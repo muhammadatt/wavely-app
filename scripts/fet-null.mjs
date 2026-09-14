@@ -71,6 +71,7 @@ import { buildProbe } from './lib/probeStimulus.js'
 import { readWav } from './lib/wav.js'
 import { writeFloatWav } from './lib/wav.js'
 import { STIM_DIR, CAP_DIR, PLANS, runKernel } from './fet-ballistics.mjs'
+import { FET_LEGACY_PATCH } from '../src/audio/fet1176Processor.js'
 
 /**
  * Where captures are read from. `--dir` overrides it, which is what
@@ -816,11 +817,29 @@ function main() {
  *
  *   synthclean  Input compensated (drive raised, level put back), fetDrive 0.
  *               Expect: linear, Output clean, NO distortion rise, COMPENSATED.
- *   synthdirty  Input a true gain, fetDrive 0.35.
- *               Expect: linear at 0 GR, Output clean, DISTORTION RISES, REAL GAIN.
+ *   synthdirty  Input a true gain, the LEGACY tanh after the cell.
+ *               Expect: linear at 0 GR, Output clean, a STATIC SATURATOR,
+ *               AFTER THE CELL, REAL GAIN.
+ * ⚠ THERE IS NO THIRD CASE FOR THE SHIPPING CURVE, AND THE REASON IS A FINDING
+ * RATHER THAN AN OMISSION. A preCell polynomial reference cannot be probed by
+ * `thd.wav` at zero gain reduction while our Input is a REAL gain: at an Input
+ * low enough that nothing compresses, the shaper sees an attenuated signal and
+ * makes nothing measurable. On a −6 dBFS tone the shaper's H2 runs −136 dBc at
+ * Input 0, −90 at Input 30, −67 at 50 and −46 at 70 — and the Input that makes
+ * it audible is the same Input that compresses hard. FETish's compensation
+ * decouples those two; ours does not, yet. That is the case the Input decision
+ * settles, and until it is settled our own curve has no zero-GR operating point
+ * to measure it at.
+ *
+ * ⚠ synthdirty PINS THE LEGACY PATCH DELIBERATELY, and it used to ride on the
+ * defaults. When the measured polynomial replaced the `tanh` the case went
+ * degenerate — the new curve is 4th/5th order and makes almost nothing at these
+ * levels, so the "static saturator" the reader was supposed to find was in the
+ * float noise and the slope read 7.72. A probe for "a reference with a strong
+ * even-order saturator" has to name the curve that is one.
  *
  * ⚠ NEITHER IS A PREDICTION ABOUT FETish OR CLA-76. They are our own kernel
- * wearing two hats, and the only claim is that the reader reports what is
+ * wearing several hats, and the only claim is that the reader reports what is
  * actually there.
  */
 
@@ -845,22 +864,27 @@ function selftest(outDir) {
 
   const write = (name, y) => writeFloatWav(join(outDir, name), y, rate)
 
-  for (const ref of ['synthclean', 'synthdirty']) {
-    const compensated = ref === 'synthclean'
-    const fetDrive = compensated ? 0 : 0.35
+  const REFS = {
+    synthclean: { compensated: true, fetDrive: 0, patch: {} },
+    synthdirty: { compensated: false, fetDrive: 0.35, patch: FET_LEGACY_PATCH },
+  }
+  for (const [ref, cfg] of Object.entries(REFS)) {
+    const compensated = cfg.compensated
+    const fetDrive = cfg.fetDrive
+    const extra = cfg.patch
     // A compensated Input puts the level back; a true-gain Input does not.
     const comp = knob => (compensated ? -inputDriveDbFor(knob) : 0)
 
     write(`null1_${ref}.wav`, runKernel(thd.stim.x, rate,
-      { inputDrive: SELFTEST_IN_LOW, outputGainDb: comp(SELFTEST_IN_LOW), ratio: '4', fetDrive }).y)
+      { inputDrive: SELFTEST_IN_LOW, outputGainDb: comp(SELFTEST_IN_LOW), ratio: '4', fetDrive, ...extra }).y)
     write(`null2_${ref}.wav`, runKernel(thd.stim.x, rate,
-      { inputDrive: SELFTEST_IN_LOW, outputGainDb: comp(SELFTEST_IN_LOW) + 10, ratio: '4', fetDrive }).y)
+      { inputDrive: SELFTEST_IN_LOW, outputGainDb: comp(SELFTEST_IN_LOW) + 10, ratio: '4', fetDrive, ...extra }).y)
     write(`null3_${ref}.wav`, runKernel(thd.stim.x, rate,
-      { inputDrive: SELFTEST_IN_COMP, outputGainDb: comp(SELFTEST_IN_COMP), ratio: '4', fetDrive }).y)
+      { inputDrive: SELFTEST_IN_COMP, outputGainDb: comp(SELFTEST_IN_COMP), ratio: '4', fetDrive, ...extra }).y)
     write(`null4_${ref}.wav`, runKernel(stairs.stim.x, rate,
-      { inputDrive: 50, ratio: '4', attack: 1, release: 7, fetDrive }).y)
+      { inputDrive: 50, ratio: '4', attack: 1, release: 7, fetDrive, ...extra }).y)
     write(`null5_${ref}.wav`, runKernel(thd.stim.x, rate,
-      { inputDrive: SELFTEST_IN_LOW2, outputGainDb: comp(SELFTEST_IN_LOW2), ratio: '4', fetDrive }).y)
+      { inputDrive: SELFTEST_IN_LOW2, outputGainDb: comp(SELFTEST_IN_LOW2), ratio: '4', fetDrive, ...extra }).y)
   }
 
   // ⚠ AND ONE DELIBERATELY BROKEN CAPTURE. The bypass check is the cheapest
@@ -872,7 +896,7 @@ function selftest(outDir) {
   console.log(`\nSynthetic captures written to ${outDir}`)
   console.log('\nEXPECTED VERDICTS — anything else is a bug in the reader, not in the capture:')
   console.log('  synthclean   linear · Output clean · NO distortion rise · COMPENSATED')
-  console.log('  synthdirty   linear · Output clean · DISTORTION RISES   · REAL GAIN')
+  console.log('  synthdirty   static saturator · AFTER the cell · REAL GAIN   (legacy tanh)')
   console.log('  synthbypass  null4 flagged BIT-IDENTICAL TO THE STIMULUS')
   capDir = outDir
   main()

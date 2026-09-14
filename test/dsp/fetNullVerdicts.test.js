@@ -87,6 +87,12 @@ test('null reader: a compensated, saturator-free reference', { skip: !haveStimul
 })
 
 test('null reader: a true-input-gain reference with a saturator', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+  // ⚠ synthdirty PINS THE LEGACY tanh. It used to ride on the kernel defaults,
+  // and when the measured polynomial replaced them the case went degenerate —
+  // the new curve is 4th/5th order and makes almost nothing at these levels, so
+  // the "static saturator" this test looks for sat in the float noise and the
+  // measured slope read 7.72. A probe for a strong even-order saturator has to
+  // name the curve that is one.
   const s = section(runSelftest(), 'synthdirty')
 
   assert.match(s, /the no-compression GAIN is LINEAR/)

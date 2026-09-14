@@ -174,8 +174,17 @@ test('FET Punch: exact at Mix 1, where the dry share is zero', () => {
     const offline = computeFET1176AutoMakeupDb([x], SR, p)
     const k = new FET1176Kernel(SR); k.setParams(p)
     const { final } = runClosedLoop(k, x, 'outputGainDb')
+    /**
+     * ⚠ THIS TOLERANCE USED TO BE 0.6 dB AND WAS ACCOMMODATING A DEFECT BY
+     * 0.02 dB. The offline solve rendered at `oversample: false` — a different
+     * algorithm from the one apply ships — so it under-delivered: 0.58 dB on the
+     * old tanh, and 0.77 once the measured polynomial replaced it and stopped
+     * squashing the peak that hid the difference. The solve renders oversampled
+     * now, with the latency compensated, and the two agree to 0.00 dB. Anything
+     * approaching a tenth of a dB here means that has come undone.
+     */
     assert.ok(
-      Math.abs(final - offline) < 0.6,
+      Math.abs(final - offline) < 0.1,
       `drive ${inputDrive}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`,
     )
   }

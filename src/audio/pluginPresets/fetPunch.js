@@ -22,6 +22,29 @@
  *
  *   MIX below 1 is parallel compression — the reason the deepest presets here
  *   are not also the loudest.
+ *
+ * ⚠⚠ THESE FIVE ARE CALIBRATED AGAINST A CURVE THAT NO LONGER SHIPS, AND THEY
+ * HAVE NOT BEEN RE-AUDITIONED.
+ *
+ * `fetDrive` used to set a drive into an asymmetric `tanh`; it now scales a
+ * degree-5 polynomial measured from Analog Obsession FETish, where 1 IS the
+ * reference curve. The stored numbers carry across arithmetically and not in
+ * voicing — the new curve is far cleaner at low level (75 dB less H2 at
+ * −30 dBFS) and that is the whole reason it was adopted, so matching the old
+ * distortion amount would undo the change rather than preserve the preset.
+ *
+ * ⚠ THEY ARE DELIBERATELY LEFT ALONE UNTIL SOMEBODY LISTENS. Re-scaling them by
+ * measurement would be inventing a voicing decision, and re-voicing twice is
+ * worse than once — the same reasoning that held the LA-2A presets back through
+ * its taper re-fit. `FET_LEGACY_PATCH` reproduces the old kernel exactly for
+ * A/B.
+ *
+ * ⚠ AND `inputDrive` NOW REACHES THE SHAPER, which it did not before: the curve
+ * sits BEFORE the gain cell (measured on FETish). The two presets at inputDrive
+ * 70-75 put the shaper's input past unity, where the curve runs out of fitted
+ * range and continues linearly — so they distort LESS than the reference does,
+ * not more. That is a consequence of our Input still being a real gain where
+ * FETish's is compensated, and it is the case the Input decision has to settle.
  */
 
 import { definePluginPresets } from './store.js'

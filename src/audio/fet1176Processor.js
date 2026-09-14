@@ -141,6 +141,46 @@ const ALL_ATTACK_LAG = 2.5
 // ...and the FET is driven much harder, which is most of the "sound".
 const ALL_FET_BOOST = 1.6
 
+/**
+ * THE STATIC CURVE, MEASURED — Analog Obsession FETish, `npm run fet:curve`.
+ *
+ *   f(x) = x − 0.0100·x⁴ + 0.0100·x⁵   =   x − 0.01·x⁴·(1 − x)
+ *
+ * Fitted jointly over five tone levels spanning 24 dB and verified by rendering
+ * the fitted curve back through the same tones: H2 matches to 0.1 dB at EVERY
+ * level, worst error 1.39 dB over 17 usable harmonic readings. Held out the
+ * loudest tone, refitted without it, and asked it to predict that tone: 1.41 dB.
+ *
+ * ⚠ THE ORDERS ARE MEASURED, NOT CHOSEN. A term of order n makes harmonics that
+ * rise (n−1) dB per dB of level, of its own parity, at or below n. FETish reads
+ * H2 3.00, H3 4.04, H4 3.02, H5 4.09 — orders 4 and 5 — and H6 through H9 sit
+ * at the float noise floor, which is what a degree-5 polynomial and nothing else
+ * looks like. H4/H2 measures −12.04 dB against a pure x⁴ term's −12.04.
+ *
+ * ⚠ AND THIS IS WHY THE `tanh` COULD NOT BE RETUNED INTO IT. A tanh is
+ * cubic-dominant: its H2 rises about 1 dB per dB. No value of `fetDrive` moves
+ * that to 3. The shape had to change, not the drive.
+ *
+ * ⚠ THE COEFFICIENTS ARE ±0.01 TO FOUR FIGURES, which is almost certainly the
+ * reference's own design constants rather than anything our fit invented.
+ */
+const POLY_C4 = -0.0100
+const POLY_C5 = 0.0100
+
+/**
+ * ⚠ THE POLYNOMIAL IS UNBOUNDED AND THE `tanh` IT REPLACES WAS NOT. Deviation
+ * from linear is 0.00 at x = 1 and 0.02 at x = −1, but +0.16 at x = 2 and
+ * +7.70 at x = 4 — and `inputDrive` can push the shaper's input well past
+ * unity. Beyond this magnitude the curve continues LINEARLY at its own edge
+ * slope, which is C1-continuous (no corner to alias) and grows no faster than
+ * the input.
+ *
+ * 1.0 rather than something larger because the fit's own data only reaches a
+ * peak of 0.5 (the −6 dBFS tone): past unity we would be extrapolating a
+ * measurement by more than 6 dB, and a straight line is the honest extension.
+ */
+const POLY_XMAX = 1.0
+
 const LN10_OVER_20 = Math.LN10 / 20
 
 export const FET1176_KERNEL_DEFAULTS = {
@@ -150,6 +190,28 @@ export const FET1176_KERNEL_DEFAULTS = {
   release: 4, // dial 1-7, 7 = fastest (hardware markings)
   ratio: '4', // '4' | '8' | '12' | '20' | 'all'
   fetDrive: 0.35, // 0-1 FET / output-amp saturation amount
+  /**
+   * Which static curve the FET stage uses.
+   *   'poly' — the measured FETish curve (see POLY_C4). `fetDrive` scales it,
+   *            so 1 IS the reference curve and 0.35 is 35 % of it.
+   *   'tanh' — the fitted asymmetric tanh this shipped with before the capture.
+   * ⚠ `fetDrive` MEANS A DIFFERENT THING IN EACH. On 'tanh' it set a drive into
+   * a fixed shaper; on 'poly' it is a fraction of a measured curve. A stored
+   * preset value carries across numerically and NOT in voicing.
+   */
+  fetCurve: 'poly',
+  /**
+   * Which side of the gain cell the static curve sits on.
+   *   'preCell'  — the shaper sees the input attenuator's output, measured on
+   *                FETish (rms error 0.00 dB for this hypothesis against
+   *                26.09 dB for the other).
+   *   'postCell' — the shaper sees the compressed signal, which is what this
+   *                kernel did before, and what CLA-76 measures (0.07 against
+   *                3.94 dB).
+   * ⚠ THE TWO REFERENCES GENUINELY DISAGREE HERE. This is not a fitted constant
+   * with a right answer; it is a choice of which unit to be.
+   */
+  fetPosition: 'preCell',
   scHpfHz: 0, // 0 = off (stock), or sidechain high-pass corner in Hz
   mix: 1, // wet/dry blend — parallel compression
   /**
@@ -159,6 +221,18 @@ export const FET1176_KERNEL_DEFAULTS = {
    */
   oversample: true,
 }
+
+/**
+ * ⚠ EVERY FET PUNCH RENDER MADE BEFORE THE FETish CAPTURE SOUNDS DIFFERENT NOW.
+ * This patch reproduces the previous kernel exactly — the fitted asymmetric
+ * `tanh`, sitting after the gain cell — and `test/dsp/fet1176Curve.test.js`
+ * pins it bit-for-bit against a render, so it cannot rot.
+ *
+ * Same arrangement, and the same reason, as `LA2A_LEGACY_PATCH`: a measurement
+ * that changes the voicing must leave the old voicing reachable, or there is no
+ * way to A/B the change and no way back for anyone who preferred it.
+ */
+export const FET_LEGACY_PATCH = { fetCurve: 'tanh', fetPosition: 'postCell' }
 
 /**
  * How much audio the live makeup tracker must hear before it will report.
@@ -351,6 +425,28 @@ export class FET1176Kernel {
     // Normalize so the shaper has unity small-signal gain
     this.fetNorm = this.fetDriveLin * (1 - this.tanhBias * this.tanhBias)
 
+    this.fetPoly = p.fetCurve !== 'tanh'
+    this.fetPre = p.fetPosition !== 'postCell'
+    // The measured curve, scaled by the same amount the tanh path uses. All
+    // buttons in drives it harder, as it does the tanh — clamped, because the
+    // polynomial's linear continuation starts at POLY_XMAX and a coefficient
+    // past 1 would put real bend outside the fitted range.
+    const polyAmount = Math.min(1, amount * (this.isAllButtons ? ALL_FET_BOOST : 1))
+    this.polyC4 = POLY_C4 * polyAmount
+    this.polyC5 = POLY_C5 * polyAmount
+    // Edge value and slope at each end, for the linear continuation. Held
+    // separately per side because the curve is asymmetric: f(−1) is −1.02 where
+    // f(1) is exactly 1.
+    const fAt = x => x + this.polyC4 * x ** 4 + this.polyC5 * x ** 5
+    const dAt = x => 1 + 4 * this.polyC4 * x ** 3 + 5 * this.polyC5 * x ** 4
+    this.polyEdgePos = fAt(POLY_XMAX)
+    this.polySlopePos = dAt(POLY_XMAX)
+    this.polyEdgeNeg = fAt(-POLY_XMAX)
+    this.polySlopeNeg = dAt(-POLY_XMAX)
+    // Lets the pre-cell path recover the cell's own gain from the folded
+    // coefficient without a per-sample divide.
+    this.invInputLin = 1 / this.inputLin
+
     this.wetMix = clamp(p.mix, 0, 1)
     this.dryMix = 1 - this.wetMix
 
@@ -368,6 +464,27 @@ export class FET1176Kernel {
    */
   get latencySamples() {
     return this.oversampleOn ? OVERSAMPLE_LATENCY_SAMPLES : 0
+  }
+
+  /**
+   * The FET stage's static curve, whichever one is selected.
+   *
+   * ⚠ ONE ENTRY POINT FOR BOTH CURVES AND BOTH PATHS. The oversampled and
+   * base-rate loops each used to carry their own copy of the tanh expression,
+   * and a third copy would have made a curve change a three-place edit with two
+   * chances to diverge. The measurement path (`oversample: false`) has to agree
+   * with the render path exactly or the auto-makeup solves against a different
+   * plugin than the one anybody hears.
+   */
+  _shapeFet(x) {
+    if (!this.fetPoly) {
+      return (Math.tanh(this.fetDriveLin * x + this.fetBias) - this.tanhBias) / this.fetNorm
+    }
+    if (x > POLY_XMAX) return this.polyEdgePos + (x - POLY_XMAX) * this.polySlopePos
+    if (x < -POLY_XMAX) return this.polyEdgeNeg + (x + POLY_XMAX) * this.polySlopeNeg
+    const x2 = x * x
+    const x4 = x2 * x2
+    return x + this.polyC4 * x4 + this.polyC5 * x4 * x
   }
 
   /** Static curve: overshoot in dB -> gain reduction in dB. */
@@ -572,16 +689,23 @@ export class FET1176Kernel {
       // 20 us attack is most of the reduction a transient was supposed to get:
       // the first sample of every hard onset passed through nearly unattenuated
       // and read as a click.
+      // ⚠ `gain[]` HOLDS `inputLin * cellGain` FOLDED TOGETHER, and the pre-cell
+      // path needs them apart: the shaper sees the attenuator's output and the
+      // cell follows it. Unfolding with `invInputLin` keeps the seam
+      // interpolation and `lastGain` in the units they were already in, which
+      // is a smaller change than splitting the array.
+      const pre = this.fetPre
       let gCur = seamGain
       for (let i = 0; i < n; i++) {
         const gNext = gain[i]
         const step = (gNext - gCur) * invL
         for (let j = 0; j < L; j++) {
           const k = i * L + j
-          let w = hi[k] * (gCur + step * j)
-          if (this.applyFet) {
-            w = (Math.tanh(this.fetDriveLin * w + this.fetBias) - this.tanhBias) / this.fetNorm
-          }
+          const g = gCur + step * j
+          let w
+          if (!this.applyFet) w = hi[k] * g
+          else if (pre) w = this._shapeFet(hi[k] * this.inputLin) * (g * this.invInputLin)
+          else w = this._shapeFet(hi[k] * g)
           hi[k] = w
         }
         gCur = gNext
@@ -642,11 +766,14 @@ export class FET1176Kernel {
     const outGain = this.outScratch
     let dcX = this.dcX[ch]
     let dcY = this.dcY[ch]
+    const pre = this.fetPre
     for (let i = 0; i < n; i++) {
       const dry = input[i]
       let w = dry * gain[i]
       if (this.applyFet) {
-        const shaped = (Math.tanh(this.fetDriveLin * w + this.fetBias) - this.tanhBias) / this.fetNorm
+        const shaped = pre
+          ? this._shapeFet(dry * this.inputLin) * (gain[i] * this.invInputLin)
+          : this._shapeFet(w)
         dcY = shaped - dcX + this.dcR * dcY
         dcX = shaped
         w = dcY
@@ -855,12 +982,43 @@ export function computeFET1176AutoMakeupDb(channelData, sampleRate, params = {},
   // would be unconstrained (every b[i] is zero).
   if (mix <= 0) return 0
 
-  // The wet path alone, at unity output gain. Taken at mix 1 so the render IS
-  // `wet[i]`; mix feeds nothing but the final blend, so this changes no other
-  // part of the kernel's behaviour.
-  const { channelData: wet } = processFET1176Buffer(channelData, sampleRate, {
-    ...params, oversample: false, outputGainDb: 0, mix: 1,
+  /**
+   * The wet path alone, at unity output gain. Taken at mix 1 so the render IS
+   * `wet[i]`; mix feeds nothing but the final blend, so this changes no other
+   * part of the kernel's behaviour.
+   *
+   * ⚠ IT IS RENDERED OVERSAMPLED — THE SAME WAY APPLY RENDERS IT — AND THAT WAS
+   * NOT ALWAYS TRUE. This solve used to run `oversample: false`, which is a
+   * cheaper and DIFFERENT algorithm from the one the timeline gets: the
+   * oversampled path interpolates the gain across sub-samples and filters
+   * through two halfbands, and on a transient it lands a lower peak. So the
+   * makeup was solved against a render nobody hears, and the applied result
+   * came out UNDER the target — measured on the narration-like fixture in
+   * `liveMakeup.test.js`, **0.77 dB** of headroom left on the table, with the
+   * live preview (which runs in the real oversampled path) reporting the higher
+   * figure and apply delivering the lower one.
+   *
+   * ⚠ THE OLD `tanh` WAS HIDING IT: it squashed peaks hard enough that the two
+   * paths agreed to 0.58 dB, just inside the test's 0.6 dB tolerance. The
+   * measured polynomial that replaced it is nearly linear at these levels and
+   * passes the difference straight through, which is what surfaced it.
+   *
+   * ⚠ AND THE LATENCY IS WHY IT WAS AVOIDED. Oversampled, the kernel delays by
+   * `latencySamples`, and this solve pairs `dry[i]` with `wet[i]` sample for
+   * sample — a 50-sample slip would compare a transient against the silence
+   * before it. The input is padded by that many samples so the whole tail is
+   * rendered, and the delay is dropped off the front.
+   */
+  const latency = new FET1176Kernel(sampleRate).latencySamples
+  const padded = channelData.map(ch => {
+    const out = new Float32Array(ch.length + latency)
+    out.set(ch)
+    return out
   })
+  const { channelData: wetPadded } = processFET1176Buffer(padded, sampleRate, {
+    ...params, outputGainDb: 0, mix: 1,
+  })
+  const wet = wetPadded.map(ch => ch.subarray(latency))
 
   const dryMix = 1 - mix
   // Largest g for which every sample satisfies |a + b·g| <= inputPeak.

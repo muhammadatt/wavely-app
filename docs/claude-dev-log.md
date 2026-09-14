@@ -1834,7 +1834,89 @@ this in the kernel needs a clamp or a blend back to linear above about |x| = 1.5
 Our `tanh` is bounded by construction and this is the one property it has that
 the fitted curve does not.
 
-- **Still not built:** the ballistics fitter, and the kernel change itself. The recovery is proved against a
+### ⚗ THE MEASURED CURVE IS IN THE KERNEL
+
+`fetCurve: 'poly'` (default) is the FETish curve; `fetPosition: 'preCell'`
+(default) puts it where FETish's measured. `FET_LEGACY_PATCH`
+(`{fetCurve:'tanh', fetPosition:'postCell'}`) reproduces the previous kernel and
+is pinned **bit-identical** against a render of the pre-change code.
+
+- **AGAINST THE CAPTURE, 0.91 dB WORST ERROR ON H2/H3 ACROSS 24 dB.** And the
+  contrast with what shipped before is the whole point: at −30 dBFS the old
+  `tanh` made **−61 dBc of H2 where FETish makes −136** — 75 dB more distortion
+  at a level where the unit is doing nothing. That is the "dirty when it isn't
+  working" behaviour the new curve removes.
+
+- **IT IS ALSO FASTER.** 20 s mono at 44.1 kHz, best of 5: poly/preCell **211 ms
+  (95x realtime)**, poly/postCell 196, legacy tanh 244, shaper bypassed 195. A
+  polynomial is cheaper than `Math.tanh`, so the voicing change bought throughput
+  against the dev-log baseline of 268 ms / 75x.
+
+- **ONE SHAPER ENTRY POINT FOR BOTH PATHS.** The oversampled and base-rate loops
+  each carried their own copy of the `tanh` expression; a third copy would have
+  made a curve change a three-place edit. `_shapeFet` is the only place a curve
+  is evaluated now, so the measurement path cannot drift from the render path.
+
+- **THE UNBOUNDED TAIL IS GUARDED.** Past |x| = 1 the polynomial continues
+  linearly at its own edge slope — C1-continuous, so no corner to alias.
+  Unguarded it returns **11.70 at x = 4**; guarded, 4.03. The `tanh` was bounded
+  by construction and this is the one property it had that the fit does not.
+
+### ⚗⚗ AND IT SURFACED A REAL DEFECT IN THE AUTO-MAKEUP, WHICH IS NOW FIXED
+
+`computeFET1176AutoMakeupDb` rendered its wet path at **`oversample: false`** — a
+cheaper and DIFFERENT algorithm from the one apply ships. So the makeup was
+solved against a render nobody hears, and apply came out under the target while
+the live preview, which runs in the real oversampled path, reported the higher
+figure.
+
+- **MEASURED ON THE narration FIXTURE: 0.58 dB ON THE OLD tanh, 0.77 ON THE NEW
+  CURVE.** ⚠ **The test tolerance was 0.6 dB — it had been accommodating the
+  defect by 0.02 dB.** The `tanh` squashed peaks hard enough to nearly hide it;
+  the measured polynomial is close to linear at these levels and passes the
+  difference straight through, which is what exposed it.
+
+- **⚠ THE LATENCY IS WHY IT WAS AVOIDED, and it is the part to get right.**
+  Oversampled, the kernel delays by `latencySamples`, and the solve pairs
+  `dry[i]` with `wet[i]` sample for sample — a 50-sample slip compares a
+  transient against the silence before it. The input is padded by that many
+  samples so the whole tail renders, and the delay is dropped off the front.
+
+- **LIVE AND OFFLINE NOW AGREE TO 0.00 dB** at Input 40 / 55 / 75, **on both
+  curves** — the legacy path was 0.58 dB out and is now exact too. Tolerance
+  tightened 0.6 → 0.1 dB, so it guards rather than accommodates.
+
+- **THE COST IS REAL AND IS THE USER'S CALL:** the solve renders oversampled now,
+  **327 ms for a 30 s selection against ~90 ms before**. The dev log's full
+  measurement path was 417 ms, so this moves the DSP half of it. Exactness was
+  chosen over speed because a preview that disagrees with apply is the failure
+  this whole tracker exists to avoid.
+
+### ⚠ WHAT THE INPUT CONTRACT STILL COSTS US
+
+With the shaper before the cell and our Input still a REAL gain, the shaper is
+driven by the Input knob. On a −6 dBFS tone its H2 runs **−136 dBc at Input 0,
+−90 at 30, −67 at 50, −46 at 70** — so the Input that makes the curve audible is
+the same Input that compresses hard. **FETish's compensation decouples those two
+and ours does not.**
+
+- Two factory presets sit at inputDrive 70-75, which puts the shaper's input past
+  unity and into the linear continuation — so they distort **less** than the
+  reference, not more.
+- ⚠ **The null-reader self-test cannot build a probe for our own shipping
+  configuration because of this**: at an Input low enough for zero gain
+  reduction the shaper makes nothing measurable, and `thd.wav` has no zero-GR
+  operating point that reaches it. Recorded in the script rather than worked
+  around.
+
+**The five factory presets are deliberately NOT re-voiced.** `fetDrive` scaled a
+`tanh` drive and now scales a measured curve where 1 IS the reference; the stored
+numbers carry across arithmetically and not in voicing. Matching the old
+distortion amount would undo the change rather than preserve the preset, and
+re-voicing twice is worse than once — the same reasoning that held the LA-2A
+presets back through its taper re-fit.
+
+- **Still not built:** the ballistics fitter, and the Input-compensation decision. The recovery is proved against a
   kernel whose constants are known before it is pointed at one whose constants
   are not, and that ordering is the point. Also still open: `LA2A_LEGACY_PATCH`
   has no FET counterpart, so a retune would change every existing FET Punch
