@@ -22,12 +22,14 @@ import {
   clipShaveFor, fetTargetImpactFor, squashFor,
   effectiveTarget, BALANCE_IMPACT_DB, BALANCE_SQUASH_SCALE, MAX_SQUASH,
   DYNAMICS_TARGET, CLIP_SHAVE_DETENTS, DEFAULT_CLIP_SHAVE_DB, DEFAULT_MIX,
+  makeupDbFor, MAKEUP_PEAK_MARGIN_DB, MAKEUP_TRIM_MARGIN_DB,
   SWEEP_POINTS, OPTO_GRID_DRIVES, OPTO_GRID_SQUASH, CLIP_MAX_DEPTH_DB,
 } from '../../src/audio/dynamicsSolve.js'
 import {
   processDynamicsBuffer, clipParamsFor, DYNAMICS_KERNEL_DEFAULTS,
 } from '../../src/audio/dynamicsProcessor.js'
 import { SoftClipperKernel } from '../../src/audio/softClipperProcessor.js'
+import { inputAlignDbFor } from '../../src/audio/dsp/inputAlign.js'
 
 const SR = 44100
 
@@ -333,8 +335,18 @@ test('⚠ the FET BYPASSES when the target is met — drive 0 is a 24 dB attenua
   assert.equal(params.fetDrive, null, 'an unneeded FET must bypass, never sit at drive 0')
   assert.equal(report.fet.peakDb, 0)
 
-  // And a bypassed FET is a pass-through, not a 24 dB drop.
-  const r = processDynamicsBuffer(x, SR, { ...params, squash: null, clipThresholdDb: null })
+  /**
+   * And a bypassed FET is a pass-through, not a 24 dB drop.
+   *
+   * ⚠ `makeupDb` GOES WITH THE OTHER TWO. This forces a configuration the solve
+   * never produces — all three stages off — so the output gain the solve
+   * computed for the opto block it DID expect no longer describes anything.
+   * Leaving it in makes the render legitimately non-identical (measured 1.45 dB)
+   * and says nothing about the kernel's bypass, which is what this pins.
+   */
+  const r = processDynamicsBuffer(x, SR, {
+    ...params, squash: null, clipThresholdDb: null, makeupDb: 0,
+  })
   const out = r.channelData[0]
   for (let i = 0; i < x[0].length - r.latencySamples; i++) {
     assert.equal(out[i + r.latencySamples], x[0][i], `not bit-exact at ${i}`)
@@ -456,6 +468,100 @@ test('⚠ a bypassed FET is not the drive-0 attenuator — the makeup must know'
 
   const r = processDynamicsBuffer(x, SR, params)
   const after = measureDynamics([r.channelData[0].subarray(r.latencySamples)], SR)
+  assert.ok(after.peakDb <= before.peakDb + 0.01,
+    `output peaked ${after.peakDb.toFixed(2)} against ${before.peakDb.toFixed(2)}`)
+})
+
+test('⚠ a bypassed FET is not the drive-0 attenuator — the OPTO must know either', () => {
+  /**
+   * ⚠ THE FIFTH TIME, AND THE FIRST THAT WAS AUDIBLE. The makeup learned that a
+   * null drive is not drive 0; `optoAlignDb` did not, and read the FET's
+   * alignment curve unconditionally. At drive 0 that curve describes a signal
+   * 24 dB down, so a bypassed FET handed the opto a +25 dB side-chain offset
+   * for a signal nothing had attenuated.
+   *
+   * Measured on a file whose impact already meets the target, so the FET
+   * bypasses at every Density: align 25.43 against a true 1.37, and the opto
+   * did 10.29 dB of gain reduction at Density 30 where its calibration asks for
+   * about one. The panel reported 0.00 throughout, because the report grid
+   * clamped the same null to its own drive-0 row.
+   *
+   * With the FET out the opto's input IS the post-clip signal, whose alignment
+   * the clip sweep now carries.
+   */
+  const x = [narration(10, -6)]
+  const sweep = sweepDynamics(x, SR)
+  const { params } = solveFromSweep(sweep, { density: 0.0001, clipShaveDb: 0 })
+  assert.equal(params.fetDrive, null, 'this case is only interesting with the FET out')
+
+  // The clipper is out too, so the opto's input is the section's input.
+  const truth = inputAlignDbFor(x, SR)
+  assert.ok(Math.abs(params.optoAlignDb - truth) < 0.5,
+    `opto aligned to ${params.optoAlignDb.toFixed(2)} for a signal at ${truth.toFixed(2)}`)
+  assert.ok(params.optoAlignDb < sweep.fet.outAlignDb[0] - 10,
+    'the drive-0 row is the attenuator and must not be what the opto reads')
+})
+
+test('⚠ the bisect renders a bypassed FET as a bypass, not as drive 50', () => {
+  /**
+   * `fetParamsFor` reads a missing `fetDrive` as the kernel default, so the
+   * solve's own `renderFet` used to hand back a drive-50 render for a stage
+   * that had been skipped — and the opto's alignment, the blend and the makeup
+   * were all measured from that phantom signal. Only `solveFromSweep` ships,
+   * but the bisect is what the sweep is scored against.
+   */
+  const x = [narration(10, -6)]
+  const { params, report } = solveDynamics(x, SR, { density: 0.0001, clipShaveDb: 0 })
+  assert.equal(params.fetDrive, null)
+  assert.equal(report.fet.peakDb, 0, 'a bypassed stage reduces nothing')
+  assert.ok(Math.abs(params.optoAlignDb - inputAlignDbFor(x, SR)) < 0.5,
+    `opto aligned to ${params.optoAlignDb.toFixed(2)} off a render that never happens`)
+})
+
+test('⚠ the makeup TRIMS when the section is predicted over the input peak', () => {
+  /**
+   * ⚠ `Math.max(0, …)` IS RIGHT ABOUT MAKEUP AND WRONG AS THE ONLY THING
+   * HOLDING THE PEAK. "Never louder than the source" was enforced by withholding
+   * makeup — which works only while there is makeup to withhold. On material
+   * whose impact already meets the target every stage bypasses, the makeup is
+   * zero, and the opto block's Pultec gain still reaches the blend: measured
+   * 2.31 dB past the input peak at Mix 1.
+   */
+  // Predicted output already 2 dB over the input peak, and no makeup wanted.
+  const over = makeupDbFor(-20, -6, -20, -4)
+  assert.ok(over < 0, `a section predicted over the peak must trim, got ${over}`)
+  assert.equal(over, -2 - MAKEUP_TRIM_MARGIN_DB)
+
+  // And a section predicted UNDER the peak is untouched — every case that was
+  // already legal must stay bit-for-bit what it was.
+  assert.equal(makeupDbFor(-20, -6, -20, -20), Math.min(0, 14 - MAKEUP_PEAK_MARGIN_DB))
+  // And the percentile target still binds ahead of the peak bound when it is
+  // the smaller of the two.
+  assert.equal(makeupDbFor(-10, -6, -20, -20), Math.min(10, 14 - MAKEUP_PEAK_MARGIN_DB))
+  assert.equal(makeupDbFor(-4, -6, -20, -20), 14 - MAKEUP_PEAK_MARGIN_DB)
+})
+
+test('⚠ with the FET out, the wet path is not the dry path', () => {
+  /**
+   * The wet side is still Pultec pre -> opto -> Pultec post, which has gain of
+   * its own. Modelling it as equal to dry made the predicted peak under-read by
+   * ~2.5 dB at Mix 1, which is what let the overshoot through.
+   *
+   * The grid cannot be read for LEVEL at drive 0 — its rows carry the
+   * attenuator's 24 dB — so the wet path is read as a GAIN off that row.
+   */
+  const x = [narration(10, -6)]
+  const before = measureDynamics(x, SR)
+  const sweep = sweepDynamics(x, SR)
+  const { params, report } = solveFromSweep(sweep, { density: 0.0001, clipShaveDb: 0, mix: 1 })
+  assert.equal(params.fetDrive, null, 'this case is only interesting with the FET out')
+
+  const r = processDynamicsBuffer(x, SR, params)
+  const after = measureDynamics([r.channelData[0].subarray(r.latencySamples)], SR)
+  // The prediction is of the output BEFORE the makeup, so add it back.
+  assert.ok(Math.abs(report.makeup.outPeakDb + params.makeupDb - after.peakDb) < 0.5,
+    `predicted ${(report.makeup.outPeakDb + params.makeupDb).toFixed(2)} `
+    + `against ${after.peakDb.toFixed(2)}`)
   assert.ok(after.peakDb <= before.peakDb + 0.01,
     `output peaked ${after.peakDb.toFixed(2)} against ${before.peakDb.toFixed(2)}`)
 })

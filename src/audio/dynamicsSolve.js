@@ -78,7 +78,7 @@ import { FET1176Kernel } from './fet1176Processor.js'
 import { LA2AKernel } from './la2aProcessor.js'
 import { BiquadCascade } from './dsp/biquad.js'
 import {
-  clipParamsFor, fetParamsFor, optoParamsFor, pultecPairFor,
+  clipParamsFor, fetParamsFor, optoParamsFor, pultecPairFor, fetEnabled,
   DYNAMICS_KERNEL_DEFAULTS,
 } from './dynamicsProcessor.js'
 import { gatedRmsOfChannels, inputAlignDbFor } from './dsp/inputAlign.js'
@@ -223,8 +223,19 @@ const renderClip = (channels, sampleRate, p) => {
   k.setParams(clipParamsFor(p))
   return { out: runKernel(k, channels), metering: k.getMetering() }
 }
+/**
+ * ⚠ A NULL DRIVE IS A BYPASS AND HAS TO BE ONE HERE TOO. `fetParamsFor` reads
+ * a missing `fetDrive` as the kernel default (50), so rendering a bypassed
+ * stage through this helper returned a signal the kernel will never produce —
+ * and everything measured downstream of it (the opto's alignment, the blend,
+ * the makeup) described that phantom render instead of the real path. The
+ * kernel's own bypass is bit-exact, so this one is too.
+ */
 const renderFet = (channels, sampleRate, p) => {
   p = { ...p, ...SOLVE_RENDER }
+  if (!fetEnabled(p)) {
+    return { out: channels, metering: { maxGainReductionDb: 0, avgGainReductionDb: 0 } }
+  }
   const k = new FET1176Kernel(sampleRate)
   k.setParams(fetParamsFor(p))
   return { out: runKernel(k, channels), metering: k.getMetering() }
@@ -510,6 +521,15 @@ export function fetTargetImpactFor(impactDb, density, afterClipImpactDb) {
  * ⚠ AND THE GUARANTEE IS ON THE MEASURED WINDOW, not the whole region — a peak
  * later in a long selection than `analysisWindow` reaches is not seen, the same
  * approximation that note already documents for every measured parameter.
+ *
+ * ⚠ THE 240-COMBINATION SCORE WAS ALL FET-ENGAGED, AND THE BYPASS CORNER BROKE
+ * THE GUARANTEE. On material whose impact already meets the target the FET is
+ * out at every Density, and there the cap had nothing to bind: `Math.max(0, …)`
+ * meant "never attenuate", so the opto block's own Pultec gain reached the blend
+ * unopposed and the output ran up to 2.31 dB past the input peak at Mix 1.
+ * The floor is now the predicted overshoot — see `makeupDbFor` — and the same
+ * grid measures −0.10 dB worst, i.e. always under. Every FET-engaged cell is
+ * bit-for-bit what it was.
  */
 
 /**
@@ -517,10 +537,32 @@ export function fetTargetImpactFor(impactDb, density, afterClipImpactDb) {
  */
 export const MAKEUP_PEAK_MARGIN_DB = 3.43
 
+/**
+ * The same margin for the TRIM direction, dB.
+ *
+ * ⚠ IT IS NOT THE SAME NUMBER, BECAUSE IT IS NOT THE SAME LOOKUP. The 3.43
+ * above is sized on the FET-engaged branch, whose wet peak comes off a bilinear
+ * grid; the trim only ever fires on the bypass branch, where the wet peak is a
+ * measured gain off one grid row and the prediction lands within 0.20 dB.
+ * Reusing 3.43 there would charge a 3 dB attenuation to buy 0.2 dB of safety.
+ */
+export const MAKEUP_TRIM_MARGIN_DB = 0.3
+
+/**
+ * ⚠ THE FLOOR IS THE OVERSHOOT, NOT ZERO — and a hard zero cost up to 2.31 dB
+ * past the input peak. `Math.max(0, ...)` says the section may never attenuate,
+ * which is right as a statement about MAKEUP and wrong as the only thing
+ * enforcing "never louder than the source": when the stages bypass there is no
+ * makeup to withhold, and the opto block's own Pultec gain still reaches the
+ * blend. So the result is clamped below by the predicted overshoot rather than
+ * by zero — which is exactly 0 whenever the section is predicted under the
+ * input peak, so every case that was already legal is untouched.
+ */
 export function makeupDbFor(inputP999Db, inputPeakDb, outP999Db, outPeakDb) {
   const wanted = inputP999Db - outP999Db
-  const headroom = inputPeakDb - outPeakDb - MAKEUP_PEAK_MARGIN_DB
-  return Math.max(0, Math.min(wanted, headroom))
+  const overshoot = inputPeakDb - outPeakDb
+  const floor = Math.min(0, overshoot - MAKEUP_TRIM_MARGIN_DB)
+  return Math.max(floor, Math.min(wanted, overshoot - MAKEUP_PEAK_MARGIN_DB))
 }
 
 /** The opto's depth: a calibrated constant scaled by Density. */
@@ -1040,6 +1082,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   const impact = []
   const clipOutP999Db = []
   const clipOutPeakDb = []
+  const clipOutAlignDb = []
   for (let i = 0; i < SWEEP_POINTS; i++) {
     const th = input.peakDb - CLIP_SWEEP_RANGE_DB
       + (CLIP_SWEEP_RANGE_DB * i) / (SWEEP_POINTS - 1)
@@ -1057,6 +1100,17 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
      */
     clipOutP999Db.push(toDb(percentileOfChannels(r.out, MAKEUP_PERCENTILE)))
     clipOutPeakDb.push(m.peakDb)
+    /**
+     * ⚠ AND THE OPTO'S ALIGNMENT WHEN THE FET BYPASSES, for the same reason and
+     * with a worse failure. `optoAlignDb` used to come off the FET curve
+     * unconditionally, so a bypassed FET read the drive-0 row — the attenuator
+     * — and handed the opto a +25 dB side-chain offset for a signal that was
+     * never attenuated. Measured on a file whose impact already met the target
+     * (so the FET bypasses at every Density): align 25.43 against a true 1.37,
+     * and the opto did 10.29 dB of gain reduction at Density 30 where its
+     * calibration asks for about one. That is audio, not a report.
+     */
+    clipOutAlignDb.push(inputAlignDbFor(r.out, sampleRate))
     // ⚠ SAMPLED TOO, or a Density move still costs a clip render (~600 ms) just
     // to read the impact its FET target is derived from. That is not a live
     // knob either.
@@ -1213,7 +1267,10 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
     sampleRate,
     patch,
     input,
-    clip: { thresholds, crest, depth, impact, outP999Db: clipOutP999Db, outPeakDb: clipOutPeakDb },
+    clip: {
+      thresholds, crest, depth, impact,
+      outP999Db: clipOutP999Db, outPeakDb: clipOutPeakDb, outAlignDb: clipOutAlignDb,
+    },
     fet: {
       alignDb: fetAlignDb,
       drives,
@@ -1295,6 +1352,12 @@ export function solveFromSweep(sweep, options = {}) {
       > targetCrest + 0.05
     afterClipImpactDb = lerpAt(sweep.clip.thresholds, sweep.clip.impact, clipThresholdDb)
   }
+  /**
+   * Where to read the clip curves for the signal the clipper actually handed
+   * on. Its shallowest sample is the section's peak, i.e. a clipper that did
+   * nothing — which is exactly what a null threshold means.
+   */
+  const clipAt = clipThresholdDb ?? sweep.clip.thresholds.at(-1)
 
   // ── 2. FET, on how much impact the drive REMOVES ────────────────────────
   /**
@@ -1350,7 +1413,17 @@ export function solveFromSweep(sweep, options = {}) {
    * gives 0.25 dB of reduction where the opto's own input gives 2.98.
    */
   const squash = squashFor(target.squash, density)
-  const optoAlignDb = lerpAt(sweep.fet.drives, sweep.fet.outAlignDb, fetDrive)
+  /**
+   * ⚠ AND FROM THE CLIP CURVE WHEN THE FET IS OUT — for the fifth time, a null
+   * drive is not drive 0. Drive 0 is the 24 dB attenuator, so reading the FET's
+   * alignment curve there told the opto its input was 24 dB down when the stage
+   * had simply been skipped, and the opto was driven that much too hard. The
+   * dry path with the FET out is the post-CLIP signal, whose own alignment the
+   * clip sweep carries.
+   */
+  const optoAlignDb = fetDrive === null
+    ? lerpAt(sweep.clip.thresholds, sweep.clip.outAlignDb, clipAt)
+    : lerpAt(sweep.fet.drives, sweep.fet.outAlignDb, fetDrive)
 
   /**
    * ⚠ THE OUTPUT LEVEL IS LINEAR IN MIX, so two sampled ends are enough. The
@@ -1370,7 +1443,6 @@ export function solveFromSweep(sweep, options = {}) {
    * +24.16 dB over the input peak. When the FET is out, the dry path is the
    * post-CLIP signal, which the clipper's own curve carries.
    */
-  const clipAt = clipThresholdDb ?? sweep.clip.thresholds.at(-1)
   const dryP999 = fetDrive === null
     ? pchipAt(sweep.clip.thresholds, sweep.clip.outP999Db, clipAt)
     : pchipAt(sweep.fet.drives, sweep.fet.outP999Db, fetDrive)
@@ -1381,8 +1453,25 @@ export function solveFromSweep(sweep, options = {}) {
   // signal, which the grid's top row (drive 100) does not describe either — so
   // a bypassed FET reads the grid at the drive the solve would otherwise use.
   const gridDrive = fetDrive ?? 0
+  /**
+   * ⚠ WITH THE FET OUT, THE WET PATH IS NOT THE DRY PATH — and saying it was
+   * cost up to 2.31 dB of overshoot past the input peak. The wet side is still
+   * Pultec pre -> opto -> Pultec post, which has gain of its own; treating it as
+   * equal to dry modelled the opto block as if it were not there, so the
+   * predicted peak under-read and the makeup's cap had nothing to bind.
+   *
+   * The grid cannot be read for LEVEL at drive 0 the way `at()` reads it for
+   * SHAPE, because its rows carry the attenuator's 24 dB in their absolute
+   * levels. So the wet path is read as a GAIN — grid row minus the FET row that
+   * fed it — which cancels the attenuation and leaves what the opto block does
+   * to whatever arrives. Same lesson as `fet.impactDrop`: store the difference,
+   * not the absolute, when the thing underneath it can move.
+   */
+  const wetGainDb = (grid, fetLevels) =>
+    bilinearAt(sweep.opto.drives, sweep.opto.squash, grid, 0, squash) - fetLevels[0]
   const outP999Db = atMix(dryP999,
-    fetDrive === null ? dryP999
+    fetDrive === null
+      ? dryP999 + wetGainDb(sweep.opto.outP999Db, sweep.fet.outP999Db)
       : bilinearAt(sweep.opto.drives, sweep.opto.squash, sweep.opto.outP999Db, gridDrive, squash))
   /**
    * ⚠ PEAK DOES NOT INTERPOLATE, AND INTERPOLATING IT COST 1.97 dB OF OVERSHOOT.
@@ -1397,7 +1486,8 @@ export function solveFromSweep(sweep, options = {}) {
    * (measured rho 0.956), which is exactly why the blend law needs its
    * correlation term in the first place.
    */
-  const wetPeak = fetDrive === null ? dryPeak
+  const wetPeak = fetDrive === null
+    ? dryPeak + wetGainDb(sweep.opto.outPeakDb, sweep.fet.outPeakDb)
     : bilinearAt(sweep.opto.drives, sweep.opto.squash, sweep.opto.outPeakDb, gridDrive, squash)
   const g = mixGains(mix, sweep.blend.correlation, sweep.blend.densityDb)
   const lin = (db) => Math.pow(10, db / 20)
@@ -1429,7 +1519,15 @@ export function solveFromSweep(sweep, options = {}) {
    * These are report values ONLY. Every param above is computed or read off the
    * knob curves; nothing here reaches the audio.
    */
-  const at = (grid) => bilinearAt(sweep.opto.drives, sweep.opto.squash, grid, fetDrive, squash)
+  /**
+   * ⚠ READ AT `gridDrive`, NOT AT A NULL. With the FET out the opto's input is
+   * the post-clip signal, which no grid row renders — but the grid's rows differ
+   * only in ENVELOPE SHAPE, level being normalised by the alignment, and drive
+   * 0 does 0.07 dB of gain reduction, so its shape is the un-compressed one.
+   * The row is the right proxy; relying on `bilinearAt` to clamp a null to it
+   * was an accident that happened to land there.
+   */
+  const at = (grid) => bilinearAt(sweep.opto.drives, sweep.opto.squash, grid, gridDrive, squash)
   const wetCrestDb = at(sweep.opto.crestDb)
   return {
     params,

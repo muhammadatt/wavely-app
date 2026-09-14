@@ -37,7 +37,7 @@ import {
   clipParamsFor, fetParamsFor, optoParamsFor, pultecPairFor,
 } from '../src/audio/dynamicsProcessor.js'
 import { inputAlignDbFor } from '../src/audio/dsp/inputAlign.js'
-import { measureDynamics, levelSpreadDb, VOICINGS } from '../src/audio/dynamicsSolve.js'
+import { measureDynamics, levelSpreadDb, DYNAMICS_TARGET } from '../src/audio/dynamicsSolve.js'
 
 const file = process.argv[2]
 if (!file) {
@@ -145,10 +145,10 @@ for (let sq = 20; sq <= 50; sq += 2) {
     + `${f(metering.avgGainReductionDb, 5)}   ${levelSpreadDb(out, SR).toFixed(3)}`)
 }
 console.log(`  -> closest to the anchor: squash ${closest.squash}  `
-  + `(shipping default ${VOICINGS.audiobook.squash} for audiobook)`)
+  + `(shipping default ${DYNAMICS_TARGET.squash})`)
 
 // ── 3. Level invariance ─────────────────────────────────────────────────────
-const SQ = VOICINGS.audiobook.squash
+const SQ = DYNAMICS_TARGET.squash
 console.log(`\n── level invariance at squash ${SQ} ─────────────────────────────────`)
 console.log('  inputGain   optoAlign   GRpeak   GRavg  |  UNALIGNED GRpeak   GRavg')
 for (const db of [6, 0, -6, -12, -20, -30]) {

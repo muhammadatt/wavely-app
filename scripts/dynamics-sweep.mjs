@@ -27,7 +27,7 @@ import {
 } from '../src/audio/dynamicsProcessor.js'
 import { inputAlignDbFor } from '../src/audio/dsp/inputAlign.js'
 import {
-  measureDynamics, solveDynamics, sweepDynamics, solveFromSweep, VOICINGS,
+  measureDynamics, solveDynamics, sweepDynamics, solveFromSweep,
 } from '../src/audio/dynamicsSolve.js'
 
 const PATCH = { ...DYNAMICS_KERNEL_DEFAULTS, oversample: false }
@@ -78,9 +78,9 @@ let truthMs = 0
 const rows = []
 for (const d of DENSITIES) {
   const t = performance.now()
-  const truth = solveDynamics(x, sampleRate, { density: d, voicing: 'audiobook' })
+  const truth = solveDynamics(x, sampleRate, { density: d })
   truthMs += performance.now() - t
-  const swept = solveFromSweep(sweep, { density: d, voicing: 'audiobook' })
+  const swept = solveFromSweep(sweep, { density: d })
   rows.push({ d, truth, swept, tImp: deliver(truth.params).impactDb, sImp: deliver(swept.params).impactDb })
 }
 
@@ -89,7 +89,11 @@ console.log(`bisect      : ${(truthMs / 1000).toFixed(2)} s for ${DENSITIES.leng
   + `(${(truthMs / 1000 / DENSITIES.length).toFixed(2)} s EACH)`)
 console.log(`a Density move on the sweep costs no renders at all\n`)
 
-const fmt = (v, w = 7, p = 2) => v.toFixed(p).padStart(w)
+// ⚠ A BYPASSED STAGE HAS A NULL KNOB, which is a setting, not a missing
+// number — the stages learned to bypass after this bench was written and a
+// `?? 0` here would print drive 0, the 24 dB attenuator.
+const fmt = (v, w = 7, p = 2) => (v === null ? 'byp' : v.toFixed(p)).padStart(w)
+const diff = (a, b, w, p) => (a === null || b === null ? '-' : (a - b).toFixed(p)).padStart(w)
 console.log('  D | clip threshold dB |    FET drive     | DELIVERED impact dB | opto GR pk')
 console.log('    | bisect  sweep err | bisect sweep err | bisect  sweep   err | bis   swp')
 let maxImp = 0
@@ -97,14 +101,14 @@ let maxOpto = 0
 for (const r of rows) {
   const t = r.truth.params
   const s = r.swept.params
-  const th = t.clipThresholdDb ?? 0
-  const sh = s.clipThresholdDb ?? 0
+  const th = t.clipThresholdDb
+  const sh = s.clipThresholdDb
   const impErr = r.sImp - r.tImp
   const optoErr = r.swept.report.opto.peakDb - r.truth.report.opto.peakDb
   maxImp = Math.max(maxImp, Math.abs(impErr))
   maxOpto = Math.max(maxOpto, Math.abs(optoErr))
-  console.log(`${String(r.d).padStart(4)}|${fmt(th)}${fmt(sh)}${fmt(sh - th, 5)} |`
-    + `${fmt(t.fetDrive, 6, 1)}${fmt(s.fetDrive, 6, 1)}${fmt(s.fetDrive - t.fetDrive, 5, 1)} |`
+  console.log(`${String(r.d).padStart(4)}|${fmt(th)}${fmt(sh)}${diff(sh, th, 5, 2)} |`
+    + `${fmt(t.fetDrive, 6, 1)}${fmt(s.fetDrive, 6, 1)}${diff(s.fetDrive, t.fetDrive, 5, 1)} |`
     + `${fmt(r.tImp)}${fmt(r.sImp)}${fmt(impErr, 7, 3)} |`
     + `${fmt(r.truth.report.opto.peakDb, 6)}${fmt(r.swept.report.opto.peakDb, 6)}`)
 }
