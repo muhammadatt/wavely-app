@@ -72,6 +72,20 @@ function togglePlayback() {
  */
 const WINDOW_WIDTH = 680
 
+/**
+ * ⚠ WITHOUT A VALID MEASUREMENT THE KERNEL IS A BIT-EXACT PASS-THROUGH, AND
+ * EVERY CONTROL THAT FEEDS IT IS INERT. That is correct DSP behaviour — all
+ * three stages bypass on an absent measured key rather than falling back to an
+ * unmeasured patch — but the panel was still presenting live knobs over it. The
+ * knobs moved, the numbers changed, the meters stayed at zero and nothing was
+ * audible. A control that cannot do anything must not look like it can.
+ *
+ * ⚠ OUTPUT IS THE EXCEPTION AND IT IS NOT AN OVERSIGHT: the bypass path still
+ * applies `outputLin`, so the trim is the one thing that works with no solve in
+ * force. Disabling it would be the same lie in the other direction.
+ */
+const controlsLive = computed(() => solutionValid.value)
+
 const ACCENT = '#f59e6b'
 
 const formatInt = (v) => String(Math.round(v))
@@ -189,7 +203,14 @@ function close() {
     @close="close"
   >
     <div class="px-[26px] pt-[22px] pb-[24px]">
-      <div class="flex items-start justify-between gap-[14px]">
+      <!-- ⚠ DIMMED WITH THE CONTROLS, because the meters are the evidence the
+           section is doing nothing: with no solve every stage bypasses, so the
+           gain-reduction bars sit at zero and read as "no compression needed"
+           rather than "nothing is measured yet". -->
+      <div
+        class="flex items-start justify-between gap-[14px]"
+        :style="{ opacity: controlsLive ? 1 : 0.45, transition: 'opacity .15s' }"
+      >
         <LevelMeter :levels="inputLevels" label="IN" :height="118" />
 
         <!-- Three devices, three bars. See `stages` for why never a sum. -->
@@ -224,6 +245,7 @@ function close() {
           <Knob
             :model-value="panel.density"
             @update:model-value="v => syncMacro('density', v)"
+            :disabled="!controlsLive"
             :min="0" :max="100" :step="1"
             label="Density" :accent="ACCENT" :format-value="formatInt"
             :value-font-px="22"
@@ -241,6 +263,7 @@ function close() {
           <Knob
             :model-value="panel.balance"
             @update:model-value="v => syncMacro('balance', v)"
+            :disabled="!controlsLive"
             :min="-100" :max="100" :step="1"
             label="Balance" :accent="ACCENT" :format-value="formatBalance"
             :value-font-px="15"
@@ -257,6 +280,7 @@ function close() {
             ]"
             :accent="ACCENT"
             label="Voicing"
+            :disabled="!controlsLive"
             @update:model-value="v => syncMacro('voicing', v)"
           />
         </div>
@@ -271,6 +295,7 @@ function close() {
             <Knob
               :model-value="effectiveMix"
               @update:model-value="v => syncBlend('mix', v)"
+              :disabled="!controlsLive"
               :min="0" :max="1" :step="0.01"
               label="Mix" :accent="ACCENT" :format-value="formatMix"
               :value-font-px="15"
