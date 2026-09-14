@@ -13,6 +13,7 @@
  */
 
 import { ensureFET1176Worklet } from '../fet1176WorkletLoader.js'
+import { fet1176TuningOverrides } from './fet1176Tuning.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
 
@@ -29,14 +30,35 @@ export const FET1176_DEFAULTS = {
   attack: 4, // dial 1-7, 7 = fastest (20 us)
   release: 4, // dial 1-7, 7 = fastest (50 ms)
   ratio: '4', // '4' | '8' | '12' | '20' | 'all'
-  fetDrive: 0.35, // FET / output-amp saturation
+  /**
+   * FET / output-amp saturation, 0-1, where 1 IS the curve measured from
+   * FETish rather than an arbitrary top of travel.
+   *
+   * ⚠ THIS FILE HAD ITS OWN COPY OF THE DEFAULT AND IT WENT STALE. The kernel's
+   * default moved to 1 with the measured curve; this one stayed at 0.35, and
+   * since `toKernelParams` always sends `fetDrive` the kernel's value never
+   * applied in the app — the panel would have shipped 35 % of the curve while
+   * every test and script saw the whole of it.
+   */
+  fetDrive: 1,
   scHpf: 0, // sidechain high-pass corner in Hz, 0 = off (stock)
   mix: 1, // wet/dry blend for parallel compression
 }
 
-/** Map UI param names to kernel param names. */
+/**
+ * Map UI param names to kernel param names.
+ *
+ * ⚠ THE BENCH TUNING IS FOLDED IN HERE AND NOWHERE ELSE. Both the live worklet
+ * and the offline apply path build their params through this function, so
+ * merging at one point is what keeps them sample-identical — the alternative is
+ * threading the tuning through every caller and relying on none of them
+ * forgetting. `fet1176TuningOverrides()` is empty unless the bench panel has
+ * been touched, so the untouched result is byte-identical to what this returned
+ * before the panel existed. See `fet1176Tuning.js`.
+ */
 export function toKernelParams(params) {
   return {
+    ...fet1176TuningOverrides(),
     inputDrive: params.inputDrive,
     outputGainDb: params.output,
     attack: params.attack,
@@ -110,6 +132,16 @@ export function createFET1176Compressor(audioContext) {
 
     getParam(name) {
       return params[name]
+    },
+
+    /**
+     * Re-send the kernel params without changing a patch param. The bench
+     * tuning is folded in by `toKernelParams` rather than held here, so there
+     * is no param name to set — the panel moves module state and then asks the
+     * live node to pick it up.
+     */
+    refreshKernelParams() {
+      worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
     },
 
     // Negative dB, matching DynamicsCompressorNode.reduction conventions.

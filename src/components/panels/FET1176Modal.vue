@@ -9,6 +9,8 @@ import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import FET1176TuningPanel from './FET1176TuningPanel.vue'
+import { isFET1176TuningVisible } from '../../audio/effects/fet1176Tuning.js'
 import PresetMenu from './PresetMenu.vue'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { FET_PUNCH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
@@ -20,8 +22,11 @@ const {
   fetAutoMakeup, fetPreview, fetReduction, fetInputLevels, fetOutputLevels,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
   syncDrive, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup,
-  apply, teardown, closeModal,
+  apply, teardown, closeModal, refreshKernelTuning,
 } = useFET1176()
+
+/** Bench only: gated off in production builds. See fet1176Tuning.js. */
+const showTuningBench = isFET1176TuningVisible()
 
 /**
  * Presets. Same two functions and the same ordering constraint as OptoSmooth:
@@ -321,6 +326,14 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
           </div>
         </div>
       </div>
+
+      <!-- Bench only: gated off in production builds. See fet1176Tuning.js. -->
+      <FET1176TuningPanel
+        v-if="showTuningBench"
+        :accent="ACCENT"
+        :disabled="!fetPreview"
+        @change="refreshKernelTuning"
+      />
     </div>
   </FloatingWindow>
 </template>

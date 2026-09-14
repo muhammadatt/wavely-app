@@ -224,6 +224,21 @@ export function useFET1176() {
    * why this is a throttle and not the debounce it replaced.
    */
   if (!makeupThrottle) makeupThrottle = createMeasureThrottle(refreshAutoMakeup)
+  /**
+   * Pick up a bench-tuning change on the live node.
+   *
+   * ⚠ AND RE-MEASURE, because the curve and its position both change the
+   * RENDER, and the auto-makeup is solved from the render. Leaving the makeup
+   * where it was would show the previous curve's gain against the new one's
+   * peaks — which on the `tanh`/MEASURED A/B is several dB and would read as
+   * the curves differing in level rather than in colour.
+   */
+  function refreshKernelTuning() {
+    getEffectChain(getAudioContext()).effects
+      .find(e => e.id === fet1176Effect.id)?.nodes?.refreshKernelParams?.()
+    scheduleAutoMakeup()
+  }
+
   function scheduleAutoMakeup() {
     if (!fetAutoMakeup.value) return
     makeupThrottle.schedule()
@@ -396,5 +411,6 @@ export function useFET1176() {
     teardown,
     openModal,
     closeModal,
+    refreshKernelTuning,
   }
 }

@@ -1892,6 +1892,59 @@ figure.
   chosen over speed because a preview that disagrees with apply is the failure
   this whole tracker exists to avoid.
 
+### The curve bench, wired to the panel
+
+`FET1176TuningPanel.vue` — two rockers (curve, position) plus a **Legacy kernel**
+button, gated off in production exactly as the OptoSmooth bench is
+(`localStorage['wavely:fet-bench'] = '1'`, or any dev build). Backed by
+`fet1176Tuning.js`, a plain store on the same contract as `la2aTuning.js`:
+module state, never serialised into a preset or an undo entry, and
+`fet1176TuningOverrides()` returns **only** keys that differ — so an untouched
+session produces kernel params byte-identical to those from before the panel
+existed.
+
+- **LEGACY IS ONE BUTTON, NOT TWO ROCKER POSITIONS.** "The plugin as it was
+  before the capture" is a PAIR of choices — the `tanh`, after the cell — and
+  either alone is a configuration that never shipped and was never voiced. The
+  button writes `FET_LEGACY_PATCH`, imported from the kernel rather than
+  restated, so the two cannot drift.
+
+- **THE OVERRIDES MERGE IN `toKernelParams` AND NOWHERE ELSE**, which is what
+  keeps the live worklet and the offline apply path sample-identical. Threading
+  the tuning through every caller and relying on none of them forgetting is the
+  alternative.
+
+- **A BENCH CHANGE RE-MEASURES THE MAKEUP.** Both the curve and its position
+  change the RENDER, and the auto-makeup is solved from the render; leaving the
+  makeup where it was would show the previous curve's gain against the new
+  one's peaks. On the `tanh`/MEASURED A/B that is several dB, and it would read
+  as the curves differing in LEVEL rather than in colour — which is exactly the
+  comparison the bench exists to make honestly.
+
+- **⚠ AND THE EFFECT WRAPPER HAD ITS OWN COPY OF `fetDrive`'S DEFAULT, WHICH
+  WENT STALE.** The kernel's moved to 1 with the measured curve;
+  `FET1176_DEFAULTS` in `fet1176Compressor.js` stayed at 0.35. Since
+  `toKernelParams` always sends `fetDrive`, the kernel's value never applied in
+  the app — **the panel would have shipped 35 % of the curve while every test
+  and script saw the whole of it.** The presets' `normalize` fallback carried
+  the same stale number. Both now track the kernel.
+
+### ⚠⚠ CORRECTION: THE "13 PRE-EXISTING TEST FAILURES" WERE A MISSING INSTALL
+
+Reported repeatedly through this branch's work as "13 failures, identical on a
+clean checkout". The clean-checkout comparison was real and the conclusion drawn
+from it — that they were not caused by the change in hand — was right. **The
+attribution was wrong.** `node_modules` was absent from the session container,
+so every suite needing a dependency failed to load.
+
+With dependencies installed: **1273 tests, 1273 pass, 0 fail.** The suite is 188
+tests larger than the 1085 that had been running, and the repo is green and has
+been throughout.
+
+⚠ **`npm run smoke` had been reported unavailable for the same reason** and now
+runs: all thirteen panels open clean, FET Punch included, with the bench panel
+mounted (the smoke runs a dev server, so the gate is open).
+
 ### ⚗⚗ THE INPUT CONTRACT, RESOLVED WITHOUT ADOPTING THE COMPENSATION
 
 **The decision: keep our Input as a real gain and keep the makeup architecture.**

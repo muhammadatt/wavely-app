@@ -80,7 +80,10 @@ function normalize(params) {
     // An unrecognised ratio falls back to the stock position rather than
     // reaching the kernel — the kernel's own guard would drop it silently.
     ratio: RATIOS.includes(String(params.ratio)) ? String(params.ratio) : '4',
-    fetDrive: clamp(params.fetDrive ?? 0.35, 0, 1),
+    // ⚠ The fallback tracks the kernel's default, which moved to 1 with the
+    // measured curve. Factory presets all state `fetDrive` explicitly, so this
+    // only catches a stored preset that predates the key.
+    fetDrive: clamp(params.fetDrive ?? 1, 0, 1),
     scHpf: clamp(params.scHpf ?? 0, 0, 500),
     mix: clamp(params.mix ?? 1, 0, 1),
     autoMakeup,
