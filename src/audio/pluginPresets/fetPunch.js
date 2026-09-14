@@ -39,12 +39,14 @@
  * its taper re-fit. `FET_LEGACY_PATCH` reproduces the old kernel exactly for
  * A/B.
  *
- * ⚠ AND `inputDrive` NOW REACHES THE SHAPER, which it did not before: the curve
- * sits BEFORE the gain cell (measured on FETish). The two presets at inputDrive
- * 70-75 put the shaper's input past unity, where the curve runs out of fitted
- * range and continues linearly — so they distort LESS than the reference does,
- * not more. That is a consequence of our Input still being a real gain where
- * FETish's is compensated, and it is the case the Input decision has to settle.
+ * ⚠ `inputDrive` DOES NOT REACH THE SHAPER, and for one release of this branch
+ * it did. The curve briefly sat between the input attenuator and the cell —
+ * FETish's measured topology — which on a compensated Input means a fixed drive
+ * and on OUR real-gain Input meant the knob's whole travel: H2 swung 79.6 dB
+ * across Input 10→90 where the reference swings 0.0. It sits ahead of the
+ * attenuator now (`preInput`), so saturation is a property of the FILE'S level
+ * and these presets' `inputDrive` values change compression without changing
+ * colour.
  */
 
 import { definePluginPresets } from './store.js'

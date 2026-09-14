@@ -189,7 +189,17 @@ export const FET1176_KERNEL_DEFAULTS = {
   attack: 4, // dial 1-7, 7 = fastest (hardware markings)
   release: 4, // dial 1-7, 7 = fastest (hardware markings)
   ratio: '4', // '4' | '8' | '12' | '20' | 'all'
-  fetDrive: 0.35, // 0-1 FET / output-amp saturation amount
+  /**
+   * FET / output-amp saturation amount, 0-1.
+   *
+   * ⚠ 1 IS THE MEASURED FETish CURVE, not an arbitrary top of travel, and the
+   * default sits there deliberately: shipping 0.35 meant shipping 35 % of the
+   * curve we had just gone and measured — 9 dB less H2 than the reference at
+   * −6 dBFS. The old default of 0.35 was calibrated for the `tanh`, where the
+   * knob also moved the asymmetry bias and the whole travel was far dirtier
+   * (H2 −38 dBc at 0.35 against this curve's −73).
+   */
+  fetDrive: 1,
   /**
    * Which static curve the FET stage uses.
    *   'poly' — the measured FETish curve (see POLY_C4). `fetDrive` scales it,
@@ -201,17 +211,37 @@ export const FET1176_KERNEL_DEFAULTS = {
    */
   fetCurve: 'poly',
   /**
-   * Which side of the gain cell the static curve sits on.
-   *   'preCell'  — the shaper sees the input attenuator's output, measured on
-   *                FETish (rms error 0.00 dB for this hypothesis against
-   *                26.09 dB for the other).
-   *   'postCell' — the shaper sees the compressed signal, which is what this
-   *                kernel did before, and what CLA-76 measures (0.07 against
-   *                3.94 dB).
-   * ⚠ THE TWO REFERENCES GENUINELY DISAGREE HERE. This is not a fitted constant
-   * with a right answer; it is a choice of which unit to be.
+   * Where the static curve sits among the two gain stages.
+   *
+   *   'preInput' — ahead of the input attenuator: the shaper sees the SOURCE,
+   *                so saturation is a property of the file and does not move
+   *                when the Input knob does.
+   *   'preCell'  — after the attenuator, before the cell. The topology measured
+   *                on FETish (rms error 0.00 dB against 26.09 for the other).
+   *   'postCell' — after the cell, on the compressed signal. What this kernel
+   *                did before, and what CLA-76 measures (0.07 against 3.94).
+   *
+   * ⚠⚠ 'preCell' IS FETish's TOPOLOGY AND IS *NOT* FETish's BEHAVIOUR HERE, and
+   * the difference is our Input knob. FETish's Input is internally compensated,
+   * so its audio path sits at source level whatever the knob does and its
+   * shaper sees a FIXED drive. Ours is a real gain. Bolting FETish's topology
+   * onto our Input contract gives the shaper the knob's full travel with nothing
+   * regulating it — measured on a −6 dBFS tone across Input 10→90, H2 moves:
+   *
+   *     preCell   79.6 dB        postCell  36.4 dB        FETish  0.0 dB
+   *
+   * So 'preCell' is the FURTHEST of the three from the reference it was taken
+   * from. 'postCell' does better only by accident — the cell pulls down what
+   * reaches the shaper as the knob pushes it up, regulating about half of it.
+   *
+   * 'preInput' reproduces FETish's saturation behaviour EXACTLY (0 dB of swing)
+   * while leaving the Input knob a real gain and the makeup architecture
+   * untouched. It is not physical — the hardware's attenuator comes first — but
+   * neither is FETish's compensation, and this is the arrangement that matches
+   * what the reference actually does. Same reasoning as `inputAlign.js`: make
+   * the character a property of the FILE, not of a knob position.
    */
-  fetPosition: 'preCell',
+  fetPosition: 'preInput',
   scHpfHz: 0, // 0 = off (stock), or sidechain high-pass corner in Hz
   mix: 1, // wet/dry blend — parallel compression
   /**
@@ -426,12 +456,24 @@ export class FET1176Kernel {
     this.fetNorm = this.fetDriveLin * (1 - this.tanhBias * this.tanhBias)
 
     this.fetPoly = p.fetCurve !== 'tanh'
-    this.fetPre = p.fetPosition !== 'postCell'
-    // The measured curve, scaled by the same amount the tanh path uses. All
-    // buttons in drives it harder, as it does the tanh — clamped, because the
-    // polynomial's linear continuation starts at POLY_XMAX and a coefficient
-    // past 1 would put real bend outside the fitted range.
-    const polyAmount = Math.min(1, amount * (this.isAllButtons ? ALL_FET_BOOST : 1))
+    // 0 = postCell, 1 = preCell, 2 = preInput. A number so the hot loop
+    // branches on an integer rather than comparing strings per sample.
+    this.fetPos = p.fetPosition === 'postCell' ? 0 : p.fetPosition === 'preCell' ? 1 : 2
+    /**
+     * The measured curve, scaled by the same amount the tanh path uses. All
+     * buttons in drives it harder, exactly as it does the tanh.
+     *
+     * ⚠ THIS WAS CLAMPED AT 1 AND THE CLAMP WAS WRONG. The reasoning was "never
+     * deeper than what was measured" — but the fitted range is a range of x,
+     * which `POLY_XMAX` already guards, and scaling the coefficients only makes
+     * the curve deeper, not wider. It stays monotonic there: at 1.6x depth
+     * f'(x) = 1 + 4c₄x³ + 5c₅x⁴ bottoms out at 1.016 across [−1, 1].
+     *
+     * What the clamp actually did was flatten the top of the knob in
+     * all-buttons mode from 0.625 upward — neutering the one mode whose whole
+     * point is that the FET is driven harder.
+     */
+    const polyAmount = amount * (this.isAllButtons ? ALL_FET_BOOST : 1)
     this.polyC4 = POLY_C4 * polyAmount
     this.polyC5 = POLY_C5 * polyAmount
     // Edge value and slope at each end, for the linear continuation. Held
@@ -694,7 +736,7 @@ export class FET1176Kernel {
       // cell follows it. Unfolding with `invInputLin` keeps the seam
       // interpolation and `lastGain` in the units they were already in, which
       // is a smaller change than splitting the array.
-      const pre = this.fetPre
+      const pos = this.fetPos
       let gCur = seamGain
       for (let i = 0; i < n; i++) {
         const gNext = gain[i]
@@ -704,7 +746,10 @@ export class FET1176Kernel {
           const g = gCur + step * j
           let w
           if (!this.applyFet) w = hi[k] * g
-          else if (pre) w = this._shapeFet(hi[k] * this.inputLin) * (g * this.invInputLin)
+          // preInput: the shaper sees the source, and the folded `inputLin *
+          // cellGain` then applies as one multiply — the cheapest of the three.
+          else if (pos === 2) w = this._shapeFet(hi[k]) * g
+          else if (pos === 1) w = this._shapeFet(hi[k] * this.inputLin) * (g * this.invInputLin)
           else w = this._shapeFet(hi[k] * g)
           hi[k] = w
         }
@@ -766,14 +811,16 @@ export class FET1176Kernel {
     const outGain = this.outScratch
     let dcX = this.dcX[ch]
     let dcY = this.dcY[ch]
-    const pre = this.fetPre
+    const pos = this.fetPos
     for (let i = 0; i < n; i++) {
       const dry = input[i]
       let w = dry * gain[i]
       if (this.applyFet) {
-        const shaped = pre
-          ? this._shapeFet(dry * this.inputLin) * (gain[i] * this.invInputLin)
-          : this._shapeFet(w)
+        const shaped = pos === 2
+          ? this._shapeFet(dry) * gain[i]
+          : pos === 1
+            ? this._shapeFet(dry * this.inputLin) * (gain[i] * this.invInputLin)
+            : this._shapeFet(w)
         dcY = shaped - dcX + this.dcR * dcY
         dcX = shaped
         w = dcY

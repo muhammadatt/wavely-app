@@ -137,13 +137,13 @@ test('fetDrive scales the measured curve, and 1 is the reference', () => {
   }
 })
 
-test('preview and apply agree on the new curve at both positions', () => {
+test('preview and apply agree on the new curve at every position', () => {
   // ⚠ The measurement path runs `oversample: false`, which is a DIFFERENT loop
   // from the render path. A curve added to one and not the other would leave
   // the auto-makeup solving against a plugin nobody hears.
   const x = new Float32Array(4096)
   for (let i = 0; i < x.length; i++) x[i] = 0.5 * Math.sin(2 * Math.PI * 220 * i / SR)
-  for (const position of ['preCell', 'postCell']) {
+  for (const position of ['preInput', 'preCell', 'postCell']) {
     const k = kernel({ inputDrive: 60, fetDrive: 1, fetPosition: position, oversample: false })
     const out = new Float32Array(x.length)
     k.process([x], [out], x.length)
@@ -151,4 +151,44 @@ test('preview and apply agree on the new curve at both positions', () => {
     for (let i = 0; i < out.length; i++) energy += out[i] * out[i]
     assert.ok(energy > 0, `${position} produced silence in the measurement path`)
   }
+})
+
+test('the shipping position holds saturation steady across the Input knob', () => {
+  /**
+   * ⚠ THE WHOLE POINT OF `preInput`, AND THE REASON `preCell` IS NOT THE
+   * DEFAULT DESPITE BEING FETish's TOPOLOGY. FETish's Input is internally
+   * compensated, so its shaper sees a fixed drive; ours is a real gain, and
+   * bolting the same topology on gives the shaper the knob's whole travel.
+   * Measured on a −6 dBFS tone across Input 10→90, H2 swings 79.6 dB at
+   * preCell and 36.4 at postCell, against FETish's 0.0.
+   */
+  const fq = 1000
+  const cyc = SR / fq
+  const N = Math.round(3000 * cyc)
+  const x = new Float32Array(N)
+  for (let i = 0; i < N; i++) x[i] = Math.pow(10, -6 / 20) * Math.sin(2 * Math.PI * fq * i / SR)
+  const h2 = (position, inputDrive) => {
+    const k = kernel({ ratio: '4', attack: 1, release: 7, fetDrive: 1, mix: 1, outputGainDb: 0, inputDrive, fetPosition: position })
+    const out = new Float32Array(N)
+    for (let o = 0; o < N; o += 512) {
+      const l = Math.min(512, N - o)
+      k.process([x.subarray(o, o + l)], [out.subarray(o, o + l)], l)
+    }
+    const n = Math.round(1000 * cyc), off = N - n
+    const mag = m => {
+      let re = 0, im = 0
+      for (let i = 0; i < n; i++) {
+        const p = 2 * Math.PI * m * fq * i / SR
+        re += out[off + i] * Math.cos(p); im += out[off + i] * Math.sin(p)
+      }
+      return 2 * Math.hypot(re, im) / n
+    }
+    return 20 * Math.log10(mag(2) / mag(1))
+  }
+  const swing = position => {
+    const v = [10, 30, 50, 70, 90].map(d => h2(position, d))
+    return Math.max(...v) - Math.min(...v)
+  }
+  assert.ok(swing('preInput') < 0.5, `preInput swings ${swing('preInput').toFixed(1)} dB — it must be flat`)
+  assert.ok(swing('preCell') > 40, 'preCell should swing widely — if it does not, the premise has changed')
 })

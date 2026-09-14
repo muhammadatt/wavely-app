@@ -1892,7 +1892,55 @@ figure.
   chosen over speed because a preview that disagrees with apply is the failure
   this whole tracker exists to avoid.
 
-### ⚠ WHAT THE INPUT CONTRACT STILL COSTS US
+### ⚗⚗ THE INPUT CONTRACT, RESOLVED WITHOUT ADOPTING THE COMPENSATION
+
+**The decision: keep our Input as a real gain and keep the makeup architecture.**
+That made `preCell` — FETish's own measured topology — the wrong default, and the
+number says so plainly. A −6 dBFS tone, Input swept 10 → 90, H2 in dBc:
+
+| position | swing across the knob |
+|---|---|
+| `preInput` (shipping) | **0.0 dB** — flat at −64.0, the reference's own figure |
+| `preCell` | **79.6 dB** |
+| `postCell` | 36.4 dB |
+| FETish | 0.0 dB |
+
+⚠ **FETish'S TOPOLOGY IS NOT FETish'S BEHAVIOUR ONCE IT IS BOLTED TO OUR INPUT
+KNOB, AND THAT IS THE WHOLE TRAP.** FETish's Input is internally compensated, so
+its audio path sits at source level whatever the knob does and its shaper sees a
+FIXED drive. Ours is a real gain. Putting the shaper in the same *place* hands it
+the knob's entire travel with nothing regulating it — which made `preCell` the
+**furthest of the three** from the reference it was taken from. `postCell` did
+better only by accident: the cell pulls down what reaches the shaper as the knob
+pushes it up, regulating about half.
+
+**`preInput` puts the shaper ahead of the input attenuator**, so it sees the
+source. That reproduces FETish's saturation behaviour exactly — 0.0 dB of swing,
+landing on −64.0 dBc, the reference's measured value — while leaving the Input
+knob a real gain and the makeup architecture completely untouched. **No
+compensation adopted.**
+
+⚠ It is not physical: the hardware's attenuator comes first. Neither is FETish's
+compensation. And it is the same reasoning `inputAlign.js` already shipped for
+OptoSmooth — make the character a property of the FILE, not of a knob position.
+The cost is the same one FETish carries: a quiet source gets no colour, because
+the colour is level-driven and always was.
+
+- **THE ALL-BUTTONS CLAMP IS GONE, AND IT WAS WRONG.** `polyAmount` was clamped
+  at 1 on the reasoning "never deeper than what was measured" — but the fitted
+  range is a range of **x**, which `POLY_XMAX` already guards, and scaling the
+  coefficients only makes the curve deeper, not wider. It stays monotonic at
+  1.6x depth (f' bottoms out at 1.016 across [−1, 1]). What the clamp actually
+  did was flatten the top of the knob in all-buttons mode from 0.625 up —
+  neutering the one mode whose point is that the FET is driven harder.
+
+- **`fetDrive` DEFAULTS TO 1 NOW, WHICH IS THE MEASURED CURVE.** Shipping 0.35
+  meant shipping 35 % of the curve we had just gone and measured: 9 dB less H2
+  than the reference at −6 dBFS. 0.35 was calibrated for the `tanh`, where the
+  knob also moved the asymmetry bias and the whole travel was far dirtier
+  (H2 −38 dBc at 0.35 against this curve's −73).
+
+### ⚠ WHAT THE INPUT CONTRACT USED TO COST US (superseded by `preInput` above)
 
 With the shaper before the cell and our Input still a REAL gain, the shaper is
 driven by the Input knob. On a −6 dBFS tone its H2 runs **−136 dBc at Input 0,
