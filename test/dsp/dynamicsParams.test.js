@@ -30,9 +30,14 @@ test('nothing measured can reach a preset', () => {
   }
   /**
    * And the panel holds ONLY things that describe an intention: how much
-   * (density), in what character (voicing), which compressor does it
-   * (balance), how much wet (mix) and the trim. Every one of them is portable —
-   * a patch saved on one file means the same thing on another.
+   * (density), which compressor does it (balance), how much the clipper takes
+   * (clipShaveDb), how much wet (mix) and the trim. Every one of them is
+   * portable — a patch saved on one file means the same thing on another.
+   *
+   * ⚠ `voicing` IS GONE AND THAT WAS THE POINT. It carried its own impact
+   * target, squash, clip shave and mix, so Density 55 meant three different
+   * amounts of processing depending on a rotary beside it — the macro's own
+   * number had no fixed meaning, and neither did a patch quoting it.
    *
    * ⚠ THIS LIST IS PINNED EXACTLY, and that is deliberate rather than fussy.
    * The failure it guards is a measured value being added to the panel for
@@ -41,7 +46,7 @@ test('nothing measured can reach a preset', () => {
    * `assert.ok(key in ...)` per key would not catch an ADDITION.
    */
   assert.deepEqual(Object.keys(DYNAMICS_DEFAULTS).sort(),
-    ['balance', 'density', 'mix', 'outputDb', 'voicing'])
+    ['balance', 'clipShaveDb', 'density', 'mix', 'outputDb'])
 })
 
 test('⚠ Balance is a SOLVE input and never reaches the kernel', () => {

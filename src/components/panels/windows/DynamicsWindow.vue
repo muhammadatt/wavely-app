@@ -10,16 +10,29 @@ import GainReductionBar from '../../meters/GainReductionBar.vue'
 // ⚠ Imported, not taken off the composable: it is a module constant, not
 // reactive state, and destructuring it from the return would have quietly been
 // `undefined` in the caption that quotes it.
-import { CLIP_MAX_DEPTH_DB } from '../../../audio/dynamicsSolve.js'
+import { CLIP_MAX_DEPTH_DB, CLIP_SHAVE_DETENTS } from '../../../audio/dynamicsSolve.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
   panel, solving, preview, metering, inputLevels, outputLevels,
-  isStale, hasSolution, solutionValid, summary, effectiveMix, mixIsAuto,
-  hasSelection, solve, syncMacro, syncBlend, resetMixAuto,
+  isStale, hasSolution, solutionValid, summary,
+  hasSelection, solve, syncMacro, syncBlend,
   togglePreview, apply, teardown, closeModal,
 } = useDynamics()
+
+/**
+ * ⚠ DERIVED FROM THE DETENT LIST, NOT TYPED OUT. The top position must stay at
+ * `CLIP_MAX_DEPTH_DB`; a hand-written list would let the dial drift past the cap
+ * and offer a setting the solve silently clamps.
+ */
+const CLIP_DETENT_OPTIONS = CLIP_SHAVE_DETENTS.map(db => ({
+  value: db,
+  label: db === 0 ? 'OFF' : `${db} dB`,
+  title: db === 0
+    ? 'No clipping — the FET and the opto do all of it'
+    : `Shave up to ${db} dB of crest before the compressors`,
+}))
 
 const { state } = useEditorState()
 
@@ -271,54 +284,40 @@ function close() {
         </div>
 
         <div class="w-[108px] flex flex-col items-center pt-[8px]">
+          <!-- ⚠ THE CLIPPER'S SHARE, WHICH USED TO BE BURIED IN THE VOICING.
+               How much crest it may shave is a character decision — tighter and
+               more forward, or rounder — and independent of how far the section
+               goes, which is Density's job. The top detent sits AT the 3 dB hard
+               cap deliberately, so the dial never offers a position the solve
+               quietly clamps. -->
           <DeviceDetentRotary
-            :model-value="panel.voicing"
-            :options="[
-              { value: 'natural', label: 'NATURAL', title: 'Light touch, most of the performance left alone' },
-              { value: 'audiobook', label: 'AUDIOBOOK', title: 'Even and controlled, conservative clipping' },
-              { value: 'podcast', label: 'PODCAST', title: 'Denser and more forward' },
-            ]"
+            :model-value="panel.clipShaveDb"
+            :options="CLIP_DETENT_OPTIONS"
             :accent="ACCENT"
-            label="Voicing"
+            label="Clip"
             :disabled="!controlsLive"
-            @update:model-value="v => syncMacro('voicing', v)"
+            @update:model-value="v => syncMacro('clipShaveDb', v)"
           />
         </div>
 
         <div class="w-[96px] flex flex-col items-center">
-          <div class="relative w-full" :style="{ opacity: mixIsAuto ? 0.78 : 1 }">
-            <!-- Mix does NOT invalidate the solve. The blend is measured at
-                 Mix 1, the worst case, precisely so this knob stays valid
-                 wherever it lands — the same reasoning Scheps uses for sizing
-                 its ceiling knee. At 0 you get clip and FET with no opto, which
-                 is a real voicing rather than a bypass. -->
-            <Knob
-              :model-value="effectiveMix"
-              @update:model-value="v => syncBlend('mix', v)"
-              :disabled="!controlsLive"
-              :min="0" :max="1" :step="0.01"
-              label="Mix" :accent="ACCENT" :format-value="formatMix"
-              :value-font-px="15"
-            />
-            <span
-              v-if="mixIsAuto"
-              class="absolute top-[2px] right-[2px] px-1 py-[1px] rounded-full pointer-events-none"
-              :style="{
-                background: `color-mix(in srgb, ${ACCENT} 20%, transparent)`,
-                border: `1px solid color-mix(in srgb, ${ACCENT} 40%, transparent)`,
-                font: `700 6px/1 'JetBrains Mono',monospace`,
-                letterSpacing: '.08em',
-                color: `color-mix(in srgb, ${ACCENT} 65%, #ffffff)`,
-              }"
-            >AUTO</span>
-          </div>
-          <button
-            v-if="!mixIsAuto"
-            class="mt-[5px] px-2 py-[2px] rounded-full cursor-pointer transition-all"
-            style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);color:rgba(255,255,255,.4);font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.1em"
-            title="Hand Mix back to the voicing's own blend."
-            @click="resetMixAuto"
-          >AUTO</button>
+          <!-- Mix does NOT invalidate the solve. The blend is measured at Mix 1,
+               the worst case, precisely so this knob stays valid wherever it
+               lands — the same reasoning Scheps uses for sizing its ceiling
+               knee. At 0 you get clip and FET with no opto, which is a real
+               setting rather than a bypass.
+               ⚠ THE AUTO BADGE WENT WITH THE VOICINGS. It meant "take the
+               voicing's own blend"; with one target set there is nothing to
+               defer to, and a nullable value is not what a preset should
+               carry. -->
+          <Knob
+            :model-value="panel.mix"
+            @update:model-value="v => syncBlend('mix', v)"
+            :disabled="!controlsLive"
+            :min="0" :max="1" :step="0.01"
+            label="Mix" :accent="ACCENT" :format-value="formatMix"
+            :value-font-px="15"
+          />
         </div>
 
         <div class="w-[96px]">

@@ -20,8 +20,9 @@ import assert from 'node:assert/strict'
 import {
   sweepDynamics, solveFromSweep, solveDynamics, measureDynamics,
   clipShaveFor, fetTargetImpactFor, squashFor,
-  effectiveVoicing, BALANCE_IMPACT_DB, BALANCE_SQUASH_SCALE, MAX_SQUASH,
-  VOICINGS, SWEEP_POINTS, OPTO_GRID_DRIVES, OPTO_GRID_SQUASH, CLIP_MAX_DEPTH_DB,
+  effectiveTarget, BALANCE_IMPACT_DB, BALANCE_SQUASH_SCALE, MAX_SQUASH,
+  DYNAMICS_TARGET, CLIP_SHAVE_DETENTS, DEFAULT_CLIP_SHAVE_DB, DEFAULT_MIX,
+  SWEEP_POINTS, OPTO_GRID_DRIVES, OPTO_GRID_SQUASH, CLIP_MAX_DEPTH_DB,
 } from '../../src/audio/dynamicsSolve.js'
 import {
   processDynamicsBuffer, clipParamsFor, DYNAMICS_KERNEL_DEFAULTS,
@@ -105,13 +106,11 @@ test('⚠ the COMPUTED params match the bisect exactly; only the searches differ
    */
   const x = [narration(10, -6)]
   const sweep = sweepDynamics(x, SR)
-  for (const voicing of Object.keys(VOICINGS)) {
-    for (const density of [0, 25, 60, 100]) {
-      const swept = solveFromSweep(sweep, { density, voicing })
-      assert.equal(swept.params.squash, squashFor(VOICINGS[voicing], density / 100),
-        `${voicing} @ ${density}: squash must be computed, not looked up`)
-      assert.equal(swept.params.mix, VOICINGS[voicing].mix)
-    }
+  for (const density of [0, 25, 60, 100]) {
+    const swept = solveFromSweep(sweep, { density })
+    assert.equal(swept.params.squash, squashFor(DYNAMICS_TARGET.squash, density / 100),
+      `@ ${density}: squash must be computed, not looked up`)
+    assert.equal(swept.params.mix, DEFAULT_MIX)
   }
 })
 
@@ -123,13 +122,12 @@ test('⚠ both paths run the SAME target arithmetic, not two copies of it', () =
    * of a formula — which is exactly the kind of thing the bench would score as
    * noise. So the arithmetic is shared, and this pins that it is.
    */
-  const v = VOICINGS.podcast
-  assert.equal(clipShaveFor(v, 1), Math.min(v.clipShaveDb, CLIP_MAX_DEPTH_DB))
-  assert.equal(clipShaveFor(v, 0), 0)
-  assert.equal(squashFor(v, 0.5), v.squash * 0.5)
-  // Density 0 asks for what the audio already is; Density 1 for the voicing's.
-  assert.equal(fetTargetImpactFor(v, 0, 12.34), 12.34)
-  assert.equal(fetTargetImpactFor(v, 1, 12.34), v.impactDb)
+  assert.equal(clipShaveFor(3, 1), Math.min(3, CLIP_MAX_DEPTH_DB))
+  assert.equal(clipShaveFor(3, 0), 0)
+  assert.equal(squashFor(DYNAMICS_TARGET.squash, 0.5), DYNAMICS_TARGET.squash * 0.5)
+  // Density 0 asks for what the audio already is; Density 1 for the target.
+  assert.equal(fetTargetImpactFor(DYNAMICS_TARGET.impactDb, 0, 12.34), 12.34)
+  assert.equal(fetTargetImpactFor(DYNAMICS_TARGET.impactDb, 1, 12.34), DYNAMICS_TARGET.impactDb)
 })
 
 test('the clipper\'s hard cap survives the interpolation', () => {
@@ -143,7 +141,7 @@ test('the clipper\'s hard cap survives the interpolation', () => {
   const x = [narration(10, -6)]
   const sweep = sweepDynamics(x, SR)
   for (const density of [60, 80, 100]) {
-    const { params, report } = solveFromSweep(sweep, { density, voicing: 'podcast' })
+    const { params, report } = solveFromSweep(sweep, { density, clipShaveDb: 3 })
     assert.ok(Number.isFinite(report.clip.thresholdDb),
       `density ${density}: threshold ran off the sampled range`)
     /**
@@ -204,10 +202,10 @@ test('Density 0 leaves the section alone, and the clipper stays bypassed', () =>
 test('swept params render through the real kernel cleanly', () => {
   const x = [narration(10, -6)]
   const sweep = sweepDynamics(x, SR)
-  for (const voicing of Object.keys(VOICINGS)) {
-    const { params } = solveFromSweep(sweep, { density: 80, voicing })
+  for (const clipShaveDb of CLIP_SHAVE_DETENTS) {
+    const { params } = solveFromSweep(sweep, { density: 80, clipShaveDb })
     const r = processDynamicsBuffer(x, SR, params)
-    assert.ok(r.channelData[0].every(Number.isFinite), `${voicing} produced non-finite output`)
+    assert.ok(r.channelData[0].every(Number.isFinite), `clip ${clipShaveDb} produced non-finite output`)
     assert.equal(r.latencySamples, 150)
   }
 })
@@ -227,8 +225,8 @@ test('⚠ the sweep and the bisect agree on what the head DELIVERS', () => {
   const x = [narration(12, -6)]
   const sweep = sweepDynamics(x, SR)
   for (const density of [30, 60, 100]) {
-    const a = solveDynamics(x, SR, { density, voicing: 'audiobook' })
-    const b = solveFromSweep(sweep, { density, voicing: 'audiobook' })
+    const a = solveDynamics(x, SR, { density })
+    const b = solveFromSweep(sweep, { density })
     const deliver = (params) => {
       const r = processDynamicsBuffer(x, SR, params)
       return measureDynamics([r.channelData[0].subarray(r.latencySamples)], SR)
@@ -250,7 +248,7 @@ test('silence is swept and looked up without crashing', () => {
   assert.ok(report.opto.peakDb < 0.5, `silence should not be compressed: ${report.opto.peakDb}`)
 })
 
-test('⚠ Balance moves the two voicing numbers in OPPOSITE senses', () => {
+test('⚠ Balance moves the two target numbers in OPPOSITE senses', () => {
   /**
    * ⚠ THE SIGNS ARE THE EASY THING TO GET BACKWARDS. A HIGHER `impactDb` is a
    * SLACKER target — it asks the FET to leave more peak-to-body alone — so
@@ -258,21 +256,25 @@ test('⚠ Balance moves the two voicing numbers in OPPOSITE senses', () => {
    * the opto raises that too. Both go up together; only one of them means
    * "do less". An inverted sign here would make Balance a second Density.
    */
-  const v = VOICINGS.audiobook
-  const opto = effectiveVoicing(v, 1)
-  const fet = effectiveVoicing(v, -1)
+  const v = DYNAMICS_TARGET
+  const opto = effectiveTarget(1)
+  const fet = effectiveTarget(-1)
 
   assert.equal(opto.impactDb, v.impactDb + BALANCE_IMPACT_DB)
   assert.equal(fet.impactDb, v.impactDb - BALANCE_IMPACT_DB)
   assert.ok(opto.squash > v.squash && fet.squash < v.squash)
-  // The clipper and the blend are NOT part of the trade.
-  assert.equal(opto.clipShaveDb, v.clipShaveDb)
-  assert.equal(opto.mix, v.mix)
-  // Centre is the voicing itself, untouched — not a rebuilt copy of it.
-  assert.equal(effectiveVoicing(v, 0), v)
+  /**
+   * ⚠ THE CLIPPER AND THE BLEND ARE NOT PART OF THE TRADE, and now they cannot
+   * be by construction: `effectiveTarget` returns only the two numbers Balance
+   * moves. They used to live in the same object and the test had to assert they
+   * came back unchanged.
+   */
+  assert.deepEqual(Object.keys(opto).sort(), ['impactDb', 'squash'])
+  // Centre is the target itself, untouched — not a rebuilt copy of it.
+  assert.equal(effectiveTarget(0), v)
   // A stray percent pins rather than running away.
-  assert.deepEqual(effectiveVoicing(v, 75), effectiveVoicing(v, 1))
-  assert.deepEqual(effectiveVoicing(v, NaN), v)
+  assert.deepEqual(effectiveTarget(75), effectiveTarget(1))
+  assert.deepEqual(effectiveTarget(NaN), v)
 })
 
 test('⚠ the opto grid reaches the deepest squash ANY voicing can ask for', () => {
@@ -280,14 +282,11 @@ test('⚠ the opto grid reaches the deepest squash ANY voicing can ask for', () 
    * The grid is what the reported opto reduction is read from. If its squash
    * axis stopped at the widest voicing, every leaned patch would land on the
    * clamp — reporting the same number for Balance +50 and +100. `MAX_SQUASH` is
-   * derived from VOICINGS and the Balance range for exactly that reason.
+   * derived from the target and the Balance range for exactly that reason.
    */
-  for (const v of Object.values(VOICINGS)) {
-    assert.ok(effectiveVoicing(v, 1).squash <= MAX_SQUASH + 1e-9,
-      `${v.squash} leaned to ${effectiveVoicing(v, 1).squash} exceeds the grid`)
-  }
-  assert.equal(MAX_SQUASH,
-    Math.max(...Object.values(VOICINGS).map(v => v.squash)) * (1 + BALANCE_SQUASH_SCALE))
+  assert.ok(effectiveTarget(1).squash <= MAX_SQUASH + 1e-9,
+    `${DYNAMICS_TARGET.squash} leaned to ${effectiveTarget(1).squash} exceeds the grid`)
+  assert.equal(MAX_SQUASH, DYNAMICS_TARGET.squash * (1 + BALANCE_SQUASH_SCALE))
 })
 
 test('Balance actually shifts the work between the two compressors', () => {
@@ -326,10 +325,10 @@ test('⚠ the FET BYPASSES when the target is met — drive 0 is a 24 dB attenua
   const x = [narration(10, -6)]
   const sweep = sweepDynamics(x, SR)
   // A target far slacker than the material can possibly need.
-  const saved = { ...VOICINGS.natural }
-  Object.assign(VOICINGS.natural, { ...saved, impactDb: 99 })
-  const { params, report } = solveFromSweep(sweep, { density: 100, voicing: 'natural' })
-  Object.assign(VOICINGS.natural, saved)
+  // A target far slacker than the material can possibly need. Balance is the
+  // only way to move it now, and its range is not enough — so this asks the
+  // solve directly, which is what the panel's detents cannot produce.
+  const { params, report } = solveFromSweep(sweep, { density: 0.0001, clipShaveDb: 0 })
 
   assert.equal(params.fetDrive, null, 'an unneeded FET must bypass, never sit at drive 0')
   assert.equal(report.fet.peakDb, 0)
@@ -344,28 +343,43 @@ test('⚠ the FET BYPASSES when the target is met — drive 0 is a 24 dB attenua
 
 test('⚠ an unreachable impact target is REPORTED, not silently pinned', () => {
   /**
-   * Impact has only ~3 dB of travel through this device — measured alone it
+   * Impact has only ~3 dB of travel through this device on real narration — it
    * moves 3.3 dB across the whole drive range and plateaus at 60, because
-   * compressing the loud parts pulls the body down with them. So a target below
-   * the floor pins the drive at 100 and, without this flag, looks exactly like
+   * compressing the loud parts pulls the body down with them. A target below
+   * that floor pins the drive at 100 and, without this flag, looks exactly like
    * a target that was met. That silence is how 26 dB of gain reduction shipped.
    *
-   * The clipper has reported its cap since it was written. Now both do.
+   * ⚠ THE CAP IS PROVOKED BY SHRINKING THE SWEEP'S OWN CURVE, not by an option
+   * the solve would otherwise not have. A sweep is plain data by construction —
+   * it crosses the worker boundary as a structured clone — so a test can hand it
+   * a low-authority device directly. The alternative was a target override on
+   * `solveFromSweep`, which would be a back door into the one thing the panel
+   * deliberately no longer exposes.
+   *
+   * ⚠ AND THE SYNTHETIC STIMULUS CANNOT REACH IT UNAIDED, which is worth
+   * recording: it has 5.37 dB of drop authority where real narration has 3.3, so
+   * even Balance at full FET lean stays reachable on it. The generator is
+   * unrepresentative in BOTH directions and has now been caught being so twice.
    */
   const x = [narration(10, -6)]
-  const sweep = sweepDynamics(x, SR)
-  const saved = { ...VOICINGS.podcast }
-  Object.assign(VOICINGS.podcast, { ...saved, impactDb: 2 }) // far below any floor
-  const { params, report } = solveFromSweep(sweep, { density: 100, voicing: 'podcast' })
-  Object.assign(VOICINGS.podcast, saved)
+  const real = sweepDynamics(x, SR)
+  assert.ok(Math.max(...real.fet.impactDrop) > 3,
+    'the stimulus should have real FET authority before it is taken away')
+
+  // Same sweep, with the FET able to remove almost nothing.
+  const starved = {
+    ...real,
+    fet: { ...real.fet, impactDrop: real.fet.impactDrop.map(v => v * 0.05) },
+  }
+  const { params, report } = solveFromSweep(starved, { density: 100, balance: -1 })
 
   assert.equal(params.fetDrive, 100, 'the drive should run out at the top')
   assert.ok(report.fet.capped, 'an unreachable target must be flagged')
   assert.ok(report.fet.shortfallDb > 1,
     `the shortfall should be reported: ${report.fet.shortfallDb}`)
 
-  // And a reachable target reports no shortfall.
-  const ok = solveFromSweep(sweep, { density: 100, voicing: 'podcast' })
+  // And the real device, which CAN reach its target, reports no shortfall.
+  const ok = solveFromSweep(real, { density: 100 })
   assert.equal(ok.report.fet.capped, false)
   assert.equal(ok.report.fet.shortfallDb, 0)
 })

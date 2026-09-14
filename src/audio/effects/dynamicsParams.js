@@ -33,18 +33,27 @@ export const DYNAMICS_LATENCY_SAMPLES = 150
  * `solveDynamics` and arrives with the solve, not from here.
  *
  * ⚠ THE SEPARATION IS THE POINT, AND IT IS WHAT MAKES A PRESET PORTABLE. A
- * saved patch is a macro position, a voicing, a balance and a blend — four
- * things that describe an intention. The threshold, the drives, the two alignment offsets
+ * saved patch is a macro position, a balance, a clipper detent and a blend —
+ * four things that describe an intention, none of which change meaning with the
+ * file. The threshold, the drives, the two alignment offsets
  * and the blend's correlation all describe THE FILE, and a preset carrying any
  * of them would apply one recording's gain staging to another.
  */
 export const DYNAMICS_DEFAULTS = {
   density: 50, // the macro, 0-100
-  voicing: 'audiobook',
+  /**
+   * How much crest the clipper may shave, dB — a detent, not a free knob.
+   *
+   * ⚠ IT USED TO BE PART OF THE VOICING, which is why it had no control of its
+   * own. With one target set it needs one: the clipper's contribution is a
+   * character decision (tighter and more forward, or rounder) that is
+   * independent of how far the section goes.
+   */
+  clipShaveDb: 2,
   /**
    * WHICH compressor does the work, −100 (FET) … 0 (as voiced) … +100 (opto).
    *
-   * ⚠ A SOLVE INPUT, NOT A KERNEL PARAM. It shifts the voicing's `impactDb` and
+   * ⚠ A SOLVE INPUT, NOT A KERNEL PARAM. It shifts the section's `impactDb` and
    * `squash` before the lookup and never appears in what the kernel reads —
    * `toKernelParams` below names every key it passes on, and this is not one of
    * them. It belongs on the panel because it is an intention, the same as
@@ -52,11 +61,14 @@ export const DYNAMICS_DEFAULTS = {
    */
   balance: 0,
   /**
-   * Null means "take the voicing's own blend". A number is the user overriding
-   * it, which survives a re-solve — the same contract AUTO knobs have
-   * elsewhere: the measurement owns the value until somebody disagrees.
+   * The opto block's blend, 0-1.
+   *
+   * ⚠ IT USED TO BE NULLABLE, meaning "take the voicing's own blend", with an
+   * AUTO badge and a reset. With the voicings gone there is nothing for AUTO to
+   * defer to — the value is simply the value, and a plain number is what a
+   * preset should carry.
    */
-  mix: null,
+  mix: 0.30,
   outputDb: 0,
 }
 

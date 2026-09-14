@@ -6,14 +6,16 @@ import {
 } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { dynamicsEffect, DYNAMICS_DEFAULTS } from '../audio/effects/dynamics.js'
-import { VOICINGS, CLIP_MAX_DEPTH_DB, solveFromSweep } from '../audio/dynamicsSolve.js'
+import {
+  CLIP_MAX_DEPTH_DB, CLIP_SHAVE_DETENTS, solveFromSweep,
+} from '../audio/dynamicsSolve.js'
 import { regionCovers } from '../audio/dsp/clipGainDecision.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const DYNAMICS_WINDOW_ID = 'vocal-chain-dynamics'
 
-export { VOICINGS, CLIP_MAX_DEPTH_DB }
+export { CLIP_MAX_DEPTH_DB, CLIP_SHAVE_DETENTS }
 
 /**
  * ⚠ THERE IS AN EXPLICIT SOLVE STEP, AND IT IS NOT A UI PREFERENCE. Every
@@ -90,10 +92,6 @@ export function useDynamics() {
   const hasSolution = computed(() => sweep.value !== null && solution.value !== null)
   const solutionValid = computed(() => hasSolution.value && !isStale.value)
 
-  const voicing = computed(() => VOICINGS[panel.value.voicing] ?? VOICINGS.audiobook)
-  /** The blend actually in force: the user's if they set one, else the voicing's. */
-  const effectiveMix = computed(() => panel.value.mix ?? voicing.value.mix)
-  const mixIsAuto = computed(() => panel.value.mix === null)
 
   /** What the solve decided, for the panel to show rather than imply. */
   const summary = computed(() => {
@@ -182,12 +180,13 @@ export function useDynamics() {
   }
 
   /**
-   * Density and Voicing — LIVE, because they are lookups on the sampled curves.
+   * Density, Balance and the clipper detent — LIVE: all three are lookups on
+   * the sampled curves.
    *
    * ⚠ THEY USED TO THROW THE MEASUREMENT AWAY. Each move cleared the solution
    * and made the user re-run a 7.3-7.9 s bisect, which is not a knob. The sweep
-   * samples both curves once, so re-deriving the knob positions for a new
-   * Density costs no renders — see `solveFromSweep`.
+   * samples every curve once, so re-deriving the knob positions costs no
+   * renders — see `solveFromSweep`.
    */
   function syncMacro(name, value) {
     panel.value = { ...panel.value, [name]: value }
@@ -205,19 +204,13 @@ export function useDynamics() {
   function macroOptions() {
     return {
       density: panel.value.density,
-      voicing: panel.value.voicing,
       balance: (panel.value.balance ?? 0) / 100,
+      clipShaveDb: panel.value.clipShaveDb,
     }
   }
 
   function syncBlend(name, value) {
     panel.value = { ...panel.value, [name]: value }
-    push()
-  }
-
-  /** Hand Mix back to the voicing's own value. */
-  function resetMixAuto() {
-    panel.value = { ...panel.value, mix: null }
     push()
   }
 
@@ -233,9 +226,9 @@ export function useDynamics() {
    * `solvedSelection`.
    *
    * ⚠ THE MACRO IS READ AT LOOKUP TIME, NOT AT SAMPLE TIME. The curves do not
-   * depend on Density or Voicing — those only pick targets on them — so moving
-   * either while this is in flight is not a race, and the result is valid for
-   * whatever the knobs say when it lands.
+   * depend on Density, Balance or the clipper detent — those only pick targets
+   * on them — so moving any of them while this is in flight is not a race, and
+   * the result is valid for whatever the knobs say when it lands.
    */
   async function solve() {
     if (!state.currentFile) return
@@ -319,15 +312,11 @@ export function useDynamics() {
     hasSolution,
     solutionValid,
     summary,
-    voicing,
-    effectiveMix,
-    mixIsAuto,
     hasSelection,
     solve,
     clearSolution,
     syncMacro,
     syncBlend,
-    resetMixAuto,
     togglePreview,
     apply,
     teardown,

@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 import {
   solveDynamics, measureDynamics, levelSpreadDb, measureBlend,
   sweepDynamics, solveFromSweep,
-  VOICINGS, CLIP_MAX_DEPTH_DB,
+  DYNAMICS_TARGET, CLIP_SHAVE_DETENTS, CLIP_MAX_DEPTH_DB,
 } from '../../src/audio/dynamicsSolve.js'
 import { processDynamicsBuffer } from '../../src/audio/dynamicsProcessor.js'
 import { inputAlignDbFor } from '../../src/audio/dsp/inputAlign.js'
@@ -99,7 +99,7 @@ test('⚠ the three devices control three different statistics', () => {
    */
   const x = [narration(14, -6)]
   const before = measureDynamics(x, SR)
-  const { params } = solveDynamics(x, SR, { density: 100, voicing: 'audiobook' })
+  const { params } = solveDynamics(x, SR, { density: 100 })
   const r = processDynamicsBuffer(x, SR, params)
   const after = measureDynamics([r.channelData[0].subarray(r.latencySamples)], SR)
 
@@ -107,9 +107,9 @@ test('⚠ the three devices control three different statistics', () => {
    * ⚠ DIRECTIONAL, NOT A MAGNITUDE, AND IT USED TO DEMAND 15 %. Two findings
    * retired that threshold. The opto does not reduce spread on speech at all —
    * levelling is Auto Level's job — so what moves this is the clipper and the
-   * FET. And the voicings were recalibrated to reachable targets, which made
-   * every one of them gentler by design. A percentage here just pins how hard
-   * the current voicing happens to push.
+   * FET. And the targets were recalibrated to reachable ones, which made the
+   * section gentler by design. A percentage here just pins how hard the current
+   * calibration happens to push.
    */
   assert.ok(after.spreadDb < before.spreadDb,
     `spread should fall: ${before.spreadDb.toFixed(2)} -> ${after.spreadDb.toFixed(2)}`)
@@ -135,14 +135,14 @@ test('⚠ the opto is a calibrated depth, NOT a search — the minimum was synth
    * is `optoAlignDb`, not a scan.
    */
   const x = [narration(16, -6)]
-  const { params, report } = solveDynamics(x, SR, { density: 100, voicing: 'podcast' })
+  const { params, report } = solveDynamics(x, SR, { density: 100 })
 
-  assert.equal(report.opto.calibratedSquash, VOICINGS.podcast.squash)
-  assert.equal(report.opto.squash, VOICINGS.podcast.squash)
-  assert.equal(params.squash, VOICINGS.podcast.squash)
+  assert.equal(report.opto.calibratedSquash, DYNAMICS_TARGET.squash)
+  assert.equal(report.opto.squash, DYNAMICS_TARGET.squash)
+  assert.equal(params.squash, DYNAMICS_TARGET.squash)
   // Density scales the depth; it is not re-derived from the audio.
-  const half = solveDynamics(x, SR, { density: 50, voicing: 'podcast' })
-  assert.ok(Math.abs(half.params.squash - VOICINGS.podcast.squash * 0.5) < 1e-9,
+  const half = solveDynamics(x, SR, { density: 50 })
+  assert.ok(Math.abs(half.params.squash - DYNAMICS_TARGET.squash * 0.5) < 1e-9,
     `Density should scale the calibrated depth: ${half.params.squash}`)
   // The layer must actually be doing something at the calibrated depth.
   assert.ok(report.opto.peakDb > 1,
@@ -165,7 +165,7 @@ test('⚠ each stage is aligned at its own input, not at the section\'s', () => 
 
 test('the clipper is capped, and says so rather than forcing the pass', () => {
   const x = [narration(12, -6)]
-  const { report } = solveDynamics(x, SR, { density: 100, voicing: 'podcast' })
+  const { report } = solveDynamics(x, SR, { density: 100 })
   assert.ok(report.clip.depthDb <= CLIP_MAX_DEPTH_DB + 1e-6,
     `the clipper took ${report.clip.depthDb.toFixed(2)} dB, past its cap`)
   // On this material the cap does bind at full density, so the flag is exercised.
@@ -254,10 +254,10 @@ test('⚠ the solve never hands back its own render shortcut', () => {
 
 test('solved params render through the real kernel cleanly', () => {
   const x = [narration(10, -6)]
-  for (const voicing of Object.keys(VOICINGS)) {
-    const { params } = solveDynamics(x, SR, { density: 80, voicing })
+  for (const clipShaveDb of CLIP_SHAVE_DETENTS) {
+    const { params } = solveDynamics(x, SR, { density: 80, clipShaveDb })
     const r = processDynamicsBuffer(x, SR, params)
-    assert.ok(r.channelData[0].every(Number.isFinite), `${voicing} produced non-finite output`)
+    assert.ok(r.channelData[0].every(Number.isFinite), `clip ${clipShaveDb} produced non-finite output`)
     assert.equal(r.latencySamples, 150)
   }
 })
@@ -270,6 +270,6 @@ test('silence and near-silence are solved without crashing', () => {
   assert.ok(Number.isFinite(params.squash))
   assert.equal(params.correlation, 0)
   // Nothing to grab, so the calibrated depth is still dialled but idle.
-  assert.equal(report.opto.squash, VOICINGS.audiobook.squash)
+  assert.equal(report.opto.squash, DYNAMICS_TARGET.squash)
   assert.ok(report.opto.peakDb < 0.5, `silence should not be compressed: ${report.opto.peakDb}`)
 })

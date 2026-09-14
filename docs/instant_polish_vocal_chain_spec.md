@@ -642,6 +642,56 @@ number is why 8.5 looked reasonable.** Both generators now accent one syllable i
 seven (impact ~13.9 / ~14.7), and four assertions had to move to match, every one
 of them in the direction of the real files.
 
+### ⚠ The three voicings are gone — Density now means one thing
+
+Each voicing carried its own `impactDb`, `squash`, `clipShaveDb` and `mix`, and
+Density interpolated from the material toward whichever set was selected. So
+**Density 55 was three different amounts of processing** depending on a rotary
+beside it. The macro's own number had no fixed meaning, and neither did a saved
+patch quoting it.
+
+There is now one target set — `DYNAMICS_TARGET`, the audiobook numbers, which
+are the ones that were actually measured. The other two were never anything but
+these moved by hand.
+
+The two knobs that were folded into the voicings got their own controls, where
+their values are visible and mean what they say:
+
+| was | is now |
+|---|---|
+| `voicing.mix` (with an AUTO badge deferring to it) | the **Mix** knob, a plain number |
+| `voicing.clipShaveDb` | a **Clip** detent — OFF / 1 / 2 / 3 dB |
+| `voicing.impactDb`, `voicing.squash` | `DYNAMICS_TARGET`, moved only by Balance |
+
+⚠ **The top Clip detent sits AT `CLIP_MAX_DEPTH_DB`**, derived from the detent
+list rather than typed out, so the dial can never offer a position the solve
+quietly clamps.
+
+⚠ **The Mix AUTO badge went with the voicings.** It meant "take the voicing's
+own blend"; with one target set there is nothing to defer to, and a nullable
+value is not what a preset should carry.
+
+Panel state stays at five keys — density, balance, clipShaveDb, mix, outputDb —
+and every one is now portable in the strong sense: it means the same thing on
+every file *and* independently of every other control. Use-case starting points
+belong in **presets**, which save all five at once and say so.
+
+### ⚠ The controls are disabled without a measurement
+
+With no valid solve the kernel is a bit-exact pass-through: all three stages
+bypass on an absent measured key rather than falling back to an unmeasured
+patch. That is correct DSP behaviour — but the panel kept presenting live knobs
+over it, so the knobs moved, the readouts changed, the meters stayed at zero and
+nothing was audible.
+
+Density, Balance, Clip and Mix are now disabled until `solutionValid`, and the
+meter row dims with them — bars at zero otherwise read as "no compression
+needed" rather than "nothing is measured yet".
+
+⚠ **Output stays enabled, and that is not an oversight:** the bypass path still
+applies `outputLin`, so the trim is the one control that works with no solve in
+force. Disabling it would be the same lie in the other direction.
+
 ### Balance — which compressor does the work
 
 Density says *how much* the section does; Balance says *which device* does it.

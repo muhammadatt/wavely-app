@@ -57,7 +57,7 @@
  *
  *   Soft Clip   crest            bisect threshold, hard-capped depth
  *   FET Punch   p99.9 - body     bisect drive
- *   Opto        (not solved)     a calibrated depth per voicing, scaled by Density
+ *   Opto        (not solved)     one calibrated depth, scaled by Density
  *
  * ⚠ AND THE HEAD IS RENDERED STAGE BY STAGE, WHICH IS NOT AN IMPLEMENTATION
  * DETAIL. Both compressors drive a fixed internal threshold, so each needs its
@@ -69,7 +69,7 @@
  *
  * ⚠ EVERY TARGET NUMBER BELOW IS PROVISIONAL. They are reachable operating
  * points measured on synthetic narration, not values chosen by listening. The
- * voicings exist so that choice has somewhere to live, not because these are
+ * targets exist so that choice has somewhere to live, not because these are
  * the right numbers.
  */
 
@@ -278,7 +278,7 @@ function bisect({ lo, hi, target, measure, decreasing, passes = BISECT_PASSES })
 
 /**
  * ⚠ PROVISIONAL, AND DELIBERATELY SHAPED SO A LISTENING DECISION CAN REPLACE
- * THEM WITHOUT TOUCHING THE SOLVE. Each voicing states, at Density 100:
+ * THEM WITHOUT TOUCHING THE SOLVE. The section states, at Density 100:
  *
  *   clipShaveDb  how much crest the clipper may take (its hard cap is separate)
  *   impactDb     the peak-to-body the FET is asked to reach
@@ -287,84 +287,53 @@ function bisect({ lo, hi, target, measure, decreasing, passes = BISECT_PASSES })
  *
  * Density scales the first three from "do nothing" toward these.
  */
-export const VOICINGS = Object.freeze({
-  audiobook: { clipShaveDb: 2.0, impactDb: 12.2, squash: 26, mix: 0.30 },
-  podcast: { clipShaveDb: 3.0, impactDb: 11.8, squash: 32, mix: 0.40 },
-  natural: { clipShaveDb: 1.0, impactDb: 13.0, squash: 20, mix: 0.20 },
+export const DYNAMICS_TARGET = Object.freeze({
+  /** Peak-to-body the FET is asked to reach at Density 100. */
+  impactDb: 12.2,
+  /** The opto block's layer depth at Density 100. */
+  squash: 26,
 })
 
 /**
- * ⚠ THE IMPACT TARGETS WERE 8.5 / 7.5 / 9.5 AND EVERY ONE OF THEM WAS BELOW
- * WHAT THE SECTION CAN REACH. This is the third constant on this plugin fitted
- * to the synthetic generator and falsified by real narration, and it is the one
- * that did the most damage.
+ * ⚠ THERE USED TO BE THREE VOICINGS AND DENSITY MEANT A DIFFERENT THING IN EACH.
  *
- * The generator's impact is 11.32 dB, so a target of 8.5 asks it for 2.82 dB —
- * comfortable. Real narration reads 13.2-14.8, so the SAME absolute number asks
- * for 4.7-6.3 dB. And the FET cannot deliver that at any setting: measured
- * alone, impact moves only 3.3 dB across its ENTIRE drive range and plateaus at
- * drive 60, because compressing the loud parts pulls the body down with them
- * (p99.9 falls 6.4 dB while the body falls 3.1; impact is the difference).
+ * Each voicing carried its own `impactDb`, `squash`, `clipShaveDb` and `mix`,
+ * and Density interpolated from the material toward whichever set was selected.
+ * So Density 55 was three different amounts of processing depending on a rotary
+ * switch beside it — the macro's own number had no fixed meaning, and neither
+ * did a saved patch that quoted it.
  *
- * Measured floor — clipper at its cap, FET at full drive:
+ * Now there is ONE target set. Density means one thing: how far toward it. The
+ * two knobs that were folded into the voicings have their own controls, where
+ * their values are visible and mean what they say — Mix already had one, and
+ * the clipper's shave is now a detent. Use-case starting points belong in
+ * PRESETS, which save every control at once and say so.
  *
- *   narrator 1   input 14.81   floor 11.50   usable band 3.30 dB
- *   narrator 2   input 13.21   floor 11.03   usable band 2.18 dB
- *
- * ⚠ SO THE DRIVE PINNED AT 100 AND 26 dB OF GAIN REDUCTION CAME OUT, WHICH
- * NOBODY ASKED FOR — the solve just ran out of road looking for a number that
- * does not exist. It failed silently, because `crossingOf` clamps to the last
- * sampled drive when a target is never crossed, and that is indistinguishable
- * from reaching it at 100. The clipper has said "capped" since it was written;
- * the FET now does too, below.
- *
- * ⚠ AND IT TOOK THE TOP HALF OF DENSITY AND THE WHOLE FET SIDE OF BALANCE WITH
- * IT. At Density 80 every Balance position from -100 to +100 produced drive 100:
- * one distinct value out of nine. A control cannot trade against a device that
- * is already pinned.
- *
- * These targets are reachable on both files and leave the drive mid-range.
- * Squash comes down with them (33/40/26 -> 26/32/20) so the opto lands nearer
- * the 2-3 dB of reduction a narration chain actually runs.
- *
- * ⚠ STILL NOT A LISTENING DECISION. They are reachable operating points on two
- * voices, which is what the old ones failed to be. `npm run dynamics:sweep`
- * against a third voice is the cheapest way to find the next problem.
+ * ⚠ THESE ARE THE AUDIOBOOK NUMBERS, which are the ones that were measured.
+ * The other two voicings' targets were never anything but these moved by hand.
+ * See the recalibration note above for the floor they had to clear.
  */
 
 /**
- * ⚠ THE SQUASH VALUES ARE ANCHORED ON A MEASURED OPERATING POINT, NOT COPIED
- * FROM SCHEPS' KNOB. Scheps' calibrated layer depth is peak gain reduction 7.64
- * dB / average 1.23 on its own wet path — a number arrived at by listening, and
- * the only calibrated reference in this codebase for how deep a parallel opto
- * layer should sit. Measured on 35 s of real narration through this chain's
- * head, at the opto's own-input alignment:
+ * How much crest the clipper may shave, in dB — the detent's positions.
  *
- *   squash   30     32     33     34     36     40
- *   GR peak  6.51   7.18   7.52   7.86   8.53   9.87
- *   GR avg   0.94   1.12   1.23   1.34   1.61   2.27
- *
- * so 33 reproduces that operating point here. Scheps reaches it at 40 because
- * its cell sees the raw signal; here it sees one already clipped and already
- * FET-compressed, so there is less left to grab — the transfer this spec
- * predicted would not hold, quantified.
- *
- * Podcast and Natural are that anchor moved deliberately, not measured: 40 for
- * a denser layer, 26 for a lighter one.
- *
- * ⚠ CALIBRATED AT 48 kHz ON A PRODUCT THAT RESAMPLES TO 44.1. Re-declaring the
- * same samples at 44.1 kHz moves the same squash to GR peak 6.96 / avg 1.02 —
- * about half a dB. That probe time-stretches the content, so it bounds the
- * sensitivity rather than measuring it; a real 44.1 kHz resample should re-check
- * this before the number is treated as settled. `npm run dynamics:calibrate`
- * reproduces the whole table against any file.
+ * ⚠ `CLIP_MAX_DEPTH_DB` STILL CAPS WHAT IT ACTUALLY TAKES. These are requests,
+ * and the solve reports when one cannot be met; the top detent sits AT the cap
+ * deliberately, so the panel never offers a position that is quietly clamped.
  */
+export const CLIP_SHAVE_DETENTS = Object.freeze([0, 1, 2, 3])
+
+/** The blend the section ships at, when nothing has touched the Mix knob. */
+export const DEFAULT_MIX = 0.30
+
+/** The clipper detent the section ships at. */
+export const DEFAULT_CLIP_SHAVE_DB = 2
 
 /**
  * ── BALANCE: WHICH COMPRESSOR DOES THE WORK ─────────────────────────────────
  *
  * Density says HOW MUCH the section does. Balance says WHICH DEVICE does it —
- * −1 leans on the FET, +1 leans on the opto, 0 is the voicing as calibrated.
+ * −1 leans on the FET, +1 leans on the opto, 0 is the section as calibrated.
  *
  * ⚠ IT MOVES TWO VOICING NUMBERS AND NOTHING ELSE, which is what keeps it free
  * at runtime. `impactDb` is the FET's target and `squash` is the opto's depth;
@@ -425,7 +394,7 @@ export const VOICINGS = Object.freeze({
  * material-dependence, not this constant's fault, and narrowing cannot fix it.
  *
  * The dead zone this knob originally had was the target sitting below the
- * floor — see VOICINGS. Fixing that did not imply anything about the range.
+ * floor — see DYNAMICS_TARGET. Fixing that implied nothing about the range.
  */
 export const BALANCE_IMPACT_DB = 2.0
 
@@ -433,20 +402,18 @@ export const BALANCE_IMPACT_DB = 2.0
 export const BALANCE_SQUASH_SCALE = 0.45
 
 /**
- * The voicing as Balance leaves it. Everything downstream reads THIS, never
- * `VOICINGS[key]` directly, so the two solve paths cannot disagree about what
+ * The target set as Balance leaves it. Everything downstream reads THIS, never
+ * `DYNAMICS_TARGET` directly, so the two solve paths cannot disagree about what
  * the knob did.
  *
- * @param {object} voicing a VOICINGS entry
  * @param {number} balance −1 (lean FET) … 0 (as calibrated) … +1 (lean opto)
  */
-export function effectiveVoicing(voicing, balance = 0) {
+export function effectiveTarget(balance = 0) {
   const b = clamp(Number.isFinite(balance) ? balance : 0, -1, 1)
-  if (b === 0) return voicing
+  if (b === 0) return DYNAMICS_TARGET
   return {
-    ...voicing,
-    impactDb: voicing.impactDb + BALANCE_IMPACT_DB * b,
-    squash: voicing.squash * (1 + BALANCE_SQUASH_SCALE * b),
+    impactDb: DYNAMICS_TARGET.impactDb + BALANCE_IMPACT_DB * b,
+    squash: DYNAMICS_TARGET.squash * (1 + BALANCE_SQUASH_SCALE * b),
   }
 }
 
@@ -462,23 +429,23 @@ export function effectiveVoicing(voicing, balance = 0) {
  */
 
 /** How much crest the clipper may take at this Density, before its hard cap. */
-export function clipShaveFor(voicing, density) {
-  return Math.min(voicing.clipShaveDb * density, CLIP_MAX_DEPTH_DB)
+export function clipShaveFor(clipShaveDb, density) {
+  return Math.min((clipShaveDb ?? 0) * density, CLIP_MAX_DEPTH_DB)
 }
 
 /**
  * The peak-to-body the FET is asked to reach.
  *
- * Interpolated from what the audio ALREADY IS toward the voicing's target, so
+ * Interpolated from what the audio ALREADY IS toward the target, so
  * Density 0 really is "leave it alone" rather than "hit 8.5 dB regardless".
  */
-export function fetTargetImpactFor(voicing, density, afterClipImpactDb) {
-  return afterClipImpactDb - (afterClipImpactDb - voicing.impactDb) * density
+export function fetTargetImpactFor(impactDb, density, afterClipImpactDb) {
+  return afterClipImpactDb - (afterClipImpactDb - impactDb) * density
 }
 
-/** The opto's depth: a calibrated constant scaled by Density. See VOICINGS. */
-export function squashFor(voicing, density) {
-  return voicing.squash * density
+/** The opto's depth: a calibrated constant scaled by Density. */
+export function squashFor(squash, density) {
+  return squash * density
 }
 
 /**
@@ -500,20 +467,21 @@ export const CLIP_MAX_DEPTH_DB = 3
  * @param {number} sampleRate
  * @param {object} [options]
  * @param {number} [options.density=50] the macro, 0-100
- * @param {string} [options.voicing='audiobook'] key into VOICINGS
+ * @param {number} [options.balance=0] −1 lean FET … +1 lean opto
+ * @param {number} [options.clipShaveDb] dB of crest the clipper may shave
  * @param {object} [options.patch] fixed params (ballistics, character) to honour
  * @returns {{ params: object, report: object }}
  */
 export function solveDynamics(channelData, sampleRate, options = {}) {
   const density = clamp(options.density ?? 50, 0, 100) / 100
-  const calibrated = VOICINGS[options.voicing] ?? VOICINGS.audiobook
-  const voicing = effectiveVoicing(calibrated, options.balance)
+  const target = effectiveTarget(options.balance)
+  const clipShaveDb = options.clipShaveDb ?? DEFAULT_CLIP_SHAVE_DB
   const patch = { ...DYNAMICS_KERNEL_DEFAULTS, ...(options.patch ?? {}) }
 
   const input = measureDynamics(channelData, sampleRate)
 
   // ── 1. Clipper: bisect the threshold for a bounded crest shave ───────────
-  const wantShave = clipShaveFor(voicing, density)
+  const wantShave = clipShaveFor(clipShaveDb, density)
   let clipThresholdDb = null
   let clipDepthDb = 0
   let clipped = channelData
@@ -563,7 +531,7 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
 
   // ── 2. FET: aligned at ITS OWN input, then bisected on peak-to-body ──────
   const fetAlignDb = inputAlignDbFor(clipped, sampleRate)
-  const targetImpact = fetTargetImpactFor(voicing, density, afterClip.impactDb)
+  const targetImpact = fetTargetImpactFor(target.impactDb, density, afterClip.impactDb)
   /**
    * ⚠ BYPASS WHEN THERE IS NOTHING TO DO — DRIVE 0 IS A 24 dB ATTENUATOR, not
    * an idle compressor. See the note in `solveFromSweep`; the bisect has the
@@ -590,11 +558,11 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
   /**
    * ⚠ NO SEARCH. This used to scan squash for the minimum block-level spread,
    * which measured well on synthetic material and does nothing on real
-   * narration — see the header. Density scales the voicing's calibrated depth,
+   * narration — see the header. Density scales the calibrated depth,
    * so Density 0 really is "leave it alone" and the knob still means something
    * in between.
    */
-  const squash = squashFor(voicing, density)
+  const squash = squashFor(target.squash, density)
   const wetRun = renderWet(dry, sampleRate, { ...patch, squash, optoAlignDb })
   const wet = wetRun.out
 
@@ -608,7 +576,7 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
     fetAlignDb,
     squash,
     optoAlignDb,
-    mix: options.mix ?? voicing.mix,
+    mix: options.mix ?? DEFAULT_MIX,
     correlation: blend.correlation,
     densityDb: blend.densityDb,
     outputDb: blend.trimDb,
@@ -635,16 +603,16 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
         alignDb: optoAlignDb,
         peakDb: wetRun.metering.maxGainReductionDb,
         avgDb: wetRun.metering.avgGainReductionDb,
-        /** The depth this voicing is calibrated to, before Density scales it. */
+        /** The section's calibrated depth, before Balance and Density move it. */
         /**
          * ⚠ THE VOICING'S OWN DEPTH, NOT THE ONE BALANCE ASKED FOR. This field
          * exists so a reader can see how far Density has scaled the calibrated
          * anchor; quoting the balanced value would make the anchor look like it
          * moves, which is the one thing it must not appear to do.
          */
-        calibratedSquash: calibrated.squash,
+        calibratedSquash: DYNAMICS_TARGET.squash,
         /** What Balance did to it, so the pair is readable together. */
-        balancedSquash: voicing.squash,
+        balancedSquash: target.squash,
       },
       blend,
       /**
@@ -806,14 +774,13 @@ export const OPTO_GRID_DRIVES = 4
 export const OPTO_GRID_SQUASH = 6
 
 /**
- * The widest depth any voicing can ask for, Balance included — the squash axis
+ * The widest depth the section can ask for, Balance included — the squash axis
  * has to reach it or the grid clamps exactly where a leaned patch lives.
  *
- * ⚠ DERIVED, NOT TYPED. A new voicing or a wider Balance range must not
+ * ⚠ DERIVED, NOT TYPED. A retuned target or a wider Balance range must not
  * silently fall off the end of the grid.
  */
-export const MAX_SQUASH = Math.max(...Object.values(VOICINGS).map(v => v.squash))
-  * (1 + BALANCE_SQUASH_SCALE)
+export const MAX_SQUASH = DYNAMICS_TARGET.squash * (1 + BALANCE_SQUASH_SCALE)
 
 /**
  * Interpolate `ys` at `xq`, given `xs` ASCENDING. Clamps at both ends.
@@ -942,7 +909,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   const depthDesc = [...depth].reverse()
 
   // ── 2. FET, sampled at the MIDDLE of the macro's clip range ──────────────
-  const midShave = clipShaveFor(VOICINGS.audiobook, 0.5)
+  const midShave = clipShaveFor(DEFAULT_CLIP_SHAVE_DB, 0.5)
   const midThreshold = Math.max(
     crossingOf(thrDesc, crestDesc, input.crestDb - midShave),
     crossingOf(thrDesc, depthDesc.map(v => -v), -CLIP_MAX_DEPTH_DB),
@@ -989,7 +956,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
    * flattening all the way up the macro. Same energy, different crest,
    * different reduction.
    *
-   * SECOND: a curve in DENSITY, walked along the shipping voicing's trajectory.
+   * SECOND: a curve in DENSITY, walked along the shipping trajectory.
    * That was right while Density was the only axis — and Balance broke it the
    * day it arrived, because it moves drive and squash in OPPOSITE directions at
    * a fixed Density. Measured, the reported reduction was out by up to 2.86 dB:
@@ -1003,7 +970,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
    * exist and hid a reporting one that did.
    *
    * So: sample the two axes that actually determine it. The grid is bilinear in
-   * (drive, squash) and covers every voicing and every Balance position,
+   * (drive, squash) and covers every Balance position,
    * because the squash axis runs to the widest any of them can ask for.
    */
   const gridDrives = []
@@ -1115,8 +1082,8 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
  */
 export function solveFromSweep(sweep, options = {}) {
   const density = clamp(options.density ?? 50, 0, 100) / 100
-  const calibrated = VOICINGS[options.voicing] ?? VOICINGS.audiobook
-  const voicing = effectiveVoicing(calibrated, options.balance)
+  const target = effectiveTarget(options.balance)
+  const clipShaveDb = options.clipShaveDb ?? DEFAULT_CLIP_SHAVE_DB
   const { input, patch } = sweep
 
   const thrDesc = [...sweep.clip.thresholds].reverse()
@@ -1124,7 +1091,7 @@ export function solveFromSweep(sweep, options = {}) {
   const depthDesc = [...sweep.clip.depth].reverse()
 
   // ── 1. Clipper: ONE inversion against TWO constraints, as the bisect has it
-  const wantShave = clipShaveFor(voicing, density)
+  const wantShave = clipShaveFor(clipShaveDb, density)
   let clipThresholdDb = null
   let clipDepthDb = 0
   let clipCapped = false
@@ -1149,7 +1116,7 @@ export function solveFromSweep(sweep, options = {}) {
    * `fet.impactDrop` — inverting the absolute curve makes the FET absorb a
    * clipper difference the lookup above has already measured.
    */
-  const targetImpact = fetTargetImpactFor(voicing, density, afterClipImpactDb)
+  const targetImpact = fetTargetImpactFor(target.impactDb, density, afterClipImpactDb)
   const wantDrop = afterClipImpactDb - targetImpact
   /**
    * ⚠ NOTHING TO DO MEANS BYPASS, NOT DRIVE 0 — AND DRIVE 0 IS A 24 dB
@@ -1160,8 +1127,8 @@ export function solveFromSweep(sweep, options = {}) {
    * `crossingOf` returns the first sampled drive when the target is already
    * met, which is 0 — correct as a curve lookup and catastrophic as a setting.
    * It never came up while the targets were unreachable; the recalibration
-   * above made them reachable and exposed it immediately, on the voicing with
-   * the gentlest target against the file that needed least.
+   * above made them reachable and exposed it immediately, against the file that
+   * needed least.
    *
    * A null drive bypasses the stage (bit-exact, latency preserved), which is
    * the same contract the clipper's absent threshold has.
@@ -1195,7 +1162,7 @@ export function solveFromSweep(sweep, options = {}) {
    * input — that is the staged-alignment rule, and taking it from the raw file
    * gives 0.25 dB of reduction where the opto's own input gives 2.98.
    */
-  const squash = squashFor(voicing, density)
+  const squash = squashFor(target.squash, density)
   const optoAlignDb = lerpAt(sweep.fet.drives, sweep.fet.outAlignDb, fetDrive)
 
   const params = {
@@ -1205,7 +1172,7 @@ export function solveFromSweep(sweep, options = {}) {
     fetAlignDb: sweep.fet.alignDb,
     squash,
     optoAlignDb,
-    mix: options.mix ?? voicing.mix,
+    mix: options.mix ?? DEFAULT_MIX,
     correlation: sweep.blend.correlation,
     densityDb: sweep.blend.densityDb,
     outputDb: sweep.blend.trimDb,
@@ -1247,8 +1214,8 @@ export function solveFromSweep(sweep, options = {}) {
         alignDb: optoAlignDb,
         peakDb: at(sweep.opto.peakDb),
         avgDb: at(sweep.opto.avgDb),
-        calibratedSquash: calibrated.squash,
-        balancedSquash: voicing.squash,
+        calibratedSquash: DYNAMICS_TARGET.squash,
+        balancedSquash: target.squash,
       },
       blend: sweep.blend,
       crestRoseBy: wetCrestDb - input.crestDb,
