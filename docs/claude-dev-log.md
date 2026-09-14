@@ -1892,6 +1892,48 @@ figure.
   chosen over speed because a preview that disagrees with apply is the failure
   this whole tracker exists to avoid.
 
+### ⚗ WHAT `preInput` AND `postCell` ACTUALLY DIFFER BY — three axes, not one
+
+Auditioned by ear: `preCell` worst, the other two both usable but different in a
+way a single sample does not settle. Measured, they differ on three axes and
+they TRADE OFF rather than being more and less of one thing.
+
+| | `preInput` | `postCell` | `preCell` |
+|---|---|---|---|
+| H2 swing across the Input knob | **0.0 dB** | 36.4 | 79.6 |
+| H2 slope vs SOURCE level, knob fixed | **3.01 dB/dB** | 1.83 | 3.00 |
+| drive while the cell clamps | **never moves** | follows the reduction | follows it |
+
+- **`preInput` IS CONSISTENT ACROSS THE KNOB AND STEEP ACROSS THE PERFORMANCE.**
+  The shaper sees the source, so the colour is a property of how loud somebody
+  actually spoke: 3 dB of H2 per dB of source level, and nothing the Input knob
+  does changes it.
+
+- **`postCell` IS THE REVERSE ON BOTH.** The shaper sees the compressed signal,
+  which is a flattened version of the performance — so the colour is much more
+  even across a take (1.83 dB/dB against 3.01) and it MOVES when the Input knob
+  does (36.4 dB across the travel).
+
+- **AND ONLY `postCell` BACKS OFF WHILE THE COMPRESSOR WORKS.** Measured exactly
+  (no analysis window) on a −26 → −4 dBFS step at ratio 8: `preInput`'s drive
+  holds at −4.0 dBFS throughout, while `postCell`'s falls −12.7 → −15.9 dBFS as
+  the cell clamps — about **10 dB of H2 decaying away over the attack**, and
+  ~36 dB below `preInput` once settled. The colour marks the front of a sound
+  and then gets out of the way.
+
+⚠ **AN EARLIER WINDOWED MEASUREMENT PUT THAT DECAY AT 52 dB AND THAT NUMBER IS
+WRONG.** The H2 windows were 40 cycles — 20 ms at the 2 kHz probe — so a window
+labelled "0.5 ms after the step" actually averaged the entire settling, and the
+early rows were dominated by the pre-clamp transient. Tracking the shaper's
+drive level directly needs no window and has sample resolution. **A time-labelled
+row is only as fast as the window behind it.**
+
+**SO THE CHOICE IS WHICH REFERENCE'S DISTORTION DYNAMICS TO HAVE.** `preInput`
+reproduces FETish's: its measured H2 slope against source level is **3.00**,
+which is what a compensated Input and a source-fed shaper give. `postCell` is
+CLA-76's POSITION (rms 0.07 dB for that hypothesis against 3.94) — though not
+its curve, which is not memoryless and which no static shaper reproduces.
+
 ### The curve bench, wired to the panel
 
 `FET1176TuningPanel.vue` — two rockers (curve, position) plus a **Legacy kernel**
