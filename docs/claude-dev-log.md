@@ -1668,6 +1668,87 @@ demo mute is true digital silence. Nothing to re-bounce.
   it is extrapolation. The protocol now asks for null1 at the **highest** Input
   that still reads zero GR, so the two captures' level ranges overlap.
 
+### ⚗⚗ FETish null test — AND THE TWO REFERENCES ARE NOT THE SAME MACHINE
+
+Captures clean (96 kHz / 32-bit float / mono, exact durations). Five bounces:
+null1-4 plus **two** null5 Input positions, giving four Input positions in all.
+
+- **⚗ FETISH'S INPUT IS FULLY COMPENSATED — CONFIRMED ACROSS FOUR POSITIONS.**
+  Open gain (the quietest tone, below threshold everywhere) reads **−0.000 dB at
+  all four**, while the loudest tone in those same captures goes 0 → 8.55 →
+  15.07 dB of reduction. The knob travelled its useful range and the
+  uncompressed level never moved. Finding 1 holds: FETish's Input is a **drive
+  offset**, not an input gain.
+
+- **⚗ AND CLA-76'S IS A REAL GAIN: +13.20 dB** of open-level change between its
+  null1 and null3. That is the hardware's behaviour and ours. ⚠ **The two
+  references are opposite on the control our whole gain-staging model is built
+  around.**
+
+- **⚠ THE COMPENSATION TEST DID NOT NEED BOUNCE 5 AT ALL.** null3 is null1 with
+  only the Input moved — which is exactly what bounce 5 asks for — so the
+  question was answerable from bounces 1-4. The reader now treats every
+  Input-only bounce as a position and reads them together; null5 variants
+  (`null5a_`, `null5b_`) add positions rather than being the sole route.
+
+- **⚗⚗ THE STATIC SHAPER SITS ON OPPOSITE SIDES OF THE GAIN CELL IN THE TWO
+  REFERENCES, AND ONLY ONE MATCHES US.** Tested by predicting ΔH2 (dBc) between
+  two Input positions under both hypotheses — before the cell, ΔH2 = k·Δopen for
+  every tone; after it, ΔH2 = k·(Δopen − GR), falling away as the tone
+  compresses:
+
+  | | rms error, BEFORE | rms error, AFTER |
+  |---|---|---|
+  | CLA-76 | 3.94 dB | **0.07 dB** |
+  | FETish | **0.00 dB** | 26.09 dB |
+  | our kernel | 5.82 dB | **0.03 dB** |
+
+  **CLA-76 is our topology; FETish is not.** FETish's H2 is *bit-identical*
+  across all four Input positions — the shaper sees the compensated input, and
+  the cell scales fundamental and harmonic together afterwards, so the ratio
+  survives 15 dB of reduction untouched.
+
+  ⚠ **THE FIRST VERSION OF THIS TEST GOT CLA-76 RIGHT BY LUCK.** It asked only
+  whether H2 changed at all. On a reference whose Input is a real gain, a shaper
+  on EITHER side sees a different level and H2 moves either way — change alone
+  cannot separate the hypotheses. It has to be the quantitative comparison.
+
+- **⚠ AND FETISH'S CURVE IS THE WRONG SHAPE, NOT JUST THE WRONG DRIVE.** H2
+  moves **3.00 dB per dB of level** where CLA-76 moves **0.99** and a memoryless
+  quadratic term gives 1.00. Its odd orders move 4.0. The leading nonlinear
+  terms are 4th/5th order — an almost perfectly flat curve that only bends at
+  the top — and **no value of `fetDrive` will reproduce it** with our asymmetric
+  `tanh`.
+
+- **WHAT FETISH ADDS UNDER COMPRESSION IS A PURE ODD-ORDER RIPPLE, FLAT WITH
+  DEPTH.** H3 goes from the floor to **−52.6 dBc** and then does not move:
+  −54.0 / −52.5 / −52.6 / −52.7 at 1.6 / 6.1 / 10.6 / 15.1 dB of reduction,
+  with H2 unchanged throughout. THD sits at **0.24 % at every depth**. That is
+  the detector's 2f modulation, not a saturator — the discriminator built for
+  exactly this case earned its place on the first real capture that showed it.
+
+- **⚠ THE READER PRINTED "187,576 % MORE DISTORTION THAN LEVEL ACCOUNTS FOR".**
+  Arithmetically true, useless to read, and it buried the finding. FETish's
+  static law predicts 0.0004 % where 0.2417 % was measured, because the fit had
+  been run through readings at the **float noise floor** (1.6e-5 % at the
+  quietest tone). Points below 5e-4 % are now excluded, three real points are
+  required, and a prediction under 5 % of the measurement reports an absolute
+  split instead of a ratio.
+
+- **⚠ AND THE OPEN-GAIN GUARD CRIED WOLF ON A GOOD CAPTURE.** It asked the two
+  quietest tones to share a gain — but in null3 the SECOND tone legitimately
+  compresses (1.63 dB) while the quietest does not. It is a slope test now: the
+  bottom step must be markedly shallower than the steps above it, which is what
+  "below the knee" actually looks like.
+
+**WHERE THIS LEAVES THE FIT.** For `fetDrive` and the static curve, **CLA-76 is
+the reference** — right topology, right curve shape, and a clean square-law to
+fit. FETish cannot speak to that stage at all. FETish remains the better
+reference for **ballistics** (continuous knobs reading in µs and ms). That
+splits the primary reference by constant rather than by plugin, which is
+defensible because they are measuring different things — but it must be recorded
+as a split, not presented as two references agreeing.
+
 - **Still not built:** the static-curve and ballistics fitters. The recovery is proved against a
   kernel whose constants are known before it is pointed at one whose constants
   are not, and that ordering is the point. Also still open: `LA2A_LEGACY_PATCH`

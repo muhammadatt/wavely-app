@@ -296,9 +296,16 @@ simplest: **it is null1 again with the Input knob moved.** Nothing else changes.
 1. Bounce **null1** first and leave the session exactly as it is.
 2. **Move Input only.** Somewhere clearly different — 10 to 20 dB up the knob is
    ideal. Do not touch Output, ratio, attack, release, or anything else.
-3. Bounce it as `null5_fetish.wav`.
-4. **Write down both Input readouts.** The difference between them is what the
-   answer gets compared against.
+3. Bounce it as `null5_fetish.wav` — or **`null5a_fetish.wav`,
+   `null5b_fetish.wav`, …** if you do more than one position, which is strictly
+   better data. The reader uses every one of them.
+4. **Write down each Input readout.** The differences are what turn the answer
+   into dB per knob unit.
+
+⚠ **AND null3 IS ALREADY ONE OF THESE.** It is null1 with only the Input moved,
+which is exactly what bounce 5 asks for — so the reader answers the compensation
+question from bounces 1–4 alone and treats any null5 as extra positions. Bounce
+5 is a cleaner single-variable confirmation, not the only route.
 
 **You do NOT need zero gain reduction across the file.** An earlier draft asked
 for that and it was a bad instruction: on a compensated Input, moving the knob

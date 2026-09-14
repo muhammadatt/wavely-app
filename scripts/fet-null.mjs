@@ -83,6 +83,8 @@ const db = v => 20 * Math.log10(Math.max(Math.abs(v), 1e-30))
 
 /** Which stimulus each null bounce used. */
 const USES = { null1: 'thd.wav', null2: 'thd.wav', null3: 'thd.wav', null4: 'stairs.wav', null5: 'thd.wav' }
+/** Which stimulus a bounce name uses — `null5a`, `null5b`, … all use null5's. */
+const usesFor = which => USES[which] || USES[which.replace(/[a-z]$/, '')]
 
 /**
  * Skip the first part of each tone — the compressor is still settling, and on
@@ -95,7 +97,10 @@ const TONE_SKIP_TAIL_S = 0.2
 function discover() {
   if (!existsSync(capDir)) return []
   return readdirSync(capDir)
-    .filter(f => /^null[1-5]_.+\.wav$/i.test(f))
+    // ⚠ null5 TAKES A SUFFIX. Bounce 5 is "null1 with the Input moved", and
+    // more than one Input position is strictly better data — four positions
+    // pin the compensation where two only sample it. `null5a_`, `null5b_`, …
+    .filter(f => /^(null[1-4]|null5[a-z]?)_.+\.wav$/i.test(f))
     .sort()
 }
 
@@ -205,12 +210,36 @@ function reportToneCapture(r, sampleRate, inCircuit) {
  */
 function openGain(r) {
   const t = r.tones.filter(x => x.h && Number.isFinite(x.gainDb))
-  if (t.length < 2) return null
-  // ⚠ THE GUARD: if the two quietest tones do not share a gain, the quietest is
-  // already being compressed and is not an open reading. Six dB apart, so a
-  // clean pair agrees to well under 0.1 dB.
-  const marginDb = Math.abs(t[0].gainDb - t[1].gainDb)
-  return { gainDb: t[0].gainDb, reliable: marginDb < 0.15, marginDb }
+  if (t.length < 3) return null
+  /**
+   * ⚠ THE GUARD IS A SLOPE TEST, NOT AN EQUALITY TEST, AND THE EQUALITY VERSION
+   * WAS WRONG. It asked the two quietest tones to share a gain — but on FETish's
+   * null3 the SECOND tone legitimately carries 1.63 dB of reduction while the
+   * quietest carries none, and the guard cried "the quietest tone is itself
+   * compressing" on a perfectly good capture.
+   *
+   * Compression is monotonic in level, and above the knee it is a straight line
+   * (4:1 shows as a constant 4.5 dB of extra reduction per 6 dB step). So the
+   * question is whether the BOTTOM step is shallower than the steps above it.
+   * If it matches them, the quietest tone is already on the linear part of the
+   * curve and is not an open reading; if it is markedly shallower, the quietest
+   * tone sits in or below the knee.
+   *
+   * FETish null3: steps of 1.63 / 4.45 / 4.50 / 4.50 dB — the bottom step is
+   * a third of the others, so the quietest tone is open. CLA-76 null3: 0.01 /
+   * 0.02 / 3.14 / 5.06 — open by a wide margin.
+   */
+  const steps = t.slice(1).map((x, i) => t[i].gainDb - x.gainDb)
+  const upper = steps.slice(1).filter(v => v > 0.2)
+  if (!upper.length) return { gainDb: t[0].gainDb, reliable: true, marginDb: 0, steps }
+  const typical = upper.reduce((a, b) => a + b, 0) / upper.length
+  return {
+    gainDb: t[0].gainDb,
+    reliable: steps[0] < 0.8 * typical,
+    marginDb: steps[0],
+    typicalDb: typical,
+    steps,
+  }
 }
 
 /** Is the gain the same at every tone level? That is the linearity question. */
@@ -295,7 +324,19 @@ function staticThdLaw(r) {
    * the honest statement is that there is nothing to control against.
    */
   if (Math.max(...t.map(x => x.h.thdPct)) < 0.005) return { degenerate: true }
-  const X = t.map(x => x.h.fundamentalDbfs), Y = t.map(x => Math.log10(x.h.thdPct))
+  /**
+   * ⚠ AND THE LOW END OF THE SWEEP CAN BE FLOAT NOISE RATHER THAN DISTORTION,
+   * which a log-space fit weights as heavily as a real reading. FETish's null1
+   * runs 1.6e-5 % at the quietest tone to 6.8e-2 % at the loudest — the bottom
+   * two are the numerical floor of a 32-bit path, and fitting through them
+   * produced a slope of 3.02 dB per dB and predictions of 0.0001 %, against
+   * which null3's real 0.24 % came back as a residual of **272,901 %**.
+   * Points below this are not measurements of anything.
+   */
+  const FLOOR_PCT = 5e-4
+  const real = t.filter(x => x.h.thdPct >= FLOOR_PCT)
+  if (real.length < 3) return { tooFewPoints: true, usable: real.length, floorPct: FLOOR_PCT }
+  const X = real.map(x => x.h.fundamentalDbfs), Y = real.map(x => Math.log10(x.h.thdPct))
   const n = X.length
   const sx = X.reduce((a, b) => a + b, 0), sy = Y.reduce((a, b) => a + b, 0)
   const sxx = X.reduce((a, b) => a + b * b, 0)
@@ -303,8 +344,9 @@ function staticThdLaw(r) {
   const m = (n * sxy - sx * sy) / (n * sxx - sx * sx)
   const c = (sy - m * sx) / n
   // How well the line describes its own data — a curved law would show here.
-  const worst = Math.max(...X.map((x, i) => Math.abs(Math.pow(10, m * x + c) / t[i].h.thdPct - 1)))
-  return { m, c, worst, loDb: Math.min(...X), hiDb: Math.max(...X), predict: outDb => Math.pow(10, m * outDb + c) }
+  const worst = Math.max(...X.map((x, i) => Math.abs(Math.pow(10, m * x + c) / real[i].h.thdPct - 1)))
+  return { m, c, worst, nPoints: n, loDb: Math.min(...X), hiDb: Math.max(...X),
+    predict: outDb => Math.pow(10, m * outDb + c) }
 }
 
 function main() {
@@ -323,7 +365,7 @@ function main() {
 
   const byRef = new Map()
   for (const f of files) {
-    const [, which, ref] = f.match(/^(null[1-5])_(.+)\.wav$/i)
+    const [, which, ref] = f.match(/^(null[1-4]|null5[a-z]?)_(.+)\.wav$/i)
     if (!byRef.has(ref)) byRef.set(ref, {})
     byRef.get(ref)[which] = f
   }
@@ -340,7 +382,7 @@ function main() {
     let inCircuit = null
     if (set.null4) {
       console.log(`\n── null4  (${set.null4}) — is the plugin in circuit?`)
-      const { plan, stim } = rendered(USES.null4, stimRate)
+      const { plan, stim } = rendered(usesFor('null4'), stimRate)
       try {
         const { y } = readCapture(join(capDir, set.null4), stimRate)
         const pre = preflight(set.null4, y, plan, stim.env, stimRate)
@@ -375,9 +417,11 @@ function main() {
       console.log('\n── null4 missing — nothing to tell a bypass from a transparent setting.')
     }
 
-    for (const which of ['null1', 'null2', 'null3', 'null5']) {
+    const toneBounces = ['null1', 'null2', 'null3',
+      ...Object.keys(set).filter(k => k.startsWith('null5')).sort()]
+    for (const which of toneBounces) {
       if (!set[which]) continue
-      const { plan, stim } = rendered(USES[which], stimRate)
+      const { plan, stim } = rendered(usesFor(which), stimRate)
       console.log(`\n── ${which}  (${set[which]})`)
       try {
         const r = readToneCapture(set[which], plan, stim, stimRate)
@@ -480,6 +524,12 @@ function main() {
       console.log('    level effect.\n')
 
       let law = results.null1 ? staticThdLaw(results.null1) : null
+      if (law && law.tooFewPoints) {
+        console.log(`    ⚠ null1 has only ${law.usable} tone(s) with distortion above the float noise`)
+        console.log(`      floor (${law.floorPct} %). That is too few to fit a law through, and fitting`)
+        console.log('      one anyway predicts numbers that are noise. Read the absolute split below.')
+        law = null
+      }
       if (law && law.degenerate) {
         console.log('    ⚠ null1 shows NO static distortion at any level — there is no law to')
         console.log('      control against, so nothing below can separate a gain-cell term from a')
@@ -497,6 +547,7 @@ function main() {
         console.log(`    static law from null1: THD% rises ${(20 * law.m).toFixed(2)} dB per 20 dB of output level`)
         console.log(`    (fits its own five points to ${(law.worst * 100).toFixed(1)} %)\n`)
         console.log('      tone       out      GR   THD meas   predicted   residual')
+        console.log('                                              (static)   (>> = static explains ~none)')
         let extrapolated = 0
         for (let i = 0; i < rows3.length; i++) {
           const t = rows3[i], c = curve[i]
@@ -504,9 +555,14 @@ function main() {
           const res = (t.h.thdPct / pred - 1) * 100
           const beyond = t.h.fundamentalDbfs > law.hiDb + 0.5 || t.h.fundamentalDbfs < law.loDb - 0.5
           if (beyond) extrapolated++
+          // ⚠ A RATIO AGAINST A NEGLIGIBLE PREDICTION IS NOISE WITH A % SIGN.
+          // Printed as ">>" instead: the split is stated absolutely below.
+          const resCol = pred < t.h.thdPct * 0.05
+            ? '     >>'
+            : (res >= 0 ? '+' : '') + res.toFixed(1).padStart(6) + '%'
           console.log(`      ${c.tag.padEnd(9)}${t.h.fundamentalDbfs.toFixed(1).padStart(7)}` +
             `${c.grDb.toFixed(2).padStart(8)}  ${t.h.thdPct.toFixed(4).padStart(9)}  ` +
-            `${pred.toFixed(4).padStart(10)}  ${(res >= 0 ? '+' : '') + res.toFixed(1).padStart(6)}%` +
+            `${pred.toFixed(4).padStart(10)}  ${resCol}` +
             `${beyond ? '  (extrapolated)' : ''}`)
         }
         if (extrapolated) {
@@ -526,7 +582,23 @@ function main() {
           const worstRes = Math.max(...compressed.map(x =>
             Math.abs(x.t.h.thdPct / law.predict(x.t.h.fundamentalDbfs) - 1) * 100))
           const deepest = compressed[compressed.length - 1]
-          if (worstRes < 15) {
+          const deepPred = law.predict(deepest.t.h.fundamentalDbfs)
+          const deepMeas = deepest.t.h.thdPct
+          /**
+           * ⚠ A RATIO AGAINST A NEGLIGIBLE PREDICTION IS NOT A MEASUREMENT.
+           * FETish's static law predicts 0.0004 % where 0.2417 % was measured,
+           * and the reader printed "187,576 % more distortion than output level
+           * accounts for" — arithmetically true, useless to read, and it buries
+           * the actual finding, which is that the static mechanism contributes
+           * essentially nothing and the compression-correlated one is all of it.
+           */
+          if (deepPred < deepMeas * 0.05) {
+            console.log(`\n  → THE STATIC MECHANISM ACCOUNTS FOR ESSENTIALLY NONE OF IT.`)
+            console.log(`    At ${deepest.c.grDb.toFixed(1)} dB of reduction: measured ${deepMeas.toFixed(4)} %, of which the`)
+            console.log(`    static law explains ${deepPred.toFixed(4)} %. Everything else is generated by`)
+            console.log('    the compression itself. ⚠ Check the harmonic balance below before')
+            console.log('    calling it a gain-cell saturator — a detector ripple looks like this too.')
+          } else if (worstRes < 15) {
             console.log(`\n  → NO GAIN-CELL DISTORTION. Output level alone explains every tone to`)
             console.log(`    within ${worstRes.toFixed(1)} %, up to ${deepest.c.grDb.toFixed(1)} dB of reduction.`)
             console.log('    The nonlinearity is STATIC and sits where level reaches it — which is')
@@ -539,6 +611,99 @@ function main() {
             console.log(`\n  → ⚠ A GAIN-CELL TERM IS PRESENT: ${worstRes.toFixed(0)} % more distortion than output`)
             console.log(`    level alone accounts for, at ${deepest.c.grDb.toFixed(1)} dB of reduction. That is on TOP of`)
             console.log('    the static law, and the two have to be separated before either is fitted.')
+          }
+        }
+      }
+
+      /**
+       * ⚠ WHICH SIDE OF THE GAIN CELL THE STATIC SHAPER SITS ON — visible only
+       * because null1 and null3 differ by the Input knob alone.
+       *
+       * H2 is the static shaper's signature (the compression adds odd orders,
+       * see below). If H2 in dBc is UNCHANGED between the two captures, the
+       * shaper saw the same level in both, so it is fed by the INPUT and sits
+       * BEFORE the cell — the cell then scales fundamental and harmonic
+       * together, preserving the ratio. If H2 in dBc instead tracks the OUTPUT
+       * level, the shaper is fed post-compression and sits AFTER the cell.
+       *
+       * Measured, the two references answer this oppositely, and our own model
+       * can only match one of them.
+       */
+      if (results.null1) {
+        const r1 = results.null1.tones.filter(t => t.h)
+        const pairs = rows3.map((t, i) => [r1[i], t, curve[i]])
+          .filter(([a, b]) => a && b && a.usable[0] && b.usable[0])
+        const openShift = openGain(results.null1) && openGain(results.null3)
+          ? openGain(results.null3).gainDb - openGain(results.null1).gainDb : null
+
+        // Slope of H2 (dBc) against level, from the capture where nothing
+        // compresses. A quadratic term gives 1.0; anything else is the
+        // reference telling us its curve is not the shape we model.
+        let k = null
+        if (r1.length >= 3) {
+          const X = r1.map(t => t.h.fundamentalDbfs), Y = r1.map(t => t.h.dBc[0])
+          const n = X.length, sx = X.reduce((a, b) => a + b, 0), sy = Y.reduce((a, b) => a + b, 0)
+          const sxx = X.reduce((a, b) => a + b * b, 0), sxy = X.reduce((a, b, i) => a + b * Y[i], 0)
+          k = (n * sxy - sx * sy) / (n * sxx - sx * sx)
+        }
+
+        if (pairs.length >= 3 && k !== null && openShift !== null) {
+          /**
+           * ⚠ WHICH SIDE OF THE GAIN CELL THE STATIC SHAPER SITS ON.
+           *
+           * The first version of this test just asked whether H2 changed at all
+           * and called any change "after the cell". That got CLA-76 right BY
+           * LUCK: its Input is a real gain, so a shaper on EITHER side would see
+           * a different level and H2 would move either way. Change alone cannot
+           * separate them.
+           *
+           * Both hypotheses make a quantitative prediction instead, using H2's
+           * measured slope `k` against level:
+           *   BEFORE the cell — the shaper sees the input, so ΔH2 = k·Δopen
+           *     for every tone, the same number regardless of reduction.
+           *   AFTER the cell  — it sees the output, so ΔH2 = k·(Δopen − GR),
+           *     falling away as the tone compresses harder.
+           * The one with the smaller error wins, and the margin says how firmly.
+           */
+          let errBefore = 0, errAfter = 0
+          const rowsOut = []
+          for (const [a, b, c] of pairs) {
+            const measured = b.h.dBc[0] - a.h.dBc[0]
+            const predBefore = k * openShift
+            const predAfter = k * (openShift - c.grDb)
+            errBefore += (measured - predBefore) ** 2
+            errAfter += (measured - predAfter) ** 2
+            rowsOut.push([c.tag, c.grDb, measured, predBefore, predAfter])
+          }
+          errBefore = Math.sqrt(errBefore / pairs.length)
+          errAfter = Math.sqrt(errAfter / pairs.length)
+
+          console.log('\n  WHERE THE STATIC SHAPER SITS, relative to the gain cell.')
+          console.log(`    H2 moves ${k.toFixed(2)} dB per dB of level (1.00 would be a plain quadratic term),`)
+          console.log(`    and the Input knob moved the open level by ${openShift.toFixed(2)} dB between the two captures.\n`)
+          console.log('      tone        GR    ΔH2 meas   if BEFORE   if AFTER')
+          for (const [tag, gr, m, pb, pa] of rowsOut) {
+            console.log(`      ${tag.padEnd(10)}${gr.toFixed(2).padStart(6)}  ${m.toFixed(2).padStart(9)}  ` +
+              `${pb.toFixed(2).padStart(10)}  ${pa.toFixed(2).padStart(9)}`)
+          }
+          console.log(`\n    rms error — BEFORE the cell ${errBefore.toFixed(2)} dB, AFTER the cell ${errAfter.toFixed(2)} dB`)
+          if (errBefore < errAfter * 0.5) {
+            console.log('  → BEFORE THE CELL. The shaper is fed by the input; the cell then scales')
+            console.log('    fundamental and harmonic together and the ratio survives compression.')
+            console.log('    ⚠ OURS SITS AFTER THE CELL. This reference is not our topology, and a')
+            console.log('    `fetDrive` fitted to it would be fitted through the wrong stage.')
+          } else if (errAfter < errBefore * 0.5) {
+            console.log('  → AFTER THE CELL, which is where ours sits. Topology matches, and the')
+            console.log('    drive constant can be fitted directly.')
+          } else {
+            console.log('  ⚠ NEITHER HYPOTHESIS WINS CLEANLY. Either both stages are present, or')
+            console.log('    this capture does not separate them — do not fit `fetDrive` from it.')
+          }
+          if (Math.abs(k - 1) > 0.5) {
+            console.log(`\n  ⚠ AND H2's SLOPE IS ${k.toFixed(2)}, NOT ~1. A memoryless quadratic term gives 1.0`)
+            console.log('    and our asymmetric tanh is close to it. This curve bends much later and')
+            console.log('    harder — the SHAPE differs, not just the drive, and no value of')
+            console.log('    `fetDrive` will reproduce it.')
           }
         }
       }
@@ -556,30 +721,74 @@ function main() {
       }
     }
 
-    if (results.null1 && results.null5) {
-      const a = openGain(results.null1), b = openGain(results.null5)
-      const d = b.gainDb - a.gainDb
-      console.log(`\n  ⚠ THE COMPENSATION TEST — the same tone at two Input positions.`)
+    /**
+     * ⚠ null3 IS A SECOND INPUT POSITION TOO, so the compensation test can be
+     * read without null5 at all.
+     *
+     * null3 is null1 with ONLY the Input knob moved — that is what the protocol
+     * asks for — which is exactly what bounce 5 is. Reading the open gain
+     * (quietest tone, below threshold in both) answers it from captures already
+     * taken. FETish's null1 and null3 both read −0.000 dB there while null3
+     * carries 15 dB of reduction on its loudest tone: the knob moved a long way
+     * and the uncompressed level did not move at all.
+     *
+     * null5 is still worth bouncing — it is the single-variable version, with a
+     * knob difference you have written down — but it is a confirmation now
+     * rather than the only route to the answer.
+     */
+    /**
+     * ⚠ EVERY BOUNCE THAT MOVED ONLY THE INPUT KNOB IS AN INPUT POSITION, and
+     * that is more than bounce 5. null3 is null1 with the Input raised — that
+     * is precisely what bounce 5 asks for — so the compensation question can be
+     * answered from bounces 1-4 alone, and any null5 variants simply add
+     * positions. null2 is excluded: it moved OUTPUT, not Input.
+     *
+     * Four positions pin this where two only sample it. On FETish the open gain
+     * read −0.000 dB at all four while the loudest tone went from 0 to 15 dB of
+     * reduction — the knob travelled its useful range and the uncompressed level
+     * never moved.
+     */
+    const inputPositions = ['null1',
+      ...Object.keys(results).filter(k => k.startsWith('null5')).sort(),
+      'null3']
+      .filter(k => results[k])
+      .map(k => ({ label: k, open: openGain(results[k]), deepest: grWithinCapture(results[k]) }))
+      .filter(x => x.open)
+
+    if (inputPositions.length >= 2) {
+      const a = inputPositions[0].open
+      const d = Math.max(...inputPositions.map(x => x.open.gainDb)) -
+                Math.min(...inputPositions.map(x => x.open.gainDb))
+      console.log(`\n  ⚠ THE COMPENSATION TEST — the open tone across ${inputPositions.length} Input positions.`)
       console.log('    Read at the QUIETEST tone, which is below threshold at any Input either')
-      console.log('    reference can reach, so what the rest of the file does is irrelevant.')
-      console.log(`    null1 open gain ${a.gainDb.toFixed(2)} dB, null5 open gain ${b.gainDb.toFixed(2)} dB`)
-      if (!a.reliable || !b.reliable) {
-        console.log(`\n  ⚠ THE QUIETEST TONE IS ITSELF COMPRESSING in ${!a.reliable ? 'null1' : 'null5'} ` +
-          `(its two quietest tones differ by ${(!a.reliable ? a.marginDb : b.marginDb).toFixed(2)} dB,`)
-        console.log('    and below threshold they should agree). The Input is too high to read an')
-        console.log('    open gain — back it off and re-bounce that one. Nothing below is valid.')
+      console.log('    reference can reach, so what the rest of the file does is irrelevant.\n')
+      console.log('      bounce     open gain    deepest GR in that capture')
+      for (const x of inputPositions) {
+        const deep = x.deepest ? Math.max(...x.deepest.map(c => c.grDb)) : NaN
+        console.log(`      ${x.label.padEnd(10)}${x.open.gainDb.toFixed(3).padStart(9)} dB` +
+          `${Number.isFinite(deep) ? deep.toFixed(2).padStart(13) + ' dB' : ''}` +
+          `${x.open.reliable ? '' : '   ⚠ open tone compressing'}`)
       }
-      console.log(`\n    output level moved ${(d >= 0 ? '+' : '') + d.toFixed(2)} dB between them`)
+      const unreliable = inputPositions.filter(x => !x.open.reliable)
+      if (unreliable.length) {
+        for (const x of unreliable) {
+          console.log(`\n  ⚠ THE QUIETEST TONE IS ITSELF COMPRESSING in ${x.label}:`)
+          console.log(`    its bottom step is ${x.open.marginDb.toFixed(2)} dB against ${x.open.typicalDb.toFixed(2)} dB higher up, so it`)
+          console.log('    is already on the linear part of the curve rather than below the knee.')
+          console.log('    Back the Input off and re-bounce that one; its row above is not valid.')
+        }
+      }
+      console.log(`\n    open level spread across those positions: ${d.toFixed(2)} dB`)
       if (Math.abs(d) < 0.5) {
         console.log('  → INPUT IS COMPENSATED. It is a DRIVE OFFSET, not an input gain, exactly as')
         console.log('    the manual says. This reference cannot speak to our Input\'s audio path —')
         console.log('    only to the detector side. ⚠ And it means the two references will disagree')
         console.log('    on stairs.wav output level BY CONSTRUCTION. That is not a bad capture.')
       } else {
-        console.log('  → ⚠ INPUT IS A REAL GAIN — the manual is wrong, or the compensation is')
-        console.log('    partial. Finding 1 in the protocol does not hold, and this reference')
-        console.log(`    becomes a full reference for the Input law. ${d.toFixed(2)} dB for the knob`)
-        console.log('    step you used; log both positions, that ratio is data now.')
+        console.log('  → ⚠ INPUT IS A REAL GAIN — it feeds the audio path as well as the')
+        console.log('    detector, which is the hardware\'s behaviour and ours. This reference is')
+        console.log(`    a full reference for the Input law: ${d.toFixed(2)} dB across the positions you`)
+        console.log('    used, and the knob readouts you logged turn that into dB per knob unit.')
       }
     }
     console.log()

@@ -81,7 +81,9 @@ test('null reader: a compensated, saturator-free reference', { skip: !haveStimul
   assert.doesNotMatch(s, /\d{5,} ?%/, 'a runaway residual escaped the degenerate guard')
 
   assert.match(s, /INPUT IS COMPENSATED/)
-  assert.match(s, /output level moved \+?-?0\.00 dB/)
+  assert.match(s, /open level spread across those positions: 0\.00 dB/)
+  // Every bounce that moved only the Input knob is a position, null3 included.
+  assert.match(s, /across \d+ Input positions/)
 })
 
 test('null reader: a true-input-gain reference with a saturator', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
@@ -105,6 +107,26 @@ test('gain reduction is measured within one capture, not across two', { skip: !h
   assert.ok(rows.length >= 5, `found ${rows.length} residual rows, expected 5`)
   const deepest = Math.max(...rows.map(m => Number(m[1])))
   assert.ok(deepest > 8 && deepest < 14, `deepest reduction read as ${deepest} dB, expected ~11`)
+})
+
+test('the shaper-position test finds our own topology', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+  // ⚠ Our saturator sits AFTER the gain cell, so the test must say so on our
+  // own kernel. The first version of it just asked whether H2 changed at all,
+  // which cannot separate the two hypotheses on a reference whose Input is a
+  // real gain — a shaper on either side would see a different level.
+  const s = section(runSelftest(), 'synthdirty')
+  assert.match(s, /AFTER THE CELL, which is where ours sits/)
+  const m = s.match(/rms error — BEFORE the cell (\d+\.\d+) dB, AFTER the cell (\d+\.\d+) dB/)
+  assert.ok(m, 'no rms comparison in the topology verdict')
+  assert.ok(Number(m[2]) < Number(m[1]) / 10, `after-cell error ${m[2]} not decisively below before-cell ${m[1]}`)
+})
+
+test('the open-gain guard tolerates a compressing second tone', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+  // ⚠ The equality version of this guard cried "the quietest tone is itself
+  // compressing" whenever the SECOND tone compressed — which is normal and
+  // expected in null3. It is a slope test now.
+  const out = runSelftest()
+  assert.doesNotMatch(out, /THE QUIETEST TONE IS ITSELF COMPRESSING/)
 })
 
 test('a static law extrapolated past its data says so', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
