@@ -286,14 +286,43 @@ Partial runs are fine: anything missing is named and skipped.
 | 2 | As 1, but **Output raised 10 dB from that position** (CLA-76 −18 → −8, FETish 0 → +10) | Is Output a clean multiply, or does it drive a stage? |
 | 3 | Input up for **~10 dB of GR**, Output back at its default | Does distortion rise with **gain reduction**? That is the axis that matters. |
 | 4 | `stairs.wav`, ratio 4, mid Input | Sanity: is the plugin actually in circuit? |
-| 5 | **FETish only.** `thd.wav` at two Input positions, ratio 4, level low enough for **zero GR** at both | ⚠ **Does the internal compensation exist?** |
+| 5 | **FETish only.** `thd.wav` again — **identical to null1 except the Input knob is somewhere else** | ⚠ **Does the internal compensation exist?** |
 
-**Bounce 5 is the most valuable single bounce in this protocol.** If the output
-level is the *same* at both Input positions, Input is drive-only and Finding 1
-holds — FETish tells us nothing about our Input's audio path. If the level
-*rises* with the knob, the manual is wrong, the compensation is not there, and
-FETish becomes a full reference for the Input law after all. Either answer
-reshapes the rest of the matrix, and it costs one bounce.
+### Bounce 5, step by step
+
+It is the most valuable single bounce in the protocol and it is also the
+simplest: **it is null1 again with the Input knob moved.** Nothing else changes.
+
+1. Bounce **null1** first and leave the session exactly as it is.
+2. **Move Input only.** Somewhere clearly different — 10 to 20 dB up the knob is
+   ideal. Do not touch Output, ratio, attack, release, or anything else.
+3. Bounce it as `null5_fetish.wav`.
+4. **Write down both Input readouts.** The difference between them is what the
+   answer gets compared against.
+
+**You do NOT need zero gain reduction across the file.** An earlier draft asked
+for that and it was a bad instruction: on a compensated Input, moving the knob
+far enough to prove anything necessarily starts compressing the loud tones, so
+the two requirements fought each other. The reader now reads the **quietest tone
+only** — −30 dBFS into a −18 dBFS threshold, below the knee at any Input either
+plugin can reach — so what the rest of the file does is irrelevant. Let the loud
+tones compress.
+
+The one way it breaks is the Input being so high that even the −30 dBFS tone
+compresses. The reader checks for that (the two quietest tones must agree, since
+below threshold they should) and tells you to back off and re-bounce.
+
+**What the answer means:**
+
+- **Level unchanged** → Input is a **drive offset**, not an input gain, exactly
+  as the manual says. Finding 1 holds: FETish speaks only to the detector side,
+  and the two references will disagree on `stairs.wav` output level by
+  construction.
+- **Level rose with the knob** → the manual is wrong or the compensation is
+  partial. Finding 1 falls, and FETish becomes a full reference for the Input
+  law. The dB-per-knob-step ratio is then data, which is why step 4 matters.
+
+Either answer reshapes the matrix, for one bounce.
 
 ⚠ **BOUNCE 1 WANTS THE HIGHEST ZERO-GR INPUT, NOT THE LOWEST, and the reason is
 what bounce 3 is compared against.** null1 measures the static distortion as a

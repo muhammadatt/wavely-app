@@ -184,6 +184,35 @@ function reportToneCapture(r, sampleRate, inCircuit) {
   console.log('           setting; suspicious only if EVERY tone of EVERY capture reads it.')
 }
 
+/**
+ * The gain a capture applies where NOTHING is compressing — its quietest tone.
+ *
+ * ⚠ THIS REPLACES AN AVERAGE OVER ALL FIVE TONES, AND THE AVERAGE IS WHAT MADE
+ * BOUNCE 5 AWKWARD TO PERFORM. Comparing mean gains requires every tone in both
+ * captures to be uncompressed, so the protocol had to ask for "zero GR
+ * throughout at two Input positions" — and on a compensated Input, raising the
+ * knob far enough to prove anything starts compressing the loud tones, so the
+ * two requirements fight each other.
+ *
+ * The quietest tone (−30 dBFS into a −18 dBFS threshold) is below threshold at
+ * any Input position either reference can reach. Comparing THAT between two
+ * captures asks the question directly — has the audio path's gain moved? — and
+ * imposes no constraint on what the rest of the file does. Bounce 5 becomes
+ * "null1 again with Input somewhere else", full stop.
+ *
+ * @returns {{ gainDb, reliable, marginDb }} `reliable` is false when the
+ *   quietest tone is ITSELF compressing, which is the one way this breaks.
+ */
+function openGain(r) {
+  const t = r.tones.filter(x => x.h && Number.isFinite(x.gainDb))
+  if (t.length < 2) return null
+  // ⚠ THE GUARD: if the two quietest tones do not share a gain, the quietest is
+  // already being compressed and is not an open reading. Six dB apart, so a
+  // clean pair agrees to well under 0.1 dB.
+  const marginDb = Math.abs(t[0].gainDb - t[1].gainDb)
+  return { gainDb: t[0].gainDb, reliable: marginDb < 0.15, marginDb }
+}
+
 /** Is the gain the same at every tone level? That is the linearity question. */
 function gainSpread(r) {
   const g = r.tones.filter(t => t.h && Number.isFinite(t.gainDb)).map(t => t.gainDb)
@@ -528,10 +557,19 @@ function main() {
     }
 
     if (results.null1 && results.null5) {
-      const a = gainSpread(results.null1), b = gainSpread(results.null5)
-      const d = b.mean - a.mean
-      console.log(`\n  ⚠ THE COMPENSATION TEST — two Input positions, zero GR at both:`)
-      console.log(`    output level moved ${(d >= 0 ? '+' : '') + d.toFixed(2)} dB between them`)
+      const a = openGain(results.null1), b = openGain(results.null5)
+      const d = b.gainDb - a.gainDb
+      console.log(`\n  ⚠ THE COMPENSATION TEST — the same tone at two Input positions.`)
+      console.log('    Read at the QUIETEST tone, which is below threshold at any Input either')
+      console.log('    reference can reach, so what the rest of the file does is irrelevant.')
+      console.log(`    null1 open gain ${a.gainDb.toFixed(2)} dB, null5 open gain ${b.gainDb.toFixed(2)} dB`)
+      if (!a.reliable || !b.reliable) {
+        console.log(`\n  ⚠ THE QUIETEST TONE IS ITSELF COMPRESSING in ${!a.reliable ? 'null1' : 'null5'} ` +
+          `(its two quietest tones differ by ${(!a.reliable ? a.marginDb : b.marginDb).toFixed(2)} dB,`)
+        console.log('    and below threshold they should agree). The Input is too high to read an')
+        console.log('    open gain — back it off and re-bounce that one. Nothing below is valid.')
+      }
+      console.log(`\n    output level moved ${(d >= 0 ? '+' : '') + d.toFixed(2)} dB between them`)
       if (Math.abs(d) < 0.5) {
         console.log('  → INPUT IS COMPENSATED. It is a DRIVE OFFSET, not an input gain, exactly as')
         console.log('    the manual says. This reference cannot speak to our Input\'s audio path —')
