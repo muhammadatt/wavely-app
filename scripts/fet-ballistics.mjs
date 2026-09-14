@@ -144,7 +144,8 @@
  * Input knob is doing something our model does not have.
  */
 
-import { mkdirSync, existsSync } from 'node:fs'
+import { mkdirSync, existsSync, readdirSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -152,6 +153,7 @@ import { writeFloatWav } from './lib/wav.js'
 import { scheduleClear, assertPlanClear } from './lib/demoMute.js'
 import { snapToZeroCrossing, buildProbe } from './lib/probeStimulus.js'
 import { traceGain, fillShortGaps, blindWindowUs, rippleDb } from './lib/gainTrace.js'
+import { readCapture, alignByEnvelope, refineLagAtEdge, preflight } from './lib/probeCapture.js'
 import {
   FET1176Kernel, attackSecondsForDial, releaseSecondsForDial,
 } from '../src/audio/fet1176Processor.js'
@@ -333,7 +335,7 @@ export function runKernel(x, sampleRate, params) {
   return { y: o, kernel: k }
 }
 
-// ── Self-test ───────────────────────────────────────────────────────────────
+// ── Analysis ────────────────────────────────────────────────────────────────
 
 const db = v => 20 * Math.log10(Math.max(Math.abs(v), 1e-30))
 
@@ -367,6 +369,61 @@ function timeToFraction(series, sampleRate, t0Sample, a, b, frac) {
     if (rising ? v >= target : v <= target) return (i - t0Sample) / sampleRate
   }
   return null
+}
+
+/**
+ * Everything one burst event says about the ballistics.
+ *
+ * ⚠ THE OPEN REFERENCE COMES FROM THE HEAD OF THE FILE, before any event, which
+ * is the only place the cell has no history at all. Taking it from the end of a
+ * recovery reads short at the slow dials — at release 1 the tail runs 4.4 s, so
+ * 7 s after the step it still holds 20 % of its share.
+ */
+function analyseBurst(y, plan, stim, sampleRate, lag, ev) {
+  const g = fillShortGaps(traceGain(y, stim.env, stim.x, { lag, floor: 0.1 }),
+    Math.ceil(sampleRate / PROBE_HZ))
+  const upS = Math.round(ev.up * sampleRate)
+  const downS = Math.round(ev.down * sampleRate)
+  const series = peakSeries(g, stim.x, stim.env, 0, downS + 8 * sampleRate)
+    .map(([i, v]) => [i, db(v)])
+
+  const openRows = series.filter(([i]) => i > 0.3 * sampleRate && i < 0.8 * sampleRate)
+  const restRows = series.filter(([i]) => i < upS).slice(-4)
+  /**
+   * ⚠ THE HELD WINDOW MUST FIT INSIDE THE BURST, and a fixed 0.1 s one does not.
+   * The shortest hold in this plan is 50 ms, so a 100 ms window reaching back
+   * from its end spans the REST BEFORE THE BURST and averages the open gain into
+   * the held level. Measured on our own kernel, that put the 50 ms burst's
+   * release t63 at 606 ms against 326-389 for the longer holds — an outlier
+   * pointing the wrong way, which made the tail test report NO TAIL on a kernel
+   * whose tail is 22 % of the reduction on a network 4x slower.
+   */
+  const heldWindow = Math.min(0.1, (ev.down - ev.up) * 0.4)
+  const heldRows = series.filter(([i]) => i > downS - heldWindow * sampleRate && i < downS)
+  if (!openRows.length || !restRows.length || !heldRows.length) return null
+
+  const mean = rows => rows.reduce((a, [, v]) => a + v, 0) / rows.length
+  const open = mean(openRows)
+  const rest = mean(restRows)
+  const held = mean(heldRows)
+
+  const attackT63 = timeToFraction(series, sampleRate, upS, rest, held, 0.63)
+  const first = series.find(([i]) => i >= upS)
+  const releaseT63 = timeToFraction(series, sampleRate, downS, held, open, 0.63)
+
+  return {
+    tag: ev.tag,
+    holdS: ev.T,
+    grDb: rest - held,
+    attackT63,
+    overshootDb: first ? first[1] - held : NaN,
+    releaseT63,
+  }
+}
+
+/** Every burst in one capture. */
+function analyseCapture(y, plan, stim, sampleRate, lag) {
+  return plan.events.map(ev => analyseBurst(y, plan, stim, sampleRate, lag, ev)).filter(Boolean)
 }
 
 function selftest(sampleRate) {
@@ -474,6 +531,213 @@ function selftest(sampleRate) {
   }
 }
 
+// ── Fitting captured references ─────────────────────────────────────────────
+
+/**
+ * Pull the declared knobs out of a capture's filename — `..._a3_r4.wav` for a
+ * dial, `..._a800us_r235ms.wav` for FETish's continuous controls.
+ */
+function knobsFromName(file) {
+  const a = file.match(/_a(\d+(?:\.\d+)?)(us|ms)?/i)
+  const r = file.match(/_r(\d+(?:\.\d+)?)(us|ms)?/i)
+  const val = m => m && ({ n: Number(m[1]), unit: (m[2] || '').toLowerCase() })
+  return { attack: val(a), release: val(r) }
+}
+
+const showKnob = k => (k ? k.n + (k.unit || ' (dial)') : '?')
+
+/**
+ * Our own kernel measured the IDENTICAL way, at every dial.
+ *
+ * ⚠ THIS IS THE WHOLE FITTING METHOD AND IT IS NOT A CONVERSION. Measured t63
+ * runs about 2.9x the attack constant that produced it — the detector is a bare
+ * rectifier, so its target is over threshold only near the waveform peaks and
+ * the gain attacks in bursts and releases between them. The factor moves with
+ * Input, level and knee, so it cannot be divided out. Running our kernel through
+ * the same analysis puts the same bias on both sides, where it cancels.
+ */
+const dialTableCache = new Map()
+
+function ourDialTable(plan, stim, sampleRate, params, sweep) {
+  /**
+   * ⚠ MEMOISED, BECAUSE THIS IS THE ENTIRE COST OF A FIT RUN. Each table is
+   * seven renders of the 83 s stimulus, oversampled — and it depends only on
+   * the params and which dial is being swept, not on the capture being fitted.
+   * Rebuilding it per capture took the self-test to 88 s.
+   */
+  const key = JSON.stringify({ params, sweep, sampleRate })
+  if (dialTableCache.has(key)) return dialTableCache.get(key)
+  const rows = []
+  for (let dial = 1; dial <= 7; dial++) {
+    const p = sweep === 'attack' ? { ...params, attack: dial } : { ...params, release: dial }
+    const { y } = runKernel(stim.x, sampleRate, { ...p, oversample: true })
+    const k = new FET1176Kernel(sampleRate)
+    k.setParams({ ...p, oversample: true })
+    const bursts = analyseCapture(y, plan, stim, sampleRate, k.latencySamples)
+    rows.push({ dial, bursts })
+  }
+  dialTableCache.set(key, rows)
+  return rows
+}
+
+/** The dial whose measurement is closest, on the statistic given. */
+function bestDial(table, target, pick) {
+  let best = null
+  for (const row of table) {
+    const v = pick(row.bursts)
+    if (!Number.isFinite(v)) continue
+    const err = Math.abs(v - target)
+    if (!best || err < best.err) best = { dial: row.dial, value: v, err }
+  }
+  return best
+}
+
+/**
+ * Synthetic bursts captures from our own kernel, at dials we choose, with an
+ * odd lag injected — so the fitter has to find both.
+ *
+ * ⚠ THE LAG IS THE HALF OF THIS THAT IS EASY TO GET WRONG SILENTLY. The kernel's
+ * own `latencySamples` is trimmed off first and something arbitrary put in its
+ * place, so a fitter that quietly assumed a known latency would fail here and
+ * pass on a capture that happened to have none.
+ */
+function writeFitSelftest(dir, sampleRate) {
+  mkdirSync(dir, { recursive: true })
+  const plan = burstPlan()
+  const stim = buildProbe(plan, sampleRate)
+  const cases = [{ attack: 2, release: 4, lag: 131 }, { attack: 5, release: 6, lag: -77 }]
+  for (const c of cases) {
+    const { y } = runKernel(stim.x, sampleRate,
+      { inputDrive: 55, ratio: '4', attack: c.attack, release: c.release, fetDrive: 0, oversample: true })
+    const k = new FET1176Kernel(sampleRate)
+    k.setParams({ oversample: true })
+    const trimmed = y.subarray(k.latencySamples)
+    const z = new Float32Array(trimmed.length + Math.max(0, c.lag))
+    if (c.lag >= 0) z.set(trimmed, c.lag)
+    else z.set(trimmed.subarray(-c.lag), 0)
+    writeFloatWav(join(dir, `synth_bursts_r4_I3_a${c.attack}_r${c.release}.wav`), z, sampleRate)
+  }
+  console.log(`\nSynthetic bursts captures in ${dir}`)
+  console.log('EXPECTED — anything else is a bug in the fitter, not in the capture:')
+  for (const c of cases) {
+    console.log(`  a${c.attack}_r${c.release}: lag ${c.lag}, attack dial ${c.attack}, release dial ${c.release}, a tail present`)
+  }
+  return dir
+}
+
+function fitCaptures(sampleRate, dir = CAP_DIR) {
+  const plan = burstPlan()
+  const stim = buildProbe(plan, sampleRate)
+  const CAP_DIR = dir
+  const files = existsSync(CAP_DIR)
+    ? readdirSync(CAP_DIR).filter(f => /bursts.*\.wav$/i.test(f)).sort()
+    : []
+  if (!files.length) {
+    console.log(`\nNo bursts captures in ${CAP_DIR}.`)
+    console.log('Expected names like  cla76_bursts_r4_I3_a3_r4.wav  /  fetish_bursts_r4_I3_a800us_r235ms.wav')
+    console.log('See docs/fet1176_capture_protocol.md, Step 3.\n')
+    return
+  }
+
+  console.log(`\nFET Punch ballistics — ${files.length} capture(s), stimulus at ${sampleRate} Hz`)
+  console.log(`Probe ${PROBE_HZ} Hz: blind window ${blindWindowUs(PROBE_HZ, 0.1).toFixed(1)} us, ` +
+    `half-period ${(5e5 / PROBE_HZ).toFixed(0)} us\n`)
+
+  for (const file of files) {
+    console.log('═'.repeat(78))
+    console.log(file)
+    console.log('═'.repeat(78))
+    let y
+    try {
+      ;({ y } = readCapture(join(CAP_DIR, file), sampleRate))
+    } catch (e) {
+      console.log(`  ⚠ ${e.message}\n`)
+      continue
+    }
+    const pre = preflight(file, y, plan, stim.env, sampleRate)
+    for (const line of pre.lines) console.log(line)
+
+    const coarse = alignByEnvelope(stim.env, y, sampleRate)
+    const ref = refineLagAtEdge(y, stim.x, plan.events[0].up, sampleRate, coarse)
+    console.log(`  lag ${ref.lag} samples (${(1000 * ref.lag / sampleRate).toFixed(3)} ms), ` +
+      `edge-refined from ${coarse}; margin ${Number.isFinite(ref.margin) ? ref.margin.toFixed(3) : 'n/a'}`)
+    if (!(ref.margin > 0.005)) {
+      console.log('  ⚠ THE EDGE DID NOT DISAMBIGUATE THE CYCLE. The runner-up lag a period away')
+      console.log('    scores almost as well, so this could be locked onto the wrong one. Every')
+      console.log('    attack number below is suspect; the release numbers are only shifted.')
+    }
+
+    const bursts = analyseCapture(y, plan, stim, sampleRate, ref.lag)
+    if (!bursts.length) { console.log('  ⚠ no usable bursts\n'); continue }
+
+    console.log('\n   hold      GR dB    attack t63    overshoot    release t63')
+    for (const b of bursts) {
+      console.log('   ' + String(b.holdS + ' s').padEnd(8) +
+        b.grDb.toFixed(2).padStart(8) +
+        (b.attackT63 === null ? '        --' : (b.attackT63 * 1e6).toFixed(0).padStart(9) + ' us') +
+        (Number.isFinite(b.overshootDb) ? b.overshootDb.toFixed(2).padStart(12) + ' dB' : '           --') +
+        (b.releaseT63 === null ? '           --' : (b.releaseT63 * 1e3).toFixed(0).padStart(12) + ' ms'))
+    }
+
+    /**
+     * ⚠ THE HOLD SWEEP IS THE TAIL TEST AND IT IS THE POINT OF THIS PLAN. A
+     * single time constant recovers identically after every hold length; a
+     * two-stage network does not. A release trace bit-identical after 50 ms and
+     * 3 s is how an 1176 got mistaken for an LA-2A in this repo's corpus.
+     */
+    /**
+     * ⚠ ONLY HOLDS THAT REACHED FULL REDUCTION BELONG IN THE TAIL TEST. A burst
+     * too short to settle releases from a shallower depth, which is a different
+     * experiment — the comparison is how long the recovery takes from the SAME
+     * place, not from wherever each burst happened to get to.
+     */
+    const deepestGr = Math.max(...bursts.map(b => b.grDb))
+    const rels = bursts.filter(b => b.releaseT63 !== null && b.grDb > deepestGr - 0.5)
+    const dropped = bursts.filter(b => b.releaseT63 !== null && b.grDb <= deepestGr - 0.5)
+    if (dropped.length) {
+      console.log(`\n   ⚠ ${dropped.map(b => b.holdS + ' s').join(', ')} never reached full reduction ` +
+        `(${dropped.map(b => b.grDb.toFixed(1)).join(', ')} dB against ${deepestGr.toFixed(1)}) —`)
+      console.log('     released from a shallower depth, so left out of the tail test below.')
+    }
+    if (rels.length >= 2) {
+      const lo = rels[0].releaseT63, hi = rels[rels.length - 1].releaseT63
+      console.log(`\n   release t63 after a ${rels[0].holdS} s hold vs a ${rels[rels.length - 1].holdS} s hold: ` +
+        `${(lo * 1e3).toFixed(0)} vs ${(hi * 1e3).toFixed(0)} ms`)
+      console.log(hi > lo * 1.05
+        ? '   → THE RELEASE STRETCHES WITH EXPOSURE — a tail is present, as we model.'
+        : '   → ⚠ NO STRETCH WITH EXPOSURE. A single-stage release; our TAIL_FRACTION /\n'
+          + '     TAIL_MULT have nothing to fit against on this reference.')
+    }
+
+    const knobs = knobsFromName(file)
+    console.log(`\n   declared knobs: attack ${showKnob(knobs.attack)}, release ${showKnob(knobs.release)}`)
+
+    // ── Matched measurement against our own kernel ──────────────────────────
+    const deepest = bursts[bursts.length - 1]
+    const params = { inputDrive: 55, ratio: '4', fetDrive: 0, attack: 4, release: 4 }
+    for (const [sweep, label, pick, fmt] of [
+      ['attack', 'overshoot', bs => bs[bs.length - 1]?.overshootDb, v => v.toFixed(2) + ' dB'],
+      ['release', 'release t63', bs => bs[bs.length - 1]?.releaseT63, v => (v * 1e3).toFixed(0) + ' ms'],
+    ]) {
+      const target = pick(bursts)
+      if (!Number.isFinite(target)) continue
+      const table = ourDialTable(plan, stim, sampleRate, params, sweep)
+      const best = bestDial(table, target, pick)
+      console.log(`\n   MATCHED MEASUREMENT on ${label} (${sweep}):`)
+      console.log('     our dial   ' + table.map(r => String(r.dial).padStart(9)).join(''))
+      console.log('     measured   ' + table.map(r => {
+        const v = pick(r.bursts)
+        return (Number.isFinite(v) ? (sweep === 'attack' ? v.toFixed(1) : (v * 1e3).toFixed(0)) : '--').padStart(9)
+      }).join(''))
+      console.log(`     reference reads ${fmt(target)}  →  closest is dial ${best ? best.dial : '?'}` +
+        (best ? ` (${fmt(best.value)})` : ''))
+    }
+    console.log(`\n   ⚠ Read the dial, not the microseconds. Measured t63 runs ~2.9x the constant`)
+    console.log('     behind it, on both sides, which is why the comparison is dial-to-dial.\n')
+  }
+  console.log('Protocol and what each column answers: docs/fet1176_capture_protocol.md\n')
+}
+
 // ── Entry ───────────────────────────────────────────────────────────────────
 
 function rateFromArgs(args) {
@@ -556,8 +820,16 @@ const isEntryPoint = process.argv[1]
 const args = isEntryPoint ? process.argv.slice(2) : []
 const sr = isEntryPoint ? rateFromArgs(args) : DEFAULT_SR
 
+const dirArg = args.indexOf('--dir')
+const capDirOverride = dirArg >= 0 && args[dirArg + 1] ? args[dirArg + 1] : null
+
 if (!isEntryPoint) {
   // imported as a library — the plans and `runKernel` are the API
+} else if (args.includes('--fit') && args.includes('--selftest')) {
+  const dir = capDirOverride || mkdtempSync(join(tmpdir(), 'fet-bal-'))
+  fitCaptures(sr, writeFitSelftest(dir, sr))
+} else if (args.includes('--fit')) {
+  fitCaptures(sr, capDirOverride || CAP_DIR)
 } else if (args.includes('--selftest')) {
   selftest(sr)
 } else if (args.includes('--stimulus')) {
@@ -568,6 +840,7 @@ FET Punch capture tooling. Pick a mode:
 
   npm run fet:stimulus     write the test signals and print the capture matrix
   npm run fet:selftest     prove the gain trace against our own kernel
+  npm run fet:ballistics   fit whatever bursts captures are present
 
 Both take --rate <hz> (default ${DEFAULT_SR}).
 

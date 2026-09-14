@@ -254,3 +254,62 @@ export function windowRmsDb(y, from, to) {
   for (let i = Math.max(0, from); i < Math.min(y.length, to); i++) { s += y[i] * y[i]; n++ }
   return n ? db(Math.sqrt(s / n)) : NaN
 }
+
+/**
+ * Refine a coarse lag against a STEP EDGE, to the sample.
+ *
+ * ⚠ ENVELOPE ALIGNMENT IS NOT ENOUGH FOR BALLISTICS AND THIS IS THE FIX THAT
+ * WAS DEFERRED. `alignByEnvelope` lands within about 12 samples once both sides
+ * are smoothed — 0.125 ms at 96 kHz, which is fine for a THD window sitting
+ * 0.8 s inside a 3 s tone and useless against a 20 us attack.
+ *
+ * ⚠ AND A PERIODIC TONE CANNOT BE CORRELATED UNAMBIGUOUSLY. At a 4 kHz probe
+ * and 96 kHz there are 24 samples per period, so a ±12 sample uncertainty spans
+ * a whole period and a waveform correlation can lock onto the wrong cycle. The
+ * STEP EDGE is what breaks the tie: it is a broadband amplitude discontinuity
+ * placed on a zero crossing, so the correlation peaks once at the true lag and
+ * the one-period-away peaks are lower — the jump does not line up there even
+ * though the waveform does.
+ *
+ * Normalised, so the compressor having pulled the post-edge amplitude down (the
+ * whole point of the capture) cannot bias it. A pure gain leaves zero crossings
+ * where they were.
+ *
+ * @param {number} edgeSec   where the stimulus steps
+ * @param {number} coarseLag from `alignByEnvelope`
+ * @param {number} searchSamples  half-width of the search, ± around coarseLag
+ */
+export function refineLagAtEdge(capture, stimulus, edgeSec, sampleRate, coarseLag, {
+  searchSamples = 64, windowSec = 0.004,
+} = {}) {
+  const half = Math.round(windowSec * sampleRate)
+  const centre = Math.round(edgeSec * sampleRate)
+  const from = centre - half
+  const to = centre + half
+  if (from < 0 || to >= stimulus.length) return { lag: coarseLag, score: NaN, margin: NaN }
+
+  const scores = []
+  for (let d = -searchSamples; d <= searchSamples; d++) {
+    const lag = coarseLag + d
+    let num = 0, sa = 0, sb = 0
+    for (let i = from; i < to; i++) {
+      const j = i + lag
+      if (j < 0 || j >= capture.length) { num = NaN; break }
+      const a = stimulus[i], b = capture[j]
+      num += a * b; sa += a * a; sb += b * b
+    }
+    if (!Number.isFinite(num) || sa <= 0 || sb <= 0) continue
+    scores.push([lag, num / Math.sqrt(sa * sb)])
+  }
+  if (!scores.length) return { lag: coarseLag, score: NaN, margin: NaN }
+  scores.sort((p, q) => q[1] - p[1])
+  const [lag, score] = scores[0]
+  /**
+   * ⚠ THE MARGIN IS THE THING TO CHECK, NOT THE SCORE. A capture that locked
+   * onto the wrong cycle still correlates beautifully — the runner-up being
+   * almost as good is what says the edge did not disambiguate. Report it so a
+   * fitter can refuse rather than quietly measure the wrong sample.
+   */
+  const rival = scores.find(([l]) => Math.abs(l - lag) > sampleRate / 8000) // ≥ half a period at 4 kHz
+  return { lag, score, margin: rival ? score - rival[1] : NaN }
+}

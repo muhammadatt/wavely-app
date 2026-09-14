@@ -1892,6 +1892,57 @@ figure.
   chosen over speed because a preview that disagrees with apply is the failure
   this whole tracker exists to avoid.
 
+### The ballistics fitter, ready for the captures
+
+`npm run fet:ballistics` reads `*bursts*.wav` captures and reports attack t63,
+first-peak overshoot, release t63 per hold length, the tail test, and a
+matched-measurement dial search against our own kernel.
+`npm run fet:ballistics:selftest` proves it on synthetic captures at dials we
+chose, with an arbitrary lag injected.
+
+- **⚗ THE DEFERRED ALIGNMENT PIECE IS BUILT AND IT IS SAMPLE-EXACT.**
+  `refineLagAtEdge` was noted as needed and left unbuilt ("building it against a
+  real capture beats guessing"). It could be built against synthetic ones after
+  all: injected lags of 0 / 7 / −13 / 50 / 137 / −200 all recover with **zero
+  error**, including the −200 case where the envelope alignment was 16 samples
+  out. ⚠ Envelope alignment lands within ~12 samples, which is HALF A PERIOD at
+  the 4 kHz probe — a waveform correlation refined from there can lock onto the
+  wrong cycle. The step edge breaks the tie because it is a broadband amplitude
+  discontinuity: the one-period-away peaks correlate on the waveform but not on
+  the jump. The fitter reports the **margin** to the runner-up and refuses to
+  trust the attack numbers when it is thin.
+
+- **⚠⚠ THE SELF-TEST FOUND THE FITTER REPORTING "NO TAIL" ON OUR OWN KERNEL,
+  whose tail is 22 % of the reduction on a network 4x slower.** The held level
+  was read over a fixed 100 ms window before the burst ended — **longer than the
+  plan's shortest hold**, so on the 50 ms burst it reached back past the step and
+  averaged the OPEN gain into the held level. That put its release t63 at 606 ms
+  against 326-389 ms for the longer holds: an outlier pointing the wrong way,
+  which inverted the tail verdict. The window is bounded by the burst now, and
+  the sequence reads 312 / 326 / 371 / 389 ms — monotone with exposure, which is
+  what a tail looks like.
+
+- **AND A BURST THAT NEVER REACHED FULL REDUCTION IS EXCLUDED FROM THE TAIL
+  TEST**, with its measured depth named. Releasing from a shallower depth is a
+  different experiment; the question is how long recovery takes from the SAME
+  place.
+
+- **THE DIAL SEARCH IS MATCHED MEASUREMENT, NOT CONVERSION**, per the earlier
+  finding that measured t63 runs ~2.9x the constant behind it with a factor that
+  moves with Input, level and knee. Our kernel goes through the identical
+  analysis so the bias cancels. Verified: attack dials 2 and 5, release dials 4
+  and 6, all recovered exactly from captures that only declared them in a
+  filename.
+
+- **⚠ THE DIAL TABLES ARE THE ENTIRE COST OF A FIT RUN** — seven renders of the
+  83 s stimulus, oversampled, per sweep — and they were being rebuilt per
+  capture. Memoised on params and sweep: **88 s → 45 s**, and the full suite is
+  82 s wall on four cores because it runs alongside everything else.
+
+**The capture matrix is unchanged and ready.** `preInput` shipping does not touch
+it: the ballistics live in the detector and the cell, and the shaper's position
+is downstream of both.
+
 ### ⚗ WHAT `preInput` AND `postCell` ACTUALLY DIFFER BY — three axes, not one
 
 Auditioned by ear: `preCell` worst, the other two both usable but different in a
