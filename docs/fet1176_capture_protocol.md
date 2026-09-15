@@ -474,6 +474,43 @@ So, for the bursts matrix:
    bursts matrix — it is the one control that must stay fixed while attack and
    release sweep.
 
+### How exact does the reduction need to be?
+
+**It does not.** Eyeball the VU meter — CLA-76 has no digital readout and none is
+needed. The fitter **measures the reduction the capture actually reached** and
+drives our kernel to that same depth before comparing anything, so a couple of dB
+either way costs nothing.
+
+⚠ **WHAT DOES MATTER IS THAT INPUT STAYS FIXED FOR THE WHOLE SWEEP.** The
+statistics the fit rests on are depth-dependent and steeply so: first-peak
+overshoot runs **1.93 dB at 2.3 dB of reduction to 8.02 dB at 11.4** — a 6 dB
+spread, which is **wider than the entire dial-to-dial spread** (4.8 dB down to
+1.0 at a fixed Input). Nudging Input between bounces would read as the ballistics
+having changed. Set it once, write the readout down, and leave it alone.
+
+Aim for somewhere around 10-14 dB. Deep enough that the release trajectory sits
+well above the noise and the tail has something to decay from; shallow enough
+that the loudest tone is not buried in the knee.
+
+### Does the Output level matter?
+
+**No, with one hard exception.** Output is a clean multiply after the FET —
+measured on both references in the null test — and the gain trace is recovered
+by division against the known stimulus, so a constant output gain cancels
+completely. Measured across 24 dB of Output, every statistic is identical to
+three decimal places: reduction 6.229 dB, overshoot 4.714 dB, release t63
+381.6 ms at every position.
+
+⚠⚠ **BUT DO NOT LET THE CAPTURE CLIP, AND IT TAKES ALMOST NOTHING TO DO IT.**
+The overshoot is the peak that ESCAPES compression, which is precisely the sample
+that hits full scale first. Measured: **48 samples over full scale took overshoot
+from 4.714 dB to 1.843** — a 2.9 dB error, on the one statistic the attack fit
+rests on, from a clip you would not hear. The reduction and the release t63 were
+untouched, so nothing else warns you.
+
+Leave a few dB of headroom and check the bounce's peak. If it reads 0.0 dBFS,
+re-bounce with Output lower.
+
 ⚠ **THE BALLISTICS SETTING DOES NOT AFFECT THIS READING, so it does not matter
 which one you happen to be on when you set it.** During a sustained hold the
 detector's target is constant, so the gain settles at the same place whatever

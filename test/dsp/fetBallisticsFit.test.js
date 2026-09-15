@@ -50,19 +50,49 @@ test('recovers an unknown capture latency to the sample', opts, () => {
   assert.match(section(out, 'synth_bursts_r4_I3_a5_r6.wav'), /lag -77 samples/)
 })
 
+/** The continuous dial the fitter placed the reference at, for one sweep. */
+function dialFor(text) {
+  const m = text.match(/our dial (\d\.\d\d)/)
+  assert.ok(m, 'no continuous dial in the verdict')
+  return Number(m[1])
+}
+
 test('recovers the attack dial by matched measurement', opts, () => {
   // ⚠ NOT by converting t63 to a constant: measured t63 runs ~2.9x the constant
   // behind it, and the factor moves with Input, level and knee. Both sides go
   // through the same analysis so the bias cancels.
-  assert.match(section(selftest(), 'synth_bursts_r4_I3_a2_r4.wav'), /our dial 2\.0\d/)
-  assert.match(section(selftest(), 'synth_bursts_r4_I3_a5_r6.wav'), /our dial 5\.0\d/)
+  const a = dialFor(section(selftest(), 'synth_bursts_r4_I3_a2_r4.wav'))
+  const b = dialFor(section(selftest(), 'synth_bursts_r4_I3_a5_r6.wav'))
+  assert.ok(Math.abs(a - 2) < 0.25, `attack placed at dial ${a}, expected 2`)
+  assert.ok(Math.abs(b - 5) < 0.25, `attack placed at dial ${b}, expected 5`)
 })
 
 test('recovers the release dial too', opts, () => {
   const a = section(selftest(), 'synth_bursts_r4_I3_a2_r4.wav')
   const b = section(selftest(), 'synth_bursts_r4_I3_a5_r6.wav')
-  assert.match(a.slice(a.indexOf('release t63 (release)')), /our dial 4\.0\d/)
-  assert.match(b.slice(b.indexOf('release t63 (release)')), /our dial (5\.9\d|6\.0\d)/)
+  const da = dialFor(a.slice(a.indexOf('release t63 (release)')))
+  const db = dialFor(b.slice(b.indexOf('release t63 (release)')))
+  assert.ok(Math.abs(da - 4) < 0.25, `release placed at dial ${da}, expected 4`)
+  assert.ok(Math.abs(db - 6) < 0.25, `release placed at dial ${db}, expected 6`)
+})
+
+test('drives our kernel to the depth the reference actually reached', opts, () => {
+  /**
+   * ⚠ THE DIAL TABLE USED A HARDCODED `inputDrive: 55` AND THAT WAS A REAL BUG.
+   * Overshoot runs 1.93 dB at 2.3 dB of reduction to 8.02 at 11.4 — a 6 dB
+   * spread, WIDER THAN THE WHOLE DIAL RANGE (4.8 down to 1.0 at fixed Input).
+   * A reference captured at ~12 dB against our kernel at ~4.9 would have landed
+   * clean off the table and reported a finding about ATTACK_SLOWEST_S caused
+   * entirely by a depth mismatch.
+   */
+  const out = selftest()
+  const rows = [...out.matchAll(/reference settled at ([\d.]+) dB of reduction; our kernel reaches that at Input [\d.]+ \(([\d.]+) dB\)/g)]
+  assert.ok(rows.length >= 2, `found ${rows.length} depth matches, expected 2`)
+  for (const m of rows) {
+    const [, ref, ours] = m
+    assert.ok(Math.abs(Number(ref) - Number(ours)) < 0.1,
+      `reference at ${ref} dB but our kernel driven to ${ours} dB`)
+  }
 })
 
 test('the dial is reported continuously, with the time it corresponds to', opts, () => {

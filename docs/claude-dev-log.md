@@ -1892,6 +1892,52 @@ figure.
   chosen over speed because a preview that disagrees with apply is the failure
   this whole tracker exists to avoid.
 
+### ⚗⚗ THE DIAL TABLE WAS BUILT AT A HARDCODED INPUT, AND THE STATISTICS ARE
+### DEPTH-DEPENDENT
+
+Asked how exactly the 12 dB target needs to be hit on a VU meter with no digital
+readout. It does not need to be hit at all — but answering that found the fitter
+comparing at the wrong depth.
+
+- **⚠⚠ OVERSHOOT MOVES MORE WITH DEPTH THAN IT DOES ACROSS THE WHOLE DIAL
+  RANGE.** Measured at attack dial 4: **1.93 dB at 2.3 dB of reduction to 8.02 dB
+  at 11.4** — a 6 dB spread, against 4.8 → 1.0 dB from dial 1 to dial 7 at a
+  fixed Input. `ourDialTable` was built at `inputDrive: 55` (≈4.9 dB) regardless
+  of the capture, so a reference taken at ~12 dB would have landed clean off the
+  top of the table and been reported as **"OUTSIDE OUR RANGE, slower than dial
+  1"** — a confident finding about `ATTACK_SLOWEST_S` caused entirely by a depth
+  mismatch. Release t63 is far less sensitive (406 → 358 ms, 12 %) but not
+  immune. The table is now built at the Input that drives our kernel to the
+  reduction the capture actually reached.
+
+- **⚠ AND THE DEPTH MATCH HAD TO USE THE SAME MEASUREMENT AS EVERYTHING ELSE.**
+  First cut bisected on the kernel's internal `grDb` from a plain tone; the
+  reference's comes from the analysed trace. They differ by hundredths of a dB —
+  one is an instantaneous envelope value, the other a peak-sampled average — and
+  that was enough to move the solved Input 0.8 knob units and **the reported
+  attack dial by a whole dial**. Bisecting on the analysed reduction instead, on
+  an 11 s single-burst plan rather than the 83 s stimulus, puts the known dials
+  back at 1.90 / 4.00 / 5.00 / 6.00.
+
+- **AND "OUTSIDE OUR RANGE" NOW HAS TO CLEAR A MARGIN OF ONE DIAL STEP.** A
+  target a hundredth of a dB past the endpoint was being reported as a finding
+  about the endpoint constant. Inside a dial step it is the endpoint plus noise,
+  and the depth match feeding the table is itself only good to a fraction of a
+  knob unit.
+
+### ⚗ OUTPUT LEVEL IS IRRELEVANT UNTIL IT CLIPS, AND THEN IT IS NOT
+
+Output is a clean multiply after the FET and the trace is recovered by division,
+so a constant output gain cancels: measured across 24 dB of Output, reduction
+6.229 dB, overshoot 4.714 dB and release t63 381.6 ms are identical **to three
+decimal places** at every position.
+
+⚠⚠ **48 SAMPLES OVER FULL SCALE TOOK OVERSHOOT FROM 4.714 dB TO 1.843.** The
+overshoot IS the peak that escapes compression, which is exactly the sample that
+clips first — so the one statistic the attack fit rests on is the one a clip
+destroys, from a clip nobody would hear. Reduction and release t63 were untouched
+at 6.229 dB and 381.6 ms, so nothing else in the report warns about it.
+
 ### ⚠ THE DIAL SEARCH COULD NOT FAIL, AND A CONTINUOUS KNOB IS WHAT EXPOSED IT
 
 Asked whether a continuous attack/release control (like FETish's) would need a

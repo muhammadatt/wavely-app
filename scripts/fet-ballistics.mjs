@@ -421,8 +421,8 @@ function analyseBurst(y, plan, stim, sampleRate, lag, ev) {
   }
 }
 
-/** Every burst in one capture. */
-function analyseCapture(y, plan, stim, sampleRate, lag) {
+/** Every burst in one capture. Exported so a test can drive it directly. */
+export function analyseCapture(y, plan, stim, sampleRate, lag) {
   return plan.events.map(ev => analyseBurst(y, plan, stim, sampleRate, lag, ev)).filter(Boolean)
 }
 
@@ -556,6 +556,76 @@ const showKnob = k => (k ? k.n + (k.unit || ' (dial)') : '?')
  * Input, level and knee, so it cannot be divided out. Running our kernel through
  * the same analysis puts the same bias on both sides, where it cancels.
  */
+/**
+ * The Input position at which OUR kernel reaches a given settled reduction.
+ *
+ * ⚠⚠ THE DIAL TABLE WAS BUILT AT A HARDCODED `inputDrive: 55` AND THAT WAS A
+ * REAL BUG. The statistics the fit rests on are depth-dependent, and strongly:
+ * measured at attack dial 4, first-peak overshoot runs **1.93 dB at 2.3 dB of
+ * reduction to 8.02 dB at 11.4 dB** — a 6 dB spread, which is WIDER THAN THE
+ * ENTIRE DIAL-TO-DIAL SPREAD (4.8 dB down to 1.0 at a fixed Input). Comparing a
+ * reference captured at ~12 dB of reduction against our kernel at 55 (≈4.9 dB)
+ * would have put the reference clean off the top of the table and reported
+ * "OUTSIDE OUR RANGE, slower than dial 1" — a confident, wrong finding about
+ * `ATTACK_SLOWEST_S` caused entirely by a depth mismatch.
+ *
+ * Release t63 is far less sensitive over the same range (406 → 358 ms, 12 %) but
+ * is not immune either.
+ *
+ * ⚠ SOLVED ON A SHORT TONE, NOT ON THE 83 s STIMULUS. The settled reduction is a
+ * property of the static curve at that level, so a 1 s tone at the burst's own
+ * −12 dBFS reaches the same place — verified across Input 40-70, where the
+ * −12 dBFS step of `stairs.wav` and the 3 s hold of `bursts.wav` agree to two
+ * decimals. Bisecting on the full stimulus would cost a dozen 83 s renders.
+ */
+/**
+ * One burst, the same shape as the plan's longest, for the depth solve. About
+ * 11 s against the full stimulus's 83.
+ */
+function depthPlan() {
+  const up = snapToZeroCrossing(PRE_S, PROBE_HZ)
+  return {
+    events: [{ tag: 'depth', T: 3.0, freqHz: PROBE_HZ, hiDb: HIGH_DBFS,
+      up, down: snapToZeroCrossing(up + 3.0, PROBE_HZ) }],
+    seconds: PRE_S + 3.0 + POST_S + 1.0,
+    lowDb: LOW_DBFS,
+  }
+}
+
+function inputForGr(targetGrDb, params, sampleRate) {
+  /**
+   * ⚠ BISECTED ON THE ANALYSED REDUCTION, NOT ON `kernel.grDb`, and the first
+   * version used the kernel's internal figure from a plain tone. The two differ
+   * by hundredths of a dB — the analysed one is a peak-sampled average of the
+   * recovered trace, the internal one an instantaneous envelope value — and
+   * that was enough to move the solved Input by 0.8 knob units and the reported
+   * attack dial BY A WHOLE DIAL, because overshoot is steep in both. The depth
+   * has to be matched by the same measurement as everything else, which is the
+   * same argument as the dial comparison one level up.
+   */
+  const plan = depthPlan()
+  const stim = buildProbe(plan, sampleRate)
+  const settled = knob => {
+    const { y } = runKernel(stim.x, sampleRate, { ...params, inputDrive: knob, oversample: true })
+    const k = new FET1176Kernel(sampleRate)
+    k.setParams({ ...params, inputDrive: knob, oversample: true })
+    const b = analyseBurst(y, plan, stim, sampleRate, k.latencySamples, plan.events[0])
+    return b ? b.grDb : NaN
+  }
+  const atHi = settled(100), atLo = settled(0)
+  if (!(atHi >= targetGrDb)) return { knob: 100, gr: atHi, clipped: 'high' }
+  if (!(atLo <= targetGrDb)) return { knob: 0, gr: atLo, clipped: 'low' }
+  let lo = 0, hi = 100
+  // ⚠ TEN STEPS, NOT TWENTY-FOUR. Each is a render; 100/2^10 is 0.1 of a knob
+  // unit, which is an order finer than the depth match itself is worth.
+  for (let i = 0; i < 10; i++) {
+    const mid = (lo + hi) / 2
+    if (settled(mid) < targetGrDb) lo = mid; else hi = mid
+  }
+  const knob = (lo + hi) / 2
+  return { knob, gr: settled(knob), clipped: null }
+}
+
 const dialTableCache = new Map()
 
 function ourDialTable(plan, stim, sampleRate, params, sweep) {
@@ -612,7 +682,21 @@ function matchDial(table, target, pick) {
   const beyondFast = rising ? target > last : target < last
   if (beyondSlow || beyondFast) {
     const edge = beyondSlow ? pts[0] : pts[pts.length - 1]
-    return { dial: edge.dial, value: edge.value, residual: target - edge.value, outside: beyondSlow ? 'slow' : 'fast' }
+    const neighbour = beyondSlow ? pts[1] : pts[pts.length - 2]
+    /**
+     * ⚠ "OUTSIDE OUR RANGE" HAS TO CLEAR A MARGIN, or a target a hundredth of a
+     * dB past the endpoint gets reported as a finding about `ATTACK_SLOWEST_S`.
+     * The margin is one dial step at that end: past the endpoint by less than
+     * the spacing between the last two dials is not evidence of anything, it is
+     * the endpoint plus noise — and the depth match feeding this table is
+     * itself only good to a fraction of a knob unit.
+     */
+    const step = Math.abs(edge.value - neighbour.value)
+    const over = Math.abs(target - edge.value)
+    if (over <= step) {
+      return { dial: edge.dial, value: edge.value, residual: target - edge.value, outside: null, atEdge: true, over, step }
+    }
+    return { dial: edge.dial, value: edge.value, residual: target - edge.value, outside: beyondSlow ? 'slow' : 'fast', over, step }
   }
 
   for (let i = 1; i < pts.length; i++) {
@@ -754,7 +838,22 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
 
     // ── Matched measurement against our own kernel ──────────────────────────
     const deepest = bursts[bursts.length - 1]
-    const params = { inputDrive: 55, ratio: '4', fetDrive: 0, attack: 4, release: 4 }
+    /**
+     * ⚠ MATCH THE DEPTH BEFORE COMPARING THE BALLISTICS. See `inputForGr` — the
+     * statistics move more with reduction depth than they do across the whole
+     * dial range, so our kernel has to be driven to the SAME settled reduction
+     * the reference reached, not to a fixed knob position.
+     */
+    const matched = inputForGr(deepest.grDb, { ratio: '4', fetDrive: 0, attack: 4, release: 4 }, sampleRate)
+    console.log(`   reference settled at ${deepest.grDb.toFixed(2)} dB of reduction; ` +
+      `our kernel reaches that at Input ${matched.knob.toFixed(1)} (${matched.gr.toFixed(2)} dB)`)
+    if (matched.clipped) {
+      console.log(`   ⚠ AND OUR INPUT KNOB CANNOT REACH IT — it runs out at the ${matched.clipped} end.`)
+      console.log('     The comparison below is at our limit, not at the reference\'s depth, so the')
+      console.log('     dial it reports is not meaningful. Re-bounce nearer our range, or treat this')
+      console.log('     as a finding about IN_DRIVE_MIN_DB / IN_DRIVE_SPAN_DB.')
+    }
+    const params = { inputDrive: matched.knob, ratio: '4', fetDrive: 0, attack: 4, release: 4 }
     for (const [sweep, label, pick, fmt] of [
       ['attack', 'overshoot', bs => bs[bs.length - 1]?.overshootDb, v => v.toFixed(2) + ' dB'],
       ['release', 'release t63', bs => bs[bs.length - 1]?.releaseT63, v => (v * 1e3).toFixed(0) + ' ms'],
@@ -779,6 +878,13 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
         console.log(`     ⚠⚠ OUTSIDE OUR RANGE — ${m.outside === 'slow' ? 'slower' : 'faster'} than dial ${m.dial},`)
         console.log(`        which reads ${fmt(m.value)}. This is NOT a dial: it is a finding about`)
         console.log(`        ${endpoint}, whose only provenance is a datasheet both plugins quote.`)
+      } else if (m.atEdge) {
+        const t = sweep === 'attack'
+          ? (attackSecondsForDial(m.dial) * 1e6).toFixed(0) + ' us'
+          : (releaseSecondsForDial(m.dial) * 1e3).toFixed(0) + ' ms'
+        console.log(`     →  at our dial ${m.dial} (${t}), the end of our range.`)
+        console.log(`        It sits ${fmt(m.over)} past it, against ${fmt(m.step)} between the last two`)
+        console.log('        dials — inside a dial step, so not evidence of anything beyond the end.')
       } else if (m.nonMonotonic) {
         console.log(`     ⚠ our table is not monotonic on this statistic, so it cannot be interpolated.`)
         console.log(`       Nearest is dial ${m.dial} (${fmt(m.value)}), residual ${fmt(Math.abs(m.residual))}.`)
