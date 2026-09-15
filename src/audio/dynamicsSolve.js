@@ -562,23 +562,51 @@ export function maxDropFor(options = {}) {
  *      bound on the real blend gains is sound in principle but reads off two
  *      interpolated peaks, so it inherits (1) on both sides.
  *
- * Measured across 240 combinations of Density, Mix and Balance on two narrators,
- * the prediction under-reads the true output peak by at most **3.43 dB**, so
- * that is the margin. With it, zero of those 240 combinations exceed the input
- * peak; without it, 68 of them did, by up to 1.97 dB.
+ * ⚠ MOST OF THAT ERROR WAS THE OPTO GRID'S DRIVE AXIS, NOT THE METHOD — the
+ * margin was 3.43 dB and is now **1.37**, because the grid was re-spanned rather
+ * than the constant re-fitted. See `OPTO_GRID_DRIVE_POINTS`: four evenly spaced
+ * rows to 100 put almost every patch inside the first interval, across exactly
+ * the convex region, and the row at 100 was unreachable anyway. Measured over
+ * 168 combinations of Density, Mix and Balance on two narrators, the worst
+ * under-read went 3.42 -> 1.37 dB for the same number of renders.
  *
- * ⚠ IT IS NOT FREE, AND AN EARLIER DRAFT OF THIS NOTE CLAIMED IT WAS. The cap
- * binds at ordinary settings, not just in the corner that motivated it: on the
- * reference narration at Density 70 the delivered body goes +2.63 dB without the
- * margin and +0.87 with it, so roughly 1.8 dB of makeup is given up to buy the
- * guarantee. The output is body-neutral-to-slightly-up with the peak ~3 dB down,
- * which is a reasonable compressor output — but it is quieter than the
- * percentile target alone would give, and that is the price.
+ * ⚠ THE SHIPPING NUMBER IS 1.50, NOT THE 1.37 THE REAL FILES MEASURED — the
+ * synthetic stimuli need 1.50 and a margin is a GUARANTEE, so it is sized on
+ * every signal that can be put through it, not on the representative ones. 1.37
+ * overshot the generator by 0.03 dB at Density 5 / Mix 0.5, which a test caught.
+ * This is the one place the unrepresentative stimulus gets the deciding vote,
+ * and it costs 0.13 dB.
  *
- * ⚠ THE MARGIN IS SIZED ON THE WORST CASE AND THE WORST CASE IS NOT TYPICAL —
- * the 3.43 dB comes from Density 5-10 at Mix 1, where the error is largest; at
- * Density 70 it is about 1.7. A margin that followed the error's own structure
- * would recover most of that, and is the obvious next improvement.
+ * ⚠ AND THE RESIDUAL IS NOW THE DRY PATH, NOT THE WET ONE. The worst case moved
+ * from Mix 1 (the grid) to Mix 0 at drive 1.5 (the FET level curve's own
+ * interpolation), which is the next thing to re-span if this is worth another
+ * dB. At Mix 0 the old grid scored 0.42 and the new one cannot beat it.
+ *
+ * ⚠ WHAT THE OVERSIZED MARGIN COST WAS AUDIBLE, WHICH IS HOW IT WAS FOUND. On
+ * real narration at Density 100 the section delivered its output 3.68 dB under
+ * the source peak where FET Punch at Input 25 delivered the source peak exactly
+ * — and level-matched (impact and crest are gain-invariant) the section was
+ * doing MORE: impact -2.65 against -2.06, crest -4.41 against -4.70. The
+ * processing was never missing; 3 dB of makeup was. The prediction error at that
+ * operating point is -0.25 dB, so the whole margin was being charged to cover
+ * something that was not happening there.
+ *
+ * ⚠ IT IS NOT FREE, AND AN EARLIER DRAFT OF THIS NOTE CLAIMED IT WAS. At 3.43 dB
+ * the cap bound at ORDINARY settings, not just in the corner that motivated it:
+ * on the reference narration at Density 70 the delivered body went +2.63 dB
+ * without the margin and +0.87 with it. At 1.37 it no longer binds there at all
+ * — the percentile target is what limits the makeup across Density 50-100, and
+ * the body lands +1.73 / +2.15 / +2.97 dB. The peak still sits ~2 dB under the
+ * source, and that is the PERCENTILE REFERENCE rather than the margin: restoring
+ * p99.9 on a signal whose crest has been reduced necessarily leaves the peak
+ * lower. A peak-referenced makeup would close it and let one onset pin the file,
+ * which is the trade the house rule already settled.
+ *
+ * ⚠ THE MARGIN IS STILL SIZED ON A WORST CASE THAT IS NOT TYPICAL — it comes
+ * from Density 5-10, where the solved drive is lowest and the curves bend most;
+ * at the drives Density 70-100 actually uses the error is 0.04-0.37 dB. Making
+ * the margin a function of the solved drive is the remaining improvement, and it
+ * is worth much less now than it was at 3.43.
  *
  * ⚠ AN EXACT CAP WOULD NEED A RENDER, and a render is what this whole path
  * exists to avoid — Density, Balance and Mix are lookups precisely so the knobs
@@ -602,7 +630,7 @@ export function maxDropFor(options = {}) {
 /**
  * Worst measured under-read of the output-peak lookup, dB. See `makeupDbFor`.
  */
-export const MAKEUP_PEAK_MARGIN_DB = 3.43
+export const MAKEUP_PEAK_MARGIN_DB = 1.50
 
 /**
  * The same margin for the TRIM direction, dB.
@@ -981,7 +1009,27 @@ export const CLIP_SWEEP_RANGE_DB = 24
  * comes off the FET curve. Both axes are smooth, so bilinear on 4x4 is enough;
  * the drive axis reuses one FET render per row.
  */
-export const OPTO_GRID_DRIVES = 4
+/**
+ * The drives the opto grid is sampled at.
+ *
+ * ⚠ IT USED TO BE FOUR EVENLY SPACED POINTS TO 100, AND THAT IS WHERE THE PEAK
+ * PREDICTION'S ERROR LIVED. The solve's drives land between about 3 and 48, so
+ * almost every patch was interpolated inside the FIRST interval — 0 to 33.3 —
+ * across exactly the region where output level against drive is strongly convex.
+ * Measured on two narrators, the predicted peak under-read by up to 3.42 dB at
+ * Mix 1 and low drive, and by 0.04-0.20 dB at the drives Density 100 actually
+ * uses. The flat margin that covers the former is charged to the latter.
+ *
+ * ⚠ AND THE TOP ROW WAS DEAD WEIGHT since the solve started stopping at
+ * `FET_MAX_SOLVE_DRIVE`. Nothing can ask for drive 100, so a row there bought
+ * nothing and stretched the interval that mattered.
+ *
+ * So the axis spans what the solve can reach and is denser where the curve
+ * bends. Same number of wet renders, same build cost.
+ */
+export const OPTO_GRID_DRIVE_POINTS = Object.freeze([0, 10, 25, 60])
+
+export const OPTO_GRID_DRIVES = OPTO_GRID_DRIVE_POINTS.length
 export const OPTO_GRID_SQUASH = 6
 
 /**
@@ -1266,11 +1314,8 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
    * (drive, squash) and covers every Balance position,
    * because the squash axis runs to the widest any of them can ask for.
    */
-  const gridDrives = []
+  const gridDrives = [...(options.optoGridDrives ?? OPTO_GRID_DRIVE_POINTS)]
   const gridSquash = []
-  for (let i = 0; i < OPTO_GRID_DRIVES; i++) {
-    gridDrives.push((100 * i) / (OPTO_GRID_DRIVES - 1))
-  }
   for (let j = 0; j < OPTO_GRID_SQUASH; j++) {
     gridSquash.push((MAX_SQUASH * j) / (OPTO_GRID_SQUASH - 1))
   }
@@ -1284,10 +1329,10 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   const gridOutPeakDb = []
   const gridAlignDb = []
   let blend = { correlation: 0, densityDb: 0, trimDb: 0 }
-  const midDrive = Math.floor(OPTO_GRID_DRIVES / 2)
+  const midDrive = Math.floor(gridDrives.length / 2)
   const midSquash = Math.floor(OPTO_GRID_SQUASH / 2)
 
-  for (let i = 0; i < OPTO_GRID_DRIVES; i++) {
+  for (let i = 0; i < gridDrives.length; i++) {
     const dry = renderFet(
       midClip, sampleRate, { ...patch, fetDrive: gridDrives[i], fetAlignDb },
     ).out
