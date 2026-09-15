@@ -299,8 +299,28 @@ function bisect({ lo, hi, target, measure, decreasing, passes = BISECT_PASSES })
  * Density scales the first three from "do nothing" toward these.
  */
 export const DYNAMICS_TARGET = Object.freeze({
-  /** Peak-to-body the FET is asked to reach at Density 100. */
-  impactDb: 12.2,
+  /**
+   * Peak-to-body the FET is asked to reach at Density 100.
+   *
+   * ⚠ 12.2 STOPPED THE SOLVE SHORT OF THE DEVICE'S OWN KNEE. Impact against
+   * drive flattens out once the FET is compressing near-uniformly — measured per
+   * 10 drive units on two narrators, the slope collapses to under 0.05 dB past
+   * drive 70 and turns POSITIVE by 90. Taking the knee as the drive that reaches
+   * 90 % of the available impact drop, it sits at drive ~45 (David Greenberg)
+   * and ~57 (Messy and Bright); 12.2 put Density 100 at drive 34.1, so the top
+   * of the macro was leaving the last genuinely useful part of the range unused.
+   *
+   * 11.9 lands Density 100 at drive 41.6 / gain reduction 11.55 dB on the
+   * reference narration. 11.8 lands exactly on that file's knee (45.0) and is
+   * the obvious next step if this proves too gentle; below about 11.6 the drive
+   * runs past the knee into the region where evenness gets WORSE — measured
+   * block-level spread 3.82 dB at drive 40 against 6.96 at 75.
+   *
+   * ⚠ ON MATERIAL WITH LESS ROOM THE RELATIVE FLOOR BINDS FIRST and this number
+   * does nothing: Messy and Bright (impact 13.21) is already at drive 47.5 from
+   * `MAX_IMPACT_DROP_DB` alone, unchanged across 12.2 -> 11.6.
+   */
+  impactDb: 11.9,
   /** The opto block's layer depth at Density 100. */
   squash: 26,
 })

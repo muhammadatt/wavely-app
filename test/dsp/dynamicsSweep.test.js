@@ -407,7 +407,12 @@ test('⚠ an unreachable impact target is REPORTED, not silently pinned', () => 
   // And the real device, which CAN reach its target, reports no shortfall.
   const ok = solveFromSweep(real, { density: 100 })
   assert.equal(ok.report.fet.capped, false)
-  assert.equal(ok.report.fet.shortfallDb, 0)
+  // ⚠ NOT `equal(…, 0)`. The shortfall is a difference of two interpolated
+  // figures, so "it reached the target" lands on floating-point dust (measured
+  // 2.2e-16) as soon as the target moves. The claim is that nothing is missing,
+  // not that the subtraction is exact.
+  assert.ok(ok.report.fet.shortfallDb < 0.01,
+    `nothing should be short here: ${ok.report.fet.shortfallDb}`)
 })
 
 test('⚠ the section makes up the level the FET attenuator took', () => {
@@ -582,7 +587,7 @@ test('⚠ with the FET out, the wet path is not the dry path', () => {
 
 test('⚠ the relative floor gives Density a meaning the file cannot take away', () => {
   /**
-   * ⚠ THE ABSOLUTE TARGET MADE DENSITY MEAN "DISTANCE TO 12.2", which is a
+   * ⚠ THE ABSOLUTE TARGET MADE DENSITY MEAN "DISTANCE TO THE TARGET", which is a
    * property of the FILE. A recording arriving at impact 10.98 has no room at
    * all, so the FET bypassed at EVERY Density and the knob bought nothing from
    * that stage. Measured: drive null from Density 10 to 100.
