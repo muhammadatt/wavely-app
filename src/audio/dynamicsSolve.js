@@ -445,13 +445,80 @@ export function clipShaveFor(clipShaveDb, density) {
 }
 
 /**
+ * How much impact the relative floor may ask for at Density 100, dB.
+ *
+ * ⚠ CHOSEN ON AN ASYMMETRIC DOWNSIDE, NOT ON A BEST SCORE. Too small is a
+ * no-op on any file that already had room; too large RAILS the FET, which is
+ * the failure this section shipped once already. Measured over 1.5 / 2.0 / 2.5 /
+ * 3.0 on two stimuli (`npm run dynamics:target`):
+ *
+ *   - On the punchy stimulus (impact 14.89, 2.69 dB of room) 1.5 is IDENTICAL to
+ *     the absolute target at every Density — the absolute binds throughout, so
+ *     this changes nothing for material that was already being processed. Real
+ *     narration measures 13.2-14.8, i.e. 1.0-2.6 dB of room, so it is in the
+ *     same regime.
+ *   - On the flat stimulus (impact 10.98, NO room — the FET bypasses at every
+ *     Density under the absolute target) 1.5 gives drive 18.4-45.8 and 0.33-6.57
+ *     dB of gain reduction across the macro, with nothing short of target.
+ *   - 2.0 rails at Density 100 on that file; 2.5 rails from 70; 3.0 from 70 and
+ *     costs 10.42 dB of gain reduction to come 1.24 dB short.
+ *
+ * ⚠ AND IT IS FITTED TO TWO SYNTHETIC STIMULI. The house rule on this section is
+ * that one file is not a bench and synthetic material has overturned a
+ * calibration twice. Re-score it on a corpus before treating it as settled.
+ */
+export const MAX_IMPACT_DROP_DB = 1.5
+
+/**
+ * The deepest drive the solve will ask the FET for.
+ *
+ * ⚠ THE DEVICE PLATEAUS AND THE SOLVE DOES NOT KNOW IT. Impact drop against
+ * drive flattens out around 60 — past that the knob buys almost no further
+ * impact and costs enormous gain reduction, because compressing the loud parts
+ * pulls the body down with them. Measured on the flat stimulus, an unreachable
+ * target took the drive to 100 and **20.49 dB of gain reduction** to buy the
+ * last 0.3 dB of impact, which is the same "26 dB nobody asked for" this
+ * section already shipped once.
+ *
+ * ⚠ IT IS NOT A WAY TO HIDE AN UNREACHABLE TARGET. `shortfallDb` still reports
+ * the miss, and reports it LARGER for the cap — the contract is that the
+ * section says what it could not do, not that it spends any amount of gain
+ * reduction trying.
+ */
+export const FET_MAX_SOLVE_DRIVE = 60
+
+/**
  * The peak-to-body the FET is asked to reach.
  *
  * Interpolated from what the audio ALREADY IS toward the target, so
- * Density 0 really is "leave it alone" rather than "hit 8.5 dB regardless".
+ * Density 0 really is "leave it alone" rather than "hit 12.2 dB regardless".
+ *
+ * ⚠ THE ABSOLUTE TARGET MAKES DENSITY MEAN "DISTANCE TO 12.2", WHICH IS A
+ * PROPERTY OF THE FILE AND NOT OF THE KNOB. A recording arriving at impact 14.9
+ * has 2.7 dB of room and Density 100 spends all of it; one arriving at 10.7 has
+ * none, so the FET bypasses at every Density and the macro does nothing. That is
+ * the target working as specified, and it is also why the same Density buys
+ * wildly different amounts of processing on two files.
+ *
+ * `maxDropDb` opts into a RELATIVE floor: Density also buys a guaranteed drop
+ * from wherever the audio starts, and the absolute target still binds as a floor
+ * so a punchy file is not driven past the house sound. Both forms agree exactly
+ * at Density 0. Off by default until the bench says which ships.
  */
-export function fetTargetImpactFor(impactDb, density, afterClipImpactDb) {
-  return afterClipImpactDb - (afterClipImpactDb - impactDb) * density
+export function fetTargetImpactFor(impactDb, density, afterClipImpactDb, maxDropDb = null) {
+  const absolute = afterClipImpactDb - (afterClipImpactDb - impactDb) * density
+  if (!Number.isFinite(maxDropDb)) return absolute
+  return Math.min(absolute, afterClipImpactDb - maxDropDb * density)
+}
+
+/**
+ * The relative floor's drop for a solve's options, or null for the absolute
+ * target. ⚠ BOTH SOLVE PATHS READ IT HERE — see the note above `clipShaveFor`.
+ */
+export function maxDropFor(options = {}) {
+  if (options.relativeTarget === false) return null
+  const d = options.maxImpactDropDb
+  return Number.isFinite(d) ? d : MAX_IMPACT_DROP_DB
 }
 
 /**
@@ -653,7 +720,9 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
 
   // ── 2. FET: aligned at ITS OWN input, then bisected on peak-to-body ──────
   const fetAlignDb = inputAlignDbFor(clipped, sampleRate)
-  const targetImpact = fetTargetImpactFor(target.impactDb, density, afterClip.impactDb)
+  const targetImpact = fetTargetImpactFor(
+    target.impactDb, density, afterClip.impactDb, maxDropFor(options),
+  )
   /**
    * ⚠ BYPASS WHEN THERE IS NOTHING TO DO — DRIVE 0 IS A 24 dB ATTENUATOR, not
    * an idle compressor. See the note in `solveFromSweep`; the bisect has the
@@ -663,7 +732,7 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
   let fetDrive = null
   if (afterClip.impactDb - targetImpact > 0.05) {
     fetDrive = bisect({
-      lo: 0, hi: 100, target: targetImpact, decreasing: true,
+      lo: 0, hi: FET_MAX_SOLVE_DRIVE, target: targetImpact, decreasing: true,
       measure: (d) => measureDynamics(
         renderFet(clipped, sampleRate, { ...patch, fetDrive: d, fetAlignDb }).out, sampleRate,
       ).impactDb,
@@ -729,6 +798,8 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
         alignDb: fetAlignDb,
         peakDb: fetRun.metering.maxGainReductionDb,
         targetImpactDb: targetImpact,
+        /** The relative floor's drop, or null when the absolute target ran. */
+        maxDropDb: maxDropFor(options),
         shortfallDb: fetShortfallDb,
         capped: fetShortfallDb > 0.05,
       },
@@ -1366,7 +1437,9 @@ export function solveFromSweep(sweep, options = {}) {
    * `fet.impactDrop` — inverting the absolute curve makes the FET absorb a
    * clipper difference the lookup above has already measured.
    */
-  const targetImpact = fetTargetImpactFor(target.impactDb, density, afterClipImpactDb)
+  const targetImpact = fetTargetImpactFor(
+    target.impactDb, density, afterClipImpactDb, maxDropFor(options),
+  )
   const wantDrop = afterClipImpactDb - targetImpact
   /**
    * ⚠ NOTHING TO DO MEANS BYPASS, NOT DRIVE 0 — AND DRIVE 0 IS A 24 dB
@@ -1388,9 +1461,9 @@ export function solveFromSweep(sweep, options = {}) {
   let fetShortfallDb = 0
   if (wantDrop > 0.05) {
     // The drop RISES with drive, and `crossingOf` walks a falling curve.
-    fetDrive = crossingOf(
+    fetDrive = Math.min(FET_MAX_SOLVE_DRIVE, crossingOf(
       sweep.fet.drives, sweep.fet.impactDrop.map(v => -v), -wantDrop,
-    )
+    ))
     const gotDrop = lerpAt(sweep.fet.drives, sweep.fet.impactDrop, fetDrive)
     afterFetImpactDb = afterClipImpactDb - gotDrop
     /**
@@ -1544,6 +1617,8 @@ export function solveFromSweep(sweep, options = {}) {
           ? 0
           : lerpAt(sweep.fet.drives, sweep.fet.peakDb, fetDrive),
         targetImpactDb: targetImpact,
+        /** The relative floor's drop, or null when the absolute target ran. */
+        maxDropDb: maxDropFor(options),
         /** How far short of the target the drive ran out, dB. 0 when met. */
         shortfallDb: fetShortfallDb,
         capped: fetShortfallDb > 0.05,

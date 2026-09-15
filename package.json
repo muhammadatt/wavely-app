@@ -39,7 +39,8 @@
     "la2a:align": "node scripts/la2a-input-align.mjs",
     "fet:align": "node scripts/la2a-input-align.mjs --fet",
     "dynamics:calibrate": "node scripts/dynamics-calibrate.mjs",
-    "dynamics:sweep": "node scripts/dynamics-sweep.mjs"
+    "dynamics:sweep": "node scripts/dynamics-sweep.mjs",
+    "dynamics:target": "node scripts/dynamics-target.mjs"
   },
   "dependencies": {
     "uuid": "^13.0.0",

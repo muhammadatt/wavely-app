@@ -23,6 +23,7 @@ import {
   effectiveTarget, BALANCE_IMPACT_DB, BALANCE_SQUASH_SCALE, MAX_SQUASH,
   DYNAMICS_TARGET, CLIP_SHAVE_DETENTS, DEFAULT_CLIP_SHAVE_DB, DEFAULT_MIX,
   makeupDbFor, MAKEUP_PEAK_MARGIN_DB, MAKEUP_TRIM_MARGIN_DB,
+  maxDropFor, MAX_IMPACT_DROP_DB, FET_MAX_SOLVE_DRIVE,
   SWEEP_POINTS, OPTO_GRID_DRIVES, OPTO_GRID_SQUASH, CLIP_MAX_DEPTH_DB,
 } from '../../src/audio/dynamicsSolve.js'
 import {
@@ -32,8 +33,16 @@ import { SoftClipperKernel } from '../../src/audio/softClipperProcessor.js'
 import { inputAlignDbFor } from '../../src/audio/dsp/inputAlign.js'
 
 const SR = 44100
+const ACCENT_EVERY = 7
+const ACCENT_GAIN = 2.6
 
-function narration(seconds, peakDbfs, seed = 4242) {
+/**
+ * ⚠ `accentGain` IS HOW THIS FILE GETS A LOW-IMPACT STIMULUS. Dropping it to 1
+ * removes the stressed onsets and takes impact from ~14.9 to ~11.0 — below the
+ * absolute target, which is the material the relative floor exists for. It is
+ * the same generator, so nothing else about the signal moves with it.
+ */
+function narration(seconds, peakDbfs, seed = 4242, accentGain = ACCENT_GAIN) {
   const n = Math.round(SR * seconds)
   const x = new Float32Array(n)
   let s = seed
@@ -52,15 +61,13 @@ function narration(seconds, peakDbfs, seed = 4242) {
    * the material — so one syllable in seven is accented, which puts it at
    * impact ~14.7 / crest ~17.7.
    */
-  const ACCENT_EVERY = 7
-  const ACCENT_GAIN = 2.6
   for (let i = 0; i < n; i++) {
     const t = i / SR
     const syl = t % 0.32
     const burst = syl < 0.2 ? Math.min(1, syl / 0.005) * Math.exp(-syl * 3.2) : 0
     // Phrase-level variation, so the macro has something to act on.
     const phrase = 0.45 + 0.55 * (Math.floor(t / 1.7) % 3) / 2
-    const accent = Math.floor(t / 0.32) % ACCENT_EVERY === 0 ? ACCENT_GAIN : 1
+    const accent = Math.floor(t / 0.32) % ACCENT_EVERY === 0 ? accentGain : 1
     x[i] = burst * phrase * accent * (0.6 * Math.sin(2 * Math.PI * 165 * t)
       + 0.25 * Math.sin(2 * Math.PI * 880 * t) + 0.15 * rnd())
   }
@@ -385,7 +392,14 @@ test('⚠ an unreachable impact target is REPORTED, not silently pinned', () => 
   }
   const { params, report } = solveFromSweep(starved, { density: 100, balance: -1 })
 
-  assert.equal(params.fetDrive, 100, 'the drive should run out at the top')
+  /**
+   * ⚠ IT RUNS OUT AT THE PLATEAU, NOT AT 100. Past `FET_MAX_SOLVE_DRIVE` the
+   * knob buys almost no further impact and costs enormous gain reduction, so
+   * the solve stops there and reports the miss — measured, an uncapped rail
+   * spent 20.49 dB of reduction to come 1.11 dB short. The cap changes where it
+   * gives up, never whether it says so.
+   */
+  assert.equal(params.fetDrive, FET_MAX_SOLVE_DRIVE, 'the drive should stop at the plateau')
   assert.ok(report.fet.capped, 'an unreachable target must be flagged')
   assert.ok(report.fet.shortfallDb > 1,
     `the shortfall should be reported: ${report.fet.shortfallDb}`)
@@ -564,4 +578,73 @@ test('⚠ with the FET out, the wet path is not the dry path', () => {
     + `against ${after.peakDb.toFixed(2)}`)
   assert.ok(after.peakDb <= before.peakDb + 0.01,
     `output peaked ${after.peakDb.toFixed(2)} against ${before.peakDb.toFixed(2)}`)
+})
+
+test('⚠ the relative floor gives Density a meaning the file cannot take away', () => {
+  /**
+   * ⚠ THE ABSOLUTE TARGET MADE DENSITY MEAN "DISTANCE TO 12.2", which is a
+   * property of the FILE. A recording arriving at impact 10.98 has no room at
+   * all, so the FET bypassed at EVERY Density and the knob bought nothing from
+   * that stage. Measured: drive null from Density 10 to 100.
+   */
+  const flat = [narration(10, -6, 4242, 1.0)]
+  assert.ok(measureDynamics(flat, SR).impactDb < DYNAMICS_TARGET.impactDb,
+    'this case needs a stimulus with no room under the absolute target')
+  const sweep = sweepDynamics(flat, SR)
+
+  for (const density of [30, 70, 100]) {
+    const off = solveFromSweep(sweep, { density, relativeTarget: false })
+    assert.equal(off.params.fetDrive, null,
+      `@ ${density}: the absolute target has nothing to ask for here`)
+
+    const on = solveFromSweep(sweep, { density })
+    assert.ok(on.params.fetDrive > 0, `@ ${density}: the floor must reach the stage`)
+    assert.ok(on.report.fet.targetImpactDb < off.report.fet.targetImpactDb,
+      `@ ${density}: the floor must ask for MORE, not less`)
+  }
+})
+
+test('⚠ the relative floor never asks for LESS than the absolute target', () => {
+  /**
+   * Both forms agree exactly at Density 0, and the absolute still binds as a
+   * floor so a punchy file is not driven past the house sound. The floor may
+   * only ever deepen the ask — `Math.min`, on a metric where lower means more
+   * processed.
+   */
+  for (const afterClip of [10.5, 12.2, 14.9, 18.0]) {
+    for (const density of [0, 0.5, 1]) {
+      const abs = fetTargetImpactFor(DYNAMICS_TARGET.impactDb, density, afterClip)
+      const rel = fetTargetImpactFor(
+        DYNAMICS_TARGET.impactDb, density, afterClip, MAX_IMPACT_DROP_DB,
+      )
+      assert.ok(rel <= abs + 1e-9, `${afterClip} @ ${density}: ${rel} > ${abs}`)
+      if (density === 0) assert.equal(rel, afterClip)
+    }
+  }
+  // And the flag is what selects between them, for both solve paths.
+  assert.equal(maxDropFor({ relativeTarget: false }), null)
+  assert.equal(maxDropFor({}), MAX_IMPACT_DROP_DB)
+  assert.equal(maxDropFor({ maxImpactDropDb: 4 }), 4)
+})
+
+test('⚠ an unreachable floor caps the drive instead of railing it', () => {
+  /**
+   * ⚠ IMPACT DROP AGAINST DRIVE PLATEAUS AROUND 60 and the solve does not know
+   * it — past that the knob buys almost no further impact and costs enormous
+   * gain reduction. Asking the flat stimulus for 3 dB took the drive to 100 and
+   * **20.49 dB of gain reduction** to come 1.11 dB short, which is the same
+   * silent rail this section shipped once already.
+   *
+   * The cap is not a way to hide the miss: the shortfall is reported, and
+   * reported LARGER because of it.
+   */
+  const flat = [narration(10, -6, 4242, 1.0)]
+  const sweep = sweepDynamics(flat, SR)
+  const { params, report } = solveFromSweep(sweep, {
+    density: 100, relativeTarget: true, maxImpactDropDb: 6,
+  })
+  assert.ok(params.fetDrive <= FET_MAX_SOLVE_DRIVE,
+    `drive ran to ${params.fetDrive} past the plateau`)
+  assert.ok(report.fet.shortfallDb > 0.05, 'an unreachable target must still report')
+  assert.equal(report.fet.capped, true)
 })
