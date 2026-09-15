@@ -656,6 +656,19 @@ cla76_bursts_rALL_I3_a4_r4.wav
 cla76_stairs_r4_I1_a1_r7.wav
 ```
 
+⚠ **THE `_a…_r….wav` PAIR MUST BE THE LAST THING IN THE NAME.** The ratio is in
+there as `r4` too, and the reader finds attack and release by anchoring to the
+end — a free search for `_r<number>` hits the ratio first. It used to, and every
+release in the report came back as the ratio: `cla76_bursts_r4_I3_a7_r1.wav`
+read as "release 4" when it is release 1. That mislabelled the report rather
+than the measurement, since the fit comes from the audio — but a wrong label on
+a right number is its own trap. A name that does not end in the pair is now
+reported as unreadable rather than guessed at.
+
+Everything before those two tokens is free-form and only groups the report, so
+put whatever helps you find the file. Dials go in bare (`a3`), FETish's
+continuous times go in with a unit (`a800us`, `r235ms`).
+
 Per capture, log: reference and version; **Rev / component variant**; every knob
 position **as the plugin displays it** (the Input readouts for I1–I4 are data,
 not bookkeeping — see "Choosing the Input positions"); **the GR meter reading**;

@@ -538,10 +538,27 @@ function selftest(sampleRate) {
  * dial, `..._a800us_r235ms.wav` for FETish's continuous controls.
  */
 function knobsFromName(file) {
-  const a = file.match(/_a(\d+(?:\.\d+)?)(us|ms)?/i)
-  const r = file.match(/_r(\d+(?:\.\d+)?)(us|ms)?/i)
-  const val = m => m && ({ n: Number(m[1]), unit: (m[2] || '').toLowerCase() })
-  return { attack: val(a), release: val(r) }
+  /**
+   * ⚠ ANCHORED TO THE END, AS ONE MATCH, BECAUSE `_r` IS AMBIGUOUS. The
+   * convention puts the RATIO in the name too — `cla76_bursts_r4_I3_a7_r1.wav` —
+   * and a free `/_r(\d+)/` finds the ratio's `r4` first. Every release label in
+   * the report read as the ratio: that file came back as "release 4" when it is
+   * release 1, and `..._a800us_r235ms.wav` came back as a unitless 4.
+   *
+   * It mislabelled the report rather than the measurement — the fit is done from
+   * the audio, not the name — but a wrong label on a right number is its own
+   * kind of trap, and anything later that trusted the declared release would
+   * have been silently wrong.
+   *
+   * Attack and release are the last two tokens by convention, so anchoring
+   * removes the ambiguity without forbidding the ratio in the name.
+   */
+  const m = file.match(/_a(\d+(?:\.\d+)?)(us|ms)?_r(\d+(?:\.\d+)?)(us|ms)?\.wav$/i)
+  if (!m) return { attack: null, release: null, unparsed: true }
+  return {
+    attack: { n: Number(m[1]), unit: (m[2] || '').toLowerCase() },
+    release: { n: Number(m[3]), unit: (m[4] || '').toLowerCase() },
+  }
 }
 
 const showKnob = k => (k ? k.n + (k.unit || ' (dial)') : '?')
@@ -834,7 +851,13 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
     }
 
     const knobs = knobsFromName(file)
-    console.log(`\n   declared knobs: attack ${showKnob(knobs.attack)}, release ${showKnob(knobs.release)}`)
+    if (knobs.unparsed) {
+      console.log('\n   ⚠ the filename does not end in _a<attack>_r<release>.wav, so the declared')
+      console.log('     knobs cannot be read from it. The measurement below is unaffected — it')
+      console.log('     comes from the audio — but nothing here records what the plugin was set to.')
+    } else {
+      console.log(`\n   declared knobs: attack ${showKnob(knobs.attack)}, release ${showKnob(knobs.release)}`)
+    }
 
     // ── Matched measurement against our own kernel ──────────────────────────
     const deepest = bursts[bursts.length - 1]
