@@ -152,15 +152,23 @@ const cappedNote = computed(() => {
 /**
  * ⚠ THE FET RAN OUT OF ROAD, AND STAYING QUIET ABOUT IT IS WHAT LET 26 dB OF
  * GAIN REDUCTION SHIP. Impact has only ~3 dB of travel through this device, so
- * a target below the floor pins the drive at 100 and looks identical to a
- * target that was met. The clipper has said so since it was written.
+ * a target below the floor is indistinguishable from one that was met unless
+ * the solve says so. The clipper has said so since it was written.
+ *
+ * ⚠ IT NO LONGER STOPS AT FULL DRIVE, AND THIS TEXT SAID IT DID. The solve gives
+ * up at `FET_MAX_SOLVE_DRIVE`, the measured plateau — past it the knob buys
+ * almost no further impact and costs enormous gain reduction, so running to 100
+ * is not "trying harder", it is 20 dB of reduction for a fraction of a dB. The
+ * message also still named the Voicing, which has not existed since Density
+ * became one number.
  */
 const fetShortNote = computed(() => {
   const s = summary.value
   if (!solutionValid.value || !s?.fetCapped) return null
-  return `The FET is at full drive and still ${s.fetShortfallDb.toFixed(1)} dB short of `
-    + `the dynamic range this Voicing asks for — there is not enough peak-to-body `
-    + `left in the material to take. Lower Density, or lean Balance toward the opto`
+  return `The FET is as deep as it is worth driving and still `
+    + `${s.fetShortfallDb.toFixed(1)} dB short of the dynamic range Density is `
+    + `asking for — there is not enough peak-to-body left in the material to take. `
+    + `Lower Density, or lean Balance toward the opto`
 })
 
 /**
