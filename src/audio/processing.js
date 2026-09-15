@@ -15,7 +15,7 @@ import { fet1176PreRollSeconds } from './fet1176Processor.js'
 import { ensureDynamicsWorklet } from './dynamicsWorkletLoader.js'
 import {
   DYNAMICS_DEFAULTS,
-  DYNAMICS_LATENCY_SAMPLES,
+  dynamicsLatencySamples,
   dynamicsPreRollSeconds,
   toKernelParams as toDynamicsKernelParams,
 } from './effects/dynamicsParams.js'
@@ -749,7 +749,9 @@ export function applyDynamicsRegion(
     ensureWorklet: ensureDynamicsWorklet,
     processorName: 'dynamics-processor',
     kernelParams,
-    latencySamples: DYNAMICS_LATENCY_SAMPLES,
+    // ⚠ THE FUNCTION, NOT THE CONSTANT — the limiter's lookahead is fixed in
+    // milliseconds, so this is 326 samples at 44.1 kHz and 342 at 48.
+    latencySamples: dynamicsLatencySamples(sampleRate),
     preRollSamples: Math.round(dynamicsPreRollSeconds(kernelParams) * sampleRate),
   })
 }

@@ -13,18 +13,27 @@
  */
 
 import {
-  DYNAMICS_KERNEL_DEFAULTS, dynamicsPreRollSeconds,
+  DYNAMICS_KERNEL_DEFAULTS, dynamicsPreRollSeconds, dynamicsLatencySamples,
+  DYNAMICS_CLIP_LIMITER,
 } from '../dynamicsProcessor.js'
 
-export { dynamicsPreRollSeconds }
+export { dynamicsPreRollSeconds, dynamicsLatencySamples, DYNAMICS_CLIP_LIMITER }
 
 /**
- * Latency of the section, in samples — clipper, FET and opto in series.
+ * Nominal latency of the section, in samples at 44.1 kHz — clipper, FET and
+ * opto in series.
  *
- * ⚠ A CONSTANT, UNLIKE OptoSmooth's AND THE SOFT CLIPPER's. Both of those are
- * per-patch because a control can switch their lookahead on; this composite
- * pins the clipper's limiter off and the opto's lookahead to zero precisely so
- * this number cannot move. `dynamicsComposite.test.js` tries to move it.
+ * ⚠ THE NOMINAL FIGURE ONLY, the same contract `la2aParams.js` states for its
+ * own. It is 150 while the clipper's limiter is pinned off and the opto's
+ * lookahead to zero; engaging the limiter (see `DYNAMICS_CLIP_LIMITER`) makes it
+ * RATE-DEPENDENT, because the lookahead is a fixed number of MILLISECONDS — 326
+ * samples at 44.1 kHz and 342 at 48.
+ *
+ * ⚠ ANYTHING THAT COMPENSATES A TIMELINE MUST CALL `dynamicsLatencySamples`,
+ * NOT THIS. Reading a constant here is precisely how the standalone clipper
+ * shifted an applied region by 176 samples and lost that much of its tail when
+ * its own `limiter` first defaulted to 100. This value is for the chain's
+ * nominal display; the apply path takes the function.
  */
 export const DYNAMICS_LATENCY_SAMPLES = 150
 

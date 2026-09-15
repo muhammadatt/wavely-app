@@ -107,11 +107,82 @@ const LN10_OVER_20 = Math.LN10 / 20
  * `outputTrimDb: 0` because any makeup in this section belongs at its output,
  * after the blend, where one number can be reasoned about.
  */
+/**
+ * The clipper's CLIP/LIMIT balance inside this composite.
+ *
+ * ⚠ IT WAS PINNED AT 0 FOR A LATENCY REASON, NOT AN AUDIO ONE. The section's
+ * "latency is 150 samples and constant" rested on the limiter being off, and
+ * nobody had auditioned the two paths here. The standalone's own measurements
+ * argue the other way on a voice: the curve's error is IN-BAND harmonics,
+ * **-16 dBc at 13 dB of drive**, which 8x oversampling does not touch because
+ * it is not fold-back; the limiter takes the same peaks down with a smooth gain
+ * envelope and errs as intermodulation and slight pumping instead.
+ *
+ * ⚠ THE KNOB IS A BALANCE, NOT A MODE. At 0 the limiter aims
+ * `LIMITER_MAX_ABOVE_DB` above the threshold and is bypassed outright; at 100
+ * it aims at the threshold itself and does as much of the peak control as it
+ * can, leaving the curve to catch intersample peaks and whatever the smoothing
+ * lets through. So 100 is "lean on the limiter", never "the curve is gone".
+ */
+/**
+ * ⚠ STILL 0, AND THE BLOCKER IS THE METERING, NOT THE LATENCY. Switching it to
+ * 100 was built and measured and then backed out: the clipper's reported
+ * reduction (`metering.maxReductionDb`) counts ONLY WHAT THE CURVE ADDED, by
+ * deliberate design — the standalone's RESIDUAL contract depends on the
+ * limiter's gain reduction being excluded. With the limiter carrying the peak
+ * control that figure reads 0.00 at every threshold, which takes two things
+ * with it:
+ *
+ *   - `CLIP_MAX_DEPTH_DB`, the section's one hard rule, stops binding. Measured
+ *     on the sweep: 25/292 combinations at the cap on David Greenberg and
+ *     88/292 on Messy and Bright BEFORE, 0/292 on both after.
+ *   - the panel's CLIP meter sits at zero while the stage is working, which is
+ *     the same lie the "controls disabled without a measurement" work removed.
+ *
+ * Fixing it means redefining the stage's reported depth as TOTAL peak reduction
+ * (source peak minus output peak) rather than the curve's own metering — which
+ * reaches into the shared kernel and changes what RESIDUAL means for the
+ * standalone plugin. That is a decision, not a refactor.
+ *
+ * The measurement that motivates the switch is real and worth keeping: at
+ * limiter 100 the output peak lands EXACTLY on the threshold (-3.00 / -5.00 /
+ * -7.00 / -9.00 dBFS measured), so it is a true brickwall and the crest
+ * response becomes predictable rather than something the sweep has to discover.
+ */
+export const DYNAMICS_CLIP_LIMITER = 0
+
 const CLIP_FIXED = {
-  limiter: 0,
+  limiter: DYNAMICS_CLIP_LIMITER,
   thresholdMode: 'fixed',
   outputTrimDb: 0,
 }
+
+/**
+ * The section's latency for a given sample rate.
+ *
+ * ⚠ IT IS NO LONGER A CONSTANT, AND A CONSTANT IS EXACTLY HOW THIS BIT THE
+ * STANDALONE. The limiter's lookahead is a fixed `LIMITER_LOOKAHEAD_MS`, so the
+ * sample count scales with the rate and only the TIME is stable: 226 samples
+ * for the clip stage at 44.1 kHz, 242 at 48. When the soft clipper's own
+ * `limiter` first defaulted to 100, both the chain's delay compensation and the
+ * offline apply path were still reading the oversampler-only constant, and the
+ * applied region came out shifted by 176 samples and short by that much at the
+ * tail — a seam at both boundaries, for a control nobody had touched.
+ *
+ * ⚠ QUOTE THE MILLISECONDS, NOT THE COUNT, for the same reason.
+ *
+ * The FET and the opto are both fixed at the oversampler's 50 — the opto's
+ * lookahead is pinned to 0 here precisely so it cannot move (see the kernel
+ * note on `lookaheadMs`).
+ */
+export function dynamicsLatencySamples(sampleRate) {
+  return softClipperLatencySamples(CLIP_FIXED, sampleRate)
+    + FET_STAGE_LATENCY_SAMPLES + OPTO_STAGE_LATENCY_SAMPLES
+}
+
+/** Both are the oversampler's group delay alone, by construction. */
+const FET_STAGE_LATENCY_SAMPLES = 50
+const OPTO_STAGE_LATENCY_SAMPLES = 50
 
 /**
  * FET settings this composite fixes.
@@ -357,11 +428,23 @@ export class DynamicsKernel {
      * push from the message port, which is not a place to be allocating.
      */
     this.bypassLines = { clip: [], fet: [], opto: [] }
-    /** Each stage's own latency, read from the kernels rather than hardcoded. */
+    /**
+     * Each stage's own latency, so a bypassed stage delays by exactly what the
+     * engaged one would.
+     *
+     * ⚠ THE CLIPPER'S CANNOT BE READ FROM THE KERNEL HERE. Its getter returns
+     * `osLatency + (limiterActive ? limiterLatency : 0)`, and `limiterActive` is
+     * only decided inside `process()` — so at construction it reads 50 even
+     * though the first block will delay by 226. Capturing it here would have
+     * rebuilt the exact bug the per-stage delay lines were added to fix, one
+     * layer up: the bypass line 176 samples shorter than the engaged path.
+     * Derived from the params instead, which is what `softClipperLatencySamples`
+     * exists for.
+     */
     this.stageLatency = {
-      clip: this.clipper.latencySamples,
-      fet: this.fet.latencySamples,
-      opto: this.la2a.latencySamples,
+      clip: softClipperLatencySamples(CLIP_FIXED, sampleRate),
+      fet: FET_STAGE_LATENCY_SAMPLES,
+      opto: OPTO_STAGE_LATENCY_SAMPLES,
     }
     this.wetScratch = []
     this.stageScratch = []
@@ -429,7 +512,14 @@ export class DynamicsKernel {
    * exactly the opto's latency, so both arrive together.
    */
   get latencySamples() {
-    return this.clipper.latencySamples + this.fet.latencySamples + this.la2a.latencySamples
+    /**
+     * ⚠ NOT SUMMED FROM THE KERNELS' GETTERS. The clipper's depends on state
+     * `process()` sets, so before the first block it would under-report by the
+     * limiter's lookahead — and `processDynamicsBuffer` reads this to tell its
+     * caller where the region starts. Derived from the params, like the bypass
+     * lines above, so the two cannot disagree.
+     */
+    return this.stageLatency.clip + this.stageLatency.fet + this.stageLatency.opto
   }
 
   /**

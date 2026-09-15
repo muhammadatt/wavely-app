@@ -18,6 +18,7 @@ import assert from 'node:assert/strict'
 import {
   DynamicsKernel, processDynamicsBuffer, dynamicsPreRollSeconds,
   DYNAMICS_KERNEL_DEFAULTS,
+  dynamicsLatencySamples,
 } from '../../src/audio/dynamicsProcessor.js'
 import { processSoftClipperBuffer } from '../../src/audio/softClipperProcessor.js'
 import { processFET1176Buffer } from '../../src/audio/fet1176Processor.js'
@@ -64,6 +65,14 @@ const HEAD_FET = {
 test('latency is the sum of the three serial stages', () => {
   const k = new DynamicsKernel(SR)
   // 50 (clipper at limiter 0) + 50 (FET) + 50 (opto, lookahead pinned off).
+  /**
+   * ⚠ DERIVED, NOT TYPED, because engaging the clipper's limiter would make it
+   * RATE-DEPENDENT — the lookahead is a fixed number of milliseconds, so the
+   * section would be 326 samples at 44.1 kHz and 342 at 48. Every timeline
+   * caller takes `dynamicsLatencySamples` for that reason; see
+   * `DYNAMICS_CLIP_LIMITER` for why the switch is not made yet.
+   */
+  assert.equal(k.latencySamples, dynamicsLatencySamples(SR))
   assert.equal(k.latencySamples, 150)
   assert.equal(
     k.latencySamples,
@@ -280,7 +289,7 @@ test('⚠ an UN-SOLVED section is bit-exact pass-through, not a default patch', 
     clipThresholdDb: null, fetDrive: null, squash: null,
   })
   const out = r.channelData[0]
-  assert.equal(r.latencySamples, 150)
+  assert.equal(r.latencySamples, dynamicsLatencySamples(SR))
   for (let i = 0; i < n - r.latencySamples; i++) {
     assert.equal(out[i + r.latencySamples], x[i],
       `un-solved must be bit-exact pass-through; diverged at ${i}`)
@@ -319,7 +328,7 @@ test('⚠ latency is constant in FACT, not just in what the getter DECLARES', ()
     }
     return at
   }
-  const expected = impulseAt + 150
+  const expected = impulseAt + dynamicsLatencySamples(SR)
   assert.equal(peakIndex({ clipThresholdDb: -6, mix: 0 }), expected, 'all stages engaged')
   assert.equal(peakIndex({ clipThresholdDb: null, mix: 0 }), expected, 'clipper bypassed')
   assert.equal(peakIndex({ clipThresholdDb: null, fetDrive: null }), expected, 'FET bypassed')
