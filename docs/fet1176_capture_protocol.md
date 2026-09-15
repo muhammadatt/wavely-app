@@ -452,6 +452,35 @@ Instead, pick four Input positions by the **gain reduction they produce on the
 that collapses the four static curves onto one *is* the taper, and the readouts
 are what it gets expressed in.
 
+### Setting an Input position in practice
+
+⚠ **THIS IS A KNOB-SETTING PROCEDURE, NOT SOMETHING THAT NEEDS A CAPTURE.** The
+table above names `stairs.wav` because that is where the static matrix uses it,
+but nothing has to be bounced to find the position — you play the file and watch
+the plugin's own meter.
+
+**And it can be set on `bursts.wav` directly, which matters if that is the file
+you are starting with.** Both files hold −12 dBFS tones, so the settled reduction
+is the same on either: measured across Input 40 / 50 / 55 / 60 / 70, the
+−12 dBFS step of `stairs.wav` and the 3 s hold of `bursts.wav` agree to **two
+decimal places** at every position.
+
+So, for the bursts matrix:
+
+1. Load **`bursts.wav`**, ratio **4**.
+2. Play it and watch the GR meter during one of the longer holds.
+3. Turn **Input** until it settles at about **12 dB** of reduction. That is I3.
+4. **Write the readout down**, and do not touch Input again for the rest of the
+   bursts matrix — it is the one control that must stay fixed while attack and
+   release sweep.
+
+⚠ **THE BALLISTICS SETTING DOES NOT AFFECT THIS READING, so it does not matter
+which one you happen to be on when you set it.** During a sustained hold the
+detector's target is constant, so the gain settles at the same place whatever
+the attack and release are: measured at Input 60 across attack 1/4/7 and release
+1/4/7, the settled reduction runs **6.37 to 6.44 dB** — a 0.07 dB spread. Even
+the 50 ms burst settles to the same value.
+
 ### `stairs.wav` — static curve
 
 44.6 s. Fifteen 1 s steps from −45 to −3 dBFS in 3 dB.
