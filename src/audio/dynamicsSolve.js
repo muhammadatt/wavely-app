@@ -1416,8 +1416,9 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
    */
   const gridDrives = [...(options.optoGridDrives ?? OPTO_GRID_DRIVE_POINTS)]
   const gridSquash = []
-  for (let j = 0; j < OPTO_GRID_SQUASH; j++) {
-    gridSquash.push((MAX_SQUASH * j) / (OPTO_GRID_SQUASH - 1))
+  const squashCols = options.optoGridSquash ?? OPTO_GRID_SQUASH
+  for (let j = 0; j < squashCols; j++) {
+    gridSquash.push((MAX_SQUASH * j) / (squashCols - 1))
   }
 
   // [driveIndex][squashIndex]
@@ -1429,7 +1430,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   const gridAlignDb = []
   let blend = { correlation: 0, densityDb: 0, trimDb: 0 }
   const midDrive = Math.floor(gridDrives.length / 2)
-  const midSquash = Math.floor(OPTO_GRID_SQUASH / 2)
+  const midSquash = Math.floor(gridSquash.length / 2)
 
   for (let i = 0; i < gridDrives.length; i++) {
     const dry = renderFet(
@@ -1447,7 +1448,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
      * exactly 1, so the output is the wet path and nothing else.
      */
     const outP999 = []
-    for (let j = 0; j < OPTO_GRID_SQUASH; j++) {
+    for (let j = 0; j < gridSquash.length; j++) {
       const r = renderWet(
         dry, sampleRate, { ...patch, squash: gridSquash[j], optoAlignDb: align },
       )
