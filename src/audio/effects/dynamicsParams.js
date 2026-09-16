@@ -102,6 +102,13 @@ export const DYNAMICS_MEASURED_KEYS = Object.freeze([
    * applying 14 dB of makeup while claiming to be a pass-through.
    */
   'makeupDb',
+  /**
+   * ⚠ AND SO DOES THE CEILING, for the same reason twice over: it is the FILE's
+   * own peak, so a preset carrying it would hold another recording's level; and
+   * a live node with no solve must clear it, or a section claiming to be a
+   * bit-exact pass-through would be shaping peaks against a stale number.
+   */
+  'ceilingDb', 'ceilingKneeDb',
 ])
 
 /**

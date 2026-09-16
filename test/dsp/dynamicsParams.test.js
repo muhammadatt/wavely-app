@@ -94,6 +94,12 @@ test('a live push CLEARS the measured keys when no solve is in force', () => {
      * pass-through it claims to be.
      */
     makeupDb: 6.2,
+    /**
+     * ⚠ AND SO IS THE CEILING. It is the FILE's own peak, so a section still
+     * shaping against it with no solve would be holding another recording's
+     * level — and the section's pass-through guarantee is bit-exactness.
+     */
+    ceilingDb: -1.0, ceilingKneeDb: 1.5,
   }
   const withSolve = toLiveKernelParams(DYNAMICS_DEFAULTS, solved)
   for (const key of DYNAMICS_MEASURED_KEYS) {

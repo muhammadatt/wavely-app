@@ -22,7 +22,7 @@ import {
   clipShaveFor, fetTargetImpactFor, squashFor,
   effectiveTarget, BALANCE_IMPACT_DB, BALANCE_SQUASH_SCALE, MAX_SQUASH,
   DYNAMICS_TARGET, CLIP_SHAVE_DETENTS, DEFAULT_CLIP_SHAVE_DB, DEFAULT_MIX,
-  makeupDbFor, MAKEUP_PEAK_MARGIN_DB, MAKEUP_TRIM_MARGIN_DB,
+  makeupDbFor,
   maxDropFor, MAX_IMPACT_DROP_DB, FET_MAX_SOLVE_DRIVE,
   SWEEP_POINTS, OPTO_GRID_DRIVES, OPTO_GRID_SQUASH, CLIP_MAX_DEPTH_DB,
   CLIP_MAX_PEAK_RED_DB,
@@ -32,6 +32,9 @@ import {
 } from '../../src/audio/dynamicsProcessor.js'
 import { SoftClipperKernel } from '../../src/audio/softClipperProcessor.js'
 import { inputAlignDbFor } from '../../src/audio/dsp/inputAlign.js'
+import {
+  percentileOfChannels, MAKEUP_PERCENTILE,
+} from '../../src/audio/dsp/makeupReference.js'
 
 const SR = 44100
 const ACCENT_EVERY = 7
@@ -369,8 +372,15 @@ test('⚠ the FET BYPASSES when the target is met — drive 0 is a 24 dB attenua
    * Leaving it in makes the render legitimately non-identical (measured 1.45 dB)
    * and says nothing about the kernel's bypass, which is what this pins.
    */
+  /**
+   * ⚠ THE CEILING GOES WITH THE MAKEUP for the same reason: this forces a
+   * configuration the solve never produces — all three stages off — so neither
+   * the output gain nor the peak shaping the solve computed describes it any
+   * more, and both would break the bit-exactness this pins.
+   */
   const r = processDynamicsBuffer(x, SR, {
     ...params, squash: null, clipThresholdDb: null, makeupDb: 0,
+    ceilingDb: null, ceilingKneeDb: null,
   })
   const out = r.channelData[0]
   for (let i = 0; i < x[0].length - r.latencySamples; i++) {
@@ -555,27 +565,37 @@ test('⚠ the bisect renders a bypassed FET as a bypass, not as drive 50', () =>
     `opto aligned to ${params.optoAlignDb.toFixed(2)} off a render that never happens`)
 })
 
-test('⚠ the makeup TRIMS when the section is predicted over the input peak', () => {
+test('⚠ the peak guarantee is ENFORCED now, not predicted', () => {
   /**
-   * ⚠ `Math.max(0, …)` IS RIGHT ABOUT MAKEUP AND WRONG AS THE ONLY THING
-   * HOLDING THE PEAK. "Never louder than the source" was enforced by withholding
-   * makeup — which works only while there is makeup to withhold. On material
-   * whose impact already meets the target every stage bypasses, the makeup is
-   * zero, and the opto block's Pultec gain still reaches the blend: measured
-   * 2.31 dB past the input peak at Mix 1.
+   * ⚠ IT USED TO BE ARITHMETIC AND THE ARITHMETIC WAS THE EXPENSIVE PART.
+   * "Never louder than the source" was held by subtracting a margin from a
+   * PREDICTED output peak — and peak, unlike level, does not interpolate, so the
+   * prediction needed a triangle-inequality bound over two interpolated peaks
+   * plus a margin sized on its own worst error. `ceilingDb` holds it by
+   * construction instead, which is what let the prediction be deleted.
+   *
+   * `makeupDbFor` is therefore just the percentile target now.
    */
-  // Predicted output already 2 dB over the input peak, and no makeup wanted.
-  const over = makeupDbFor(-20, -6, -20, -4)
-  assert.ok(over < 0, `a section predicted over the peak must trim, got ${over}`)
-  assert.equal(over, -2 - MAKEUP_TRIM_MARGIN_DB)
+  assert.equal(makeupDbFor(-10, -20), 10)
+  assert.equal(makeupDbFor(-20, -20), 0)
+  assert.equal(makeupDbFor(-24, -20), -4)
 
-  // And a section predicted UNDER the peak is untouched — every case that was
-  // already legal must stay bit-for-bit what it was.
-  assert.equal(makeupDbFor(-20, -6, -20, -20), Math.min(0, 14 - MAKEUP_PEAK_MARGIN_DB))
-  // And the percentile target still binds ahead of the peak bound when it is
-  // the smaller of the two.
-  assert.equal(makeupDbFor(-10, -6, -20, -20), Math.min(10, 14 - MAKEUP_PEAK_MARGIN_DB))
-  assert.equal(makeupDbFor(-4, -6, -20, -20), 14 - MAKEUP_PEAK_MARGIN_DB)
+  // And the section holds the ceiling on a real render, at the Mix where the
+  // dry side dominates and at the one where the wet side does.
+  const x = [narration(10, -6)]
+  const before = measureDynamics(x, SR)
+  const sweep = sweepDynamics(x, SR)
+  for (const mix of [0, 0.3, 1]) {
+    for (const density of [10, 60, 100]) {
+      const { params } = solveFromSweep(sweep, { density, mix })
+      assert.equal(params.ceilingDb, before.peakDb)
+      const r = processDynamicsBuffer(x, SR, params)
+      const after = measureDynamics([r.channelData[0].subarray(r.latencySamples)], SR)
+      assert.ok(after.peakDb <= before.peakDb + 0.01,
+        `D${density}/mix${mix}: peaked ${after.peakDb.toFixed(2)} against `
+        + `${before.peakDb.toFixed(2)}`)
+    }
+  }
 })
 
 test('⚠ with the FET out, the wet path is not the dry path', () => {
@@ -595,10 +615,16 @@ test('⚠ with the FET out, the wet path is not the dry path', () => {
 
   const r = processDynamicsBuffer(x, SR, params)
   const after = measureDynamics([r.channelData[0].subarray(r.latencySamples)], SR)
-  // The prediction is of the output BEFORE the makeup, so add it back.
-  assert.ok(Math.abs(report.makeup.outPeakDb + params.makeupDb - after.peakDb) < 0.5,
-    `predicted ${(report.makeup.outPeakDb + params.makeupDb).toFixed(2)} `
-    + `against ${after.peakDb.toFixed(2)}`)
+  /**
+   * ⚠ ASSERTED ON THE LEVEL, NOT THE PEAK — the peak prediction is gone, the
+   * ceiling holds that now. The LEVEL prediction is what the wet-gain read
+   * exists for, and it is still what sets the makeup.
+   */
+  const p999 = 20 * Math.log10(percentileOfChannels(
+    [r.channelData[0].subarray(r.latencySamples)], MAKEUP_PERCENTILE))
+  assert.ok(Math.abs(report.makeup.outP999Db + params.makeupDb - p999) < 0.5,
+    `predicted ${(report.makeup.outP999Db + params.makeupDb).toFixed(2)} `
+    + `against ${p999.toFixed(2)}`)
   assert.ok(after.peakDb <= before.peakDb + 0.01,
     `output peaked ${after.peakDb.toFixed(2)} against ${before.peakDb.toFixed(2)}`)
 })
@@ -728,3 +754,36 @@ function lerpLike(xs, ys, q) {
   }
   return ys[ys.length - 1]
 }
+
+test('⚠ the ceiling is a BACKSTOP, not a working stage', () => {
+  /**
+   * ⚠ THE KNEE IS THE PRICE OF ENFORCEMENT AND IT HAS TO STAY SMALL. `tanh` is
+   * asymptotic, so it bends BELOW the ceiling and pulls down samples that were
+   * never going to exceed it — that is what cost OptoSmooth 0.30-0.48 dB at
+   * settings with nothing to catch, and Scheps 0.63 dB at Mix 0.
+   *
+   * It is affordable here because the section reduces crest, so matching the
+   * percentile normally leaves the peak BELOW where it started: measured with
+   * the makeup unbounded, the output lands over the input peak in 22/84 and
+   * 0/84 combinations, worst +0.93 dB, median 0.74-1.11 dB under.
+   *
+   * So this pins the two halves of that bargain — the guarantee holds, and the
+   * makeup still lands on its percentile target.
+   */
+  const x = [narration(10, -6)]
+  const input = measureDynamics(x, SR)
+  const inP999 = 20 * Math.log10(percentileOfChannels(x, MAKEUP_PERCENTILE))
+  const sweep = sweepDynamics(x, SR)
+  for (const density of [10, 60, 100]) {
+    for (const mix of [0, 0.3, 1]) {
+      const { params } = solveFromSweep(sweep, { density, mix })
+      const r = processDynamicsBuffer(x, SR, params)
+      const out = [r.channelData[0].subarray(r.latencySamples)]
+      assert.ok(measureDynamics(out, SR).peakDb <= input.peakDb + 0.01,
+        `D${density}/mix${mix}: the ceiling did not hold`)
+      const short = inP999 - 20 * Math.log10(percentileOfChannels(out, MAKEUP_PERCENTILE))
+      assert.ok(short < 0.6,
+        `D${density}/mix${mix}: the knee cost ${short.toFixed(2)} dB of the target`)
+    }
+  }
+})

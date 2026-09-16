@@ -80,6 +80,7 @@ import { BiquadCascade } from './dsp/biquad.js'
 import { pultecSections, PULTEC_STAGES } from './dsp/pultec.js'
 import { DelayLine } from './dsp/oversample.js'
 import { clamp, finite, mixGains } from './dsp/parallelMix.js'
+import { softCeiling, float32AtOrBelow } from './dsp/makeupReference.js'
 
 const LN10_OVER_20 = Math.LN10 / 20
 
@@ -162,6 +163,21 @@ const LN10_OVER_20 = Math.LN10 / 20
  * Neither was optional and neither is visible from this line, which is why they
  * are named here.
  */
+/**
+ * The output ceiling's soft-knee width, dB.
+ *
+ * ⚠ FIXED, NOT SOLVED, AND THAT IS THE POINT OF ADOPTING THE CEILING. OptoSmooth
+ * sizes its knee from the overshoot it predicts — which is exactly the
+ * prediction this change exists to delete. Sizing it here instead from what the
+ * ceiling actually has to CATCH: with the makeup targeting p99.9 and no peak
+ * bound, measured over 84 combinations of Density, Mix and Balance on two
+ * narrators, the output lands OVER the input peak in 22/84 and 0/84, worst
+ * +0.93 dB, median 0.74-1.11 dB UNDER. The section reduces crest, so matching
+ * the percentile normally leaves the peak below where it started; the ceiling
+ * is a backstop, not a working stage.
+ */
+export const DYNAMICS_CEILING_KNEE_DB = 1.5
+
 export const DYNAMICS_CLIP_LIMITER = 100
 
 const CLIP_FIXED = {
@@ -264,6 +280,21 @@ export const DYNAMICS_KERNEL_DEFAULTS = {
   clipShape: 'tanh4',
 
   // ── FET Punch ────────────────────────────────────────────────────────────
+  /**
+   * The section's output ceiling, dBFS, and the width of its soft knee.
+   *
+   * ⚠ MEASURED KEYS, AND THE SECTION USED TO HOLD NO CEILING AT ALL. That was a
+   * deliberate property — peak control belongs to the chain's delivery solve,
+   * and a ceiling here would be partly undone downstream — but it forced the
+   * makeup to hold "never louder than the source" by ARITHMETIC on a predicted
+   * peak, which needed the whole peak-prediction apparatus and a margin sized
+   * on its worst error.
+   *
+   * ⚠ NULL DISABLES IT, which is what an un-solved section gets. `softCeiling`
+   * is memoryless, so this adds no latency and nothing to converge.
+   */
+  ceilingDb: null,
+  ceilingKneeDb: null,
   fetDrive: 50, // 0-100 into the fixed internal threshold
   fetAttack: 4, // dial 1-7, 7 fastest
   fetRelease: 4,
@@ -493,6 +524,20 @@ export class DynamicsKernel {
 
     this.la2a.setParams(optoParamsFor(p))
 
+    /**
+     * ⚠ ROUNDED DOWN INTO FLOAT32 so the clamp inside `softCeiling` survives the
+     * store into a Float32Array — the same reason `computeAutoMakeupPlan` does
+     * it. Inaudible at 1e-8 dB; the point is that the guarantee either holds or
+     * it does not.
+     */
+    this.ceilingLin = Number.isFinite(p.ceilingDb)
+      ? float32AtOrBelow(Math.exp(p.ceilingDb * LN10_OVER_20))
+      : 0
+    this.ceilingKneeStart = this.ceilingLin > 0
+      ? this.ceilingLin * Math.exp(-finite(p.ceilingKneeDb, DYNAMICS_CEILING_KNEE_DB, 0.05, 12)
+        * LN10_OVER_20)
+      : 0
+
     this.outputLin = Math.exp(
       (finite(p.outputDb, 0, -24, 24) + finite(p.makeupDb, 0, -24, 36)) * LN10_OVER_20,
     )
@@ -646,7 +691,7 @@ export class DynamicsKernel {
         const s = stage[ch]
         const out = outputChannels[ch]
         const line = lines[ch]
-        for (let i = 0; i < n; i++) out[i] = line.push(s[i]) * outputLin
+        for (let i = 0; i < n; i++) out[i] = this._ceil(line.push(s[i]) * outputLin)
       }
       return
     }
@@ -671,9 +716,23 @@ export class DynamicsKernel {
         // Read the dry sample before writing the output, so an in-place caller
         // (input and output the same array) still works.
         const dry = line.push(s[i])
-        out[i] = (dry * dryGain + w[i] * wetGain) * outputLin
+        out[i] = this._ceil((dry * dryGain + w[i] * wetGain) * outputLin)
       }
     }
+  }
+
+  /**
+   * The section's output ceiling — a `tanh` knee into a hard clamp.
+   *
+   * ⚠ MEMORYLESS ON PURPOSE. It is the last thing the section does and it holds
+   * no state, so it adds no latency, needs no pre-roll, and cannot diverge
+   * between the preview worklet and the offline apply.
+   *
+   * ⚠ AND IT IS A NO-OP WITH NO SOLVE, which matters because an un-solved
+   * section must stay a bit-exact pass-through.
+   */
+  _ceil(v) {
+    return this.ceilingLin > 0 ? softCeiling(v, this.ceilingLin, this.ceilingKneeStart) : v
   }
 
   /** Run a bypassed stage's delay so the composite's latency does not move. */
