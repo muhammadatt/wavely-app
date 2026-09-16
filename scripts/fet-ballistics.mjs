@@ -1390,6 +1390,8 @@ FET Punch capture tooling. Pick a mode:
   npm run fet:stimulus     write the test signals and print the capture matrix
   npm run fet:selftest     prove the gain trace against our own kernel
   npm run fet:ballistics   fit whatever bursts captures are present
+  npm run fet:transients   the transient limb only — seconds, not minutes, because
+                           it skips the dial tables the bursts fit has to render
 
 Both take --rate <hz> (default ${DEFAULT_SR}).
 

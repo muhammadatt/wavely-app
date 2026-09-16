@@ -44,6 +44,7 @@
     "fet:curve": "node scripts/fet-static-curve.mjs",
     "fet:curve:selftest": "node scripts/fet-static-curve.mjs --selftest",
     "fet:ballistics": "node scripts/fet-ballistics.mjs --fit",
+    "fet:transients": "node scripts/fet-ballistics.mjs --transients",
     "fet:ballistics:selftest": "node scripts/fet-ballistics.mjs --fit --selftest"
   },
   "dependencies": {
