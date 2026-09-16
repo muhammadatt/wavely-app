@@ -2335,6 +2335,65 @@ both 17.51 and 21.86. Whatever the cause, overshoot stops discriminating above
 roughly 17 dB, so the attack fit should not be run at depths beyond that until it
 is understood.
 
+### Depth-scheduled release, behind a flag — and why the fit cannot be believed yet
+
+`releaseSchedule: 'depth'` on the FET kernel, default `'none'`, with a test that
+renders both and compares sample by sample: **off is bit-identical to every FET
+Punch render made before it existed.** The constant scales as
+`tau = tau_knob * exp(k * (D - 10 dB))`, read from a 0.25 dB lookup table rather
+than a `Math.exp` per sample, and indexed on the CURRENT reduction — so it
+shortens as the cell recovers, which is the physical choice and the reason
+measured t63 is no longer the constant behind it.
+
+`scripts/fet-release-depth.mjs` fits it by simulate-and-match: every candidate is
+rendered through the kernel and read by the same analysis that produced the
+reference numbers. Its self-test recovers `k = 0.1198` from a synthetic table
+rendered at 0.12, and confirms the schedule is inert when off.
+
+**Three things the fit got wrong before it got them right, all worth keeping:**
+
+⚠ **The release dial was pinned at 4 because the reference knob said 234 ms.** The
+residual came out at 207 ms and looked like the model failing. FETish's release
+knob reads ~2.75x longer than the constant it produces — measured twice, already
+logged — so its "234 ms" is not our dial 4. The schedule sets the SHAPE and the
+dial sets the LEVEL; fitting one against a label neither side shares cannot
+converge. With the dial free the same fit lands at 0.48 %.
+
+⚠ **The tail has to come off, and that is not a detail.** The two mechanisms
+fight: the tail lengthens recovery with exposure, which FETish measurably does
+not do, and at shallow depths it dominates the schedule outright — a synthetic
+table rendered at `k = 0.12` with the tail on comes back NON-MONOTONE
+(271 / 262 / 301 / 333 ms).
+
+⚠ **The residual is in percent, not milliseconds.** The reference spans 30 to
+139 ms, so an absolute residual is dominated by the deepest row and a fit can
+look good while being 3x wrong at the shallow end.
+
+**AND THE RESULT IS STILL NOT EVIDENCE.** Our Input runs out near 16.3 dB against
+a reference reaching 21.9, so two of the four rows cannot be driven to at all:
+
+| reference depth | reference t63 | ours | error |
+|---|---|---|---|
+| 6.18 dB | 30 ms | 29.8 | −0.6 % |
+| 13.96 dB | 70 ms | 70.2 | +0.3 % |
+| 17.51 dB | 93 ms | — | past our Input range |
+| 21.86 dB | 139 ms | — | past our Input range |
+
+`k = 0.1586 dB⁻¹` at release dial 6.13, rms 0.48 %. **Two reachable points against
+two free parameters is an interpolation, not a fit** — k and the dial can hit any
+two rows exactly, so that 0.48 % is arithmetic and says nothing about whether a
+depth schedule is the right model. The tool names this rather than printing a
+flattering number, and a test pins the underdetermination so that it failing is
+the signal the fit has become worth believing.
+
+The one number that does carry information: the same fit with the schedule off
+and **the dial free** — the honest null hypothesis, not the shipping dial — cannot
+get below **51 %**. A fixed release of any length cannot produce this shape. That
+is weak evidence for the schedule and strong evidence against a fixed constant.
+
+**Blocked on `IN_DRIVE_SPAN_DB`.** Widening our Input range is now the gate on the
+release fit, not a side finding — it is the third time it has come up.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

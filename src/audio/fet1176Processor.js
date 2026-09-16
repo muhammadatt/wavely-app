@@ -113,6 +113,30 @@ const RELEASE_FASTEST_S = 0.05
 
 // Program-dependent release: this share of the reduction recovers on a tail
 // this many times slower than the dial setting.
+/**
+ * Depth-scheduled release — OFF BY DEFAULT, and off is bit-identical to before.
+ *
+ * ⚠ THIS IS A DIFFERENT MECHANISM FROM `TAIL_FRACTION`, NOT A RETUNE OF IT. The
+ * tail makes recovery depend on how LONG the cell was held down; this makes it
+ * depend on how DEEP the reduction is. Measured on FETish with one release
+ * setting and only the Input moving, release t63 runs 30 / 70 / 93 / 139 ms at
+ * 6.2 / 14.0 / 17.5 / 21.9 dB — 4.6x — while it reads flat on both the exposure
+ * and the density plans. Our own kernel with the tail off reads 233 ms at every
+ * depth to the millisecond, which is what a fixed exponential must do, so the
+ * measurement is clean and the effect is the reference's.
+ *
+ * ⚠ THE SCHEDULE READS THE CURRENT REDUCTION, NOT THE DEPTH AT RELEASE ONSET.
+ * That is the physical choice — a cap network's recovery rate follows its present
+ * state — and it is why the recovery is NOT a pure exponential and why measured
+ * t63 is no longer the constant behind it. Fitting `k` by regressing the numbers
+ * above is therefore wrong; it has to go through the kernel and the same
+ * analysis, as everything else here does.
+ */
+const RELEASE_DEPTH_REF_DB = 10
+const RELEASE_DEPTH_K = 0.098
+const RELEASE_DEPTH_MAX_DB = 36
+const RELEASE_LUT_STEP_DB = 0.25
+
 const TAIL_FRACTION = 0.22
 const TAIL_MULT = 4
 
@@ -189,6 +213,16 @@ export const FET1176_KERNEL_DEFAULTS = {
   attack: 4, // dial 1-7, 7 = fastest (hardware markings)
   release: 4, // dial 1-7, 7 = fastest (hardware markings)
   ratio: '4', // '4' | '8' | '12' | '20' | 'all'
+  /**
+   * Release-time schedule.
+   *   'none'  — one constant per knob position, whatever the reduction. Ships,
+   *             and is bit-identical to every render made before this existed.
+   *   'depth' — the constant scales with the CURRENT reduction, which is the
+   *             limb FETish actually has. See RELEASE_DEPTH_K.
+   */
+  releaseSchedule: 'none',
+  /** dB⁻¹ slope of that schedule. Only read when releaseSchedule is 'depth'. */
+  releaseDepthK: RELEASE_DEPTH_K,
   /**
    * FET / output-amp saturation amount, 0-1.
    *
@@ -438,6 +472,25 @@ export class FET1176Kernel {
     this.releaseCoef = 1 - Math.exp(-1 / (sr * releaseS))
     this.tailCoef = 1 - Math.exp(-1 / (sr * releaseS * this.tailMult))
 
+    /**
+     * \u26a0 A TABLE, NOT A `Math.exp` PER SAMPLE. The schedule reads the current
+     * reduction, so a closed form would put two transcendentals in the envelope
+     * loop at 4x oversampling. Quantising the DEPTH to 0.25 dB costs nothing
+     * audible \u2014 the coefficient moves 2.4 % per step at k = 0.098 \u2014 and the
+     * table is rebuilt only when a parameter changes.
+     */
+    this.releaseScheduled = p.releaseSchedule === 'depth'
+    if (this.releaseScheduled) {
+      const k = Number.isFinite(p.releaseDepthK) ? p.releaseDepthK : RELEASE_DEPTH_K
+      const n = Math.round(RELEASE_DEPTH_MAX_DB / RELEASE_LUT_STEP_DB) + 1
+      if (!this.releaseLut || this.releaseLut.length !== n) this.releaseLut = new Float64Array(n)
+      for (let i = 0; i < n; i++) {
+        const depthDb = i * RELEASE_LUT_STEP_DB
+        const tau = releaseS * Math.exp(k * (depthDb - RELEASE_DEPTH_REF_DB))
+        this.releaseLut[i] = 1 - Math.exp(-1 / (sr * tau))
+      }
+    }
+
     // Input attenuator: audio path and detector both, as on the hardware.
     const knob = clamp(p.inputDrive, 0, 100) / 100
     this.inputDriveDb = IN_DRIVE_MIN_DB + IN_DRIVE_SPAN_DB * Math.pow(knob, IN_TAPER)
@@ -665,7 +718,21 @@ export class FET1176Kernel {
         grMain += delta * this.mainFraction
         grTail += delta * this.tailFraction
       } else {
-        grMain += (grTarget * this.mainFraction - grMain) * this.releaseCoef
+        /**
+         * \u26a0 THE SCHEDULE IS INDEXED ON THE REDUCTION, WHICH IS FALLING, so the
+         * constant shortens as the cell recovers and the trajectory is not an
+         * exponential. That is the point \u2014 it is what produces a t63 that moves
+         * with depth \u2014 and it is also why the fit for `k` cannot be a regression
+         * on measured t63.
+         */
+        let rc = this.releaseCoef
+        if (this.releaseScheduled) {
+          let idx = (gr * (1 / RELEASE_LUT_STEP_DB) + 0.5) | 0
+          if (idx < 0) idx = 0
+          else if (idx >= this.releaseLut.length) idx = this.releaseLut.length - 1
+          rc = this.releaseLut[idx]
+        }
+        grMain += (grTarget * this.mainFraction - grMain) * rc
         grTail += (grTarget * this.tailFraction - grTail) * this.tailCoef
       }
 
