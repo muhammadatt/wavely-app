@@ -275,9 +275,54 @@ test('the transient plan resolves program dependence, and its absence', () => {
 
 test('mismatched depths refuse a verdict rather than comparing the times', () => {
   const v = transientVerdict([
+    // Both clear the depth floor, so it is the MISMATCH that must stop this.
     { depthDb: 14.0, releaseT63: 0.2 },
-    { depthDb: 4.0, releaseT63: 0.4 },
+    { depthDb: 10.0, releaseT63: 0.4 },
   ])
   assert.equal(v.ok, false)
   assert.match(v.reason, /matched depth/)
+})
+
+/**
+ * ⚠ BOTH OF THESE FIRED ON REAL CAPTURES AND BOTH PRODUCED A CONFIDENT WRONG
+ * FINDING. A CLA-76 capture that never compressed (−0.01 dB) was reported as
+ * "does not model program dependence on either limb"; a FETish capture reading
+ * 23 / 23 / 24 ms was reported as keyed on transient density, on one millisecond
+ * of rounding at 23 ms.
+ */
+test('a capture that never compressed refuses a verdict', () => {
+  const v = transientVerdict([
+    { depthDb: -0.01, releaseT63: 0 },
+    { depthDb: -0.01, releaseT63: 0 },
+    { depthDb: -0.01, releaseT63: 0 },
+  ])
+  assert.equal(v.ok, false)
+  assert.match(v.reason, /did not compress at all/)
+})
+
+test('a capture too shallow to have been validated refuses a verdict', () => {
+  const v = transientVerdict([
+    { depthDb: 4.93, releaseT63: 0.023 },
+    { depthDb: 4.69, releaseT63: 0.024 },
+  ])
+  assert.equal(v.ok, false)
+  assert.match(v.reason, /under the 6 dB/)
+})
+
+test('a millisecond of rounding at 23 ms is not a density finding', () => {
+  const v = transientVerdict([
+    { depthDb: 14.0, releaseT63: 0.023 },
+    { depthDb: 14.0, releaseT63: 0.023 },
+    { depthDb: 14.0, releaseT63: 0.024 },
+  ])
+  assert.equal(v.ok, true)
+  assert.equal(v.keyed, false, '4.3 % on a 1 ms step must not read as keyed')
+})
+
+test('a spread large in percent but tiny in absolute terms is not enough either', () => {
+  const v = transientVerdict([
+    { depthDb: 14.0, releaseT63: 0.010 },
+    { depthDb: 14.0, releaseT63: 0.014 },
+  ])
+  assert.equal(v.keyed, false, '40 % but only 4 ms — under the floor')
 })

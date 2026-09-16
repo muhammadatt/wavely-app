@@ -946,21 +946,52 @@ function reportLabelGap(sweep, knobs, dial) {
  * still compressed, so `grDb` reads the incremental step at that edge — 0.80 dB
  * on a kernel sitting at a matched 14.31. See `analyseBurst`.
  */
+/**
+ * ⚠ A VERDICT NEEDS A REFERENCE THAT ACTUALLY COMPRESSED, and the first version
+ * did not check. A CLA-76 transients capture came back at −0.01 dB of depth with
+ * every release reading 0 ms — nothing was processed at all — and it was reported
+ * as "FLAT ON DENSITY TOO. This reference does not model program dependence on
+ * either limb." A bypassed capture and a fixed-release compressor are not the
+ * same claim, and only one of them is about the plugin.
+ */
+const MIN_DEPTH_DB = 6
+
+/**
+ * ⚠ AND THE THRESHOLD HAS TO CLEAR THE MEASUREMENT, not just zero. A FETish
+ * capture read 23 / 23 / 24 ms across the three conditions; at 23 ms a single
+ * millisecond is 4.3 %, so a 5 % rule turned rounding into "THE RELEASE IS KEYED
+ * ON TRANSIENT DENSITY". The kernel this plan was validated against spreads 19 %
+ * and 67 ms, and goes to exactly 0 with the tail off, so a threshold that needs
+ * BOTH a 10 % spread and 5 ms of it sits well clear of either control.
+ */
+const KEYED_FRACTION = 0.10
+const KEYED_FLOOR_S = 0.005
+
 export function transientVerdict(rows) {
   const usable = rows.filter(r => Number.isFinite(r.releaseT63) && Number.isFinite(r.depthDb))
   if (usable.length < 2) return { ok: false, reason: 'fewer than two usable conditions' }
   const depths = usable.map(r => r.depthDb)
+  const minDepth = Math.min(...depths)
+  if (minDepth < MIN_DEPTH_DB) {
+    return { ok: false, minDepth, reason: minDepth < 0.5
+      ? `the reference did not compress at all (${minDepth.toFixed(2)} dB of depth) — ` +
+        `this is a bypassed or mis-set capture, not a flat release`
+      : `the reference only reached ${minDepth.toFixed(2)} dB of depth, under the ` +
+        `${MIN_DEPTH_DB} dB this plan was validated at — turn the Input up and re-bounce` }
+  }
   const depthSpread = Math.max(...depths) - Math.min(...depths)
   if (depthSpread > 1.0) {
     return { ok: false, reason: `the conditions did not land at a matched depth ` +
       `(${depthSpread.toFixed(2)} dB apart), so the release times are not comparable` }
   }
   const ts = usable.map(r => r.releaseT63)
-  const spread = (Math.max(...ts) - Math.min(...ts)) / Math.min(...ts)
-  return { ok: true, depthSpread, spread, keyed: spread > 0.05 }
+  const absSpread = Math.max(...ts) - Math.min(...ts)
+  const spread = absSpread / Math.min(...ts)
+  return { ok: true, depthSpread, spread, absSpread, minDepth,
+    keyed: spread > KEYED_FRACTION && absSpread > KEYED_FLOOR_S }
 }
 
-function fitTransients(sampleRate, dir = CAP_DIR) {
+export function fitTransients(sampleRate, dir = CAP_DIR) {
   const plan = transientPlan()
   const stim = buildProbe(plan, sampleRate)
   const files = existsSync(dir)
@@ -995,8 +1026,8 @@ function fitTransients(sampleRate, dir = CAP_DIR) {
     }
     const v = transientVerdict(rows)
     if (!v.ok) { console.log(`\n   ⚠ no verdict: ${v.reason}.\n`); continue }
-    console.log(`\n   depths matched to ${v.depthSpread.toFixed(2)} dB; release spread ` +
-      `${(v.spread * 100).toFixed(0)} %`)
+    console.log(`\n   depth ${v.minDepth.toFixed(2)} dB, matched to ${v.depthSpread.toFixed(2)} dB; ` +
+      `release spread ${(v.spread * 100).toFixed(0)} % (${(v.absSpread * 1e3).toFixed(0)} ms)`)
     console.log(v.keyed
       ? '   → THE RELEASE IS KEYED ON TRANSIENT DENSITY. Program dependence is present,\n' +
         '     on a dimension bursts.wav cannot see — so a flat burst result is NOT absence.'
@@ -1305,6 +1336,8 @@ if (!isEntryPoint) {
 } else if (args.includes('--fit') && args.includes('--selftest')) {
   const dir = capDirOverride || mkdtempSync(join(tmpdir(), 'fet-bal-'))
   fitCaptures(sr, writeFitSelftest(dir, sr))
+} else if (args.includes('--transients')) {
+  fitTransients(sr, capDirOverride || CAP_DIR)
 } else if (args.includes('--fit')) {
   fitCaptures(sr, capDirOverride || CAP_DIR)
   fitTransients(sr, capDirOverride || CAP_DIR)
