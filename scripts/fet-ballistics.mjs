@@ -1170,8 +1170,14 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
         ? '   → THE RELEASE STRETCHES WITH EXPOSURE — a tail is present, as we model.'
         : '   → ⚠ NO STRETCH WITH EXPOSURE. This reference does not lengthen its release\n'
           + '     under sustained compression, so our TAIL_FRACTION / TAIL_MULT have nothing\n'
-          + '     to fit against HERE. Not a finding about the 1176, which does — and not yet\n'
-          + '     a finding about the reference either, until the transient limb is tested.')
+          + '     to fit against HERE. Not a finding about the 1176, which does.\n'
+          + '     ⚠ AND NOT A FINDING THAT THE RELEASE IS FIXED. This plan holds DEPTH constant\n'
+          + '     within a capture, deliberately, because depth confounds the comparison it\n'
+          + '     makes. FETish reads flat here and flat on transients.wav, yet its release t63\n'
+          + '     runs 30 / 70 / 93 / 139 ms at 6.2 / 14.0 / 17.5 / 21.9 dB of reduction on one\n'
+          + '     release setting. A fixed exponential recovers 63 % of its reduction in one\n'
+          + '     constant WHATEVER the depth — ours reads 233 ms at every depth to the\n'
+          + '     millisecond with the tail off. Compare across captures, not within one.')
     }
 
     const knobs = knobsFromName(file)

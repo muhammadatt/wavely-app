@@ -2262,6 +2262,79 @@ FETish is not a fixed-release compressor at all, so "match FETish" does not mean
 "remove program dependence", it means implement the limb FETish actually has,
 which is not the limb we implemented.
 
+### ⚗⚗⚗ CONFIRMED UNDER CONTROL: FETish'S RELEASE IS SCHEDULED ON DEPTH, AND OURS IS NOT
+
+Four `bursts.wav` captures, identical knobs (`a121_r234`), Input the only thing
+moving. The signal from the three scattered captures holds:
+
+| reduction | release t63 |
+|---|---|
+| 6.18 dB | 30 ms |
+| 13.96 dB | 70 ms |
+| 17.51 dB | 93 ms |
+| 21.86 dB | 139 ms |
+
+**The control that makes this a measurement rather than an artefact:** our own
+kernel over the same plan and the same analysis, release knob fixed at dial 4.
+
+| depth | ours, tail on | ours, TAIL_FRACTION 0 |
+|---|---|---|
+| 5.09 dB | 390 ms | 233 ms |
+| 9.04 dB | 368 ms | 233 ms |
+| 12.08 dB | 356 ms | 233 ms |
+| 14.30 dB | 350 ms | 233 ms |
+| 16.48 dB | 346 ms | 233 ms |
+
+A fixed exponential reads **233 ms at every depth, to the millisecond** — which is
+what the maths says it must, since recovering 63 % of a reduction takes one time
+constant however deep the reduction was. The analysis does not manufacture depth
+dependence. And with our tail on, t63 *falls* 11 % across the range: our program
+dependence runs the OPPOSITE way to FETish's, and 40× weaker.
+
+Shape, fitted to the four points:
+
+| law | R² |
+|---|---|
+| `t63 = 16.9 * exp(0.098 * D)` | **0.995** |
+| `t63 = 3.44 * D^1.17` | 0.969 |
+| `t63 = -17.2 + 6.74 * D` | 0.965 |
+
+Exponential, doubling about every 7 dB.
+
+⚠ **DO NOT FIT τ(D) BY REGRESSING THAT CURVE.** Those are *measured t63* values.
+Once the constant is scheduled on depth it changes DURING the recovery as the
+reduction decays, so the recovery is not a pure exponential and measured t63 is
+no longer the constant behind it. The law has to be fitted the way everything
+else here was — parameterise the kernel, run it through the identical analysis,
+and match the measurement. Regressing the table directly is the same class of
+error as dividing out the release "bias" that turned out to be our own tail.
+
+**Where this leaves the three limbs:**
+
+| | exposure (`bursts`) | density (`transients`) | depth |
+|---|---|---|---|
+| documented 1176 | lengthens | quick after transients | "heavy compression" lengthens |
+| CLA-76 | ✓ lengthens | ✗ flat | not yet measured |
+| FETish | ✗ flat | ✗ flat | ✓ **4.6× over 6→22 dB** |
+| our kernel | ✓ lengthens | ✓ but backwards | ✗ 11 %, backwards |
+
+So `TAIL_FRACTION` / `TAIL_MULT` are not merely unsupported by FETish — they
+implement a different limb from the one FETish has, in the wrong direction on the
+one limb both touch. Fitting to FETish means a release constant scheduled on
+reduction depth, which is a topology change, not a retune, and needs a legacy
+patch on the `FET_LEGACY_PATCH` precedent.
+
+⚠ **TWO OF THE FOUR CAPTURES CANNOT SUPPORT AN ATTACK COMPARISON.** At 17.51 and
+21.86 dB our Input knob clipped at 16.27, so both fell back to the same table and
+both reported dial 2.44 — the tool flagged it. Their *release* readings are sound
+(they come from the capture alone), the dial matches are not. Second confirmation
+that `IN_DRIVE_MIN_DB` / `IN_DRIVE_SPAN_DB` is short of the reference's range.
+
+⚠ Overshoot also saturates near 14 dB — 13.28 at 13.96 dB of depth, then 13.99 at
+both 17.51 and 21.86. Whatever the cause, overshoot stops discriminating above
+roughly 17 dB, so the attack fit should not be run at depths beyond that until it
+is understood.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
