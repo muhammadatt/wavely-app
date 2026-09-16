@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { tailTestHolds, declaredSeconds, labelRatio, PLANS, analyseCapture } from '../../scripts/fet-ballistics.mjs'
+import { tailTestHolds, declaredSeconds, labelRatio, PLANS, analyseCapture, transientVerdict } from '../../scripts/fet-ballistics.mjs'
 import { buildProbe } from '../../scripts/lib/probeStimulus.js'
 import { FET1176Kernel } from '../../src/audio/fet1176Processor.js'
 
@@ -229,4 +229,55 @@ test('with the tail off, measured release t63 IS the release constant', () => {
     assert.ok(Math.abs(measuredMs / nominalMs - 1) < 0.03,
       `dial ${dial}: measured ${measuredMs.toFixed(0)} ms against a ${nominalMs} ms constant`)
   }
+})
+
+/**
+ * ⚠ A PLAN THAT CANNOT RESOLVE THE THING IT TESTS REPORTS "ABSENT" FOR EVERY
+ * REFERENCE. Before the transient plan is allowed to say FETish has no program
+ * dependence, it has to spread on a kernel that demonstrably does and go flat on
+ * one that does not — same stimulus, same analysis, only the tail stage moving.
+ */
+function runTransients(tailFraction) {
+  const plan = PLANS['transients.wav']()
+  const stim = buildProbe(plan, SR)
+  const k = new FET1176Kernel(SR)
+  k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
+    inputDrive: 91, ratio: '4', attack: 4, release: 4 })
+  if (tailFraction !== undefined) { k.tailFraction = tailFraction; k.mainFraction = 1 - tailFraction }
+  const y = new Float32Array(stim.x.length)
+  for (let f = 0; f < stim.x.length; f += 128) {
+    const l = Math.min(128, stim.x.length - f)
+    k.process([stim.x.subarray(f, f + l)], [y.subarray(f, f + l)], l)
+  }
+  return analyseCapture(y, plan, stim, SR, 0)
+}
+
+test('the transient conditions land at a matched depth', () => {
+  // ⚠ depthDb, not grDb — inside a train grDb is the incremental step at the
+  // edge (0.80 dB at a matched 14.31) and reads as a wrecked experiment.
+  const rows = runTransients()
+  assert.equal(rows.length, 3)
+  const depths = rows.map(r => r.depthDb)
+  assert.ok(Math.max(...depths) - Math.min(...depths) < 0.1,
+    `depths ${depths.map(d => d.toFixed(2)).join(' / ')}`)
+})
+
+test('the transient plan resolves program dependence, and its absence', () => {
+  const withTail = transientVerdict(runTransients())
+  assert.ok(withTail.ok, withTail.reason)
+  assert.ok(withTail.keyed, `a kernel with a tail must spread; got ${(withTail.spread * 100).toFixed(0)} %`)
+  assert.ok(withTail.spread > 0.15)
+
+  const noTail = transientVerdict(runTransients(0))
+  assert.ok(noTail.ok, noTail.reason)
+  assert.equal(noTail.keyed, false, 'a kernel without a tail must read flat')
+})
+
+test('mismatched depths refuse a verdict rather than comparing the times', () => {
+  const v = transientVerdict([
+    { depthDb: 14.0, releaseT63: 0.2 },
+    { depthDb: 4.0, releaseT63: 0.4 },
+  ])
+  assert.equal(v.ok, false)
+  assert.match(v.reason, /matched depth/)
 })

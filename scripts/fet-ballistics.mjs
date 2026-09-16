@@ -200,6 +200,12 @@ const PRE_S = 1.0    // quiet lead inside the protected span
 const POST_S = 7.0   // release observed here — 1.1 s main plus a 4.4 s tail
 const REST_S = 10.0  // everything discharges before the next burst
 
+// Transient-density plan. Same total on-time and the same elapsed window at
+// every rate, so the ONLY thing that moves is how many edges the detector saw.
+const TRANSIENT_RATES_HZ = [5, 25]
+const TRANSIENT_DUTY = 0.5
+const TRANSIENT_COND_S = 3.0
+
 // Static staircase. 3 dB steps from well under the knee to well over it, at
 // every Input position in the matrix.
 const STAIRS = [-45, -42, -39, -36, -33, -30, -27, -24, -21, -18, -15, -12, -9, -6, -3]
@@ -240,6 +246,72 @@ export function burstPlan() {
     t += PRE_S + T + POST_S + REST_S
   }
   assertPlanClear('bursts', spans)
+  return { events, spans, seconds: t + 1.0, lowDb: LOW_DBFS }
+}
+
+/**
+ * The transient limb of program dependence, which the burst plan cannot reach.
+ *
+ * ⚠ `bursts.wav` VARIES EXPOSURE AND NOTHING ELSE. It holds a
+ * constant-amplitude tone for 50 ms to 3 s, so it answers "does recovery
+ * lengthen the longer the cell is held down" — the sustained limb, and the only
+ * one it can see. The 1176's release is also described as quick after a
+ * transient, and a reference keyed on transient DENSITY rather than on elapsed
+ * exposure reads perfectly flat on the burst plan while modelling program
+ * dependence perfectly well. FETish reads flat there, and that is why this plan
+ * exists rather than concluding from the flat result.
+ *
+ * Every condition delivers the same total on-time in the same elapsed window and
+ * releases from a full on-period, so depth, exposure and the release edge are
+ * all matched and the edge COUNT is the only variable: 1 for the sustained
+ * control, 15 at 5 Hz, 75 at 25 Hz. A release that differs across them is keyed
+ * on density; one that does not, is not.
+ */
+export function transientPlan() {
+  const events = []
+  const spans = []
+  let t = 1.0
+
+  // Sustained control. Same on-time as each train, delivered in one piece.
+  const sustainedS = TRANSIENT_COND_S * TRANSIENT_DUTY
+  t = scheduleClear(t, PRE_S + sustainedS + POST_S, 'sustained')
+  {
+    const up = snapToZeroCrossing(t + PRE_S, PROBE_HZ)
+    events.push({
+      tag: 'sustained', T: sustainedS, freqHz: PROBE_HZ, hiDb: HIGH_DBFS,
+      up, down: snapToZeroCrossing(up + sustainedS, PROBE_HZ),
+    })
+    spans.push(['sustained', t, t + PRE_S + sustainedS + POST_S])
+    t += PRE_S + sustainedS + POST_S + REST_S
+  }
+
+  for (const f of TRANSIENT_RATES_HZ) {
+    const period = 1 / f
+    const onS = period * TRANSIENT_DUTY
+    const n = Math.floor(TRANSIENT_COND_S * f)
+    const tag = `${f} Hz train`
+    t = scheduleClear(t, PRE_S + TRANSIENT_COND_S + POST_S, tag)
+    const start = t + PRE_S
+    for (let i = 0; i < n; i++) {
+      const up = snapToZeroCrossing(start + i * period, PROBE_HZ)
+      /**
+       * ⚠ ONLY THE LAST ON-PERIOD IS MEASURED. The ones before it are what
+       * puts the detector in the state under test; analysing them would print
+       * 90 rows and bury the one row that answers the question. Their release
+       * is also truncated by the next on-period by construction, so the number
+       * would be meaningless as well as noisy.
+       */
+      events.push({
+        tag: i === n - 1 ? tag : `${tag} #${i + 1}`,
+        T: onS, freqHz: PROBE_HZ, hiDb: HIGH_DBFS, conditioning: i !== n - 1,
+        up, down: snapToZeroCrossing(up + onS, PROBE_HZ),
+      })
+    }
+    spans.push([tag, t, t + PRE_S + TRANSIENT_COND_S + POST_S])
+    t += PRE_S + TRANSIENT_COND_S + POST_S + REST_S
+  }
+
+  assertPlanClear('transients', spans)
   return { events, spans, seconds: t + 1.0, lowDb: LOW_DBFS }
 }
 
@@ -307,6 +379,7 @@ export function thdPlan() {
 export const PLANS = {
   'stairs.wav': stairPlan,
   'bursts.wav': burstPlan,
+  'transients.wav': transientPlan,
   'frequency.wav': freqPlan,
   'thd.wav': thdPlan,
 }
@@ -415,6 +488,21 @@ function analyseBurst(y, plan, stim, sampleRate, lag, ev) {
     tag: ev.tag,
     holdS: ev.T,
     grDb: rest - held,
+    /**
+     * ⚠ `grDb` IS REDUCTION AGAINST THE GAIN JUST BEFORE THIS EVENT, WHICH IS
+     * NOT THE DEPTH ON A TRAIN. On the burst plan the two agree, because 10 s of
+     * rest leaves the cell fully open and `rest` is `open`. Inside a train the
+     * gap before an on-period is still compressed — 20 ms of recovery against a
+     * 234 ms constant at 25 Hz — so `rest - held` reads the INCREMENTAL step at
+     * that edge and collapses to 0.80 dB on a kernel sitting at a matched 14 dB.
+     * Reading that as the depth says the conditions are wildly mismatched when
+     * they are not, and would have condemned a working plan.
+     *
+     * `depthDb` is against the file-head open gain, so it is absolute and
+     * comparable across conditions. `releaseT63` already recovers toward `open`
+     * for the same reason, which is why the release column was sound throughout.
+     */
+    depthDb: open - held,
     attackT63,
     overshootDb: first ? first[1] - held : NaN,
     releaseT63,
@@ -423,7 +511,10 @@ function analyseBurst(y, plan, stim, sampleRate, lag, ev) {
 
 /** Every burst in one capture. Exported so a test can drive it directly. */
 export function analyseCapture(y, plan, stim, sampleRate, lag) {
-  return plan.events.map(ev => analyseBurst(y, plan, stim, sampleRate, lag, ev)).filter(Boolean)
+  return plan.events
+    .filter(ev => !ev.conditioning)
+    .map(ev => analyseBurst(y, plan, stim, sampleRate, lag, ev))
+    .filter(Boolean)
 }
 
 /** How far a hold may sit below a longer one and still count as settled. */
@@ -847,6 +938,75 @@ function reportLabelGap(sweep, knobs, dial) {
   }
 }
 
+/**
+ * The transient limb: does recovery depend on how many EDGES the detector saw,
+ * at matched depth and matched total on-time?
+ *
+ * ⚠ READ `depthDb`, NOT `grDb`. Inside a train the gap before an on-period is
+ * still compressed, so `grDb` reads the incremental step at that edge — 0.80 dB
+ * on a kernel sitting at a matched 14.31. See `analyseBurst`.
+ */
+export function transientVerdict(rows) {
+  const usable = rows.filter(r => Number.isFinite(r.releaseT63) && Number.isFinite(r.depthDb))
+  if (usable.length < 2) return { ok: false, reason: 'fewer than two usable conditions' }
+  const depths = usable.map(r => r.depthDb)
+  const depthSpread = Math.max(...depths) - Math.min(...depths)
+  if (depthSpread > 1.0) {
+    return { ok: false, reason: `the conditions did not land at a matched depth ` +
+      `(${depthSpread.toFixed(2)} dB apart), so the release times are not comparable` }
+  }
+  const ts = usable.map(r => r.releaseT63)
+  const spread = (Math.max(...ts) - Math.min(...ts)) / Math.min(...ts)
+  return { ok: true, depthSpread, spread, keyed: spread > 0.05 }
+}
+
+function fitTransients(sampleRate, dir = CAP_DIR) {
+  const plan = transientPlan()
+  const stim = buildProbe(plan, sampleRate)
+  const files = existsSync(dir)
+    ? readdirSync(dir).filter(f => /transients.*\.wav$/i.test(f)).sort()
+    : []
+  if (!files.length) {
+    console.log(`\nNo transients captures in ${dir} — the transient limb is untested.`)
+    console.log('A reference that reads flat on bursts.wav has only been shown not to key its')
+    console.log('release on ELAPSED EXPOSURE. Expected names like  fetish_transients_r4_I3_a38us_r234ms.wav\n')
+    return
+  }
+  console.log(`\nFET Punch transient limb — ${files.length} capture(s)\n`)
+  for (const file of files) {
+    console.log('═'.repeat(78))
+    console.log(file)
+    console.log('═'.repeat(78))
+    let y
+    try { ;({ y } = readCapture(join(dir, file), sampleRate)) }
+    catch (e) { console.log(`  ⚠ ${e.message}\n`); continue }
+    for (const line of preflight(file, y, plan, stim.env, sampleRate).lines) console.log(line)
+    const coarse = alignByEnvelope(stim.env, y, sampleRate)
+    const ref = refineLagAtEdge(y, stim.x, plan.events[0].up, sampleRate, coarse)
+    console.log(`  lag ${ref.lag} samples; margin ${Number.isFinite(ref.margin) ? ref.margin.toFixed(3) : 'n/a'}`)
+
+    const rows = analyseCapture(y, plan, stim, sampleRate, ref.lag)
+    console.log('\n   condition        edges     depth dB     release t63')
+    for (const r of rows) {
+      const edges = r.tag === 'sustained' ? 1 : Math.floor(TRANSIENT_COND_S * Number(r.tag.split(' ')[0]))
+      console.log('   ' + r.tag.padEnd(17) + String(edges).padStart(5) +
+        r.depthDb.toFixed(2).padStart(13) +
+        (r.releaseT63 === null ? '              --' : (r.releaseT63 * 1e3).toFixed(0).padStart(13) + ' ms'))
+    }
+    const v = transientVerdict(rows)
+    if (!v.ok) { console.log(`\n   ⚠ no verdict: ${v.reason}.\n`); continue }
+    console.log(`\n   depths matched to ${v.depthSpread.toFixed(2)} dB; release spread ` +
+      `${(v.spread * 100).toFixed(0)} %`)
+    console.log(v.keyed
+      ? '   → THE RELEASE IS KEYED ON TRANSIENT DENSITY. Program dependence is present,\n' +
+        '     on a dimension bursts.wav cannot see — so a flat burst result is NOT absence.'
+      : '   → ⚠ FLAT ON DENSITY TOO. Taken with a flat bursts.wav result, this reference\n' +
+        '     does not model program dependence on either limb. Our own kernel spreads 19 %\n' +
+        '     here (346/398/413 ms) and goes flat at 233 with the tail off, so the test can\n' +
+        '     resolve it and the absence is real.\n')
+  }
+}
+
 function fitCaptures(sampleRate, dir = CAP_DIR) {
   const plan = burstPlan()
   const stim = buildProbe(plan, sampleRate)
@@ -1059,6 +1219,12 @@ CAPTURE MATRIX — the stimulus files above do not change across it, only knobs 
               Analog noise / hiss OFF on any reference that offers it, or it
               lands in the trace as gain that is not gain.
 
+  transients.wav  ratio 4, Input 50, attack 4, release 4. 1 bounce per reference.
+                  THE OTHER LIMB OF PROGRAM DEPENDENCE. bursts.wav varies elapsed
+                  exposure; this varies how many EDGES the detector saw at a
+                  matched depth and a matched total on-time. A reference flat on
+                  bursts.wav has only been shown not to key on exposure.
+
   stairs.wav      attack 1, release 7        (see the plan note — a fast attack
                   ratio  4 / 8 / 12 / 20 / all     leaves nothing settled to read)
                   Input  20 / 40 / 60 / 80
@@ -1119,6 +1285,7 @@ if (!isEntryPoint) {
   fitCaptures(sr, writeFitSelftest(dir, sr))
 } else if (args.includes('--fit')) {
   fitCaptures(sr, capDirOverride || CAP_DIR)
+  fitTransients(sr, capDirOverride || CAP_DIR)
 } else if (args.includes('--selftest')) {
   selftest(sr)
 } else if (args.includes('--stimulus')) {
