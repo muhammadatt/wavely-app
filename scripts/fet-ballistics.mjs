@@ -1014,8 +1014,15 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
         reportLabelGap(sweep, knobs, m.dial)
       }
     }
-    console.log(`\n   ⚠ Read the dial, not the microseconds. Measured t63 runs ~2.9x the constant`)
-    console.log('     behind it, on both sides, which is why the comparison is dial-to-dial.\n')
+    console.log(`\n   ⚠ Read the dial, not the microseconds — ON ATTACK. Measured attack t63 runs`)
+    console.log('     ~2.75x the constant behind it: the detector is a bare rectifier, so its target')
+    console.log('     is over threshold only near the waveform peaks. Running our kernel through the')
+    console.log('     same analysis puts the same bias on both sides, where it cancels.')
+    console.log('     ⚠ RELEASE IS NOT LIKE THIS AND TREATING IT THE SAME IS AN ERROR. Measured')
+    console.log('     release t63 equals the release constant to better than 1 % with the tail off')
+    console.log('     (dial 7: 50 ms / 50 ms; dial 4: 233 / 234). The ~1.5x our captures show is OUR')
+    console.log('     PROGRAM-DEPENDENCE STAGE, not an analysis bias — so it must not be divided out')
+    console.log('     of a reference that has no tail, which inflates how fast that reference looks.\n')
   }
   console.log('Protocol and what each column answers: docs/fet1176_capture_protocol.md\n')
 }

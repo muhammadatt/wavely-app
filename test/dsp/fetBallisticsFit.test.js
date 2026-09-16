@@ -17,7 +17,11 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { tailTestHolds, declaredSeconds, labelRatio } from '../../scripts/fet-ballistics.mjs'
+import { tailTestHolds, declaredSeconds, labelRatio, PLANS, analyseCapture } from '../../scripts/fet-ballistics.mjs'
+import { buildProbe } from '../../scripts/lib/probeStimulus.js'
+import { FET1176Kernel } from '../../src/audio/fet1176Processor.js'
+
+const SR = 96000
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const haveStimulus = existsSync(join(ROOT, 'data/corpus/fet1176/stimulus/thd.wav'))
@@ -193,4 +197,36 @@ test('the label ratio is our constant over the declared one, and refuses nonsens
   assert.ok(Math.abs(labelRatio(0.00002, 0.0000534) - 2.67) < 0.01)
   assert.equal(labelRatio(0, 0.001), null)
   assert.equal(labelRatio(0.001, NaN), null)
+})
+
+/**
+ * ⚠ THE RELEASE MEASUREMENT CARRIES NO BIAS AND THE ATTACK ONE DOES. Measured
+ * attack t63 runs ~2.75x the constant behind it, because the detector is a bare
+ * rectifier whose target clears threshold only near the waveform peaks. Release
+ * has no such distortion: with the tail stage off, measured release t63 IS the
+ * release constant. The ~1.5x our own captures show is entirely the tail.
+ *
+ * This matters beyond bookkeeping. Divide that 1.5x out of a reference that has
+ * no tail — as FETish does not — and it reads 1.5x faster than it is; that error
+ * turned a 2.75x label gap into a reported 4-5x one.
+ */
+test('with the tail off, measured release t63 IS the release constant', () => {
+  const plan = PLANS['bursts.wav']()
+  const stim = buildProbe(plan, SR)
+  const x = stim.x
+  for (const [dial, nominalMs] of [[7, 50], [4, 234]]) {
+    const k = new FET1176Kernel(SR)
+    k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
+      inputDrive: 91, ratio: '4', attack: 4, release: dial })
+    k.tailFraction = 0
+    k.mainFraction = 1
+    const y = new Float32Array(x.length)
+    for (let f = 0; f < x.length; f += 128) {
+      const l = Math.min(128, x.length - f)
+      k.process([x.subarray(f, f + l)], [y.subarray(f, f + l)], l)
+    }
+    const measuredMs = analyseCapture(y, plan, stim, SR, 0).at(-1).releaseT63 * 1e3
+    assert.ok(Math.abs(measuredMs / nominalMs - 1) < 0.03,
+      `dial ${dial}: measured ${measuredMs.toFixed(0)} ms against a ${nominalMs} ms constant`)
+  }
 })
