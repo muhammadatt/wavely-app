@@ -128,14 +128,21 @@ const LN10_OVER_20 = Math.LN10 / 20
 /**
  * The clipper's CLIP/LIMIT balance inside this composite.
  *
- * ⚠ IT WAS PINNED AT 0 FOR A LATENCY REASON, NOT AN AUDIO ONE, and it is 100
- * now on an audio judgement. The section's "latency is 150 samples and
- * constant" rested on the limiter being off, and nobody had auditioned the two
- * paths here. The standalone's own measurements argue for the limiter on a
- * voice: the curve's error is IN-BAND harmonics, -16 dBc at 13 dB of drive,
- * which 8x oversampling does not touch because it is not fold-back; the limiter
- * takes the same peaks down with a smooth gain envelope and errs as
- * intermodulation and slight pumping instead.
+ * ⚠ IT WAS PINNED AT 0 FOR A LATENCY REASON, NOT AN AUDIO ONE. The section's
+ * "latency is 150 samples and constant" rested on the limiter being off, and
+ * nobody had auditioned the two paths here.
+ *
+ * ⚠ 100 IS A LISTENING DECISION, AND THE MEASUREMENTS ONLY MOTIVATED IT. It was
+ * auditioned on narration through this composite and judged cleaner than the
+ * curve path; that is the justification, and the same rule applies here as to
+ * the LA-2A's shipping cell curve — a number chosen by ear must not be defended
+ * with a measurement that was taken for a different purpose.
+ *
+ * What the measurements DID say, and all they say: the curve's error is IN-BAND
+ * harmonics, -16 dBc at 13 dB of drive, which 8x oversampling does not touch
+ * because it is not fold-back, while the limiter takes the same peaks down with
+ * a smooth gain envelope and errs as intermodulation and slight pumping. That
+ * is a reason to go and listen, not a result.
  *
  * ⚠ THE KNOB IS A BALANCE, NOT A MODE. At 0 the limiter aims
  * `LIMITER_MAX_ABOVE_DB` above the threshold and is bypassed outright; at 100 it
