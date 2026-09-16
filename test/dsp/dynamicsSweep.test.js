@@ -94,8 +94,10 @@ test('a sweep is plain numbers, so it crosses the worker boundary', () => {
   assert.equal(round.fet.drives.length, SWEEP_POINTS)
   assert.equal(round.opto.drives.length, OPTO_GRID_DRIVES)
   assert.equal(round.opto.squash.length, OPTO_GRID_SQUASH)
-  assert.equal(round.opto.peakDb.length, OPTO_GRID_DRIVES)
-  assert.equal(round.opto.peakDb[0].length, OPTO_GRID_SQUASH)
+  // ⚠ THE LEVEL COLUMN IS THE ONLY ONE LEFT — the reduction, evenness and
+  // alignment columns fed PREDICTED readouts and went with them.
+  assert.equal(round.opto.outP999Db.length, OPTO_GRID_DRIVES)
+  assert.equal(round.opto.outP999Db[0].length, OPTO_GRID_SQUASH)
   assert.equal(JSON.stringify(round.blend), JSON.stringify(sweep.blend))
 })
 
@@ -275,7 +277,11 @@ test('silence is swept and looked up without crashing', () => {
   assert.ok(Number.isFinite(params.squash))
   assert.ok(Number.isFinite(params.optoAlignDb))
   assert.equal(params.correlation, 0)
-  assert.ok(report.opto.peakDb < 0.5, `silence should not be compressed: ${report.opto.peakDb}`)
+  // ⚠ ASSERTED ON THE SETTING, NOT A PREDICTED REDUCTION — the predicted figure
+  // is gone with the grid columns that fed it. Silence still gets a finite,
+  // renderable patch, which is what this test is really guarding.
+  assert.ok(Number.isFinite(params.makeupDb), `makeup was ${params.makeupDb}`)
+  assert.ok(Number.isFinite(params.ceilingDb), `ceiling was ${params.ceilingDb}`)
 })
 
 test('⚠ Balance moves the two target numbers in OPPOSITE senses', () => {

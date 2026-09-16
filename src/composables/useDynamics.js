@@ -104,10 +104,13 @@ export function useDynamics() {
       /** The FET ran out of drive before reaching its target — see the report. */
       fetCapped: r.fet.capped,
       fetShortfallDb: r.fet.shortfallDb,
-      optoPeakDb: r.opto.peakDb,
+      /**
+       * ⚠ NO PREDICTED OPTO REDUCTION AND NO PREDICTED EVENNESS. Both were
+       * guesses off the opto grid, shown before playback, and the panel already
+       * meters the opto's reduction LIVE off the kernel. Guessing them is what
+       * the grid's extra squash columns were paying for.
+       */
       squash: r.opto.squash,
-      spreadFrom: r.input.spreadDb,
-      spreadTo: r.afterWet.spreadDb,
       impactFrom: r.input.impactDb,
       impactTo: r.afterFet.impactDb,
       /**

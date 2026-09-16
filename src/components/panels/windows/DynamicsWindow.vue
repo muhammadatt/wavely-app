@@ -133,8 +133,14 @@ const statusText = computed(() => {
   if (!hasSolution.value) return 'Measure this material to set the three devices'
   if (isStale.value) return 'The file or the selection moved — measure again'
   const s = summary.value
-  return `clip ${s.clipDepthDb.toFixed(1)} · FET ${s.fetPeakDb.toFixed(1)} · opto `
-    + `${s.optoPeakDb.toFixed(1)} dB · evenness ${s.spreadFrom.toFixed(1)} → ${s.spreadTo.toFixed(1)} dB`
+  /**
+   * ⚠ CLIP AND FET ONLY. The opto's reduction and the evenness pair used to sit
+   * here as PREDICTIONS off the opto grid; the meter row beside this shows the
+   * opto live, and predicting it before playback is what the grid's extra
+   * columns cost. These two are free — they come off curves the solve needs for
+   * its parameters either way.
+   */
+  return `clip ${s.clipDepthDb.toFixed(1)} · FET ${s.fetPeakDb.toFixed(1)} dB`
 })
 
 /**

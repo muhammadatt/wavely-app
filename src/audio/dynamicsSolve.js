@@ -1092,7 +1092,19 @@ export const CLIP_SWEEP_POINTS_LIMITER = 5
 export const OPTO_GRID_DRIVE_POINTS = Object.freeze([0, 10, 25, 60])
 
 export const OPTO_GRID_DRIVES = OPTO_GRID_DRIVE_POINTS.length
-export const OPTO_GRID_SQUASH = 6
+/**
+ * ⚠ SIX COLUMNS WERE BOUGHT FOR A READOUT THAT IS GONE. The squash axis was
+ * sized on the REPORTED opto gain reduction — 4 columns scored 1.45 dB of error
+ * against 6's 0.70 — while the only thing on the grid that reaches the AUDIO is
+ * `outP999Db`, which feeds the makeup. Measured against the delivered p99.9 over
+ * Density x Mix x Balance on two narrators, 4 columns and 6 are
+ * indistinguishable: 0.704/0.644 dB against 0.708/0.644.
+ *
+ * ⚠ THE DRIVE AXIS IS NOT THE SAME STORY and was measured before assuming it
+ * was: three rows instead of four costs 1.44-1.71 dB on the same test. It stays
+ * at four.
+ */
+export const OPTO_GRID_SQUASH = 4
 
 /**
  * The widest depth the section can ask for, Balance included — the squash axis
@@ -1422,12 +1434,8 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   }
 
   // [driveIndex][squashIndex]
-  const gridPeakDb = []
-  const gridAvgDb = []
   const gridCrestDb = []
-  const gridSpreadDb = []
   const gridOutP999Db = []
-  const gridAlignDb = []
   let blend = { correlation: 0, densityDb: 0, trimDb: 0 }
   const midDrive = Math.floor(gridDrives.length / 2)
   const midSquash = Math.floor(gridSquash.length / 2)
@@ -1437,11 +1445,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
       midClip, sampleRate, { ...patch, fetDrive: gridDrives[i], fetAlignDb },
     ).out
     const align = inputAlignDbFor(dry, sampleRate)
-    gridAlignDb.push(align)
-    const peak = []
-    const avg = []
     const crest = []
-    const spread = []
     /**
      * ⚠ THE SECTION'S OUTPUT LEVEL AT MIX 1, WHICH IS EXACTLY THIS RENDER. At
      * Mix 1 the blend law's dry gain is cos(π/2) = 0 and its compensation is
@@ -1453,10 +1457,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
         dry, sampleRate, { ...patch, squash: gridSquash[j], optoAlignDb: align },
       )
       const m = measureDynamics(r.out, sampleRate)
-      peak.push(r.metering.maxGainReductionDb)
-      avg.push(r.metering.avgGainReductionDb)
       crest.push(m.crestDb)
-      spread.push(m.spreadDb)
       outP999.push(toDb(percentileOfChannels(r.out, MAKEUP_PERCENTILE)))
       /**
        * ⚠ MEASURED ONCE, MID-GRID. Across the whole Density range the blend
@@ -1469,10 +1470,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
         blend = measureBlend(dry, r.out, sampleRate, r.latencySamples)
       }
     }
-    gridPeakDb.push(peak)
-    gridAvgDb.push(avg)
     gridCrestDb.push(crest)
-    gridSpreadDb.push(spread)
     gridOutP999Db.push(outP999)
   }
 
@@ -1516,11 +1514,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
     opto: {
       drives: gridDrives,
       squash: gridSquash,
-      alignDb: gridAlignDb,
-      peakDb: gridPeakDb,
-      avgDb: gridAvgDb,
       crestDb: gridCrestDb,
-      spreadDb: gridSpreadDb,
       /** Output level at Mix 1, per (drive, squash) — see `makeupDb`. */
       outP999Db: gridOutP999Db,
     },
@@ -1749,7 +1743,6 @@ export function solveFromSweep(sweep, options = {}) {
       input,
       afterClip: { impactDb: afterClipImpactDb },
       afterFet: { impactDb: afterFetImpactDb },
-      afterWet: { spreadDb: at(sweep.opto.spreadDb) },
       clip: { thresholdDb: clipThresholdDb, depthDb: clipDepthDb, capped: clipCapped },
       fet: {
         drive: fetDrive,
@@ -1764,11 +1757,16 @@ export function solveFromSweep(sweep, options = {}) {
         shortfallDb: fetShortfallDb,
         capped: fetShortfallDb > 0.05,
       },
+      /**
+       * ⚠ NO PREDICTED GAIN REDUCTION HERE ANY MORE. The panel already shows the
+       * opto's reduction LIVE, off the kernel's own metering; this was the same
+       * number guessed from a grid before playback, and guessing it is what the
+       * squash axis's extra columns were paying for. What is left describes the
+       * SETTING, which is computed and free.
+       */
       opto: {
         squash,
         alignDb: optoAlignDb,
-        peakDb: at(sweep.opto.peakDb),
-        avgDb: at(sweep.opto.avgDb),
         calibratedSquash: DYNAMICS_TARGET.squash,
         balancedSquash: target.squash,
       },
