@@ -256,28 +256,53 @@ test('the transient conditions land at a matched depth', () => {
   // ⚠ depthDb, not grDb — inside a train grDb is the incremental step at the
   // edge (0.80 dB at a matched 14.31) and reads as a wrecked experiment.
   const rows = runTransients()
-  assert.equal(rows.length, 3)
+  assert.equal(rows.length, 1 + 4)
   const depths = rows.map(r => r.depthDb)
   assert.ok(Math.max(...depths) - Math.min(...depths) < 0.1,
     `depths ${depths.map(d => d.toFixed(2)).join(' / ')}`)
 })
 
-test('the transient plan resolves program dependence, and its absence', () => {
+test('the density contrast resolves program dependence, and its absence', () => {
+  // ⚠ TRAIN AGAINST TRAIN. The sustained row moves the elapsed window as well as
+  // the duty, so including it measures the exposure limb — that leak is what
+  // made a 3.8 % density response look like a validated 19 %.
   const withTail = transientVerdict(runTransients())
   assert.ok(withTail.ok, withTail.reason)
-  assert.ok(withTail.keyed, `a kernel with a tail must spread; got ${(withTail.spread * 100).toFixed(0)} %`)
-  assert.ok(withTail.spread > 0.15)
+  assert.ok(withTail.keyed, `a kernel with a tail must spread; got ${(withTail.spread * 100).toFixed(1)} %`)
 
   const noTail = transientVerdict(runTransients(0))
   assert.ok(noTail.ok, noTail.reason)
   assert.equal(noTail.keyed, false, 'a kernel without a tail must read flat')
+  assert.ok(noTail.spread < 0.01)
+})
+
+test('the sustained row is reported as exposure, never folded into density', () => {
+  const v = transientVerdict(runTransients())
+  assert.ok(v.exposure, 'the sustained reading must still be surfaced')
+  assert.ok(v.exposure.sustainedT63 < v.exposure.trainMinT63,
+    'sustained runs in half the window, so it recovers sooner than any train')
+  // The density spread must be the trains' own range, never the full range that
+  // the sustained row widens — that conflation is the bug this guards.
+  const trainRange = v.exposure.trainMaxT63 - v.exposure.trainMinT63
+  assert.ok(Math.abs(v.absSpread - trainRange) < 1e-9, 'absSpread must be the train range')
+  const fullRange = v.exposure.trainMaxT63 - Math.min(v.exposure.sustainedT63, v.exposure.trainMinT63)
+  assert.ok(v.absSpread < fullRange, 'and must be strictly narrower than the range including sustained')
+})
+
+test('one train condition cannot support a density verdict', () => {
+  const v = transientVerdict([
+    { tag: 'sustained', depthDb: 14, releaseT63: 0.35 },
+    { tag: '5 Hz train', depthDb: 14, releaseT63: 0.40 },
+  ])
+  assert.equal(v.ok, false)
+  assert.match(v.reason, /edge count was never varied/)
 })
 
 test('mismatched depths refuse a verdict rather than comparing the times', () => {
   const v = transientVerdict([
     // Both clear the depth floor, so it is the MISMATCH that must stop this.
-    { depthDb: 14.0, releaseT63: 0.2 },
-    { depthDb: 10.0, releaseT63: 0.4 },
+    { tag: '2 Hz train', depthDb: 14.0, releaseT63: 0.2 },
+    { tag: '100 Hz train', depthDb: 10.0, releaseT63: 0.4 },
   ])
   assert.equal(v.ok, false)
   assert.match(v.reason, /matched depth/)
@@ -292,9 +317,9 @@ test('mismatched depths refuse a verdict rather than comparing the times', () =>
  */
 test('a capture that never compressed refuses a verdict', () => {
   const v = transientVerdict([
-    { depthDb: -0.01, releaseT63: 0 },
-    { depthDb: -0.01, releaseT63: 0 },
-    { depthDb: -0.01, releaseT63: 0 },
+    { tag: '2 Hz train', depthDb: -0.01, releaseT63: 0 },
+    { tag: '5 Hz train', depthDb: -0.01, releaseT63: 0 },
+    { tag: '100 Hz train', depthDb: -0.01, releaseT63: 0 },
   ])
   assert.equal(v.ok, false)
   assert.match(v.reason, /did not compress at all/)
@@ -302,8 +327,8 @@ test('a capture that never compressed refuses a verdict', () => {
 
 test('a capture too shallow to have been validated refuses a verdict', () => {
   const v = transientVerdict([
-    { depthDb: 4.93, releaseT63: 0.023 },
-    { depthDb: 4.69, releaseT63: 0.024 },
+    { tag: '2 Hz train', depthDb: 4.93, releaseT63: 0.023 },
+    { tag: '100 Hz train', depthDb: 4.69, releaseT63: 0.024 },
   ])
   assert.equal(v.ok, false)
   assert.match(v.reason, /under the 6 dB/)
@@ -311,9 +336,9 @@ test('a capture too shallow to have been validated refuses a verdict', () => {
 
 test('a millisecond of rounding at 23 ms is not a density finding', () => {
   const v = transientVerdict([
-    { depthDb: 14.0, releaseT63: 0.023 },
-    { depthDb: 14.0, releaseT63: 0.023 },
-    { depthDb: 14.0, releaseT63: 0.024 },
+    { tag: '2 Hz train', depthDb: 14.0, releaseT63: 0.023 },
+    { tag: '5 Hz train', depthDb: 14.0, releaseT63: 0.023 },
+    { tag: '25 Hz train', depthDb: 14.0, releaseT63: 0.024 },
   ])
   assert.equal(v.ok, true)
   assert.equal(v.keyed, false, '4.3 % on a 1 ms step must not read as keyed')
@@ -321,8 +346,8 @@ test('a millisecond of rounding at 23 ms is not a density finding', () => {
 
 test('a spread large in percent but tiny in absolute terms is not enough either', () => {
   const v = transientVerdict([
-    { depthDb: 14.0, releaseT63: 0.010 },
-    { depthDb: 14.0, releaseT63: 0.014 },
+    { tag: '2 Hz train', depthDb: 14.0, releaseT63: 0.010 },
+    { tag: '100 Hz train', depthDb: 14.0, releaseT63: 0.014 },
   ])
   assert.equal(v.keyed, false, '40 % but only 4 ms — under the floor')
 })

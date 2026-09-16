@@ -202,7 +202,14 @@ const REST_S = 10.0  // everything discharges before the next burst
 
 // Transient-density plan. Same total on-time and the same elapsed window at
 // every rate, so the ONLY thing that moves is how many edges the detector saw.
-const TRANSIENT_RATES_HZ = [5, 25]
+//
+// ⚠ TWO RATES WAS NOT ENOUGH LEVERAGE AND WOULD HAVE REPORTED A FALSE ABSENCE.
+// At 5 and 25 Hz alone our own tailed kernel separates by only 15 ms / 3.8 % on
+// the train-only contrast — under any threshold that survives measurement noise,
+// so the plan would have called a kernel that IS keyed on density flat. Spanning
+// 2 to 100 Hz takes the same contrast to 38 ms / 10.1 %, against 0.1 % with the
+// tail off. Not a wide margin; it is the honest one.
+const TRANSIENT_RATES_HZ = [2, 5, 25, 100]
 const TRANSIENT_DUTY = 0.5
 const TRANSIENT_COND_S = 3.0
 
@@ -974,20 +981,44 @@ export function transientVerdict(rows) {
   const minDepth = Math.min(...depths)
   if (minDepth < MIN_DEPTH_DB) {
     return { ok: false, minDepth, reason: minDepth < 0.5
-      ? `the reference did not compress at all (${minDepth.toFixed(2)} dB of depth) — ` +
+      ? `the reference did not compress at all (${minDepth.toFixed(2)} dB of depth) \u2014 ` +
         `this is a bypassed or mis-set capture, not a flat release`
       : `the reference only reached ${minDepth.toFixed(2)} dB of depth, under the ` +
-        `${MIN_DEPTH_DB} dB this plan was validated at — turn the Input up and re-bounce` }
+        `${MIN_DEPTH_DB} dB this plan was validated at \u2014 turn the Input up and re-bounce` }
   }
   const depthSpread = Math.max(...depths) - Math.min(...depths)
   if (depthSpread > 1.0) {
     return { ok: false, reason: `the conditions did not land at a matched depth ` +
       `(${depthSpread.toFixed(2)} dB apart), so the release times are not comparable` }
   }
-  const ts = usable.map(r => r.releaseT63)
+
+  /**
+   * \u26a0 THE SUSTAINED CONTROL IS NOT PART OF THE DENSITY CONTRAST, AND TREATING IT
+   * AS ONE IS WHAT THIS PLAN GOT WRONG FIRST. Sustained matches the trains on
+   * total on-time and on depth, but delivers that on-time in HALF the elapsed
+   * window \u2014 1.5 s against 3 s \u2014 because matching duty, on-time and window at
+   * once is arithmetically impossible. So sustained-against-train moves two
+   * variables and reads mostly as the EXPOSURE limb, which bursts.wav already
+   * covers. The "19 % density spread" this plan was validated on was that leak:
+   * on the contrast where everything but edge count is held, the same kernel
+   * separates by 3.8 %.
+   *
+   * The density verdict therefore comes from TRAIN AGAINST TRAIN only, where
+   * window, on-time, duty and depth are all held and the rate is the sole
+   * variable. Sustained is reported beside it as the exposure reading it is.
+   */
+  const trains = usable.filter(r => r.tag !== 'sustained')
+  const sustained = usable.find(r => r.tag === 'sustained') || null
+  if (trains.length < 2) {
+    return { ok: false, reason: 'fewer than two train conditions, so edge count was never varied on its own' }
+  }
+  const ts = trains.map(r => r.releaseT63)
   const absSpread = Math.max(...ts) - Math.min(...ts)
   const spread = absSpread / Math.min(...ts)
-  return { ok: true, depthSpread, spread, absSpread, minDepth,
+  const exposure = sustained
+    ? { sustainedT63: sustained.releaseT63, trainMinT63: Math.min(...ts), trainMaxT63: Math.max(...ts) }
+    : null
+  return { ok: true, depthSpread, spread, absSpread, minDepth, exposure,
     keyed: spread > KEYED_FRACTION && absSpread > KEYED_FLOOR_S }
 }
 
@@ -1026,15 +1057,22 @@ export function fitTransients(sampleRate, dir = CAP_DIR) {
     }
     const v = transientVerdict(rows)
     if (!v.ok) { console.log(`\n   ⚠ no verdict: ${v.reason}.\n`); continue }
-    console.log(`\n   depth ${v.minDepth.toFixed(2)} dB, matched to ${v.depthSpread.toFixed(2)} dB; ` +
-      `release spread ${(v.spread * 100).toFixed(0)} % (${(v.absSpread * 1e3).toFixed(0)} ms)`)
+    if (v.exposure) {
+      console.log(`\n   sustained reads ${(v.exposure.sustainedT63 * 1e3).toFixed(0)} ms against ` +
+        `${(v.exposure.trainMinT63 * 1e3).toFixed(0)}-${(v.exposure.trainMaxT63 * 1e3).toFixed(0)} ms for the trains.`)
+      console.log('     ⚠ THAT COMPARISON IS THE EXPOSURE LIMB, NOT DENSITY — the sustained')
+      console.log('     condition also runs in half the elapsed window. bursts.wav answers it.')
+    }
+    console.log(`\n   DENSITY (train against train, only edge count moving): depth ` +
+      `${v.minDepth.toFixed(2)} dB matched to ${v.depthSpread.toFixed(2)}; spread ` +
+      `${(v.spread * 100).toFixed(1)} % (${(v.absSpread * 1e3).toFixed(0)} ms)`)
     console.log(v.keyed
-      ? '   → THE RELEASE IS KEYED ON TRANSIENT DENSITY. Program dependence is present,\n' +
-        '     on a dimension bursts.wav cannot see — so a flat burst result is NOT absence.'
-      : '   → ⚠ FLAT ON DENSITY TOO. Taken with a flat bursts.wav result, this reference\n' +
-        '     does not model program dependence on either limb. Our own kernel spreads 19 %\n' +
-        '     here (346/398/413 ms) and goes flat at 233 with the tail off, so the test can\n' +
-        '     resolve it and the absence is real.\n')
+      ? '   → THE RELEASE IS KEYED ON TRANSIENT DENSITY. Program dependence is present\n' +
+        '     on a dimension bursts.wav cannot see, so a flat burst result is not absence.'
+      : '   → ⚠ FLAT ON DENSITY. Our tailed kernel spreads 10.1 % / 38 ms on this same\n' +
+        '     contrast and 0.1 % with the tail off, so the test resolves it — but the margin\n' +
+        '     is not large. What this says about the reference OVERALL depends on its\n' +
+        '     bursts.wav result, which this plan does not know and must not assume.\n')
   }
 }
 
