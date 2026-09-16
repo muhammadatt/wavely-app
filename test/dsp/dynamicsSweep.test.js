@@ -25,6 +25,7 @@ import {
   makeupDbFor, MAKEUP_PEAK_MARGIN_DB, MAKEUP_TRIM_MARGIN_DB,
   maxDropFor, MAX_IMPACT_DROP_DB, FET_MAX_SOLVE_DRIVE,
   SWEEP_POINTS, OPTO_GRID_DRIVES, OPTO_GRID_SQUASH, CLIP_MAX_DEPTH_DB,
+  CLIP_MAX_PEAK_RED_DB,
 } from '../../src/audio/dynamicsSolve.js'
 import {
   processDynamicsBuffer, clipParamsFor, DYNAMICS_KERNEL_DEFAULTS,
@@ -653,3 +654,60 @@ test('⚠ an unreachable floor caps the drive instead of railing it', () => {
   assert.ok(report.fet.shortfallDb > 0.05, 'an unreachable target must still report')
   assert.equal(report.fet.capped, true)
 })
+
+test('⚠ the clipper is bounded on BOTH distortion and peak movement', () => {
+  /**
+   * ⚠ ONE CAP DOES NOT COVER BOTH PATHS, AND REPLACING IT WITH THE OTHER
+   * QUIETLY WEAKENED IT. `depth` is the shaping curve's own reduction — a
+   * DISTORTION bound, and the kernel deliberately excludes the limiter's gain
+   * reduction from it so the standalone's RESIDUAL keeps meaning "what the curve
+   * added". Measured with `limiter: 100` at every threshold 1-12 dB below peak,
+   * it reads 0.00-0.01 dB while the peak moves the full 1-12, so as the only
+   * bound it does nothing there.
+   *
+   * Swapping in peak movement instead ran the solve to 8.04 dB below peak on the
+   * reference narration, where the curve's own depth is 3.8-4.5 dB — past the
+   * 2.77-3.21 dB at which speech starts to distort audibly. The two are
+   * different scales and not related the same way on every file: where `depth`
+   * first reaches 3.0, the peak has moved 2.90 dB on one narrator and 1.80 on
+   * the other.
+   */
+  const x = [narration(10, -6)]
+  const sweep = sweepDynamics(x, SR)
+  assert.equal(sweep.clip.peakRed.length, sweep.clip.depth.length)
+
+  // Both rise as the threshold deepens, and they are NOT the same curve.
+  const deepest = sweep.clip.thresholds.length - 1
+  assert.ok(sweep.clip.peakRed[0] > sweep.clip.peakRed[deepest],
+    'peak movement must be largest at the deepest threshold')
+  assert.ok(Math.abs(sweep.clip.depth[0] - sweep.clip.peakRed[0]) > 0.01,
+    'curve depth and peak movement are different quantities')
+
+  // Neither bound may be exceeded, at any Density or detent.
+  for (const clipShaveDb of CLIP_SHAVE_DETENTS) {
+    for (const density of [20, 60, 100]) {
+      const { params } = solveFromSweep(sweep, { density, clipShaveDb })
+      if (params.clipThresholdDb === null) continue
+      const at = params.clipThresholdDb
+      const depth = lerpLike(sweep.clip.thresholds, sweep.clip.depth, at)
+      const peak = lerpLike(sweep.clip.thresholds, sweep.clip.peakRed, at)
+      assert.ok(depth <= CLIP_MAX_DEPTH_DB + 0.05,
+        `@ ${density}/${clipShaveDb}: curve depth ${depth.toFixed(2)}`)
+      assert.ok(peak <= CLIP_MAX_PEAK_RED_DB + 0.05,
+        `@ ${density}/${clipShaveDb}: peak moved ${peak.toFixed(2)}`)
+    }
+  }
+})
+
+/** The module's `lerpAt` is private; this mirrors it for the assertion above. */
+function lerpLike(xs, ys, q) {
+  if (q <= xs[0]) return ys[0]
+  if (q >= xs[xs.length - 1]) return ys[ys.length - 1]
+  for (let i = 1; i < xs.length; i++) {
+    if (q <= xs[i]) {
+      const t = (q - xs[i - 1]) / (xs[i] - xs[i - 1])
+      return ys[i - 1] + t * (ys[i] - ys[i - 1])
+    }
+  }
+  return ys[ys.length - 1]
+}

@@ -695,6 +695,23 @@ export function squashFor(squash, density) {
  */
 export const CLIP_MAX_DEPTH_DB = 3
 
+/**
+ * How far the clipper may move the PEAK, dB — the over-processing bound.
+ *
+ * ⚠ A SECOND CONSTRAINT, NOT A REPLACEMENT FOR `CLIP_MAX_DEPTH_DB`. That one
+ * bounds DISTORTION and is measured on the shaping curve's own reduction, which
+ * reads 0.00-0.01 dB whenever the limiter is carrying the peak control — so on
+ * a limiter path it is inert and this is the only thing holding the stage back.
+ * On the curve path it is the looser of the two on both narrators (the curve cap
+ * binds at 2.90 dB of peak movement on David Greenberg and 1.80 on Messy and
+ * Bright), so adding it changes the shipping solve by almost nothing: measured,
+ * 2/292 combinations newly bound on one file and 0/292 on the other.
+ *
+ * 3.0 matches the Clip detent's top position, which is what the number on the
+ * dial means to a reader — "take up to this much off the peaks".
+ */
+export const CLIP_MAX_PEAK_RED_DB = 3
+
 // ── The solve ───────────────────────────────────────────────────────────────
 
 /**
@@ -741,6 +758,7 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
       const r = renderClip(channelData, sampleRate, { ...patch, clipThresholdDb: mid })
       const deeper = measureDynamics(r.out, sampleRate).crestDb > targetCrest
         && r.metering.maxReductionDb < CLIP_MAX_DEPTH_DB
+        && input.peakDb - measureDynamics(r.out, sampleRate).peakDb < CLIP_MAX_PEAK_RED_DB
       if (deeper) hiTh = mid
       else loTh = mid
     }
@@ -754,7 +772,13 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
     clipThresholdDb = hiTh
     const final = renderClip(channelData, sampleRate, { ...patch, clipThresholdDb })
     clipped = final.out
-    clipDepthDb = final.metering.maxReductionDb
+    /**
+     * ⚠ THE REPORTED FIGURE IS THE PEAK MOVEMENT, not the curve's metering —
+     * that is what the panel's "clip N dB" means to a reader, and it is the one
+     * of the two that stays meaningful on either path. The distortion bound is
+     * still enforced above; it is just not the number shown.
+     */
+    clipDepthDb = input.peakDb - measureDynamics(final.out, sampleRate).peakDb
     /**
      * ⚠ REPORTED WHEN THE CAP IS WHAT STOPPED IT, not when the target was met.
      * The design's one hard rule is that the clipper is never asked for more
@@ -1222,6 +1246,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   const clipOutP999Db = []
   const clipOutPeakDb = []
   const clipOutAlignDb = []
+  const peakRed = []
   for (let i = 0; i < SWEEP_POINTS; i++) {
     const th = input.peakDb - CLIP_SWEEP_RANGE_DB
       + (CLIP_SWEEP_RANGE_DB * i) / (SWEEP_POINTS - 1)
@@ -1229,7 +1254,36 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
     const m = measureDynamics(r.out, sampleRate)
     thresholds.push(th)
     crest.push(m.crestDb)
+    /**
+     * ⚠ TWO BOUNDS, NOT ONE RENAMED. Replacing the curve's metering with total
+     * peak reduction was tried and it QUIETLY WEAKENED THE CAP: at a 3 dB
+     * peak-reduction bound the solve ran to 8.04 dB below peak on David
+     * Greenberg, where the curve's own depth is 3.8-4.5 dB — past the
+     * 2.77-3.21 dB at which speech starts to distort audibly, which is the
+     * measurement the cap exists to respect. The two quantities are different
+     * scales and are not related the same way on every file: where
+     * `maxReductionDb` first reaches 3.0, the peak has moved 2.90 dB on David
+     * Greenberg and 1.80 on Messy and Bright. No single peak-reduction number
+     * reproduces a single curve-depth number.
+     *
+     * So they bound different things and both are kept:
+     *
+     *   `depth`   — what the SHAPING CURVE took off. A DISTORTION bound. Reads
+     *               0.00-0.01 dB on the limiter path by design (the kernel
+     *               excludes the limiter's gain reduction so the standalone's
+     *               RESIDUAL keeps meaning "what the curve added"), so its
+     *               crossing is simply inert there, which is correct: there is
+     *               no curve distortion to bound.
+     *   `peakRed` — how far the peak actually moved. An OVER-PROCESSING bound,
+     *               path-agnostic, and the quantity the Clip detent's dB number
+     *               means to a reader. On the limiter path it equals the
+     *               threshold's distance below peak exactly, measured to 0.00.
+     *
+     * The solve takes the shallowest threshold any constraint allows, so adding
+     * one can only ever be conservative.
+     */
     depth.push(r.metering.maxReductionDb)
+    peakRed.push(input.peakDb - m.peakDb)
     /**
      * ⚠ THE DRY PATH WHEN THE FET BYPASSES, which is not the same as the FET
      * curve at drive 0 — drive 0 is a 24 dB ATTENUATOR. Reading the FET curve
@@ -1259,12 +1313,14 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   const thrDesc = [...thresholds].reverse()
   const crestDesc = [...crest].reverse()
   const depthDesc = [...depth].reverse()
+  const peakRedDescLocal = [...peakRed].reverse()
 
   // ── 2. FET, sampled at the MIDDLE of the macro's clip range ──────────────
   const midShave = clipShaveFor(DEFAULT_CLIP_SHAVE_DB, 0.5)
   const midThreshold = Math.max(
     crossingOf(thrDesc, crestDesc, input.crestDb - midShave),
     crossingOf(thrDesc, depthDesc.map(v => -v), -CLIP_MAX_DEPTH_DB),
+    crossingOf(thrDesc, peakRedDescLocal.map(v => -v), -CLIP_MAX_PEAK_RED_DB),
   )
   const midClip = renderClip(
     channelData, sampleRate, { ...patch, clipThresholdDb: midThreshold },
@@ -1405,6 +1461,7 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
     input,
     clip: {
       thresholds, crest, depth, impact,
+      peakRed,
       outP999Db: clipOutP999Db, outPeakDb: clipOutPeakDb, outAlignDb: clipOutAlignDb,
     },
     fet: {
@@ -1469,6 +1526,7 @@ export function solveFromSweep(sweep, options = {}) {
   const thrDesc = [...sweep.clip.thresholds].reverse()
   const crestDesc = [...sweep.clip.crest].reverse()
   const depthDesc = [...sweep.clip.depth].reverse()
+  const peakRedDesc = [...sweep.clip.peakRed].reverse()
 
   // ── 1. Clipper: ONE inversion against TWO constraints, as the bisect has it
   const wantShave = clipShaveFor(clipShaveDb, density)
@@ -1480,10 +1538,12 @@ export function solveFromSweep(sweep, options = {}) {
     const targetCrest = input.crestDb - wantShave
     clipThresholdDb = Math.max(
       crossingOf(thrDesc, crestDesc, targetCrest),
-      // Negated so the cap reads as a descending curve too.
+      // Negated so the caps read as descending curves too.
       crossingOf(thrDesc, depthDesc.map(v => -v), -CLIP_MAX_DEPTH_DB),
+      crossingOf(thrDesc, peakRedDesc.map(v => -v), -CLIP_MAX_PEAK_RED_DB),
     )
-    clipDepthDb = lerpAt(sweep.clip.thresholds, sweep.clip.depth, clipThresholdDb)
+    // Reported as peak movement, matching the bisect — see its note.
+    clipDepthDb = lerpAt(sweep.clip.thresholds, sweep.clip.peakRed, clipThresholdDb)
     clipCapped = lerpAt(sweep.clip.thresholds, sweep.clip.crest, clipThresholdDb)
       > targetCrest + 0.05
     afterClipImpactDb = lerpAt(sweep.clip.thresholds, sweep.clip.impact, clipThresholdDb)
