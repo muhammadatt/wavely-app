@@ -2204,6 +2204,64 @@ presets back through its taper re-fit.
   the Scheps inheritance bug (which shipped 4× the intended gain reduction) is
   the precedent for what happens when that is not handled deliberately.
 
+### ⚗⚗ THE TRANSIENT LIMB IS SETTLED, AND IT UNCOVERED A THIRD LIMB NOBODY WAS CONTROLLING FOR
+
+`transients.wav`, four rates, both references at a matched depth with a validated
+control. **Neither reference keys its release on transient density.**
+
+| | depth dB | sustained | 2 Hz | 5 Hz | 25 Hz | 100 Hz | density spread |
+|---|---|---|---|---|---|---|---|
+| CLA-76 (dial 4) | 10.2–10.3 | 1149 | 1153 | 1150 | 1145 | 1143 | 0.9 % / 10 ms |
+| FETish (234 ms) | 18.5–19.0 | 96 | 96 | 96 | 96 | 94 | 2.4 % / 2 ms |
+
+Against our own tailed kernel at 10.1 % / 38 ms and 0.1 % with the tail off, on
+the identical contrast. So the test resolves it and both are flat.
+
+Combined with the burst results, that gives: **CLA-76 lengthens with exposure and
+not with density. FETish does neither.**
+
+**⚠ BUT FETish'S RELEASE IS NOT A FIXED TIME CONSTANT, AND THE PLANS WERE BUILT
+SO THAT NEITHER COULD SEE IT.** Both `bursts.wav` and `transients.wav` hold depth
+constant *within* a capture — deliberately, because depth confounds the
+comparison they each make. Across three FETish captures at essentially the same
+release knob (234–235 ms), depth was the thing that varied:
+
+| depth | release t63 |
+|---|---|
+| 4.93 dB | 23 ms |
+| 14.08 dB | 85 ms |
+| 19.04 dB | 96 ms |
+
+A pure exponential recovers 63 % of its reduction in τ **regardless of how deep
+that reduction was**, so a depth-invariant t63 is what a fixed release predicts
+and this is not it — it moves 4×. That is program dependence, keyed on the
+amount of gain reduction, which is arguably the most literal reading of the
+hardware description: *"during heavy, continuous compression the circuit
+automatically lengthens the release."* **Heavy is depth.**
+
+Our own kernel does not do this. Measured earlier over 2.3 → 11.4 dB, its release
+t63 moves 406 → 358 ms — 12 %, and in the *opposite* direction.
+
+⚠ THREE POINTS FROM THREE SEPARATE CAPTURES IS A SIGNAL, NOT A MEASUREMENT. The
+attack knob differed across them (126 / 38 / 120 µs) and so did the Input. It
+needs a controlled sweep before anything is fitted to it — which costs no new
+code, because `bursts.wav` at a fixed attack and release with Input swept is
+exactly that experiment, and the report already prints depth and release t63 per
+capture.
+
+⚠ ALSO NOTE FETish'S 0.55 dB DEPTH SPREAD ACROSS THE RATES, monotone with rate
+(19.04 at 2 Hz to 18.48 at 100 Hz — the 5 ms on-period at 100 Hz is marginal for
+a full re-attack). Given the depth sensitivity above, that spread is the likelier
+cause of the 2 ms density reading than density is. The flat verdict is cleaner
+than the number makes it look.
+
+**Consequence for the fit: `TAIL_FRACTION` / `TAIL_MULT` still must not be zeroed
+to match FETish.** The earlier reason was that the hardware behaviour is
+documented and FETish's omission is a modelling gap. The reason now is stronger —
+FETish is not a fixed-release compressor at all, so "match FETish" does not mean
+"remove program dependence", it means implement the limb FETish actually has,
+which is not the limb we implemented.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
