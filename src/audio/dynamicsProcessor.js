@@ -539,7 +539,22 @@ export class DynamicsKernel {
     const opto = this.optoOn ? this.la2a.getMetering() : null
     const clip = this.clipOn ? this.clipper.getMetering() : null
     return {
-      clip: { now: clip?.reductionDb ?? 0, peak: clip?.maxReductionDb ?? 0 },
+      /**
+       * ⚠ THE STAGE'S FIGURE, NOT THE CURVE'S. `reductionDb` counts only what
+       * the shaping curve took off — the distortion quantity the standalone's
+       * RESIDUAL is scoped to — so with the limiter carrying the peak control it
+       * reads 0.00-0.01 dB at every threshold while the peak moves by several.
+       * A meter at zero over a working stage is the same lie the "controls
+       * disabled without a measurement" work removed, one number down.
+       *
+       * `stageReductionDb` adds the limiter's gain to the curve's PER SAMPLE
+       * (see its note in softClipperProcessor.js) and is identical to
+       * `reductionDb` while the limiter is off, so this changes nothing today.
+       */
+      clip: {
+        now: clip?.stageReductionDb ?? 0,
+        peak: clip?.maxStageReductionDb ?? 0,
+      },
       fet: {
         now: fet?.grDb ?? 0,
         peak: fet?.maxGainReductionDb ?? 0,

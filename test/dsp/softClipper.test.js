@@ -2347,3 +2347,44 @@ test('the reported latency is per-patch, and the apply path can ask for it', () 
     'the shipped default no longer engages the limiter, or the constant is back')
   assert.equal(softClipperLatencySamples({ limiter: 0 }, SR), SOFT_CLIPPER_LATENCY_SAMPLES)
 })
+
+test('⚠ the GR meter counts the LIMITER too, and the plugin defaults to it', () => {
+  /**
+   * ⚠ THIS WAS UNDER-READING AT THE SHIPPING DEFAULT. `reductionDb` counts only
+   * what the shaping CURVE took off — the quantity RESIDUAL is scoped to — and
+   * `SOFT_CLIPPER_KERNEL_DEFAULTS.limiter` is 100, so out of the box the bar sat
+   * at ~0 while the stage took the peaks down by the full threshold distance.
+   * Its own comment called it "peak_in - peak_out".
+   *
+   * The two figures are both kept and they answer different questions: the
+   * curve's is the DISTORTION quantity a caller bounds against, the stage's is
+   * what a gain-reduction meter shows.
+   */
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.limiter, 100,
+    'the premise of this test is that the limiter is on by default')
+
+  const x = tone(220, 0.5, 0.9)
+  const at = (params) => {
+    const k = new SoftClipperKernel(SR)
+    k.setParams({ thresholdMode: 'fixed', fixedThresholdDb: -12, ...params })
+    const out = new Float32Array(x.length)
+    for (let off = 0; off < x.length; off += 128) {
+      const len = Math.min(128, x.length - off)
+      k.process([x.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    }
+    return k.getMetering()
+  }
+
+  // Limiter carrying it: the curve is idle, the stage is not.
+  const lim = at({ limiter: 100 })
+  assert.ok(lim.maxReductionDb < 0.1,
+    `the curve should be near-idle behind the limiter: ${lim.maxReductionDb}`)
+  assert.ok(lim.maxStageReductionDb > 1,
+    `the stage meter must see the limiter's gain: ${lim.maxStageReductionDb}`)
+
+  // ⚠ AND IT CHANGES NOTHING WHEN THE LIMITER IS OFF, which is what lets the
+  // composite adopt it without moving today's readout.
+  const curve = at({ limiter: 0 })
+  assert.ok(curve.maxReductionDb > 0.1, 'the curve should be working here')
+  assert.equal(curve.maxStageReductionDb, curve.maxReductionDb)
+})

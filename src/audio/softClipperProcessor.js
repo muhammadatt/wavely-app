@@ -1756,6 +1756,28 @@ export class SoftClipperKernel {
     // ── Metering ──
     this.reductionDb = 0
     this.maxReductionDb = 0
+    /**
+     * The STAGE's total reduction — the limiter's gain and the curve's shaping
+     * added per sample, in dB — alongside the curve-only pair above.
+     *
+     * ⚠ BOTH EXIST BECAUSE THEY ANSWER DIFFERENT QUESTIONS, and collapsing them
+     * would break one of two contracts. `reductionDb` is what the CURVE took
+     * off: it is the distortion figure, it is what RESIDUAL is scoped to, and a
+     * caller bounding audible shaping needs exactly it. `stageReductionDb` is
+     * what the STAGE did: it is what a gain-reduction meter should show, because
+     * a meter reading 0.00 while the stage takes 6 dB off the peaks is the same
+     * lie as a knob that moves nothing.
+     *
+     * ⚠ ADDED PER SAMPLE, NOT AS TWO MAXIMA. The limiter runs at the base rate
+     * ahead of the oversampler and the curve runs at 4x inside it, so the two
+     * maxima can fall on different moments; summing them would report a
+     * reduction that never happened to any sample. The curve's worst sub-sample
+     * is taken WITHIN each base sample and added to that sample's limiter gain.
+     */
+    this.stageReductionDb = 0
+    this.maxStageReductionDb = 0
+    /** Per-base-sample limiter reduction for the block, dB. Grown on demand. */
+    this.limiterRedDb = new Float64Array(0)
     // Smoothed residual and signal POWER, separately — the ratio is taken at
     // read time. See RESIDUAL_TAU_S for why not the other way round.
     this.residualPower = 0
@@ -1855,6 +1877,9 @@ export class SoftClipperKernel {
     return {
       reductionDb: this.reductionDb,
       maxReductionDb: this.maxReductionDb,
+      /** Limiter + curve, per sample. See the field's note. */
+      stageReductionDb: this.stageReductionDb,
+      maxStageReductionDb: this.maxStageReductionDb,
       engagedFraction: this.engagedFraction,
       // How much of HF Emphasis's boost the threshold is currently giving
       // back. Reported so the panel can say what the knob is doing rather
@@ -2339,6 +2364,7 @@ export class SoftClipperKernel {
     // immune to the issue by construction — there is nothing to misalign
     // when both sides of the comparison are read at the same instant.
     let blockMaxReductionDb = 0
+    let blockMaxStageReductionDb = 0
     // Summed across channels, both terms, so the ratio is energy-weighted
     // rather than an average of per-channel ratios — a silent channel should
     // dilute the reading, not contribute a 0/0 to it.
@@ -2357,7 +2383,23 @@ export class SoftClipperKernel {
         // — which is why a moving threshold is safe here and is its own test.
         const lim = this.limiters[ch]
         const scratch = this.limiterScratch
-        for (let i = 0; i < n; i++) scratch[i] = lim.processSample(input[i], T[i] * limiterCeilFactor)
+        if (this.limiterRedDb.length < n) this.limiterRedDb = new Float64Array(n)
+        const limRed = this.limiterRedDb
+        for (let i = 0; i < n; i++) {
+          scratch[i] = lim.processSample(input[i], T[i] * limiterCeilFactor)
+          /**
+           * ⚠ READ AFTER THE SAMPLE, because `gain` is the gain applied to the
+           * sample just EMITTED — which is `latencySamples` behind the one whose
+           * threshold was read. Taking it before would pair a gain with audio it
+           * was not applied to.
+           *
+           * Across channels the largest wins: the limiters are per channel, and
+           * a stage meter reports what the stage did at its loudest.
+           */
+          const g = lim.gain
+          const red = g > 0 && g < 1 ? -20 * Math.log10(g) : 0
+          if (ch === 0 || red > limRed[i]) limRed[i] = red
+        }
         // ⚠ THE DRY SIDE OF THE RESIDUAL IS FED FROM HERE, post-limiter. The
         // limiter's gain reduction is intended, not distortion, and counting
         // it as residual would make the readout report the balance knob rather
@@ -2379,6 +2421,10 @@ export class SoftClipperKernel {
       // sub-samples; holding it flat across each group of L is inaudible.
       for (let i = 0; i < n; i++) {
         const t = T[i]
+        // The curve's worst sub-sample WITHIN this base sample, so it can be
+        // added to the limiter's gain for the same instant — see
+        // `stageReductionDb`.
+        let curveHereDb = 0
         for (let j = 0; j < L; j++) {
           const k = i * L + j
           const before = hi[k]
@@ -2389,8 +2435,12 @@ export class SoftClipperKernel {
             const aa = after < 0 ? -after : after
             const redDb = linToDb(ab) - linToDb(aa)
             if (redDb > blockMaxReductionDb) blockMaxReductionDb = redDb
+            if (redDb > curveHereDb) curveHereDb = redDb
           }
         }
+        const totalHereDb = curveHereDb
+          + (this.limiterActive ? this.limiterRedDb[i] : 0)
+        if (totalHereDb > blockMaxStageReductionDb) blockMaxStageReductionDb = totalHereDb
       }
 
       oversampler.down(out, n)
@@ -2435,6 +2485,10 @@ export class SoftClipperKernel {
 
     this.reductionDb = blockMaxReductionDb
     if (this.reductionDb > this.maxReductionDb) this.maxReductionDb = this.reductionDb
+    this.stageReductionDb = blockMaxStageReductionDb
+    if (this.stageReductionDb > this.maxStageReductionDb) {
+      this.maxStageReductionDb = this.stageReductionDb
+    }
 
     // ENGAGED: share of VOICED blocks in which the curve did anything. Silent
     // blocks neither raise nor lower it — see ENGAGED_TAU_S.
@@ -2672,7 +2726,23 @@ if (typeof registerProcessor === 'function') {
         this.sinceMeter = 0
         this.port.postMessage({
           type: 'gr',
-          reductionDb: this.kernel.reductionDb,
+          /**
+           * ⚠ THE STAGE'S REDUCTION, NOT THE CURVE'S, AND THIS PLUGIN SHIPS
+           * WITH `limiter: 100`. `reductionDb` counts only what the shaping
+           * curve took off — so at the DEFAULT setting the GR bar was reading
+           * 0.00-0.01 dB while the stage took the peaks down by the full
+           * threshold distance. Measured at 1/2/3/4/6/9/12 dB below peak on
+           * narration: curve 0.00 / 0.00 / 0.00 / 0.00 / 0.00 / 0.00 / 0.01
+           * against a stage doing 1.00 / 2.00 / 3.00 / 4.41 / 7.36 / 11.62 /
+           * 14.96. The bar's own comment called it "peak_in - peak_out", which
+           * is what it should have been all along.
+           *
+           * `engagedFraction` and `residualDbc` stay scoped to the CURVE — they
+           * answer "is the shaper doing anything" and "what did it add", which
+           * are questions about the curve specifically.
+           */
+          reductionDb: this.kernel.stageReductionDb,
+          curveReductionDb: this.kernel.reductionDb,
           engagedFraction: this.kernel.engagedFraction,
           liftDb: this.kernel.liftDb,
           residualDbc: this.kernel.residualDbc,
