@@ -79,7 +79,7 @@ import { LA2AKernel } from './la2aProcessor.js'
 import { BiquadCascade } from './dsp/biquad.js'
 import {
   clipParamsFor, fetParamsFor, optoParamsFor, pultecPairFor, fetEnabled,
-  DYNAMICS_KERNEL_DEFAULTS,
+  DYNAMICS_KERNEL_DEFAULTS, DYNAMICS_CLIP_LIMITER,
 } from './dynamicsProcessor.js'
 import { gatedRmsOfChannels, inputAlignDbFor } from './dsp/inputAlign.js'
 import { percentileOfChannels, MAKEUP_PERCENTILE } from './dsp/makeupReference.js'
@@ -1042,8 +1042,44 @@ export function measureBlend(dry, wet, sampleRate, wetLatencySamples = 0) {
 /** Samples per curve. 12 is what the bench scored; fewer was not tested. */
 export const SWEEP_POINTS = 12
 
-/** How far below the region's peak the clipper's curve is sampled, in dB. */
-export const CLIP_SWEEP_RANGE_DB = 24
+/**
+ * How far below the region's peak the clipper's curve is sampled, in dB, on the
+ * CURVE path — where the deepest reachable threshold has to be guessed.
+ *
+ * ⚠ 24 dB SAMPLED A RANGE THE SOLVE COULD NEVER REACH. Measured across every
+ * Density and detent on two narrators, the thresholds actually picked spanned
+ * 4 dB and sat at most 6.31 dB below peak, so NINE of the twelve points were
+ * deeper than anything selectable — paid for on every measure and read by
+ * nothing, while the region that IS used got one or two samples.
+ */
+export const CLIP_SWEEP_RANGE_DB = 12
+
+/**
+ * The same range on the LIMITER path, where it is a BOUND rather than a guess.
+ *
+ * ⚠ THE PEAK IS THE THRESHOLD THERE, EXACTLY — measured -3.00 / -5.00 / -7.00 /
+ * -9.00 dBFS for those thresholds, to 0.00. So `peakRed` is `srcPeak - threshold`
+ * in closed form, and `peakRed <= CLIP_MAX_PEAK_RED_DB` pins the deepest
+ * threshold the solve can ever pick at exactly `srcPeak - CLIP_MAX_PEAK_RED_DB`.
+ * The crest target and the distortion cap can only ever make it SHALLOWER.
+ *
+ * The 1.5x is margin on a bound that is otherwise exact, not a fitted number.
+ */
+export const CLIP_SWEEP_RANGE_LIMITER_DB = CLIP_MAX_PEAK_RED_DB * 1.5
+
+/**
+ * Points on the clipper's axis — five on the limiter path against twelve on the
+ * curve's, because the range it has to cover is a quarter as wide.
+ *
+ * ⚠ SCORED ON WHAT THE SECTION DELIVERS, not on where the threshold landed.
+ * Against the 12-point/24 dB sweep across every detent and Density 20-100 on
+ * two narrators: worst delivered impact 0.028 dB, crest 0.049, threshold 0.011.
+ * The sweep already concedes 0.136 dB of impact against the bisect it replaces,
+ * so this is comfortably inside the noise it is allowed to make. Five clip
+ * renders instead of twelve.
+ */
+export const CLIP_SWEEP_POINTS = 12
+export const CLIP_SWEEP_POINTS_LIMITER = 5
 
 /**
  * Grid resolution for the opto's reported reduction: drives x squash.
@@ -1247,9 +1283,19 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   const clipOutPeakDb = []
   const clipOutAlignDb = []
   const peakRed = []
-  for (let i = 0; i < SWEEP_POINTS; i++) {
-    const th = input.peakDb - CLIP_SWEEP_RANGE_DB
-      + (CLIP_SWEEP_RANGE_DB * i) / (SWEEP_POINTS - 1)
+  /**
+   * ⚠ THE AXIS FOLLOWS THE CLIPPER'S BALANCE, because the deepest reachable
+   * threshold does. With the limiter engaged it is a closed-form bound; without
+   * it, only a measured guess. See the two range constants.
+   */
+  const limiterOn = DYNAMICS_CLIP_LIMITER > 1e-4
+  const clipPoints = options.clipSweepPoints
+    ?? (limiterOn ? CLIP_SWEEP_POINTS_LIMITER : CLIP_SWEEP_POINTS)
+  const clipRangeDb = options.clipSweepRangeDb
+    ?? (limiterOn ? CLIP_SWEEP_RANGE_LIMITER_DB : CLIP_SWEEP_RANGE_DB)
+  for (let i = 0; i < clipPoints; i++) {
+    const th = input.peakDb - clipRangeDb
+      + (clipRangeDb * i) / (clipPoints - 1)
     const r = renderClip(channelData, sampleRate, { ...patch, clipThresholdDb: th })
     const m = measureDynamics(r.out, sampleRate)
     thresholds.push(th)

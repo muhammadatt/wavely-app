@@ -84,7 +84,10 @@ test('a sweep is plain numbers, so it crosses the worker boundary', () => {
   // structuredClone throws on anything that is not cloneable — a typed array
   // would survive, a kernel or a closure would not.
   const round = structuredClone(sweep)
-  assert.equal(round.clip.thresholds.length, SWEEP_POINTS)
+  // ⚠ THE CLIPPER'S AXIS IS ITS OWN — it follows the clipper's balance, not
+  // `SWEEP_POINTS`. See `CLIP_SWEEP_POINTS_LIMITER`.
+  assert.equal(round.clip.thresholds.length, sweep.clip.thresholds.length)
+  assert.ok(round.clip.thresholds.length >= 3)
   assert.equal(round.fet.drives.length, SWEEP_POINTS)
   assert.equal(round.opto.drives.length, OPTO_GRID_DRIVES)
   assert.equal(round.opto.squash.length, OPTO_GRID_SQUASH)
@@ -189,8 +192,20 @@ test('⚠ a non-monotonic crest curve does not send the clipper to the far end',
    * its curve does not turn inside the range, so the corpus bench scored 0.064
    * dB while this stimulus was 0.65 dB out. One file is not a bench.
    */
+  /**
+   * ⚠ SWEPT AT THE OLD WIDE AXIS ON PURPOSE. This pins `crossingOf`, not the
+   * shipping range — and the shipping range no longer REACHES the turn, because
+   * the limiter's determinism bounds the axis at 1.5x `CLIP_MAX_PEAK_RED_DB`.
+   * That makes the hazard doubly guarded, and it would also make this test pass
+   * vacuously: at a 4.5 dB range the old "6 dB above the bottom" threshold sits
+   * above the peak and can never be met, so the assertion would fail for a
+   * reason that has nothing to do with the crossing.
+   *
+   * Narrowing the axis is not a substitute for the fix. A future range change,
+   * or a caller sweeping wider, puts the turn back in reach.
+   */
   const x = [narration(10, -6)]
-  const sweep = sweepDynamics(x, SR)
+  const sweep = sweepDynamics(x, SR, { clipSweepPoints: 12, clipSweepRangeDb: 24 })
   const deepest = sweep.clip.thresholds[0]
   for (const density of [20, 30, 50]) {
     const { params } = solveFromSweep(sweep, { density })
