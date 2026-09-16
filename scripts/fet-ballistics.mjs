@@ -426,6 +426,41 @@ export function analyseCapture(y, plan, stim, sampleRate, lag) {
   return plan.events.map(ev => analyseBurst(y, plan, stim, sampleRate, lag, ev)).filter(Boolean)
 }
 
+/** How far a hold may sit below a longer one and still count as settled. */
+export const SETTLED_TOLERANCE_DB = 0.5
+
+/**
+ * Split a capture's bursts into the ones that belong in the tail test and the
+ * ones that were still settling.
+ *
+ * ⚠ THE EXCLUSION IS DIRECTIONAL AND THE FIRST VERSION WAS NOT. It compared
+ * every hold against the deepest hold anywhere in the capture, which is only the
+ * intended test when reduction rises with hold length. On the CLA-76 captures it
+ * does the opposite: reduction peaks at the 0.2 s hold and then SAGS —
+ * 10.00 / 10.21 / 9.68 / 9.65 dB — so the 1 s and 3 s holds were thrown out for
+ * being 0.5 dB under a SHORTER burst, and the tail test was left comparing 0.05 s
+ * against 0.2 s, the pair with the least tail in it. That suppressed the verdict
+ * on 9 of 12 CLA-76 captures. A long hold cannot be "still settling" — whatever
+ * a longer tone does, it had at least as much time to get there — so a burst is
+ * excluded only when a LONGER hold reached deeper than it.
+ */
+export function tailTestHolds(bursts) {
+  const usable = bursts.filter(b => b.releaseT63 !== null)
+  const kept = [], dropped = []
+  for (let i = 0; i < usable.length; i++) {
+    let deeperLater = -Infinity
+    for (let j = i + 1; j < usable.length; j++) deeperLater = Math.max(deeperLater, usable[j].grDb)
+    if (Number.isFinite(deeperLater) && usable[i].grDb <= deeperLater - SETTLED_TOLERANCE_DB) {
+      dropped.push({ ...usable[i], against: deeperLater })
+    } else {
+      kept.push(usable[i])
+    }
+  }
+  const all = bursts.map(b => b.grDb)
+  const sagDb = all.length ? Math.max(...all) - all[all.length - 1] : 0
+  return { kept, dropped, sag: sagDb > SETTLED_TOLERANCE_DB ? sagDb : null }
+}
+
 function selftest(sampleRate) {
   console.log(`\nFET Punch gain-trace self-test — ${sampleRate} Hz, ${PROBE_HZ} Hz probe`)
   console.log(`Zero-crossing blind window: ${blindWindowUs(PROBE_HZ, 0.1).toFixed(1)} us ` +
@@ -832,13 +867,17 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
      * experiment — the comparison is how long the recovery takes from the SAME
      * place, not from wherever each burst happened to get to.
      */
-    const deepestGr = Math.max(...bursts.map(b => b.grDb))
-    const rels = bursts.filter(b => b.releaseT63 !== null && b.grDb > deepestGr - 0.5)
-    const dropped = bursts.filter(b => b.releaseT63 !== null && b.grDb <= deepestGr - 0.5)
+    const { kept: rels, dropped, sag } = tailTestHolds(bursts)
     if (dropped.length) {
       console.log(`\n   ⚠ ${dropped.map(b => b.holdS + ' s').join(', ')} never reached full reduction ` +
-        `(${dropped.map(b => b.grDb.toFixed(1)).join(', ')} dB against ${deepestGr.toFixed(1)}) —`)
-      console.log('     released from a shallower depth, so left out of the tail test below.')
+        `(${dropped.map(b => b.grDb.toFixed(1)).join(', ')} dB against a longer hold's ` +
+        `${dropped.map(b => b.against.toFixed(1)).join(', ')}) —`)
+      console.log('     still settling, so left out of the tail test below.')
+    }
+    if (sag !== null) {
+      console.log(`\n   note: reduction SAGS ${sag.toFixed(2)} dB from the deepest hold to the longest.`)
+      console.log('     That is the reference recovering under a sustained tone, not a burst that')
+      console.log('     failed to settle, so the long holds stay in the tail test.')
     }
     if (rels.length >= 2) {
       const lo = rels[0].releaseT63, hi = rels[rels.length - 1].releaseT63

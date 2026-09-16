@@ -17,6 +17,8 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { tailTestHolds } from '../../scripts/fet-ballistics.mjs'
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const haveStimulus = existsSync(join(ROOT, 'data/corpus/fet1176/stimulus/thd.wav'))
 
@@ -135,4 +137,47 @@ test('the release t63 grows monotonically with how long the burst was held', opt
     assert.ok(rows[i] >= rows[i - 1], `release t63 fell from ${rows[i - 1]} to ${rows[i]} ms`)
   }
   assert.ok(rows[3] > rows[0] * 1.05, `no stretch: ${rows[0]} -> ${rows[3]} ms`)
+})
+
+/**
+ * The tail test is only meaningful if the long holds survive into it. These pin
+ * the two shapes apart: a burst that was still settling is excluded, a reference
+ * whose reduction sags under a sustained tone is not.
+ */
+const holds = [0.05, 0.2, 1.0, 3.0]
+const asBursts = (grs) => grs.map((grDb, i) => ({ holdS: holds[i], grDb, releaseT63: 0.1 }))
+
+test('a hold shallower than a LONGER hold is still settling and is excluded', () => {
+  const { kept, dropped } = tailTestHolds(asBursts([5.0, 9.8, 10.0, 10.0]))
+  assert.deepEqual(dropped.map(b => b.holdS), [0.05])
+  assert.deepEqual(kept.map(b => b.holdS), [0.2, 1.0, 3.0])
+  assert.equal(dropped[0].against, 10.0)
+})
+
+test('reduction that SAGS toward the long holds keeps every hold in the test', () => {
+  // The CLA-76 a2 capture verbatim: the peak is the 0.2 s hold, not the 3 s one.
+  const { kept, dropped, sag } = tailTestHolds(asBursts([10.00, 10.21, 9.68, 9.65]))
+  assert.deepEqual(dropped, [])
+  assert.deepEqual(kept.map(b => b.holdS), holds)
+  assert.ok(Math.abs(sag - 0.56) < 1e-9, 'the 0.56 dB sag is reported, not used to exclude')
+})
+
+test('a sag past the tolerance is reported but still excludes nothing', () => {
+  const { kept, dropped, sag } = tailTestHolds(asBursts([12.0, 12.0, 10.5, 10.0]))
+  assert.deepEqual(dropped, [])
+  assert.equal(kept.length, 4)
+  assert.ok(Math.abs(sag - 2.0) < 1e-9)
+})
+
+test('the longest hold is never excluded, however shallow it reads', () => {
+  const { kept, dropped } = tailTestHolds(asBursts([10.0, 10.0, 10.0, 1.0]))
+  assert.deepEqual(dropped, [])
+  assert.equal(kept.at(-1).grDb, 1.0)
+})
+
+test('bursts with no recovered release are left out of both lists', () => {
+  const bursts = asBursts([10.0, 10.0, 10.0, 10.0])
+  bursts[1].releaseT63 = null
+  const { kept, dropped } = tailTestHolds(bursts)
+  assert.equal(kept.length + dropped.length, 3)
 })
