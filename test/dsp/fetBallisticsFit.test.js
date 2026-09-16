@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { tailTestHolds } from '../../scripts/fet-ballistics.mjs'
+import { tailTestHolds, declaredSeconds, labelRatio } from '../../scripts/fet-ballistics.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const haveStimulus = existsSync(join(ROOT, 'data/corpus/fet1176/stimulus/thd.wav'))
@@ -180,4 +180,17 @@ test('bursts with no recovered release are left out of both lists', () => {
   bursts[1].releaseT63 = null
   const { kept, dropped } = tailTestHolds(bursts)
   assert.equal(kept.length + dropped.length, 3)
+})
+
+test('a declared knob in us/ms converts; a dial has no time to compare', () => {
+  assert.ok(Math.abs(declaredSeconds({ n: 800, unit: 'us' }) - 0.0008) < 1e-12)
+  assert.ok(Math.abs(declaredSeconds({ n: 235, unit: 'ms' }) - 0.235) < 1e-12)
+  assert.equal(declaredSeconds({ n: 4, unit: '' }), null, 'a dial position is not a time')
+  assert.equal(declaredSeconds(null), null)
+})
+
+test('the label ratio is our constant over the declared one, and refuses nonsense', () => {
+  assert.ok(Math.abs(labelRatio(0.00002, 0.0000534) - 2.67) < 0.01)
+  assert.equal(labelRatio(0, 0.001), null)
+  assert.equal(labelRatio(0.001, NaN), null)
 })

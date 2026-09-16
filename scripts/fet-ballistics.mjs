@@ -598,6 +598,30 @@ function knobsFromName(file) {
 
 const showKnob = k => (k ? k.n + (k.unit || ' (dial)') : '?')
 
+/** A declared knob in seconds, or null when it is a dial rather than a time. */
+export function declaredSeconds(k) {
+  if (!k || !k.unit) return null
+  return k.unit === 'us' ? k.n * 1e-6 : k.n * 1e-3
+}
+
+/**
+ * What the plugin's own knob says, against the constant our dial law puts on the
+ * same behaviour.
+ *
+ * ⚠ THIS IS TWO LABELLING CONVENTIONS, NOT AN ABSOLUTE MEASUREMENT. Neither
+ * side is calibrated against anything external: our dial law and the plugin's
+ * knob both claim the 1176's published 20-800 us / 50 ms-1.1 s span, and the
+ * measured t63 is ~2.75x the attack constant and ~1.66x the release constant on
+ * BOTH sides, so it cannot answer the question either. What the ratio does say
+ * is that the two conventions disagree, and by how much — which is the thing
+ * that makes a saved patch travel wrong between them.
+ */
+export function labelRatio(declaredS, ourS) {
+  if (!Number.isFinite(declaredS) || !Number.isFinite(ourS) || declaredS <= 0) return null
+  return ourS / declaredS
+}
+
+
 /**
  * Our own kernel measured the IDENTICAL way, at every dial.
  *
@@ -801,6 +825,28 @@ function writeFitSelftest(dir, sampleRate) {
   return dir
 }
 
+function reportLabelGap(sweep, knobs, dial) {
+  const declaredS = declaredSeconds(sweep === 'attack' ? knobs.attack : knobs.release)
+  if (declaredS === null) {
+    if (!knobs.unparsed) {
+      console.log(`        (the declared ${sweep} is a dial, not a time, so there is nothing to compare)`)
+    }
+    return
+  }
+  const ourS = sweep === 'attack' ? attackSecondsForDial(dial) : releaseSecondsForDial(dial)
+  const ratio = labelRatio(declaredS, ourS)
+  const fmtS = v => (sweep === 'attack' ? (v * 1e6).toFixed(0) + ' us' : (v * 1e3).toFixed(0) + ' ms')
+  console.log(`        the plugin's knob says ${fmtS(declaredS)}; our law calls that behaviour ` +
+    `${fmtS(ourS)} — ${ratio.toFixed(2)}x`)
+  if (ratio > 1.25 || ratio < 0.8) {
+    console.log(`        ⚠ THE TWO LABELS DISAGREE BY ${ratio >= 1 ? ratio.toFixed(1) : (1 / ratio).toFixed(1)}x. ` +
+      `Neither is calibrated against anything`)
+    console.log('          external — both just quote the 1176 datasheet — so this does not say which is')
+    console.log('          wrong. It says a patch saved on one and typed into the other lands somewhere')
+    console.log('          else, and that our dial law is a candidate for the fit, not a fixed point.')
+  }
+}
+
 function fitCaptures(sampleRate, dir = CAP_DIR) {
   const plan = burstPlan()
   const stim = buildProbe(plan, sampleRate)
@@ -965,6 +1011,7 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
           ? (attackSecondsForDial(m.dial) * 1e6).toFixed(0) + ' us'
           : (releaseSecondsForDial(m.dial) * 1e3).toFixed(0) + ' ms'
         console.log(`     →  our dial ${m.dial.toFixed(2)}  (between ${m.between[0]} and ${m.between[1]}) = ${t}`)
+        reportLabelGap(sweep, knobs, m.dial)
       }
     }
     console.log(`\n   ⚠ Read the dial, not the microseconds. Measured t63 runs ~2.9x the constant`)
