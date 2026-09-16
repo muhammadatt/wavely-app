@@ -102,6 +102,50 @@ const IN_DRIVE_MIN_DB = -24
 const IN_DRIVE_SPAN_DB = 40
 const IN_TAPER = 0.8
 
+/**
+ * Extra drive above the knee, so the top of the knob reaches the reference.
+ *
+ * ⚠ THE PLAIN FIX — RAISING `IN_DRIVE_SPAN_DB` — MOVES EVERY KNOB POSITION, and
+ * that is not a cosmetic objection. `inputDrive` is a value presets SAVE, so a
+ * wider span silently re-voices all five factory presets and every patch a user
+ * has stored: at span 47 the knob's midpoint runs 3.4 dB hotter than the number
+ * beside it used to mean. The Scheps inheritance bug, which shipped 4x the
+ * intended gain reduction because a change landed on shared defaults, is the
+ * precedent.
+ *
+ * So the extra travel is added ON TOP of the existing law, weighted by a
+ * smoothstep that is zero at the knee with zero slope there. Below knob 80 the
+ * drive is bit-identical to before — which covers every factory preset, the
+ * hottest of which is 75 — and the curve has no kink at the join. At knob 100 it
+ * reaches +24 dB, which puts a -12 dBFS source at 22.5 dB of reduction against
+ * the 16.3 it managed before. FETish sat at 21.86 dB in the capture our own knob
+ * could not follow, so the top of the travel now clears the reference rather
+ * than landing just under it — 7 dB of extra drive stopped 0.13 dB short, which
+ * is inside the scatter on the source level and not a margin worth shipping.
+ *
+ * ⚠ A USER PATCH SAVED ABOVE KNOB 80 WILL GET HOTTER. That is a real break and
+ * there is no way to both extend the top and leave the top unchanged; the knee
+ * is placed to make the affected band as small as it can be.
+ */
+/**
+ * 0 below `a`, 1 at `b`, with ZERO SLOPE AT BOTH ENDS.
+ *
+ * ⚠ THE ZERO SLOPE AT `a` IS THE WHOLE POINT and a linear ramp will not do. A
+ * ramp joins the existing taper with a step change in slope — the knob would
+ * visibly accelerate at one position, which is exactly the artefact a hardware
+ * attenuator does not have. The zero slope at `b` is the existing law's own
+ * behaviour, which already flattens toward the top.
+ */
+function smoothstepFrom(v, a, b) {
+  if (v <= a) return 0
+  if (v >= b) return 1
+  const t = (v - a) / (b - a)
+  return t * t * (3 - 2 * t)
+}
+
+const IN_DRIVE_EXTRA_DB = 8
+const IN_DRIVE_KNEE = 80
+
 // ── Ballistics ──────────────────────────────────────────────────────────────
 
 // Dial 1 (slowest) and dial 7 (fastest) endpoints; positions in between are
@@ -492,8 +536,10 @@ export class FET1176Kernel {
     }
 
     // Input attenuator: audio path and detector both, as on the hardware.
-    const knob = clamp(p.inputDrive, 0, 100) / 100
+    const knobPos = clamp(p.inputDrive, 0, 100)
+    const knob = knobPos / 100
     this.inputDriveDb = IN_DRIVE_MIN_DB + IN_DRIVE_SPAN_DB * Math.pow(knob, IN_TAPER)
+      + IN_DRIVE_EXTRA_DB * smoothstepFrom(knobPos, IN_DRIVE_KNEE, 100)
     this.inputLin = Math.exp(this.inputDriveDb * LN10_OVER_20)
     this.outputLin = Math.exp(p.outputGainDb * LN10_OVER_20)
 

@@ -2443,6 +2443,59 @@ and whether to widen it is a shipping decision about the plugin — with every
 preset and render downstream of it — not something to change in service of a
 measurement.
 
+### The Input knob reaches the reference — added above a knee, not by widening the span
+
+FET Punch topped out near 16.3 dB of reduction on a −12 dBFS source where FETish
+reached 21.9. That is a limit a user can hit, so it is fixed as a product change
+rather than a bench one.
+
+⚠ **THE OBVIOUS FIX WAS THE WRONG ONE.** Raising `IN_DRIVE_SPAN_DB` from 40 to 47
+moves *every* knob position, and `inputDrive` is a value presets SAVE — so it
+would have silently re-voiced all five factory presets and every stored user
+patch. At span 47 the knob's midpoint runs **3.4 dB hotter** than the number
+beside it used to mean. The Scheps inheritance bug, which shipped 4× the intended
+gain reduction because a change landed on shared defaults, is the precedent.
+
+Instead the extra travel is added on top of the existing law, weighted by a
+smoothstep that is zero at knob 80 **with zero slope there**:
+
+```
+drive = IN_DRIVE_MIN_DB + IN_DRIVE_SPAN_DB * knob^IN_TAPER
+      + IN_DRIVE_EXTRA_DB * smoothstepFrom(knob, 80, 100)
+```
+
+| knob | 0 | 40 | 55 | 70 | 75 | 80 | 90 | 100 |
+|---|---|---|---|---|---|---|---|---|
+| before | −24.000 | −4.782 | 0.794 | 6.070 | 7.777 | 9.460 | 12.767 | 16.000 |
+| after | −24.000 | −4.782 | 0.794 | 6.070 | 7.777 | 9.460 | 16.267 | **24.000** |
+
+Below 80 it is bit-identical, which covers every factory preset (40 / 55 / 60 /
+70 / 75 — the hottest is 75). Reduction at −12 dBFS, ratio 4, now runs to
+**22.5 dB** against 16.3, clearing FETish's 21.86.
+
+⚠ THE ZERO SLOPE AT THE KNEE IS LOAD-BEARING and a linear ramp will not do — it
+joins the taper with a step change in slope, so the knob visibly accelerates at
+one position, which a hardware attenuator does not do. Measured across the join:
+0.335 → 0.385 dB per knob unit, continuous.
+
+⚠ 7 dB OF EXTRA DRIVE LANDED 0.13 dB SHORT of the reference (21.73 against
+21.86). Inside the scatter on source level, but shipping a top-of-travel that
+sits just under the thing it exists to reach is not a margin; it is 8 dB.
+
+⚠ **A USER PATCH SAVED ABOVE KNOB 80 WILL GET HOTTER.** There is no way to both
+extend the top and leave the top unchanged. The knee is placed to make the
+affected band as small as possible, and a test pins that no factory preset sits
+in it — so if someone adds one at 90 later, the guarantee fails loudly instead of
+silently.
+
+⚠ **THIS IS NOT A SUBSTITUTE FOR INPUT ALIGNMENT, AND PARTLY OVERLAPS IT.** The
+underlying complaint — a knob whose effect depends on how hot the file is — is
+what `dsp/inputAlign.js` already solves properly for OptoSmooth and Scheps by
+measuring gated RMS and offsetting the drive, and FET Punch is still unaligned.
+More travel is the brute-force version of that. If FET Punch is aligned later,
+some of these 8 dB become redundant and the knee should be revisited rather than
+left stacked on top of a correction that now does the same job.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
