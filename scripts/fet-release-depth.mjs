@@ -57,12 +57,28 @@ const plan = shortPlan()
 let cachedStim = null
 const stim = () => (cachedStim ||= buildProbe(plan, SR))
 
-/** Our kernel's settled reduction and measured release t63 at one Input. */
-export function measureAt(inputDrive, params) {
+/**
+ * Our kernel's settled reduction and measured release t63, driven by stimulus
+ * level rather than by the Input knob.
+ *
+ * ⚠ THIS IS WHY THE FIT DOES NOT NEED `IN_DRIVE_SPAN_DB` WIDENED, and calling
+ * that constant the blocker was wrong. The detector sees `level + inputDrive` in
+ * dB and nothing else — the measurement path runs at `fetDrive: 0`, so the
+ * saturator, the one stage that could tell the two apart, is bypassed. Verified
+ * rather than assumed: Input 80 with the stimulus raised 6.540 dB (exactly the
+ * knob's own 80-to-100 span) returns 16.484 dB of depth and 345.7 ms, which is
+ * Input 100's answer to every digit printed.
+ *
+ * So the bench can drive past the knob's +16 dB ceiling and reach the
+ * reference's 21.9 dB without touching a shipping constant, which would
+ * otherwise have moved every existing knob position, preset and render to
+ * unblock a measurement.
+ */
+export function measureAt(stimGainDb, params) {
   const k = new FET1176Kernel(SR)
   const { tailFraction, ...kernelParams } = params
   k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
-    inputDrive, ratio: '4', attack: 4, release: 4, ...kernelParams })
+    inputDrive: 100, ratio: '4', attack: 4, release: 4, ...kernelParams })
   /**
    * \u26a0 THE TAIL HAS TO COME OFF FOR A FETish FIT AND THAT IS NOT A DETAIL. The
    * two mechanisms fight: the tail lengthens recovery with EXPOSURE, which
@@ -73,26 +89,35 @@ export function measureAt(inputDrive, params) {
    * it a parameter is a shipping decision this bench tool should not take.
    */
   if (tailFraction !== undefined) { k.tailFraction = tailFraction; k.mainFraction = 1 - tailFraction }
-  const x = stim().x
+
+  const g = Math.pow(10, stimGainDb / 20)
+  const base = stim()
+  const x = new Float32Array(base.x.length)
+  for (let i = 0; i < x.length; i++) x[i] = base.x[i] * g
   const y = new Float32Array(x.length)
   for (let f = 0; f < x.length; f += 128) {
     const l = Math.min(128, x.length - f)
     k.process([x.subarray(f, f + l)], [y.subarray(f, f + l)], l)
   }
-  const b = analyseCapture(y, plan, stim(), SR, 0).at(-1)
+  /**
+   * \u26a0 THE REFERENCE ENVELOPE IS SCALED TOO. `traceGain` divides the capture by
+   * this envelope, so leaving it at the unscaled amplitude would read the
+   * stimulus gain itself as compressor gain and report the drive as reduction.
+   */
+  const scaled = { x, env: base.env.map(v => v * g) }
+  const b = analyseCapture(y, plan, scaled, SR, 0).at(-1)
   return { depthDb: b.grDb, t63Ms: b.releaseT63 * 1e3 }
 }
 
 /**
- * The Input that puts our kernel at a given reduction.
+ * The stimulus level that puts our kernel at a given reduction.
  *
- * ⚠ IT REPORTS WHEN IT CANNOT GET THERE rather than returning its best effort.
- * Our Input tops out around 16.3 dB and two of the four reference rows are past
- * it; silently clamping would fold an out-of-range row into the residual as
- * though it had been matched, which is how `inputForGr` went wrong before.
+ * ⚠ IT STILL REPORTS WHEN IT CANNOT GET THERE. The ceiling is far higher now,
+ * but a target past it must still be named rather than silently clamped — that
+ * is how a row lands in the residual as though it had been matched.
  */
 export function inputForDepth(targetDb, params) {
-  let lo = 0, hi = 100
+  let lo = -40, hi = 24
   const seen = new Map()
   const at = v => {
     if (!seen.has(v)) seen.set(v, measureAt(v, params).depthDb)
@@ -100,7 +125,7 @@ export function inputForDepth(targetDb, params) {
   }
   if (at(hi) < targetDb - 0.05) return { knob: hi, clipped: 'high', depthDb: at(hi) }
   if (at(lo) > targetDb + 0.05) return { knob: lo, clipped: 'low', depthDb: at(lo) }
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 14; i++) {
     const mid = (lo + hi) / 2
     if (at(mid) < targetDb) lo = mid; else hi = mid
   }
@@ -108,7 +133,6 @@ export function inputForDepth(targetDb, params) {
   return { knob, clipped: null, depthDb: at(knob) }
 }
 
-/** Measured t63 at each reachable reference depth, for one candidate schedule. */
 /**
  * ⚠ THE INPUT SOLVE IS HOISTED OUT OF THE SEARCH, and it has to be. Settled
  * reduction is a property of the static curve at that level; the release
@@ -209,7 +233,7 @@ function fit() {
   for (const r of rows) {
     if (r.clipped) {
       console.log(`  ${r.depthDb.toFixed(2).padStart(13)} dB ${String(r.t63Ms).padStart(14)} ms` +
-        `     ⚠ past our Input range — not in the fit`)
+        `     ⚠ past our drive range — not in the fit`)
       continue
     }
     console.log(`  ${r.depthDb.toFixed(2).padStart(13)} dB ${String(r.t63Ms).padStart(14)} ms ` +
@@ -241,10 +265,10 @@ function fit() {
   console.log('    the null hypothesis; beating the SHIPPING dial proves nothing, since the')
   console.log('    shipping dial was never chosen to match this reference.')
 
-  console.log(`\n  ⚠ ONLY ${best.n} OF ${FETISH_DEPTH_TABLE.length} REFERENCE POINTS ARE IN THIS FIT. Our Input runs out`)
-  console.log('    near 16.3 dB and the reference goes to 21.9, so the two deepest rows — the')
-  console.log('    ones carrying most of the curvature — cannot be matched at all until')
-  console.log('    IN_DRIVE_SPAN_DB is widened. Treat k as provisional.\n')
+  if (best.n < FETISH_DEPTH_TABLE.length) {
+    console.log(`\n  ⚠ only ${best.n} of ${FETISH_DEPTH_TABLE.length} reference rows were reachable.`)
+  }
+  console.log()
 }
 
 const args = process.argv.slice(2)

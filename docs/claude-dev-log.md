@@ -2394,6 +2394,55 @@ is weak evidence for the schedule and strong evidence against a fixed constant.
 **Blocked on `IN_DRIVE_SPAN_DB`.** Widening our Input range is now the gate on the
 release fit, not a side finding — it is the third time it has come up.
 
+### ⚠⚠ CORRECTION: `IN_DRIVE_SPAN_DB` WAS NEVER THE BLOCKER ON THE RELEASE FIT
+
+The previous entry called widening the Input range "the gate" on the depth fit,
+and said so three times. It was wrong, and acting on it would have moved every
+shipping knob position, every factory preset and every existing render in order
+to unblock a **measurement**.
+
+The detector sees `level + inputDrive` summed in dB and nothing else, and the
+measurement path runs at `fetDrive: 0`, so the saturator — the one stage that
+could distinguish them — is bypassed. Raising the stimulus is therefore exactly
+equivalent to raising the knob, and the bench can drive as far past +16 dB as it
+likes. Verified rather than assumed:
+
+| | depth | release t63 |
+|---|---|---|
+| Input 100, stimulus 0 dB | 16.484 dB | 345.7 ms |
+| Input 80, stimulus +6.540 dB | 16.484 dB | 345.7 ms |
+
+6.540 dB is exactly the knob's own 80-to-100 span at `IN_TAPER` 0.8. Identical to
+every digit printed.
+
+⚠ ONE TRAP IN DOING IT THIS WAY: `traceGain` divides the capture by the reference
+envelope, so the envelope has to be scaled by the same factor. Leave it at the
+original amplitude and the drive itself reads as compressor gain.
+
+**With all four rows reachable, the fit is real:**
+
+| reference depth | reference t63 | ours | error |
+|---|---|---|---|
+| 6.18 dB | 30 ms | 31.3 | +4.4 % |
+| 13.96 dB | 70 ms | 65.3 | −6.7 % |
+| 17.51 dB | 93 ms | 92.4 | −0.6 % |
+| 21.86 dB | 139 ms | 142.9 | +2.8 % |
+
+`k = 0.1380 dB⁻¹` at release dial 6.28, tail off, **rms 4.25 % over four points
+against two free parameters** — against **53.59 %** for a fixed release with the
+dial free, which is the honest null. Twelve times better, and no longer an
+interpolation.
+
+⚠ THE RESIDUAL HAS STRUCTURE IN IT: +4.4 / −6.7 / −0.6 / +2.8. A pure exponential
+in depth is clearly the right family and is not exactly the law. Worth trying
+other forms before anything ships, and worth more than four rows.
+
+**The product question is still open and is genuinely separate.** FETish reaches
+21.9 dB where FET Punch tops out near 16.3. That is a real limit a user can hit,
+and whether to widen it is a shipping decision about the plugin — with every
+preset and render downstream of it — not something to change in service of a
+measurement.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

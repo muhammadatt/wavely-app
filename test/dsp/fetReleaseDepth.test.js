@@ -41,9 +41,11 @@ test('off is bit-identical, even with a slope set', () => {
 })
 
 test('on, release t63 rises with depth; off, it does not move', () => {
-  const on = [6, 10, 14].map(d => measureAt(
-    { 6: 62, 10: 73, 14: 89 }[d], { releaseSchedule: 'depth', releaseDepthK: 0.12, tailFraction: 0 }))
-  const off = [62, 73, 89].map(i => measureAt(i, { releaseSchedule: 'none', tailFraction: 0 }))
+  // measureAt drives by STIMULUS LEVEL in dB, not by the Input knob — see the
+  // note on measureAt for why, and for the check that the two are equivalent.
+  const drives = [-8, -2, 4]
+  const on = drives.map(d => measureAt(d, { releaseSchedule: 'depth', releaseDepthK: 0.12, tailFraction: 0 }))
+  const off = drives.map(d => measureAt(d, { releaseSchedule: 'none', tailFraction: 0 }))
 
   // ⚠ The control is the point: a fixed exponential recovers 63 % of its
   // reduction in one constant HOWEVER deep the reduction was, so a flat reading
@@ -69,20 +71,25 @@ test('the fitter recovers a slope the kernel was rendered with', () => {
 })
 
 /**
- * ⚠ THE FETish FIT IS UNDERDETERMINED AND MUST STAY VISIBLY SO. Our Input runs
- * out near 16.3 dB against a reference that reaches 21.9, leaving two reachable
- * rows against two free parameters — k and the release dial. Any two rows can
- * then be hit exactly, so a near-zero residual is arithmetic, not evidence. If
- * this test ever starts failing because more rows are reachable, that is the
- * signal the fit has become worth believing.
+ * ⚠ THIS TEST USED TO ASSERT THE OPPOSITE, AND THAT IS THE POINT. Our Input knob
+ * tops out near 16.3 dB against a reference reaching 21.9, so two of the four
+ * rows were unreachable and the fit had two points against two free parameters —
+ * an interpolation whose residual was zero by construction. The fix was NOT to
+ * widen IN_DRIVE_SPAN_DB, which would have moved every shipping knob position to
+ * unblock a measurement: the detector sees level and drive summed in dB, and the
+ * measurement path bypasses the saturator, so the bench drives the stimulus
+ * instead and reaches any depth it likes. This pins that all four rows stay
+ * reachable, because losing one takes the fit back to meaningless.
  */
-test('the FETish fit is underdetermined until the Input range widens', () => {
-  const rows = curveFor({ releaseSchedule: 'depth', releaseDepthK: 0.12, tailFraction: 0 })
-  const reachable = rows.filter(r => r.ourT63Ms !== null).length
-  assert.ok(reachable <= 2,
-    `${reachable} rows now reachable — the fit may no longer be underdetermined, so re-read it`)
+test('every reference row is reachable, so the fit is not an interpolation', () => {
+  const rows = curveFor({ releaseSchedule: 'depth', releaseDepthK: 0.138, tailFraction: 0 })
   assert.equal(rows.length, FETISH_DEPTH_TABLE.length)
-  assert.ok(rows.filter(r => r.clipped === 'high').length >= 2)
+  const reachable = rows.filter(r => r.ourT63Ms !== null).length
+  assert.equal(reachable, FETISH_DEPTH_TABLE.length,
+    `only ${reachable} rows reachable — with 2 free parameters the fit needs more than 2`)
+  // And the deepest row is past the Input knob's own ceiling, which is the whole
+  // reason the bench drives by level.
+  assert.ok(FETISH_DEPTH_TABLE.at(-1).depthDb > 16.5)
 })
 
 test('a fixed release with the dial free cannot match the reference shape', () => {
