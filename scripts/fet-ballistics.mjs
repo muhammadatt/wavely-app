@@ -1219,26 +1219,48 @@ CAPTURE MATRIX — the stimulus files above do not change across it, only knobs 
               Analog noise / hiss OFF on any reference that offers it, or it
               lands in the trace as gain that is not gain.
 
-  transients.wav  ratio 4, Input 50, attack 4, release 4. 1 bounce per reference.
+  ⚠ KNOBS BELOW ARE DIALS 1-7, WHICH ONLY CLA-76 HAS. FETish's attack and
+    release are continuous and printed in us / ms, so set it to the exact time
+    our dial produces and compare with no interpolation assumption on either
+    side. Attack 1 is the SLOWEST and 7 the fastest, as on the hardware:
+
+      dial        1      2      3      4      5      6      7
+      attack   800us  433us  234us  126us   68us   37us   20us
+      release  1100ms  657ms  393ms  235ms  140ms   84ms   50ms
+
+    Agreement at the ENDPOINTS confirms nothing — 20-800 us and 50-1100 ms are
+    our own constants too, because both quote the same datasheet. The taper
+    between them is what these captures settle.
+
+  transients.wav  ratio 4, Input 50, attack 4, release 4
+                  = FETish attack 126 us, release 235 ms.
+                  1 bounce per reference.
                   THE OTHER LIMB OF PROGRAM DEPENDENCE. bursts.wav varies elapsed
                   exposure; this varies how many EDGES the detector saw at a
                   matched depth and a matched total on-time. A reference flat on
                   bursts.wav has only been shown not to key on exposure.
 
   stairs.wav      attack 1, release 7        (see the plan note — a fast attack
-                  ratio  4 / 8 / 12 / 20 / all     leaves nothing settled to read)
+                  = FETish 800 us / 50 ms      leaves nothing settled to read)
+                  ratio  4 / 8 / 12 / 20 / all
                   Input  20 / 40 / 60 / 80
                   = 20 bounces per reference.
 
   bursts.wav      ratio 4, Input 50
-                  attack 1..7 at release 4   = 7 bounces
-                  release 1..7 at attack 7   = 7 bounces (one shared corner)
+                  attack 1..7 at release 4   = 7 bounces (FETish: the 7 attack
+                  release 1..7 at attack 7   = 7 bounces  times above at 235 ms,
+                                               (one shared corner)  then the 7
+                                               release times at 20 us)
                   then ratio 'all' at attack 4 / release 4 = 1 bounce
                   = 14 bounces per reference.
 
-  frequency.wav   ratio 4, Input 50, attack 1, release 7. 1 bounce. HOLD-OUT.
+  frequency.wav   ratio 4, Input 50, attack 1, release 7 (FETish 800 us / 50 ms).
+                  1 bounce. HOLD-OUT — and the only thing that checks whether the
+                  reference's detector carries our rectifier bias, which every
+                  attack number rests on.
 
-  thd.wav         ratio 4, attack 1, release 7, Input 20 / 50 / 80. 3 bounces.
+  thd.wav         ratio 4, attack 1, release 7 (FETish 800 us / 50 ms),
+                  Input 20 / 50 / 80. 3 bounces.
 
 ⚠ START EVERY BOUNCE AT THE FILE'S FIRST SAMPLE. Events are POSITIONED around
   the 20 s demo-mute grid, which is relative to the RENDER's start, not the
