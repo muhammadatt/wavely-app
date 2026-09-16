@@ -24,10 +24,10 @@ export { dynamicsPreRollSeconds, dynamicsLatencySamples, DYNAMICS_CLIP_LIMITER }
  * opto in series.
  *
  * ⚠ THE NOMINAL FIGURE ONLY, the same contract `la2aParams.js` states for its
- * own. It is 150 while the clipper's limiter is pinned off and the opto's
- * lookahead to zero; engaging the limiter (see `DYNAMICS_CLIP_LIMITER`) makes it
- * RATE-DEPENDENT, because the lookahead is a fixed number of MILLISECONDS — 326
- * samples at 44.1 kHz and 342 at 48.
+ * own, and it is RATE-DEPENDENT: the clipper's limiter is engaged (see
+ * `DYNAMICS_CLIP_LIMITER`) and its lookahead is a fixed number of MILLISECONDS,
+ * so the section is 326 samples at 44.1 kHz and 342 at 48. It was 150 while the
+ * limiter was off.
  *
  * ⚠ ANYTHING THAT COMPENSATES A TIMELINE MUST CALL `dynamicsLatencySamples`,
  * NOT THIS. Reading a constant here is precisely how the standalone clipper
@@ -35,7 +35,7 @@ export { dynamicsPreRollSeconds, dynamicsLatencySamples, DYNAMICS_CLIP_LIMITER }
  * its own `limiter` first defaulted to 100. This value is for the chain's
  * nominal display; the apply path takes the function.
  */
-export const DYNAMICS_LATENCY_SAMPLES = 150
+export const DYNAMICS_LATENCY_SAMPLES = 326
 
 /**
  * What the PANEL holds. Everything else the kernel reads is MEASURED by

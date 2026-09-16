@@ -125,31 +125,44 @@ const LN10_OVER_20 = Math.LN10 / 20
  * lets through. So 100 is "lean on the limiter", never "the curve is gone".
  */
 /**
- * ⚠ STILL 0, AND THE BLOCKER IS THE METERING, NOT THE LATENCY. Switching it to
- * 100 was built and measured and then backed out: the clipper's reported
- * reduction (`metering.maxReductionDb`) counts ONLY WHAT THE CURVE ADDED, by
- * deliberate design — the standalone's RESIDUAL contract depends on the
- * limiter's gain reduction being excluded. With the limiter carrying the peak
- * control that figure reads 0.00 at every threshold, which takes two things
- * with it:
+ * The clipper's CLIP/LIMIT balance inside this composite.
  *
- *   - `CLIP_MAX_DEPTH_DB`, the section's one hard rule, stops binding. Measured
- *     on the sweep: 25/292 combinations at the cap on David Greenberg and
- *     88/292 on Messy and Bright BEFORE, 0/292 on both after.
- *   - the panel's CLIP meter sits at zero while the stage is working, which is
- *     the same lie the "controls disabled without a measurement" work removed.
+ * ⚠ IT WAS PINNED AT 0 FOR A LATENCY REASON, NOT AN AUDIO ONE, and it is 100
+ * now on an audio judgement. The section's "latency is 150 samples and
+ * constant" rested on the limiter being off, and nobody had auditioned the two
+ * paths here. The standalone's own measurements argue for the limiter on a
+ * voice: the curve's error is IN-BAND harmonics, -16 dBc at 13 dB of drive,
+ * which 8x oversampling does not touch because it is not fold-back; the limiter
+ * takes the same peaks down with a smooth gain envelope and errs as
+ * intermodulation and slight pumping instead.
  *
- * Fixing it means redefining the stage's reported depth as TOTAL peak reduction
- * (source peak minus output peak) rather than the curve's own metering — which
- * reaches into the shared kernel and changes what RESIDUAL means for the
- * standalone plugin. That is a decision, not a refactor.
+ * ⚠ THE KNOB IS A BALANCE, NOT A MODE. At 0 the limiter aims
+ * `LIMITER_MAX_ABOVE_DB` above the threshold and is bypassed outright; at 100 it
+ * aims at the threshold itself and does as much of the peak control as it can,
+ * leaving the curve to catch intersample peaks and whatever the smoothing lets
+ * through. So this is "lean on the limiter", never "the curve is gone".
  *
- * The measurement that motivates the switch is real and worth keeping: at
- * limiter 100 the output peak lands EXACTLY on the threshold (-3.00 / -5.00 /
- * -7.00 / -9.00 dBFS measured), so it is a true brickwall and the crest
- * response becomes predictable rather than something the sweep has to discover.
+ * ⚠ IT COSTS LATENCY AND THE COST IS RATE-DEPENDENT: the lookahead is a fixed
+ * `LIMITER_LOOKAHEAD_MS`, so the section goes 150 -> 326 samples at 44.1 kHz and
+ * 150 -> 342 at 48. Everything that compensates a timeline takes
+ * `dynamicsLatencySamples`; a constant is exactly how this shifted an applied
+ * region by 176 samples in the standalone.
+ *
+ * ⚠ IT TOOK TWO FIXES TO BECOME SAFE, both of them about the clipper reporting
+ * only what its SHAPING CURVE did:
+ *
+ *   - `CLIP_MAX_DEPTH_DB` reads that figure, which is 0.00-0.01 dB at every
+ *     threshold once the limiter carries the work — so the section's one hard
+ *     rule stopped binding entirely (measured 25/292 and 88/292 combinations at
+ *     the cap before, 0/292 after). `peakRed` is the second bound that holds
+ *     here, and it holds at exactly 3.00 dB below peak on both narrators.
+ *   - the panel's CLIP meter read it too, so it would have sat at zero over a
+ *     working stage. `stageReductionDb` adds the limiter's gain per sample.
+ *
+ * Neither was optional and neither is visible from this line, which is why they
+ * are named here.
  */
-export const DYNAMICS_CLIP_LIMITER = 0
+export const DYNAMICS_CLIP_LIMITER = 100
 
 const CLIP_FIXED = {
   limiter: DYNAMICS_CLIP_LIMITER,

@@ -19,7 +19,9 @@ import {
   sweepDynamics, solveFromSweep,
   DYNAMICS_TARGET, CLIP_SHAVE_DETENTS, CLIP_MAX_DEPTH_DB,
 } from '../../src/audio/dynamicsSolve.js'
-import { processDynamicsBuffer } from '../../src/audio/dynamicsProcessor.js'
+import {
+  processDynamicsBuffer, dynamicsLatencySamples,
+} from '../../src/audio/dynamicsProcessor.js'
 import { inputAlignDbFor } from '../../src/audio/dsp/inputAlign.js'
 
 const SR = 44100
@@ -258,7 +260,9 @@ test('solved params render through the real kernel cleanly', () => {
     const { params } = solveDynamics(x, SR, { density: 80, clipShaveDb })
     const r = processDynamicsBuffer(x, SR, params)
     assert.ok(r.channelData[0].every(Number.isFinite), `clip ${clipShaveDb} produced non-finite output`)
-    assert.equal(r.latencySamples, 150)
+    // ⚠ DERIVED — the clipper's limiter makes this RATE-DEPENDENT (326 samples
+    // at 44.1 kHz, 342 at 48). See `DYNAMICS_CLIP_LIMITER`.
+    assert.equal(r.latencySamples, dynamicsLatencySamples(SR))
   }
 })
 

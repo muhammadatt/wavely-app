@@ -18,7 +18,7 @@ import assert from 'node:assert/strict'
 import {
   DynamicsKernel, processDynamicsBuffer, dynamicsPreRollSeconds,
   DYNAMICS_KERNEL_DEFAULTS,
-  dynamicsLatencySamples,
+  dynamicsLatencySamples, DYNAMICS_CLIP_LIMITER,
 } from '../../src/audio/dynamicsProcessor.js'
 import { processSoftClipperBuffer } from '../../src/audio/softClipperProcessor.js'
 import { processFET1176Buffer } from '../../src/audio/fet1176Processor.js'
@@ -53,8 +53,15 @@ const peakDb = (c) => {
 
 const CLIP_DB = -9
 /** The clip and FET settings the composite pins, spelled out for the A/B below. */
+/**
+ * ⚠ `limiter` MIRRORS `DYNAMICS_CLIP_LIMITER` RATHER THAN BEING TYPED. This is
+ * the reference the composite's head is compared against bit-for-bit, so a
+ * literal here would not fail when the composite's balance moved — it would
+ * fail because the reference no longer describes the composite, which reads as
+ * a blend bug and is not one.
+ */
 const HEAD_CLIP = {
-  limiter: 0, thresholdMode: 'fixed', fixedThresholdDb: CLIP_DB,
+  limiter: DYNAMICS_CLIP_LIMITER, thresholdMode: 'fixed', fixedThresholdDb: CLIP_DB,
   outputTrimDb: 0, shape: 'tanh4',
 }
 const HEAD_FET = {
@@ -64,19 +71,43 @@ const HEAD_FET = {
 
 test('latency is the sum of the three serial stages', () => {
   const k = new DynamicsKernel(SR)
-  // 50 (clipper at limiter 0) + 50 (FET) + 50 (opto, lookahead pinned off).
   /**
-   * ⚠ DERIVED, NOT TYPED, because engaging the clipper's limiter would make it
-   * RATE-DEPENDENT — the lookahead is a fixed number of milliseconds, so the
-   * section would be 326 samples at 44.1 kHz and 342 at 48. Every timeline
-   * caller takes `dynamicsLatencySamples` for that reason; see
-   * `DYNAMICS_CLIP_LIMITER` for why the switch is not made yet.
+   * 226 (clipper: the oversampler's 50 plus the limiter's 2 ms lookahead,
+   * twice) + 50 (FET) + 50 (opto, lookahead pinned off).
+   *
+   * ⚠ DERIVED, NOT TYPED, because it is RATE-DEPENDENT — the lookahead is a
+   * fixed number of milliseconds, so the section is 326 samples at 44.1 kHz and
+   * 342 at 48. Every timeline caller takes `dynamicsLatencySamples` for that
+   * reason; a constant is how the standalone shifted an applied region by 176
+   * samples. See `DYNAMICS_CLIP_LIMITER`.
    */
   assert.equal(k.latencySamples, dynamicsLatencySamples(SR))
-  assert.equal(k.latencySamples, 150)
+  assert.equal(k.latencySamples, 326)
+
+  /**
+   * ⚠ IT IS NOT THE SUM OF THE KERNELS' OWN GETTERS, AND THAT IDENTITY WAS ONLY
+   * EVER INCIDENTALLY TRUE. Two things break it, both of them the reason the
+   * composite derives its figure from the params instead:
+   *
+   *   - the clipper's getter returns `osLatency + (limiterActive ?
+   *     limiterLatency : 0)`, and `limiterActive` is decided inside
+   *     `process()` — so on a fresh kernel it reads 50 while the first block
+   *     will delay by 226;
+   *   - a BYPASSED stage never runs `process()` at all, so its getter stays at
+   *     the constructor value forever while its delay line still carries the
+   *     full latency. With no `clipThresholdDb` — the default — the clipper is
+   *     bypassed, so the sum reads 150 against a composite that delays 326.
+   *
+   * Engaged and warmed, they agree. The property that actually matters is that
+   * the DELAY matches the DECLARATION in every bypass combination, which the
+   * impulse test measures rather than asserting a sum.
+   */
+  const engaged = new DynamicsKernel(SR)
+  engaged.setParams({ clipThresholdDb: -6, fetDrive: 30, squash: 26 })
+  engaged.process([new Float32Array(128)], [new Float32Array(128)], 128)
   assert.equal(
-    k.latencySamples,
-    k.clipper.latencySamples + k.fet.latencySamples + k.la2a.latencySamples,
+    engaged.latencySamples,
+    engaged.clipper.latencySamples + engaged.fet.latencySamples + engaged.la2a.latencySamples,
   )
 })
 
