@@ -422,6 +422,14 @@ export class FET1176Kernel {
 
     // Ballistics. Attack is applied to the whole reduction; release splits
     // across a main stage and a slower tail.
+    //
+    // ⚠ THE SPLIT IS NOT A CLAIM THAT THE 1176 HAS TWO RELEASE CIRCUITS. It
+    // has one, heavily program-dependent: recovery is quick after a transient
+    // and lengthens under sustained compression. Two stages filling
+    // proportionally on attack and decaying at different rates is how we
+    // produce that observable — the longer the cell is held down, the more of
+    // the reduction sits on the slow stage. Measured on our own kernel, release
+    // t63 grows 21-25 % from a 50 ms hold to a 3 s one.
     let attackS = dialToSeconds(p.attack, ATTACK_SLOWEST_S, ATTACK_FASTEST_S)
     if (this.isAllButtons) attackS *= ALL_ATTACK_LAG
     const releaseS = dialToSeconds(p.release, RELEASE_SLOWEST_S, RELEASE_FASTEST_S)

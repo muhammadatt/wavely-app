@@ -856,10 +856,18 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
     }
 
     /**
-     * ⚠ THE HOLD SWEEP IS THE TAIL TEST AND IT IS THE POINT OF THIS PLAN. A
-     * single time constant recovers identically after every hold length; a
-     * two-stage network does not. A release trace bit-identical after 50 ms and
-     * 3 s is how an 1176 got mistaken for an LA-2A in this repo's corpus.
+     * ⚠ THE HOLD SWEEP IS THE PROGRAM-DEPENDENCE TEST AND IT IS THE POINT OF
+     * THIS PLAN. The 1176's release is not dual-stage, it is program-dependent:
+     * quick after a transient, lengthening under sustained compression. That
+     * predicts release t63 growing with hold length, which a fixed time constant
+     * cannot do. A release trace bit-identical after 50 ms and 3 s is how an
+     * 1176 got mistaken for an LA-2A in this repo's corpus.
+     *
+     * ⚠ THIS ONLY REACHES THE SUSTAINED LIMB. The stimulus is a
+     * constant-amplitude tone, so it varies exposure and nothing else. A
+     * reference that keys its program dependence on transient density rather
+     * than hold duration reads flat here and is not therefore fixed-release —
+     * that takes a second stimulus at matched depth and duration.
      */
     /**
      * ⚠ ONLY HOLDS THAT REACHED FULL REDUCTION BELONG IN THE TAIL TEST. A burst
@@ -885,8 +893,10 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
         `${(lo * 1e3).toFixed(0)} vs ${(hi * 1e3).toFixed(0)} ms`)
       console.log(hi > lo * 1.05
         ? '   → THE RELEASE STRETCHES WITH EXPOSURE — a tail is present, as we model.'
-        : '   → ⚠ NO STRETCH WITH EXPOSURE. A single-stage release; our TAIL_FRACTION /\n'
-          + '     TAIL_MULT have nothing to fit against on this reference.')
+        : '   → ⚠ NO STRETCH WITH EXPOSURE. This reference does not lengthen its release\n'
+          + '     under sustained compression, so our TAIL_FRACTION / TAIL_MULT have nothing\n'
+          + '     to fit against HERE. Not a finding about the 1176, which does — and not yet\n'
+          + '     a finding about the reference either, until the transient limb is tested.')
     }
 
     const knobs = knobsFromName(file)
