@@ -2443,7 +2443,7 @@ and whether to widen it is a shipping decision about the plugin — with every
 preset and render downstream of it — not something to change in service of a
 measurement.
 
-### The Input knob reaches the reference — added above a knee, not by widening the span
+### The Input knob reaches the reference — added above a knee (SUPERSEDED, see below)
 
 FET Punch topped out near 16.3 dB of reduction on a −12 dBFS source where FETish
 reached 21.9. That is a limit a user can hit, so it is fixed as a product change
@@ -2495,6 +2495,67 @@ measuring gated RMS and offsetting the drive, and FET Punch is still unaligned.
 More travel is the brute-force version of that. If FET Punch is aligned later,
 some of these 8 dB become redundant and the knee should be revisited rather than
 left stacked on top of a correction that now does the same job.
+
+### FET Punch is input-aligned, and the Input knee is gone
+
+Two changes that belong together, both with the owner's agreement to re-voice the
+factory presets rather than preserve them.
+
+**1. The knee is replaced by one power law.** `IN_DRIVE_SPAN_DB` 40 → 48, so the
+knob runs −24 to **+24 dB** across its travel. The knee version bought preset
+compatibility at the cost of a knob whose RATE OF CHANGE was not monotonic —
+0.335 dB per unit below knob 80, bulging past 0.7 near 90, back to 0.384 at the
+top. A hardware attenuator does not do that, and it is felt rather than seen. One
+law has a slope that only ever falls (0.609 at knob 10 to 0.384 at 100), which is
+what `IN_TAPER` below 1 models in the first place.
+
+⚠ EVERY KNOB POSITION HAS MOVED — up to 8 dB at the top, ~4.6 dB at mid-travel.
+All five factory presets are now mis-voiced and are to be re-cut. A test records
+the size of the shift per preset so the debt is visible rather than forgotten.
+
+**2. Alignment, the thing that was actually overdue.** FET Punch has no threshold
+control either, so what a knob position DID was set by the file's level.
+Measured at Input 55, ratio 4:
+
+| source peak | unaligned | aligned |
+|---|---|---|
+| −6 dBFS | 13.30 dB | 8.80 dB |
+| −12 dBFS | 8.80 dB | 8.80 dB |
+| −18 dBFS | 4.31 dB | 8.80 dB |
+| −24 dBFS | 0.85 dB | 8.80 dB |
+| −30 dBFS | **0.00 dB** | 8.80 dB |
+
+The same failure `dsp/inputAlign.js` was built for on OptoSmooth, and the same
+fix: gated RMS of the whole file, `ALIGN_TARGET_DBFS`, an `Align` knob that AUTO
+owns until touched, `INPUT_TRIM_MAX_DB` by hand, keyed on `docId:revision` so a
+document switch re-measures and an edit does too.
+
+⚠ **BUT IT GOES ON THE DETECTOR, NOT ON `inputLin`, AND THAT DIFFERS FROM
+OPTOSMOOTH.** There the offset can ride `scDriveDb` because that is side-chain
+only. Here `inputLin` gains the AUDIO as well — the hardware's input attenuator
+feeds both — so folding the offset into it would raise the output level and drive
+the saturator harder: precisely the "input gain that has to undo itself
+downstream" that `inputAlign.js` argues against. Adding it to the detector's
+`levelDb` instead leaves `inputLin` at whatever the knob says, so the REDUCTION
+stops depending on the file's level while the output level still tracks the file,
+which is the user's gain staging and not ours to correct.
+
+⚠ IT HAS TO REACH THE MAKEUP SOLVE AND THE APPLY PATH, not just preview. Apply is
+reachable without ever previewing, and the solve renders the kernel — a makeup
+solved against a stale offset is solved for a compressor doing a different amount
+of work. `refreshInputAlign()` runs before both.
+
+⚠ IT IS SEEDED IN THE EFFECT WRAPPER. `setParam` gates on `name in params` and
+the offset is deliberately absent from `FET1176_DEFAULTS` (it describes the file,
+not the patch), so without the seed every push would be dropped silently and
+preview would run the raw behaviour while apply ran the aligned one — the same
+trap `ceilingDb` hit in `la2aCompressor.js`.
+
+**Where this leaves the earlier caveat.** The knee entry warned that extra travel
+is the brute-force version of alignment and that the two would overlap. They do,
+but they are not redundant: alignment moves the DETECTOR to nominal, which fixes
+the quiet-file case; the wider span is what lets the knob reach 22.5 dB of
+reduction on a nominal file, which is where FETish sat. Both were needed.
 
 ### Available but Not Active in Current Presets
 

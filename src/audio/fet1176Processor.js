@@ -94,12 +94,12 @@ const OUT_SMOOTH_MS = 8
 const NOMINAL_DBFS = -18
 const THRESHOLD_DBFS = NOMINAL_DBFS
 
-// Input knob 0-100 -> drive into the fixed threshold, spanning 40 dB
-// (-24 dB at knob 0, +16 dB at knob 100). IN_TAPER < 1 models the hardware's
+// Input knob 0-100 -> drive into the fixed threshold, spanning 48 dB
+// (-24 dB at knob 0, +24 dB at knob 100). IN_TAPER < 1 models the hardware's
 // stepped audio-taper attenuator: level rises quickly off zero and flattens
 // toward the top.
 const IN_DRIVE_MIN_DB = -24
-const IN_DRIVE_SPAN_DB = 40
+const IN_DRIVE_SPAN_DB = 48
 const IN_TAPER = 0.8
 
 /**
@@ -128,23 +128,21 @@ const IN_TAPER = 0.8
  * is placed to make the affected band as small as it can be.
  */
 /**
- * 0 below `a`, 1 at `b`, with ZERO SLOPE AT BOTH ENDS.
+ * ⚠ THE SPAN WAS 40 AND EVERY KNOB POSITION HAS MOVED. This re-voices all five
+ * factory presets and every stored user patch, deliberately and with the owner's
+ * agreement, because the alternative was worse. The first attempt kept the old
+ * law below knob 80 and added the extra travel above it through a smoothstep, so
+ * nothing already saved would change — but that buys preset compatibility with a
+ * knob whose RATE OF CHANGE is no longer monotonic: slope runs 0.335 dB per unit
+ * below the knee, bulges past 0.7 around knob 90, and falls back to 0.384 at the
+ * top. A hardware attenuator does not do that, and it is the sort of thing that
+ * is felt rather than seen.
  *
- * ⚠ THE ZERO SLOPE AT `a` IS THE WHOLE POINT and a linear ramp will not do. A
- * ramp joins the existing taper with a step change in slope — the knob would
- * visibly accelerate at one position, which is exactly the artefact a hardware
- * attenuator does not have. The zero slope at `b` is the existing law's own
- * behaviour, which already flattens toward the top.
+ * One power law across the whole travel has a slope that only ever falls
+ * (0.609 dB per unit at knob 10 down to 0.384 at 100), which is what `IN_TAPER`
+ * below 1 is modelling in the first place. Presets are re-cut against it.
  */
-function smoothstepFrom(v, a, b) {
-  if (v <= a) return 0
-  if (v >= b) return 1
-  const t = (v - a) / (b - a)
-  return t * t * (3 - 2 * t)
-}
-
-const IN_DRIVE_EXTRA_DB = 8
-const IN_DRIVE_KNEE = 80
+export const IN_DRIVE_SPAN_DB_LEGACY = 40
 
 // ── Ballistics ──────────────────────────────────────────────────────────────
 
@@ -265,6 +263,12 @@ export const FET1176_KERNEL_DEFAULTS = {
    *             limb FETish actually has. See RELEASE_DEPTH_K.
    */
   releaseSchedule: 'none',
+  /**
+   * Detector offset in dB that makes a knob position mean the same reduction on
+   * every file. Null/absent is 0 \u2014 the un-aligned behaviour. Measured per file
+   * from gated RMS, never stored in a preset: it is a property of the FILE.
+   */
+  inputAlignDb: 0,
   /** dB⁻¹ slope of that schedule. Only read when releaseSchedule is 'depth'. */
   releaseDepthK: RELEASE_DEPTH_K,
   /**
@@ -536,10 +540,24 @@ export class FET1176Kernel {
     }
 
     // Input attenuator: audio path and detector both, as on the hardware.
-    const knobPos = clamp(p.inputDrive, 0, 100)
-    const knob = knobPos / 100
+    const knob = clamp(p.inputDrive, 0, 100) / 100
     this.inputDriveDb = IN_DRIVE_MIN_DB + IN_DRIVE_SPAN_DB * Math.pow(knob, IN_TAPER)
-      + IN_DRIVE_EXTRA_DB * smoothstepFrom(knobPos, IN_DRIVE_KNEE, 100)
+
+    /**
+     * \u26a0 A DETECTOR OFFSET, AND FOR FET PUNCH THAT IS NOT WHERE THE INPUT KNOB
+     * LIVES. On OptoSmooth the alignment can ride the side-chain drive because
+     * `scDriveDb` is side-chain only and the audio path never sees it. Here
+     * `inputLin` gains the AUDIO as well \u2014 the hardware's input attenuator feeds
+     * both \u2014 so folding the offset into it would raise the output level and
+     * drive the saturator harder, which is exactly the "input gain that has to
+     * undo itself downstream" that `dsp/inputAlign.js` argues against.
+     *
+     * So it is added to the detector's level instead, leaving `inputLin` at
+     * whatever the knob says. The reduction a knob position delivers stops
+     * depending on how hot the file is; the output level still tracks the file,
+     * which is the user's gain staging and not ours to correct.
+     */
+    this.inputAlignDb = Number.isFinite(p.inputAlignDb) ? p.inputAlignDb : 0
     this.inputLin = Math.exp(this.inputDriveDb * LN10_OVER_20)
     this.outputLin = Math.exp(p.outputGainDb * LN10_OVER_20)
 
@@ -752,7 +770,7 @@ export class FET1176Kernel {
       // track the waveform itself, and the release network supplies the only
       // meaningful time constant on the way back down.
       const rect = sc < 0 ? -sc : sc
-      const levelDb = rect > 1e-6 ? 20 * Math.log10(rect) : -120
+      const levelDb = (rect > 1e-6 ? 20 * Math.log10(rect) : -120) + this.inputAlignDb
       const grTarget = this._grForOvershoot(levelDb - this.thresholdDb)
 
       // Attack pulls both stages toward their share of the target together;

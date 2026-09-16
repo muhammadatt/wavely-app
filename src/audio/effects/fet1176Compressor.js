@@ -67,6 +67,7 @@ export function toKernelParams(params) {
     fetDrive: params.fetDrive,
     scHpfHz: params.scHpf,
     mix: params.mix,
+    inputAlignDb: params.inputAlignDb ?? 0,
   }
 }
 
@@ -79,7 +80,15 @@ export function createFET1176Compressor(audioContext) {
   const preOutput = audioContext.createGain()
   const output = audioContext.createGain()
 
-  let params = { ...FET1176_DEFAULTS }
+  /**
+   * ⚠ `inputAlignDb` IS SEEDED HERE BECAUSE `setParam` GATES ON `name in params`.
+   * It is measured from the file rather than dialled, so it is deliberately
+   * absent from `FET1176_DEFAULTS` — and without a seed that gate would drop
+   * every push of it silently, leaving preview running the raw level-dependent
+   * behaviour while apply ran the aligned one. Exactly the reason `ceilingDb`
+   * and `inputAlignDb` are seeded in `la2aCompressor.js`.
+   */
+  let params = { ...FET1176_DEFAULTS, inputAlignDb: null }
   let worklet = null
   let destroyed = false
   let grDb = 0
