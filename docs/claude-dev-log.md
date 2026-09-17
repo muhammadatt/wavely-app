@@ -2557,6 +2557,76 @@ but they are not redundant: alignment moves the DETECTOR to nominal, which fixes
 the quiet-file case; the wider span is what lets the knob reach 22.5 dB of
 reduction on a nominal file, which is where FETish sat. Both were needed.
 
+### ⚗⚗⚗ THE DIAL LAWS, FITTED — our taper SHAPE is right and both endpoint pairs are wrong
+
+17 FETish bursts captures, the Input-range work having rescued the three that
+previously reported "OUR INPUT KNOB CANNOT REACH IT".
+
+**Release — solved, and cleanly.** The `a20us` sweep varies only the release
+knob, at a depth matched to 0.44 dB across all seven:
+
+| declared | measured t63 | ratio | depth |
+|---|---|---|---|
+| 50 ms | 18 | 0.3600 | 12.17 |
+| 86 ms | 31 | 0.3605 | 12.34 |
+| 139 ms | 51 | 0.3669 | 12.45 |
+| 235 ms | 86 | 0.3660 | 12.52 |
+| 393 ms | 145 | 0.3690 | 12.57 |
+| 657 ms | 242 | 0.3683 | 12.59 |
+| 1100 ms | 407 | 0.3700 | 12.61 |
+
+A **constant 0.366 across a 22× range of the knob.** The step ratios agree to
+three decimals (declared 1.7200 / 1.6906 / 1.6723 against measured 1.7222 /
+1.6863 / 1.6860), so FETish's taper is geometric with the same ladder ours uses:
+**our `dialToSeconds` interpolation is correct and only the endpoints are off.**
+
+Implied FETish range: **18.3 ms to 402 ms**, against our 50 ms to 1.1 s. Both
+endpoints 2.73× too slow.
+
+⚠ AND THE RESIDUAL DRIFT IS THE DEPTH SCHEDULE SHOWING THROUGH. The ratio creeps
+1.0000 → 1.0278 across the sweep; the depth creeps 12.17 → 12.61 dB, which at
+`k = 0.138` predicts 1.0626. Same direction, about half the size — an independent
+corroboration of the depth limb from a capture set that was not fitted to it.
+
+**Attack — same story, larger shift, one point excluded.** The `_r235ms` sweep:
+
+| declared | t63 µs | t63/declared | depth | overshoot |
+|---|---|---|---|---|
+| 20 µs | 188 | 9.40 | 12.52 | 5.29 |
+| 66 µs | 938 | 14.21 | 15.40 | 10.91 |
+| 126 µs | 1813 | 14.39 | 16.30 | 14.13 |
+| 235 µs | 3438 | 14.63 | 16.35 | 15.99 |
+| 433 µs | 6313 | 14.58 | 15.98 | 16.10 |
+| 800 µs | 11313 | 14.14 | 15.49 | 15.61 |
+
+Five of the six sit within 0.95 dB of each other in depth and give a ratio
+constant to 3 %. **The taper shape is right here too**; the endpoints are
+~5.1× too fast. Bias-free version, comparing measured-to-measured: our dial 1
+(800 µs) measures ~2200 µs through this analysis, FETish's 800 µs setting
+measures 11313 — **5.14×**. At dial 5 it is 5.0×. Implied FETish range is roughly
+**103 µs to 4.1 ms** against our 20–800 µs.
+
+⚠ **THE 20 µs POINT IS RESOLUTION-LIMITED AND MUST BE EXCLUDED.** 188 µs is 1.5
+half-periods of the 4 kHz probe, so anything faster than ~250 µs cannot be
+resolved at all. Its ratio of 9.40 is the measurement's floor, not FETish's
+behaviour, and depth correction moves it the wrong way. **Fitting the fast end of
+attack needs a faster probe** — 10 kHz would give a 50 µs half-period.
+
+⚠⚠ **CORRECTION: OVERSHOOT IS NOT THE SHARPER ATTACK ESTIMATOR, AND I SAID IT
+WAS.** When CLA-76's two estimators disagreed I called overshoot the one to
+trust. Here they disagree by 2× — overshoot's dial match says 2.2–2.75×, t63 says
+5.1× — and the reason is visible in the table: overshoot **saturates near 16 dB**,
+so the three slowest settings all read 15.6–16.1 and discriminate nothing. t63
+does not saturate. On this reference **t63 is the trustworthy attack estimator**,
+and the same explanation probably covers the CLA-76 disagreement.
+
+⚠ **FOLLOWING FETish ON ATTACK MEANS LEAVING THE DATASHEET BY 5×.** The hardware
+1176 is specified at 20–800 µs and our constants quote it. FETish's behaviour is
+5× slower than its own labels, which either means its knob is calibrated in some
+other quantity or it is simply not 1176-accurate there. Release is a 2.73× shift
+in the other direction, so the two are not one common cause. This is a product
+decision, not a measurement one.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
