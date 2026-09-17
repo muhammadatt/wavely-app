@@ -166,6 +166,46 @@ export const IN_DRIVE_SPAN_DB_LEGACY = 40
 // interpolated geometrically, as the hardware's switched resistor ladder does.
 const ATTACK_SLOWEST_S = 0.0008
 const ATTACK_FASTEST_S = 0.00002
+
+/**
+ * The attack range measured from FETish, selectable for A/B but NOT shipping.
+ *
+ * ⚠ THE TWO ARE A PAIR AND THERE IS NO MIDDLE. `attackRange` picks a whole
+ * ladder, the same reasoning as `FET_LEGACY_PATCH`: "the FETish attack" is one
+ * decision, and an endpoint moved without its partner is a configuration nobody
+ * measured. The ladder shape is shared — five of six FETish settings gave
+ * `t63 / declared` constant to 3 %, so its taper is the geometric one
+ * `dialToSeconds` already interpolates, and only the endpoints differ.
+ *
+ * ⚠⚠ SOLVED BY SIMULATE-AND-MATCH, AND DIVIDING THE MEASURED t63 BY A FIXED
+ * FACTOR WAS 44 % WRONG. The first cut took our "measured t63 runs ~2.75x the
+ * constant" figure and applied it to FETish's readings, giving 4114 / 103 us —
+ * which rendered every dial 44 % short of the reference. That factor is NOT
+ * constant across the ladder: measured on our own kernel it is 1.64 at dial 1
+ * (800 us -> 1313) and 2.76 at dial 5 (68 -> 188), because a slower attack is
+ * resolved differently by a rectifier that only clears threshold near the
+ * waveform peaks.
+ *
+ * So each endpoint is solved by driving our own kernel until it REPRODUCES the
+ * reference's measured t63 at the reference's own depth: dial 1 to 11313 us
+ * (FETish's 800 us setting) and dial 5 to 938 (its 66 us setting), then the
+ * geometric ladder carries the rest. Third time this principle has been needed
+ * — after the release endpoints and the depth-schedule slope — and the third
+ * time the number the measurement printed was not the number to install.
+ *
+ * ⚠ THE FAST ENDPOINT IS AN EXTRAPOLATION AND THE MEASUREMENT COULD NOT REACH
+ * IT. FETish's 20 us capture read 188 us of t63, which is 1.5 half-periods of the
+ * 4 kHz probe — the measurement floor, not its behaviour. Resolving it needs a
+ * faster probe; 10 kHz would give a 50 us half-period.
+ *
+ * ⚠ AND CHOOSING IT MEANS LEAVING THE DATASHEET BY 5x. The hardware 1176 is
+ * specified at 20-800 us and `ATTACK_SLOWEST_S` / `ATTACK_FASTEST_S` quote it.
+ * Release moved 2.73x in the OTHER direction, so the two are not one common
+ * cause and following FETish here is a judgement about which to match, not a
+ * correction.
+ */
+const FETISH_ATTACK_SLOWEST_S = 0.00763
+const FETISH_ATTACK_FASTEST_S = 0.000170
 /**
  * Release endpoints, FITTED TO FETish rather than quoted from the datasheet.
  *
@@ -337,6 +377,12 @@ export const FET1176_KERNEL_DEFAULTS = {
    *             though see the warning there about what that can no longer
    *             restore.
    */
+  /**
+   * Which attack ladder the dial interpolates.
+   *   'datasheet' — 20-800 us, the 1176's published span. SHIPS.
+   *   'fetish'    — 103 us - 4.1 ms, measured. A/B only; see the constants.
+   */
+  attackRange: 'datasheet',
   releaseSchedule: 'depth',
   /**
    * Detector offset in dB that makes a knob position mean the same reduction on
@@ -493,8 +539,10 @@ function dialToSeconds(dial, slowestS, fastestS) {
  * the panel can print the real number under the knob instead of carrying a
  * second, drift-prone copy of the table.
  */
-export function attackSecondsForDial(dial) {
-  return dialToSeconds(dial, ATTACK_SLOWEST_S, ATTACK_FASTEST_S)
+export function attackSecondsForDial(dial, attackRange = 'datasheet') {
+  return attackRange === 'fetish'
+    ? dialToSeconds(dial, FETISH_ATTACK_SLOWEST_S, FETISH_ATTACK_FASTEST_S)
+    : dialToSeconds(dial, ATTACK_SLOWEST_S, ATTACK_FASTEST_S)
 }
 
 export function releaseSecondsForDial(dial) {
@@ -632,7 +680,7 @@ export class FET1176Kernel {
     // produce that observable — the longer the cell is held down, the more of
     // the reduction sits on the slow stage. Measured on our own kernel, release
     // t63 grows 21-25 % from a 50 ms hold to a 3 s one.
-    let attackS = dialToSeconds(p.attack, ATTACK_SLOWEST_S, ATTACK_FASTEST_S)
+    let attackS = attackSecondsForDial(p.attack, p.attackRange)
     if (this.isAllButtons) attackS *= ALL_ATTACK_LAG
     const releaseS = dialToSeconds(p.release, RELEASE_SLOWEST_S, RELEASE_FASTEST_S)
 

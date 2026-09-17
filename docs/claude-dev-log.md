@@ -2832,6 +2832,53 @@ that is on the bound. The soft `ALL_RATIO_*` law has nothing behind it either.
 This is the one capture set only CLA-76 can supply, and it needs the attack
 confound resolved before it can be read.
 
+### The attack A/B, wired to the bench — and a third simulate-and-match lesson
+
+`attackRange` on the FET kernel, `'datasheet'` (ships) or `'fetish'`, exposed as
+a third rocker on the bench tuning panel beside the curve and position ones. It
+is a named PAIR, not two loose endpoints, on the `FET_LEGACY_PATCH` reasoning:
+"the FETish attack" is one decision and a moved endpoint without its partner is a
+configuration nobody measured.
+
+| dial | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| datasheet | 800 µs | 433 | 234 | 126 | 68 | 37 | 20 |
+| FETish | 7630 µs | 4079 | 2181 | 1166 | 623 | 333 | 170 |
+
+⚠⚠ **DIVIDING THE MEASURED t63 BY A FIXED FACTOR WAS 44 % WRONG, AND THIS IS THE
+THIRD TIME.** The first cut took the "measured t63 runs ~2.75x the constant"
+figure and applied it to FETish's readings, giving 4114 / 103 µs — which rendered
+every dial 44 % short of the reference. **That factor is not constant across the
+ladder:** measured on our own kernel it is 1.64 at dial 1 (800 µs → 1313) and
+2.76 at dial 5 (68 → 188), because a slower attack is resolved differently by a
+rectifier that only clears threshold near the waveform peaks.
+
+So each endpoint is solved by driving our kernel until it REPRODUCES the
+reference's measured t63 at the reference's own depth. After the release
+endpoints (1.8130x) and the depth-schedule slope, this is the third constant
+where the number the measurement printed was not the number to install.
+
+**Validated on a point that was not fitted.** The solve targets dial 1 (FETish's
+800 µs setting, 11313 µs of t63) and dial 5 (its 66 µs, 938 µs). Dial 3 — held
+out — reproduces its 3438 µs to **3.7 %**.
+
+⚠ **THE TWO LADDERS ARE NOT PARALLEL AND EXPECTING THEM TO BE WAS WRONG.** The
+datasheet spans 40x, this one 44.9x, so the ratio drifts 9.54 → 8.50 across the
+dial. That is a consequence of solving against measured t63, whose factor is
+itself dial-dependent — matching t63 at two points cannot preserve the span of
+the constants. FETish's own labels do span 40x (its 800 and 66 µs settings gave a
+t63 ratio of 12.06 against a label ratio of 12.12), which is what makes the taper
+SHAPE shared even though these endpoints are not.
+
+⚠ **THE FAST ENDPOINT IS STILL EXTRAPOLATED.** FETish's 20 µs capture read 188 µs
+of t63 — 1.5 half-periods of the 4 kHz probe, which is the measurement floor and
+not its behaviour. A 10 kHz probe would give a 50 µs half-period and settle it.
+
+**What the A/B is actually deciding.** The datasheet is what the hardware claims;
+FETish is what the reference does; release moved 2.73x in the OTHER direction so
+the two are not one common cause. No measurement settles it, which is exactly why
+it is a rocker on the bench and not a constant in a script.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

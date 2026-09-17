@@ -11,9 +11,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  FET1176Kernel, FET_LEGACY_PATCH, processFET1176Buffer,
-} from '../../src/audio/fet1176Processor.js'
+import { FET1176Kernel, FET_LEGACY_PATCH, processFET1176Buffer, FET1176_KERNEL_DEFAULTS, attackSecondsForDial } from '../../src/audio/fet1176Processor.js'
 
 const SR = 96000
 
@@ -191,4 +189,50 @@ test('the shipping position holds saturation steady across the Input knob', () =
   }
   assert.ok(swing('preInput') < 0.5, `preInput swings ${swing('preInput').toFixed(1)} dB — it must be flat`)
   assert.ok(swing('preCell') > 40, 'preCell should swing widely — if it does not, the premise has changed')
+})
+
+/**
+ * ⚠ THE ATTACK LADDER IS SELECTABLE FOR A/B AND MUST SHIP ON THE DATASHEET.
+ * The two disagree by about 5x and no measurement settles which is right: the
+ * datasheet is what the hardware claims, FETish is what the reference does, and
+ * the release endpoints moved 2.73x in the OTHER direction so they are not one
+ * common cause. Until that is a decision, 'datasheet' is what renders.
+ */
+test('the attack ladder ships on the datasheet span', () => {
+  assert.equal(FET1176_KERNEL_DEFAULTS.attackRange, 'datasheet')
+  assert.ok(Math.abs(attackSecondsForDial(1) - 0.0008) < 1e-9)
+  assert.ok(Math.abs(attackSecondsForDial(7) - 0.00002) < 1e-9)
+})
+
+test('the FETish ladder is about 5x slower and shares the geometric shape', () => {
+  for (let dial = 1; dial <= 7; dial++) {
+    const ratio = attackSecondsForDial(dial, 'fetish') / attackSecondsForDial(dial)
+    assert.ok(ratio > 8 && ratio < 10,
+      `dial ${dial}: FETish ladder is ${ratio.toFixed(2)}x the datasheet one`)
+  }
+  /**
+   * ⚠ THE TWO LADDERS ARE NOT PARALLEL, AND EXPECTING THEM TO BE WAS WRONG. The
+   * datasheet spans 40x (800 -> 20 us) and this one spans 44.9x (7630 -> 170),
+   * so the ratio drifts 9.54 -> 8.50 across the dial. That is a CONSEQUENCE of
+   * solving against measured t63 rather than an inconsistency: the factor
+   * between a constant and the t63 it produces is itself dial-dependent (1.64 at
+   * dial 1, 2.76 at dial 5), so matching t63 at two points cannot preserve the
+   * span of the constants. FETish's own labels do span 40x — its 800 and 66 us
+   * settings gave a t63 ratio of 12.06 against a label ratio of 12.12 — which is
+   * what makes the taper SHAPE shared even though these endpoints are not.
+   */
+  const ratios = [1, 4, 7].map(d => attackSecondsForDial(d, 'fetish') / attackSecondsForDial(d))
+  assert.ok(ratios.every((v, i) => i === 0 || v < ratios[i - 1]),
+    `the drift must be smooth and one-directional; got ${ratios.map(r => r.toFixed(3)).join(' / ')}`)
+})
+
+/**
+ * ⚠ AND AN UNKNOWN VALUE MUST FALL BACK TO THE SHIPPING LADDER, not to the
+ * other one. `setParams` treats anything it does not recognise as the default
+ * everywhere else, and a typo silently selecting a 5x slower attack is the
+ * worst failure this switch could have.
+ */
+test('an unrecognised attack range falls back to the datasheet', () => {
+  assert.equal(attackSecondsForDial(4, 'nonsense'), attackSecondsForDial(4))
+  assert.equal(attackSecondsForDial(4, undefined), attackSecondsForDial(4))
 })

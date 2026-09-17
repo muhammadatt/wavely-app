@@ -81,6 +81,22 @@ const CHOICES = [
       },
     ],
   },
+  {
+    key: 'attackRange', label: 'Attack',
+    options: [
+      {
+        id: 'datasheet', label: 'DATASHEET',
+        title: '20–800 µs across the dial — the 1176’s published span, which our constants '
+          + 'quote and which ships. Dial 1 / 4 / 7 = 800 / 126 / 20 µs',
+      },
+      {
+        id: 'fetish', label: 'FETish',
+        title: '7.63 ms – 170 µs, solved so our dials reproduce FETish’s own measured attack '
+          + 'times: dial 1 hits its 11313 µs and dial 5 its 938 µs exactly, and dial 3 — '
+          + 'which was not fitted — lands within 3.7 %. About 5× slower than the datasheet',
+      },
+    ],
+  },
 ]
 
 /**
@@ -194,7 +210,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span class="ml-auto font-mono text-[9px] text-white/30">
-          {{ vals.fetCurve }} / {{ vals.fetPosition }}
+          {{ vals.fetCurve }} / {{ vals.fetPosition }} / {{ vals.attackRange }}
         </span>
       </div>
     </div>

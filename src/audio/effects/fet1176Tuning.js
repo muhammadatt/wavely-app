@@ -40,6 +40,20 @@ export const FET1176_TUNING_DEFAULTS = Object.freeze({
    * reference's 0.0), which is why `preInput` ships.
    */
   fetPosition: FET1176_KERNEL_DEFAULTS.fetPosition,
+  /**
+   * 'datasheet' — 20-800 us, the 1176's published span, which our constants
+   *               quote and which ships.
+   * 'fetish'    — 7630-170 us, solved so our dials reproduce FETish's own
+   *               measured attack times.
+   *
+   * ⚠ THIS IS THE ONE OPEN QUESTION THE BENCH EXISTS FOR RIGHT NOW. The two
+   * disagree by about 5x and there is no measurement that settles which is
+   * right: the datasheet is what the hardware claims, FETish is what the
+   * reference does, and release moved 2.73x in the OTHER direction so they are
+   * not one common cause. It is a listening decision, which is why it is here
+   * and not in a script.
+   */
+  attackRange: FET1176_KERNEL_DEFAULTS.attackRange,
 })
 
 /**
@@ -55,6 +69,7 @@ export const FET1176_LEGACY_TUNING = Object.freeze({ ...FET_LEGACY_PATCH })
 const KEYS = Object.keys(FET1176_TUNING_DEFAULTS)
 const CURVES = new Set(['poly', 'tanh'])
 const POSITIONS = new Set(['preInput', 'preCell', 'postCell'])
+const ATTACK_RANGES = new Set(['datasheet', 'fetish'])
 
 let tuning = { ...FET1176_TUNING_DEFAULTS }
 const listeners = new Set()
@@ -99,6 +114,7 @@ export function setFET1176Tuning(patch) {
     const v = String(patch[k])
     if (k === 'fetCurve' && !CURVES.has(v)) continue
     if (k === 'fetPosition' && !POSITIONS.has(v)) continue
+    if (k === 'attackRange' && !ATTACK_RANGES.has(v)) continue
     if (tuning[k] !== v) { tuning[k] = v; changed = true }
   }
   if (changed) for (const fn of listeners) fn()
