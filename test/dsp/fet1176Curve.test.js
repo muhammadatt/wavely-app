@@ -204,26 +204,27 @@ test('the attack ladder ships on the datasheet span', () => {
   assert.ok(Math.abs(attackSecondsForDial(7) - 0.00002) < 1e-9)
 })
 
-test('the FETish ladder is about 5x slower and shares the geometric shape', () => {
-  for (let dial = 1; dial <= 7; dial++) {
-    const ratio = attackSecondsForDial(dial, 'fetish') / attackSecondsForDial(dial)
-    assert.ok(ratio > 8 && ratio < 10,
-      `dial ${dial}: FETish ladder is ${ratio.toFixed(2)}x the datasheet one`)
-  }
+test('the FETish ladder is a clean scaling of the datasheet one', () => {
   /**
-   * ⚠ THE TWO LADDERS ARE NOT PARALLEL, AND EXPECTING THEM TO BE WAS WRONG. The
-   * datasheet spans 40x (800 -> 20 us) and this one spans 44.9x (7630 -> 170),
-   * so the ratio drifts 9.54 -> 8.50 across the dial. That is a CONSEQUENCE of
-   * solving against measured t63 rather than an inconsistency: the factor
-   * between a constant and the t63 it produces is itself dial-dependent (1.64 at
-   * dial 1, 2.76 at dial 5), so matching t63 at two points cannot preserve the
-   * span of the constants. FETish's own labels do span 40x — its 800 and 66 us
-   * settings gave a t63 ratio of 12.06 against a label ratio of 12.12 — which is
-   * what makes the taper SHAPE shared even though these endpoints are not.
+   * ⚠ IT IS EXACTLY PARALLEL NOW AND AN EARLIER VERSION WAS NOT, which is the
+   * interesting part rather than the assertion. The first ladder was solved from
+   * two measured t63 points, and because the factor between a constant and the
+   * t63 it produces is itself dial-dependent (1.64 at dial 1, 2.76 at dial 5),
+   * that solve could not preserve the span: it came out 44.9x against the
+   * datasheet's 40x, drifting 9.54 -> 8.50 across the dial.
+   *
+   * Fitting the ladder TOGETHER WITH the depth schedule replaced those two
+   * points with a single scale over the whole thing, so the taper is shared
+   * exactly. That is what the schedule buys — the depth dependence lives in the
+   * schedule instead of being smeared into the endpoints.
    */
-  const ratios = [1, 4, 7].map(d => attackSecondsForDial(d, 'fetish') / attackSecondsForDial(d))
-  assert.ok(ratios.every((v, i) => i === 0 || v < ratios[i - 1]),
-    `the drift must be smooth and one-directional; got ${ratios.map(r => r.toFixed(3)).join(' / ')}`)
+  const ratios = []
+  for (let dial = 1; dial <= 7; dial++) {
+    ratios.push(attackSecondsForDial(dial, 'fetish') / attackSecondsForDial(dial))
+  }
+  assert.ok(Math.max(...ratios) - Math.min(...ratios) < 0.01,
+    `the ladders must be parallel; got ${ratios.map(r => r.toFixed(3)).join(' / ')}`)
+  assert.ok(ratios[0] > 7 && ratios[0] < 9, `scale is ${ratios[0].toFixed(3)}x`)
 })
 
 /**

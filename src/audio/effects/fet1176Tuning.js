@@ -68,6 +68,15 @@ export const FET1176_TUNING_DEFAULTS = Object.freeze({
    * coupling a test now pins.
    */
   releaseSchedule: FET1176_KERNEL_DEFAULTS.releaseSchedule,
+  /**
+   * 'none' ships; 'depth' shortens the attack as the TARGET reduction deepens.
+   *
+   * ⚠ IT IS HALF A MODEL. Paired with `attackRange: 'fetish'` it reproduces the
+   * reference to 1.15 % across 6-22 dB; on its own it is 36 % out, and the
+   * FETish ladder on its own is 41 %. The two were fitted together and the
+   * panel says to select both or neither.
+   */
+  attackSchedule: FET1176_KERNEL_DEFAULTS.attackSchedule,
 })
 
 /**
@@ -131,6 +140,7 @@ export function setFET1176Tuning(patch) {
     if (k === 'fetPosition' && !POSITIONS.has(v)) continue
     if (k === 'attackRange' && !ATTACK_RANGES.has(v)) continue
     if (k === 'releaseSchedule' && !SCHEDULES.has(v)) continue
+    if (k === 'attackSchedule' && !SCHEDULES.has(v)) continue
     if (tuning[k] !== v) { tuning[k] = v; changed = true }
   }
   if (changed) for (const fn of listeners) fn()

@@ -91,10 +91,26 @@ const CHOICES = [
       },
       {
         id: 'fetish', label: 'FETish',
-        title: '7.63 ms – 170 µs, solved so our dials reproduce FETish’s own measured attack '
-          + 'times AT ~16 dB OF REDUCTION. Its attack shortens 5× with depth (−0.085/dB) '
-          + 'and ours does not, so this ladder is 2.8× too fast at 6 dB and 0.53× too slow '
-          + 'at 22 dB. A/B it at moderate reduction',
+        title: '6.37 ms – 159 µs, fitted together with the DEPTH attack schedule. '
+          + '⚠ USE BOTH OR NEITHER: with the schedule it reproduces the reference to '
+          + '1.15 % across 6–22 dB; this ladder alone is 41 % out and the schedule alone '
+          + 'is 36 %, against 88 % for the shipping datasheet ladder',
+      },
+    ],
+  },
+  {
+    key: 'attackSchedule', label: 'Attack sched',
+    options: [
+      {
+        id: 'none', label: 'FIXED',
+        title: 'One constant per dial whatever the reduction. Ships',
+      },
+      {
+        id: 'depth', label: 'DEPTH',
+        title: 'The attack constant shortens as the TARGET reduction deepens — FETish '
+          + 'attacks 5× faster at 22 dB than at 6 (−0.0926/dB), the mirror of its release, '
+          + 'which lengthens. Pair it with the FETish ladder; either alone is far worse '
+          + 'than both',
       },
     ],
   },
@@ -228,7 +244,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span class="ml-auto font-mono text-[9px] text-white/30">
-          {{ vals.fetCurve }} / {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.releaseSchedule }}
+          {{ vals.fetCurve }} / {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.attackSchedule }} / {{ vals.releaseSchedule }}
         </span>
       </div>
     </div>

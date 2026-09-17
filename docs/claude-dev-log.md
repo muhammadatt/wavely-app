@@ -2944,6 +2944,59 @@ found by ear. Expressing the rest needs an attack schedule of the kind
 dial 1 is the ~16 dB calibration. At 22 dB the same setting behaves about half
 that, and at 6 dB nearly three times it.
 
+### ⚗⚗⚗ THE ATTACK SCHEDULE — and the mechanism was the whole story, not the constant
+
+`attackSchedule: 'depth'`, off by default, mirroring `releaseSchedule`. Fitted
+with `scripts/fet-attack-depth.mjs`.
+
+⚠⚠ **THE FIRST VERSION INDEXED THE CONSTANT ON THE CURRENT REDUCTION, COPYING
+THE RELEASE SCHEDULE, AND PRODUCED THE OPPOSITE OF THE LAW.** At the START of
+every attack the reduction is 0, whatever depth it is heading for, so a constant
+indexed on the instantaneous value cannot express "a deeper settled reduction
+attacks faster" — the deep case merely spends longer climbing through the slow
+region. Measured over the first 20 ms, the deep-to-shallow energy ratio came out
+**3.24 with the schedule on against 2.54 off**: slower at depth, when the
+reference is faster.
+
+Indexing on `grTarget` — the depth the detector is heading for, known on the
+first sample — is the right quantity, and it took the fit from **14.23 % rms to
+1.15 %**, three of four points exact. Release keeps current-value indexing
+because there the trajectory STARTS at the depth in question.
+
+| model | rms against the four captures |
+|---|---|
+| datasheet ladder, no schedule (ships) | 87.69 % |
+| FETish ladder alone | 36.53 % |
+| schedule alone | 36.35 % |
+| **FETish ladder + schedule** | **1.15 %** |
+
+`k = −0.0926 dB⁻¹`, converging with the −0.085 estimated independently from the
+raw t63 data with the measurement's own contribution subtracted.
+
+⚠ **THE LADDER AND THE SCHEDULE ARE ONE MODEL AND WERE REFITTED TOGETHER.** The
+earlier `attackRange: 'fetish'` ladder was solved WITHOUT the schedule at a
+single depth; pairing that with the schedule gave 13.87 %. Two separately
+correct fits that do not compose — the third instance, after the release
+endpoints and the depth-schedule slope. `FETISH_ATTACK_*` is now the ladder the
+joint fit asked for, and a test pins that either half alone is at least 5× worse
+than the pair.
+
+⚠ A SIDE EFFECT WORTH NOTING: the two ladders are now **exactly parallel**
+(7.963× at every dial) where the old one drifted 9.54 → 8.50. Fitting against
+measured t63 at two points could not preserve the span, because the factor
+between a constant and its t63 is itself dial-dependent. With the schedule
+carrying the depth dependence, the endpoints no longer have to absorb it.
+
+**Two tooling defects found on the way.** The fitter ran `fit()` on import — no
+entry-point guard — so a scratch script that imported `curveFor` printed a full
+fit report first. And it had copied `-0.085` and `15.9` as literals instead of
+importing the kernel's constants, so the same table read 4.60 % from one caller
+and 1.15 % from another once the fitted slope replaced the estimate. Same failure
+`fet-null.mjs` had with the input drive law.
+
+**Both schedules still ship off.** The release one is on; this one is not, and
+the A/B is now a real reproduction rather than a single-depth snapshot.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

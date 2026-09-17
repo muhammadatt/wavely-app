@@ -220,8 +220,8 @@ const ATTACK_FASTEST_S = 0.00002
  * cause and following FETish here is a judgement about which to match, not a
  * correction.
  */
-const FETISH_ATTACK_SLOWEST_S = 0.00763
-const FETISH_ATTACK_FASTEST_S = 0.000170
+const FETISH_ATTACK_SLOWEST_S = 0.006370
+const FETISH_ATTACK_FASTEST_S = 0.0001593
 /**
  * Release endpoints, FITTED TO FETish rather than quoted from the datasheet.
  *
@@ -286,6 +286,29 @@ const RELEASE_FASTEST_S = 0.03318
  * matched at, and the two fits would have silently fought. At REF = 12.5 the
  * schedule is exactly 1.000 there and the ladder composes with it untouched.
  */
+/**
+ * Depth-scheduled ATTACK — off by default, and off is bit-identical to before.
+ *
+ * ⚠ THE MIRROR OF `releaseSchedule`, AND THE SIGN IS THE POINT. FETish's attack
+ * SHORTENS with reduction depth where its release LENGTHENS: measured at one
+ * setting with only the Input moving, attack t63 runs 5438 / 2188 / 1563 /
+ * 1063 us at 6.2 / 14.0 / 17.5 / 21.9 dB, fitting exp(-0.1047 per dB) at R2
+ * 0.995, against exp(+0.1389) for the release. Our own kernel contributes only
+ * -0.0194 over the same span, so the reference's own law is about -0.085.
+ *
+ * It grabs faster and lets go slower the harder it is working. Two limbs of one
+ * program-dependent detector, not two quirks.
+ *
+ * ⚠ THE SCHEDULE READS THE REDUCTION AS IT RISES, which is what makes this a
+ * solve rather than an arithmetic conversion. During an attack the reduction
+ * climbs from 0 to the target, so a schedule anchored at the reference depth
+ * starts far off it — at k = -0.085 and a 15.9 dB anchor the constant begins
+ * 3.9x LONG and shortens as the cell grabs. `k` and the ladder are therefore
+ * fitted together by simulate-and-match, in `scripts/fet-attack-depth.mjs`.
+ */
+export const ATTACK_DEPTH_REF_DB = 15.9
+export const ATTACK_DEPTH_K = -0.0926
+
 const RELEASE_DEPTH_REF_DB = 12.5
 const RELEASE_DEPTH_K = 0.1389
 const RELEASE_DEPTH_MAX_DB = 36
@@ -399,6 +422,15 @@ export const FET1176_KERNEL_DEFAULTS = {
    *   'fetish'    — 103 us - 4.1 ms, measured. A/B only; see the constants.
    */
   attackRange: 'datasheet',
+  /**
+   * Attack-time schedule.
+   *   'none'  — one constant per dial, whatever the reduction. SHIPS.
+   *   'depth' — the constant shortens as the reduction rises, which is the limb
+   *             FETish has. See ATTACK_DEPTH_K.
+   */
+  attackSchedule: 'none',
+  /** dB⁻¹ slope of that schedule, negative. Read only when it is 'depth'. */
+  attackDepthK: ATTACK_DEPTH_K,
   releaseSchedule: 'depth',
   /**
    * Detector offset in dB that makes a knob position mean the same reduction on
@@ -711,6 +743,24 @@ export class FET1176Kernel {
      * audible \u2014 the coefficient moves 2.4 % per step at k = 0.098 \u2014 and the
      * table is rebuilt only when a parameter changes.
      */
+    /**
+     * \u26a0 A SECOND TABLE, SAME REASONING AS THE RELEASE ONE. The schedule reads
+     * the current reduction, so a closed form would put a transcendental in the
+     * envelope loop at 4x oversampling. 0.25 dB of depth quantisation moves the
+     * coefficient ~2 %.
+     */
+    this.attackScheduled = p.attackSchedule === 'depth'
+    if (this.attackScheduled) {
+      const ka = Number.isFinite(p.attackDepthK) ? p.attackDepthK : ATTACK_DEPTH_K
+      const n = Math.round(RELEASE_DEPTH_MAX_DB / RELEASE_LUT_STEP_DB) + 1
+      if (!this.attackLut || this.attackLut.length !== n) this.attackLut = new Float64Array(n)
+      for (let i = 0; i < n; i++) {
+        const depthDb = i * RELEASE_LUT_STEP_DB
+        const tau = attackS * Math.exp(ka * (depthDb - ATTACK_DEPTH_REF_DB))
+        this.attackLut[i] = 1 - Math.exp(-1 / (sr * tau))
+      }
+    }
+
     this.releaseScheduled = p.releaseSchedule === 'depth'
     if (this.releaseScheduled) {
       const k = Number.isFinite(p.releaseDepthK) ? p.releaseDepthK : RELEASE_DEPTH_K
@@ -961,7 +1011,30 @@ export class FET1176Kernel {
       // recovery depend on how dense the program was.
       const gr = grMain + grTail
       if (grTarget > gr) {
-        const delta = (grTarget - gr) * this.attackCoef
+        /**
+         * \u26a0\u26a0 INDEXED ON THE TARGET, NOT ON THE CURRENT REDUCTION, AND THE
+         * RELEASE SCHEDULE'S CHOICE IS WRONG HERE. At the START of every attack
+         * the reduction is 0, whatever depth it is heading for, so a constant
+         * indexed on the instantaneous value cannot express "a deeper settled
+         * reduction attacks faster" — the deep case merely spends longer
+         * climbing through the slow region and comes out RELATIVELY SLOWER.
+         * Measured that way over the first 20 ms, the deep-to-shallow energy
+         * ratio went 3.24 with the schedule on against 2.54 off: the opposite of
+         * the law it was built from.
+         *
+         * `grTarget` is the depth the detector is heading for and is known on
+         * the first sample, which is the quantity the reference's t63 actually
+         * tracks. Release keeps the current-value indexing because there the
+         * trajectory STARTS at the depth in question.
+         */
+        let ac = this.attackCoef
+        if (this.attackScheduled) {
+          let idx = (grTarget * (1 / RELEASE_LUT_STEP_DB) + 0.5) | 0
+          if (idx < 0) idx = 0
+          else if (idx >= this.attackLut.length) idx = this.attackLut.length - 1
+          ac = this.attackLut[idx]
+        }
+        const delta = (grTarget - gr) * ac
         grMain += delta * this.mainFraction
         grTail += delta * this.tailFraction
       } else {
