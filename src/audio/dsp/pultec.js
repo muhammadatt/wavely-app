@@ -88,10 +88,10 @@ export const PULTEC_STAGES = {
       { type: 'peaking', freqHz: 21000.0000, width: 1.44917, gainDb: -0.9976 },
     ],
     post: [
-      { type: 'lowShelf', freqHz: 1295.9232, width: 3.30783, gainDb: 6.5377 },
-      { type: 'highShelf', freqHz: 5103.3577, width: 3.39739, gainDb: -3.7401 },
-      { type: 'peaking', freqHz: 1208.6685, width: 0.41627, gainDb: -1.6866 },
-      { type: 'peaking', freqHz: 20866.0249, width: 1.80577, gainDb: -0.6597 },
+      { type: 'lowShelf', freqHz: 2226.4171, width: 4.51613, gainDb: 6.5381 },
+      { type: 'highShelf', freqHz: 13106.9514, width: 2.38455, gainDb: -2.0866 },
+      { type: 'peaking', freqHz: 2448.1859, width: 0.28261, gainDb: -2.9878 },
+      { type: 'peaking', freqHz: 16867.3780, width: 0.19667, gainDb: -0.9622 },
     ],
   },
 }

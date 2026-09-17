@@ -41,13 +41,17 @@ Position values (0–10 scale) on the reference VST3 plugin used for measurement
 | Pre-EQ ("Push") | Low @ 100 Hz | Atten | 3.8 |
 | Pre-EQ ("Push") | High @ 8 kHz | Boost | 3.6 |
 | Post-EQ ("Recovery") | Low @ 100 Hz | Boost | 2.8 |
-| Post-EQ ("Recovery") | High @ **20 kHz** | Atten | 1.8 |
+| Post-EQ ("Recovery") | High @ **20 kHz** | Atten | 1.8 → **~1.1** (adjusted, see below) |
 
 **High Atten frequency is 20 kHz, not 10 kHz** — deliberate, per Andrew Scheps' own stated preference for the 20 kHz Atten setting on the hardware EQP-1A. Do not "correct" this to match the Thick preset's 10 kHz point; it's the source of this preset's character (see Curve Shape Notes).
 
+⚠ **THE POST-EQ HIGH ATTEN IS NO LONGER AT THE POSITION THIS TABLE WAS CAPTURED AT.** Its cut has been scaled back by 1.5 dB at 20 kHz — see **Deviation from the source curves** below. The knob position is quoted as "~1.1" only to say roughly where that lands; it was not re-captured from the reference, and the CSV, not this row, is what ships.
+
 ### Measured Target Curves
 
-Measured via swept-sine (Farina) deconvolution against a reference Pultec EQP-1A emulation, gated to exclude harmonic-distortion pre-echo (confirmed <0.04% of peak IR energy in both stages). Fractional-octave smoothed (1/24 oct). Full 120-point curve in `scheps_presence_curve_data.csv`; key points below.
+The **pre** column is measured: swept-sine (Farina) deconvolution against a reference Pultec EQP-1A emulation, gated to exclude harmonic-distortion pre-echo (confirmed <0.04% of peak IR energy in both stages), fractional-octave smoothed (1/24 oct).
+
+⚠ **THE POST COLUMN IS NO LONGER PURELY THAT MEASUREMENT** — its cut region carries a deliberate adjustment. See **Deviation from the source curves**. Everything below 2 kHz, where the post curve is a boost, is untouched measurement; the 39 points above it are scaled. Full 120-point curve in `scheps_presence_curve_data.csv`, which is the source of truth — this table is a readable excerpt of it.
 
 | Frequency | Pre-EQ (dB) | Post-EQ (dB) | Net (Pre+Post) |
 |---|---|---|---|
@@ -57,22 +61,36 @@ Measured via swept-sine (Farina) deconvolution against a reference Pultec EQP-1A
 | 500 Hz | −3.24 | +3.80 | +0.56 |
 | 1000 Hz | −1.74 | +1.63 | −0.11 |
 | 2000 Hz | +0.27 | +0.08 | +0.35 |
-| 4000 Hz | +2.34 | −1.03 | +1.31 |
-| 6000 Hz | +3.22 | −1.64 | +1.58 |
-| 8000 Hz | +3.44 | −2.06 | +1.38 |
-| 10000 Hz | +3.33 | −2.40 | +0.92 |
-| 15000 Hz | +2.47 | −3.12 | −0.64 |
-| 20000 Hz | +1.35 | −3.88 | −2.53 |
+| 4000 Hz | +2.29 | −0.62 | +1.68 |
+| 6000 Hz | +3.20 | −0.99 | +2.21 |
+| 8000 Hz | +3.44 | −1.25 | +2.19 |
+| 10000 Hz | +3.33 | −1.47 | +1.86 |
+| 15000 Hz | +2.49 | −1.91 | +0.58 |
+| 20000 Hz | +1.35 | −2.38 | −1.03 |
 
 ### Curve Shape Notes
 
-- **Net effect peaks in the presence range, not the air range.** Net gain is highest (+1.3 to +1.6 dB) between roughly 4–10 kHz, and turns *negative* above ~14 kHz (down to −2.5 dB at 20 kHz). This preset does not deliver a top-octave lift — it delivers a mid-to-upper-presence lift with a scooped top end. This is the direct, intentional consequence of anchoring the post-EQ cut at 20 kHz (see Naming Note).
+- **Net effect peaks in the presence range and no longer scoops the top.** Net gain is highest (+1.7 to +2.2 dB) between roughly 4–10 kHz, stays positive to ~16.9 kHz and reaches only −1.03 dB at 20 kHz. Before the adjustment below it peaked at +1.58 dB, crossed zero at ~13.3 kHz and fell to −2.53 dB — a genuinely scooped top octave, which is what the adjustment was made to remove.
 - **Pre-EQ low cut and Post-EQ low boost are not mirror images** — same asymmetric behavior documented in the Thick spec, confirmed via isolated boost-alone/cut-alone measurement (see project measurement history).
 - **Pre-EQ high band (8 kHz boost) is close to identical to the Thick preset's original v0.1 pre-EQ high band** — both used the same knob setting (3.6) before Thick was revised upward to 5.2 in v0.2. Coincidental shared calibration point, not a design link between presets.
 
 ### Naming Note
 
 This preset was developed under the working name "Airy." It was renamed to **Presence** once the measured net curve showed a clear presence-band lift (peaking 6–8 kHz) rather than a genuine top-octave "air" lift — the 20 kHz post-EQ cut nets out the top octave negative, the opposite of what "airy" implies. The name was changed to match measured behavior rather than intent, to avoid the same mismatch this exercise surfaced.
+
+⚠ **THE ADJUSTMENT BELOW REOPENS THAT QUESTION AND THE NAME WAS DELIBERATELY LEFT ALONE.** The net is now positive out to ~16.9 kHz instead of ~13.3, so the original objection — that nothing about it is airy — no longer holds as stated. It is still not an air *lift*: the curve peaks at 6.3 kHz and is falling through the whole top octave, ending 1.03 dB down. The name goes on describing where the energy actually is. Renaming it on a 1.5 dB move would trade an accurate name for an aspirational one, which is the exact trade this note exists to warn against.
+
+---
+
+## Deviation from the source curves
+
+The post-EQ cut region is scaled to **74.2%** of the curve this document was captured from — 1.5 dB less cut at 20 kHz (−3.88 → −2.38 dB), scaled proportionally across the whole cut so the shape is preserved and the boost region below ~2 kHz is untouched. That is the shape a High Atten knob makes when you turn it down, which is why it was chosen over a correction that hinges in at a fixed frequency.
+
+**Why:** the top-octave scoop was audible on narration and was not the result of a hardware measurement worth defending. These curves are assembled from anecdotal reports rather than a metrological capture of a real EQP-1A, so the numbers they carry are a starting point, not a reference to be reproduced faithfully. ⚠ **DO NOT CITE THIS FILE AS EVIDENCE OF WHAT AN EQP-1A DOES.** The pre column is a measurement of a reference emulation; the post column is that measurement with a deliberate editorial change on top.
+
+⚠ **BACKING THE CUT OFF ALSO RAISES THE PRESENCE BUMP, AND THAT WAS ACCEPTED, NOT OVERLOOKED.** Scaling the whole cut relaxes it at 4–10 kHz too, so the net bump goes +1.58 → +2.21 dB and its centre moves 5.9 → 6.6 kHz. A variant that hinged in above 10 kHz and held the bump exactly was generated and compared; the proportional scaling was preferred because it is a single physical move rather than a synthetic correction, and because a slope discontinuity at 10 kHz is a worse thing to ask a biquad cascade to reproduce. If the brighter presence band turns out to be unwanted, the hinged shape is the alternative to reach for, not a smaller scale factor.
+
+The adjusted curve fits marginally *better* than the original (post objective 0.0372 → 0.0356 dB, same four sections), and the gain reduction at the calibrated `squash: 40` default is unchanged at 4.37 dB peak — the pre stage feeds the side-chain and was not touched.
 
 ---
 
