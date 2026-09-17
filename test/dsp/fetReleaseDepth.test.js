@@ -10,17 +10,18 @@ import { measureAt, fitK, curveFor, rmsResidual, FETISH_DEPTH_TABLE } from '../.
 const SR = 96000
 
 /**
- * ⚠ THE DEFAULT MUST STAY 'none'. This is a topology change, not a retune —
- * every FET Punch render ever made used a fixed release, and the five factory
- * presets are calibrated against it. The Scheps inheritance bug, which shipped
- * 4x the intended gain reduction, is the precedent for what a silently changed
- * default costs here.
+ * ⚠ THIS ASSERTED 'none' UNTIL THE RELEASE WAS FITTED, AND THE INVERSION IS THE
+ * POINT. The schedule is the limb FETish measurably has — flat on exposure, flat
+ * on density, 4.6x across depth — so with the endpoints fitted it ships on. What
+ * still has to hold is that the OTHER mode remains reachable and inert, which
+ * the next test pins.
  */
-test('the schedule ships off', () => {
-  assert.equal(FET1176_KERNEL_DEFAULTS.releaseSchedule, 'none')
+test('the schedule ships on', () => {
+  assert.equal(FET1176_KERNEL_DEFAULTS.releaseSchedule, 'depth')
+  assert.ok(FET1176_KERNEL_DEFAULTS.releaseDepthK > 0)
 })
 
-test('off is bit-identical, even with a slope set', () => {
+test("'none' is inert, even with a slope set", () => {
   const render = params => {
     const k = new FET1176Kernel(SR)
     k.setParams({ outputGainDb: 0, mix: 1, oversample: false, inputDrive: 85, ...params })
@@ -33,10 +34,10 @@ test('off is bit-identical, even with a slope set', () => {
     }
     return y
   }
-  const a = render({})
+  const a = render({ releaseSchedule: 'none' })
   const b = render({ releaseSchedule: 'none', releaseDepthK: 0.25 })
   for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) assert.fail(`sample ${i}: ${a[i]} vs ${b[i]} — 'none' is not a way back`)
+    if (a[i] !== b[i]) assert.fail(`sample ${i}: ${a[i]} vs ${b[i]} — a slope leaks through 'none'`)
   }
 })
 
@@ -46,6 +47,7 @@ test('on, release t63 rises with depth; off, it does not move', () => {
   const drives = [-8, -2, 4]
   const on = drives.map(d => measureAt(d, { releaseSchedule: 'depth', releaseDepthK: 0.12, tailFraction: 0 }))
   const off = drives.map(d => measureAt(d, { releaseSchedule: 'none', tailFraction: 0 }))
+  // ⚠ The control is 'none', not the default — the default IS the schedule now.
 
   // ⚠ The control is the point: a fixed exponential recovers 63 % of its
   // reduction in one constant HOWEVER deep the reduction was, so a flat reading

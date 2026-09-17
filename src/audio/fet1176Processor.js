@@ -103,6 +103,22 @@ const IN_DRIVE_SPAN_DB = 48
 const IN_TAPER = 0.8
 
 /**
+ * The Input knob's drive law, exported so nothing has to keep a second copy.
+ *
+ * ⚠ `scripts/fet-null.mjs` DID KEEP ONE, AND IT SILENTLY WENT STALE. Its
+ * compensated reference undid the taper by re-declaring `IN_DRIVE_MIN_DB`,
+ * `IN_DRIVE_SPAN_DB` and `IN_TAPER` locally; when the span went 40 -> 48 the
+ * copy did not, so the fixture was undoing 40 dB of gain against a kernel
+ * applying 48 and its "compensated" reference had a 5.3 dB real gain in it.
+ * Two of its verdicts changed as a result. Same failure mode as the Scheps
+ * defaults: a constant duplicated instead of imported.
+ */
+export function inputDriveDbForKnob(knob) {
+  const k = clamp(knob, 0, 100) / 100
+  return IN_DRIVE_MIN_DB + IN_DRIVE_SPAN_DB * Math.pow(k, IN_TAPER)
+}
+
+/**
  * Extra drive above the knee, so the top of the knob reaches the reference.
  *
  * ⚠ THE PLAIN FIX — RAISING `IN_DRIVE_SPAN_DB` — MOVES EVERY KNOB POSITION, and
@@ -165,12 +181,23 @@ const ATTACK_FASTEST_S = 0.00002
  * and agreement at the endpoints was never evidence of anything because our
  * constants came from the same sheet. These are measurements.
  *
- * ⚠ EVERY SAVED RELEASE DIAL NOW MEANS SOMETHING 2.73x FASTER. That re-voices
- * the factory presets along with the Input span change, deliberately and with
- * the owner's agreement; they are to be re-cut together.
+ * ⚠ EVERY SAVED RELEASE DIAL NOW MEANS SOMETHING FASTER. That re-voices the
+ * factory presets along with the Input span change, deliberately and with the
+ * owner's agreement; they are to be re-cut together.
+ *
+ * ⚠⚠ THESE ARE NOT THE MEASURED 402 / 18.3 ms, AND THAT IS THE POINT. Those are
+ * what a FIXED release needs to reproduce the ladder. With the depth schedule
+ * shipping, the constant shrinks as the reduction decays DURING the recovery, so
+ * the same endpoints render 45 % short. The schedule reads the state and not the
+ * clock, so scaling the base constant scales the whole trajectory's timebase
+ * exactly — measured uniformly at 0.5516 across all seven dials — and 1.8130x
+ * puts the ladder back. Installing the measured numbers directly and trusting
+ * them to compose is the same class of error as regressing t63 to get `k`: what
+ * ships is the constant that makes the RENDER match, not the one the
+ * measurement printed.
  */
-const RELEASE_SLOWEST_S = 0.402
-const RELEASE_FASTEST_S = 0.0183
+const RELEASE_SLOWEST_S = 0.7288
+const RELEASE_FASTEST_S = 0.03318
 
 // Program-dependent release: this share of the reduction recovers on a tail
 // this many times slower than the dial setting.
@@ -193,12 +220,39 @@ const RELEASE_FASTEST_S = 0.0183
  * above is therefore wrong; it has to go through the kernel and the same
  * analysis, as everything else here does.
  */
-const RELEASE_DEPTH_REF_DB = 10
-const RELEASE_DEPTH_K = 0.098
+/**
+ * ⚠ THE ANCHOR IS THE DEPTH THE RELEASE ENDPOINTS WERE FITTED AT, NOT A ROUND
+ * NUMBER, AND GETTING THIS WRONG COSTS 42 %. The endpoint fit — the seven-dial
+ * ladder that lands within 1.8 % of FETish — was measured at 12.5 dB of
+ * reduction with the schedule off. The schedule multiplies by
+ * `exp(k * (D - REF))`, so shipping both with REF at 10 would have made every
+ * dial render `exp(0.1389 * 2.5)` = 1.415x long at the very depth the ladder was
+ * matched at, and the two fits would have silently fought. At REF = 12.5 the
+ * schedule is exactly 1.000 there and the ladder composes with it untouched.
+ */
+const RELEASE_DEPTH_REF_DB = 12.5
+const RELEASE_DEPTH_K = 0.1389
 const RELEASE_DEPTH_MAX_DB = 36
 const RELEASE_LUT_STEP_DB = 0.25
 
-const TAIL_FRACTION = 0.22
+/**
+ * ⚠ ZERO, BECAUSE THE REFERENCE MEASURABLY HAS NO EXPOSURE LIMB. FETish reads
+ * flat on bursts.wav (release t63 identical to the millisecond after 50 ms and
+ * 3 s holds, on every capture) and flat on transients.wav (train against train,
+ * against a control that spreads 10.1 % with this stage and 0.1 % without). Its
+ * program dependence is on DEPTH, which `releaseSchedule` now carries.
+ *
+ * Left at 0.22 alongside the fitted endpoints, every release dial rendered about
+ * 50 % long against the reference — 27.7 ms against 18, 129.8 against 86, 603.8
+ * against 407 — a uniform offset that was this stage and not the endpoints.
+ *
+ * ⚠ THE ALL-BUTTONS TAIL IS LEFT ALONE AND THAT IS DELIBERATE. There is not one
+ * all-buttons capture of either reference, so zeroing it would be inventing a
+ * measurement; all-buttons is also where the hardware's program dependence is
+ * least disputed. The two modes therefore use different release topologies until
+ * `bursts.wav` is bounced at ratio 'all'.
+ */
+const TAIL_FRACTION = 0
 const TAIL_MULT = 4
 
 // All-buttons-in holds far more of the reduction on the slow tail, which is
@@ -276,12 +330,14 @@ export const FET1176_KERNEL_DEFAULTS = {
   ratio: '4', // '4' | '8' | '12' | '20' | 'all'
   /**
    * Release-time schedule.
-   *   'none'  — one constant per knob position, whatever the reduction. Ships,
-   *             and is bit-identical to every render made before this existed.
-   *   'depth' — the constant scales with the CURRENT reduction, which is the
-   *             limb FETish actually has. See RELEASE_DEPTH_K.
+   *   'depth' — SHIPS. The constant scales with the CURRENT reduction, which is
+   *             the limb FETish actually has. See RELEASE_DEPTH_K.
+   *   'none'  — one constant per knob position, whatever the reduction. What
+   *             shipped before the fit; reachable through FET_LEGACY_PATCH,
+   *             though see the warning there about what that can no longer
+   *             restore.
    */
-  releaseSchedule: 'none',
+  releaseSchedule: 'depth',
   /**
    * Detector offset in dB that makes a knob position mean the same reduction on
    * every file. Null/absent is 0 \u2014 the un-aligned behaviour. Measured per file
@@ -363,7 +419,52 @@ export const FET1176_KERNEL_DEFAULTS = {
  * that changes the voicing must leave the old voicing reachable, or there is no
  * way to A/B the change and no way back for anyone who preferred it.
  */
-export const FET_LEGACY_PATCH = { fetCurve: 'tanh', fetPosition: 'postCell' }
+/**
+ * The kernel as it shipped before the FETish fit.
+ *
+ * ⚠⚠ THIS NO LONGER REPRODUCES OLD RENDERS AND MUST NOT BE READ AS DOING SO.
+ * It restores the TOPOLOGY — the tanh curve, the post-cell shaper position, a
+ * fixed release — but three of the changes are CONSTANTS rather than parameters
+ * and a patch cannot reach them: `IN_DRIVE_SPAN_DB` (40 -> 48, so every Input
+ * position moved), `RELEASE_SLOWEST_S` / `RELEASE_FASTEST_S` (2.73x, so every
+ * release dial moved) and `TAIL_FRACTION`. Those were changed with the owner's
+ * agreement to re-voice rather than preserve, so bit-exact reproduction of
+ * pre-fit renders was already gone before this patch was extended.
+ *
+ * Unlike `LA2A_LEGACY_PATCH`, which does reproduce its predecessor exactly.
+ */
+/**
+ * Lead-in fed to an offline render so it matches a settled preview, seconds.
+ *
+ * ⚠ FET PUNCH COULD NOT BE PRE-ROLLED AT ALL UNTIL THE TAIL CAME OFF, and the
+ * reason recorded in `previewApplyConvergence.test.js` was the wrong one. That
+ * test blamed the live makeup tracker's running maximum; measured, the tracker
+ * does not latch in the offline path at all — a fixture whose loudest moment
+ * sits well before the pre-roll window still converges to exactly 0. What did
+ * not converge was the TAIL, whose constant is `releaseS * TAIL_MULT` = 4.4 s
+ * under the old law, longer than any pre-roll anyone was going to feed it.
+ * With `TAIL_FRACTION` at 0 the worst difference over a 2 s lead-in goes from
+ * 1.64e-1 to 7.11e-15.
+ *
+ * ⚠ NOT BIT-EXACT, UNLIKE `LA2A_PREROLL_S`, AND ALL-BUTTONS IS WHY. It is the
+ * one mode that kept a tail (`ALL_TAIL_FRACTION`, unmeasured and left alone
+ * until there are all-buttons captures), so it is the slow case: 5.46e-6 at 2 s
+ * and 1.04e-7 at 3 s, decaying but never reaching zero. That is ~ -105 dBFS,
+ * inaudible and vastly better than the 3.61e-2 it renders with no lead-in, but
+ * the claim here is convergence rather than exactness.
+ *
+ * ⚠ THE LIVE PREVIEW IS A SEPARATE QUESTION THIS DOES NOT SETTLE. `trkInPeak`
+ * is still a running maximum with unbounded memory, so what the user HEARS can
+ * still carry a loud moment from earlier in the session. This makes the offline
+ * render match a settled preview; it does not make the preview reproducible.
+ */
+export const FET1176_PREROLL_S = 2
+
+export const FET_LEGACY_PATCH = {
+  fetCurve: 'tanh',
+  fetPosition: 'postCell',
+  releaseSchedule: 'none',
+}
 
 /**
  * How much audio the live makeup tracker must hear before it will report.
@@ -559,8 +660,7 @@ export class FET1176Kernel {
     }
 
     // Input attenuator: audio path and detector both, as on the hardware.
-    const knob = clamp(p.inputDrive, 0, 100) / 100
-    this.inputDriveDb = IN_DRIVE_MIN_DB + IN_DRIVE_SPAN_DB * Math.pow(knob, IN_TAPER)
+    this.inputDriveDb = inputDriveDbForKnob(p.inputDrive)
 
     /**
      * \u26a0 A DETECTOR OFFSET, AND FOR FET PUNCH THAT IS NOT WHERE THE INPUT KNOB

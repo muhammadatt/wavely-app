@@ -140,16 +140,29 @@ test('finds the release tail on a kernel that has one', opts, () => {
    * pointing the wrong way, on a kernel whose tail is 22 % of the reduction on
    * a network 4x slower.
    */
+  /**
+   * ⚠ THE SELF-TEST NOW WRITES BOTH KINDS AND THE TEST HAS TO SAY WHICH IS
+   * WHICH. Two captures are the shipping configuration — no tail, because the
+   * release is fitted to a reference that has no exposure limb — and must read
+   * NO STRETCH. One is rendered with a tail on purpose and must read a stretch.
+   * Asserting "no NO_STRETCH anywhere", as this did, would now fail on a correct
+   * tool; asserting a stretch everywhere would assert that the fit never
+   * happened.
+   */
   const out = selftest()
-  assert.doesNotMatch(out, /NO STRETCH WITH EXPOSURE/)
-  const hits = [...out.matchAll(/THE RELEASE STRETCHES WITH EXPOSURE/g)]
-  assert.equal(hits.length, 2, `tail found in ${hits.length} of 2 captures`)
+  const stretch = [...out.matchAll(/THE RELEASE STRETCHES WITH EXPOSURE/g)]
+  const flat = [...out.matchAll(/NO STRETCH WITH EXPOSURE/g)]
+  assert.equal(stretch.length, 1, `stretch found in ${stretch.length} captures, expected the 1 tailed one`)
+  assert.equal(flat.length, 2, `flat found in ${flat.length} captures, expected the 2 shipping ones`)
 })
 
 test('the release t63 grows monotonically with how long the burst was held', opts, () => {
   // The tail IS this: a single time constant recovers identically after every
   // hold length, and a two-stage network takes longer the longer it was lit.
-  const s = section(selftest(), 'synth_bursts_r4_I3_a2_r4.wav')
+  // ⚠ THE TAILED CAPTURE, NOT THE SHIPPING ONE. TAIL_FRACTION is 0 now that the
+  // release is fitted to FETish, so the shipping kernel has no exposure limb and
+  // asserting a stretch on it would assert that the fit did not happen.
+  const s = section(selftest(), 'synth_tailed_bursts_r4_I3_a2_r4.wav')
   const rows = [...s.matchAll(/^\s+[\d.]+ s\s+[\d.]+\s+\d+ us\s+[\d.]+ dB\s+(\d+) ms/gm)]
     .map(m => Number(m[1]))
   assert.equal(rows.length, 4, `found ${rows.length} burst rows, expected 4`)
@@ -240,8 +253,15 @@ test('with the tail off, measured release t63 IS the release constant', () => {
   for (const dial of [7, 4]) {
     const nominalMs = releaseSecondsForDial(dial) * 1e3
     const k = new FET1176Kernel(SR)
+    /**
+     * ⚠ `releaseSchedule: 'none'` IS NOW REQUIRED AND THE DEFAULT NO LONGER GIVES
+     * IT. The identity being asserted — measured t63 equals the constant behind
+     * it — is a property of a FIXED exponential. Under the shipping depth
+     * schedule the constant shrinks as the reduction decays, so the trajectory
+     * is not an exponential and t63 is 45 % short of the nominal by design.
+     */
     k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
-      inputDrive: 91, ratio: '4', attack: 4, release: dial })
+      inputDrive: 91, ratio: '4', attack: 4, release: dial, releaseSchedule: 'none' })
     k.tailFraction = 0
     k.mainFraction = 1
     const y = new Float32Array(x.length)
@@ -261,13 +281,21 @@ test('with the tail off, measured release t63 IS the release constant', () => {
  * dependence, it has to spread on a kernel that demonstrably does and go flat on
  * one that does not — same stimulus, same analysis, only the tail stage moving.
  */
-function runTransients(tailFraction) {
+/**
+ * ⚠ THE POSITIVE CONTROL HAS TO BE BUILT, NOT INHERITED. It used to come free
+ * from the shipping kernel's own tail; TAIL_FRACTION is 0 now that the release
+ * is fitted to FETish, so a default kernel is FLAT on this contrast and the test
+ * would have proved only that the plan reports "absent" — for a reference that
+ * has program dependence and for one that does not alike.
+ */
+function runTransients(tailFraction = 0.22) {
   const plan = PLANS['transients.wav']()
   const stim = buildProbe(plan, SR)
   const k = new FET1176Kernel(SR)
   k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
-    inputDrive: 91, ratio: '4', attack: 4, release: 4 })
-  if (tailFraction !== undefined) { k.tailFraction = tailFraction; k.mainFraction = 1 - tailFraction }
+    inputDrive: 91, ratio: '4', attack: 4, release: 4, releaseSchedule: 'none' })
+  k.tailFraction = tailFraction
+  k.mainFraction = 1 - tailFraction
   const y = new Float32Array(stim.x.length)
   for (let f = 0; f < stim.x.length; f += 128) {
     const l = Math.min(128, stim.x.length - f)

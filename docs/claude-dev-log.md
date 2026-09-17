@@ -2627,6 +2627,93 @@ other quantity or it is simply not 1176-accurate there. Release is a 2.73× shif
 in the other direction, so the two are not one common cause. This is a product
 decision, not a measurement one.
 
+### The FETish release voicing SHIPS — schedule on, tail off, endpoints re-scaled
+
+`releaseSchedule: 'depth'` and `TAIL_FRACTION: 0` are now the defaults. What the
+reference measurably has is a release keyed on DEPTH and no exposure or density
+limb; that is what ships.
+
+⚠ **THE TWO FITS DID NOT COMPOSE, AND SHIPPING THEM AS FITTED WAS 45 % WRONG.**
+The endpoints (402 / 18.3 ms) were fitted with the schedule OFF. Turning the
+schedule on makes the constant shrink as the reduction decays *during* the
+recovery, so the same endpoints render every dial 45 % short. Anchoring
+`RELEASE_DEPTH_REF_DB` at the sweep's own depth does NOT fix it — I tried that
+first, reasoning the schedule would be a no-op there, and it is not: the anchor
+sets the constant at the *initial* depth while the whole trajectory runs faster.
+
+The schedule reads the STATE and not the clock, so scaling the base constant
+scales the entire trajectory's timebase exactly — measured uniformly at 0.5516
+across all seven dials. `1.8130x` puts the ladder back, giving
+`RELEASE_SLOWEST_S = 0.7288`, `RELEASE_FASTEST_S = 0.03318`. **What ships is the
+constant that makes the render match, not the one the measurement printed** —
+the same principle as refusing to regress t63 for `k`.
+
+Verified in the shipping configuration, tail off and schedule on, at 12.5 dB:
+
+| dial | ours | FETish | error |
+|---|---|---|---|
+| 7 | 18.2 | 18 | +1.0 % |
+| 6 | 30.6 | 31 | −1.4 % |
+| 5 | 51.3 | 51 | +0.6 % |
+| 4 | 86.2 | 86 | +0.2 % |
+| 3 | 144.3 | 145 | −0.5 % |
+| 2 | 241.7 | 242 | −0.1 % |
+| 1 | 404.6 | 407 | −0.6 % |
+
+The depth limb re-fits to `k = 0.1389` at release dial 4.82 — mid-travel now,
+where it was 6.28 before the endpoints moved.
+
+**Seven consequences, all fixed at the cause.**
+
+⚠ **THE TOOLING LOST ITS POSITIVE CONTROL AND ALMOST DID SO SILENTLY.** Both the
+tail test and the density test prove they can resolve program dependence by
+spreading on a kernel that has it and going flat on one that does not — and the
+kernel they used was ours. With `TAIL_FRACTION` at 0 they would have gone on
+reporting "absent" for every reference with nothing left to show they could ever
+report otherwise. `runKernel` now takes a tail override, the ballistics self-test
+writes a third capture rendered WITH a tail alongside two in the shipping
+configuration, and the density control builds its own.
+
+⚠ **`scripts/fet-null.mjs` KEPT ITS OWN COPY OF THE INPUT DRIVE LAW.** It undid
+the taper by re-declaring `IN_DRIVE_MIN_DB` / `IN_DRIVE_SPAN_DB` / `IN_TAPER`
+locally; when the span went 40 → 48 the copy stayed at 40, so its "compensated"
+reference carried a 5.3 dB real gain and flipped its own verdict about whether
+Input is a real gain. The kernel exports `inputDriveDbForKnob` now. Same failure
+mode as the Scheps defaults.
+
+⚠ **THE BASE-RATE MEASUREMENT PARITY DRIFTED WITH THE WIDER KNOB.** Base-rate
+aliases the saturator's harmonics where oversampled folds them out, so the gap
+tracks drive: 0.0133 dB at 7.9 dB, 0.0257 at 16.2, 0.0498 at 24.0 — doubling
+every ~8 dB. The extra 8 dB of travel doubled the worst case, from inside 0.05
+to 0.1031. Nothing depends on it (the makeup solve renders oversampled since the
+0.58 dB bug), so the top of travel carries its own stated bound rather than
+everything getting a looser one.
+
+⚠⚠ **AND FET PUNCH CAN NOW BE PRE-ROLLED, WHICH MEANS THE OLD DIAGNOSIS WAS
+WRONG.** `previewApplyConvergence.test.js` asserted FET Punch *cannot* be made
+exact and blamed `trkInPeak`, the makeup tracker's running maximum. Measured: the
+tracker does not latch in the offline path at all — a fixture whose loudest
+moment sits 8 s before the pre-roll window, at amplitudes to 0.95, converges to
+exactly 0. What never converged was the TAIL, constant `releaseS * TAIL_MULT` =
+4.4 s, longer than any lead-in. With it gone, a 2 s pre-roll takes the worst
+difference from 1.64e-1 to 7.11e-15, and `FET1176_PREROLL_S` is wired.
+
+⚠ It is convergent, NOT bit-exact, and all-buttons is why: it is the one mode
+that kept a tail, since `ALL_TAIL_FRACTION` has no captures behind it. 5.46e-6 at
+2 s, 1.04e-7 at 3 s — about −105 dBFS against 3.61e-2 cold. Claim convergence,
+not exactness.
+
+⚠ And the LIVE preview is a separate question this does not settle. `trkInPeak`
+still has unbounded memory, so what the user hears can still carry a loud moment
+from earlier in the session. The offline render now matches a *settled* preview;
+the preview itself is not thereby reproducible.
+
+⚠ `FET_LEGACY_PATCH` gains `releaseSchedule: 'none'` but **no longer reproduces
+old renders and must not be read as doing so.** Three of the changes are
+constants, not parameters: `IN_DRIVE_SPAN_DB`, the release endpoints and
+`TAIL_FRACTION`. Bit-exact reproduction of pre-fit renders was already gone
+before this patch was extended.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

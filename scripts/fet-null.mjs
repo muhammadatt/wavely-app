@@ -71,6 +71,7 @@ import { buildProbe } from './lib/probeStimulus.js'
 import { readWav } from './lib/wav.js'
 import { writeFloatWav } from './lib/wav.js'
 import { STIM_DIR, CAP_DIR, PLANS, runKernel } from './fet-ballistics.mjs'
+import { inputDriveDbForKnob } from '../src/audio/fet1176Processor.js'
 import { FET_LEGACY_PATCH } from '../src/audio/fet1176Processor.js'
 
 /**
@@ -847,14 +848,26 @@ function main() {
 const SELFTEST_IN_LOW = 0
 const SELFTEST_IN_LOW2 = 10
 /** ...and one that compresses. */
-const SELFTEST_IN_COMP = 60
+/**
+ * ⚠ 47.8, NOT 60, BECAUSE THE KNOB MOVED UNDER IT. This fixture exists to land
+ * near 11 dB of reduction, which is what its verdict test asserts. When
+ * `IN_DRIVE_SPAN_DB` went 40 -> 48 the same knob position became 5.3 dB hotter
+ * (2.58 -> 7.90 dB of drive) and the fixture read 14.94 dB instead. 47.8
+ * reproduces the drive the fixture was built at, so what is pinned is the
+ * DEPTH the reader is being tested on, not a knob number that has since come to
+ * mean something else.
+ */
+const SELFTEST_IN_COMP = 47.8
 
-function inputDriveDbFor(knob) {
-  // Mirrors the kernel's own taper. Used only to undo it for the compensated
-  // reference, so the synthetic plugin behaves the way FETish's manual claims.
-  const IN_DRIVE_MIN_DB = -24, IN_DRIVE_SPAN_DB = 40, IN_TAPER = 0.8
-  return IN_DRIVE_MIN_DB + IN_DRIVE_SPAN_DB * Math.pow(Math.max(0, Math.min(100, knob)) / 100, IN_TAPER)
-}
+/**
+ * ⚠ IMPORTED, NOT MIRRORED. This function used to re-declare the kernel's
+ * taper constants so it could undo them. When `IN_DRIVE_SPAN_DB` went 40 -> 48
+ * the copy stayed at 40, so the compensated reference was undoing 40 dB of gain
+ * against a kernel applying 48 and carried a 5.3 dB real gain it was supposed to
+ * have none of — which flipped its own verdict about whether Input is a real
+ * gain. The kernel exports the law now and there is one copy of it.
+ */
+const inputDriveDbFor = inputDriveDbForKnob
 
 function selftest(outDir) {
   mkdirSync(outDir, { recursive: true })

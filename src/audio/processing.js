@@ -9,6 +9,7 @@ import {
 import { ensureFET1176Worklet } from './fet1176WorkletLoader.js'
 import {
   FET1176_DEFAULTS,
+  FET1176_PREROLL_S,
   FET1176_LATENCY_SAMPLES,
   toKernelParams as toFET1176KernelParams,
 } from './effects/fet1176Compressor.js'
@@ -766,6 +767,8 @@ export function applyFET1176Region(segments, start, end, params, sampleRate, cha
     processorName: 'fet1176-processor',
     kernelParams: toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params }),
     latencySamples: FET1176_LATENCY_SAMPLES,
+    // Convergent at this length once the tail came off — see FET1176_PREROLL_S.
+    preRollSamples: Math.round(FET1176_PREROLL_S * sampleRate),
   })
 }
 

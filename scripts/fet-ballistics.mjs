@@ -406,7 +406,20 @@ export const PLANS = {
  */
 export function runKernel(x, sampleRate, params) {
   const k = new FET1176Kernel(sampleRate)
-  k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false, ...params })
+  const { tailFraction, ...kernelParams } = params
+  k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false, ...kernelParams })
+  /**
+   * \u26a0 THE TOOL NEEDS A TAILED KERNEL EVEN THOUGH THE PRODUCT NO LONGER HAS ONE.
+   * `TAIL_FRACTION` went to 0 when the release was fitted to FETish, which has no
+   * exposure limb \u2014 and that quietly removed this tooling's only POSITIVE
+   * CONTROL. The tail test and the density test both prove they can resolve
+   * program dependence by showing a spread on a kernel that has it and none on a
+   * kernel that does not; with the shipping kernel flat, both would have gone on
+   * reporting "absent" for every reference with nothing left to prove they could
+   * ever report otherwise. It is poked rather than passed as a parameter because
+   * it is derived from the ratio button.
+   */
+  if (tailFraction !== undefined) { k.tailFraction = tailFraction; k.mainFraction = 1 - tailFraction }
   const o = new Float32Array(x.length)
   for (let f = 0; f < x.length; f += 128) {
     const l = Math.min(128, x.length - f)
@@ -903,22 +916,50 @@ function writeFitSelftest(dir, sampleRate) {
   mkdirSync(dir, { recursive: true })
   const plan = burstPlan()
   const stim = buildProbe(plan, sampleRate)
-  const cases = [{ attack: 2, release: 4, lag: 131 }, { attack: 5, release: 6, lag: -77 }]
+  /**
+   * \u26a0 TWO DIFFERENT CONFIGURATIONS, BECAUSE THE SELF-TEST PROVES TWO DIFFERENT
+   * THINGS AND THEY NO LONGER COEXIST IN ONE KERNEL.
+   *
+   * DIAL RECOVERY needs the synthetic rendered exactly as the fitter's own dial
+   * table is rendered \u2014 shipping config, depth schedule on, no tail \u2014 or the
+   * table it is matched against is a different compressor and the dial cannot
+   * come back.
+   *
+   * TAIL DETECTION needs a synthetic that HAS an exposure limb. `TAIL_FRACTION`
+   * went to 0 when the release was fitted to FETish, which has no such limb, and
+   * that quietly removed this tooling's only positive control: the tail test
+   * would have gone on reporting "no stretch" for every reference with nothing
+   * left to show it could ever report otherwise.
+   *
+   * Rendering one capture with a tail costs one extra file and keeps both
+   * claims honest.
+   */
+  const cases = [
+    { attack: 2, release: 4, lag: 131, tail: 0 },
+    { attack: 5, release: 6, lag: -77, tail: 0 },
+    { attack: 2, release: 4, lag: 0, tail: 0.22, name: 'tailed' },
+  ]
   for (const c of cases) {
     const { y } = runKernel(stim.x, sampleRate,
-      { inputDrive: 55, ratio: '4', attack: c.attack, release: c.release, fetDrive: 0, oversample: true })
+      { inputDrive: 55, ratio: '4', attack: c.attack, release: c.release, fetDrive: 0,
+        oversample: true, ...(c.tail ? { releaseSchedule: 'none', tailFraction: c.tail } : {}) })
     const k = new FET1176Kernel(sampleRate)
     k.setParams({ oversample: true })
     const trimmed = y.subarray(k.latencySamples)
     const z = new Float32Array(trimmed.length + Math.max(0, c.lag))
     if (c.lag >= 0) z.set(trimmed, c.lag)
     else z.set(trimmed.subarray(-c.lag), 0)
-    writeFloatWav(join(dir, `synth_bursts_r4_I3_a${c.attack}_r${c.release}.wav`), z, sampleRate)
+    const stem = c.name
+      ? `synth_${c.name}_bursts_r4_I3_a${c.attack}_r${c.release}`
+      : `synth_bursts_r4_I3_a${c.attack}_r${c.release}`
+    writeFloatWav(join(dir, `${stem}.wav`), z, sampleRate)
   }
   console.log(`\nSynthetic bursts captures in ${dir}`)
   console.log('EXPECTED — anything else is a bug in the fitter, not in the capture:')
   for (const c of cases) {
-    console.log(`  a${c.attack}_r${c.release}: lag ${c.lag}, attack dial ${c.attack}, release dial ${c.release}, a tail present`)
+    console.log(`  ${c.name ? c.name + ' ' : ''}a${c.attack}_r${c.release}: lag ${c.lag}, ` +
+      `attack dial ${c.attack}, release dial ${c.release}, ` +
+      (c.tail ? 'a tail present' : 'no tail — the shipping configuration'))
   }
   return dir
 }

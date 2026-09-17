@@ -35,7 +35,7 @@ import assert from 'node:assert/strict'
 import { processLA2ABuffer } from '../../src/audio/la2aProcessor.js'
 import { processSchepsBuffer } from '../../src/audio/schepsProcessor.js'
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
-import { processFET1176Buffer } from '../../src/audio/fet1176Processor.js'
+import { FET1176_PREROLL_S, processFET1176Buffer } from '../../src/audio/fet1176Processor.js'
 import { processSoftClipperBuffer } from '../../src/audio/softClipperProcessor.js'
 import { LA2A_PREROLL_S } from '../../src/audio/la2aProcessor.js'
 import { SCHEPS_PREROLL_S } from '../../src/audio/schepsProcessor.js'
@@ -233,21 +233,47 @@ test('⚠ the soft clipper\'s adaptive mode is why it stays deprecated', () => {
   assert.equal(fixed, 0, 'the shipping fixed mode should be history-independent')
 })
 
-test('⚠ FET Punch CANNOT be made exact, and this records why', () => {
-  // `trkInPeak` is a running maximum — "the loudest input sample heard so far"
-  // — so it carries the whole preview session and an offline render cannot
-  // match it. A pre-roll helps a lot (stock: -0.668 dB cold, -0.022 at 2 s) and
-  // never closes. No pre-roll is wired for it.
-  //
-  // If someone gives that tracker a bounded reference — a decaying peak, or a
-  // percentile over a window — this goes red, and FET Punch can then be wired
-  // like the other three.
-  const diff = worstDiff(processFET1176Buffer, { inputDrive: 70, attack: 1, release: 1 }, SR * 2)
-  assert.ok(
-    diff > 1e-4,
-    `FET Punch converged to ${diff.toExponential(2)} — if its makeup tracker `
-    + 'stopped latching, wire preRollSamples for it and delete this test',
-  )
+/**
+ * ⚠⚠ THIS TEST USED TO ASSERT FET PUNCH COULD NOT CONVERGE, AND ITS DIAGNOSIS
+ * WAS WRONG. It blamed `trkInPeak`, the makeup tracker's running maximum. But
+ * that tracker does not latch in the OFFLINE path at all — measured on a fixture
+ * whose loudest moment sits 8 s before the pre-roll window, at loud amplitudes
+ * up to 0.95, the two renders agree to exactly 0. What actually failed to
+ * converge was the release TAIL, whose constant is `releaseS * TAIL_MULT` =
+ * 4.4 s under the old law and so outlasted any lead-in. `TAIL_FRACTION` went to
+ * 0 when the release was fitted to FETish, which has no exposure limb, and the
+ * worst difference over a 2 s lead-in went from 1.64e-1 to 7.11e-15.
+ *
+ * `preRollSamples` is wired for FET Punch now. What is pinned here is that it
+ * earns it.
+ */
+test('FET Punch converges on a pre-roll, now that the tail is gone', () => {
+  const cold = worstDiff(processFET1176Buffer, { inputDrive: 70, attack: 1, release: 1 }, 0)
+  assert.ok(cold > 1e-2, `no lead-in should be visibly wrong; got ${cold.toExponential(2)}`)
+
+  const warm = worstDiff(processFET1176Buffer,
+    { inputDrive: 70, attack: 1, release: 1 }, Math.round(FET1176_PREROLL_S * SR))
+  assert.ok(warm < 1e-9, `slowest ballistics should converge; got ${warm.toExponential(2)}`)
+})
+
+/**
+ * ⚠ ALL-BUTTONS IS THE SLOW CASE BECAUSE IT IS THE ONE MODE THAT KEPT A TAIL.
+ * `ALL_TAIL_FRACTION` is unmeasured — there is not one all-buttons capture of
+ * either reference — so it was left alone rather than zeroed on no evidence.
+ * The consequence is that FET Punch converges but is NOT bit-exact, unlike
+ * OptoSmooth at `LA2A_PREROLL_S`: 5.46e-6 at 2 s and 1.04e-7 at 3 s, decaying
+ * and never reaching zero. That is about -105 dBFS against the 3.61e-2 it
+ * renders cold, so the lead-in is worth having; the claim is convergence, not
+ * exactness, and this records which is which.
+ */
+test('all-buttons converges more slowly, and is the reason exactness is not claimed', () => {
+  const params = { inputDrive: 90, attack: 7, release: 7, fetDrive: 1, ratio: 'all' }
+  const warm = worstDiff(processFET1176Buffer, params, Math.round(FET1176_PREROLL_S * SR))
+  assert.ok(warm < 1e-4, `should be inaudible; got ${warm.toExponential(2)}`)
+  assert.ok(warm > 0, 'and should NOT be bit-exact while all-buttons keeps its tail')
+
+  const longer = worstDiff(processFET1176Buffer, params, Math.round(3 * SR))
+  assert.ok(longer < warm, `a longer lead-in should still help: ${warm.toExponential(2)} -> ${longer.toExponential(2)}`)
 })
 
 /**
