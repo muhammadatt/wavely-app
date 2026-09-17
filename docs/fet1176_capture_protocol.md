@@ -528,6 +528,35 @@ the attack and release are: measured at Input 60 across attack 1/4/7 and release
 1/4/7, the settled reduction runs **6.37 to 6.44 dB** — a 0.07 dB spread. Even
 the 50 ms burst settles to the same value.
 
+### Output level on `stairs.wav` — change it freely between captures
+
+**Turning Output down for the hotter Input positions does not affect the
+result.** The static fit reads `depth = open − held`, both taken from inside the
+same capture, so a constant gain divides straight out. Measured across 24 dB of
+Output on our own kernel, slope 0.7698, knee 10.89 dB and effective threshold
+−35.05 dB are **identical to four decimal places** at every position.
+
+The only rule is that Output must be constant **within** one capture. Between
+captures it is free, and at high Input positions turning it down is the right
+thing to do.
+
+⚠ **AND THE STAIRS FIT IS ROBUST TO CLIPPING, WHICH THE BURSTS FIT IS NOT — DO
+NOT CARRY THE WARNING ACROSS.** The dev log records 48 clipped samples taking a
+bursts overshoot reading from 4.714 dB to 1.843, because there the overshoot IS
+the measurement and it is exactly the sample that clips first. Here the
+measurement is the SETTLED value, which sits well below the peak; the peak is a
+brief attack overshoot at each step edge. Driven 16 dB past full scale, 434
+samples clipped, the fitted slope moves by 0.0000.
+
+⚠ **ONE THING THIS ASSUMES:** that Output is a clean multiply after the gain
+cell. A real 1176 has an output amp and a transformer, so a reference that models
+saturation there would change its DISTORTION with the Output setting and not only
+its level, which the division cannot remove. Unlikely to matter at these levels —
+but if one Input position's curve comes back with a slope or knee that does not
+sit on the trend of the others, suspect this before believing it is a property of
+the plugin. **Write the Output readout down per capture** so the question can be
+asked later.
+
 ### `stairs.wav` — static curve
 
 44.6 s. Fifteen 1 s steps from −45 to −3 dBFS in 3 dB.
