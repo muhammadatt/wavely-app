@@ -84,7 +84,7 @@ This preset was developed under the working name "Airy." It was renamed to **Pre
 
 ## Deviation from the source curves
 
-The post-EQ cut region is scaled to **74.2%** of the curve this document was captured from — 1.5 dB less cut at 20 kHz (−3.88 → −2.38 dB), scaled proportionally across the whole cut so the shape is preserved and the boost region below ~2 kHz is untouched. That is the shape a High Atten knob makes when you turn it down, which is why it was chosen over a correction that hinges in at a fixed frequency.
+The post-EQ cut region is scaled to **61.3%** of the curve this document was captured from — 1.5 dB less cut at 20 kHz (−3.88 → −2.38 dB), scaled proportionally across the whole cut so the shape is preserved and the boost region below ~2 kHz is untouched. The factor is `(3.88 − 1.5) / 3.88`: the whole cut is multiplied by whatever ratio puts 20 kHz where it is wanted. That is the shape a High Atten knob makes when you turn it down, which is why it was chosen over a correction that hinges in at a fixed frequency.
 
 **Why:** the top-octave scoop was audible on narration and was not the result of a hardware measurement worth defending. These curves are assembled from anecdotal reports rather than a metrological capture of a real EQP-1A, so the numbers they carry are a starting point, not a reference to be reproduced faithfully. ⚠ **DO NOT CITE THIS FILE AS EVIDENCE OF WHAT AN EQP-1A DOES.** The pre column is a measurement of a reference emulation; the post column is that measurement with a deliberate editorial change on top.
 
