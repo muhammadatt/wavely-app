@@ -3,13 +3,15 @@ import { applyGainSegments } from './dsp/autoLevel.js'
 import { analysisWindow, analysedWholeRegion, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_PREROLL_S } from './la2aProcessor.js'
+// ⚠ From the PROCESSOR, not the effect wrapper — the wrapper pulls the worklet
+// URL and does not re-export kernel constants. Same shape as LA2A_PREROLL_S.
+import { FET1176_PREROLL_S } from './fet1176Processor.js'
 import {
   LA2A_DEFAULTS, la2aPatchLatencySamples, toKernelParams,
 } from './effects/la2aCompressor.js'
 import { ensureFET1176Worklet } from './fet1176WorkletLoader.js'
 import {
   FET1176_DEFAULTS,
-  FET1176_PREROLL_S,
   FET1176_LATENCY_SAMPLES,
   toKernelParams as toFET1176KernelParams,
 } from './effects/fet1176Compressor.js'
