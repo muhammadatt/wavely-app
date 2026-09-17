@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { PLANS, runKernel } from '../../scripts/fet-ballistics.mjs'
 import { buildProbe } from '../../scripts/lib/probeStimulus.js'
 import { inputDriveDbForKnob } from '../../src/audio/fet1176Processor.js'
-import { fitStatic, stairCurve, grForLevel, ratioForSlope, knobsFromName } from '../../scripts/fet-stairs.mjs'
+import { fitStatic, stairCurve, grForLevel, ratioForSlope, knobsFromName, KNEE_MIN_DB } from '../../scripts/fet-stairs.mjs'
 
 const SR = 96000
 const plan = PLANS['stairs.wav']()
@@ -120,4 +120,41 @@ test('slope is invariant under Input, which is the additive model', () => {
   const slopes = [30, 44.5, 71.5, 88].map(inputDrive => fitFor('4', inputDrive).slope)
   const spread = Math.max(...slopes) - Math.min(...slopes)
   assert.ok(spread < 0.01, `slope moved ${spread.toFixed(4)} across the drive span`)
+})
+
+/**
+ * ⚠ THE DIFF COLUMN ONLY CANCELS THE ATTACK BIAS IF BOTH SIDES SHARE AN ATTACK,
+ * AND THIS IS THE MEASUREMENT THAT SAYS SO. The fitted static curve moves with
+ * the attack dial, because a slower attack lags further behind the per-peak
+ * target and reads the law steeper. FETish's slowest attack sits near ours so
+ * the subtraction is sound there; CLA-76's dial 1 measures ~5688 us against our
+ * ~2200, beyond our slowest, so its slope is inflated by an amount the
+ * subtraction cannot remove.
+ */
+test('the fitted static curve depends on the attack dial', () => {
+  const at = (attack) => {
+    const { y } = runKernel(stim().x, SR, { inputDrive: 50, ratio: '4', attack, release: 7, fetDrive: 0 })
+    return fitStatic(stairCurve(y, plan, stim(), SR, 0))
+  }
+  const slow = at(1).slope, fast = at(4).slope
+  assert.ok(slow > fast, 'a slower attack must read the law steeper, not shallower')
+  assert.ok(slow - fast > 0.005,
+    `the dependence must stay visible; got ${(slow - fast).toFixed(4)} — if this ever` +
+    ' goes to zero the diff column has become unconditionally safe and this comment is wrong')
+})
+
+/**
+ * ⚠ A PARAMETER ON ITS BOUND IS NOT A READING. Twelve of twenty CLA-76 captures
+ * returned a knee at or below the old 0.5 dB floor and were printed as though
+ * they were measurements.
+ */
+test('a knee driven to the bound is flagged rather than reported', () => {
+  // A hard corner: no knee at all, which the parameterisation cannot express.
+  const pts = []
+  for (let level = -45; level <= -3; level += 3) {
+    pts.push({ levelDb: level, grDb: level > -20 ? 0.75 * (level + 20) : 0 })
+  }
+  const fit = fitStatic(pts)
+  assert.equal(fit.kneeAtBound, true, 'a corner must be flagged, not returned as a narrow knee')
+  assert.ok(fit.kneeDb >= KNEE_MIN_DB)
 })

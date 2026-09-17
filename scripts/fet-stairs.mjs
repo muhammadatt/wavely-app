@@ -67,6 +67,9 @@ export function stairCurve(y, plan, stim, sampleRate, lag) {
     .map((r, i) => ({ ...r, levelDb: plan.events[i].L }))
 }
 
+/** The sharpest knee the fit can express. Below this the law is a corner. */
+export const KNEE_MIN_DB = 0.1
+
 const rms = (pts, law) =>
   Math.sqrt(pts.reduce((a, p) => a + (grForLevel(p.levelDb, law) - p.grDb) ** 2, 0) / pts.length)
 
@@ -84,7 +87,7 @@ export function fitStatic(pts) {
   let best = { rms: Infinity }
   for (let th = -42; th <= 6; th += 1) {
     for (let slope = 0.2; slope <= 0.99; slope += 0.01) {
-      for (let knee = 0.5; knee <= 24; knee += 1.5) {
+      for (let knee = KNEE_MIN_DB; knee <= 24; knee += 1.5) {
         const law = { effThresholdDb: th, slope, kneeDb: knee }
         const e = rms(pts, law)
         if (e < best.rms) best = { ...law, rms: e }
@@ -97,14 +100,25 @@ export function fitStatic(pts) {
     for (const [i, key] of ['effThresholdDb', 'slope', 'kneeDb'].entries()) {
       for (const dir of [1, -1]) {
         const cand = { ...best, [key]: best[key] + dir * step[i] }
-        if (cand.kneeDb <= 0 || cand.slope <= 0.05 || cand.slope >= 0.999) continue
+        if (cand.kneeDb < KNEE_MIN_DB || cand.slope <= 0.05 || cand.slope >= 0.999) continue
         const e = rms(pts, cand)
         if (e < best.rms) { best = { ...cand, rms: e }; improved = true }
       }
     }
     if (!improved) step = step.map(v => v / 2)
   }
-  return { ...best, ratio: ratioForSlope(best.slope) }
+  /**
+   * ⚠ A PARAMETER SITTING ON ITS BOUND IS NOT A MEASUREMENT, IT IS THE SEARCH
+   * RUNNING OUT OF ROOM. Twelve of twenty CLA-76 captures came back with a knee
+   * at or under the old 0.5 dB floor — several at exactly 0.50, two at 0.13 and
+   * 0.17 where the polish had walked off the grid — and were printed as though
+   * they were readings. They mean the curve wants a corner sharper than this
+   * parameterisation has, which is a different statement and has to be flagged
+   * as one.
+   */
+  const atBound = best.kneeDb <= KNEE_MIN_DB * 1.02
+  return { ...best, kneeDb: Math.max(best.kneeDb, KNEE_MIN_DB), kneeAtBound: atBound,
+    ratio: ratioForSlope(best.slope) }
 }
 
 /** `<ref>_stairs_r<ratio>_I<n>.wav` */
@@ -148,7 +162,8 @@ function report(rows, sampleRate, plan, stim) {
     console.log('  ' + r.file.padEnd(31) +
       r.fit.slope.toFixed(4).padStart(7) +
       ('~' + r.fit.ratio.toFixed(1)).padStart(9) + r.fit.kneeDb.toFixed(2).padStart(10) +
-      r.fit.effThresholdDb.toFixed(2).padStart(13) + r.fit.rms.toFixed(3).padStart(9))
+      r.fit.effThresholdDb.toFixed(2).padStart(13) + r.fit.rms.toFixed(3).padStart(9) +
+      (r.fit.kneeAtBound ? '  ⚠ knee at bound' : ''))
   }
 
   // ⚠ The only comparison with the attack bias cancelled out of it.
@@ -163,8 +178,16 @@ function report(rows, sampleRate, plan, stim) {
         ((r.fit.slope - o.slope >= 0 ? '+' : '') + (r.fit.slope - o.slope).toFixed(4)).padStart(9) +
         r.fit.kneeDb.toFixed(2).padStart(12) + o.kneeDb.toFixed(2).padStart(7))
     }
-    console.log('    ⚠ THE DIFF COLUMN IS THE MEASUREMENT. Both sides carry the same attack')
-    console.log('      bias, so it cancels there and does not in the absolute columns above.')
+    console.log('    ⚠ THE DIFF COLUMN CANCELS THE ATTACK BIAS ONLY IF BOTH SIDES SHARE AN')
+    console.log('      ATTACK. Measured on our own kernel at ratio 4, the fitted slope runs')
+    console.log('      0.7734 / 0.7636 / 0.7581 / 0.7582 across attack dials 1-4 — 0.015 of')
+    console.log('      slope, nearly all of it between dials 1 and 2, because a slower attack')
+    console.log('      lags further behind the per-peak target and reads the law steeper.')
+    console.log('      ⚠ SO THIS IS SOUND FOR FETish, WHOSE SLOWEST ATTACK IS NEAR OURS, AND')
+    console.log('      NOT FOR CLA-76, WHOSE DIAL 1 MEASURES ~5688 us AGAINST OUR ~2200 — it')
+    console.log('      sits beyond our slowest, so its slope is inflated by an amount this')
+    console.log('      subtraction does not remove. Read the SIGN of a large difference; treat')
+    console.log('      the magnitude as an upper bound on how much the reference compresses.')
   }
 
   // ── Does the threshold move with the ratio button? ────────────────────────

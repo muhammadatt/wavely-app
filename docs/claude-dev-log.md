@@ -2769,6 +2769,69 @@ them, not an independent result.
 `ALL_THRESHOLD_DROP_DB` and the soft `ALL_RATIO_*` law have no captures behind
 them from either reference and CLA-76 is the only one that can supply them.
 
+### ⚗⚗ CLA-76'S STATIC CURVE — one strong finding, and two the instrument cannot support
+
+20 captures, five ratio buttons including all-buttons. Much noisier than FETish:
+rms 0.016–0.126 dB against 0.002–0.004, rising steeply at I4.
+
+**1. THE THRESHOLD MOVES WITH THE RATIO BUTTON, and this one is solid.** Relative
+to ratio 12, at every Input position:
+
+| ratio | all | 4 | 8 | 12 | 20 |
+|---|---|---|---|---|---|
+| I1 | −3.17 | −2.63 | −0.84 | 0 | +1.32 |
+| I2 | −3.23 | −2.63 | −0.90 | 0 | +1.26 |
+| I3 | −3.26 | −2.67 | −0.88 | 0 | +1.29 |
+| I4 | −3.29 | −2.76 | −0.95 | 0 | +1.35 |
+
+**Monotone in ratio and reproduced to ~0.1 dB across four independent Input
+positions.** A shift that survives four separate captures at four drives is not
+the fit wandering. Our model holds the threshold fixed; CLA-76's ratio buttons
+move it by 4.5 dB end to end.
+
+⚠ AND THIS IS THE CLAIM FETish'S MANUAL MAKES AND FETish DOES NOT HONOUR. FETish
+measured fixed to 0.00 dB. So the two references disagree about the topology, not
+just the numbers, and the hardware behaviour is a question neither settles alone.
+
+**2. ⚠⚠ THE SLOPE COMPARISON IS NOT BIAS-CANCELLED FOR CLA-76, AND THE TOOL SAID
+IT WAS.** The diff column's whole justification is that both sides carry the same
+attack lag. Measured on our own kernel at ratio 4, the fitted slope runs
+**0.7734 / 0.7636 / 0.7581 / 0.7582 across attack dials 1–4** — 0.015 of slope,
+nearly all of it between dials 1 and 2, because a slower attack lags further
+behind the per-peak target and reads the law steeper. FETish's slowest attack
+sits near ours, so the subtraction holds there. **CLA-76's dial 1 measures
+~5688 µs against our ~2200** — beyond our slowest — so its slope is inflated by
+an amount the subtraction does not remove.
+
+The sign of the large differences survives: CLA-76's ratio 4 reads **+0.0568**
+above ours where every other button reads negative, so its "4:1" really does
+compress harder than 4:1 (~5.9 by the raw fit). The magnitude is an upper bound,
+not a measurement.
+
+**3. ⚠ THE KNEE READINGS ARE NOT USABLE, AND TWELVE OF TWENTY WERE ON A BOUND.**
+Values came back at exactly 0.50 repeatedly, and at 0.13 and 0.17 where the
+polish had walked below the grid — printed as though they were readings. They are
+the search running out of room: the curve wants a corner sharper than this
+parameterisation can express. The knee is also erratic rather than trending
+(ratio 8: 3.60 / 0.50 / 3.94 / 0.50 across I1–I4), which is noise. The fit now
+flags a bounded parameter instead of reporting it.
+
+⚠ Contrast FETish, whose knee was orderly (5.85 → 10.86, monotone in drive) with
+rms an order of magnitude lower. The knee finding there stands; there is no
+comparable finding here.
+
+**4. The taper is clean.** 0 / 4.72 / 10.11 / 15.50 dB across I1–I4, consistent
+to 0.1 dB across all five ratio buttons. CLA-76 spans 15.5 dB where FETish spanned
+25.0 for the same I1–I4 GR targets, which is a property of where the positions
+landed rather than of the knobs.
+
+**5. Still not answered: the all-buttons law.** CLA-76's all-buttons slope reads
+0.9449 → 0.9163 across I1–I4 and its threshold sits 3.2 dB below ratio 12's. Our
+`ALL_THRESHOLD_DROP_DB` is 6 and `ALL_KNEE_DB` is 16, against a measured knee
+that is on the bound. The soft `ALL_RATIO_*` law has nothing behind it either.
+This is the one capture set only CLA-76 can supply, and it needs the attack
+confound resolved before it can be read.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
