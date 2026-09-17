@@ -45,6 +45,8 @@
     "fet:curve:selftest": "node scripts/fet-static-curve.mjs --selftest",
     "fet:ballistics": "node scripts/fet-ballistics.mjs --fit",
     "fet:transients": "node scripts/fet-ballistics.mjs --transients",
+    "fet:stairs": "node scripts/fet-stairs.mjs",
+    "fet:stairs:selftest": "node scripts/fet-stairs.mjs --selftest",
     "fet:release-depth": "node scripts/fet-release-depth.mjs",
     "fet:release-depth:selftest": "node scripts/fet-release-depth.mjs --selftest",
     "fet:ballistics:selftest": "node scripts/fet-ballistics.mjs --fit --selftest"

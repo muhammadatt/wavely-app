@@ -1465,6 +1465,7 @@ FET Punch capture tooling. Pick a mode:
   npm run fet:ballistics   fit whatever bursts captures are present
   npm run fet:transients   the transient limb only — seconds, not minutes, because
                            it skips the dial tables the bursts fit has to render
+  npm run fet:stairs       the static curve: slope, knee and the two sweeps
 
 Both take --rate <hz> (default ${DEFAULT_SR}).
 
