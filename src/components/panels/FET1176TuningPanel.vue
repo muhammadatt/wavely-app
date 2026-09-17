@@ -103,7 +103,9 @@ const CHOICES = [
     options: [
       {
         id: 'none', label: 'FIXED',
-        title: 'One constant per dial whatever the reduction. Ships',
+        title: 'One constant per dial whatever the reduction. SHIPS, and is a complete '
+          + 'model rather than half of one — the datasheet ladder was never scaled for a '
+          + 'schedule, so datasheet + FIXED is internally consistent',
       },
       {
         id: 'depth', label: 'DEPTH',
@@ -125,9 +127,11 @@ const CHOICES = [
       },
       {
         id: 'none', label: 'FIXED',
-        title: 'One constant per knob position whatever the reduction, as before the fit. '
-          + 'Note the release ENDPOINTS do not change with this — they are fitted to FETish '
-          + 'and ship either way',
+        title: '⚠ HALF A MODEL, LIKE THE ATTACK PAIR. One constant per knob position, but '
+          + 'the endpoints were scaled 1.813× to compose WITH the schedule and cannot be '
+          + 'switched from here — so turning it off leaves every dial ~1.8× long: 80 % rms '
+          + 'against the reference where the shipping pair is 0.8 %. For hearing what the '
+          + 'schedule does, not for matching anything',
       },
     ],
   },

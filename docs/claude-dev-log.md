@@ -2997,6 +2997,37 @@ and 1.15 % from another once the fitted slope replaced the estimate. Same failur
 **Both schedules still ship off.** The release one is on; this one is not, and
 the A/B is now a real reproduction rather than a single-depth snapshot.
 
+### ⚠ THE BENCH'S RELEASE "FIXED" IS A MISMATCHED HALF, AND ITS TOOLTIP DID NOT SAY SO
+
+Asked whether the shipping default is one of the combinations the attack pair
+warns against. It is not — but checking turned up one next to it.
+
+**The shipping default is consistent.** `datasheet` + attack `FIXED` is the
+COMPLETE datasheet attack model, not half of the FETish one: that ladder was
+never scaled for a schedule, so the two together are internally coherent. The two
+halves that must travel together are `fetish` + attack `DEPTH`.
+
+**And the release ships as its matched pair.** Measured against the reference at
+12.5 dB, the seven dials read 18 / 31 / 51 / 86 / 144 / 242 / 405 ms against
+18 / 31 / 51 / 86 / 145 / 242 / 407 — **0.8 % rms**.
+
+⚠ **BUT THE BENCH'S RELEASE `FIXED` IS EXACTLY THE FAILURE THE ATTACK PANEL
+WARNS ABOUT.** The release endpoints were scaled **1.813×** so they compose WITH
+the depth schedule, and they are constants rather than parameters, so the bench
+cannot switch them back. Selecting FIXED leaves every dial about 1.8× long:
+
+| | rms | dials 7→1, ms |
+|---|---|---|
+| shipping, release DEPTH | **0.8 %** | 18 / 31 / 51 / 86 / 144 / 242 / 405 |
+| bench, release FIXED | **79.8 %** | 33 / 55 / 92 / 155 / 259 / 433 / 725 |
+| reference | — | 18 / 31 / 51 / 86 / 145 / 242 / 407 |
+
+The tooltip described this neutrally — "the release ENDPOINTS do not change with
+this" — which is true and reads as reassurance. It now says the switch turns the
+release 80 % wrong and is for hearing what the schedule DOES, not for matching
+anything. A test pins the asymmetry, including why the attack's FIXED is fine
+where the release's is not.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

@@ -103,3 +103,44 @@ test('a fixed release with the dial free cannot match the reference shape', () =
   }
   assert.ok(best > 0.2, `a fixed release got within ${(best * 100).toFixed(1)} % — the shape claim needs re-examining`)
 })
+
+/**
+ * ⚠ THE SHIPPING COMBINATION IS A MATCHED PAIR AND TURNING THE SCHEDULE OFF
+ * BREAKS IT, WHICH THE BENCH HAS TO SAY OUT LOUD. The release endpoints were
+ * scaled 1.813x so they compose with the depth schedule — that is what makes the
+ * shipping pair land within 1 % of the reference. They are constants, not
+ * parameters, so the bench cannot switch them back: selecting FIXED leaves every
+ * dial about 1.8x long.
+ *
+ * This is the same shape as the attack pair, where either half alone is ~36 %
+ * out against 1.15 % for both. The difference is that the ATTACK ships as the
+ * complete datasheet model — its ladder was never scaled for a schedule — so
+ * 'datasheet' + 'none' is internally consistent, while release 'none' is not.
+ */
+test('turning the release schedule off breaks the endpoint calibration', () => {
+  const t63 = (params) => {
+    const k = new FET1176Kernel(SR)
+    k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
+      inputDrive: 67, ratio: '4', attack: 4, release: 4, ...params })
+    k.tailFraction = 0
+    k.mainFraction = 1
+    const x = new Float32Array(SR * 2)
+    for (let i = 0; i < x.length; i++) {
+      x[i] = (i < SR ? 0.25 : 0.002) * Math.sin(2 * Math.PI * 4000 * i / SR)
+    }
+    const y = new Float32Array(x.length)
+    for (let f = 0; f < x.length; f += 128) {
+      const l = Math.min(128, x.length - f)
+      k.process([x.subarray(f, f + l)], [y.subarray(f, f + l)], l)
+    }
+    // Time for the gain to come most of the way back after the step.
+    let i = SR
+    const open = Math.abs(y[x.length - 100]) / 0.002
+    while (i < x.length - 1 && Math.abs(y[i]) / 0.002 < open * 0.63) i++
+    return (i - SR) / SR
+  }
+  const shipping = t63({})
+  const fixed = t63({ releaseSchedule: 'none' })
+  assert.ok(fixed > shipping * 1.4,
+    `FIXED must be visibly slower than the calibrated pair; ${shipping.toFixed(4)} vs ${fixed.toFixed(4)} s`)
+})
