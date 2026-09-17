@@ -91,10 +91,11 @@ const CHOICES = [
       },
       {
         id: 'fetish', label: 'FETish',
-        title: '6.37 ms – 159 µs, fitted together with the DEPTH attack schedule. '
-          + '⚠ USE BOTH OR NEITHER: with the schedule it reproduces the reference to '
-          + '1.15 % across 6–22 dB; this ladder alone is 41 % out and the schedule alone '
-          + 'is 36 %, against 88 % for the shipping datasheet ladder',
+        title: '6.37 ms – 159 µs, fitted together with the DEPTH schedule — the pair '
+          + 'reproduces the reference to 1.15 % across 6–22 dB, either half alone ~36 %. '
+          + '⚠ BUT IT FLATTENS THE KNOB: at 12 dB the overshoot spans 1.5 dB across all '
+          + 'seven dials against 9.7 for the datasheet ladder, so the control stops '
+          + 'discriminating. Accurate, and barely playable',
       },
     ],
   },
@@ -111,8 +112,9 @@ const CHOICES = [
         id: 'depth', label: 'DEPTH',
         title: 'The attack constant shortens as the TARGET reduction deepens — FETish '
           + 'attacks 5× faster at 22 dB than at 6 (−0.0926/dB), the mirror of its release, '
-          + 'which lengthens. Pair it with the FETish ladder; either alone is far worse '
-          + 'than both',
+          + 'which lengthens. ⚠ ON THE DATASHEET LADDER THIS IS A VOICING, NOT A '
+          + 'REPRODUCTION: 36 % off the reference’s absolute times, but it keeps 8.3 dB of '
+          + 'the knob’s 9.7 dB range where the FETish ladder leaves 1.5',
       },
     ],
   },

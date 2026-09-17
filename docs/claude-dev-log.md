@@ -3028,6 +3028,43 @@ release 80 % wrong and is for hearing what the schedule DOES, not for matching
 anything. A test pins the asymmetry, including why the attack's FIXED is fine
 where the release's is not.
 
+### ⚗⚗ THE FETish ATTACK LADDER FLATTENS THE KNOB, WHICH NO FIDELITY NUMBER SHOWED
+
+Owner's ears after the A/B: the depth schedule is clearly preferred, the slow
+FETish constants less so. Measured, that instinct is right for a reason none of
+the fit statistics surfaced.
+
+At 12 dB of reduction, how much transient escapes across the seven dials:
+
+| | overshoot span | t63 range |
+|---|---|---|
+| datasheet, no schedule (ships) | **9.7 dB** | 1438 → 63 µs |
+| datasheet + DEPTH schedule | **8.3 dB** | 2188 → 63 µs |
+| FETish ladder + DEPTH schedule | **1.5 dB** | 15813 → 438 µs |
+
+**The FETish ladder is accurate and barely playable.** Every position is slow
+enough that overshoot sits near its ceiling, so the knob stops discriminating —
+10.99 / 11.30 / 11.43 / 11.40 / 11.19 / 10.79 / 9.98 dB from dial 1 to 7. The
+whole ladder maps onto datasheet 1-3 and beyond.
+
+⚠ **NO FIT STATISTIC WOULD EVER HAVE SHOWN THIS.** The pair reproduces the
+reference to 1.15 % rms across depth, which is the best number in this whole
+retune — and it is the configuration in which the control does least. Fidelity
+was measured at four depths on ONE dial position; the dial's usable RANGE was
+never a quantity anything looked at.
+
+**So there are three coherent attack configurations, not two:**
+
+1. `datasheet` + `FIXED` — ships. The 1176's published span, complete.
+2. `datasheet` + `DEPTH` — **a voicing, not a reproduction.** 36 % off the
+   reference's absolute times, but it carries the depth behaviour on a ladder
+   that keeps 8.3 dB of the knob's 9.7 dB range.
+3. `fetish` + `DEPTH` — the reproduction, at 1.15 %, with a 1.5 dB knob.
+
+The panel says which is which now, rather than presenting 3 as simply the better
+one. Precedent: the Tube Saturation curve shipped on a listening decision against
+a measured alternative, and is documented as such.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
