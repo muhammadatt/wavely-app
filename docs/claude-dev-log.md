@@ -2714,6 +2714,61 @@ constants, not parameters: `IN_DRIVE_SPAN_DB`, the release endpoints and
 `TAIL_FRACTION`. Bit-exact reproduction of pre-fit renders was already gone
 before this patch was extended.
 
+### ⚗⚗⚗ FETish'S STATIC CURVE — 16 captures, and three findings our model cannot express
+
+`stairs.wav`, four ratio buttons × four Input positions, rms 0.002–0.004 dB per
+fit. Two of the three verdicts needed a control before they could be believed;
+one of them was a bug in the tool.
+
+**1. The threshold is FIXED across the ratio button.** −15.29 / −22.09 / −33.68 /
+−40.28 dB at I1–I4, identical to 0.00 dB across all four ratios at every
+position. FETish's manual says the threshold moves with ratio. It does not. Our
+model already holds it fixed, so nothing changes — but this was the question the
+ratio sweep was added for, and it is now answered rather than assumed.
+
+**2. The knee does NOT vary with the ratio button, and ours does.** FETish reads
+5.85 / 5.85 / 5.84 / 5.84 dB across ratios 12 / 20 / 4 / 8 at I1 — one knee for
+every button. `RATIO_KNEE_DB` is `{4: 10, 8: 8, 12: 6, 20: 3}`, a different knee
+per button, which has no support in this data.
+
+**3. ⚠ BUT THE KNEE WIDENS WITH DRIVE, 5.85 → 10.86 dB across I1–I4.** This is
+the finding our topology cannot express at all: `RATIO_KNEE_DB` is a constant per
+button, and here the knee is a function of the Input.
+
+⚠ **AND IT IS REAL, WHICH TOOK A CONTROL TO ESTABLISH.** The obvious suspicion is
+the instrument: the attack-lag bias grows with reduction depth, so a deeper
+capture might just *read* as a wider knee. Our own kernel's knee is nailed to
+10 dB by construction; run across the same four drive offsets and fitted the same
+way it reads **10.95 / 11.13 / 11.09 / 10.91 — a 0.22 dB spread.** The instrument
+does not manufacture knee growth, so FETish's 5.01 dB is FETish's. A test pins
+that control, because without it the verdict is an opinion.
+
+**4. ⚠⚠ AND THE COLLAPSE VERDICT HAD THE RATIO BUG IN IT — THE SAME ONE THE FIT
+WAS REPARAMETERISED TO AVOID.** It tested the spread of `fit.ratio` across the
+sweep. FETish's ratio-20 sweep spread 0.71 in ratio and was reported as the shape
+moving with Input; in SLOPE the same four captures spread **0.0018**, which is
+nothing. `1/(1-slope)` amplifies, so a threshold stated in ratio is meaningless at
+the top of the range. Fixed, and slope and knee are now reported as the separate
+claims they are: **the slope collapses** (drive and level add in dB above the
+knee, as we model) while **the knee does not**.
+
+**5. The slope is lower than ours at every button, bias-cancelled.** Reference
+minus ours, same button, same analysis: −0.0247 at ratio 4, −0.0375 at 8, −0.0311
+at 12, −0.0269 at 20. FETish compresses *less* than our implementation at the
+same marking, and consistently. Taking our own true slopes as the anchor, that
+puts FETish's real ratios near **3.6 / 6.1 / 8.8 / 13.2** against its nominal
+4 / 8 / 12 / 20 — lower than the button says, and increasingly so as the button
+climbs.
+
+⚠ That last conversion leans on the absolute bias being ~3 %, which is a
+self-test number and not a measurement of FETish. The −0.024 to −0.038 slope
+differences are the solid part; the implied ratios are the readable version of
+them, not an independent result.
+
+**Still unmeasured:** all-buttons, which FETish does not have. `ALL_KNEE_DB`,
+`ALL_THRESHOLD_DROP_DB` and the soft `ALL_RATIO_*` law have no captures behind
+them from either reference and CLA-76 is the only one that can supply them.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

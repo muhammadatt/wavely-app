@@ -94,3 +94,30 @@ test('the filename carries the ratio button and the Input position', () => {
   assert.deepEqual(knobsFromName('cla76_stairs_rall_I2.wav'), { ratio: 'all', input: 2 })
   assert.equal(knobsFromName('fetish_stairs.wav').unparsed, true)
 })
+
+/**
+ * ⚠ THE CONTROL FOR THE COLLAPSE VERDICT, AND WITHOUT IT THAT VERDICT IS AN
+ * OPINION. The fitter reported FETish's knee widening 5.01 dB across its four
+ * Input positions and called it a property of the reference. That is only worth
+ * saying if the instrument reads a KNOWN-fixed knee as fixed across the same
+ * span — our own kernel's knee is nailed to RATIO_KNEE_DB by construction, so
+ * this is the thing that licenses the claim.
+ */
+test('a knee that is fixed by construction reads as fixed across the Input range', () => {
+  const knees = [30, 44.5, 71.5, 88].map(inputDrive => fitFor('4', inputDrive).kneeDb)
+  const spread = Math.max(...knees) - Math.min(...knees)
+  assert.ok(spread < 0.5,
+    `our fixed knee wobbled ${spread.toFixed(2)} dB across a 25 dB drive span: ` +
+    `${knees.map(k => k.toFixed(2)).join(' / ')} — the collapse verdict cannot be trusted`)
+})
+
+/**
+ * ⚠ AND THE SLOPE MUST COLLAPSE, which is the additive model itself: above the
+ * knee, drive and level add in dB, so a drive change moves the curve sideways
+ * and does not tilt it.
+ */
+test('slope is invariant under Input, which is the additive model', () => {
+  const slopes = [30, 44.5, 71.5, 88].map(inputDrive => fitFor('4', inputDrive).slope)
+  const spread = Math.max(...slopes) - Math.min(...slopes)
+  assert.ok(spread < 0.01, `slope moved ${spread.toFixed(4)} across the drive span`)
+})

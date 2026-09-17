@@ -217,16 +217,42 @@ function report(rows, sampleRate, plan, stim) {
      * ratio or the knee moves across the sweep, the Input knob is doing
      * something more than adding dB and no single shift will ever collapse them.
      */
-    const ratios = group.map(r => r.fit.ratio)
+    /**
+     * ⚠ ON SLOPE, NOT RATIO — THIS TESTED RATIO AND THAT WAS THE SAME BUG THE
+     * FIT ITSELF WAS REPARAMETERISED TO AVOID. A FETish ratio-20 sweep spread
+     * 0.71 in "ratio" and was reported as a shape change; in slope it is 0.0018,
+     * which is nothing. `1/(1-slope)` amplifies, so any threshold stated in
+     * ratio is meaningless at the top of the range.
+     *
+     * ⚠ AND SLOPE AND KNEE ARE REPORTED SEPARATELY BECAUSE THEY SAY DIFFERENT
+     * THINGS. Slope collapsing means drive and level add in dB for the part of
+     * the law above the knee, which is the additive model. The knee is a
+     * different claim and can fail on its own — on FETish it does.
+     */
+    const slopes = group.map(r => r.fit.slope)
     const knees = group.map(r => r.fit.kneeDb)
-    const dR = Math.max(...ratios) - Math.min(...ratios)
+    const dS = Math.max(...slopes) - Math.min(...slopes)
     const dK = Math.max(...knees) - Math.min(...knees)
-    console.log(`    shape across the sweep: ratio spread ${dR.toFixed(2)}, knee spread ${dK.toFixed(2)} dB`)
-    console.log(dR < 0.5 && dK < 1.5
-      ? '    → THE CURVES COLLAPSE. Drive and level add in dB, as we model, and the\n' +
-        '      shifts above are the taper.'
-      : '    → ⚠ THEY DO NOT COLLAPSE. The shape moves with Input, so the knob is not\n' +
-        '      a simple dB offset into the detector and the shifts are not a taper.')
+    console.log(`    slope spread ${dS.toFixed(4)} (ratio ${ratioForSlope(Math.min(...slopes)).toFixed(1)}` +
+      `-${ratioForSlope(Math.max(...slopes)).toFixed(1)}), knee spread ${dK.toFixed(2)} dB`)
+    console.log(dS < 0.01
+      ? '    → THE SLOPE COLLAPSES. Above the knee, drive and level add in dB as we\n' +
+        '      model, and the shifts above are the taper.'
+      : '    → ⚠ THE SLOPE MOVES WITH INPUT. The knob is not a simple dB offset into\n' +
+        '      the detector and the shifts are not a taper.')
+    /**
+     * ⚠ 0.5 dB, AND THE NUMBER IS A MEASUREMENT RATHER THAN A GUESS. Our own
+     * kernel has a knee fixed by construction at 10 dB; run across these same
+     * four drive offsets and fitted the same way it reads 10.95 / 11.13 / 11.09
+     * / 10.91, a 0.22 dB spread. So anything past about half a dB is the
+     * reference's knee moving, not this instrument wobbling.
+     */
+    console.log(dK < 0.5
+      ? '    → AND THE KNEE HOLDS, as ours does.'
+      : `    → ⚠ BUT THE KNEE WIDENS WITH DRIVE, by ${dK.toFixed(2)} dB. Ours is fixed per\n` +
+        '      ratio button and reads flat to 0.22 dB under this same test, so this is\n' +
+        '      the reference and not the instrument. Our RATIO_KNEE_DB cannot express\n' +
+        '      it: the knee would have to be a function of drive.')
   }
 }
 
