@@ -97,6 +97,23 @@ const CHOICES = [
       },
     ],
   },
+  {
+    key: 'releaseSchedule', label: 'Release',
+    options: [
+      {
+        id: 'depth', label: 'DEPTH',
+        title: 'The release constant scales with the current reduction — the limb FETish '
+          + 'measurably has: 30 / 70 / 93 / 139 ms at 6.2 / 14.0 / 17.5 / 21.9 dB on one '
+          + 'release setting. Ships',
+      },
+      {
+        id: 'none', label: 'FIXED',
+        title: 'One constant per knob position whatever the reduction, as before the fit. '
+          + 'Note the release ENDPOINTS do not change with this — they are fitted to FETish '
+          + 'and ship either way',
+      },
+    ],
+  },
 ]
 
 /**
@@ -210,7 +227,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span class="ml-auto font-mono text-[9px] text-white/30">
-          {{ vals.fetCurve }} / {{ vals.fetPosition }} / {{ vals.attackRange }}
+          {{ vals.fetCurve }} / {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.releaseSchedule }}
         </span>
       </div>
     </div>

@@ -2879,6 +2879,32 @@ FETish is what the reference does; release moved 2.73x in the OTHER direction so
 the two are not one common cause. No measurement settles it, which is exactly why
 it is a rocker on the bench and not a constant in a script.
 
+### ⚠ THE BENCH'S LEGACY BUTTON WAS DROPPING A KEY AND REPORTING SUCCESS
+
+Asked whether the attack A/B also switches the release, and checking rather than
+answering from the code's intent turned up a defect one commit old.
+
+`attackRange` touches only `attackSecondsForDial` — **both rocker positions run
+the FETish release**, endpoints and schedule alike, which is what the A/B wants:
+one variable moving. That part was right.
+
+But `FET_LEGACY_PATCH` had gained `releaseSchedule: 'none'` when the depth
+schedule shipped, and `setFET1176Tuning` only accepts keys present in
+`FET1176_TUNING_DEFAULTS`. So the bench's LEGACY control restored the curve and
+the shaper position, **silently left the depth schedule running**, and
+`isFET1176TuningLegacy()` returned `true` regardless — a button claiming to
+reproduce the pre-capture kernel while reproducing two thirds of it.
+
+`releaseSchedule` is a bench key now, with its own rocker (DEPTH / FIXED), and a
+test pins the coupling directly: every key in `FET_LEGACY_PATCH` must be one the
+bench can actually set, and applying LEGACY must emit all of them. Adding a key
+to the patch without adding it to the bench now fails loudly.
+
+⚠ NOTE WHAT THE RELEASE ROCKER DOES *NOT* DO. It switches the SCHEDULE only. The
+release endpoints (0.7288 / 0.03318 s) are fitted to FETish and ship either way —
+they are constants, not parameters, so there is no way to A/B them from here and
+the panel says so.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

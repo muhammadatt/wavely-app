@@ -236,3 +236,27 @@ test('an unrecognised attack range falls back to the datasheet', () => {
   assert.equal(attackSecondsForDial(4, 'nonsense'), attackSecondsForDial(4))
   assert.equal(attackSecondsForDial(4, undefined), attackSecondsForDial(4))
 })
+
+/**
+ * ⚠ THE BENCH'S LEGACY BUTTON SILENTLY DROPPED A KEY, AND CLAIMED SUCCESS. The
+ * store only accepts keys present in its own defaults, so when `releaseSchedule`
+ * was added to `FET_LEGACY_PATCH` the bench restored the curve and the position,
+ * left the depth schedule running, and `isFET1176TuningLegacy()` returned true
+ * regardless — a control reporting it had reproduced the pre-capture kernel
+ * while reproducing two thirds of it. This pins the coupling: every key in the
+ * legacy patch must be one the bench can actually set.
+ */
+test('the bench can set every key the legacy patch carries', async () => {
+  const t = await import('../../src/audio/effects/fet1176Tuning.js')
+  for (const key of Object.keys(FET_LEGACY_PATCH)) {
+    assert.ok(key in t.FET1176_TUNING_DEFAULTS,
+      `FET_LEGACY_PATCH carries '${key}' but the bench has no default for it, so it is dropped`)
+  }
+  t.setFET1176Tuning(t.FET1176_LEGACY_TUNING)
+  const sent = t.fet1176TuningOverrides()
+  for (const [key, value] of Object.entries(FET_LEGACY_PATCH)) {
+    assert.equal(sent[key], value, `LEGACY did not send ${key}`)
+  }
+  t.resetFET1176Tuning()
+  assert.deepEqual(t.fet1176TuningOverrides(), {}, 'and reset must emit nothing at all')
+})

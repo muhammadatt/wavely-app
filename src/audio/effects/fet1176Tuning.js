@@ -54,6 +54,20 @@ export const FET1176_TUNING_DEFAULTS = Object.freeze({
    * and not in a script.
    */
   attackRange: FET1176_KERNEL_DEFAULTS.attackRange,
+  /**
+   * 'depth' — the release constant scales with the current reduction, which is
+   *           the limb FETish measurably has. SHIPS.
+   * 'none'  — one constant per knob position, as before the fit.
+   *
+   * ⚠ IT IS HERE BECAUSE `FET_LEGACY_PATCH` CARRIES IT AND THE BENCH WAS SILENTLY
+   * DROPPING IT. `setFET1176Tuning` only accepts keys present in these defaults,
+   * so LEGACY restored the curve and the position, left the depth schedule
+   * running, and `isFET1176TuningLegacy()` returned true anyway — a button
+   * claiming to reproduce the pre-capture kernel while reproducing two thirds of
+   * it. Any key added to the legacy patch has to be added here too, which is the
+   * coupling a test now pins.
+   */
+  releaseSchedule: FET1176_KERNEL_DEFAULTS.releaseSchedule,
 })
 
 /**
@@ -70,6 +84,7 @@ const KEYS = Object.keys(FET1176_TUNING_DEFAULTS)
 const CURVES = new Set(['poly', 'tanh'])
 const POSITIONS = new Set(['preInput', 'preCell', 'postCell'])
 const ATTACK_RANGES = new Set(['datasheet', 'fetish'])
+const SCHEDULES = new Set(['depth', 'none'])
 
 let tuning = { ...FET1176_TUNING_DEFAULTS }
 const listeners = new Set()
@@ -115,6 +130,7 @@ export function setFET1176Tuning(patch) {
     if (k === 'fetCurve' && !CURVES.has(v)) continue
     if (k === 'fetPosition' && !POSITIONS.has(v)) continue
     if (k === 'attackRange' && !ATTACK_RANGES.has(v)) continue
+    if (k === 'releaseSchedule' && !SCHEDULES.has(v)) continue
     if (tuning[k] !== v) { tuning[k] = v; changed = true }
   }
   if (changed) for (const fn of listeners) fn()
