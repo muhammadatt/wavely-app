@@ -92,8 +92,9 @@ const CHOICES = [
       {
         id: 'fetish', label: 'FETish',
         title: '7.63 ms – 170 µs, solved so our dials reproduce FETish’s own measured attack '
-          + 'times: dial 1 hits its 11313 µs and dial 5 its 938 µs exactly, and dial 3 — '
-          + 'which was not fitted — lands within 3.7 %. About 5× slower than the datasheet',
+          + 'times AT ~16 dB OF REDUCTION. Its attack shortens 5× with depth (−0.085/dB) '
+          + 'and ours does not, so this ladder is 2.8× too fast at 6 dB and 0.53× too slow '
+          + 'at 22 dB. A/B it at moderate reduction',
       },
     ],
   },

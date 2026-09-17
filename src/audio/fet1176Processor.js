@@ -193,8 +193,24 @@ const ATTACK_FASTEST_S = 0.00002
  * — after the release endpoints and the depth-schedule slope — and the third
  * time the number the measurement printed was not the number to install.
  *
- * ⚠ THE FAST ENDPOINT IS AN EXTRAPOLATION AND THE MEASUREMENT COULD NOT REACH
- * IT. FETish's 20 us capture read 188 us of t63, which is 1.5 half-periods of the
+ * ⚠⚠ AND THE LADDER IS A SINGLE-DEPTH SNAPSHOT OF SOMETHING THAT IS NOT ONE
+ * CONSTANT. FETish's attack SHORTENS with reduction depth, measured at one
+ * setting with only the Input moving: 5438 / 2188 / 1563 / 1063 us of t63 at
+ * 6.2 / 14.0 / 17.5 / 21.9 dB — a factor of 5.12. Fitted, `t63 = 10018 *
+ * exp(-0.1047 * D)` at R2 0.995; our own kernel over the same span contributes
+ * only -0.0194/dB, so the reference's own law is about **-0.085 per dB**.
+ *
+ * Its RELEASE schedule fitted at **+0.1389 per dB** — opposite sign, similar
+ * size. Both limbs are program-dependent on depth: it grabs faster and lets go
+ * slower the harder it is working.
+ *
+ * These endpoints were solved at ~15.9 dB and are only right there. Against that
+ * law the ladder is **2.82x too fast at 6 dB and 0.53x too slow at 22 dB**. It is
+ * an honest A/B of the reference's attack AT ONE DEPTH, and expressing the rest
+ * needs an attack schedule of the kind `releaseSchedule` already provides.
+ *
+ * ⚠ THE FAST ENDPOINT IS ALSO AN EXTRAPOLATION AND THE MEASUREMENT COULD NOT
+ * REACH IT. FETish's 20 us capture read 188 us of t63, which is 1.5 half-periods of the
  * 4 kHz probe — the measurement floor, not its behaviour. Resolving it needs a
  * faster probe; 10 kHz would give a 50 us half-period.
  *

@@ -2905,6 +2905,45 @@ release endpoints (0.7288 / 0.03318 s) are fitted to FETish and ship either way 
 they are constants, not parameters, so there is no way to A/B them from here and
 the panel says so.
 
+### ⚗⚗ FETish'S ATTACK IS DEPTH-SCHEDULED TOO — and in the opposite direction
+
+Asked whether FETish's attack times are consistent across Input, which they are
+not, and the answer undercuts the ladder shipped to the bench one commit earlier.
+
+One attack setting, Input the only thing moving:
+
+| reduction | attack t63 |
+|---|---|
+| 6.18 dB | 5438 µs |
+| 13.96 dB | 2188 µs |
+| 17.51 dB | 1563 µs |
+| 21.86 dB | 1063 µs |
+
+**A factor of 5.12.** Fitted, `t63 = 10018 · exp(−0.1047 · D)` at R² 0.995.
+
+**The control**, which is what makes it a property of the reference rather than
+of the instrument: our own kernel, attack dial fixed, over the same span reads
+1563 → 1188 µs on the datasheet ladder and 12563 → 10563 on the FETish one —
+`exp(−0.0194 · D)`. So the measurement contributes about −0.02/dB and **the
+reference's own law is about −0.085 per dB.**
+
+⚠ **ITS RELEASE SCHEDULE FITTED AT +0.1389 PER dB. OPPOSITE SIGN, SIMILAR SIZE.**
+Both limbs are program-dependent on depth: FETish grabs faster and lets go slower
+the harder it is working. That is a coherent detector, and it is a second place
+where a single constant is the wrong shape.
+
+⚠⚠ **SO THE `attackRange: 'fetish'` LADDER IS A SINGLE-DEPTH SNAPSHOT.** Its
+endpoints were solved at ~15.9 dB, where they reproduce the reference exactly.
+Against the law above it is **2.82× too fast at 6 dB and 0.53× too slow at
+22 dB**. It is an honest A/B of the reference's attack at moderate reduction and
+nothing more; the panel and the constants now say so rather than leaving it to be
+found by ear. Expressing the rest needs an attack schedule of the kind
+`releaseSchedule` already provides.
+
+⚠ AND THIS IS WHY THE "SURPRISINGLY LONG" TIMES LOOK THE WAY THEY DO. 7.63 ms at
+dial 1 is the ~16 dB calibration. At 22 dB the same setting behaves about half
+that, and at 6 dB nearly three times it.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
