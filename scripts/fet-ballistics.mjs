@@ -1367,11 +1367,26 @@ CAPTURE MATRIX — the stimulus files above do not change across it, only knobs 
                   matched depth and a matched total on-time. A reference flat on
                   bursts.wav has only been shown not to key on exposure.
 
-  stairs.wav      attack 1, release 7        (see the plan note — a fast attack
-                  = FETish 800 us / 50 ms      leaves nothing settled to read)
-                  ratio  4 / 8 / 12 / 20 / all
-                  Input  20 / 40 / 60 / 80
-                  = 20 bounces per reference.
+  stairs.wav      attack 1, release 7        (a fast attack leaves nothing
+                  = FETish 800 us / 50 ms      settled to read — see below)
+                  ratio  4 / 8 / 12 / 20 / all   (FETish has no all-buttons:
+                                                 16 bounces, not 20)
+                  Input  I1 / I2 / I3 / I4
+                  = 20 bounces on CLA-76, 16 on FETish.
+
+    ⚠ I1-I4 ARE NOT KNOB PERCENTAGES AND THIS LINE USED TO SAY 20/40/60/80,
+      which contradicted the protocol doc and is not portable between two
+      plugins with different scales. Set them by the GAIN REDUCTION they produce
+      on the -12 dBFS step, read off the plugin's own meter: I1 ~2 dB, I2 ~6,
+      I3 ~12, I4 ~18. Write the knob readout down for each — the shift that
+      collapses the four static curves onto one IS the taper, and the readouts
+      are what it gets expressed in.
+
+    ⚠ ATTACK AT ITS SLOWEST IS LOAD-BEARING HERE. The detector is a bare
+      full-wave rectifier with no smoothing, so at a fast attack the gain tracks
+      |sin| WITHIN the cycle and there is no settled value to read at all. On
+      FETish this is now known to be even safer than it looked: its 800 us
+      setting behaves like ~4.1 ms measured, 5.1x its label.
 
   bursts.wav      ratio 4, Input 50
                   attack 1..7 at release 4   = 7 bounces (FETish: the 7 attack
