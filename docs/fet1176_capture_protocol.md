@@ -234,8 +234,18 @@ Set the knob to the exact time our own dial produces and compare directly, with
 
 | dial | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 |---|---|---|---|---|---|---|---|
-| attack | 800 µs | 433 | 234 | 126 | 68 | 37 | 20 |
-| release | 1100 ms | 657 | 393 | 235 | 140 | 84 | 50 |
+| our attack | 800 µs | 433 | 234 | 126 | 68 | 37 | 20 |
+| set FETish to | 800 µs | 433 | 234 | 126 | 68 | 37 | 20 |
+| **our release** | **402 ms** | **240** | **144** | **86** | **51** | **31** | **18** |
+| set FETish to | 1100 ms | 657 | 393 | 235 | 140 | 84 | 50 |
+
+⚠ **THE RELEASE ROWS USED TO BE THE SAME NUMBERS AND ARE NOT ANY MORE.** Our
+endpoints quoted the same datasheet FETish does, so they agreed by construction
+and that agreement was never evidence. Seven captures showed FETish's measured
+release running a constant 0.366 of its own label across a 22× range, with the
+step ratios agreeing to three decimals — the ladder was right, the endpoints were
+2.73× too slow. Fitted, FETish's label at dial N now reproduces our dial N to
+within 1.8 %. Attack is not yet fitted, so those rows still agree.
 
 ⚠ **BUT THE ENDPOINTS ARE NOT INDEPENDENT EVIDENCE.** FETish's advertised
 20–800 µs and 50–1100 ms are *identical* to our `ATTACK_FASTEST_S` /

@@ -150,8 +150,27 @@ export const IN_DRIVE_SPAN_DB_LEGACY = 40
 // interpolated geometrically, as the hardware's switched resistor ladder does.
 const ATTACK_SLOWEST_S = 0.0008
 const ATTACK_FASTEST_S = 0.00002
-const RELEASE_SLOWEST_S = 1.1
-const RELEASE_FASTEST_S = 0.05
+/**
+ * Release endpoints, FITTED TO FETish rather than quoted from the datasheet.
+ *
+ * ⚠ THE TAPER SHAPE WAS ALREADY RIGHT AND ONLY THESE TWO NUMBERS WERE WRONG.
+ * Seven captures varying only the release knob, at a depth matched to 0.44 dB,
+ * give measured t63 over the declared setting as a CONSTANT 0.366 across a 22x
+ * range of the knob — and the step ratios agree to three decimals (declared
+ * 1.7200 / 1.6906 / 1.6723 against measured 1.7222 / 1.6863 / 1.6860). So the
+ * geometric ladder `dialToSeconds` interpolates is the one FETish uses; the
+ * endpoints were 2.73x too slow at both ends.
+ *
+ * The old 1.1 s / 50 ms had no provenance beyond a datasheet both plugins quote,
+ * and agreement at the endpoints was never evidence of anything because our
+ * constants came from the same sheet. These are measurements.
+ *
+ * ⚠ EVERY SAVED RELEASE DIAL NOW MEANS SOMETHING 2.73x FASTER. That re-voices
+ * the factory presets along with the Input span change, deliberately and with
+ * the owner's agreement; they are to be re-cut together.
+ */
+const RELEASE_SLOWEST_S = 0.402
+const RELEASE_FASTEST_S = 0.0183
 
 // Program-dependent release: this share of the reduction recovers on a tail
 // this many times slower than the dial setting.

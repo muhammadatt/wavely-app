@@ -1295,17 +1295,28 @@ CAPTURE MATRIX — the stimulus files above do not change across it, only knobs 
               lands in the trace as gain that is not gain.
 
   ⚠ KNOBS BELOW ARE DIALS 1-7, WHICH ONLY CLA-76 HAS. FETish's attack and
-    release are continuous and printed in us / ms, so set it to the exact time
-    our dial produces and compare with no interpolation assumption on either
-    side. Attack 1 is the SLOWEST and 7 the fastest, as on the hardware:
+    release are continuous and printed in us / ms. Attack 1 is the SLOWEST and 7
+    the fastest, as on the hardware. Set FETish to the value in its own row:
 
-      dial        1      2      3      4      5      6      7
-      attack   800us  433us  234us  126us   68us   37us   20us
-      release  1100ms  657ms  393ms  235ms  140ms   84ms   50ms
+      dial             1      2      3      4      5      6      7
+      our attack    800us  433us  234us  126us   68us   37us   20us
+      set FETish    800us  433us  234us  126us   68us   37us   20us
 
-    Agreement at the ENDPOINTS confirms nothing — 20-800 us and 50-1100 ms are
-    our own constants too, because both quote the same datasheet. The taper
-    between them is what these captures settle.
+      our release   402ms  240ms  144ms   86ms   51ms   31ms   18ms
+      set FETish   1100ms  657ms  393ms  235ms  140ms   84ms   50ms
+
+    ⚠ THE RELEASE ROWS NO LONGER MATCH AND THAT IS THE POINT. They used to be
+    the same numbers, because our endpoints quoted the same datasheet FETish
+    does. Seven captures then showed FETish's measured release running a constant
+    0.366 of its own label across a 22x range, with the step ratios agreeing to
+    three decimals — so the ladder was right and the endpoints were 2.73x too
+    slow. They are now fitted, and FETish's label at dial N reproduces OUR dial N
+    to within 1.8 %.
+
+    The attack rows still match because attack is NOT yet fitted. On the same
+    evidence it is out by ~5.1x, but following that would leave the 1176's
+    published 20-800 us behind, which is a product decision and not a
+    measurement one.
 
   transients.wav  ratio 4, Input 50, attack 4, release 4
                   = FETish attack 126 us, release 235 ms.
