@@ -38,7 +38,7 @@
  *   node scripts/fet-stairs.mjs              fit whatever stairs captures are present
  */
 import { existsSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { PLANS, analyseCapture, runKernel, CAP_DIR } from './fet-ballistics.mjs'
 import { buildProbe } from './lib/probeStimulus.js'
 import { inputDriveDbForKnob } from '../src/audio/fet1176Processor.js'
@@ -379,10 +379,20 @@ function fit(sampleRate, dir) {
   console.log('    anything. See the header of this file.\n')
 }
 
-const args = process.argv.slice(2)
-const rateArg = args.indexOf('--rate')
-const sr = rateArg >= 0 && args[rateArg + 1] ? Number(args[rateArg + 1]) : DEFAULT_SR
-const dirArg = args.indexOf('--dir')
-const dir = dirArg >= 0 && args[dirArg + 1] ? args[dirArg + 1] : CAP_DIR
-if (args.includes('--selftest')) selftest(sr)
-else fit(sr, dir)
+/**
+ * ⚠ THE ENTRY POINT IS GUARDED, AND IT WAS NOT. This module exports `fitStatic`,
+ * `stairCurve` and `ourFit`, which `fetStairs.test.js` and
+ * `fet-static-fit.mjs` both import — and without the guard the import ALSO ran
+ * the capture scan, so pulling in a pure function printed a "No stairs captures"
+ * banner and walked a directory. Same guard, for the same reason, as
+ * `fet-attack-depth.mjs`.
+ */
+if (basename(process.argv[1] ?? '') === 'fet-stairs.mjs') {
+  const args = process.argv.slice(2)
+  const rateArg = args.indexOf('--rate')
+  const sr = rateArg >= 0 && args[rateArg + 1] ? Number(args[rateArg + 1]) : DEFAULT_SR
+  const dirArg = args.indexOf('--dir')
+  const dir = dirArg >= 0 && args[dirArg + 1] ? args[dirArg + 1] : CAP_DIR
+  if (args.includes('--selftest')) selftest(sr)
+  else fit(sr, dir)
+}

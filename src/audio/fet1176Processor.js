@@ -379,32 +379,32 @@ const KNEE_AT_REF_DB = 5.85
 /**
  * The drive the knee is quoted at, and the dB of knee per dB of drive above it.
  *
- * ⚠⚠ PROVISIONAL — FITTED ON THE TWO RECORDED ENDPOINTS ONLY (5.85 dB at I1,
- * 10.86 at I4, 24.99 dB apart -> 0.2005). The per-capture table was printed and
- * summarised but not kept, so the two interior points are not in hand and the
- * law's SHAPE is unverified: these endpoints are equally consistent with a
- * curve. Refit by simulate-and-match against all four when the table returns —
- * and by matching, not by installing what the fit prints, because a fitted knee
- * reads ~1 dB wide (the control above) and this is the fifth constant in this
- * re-tune where the measured number is not the number to install.
+ * FITTED BY SIMULATE-AND-MATCH against all four Input positions —
+ * `scripts/fet-static-fit.mjs`, targets in `data/fet1176/fetish_stairs_fits.json`.
  *
- * ⚠ THE REFERENCE IS OUR OWN NOMINAL DRIVE, NOT FETish'S I1, and deliberately:
- * FETish's Input readouts do not transfer, so anchoring on one would bake a
- * knob-scale guess into the law. The captures give the RELATIVE offsets
- * (0 / 6.80 / 18.39 / 24.99 dB, from the fitted effective thresholds). The refit
- * searches the pair and lets the anchor fall where it must.
+ * ⚠ THE LAW IS LINEAR, AND THE CAPTURES SAY SO RATHER THAN THE FIT ASSUMING IT.
+ * FETish's knee against its own drive: 5.85 at +0.00, 7.21 at +6.80, 9.53 at
+ * +18.40, 10.86 at +25.00 — segment slopes 0.2000 / 0.2000 / 0.2015. Straight to
+ * three-quarters of a percent over 25 dB.
  *
- * ⚠⚠ AND "PER dB OF DRIVE" IS AMBIGUOUS BY 24 %, WHICH IS THE WHOLE REASON THE
- * REFIT MUST MATCH RATHER THAN DIVIDE. FETish spends 24.99 dB of ITS drive going
- * from I1 to I4; our kernel reaches the same 2 -> 18 dB of reduction in 20.07,
- * because its slope is lower than ours at every button (Finding 5) and it
- * therefore needs more drive for the same work. 5.01 dB of knee growth over
- * FETish's span is 0.2005 per dB; over ours at MATCHED REDUCTION it is 0.2496.
- * The two axes are not even proportional in between — our offsets run
- * 0 / 5.24 / 12.52 / 20.07 against its 0 / 6.80 / 18.39 / 24.99 — so no single
- * scale factor converts one to the other and the interior points decide it.
- * 0.2005 is installed as the conservative end of that range, and it is a
- * PLACEHOLDER: the four-point simulate-and-match replaces it.
+ * ⚠ AND 0.2004 IS NOT THE NUMBER TO INSTALL, because the instrument's knee bias
+ * is WIDTH-DEPENDENT: measured on our own kernel, a true knee of 4 / 6 / 8 / 10 /
+ * 12 dB reads back 5.92 / 7.90 / 9.53 / 11.11 / 12.76 — a bias of +1.92 shrinking
+ * to +0.76. It therefore COMPRESSES the range, so reproducing a fitted growth of
+ * 5.01 dB takes a true growth near 5.8. Installing what the fit printed would
+ * have under-delivered the law by about 16 %. Fifth constant in this re-tune
+ * where that is true.
+ *
+ * ⚠⚠ AN EARLIER VERSION OF THIS NOTE CLAIMED THE SLOPE WAS AMBIGUOUS BY 24 %,
+ * AND THAT WAS MY ERROR, NOT THE DATA'S. It argued that FETish spends 24.99 dB
+ * of drive going I1 -> I4 where our kernel reaches the same REDUCTION in 20.07,
+ * so "per dB of drive" depended on which axis you meant. Wrong question: the
+ * knee is a width on the INPUT-LEVEL axis, and `effThresholdDb` — `threshold -
+ * drive` — is absolute, dBFS against the same stimulus, so both kernels report
+ * where the bend sits in the same units. Put in correspondence on that, the two
+ * drive axes coincide by construction. Reduction never enters it. FETish does
+ * need more drive for the same reduction, because its slope is lower; that is a
+ * fact about the slope and says nothing about where the bend is.
  */
 const KNEE_DRIVE_REF_DB = 0
 const KNEE_DRIVE_SLOPE = 0.2005
@@ -556,6 +556,8 @@ export const FET1176_KERNEL_DEFAULTS = {
    */
   kneeAtRefDb: null,
   kneeDriveSlope: null,
+  /** Continuous ratio, bypassing the button. Fit only — see `setParams`. */
+  ratioValue: null,
   /** dB⁻¹ slope of that schedule. Only read when releaseSchedule is 'depth'. */
   releaseDepthK: RELEASE_DEPTH_K,
   /**
@@ -829,7 +831,15 @@ export class FET1176Kernel {
       this.tailMult = ALL_TAIL_MULT
     } else {
       const ratioKey = RATIO_VALUES[p.ratio] ? p.ratio : '4'
-      this.ratio = RATIO_VALUES[ratioKey]
+      /**
+       * ⚠ `ratioValue` BYPASSES THE BUTTON, and exists for the static-curve fit.
+       * `ratio` is a four-position switch, so a search cannot move through it;
+       * this is the continuous quantity underneath, which is what gets fitted.
+       * Not a panel param and not a preset key — the buttons are the product.
+       */
+      this.ratio = Number.isFinite(p.ratioValue) && p.ratioValue > 1
+        ? p.ratioValue
+        : RATIO_VALUES[ratioKey]
       this.slope = 1 - 1 / this.ratio
       this.thresholdDb = THRESHOLD_DBFS
       this.tailFraction = TAIL_FRACTION
