@@ -3902,6 +3902,58 @@ it.
 
 ---
 
+### The shape extractor — and why `allRatioMin` was never fittable
+
+Built `fet-allbuttons-shape.mjs`: reads the all-buttons slope law off the fine
+captures WITHOUT assuming the `MIN + SPAN*over/(over+HALF)` form. It asks the
+question the fitter cannot: what shape does the data want?
+
+**How it works.** The staircase gives reduction against level; its local slope is
+the compression slope there, and the slope law is a function of overshoot — so
+four captures are four windows onto one curve, each shifted by its own drive.
+Slope is read by least-squares regression over a 5 dB window rather than by
+differencing adjacent steps, which multiplies capture noise by the step size.
+
+⚠ The x-axis origin is unrecoverable (drive and drop are degenerate), so
+everything is reported against a shifted axis with the first capture pinned at
+zero. The offsets BETWEEN captures are real; their common origin is not.
+
+**Validated by planting a law**: offsets recovered as 0.00 / 5.00 / 10.00 / 15.00
+against a true 0 / 5 / 10 / 15, and a collapse residual of **0.0000** — four
+windows onto one function land exactly on one curve.
+
+#### ⚠⚠ And it explains the non-identifiability, which no amount of fitting did
+
+`allRatioMin` is the slope as overshoot goes to **zero**. With a 16 dB knee,
+everything below +8 dB of overshoot is bend. The guard that keeps the bend out of
+a slope reading therefore removes **the entire region that determines the ratio
+floor** — the captures can only ever see the saturated end of the law. On the
+planted-law self-test the recovered span is 0.9488–0.9526 against a family
+spanning 0.7501–0.9500: only the top.
+
+⚠ **SO THE KNEE AND THE RATIO LAW ARE ENTANGLED, NOT INDEPENDENT UNKNOWNS.**
+Assuming a wide knee hides the evidence about the floor. CLA-76's coarse captures
+already say its knee is far narrower than our 16 — and a narrower knee uncovers
+more of the law. Fit the knee first and the rest comes into view; fit them
+together on the assumption of a wide knee and the floor is unreachable by
+construction.
+
+#### Two self-test failures, both mine
+
+⚠ **The offset sign.** The test expected 0 / −5 / −10 / −15 and got
+0 / +5 / +10 / +15. More drive puts the same overshoot at a LOWER level, so
+mapping a higher-drive capture onto the first shifts its axis UP. The extractor
+had it right the whole time; the expectation was backwards.
+
+⚠ **The knee leaked into the window.** The guard checked only the point, not its
+regression window, so with a 5 dB window and a 16 dB knee a point just above the
+guard still had half its window inside the bend — reporting slope 0.272 for a
+family whose floor is 0.750. The whole window must clear the guard, and the guard
+has to be set for the knee in question: ours reaches 8 dB above threshold, so the
+law is only clean above roughly 7 dB of reduction.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

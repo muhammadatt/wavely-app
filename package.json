@@ -48,6 +48,8 @@
     "fet:stairs": "node scripts/fet-stairs.mjs",
     "fet:static-fit": "node scripts/fet-static-fit.mjs",
     "fet:allbuttons": "node scripts/fet-allbuttons-fit.mjs",
+    "fet:allshape": "node scripts/fet-allbuttons-shape.mjs",
+    "fet:allshape:selftest": "node scripts/fet-allbuttons-shape.mjs --selftest",
     "fet:allbuttons:selftest": "node scripts/fet-allbuttons-fit.mjs --selftest",
     "fet:recut": "node scripts/fet-recut-presets.mjs",
     "fet:recut:selftest": "node scripts/fet-recut-presets.mjs --selftest",
