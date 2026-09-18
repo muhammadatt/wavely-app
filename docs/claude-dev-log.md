@@ -3791,6 +3791,78 @@ all-buttons.
 
 ---
 
+### The all-buttons tail, measured away — and an attack verdict that was an artefact
+
+CLA-76's one `bursts.wav` bounce at ratio all (attack 4, release 4, Input I3).
+The only capture of all-buttons ballistics that exists, since FETish has no such
+mode.
+
+#### ⚠⚠ `ALL_TAIL_FRACTION` 0.45 → 0. There is no tail.
+
+The observable that argued for one is there: release t63 lengthens with hold
+length, **77 / 82 / 105 / 124 ms** across the 0.05 / 0.2 / 1 / 3 s holds. That is
+what a two-stage release looks like.
+
+But reduction also deepens over those holds — 9.70 / 10.02 / 11.91 / 13.34 dB —
+and `RELEASE_DEPTH_K` says a deeper release is slower. Against the shortest:
+
+| hold | 0.2 s | 1 s | 3 s |
+|---|---|---|---|
+| observed | 1.065 | 1.364 | 1.610 |
+| depth schedule alone | 1.045 | 1.359 | 1.658 |
+
+Agreement at **every** hold, and **0.971× left over for a tail** end to end. A
+45 % share on a 6× stage would have shown as a large extra lengthening on top of
+the depth term; it is not there.
+
+⚠ One capture, one reference, and it leans on `RELEASE_DEPTH_K`, which was
+fitted to FETish at ratio 4 — so using it to explain CLA-76 at all-buttons
+assumes the same law applies. The agreement IS the evidence for that, but it is
+not independent of it, and no second reference can check it.
+
+⚠ **THE TAIL TEST ITSELF NEVER RAN.** All three shorter holds were excluded for
+"still settling" — correctly, since release t63 cannot be compared across
+different depths. The finding came from reading the exclusion's own cause
+instead: what looked like unsettled holds is the program dependence, and the two
+are the same observable.
+
+#### A caveat retired
+
+⚠ All-buttons was the one mode still carrying a tail, which made FET Punch's
+pre-roll **convergent but not bit-exact** — 5.46e-6 after 2 s, decaying and
+never reaching zero, unlike OptoSmooth. With the fraction at 0 the last state
+with memory longer than the pre-roll is gone and the render is **exactly** zero.
+`previewApplyConvergence.test.js` now asserts equality rather than a bound, so a
+tail coming back fails loudly.
+
+#### ⚠⚠ And the attack verdict was an artefact of the wrong statistic
+
+The report said CLA-76's all-buttons attack was **"OUTSIDE OUR RANGE — slower
+than dial 1"**, flagged as a finding about `ALL_ATTACK_LAG`. It was not.
+
+The matcher used **overshoot**, which SATURATES at the slow end of the dial —
+exactly where a slow reference sits. Measured on our own all-buttons kernel at a
+matched 13.4 dB: dials 1 / 2 / 3 give overshoot 12.99 / 12.74 / 12.21 dB, **0.78
+dB across two dials**, while attack t63 gives 3696 / 2063 / 1066 µs, a factor of
+**3.5** over the same span.
+
+On t63, CLA-76's 1938 µs sits between our dial 2 and dial 3 — comfortably inside
+the range, near dial 2, and no finding at all. The dev log had already recorded
+that overshoot saturates and t63 is the trustworthy attack estimator; the tool
+had not been told. It now matches on t63 and prints overshoot as the secondary
+reading it is.
+
+**`ALL_ATTACK_LAG` is unchanged** — nothing here says it is wrong.
+
+#### What the release comparison does say
+
+At the same dial our all-buttons release was far slower than CLA-76's: its
+dial 4 behaved like our 6.43. Most of that was the tail, now gone. Worth
+re-reading the capture against the current kernel before drawing anything from
+it.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

@@ -257,23 +257,30 @@ test('FET Punch converges on a pre-roll, now that the tail is gone', () => {
 })
 
 /**
- * ⚠ ALL-BUTTONS IS THE SLOW CASE BECAUSE IT IS THE ONE MODE THAT KEPT A TAIL.
- * `ALL_TAIL_FRACTION` is unmeasured — there is not one all-buttons capture of
- * either reference — so it was left alone rather than zeroed on no evidence.
- * The consequence is that FET Punch converges but is NOT bit-exact, unlike
- * OptoSmooth at `LA2A_PREROLL_S`: 5.46e-6 at 2 s and 1.04e-7 at 3 s, decaying
- * and never reaching zero. That is about -105 dBFS against the 3.61e-2 it
- * renders cold, so the lead-in is worth having; the claim is convergence, not
- * exactness, and this records which is which.
+ * ⚠⚠ ALL-BUTTONS IS BIT-EXACT NOW, AND IT WAS THE ONE THING STOPPING THE WHOLE
+ * PLUGIN CLAIMING EXACTNESS. This test used to assert the opposite — that the
+ * pre-roll CONVERGES but does not reach zero (5.46e-6 at 2 s, 1.04e-7 at 3 s) —
+ * because all-buttons was the only mode still carrying a release tail, held at
+ * 0.45 on the grounds that no all-buttons capture existed to zero it with.
+ *
+ * CLA-76's `bursts.wav` at ratio all supplied one, and it says there is no tail:
+ * the release lengthening across hold lengths is fully accounted for by the
+ * depth schedule, with 0.971x left over. With `ALL_TAIL_FRACTION` at 0 the only
+ * state with memory longer than the pre-roll is gone.
+ *
+ * ⚠ SO THE CAVEAT ON `FET1176_PREROLL_S` IS RETIRED, and if a tail ever comes
+ * back this fails rather than the claim quietly becoming false.
  */
-test('all-buttons converges more slowly, and is the reason exactness is not claimed', () => {
+test('all-buttons is bit-exact now that its tail is measured away', () => {
   const params = { inputDrive: 90, attack: 7, release: 7, fetDrive: 1, ratio: 'all' }
   const warm = worstDiff(processFET1176Buffer, params, Math.round(FET1176_PREROLL_S * SR))
-  assert.ok(warm < 1e-4, `should be inaudible; got ${warm.toExponential(2)}`)
-  assert.ok(warm > 0, 'and should NOT be bit-exact while all-buttons keeps its tail')
+  assert.equal(warm, 0,
+    `all-buttons should now converge exactly; got ${warm.toExponential(2)} — ` +
+    'has a tail come back, or another stage grown memory longer than the pre-roll?')
 
-  const longer = worstDiff(processFET1176Buffer, params, Math.round(3 * SR))
-  assert.ok(longer < warm, `a longer lead-in should still help: ${warm.toExponential(2)} -> ${longer.toExponential(2)}`)
+  // Cold must still be visibly wrong, or the fixture is not exercising anything.
+  const cold = worstDiff(processFET1176Buffer, params, 0)
+  assert.ok(cold > 1e-3, `no lead-in should be visibly wrong; got ${cold.toExponential(2)}`)
 })
 
 /**

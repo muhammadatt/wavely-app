@@ -337,18 +337,44 @@ const RELEASE_LUT_STEP_DB = 0.25
  * 50 % long against the reference — 27.7 ms against 18, 129.8 against 86, 603.8
  * against 407 — a uniform offset that was this stage and not the endpoints.
  *
- * ⚠ THE ALL-BUTTONS TAIL IS LEFT ALONE AND THAT IS DELIBERATE. There is not one
- * all-buttons capture of either reference, so zeroing it would be inventing a
- * measurement; all-buttons is also where the hardware's program dependence is
- * least disputed. The two modes therefore use different release topologies until
- * `bursts.wav` is bounced at ratio 'all'.
+ * ⚠ THE ALL-BUTTONS TAIL IS NOW ZERO TOO, AND THAT CHANGED WHEN THE CAPTURE
+ * ARRIVED. It was 0.45 on a 6x stage, held on the grounds that no all-buttons
+ * capture existed — see below.
  */
 const TAIL_FRACTION = 0
 const TAIL_MULT = 4
 
-// All-buttons-in holds far more of the reduction on the slow tail, which is
-// what makes it pump and breathe instead of releasing cleanly.
-const ALL_TAIL_FRACTION = 0.45
+/**
+ * ALL-BUTTONS-IN: NO TAIL EITHER, measured on CLA-76's one all-buttons
+ * `bursts.wav` bounce (ratio all, attack 4, release 4, Input I3).
+ *
+ * ⚠⚠ THE OBSERVABLE THAT USED TO ARGUE FOR A TAIL IS FULLY EXPLAINED BY THE
+ * DEPTH SCHEDULE. Release t63 does lengthen with hold — 77 / 82 / 105 / 124 ms
+ * across the 0.05 / 0.2 / 1 / 3 s holds — which is exactly what a tail looks
+ * like. But reduction deepens over those same holds (9.70 / 10.02 / 11.91 /
+ * 13.34 dB), and `RELEASE_DEPTH_K` says a deeper release is slower. Against the
+ * shortest hold:
+ *
+ *   hold          0.2 s    1 s     3 s
+ *   observed      1.065   1.364   1.610
+ *   depth alone   1.045   1.359   1.658
+ *
+ * Agreement at every hold, and **0.971x left over for a tail** end to end —
+ * which is nothing. A 45 % share on a 6x stage would have shown as a large
+ * extra lengthening on top of the depth term. It is not there.
+ *
+ * ⚠ ONE CAPTURE, ONE REFERENCE, AND IT LEANS ON A CONSTANT FITTED ELSEWHERE.
+ * `RELEASE_DEPTH_K` was fitted to FETish at ratio 4, so using it to explain
+ * CLA-76 at all-buttons assumes the same law applies — the agreement is itself
+ * the evidence for that, but it is not independent of it. FETish has no
+ * all-buttons mode, so a second reference cannot check this.
+ *
+ * ⚠ AND IT DOES NOT MAKE THE TWO MODES IDENTICAL. `ALL_TAIL_MULT` is now inert
+ * (a fraction of zero), kept so the topology is still expressible; all-buttons
+ * still differs by its threshold drop, knee, soft ratio law, attack lag and FET
+ * drive — the constants this capture says nothing about.
+ */
+const ALL_TAIL_FRACTION = 0
 const ALL_TAIL_MULT = 6
 
 // ── Gain computer ───────────────────────────────────────────────────────────
@@ -683,12 +709,13 @@ export const FET1176_KERNEL_DEFAULTS = {
  * With `TAIL_FRACTION` at 0 the worst difference over a 2 s lead-in goes from
  * 1.64e-1 to 7.11e-15.
  *
- * ⚠ NOT BIT-EXACT, UNLIKE `LA2A_PREROLL_S`, AND ALL-BUTTONS IS WHY. It is the
- * one mode that kept a tail (`ALL_TAIL_FRACTION`, unmeasured and left alone
- * until there are all-buttons captures), so it is the slow case: 5.46e-6 at 2 s
- * and 1.04e-7 at 3 s, decaying but never reaching zero. That is ~ -105 dBFS,
- * inaudible and vastly better than the 3.61e-2 it renders with no lead-in, but
- * the claim here is convergence rather than exactness.
+ * ⚠ IT IS BIT-EXACT NOW, AND THIS NOTE USED TO SAY IT WAS NOT. All-buttons was
+ * the one mode still carrying a tail (`ALL_TAIL_FRACTION` 0.45, held because no
+ * all-buttons capture existed), which made it the slow case at 5.46e-6 after
+ * 2 s — convergent but never zero. CLA-76's `bursts.wav` at ratio all supplied
+ * the capture and says there is no tail, so with the fraction at 0 the last
+ * state with memory longer than the pre-roll is gone and the claim is now
+ * exactness, pinned by `previewApplyConvergence.test.js`.
  *
  * ⚠ THE LIVE PREVIEW IS A SEPARATE QUESTION THIS DOES NOT SETTLE. `trkInPeak`
  * is still a running maximum with unbounded memory, so what the user HEARS can

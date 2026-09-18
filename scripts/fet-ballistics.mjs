@@ -1373,8 +1373,24 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
       console.log('     as a finding about IN_DRIVE_MIN_DB / IN_DRIVE_SPAN_DB.')
     }
     const params = { inputDrive: matched.knob, ratio, fetDrive: 0, attack: 4, release: 4 }
+    /**
+     * ⚠⚠ ATTACK IS MATCHED ON t63, NOT ON OVERSHOOT, AND IT USED TO BE THE OTHER
+     * WAY ROUND. Overshoot SATURATES at the slow end of the dial, which is
+     * exactly where a slow reference sits, so it cannot discriminate there.
+     * Measured on our own all-buttons kernel at a matched 13.4 dB: dials 1/2/3
+     * give overshoot 12.99 / 12.74 / 12.21 dB — 0.78 dB across two dials —
+     * while t63 gives 3696 / 2063 / 1066 us, a factor of 3.5 over the same span.
+     *
+     * It cost a wrong verdict on the only all-buttons capture that exists.
+     * CLA-76 read overshoot 13.67 dB against our dial 1's 12.99 and was reported
+     * as "OUTSIDE OUR RANGE — slower than dial 1", a finding about
+     * ALL_ATTACK_LAG. On t63 its 1938 us sits between our dial 2 (2063) and
+     * dial 3 (1066) — comfortably inside the range, near dial 2, and no finding
+     * at all. Overshoot is still printed, as the secondary reading it is.
+     */
     for (const [sweep, label, pick, fmt] of [
-      ['attack', 'overshoot', bs => bs[bs.length - 1]?.overshootDb, v => v.toFixed(2) + ' dB'],
+      ['attack', 'attack t63', bs => bs[bs.length - 1]?.attackT63, v => (v * 1e6).toFixed(0) + ' us'],
+      ['attack', 'overshoot (secondary — saturates)', bs => bs[bs.length - 1]?.overshootDb, v => v.toFixed(2) + ' dB'],
       ['release', 'release t63', bs => bs[bs.length - 1]?.releaseT63, v => (v * 1e3).toFixed(0) + ' ms'],
     ]) {
       const target = pick(bursts)
