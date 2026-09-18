@@ -351,10 +351,97 @@ const ALL_TAIL_MULT = 6
 
 // ── Gain computer ───────────────────────────────────────────────────────────
 
-// Tighter knees as the ratio climbs — 4:1 is a comparatively gentle curve,
-// 20:1 is nearly a corner.
 const RATIO_VALUES = { 4: 4, 8: 8, 12: 12, 20: 20 }
-const RATIO_KNEE_DB = { 4: 10, 8: 8, 12: 6, 20: 3 }
+
+/**
+ * THE KNEE, AND IT IS NOT A PROPERTY OF THE RATIO BUTTON.
+ *
+ * ⚠ IT USED TO BE `{4: 10, 8: 8, 12: 6, 20: 3}` — "tighter knees as the ratio
+ * climbs" — AND THAT HAS NO SUPPORT IN ANY CAPTURE. FETish's 16 `stairs.wav`
+ * bounces read **5.85 / 5.85 / 5.84 / 5.84 dB across ratios 12 / 20 / 4 / 8** at
+ * one Input position: one knee for every button, to a hundredth of a dB. The
+ * four different values were invented, and the ratio sweep was added to the
+ * capture matrix to test exactly that.
+ *
+ * ⚠ WHAT THE KNEE DOES TRACK IS THE INPUT KNOB — 5.85 dB at I1 to 10.86 at I4,
+ * monotone, across 24.99 dB of drive. A constant per button cannot express that
+ * at all, which is why this is a law and not a number.
+ *
+ * ⚠ AND THE GROWTH IS FETish'S, NOT THE INSTRUMENT'S, WHICH TOOK A CONTROL TO
+ * ESTABLISH. The obvious suspicion is the tool: the attack-lag bias grows with
+ * reduction depth, so a deeper capture could simply READ as a wider knee. Our
+ * own kernel's knee was nailed to 10 dB by construction; run across the same
+ * four drive offsets and fitted the same way it read **10.95 / 11.13 / 11.09 /
+ * 10.91 — a 0.22 dB spread** against FETish's 5.01 dB of growth. The instrument
+ * does not manufacture knee growth. `fetStairs.test.js` pins that control.
+ */
+const KNEE_AT_REF_DB = 5.85
+/**
+ * The drive the knee is quoted at, and the dB of knee per dB of drive above it.
+ *
+ * ⚠⚠ PROVISIONAL — FITTED ON THE TWO RECORDED ENDPOINTS ONLY (5.85 dB at I1,
+ * 10.86 at I4, 24.99 dB apart -> 0.2005). The per-capture table was printed and
+ * summarised but not kept, so the two interior points are not in hand and the
+ * law's SHAPE is unverified: these endpoints are equally consistent with a
+ * curve. Refit by simulate-and-match against all four when the table returns —
+ * and by matching, not by installing what the fit prints, because a fitted knee
+ * reads ~1 dB wide (the control above) and this is the fifth constant in this
+ * re-tune where the measured number is not the number to install.
+ *
+ * ⚠ THE REFERENCE IS OUR OWN NOMINAL DRIVE, NOT FETish'S I1, and deliberately:
+ * FETish's Input readouts do not transfer, so anchoring on one would bake a
+ * knob-scale guess into the law. The captures give the RELATIVE offsets
+ * (0 / 6.80 / 18.39 / 24.99 dB, from the fitted effective thresholds). The refit
+ * searches the pair and lets the anchor fall where it must.
+ *
+ * ⚠⚠ AND "PER dB OF DRIVE" IS AMBIGUOUS BY 24 %, WHICH IS THE WHOLE REASON THE
+ * REFIT MUST MATCH RATHER THAN DIVIDE. FETish spends 24.99 dB of ITS drive going
+ * from I1 to I4; our kernel reaches the same 2 -> 18 dB of reduction in 20.07,
+ * because its slope is lower than ours at every button (Finding 5) and it
+ * therefore needs more drive for the same work. 5.01 dB of knee growth over
+ * FETish's span is 0.2005 per dB; over ours at MATCHED REDUCTION it is 0.2496.
+ * The two axes are not even proportional in between — our offsets run
+ * 0 / 5.24 / 12.52 / 20.07 against its 0 / 6.80 / 18.39 / 24.99 — so no single
+ * scale factor converts one to the other and the interior points decide it.
+ * 0.2005 is installed as the conservative end of that range, and it is a
+ * PLACEHOLDER: the four-point simulate-and-match replaces it.
+ */
+const KNEE_DRIVE_REF_DB = 0
+const KNEE_DRIVE_SLOPE = 0.2005
+// The law is linear and the knob is not, so it needs ends. The floor keeps the
+// knee from inverting into a corner at the bottom of the travel; the ceiling is
+// where the knee would start swallowing the whole useful range of overshoot.
+const KNEE_FLOOR_DB = 2
+const KNEE_CEIL_DB = 16
+
+/**
+ * The knee at a given Input drive, dB.
+ *
+ * ⚠ IT TAKES THE KNOB'S DRIVE, NOT THE DRIVE THE DETECTOR SEES, and the
+ * difference is `inputAlignDb`. Passing the aligned drive is the obvious reading
+ * — the knee lives in the gain computer, which is detector side — and it would
+ * UNDO INPUT ALIGNMENT. Alignment exists so that a knob position delivers the
+ * same reduction on a -18 dBFS file as on a -1 dBFS one; it does that by adding
+ * an offset to the detector's level so `over` comes out identical. Widen the
+ * knee with that same offset and the two files get the same `over` through
+ * DIFFERENT curves, so the quiet one compresses softer — which is precisely the
+ * level dependence alignment was built to remove.
+ *
+ * ⚠ THE CAPTURES CANNOT SETTLE THIS AND ARE NOT BEING ASKED TO. They varied the
+ * Input knob against a fixed stimulus, so knob drive and detector level moved
+ * together and nothing separates them. FETish has no alignment, so the question
+ * does not arise there. This is a design choice made where the data is silent,
+ * and it is recorded as one.
+ */
+export function kneeDbForDrive(driveDb, atRefDb = KNEE_AT_REF_DB, slope = KNEE_DRIVE_SLOPE) {
+  const knee = atRefDb + slope * (driveDb - KNEE_DRIVE_REF_DB)
+  return clamp(knee, KNEE_FLOOR_DB, KNEE_CEIL_DB)
+}
+
+// ⚠ NOT `KNEE_MIN_DB` — `fet-stairs.mjs` exports that name for the FITTER's grid
+// bound, which is a different quantity (how narrow a knee the search may report)
+// and the two are imported side by side in `fetStairs.test.js`.
+export { KNEE_AT_REF_DB, KNEE_DRIVE_SLOPE, KNEE_DRIVE_REF_DB, KNEE_FLOOR_DB, KNEE_CEIL_DB }
 
 // All-buttons-in: a wide, badly-behaved knee whose effective ratio climbs
 // with overshoot, over a threshold pulled down by ALL_THRESHOLD_DROP_DB.
@@ -460,6 +547,15 @@ export const FET1176_KERNEL_DEFAULTS = {
    */
   ceilingDb: null,
   ceilingKneeDb: null,
+  /**
+   * The knee law's two parameters, exposed so the stairs fitter can search them
+   * and so a control can turn the law OFF (`kneeDriveSlope: 0`) and get the
+   * fixed knee this shipped with. Absent means the fitted constants — see
+   * `kneeDbForDrive`. Not panel params and not preset keys: the law is a fit,
+   * not a taste control.
+   */
+  kneeAtRefDb: null,
+  kneeDriveSlope: null,
   /** dB⁻¹ slope of that schedule. Only read when releaseSchedule is 'depth'. */
   releaseDepthK: RELEASE_DEPTH_K,
   /**
@@ -540,12 +636,15 @@ export const FET1176_KERNEL_DEFAULTS = {
  *
  * ⚠⚠ THIS NO LONGER REPRODUCES OLD RENDERS AND MUST NOT BE READ AS DOING SO.
  * It restores the TOPOLOGY — the tanh curve, the post-cell shaper position, a
- * fixed release — but three of the changes are CONSTANTS rather than parameters
+ * fixed release — but four of the changes are CONSTANTS rather than parameters
  * and a patch cannot reach them: `IN_DRIVE_SPAN_DB` (40 -> 48, so every Input
  * position moved), `RELEASE_SLOWEST_S` / `RELEASE_FASTEST_S` (2.73x, so every
- * release dial moved) and `TAIL_FRACTION`. Those were changed with the owner's
- * agreement to re-voice rather than preserve, so bit-exact reproduction of
- * pre-fit renders was already gone before this patch was extended.
+ * release dial moved), `TAIL_FRACTION`, and now the knee — `RATIO_KNEE_DB`'s
+ * four per-button values are gone and `kneeAtRefDb`/`kneeDriveSlope` cannot
+ * express them, since the whole finding is that there is ONE knee. Those were
+ * changed with the owner's agreement to re-voice rather than preserve, so
+ * bit-exact reproduction of pre-fit renders was already gone before this patch
+ * was extended.
  *
  * Unlike `LA2A_LEGACY_PATCH`, which does reproduce its predecessor exactly.
  */
@@ -725,7 +824,6 @@ export class FET1176Kernel {
 
     this.isAllButtons = String(p.ratio) === 'all'
     if (this.isAllButtons) {
-      this.kneeDb = ALL_KNEE_DB
       this.thresholdDb = THRESHOLD_DBFS - ALL_THRESHOLD_DROP_DB
       this.tailFraction = ALL_TAIL_FRACTION
       this.tailMult = ALL_TAIL_MULT
@@ -733,12 +831,14 @@ export class FET1176Kernel {
       const ratioKey = RATIO_VALUES[p.ratio] ? p.ratio : '4'
       this.ratio = RATIO_VALUES[ratioKey]
       this.slope = 1 - 1 / this.ratio
-      this.kneeDb = RATIO_KNEE_DB[ratioKey]
       this.thresholdDb = THRESHOLD_DBFS
       this.tailFraction = TAIL_FRACTION
       this.tailMult = TAIL_MULT
     }
-    this.halfKnee = this.kneeDb / 2
+    // ⚠ THE KNEE IS NOT SET HERE ANY MORE. It is a function of the Input drive,
+    // which this method computes further down, so it is assigned after that —
+    // see `kneeDbForDrive`. Setting it here would read a stale drive on every
+    // call that changes the Input knob, which is most of them.
     this.mainFraction = 1 - this.tailFraction
 
     // Ballistics. Attack is applied to the whole reduction; release splits
@@ -798,6 +898,24 @@ export class FET1176Kernel {
 
     // Input attenuator: audio path and detector both, as on the hardware.
     this.inputDriveDb = inputDriveDbForKnob(p.inputDrive)
+
+    /**
+     * The knee, which the Input knob moves — see `kneeDbForDrive`, including
+     * why it reads the knob's drive rather than the aligned one.
+     *
+     * All-buttons keeps its own fixed width: `ALL_KNEE_DB` has no captures
+     * behind it from either reference (FETish does not have the mode, and
+     * CLA-76's knee readings came back on a search bound), so there is nothing
+     * to justify giving it a drive law too.
+     */
+    this.kneeDb = this.isAllButtons
+      ? ALL_KNEE_DB
+      : kneeDbForDrive(
+        this.inputDriveDb,
+        Number.isFinite(p.kneeAtRefDb) ? p.kneeAtRefDb : KNEE_AT_REF_DB,
+        Number.isFinite(p.kneeDriveSlope) ? p.kneeDriveSlope : KNEE_DRIVE_SLOPE,
+      )
+    this.halfKnee = this.kneeDb / 2
 
     /**
      * \u26a0 A DETECTOR OFFSET, AND FOR FET PUNCH THAT IS NOT WHERE THE INPUT KNOB

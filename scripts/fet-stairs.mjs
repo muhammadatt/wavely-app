@@ -146,11 +146,11 @@ function curveFor(file, dir, sampleRate, plan, stim) {
  * above are approximate; these differences are not.
  */
 const ourCache = new Map()
-export function ourFit(ratio, sampleRate, plan, stim, inputDrive = 50) {
-  const key = `${ratio}:${inputDrive}`
+export function ourFit(ratio, sampleRate, plan, stim, inputDrive = 50, extra = null) {
+  const key = `${ratio}:${inputDrive}:${extra ? JSON.stringify(extra) : ''}`
   if (!ourCache.has(key)) {
     const { y } = runKernel(stim.x, sampleRate,
-      { inputDrive, ratio: String(ratio), attack: 1, release: 7, fetDrive: 0 })
+      { inputDrive, ratio: String(ratio), attack: 1, release: 7, fetDrive: 0, ...extra })
     ourCache.set(key, fitStatic(stairCurve(y, plan, stim, sampleRate, 0)))
   }
   return ourCache.get(key)
@@ -274,8 +274,8 @@ function report(rows, sampleRate, plan, stim) {
       ? '    → AND THE KNEE HOLDS, as ours does.'
       : `    → ⚠ BUT THE KNEE WIDENS WITH DRIVE, by ${dK.toFixed(2)} dB. Ours is fixed per\n` +
         '      ratio button and reads flat to 0.22 dB under this same test, so this is\n' +
-        '      the reference and not the instrument. Our RATIO_KNEE_DB cannot express\n' +
-        '      it: the knee would have to be a function of drive.')
+        '      the reference and not the instrument. This is the finding that replaced\n' +
+        '      our per-button RATIO_KNEE_DB with a drive law — see kneeDbForDrive.')
   }
 }
 
@@ -283,7 +283,16 @@ function selftest(sampleRate) {
   console.log('\nStairs fitter self-test — what the staircase can and cannot recover\n')
   const plan = PLANS['stairs.wav']()
   const stim = buildProbe(plan, sampleRate)
+  /**
+   * ⚠ THE KNEES HERE ARE SET BY THIS TEST, NOT READ OFF THE KERNEL, and that
+   * changed when the per-button `RATIO_KNEE_DB` became a drive law. These four
+   * values are the old constants, kept because a self-test needs a known law
+   * with FOUR DISTINCT knees to show the fitter can tell them apart — which is
+   * a property of the instrument and has nothing to do with what we ship. The
+   * kernel is pinned to each via `kneeAtRefDb` + `kneeDriveSlope: 0`.
+   */
   const EXPECT = { 4: { ratio: 4, knee: 10 }, 8: { ratio: 8, knee: 8 }, 12: { ratio: 12, knee: 6 }, 20: { ratio: 20, knee: 3 } }
+  const pinKnee = (knee) => ({ kneeAtRefDb: knee, kneeDriveSlope: 0 })
   let bad = 0
 
   /**
@@ -311,8 +320,8 @@ function selftest(sampleRate) {
   console.log('  button   true slope   fitted   bias       knee true / fitted    rms dB')
   const slopes = []
   for (const ratio of ['4', '8', '12', '20']) {
-    const fit = ourFit(ratio, sampleRate, plan, stim)
     const want = EXPECT[ratio]
+    const fit = ourFit(ratio, sampleRate, plan, stim, 50, pinKnee(want.knee))
     const trueSlope = 1 - 1 / want.ratio
     slopes.push(fit.slope)
     const ok = fit.rms < 0.15

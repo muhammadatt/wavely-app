@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PLANS, runKernel } from '../../scripts/fet-ballistics.mjs'
 import { buildProbe } from '../../scripts/lib/probeStimulus.js'
-import { inputDriveDbForKnob } from '../../src/audio/fet1176Processor.js'
+import { inputDriveDbForKnob, FET1176Kernel } from '../../src/audio/fet1176Processor.js'
 import { fitStatic, stairCurve, grForLevel, ratioForSlope, knobsFromName, KNEE_MIN_DB } from '../../scripts/fet-stairs.mjs'
 
 const SR = 96000
@@ -14,14 +14,24 @@ let cachedStim = null
 const stim = () => (cachedStim ||= buildProbe(plan, SR))
 
 const cache = new Map()
-function fitFor(ratio, inputDrive = 50) {
-  const key = `${ratio}:${inputDrive}`
+function fitFor(ratio, inputDrive = 50, extra = null) {
+  const key = `${ratio}:${inputDrive}:${extra ? JSON.stringify(extra) : ''}`
   if (!cache.has(key)) {
-    const { y } = runKernel(stim().x, SR, { inputDrive, ratio, attack: 1, release: 7, fetDrive: 0 })
+    const { y } = runKernel(stim().x, SR, {
+      inputDrive, ratio, attack: 1, release: 7, fetDrive: 0, ...extra,
+    })
     cache.set(key, fitStatic(stairCurve(y, plan, stim(), SR, 0)))
   }
   return cache.get(key)
 }
+
+/**
+ * The law turned OFF: one fixed knee at every drive, which is what this kernel
+ * did before FETish's stairs captures replaced `RATIO_KNEE_DB`. Every control
+ * below runs through this, because a control has to hold the thing it is
+ * controlling for FIXED — see the note on the first of them.
+ */
+const FIXED_KNEE = { kneeAtRefDb: 10, kneeDriveSlope: 0 }
 
 test('the fit describes the curve it was given', () => {
   for (const ratio of ['4', '20']) {
@@ -100,15 +110,65 @@ test('the filename carries the ratio button and the Input position', () => {
  * OPINION. The fitter reported FETish's knee widening 5.01 dB across its four
  * Input positions and called it a property of the reference. That is only worth
  * saying if the instrument reads a KNOWN-fixed knee as fixed across the same
- * span — our own kernel's knee is nailed to RATIO_KNEE_DB by construction, so
- * this is the thing that licenses the claim.
+ * span.
+ *
+ * ⚠ IT MUST NOW PIN THE KNEE EXPLICITLY, because the shipping kernel's knee is
+ * no longer fixed — the verdict this control licensed is what replaced
+ * `RATIO_KNEE_DB` with a drive law. Running it against the default would be the
+ * control measuring the thing it exists to rule out, and it would pass for the
+ * wrong reason or fail for a reason that is not the instrument's.
  */
 test('a knee that is fixed by construction reads as fixed across the Input range', () => {
-  const knees = [30, 44.5, 71.5, 88].map(inputDrive => fitFor('4', inputDrive).kneeDb)
+  const knees = [30, 44.5, 71.5, 88].map(d => fitFor('4', d, FIXED_KNEE).kneeDb)
   const spread = Math.max(...knees) - Math.min(...knees)
   assert.ok(spread < 0.5,
     `our fixed knee wobbled ${spread.toFixed(2)} dB across a 25 dB drive span: ` +
     `${knees.map(k => k.toFixed(2)).join(' / ')} — the collapse verdict cannot be trusted`)
+})
+
+/**
+ * ...and the shipping kernel does the opposite, which is the finding itself.
+ * Same fitter, same drives, law on: the knee has to grow, and monotonically.
+ */
+test('the shipping knee widens with the Input knob, as FETish\'s does', () => {
+  const knees = [30, 44.5, 71.5, 88].map(d => fitFor('4', d).kneeDb)
+  for (let i = 1; i < knees.length; i++) {
+    assert.ok(knees[i] > knees[i - 1],
+      `not monotone at ${i}: ${knees.map(k => k.toFixed(2)).join(' / ')}`)
+  }
+  assert.ok(knees[3] - knees[0] > 1,
+    `the law is barely doing anything: ${(knees[3] - knees[0]).toFixed(2)} dB of growth`)
+})
+
+/**
+ * ⚠ THE KNEE IS A FUNCTION OF THE KNOB, NOT OF THE ALIGNED DRIVE, and this is
+ * the test that says so. `inputAlignDb` exists to make a knob position deliver
+ * the same reduction on a quiet file as on a hot one; if it also widened the
+ * knee, the two files would reach the same overshoot through different curves
+ * and the quiet one would compress softer — the level dependence alignment was
+ * built to remove, reintroduced one level down. See `kneeDbForDrive`.
+ */
+test('the alignment offset moves the reduction but never the knee', () => {
+  /**
+   * ⚠ THE KNEE HALF IS ASSERTED ON THE KERNEL, NOT THROUGH THE FITTER, because
+   * the claim is exact and the measurement is not: a +12 dB offset deepens the
+   * reduction, and the fitter's own attack-lag bias moves ~0.1 dB with depth
+   * (the control above bounds it at 0.22 over 25 dB). Fitting both sides would
+   * test the instrument's noise floor and call it the kernel's behaviour.
+   */
+  const kneeAt = (inputAlignDb) => {
+    const k = new FET1176Kernel(SR)
+    k.setParams({ inputDrive: 50, ratio: '4', inputAlignDb })
+    return k.kneeDb
+  }
+  assert.equal(kneeAt(12), kneeAt(0), 'the offset must not reach the knee at all')
+  assert.equal(kneeAt(-12), kneeAt(0))
+
+  // ...and it must still reach the detector, or it is not doing its job.
+  const plain = fitFor('4', 50)
+  const aligned = fitFor('4', 50, { inputAlignDb: 12 })
+  assert.ok(plain.effThresholdDb - aligned.effThresholdDb > 10,
+    'the offset never reached the effective threshold')
 })
 
 /**
@@ -117,9 +177,29 @@ test('a knee that is fixed by construction reads as fixed across the Input range
  * and does not tilt it.
  */
 test('slope is invariant under Input, which is the additive model', () => {
-  const slopes = [30, 44.5, 71.5, 88].map(inputDrive => fitFor('4', inputDrive).slope)
+  const slopes = [30, 44.5, 71.5, 88].map(d => fitFor('4', d, FIXED_KNEE).slope)
   const spread = Math.max(...slopes) - Math.min(...slopes)
   assert.ok(spread < 0.01, `slope moved ${spread.toFixed(4)} across the drive span`)
+})
+
+/**
+ * ⚠ AND WITH THE LAW ON THE COLLAPSE IS NO LONGER EXACT — a consequence of the
+ * knee law worth stating rather than discovering. Above the knee drive and level
+ * still add in dB, so the curve still moves sideways; but the knee itself now
+ * changes width with drive, so the four curves no longer lie on top of one
+ * another through the bend, and a JOINT fit of (threshold, slope, knee) lets
+ * that leak into the slope estimate. It stays small — this bounds it — and the
+ * additive model is unharmed above the knee, which is where it is a claim.
+ */
+test('the knee law perturbs the collapse, and only slightly', () => {
+  const spreadOf = (extra) => {
+    const slopes = [30, 44.5, 71.5, 88].map(d => fitFor('4', d, extra).slope)
+    return Math.max(...slopes) - Math.min(...slopes)
+  }
+  const withLaw = spreadOf(null)
+  assert.ok(withLaw > spreadOf(FIXED_KNEE),
+    'if the law cost nothing here, it is not reaching the fit at all')
+  assert.ok(withLaw < 0.05, `the law tilted the fitted slope by ${withLaw.toFixed(4)}`)
 })
 
 /**

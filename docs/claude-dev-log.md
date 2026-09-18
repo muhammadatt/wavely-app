@@ -3276,6 +3276,113 @@ to this one, which is exactly why `inputAlignDb` is kept out too.
 
 ---
 
+### The knee becomes a law — `RATIO_KNEE_DB` retired
+
+The first half of installing FETish's static curve. The captures were taken and
+analysed a while back (see "FETish'S STATIC CURVE" above) and **never reached the
+kernel** — the gain computer was still carrying the hand-set originals while the
+ballistics around it had been refitted four times.
+
+**What was there:**
+
+```js
+// Tighter knees as the ratio climbs — 4:1 is a comparatively gentle curve,
+// 20:1 is nearly a corner.
+const RATIO_KNEE_DB = { 4: 10, 8: 8, 12: 6, 20: 3 }
+```
+
+⚠ **THOSE FOUR NUMBERS WERE INVENTED, AND THE RATIO SWEEP WAS ADDED TO THE
+CAPTURE MATRIX TO TEST EXACTLY THAT.** FETish reads **5.85 / 5.85 / 5.84 / 5.84
+dB across ratios 12 / 20 / 4 / 8** at one Input position — one knee for every
+button, to a hundredth of a dB. Deleted.
+
+**What replaced it** is `kneeDbForDrive(driveDb)`: one knee, moving with the
+Input knob, because that is the other thing the captures say (5.85 dB at I1 to
+10.86 at I4, monotone). A constant per button cannot express that at all, so this
+is the first topology change of the re-tune rather than a re-fit.
+
+#### ⚠ "Per dB of drive" is ambiguous by 24 %, and the interior points decide it
+
+The two recorded endpoints fix the knee growth at 5.01 dB. What they do **not**
+fix is what it is growth *per*:
+
+| | I1 | I2 | I3 | I4 | slope from 5.01 dB |
+|---|---|---|---|---|---|
+| FETish's own drive | 0 | 6.80 | 18.39 | 24.99 | **0.2005** /dB |
+| ours, at matched reduction | 0 | 5.24 | 12.52 | 20.07 | **0.2496** /dB |
+
+FETish spends 24.99 dB of its drive going from I1 to I4; our kernel reaches the
+same 2 → 18 dB of reduction in 20.07, because its slope is lower than ours at
+every button (Finding 5) and it therefore needs more drive for the same work.
+**And the two axes are not proportional in between**, so no single scale factor
+converts one to the other — the interior points are the only thing that settles
+it, and they were summarised but not kept.
+
+`KNEE_DRIVE_SLOPE` ships at **0.2005**, the conservative end, flagged in the
+source as a placeholder. The four-point simulate-and-match replaces it when the
+per-capture table is re-printed. ⚠ By MATCHING, not by dividing: a fitted knee
+reads about 1 dB wide (the control below), and this would be the fifth constant
+in this re-tune where the number the measurement printed is not the number to
+install.
+
+#### ⚠ The knee takes the KNOB's drive, not the detector's — or it undoes input alignment
+
+The obvious reading is that the knee should follow the drive the detector
+actually sees, `inputDriveDb + inputAlignDb` — the knee lives in the gain
+computer, which is detector side. That is wrong, and quietly so.
+
+Alignment exists so a knob position delivers the same reduction on a −18 dBFS
+file as on a −1 dBFS one; it does that by offsetting the detector's level so
+`over` comes out identical. Widen the knee with that same offset and the two
+files reach the same `over` **through different curves**, so the quiet one
+compresses softer — precisely the level dependence alignment was built to
+remove, reintroduced one level down.
+
+⚠ **THE CAPTURES CANNOT SETTLE THIS AND ARE NOT BEING ASKED TO.** They varied the
+Input knob against a fixed stimulus, so knob drive and detector level moved
+together and nothing separates them; FETish has no alignment, so the question
+never arose there. This is a design choice made where the data is silent, and a
+test asserts it **on the kernel rather than through the fitter** — the claim is
+exact, the instrument is not, and a +12 dB offset moves the fitted knee ~0.09 dB
+on its own.
+
+#### The control had to be rewritten, because the kernel stopped being the control
+
+⚠ **TWO TESTS FAILED, AND BOTH WERE RIGHT TO.** The collapse verdict — "FETish's
+knee widens and that is the reference, not the instrument" — is licensed by a
+control: our own kernel, knee fixed by construction, read through the same
+fitter, comes back flat (10.95 / 11.13 / 11.09 / 10.91, a 0.22 dB spread). That
+control was written against a kernel whose knee *was* fixed. Installing the
+finding removed the thing the control controlled for.
+
+The fix is not to relax the control but to pin the knee explicitly:
+`kneeAtRefDb` + `kneeDriveSlope: 0` are now kernel params, so the control sets
+the fixed knee it needs and the fitter's self-test sets four distinct ones (the
+old constants, now a property of the TEST and not of what ships). Those params
+are also what the four-point refit will search. They are deliberately not panel
+params and not preset keys: the law is a fit, not a taste control.
+
+⚠ **AND THE COLLAPSE IS NO LONGER EXACT, which is a consequence worth stating
+rather than discovering.** Above the knee drive and level still add in dB, so the
+curves still shift sideways; but the knee now changes width with drive, so they
+no longer lie on top of one another through the bend, and a joint fit of
+(threshold, slope, knee) lets that leak into the slope estimate. Bounded at 0.05
+of slope by a new test, against 0.01 with the law off.
+
+#### What it actually changes: less than it sounds
+
+⚠ **THE STEADY-TONE PROBE SAYS ALMOST NOTHING, AND THAT IS THE TRAP.** On the
+−12 dBFS tone the GR meter is set by, the change is ≤ 0.07 dB at every button and
+Input position — because at those drives the tone sits well above the knee, where
+the knee does not live. Swept across level, the worst case is **0.35 dB of gain
+reduction**, at ratio 20 / Input 70 / −30 dBFS: 15–30 dB below the tone. On five
+seconds of narration it is 0.04 dB of rms at Input 40 and under 0.01 above it.
+
+So the knee is **not** what will move the presets. The slope is — and that is the
+half still waiting on the table.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
