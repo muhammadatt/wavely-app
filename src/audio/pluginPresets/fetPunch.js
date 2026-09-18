@@ -151,7 +151,10 @@ export const FET_PUNCH_PRESETS = [
     name: 'Consonant Control',
     description: '8:1 with a fast attack and the lows out of the detector.',
     params: {
-      inputDrive: 53,
+      // ⚠ 53 -> 57 WHEN THE MOVING THRESHOLD SHIPPED. This preset is on 8:1, so
+      // its threshold rose 1.71 dB and it needed the Input back to deliver what
+      // it was cut for.
+      inputDrive: 57,
       output: 0,
       // Fast enough to catch a consonant rather than ride behind it, with the
       // side-chain high-passed at 120 Hz so the fundamental is not what sets
@@ -204,7 +207,9 @@ export const FET_PUNCH_PRESETS = [
       // ⚠ 75 -> 47 IS THE LARGEST MOVE IN THE RE-CUT and it is the Input span
       // change, not a re-voicing: at the old span this patch delivered 6.54 dB
       // of average reduction and at the new one the same 75 delivered 14.36.
-      inputDrive: 47,
+      // ⚠ THEN 47 -> 53 WHEN THE MOVING THRESHOLD SHIPPED — on 12:1 the
+      // threshold rose 2.71 dB, so the Input had to come back to match.
+      inputDrive: 53,
       output: 0,
       attack: 7,
       release: 7,

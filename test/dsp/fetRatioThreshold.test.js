@@ -11,10 +11,15 @@
  * threshold level" (via Moore, JARP 2012), and FETish therefore contradicts its
  * own documentation.
  *
- * So `'fixed'` ships — it reproduces one reference exactly — and `'moving'` is a
- * bench switch for deciding by ear whether to follow the hardware instead. This
- * pins both sides, because the interesting failure is a switch that looks wired
- * and does nothing.
+ * `'moving'` SHIPS, on the hardware documentation's authority and against a
+ * reference that disagrees. `'fixed'` stays reachable from the bench because it
+ * is a complete model of FETish rather than a legacy stub, and `FET_LEGACY_PATCH`
+ * carries it. This pins both sides, because the interesting failure is a switch
+ * that looks wired and does nothing.
+ *
+ * ⚠ SHIPPING IT RE-VOICED EVERY PATCH ON 8:1, 12:1 AND 20:1. Ratio 4 is the
+ * anchor and did not move; `consonant-control` went Input 53 -> 57 and
+ * `parallel-thickener` 47 -> 53 to keep delivering what they were cut for.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -28,11 +33,39 @@ const thresholdOf = (ratio, mode) => {
   return k.thresholdDb
 }
 
-test('fixed is what ships, and holds one threshold for every button', () => {
+test('fixed holds one threshold for every button, and is still reachable', () => {
   const vals = ['4', '8', '12', '20'].map(r => thresholdOf(r, 'fixed'))
   assert.equal(new Set(vals).size, 1, `fixed must not move: ${vals.join(' / ')}`)
-  // The default must BE fixed — the A/B is opt-in, not opt-out.
-  assert.equal(thresholdOf('20', undefined), thresholdOf('4', undefined))
+})
+
+/**
+ * ⚠ THE DEFAULT IS `moving` AND THIS IS THE TEST THAT SAYS SO. It shipped after
+ * an A/B; a silent revert to `fixed` would undo it while every other test still
+ * passed, because `fixed` is a legitimate configuration rather than a broken one.
+ */
+test('moving is the default, so the ratio button moves the threshold', () => {
+  const byDefault = ['4', '8', '12', '20'].map(r => thresholdOf(r, undefined))
+  assert.equal(new Set(byDefault).size, 4, 'each button must sit at its own threshold')
+  for (let i = 1; i < byDefault.length; i++) {
+    assert.ok(byDefault[i] > byDefault[i - 1], 'and they must rise with the ratio')
+  }
+  for (const r of ['4', '8', '12', '20']) {
+    assert.equal(thresholdOf(r, undefined), thresholdOf(r, 'moving'))
+  }
+})
+
+/**
+ * ⚠ AND THE LEGACY PATCH HAS TO CARRY IT. `FET_LEGACY_PATCH` reproduces the
+ * pre-capture kernel, which held one threshold for every button — a legacy
+ * button that restored four things out of five would claim a reproduction it
+ * was not delivering, which has happened once already on this patch.
+ */
+test('the legacy patch restores the fixed threshold', async () => {
+  const { FET_LEGACY_PATCH } = await import('../../src/audio/fet1176Processor.js')
+  assert.equal(FET_LEGACY_PATCH.ratioThreshold, 'fixed')
+  const { FET1176_TUNING_DEFAULTS } = await import('../../src/audio/effects/fet1176Tuning.js')
+  assert.ok('ratioThreshold' in FET1176_TUNING_DEFAULTS,
+    'every legacy-patch key must be a bench key, or the bench drops it silently')
 })
 
 /**

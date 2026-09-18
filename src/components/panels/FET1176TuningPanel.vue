@@ -125,22 +125,24 @@ const CHOICES = [
     key: 'ratioThreshold', label: 'Ratio thr',
     options: [
       {
-        id: 'fixed', label: 'FIXED',
-        title: 'One threshold for all four ratio buttons. SHIPS, and it reproduces '
-          + 'FETish EXACTLY — 16 captures, four buttons at four Input positions, '
-          + 'effective threshold identical to the printed digit every time (0.00 dB of '
-          + 'spread). ⚠ But FETish contradicts its own manual here, and the hardware’s '
-          + 'says the threshold moves',
+        id: 'moving', label: 'MOVING',
+        title: 'SHIPS. The threshold RISES 1.712 dB per octave of ratio — CLA-76’s '
+          + 'measured behaviour (3.88–4.11 dB across the four buttons at every drive, '
+          + 'worst residual 0.135 dB) and what the UA manual describes: “selecting '
+          + 'higher ratios also raises the threshold level”. Higher ratios compress '
+          + 'LESS at the same Input, so the ratio button is closer to a character '
+          + 'control than a level control. ⚠ Ratio 4 is the anchor and does not move, '
+          + 'so 4:1 patches are unchanged; 8/12/20 were all re-voiced by this and '
+          + 'Consonant Control and Parallel Thickener were re-cut for it',
       },
       {
-        id: 'moving', label: 'MOVING',
-        title: 'The threshold RISES 1.712 dB per octave of ratio — CLA-76’s measured '
-          + 'behaviour (3.88–4.11 dB across the four buttons at every drive, worst '
-          + 'residual 0.135 dB) and what the UA manual describes: “selecting higher '
-          + 'ratios also raises the threshold level”. ⚠ Ratio 4 is the anchor and does '
-          + 'not move, so listen on 8:1 and 12:1 — Consonant Control and Parallel '
-          + 'Thickener. Higher ratios compress LESS at the same Input. ⚠ Shipping this '
-          + 'would re-voice every patch on 8/12/20 and need a preset re-cut',
+        id: 'fixed', label: 'FIXED',
+        title: 'One threshold for all four ratio buttons — what shipped before the '
+          + 'CLA-76 captures, and what reproduces FETish EXACTLY: 16 captures, four '
+          + 'buttons at four Input positions, effective threshold identical to the '
+          + 'printed digit every time (0.00 dB of spread). ⚠ FETish contradicts its own '
+          + 'manual here, which is why it is the alternative and not the default. '
+          + 'FET_LEGACY_PATCH selects it',
       },
     ],
   },

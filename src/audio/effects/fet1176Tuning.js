@@ -78,7 +78,8 @@ export const FET1176_TUNING_DEFAULTS = Object.freeze({
    */
   attackSchedule: FET1176_KERNEL_DEFAULTS.attackSchedule,
   /**
-   * 'fixed' ships; 'moving' raises the threshold with the ratio button.
+   * 'moving' ships; 'fixed' is the one-threshold-for-every-button kernel that
+   * preceded it.
    *
    * ⚠ THE REFERENCES DISAGREE AND THE HARDWARE SIDES AGAINST US. FETish holds
    * the threshold fixed to 0.00 dB across all four buttons at all four Input
@@ -86,10 +87,11 @@ export const FET1176_TUNING_DEFAULTS = Object.freeze({
    * and the UA manual agrees: "selecting higher ratios also raises the threshold
    * level". FETish contradicts its own documentation here.
    *
-   * ⚠ IT CHANGES WHAT EVERY PATCH ON 8:1, 12:1 AND 20:1 DOES, which is why it
-   * is an A/B and not a fix. Ratio 4 is the anchor and is untouched, so
-   * `vocal-punch` and `gentle-ride` are unaffected; `consonant-control` (8:1)
-   * and `parallel-thickener` (12:1) are what there is to listen to.
+   * ⚠ SHIPPING IT CHANGED WHAT EVERY PATCH ON 8:1, 12:1 AND 20:1 DOES. Ratio 4
+   * is the anchor and is untouched, so `vocal-punch` and `gentle-ride` were
+   * unaffected; `consonant-control` (8:1) and `parallel-thickener` (12:1) were
+   * re-cut for it. A user's saved patch on those buttons compresses less than
+   * it did and wants its Input turned up.
    */
   ratioThreshold: FET1176_KERNEL_DEFAULTS.ratioThreshold,
 })

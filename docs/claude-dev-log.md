@@ -4106,10 +4106,11 @@ either means refitting the slope law**. `factory:all-buttons-in` stays un-recut.
 
 ---
 
-### The ratio-dependent threshold, as an A/B
+### The ratio-dependent threshold — auditioned, then shipped
 
-Owner wants to hear it on the four numbered buttons before deciding. Wired to
-the bench panel as `Ratio thr` — `FIXED` (ships) against `MOVING`.
+Wired to the bench panel as `Ratio thr` first, so the owner could hear it on the
+four numbered buttons before deciding. **`MOVING` now ships**, with the anchor
+left at 4:1; `FIXED` stays reachable on the rocker and in `FET_LEGACY_PATCH`.
 
 **The law, fitted to CLA-76's 16 coarse captures.** Threshold offsets against its
 own ratio 4, at each Input position:
@@ -4156,9 +4157,26 @@ reduction at 8 / 12 / 20.
 `ALL_THRESHOLD_DROP_DB` from the base threshold, and folding it in would change a
 mode whose law is still being measured. A test pins that it does not move.
 
-⚠ **SHIPPING `MOVING` WOULD RE-VOICE EVERY PATCH ON 8/12/20** and require a
-second preset re-cut. That is the decision the A/B exists to inform, and it is
-not taken here.
+#### What shipping it cost
+
+⚠ **IT RE-VOICED EVERY PATCH ON 8/12/20**, which is why the factory presets were
+re-cut a second time: `consonant-control` Input **53 → 57**, `parallel-thickener`
+**47 → 53**, each re-solved for the gain reduction its old patch delivered. The
+two ratio-4 presets and all-buttons are untouched, by construction of the anchor.
+
+The button is now closer to a character control than a level control: at Input 90
+the spread of average reduction across the four buttons falls from **7.68 dB**
+under `FIXED` to **3.37 dB** under `MOVING`. That is the point of the hardware
+behaviour — changing ratio changes how it grabs, not how much.
+
+⚠ **THE DEFAULT FLIP EXPOSED A REAL BUG, AND THE TEST FOR THE DEFAULT IS WHAT
+CAUGHT IT.** The kernel read the mode as `p.ratioThreshold === 'moving'`, and
+`setParams` merges `{ ...this.params, ...partial }` — so a patch that simply does
+not mention the key arrives as `undefined` and read back as `fixed`, silently
+reverting to the old behaviour for every caller that had not been updated. It now
+falls back through `== null` to `FET1176_KERNEL_DEFAULTS.ratioThreshold`. **A
+bench rocker whose off position was the default hid this for as long as it was
+the default** — the failure only becomes visible when the default moves.
 
 ---
 

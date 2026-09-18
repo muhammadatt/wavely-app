@@ -486,8 +486,13 @@ export { KNEE_AT_REF_DB, KNEE_DRIVE_SLOPE, KNEE_DRIVE_REF_DB, KNEE_FLOOR_DB, KNE
 // All-buttons-in: a wide, badly-behaved knee whose effective ratio climbs
 // with overshoot, over a threshold pulled down by ALL_THRESHOLD_DROP_DB.
 /**
- * THE THRESHOLD AND THE RATIO BUTTON — an A/B, because the two references
- * disagree and the hardware documentation sides against us.
+ * THE THRESHOLD AND THE RATIO BUTTON — `'moving'` SHIPS.
+ *
+ * ⚠ THIS CHANGED WHAT EVERY PATCH ON 8:1, 12:1 AND 20:1 DOES. Ratio 4 is the
+ * anchor and is untouched; the others start compressing later, by up to 3.98 dB
+ * of threshold at 20:1. The two factory presets on those buttons were re-cut in
+ * the same change. It shipped on the hardware documentation's authority, over a
+ * reference that disagrees — see below.
  *
  * ⚠⚠ WE HOLD THE THRESHOLD FIXED ACROSS ALL FOUR BUTTONS, AND FETish AGREES
  * EXACTLY: 16 captures, four buttons at four Input positions, effective
@@ -694,14 +699,16 @@ export const FET1176_KERNEL_DEFAULTS = {
   attackSchedule: 'depth',
   /**
    * Whether the ratio button moves the threshold.
-   *   'fixed'  — SHIPS. One threshold for all four buttons, which is what
-   *              FETish measures to 0.00 dB.
-   *   'moving' — CLA-76's behaviour and the hardware manual's: the threshold
-   *              rises with the ratio. See `RATIO_THRESHOLD_PER_OCTAVE_DB`.
-   * A bench A/B, not a patch key — the two references disagree and no
-   * measurement of ours settles which to ship.
+   *   'moving' — SHIPS. The threshold rises with the ratio button, which is
+   *              CLA-76's behaviour and the hardware manual's. See
+   *              `RATIO_THRESHOLD_PER_OCTAVE_DB`.
+   *   'fixed'  — one threshold for all four buttons. What shipped before, and
+   *              what FETish measures to 0.00 dB, so it is a complete model of
+   *              one reference rather than a legacy stub.
+   * Still a bench A/B because the references genuinely disagree; the default
+   * follows the hardware documentation.
    */
-  ratioThreshold: 'fixed',
+  ratioThreshold: 'moving',
   /** dB per octave of ratio, read only when `ratioThreshold` is 'moving'. */
   ratioThresholdPerOctaveDb: RATIO_THRESHOLD_PER_OCTAVE_DB,
   /** dB⁻¹ slope of that schedule, negative. Read only when it is 'depth'. */
@@ -866,6 +873,8 @@ export const FET_LEGACY_PATCH = {
   fetPosition: 'postCell',
   releaseSchedule: 'none',
   attackSchedule: 'none',
+  // The pre-capture kernel held one threshold for every ratio button.
+  ratioThreshold: 'fixed',
 }
 
 /**
@@ -1039,10 +1048,23 @@ export class FET1176Kernel {
         : RATIO_VALUES[ratioKey]
       this.slope = 1 - 1 / this.ratio
       /**
-       * ⚠ 'fixed' SHIPS AND REPRODUCES FETish EXACTLY; 'moving' reproduces
-       * CLA-76 and the hardware manual. See `RATIO_THRESHOLD_PER_OCTAVE_DB`.
+       * ⚠ 'moving' SHIPS; 'fixed' reproduces FETish exactly. See
+       * `RATIO_THRESHOLD_PER_OCTAVE_DB`.
+       *
+       * ⚠⚠ AN ABSENT VALUE RESOLVES TO THE DEFAULT, AND IT DID NOT. `setParams`
+       * merges `{ ...this.params, ...partial }`, so a caller spreading an object
+       * that happens to carry `ratioThreshold: undefined` — which is what
+       * `{ ...defaults, ...extra }` produces whenever `extra` names the key
+       * without a value — overwrote the default with `undefined`. A bare
+       * `=== 'moving'` then read that as `fixed` and SILENTLY SHIPPED THE OTHER
+       * MODEL. Caught by this key's own default test, in its own test helper.
+       * Every other param in this method guards the same way (`Number.isFinite`
+       * for the numeric ones); this one was the exception.
        */
-      this.thresholdDb = p.ratioThreshold === 'moving'
+      const ratioThresholdMode = p.ratioThreshold == null
+        ? FET1176_KERNEL_DEFAULTS.ratioThreshold
+        : p.ratioThreshold
+      this.thresholdDb = ratioThresholdMode === 'moving'
         ? THRESHOLD_DBFS + ratioThresholdOffsetDb(ratioKey, p.ratioThresholdPerOctaveDb)
         : THRESHOLD_DBFS
       this.tailFraction = TAIL_FRACTION
