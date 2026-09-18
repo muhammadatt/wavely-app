@@ -28,6 +28,10 @@
  *
  *   neither      -> not a convergence problem at all
  *     ResoTame     an STFT frame-PHASE error; see its own test below
+ *     Auto Leveler no kernel and no state: preview schedules the solved gain
+ *                  curve onto an AudioParam and apply expands the same segment
+ *                  list, so the two are equal by construction rather than by
+ *                  convergence. Pinned in autoLevelSegments.test.js
  *
  * ⚠ FET PUNCH WAS IN THE `latches` GROUP AND THE DIAGNOSIS WAS WRONG. The claim
  * was that `trkInPeak`, a running maximum, made it unconvergeable. That field is

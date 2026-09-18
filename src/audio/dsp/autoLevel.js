@@ -1,452 +1,516 @@
 /**
- * AUTO LEVEL — clip-based gain riding, client port of the server's Stage 4b.
+ * Auto Leveler — client port of the server's clip-automation leveler.
  *
- * Direct port of `server/pipeline/autoLeveler.js`: same segmentation, same
- * per-clip gain law, same merge and crossfade rules, same constants. Read that
- * file for the design; this one documents only where the browser forced a
- * difference, and why each difference is sound.
+ * Direct port of server/pipeline/autoLeveler.js. Same constants, same steps,
+ * same order: VAD voiced runs -> sub-phrase splits at sustained internal level
+ * drops -> per-clip K-weighted LUFS -> shapeDrift against a per-clip target ->
+ * merge conflicting neighbours -> cosine crossfades at the lowest-energy point
+ * of each boundary.
  *
- * ⚠ IT IS NOT A GAIN-RIDING CURVE, AND THAT IS THE WHOLE DESIGN. There is no
- * continuous IIR smoothing of a sample-rate gain. Audio is segmented into voiced
- * clips, each clip gets ONE flat gain, and adjacent clips are crossfaded at the
- * lowest-energy point between them. So the dynamics INSIDE a clip are preserved
- * exactly — a leveller that rides continuously is a slow compressor wearing a
- * different name, and it flattens the syllable-scale movement the compressors
- * downstream are supposed to act on.
+ * WHAT A "CLIP" IS, AND WHY THERE IS NO SMOOTHING. Gain is piecewise constant
+ * within a clip, so the dynamics *inside* a phrase survive untouched and only
+ * the level *between* phrases moves. That is the whole difference between this
+ * and a compressor, and it is why the leveler can sit in front of one without
+ * the two fighting over the same transients.
  *
- * ⚠ WHY A SEPARATE STAGE AT ALL, RATHER THAN LETTING THE COMPRESSORS DO IT.
- * Long-term drift — a narrator leaning in over a paragraph, a chapter that opens
- * loud — is minutes wide. A compressor with a release long enough to track that
- * pumps on speech, and one fast enough not to pump cannot see it. This removes
- * the drift so the compressors only ever see syllable-scale work.
+ * ── THE ONE THING THAT IS NOT PORTED ─────────────────────────────────────────
  *
- * ── Two things this port does differently ───────────────────────────────────
+ * The voiced/silence mask. The server gets it from Silero v5 through a Python
+ * subprocess; there is no Silero in the browser, and unlike VoiceRx's corrective
+ * EQ — which wants *pitched* frames specifically and so can substitute an F0
+ * tracker honestly — this wants speech presence, which is exactly the
+ * distinction dsp/f0.js warns against faking. Fricatives and breaths are speech
+ * and are not pitched, and a leveler that ends its clips early at every /s/
+ * would place crossfades inside words.
  *
- * ⚠ 1. THE VOICED MASK COMES FROM ENERGY, NOT FROM SILERO. The server's default
- * backend is a neural VAD in a Python subprocess; there is none in the browser.
- * The substitute is NOT an invention: `frameAnalysis.js` ships an ENERGY BACKEND
- * as a first-class path (`VAD_BACKEND=energy`), used whenever Silero is
- * unavailable, and it is what is ported here — frame RMS against
- * `noiseFloor + 6 dB`, with the noise floor bootstrapped from the 20
- * lowest-energy frames.
+ * So the mask comes from the server, once, through /api/analyze/vad, and
+ * everything downstream of it runs here. That split is not a compromise: the
+ * mask depends only on the audio, while every control the user turns
+ * (target mode and window, deadband, knee, the two caps) acts on numbers
+ * derived *after* it. One round trip buys unlimited knob turns.
  *
- * ⚠ IT IS STILL A REAL DIFFERENCE AND THE COST LANDS IN ONE PLACE. Silero
- * labels breaths and unvoiced fricatives as speech; an energy gate at
- * `noiseFloor + 6` labels the quiet ones as silence. That does not change a
- * clip's measured level — fricatives carry little energy, which is why they fall
- * under the gate — but it could FRAGMENT a clip, splitting a phrase at its own
- * "s". The hysteresis is what absorbs it: an unvoiced run shorter than
- * `VAD_MIN_UNVOICED_MS` (300 ms) is bridged, and speech fricatives are
- * essentially always shorter than that. A deliberate silence longer than 300 ms
- * is a real phrase boundary and should split a clip.
+ * ── THE TWO-PHASE SHAPE ──────────────────────────────────────────────────────
  *
- * ⚠ AND THIS IS A DIFFERENT SUBSTITUTION FROM VoiceRx's, WHICH IS NOT
- * INTERCHANGEABLE WITH IT. VoiceRx selects PITCHED frames with `F0Tracker`,
- * because its computation is about harmonic structure and wants exactly the
- * periodic frames. A leveller wants "is anyone talking", where an energy gate is
- * the closer proxy and a pitch tracker would drop every fricative outright.
+ *   prepareAutoLevel()  audio + mask -> clips, per-clip LUFS, a block power
+ *                       index. O(n), two biquad passes, once per analysis.
+ *                       Transiently allocates one Float32 copy of the audio and
+ *                       RETAINS under a megabyte of it — see BlockPowerSum.
+ *   solveAutoLevel()    prepared + config -> gains, merges, crossfades.
+ *                       O(clips). Runs on every knob move.
  *
- * ⚠ 2. K-WEIGHTING COMES FROM `dsp/loudness.js`, not from a private copy of the
- * coefficients. Same filter, one definition, and it is the one whose sections
- * are re-derived per sample rate — so 44.1 kHz material is measured exactly
- * rather than through a 48 kHz table.
+ * The split falls exactly where the server's own data flow does; it is only
+ * that the server never had a reason to name the halves.
  *
- * ── Shape ───────────────────────────────────────────────────────────────────
- *
- * Analysis and rendering are split, and the split is what the apply path needs:
- *
- *   analyzeAutoLevel(channels, sampleRate, config) -> analysis   (WHOLE FILE)
- *   renderAutoLevelGainDb(analysis, startSample, numSamples)     (ANY SPAN)
- *
- * ⚠ THE ANALYSIS IS WHOLE-FILE AND THE RENDER IS PER-SPAN, DELIBERATELY. Clip
- * targets are a running median over neighbouring clips, so analysing only the
- * region would give one answer for a phrase and a different one for the
- * paragraph containing it — the same defect `inputAlignDbFor` warns about, and
- * worse here because the whole point is consistency ACROSS a recording. It also
- * means the offline apply path can evaluate the envelope over its PRE-ROLL as
- * well as its region, so the audio entering the composite's compressors is
- * already levelled at the region boundary instead of stepping there.
- *
- * No Web Audio, no DOM — hand it Float32Arrays.
+ * Dependency-free apart from ./biquad.js and ./loudness.js. No Web Audio, no
+ * DOM — the caller hands in a mono Float32Array, which keeps this unit-testable
+ * without an AudioContext.
  */
 
-import { kWeightingSections, LOUDNESS_OFFSET_DB } from './loudness.js'
 import { BiquadCascade } from './biquad.js'
+import { kWeightingSections } from './loudness.js'
 
-// ── Constants, all matching server/pipeline/autoLeveler.js ──────────────────
+// ── Constants (must track server/pipeline/autoLeveler.js) ────────────────────
 
-/** Frame size for the voiced/silence decision, ms. Matches FRAME_DURATION_S. */
-export const FRAME_MS = 25
-/** Hop for the short-term loudness curve that drives sub-phrase splitting, ms. */
 export const HOP_MS = 100
 
-/**
- * Resolution of the K-weighted energy prefix sum, ms.
- *
- * ⚠ THE ENERGY SUM IS PER-BLOCK, NOT PER-SAMPLE, AND THAT IS A HARD REQUIREMENT
- * RATHER THAN AN OPTIMISATION. A per-sample `Float64Array` prefix sum over an
- * hour of 44.1 kHz audio is 1.27 GB, with a 635 MB mono buffer beside it — and
- * an hour-long chapter is not an edge case here, it is what the beachhead
- * audience uploads. At 10 ms the same file needs 2.9 MB.
- *
- * ⚠ NOTHING IN THIS STAGE WANTS SAMPLE RESOLUTION. Clip and hop boundaries are
- * hop-aligned by construction; the only finer consumer is the crossfade
- * placement search, whose window is 30 ms — so 10 ms moves a transition by at
- * most one block, inside silence that was chosen for being the quietest place
- * in the gap.
- *
- * ⚠ HOP IS DERIVED FROM BLOCK, NOT ROUNDED SEPARATELY. `round(0.1 * sr)` and
- * `10 * round(0.01 * sr)` differ at some sample rates, and a hop that is not a
- * whole number of blocks makes every clip boundary land mid-block — which turns
- * an exact range sum into a silently approximate one.
- */
-export const BLOCK_MS = 10
-/** Blocks per hop. HOP_MS / BLOCK_MS, stated so the derivation is visible. */
-const BLOCKS_PER_HOP = HOP_MS / BLOCK_MS
+// VAD hysteresis parameters
+const VAD_MIN_VOICED_MS   = 200
+const VAD_MIN_UNVOICED_MS = 300
 
-export const VAD_MIN_VOICED_MS = 200
-export const VAD_MIN_UNVOICED_MS = 300
+// Skip condition thresholds
+const MIN_FILE_DURATION_S   = 10
+const MIN_VOICED_DURATION_S = 5
 
-/** Lowest-energy frames used to bootstrap the noise floor. */
-export const BOOTSTRAP_FRAMES = 20
-/** How far above the bootstrapped noise floor a frame must sit to be voiced. */
-export const SILENCE_MARGIN_DB = 6
+// Sub-phrase splitting: split a voiced run when an internal level drop of
+// >= SUBPHRASE_SPLIT_DROP_DB is sustained for >= SUBPHRASE_SPLIT_MIN_DURATION_MS.
+const SUBPHRASE_SPLIT_DROP_DB         = 6.0
+const SUBPHRASE_SPLIT_MIN_DURATION_MS = 500
 
-export const SUBPHRASE_SPLIT_DROP_DB = 6.0
-export const SUBPHRASE_SPLIT_MIN_DURATION_MS = 500
-export const MIN_SUBCLIP_HOPS_FACTOR = 2
-
+// Cosine crossfade duration at clip boundaries.
 export const CROSSFADE_MS = 30
-export const MERGE_MAX_DELTA_DB = 6.0
 
-export const MIN_FILE_DURATION_S = 10
-export const MIN_VOICED_DURATION_S = 5
+// Transparent-fallback merge: adjacent clips with gain delta exceeding this
+// threshold are merged into one clip with a duration-weighted average gain.
+const MERGE_MAX_DELTA_DB = 6.0
 
-/**
- * Defaults matching the server's `general_clean` autoLeveler config — the
- * middle of the three shipped settings.
- */
-export const AUTO_LEVEL_DEFAULTS = Object.freeze({
-  targetMode: 'running_median', // 'running_median' | 'global'
-  targetWindowS: 30,
-  noiseFloorTargetDbfs: -50,
-  deadbandDb: 1.5,
-  kneeDb: 1,
-  maxUpDb: 6,
-  maxDownDb: 8,
-})
+// Sub-phrase splitting recursion guard — never split a sub-clip shorter than
+// twice the minimum drop duration (otherwise the split point can't itself
+// satisfy the duration check).
+const MIN_SUBCLIP_HOPS_FACTOR = 2
 
-const DB_FLOOR = -120
-
-function rmsToDbfs(rms) {
-  return rms > 0 ? 20 * Math.log10(rms) : DB_FLOOR
-}
-
-/** Frame f starts here. Time-based so boundaries line up across sample rates. */
-function frameBoundary(f, sampleRate) {
-  return Math.round(f * (FRAME_MS / 1000) * sampleRate)
-}
-
-// ── Mono sum and K-weighted power ───────────────────────────────────────────
+/** Short-term LUFS window for the sub-phrase split curve. */
+const ST_WINDOW_MS = 400
 
 /**
- * Per-frame RMS of the channel SUM, without materialising the sum.
+ * Defaults, from the ACX Audiobook preset's autoLeveler block.
  *
- * ⚠ SUM, NOT MEAN-OF-POWERS — the same distinction `gatedRmsOfChannels` records
- * paying for. A stereo file with one dead channel and a polarity-flipped pair
- * are the two cases that separate them, and both are ordinary recordings.
- *
- * ⚠ AND NOT VIA A MONO BUFFER. Building one costs a `Float32Array` the length of
- * the file — 635 MB for an hour — to be read once, in order, and thrown away.
- * The frame loop needs only the samples of the frame it is on.
+ * `global` rather than `running_median` because a spot edit is usually one
+ * passage: a running median over a 60 s window inside a 30 s selection is the
+ * global median with extra steps, and on a long selection the global target is
+ * the one that makes two separately-levelled regions match each other.
  */
-function frameRmsOfChannelSum(channels, sampleRate, totalSamples) {
-  const numFrames = Math.floor(totalSamples / ((FRAME_MS / 1000) * sampleRate))
-  const out = new Float64Array(Math.max(0, numFrames))
-  const nCh = channels.length
-  if (nCh === 0) return out
-  const scale = 1 / nCh
+export const AUTOLEVEL_DEFAULTS = {
+  target_mode:             'global',
+  target_window_s:         60,
+  noise_floor_target_dbfs: -60,
+  deadband_db:             0.75,
+  knee_db:                 1.0,
+  max_up_db:               10.0,
+  max_down_db:             10.0,
+}
 
-  for (let f = 0; f < numFrames; f++) {
-    const start = frameBoundary(f, sampleRate)
-    const end = Math.min(totalSamples, frameBoundary(f + 1, sampleRate))
-    let sumSq = 0
-    for (let i = start; i < end; i++) {
-      let x = 0
-      for (let ch = 0; ch < nCh; ch++) x += channels[ch][i]
-      x *= scale
-      sumSq += x * x
-    }
-    out[f] = end > start ? Math.sqrt(sumSq / (end - start)) : 0
-  }
+// ── K-weighting filter (EBU R128 / ITU-R BS.1770-4) ──────────────────────────
+
+/**
+ * K-weight a buffer, using the loudness module's sections rather than the
+ * server's.
+ *
+ * ⚠ THESE ARE NOT THE SERVER'S COEFFICIENTS, AND PARITY STILL HOLDS EXACTLY.
+ * That looks like it cannot both be true, so: the two differ only in the
+ * numerator scaling of stage 2. `loudness.js` reproduces the BS.1770-4 table
+ * (b = [1, -2, 1]); the server divides that numerator by a0, which is the same
+ * filter a constant 0.047 dB quieter at 44.1 kHz. Nothing here reads an
+ * absolute LUFS value. Every number that leaves this module is a DIFFERENCE of
+ * two LUFS measurements taken through the same filter — a clip against its
+ * target, a hop against its clip's median, the weighted standard deviation of
+ * a set of clips — and a constant offset cancels out of all of them. The gains
+ * come out bit-identical, which autoLevelParity.test.js checks against the real
+ * pipeline stage rather than taking on faith.
+ *
+ * Sharing it is worth the paragraph. Two `kWeightingSections` in one directory,
+ * agreeing to four decimal places and disagreeing in the fifth, is a trap for
+ * whoever next needs K-weighting and picks whichever import their editor
+ * offers first.
+ *
+ * @returns {Float32Array} K-weighted copy of `samples`.
+ */
+export function applyKWeighting(samples, sampleRate) {
+  const cascade = new BiquadCascade(2, 1)
+  cascade.setSections(kWeightingSections(sampleRate))
+  // FLOAT32 OUT, FLOAT64 INSIDE. The cascade's z1/z2 state is Float64 either
+  // way, so the filter is unchanged; only the stored result is narrowed. That
+  // halves the largest array this module holds, and every value in it is read
+  // back into a Float64 accumulator, so the precision that actually matters —
+  // the sums — is not the precision being narrowed.
+  const out = new Float32Array(samples.length)
+  cascade.process(samples, out, samples.length, 0)
   return out
 }
 
+// ── Energy-in-range queries ──────────────────────────────────────────────────
+
 /**
- * Prefix sum of K-weighted energy per BLOCK, summed across channels per BS.1770.
+ * Block size for the power index. 4096 samples is ~93 ms at 44.1 kHz.
  *
- * Entry `b` holds the total K-weighted energy of every sample before block `b`,
- * so the energy of any block-aligned range is one subtraction. See `BLOCK_MS`
- * for why this is per-block and not per-sample.
- *
- * ⚠ FILTERED IN CHUNKS, WITH THE CASCADE STATE CARRIED ACROSS THEM. The scratch
- * buffer is what would otherwise be file-length; a `BiquadCascade` is a
- * stateful streaming filter, so feeding it consecutive chunks gives bit-identical
- * output to one long call. Resetting between chunks instead would put a filter
- * transient at every chunk boundary.
+ * Only the partial blocks at each end of a query are summed directly, so this
+ * bounds a range query at ~8192 multiply-adds however long the range is. The
+ * queries are per clip and per hop — hundreds, not millions — so that is free,
+ * and a bigger block would only shrink an index that is already negligible.
  */
-function kWeightedBlockEnergy(channels, sampleRate, totalSamples, blockSamples) {
-  const sections = kWeightingSections(sampleRate)
-  const numBlocks = Math.ceil(totalSamples / blockSamples)
-  const prefix = new Float64Array(numBlocks + 1)
-  const perBlock = new Float64Array(numBlocks)
+const POWER_BLOCK = 4096
 
-  // A whole number of blocks per chunk, so a chunk never splits one.
-  const CHUNK_BLOCKS = 4096
-  const chunkSamples = CHUNK_BLOCKS * blockSamples
-  const scratch = new Float32Array(chunkSamples)
-
-  for (const channel of channels) {
-    const cascade = new BiquadCascade(sections.length, 1)
-    cascade.setSections(sections)
-    for (let off = 0; off < totalSamples; off += chunkSamples) {
-      const n = Math.min(chunkSamples, totalSamples - off, channel.length - off)
-      if (n <= 0) break
-      cascade.process(channel.subarray(off, off + n), scratch.subarray(0, n), n, 0)
-      for (let i = 0; i < n; i++) {
-        const v = scratch[i]
-        perBlock[((off + i) / blockSamples) | 0] += v * v
-      }
+/**
+ * Energy over arbitrary sample ranges, without a per-sample prefix array.
+ *
+ * ⚠ THE OBVIOUS STRUCTURE IS A FULL PREFIX SUM, AND IT DOES NOT FIT. One
+ * Float64 per sample is 635 MB per thirty minutes of mono at 44.1 kHz, and the
+ * first version of this module built two of them — over the K-weighted signal
+ * and over the raw audio — beside a Float64 copy of the filtered samples. That
+ * is ~1.9 GB before the render and the upload buffer, on exactly the
+ * chapter-length selections this plugin exists for. Scheduling the gain curve
+ * instead of rendering it (see effects/autoLevel.js) had already been done for
+ * this reason; the analysis pass simply had not been looked at with the same
+ * eye.
+ *
+ * A block index holds one Float64 per 4096 samples — 155 KB for that same half
+ * hour — and the samples it indexes are BORROWED, not copied. The raw-audio
+ * index therefore costs nothing beyond the index itself, because the caller
+ * already owns the audio.
+ *
+ * ⚠ IT IS ALSO MORE ACCURATE, WHICH IS NOT THE POINT BUT IS WORTH KNOWING. A
+ * prefix sum over 79 M squared samples answers a short range by subtracting two
+ * large nearly-equal numbers, and a 30 ms crossfade window late in a chapter is
+ * exactly that subtraction. Summing whole blocks and the two partial ends never
+ * forms the large intermediate at all.
+ */
+export class BlockPowerSum {
+  /** @param {Float32Array|Float64Array} samples borrowed, never copied */
+  constructor(samples) {
+    this.samples = samples
+    const n = samples.length
+    const blocks = Math.ceil(n / POWER_BLOCK)
+    this.blockPrefix = new Float64Array(blocks + 1)
+    for (let b = 0; b < blocks; b++) {
+      const from = b * POWER_BLOCK
+      const to = Math.min(n, from + POWER_BLOCK)
+      let sum = 0
+      for (let i = from; i < to; i++) sum += samples[i] * samples[i]
+      this.blockPrefix[b + 1] = this.blockPrefix[b] + sum
     }
   }
 
-  for (let b = 0; b < numBlocks; b++) prefix[b + 1] = prefix[b] + perBlock[b]
-  return prefix
-}
+  /** Sum of squares over [start, end). */
+  sum(start, end) {
+    const a = Math.max(0, start)
+    const b = Math.min(this.samples.length, end)
+    if (b <= a) return 0
 
-/**
- * Mean K-weighted square over a SAMPLE range, read from the block prefix sum.
- *
- * ⚠ THE RANGE IS ROUNDED TO BLOCKS. Every caller that matters passes hop-aligned
- * bounds (clips and hops are both whole numbers of blocks by construction), so
- * the rounding is a no-op for them; only the crossfade search can land between
- * blocks, and it is choosing a place to hide a transition rather than measuring
- * anything reported.
- */
-function meanSquareRange(blockPrefix, start, end, blockSamples) {
-  if (end <= start) return 0
-  const b0 = Math.max(0, Math.round(start / blockSamples))
-  const b1 = Math.min(blockPrefix.length - 1, Math.round(end / blockSamples))
-  if (b1 <= b0) return 0
-  return (blockPrefix[b1] - blockPrefix[b0]) / ((b1 - b0) * blockSamples)
-}
+    const firstWhole = Math.ceil(a / POWER_BLOCK)
+    const lastWhole = Math.floor(b / POWER_BLOCK)
+    const { samples } = this
 
-function lufsOf(meanSq) {
-  return meanSq > 0 ? LOUDNESS_OFFSET_DB + 10 * Math.log10(meanSq) : DB_FLOOR
-}
+    // Too short to contain a whole block: sum it directly.
+    if (firstWhole >= lastWhole) {
+      let sum = 0
+      for (let i = a; i < b; i++) sum += samples[i] * samples[i]
+      return sum
+    }
 
-// ── Voiced mask ─────────────────────────────────────────────────────────────
-
-/**
- * Per-frame voiced flags from energy alone, plus the bootstrapped noise floor.
- * The server's energy backend, ported exactly.
- */
-export function voicedFramesByEnergy(channels, sampleRate, totalSamples) {
-  /**
-   * ⚠ THE WRAP HAPPENS BEFORE THE LENGTH IS TAKEN, and a default parameter
-   * cannot do that. `channels[0]` on a bare Float32Array is the first SAMPLE, a
-   * number, so `.length` is undefined and the default resolved to zero — the
-   * function then reported no frames on perfectly good audio.
-   */
-  const list = Array.isArray(channels) ? channels : [channels]
-  const n = totalSamples ?? list[0]?.length ?? 0
-  const frameRms = frameRmsOfChannelSum(list, sampleRate, n)
-  const numFrames = frameRms.length
-  if (numFrames === 0) {
-    return { voiced: new Uint8Array(0), noiseFloorDbfs: DB_FLOOR, frameRms: new Float64Array(0) }
+    let sum = this.blockPrefix[lastWhole] - this.blockPrefix[firstWhole]
+    for (let i = a; i < firstWhole * POWER_BLOCK; i++) sum += samples[i] * samples[i]
+    for (let i = lastWhole * POWER_BLOCK; i < b; i++) sum += samples[i] * samples[i]
+    return sum
   }
 
-  // Noise floor: RMS over the lowest-energy frames.
-  const sorted = Float64Array.from(frameRms).sort()
-  const take = Math.min(BOOTSTRAP_FRAMES, sorted.length)
-  let sumSq = 0
-  for (let i = 0; i < take; i++) sumSq += sorted[i] * sorted[i]
-  const noiseFloorDbfs = rmsToDbfs(Math.sqrt(sumSq / take))
-  const threshold = noiseFloorDbfs + SILENCE_MARGIN_DB
-
-  const voiced = new Uint8Array(numFrames)
-  for (let f = 0; f < numFrames; f++) {
-    voiced[f] = rmsToDbfs(frameRms[f]) >= threshold ? 1 : 0
+  /** Mean square over [start, end), or 0 for an empty range. */
+  meanSquare(start, end) {
+    const a = Math.max(0, start)
+    const b = Math.min(this.samples.length, end)
+    if (b <= a) return 0
+    return this.sum(a, b) / (b - a)
   }
-  return { voiced, noiseFloorDbfs, frameRms }
+}
+
+/** @returns {BlockPowerSum} */
+export function buildPowerSum(samples) {
+  return new BlockPowerSum(samples)
+}
+
+function meanSquareRange(powerSum, start, end) {
+  return powerSum.meanSquare(start, end)
+}
+
+function meanSquareToLufs(meanSq) {
+  return meanSq > 0 ? -0.691 + 10.0 * Math.log10(meanSq) : NaN
+}
+
+// ── VAD mask ─────────────────────────────────────────────────────────────────
+
+/**
+ * Expand the route's run-length encoded voiced runs back to a per-frame mask.
+ *
+ * @param {Array<[number, number]>} voicedRuns [startInclusive, endExclusive)
+ * @param {number} numFrames
+ */
+export function expandVoicedRuns(voicedRuns, numFrames) {
+  const mask = new Uint8Array(numFrames)
+  for (const [start, end] of voicedRuns ?? []) {
+    const a = Math.max(0, Math.min(numFrames, start))
+    const b = Math.max(0, Math.min(numFrames, end))
+    for (let f = a; f < b; f++) mask[f] = 1
+  }
+  return mask
 }
 
 /**
- * Two-pass hysteresis: drop voiced runs shorter than VAD_MIN_VOICED_MS, then
- * bridge unvoiced gaps shorter than VAD_MIN_UNVOICED_MS.
+ * Two-pass hysteresis over the raw mask.
  *
- * ⚠ THE BRIDGING PASS IS WHAT MAKES THE ENERGY GATE USABLE HERE — see the note
- * at the top of this file. An unvoiced fricative is far shorter than 300 ms, so
- * it is bridged and the phrase stays one clip; a real pause is longer, and
- * should split one.
+ * Pass 1 drops voiced islands shorter than VAD_MIN_VOICED_MS — a single
+ * mislabelled frame in a pause would otherwise start a clip. Pass 2 bridges
+ * unvoiced gaps shorter than VAD_MIN_UNVOICED_MS, which is what keeps a clip
+ * running across the stop consonant in the middle of a word.
  *
- * Order matters and matches the server: dropping spurious voiced runs first
- * stops a single loud tick from anchoring a bridge across a genuine pause.
+ * The order matters and is the server's: dropping first means a bridged gap
+ * cannot be re-opened by an island that was never real.
  */
-export function applyVadHysteresis(voicedIn) {
-  const n = voicedIn.length
+export function conditionVoicedMask(rawMask, frameDurationS) {
+  const n = rawMask.length
   if (n === 0) return new Uint8Array(0)
-  const minVoicedF = Math.max(1, Math.round(VAD_MIN_VOICED_MS / FRAME_MS))
-  const minUnvoicedF = Math.max(1, Math.round(VAD_MIN_UNVOICED_MS / FRAME_MS))
-  const voiced = Uint8Array.from(voicedIn)
 
-  for (let f = 0; f < n;) {
+  const frameMs      = frameDurationS * 1000
+  const minVoicedF   = Math.max(1, Math.round(VAD_MIN_VOICED_MS   / frameMs))
+  const minUnvoicedF = Math.max(1, Math.round(VAD_MIN_UNVOICED_MS / frameMs))
+
+  const voiced = new Uint8Array(rawMask)
+
+  // Pass 1: drop voiced segments shorter than minVoicedF (false positives)
+  let f = 0
+  while (f < n) {
     if (voiced[f] === 1) {
       let e = f
       while (e < n && voiced[e] === 1) e++
-      if (e - f < minVoicedF) voiced.fill(0, f, e)
+      if (e - f < minVoicedF) for (let k = f; k < e; k++) voiced[k] = 0
       f = e
-    } else f++
+    } else {
+      f++
+    }
   }
-  for (let f = 0; f < n;) {
+
+  // Pass 2: bridge unvoiced gaps shorter than minUnvoicedF (false negatives)
+  f = 0
+  while (f < n) {
     if (voiced[f] === 0) {
       let e = f
       while (e < n && voiced[e] === 0) e++
-      if (e - f < minUnvoicedF) voiced.fill(1, f, e)
+      if (e - f < minUnvoicedF) for (let k = f; k < e; k++) voiced[k] = 1
       f = e
-    } else f++
+    } else {
+      f++
+    }
   }
+
   return voiced
 }
 
-/** Any voiced frame inside a hop makes the hop voiced. */
-function frameVoicedToHopVoiced(voiced, framesPerHop, numHops) {
+/**
+ * Collapse the 25 ms frame mask onto the 100 ms hop grid.
+ *
+ * Any voiced frame makes the hop voiced. Asymmetric on purpose: the cost of
+ * calling a hop voiced when a quarter of it is speech is that a clip starts
+ * 75 ms early, into silence, where the gain step is inaudible. The cost of the
+ * other rule is clipping the first phoneme of a phrase.
+ *
+ * `frameDurationS` and `sampleRate` rather than a frame count, because the
+ * server's frames come off a 44.1 kHz grid and the project may be at 48.
+ */
+export function frameVoicedToHopVoiced(frameVoiced, frameDurationS, numHops) {
+  const framesPerHop = Math.max(1, Math.round((HOP_MS * 0.001) / frameDurationS))
   const hopVoiced = new Uint8Array(numHops)
   for (let h = 0; h < numHops; h++) {
     const f0 = h * framesPerHop
     for (let k = 0; k < framesPerHop; k++) {
-      if (f0 + k < voiced.length && voiced[f0 + k]) { hopVoiced[h] = 1; break }
+      if (f0 + k < frameVoiced.length && frameVoiced[f0 + k]) {
+        hopVoiced[h] = 1
+        break
+      }
     }
   }
   return hopVoiced
 }
 
-// ── Gain law ────────────────────────────────────────────────────────────────
+// ── LUFS sliding-window curve (voiced hops only) ─────────────────────────────
 
-/**
- * Drift correction with a deadband and a smoothstep knee, clamped per direction.
- *
- * ⚠ THE DEADBAND IS NOT A THRESHOLD AND THE KNEE IS NOT A RATIO. Inside the
- * deadband the correction is exactly zero, so a file already level is left
- * bit-identical rather than nudged. Past it the correction is `delta - deadband`
- * — it closes the excess, not the whole gap — which is what keeps a clip that is
- * 1.6 dB out from being yanked all the way to the median.
- */
-export function shapeDrift(delta, deadbandDb, kneeDb, maxUpDb, maxDownDb) {
-  const abs = Math.abs(delta)
-  const sign = delta >= 0 ? 1 : -1
-  let g
-  if (abs < deadbandDb) g = 0
-  else if (kneeDb > 0 && abs <= deadbandDb + kneeDb) {
-    const x = (abs - deadbandDb) / kneeDb
-    g = sign * (x * x * (3 - 2 * x)) * (abs - deadbandDb)
-  } else g = sign * (abs - deadbandDb)
-  return g > 0 ? Math.min(g, maxUpDb) : Math.max(g, -maxDownDb)
+export function computeLufsCurve(kwPowerSum, hopVoiced, windowSamples, hopSamples, totalSamples) {
+  const numHops = hopVoiced.length
+  const halfWin = Math.floor(windowSamples / 2)
+  const curve   = new Float64Array(numHops)
+
+  for (let h = 0; h < numHops; h++) {
+    if (!hopVoiced[h]) {
+      curve[h] = NaN
+      continue
+    }
+    const center = h * hopSamples + Math.floor(hopSamples / 2)
+    const start  = Math.max(0, center - halfWin)
+    const end    = Math.min(totalSamples, center + halfWin)
+    if (end <= start) { curve[h] = NaN; continue }
+    curve[h] = meanSquareToLufs(meanSquareRange(kwPowerSum, start, end))
+  }
+
+  return curve
 }
 
-// ── Clip detection ──────────────────────────────────────────────────────────
+// ── Clip detection (VAD voiced runs + sub-phrase splits) ─────────────────────
+
+/**
+ * @typedef {{ hopStart: number, hopEnd: number, sampleStart: number, sampleEnd: number }} Clip
+ */
 
 function vadRunsToClips(hopVoiced, hopSamples, totalSamples) {
   const clips = []
   const n = hopVoiced.length
-  for (let h = 0; h < n;) {
+  let h = 0
+  while (h < n) {
     if (hopVoiced[h] === 1) {
       let e = h
       while (e < n && hopVoiced[e] === 1) e++
       clips.push({
-        hopStart: h, hopEnd: e,
+        hopStart:    h,
+        hopEnd:      e,
         sampleStart: h * hopSamples,
-        sampleEnd: Math.min(e * hopSamples, totalSamples),
+        sampleEnd:   Math.min(e * hopSamples, totalSamples),
       })
       h = e
-    } else h++
+    } else {
+      h++
+    }
   }
   return clips
 }
 
 /**
- * Split a voiced run at a sustained internal level drop — a phrase boundary the
- * VAD did not see because the speaker never stopped making sound.
+ * Recursive sub-phrase splitter.
+ *
+ * A long unbroken voiced run is not one level: a narrator drops into a
+ * parenthetical and comes back up without ever pausing long enough for the VAD
+ * to notice. Splitting at a sustained internal drop gives those their own clip
+ * and their own gain, which is most of what makes this sound like levelling
+ * rather than like fader moves between sentences.
+ *
+ * Splits at the deepest hop within any internal region where L_st falls
+ * >= splitDropDb below the clip's median for >= splitMinDurationHops hops.
  */
-function splitClipBySubphrase(clip, shortTerm, hopSamples, totalSamples, dropDb, minHops) {
+function splitClipBySubphrase(clip, L_st, hopSamples, totalSamples, splitDropDb, splitMinDurationHops) {
   const { hopStart, hopEnd } = clip
-  if (hopEnd - hopStart < MIN_SUBCLIP_HOPS_FACTOR * minHops) return [clip]
+  const minSubclipHops = MIN_SUBCLIP_HOPS_FACTOR * splitMinDurationHops
 
+  if (hopEnd - hopStart < minSubclipHops) return [clip]
+
+  // Median of finite L_st values inside the clip
   const vals = []
   for (let h = hopStart; h < hopEnd; h++) {
-    if (Number.isFinite(shortTerm[h])) vals.push(shortTerm[h])
+    if (Number.isFinite(L_st[h])) vals.push(L_st[h])
   }
   if (vals.length < 2) return [clip]
   vals.sort((a, b) => a - b)
   const mid = Math.floor(vals.length / 2)
   const median = vals.length % 2 === 0 ? (vals[mid - 1] + vals[mid]) / 2 : vals[mid]
-  const dropThreshold = median - dropDb
+  const dropThreshold = median - splitDropDb
 
-  let bestHop = -1
-  let bestVal = Infinity
+  // Find drop regions
+  let bestSplitHop = -1
+  let bestSplitVal = Infinity
   let regionStart = -1
   for (let h = hopStart; h <= hopEnd; h++) {
-    const below = h < hopEnd && Number.isFinite(shortTerm[h]) && shortTerm[h] < dropThreshold
-    if (below && regionStart < 0) regionStart = h
-    else if (!below && regionStart >= 0) {
-      if (h - regionStart >= minHops) {
-        let localHop = regionStart
-        let localVal = shortTerm[regionStart]
-        for (let k = regionStart; k < h; k++) {
-          if (shortTerm[k] < localVal) { localVal = shortTerm[k]; localHop = k }
+    const below = h < hopEnd && Number.isFinite(L_st[h]) && L_st[h] < dropThreshold
+    if (below && regionStart < 0) {
+      regionStart = h
+    } else if (!below && regionStart >= 0) {
+      const regionEnd = h
+      if (regionEnd - regionStart >= splitMinDurationHops) {
+        // Find local minimum hop in [regionStart, regionEnd)
+        let localMinHop = regionStart
+        let localMinVal = L_st[regionStart]
+        for (let k = regionStart; k < regionEnd; k++) {
+          if (L_st[k] < localMinVal) {
+            localMinVal = L_st[k]
+            localMinHop = k
+          }
         }
-        if (localVal < bestVal) { bestVal = localVal; bestHop = localHop }
+        // Pick the deepest drop across all qualifying regions
+        if (localMinVal < bestSplitVal) {
+          bestSplitVal = localMinVal
+          bestSplitHop = localMinHop
+        }
       }
       regionStart = -1
     }
   }
-  if (bestHop < 0) return [clip]
-  if (bestHop - hopStart < minHops || hopEnd - bestHop < minHops) return [clip]
 
-  const mk = (a, b) => ({
-    hopStart: a, hopEnd: b,
-    sampleStart: a * hopSamples,
-    sampleEnd: Math.min(b * hopSamples, totalSamples),
-  })
+  if (bestSplitHop < 0) return [clip]
+
+  // Avoid degenerate splits (one sub-clip too short)
+  const leftLen  = bestSplitHop - hopStart
+  const rightLen = hopEnd - bestSplitHop
+  if (leftLen < splitMinDurationHops || rightLen < splitMinDurationHops) return [clip]
+
+  const left = {
+    hopStart,
+    hopEnd:      bestSplitHop,
+    sampleStart: hopStart * hopSamples,
+    sampleEnd:   Math.min(bestSplitHop * hopSamples, totalSamples),
+  }
+  const right = {
+    hopStart:    bestSplitHop,
+    hopEnd,
+    sampleStart: bestSplitHop * hopSamples,
+    sampleEnd:   Math.min(hopEnd * hopSamples, totalSamples),
+  }
+
   return [
-    ...splitClipBySubphrase(mk(hopStart, bestHop), shortTerm, hopSamples, totalSamples, dropDb, minHops),
-    ...splitClipBySubphrase(mk(bestHop, hopEnd), shortTerm, hopSamples, totalSamples, dropDb, minHops),
+    ...splitClipBySubphrase(left,  L_st, hopSamples, totalSamples, splitDropDb, splitMinDurationHops),
+    ...splitClipBySubphrase(right, L_st, hopSamples, totalSamples, splitDropDb, splitMinDurationHops),
   ]
 }
 
-// ── Weighted statistics ─────────────────────────────────────────────────────
+export function detectClips({ hopVoiced, L_st, hopSamples, totalSamples }) {
+  const splitMinDurationHops = Math.max(1, Math.round(SUBPHRASE_SPLIT_MIN_DURATION_MS / HOP_MS))
+  const baseClips = vadRunsToClips(hopVoiced, hopSamples, totalSamples)
+  const out = []
+  let subphraseSplits = 0
+  for (const clip of baseClips) {
+    const sub = splitClipBySubphrase(
+      clip, L_st, hopSamples, totalSamples,
+      SUBPHRASE_SPLIT_DROP_DB, splitMinDurationHops,
+    )
+    subphraseSplits += sub.length - 1
+    out.push(...sub)
+  }
+  return { clips: out, subphraseSplits }
+}
 
-function weightedMedian(values, weights) {
+// ── Per-clip LUFS and weighted statistics ────────────────────────────────────
+
+export function computeClipLufs(kwPowerSum, clip) {
+  const meanSq = meanSquareRange(kwPowerSum, clip.sampleStart, clip.sampleEnd)
+  return meanSq > 0 ? -0.691 + 10.0 * Math.log10(meanSq) : -120.0
+}
+
+export function weightedMedian(values, weights) {
   const n = values.length
   if (n === 0) return NaN
   if (n === 1) return values[0]
-  const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => values[a] - values[b])
+
+  const order = Array.from({ length: n }, (_, i) => i)
+  order.sort((a, b) => values[a] - values[b])
+
   let totalW = 0
   for (let i = 0; i < n; i++) totalW += weights[i]
   if (totalW <= 0) return values[order[Math.floor(n / 2)]]
+
+  const half = totalW / 2
   let cum = 0
   for (let i = 0; i < n; i++) {
     cum += weights[order[i]]
-    if (cum >= totalW / 2) return values[order[i]]
+    if (cum >= half) return values[order[i]]
   }
   return values[order[n - 1]]
 }
 
-function weightedStd(values, weights) {
+export function weightedStd(values, weights) {
   const n = values.length
   if (n < 2) return 0
-  let totalW = 0
-  let mean = 0
+  let totalW = 0, mean = 0
   for (let i = 0; i < n; i++) { totalW += weights[i]; mean += values[i] * weights[i] }
   if (totalW <= 0) return 0
   mean /= totalW
@@ -455,388 +519,646 @@ function weightedStd(values, weights) {
   return Math.sqrt(varSum / totalW)
 }
 
-function computeClipTargets(clipLufs, durations, sampleStarts, windowS, sampleRate, mode) {
+// ── Per-clip targets ─────────────────────────────────────────────────────────
+
+export function computeClipTargets(clipLufs, clipDurations, sampleStarts, targetWindowS, sampleRate, mode) {
   const n = clipLufs.length
   const out = new Float64Array(n)
-  const globalTarget = weightedMedian(clipLufs, durations)
-  if (mode === 'global' || n < 2) { out.fill(globalTarget); return out }
 
-  const windowSamples = Math.round(windowS * sampleRate)
+  // Global fallback target (also used when running_median has insufficient data)
+  const globalTarget = weightedMedian(Array.from(clipLufs), Array.from(clipDurations))
+
+  if (mode === 'global' || n < 2) {
+    for (let k = 0; k < n; k++) out[k] = globalTarget
+    return out
+  }
+
+  const windowSamples = Math.round(targetWindowS * sampleRate)
+  const winVals = []
+  const winWts  = []
   for (let k = 0; k < n; k++) {
-    const vals = []
-    const wts = []
+    winVals.length = 0
+    winWts.length  = 0
     const cutoff = sampleStarts[k] - windowSamples
     for (let j = 0; j <= k; j++) {
-      if (sampleStarts[j] >= cutoff) { vals.push(clipLufs[j]); wts.push(durations[j]) }
+      if (sampleStarts[j] >= cutoff) {
+        winVals.push(clipLufs[j])
+        winWts.push(clipDurations[j])
+      }
     }
-    out[k] = vals.length >= 2 ? weightedMedian(vals, wts) : globalTarget
+    out[k] = winVals.length >= 2
+      ? weightedMedian(winVals, winWts)
+      : globalTarget
   }
   return out
 }
 
-// ── Merge and crossfade ─────────────────────────────────────────────────────
+// ── Drift correction with deadband + cubic knee ──────────────────────────────
 
 /**
- * Merge adjacent clips whose gains disagree by more than MERGE_MAX_DELTA_DB.
+ * The transfer curve from "how far this clip is from its target" to "how much
+ * to move it".
  *
- * ⚠ THE TRANSPARENT FALLBACK, AND IT IS NOT A SAFETY CLAMP. A large step between
- * neighbouring clips is audible as a level jump however well the crossfade is
- * placed, so the stage gives up the correction rather than make an artefact: the
- * two become one clip at their duration-weighted average.
+ * The deadband is why this does not audibly breathe: inside it the answer is
+ * exactly zero, so a clip that is already close is left bit-identical rather
+ * than nudged by a tenth of a dB. The smoothstep knee then opens the correction
+ * continuously instead of switching it on at the deadband edge, which would put
+ * a step in the gain between two clips that differ by a hair either side of it.
  */
-function mergeClipsForGainConflict(clipsIn, gainsIn, maxDeltaDb) {
-  const clips = clipsIn.map(c => ({ ...c }))
-  const gains = Array.from(gainsIn)
-  const durs = clips.map(c => c.sampleEnd - c.sampleStart)
-  let merges = 0
+export function shapeDrift(delta, deadband, knee, maxUp, maxDown) {
+  const abs_d  = Math.abs(delta)
+  const sign_d = delta >= 0 ? 1 : -1
+  let g
+
+  if (abs_d < deadband) {
+    g = 0
+  } else if (abs_d <= deadband + knee) {
+    const x        = (abs_d - deadband) / knee      // 0..1
+    const smoothed = x * x * (3 - 2 * x)            // smoothstep
+    g = sign_d * smoothed * (abs_d - deadband)
+  } else {
+    g = sign_d * (abs_d - deadband)
+  }
+
+  return g > 0 ? Math.min(g, maxUp) : Math.max(g, -maxDown)
+}
+
+// ── Merge adjacent clips whose gain delta exceeds threshold ──────────────────
+
+/**
+ * Transparent fallback: where two neighbouring clips would be pulled more than
+ * MERGE_MAX_DELTA_DB apart, level neither and average them instead.
+ *
+ * A 6 dB step between adjacent phrases is not levelling, it is an edit — and
+ * it is nearly always the analysis being wrong about where one phrase ends
+ * rather than the narrator really having jumped. Averaging keeps the pair's
+ * relationship to the rest of the file while leaving their relationship to each
+ * other alone.
+ */
+export function mergeClipsForGainConflict(clips, gains, mergeMaxDeltaDb = MERGE_MAX_DELTA_DB) {
+  const cs   = clips.map(c => ({ ...c }))
+  const gs   = Array.from(gains)
+  const durs = cs.map(c => c.sampleEnd - c.sampleStart)
+  let mergesCount = 0
+
   let changed = true
   while (changed) {
     changed = false
-    for (let k = 0; k < clips.length - 1; k++) {
-      if (Math.abs(gains[k + 1] - gains[k]) > maxDeltaDb) {
+    for (let k = 0; k < cs.length - 1; k++) {
+      if (Math.abs(gs[k + 1] - gs[k]) > mergeMaxDeltaDb) {
         const merged = {
-          hopStart: clips[k].hopStart, hopEnd: clips[k + 1].hopEnd,
-          sampleStart: clips[k].sampleStart, sampleEnd: clips[k + 1].sampleEnd,
+          hopStart:    cs[k].hopStart,
+          hopEnd:      cs[k + 1].hopEnd,
+          sampleStart: cs[k].sampleStart,
+          sampleEnd:   cs[k + 1].sampleEnd,
         }
-        const g = (gains[k] * durs[k] + gains[k + 1] * durs[k + 1]) / (durs[k] + durs[k + 1])
-        clips.splice(k, 2, merged)
-        gains.splice(k, 2, g)
-        durs.splice(k, 2, merged.sampleEnd - merged.sampleStart)
-        merges++
+        const mDur = merged.sampleEnd - merged.sampleStart
+        // Sample-duration-weighted average gain (clamping not needed — both
+        // inputs were already within caps, average stays within them).
+        const mergedGain = (gs[k] * durs[k] + gs[k + 1] * durs[k + 1]) / (durs[k] + durs[k + 1])
+        cs.splice(k, 2, merged)
+        gs.splice(k, 2, mergedGain)
+        durs.splice(k, 2, mDur)
+        mergesCount++
         changed = true
-        break
+        break  // restart scan
       }
     }
   }
-  return { clips, gains, merges }
+
+  return { clips: cs, gains: gs, mergesCount }
 }
 
-function findLowestEnergyWindow(
-  powerSum, fromSample, toSample, windowSamples, totalSamples, blockSamples,
-) {
-  const lo = Math.max(0, fromSample)
-  const hi = Math.min(totalSamples, toSample)
+// ── Boundary crossfade plan ──────────────────────────────────────────────────
+
+function findLowestEnergyWindow(audioPowerSum, fromSample, toSample, windowSamples, totalSamples) {
+  const lo  = Math.max(0, fromSample)
+  const hi  = Math.min(totalSamples, toSample)
   const win = Math.max(1, Math.min(windowSamples, hi - lo))
   if (hi - lo <= win) return lo
-  /**
-   * ⚠ STEPPED IN BLOCKS, because the energy sum has no finer resolution — a
-   * sample-stride search would read the same block repeatedly and report ties.
-   * The window is 30 ms against a 10 ms block, so the placement moves by at
-   * most a third of a crossfade, inside a gap chosen for being quiet.
-   */
-  const stride = Math.max(blockSamples, Math.floor(win / 4))
+
+  const stride = Math.max(1, Math.floor(win / 4))
   let bestStart = lo
   let bestEnergy = Infinity
   for (let s = lo; s + win <= hi; s += stride) {
-    const e = meanSquareRange(powerSum, s, s + win, blockSamples)
+    const e = meanSquareRange(audioPowerSum, s, s + win)
     if (e < bestEnergy) { bestEnergy = e; bestStart = s }
   }
   return bestStart
 }
 
 /**
- * Where each clip-to-clip transition happens.
+ * Place a cosine crossfade for each adjacent pair of clips.
  *
- * ⚠ PLACED AT THE QUIETEST POINT IN THE GAP, NOT AT THE CLIP BOUNDARY. A gain
- * change is inaudible under silence and obvious under speech, so the transition
- * is moved to wherever there is least signal to reveal it.
+ * Gap boundaries get theirs at the quietest window inside the gap, which is
+ * where a gain change has the least signal to be heard on. Voiced-adjacent
+ * boundaries — a sub-phrase split, where there is no gap at all — straddle the
+ * split point, because there is nowhere quieter to go.
  */
-/**
- * The ramp from 0 dB into the FIRST clip's gain.
- *
- * ⚠ THE SERVER HAS NO EQUIVALENT AND STEPS INSTEAD, AND THIS PORT DELIBERATELY
- * DIVERGES. `buildSampleGainArray` there fills everything before the first clip
- * with 0 dB and the clip itself with its own gain, so the envelope jumps by the
- * whole of that gain on one sample — measured here at 6.00 dB, landing exactly
- * at the first clip's start, which is where the first word begins.
- *
- * ⚠ AND EVERY ACX FILE HITS IT, which is what makes it worth diverging over
- * rather than matching: `roomTonePad` exists to put 0.75 s of room tone at the
- * head of a narration file, so "leading silence before the first clip" is not an
- * edge case, it is the house style for the beachhead audience.
- *
- * The fix reuses the rule the other boundaries already follow — the quietest
- * crossfade-length window in the silence ahead of the clip — so a head ramp and
- * a clip-to-clip transition are the same mechanism, not two.
- *
- * Null when the first clip starts at sample 0: there is nothing before it to
- * step from, so the envelope simply begins at that clip's gain.
- */
-function buildHeadPlan(clips, gains, powerSum, crossfadeSamples, totalSamples, blockSamples) {
-  const first = clips[0]
-  if (!first || first.sampleStart <= 0) return null
-  const start = findLowestEnergyWindow(
-    powerSum, 0, first.sampleStart, crossfadeSamples, totalSamples, blockSamples,
-  )
-  return {
-    startSample: start,
-    endSample: Math.min(first.sampleStart, start + crossfadeSamples),
-    fromGain: 0,
-    toGain: gains[0],
-  }
-}
-
-function buildCrossfadePlans(
-  clips, gains, powerSum, crossfadeSamples, totalSamples, blockSamples,
-) {
+export function buildCrossfadePlans(clips, gains, audioPowerSum, crossfadeSamples, totalSamples) {
   const plans = []
   for (let k = 0; k < clips.length - 1; k++) {
-    const a = clips[k]
-    const b = clips[k + 1]
-    const start = b.sampleStart > a.sampleEnd
-      ? findLowestEnergyWindow(
-        powerSum, a.sampleEnd, b.sampleStart, crossfadeSamples, totalSamples, blockSamples,
-      )
-      : Math.max(0, a.sampleEnd - Math.floor(crossfadeSamples / 2))
+    const a = clips[k], b = clips[k + 1]
+    const gapStart = a.sampleEnd
+    const gapEnd   = b.sampleStart
+    let winStart
+    if (gapEnd > gapStart) {
+      winStart = findLowestEnergyWindow(audioPowerSum, gapStart, gapEnd, crossfadeSamples, totalSamples)
+    } else {
+      // Voiced-adjacent: straddle the boundary
+      winStart = Math.max(0, a.sampleEnd - Math.floor(crossfadeSamples / 2))
+    }
+    const winEnd = Math.min(totalSamples, winStart + crossfadeSamples)
     plans.push({
-      startSample: start,
-      endSample: Math.min(totalSamples, start + crossfadeSamples),
-      fromGain: gains[k],
-      toGain: gains[k + 1],
+      startSample: winStart,
+      endSample:   winEnd,
+      fromGain:    gains[k],
+      toGain:      gains[k + 1],
     })
   }
   return plans
 }
 
-// ── Public API ──────────────────────────────────────────────────────────────
+// ── Gain curve: segments, and the per-sample expansion of them ───────────────
 
 /**
- * Analyse a WHOLE FILE and produce the clip plan.
- *
- * @param {Float32Array[]} channels whole-file audio
- * @param {number} sampleRate
- * @param {object} [config] overrides over AUTO_LEVEL_DEFAULTS
- * @returns {{
- *   applied: boolean, skippedReason: string|null,
- *   clips: Array<{sampleStart:number,sampleEnd:number}>, gainsDb: number[],
- *   crossfadePlans: Array<object>, totalSamples: number,
- *   noiseFloorDbfs: number, clipStdDb: number, merges: number,
- *   subphraseSplits: number, maxUpDbEffective: number,
- * }}
+ * @typedef {{ startSample: number, endSample: number, fromDb: number, toDb: number }} GainSegment
+ *   A span of the timeline over which gain is either constant (fromDb === toDb)
+ *   or a raised-cosine ramp between the two.
  */
-export function analyzeAutoLevel(channels, sampleRate, config = {}) {
-  const cfg = { ...AUTO_LEVEL_DEFAULTS, ...config }
-  const totalSamples = channels?.[0]?.length ?? 0
 
-  const skip = (reason) => ({
-    applied: false, skippedReason: reason, clips: [], gainsDb: [],
-    crossfadePlans: [], totalSamples, noiseFloorDbfs: DB_FLOOR,
-    clipStdDb: 0, merges: 0, subphraseSplits: 0, maxUpDbEffective: cfg.maxUpDb,
+/**
+ * The gain curve as a segment list rather than a per-sample array.
+ *
+ * WHY THIS IS THE CANONICAL FORM HERE AND NOT ON THE SERVER. The server builds
+ * a Float32Array of one gain per sample, which is fine when it is about to
+ * stream it into a file and drop it. In a browser holding a whole chapter it is
+ * 317 MB for thirty minutes of mono at 44.1 kHz — before the AudioBuffer copy
+ * that would be needed to schedule it. The segment list is the same curve at
+ * the size of the speech structure: a few hundred entries for that chapter.
+ *
+ * Both consumers derive from this one list, which is what makes preview and
+ * apply the same curve by construction rather than by two implementations
+ * agreeing: playback schedules the segments onto an AudioParam, and apply
+ * expands them with expandGainSegments below.
+ *
+ * The layout follows the server's buildSampleGainArray exactly, including the
+ * post-roll: gain holds at the last clip's value to the end of the region
+ * rather than stepping back to 0 dB, so a trailing breath does not jump.
+ */
+export function buildGainSegments(clips, gains, crossfadePlans, totalSamples) {
+  if (clips.length === 0) {
+    return [{ startSample: 0, endSample: totalSamples, fromDb: 0, toDb: 0 }]
+  }
+
+  // ── Paint operations, in the server's order ────────────────────────────────
+  //
+  // THE ORDER IS THE ALGORITHM, and getting it wrong is silent. The server
+  // fills EVERY clip span first and only then overlays EVERY boundary, so a
+  // crossfade window that reaches past a clip edge wins over the flat fill
+  // underneath it. Emitting each clip and its following boundary together
+  // instead — the obvious reading — lets the *next* clip's fill land on top of
+  // the crossfade's second half, which flattens the back half of every
+  // voiced-adjacent fade. It shows up as a step at exactly the place the fade
+  // existed to smooth, and only on sub-phrase splits, where there is no gap for
+  // the fade to hide in.
+  const ops = []
+  const paint = (start, end, fromDb, toDb) => {
+    if (end > start) ops.push({ start, end, fromDb, toDb })
+  }
+
+  paint(0, clips[0].sampleStart, 0, 0)                       // pre-roll: 0 dB
+  for (let k = 0; k < clips.length; k++) {
+    paint(clips[k].sampleStart, clips[k].sampleEnd, gains[k], gains[k])
+  }
+  const last = clips[clips.length - 1]
+  paint(last.sampleEnd, totalSamples, gains[gains.length - 1], gains[gains.length - 1])
+
+  for (let k = 0; k < clips.length - 1; k++) {
+    const plan     = crossfadePlans[k]
+    const fromGain = gains[k]
+    const toGain   = gains[k + 1]
+    const gapStart = clips[k].sampleEnd
+    const gapEnd   = clips[k + 1].sampleStart
+
+    paint(gapStart, Math.min(plan.startSample, gapEnd), fromGain, fromGain)
+    paint(plan.startSample, plan.endSample, fromGain, toGain)
+    paint(Math.max(plan.endSample, gapStart), gapEnd, toGain, toGain)
+  }
+
+  return overlayOps(ops, totalSamples)
+}
+
+/**
+ * Flatten overlapping paint operations into a segment list that tiles
+ * [0, totalSamples) exactly once, last writer winning.
+ *
+ * A sweep rather than a stack, because the winner of a span is not generally
+ * the operation before it in the list: every crossfade is painted after every
+ * clip, so the thing a fade overwrites was emitted long earlier. Cutting the
+ * timeline at every operation edge and asking which operation covers each
+ * elementary interval gets that right without caring about the list's shape.
+ *
+ * RAMPS ARE NEVER SPLIT. A cosine is not linear, so a fade emitted as two
+ * half-fades with interpolated endpoints is a different curve. It never has to
+ * be: crossfade windows cannot overlap each other (clips are >= 200 ms after
+ * VAD hysteresis, fades are 30 ms), so any interval a ramp wins, it wins the
+ * whole of. Consecutive intervals won by the same operation are regrouped
+ * below, which restores a ramp that an unrelated edge — the clip boundary a
+ * voiced-adjacent fade straddles — happened to cut in two.
+ */
+function overlayOps(ops, totalSamples) {
+  const edges = new Set([0, totalSamples])
+  for (const op of ops) {
+    if (op.start > 0 && op.start < totalSamples) edges.add(op.start)
+    if (op.end   > 0 && op.end   < totalSamples) edges.add(op.end)
+  }
+  const cuts = Array.from(edges).sort((a, b) => a - b)
+
+  // Winner per elementary interval: the last operation that covers it.
+  const winners = new Array(cuts.length - 1).fill(null)
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const a = cuts[i], b = cuts[i + 1]
+    for (let j = ops.length - 1; j >= 0; j--) {
+      if (ops[j].start <= a && ops[j].end >= b) { winners[i] = ops[j]; break }
+    }
+  }
+
+  /** @type {GainSegment[]} */
+  const segments = []
+  let i = 0
+  while (i < cuts.length - 1) {
+    const op = winners[i]
+    let j = i
+    while (j + 1 < cuts.length - 1 && winners[j + 1] === op) j++
+
+    const start = cuts[i]
+    const end   = cuts[j + 1]
+
+    if (!op) {
+      // Uncovered — only reachable if the ops leave a hole, which the pre-roll
+      // and post-roll rule out. Hold the level either side rather than dropping
+      // to unity mid-file.
+      const fill = segments.length ? segments[segments.length - 1].toDb : 0
+      segments.push({ startSample: start, endSample: end, fromDb: fill, toDb: fill })
+    } else if (op.fromDb === op.toDb) {
+      const prev = segments[segments.length - 1]
+      if (prev && prev.endSample === start && prev.fromDb === prev.toDb && prev.toDb === op.fromDb) {
+        prev.endSample = end   // coalesce abutting holds at the same level
+      } else {
+        segments.push({ startSample: start, endSample: end, fromDb: op.fromDb, toDb: op.toDb })
+      }
+    } else {
+      segments.push({ startSample: op.start, endSample: op.end, fromDb: op.fromDb, toDb: op.toDb })
+    }
+
+    i = j + 1
+  }
+
+  return segments
+}
+
+/** The raised-cosine weight used by every ramp segment. 0 at t=0, 1 at t=1. */
+export function crossfadeWeight(t) {
+  return 0.5 - 0.5 * Math.cos(Math.PI * t)
+}
+
+/**
+ * Expand segments to one gain in dB per sample — the server's gainSr.
+ *
+ * Only the apply path calls this, over the region being written. Preview never
+ * does; see buildGainSegments for why.
+ */
+export function expandGainSegments(segments, totalSamples) {
+  const g = new Float32Array(totalSamples)
+  for (const seg of segments) {
+    const start = Math.max(0, seg.startSample)
+    const end   = Math.min(totalSamples, seg.endSample)
+    if (end <= start) continue
+    if (seg.fromDb === seg.toDb) {
+      g.fill(seg.fromDb, start, end)
+      continue
+    }
+    const len = seg.endSample - seg.startSample
+    for (let i = start; i < end; i++) {
+      const w = crossfadeWeight((i - seg.startSample) / len)
+      g[i] = seg.fromDb * (1 - w) + seg.toDb * w
+    }
+  }
+  return g
+}
+
+/** Gain in dB at one sample position — for the meter, which needs one value. */
+export function gainDbAtSample(segments, sample) {
+  // Segments tile the region in order, so a binary search is exact.
+  let lo = 0, hi = segments.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    const seg = segments[mid]
+    if (sample < seg.startSample) hi = mid - 1
+    else if (sample >= seg.endSample) lo = mid + 1
+    else {
+      if (seg.fromDb === seg.toDb) return seg.fromDb
+      const w = crossfadeWeight((sample - seg.startSample) / (seg.endSample - seg.startSample))
+      return seg.fromDb * (1 - w) + seg.toDb * w
+    }
+  }
+  return 0
+}
+
+// ── Phase 1: prepare (audio + VAD dependent, runs once) ──────────────────────
+
+/**
+ * @typedef {Object} PreparedAutoLevel
+ * @property {boolean} applicable
+ * @property {string|null} reason        - why not, when applicable is false
+ * @property {Clip[]} clips
+ * @property {number[]} clipLufs
+ * @property {number[]} clipDurations
+ * @property {number[]} sampleStarts
+ * @property {number} inClipStd          - duration-weighted std of clip LUFS
+ * @property {number} subphraseSplits
+ * @property {number} sampleRate
+ * @property {number} totalSamples
+ * @property {number} noiseFloorDbfs
+ * @property {BlockPowerSum} audioPowerSum
+ */
+
+/**
+ * Everything derived from the audio and the mask, before any control is read.
+ *
+ * The skip conditions are the server's and they are about honesty rather than
+ * cost: under ten seconds, or under five seconds of speech, there are not
+ * enough phrases for a median to mean anything, and a leveler fitted to two
+ * clips is just a random gain change.
+ *
+ * @param {Object} input
+ * @param {Float32Array} input.audio        mono
+ * @param {number} input.sampleRate
+ * @param {Uint8Array} input.frameVoiced    raw per-frame mask (pre-hysteresis)
+ * @param {number} input.frameDurationS
+ * @param {number} input.noiseFloorDbfs
+ * @returns {PreparedAutoLevel}
+ */
+export function prepareAutoLevel({ audio, sampleRate, frameVoiced, frameDurationS, noiseFloorDbfs }) {
+  const n = audio.length
+  const fail = reason => ({ applicable: false, reason, clips: [], sampleRate, totalSamples: n })
+
+  if (n / sampleRate < MIN_FILE_DURATION_S) return fail('duration_too_short')
+
+  const hopSamples = Math.round(HOP_MS * 0.001 * sampleRate)
+  const numHops    = Math.floor(n / hopSamples)
+  if (numHops === 0) return fail('duration_too_short')
+
+  const conditioned = conditionVoicedMask(frameVoiced, frameDurationS)
+  const hopVoiced   = frameVoicedToHopVoiced(conditioned, frameDurationS, numHops)
+
+  let voicedHops = 0
+  for (let h = 0; h < numHops; h++) voicedHops += hopVoiced[h]
+  if (voicedHops * HOP_MS * 0.001 < MIN_VOICED_DURATION_S) {
+    return fail('insufficient_voiced_audio')
+  }
+
+  // K-weight once; reuse for L_st (sub-phrase splitting) and per-clip LUFS.
+  // The K-weighted copy is the only full-length array this pass allocates; the
+  // raw-audio index borrows the caller's samples and adds only its block table.
+  const kwSamples     = applyKWeighting(audio, sampleRate)
+  const kwPowerSum    = new BlockPowerSum(kwSamples)
+  const audioPowerSum = new BlockPowerSum(audio)
+
+  const windowSt = Math.round(ST_WINDOW_MS * 0.001 * sampleRate)
+  const L_st     = computeLufsCurve(kwPowerSum, hopVoiced, windowSt, hopSamples, n)
+
+  const { clips, subphraseSplits } = detectClips({
+    hopVoiced, L_st, hopSamples, totalSamples: n,
   })
 
-  if (!channels || channels.length === 0 || totalSamples === 0) return skip('empty')
-  if (totalSamples < MIN_FILE_DURATION_S * sampleRate) return skip('file_too_short')
+  if (clips.length < 2) return fail('insufficient_clips')
 
-  const { voiced: rawVoiced, noiseFloorDbfs } = voicedFramesByEnergy(
-    channels, sampleRate, totalSamples,
-  )
-  const voiced = applyVadHysteresis(rawVoiced)
+  const clipLufs      = clips.map(c => computeClipLufs(kwPowerSum, c))
+  const clipDurations = clips.map(c => c.sampleEnd - c.sampleStart)
+  const sampleStarts  = clips.map(c => c.sampleStart)
+  const inClipStd     = weightedStd(clipLufs, clipDurations)
 
-  let voicedFrames = 0
-  for (let i = 0; i < voiced.length; i++) voicedFrames += voiced[i]
-  if (voicedFrames * (FRAME_MS / 1000) < MIN_VOICED_DURATION_S) return skip('not_enough_voiced')
+  return {
+    applicable: true,
+    reason: null,
+    clips,
+    clipLufs,
+    clipDurations,
+    sampleStarts,
+    inClipStd,
+    subphraseSplits,
+    sampleRate,
+    totalSamples: n,
+    noiseFloorDbfs: Number.isFinite(noiseFloorDbfs) ? noiseFloorDbfs : -60,
+    audioPowerSum,
+  }
+}
 
-  /**
-   * ⚠ HOP DERIVED FROM BLOCK, so a clip boundary is always a whole number of
-   * blocks and `meanSquareRange`'s rounding is exact for it. See BLOCK_MS.
-   */
-  const blockSamples = Math.max(1, Math.round((BLOCK_MS / 1000) * sampleRate))
-  const hopSamples = blockSamples * BLOCKS_PER_HOP
-  const numHops = Math.floor(totalSamples / hopSamples)
-  if (numHops < 2) return skip('file_too_short')
-  const framesPerHop = Math.max(1, Math.round(HOP_MS / FRAME_MS))
-  const hopVoiced = frameVoicedToHopVoiced(voiced, framesPerHop, numHops)
+// ── Phase 2: solve (config dependent, runs on every knob move) ───────────────
 
-  const kwPowerSum = kWeightedBlockEnergy(channels, sampleRate, totalSamples, blockSamples)
+/**
+ * @typedef {Object} SolvedAutoLevel
+ * @property {boolean} applied
+ * @property {string|null} reason
+ * @property {GainSegment[]} segments
+ * @property {Clip[]} clips              - post-merge
+ * @property {number[]} gains            - post-merge, dB
+ * @property {Object} measurements
+ */
 
-  // Short-term loudness per hop, for sub-phrase splitting. One hop's own window
-  // — the server uses the same span for this curve.
-  const shortTerm = new Float64Array(numHops)
-  for (let h = 0; h < numHops; h++) {
-    const a = h * hopSamples
-    shortTerm[h] = lufsOf(meanSquareRange(
-      kwPowerSum, a, Math.min(a + hopSamples, totalSamples), blockSamples,
-    ))
+/**
+ * Turn the prepared analysis into a gain curve under the current settings.
+ *
+ * O(clips) apart from the crossfade search, which touches only the gaps. No
+ * audio is re-read and nothing is re-filtered, which is what makes the controls
+ * feel live on a chapter-length selection.
+ */
+export function solveAutoLevel(prepared, config = AUTOLEVEL_DEFAULTS) {
+  if (!prepared?.applicable) {
+    return {
+      applied: false,
+      reason: prepared?.reason ?? 'not_analyzed',
+      segments: [],
+      clips: [],
+      gains: [],
+      measurements: null,
+    }
   }
 
-  const minHops = Math.max(1, Math.round(SUBPHRASE_SPLIT_MIN_DURATION_MS / HOP_MS))
-  const baseClips = vadRunsToClips(hopVoiced, hopSamples, totalSamples)
-  const clips = []
-  let subphraseSplits = 0
-  for (const clip of baseClips) {
-    const sub = splitClipBySubphrase(
-      clip, shortTerm, hopSamples, totalSamples, SUBPHRASE_SPLIT_DROP_DB, minHops,
-    )
-    subphraseSplits += sub.length - 1
-    clips.push(...sub)
-  }
-  if (clips.length === 0) return skip('no_clips')
+  const {
+    clips, clipLufs, clipDurations, sampleStarts, inClipStd,
+    subphraseSplits, sampleRate, totalSamples, noiseFloorDbfs, audioPowerSum,
+  } = prepared
 
-  const clipLufs = clips.map(
-    c => lufsOf(meanSquareRange(kwPowerSum, c.sampleStart, c.sampleEnd, blockSamples)),
-  )
-  const durations = clips.map(c => c.sampleEnd - c.sampleStart)
-  const sampleStarts = clips.map(c => c.sampleStart)
-
-  /**
-   * ⚠ THE SKIP IS TIED TO THE DEADBAND, NOT TO A SEPARATE NUMBER. If the spread
-   * across clips is already inside the deadband then every clip would solve to
-   * exactly zero, and the stage would run in full to produce an identity. Tying
-   * the two keeps "already level" meaning one thing.
-   */
-  const clipStdDb = weightedStd(clipLufs, durations)
-  if (clipStdDb < cfg.deadbandDb) {
-    return { ...skip('file_already_leveled'), noiseFloorDbfs, clipStdDb }
+  // Already level: every clip would land inside the deadband, so the whole
+  // stage is a no-op. Tying this to the deadband rather than a constant keeps
+  // the file-level and per-clip no-op conditions the same condition.
+  if (inClipStd < config.deadband_db) {
+    return {
+      applied: false,
+      reason: 'file_already_leveled',
+      segments: [],
+      clips: [],
+      gains: [],
+      measurements: { input_clip_lufs_std_db: inClipStd, clip_count_initial: clips.length },
+    }
   }
 
-  /**
-   * ⚠ THE NOISE FLOOR CAPS HOW FAR ANYTHING MAY BE RAISED. Lifting a quiet clip
-   * lifts its room tone with it, and a leveller that hands the user a louder
-   * noise floor than they started with has made the file worse in the one
-   * dimension ACX actually measures. 3 dB of margin below the target.
-   */
-  const nfHeadroom = Math.max(0, (cfg.noiseFloorTargetDbfs - noiseFloorDbfs) - 3)
-  const maxUpDbEffective = Math.min(cfg.maxUpDb, nfHeadroom)
+  // Noise-floor headroom cap. Lifting a quiet clip lifts its room tone with it,
+  // so the boost available is whatever distance the floor has left before it
+  // reaches the target, less 3 dB of margin.
+  const nfHeadroom  = Math.max(0, (config.noise_floor_target_dbfs - noiseFloorDbfs) - 3)
+  const maxUpEff    = Math.min(config.max_up_db, nfHeadroom)
+  const nfCapActive = maxUpEff < config.max_up_db
 
   const targets = computeClipTargets(
-    clipLufs, durations, sampleStarts, cfg.targetWindowS, sampleRate, cfg.targetMode,
+    clipLufs, clipDurations, sampleStarts,
+    config.target_window_s, sampleRate, config.target_mode,
   )
-  const rawGains = clipLufs.map((lufs, k) => shapeDrift(
-    targets[k] - lufs, cfg.deadbandDb, cfg.kneeDb, maxUpDbEffective, cfg.maxDownDb,
+
+  const gains = clipLufs.map((lufs, k) => shapeDrift(
+    targets[k] - lufs,
+    config.deadband_db,
+    config.knee_db,
+    maxUpEff,
+    config.max_down_db,
   ))
 
-  const merged = mergeClipsForGainConflict(clips, rawGains, MERGE_MAX_DELTA_DB)
-  const crossfadeSamples = Math.max(1, Math.round((CROSSFADE_MS / 1000) * sampleRate))
-  const crossfadePlans = buildCrossfadePlans(
-    merged.clips, merged.gains, kwPowerSum, crossfadeSamples, totalSamples, blockSamples,
+  const merged = mergeClipsForGainConflict(clips, gains)
+
+  const crossfadeSamples = Math.max(1, Math.round(CROSSFADE_MS * 0.001 * sampleRate))
+  const plans = buildCrossfadePlans(
+    merged.clips, merged.gains, audioPowerSum, crossfadeSamples, totalSamples,
   )
-  const headPlan = buildHeadPlan(
-    merged.clips, merged.gains, kwPowerSum, crossfadeSamples, totalSamples, blockSamples,
+
+  const segments = buildGainSegments(merged.clips, merged.gains, plans, totalSamples)
+
+  // Gain stats over merged clips, duration-weighted — the same numbers the
+  // server reports, so a levelled selection can be compared with a mastered one.
+  let maxUp = -Infinity, maxDown = Infinity
+  let powSum = 0, dSum = 0
+  for (let k = 0; k < merged.gains.length; k++) {
+    const g = merged.gains[k]
+    if (g > maxUp)   maxUp   = g
+    if (g < maxDown) maxDown = g
+    const lin = Math.pow(10, g / 20.0)
+    const d   = merged.clips[k].sampleEnd - merged.clips[k].sampleStart
+    powSum += lin * lin * d
+    dSum   += d
+  }
+  const gainRmsDb = dSum > 0 ? 20 * Math.log10(Math.sqrt(powSum / dSum)) : 0
+
+  // Predicted output spread. The gain is flat within a clip, so a clip's output
+  // LUFS is its input LUFS plus its gain exactly — no need to re-measure the
+  // processed audio the way the server does after rendering it.
+  const outLufs = merged.clips.map(
+    (c, k) => clipLufsForMerged(clipLufs, clips, c) + merged.gains[k],
   )
+  const outDurs = merged.clips.map(c => c.sampleEnd - c.sampleStart)
+  const outClipStd = weightedStd(outLufs, outDurs)
 
   return {
     applied: true,
-    skippedReason: null,
+    reason: null,
+    segments,
     clips: merged.clips,
-    gainsDb: merged.gains,
-    /**
-     * Each clip's measured K-weighted loudness, ungated. Reported rather than
-     * kept private so the panel can show what was measured instead of only what
-     * was decided — and so the chunked filtering above can be checked against an
-     * independent single-pass measurement, which is the only direct test of it.
-     */
-    clipLufs: merged.clips.map(
-      c => lufsOf(meanSquareRange(kwPowerSum, c.sampleStart, c.sampleEnd, blockSamples)),
-    ),
-    crossfadePlans,
-    headPlan,
-    totalSamples,
-    noiseFloorDbfs,
-    clipStdDb,
-    merges: merged.merges,
-    subphraseSplits,
-    maxUpDbEffective,
+    gains: merged.gains,
+    measurements: {
+      input_clip_lufs_std_db:  inClipStd,
+      output_clip_lufs_std_db: outClipStd,
+      clip_count_initial:      clips.length,
+      clip_count_after_merge:  merged.clips.length,
+      subphrase_splits_count:  subphraseSplits,
+      merges_count:            merged.mergesCount,
+      gain_max_up_db:          maxUp   === -Infinity ? 0 : maxUp,
+      gain_max_down_db:        maxDown ===  Infinity ? 0 : maxDown,
+      gain_rms_db:             gainRmsDb,
+      noise_floor_cap_active:  nfCapActive,
+      max_up_effective_db:     maxUpEff,
+    },
   }
 }
 
 /**
- * The gain envelope, in dB, over an arbitrary span of the analysed file.
+ * Energy-weighted LUFS of a merged clip, from the pre-merge measurements.
  *
- * ⚠ ANY SPAN, INCLUDING ONE THAT STARTS BEFORE THE REGION BEING APPLIED. That is
- * the whole reason this is separate from the analysis: the offline apply path
- * renders a pre-roll ahead of its region, and that pre-roll has to carry the
- * same gain the preview gave it or the compressors downstream meet a step
- * exactly where the region begins.
+ * A merge concatenates two spans, and LUFS is a log of a mean square, so the
+ * combined value is the duration-weighted mean of the two *powers* — averaging
+ * the dB values instead would be wrong by up to 3 dB on an uneven pair.
+ */
+function clipLufsForMerged(clipLufs, originalClips, mergedClip) {
+  let powSum = 0, dSum = 0
+  for (let i = 0; i < originalClips.length; i++) {
+    const c = originalClips[i]
+    if (c.sampleStart >= mergedClip.sampleStart && c.sampleEnd <= mergedClip.sampleEnd) {
+      const d = c.sampleEnd - c.sampleStart
+      powSum += Math.pow(10, (clipLufs[i] + 0.691) / 10) * d
+      dSum   += d
+    }
+  }
+  if (dSum === 0) return -120
+  return -0.691 + 10 * Math.log10(powSum / dSum)
+}
+
+/**
+ * Multiply a window of the curve into a region's channels.
  *
- * Outside the analysed file the envelope holds its edge value (0 dB before the
- * first clip, the last clip's gain after it), matching what the preview's
- * modulator does when it runs past its buffer.
+ * WALKS THE SEGMENTS RATHER THAN EXPANDING THEM. Calling expandGainSegments
+ * first would be shorter, and would also allocate a second full-length
+ * Float32Array beside the rendered audio — on the chapter-length selections
+ * this plugin is for, that is another 317 MB per thirty minutes at the exact
+ * moment memory is already at its peak. Walking costs one branch per segment
+ * instead, and there are a few hundred of them.
  *
- * @param {object} analysis result of analyzeAutoLevel
- * @param {number} startSample first sample of the span, may be negative
+ * expandGainSegments stays as the reference expansion: it is what the parity
+ * suite checks against the server, and autoLevelApply.test.js checks this
+ * against it, so the lean path is pinned to the verified one.
+ *
+ * @param {Float32Array[]} channels    rendered region, `numSamples` long
+ * @param {GainSegment[]} segments     curve over the ANALYSED region
  * @param {number} numSamples
- * @returns {Float32Array} per-sample gain in dB
+ * @param {number} offsetSamples       where this region starts within the
+ *                                     analysed one — non-zero when the user
+ *                                     analysed a span and applies part of it
  */
-export function renderAutoLevelGainDb(analysis, startSample, numSamples) {
-  const out = new Float32Array(numSamples)
-  if (!analysis?.applied || analysis.clips.length === 0) return out
+export function applyGainSegments(channels, segments, numSamples, offsetSamples = 0) {
+  // Start from a copy rather than zeros. The segments tile the analysed region,
+  // but a caller can hand over a window reaching past it — and an uncovered
+  // sample must be untouched audio, not silence. Zero-filling makes that
+  // failure inaudible in testing and catastrophic in use.
+  const out = channels.map((ch) => {
+    const dst = new Float32Array(numSamples)
+    dst.set(ch.subarray(0, Math.min(numSamples, ch.length)))
+    return dst
+  })
 
-  const { clips, gainsDb, crossfadePlans, headPlan } = analysis
-  const lastGain = gainsDb[gainsDb.length - 1]
-  const lastEnd = clips[clips.length - 1].sampleEnd
-  const firstStart = clips[0].sampleStart
+  for (const seg of segments) {
+    // Intersect the segment with the window, in window coordinates.
+    const from = Math.max(0, seg.startSample - offsetSamples)
+    const to   = Math.min(numSamples, seg.endSample - offsetSamples)
+    if (to <= from) continue
 
-  /**
-   * ⚠ A CURSOR, NOT A SEARCH PER SAMPLE. The obvious implementation asks "which
-   * clip is sample i in" for every sample, which is O(samples x clips) — on a
-   * 60 s file with 100 clips that is 260 million comparisons to produce one
-   * envelope, and the envelope is rebuilt on every apply. Samples are requested
-   * in order, so the clip index only ever moves forward.
-   */
-  let k = 0
-  for (let n = 0; n < numSamples; n++) {
-    const i = startSample + n
-
-    if (i >= lastEnd) { out[n] = lastGain; continue }
-    if (i < firstStart) {
-      // Head: 0 dB, then the ramp into the first clip's gain.
-      out[n] = headPlan == null ? gainsDb[0]
-        : i < headPlan.startSample ? 0
-          : i >= headPlan.endSample ? headPlan.toGain
-            : blend(headPlan, i)
+    if (seg.fromDb === seg.toDb) {
+      const lin = Math.pow(10, seg.fromDb / 20.0)
+      for (let c = 0; c < channels.length; c++) {
+        const src = channels[c], dst = out[c]
+        for (let i = from; i < to; i++) dst[i] = src[i] * lin
+      }
       continue
     }
 
-    // Advance to the clip containing i, or to the first clip starting after it.
-    while (k < clips.length - 1 && i >= clips[k].sampleEnd) k++
-    // A span can start mid-file, so the cursor may also need to move BACK on
-    // the first sample; after that it only advances.
-    while (k > 0 && i < clips[k].sampleStart && i < clips[k - 1].sampleEnd) k--
-
-    const clip = clips[k]
-    if (i < clip.sampleStart) {
-      // In the gap before clip k — plan k-1 carries the transition into it.
-      const plan = crossfadePlans[k - 1]
-      out[n] = plan == null ? gainsDb[k]
-        : i < plan.startSample ? plan.fromGain
-          : i >= plan.endSample ? plan.toGain
-            : blend(plan, i)
-      continue
+    const len = seg.endSample - seg.startSample
+    for (let i = from; i < to; i++) {
+      // Phase is measured against the segment's own start, so a fade clipped by
+      // the window keeps the shape it would have had uncut.
+      const w  = crossfadeWeight((i + offsetSamples - seg.startSample) / len)
+      const db = seg.fromDb * (1 - w) + seg.toDb * w
+      const lin = Math.pow(10, db / 20.0)
+      for (let c = 0; c < channels.length; c++) out[c][i] = channels[c][i] * lin
     }
-
-    // Inside clip k, unless a crossfade window reaches in over it from either
-    // side — a window placed at a voiced-adjacent boundary straddles the join.
-    const before = k > 0 ? crossfadePlans[k - 1] : null
-    if (before && i >= before.startSample && i < before.endSample) {
-      out[n] = blend(before, i)
-      continue
-    }
-    const after = k < crossfadePlans.length ? crossfadePlans[k] : null
-    if (after && i >= after.startSample && i < after.endSample) {
-      out[n] = blend(after, i)
-      continue
-    }
-    out[n] = gainsDb[k]
   }
-  return out
-}
 
-/** Cosine blend across one crossfade plan. */
-function blend(plan, i) {
-  const len = plan.endSample - plan.startSample
-  if (len <= 0) return plan.toGain
-  const t = (i - plan.startSample) / len
-  const w = 0.5 - 0.5 * Math.cos(Math.PI * t)
-  return plan.fromGain * (1 - w) + plan.toGain * w
-}
-
-/**
- * Convenience: the envelope as a linear multiplier for the whole analysed file.
- * Preview drives an AudioParam from this; see the de-esser for that pattern.
- */
-export function renderAutoLevelGainLinear(analysis, startSample, numSamples) {
-  const db = renderAutoLevelGainDb(analysis, startSample, numSamples)
-  const out = new Float32Array(db.length)
-  for (let i = 0; i < db.length; i++) out[i] = Math.pow(10, db[i] / 20)
   return out
 }

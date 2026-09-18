@@ -58,6 +58,7 @@
 import vocalChainDynamics from './vocal-chain-dynamics.js'
 import autoLevel from './auto-level.js'
 import airBand from './air-band.js'
+import autoLeveler from './auto-leveler.js'
 import clipGainDeesser from './clip-gain-deesser.js'
 import fetPunch from './fet-punch.js'
 import humRemover from './hum-remover.js'
@@ -79,6 +80,7 @@ export const HELP = {
   'vocal-chain-dynamics': vocalChainDynamics,
   'auto-level': autoLevel,
   'air-band': airBand,
+  'auto-leveler': autoLeveler,
   'clip-gain-deesser': clipGainDeesser,
   'fet-punch': fetPunch,
   'hum-remover': humRemover,

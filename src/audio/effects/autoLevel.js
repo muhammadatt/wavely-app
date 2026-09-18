@@ -1,114 +1,216 @@
 /**
- * Auto Level — real-time effect chain wrapper.
+ * Auto Leveler — real-time effect chain wrapper.
  *
- * NO WORKLET, AND NO DSP AT PLAY TIME — the same arrangement `clipGainDeEss.js`
- * uses, for the same reason. The gain is fully known before a sample is played:
- * `dsp/autoLevel.js` segments the file into voiced clips and solves one flat
- * gain per clip offline. So the envelope is rendered into an AudioBuffer and
- * used to drive a GainNode's `gain` AudioParam directly. Latency is zero, and
- * the offline apply path multiplies the same numbers into the same samples.
+ * NO WORKLET, AND NO DSP AT PLAY TIME, for the same reason as the clip-gain
+ * de-esser: the gain curve is fully known before a sample is played. Where the
+ * two differ is how the curve reaches the graph.
  *
- * ⚠ THE BUFFER HOLDS DEVIATION FROM UNITY, NOT THE ENVELOPE ITSELF. An
- * AudioParam SUMS its intrinsic value with whatever is connected to it, so with
- * `gain.value = 1` and a buffer of `envelope - 1` the result is `envelope`. The
- * obvious alternative — `gain.value = 0` and a buffer of the envelope — is the
- * same arithmetic with a far worse failure mode: any moment with no modulator
- * running (before playback, after the buffer ends, between seeks) would be
- * silence rather than clean pass-through.
+ * THE DE-ESSER'S TRICK DOES NOT SCALE HERE. It renders its envelope into an
+ * AudioBuffer and drives the gain AudioParam with it, which is exact and cheap
+ * because a de-essed region is a selection of a few phrases. A leveler is used
+ * on whole chapters — that is the point of it — and one Float32 per sample is
+ * 317 MB for thirty minutes of mono at 44.1 kHz, plus as much again for the
+ * AudioBuffer copy. On a file long enough to need levelling, the buffer
+ * approach allocates more memory than the audio it is levelling.
  *
- * ⚠ THE ENVELOPE IS REGION-SCOPED THOUGH THE ANALYSIS IS WHOLE-FILE, and the
- * two must not be confused. `analyzeAutoLevel` measures the whole timeline
- * because clip targets are a running median over neighbours — analysing only a
- * selection would give one answer for a phrase and another for the paragraph
- * containing it. But the BUFFER covers only the region being previewed: a
- * whole-timeline buffer is 635 MB of Float32 for a one-hour chapter.
- * `renderAutoLevelGainDb` takes an absolute start sample so the two can differ.
+ * So the curve is SCHEDULED, not sampled. Gain is piecewise constant with 30 ms
+ * cosine fades between clips, so the whole chapter is a few hundred automation
+ * events: `setValueAtTime` for each hold, `setValueCurveAtTime` for each fade,
+ * with the fade's curve handed over at one point per sample so Web Audio's
+ * linear interpolation between points lands on the cosine exactly. Memory
+ * scales with the number of phrases rather than the number of samples.
+ *
+ * PREVIEW AND APPLY ARE THE SAME CURVE BY CONSTRUCTION. Both read the segment
+ * list out of solveAutoLevel — this module schedules it, dsp/autoLevel's
+ * expandGainSegments expands it — so there is no second implementation of the
+ * curve to drift. autoLevelSegments.test.js pins the two against each other.
+ *
+ * ABSOLUTE GAIN, NOT DEVIATION FROM UNITY. The de-esser's buffer holds
+ * `envelope - 1` so that a moment with no modulator running is clean
+ * pass-through rather than silence. Automation has no such failure mode: the
+ * param holds its last scheduled value, and `stopTransport` cancels back to 1.
  */
 
 import { createLevelTap } from './levelTap.js'
-import { scheduleEnvelope } from './envelopeSchedule.js'
+import { crossfadeWeight, gainDbAtSample } from '../dsp/autoLevel.js'
 
-export function createAutoLevel(audioContext) {
+/**
+ * Hard cap on points for one fade, in case a caller hands over a long ramp.
+ *
+ * A 30 ms fade needs 1324, so this is headroom rather than a real limit; past
+ * it the curve is spread over fewer points and Web Audio's interpolation
+ * between them is linear-in-gain rather than following the cosine exactly.
+ */
+const MAX_CURVE_POINTS = 8192
+
+const dbToLin = db => Math.pow(10, db / 20)
+
+/**
+ * Render one ramp segment as the linear-gain curve `setValueCurveAtTime` wants.
+ *
+ * The weight function is the DSP module's, not a copy of it: the scheduled
+ * fade and the rendered one have to be the same cosine, and two spellings of
+ * `0.5 - 0.5cos(pi t)` in two files is precisely how that stops being true.
+ *
+ * Interpolation happens in dB and is converted to linear per point, which is
+ * what expandGainSegments does. Interpolating linear gain directly would be a
+ * different — and audibly duller — fade across a large step.
+ */
+export function renderRampCurve(segment, sampleRate) {
+  const lengthSamples = segment.endSample - segment.startSample
+  // ONE POINT PER SAMPLE BOUNDARY, WHICH IS lengthSamples + 1, NOT lengthSamples.
+  // Web Audio spreads N curve points across the duration at intervals of
+  // duration/(N-1) — the last point lands ON the end, not one step short of it.
+  // With N = length + 1 the spacing is exactly one sample and point i sits on
+  // sample startSample + i, so the scheduled curve and expandGainSegments read
+  // the same phase. Using N = length instead stretches the cosine by one part
+  // in `length`, which is inaudible and still wrong: it puts preview and apply
+  // on curves that differ, which is the one property this design exists to have.
+  const points = Math.min(MAX_CURVE_POINTS, Math.max(2, lengthSamples + 1))
+  const denom = points - 1
+  const curve = new Float32Array(points)
+  for (let i = 0; i < points; i++) {
+    const w = crossfadeWeight(i / denom)
+    curve[i] = dbToLin(segment.fromDb * (1 - w) + segment.toDb * w)
+  }
+  return curve
+}
+
+export function createAutoLeveler(audioContext) {
   const input = audioContext.createGain()
   const gainNode = audioContext.createGain()
   const output = audioContext.createGain()
 
-  // Unity intrinsic value: with no modulator connected this is a straight wire.
   gainNode.gain.value = 1
   input.connect(gainNode)
   gainNode.connect(output)
 
   let destroyed = false
-  let envelopeBuffer = null
-  let envelopeDeviation = null
-  let regionStartSec = 0
-  let modulator = null
 
-  // Transport anchor, so getGainDb() can read the envelope at the position that
-  // is actually sounding rather than at the scheduler's clock.
+  /** The solved curve: segment list plus where on the timeline it starts. */
+  let segments = null
+  let regionStartSec = 0
+  let curveSampleRate = audioContext.sampleRate
+
+  // Transport anchor, so getGainDb() can read the curve at the position that is
+  // actually sounding rather than the one being scheduled.
   let transportWhen = 0
   let transportStartSec = 0
   let running = false
-  let lastReadIdx = -1
+  /** Anchor for a pass booked into the lookahead window but not yet sounding. */
+  let pending = null
 
   /**
-   * Stop the scheduled envelope. `when` is a context time to stop *at*, which is
-   * what makes a gapless loop possible: the next pass is booked slightly ahead
-   * of the seam, and the pass still sounding has to run TO the seam rather than
-   * be cut off the moment its replacement is scheduled.
+   * Stop the scheduled curve. `when` is a context time to stop AT, and that is
+   * what makes a gapless loop possible.
+   *
+   * ⚠ PLAYBACK BOOKS THE NEXT LOOP PASS BEFORE THE CURRENT ONE ENDS. It calls
+   * `startTransport(passEndsAt, loopFrom)` a TRANSPORT_LOOKAHEAD_SEC (60 ms)
+   * ahead of the seam, with `when` in the future. Cancelling at `currentTime`
+   * there does not tidy up the outgoing pass — it kills automation that is
+   * still sounding, and the leveler drops to unity for the last 60 ms of every
+   * repeat. Cancelling at `when` leaves everything scheduled before the seam
+   * intact and clears only what the next pass is about to replace.
+   *
+   * Omitted — a transport stop, a new curve, teardown — it cancels immediately
+   * and returns the param to unity, which is the pass-through the de-esser gets
+   * for free by storing deviation instead of absolute gain.
    */
   function stopTransport(when) {
-    lastReadIdx = -1
-    if (!modulator) return
-    const node = modulator
-    try {
-      if (when !== undefined && when > audioContext.currentTime) {
-        // Left connected deliberately — it is still sounding until `when`.
-        node.stop(when)
-      } else {
-        node.stop()
-        node.disconnect()
-      }
-    } catch {
-      // Already stopped — starting and stopping in the same tick is normal.
+    if (destroyed) return
+
+    const now = audioContext.currentTime
+    const future = when !== undefined && when > now
+    if (!future) {
+      running = false
+      pending = null
     }
-    modulator = null
-    running = false
+
+    try {
+      gainNode.gain.cancelScheduledValues(future ? when : now)
+    } catch {
+      // Nothing scheduled.
+    }
+    if (!future) gainNode.gain.value = 1
   }
 
+  /**
+   * Schedule the curve against a playback starting at `startSec` on the
+   * timeline and sounding from context time `when`.
+   *
+   * Everything before `startSec` is skipped; the value in force at that point
+   * is set at `when` so a seek into the middle of a phrase starts at that
+   * phrase's gain rather than ramping into it from unity.
+   */
   function startTransport(when, startSec) {
+    // Hand the outgoing pass the time it is allowed to run to. When `when` is
+    // now, this is the immediate stop it always was.
     stopTransport(when)
-    if (destroyed || !envelopeBuffer) return
+    if (destroyed || !segments?.length) return
 
-    const plan = scheduleEnvelope({
-      regionStartSec,
-      durationSec: envelopeBuffer.duration,
-      when,
-      startSec,
-    })
-    if (plan === null) return
+    const param = gainNode.gain
+    const regionEndSec = regionStartSec + lastSample() / curveSampleRate
+    if (startSec >= regionEndSec) return   // region already behind the playhead
 
-    modulator = audioContext.createBufferSource()
-    modulator.buffer = envelopeBuffer
-    modulator.connect(gainNode.gain)
-    // The disconnect is unconditional: an outgoing modulator is stopped at a
-    // FUTURE time, so this is the only point at which it can be freed. The
-    // `running` flag is guarded on identity so the outgoing pass cannot clear
-    // it for the one that has already replaced it.
-    const node = modulator
-    node.onended = () => {
-      if (modulator === node) running = false
-      try {
-        node.disconnect()
-      } catch {
-        // Already disconnected by the immediate stop path.
+    // Context time for a timeline position, and its inverse for the region.
+    const ctxTimeForSample = s =>
+      when + (regionStartSec + s / curveSampleRate - startSec)
+
+    // Where playback enters the region, in region samples. Negative when
+    // playback starts before the region — then the region's own head is used.
+    const entrySample = Math.max(
+      0, Math.round((startSec - regionStartSec) * curveSampleRate),
+    )
+
+    param.setValueAtTime(dbToLin(gainDbAtSample(segments, entrySample)), when)
+
+    for (const seg of segments) {
+      if (seg.endSample <= entrySample) continue      // already behind us
+
+      const at = ctxTimeForSample(seg.startSample)
+
+      if (seg.fromDb === seg.toDb) {
+        // A hold that started before entry is already covered by the
+        // setValueAtTime above; only schedule holds that begin ahead.
+        if (at > when) param.setValueAtTime(dbToLin(seg.fromDb), at)
+        continue
       }
-    }
-    modulator.start(plan.at, plan.offset)
 
-    transportWhen = plan.at
-    transportStartSec = plan.transportStartSec
-    running = true
+      if (at <= when) {
+        // Seeking into the middle of a 30 ms fade. A curve cannot be started in
+        // the past, so the entry value already holds and the fade's endpoint is
+        // set where it lands — 30 ms of a fade replaced by its destination,
+        // once, only when the playhead is dropped inside one.
+        const end = ctxTimeForSample(seg.endSample)
+        if (end > when) param.setValueAtTime(dbToLin(seg.toDb), end)
+        continue
+      }
+
+      param.setValueCurveAtTime(
+        renderRampCurve(seg, curveSampleRate),
+        at,
+        (seg.endSample - seg.startSample) / curveSampleRate,
+      )
+    }
+
+    // The outgoing pass is still sounding until `when`, so the meter must keep
+    // reading against its anchor until then. Promoting immediately would make
+    // getGainDb see a negative elapsed time and report 0 dB — a visible drop to
+    // unity on the meter at every loop seam, for the same 60 ms the audio bug
+    // above used to last.
+    const anchor = { when, startSec: Math.max(startSec, regionStartSec) }
+    if (running && when > audioContext.currentTime) {
+      pending = anchor
+    } else {
+      transportWhen = anchor.when
+      transportStartSec = anchor.startSec
+      pending = null
+      running = true
+    }
+  }
+
+  function lastSample() {
+    return segments?.length ? segments[segments.length - 1].endSample : 0
   }
 
   const inputMonitor = audioContext.createGain()
@@ -126,77 +228,55 @@ export function createAutoLevel(audioContext) {
     stopTransport,
 
     setParam(name, value) {
-      if (name !== 'envelope') return
-      // { deviation: Float32Array, startSec: number } — or null to clear.
+      if (name !== 'curve') return
+      // { segments, startSec, sampleRate } — or null to clear.
       stopTransport()
-      if (!value || !value.deviation?.length) {
-        envelopeBuffer = null
-        envelopeDeviation = null
+      if (!value?.segments?.length) {
+        segments = null
         return
       }
-      const buf = audioContext.createBuffer(
-        1, value.deviation.length, audioContext.sampleRate,
-      )
-      buf.copyToChannel(value.deviation, 0)
-      envelopeBuffer = buf
-      envelopeDeviation = value.deviation
+      segments = value.segments
       regionStartSec = value.startSec ?? 0
+      curveSampleRate = value.sampleRate ?? audioContext.sampleRate
     },
 
     getParam(name) {
-      return name === 'envelope' ? envelopeDeviation : undefined
+      if (name === 'curve') return segments
+      return undefined
     },
 
     /**
-     * The gain currently being applied, in dB — signed, and that is the point.
+     * SIGNED gain at the playhead, in dB — not a reduction.
      *
-     * ⚠ IT IS NOT A GAIN-REDUCTION METER AND MUST NOT BE RENDERED AS ONE. Every
-     * other effect here reports `getReduction()`, a negative number, because
-     * every other effect only ever attenuates. A leveller's whole job is to
-     * raise quiet passages as well as lower loud ones, so a meter that can only
-     * point one way would hide half of what it does — and the half a user is
-     * most likely to be checking, since lifting a quiet clip is what risks
-     * lifting its room tone with it.
+     * A leveler's boosts are the point of it: reporting only the cuts, as the
+     * compressors' `getReduction` convention does, would leave the meter at
+     * rest through exactly the passages the user reached for this to fix.
      *
-     * Read straight out of the envelope rather than measured from the signal:
-     * the envelope IS the gain, so this is exact.
-     *
-     * ⚠ THE LARGEST-MAGNITUDE VALUE OVER THE SPAN SINCE THE LAST CALL, not a
-     * point sample. This is polled from an animation frame — one look every
-     * ~16.7 ms — and a crossfade is 30 ms, so point sampling lands inside a
-     * transition often enough to make the readout flicker between two clips'
-     * values. Scanning the elapsed span costs one walk over a frame of samples.
-     *
-     * Note this is a getter with state: each call consumes the span it reports.
+     * Read from the curve rather than measured from the signal. The curve IS
+     * the gain, so this is exact, and unlike a level difference it cannot be
+     * confused by the audio's own dynamics.
      */
     getGainDb() {
-      if (!running || !envelopeDeviation) return 0
+      if (!running || !segments) return 0
+
+      // Promote the queued pass once its start time has actually arrived.
+      if (pending && audioContext.currentTime >= pending.when) {
+        transportWhen = pending.when
+        transportStartSec = pending.startSec
+        pending = null
+      }
 
       // currentTime is the scheduler's clock: audio scheduled for it has not
-      // been heard yet. Backing off by the device latency reports the envelope
-      // at the position actually sounding.
+      // been heard yet. Backing off by the device latency reports the curve at
+      // the position actually sounding.
       const latency = (audioContext.outputLatency || 0) + (audioContext.baseLatency || 0)
       const elapsed = audioContext.currentTime - transportWhen - latency
       if (elapsed < 0) return 0
 
-      const len = envelopeDeviation.length
-      if (lastReadIdx >= len) return 0 // envelope already fully consumed
-
       const posSec = transportStartSec - regionStartSec + elapsed
-      const idx = Math.round(posSec * audioContext.sampleRate)
-      if (idx < 0) return 0
-
-      const to = Math.min(idx, len - 1)
-      const from = lastReadIdx < 0 || lastReadIdx > to ? to : lastReadIdx
-      if (to < from) return 0
-      lastReadIdx = to + 1
-
-      let extreme = 0
-      for (let i = from; i <= to; i++) {
-        if (Math.abs(envelopeDeviation[i]) > Math.abs(extreme)) extreme = envelopeDeviation[i]
-      }
-      const gain = 1 + extreme
-      return gain > 0 ? 20 * Math.log10(gain) : 0
+      const idx = Math.round(posSec * curveSampleRate)
+      if (idx < 0 || idx >= lastSample()) return 0
+      return gainDbAtSample(segments, idx)
     },
 
     getInputLevels(channelCount) {
@@ -209,7 +289,12 @@ export function createAutoLevel(audioContext) {
 
     destroy() {
       destroyed = true
-      stopTransport()
+      running = false
+      try {
+        gainNode.gain.cancelScheduledValues(audioContext.currentTime)
+      } catch {
+        // Context already closed.
+      }
       input.disconnect()
       gainNode.disconnect()
       output.disconnect()
@@ -221,11 +306,11 @@ export function createAutoLevel(audioContext) {
   }
 }
 
-export const autoLevelEffect = {
-  id: 'auto-level',
-  name: 'Auto Level',
+export const autoLevelerEffect = {
+  id: 'auto-leveler',
+  name: 'Auto Leveler',
   latencySamples: 0,
   createNodes(audioContext) {
-    return createAutoLevel(audioContext)
+    return createAutoLeveler(audioContext)
   },
 }
