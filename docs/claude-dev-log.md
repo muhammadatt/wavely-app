@@ -3383,6 +3383,97 @@ half still waiting on the table.
 
 ---
 
+### The knee law, fitted — and Finding 5 withdrawn
+
+The per-capture table came back and the law is installed:
+`KNEE_AT_REF_DB 4.7344`, `KNEE_DRIVE_SLOPE 0.21738`, fitted by simulate-and-match
+in `scripts/fet-static-fit.mjs`. The readings are now kept in
+`data/fet1176/fetish_stairs_fits.json` so this cannot be lost a third time.
+
+**The interior points make the law linear**, which the two endpoints could not
+say: FETish's knee against its own drive is 5.85 / 7.21 / 9.53 / 10.86 at
++0.00 / 6.80 / 18.40 / 25.00 dB — segment slopes **0.2000 / 0.2000 / 0.2015**,
+straight to three-quarters of a percent over 25 dB. Held out, fitting I1 and I4
+alone predicts I2 and I3 to 0.257 dB rms.
+
+#### ⚠ Three things I said last round were wrong
+
+**1. The "24 % ambiguity" in the slope was mine, not the data's.** I framed the
+correspondence between the two kernels as matched *reduction*. Wrong question:
+the knee is a width on the INPUT-LEVEL axis, and `effThresholdDb` is absolute —
+dBFS against the same stimulus — so both kernels report where the bend sits in
+the same units. Anchored on that the drive axes coincide by construction.
+
+**2. ⚠⚠ FINDING 5 IS WITHDRAWN. "FETish compresses less than our implementation
+at the same marking" WAS OUR WRONG KNEE READING BACK.** The recorded finding put
+FETish's real ratios near 3.6 / 6.1 / 8.8 / 13.2 and it is an artefact. Against
+nominal, FETish's four buttons read:
+
+| button | nominal | FETish | dev |
+|---|---|---|---|
+| 4 | 0.7500 | 0.7489 | −0.15 % |
+| 8 | 0.8750 | 0.8672 | −0.89 % |
+| 12 | 0.9167 | 0.9157 | −0.10 % |
+| 20 | 0.9500 | 0.9489 | −0.11 % |
+
+**FETish's ratio buttons are accurate.** `RATIO_VALUES` needs no change, and
+installing the fitted 3.769 / 6.552 / 9.397 / 13.417 would have put our own
+measurement error into the product as a re-voicing.
+
+**3. And my first explanation of that was also wrong.** I said our +3 % excess
+was attack-lag bias and that no ballistics configuration reproduced FETish. It
+was mostly **the knee**. The instrument fits (threshold, slope, knee) jointly, so
+a wrong knee comes back as a wrong slope: at ratio 4 our fitted slope was 0.7734
+(+3.12 %) under the old fixed 10 dB knee and is **0.7495 (−0.07 %)** under the
+fitted law, against FETish's 0.7489. Installing the knee removed almost all of
+the slope gap without touching a ratio.
+
+#### What survives: a drive-dependent residual, ~2.4 %
+
+Our fitted slope is not flat where FETish's is. Ratio 4, by Input position:
+ours 0.7495 / 0.7681 / 0.7725 / 0.7708 against FETish's 0.7477 / 0.7488 /
+0.7495 / 0.7496. We match at I1 and drift ~2.4 % high by I2, then hold. That is
+the real residual and it is smaller and better-located than "+3 % everywhere".
+The ballistics-configuration table still stands as a separate caution — at
+Input 50, `datasheet`+`none` reads +2.45 %, `datasheet`+`depth` +9.27 %,
+`fetish`+`none` +8.69 %, `fetish`+`depth` +29.20 % — so the diff column's bias
+cancellation is still not something to lean on, it is simply not what produced
+Finding 5.
+
+#### The fit had to be run twice, and the first run was wrong
+
+⚠ **THE FIRST RUN SEARCHED THE KNEE AND THE FOUR RATIOS TOGETHER** by coordinate
+descent, returning `KNEE_AT_REF_DB 4.7148` alongside ratios 3.769 / 6.552 /
+9.397 / 13.417. Since the ratios are a diagnostic we are NOT installing, that
+calibrated the knee against a kernel that is not the one shipping — and our
+fitted knee moves 0.32 dB across the buttons, so a ratio the product never uses
+was dragging the knee with it. Re-run with ratios pinned at nominal: 4.7344 /
+0.21738. Small (0.02 dB of knee) but the principle is not: **fit against what
+ships.** It is also most of the fitter's runtime, so the nominal path is now the
+default.
+
+#### Known residual
+
+⚠ The full-fit rms of 0.384 dB is a STRUCTURAL MISMATCH rather than noise, and
+it has a direction: our fitted knee varies 0.32 dB across the ratio buttons
+where FETish's varies 0.01, so no single law can satisfy all sixteen readings.
+Worst at ratio 20 / I4, −0.84 dB. Closing it needs a knee that knows about the
+button — the opposite of what the captures say — so it is left.
+
+#### What it changes
+
+Still small, and still near threshold. Against the ORIGINAL per-button knees,
+swept across level, the worst gain-reduction change is **0.32 dB** (ratio 4,
+Input 40, −15 dBFS); on narration it is 0.048 dB of rms at Input 40 and 0.000
+by Input 85. The fitted law is slightly narrower than the provisional one at
+every position (e.g. 5.66 → 4.53 dB at knob 40, 8.27 → 7.36 at knob 70).
+
+**The static curve is now finished for the four normal buttons.** All-buttons
+remains unmeasured — `ALL_KNEE_DB`, `ALL_THRESHOLD_DROP_DB` and the soft
+`ALL_RATIO_*` law have nothing behind them, and only CLA-76 can supply it.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

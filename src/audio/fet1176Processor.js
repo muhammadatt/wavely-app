@@ -375,7 +375,7 @@ const RATIO_VALUES = { 4: 4, 8: 8, 12: 12, 20: 20 }
  * 10.91 — a 0.22 dB spread** against FETish's 5.01 dB of growth. The instrument
  * does not manufacture knee growth. `fetStairs.test.js` pins that control.
  */
-const KNEE_AT_REF_DB = 5.85
+const KNEE_AT_REF_DB = 4.7344
 /**
  * The drive the knee is quoted at, and the dB of knee per dB of drive above it.
  *
@@ -391,9 +391,21 @@ const KNEE_AT_REF_DB = 5.85
  * is WIDTH-DEPENDENT: measured on our own kernel, a true knee of 4 / 6 / 8 / 10 /
  * 12 dB reads back 5.92 / 7.90 / 9.53 / 11.11 / 12.76 — a bias of +1.92 shrinking
  * to +0.76. It therefore COMPRESSES the range, so reproducing a fitted growth of
- * 5.01 dB takes a true growth near 5.8. Installing what the fit printed would
- * have under-delivered the law by about 16 %. Fifth constant in this re-tune
- * where that is true.
+ * 5.01 dB takes a true growth near 5.8. Fifth constant in this re-tune where the
+ * printed number is not the number to install; the fit returns 0.21738, 8.5 %
+ * steeper, and 4.7344 at drive 0 against a fitted reading of 5.85 at I1.
+ *
+ * VALIDATED ON POINTS THAT WERE NOT FITTED. Fitted on I1 and I4 alone the law
+ * comes back 4.8955 / 0.22393 and predicts the held-out I2 and I3 to an rms of
+ * 0.257 dB, worst +0.53. That is the test of the LINE, which is the whole claim
+ * about the law's shape.
+ *
+ * ⚠ THE FULL-FIT RESIDUAL (0.384 dB rms) IS A STRUCTURAL MISMATCH, NOT NOISE,
+ * and it has a direction: our fitted knee moves 0.32 dB across the ratio
+ * buttons where FETish's moves 0.01, so no single law can match all sixteen
+ * readings. The residual is worst at the high buttons and the deepest drive
+ * (-0.84 dB at ratio 20 / I4). Known and left: closing it needs a knee that
+ * knows about the button, which is the opposite of what the captures say.
  *
  * ⚠⚠ AN EARLIER VERSION OF THIS NOTE CLAIMED THE SLOPE WAS AMBIGUOUS BY 24 %,
  * AND THAT WAS MY ERROR, NOT THE DATA'S. It argued that FETish spends 24.99 dB
@@ -407,7 +419,7 @@ const KNEE_AT_REF_DB = 5.85
  * fact about the slope and says nothing about where the bend is.
  */
 const KNEE_DRIVE_REF_DB = 0
-const KNEE_DRIVE_SLOPE = 0.2005
+const KNEE_DRIVE_SLOPE = 0.21738
 // The law is linear and the knob is not, so it needs ends. The floor keeps the
 // knee from inverting into a corner at the bottom of the travel; the ceiling is
 // where the knee would start swallowing the whole useful range of overshoot.
