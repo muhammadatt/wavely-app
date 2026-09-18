@@ -3683,6 +3683,69 @@ twice over. It has drifted like the others and is left wrong on purpose.
 
 ---
 
+### The all-buttons tooling — and the law that cannot be fitted
+
+Five captures were bounced and were too large to upload, so the analysis has to
+run locally. Building the tooling first turned up two gaps and one finding that
+changes what the captures can deliver.
+
+#### ⚠ The bursts comparison was hardcoded to ratio 4
+
+`fet-ballistics.mjs` matched our kernel against a reference capture at
+`ratio: '4'` regardless of what the capture was — including the single
+all-buttons bounce the matrix asks for, which is the **only** source for
+`ALL_TAIL_FRACTION` and `ALL_TAIL_MULT`. A matched measurement against the wrong
+gain computer is not matched at all. The ratio is now read off the filename.
+
+#### ⚠⚠ The all-buttons law is not identifiable from a staircase
+
+Built `fet-allbuttons-fit.mjs` to fit the five all-buttons constants to the
+1 dB staircase by simulate-and-match on the whole curve, since the coarse
+fitter's single slope averages away a ratio that varies ALONG the curve.
+
+**The self-test planted a known law and the fit did not get it back.** It
+reproduced the curve to 0.207 dB while returning a knee of 2.33 for a planted 6,
+a ratio floor of 2.56 for a planted 10, and a half-point pinned to its bound. A
+sensitivity probe says why — perturbing the planted law one constant at a time:
+
+| constant | probe | curve moves |
+|---|---|---|
+| `allThresholdDropDb` | ±1 dB | **0.78–0.80 dB** |
+| `allRatioMin` | ±4 | 0.07–0.20 |
+| `allRatioSpan` | ±6 | 0.06–0.17 |
+| `allKneeDb` | ±3 dB | 0.09–0.11 |
+| `allRatioHalfDb` | ±6 | 0.03–0.07 |
+
+**Only the threshold drop is determined.** The other four move the curve less
+than the residual the fit settles at, so a number for any of them would be a
+guess with a decimal point on it.
+
+⚠ **THIS IS THE STIMULUS, NOT THE SEARCH.** A better optimiser finds the same
+flat valley faster. Separating the ratio triple needs material that sweeps
+overshoot INDEPENDENTLY of level — which a staircase, where the two move
+together by construction, cannot do.
+
+So the tool fits the threshold drop, prints the sensitivity table, and refuses
+to hand back the rest. The self-test now **asserts the non-identifiability**: if
+a future stimulus does determine those four, it fails, which is the right way to
+find that out.
+
+#### A 13x speedup that had to be proved identical
+
+`analyseBurst` re-traces the whole capture for every event — fine for the
+4-event burst plan it was written for, quadratic on a 34-step staircase. At
+6.5 s per curve, a fit that renders one curve per candidate ran for hours.
+`stairDepths` traces once: **501 ms against 6520**.
+
+⚠ It is a speed path, NOT a second analysis, and the distinction is the whole
+point — both the reference and our own kernel go through `stairCurve`, so a fork
+here silently puts the two sides on different instruments, which is the one
+thing every measurement in this re-tune depends on not happening. A test pins it
+`deepEqual` against `analyseCapture` on a real render, at ratio 4 and
+all-buttons.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

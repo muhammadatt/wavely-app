@@ -597,6 +597,43 @@ function analyseBurst(y, plan, stim, sampleRate, lag, ev) {
   }
 }
 
+/**
+ * Settled reduction at every event, in ONE pass over the capture.
+ *
+ * ⚠⚠ THIS EXISTS PURELY FOR SPEED AND MUST STAY BIT-IDENTICAL TO
+ * `analyseCapture`'s `depthDb`. `analyseBurst` re-traces the WHOLE buffer for
+ * every event — fine for the 4-event burst plan it was written for, quadratic
+ * on a 34-step staircase, and it made the all-buttons fit (which renders a
+ * curve per candidate) take 6.5 s per curve and hours per fit.
+ *
+ * ⚠ IT IS NOT A SECOND ANALYSIS, AND THAT DISTINCTION IS THE WHOLE POINT. Both
+ * the reference and our own kernel go through `stairCurve`, so a fork here
+ * would silently put the two sides on different instruments — the one thing
+ * every measurement in this re-tune depends on not happening.
+ * `fetStairs.test.js` pins it against `analyseCapture` on a real render.
+ *
+ * `open` is the file-head gain, identical for every event, so it is computed
+ * once; `held` is the last `heldWindow` before each event's `down`.
+ */
+export function stairDepths(y, plan, stim, sampleRate, lag) {
+  const g = fillShortGaps(traceGain(y, stim.env, stim.x, { lag, floor: 0.1 }),
+    Math.ceil(sampleRate / PROBE_HZ))
+  const series = peakSeries(g, stim.x, stim.env, 0, stim.x.length).map(([i, v]) => [i, db(v)])
+  const mean = rows => rows.reduce((a, [, v]) => a + v, 0) / rows.length
+
+  const openRows = series.filter(([i]) => i > 0.3 * sampleRate && i < 0.8 * sampleRate)
+  if (!openRows.length) return []
+  const open = mean(openRows)
+
+  return plan.events.filter(ev => !ev.conditioning).map((ev) => {
+    const downS = Math.round(ev.down * sampleRate)
+    const heldWindow = Math.min(0.1, (ev.down - ev.up) * 0.4)
+    const heldRows = series.filter(([i]) => i > downS - heldWindow * sampleRate && i < downS)
+    if (!heldRows.length) return null
+    return { tag: ev.tag, depthDb: open - mean(heldRows) }
+  }).filter(Boolean)
+}
+
 /** Every burst in one capture. Exported so a test can drive it directly. */
 export function analyseCapture(y, plan, stim, sampleRate, lag) {
   return plan.events
@@ -751,6 +788,21 @@ function selftest(sampleRate) {
  * Pull the declared knobs out of a capture's filename — `..._a3_r4.wav` for a
  * dial, `..._a800us_r235ms.wav` for FETish's continuous controls.
  */
+/**
+ * The ratio button a capture was taken on, from its name. Defaults to '4',
+ * which is what the whole matrix uses apart from the single all-buttons bounce.
+ *
+ * ⚠ IT USED TO BE HARDCODED TO '4' IN THE COMPARISON, which would have driven
+ * our kernel through an entirely different gain computer from the reference's
+ * for the one all-buttons capture the matrix asks for — the same capture that
+ * is the ONLY source for `ALL_TAIL_FRACTION` and `ALL_TAIL_MULT`. A matched
+ * measurement against the wrong law is not matched at all.
+ */
+export function ratioFromName(file) {
+  const m = file.match(/_r(4|8|12|20|all)_/i)
+  return m ? m[1].toLowerCase() : '4'
+}
+
 function knobsFromName(file) {
   /**
    * ⚠ ANCHORED TO THE END, AS ONE MATCH, BECAUSE `_r` IS AMBIGUOUS. The
@@ -1306,7 +1358,12 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
      * dial range, so our kernel has to be driven to the SAME settled reduction
      * the reference reached, not to a fixed knob position.
      */
-    const matched = inputForGr(deepest.grDb, { ratio: '4', fetDrive: 0, attack: 4, release: 4 }, sampleRate)
+    const ratio = ratioFromName(file)
+    if (ratio !== '4') {
+      console.log(`\n   ⚠ RATIO BUTTON '${ratio}' READ FROM THE NAME — our kernel is driven through` +
+        '\n     the same button below, not through ratio 4.')
+    }
+    const matched = inputForGr(deepest.grDb, { ratio, fetDrive: 0, attack: 4, release: 4 }, sampleRate)
     console.log(`   reference settled at ${deepest.grDb.toFixed(2)} dB of reduction; ` +
       `our kernel reaches that at Input ${matched.knob.toFixed(1)} (${matched.gr.toFixed(2)} dB)`)
     if (matched.clipped) {
@@ -1315,7 +1372,7 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
       console.log('     dial it reports is not meaningful. Re-bounce nearer our range, or treat this')
       console.log('     as a finding about IN_DRIVE_MIN_DB / IN_DRIVE_SPAN_DB.')
     }
-    const params = { inputDrive: matched.knob, ratio: '4', fetDrive: 0, attack: 4, release: 4 }
+    const params = { inputDrive: matched.knob, ratio, fetDrive: 0, attack: 4, release: 4 }
     for (const [sweep, label, pick, fmt] of [
       ['attack', 'overshoot', bs => bs[bs.length - 1]?.overshootDb, v => v.toFixed(2) + ' dB'],
       ['release', 'release t63', bs => bs[bs.length - 1]?.releaseT63, v => (v * 1e3).toFixed(0) + ' ms'],

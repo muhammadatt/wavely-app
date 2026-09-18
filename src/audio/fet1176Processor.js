@@ -459,11 +459,11 @@ export { KNEE_AT_REF_DB, KNEE_DRIVE_SLOPE, KNEE_DRIVE_REF_DB, KNEE_FLOOR_DB, KNE
 
 // All-buttons-in: a wide, badly-behaved knee whose effective ratio climbs
 // with overshoot, over a threshold pulled down by ALL_THRESHOLD_DROP_DB.
-const ALL_KNEE_DB = 16
-const ALL_THRESHOLD_DROP_DB = 6
-const ALL_RATIO_MIN = 6
-const ALL_RATIO_SPAN = 14
-const ALL_RATIO_HALF_DB = 12 // overshoot at which the ratio sits mid-range
+export const ALL_KNEE_DB = 16
+export const ALL_THRESHOLD_DROP_DB = 6
+export const ALL_RATIO_MIN = 6
+export const ALL_RATIO_SPAN = 14
+export const ALL_RATIO_HALF_DB = 12 // overshoot at which the ratio sits mid-range
 // The famously late attack: the dial still sets the rate, but everything
 // arrives slower than the number says.
 const ALL_ATTACK_LAG = 2.5
@@ -572,6 +572,12 @@ export const FET1176_KERNEL_DEFAULTS = {
   kneeDriveSlope: null,
   /** Continuous ratio, bypassing the button. Fit only — see `setParams`. */
   ratioValue: null,
+  /** The all-buttons law, overridable for the fit. See `setParams`. */
+  allKneeDb: null,
+  allThresholdDropDb: null,
+  allRatioMin: null,
+  allRatioSpan: null,
+  allRatioHalfDb: null,
   /** dB⁻¹ slope of that schedule. Only read when releaseSchedule is 'depth'. */
   releaseDepthK: RELEASE_DEPTH_K,
   /**
@@ -839,8 +845,20 @@ export class FET1176Kernel {
     const sr = this.sampleRate
 
     this.isAllButtons = String(p.ratio) === 'all'
+    /**
+     * ⚠ THE ALL-BUTTONS LAW IS OVERRIDABLE SO IT CAN BE FITTED, and every one of
+     * these five is currently a GUESS — no capture from either reference stands
+     * behind them, and CLA-76's stairs already say the first two are too big.
+     * `scripts/fet-allbuttons-fit.mjs` searches them. Fit only: not panel
+     * params, not preset keys.
+     */
+    this.allKneeDb = Number.isFinite(p.allKneeDb) ? p.allKneeDb : ALL_KNEE_DB
+    this.allRatioMin = Number.isFinite(p.allRatioMin) ? p.allRatioMin : ALL_RATIO_MIN
+    this.allRatioSpan = Number.isFinite(p.allRatioSpan) ? p.allRatioSpan : ALL_RATIO_SPAN
+    this.allRatioHalfDb = Number.isFinite(p.allRatioHalfDb) ? p.allRatioHalfDb : ALL_RATIO_HALF_DB
+    const allDrop = Number.isFinite(p.allThresholdDropDb) ? p.allThresholdDropDb : ALL_THRESHOLD_DROP_DB
     if (this.isAllButtons) {
-      this.thresholdDb = THRESHOLD_DBFS - ALL_THRESHOLD_DROP_DB
+      this.thresholdDb = THRESHOLD_DBFS - allDrop
       this.tailFraction = ALL_TAIL_FRACTION
       this.tailMult = ALL_TAIL_MULT
     } else {
@@ -933,7 +951,7 @@ export class FET1176Kernel {
      * to justify giving it a drive law too.
      */
     this.kneeDb = this.isAllButtons
-      ? ALL_KNEE_DB
+      ? this.allKneeDb
       : kneeDbForDrive(
         this.inputDriveDb,
         Number.isFinite(p.kneeAtRefDb) ? p.kneeAtRefDb : KNEE_AT_REF_DB,
@@ -1075,7 +1093,8 @@ export class FET1176Kernel {
   _grForOvershoot(over) {
     if (over <= -this.halfKnee) return 0
     const slope = this.isAllButtons
-      ? 1 - 1 / (ALL_RATIO_MIN + ALL_RATIO_SPAN * (over > 0 ? over / (over + ALL_RATIO_HALF_DB) : 0))
+      ? 1 - 1 / (this.allRatioMin + this.allRatioSpan
+        * (over > 0 ? over / (over + this.allRatioHalfDb) : 0))
       : this.slope
     if (over >= this.halfKnee) return slope * over
     const t = over + this.halfKnee

@@ -39,7 +39,7 @@
  */
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { PLANS, analyseCapture, runKernel, CAP_DIR } from './fet-ballistics.mjs'
+import { PLANS, analyseCapture, stairDepths, runKernel, CAP_DIR } from './fet-ballistics.mjs'
 import { buildProbe } from './lib/probeStimulus.js'
 import { inputDriveDbForKnob } from '../src/audio/fet1176Processor.js'
 import { readCapture, preflight, alignByEnvelope, refineLagAtEdge } from './lib/probeCapture.js'
@@ -61,10 +61,9 @@ export const ratioForSlope = slope => (slope >= 1 ? Infinity : 1 / (1 - slope))
 
 /** Settled reduction at each step of the staircase. */
 export function stairCurve(y, plan, stim, sampleRate, lag) {
-  return analyseCapture(y, plan, stim, sampleRate, lag)
+  return stairDepths(y, plan, stim, sampleRate, lag)
     .filter(b => Number.isFinite(b.depthDb))
-    .map(b => ({ levelDb: b.holdS === undefined ? null : null, tag: b.tag, grDb: b.depthDb }))
-    .map((r, i) => ({ ...r, levelDb: plan.events[i].L }))
+    .map((b, i) => ({ levelDb: plan.events[i].L, tag: b.tag, grDb: b.depthDb }))
 }
 
 /** The sharpest knee the SEARCH can express. Below this the law is a corner. */

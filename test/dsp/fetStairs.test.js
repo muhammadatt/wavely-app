@@ -319,3 +319,25 @@ test('the fine staircase is routed by its filename, never guessed', () => {
   assert.equal(knobsFromName('fetish_stairs-fine_r4_I3.wav').plan, 'stairs-fine.wav')
   assert.equal(knobsFromName('fetish_stairs_r4_I3.wav').plan, 'stairs.wav')
 })
+
+/**
+ * ⚠⚠ `stairDepths` IS A SPEED PATH AND MUST BE BIT-IDENTICAL TO THE ANALYSIS IT
+ * REPLACED. `analyseBurst` re-traces the whole capture per event — quadratic on
+ * a 34-step staircase, 6.5 s a curve, hours for a fit that renders one curve per
+ * candidate. Tracing once fixes that, and would be worthless if it also changed
+ * the numbers: both the reference and our own kernel go through `stairCurve`, so
+ * a fork here puts the two sides on different instruments, which is the one
+ * thing every measurement in this re-tune depends on not happening.
+ */
+test('the fast staircase path is identical to the analysis it replaced', async () => {
+  const { analyseCapture, stairDepths } = await import('../../scripts/fet-ballistics.mjs')
+  for (const ratio of ['4', 'all']) {
+    const { y } = runKernel(stim().x, SR,
+      { inputDrive: 60, ratio, attack: 1, release: 7, fetDrive: 0 })
+    const slow = analyseCapture(y, plan, stim(), SR, 0)
+      .filter(b => Number.isFinite(b.depthDb)).map(b => b.depthDb)
+    const fast = stairDepths(y, plan, stim(), SR, 0).map(b => b.depthDb)
+    assert.equal(fast.length, slow.length, `ratio ${ratio}: different number of steps`)
+    assert.deepEqual(fast, slow, `ratio ${ratio}: the fast path changed the numbers`)
+  }
+})

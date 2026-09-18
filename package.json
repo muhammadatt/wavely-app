@@ -47,6 +47,8 @@
     "fet:transients": "node scripts/fet-ballistics.mjs --transients",
     "fet:stairs": "node scripts/fet-stairs.mjs",
     "fet:static-fit": "node scripts/fet-static-fit.mjs",
+    "fet:allbuttons": "node scripts/fet-allbuttons-fit.mjs",
+    "fet:allbuttons:selftest": "node scripts/fet-allbuttons-fit.mjs --selftest",
     "fet:recut": "node scripts/fet-recut-presets.mjs",
     "fet:recut:selftest": "node scripts/fet-recut-presets.mjs --selftest",
     "fet:static-fit:selftest": "node scripts/fet-static-fit.mjs --selftest",
