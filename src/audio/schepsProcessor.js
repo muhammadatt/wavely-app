@@ -277,9 +277,8 @@ export class SchepsKernel {
     const character = PULTEC_STAGES[p.character] ? p.character : SCHEPS_KERNEL_DEFAULTS.character
     const pre = pultecSections(this.sampleRate, character, 'pre')
     const post = pultecSections(this.sampleRate, character, 'post')
-    // Rebuilt rather than resized when the character changes: the two curves
-    // can differ in section count, and a cascade's state is meaningless across
-    // a topology change anyway.
+    // Rebuilt when the section count changes, because a cascade cannot be
+    // resized in place.
     if (!this.preEq || this.preEq.sectionCount !== pre.length) {
       this.preEq = new BiquadCascade(pre.length, Math.max(1, this.dryLines.length))
     }
@@ -288,6 +287,36 @@ export class SchepsKernel {
     }
     this.preEq.setSections(pre)
     this.postEq.setSections(post)
+
+    /**
+     * ⚠ AND FLUSHED WHEN THE CHARACTER CHANGES, WHICH THE COUNT CHECK ABOVE
+     * ONLY EVER DID BY COINCIDENCE. `setSections` preserves delay state by
+     * design — that is what makes a knob move click-free — so swapping Thick
+     * for Presence used to leave Thick's memory running under Presence's
+     * coefficients on any stage where the two happened to have the same section
+     * count. The post stage has had four sections for both characters since it
+     * shipped, so it always behaved this way; the pre stage only joined it when
+     * `thick/pre` went from three sections to four in the warm-start refit.
+     *
+     * ⚠ THE FIX IS A RESET AND NOT A REBUILD, AND IT IS MEASURED RATHER THAN
+     * ASSUMED. Both paths step — the two characters have genuinely different
+     * responses, so switching mid-playback is a discontinuity no matter what —
+     * but carrying the old state makes it markedly worse. Against a fully
+     * settled Presence render, switching on a 200 Hz tone:
+     *
+     *     state preserved   peak error 0.230   settles to 1e-3 in 53.54 ms
+     *     state zeroed      peak error 0.144   settles to 1e-3 in  2.56 ms
+     *
+     * A coefficient change on its own must NOT reset — resetting a biquad every
+     * time a knob moves is exactly the click this state-preservation exists to
+     * avoid. Character is the one parameter that swaps the whole curve for an
+     * unrelated one, so it is the one that flushes.
+     */
+    if (this.eqCharacter !== character) {
+      this.eqCharacter = character
+      this.preEq.reset()
+      this.postEq.reset()
+    }
 
     this.la2a.setParams({
       ...LA2A_FIXED,

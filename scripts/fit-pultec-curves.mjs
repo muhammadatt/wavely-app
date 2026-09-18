@@ -324,7 +324,16 @@ for (const character of CHARACTERS) {
     }
 
     /**
-     * The shortest cascade that comes within 15% of the best fit available.
+     * The shortest cascade the best fit does not beat by the margin.
+     *
+     * ⚠ THE MARGIN IS A RATIO OF 0.85, NOT "WITHIN 15%", AND THE TWO ARE NOT THE
+     * SAME NUMBER. `bestFx / 0.85` admits a candidate up to 17.65% above the
+     * best. That is deliberate: the rule has always been "a longer cascade earns
+     * its section by beating the shorter one by 15%", i.e. `longer <= 0.85 *
+     * shorter`, and rearranging that for the shorter cascade gives `shorter <=
+     * best / 0.85`. Writing `bestFx * 1.15` would look like the same rule and
+     * quietly tighten it. Both pick identically on the current curves; the ratio
+     * is kept because it is the one the rule was written with.
      *
      * A biquad is a per-sample cost on every channel and these are 1/24-octave
      * smoothed measurements, so a section has to earn its keep rather than buy

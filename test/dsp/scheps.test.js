@@ -963,3 +963,46 @@ test('the Output trim widens the knee, because it is applied before the ceiling'
     assert.ok(peakDb(channelData[0]) <= t.ceilingDb + 1e-9, `outputDb ${outputDb}: ceiling broken`)
   }
 })
+
+test('a character change flushes the EQ state; an ordinary knob move does not', () => {
+  /**
+   * `BiquadCascade.setSections` preserves delay state on purpose — that is what
+   * keeps a knob move from clicking. But Thick and Presence are unrelated
+   * curves, so carrying one's memory into the other is stale state under new
+   * coefficients, and it used to happen on any stage where the two characters
+   * agreed on section count. Both halves are pinned here because a fix that
+   * flushed on every setParams would trade this bug for a much louder one.
+   */
+  const k = new SchepsKernel(SR)
+  const dirty = () => {
+    const n = 4096
+    const x = new Float32Array(n)
+    for (let i = 0; i < n; i++) x[i] = 0.3 * Math.sin(2 * Math.PI * 200 * i / SR)
+    const y = new Float32Array(n)
+    for (let off = 0; off < n; off += 128) {
+      k.process([x.subarray(off, off + 128)], [y.subarray(off, off + 128)], 128)
+    }
+  }
+  const stateSum = () => [k.preEq, k.postEq].reduce(
+    (s, c) => s + c.z1.reduce((a, v) => a + Math.abs(v), 0)
+      + c.z2.reduce((a, v) => a + Math.abs(v), 0), 0)
+
+  k.setParams({ ...SCHEPS_KERNEL_DEFAULTS, character: 'thick', mix: 1 })
+  dirty()
+  assert.ok(stateSum() > 0, 'the probe must leave the cascades holding state')
+
+  // An ordinary parameter change keeps it — resetting here would be the click.
+  k.setParams({ squash: 55 })
+  assert.ok(stateSum() > 0, 'a knob move must not flush the EQ state')
+
+  // The character swap flushes it.
+  k.setParams({ character: 'presence' })
+  assert.equal(stateSum(), 0, 'a character change must flush the EQ state')
+
+  // Idempotent: re-sending the same character does not flush a running filter.
+  dirty()
+  const running = stateSum()
+  assert.ok(running > 0)
+  k.setParams({ character: 'presence' })
+  assert.equal(stateSum(), running, 're-sending the same character must not flush')
+})
