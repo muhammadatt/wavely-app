@@ -22,13 +22,20 @@ const RATES = [44100, 48000, 96000]
 /**
  * Tolerance, in dB, against the measured curve.
  *
- * The fit's own worst point is 0.57 dB (thick/pre at 20 kHz, at 44.1 kHz, where
+ * The fit's own worst point is 0.28 dB (thick/pre at 20 kHz, at 44.1 kHz, where
  * bilinear warping compresses the top octave into almost nothing); everything
- * else is inside 0.15 dB. This is set just above the worst case so a
+ * else is inside 0.18 dB. This is set just above the worst case so a
  * regeneration that made any stage materially worse fails here rather than in
  * someone's ears.
+ *
+ * ⚠ TIGHTENED FROM 0.7 WHEN THE FITTER LEARNED TO WARM-START, and the old value
+ * is why that was worth doing: thick/pre was 0.57 dB out at 20 kHz and 0.45 dB
+ * short of its own presence bump at 8 kHz, and a tolerance wide enough to admit
+ * that is wide enough to admit the next one silently. Loosening this is a
+ * decision about how close to the measured hardware the plugin has to be, not a
+ * knob to turn when a regeneration disagrees with it.
  */
-const TOLERANCE_DB = 0.7
+const TOLERANCE_DB = 0.4
 
 function readCurves(character) {
   const path = join(ROOT, 'data/pultec_curves', `scheps_${character}_curve_data.csv`)
