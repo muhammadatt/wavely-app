@@ -529,8 +529,42 @@ export function ratioThresholdOffsetDb(ratio, perOctave = RATIO_THRESHOLD_PER_OC
   return perOctave * Math.log2(r / 4)
 }
 
-export const ALL_KNEE_DB = 16
-export const ALL_THRESHOLD_DROP_DB = 6
+/**
+ * THE ALL-BUTTONS KNEE AND THRESHOLD DROP — BOTH FITTED, BOTH WERE INVENTED.
+ *
+ * They shipped at 16 and 6, neither measured, and both are now pinned against
+ * CLA-76 by `scripts/fet-allbuttons-refit.mjs` with no new capture: 3.486 and
+ * 0.969. The knee was more than four times too wide and the drop six times too
+ * deep.
+ *
+ * ⚠⚠ THE DROP IS 0.969 AND THE MEASUREMENT READS 0.565 — DO NOT INSTALL THE
+ * MEASUREMENT. CLA-76's all-buttons effective threshold sits 0.565 dB below its
+ * ratio 4 (mean of four Input positions, spread 0.032), but the instrument fits
+ * threshold, slope and knee JOINTLY, so a threshold read under one knee is not
+ * a threshold under another. 0.969 is what makes OUR kernel read 0.565 through
+ * the same fitter.
+ *
+ * ⚠ THE DROP IS MEASURABLE ONLY ACROSS BUTTONS AT ONE INPUT POSITION. Within a
+ * single capture it is exactly degenerate with the drive — the kernel reads
+ * `over = level + drive - (THRESHOLD - drop)` — so only the cross-button
+ * difference, where the drive is common and cancels, says anything.
+ *
+ * ⚠⚠ AND THAT CANCELLATION ASSUMES THE INPUT KNOB WAS NOT RE-DIALLED PER
+ * BUTTON, which FETish proves: its effective threshold reads identically across
+ * its four buttons at every position (0.00 dB of spread). Re-dialling for a
+ * target reduction would have made ratio 20 need far less drive than ratio 4,
+ * and that spread could not be zero. Same operator, same session for CLA-76.
+ *
+ * ⚠ THE DROP COULD NOT BE PINNED AT ALL UNTIL THE MOVING THRESHOLD SHIPPED —
+ * not for want of arithmetic but for want of a CONVENTION. A drop is measured
+ * against a numbered button; our model used to hold one threshold for all four
+ * while CLA-76's moved 4.5 dB across them, so "below ratio 4" and "below the
+ * mean of four" were different answers (0.54 / 2.65 / 3.24) with nothing to
+ * choose between them. With `ratioThreshold: 'moving'` anchored at 4:1 our
+ * family IS CLA-76's family, and ratio 4 is the reference by construction.
+ */
+export const ALL_KNEE_DB = 3.486
+export const ALL_THRESHOLD_DROP_DB = 0.969
 
 /**
  * THE ALL-BUTTONS SLOPE LAW — AND IT USED TO RUN THE WRONG WAY.
@@ -567,16 +601,31 @@ export const ALL_THRESHOLD_DROP_DB = 6
  * knee and goes below it at the top, which is where Moore's own drum test saw
  * "the occasional hit overshooting... close to 0dBFS" at low RMS.
  */
-export const ALL_INCR_AT_KNEE = 0.949
-export const ALL_INCR_FALL_PER_DB = 0.0057
 /**
- * ⚠ THE FLOOR IS AN EXTRAPOLATION AND THE CAPTURES DO NOT REACH IT. The measured
- * curve stops at 0.8418 (ratio 6.32) about 19 dB above the knee, and this line
- * crosses the floor near 28 dB. It is set at ratio 6 — the old `ALL_RATIO_MIN`,
- * itself a guess — because a falling slope with no floor keeps falling until it
- * EXPANDS, and a stated extrapolation beats an unbounded one.
+ * ⚠ REFITTED WITH THE KNEE, AND IT BARELY MOVED — 0.949 -> 0.9484 and 0.0057 ->
+ * 0.00516 when `ALL_KNEE_DB` went from 16 to 3.486. That is worth knowing: the
+ * law was fitted through a knee more than four times too wide, and the shape it
+ * found survived the correction. The anchor did not survive — these are values
+ * AT THE KNEE EXIT, which moved from 8 dB of overshoot to 1.74, so the triple
+ * and the knee must be installed together or the curve slides.
  */
-export const ALL_INCR_FLOOR = 1 - 1 / 6
+export const ALL_INCR_AT_KNEE = 0.9484
+export const ALL_INCR_FALL_PER_DB = 0.00516
+/**
+ * ⚠⚠ THE FLOOR IS A BOUND, NOT A MEASUREMENT, AND THE FIT SAYS SO. The refit
+ * returns 0.8229 (ratio 5.65), but walking it all the way down to 0.70 costs
+ * almost nothing — residual 0.0111 against the fit's own 0.0105 — while walking
+ * it UP to 0.92 costs 0.0501. So the data bounds the floor from above and not
+ * from below, for the obvious reason: the captures stop at 0.8418, roughly
+ * where the floor is, and nothing was measured past it.
+ *
+ * ⚠ It is set to the fitted value anyway rather than to something rounder,
+ * because the alternative is another invented number — which is what `1 - 1/6`
+ * (ratio 6, inherited from the old `ALL_RATIO_MIN`) was. A falling slope with
+ * no floor eventually EXPANDS, so the floor has to exist; what it must not do
+ * is pretend to more precision than one-sided evidence gives.
+ */
+export const ALL_INCR_FLOOR = 0.8229
 
 /**
  * ⚠⚠ THESE ARE INCREMENTAL SLOPES — `d(reduction)/d(level)` — AND THE KERNEL'S
@@ -597,7 +646,9 @@ export const ALL_INCR_FLOOR = 1 - 1 / 6
  * `ALL_KNEE_DB`. The measurement's x-axis origin is unrecoverable — drive and
  * threshold drop enter as a sum — so the curve can only be placed by assuming
  * the reference's knee ends where ours does. ⚠ A CHANGE TO `ALL_KNEE_DB` OR
- * `ALL_THRESHOLD_DROP_DB` MOVES THIS LAW and it must be refitted.
+ * `ALL_THRESHOLD_DROP_DB` MOVES THIS LAW and it must be refitted — which is
+ * exactly what `npm run fet:allrefit` does, and why it fits all five together
+ * rather than one at a time.
  */
 export function allButtonsIncrSlope(overDb, halfKneeDb, atKnee = ALL_INCR_AT_KNEE,
   fallPerDb = ALL_INCR_FALL_PER_DB, floor = ALL_INCR_FLOOR) {
@@ -620,8 +671,24 @@ export function allButtonsGr(overDb, halfKneeDb, atKnee = ALL_INCR_AT_KNEE,
   return grAtMax + floor * (x - xMax)
 }
 
-// The famously late attack: the dial still sets the rate, but everything
-// arrives slower than the number says.
+/**
+ * The famously late attack: the dial still sets the rate, but everything
+ * arrives slower than the number says.
+ *
+ * ⚠⚠ IT WAS 2.5 ON REPUTATION AND THE MEASUREMENT RUNS THE OTHER WAY. CLA-76's
+ * all-buttons burst and its ratio-4 burst were captured at the SAME Input and
+ * the SAME attack dial, so the reference's own ladder offset cancels between
+ * them — and all-buttons comes back FASTER, t63 1938 us against 2688. Driven to
+ * each capture's own settled reduction so our depth schedule answers for the
+ * 13.34-vs-9.66 dB gap, what is left is `ALL_ATTACK_LAG_FITTED`.
+ *
+ * ⚠ READING THE ALL-BUTTONS CAPTURE ALONE GIVES THE OPPOSITE ANSWER WITH
+ * CONFIDENCE — its 1938 us places it near our dial 2 against a declared dial 4,
+ * which looks like a late attack. It is not: CLA-76 is slower than our ladder at
+ * every dial on the numbered buttons too. The ladder offset is confounded with
+ * the lag and is the larger of the two, so only the cross-button ratio measures
+ * it. `scripts/fet-allbuttons-refit.mjs`.
+ */
 const ALL_ATTACK_LAG = 2.5
 // ...and the FET is driven much harder, which is most of the "sound".
 const ALL_FET_BOOST = 1.6
@@ -747,6 +814,7 @@ export const FET1176_KERNEL_DEFAULTS = {
   allThresholdDropDb: null,
   allIncrAtKnee: null,
   allIncrFallPerDb: null,
+  allAttackLag: null,
   allIncrFloor: null,
   /** dB⁻¹ slope of that schedule. Only read when releaseSchedule is 'depth'. */
   releaseDepthK: RELEASE_DEPTH_K,
@@ -1030,6 +1098,7 @@ export class FET1176Kernel {
     this.allIncrFallPerDb = Number.isFinite(p.allIncrFallPerDb)
       ? p.allIncrFallPerDb : ALL_INCR_FALL_PER_DB
     this.allIncrFloor = Number.isFinite(p.allIncrFloor) ? p.allIncrFloor : ALL_INCR_FLOOR
+    this.allAttackLag = Number.isFinite(p.allAttackLag) ? p.allAttackLag : ALL_ATTACK_LAG
     const allDrop = Number.isFinite(p.allThresholdDropDb) ? p.allThresholdDropDb : ALL_THRESHOLD_DROP_DB
     if (this.isAllButtons) {
       this.thresholdDb = THRESHOLD_DBFS - allDrop
@@ -1087,7 +1156,7 @@ export class FET1176Kernel {
     // the reduction sits on the slow stage. Measured on our own kernel, release
     // t63 grows 21-25 % from a 50 ms hold to a 3 s one.
     let attackS = attackSecondsForDial(p.attack, p.attackRange)
-    if (this.isAllButtons) attackS *= ALL_ATTACK_LAG
+    if (this.isAllButtons) attackS *= this.allAttackLag
     const releaseS = dialToSeconds(p.release, RELEASE_SLOWEST_S, RELEASE_FASTEST_S)
 
     this.attackCoef = 1 - Math.exp(-1 / (sr * attackS))

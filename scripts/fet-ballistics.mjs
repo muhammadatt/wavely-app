@@ -899,7 +899,7 @@ function depthPlan() {
   }
 }
 
-function inputForGr(targetGrDb, params, sampleRate) {
+export function inputForGr(targetGrDb, params, sampleRate) {
   /**
    * ⚠ BISECTED ON THE ANALYSED REDUCTION, NOT ON `kernel.grDb`, and the first
    * version used the kernel's internal figure from a plain tone. The two differ

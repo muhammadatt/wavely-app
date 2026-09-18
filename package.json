@@ -51,6 +51,8 @@
     "fet:allshape": "node scripts/fet-allbuttons-shape.mjs",
     "fet:allshape:selftest": "node scripts/fet-allbuttons-shape.mjs --selftest",
     "fet:allbuttons:selftest": "node scripts/fet-allbuttons-fit.mjs --selftest",
+    "fet:allrefit": "node scripts/fet-allbuttons-refit.mjs",
+    "fet:allrefit:selftest": "node scripts/fet-allbuttons-refit.mjs --selftest",
     "fet:recut": "node scripts/fet-recut-presets.mjs",
     "fet:recut:selftest": "node scripts/fet-recut-presets.mjs --selftest",
     "fet:static-fit:selftest": "node scripts/fet-static-fit.mjs --selftest",
