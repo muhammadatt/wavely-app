@@ -3535,6 +3535,39 @@ settles it: `stairs.wav` at ratio 4 / I3 at the fastest attack, compared against
 the dial-1 capture that already exists. If its fit rms drops the way ours does,
 re-bounce the matrix and analyse with `--attack 7`.
 
+#### ⚠ The gate bounce: the correction is OURS, not the reference's
+
+Predicted that a reference would read better at the fast attack too, and asked
+for one bounce to settle it before re-taking 20. **It does not transfer.**
+
+| | slope | knee | eff thr | rms |
+|---|---|---|---|---|
+| CLA-76 r4 I3 at dial 1 | 0.8271 | 5.15 | −24.13 | 0.037 |
+| CLA-76 r4 I3 at dial 7 | 0.8328 | 4.91 | −24.38 | 0.038 |
+| ours, same position (true 0.7500) | 0.7710 → **0.7513** | 7.74 → **5.63** | | |
+
+Ours moves 0.0197 of slope and 2.11 dB of knee. CLA-76 moves 0.0057 and 0.24.
+Its fit rms does not improve at all (0.037 → 0.038), so the ~0.037 is not attack
+rounding — it is structure in CLA-76's curve that a three-parameter law does not
+describe, and a re-take will not fix it.
+
+**The 20-capture re-bounce is therefore cancelled**, per the stopping rule the
+gate was set up with.
+
+⚠ **BUT THE INVARIANCE IS THE MORE USEFUL RESULT.** A reading that does not move
+when the attack is swept end to end was never attack-biased, so CLA-76's stairs
+numbers can be read at face value — which retires the "treat the magnitude as an
+upper bound" caveat that has hung over every CLA-76 slope since they were taken.
+Against our now-unbiased dial-7 instrument (0.7513 for a true 0.7500),
+**CLA-76's "4:1" really is about 6:1.** Note this is the opposite of FETish,
+whose four buttons measure nominal to within 0.9 %: the two references disagree
+about their own ratio markings, as they already did about the threshold.
+
+And the protocol rule survives with a different justification: capture at the
+fastest attack not because the reference reads better, but because both sides
+must share a setting for the diff to cancel and dial 7 is where OUR side is
+unbiased. Existing dial-1 captures stay usable, carrying our +1.8 %.
+
 #### The two tooling gaps
 
 **1. ⚠ `kneeAtBound` tested the wrong bound and therefore never fired where it

@@ -589,12 +589,31 @@ FROM.** Most of the few-percent slope inflation that made the absolute numbers
 untrustworthy — and that forced the knee to be installed by simulate-and-match —
 is the attack rounding the corner. At dial 7 it is 0.16 %.
 
-⚠ **MEASURED ON OUR KERNEL; EXPECTED BUT UNVERIFIED ON A REFERENCE.** Whether a
-reference plugin's detector also reads better fast is an empirical question that
-one bounce settles. Bounce a single `stairs.wav` at ratio 4 / I3 at the fastest
-attack and compare its fit rms against the dial-1 capture you already have: if it
-drops the same way ours does, re-bounce the matrix and analyse with
-`npm run fet:stairs -- --attack 7`.
+⚠⚠ **IT DOES NOT TRANSFER TO CLA-76, AND THAT WAS BOUNCED RATHER THAN ASSUMED.**
+The gate capture — `stairs.wav`, ratio 4, the same I3 knob position, attack
+slowest → fastest — moved CLA-76 almost not at all:
+
+| | slope | knee | eff thr | rms |
+|---|---|---|---|---|
+| CLA-76 at dial 1 | 0.8271 | 5.15 | −24.13 | 0.037 |
+| CLA-76 at dial 7 | 0.8328 | 4.91 | −24.38 | 0.038 |
+| ours, same position (true slope 0.7500) | 0.7710 → **0.7513** | 7.74 → **5.63** | | |
+
+**Our reading moves 0.0197 of slope and 2.11 dB of knee; CLA-76's moves 0.0057
+and 0.24.** Its detector is not attack-sensitive the way ours is.
+
+**SO THE RULE IS: CAPTURE AT THE FASTEST ATTACK, BUT DO NOT RE-BOUNCE WHAT YOU
+HAVE.** The reason to capture fast is not that the reference reads better — it
+does not — it is that both sides must share a setting for the diff column to
+cancel, and dial 7 is where OUR side is unbiased (+0.16 % against +1.8 %). Old
+dial-1 captures stay usable; their diff column just carries our +1.8 %.
+
+⚠ **AND THE INVARIANCE IS ITSELF A RESULT.** A reading that does not move when
+the attack is swept end to end was not attack-biased to begin with, so CLA-76's
+stairs numbers can be taken at face value. That retires the "treat the magnitude
+as an upper bound" caveat on its slopes: read against our unbiased dial-7 figure,
+**CLA-76's "4:1" really is about 6:1** (0.8328 against a true-0.7500 instrument
+reading 0.7513).
 
 ⚠ **A FINER STAIRCASE IS NOT THE ANSWER TO THE KNEE**, and this was tried.
 `stairs-fine.wav` (1 dB steps) does not lift the floor at all — 5.18 dB at dial 1
