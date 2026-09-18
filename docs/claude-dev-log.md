@@ -3954,6 +3954,90 @@ law is only clean above roughly 7 dB of reduction.
 
 ---
 
+### ⚗⚗⚗ The all-buttons law measured, and OUR MODEL HAS IT BACKWARDS
+
+The shape extractor run on CLA-76's four all-buttons fine captures.
+
+**First, the law is well defined.** Collapse residual **0.0041 of slope over 34
+overlapping points**, against a slope variation of 0.107. Four windows onto one
+curve land on one curve — so slope IS a function of overshoot alone, and the
+recovered drive offsets (−5.05 / 0 / +5.75 / +10.80 dB) are consistent with the
+Input positions. Nothing is refuted by the collapse; the law exists.
+
+**Then the shape, and it is the opposite of ours.**
+
+| shifted level | slope | implied ratio |
+|---|---|---|
+| −16.0 | 0.9150 | 11.76 |
+| −11.0 | 0.9492 | **19.69** ← peak |
+| −5.2 | 0.9416 | 17.11 |
+| −2.2 | 0.9262 | 13.56 |
+| +0.8 | 0.9011 | 10.11 |
+| +7.8 | 0.8418 | **6.32** |
+
+Above the peak the trend is **−0.756 of ratio per dB** of overshoot: the ratio
+**falls** from ~19.7 to ~6.3. Our law is `MIN + SPAN*over/(over+HALF)` with MIN 6
+and SPAN 14 — it **rises** 6 → 20. Our own kernel through the identical
+extractor reads 0.9473 → 0.9521, essentially flat at ratio ~20, because with a
+16 dB knee the law has already saturated everywhere it can be seen.
+
+⚠ **THE RANGE IS NOT WHAT REFUTES IT.** Measured 0.8418–0.9494 sits neatly inside
+our family's 0.8334–0.9500. It is the DIRECTION.
+
+⚠ **AND A SIGN FLIP DOES NOT RESCUE THE FAMILY**, which was checked rather than
+assumed. Fitted to the falling region with negative spans allowed, the best
+member reaches 1.595 rms of ratio — about 12 % of the measured range — and wants
+an asymptote of **−13.0**, which is not a ratio at all (below 1 is expansion).
+Held to a legal asymptote it is worse, 2.079.
+
+⚠ **MY SEARCH BOUNDS EXCLUDED THE CORRECT SIGN.** `allRatioSpan` was bounded
+`[0, 40]`, so the fitter could only ever return the least-bad *climbing* law.
+Fixed to `[-40, 40]` — the tool should not be wrong for two reasons at once,
+even though the family is refuted on shape either way.
+
+#### The literature agrees, and the owner found it
+
+Austin Moore, *All Buttons In: An investigation into the use of the 1176 FET
+compressor in popular music production* (Journal on the Art of Record
+Production, 2012) — supplied by the owner; the sandbox cannot reach the domain,
+so this works from the text they pasted.
+
+- ⚠ **Shanks (UA Webzine, 2003) likens the all-buttons compression curve to a
+  "plateau"**, with "lag time on initial transients". A plateau is a region of
+  very high ratio; a curve that resumes rising above it has a LOWER ratio there.
+  That is our measured shape — high near the knee, falling above it. **Inference
+  from a qualitative description, not a measured curve**, and labelled as one.
+- The UA manual puts all-buttons "somewhere between 12:1 and 20:1". Our
+  measurement matches near the knee (19.7) and goes **below** it at high
+  overshoot (6.3).
+- Moore's own drum test in all-buttons: "the occasional hit overshooting…
+  close to 0dBFS" at low RMS — what a falling ratio at high overshoot does.
+- ⚠ **NOT THE SAME CLAIM**: Shanks also says "the ratio will always increase a
+  bit after the transient", which is program dependence in TIME. Ours is in
+  LEVEL. Different axes, and they must not be merged.
+- ⚠ The paper measures HARDWARE; both our references are plugins.
+
+#### ⚠⚠ And it settles the threshold disagreement, against us
+
+The log has recorded FETish measuring a threshold FIXED across the ratio button
+(0.00 dB) while CLA-76's moves 4.5 dB, and called it a topology disagreement
+neither reference could settle. The paper quotes the UA manual directly: **"The
+1176 has been designed so that selecting higher ratios also raises the threshold
+level."** Moore reads the same off the Urei transfer-function diagram, and adds
+that the knee hardens with ratio too.
+
+So **CLA-76 matches the hardware documentation and FETish does not** — and our
+model, which holds the threshold fixed, is wrong with FETish. That is a real
+finding about all four normal buttons, not just all-buttons, and it is a
+topology change rather than a refit. **Not made here**; recorded so the next
+person does not re-derive the disagreement from scratch.
+
+⚠ Note this also means FETish's *manual* was right and its *implementation* was
+not — the log already recorded that FETish contradicts its own documentation on
+this point.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

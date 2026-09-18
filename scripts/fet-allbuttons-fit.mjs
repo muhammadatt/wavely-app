@@ -109,7 +109,24 @@ export const BOUNDS = {
   allKneeDb: [0.5, 20],
   allThresholdDropDb: [-2, 12],
   allRatioMin: [2, 20],
-  allRatioSpan: [0, 40],
+  /**
+   * ⚠⚠ THE LOWER BOUND WAS 0 AND THAT EXCLUDED THE ANSWER. Our law is written
+   * `ratio = MIN + SPAN*over/(over+HALF)`, so a positive span means the ratio
+   * CLIMBS with overshoot — which is what the constant was invented to express
+   * and the opposite of what CLA-76 does. The shape extractor measured its
+   * all-buttons ratio FALLING from ~19.7 near the knee to ~6.3 at the top, a
+   * trend of -0.756 per dB. A search that cannot go negative could only ever
+   * report the least-bad climbing law.
+   *
+   * ⚠ WIDENING IT DOES NOT RESCUE THE FAMILY, which was checked before changing
+   * it: fitted to the falling region with negative spans allowed, the best
+   * member lands at 1.595 rms of ratio — about 12 % of the measured 6.3-19.7
+   * range — and wants an asymptote of -13.0, which is not a ratio at all. Held
+   * to a legal asymptote it is worse still, 2.079. The bound is fixed so the
+   * tool stops being wrong for TWO reasons at once; the family is refuted on
+   * shape either way.
+   */
+  allRatioSpan: [-40, 40],
   allRatioHalfDb: [1, 40],
 }
 
