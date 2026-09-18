@@ -77,6 +77,21 @@ export const FET1176_TUNING_DEFAULTS = Object.freeze({
    * panel says to select both or neither.
    */
   attackSchedule: FET1176_KERNEL_DEFAULTS.attackSchedule,
+  /**
+   * 'fixed' ships; 'moving' raises the threshold with the ratio button.
+   *
+   * ⚠ THE REFERENCES DISAGREE AND THE HARDWARE SIDES AGAINST US. FETish holds
+   * the threshold fixed to 0.00 dB across all four buttons at all four Input
+   * positions — so 'fixed' reproduces it exactly. CLA-76 moves it 3.88-4.11 dB,
+   * and the UA manual agrees: "selecting higher ratios also raises the threshold
+   * level". FETish contradicts its own documentation here.
+   *
+   * ⚠ IT CHANGES WHAT EVERY PATCH ON 8:1, 12:1 AND 20:1 DOES, which is why it
+   * is an A/B and not a fix. Ratio 4 is the anchor and is untouched, so
+   * `vocal-punch` and `gentle-ride` are unaffected; `consonant-control` (8:1)
+   * and `parallel-thickener` (12:1) are what there is to listen to.
+   */
+  ratioThreshold: FET1176_KERNEL_DEFAULTS.ratioThreshold,
 })
 
 /**
@@ -94,6 +109,7 @@ const CURVES = new Set(['poly', 'tanh'])
 const POSITIONS = new Set(['preInput', 'preCell', 'postCell'])
 const ATTACK_RANGES = new Set(['datasheet', 'fetish'])
 const SCHEDULES = new Set(['depth', 'none'])
+const RATIO_THRESHOLDS = new Set(['fixed', 'moving'])
 
 let tuning = { ...FET1176_TUNING_DEFAULTS }
 const listeners = new Set()
@@ -141,6 +157,7 @@ export function setFET1176Tuning(patch) {
     if (k === 'attackRange' && !ATTACK_RANGES.has(v)) continue
     if (k === 'releaseSchedule' && !SCHEDULES.has(v)) continue
     if (k === 'attackSchedule' && !SCHEDULES.has(v)) continue
+    if (k === 'ratioThreshold' && !RATIO_THRESHOLDS.has(v)) continue
     if (tuning[k] !== v) { tuning[k] = v; changed = true }
   }
   if (changed) for (const fn of listeners) fn()

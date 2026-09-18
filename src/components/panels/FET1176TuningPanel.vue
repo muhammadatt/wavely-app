@@ -122,6 +122,29 @@ const CHOICES = [
     ],
   },
   {
+    key: 'ratioThreshold', label: 'Ratio thr',
+    options: [
+      {
+        id: 'fixed', label: 'FIXED',
+        title: 'One threshold for all four ratio buttons. SHIPS, and it reproduces '
+          + 'FETish EXACTLY — 16 captures, four buttons at four Input positions, '
+          + 'effective threshold identical to the printed digit every time (0.00 dB of '
+          + 'spread). ⚠ But FETish contradicts its own manual here, and the hardware’s '
+          + 'says the threshold moves',
+      },
+      {
+        id: 'moving', label: 'MOVING',
+        title: 'The threshold RISES 1.712 dB per octave of ratio — CLA-76’s measured '
+          + 'behaviour (3.88–4.11 dB across the four buttons at every drive, worst '
+          + 'residual 0.135 dB) and what the UA manual describes: “selecting higher '
+          + 'ratios also raises the threshold level”. ⚠ Ratio 4 is the anchor and does '
+          + 'not move, so listen on 8:1 and 12:1 — Consonant Control and Parallel '
+          + 'Thickener. Higher ratios compress LESS at the same Input. ⚠ Shipping this '
+          + 'would re-voice every patch on 8/12/20 and need a preset re-cut',
+      },
+    ],
+  },
+  {
     key: 'releaseSchedule', label: 'Release',
     options: [
       {
@@ -253,7 +276,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span class="ml-auto font-mono text-[9px] text-white/30">
-          {{ vals.fetCurve }} / {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.attackSchedule }} / {{ vals.releaseSchedule }}
+          {{ vals.fetCurve }} / {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.attackSchedule }} / {{ vals.ratioThreshold }} / {{ vals.releaseSchedule }}
         </span>
       </div>
     </div>

@@ -485,6 +485,45 @@ export { KNEE_AT_REF_DB, KNEE_DRIVE_SLOPE, KNEE_DRIVE_REF_DB, KNEE_FLOOR_DB, KNE
 
 // All-buttons-in: a wide, badly-behaved knee whose effective ratio climbs
 // with overshoot, over a threshold pulled down by ALL_THRESHOLD_DROP_DB.
+/**
+ * THE THRESHOLD AND THE RATIO BUTTON — an A/B, because the two references
+ * disagree and the hardware documentation sides against us.
+ *
+ * ⚠⚠ WE HOLD THE THRESHOLD FIXED ACROSS ALL FOUR BUTTONS, AND FETish AGREES
+ * EXACTLY: 16 captures, four buttons at four Input positions, effective
+ * threshold identical to the printed digit at every position (-15.29 / -22.09 /
+ * -33.68 / -40.28 dBFS, 0.00 dB of spread across the buttons). So `'fixed'` is
+ * not an invention — it reproduces one of the two references perfectly.
+ *
+ * ⚠ CLA-76 MOVES IT, AND SO DOES THE HARDWARE. CLA-76 spreads 3.88-4.11 dB
+ * across the same four buttons, monotone in ratio, at every drive. The UA
+ * manual says the same — "The 1176 has been designed so that selecting higher
+ * ratios also raises the threshold level" (quoted in Moore, JARP 2012, who
+ * reads it off the Urei transfer-function diagram too). ⚠ AND FETish
+ * CONTRADICTS ITS OWN MANUAL HERE, which is what the ratio sweep was added to
+ * test.
+ *
+ * The law, fitted to CLA-76's 16 captures: the threshold RISES **1.712 dB per
+ * octave of ratio**, worst residual 0.135 dB. Measured offsets against its own
+ * ratio 4: +1.778 at 8:1, +2.673 at 12:1, +3.975 at 20:1.
+ *
+ * ⚠ THE ANCHOR AT RATIO 4 IS A CHOICE, NOT A MEASUREMENT. Captures give only
+ * the offsets BETWEEN buttons; where the family sits absolutely is degenerate
+ * with the Input drive, exactly as for all-buttons. Anchoring at 4:1 leaves the
+ * most-used button — and the two presets that sit on it — untouched, so the
+ * A/B is about the other three rather than about everything at once.
+ *
+ * ⚠ ALL-BUTTONS IS NOT AFFECTED. It keeps `ALL_THRESHOLD_DROP_DB` from the base
+ * threshold; this switch is scoped to the four numbered buttons.
+ */
+export const RATIO_THRESHOLD_PER_OCTAVE_DB = 1.712
+
+/** The threshold offset a ratio button carries, dB, under `'moving'`. */
+export function ratioThresholdOffsetDb(ratio, perOctave = RATIO_THRESHOLD_PER_OCTAVE_DB) {
+  const r = RATIO_VALUES[ratio] ?? 4
+  return perOctave * Math.log2(r / 4)
+}
+
 export const ALL_KNEE_DB = 16
 export const ALL_THRESHOLD_DROP_DB = 6
 
@@ -653,6 +692,18 @@ export const FET1176_KERNEL_DEFAULTS = {
    *             before the fit; reachable through FET_LEGACY_PATCH.
    */
   attackSchedule: 'depth',
+  /**
+   * Whether the ratio button moves the threshold.
+   *   'fixed'  — SHIPS. One threshold for all four buttons, which is what
+   *              FETish measures to 0.00 dB.
+   *   'moving' — CLA-76's behaviour and the hardware manual's: the threshold
+   *              rises with the ratio. See `RATIO_THRESHOLD_PER_OCTAVE_DB`.
+   * A bench A/B, not a patch key — the two references disagree and no
+   * measurement of ours settles which to ship.
+   */
+  ratioThreshold: 'fixed',
+  /** dB per octave of ratio, read only when `ratioThreshold` is 'moving'. */
+  ratioThresholdPerOctaveDb: RATIO_THRESHOLD_PER_OCTAVE_DB,
   /** dB⁻¹ slope of that schedule, negative. Read only when it is 'depth'. */
   attackDepthK: ATTACK_DEPTH_K,
   releaseSchedule: 'depth',
@@ -987,7 +1038,13 @@ export class FET1176Kernel {
         ? p.ratioValue
         : RATIO_VALUES[ratioKey]
       this.slope = 1 - 1 / this.ratio
-      this.thresholdDb = THRESHOLD_DBFS
+      /**
+       * ⚠ 'fixed' SHIPS AND REPRODUCES FETish EXACTLY; 'moving' reproduces
+       * CLA-76 and the hardware manual. See `RATIO_THRESHOLD_PER_OCTAVE_DB`.
+       */
+      this.thresholdDb = p.ratioThreshold === 'moving'
+        ? THRESHOLD_DBFS + ratioThresholdOffsetDb(ratioKey, p.ratioThresholdPerOctaveDb)
+        : THRESHOLD_DBFS
       this.tailFraction = TAIL_FRACTION
       this.tailMult = TAIL_MULT
     }

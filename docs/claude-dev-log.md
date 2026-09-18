@@ -4106,6 +4106,62 @@ either means refitting the slope law**. `factory:all-buttons-in` stays un-recut.
 
 ---
 
+### The ratio-dependent threshold, as an A/B
+
+Owner wants to hear it on the four numbered buttons before deciding. Wired to
+the bench panel as `Ratio thr` — `FIXED` (ships) against `MOVING`.
+
+**The law, fitted to CLA-76's 16 coarse captures.** Threshold offsets against its
+own ratio 4, at each Input position:
+
+| | r4 | r8 | r12 | r20 |
+|---|---|---|---|---|
+| I1 | 0 | +1.79 | +2.63 | +3.95 |
+| I2 | 0 | +1.72 | +2.63 | +3.88 |
+| I3 | 0 | +1.79 | +2.67 | +3.96 |
+| I4 | 0 | +1.81 | +2.76 | +4.11 |
+| mean | 0 | **+1.778** | **+2.673** | **+3.975** |
+
+A line in log2(ratio) through the origin at 4:1 fits at **1.712 dB per octave**,
+worst residual **0.135 dB** over all sixteen. The threshold RISES with the
+button, so a higher ratio starts compressing later.
+
+⚠ **FETish IS NOT AMBIGUOUS HERE AND `FIXED` REPRODUCES IT EXACTLY** — its
+sixteen captures read −15.29 / −22.09 / −33.68 / −40.28 dBFS with **0.00 dB** of
+spread across the four buttons at every position. So this is not our invention
+against a reference; it is one reference against the other, with the hardware
+manual siding against FETish and against us.
+
+⚠ **THE ANCHOR AT 4:1 IS A CHOICE, NOT A MEASUREMENT.** The captures give only
+the offsets between buttons; the family's absolute placement is degenerate with
+the Input drive, exactly as for all-buttons. Anchoring at 4:1 leaves the
+most-used button untouched, so the A/B is about the other three rather than
+about everything at once.
+
+#### What there is to hear
+
+| preset | ratio | fixed | moving | change |
+|---|---|---|---|---|
+| vocal-punch | 4 | 4.15 | 4.15 | **0.00** |
+| consonant-control | 8 | 5.53 | 4.68 | **−0.84** |
+| gentle-ride | 4 | 3.13 | 3.13 | **0.00** |
+| parallel-thickener | 12 | 6.50 | 4.83 | **−1.67** |
+| all-buttons-in | all | 17.29 | 17.29 | **0.00** |
+
+So `consonant-control` and `parallel-thickener` are the two to listen to. On a
+fixed patch at Input 60 the ratio sweep moves −1.45 / −2.48 / −3.76 dB of average
+reduction at 8 / 12 / 20.
+
+⚠ **ALL-BUTTONS IS DELIBERATELY OUT OF SCOPE.** It carries its own
+`ALL_THRESHOLD_DROP_DB` from the base threshold, and folding it in would change a
+mode whose law is still being measured. A test pins that it does not move.
+
+⚠ **SHIPPING `MOVING` WOULD RE-VOICE EVERY PATCH ON 8/12/20** and require a
+second preset re-cut. That is the decision the A/B exists to inform, and it is
+not taken here.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
