@@ -3697,6 +3697,51 @@ all-buttons bounce the matrix asks for, which is the **only** source for
 `ALL_TAIL_FRACTION` and `ALL_TAIL_MULT`. A matched measurement against the wrong
 gain computer is not matched at all. The ratio is now read off the filename.
 
+#### ⚠⚠ THE TOOL FITTED A NUMBER IT COULD NOT MEASURE, AND THE CAPTURES CAUGHT IT
+
+The four all-buttons fine captures came back and the fitter reported
+`allThresholdDropDb = 0.750` against a shipping 6 — a big, plausible-looking
+result, consistent with what the coarse matrix had hinted. **It was an
+artefact.**
+
+The kernel computes `over = level + drive - (THRESHOLD - drop)`, so **drive and
+drop enter as a sum.** Raise the drive 1 dB and lower the drop 1 dB and the
+curve is identical — measured at **3.65e-7 dB rms** across a 4 dB range of the
+pair, against **0.797 dB** for moving either alone. A capture at an unknown
+Input position constrains `drive + drop` and neither term.
+
+So the 0.750 was whatever made up the difference against `estimateDrive`'s
+guess — which is quantised to the staircase's 1 dB step and depends on the very
+law being fitted. The output even showed it: the estimated drives came back
+−5 / −1 / +4 / +10, suspiciously round, because they are step indices.
+
+⚠ **AND THE REPORT'S OWN VERDICT COLUMN SAID "NOT determined" FOR THE ROW IT WAS
+FITTING.** The rule compared each constant's sensitivity against three times the
+fit residual, and with the residual at 0.565 dB nothing could clear it. A tool
+printing a fitted value on a row it has just labelled undetermined is a tool to
+stop trusting; the fit is now removed rather than the label.
+
+**The drop is measurable, just not there.** It is defined against the normal
+buttons' threshold, so it needs all-buttons and a normal button at the SAME
+Input knob — which the coarse `stairs.wav` matrix already has:
+
+| Input | vs ratio 4 | vs mean of four | vs ratio 12 |
+|---|---|---|---|
+| I1 | 0.54 | 2.63 | 3.17 |
+| I2 | 0.61 | 2.67 | 3.24 |
+| I3 | 0.58 | 2.68 | 3.25 |
+| I4 | 0.53 | 2.70 | 3.29 |
+
+Reproducible to ~0.1 dB across four independent drives, and **our 6 dB is larger
+than every convention.** ⚠ The convention ambiguity is irreducible and is itself
+the finding: our model holds ONE threshold for all four normal buttons and
+CLA-76's moves with the button by 4.5 dB, so the three columns disagree by
+2.7 dB and none is more correct than the others.
+
+CLA-76's coarse fits are now persisted in `data/fet1176/cla76_stairs_fits.json`
+beside FETish's, for the same reason: the captures cannot be committed and the
+numbers were nearly lost once already.
+
 #### ⚠⚠ The all-buttons law is not identifiable from a staircase
 
 Built `fet-allbuttons-fit.mjs` to fit the five all-buttons constants to the

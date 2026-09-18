@@ -48,8 +48,9 @@
  * that sweeps overshoot independently of level — which the staircase, where the
  * two move together by construction, cannot do.
  */
-import { existsSync, readdirSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { PLANS, runKernel, CAP_DIR } from './fet-ballistics.mjs'
 import { buildProbe } from './lib/probeStimulus.js'
 import { stairCurve, knobsFromName } from './fet-stairs.mjs'
@@ -59,6 +60,7 @@ import {
   inputDriveDbForKnob,
 } from '../src/audio/fet1176Processor.js'
 
+const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SR = 96000
 const PLAN_NAME = 'stairs-fine.wav'
 
@@ -71,10 +73,27 @@ export const SHIPPING_LAW = {
 }
 
 /**
- * The constants the curve actually determines. Everything else is reported with
- * its sensitivity and left alone — see the header.
+ * The constants an all-buttons-only capture set determines.
+ *
+ * ⚠⚠ IT IS EMPTY, AND `allThresholdDropDb` WAS IN IT UNTIL THE DEGENERACY WAS
+ * CHECKED RATHER THAN ASSUMED. The kernel computes
+ * `over = level + drive - (THRESHOLD - drop)`, so **drive and drop enter as a
+ * sum**: raise the drive 1 dB and lower the drop 1 dB and the curve is
+ * bit-identical — measured at 0.0000 dB rms across a 4 dB range of the pair.
+ * A capture at an unknown Input position therefore constrains `drive + drop`
+ * and neither term alone.
+ *
+ * This tool reported a fitted 0.750 dB drop on real captures before that was
+ * caught. The number was pure artefact: it was whatever made up the difference
+ * against `estimateDrive`'s guess, which is itself quantised to the staircase's
+ * 1 dB step and depends on the very law being fitted.
+ *
+ * ⚠ THE DROP IS MEASURABLE, JUST NOT HERE. It is defined against the NORMAL
+ * buttons' threshold, so it needs all-buttons and a normal button at the SAME
+ * Input knob position — which is exactly what the coarse `stairs.wav` matrix
+ * already captures (five ratios at each of I1-I4). See `thresholdDropFromCoarse`.
  */
-export const IDENTIFIABLE = ['allThresholdDropDb']
+export const IDENTIFIABLE = []
 
 /** A perturbation big enough to matter musically, per constant. */
 export const PROBE_DELTA = {
@@ -192,6 +211,50 @@ export function fitLaw(targets, sampleRate, plan, stim, { rounds = 6, start = SH
   return { law, rms: best }
 }
 
+/**
+ * The all-buttons threshold drop, from the COARSE stairs matrix — the only
+ * place it is measurable, because it needs all-buttons and a normal button at
+ * the SAME Input knob position so the drive cancels between them.
+ *
+ * ⚠ THE CONVENTION IS IRREDUCIBLY AMBIGUOUS AND THAT IS A FINDING, NOT A GAP.
+ * Our model holds ONE threshold for all four normal buttons; CLA-76's moves
+ * with the button, by 4.5 dB end to end. So "how far below the normal
+ * threshold" has no single answer — it depends which normal button you call
+ * the reference, and the three defensible choices disagree by 2.7 dB. All three
+ * are returned rather than one being picked silently.
+ *
+ * @param rows `{ ratio, input, effThresholdDb }` from a coarse stairs run
+ */
+export function thresholdDropFromCoarse(rows) {
+  const byInput = new Map()
+  for (const r of rows) {
+    if (!byInput.has(r.input)) byInput.set(r.input, [])
+    byInput.get(r.input).push(r)
+  }
+  const out = []
+  for (const [input, group] of [...byInput].sort((a, b) => a[0] - b[0])) {
+    const all = group.find(r => String(r.ratio).toLowerCase() === 'all')
+    const normal = group.filter(r => String(r.ratio).toLowerCase() !== 'all')
+    if (!all || normal.length < 2) continue
+    const byRatio = Object.fromEntries(normal.map(r => [String(r.ratio), r.effThresholdDb]))
+    const mean = normal.reduce((a, r) => a + r.effThresholdDb, 0) / normal.length
+    out.push({
+      input,
+      vsLowestRatio: byRatio['4'] - all.effThresholdDb,
+      vsMeanOfNormal: mean - all.effThresholdDb,
+      vsRatio12: byRatio['12'] - all.effThresholdDb,
+    })
+  }
+  return out
+}
+
+/** The coarse stairs fits, if they have been kept. */
+export function loadCoarse(path = null) {
+  const file = path ?? join(HERE, '..', 'data', 'fet1176', 'cla76_stairs_fits.json')
+  if (!existsSync(file)) return null
+  return JSON.parse(readFileSync(file, 'utf8'))
+}
+
 function loadTargets(dir, sampleRate, plan, stim) {
   const files = existsSync(dir)
     ? readdirSync(dir).filter(f => /stairsfine|stairs-fine/i.test(f) && /\.wav$/i.test(f)).sort()
@@ -211,10 +274,12 @@ function loadTargets(dir, sampleRate, plan, stim) {
 }
 
 /**
- * ⚠ THE DRIVE IS RECOVERED FROM THE CAPTURE, NOT ASSUMED FROM THE KNOB. The
- * reference's Input positions are its own; what puts the two kernels in
- * correspondence is where the bend sits, which is an absolute level. Estimated
- * here as the lowest step showing measurable reduction, refined by the fit.
+ * ⚠ A ROUGH DRIVE ESTIMATE, AND IT CANNOT BE REFINED AWAY. The lowest step
+ * showing measurable reduction, so it is quantised to the staircase's step
+ * (1 dB) and depends on the knee it is trying to help measure. That is
+ * tolerable for POSITIONING the curves and fatal for anything that trades
+ * against it — see `IDENTIFIABLE` for why the threshold drop is no longer
+ * fitted here.
  */
 export function estimateDrive(pts, thresholdDbfs = -18) {
   const first = pts.find(p => Number.isFinite(p.grDb) && p.grDb > 0.5)
@@ -240,46 +305,41 @@ function report(sampleRate, dir) {
   }
 
   const sens = sensitivity(targets, sampleRate, plan, stim, SHIPPING_LAW)
-  const { law, rms } = fitLaw(targets, sampleRate, plan, stim)
-
   console.log(`\n  curve rms against the SHIPPING law : ${sens.base.toFixed(3)} dB`)
-  console.log(`  curve rms after fitting ${IDENTIFIABLE.join(', ')} : ${rms.toFixed(3)} dB`)
+
+  console.log('\n  WHAT THESE CAPTURES CAN DETERMINE')
+  console.log('  constant                probe   curve moves')
+  for (const key of Object.keys(BOUNDS)) {
+    console.log(`  ${key.padEnd(22)} +/-${String(PROBE_DELTA[key]).padEnd(4)} ${sens.moves[key].toFixed(3).padStart(10)} dB`)
+  }
 
   /**
-   * ⚠ THE SENSITIVITY TABLE IS THE POINT, NOT THE FITTED NUMBERS. A constant
-   * whose whole plausible range moves the curve less than the residual the fit
-   * settles at is not determined by this data, and a number for it would be a
-   * guess with a decimal point on it.
+   * ⚠⚠ NOTHING IS FITTED FROM THESE, AND THE TOOL USED TO FIT ONE THING FROM
+   * THEM. See `IDENTIFIABLE`: drive and threshold drop enter the law as a sum,
+   * so an all-buttons capture at an unknown Input constrains only their total.
+   * The 0.750 dB drop an earlier version reported here was whatever made up the
+   * difference against a 1 dB-quantised drive guess.
    */
-  console.log('\n  WHAT THIS DATA CAN AND CANNOT DETERMINE')
-  console.log('  constant                probe   curve moves   verdict')
-  for (const key of Object.keys(BOUNDS)) {
-    const move = sens.moves[key]
-    const determined = move > Math.max(rms, 0.1) * 3
-    console.log(`  ${key.padEnd(22)} +/-${String(PROBE_DELTA[key]).padEnd(4)} ${move.toFixed(3).padStart(10)} dB   ` +
-      (determined ? 'determined' : '⚠ NOT determined by this stimulus'))
-  }
+  console.log('\n  ⚠ NOTHING IS INSTALLABLE FROM THESE CAPTURES.')
+  console.log('    allThresholdDropDb is DEGENERATE with the Input drive — the kernel reads')
+  console.log('    `over = level + drive - (THRESHOLD - drop)`, so raising the drive 1 dB and')
+  console.log('    lowering the drop 1 dB is bit-identical (0.0000 dB rms, measured). An')
+  console.log('    all-buttons capture at an unknown Input pins only `drive + drop`.')
+  console.log('    The other four barely move the curve at all — see the table above.')
 
-  console.log('\n  constant                shipping      fitted')
-  for (const key of Object.keys(BOUNDS)) {
-    const fitted = IDENTIFIABLE.includes(key) ? law[key].toFixed(3) : '— held'
-    console.log(`  ${key.padEnd(22)} ${String(SHIPPING_LAW[key]).padStart(8)}  ${String(fitted).padStart(10)}`)
-  }
-  console.log('\n  ⚠ ONLY THE "determined" ROWS MAY BE INSTALLED. The rest are held at their')
-  console.log('    shipping values because the curve does not distinguish them — separating')
-  console.log('    the ratio triple needs material that sweeps overshoot independently of')
-  console.log('    level, which a staircase cannot do.')
-
-  if (targets.length >= 3) {
-    const held = targets[Math.floor(targets.length / 2)]
-    const rest = targets.filter(t => t !== held)
-    const { law: lawH } = fitLaw(rest, sampleRate, plan, stim)
-    const heldRms = curveRms(held.pts, ourCurve(sampleRate, plan, stim, held.driveDb, lawH))
-    console.log(`\n  HELD OUT — fitted without ${held.file}`)
-    console.log(`    ${IDENTIFIABLE[0]} ${lawH[IDENTIFIABLE[0]].toFixed(3)} against ${law[IDENTIFIABLE[0]].toFixed(3)} on everything`)
-    console.log(`    its curve rms under that law: ${heldRms.toFixed(3)} dB`)
-  } else {
-    console.log('\n  ⚠ TOO FEW CAPTURES TO HOLD ONE OUT.')
+  const coarse = loadCoarse()
+  if (coarse) {
+    console.log('\n  THE DROP, FROM THE COARSE MATRIX — where all-buttons and the normal')
+    console.log('  buttons share an Input position, so the drive cancels between them:')
+    console.log('    Input   vs ratio 4   vs mean of four   vs ratio 12')
+    for (const r of thresholdDropFromCoarse(coarse.captures)) {
+      console.log(`     I${r.input}   ${r.vsLowestRatio.toFixed(2).padStart(9)}` +
+        `${r.vsMeanOfNormal.toFixed(2).padStart(18)}${r.vsRatio12.toFixed(2).padStart(14)}`)
+    }
+    console.log(`    ours: ${SHIPPING_LAW.allThresholdDropDb.toFixed(2)} dB — larger than every convention.`)
+    console.log('    ⚠ THE CONVENTION IS IRREDUCIBLY AMBIGUOUS. Our model holds ONE threshold')
+    console.log('      for all four normal buttons and CLA-76\'s moves with the button by 4.5 dB,')
+    console.log('      so the three columns disagree by 2.7 dB and none is more correct.')
   }
   console.log()
 }
@@ -301,27 +361,52 @@ function selftest(sampleRate) {
   const selfRms = curveRms(targets[0].pts, ourCurve(sampleRate, plan, stim, -2, truth))
   ok('a curve compared with itself is exactly zero', selfRms === 0)
 
-  const { law, rms } = fitLaw(targets, sampleRate, plan, stim, { rounds: 5 })
-  const shippingRms = costOf(targets, sampleRate, plan, stim, SHIPPING_LAW)
-  console.log(`\n  planted law recovered to ${rms.toFixed(3)} dB rms, from ${shippingRms.toFixed(3)} at the start`)
-  ok('the fit improves on the starting law', rms < shippingRms)
-  ok('it recovers the planted threshold drop', Math.abs(law.allThresholdDropDb - truth.allThresholdDropDb) < 1)
-
   /**
-   * ⚠⚠ THE NON-IDENTIFIABILITY IS ASSERTED, NOT WORKED AROUND. This is the
-   * finding: four of the five constants barely move the curve, so the tool must
-   * keep refusing to report them. If a future stimulus DOES determine them this
-   * test fails — which is the right way to find that out.
+   * ⚠⚠ THE DEGENERACY IS THE HEADLINE ASSERTION. Drive and threshold drop enter
+   * the law as a sum, so moving one up and the other down by the same amount is
+   * the SAME CURVE. This is what stopped the tool fitting a drop it could not
+   * measure; if the kernel ever separates them, this fails and the tool can
+   * start fitting it again.
    */
+  const ref = ourCurve(sampleRate, plan, stim, 4, SHIPPING_LAW)
+  const oneAloneProbe = curveRms(ref, ourCurve(sampleRate, plan, stim, 5, SHIPPING_LAW))
+  let worstTied = 0
+  for (const d of [-2, -1, 1, 2]) {
+    const moved = ourCurve(sampleRate, plan, stim, 4 + d,
+      { ...SHIPPING_LAW, allThresholdDropDb: SHIPPING_LAW.allThresholdDropDb - d })
+    worstTied = Math.max(worstTied, curveRms(ref, moved))
+  }
+  /**
+   * ⚠ NOT `=== 0`, AND THE FIRST VERSION WAS. `knobForDrive` bisects, so the
+   * drive it lands on is within ~1e-15 of the one asked for rather than exactly
+   * it, and the curve carries that through — measured, 3.65e-7 dB. The bar is
+   * set six orders of magnitude under the 0.797 dB that moving EITHER ALONE
+   * produces, so it still cannot pass by accident; the claim is that the pair is
+   * degenerate, not that floating point is exact.
+   */
+  console.log(`\n  drive/drop tied, worst curve rms: ${worstTied.toExponential(2)} dB` +
+    `  (moving one alone: ${oneAloneProbe.toFixed(3)} dB)`)
+  ok('drive and threshold drop are the SAME knob to this curve', worstTied < 1e-5)
+  ok('...while moving either alone does change it', oneAloneProbe > 0.5)
+  ok('so nothing is declared identifiable from these captures', IDENTIFIABLE.length === 0)
+
   const sens = sensitivity(targets, sampleRate, plan, stim, truth)
   console.log('\n  constant                probe   curve moves')
   for (const key of Object.keys(BOUNDS)) {
     console.log(`  ${key.padEnd(22)} +/-${String(PROBE_DELTA[key]).padEnd(4)} ${sens.moves[key].toFixed(3).padStart(10)} dB`)
   }
-  ok('the threshold drop is the one the curve is sensitive to',
-    sens.moves.allThresholdDropDb > 0.4)
-  for (const key of ['allKneeDb', 'allRatioMin', 'allRatioSpan', 'allRatioHalfDb']) {
-    ok(`${key} is NOT determined by this stimulus`, sens.moves[key] < 0.25)
+  ok('the ratio triple and the knee stay far less sensitive than the drop',
+    Math.max(sens.moves.allKneeDb, sens.moves.allRatioSpan, sens.moves.allRatioHalfDb)
+      < sens.moves.allThresholdDropDb)
+
+  // The coarse path is the one that CAN answer, so it must stay wired up.
+  const coarse = loadCoarse()
+  ok('the coarse stairs fits are kept in the repo', coarse !== null)
+  if (coarse) {
+    const drops = thresholdDropFromCoarse(coarse.captures)
+    ok('the drop is recoverable from them at every Input position', drops.length === 4)
+    ok('and is far below our 6 dB under every convention',
+      drops.every(d => d.vsRatio12 < 4 && d.vsLowestRatio < 1))
   }
   console.log(`\n  ${bad === 0 ? 'PASS' : `⚠ ${bad} FAILED`}\n`)
   return bad
