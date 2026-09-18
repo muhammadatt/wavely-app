@@ -7,7 +7,7 @@
  * voiceProfile, measureLoudness
  */
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
-import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
+import { computeFET1176AutoMakeupPlan } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
 import { computeSoftClipperAutoMakeupDb } from '../audio/softClipperProcessor.js'
 import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
@@ -75,7 +75,7 @@ self.onmessage = function (e) {
       la2aAutoMakeup(channelData, sampleRate, params)
       break
     case 'fet1176AutoMakeup':
-      autoMakeup(computeFET1176AutoMakeupDb, channelData, sampleRate, params)
+      fet1176AutoMakeup(channelData, sampleRate, params)
       break
     case 'softClipperAutoMakeup':
       autoMakeup(computeSoftClipperAutoMakeupDb, channelData, sampleRate, params)
@@ -115,6 +115,23 @@ function la2aAutoMakeup(channelData, sampleRate, params) {
   const { reference = 'peak', ...kernelParams } = params ?? {}
   try {
     const plan = computeAutoMakeupPlan(channelData, sampleRate, kernelParams, { reference })
+    postDone({ makeupDb: plan.makeupDb, ceilingKneeDb: plan.ceilingKneeDb })
+  } catch (err) {
+    postReply({ type: 'error', message: err.message })
+  }
+}
+
+/**
+ * FET Punch's makeup, which now has a REFERENCE for the same reason
+ * OptoSmooth's does — see `la2aAutoMakeup` above, whose contract this mirrors
+ * exactly: `reference` rides in `params` and is pulled back out before the
+ * params reach the kernel, and only `makeupDb` and `ceilingKneeDb` come back
+ * because the ceiling itself is measured over the WHOLE region upstream.
+ */
+function fet1176AutoMakeup(channelData, sampleRate, params) {
+  const { reference = 'peak', ...kernelParams } = params ?? {}
+  try {
+    const plan = computeFET1176AutoMakeupPlan(channelData, sampleRate, kernelParams, { reference })
     postDone({ makeupDb: plan.makeupDb, ceilingKneeDb: plan.ceilingKneeDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })

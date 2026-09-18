@@ -506,7 +506,7 @@ export function loudnessNormalizeRegion(
  * why each span is right for its job.
  *
  * `ceilingDb` is null under the peak reference, which needs no ceiling: its
- * guarantee is arithmetic. See `peakOfChannels` in la2aProcessor.js.
+ * guarantee is arithmetic. See `peakOfChannels` in dsp/makeupReference.js.
  */
 export function computeLA2AAutoMakeup(
   segments, start, end, kernelParams, sampleRate, channels, reference = 'peak',
@@ -533,10 +533,40 @@ export function computeLA2AAutoMakeup(
   })
 }
 
-/** Measure the FET Punch auto-makeup (Output) for a region — see above. */
-export function computeFET1176AutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
-  return measureInWorker('fet1176AutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
-    .then(d => d.makeupDb)
+/**
+ * Measure FET Punch's auto-makeup for a region. Resolves
+ * `{ makeupDb, ceilingDb, ceilingKneeDb }`.
+ *
+ * ⚠ THE SAME CONTRACT AS `computeLA2AAutoMakeup`, DELIBERATELY — read its note
+ * for all of it. The two halves are measured over different spans (makeup from
+ * the worker's capped window because solving it means running the kernel; the
+ * ceiling over the WHOLE region because "never louder than the source" is a
+ * claim about the source, not about its first thirty seconds), and the knee
+ * must not be dropped or the kernel silently falls back to the widest fixed
+ * width and every render loses peak headroom.
+ *
+ * `ceilingDb` is null under the peak reference, which needs no ceiling.
+ */
+export function computeFET1176AutoMakeup(
+  segments, start, end, kernelParams, sampleRate, channels, reference = 'peak',
+) {
+  return measureInWorker(
+    'fet1176AutoMakeup', segments, start, end, { ...kernelParams, reference }, sampleRate, channels,
+  ).then((d) => {
+    if (reference !== 'percentile') {
+      return { makeupDb: d.makeupDb, ceilingDb: null, ceilingKneeDb: null }
+    }
+    const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
+    return {
+      makeupDb: d.makeupDb,
+      ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+      // The measured width only when the solve saw everything the ceiling was
+      // measured over — see `analysedWholeRegion`.
+      ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+        ? d.ceilingKneeDb
+        : null,
+    }
+  })
 }
 
 /**

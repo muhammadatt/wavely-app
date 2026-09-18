@@ -56,6 +56,40 @@ const fetInputAlignDb = ref(0)
  */
 let fetAlignedFor = null
 
+/**
+ * THE MAKEUP REFERENCE, FIXED — the same one OptoSmooth ships, and for the same
+ * measured reason.
+ *
+ * ⚠ PEAK-REFERENCED MAKEUP RAN THE INPUT KNOB BACKWARDS. On the syllabic
+ * narration fixture with one plosive at the end of a pause, the plosive
+ * survives the FET's attack almost intact, so it pinned the reference for the
+ * whole file and compressing harder DELIVERED LESS LEVEL: rms -20.85 dB at
+ * Input 50 against -22.56 at 70 and -24.37 at 100, every one of them quieter
+ * than the -19.18 source. Referenced to the 99.9th percentile the same sweep
+ * holds the body at -17.90 / -17.89 / -18.28 and the ceiling holds the peak at
+ * or under the source's -0.45 dBFS throughout.
+ *
+ * ⚠ IT IS NOT A CHOICE, DELIBERATELY. There is no material on which the peak
+ * reference is the better answer — the bench keeps both, which is where a
+ * comparison belongs. See `peakOfChannels` in `dsp/makeupReference.js` for what
+ * the percentile gives up and `computeFET1176AutoMakeupPlan` for the ceiling
+ * that puts it back.
+ *
+ * ⚠ AND EVERY PATCH, PRESET AND PREVIOUSLY RENDERED FILE NOW SOUNDS DIFFERENT
+ * — louder at the same settings, and louder the further up the Input knob.
+ */
+const MAKEUP_REFERENCE = 'percentile'
+/**
+ * The ceiling the last measurement produced, dBFS, and its knee width.
+ *
+ * ⚠ MEASURED STATE, NOT A KNOB, and deliberately not in `FET1176_DEFAULTS`: it
+ * is the region's own peak, so it belongs to the audio rather than to the patch
+ * — a preset carrying one would apply another file's peak to this one. Exactly
+ * the reasoning `inputAlignDb` is kept out of presets for.
+ */
+const fetCeilingDb = ref(null)
+const fetCeilingKneeDb = ref(null)
+
 const fetAutoMakeup = ref(true)
 const fetAutoMakeupBusy = ref(false)
 
@@ -95,6 +129,14 @@ function currentParams() {
     scHpf: fetScHpf.value,
     mix: fetMix.value,
     inputAlignDb: fetInputAlignDb.value,
+    /**
+     * ⚠ ONLY WHILE AUTO OWNS THE KNOB. The ceiling is the other half of the
+     * percentile makeup; once the Output knob is the user's, enforcing a
+     * ceiling they never asked for would attenuate a boost they set by hand.
+     */
+    ceilingDb: fetAutoMakeup.value ? fetCeilingDb.value : null,
+    // Leaves with the ceiling it belongs to, for the same reason.
+    ceilingKneeDb: fetAutoMakeup.value ? fetCeilingKneeDb.value : null,
   }
 }
 
@@ -136,32 +178,22 @@ export function useFET1176() {
     function tick() {
       const nodes = chain.effects.find(e => e.id === fet1176Effect.id)?.nodes
       /**
-       * LIVE AUTO MAKEUP — read off the worklet on the meter's own cadence.
+       * ⚠ THERE IS NO LIVE MAKEUP WRITE-BACK ANY MORE, and it is not an
+       * oversight. The kernel's tracker is a running peak by construction —
+       * `(P - max|a|)/max|b|` over what has played — and the shipping reference
+       * is the 99.9th percentile, which is a statistic over millions of samples
+       * that no pair of running extrema can express. Left in, it would have
+       * driven the knob to the peak-referenced answer between measurements and
+       * the offline solve would have yanked it back: on the narration fixture
+       * that is a 3-6 dB fight, visible as the knob jumping on every re-measure
+       * and audible as the level doing the same. OptoSmooth's write-back came
+       * out for exactly this reason; the tracker itself stays, because the
+       * bench still reads it.
        *
-       * The kernel maintains it from running extrema at O(1) per sample, so it
-       * needs no worker, no region render and no selection, and it lands within
-       * one meter interval (~21 ms) rather than a measurement (~170 ms).
-       *
-       * ⚠ THIS IS THE PREVIEW VALUE ONLY. It knows only what has PLAYED, so it
-       * is history-dependent — measured on real narration it can sit ~0.9 dB
-       * high before the loudest moment arrives. `apply()` re-measures offline
-       * for exactly that reason; see the note there.
-       *
-       * ⚠ ONLY WHILE AUTO OWNS THE KNOB. Once the user has taken over, writing
-       * a tracked value into it would be the panel overruling them.
+       * The cost is that the Output knob now moves on the measurement's cadence
+       * (~170 ms) rather than the meter's (~21 ms). That is the honest cadence:
+       * it is when the answer actually changes.
        */
-      if (fetAutoMakeup.value) {
-        const live = nodes.getLiveMakeupDb?.()
-        if (Number.isFinite(live)) {
-          const next = Math.max(OUTPUT_MIN_DB, Math.min(OUTPUT_MAX_DB, live))
-          // A threshold, not equality: the knob prints one decimal, and
-          // repainting it on sub-hundredth wobble is churn nobody can see.
-          if (Math.abs(next - fetOutput.value) > 0.02) {
-            fetOutput.value = next
-            pushOutput()
-          }
-        }
-      }
       if (nodes) {
         fetReduction.value = nodes.getReduction()
         // Only meter channels the source really has: the splitter is
@@ -311,12 +343,27 @@ export function useFET1176() {
     const seq = ++makeupSeq
     fetAutoMakeupBusy.value = true
     try {
-      const makeupDb = await computeFET1176AutoMakeup(
+      const { makeupDb, ceilingDb, ceilingKneeDb } = await computeFET1176AutoMakeup(
         state.segments, start, end,
         measurementParams(),
-        state.currentFile.sampleRate, state.currentFile.channels
+        state.currentFile.sampleRate, state.currentFile.channels,
+        MAKEUP_REFERENCE,
       )
       if (seq !== makeupSeq) return // a newer measurement is already in flight
+      /**
+       * ⚠ THE CEILING GOES FIRST, AND THE ORDER IS THE GUARANTEE. Each reaches
+       * the live node as its own param message, so between them the node holds
+       * one old value and one new one. Gain-then-ceiling would leave the raised
+       * makeup running for that gap with the old ceiling — or none — which is
+       * exactly the overshoot the pairing exists to prevent, audible as a blip
+       * on every re-measure during a drag.
+       */
+      fetCeilingDb.value = ceilingDb
+      pushParam('ceilingDb', ceilingDb)
+      // With the ceiling, ahead of the gain, and for the same reason: the knee
+      // is how hard that ceiling holds, so it must not lag the makeup either.
+      fetCeilingKneeDb.value = ceilingKneeDb
+      pushParam('ceilingKneeDb', ceilingKneeDb)
       fetOutput.value = Math.max(OUTPUT_MIN_DB, Math.min(OUTPUT_MAX_DB, makeupDb))
       pushOutput()
     } catch (err) {
@@ -406,6 +453,17 @@ export function useFET1176() {
     makeupThrottle?.cancel()
     makeupSeq++
     fetAutoMakeupBusy.value = false
+    /**
+     * ⚠ THE CEILING LEAVES WITH AUTO. `currentParams()` already drops it while
+     * AUTO is off, but the LIVE node has been told about it and would keep
+     * enforcing it against a gain the user now owns — a manual boost silently
+     * held down by the last measurement's ceiling, with nothing on the panel
+     * saying so.
+     */
+    fetCeilingDb.value = null
+    pushParam('ceilingDb', null)
+    fetCeilingKneeDb.value = null
+    pushParam('ceilingKneeDb', null)
   }
 
   function toggleAutoMakeup() {
@@ -419,9 +477,13 @@ export function useFET1176() {
 
   /**
    * A new region is new material, so the live tracker's running extrema — which
-   * describe audio the user has moved on from — are cleared with it. Without
-   * this the makeup keeps answering for the previous selection and only drifts
-   * toward the new one as it is diluted.
+   * describe audio the user has moved on from — are cleared with it.
+   *
+   * ⚠ IT NO LONGER MOVES THE KNOB, and it is still right to call. The tracker
+   * stopped driving Output when the reference became the percentile (see the
+   * meter loop), so this is now housekeeping on a reading the bench takes —
+   * but a tracker carrying the previous selection's extrema is a wrong reading
+   * whoever is looking at it.
    */
   function resetLiveMakeup() {
     getEffectChain(getAudioContext()).effects
@@ -433,13 +495,12 @@ export function useFET1176() {
     const { start, end } = state.selection
 
     /**
-     * ⚠ RE-MEASURE BEFORE APPLYING, because the knob may be holding a LIVE
-     * value and a live value is history-dependent — a function of what has
-     * played. Committing it would mean the same selection and settings render
-     * differently depending on where and how long you pressed play, and a
-     * makeup measured before the loudest moment arrived would put the output
-     * above the source's peak. The offline solve answers for the whole region
-     * every time.
+     * ⚠ RE-MEASURE BEFORE APPLYING, because the knob may be answering for a
+     * DIFFERENT SPAN. With no selection, preview measures the whole file; apply
+     * always has one, and the makeup and the ceiling are both properties of the
+     * region they were measured over — committing the file's answer to a
+     * selection would put the output above that selection's own peak. The
+     * offline solve answers for the region being written, every time.
      */
     /**
      * ⚠ BEFORE THE MAKEUP SOLVE, AND BEFORE apply — not only on preview. Apply

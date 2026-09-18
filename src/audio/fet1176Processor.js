@@ -78,8 +78,18 @@ import {
   Oversampler, DelayLine, OVERSAMPLE_FACTOR,
   OVERSAMPLE_LATENCY_SAMPLES, UPSAMPLE_DELAY_SAMPLES,
 } from './dsp/oversample.js'
+/**
+ * ⚠ THE MAKEUP REFERENCE AND ITS CEILING ARE SHARED WITH OPTOSMOOTH, and
+ * deliberately so: they are one mechanism, and two copies of a guarantee is two
+ * guarantees. See `dsp/makeupReference.js`.
+ */
+import {
+  MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor,
+  softCeiling, float32AtOrBelow, percentileOfChannels, peakOfChannels,
+} from './dsp/makeupReference.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
+export { MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor }
 
 // ── Level reference ─────────────────────────────────────────────────────────
 
@@ -439,6 +449,17 @@ export const FET1176_KERNEL_DEFAULTS = {
    * from gated RMS, never stored in a preset: it is a property of the FILE.
    */
   inputAlignDb: 0,
+  /**
+   * The output ceiling, dBFS, and how softly it is enforced. Null is off.
+   *
+   * ⚠ THESE TWO AND THE PERCENTILE MAKEUP ARE ONE MECHANISM. A percentile
+   * reference does not keep "never louder than the source" by arithmetic, so
+   * the ceiling keeps it by enforcement; `computeFET1176AutoMakeupPlan` is the
+   * only thing that issues either and it issues both. Measured per FILE, like
+   * `inputAlignDb` and for the same reason — never stored in a preset.
+   */
+  ceilingDb: null,
+  ceilingKneeDb: null,
   /** dB⁻¹ slope of that schedule. Only read when releaseSchedule is 'depth'. */
   releaseDepthK: RELEASE_DEPTH_K,
   /**
@@ -852,6 +873,25 @@ export class FET1176Kernel {
     this.wetMix = clamp(p.mix, 0, 1)
     this.dryMix = 1 - this.wetMix
 
+    /**
+     * The ceiling, memoryless and at the very output — after the wet/dry sum,
+     * because a ceiling inside the wet path would be undone by the dry side.
+     * Rounded DOWN to the nearest float32 so a sample sitting exactly on the
+     * ceiling cannot round up through it.
+     */
+    this.ceilingLin = Number.isFinite(p.ceilingDb)
+      ? float32AtOrBelow(Math.exp(p.ceilingDb * LN10_OVER_20)) : 0
+    /**
+     * ⚠ THE KNEE IS SIZED BY THE SOLVE, NOT FIXED — see `ceilingKneeDbFor`. A
+     * ceiling with nothing to catch must cost nothing, and a fixed width costs
+     * 0.3-0.5 dB of peak on a render that was already legal. Absent, fall back
+     * to the widest fixed width: conservative, never unsafe.
+     */
+    const ceilingKneeDb = Number.isFinite(p.ceilingKneeDb)
+      ? clamp(p.ceilingKneeDb, 0, CEILING_KNEE_DB) : CEILING_KNEE_DB
+    this.ceilingKneeLin = this.ceilingLin > 0
+      ? this.ceilingLin * Math.exp(-ceilingKneeDb * LN10_OVER_20) : 0
+
     this.oversampleOn = p.oversample !== false
   }
 
@@ -1174,7 +1214,10 @@ export class FET1176Kernel {
         // and bypass A/B compares like for like.
         const dry = dryLine.push(input[i])
         this._trackMakeup(dry, wetUnity)
-        out[i] = dry * this.dryMix + w * this.wetMix
+        const mixed = dry * this.dryMix + w * this.wetMix
+        out[i] = this.ceilingLin > 0
+          ? softCeiling(mixed, this.ceilingLin, this.ceilingKneeLin)
+          : mixed
       }
       this.dcX[ch] = dcX
       this.dcY[ch] = dcY
@@ -1225,7 +1268,10 @@ export class FET1176Kernel {
       const wetUnity = w
       w *= outGain[i]
       this._trackMakeup(dry, wetUnity)
-      out[i] = dry * this.dryMix + w * this.wetMix
+      const mixed = dry * this.dryMix + w * this.wetMix
+      out[i] = this.ceilingLin > 0
+        ? softCeiling(mixed, this.ceilingLin, this.ceilingKneeLin)
+        : mixed
     }
     this.dcX[ch] = dcX
     this.dcY[ch] = dcY
@@ -1318,45 +1364,21 @@ export function processFET1176Buffer(channelData, sampleRate, params = {}) {
 }
 
 /**
+ * ⚠ THE MAKEUP REFERENCE MOVED, AND SO DID THE ARGUMENT ABOUT IT. Both the peak
+ * reference and the percentile-plus-ceiling pair that supersedes it live in
+ * `dsp/makeupReference.js` now, shared with OptoSmooth, because they are one
+ * mechanism and FET Punch failed in exactly the way that note describes: on
+ * narration with one plosive, the Output knob ran BACKWARDS above Input ~80 —
+ * auto makeup 9.99 / 9.12 / 8.23 / 7.32 dB at Input 70 / 80 / 90 / 100 for a
+ * delivered rms of -13.47 / -13.44 / -13.51 / -13.73 dB. One uncompressed onset
+ * pinned the reference for the whole file, so compressing harder delivered LESS
+ * level. See `peakOfChannels` there for the whole of it.
+ */
+
+/**
  * RMS across every sample of every channel, optionally skipping a leading
  * stretch — see the counterpart in la2aProcessor.js for why.
  */
-/**
- * Peak magnitude across every sample of every channel, in dB.
- *
- * The makeup reference. Peak rather than RMS, and the distinction is the whole
- * point of makeup gain: the compressor pulls the loud moments down, makeup
- * hands back what it took, the peaks land where they started and everything
- * underneath rises with them. That is a compressor made louder without being
- * merely turned up — which is the comparison a listener is actually running
- * when they A/B it.
- *
- * Matching RMS instead, as this did, returns only the average loss and
- * therefore leaves the output exactly as loud as the input: a compressor that
- * by construction cannot make anything louder.
- *
- * TRUE PEAK, not a high percentile, and that was measured. A percentile of
- * short-block peaks looks more robust and is worse where it matters: on real
- * speech a fast transient can survive compression almost intact while the p99
- * comes down several dB, so percentile-referenced makeup over-compensates and
- * pushes that survivor ABOVE the source — up to 5.5 dB above, measured. True
- * peak cannot do that; the guarantee it buys is exact.
- *
- * The cost is the opposite failure: a single uncompressed click sets the
- * reference and the makeup comes out small. That is the safe direction — never
- * louder than the source — and the manual trim is there for it.
- */
-function peakOfChannels(channels, skip = 0) {
-  let peak = 0
-  for (const ch of channels) {
-    for (let i = skip; i < ch.length; i++) {
-      const v = ch[i] < 0 ? -ch[i] : ch[i]
-      if (v > peak) peak = v
-    }
-  }
-  return peak
-}
-
 function rmsOfChannels(channels, skip = 0) {
   let sumSq = 0
   let count = 0
@@ -1416,15 +1438,48 @@ function rmsOfChannels(channels, skip = 0) {
  * @returns {number} Makeup in dB, clamped to the Output knob's travel.
  */
 export function computeFET1176AutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
-  const { minDb = -36, maxDb = 36 } = options
+  return computeFET1176AutoMakeupPlan(channelData, sampleRate, params, options).makeupDb
+}
+
+/**
+ * The makeup AND the ceiling that has to ship with it. See the note on
+ * `peakOfChannels` in `dsp/makeupReference.js` for why they are one thing.
+ *
+ * `reference: 'peak'` (the default) is the one-render affine solve documented
+ * above, unchanged, and returns `ceilingDb: null`: its guarantee is arithmetic
+ * and there is nothing for a ceiling to catch. `reference: 'percentile'` gives
+ * up that guarantee on purpose — it is what stops one plosive pinning the whole
+ * file — and hands back `ceilingDb`/`ceilingKneeDb`, which put it back by
+ * enforcement. There is no option that yields one without the other.
+ *
+ * ⚠ THE PERCENTILE SOLVE IS ALSO EXACT, AND FOR THE SAME REASON THE PEAK ONE
+ * IS. The output is affine in the makeup — `out[i] = a[i] + b[i]·g`, with the
+ * wet path independent of `g` — so neither reference needs a second render.
+ * OptoSmooth's equivalent must iterate because its output valve sits AFTER the
+ * makeup amp; nothing here does. At Mix 1 the percentile answer is closed form
+ * (every sample scales with `g`, so the quantile does too); below Mix 1 the dry
+ * sum breaks that proportionality and it is bisected on `g` instead — over the
+ * knob's own travel, against the already-rendered wet path, so the cost is a
+ * handful of O(n) passes and not a handful of renders. ⚠ ITERATING THE RENDER
+ * HERE WOULD NOT CONVERGE: see the measured table above, where three passes at
+ * Mix 0.3 came out 6.1 dB short.
+ *
+ * @returns {{makeupDb:number, ceilingDb:number|null, ceilingKneeDb:number|null}}
+ */
+export function computeFET1176AutoMakeupPlan(channelData, sampleRate, params = {}, options = {}) {
+  const { minDb = -36, maxDb = 36, reference = 'peak' } = options
+  if (reference !== 'peak' && reference !== 'percentile') {
+    throw new Error(`unknown makeup reference: ${reference}`)
+  }
+  const NONE = { makeupDb: 0, ceilingDb: null, ceilingKneeDb: null }
 
   const inputPeak = peakOfChannels(channelData)
-  if (inputPeak <= 0) return 0
+  if (inputPeak <= 0) return NONE
 
   const mix = clamp(params.mix ?? FET1176_KERNEL_DEFAULTS.mix, 0, 1)
   // Mix 0 is the dry signal: there is nothing to make up, and the solve below
   // would be unconstrained (every b[i] is zero).
-  if (mix <= 0) return 0
+  if (mix <= 0) return NONE
 
   /**
    * The wet path alone, at unity output gain. Taken at mix 1 so the render IS
@@ -1460,28 +1515,95 @@ export function computeFET1176AutoMakeupDb(channelData, sampleRate, params = {},
     return out
   })
   const { channelData: wetPadded } = processFET1176Buffer(padded, sampleRate, {
-    ...params, outputGainDb: 0, mix: 1,
+    // ⚠ THE SOLVE MEASURES WITHOUT THE CEILING, DELIBERATELY — the same reason
+    // OptoSmooth's does. The ceiling is enforcement placed downstream of the
+    // answer; measuring through it would fold the enforcement into the thing
+    // being enforced, and `b[i]` would stop being the wet path at unity.
+    ...params, outputGainDb: 0, mix: 1, ceilingDb: null, ceilingKneeDb: null,
   })
   const wet = wetPadded.map(ch => ch.subarray(latency))
 
   const dryMix = 1 - mix
-  // Largest g for which every sample satisfies |a + b·g| <= inputPeak.
-  let gMax = Infinity
-  for (let ch = 0; ch < wet.length; ch++) {
-    const dry = channelData[ch]
-    const w = wet[ch]
-    for (let i = 0; i < w.length; i++) {
-      const b = w[i] * mix
-      if (b === 0) continue
-      const a = dry[i] * dryMix
-      // The binding end of this sample's interval is the one it moves toward.
-      const bound = (b > 0 ? inputPeak - a : -inputPeak - a) / b
-      if (bound < gMax) gMax = bound
+  if (reference === 'peak') {
+    // Largest g for which every sample satisfies |a + b·g| <= inputPeak.
+    let gMax = Infinity
+    for (let ch = 0; ch < wet.length; ch++) {
+      const dry = channelData[ch]
+      const w = wet[ch]
+      for (let i = 0; i < w.length; i++) {
+        const b = w[i] * mix
+        if (b === 0) continue
+        const a = dry[i] * dryMix
+        // The binding end of this sample's interval is the one it moves toward.
+        const bound = (b > 0 ? inputPeak - a : -inputPeak - a) / b
+        if (bound < gMax) gMax = bound
+      }
     }
+    if (!Number.isFinite(gMax) || gMax <= 0) return NONE
+    // The peak reference needs no ceiling, so it needs no knee either.
+    return { makeupDb: clamp(20 * Math.log10(gMax), minDb, maxDb), ceilingDb: null, ceilingKneeDb: null }
   }
-  if (!Number.isFinite(gMax) || gMax <= 0) return 0
 
-  return clamp(20 * Math.log10(gMax), minDb, maxDb)
+  const inputRef = percentileOfChannels(channelData, MAKEUP_PERCENTILE)
+  if (!(inputRef > 0)) return NONE
+
+  /** The output at makeup `g`, written into scratch buffers the caller owns. */
+  const scratch = wet.map(w => new Float32Array(w.length))
+  const outAt = (g) => {
+    for (let ch = 0; ch < wet.length; ch++) {
+      const dry = channelData[ch]
+      const w = wet[ch]
+      const o = scratch[ch]
+      for (let i = 0; i < o.length; i++) o[i] = dry[i] * dryMix + w[i] * mix * g
+    }
+    return scratch
+  }
+
+  let gainLin
+  if (dryMix === 0) {
+    /**
+     * Closed form. Every sample is `b[i]·g`, so the quantile of magnitudes is
+     * the quantile of `|b|` times `g` — one pass, no search, exact.
+     */
+    const wetRef = percentileOfChannels(wet, MAKEUP_PERCENTILE)
+    if (!(wetRef > 0)) return NONE
+    gainLin = inputRef / (wetRef * mix)
+  } else {
+    /**
+     * Bisection over the knob's own travel. The quantile is monotone
+     * non-decreasing in `g` once the wet share dominates, and the bracket is
+     * the range the answer is allowed to land in anyway, so an answer pinned to
+     * an end is the clamp doing its job rather than a failed solve. Sixteen
+     * halvings of the travel land inside a thousandth of a dB.
+     */
+    let loDb = minDb
+    let hiDb = maxDb
+    for (let i = 0; i < 16; i++) {
+      const midDb = 0.5 * (loDb + hiDb)
+      const ref = percentileOfChannels(outAt(Math.exp(midDb * LN10_OVER_20)), MAKEUP_PERCENTILE)
+      if (ref < inputRef) loDb = midDb
+      else hiDb = midDb
+    }
+    gainLin = Math.exp(0.5 * (loDb + hiDb) * LN10_OVER_20)
+  }
+
+  const makeupDb = clamp(20 * Math.log10(gainLin), minDb, maxDb)
+  const ceilingDb = 20 * Math.log10(inputPeak)
+  /**
+   * How far the un-ceilinged render actually overshoots, measured at the makeup
+   * that ships — not estimated. The affine form gives it for one more O(n)
+   * pass, where OptoSmooth has to carry a stale render forward.
+   */
+  const outPeak = peakOfChannels(outAt(Math.exp(makeupDb * LN10_OVER_20)))
+  const outPeakDb = outPeak > 0 ? 20 * Math.log10(outPeak) : -Infinity
+  return {
+    makeupDb,
+    // The guarantee, restated as a number the kernel can enforce: the source's
+    // own peak.
+    ceilingDb,
+    // How soft that enforcement has to be, from how much there is to enforce.
+    ceilingKneeDb: ceilingKneeDbFor(outPeakDb - ceilingDb),
+  }
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────

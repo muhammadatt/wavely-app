@@ -3165,6 +3165,117 @@ second time: three stairs tests went red because `releaseSchedule` had shipped a
 were analysed against a kernel that had it. The pin is now `attack: 'none',
 release: 'depth'` — what the record was actually taken with — and says so.
 
+### FET Punch — the percentile makeup reference and its ceiling
+
+**The ask:** "Our OptoSmooth compressor has a soft ceiling that allows us to
+maximize our headroom by catching transient peaks. It also normalizes our input
+so that our gain reduction is consistent regardless of the level on the input
+file. Can we add these features to FETPunch (ideally via a shared composable or
+module, if possible)?"
+
+**Half of it was already there.** Input normalisation shipped earlier in this
+same session: `inputAlignDb` on the detector's `levelDb` (not on `inputLin`,
+which would gain the audio too), an `Align` knob that AUTO owns until touched,
+measured per file from gated RMS and never stored in a preset. So the work was
+the ceiling — and the ceiling does not travel alone.
+
+**FET PUNCH HAD THE SAME DEFECT OPTOSMOOTH'S CEILING WAS BUILT TO FIX, and a
+ceiling alone would have caught nothing.** FET Punch's makeup was
+peak-referenced with a HARD ARITHMETIC guarantee — a one-render affine solve
+returning the largest gain for which every sample satisfies
+`|a + b·g| <= inputPeak`. Nothing can exceed the source under that solve, so
+there is nothing to enforce. The guarantee is also the bug: one uncompressed
+onset sets the reference for the whole file. Measured on syllabic narration with
+a 1.5 ms plosive at the end of a pause — the fixture the OptoSmooth thread ended
+on, and the shape that matters, because inside speech the cell is already lit
+and compresses the tick along with everything else:
+
+| Input | delivered rms, peak-referenced | percentile + ceiling |
+|---|---|---|
+| 50 | −20.85 dB | −17.90 dB |
+| 60 | −21.75 | −17.87 |
+| 70 | −22.56 | −17.89 |
+| 80 | −23.32 | −17.95 |
+| 90 | −24.12 | −18.08 |
+| 100 | −24.37 | −18.28 |
+
+Source rms −19.18 dB, source peak −0.45 dBFS. **Every peak-referenced setting is
+quieter than the source, and the knob runs backwards over its whole travel** —
+3.5 dB lost by compressing harder. Percentile-referenced the body holds to under
+0.5 dB of spread, and the ceiling holds the output peak at or under −0.45 dBFS
+at every setting and at Mix 0.5 as well.
+
+So the answer to "can we add the ceiling" is: only as the pair. A percentile
+reference gives up "never louder than the source" **by construction** — that is
+what stops the plosive pinning the file — and the ceiling puts it back by
+enforcement. `computeFET1176AutoMakeupPlan` is the only thing that issues
+either, and it issues both.
+
+**What is shared, and what deliberately is not.** `dsp/makeupReference.js` now
+holds `peakOfChannels` (moved out of `la2aProcessor.js` with the whole of its
+argument, since two copies of a guarantee is two guarantees),
+`percentileOfChannels`, `MAKEUP_PERCENTILE`, `ceilingKneeDbFor`, `softCeiling`,
+`float32AtOrBelow` and `solveMakeupPlan` — the iterative solve extracted from
+`computeAutoMakeupPlan` and parameterised by a caller-supplied renderer and
+latency, which is all that was ever LA-2A-specific about it. OptoSmooth now goes
+through it and is **bit-identical**: the plan for six (fixture, Peak Reduction,
+reference) combinations matches to the last digit of the double.
+
+⚠ **THE SOLVE ITSELF IS NOT SHARED WITH FET PUNCH, AND MUST NOT BE.** OptoSmooth
+has to iterate renders because its output valve sits AFTER the makeup amp, so
+its output is not affine in the makeup. FET Punch's Output is the last multiply
+on the wet path and the detector reads the input, so `out[i] = a[i] + b[i]·g`
+exactly — one render answers both references. At Mix 1 the percentile answer is
+closed form (every sample scales with `g`, so the quantile does too); below Mix 1
+the dry sum breaks the proportionality and it bisects on `g` against the
+already-rendered wet path, sixteen halvings of the knob's own travel. **Porting
+the iteration would have been a regression**: the measured table from the
+original affine-solve work shows three passes at Mix 0.3 landing 6.1 dB short,
+and two factory presets ship below Mix 1. The knee is also better here than on
+OptoSmooth — the affine form gives the un-ceilinged output peak at the shipping
+makeup for one more O(n) pass, where OptoSmooth carries a stale render forward.
+
+**The live makeup write-back had to go, exactly as OptoSmooth's did.** The
+kernel's tracker is `(P − max|a|)/max|b|` over what has played — a running peak
+by construction, and no pair of running extrema can express a statistic over
+millions of samples. Left in, it would have driven the knob to the
+peak-referenced answer between measurements and the offline solve would have
+yanked it back: a 3–6 dB fight on this fixture, visible as the knob jumping on
+every re-measure and audible as the level doing the same. The tracker stays,
+because the bench still reads it. The cost is that Output now moves on the
+measurement's cadence (~170 ms) rather than the meter's (~21 ms) — which is the
+honest cadence, since it is when the answer changes.
+
+⚠ **THIS IS THE FOURTH RE-VOICING OF FET PUNCH THIS SESSION** (Input span,
+release endpoints, release schedule, attack schedule, and now the makeup
+reference) and every patch, preset and previously rendered file sounds
+different — louder at the same settings, and louder the further up the Input
+knob. The five factory presets in `pluginPresets/fetPunch.js` are still
+uncut; they were deferred until the fit was finished and this is one more
+reason they need re-cutting.
+
+**Two wiring hazards, both already load-bearing elsewhere.** First, the
+measured keys must be mapped UNCONDITIONALLY. `setParam` re-maps the whole panel
+object and posts it, and the kernel MERGES a partial — so an omitted key means
+"unchanged", not "null", and a cleared ceiling would stay armed on the live node
+against a gain the user now owns. That is the bug `withMeasuredClears` exists to
+dig OptoSmooth out of, and it was preview-only, which made it worse rather than
+better: a preview/apply divergence on the one control whose whole job is that the
+two agree. FET Punch's `toKernelParams` uses `?? null`, so the clear already
+reaches the kernel, and a test pins that rather than leaving it to a comment.
+Second, that test could not be written at all until `FET1176_DEFAULTS` and
+`toKernelParams` moved out of the effect wrapper into `effects/fet1176Params.js`
+— the wrapper pulls in a `?worker&url` import that only Vite resolves, so
+nothing that imports it is reachable from Node. Same split, for the same reason,
+as `la2aParams.js` and `softClipperParams.js`.
+
+`ceilingDb` and `ceilingKneeDb` are measured state, not knobs: absent from
+`FET1176_DEFAULTS`, dropped by the preset normaliser's key whitelist, and
+cleared when AUTO leaves — a preset carrying one would apply another file's peak
+to this one, which is exactly why `inputAlignDb` is kept out too.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

@@ -13,63 +13,14 @@
  */
 
 import { ensureFET1176Worklet } from '../fet1176WorkletLoader.js'
-import { fet1176TuningOverrides } from './fet1176Tuning.js'
-import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
+import {
+  FET1176_LATENCY_SAMPLES, FET1176_DEFAULTS, toKernelParams,
+} from './fet1176Params.js'
 
-/**
- * The gain cell and FET stage run oversampled, and the halfband filters that
- * get them there are linear phase, so the plugin delays. Constant at every
- * setting — see `latencySamples` on the kernel.
- */
-export const FET1176_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
-
-export const FET1176_DEFAULTS = {
-  inputDrive: 50, // 0-100, drives the fixed internal threshold
-  output: 0, // makeup gain dB
-  attack: 4, // dial 1-7, 7 = fastest (20 us)
-  release: 4, // dial 1-7, 7 = fastest (50 ms)
-  ratio: '4', // '4' | '8' | '12' | '20' | 'all'
-  /**
-   * FET / output-amp saturation, 0-1, where 1 IS the curve measured from
-   * FETish rather than an arbitrary top of travel.
-   *
-   * ⚠ THIS FILE HAD ITS OWN COPY OF THE DEFAULT AND IT WENT STALE. The kernel's
-   * default moved to 1 with the measured curve; this one stayed at 0.35, and
-   * since `toKernelParams` always sends `fetDrive` the kernel's value never
-   * applied in the app — the panel would have shipped 35 % of the curve while
-   * every test and script saw the whole of it.
-   */
-  fetDrive: 1,
-  scHpf: 0, // sidechain high-pass corner in Hz, 0 = off (stock)
-  mix: 1, // wet/dry blend for parallel compression
-}
-
-/**
- * Map UI param names to kernel param names.
- *
- * ⚠ THE BENCH TUNING IS FOLDED IN HERE AND NOWHERE ELSE. Both the live worklet
- * and the offline apply path build their params through this function, so
- * merging at one point is what keeps them sample-identical — the alternative is
- * threading the tuning through every caller and relying on none of them
- * forgetting. `fet1176TuningOverrides()` is empty unless the bench panel has
- * been touched, so the untouched result is byte-identical to what this returned
- * before the panel existed. See `fet1176Tuning.js`.
- */
-export function toKernelParams(params) {
-  return {
-    ...fet1176TuningOverrides(),
-    inputDrive: params.inputDrive,
-    outputGainDb: params.output,
-    attack: params.attack,
-    release: params.release,
-    ratio: params.ratio,
-    fetDrive: params.fetDrive,
-    scHpfHz: params.scHpf,
-    mix: params.mix,
-    inputAlignDb: params.inputAlignDb ?? 0,
-  }
-}
+// Re-exported so callers that already reach for these through the effect keep
+// working; the definitions live in fet1176Params.js, which Node can import.
+export { FET1176_LATENCY_SAMPLES, FET1176_DEFAULTS, toKernelParams }
 
 export function createFET1176Compressor(audioContext) {
   const input = audioContext.createGain()
@@ -81,14 +32,15 @@ export function createFET1176Compressor(audioContext) {
   const output = audioContext.createGain()
 
   /**
-   * ⚠ `inputAlignDb` IS SEEDED HERE BECAUSE `setParam` GATES ON `name in params`.
+   * ⚠ `inputAlignDb`, `ceilingDb` AND `ceilingKneeDb` ARE SEEDED HERE BECAUSE
+   * `setParam` GATES ON `name in params`.
    * It is measured from the file rather than dialled, so it is deliberately
    * absent from `FET1176_DEFAULTS` — and without a seed that gate would drop
    * every push of it silently, leaving preview running the raw level-dependent
    * behaviour while apply ran the aligned one. Exactly the reason `ceilingDb`
    * and `inputAlignDb` are seeded in `la2aCompressor.js`.
    */
-  let params = { ...FET1176_DEFAULTS, inputAlignDb: null }
+  let params = { ...FET1176_DEFAULTS, inputAlignDb: null, ceilingDb: null, ceilingKneeDb: null }
   let worklet = null
   let destroyed = false
   let grDb = 0
