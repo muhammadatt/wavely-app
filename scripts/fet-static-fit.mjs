@@ -140,7 +140,7 @@ function search1d(lo, hi, cost, steps = 8, rounds = 14) {
  * Fit the law. `rows` are the reference's readings; `fitRows` may be a subset,
  * which is how the held-out validation works.
  */
-export function fitLaw(rows, sampleRate, plan, stim, { fitRows = rows, rounds = 3 } = {}) {
+export function fitLaw(rows, sampleRate, plan, stim, { fitRows = rows, rounds = 3, fitRatios = false } = {}) {
   const buttons = [...new Set(rows.map(r => r.ratio))]
   // Start from the button's nominal slope and the law as it currently ships.
   let ratioValues = Object.fromEntries(buttons.map(b => [b, Number(b)]))
@@ -181,6 +181,17 @@ export function fitLaw(rows, sampleRate, plan, stim, { fitRows = rows, rounds = 
     kneeAtRefDb = a.v
     const b = search1d(0.05, 0.45, v => kneeCost(kneeAtRefDb, v))
     kneeDriveSlope = b.v
+    /**
+     * ⚠⚠ THE RATIOS ARE HELD AT NOMINAL UNLESS ASKED FOR, AND THE KNEE MUST BE
+     * FITTED THAT WAY. Fitting them jointly and then installing only the knee
+     * would calibrate the knee against a kernel that is not the one shipping:
+     * our fitted knee moves 0.32 dB across the ratio buttons, so a ratio the
+     * product does not use drags the knee with it. The first run of this fitter
+     * did exactly that — it returned KNEE_AT_REF_DB 4.7148 alongside ratios
+     * 3.769 / 6.552 / 9.397 / 13.417, and those ratios are a DIAGNOSTIC that
+     * the nominal check above says not to install.
+     */
+    if (!fitRatios) continue
     for (const button of buttons) {
       const r = search1d(2, 40, v => slopeCost(button, v), 12)
       ratioValues[button] = r.v
@@ -210,7 +221,7 @@ function report(sampleRate) {
   console.log(`\nFET Punch static curve — simulate-and-match against ${data.reference}`)
   console.log(`${rows.length} readings, fitted at ${sampleRate} Hz\n`)
 
-  const law = fitLaw(rows, sampleRate, plan, stim)
+  const law = fitLaw(rows, sampleRate, plan, stim)   // nominal ratios — what ships
   const res = residuals(rows, sampleRate, plan, stim, law)
 
   console.log('  capture        ref slope    ours     d       ref knee    ours      d')
@@ -249,9 +260,7 @@ function report(sampleRate) {
   console.log('\n  THE LAW TO INSTALL')
   console.log(`    KNEE_AT_REF_DB    ${law.kneeAtRefDb.toFixed(4)}   (at drive ${KNEE_DRIVE_REF_DB} dB)`)
   console.log(`    KNEE_DRIVE_SLOPE  ${law.kneeDriveSlope.toFixed(5)}`)
-  console.log('    ⚠ RATIO_VALUES below are DIAGNOSTIC — read the nominal check first.')
-  console.log('      ' +
-    Object.entries(law.ratioValues).map(([k, v]) => `${k}: ${v.toFixed(3)}`).join(', '))
+  console.log('    RATIO_VALUES      unchanged at nominal — see the check above')
 
   /**
    * ⚠ HELD OUT, BECAUSE A FIT THAT REPRODUCES ITS OWN TARGETS HAS SHOWN NOTHING.
