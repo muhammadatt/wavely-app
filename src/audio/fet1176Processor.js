@@ -487,9 +487,95 @@ export { KNEE_AT_REF_DB, KNEE_DRIVE_SLOPE, KNEE_DRIVE_REF_DB, KNEE_FLOOR_DB, KNE
 // with overshoot, over a threshold pulled down by ALL_THRESHOLD_DROP_DB.
 export const ALL_KNEE_DB = 16
 export const ALL_THRESHOLD_DROP_DB = 6
-export const ALL_RATIO_MIN = 6
-export const ALL_RATIO_SPAN = 14
-export const ALL_RATIO_HALF_DB = 12 // overshoot at which the ratio sits mid-range
+
+/**
+ * THE ALL-BUTTONS SLOPE LAW — AND IT USED TO RUN THE WRONG WAY.
+ *
+ * ⚠⚠ IT WAS `ratio = MIN + SPAN*over/(over + HALF)` WITH MIN 6 AND SPAN 14, so
+ * the ratio CLIMBED from 6 to 20 as overshoot grew. Measured on CLA-76's four
+ * all-buttons captures through `fet-allbuttons-shape.mjs`, it **falls**: ratio
+ * ~19.7 just clear of the knee down to ~6.3 some 19 dB above it, a trend of
+ * -0.756 of ratio per dB. Our own kernel through the same extractor read
+ * 0.9473 -> 0.9521 — flat at ratio ~20, because a 16 dB knee saturated the old
+ * law everywhere it could be seen.
+ *
+ * ⚠ THE OLD FAMILY COULD NOT BE RESCUED BY FLIPPING ITS SIGN, which was checked
+ * before replacing it: fitted to the falling region with negative spans allowed,
+ * the best member reached 1.595 rms of ratio (~12 % of the measured range) and
+ * wanted an asymptote of -13.0, which is not a ratio at all.
+ *
+ * ⚠ AND THE DATA WANTS A LINE, NOT A RECIPROCAL. Candidate families fitted to
+ * the measured slope (which spans 0.107):
+ *
+ *   linear in slope, floored      rms 0.0115
+ *   exponential decay in slope    rms 0.0092   <- tau 59.5 dB, i.e. linear here
+ *   falling reciprocal in ratio   rms 0.0130   <- floor pinned at ratio 1.0
+ *
+ * The exponential's edge is illusory: at tau 59.5 dB it IS the line over the
+ * 6-25 dB the captures cover, and its floor sits where nothing was measured.
+ * The line is installed because it is the simplest thing that fits and it makes
+ * its one extrapolation explicit.
+ *
+ * ⚠ CORROBORATED, NOT JUST FITTED. Shanks (UA Webzine 2003, via Moore, JARP
+ * 2012) likens the all-buttons curve to a "plateau" — a region of very high
+ * ratio with the curve resuming its rise above it, which is a falling ratio.
+ * The UA manual puts all-buttons "between 12:1 and 20:1"; this matches near the
+ * knee and goes below it at the top, which is where Moore's own drum test saw
+ * "the occasional hit overshooting... close to 0dBFS" at low RMS.
+ */
+export const ALL_INCR_AT_KNEE = 0.949
+export const ALL_INCR_FALL_PER_DB = 0.0057
+/**
+ * ⚠ THE FLOOR IS AN EXTRAPOLATION AND THE CAPTURES DO NOT REACH IT. The measured
+ * curve stops at 0.8418 (ratio 6.32) about 19 dB above the knee, and this line
+ * crosses the floor near 28 dB. It is set at ratio 6 — the old `ALL_RATIO_MIN`,
+ * itself a guess — because a falling slope with no floor keeps falling until it
+ * EXPANDS, and a stated extrapolation beats an unbounded one.
+ */
+export const ALL_INCR_FLOOR = 1 - 1 / 6
+
+/**
+ * ⚠⚠ THESE ARE INCREMENTAL SLOPES — `d(reduction)/d(level)` — AND THE KERNEL'S
+ * `slope` IS NOT. Everywhere else in this file reduction is `slope * over`, a
+ * SECANT. For a law whose slope varies with level the two differ by the product
+ * rule: with `gr = s(over)*over` the incremental slope is `s + over*s'`, so a
+ * secant falling at k reads as an incremental falling at 2k. A first cut here
+ * installed the measured 0.0057 as a secant, and the shape extractor's own
+ * self-test caught it — our kernel came back falling twice as fast as the
+ * reference it was fitted to.
+ *
+ * The extractor measures the INCREMENTAL slope, because that is what
+ * `d(gr)/d(level)` is and what a compressor's ratio conventionally means. So the
+ * law is stated incrementally and reduction is its INTEGRAL, which removes the
+ * factor of two rather than leaving it in a comment for someone to trip over.
+ *
+ * ⚠ ANCHORED AT THE KNEE EXIT, NOT AT ZERO OVERSHOOT, WHICH COUPLES IT TO
+ * `ALL_KNEE_DB`. The measurement's x-axis origin is unrecoverable — drive and
+ * threshold drop enter as a sum — so the curve can only be placed by assuming
+ * the reference's knee ends where ours does. ⚠ A CHANGE TO `ALL_KNEE_DB` OR
+ * `ALL_THRESHOLD_DROP_DB` MOVES THIS LAW and it must be refitted.
+ */
+export function allButtonsIncrSlope(overDb, halfKneeDb, atKnee = ALL_INCR_AT_KNEE,
+  fallPerDb = ALL_INCR_FALL_PER_DB, floor = ALL_INCR_FLOOR) {
+  return clamp(atKnee - fallPerDb * (overDb - halfKneeDb), floor, atKnee)
+}
+
+/**
+ * Reduction at an overshoot at or above the knee exit: the integral of
+ * `allButtonsIncrSlope`, continuous with the knee's own curve at `halfKneeDb`.
+ */
+export function allButtonsGr(overDb, halfKneeDb, atKnee = ALL_INCR_AT_KNEE,
+  fallPerDb = ALL_INCR_FALL_PER_DB, floor = ALL_INCR_FLOOR) {
+  const grAtKnee = atKnee * halfKneeDb
+  const x = overDb - halfKneeDb
+  if (x <= 0) return grAtKnee
+  // Where the falling line meets the floor and the law goes straight again.
+  const xMax = fallPerDb > 0 ? (atKnee - floor) / fallPerDb : Infinity
+  if (x <= xMax) return grAtKnee + atKnee * x - fallPerDb * x * x / 2
+  const grAtMax = grAtKnee + atKnee * xMax - fallPerDb * xMax * xMax / 2
+  return grAtMax + floor * (x - xMax)
+}
+
 // The famously late attack: the dial still sets the rate, but everything
 // arrives slower than the number says.
 const ALL_ATTACK_LAG = 2.5
@@ -601,9 +687,9 @@ export const FET1176_KERNEL_DEFAULTS = {
   /** The all-buttons law, overridable for the fit. See `setParams`. */
   allKneeDb: null,
   allThresholdDropDb: null,
-  allRatioMin: null,
-  allRatioSpan: null,
-  allRatioHalfDb: null,
+  allIncrAtKnee: null,
+  allIncrFallPerDb: null,
+  allIncrFloor: null,
   /** dB⁻¹ slope of that schedule. Only read when releaseSchedule is 'depth'. */
   releaseDepthK: RELEASE_DEPTH_K,
   /**
@@ -880,9 +966,10 @@ export class FET1176Kernel {
      * params, not preset keys.
      */
     this.allKneeDb = Number.isFinite(p.allKneeDb) ? p.allKneeDb : ALL_KNEE_DB
-    this.allRatioMin = Number.isFinite(p.allRatioMin) ? p.allRatioMin : ALL_RATIO_MIN
-    this.allRatioSpan = Number.isFinite(p.allRatioSpan) ? p.allRatioSpan : ALL_RATIO_SPAN
-    this.allRatioHalfDb = Number.isFinite(p.allRatioHalfDb) ? p.allRatioHalfDb : ALL_RATIO_HALF_DB
+    this.allIncrAtKnee = Number.isFinite(p.allIncrAtKnee) ? p.allIncrAtKnee : ALL_INCR_AT_KNEE
+    this.allIncrFallPerDb = Number.isFinite(p.allIncrFallPerDb)
+      ? p.allIncrFallPerDb : ALL_INCR_FALL_PER_DB
+    this.allIncrFloor = Number.isFinite(p.allIncrFloor) ? p.allIncrFloor : ALL_INCR_FLOOR
     const allDrop = Number.isFinite(p.allThresholdDropDb) ? p.allThresholdDropDb : ALL_THRESHOLD_DROP_DB
     if (this.isAllButtons) {
       this.thresholdDb = THRESHOLD_DBFS - allDrop
@@ -1119,13 +1206,23 @@ export class FET1176Kernel {
   /** Static curve: overshoot in dB -> gain reduction in dB. */
   _grForOvershoot(over) {
     if (over <= -this.halfKnee) return 0
-    const slope = this.isAllButtons
-      ? 1 - 1 / (this.allRatioMin + this.allRatioSpan
-        * (over > 0 ? over / (over + this.allRatioHalfDb) : 0))
-      : this.slope
-    if (over >= this.halfKnee) return slope * over
+    /**
+     * ⚠ ALL-BUTTONS RETURNS AN INTEGRAL, NOT `slope * over`. Its slope varies
+     * with overshoot, so a secant multiply is not the area under the law — see
+     * `allButtonsIncrSlope` for the factor of two that costs.
+     */
+    if (this.isAllButtons) {
+      if (over >= this.halfKnee) {
+        return allButtonsGr(over, this.halfKnee, this.allIncrAtKnee,
+          this.allIncrFallPerDb, this.allIncrFloor)
+      }
+      // Inside the knee, the knee's own curve, meeting the law at the exit.
+      const tk = over + this.halfKnee
+      return this.allIncrAtKnee * tk * tk / (2 * this.kneeDb)
+    }
+    if (over >= this.halfKnee) return this.slope * over
     const t = over + this.halfKnee
-    return slope * t * t / (2 * this.kneeDb)
+    return this.slope * t * t / (2 * this.kneeDb)
   }
 
   /**

@@ -42,7 +42,8 @@ import { stairCurve, knobsFromName } from './fet-stairs.mjs'
 import { readCapture, preflight, alignByEnvelope, refineLagAtEdge } from './lib/probeCapture.js'
 import { knobForDrive, SHIPPING_LAW } from './fet-allbuttons-fit.mjs'
 import {
-  ALL_RATIO_MIN, ALL_RATIO_SPAN, ALL_RATIO_HALF_DB,
+  ALL_INCR_AT_KNEE, ALL_INCR_FALL_PER_DB, ALL_INCR_FLOOR, ALL_KNEE_DB,
+  allButtonsIncrSlope,
 } from '../src/audio/fet1176Processor.js'
 
 const DEFAULT_SR = 96000
@@ -135,11 +136,12 @@ export function collapse(curves, span = 20) {
   return offsets
 }
 
-/** The shipping family's slope at an overshoot, for comparison. */
+/** The shipping law's slope at an overshoot, for comparison. */
 export function shippingSlope(overDb, law = SHIPPING_LAW) {
-  const ratio = law.allRatioMin + law.allRatioSpan
-    * (overDb > 0 ? overDb / (overDb + law.allRatioHalfDb) : 0)
-  return 1 - 1 / ratio
+  return allButtonsIncrSlope(overDb, ALL_KNEE_DB / 2,
+    law.allIncrAtKnee ?? ALL_INCR_AT_KNEE,
+    law.allIncrFallPerDb ?? ALL_INCR_FALL_PER_DB,
+    law.allIncrFloor ?? ALL_INCR_FLOOR)
 }
 
 function curveForFile(file, dir, sampleRate, plan, stim) {
@@ -251,8 +253,11 @@ function report(sampleRate, dir) {
   console.log(`\n  (span read from ${cleanMerged.length} points clear of the ${KNEE_GUARD_DB} dB knee guard)`)
   console.log(`\n  SLOPE RANGE: ${lo.toFixed(4)} to ${hi.toFixed(4)}` +
     `  (ratio ${(1 / (1 - lo)).toFixed(2)} to ${(1 / (1 - hi)).toFixed(2)})`)
-  console.log(`  OUR FAMILY spans ${shippingSlope(0.001).toFixed(4)} to ${shippingSlope(1e6).toFixed(4)}` +
-    `  (ratio ${ALL_RATIO_MIN} to ${ALL_RATIO_MIN + ALL_RATIO_SPAN}, half-point ${ALL_RATIO_HALF_DB} dB)`)
+  const ourHi = shippingSlope(ALL_KNEE_DB / 2)
+  const ourLo = shippingSlope(1e6)
+  console.log(`  OUR LAW spans ${ourLo.toFixed(4)} to ${ourHi.toFixed(4)}` +
+    `  (ratio ${(1 / (1 - ourLo)).toFixed(1)} to ${(1 / (1 - ourHi)).toFixed(1)}, falling` +
+    ` ${ALL_INCR_FALL_PER_DB} of slope per dB above the knee)`)
   console.log('    ⚠ If the measured range sits outside what the family can reach, the family')
   console.log('      is refuted whatever its parameters — which is the cheapest possible')
   console.log('      verdict and needs no fit at all.')
@@ -312,7 +317,7 @@ function selftest(sampleRate) {
    * extractor reads the law convolved with the attack, so this checks the SHAPE
    * and its span rather than demanding the static law exactly.
    */
-  const law = { ...SHIPPING_LAW, allRatioMin: 4, allRatioSpan: 16, allRatioHalfDb: 10 }
+  const law = { ...SHIPPING_LAW, allIncrAtKnee: 0.95, allIncrFallPerDb: 0.008, allIncrFloor: 0.75 }
   const curves = [0, 5, 10, 15].map((d) => {
     const { y } = runKernel(stim.x, sampleRate,
       { inputDrive: knobForDrive(d), ratio: 'all', attack: 7, release: 7, fetDrive: 0, ...law })
@@ -352,8 +357,18 @@ function selftest(sampleRate) {
   const hi = Math.max(...merged.map(p => p.slope))
   console.log(`  slope span recovered ${lo.toFixed(4)}..${hi.toFixed(4)}` +
     `, planted family spans ${shippingSlope(0.001, law).toFixed(4)}..${shippingSlope(1e6, law).toFixed(4)}`)
-  ok('the recovered span sits inside the planted family, as it must',
-    lo > shippingSlope(0.001, law) - 0.08 && hi < shippingSlope(1e6, law) + 0.02)
+  ok('the recovered span sits inside the planted law, as it must',
+    lo > law.allIncrFloor - 0.02 && hi < law.allIncrAtKnee + 0.02)
+  /**
+   * ⚠ AND IT MUST COME BACK FALLING. The whole reason the law was replaced is
+   * that the old one climbed with overshoot and the reference does the
+   * opposite; an extractor that cannot see the direction would not have caught
+   * it, and would not catch a regression back to a climbing law either.
+   */
+  const first = merged.slice(0, 4).reduce((a, p) => a + p.slope, 0) / 4
+  const last = merged.slice(-4).reduce((a, p) => a + p.slope, 0) / 4
+  console.log(`  slope over the sweep: ${first.toFixed(4)} -> ${last.toFixed(4)}`)
+  ok('a planted FALLING law is recovered as falling', last < first - 0.01)
 
   console.log(`\n  ${bad === 0 ? 'PASS' : `⚠ ${bad} FAILED`}\n`)
   return bad

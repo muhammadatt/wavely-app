@@ -4038,6 +4038,74 @@ this point.
 
 ---
 
+### The all-buttons ratio law, reversed and installed
+
+Owner's call: fix the direction, leave the threshold. Done.
+
+**The old law is gone.** `ALL_RATIO_MIN` / `SPAN` / `HALF_DB` climbed 6 → 20 with
+overshoot. The replacement is stated as an incremental slope falling with
+overshoot, floored:
+
+```js
+ALL_INCR_AT_KNEE     = 0.949     // measured, at the knee exit
+ALL_INCR_FALL_PER_DB = 0.0057    // measured
+ALL_INCR_FLOOR       = 1 - 1/6   // EXTRAPOLATED — the captures never reach it
+```
+
+**Why a line.** Candidate families fitted to the measured slope (which spans
+0.107): linear 0.0115 rms, exponential decay 0.0092, falling reciprocal in ratio
+0.0130. The exponential's edge is illusory — at τ 59.5 dB it IS the line over the
+6–25 dB the captures cover, and its floor sits where nothing was measured. The
+line is the simplest thing that fits and it makes its one extrapolation explicit.
+
+#### ⚠⚠ A factor of two the self-test caught
+
+**The extractor measures the INCREMENTAL slope `d(gr)/d(level)`; the kernel's
+`slope` is a SECANT** (`gr = slope * over`). For a law whose slope varies with
+level these differ by the product rule — with `gr = s(over)*over` the incremental
+is `s + over*s'`, so **a secant falling at k reads as an incremental falling at
+2k**. The first cut installed the measured 0.0057 as a secant, and the shape
+extractor's own self-test caught our kernel coming back falling twice as fast as
+the reference it had just been fitted to.
+
+Fixed by stating the law incrementally and making reduction its **integral**,
+which removes the factor rather than leaving it in a comment to trip over. A
+test pins the integral against the stated slope by numerical differentiation, and
+another pins continuity where the knee meets the law.
+
+#### Where it lands
+
+Our kernel through the same extractor, against CLA-76, both measured from their
+own peak:
+
+| dB above peak | ours | CLA-76 | diff |
+|---|---|---|---|
+| 0 | 0.9422 | 0.9492 | −0.007 |
+| 5.8 | 0.9084 | 0.9416 | −0.033 |
+| 8.8 | 0.8903 | 0.9262 | −0.036 |
+| 13.8 | 0.8605 | 0.8736 | −0.013 |
+| 18.8 | 0.8365 | 0.8418 | −0.005 |
+
+Span 0.8348–0.9422 against 0.8418–0.9492. **Endpoints match to 0.007; the middle
+sags by up to 0.036** — and that sag is the "plateau" Shanks describes: CLA-76
+holds near 0.94 for about 9 dB and then falls faster than a line. Against the
+old law's ~0.11 of error in the wrong direction, this is about a 3× improvement
+with the direction now right.
+
+⚠ **A PLATEAU-SHAPED LAW WOULD CLOSE THE REST** and is not attempted here: it
+adds a parameter to a fit that already cannot separate the knee from the law, on
+one reference with no second to check it.
+
+#### Still not touched
+
+`ALL_THRESHOLD_DROP_DB` (6, against a measured 0.54–3.24 depending on
+convention) and `ALL_KNEE_DB` (16, measured narrower) stay as they are, at the
+owner's direction. ⚠ Both are coupled to this fit — the law is anchored at the
+knee exit because the measurement's x-origin is unrecoverable — so **changing
+either means refitting the slope law**. `factory:all-buttons-in` stays un-recut.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

@@ -4,9 +4,10 @@
  * FITS THE ALL-BUTTONS STATIC LAW from `stairs-fine.wav` captures.
  *
  * ⚠⚠ ALL FIVE CONSTANTS IT FITS ARE CURRENTLY GUESSES. `ALL_KNEE_DB` (16),
- * `ALL_THRESHOLD_DROP_DB` (6) and the soft `ALL_RATIO_MIN` / `SPAN` / `HALF_DB`
- * triple were chosen to reproduce a DESCRIBED behaviour and have never been
- * measured. CLA-76's coarse stairs already say the first two are too big: its
+ * `ALL_THRESHOLD_DROP_DB` (6) and the slope law were chosen to reproduce a
+ * DESCRIBED behaviour. ⚠ The slope law has since been MEASURED and replaced —
+ * it ran the wrong way; see `ALL_INCR_AT_KNEE` in the kernel and
+ * `fet-allbuttons-shape.mjs`. The knee and the drop are still unmeasured. CLA-76's coarse stairs already say the first two are too big: its
  * all-buttons knee reads under the instrument's floor where ours reads 16, and
  * its threshold sits 0.54 / 2.65 / 3.24 dB below its own ratio 4 / the mean of
  * four / ratio 12 against our 6.
@@ -33,9 +34,9 @@
  *
  *   allThresholdDropDb  +/-1 dB  ->  0.78 dB of curve rms   <- determined
  *   allKneeDb           +/-3 dB  ->  0.09-0.11
- *   allRatioMin         +/-4     ->  0.07-0.20
- *   allRatioSpan        +/-6     ->  0.06-0.17
- *   allRatioHalfDb      +/-6     ->  0.03-0.07              <- nearly flat
+ *   allRatioMin         +/-4     ->  0.07-0.20   } the OLD parameterisation,
+ *   allRatioSpan        +/-6     ->  0.06-0.17   } since replaced — see
+ *   allRatioHalfDb      +/-6     ->  0.03-0.07   } ALL_SLOPE_* in the kernel
  *
  * A constant whose whole plausible range moves the curve less than the fit's
  * own residual is not measured by the data, and printing a number for it would
@@ -56,7 +57,8 @@ import { buildProbe } from './lib/probeStimulus.js'
 import { stairCurve, knobsFromName } from './fet-stairs.mjs'
 import { readCapture, preflight, alignByEnvelope, refineLagAtEdge } from './lib/probeCapture.js'
 import {
-  ALL_KNEE_DB, ALL_THRESHOLD_DROP_DB, ALL_RATIO_MIN, ALL_RATIO_SPAN, ALL_RATIO_HALF_DB,
+  ALL_KNEE_DB, ALL_THRESHOLD_DROP_DB,
+  ALL_INCR_AT_KNEE, ALL_INCR_FALL_PER_DB, ALL_INCR_FLOOR,
   inputDriveDbForKnob,
 } from '../src/audio/fet1176Processor.js'
 
@@ -67,9 +69,9 @@ const PLAN_NAME = 'stairs-fine.wav'
 export const SHIPPING_LAW = {
   allKneeDb: ALL_KNEE_DB,
   allThresholdDropDb: ALL_THRESHOLD_DROP_DB,
-  allRatioMin: ALL_RATIO_MIN,
-  allRatioSpan: ALL_RATIO_SPAN,
-  allRatioHalfDb: ALL_RATIO_HALF_DB,
+  allIncrAtKnee: ALL_INCR_AT_KNEE,
+  allIncrFallPerDb: ALL_INCR_FALL_PER_DB,
+  allIncrFloor: ALL_INCR_FLOOR,
 }
 
 /**
@@ -99,16 +101,16 @@ export const IDENTIFIABLE = []
 export const PROBE_DELTA = {
   allKneeDb: 3,
   allThresholdDropDb: 1,
-  allRatioMin: 4,
-  allRatioSpan: 6,
-  allRatioHalfDb: 6,
+  allIncrAtKnee: 0.02,
+  allIncrFallPerDb: 0.004,
+  allIncrFloor: 0.05,
 }
 
 /** Search bounds. Wide, because none of the five has a measurement behind it. */
 export const BOUNDS = {
   allKneeDb: [0.5, 20],
   allThresholdDropDb: [-2, 12],
-  allRatioMin: [2, 20],
+  allIncrAtKnee: [0.5, 0.99],
   /**
    * ⚠⚠ THE LOWER BOUND WAS 0 AND THAT EXCLUDED THE ANSWER. Our law is written
    * `ratio = MIN + SPAN*over/(over+HALF)`, so a positive span means the ratio
@@ -126,8 +128,8 @@ export const BOUNDS = {
    * tool stops being wrong for TWO reasons at once; the family is refuted on
    * shape either way.
    */
-  allRatioSpan: [-40, 40],
-  allRatioHalfDb: [1, 40],
+  allIncrFallPerDb: [-0.02, 0.05],
+  allIncrFloor: [0.3, 0.97],
 }
 
 export function knobForDrive(driveDb) {
@@ -371,7 +373,7 @@ function selftest(sampleRate) {
   ok('the fine plan is the 1 dB one', plan.stepDb === 1 && plan.events.length > 30)
 
   // Recover a known law from our own kernel — the only ground truth available.
-  const truth = { ...SHIPPING_LAW, allKneeDb: 6, allThresholdDropDb: 3, allRatioMin: 10 }
+  const truth = { ...SHIPPING_LAW, allKneeDb: 6, allThresholdDropDb: 3, allIncrAtKnee: 0.92 }
   const targets = [-2, 6, 14].map(driveDb => ({
     driveDb, pts: ourCurve(sampleRate, plan, stim, driveDb, truth),
   }))
@@ -413,7 +415,7 @@ function selftest(sampleRate) {
     console.log(`  ${key.padEnd(22)} +/-${String(PROBE_DELTA[key]).padEnd(4)} ${sens.moves[key].toFixed(3).padStart(10)} dB`)
   }
   ok('the ratio triple and the knee stay far less sensitive than the drop',
-    Math.max(sens.moves.allKneeDb, sens.moves.allRatioSpan, sens.moves.allRatioHalfDb)
+    Math.max(sens.moves.allKneeDb, sens.moves.allIncrFallPerDb, sens.moves.allIncrFloor)
       < sens.moves.allThresholdDropDb)
 
   // The coarse path is the one that CAN answer, so it must stay wired up.
