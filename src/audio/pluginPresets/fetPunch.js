@@ -94,16 +94,51 @@ export const FET_PUNCH_PARAM_KEYS = [
   'inputDrive', 'output', 'attack', 'release', 'ratio', 'fetDrive', 'scHpf', 'mix', 'autoMakeup',
 ]
 
+/**
+ * ⚠⚠ RE-CUT AGAINST THE MEASURED KERNEL. These dials are NOT the ones that
+ * shipped, and the numbers moved because the kernel under them did — five
+ * changes, none of them reachable from a patch:
+ *
+ *   1. `IN_DRIVE_SPAN_DB` 40 -> 48, so every Input position means more drive
+ *   2. release endpoints 1.1 / 0.05 s -> 0.7288 / 0.03318, every dial 1.51x faster
+ *   3. `releaseSchedule: 'depth'`, so the constant scales with reduction
+ *   4. `attackSchedule: 'depth'`, likewise on the attack
+ *   5. the knee: four per-button constants -> one drive law
+ *
+ * ⚠ THE TARGET WAS WHAT EACH PRESET DID WHEN IT WAS CUT, NOT A NEW VOICING.
+ * Left alone, the same dials had drifted by +1.72 / +2.13 / -0.68 / +7.82 dB of
+ * average gain reduction on narration — so doing nothing was itself a
+ * re-voicing, and a silent one. `scripts/fet-recut-presets.mjs` re-derives them
+ * against the as-cut kernel (commit 57e1877) and is the record of how; run it
+ * again if any of those five constants moves.
+ *
+ * ⚠ THE DIALS ARE INTEGERS AND THE SOLVE IS NOT, so attack and release land on
+ * the nearest position. Residuals at each preset's own working depth: attack
+ * -0 / +23 / +36 / +22 %, release +19 / +31 / -26 / -21 %. Two presets sit at
+ * the END of a dial's travel (gentle-ride's release, parallel-thickener's
+ * attack and release) where the old voicing is not reachable at all and the
+ * residual is a floor rather than a rounding.
+ *
+ * ⚠ `output` IS NOT RE-CUT AND MUST NOT BE. It is canonicalised to 0 while AUTO
+ * is on and solved per file, so the percentile-makeup change needs no preset
+ * edit — see `normalize`.
+ *
+ * ⚠ `factory:all-buttons-in` IS DELIBERATELY UNTOUCHED. Its law has no captures
+ * behind it from either reference (`ALL_KNEE_DB`, `ALL_THRESHOLD_DROP_DB`, the
+ * soft `ALL_RATIO_*` triple, `ALL_TAIL_*`), and CLA-76's four all-buttons
+ * captures already say the first two are too big. Re-cutting a preset against a
+ * law that is about to change would dress a guess as a fit twice over.
+ */
 export const FET_PUNCH_PRESETS = [
   {
     id: 'factory:vocal-punch',
     name: 'Vocal Punch',
     description: '4:1, medium ballistics. The one to reach for first.',
     params: {
-      inputDrive: 55,
+      inputDrive: 46,
       output: 0,
-      attack: 4,
-      release: 5,
+      attack: 5,
+      release: 3,
       ratio: '4',
       fetDrive: 0.35,
       scHpf: 0,
@@ -116,13 +151,13 @@ export const FET_PUNCH_PRESETS = [
     name: 'Consonant Control',
     description: '8:1 with a fast attack and the lows out of the detector.',
     params: {
-      inputDrive: 60,
+      inputDrive: 53,
       output: 0,
       // Fast enough to catch a consonant rather than ride behind it, with the
       // side-chain high-passed at 120 Hz so the fundamental is not what sets
       // the gain reduction.
       attack: 6,
-      release: 5,
+      release: 4,
       ratio: '8',
       fetDrive: 0.3,
       scHpf: 120,
@@ -135,13 +170,22 @@ export const FET_PUNCH_PRESETS = [
     name: 'Gentle Ride',
     description: 'Slow attack, low drive — onsets pass, the body steadies.',
     params: {
-      inputDrive: 40,
+      inputDrive: 35,
       output: 0,
-      // A LOW attack number is a SLOW attack. Letting the onset through is
-      // the whole point: this is the setting that keeps a narrator's diction
-      // while taking the swing out of the phrase underneath it.
-      attack: 2,
-      release: 3,
+      /**
+       * A LOW attack number is a SLOW attack. Letting the onset through is the
+       * whole point: this is the setting that keeps a narrator's diction while
+       * taking the swing out of the phrase underneath it.
+       *
+       * ⚠ DIAL 3 IS A JUDGEMENT, NOT THE ARITHMETIC'S ANSWER. The re-cut's
+       * combined score preferred 4; at their own settled operating points the
+       * two straddle the old 0.433 ms constant almost symmetrically (dial 3
+       * +36 %, dial 4 -28 %), and dial 3 is both marginally closer in log terms
+       * AND errs on the SLOW side — which is what "onsets pass" asks for. A
+       * preset that exists to let transients through should miss slow.
+       */
+      attack: 3,
+      release: 1,
       ratio: '4',
       fetDrive: 0.2,
       scHpf: 80,
@@ -156,7 +200,11 @@ export const FET_PUNCH_PRESETS = [
     params: {
       // Deep and fast, then mixed back at 40%: the wet path is doing something
       // that would be unusable on its own, which is what parallel is for.
-      inputDrive: 75,
+      //
+      // ⚠ 75 -> 47 IS THE LARGEST MOVE IN THE RE-CUT and it is the Input span
+      // change, not a re-voicing: at the old span this patch delivered 6.54 dB
+      // of average reduction and at the new one the same 75 delivered 14.36.
+      inputDrive: 47,
       output: 0,
       attack: 7,
       release: 7,
@@ -172,6 +220,10 @@ export const FET_PUNCH_PRESETS = [
     name: 'All Buttons In',
     description: 'The 1176 stunt setting, kept usable by the Mix knob.',
     params: {
+      // ⚠ NOT RE-CUT — see the note on FET_PUNCH_PRESETS. These are the original
+      // dials, and they drifted with the kernel like every other preset's; they
+      // are left wrong ON PURPOSE rather than corrected against an unmeasured
+      // law that is already known to be changing.
       inputDrive: 70,
       output: 0,
       attack: 7,

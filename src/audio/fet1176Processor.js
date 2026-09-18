@@ -319,8 +319,10 @@ const RELEASE_FASTEST_S = 0.03318
 export const ATTACK_DEPTH_REF_DB = 15.9
 export const ATTACK_DEPTH_K = -0.0926
 
-const RELEASE_DEPTH_REF_DB = 12.5
-const RELEASE_DEPTH_K = 0.1389
+// Exported alongside the attack pair so the preset re-cut can read the schedule
+// analytically instead of re-deriving it — see `scripts/fet-recut-presets.mjs`.
+export const RELEASE_DEPTH_REF_DB = 12.5
+export const RELEASE_DEPTH_K = 0.1389
 const RELEASE_DEPTH_MAX_DB = 36
 const RELEASE_LUT_STEP_DB = 0.25
 

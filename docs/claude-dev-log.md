@@ -3601,6 +3601,88 @@ much wrong as meaningless.
 
 ---
 
+### The four presets, re-cut
+
+Deferred since the start of the re-tune ("leave the presets alone until we've
+completed the FET fit"). Done now for the four normal-ratio presets.
+
+⚠ **DOING NOTHING WAS ITSELF A RE-VOICING, AND A SILENT ONE.** Left on their
+stored dials, the presets had drifted by **+1.72 / +2.13 / −0.68 / +7.82 dB** of
+average gain reduction on narration. Five changes moved under them, none of them
+reachable from a patch: the Input span (40 → 48 dB), the release endpoints
+(1.1 / 0.05 s → 0.7288 / 0.03318, every dial 1.51× faster), the release depth
+schedule, the attack depth schedule, and the knee law.
+
+**The target was what each preset DID when it was cut**, not a new voicing —
+choosing new ones is a listening decision and not the fitter's to make. The
+as-cut kernel is recoverable exactly, because the constants that moved are all
+module-level: `git show 57e1877:src/audio/fet1176Processor.js` imports and runs
+as a second module beside the current one.
+
+| preset | Input | attack | release | avg GR as cut → now |
+|---|---|---|---|---|
+| vocal-punch | 55 → **46** | 4 → **5** | 5 → **3** | 4.21 → 4.15 dB |
+| consonant-control | 60 → **53** | 6 | 5 → **4** | 5.46 → 5.53 |
+| gentle-ride | 40 → **35** | 2 → **3** | 3 → **1** | 3.24 → 3.13 |
+| parallel-thickener | 75 → **47** | 7 | 7 | 6.54 → 6.50 |
+
+All four land within 0.10 dB of their as-cut behaviour. `output` is untouched
+and must stay so — it is canonicalised to 0 while AUTO is on and solved per
+file, so the percentile-makeup change needed no preset edit at all.
+
+#### ⚠ Three things the tool got wrong before it got them right
+
+**1. The dials were chosen at one depth and the residual printed at another.**
+Solve the Input, read the depth, pick the dials, stop — but rounding the Input
+moves the depth again, so the printed residual belonged to a patch that was not
+the one being installed. It read as a bad dial choice when it was two questions
+answered at two operating points.
+
+**2. ⚠⚠ THEN IT LIMIT-CYCLED, AND CHASING THE FIXED POINT DOES NOT END IT.**
+Moving a dial moves the depth, the depth picks the dial, and the dials are
+integers — so a preset whose ideal sits on a boundary flips between two
+positions forever. Two versions ended by taking whatever the last iteration
+happened to hold, which is an arbitrary tie-break dressed as a solve. Ended
+properly: take the small neighbourhood the loop was circling, **settle the Input
+separately for each candidate**, and keep the one whose ballistics land closest
+at its own operating point. Nine patches, each fully solved, winner
+self-consistent by construction.
+
+**3. The convergence flag then measured the wrong thing twice** — first
+loop-to-loop stability, which a limit cycle never has even when the answer is
+fine; then agreement between the joint optimum and the per-axis ideal, which
+legitimately differ when the dials trade through the depth. It is now printed as
+information rather than as a failure.
+
+#### One judgement, made explicitly
+
+⚠ **`gentle-ride`'s attack is dial 3 because of what the preset is FOR, not
+because the arithmetic said so.** The combined score preferred 4. At their own
+settled operating points the two straddle the old 0.433 ms almost symmetrically
+— dial 3 at +36 %, dial 4 at −28 % — and dial 3 is marginally closer in log
+terms **and** errs on the slow side. A preset whose whole description is "onsets
+pass" should miss slow. The straddle is now printed for every preset so this
+kind of call is visible rather than absorbed.
+
+#### Where the knob runs out
+
+⚠ Three of the eight dials sit at the END of their travel, where the old voicing
+is not reachable and the residual is a **floor, not a rounding**:
+`gentle-ride`'s release (dial 1, −26 %) and `parallel-thickener`'s attack and
+release (dial 7, +22 % and −21 %). The release endpoints moved 1.51× faster and
+the schedule moves them further, so the slowest release available is now
+meaningfully faster than it was.
+
+#### Not re-cut
+
+`factory:all-buttons-in` keeps its original dials, deliberately. Its law has no
+captures behind it from either reference, and CLA-76's four all-buttons stairs
+captures already say `ALL_KNEE_DB` and `ALL_THRESHOLD_DROP_DB` are both too big.
+Re-cutting against a law that is about to change would dress a guess as a fit
+twice over. It has drifted like the others and is left wrong on purpose.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
