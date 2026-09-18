@@ -6,7 +6,10 @@ import assert from 'node:assert/strict'
 import { PLANS, runKernel } from '../../scripts/fet-ballistics.mjs'
 import { buildProbe } from '../../scripts/lib/probeStimulus.js'
 import { inputDriveDbForKnob, FET1176Kernel } from '../../src/audio/fet1176Processor.js'
-import { fitStatic, stairCurve, grForLevel, ratioForSlope, knobsFromName, KNEE_MIN_DB } from '../../scripts/fet-stairs.mjs'
+import {
+  fitStatic, stairCurve, grForLevel, ratioForSlope, knobsFromName, ourFit,
+  KNEE_MIN_DB, KNEE_FLOOR_DB, kneeFloorFor,
+} from '../../scripts/fet-stairs.mjs'
 
 const SR = 96000
 const plan = PLANS['stairs.wav']()
@@ -100,8 +103,10 @@ test('ratio is derived from slope and says so at the limit', () => {
 })
 
 test('the filename carries the ratio button and the Input position', () => {
-  assert.deepEqual(knobsFromName('fetish_stairs_r4_I3.wav'), { ratio: '4', input: 3 })
-  assert.deepEqual(knobsFromName('cla76_stairs_rall_I2.wav'), { ratio: 'all', input: 2 })
+  assert.deepEqual(knobsFromName('fetish_stairs_r4_I3.wav'),
+    { ratio: '4', input: 3, plan: 'stairs.wav' })
+  assert.deepEqual(knobsFromName('cla76_stairs_rall_I2.wav'),
+    { ratio: 'all', input: 2, plan: 'stairs.wav' })
   assert.equal(knobsFromName('fetish_stairs.wav').unparsed, true)
 })
 
@@ -237,4 +242,80 @@ test('a knee driven to the bound is flagged rather than reported', () => {
   const fit = fitStatic(pts)
   assert.equal(fit.kneeAtBound, true, 'a corner must be flagged, not returned as a narrow knee')
   assert.ok(fit.kneeDb >= KNEE_MIN_DB)
+})
+
+/**
+ * ⚠⚠ THE KNEE FLOOR IS THE INSTRUMENT'S, NOT THE SEARCH'S, and the old
+ * `kneeAtBound` flag tested the wrong one — so it never fired on the readings
+ * that most needed it. CLA-76's all-buttons captures came back at 0.13 / 0.50 /
+ * 0.17 dB and were printed as measurements; our own kernel cannot produce a
+ * reading that low for ANY true knee, which is what makes them unresolved
+ * rather than sharp.
+ */
+test('the fitter cannot distinguish knees below its floor, which is why the flag exists', () => {
+  const fitted = [0.3, 0.6, 1, 2].map(k => fitFor('4', 50, { kneeAtRefDb: k, kneeDriveSlope: 0 }).kneeDb)
+  const spread = Math.max(...fitted) - Math.min(...fitted)
+  assert.ok(spread < 0.05,
+    `four different laws must read back as one number; got ${fitted.map(v => v.toFixed(2)).join(' / ')}`)
+  assert.ok(fitted[0] > 2,
+    'and that number must be well above the true knees, or there is nothing to warn about')
+})
+
+test('a knee under the floor is flagged unresolved, and one above it is not', () => {
+  const { y } = runKernel(stim().x, SR,
+    { inputDrive: 50, ratio: '4', attack: 1, release: 7, fetDrive: 0, kneeAtRefDb: 0.6, kneeDriveSlope: 0 })
+  const pts = stairCurve(y, plan, stim(), SR, 0)
+  const floor = kneeFloorFor('stairs.wav', 1)
+  assert.equal(fitStatic(pts, { kneeFloorDb: floor }).kneeUnresolved, true)
+  // The same curve read against a floor it clears is a reading, not a warning.
+  assert.equal(fitStatic(pts, { kneeFloorDb: 1 }).kneeUnresolved, false)
+  // No floor given, no claim either way — null, not false.
+  assert.equal(fitStatic(pts).kneeUnresolved, null)
+})
+
+/**
+ * ⚠⚠ THE PROTOCOL'S "ATTACK SLOWEST, ALWAYS" IS BACKWARDS FOR THE STATIC CURVE,
+ * and this is the measurement that says so. Every capture taken so far used
+ * dial 1, which is the worst setting for every quantity this fitter reports.
+ */
+test('the fastest attack reads the static curve better on every axis', () => {
+  const at = (attack, kneeAtRefDb) => fitFor('4', 50, { attack, kneeAtRefDb, kneeDriveSlope: 0 })
+  const slow = at(1, 8)
+  const fast = at(7, 8)
+  assert.ok(Math.abs(fast.kneeDb - 8) < Math.abs(slow.kneeDb - 8),
+    `knee: fast ${fast.kneeDb.toFixed(2)} vs slow ${slow.kneeDb.toFixed(2)} against a true 8`)
+  assert.ok(Math.abs(fast.slope - 0.75) < Math.abs(slow.slope - 0.75),
+    `slope: fast ${fast.slope.toFixed(4)} vs slow ${slow.slope.toFixed(4)} against a true 0.7500`)
+  assert.ok(fast.rms < slow.rms, `rms: fast ${fast.rms.toFixed(3)} vs slow ${slow.rms.toFixed(3)}`)
+  // And the floor table has to agree with what the fitter actually does.
+  assert.ok(kneeFloorFor('stairs.wav', 7) < kneeFloorFor('stairs.wav', 1))
+})
+
+test('the floor table defaults to the worst case rather than to nothing', () => {
+  assert.equal(kneeFloorFor('stairs.wav', 1), KNEE_FLOOR_DB['stairs.wav'][1])
+  assert.equal(kneeFloorFor('stairs.wav', 7), KNEE_FLOOR_DB['stairs.wav'][7])
+  // An undialled or unknown attack must not silently read as "no floor".
+  assert.equal(kneeFloorFor('stairs.wav', 4), KNEE_FLOOR_DB['stairs.wav'][1])
+  assert.equal(kneeFloorFor('who-knows.wav', 1), KNEE_FLOOR_DB['stairs.wav'][1])
+})
+
+/**
+ * ⚠ ALL-BUTTONS WAS EXCLUDED FROM THE DIFF COLUMN, so CLA-76's four
+ * all-buttons captures were never placed next to our own kernel — which is
+ * exactly where ALL_KNEE_DB = 16 shows up as wrong.
+ */
+test('all-buttons is a fittable setting, not one to skip', () => {
+  const f = ourFit('all', SR, plan, stim(), 50, { attack: 1 }, 'stairs.wav')
+  assert.ok(f.rms < 0.1, `our all-buttons curve must fit; rms ${f.rms}`)
+  assert.ok(f.kneeDb > 12,
+    `ours is built with ALL_KNEE_DB = 16 and must read near it; got ${f.kneeDb.toFixed(2)}`)
+  assert.equal(f.kneeUnresolved, false, 'a 16 dB knee is far above the floor')
+  assert.deepEqual(knobsFromName('cla76_stairs_rall_I2.wav'),
+    { ratio: 'all', input: 2, plan: 'stairs.wav' })
+})
+
+test('the fine staircase is routed by its filename, never guessed', () => {
+  assert.equal(knobsFromName('fetish_stairsfine_r4_I3.wav').plan, 'stairs-fine.wav')
+  assert.equal(knobsFromName('fetish_stairs-fine_r4_I3.wav').plan, 'stairs-fine.wav')
+  assert.equal(knobsFromName('fetish_stairs_r4_I3.wav').plan, 'stairs.wav')
 })

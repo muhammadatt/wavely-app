@@ -3474,6 +3474,100 @@ remains unmeasured — `ALL_KNEE_DB`, `ALL_THRESHOLD_DROP_DB` and the soft
 
 ---
 
+### ⚗⚗ The staircase protocol had the attack backwards
+
+Asked to fix two tooling gaps and add a finer staircase so the all-buttons law
+could be measured. The tooling gaps were real. **The finer staircase was the
+wrong fix, and finding out why overturned the capture protocol.**
+
+#### What the four CLA-76 all-buttons captures could and could not say
+
+They came back with knees of 0.13 / 2.98 / 0.50 / 0.17 dB, three at or under the
+search bound. The question was whether they were usable or needed re-bouncing.
+
+Usable, and worth having:
+- **`ALL_KNEE_DB = 16` is wrong.** Our own all-buttons kernel reads 16.0–16.8
+  through this fitter, so it recovers a wide knee correctly; CLA-76 reads at the
+  floor. A bound rather than a number, but a decisive one.
+- **`ALL_THRESHOLD_DROP_DB = 6` is too big**, and it survives the convention
+  problem. CLA-76's thresholds move with the button and ours do not, so "how far
+  below" depends what you compare against — all-buttons sits 0.54 dB below its
+  own ratio 4, 2.65 below the mean of the four, 3.24 below ratio 12, each
+  reproducible to ~0.1 dB across the four Input positions. Every convention says
+  6 is too big.
+- **Our soft ratio law has the wrong sign**: ours climbs with drive (0.9381 →
+  0.9560), CLA-76's falls (0.9449 → 0.9163). ⚠ Confounded — *every* CLA-76 button
+  falls with drive (−0.013 to −0.022), so most of it is reference-wide. All-buttons
+  falls most (−0.0286), leaving maybe −0.01 that is specific. Suggestive, not settled.
+
+#### ⚠⚠ The finer staircase does not lift the knee floor, and the attack does
+
+The hypothesis was that 3 dB steps cannot resolve a knee finer than ~4 dB. It is
+wrong. Driven through the fitter at a true knee of 0.3 / 0.6 / 1 / 2 dB, the
+coarse plan reads back **4.32 in all four cases** — and the 1 dB plan reads
+**5.18**, if anything worse. The limit is not the sampling.
+
+It is the **attack rounding the corner**. Sweeping the dial at a true knee of
+0.6 dB: 4.32 / 3.76 / 3.34 / 3.01 / 2.75 / 2.49 / 2.28 across dials 1–7.
+
+⚠ **WHICH MEANS "ATTACK SLOWEST, ALWAYS" — WHICH THE PROTOCOL HAS REQUIRED FOR
+EVERY CAPTURE TAKEN SO FAR — IS THE WORST SETTING FOR THIS MEASUREMENT.**
+
+| | attack dial 1 | attack dial 7 |
+|---|---|---|
+| true knee 4 / 8 / 16 dB reads | +2.15 / +1.43 / +0.44 | **+0.15 / +0.09 / +0.04** |
+| sharpest knee distinguishable | 4.32 dB | **2.28 dB** |
+| fitted slope (true 0.7500) | 0.7634 (+1.8 %) | **0.7512 (+0.16 %)** |
+| …and its drift with the knee under it | 0.7634 → 0.7762 | **flat** |
+| fit rms | 0.035 | **0.002** |
+
+The old reasoning — a bare rectifier with no smoothing means a fast attack
+tracks |sin| within the cycle and leaves no settled value to read — is about
+reading a trace **by eye**. `fet-stairs.mjs` takes a robust statistic instead.
+
+⚠ **THIS IS WHERE THE BIAS THAT HAS DRIVEN THE WHOLE STATIC FIT COMES FROM.**
+The few-percent slope inflation that made the absolute numbers untrustworthy,
+that motivated the diff column, and that forced the knee to be installed by
+simulate-and-match, is mostly the attack. At dial 7 it is 0.16 %.
+
+⚠ Measured on our kernel; expected but **unverified** on a reference. One bounce
+settles it: `stairs.wav` at ratio 4 / I3 at the fastest attack, compared against
+the dial-1 capture that already exists. If its fit rms drops the way ours does,
+re-bounce the matrix and analyse with `--attack 7`.
+
+#### The two tooling gaps
+
+**1. ⚠ `kneeAtBound` tested the wrong bound and therefore never fired where it
+mattered.** It checked the search's 0.1 dB floor. The real floor is the
+instrument's — 4.32 dB at dial 1 — so CLA-76's 0.13 / 0.50 / 0.17 readings were
+printed as measurements when our kernel cannot produce a reading that low for
+*any* true knee. There is now a measured `KNEE_FLOOR_DB` table per plan and
+attack dial, and a separate `kneeUnresolved` flag. Both are kept: `kneeAtBound`
+says the search ran out of grid, `kneeUnresolved` says the measurement cannot
+support the number whatever the search did.
+
+**2. ⚠ All-buttons was filtered out of the diff column** (`r.knobs.ratio !== 'all'`),
+so CLA-76's four all-buttons captures were never placed beside our own kernel —
+which is exactly where `ALL_KNEE_DB = 16` shows up as wrong. `ratio: 'all'` is a
+perfectly good kernel setting and there was never a reason to drop it.
+
+#### `stairs-fine.wav` ships anyway, for the job it can actually do
+
+97 s, thirty-four 1 dB steps from −36 to −3 dBFS. ⚠ **NOT for the knee** — the
+table above is in the header so nobody re-derives it. What it buys is **34 points
+inside the bend against 15**, over the span where every reference's effective
+threshold lands (CLA-76's all-buttons runs −14.52 dBFS at I1 to −30.13 at I4).
+That is what the all-buttons `ALL_RATIO_MIN` / `SPAN` / `HALF_DB` triple needs:
+its effective ratio varies *along* the curve, and one fitted slope per capture
+averages it away. Only all-buttons needs it; the four normal buttons are
+single-slope laws the coarse plan measures fine.
+
+Captures route by filename (`_stairsfine_`), because analysing a fine capture
+against the coarse plan misaligns every step and returns a curve that is not so
+much wrong as meaningless.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

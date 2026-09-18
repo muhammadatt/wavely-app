@@ -561,22 +561,67 @@ asked later.
 
 44.6 s. Fifteen 1 s steps from −45 to −3 dBFS in 3 dB.
 
-**Ballistics: attack slowest, release fastest, always** — CLA-76 attack 1 /
-release 7; FETish attack 800 µs / release 50 ms. Both halves matter:
+**Ballistics: attack FASTEST, release fastest.** ⚠⚠ **THIS INSTRUCTION WAS THE
+OPPOSITE UNTIL IT WAS MEASURED, AND EVERY CAPTURE TAKEN SO FAR USED THE WRONG
+SETTING.**
 
-- The detector is a bare full-wave rectifier with no smoothing, so at a **fast**
-  attack the gain tracks |sin| *within* the cycle — the trace swings between no
-  reduction at the crossings and full reduction at the peaks, and there is no
-  settled value to read. The slowest attack (800 µs against a 250 µs probe
-  period) smooths that into a steady, peak-referenced number, which is the
-  quantity the static curve is defined on.
 - The **fastest** release settles each step in ~200 ms, so the steps can sit
-  1.5 s apart instead of needing ten.
+  1.5 s apart instead of needing ten. Unchanged.
+- The **attack** used to say *slowest*, on this reasoning: the detector is a bare
+  full-wave rectifier with no smoothing, so at a fast attack the gain tracks
+  |sin| within the cycle — the trace swings between no reduction at the crossings
+  and full reduction at the peaks, and there is no settled value to read. **That
+  argument is about reading a trace by eye. `fet-stairs.mjs` takes a robust
+  statistic instead, and measured, the fast attack is strictly better.**
+
+Driven through the fitter, our own kernel at a known law:
+
+| | attack dial 1 | attack dial 7 |
+|---|---|---|
+| true knee 4 / 8 / 16 dB reads | +2.15 / +1.43 / +0.44 | **+0.15 / +0.09 / +0.04** |
+| sharpest knee distinguishable | 4.32 dB | **2.28 dB** |
+| fitted slope (true 0.7500) | 0.7634 (+1.8 %) | **0.7512 (+0.16 %)** |
+| …and its drift with the knee under it | 0.7634 → 0.7762 | **flat** |
+| fit rms | 0.035 | **0.002** |
+
+⚠ **THE SLOW ATTACK IS WHERE THE "BIAS" THAT MOTIVATES THE DIFF COLUMN COMES
+FROM.** Most of the few-percent slope inflation that made the absolute numbers
+untrustworthy — and that forced the knee to be installed by simulate-and-match —
+is the attack rounding the corner. At dial 7 it is 0.16 %.
+
+⚠ **MEASURED ON OUR KERNEL; EXPECTED BUT UNVERIFIED ON A REFERENCE.** Whether a
+reference plugin's detector also reads better fast is an empirical question that
+one bounce settles. Bounce a single `stairs.wav` at ratio 4 / I3 at the fastest
+attack and compare its fit rms against the dial-1 capture you already have: if it
+drops the same way ours does, re-bounce the matrix and analyse with
+`npm run fet:stairs -- --attack 7`.
+
+⚠ **A FINER STAIRCASE IS NOT THE ANSWER TO THE KNEE**, and this was tried.
+`stairs-fine.wav` (1 dB steps) does not lift the floor at all — 5.18 dB at dial 1
+against the coarse plan's 4.32, if anything slightly worse — because the limit is
+the attack, not the sampling. It exists for a different job; see below.
 
 | reference | ratio | Input | bounces |
 |---|---|---|---|
 | CLA-76 | 4 / 8 / 12 / 20 / **ALL** | I1–I4 | **20** |
 | FETish | 4 / 8 / 12 / 20 | I1–I4 | **16** |
+
+### `stairs-fine.wav` — curve SHAPE, not the knee
+
+97 s. Thirty-four 1 s steps from −36 to −3 dBFS in **1 dB**. Same ballistics and
+same Input positions as the coarse plan; name captures `<ref>_stairsfine_r<n>_I<n>.wav`
+so the fitter picks the right plan (it misaligns every step otherwise).
+
+⚠ **IT DOES NOT RESOLVE THE KNEE ANY BETTER — see above.** What it buys is
+**points inside the bend**: 34 against 15, over the span where every reference's
+effective threshold lands (CLA-76's all-buttons runs −14.52 dBFS at I1 to −30.13
+at I4). That matters for any law whose shape lives in the bend rather than either
+side of it — specifically the all-buttons `ALL_RATIO_MIN` / `ALL_RATIO_SPAN` /
+`ALL_RATIO_HALF_DB` triple, whose effective ratio varies *along* the curve and
+which a single fitted slope per capture averages away.
+
+**Only needed for all-buttons.** The four normal buttons are single-slope laws
+and the coarse plan measures them fine.
 
 ⚠ **THE RATIO SWEEP NOW CARRIES TWO QUESTIONS, NOT ONE.** It was in the matrix
 to fit `RATIO_KNEE_DB`. Per Finding 3 it also measures **whether the threshold
@@ -627,6 +672,12 @@ photocell, and that signature is how an 1176 got into the LA-2A corpus.
 
 57.0 s. The same −12 dBFS step at 100 / 400 / 1000 / 4000 / 10000 Hz. Ratio 4,
 Input I3, attack slowest, release fastest.
+
+⚠ **THE ATTACK CORRECTION ABOVE IS STAIRCASE-SPECIFIC AND HAS NOT BEEN CHECKED
+HERE.** This plan sweeps the probe frequency down to 100 Hz — a 10 ms period
+against the staircase's 250 µs — so the ripple argument that the fast attack
+defeats on `stairs.wav` is a different size at every step of this one. Left at
+slowest until someone measures it.
 
 ⚠ **HOLD-OUT, NOT FIT DATA, AND IT MUST STAY THAT WAY.** The hardware's detector
 is broadband and ours models it that way, so the settled reduction has to be

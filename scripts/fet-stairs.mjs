@@ -67,8 +67,48 @@ export function stairCurve(y, plan, stim, sampleRate, lag) {
     .map((r, i) => ({ ...r, levelDb: plan.events[i].L }))
 }
 
-/** The sharpest knee the fit can express. Below this the law is a corner. */
+/** The sharpest knee the SEARCH can express. Below this the law is a corner. */
 export const KNEE_MIN_DB = 0.1
+
+/**
+ * THE SHARPEST KNEE THIS INSTRUMENT CAN ACTUALLY REPORT — which is nothing to
+ * do with `KNEE_MIN_DB` and everything to do with the ATTACK.
+ *
+ * ⚠⚠ THE OLD `kneeAtBound` FLAG CHECKED THE WRONG THING AND THEREFORE NEVER
+ * FIRED WHERE IT MATTERED. It tested the search's 0.1 dB bound. The real floor
+ * is several dB up: driven through this fitter, our own kernel at a TRUE knee of
+ * 0.3 / 0.6 / 1 / 2 dB reads back **4.32 in all four cases** at attack dial 1 —
+ * one number, four different laws. A reading below the floor is not a sharp
+ * knee measured, it is the fit leaving the parameterisation.
+ *
+ * ⚠ AND IT IS THE ATTACK ROUNDING THE CORNER, NOT THE STEP SIZE. Sweeping the
+ * dial at a true knee of 0.6 dB: 4.32 / 3.76 / 3.34 / 3.01 / 2.75 / 2.49 / 2.28
+ * across dials 1-7. The 1 dB staircase does NOT lift it (5.18 at dial 1, if
+ * anything worse), so a finer stimulus was the wrong answer to this.
+ *
+ * ⚠⚠ WHICH MEANS THE PROTOCOL'S "ATTACK SLOWEST, ALWAYS" IS BACKWARDS FOR THIS
+ * MEASUREMENT. At dial 7 the same fitter recovers a true knee of 4 / 8 / 16 dB
+ * to +0.15 / +0.09 / +0.04 (against +2.15 / +1.43 / +0.44 at dial 1), the fitted
+ * slope lands at 0.7512 against a true 0.7500 (+0.16 %, against +1.8 %) and is
+ * INVARIANT to the knee underneath it, and the fit rms falls from 0.035 to
+ * 0.002. Every existing capture was taken at the worst setting for it.
+ *
+ * ⚠ MEASURED ON OUR KERNEL, AND EXPECTED-BUT-UNVERIFIED ON A REFERENCE. The
+ * protocol's reason for the slow attack — "no settled value to read" — is about
+ * reading a trace by eye, and this analysis takes a robust statistic instead.
+ * Whether a reference plugin's detector also reads better fast is an empirical
+ * question that one bounce settles.
+ */
+export const KNEE_FLOOR_DB = {
+  'stairs.wav': { 1: 4.32, 7: 2.28 },
+  'stairs-fine.wav': { 1: 5.18, 7: 2.18 },
+}
+
+/** The floor for a plan and attack dial, defaulting to the worst case. */
+export function kneeFloorFor(planName, attackDial) {
+  const byDial = KNEE_FLOOR_DB[planName] ?? KNEE_FLOOR_DB['stairs.wav']
+  return byDial[attackDial] ?? Math.max(...Object.values(byDial))
+}
 
 const rms = (pts, law) =>
   Math.sqrt(pts.reduce((a, p) => a + (grForLevel(p.levelDb, law) - p.grDb) ** 2, 0) / pts.length)
@@ -83,7 +123,7 @@ const rms = (pts, law) =>
  * it began. The grid is coarse enough to be cheap and fine enough that the
  * polish only ever has to travel within one cell.
  */
-export function fitStatic(pts) {
+export function fitStatic(pts, { kneeFloorDb = null } = {}) {
   let best = { rms: Infinity }
   for (let th = -42; th <= 6; th += 1) {
     for (let slope = 0.2; slope <= 0.99; slope += 0.01) {
@@ -117,15 +157,31 @@ export function fitStatic(pts) {
    * as one.
    */
   const atBound = best.kneeDb <= KNEE_MIN_DB * 1.02
+  /**
+   * ⚠ THE FLOOR IS THE HONEST FLAG AND THE BOUND IS THE COSMETIC ONE. A knee at
+   * or under `kneeFloorDb` is a knee this instrument cannot distinguish from
+   * zero — see `KNEE_FLOOR_DB`. Both are reported because they mean different
+   * things: `kneeAtBound` says the search ran out of grid, `kneeUnresolved`
+   * says the measurement cannot support the number whatever the search did.
+   */
+  const unresolved = Number.isFinite(kneeFloorDb) ? best.kneeDb <= kneeFloorDb : null
   return { ...best, kneeDb: Math.max(best.kneeDb, KNEE_MIN_DB), kneeAtBound: atBound,
-    ratio: ratioForSlope(best.slope) }
+    kneeUnresolved: unresolved, ratio: ratioForSlope(best.slope) }
 }
 
-/** `<ref>_stairs_r<ratio>_I<n>.wav` */
+/**
+ * `<ref>_stairs_r<ratio>_I<n>.wav`, or `_stairsfine_` for the 1 dB staircase.
+ * The token picks the PLAN, and getting it wrong misaligns every step, so it is
+ * read off the name rather than guessed.
+ */
 export function knobsFromName(file) {
   const m = file.match(/_r(4|8|12|20|all)_I(\d)\.wav$/i)
   if (!m) return { ratio: null, input: null, unparsed: true }
-  return { ratio: m[1].toLowerCase(), input: Number(m[2]) }
+  return {
+    ratio: m[1].toLowerCase(),
+    input: Number(m[2]),
+    plan: /stairsfine|stairs-fine/i.test(file) ? 'stairs-fine.wav' : 'stairs.wav',
+  }
 }
 
 function curveFor(file, dir, sampleRate, plan, stim) {
@@ -146,48 +202,68 @@ function curveFor(file, dir, sampleRate, plan, stim) {
  * above are approximate; these differences are not.
  */
 const ourCache = new Map()
-export function ourFit(ratio, sampleRate, plan, stim, inputDrive = 50, extra = null) {
-  const key = `${ratio}:${inputDrive}:${extra ? JSON.stringify(extra) : ''}`
+export function ourFit(ratio, sampleRate, plan, stim, inputDrive = 50, extra = null, planName = 'stairs.wav') {
+  const attack = extra?.attack ?? 1
+  const key = `${planName}:${ratio}:${inputDrive}:${extra ? JSON.stringify(extra) : ''}`
   if (!ourCache.has(key)) {
     const { y } = runKernel(stim.x, sampleRate,
       { inputDrive, ratio: String(ratio), attack: 1, release: 7, fetDrive: 0, ...extra })
-    ourCache.set(key, fitStatic(stairCurve(y, plan, stim, sampleRate, 0)))
+    ourCache.set(key, fitStatic(stairCurve(y, plan, stim, sampleRate, 0),
+      { kneeFloorDb: kneeFloorFor(planName, attack) }))
   }
   return ourCache.get(key)
 }
 
-function report(rows, sampleRate, plan, stim) {
+function report(rows, sampleRate, attackDial) {
   console.log('\n  capture                        slope   (ratio)   knee dB   eff thr dB   rms dB')
   for (const r of rows) {
     console.log('  ' + r.file.padEnd(31) +
       r.fit.slope.toFixed(4).padStart(7) +
       ('~' + r.fit.ratio.toFixed(1)).padStart(9) + r.fit.kneeDb.toFixed(2).padStart(10) +
       r.fit.effThresholdDb.toFixed(2).padStart(13) + r.fit.rms.toFixed(3).padStart(9) +
-      (r.fit.kneeAtBound ? '  ⚠ knee at bound' : ''))
+      (r.fit.kneeUnresolved ? '  ⚠ knee UNRESOLVED (under the floor)'
+        : r.fit.kneeAtBound ? '  ⚠ knee at search bound' : ''))
   }
 
-  // ⚠ The only comparison with the attack bias cancelled out of it.
-  const cmp = rows.filter(r => !r.knobs.unparsed && r.knobs.ratio !== 'all')
+  /**
+   * ⚠ The only comparison with the attack bias cancelled out of it.
+   *
+   * ⚠⚠ ALL-BUTTONS USED TO BE EXCLUDED FROM THIS TABLE AND THAT HID A FINDING.
+   * The filter read `r.knobs.ratio !== 'all'`, so CLA-76's four all-buttons
+   * captures were printed in the absolute table and never placed next to our
+   * own kernel — which is where it shows that ours reads a 16 dB knee (we set
+   * ALL_KNEE_DB to 16 and the fitter recovers it) against a reference sitting
+   * under the floor. `ratio: 'all'` is a perfectly good kernel setting; there
+   * was never a reason to drop it.
+   */
+  const cmp = rows.filter(r => !r.knobs.unparsed)
   if (cmp.length) {
     console.log('\n  AGAINST OUR OWN KERNEL, same ratio button, same analysis:')
     console.log('    capture                        ref slope   ours    diff     ref knee   ours')
     for (const r of cmp) {
-      const o = ourFit(r.knobs.ratio, sampleRate, plan, stim)
+      const o = ourFit(r.knobs.ratio, sampleRate, r.plan, r.stim, 50, { attack: attackDial }, r.knobs.plan)
       console.log('    ' + r.file.padEnd(31) +
         r.fit.slope.toFixed(4).padStart(9) + o.slope.toFixed(4).padStart(8) +
         ((r.fit.slope - o.slope >= 0 ? '+' : '') + (r.fit.slope - o.slope).toFixed(4)).padStart(9) +
         r.fit.kneeDb.toFixed(2).padStart(12) + o.kneeDb.toFixed(2).padStart(7))
     }
     console.log('    ⚠ THE DIFF COLUMN CANCELS THE ATTACK BIAS ONLY IF BOTH SIDES SHARE AN')
-    console.log('      ATTACK. Measured on our own kernel at ratio 4, the fitted slope runs')
-    console.log('      0.7734 / 0.7636 / 0.7581 / 0.7582 across attack dials 1-4 — 0.015 of')
-    console.log('      slope, nearly all of it between dials 1 and 2, because a slower attack')
-    console.log('      lags further behind the per-peak target and reads the law steeper.')
-    console.log('      ⚠ SO THIS IS SOUND FOR FETish, WHOSE SLOWEST ATTACK IS NEAR OURS, AND')
-    console.log('      NOT FOR CLA-76, WHOSE DIAL 1 MEASURES ~5688 us AGAINST OUR ~2200 — it')
-    console.log('      sits beyond our slowest, so its slope is inflated by an amount this')
-    console.log('      subtraction does not remove. Read the SIGN of a large difference; treat')
-    console.log('      the magnitude as an upper bound on how much the reference compresses.')
+    console.log('      ATTACK, and at dial 1 there is a lot of bias to cancel: our fitted')
+    console.log('      slope runs 0.7634 against a true 0.7500 (+1.8 %) and drifts with the')
+    console.log('      knee underneath it. CLA-76 is the worse case — its dial 1 measures')
+    console.log('      ~5688 us against our ~2200, beyond our slowest, so the subtraction')
+    console.log('      does not fully remove it. Read the SIGN; treat the magnitude as a')
+    console.log('      bound.')
+    if (attackDial !== 7) {
+      console.log('')
+      console.log('    ⚠⚠ CAPTURE THIS AT THE FASTEST ATTACK INSTEAD. The protocol says')
+      console.log('      "attack slowest, always" and that is backwards for the static curve.')
+      console.log('      At dial 7 this fitter recovers a true knee of 4 / 8 / 16 dB to')
+      console.log('      +0.15 / +0.09 / +0.04 (against +2.15 / +1.43 / +0.44 at dial 1), the')
+      console.log('      fitted slope lands +0.16 % from true and stops moving with the knee,')
+      console.log('      and the fit rms falls from 0.035 to 0.002. Re-run this script with')
+      console.log('      --attack 7 once the captures are re-bounced there.')
+    }
   }
 
   // ── Does the threshold move with the ratio button? ────────────────────────
@@ -353,27 +429,48 @@ function selftest(sampleRate) {
   if (bad) process.exitCode = 1
 }
 
-function fit(sampleRate, dir) {
-  const plan = PLANS['stairs.wav']()
-  const stim = buildProbe(plan, sampleRate)
+function fit(sampleRate, dir, attackDial = 1) {
+  /**
+   * ⚠ ONE PLAN PER CAPTURE, PICKED OFF THE NAME. The coarse and fine staircases
+   * have different step counts and different total lengths, so analysing a fine
+   * capture against the coarse plan misaligns every step and returns a curve
+   * that is not wrong so much as meaningless. `knobsFromName` reads the token.
+   */
+  const planCache = new Map()
+  const planFor = (name) => {
+    if (!planCache.has(name)) {
+      const plan = PLANS[name]()
+      planCache.set(name, { plan, stim: buildProbe(plan, sampleRate) })
+    }
+    return planCache.get(name)
+  }
   const files = existsSync(dir) ? readdirSync(dir).filter(f => /stairs.*\.wav$/i.test(f)).sort() : []
   if (!files.length) {
     console.log(`\nNo stairs captures in ${dir}.`)
     console.log('Expected names like  fetish_stairs_r4_I3.wav  /  cla76_stairs_rall_I2.wav')
+    console.log('  (1 dB staircase: fetish_stairsfine_r4_I3.wav)')
     console.log('See docs/fet1176_capture_protocol.md, "stairs.wav — static curve".\n')
     return
   }
   console.log(`\nFET Punch static curve — ${files.length} capture(s) at ${sampleRate} Hz`)
+  console.log(`  analysed as attack dial ${attackDial}` +
+    (attackDial === 1 ? '  (protocol default — see the warning below)' : ''))
   const rows = []
   for (const file of files) {
+    const knobs = knobsFromName(file)
+    const planName = knobs.plan ?? 'stairs.wav'
+    const { plan, stim } = planFor(planName)
     let c
     try { c = curveFor(file, dir, sampleRate, plan, stim) }
     catch (e) { console.log(`\n  ⚠ ${file}: ${e.message}`); continue }
     for (const line of c.lines) if (/⚠/.test(line)) console.log(`  ${file}: ${line.trim()}`)
-    rows.push({ file, knobs: knobsFromName(file), fit: fitStatic(c.pts) })
+    rows.push({
+      file, knobs, plan, stim,
+      fit: fitStatic(c.pts, { kneeFloorDb: kneeFloorFor(planName, attackDial) }),
+    })
   }
   if (!rows.length) { console.log('  no readable captures\n'); return }
-  report(rows, sampleRate, plan, stim)
+  report(rows, sampleRate, attackDial)
   console.log('\n  ⚠ "eff thr" IS `threshold - drive` AND IS NOT `THRESHOLD_DBFS`. A capture')
   console.log('    only ever shows the sum, so only differences between captures mean')
   console.log('    anything. See the header of this file.\n')
@@ -393,6 +490,8 @@ if (basename(process.argv[1] ?? '') === 'fet-stairs.mjs') {
   const sr = rateArg >= 0 && args[rateArg + 1] ? Number(args[rateArg + 1]) : DEFAULT_SR
   const dirArg = args.indexOf('--dir')
   const dir = dirArg >= 0 && args[dirArg + 1] ? args[dirArg + 1] : CAP_DIR
+  const attackArg = args.indexOf('--attack')
+  const attackDial = attackArg >= 0 && args[attackArg + 1] ? Number(args[attackArg + 1]) : 1
   if (args.includes('--selftest')) selftest(sr)
-  else fit(sr, dir)
+  else fit(sr, dir, attackDial)
 }

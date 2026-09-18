@@ -52,17 +52,27 @@
  *                  A settled staircase, so every ballistic transient is
  *                  excluded and what is left is the gain computer alone.
  *
- *                  ⚠ CAPTURE IT AT ATTACK 1 / RELEASE 7, and both halves of
- *                  that matter. The detector is a bare full-wave rectifier with
- *                  no smoothing, so at a FAST attack the gain tracks |sin|
- *                  within the cycle and there is no settled value to read — the
- *                  trace swings between no reduction at the crossings and full
- *                  reduction at the peaks. The slowest attack (800 us, against
- *                  a 250 us probe period) smooths that into a steady,
- *                  peak-referenced value, which is the quantity the static
- *                  curve is defined on. The FASTEST release then settles each
- *                  step in ~200 ms so the steps can sit 1.5 s apart instead of
- *                  needing 10.
+ *                  ⚠⚠ CAPTURE IT AT ATTACK 7 / RELEASE 7. THIS SAID ATTACK 1
+ *                  UNTIL IT WAS MEASURED, and every capture taken so far used
+ *                  the wrong setting. The old reasoning — a bare rectifier with
+ *                  no smoothing means a fast attack tracks |sin| within the
+ *                  cycle and leaves no settled value — is about reading a trace
+ *                  by eye; `fet-stairs.mjs` takes a robust statistic instead.
+ *                  Measured through it, dial 7 against dial 1 recovers a true
+ *                  4 / 8 / 16 dB knee to +0.15 / +0.09 / +0.04 rather than
+ *                  +2.15 / +1.43 / +0.44, lands the fitted slope +0.16 % from
+ *                  true rather than +1.8 %, stops the slope drifting with the
+ *                  knee under it, and drops the fit rms from 0.035 to 0.002.
+ *                  The FASTEST release is unchanged: it settles each step in
+ *                  ~200 ms so the steps can sit 1.5 s apart instead of 10.
+ *
+ *   stairs-fine.wav  THE SAME AT 1 dB STEPS — for curve SHAPE, and ONLY for
+ *                  all-buttons. ⚠ It does NOT resolve the knee any better
+ *                  (5.18 dB floor against the coarse plan's 4.32); the limit is
+ *                  the attack, not the sampling. What it buys is 34 points
+ *                  inside the bend against 15, which is what the all-buttons
+ *                  ALL_RATIO_* law needs — its effective ratio varies ALONG the
+ *                  curve and a single fitted slope per capture averages it away.
  *
  *   bursts.wav     BALLISTICS — attack, release, and the program-dependent
  *                  release tail (TAIL_FRACTION / TAIL_MULT).
@@ -216,6 +226,29 @@ const TRANSIENT_COND_S = 3.0
 // Static staircase. 3 dB steps from well under the knee to well over it, at
 // every Input position in the matrix.
 const STAIRS = [-45, -42, -39, -36, -33, -30, -27, -24, -21, -18, -15, -12, -9, -6, -3]
+/**
+ * THE FINE STAIRCASE — 1 dB steps, for the knee and for any law whose SHAPE
+ * lives inside the bend rather than either side of it.
+ *
+ * ⚠ 3 dB STEPS CANNOT RESOLVE A KNEE NARROWER THAN ABOUT 4 dB, AND THAT IS
+ * MEASURED, NOT ASSUMED. Driven through `fitStatic`, our own kernel at a true
+ * knee of 0.6 / 1 / 2 dB reads back 4.32 in all three cases — one number, three
+ * different laws. It recovers a 16 dB knee correctly (16.44), so the fitter is
+ * not broken; the staircase simply does not sample the bend often enough to say
+ * anything finer. CLA-76's all-buttons captures came back at 0.13 / 0.50 / 0.17,
+ * values our kernel cannot produce for ANY true knee, which is the signature of
+ * the search leaving the parameterisation rather than a sharp knee measured.
+ *
+ * ⚠ SO RE-BOUNCING `stairs.wav` DOES NOT HELP. The limit is the stimulus, and
+ * this is the stimulus that lifts it.
+ *
+ * THE SPAN IS THE UNION OF THE BENDS. CLA-76's all-buttons effective threshold
+ * runs -14.52 dBFS at I1 to -30.13 at I4, and a knee needs several dB either
+ * side of it, so one file usable at all four Input positions has to cover about
+ * -36 to -3. That is 34 steps against the coarse plan's 15 — 87 s rather than
+ * 45 — which is the whole cost of it.
+ */
+const STAIRS_FINE = Array.from({ length: 34 }, (_, i) => -36 + i)
 const STAIR_S = 1.0
 const STAIR_REST_S = 1.5
 
@@ -322,11 +355,11 @@ export function transientPlan() {
   return { events, spans, seconds: t + 1.0, lowDb: LOW_DBFS }
 }
 
-export function stairPlan() {
+export function stairPlan(levels = STAIRS) {
   const events = []
   const spans = []
   let t = 1.0
-  for (const L of STAIRS) {
+  for (const L of levels) {
     t = scheduleClear(t, STAIR_REST_S + STAIR_S, `${L} dBFS`)
     const up = snapToZeroCrossing(t + STAIR_REST_S, PROBE_HZ)
     events.push({
@@ -337,7 +370,12 @@ export function stairPlan() {
     t += STAIR_REST_S + STAIR_S
   }
   assertPlanClear('staircase', spans)
-  return { events, spans, seconds: t + 1.0, lowDb: LOW_DBFS }
+  return { events, spans, seconds: t + 1.0, lowDb: LOW_DBFS, stepDb: levels.length > 1 ? levels[1] - levels[0] : null }
+}
+
+/** The same staircase at 1 dB — see `STAIRS_FINE` for why it exists. */
+export function stairFinePlan() {
+  return stairPlan(STAIRS_FINE)
 }
 
 export function freqPlan() {
@@ -385,6 +423,7 @@ export function thdPlan() {
  */
 export const PLANS = {
   'stairs.wav': stairPlan,
+  'stairs-fine.wav': stairFinePlan,
   'bursts.wav': burstPlan,
   'transients.wav': transientPlan,
   'frequency.wav': freqPlan,
