@@ -3065,6 +3065,46 @@ The panel says which is which now, rather than presenting 3 as simply the better
 one. Precedent: the Tube Saturation curve shipped on a listening decision against
 a measured alternative, and is documented as such.
 
+### ⚠⚠ THE ATTACK LADDER ONLY RELABELS THE KNOB — the "three models" were one
+
+Asked whether `datasheet` + DEPTH and `fetish` + DEPTH differ once equalised for
+attack speed. **They do not. At a matched constant they render bit-identically:
+0 of 288,000 samples differ on syllabic material.**
+
+Which follows from the structure, and I should have said so without measuring:
+the two ladders are the same geometric law scaled by 7.963 (they were made
+exactly parallel when the ladder was refitted with the schedule), and both use
+the same `k` and the same anchor. So a dial on one whose CONSTANT matches a dial
+on the other is the same compressor. FETish dial 7 is datasheet dial 3.62.
+
+⚠ **SO THERE IS NOTHING TO AUDITION BETWEEN THEM**, and presenting them as three
+configurations to compare by ear was wrong. The only real choices are whether the
+schedule is on, and what range the knob spans.
+
+⚠ **AND THE "36 % OFF THE REFERENCE" FIGURE FOR `datasheet` + DEPTH IS ABOUT THE
+DIAL, NOT THE MODEL.** Every rms in that comparison was measured with the dial
+pinned at 4. The fitted constant at dial 4 is 1007 us, which is slower than the
+datasheet ladder's slowest (800), so that ladder cannot reach it AT ANY POSITION
+— the 36 % is a statement about reach, not about behaviour.
+
+**What the choice actually is — which constants the knob can reach:**
+
+| | slowest | fastest |
+|---|---|---|
+| datasheet | 800 us | 20.0 us |
+| FETish | 6370 us | 159.3 us |
+
+They overlap from 800 down to 159 us — datasheet dials 1.00–3.62, FETish dials
+4.37–7.00. Outside that, **only datasheet reaches 159 → 20 us** and **only
+FETish reaches 6370 → 800 us**.
+
+So the owner's position resolves cleanly: liking the depth schedule and
+disliking the slow constants is not a preference between two models, it is a
+preference for where the knob's travel sits. The FETish ladder spends its whole
+range in territory where overshoot saturates (1.5 dB of spread across seven
+dials at 12 dB of reduction); the datasheet ladder spends it where the control
+discriminates (8.3 dB).
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

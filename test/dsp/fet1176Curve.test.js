@@ -261,3 +261,59 @@ test('the bench can set every key the legacy patch carries', async () => {
   t.resetFET1176Tuning()
   assert.deepEqual(t.fet1176TuningOverrides(), {}, 'and reset must emit nothing at all')
 })
+
+/**
+ * ⚠ THE LADDER ONLY RELABELS THE KNOB, AND THE THREE-WAY "MODEL" FRAMING HID
+ * THAT. Both ladders are the same geometric law scaled by 7.963, and both use
+ * the same schedule, so a dial on one whose CONSTANT matches a dial on the other
+ * renders bit-identically — 0 of 288,000 samples differ on syllabic material.
+ * There is no sonic difference to audition between `datasheet` + DEPTH and
+ * `fetish` + DEPTH; the only real choices are whether the schedule is on and
+ * what range the knob spans.
+ */
+test('matched constants render identically across the two ladders', () => {
+  const target = attackSecondsForDial(7, 'fetish')
+  let lo = 1, hi = 7
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2
+    if (attackSecondsForDial(mid) > target) lo = mid; else hi = mid
+  }
+  const dsDial = (lo + hi) / 2
+  assert.ok(Math.abs(attackSecondsForDial(dsDial) - target) < 1e-12)
+
+  const render = (params) => {
+    const k = new FET1176Kernel(96000)
+    k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
+      inputDrive: 75, ratio: '4', release: 4, ...params })
+    const n = 96000
+    const x = new Float32Array(n)
+    for (let i = 0; i < n; i++) {
+      const t = i / 96000
+      const syl = Math.max(0, Math.sin(2 * Math.PI * 2.6 * t)) ** 2
+      x[i] = 0.5 * syl * Math.sin(2 * Math.PI * 160 * t)
+    }
+    const y = new Float32Array(n)
+    for (let f = 0; f < n; f += 128) {
+      const l = Math.min(128, n - f)
+      k.process([x.subarray(f, f + l)], [y.subarray(f, f + l)], l)
+    }
+    return y
+  }
+  const a = render({ attackRange: 'fetish', attackSchedule: 'depth', attack: 7 })
+  const b = render({ attackSchedule: 'depth', attack: dsDial })
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) assert.fail(`sample ${i}: the ladder is doing more than relabelling`)
+  }
+})
+
+/**
+ * ⚠ WHAT THE CHOICE ACTUALLY IS: which constants the knob can REACH. The two
+ * overlap from 800 down to 159 us and each reaches where the other cannot —
+ * datasheet alone gets to 20 us, FETish alone gets to 6.37 ms.
+ */
+test('the ladders reach different ranges, which is the whole difference', () => {
+  assert.ok(attackSecondsForDial(7) < attackSecondsForDial(7, 'fetish'),
+    'only the datasheet ladder reaches the fast end')
+  assert.ok(attackSecondsForDial(1, 'fetish') > attackSecondsForDial(1),
+    'only the FETish ladder reaches the slow end')
+})
