@@ -424,11 +424,12 @@ export const FET1176_KERNEL_DEFAULTS = {
   attackRange: 'datasheet',
   /**
    * Attack-time schedule.
-   *   'none'  — one constant per dial, whatever the reduction. SHIPS.
-   *   'depth' — the constant shortens as the reduction rises, which is the limb
-   *             FETish has. See ATTACK_DEPTH_K.
+   *   'depth' — SHIPS. The constant shortens as the TARGET reduction deepens,
+   *             which is the limb both references have.
+   *   'none'  — one constant per dial whatever the reduction. What shipped
+   *             before the fit; reachable through FET_LEGACY_PATCH.
    */
-  attackSchedule: 'none',
+  attackSchedule: 'depth',
   /** dB⁻¹ slope of that schedule, negative. Read only when it is 'depth'. */
   attackDepthK: ATTACK_DEPTH_K,
   releaseSchedule: 'depth',
@@ -558,6 +559,7 @@ export const FET_LEGACY_PATCH = {
   fetCurve: 'tanh',
   fetPosition: 'postCell',
   releaseSchedule: 'none',
+  attackSchedule: 'none',
 }
 
 /**

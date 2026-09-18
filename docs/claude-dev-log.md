@@ -3105,6 +3105,66 @@ range in territory where overshoot saturates (1.5 dB of spread across seven
 dials at 12 dB of reduction); the datasheet ladder spends it where the control
 discriminates (8.3 dB).
 
+### ⚗ CLA-76 CORROBORATES THE ATTACK FINDING INDEPENDENTLY
+
+Placed on our own ladder at its own depth, by t63 rather than overshoot (which
+saturates):
+
+| | nominal 20 µs setting | nominal 800 µs |
+|---|---|---|
+| CLA-76 (its bursts near 10 dB) | 688 µs → **our dial 2.3** | 5688 µs → past our dial 1 |
+| FETish (its sweep near 16 dB) | 938 µs at its 66 µs → **our dial 1.6** | 11313 µs → past our dial 1 |
+
+**Two independently built emulations both say their published "20 µs" behaves
+like our dial 2–3, and their "800 µs" is slower than our slowest.** So the slow
+reading is not a FETish quirk: our datasheet implementation is faster than either
+reference across the whole range.
+
+⚠ IT DOES NOT SAY THE HARDWARE IS SLOW. It says both emulations are, and two
+plugins modelling the same circuit can share an assumption. Neither settles the
+datasheet question.
+
+**And both have narrower ranges than ours:**
+
+| | attack span across the dial |
+|---|---|
+| ours (datasheet) | 25× |
+| FETish | 12.1× |
+| CLA-76 | 8.3× |
+
+CLA-76 is the narrowest of the three — the same flattening that made the FETish
+ladder unplayable, less extreme. Our dials 5–7 have no counterpart in either
+reference, so keeping them is a deliberate choice to offer more control range
+than the references do, and is arguably closer to the published 20 µs than either
+emulation gets.
+
+### `attackSchedule: 'depth'` SHIPS, on the datasheet ladder
+
+The A/B separated two things that had been presented as one. The **depth
+dependence** is what both references have and our fixed model did not, and it was
+preferred by ear. The **FETish ladder** is what did not ship: it leaves 1.5 dB of
+overshoot spread across seven dials at 12 dB of reduction where the datasheet
+ladder leaves 8.3, so the control stops discriminating.
+
+⚠ AND THE TWO LADDERS ARE THE SAME MODEL — matched constants render
+bit-identically — so nothing sonic was given up by choosing the datasheet one.
+What was given up is reach: only the FETish ladder gets to 800 µs–6.37 ms, which
+is exactly the territory where the knob stops doing anything.
+
+⚠⚠ **THE DEFAULT CHANGE BROKE SIX TESTS BY LEAKING INTO THE MEASUREMENT TOOLING,
+WHICH IS THE MORE USEFUL FINDING.** `runKernel` inherited kernel defaults, so a
+synthetic rendered at attack dial 2 came back as dial 4.01 — both sides had
+quietly acquired a depth dependence nobody asked the tool for. A measurement
+instrument that shifts when a product decision shifts cannot be compared against
+its own history. The ballistics measurement mode now pins both schedules
+explicitly, the way `oversample: false` already was.
+
+⚠ AND THE FIRST FIX OVER-CORRECTED. Pinning both to 'none' moved the goalposts a
+second time: three stairs tests went red because `releaseSchedule` had shipped as
+'depth' BEFORE the bursts and stairs numbers were recorded, so those captures
+were analysed against a kernel that had it. The pin is now `attack: 'none',
+release: 'depth'` — what the record was actually taken with — and says so.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

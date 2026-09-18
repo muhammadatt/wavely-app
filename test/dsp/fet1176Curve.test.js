@@ -199,6 +199,9 @@ test('the shipping position holds saturation steady across the Input knob', () =
  * common cause. Until that is a decision, 'datasheet' is what renders.
  */
 test('the attack ladder ships on the datasheet span', () => {
+  // ⚠ The LADDER ships as the datasheet one; the depth SCHEDULE ships on. Those
+  // are separate choices and the A/B separated them: the schedule was preferred,
+  // the FETish ladder was not, because it flattens the knob to 1.5 dB of spread.
   assert.equal(FET1176_KERNEL_DEFAULTS.attackRange, 'datasheet')
   assert.ok(Math.abs(attackSecondsForDial(1) - 0.0008) < 1e-9)
   assert.ok(Math.abs(attackSecondsForDial(7) - 0.00002) < 1e-9)

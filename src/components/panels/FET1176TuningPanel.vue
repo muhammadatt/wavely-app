@@ -86,8 +86,10 @@ const CHOICES = [
     options: [
       {
         id: 'datasheet', label: 'DATASHEET',
-        title: '20–800 µs across the dial — the 1176’s published span, which our constants '
-          + 'quote and which ships. Dial 1 / 4 / 7 = 800 / 126 / 20 µs',
+        title: '20–800 µs across the dial — the 1176’s published span, and what ships. '
+          + 'Dial 1 / 4 / 7 = 800 / 126 / 20 µs before the depth schedule scales them. '
+          + '⚠ Both references measure SLOWER than this everywhere: their nominal 20 µs '
+          + 'lands at our dial 1.6 (FETish) and 2.3 (CLA-76)',
       },
       {
         id: 'fetish', label: 'FETish',
@@ -104,17 +106,18 @@ const CHOICES = [
     options: [
       {
         id: 'none', label: 'FIXED',
-        title: 'One constant per dial whatever the reduction. SHIPS, and is a complete '
-          + 'model rather than half of one — the datasheet ladder was never scaled for a '
-          + 'schedule, so datasheet + FIXED is internally consistent',
+        title: 'One constant per dial whatever the reduction — what shipped before the '
+          + 'fit. Still a complete model rather than half of one: the datasheet ladder '
+          + 'was never scaled for a schedule, so datasheet + FIXED is internally '
+          + 'consistent, just not what either reference does',
       },
       {
         id: 'depth', label: 'DEPTH',
         title: 'The attack constant shortens as the TARGET reduction deepens — FETish '
           + 'attacks 5× faster at 22 dB than at 6 (−0.0926/dB), the mirror of its release, '
-          + 'which lengthens. ⚠ ON THE DATASHEET LADDER THIS IS A VOICING, NOT A '
-          + 'REPRODUCTION: 36 % off the reference’s absolute times, but it keeps 8.3 dB of '
-          + 'the knob’s 9.7 dB range where the FETish ladder leaves 1.5',
+          + 'which lengthens. SHIPS, on the datasheet ladder — which keeps 8.3 dB of the '
+          + 'knob’s 9.7 dB range where the FETish ladder leaves 1.5. CLA-76 corroborates '
+          + 'the depth dependence independently',
       },
     ],
   },

@@ -24,13 +24,16 @@ function render(params) {
 }
 
 /**
- * ⚠ IT MUST SHIP OFF. A single exponential in depth fits FETish's attack at
- * 14.2 % rms with structured residuals (−25 / −6 / 0 / +12 % across the four
- * depths) against 36.4 % for a fixed attack. Better, and not good enough to be
- * the default — unlike the release schedule, which fitted at 4.2 %.
+ * ⚠ IT SHIPS ON, ON THE DATASHEET LADDER, AND THIS ASSERTED THE OPPOSITE UNTIL
+ * THE A/B. The depth dependence is the part both references have and our fixed
+ * model does not — FETish −0.085/dB measured, CLA-76 corroborating independently
+ * — and it was preferred by ear. The FETish LADDER is what did not ship: it
+ * leaves 1.5 dB of overshoot spread across seven dials where the datasheet
+ * ladder leaves 8.3, so the control stops discriminating.
  */
-test('the attack schedule ships off', () => {
-  assert.equal(FET1176_KERNEL_DEFAULTS.attackSchedule, 'none')
+test('the attack schedule ships on, on the datasheet ladder', () => {
+  assert.equal(FET1176_KERNEL_DEFAULTS.attackSchedule, 'depth')
+  assert.equal(FET1176_KERNEL_DEFAULTS.attackRange, 'datasheet')
   assert.ok(FET1176_KERNEL_DEFAULTS.attackDepthK < 0,
     'the reference attacks FASTER as it compresses harder, so the slope is negative')
 })

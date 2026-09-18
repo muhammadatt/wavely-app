@@ -407,7 +407,36 @@ export const PLANS = {
 export function runKernel(x, sampleRate, params) {
   const k = new FET1176Kernel(sampleRate)
   const { tailFraction, ...kernelParams } = params
-  k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false, ...kernelParams })
+  /**
+   * ⚠⚠ THE SCHEDULES ARE PINNED OFF, AND THAT IS PART OF THE MEASUREMENT MODE
+   * RATHER THAN A VOICING CHOICE. Same argument as `oversample: false` above:
+   * this function exists to put a KNOWN kernel beside a reference capture, and
+   * every number in the dev log — dial tables, matched measurements, the bias
+   * figures, the stairs comparisons — was taken with fixed ballistics.
+   *
+   * When `attackSchedule` shipped as 'depth' these defaults leaked in and six
+   * tests failed at once: a synthetic rendered at attack dial 2 came back as
+   * dial 4.01, because both sides had acquired a depth dependence nobody had
+   * asked this tool for. A measurement instrument that changes when a product
+   * decision changes cannot be compared against its own history.
+   *
+   * ⚠ AND THE TWO ARE PINNED DIFFERENTLY, WHICH IS A FACT ABOUT THE RECORD
+   * RATHER THAN A PREFERENCE. `releaseSchedule` shipped as 'depth' BEFORE the
+   * bursts and stairs numbers in the dev log were taken, so those captures were
+   * analysed against a kernel that had it; `attackSchedule` shipped after. The
+   * first cut of this pin set both to 'none' and moved the goalposts a second
+   * time — three stairs tests went red because their recorded slopes and biases
+   * had all been measured with the release schedule in force. These values are
+   * what the record was taken with; changing either invalidates comparisons
+   * against it, and should be done deliberately and re-measured, not inherited.
+   *
+   * The fitters that are fitting a schedule pass it explicitly.
+   */
+  k.setParams({
+    outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
+    attackSchedule: 'none', releaseSchedule: 'depth',
+    ...kernelParams,
+  })
   /**
    * \u26a0 THE TOOL NEEDS A TAILED KERNEL EVEN THOUGH THE PRODUCT NO LONGER HAS ONE.
    * `TAIL_FRACTION` went to 0 when the release was fitted to FETish, which has no
