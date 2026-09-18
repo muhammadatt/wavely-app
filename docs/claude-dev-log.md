@@ -3765,10 +3765,49 @@ sensitivity probe says why — perturbing the planted law one constant at a time
 than the residual the fit settles at, so a number for any of them would be a
 guess with a decimal point on it.
 
-⚠ **THIS IS THE STIMULUS, NOT THE SEARCH.** A better optimiser finds the same
-flat valley faster. Separating the ratio triple needs material that sweeps
-overshoot INDEPENDENTLY of level — which a staircase, where the two move
-together by construction, cannot do.
+⚠ **THIS IS NOT THE SEARCH** — a better optimiser finds the same flat valley
+faster. ⚠⚠ **BUT THE CLAIM THAT IT WAS THE STIMULUS IS WITHDRAWN.**
+
+### What would actually move the all-buttons ratio law — measured, not guessed
+
+Asked what stimulus would sweep overshoot independently of level. **There isn't
+one, because the premise was wrong**, and the measurements say so.
+
+**The staircase already sweeps overshoot.** At the four captured drives the fine
+plan covers **−17 to +31 dB** of overshoot, most of the law's useful domain.
+"Overshoot and level move together so a staircase cannot separate them" sounded
+right and is not: moving the Input knob moves the threshold under the same level
+ramp, which is exactly how that range gets covered.
+
+**Sensitivity is not the blocker either.** Against capture noise alone — CLA-76
+reads 0.02–0.13 dB — two of the four would be measurable:
+
+| design | ratioMin | ratioSpan | ratioHalf | knee |
+|---|---|---|---|---|
+| as captured (−5..10) | 0.398 | 0.281 | 0.111 | 0.162 |
+| wider drive (−5..25) | 0.395 | 0.459 | 0.137 | 0.192 |
+| widest (−5..40) | 0.349 | 0.531 | 0.146 | 0.233 |
+
+**The blocker is the residual.** The fit settles at **0.565 dB**, larger than
+every sensitivity above. That is model mismatch — our law does not describe
+CLA-76's all-buttons curve — and while it dominates, no parameter inside the law
+can separate from the error in the law's shape.
+
+⚠ **SO NO NEW BOUNCE FIXES IT.** Wider drive does buy real sensitivity on
+`allRatioSpan` (0.28 → 0.53) and is worth having later; it does nothing for
+`allRatioMin` or `allRatioHalfDb`, and nothing at all while the residual
+dominates.
+
+⚠ **AND DIFFERENCING MAKES IT WORSE**, which was the other idea and was also
+checked. Reading local slope instead of accumulated reduction drops every
+sensitivity by about 7× (`allRatioMin` 0.398 → 0.056): the integral accumulates
+the difference across the curve, the derivative throws it away and keeps the
+noise.
+
+**The next step needs no captures.** Extract slope against overshoot
+non-parametrically from the four already taken, and look at the shape the data
+wants instead of asking how well a MIN/SPAN/HALF form fits it. If that form is
+wrong, fitting it harder was never going to work.
 
 So the tool fits the threshold drop, prints the sensitivity table, and refuses
 to hand back the rest. The self-test now **asserts the non-identifiability**: if
