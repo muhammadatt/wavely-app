@@ -37,7 +37,7 @@ const URL_ = `http://localhost:${PORT}/`
 
 /** Command-palette search terms. These are the REGISTRY labels, not our names. */
 const PANELS = [
-  'Opto Comp', 'FET Punch', 'Soft Clipper', 'Scheps Parallel',
+  'Opto Comp', 'FET Punch', 'Soft Clipper', 'Scheps Parallel', 'Punch Chain',
   'Reso', 'EQ', 'Air Boost', 'De-Esser', 'Inflator', 'Tube Sat',
   'Loudness Normalize', 'Auto Leveler',
 ]

@@ -27,6 +27,11 @@ import {
   AIR_BAND_DEFAULTS,
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
+import { ensurePunchChainWorklet } from './punchChainWorkletLoader.js'
+import {
+  PUNCH_CHAIN_DEFAULTS, PUNCH_CHAIN_LATENCY_SAMPLES, PUNCH_CHAIN_PREROLL_S,
+  toKernelParams as toPunchChainKernelParams,
+} from './effects/punchChainParams.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
@@ -850,6 +855,68 @@ export function applyAirBandRegion(segments, start, end, params, sampleRate, cha
     ensureWorklet: ensureAirBandWorklet,
     processorName: 'air-band-processor',
     kernelParams: toAirBandKernelParams({ ...AIR_BAND_DEFAULTS, ...params }),
+  })
+}
+
+/**
+ * Everything the Punch Chain measures for a region, in one worker round trip:
+ * both side-chain alignments, the makeup, the ceiling, and the density and
+ * level-spread readouts the plate prints.
+ *
+ * ⚠ THE SPANS ARE DELIBERATELY NOT ALL THE SAME, exactly as in
+ * `computeLA2AAutoMakeup` and for the same reasons one level up:
+ *
+ *  - the FET's alignment comes from the WHOLE FILE, measured by the caller with
+ *    `regionAlignDb` and passed in. A per-selection offset makes this a
+ *    different compressor on every selection.
+ *  - the makeup and both readouts come from the worker's CAPPED window, because
+ *    solving or measuring them means rendering two compressors.
+ *  - the ceiling comes from the WHOLE REGION, because "never louder than the
+ *    source" is a claim about the source and not about its first thirty
+ *    seconds.
+ *
+ * The Opto's alignment is derived inside the plan from the FET's, so it
+ * inherits the whole-file anchor without needing a whole-file render — see
+ * `computePunchChainPlan`.
+ */
+export function computePunchChainPlan(
+  segments, start, end, kernelParams, sampleRate, channels,
+) {
+  return measureInWorker(
+    'punchChainPlan', segments, start, end, kernelParams, sampleRate, channels,
+  ).then((d) => {
+    const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
+    return {
+      fetAlignDb: d.fetAlignDb,
+      optoAlignDb: d.optoAlignDb,
+      makeupDb: d.makeupDb,
+      ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+      // The measured width only when the solve saw everything the ceiling was
+      // measured over. Null is the conservative fixed knee.
+      ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+        ? d.ceilingKneeDb
+        : null,
+      sourceDensityDb: d.sourceDensityDb,
+      sourceSpreadDb: d.sourceSpreadDb,
+      densityDb: d.densityDb,
+      spreadDb: d.spreadDb,
+    }
+  })
+}
+
+/**
+ * Apply the Punch Chain to a region.
+ *
+ * Latency is both kernels' summed, and the pre-roll is theirs — see
+ * `PUNCH_CHAIN_LATENCY_SAMPLES` and `PUNCH_CHAIN_PREROLL_S`.
+ */
+export function applyPunchChainRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensurePunchChainWorklet,
+    processorName: 'punch-chain-processor',
+    kernelParams: toPunchChainKernelParams({ ...PUNCH_CHAIN_DEFAULTS, ...params }),
+    latencySamples: PUNCH_CHAIN_LATENCY_SAMPLES,
+    preRollSamples: Math.round(PUNCH_CHAIN_PREROLL_S * sampleRate),
   })
 }
 

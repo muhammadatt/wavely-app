@@ -9,6 +9,7 @@ import LA2AModal from '../components/panels/LA2AModal.vue'
 import FET1176Modal from '../components/panels/FET1176Modal.vue'
 import SoftClipperModal from '../components/panels/SoftClipperModal.vue'
 import SchepsModal from '../components/panels/SchepsModal.vue'
+import PunchChainModal from '../components/panels/PunchChainModal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
@@ -286,6 +287,25 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: SoftClipperModal,
+  },
+  {
+    // Filed next to the two plugins it embeds, because that is what it is: the
+    // same FET and the same opto cell, in series, with the ballistics and the
+    // levelling taken off the panel. Someone who wants either one alone still
+    // has it.
+    id: 'punch-chain',
+    label: 'Punch Chain',
+    desc: 'FET into opto, level-matched, with density and consistency readouts',
+    category: 'effects',
+    group: 'Dynamics',
+    icon: 'fet',
+    keywords: [
+      'punch', 'chain', '1176', 'la-2a', 'fet', 'opto', 'series', 'vocal',
+      'compressor', 'density', 'consistency', 'levelling', 'leveling',
+    ],
+    requires: 'selection',
+    surface: 'window',
+    component: PunchChainModal,
   },
   {
     // Filed under Dynamics rather than Tone: the two Pultec stages are there to
