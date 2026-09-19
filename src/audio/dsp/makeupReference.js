@@ -389,6 +389,81 @@ export function peakOfChannels(channels, skip = 0) {
 }
 
 /**
+ * THE PEAK RESTORE — the trim, in dB, that puts a rendered region's peak back
+ * ON the ceiling instead of somewhere under it.
+ *
+ * ⚠⚠ IT IS NOT THE PEAK REFERENCE COMING BACK, AND THAT OBJECTION WAS RAISED
+ * AND MEASURED DOWN. The reasoning against it was that restoring the peak after
+ * the solve is arithmetically the same as solving for the peak in the first
+ * place, so it would bring back the knob that ran backwards. That holds ONLY
+ * while the ceiling is idle. Once the ceiling is catching peaks it is a
+ * limiter, and the two paths separate — measured on a narrator's own 35 s take
+ * at Input 60, both ending at -1 dBFS: restored -16.94 dB rms against the peak
+ * reference's -19.21. Across the whole knob the restore holds -16.2 to -17.6
+ * where the peak reference slides -17.5 to -20.3. It is identical to the peak
+ * reference exactly where the ceiling does nothing (Input 20-30) and strictly
+ * better everywhere above.
+ *
+ * ⚠ SO THE MAKEUP REFERENCE IS UNCHANGED. The solve still matches the 99.9th
+ * percentile; this is a separate scalar applied to the finished render. The
+ * body-to-source relationship the percentile buys is what makes the restore
+ * safe to add, not something it replaces.
+ *
+ * ⚠ THE TRIM IS APPLIED BY SCALING THE RENDER, and that is equivalent to adding
+ * it to BOTH `outputGainDb` and `ceilingDb` — verified bit-identical to 1.2e-7
+ * (float32 rounding) over a nine-point Input sweep, because the ceiling's knee
+ * is defined in dB relative to its own threshold and is therefore homogeneous.
+ * Scaling the render is preferred anyway: it needs no second render and cannot
+ * be got wrong by a caller who updates one of the two numbers and not the other.
+ *
+ * ⚠⚠ AND IT MUST BE MEASURED OVER THE WHOLE RENDERED REGION, NOT THE SOLVE'S
+ * WINDOW. The makeup is solved on a capped, start-anchored window; a region's
+ * loudest moment routinely falls outside it, and `windowPeak <= wholePeak`
+ * always, so a window-derived trim is too GENEROUS. Applied with the ceiling
+ * raised to match, it would push the later passage past the source peak — the
+ * one guarantee the ceiling exists to provide, and a clip on anything already
+ * near 0 dBFS. Hence the apply path computes this on its own output, which is
+ * whole-region by construction.
+ *
+ * ⚠ THE PRICE, ACCEPTED DELIBERATELY: the live preview cannot know the region's
+ * rendered peak, so preview and apply can differ by this trim — up to ~1.9 dB at
+ * light settings, and under 0.1 dB from Input 40 up, where the ceiling is
+ * already holding the peak. Everywhere else in this codebase preview and apply
+ * are sample-identical; this is the one stage where they are not, and it was a
+ * deliberate call by the owner rather than an oversight.
+ *
+ * Returns 0 when there is no ceiling (the peak reference needs no restore — its
+ * guarantee is arithmetic) or when the region is silent.
+ *
+ * @param {Float32Array[]} channels the RENDERED region
+ * @param {number|null} ceilingDb the source region's peak, dBFS
+ */
+export function peakRestoreTrimDb(channels, ceilingDb) {
+  if (!Number.isFinite(ceilingDb)) return 0
+  const peak = peakOfChannels(channels)
+  if (!(peak > 0)) return 0
+  return ceilingDb - 20 * Math.log10(peak)
+}
+
+/**
+ * Scale a rendered region by `peakRestoreTrimDb`, in place, and return the trim.
+ *
+ * ⚠ A NEGATIVE TRIM IS APPLIED TOO, and that is the invariant rather than an
+ * edge case: if a render ever comes back ABOVE the ceiling this pulls it down,
+ * so "never louder than the source" holds by enforcement here as well as in the
+ * kernel. Clamping at zero would leave the one case that actually matters.
+ */
+export function restorePeakToCeiling(channels, ceilingDb) {
+  const trimDb = peakRestoreTrimDb(channels, ceilingDb)
+  if (!trimDb) return 0
+  const g = Math.pow(10, trimDb / 20)
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) ch[i] *= g
+  }
+  return trimDb
+}
+
+/**
  * The makeup solve, and the ceiling that has to ship with it.
  *
  * ⚠ EXTRACTED FROM `la2aProcessor.js` SO FET PUNCH CAN USE IT, and the two

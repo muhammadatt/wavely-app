@@ -518,7 +518,16 @@ export function useFET1176() {
 
     startProcessing('Applying FET Punch...')
     try {
-      const buffer = await applyFET1176Region(
+      /**
+       * ⚠ THE PEAK RESTORE HAPPENS INSIDE apply AND IS REPORTED, NOT SILENT.
+       * The makeup is percentile-referenced, so the render's peak lands under
+       * the region's own — by 1.9 dB at light settings and under 0.1 dB once
+       * the ceiling is working. `applyFET1176Region` puts it back on the
+       * ceiling and hands back what it added; saying so is the difference
+       * between a number the user can check and gain that appeared from
+       * nowhere. See `peakRestoreTrimDb`.
+       */
+      const { buffer, trimDb } = await applyFET1176Region(
         state.segments, start, end,
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels
@@ -526,7 +535,9 @@ export function useFET1176() {
       const bufferId = replaceRegion(start, end, buffer, 'FET Punch compression')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
-      showToast('FET Punch compression applied')
+      showToast(Math.abs(trimDb) >= 0.05
+        ? `FET Punch applied — peak restored ${trimDb >= 0 ? '+' : ''}${trimDb.toFixed(2)} dB`
+        : 'FET Punch compression applied')
     } catch (err) {
       console.error('FET Punch failed:', err)
       showToast('FET Punch compression failed')

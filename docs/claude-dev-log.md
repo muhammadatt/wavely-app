@@ -4334,6 +4334,99 @@ existed only as terminal output, one context window from being lost.
 
 ---
 
+### FET Punch's peak restore, and the objection to it that was wrong
+
+Reported as a regression: "after applying FET Punch I still have to normalize
+the output to bring it back up to the pre-compression peak. When I run FETPunch
+on the old version it comes back with peaks already at -1 dB."
+
+**It was not a regression, and the first two diagnoses were both mine and both
+wrong.**
+
+#### What it actually was
+
+Nothing. At the same final peak the two versions were within 0.04 dB — the old
+peak-referenced makeup simply folded the normalize into the solve, so the step
+was invisible. On the owner's own 35 s narration take at Input 30:
+
+| | makeup | peak | p99.9 | rms | rms at -1 dBFS |
+|---|---|---|---|---|---|
+| source | — | -1.00 | -6.28 | -21.68 | — |
+| peak reference (old) | +13.95 | -1.00 | — | -16.24 | **-16.24** |
+| percentile (ships) + manual normalize | +12.28 | -2.73 | -6.04 | -17.91 | **-16.17** |
+
+⚠ **THE REPRO FAILED TWICE BEFORE IT SUCCEEDED, AND THE SECOND FAILURE WAS THE
+INFORMATIVE ONE.** Synthetic fixtures showed no shortfall at all, because a
+sustained-tone fixture has its peak sitting on its own 99.9th percentile — match
+the percentile and the peak comes with it. Real narration has short transients
+that a percentile cannot see (peak 5.3 dB over p99.9 here). Then the first real
+repro still missed by 0.93 dB of rms at an exactly matching p99.9, which was
+**the input alignment**: the owner's panel read `align +3.5` and the repro ran
+with none. With `inputAlignDb: 3.52` — which our own module computes for that
+file, against the app's +3.5 — the repro matched the app's render to 0.01 dB on
+all three statistics and its makeup to 0.02 dB.
+
+#### The objection that was wrong
+
+Asked "can't we simply add a peak normalize step after the makeup solve?", the
+answer given was no: restoring the peak afterwards is arithmetically the same as
+solving for the peak, so it would bring back the knob that ran backwards.
+
+⚠⚠ **THAT IS TRUE ONLY WHILE THE CEILING IS IDLE.** The ceiling is a limiter.
+Once it is catching peaks, the two paths are different operations, and the
+sweep that had already been run said so:
+
+| Input | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 |
+|---|---|---|---|---|---|---|---|---|
+| restored, rms | -17.54 | -16.24 | -17.17 | -16.95 | **-16.94** | -17.09 | -17.30 | -17.61 |
+| peak-referenced | -17.54 | -16.24 | -17.46 | -18.05 | **-19.21** | -19.79 | -19.52 | -20.26 |
+
+Identical where the ceiling does nothing, up to **2.3 dB better** where it
+works, and flat across the knob instead of sliding 2.7 dB. The restore is
+strictly better than the reference it was accused of being.
+
+#### What shipped
+
+`peakRestoreTrimDb` / `restorePeakToCeiling` in `dsp/makeupReference.js`, called
+from `applyFET1176Region`, which now resolves `{ buffer, trimDb }` and reports
+the trim in the toast rather than adding gain silently.
+
+⚠ **SCALING THE FINISHED RENDER IS EXACTLY ADDING THE TRIM TO BOTH
+`outputGainDb` AND `ceilingDb`** — verified bit-identical to 1.2e-7 (float32
+rounding) over a nine-point sweep, because the ceiling's knee is defined in dB
+relative to its own threshold and is homogeneous. Scaling is preferred anyway:
+no second render, and no caller can update one number and forget the other.
+
+⚠⚠ **THE TRIM IS MEASURED ON THE WHOLE RENDERED REGION, NEVER THE SOLVE'S
+WINDOW, AND THAT IS THE WHOLE SAFETY ARGUMENT.** The makeup is solved on a
+capped start-anchored window; `windowPeak <= wholePeak` always, so a
+window-derived trim is too generous, and applied with the ceiling raised to
+match it would push a late loud passage PAST the source peak — the one guarantee
+the ceiling exists to provide, and a clip on anything near 0 dBFS. On the
+owner's file the two agree exactly, but only because its loudest moment happens
+to fall inside the first 30 s; that is luck, not a property.
+
+⚠ **PREVIEW AND APPLY CAN NOW DIFFER, BY UP TO ~1.9 dB AT LIGHT SETTINGS** (and
+under 0.1 dB from Input 40 up, where the ceiling already holds the peak). The
+preview cannot know the region's rendered peak. Everywhere else in this codebase
+preview and apply are sample-identical; this is the one stage where they are
+not, and it is an explicit decision by the owner, recorded here so it is not
+read later as an oversight.
+
+⚠ **IT UN-MATCHES THE A/B.** The percentile reference put the body at source
+level, so a before/after comparison was hearing compression rather than level.
+With the restore the body sits up to 1.9 dB above source at light settings, and
+louder wins every blind comparison. Flagged before building; accepted.
+
+⚠ **NO PRESET RE-CUT.** It is a pure output trim applied after the compression:
+gain reduction and character are untouched, and `output` is canonicalised to 0
+and solved per file, so nothing a preset stores moves.
+
+Verified end to end on the owner's file: Input 30 now lands at **-1.00 dBFS,
+rms -16.24**, against their manual FET-then-normalize at -1.00 / -16.18.
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
