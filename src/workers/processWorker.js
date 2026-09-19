@@ -182,11 +182,13 @@ function schepsAutoTrim(channelData, sampleRate, params) {
  * alignments, the makeup, the ceiling and the two readouts the plate prints.
  *
  * ⚠ HEAVIER THAN ANY OTHER MEASUREMENT IN THIS WORKER, which is why it matters
- * that it runs here. It renders the FET alone to measure what the Opto will be
- * fed, then up to four composite renders for the makeup solve, then one more
- * for the readouts — six passes through two compressors where the single-plugin
- * solves take one to four through one. On the main thread that would jank a
- * knob drag outright; the composable's debounce is sized to match.
+ * that it runs here. It renders each stage once — the FET, then the opto on
+ * that — and everything else is arithmetic: the makeup is closed form and the
+ * readouts come from applying a pointwise output stage to the render already in
+ * hand. Two compressor passes, where the single-plugin solves take one to four
+ * through one. Measured on a 30 s window it runs ~780 ms, down from ~2100 when
+ * the makeup was solved by iterating whole-chain renders. Still far too slow
+ * for the main thread, and the composable's debounce is sized to match.
  */
 function punchChainPlan(channelData, sampleRate, params) {
   try {

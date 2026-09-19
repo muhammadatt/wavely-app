@@ -29,6 +29,7 @@ import { processLA2ABuffer } from '../../src/audio/la2aProcessor.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../../src/audio/dsp/oversample.js'
 import {
   percentileOfChannels, peakOfChannels, MAKEUP_PERCENTILE, CEILING_KNEE_DB,
+  solveMakeupPlan,
 } from '../../src/audio/dsp/makeupReference.js'
 import { gatedRmsOfChannels, inputAlignDbFor } from '../../src/audio/dsp/inputAlign.js'
 import {
@@ -263,6 +264,87 @@ test('the plan anchors the opto to the whole file, not to the window it was hand
     Math.abs(fromWhole.optoAlignDb - fromWindow.optoAlignDb) < 6,
     `opto offset tracked the window rather than the file: `
     + `${fromWhole.optoAlignDb.toFixed(2)} vs ${fromWindow.optoAlignDb.toFixed(2)}`,
+  )
+})
+
+test("the plan's readouts describe the render the user actually hears", () => {
+  /**
+   * ⚠ THE ONE ASSERTION THAT KEEPS THE FAST PATH HONEST. The plan no longer
+   * renders the chain to measure its own output — it applies the pointwise
+   * output stage to the render it already has, which is 600 ms cheaper and is
+   * only correct because that stage has no memory. If anything with state is
+   * ever added after the compressors, this test is what notices: the numbers on
+   * the plate would quietly start describing a signal nobody hears.
+   *
+   * Re-measured through `processPunchChainBuffer`, which is the audible path.
+   */
+  const src = signal()
+  const params = { drive: 45, peakReduction: 65, outputDb: 2 }
+  const plan = computePunchChainPlan(src, SR, params)
+
+  const rendered = processPunchChainBuffer(src, SR, {
+    ...PUNCH_CHAIN_KERNEL_DEFAULTS,
+    ...params,
+    // Base rate, because that is what the plan measures — see its note on why
+    // oversampling moves neither readout by a tenth of what the plate prints.
+    oversample: false,
+    fetAlignDb: plan.fetAlignDb,
+    optoAlignDb: plan.optoAlignDb,
+    makeupDb: plan.makeupDb,
+    ceilingDb: plan.ceilingDb,
+    ceilingKneeDb: plan.ceilingKneeDb,
+  }).channelData
+
+  const phrases = detectPhrases(src, SR)
+  assert.equal(measureDensityDb(rendered, SR), plan.densityDb)
+  assert.equal(measureSpreadDb(rendered, phrases), plan.spreadDb)
+})
+
+test('the closed-form makeup agrees with a converged iterative solve', () => {
+  /**
+   * ⚠ THE CLOSED FORM IS ONLY VALID WHILE THE MAKEUP IS THE LAST MULTIPLY. It
+   * is exact today because nothing follows it but a pointwise ceiling the solve
+   * measures without — the output is linear in the gain, so the percentile
+   * scales with it and one division answers it. Put a saturator, a limiter or
+   * any curve after that multiply and this silently becomes an approximation;
+   * iterating against the real renderer is what catches it.
+   *
+   * CLAUDE.md records the same split between the two embedded plugins:
+   * OptoSmooth iterates because its valve sits after the makeup amp, FET Punch
+   * does not because its Output is the last multiply. This chain is the FET
+   * case, and this test is the proof rather than the assumption.
+   */
+  const src = signal()
+  const params = { drive: 45, peakReduction: 65 }
+  const plan = computePunchChainPlan(src, SR, params)
+
+  const measureParams = {
+    ...PUNCH_CHAIN_KERNEL_DEFAULTS,
+    ...params,
+    fetAlignDb: plan.fetAlignDb,
+    optoAlignDb: plan.optoAlignDb,
+    oversample: false,
+    makeupDb: 0, outputDb: 0, ceilingDb: null, ceilingKneeDb: null,
+  }
+  const iterative = solveMakeupPlan({
+    channelData: src,
+    latencySamples: 0,
+    render: (chs, extra) => processPunchChainBuffer(chs, SR, {
+      ...measureParams, ...extra,
+    }).channelData,
+    gainKey: 'makeupDb',
+    reference: 'percentile',
+    maxIterations: 6,
+    toleranceDb: 0.001,
+    minDb: -24,
+    maxDb: 24,
+  })
+
+  assert.ok(
+    Math.abs(plan.makeupDb - iterative.makeupDb) < 0.01,
+    `closed form ${plan.makeupDb.toFixed(4)} dB vs converged `
+    + `${iterative.makeupDb.toFixed(4)} dB — the makeup is no longer the last `
+    + 'multiply, so it cannot be solved in closed form any more',
   )
 })
 

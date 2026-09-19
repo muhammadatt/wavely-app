@@ -43,9 +43,12 @@
 import {
   FET1176Kernel, FET1176_KERNEL_DEFAULTS, processFET1176Buffer,
 } from './fet1176Processor.js'
-import { LA2AKernel, LA2A_KERNEL_DEFAULTS } from './la2aProcessor.js'
 import {
-  CEILING_KNEE_DB, softCeiling, float32AtOrBelow, solveMakeupPlan,
+  LA2AKernel, LA2A_KERNEL_DEFAULTS, processLA2ABuffer,
+} from './la2aProcessor.js'
+import {
+  CEILING_KNEE_DB, softCeiling, float32AtOrBelow, ceilingKneeDbFor,
+  percentileOfChannels, peakOfChannels, MAKEUP_PERCENTILE,
 } from './dsp/makeupReference.js'
 import {
   inputAlignDbFor, gatedRmsOfChannels, ALIGN_MAX_DB,
@@ -253,6 +256,109 @@ function finite(v, fallback, lo, hi) {
   return Number.isFinite(v) ? clamp(v, lo, hi) : fallback
 }
 
+/**
+ * ── THE THREE STAGES, AS PARAMS, IN ONE PLACE EACH ──────────────────────────
+ *
+ * ⚠ EXTRACTED BECAUSE TWO CALLERS NEED THEM AND A SECOND COPY WOULD DRIFT
+ * SILENTLY. The kernel builds its two embedded compressors from these, and
+ * `computePunchChainPlan` renders the same two stages SEPARATELY — it has to,
+ * because the opto's alignment is a measurement of the FET's output and cannot
+ * be known before the FET has run. Two descriptions of "what the opto stage is"
+ * would let the measured plan and the audible render disagree about the plugin,
+ * which is the one failure neither a listening test nor a render diff would
+ * show: both would be internally consistent and describe different plugins.
+ *
+ * `test/dsp/punchChain.test.js` renders the audible path and re-measures it
+ * against the plan's own readouts, so a drift here fails a test.
+ */
+function fetStageParams(p, oversample) {
+  return {
+    ...FET_FIXED,
+    oversample,
+    inputDrive: finite(p.drive, PUNCH_CHAIN_KERNEL_DEFAULTS.drive, 0, 100),
+    inputAlignDb: finite(p.fetAlignDb, 0, -48, 48),
+    ...(p.fetTuning ?? {}),
+  }
+}
+
+function optoStageParams(p, oversample) {
+  return {
+    ...LA2A_FIXED,
+    oversample,
+    peakReduction: finite(
+      p.peakReduction, PUNCH_CHAIN_KERNEL_DEFAULTS.peakReduction, 0, 100,
+    ),
+    inputAlignDb: finite(p.optoAlignDb, 0, -48, 48),
+    /**
+     * ⚠ NESTED RATHER THAN SPREAD FLAT, for the reason schepsParams.js records:
+     * these are the embedded compressor's params, not this chain's, and
+     * flattening would let a shared key name collide silently on whichever
+     * spread came last.
+     */
+    ...(p.la2aTuning ?? {}),
+  }
+}
+
+/**
+ * The output stage — the makeup, the user's trim and the ceiling — as the three
+ * linear coefficients that implement it.
+ *
+ * ⚠ THE WHOLE STAGE IS POINTWISE, WHICH IS WHAT MAKES THE MEASUREMENT PASS
+ * CHEAP. Nothing here has memory, so applying it to an already-rendered buffer
+ * is arithmetic rather than a second trip through two compressors. The plan
+ * used to re-render the entire chain to find out what a scalar and a clamp
+ * would do: 598 ms of the 2100 ms pass, for ~1 ms of work.
+ */
+function outputStageFor(p) {
+  // The solved makeup and the user's trim are two different things that land on
+  // the same multiply — see `outputDb` and `makeupDb`.
+  const gainDb = finite(p.makeupDb, 0, -24, 24) + finite(p.outputDb, 0, -24, 24)
+  const outputLin = Math.exp(gainDb * LN10_OVER_20)
+
+  /**
+   * ⚠ ROUNDED DOWN INTO FLOAT32 so the clamp is exactly representable and the
+   * "never louder than the source" guarantee survives the store. See
+   * `float32AtOrBelow`.
+   */
+  const ceilingLin = Number.isFinite(p.ceilingDb)
+    ? float32AtOrBelow(Math.exp(finite(p.ceilingDb, 0, -96, 24) * LN10_OVER_20))
+    : 0
+
+  /**
+   * ⚠ THE SOLVED KNEE IS WIDENED BY A POSITIVE MANUAL TRIM, exactly as Scheps
+   * does. The knee was sized against the render the solve saw; a user who then
+   * adds output gain pushes more into the ceiling than was measured, and
+   * widening by that much is the right correction. A NEGATIVE trim is ignored —
+   * it only moves the signal further under the ceiling, where a narrower knee
+   * is already correct and free.
+   */
+  const solvedKneeDb = Number.isFinite(p.ceilingKneeDb)
+    ? clamp(p.ceilingKneeDb, 0, CEILING_KNEE_DB) : CEILING_KNEE_DB
+  const trimHeadroomDb = Math.max(0, finite(p.outputDb, 0, -24, 24))
+  const ceilingKneeDb = Number.isFinite(p.ceilingKneeDb)
+    ? clamp(solvedKneeDb + trimHeadroomDb, 0, CEILING_KNEE_DB)
+    : CEILING_KNEE_DB
+  const ceilingKneeLin = ceilingLin > 0
+    ? ceilingLin * Math.exp(-ceilingKneeDb * LN10_OVER_20) : 0
+
+  return { outputLin, ceilingLin, ceilingKneeLin }
+}
+
+/**
+ * That stage, applied to an already-rendered buffer. New arrays; the input is
+ * left alone because the plan measures both.
+ */
+function applyOutputStage(channels, { outputLin, ceilingLin, ceilingKneeLin }) {
+  return channels.map((ch) => {
+    const out = new Float32Array(ch.length)
+    for (let i = 0; i < ch.length; i++) {
+      const v = ch[i] * outputLin
+      out[i] = ceilingLin > 0 ? softCeiling(v, ceilingLin, ceilingKneeLin) : v
+    }
+    return out
+  })
+}
+
 export class PunchChainKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
@@ -273,61 +379,13 @@ export class PunchChainKernel {
     this.params = p
 
     const oversample = p.oversample !== false
+    this.fet.setParams(fetStageParams(p, oversample))
+    this.la2a.setParams(optoStageParams(p, oversample))
 
-    this.fet.setParams({
-      ...FET_FIXED,
-      oversample,
-      inputDrive: finite(p.drive, PUNCH_CHAIN_KERNEL_DEFAULTS.drive, 0, 100),
-      inputAlignDb: finite(p.fetAlignDb, 0, -48, 48),
-      ...(p.fetTuning ?? {}),
-    })
-
-    this.la2a.setParams({
-      ...LA2A_FIXED,
-      oversample,
-      peakReduction: finite(
-        p.peakReduction, PUNCH_CHAIN_KERNEL_DEFAULTS.peakReduction, 0, 100,
-      ),
-      inputAlignDb: finite(p.optoAlignDb, 0, -48, 48),
-      /**
-       * ⚠ NESTED RATHER THAN SPREAD FLAT, for the reason schepsParams.js
-       * records: these are the embedded compressor's params, not this chain's,
-       * and flattening would let a shared key name collide silently on
-       * whichever spread came last.
-       */
-      ...(p.la2aTuning ?? {}),
-    })
-
-    // The solved makeup and the user's trim are two different things that land
-    // on the same multiply — see `outputDb` and `makeupDb`.
-    const gainDb = finite(p.makeupDb, 0, -24, 24) + finite(p.outputDb, 0, -24, 24)
-    this.outputLin = Math.exp(gainDb * LN10_OVER_20)
-
-    /**
-     * ⚠ ROUNDED DOWN INTO FLOAT32 so the clamp is exactly representable and the
-     * "never louder than the source" guarantee survives the store. See
-     * `float32AtOrBelow`.
-     */
-    this.ceilingLin = Number.isFinite(p.ceilingDb)
-      ? float32AtOrBelow(Math.exp(finite(p.ceilingDb, 0, -96, 24) * LN10_OVER_20))
-      : 0
-
-    /**
-     * ⚠ THE SOLVED KNEE IS WIDENED BY A POSITIVE MANUAL TRIM, exactly as Scheps
-     * does. The knee was sized against the render the solve saw; a user who
-     * then adds output gain pushes more into the ceiling than was measured, and
-     * widening by that much is the right correction. A NEGATIVE trim is
-     * ignored — it only moves the signal further under the ceiling, where a
-     * narrower knee is already correct and free.
-     */
-    const solvedKneeDb = Number.isFinite(p.ceilingKneeDb)
-      ? clamp(p.ceilingKneeDb, 0, CEILING_KNEE_DB) : CEILING_KNEE_DB
-    const trimHeadroomDb = Math.max(0, finite(p.outputDb, 0, -24, 24))
-    const ceilingKneeDb = Number.isFinite(p.ceilingKneeDb)
-      ? clamp(solvedKneeDb + trimHeadroomDb, 0, CEILING_KNEE_DB)
-      : CEILING_KNEE_DB
-    this.ceilingKneeLin = this.ceilingLin > 0
-      ? this.ceilingLin * Math.exp(-ceilingKneeDb * LN10_OVER_20) : 0
+    const { outputLin, ceilingLin, ceilingKneeLin } = outputStageFor(p)
+    this.outputLin = outputLin
+    this.ceilingLin = ceilingLin
+    this.ceilingKneeLin = ceilingKneeLin
   }
 
   /**
@@ -467,14 +525,18 @@ export function processPunchChainBuffer(channelData, sampleRate, params = {}) {
  *
  * @param {Float32Array[]} channelData
  * @param {number} sampleRate
+ * ⚠ NO ITERATION COUNT OR TOLERANCE ANY MORE. It used to take both, because
+ * the makeup was solved by rendering repeatedly; the makeup is now closed form
+ * and exact, so there is nothing for either to tune. See the note on the solve
+ * below for why this chain gets to do that and OptoSmooth does not.
+ *
  * @param {object} params  the two dials, plus any tuning overrides
  * @returns {{ fetAlignDb: number, optoAlignDb: number, makeupDb: number,
  *             ceilingDb: number|null, ceilingKneeDb: number|null,
  *             sourceDensityDb: number, sourceSpreadDb: number,
  *             densityDb: number, spreadDb: number }}
  */
-export function computePunchChainPlan(channelData, sampleRate, params = {}, options = {}) {
-  const { maxIterations = 4, toleranceDb = 0.05 } = options
+export function computePunchChainPlan(channelData, sampleRate, params = {}) {
   const p = { ...PUNCH_CHAIN_KERNEL_DEFAULTS, ...params }
 
   /**
@@ -498,13 +560,9 @@ export function computePunchChainPlan(channelData, sampleRate, params = {}, opti
    * cell and a saturator, which is exactly the quantity alignment exists to
    * read off real audio rather than infer.
    */
-  const fetOnly = processFET1176Buffer(channelData, sampleRate, {
-    ...FET_FIXED,
-    oversample: false,
-    inputDrive: p.drive,
-    inputAlignDb: fetAlignDb,
-    ...(p.fetTuning ?? {}),
-  }).channelData
+  const fetOnly = processFET1176Buffer(
+    channelData, sampleRate, fetStageParams({ ...p, fetAlignDb }, false),
+  ).channelData
 
   /**
    * The Opto's offset, as the FET's own offset MINUS what the FET did to the
@@ -530,57 +588,100 @@ export function computePunchChainPlan(channelData, sampleRate, params = {}, opti
   // Clamped like `alignDbForRms` does, which this arithmetic bypasses.
   const optoAlignDb = clamp(fetAlignDb - deltaDb, -ALIGN_MAX_DB, ALIGN_MAX_DB)
 
-  // Base rate for the solve, and with the ceiling off — the solve must stay on
-  // a monotone objective. See `computeAutoMakeupPlan` for both arguments.
-  const measureParams = {
-    ...p, fetAlignDb, optoAlignDb, oversample: false,
-    makeupDb: 0, outputDb: 0, ceilingDb: null, ceilingKneeDb: null,
-  }
-  const probe = new PunchChainKernel(sampleRate)
-  probe.setParams(measureParams)
+  /**
+   * The chain's output with NO makeup, no trim and no ceiling — the one render
+   * everything below is computed from.
+   *
+   * ⚠ THE OPTO STAGE ALONE, ON THE FET RENDER ABOVE, RATHER THAN THE COMPOSITE
+   * OVER THE SOURCE. The composite would re-run the FET for a result that is
+   * already in hand: its output cannot depend on the opto's dial, and the opto
+   * cannot run until its alignment is known, which needs the FET's output. The
+   * ordering is forced, so the staged render is not an optimisation of the
+   * composite — it is what the composite would have to do anyway, minus the
+   * duplicate.
+   *
+   * Base rate, and ceiling off, for the two reasons `computeAutoMakeupPlan`
+   * gives: oversampling costs 3x and moves the measured peak by ~0.001 dB, and
+   * a ceiling in the measurement takes the objective off its monotone branch.
+   */
+  const base = processLA2ABuffer(
+    fetOnly, sampleRate, optoStageParams({ ...p, optoAlignDb }, false),
+  ).channelData
 
-  const plan = solveMakeupPlan({
-    channelData,
-    // ⚠ THE LATENCY OF THE MEASUREMENT PARAMS, NOT OF THE AUDIBLE ONES — the
-    // solver pads and trims by this, and `oversample: false` changes it.
-    latencySamples: probe.latencySamples,
-    render: (chs, extra) => processPunchChainBuffer(chs, sampleRate, {
-      ...measureParams, ...extra,
-    }).channelData,
-    gainKey: 'makeupDb',
-    /**
-     * ⚠ PERCENTILE, WHICH IS WHY THERE IS A CEILING AT ALL. A peak reference
-     * lets one uncompressed onset pin the whole region's makeup, and on
-     * syllabic narration that makes the dials run BACKWARDS — both embedded
-     * plugins shipped that defect and both were fixed this way. The ceiling
-     * `solveMakeupPlan` returns with it is not optional; see makeupReference.js.
-     */
-    reference: 'percentile',
-    maxIterations,
-    toleranceDb,
-    minDb: -24,
-    maxDb: 24,
-  })
+  /**
+   * ── THE MAKEUP, IN CLOSED FORM ──────────────────────────────────────────
+   *
+   * ⚠ ONE RENDER, NOT AN ITERATION, AND THE REASON IS STRUCTURAL RATHER THAN A
+   * TOLERANCE JUDGEMENT. This chain's makeup is the LAST multiply, after both
+   * saturators, so the output is exactly linear in it: measured,
+   * `render(6 dB)` and `render(0 dB) * 10^(6/20)` agree to 1.5e-8, which is
+   * float32 rounding. A scale factor commutes with a percentile, so the gain
+   * that lands the render's reference on the source's is a division, and
+   * iterating only spends a second render confirming it.
+   *
+   * ⚠ THIS IS EXACTLY THE DISTINCTION CLAUDE.md DRAWS BETWEEN THE TWO EMBEDDED
+   * PLUGINS, and it decides which of them this chain resembles. OptoSmooth must
+   * iterate because its output valve sits AFTER the makeup amp, so its output
+   * is not affine in the gain; FET Punch's Output is the last multiply and one
+   * render answers it. Ours is the FET case. If a stage is ever added after
+   * this multiply — a saturator, a limiter, anything with a curve — this stops
+   * being true and the iteration has to come back. `solveMakeupPlan` is still
+   * the right tool for that day.
+   *
+   * ⚠ PERCENTILE, WHICH IS WHY THERE IS A CEILING AT ALL. A peak reference lets
+   * one uncompressed onset pin the whole region's makeup, and on syllabic
+   * narration that makes the dials run BACKWARDS — both embedded plugins
+   * shipped that defect and both were fixed this way.
+   */
+  const inputRef = percentileOfChannels(channelData, MAKEUP_PERCENTILE)
+  const baseRef = percentileOfChannels(base, MAKEUP_PERCENTILE)
+  const makeupDb = inputRef > 0 && baseRef > 0
+    ? clamp(20 * Math.log10(inputRef / baseRef), -24, 24)
+    : 0
 
+  /**
+   * The ceiling is the source's own peak, and the knee is sized to the overshoot
+   * this render actually has — which is the un-ceilinged peak, scaled by the
+   * makeup, because the makeup is a scalar.
+   *
+   * ⚠ THE APP OVERWRITES `ceilingDb` WITH THE WHOLE REGION'S PEAK. This one is
+   * measured over whatever buffer we were handed, which for the app is a capped
+   * window; `processing.js` re-measures it over the whole region because "never
+   * louder than the source" is a claim about the source, not about its first
+   * thirty seconds. Kept here so the offline path and the tests get a complete
+   * plan from one call.
+   */
+  const inputPeak = peakOfChannels(channelData)
+  const basePeak = peakOfChannels(base)
+  const ceilingDb = inputPeak > 0 ? 20 * Math.log10(inputPeak) : null
+  const outPeakDb = basePeak > 0 ? 20 * Math.log10(basePeak) + makeupDb : -Infinity
+  const ceilingKneeDb = ceilingDb === null
+    ? null : ceilingKneeDbFor(outPeakDb - ceilingDb)
+
+  /**
+   * The readouts, measured on the audible render — reached by applying the
+   * output stage to `base` rather than by rendering the chain again.
+   *
+   * ⚠ NOT AN APPROXIMATION OF THE RENDER, THE RENDER ITSELF. `applyOutputStage`
+   * is the same arithmetic `PunchChainKernel.process` performs on its last
+   * pass, from the same `outputStageFor`, and the stage is pointwise — so this
+   * is bit-identical to re-running both compressors and then their output
+   * stage, at none of the cost. The test suite renders the audible path and
+   * re-measures it against these numbers rather than trusting that claim.
+   */
   const phrases = detectPhrases(channelData, sampleRate)
   const source = measureChainMetrics(channelData, sampleRate, phrases)
-  const rendered = processPunchChainBuffer(channelData, sampleRate, {
-    ...p,
-    oversample: false,
-    fetAlignDb,
-    optoAlignDb,
-    makeupDb: plan.makeupDb,
-    ceilingDb: plan.ceilingDb,
-    ceilingKneeDb: plan.ceilingKneeDb,
-  }).channelData
+  const rendered = applyOutputStage(
+    base, outputStageFor({ ...p, makeupDb, ceilingDb, ceilingKneeDb }),
+  )
   const out = measureChainMetrics(rendered, sampleRate, phrases)
 
   return {
     fetAlignDb,
     optoAlignDb,
-    makeupDb: plan.makeupDb,
-    ceilingDb: plan.ceilingDb,
-    ceilingKneeDb: plan.ceilingKneeDb,
+    makeupDb,
+    ceilingDb,
+    ceilingKneeDb,
     sourceDensityDb: source.densityDb,
     sourceSpreadDb: source.spreadDb,
     densityDb: out.densityDb,

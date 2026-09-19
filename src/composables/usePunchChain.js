@@ -72,19 +72,22 @@ let meterId = null
  * Debounce + supersede state for the measurement pass, shared across every
  * usePunchChain() caller so knob drags coalesce into one measurement.
  *
- * ⚠ THE LONGEST WINDOW OF ANY PLUGIN HERE, BECAUSE THE PASS IS THE HEAVIEST.
- * It renders the FET alone to find what the Opto is fed, then up to four
- * composite renders to solve the makeup, then one more for the readouts — six
- * passes through two compressors, where OptoSmooth's solve is one to four
- * through one. Measured on a 35 s narration clip it runs ~2.5 s at base rate;
- * the worker's analysis cap keeps that bounded, and this window keeps a drag
- * from queuing more of them than it can retire.
+ * ⚠ TRAILING EDGE ONLY, WHERE EVERY OTHER PLUGIN HERE ALSO MEASURES ON THE
+ * LEADING ONE. Theirs is a cheap pass, so measuring the first move of a burst
+ * costs nothing and makes a single click feel instant. This pass is the
+ * heaviest in the app, and a leading edge made it feel far slower than it is:
+ * it measures the knob position the drag STARTED at, so a stale pair of numbers
+ * lands most of a second in, sits there while the trailing pass runs, and is
+ * then replaced. Two passes per drag, and the first one's answer was wrong
+ * before it was computed.
+ *
+ * The cost of dropping it is that a single nudge now waits out the window
+ * before the readouts move, which at 160 ms is not perceptible next to the
+ * measurement itself.
  */
 const PLAN_DEBOUNCE_MS = 160
 let planTimer = null
 let planSeq = 0
-let planBurstActive = false
-let planBurstDirty = false
 
 function currentParams() {
   return {
@@ -293,23 +296,10 @@ export function usePunchChain() {
   }
 
   function schedulePlan() {
-    // Leading edge: the first move in a burst measures immediately so the
-    // readouts respond right away.
-    if (!planBurstActive) {
-      planBurstActive = true
-      planBurstDirty = false
-      refreshPlan()
-    } else {
-      planBurstDirty = true
-    }
-
     if (planTimer !== null) clearTimeout(planTimer)
     planTimer = setTimeout(() => {
       planTimer = null
-      const shouldRunTrailing = planBurstDirty
-      planBurstActive = false
-      planBurstDirty = false
-      if (shouldRunTrailing) refreshPlan()
+      refreshPlan()
     }, PLAN_DEBOUNCE_MS)
   }
 
@@ -350,8 +340,6 @@ export function usePunchChain() {
       clearTimeout(planTimer)
       planTimer = null
     }
-    planBurstActive = false
-    planBurstDirty = false
     planSeq++ // discard any in-flight measurement
     punchAutoBusy.value = false
     punchMakeupDb.value = 0
