@@ -31,6 +31,13 @@ const AS_CUT_AVG_GR = {
   'factory:consonant-control': 5.46,
   'factory:gentle-ride': 3.24,
   'factory:parallel-thickener': 6.54,
+  /**
+   * ⚠ ALL-BUTTONS JOINED ON THE SECOND PASS, once `fet:allrefit` had fitted its
+   * knee, threshold drop, slope law and attack lag against CLA-76. Until then
+   * it deliberately had no target here — a preset cannot be held to a voicing
+   * that was never measured.
+   */
+  'factory:all-buttons-in': 9.77,
 }
 
 /**
@@ -68,21 +75,20 @@ for (const preset of FET_PUNCH_PRESETS) {
 }
 
 /**
- * ⚠ ALL-BUTTONS IS EXCLUDED ON PURPOSE AND THAT MUST NOT ROT INTO AN OVERSIGHT.
- * Its law has no captures behind it from either reference, and CLA-76's stairs
- * captures already say `ALL_KNEE_DB` and `ALL_THRESHOLD_DROP_DB` are too big —
- * so it keeps its original dials and its drift until that law is measured.
+ * ⚠ ALL-BUTTONS WAS RE-CUT LAST AND ITS BALLISTICS DIALS COULD NOT MOVE. Both
+ * sit at the end of their travel, so Input carried the whole correction: 70 ->
+ * 55 for 9.77 -> 9.63 dB of average reduction. The dials are pinned here
+ * because the interesting failure is a quiet edit to them, not to the drive.
  */
-test('all-buttons is left un-recut, deliberately and visibly', () => {
+test('all-buttons is re-cut, and its ballistics are at the travel end', () => {
   const all = FET_PUNCH_PRESETS.find(p => p.id === 'factory:all-buttons-in')
   assert.ok(all, 'the preset must still exist')
   assert.equal(all.params.ratio, 'all')
-  assert.equal(AS_CUT_AVG_GR[all.id], undefined,
-    'if all-buttons ever gains a target here, its law has been measured — say so in the note above')
-  // The original dials, unchanged. A quiet edit to these is the thing to catch.
+  assert.ok(AS_CUT_AVG_GR[all.id] !== undefined,
+    'all-buttons has a measured law now, so it must be held to its as-cut voicing')
   assert.deepEqual(
     { inputDrive: all.params.inputDrive, attack: all.params.attack, release: all.params.release },
-    { inputDrive: 70, attack: 7, release: 7 })
+    { inputDrive: 55, attack: 7, release: 7 })
 })
 
 /**

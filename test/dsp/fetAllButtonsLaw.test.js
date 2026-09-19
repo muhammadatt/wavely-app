@@ -103,5 +103,15 @@ test('the law reaches the rendered curve, and the overrides reach the law', () =
     `a steeper fall must compress less up here: ${steeper.toFixed(2)} vs ${shipping.toFixed(2)} dB`)
   const flat = grAt(-3, { allIncrFallPerDb: 0 })
   assert.ok(flat > shipping, 'and a flat law must compress more')
-  assert.ok(Math.abs(ALL_INCR_AT_KNEE - 0.949) < 1e-9, 'the fitted anchor is what ships')
+  /**
+   * ⚠ THE FIVE ALL-BUTTONS CONSTANTS COME FROM ONE FIT AND MUST MOVE TOGETHER.
+   * The law is anchored at the KNEE EXIT, so `ALL_KNEE_DB` sets where
+   * `ALL_INCR_AT_KNEE` applies: when the knee went 16 -> 1.52 the anchor moved
+   * from 8 dB of overshoot to 0.76, and installing one without the others
+   * slides the whole curve. `npm run fet:allrefit` is what produced them.
+   */
+  assert.ok(Math.abs(ALL_INCR_AT_KNEE - 0.9528) < 1e-9, 'the fitted anchor is what ships')
+  assert.ok(Math.abs(ALL_KNEE_DB - 1.52) < 1e-9, 'and the knee it is anchored to')
+  assert.ok(Math.abs(ALL_INCR_FALL_PER_DB - 0.0055) < 1e-9, 'and the fall fitted with it')
+  assert.ok(Math.abs(ALL_INCR_FLOOR - 0.8379) < 1e-9, 'and the floor')
 })

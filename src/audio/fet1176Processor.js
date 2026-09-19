@@ -532,10 +532,21 @@ export function ratioThresholdOffsetDb(ratio, perOctave = RATIO_THRESHOLD_PER_OC
 /**
  * THE ALL-BUTTONS KNEE AND THRESHOLD DROP — BOTH FITTED, BOTH WERE INVENTED.
  *
- * They shipped at 16 and 6, neither measured, and both are now pinned against
- * CLA-76 by `scripts/fet-allbuttons-refit.mjs` with no new capture: 3.486 and
- * 0.969. The knee was more than four times too wide and the drop six times too
- * deep.
+ * They shipped at 16 and 6, neither measured, and both are now fitted against
+ * CLA-76 by `scripts/fet-allbuttons-refit.mjs` with no new capture: 1.52 and
+ * 0.969. The knee was an order of magnitude too wide and the drop six times too
+ * deep. All-buttons has a HARD corner — sharper than any numbered button can
+ * reach, since `KNEE_FLOOR_DB` holds those at 2 dB.
+ *
+ * ⚠⚠ THE KNEE IS A BOUND FROM ABOVE, NOT A POINT. The shape fit's residual
+ * climbs threefold walking it up to 20 dB and barely moves walking it down to 1
+ * (0.0147 against the fit's 0.0124), so the data says "sharp" and does not say
+ * how sharp. The coarse matrix agrees on the direction and cannot close it
+ * either: CLA-76's all-buttons knee reads back 0.13 / 2.98 / 0.50 / 0.17 dB, and
+ * OUR kernel cannot read back below about 4.2 at any true knee — the attack
+ * rounds the corner — so every candidate under ~3 is equally consistent with it.
+ * 1.52 is the shape fit's optimum, installed as the best available point inside
+ * a one-sided bound, not as a measured width.
  *
  * ⚠⚠ THE DROP IS 0.969 AND THE MEASUREMENT READS 0.565 — DO NOT INSTALL THE
  * MEASUREMENT. CLA-76's all-buttons effective threshold sits 0.565 dB below its
@@ -563,7 +574,7 @@ export function ratioThresholdOffsetDb(ratio, perOctave = RATIO_THRESHOLD_PER_OC
  * choose between them. With `ratioThreshold: 'moving'` anchored at 4:1 our
  * family IS CLA-76's family, and ratio 4 is the reference by construction.
  */
-export const ALL_KNEE_DB = 3.486
+export const ALL_KNEE_DB = 1.52
 export const ALL_THRESHOLD_DROP_DB = 0.969
 
 /**
@@ -602,20 +613,29 @@ export const ALL_THRESHOLD_DROP_DB = 0.969
  * "the occasional hit overshooting... close to 0dBFS" at low RMS.
  */
 /**
- * ⚠ REFITTED WITH THE KNEE, AND IT BARELY MOVED — 0.949 -> 0.9484 and 0.0057 ->
- * 0.00516 when `ALL_KNEE_DB` went from 16 to 3.486. That is worth knowing: the
- * law was fitted through a knee more than four times too wide, and the shape it
- * found survived the correction. The anchor did not survive — these are values
- * AT THE KNEE EXIT, which moved from 8 dB of overshoot to 1.74, so the triple
- * and the knee must be installed together or the curve slides.
+ * ⚠ REFITTED WITH THE KNEE, AND IT BARELY MOVED — 0.949 -> 0.9528 and 0.0057 ->
+ * 0.0055 while `ALL_KNEE_DB` went from 16 to 1.52. That is worth knowing: the
+ * law was originally fitted through a knee an order of magnitude too wide, and
+ * the shape it found survived the correction. The ANCHOR did not survive: these
+ * are values AT THE KNEE EXIT, which moved from 8 dB of overshoot to 0.76, so
+ * the triple and the knee must be installed together or the curve slides.
+ *
+ * ⚠⚠ THE FALL IS A COMPROMISE BETWEEN TWO TARGETS THAT DISAGREE, and fitting
+ * either alone gets it wrong. CLA-76's fine captures (the collapsed shape) want
+ * 0.00453 and its coarse matrix (the slope column) wants steeper; at 0.00453 the
+ * coarse residual is 0.0133 of slope, at 0.0055 it is 0.0081 for 0.0030 of
+ * shape. Both are the same law measured through different staircases — the fine
+ * one weighting the knee region, the coarse one the top of the curve — so both
+ * get a vote and the sum is minimised. ⚠ The price is that NOTHING IS HELD OUT
+ * for this law any more; the check that used to exist is now a residual.
  */
-export const ALL_INCR_AT_KNEE = 0.9484
-export const ALL_INCR_FALL_PER_DB = 0.00516
+export const ALL_INCR_AT_KNEE = 0.9528
+export const ALL_INCR_FALL_PER_DB = 0.0055
 /**
  * ⚠⚠ THE FLOOR IS A BOUND, NOT A MEASUREMENT, AND THE FIT SAYS SO. The refit
- * returns 0.8229 (ratio 5.65), but walking it all the way down to 0.70 costs
- * almost nothing — residual 0.0111 against the fit's own 0.0105 — while walking
- * it UP to 0.92 costs 0.0501. So the data bounds the floor from above and not
+ * returns 0.8379 (ratio 6.17), but walking it all the way down to 0.70 costs
+ * almost nothing — residual 0.0150 against the fit's own 0.0124 — while walking
+ * it UP to 0.92 costs 0.0377. So the data bounds the floor from above and not
  * from below, for the obvious reason: the captures stop at 0.8418, roughly
  * where the floor is, and nothing was measured past it.
  *
@@ -625,7 +645,7 @@ export const ALL_INCR_FALL_PER_DB = 0.00516
  * no floor eventually EXPANDS, so the floor has to exist; what it must not do
  * is pretend to more precision than one-sided evidence gives.
  */
-export const ALL_INCR_FLOOR = 0.8229
+export const ALL_INCR_FLOOR = 0.8379
 
 /**
  * ⚠⚠ THESE ARE INCREMENTAL SLOPES — `d(reduction)/d(level)` — AND THE KERNEL'S
@@ -675,12 +695,20 @@ export function allButtonsGr(overDb, halfKneeDb, atKnee = ALL_INCR_AT_KNEE,
  * The famously late attack: the dial still sets the rate, but everything
  * arrives slower than the number says.
  *
- * ⚠⚠ IT WAS 2.5 ON REPUTATION AND THE MEASUREMENT RUNS THE OTHER WAY. CLA-76's
+ * ⚠⚠ IT WAS 2.5 ON REPUTATION, THE MEASUREMENT SAYS 1, AND THE MEASUREMENT RUNS
+ * THE OTHER WAY — all-buttons is not late at all on this reference. CLA-76's
  * all-buttons burst and its ratio-4 burst were captured at the SAME Input and
  * the SAME attack dial, so the reference's own ladder offset cancels between
  * them — and all-buttons comes back FASTER, t63 1938 us against 2688. Driven to
  * each capture's own settled reduction so our depth schedule answers for the
- * 13.34-vs-9.66 dB gap, what is left is `ALL_ATTACK_LAG_FITTED`.
+ * 13.34-vs-9.66 dB gap, a lag of 1.000 reproduces the reference's ratio to
+ * 0.0001 — and reproduces BOTH its absolute figures, 2688 us and 1938 us, at our
+ * dial 1. One probe quantum is about 0.06 of lag, so read it as 1.00 +/- 0.06.
+ *
+ * ⚠ ONE CAPTURE, ONE REFERENCE, AND IT IS A PLUGIN. This says CLA-76 applies no
+ * button-specific attack multiplier; it does not settle what the hardware does,
+ * and the lore about a late all-buttons attack may well be about its distortion
+ * and its release rather than its attack.
  *
  * ⚠ READING THE ALL-BUTTONS CAPTURE ALONE GIVES THE OPPOSITE ANSWER WITH
  * CONFIDENCE — its 1938 us places it near our dial 2 against a declared dial 4,
@@ -689,7 +717,7 @@ export function allButtonsGr(overDb, halfKneeDb, atKnee = ALL_INCR_AT_KNEE,
  * the lag and is the larger of the two, so only the cross-button ratio measures
  * it. `scripts/fet-allbuttons-refit.mjs`.
  */
-const ALL_ATTACK_LAG = 2.5
+const ALL_ATTACK_LAG = 1
 // ...and the FET is driven much harder, which is most of the "sound".
 const ALL_FET_BOOST = 1.6
 

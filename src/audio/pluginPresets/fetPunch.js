@@ -123,11 +123,15 @@ export const FET_PUNCH_PARAM_KEYS = [
  * is on and solved per file, so the percentile-makeup change needs no preset
  * edit — see `normalize`.
  *
- * ⚠ `factory:all-buttons-in` IS DELIBERATELY UNTOUCHED. Its law has no captures
- * behind it from either reference (`ALL_KNEE_DB`, `ALL_THRESHOLD_DROP_DB`, the
- * soft `ALL_RATIO_*` triple, `ALL_TAIL_*`), and CLA-76's four all-buttons
- * captures already say the first two are too big. Re-cutting a preset against a
- * law that is about to change would dress a guess as a fit twice over.
+ * ⚠ `factory:all-buttons-in` WAS RE-CUT LAST, in a second pass, because its law
+ * had to be measured first. It held its original dials while `ALL_KNEE_DB`,
+ * `ALL_THRESHOLD_DROP_DB`, the slope law and `ALL_ATTACK_LAG` were guesses; all
+ * four are now fitted against CLA-76 from the captures already taken
+ * (`npm run fet:allrefit`), so it is cut to the same target as the others.
+ *
+ * ⚠ `consonant-control` and `parallel-thickener` were ALSO re-cut twice — once
+ * against the measured kernel, and again when the moving ratio threshold
+ * shipped and re-voiced every patch on 8 / 12 / 20.
  */
 export const FET_PUNCH_PRESETS = [
   {
@@ -225,11 +229,16 @@ export const FET_PUNCH_PRESETS = [
     name: 'All Buttons In',
     description: 'The 1176 stunt setting, kept usable by the Mix knob.',
     params: {
-      // ⚠ NOT RE-CUT — see the note on FET_PUNCH_PRESETS. These are the original
-      // dials, and they drifted with the kernel like every other preset's; they
-      // are left wrong ON PURPOSE rather than corrected against an unmeasured
-      // law that is already known to be changing.
-      inputDrive: 70,
+      // ⚠ RE-CUT LAST, AND ONLY ONCE ITS LAW WAS MEASURED. This sat on the
+      // original dials on purpose while `ALL_KNEE_DB`, `ALL_THRESHOLD_DROP_DB`,
+      // the slope triple and `ALL_ATTACK_LAG` had no captures behind them —
+      // correcting a preset against a guess would have dressed it as a fit.
+      // `fet:allrefit` fitted all five against CLA-76, so this is now re-cut to
+      // what it DID when it was cut: 70 -> 55, avg GR 9.77 -> 9.63 dB.
+      // ⚠ Both ballistics dials sit at the end of their travel, so their
+      // residuals (-23 % attack, +56 % release) are a floor, not a rounding —
+      // `ALL_ATTACK_LAG` going 2.5 -> 1 moved the attack out of reach at dial 7.
+      inputDrive: 55,
       output: 0,
       attack: 7,
       release: 7,

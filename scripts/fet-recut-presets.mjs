@@ -54,6 +54,15 @@ export const AS_CUT = [
   { id: 'consonant-control', inputDrive: 60, attack: 6, release: 5, ratio: '8', fetDrive: 0.3, scHpfHz: 120, mix: 1 },
   { id: 'gentle-ride', inputDrive: 40, attack: 2, release: 3, ratio: '4', fetDrive: 0.2, scHpfHz: 80, mix: 1 },
   { id: 'parallel-thickener', inputDrive: 75, attack: 7, release: 7, ratio: '12', fetDrive: 0.5, scHpfHz: 100, mix: 0.4 },
+  /**
+   * ⚠ ALL-BUTTONS JOINED LATE, AND ITS AS-CUT DIALS ARE THE ORIGINALS. It was
+   * held out while its law had no captures behind it; `fet:allrefit` has now
+   * fitted the knee, the threshold drop, the slope triple and the attack lag
+   * against CLA-76, so re-cutting it against that law is a fit rather than a
+   * guess dressed as one. Its target is the same as every other preset's: what
+   * it DID when it was cut.
+   */
+  { id: 'all-buttons-in', inputDrive: 70, attack: 7, release: 7, ratio: 'all', fetDrive: 0.6, scHpfHz: 0, mix: 0.5 },
 ]
 
 /**

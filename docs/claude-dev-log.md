@@ -4103,6 +4103,8 @@ convention) and `ALL_KNEE_DB` (16, measured narrower) stay as they are, at the
 owner's direction. ⚠ Both are coupled to this fit — the law is anchored at the
 knee exit because the measurement's x-origin is unrecoverable — so **changing
 either means refitting the slope law**. `factory:all-buttons-in` stays un-recut.
+(Both were fitted, and the preset re-cut, in "The all-buttons law, pinned from
+the captures already taken" below — this paragraph records the state at the time.)
 
 ---
 
@@ -4177,6 +4179,158 @@ reverting to the old behaviour for every caller that had not been updated. It no
 falls back through `== null` to `FET1176_KERNEL_DEFAULTS.ratioThreshold`. **A
 bench rocker whose off position was the default hid this for as long as it was
 the default** — the failure only becomes visible when the default moves.
+
+---
+
+### The all-buttons law, pinned from the captures already taken
+
+No new bounce — the owner called the all-buttons capture set closed, so this is
+what the existing readings can still be made to say. `npm run fet:allrefit`.
+
+**Four constants moved, and three of them were invented:**
+
+| | shipped | fitted |
+|---|---|---|
+| `ALL_KNEE_DB` | 16 | **1.52** |
+| `ALL_THRESHOLD_DROP_DB` | 6 | **0.969** |
+| `ALL_ATTACK_LAG` | 2.5 | **1.0** |
+| `ALL_INCR_AT_KNEE` / `FALL_PER_DB` / `FLOOR` | 0.949 / 0.0057 / 0.8333 | 0.9528 / 0.0055 / 0.8379 |
+
+#### The drop was blocked by a convention, not by arithmetic
+
+A threshold drop is measured against a numbered button. Our model used to hold
+one threshold for all four while CLA-76's moved 4.5 dB across them, so "below
+ratio 4" and "below the mean of four" were different answers — 0.54 / 2.65 /
+3.24 — with nothing to choose between them. **Shipping the moving threshold
+anchored at 4:1 settles it**: our family IS CLA-76's family, so ratio 4 is the
+reference by construction. That is a consequence of the previous change rather
+than a coincidence, and it is why this could not have been done first.
+
+Measured across buttons at one Input, where the drive is common and cancels:
+
+| Input | all | r4 | delta |
+|---|---|---|---|
+| I1 | −14.52 | −13.98 | −0.54 |
+| I2 | −19.30 | −18.69 | −0.61 |
+| I3 | −24.71 | −24.13 | −0.58 |
+| I4 | −30.13 | −29.60 | −0.53 |
+
+Mean **−0.565 dB, spread 0.032** over four positions.
+
+⚠ **THE CANCELLATION ASSUMES THE INPUT KNOB WAS NOT RE-DIALLED PER BUTTON**, and
+that is checkable rather than assumable: FETish's effective threshold reads
+identically across its four buttons at every position (0.00 dB of spread). Had
+the operator re-dialled for a target reduction, ratio 20 would have needed far
+less drive than ratio 4 and that spread could not be zero. Same operator, same
+session, same procedure for CLA-76.
+
+⚠ **0.969 IS INSTALLED, NOT THE MEASURED 0.565** — the instrument fits
+threshold, slope and knee jointly, so a threshold read under one knee is not a
+threshold under another. 0.969 is what makes our kernel read 0.565 back through
+the same fitter. Simulate-and-match, for the ninth time in this re-tune.
+
+#### The attack lag was reputation, and the obvious reading of it is wrong
+
+⚠⚠ **READING THE ALL-BUTTONS BURSTS CAPTURE ALONE GIVES THE OPPOSITE ANSWER WITH
+CONFIDENCE.** Its t63 of 1938 µs at a declared attack dial 4 places it near OUR
+dial 2, which looks like a late attack needing a bigger lag. It is not: CLA-76
+is slower than our ladder at *every* dial on the numbered buttons too (its
+nominal 20 µs reads like our dial 2.3, its 800 µs is slower than our dial 1).
+**The reference's ladder offset is confounded with the lag and is the larger of
+the two.**
+
+The cancellation is the measurement: `cla76_bursts_r4_I3_a4_r4.wav` is the same
+reference, the same Input and the **same attack dial** as the all-buttons
+capture, so the ladder offset divides out of their ratio. All-buttons comes back
+**faster**, 1938 µs against 2688 — ratio 0.721.
+
+⚠ **THE DEPTH SCHEDULE HAS TO BE ON FOR THAT RATIO TO MEAN ANYTHING**, and
+`runKernel` deliberately pins it off so the instrument cannot drift with product
+decisions. With it off our cross-button ratio is exactly 1.000 at every dial when
+the lag is 1, so the whole 13.34-vs-9.66 dB depth gap would have landed in the
+lag. Passed explicitly, a lag of **1.000** reproduces the reference's ratio to
+0.0001 and reproduces **both** its absolute figures at our dial 1.
+
+⚠ Probed at **dial 1, not the reference's dial 4**: t63 is quantised at 125 µs
+and our dial 4 t63 is 313 µs, so the ratio there moves in steps of ~0.4. The
+first run returned a residual of 0.121 on a target of 0.721 — one quantum,
+meaning nothing. The lag is a multiplier, so the ratio is dial-independent where
+the instrument can resolve it: 2.391 / 2.385 / 2.429 at dials 1/2/3 for a lag of
+2.5, and 1.800 at dial 4, which is the quantisation breaking rather than the
+model.
+
+⚠ One capture, one reference, and it is a plugin. This says CLA-76 applies no
+button-specific attack multiplier; the lore about a late all-buttons attack may
+well be about its distortion and its release.
+
+#### Two defects in the fit, both caught by guards rather than by inspection
+
+⚠⚠ **A FREE SHIFT THAT MAY DROP POINTS IS NOT A NUISANCE PARAMETER, IT IS A WAY
+TO CHEAT.** The shape cost minimises over a horizontal shift because both axes
+have arbitrary origins. Allowing shifts that slide the reference's falling tail
+off the end of our curve let a **flat** law score 0.0121 against 0.0304 scored
+honestly — a law with no fall at all looking two and a half times better than it
+is. Requiring full coverage fixes it, and the self-test now plants a flat curve
+and insists it scores badly.
+
+⚠⚠ **AND THE FIRST FIX PUT THE OPTIMUM ON THE COVERAGE BOUND** — 5.00 dB of a
+5.00 dB maximum, i.e. the search reporting the edge of its window rather than a
+minimum. Our side is now rendered at three drives the reference never used,
+which is legitimate because our law is a function of overshoot by construction:
+those renders add reach, not information. The shift moved to 6.75 dB and the
+residual fell 0.0315 → 0.0159.
+
+#### The two targets disagree, so nothing is held out any more
+
+The coarse matrix's slope column started as held-out validation. It cannot stay
+that way: fitted to the shape alone the law wants a fall of 0.00453 and predicts
+that column at 0.0133 of slope; giving the column a vote moves the fall to
+0.0055 and the column to 0.0081 for 0.0030 of shape. The split is structural —
+the fine captures weight the knee region, the coarse ones the top of the curve —
+so fitting one and checking the other reports whichever tension the split
+happened to produce. Both measure the same law, so both now vote, and **the
+price is that there is no held-out data left for the all-buttons law.**
+
+Worth noting the compromise lands at 0.0055, within a hair of the 0.0057 that
+was there before any of this.
+
+#### What is a bound rather than a measurement
+
+⚠ **THE KNEE IS BOUNDED FROM ABOVE ONLY.** The residual triples walking it up to
+20 dB and barely moves walking it down to 1 (0.0147 against 0.0124). The coarse
+column agrees on the direction and cannot close it either — CLA-76's all-buttons
+knee reads back 0.13 / 2.98 / 0.50 / 0.17 dB and **our kernel cannot read back
+below about 4.2 at any true knee**, because the attack rounds the corner. So
+every candidate under ~3 is equally consistent with everything we have. 1.52 is
+the fit's optimum installed as the best point inside a one-sided bound.
+
+⚠ A side effect worth knowing: at 1.52 dB the readback is 4.55 against an
+instrument floor of 4.32, so `kneeUnresolved` — a plain `fitted <= floor` test —
+stays FALSE for a knee that is plainly unresolvable. The flag is right about
+every reading at or under the floor and must not be read as "resolved".
+
+⚠ **THE SLOPE FLOOR IS THE SAME SHAPE OF ANSWER**, and for the same reason: the
+captures stop at 0.8418, roughly where the floor is, so nothing was measured past
+it. Installed at the fitted 0.8379 because the alternative is another invented
+number — which is exactly what the old `1 − 1/6` was.
+
+⚠ **`ALL_FET_BOOST` (1.6) REMAINS UNMEASURED AND THERE IS NO WAY TO REACH IT
+FROM WHAT EXISTS.** It is a distortion quantity and every capture in hand is
+level- or reduction-based. It needs a `thd.wav` bounce in all-buttons.
+
+#### `factory:all-buttons-in` is re-cut at last
+
+It was held on its original dials on purpose while its law was a guess. With the
+law fitted, it takes the same target as every other preset — what it DID when it
+was cut: **Input 70 → 55**, avg GR 9.77 → 9.63 dB. ⚠ Both ballistics dials sit at
+the end of their travel, so their residuals (−23 % attack, +56 % release) are a
+floor and not a rounding; `ALL_ATTACK_LAG` going 2.5 → 1 moved the old attack out
+of reach at dial 7.
+
+⚠ The readings themselves are now persisted in
+`data/fet1176/cla76_allbuttons_shape.json`, alongside the stairs fits. Those
+captures are licensed audio and are gone from the machine; the extracted curve
+existed only as terminal output, one context window from being lost.
 
 ---
 

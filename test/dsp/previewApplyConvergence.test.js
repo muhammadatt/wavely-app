@@ -278,9 +278,19 @@ test('all-buttons is bit-exact now that its tail is measured away', () => {
     `all-buttons should now converge exactly; got ${warm.toExponential(2)} — ` +
     'has a tail come back, or another stage grown memory longer than the pre-roll?')
 
-  // Cold must still be visibly wrong, or the fixture is not exercising anything.
+  /**
+   * Cold must still be visibly wrong, or the fixture is not exercising anything.
+   *
+   * ⚠ THE BAR MOVED FROM 1e-3 TO 1e-4 WHEN `ALL_ATTACK_LAG` WENT 2.5 -> 1, and
+   * that is the control weakening rather than the kernel improving. A cold
+   * start is wrong for as long as the state takes to catch up, so an attack two
+   * and a half times faster is wrong for less of the buffer: the same fixture
+   * went 2.40e-4 where it used to clear 1e-3. Still four orders above the warm
+   * case, so it does its job — but if this ever has to be lowered again, the
+   * fixture needs a longer-memory setting, not a smaller number.
+   */
   const cold = worstDiff(processFET1176Buffer, params, 0)
-  assert.ok(cold > 1e-3, `no lead-in should be visibly wrong; got ${cold.toExponential(2)}`)
+  assert.ok(cold > 1e-4, `no lead-in should be visibly wrong; got ${cold.toExponential(2)}`)
 })
 
 /**

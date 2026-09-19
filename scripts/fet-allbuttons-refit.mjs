@@ -368,6 +368,37 @@ export function fit(sampleRate, { coarse, shape, rounds = 2 } = {}) {
   const shapeCostOf = (cand) => shapeCost(
     ourShape(sampleRate, finePlan, fineStim, fineDrives, cand), shape.curve).rms
 
+  const allRows = coarse.captures.filter(c => c.ratio === 'all').sort((a, b) => a.input - b.input)
+
+  /**
+   * The coarse matrix's all-buttons SLOPE column, as a second target.
+   *
+   * ⚠⚠ IT USED TO BE HELD OUT AND IT CANNOT BE, BECAUSE THE TWO TARGETS
+   * DISAGREE. Fitted to the shape alone the law lands at a fall of 0.00453 and
+   * predicts this column at 0.0133 of slope; giving the column a vote moves the
+   * fall to 0.0055 and the column to 0.0081 for 0.0030 of shape. The
+   * disagreement is structural — the fine captures weight the knee region and
+   * the coarse ones the top of the curve — so fitting one and checking the
+   * other reports whichever tension the split happened to produce. Both measure
+   * the same law, so both are used, and the price is stated plainly: THERE IS NO
+   * HELD-OUT DATA LEFT for the all-buttons law.
+   *
+   * ⚠ The knee is not the parameter in tension. Swept against this column alone
+   * it prefers sharp exactly as the shape does (rms 0.0116 at 1.0 rising to
+   * 0.0237 at 6), so nothing here rescues it from being a one-sided bound.
+   */
+  const coarseSlopeCostOf = (cand) => rms(allRows.map((r, i) => ourCoarse(
+    sampleRate, coarsePlan, coarseStim,
+    { ratio: 'all', driveDb: coarseDrives[i].driveDb, law: cand },
+  ).slope - r.slope))
+
+  /**
+   * ⚠ THE TWO RESIDUALS ARE BOTH IN SLOPE, so they are added unweighted. That
+   * is a choice and it is only defensible because the units match; a weight
+   * would be a thumb on the scale for one capture set over the other.
+   */
+  const jointCostOf = (cand) => shapeCostOf(cand) + coarseSlopeCostOf(cand)
+
   const dropCostOf = (d) => rms(drop.map((r, i) => ourDrop(sampleRate, coarsePlan, coarseStim, {
     driveDb: coarseDrives[i].driveDb, law: { ...law, allThresholdDropDb: d },
   }).deltaDb - r.deltaDb))
@@ -375,7 +406,7 @@ export function fit(sampleRate, { coarse, shape, rounds = 2 } = {}) {
   for (let round = 0; round < rounds; round++) {
     for (const key of Object.keys(RANGES)) {
       const [lo, hi] = RANGES[key]
-      const best = search1d(lo, hi, v => shapeCostOf({ ...law, [key]: v }), 8, 8)
+      const best = search1d(lo, hi, v => jointCostOf({ ...law, [key]: v }), 6, 6)
       law = { ...law, [key]: best.v }
     }
     dropDb = search1d(-2, 8, dropCostOf, 10, 10).v
@@ -383,8 +414,12 @@ export function fit(sampleRate, { coarse, shape, rounds = 2 } = {}) {
   return {
     law, dropDb, fineDrives, coarseDrives, drop,
     shape: shapeCost(ourShape(sampleRate, finePlan, fineStim, fineDrives, law), shape.curve),
+    coarseSlope: coarseSlopeCostOf(law),
     shapeCostOf,
+    coarseSlopeCostOf,
+    jointCostOf,
     dropCostOf,
+    allRows,
     context: { finePlan, fineStim, coarsePlan, coarseStim },
   }
 }
@@ -424,8 +459,10 @@ function report(sampleRate) {
     `(ships ${ALL_INCR_FALL_PER_DB})`)
   console.log(`    ALL_INCR_FLOOR         ${f.law.allIncrFloor.toFixed(4).padStart(8)}   ` +
     `(ships ${ALL_INCR_FLOOR.toFixed(4)})`)
-  console.log(`\n    shape residual ${f.shape.rms.toFixed(4)} of slope over ${f.shape.n} points` +
+  console.log(`\n    shape residual  ${f.shape.rms.toFixed(4)} of slope over ${f.shape.n} points` +
     ` at a ${f.shape.shiftDb.toFixed(2)} dB shift`)
+  console.log(`    coarse residual ${f.coarseSlope.toFixed(4)} of slope over ` +
+    `${f.allRows.length} Input positions`)
   console.log(`    collapse residual of the reference itself: ${shape.collapseResidual}`)
   console.log('    ⚠ A shape residual near the reference\'s own collapse residual is as good')
   console.log('      as the data gets. One far above it is a wrong family, not a loose fit.')
@@ -442,11 +479,12 @@ function report(sampleRate) {
   console.log('    parameter                  lo    fitted        hi   bounded')
   for (const key of Object.keys(RANGES)) {
     const [lo, hi] = RANGES[key]
-    const cl = f.shapeCostOf({ ...f.law, [key]: lo })
-    const ch = f.shapeCostOf({ ...f.law, [key]: hi })
+    const fitted = f.jointCostOf(f.law)
+    const cl = f.jointCostOf({ ...f.law, [key]: lo })
+    const ch = f.jointCostOf({ ...f.law, [key]: hi })
     // A side counts as bounded when walking to it at least doubles the residual.
-    const side = (c) => (c > 2 * f.shape.rms ? 'yes' : '⚠ NO')
-    console.log(`    ${key.padEnd(22)} ${cl.toFixed(4)}  ${f.shape.rms.toFixed(4)}  ` +
+    const side = (c) => (c > 2 * fitted ? 'yes' : '⚠ NO')
+    console.log(`    ${key.padEnd(22)} ${cl.toFixed(4)}  ${fitted.toFixed(4)}  ` +
       `${ch.toFixed(4)}   below ${side(cl)}, above ${side(ch)}`)
   }
 
@@ -460,13 +498,13 @@ function report(sampleRate) {
     `   one probe quantum is about ${lag.quantumLag.toFixed(2)} of lag`)
 
   /**
-   * HELD OUT. The coarse matrix's all-buttons slope column is not in either
-   * cost, so this is a prediction.
+   * ⚠ NOT HELD OUT — see `coarseSlopeCostOf`. This column is IN the fit, so the
+   * table below is a residual and must not be read as a prediction.
    */
-  console.log('\n  HELD OUT — the coarse matrix\'s all-buttons slope column')
+  console.log('\n  THE COARSE SLOPE COLUMN (in the fit, not held out)')
   console.log('    Input     ref     ours       d')
   const errs = []
-  for (const r of coarse.captures.filter(c => c.ratio === 'all').sort((a, b) => a.input - b.input)) {
+  for (const r of f.allRows) {
     const m = ourDrop(sampleRate, f.context.coarsePlan, f.context.coarseStim, {
       driveDb: THRESHOLD_DBFS - drop.find(d => d.input === r.input).ref,
       law: { ...f.law, allThresholdDropDb: f.dropDb },

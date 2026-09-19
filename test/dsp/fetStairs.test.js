@@ -302,14 +302,29 @@ test('the floor table defaults to the worst case rather than to nothing', () => 
 /**
  * ⚠ ALL-BUTTONS WAS EXCLUDED FROM THE DIFF COLUMN, so CLA-76's four
  * all-buttons captures were never placed next to our own kernel — which is
- * exactly where ALL_KNEE_DB = 16 shows up as wrong.
+ * exactly where ALL_KNEE_DB = 16 showed up as wrong.
+ *
+ * ⚠⚠ AND NOW THAT IT IS 1.52 THE READBACK CANNOT SEE IT. The instrument's own
+ * knee floor at attack dial 1 is 4.32 dB and a 1.52 dB knee reads back 4.55 —
+ * the attack rounds the corner and the fit recovers the rounding, not the knee.
+ * This test therefore pins the FLOOR BEHAVIOUR rather than a width. It is also
+ * why the refit fits the knee against the fine captures' SHAPE and not against
+ * this number, and why `ALL_KNEE_DB` is a bound rather than a measurement.
+ *
+ * ⚠ NOTE `kneeUnresolved` IS FALSE HERE AND THAT IS A GAP, NOT A VERDICT. The
+ * flag is a simple `fitted <= floor` test, so a knee far BELOW the floor that
+ * reads back a quarter of a dB ABOVE it escapes the warning. 4.55 against 4.32
+ * is exactly that case. The flag is left as it is — it is right about every
+ * reading at or under the floor — but it must not be read as "resolved".
  */
 test('all-buttons is a fittable setting, not one to skip', () => {
   const f = ourFit('all', SR, plan, stim(), 50, { attack: 1 }, 'stairs.wav')
   assert.ok(f.rms < 0.1, `our all-buttons curve must fit; rms ${f.rms}`)
-  assert.ok(f.kneeDb > 12,
-    `ours is built with ALL_KNEE_DB = 16 and must read near it; got ${f.kneeDb.toFixed(2)}`)
-  assert.equal(f.kneeUnresolved, false, 'a 16 dB knee is far above the floor')
+  assert.ok(f.kneeDb < 8 && f.kneeDb > 3,
+    `a 1.52 dB knee must read back near the 4.32 floor, not above it; got ${f.kneeDb.toFixed(2)}`)
+  // Within a dB of the floor: the reading is the attack's rounding, not the knee.
+  assert.ok(Math.abs(f.kneeDb - kneeFloorFor('stairs.wav', 1)) < 1,
+    `the readback must sit at the instrument floor; got ${f.kneeDb.toFixed(2)}`)
   assert.deepEqual(knobsFromName('cla76_stairs_rall_I2.wav'),
     { ratio: 'all', input: 2, plan: 'stairs.wav' })
 })
