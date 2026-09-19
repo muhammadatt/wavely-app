@@ -66,7 +66,8 @@ function tone(seconds = 0.5) {
 const MEASUREMENTS = [
   ['la2aAutoMakeup', { peakReduction: 60 }, 'makeupDb'],
   ['la2aAutoMakeup', { peakReduction: 60, reference: 'percentile' }, 'makeupDb'],
-  ['fet1176AutoMakeup', { input: 55 }, 'makeupDb'],
+  ['fet1176AutoMakeup', { inputDrive: 55 }, 'makeupDb'],
+  ['fet1176AutoMakeup', { inputDrive: 55, reference: 'percentile' }, 'makeupDb'],
   ['softClipperAutoMakeup', {}, 'makeupDb'],
   ['schepsAutoTrim', {}, 'trimDb'],
   ['softClipperCeiling', { percentile: 0.001 }, 'ceilingDb'],
@@ -96,7 +97,7 @@ const MEASUREMENTS = [
 ]
 
 for (const [type, params, key] of MEASUREMENTS) {
-  const label = type === 'la2aAutoMakeup' && params.reference
+  const label = params.reference
     ? `${type} (${params.reference})`
     : type
   test(`${label} answers with type "done"`, () => {
@@ -135,6 +136,33 @@ test('the ceiling solvers carry the knee back with them, never the level alone',
   const scheps = request('schepsAutoTrim', { channelData: audio, params: {} })
   assert.equal(scheps.type, 'done')
   assert.ok('ceilingKneeDb' in scheps, 'Scheps must return a knee with its ceiling')
+
+  // FET Punch shares the mechanism and therefore the failure mode.
+  const fetBody = request('fet1176AutoMakeup', {
+    channelData: audio, params: { inputDrive: 70, reference: 'percentile' },
+  })
+  assert.equal(fetBody.type, 'done')
+  assert.ok('ceilingKneeDb' in fetBody, 'FET Punch must return a knee with its ceiling')
+  assert.ok(Number.isFinite(fetBody.ceilingKneeDb))
+  const fetPeak = request('fet1176AutoMakeup', {
+    channelData: audio, params: { inputDrive: 70 },
+  })
+  assert.ok('ceilingKneeDb' in fetPeak)
+  assert.equal(fetPeak.ceilingKneeDb, null)
+})
+
+test('the two FET Punch references really do return different makeup', () => {
+  const audio = tone(1)
+  const byPeak = request('fet1176AutoMakeup', {
+    channelData: audio, params: { inputDrive: 70 },
+  })
+  const byBody = request('fet1176AutoMakeup', {
+    channelData: audio, params: { inputDrive: 70, reference: 'percentile' },
+  })
+  assert.equal(byPeak.type, 'done')
+  assert.equal(byBody.type, 'done')
+  assert.notEqual(byPeak.makeupDb, byBody.makeupDb,
+    'the reference is being dropped somewhere between the message and the solve')
 })
 
 test('the two OptoSmooth references really do return different makeup', () => {

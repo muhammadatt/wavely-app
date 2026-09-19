@@ -234,9 +234,17 @@ test('the pre-roll takes the slowest embedded envelope, which is the FET\'s', ()
    */
   assert.equal(dynamicsPreRollSeconds({}),
     Math.max(LA2A_PREROLL_S, fet1176PreRollSeconds({})))
-  // At the slowest FET settings the FET dominates by an order of magnitude.
+  /**
+   * At the slowest FET settings the FET still dominates — but by 8.7x, not the
+   * order of magnitude this asserted when it was written.
+   *
+   * ⚠ THE BOUND MOVED BECAUSE THE FET'S TAIL DID, NOT BECAUSE THIS SECTION
+   * CHANGED. `ALL_TAIL_FRACTION` went to 0 when the release was fitted to
+   * FETish, so the all-buttons pre-roll this reads went 26.4 s to 17.49. The
+   * claim under test is which stage sets the number, and that is unaffected.
+   */
   const slow = dynamicsPreRollSeconds({ fetRelease: 1, fetRatio: 'all' })
-  assert.ok(slow > LA2A_PREROLL_S * 10, `expected the FET to dominate; got ${slow}`)
+  assert.ok(slow > LA2A_PREROLL_S * 8, `expected the FET to dominate; got ${slow}`)
   // At the fastest it still never drops below the opto's floor.
   assert.ok(dynamicsPreRollSeconds({ fetRelease: 7 }) >= LA2A_PREROLL_S)
 })
@@ -275,7 +283,14 @@ test('⚠ each stage must be aligned at ITS OWN input, not at the section\'s', (
     mix: 1, clipThresholdDb: CLIP_DB, squash: 40, fetAlignDb: -1.12, optoAlignDb: 4.42,
   })
 
-  assert.ok(fromSectionInput.metering.opto.peak < 0.6,
+  /**
+   * ⚠ 0.6 -> 0.9 WHEN THE RATIO-DEPENDENT THRESHOLD SHIPPED. The FET now moves
+   * its threshold with the ratio button, so it hands the opto a slightly
+   * different level and the section-aligned case reads 0.71 dB where it read
+   * under 0.6. The contrast the test exists for is untouched: the opto's own
+   * input still wakes it four times harder from the same knob.
+   */
+  assert.ok(fromSectionInput.metering.opto.peak < 0.9,
     `aligning from the section input should leave the opto idle; got `
     + `${fromSectionInput.metering.opto.peak.toFixed(2)} dB`)
   assert.ok(fromOwnInput.metering.opto.peak > 2,

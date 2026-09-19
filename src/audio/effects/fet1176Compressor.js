@@ -13,53 +13,14 @@
  */
 
 import { ensureFET1176Worklet } from '../fet1176WorkletLoader.js'
-import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
-import { withMeasuredClears } from './measuredKeys.js'
+import {
+  FET1176_LATENCY_SAMPLES, FET1176_DEFAULTS, toKernelParams,
+} from './fet1176Params.js'
 
-/**
- * The gain cell and FET stage run oversampled, and the halfband filters that
- * get them there are linear phase, so the plugin delays. Constant at every
- * setting — see `latencySamples` on the kernel.
- */
-export const FET1176_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
-
-export const FET1176_DEFAULTS = {
-  inputDrive: 50, // 0-100, drives the fixed internal threshold
-  output: 0, // makeup gain dB
-  attack: 4, // dial 1-7, 7 = fastest (20 us)
-  release: 4, // dial 1-7, 7 = fastest (50 ms)
-  ratio: '4', // '4' | '8' | '12' | '20' | 'all'
-  fetDrive: 0.35, // FET / output-amp saturation
-  scHpf: 0, // sidechain high-pass corner in Hz, 0 = off (stock)
-  mix: 1, // wet/dry blend for parallel compression
-}
-
-/** Map UI param names to kernel param names. */
-export function toKernelParams(params) {
-  return {
-    inputDrive: params.inputDrive,
-    outputGainDb: params.output,
-    attack: params.attack,
-    release: params.release,
-    ratio: params.ratio,
-    fetDrive: params.fetDrive,
-    scHpfHz: params.scHpf,
-    mix: params.mix,
-    /**
-     * ⚠ MEASURED FROM THE WHOLE FILE, NOT DIALLED, AND NOT A PRESET KEY — the
-     * same rule `la2aParams.js` states for its copy of this key, for the same
-     * reason. It is the file's own level relative to nominal, so it belongs to
-     * the audio; a preset carrying one would apply another recording's gain
-     * staging to this one, which is the portability problem alignment exists to
-     * fix, inverted.
-     *
-     * Spread in only when it is real, so the params object stays key-for-key
-     * what it has always been wherever no measurement is in play.
-     */
-    ...(Number.isFinite(params.inputAlignDb) ? { inputAlignDb: params.inputAlignDb } : {}),
-  }
-}
+// Re-exported so callers that already reach for these through the effect keep
+// working; the definitions live in fet1176Params.js, which Node can import.
+export { FET1176_LATENCY_SAMPLES, FET1176_DEFAULTS, toKernelParams }
 
 export function createFET1176Compressor(audioContext) {
   const input = audioContext.createGain()
@@ -71,13 +32,15 @@ export function createFET1176Compressor(audioContext) {
   const output = audioContext.createGain()
 
   /**
-   * ⚠ `inputAlignDb` IS SEEDED HERE THOUGH IT IS ABSENT FROM `FET1176_DEFAULTS`,
-   * and without the seed the panel could never clear it. `setParam` only accepts
-   * names already present on this object (`if (name in params)`), so a key that
-   * never appears cannot be written — and a measured key has to be writable in
-   * both directions. Same reasoning, same shape, as `la2aCompressor.js`.
+   * ⚠ `inputAlignDb`, `ceilingDb` AND `ceilingKneeDb` ARE SEEDED HERE BECAUSE
+   * `setParam` GATES ON `name in params`.
+   * It is measured from the file rather than dialled, so it is deliberately
+   * absent from `FET1176_DEFAULTS` — and without a seed that gate would drop
+   * every push of it silently, leaving preview running the raw level-dependent
+   * behaviour while apply ran the aligned one. Exactly the reason `ceilingDb`
+   * and `inputAlignDb` are seeded in `la2aCompressor.js`.
    */
-  let params = { ...FET1176_DEFAULTS, inputAlignDb: null }
+  let params = { ...FET1176_DEFAULTS, inputAlignDb: null, ceilingDb: null, ceilingKneeDb: null }
   let worklet = null
   let destroyed = false
   let grDb = 0
@@ -124,22 +87,22 @@ export function createFET1176Compressor(audioContext) {
     setParam(name, value) {
       if (name in params) {
         params[name] = value
-        /**
-         * ⚠ `withMeasuredClears` ON THE LIVE PATH ONLY. The kernel MERGES a
-         * partial, so an omitted key means "unchanged", not "null" — and
-         * `toKernelParams` omits `inputAlignDb` whenever it is not finite.
-         * Without this, pushing a clear would leave the previous alignment armed
-         * on the running node while the panel showed none. See measuredKeys.js
-         * for the measured-and-silent version of this bug that shipped once.
-         */
-        worklet?.port.postMessage({
-          type: 'params', params: withMeasuredClears(toKernelParams(params)),
-        })
+        worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
       }
     },
 
     getParam(name) {
       return params[name]
+    },
+
+    /**
+     * Re-send the kernel params without changing a patch param. The bench
+     * tuning is folded in by `toKernelParams` rather than held here, so there
+     * is no param name to set — the panel moves module state and then asks the
+     * live node to pick it up.
+     */
+    refreshKernelParams() {
+      worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
     },
 
     // Negative dB, matching DynamicsCompressorNode.reduction conventions.

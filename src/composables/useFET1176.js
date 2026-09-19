@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { fet1176TuningState } from '../audio/effects/fet1176Tuning.js'
 import { applyFET1176Region, computeFET1176AutoMakeup, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { fet1176Effect, FET1176_DEFAULTS } from '../audio/effects/fet1176Compressor.js'
@@ -22,55 +23,74 @@ const fetDrive = ref(FET1176_DEFAULTS.fetDrive)
 const fetScHpf = ref(FET1176_DEFAULTS.scHpf)
 const fetMix = ref(FET1176_DEFAULTS.mix)
 
-/**
- * SIDE-CHAIN ALIGNMENT — the offset that makes a knob position mean the same
- * thing on every file. `dsp/inputAlign.js` has the argument and the numbers.
- *
- * ⚠ IT IS A SEPARATE CONTROL FROM `fetInput`, AND ON THIS UNIT THAT SEPARATION
- * IS NOT COSMETIC. The hardware's Input knob is an attenuator feeding the audio
- * path AND the detector, so folding the alignment into `fetInput` would make it
- * an input gain — it would raise the output by the same amount, need the Output
- * knob to cancel it, and drive the FET saturator harder on a quiet file. The
- * kernel keeps the offset on the detector's coefficient alone; see
- * `inputAlignDb` in `fet1176Processor.js`. OptoSmooth can put its offset on the
- * INPUT knob precisely because the LA-2A has no input attenuator to collide
- * with, and the panel here is labelled ALIGN for the same reason.
- *
- * ⚠ MEASURED-THEN-OVERRIDABLE, the same contract the Output knob has under AUTO
- * and the same one OptoSmooth's INPUT knob has: while `fetAlignAuto` is set the
- * measurement owns `fetAlignDb`, so the knob always shows the offset actually in
- * force rather than a delta against a number kept somewhere else.
- *
- * ⚠ NOT A PRESET KEY. It describes the audio, not the patch, so it stays out of
- * `FET1176_DEFAULTS` and out of saved presets — a preset carrying one would
- * apply another recording's gain staging to this file, which is the failure the
- * mechanism removes.
- *
- * ⚠ THE STATISTIC IS INHERITED AND NOT INDEPENDENTLY SETTLED FOR THIS UNIT.
- * Gated RMS was chosen for the opto on the argument that gain reduction is an
- * integral over the envelope distribution; this unit's detector is a rectified
- * PEAK follower with no smoothing, so that argument does not obviously carry.
- * It ships on gated RMS regardless, because one statistic across both
- * compressors is what stops a serial chain's two devices drifting apart on
- * material that separates them. `npm run fet:align -- --dir <narration>` scores
- * the alternatives against this unit specifically; there is no corpus in the
- * repo to settle it with.
- */
-const fetAlignAuto = ref(true)
-const fetAlignDb = ref(0)
-/**
- * Which timeline `fetAlignDb` was measured from — `docId:revision`, or null.
- * The state here is a module singleton and the document under it can change;
- * see the identical note in `useLA2A.js` for the bug that keying on identity
- * (rather than null-checking) exists to prevent.
- */
-let alignedFor = null
-
 // Auto makeup: on by default, and load-bearing here in a way it isn't on the
 // OptoSmooth — Input drives the audio path as well as the detector, so a
 // 20-point move on that knob swings the output by tens of dB. While auto is
 // on the plugin owns the Output knob: measurements are written into fetOutput
 // itself, so the knob always shows the gain actually in effect.
+/**
+ * Input alignment — the same contract OptoSmooth's Input knob has: AUTO owns the
+ * value until the user touches it.
+ *
+ * ⚠ FET PUNCH HAS NO THRESHOLD CONTROL EITHER, so what a knob position DOES was
+ * set by the file's level, not by the knob. Measured at Input 55, ratio 4, on a
+ * 3 s tone:
+ *
+ *     peak  -6 dBFS  13.30 dB      peak -24 dBFS   0.85 dB
+ *     peak -12 dBFS   8.80 dB      peak -30 dBFS   0.00 dB
+ *     peak -18 dBFS   4.31 dB
+ *
+ * A narrator who gain-staged with headroom got a compressor that did nothing at
+ * a mid-travel setting, and a saved patch was only valid at the level it was
+ * saved at. With alignment on, all five rows read 8.80 dB.
+ *
+ * ⚠ NOT A PRESET KEY. It describes the FILE, not the patch — the same argument
+ * that keeps `ceilingDb` out of presets. Baking it into a patch is the
+ * portability failure alignment exists to remove, one level up.
+ */
+const fetInputAuto = ref(true)
+const fetInputAlignDb = ref(0)
+/**
+ * Which timeline the offset was measured from — `docId:revision`, or null.
+ * Module-singleton state with a document that can change underneath it, so
+ * freshness is keyed on identity rather than on null-ness. See `useLA2A.js`.
+ */
+let fetAlignedFor = null
+
+/**
+ * THE MAKEUP REFERENCE, FIXED — the same one OptoSmooth ships, and for the same
+ * measured reason.
+ *
+ * ⚠ PEAK-REFERENCED MAKEUP RAN THE INPUT KNOB BACKWARDS. On the syllabic
+ * narration fixture with one plosive at the end of a pause, the plosive
+ * survives the FET's attack almost intact, so it pinned the reference for the
+ * whole file and compressing harder DELIVERED LESS LEVEL: rms -20.85 dB at
+ * Input 50 against -22.56 at 70 and -24.37 at 100, every one of them quieter
+ * than the -19.18 source. Referenced to the 99.9th percentile the same sweep
+ * holds the body at -17.90 / -17.89 / -18.28 and the ceiling holds the peak at
+ * or under the source's -0.45 dBFS throughout.
+ *
+ * ⚠ IT IS NOT A CHOICE, DELIBERATELY. There is no material on which the peak
+ * reference is the better answer — the bench keeps both, which is where a
+ * comparison belongs. See `peakOfChannels` in `dsp/makeupReference.js` for what
+ * the percentile gives up and `computeFET1176AutoMakeupPlan` for the ceiling
+ * that puts it back.
+ *
+ * ⚠ AND EVERY PATCH, PRESET AND PREVIOUSLY RENDERED FILE NOW SOUNDS DIFFERENT
+ * — louder at the same settings, and louder the further up the Input knob.
+ */
+const MAKEUP_REFERENCE = 'percentile'
+/**
+ * The ceiling the last measurement produced, dBFS, and its knee width.
+ *
+ * ⚠ MEASURED STATE, NOT A KNOB, and deliberately not in `FET1176_DEFAULTS`: it
+ * is the region's own peak, so it belongs to the audio rather than to the patch
+ * — a preset carrying one would apply another file's peak to this one. Exactly
+ * the reasoning `inputAlignDb` is kept out of presets for.
+ */
+const fetCeilingDb = ref(null)
+const fetCeilingKneeDb = ref(null)
+
 const fetAutoMakeup = ref(true)
 const fetAutoMakeupBusy = ref(false)
 
@@ -109,19 +129,31 @@ function currentParams() {
     fetDrive: fetDrive.value,
     scHpf: fetScHpf.value,
     mix: fetMix.value,
+    inputAlignDb: fetInputAlignDb.value,
     /**
-     * ⚠ INDEPENDENT OF AUTO MAKEUP, unlike a ceiling would be. The makeup is
-     * solved downstream of the compression; alignment decides how much
-     * compression there is at all. Turning the makeup off is not a reason to
-     * hand the user back a compressor whose knob does nothing.
+     * ⚠ ONLY WHILE AUTO OWNS THE KNOB. The ceiling is the other half of the
+     * percentile makeup; once the Output knob is the user's, enforcing a
+     * ceiling they never asked for would attenuate a boost they set by hand.
      */
-    inputAlignDb: fetAlignDb.value,
+    ceilingDb: fetAutoMakeup.value ? fetCeilingDb.value : null,
+    // Leaves with the ceiling it belongs to, for the same reason.
+    ceilingKneeDb: fetAutoMakeup.value ? fetCeilingKneeDb.value : null,
   }
 }
 
 /** Params for the measurement pass — makeup is what we're solving for. */
 function measurementParams() {
   return {
+    /**
+     * ⚠⚠ THE BENCH TUNING HAS TO REACH THE SOLVE, AND IT DID NOT. These params
+     * go to the measurement worker, which is a separate thread with its own
+     * module state — `toKernelParams` folds the tuning in for the live worklet
+     * and for offline apply, and this path bypasses it. So after changing the
+     * curve, the FET position, the attack range or schedule, or the
+     * ratio-threshold mode, the makeup and the ceiling knee were solved against
+     * the SHIPPING kernel while preview and apply rendered the tuned one.
+     */
+    ...fet1176TuningState(),
     inputDrive: fetInput.value,
     outputGainDb: 0,
     attack: fetAttack.value,
@@ -131,12 +163,20 @@ function measurementParams() {
     scHpfHz: fetScHpf.value,
     mix: fetMix.value,
     /**
-     * ⚠ THE ALIGNMENT BELONGS IN THE MEASUREMENT. Without it the solve models
-     * the raw hardware behaviour and the render applies the aligned one, so the
-     * makeup is solved for a compressor nobody is listening to. On a file 15 dB
-     * below nominal the two differ by the whole of the gain reduction.
+     * \u26a0 THE OFFSET HAS TO REACH THE MAKEUP SOLVE. It decides how much reduction
+     * the cell applies, so a solve run without it solves for a compressor doing
+     * a different amount of work and the knob lands wrong.
      */
-    ...(Number.isFinite(fetAlignDb.value) ? { inputAlignDb: fetAlignDb.value } : {}),
+    inputAlignDb: fetInputAlignDb.value,
+    /**
+     * ⚠ THE SOLVE MUST BE BOUNDED BY THE KNOB IT LANDS ON. The plan defaults to
+     * +/-36 dB; this panel clamps Output to OUTPUT_MIN_DB..OUTPUT_MAX_DB. A
+     * solve landing above the knob's travel was clamped afterwards, but the
+     * ceiling KNEE had already been sized for the gain the clamp threw away, so
+     * the pair no longer described the audio that renders. Bound both together.
+     */
+    makeupMinDb: OUTPUT_MIN_DB,
+    makeupMaxDb: OUTPUT_MAX_DB,
   }
 }
 
@@ -158,32 +198,22 @@ export function useFET1176() {
     function tick() {
       const nodes = chain.effects.find(e => e.id === fet1176Effect.id)?.nodes
       /**
-       * LIVE AUTO MAKEUP — read off the worklet on the meter's own cadence.
+       * ⚠ THERE IS NO LIVE MAKEUP WRITE-BACK ANY MORE, and it is not an
+       * oversight. The kernel's tracker is a running peak by construction —
+       * `(P - max|a|)/max|b|` over what has played — and the shipping reference
+       * is the 99.9th percentile, which is a statistic over millions of samples
+       * that no pair of running extrema can express. Left in, it would have
+       * driven the knob to the peak-referenced answer between measurements and
+       * the offline solve would have yanked it back: on the narration fixture
+       * that is a 3-6 dB fight, visible as the knob jumping on every re-measure
+       * and audible as the level doing the same. OptoSmooth's write-back came
+       * out for exactly this reason; the tracker itself stays, because the
+       * bench still reads it.
        *
-       * The kernel maintains it from running extrema at O(1) per sample, so it
-       * needs no worker, no region render and no selection, and it lands within
-       * one meter interval (~21 ms) rather than a measurement (~170 ms).
-       *
-       * ⚠ THIS IS THE PREVIEW VALUE ONLY. It knows only what has PLAYED, so it
-       * is history-dependent — measured on real narration it can sit ~0.9 dB
-       * high before the loudest moment arrives. `apply()` re-measures offline
-       * for exactly that reason; see the note there.
-       *
-       * ⚠ ONLY WHILE AUTO OWNS THE KNOB. Once the user has taken over, writing
-       * a tracked value into it would be the panel overruling them.
+       * The cost is that the Output knob now moves on the measurement's cadence
+       * (~170 ms) rather than the meter's (~21 ms). That is the honest cadence:
+       * it is when the answer actually changes.
        */
-      if (fetAutoMakeup.value) {
-        const live = nodes.getLiveMakeupDb?.()
-        if (Number.isFinite(live)) {
-          const next = Math.max(OUTPUT_MIN_DB, Math.min(OUTPUT_MAX_DB, live))
-          // A threshold, not equality: the knob prints one decimal, and
-          // repainting it on sub-hundredth wobble is churn nobody can see.
-          if (Math.abs(next - fetOutput.value) > 0.02) {
-            fetOutput.value = next
-            pushOutput()
-          }
-        }
-      }
       if (nodes) {
         fetReduction.value = nodes.getReduction()
         // Only meter channels the source really has: the splitter is
@@ -207,6 +237,72 @@ export function useFET1176() {
     fetOutputLevels.value = []
   }
 
+  /** Identity of the timeline currently loaded, for the freshness check. */
+  function timelineKey() {
+    return state.currentFile ? `${appState.activeDocumentId}:${state.revision}` : null
+  }
+
+  /**
+   * Measure the file's alignment offset and push it.
+   *
+   * ⚠ THE WHOLE FILE, ALWAYS, IGNORING THE SELECTION — see `regionAlignDb`. A
+   * per-selection offset would make this a different compressor on every
+   * selection, so the same edit applied to a phrase and to the paragraph
+   * containing it would not agree.
+   *
+   * ⚠ A MANUAL TRIM BELONGS TO THE FILE IT WAS DIALLED ON, so a different
+   * document takes the knob back to AUTO rather than inheriting it. Within one
+   * document the user's value stands — a new selection or an edit must never
+   * walk it back, the rule the Gain knob follows under AUTO. Keyed on the
+   * DOCUMENT, not the revision, so editing a file the user trimmed by hand
+   * leaves their setting alone.
+   */
+  function refreshInputAlign() {
+    if (!state.currentFile) return
+    const key = timelineKey()
+    const sameDoc = fetAlignedFor !== null
+      && fetAlignedFor.split(':')[0] === String(appState.activeDocumentId)
+    if (!fetInputAuto.value) {
+      if (sameDoc) return
+      fetInputAuto.value = true
+    } else if (fetAlignedFor === key) {
+      return
+    }
+    const end = totalDuration.value
+    if (!(end > 0)) return
+    const db = regionAlignDb(
+      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+    )
+    fetAlignedFor = key
+    fetInputAlignDb.value = db
+    pushParam('inputAlignDb', db)
+  }
+
+  /**
+   * The user moved the Input trim: take the knob over from the measurement.
+   *
+   * ⚠ IT RE-SOLVES THE MAKEUP, because this is a compression change — exactly
+   * as an Input knob move is.
+   */
+  function syncInputAlign(v) {
+    const clamped = Math.max(-INPUT_TRIM_MAX_DB, Math.min(INPUT_TRIM_MAX_DB, v))
+    fetInputAuto.value = false
+    fetAlignedFor = timelineKey()
+    fetInputAlignDb.value = clamped
+    pushParam('inputAlignDb', clamped)
+    resetLiveMakeup()
+    scheduleAutoMakeup()
+  }
+
+  /** Hand the trim back to the measurement, re-measuring immediately. */
+  function enableInputAuto() {
+    fetInputAuto.value = true
+    fetAlignedFor = null
+    refreshInputAlign()
+    resetLiveMakeup()
+    scheduleAutoMakeup()
+  }
+
   function pushAllParams(chain) {
     for (const [name, value] of Object.entries(currentParams())) {
       chain.updateParam(fet1176Effect.id, name, value)
@@ -219,8 +315,8 @@ export function useFET1176() {
     chain.setEnabled(fet1176Effect.id, fetPreview.value)
 
     if (fetPreview.value) {
-      // Before pushAllParams, not after: it pushes `currentParams()`, so a
-      // stale or unmeasured offset would be what preview starts with.
+      // Before pushAllParams, not after: it pushes `currentParams()`, so a stale
+      // or unmeasured offset would be what preview starts with.
       refreshInputAlign()
       pushAllParams(chain)
       startMeters(chain)
@@ -246,89 +342,7 @@ export function useFET1176() {
    * number so a fast knob drag can't have an older measurement land after
    * a newer one.
    */
-  /** Identity of the timeline currently loaded, for the freshness check above. */
-  function timelineKey() {
-    return state.currentFile ? `${appState.activeDocumentId}:${state.revision}` : null
-  }
-
-  /**
-   * Measure the file's alignment offset and push it.
-   *
-   * ⚠ THE WHOLE FILE, ALWAYS, IGNORING THE SELECTION — see `regionAlignDb`. A
-   * per-selection offset would make this a different compressor on every
-   * selection, so the same edit applied to a phrase and to the paragraph
-   * containing it would not agree.
-   */
-  function refreshInputAlign() {
-    if (!state.currentFile) return
-    const key = timelineKey()
-
-    /**
-     * ⚠ A MANUAL TRIM BELONGS TO THE FILE IT WAS DIALLED ON, so a different
-     * document takes the knob back to AUTO rather than inheriting it — the same
-     * principle that keeps this value out of presets. Within one document the
-     * user's value stands: a new selection or an edit must never walk it back.
-     */
-    const sameDoc = alignedFor !== null
-      && alignedFor.split(':')[0] === String(appState.activeDocumentId)
-    if (!fetAlignAuto.value) {
-      if (sameDoc) return
-      fetAlignAuto.value = true
-    } else if (alignedFor === key) {
-      return // already measured for this exact timeline
-    }
-
-    const end = totalDuration.value
-    if (!(end > 0)) return
-    const db = regionAlignDb(
-      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
-    )
-    alignedFor = key
-    fetAlignDb.value = db
-    pushParam('inputAlignDb', db)
-  }
-
-  /**
-   * The user moved ALIGN: take the knob over from the measurement.
-   *
-   * ⚠ IT RE-SOLVES THE MAKEUP, because this is a compression change — the
-   * offset decides how much reduction the cell applies, so the makeup that
-   * matches it moves too. It also clears the live tracker, for the reason
-   * `syncCompressionParam` gives: the tracked signal is post-gain-reduction and
-   * this is one of the knobs that sets it.
-   */
-  function syncAlign(v) {
-    const clamped = Math.max(-INPUT_TRIM_MAX_DB, Math.min(INPUT_TRIM_MAX_DB, v))
-    fetAlignAuto.value = false
-    alignedFor = timelineKey()
-    fetAlignDb.value = clamped
-    pushParam('inputAlignDb', clamped)
-    resetLiveMakeup()
-    scheduleAutoMakeup()
-  }
-
-  /**
-   * Hand ALIGN back to the measurement. Re-measures immediately so the knob
-   * lands on the file's own value rather than sitting on the user's until
-   * something else happens to trigger a pass.
-   */
-  function resetAlignAuto() {
-    fetAlignAuto.value = true
-    alignedFor = null
-    refreshInputAlign()
-    resetLiveMakeup()
-    scheduleAutoMakeup()
-  }
-
   async function refreshAutoMakeup() {
-    /**
-     * ⚠ BEFORE THE AUTO GUARD, NOT AFTER IT. Alignment is not part of the
-     * makeup solve — it decides how much the compressor does at all — so with
-     * AUTO makeup off, the selection watcher that drives this function would
-     * never refresh it and preview would run on whatever offset was left over.
-     * The same staleness hole `useLA2A.js` records closing.
-     */
-    refreshInputAlign()
     if (!fetAutoMakeup.value || !state.currentFile) return
 
     /**
@@ -349,12 +363,27 @@ export function useFET1176() {
     const seq = ++makeupSeq
     fetAutoMakeupBusy.value = true
     try {
-      const makeupDb = await computeFET1176AutoMakeup(
+      const { makeupDb, ceilingDb, ceilingKneeDb } = await computeFET1176AutoMakeup(
         state.segments, start, end,
         measurementParams(),
-        state.currentFile.sampleRate, state.currentFile.channels
+        state.currentFile.sampleRate, state.currentFile.channels,
+        MAKEUP_REFERENCE,
       )
       if (seq !== makeupSeq) return // a newer measurement is already in flight
+      /**
+       * ⚠ THE CEILING GOES FIRST, AND THE ORDER IS THE GUARANTEE. Each reaches
+       * the live node as its own param message, so between them the node holds
+       * one old value and one new one. Gain-then-ceiling would leave the raised
+       * makeup running for that gap with the old ceiling — or none — which is
+       * exactly the overshoot the pairing exists to prevent, audible as a blip
+       * on every re-measure during a drag.
+       */
+      fetCeilingDb.value = ceilingDb
+      pushParam('ceilingDb', ceilingDb)
+      // With the ceiling, ahead of the gain, and for the same reason: the knee
+      // is how hard that ceiling holds, so it must not lag the makeup either.
+      fetCeilingKneeDb.value = ceilingKneeDb
+      pushParam('ceilingKneeDb', ceilingKneeDb)
       fetOutput.value = Math.max(OUTPUT_MIN_DB, Math.min(OUTPUT_MAX_DB, makeupDb))
       pushOutput()
     } catch (err) {
@@ -369,6 +398,21 @@ export function useFET1176() {
    * why this is a throttle and not the debounce it replaced.
    */
   if (!makeupThrottle) makeupThrottle = createMeasureThrottle(refreshAutoMakeup)
+  /**
+   * Pick up a bench-tuning change on the live node.
+   *
+   * ⚠ AND RE-MEASURE, because the curve and its position both change the
+   * RENDER, and the auto-makeup is solved from the render. Leaving the makeup
+   * where it was would show the previous curve's gain against the new one's
+   * peaks — which on the `tanh`/MEASURED A/B is several dB and would read as
+   * the curves differing in level rather than in colour.
+   */
+  function refreshKernelTuning() {
+    getEffectChain(getAudioContext()).effects
+      .find(e => e.id === fet1176Effect.id)?.nodes?.refreshKernelParams?.()
+    scheduleAutoMakeup()
+  }
+
   function scheduleAutoMakeup() {
     if (!fetAutoMakeup.value) return
     makeupThrottle.schedule()
@@ -429,6 +473,17 @@ export function useFET1176() {
     makeupThrottle?.cancel()
     makeupSeq++
     fetAutoMakeupBusy.value = false
+    /**
+     * ⚠ THE CEILING LEAVES WITH AUTO. `currentParams()` already drops it while
+     * AUTO is off, but the LIVE node has been told about it and would keep
+     * enforcing it against a gain the user now owns — a manual boost silently
+     * held down by the last measurement's ceiling, with nothing on the panel
+     * saying so.
+     */
+    fetCeilingDb.value = null
+    pushParam('ceilingDb', null)
+    fetCeilingKneeDb.value = null
+    pushParam('ceilingKneeDb', null)
   }
 
   function toggleAutoMakeup() {
@@ -442,9 +497,13 @@ export function useFET1176() {
 
   /**
    * A new region is new material, so the live tracker's running extrema — which
-   * describe audio the user has moved on from — are cleared with it. Without
-   * this the makeup keeps answering for the previous selection and only drifts
-   * toward the new one as it is diluted.
+   * describe audio the user has moved on from — are cleared with it.
+   *
+   * ⚠ IT NO LONGER MOVES THE KNOB, and it is still right to call. The tracker
+   * stopped driving Output when the reference became the percentile (see the
+   * meter loop), so this is now housekeeping on a reading the bench takes —
+   * but a tracker carrying the previous selection's extrema is a wrong reading
+   * whoever is looking at it.
    */
   function resetLiveMakeup() {
     getEffectChain(getAudioContext()).effects
@@ -456,14 +515,22 @@ export function useFET1176() {
     const { start, end } = state.selection
 
     /**
-     * ⚠ RE-MEASURE BEFORE APPLYING, because the knob may be holding a LIVE
-     * value and a live value is history-dependent — a function of what has
-     * played. Committing it would mean the same selection and settings render
-     * differently depending on where and how long you pressed play, and a
-     * makeup measured before the loudest moment arrived would put the output
-     * above the source's peak. The offline solve answers for the whole region
-     * every time.
+     * ⚠ RE-MEASURE BEFORE APPLYING, because the knob may be answering for a
+     * DIFFERENT SPAN. With no selection, preview measures the whole file; apply
+     * always has one, and the makeup and the ceiling are both properties of the
+     * region they were measured over — committing the file's answer to a
+     * selection would put the output above that selection's own peak. The
+     * offline solve answers for the region being written, every time.
      */
+    /**
+     * ⚠ BEFORE THE MAKEUP SOLVE, AND BEFORE apply — not only on preview. Apply
+     * is reachable without ever previewing, and an unmeasured offset there
+     * would render the raw level-dependent compressor while preview rendered
+     * the aligned one. The solve also has to see it: the offset decides how
+     * much reduction the cell applies, so a makeup solved against a stale one
+     * is solved for a compressor doing a different amount of work.
+     */
+    refreshInputAlign()
     if (fetAutoMakeup.value) await refreshAutoMakeup()
 
     const wasPreviewing = fetPreview.value
@@ -471,7 +538,16 @@ export function useFET1176() {
 
     startProcessing('Applying FET Punch...')
     try {
-      const buffer = await applyFET1176Region(
+      /**
+       * ⚠ THE PEAK RESTORE HAPPENS INSIDE apply AND IS REPORTED, NOT SILENT.
+       * The makeup is percentile-referenced, so the render's peak lands under
+       * the region's own — by 1.9 dB at light settings and under 0.1 dB once
+       * the ceiling is working. `applyFET1176Region` puts it back on the
+       * ceiling and hands back what it added; saying so is the difference
+       * between a number the user can check and gain that appeared from
+       * nowhere. See `peakRestoreTrimDb`.
+       */
+      const { buffer, trimDb } = await applyFET1176Region(
         state.segments, start, end,
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels
@@ -479,7 +555,9 @@ export function useFET1176() {
       const bufferId = replaceRegion(start, end, buffer, 'FET Punch compression')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
-      showToast('FET Punch compression applied')
+      showToast(Math.abs(trimDb) >= 0.05
+        ? `FET Punch applied — peak restored ${trimDb >= 0 ? '+' : ''}${trimDb.toFixed(2)} dB`
+        : 'FET Punch compression applied')
     } catch (err) {
       console.error('FET Punch failed:', err)
       showToast('FET Punch compression failed')
@@ -510,9 +588,12 @@ export function useFET1176() {
   }
 
   return {
+    fetInputAlignDb,
+    fetInputAuto,
+    syncInputAlign,
+    enableInputAuto,
+    refreshInputAlign,
     fetInput,
-    fetAlignDb,
-    fetAlignAuto,
     fetOutput,
     fetAttack,
     fetRelease,
@@ -529,8 +610,6 @@ export function useFET1176() {
     hasSelection,
     togglePreview,
     syncInput,
-    syncAlign,
-    resetAlignAuto,
     syncOutput,
     syncAttack,
     syncRelease,
@@ -545,5 +624,6 @@ export function useFET1176() {
     teardown,
     openModal,
     closeModal,
+    refreshKernelTuning,
   }
 }
