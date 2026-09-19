@@ -67,6 +67,7 @@ import normalize from './normalize.js'
 import optoSmooth from './opto-smooth.js'
 import removeSilence from './remove-silence.js'
 import resonanceSuppressor from './resonance-suppressor.js'
+import punchChain from './punch-chain.js'
 import schepsParallel from './scheps-parallel.js'
 import softClipper from './soft-clipper.js'
 import spectrumAnalyzer from './spectrum-analyzer.js'
@@ -87,6 +88,7 @@ export const HELP = {
   'opto-smooth': optoSmooth,
   'remove-silence': removeSilence,
   'resonance-suppressor': resonanceSuppressor,
+  'punch-chain': punchChain,
   'scheps-parallel': schepsParallel,
   'soft-clipper': softClipper,
   'spectrum-analyzer': spectrumAnalyzer,
