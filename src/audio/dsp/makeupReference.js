@@ -306,3 +306,245 @@ function selectNth(a, k) {
   }
   return a[lo]
 }
+
+/**
+ * Peak magnitude across every sample of every channel, in dB.
+ *
+ * The default makeup reference. Peak rather than RMS, and the distinction is
+ * the whole point of makeup gain: the compressor pulls the loud moments down,
+ * makeup hands back what it took, the peaks land where they started and
+ * everything underneath rises with them. That is a compressor made louder
+ * without being merely turned up — which is the comparison a listener is
+ * actually running when they A/B it.
+ *
+ * Matching RMS instead, as this did, returns only the average loss and
+ * therefore leaves the output exactly as loud as the input: a compressor that
+ * by construction cannot make anything louder.
+ *
+ * TRUE PEAK, not a high percentile, and that was measured. A percentile of
+ * short-block peaks looks more robust and is worse where it matters: on real
+ * speech a fast transient can survive compression almost intact while the p99
+ * comes down several dB, so percentile-referenced makeup over-compensates and
+ * pushes that survivor ABOVE the source — up to 5.5 dB above, measured. True
+ * peak cannot do that; the guarantee it buys is exact.
+ *
+ * The cost is the opposite failure: a single uncompressed click sets the
+ * reference and the makeup comes out small. That is the safe direction — never
+ * louder than the source — and the manual trim is there for it.
+ *
+ * ── THE PERCENTILE IS BACK, AND ONLY BECAUSE THE MISSING HALF ARRIVED ───────
+ *
+ * ⚠ NOTHING ABOVE IS WITHDRAWN. The percentile alone still fails exactly as
+ * described, and the failure reproduces on demand: referencing the 99.9th
+ * percentile at Peak Reduction 40 / 50 / 60 / 70 / 80 puts the OUTPUT PEAK at
+ * -3.15 / -0.92 / +1.54 / +2.59 / +3.01 dBFS against a source peaking at
+ * -2.80 — 5.81 dB above it at the top, against the 5.5 the note above
+ * measured. A percentile reference cannot keep the peak guarantee, full stop.
+ *
+ * WHAT CHANGED IS THAT THE GUARANTEE NO LONGER HAS TO COME FROM THE SOLVE.
+ * `ceilingDb` enforces it downstream, so the pair keeps the same promise the
+ * peak reference kept — output peak never exceeds input peak — while spending
+ * the headroom a lone transient was sitting on. That promise is now pinned by
+ * `test/dsp/la2aMakeupReference.test.js` rather than being a property of the
+ * arithmetic, which is the real cost of the change and is stated here so
+ * nobody has to rediscover it: it is enforced, not structural, and the two
+ * halves must ship together. `computeAutoMakeupPlan` is the only way to get
+ * either, and it returns both.
+ *
+ * WHY IT IS WORTH IT. The lone-transient failure the note above calls "the safe
+ * direction" is not free — it is the whole of the Peak Reduction 60 loudness
+ * collapse. On narration whose binding peak is one onset out of a 180 ms pause,
+ * peak-normalised to -1 dBFS at Peak Reduction 50: rms -17.39 -> -16.80 dB and
+ * peak-over-body 4.38 -> 3.78 dB, with delivered speech dynamic range unmoved
+ * at 9.11 -> 9.13. It recovers loudness that was being discarded rather than
+ * buying it by compressing harder — a hardware LA-2A capture of the same take
+ * sits at -16.38 and 3.35.
+ *
+ * ⚠ AND THE PERCENTILE IS NOW WHAT THE APP USES. It shipped off by default and
+ * behind a panel toggle, was auditioned, and the toggle came back out: there is
+ * no material on which the peak reference is the better answer, so there was
+ * nothing for a user to choose between. `useLA2A` fixes the reference and the
+ * panel has no control for it.
+ *
+ * ⚠ WHICH MEANS EVERY PATCH, PRESET AND PREVIOUSLY RENDERED FILE NOW SOUNDS
+ * DIFFERENT — several dB louder at the same settings, and louder the further up
+ * the knob. That is the intended change and it is not reversible from the UI.
+ * A file already rendered on disk is untouched; the same patch re-applied to it
+ * is not the same render.
+ *
+ * The peak reference remains the DEFAULT of this function and is what
+ * `npm run la2a:makeup` renders against for comparison. It is the reference
+ * anything measuring "makeup that cannot exceed the source by construction"
+ * should still use.
+ */
+export function peakOfChannels(channels, skip = 0) {
+  let peak = 0
+  for (const ch of channels) {
+    for (let i = skip; i < ch.length; i++) {
+      const v = ch[i] < 0 ? -ch[i] : ch[i]
+      if (v > peak) peak = v
+    }
+  }
+  return peak
+}
+
+/**
+ * THE PEAK RESTORE — the trim, in dB, that puts a rendered region's peak back
+ * ON the ceiling instead of somewhere under it.
+ *
+ * ⚠⚠ IT IS NOT THE PEAK REFERENCE COMING BACK, AND THAT OBJECTION WAS RAISED
+ * AND MEASURED DOWN. The reasoning against it was that restoring the peak after
+ * the solve is arithmetically the same as solving for the peak in the first
+ * place, so it would bring back the knob that ran backwards. That holds ONLY
+ * while the ceiling is idle. Once the ceiling is catching peaks it is a
+ * limiter, and the two paths separate — measured on a narrator's own 35 s take
+ * at Input 60, both ending at -1 dBFS: restored -16.94 dB rms against the peak
+ * reference's -19.21. Across the whole knob the restore holds -16.2 to -17.6
+ * where the peak reference slides -17.5 to -20.3. It is identical to the peak
+ * reference exactly where the ceiling does nothing (Input 20-30) and strictly
+ * better everywhere above.
+ *
+ * ⚠ SO THE MAKEUP REFERENCE IS UNCHANGED. The solve still matches the 99.9th
+ * percentile; this is a separate scalar applied to the finished render. The
+ * body-to-source relationship the percentile buys is what makes the restore
+ * safe to add, not something it replaces.
+ *
+ * ⚠ THE TRIM IS APPLIED BY SCALING THE RENDER, and that is equivalent to adding
+ * it to BOTH `outputGainDb` and `ceilingDb` — verified bit-identical to 1.2e-7
+ * (float32 rounding) over a nine-point Input sweep, because the ceiling's knee
+ * is defined in dB relative to its own threshold and is therefore homogeneous.
+ * Scaling the render is preferred anyway: it needs no second render and cannot
+ * be got wrong by a caller who updates one of the two numbers and not the other.
+ *
+ * ⚠⚠ AND IT MUST BE MEASURED OVER THE WHOLE RENDERED REGION, NOT THE SOLVE'S
+ * WINDOW. The makeup is solved on a capped, start-anchored window; a region's
+ * loudest moment routinely falls outside it, and `windowPeak <= wholePeak`
+ * always, so a window-derived trim is too GENEROUS. Applied with the ceiling
+ * raised to match, it would push the later passage past the source peak — the
+ * one guarantee the ceiling exists to provide, and a clip on anything already
+ * near 0 dBFS. Hence the apply path computes this on its own output, which is
+ * whole-region by construction.
+ *
+ * ⚠ THE PRICE, ACCEPTED DELIBERATELY: the live preview cannot know the region's
+ * rendered peak, so preview and apply can differ by this trim — up to ~1.9 dB at
+ * light settings, and under 0.1 dB from Input 40 up, where the ceiling is
+ * already holding the peak. Everywhere else in this codebase preview and apply
+ * are sample-identical; this is the one stage where they are not, and it was a
+ * deliberate call by the owner rather than an oversight.
+ *
+ * Returns 0 when there is no ceiling (the peak reference needs no restore — its
+ * guarantee is arithmetic) or when the region is silent.
+ *
+ * @param {Float32Array[]} channels the RENDERED region
+ * @param {number|null} ceilingDb the source region's peak, dBFS
+ */
+export function peakRestoreTrimDb(channels, ceilingDb) {
+  if (!Number.isFinite(ceilingDb)) return 0
+  const peak = peakOfChannels(channels)
+  if (!(peak > 0)) return 0
+  return ceilingDb - 20 * Math.log10(peak)
+}
+
+/**
+ * Scale a rendered region by `peakRestoreTrimDb`, in place, and return the trim.
+ *
+ * ⚠ A NEGATIVE TRIM IS APPLIED TOO, and that is the invariant rather than an
+ * edge case: if a render ever comes back ABOVE the ceiling this pulls it down,
+ * so "never louder than the source" holds by enforcement here as well as in the
+ * kernel. Clamping at zero would leave the one case that actually matters.
+ */
+export function restorePeakToCeiling(channels, ceilingDb) {
+  const trimDb = peakRestoreTrimDb(channels, ceilingDb)
+  if (!trimDb) return 0
+  const g = Math.pow(10, trimDb / 20)
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) ch[i] *= g
+  }
+  return trimDb
+}
+
+/**
+ * The makeup solve, and the ceiling that has to ship with it.
+ *
+ * ⚠ EXTRACTED FROM `la2aProcessor.js` SO FET PUNCH CAN USE IT, and the two
+ * halves still cannot be separated. A percentile reference does NOT guarantee
+ * "never louder than the source" — that is the point of it, since a peak
+ * reference lets one uncompressed onset pin the whole file — so the guarantee
+ * comes back as enforcement instead: a memoryless ceiling at the region's own
+ * peak, with a knee sized by how far the solve actually overshot it. Ask for
+ * `reference: 'percentile'` and you get a ceiling; ask for `'peak'` and there is
+ * nothing to catch and none is returned.
+ *
+ * The caller supplies its own renderer and its own latency, which is all that
+ * was ever LA-2A-specific about this.
+ *
+ * @param render   (channelData, extraParams) => channelData, at unity makeup
+ *                 plus whatever `extraParams` says
+ * @param latency  samples the renderer delays its output by, or 0
+ */
+export function solveMakeupPlan({
+  channelData, render, latencySamples = 0, gainKey = 'gainDb',
+  reference = 'peak', maxIterations = 4, toleranceDb = 0.05,
+  minDb = -24, maxDb = 24,
+}) {
+  if (reference !== 'peak' && reference !== 'percentile') {
+    throw new Error(`unknown makeup reference: ${reference}`)
+  }
+  const measureRef = reference === 'percentile'
+    ? (chs) => percentileOfChannels(chs, MAKEUP_PERCENTILE)
+    : peakOfChannels
+
+  const inputPeak = peakOfChannels(channelData)
+  const inputRef = measureRef(channelData)
+  if (!(inputPeak > 0) || !(inputRef > 0)) {
+    return { makeupDb: 0, ceilingDb: null, ceilingKneeDb: null }
+  }
+
+  /**
+   * ⚠ THE MEASURED SPAN MUST BE THE SPAN APPLY WRITES BACK. With lookahead the
+   * output lags its input, so the last `latency` samples never emerge and the
+   * first `latency` are the delay line filling with silence — measuring the
+   * render as-is compares a region's input peak against an output missing that
+   * region's tail, and on a short selection the tail is often where the peak is.
+   */
+  const len = channelData[0].length
+  const padded = latencySamples > 0
+    ? channelData.map((ch) => {
+      const q = new Float32Array(ch.length + latencySamples)
+      q.set(ch, 0)
+      return q
+    })
+    : channelData
+
+  let makeupDb = 0
+  let lastOutPeak = 0
+  let lastMakeupDb = 0
+  for (let i = 0; i < maxIterations; i++) {
+    const rendered = render(padded, { [gainKey]: makeupDb })
+    const out = latencySamples > 0
+      ? rendered.map((ch) => ch.subarray(latencySamples, latencySamples + len))
+      : rendered
+    lastOutPeak = peakOfChannels(out)
+    lastMakeupDb = makeupDb
+    const outRef = measureRef(out)
+    if (outRef <= 0) break
+    const correctionDb = 20 * Math.log10(inputRef / outRef)
+    makeupDb = Math.max(minDb, Math.min(maxDb, makeupDb + correctionDb))
+    if (Math.abs(correctionDb) < toleranceDb) break
+  }
+
+  if (reference !== 'percentile') {
+    // The peak reference needs no ceiling, so it needs no knee either.
+    return { makeupDb, ceilingDb: null, ceilingKneeDb: null }
+  }
+  const ceilingDb = 20 * Math.log10(inputPeak)
+  /**
+   * The loop renders at `makeupDb` and only THEN corrects it, so the last
+   * render is one step stale. Carried forward rather than re-rendered: the gain
+   * is ahead of the peak by that step, and the step is under `toleranceDb` on a
+   * converged solve.
+   */
+  const outPeakDb = lastOutPeak > 0
+    ? 20 * Math.log10(lastOutPeak) + (makeupDb - lastMakeupDb) : -Infinity
+  return { makeupDb, ceilingDb, ceilingKneeDb: ceilingKneeDbFor(outPeakDb - ceilingDb) }
+}

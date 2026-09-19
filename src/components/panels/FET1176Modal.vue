@@ -9,6 +9,9 @@ import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import FET1176TuningPanel from './FET1176TuningPanel.vue'
+import { isFET1176TuningVisible } from '../../audio/effects/fet1176Tuning.js'
+import { INPUT_TRIM_MAX_DB } from '../../audio/dsp/inputAlign.js'
 import PresetMenu from './PresetMenu.vue'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { FET_PUNCH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
@@ -18,10 +21,14 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetScHpf, fetMix,
   fetAutoMakeup, fetPreview, fetReduction, fetInputLevels, fetOutputLevels,
+  fetInputAlignDb, fetInputAuto, syncInputAlign, enableInputAuto,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
   syncDrive, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup,
-  apply, teardown, closeModal,
+  apply, teardown, closeModal, refreshKernelTuning,
 } = useFET1176()
+
+/** Bench only: gated off in production builds. See fet1176Tuning.js. */
+const showTuningBench = isFET1176TuningVisible()
 
 /**
  * Presets. Same two functions and the same ordering constraint as OptoSmooth:
@@ -73,6 +80,7 @@ watch(() => state.selection, () => { resetLiveMakeup(); refreshAutoMakeup() }, {
 // Steel blue rather than the OptoSmooth's amber — at a glance you can tell
 // which of the two is on screen.
 const ACCENT = '#79b8ff'
+const formatTrim = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
 
 const RATIO_OPTIONS = [
   { value: '4', label: '4:1', title: 'Gentle enough to leave on a whole take' },
@@ -191,6 +199,48 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
               label="Input" :accent="ACCENT" :format-value="formatInteger"
               :disabled="!fetPreview"
             />
+          </div>
+          <!-- ALIGN offsets the DETECTOR only, never the audio path — unlike
+               Input beside it, which gains both as the hardware attenuator
+               does. It exists because there is no threshold control, so
+               without it the file's own level decides what Input does:
+               measured at Input 55, ratio 4, a file peaking at -6 dBFS gets
+               13.30 dB of reduction and one at -30 dBFS gets 0.00.
+
+               ⚠ IT IS NOT A SECOND INPUT KNOB, THOUGH IT RENDERS LIKE ONE.
+               An offset and the matching Input move are the same DSP; the
+               difference is what the numbers MEAN. Input is a patch value
+               presets save, this is a property of the FILE. Absorbing a bad
+               measurement by moving Input gets the right sound with the wrong
+               number and bakes the file's gain staging into the preset, which
+               is the portability failure alignment exists to remove.
+
+               AUTO measures the whole file's gated RMS and drives this knob;
+               touching it takes over, exactly as Output behaves. -->
+          <div class="w-[78px] flex flex-col items-center">
+            <div class="relative w-full" :style="{ opacity: fetInputAuto ? 0.78 : 1 }">
+              <Knob
+                :model-value="fetInputAlignDb"
+                @update:model-value="syncInputAlign"
+                :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
+                :value-font-px="13"
+                label="Align" :accent="ACCENT" :format-value="formatTrim"
+                :disabled="!fetPreview"
+              />
+              <span
+                v-if="fetInputAuto"
+                class="absolute top-[2px] right-[2px] px-1 py-[1px] rounded-full pointer-events-none"
+                style="background:rgba(245,166,35,.2);border:1px solid rgba(245,166,35,.4);font:700 6px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#f7c877"
+              >AUTO</span>
+            </div>
+            <button
+              v-if="!fetInputAuto"
+              class="mt-[5px] px-2 py-[2px] rounded-full cursor-pointer transition-all"
+              style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);color:rgba(255,255,255,.4);font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.1em"
+              :disabled="!fetPreview"
+              title="Hand the alignment back to the automatic measurement."
+              @click="enableInputAuto"
+            >AUTO</button>
           </div>
           <div class="w-[118px] flex flex-col items-center">
             <div class="relative w-full" :style="{ opacity: fetAutoMakeup ? 0.78 : 1 }">
@@ -321,6 +371,14 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
           </div>
         </div>
       </div>
+
+      <!-- Bench only: gated off in production builds. See fet1176Tuning.js. -->
+      <FET1176TuningPanel
+        v-if="showTuningBench"
+        :accent="ACCENT"
+        :disabled="!fetPreview"
+        @change="refreshKernelTuning"
+      />
     </div>
   </FloatingWindow>
 </template>

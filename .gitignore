@@ -27,3 +27,6 @@ server/bin/
 *.flac
 *.aiff
 *.m4a
+
+# Reconstructed by `npm run fet:recut` from the as-cut commit; never edited by hand.
+src/audio/.fet-as-cut.generated.mjs

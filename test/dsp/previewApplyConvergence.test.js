@@ -35,7 +35,7 @@ import assert from 'node:assert/strict'
 import { processLA2ABuffer } from '../../src/audio/la2aProcessor.js'
 import { processSchepsBuffer } from '../../src/audio/schepsProcessor.js'
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
-import { processFET1176Buffer } from '../../src/audio/fet1176Processor.js'
+import { FET1176_PREROLL_S, processFET1176Buffer } from '../../src/audio/fet1176Processor.js'
 import { processSoftClipperBuffer } from '../../src/audio/softClipperProcessor.js'
 import { LA2A_PREROLL_S } from '../../src/audio/la2aProcessor.js'
 import { SCHEPS_PREROLL_S } from '../../src/audio/schepsProcessor.js'
@@ -233,21 +233,64 @@ test('⚠ the soft clipper\'s adaptive mode is why it stays deprecated', () => {
   assert.equal(fixed, 0, 'the shipping fixed mode should be history-independent')
 })
 
-test('⚠ FET Punch CANNOT be made exact, and this records why', () => {
-  // `trkInPeak` is a running maximum — "the loudest input sample heard so far"
-  // — so it carries the whole preview session and an offline render cannot
-  // match it. A pre-roll helps a lot (stock: -0.668 dB cold, -0.022 at 2 s) and
-  // never closes. No pre-roll is wired for it.
-  //
-  // If someone gives that tracker a bounded reference — a decaying peak, or a
-  // percentile over a window — this goes red, and FET Punch can then be wired
-  // like the other three.
-  const diff = worstDiff(processFET1176Buffer, { inputDrive: 70, attack: 1, release: 1 }, SR * 2)
-  assert.ok(
-    diff > 1e-4,
-    `FET Punch converged to ${diff.toExponential(2)} — if its makeup tracker `
-    + 'stopped latching, wire preRollSamples for it and delete this test',
-  )
+/**
+ * ⚠⚠ THIS TEST USED TO ASSERT FET PUNCH COULD NOT CONVERGE, AND ITS DIAGNOSIS
+ * WAS WRONG. It blamed `trkInPeak`, the makeup tracker's running maximum. But
+ * that tracker does not latch in the OFFLINE path at all — measured on a fixture
+ * whose loudest moment sits 8 s before the pre-roll window, at loud amplitudes
+ * up to 0.95, the two renders agree to exactly 0. What actually failed to
+ * converge was the release TAIL, whose constant is `releaseS * TAIL_MULT` =
+ * 4.4 s under the old law and so outlasted any lead-in. `TAIL_FRACTION` went to
+ * 0 when the release was fitted to FETish, which has no exposure limb, and the
+ * worst difference over a 2 s lead-in went from 1.64e-1 to 7.11e-15.
+ *
+ * `preRollSamples` is wired for FET Punch now. What is pinned here is that it
+ * earns it.
+ */
+test('FET Punch converges on a pre-roll, now that the tail is gone', () => {
+  const cold = worstDiff(processFET1176Buffer, { inputDrive: 70, attack: 1, release: 1 }, 0)
+  assert.ok(cold > 1e-2, `no lead-in should be visibly wrong; got ${cold.toExponential(2)}`)
+
+  const warm = worstDiff(processFET1176Buffer,
+    { inputDrive: 70, attack: 1, release: 1 }, Math.round(FET1176_PREROLL_S * SR))
+  assert.ok(warm < 1e-9, `slowest ballistics should converge; got ${warm.toExponential(2)}`)
+})
+
+/**
+ * ⚠⚠ ALL-BUTTONS IS BIT-EXACT NOW, AND IT WAS THE ONE THING STOPPING THE WHOLE
+ * PLUGIN CLAIMING EXACTNESS. This test used to assert the opposite — that the
+ * pre-roll CONVERGES but does not reach zero (5.46e-6 at 2 s, 1.04e-7 at 3 s) —
+ * because all-buttons was the only mode still carrying a release tail, held at
+ * 0.45 on the grounds that no all-buttons capture existed to zero it with.
+ *
+ * CLA-76's `bursts.wav` at ratio all supplied one, and it says there is no tail:
+ * the release lengthening across hold lengths is fully accounted for by the
+ * depth schedule, with 0.971x left over. With `ALL_TAIL_FRACTION` at 0 the only
+ * state with memory longer than the pre-roll is gone.
+ *
+ * ⚠ SO THE CAVEAT ON `FET1176_PREROLL_S` IS RETIRED, and if a tail ever comes
+ * back this fails rather than the claim quietly becoming false.
+ */
+test('all-buttons is bit-exact now that its tail is measured away', () => {
+  const params = { inputDrive: 90, attack: 7, release: 7, fetDrive: 1, ratio: 'all' }
+  const warm = worstDiff(processFET1176Buffer, params, Math.round(FET1176_PREROLL_S * SR))
+  assert.equal(warm, 0,
+    `all-buttons should now converge exactly; got ${warm.toExponential(2)} — ` +
+    'has a tail come back, or another stage grown memory longer than the pre-roll?')
+
+  /**
+   * Cold must still be visibly wrong, or the fixture is not exercising anything.
+   *
+   * ⚠ THE BAR MOVED FROM 1e-3 TO 1e-4 WHEN `ALL_ATTACK_LAG` WENT 2.5 -> 1, and
+   * that is the control weakening rather than the kernel improving. A cold
+   * start is wrong for as long as the state takes to catch up, so an attack two
+   * and a half times faster is wrong for less of the buffer: the same fixture
+   * went 2.40e-4 where it used to clear 1e-3. Still four orders above the warm
+   * case, so it does its job — but if this ever has to be lowered again, the
+   * fixture needs a longer-memory setting, not a smaller number.
+   */
+  const cold = worstDiff(processFET1176Buffer, params, 0)
+  assert.ok(cold > 1e-4, `no lead-in should be visibly wrong; got ${cold.toExponential(2)}`)
 })
 
 /**

@@ -13,40 +13,14 @@
  */
 
 import { ensureFET1176Worklet } from '../fet1176WorkletLoader.js'
-import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
+import {
+  FET1176_LATENCY_SAMPLES, FET1176_DEFAULTS, toKernelParams,
+} from './fet1176Params.js'
 
-/**
- * The gain cell and FET stage run oversampled, and the halfband filters that
- * get them there are linear phase, so the plugin delays. Constant at every
- * setting — see `latencySamples` on the kernel.
- */
-export const FET1176_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
-
-export const FET1176_DEFAULTS = {
-  inputDrive: 50, // 0-100, drives the fixed internal threshold
-  output: 0, // makeup gain dB
-  attack: 4, // dial 1-7, 7 = fastest (20 us)
-  release: 4, // dial 1-7, 7 = fastest (50 ms)
-  ratio: '4', // '4' | '8' | '12' | '20' | 'all'
-  fetDrive: 0.35, // FET / output-amp saturation
-  scHpf: 0, // sidechain high-pass corner in Hz, 0 = off (stock)
-  mix: 1, // wet/dry blend for parallel compression
-}
-
-/** Map UI param names to kernel param names. */
-export function toKernelParams(params) {
-  return {
-    inputDrive: params.inputDrive,
-    outputGainDb: params.output,
-    attack: params.attack,
-    release: params.release,
-    ratio: params.ratio,
-    fetDrive: params.fetDrive,
-    scHpfHz: params.scHpf,
-    mix: params.mix,
-  }
-}
+// Re-exported so callers that already reach for these through the effect keep
+// working; the definitions live in fet1176Params.js, which Node can import.
+export { FET1176_LATENCY_SAMPLES, FET1176_DEFAULTS, toKernelParams }
 
 export function createFET1176Compressor(audioContext) {
   const input = audioContext.createGain()
@@ -57,7 +31,16 @@ export function createFET1176Compressor(audioContext) {
   const preOutput = audioContext.createGain()
   const output = audioContext.createGain()
 
-  let params = { ...FET1176_DEFAULTS }
+  /**
+   * ⚠ `inputAlignDb`, `ceilingDb` AND `ceilingKneeDb` ARE SEEDED HERE BECAUSE
+   * `setParam` GATES ON `name in params`.
+   * It is measured from the file rather than dialled, so it is deliberately
+   * absent from `FET1176_DEFAULTS` — and without a seed that gate would drop
+   * every push of it silently, leaving preview running the raw level-dependent
+   * behaviour while apply ran the aligned one. Exactly the reason `ceilingDb`
+   * and `inputAlignDb` are seeded in `la2aCompressor.js`.
+   */
+  let params = { ...FET1176_DEFAULTS, inputAlignDb: null, ceilingDb: null, ceilingKneeDb: null }
   let worklet = null
   let destroyed = false
   let grDb = 0
@@ -110,6 +93,16 @@ export function createFET1176Compressor(audioContext) {
 
     getParam(name) {
       return params[name]
+    },
+
+    /**
+     * Re-send the kernel params without changing a patch param. The bench
+     * tuning is folded in by `toKernelParams` rather than held here, so there
+     * is no param name to set — the panel moves module state and then asks the
+     * live node to pick it up.
+     */
+    refreshKernelParams() {
+      worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
     },
 
     // Negative dB, matching DynamicsCompressorNode.reduction conventions.

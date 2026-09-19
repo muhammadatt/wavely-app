@@ -83,7 +83,8 @@ import {
  */
 import {
   MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor,
-  softCeiling, float32AtOrBelow, percentileOfChannels,
+  softCeiling, float32AtOrBelow, percentileOfChannels, peakOfChannels,
+  solveMakeupPlan,
 } from './dsp/makeupReference.js'
 import { makeVocalSatCurve, VOCAL_SAT_CURVE_LEAN_POSITIVE } from './dsp/vocalSatCurve.js'
 import { highShelf, BiquadCascade } from './dsp/biquad.js'
@@ -2863,86 +2864,6 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
  * Over a region of any real length the effect is tiny, but the auto-makeup that
  * depends on it is exactly the thing users judge bypass A/B by.
  */
-/**
- * Peak magnitude across every sample of every channel, in dB.
- *
- * The default makeup reference. Peak rather than RMS, and the distinction is
- * the whole point of makeup gain: the compressor pulls the loud moments down,
- * makeup hands back what it took, the peaks land where they started and
- * everything underneath rises with them. That is a compressor made louder
- * without being merely turned up — which is the comparison a listener is
- * actually running when they A/B it.
- *
- * Matching RMS instead, as this did, returns only the average loss and
- * therefore leaves the output exactly as loud as the input: a compressor that
- * by construction cannot make anything louder.
- *
- * TRUE PEAK, not a high percentile, and that was measured. A percentile of
- * short-block peaks looks more robust and is worse where it matters: on real
- * speech a fast transient can survive compression almost intact while the p99
- * comes down several dB, so percentile-referenced makeup over-compensates and
- * pushes that survivor ABOVE the source — up to 5.5 dB above, measured. True
- * peak cannot do that; the guarantee it buys is exact.
- *
- * The cost is the opposite failure: a single uncompressed click sets the
- * reference and the makeup comes out small. That is the safe direction — never
- * louder than the source — and the manual trim is there for it.
- *
- * ── THE PERCENTILE IS BACK, AND ONLY BECAUSE THE MISSING HALF ARRIVED ───────
- *
- * ⚠ NOTHING ABOVE IS WITHDRAWN. The percentile alone still fails exactly as
- * described, and the failure reproduces on demand: referencing the 99.9th
- * percentile at Peak Reduction 40 / 50 / 60 / 70 / 80 puts the OUTPUT PEAK at
- * -3.15 / -0.92 / +1.54 / +2.59 / +3.01 dBFS against a source peaking at
- * -2.80 — 5.81 dB above it at the top, against the 5.5 the note above
- * measured. A percentile reference cannot keep the peak guarantee, full stop.
- *
- * WHAT CHANGED IS THAT THE GUARANTEE NO LONGER HAS TO COME FROM THE SOLVE.
- * `ceilingDb` enforces it downstream, so the pair keeps the same promise the
- * peak reference kept — output peak never exceeds input peak — while spending
- * the headroom a lone transient was sitting on. That promise is now pinned by
- * `test/dsp/la2aMakeupReference.test.js` rather than being a property of the
- * arithmetic, which is the real cost of the change and is stated here so
- * nobody has to rediscover it: it is enforced, not structural, and the two
- * halves must ship together. `computeAutoMakeupPlan` is the only way to get
- * either, and it returns both.
- *
- * WHY IT IS WORTH IT. The lone-transient failure the note above calls "the safe
- * direction" is not free — it is the whole of the Peak Reduction 60 loudness
- * collapse. On narration whose binding peak is one onset out of a 180 ms pause,
- * peak-normalised to -1 dBFS at Peak Reduction 50: rms -17.39 -> -16.80 dB and
- * peak-over-body 4.38 -> 3.78 dB, with delivered speech dynamic range unmoved
- * at 9.11 -> 9.13. It recovers loudness that was being discarded rather than
- * buying it by compressing harder — a hardware LA-2A capture of the same take
- * sits at -16.38 and 3.35.
- *
- * ⚠ AND THE PERCENTILE IS NOW WHAT THE APP USES. It shipped off by default and
- * behind a panel toggle, was auditioned, and the toggle came back out: there is
- * no material on which the peak reference is the better answer, so there was
- * nothing for a user to choose between. `useLA2A` fixes the reference and the
- * panel has no control for it.
- *
- * ⚠ WHICH MEANS EVERY PATCH, PRESET AND PREVIOUSLY RENDERED FILE NOW SOUNDS
- * DIFFERENT — several dB louder at the same settings, and louder the further up
- * the knob. That is the intended change and it is not reversible from the UI.
- * A file already rendered on disk is untouched; the same patch re-applied to it
- * is not the same render.
- *
- * The peak reference remains the DEFAULT of this function and is what
- * `npm run la2a:makeup` renders against for comparison. It is the reference
- * anything measuring "makeup that cannot exceed the source by construction"
- * should still use.
- */
-function peakOfChannels(channels, skip = 0) {
-  let peak = 0
-  for (const ch of channels) {
-    for (let i = skip; i < ch.length; i++) {
-      const v = ch[i] < 0 ? -ch[i] : ch[i]
-      if (v > peak) peak = v
-    }
-  }
-  return peak
-}
 
 function rmsOfChannels(channels, skip = 0) {
   let sumSq = 0
@@ -3002,98 +2923,41 @@ export function computeAutoMakeupDb(channelData, sampleRate, params = {}, option
  */
 export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, options = {}) {
   const { maxIterations = 4, toleranceDb = 0.05, reference = 'peak' } = options
-  if (reference !== 'peak' && reference !== 'percentile') {
-    throw new Error(`unknown makeup reference: ${reference}`)
-  }
 
   // Measured through the base-rate path: oversampling removes folded
   // harmonics, which carry almost no energy, and measuring through it was
   // about three times slower — which the Gain knob showed as lag behind a
   // drag. It does move the peak slightly more than it moves the RMS, so the
   // iteration below re-measures rather than trusting one pass.
+  //
+  // `ceilingDb: null` is the other half of that: ⚠ THE SOLVE MEASURES WITHOUT
+  // THE CEILING, DELIBERATELY. Including it would make the objective
+  // non-monotone in the makeup — past the ceiling, more gain stops moving the
+  // measured statistic — and the iteration could run away against a curve that
+  // has flattened. Measuring below it and enforcing above it keeps the solve on
+  // a monotone objective, and the two cannot disagree by much in any case: the
+  // ceiling engages on the top ten-thousandth of samples and the reference is
+  // read at the top thousandth.
   const measureParams = { ...params, oversample: false, ceilingDb: null }
 
-  const measureRef = reference === 'percentile'
-    ? (chs) => percentileOfChannels(chs, MAKEUP_PERCENTILE)
-    : peakOfChannels
-
-  const inputPeak = peakOfChannels(channelData)
-  const inputRef = measureRef(channelData)
-  if (!(inputPeak > 0) || !(inputRef > 0)) {
-    return { makeupDb: 0, ceilingDb: null, ceilingKneeDb: null }
-  }
-
-  /**
-   * ⚠ THE MEASURED SPAN MUST BE THE SPAN APPLY WRITES BACK, not the raw render.
-   *
-   * With lookahead the output lags its input, so the last `latency` samples of
-   * the region never emerge and the first `latency` are the delay line filling
-   * with silence. Measuring the render as-is therefore compares a region's
-   * input peak against an output missing that region's tail — and on a short
-   * selection the tail is where the peak often is. `applyWorkletRegion` already
-   * solves this the same way for the render it splices in: extend, then trim.
-   * This is that, so the solve and the apply see the same audio.
-   *
-   * Zero at lookahead 0, where it telescopes to the old behaviour exactly.
-   */
-  const latency = la2aLatencySamples(measureParams, sampleRate)
-  const padded = latency > 0
-    ? channelData.map((ch) => {
-      const p = new Float32Array(ch.length + latency)
-      p.set(ch, 0)
-      return p
-    })
-    : channelData
-
-  let makeupDb = 0
-  /**
-   * The un-ceilinged peak of the last render, and the makeup it was rendered
-   * at. The knee is sized from how far this sits over the ceiling, and these
-   * come free — the loop already renders without the ceiling, deliberately
-   * (see above), which is exactly the measurement the knee needs.
-   */
-  let lastOutPeak = 0
-  let lastMakeupDb = 0
-  for (let i = 0; i < maxIterations; i++) {
-    const { channelData: rendered } = processLA2ABuffer(padded, sampleRate, {
-      ...measureParams,
-      gainDb: makeupDb,
-    })
-    const out = latency > 0
-      ? rendered.map((ch) => ch.subarray(latency, latency + channelData[0].length))
-      : rendered
-    lastOutPeak = peakOfChannels(out)
-    lastMakeupDb = makeupDb
-    const outRef = measureRef(out)
-    if (outRef <= 0) break
-    const correctionDb = 20 * Math.log10(inputRef / outRef)
-    makeupDb = clamp(makeupDb + correctionDb, -24, 24)
-    if (Math.abs(correctionDb) < toleranceDb) break
-  }
-  if (reference !== 'percentile') {
-    // The peak reference needs no ceiling, so it needs no knee either.
-    return { makeupDb, ceilingDb: null, ceilingKneeDb: null }
-  }
-  const ceilingDb = 20 * Math.log10(inputPeak)
-  /**
-   * The loop renders at `makeupDb` and only THEN corrects it, so the last
-   * render is one step stale. Carried forward rather than re-rendered: the gain
-   * is ahead of the peak by that step, and the step is under `toleranceDb` on a
-   * converged solve. Only an unconverged one makes it large, and there the
-   * correction is what keeps the knee honest.
-   */
-  const outPeakDb = lastOutPeak > 0
-    ? 20 * Math.log10(lastOutPeak) + (makeupDb - lastMakeupDb) : -Infinity
-  return {
-    makeupDb,
-    // The guarantee, restated as a number the kernel can enforce: the source's
-    // own peak. `softCeiling` never lets the output exceed it — at or under,
-    // not strictly under; see the note there for why that distinction is the
-    // honest one and not a weaker claim.
-    ceilingDb,
-    // How soft that enforcement has to be, from how much there is to enforce.
-    ceilingKneeDb: ceilingKneeDbFor(outPeakDb - ceilingDb),
-  }
+  return solveMakeupPlan({
+    channelData,
+    // ⚠ THE MEASURED SPAN MUST BE THE SPAN APPLY WRITES BACK — the solver pads
+    // and trims by this, so it must be the latency of `measureParams` and not
+    // of `params`. `applyWorkletRegion` already solves it the same way for the
+    // render it splices in; this is that, so the solve and the apply see the
+    // same audio.
+    latencySamples: la2aLatencySamples(measureParams, sampleRate),
+    render: (chs, extra) => processLA2ABuffer(chs, sampleRate, {
+      ...measureParams, ...extra,
+    }).channelData,
+    gainKey: 'gainDb',
+    reference,
+    maxIterations,
+    toleranceDb,
+    minDb: -24,
+    maxDb: 24,
+  })
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────

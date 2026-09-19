@@ -3,6 +3,10 @@ import { applyGainSegments } from './dsp/autoLevel.js'
 import { analysisWindow, analysedWholeRegion, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_PREROLL_S } from './la2aProcessor.js'
+// ⚠ From the PROCESSOR, not the effect wrapper — the wrapper pulls the worklet
+// URL and does not re-export kernel constants. Same shape as LA2A_PREROLL_S.
+import { FET1176_PREROLL_S } from './fet1176Processor.js'
+import { restorePeakToCeiling } from './dsp/makeupReference.js'
 import {
   LA2A_DEFAULTS, la2aPatchLatencySamples, toKernelParams,
 } from './effects/la2aCompressor.js'
@@ -503,7 +507,7 @@ export function loudnessNormalizeRegion(
  * why each span is right for its job.
  *
  * `ceilingDb` is null under the peak reference, which needs no ceiling: its
- * guarantee is arithmetic. See `peakOfChannels` in la2aProcessor.js.
+ * guarantee is arithmetic. See `peakOfChannels` in dsp/makeupReference.js.
  */
 export function computeLA2AAutoMakeup(
   segments, start, end, kernelParams, sampleRate, channels, reference = 'peak',
@@ -530,10 +534,40 @@ export function computeLA2AAutoMakeup(
   })
 }
 
-/** Measure the FET Punch auto-makeup (Output) for a region — see above. */
-export function computeFET1176AutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
-  return measureInWorker('fet1176AutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
-    .then(d => d.makeupDb)
+/**
+ * Measure FET Punch's auto-makeup for a region. Resolves
+ * `{ makeupDb, ceilingDb, ceilingKneeDb }`.
+ *
+ * ⚠ THE SAME CONTRACT AS `computeLA2AAutoMakeup`, DELIBERATELY — read its note
+ * for all of it. The two halves are measured over different spans (makeup from
+ * the worker's capped window because solving it means running the kernel; the
+ * ceiling over the WHOLE region because "never louder than the source" is a
+ * claim about the source, not about its first thirty seconds), and the knee
+ * must not be dropped or the kernel silently falls back to the widest fixed
+ * width and every render loses peak headroom.
+ *
+ * `ceilingDb` is null under the peak reference, which needs no ceiling.
+ */
+export function computeFET1176AutoMakeup(
+  segments, start, end, kernelParams, sampleRate, channels, reference = 'peak',
+) {
+  return measureInWorker(
+    'fet1176AutoMakeup', segments, start, end, { ...kernelParams, reference }, sampleRate, channels,
+  ).then((d) => {
+    if (reference !== 'percentile') {
+      return { makeupDb: d.makeupDb, ceilingDb: null, ceilingKneeDb: null }
+    }
+    const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
+    return {
+      makeupDb: d.makeupDb,
+      ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+      // The measured width only when the solve saw everything the ceiling was
+      // measured over — see `analysedWholeRegion`.
+      ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+        ? d.ceilingKneeDb
+        : null,
+    }
+  })
 }
 
 /**
@@ -759,14 +793,37 @@ export function applyLA2ARegion(segments, start, end, params, sampleRate, channe
   })
 }
 
-/** Apply FET Punch (1176) compression to a region. */
-export function applyFET1176Region(segments, start, end, params, sampleRate, channels) {
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+/**
+ * Apply FET Punch (1176) compression to a region.
+ *
+ * Resolves `{ buffer, trimDb }` rather than a bare buffer: the peak restore is
+ * a per-region measurement the panel reports, so it has to come back out.
+ *
+ * ⚠ THE RESTORE IS MEASURED ON THIS RENDER, WHICH IS WHY IT LIVES HERE AND NOT
+ * IN THE SOLVE. The makeup is solved on a capped window; this buffer is the
+ * whole region. See `peakRestoreTrimDb` for why a window-derived trim would
+ * push a late loud passage past the source peak, and for the preview/apply
+ * divergence this deliberately accepts.
+ *
+ * ⚠ AFTER THE PRE-ROLL AND LATENCY ARE TRIMMED, necessarily — a peak sitting in
+ * the discarded head is not part of what lands on the timeline, and measuring
+ * before the trim would size the restore from audio the user never gets.
+ */
+export async function applyFET1176Region(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params })
+  const buffer = await applyWorkletRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureFET1176Worklet,
     processorName: 'fet1176-processor',
-    kernelParams: toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params }),
+    kernelParams,
     latencySamples: FET1176_LATENCY_SAMPLES,
+    // Convergent at this length once the tail came off — see FET1176_PREROLL_S.
+    preRollSamples: Math.round(FET1176_PREROLL_S * sampleRate),
   })
+  const channelData = []
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) channelData.push(buffer.getChannelData(ch))
+  // getChannelData hands back the buffer's own storage, so this scales in place.
+  const trimDb = restorePeakToCeiling(channelData, kernelParams.ceilingDb)
+  return { buffer, trimDb }
 }
 
 /**

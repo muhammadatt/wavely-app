@@ -66,10 +66,25 @@ function peakDb(channels, skip = 0) {
 
 const SIGNAL = material()
 
+/**
+ * ⚠ THIS NO LONGER GUARDS A SHORTCUT FET PUNCH TAKES. `computeFET1176AutoMakeupDb`
+ * used to solve at `oversample: false` while apply rendered oversampled, which
+ * was 0.58 dB out on the tanh curve; it renders oversampled now. What is left is
+ * a characterisation of how far the two paths drift, which is worth keeping
+ * because the drift is not constant.
+ *
+ * ⚠ AND IT GREW WHEN THE INPUT KNOB DID. The base-rate path aliases the
+ * saturator's harmonics where the oversampled path folds them out, so the gap
+ * tracks DRIVE — measured on a mild signal at ratio 'all', fetDrive 1:
+ * 0.0133 dB at 7.9 dB of drive, 0.0257 at 16.2, 0.0498 at 24.0, roughly doubling
+ * every 8 dB. `IN_DRIVE_SPAN_DB` going 40 -> 48 added 8 dB at the top of the
+ * knob and so doubled the worst case, which on this suite's material took it
+ * from just inside 0.05 to 0.1031. The top of travel therefore carries its own
+ * bound, stated rather than folded into a looser one for everything.
+ */
+const TOP_OF_TRAVEL_TOLERANCE_DB = 0.15
+
 test('FET Punch: the measurement path measures the same level as the audio path', () => {
-  // The tolerance is the whole argument for the shortcut. Oversampling removes
-  // folded harmonics, which carry almost no energy, so the RMS it changes is a
-  // rounding error next to the gain being set from it.
   for (const params of [
     { inputDrive: 30, ratio: '4', attack: 1, release: 4, fetDrive: 0 },
     { inputDrive: 50, ratio: '4', attack: 4, release: 4, fetDrive: 0.35 },
@@ -82,12 +97,28 @@ test('FET Punch: the measurement path measures the same level as the audio path'
     // The oversampled output is delayed, so skip its ramp-up on both sides.
     const delta = rmsDb(over.channelData, OVERSAMPLE_LATENCY_SAMPLES)
       - rmsDb(base.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+    const limit = params.inputDrive >= 100 ? TOP_OF_TRAVEL_TOLERANCE_DB : 0.05
     assert.ok(
-      Math.abs(delta) < 0.05,
+      Math.abs(delta) < limit,
       `inputDrive ${params.inputDrive} ratio ${params.ratio}: `
-      + `oversampled RMS differs from base-rate by ${delta.toFixed(4)} dB`,
+      + `oversampled RMS differs from base-rate by ${delta.toFixed(4)} dB (limit ${limit})`,
     )
   }
+})
+
+test('the base-rate gap grows with drive, which is why the top of travel has its own bound', () => {
+  // ⚠ The monotonicity is the claim. If this ever went flat, the bound above
+  // would be an arbitrary number rather than a consequence of the wider knob.
+  const at = (inputDrive) => {
+    const p = { inputDrive, ratio: 'all', attack: 4, release: 4, fetDrive: 1 }
+    const over = processFET1176Buffer([SIGNAL], SR, { ...p, oversample: true })
+    const base = processFET1176Buffer([SIGNAL], SR, { ...p, oversample: false })
+    return Math.abs(rmsDb(over.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+      - rmsDb(base.channelData, OVERSAMPLE_LATENCY_SAMPLES))
+  }
+  const low = at(60), mid = at(80), high = at(100)
+  assert.ok(low < mid && mid < high, `gap not monotonic in drive: ${low} / ${mid} / ${high}`)
+  assert.ok(high < TOP_OF_TRAVEL_TOLERANCE_DB)
 })
 
 test('OptoSmooth: the measurement path measures the same level as the audio path', () => {
