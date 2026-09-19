@@ -15,6 +15,7 @@
  *   node scripts/fet-release-depth.mjs            fit against the FETish table
  *   node scripts/fet-release-depth.mjs --selftest recover a known k
  */
+import { basename } from 'node:path'
 import { analyseCapture } from './fet-ballistics.mjs'
 import { buildProbe, snapToZeroCrossing } from './lib/probeStimulus.js'
 import { FET1176Kernel } from '../src/audio/fet1176Processor.js'
@@ -271,6 +272,16 @@ function fit() {
   console.log()
 }
 
-const args = process.argv.slice(2)
-if (args.includes('--selftest')) selftest()
-else fit()
+/**
+ * ⚠ ENTRY-POINT GUARDED, AND IT WAS NOT. `fetReleaseDepth.test.js` imports
+ * `measureAt` / `fitK` / `curveFor` from this module, and an unconditional
+ * dispatch runs the whole nested fit during module initialisation — before a
+ * single assertion, on every `npm test`. The same defect was found and fixed in
+ * `fet-stairs.mjs`; a module that exports helpers must not also run a report
+ * just because something imported it.
+ */
+if (basename(process.argv[1] ?? '') === 'fet-release-depth.mjs') {
+  const args = process.argv.slice(2)
+  if (args.includes('--selftest')) selftest()
+  else fit()
+}

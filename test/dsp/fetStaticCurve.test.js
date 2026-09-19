@@ -24,10 +24,12 @@ import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureFetStimulus } from './ensureFetStimulus.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const STIM = join(ROOT, 'data/corpus/fet1176/stimulus/thd.wav')
-const haveStimulus = existsSync(STIM)
+// Generated on demand rather than skipped — see `ensureFetStimulus`.
+ensureFetStimulus()
 
 let cached = null
 function selftest() {
@@ -57,7 +59,7 @@ const coefOf = (s, n) => {
   return null
 }
 
-test('recovers a known 4th/5th-order curve', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+test('recovers a known 4th/5th-order curve', () => {
   const s = section(selftest(), 'x - 0.01·x⁴ + 0.01·x⁵')
   assert.match(s, /basis chosen from the data: x\^\[1, 4, 5\]/,
     'the basis must be read from the harmonic slopes, not assumed')
@@ -68,7 +70,7 @@ test('recovers a known 4th/5th-order curve', { skip: !haveStimulus && 'run npm r
   assert.ok(Math.abs(coefOf(s, 1) - 1) < 1e-4, `c1 = ${coefOf(s, 1)}, expected 1`)
 })
 
-test('recovers a pure cubic exactly', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+test('recovers a pure cubic exactly', () => {
   const s = section(selftest(), 'pure cubic')
   assert.match(s, /basis chosen from the data: x\^\[1, 3\]/)
   assert.ok(Math.abs(coefOf(s, 3) - -0.2) < 1e-5, `c3 = ${coefOf(s, 3)}`)
@@ -76,7 +78,7 @@ test('recovers a pure cubic exactly', { skip: !haveStimulus && 'run npm run fet:
 })
 
 test('our own tanh reads as cubic-dominant, which is why it cannot reach FETish',
-  { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+  () => {
     // FETish measures an H2 slope of 3.0 (a 4th-order term). A tanh's leading
     // nonlinearity is cubic, giving H2 a slope near 1 — no drive value closes
     // that gap, which is the whole argument for replacing the curve.
@@ -86,7 +88,7 @@ test('our own tanh reads as cubic-dominant, which is why it cannot reach FETish'
   })
 
 test('every self-test curve extrapolates to a level it was not fitted on',
-  { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+  () => {
     // ⚠ The hold-out is what separates "a curve fits" from "a curve IS the
     // model". A level-dependent mechanism fits every level individually and
     // fails to predict one it never saw.

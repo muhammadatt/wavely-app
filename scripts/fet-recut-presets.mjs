@@ -33,7 +33,8 @@
  * re-cutting a preset against an unmeasured law would dress a guess as a fit.
  * It keeps its original dials until CLA-76 supplies the captures.
  */
-import { basename } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import * as NEW from '../src/audio/fet1176Processor.js'
 
 const SR = 44100
@@ -326,15 +327,53 @@ function selftest() {
   return bad
 }
 
+/**
+ * The commit the factory presets were cut against. Every constant that has
+ * moved since is module-level, so checking this one file out reconstructs that
+ * kernel exactly — there is no patch that could express it.
+ */
+export const AS_CUT_COMMIT = '57e1877'
+
+/**
+ * Materialise the as-cut kernel from git history.
+ *
+ * ⚠ IT IS WRITTEN BESIDE THE CURRENT PROCESSOR, NOT INTO A TEMP DIRECTORY, and
+ * that is load-bearing rather than tidy: the file imports `./dsp/oversample.js`
+ * and its siblings by relative path, so anywhere else on disk it fails to
+ * resolve. The name is dot-prefixed and gitignored.
+ *
+ * ⚠ `npm run fet:recut` USED TO REQUIRE `--as-cut <path>` AND PRINT USAGE
+ * WITHOUT IT, so the documented command did nothing on a clean checkout and the
+ * input it named was not in the repository either. The flag still works for a
+ * kernel from somewhere else; with nothing passed, this is the default.
+ */
+async function materialiseAsCut() {
+  const { execFileSync } = await import('node:child_process')
+  const { writeFileSync } = await import('node:fs')
+  const here = dirname(fileURLToPath(import.meta.url))
+  const out = join(here, '..', 'src', 'audio', '.fet-as-cut.generated.mjs')
+  const src = execFileSync(
+    'git', ['show', `${AS_CUT_COMMIT}:src/audio/fet1176Processor.js`],
+    { cwd: join(here, '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  )
+  writeFileSync(out, src)
+  return out
+}
+
 if (basename(process.argv[1] ?? '') === 'fet-recut-presets.mjs') {
   if (process.argv.includes('--selftest')) process.exit(selftest() === 0 ? 0 : 1)
   else {
     const i = process.argv.indexOf('--as-cut')
-    if (i < 0 || !process.argv[i + 1]) {
-      console.log('\nUsage: node scripts/fet-recut-presets.mjs --as-cut <path to the 57e1877 processor>')
-      console.log('  git show 57e1877:src/audio/fet1176Processor.js > /tmp/as-cut.mjs\n')
-      process.exit(1)
+    let path = i >= 0 ? process.argv[i + 1] : null
+    if (!path) {
+      try {
+        path = await materialiseAsCut()
+      } catch (err) {
+        console.log(`\nCould not read the as-cut kernel from git (${AS_CUT_COMMIT}): ${err.message}`)
+        console.log('Pass one explicitly:  node scripts/fet-recut-presets.mjs --as-cut <path>\n')
+        process.exit(1)
+      }
     }
-    await report(process.argv[i + 1])
+    await report(path)
   }
 }

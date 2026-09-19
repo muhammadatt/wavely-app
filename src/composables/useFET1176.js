@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { fet1176TuningState } from '../audio/effects/fet1176Tuning.js'
 import { applyFET1176Region, computeFET1176AutoMakeup, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { fet1176Effect, FET1176_DEFAULTS } from '../audio/effects/fet1176Compressor.js'
@@ -143,6 +144,16 @@ function currentParams() {
 /** Params for the measurement pass — makeup is what we're solving for. */
 function measurementParams() {
   return {
+    /**
+     * ⚠⚠ THE BENCH TUNING HAS TO REACH THE SOLVE, AND IT DID NOT. These params
+     * go to the measurement worker, which is a separate thread with its own
+     * module state — `toKernelParams` folds the tuning in for the live worklet
+     * and for offline apply, and this path bypasses it. So after changing the
+     * curve, the FET position, the attack range or schedule, or the
+     * ratio-threshold mode, the makeup and the ceiling knee were solved against
+     * the SHIPPING kernel while preview and apply rendered the tuned one.
+     */
+    ...fet1176TuningState(),
     inputDrive: fetInput.value,
     outputGainDb: 0,
     attack: fetAttack.value,
@@ -157,6 +168,15 @@ function measurementParams() {
      * a different amount of work and the knob lands wrong.
      */
     inputAlignDb: fetInputAlignDb.value,
+    /**
+     * ⚠ THE SOLVE MUST BE BOUNDED BY THE KNOB IT LANDS ON. The plan defaults to
+     * +/-36 dB; this panel clamps Output to OUTPUT_MIN_DB..OUTPUT_MAX_DB. A
+     * solve landing above the knob's travel was clamped afterwards, but the
+     * ceiling KNEE had already been sized for the gain the clamp threw away, so
+     * the pair no longer described the audio that renders. Bound both together.
+     */
+    makeupMinDb: OUTPUT_MIN_DB,
+    makeupMaxDb: OUTPUT_MAX_DB,
   }
 }
 

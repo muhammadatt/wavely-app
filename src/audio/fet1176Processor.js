@@ -1980,7 +1980,21 @@ export function computeFET1176AutoMakeupPlan(channelData, sampleRate, params = {
     // OptoSmooth's does. The ceiling is enforcement placed downstream of the
     // answer; measuring through it would fold the enforcement into the thing
     // being enforced, and `b[i]` would stop being the wet path at unity.
-    ...params, outputGainDb: 0, mix: 1, ceilingDb: null, ceilingKneeDb: null,
+    ...params,
+    /**
+     * ⚠⚠ `oversample` IS PINNED ON AFTER THE SPREAD, AND THE SPREAD IS WHY.
+     * `latency` above is read from a DEFAULT kernel, which is oversampled and
+     * reports 50 samples; `latencySamples` returns 0 when oversampling is off.
+     * A caller passing `oversample: false` therefore got a render with no
+     * delay, from which this still stripped 50 samples — pairing `dry[i]`
+     * against `wet[i + 50]` and solving the makeup against a transient offset
+     * by 1.1 ms. It also has to be on to match what apply renders.
+     */
+    oversample: true,
+    outputGainDb: 0,
+    mix: 1,
+    ceilingDb: null,
+    ceilingKneeDb: null,
   })
   const wet = wetPadded.map(ch => ch.subarray(latency))
 

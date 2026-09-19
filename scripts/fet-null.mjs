@@ -934,7 +934,14 @@ const dirArg = args.indexOf('--dir')
 if (dirArg >= 0 && args[dirArg + 1]) capDir = args[dirArg + 1]
 
 if (args.includes('--selftest')) {
-  const out = args[dirArg + 1] || join(STIM_DIR, '..', 'selftest')
+  /**
+   * ⚠ `dirArg` IS -1 WHEN `--dir` IS ABSENT, and `args[-1 + 1]` is `args[0]` —
+   * which for the packaged self-test is the string `--selftest`. The guard
+   * above already refuses that for `capDir`; this line did not, so
+   * `npm run fet:null:selftest` wrote its scratch renders into a directory
+   * literally named `--selftest`. Read the same way it is set.
+   */
+  const out = (dirArg >= 0 && args[dirArg + 1]) || join(STIM_DIR, '..', 'selftest')
   selftest(out)
 } else {
   main()

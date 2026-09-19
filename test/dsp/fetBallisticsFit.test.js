@@ -20,11 +20,13 @@ import { fileURLToPath } from 'node:url'
 import { tailTestHolds, declaredSeconds, labelRatio, PLANS, analyseCapture, transientVerdict } from '../../scripts/fet-ballistics.mjs'
 import { buildProbe } from '../../scripts/lib/probeStimulus.js'
 import { FET1176Kernel, releaseSecondsForDial } from '../../src/audio/fet1176Processor.js'
+import { ensureFetStimulus } from './ensureFetStimulus.js'
 
 const SR = 96000
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
-const haveStimulus = existsSync(join(ROOT, 'data/corpus/fet1176/stimulus/thd.wav'))
+// Generated on demand rather than skipped — see `ensureFetStimulus`.
+ensureFetStimulus()
 
 let cached = null
 function selftest() {
@@ -45,7 +47,7 @@ function section(out, name) {
   return j < 0 ? rest : rest.slice(0, j)
 }
 
-const opts = { skip: !haveStimulus && 'run npm run fet:stimulus first' }
+const opts = {}
 
 test('recovers an unknown capture latency to the sample', opts, () => {
   // ⚠ Envelope alignment lands within ~12 samples, which is half a period at

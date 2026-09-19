@@ -53,7 +53,16 @@ export function readCapture(path, expectSampleRate) {
  * difference across every sample means the audio never entered it.
  */
 export function isUnprocessed(capture, stimulus) {
-  const n = Math.min(capture.length, stimulus.length)
+  /**
+   * ⚠ LENGTHS MUST MATCH, and comparing only the shared prefix was wrong in the
+   * dangerous direction. A bounce truncated before the processed events — the
+   * commonest way a capture goes wrong after exporting the source track — has a
+   * prefix identical to the stimulus, so a prefix test calls it "the source
+   * track, unprocessed" and takes the bypass verdict. `preflight` only WARNS
+   * about truncation, so nothing else stops it.
+   */
+  if (capture.length !== stimulus.length) return false
+  const n = stimulus.length
   for (let i = 0; i < n; i++) if (capture[i] !== stimulus[i]) return false
   return n > 0
 }

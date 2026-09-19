@@ -59,11 +59,26 @@ export function grForLevel(levelDb, { effThresholdDb, slope, kneeDb }) {
 /** Ratio implied by a slope. Advisory only — see the header. */
 export const ratioForSlope = slope => (slope >= 1 ? Infinity : 1 / (1 - slope))
 
-/** Settled reduction at each step of the staircase. */
+/**
+ * Settled reduction at each step of the staircase.
+ *
+ * ⚠⚠ THE LEVEL COMES FROM THE EVENT'S TAG, NEVER FROM THE ARRAY INDEX. Both
+ * `stairDepths` and the finite filter below DROP rows — a step whose held
+ * window is unavailable in a short or partial capture produces no reading — and
+ * indexing `plan.events[i]` after a drop pairs every later depth with the
+ * WRONG input level. The staircase is monotonic in level, so the result is not
+ * noise: it is a smoothly wrong curve that fits beautifully and reports a
+ * fabricated threshold and slope. Nothing downstream could tell.
+ *
+ * Today's stair plans carry no conditioning events and full captures lose no
+ * rows, so this has not bitten; it is a silent corruption waiting for the first
+ * truncated bounce, which is exactly the case this tooling is meant to catch.
+ */
 export function stairCurve(y, plan, stim, sampleRate, lag) {
+  const levelForTag = new Map(plan.events.map(ev => [ev.tag, ev.L]))
   return stairDepths(y, plan, stim, sampleRate, lag)
-    .filter(b => Number.isFinite(b.depthDb))
-    .map((b, i) => ({ levelDb: plan.events[i].L, tag: b.tag, grDb: b.depthDb }))
+    .filter(b => Number.isFinite(b.depthDb) && levelForTag.has(b.tag))
+    .map(b => ({ levelDb: levelForTag.get(b.tag), tag: b.tag, grDb: b.depthDb }))
 }
 
 /** The sharpest knee the SEARCH can express. Below this the law is a corner. */

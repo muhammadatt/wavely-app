@@ -315,7 +315,21 @@ function selftest(sampleRate) {
 }
 
 if (basename(process.argv[1] ?? '') === 'fet-static-fit.mjs') {
-  const sampleRate = 44100
-  if (process.argv.includes('--selftest')) process.exit(selftest(sampleRate) === 0 ? 0 : 1)
+  /**
+   * ⚠⚠ THE REPORT SIMULATES AT THE RATE THE TARGETS WERE CAPTURED AT, AND IT
+   * USED TO HARDCODE 44100 AGAINST 96 kHz READINGS. This is simulate-and-match:
+   * the whole method rests on our side going through the SAME instrument as the
+   * reference, and the staircase reading is sample-rate dependent — the attack
+   * rounds the corner of the knee over a fixed number of SECONDS, so it rounds
+   * it over a different number of samples at each rate. Fitting a 44.1 kHz
+   * simulation to 96 kHz readings matches two different systems.
+   *
+   * ⚠ The self-test keeps its own rate deliberately: it plants a known law and
+   * asks whether the fitter recovers it, which is a statement about the fitter
+   * and not about any capture, so it must not follow a data file.
+   */
+  const targets = loadTargets()
+  const sampleRate = Number(targets.sampleRate) || 44100
+  if (process.argv.includes('--selftest')) process.exit(selftest(44100) === 0 ? 0 : 1)
   else report(sampleRate)
 }

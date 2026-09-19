@@ -144,6 +144,30 @@ export function fet1176TuningOverrides() {
 }
 
 /**
+ * The COMPLETE tuning state — every key, whether or not it differs from its
+ * shipping value.
+ *
+ * ⚠⚠ A DIFF CANNOT EXPRESS "BACK TO THE DEFAULT", AND THAT IS WHY THIS EXISTS.
+ * `FET1176Kernel.setParams` merges (`{ ...this.params, ...partial }`), so a key
+ * the patch omits keeps whatever the kernel last had. Resetting a bench rocker
+ * removes that key from `fet1176TuningOverrides()`, so the refresh posted a
+ * partial object and the LIVE worklet went on running the old value —
+ * `fetCurve: 'tanh'`, say, or `ratioThreshold: 'fixed'` — while offline apply
+ * built a fresh kernel on the shipping defaults. Reset silently produced two
+ * different compressors.
+ *
+ * ⚠ The same shape of bug as `ratioThreshold: undefined` reading back as
+ * 'fixed' in the kernel, and the fix there does not cover this one: a merged
+ * param that is STALE is not `undefined`, so the kernel's own fallback never
+ * sees it. It has to be sent.
+ */
+export function fet1176TuningState() {
+  const out = {}
+  for (const k of KEYS) out[k] = tuning[k]
+  return out
+}
+
+/**
  * Merge a partial update. Unknown keys, and values outside the allowed set,
  * are ignored rather than stored — a typo here would otherwise reach
  * `setParams`, which treats anything it does not recognise as the default and

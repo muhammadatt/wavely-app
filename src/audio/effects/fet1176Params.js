@@ -16,7 +16,7 @@
  * unaffected.
  */
 
-import { fet1176TuningOverrides } from './fet1176Tuning.js'
+import { fet1176TuningState } from './fet1176Tuning.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 
 /**
@@ -54,13 +54,18 @@ export const FET1176_DEFAULTS = {
  * and the offline apply path build their params through this function, so
  * merging at one point is what keeps them sample-identical — the alternative is
  * threading the tuning through every caller and relying on none of them
- * forgetting. `fet1176TuningOverrides()` is empty unless the bench panel has
- * been touched, so the untouched result is byte-identical to what this returned
- * before the panel existed. See `fet1176Tuning.js`.
+ * forgetting. See `fet1176Tuning.js`.
+ *
+ * ⚠ THE COMPLETE STATE, NOT THE DIFF AGAINST THE DEFAULTS. It used to send only
+ * the keys that differed, which cannot say "this one went back to normal": the
+ * kernel merges partials, so a reset key kept its old value in the live worklet
+ * while apply got the default. Every key travels every time. The values are the
+ * shipping defaults until the bench panel is touched, so an untouched result is
+ * behaviourally identical to what this returned before the panel existed.
  */
 export function toKernelParams(params) {
   return {
-    ...fet1176TuningOverrides(),
+    ...fet1176TuningState(),
     inputDrive: params.inputDrive,
     outputGainDb: params.output,
     attack: params.attack,

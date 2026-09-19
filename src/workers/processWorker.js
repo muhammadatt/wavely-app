@@ -129,9 +129,20 @@ function la2aAutoMakeup(channelData, sampleRate, params) {
  * because the ceiling itself is measured over the WHOLE region upstream.
  */
 function fet1176AutoMakeup(channelData, sampleRate, params) {
-  const { reference = 'peak', ...kernelParams } = params ?? {}
+  /**
+   * ⚠ `makeupMinDb` / `makeupMaxDb` RIDE IN AND ARE PULLED BACK OUT, like
+   * `reference`. The plan's own defaults are +/-36 dB while the panel's Output
+   * knob stops at +24: a solve past the knob's travel got clamped by the panel
+   * afterwards, but `ceilingKneeDb` had already been sized for the gain that
+   * clamp discarded, so the makeup/knee pair stopped describing the render.
+   * Bounding the solve makes both answers come from the same gain.
+   */
+  const { reference = 'peak', makeupMinDb, makeupMaxDb, ...kernelParams } = params ?? {}
   try {
-    const plan = computeFET1176AutoMakeupPlan(channelData, sampleRate, kernelParams, { reference })
+    const options = { reference }
+    if (Number.isFinite(makeupMinDb)) options.minDb = makeupMinDb
+    if (Number.isFinite(makeupMaxDb)) options.maxDb = makeupMaxDb
+    const plan = computeFET1176AutoMakeupPlan(channelData, sampleRate, kernelParams, options)
     postDone({ makeupDb: plan.makeupDb, ceilingKneeDb: plan.ceilingKneeDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })

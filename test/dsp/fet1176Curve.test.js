@@ -263,6 +263,26 @@ test('the bench can set every key the legacy patch carries', async () => {
   }
   t.resetFET1176Tuning()
   assert.deepEqual(t.fet1176TuningOverrides(), {}, 'and reset must emit nothing at all')
+
+  /**
+   * ⚠⚠ AND THAT IS EXACTLY WHY THE WORKLET IS SENT THE STATE, NOT THE DIFF. A
+   * diff cannot express "back to the default": the kernel merges partials, so a
+   * reset key kept its OLD value in the live node while offline apply built a
+   * fresh kernel on the shipping default — Reset quietly produced two different
+   * compressors. `fet1176TuningState()` always carries every key.
+   */
+  const state = t.fet1176TuningState()
+  assert.deepEqual(state, { ...t.FET1176_TUNING_DEFAULTS },
+    'reset must send every key at its shipping value, not an empty object')
+  t.setFET1176Tuning(t.FET1176_LEGACY_TUNING)
+  for (const [key, value] of Object.entries(FET_LEGACY_PATCH)) {
+    assert.equal(t.fet1176TuningState()[key], value, `state did not carry ${key}`)
+  }
+  t.resetFET1176Tuning()
+  for (const key of Object.keys(FET_LEGACY_PATCH)) {
+    assert.equal(t.fet1176TuningState()[key], t.FET1176_TUNING_DEFAULTS[key],
+      `${key} did not come back to its default in the state`)
+  }
 })
 
 /**

@@ -29,6 +29,7 @@ import { mkdtempSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureFetStimulus } from './ensureFetStimulus.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const STIM = join(ROOT, 'data/corpus/fet1176/stimulus/thd.wav')
@@ -60,9 +61,10 @@ function section(out, ref) {
 
 // ⚠ The stimulus is gitignored, so a fresh clone has to build it first. Skipping
 // beats failing for a missing artefact that `npm run fet:stimulus` regenerates.
-const haveStimulus = existsSync(STIM)
+// Generated on demand rather than skipped — see `ensureFetStimulus`.
+ensureFetStimulus()
 
-test('null reader: a compensated, saturator-free reference', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+test('null reader: a compensated, saturator-free reference', () => {
   const s = section(runSelftest(), 'synthclean')
 
   assert.match(s, /the no-compression GAIN is LINEAR/)
@@ -86,7 +88,7 @@ test('null reader: a compensated, saturator-free reference', { skip: !haveStimul
   assert.match(s, /across \d+ Input positions/)
 })
 
-test('null reader: a true-input-gain reference with a saturator', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+test('null reader: a true-input-gain reference with a saturator', () => {
   // ⚠ synthdirty PINS THE LEGACY tanh. It used to ride on the kernel defaults,
   // and when the measured polynomial replaced them the case went degenerate —
   // the new curve is 4th/5th order and makes almost nothing at these levels, so
@@ -104,7 +106,7 @@ test('null reader: a true-input-gain reference with a saturator', { skip: !haveS
   assert.match(s, /INPUT IS A REAL GAIN/)
 })
 
-test('gain reduction is measured within one capture, not across two', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+test('gain reduction is measured within one capture, not across two', () => {
   const s = section(runSelftest(), 'synthdirty')
   // ⚠ The regression: comparing null3's mean gain to null1's carried the
   // insertion gain and reported −22.63 dB where the truth is ~11. The GR column
@@ -115,7 +117,7 @@ test('gain reduction is measured within one capture, not across two', { skip: !h
   assert.ok(deepest > 8 && deepest < 14, `deepest reduction read as ${deepest} dB, expected ~11`)
 })
 
-test('the shaper-position test finds our own topology', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+test('the shaper-position test finds our own topology', () => {
   // ⚠ Our saturator sits AFTER the gain cell, so the test must say so on our
   // own kernel. The first version of it just asked whether H2 changed at all,
   // which cannot separate the two hypotheses on a reference whose Input is a
@@ -127,7 +129,7 @@ test('the shaper-position test finds our own topology', { skip: !haveStimulus &&
   assert.ok(Number(m[2]) < Number(m[1]) / 10, `after-cell error ${m[2]} not decisively below before-cell ${m[1]}`)
 })
 
-test('the open-gain guard tolerates a compressing second tone', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+test('the open-gain guard tolerates a compressing second tone', () => {
   // ⚠ The equality version of this guard cried "the quietest tone is itself
   // compressing" whenever the SECOND tone compressed — which is normal and
   // expected in null3. It is a slope test now.
@@ -135,7 +137,7 @@ test('the open-gain guard tolerates a compressing second tone', { skip: !haveSti
   assert.doesNotMatch(out, /THE QUIETEST TONE IS ITSELF COMPRESSING/)
 })
 
-test('a static law extrapolated past its data says so', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+test('a static law extrapolated past its data says so', () => {
   // ⚠ null1 and null3 sit at different Input positions, so their output level
   // ranges need not overlap — and when they do not, the law is extrapolated and
   // the residual is partly fit error. Silence there would read as measurement.
@@ -144,7 +146,7 @@ test('a static law extrapolated past its data says so', { skip: !haveStimulus &&
   assert.match(s, /sit outside null1's measured level range/)
 })
 
-test('a bypassed capture is caught, and a transparent one is not mistaken for it', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+test('a bypassed capture is caught, and a transparent one is not mistaken for it', () => {
   const out = runSelftest()
 
   // synthbypass's null4 IS the raw stimulus.
