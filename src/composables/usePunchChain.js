@@ -374,7 +374,15 @@ export function usePunchChain() {
 
     startProcessing('Applying Punch Chain...')
     try {
-      const buffer = await applyPunchChainRegion(
+      /**
+       * ⚠ THE TRIM IS REPORTED RATHER THAN APPLIED SILENTLY, the same contract
+       * FET Punch has. The makeup is level-matched on the percentile, which
+       * deliberately leaves the peak under the source; `applyPunchChainRegion`
+       * puts it back on the ceiling and hands back what it added. Saying so is
+       * the difference between a number the user can check and gain that
+       * appeared from nowhere. See `peakRestoreTrimDb`.
+       */
+      const { buffer, trimDb } = await applyPunchChainRegion(
         state.segments, start, end,
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
@@ -382,7 +390,9 @@ export function usePunchChain() {
       const bufferId = replaceRegion(start, end, buffer, 'Punch Chain')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
-      showToast('Punch Chain applied')
+      showToast(Math.abs(trimDb) >= 0.05
+        ? `Punch Chain applied — peak restored ${trimDb >= 0 ? '+' : ''}${trimDb.toFixed(2)} dB`
+        : 'Punch Chain applied')
     } catch (err) {
       console.error('Punch Chain failed:', err)
       showToast('Punch Chain failed')

@@ -29,7 +29,7 @@ import { processLA2ABuffer } from '../../src/audio/la2aProcessor.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../../src/audio/dsp/oversample.js'
 import {
   percentileOfChannels, peakOfChannels, MAKEUP_PERCENTILE, CEILING_KNEE_DB,
-  solveMakeupPlan,
+  solveMakeupPlan, peakRestoreTrimDb, restorePeakToCeiling,
 } from '../../src/audio/dsp/makeupReference.js'
 import { gatedRmsOfChannels, inputAlignDbFor } from '../../src/audio/dsp/inputAlign.js'
 import {
@@ -346,6 +346,92 @@ test('the closed-form makeup agrees with a converged iterative solve', () => {
     + `${iterative.makeupDb.toFixed(4)} dB — the makeup is no longer the last `
     + 'multiply, so it cannot be solved in closed form any more',
   )
+})
+
+// ── Peak restore ────────────────────────────────────────────────────────────
+
+test('the peak restore lands the output exactly on the ceiling', () => {
+  /**
+   * The chain level-matches the PERCENTILE, which deliberately leaves the peak
+   * under the source — so without this the plugin is quieter than FET Punch at
+   * the same settings for no reason the user can see. Measured on narration it
+   * is worth up to 1.74 dB at light settings and nothing once the ceiling is
+   * holding the peak.
+   *
+   * Reused rather than reimplemented: `peakRestoreTrimDb` was already generic
+   * over a rendered region and its ceiling.
+   */
+  const src = signal()
+  const params = { drive: 20, peakReduction: 25 }
+  const plan = computePunchChainPlan(src, SR, params)
+  const out = processPunchChainBuffer(src, SR, {
+    ...PUNCH_CHAIN_KERNEL_DEFAULTS,
+    ...params,
+    fetAlignDb: plan.fetAlignDb,
+    optoAlignDb: plan.optoAlignDb,
+    makeupDb: plan.makeupDb,
+    ceilingDb: plan.ceilingDb,
+    ceilingKneeDb: plan.ceilingKneeDb,
+  }).channelData
+
+  const trimDb = restorePeakToCeiling(out, plan.ceilingDb)
+  const outPeakDb = db(peakOfChannels(out))
+  assert.ok(
+    Math.abs(outPeakDb - plan.ceilingDb) < 0.01,
+    `restored peak ${outPeakDb.toFixed(3)} is not on the ceiling ${plan.ceilingDb.toFixed(3)}`,
+  )
+  /**
+   * ⚠ AND IT STILL DOES NOT EXCEED THE SOURCE. The ceiling IS the source's
+   * peak, so landing on it is the loudest legal answer; a restore that
+   * overshot would break the one guarantee the ceiling exists to provide.
+   */
+  assert.ok(outPeakDb <= db(peakOfChannels(src)) + 1e-6)
+  assert.ok(trimDb >= 0, 'this render sat under the ceiling, so the trim is up')
+})
+
+test('the restore does not disturb either readout', () => {
+  /**
+   * ⚠ THE PROPERTY THAT LETS THE TRIM BE APPLY-ONLY WITHOUT THE PLATE LYING.
+   * Preview and apply diverge by this trim — the accepted cost FET Punch
+   * already carries — but density and level spread are both differences of two
+   * levels measured on the same signal, so a scalar gain cancels out of each.
+   * The two numbers the panel printed stay true of the applied file.
+   *
+   * If a future restore ever stops being a pure scalar (a limiter, a per-block
+   * gain), this is what notices.
+   */
+  const src = signal()
+  const plan = computePunchChainPlan(src, SR, { drive: 20, peakReduction: 25 })
+  const rendered = processPunchChainBuffer(src, SR, {
+    ...PUNCH_CHAIN_KERNEL_DEFAULTS,
+    drive: 20, peakReduction: 25, oversample: false,
+    fetAlignDb: plan.fetAlignDb,
+    optoAlignDb: plan.optoAlignDb,
+    makeupDb: plan.makeupDb,
+    ceilingDb: plan.ceilingDb,
+    ceilingKneeDb: plan.ceilingKneeDb,
+  }).channelData
+
+  const phrases = detectPhrases(src, SR)
+  const before = {
+    density: measureDensityDb(rendered, SR),
+    spread: measureSpreadDb(rendered, phrases),
+  }
+  const trimDb = restorePeakToCeiling(rendered, plan.ceilingDb)
+  assert.ok(Math.abs(trimDb) > 0.01, 'this fixture was meant to need a restore')
+
+  assert.ok(Math.abs(measureDensityDb(rendered, SR) - before.density) < 1e-6)
+  assert.ok(Math.abs(measureSpreadDb(rendered, phrases) - before.spread) < 1e-6)
+})
+
+test('with AUTO off there is no ceiling, so nothing is restored', () => {
+  /**
+   * The right answer rather than a gap: with AUTO off the level is the user's,
+   * and normalising anyway would be the plugin overruling a deliberate setting.
+   */
+  const src = signal()
+  assert.equal(peakRestoreTrimDb(src, null), 0)
+  assert.equal(peakRestoreTrimDb(src, undefined), 0)
 })
 
 // ── Metrics ─────────────────────────────────────────────────────────────────

@@ -907,17 +907,64 @@ export function computePunchChainPlan(
 /**
  * Apply the Punch Chain to a region.
  *
+ * Resolves `{ buffer, trimDb }` rather than a bare buffer, for the same reason
+ * `applyFET1176Region` does: the peak restore is a per-region measurement the
+ * panel reports.
+ *
+ * ⚠ THE RESTORE IS THE SAME MECHANISM FET PUNCH USES, REUSED RATHER THAN
+ * REIMPLEMENTED — `peakRestoreTrimDb` was already generic over "a rendered
+ * region and its ceiling", and nothing about it was FET-specific. Both plugins
+ * level-match the PERCENTILE, which deliberately leaves the peak under the
+ * source; without the restore this chain landed up to 1.74 dB quieter than FET
+ * Punch at settings where the ceiling was not yet holding the peak.
+ *
+ * Measured across the three narration clips, trim by setting:
+ *
+ *   Input/PR      15/20   30/40   25/60   50/0   60/80   80/90
+ *   Messy          0.11    0.11    0.07   0.07    0.00    0.00
+ *   art_test       0.11    0.08    0.07   0.08    0.01    0.00
+ *   Greenberg      1.74    1.26    0.08   0.08    0.00    0.00
+ *
+ * The same shape FET Punch records: it matters at light settings on peaky
+ * material and is nothing once the ceiling is engaged.
+ *
+ * ⚠ MEASURED ON THIS RENDER, WHICH IS WHY IT LIVES HERE AND NOT IN THE PLAN.
+ * The plan runs on a capped window and `windowPeak <= wholePeak` always, so a
+ * window-derived trim is too generous and would push a late loud passage past
+ * the source peak — the one guarantee the ceiling exists to provide.
+ *
+ * ⚠ AND AFTER THE PRE-ROLL AND LATENCY ARE TRIMMED, necessarily: a peak sitting
+ * in the discarded head is not part of what lands on the timeline.
+ *
+ * ⚠ PREVIEW AND APPLY THEREFORE DIVERGE BY THE TRIM, the same accepted cost FET
+ * Punch carries. What does NOT diverge is the plate: density and level spread
+ * are both invariant to a scalar gain, and this is a scalar applied after the
+ * ceiling, so the two numbers the panel printed stay true of the applied file.
+ *
  * Latency is both kernels' summed, and the pre-roll is theirs — see
  * `PUNCH_CHAIN_LATENCY_SAMPLES` and `PUNCH_CHAIN_PREROLL_S`.
  */
-export function applyPunchChainRegion(segments, start, end, params, sampleRate, channels) {
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+export async function applyPunchChainRegion(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toPunchChainKernelParams({ ...PUNCH_CHAIN_DEFAULTS, ...params })
+  const buffer = await applyWorkletRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensurePunchChainWorklet,
     processorName: 'punch-chain-processor',
-    kernelParams: toPunchChainKernelParams({ ...PUNCH_CHAIN_DEFAULTS, ...params }),
+    kernelParams,
     latencySamples: PUNCH_CHAIN_LATENCY_SAMPLES,
     preRollSamples: Math.round(PUNCH_CHAIN_PREROLL_S * sampleRate),
   })
+  const channelData = []
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) channelData.push(buffer.getChannelData(ch))
+  /**
+   * getChannelData hands back the buffer's own storage, so this scales in place.
+   *
+   * ⚠ `kernelParams.ceilingDb` IS ABSENT WITH AUTO OFF, and `peakRestoreTrimDb`
+   * returns 0 for that — which is the right answer, not a gap. With AUTO off
+   * the level is the user's and there is no measured ceiling to restore to;
+   * normalising anyway would be the plugin overruling a deliberate setting.
+   */
+  const trimDb = restorePeakToCeiling(channelData, kernelParams.ceilingDb ?? null)
+  return { buffer, trimDb }
 }
 
 /** Apply Scheps Parallel to a region. */
