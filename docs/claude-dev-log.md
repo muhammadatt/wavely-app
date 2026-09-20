@@ -4433,6 +4433,141 @@ rms -16.24**, against their manual FET-then-normalize at -1.00 / -16.18.
 
 ---
 
+### OptoSmooth's curve, revisited — the quartic, and two of my own errors
+
+The shipping cell and valve curves are Tube Saturation's, chosen by ear, and
+CLAUDE.md is explicit that no measurement backs them. The owner's complaint came
+back inverted from the one they were brought in to answer: the harmonics are
+liked, the behaviour on loud peaks is not, and FET Punch's measured polynomial
+sounds cleaner by comparison. So: can a polynomial fitted to the LA-2A do better?
+
+- **⚗⚗⚗ LALA'S OUTPUT STAGE IS A QUARTIC, AND IT IDENTIFIES FROM READINGS ALREADY
+  IN THIS LOG — NO NEW BOUNCE.** A term of order n makes harmonics rising (n−1) dB
+  per dB, so LALA's **H2 slope 3.06** reads as order 4 and its **H3 slope 1.95** as
+  order 3. The confirming ratio is **H4−H2 = −12.10 dB** against a pure x⁴ term's
+  −12.04. Fitting `c4` to the −18 dBFS H2 row ALONE gives
+  **g(u) = u + 1.1017e-3·u³ + 0.032812·u⁴**, which then predicts the other three
+  measured levels — −40, −1, +9.2 dBFS — to **0.00 dB**, and H4 at −18 to 0.06.
+  That is an identification, not a fit. `npm run la2a:curve` re-derives it on every
+  run so the two constants are never taken on trust.
+- **⚠ THE FET'S ORDERS ARE THE WRONG ONES TO PORT, WHICH WAS THE ORIGINAL
+  QUESTION.** FETish is orders 4 and 5 (H2 3.00, H3 4.04); LALA is 4 and 3. Copying
+  `POLY_C4`/`POLY_C5` across would put H3 at slope 4 where LALA measures 1.95 — the
+  mirror image of how the `tanh` failed. The FAMILY transfers; the coefficients do not.
+- **⚠ AND CHOOSING LALA IS A NARROWER CHOICE THAN "PICKING A SIDE".** The standing
+  position is that the two emulations disagree by 10–77 dB and any refit picks one.
+  That holds for MAGNITUDE. On SHAPE there is only one usable reference: **CLA-2A's
+  H2/H3 slopes of 0.77/0.66 are not reachable by any memoryless polynomial**, since a
+  genuine third-order term goes as level². CLA-2A abstains rather than disagreeing.
+
+**⚠⚠ THE FIRST BENCH REPORTED A DEPTH CEILING AND THERE IS NO SUCH THING. ONE BUG,
+THREE WRONG FINDINGS.** It printed a fold at drive 1.976, a monotonicity ceiling
+8 dB below the Moore anchor, and the conclusion that the shape could not carry the
+hardware's magnitude without borrowing the FET kernel's partner term. All three were
+artifacts of guarding the polynomial's domain in **x** when the drive convention
+evaluates it at **u = d·x**. Guarded in u the drive cancels out of the slope —
+`f(x) = g(d·x)/d` so `f'(x) = g'(d·x)` — the stage presents a minimum slope of
+**0.8721 at every drive from 0.25 to 40**, and the Moore median sits at drive 2.70
+with peak u = 0.34, well inside the measured domain. No cap, no invented knee, no
+partner term. `test/dsp/la2aQuarticCurve.test.js` now pins the property the mistake
+turned on: minimum slope must be the SAME NUMBER at every drive.
+
+⚠ The bounding behaviour that was asked for falls out of the correct guard rather
+than being added: past |u| = 1 the curve continues linearly at the edge slope, and
+raising drive moves that corner to |x| = 1/d — so the stage soft-clips harder as it
+is driven while still tracking gain reduction.
+
+**⚠⚠ AND A SECOND ERROR, IN THE PEAK-LEVEL SWEEP THAT WAS MEANT TO SETTLE IT.** A
+linear amplitude was passed into a helper expecting dBFS, so three rows labelled
+−12 / −6 / −3 dBFS were all pinned near full scale. **The tell was in the output and
+went unread: H2 moved 0.1 dB across a nominal 9 dB sweep**, which no level-dependent
+curve does. Every conclusion drawn from that table was withdrawn and re-measured.
+
+- **⚗⚗ THE PREFERENCE IS THE EVEN/ODD BALANCE, NOT THE AMOUNT — AND THE MATCHED TEST
+  IS WHAT SHOWS IT.** At the shipping drives the quartic is simply less (THD 0.70 %
+  against 3.26 % at −6 dBFS peak, PR 60), which on its own would explain "cleaner"
+  with no claim about shape. Raising Cell sat until TOTAL DISTORTION MATCHES, the
+  difference survives and localises:
+
+  | −6 dBFS peak, PR 60 | H2 | H3 | H3−H2 | THD |
+  |---|---|---|---|---|
+  | TubeSat (ships) | −30.9 | −36.1 | −5.2 | 3.26 % |
+  | Quartic, Cell sat 3.2 | −29.9 | **−48.7** | **−18.8** | 3.26 % |
+  | TubeSat (ships), −1 dBFS | −27.2 | −29.1 | −1.8 | 5.63 % |
+  | Quartic, Cell sat 5.7, −1 dBFS | −25.1 | **−48.1** | **−23.0** | 5.63 % |
+
+  At identical total distortion the quartic puts **12–19 dB less third harmonic**
+  into the peaks with H2 essentially matched. ⚠ It appears only at PEAK levels — at
+  −18 dBFS the relation inverts — which is exactly where the complaint lives.
+- **⚗⚗ THE OWNER'S CHOSEN SETTING TAKES MORE DISTORTION, NOT LESS, WHICH IS THE
+  STRONGER RESULT.** Auditioned live on the bench panel, the verdict was
+  Quartic/Quartic at **Cell sat ≈ 5** — "warmer than before but still smooth and not
+  edgy at the peaks". Measured against the shipping curve at PR 60:
+
+  | peak | curve | H2 | H3 | H3−H2 | THD |
+  |---|---|---|---|---|---|
+  | −12 | TubeSat | −44.1 | −45.4 | −1.3 | 0.83 % |
+  | −12 | Quartic 5.0 | −39.0 | −50.4 | −11.4 | **1.19 %** |
+  | −6 | TubeSat | −30.9 | −36.1 | −5.2 | 3.26 % |
+  | −6 | Quartic 5.0 | −26.7 | −48.8 | −22.1 | **4.66 %** |
+  | −1 | TubeSat | −27.2 | −29.1 | −1.8 | 5.63 % |
+  | −1 | Quartic 5.0 | −25.3 | −48.0 | −22.7 | 5.49 % |
+
+  **More total distortion and more second harmonic — the "warmer" — with 13–19 dB
+  less third.** The ear report and the measurement agree without either being told
+  about the other, and it rules out "it just does less" as the explanation.
+  ⚠ Crest is level with TubeSat throughout (11.68 vs 11.92 dB at −6); rms runs
+  **0.4–0.9 dB hot at peaks**, which biases a blind A/B slightly and is small against
+  a 13–19 dB harmonic difference, but is not zero and is not corrected for.
+- **⚠ THE HIGH-ORDER "GRIT" SHARE IS A RED HERRING ON THESE CURVES, and the first
+  pass at this comparison led with it.** The shipping cell curve's ladder runs past
+  H8 where a degree-4 polynomial stops dead at H4, which invites "the dense ladder is
+  the harshness" — but energetically that content is **0.11 %** of its distortion at
+  −6 dBFS. Worse, through the FULL kernel the ladders above H4 are identical across
+  all three configurations to 0.1–1 dB, so most of it is not the curve at all.
+  The axis that separates them is H3.
+- **⚠ THE ARCHITECTURE QUESTION IS OPEN AND THE EAR AND THE PAPER DISAGREE.**
+  Moore's six hardware units are ODD-dominant under compression (H3−H2 **+16 to
+  +44 dB**), attributed to the T4 cell rather than the valves. Our shipping config
+  gets odd content at the cell only incidentally, from a waveshaper standing where
+  the modulation would be, and the chosen quartic removes it (H3−H2 −22). The only
+  configuration where every stage is measurement-backed is **GAIN MOD at the cell,
+  QUARTIC at the valve** — measured H3−H2 **+18.8 dB**, inside the paper's band.
+  Not yet auditioned.
+
+**NOT SHIPPED.** `quartic` is a bench option at both stages, not a default. The
+drives that would have to move with it — `cellCurveDriveMax` 1.5,
+`vocalSatCurveDrive` 0.5, `emphasis` 50 — were all chosen by ear FOR THE TUBE SAT
+CURVE and none of them transfer; the OptoSmooth factory presets would need a re-cut
+on the `fet-recut-presets.mjs` pattern; and Scheps holds the kernel, so it is
+re-voiced by the same change.
+
+⚠ **THE PER-STAGE SPLIT WAS THE ONLY SHIPPING-PATH CHANGE.** One `vsCurve` object
+served both stages — workable only because the cell reads `transferAt` and the valve
+reads `transfer`/`inverse` — and two selectable curves forced them apart. Checked
+rather than claimed: rendered against the pre-change kernel at PR 0/25/50/75/100 ×
+gain 0/6, plus `LA2A_LEGACY_PATCH` and the gain modulation, worst |diff| is
+**exactly 0**.
+
+⚠ **THE TANH IS GONE FROM BOTH BENCH PANELS**, along with FET Punch's Legacy kernel
+button and OptoSmooth's Valve drive / Valve bias sliders — the latter two are
+constants OF the tanh and moved nothing once it was unselectable. The KERNEL MODES
+STAY: `LA2A_LEGACY_PATCH` is the baseline five test files measure against and
+`FET_LEGACY_PATCH` is pinned by `fet1176Curve.test.js`, and both tuning stores keep
+their keys so those tests are untouched.
+
+⚠ **THE MISSING-INSTALL TRAP RECURRED**, exactly as the correction above this entry
+records it: a fresh container reported **13 failures** on a clean checkout. Same
+cause, `node_modules` absent. Diagnosed from the error text this time rather than
+from a clean-checkout comparison — the failures all read `Cannot find package 'vue'`
+or `'uuid'`. With dependencies installed: **1391 tests, 1391 pass, 0 fail**, and
+`npm run smoke` opens all thirteen panels clean.
+
+---
+
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
