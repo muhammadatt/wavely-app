@@ -75,6 +75,13 @@ function normalize(params) {
      * Every factory preset states it explicitly for the same reason.
      */
     lookahead: clamp(params.lookahead ?? 0, 0, LOOKAHEAD_MAX_MS),
+    /**
+     * ⚠ DEFAULTS TO TRUE FOR PRESETS SAVED BEFORE THE CONTROL EXISTED, which is
+     * the mirror of the `lookahead` rule above and correct for the same reason:
+     * those patches were auditioned WITH the nonlinearity, so `false` would
+     * change how every one of them sounds. Every factory preset states it.
+     */
+    analog: params.analog !== false,
     autoMakeup,
   }
 }
@@ -82,7 +89,7 @@ function normalize(params) {
 // ⚠ A PARAM MISSING FROM THIS LIST IS SILENTLY DROPPED on save and never
 // restored — the preset simply forgets it.
 export const OPTO_SMOOTH_PARAM_KEYS = [
-  'mode', 'peakReduction', 'gain', 'r37', 'lookahead', 'autoMakeup',
+  'mode', 'peakReduction', 'gain', 'r37', 'lookahead', 'autoMakeup', 'analog',
 ]
 
 export const OPTO_SMOOTH_PRESETS = [
@@ -96,6 +103,7 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 100,
       lookahead: 0,
+      analog: true,
       autoMakeup: true,
     },
   },
@@ -111,6 +119,7 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 82,
       lookahead: 0,
+      analog: true,
       autoMakeup: true,
     },
   },
@@ -128,6 +137,7 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 45,
       lookahead: 0,
+      analog: true,
       autoMakeup: true,
     },
   },
@@ -151,6 +161,7 @@ export const OPTO_SMOOTH_PRESETS = [
       // already fairly even.
       r37: 100,
       lookahead: 0,
+      analog: true,
       autoMakeup: true,
     },
   },
@@ -168,6 +179,7 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 100,
       lookahead: 0,
+      analog: true,
       autoMakeup: true,
     },
   },

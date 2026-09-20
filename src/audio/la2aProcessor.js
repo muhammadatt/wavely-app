@@ -2122,7 +2122,38 @@ export class LA2AKernel {
     // Tube stage. Drive can go sub-unity (slope is normalized back to 1
     // below): at the default amount a -6 dBFS peak lands around H3 ≈ -40 dBc
     // — tube warmth at nominal level, not overdrive. Max reaches ~-22 dBc.
-    this.applyTube = p.tube !== false
+    /**
+     * ANALOG MODE — the product-facing opt-out from every nonlinearity in this
+     * plugin, and the ONLY control here that is a patch key rather than a bench
+     * one.
+     *
+     * ⚠ IT GATES ALL THREE MECHANISMS, NOT ONE. The output valve, the cell
+     * shaper and the gain modulation are alternatives to each other, so switching
+     * off whichever happens to be selected is not the same as switching off
+     * "the distortion". Off means the wet path is `driven[i] * gain[i]` — a pure
+     * time-varying gain — whatever the curve selectors say.
+     *
+     * ⚠ IT IS NOT A BYPASS, AND THE DIFFERENCE IS THE WHOLE FEATURE. The
+     * detector, the taper, R37, the ballistics and the gain envelope are
+     * untouched, so gain reduction is bit-identical with it on or off. What
+     * changes is only whether that envelope is delivered through a curve. A user
+     * turning it off keeps the compressor they chose and loses the harmonics.
+     *
+     * ⚠⚠ THE EMPHASIS PAIR IS GATED TOO, AND THE FIRST VERSION OF THIS NOTE
+     * ARGUED IT DID NOT NEED TO BE. The argument was that pre-emphasis, a linear
+     * stage, and de-emphasis is an exact identity — measured at 6e-8 — so the
+     * pair would go inert by construction. That measurement was taken at Peak
+     * Reduction 0, where the cell's gain is CONSTANT. A gain that MOVES does not
+     * commute with a filter, so under compression the pair is not an identity:
+     * with the nonlinearity off and the cell working, Emphasis 100 still moved
+     * the render by 2.45e-4. A test caught it.
+     *
+     * So it is switched off explicitly. The pair exists only to shape what the
+     * nonlinearity sees; with no nonlinearity it is two shelves either side of a
+     * gain, which is a colour the user switched off asking for.
+     */
+    this.analog = p.analog !== false
+    this.applyTube = this.analog && p.tube !== false
     this.cellMod = Number.isFinite(p.cellMod) ? Math.max(0, p.cellMod) : 1
     /**
      * ⚠ THE FOUR CONSTANTS BELOW ARE OVERRIDABLE, AND THE OVERRIDES ARE A BENCH
@@ -2251,7 +2282,7 @@ export class LA2AKernel {
     this.emphasisDb = (Math.min(Math.max(p.emphasis ?? 0, 0), 100) / 100)
       * EMPHASIS_MAX_DB
     const emphWas = this.emphasisActive
-    this.emphasisActive = this.emphasisDb > EMPHASIS_EPSILON
+    this.emphasisActive = this.analog && this.emphasisDb > EMPHASIS_EPSILON
     /**
      * ⚠ THE PAIR'S FILTERS ARE CLEARED WHEN IT SWITCHES OFF, AND THEY WERE NOT.
      * Turning Emphasis to 0 stops feeding the three biquads but does not empty
@@ -2322,10 +2353,19 @@ export class LA2AKernel {
      * bypass it always was; this is the selector honouring "alternatives, not a
      * stack" in one place rather than at every call site.
      */
-    this.cellModActive = this.cellCurveMode === CELL_CURVE_GAINMOD
+    this.cellModActive = this.analog
+      && this.cellCurveMode === CELL_CURVE_GAINMOD
       && this.cellMod > 0
     const shaperWas = this.cellShaperActive
-    this.cellShaperActive = this.cellCurveMode !== CELL_CURVE_GAINMOD
+    /**
+     * ⚠ THE ANALOG GATE GOES THROUGH THIS EXPRESSION DELIBERATELY, so turning
+     * the mode off takes the same path as turning the shaper off any other way —
+     * including the seam reset below, which exists because the shaper's three
+     * carried values go stale the moment it stops running. A gate that bypassed
+     * at the call site instead would skip that reset and click on the way back.
+     */
+    this.cellShaperActive = this.analog
+      && this.cellCurveMode !== CELL_CURVE_GAINMOD
       && this.cellCurveDriveMax > 0
     /**
      * ⚠ THE SHAPER'S THREE SEAM VALUES ONLY ADVANCE WHILE IT IS RUNNING, so
