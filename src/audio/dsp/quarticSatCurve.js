@@ -19,10 +19,30 @@
  *
  * A term of order n makes harmonics rising (n−1) dB per dB, so H2 at 3.06 reads
  * as order 4 and H3 at 1.95 as order 3. The confirming ratio is H4−H2, which
- * measures −12.10 dB against a pure x⁴ term's −12.04. Fitting c4 to the −18 dBFS
- * H2 alone then predicts the other three levels to 0.00 dB and H4 to 0.06 — so
- * this is an identification rather than a fit, and `npm run la2a:curve` re-derives
- * it on every run rather than asking anyone to trust the two constants here.
+ * measures −12.10 dB against a pure x⁴ term's −12.04.
+ *
+ * ⚠⚠ THE IDENTIFICATION IS NOT ORIGINAL TO THIS MODULE AND WAS REDISCOVERED BY
+ * ACCIDENT. The dev-log entry "THE LALA HAS AN OUTPUT STAGE TOO, AND IT IS A
+ * POLYNOMIAL WITH NO QUADRATIC TERM" had already recovered `x + a₃x³ + a₄x⁴`
+ * from 21 measured numbers, at a₄ = 3.281e−2 and a₃ = 1.102e−3. This module's
+ * constants were derived later from the same log's columns, fitting c4 to the
+ * −18 dBFS H2 row alone, and land on the same four figures. Treat the original as
+ * the citation: it recovered a₄ from H2 and H4 INDEPENDENTLY (0.7 % apart), pinned
+ * H2:H4 at 12.00–12.10 dB at every level against cos⁴'s 12.041, and established
+ * the memoryless class from a frequency sweep flat to 0.3 dB over 50 Hz–5 kHz.
+ * The later pass is corroboration from a different subset, not the source.
+ *
+ * `npm run la2a:curve` re-derives the constants on every run rather than asking
+ * anyone to trust the two numbers below.
+ *
+ * ⚠⚠ IT IDENTIFIES THE OUTPUT STAGE, AND THE CELL IS A DIFFERENT STAGE. Both
+ * sweeps behind it were captured at Gain 0 / PEAK REDUCTION 0 — cell idle — so
+ * nothing here measures what the T4 should do, and LALA's own under-compression
+ * captures read ratio, taper, ballistics and side-chain rather than harmonics.
+ * Selecting this curve at the VALVE puts a reference curve in the stage the
+ * reference measured. Selecting it at the CELL does not: there it is an ear
+ * choice wearing a borrowed shape, in the same category as the Tube Sat cell
+ * curve it would replace. The pedigree does not cross the stage boundary.
  *
  * ⚠ ONE REFERENCE, AND CHOOSING IT IS CHOOSING A SIDE — but a narrower side than
  * the ledger's "any refit picks one" (line 317). That warning is about MAGNITUDE,

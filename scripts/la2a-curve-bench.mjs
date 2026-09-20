@@ -58,8 +58,18 @@
  * A term of order n makes harmonics rising (n−1) dB per dB, so H2 at 3.06 reads
  * as order 4 and H3 at 1.95 as order 3 — and H4−H2 measures −12.10 dB against a
  * pure x⁴ term's −12.04. Fitting `c4` to the −18 dBFS H2 alone then predicts the
- * other three levels to 0.00 dB and H4 to 0.06. That is an identification, not
- * a fit, and `--selftest` pins it.
+ * other three levels to 0.00 dB and H4 to 0.06, and `--selftest` pins that.
+ *
+ * ⚠⚠ THE LOG HAD ALREADY DONE THIS AND THIS SCRIPT REDISCOVERED IT. See the entry
+ * "THE LALA HAS AN OUTPUT STAGE TOO, AND IT IS A POLYNOMIAL WITH NO QUADRATIC
+ * TERM", which recovered the same two constants to four figures from 21 measured
+ * numbers — and did it better, taking `a₄` from H2 and H4 independently. What the
+ * re-derivation below is worth is that it used a DIFFERENT subset (one level) and
+ * landed in the same place. It is corroboration, not the source.
+ *
+ * ⚠⚠ AND IT IDENTIFIES THE OUTPUT STAGE ONLY. Both sweeps were captured at Gain 0
+ * / PEAK REDUCTION 0, cell idle. Nothing here measures the T4, so the `quartic`
+ * option at the CELL carries none of this pedigree — see the module header.
  *
  * ⚠ IT IS ONE REFERENCE, AND PICKING IT IS PICKING A SIDE. The dev log's
  * position (line 317) is that the two emulations disagree by 10–77 dB and any

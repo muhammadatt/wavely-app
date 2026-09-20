@@ -4441,15 +4441,24 @@ back inverted from the one they were brought in to answer: the harmonics are
 liked, the behaviour on loud peaks is not, and FET Punch's measured polynomial
 sounds cleaner by comparison. So: can a polynomial fitted to the LA-2A do better?
 
-- **⚗⚗⚗ LALA'S OUTPUT STAGE IS A QUARTIC, AND IT IDENTIFIES FROM READINGS ALREADY
-  IN THIS LOG — NO NEW BOUNCE.** A term of order n makes harmonics rising (n−1) dB
-  per dB, so LALA's **H2 slope 3.06** reads as order 4 and its **H3 slope 1.95** as
-  order 3. The confirming ratio is **H4−H2 = −12.10 dB** against a pure x⁴ term's
-  −12.04. Fitting `c4` to the −18 dBFS H2 row ALONE gives
-  **g(u) = u + 1.1017e-3·u³ + 0.032812·u⁴**, which then predicts the other three
-  measured levels — −40, −1, +9.2 dBFS — to **0.00 dB**, and H4 at −18 to 0.06.
-  That is an identification, not a fit. `npm run la2a:curve` re-derives it on every
-  run so the two constants are never taken on trust.
+- **⚠⚠ THE IDENTIFICATION WAS ALREADY IN THIS LOG AND I REDISCOVERED IT WITHOUT
+  NOTICING — see the entry above beginning "THE LALA HAS AN OUTPUT STAGE TOO".** It
+  had already recovered `x + a₃x³ + a₄x⁴` from 21 measured numbers, with
+  **a₄ = 3.281e−2** and **a₃ = 1.102e−3**. Working from the same log's harmonic
+  columns I re-derived **a₄ = 0.032812, a₃ = 1.1017e-3** — the same constants to four
+  figures — and wrote them up as a fresh finding. They are not.
+- **⚗ WHAT THE REDISCOVERY IS WORTH IS CORROBORATION, AND ONLY BECAUSE IT USED A
+  DIFFERENT SUBSET.** The original recovered `a₄` from H2 and from H4 independently
+  (3.281e−2 against 3.259e−2, 0.7 % apart), pinned H2:H4 at **12.00–12.10 dB** at
+  every level from −30 to −1 against `cos⁴`'s 12.041, and held all constants to four
+  figures across 30 dB. Mine fitted `a₄` to the **−18 dBFS H2 row alone** and then
+  predicted −40, −1 and +9.2 dBFS to **0.00 dB** and H4 at −18 to 0.06. Same answer
+  from a different direction — which is the only reason this bullet is worth keeping
+  rather than deleting.
+- **⚠ THE ORIGINAL IS THE STRONGER DERIVATION AND SHOULD BE CITED IN PREFERENCE.**
+  It also records what mine did not: LALA's fundamental gain is **−0.24 dB at every
+  level**, and its frequency sweep is flat to **0.3 dB** from 50 Hz to 5 kHz, which
+  is what puts the stage in the memoryless class at all.
 - **⚠ THE FET'S ORDERS ARE THE WRONG ONES TO PORT, WHICH WAS THE ORIGINAL
   QUESTION.** FETish is orders 4 and 5 (H2 3.00, H3 4.04); LALA is 4 and 3. Copying
   `POLY_C4`/`POLY_C5` across would put H3 at slope 4 where LALA measures 1.95 — the
@@ -4561,6 +4570,17 @@ curve does. Every conclusion drawn from that table was withdrawn and re-measured
 - **⚠ ONE LISTENER, SIGHTED, ONE PASSAGE, THREE CONFIGURATIONS.** The ordering is
   clean and the measurements were taken after each verdict rather than before, but
   this is not a blind panel and should not be written up as one.
+
+⚠⚠ **THE CURVE IS IDENTIFIED AT THE VALVE AND IS BEING USED AT THE CELL, AND
+NOTHING MEASURES THAT.** Both sweeps behind it were captured at **Gain 0 / PR 0** —
+cell idle — so they characterise the OUTPUT STAGE and say nothing about what the T4
+should do. LALA's own under-compression captures are ratio, taper, ballistics and
+side-chain; none of them read harmonics. So `Quartic` at the CELL is an ear choice
+wearing a borrowed shape, in exactly the category the Tube Sat cell curve is in, and
+the pedigree does not transfer across the stage boundary. The only cell-under-
+compression harmonic data in this repo remains LAEA's ~0.06 % odd at 24.9 dB GR
+(a different unit) and the Moore paper's six hardware units. ⚠ The VALVE selection is
+a different matter — there the reference measured exactly the stage it is being put in.
 
 **NOT SHIPPED, BUT THE AUDITION IS FINISHED.** `quartic` is a bench option at both
 stages, not a default. The settled preference is **Quartic/Quartic at Cell sat ≈ 5**,
