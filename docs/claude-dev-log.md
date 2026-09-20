@@ -4721,7 +4721,32 @@ to the quartic unexamined. The question was whether it even works the same way.
   100 measures **−23.70 dB / 2.2 %** at the stock 1800 Hz and **−21.97 dB / 3.7 %**
   at 600. `emphasisCornerHz` ships as a bench control anyway — it is a real axis
   and it is now measured rather than guessed at — but not as the escape hatch it
-  was reached for.
+  was reached for. ⚠ The sign of this bullet is right and its FRAMING was still
+  wrong: lowering the corner does make both worse, but the useful move is RAISING
+  it, which the entries below measure.
+- **⛗⛗ THE CORNER'S DIRECTION, SETTLED BY EAR AND CONFIRMED BY MEASUREMENT — AND IT
+  IS THE ONE I HAD BACKWARDS.** Auditioned on real narration, RAISING the corner
+  1800 → 2500 "virtually eliminates the high end distortion". The sweep agrees:
+  added nonlinear energy over the Emphasis-0 render, on synthetic narration with
+  sibilance, in 3–5 kHz, runs **0.54 / 0.34 / 0.20 / 0.06 / 0.02 dB** at corners
+  **1200 / 1500 / 1800 / 2400 / 3200**. Raising the corner boosts less of the
+  spectrum, so less reaches the curve, so less distortion is made. Lowering it does
+  the reverse, which is what the original prediction had inverted.
+- **⚠⚠ BUT THE CORNER IS ~75 % REDUNDANT WITH THE DEPTH KNOB, WHICH IS WORTH
+  KNOWING BEFORE ANYONE SHIPS IT.** Nulling "Emphasis E at 1800" against "Emphasis
+  100 at 2500" sample for sample, the best depth match is **E ≈ 65**, leaving a
+  residual of **−40.3 dB re. output** — against the whole emphasis effect
+  (0 vs 100 at 1800) measuring **−28.4 dB**. So a depth change reproduces about
+  three quarters of a corner move in amplitude and a quarter of it is genuinely
+  independent. The band distribution barely moves either: the 3–5 kHz to 200 Hz–1 kHz
+  energy ratio sits at **1.02–1.09** across every depth AND every corner tested.
+  ⚠ It is a real second axis, but a weak one — mostly a second way to set how much
+  boost reaches the nonlinearity, not a way to change where the distortion lands.
+- **⛗ AND THE SHIPPING DEFAULT IS ALREADY CLOSE TO THE AUDITIONED SETTING.** Emphasis
+  50 at 1800 — what ships — nulls against Emphasis 100 at 2500 to **−39.2 dB**, within
+  1.1 dB of the best match any depth achieves. Whether the preference survives a
+  blind A/B against the stock patch is therefore an open question and the cheapest
+  next test, since a difference that small may not be the corner at all.
 - **⛗ CELL SAT IS THE BETTER ROUTE TO DENSITY, MODESTLY AND MEASURABLY.** At
   matched total distortion it puts less of it in the grind band: at −6 dBFS,
   Emphasis 100 at cell 5 gives −23.70 dB / **2.2 %** while cell sat 9 at Emphasis 0
