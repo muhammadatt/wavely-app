@@ -158,7 +158,7 @@ async function applyAndClose() {
                     color: punchAutoBusy ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.86)',
                     transition: 'color .15s',
                   }"
-                >{{ readoutValue(r.value.value) }}</span>
+                >{{ readoutValue(r.value) }}</span>
                 <span
                   style="font:500 9px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)"
                 >dB</span>
