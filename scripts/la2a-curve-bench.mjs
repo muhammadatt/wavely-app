@@ -5,6 +5,7 @@
  *   npm run la2a:curve              the bench: ladder, passage, matched-GR render
  *   npm run la2a:curve -- --write   also emit level-matched A/B wavs to listen to
  *   npm run la2a:curve -- --cell-only   valve stage off, to isolate the cell
+ *   npm run la2a:curve -- --emph-sweep  sweep the emphasis corner on the corpus
  *   npm run la2a:curve:selftest     prove the instrument on planted curves
  *
  * WHY THIS EXISTS. The shipping cell and valve curves are Tube Saturation's,
@@ -471,6 +472,75 @@ function sectionRender(mono, sampleRate, { depth, flip, write, cellOnly }) {
   }
 }
 
+
+// ── D. The emphasis corner, on real material ────────────────────────────
+
+/**
+ * WHAT MAKES THIS MEASURABLE ON A FILE WITH NO SPECTRAL GAPS.
+ *
+ * The emphasis pair is an EXACT IDENTITY around a linear stage — pre-emphasis P,
+ * de-emphasis P⁻¹, and a gain commutes with a filter, so `P⁻¹(g·P(x)) = g·x`.
+ * Verified on this kernel with the saturation bypassed: Emphasis 0 against
+ * Emphasis 100 differs by 6e-8, which is float noise.
+ *
+ * ⚠ THAT IS THE WHOLE INSTRUMENT, AND IT IS WHY THIS WORKS WHERE A MULTITONE
+ * DOES NOT. Two renders of the same file at different Emphasis settings have the
+ * SAME linear transfer by construction, so every spectral difference between them
+ * is nonlinear — no gap, no probe tones, no assumption about the material. The
+ * column below is the band-limited energy difference, in dB, against the
+ * Emphasis-0 render.
+ *
+ * ⚠⚠ IT EXISTS BECAUSE FOUR SYNTHETIC PROBES FAILED TO REPRODUCE WHAT THE OWNER
+ * HEARS. A sparse 12-tone multitone said the corner moved distortion by 1.2-1.6 dB;
+ * a dense speech-shaped one said 0.06 dB across 1200-1800 Hz; adding a sibilance
+ * band moved it to 0.42 dB, in the opposite direction; and the corner was
+ * originally exposed on a prediction that measured backwards. Synthetic material
+ * has been wrong about this control four times, so the measurement belongs on the
+ * file that provoked the question.
+ */
+function sectionEmphasis(mono, sampleRate, file, { depth, flip }) {
+  console.log(`\n══ D. EMPHASIS CORNER — ${file} ══`)
+  console.log('   Energy vs the Emphasis-0 render, dB. The pair cancels exactly around a')
+  console.log('   linear stage, so every number here is nonlinear — nothing else can move.\n')
+
+  const base = {
+    mode: 'compress', peakReduction: 60, gainDb: 0, r37: 100, mix: 1,
+    cellCurve: 'quartic', tubeCurve: 'quartic', cellCurveDriveMax: depth,
+    vocalSatLeanPositive: !flip,
+  }
+  const ref = renderWith(mono, sampleRate, { ...base, emphasis: 0 }, null).out
+
+  /** Band energy of `y` minus that of the reference, in dB, over [lo, hi). */
+  const bandDelta = (y, lo, hi) => {
+    const n = 1 << Math.floor(Math.log2(Math.min(y.length, 1 << 18)))
+    const e = (sig) => {
+      let acc = 0
+      // Goertzel over a coarse bin grid is enough for a band total and avoids
+      // pulling an FFT into this script.
+      const step = Math.max(1, Math.round((hi - lo) / 160))
+      for (let f = lo; f < hi; f += step) {
+        const w = 2 * Math.PI * f / sampleRate
+        let s0 = 0; let s1 = 0; let s2 = 0
+        const c = 2 * Math.cos(w)
+        for (let i = 0; i < n; i++) { s0 = sig[i] + c * s1 - s2; s2 = s1; s1 = s0 }
+        acc += s1 * s1 + s2 * s2 - c * s1 * s2
+      }
+      return acc
+    }
+    return 10 * Math.log10(e(y) / e(ref))
+  }
+
+  console.log('    corner   200-1k    1k-3k    3k-5k    5k-10k   10k-16k')
+  for (const corner of [1200, 1400, 1500, 1600, 1700, 1800, 2000, 2400, 3200]) {
+    const y = renderWith(mono, sampleRate,
+      { ...base, emphasis: 100, emphasisCornerHz: corner }, null).out
+    const cells = [[200, 1000], [1000, 3000], [3000, 5000], [5000, 10000], [10000, 16000]]
+      .map(([lo, hi]) => bandDelta(y, lo, hi).toFixed(2).padStart(9)).join('')
+    console.log(`   ${String(corner).padStart(6)}${cells}`)
+  }
+  console.log('\n   ⚠ Emphasis 100 throughout: the corner is the variable, not the depth.')
+}
+
 // ── The identification, re-derived every run ────────────────────────────────
 
 /**
@@ -647,7 +717,30 @@ function selftest() {
   ok(worstAt < 1e-12, `transferAt agrees with transfer at the built drive (${worstAt.toExponential(1)})`)
   ok(c.transferAt(0.5, 0) === 0.5, 'and is the identity at zero drive, as the cell needs')
 
-  // 7. The restated FET constants still match the shipping kernel's curve.
+  /**
+   * 7. THE PREMISE SECTION D RESTS ON: the emphasis pair is an exact identity
+   * around a LINEAR stage. If that ever stops holding, every number section D
+   * prints stops being nonlinear energy and becomes an unexplained EQ change.
+   */
+  {
+    const sr = 44100
+    const len = sr
+    const sig = new Float32Array(len)
+    for (let i = 0; i < len; i++) {
+      const t = i / sr
+      sig[i] = 0.4 * Math.sin(2 * Math.PI * 220 * t) + 0.25 * Math.sin(2 * Math.PI * 3100 * t)
+    }
+    const flat = { mode: 'compress', peakReduction: 0, gainDb: 0, r37: 100, mix: 1,
+      tube: false, cellCurve: 'gainmod', cellMod: 0 }
+    const a = renderWith(sig, sr, { ...flat, emphasis: 0 }, null).out
+    const b = renderWith(sig, sr, { ...flat, emphasis: 100 }, null).out
+    let worstLin = 0
+    for (let i = 2000; i < len; i++) worstLin = Math.max(worstLin, Math.abs(a[i] - b[i]))
+    ok(worstLin < 1e-6,
+      `emphasis cancels around a linear stage (${worstLin.toExponential(1)})`)
+  }
+
+  // 8. The restated FET constants still match the shipping kernel's curve.
   //    Rendered rather than compared as literals — the point is the CURVE.
   const fet = makeFetCurve()
   ok(Math.abs(fet.transfer(1) - 1) < 1e-12,
@@ -670,6 +763,7 @@ function main() {
   const flip = args.includes('--flip')
   const write = args.includes('--write')
   const cellOnly = args.includes('--cell-only')
+  const emphSweep = args.includes('--emph-sweep')
   const fileArg = args.find(a => a.startsWith('--file='))
 
   if (!Number.isFinite(depth) || depth <= 0) {
@@ -700,6 +794,7 @@ function main() {
     const { mono, sampleRate } = readWav(path.join(CORPUS, file))
     sectionPassage(cands, mono, sampleRate, file)
     sectionRender(mono, sampleRate, { depth, flip, write, cellOnly })
+    if (emphSweep) sectionEmphasis(mono, sampleRate, file, { depth, flip })
   }
 }
 
