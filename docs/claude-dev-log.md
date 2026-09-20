@@ -4526,16 +4526,50 @@ curve does. Every conclusion drawn from that table was withdrawn and re-measured
   −6 dBFS. Worse, through the FULL kernel the ladders above H4 are identical across
   all three configurations to 0.1–1 dB, so most of it is not the curve at all.
   The axis that separates them is H3.
-- **⚠ THE ARCHITECTURE QUESTION IS OPEN AND THE EAR AND THE PAPER DISAGREE.**
-  Moore's six hardware units are ODD-dominant under compression (H3−H2 **+16 to
-  +44 dB**), attributed to the T4 cell rather than the valves. Our shipping config
-  gets odd content at the cell only incidentally, from a waveshaper standing where
-  the modulation would be, and the chosen quartic removes it (H3−H2 −22). The only
-  configuration where every stage is measurement-backed is **GAIN MOD at the cell,
-  QUARTIC at the valve** — measured H3−H2 **+18.8 dB**, inside the paper's band.
-  Not yet auditioned.
+- **⚗⚗⚗ THE ARCHITECTURE QUESTION IS SETTLED BY EAR, AGAINST THE PAPER — AND THE
+  THREE VERDICTS RANK IN EXACT ORDER OF ODD-HARMONIC SHARE.** Moore's six hardware
+  units are ODD-dominant under compression (H3−H2 **+16 to +44 dB**), attributed to
+  the T4 cell rather than the valves. **GAIN MOD at the cell + QUARTIC at the valve**
+  is the only configuration where every stage is measurement-backed, and it measures
+  H3−H2 **+18.8 dB**, inside the paper's band. Auditioned, the verdict was
+  "definitely worse — a lot of colour, not a neutral sound; could be useful in
+  certain applications but probably not wanted for general use."
 
-**NOT SHIPPED.** `quartic` is a bench option at both stages, not a default. The
+  Share of distortion energy that is ODD-order, PR 60, full kernel:
+
+  | peak | TubeSat/TubeSat | Quartic/Quartic 5.0 | GAIN MOD/Quartic |
+  |---|---|---|---|
+  | −12 dBFS | 43 % | **7 %** | **100 %** |
+  | −6 dBFS | 23 % | **1 %** | **99 %** |
+  | −1 dBFS | 39 % | **1 %** | **98 %** |
+
+  The three listening verdicts — preferred, previously shipped, rejected — order
+  themselves **1 % → 23 % → 99 %** odd content, monotonically, across three separate
+  auditions.
+- **⚠⚠ AND TOTAL DISTORTION ORDERS THE OTHER WAY, WHICH IS WHAT MAKES THIS A REAL
+  FINDING RATHER THAN A RESTATEMENT OF "CLEANER IS BETTER".** At −6 dBFS the THD of
+  the three runs **4.66 % (preferred) / 3.26 % (previous) / 1.94 % (rejected)**. The
+  REJECTED configuration is the cleanest one by total distortion, and by a factor of
+  two. Whatever the ear is tracking here, it is not how much.
+- **⚠ THE GAIN MODULATION'S LADDER IS WHY IT READS AS "COLOURED", and the shape is
+  distinctive rather than merely large.** At −6 dBFS it returns H3 **−37.7**, H5
+  **−39.1**, H7 **−43.2** with H2 at −56.5 and H4 at −63.5 — a slowly-decaying
+  odd-only comb where H5 sits within 1.4 dB of H3. That is the signature of a gain
+  being modulated at 2f rather than a waveform being bent: sidebands at f and 3f, and
+  their own sidebands above. It is a correct model of the mechanism the paper
+  measures; it is also unmistakable on voice.
+- **⚠ ONE LISTENER, SIGHTED, ONE PASSAGE, THREE CONFIGURATIONS.** The ordering is
+  clean and the measurements were taken after each verdict rather than before, but
+  this is not a blind panel and should not be written up as one.
+
+**NOT SHIPPED, BUT THE AUDITION IS FINISHED.** `quartic` is a bench option at both
+stages, not a default. The settled preference is **Quartic/Quartic at Cell sat ≈ 5**,
+and the divergence that implies is deliberate and should be stated whenever it ships:
+Moore's hardware is odd-dominant under compression and this is not. That is the same
+class of decision as the shipping Tube Sat curve — an ear verdict overruling a
+measurement — with the difference that the SHAPE here is identified from a reference
+rather than invented, and that the alternative was built, heard and rejected rather
+than argued about. The
 drives that would have to move with it — `cellCurveDriveMax` 1.5,
 `vocalSatCurveDrive` 0.5, `emphasis` 50 — were all chosen by ear FOR THE TUBE SAT
 CURVE and none of them transfer; the OptoSmooth factory presets would need a re-cut
