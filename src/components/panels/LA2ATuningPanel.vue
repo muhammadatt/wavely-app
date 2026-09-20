@@ -9,11 +9,14 @@
  * default (see `isLA2ATuningVisible`), and it should look like an instrument
  * panel rather than part of the unit.
  *
- * ⚠ EVERY VALUE HERE IS FITTED TO SOMETHING. The two cell constants come from
- * the hardware paper, the two valve constants from the -63.80 dBc H2 anchor,
- * and the rectifier pole is the one mechanism measured to move the harmonic
- * PROFILE rather than the level. Nothing dialled in here ships until it has
- * been back through the ledger, which is what COPY exists for.
+ * ⚠ NOT EVERY VALUE HERE IS FITTED, AND THE SPLIT MOVED. The two cell
+ * modulation constants come from the hardware paper and the rectifier pole is
+ * the one mechanism measured to move the harmonic PROFILE rather than the
+ * level; the two saturation drives and Emphasis are ear decisions with nothing
+ * behind them, which is most of why this panel exists. The valve constants that
+ * WERE fitted — to the -63.80 dBc H2 anchor — belonged to the tanh and went
+ * with it. Nothing dialled in here ships until it has been back through the
+ * ledger, which is what COPY exists for.
  */
 import { computed, ref } from 'vue'
 import {
@@ -77,21 +80,23 @@ const CONTROLS = [
     key: 'rectLpMs', label: 'Rect pole', min: 0, max: 5, step: 0.02, digits: 2, unit: ' ms',
     hint: 'One-pole on the rectifier. 0 is off. The only control that changes the harmonic PROFILE: at 2 ms the H3-to-H9 spread opens from 32 to 42 dB.',
   },
-  {
-    key: 'tubeDriveLin', label: 'Valve drive', min: 0.02, max: 1.2, step: 0.002, digits: 4,
-    hint: 'Anchored to the paper’s -63.80 dBc H2 median. Measures ~30 dB below the cell at working depths.',
-  },
-  {
-    key: 'tubeBias', label: 'Valve bias', min: 0, max: 0.4, step: 0.002, digits: 3,
-    hint: 'Operating-point offset — what makes the valve stage even-order at all.',
-  },
+  /**
+   * ⚠ "VALVE DRIVE" AND "VALVE BIAS" WERE HERE AND WENT WITH THE TANH. Both are
+   * constants OF THAT CURVE — `tubeDriveLin` and `tubeBias` reach the kernel
+   * only through the tanh branch of `shapeTube` and its inverse — so with the
+   * valve selector gone they moved nothing, and a slider that moves nothing is
+   * worse than no slider. They remain in the tuning store, because
+   * `test/dsp/la2aTuning.test.js` drives them through `LA2A_LEGACY_PATCH` and
+   * pins that `tubeDriveLin` does NOT reach the shipping curve. `npm run
+   * la2a:h2:refit` is where that anchor is worked on now.
+   */
   {
     key: 'cellCurveDriveMax', label: 'Cell sat', min: 0, max: 24, step: 0.05, digits: 2,
     hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law scales it. NOT Tube Sat’s Drive knob. Ships at 1.5, chosen by ear alongside Valve sat 0.5 and Emphasis 50.',
   },
   {
     key: 'emphasis', label: 'Emphasis', min: 0, max: 100, step: 1, digits: 0,
-    hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Ships at 50. Measured on narration, the whole 0-100 sweep moves crest under 0.07 dB while the top half adds ~11 dB of distortion on bright sustained vowels — the -1.1 dB it shows on a synthetic burst probe does not transfer to speech. Inert on tanh and on the gain modulation.',
+    hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Ships at 50. Measured on narration, the whole 0-100 sweep moves crest under 0.07 dB while the top half adds ~11 dB of distortion on bright sustained vowels — the -1.1 dB it shows on a synthetic burst probe does not transfer to speech. Inert on the gain modulation.',
   },
   {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
@@ -100,18 +105,18 @@ const CONTROLS = [
 ]
 
 /**
- * The two curve selectors. Peers rather than on/off, which is why they are
- * rockers and not checkboxes: a fitted mechanism and an auditioned one are two
- * different things, not more and less of one thing.
+ * The curve selector. A rocker rather than a checkbox: a fitted mechanism and
+ * an auditioned one are two different things, not more and less of one thing.
+ *
+ * ⚠ THE VALVE SELECTOR IS GONE AND THE KERNEL MODE IS NOT. `tubeCurve: 'tanh'`
+ * was falsified as the valve curve by two references failing it in two
+ * different ways — CLA-2A's H3 off by 43 dB, LALA's H2 law off by 76 — so it is
+ * not something to audition against and the bench stopped offering it. It
+ * remains a kernel mode because `LA2A_LEGACY_PATCH` is the baseline five test
+ * files measure against, and a legacy patch that cannot be selected is not a
+ * legacy patch. Reach it from code, not from here.
  */
 const CURVE_CHOICES = [
-  {
-    key: 'tubeCurve', label: 'Valve curve',
-    options: [
-      { id: 'tanh', label: 'TANH', title: 'The fitted biased hyperbolic tangent — anchored to the paper’s H2 median' },
-      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve at its panel defaults' },
-    ],
-  },
   {
     key: 'cellCurve', label: 'Cell mechanism',
     options: [
@@ -161,12 +166,9 @@ async function copyConstants() {
     '// OptoSmooth bench tuning',
     `CELL_MOD_MAX    = ${v.cellModMax}`,
     `CELL_MOD_TAU_DB = ${v.cellModTauDb}`,
-    `TUBE_DRIVE_LIN  = ${v.tubeDriveLin}`,
-    `TUBE_BIAS       = ${v.tubeBias}`,
     `rectLpMs        = ${v.rectLpMs}`,
     `cellMod         = ${v.cellMod}`,
     `tube            = ${v.tube}`,
-    `tubeCurve       = ${v.tubeCurve}`,
     `cellCurve       = ${v.cellCurve}`,
     `cellCurveDriveMax  = ${v.cellCurveDriveMax}`,
     `vocalSatCurveDrive = ${v.vocalSatCurveDrive}`,
@@ -293,7 +295,7 @@ async function copyConstants() {
       </p>
 
       <label
-        v-if="vals.tubeCurve === 'vocalsat' || vals.cellCurve === 'vocalsat'"
+        v-if="vals.cellCurve === 'vocalsat'"
         class="mt-3 flex items-center gap-2 text-[10px] text-white/55"
       >
         <input

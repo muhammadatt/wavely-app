@@ -61,7 +61,9 @@
     "fet:attack-depth:selftest": "node scripts/fet-attack-depth.mjs --selftest",
     "fet:release-depth": "node scripts/fet-release-depth.mjs",
     "fet:release-depth:selftest": "node scripts/fet-release-depth.mjs --selftest",
-    "fet:ballistics:selftest": "node scripts/fet-ballistics.mjs --fit --selftest"
+    "fet:ballistics:selftest": "node scripts/fet-ballistics.mjs --fit --selftest",
+    "la2a:curve": "node scripts/la2a-curve-bench.mjs",
+    "la2a:curve:selftest": "node scripts/la2a-curve-bench.mjs --selftest"
   },
   "dependencies": {
     "uuid": "^13.0.0",
