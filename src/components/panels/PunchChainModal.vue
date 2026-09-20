@@ -21,9 +21,22 @@ const {
 
 const { state } = useEditorState()
 
-// Default to engaged when the panel opens, matching the other plugin windows.
+/**
+ * Default to engaged when the panel opens, matching the other plugin windows —
+ * and measure either way.
+ *
+ * ⚠ THE MEASUREMENT USED TO BE A SIDE EFFECT OF `togglePreview`, so a panel
+ * that mounted with preview ALREADY on never ran one. `punchPreview` is a
+ * module singleton that outlives this component, so that is a state the panel
+ * can be opened into; the cards would then show whatever the singleton last
+ * held, which on a fresh page load is "—" forever. Measuring on mount makes the
+ * readouts a property of the panel being open rather than of how it got there.
+ *
+ * Exactly one pass either way: `togglePreview` already calls `refreshPlan`.
+ */
 onMounted(() => {
   if (!punchPreview.value) togglePreview()
+  else refreshPlan()
 })
 
 // Everything is measured from the selected region, so a new selection needs a
