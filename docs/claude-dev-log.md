@@ -4764,10 +4764,50 @@ on programme by ~11 dB; what this adds is that on a control which REDISTRIBUTES
 spectrum, a single tone does not merely understate the effect, it can reverse its
 sign. Reach for the multitone first on anything touching spectral balance.
 
-⚠ `EMPHASIS_CORNER_HZ` is still the default and nothing about the shipping voicing
-moved. `LA2A_TUBESAT_PATCH` now pins the corner as a literal 1800 for the same
-reason it pins `cellCurveDriveMax: 1.5` — a patch restoring a past voicing must not
-track a constant that has just become movable.
+**SHIPPED — EMPHASIS 85 ON A 2300 Hz CORNER**, up from 50 at 1800.
+
+- **⛗ WHERE 1800 CAME FROM, SINCE IT WAS NEVER RE-DERIVED FOR THIS STAGE.** It is
+  Tube Saturation's constant, ported wholesale with the rest of the pair, and its
+  own note gives the entire derivation: *"low enough to cover the consonant and
+  attack region a voice puts its edge in, high enough to leave the fundamental and
+  the first formant out of it — the pair must not turn into a bass control, because
+  whatever it boosts into the curve is what the curve distorts most."* **No
+  measurement picked it.** Two constraints bracketed a range and 1800 sits inside
+  it — unlike `EMPHASIS_MAX_DB`, whose note says plainly "12 dB because that is
+  what the measurement above used".
+- **⛗ 2300 SERVES THAT REASONING BETTER, so this is a re-reading rather than a
+  rejection.** The stated rule leaves out the fundamental and the FIRST formant. On
+  speech that is too low a bar: a voice's SECOND formant runs to roughly
+  2000-2400 Hz, so an 1800 Hz corner is already inside the vowel body the pair was
+  supposed to stay clear of. 2300 puts the shelf above most of F2 and leaves it on
+  the consonant and sibilance edge, which is what the original sentence was
+  reaching for.
+- **⚠ AND THE CONSTRAINT THAT SET 50 NO LONGER BINDS.** The ~11 dB of worst-case
+  distortion that forced 100 → 50 is a property of Tube Saturation's curve being
+  driven into its knee by the shelf. The quartic pays about a sixth of it — THD at
+  a 5 kHz probe, Emphasis 0 → 100, moves **+1.79 dB against Tube Sat's +10.95** —
+  most likely because a +12 dB boost pushes the quartic past `|u| = 1` into its
+  linear continuation, which makes no new harmonics.
+- **⛗ SO THE NEW PAIR COSTS LESS THAN THE OLD ONE WHILE CARRYING MORE DEPTH.** Added
+  nonlinear energy over the Emphasis-0 render, on narration with sibilance, in
+  200 Hz-1 kHz / 1-3 kHz / 3-5 kHz:
+
+  | setting | 200 Hz-1 kHz | 1-3 kHz | 3-5 kHz |
+  |---|---|---|---|
+  | 50 @ 1800 (what shipped) | 0.028 | 0.133 | 0.330 dB |
+  | **85 @ 2300 (ships now)** | **0.027** | **0.116** | **0.301 dB** |
+  | 100 @ 1800 | 0.093 | 0.289 | 0.452 dB |
+
+  That is why it is a change of BOTH numbers and not of one: 85 alone at 1800 would
+  cost more than the 50 it replaced, and the corner is what pays for it.
+- **⚠ `EMPHASIS_CORNER_HZ` NOW DIFFERS FROM `vocalSatProcessor.js`'s CONSTANT OF THE
+  SAME NAME, DELIBERATELY.** They are separate declarations because importing across
+  would pull a module that calls `registerProcessor` at module scope into this
+  worklet bundle — the duplicate-registration bug at the top of `dsp/satCurves.js`.
+  The divergence is not drift and must not be "fixed" by wiring them together.
+- **⚠ `LA2A_TUBESAT_PATCH` PINS 50 AND 1800 AS LITERALS**, for the third time in this
+  entry's worth of changes and for the same reason: a patch whose job is "the
+  previous voicing, exactly" must not track constants that have just moved.
 
 ---
 

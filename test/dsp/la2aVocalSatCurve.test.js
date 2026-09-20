@@ -21,7 +21,7 @@ import {
   TUBE_CURVE_TANH, TUBE_CURVE_VOCALSAT,
   CELL_CURVE_GAINMOD, CELL_CURVE_VOCALSAT,
 } from '../../src/audio/la2aProcessor.js'
-import { LA2A_KERNEL_DEFAULTS } from '../../src/audio/la2aProcessor.js'
+import { LA2A_KERNEL_DEFAULTS, EMPHASIS_CORNER_HZ } from '../../src/audio/la2aProcessor.js'
 import { makeVocalSatCurve } from '../../src/audio/dsp/vocalSatCurve.js'
 
 /**
@@ -86,7 +86,12 @@ test('the shipping patch is the audition patch, exactly', () => {
   assert.equal(d.cellCurveDriveMax, 5)
   assert.equal(d.vocalSatCurveDrive, 0.5)
   assert.equal(d.vocalSatLeanPositive, true)
-  assert.equal(d.emphasis, 50)
+  // ⚠ 50 → 85 with a corner move 1800 → 2300. The 11 dB of worst-case distortion
+  // that forced 100 → 50 belonged to Tube Saturation's curve; the quartic pays
+  // about a sixth of it, and 2300 puts the shelf above most of a voice's second
+  // formant. Measured, the new pair costs slightly LESS than the old one.
+  assert.equal(d.emphasis, 85)
+  assert.equal(d.emphasisCornerHz ?? EMPHASIS_CORNER_HZ, 2300)
   assert.equal(d.tube, true)
 })
 

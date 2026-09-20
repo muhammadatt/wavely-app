@@ -1341,10 +1341,30 @@ export const VALVE_CURVE_DRIVE = 0.5
  * same passage 3-4 dB and pays for it broadband; this knob moves it 11 dB and
  * is nearly free everywhere else.
  *
- * ⚠ 50 IS AUDITIONED, NOT SOLVED. The measurement says anything at or below 50
- * is equally free; 50 is where it was listened to and kept.
+ * ⚠ 50 WAS AUDITIONED, NOT SOLVED. The measurement said anything at or below 50
+ * was equally free; 50 is where it was listened to and kept.
+ *
+ * ⚠⚠ AND ALL OF THE ABOVE IS ABOUT TUBE SATURATION'S CURVE, WHICH NO LONGER
+ * SHIPS. The 11 dB of worst-case distortion that forced 100 → 50 is a property of
+ * that curve being driven into its knee by the shelf. On the quartic the same
+ * sweep costs about a sixth of it — THD at a 5 kHz probe, Emphasis 0 → 100, moves
+ * +1.79 dB against Tube Sat's +10.95 — most likely because a +12 dB boost pushes
+ * the quartic past `|u| = 1` into its LINEAR continuation, which makes no new
+ * harmonics, where the same boost drives a split soft clipper deeper into its
+ * bend. The constraint that set 50 does not bind here.
+ *
+ * ⚠ 85 IS AUDITIONED TOO, AND PAIRED WITH A CORNER MOVE. Measured on narration
+ * with sibilance, added nonlinear energy over the Emphasis-0 render, in
+ * 200 Hz-1 kHz / 1-3 kHz / 3-5 kHz:
+ *
+ *   50 @ 1800  (what shipped)   0.028 / 0.133 / 0.330 dB
+ *   85 @ 2300  (ships now)      0.027 / 0.116 / 0.301 dB
+ *   100 @ 1800                  0.093 / 0.289 / 0.452 dB
+ *
+ * So the new pair carries more depth at slightly LESS distortion than the one it
+ * replaces, which is why it is a change of both numbers and not of one.
  */
-export const EMPHASIS_DEFAULT = 50
+export const EMPHASIS_DEFAULT = 85
 
 /**
  * THE PRE-IMPORT KERNEL, AS A PATCH — the fitted `tanh` valve, the Moore-
@@ -1394,7 +1414,12 @@ export const LA2A_TUBESAT_PATCH = Object.freeze({
   cellCurve: CELL_CURVE_VOCALSAT,
   cellCurveDriveMax: 1.5,
   vocalSatCurveDrive: VALVE_CURVE_DRIVE,
-  emphasis: EMPHASIS_DEFAULT,
+  /**
+   * ⚠ A LITERAL FOR THE SAME REASON THE CORNER BELOW IS. `EMPHASIS_DEFAULT` moved
+   * 50 → 85 with the curve; a patch restoring the Tube Sat voicing must carry the
+   * 50 that voicing was cut at, not whatever the default happens to be later.
+   */
+  emphasis: 50,
   /**
    * ⚠ A LITERAL, NOT `EMPHASIS_CORNER_HZ`, FOR THE SAME REASON `cellCurveDriveMax`
    * ABOVE IS. A patch whose job is "the previous voicing, exactly" must not track
@@ -1473,7 +1498,35 @@ export const LA2A_TUBESAT_PATCH = Object.freeze({
 export const EMPHASIS_MAX_DB = 12
 
 /** Corner of the emphasis shelf, Hz. Inherited from Tube Saturation. */
-export const EMPHASIS_CORNER_HZ = 1800
+/**
+ * Corner of the emphasis shelf, Hz.
+ *
+ * ⚠ 1800 CAME FROM TUBE SATURATION AND WAS REASONED, NOT FITTED. Its own note
+ * (`vocalSatProcessor.js`) gives the whole derivation: "low enough to cover the
+ * consonant and attack region a voice puts its edge in, high enough to leave the
+ * fundamental and the first formant out of it — the pair must not turn into a
+ * bass control, because whatever it boosts into the curve is what the curve
+ * distorts most." No measurement picked the number; two constraints bracketed it
+ * and 1800 sits between them. It arrived here by being ported wholesale with the
+ * rest of the pair, never re-derived for this stage.
+ *
+ * ⚠⚠ 2300 SERVES THAT SAME REASONING BETTER FOR NARRATION, which is why this is
+ * a re-reading rather than a rejection. A voice's SECOND formant runs to about
+ * 2000-2400 Hz, so an 1800 Hz corner is already inside the vowel body it was
+ * supposed to stay out of — the original rule says leave the fundamental and the
+ * FIRST formant out, and on speech that is not a high enough bar. Raising it to
+ * 2300 puts the shelf above most of F2 and leaves it on the consonant and
+ * sibilance edge the pair exists to shape. Auditioned, and measured: added
+ * nonlinear energy in 3-5 kHz over the Emphasis-0 render runs 0.54 / 0.34 / 0.20 /
+ * 0.06 / 0.02 dB at corners 1200 / 1500 / 1800 / 2400 / 3200.
+ *
+ * ⚠ IT NO LONGER MATCHES `vocalSatProcessor.js`'s CONSTANT OF THE SAME NAME, AND
+ * THAT IS DELIBERATE. The two are separate declarations on purpose: importing
+ * across would pull a module that calls `registerProcessor` at module scope into
+ * this worklet bundle, which is the duplicate-registration bug documented at the
+ * top of `dsp/satCurves.js`. Do not "fix" the divergence by wiring them together.
+ */
+export const EMPHASIS_CORNER_HZ = 2300
 
 /**
  * Bench travel for the corner. Wide enough to reach under the voice's first
