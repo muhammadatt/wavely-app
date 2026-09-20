@@ -99,6 +99,10 @@ const CONTROLS = [
     hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Ships at 50. Measured on narration AGAINST THE TUBE SAT CURVE, the whole 0-100 sweep moves crest under 0.07 dB while the top half adds ~11 dB of distortion on bright sustained vowels. ⚠ WHAT IT DOES ON THE QUARTIC IS UNMEASURED — it is inert on a steady tone for both curves, which is the one probe run so far and the one that cannot see it. Inert on the gain modulation.',
   },
   {
+    key: 'emphasisCornerHz', label: 'Emph Hz', min: 200, max: 8000, step: 25, digits: 0, unit: ' Hz',
+    hint: 'Corner of the pre/de-emphasis shelf pair. Ships at 1800. ⚠ THE SECOND AXIS ON EMPHASIS, and it exists because the depth knob has only one. Measured on a multitone, Emphasis 100 adds 1.2–1.6 dB of distortion at peak levels and TRIPLES the share above 5 kHz while doing nothing at −12 dBFS — auditioned, the same mechanism reads as both “fuller/fatter” and “grinds at the peaks”, so no depth setting buys one without the other. ⚠ LOWERING IT MAKES BOTH WORSE, not one better — a high shelf with a lower corner boosts MORE of the spectrum. At −6 dBFS peak, Emphasis 100 measures −23.70 dB / 2.2% above 5 kHz at 1800, and −21.97 dB / 3.7% at 600. If you want density with less grind, CELL SAT is the better route: at matched total distortion it puts ~10–20% less of it above 5 kHz. ⚠ Inert when Emphasis is 0.',
+  },
+  {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
     hint: 'VALVE stage only — the valves are ~5% of the distortion, so this is a small constant floor under the cell. Same quantity as Cell sat, at the other stage, and the two read in comparable units once auto makeup is engaged. Ships at 0.5, chosen by ear.',
   },

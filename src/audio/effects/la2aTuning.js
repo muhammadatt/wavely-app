@@ -28,7 +28,7 @@
 
 import {
   TUBE_DRIVE_LIN, TUBE_BIAS, CELL_MOD_MAX, CELL_MOD_TAU_DB, CELL_MOD_SHAPE,
-  CELL_CURVE_DRIVE_MAX, VALVE_CURVE_DRIVE, EMPHASIS_DEFAULT,
+  CELL_CURVE_DRIVE_MAX, VALVE_CURVE_DRIVE, EMPHASIS_DEFAULT, EMPHASIS_CORNER_HZ,
   LA2A_KERNEL_DEFAULTS,
 } from '../la2aProcessor.js'
 
@@ -103,6 +103,20 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
    * modulation it is inert. See EMPHASIS_MAX_DB for the table.
    */
   emphasis: EMPHASIS_DEFAULT,
+  /**
+   * Corner of that shelf pair, Hz.
+   *
+   * ⚠ IT IS HERE BECAUSE THE DEPTH KNOB CANNOT SEPARATE FULLNESS FROM GRIND.
+   * Emphasis 100 measures 1.2-1.6 dB more distortion at peak levels with three
+   * times the share above 5 kHz, and nothing at all at -12 dBFS; auditioned,
+   * that one mechanism reads as both "fatter" and "grinds at the peaks".
+   *
+   * ⚠ MOVING THE CORNER DOWN DOES NOT TRADE ONE FOR THE OTHER — measured, it
+   * makes both worse, because a high shelf with a lower corner boosts more of
+   * the spectrum rather than less. The control is kept as a measured axis, not
+   * as the escape hatch it was added to be.
+   */
+  emphasisCornerHz: EMPHASIS_CORNER_HZ,
 })
 
 /**

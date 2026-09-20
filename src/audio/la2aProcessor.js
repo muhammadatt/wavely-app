@@ -1395,6 +1395,13 @@ export const LA2A_TUBESAT_PATCH = Object.freeze({
   cellCurveDriveMax: 1.5,
   vocalSatCurveDrive: VALVE_CURVE_DRIVE,
   emphasis: EMPHASIS_DEFAULT,
+  /**
+   * ⚠ A LITERAL, NOT `EMPHASIS_CORNER_HZ`, FOR THE SAME REASON `cellCurveDriveMax`
+   * ABOVE IS. A patch whose job is "the previous voicing, exactly" must not track
+   * a constant that can move — and the corner became a bench control precisely so
+   * it could. 1800 is what this voicing was cut at.
+   */
+  emphasisCornerHz: 1800,
 })
 
 /**
@@ -1467,6 +1474,13 @@ export const EMPHASIS_MAX_DB = 12
 
 /** Corner of the emphasis shelf, Hz. Inherited from Tube Saturation. */
 export const EMPHASIS_CORNER_HZ = 1800
+
+/**
+ * Bench travel for the corner. Wide enough to reach under the voice's first
+ * formant at one end and past the grind band at the other; not a patch range.
+ */
+export const EMPHASIS_CORNER_MIN_HZ = 200
+export const EMPHASIS_CORNER_MAX_HZ = 8000
 
 /** Below this the pair is skipped outright rather than run flat. */
 export const EMPHASIS_EPSILON = 1e-4
@@ -2203,12 +2217,42 @@ export class LA2AKernel {
       for (const f of this.deEmph) f?.reset()
       for (const f of this.trkEmph) f?.reset()
     }
+    /**
+     * The shelf corner, exposed because the knob it belongs to cannot separate
+     * the two things it does.
+     *
+     * ⚠ WHY THIS IS A CONTROL AT ALL. Measured on a multitone, Emphasis 100 adds
+     * 1.2-1.6 dB of distortion at peak levels and TRIPLES the share sitting
+     * above 5 kHz, while doing nothing at -12 dBFS. Auditioned, that reads as
+     * "fuller and fatter" AND as "grinds more at the peaks" — one mechanism, two
+     * descriptions, so no position of the depth knob buys one without the other.
+     * ⚠⚠ THE CORNER IS A SECOND AXIS AND IT DOES NOT SEPARATE THEM EITHER — this
+     * control was added on the prediction that it would, and the prediction was
+     * wrong. A HIGH shelf with a LOWER corner boosts MORE of the spectrum, not
+     * less, so lowering it raises total distortion AND the high-frequency share
+     * together: at -6 dBFS peak, Emphasis 100 goes -23.70 dB / 2.2 % above 5 kHz
+     * at the stock 1800 Hz, and -21.97 dB / 3.7 % at 600. It is kept because it
+     * is a real axis that is now measured rather than guessed at, not because it
+     * buys the separation it was reached for.
+     *
+     * ⚠ IT IS A BENCH CONTROL AND NOT A PATCH KEY, like everything else in
+     * `la2aTuning.js` — see that file's header. Nothing serialises it.
+     *
+     * ⚠ CLAMPED WELL UNDER NYQUIST. `highShelf` is a bilinear-transform biquad,
+     * so a corner approaching Nyquist warps into nonsense rather than failing
+     * loudly, and the bench can write any number here live onto a running
+     * worklet.
+     */
+    const corner = Number.isFinite(p.emphasisCornerHz) && p.emphasisCornerHz > 0
+      ? clamp(p.emphasisCornerHz, EMPHASIS_CORNER_MIN_HZ,
+        Math.min(EMPHASIS_CORNER_MAX_HZ, this.sampleRate * 0.45))
+      : EMPHASIS_CORNER_HZ
     if (this.emphasisActive) {
       this.preSections = [highShelf(
-        this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, this.emphasisDb,
+        this.sampleRate, corner, Math.SQRT1_2, this.emphasisDb,
       )]
       this.deSections = [highShelf(
-        this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, -this.emphasisDb,
+        this.sampleRate, corner, Math.SQRT1_2, -this.emphasisDb,
       )]
       for (const f of this.preEmph) f?.setSections(this.preSections)
       for (const f of this.deEmph) f?.setSections(this.deSections)

@@ -4659,6 +4659,93 @@ or `'uuid'`. With dependencies installed: **1391 tests, 1391 pass, 0 fail**, and
 ---
 
 
+### Emphasis on the quartic — and three tone probes that pointed the wrong way
+
+Emphasis ships at 50, cut against Tube Saturation's curve, and was carried across
+to the quartic unexamined. The question was whether it even works the same way.
+
+- **⚠ THE FIRST PROBE WAS AT 150 Hz, BELOW THE 1800 Hz CORNER, AND READ "INERT ON
+  BOTH".** That is what a pre/de-emphasis pair does below its own corner, and it
+  says nothing about the band the control acts in. Recorded because the reading
+  was reported as an answer before anyone noticed which side of the corner it sat
+  on.
+- **⛗ SWEPT ACROSS FREQUENCY, THE MECHANISM IS THE SAME ON BOTH CURVES AND THE
+  MAGNITUDE IS NOT.** THD at PR 60, −6 dBFS tone, Emphasis 0 → 100:
+
+  | probe | quartic | tube sat |
+  |---|---|---|
+  | 200 Hz | −0.04 dB | −0.09 dB |
+  | 1 kHz | −5.33 dB | −4.44 dB |
+  | 2.5 kHz | −0.78 dB | **+7.52 dB** |
+  | 5 kHz | **+1.79 dB** | **+10.95 dB** |
+
+  Below the corner it suppresses — harmonics land where the de-emphasis cuts them,
+  which is "absorb rather than excite". Above it, the fundamental itself is driven
+  into the nonlinearity and it excites. ⛗ The tube-sat 5 kHz row reproduces the
+  ledger's own "~11 dB on bright sustained vowels" almost exactly, which is the
+  probe validating itself against a known number. The quartic pays about a sixth
+  of it, most likely because a +12 dB boost pushes it past `|u| = 1` into the
+  LINEAR continuation, which makes no new harmonics, where the same boost drives
+  Tube Sat's split soft clipper deeper into its knee.
+- **⚠⚠ AND THAT WHOLE TABLE IS THE WRONG INSTRUMENT FOR THE QUESTION ACTUALLY
+  ASKED.** On the strength of it the recommendation was to try Emphasis 100 on the
+  quartic, since the cost that had forced 100 → 50 looked largely gone. Auditioned:
+  **"fuller/softer/fatter at 100, but grinds a bit more at the peaks."** Both
+  halves of that contradict the single-tone measurement, which says 100 is cleaner
+  AND less warm at every level (H2 −25.8 → −30.7 dBc at 900 Hz, high-order share
+  falling too).
+- **⛗⛗ A MULTITONE REPRODUCES THE EAR EXACTLY, AND EXPLAINS WHY A TONE CANNOT.**
+  Twelve tones on prime bins, so no sum or difference of two inputs lands on a
+  third and every non-input bin is distortion. PR 60, quartic:
+
+  | peak | emph | distortion / signal | share above 5 kHz |
+  |---|---|---|---|
+  | −12 dBFS | 0 / 50 / 100 | −30.62 / −30.62 / −30.62 dB | 1.5 / 1.5 / 1.5 % |
+  | −6 dBFS | 0 / 50 / 100 | −25.27 / −24.98 / **−23.70** dB | 0.7 / 1.2 / **2.2 %** |
+  | −3 dBFS | 0 / 50 / 100 | −22.43 / −21.98 / **−20.74** dB | 1.3 / 2.1 / **2.8 %** |
+  | −1 dBFS | 0 / 50 / 100 | −20.71 / −20.43 / **−19.49** dB | 1.4 / 2.3 / **2.7 %** |
+
+  Emphasis 100 adds **1.2–1.6 dB** of distortion and **triples** the share above
+  5 kHz — and does nothing whatever at −12 dBFS. Level-dependent extra HF
+  distortion is "grinds at the peaks", stated as a number. A single tone has
+  nothing to intermodulate with, so the de-emphasis simply attenuates that tone's
+  own harmonics and the control looks benign.
+- **⚠ THE TWO DESCRIPTIONS ARE ONE MECHANISM, SO THE DEPTH KNOB CANNOT SEPARATE
+  THEM.** "Fatter" and "grinds" are both the same added IMD energy at high level.
+  No position of Emphasis buys one without the other, which makes the shipped 50 a
+  real compromise rather than an inherited number.
+- **⚠⚠ THE CORNER WAS EXPOSED ON THE BENCH TO BREAK THAT TIE, ON A PREDICTION THAT
+  WAS WRONG.** The reasoning was that lowering it would fatten the low-mids while
+  exciting less of the grind band. A HIGH shelf with a LOWER corner boosts MORE of
+  the spectrum, not less, so it raises both together: at −6 dBFS peak, Emphasis
+  100 measures **−23.70 dB / 2.2 %** at the stock 1800 Hz and **−21.97 dB / 3.7 %**
+  at 600. `emphasisCornerHz` ships as a bench control anyway — it is a real axis
+  and it is now measured rather than guessed at — but not as the escape hatch it
+  was reached for.
+- **⛗ CELL SAT IS THE BETTER ROUTE TO DENSITY, MODESTLY AND MEASURABLY.** At
+  matched total distortion it puts less of it in the grind band: at −6 dBFS,
+  Emphasis 100 at cell 5 gives −23.70 dB / **2.2 %** while cell sat 9 at Emphasis 0
+  gives −23.99 dB / **1.8 %**; at −1 dBFS, −19.49 / **2.7 %** against cell 12's
+  −19.53 / **2.4 %**. Same density, roughly 10–20 % less of it above 5 kHz. ⚠ A
+  consistent direction rather than a dramatic win, and it does not separate the two
+  either — on this curve, added density at peaks brings HF intermodulation with it.
+
+⚠⚠ **THE PATTERN WORTH KEEPING FROM THIS ENTRY IS ABOUT THE INSTRUMENT, NOT THE
+KNOB.** Three single-tone probes in a row gave confident answers that the ear
+contradicted: inert (wrong side of the corner), then cleaner-and-thinner (no
+intermodulation), then a corner prediction with the shelf's own direction
+backwards. The ledger already warns that tone THD understates a memoryless shaper
+on programme by ~11 dB; what this adds is that on a control which REDISTRIBUTES
+spectrum, a single tone does not merely understate the effect, it can reverse its
+sign. Reach for the multitone first on anything touching spectral balance.
+
+⚠ `EMPHASIS_CORNER_HZ` is still the default and nothing about the shipping voicing
+moved. `LA2A_TUBESAT_PATCH` now pins the corner as a literal 1800 for the same
+reason it pins `cellCurveDriveMax: 1.5` — a patch restoring a past voicing must not
+track a constant that has just become movable.
+
+---
+
 ---
 
 ### Available but Not Active in Current Presets
