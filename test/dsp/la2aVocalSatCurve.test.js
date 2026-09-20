@@ -73,10 +73,17 @@ test('the shipping patch is the audition patch, exactly', () => {
   // the knob was measured to cost ~11 dB of worst-case distortion on bright
   // sustained vowels for under 0.02 dB of the transient absorption it was kept
   // for. See EMPHASIS_DEFAULT for the sweep.
+  //
+  // ⚠⚠ IT CAME THROUGH AGAIN, AND FURTHER: the curve itself moved from Tube
+  // Saturation's to the QUARTIC at both stages, with `cellCurveDriveMax` 1.5 ->
+  // 5. Chosen by ear over three auditions whose verdicts ranked in exact order
+  // of odd-harmonic share (1 % / 23 % / 99 %), with total distortion ordering
+  // the other way. `LA2A_TUBESAT_PATCH` restores what this used to pin, and
+  // `la2aQuarticCurve.test.js` proves it does so bit-identically.
   const d = LA2A_KERNEL_DEFAULTS
-  assert.equal(d.tubeCurve, TUBE_CURVE_VOCALSAT)
-  assert.equal(d.cellCurve, CELL_CURVE_VOCALSAT)
-  assert.equal(d.cellCurveDriveMax, 1.5)
+  assert.equal(d.tubeCurve, 'quartic')
+  assert.equal(d.cellCurve, 'quartic')
+  assert.equal(d.cellCurveDriveMax, 5)
   assert.equal(d.vocalSatCurveDrive, 0.5)
   assert.equal(d.vocalSatLeanPositive, true)
   assert.equal(d.emphasis, 50)

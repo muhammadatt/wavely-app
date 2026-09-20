@@ -74,9 +74,17 @@ test('splitting vsCurve per stage left every existing configuration bit-identica
 
 test('the quartic is selectable at each stage independently', () => {
   const x = passage()
-  const ship = render(x, { peakReduction: 60 })
-  const qCell = render(x, { peakReduction: 60, cellCurve: CELL_CURVE_QUARTIC })
-  const qValve = render(x, { peakReduction: 60, tubeCurve: TUBE_CURVE_QUARTIC })
+  /**
+   * ⚠ CONTRASTED AGAINST AN EXPLICIT `vocalsat`, NOT AGAINST THE DEFAULT. This
+   * test read `render(x, {})` as the non-quartic side until the quartic became
+   * the default, at which point both sides of every comparison were the same
+   * curve and the test asserted that the quartic differs from itself. A test
+   * that names both configurations cannot rot that way.
+   */
+  const V = { cellCurve: 'vocalsat', tubeCurve: 'vocalsat' }
+  const ship = render(x, { peakReduction: 60, ...V })
+  const qCell = render(x, { peakReduction: 60, ...V, cellCurve: CELL_CURVE_QUARTIC })
+  const qValve = render(x, { peakReduction: 60, ...V, tubeCurve: TUBE_CURVE_QUARTIC })
   const qBoth = render(x, {
     peakReduction: 60, cellCurve: CELL_CURVE_QUARTIC, tubeCurve: TUBE_CURVE_QUARTIC,
   })
@@ -161,4 +169,61 @@ test('an unknown curve name falls back to what ships, not to something older', (
   const ship = render(x, { peakReduction: 60 })
   const typo = render(x, { peakReduction: 60, cellCurve: 'quartics', tubeCurve: 'vocalsatt' })
   assert.equal(maxDiff(ship, typo), 0, 'an unknown curve name did not fall back to the shipping curve')
+})
+
+test('the quartic ships at both stages, and the previous voicing is recoverable', async () => {
+  /**
+   * ⚠ THE PATCH HAS TO CARRY THE DRIVES, NOT JUST THE CURVE NAMES.
+   * `CELL_CURVE_DRIVE_MAX` moved 1.5 → 5 with the curve, so a patch that restored
+   * only `cellCurve: 'vocalsat'` would give Tube Saturation's curve at three times
+   * the drive it was voiced at — a configuration that never shipped. That is the
+   * silent-partial-restore bug `fet1176Curve.test.js` documents on the other
+   * plugin, and this is the same guard one plugin over.
+   */
+  const m = await import('../../src/audio/la2aProcessor.js')
+  assert.equal(m.LA2A_KERNEL_DEFAULTS.cellCurve, CELL_CURVE_QUARTIC)
+  assert.equal(m.LA2A_KERNEL_DEFAULTS.tubeCurve, TUBE_CURVE_QUARTIC)
+  assert.equal(m.CELL_CURVE_DRIVE_MAX, 5)
+
+  for (const key of ['tubeCurve', 'cellCurve', 'cellCurveDriveMax', 'vocalSatCurveDrive', 'emphasis']) {
+    assert.ok(key in m.LA2A_TUBESAT_PATCH,
+      `LA2A_TUBESAT_PATCH must carry '${key}' or it restores half a voicing`)
+  }
+  assert.equal(m.LA2A_TUBESAT_PATCH.cellCurveDriveMax, 1.5,
+    'the previous voicing was cut at cell drive 1.5, not at whatever ships now')
+
+  // And the bench must be able to set every key it carries, same rule as the FET's.
+  const t = await import('../../src/audio/effects/la2aTuning.js')
+  for (const key of Object.keys(m.LA2A_TUBESAT_PATCH)) {
+    assert.ok(key in t.LA2A_TUNING_DEFAULTS,
+      `LA2A_TUBESAT_PATCH carries '${key}' but the bench has no default for it`)
+  }
+
+  // It must actually render differently from what now ships.
+  const x = passage(0.7)
+  assert.ok(maxDiff(render(x, { peakReduction: 60 }),
+    render(x, { peakReduction: 60, ...m.LA2A_TUBESAT_PATCH })) > 1e-4,
+  'LA2A_TUBESAT_PATCH renders identically to the shipping patch — it is not restoring anything')
+})
+
+test('the curve change did not move gain reduction, so presets need no re-cut', () => {
+  /**
+   * ⚠ THE LOAD-BEARING REASON THE FACTORY PRESETS SURVIVED A RE-VOICING UNTOUCHED.
+   * The detector sits ahead of the gain cell and never sees the shaper, so swapping
+   * the curve cannot move the envelope. `OPTO_SMOOTH_PARAM_KEYS` stores knob
+   * positions and no curve keys, so a preset means the same gain reduction it
+   * always did. If this ever fails, every OptoSmooth preset has silently drifted
+   * and needs the `fet-recut-presets.mjs` treatment.
+   */
+  const x = passage()
+  for (const pr of [30, 45, 55, 60, 65, 75]) {
+    const base = { mode: 'compress', peakReduction: pr, gainDb: 0, r37: 100, mix: 1 }
+    const ship = processLA2ABuffer([x], SR, base).metering
+    for (const patch of [{ cellCurve: CELL_CURVE_QUARTIC }, { cellCurve: 'vocalsat' },
+      { cellCurve: CELL_CURVE_GAINMOD }, LA2A_LEGACY_PATCH]) {
+      const alt = processLA2ABuffer([x], SR, { ...base, ...patch }).metering
+      assert.ok(Math.abs(ship.avgGainReductionDb - alt.avgGainReductionDb) < 1e-9,
+        `curve selection moved avg GR at PR ${pr}: ${ship.avgGainReductionDb} vs ${alt.avgGainReductionDb}`)
+    }
+  }
 })

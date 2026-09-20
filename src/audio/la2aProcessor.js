@@ -1244,7 +1244,25 @@ export const CELL_CURVE_QUARTIC = 'quartic'
  * these two stages has to run with the makeup the patch will actually use.
  * At makeup 0 the valve is starved and every comparison tilts toward the cell.
  */
-export const CELL_CURVE_DRIVE_MAX = 1.5
+/**
+ * ⚠⚠ 1.5 -> 5 WITH THE CURVE CHANGE, AND IT IS A DIFFERENT QUANTITY NOW. 1.5 was
+ * auditioned against Tube Saturation's curve; 5 was auditioned against the
+ * quartic, on the bench, on the owner's own material. Drive means something
+ * different in each — on the split soft clipper it sets how far into the knee the
+ * cell runs, on the quartic it scales `c4` as d³ — so the number does NOT carry
+ * across and a stored value from one is not a voicing in the other. Same hazard
+ * `fetDrive` carries between the FET kernel's `tanh` and `poly`.
+ *
+ * ⚠ AT 5 THE QUARTIC IS NOT THE QUIET OPTION. Measured at PR 60 against the Tube
+ * Sat curve it replaced: THD 1.19 % against 0.83 % at -12 dBFS peak, 4.66 %
+ * against 3.26 % at -6, 5.49 % against 5.63 % at -1. It delivers MORE total
+ * distortion through most of the range and more second harmonic with it, and 13-19
+ * dB LESS third. That combination is the whole reason it was chosen; see the dev
+ * log entry "OptoSmooth's curve, revisited".
+ *
+ * ⚠ THE PREVIOUS VOICING IS RECOVERABLE IN ONE OBJECT — `LA2A_TUBESAT_PATCH`.
+ */
+export const CELL_CURVE_DRIVE_MAX = 5
 
 /**
  * Ceiling on that compensation, dB.
@@ -1347,6 +1365,36 @@ export const LA2A_LEGACY_PATCH = Object.freeze({
   tubeCurve: TUBE_CURVE_TANH,
   cellCurve: CELL_CURVE_GAINMOD,
   emphasis: 0,
+})
+
+/**
+ * THE VOICING THAT SHIPPED BEFORE THE QUARTIC — Tube Saturation's curve at both
+ * stages, at the drives it was auditioned at.
+ *
+ * ⚠ THIS IS NOT `LA2A_LEGACY_PATCH` AND THE TWO MUST NOT BE CONFLATED. That one
+ * goes back further, to the fitted `tanh` and the gain modulation, and is the
+ * baseline five test files measure against. This one is the IMMEDIATELY previous
+ * ship: every render made between the Tube Sat import and the quartic sounds like
+ * this and like neither of the other two.
+ *
+ * ⚠ IT CARRIES THE DRIVES, NOT JUST THE CURVE NAMES, AND THAT IS THE WHOLE POINT.
+ * `CELL_CURVE_DRIVE_MAX` moved 1.5 -> 5 with the curve, so selecting `vocalsat` on
+ * the bench without also restoring 1.5 gives Tube Saturation's curve at three
+ * times the drive it was voiced at — a configuration that has never shipped and
+ * was never auditioned. A patch that restores half a voicing is the bug
+ * `test/dsp/fet1176Curve.test.js` was written to catch on the other plugin.
+ *
+ * Same reasoning as `FET_LEGACY_PATCH`: a measurement replaced an ear decision
+ * (here, an ear decision replaced an ear decision with a better-pedigreed shape),
+ * and what it replaced stays reachable so the change can be differenced rather
+ * than argued about.
+ */
+export const LA2A_TUBESAT_PATCH = Object.freeze({
+  tubeCurve: TUBE_CURVE_VOCALSAT,
+  cellCurve: CELL_CURVE_VOCALSAT,
+  cellCurveDriveMax: 1.5,
+  vocalSatCurveDrive: VALVE_CURVE_DRIVE,
+  emphasis: EMPHASIS_DEFAULT,
 })
 
 /**
@@ -1536,8 +1584,30 @@ export const LA2A_KERNEL_DEFAULTS = {
    * preset chain runs its own compression stages server-side; these are the
    * client-side plugin's defaults. Nothing in `presets.js` changes.
    */
-  tubeCurve: TUBE_CURVE_VOCALSAT,
-  cellCurve: CELL_CURVE_VOCALSAT,
+  /**
+   * ⚠⚠ THE SHIPPING CURVE IS NOW THE QUARTIC AT BOTH STAGES, AND EVERY EARLIER
+   * RENDER SOUNDS DIFFERENT. Chosen by ear over three auditions — Tube Sat (what
+   * shipped), the quartic, and the fully measurement-backed GAIN MOD + quartic —
+   * and the three verdicts ranked in exact order of ODD-harmonic share: 23 %,
+   * 1 %, 99 % at -6 dBFS peak. Total distortion ordered the other way, so "it is
+   * cleaner" is not the explanation; the rejected configuration was the cleanest
+   * of the three by a factor of two.
+   *
+   * ⚠ THE SHAPE IS IDENTIFIED, THE PLACEMENT AT THE CELL IS NOT. Both reference
+   * sweeps behind the quartic were captured at Gain 0 / Peak Reduction 0 — cell
+   * idle — so they measure the OUTPUT STAGE. At the valve this is a reference
+   * curve in the stage the reference measured. At the cell it is an ear choice
+   * wearing a borrowed shape, in the same category as the Tube Sat curve it
+   * replaces. See `dsp/quarticSatCurve.js`.
+   *
+   * ⚠ AND IT DIVERGES FROM THE HARDWARE PAPER DELIBERATELY. Moore's six units are
+   * ODD-dominant under compression (H3-H2 +16 to +44 dB) and this is not (-22).
+   * The configuration that does reproduce that band was built, auditioned and
+   * rejected as "a lot of colour, not a neutral sound". `cellCurve: 'gainmod'`
+   * still selects it.
+   */
+  tubeCurve: TUBE_CURVE_QUARTIC,
+  cellCurve: CELL_CURVE_QUARTIC,
   /** Cell shaper drive at full compression. Auditioned — see the constant. */
   cellCurveDriveMax: CELL_CURVE_DRIVE_MAX,
   /** Valve stage drive. Auditioned, and NOT the derived reconstruction. */
@@ -2053,13 +2123,21 @@ export class LA2AKernel {
      * while `tanh`/`gainmod` were the defaults, and leaving it would have
      * meant a typo or a stale param message silently selecting the OLD model —
      * a fallback that lands anywhere but the shipping patch is not a fallback.
+     *
+     * ⚠⚠ REWRITTEN AGAIN WHEN THE QUARTIC SHIPPED, AND A TEST IS WHY IT WAS NOT
+     * MISSED. Changing `LA2A_KERNEL_DEFAULTS` is not enough: the fallback arm is
+     * a SEPARATE statement of what ships, and after the default moved to
+     * `quartic` this still landed a typo on `vocalsat` — the previous voicing,
+     * silently. Every named mode is now matched explicitly and the DEFAULT is
+     * the else-branch, so the next curve change breaks the list rather than the
+     * fallback. `la2aQuarticCurve.test.js` pins it.
      */
     this.tubeCurveMode = p.tubeCurve === TUBE_CURVE_TANH ? TUBE_CURVE_TANH
-      : p.tubeCurve === TUBE_CURVE_QUARTIC ? TUBE_CURVE_QUARTIC
-        : TUBE_CURVE_VOCALSAT
+      : p.tubeCurve === TUBE_CURVE_VOCALSAT ? TUBE_CURVE_VOCALSAT
+        : TUBE_CURVE_QUARTIC
     this.cellCurveMode = p.cellCurve === CELL_CURVE_GAINMOD ? CELL_CURVE_GAINMOD
-      : p.cellCurve === CELL_CURVE_QUARTIC ? CELL_CURVE_QUARTIC
-        : CELL_CURVE_VOCALSAT
+      : p.cellCurve === CELL_CURVE_VOCALSAT ? CELL_CURVE_VOCALSAT
+        : CELL_CURVE_QUARTIC
     const curveOverrides = {}
     if (Number.isFinite(p.vocalSatCurveDrive) && p.vocalSatCurveDrive > 0) {
       curveOverrides.curveDrive = p.vocalSatCurveDrive

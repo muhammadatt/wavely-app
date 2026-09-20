@@ -92,11 +92,11 @@ const CONTROLS = [
    */
   {
     key: 'cellCurveDriveMax', label: 'Cell sat', min: 0, max: 24, step: 0.05, digits: 2,
-    hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law scales it. NOT Tube Sat’s Drive knob. Ships at 1.5, chosen by ear alongside Valve sat 0.5 and Emphasis 50.',
+    hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law scales it. Means a DIFFERENT THING per curve — on Tube Sat it sets how far into the knee the cell runs, on the QUARTIC it scales c4 as the cube of the drive, so a value from one is not a voicing in the other. Ships at 5 on the quartic, chosen by ear. The previous Tube Sat voicing was 1.5; LA2A_TUBESAT_PATCH restores the pair.',
   },
   {
     key: 'emphasis', label: 'Emphasis', min: 0, max: 100, step: 1, digits: 0,
-    hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Ships at 50. Measured on narration, the whole 0-100 sweep moves crest under 0.07 dB while the top half adds ~11 dB of distortion on bright sustained vowels — the -1.1 dB it shows on a synthetic burst probe does not transfer to speech. Inert on the gain modulation.',
+    hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Ships at 50. Measured on narration AGAINST THE TUBE SAT CURVE, the whole 0-100 sweep moves crest under 0.07 dB while the top half adds ~11 dB of distortion on bright sustained vowels. ⚠ WHAT IT DOES ON THE QUARTIC IS UNMEASURED — it is inert on a steady tone for both curves, which is the one probe run so far and the one that cannot see it. Inert on the gain modulation.',
   },
   {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
@@ -129,7 +129,7 @@ const CURVE_CHOICES = [
     key: 'cellCurve', label: 'Cell mechanism',
     options: [
       { id: 'gainmod', label: 'GAIN MOD', title: 'Detector ripple modulating the gain — fitted to the hardware paper' },
-      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve as a waveshaper at the cell. Replaces the modulation; this is where ~95% of the plugin’s distortion lives' },
+      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve as a waveshaper at the cell — what shipped before the quartic. Replaces the modulation; this is where ~95% of the plugin’s distortion lives. ⚠ Voiced at Cell sat 1.5, not the 5 that now ships' },
       {
         id: 'quartic', label: 'QUARTIC',
         title: 'u + 1.1e-3·u³ + 0.0328·u⁴ — Analog Obsession LALA’s output stage, identified '
@@ -143,7 +143,7 @@ const CURVE_CHOICES = [
   {
     key: 'tubeCurve', label: 'Valve curve',
     options: [
-      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve at its panel defaults — what ships' },
+      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve — what shipped before the quartic. ⚠ Restore Cell sat to 1.5 with it, or it runs at three times the drive it was voiced at' },
       {
         id: 'quartic', label: 'QUARTIC',
         title: 'The same identified LA-2A output stage, at the stage the references actually '

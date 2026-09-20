@@ -4582,19 +4582,58 @@ compression harmonic data in this repo remains LAEA's ~0.06 % odd at 24.9 dB GR
 (a different unit) and the Moore paper's six hardware units. ⚠ The VALVE selection is
 a different matter — there the reference measured exactly the stage it is being put in.
 
-**NOT SHIPPED, BUT THE AUDITION IS FINISHED.** `quartic` is a bench option at both
-stages, not a default. The settled preference is **Quartic/Quartic at Cell sat ≈ 5**,
-and the divergence that implies is deliberate and should be stated whenever it ships:
-Moore's hardware is odd-dominant under compression and this is not. That is the same
-class of decision as the shipping Tube Sat curve — an ear verdict overruling a
-measurement — with the difference that the SHAPE here is identified from a reference
-rather than invented, and that the alternative was built, heard and rejected rather
-than argued about. The
-drives that would have to move with it — `cellCurveDriveMax` 1.5,
-`vocalSatCurveDrive` 0.5, `emphasis` 50 — were all chosen by ear FOR THE TUBE SAT
-CURVE and none of them transfer; the OptoSmooth factory presets would need a re-cut
-on the `fet-recut-presets.mjs` pattern; and Scheps holds the kernel, so it is
-re-voiced by the same change.
+**SHIPPED — QUARTIC AT BOTH STAGES, CELL DRIVE 5.** `LA2A_KERNEL_DEFAULTS` now
+selects `quartic` at the cell and the valve and `CELL_CURVE_DRIVE_MAX` moves 1.5 to
+5. The divergence that implies is deliberate and is stated wherever it ships: Moore's
+hardware is odd-dominant under compression and this is not. Same class of decision as
+the Tube Sat curve it replaces — an ear verdict overruling a measurement — with two
+differences worth having: the SHAPE is identified from a reference rather than
+invented, and the measurement-faithful alternative was built, heard and rejected
+rather than argued about.
+
+⚠ **THE DRIVE IS A DIFFERENT QUANTITY IN EACH CURVE, SO 1.5 -> 5 IS NOT A DEPTH
+INCREASE.** On the split soft clipper it sets how far into the knee the cell runs; on
+the quartic it scales `c4` as d³. A value from one is not a voicing in the other, the
+same hazard `fetDrive` carries between the FET kernel's `tanh` and `poly`.
+
+⚠ **`LA2A_TUBESAT_PATCH` RESTORES THE PREVIOUS VOICING BIT-IDENTICALLY** — verified
+against the pre-change kernel at PR 60, worst |diff| **exactly 0**. It carries the
+DRIVES and not just the curve names, which is the whole point: `CELL_CURVE_DRIVE_MAX`
+moved with the curve, so selecting `vocalsat` alone gives Tube Saturation's curve at
+three times the drive it was voiced at — a configuration that has never shipped and
+was never auditioned. That is the silent-partial-restore bug `fet1176Curve.test.js`
+documents on the other plugin, and the guard is now duplicated here.
+⚠ It is NOT `LA2A_LEGACY_PATCH`, which goes back further to `tanh` + `gainmod` and
+remains the baseline five test files measure against.
+
+- **⚗ NO PRESET RE-CUT, AND THE REASON IS STRUCTURAL RATHER THAN LUCKY.** The shaper
+  sits after the detector, so curve selection cannot move the gain envelope: measured
+  across PR 30/45/55/60/65/75, avg and max gain reduction are **bit-identical** for
+  the quartic, Tube Sat, the gain modulation and the legacy patch alike. And
+  `OPTO_SMOOTH_PARAM_KEYS` stores `mode / peakReduction / gain / r37 / lookahead /
+  autoMakeup` — no curve, no drives. So every factory preset delivers the reduction it
+  always did and only its character moved, which is the intended change. Pinned, so
+  that if it ever stops being true the presets get the `fet-recut-presets.mjs`
+  treatment instead of drifting silently.
+- **⚠⚠ CHANGING THE DEFAULT WAS NOT ENOUGH, AND A TEST CAUGHT WHAT WAS LEFT.** The
+  kernel's unknown-name fallback is a SEPARATE statement of what ships, and after the
+  default moved it still landed a typo or a stale stored param on `vocalsat` — the
+  previous voicing, silently, which is precisely the failure the fallback's own note
+  says it exists to prevent. Every named mode is now matched explicitly with the
+  DEFAULT as the else-branch, so the next curve change breaks the list rather than the
+  fallback.
+- **⚠ SCHEPS IS RE-VOICED WITH IT, BY INHERITANCE, AND THAT IS THE DOCUMENTED HAZARD.**
+  It passes no curve keys to the embedded kernel, so it takes the new defaults. Its
+  `squash` calibration is untouched — the detector is unaffected and gain reduction is
+  bit-identical — and its delivered level moved **≤0.09 dB** (squash 40: peak −3.576 →
+  −3.551; squash 60: −5.616 → −5.530). Small, but not zero, and not corrected for.
+- **⚠ EMPHASIS SHIPS AT 50 ON A CURVE IT WAS NOT TUNED FOR.** Its 50 was cut against
+  Tube Saturation's curve. Swept 0/50/100 on a steady tone it is inert on BOTH curves
+  (H2 within 0.1 dB), which is the one probe that cannot see it — its own note records
+  that its effect is a burst/onset quantity and that the −1.13 dB crest figure does not
+  transfer to speech. So it is carried over unexamined and is the obvious next thing to
+  re-audition.
+
 
 ⚠ **THE PER-STAGE SPLIT WAS THE ONLY SHIPPING-PATH CHANGE.** One `vsCurve` object
 served both stages — workable only because the cell reads `transferAt` and the valve
