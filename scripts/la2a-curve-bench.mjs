@@ -18,7 +18,7 @@
  *
  * ⚠ THIS REPORTS; IT DOES NOT WRITE. Same rule as `la2a-tube-fit.mjs`: there is
  * no `--fit` that lands a constant in `la2aProcessor.js`. Nothing here is
- * shipped, `LALA_C3`/`LALA_C4` are a candidate and not a calibration, and
+ * shipped, `QUARTIC_C3`/`QUARTIC_C4` are a candidate and not a calibration, and
  * `--write` emits audio to the gitignored corpus, never to source.
  *
  * ── THE THREE SECTIONS, AND WHY IT TAKES THREE ──────────────────────────────
@@ -75,15 +75,20 @@
  * the same standing unknown as `VOCAL_SAT_CURVE_LEAN_POSITIVE`. Positive is
  * assumed here. `--flip` runs the other sign; settling it needs the captures.
  *
- * ⚠ AND THE DEPTH IS A SEPARATE QUESTION FROM THE SHAPE, WITH ITS OWN CEILING.
- * A quartic is unbounded and its slope goes negative on the side the quartic
- * pulls down, so depth is capped by monotonicity — which auto-makeup needs,
- * since `inverse()` is what `computeAutoMakeupPlan` solves through. Measured
- * below: the cap is 17.9 dB of depth, and the Moore H2 anchor is 25.9. The
- * shape cannot carry the hardware's measured MAGNITUDE without the bounding the
- * FET curve already has (a partner term, or `POLY_XMAX`'s linear continuation,
- * or both). Both are implemented here so the trade is visible rather than
- * argued.
+ * ⚠ THE DEPTH IS A SEPARATE QUESTION FROM THE SHAPE, AND IT IS AN EAR DECISION.
+ * `c4` is LALA's, and LALA is 25.9 dB cleaner at nominal than the Moore paper's
+ * six hardware units. Drive spans that: 1.0 is LALA's own, 2.70 puts H2 on the
+ * paper's −63.80 dBc median. Nothing measured chooses between them.
+ *
+ * ⚠⚠ AN EARLIER VERSION OF THIS HEADER CLAIMED A CEILING ON THAT DEPTH — a fold
+ * at drive 1.976, a monotonicity limit 8 dB under the Moore anchor, and the
+ * conclusion that the shape could not carry the hardware's magnitude without
+ * borrowing the FET kernel's partner term. ALL THREE WERE WRONG, and they came
+ * from one bug: this script guarded the polynomial's domain in x when the drive
+ * convention evaluates it at u = d·x. Guarded in u the drive cancels out of the
+ * slope entirely, the stage is monotone at every drive, and the Moore anchor
+ * sits at peak u = 0.34 — comfortably inside the measured domain. The curve now
+ * lives in `src/audio/dsp/quarticSatCurve.js`; its header has the derivation.
  */
 
 import { readdirSync, existsSync, mkdirSync } from 'node:fs'
@@ -91,6 +96,9 @@ import path from 'node:path'
 import { readWav, writeFloatWav } from './lib/wav.js'
 import { harmonicsAt } from './lib/harmonics.js'
 import { makeVocalSatCurve } from '../src/audio/dsp/vocalSatCurve.js'
+import {
+  makeQuarticSatCurve, QUARTIC_C3, QUARTIC_C4, QUARTIC_XMAX, QUARTIC_MOORE_DRIVE,
+} from '../src/audio/dsp/quarticSatCurve.js'
 import { gatedRmsOfChannels, alignDbForRms } from '../src/audio/dsp/inputAlign.js'
 import {
   LA2AKernel, CELL_CURVE_DRIVE_MAX, VALVE_CURVE_DRIVE,
@@ -109,136 +117,22 @@ const NOMINAL_DBFS = -18
 // ── The candidate curve ─────────────────────────────────────────────────────
 
 /**
- * LALA's output stage: `f(x) = x + c3·x³ + c4·x⁴`.
+ * ⚠ THE CANDIDATE LIVES IN `src/audio/dsp/quarticSatCurve.js` AND IS IMPORTED,
+ * NOT RESTATED. It began life here as a bench-local curve and moved into the
+ * kernel when it became selectable on the panel; leaving a copy behind is the
+ * thing CLAUDE.md warns about for Scheps and the LA-2A kernel — the next tuning
+ * pass reaches one of them and not the other. The identification below still
+ * re-derives the constants from the ledger's readings on every run, so this
+ * script is still where the claim is checked.
  *
- * Derived in the header. Stated to the precision the transcribed dBc readings
- * support — they are given to 0.1 dB, which is about 1 % on a coefficient, so
- * the fifth figure here is arithmetic rather than measurement.
+ * ⚠⚠ AND THE COPY THAT USED TO BE HERE HAD A BUG THE MODULE DOES NOT. It guarded
+ * the polynomial's domain in x where the drive convention needs it in u = d·x,
+ * which let the coefficients grow over a fixed range and fold the curve. That
+ * produced three findings this script once printed and all three were artifacts:
+ * a fold at drive 1.976, a monotonicity ceiling 8 dB under the Moore anchor, and
+ * the conclusion that the shape could not carry the hardware's magnitude. See
+ * the module header.
  */
-export const LALA_C3 = 1.1017e-3
-export const LALA_C4 = 0.032812
-
-/**
- * Where the polynomial stops being a measurement and becomes a straight line.
- *
- * Same reasoning as `POLY_XMAX` in the FET kernel, and the same value: the
- * readings behind this curve reach a peak of 0.891 (the −1 dBFS row), so past
- * unity any polynomial is extrapolating a measurement, and a C1-continuous
- * straight line at the edge slope is the honest extension. ⚠ IT IS ALSO WHAT
- * KEEPS THE STAGE BOUNDED — a bare quartic grows as x⁴ and `inverse()` would
- * be solving against something that outruns every bracket.
- */
-export const LALA_XMAX = 1.0
-
-/**
- * Build the candidate, to the same contract as `makeVocalSatCurve`.
- *
- * ⚠ THE CONTRACT IS THE POINT, NOT A CONVENIENCE. `{transfer, transferAt,
- * inverse, drive}` is what the kernel's cell path and both auto-makeup paths
- * already consume, so a curve that implements it is a drop-in for section C
- * with no kernel edit — which is what keeps this bench out of shipping source.
- *
- * ⚠ DRIVE FOLLOWS `makeVocalSatCurve`'s CONVENTION AND THAT IS NOT COSMETIC.
- * There the curve is evaluated at `d·x` and divided back by `d`, which
- * normalises small-signal gain to unity; for a polynomial that works out as
- *
- *     curve(d·x)/d = x + c3·d²·x³ + c4·d³·x⁴
- *
- * so drive scales the cubic as d² and the quartic as d³. The cell's drive MOVES
- * with gain reduction and reaches the curve through `transferAt`, so getting
- * this convention wrong would not error — it would quietly re-voice the cell's
- * whole drive law.
- *
- * ⚠ THERE IS NO WET/DRY HERE AND THERE MUST NOT BE. For a polynomial a blend is
- * exactly degenerate with depth — `dry·x + wet·(x + a·x³ + b·x⁴)` is just the
- * same curve with both coefficients scaled by `wet` — so a Mix control would be
- * a second name for `depth` and two knobs that multiply to one number is how
- * `squash` came to ship at 4× its intended value.
- */
-export function makeQuarticCurve(opts = {}) {
-  const drive = Number.isFinite(opts.drive) && opts.drive > 0 ? opts.drive : 1
-  const sign = opts.flip ? -1 : 1
-  const c3 = (Number.isFinite(opts.c3) ? opts.c3 : LALA_C3) * sign
-  const c4 = (Number.isFinite(opts.c4) ? opts.c4 : LALA_C4) * sign
-  const xmax = Number.isFinite(opts.xmax) && opts.xmax > 0 ? opts.xmax : LALA_XMAX
-
-  // Coefficients at a given drive, per the convention above.
-  const at = d => ({ a: c3 * d * d, b: c4 * d * d * d })
-
-  const core = (x, a, b) => {
-    const ax = Math.abs(x)
-    if (ax <= xmax) {
-      const x3 = x * x * x
-      return x + a * x3 + b * x3 * x
-    }
-    // C1-continuous straight line from the edge, per side — the curve is not
-    // odd, so the two edges carry different values AND different slopes.
-    const e = x > 0 ? xmax : -xmax
-    const e3 = e * e * e
-    const fe = e + a * e3 + b * e3 * e
-    const de = 1 + 3 * a * e * e + 4 * b * e3
-    return fe + (x - e) * de
-  }
-
-  const transferAt = (x, d) => {
-    if (!(d > 1e-6)) return x
-    const { a, b } = at(d)
-    return core(x, a, b)
-  }
-  const { a: a0, b: b0 } = at(drive)
-  const transfer = x => core(x, a0, b0)
-
-  /**
-   * Smallest slope anywhere the polynomial section applies.
-   *
-   * ⚠ REPORTED RATHER THAN ASSERTED, BECAUSE THE BENCH'S JOB IS TO SHOW THE
-   * CEILING. A curve that folds is useless — `inverse()` stops being a function
-   * and the shaper aliases — but a bench that refused to build one could not
-   * print the depth at which that starts, which is the number the decision
-   * turns on.
-   */
-  const minSlope = (() => {
-    let m = Infinity
-    for (let i = 0; i <= 4000; i++) {
-      const x = -xmax + (2 * xmax * i) / 4000
-      m = Math.min(m, 1 + 3 * a0 * x * x + 4 * b0 * x * x * x)
-    }
-    return m
-  })()
-
-  /**
-   * Inverse, by bracket and bisection — the same method and the same null
-   * contract as `makeVocalSatCurve`'s.
-   *
-   * ⚠ BRACKETED ON THE SIGNED VALUE. The curve is not odd (that is the whole
-   * point of the quartic term), so folding through `Math.abs` would invert the
-   * wrong branch on one side — the exact bug the vocal-sat inverse carries a
-   * warning about.
-   */
-  const inverse = (y) => {
-    if (!Number.isFinite(y)) return null
-    if (minSlope <= 0) return null // not monotone: no inverse to return
-    if (y === 0) return 0
-    let lo = 0
-    let hi = 0
-    if (y > 0) {
-      hi = 1
-      for (let i = 0; i < 200 && transfer(hi) < y; i++) hi *= 2
-      if (transfer(hi) < y) return null
-    } else {
-      lo = -1
-      for (let i = 0; i < 200 && transfer(lo) > y; i++) lo *= 2
-      if (transfer(lo) > y) return null
-    }
-    for (let i = 0; i < 80; i++) {
-      const mid = 0.5 * (lo + hi)
-      if (transfer(mid) < y) lo = mid; else hi = mid
-    }
-    return 0.5 * (lo + hi)
-  }
-
-  return { transfer, transferAt, inverse, drive, minSlope, c3: a0, c4: b0 }
-}
 
 /**
  * The FET kernel's measured curve, for orientation only.
@@ -281,7 +175,7 @@ function candidates({ depth, flip }) {
   return [
     ['cell   TubeSat', makeVocalSatCurve({ curveDrive: CELL_CURVE_DRIVE_MAX })],
     ['valve  TubeSat', makeVocalSatCurve({ curveDrive: VALVE_CURVE_DRIVE })],
-    [`quartic d=${depth}`, makeQuarticCurve({ drive: depth, flip })],
+    [`quartic d=${depth}`, makeQuarticSatCurve({ drive: depth, leanPositive: !flip })],
     ['FET     poly  ', makeFetCurve()],
   ]
 }
@@ -535,7 +429,7 @@ function sectionRender(mono, sampleRate, { depth, flip, write, cellOnly }) {
     }
     const ship = renderWith(mono, sampleRate, base, null)
     const cand = renderWith(mono, sampleRate, base,
-      makeQuarticCurve({ drive: depth, flip }))
+      makeQuarticSatCurve({ drive: depth, leanPositive: !flip }))
     const a = stats(ship.out); const b = stats(cand.out)
     const grDrift = Math.abs(ship.avgGrDb - cand.avgGrDb)
     console.log(`   ${String(pr).padStart(3)} | TubeSat (ships) ${ship.avgGrDb.toFixed(2).padStart(6)} `
@@ -575,7 +469,7 @@ function sectionRender(mono, sampleRate, { depth, flip, write, cellOnly }) {
  * ⚠ PRINTED ON EVERY RUN RATHER THAN TRUSTED. `la2a-h2-refit.mjs` exists
  * because a previous derivation lived in prose, could not be re-run, and had two
  * premises that did not survive being checked. This is the same hazard one step
- * earlier: `LALA_C4` is a number in this file, and the only thing that makes it
+ * earlier: `QUARTIC_C4` is a number in this file, and the only thing that makes it
  * a measurement rather than a preference is that the arithmetic tying it to the
  * captures runs in front of whoever is reading the report.
  */
@@ -587,20 +481,20 @@ const LALA_MEASURED = {
 
 function sectionIdentification() {
   console.log('\n══ THE CANDIDATE, RE-DERIVED ══')
-  console.log(`   f(x) = x + ${LALA_C3.toExponential(4)}·x³ + ${LALA_C4.toFixed(6)}·x⁴`)
+  console.log(`   f(x) = x + ${QUARTIC_C3.toExponential(4)}·x³ + ${QUARTIC_C4.toFixed(6)}·x⁴`)
   const A = lin(NOMINAL_DBFS)
   // Small-signal closed form: H2/H1 = c4·A³/2, H3/H1 = c3·A²/4, H4/H1 = c4·A³/8.
   console.log('   fitted from the −18 dBFS row alone; everything else is held out.\n')
   console.log('    reading          measured  predicted    err')
   let worst = 0
   for (const L of ['-40', '-1', '9.2']) {
-    const p = db(LALA_C4 * Math.pow(lin(Number(L)), 3) / 2)
+    const p = db(QUARTIC_C4 * Math.pow(lin(Number(L)), 3) / 2)
     const e = p - LALA_MEASURED.h2[L]
     worst = Math.max(worst, Math.abs(e))
     console.log(`    H2 @ ${String(L).padStart(5)} dBFS ${LALA_MEASURED.h2[L].toFixed(1).padStart(9)} `
       + `${p.toFixed(1).padStart(10)} ${e.toFixed(2).padStart(6)}`)
   }
-  const p4 = db(LALA_C4 * Math.pow(A, 3) / 8)
+  const p4 = db(QUARTIC_C4 * Math.pow(A, 3) / 8)
   worst = Math.max(worst, Math.abs(p4 - LALA_MEASURED.h4_18))
   console.log(`    H4 @   −18 dBFS ${LALA_MEASURED.h4_18.toFixed(1).padStart(9)} `
     + `${p4.toFixed(1).padStart(10)} ${(p4 - LALA_MEASURED.h4_18).toFixed(2).padStart(6)}`)
@@ -608,36 +502,36 @@ function sectionIdentification() {
   return worst
 }
 
-/** The depth ceiling monotonicity imposes, and where the Moore anchor sits. */
+/**
+ * What drive buys, and where the two anchors sit on it.
+ *
+ * ⚠ THIS SECTION ONCE REPORTED A MONOTONICITY CEILING AND THERE ISN'T ONE. The
+ * curve is `g(d·x)/d`, so its slope is `g'(d·x)` and the drive CANCELS — the
+ * stage presents the same minimum slope at every drive. The ceiling came from a
+ * domain guard in the wrong variable; see the module header. The column is kept
+ * because a claim that was wrong once is worth printing rather than asserting.
+ */
 function sectionDepth(flip) {
-  console.log('\n══ DEPTH — what the shape can and cannot carry ══')
-  console.log('   H2 @ −18 is the anchor column: Moore\'s hardware median is −63.80 dBc.\n')
-  console.log('    drive  depth(c4)   min f\'   H2@−18   dev@x=1   inverse')
+  console.log('\n══ DEPTH — what drive buys ══')
+  console.log('   H2 @ −18 dBFS is the anchor column. LALA reads −89.7 dBc there;')
+  console.log('   the Moore paper\'s six hardware units median −63.80.\n')
+  console.log('    drive   H2@−18   peak u at nominal   min slope   clipping?')
   const A = lin(NOMINAL_DBFS)
-  for (const d of [1, 1.5, 2, 2.5, 3, 3.5]) {
-    const c = makeQuarticCurve({ drive: d, flip })
-    const h2 = db(Math.abs(c.c4) * A * A * A / 2)
-    const dev = db(Math.abs(c.transfer(1)))
-    console.log(`   ${d.toFixed(2).padStart(5)} ${(d ** 3).toFixed(2).padStart(9)} `
-      + `${c.minSlope.toFixed(4).padStart(9)} ${h2.toFixed(1).padStart(8)} `
-      + `${dev.toFixed(2).padStart(9)} ${(c.minSlope > 0 ? '   ok' : '  FOLDS').padStart(9)}`)
+  for (const d of [1, 1.5, QUARTIC_MOORE_DRIVE, 4, 6, 8]) {
+    const c = makeQuarticSatCurve({ drive: d, leanPositive: !flip })
+    const U = d * A
+    const h2 = db(QUARTIC_C4 * U * U * U / 2)
+    console.log(`   ${d.toFixed(2).padStart(5)} ${h2.toFixed(1).padStart(8)} `
+      + `${U.toFixed(3).padStart(18)} ${c.minSlope.toFixed(4).padStart(11)}   `
+      + (U > QUARTIC_XMAX ? 'past the measured domain' : 'inside'))
   }
-  // Largest drive that keeps the polynomial section monotone.
-  let lo = 0.5; let hi = 8
-  for (let i = 0; i < 60; i++) {
-    const m = (lo + hi) / 2
-    if (makeQuarticCurve({ drive: m, flip }).minSlope > 0) lo = m; else hi = m
-  }
-  const cMax = makeQuarticCurve({ drive: lo, flip })
-  const h2Max = db(Math.abs(cMax.c4) * A * A * A / 2)
-  console.log(`\n   monotonicity ceiling: drive ${lo.toFixed(3)} (c4 depth ${(lo ** 3).toFixed(2)}, `
-    + `${db(lo ** 3).toFixed(1)} dB) → H2 @ −18 = ${h2Max.toFixed(1)} dBc`)
-  console.log(`   Moore anchor −63.80 dBc needs c4 depth ${(2 * lin(-63.80) / (LALA_C4 * A ** 3)).toFixed(2)} `
-    + `(${db(2 * lin(-63.80) / (LALA_C4 * A ** 3)).toFixed(1)} dB) — past the ceiling.`)
-  console.log('   ⚠ The shape cannot reach the hardware\'s MAGNITUDE unbounded. Closing that')
-  console.log('     needs the FET curve\'s own trick: a partner term that cancels at the edge,')
-  console.log('     or XMAX\'s linear continuation carrying more of the range.')
-  return lo
+  const c1 = makeQuarticSatCurve({ drive: 1, leanPositive: !flip })
+  console.log(`\n   minimum slope is ${c1.minSlope.toFixed(4)} at EVERY drive — the stage is`)
+  console.log('   monotone throughout, so `inverse()` and auto makeup always have an answer.')
+  console.log(`   Moore's −63.80 dBc median sits at drive ${QUARTIC_MOORE_DRIVE.toFixed(2)}, peak u `
+    + `${(QUARTIC_MOORE_DRIVE * A).toFixed(3)} — well inside the measured domain.`)
+  console.log('   ⚠ Drive is an EAR decision. The shape is identified; the depth is not.')
+  return c1.minSlope
 }
 
 // ── Selftest ────────────────────────────────────────────────────────────────
@@ -692,7 +586,7 @@ function selftest() {
   ok(rLin.totalDb < -120, `a pure gain leaves no residual (${rLin.totalDb.toFixed(1)} dB)`)
   ok(Math.abs(rLin.gainDb - db(0.7)) < 1e-9,
     `and the fitted gain recovers it exactly (${rLin.gainDb.toFixed(6)} vs ${db(0.7).toFixed(6)})`)
-  const rNl = residualBands(makeQuarticCurve({ drive: 2 }), x)
+  const rNl = residualBands(makeQuarticSatCurve({ drive: 2 }), x)
   ok(rNl.totalDb > rLin.totalDb + 60, `a quartic leaves one (${rNl.totalDb.toFixed(1)} dB)`)
   ok(rNl.bandDb[3] > rNl.bandDb[0],
     `and it is larger on peaks than on the body (${rNl.bandDb[3].toFixed(1)} vs ${rNl.bandDb[0].toFixed(1)} dB)`)
@@ -702,11 +596,11 @@ function selftest() {
   ok(worst < 0.1, `held-out LALA readings reproduce to ${worst.toFixed(2)} dB`)
 
   // 5. Curve contract: continuity at XMAX, and the inverse round-trips.
-  const c = makeQuarticCurve({ drive: 1.5 })
+  const c = makeQuarticSatCurve({ drive: 1.5 })
   const eps = 1e-7
-  ok(Math.abs(c.transfer(LALA_XMAX + eps) - c.transfer(LALA_XMAX - eps)) < 1e-6,
+  ok(Math.abs(c.transfer(QUARTIC_XMAX + eps) - c.transfer(QUARTIC_XMAX - eps)) < 1e-6,
     'the linear continuation is continuous at +XMAX')
-  ok(Math.abs(c.transfer(-LALA_XMAX + eps) - c.transfer(-LALA_XMAX - eps)) < 1e-6,
+  ok(Math.abs(c.transfer(-QUARTIC_XMAX + eps) - c.transfer(-QUARTIC_XMAX - eps)) < 1e-6,
     'and at −XMAX')
   let worstInv = 0
   for (let v = -0.95; v <= 0.95; v += 0.05) {
@@ -714,8 +608,25 @@ function selftest() {
     worstInv = Math.max(worstInv, Math.abs(back - v))
   }
   ok(worstInv < 1e-6, `inverse round-trips to ${worstInv.toExponential(1)}`)
-  ok(makeQuarticCurve({ drive: 12 }).inverse(0.5) === null,
-    'a folded curve returns null from inverse rather than a wrong answer')
+  /**
+   * ⚠ THIS CHECK USED TO ASSERT THE OPPOSITE — that a deep drive folds the curve
+   * and `inverse` returns null. It passed against the bench's old x-space domain
+   * guard, which is exactly how a wrong guard got reported as a property of the
+   * curve for a whole session. Guarded in u the drive cancels out of the slope,
+   * so the invariant is monotone-at-every-drive and this pins THAT.
+   */
+  let worstSlope = Infinity
+  for (const d of [0.25, 1, 2.7, 6, 12, 40]) {
+    worstSlope = Math.min(worstSlope, makeQuarticSatCurve({ drive: d }).minSlope)
+  }
+  ok(worstSlope > 0.8,
+    `monotone at every drive 0.25–40, worst slope ${worstSlope.toFixed(4)}`)
+  const deep = makeQuarticSatCurve({ drive: 12 })
+  let worstDeep = 0
+  for (let v = -0.95; v <= 0.95; v += 0.05) {
+    worstDeep = Math.max(worstDeep, Math.abs(deep.inverse(deep.transfer(v)) - v))
+  }
+  ok(worstDeep < 1e-6, `and inverse still round-trips at drive 12 (${worstDeep.toExponential(1)})`)
 
   // 6. transferAt matches transfer at the built drive — the cell path and the
   //    hoisted path must not disagree, or preview and apply diverge.

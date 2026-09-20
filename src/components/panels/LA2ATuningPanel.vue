@@ -108,13 +108,21 @@ const CONTROLS = [
  * The curve selector. A rocker rather than a checkbox: a fitted mechanism and
  * an auditioned one are two different things, not more and less of one thing.
  *
- * ⚠ THE VALVE SELECTOR IS GONE AND THE KERNEL MODE IS NOT. `tubeCurve: 'tanh'`
- * was falsified as the valve curve by two references failing it in two
- * different ways — CLA-2A's H3 off by 43 dB, LALA's H2 law off by 76 — so it is
- * not something to audition against and the bench stopped offering it. It
- * remains a kernel mode because `LA2A_LEGACY_PATCH` is the baseline five test
- * files measure against, and a legacy patch that cannot be selected is not a
- * legacy patch. Reach it from code, not from here.
+ * ⚠ THE TANH IS NOT AN OPTION ON EITHER ROCKER AND THE KERNEL MODE STILL EXISTS.
+ * `tubeCurve: 'tanh'` was falsified as the valve curve by two references failing
+ * it in two different ways — CLA-2A's H3 off by 43 dB, LALA's H2 law off by 76 —
+ * so it is not something to audition against. It remains a kernel mode because
+ * `LA2A_LEGACY_PATCH` is the baseline five test files measure against, and a
+ * legacy patch that cannot be selected is not a legacy patch. Reach it from
+ * code, not from here.
+ *
+ * ⚠ THE TWO ROCKERS ARE INDEPENDENT, AND THE KERNEL ONLY LEARNED THAT RECENTLY.
+ * One `vsCurve` object used to serve both stages — workable while they always
+ * held the same curve, since the cell reads `transferAt` and the valve reads
+ * `transfer`. The quartic being selectable at either stage is what forced them
+ * apart. Audition the cell first: it is ~95% of the distortion, and it is the
+ * stage where no measurement is being overruled, because both references were
+ * captured at Peak Reduction 0 with the cell idle.
  */
 const CURVE_CHOICES = [
   {
@@ -122,6 +130,25 @@ const CURVE_CHOICES = [
     options: [
       { id: 'gainmod', label: 'GAIN MOD', title: 'Detector ripple modulating the gain — fitted to the hardware paper' },
       { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve as a waveshaper at the cell. Replaces the modulation; this is where ~95% of the plugin’s distortion lives' },
+      {
+        id: 'quartic', label: 'QUARTIC',
+        title: 'u + 1.1e-3·u³ + 0.0328·u⁴ — Analog Obsession LALA’s output stage, identified '
+          + 'from its harmonic columns (H2 reproduced to 0.00 dB across 49 dB). Stops dead at '
+          + 'H4 where Tube Sat runs past H8. Cell sat is its depth: 1.0 is LALA’s own, 2.7 puts '
+          + 'H2 on the hardware paper’s median. ⚠ The references that identify it were captured '
+          + 'with the cell IDLE — they measure the valve and say nothing about the cell',
+      },
+    ],
+  },
+  {
+    key: 'tubeCurve', label: 'Valve curve',
+    options: [
+      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve at its panel defaults — what ships' },
+      {
+        id: 'quartic', label: 'QUARTIC',
+        title: 'The same identified LA-2A output stage, at the stage the references actually '
+          + 'measured. Valve sat is its depth; 2.70 lands H2 on the −63.80 dBc Moore median',
+      },
     ],
   },
 ]
@@ -169,6 +196,7 @@ async function copyConstants() {
     `rectLpMs        = ${v.rectLpMs}`,
     `cellMod         = ${v.cellMod}`,
     `tube            = ${v.tube}`,
+    `tubeCurve       = ${v.tubeCurve}`,
     `cellCurve       = ${v.cellCurve}`,
     `cellCurveDriveMax  = ${v.cellCurveDriveMax}`,
     `vocalSatCurveDrive = ${v.vocalSatCurveDrive}`,
@@ -294,10 +322,13 @@ async function copyConstants() {
         <span class="text-white/45">Cell onset stays live: it sets how fast the Tube Sat drive arrives.</span>
       </p>
 
-      <label
-        v-if="vals.cellCurve === 'vocalsat'"
-        class="mt-3 flex items-center gap-2 text-[10px] text-white/55"
-      >
+      <!--
+        Shown unconditionally: every curve either rocker can now select is a
+        waveshaper with an undetermined polarity, and this is the switch for it.
+        It means different things on each — the hard-knee side on Tube Sat, the
+        sign of c4 on the quartic — and neither is measured.
+      -->
+      <label class="mt-3 flex items-center gap-2 text-[10px] text-white/55">
         <input
           type="checkbox"
           :checked="vals.vocalSatLeanPositive"
@@ -305,7 +336,7 @@ async function copyConstants() {
           @change="write({ vocalSatLeanPositive: $event.target.checked })"
         />
         <span>Lean positive</span>
-        <span class="text-white/25">— which polarity gets the hard knee</span>
+        <span class="text-white/25">— which polarity saturates first; unmeasured on both curves</span>
       </label>
 
       <label class="mt-3 flex items-center gap-2 text-[10px] text-white/55">

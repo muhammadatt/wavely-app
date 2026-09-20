@@ -87,6 +87,7 @@ import {
   solveMakeupPlan,
 } from './dsp/makeupReference.js'
 import { makeVocalSatCurve, VOCAL_SAT_CURVE_LEAN_POSITIVE } from './dsp/vocalSatCurve.js'
+import { makeQuarticSatCurve } from './dsp/quarticSatCurve.js'
 import { highShelf, BiquadCascade } from './dsp/biquad.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
@@ -1180,6 +1181,15 @@ export const TUBE_CURVE_TANH = 'tanh'
 export const TUBE_CURVE_VOCALSAT = 'vocalsat'
 export const CELL_CURVE_GAINMOD = 'gainmod'
 export const CELL_CURVE_VOCALSAT = 'vocalsat'
+/**
+ * The LA-2A output stage identified from LALA's harmonic columns — see
+ * `dsp/quarticSatCurve.js`. A bench option at BOTH stages, not a default:
+ * nothing about it has been auditioned, and the references that identify its
+ * shape were captured at Peak Reduction 0, where the cell is idle. They measure
+ * the valve and say nothing about what the cell should do.
+ */
+export const TUBE_CURVE_QUARTIC = 'quartic'
+export const CELL_CURVE_QUARTIC = 'quartic'
 
 /**
  * The cell shaper's drive at full compression.
@@ -1888,8 +1898,8 @@ export class LA2AKernel {
 
     let g = Infinity
     if (this.applyTube) {
-      const inv = this.tubeCurveMode === TUBE_CURVE_VOCALSAT
-        ? (y) => this.vsCurve.inverse(y)
+      const inv = this.tubeCurveMode !== TUBE_CURVE_TANH
+        ? (y) => this.tubeSatCurve.inverse(y)
         : (y) => {
           const a = y * this.tubeNorm + this.tanhBias
           // The shaper saturates below the target: no makeup reaches it.
@@ -2044,10 +2054,12 @@ export class LA2AKernel {
      * meant a typo or a stale param message silently selecting the OLD model —
      * a fallback that lands anywhere but the shipping patch is not a fallback.
      */
-    this.tubeCurveMode = p.tubeCurve === TUBE_CURVE_TANH
-      ? TUBE_CURVE_TANH : TUBE_CURVE_VOCALSAT
-    this.cellCurveMode = p.cellCurve === CELL_CURVE_GAINMOD
-      ? CELL_CURVE_GAINMOD : CELL_CURVE_VOCALSAT
+    this.tubeCurveMode = p.tubeCurve === TUBE_CURVE_TANH ? TUBE_CURVE_TANH
+      : p.tubeCurve === TUBE_CURVE_QUARTIC ? TUBE_CURVE_QUARTIC
+        : TUBE_CURVE_VOCALSAT
+    this.cellCurveMode = p.cellCurve === CELL_CURVE_GAINMOD ? CELL_CURVE_GAINMOD
+      : p.cellCurve === CELL_CURVE_QUARTIC ? CELL_CURVE_QUARTIC
+        : CELL_CURVE_VOCALSAT
     const curveOverrides = {}
     if (Number.isFinite(p.vocalSatCurveDrive) && p.vocalSatCurveDrive > 0) {
       curveOverrides.curveDrive = p.vocalSatCurveDrive
@@ -2055,7 +2067,33 @@ export class LA2AKernel {
     if (typeof p.vocalSatLeanPositive === 'boolean') {
       curveOverrides.leanPositive = p.vocalSatLeanPositive
     }
-    this.vsCurve = makeVocalSatCurve(curveOverrides)
+    /**
+     * ⚠ ONE CURVE OBJECT PER STAGE, WHERE THERE USED TO BE ONE FOR BOTH, and
+     * the old arrangement was not a shortcut — it worked because the cell only
+     * ever calls `transferAt` (its drive arrives per sample, overriding the
+     * object's own) and the valve only ever calls `transfer`/`inverse`. So a
+     * single object served two stages with two different drives.
+     *
+     * That stops being true the moment the two stages can hold DIFFERENT
+     * CURVES, which is the whole point of the quartic being selectable at
+     * either. Built separately, selected separately.
+     *
+     * ⚠ AT THE SHIPPING PATCH BOTH ARE `makeVocalSatCurve(curveOverrides)` WITH
+     * THE SAME OVERRIDES, so this is two identical pure-function objects where
+     * there was one, and the render is bit-identical. `test/dsp/la2aQuarticCurve.test.js`
+     * pins that rather than leaving it as a claim.
+     */
+    const buildSat = (mode, driveOverride) => (
+      mode === TUBE_CURVE_QUARTIC || mode === CELL_CURVE_QUARTIC
+        ? makeQuarticSatCurve({
+          drive: driveOverride,
+          leanPositive: typeof p.vocalSatLeanPositive === 'boolean'
+            ? p.vocalSatLeanPositive : undefined,
+        })
+        : makeVocalSatCurve(curveOverrides)
+    )
+    this.tubeSatCurve = buildSat(this.tubeCurveMode, curveOverrides.curveDrive)
+    this.cellSatCurve = buildSat(this.cellCurveMode, curveOverrides.curveDrive)
     this.cellCurveDriveMax = Number.isFinite(p.cellCurveDriveMax)
       && p.cellCurveDriveMax >= 0 ? p.cellCurveDriveMax : CELL_CURVE_DRIVE_MAX
     /**
@@ -2112,7 +2150,7 @@ export class LA2AKernel {
     this.cellModActive = this.cellCurveMode === CELL_CURVE_GAINMOD
       && this.cellMod > 0
     const shaperWas = this.cellShaperActive
-    this.cellShaperActive = this.cellCurveMode === CELL_CURVE_VOCALSAT
+    this.cellShaperActive = this.cellCurveMode !== CELL_CURVE_GAINMOD
       && this.cellCurveDriveMax > 0
     /**
      * ⚠ THE SHAPER'S THREE SEAM VALUES ONLY ADVANCE WHILE IT IS RUNNING, so
@@ -2584,7 +2622,7 @@ export class LA2AKernel {
       const trk = this.trkEmphScratch
       for (let i = 0; i < n; i++) {
         let v = driven[i] * preGain[i]
-        if (this.cellShaperActive) v = this.vsCurve.transferAt(v, cellDriveRaw[i])
+        if (this.cellShaperActive) v = this.cellSatCurve.transferAt(v, cellDriveRaw[i])
         trk[i] = v
       }
       if (this.emphasisActive) this.trkEmph[ch].process(trk, trk, n, 0)
@@ -2641,7 +2679,7 @@ export class LA2AKernel {
           for (let j = 0; j < L; j++) {
             const k = i * L + j
             let w = hi[k] * (pCur + pStep * j)
-            w = this.vsCurve.transferAt(w, dCur + dStep * j)
+            w = this.cellSatCurve.transferAt(w, dCur + dStep * j)
             w *= mCur + mStep * j
             if (this.applyTube) w = this.shapeTube(w)
             hi[k] = w
@@ -2661,8 +2699,8 @@ export class LA2AKernel {
             const k = i * L + j
             let w = hi[k] * (gCur + step * j)
             if (this.applyTube) {
-              w = this.tubeCurveMode === TUBE_CURVE_VOCALSAT
-                ? this.vsCurve.transfer(w)
+              w = this.tubeCurveMode !== TUBE_CURVE_TANH
+                ? this.tubeSatCurve.transfer(w)
                 : (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
             }
             hi[k] = w
@@ -2747,8 +2785,8 @@ export class LA2AKernel {
    * the arithmetic it had. Everywhere else the call is nowhere near hot.
    */
   shapeTube(w) {
-    return this.tubeCurveMode === TUBE_CURVE_VOCALSAT
-      ? this.vsCurve.transfer(w)
+    return this.tubeCurveMode !== TUBE_CURVE_TANH
+      ? this.tubeSatCurve.transfer(w)
       : (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
   }
 
@@ -2765,7 +2803,7 @@ export class LA2AKernel {
       let w
       if (this.cellShaperActive) {
         // Same order as the oversampled path: attenuate, shape, then make up.
-        w = this.vsCurve.transferAt(driven[i] * cellPreG[i], cellDrive[i])
+        w = this.cellSatCurve.transferAt(driven[i] * cellPreG[i], cellDrive[i])
           * cellMakeup[i]
       } else {
         w = driven[i] * gain[i]
