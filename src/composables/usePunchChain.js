@@ -51,6 +51,18 @@ const punchSourceDensityDb = ref(NaN)
 const punchSourceSpreadDb = ref(NaN)
 
 /**
+ * Why the readouts are what they are: 'idle' | 'measuring' | 'ready' |
+ * 'no-selection' | 'failed'.
+ *
+ * ⚠ THIS EXISTS BECAUSE "—" IS A REPORT WITH NO INFORMATION IN IT. Three
+ * different situations printed exactly the same dash — nothing has measured
+ * yet, there is no selection to measure, and the pass threw — and the only one
+ * of them the user can act on is the middle one. A panel that cannot measure
+ * should say so on its face rather than leave someone comparing dashes.
+ */
+const punchPlanState = ref('idle')
+
+/**
  * Which timeline the alignments were measured from — `docId:revision`.
  *
  * ⚠ A NULL CHECK CANNOT ANSWER "IS THIS STILL THE RIGHT FILE". This state is a
@@ -243,11 +255,25 @@ export function usePunchChain() {
      * in both cases. Cheap and idempotent: keyed on the timeline.
      */
     refreshInputAlign()
-    if (!state.selection || !state.currentFile) return
+    if (!state.selection || !state.currentFile) {
+      /**
+       * ⚠ THE READOUTS ARE CLEARED RATHER THAN LEFT STANDING. They describe a
+       * region, and without one they describe nothing — holding the last
+       * region's numbers beside two live dials would be worse than a dash,
+       * because they would look current.
+       */
+      punchPlanState.value = 'no-selection'
+      punchDensityDb.value = NaN
+      punchSpreadDb.value = NaN
+      punchSourceDensityDb.value = NaN
+      punchSourceSpreadDb.value = NaN
+      return
+    }
 
     const { start, end } = state.selection
     const seq = ++planSeq
     punchAutoBusy.value = true
+    punchPlanState.value = 'measuring'
     try {
       const plan = await computePunchChainPlan(
         state.segments, start, end,
@@ -272,6 +298,7 @@ export function usePunchChain() {
       punchSourceSpreadDb.value = plan.sourceSpreadDb
       punchDensityDb.value = plan.densityDb
       punchSpreadDb.value = plan.spreadDb
+      punchPlanState.value = 'ready'
 
       if (!punchAuto.value) return
 
@@ -290,6 +317,7 @@ export function usePunchChain() {
       pushParam('makeupDb', plan.makeupDb)
     } catch (err) {
       console.error('Punch Chain measurement failed:', err)
+      if (seq === planSeq) punchPlanState.value = 'failed'
     } finally {
       if (seq === planSeq) punchAutoBusy.value = false
     }
@@ -433,6 +461,7 @@ export function usePunchChain() {
     punchSpreadDb,
     punchSourceDensityDb,
     punchSourceSpreadDb,
+    punchPlanState,
     punchPreview,
     punchReduction,
     punchFetReduction,

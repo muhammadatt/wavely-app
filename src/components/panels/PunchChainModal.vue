@@ -13,6 +13,7 @@ const {
   punchDrive, punchPeakReduction, punchOutput,
   punchAuto, punchAutoBusy, punchMakeupDb,
   punchDensityDb, punchSpreadDb, punchSourceDensityDb, punchSourceSpreadDb,
+  punchPlanState,
   punchPreview, punchReduction, punchFetReduction, punchOptoReduction,
   punchInputLevels, punchOutputLevels,
   togglePreview, syncDrive, syncPeakReduction, syncOutput,
@@ -90,6 +91,27 @@ const spreadDelta = computed(
 function readoutValue(v) {
   return Number.isFinite(v) ? v.toFixed(1) : '—'
 }
+
+/**
+ * What to say when there is no number, and why the panel says anything at all.
+ *
+ * ⚠ A BARE "—" IS A REPORT WITH NO INFORMATION IN IT. Three different
+ * situations printed the same dash — nothing measured yet, no selection to
+ * measure, and the pass threw — and only one of them is something the user can
+ * act on. This turns the dash into a sentence.
+ *
+ * Empty while a number is on screen: the state line is for the cases where
+ * there is nothing to read, not a permanent label.
+ */
+const PLAN_NOTE = {
+  'no-selection': 'select a region to measure',
+  measuring: 'measuring…',
+  failed: 'measurement failed — see the console',
+  idle: 'not measured yet',
+}
+
+const planNote = computed(
+  () => (punchPlanState.value === 'ready' ? '' : PLAN_NOTE[punchPlanState.value] ?? ''))
 
 function deltaColor(d) {
   if (!d) return 'rgba(255,255,255,.3)'
@@ -186,6 +208,18 @@ async function applyAndClose() {
               </div>
             </div>
           </div>
+
+          <!-- Why there is no number, when there is no number. -->
+          <div
+            v-if="planNote"
+            class="w-full mt-[6px] text-center"
+            :style="{
+              font: `600 8.5px 'JetBrains Mono',monospace`,
+              letterSpacing: '.08em',
+              color: punchPlanState === 'failed'
+                ? 'rgba(255,140,140,.75)' : 'rgba(255,255,255,.34)',
+            }"
+          >{{ planNote }}</div>
 
           <div class="flex gap-[34px] mt-[20px] justify-center">
             <div class="w-[124px] flex flex-col items-center">
