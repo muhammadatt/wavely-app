@@ -33,7 +33,7 @@
  */
 
 import { percentileOfChannels, MAKEUP_PERCENTILE } from './makeupReference.js'
-import { gatedRmsOfChannels } from './inputAlign.js'
+import { gatedRmsOfChannels, monoRms } from './inputAlign.js'
 
 /** Block length for phrase detection, ms. */
 const PHRASE_BLOCK_MS = 20
@@ -50,6 +50,15 @@ const db = (x) => 20 * Math.log10(Math.max(x, 1e-12))
 
 /**
  * Energy-gated phrase boundaries, as `[startSample, endSample]` pairs.
+ *
+ * ⚠ MEASURED ON THE MONO SUM, NOT ON THE LEFT CHANNEL. The gate is the file's
+ * gated RMS, which `gatedRmsOfChannels` takes over the mono sum — so reading
+ * the energy off `channels[0]` compared two different signals. On a stereo file
+ * with the voice on the right, or with materially different sides, the energy
+ * was near silence while the gate was not, so NO phrase was ever found and
+ * LEVEL SPREAD read "—" on a file the chain was otherwise processing happily.
+ * `monoRms` is the same helper the alignment measurement uses, so all three
+ * numbers on the plate now describe one signal.
  *
  * ⚠ DETECT ON THE SOURCE AND REUSE THE RESULT FOR EVERY PROCESSED RENDER. The
  * gate is relative to the material's own gated RMS, so re-detecting on a
@@ -69,18 +78,12 @@ const db = (x) => 20 * Math.log10(Math.max(x, 1e-12))
  */
 export function detectPhrases(channels, sampleRate) {
   if (!channels?.length || !(channels[0].length > 0)) return []
-  const ch = channels[0]
   const blk = Math.max(1, Math.round(sampleRate * PHRASE_BLOCK_MS / 1000))
-  const n = Math.floor(ch.length / blk)
+  const n = Math.floor(channels[0].length / blk)
   if (n === 0) return []
 
   const energy = new Float32Array(n)
-  for (let b = 0; b < n; b++) {
-    let sum = 0
-    const from = b * blk
-    for (let i = from; i < from + blk; i++) sum += ch[i] * ch[i]
-    energy[b] = Math.sqrt(sum / blk)
-  }
+  for (let b = 0; b < n; b++) energy[b] = monoRms(channels, b * blk, blk)
 
   const gate = gatedRmsOfChannels(channels, sampleRate)
     * Math.pow(10, -PHRASE_GATE_BELOW_DB / 20)
@@ -121,20 +124,21 @@ export function measureDensityDb(channels, sampleRate) {
  * used for the source and for every render measured against it. See
  * `detectPhrases`.
  *
+ * ⚠ AND MEASURES THE MONO SUM, for the reason `detectPhrases` gives: a
+ * left-channel reading would describe a different signal from the one the gate,
+ * the density reference and the alignment are all taken over.
+ *
  * @param {Float32Array[]} channels
  * @param {Array<[number, number]>} phrases
  * @returns {number} dB, or NaN with fewer than two measurable phrases
  */
 export function measureSpreadDb(channels, phrases) {
   if (!channels?.length || !phrases?.length) return NaN
-  const ch = channels[0]
   const levels = []
   for (const [from, to] of phrases) {
-    const end = Math.min(to, ch.length)
+    const end = Math.min(to, channels[0].length)
     if (end - from < 2) continue
-    let sum = 0
-    for (let i = from; i < end; i++) sum += ch[i] * ch[i]
-    const rms = Math.sqrt(sum / (end - from))
+    const rms = monoRms(channels, from, end - from)
     if (rms > 0) levels.push(db(rms))
   }
   if (levels.length < 2) return NaN

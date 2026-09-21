@@ -26,13 +26,13 @@ import { onFET1176TuningChange } from './fet1176Tuning.js'
  */
 import {
   PUNCH_CHAIN_LATENCY_SAMPLES, PUNCH_CHAIN_DEFAULTS, PUNCH_CHAIN_PREROLL_S,
-  PUNCH_CHAIN_MEASURED_KEYS, toKernelParams,
+  PUNCH_CHAIN_MEASURED_KEYS, PUNCH_CHAIN_CLEARABLE_KEYS, toKernelParams,
 } from './punchChainParams.js'
 import { withMeasuredClears } from './measuredKeys.js'
 
 export {
   PUNCH_CHAIN_LATENCY_SAMPLES, PUNCH_CHAIN_DEFAULTS, PUNCH_CHAIN_PREROLL_S,
-  PUNCH_CHAIN_MEASURED_KEYS, toKernelParams,
+  PUNCH_CHAIN_MEASURED_KEYS, PUNCH_CHAIN_CLEARABLE_KEYS, toKernelParams,
 }
 
 export function createPunchChain(audioContext) {
@@ -86,7 +86,7 @@ export function createPunchChain(audioContext) {
   function push() {
     worklet?.port.postMessage({
       type: 'params',
-      params: withMeasuredClears(toKernelParams(params), PUNCH_CHAIN_MEASURED_KEYS),
+      params: withMeasuredClears(toKernelParams(params), PUNCH_CHAIN_CLEARABLE_KEYS),
     })
   }
 

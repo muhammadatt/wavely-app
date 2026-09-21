@@ -89,6 +89,26 @@ export const PUNCH_CHAIN_MEASURED_KEYS = Object.freeze([
   'ceilingDb', 'ceilingKneeDb', 'fetAlignDb', 'optoAlignDb',
 ])
 
+/**
+ * Everything a LIVE push has to be able to clear, which is the measured keys
+ * PLUS the two bench tunings.
+ *
+ * ⚠ THE TUNINGS ARE DIFF-STYLE, SO RESETTING ONE MAKES IT VANISH FROM THE
+ * MESSAGE RATHER THAN ARRIVE AS EMPTY. `la2aTuningOverrides` returns only the
+ * keys that differ from the shipping constants, so a reset returns {} and
+ * `embeddedTuning` drops the key entirely — and `PunchChainKernel.setParams`
+ * MERGES partials, so an absent key means "unchanged", not "off". The live node
+ * would keep running the old tuning while a fresh apply used the defaults:
+ * preview and apply diverging until the node was rebuilt.
+ *
+ * Exactly the failure `measuredKeys.js` was written against, arriving through a
+ * different door — its rule is that anything conditionally spread in
+ * `toKernelParams` needs a clear, and these two are.
+ */
+export const PUNCH_CHAIN_CLEARABLE_KEYS = Object.freeze([
+  ...PUNCH_CHAIN_MEASURED_KEYS, 'fetTuning', 'la2aTuning',
+])
+
 /** Map UI param names to kernel param names. */
 export function toKernelParams(params) {
   return {
@@ -123,9 +143,16 @@ export function toKernelParams(params) {
  * its own allowlist, so the bench wins there and only there.
  *
  * ⚠ AND EACH IS ABSENT WHEN ITS BENCH IS UNTOUCHED, not an empty object, so
- * the params stay key-for-key what they were before this existed.
+ * the params stay key-for-key what they were before this existed. That absence
+ * is why the live path needs `PUNCH_CHAIN_CLEARABLE_KEYS` — see it.
+ *
+ * ⚠ EXPORTED BECAUSE THE MEASUREMENT PASS NEEDS THE SAME OVERRIDES. The plan
+ * builds its kernels from `PUNCH_CHAIN_KERNEL_DEFAULTS` plus whatever it is
+ * handed, so a measurement that omits these solves the makeup, the knee, the
+ * alignment and both readouts for the SHIPPING kernels while preview and apply
+ * run the tuned ones. `usePunchChain` folds this into its measurement params.
  */
-function embeddedTuning() {
+export function embeddedTuning() {
   const la2a = la2aTuningOverrides()
   const fet = fet1176TuningOverrides()
   return {

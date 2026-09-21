@@ -37,7 +37,7 @@ import {
 } from '../../src/audio/dsp/densityMetrics.js'
 import {
   PUNCH_CHAIN_DEFAULTS, PUNCH_CHAIN_LATENCY_SAMPLES, PUNCH_CHAIN_MEASURED_KEYS,
-  toKernelParams,
+  PUNCH_CHAIN_CLEARABLE_KEYS, toKernelParams,
 } from '../../src/audio/effects/punchChainParams.js'
 import { withMeasuredClears } from '../../src/audio/effects/measuredKeys.js'
 
@@ -496,6 +496,39 @@ test('a silent or empty region measures as unknown rather than as a number', () 
   assert.equal(detectPhrases([new Float32Array(0)], SR).length, 0)
 })
 
+test('the readouts read the mono sum, not the left channel', () => {
+  /**
+   * ⚠ A STEREO FILE WITH THE VOICE ON ONE SIDE USED TO READ "—" FOR SPREAD. The
+   * gate is the file's gated RMS, which is taken over the MONO SUM, while the
+   * phrase energy was read off `channels[0]` — two different signals compared to
+   * each other. With silence on the left, no block ever cleared the gate, so no
+   * phrase was found on a file the chain was otherwise processing happily.
+   */
+  const mono = signal()[0]
+  const silent = new Float32Array(mono.length)
+  const rightOnly = [silent, mono]
+  const leftOnly = [mono, silent]
+
+  for (const [name, chs] of [['right-only', rightOnly], ['left-only', leftOnly]]) {
+    const phrases = detectPhrases(chs, SR)
+    assert.ok(phrases.length >= 4, `${name}: found ${phrases.length} phrases`)
+    assert.ok(
+      Number.isFinite(measureSpreadDb(chs, phrases)),
+      `${name}: spread was not measurable`,
+    )
+    assert.ok(Number.isFinite(measureDensityDb(chs, SR)), `${name}: density`)
+  }
+
+  /**
+   * And the two sides are interchangeable, which is the property that was
+   * broken: the measurement is of the file, not of a channel.
+   */
+  const left = detectPhrases(leftOnly, SR)
+  const right = detectPhrases(rightOnly, SR)
+  assert.deepEqual(left, right)
+  assert.equal(measureSpreadDb(leftOnly, left), measureSpreadDb(rightOnly, right))
+})
+
 // ── Params ──────────────────────────────────────────────────────────────────
 
 test('panel defaults round-trip to the kernel defaults', () => {
@@ -534,6 +567,70 @@ test('unmeasured keys are absent from the mapping and cleared on a live push', (
     assert.ok(key in live, `${key} must be clearable on a live node`)
     assert.equal(live[key], null)
   }
+})
+
+test('a live push can clear the bench tunings, not only the measured keys', () => {
+  /**
+   * ⚠ THE TUNINGS ARE DIFF-STYLE, SO A RESET MAKES THEM VANISH RATHER THAN
+   * ARRIVE EMPTY, and `PunchChainKernel.setParams` merges partials — an absent
+   * key means "unchanged", not "off". Without a clear the live node keeps
+   * running a tuning the bench has already reset, while a fresh apply uses the
+   * defaults: preview and apply diverging until the node is rebuilt. Same
+   * failure `measuredKeys.js` was written against, through a different door.
+   */
+  for (const key of ['fetTuning', 'la2aTuning']) {
+    assert.ok(
+      PUNCH_CHAIN_CLEARABLE_KEYS.includes(key),
+      `${key} must be clearable on a live node`,
+    )
+  }
+  // Every measured key is still clearable too.
+  for (const key of PUNCH_CHAIN_MEASURED_KEYS) {
+    assert.ok(PUNCH_CHAIN_CLEARABLE_KEYS.includes(key))
+  }
+
+  const live = withMeasuredClears(
+    toKernelParams(PUNCH_CHAIN_DEFAULTS), PUNCH_CHAIN_CLEARABLE_KEYS,
+  )
+  for (const key of PUNCH_CHAIN_CLEARABLE_KEYS) {
+    assert.equal(live[key], null, `${key} should clear to null`)
+  }
+
+  // And a null tuning must not break the kernel — it means "no overrides".
+  const kernel = new PunchChainKernel(SR)
+  kernel.setParams({ fetTuning: null, la2aTuning: null })
+  assert.equal(kernel.params.fetTuning, null)
+  assert.ok(Number.isFinite(kernel.la2a.params.peakReduction))
+})
+
+test('the measurement pass honours the bench tunings it is handed', () => {
+  /**
+   * ⚠ THE PLAN BUILDS FRESH KERNELS FROM THE DEFAULTS, so a measurement that
+   * omits the tuning solves the makeup, the knee, the alignment and both
+   * readouts for the SHIPPING kernels while preview and apply run the tuned
+   * ones. `usePunchChain` folds `embeddedTuning()` into its measurement params;
+   * this pins the half of that contract which is reachable from node — that the
+   * plan actually reads them when they arrive.
+   */
+  const src = signal()
+  const plain = computePunchChainPlan(src, SR, {})
+  const tuned = computePunchChainPlan(src, SR, {
+    /**
+     * A real key from `LA2A_TUNING_DEFAULTS`, and an unambiguous one: the valve
+     * off isolates the cell, which moves the saturation and therefore the
+     * percentile the makeup is solved against.
+     *
+     * ⚠ THE FIRST CUT OF THIS TEST INVENTED A KEY NAME and the plan quite
+     * correctly ignored it. Asserting a DIFFERENCE is what caught that; an
+     * equality assertion would have passed on a plugin that read no tuning at
+     * all.
+     */
+    la2aTuning: { tube: false },
+  })
+  assert.notEqual(
+    plain.makeupDb, tuned.makeupDb,
+    'the plan ignored the tuning it was handed',
+  )
 })
 
 test('measured params carry through the mapping when they are real', () => {

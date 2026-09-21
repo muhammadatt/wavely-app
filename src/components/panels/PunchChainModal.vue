@@ -17,7 +17,7 @@ const {
   punchPreview, punchReduction, punchFetReduction, punchOptoReduction,
   punchInputLevels, punchOutputLevels,
   togglePreview, syncDrive, syncPeakReduction, syncOutput,
-  toggleAuto, refreshPlan, apply, teardown, closeModal,
+  toggleAuto, refreshPlan, schedulePlan, apply, teardown, closeModal,
 } = usePunchChain()
 
 const { state } = useEditorState()
@@ -40,9 +40,26 @@ onMounted(() => {
   else refreshPlan()
 })
 
-// Everything is measured from the selected region, so a new selection needs a
-// fresh measurement.
-watch(() => state.selection, () => refreshPlan(), { deep: true })
+/**
+ * Everything is measured from the selected region, so a new selection needs a
+ * fresh measurement — DEBOUNCED, like the knobs.
+ *
+ * ⚠ `state.selection` UPDATES ON EVERY MOUSEMOVE. `WaveformArea` calls
+ * `setSelection` from its mousemove handler, so dragging a selection edge fires
+ * this watcher per pointer event. Calling `refreshPlan` directly queued a
+ * ~780 ms worker job for each one: the sequence number discards the stale
+ * ANSWERS but nothing cancels the WORK, so a single drag could build a backlog
+ * that outlives the gesture and blocks every other plugin's measurement behind
+ * it in the shared worker.
+ *
+ * The sibling panels get away with the direct call because their passes are an
+ * order of magnitude cheaper; `SoftClipperModal` already schedules for the same
+ * reason this now does.
+ *
+ * The immediate path is kept where it belongs: `onMounted` below, and `apply`,
+ * which must not act on a debounce.
+ */
+watch(() => state.selection, () => schedulePlan(), { deep: true })
 
 const ACCENT = '#e0a13c'
 

@@ -7,6 +7,9 @@ import {
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { punchChainEffect, PUNCH_CHAIN_DEFAULTS } from '../audio/effects/punchChain.js'
+import { embeddedTuning } from '../audio/effects/punchChainParams.js'
+import { onLA2ATuningChange } from '../audio/effects/la2aTuning.js'
+import { onFET1176TuningChange } from '../audio/effects/fet1176Tuning.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -101,6 +104,23 @@ const PLAN_DEBOUNCE_MS = 160
 let planTimer = null
 let planSeq = 0
 
+/**
+ * Re-measure when either bench tuning moves.
+ *
+ * ⚠ SUBSCRIBED AT MODULE SCOPE, NOT FROM THE PANEL, for the reason
+ * `punchChain.js` gives about its own pair: the panels that own these tunings
+ * are OptoSmooth's and FET Punch's, and neither should have to know this plugin
+ * exists. The effect wrapper's subscription re-pushes params at the LIVE node;
+ * this one re-runs the MEASUREMENT, which is a different thing — without it the
+ * node would play the new tuning while the plate kept the old tuning's numbers.
+ *
+ * Costs nothing when the panel is shut: `refreshPlan` returns early without a
+ * selection, and the bench panels are developer tools that move rarely.
+ */
+let rePlanOnTuningChange = () => {}
+onLA2ATuningChange(() => rePlanOnTuningChange())
+onFET1176TuningChange(() => rePlanOnTuningChange())
+
 function currentParams() {
   return {
     drive: punchDrive.value,
@@ -128,7 +148,20 @@ function currentParams() {
   }
 }
 
-/** Params for the measurement pass — the makeup is what we're solving for. */
+/**
+ * Params for the measurement pass — the makeup is what we're solving for.
+ *
+ * ⚠ THE BENCH TUNINGS BELONG HERE, AND LEAVING THEM OUT WAS A REAL DRIFT. The
+ * plan builds fresh kernels from `PUNCH_CHAIN_KERNEL_DEFAULTS` plus what it is
+ * handed, so without these it solved the makeup, the ceiling knee, the opto's
+ * alignment and BOTH readouts against the shipping kernels while preview and
+ * apply ran the tuned ones. After a re-fit the level and the numbers on the
+ * plate would both be wrong, with nothing saying so — the same shape as the
+ * Scheps-didn't-follow-the-bench defect, one layer down.
+ *
+ * Folded in from the same `embeddedTuning` the live path and the apply path
+ * use, so the three cannot disagree.
+ */
 function measurementParams() {
   return {
     drive: punchDrive.value,
@@ -136,6 +169,7 @@ function measurementParams() {
     // The whole-file offset, so the plan anchors the Opto's to it rather than
     // to its own capped window. See `computePunchChainPlan`.
     fetAlignDb: punchFetAlignDb.value,
+    ...embeddedTuning(),
   }
 }
 
@@ -323,6 +357,8 @@ export function usePunchChain() {
     }
   }
 
+  rePlanOnTuningChange = schedulePlan
+
   function schedulePlan() {
     if (planTimer !== null) clearTimeout(planTimer)
     planTimer = setTimeout(() => {
@@ -475,6 +511,7 @@ export function usePunchChain() {
     syncOutput,
     toggleAuto,
     refreshPlan,
+    schedulePlan,
     apply,
     teardown,
     openModal,
