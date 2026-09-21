@@ -4433,6 +4433,386 @@ rms -16.24**, against their manual FET-then-normalize at -1.00 / -16.18.
 
 ---
 
+### OptoSmooth's curve, revisited — the quartic, and two of my own errors
+
+The shipping cell and valve curves are Tube Saturation's, chosen by ear, and
+CLAUDE.md is explicit that no measurement backs them. The owner's complaint came
+back inverted from the one they were brought in to answer: the harmonics are
+liked, the behaviour on loud peaks is not, and FET Punch's measured polynomial
+sounds cleaner by comparison. So: can a polynomial fitted to the LA-2A do better?
+
+- **⚠⚠ THE IDENTIFICATION WAS ALREADY IN THIS LOG AND I REDISCOVERED IT WITHOUT
+  NOTICING — see the entry above beginning "THE LALA HAS AN OUTPUT STAGE TOO".** It
+  had already recovered `x + a₃x³ + a₄x⁴` from 21 measured numbers, with
+  **a₄ = 3.281e−2** and **a₃ = 1.102e−3**. Working from the same log's harmonic
+  columns I re-derived **a₄ = 0.032812, a₃ = 1.1017e-3** — the same constants to four
+  figures — and wrote them up as a fresh finding. They are not.
+- **⚗ WHAT THE REDISCOVERY IS WORTH IS CORROBORATION, AND ONLY BECAUSE IT USED A
+  DIFFERENT SUBSET.** The original recovered `a₄` from H2 and from H4 independently
+  (3.281e−2 against 3.259e−2, 0.7 % apart), pinned H2:H4 at **12.00–12.10 dB** at
+  every level from −30 to −1 against `cos⁴`'s 12.041, and held all constants to four
+  figures across 30 dB. Mine fitted `a₄` to the **−18 dBFS H2 row alone** and then
+  predicted −40, −1 and +9.2 dBFS to **0.00 dB** and H4 at −18 to 0.06. Same answer
+  from a different direction — which is the only reason this bullet is worth keeping
+  rather than deleting.
+- **⚠ THE ORIGINAL IS THE STRONGER DERIVATION AND SHOULD BE CITED IN PREFERENCE.**
+  It also records what mine did not: LALA's fundamental gain is **−0.24 dB at every
+  level**, and its frequency sweep is flat to **0.3 dB** from 50 Hz to 5 kHz, which
+  is what puts the stage in the memoryless class at all.
+- **⚠ THE FET'S ORDERS ARE THE WRONG ONES TO PORT, WHICH WAS THE ORIGINAL
+  QUESTION.** FETish is orders 4 and 5 (H2 3.00, H3 4.04); LALA is 4 and 3. Copying
+  `POLY_C4`/`POLY_C5` across would put H3 at slope 4 where LALA measures 1.95 — the
+  mirror image of how the `tanh` failed. The FAMILY transfers; the coefficients do not.
+- **⚠ AND CHOOSING LALA IS A NARROWER CHOICE THAN "PICKING A SIDE".** The standing
+  position is that the two emulations disagree by 10–77 dB and any refit picks one.
+  That holds for MAGNITUDE. On SHAPE there is only one usable reference: **CLA-2A's
+  H2/H3 slopes of 0.77/0.66 are not reachable by any memoryless polynomial**, since a
+  genuine third-order term goes as level². CLA-2A abstains rather than disagreeing.
+
+**⚠⚠ THE FIRST BENCH REPORTED A DEPTH CEILING AND THERE IS NO SUCH THING. ONE BUG,
+THREE WRONG FINDINGS.** It printed a fold at drive 1.976, a monotonicity ceiling
+8 dB below the Moore anchor, and the conclusion that the shape could not carry the
+hardware's magnitude without borrowing the FET kernel's partner term. All three were
+artifacts of guarding the polynomial's domain in **x** when the drive convention
+evaluates it at **u = d·x**. Guarded in u the drive cancels out of the slope —
+`f(x) = g(d·x)/d` so `f'(x) = g'(d·x)` — the stage presents a minimum slope of
+**0.8721 at every drive from 0.25 to 40**, and the Moore median sits at drive 2.70
+with peak u = 0.34, well inside the measured domain. No cap, no invented knee, no
+partner term. `test/dsp/la2aQuarticCurve.test.js` now pins the property the mistake
+turned on: minimum slope must be the SAME NUMBER at every drive.
+
+⚠ The bounding behaviour that was asked for falls out of the correct guard rather
+than being added: past |u| = 1 the curve continues linearly at the edge slope, and
+raising drive moves that corner to |x| = 1/d — so the stage soft-clips harder as it
+is driven while still tracking gain reduction.
+
+**⚠⚠ AND A SECOND ERROR, IN THE PEAK-LEVEL SWEEP THAT WAS MEANT TO SETTLE IT.** A
+linear amplitude was passed into a helper expecting dBFS, so three rows labelled
+−12 / −6 / −3 dBFS were all pinned near full scale. **The tell was in the output and
+went unread: H2 moved 0.1 dB across a nominal 9 dB sweep**, which no level-dependent
+curve does. Every conclusion drawn from that table was withdrawn and re-measured.
+
+- **⚗⚗ THE PREFERENCE IS THE EVEN/ODD BALANCE, NOT THE AMOUNT — AND THE MATCHED TEST
+  IS WHAT SHOWS IT.** At the shipping drives the quartic is simply less (THD 0.70 %
+  against 3.26 % at −6 dBFS peak, PR 60), which on its own would explain "cleaner"
+  with no claim about shape. Raising Cell sat until TOTAL DISTORTION MATCHES, the
+  difference survives and localises:
+
+  | −6 dBFS peak, PR 60 | H2 | H3 | H3−H2 | THD |
+  |---|---|---|---|---|
+  | TubeSat (ships) | −30.9 | −36.1 | −5.2 | 3.26 % |
+  | Quartic, Cell sat 3.2 | −29.9 | **−48.7** | **−18.8** | 3.26 % |
+  | TubeSat (ships), −1 dBFS | −27.2 | −29.1 | −1.8 | 5.63 % |
+  | Quartic, Cell sat 5.7, −1 dBFS | −25.1 | **−48.1** | **−23.0** | 5.63 % |
+
+  At identical total distortion the quartic puts **12–19 dB less third harmonic**
+  into the peaks with H2 essentially matched. ⚠ It appears only at PEAK levels — at
+  −18 dBFS the relation inverts — which is exactly where the complaint lives.
+- **⚗⚗ THE OWNER'S CHOSEN SETTING TAKES MORE DISTORTION, NOT LESS, WHICH IS THE
+  STRONGER RESULT.** Auditioned live on the bench panel, the verdict was
+  Quartic/Quartic at **Cell sat ≈ 5** — "warmer than before but still smooth and not
+  edgy at the peaks". Measured against the shipping curve at PR 60:
+
+  | peak | curve | H2 | H3 | H3−H2 | THD |
+  |---|---|---|---|---|---|
+  | −12 | TubeSat | −44.1 | −45.4 | −1.3 | 0.83 % |
+  | −12 | Quartic 5.0 | −39.0 | −50.4 | −11.4 | **1.19 %** |
+  | −6 | TubeSat | −30.9 | −36.1 | −5.2 | 3.26 % |
+  | −6 | Quartic 5.0 | −26.7 | −48.8 | −22.1 | **4.66 %** |
+  | −1 | TubeSat | −27.2 | −29.1 | −1.8 | 5.63 % |
+  | −1 | Quartic 5.0 | −25.3 | −48.0 | −22.7 | 5.49 % |
+
+  **More total distortion and more second harmonic — the "warmer" — with 13–19 dB
+  less third.** The ear report and the measurement agree without either being told
+  about the other, and it rules out "it just does less" as the explanation.
+  ⚠ Crest is level with TubeSat throughout (11.68 vs 11.92 dB at −6); rms runs
+  **0.4–0.9 dB hot at peaks**, which biases a blind A/B slightly and is small against
+  a 13–19 dB harmonic difference, but is not zero and is not corrected for.
+- **⚠ THE HIGH-ORDER "GRIT" SHARE IS A RED HERRING ON THESE CURVES, and the first
+  pass at this comparison led with it.** The shipping cell curve's ladder runs past
+  H8 where a degree-4 polynomial stops dead at H4, which invites "the dense ladder is
+  the harshness" — but energetically that content is **0.11 %** of its distortion at
+  −6 dBFS. Worse, through the FULL kernel the ladders above H4 are identical across
+  all three configurations to 0.1–1 dB, so most of it is not the curve at all.
+  The axis that separates them is H3.
+- **⚗⚗⚗ THE ARCHITECTURE QUESTION IS SETTLED BY EAR, AGAINST THE PAPER — AND THE
+  THREE VERDICTS RANK IN EXACT ORDER OF ODD-HARMONIC SHARE.** Moore's six hardware
+  units are ODD-dominant under compression (H3−H2 **+16 to +44 dB**), attributed to
+  the T4 cell rather than the valves. **GAIN MOD at the cell + QUARTIC at the valve**
+  is the only configuration where every stage is measurement-backed, and it measures
+  H3−H2 **+18.8 dB**, inside the paper's band. Auditioned, the verdict was
+  "definitely worse — a lot of colour, not a neutral sound; could be useful in
+  certain applications but probably not wanted for general use."
+
+  Share of distortion energy that is ODD-order, PR 60, full kernel:
+
+  | peak | TubeSat/TubeSat | Quartic/Quartic 5.0 | GAIN MOD/Quartic |
+  |---|---|---|---|
+  | −12 dBFS | 43 % | **7 %** | **100 %** |
+  | −6 dBFS | 23 % | **1 %** | **99 %** |
+  | −1 dBFS | 39 % | **1 %** | **98 %** |
+
+  The three listening verdicts — preferred, previously shipped, rejected — order
+  themselves **1 % → 23 % → 99 %** odd content, monotonically, across three separate
+  auditions.
+- **⚠⚠ AND TOTAL DISTORTION ORDERS THE OTHER WAY, WHICH IS WHAT MAKES THIS A REAL
+  FINDING RATHER THAN A RESTATEMENT OF "CLEANER IS BETTER".** At −6 dBFS the THD of
+  the three runs **4.66 % (preferred) / 3.26 % (previous) / 1.94 % (rejected)**. The
+  REJECTED configuration is the cleanest one by total distortion, and by a factor of
+  two. Whatever the ear is tracking here, it is not how much.
+- **⚠ THE GAIN MODULATION'S LADDER IS WHY IT READS AS "COLOURED", and the shape is
+  distinctive rather than merely large.** At −6 dBFS it returns H3 **−37.7**, H5
+  **−39.1**, H7 **−43.2** with H2 at −56.5 and H4 at −63.5 — a slowly-decaying
+  odd-only comb where H5 sits within 1.4 dB of H3. That is the signature of a gain
+  being modulated at 2f rather than a waveform being bent: sidebands at f and 3f, and
+  their own sidebands above. It is a correct model of the mechanism the paper
+  measures; it is also unmistakable on voice.
+- **⚠ ONE LISTENER, SIGHTED, ONE PASSAGE, THREE CONFIGURATIONS.** The ordering is
+  clean and the measurements were taken after each verdict rather than before, but
+  this is not a blind panel and should not be written up as one.
+
+⚠⚠ **THE CURVE IS IDENTIFIED AT THE VALVE AND IS BEING USED AT THE CELL, AND
+NOTHING MEASURES THAT.** Both sweeps behind it were captured at **Gain 0 / PR 0** —
+cell idle — so they characterise the OUTPUT STAGE and say nothing about what the T4
+should do. LALA's own under-compression captures are ratio, taper, ballistics and
+side-chain; none of them read harmonics. So `Quartic` at the CELL is an ear choice
+wearing a borrowed shape, in exactly the category the Tube Sat cell curve is in, and
+the pedigree does not transfer across the stage boundary. The only cell-under-
+compression harmonic data in this repo remains LAEA's ~0.06 % odd at 24.9 dB GR
+(a different unit) and the Moore paper's six hardware units. ⚠ The VALVE selection is
+a different matter — there the reference measured exactly the stage it is being put in.
+
+**SHIPPED — QUARTIC AT BOTH STAGES, CELL DRIVE 5.** `LA2A_KERNEL_DEFAULTS` now
+selects `quartic` at the cell and the valve and `CELL_CURVE_DRIVE_MAX` moves 1.5 to
+5. The divergence that implies is deliberate and is stated wherever it ships: Moore's
+hardware is odd-dominant under compression and this is not. Same class of decision as
+the Tube Sat curve it replaces — an ear verdict overruling a measurement — with two
+differences worth having: the SHAPE is identified from a reference rather than
+invented, and the measurement-faithful alternative was built, heard and rejected
+rather than argued about.
+
+⚠ **THE DRIVE IS A DIFFERENT QUANTITY IN EACH CURVE, SO 1.5 -> 5 IS NOT A DEPTH
+INCREASE.** On the split soft clipper it sets how far into the knee the cell runs; on
+the quartic it scales `c4` as d³. A value from one is not a voicing in the other, the
+same hazard `fetDrive` carries between the FET kernel's `tanh` and `poly`.
+
+⚠ **`LA2A_TUBESAT_PATCH` RESTORES THE PREVIOUS VOICING BIT-IDENTICALLY** — verified
+against the pre-change kernel at PR 60, worst |diff| **exactly 0**. It carries the
+DRIVES and not just the curve names, which is the whole point: `CELL_CURVE_DRIVE_MAX`
+moved with the curve, so selecting `vocalsat` alone gives Tube Saturation's curve at
+three times the drive it was voiced at — a configuration that has never shipped and
+was never auditioned. That is the silent-partial-restore bug `fet1176Curve.test.js`
+documents on the other plugin, and the guard is now duplicated here.
+⚠ It is NOT `LA2A_LEGACY_PATCH`, which goes back further to `tanh` + `gainmod` and
+remains the baseline five test files measure against.
+
+- **⚗ NO PRESET RE-CUT, AND THE REASON IS STRUCTURAL RATHER THAN LUCKY.** The shaper
+  sits after the detector, so curve selection cannot move the gain envelope: measured
+  across PR 30/45/55/60/65/75, avg and max gain reduction are **bit-identical** for
+  the quartic, Tube Sat, the gain modulation and the legacy patch alike. And
+  `OPTO_SMOOTH_PARAM_KEYS` stores `mode / peakReduction / gain / r37 / lookahead /
+  autoMakeup` — no curve, no drives. So every factory preset delivers the reduction it
+  always did and only its character moved, which is the intended change. Pinned, so
+  that if it ever stops being true the presets get the `fet-recut-presets.mjs`
+  treatment instead of drifting silently.
+- **⚠⚠ CHANGING THE DEFAULT WAS NOT ENOUGH, AND A TEST CAUGHT WHAT WAS LEFT.** The
+  kernel's unknown-name fallback is a SEPARATE statement of what ships, and after the
+  default moved it still landed a typo or a stale stored param on `vocalsat` — the
+  previous voicing, silently, which is precisely the failure the fallback's own note
+  says it exists to prevent. Every named mode is now matched explicitly with the
+  DEFAULT as the else-branch, so the next curve change breaks the list rather than the
+  fallback.
+- **⚠ SCHEPS IS RE-VOICED WITH IT, BY INHERITANCE, AND THAT IS THE DOCUMENTED HAZARD.**
+  It passes no curve keys to the embedded kernel, so it takes the new defaults. Its
+  `squash` calibration is untouched — the detector is unaffected and gain reduction is
+  bit-identical — and its delivered level moved **≤0.09 dB** (squash 40: peak −3.576 →
+  −3.551; squash 60: −5.616 → −5.530). Small, but not zero, and not corrected for.
+- **⚠ EMPHASIS SHIPS AT 50 ON A CURVE IT WAS NOT TUNED FOR.** Its 50 was cut against
+  Tube Saturation's curve. Swept 0/50/100 on a steady tone it is inert on BOTH curves
+  (H2 within 0.1 dB), which is the one probe that cannot see it — its own note records
+  that its effect is a burst/onset quantity and that the −1.13 dB crest figure does not
+  transfer to speech. So it is carried over unexamined and is the obvious next thing to
+  re-audition.
+
+
+⚠ **THE PER-STAGE SPLIT WAS THE ONLY SHIPPING-PATH CHANGE.** One `vsCurve` object
+served both stages — workable only because the cell reads `transferAt` and the valve
+reads `transfer`/`inverse` — and two selectable curves forced them apart. Checked
+rather than claimed: rendered against the pre-change kernel at PR 0/25/50/75/100 ×
+gain 0/6, plus `LA2A_LEGACY_PATCH` and the gain modulation, worst |diff| is
+**exactly 0**.
+
+⚠ **THE TANH IS GONE FROM BOTH BENCH PANELS**, along with FET Punch's Legacy kernel
+button and OptoSmooth's Valve drive / Valve bias sliders — the latter two are
+constants OF the tanh and moved nothing once it was unselectable. The KERNEL MODES
+STAY: `LA2A_LEGACY_PATCH` is the baseline five test files measure against and
+`FET_LEGACY_PATCH` is pinned by `fet1176Curve.test.js`, and both tuning stores keep
+their keys so those tests are untouched.
+
+⚠ **THE MISSING-INSTALL TRAP RECURRED**, exactly as the correction above this entry
+records it: a fresh container reported **13 failures** on a clean checkout. Same
+cause, `node_modules` absent. Diagnosed from the error text this time rather than
+from a clean-checkout comparison — the failures all read `Cannot find package 'vue'`
+or `'uuid'`. With dependencies installed: **1391 tests, 1391 pass, 0 fail**, and
+`npm run smoke` opens all thirteen panels clean.
+
+---
+
+
+### Emphasis on the quartic — and three tone probes that pointed the wrong way
+
+Emphasis ships at 50, cut against Tube Saturation's curve, and was carried across
+to the quartic unexamined. The question was whether it even works the same way.
+
+- **⚠ THE FIRST PROBE WAS AT 150 Hz, BELOW THE 1800 Hz CORNER, AND READ "INERT ON
+  BOTH".** That is what a pre/de-emphasis pair does below its own corner, and it
+  says nothing about the band the control acts in. Recorded because the reading
+  was reported as an answer before anyone noticed which side of the corner it sat
+  on.
+- **⛗ SWEPT ACROSS FREQUENCY, THE MECHANISM IS THE SAME ON BOTH CURVES AND THE
+  MAGNITUDE IS NOT.** THD at PR 60, −6 dBFS tone, Emphasis 0 → 100:
+
+  | probe | quartic | tube sat |
+  |---|---|---|
+  | 200 Hz | −0.04 dB | −0.09 dB |
+  | 1 kHz | −5.33 dB | −4.44 dB |
+  | 2.5 kHz | −0.78 dB | **+7.52 dB** |
+  | 5 kHz | **+1.79 dB** | **+10.95 dB** |
+
+  Below the corner it suppresses — harmonics land where the de-emphasis cuts them,
+  which is "absorb rather than excite". Above it, the fundamental itself is driven
+  into the nonlinearity and it excites. ⛗ The tube-sat 5 kHz row reproduces the
+  ledger's own "~11 dB on bright sustained vowels" almost exactly, which is the
+  probe validating itself against a known number. The quartic pays about a sixth
+  of it, most likely because a +12 dB boost pushes it past `|u| = 1` into the
+  LINEAR continuation, which makes no new harmonics, where the same boost drives
+  Tube Sat's split soft clipper deeper into its knee.
+- **⚠⚠ AND THAT WHOLE TABLE IS THE WRONG INSTRUMENT FOR THE QUESTION ACTUALLY
+  ASKED.** On the strength of it the recommendation was to try Emphasis 100 on the
+  quartic, since the cost that had forced 100 → 50 looked largely gone. Auditioned:
+  **"fuller/softer/fatter at 100, but grinds a bit more at the peaks."** Both
+  halves of that contradict the single-tone measurement, which says 100 is cleaner
+  AND less warm at every level (H2 −25.8 → −30.7 dBc at 900 Hz, high-order share
+  falling too).
+- **⛗⛗ A MULTITONE REPRODUCES THE EAR EXACTLY, AND EXPLAINS WHY A TONE CANNOT.**
+  Twelve tones on prime bins, so no sum or difference of two inputs lands on a
+  third and every non-input bin is distortion. PR 60, quartic:
+
+  | peak | emph | distortion / signal | share above 5 kHz |
+  |---|---|---|---|
+  | −12 dBFS | 0 / 50 / 100 | −30.62 / −30.62 / −30.62 dB | 1.5 / 1.5 / 1.5 % |
+  | −6 dBFS | 0 / 50 / 100 | −25.27 / −24.98 / **−23.70** dB | 0.7 / 1.2 / **2.2 %** |
+  | −3 dBFS | 0 / 50 / 100 | −22.43 / −21.98 / **−20.74** dB | 1.3 / 2.1 / **2.8 %** |
+  | −1 dBFS | 0 / 50 / 100 | −20.71 / −20.43 / **−19.49** dB | 1.4 / 2.3 / **2.7 %** |
+
+  Emphasis 100 adds **1.2–1.6 dB** of distortion and **triples** the share above
+  5 kHz — and does nothing whatever at −12 dBFS. Level-dependent extra HF
+  distortion is "grinds at the peaks", stated as a number. A single tone has
+  nothing to intermodulate with, so the de-emphasis simply attenuates that tone's
+  own harmonics and the control looks benign.
+- **⚠ THE TWO DESCRIPTIONS ARE ONE MECHANISM, SO THE DEPTH KNOB CANNOT SEPARATE
+  THEM.** "Fatter" and "grinds" are both the same added IMD energy at high level.
+  No position of Emphasis buys one without the other, which makes the shipped 50 a
+  real compromise rather than an inherited number.
+- **⚠⚠ THE CORNER WAS EXPOSED ON THE BENCH TO BREAK THAT TIE, ON A PREDICTION THAT
+  WAS WRONG.** The reasoning was that lowering it would fatten the low-mids while
+  exciting less of the grind band. A HIGH shelf with a LOWER corner boosts MORE of
+  the spectrum, not less, so it raises both together: at −6 dBFS peak, Emphasis
+  100 measures **−23.70 dB / 2.2 %** at the stock 1800 Hz and **−21.97 dB / 3.7 %**
+  at 600. `emphasisCornerHz` ships as a bench control anyway — it is a real axis
+  and it is now measured rather than guessed at — but not as the escape hatch it
+  was reached for. ⚠ The sign of this bullet is right and its FRAMING was still
+  wrong: lowering the corner does make both worse, but the useful move is RAISING
+  it, which the entries below measure.
+- **⛗⛗ THE CORNER'S DIRECTION, SETTLED BY EAR AND CONFIRMED BY MEASUREMENT — AND IT
+  IS THE ONE I HAD BACKWARDS.** Auditioned on real narration, RAISING the corner
+  1800 → 2500 "virtually eliminates the high end distortion". The sweep agrees:
+  added nonlinear energy over the Emphasis-0 render, on synthetic narration with
+  sibilance, in 3–5 kHz, runs **0.54 / 0.34 / 0.20 / 0.06 / 0.02 dB** at corners
+  **1200 / 1500 / 1800 / 2400 / 3200**. Raising the corner boosts less of the
+  spectrum, so less reaches the curve, so less distortion is made. Lowering it does
+  the reverse, which is what the original prediction had inverted.
+- **⚠⚠ BUT THE CORNER IS ~75 % REDUNDANT WITH THE DEPTH KNOB, WHICH IS WORTH
+  KNOWING BEFORE ANYONE SHIPS IT.** Nulling "Emphasis E at 1800" against "Emphasis
+  100 at 2500" sample for sample, the best depth match is **E ≈ 65**, leaving a
+  residual of **−40.3 dB re. output** — against the whole emphasis effect
+  (0 vs 100 at 1800) measuring **−28.4 dB**. So a depth change reproduces about
+  three quarters of a corner move in amplitude and a quarter of it is genuinely
+  independent. The band distribution barely moves either: the 3–5 kHz to 200 Hz–1 kHz
+  energy ratio sits at **1.02–1.09** across every depth AND every corner tested.
+  ⚠ It is a real second axis, but a weak one — mostly a second way to set how much
+  boost reaches the nonlinearity, not a way to change where the distortion lands.
+- **⛗ AND THE SHIPPING DEFAULT IS ALREADY CLOSE TO THE AUDITIONED SETTING.** Emphasis
+  50 at 1800 — what ships — nulls against Emphasis 100 at 2500 to **−39.2 dB**, within
+  1.1 dB of the best match any depth achieves. Whether the preference survives a
+  blind A/B against the stock patch is therefore an open question and the cheapest
+  next test, since a difference that small may not be the corner at all.
+- **⛗ CELL SAT IS THE BETTER ROUTE TO DENSITY, MODESTLY AND MEASURABLY.** At
+  matched total distortion it puts less of it in the grind band: at −6 dBFS,
+  Emphasis 100 at cell 5 gives −23.70 dB / **2.2 %** while cell sat 9 at Emphasis 0
+  gives −23.99 dB / **1.8 %**; at −1 dBFS, −19.49 / **2.7 %** against cell 12's
+  −19.53 / **2.4 %**. Same density, roughly 10–20 % less of it above 5 kHz. ⚠ A
+  consistent direction rather than a dramatic win, and it does not separate the two
+  either — on this curve, added density at peaks brings HF intermodulation with it.
+
+⚠⚠ **THE PATTERN WORTH KEEPING FROM THIS ENTRY IS ABOUT THE INSTRUMENT, NOT THE
+KNOB.** Three single-tone probes in a row gave confident answers that the ear
+contradicted: inert (wrong side of the corner), then cleaner-and-thinner (no
+intermodulation), then a corner prediction with the shelf's own direction
+backwards. The ledger already warns that tone THD understates a memoryless shaper
+on programme by ~11 dB; what this adds is that on a control which REDISTRIBUTES
+spectrum, a single tone does not merely understate the effect, it can reverse its
+sign. Reach for the multitone first on anything touching spectral balance.
+
+**SHIPPED — EMPHASIS 85 ON A 2300 Hz CORNER**, up from 50 at 1800.
+
+- **⛗ WHERE 1800 CAME FROM, SINCE IT WAS NEVER RE-DERIVED FOR THIS STAGE.** It is
+  Tube Saturation's constant, ported wholesale with the rest of the pair, and its
+  own note gives the entire derivation: *"low enough to cover the consonant and
+  attack region a voice puts its edge in, high enough to leave the fundamental and
+  the first formant out of it — the pair must not turn into a bass control, because
+  whatever it boosts into the curve is what the curve distorts most."* **No
+  measurement picked it.** Two constraints bracketed a range and 1800 sits inside
+  it — unlike `EMPHASIS_MAX_DB`, whose note says plainly "12 dB because that is
+  what the measurement above used".
+- **⛗ 2300 SERVES THAT REASONING BETTER, so this is a re-reading rather than a
+  rejection.** The stated rule leaves out the fundamental and the FIRST formant. On
+  speech that is too low a bar: a voice's SECOND formant runs to roughly
+  2000-2400 Hz, so an 1800 Hz corner is already inside the vowel body the pair was
+  supposed to stay clear of. 2300 puts the shelf above most of F2 and leaves it on
+  the consonant and sibilance edge, which is what the original sentence was
+  reaching for.
+- **⚠ AND THE CONSTRAINT THAT SET 50 NO LONGER BINDS.** The ~11 dB of worst-case
+  distortion that forced 100 → 50 is a property of Tube Saturation's curve being
+  driven into its knee by the shelf. The quartic pays about a sixth of it — THD at
+  a 5 kHz probe, Emphasis 0 → 100, moves **+1.79 dB against Tube Sat's +10.95** —
+  most likely because a +12 dB boost pushes the quartic past `|u| = 1` into its
+  linear continuation, which makes no new harmonics.
+- **⛗ SO THE NEW PAIR COSTS LESS THAN THE OLD ONE WHILE CARRYING MORE DEPTH.** Added
+  nonlinear energy over the Emphasis-0 render, on narration with sibilance, in
+  200 Hz-1 kHz / 1-3 kHz / 3-5 kHz:
+
+  | setting | 200 Hz-1 kHz | 1-3 kHz | 3-5 kHz |
+  |---|---|---|---|
+  | 50 @ 1800 (what shipped) | 0.028 | 0.133 | 0.330 dB |
+  | **85 @ 2300 (ships now)** | **0.027** | **0.116** | **0.301 dB** |
+  | 100 @ 1800 | 0.093 | 0.289 | 0.452 dB |
+
+  That is why it is a change of BOTH numbers and not of one: 85 alone at 1800 would
+  cost more than the 50 it replaced, and the corner is what pays for it.
+- **⚠ `EMPHASIS_CORNER_HZ` NOW DIFFERS FROM `vocalSatProcessor.js`'s CONSTANT OF THE
+  SAME NAME, DELIBERATELY.** They are separate declarations because importing across
+  would pull a module that calls `registerProcessor` at module scope into this
+  worklet bundle — the duplicate-registration bug at the top of `dsp/satCurves.js`.
+  The divergence is not drift and must not be "fixed" by wiring them together.
+- **⚠ `LA2A_TUBESAT_PATCH` PINS 50 AND 1800 AS LITERALS**, for the third time in this
+  entry's worth of changes and for the same reason: a patch whose job is "the
+  previous voicing, exactly" must not track constants that have just moved.
+
+---
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

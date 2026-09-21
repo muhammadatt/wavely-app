@@ -164,9 +164,46 @@ test('it overshoots in the passband, and by a bounded amount', () => {
   assert.ok(atNyquist > 0, 'the one-pole is expected to overshoot; it did not')
   assert.ok(atNyquist < 0.005, `overshoot reached ${atNyquist.toFixed(4)} dB at Nyquist`)
 
-  // And the end-to-end path shows the same number, so it is the blocker's and
-  // not an artifact of measuring through the compressor.
+  // ⚠⚠ THE END-TO-END PROBE THAT USED TO SIT HERE WAS NOT MEASURING THE BLOCKER,
+  // and it took a curve change to expose it. It compared rms through the whole
+  // compressor with and without the blocker, against the NYQUIST asymptote, and
+  // called the agreement proof that the number was "the blocker's and not an
+  // artifact of measuring through the compressor". It is exactly that artifact:
+  //
+  //   - The blocker runs INSIDE the `applyTube` branch, so with saturation off
+  //     the probe reads 0.00000 rather than the filter's response. There was no
+  //     linear control.
+  //   - rms through a nonlinearity is harmonic-weighted, so the reading moves
+  //     with whatever the shaper is making. Tube Sat read 0.00256, the quartic
+  //     reads 0.00134, against an analytic 0.00299 at the probe frequency.
+  //   - The two effects pull opposite ways: harmonics sit higher in the
+  //     blocker's passband and push the reading UP, while the asymmetric
+  //     shaper's DC offset is removed by the blocker and pushes it DOWN. The
+  //     quartic is strongly even-dominant, so it makes more offset and reads
+  //     LOWER despite making more distortion.
+  //
+  // It passed for years because 0.00054 happened to be under the tolerance.
+  // What the file can honestly assert is that the coefficient the kernel
+  // actually runs is the one the analytic magnitude describes, so the probe is
+  // now the difference equation itself, driven at the probe frequency.
+  const k = new LA2AKernel(SR)
+  k.setParams({ mode: 'compress', peakReduction: 84, gainDb: 0, mix: 1 })
+  const w = 2 * Math.PI * 1000 / SR
+  const analytic = db(
+    Math.hypot(1 - Math.cos(w), Math.sin(w))
+    / Math.hypot(1 - k.dcR * Math.cos(w), k.dcR * Math.sin(w)),
+  )
   const x = tone(1000, 3, 0.3)
-  const measured = db(rms(run(x))) - db(rms(run(x, { corner: null })))
-  assert.ok(Math.abs(measured - db(2 / (1 + R))) < 0.001, `measured ${measured.toFixed(5)} dB`)
+  const y = new Float32Array(x.length)
+  let dcX = 0
+  let dcY = 0
+  for (let i = 0; i < x.length; i++) {
+    dcY = x[i] - dcX + k.dcR * dcY
+    dcX = x[i]
+    y[i] = dcY
+  }
+  // Skip the first second: the filter's own settling, not its passband.
+  const measured = db(rms(y.subarray(SR))) - db(rms(x.subarray(SR)))
+  assert.ok(Math.abs(measured - analytic) < 1e-4,
+    `measured ${measured.toFixed(5)} dB against analytic ${analytic.toFixed(5)}`)
 })

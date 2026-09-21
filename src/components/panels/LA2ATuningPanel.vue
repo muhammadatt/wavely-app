@@ -9,11 +9,14 @@
  * default (see `isLA2ATuningVisible`), and it should look like an instrument
  * panel rather than part of the unit.
  *
- * ⚠ EVERY VALUE HERE IS FITTED TO SOMETHING. The two cell constants come from
- * the hardware paper, the two valve constants from the -63.80 dBc H2 anchor,
- * and the rectifier pole is the one mechanism measured to move the harmonic
- * PROFILE rather than the level. Nothing dialled in here ships until it has
- * been back through the ledger, which is what COPY exists for.
+ * ⚠ NOT EVERY VALUE HERE IS FITTED, AND THE SPLIT MOVED. The two cell
+ * modulation constants come from the hardware paper and the rectifier pole is
+ * the one mechanism measured to move the harmonic PROFILE rather than the
+ * level; the two saturation drives and Emphasis are ear decisions with nothing
+ * behind them, which is most of why this panel exists. The valve constants that
+ * WERE fitted — to the -63.80 dBc H2 anchor — belonged to the tanh and went
+ * with it. Nothing dialled in here ships until it has been back through the
+ * ledger, which is what COPY exists for.
  */
 import { computed, ref } from 'vue'
 import {
@@ -77,21 +80,27 @@ const CONTROLS = [
     key: 'rectLpMs', label: 'Rect pole', min: 0, max: 5, step: 0.02, digits: 2, unit: ' ms',
     hint: 'One-pole on the rectifier. 0 is off. The only control that changes the harmonic PROFILE: at 2 ms the H3-to-H9 spread opens from 32 to 42 dB.',
   },
-  {
-    key: 'tubeDriveLin', label: 'Valve drive', min: 0.02, max: 1.2, step: 0.002, digits: 4,
-    hint: 'Anchored to the paper’s -63.80 dBc H2 median. Measures ~30 dB below the cell at working depths.',
-  },
-  {
-    key: 'tubeBias', label: 'Valve bias', min: 0, max: 0.4, step: 0.002, digits: 3,
-    hint: 'Operating-point offset — what makes the valve stage even-order at all.',
-  },
+  /**
+   * ⚠ "VALVE DRIVE" AND "VALVE BIAS" WERE HERE AND WENT WITH THE TANH. Both are
+   * constants OF THAT CURVE — `tubeDriveLin` and `tubeBias` reach the kernel
+   * only through the tanh branch of `shapeTube` and its inverse — so with the
+   * valve selector gone they moved nothing, and a slider that moves nothing is
+   * worse than no slider. They remain in the tuning store, because
+   * `test/dsp/la2aTuning.test.js` drives them through `LA2A_LEGACY_PATCH` and
+   * pins that `tubeDriveLin` does NOT reach the shipping curve. `npm run
+   * la2a:h2:refit` is where that anchor is worked on now.
+   */
   {
     key: 'cellCurveDriveMax', label: 'Cell sat', min: 0, max: 24, step: 0.05, digits: 2,
-    hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law scales it. NOT Tube Sat’s Drive knob. Ships at 1.5, chosen by ear alongside Valve sat 0.5 and Emphasis 50.',
+    hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law scales it. Means a DIFFERENT THING per curve — on Tube Sat it sets how far into the knee the cell runs, on the QUARTIC it scales c4 as the cube of the drive, so a value from one is not a voicing in the other. Ships at 5 on the quartic, chosen by ear. The previous Tube Sat voicing was 1.5; LA2A_TUBESAT_PATCH restores the pair.',
   },
   {
     key: 'emphasis', label: 'Emphasis', min: 0, max: 100, step: 1, digits: 0,
-    hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Ships at 50. Measured on narration, the whole 0-100 sweep moves crest under 0.07 dB while the top half adds ~11 dB of distortion on bright sustained vowels — the -1.1 dB it shows on a synthetic burst probe does not transfer to speech. Inert on tanh and on the gain modulation.',
+    hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Ships at 85, paired with the 2300 Hz corner. ⚠ IT SHIPPED AT 50 FOR A CONSTRAINT THAT NO LONGER BINDS: the ~11 dB of worst-case distortion that forced 100 → 50 belonged to Tube Saturation’s curve being driven into its knee; the quartic pays about a sixth of it (+1.79 dB against +10.95 at a 5 kHz probe, Emphasis 0 → 100). Measured on narration, 85 @ 2300 adds LESS nonlinear energy than the old 50 @ 1800 (0.027/0.116/0.301 against 0.028/0.133/0.330 dB in 200-1k / 1-3k / 3-5k). Inert on the gain modulation as far as THD is concerned — though it does move that stage’s sidebands, which a harmonic probe cannot see.',
+  },
+  {
+    key: 'emphasisCornerHz', label: 'Emph Hz', min: 200, max: 8000, step: 25, digits: 0, unit: ' Hz',
+    hint: 'Corner of the pre/de-emphasis shelf pair. Ships at 2300, up from 1800. ⚠ 1800 WAS REASONED, NOT FITTED — Tube Sat’s own note says “low enough to cover the consonant and attack region, high enough to leave the fundamental and the FIRST formant out”, and on speech that is not a high enough bar: a voice’s SECOND formant runs to ~2000-2400 Hz, so 1800 already sits inside the vowel body the pair was meant to stay out of. ⚠ THE SECOND AXIS ON EMPHASIS, and it exists because the depth knob has only one. Measured on a multitone, Emphasis 100 adds 1.2–1.6 dB of distortion at peak levels and TRIPLES the share above 5 kHz while doing nothing at −12 dBFS — auditioned, the same mechanism reads as both “fuller/fatter” and “grinds at the peaks”, so no depth setting buys one without the other. RAISING it reduces the distortion emphasis adds, lowering it increases it — a high shelf with a lower corner boosts MORE of the spectrum, not less. Added nonlinear energy in 3–5 kHz on narration runs 0.54 / 0.34 / 0.20 / 0.06 / 0.02 dB at corners 1200 / 1500 / 1800 / 2400 / 3200. ⚠ IT IS ~75% REDUNDANT WITH THE DEPTH KNOB: Emphasis 100 at 2500 nulls against Emphasis 65 at 1800 to −40.3 dB re. output, where the whole emphasis effect is −28.4 dB, and the band distribution barely moves at all (3–5k to 200–1k ratio 1.02–1.09 across every setting tested). A second way to set how much boost reaches the curve, not a way to change where the distortion lands. ⚠ Inert when Emphasis is 0.',
   },
   {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
@@ -100,23 +109,50 @@ const CONTROLS = [
 ]
 
 /**
- * The two curve selectors. Peers rather than on/off, which is why they are
- * rockers and not checkboxes: a fitted mechanism and an auditioned one are two
- * different things, not more and less of one thing.
+ * The curve selector. A rocker rather than a checkbox: a fitted mechanism and
+ * an auditioned one are two different things, not more and less of one thing.
+ *
+ * ⚠ THE TANH IS NOT AN OPTION ON EITHER ROCKER AND THE KERNEL MODE STILL EXISTS.
+ * `tubeCurve: 'tanh'` was falsified as the valve curve by two references failing
+ * it in two different ways — CLA-2A's H3 off by 43 dB, LALA's H2 law off by 76 —
+ * so it is not something to audition against. It remains a kernel mode because
+ * `LA2A_LEGACY_PATCH` is the baseline five test files measure against, and a
+ * legacy patch that cannot be selected is not a legacy patch. Reach it from
+ * code, not from here.
+ *
+ * ⚠ THE TWO ROCKERS ARE INDEPENDENT, AND THE KERNEL ONLY LEARNED THAT RECENTLY.
+ * One `vsCurve` object used to serve both stages — workable while they always
+ * held the same curve, since the cell reads `transferAt` and the valve reads
+ * `transfer`. The quartic being selectable at either stage is what forced them
+ * apart. Audition the cell first: it is ~95% of the distortion, and it is the
+ * stage where no measurement is being overruled, because both references were
+ * captured at Peak Reduction 0 with the cell idle.
  */
 const CURVE_CHOICES = [
-  {
-    key: 'tubeCurve', label: 'Valve curve',
-    options: [
-      { id: 'tanh', label: 'TANH', title: 'The fitted biased hyperbolic tangent — anchored to the paper’s H2 median' },
-      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve at its panel defaults' },
-    ],
-  },
   {
     key: 'cellCurve', label: 'Cell mechanism',
     options: [
       { id: 'gainmod', label: 'GAIN MOD', title: 'Detector ripple modulating the gain — fitted to the hardware paper' },
-      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve as a waveshaper at the cell. Replaces the modulation; this is where ~95% of the plugin’s distortion lives' },
+      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve as a waveshaper at the cell — what shipped before the quartic. Replaces the modulation; this is where ~95% of the plugin’s distortion lives. ⚠ Voiced at Cell sat 1.5, not the 5 that now ships' },
+      {
+        id: 'quartic', label: 'QUARTIC',
+        title: 'u + 1.1e-3·u³ + 0.0328·u⁴ — Analog Obsession LALA’s output stage, identified '
+          + 'from its harmonic columns (H2 reproduced to 0.00 dB across 49 dB). Stops dead at '
+          + 'H4 where Tube Sat runs past H8. Cell sat is its depth: 1.0 is LALA’s own, 2.7 puts '
+          + 'H2 on the hardware paper’s median. ⚠ The references that identify it were captured '
+          + 'with the cell IDLE — they measure the valve and say nothing about the cell',
+      },
+    ],
+  },
+  {
+    key: 'tubeCurve', label: 'Valve curve',
+    options: [
+      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve — what shipped before the quartic. ⚠ Restore Cell sat to 1.5 with it, or it runs at three times the drive it was voiced at' },
+      {
+        id: 'quartic', label: 'QUARTIC',
+        title: 'The same identified LA-2A output stage, at the stage the references actually '
+          + 'measured. Valve sat is its depth; 2.70 lands H2 on the −63.80 dBc Moore median',
+      },
     ],
   },
 ]
@@ -161,8 +197,6 @@ async function copyConstants() {
     '// OptoSmooth bench tuning',
     `CELL_MOD_MAX    = ${v.cellModMax}`,
     `CELL_MOD_TAU_DB = ${v.cellModTauDb}`,
-    `TUBE_DRIVE_LIN  = ${v.tubeDriveLin}`,
-    `TUBE_BIAS       = ${v.tubeBias}`,
     `rectLpMs        = ${v.rectLpMs}`,
     `cellMod         = ${v.cellMod}`,
     `tube            = ${v.tube}`,
@@ -172,6 +206,7 @@ async function copyConstants() {
     `vocalSatCurveDrive = ${v.vocalSatCurveDrive}`,
     `vocalSatLeanPositive = ${v.vocalSatLeanPositive}`,
     `emphasis        = ${v.emphasis}`,
+    `emphasisCornerHz   = ${v.emphasisCornerHz}`,
   ].join('\n')
   try {
     await navigator.clipboard.writeText(lines)
@@ -292,10 +327,13 @@ async function copyConstants() {
         <span class="text-white/45">Cell onset stays live: it sets how fast the Tube Sat drive arrives.</span>
       </p>
 
-      <label
-        v-if="vals.tubeCurve === 'vocalsat' || vals.cellCurve === 'vocalsat'"
-        class="mt-3 flex items-center gap-2 text-[10px] text-white/55"
-      >
+      <!--
+        Shown unconditionally: every curve either rocker can now select is a
+        waveshaper with an undetermined polarity, and this is the switch for it.
+        It means different things on each — the hard-knee side on Tube Sat, the
+        sign of c4 on the quartic — and neither is measured.
+      -->
+      <label class="mt-3 flex items-center gap-2 text-[10px] text-white/55">
         <input
           type="checkbox"
           :checked="vals.vocalSatLeanPositive"
@@ -303,7 +341,7 @@ async function copyConstants() {
           @change="write({ vocalSatLeanPositive: $event.target.checked })"
         />
         <span>Lean positive</span>
-        <span class="text-white/25">— which polarity gets the hard knee</span>
+        <span class="text-white/25">— which polarity saturates first; unmeasured on both curves</span>
       </label>
 
       <label class="mt-3 flex items-center gap-2 text-[10px] text-white/55">
