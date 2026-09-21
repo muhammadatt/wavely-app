@@ -21,14 +21,21 @@
  *
  * `FET_LEGACY_PATCH` remains a kernel patch and `fetCurve` remains a tuning-store
  * key, so the pre-capture kernel is still reachable — from code, where the tests
- * that measure against it live. The LEGACY badge below still lights, because the
- * remaining rockers can still be walked into that configuration by hand.
+ * that measure against it live.
+ *
+ * ⚠⚠ AND THE LEGACY BADGE WENT WITH THEM, because it could no longer light. An
+ * earlier version of this note claimed the remaining rockers could still be walked
+ * into that configuration by hand; they cannot. `isFET1176TuningLegacy()` requires
+ * `fetCurve: 'tanh'`, and with the curve rocker gone this panel has no way to set
+ * it — so the predicate was dead and the badge read MODIFIED forever. The
+ * predicate itself stays exported: `fet1176Curve.test.js` uses it to pin that the
+ * bench can express every key the legacy patch carries. Caught by Copilot on PR #160.
  */
 import { ref } from 'vue'
 import {
   FET1176_TUNING_DEFAULTS,
   getFET1176Tuning, setFET1176Tuning, resetFET1176Tuning,
-  isFET1176TuningDefault, isFET1176TuningLegacy,
+  isFET1176TuningDefault,
 } from '../../audio/effects/fet1176Tuning.js'
 
 const props = defineProps({
@@ -44,13 +51,11 @@ const open = ref(false)
  */
 const vals = ref(getFET1176Tuning())
 const pristine = ref(isFET1176TuningDefault())
-const legacy = ref(isFET1176TuningLegacy())
 
 function write(patch) {
   setFET1176Tuning(patch)
   vals.value = getFET1176Tuning()
   pristine.value = isFET1176TuningDefault()
-  legacy.value = isFET1176TuningLegacy()
   emit('change')
 }
 
@@ -186,7 +191,6 @@ function reset() {
   resetFET1176Tuning()
   vals.value = getFET1176Tuning()
   pristine.value = true
-  legacy.value = isFET1176TuningLegacy()
   emit('change')
 }
 </script>
@@ -204,7 +208,7 @@ function reset() {
         v-if="!pristine"
         class="rounded-sm px-1.5 py-px text-[9px] tracking-normal"
         :style="{ background: accent, color: '#1a1a1a' }"
-      >{{ legacy ? 'LEGACY' : 'MODIFIED' }}</span>
+      >MODIFIED</span>
       <span class="ml-auto normal-case tracking-normal text-white/25">
         {{ open ? '' : 'not a shipping control' }}
       </span>

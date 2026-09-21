@@ -122,8 +122,21 @@ const DRIVE_EPSILON = 1e-6
  */
 export function makeQuarticSatCurve(opts = {}) {
   const drive = Number.isFinite(opts.drive) && opts.drive > 0 ? opts.drive : 1
+  /**
+   * ⚠⚠ THE SIGN APPLIES TO c4 ALONE, AND IT NEGATED BOTH TERMS FIRST.
+   * `leanPositive` is a POLARITY MIRROR: the curve with its two sides swapped is
+   * `-g(-u)`, and expanding that gives `u + c3·u³ - c4·u⁴` — the odd term is
+   * unchanged and only the even one flips. Negating `c3` as well produced a
+   * different curve rather than a mirrored one, changing the H3 phase and the odd
+   * character that `c3` exists to carry, so `--flip` and the bench switch were
+   * comparing against something that was not the other polarity of this curve.
+   *
+   * ⚠ IT NEVER REACHED THE SHIPPING SOUND: `leanPositive` defaults to true, where
+   * the sign is +1 and both spellings agree. Only the flipped branch was wrong.
+   * Caught by Copilot on PR #160.
+   */
   const sign = opts.leanPositive === false ? -1 : 1
-  const c3 = (Number.isFinite(opts.c3) ? opts.c3 : QUARTIC_C3) * sign
+  const c3 = Number.isFinite(opts.c3) ? opts.c3 : QUARTIC_C3
   const c4 = (Number.isFinite(opts.c4) ? opts.c4 : QUARTIC_C4) * sign
   const xmax = Number.isFinite(opts.xmax) && opts.xmax > 0 ? opts.xmax : QUARTIC_XMAX
 

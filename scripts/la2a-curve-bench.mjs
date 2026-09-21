@@ -113,6 +113,7 @@ import {
 import { gatedRmsOfChannels, alignDbForRms } from '../src/audio/dsp/inputAlign.js'
 import {
   LA2AKernel, CELL_CURVE_DRIVE_MAX, VALVE_CURVE_DRIVE,
+  LA2A_TUBESAT_PATCH, CELL_CURVE_QUARTIC, TUBE_CURVE_QUARTIC,
 } from '../src/audio/la2aProcessor.js'
 
 const ROOT = process.cwd()
@@ -370,20 +371,26 @@ function sectionPassage(cands, mono, sampleRate, file) {
 // ── C. The render ───────────────────────────────────────────────────────────
 
 /**
- * Run the kernel with a curve of our choosing patched in.
+ * Run the kernel over a buffer.
  *
- * ⚠ A BENCH HACK, STATED AS ONE. `setParams` builds `this.vsCurve` from the
- * mode selectors, and there is no param that reaches a curve the kernel does not
- * know about — so this sets the field afterwards and then never calls
- * `setParams` again, because a second call would rebuild it and silently revert
- * to the shipping curve mid-render. The kernel is untouched, which is the point:
- * a candidate gets auditioned through the real plugin without a mode landing in
- * shipping source before anyone has decided it should.
+ * ⚠⚠ THIS USED TO PATCH A CURVE OBJECT STRAIGHT ONTO THE KERNEL, AND THE HACK
+ * ROTTED SILENTLY INTO A BROKEN COMPARISON. When the candidate existed only here
+ * it was injected as `k.vsCurve = curve` after `setParams`. Two later changes
+ * killed that without a word: the per-stage split renamed the field to
+ * `cellSatCurve`/`tubeSatCurve`, so the assignment started creating an unused
+ * property; and then the quartic became the shipping default, so the "TubeSat"
+ * and "quartic" rows of section C were rendering the SAME patch and `--write`
+ * was emitting an A/B of a file against itself.
+ *
+ * Neither the selftest nor any assertion could see it, because the hack was
+ * reaching past the kernel's own parameter surface — which is the general
+ * hazard, not a detail of this one. The quartic is a real mode now, so the
+ * curves are selected the way anything else selects them, through params.
+ * Caught by Copilot on PR #160.
  */
-function renderWith(mono, sampleRate, params, curve) {
+function renderWith(mono, sampleRate, params) {
   const k = new LA2AKernel(sampleRate)
   k.setParams(params)
-  if (curve) k.vsCurve = curve
   const n = mono.length
   const out = new Float32Array(n)
   const BLOCK = 128
@@ -420,7 +427,7 @@ function sectionRender(mono, sampleRate, { depth, flip, write, cellOnly }) {
    */
   console.log(cellOnly
     ? '   Valve stage OFF — the cell alone. Not the shipping topology.'
-    : '   One curve object feeds the cell AND the valve, so both move. --cell-only isolates.')
+    : '   TubeSat at its own drives against the quartic at both stages. --cell-only isolates.')
   console.log()
 
   /**
@@ -438,12 +445,24 @@ function sectionRender(mono, sampleRate, { depth, flip, write, cellOnly }) {
       mode: 'compress', peakReduction: pr, gainDb: 0, r37: 100, mix: 1,
       ...(cellOnly ? { tube: false } : {}),
     }
-    const ship = renderWith(mono, sampleRate, base, null)
-    const cand = renderWith(mono, sampleRate, base,
-      makeQuarticSatCurve({ drive: depth, leanPositive: !flip }))
+    /**
+     * ⚠ BOTH SIDES ARE NAMED EXPLICITLY, NEITHER IS "THE DEFAULT". The default
+     * is now the quartic, so a row built from bare `base` would be the candidate
+     * wearing the other row's label — which is exactly how the injection bug
+     * above went unnoticed. `LA2A_TUBESAT_PATCH` is the voicing the quartic
+     * replaced, and it carries the drives as well as the curve names.
+     */
+    const ship = renderWith(mono, sampleRate, { ...base, ...LA2A_TUBESAT_PATCH })
+    const cand = renderWith(mono, sampleRate, {
+      ...base,
+      cellCurve: CELL_CURVE_QUARTIC,
+      tubeCurve: TUBE_CURVE_QUARTIC,
+      cellCurveDriveMax: depth,
+      vocalSatLeanPositive: !flip,
+    })
     const a = stats(ship.out); const b = stats(cand.out)
     const grDrift = Math.abs(ship.avgGrDb - cand.avgGrDb)
-    console.log(`   ${String(pr).padStart(3)} | TubeSat (ships) ${ship.avgGrDb.toFixed(2).padStart(6)} `
+    console.log(`   ${String(pr).padStart(3)} | TubeSat (was)   ${ship.avgGrDb.toFixed(2).padStart(6)} `
       + `${a.peakDb.toFixed(2).padStart(7)} ${a.rmsDb.toFixed(2).padStart(7)} ${a.crestDb.toFixed(2).padStart(6)} |`)
     console.log(`       | quartic d=${depth}    ${cand.avgGrDb.toFixed(2).padStart(6)} `
       + `${b.peakDb.toFixed(2).padStart(7)} ${b.rmsDb.toFixed(2).padStart(7)} ${b.crestDb.toFixed(2).padStart(6)} | `
@@ -508,7 +527,7 @@ function sectionEmphasis(mono, sampleRate, file, { depth, flip }) {
     cellCurve: 'quartic', tubeCurve: 'quartic', cellCurveDriveMax: depth,
     vocalSatLeanPositive: !flip,
   }
-  const ref = renderWith(mono, sampleRate, { ...base, emphasis: 0 }, null).out
+  const ref = renderWith(mono, sampleRate, { ...base, emphasis: 0 }).out
 
   /** Band energy of `y` minus that of the reference, in dB, over [lo, hi). */
   const bandDelta = (y, lo, hi) => {
@@ -533,7 +552,7 @@ function sectionEmphasis(mono, sampleRate, file, { depth, flip }) {
   console.log('    corner   200-1k    1k-3k    3k-5k    5k-10k   10k-16k')
   for (const corner of [1200, 1400, 1500, 1600, 1700, 1800, 2000, 2400, 3200]) {
     const y = renderWith(mono, sampleRate,
-      { ...base, emphasis: 100, emphasisCornerHz: corner }, null).out
+      { ...base, emphasis: 100, emphasisCornerHz: corner }).out
     const cells = [[200, 1000], [1000, 3000], [3000, 5000], [5000, 10000], [10000, 16000]]
       .map(([lo, hi]) => bandDelta(y, lo, hi).toFixed(2).padStart(9)).join('')
     console.log(`   ${String(corner).padStart(6)}${cells}`)
@@ -732,8 +751,8 @@ function selftest() {
     }
     const flat = { mode: 'compress', peakReduction: 0, gainDb: 0, r37: 100, mix: 1,
       tube: false, cellCurve: 'gainmod', cellMod: 0 }
-    const a = renderWith(sig, sr, { ...flat, emphasis: 0 }, null).out
-    const b = renderWith(sig, sr, { ...flat, emphasis: 100 }, null).out
+    const a = renderWith(sig, sr, { ...flat, emphasis: 0 }).out
+    const b = renderWith(sig, sr, { ...flat, emphasis: 100 }).out
     let worstLin = 0
     for (let i = 2000; i < len; i++) worstLin = Math.max(worstLin, Math.abs(a[i] - b[i]))
     ok(worstLin < 1e-6,

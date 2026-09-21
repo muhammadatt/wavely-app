@@ -206,6 +206,7 @@ async function copyConstants() {
     `vocalSatCurveDrive = ${v.vocalSatCurveDrive}`,
     `vocalSatLeanPositive = ${v.vocalSatLeanPositive}`,
     `emphasis        = ${v.emphasis}`,
+    `emphasisCornerHz   = ${v.emphasisCornerHz}`,
   ].join('\n')
   try {
     await navigator.clipboard.writeText(lines)
