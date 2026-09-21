@@ -43,6 +43,14 @@ export const LA2A_DEFAULTS = {
    * measurements and for why the ceiling is 20 and not higher.
    */
   lookahead: 0,
+  /**
+   * Analog mode — the nonlinearity, on or off. True is the shipping character.
+   *
+   * ⚠ A PATCH KEY, NOT A BENCH ONE, which is what separates it from everything
+   * in `la2aTuning.js`. It is serialised into presets, saved patches and undo
+   * entries, so a user who turns it off and saves gets it back off.
+   */
+  analog: true,
 }
 
 /**
@@ -62,6 +70,13 @@ export function toKernelParams(params) {
     mode: params.mode,
     peakReduction: params.peakReduction,
     gainDb: params.gain,
+    /**
+     * ⚠ DEFAULTS TO TRUE ON AN ABSENT KEY, and that is the only correct default:
+     * every patch saved before this control existed was auditioned WITH the
+     * nonlinearity, so anything else would silently change how a stored preset
+     * sounds. Same rule `lookahead` follows in the other direction.
+     */
+    analog: params.analog !== false,
     r37: params.r37,
     lookaheadMs: params.lookahead,
     ...la2aTuningOverrides(),

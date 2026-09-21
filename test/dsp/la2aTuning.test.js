@@ -84,13 +84,25 @@ test('an untouched bench emits no kernel params at all', () => {
   assert.ok(isLA2ATuningDefault())
   assert.deepEqual(la2aTuningOverrides(), {})
 
-  // The exact shape `toKernelParams` returned before the bench existed.
+  /**
+   * The exact shape `toKernelParams` returns. Pinned key-for-key on purpose:
+   * this is the guard on "an untouched bench emits nothing", and it works by
+   * noticing ANY change to the object, which is what caught an unconditional
+   * `ceilingDb: null` that was inert to the kernel but changed the shape.
+   *
+   * ⚠ `analog` IS A PATCH KEY AND BELONGS HERE UNCONDITIONALLY, unlike the
+   * ceiling and the input alignment, which are properties of the AUDIO and are
+   * spread in only when real. This one has a default and always travels, exactly
+   * as `mode` and `peakReduction` do — so its presence is the shape, not a
+   * violation of it.
+   */
   assert.deepEqual(toKernelParams(LA2A_DEFAULTS), {
     mode: 'compress',
     peakReduction: 50,
     gainDb: 0,
     r37: 100,
     lookaheadMs: 0,
+    analog: true,
   })
 })
 

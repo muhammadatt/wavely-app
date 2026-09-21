@@ -20,6 +20,7 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aR37, la2aLookahead,
   la2aAutoMakeup, la2aAutoMakeupBusy, toggleAutoMakeup: toggleAuto,
+  la2aAnalog, syncAnalog,
   la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels,
   togglePreview, syncMode, syncPeakReduction, syncGain,
   syncR37, syncLookahead, toggleAutoMakeup, refreshAutoMakeup,
@@ -61,6 +62,21 @@ const ACCENT = '#f5a623'
 const MODE_OPTIONS = [
   { value: 'compress', label: 'COMP' },
   { value: 'limit', label: 'LIMIT' },
+]
+
+/**
+ * Analog mode — the nonlinearity, on or off.
+ *
+ * ⚠ A ROCKER AND NOT A DRIVE KNOB, WHICH IS THE SAME ARGUMENT THAT REMOVED THE
+ * OLD ONE. An LA-2A has no saturation control: how hard the valves are pushed is
+ * a consequence of level, not an operator setting, and a knob scaling the curve
+ * would be modelling the operator. What this offers is not "how much" but
+ * "whether" — a product choice about whether the plugin colours at all, which
+ * the hardware analogy has nothing to say about.
+ */
+const ANALOG_OPTIONS = [
+  { value: true, label: 'ON' },
+  { value: false, label: 'OFF' },
 ]
 
 // Preview is just transport playback: the worklet is already in the chain, so
@@ -111,6 +127,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
     gain: la2aGain.value,
     r37: la2aR37.value,
     lookahead: la2aLookahead.value,
+    analog: la2aAnalog.value,
     autoMakeup: la2aAutoMakeup.value,
   }),
   write: (p) => {
@@ -120,6 +137,9 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
     // Absent in every preset saved before the control existed, and 0 is both
     // the default and what those patches were auditioned with.
     syncLookahead(p.lookahead ?? 0)
+    // Absent in every preset saved before the control existed, and those were
+    // auditioned WITH the nonlinearity — so an absent key means ON, never OFF.
+    syncAnalog(p.analog !== false)
     if (p.autoMakeup) {
       // Already on: the syncs above have each scheduled a re-measure, so the
       // knob lands on the new settings without a second toggle.
@@ -222,12 +242,16 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
         <LevelMeter :levels="la2aOutputLevels" label="OUT" />
       </div>
 
-      <!-- Secondary row: Comp/Limit mode + the R37 side-chain trimmer.
-           ⚠ THERE IS NO SATURATION CONTROL, AND THAT IS THE HARDWARE. A Tube
-           Drive knob used to sit beside R37; an LA-2A has no such thing, and
-           the knob was really moving the level at which the output valves
-           saturate. Gain drives them now, as it does on the unit — see
-           TUBE_DRIVE_LIN in la2aProcessor.js. -->
+      <!-- Secondary row: Comp/Limit mode, ANALOG, and the R37 side-chain trimmer.
+           ⚠ THERE IS STILL NO SATURATION *AMOUNT* CONTROL, AND THAT IS THE
+           HARDWARE. A Tube Drive knob used to sit beside R37; an LA-2A has no
+           such thing, and the knob was really moving the level at which the
+           output valves saturate. Gain drives them, as it does on the unit.
+           ANALOG is a different question and not a reinstatement of it: not
+           "how much" but "whether", which is a product choice about whether the
+           plugin colours at all. Off leaves the compressor completely intact —
+           gain reduction is bit-identical — and delivers its envelope as a pure
+           gain. See `analog` in la2aProcessor.js. -->
       <div class="flex items-center justify-between mt-[20px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
         <!-- Compress / Limit — the hardware's rear-panel switch -->
         <DeviceChoiceRocker
@@ -238,6 +262,20 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
           :disabled="!la2aPreview"
           label="Mode"
           :caption="la2aMode === 'compress' ? '~3:1 leveling' : 'hard ceiling'"
+        />
+
+        <!-- ANALOG — the harmonics, on or off. Off is not a bypass: the
+             detector, taper, R37 and ballistics are untouched and the gain
+             reduction is identical, so what goes is the colour and not the
+             compression. -->
+        <DeviceChoiceRocker
+          :model-value="la2aAnalog"
+          @update:model-value="syncAnalog"
+          :options="ANALOG_OPTIONS"
+          :accent="ACCENT"
+          :disabled="!la2aPreview"
+          label="Analog"
+          :caption="la2aAnalog ? 'harmonics on' : 'clean — same compression'"
         />
 
         <div class="flex gap-[26px]">

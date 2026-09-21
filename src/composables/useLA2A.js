@@ -19,6 +19,7 @@ const la2aPeakReduction = ref(LA2A_DEFAULTS.peakReduction)
 const la2aGain = ref(LA2A_DEFAULTS.gain)
 const la2aR37 = ref(LA2A_DEFAULTS.r37)
 const la2aLookahead = ref(LA2A_DEFAULTS.lookahead)
+const la2aAnalog = ref(LA2A_DEFAULTS.analog)
 /**
  * The statistic the AUTO makeup solve references. Fixed, not a control.
  *
@@ -151,6 +152,7 @@ function currentParams() {
     gain: la2aGain.value,
     r37: la2aR37.value,
     lookahead: la2aLookahead.value,
+    analog: la2aAnalog.value,
     /**
      * ⚠ ONLY WHILE AUTO OWNS THE KNOB. The ceiling is the other half of the
      * percentile solve; with AUTO off there is no solve, the gain is the
@@ -186,6 +188,15 @@ function measurementParams() {
      * to, and hand back exactly the number the control exists to change.
      */
     lookaheadMs: la2aLookahead.value,
+    /**
+     * ⚠ ANALOG BELONGS IN THE MEASUREMENT FOR THE SAME REASON THE BENCH TUNING
+     * DOES — see the note just below. This function builds kernel params BY HAND
+     * rather than through `toKernelParams`, so every key has to be remembered
+     * here separately. Leaving this one out would solve the makeup through the
+     * valve and then render without it, which is the exact failure that note
+     * records for the bench overrides.
+     */
+    analog: la2aAnalog.value,
     /**
      * ⚠ THE BENCH TUNING BELONGS IN THE MEASUREMENT, and leaving it out meant
      * the solve modelled a different compressor from the one rendering.
@@ -501,6 +512,12 @@ export function useLA2A() {
   // A compression param, not a trim: it changes which peak survives, so the
   // makeup has to be re-solved and the live tracker's extrema are stale.
   const syncLookahead = (v) => syncCompressionParam('lookahead', la2aLookahead, v)
+  /**
+   * A COMPRESSION PARAM, NOT A TRIM, for the same reason lookahead is: the curve
+   * changes the delivered level, so the makeup has to be re-solved and the live
+   * tracker's extrema are stale.
+   */
+  const syncAnalog = (v) => syncCompressionParam('analog', la2aAnalog, v !== false)
 
   /**
    * Touch-to-take-over: dragging the knob while AUTO is on switches AUTO off
@@ -643,6 +660,7 @@ export function useLA2A() {
     la2aGain,
     la2aR37,
     la2aLookahead,
+    la2aAnalog,
     la2aAutoMakeup,
     la2aAutoMakeupBusy,
     la2aInputAuto,
@@ -658,6 +676,7 @@ export function useLA2A() {
     syncGain,
     syncR37,
     syncLookahead,
+    syncAnalog,
     toggleAutoMakeup,
     syncInput,
     resetInputAuto,

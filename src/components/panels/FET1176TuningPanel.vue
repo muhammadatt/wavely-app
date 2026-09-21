@@ -1,24 +1,41 @@
 <script setup>
 /**
- * FET Punch curve bench — which static curve runs, and where it sits.
+ * FET Punch curve bench — where the static curve sits, and which ballistics
+ * and threshold laws run.
  *
  * ⚠ DELIBERATELY PLAIN, AND NOT BUILT FROM THE DEVICE CHROME, for the same
  * reason `LA2ATuningPanel.vue` is: the knobs and rockers in `../knobs/` are the
  * product's visual language, and using them here would make this read as a
- * feature of the plugin. It is a bench control for A/B-ing the measured curve
- * against the one it replaced, gated off by default (see
+ * feature of the plugin. It is a bench control for A/B-ing the laws that are
+ * still open against the ones that ship, gated off by default (see
  * `isFET1176TuningVisible`).
  *
- * ⚠ THE TWO CONTROLS ARE NOT INDEPENDENT IN PRACTICE, which is why LEGACY is a
- * button and not a third option on each rocker. "The plugin as it was before the
- * FETish capture" is a PAIR of choices — the `tanh`, after the cell — and either
- * one alone is a configuration that never shipped and was never voiced.
+ * ⚠ THE CURVE SELECTOR AND THE LEGACY BUTTON ARE BOTH GONE, AND THE KERNEL MODE
+ * IS NOT. `fetCurve: 'tanh'` is cubic-dominant — its H2 rises about 1 dB per dB
+ * where FETish measures 3 — so no value of `fetDrive` was ever going to reach
+ * the measured curve, and a rocker offering a falsified shape as a peer of a
+ * measured one misrepresents both. The button went with it: "the plugin before
+ * the FETish capture" is a PAIR of choices, the tanh AFTER the cell, and a
+ * button that restored half of that pair is the exact silent-partial-restore
+ * bug `test/dsp/fet1176Curve.test.js` was written to catch.
+ *
+ * `FET_LEGACY_PATCH` remains a kernel patch and `fetCurve` remains a tuning-store
+ * key, so the pre-capture kernel is still reachable — from code, where the tests
+ * that measure against it live.
+ *
+ * ⚠⚠ AND THE LEGACY BADGE WENT WITH THEM, because it could no longer light. An
+ * earlier version of this note claimed the remaining rockers could still be walked
+ * into that configuration by hand; they cannot. `isFET1176TuningLegacy()` requires
+ * `fetCurve: 'tanh'`, and with the curve rocker gone this panel has no way to set
+ * it — so the predicate was dead and the badge read MODIFIED forever. The
+ * predicate itself stays exported: `fet1176Curve.test.js` uses it to pin that the
+ * bench can express every key the legacy patch carries. Caught by Copilot on PR #160.
  */
 import { ref } from 'vue'
 import {
-  FET1176_TUNING_DEFAULTS, FET1176_LEGACY_TUNING,
+  FET1176_TUNING_DEFAULTS,
   getFET1176Tuning, setFET1176Tuning, resetFET1176Tuning,
-  isFET1176TuningDefault, isFET1176TuningLegacy,
+  isFET1176TuningDefault,
 } from '../../audio/effects/fet1176Tuning.js'
 
 const props = defineProps({
@@ -34,32 +51,15 @@ const open = ref(false)
  */
 const vals = ref(getFET1176Tuning())
 const pristine = ref(isFET1176TuningDefault())
-const legacy = ref(isFET1176TuningLegacy())
 
 function write(patch) {
   setFET1176Tuning(patch)
   vals.value = getFET1176Tuning()
   pristine.value = isFET1176TuningDefault()
-  legacy.value = isFET1176TuningLegacy()
   emit('change')
 }
 
 const CHOICES = [
-  {
-    key: 'fetCurve', label: 'Curve',
-    options: [
-      {
-        id: 'poly', label: 'MEASURED',
-        title: 'x − 0.01·x⁴ + 0.01·x⁵ — fitted to Analog Obsession FETish over 24 dB, '
-          + 'H2 matching to 0.1 dB at every level',
-      },
-      {
-        id: 'tanh', label: 'TANH',
-        title: 'The fitted asymmetric hyperbolic tangent this shipped with before the '
-          + 'capture. Cubic-dominant: 75 dB more H2 at −30 dBFS',
-      },
-    ],
-  },
   {
     key: 'fetPosition', label: 'Position',
     options: [
@@ -191,7 +191,6 @@ function reset() {
   resetFET1176Tuning()
   vals.value = getFET1176Tuning()
   pristine.value = true
-  legacy.value = isFET1176TuningLegacy()
   emit('change')
 }
 </script>
@@ -209,7 +208,7 @@ function reset() {
         v-if="!pristine"
         class="rounded-sm px-1.5 py-px text-[9px] tracking-normal"
         :style="{ background: accent, color: '#1a1a1a' }"
-      >{{ legacy ? 'LEGACY' : 'MODIFIED' }}</span>
+      >MODIFIED</span>
       <span class="ml-auto normal-case tracking-normal text-white/25">
         {{ open ? '' : 'not a shipping control' }}
       </span>
@@ -261,16 +260,6 @@ function reset() {
       <div class="mt-4 flex items-center gap-2">
         <button
           type="button"
-          class="rounded border px-2 py-[3px] text-[9px] uppercase tracking-wide disabled:opacity-30"
-          :class="legacy
-            ? 'border-sky-400/60 bg-sky-400/10 text-sky-200'
-            : 'border-white/15 text-white/45 hover:border-white/35 hover:text-white/80'"
-          :disabled="disabled"
-          title="The kernel exactly as it stood before the FETish capture — the tanh, after the cell. Both controls at once, because either alone is a configuration that never shipped."
-          @click="write(FET1176_LEGACY_TUNING)"
-        >Legacy kernel</button>
-        <button
-          type="button"
           class="rounded border border-white/15 px-2 py-[3px] text-[9px] uppercase tracking-wide text-white/45 hover:border-white/35 hover:text-white/80 disabled:opacity-30"
           :class="{ 'opacity-30 pointer-events-none': pristine }"
           :disabled="disabled"
@@ -278,7 +267,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span class="ml-auto font-mono text-[9px] text-white/30">
-          {{ vals.fetCurve }} / {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.attackSchedule }} / {{ vals.ratioThreshold }} / {{ vals.releaseSchedule }}
+          {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.attackSchedule }} / {{ vals.ratioThreshold }} / {{ vals.releaseSchedule }}
         </span>
       </div>
     </div>

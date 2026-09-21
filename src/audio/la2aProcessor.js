@@ -87,6 +87,7 @@ import {
   solveMakeupPlan,
 } from './dsp/makeupReference.js'
 import { makeVocalSatCurve, VOCAL_SAT_CURVE_LEAN_POSITIVE } from './dsp/vocalSatCurve.js'
+import { makeQuarticSatCurve } from './dsp/quarticSatCurve.js'
 import { highShelf, BiquadCascade } from './dsp/biquad.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
@@ -1180,6 +1181,15 @@ export const TUBE_CURVE_TANH = 'tanh'
 export const TUBE_CURVE_VOCALSAT = 'vocalsat'
 export const CELL_CURVE_GAINMOD = 'gainmod'
 export const CELL_CURVE_VOCALSAT = 'vocalsat'
+/**
+ * The LA-2A output stage identified from LALA's harmonic columns — see
+ * `dsp/quarticSatCurve.js`. A bench option at BOTH stages, not a default:
+ * nothing about it has been auditioned, and the references that identify its
+ * shape were captured at Peak Reduction 0, where the cell is idle. They measure
+ * the valve and say nothing about what the cell should do.
+ */
+export const TUBE_CURVE_QUARTIC = 'quartic'
+export const CELL_CURVE_QUARTIC = 'quartic'
 
 /**
  * The cell shaper's drive at full compression.
@@ -1234,7 +1244,25 @@ export const CELL_CURVE_VOCALSAT = 'vocalsat'
  * these two stages has to run with the makeup the patch will actually use.
  * At makeup 0 the valve is starved and every comparison tilts toward the cell.
  */
-export const CELL_CURVE_DRIVE_MAX = 1.5
+/**
+ * ⚠⚠ 1.5 -> 5 WITH THE CURVE CHANGE, AND IT IS A DIFFERENT QUANTITY NOW. 1.5 was
+ * auditioned against Tube Saturation's curve; 5 was auditioned against the
+ * quartic, on the bench, on the owner's own material. Drive means something
+ * different in each — on the split soft clipper it sets how far into the knee the
+ * cell runs, on the quartic it scales `c4` as d³ — so the number does NOT carry
+ * across and a stored value from one is not a voicing in the other. Same hazard
+ * `fetDrive` carries between the FET kernel's `tanh` and `poly`.
+ *
+ * ⚠ AT 5 THE QUARTIC IS NOT THE QUIET OPTION. Measured at PR 60 against the Tube
+ * Sat curve it replaced: THD 1.19 % against 0.83 % at -12 dBFS peak, 4.66 %
+ * against 3.26 % at -6, 5.49 % against 5.63 % at -1. It delivers MORE total
+ * distortion through most of the range and more second harmonic with it, and 13-19
+ * dB LESS third. That combination is the whole reason it was chosen; see the dev
+ * log entry "OptoSmooth's curve, revisited".
+ *
+ * ⚠ THE PREVIOUS VOICING IS RECOVERABLE IN ONE OBJECT — `LA2A_TUBESAT_PATCH`.
+ */
+export const CELL_CURVE_DRIVE_MAX = 5
 
 /**
  * Ceiling on that compensation, dB.
@@ -1313,10 +1341,30 @@ export const VALVE_CURVE_DRIVE = 0.5
  * same passage 3-4 dB and pays for it broadband; this knob moves it 11 dB and
  * is nearly free everywhere else.
  *
- * ⚠ 50 IS AUDITIONED, NOT SOLVED. The measurement says anything at or below 50
- * is equally free; 50 is where it was listened to and kept.
+ * ⚠ 50 WAS AUDITIONED, NOT SOLVED. The measurement said anything at or below 50
+ * was equally free; 50 is where it was listened to and kept.
+ *
+ * ⚠⚠ AND ALL OF THE ABOVE IS ABOUT TUBE SATURATION'S CURVE, WHICH NO LONGER
+ * SHIPS. The 11 dB of worst-case distortion that forced 100 → 50 is a property of
+ * that curve being driven into its knee by the shelf. On the quartic the same
+ * sweep costs about a sixth of it — THD at a 5 kHz probe, Emphasis 0 → 100, moves
+ * +1.79 dB against Tube Sat's +10.95 — most likely because a +12 dB boost pushes
+ * the quartic past `|u| = 1` into its LINEAR continuation, which makes no new
+ * harmonics, where the same boost drives a split soft clipper deeper into its
+ * bend. The constraint that set 50 does not bind here.
+ *
+ * ⚠ 85 IS AUDITIONED TOO, AND PAIRED WITH A CORNER MOVE. Measured on narration
+ * with sibilance, added nonlinear energy over the Emphasis-0 render, in
+ * 200 Hz-1 kHz / 1-3 kHz / 3-5 kHz:
+ *
+ *   50 @ 1800  (what shipped)   0.028 / 0.133 / 0.330 dB
+ *   85 @ 2300  (ships now)      0.027 / 0.116 / 0.301 dB
+ *   100 @ 1800                  0.093 / 0.289 / 0.452 dB
+ *
+ * So the new pair carries more depth at slightly LESS distortion than the one it
+ * replaces, which is why it is a change of both numbers and not of one.
  */
-export const EMPHASIS_DEFAULT = 50
+export const EMPHASIS_DEFAULT = 85
 
 /**
  * THE PRE-IMPORT KERNEL, AS A PATCH — the fitted `tanh` valve, the Moore-
@@ -1337,6 +1385,48 @@ export const LA2A_LEGACY_PATCH = Object.freeze({
   tubeCurve: TUBE_CURVE_TANH,
   cellCurve: CELL_CURVE_GAINMOD,
   emphasis: 0,
+})
+
+/**
+ * THE VOICING THAT SHIPPED BEFORE THE QUARTIC — Tube Saturation's curve at both
+ * stages, at the drives it was auditioned at.
+ *
+ * ⚠ THIS IS NOT `LA2A_LEGACY_PATCH` AND THE TWO MUST NOT BE CONFLATED. That one
+ * goes back further, to the fitted `tanh` and the gain modulation, and is the
+ * baseline five test files measure against. This one is the IMMEDIATELY previous
+ * ship: every render made between the Tube Sat import and the quartic sounds like
+ * this and like neither of the other two.
+ *
+ * ⚠ IT CARRIES THE DRIVES, NOT JUST THE CURVE NAMES, AND THAT IS THE WHOLE POINT.
+ * `CELL_CURVE_DRIVE_MAX` moved 1.5 -> 5 with the curve, so selecting `vocalsat` on
+ * the bench without also restoring 1.5 gives Tube Saturation's curve at three
+ * times the drive it was voiced at — a configuration that has never shipped and
+ * was never auditioned. A patch that restores half a voicing is the bug
+ * `test/dsp/fet1176Curve.test.js` was written to catch on the other plugin.
+ *
+ * Same reasoning as `FET_LEGACY_PATCH`: a measurement replaced an ear decision
+ * (here, an ear decision replaced an ear decision with a better-pedigreed shape),
+ * and what it replaced stays reachable so the change can be differenced rather
+ * than argued about.
+ */
+export const LA2A_TUBESAT_PATCH = Object.freeze({
+  tubeCurve: TUBE_CURVE_VOCALSAT,
+  cellCurve: CELL_CURVE_VOCALSAT,
+  cellCurveDriveMax: 1.5,
+  vocalSatCurveDrive: VALVE_CURVE_DRIVE,
+  /**
+   * ⚠ A LITERAL FOR THE SAME REASON THE CORNER BELOW IS. `EMPHASIS_DEFAULT` moved
+   * 50 → 85 with the curve; a patch restoring the Tube Sat voicing must carry the
+   * 50 that voicing was cut at, not whatever the default happens to be later.
+   */
+  emphasis: 50,
+  /**
+   * ⚠ A LITERAL, NOT `EMPHASIS_CORNER_HZ`, FOR THE SAME REASON `cellCurveDriveMax`
+   * ABOVE IS. A patch whose job is "the previous voicing, exactly" must not track
+   * a constant that can move — and the corner became a bench control precisely so
+   * it could. 1800 is what this voicing was cut at.
+   */
+  emphasisCornerHz: 1800,
 })
 
 /**
@@ -1408,7 +1498,42 @@ export const LA2A_LEGACY_PATCH = Object.freeze({
 export const EMPHASIS_MAX_DB = 12
 
 /** Corner of the emphasis shelf, Hz. Inherited from Tube Saturation. */
-export const EMPHASIS_CORNER_HZ = 1800
+/**
+ * Corner of the emphasis shelf, Hz.
+ *
+ * ⚠ 1800 CAME FROM TUBE SATURATION AND WAS REASONED, NOT FITTED. Its own note
+ * (`vocalSatProcessor.js`) gives the whole derivation: "low enough to cover the
+ * consonant and attack region a voice puts its edge in, high enough to leave the
+ * fundamental and the first formant out of it — the pair must not turn into a
+ * bass control, because whatever it boosts into the curve is what the curve
+ * distorts most." No measurement picked the number; two constraints bracketed it
+ * and 1800 sits between them. It arrived here by being ported wholesale with the
+ * rest of the pair, never re-derived for this stage.
+ *
+ * ⚠⚠ 2300 SERVES THAT SAME REASONING BETTER FOR NARRATION, which is why this is
+ * a re-reading rather than a rejection. A voice's SECOND formant runs to about
+ * 2000-2400 Hz, so an 1800 Hz corner is already inside the vowel body it was
+ * supposed to stay out of — the original rule says leave the fundamental and the
+ * FIRST formant out, and on speech that is not a high enough bar. Raising it to
+ * 2300 puts the shelf above most of F2 and leaves it on the consonant and
+ * sibilance edge the pair exists to shape. Auditioned, and measured: added
+ * nonlinear energy in 3-5 kHz over the Emphasis-0 render runs 0.54 / 0.34 / 0.20 /
+ * 0.06 / 0.02 dB at corners 1200 / 1500 / 1800 / 2400 / 3200.
+ *
+ * ⚠ IT NO LONGER MATCHES `vocalSatProcessor.js`'s CONSTANT OF THE SAME NAME, AND
+ * THAT IS DELIBERATE. The two are separate declarations on purpose: importing
+ * across would pull a module that calls `registerProcessor` at module scope into
+ * this worklet bundle, which is the duplicate-registration bug documented at the
+ * top of `dsp/satCurves.js`. Do not "fix" the divergence by wiring them together.
+ */
+export const EMPHASIS_CORNER_HZ = 2300
+
+/**
+ * Bench travel for the corner. Wide enough to reach under the voice's first
+ * formant at one end and past the grind band at the other; not a patch range.
+ */
+export const EMPHASIS_CORNER_MIN_HZ = 200
+export const EMPHASIS_CORNER_MAX_HZ = 8000
 
 /** Below this the pair is skipped outright rather than run flat. */
 export const EMPHASIS_EPSILON = 1e-4
@@ -1526,8 +1651,30 @@ export const LA2A_KERNEL_DEFAULTS = {
    * preset chain runs its own compression stages server-side; these are the
    * client-side plugin's defaults. Nothing in `presets.js` changes.
    */
-  tubeCurve: TUBE_CURVE_VOCALSAT,
-  cellCurve: CELL_CURVE_VOCALSAT,
+  /**
+   * ⚠⚠ THE SHIPPING CURVE IS NOW THE QUARTIC AT BOTH STAGES, AND EVERY EARLIER
+   * RENDER SOUNDS DIFFERENT. Chosen by ear over three auditions — Tube Sat (what
+   * shipped), the quartic, and the fully measurement-backed GAIN MOD + quartic —
+   * and the three verdicts ranked in exact order of ODD-harmonic share: 23 %,
+   * 1 %, 99 % at -6 dBFS peak. Total distortion ordered the other way, so "it is
+   * cleaner" is not the explanation; the rejected configuration was the cleanest
+   * of the three by a factor of two.
+   *
+   * ⚠ THE SHAPE IS IDENTIFIED, THE PLACEMENT AT THE CELL IS NOT. Both reference
+   * sweeps behind the quartic were captured at Gain 0 / Peak Reduction 0 — cell
+   * idle — so they measure the OUTPUT STAGE. At the valve this is a reference
+   * curve in the stage the reference measured. At the cell it is an ear choice
+   * wearing a borrowed shape, in the same category as the Tube Sat curve it
+   * replaces. See `dsp/quarticSatCurve.js`.
+   *
+   * ⚠ AND IT DIVERGES FROM THE HARDWARE PAPER DELIBERATELY. Moore's six units are
+   * ODD-dominant under compression (H3-H2 +16 to +44 dB) and this is not (-22).
+   * The configuration that does reproduce that band was built, auditioned and
+   * rejected as "a lot of colour, not a neutral sound". `cellCurve: 'gainmod'`
+   * still selects it.
+   */
+  tubeCurve: TUBE_CURVE_QUARTIC,
+  cellCurve: CELL_CURVE_QUARTIC,
   /** Cell shaper drive at full compression. Auditioned — see the constant. */
   cellCurveDriveMax: CELL_CURVE_DRIVE_MAX,
   /** Valve stage drive. Auditioned, and NOT the derived reconstruction. */
@@ -1888,8 +2035,8 @@ export class LA2AKernel {
 
     let g = Infinity
     if (this.applyTube) {
-      const inv = this.tubeCurveMode === TUBE_CURVE_VOCALSAT
-        ? (y) => this.vsCurve.inverse(y)
+      const inv = this.tubeCurveMode !== TUBE_CURVE_TANH
+        ? (y) => this.tubeSatCurve.inverse(y)
         : (y) => {
           const a = y * this.tubeNorm + this.tanhBias
           // The shaper saturates below the target: no makeup reaches it.
@@ -1975,7 +2122,38 @@ export class LA2AKernel {
     // Tube stage. Drive can go sub-unity (slope is normalized back to 1
     // below): at the default amount a -6 dBFS peak lands around H3 ≈ -40 dBc
     // — tube warmth at nominal level, not overdrive. Max reaches ~-22 dBc.
-    this.applyTube = p.tube !== false
+    /**
+     * ANALOG MODE — the product-facing opt-out from every nonlinearity in this
+     * plugin, and the ONLY control here that is a patch key rather than a bench
+     * one.
+     *
+     * ⚠ IT GATES ALL THREE MECHANISMS, NOT ONE. The output valve, the cell
+     * shaper and the gain modulation are alternatives to each other, so switching
+     * off whichever happens to be selected is not the same as switching off
+     * "the distortion". Off means the wet path is `driven[i] * gain[i]` — a pure
+     * time-varying gain — whatever the curve selectors say.
+     *
+     * ⚠ IT IS NOT A BYPASS, AND THE DIFFERENCE IS THE WHOLE FEATURE. The
+     * detector, the taper, R37, the ballistics and the gain envelope are
+     * untouched, so gain reduction is bit-identical with it on or off. What
+     * changes is only whether that envelope is delivered through a curve. A user
+     * turning it off keeps the compressor they chose and loses the harmonics.
+     *
+     * ⚠⚠ THE EMPHASIS PAIR IS GATED TOO, AND THE FIRST VERSION OF THIS NOTE
+     * ARGUED IT DID NOT NEED TO BE. The argument was that pre-emphasis, a linear
+     * stage, and de-emphasis is an exact identity — measured at 6e-8 — so the
+     * pair would go inert by construction. That measurement was taken at Peak
+     * Reduction 0, where the cell's gain is CONSTANT. A gain that MOVES does not
+     * commute with a filter, so under compression the pair is not an identity:
+     * with the nonlinearity off and the cell working, Emphasis 100 still moved
+     * the render by 2.45e-4. A test caught it.
+     *
+     * So it is switched off explicitly. The pair exists only to shape what the
+     * nonlinearity sees; with no nonlinearity it is two shelves either side of a
+     * gain, which is a colour the user switched off asking for.
+     */
+    this.analog = p.analog !== false
+    this.applyTube = this.analog && p.tube !== false
     this.cellMod = Number.isFinite(p.cellMod) ? Math.max(0, p.cellMod) : 1
     /**
      * ⚠ THE FOUR CONSTANTS BELOW ARE OVERRIDABLE, AND THE OVERRIDES ARE A BENCH
@@ -2043,11 +2221,21 @@ export class LA2AKernel {
      * while `tanh`/`gainmod` were the defaults, and leaving it would have
      * meant a typo or a stale param message silently selecting the OLD model —
      * a fallback that lands anywhere but the shipping patch is not a fallback.
+     *
+     * ⚠⚠ REWRITTEN AGAIN WHEN THE QUARTIC SHIPPED, AND A TEST IS WHY IT WAS NOT
+     * MISSED. Changing `LA2A_KERNEL_DEFAULTS` is not enough: the fallback arm is
+     * a SEPARATE statement of what ships, and after the default moved to
+     * `quartic` this still landed a typo on `vocalsat` — the previous voicing,
+     * silently. Every named mode is now matched explicitly and the DEFAULT is
+     * the else-branch, so the next curve change breaks the list rather than the
+     * fallback. `la2aQuarticCurve.test.js` pins it.
      */
-    this.tubeCurveMode = p.tubeCurve === TUBE_CURVE_TANH
-      ? TUBE_CURVE_TANH : TUBE_CURVE_VOCALSAT
-    this.cellCurveMode = p.cellCurve === CELL_CURVE_GAINMOD
-      ? CELL_CURVE_GAINMOD : CELL_CURVE_VOCALSAT
+    this.tubeCurveMode = p.tubeCurve === TUBE_CURVE_TANH ? TUBE_CURVE_TANH
+      : p.tubeCurve === TUBE_CURVE_VOCALSAT ? TUBE_CURVE_VOCALSAT
+        : TUBE_CURVE_QUARTIC
+    this.cellCurveMode = p.cellCurve === CELL_CURVE_GAINMOD ? CELL_CURVE_GAINMOD
+      : p.cellCurve === CELL_CURVE_VOCALSAT ? CELL_CURVE_VOCALSAT
+        : CELL_CURVE_QUARTIC
     const curveOverrides = {}
     if (Number.isFinite(p.vocalSatCurveDrive) && p.vocalSatCurveDrive > 0) {
       curveOverrides.curveDrive = p.vocalSatCurveDrive
@@ -2055,7 +2243,33 @@ export class LA2AKernel {
     if (typeof p.vocalSatLeanPositive === 'boolean') {
       curveOverrides.leanPositive = p.vocalSatLeanPositive
     }
-    this.vsCurve = makeVocalSatCurve(curveOverrides)
+    /**
+     * ⚠ ONE CURVE OBJECT PER STAGE, WHERE THERE USED TO BE ONE FOR BOTH, and
+     * the old arrangement was not a shortcut — it worked because the cell only
+     * ever calls `transferAt` (its drive arrives per sample, overriding the
+     * object's own) and the valve only ever calls `transfer`/`inverse`. So a
+     * single object served two stages with two different drives.
+     *
+     * That stops being true the moment the two stages can hold DIFFERENT
+     * CURVES, which is the whole point of the quartic being selectable at
+     * either. Built separately, selected separately.
+     *
+     * ⚠ AT THE SHIPPING PATCH BOTH ARE `makeVocalSatCurve(curveOverrides)` WITH
+     * THE SAME OVERRIDES, so this is two identical pure-function objects where
+     * there was one, and the render is bit-identical. `test/dsp/la2aQuarticCurve.test.js`
+     * pins that rather than leaving it as a claim.
+     */
+    const buildSat = (mode, driveOverride) => (
+      mode === TUBE_CURVE_QUARTIC || mode === CELL_CURVE_QUARTIC
+        ? makeQuarticSatCurve({
+          drive: driveOverride,
+          leanPositive: typeof p.vocalSatLeanPositive === 'boolean'
+            ? p.vocalSatLeanPositive : undefined,
+        })
+        : makeVocalSatCurve(curveOverrides)
+    )
+    this.tubeSatCurve = buildSat(this.tubeCurveMode, curveOverrides.curveDrive)
+    this.cellSatCurve = buildSat(this.cellCurveMode, curveOverrides.curveDrive)
     this.cellCurveDriveMax = Number.isFinite(p.cellCurveDriveMax)
       && p.cellCurveDriveMax >= 0 ? p.cellCurveDriveMax : CELL_CURVE_DRIVE_MAX
     /**
@@ -2068,7 +2282,7 @@ export class LA2AKernel {
     this.emphasisDb = (Math.min(Math.max(p.emphasis ?? 0, 0), 100) / 100)
       * EMPHASIS_MAX_DB
     const emphWas = this.emphasisActive
-    this.emphasisActive = this.emphasisDb > EMPHASIS_EPSILON
+    this.emphasisActive = this.analog && this.emphasisDb > EMPHASIS_EPSILON
     /**
      * ⚠ THE PAIR'S FILTERS ARE CLEARED WHEN IT SWITCHES OFF, AND THEY WERE NOT.
      * Turning Emphasis to 0 stops feeding the three biquads but does not empty
@@ -2087,12 +2301,42 @@ export class LA2AKernel {
       for (const f of this.deEmph) f?.reset()
       for (const f of this.trkEmph) f?.reset()
     }
+    /**
+     * The shelf corner, exposed because the knob it belongs to cannot separate
+     * the two things it does.
+     *
+     * ⚠ WHY THIS IS A CONTROL AT ALL. Measured on a multitone, Emphasis 100 adds
+     * 1.2-1.6 dB of distortion at peak levels and TRIPLES the share sitting
+     * above 5 kHz, while doing nothing at -12 dBFS. Auditioned, that reads as
+     * "fuller and fatter" AND as "grinds more at the peaks" — one mechanism, two
+     * descriptions, so no position of the depth knob buys one without the other.
+     * ⚠⚠ THE CORNER IS A SECOND AXIS AND IT DOES NOT SEPARATE THEM EITHER — this
+     * control was added on the prediction that it would, and the prediction was
+     * wrong. A HIGH shelf with a LOWER corner boosts MORE of the spectrum, not
+     * less, so lowering it raises total distortion AND the high-frequency share
+     * together: at -6 dBFS peak, Emphasis 100 goes -23.70 dB / 2.2 % above 5 kHz
+     * at the stock 1800 Hz, and -21.97 dB / 3.7 % at 600. It is kept because it
+     * is a real axis that is now measured rather than guessed at, not because it
+     * buys the separation it was reached for.
+     *
+     * ⚠ IT IS A BENCH CONTROL AND NOT A PATCH KEY, like everything else in
+     * `la2aTuning.js` — see that file's header. Nothing serialises it.
+     *
+     * ⚠ CLAMPED WELL UNDER NYQUIST. `highShelf` is a bilinear-transform biquad,
+     * so a corner approaching Nyquist warps into nonsense rather than failing
+     * loudly, and the bench can write any number here live onto a running
+     * worklet.
+     */
+    const corner = Number.isFinite(p.emphasisCornerHz) && p.emphasisCornerHz > 0
+      ? clamp(p.emphasisCornerHz, EMPHASIS_CORNER_MIN_HZ,
+        Math.min(EMPHASIS_CORNER_MAX_HZ, this.sampleRate * 0.45))
+      : EMPHASIS_CORNER_HZ
     if (this.emphasisActive) {
       this.preSections = [highShelf(
-        this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, this.emphasisDb,
+        this.sampleRate, corner, Math.SQRT1_2, this.emphasisDb,
       )]
       this.deSections = [highShelf(
-        this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, -this.emphasisDb,
+        this.sampleRate, corner, Math.SQRT1_2, -this.emphasisDb,
       )]
       for (const f of this.preEmph) f?.setSections(this.preSections)
       for (const f of this.deEmph) f?.setSections(this.deSections)
@@ -2109,10 +2353,19 @@ export class LA2AKernel {
      * bypass it always was; this is the selector honouring "alternatives, not a
      * stack" in one place rather than at every call site.
      */
-    this.cellModActive = this.cellCurveMode === CELL_CURVE_GAINMOD
+    this.cellModActive = this.analog
+      && this.cellCurveMode === CELL_CURVE_GAINMOD
       && this.cellMod > 0
     const shaperWas = this.cellShaperActive
-    this.cellShaperActive = this.cellCurveMode === CELL_CURVE_VOCALSAT
+    /**
+     * ⚠ THE ANALOG GATE GOES THROUGH THIS EXPRESSION DELIBERATELY, so turning
+     * the mode off takes the same path as turning the shaper off any other way —
+     * including the seam reset below, which exists because the shaper's three
+     * carried values go stale the moment it stops running. A gate that bypassed
+     * at the call site instead would skip that reset and click on the way back.
+     */
+    this.cellShaperActive = this.analog
+      && this.cellCurveMode !== CELL_CURVE_GAINMOD
       && this.cellCurveDriveMax > 0
     /**
      * ⚠ THE SHAPER'S THREE SEAM VALUES ONLY ADVANCE WHILE IT IS RUNNING, so
@@ -2584,7 +2837,7 @@ export class LA2AKernel {
       const trk = this.trkEmphScratch
       for (let i = 0; i < n; i++) {
         let v = driven[i] * preGain[i]
-        if (this.cellShaperActive) v = this.vsCurve.transferAt(v, cellDriveRaw[i])
+        if (this.cellShaperActive) v = this.cellSatCurve.transferAt(v, cellDriveRaw[i])
         trk[i] = v
       }
       if (this.emphasisActive) this.trkEmph[ch].process(trk, trk, n, 0)
@@ -2641,7 +2894,7 @@ export class LA2AKernel {
           for (let j = 0; j < L; j++) {
             const k = i * L + j
             let w = hi[k] * (pCur + pStep * j)
-            w = this.vsCurve.transferAt(w, dCur + dStep * j)
+            w = this.cellSatCurve.transferAt(w, dCur + dStep * j)
             w *= mCur + mStep * j
             if (this.applyTube) w = this.shapeTube(w)
             hi[k] = w
@@ -2661,8 +2914,8 @@ export class LA2AKernel {
             const k = i * L + j
             let w = hi[k] * (gCur + step * j)
             if (this.applyTube) {
-              w = this.tubeCurveMode === TUBE_CURVE_VOCALSAT
-                ? this.vsCurve.transfer(w)
+              w = this.tubeCurveMode !== TUBE_CURVE_TANH
+                ? this.tubeSatCurve.transfer(w)
                 : (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
             }
             hi[k] = w
@@ -2747,8 +3000,8 @@ export class LA2AKernel {
    * the arithmetic it had. Everywhere else the call is nowhere near hot.
    */
   shapeTube(w) {
-    return this.tubeCurveMode === TUBE_CURVE_VOCALSAT
-      ? this.vsCurve.transfer(w)
+    return this.tubeCurveMode !== TUBE_CURVE_TANH
+      ? this.tubeSatCurve.transfer(w)
       : (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
   }
 
@@ -2765,7 +3018,7 @@ export class LA2AKernel {
       let w
       if (this.cellShaperActive) {
         // Same order as the oversampled path: attenuate, shape, then make up.
-        w = this.vsCurve.transferAt(driven[i] * cellPreG[i], cellDrive[i])
+        w = this.cellSatCurve.transferAt(driven[i] * cellPreG[i], cellDrive[i])
           * cellMakeup[i]
       } else {
         w = driven[i] * gain[i]

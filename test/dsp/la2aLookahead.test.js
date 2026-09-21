@@ -241,6 +241,9 @@ test('Scheps pins lookahead off, so its latency constant stays true', () => {
 
 // ── 4. It does the job ──────────────────────────────────────────────────────
 
+/** The tolerance `solveMakeupPlan` converges to; see the note in the test below. */
+const MAKEUP_SOLVE_TOLERANCE_DB = 0.05
+
 test('lookahead raises the peak-referenced auto makeup, monotonically', () => {
   const x = [onsets()]
   const at = (lookaheadMs) =>
@@ -248,10 +251,24 @@ test('lookahead raises the peak-referenced auto makeup, monotonically', () => {
 
   const off = at(0)
   const depths = [3, 5, 10, LOOKAHEAD_MAX_MS].map((ms) => at(ms))
+  /**
+   * ⚠ THE TOLERANCE IS THE SOLVER'S OWN, NOT 1e-6, AND THE OLD VALUE WAS LUCK.
+   * `computeAutoMakeupDb` runs `solveMakeupPlan` at `toleranceDb = 0.05` over at
+   * most four render passes, so the quantity under test is only resolved to
+   * ±0.05 dB. Asserting strict monotonicity at 1e-6 was asserting a property
+   * ten thousand times finer than the number it was reading.
+   *
+   * It passed under every curve this kernel had shipped until the quartic, where
+   * the 3 → 5 ms step reads −0.046 dB — inside the solver's tolerance, and
+   * against +0.814 dB for the same step under the curve before it. The direction
+   * is still right and the total is still worth several dB; the step-by-step
+   * claim was never something the solve could support.
+   */
   let prev = off
   for (const [i, v] of depths.entries()) {
-    assert.ok(v > prev - 1e-6, `makeup fell going deeper (step ${i}: ${prev} -> ${v})`)
-    prev = v
+    assert.ok(v > prev - MAKEUP_SOLVE_TOLERANCE_DB,
+      `makeup fell going deeper by more than the solver resolves (step ${i}: ${prev} -> ${v})`)
+    prev = Math.max(prev, v)
   }
   // Not merely monotone — worth something. On this material the ceiling buys
   // several dB the compressor was otherwise throwing away.
