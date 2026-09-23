@@ -8,6 +8,11 @@ import { formatSignedDb } from './hardwareDial.js'
  * Input alignment, kept off the faceplate: a small engraved readout of the
  * offset in effect, which opens a popover holding the override.
  *
+ * Labelled PRE-GAIN on the face. Strictly it offsets the detector, not the
+ * audio, but that is what pre-gain into a compressor does to the COMPRESSION,
+ * and with Auto Makeup on it is what the user hears; "alignment" is our word
+ * for the mechanism, not theirs for the control.
+ *
  * ⚠ THE READOUT IS NOT DECORATION. The offset is a property of the FILE, and a
  * user who cannot see it fixes a mis-measured file with Input instead — which
  * is right for this file and then travels into every preset they save. So the
@@ -31,6 +36,8 @@ const props = defineProps({
   /** Opens and reads while disabled, but will not take a change. */
   disabled: { type: Boolean, default: false },
   disabledHint: { type: String, default: '' },
+  /** The control's name, on the readout and the popover. */
+  name: { type: String, default: 'Pre-Gain' },
 })
 const emit = defineEmits(['update:modelValue', 'update:auto'])
 
@@ -42,14 +49,20 @@ const pos = ref({ left: 0, top: 0, flip: false })
 const POP_W = 236
 const GAP = 8
 const MARGIN = 12
+/**
+ * Kept this far inside the plugin window's own edge, not just the viewport's:
+ * centred on a readout near the left of the faceplate, the popover otherwise
+ * lands flush against the window border and reads as part of the chrome.
+ */
+const FRAME_INSET = 18
 // Above every floating window, like the preset menu: it cannot outlive a
 // click elsewhere, so a flat ceiling is safe.
 const POP_Z = 4000
 
-const text = computed(() => `ALIGN ${formatSignedDb(props.modelValue)}${props.auto ? '' : ' · MANUAL'}`)
+const text = computed(() => `${props.name.toUpperCase()} ${formatSignedDb(props.modelValue)}${props.auto ? '' : ' · MANUAL'}`)
 const title = computed(() => (props.auto
-  ? 'Input alignment, measured from this file. Click to adjust.'
-  : 'Input alignment, set by hand for this file. Click to adjust or return to auto.'))
+  ? `${props.name}, measured from this file. Click to adjust.`
+  : `${props.name}, set by hand for this file. Click to adjust or return to auto.`))
 
 function place() {
   const r = trigger.value?.getBoundingClientRect()
@@ -57,8 +70,11 @@ function place() {
   const h = pop.value?.offsetHeight ?? 150
   const below = window.innerHeight - r.bottom - GAP - MARGIN
   const flip = below < h && r.top - GAP - MARGIN > below
+  const frame = trigger.value.closest('.win-frame')?.getBoundingClientRect()
+  const lo = Math.max(MARGIN, frame ? frame.left + FRAME_INSET : MARGIN)
+  const hi = Math.min(window.innerWidth - MARGIN, frame ? frame.right - FRAME_INSET : Infinity) - POP_W
   pos.value = {
-    left: Math.max(MARGIN, Math.min(window.innerWidth - POP_W - MARGIN, r.left + r.width / 2 - POP_W / 2)),
+    left: Math.max(lo, Math.min(hi, r.left + r.width / 2 - POP_W / 2)),
     top: flip ? r.top - GAP : r.bottom + GAP,
     flip,
   }
@@ -136,7 +152,7 @@ onBeforeUnmount(() => {
       ref="pop"
       class="align-pop"
       role="dialog"
-      aria-label="Input alignment"
+      :aria-label="name"
       tabindex="-1"
       :style="{
         left: pos.left + 'px', top: pos.top + 'px', width: POP_W + 'px', zIndex: POP_Z,
@@ -144,7 +160,14 @@ onBeforeUnmount(() => {
       }"
       @pointerdown.stop
     >
-      <div class="align-pop-title">Input Alignment</div>
+      <div class="align-pop-head">
+        <div class="align-pop-title">{{ name }}</div>
+        <button type="button" class="align-pop-close" :aria-label="`Close ${name}`" title="Close" @click="close({ refocus: true })">
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
       <div class="align-pop-row">
         <LcdSpinner
           :model-value="modelValue"
@@ -152,7 +175,7 @@ onBeforeUnmount(() => {
           :min="min" :max="max" :step="step"
           :dim="auto"
           :disabled="disabled"
-          label="Input alignment"
+          :label="name"
           :format="formatSignedDb"
         />
         <div class="align-pop-auto">
@@ -179,7 +202,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .align-readout {
   padding: 2px 5px; border: 0; border-radius: 3px; background: none; cursor: pointer; outline: none;
-  font: 400 9px/1 Oswald, 'Inter', system-ui, sans-serif; letter-spacing: .14em; white-space: nowrap;
+  font: 400 9px/1 Oswald, 'Inter', system-ui, sans-serif; letter-spacing: .11em; white-space: nowrap;
   color: #8f8b84; transition: color .15s ease, background-color .15s ease;
 }
 .align-readout:hover, .align-readout.is-open { color: #c9c5be; background: rgba(255,255,255,.05); }
@@ -194,6 +217,14 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(0,0,0,.7);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 14px 32px rgba(0,0,0,.6);
 }
+.align-pop-head { display: flex; align-items: center; justify-content: space-between; margin: -2px -4px 0 0; }
+.align-pop-close {
+  width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; outline: none;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: #a8a49d; transition: background-color .15s ease, color .15s ease;
+}
+.align-pop-close:hover { background: rgba(255,255,255,.08); color: #f2f0ec; }
+.align-pop-close:focus-visible { box-shadow: 0 0 0 1.5px rgba(255,164,53,.6); }
 .align-pop-title {
   font-size: 10px; font-weight: 500; letter-spacing: .2em; text-transform: uppercase;
   color: #f2f0ec; text-shadow: 0 1px 0 rgba(0,0,0,.9);

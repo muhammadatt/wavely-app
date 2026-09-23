@@ -255,8 +255,8 @@ async function applyAndClose() {
             :disabled="off"
           />
           <div class="c76-readout">{{ inputReadout }}</div>
-          <!-- Input alignment lives off the face: a readout of the offset in
-               effect, which opens its override. See AlignReadout. -->
+          <!-- Pre-Gain (input alignment) lives off the face: a readout of the
+               offset in effect, which opens its override. See AlignReadout. -->
           <div class="c76-align">
             <AlignReadout
               :model-value="fetInputAlignDb"
@@ -265,7 +265,7 @@ async function applyAndClose() {
               @update:auto="setAlignAuto"
               :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
               :disabled="off"
-              disabled-hint="Turn FET Punch on to change the alignment."
+              disabled-hint="Turn FET Punch on to change Pre-Gain."
             />
           </div>
         </div>
