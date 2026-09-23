@@ -21,8 +21,8 @@ export default {
       text: 'Sets Output to restore what the peaks lost — touching the knob takes over',
     },
     {
-      label: 'Pre-Gain',
-      text: 'Lines the detector up with how loud the file is, so an Input setting does the same on a quiet file as on a hot one. AUTO measures it; stepping it takes over',
+      label: 'ALIGN',
+      text: 'The readout under Input: how far the plugin has lined the compressor up with this file\'s level, so an Input setting does the same on a quiet file as on a hot one. Measured automatically; click it to set it by hand (it turns amber and reads MANUAL until you switch AUTO back on)',
     },
     {
       label: 'RATIO',

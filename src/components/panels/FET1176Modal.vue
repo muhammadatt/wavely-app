@@ -8,7 +8,7 @@ import {
 import { FET1176_DEFAULTS } from '../../audio/effects/fet1176Params.js'
 import HardwareKnob from '../hardware/HardwareKnob.vue'
 import LampButton from '../hardware/LampButton.vue'
-import LcdSpinner from '../hardware/LcdSpinner.vue'
+import AlignReadout from '../hardware/AlignReadout.vue'
 import ClassicVuMeter from '../hardware/ClassicVuMeter.vue'
 import { engraving, evenAngles, formatSignedDb, DIAL_MIN_DEG, DIAL_MAX_DEG } from '../hardware/hardwareDial.js'
 import FloatingWindow from './FloatingWindow.vue'
@@ -162,22 +162,21 @@ const releaseReadout = computed(() => formatMs(releaseSecondsForDial(fetRelease.
 const mixReadout = computed(() => formatPercent(fetMix.value))
 
 /**
- * Pre-Gain is the input ALIGNMENT, not a second Input. It offsets the DETECTOR
- * only, never the audio path — unlike Input, which gains both as the hardware
- * attenuator does. It exists because there is no threshold control, so
- * without it the file's own level decides what Input does: measured at Input
- * 55, ratio 4, a file peaking at -6 dBFS gets 13.30 dB of reduction and one at
- * -30 dBFS gets 0.00.
+ * Input ALIGNMENT, not a second Input. It offsets the DETECTOR only, never the
+ * audio path — unlike Input, which gains both as the hardware attenuator does.
+ * It exists because there is no threshold control, so without it the file's
+ * own level decides what Input does: measured at Input 55, ratio 4, a file
+ * peaking at -6 dBFS gets 13.30 dB of reduction and one at -30 dBFS gets 0.00.
  *
- * ⚠ IT IS NOT A SECOND INPUT KNOB, and deliberately is not drawn as one. An
- * offset and the matching Input move are the same DSP; the difference is what
- * the numbers MEAN. Input is a patch value presets save, this is a property of
- * the FILE. AUTO measures the whole file's gated RMS and drives it; stepping it
- * takes over, exactly as Output behaves under Auto Makeup.
+ * Off the faceplate: AUTO measures the whole file's gated RMS and is right for
+ * nearly every file, so the face shows only a readout and the override sits
+ * behind it (AlignReadout). Stepping it takes over from AUTO, exactly as Output
+ * behaves under Auto Makeup; turning AUTO off keeps the measured value as the
+ * starting point rather than jumping.
  */
-function toggleAlignAuto() {
-  if (fetInputAuto.value) syncInputAlign(fetInputAlignDb.value)
-  else enableInputAuto()
+function setAlignAuto(on) {
+  if (on) enableInputAuto()
+  else syncInputAlign(fetInputAlignDb.value)
 }
 
 // Preview is just transport playback: the worklet is already in the chain, so
@@ -256,6 +255,19 @@ async function applyAndClose() {
             :disabled="off"
           />
           <div class="c76-readout">{{ inputReadout }}</div>
+          <!-- Input alignment lives off the face: a readout of the offset in
+               effect, which opens its override. See AlignReadout. -->
+          <div class="c76-align">
+            <AlignReadout
+              :model-value="fetInputAlignDb"
+              @update:model-value="syncInputAlign"
+              :auto="fetInputAuto"
+              @update:auto="setAlignAuto"
+              :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
+              :disabled="off"
+              disabled-hint="Turn FET Punch on to change the alignment."
+            />
+          </div>
         </div>
 
         <div class="c76-center">
@@ -316,38 +328,9 @@ async function applyAndClose() {
         </div>
       </div>
 
-      <!-- ── Bottom row: Pre-Gain · Attack/Release · Makeup/Mix ───────────── -->
+      <!-- ── Bottom row: SC HPF · Attack/Release · Makeup/Mix ─────────────── -->
       <div class="c76-bottom">
         <div class="c76-left">
-        <div class="c76-pregain">
-          <div class="c76-pregain-spacer" aria-hidden="true" />
-          <div class="c76-pregain-lcd">
-            <div class="c76-tiny-title c76-pregain-title">Pre-Gain</div>
-            <LcdSpinner
-              class="c76-ctl"
-              :model-value="fetInputAlignDb"
-              @update:model-value="syncInputAlign"
-              :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
-              :dim="fetInputAuto"
-              :disabled="off"
-              label="Pre-gain (detector alignment)"
-              :format="formatSignedDb"
-            />
-          </div>
-          <div class="c76-pregain-auto">
-            <div class="c76-tiny-title">Auto</div>
-            <LampButton
-              class="c76-ctl"
-              :on="fetInputAuto"
-              :size="22"
-              :disabled="off"
-              :title="fetInputAuto
-                ? 'Pre-gain is measured from the file. Click to set it by hand.'
-                : 'Pre-gain is set by hand. Click to measure it from the file.'"
-              @click="toggleAlignAuto"
-            />
-          </div>
-        </div>
         <div class="c76-schpf">
           <HardwareKnob
             class="c76-ctl"
@@ -483,6 +466,7 @@ async function applyAndClose() {
 
 .c76-top { position: relative; display: flex; align-items: flex-start; justify-content: space-between; }
 .c76-col { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.c76-align { margin-top: -5px; }
 .c76-center { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: center; gap: 10px; }
 
 .c76-ratio { align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 5px; }
@@ -513,13 +497,7 @@ async function applyAndClose() {
 
 .c76-bottom { position: relative; margin-top: 18px; display: grid; grid-template-columns: 176px 1fr 176px; align-items: start; }
 .c76-left { display: flex; flex-direction: column; align-items: center; }
-.c76-pregain { display: flex; align-items: flex-start; justify-content: center; gap: 6px; margin-top: 10px; }
-.c76-pregain-spacer { width: 33px; flex: 0 0 auto; }
-.c76-pregain-lcd { width: 96px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 5px; }
-.c76-pregain-title { transform: translateX(-8px); }
-.c76-pregain-auto { width: 33px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 5px; }
-
-.c76-schpf { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 8px; }
+.c76-schpf { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 10px; }
 
 .c76-ballistics { display: flex; align-items: flex-start; justify-content: center; gap: 12px; }
 .c76-small-knob { display: flex; flex-direction: column; align-items: center; gap: 5px; }
