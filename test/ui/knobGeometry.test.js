@@ -24,19 +24,20 @@ import {
 import {
   SOFT_CLIPPER_MAKEUP_MIN_DB, SOFT_CLIPPER_MAKEUP_MAX_DB,
 } from '../../src/audio/softClipperProcessor.js'
+import {
+  FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB,
+} from '../../src/audio/fet1176Processor.js'
 
 /**
- * The two asymmetric makeup knobs still shipping. Both are knobs AUTO writes a
- * measured makeup into, which is why they run far further up than down —
- * OptoSmooth's auto makeup clamps against the +24 top at deep LIMIT settings,
- * and FET Punch needs the wide bottom because Input drives the audio path as
- * well as the detector.
+ * The one asymmetric makeup knob still shipping: AUTO writes a measured makeup
+ * into it, and OptoSmooth's clamps against the +24 top at deep LIMIT settings.
  *
- * The soft clipper's Output is no longer among them: it is unipolar 0..+24,
- * pinned below against the constants themselves rather than repeated here.
+ * Neither the soft clipper's Output (unipolar 0..+24) nor FET Punch's (±24,
+ * derived from the Input drive law) is among them; both are pinned below
+ * against the constants themselves rather than repeated here.
  */
 const LA2A_GAIN = [-12, 24]
-const FET_OUTPUT = [-36, 24]
+const FET_OUTPUT = [FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB]
 
 /**
  * An asymmetric BIPOLAR range. Nothing ships one — every bipolar knob in the
@@ -99,13 +100,13 @@ test('a bipolar range with no zero in it fills from its nearest end', () => {
 test('the other two makeup knobs put 0 dB where their travel puts it', () => {
   // Neither is bipolar — both fill from the minimum — so this pins the reading
   // rather than a fill: 0 dB is a third of the way round OptoSmooth's Gain and
-  // three fifths of the way round FET Punch's Output, and has been since each
-  // panel was written. ⚠ Both DO use their negative travel — OptoSmooth's
-  // makeup sits before the tube stage and FET Punch's Input drives the audio
-  // path — so the soft clipper's move to a unipolar range does not transfer to
-  // them, and neither is something to "fix" by symmetrising.
+  // straight up on FET Punch's Output. ⚠ Both DO use their negative travel —
+  // OptoSmooth's makeup sits before the tube stage and FET Punch's Input drives
+  // the audio path — so the soft clipper's move to a unipolar range does not
+  // transfer to them. FET Punch's was symmetrised, not removed: the cut it
+  // needs is exactly Input's top drive (see `fetOutputRange.test.js`).
   assert.equal(valueToPct(0, ...LA2A_GAIN), 1 / 3)
-  assert.equal(valueToPct(0, ...FET_OUTPUT), 0.6)
+  assert.equal(valueToPct(0, ...FET_OUTPUT), 0.5)
 })
 
 test('value and fraction are exact inverses inside the range, linear and log', () => {

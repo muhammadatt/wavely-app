@@ -2,7 +2,9 @@
 import { computed, onMounted, watch } from 'vue'
 import { useFET1176 } from '../../composables/useFET1176.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { attackSecondsForDial, releaseSecondsForDial } from '../../audio/fet1176Processor.js'
+import {
+  attackSecondsForDial, releaseSecondsForDial, FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB,
+} from '../../audio/fet1176Processor.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
 import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
@@ -247,7 +249,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
               <Knob
                 :model-value="fetOutput"
                 @update:model-value="syncOutput"
-                :min="-36" :max="24" :step="0.1"
+                :min="FET1176_OUTPUT_MIN_DB" :max="FET1176_OUTPUT_MAX_DB" :step="0.1"
                 label="Output" :accent="ACCENT" :format-value="formatGain"
                 :disabled="!fetPreview"
               />

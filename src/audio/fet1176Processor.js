@@ -129,6 +129,22 @@ export function inputDriveDbForKnob(knob) {
 }
 
 /**
+ * The Output knob's travel, derived from the Input law rather than stated.
+ *
+ * Output is the last multiply on the wet path and Input gains that path by at
+ * most its top drive, so the deepest cut any setting can need is that drive
+ * with no reduction at all (reachable only by trimming Align far down): -24.
+ * The top is the mirror case, Input at 0 with nothing to compress: +24. Mix
+ * below 1 sums an attenuated dry, which only ever asks the wet for MORE gain.
+ *
+ * ⚠ IT WAS -36..+24, and the -36 was the makeup plan's generic default, never
+ * derived. Twelve dB of travel no setting could use, and 0 dB sat three fifths
+ * of the way round instead of at the top of the dial.
+ */
+export const FET1176_OUTPUT_MAX_DB = IN_DRIVE_MIN_DB + IN_DRIVE_SPAN_DB
+export const FET1176_OUTPUT_MIN_DB = IN_DRIVE_MIN_DB
+
+/**
  * Extra drive above the knee, so the top of the knob reaches the reference.
  *
  * ⚠ THE PLAIN FIX — RAISING `IN_DRIVE_SPAN_DB` — MOVES EVERY KNOB POSITION, and
