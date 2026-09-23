@@ -17,8 +17,12 @@ export default {
       text: 'Level after the compressor',
     },
     {
-      label: 'AUTO',
+      label: 'Auto Makeup',
       text: 'Sets Output to restore what the peaks lost — touching the knob takes over',
+    },
+    {
+      label: 'Pre-Gain',
+      text: 'Lines the detector up with how loud the file is, so an Input setting does the same on a quiet file as on a hot one. AUTO measures it; stepping it takes over',
     },
     {
       label: 'RATIO',
@@ -33,7 +37,7 @@ export default {
       text: 'How quickly it recovers afterwards',
     },
     {
-      label: 'SC HPF',
+      label: 'Sidechain HPF',
       text: 'Keeps low frequencies out of the detector, so plosives stop triggering the whole compressor',
     },
     {
@@ -47,13 +51,13 @@ export default {
   ],
 
   steps: [
-    'Play the selection and raise Input until the meter shows a few dB on the loudest words',
+    'Play the selection and raise Input until the meter\'s needle drops a few dB on the loudest words',
     'Set Attack by ear against the consonants — too fast dulls them, too slow lets them through',
     'Pull Mix back if the result feels squashed but you want the density',
   ],
 
   notes: [
     'It reaches for peaks rather than the body, so it typically adds 1 to 2 dB of average level where Opto Comp adds none',
-    'Turn on SC HPF before reaching for a slower attack when plosives are the problem',
+    'Turn on Sidechain HPF before reaching for a slower attack when plosives are the problem',
   ],
 }
