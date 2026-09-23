@@ -8,7 +8,9 @@ import {
 import { FET1176_DEFAULTS } from '../../audio/effects/fet1176Params.js'
 import HardwareKnob from '../hardware/HardwareKnob.vue'
 import LampButton from '../hardware/LampButton.vue'
-import AlignReadout from '../hardware/AlignReadout.vue'
+import PreGainToggle from '../hardware/PreGainToggle.vue'
+import HardwareFader from '../hardware/HardwareFader.vue'
+import HardwareSlideSwitch from '../hardware/HardwareSlideSwitch.vue'
 import ClassicVuMeter from '../hardware/ClassicVuMeter.vue'
 import { engraving, evenAngles, formatSignedDb, DIAL_MIN_DEG, DIAL_MAX_DEG } from '../hardware/hardwareDial.js'
 import FloatingWindow from './FloatingWindow.vue'
@@ -109,12 +111,6 @@ const BALLISTICS_LABELS = [
   { angle: DIAL_MIN_DEG, text: 'SLOW' },
   { angle: DIAL_MAX_DEG, text: 'FAST' },
 ]
-const MIX_DOTS = [DIAL_MIN_DEG, DIAL_MAX_DEG]
-const MIX_LABELS = [
-  { angle: DIAL_MIN_DEG, text: '0' },
-  { angle: DIAL_MAX_DEG, text: '100' },
-]
-
 // Top to bottom, as the buttons are stacked on the unit.
 const RATIOS = [
   { value: '20', label: '20', title: '20:1 — effectively limiting' },
@@ -125,24 +121,15 @@ const RATIOS = [
 ]
 
 /**
- * Sidechain high-pass, a three-position detent switch. Not on the original:
+ * Sidechain high-pass, a three-position slide switch. Not on the original:
  * the 1176's detector is broadband, which lets plosives duck a whole phrase.
- * OFF is the stock path. The knob turns in POSITIONS (0-2); the corner each
- * position selects is looked up here.
+ * OFF is the stock path.
  */
-const SC_HPF_POSITIONS = [0, 90, 150]
-const SC_HPF_LABELS = [
-  { angle: DIAL_MIN_DEG, text: 'OFF' },
-  { angle: 0, text: '90' },
-  { angle: DIAL_MAX_DEG, text: '150' },
+const SC_HPF_OPTIONS = [
+  { value: 0, label: 'Off', title: 'Stock broadband detector' },
+  { value: 90, label: '90', title: '90 Hz: stops plosives and rumble from ducking the take' },
+  { value: 150, label: '150', title: '150 Hz: keeps chest weight out of the detector entirely' },
 ]
-const SC_HPF_DOTS = evenAngles(3)
-const scHpfPosition = computed(() => {
-  const i = SC_HPF_POSITIONS.indexOf(fetScHpf.value)
-  return i < 0 ? 0 : i
-})
-const setScHpfPosition = (i) => syncScHpf(SC_HPF_POSITIONS[i] ?? 0)
-const formatScHpf = (i) => (SC_HPF_POSITIONS[i] ? `${SC_HPF_POSITIONS[i]} Hz` : 'Off')
 
 // ── Readouts ────────────────────────────────────────────────────────────────
 function formatMs(seconds) {
@@ -170,7 +157,7 @@ const mixReadout = computed(() => formatPercent(fetMix.value))
  *
  * Off the faceplate: AUTO measures the whole file's gated RMS and is right for
  * nearly every file, so the face shows only a readout and the override sits
- * behind it (AlignReadout). Stepping it takes over from AUTO, exactly as Output
+ * behind it (PreGainToggle). Stepping it takes over from AUTO, exactly as Output
  * behaves under Auto Makeup; turning AUTO off keeps the measured value as the
  * starting point rather than jumping.
  */
@@ -255,19 +242,6 @@ async function applyAndClose() {
             :disabled="off"
           />
           <div class="c76-readout">{{ inputReadout }}</div>
-          <!-- Pre-Gain (input alignment) lives off the face: a readout of the
-               offset in effect, which opens its override. See AlignReadout. -->
-          <div class="c76-align">
-            <AlignReadout
-              :model-value="fetInputAlignDb"
-              @update:model-value="syncInputAlign"
-              :auto="fetInputAuto"
-              @update:auto="setAlignAuto"
-              :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
-              :disabled="off"
-              disabled-hint="Turn FET Punch on to change Pre-Gain."
-            />
-          </div>
         </div>
 
         <div class="c76-center">
@@ -331,21 +305,28 @@ async function applyAndClose() {
       <!-- ── Bottom row: SC HPF · Attack/Release · Makeup/Mix ─────────────── -->
       <div class="c76-bottom">
         <div class="c76-left">
-        <div class="c76-schpf">
-          <HardwareKnob
+          <!-- Pre-Gain (input alignment) is folded to one line by default and
+               opens in place. See PreGainToggle. -->
+          <PreGainToggle
             class="c76-ctl"
-            variant="mini"
-            :model-value="scHpfPosition"
-            @update:model-value="setScHpfPosition"
-            :min="0" :max="2" :step="1"
-            :default-value="0"
-            :dots="SC_HPF_DOTS" :labels="SC_HPF_LABELS"
-            label="Sidechain high-pass" :format-value="formatScHpf"
+            :model-value="fetInputAlignDb"
+            @update:model-value="syncInputAlign"
+            :auto="fetInputAuto"
+            @update:auto="setAlignAuto"
+            :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
             :disabled="off"
           />
-          <div class="c76-sub-readout c76-sub-readout--sm">{{ formatScHpf(scHpfPosition) }}</div>
-          <div class="c76-tiny-title">SC HPF</div>
-        </div>
+          <div class="c76-schpf">
+            <HardwareSlideSwitch
+              class="c76-ctl"
+              :model-value="fetScHpf"
+              @update:model-value="syncScHpf"
+              :options="SC_HPF_OPTIONS"
+              :disabled="off"
+              label="Sidechain high-pass"
+            />
+            <div class="c76-tiny-title">SC HPF</div>
+          </div>
         </div>
 
         <div class="c76-ballistics">
@@ -402,14 +383,13 @@ async function applyAndClose() {
           <div class="c76-mix">
             <!-- Blends the untouched input back in — parallel compression
                  without a second track. -->
-            <HardwareKnob
+            <HardwareFader
               class="c76-ctl"
-              variant="mini"
               :model-value="fetMix"
               @update:model-value="syncMix"
               :min="0" :max="1" :step="0.01"
               :default-value="1"
-              :dots="MIX_DOTS" :labels="MIX_LABELS"
+              min-label="0" max-label="100"
               label="Mix" :format-value="formatPercent"
               :disabled="off"
             />
@@ -433,7 +413,7 @@ async function applyAndClose() {
 
 <style scoped>
 .c76 {
-  position: relative; padding: 26px 30px 24px; overflow: hidden;
+  position: relative; padding: 24px 30px 24px; overflow: hidden;
   font-family: Oswald, 'Inter', system-ui, sans-serif;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.2), inset 0 -1px 0 rgba(0,0,0,.85);
 }
@@ -466,7 +446,6 @@ async function applyAndClose() {
 
 .c76-top { position: relative; display: flex; align-items: flex-start; justify-content: space-between; }
 .c76-col { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.c76-align { margin-top: -5px; }
 .c76-center { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: center; gap: 10px; }
 
 .c76-ratio { align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 5px; }
@@ -493,19 +472,21 @@ async function applyAndClose() {
 .c76-nameplate-row { display: flex; align-items: center; }
 .c76-power { margin-right: 9px; }
 .c76-model { font-size: 14px; font-weight: 500; letter-spacing: .3em; }
-.c76-kind { font-size: 17px; font-weight: 600; letter-spacing: .14em; color: #ffffff; }
+.c76-kind { font-size: 17px; font-weight: 600; letter-spacing: .14em; color: #ffffff; margin-top: 5px; }
 
-.c76-bottom { position: relative; margin-top: 18px; display: grid; grid-template-columns: 176px 1fr 176px; align-items: start; }
-.c76-left { display: flex; flex-direction: column; align-items: center; }
-.c76-schpf { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 10px; }
+.c76-bottom { position: relative; margin-top: 18px; display: grid; grid-template-columns: 176px 1fr 176px; align-items: stretch; }
+/* Both side columns pin their first control to the top of the row and their
+   last to the bottom, so they line up with the ballistics knobs between. */
+.c76-left { display: flex; flex-direction: column; align-items: center; justify-content: space-between; }
+.c76-schpf { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 
 .c76-ballistics { display: flex; align-items: flex-start; justify-content: center; gap: 12px; }
 .c76-small-knob { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 
-.c76-makeup { display: flex; flex-direction: column; align-items: center; }
+.c76-makeup { display: flex; flex-direction: column; align-items: center; justify-content: space-between; }
 .c76-makeup-lamp { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .c76-makeup-title { font-size: 10px; letter-spacing: .16em; margin-top: 5px; }
-.c76-mix { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 2px; }
+.c76-mix { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 
 /* Unit off: the controls go dead and dim; the power lamp and the engraving
    stay, so the face still reads as the same unit. Knobs dim their own cap

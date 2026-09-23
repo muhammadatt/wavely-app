@@ -22,7 +22,7 @@ export default {
     },
     {
       label: 'Pre-Gain',
-      text: 'The readout under Input: how hard the compressor is driven to suit this file\'s level, so an Input setting does the same on a quiet file as on a hot one. Measured automatically; click it to set it by hand (it turns amber and reads MANUAL until you switch AUTO back on)',
+      text: 'The line in the bottom-left corner: how hard the compressor is driven to suit this file\'s level, so an Input setting does the same on a quiet file as on a hot one. Measured automatically; click it to open the control in place and set it by hand (it turns amber and reads MANUAL until you switch AUTO back on)',
     },
     {
       label: 'RATIO',

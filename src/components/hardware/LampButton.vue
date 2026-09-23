@@ -72,9 +72,9 @@ const capShadow = computed(() => (depth.value > 1
 }
 .lamp-btn:not(:disabled):active .lamp-body { translate: 0 1px; }
 .l { position: absolute; display: block; border-radius: 50%; }
-.halo { inset: -4px; pointer-events: none; background: radial-gradient(closest-side,rgba(255,96,22,.3) 0%,rgba(255,60,10,.1) 46%,rgba(255,40,0,0) 74%); filter: blur(5px); transition: opacity 260ms ease; }
+.halo { inset: -1px; pointer-events: none; background: radial-gradient(closest-side,rgba(255,96,22,.22) 0%,rgba(255,60,10,.06) 55%,rgba(255,40,0,0) 80%); filter: blur(5px); transition: opacity 260ms ease; }
 .bezel { inset: 0; background: linear-gradient(160deg,#403e3f 0%,#262526 34%,#181718 66%,#0d0c0d 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), inset 1px 0 0 rgba(255,255,255,.07), inset 0 -2px 4px rgba(0,0,0,.85), 0 8px 14px rgba(0,0,0,.75), 0 2px 5px rgba(0,0,0,.6); }
-.glow { inset: 0; pointer-events: none; transition: opacity 260ms ease; box-shadow: 0 0 8px 0 rgba(255,88,22,.45), 0 0 16px 2px rgba(255,64,10,.18); }
+.glow { inset: 0; pointer-events: none; transition: opacity 260ms ease; box-shadow: 0 0 4px 0 rgba(255,88,22,.4), 0 0 7px 0 rgba(255,64,10,.12); }
 .ring { inset: 4px; background: linear-gradient(180deg,#090809 0%,#1c1b1c 60%,#2a2829 100%); box-shadow: inset 0 2px 4px rgba(0,0,0,.95), inset 0 -1px 0 rgba(255,255,255,.12); }
 .well { inset: 6px; background: linear-gradient(180deg,#120a08 0%,#060303 100%); box-shadow: inset 0 3px 6px rgba(0,0,0,.9); }
 .lens-clip { inset: 6px; overflow: hidden; }
