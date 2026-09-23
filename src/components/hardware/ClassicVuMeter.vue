@@ -14,6 +14,7 @@ import { VU_SCALE, vuFraction, vuFractionToDeg, grToVuFraction } from './hardwar
  * left stop, as a de-energised movement does.
  */
 const props = defineProps({
+  /** Gain reduction in dB, either sign (the compressors report it negative). */
   reductionDb: { type: Number, default: 0 },
   active: { type: Boolean, default: true },
   /** Displayed width; the face is drawn at 400 px and scaled. */
@@ -63,7 +64,7 @@ const needleRot = computed(() => `rotate(${vuFractionToDeg(fraction.value).toFix
     :style="{ width: width + 'px', height: (NATIVE_H * scale).toFixed(1) + 'px' }"
     role="meter"
     aria-label="Gain reduction"
-    :aria-valuenow="Math.max(0, reductionDb).toFixed(1)"
+    :aria-valuenow="Math.abs(reductionDb).toFixed(1)"
     aria-valuemin="0"
     aria-valuemax="20"
   >

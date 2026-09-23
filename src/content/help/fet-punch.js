@@ -37,12 +37,8 @@ export default {
       text: 'How quickly it recovers afterwards',
     },
     {
-      label: 'Sidechain HPF',
+      label: 'SC HPF',
       text: 'Keeps low frequencies out of the detector, so plosives stop triggering the whole compressor',
-    },
-    {
-      label: 'FET Drive',
-      text: 'How much of the amplifier colour comes with the compression',
     },
     {
       label: 'Mix',
@@ -58,6 +54,6 @@ export default {
 
   notes: [
     'It reaches for peaks rather than the body, so it typically adds 1 to 2 dB of average level where Opto Comp adds none',
-    'Turn on Sidechain HPF before reaching for a slower attack when plosives are the problem',
+    'Turn on SC HPF before reaching for a slower attack when plosives are the problem',
   ],
 }

@@ -6,7 +6,6 @@ import {
   attackSecondsForDial, releaseSecondsForDial, FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB,
 } from '../../audio/fet1176Processor.js'
 import { FET1176_DEFAULTS } from '../../audio/effects/fet1176Params.js'
-import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
 import HardwareKnob from '../hardware/HardwareKnob.vue'
 import LampButton from '../hardware/LampButton.vue'
 import LcdSpinner from '../hardware/LcdSpinner.vue'
@@ -51,6 +50,12 @@ const presets = usePluginPresets(FET_PUNCH_PRESET_PLUGIN, {
     mix: fetMix.value,
     autoMakeup: fetAutoMakeup.value,
   }),
+  /**
+   * ⚠ `fetDrive` HAS NO CONTROL ON THE FACE BUT PRESETS STILL CARRY IT. Each
+   * factory preset was voiced with its own amount (0.2-0.6) against a default
+   * of 1, so dropping it on load would re-voice every one of them. It rides
+   * along invisibly: a preset sets it, a saved preset keeps what is in effect.
+   */
   write: (p) => {
     syncInput(p.inputDrive)
     syncAttack(p.attack)
@@ -119,11 +124,25 @@ const RATIOS = [
   { value: 'all', label: 'ALL', title: 'All buttons in — crushed, lagging, loud' },
 ]
 
-const SC_HPF_OPTIONS = [
-  { value: 0, label: 'OFF', title: 'Stock broadband detector' },
-  { value: 90, label: '90', title: 'Stops plosives and rumble from ducking the take' },
-  { value: 150, label: '150', title: 'Keeps chest weight out of the detector entirely' },
+/**
+ * Sidechain high-pass, a three-position detent switch. Not on the original:
+ * the 1176's detector is broadband, which lets plosives duck a whole phrase.
+ * OFF is the stock path. The knob turns in POSITIONS (0-2); the corner each
+ * position selects is looked up here.
+ */
+const SC_HPF_POSITIONS = [0, 90, 150]
+const SC_HPF_LABELS = [
+  { angle: DIAL_MIN_DEG, text: 'OFF' },
+  { angle: 0, text: '90' },
+  { angle: DIAL_MAX_DEG, text: '150' },
 ]
+const SC_HPF_DOTS = evenAngles(3)
+const scHpfPosition = computed(() => {
+  const i = SC_HPF_POSITIONS.indexOf(fetScHpf.value)
+  return i < 0 ? 0 : i
+})
+const setScHpfPosition = (i) => syncScHpf(SC_HPF_POSITIONS[i] ?? 0)
+const formatScHpf = (i) => (SC_HPF_POSITIONS[i] ? `${SC_HPF_POSITIONS[i]} Hz` : 'Off')
 
 // ── Readouts ────────────────────────────────────────────────────────────────
 function formatMs(seconds) {
@@ -299,6 +318,7 @@ async function applyAndClose() {
 
       <!-- ── Bottom row: Pre-Gain · Attack/Release · Makeup/Mix ───────────── -->
       <div class="c76-bottom">
+        <div class="c76-left">
         <div class="c76-pregain">
           <div class="c76-pregain-spacer" aria-hidden="true" />
           <div class="c76-pregain-lcd">
@@ -327,6 +347,22 @@ async function applyAndClose() {
               @click="toggleAlignAuto"
             />
           </div>
+        </div>
+        <div class="c76-schpf">
+          <HardwareKnob
+            class="c76-ctl"
+            variant="mini"
+            :model-value="scHpfPosition"
+            @update:model-value="setScHpfPosition"
+            :min="0" :max="2" :step="1"
+            :default-value="0"
+            :dots="SC_HPF_DOTS" :labels="SC_HPF_LABELS"
+            label="Sidechain high-pass" :format-value="formatScHpf"
+            :disabled="off"
+          />
+          <div class="c76-sub-readout c76-sub-readout--sm">{{ formatScHpf(scHpfPosition) }}</div>
+          <div class="c76-tiny-title">SC HPF</div>
+        </div>
         </div>
 
         <div class="c76-ballistics">
@@ -398,40 +434,6 @@ async function applyAndClose() {
             <div class="c76-tiny-title">Mix</div>
           </div>
         </div>
-      </div>
-    </div>
-
-    <!-- Not on the hardware face, so not on ours: the two additions that have
-         no front-panel equivalent sit on a rear strip below it. -->
-    <div class="c76-rear" :class="{ 'is-off': off }">
-      <div class="c76-rear-item">
-        <!-- The 1176's detector is broadband, which lets plosives duck a
-             whole phrase. Off is the stock path. -->
-        <span class="c76-tiny-title">Sidechain HPF</span>
-        <DeviceTravelSlide
-          :model-value="fetScHpf"
-          @update:model-value="syncScHpf"
-          :options="SC_HPF_OPTIONS"
-          accent="#ffa435"
-          :disabled="off"
-          :width="118"
-          label="Sidechain high-pass"
-        />
-      </div>
-      <div class="c76-rear-item">
-        <span class="c76-tiny-title">FET Drive</span>
-        <HardwareKnob
-          class="c76-ctl c76-rear-knob"
-          variant="mini"
-          :model-value="fetDrive"
-          @update:model-value="syncDrive"
-          :min="0" :max="1" :step="0.01"
-          :default-value="FET1176_DEFAULTS.fetDrive"
-          :dots="MIX_DOTS" :labels="MIX_LABELS"
-          label="FET drive" :format-value="formatPercent"
-          :disabled="off"
-        />
-        <span class="c76-sub-readout c76-sub-readout--sm">{{ formatPercent(fetDrive) }}</span>
       </div>
     </div>
 
@@ -510,11 +512,14 @@ async function applyAndClose() {
 .c76-kind { font-size: 17px; font-weight: 600; letter-spacing: .14em; color: #ffffff; }
 
 .c76-bottom { position: relative; margin-top: 18px; display: grid; grid-template-columns: 176px 1fr 176px; align-items: start; }
+.c76-left { display: flex; flex-direction: column; align-items: center; }
 .c76-pregain { display: flex; align-items: flex-start; justify-content: center; gap: 6px; margin-top: 10px; }
 .c76-pregain-spacer { width: 33px; flex: 0 0 auto; }
 .c76-pregain-lcd { width: 96px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .c76-pregain-title { transform: translateX(-8px); }
 .c76-pregain-auto { width: 33px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+
+.c76-schpf { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 8px; }
 
 .c76-ballistics { display: flex; align-items: flex-start; justify-content: center; gap: 12px; }
 .c76-small-knob { display: flex; flex-direction: column; align-items: center; gap: 5px; }
@@ -523,15 +528,6 @@ async function applyAndClose() {
 .c76-makeup-lamp { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .c76-makeup-title { font-size: 10px; letter-spacing: .16em; margin-top: 5px; }
 .c76-mix { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 2px; }
-
-.c76-rear {
-  display: flex; align-items: center; justify-content: center; gap: 36px;
-  padding: 10px 30px 14px; border-top: 1px solid rgba(0,0,0,.55);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-  font-family: Oswald, 'Inter', system-ui, sans-serif;
-}
-.c76-rear-item { display: flex; align-items: center; gap: 12px; }
-.c76-rear-knob { margin: -18px -8px; transform: scale(.7); }
 
 /* Unit off: the controls go dead and dim; the power lamp and the engraving
    stay, so the face still reads as the same unit. Knobs dim their own cap

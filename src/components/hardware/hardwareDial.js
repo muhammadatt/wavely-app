@@ -92,7 +92,12 @@ export function vuFractionToDeg(f) {
 /**
  * Gain reduction on the VU face, as the hardware's GR switch position reads
  * it: the needle rests on 0 and falls left, one VU division per dB.
+ *
+ * ⚠ SIGN-AGNOSTIC ON PURPOSE. The compressors report reduction as a GAIN, so
+ * negative (`getReduction()` returns `-grDb`), and the first cut of this
+ * clamped negatives to zero: the needle sat on 0 through every playback. The
+ * bar meter it replaced took the magnitude, and so does this.
  */
 export function grToVuFraction(reductionDb) {
-  return vuFraction(-Math.max(0, reductionDb))
+  return vuFraction(-Math.abs(reductionDb))
 }

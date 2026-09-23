@@ -53,8 +53,14 @@ test('the VU needle rests on 0 with no reduction and falls left one division per
   assert.equal(grToVuFraction(10), vuFraction(-10))
   assert.equal(grToVuFraction(20), 0)
   assert.equal(grToVuFraction(40), 0, 'pinned at the left stop past full scale')
-  // Negative reduction is not a thing the needle should show as gain.
-  assert.equal(grToVuFraction(-3), vuFraction(0))
+})
+
+test('the needle reads reduction whichever sign the compressor reports it in', () => {
+  // The compressors report it as a negative gain. Clamping that to zero is
+  // what left the needle parked on 0 through every playback.
+  assert.equal(grToVuFraction(-6), vuFraction(-6))
+  assert.equal(grToVuFraction(-6), grToVuFraction(6))
+  assert.ok(grToVuFraction(-6) < grToVuFraction(0))
 })
 
 test('the VU scale is monotonic and spans the full sweep', () => {
