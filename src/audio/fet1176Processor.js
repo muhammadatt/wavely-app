@@ -86,6 +86,7 @@ import {
 import {
   MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor,
   softCeiling, float32AtOrBelow, percentileOfChannels, peakOfChannels,
+  blendInto, peakBlendGain, percentileBlendGain,
 } from './dsp/makeupReference.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
@@ -2014,23 +2015,10 @@ export function computeFET1176AutoMakeupPlan(channelData, sampleRate, params = {
   })
   const wet = wetPadded.map(ch => ch.subarray(latency))
 
-  const dryMix = 1 - mix
   if (reference === 'peak') {
     // Largest g for which every sample satisfies |a + b·g| <= inputPeak.
-    let gMax = Infinity
-    for (let ch = 0; ch < wet.length; ch++) {
-      const dry = channelData[ch]
-      const w = wet[ch]
-      for (let i = 0; i < w.length; i++) {
-        const b = w[i] * mix
-        if (b === 0) continue
-        const a = dry[i] * dryMix
-        // The binding end of this sample's interval is the one it moves toward.
-        const bound = (b > 0 ? inputPeak - a : -inputPeak - a) / b
-        if (bound < gMax) gMax = bound
-      }
-    }
-    if (!Number.isFinite(gMax) || gMax <= 0) return NONE
+    const gMax = peakBlendGain(channelData, wet, mix, inputPeak)
+    if (gMax === null || gMax <= 0) return NONE
     // The peak reference needs no ceiling, so it needs no knee either.
     return { makeupDb: clamp(20 * Math.log10(gMax), minDb, maxDb), ceilingDb: null, ceilingKneeDb: null }
   }
@@ -2038,45 +2026,14 @@ export function computeFET1176AutoMakeupPlan(channelData, sampleRate, params = {
   const inputRef = percentileOfChannels(channelData, MAKEUP_PERCENTILE)
   if (!(inputRef > 0)) return NONE
 
-  /** The output at makeup `g`, written into scratch buffers the caller owns. */
+  /**
+   * Closed form at mix 1, bisection over the knob's own travel below it — see
+   * `percentileBlendGain`, shared with OptoSmooth's solve.
+   */
   const scratch = wet.map(w => new Float32Array(w.length))
-  const outAt = (g) => {
-    for (let ch = 0; ch < wet.length; ch++) {
-      const dry = channelData[ch]
-      const w = wet[ch]
-      const o = scratch[ch]
-      for (let i = 0; i < o.length; i++) o[i] = dry[i] * dryMix + w[i] * mix * g
-    }
-    return scratch
-  }
-
-  let gainLin
-  if (dryMix === 0) {
-    /**
-     * Closed form. Every sample is `b[i]·g`, so the quantile of magnitudes is
-     * the quantile of `|b|` times `g` — one pass, no search, exact.
-     */
-    const wetRef = percentileOfChannels(wet, MAKEUP_PERCENTILE)
-    if (!(wetRef > 0)) return NONE
-    gainLin = inputRef / (wetRef * mix)
-  } else {
-    /**
-     * Bisection over the knob's own travel. The quantile is monotone
-     * non-decreasing in `g` once the wet share dominates, and the bracket is
-     * the range the answer is allowed to land in anyway, so an answer pinned to
-     * an end is the clamp doing its job rather than a failed solve. Sixteen
-     * halvings of the travel land inside a thousandth of a dB.
-     */
-    let loDb = minDb
-    let hiDb = maxDb
-    for (let i = 0; i < 16; i++) {
-      const midDb = 0.5 * (loDb + hiDb)
-      const ref = percentileOfChannels(outAt(Math.exp(midDb * LN10_OVER_20)), MAKEUP_PERCENTILE)
-      if (ref < inputRef) loDb = midDb
-      else hiDb = midDb
-    }
-    gainLin = Math.exp(0.5 * (loDb + hiDb) * LN10_OVER_20)
-  }
+  const outAt = (g) => blendInto(scratch, channelData, wet, mix, g)
+  const gainLin = percentileBlendGain(channelData, wet, mix, inputRef, minDb, maxDb, scratch)
+  if (gainLin === null) return NONE
 
   const makeupDb = clamp(20 * Math.log10(gainLin), minDb, maxDb)
   const ceilingDb = 20 * Math.log10(inputPeak)

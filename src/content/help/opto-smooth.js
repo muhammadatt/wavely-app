@@ -33,6 +33,10 @@ export default {
       text: 'The lamp beside VINTAGE 2A turns the valve and cell colour on or off. Off is clean with exactly the same compression',
     },
     {
+      label: 'Mix',
+      text: 'Blends the untouched signal back in for parallel compression. Auto Makeup accounts for the blend, so Gain stays right at any Mix',
+    },
+    {
       label: 'Pre-Gain',
       text: 'The line in the bottom-left corner: how hard the compressor is driven to suit this file\'s level, so a Peak Reduction setting does the same on a quiet file as on a hot one. Measured automatically; click it to open the control in place and set it by hand (it turns amber and reads MANUAL until you switch AUTO back on)',
     },

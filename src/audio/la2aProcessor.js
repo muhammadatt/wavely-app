@@ -3210,6 +3210,13 @@ export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, opti
     toleranceDb,
     minDb: -24,
     maxDb: 24,
+    /**
+     * The kernel's own blend. Its dry path is the input through the same delay
+     * the wet path has, so after the solver trims `latencySamples` the dry
+     * samples ARE the input, which is what the blended solve pairs them with.
+     */
+    mix: Number.isFinite(params.mix) ? params.mix : LA2A_KERNEL_DEFAULTS.mix,
+    mixKey: 'mix',
   })
 }
 

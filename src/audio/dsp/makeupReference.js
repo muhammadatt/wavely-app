@@ -463,6 +463,89 @@ export function restorePeakToCeiling(channels, ceilingDb) {
   return trimDb
 }
 
+// ── The blend: makeup solved over dry·(1−mix) + wet·mix·g ───────────────────
+//
+// Shared by FET Punch and OptoSmooth. Given one render of the WET path, these
+// answer "what gain on the wet path makes the blended output hit its target"
+// with O(n) passes instead of renders. For FET Punch that is exact, because its
+// Output is the last multiply on the wet path. For OptoSmooth it is exact to
+// first order around the gain the wet path was rendered at — its Gain sits
+// before the output valve — so `solveMakeupPlan` re-renders and asks again.
+
+const LN10_OVER_20 = Math.LN10 / 20
+
+/**
+ * The blended output at wet gain `g` (linear), written into `scratch`, which
+ * the caller owns. `dry` and `wet` must be sample-aligned: any latency is the
+ * caller's to remove before this pairs `dry[i]` with `wet[i]`.
+ */
+export function blendInto(scratch, dry, wet, mix, g) {
+  const dryMix = 1 - mix
+  for (let ch = 0; ch < wet.length; ch++) {
+    const d = dry[ch]
+    const w = wet[ch]
+    const o = scratch[ch]
+    for (let i = 0; i < o.length; i++) o[i] = d[i] * dryMix + w[i] * mix * g
+  }
+  return scratch
+}
+
+/**
+ * The largest linear wet gain for which every blended sample stays within
+ * ±`limit` — the peak reference, solved in closed form. Each sample is
+ * `a + b·g`, so each bounds `g` from one side; the answer is the tightest bound.
+ *
+ * @returns the gain, or null when nothing on the wet path constrains it
+ */
+export function peakBlendGain(dry, wet, mix, limit) {
+  const dryMix = 1 - mix
+  let gMax = Infinity
+  for (let ch = 0; ch < wet.length; ch++) {
+    const d = dry[ch]
+    const w = wet[ch]
+    for (let i = 0; i < w.length; i++) {
+      const b = w[i] * mix
+      if (b === 0) continue
+      const a = d[i] * dryMix
+      // The binding end of this sample's interval is the one it moves toward.
+      const bound = (b > 0 ? limit - a : -limit - a) / b
+      if (bound < gMax) gMax = bound
+    }
+  }
+  return Number.isFinite(gMax) ? gMax : null
+}
+
+/**
+ * The linear wet gain that puts the blend's `MAKEUP_PERCENTILE` level on
+ * `targetRef`, searched over [minDb, maxDb].
+ *
+ * At mix 1 it is closed form: every sample is `b·g`, so the quantile scales
+ * with `g` exactly. Below mix 1 the dry sum breaks that, and it bisects —
+ * the quantile is monotone non-decreasing in `g` once the wet share
+ * dominates, and an answer pinned to an end of the bracket is the clamp doing
+ * its job, not a failed solve. Sixteen halvings of a 48 dB bracket land inside
+ * a thousandth of a dB.
+ *
+ * @param scratch  per-channel buffers the length of `wet`, reused across calls
+ * @returns the gain, or null when the wet path is silent at the reference
+ */
+export function percentileBlendGain(dry, wet, mix, targetRef, minDb, maxDb, scratch) {
+  if (mix >= 1) {
+    const wetRef = percentileOfChannels(wet, MAKEUP_PERCENTILE)
+    if (!(wetRef > 0)) return null
+    return targetRef / (wetRef * mix)
+  }
+  let loDb = minDb
+  let hiDb = maxDb
+  for (let i = 0; i < 16; i++) {
+    const midDb = 0.5 * (loDb + hiDb)
+    const ref = percentileOfChannels(blendInto(scratch, dry, wet, mix, Math.exp(midDb * LN10_OVER_20)), MAKEUP_PERCENTILE)
+    if (ref < targetRef) loDb = midDb
+    else hiDb = midDb
+  }
+  return Math.exp(0.5 * (loDb + hiDb) * LN10_OVER_20)
+}
+
 /**
  * The makeup solve, and the ceiling that has to ship with it.
  *
@@ -478,14 +561,34 @@ export function restorePeakToCeiling(channels, ceilingDb) {
  * The caller supplies its own renderer and its own latency, which is all that
  * was ever LA-2A-specific about this.
  *
+ * ⚠ BELOW MIX 1 THE LOOP CHANGES, AND IT HAS TO. The plain loop adds the
+ * whole dB error to the makeup each pass, which assumes a dB of makeup moves
+ * the output a dB. Summed with a dry path it moves it by the wet share only,
+ * so every pass under-corrects and four passes stall: measured on narration at
+ * Peak Reduction 70, the makeup landed 1.4 / 4.6 / 9.8 dB short at mix
+ * 0.5 / 0.3 / 0.1 (the level only 0.7 / 1.2 / 0.6 dB short — the dry path
+ * dominates — which is why a level check alone would not catch it). So below
+ * mix 1 each pass renders the WET path alone at the current makeup and solves
+ * the blend over that render (`percentileBlendGain` / `peakBlendGain`, FET
+ * Punch's solve), then re-renders to absorb whatever the renderer does after
+ * its gain stage. Measured: on target to 0.01 dB in two renders at every
+ * setting tried, PR 30-70 by mix 0.1-1, where the plain loop used four.
+ *
+ * At mix 1 the plain loop runs, unchanged: there the blend solve IS the plain
+ * correction, and leaving the code alone keeps every existing answer
+ * bit-identical.
+ *
  * @param render   (channelData, extraParams) => channelData, at unity makeup
  *                 plus whatever `extraParams` says
  * @param latency  samples the renderer delays its output by, or 0
+ * @param mix      the renderer's wet/dry blend, 0-1; its dry path must be the
+ *                 input itself, aligned by `latency`
+ * @param mixKey   the renderer's param for it, set to 1 for the wet-only renders
  */
 export function solveMakeupPlan({
   channelData, render, latencySamples = 0, gainKey = 'gainDb',
   reference = 'peak', maxIterations = 4, toleranceDb = 0.05,
-  minDb = -24, maxDb = 24,
+  minDb = -24, maxDb = 24, mix = 1, mixKey = 'mix',
 }) {
   if (reference !== 'peak' && reference !== 'percentile') {
     throw new Error(`unknown makeup reference: ${reference}`)
@@ -515,6 +618,19 @@ export function solveMakeupPlan({
       return q
     })
     : channelData
+
+  const wetMix = Math.max(0, Math.min(1, Number.isFinite(mix) ? mix : 1))
+  if (wetMix <= 0) {
+    // All dry: the makeup reaches nothing, so there is nothing to solve.
+    return { makeupDb: 0, ceilingDb: null, ceilingKneeDb: null }
+  }
+  if (wetMix < 1) {
+    return solveBlendedMakeupPlan({
+      channelData, padded, len, render, latencySamples, gainKey, mixKey,
+      reference, maxIterations, toleranceDb, minDb, maxDb,
+      mix: wetMix, inputPeak, inputRef,
+    })
+  }
 
   let makeupDb = 0
   let lastOutPeak = 0
@@ -546,5 +662,51 @@ export function solveMakeupPlan({
    */
   const outPeakDb = lastOutPeak > 0
     ? 20 * Math.log10(lastOutPeak) + (makeupDb - lastMakeupDb) : -Infinity
+  return { makeupDb, ceilingDb, ceilingKneeDb: ceilingKneeDbFor(outPeakDb - ceilingDb) }
+}
+
+/**
+ * `solveMakeupPlan` below mix 1: one wet-only render per pass, the blend solved
+ * over it, repeated until the wet path's own curvature has been absorbed. See
+ * the note on `solveMakeupPlan`.
+ */
+function solveBlendedMakeupPlan({
+  channelData, padded, len, render, latencySamples, gainKey, mixKey,
+  reference, maxIterations, toleranceDb, minDb, maxDb, mix, inputPeak, inputRef,
+}) {
+  const scratch = channelData.map(() => new Float32Array(len))
+  let makeupDb = 0
+  let wet = null
+  let wetAtDb = 0
+  for (let i = 0; i < maxIterations; i++) {
+    const rendered = render(padded, { [gainKey]: makeupDb, [mixKey]: 1 })
+    wet = latencySamples > 0
+      ? rendered.map((ch) => ch.subarray(latencySamples, latencySamples + len))
+      : rendered
+    wetAtDb = makeupDb
+    // The extra wet gain, relative to the render, bounded so the answer stays
+    // inside [minDb, maxDb].
+    const g = reference === 'percentile'
+      ? percentileBlendGain(channelData, wet, mix, inputRef, minDb - makeupDb, maxDb - makeupDb, scratch)
+      : peakBlendGain(channelData, wet, mix, inputPeak)
+    if (g === null || !(g > 0)) break
+    const correctionDb = 20 * Math.log10(g)
+    makeupDb = Math.max(minDb, Math.min(maxDb, makeupDb + correctionDb))
+    if (Math.abs(correctionDb) < toleranceDb) break
+  }
+
+  if (reference !== 'percentile') {
+    return { makeupDb, ceilingDb: null, ceilingKneeDb: null }
+  }
+  const ceilingDb = 20 * Math.log10(inputPeak)
+  /**
+   * The overshoot the ceiling has to catch, read off the blend at the makeup
+   * that ships — the last wet render scaled by the final step, which is
+   * exactly what the solve itself assumed.
+   */
+  const outPeak = wet
+    ? peakOfChannels(blendInto(scratch, channelData, wet, mix, Math.exp((makeupDb - wetAtDb) * LN10_OVER_20)))
+    : 0
+  const outPeakDb = outPeak > 0 ? 20 * Math.log10(outPeak) : -Infinity
   return { makeupDb, ceilingDb, ceilingKneeDb: ceilingKneeDbFor(outPeakDb - ceilingDb) }
 }

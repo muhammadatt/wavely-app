@@ -82,6 +82,11 @@ function normalize(params) {
      * change how every one of them sounds. Every factory preset states it.
      */
     analog: params.analog !== false,
+    /**
+     * ⚠ DEFAULTS TO 1 FOR PRESETS SAVED BEFORE THE CONTROL EXISTED — the
+     * hardware has no blend, and those patches were auditioned fully wet.
+     */
+    mix: clamp(params.mix ?? 1, 0, 1),
     autoMakeup,
   }
 }
@@ -89,7 +94,7 @@ function normalize(params) {
 // ⚠ A PARAM MISSING FROM THIS LIST IS SILENTLY DROPPED on save and never
 // restored — the preset simply forgets it.
 export const OPTO_SMOOTH_PARAM_KEYS = [
-  'mode', 'peakReduction', 'gain', 'r37', 'lookahead', 'autoMakeup', 'analog',
+  'mode', 'peakReduction', 'gain', 'r37', 'lookahead', 'autoMakeup', 'analog', 'mix',
 ]
 
 export const OPTO_SMOOTH_PRESETS = [
@@ -104,6 +109,7 @@ export const OPTO_SMOOTH_PRESETS = [
       r37: 100,
       lookahead: 0,
       analog: true,
+      mix: 1,
       autoMakeup: true,
     },
   },
@@ -120,6 +126,7 @@ export const OPTO_SMOOTH_PRESETS = [
       r37: 82,
       lookahead: 0,
       analog: true,
+      mix: 1,
       autoMakeup: true,
     },
   },
@@ -138,6 +145,7 @@ export const OPTO_SMOOTH_PRESETS = [
       r37: 45,
       lookahead: 0,
       analog: true,
+      mix: 1,
       autoMakeup: true,
     },
   },
@@ -162,6 +170,7 @@ export const OPTO_SMOOTH_PRESETS = [
       r37: 100,
       lookahead: 0,
       analog: true,
+      mix: 1,
       autoMakeup: true,
     },
   },
@@ -180,6 +189,7 @@ export const OPTO_SMOOTH_PRESETS = [
       r37: 100,
       lookahead: 0,
       analog: true,
+      mix: 1,
       autoMakeup: true,
     },
   },

@@ -10,6 +10,7 @@ import PresetMenu from './PresetMenu.vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import HardwareKnob from '../hardware/HardwareKnob.vue'
 import HardwareSlideSwitch from '../hardware/HardwareSlideSwitch.vue'
+import HardwareFader from '../hardware/HardwareFader.vue'
 import LampButton from '../hardware/LampButton.vue'
 import FoldedLcd from '../hardware/FoldedLcd.vue'
 import ClassicVuMeter from '../hardware/ClassicVuMeter.vue'
@@ -23,7 +24,7 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aR37, la2aLookahead,
   la2aAutoMakeup, toggleAutoMakeup: toggleAuto,
-  la2aAnalog, syncAnalog,
+  la2aAnalog, syncAnalog, la2aMix, syncMix,
   la2aPreview, la2aReduction,
   togglePreview, syncMode, syncPeakReduction, syncGain,
   syncR37, syncLookahead, toggleAutoMakeup, refreshAutoMakeup,
@@ -107,6 +108,7 @@ const formatEmph = (v) => {
 const prTip = computed(() => String(Math.round(la2aPeakReduction.value)))
 const gainTip = computed(() => formatSignedDb(la2aGain.value))
 const formatLookahead = (v) => (v <= 0 ? 'Off' : `${Math.round(v)} ms`)
+const formatPercent = (v) => `${Math.round(v * 100)}%`
 
 /**
  * Pre-Gain is the input ALIGNMENT, and it trims the SIDE-CHAIN DRIVE, not the
@@ -175,6 +177,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
     r37: la2aR37.value,
     lookahead: la2aLookahead.value,
     analog: la2aAnalog.value,
+    mix: la2aMix.value,
     autoMakeup: la2aAutoMakeup.value,
   }),
   write: (p) => {
@@ -187,6 +190,9 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
     // Absent in every preset saved before the control existed, and those were
     // auditioned WITH the nonlinearity — so an absent key means ON, never OFF.
     syncAnalog(p.analog !== false)
+    // Absent in every preset saved before the control existed; those were
+    // auditioned fully wet.
+    syncMix(p.mix ?? 1)
     if (p.autoMakeup) {
       // Already on: the syncs above have each scheduled a re-measure, so the
       // knob lands on the new settings without a second toggle.
@@ -372,6 +378,24 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
               />
               <div class="v2a-small">Auto Makeup</div>
             </div>
+            <!-- Blends the untouched input back in — parallel compression
+                 without a second track. Auto Makeup solves through the blend,
+                 so the Gain it sets is right at every Mix. -->
+            <div class="v2a-mix">
+              <HardwareFader
+                class="v2a-ctl"
+                cap="black"
+                :model-value="la2aMix"
+                @update:model-value="syncMix"
+                :min="0" :max="1" :step="0.01"
+                :default-value="1"
+                min-label="0" max-label="100"
+                label="Mix" :format-value="formatPercent"
+                :disabled="off"
+              />
+              <div class="v2a-mix-read">{{ formatPercent(la2aMix) }}</div>
+              <div class="v2a-mix-title">Mix</div>
+            </div>
           </div>
         </div>
       </div>
@@ -461,6 +485,9 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
   margin-top: 3px; padding-left: .16em; font-size: 10px; line-height: 1; letter-spacing: .16em;
   text-transform: uppercase; white-space: nowrap; color: #2f3134;
 }
+.v2a-mix { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.v2a-mix-read { font-size: 9px; line-height: 1; letter-spacing: .14em; text-transform: uppercase; color: #55585b; }
+.v2a-mix-title { font-size: 9px; line-height: 1; letter-spacing: .18em; text-transform: uppercase; color: #2f3134; }
 .v2a-bench { display: flow-root; padding: 0 26px 20px; background: #1d2027; }
 
 /* Unit off: the controls go dead and dim; the engraving stays. Knobs dim
