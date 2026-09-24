@@ -9,6 +9,7 @@
  * the plain loop left the makeup up to 9.8 dB short at mix 0.1 (PR 70); after,
  * "short-by" is 0.00 everywhere.
  */
+import { pathToFileURL } from 'node:url'
 import { processLA2ABuffer, computeAutoMakeupPlan, la2aLatencySamples } from '../src/audio/la2aProcessor.js'
 import { percentileOfChannels, MAKEUP_PERCENTILE } from '../src/audio/dsp/makeupReference.js'
 const SR = 44100
@@ -50,17 +51,28 @@ function achieved(x, params, makeupDb) {
   return db(percentileOfChannels([out], MAKEUP_PERCENTILE)) - db(percentileOfChannels([x], MAKEUP_PERCENTILE))
 }
 
-for (const [name, x] of [['narration', narration()], ['dense', dense()]]) {
-  console.log(`\n== ${name} ==   error = output p99.9 − input p99.9 (dB), 0 is on target`)
-  console.log('PR   mix   solved     err     converged  err     short-by')
-  for (const pr of [30, 50, 70]) {
-    for (const mix of [1, 0.7, 0.5, 0.3, 0.1]) {
-      const params = { peakReduction: pr, mix, lookaheadMs: 0 }
-      const solved = computeAutoMakeupPlan([x], SR, params, { reference: 'percentile' })
-      const conv = computeAutoMakeupPlan([x], SR, params, { reference: 'percentile', maxIterations: 200, toleranceDb: 0.001 })
-      const eShip = achieved(x, params, solved.makeupDb)
-      const eConv = achieved(x, params, conv.makeupDb)
-      console.log(`${String(pr).padEnd(4)} ${mix.toFixed(1)}   ${solved.makeupDb.toFixed(2).padStart(7)}  ${eShip.toFixed(2).padStart(6)}   ${conv.makeupDb.toFixed(2).padStart(7)}  ${eConv.toFixed(2).padStart(6)}   ${(conv.makeupDb - solved.makeupDb).toFixed(2).padStart(6)}`)
+export { narration, dense, achieved }
+
+function main() {
+  for (const [name, x] of [['narration', narration()], ['dense', dense()]]) {
+    console.log(`\n== ${name} ==   error = output p99.9 − input p99.9 (dB), 0 is on target`)
+    console.log('PR   mix   solved     err     converged  err     short-by')
+    for (const pr of [30, 50, 70]) {
+      for (const mix of [1, 0.7, 0.5, 0.3, 0.1]) {
+        const params = { peakReduction: pr, mix, lookaheadMs: 0 }
+        const solved = computeAutoMakeupPlan([x], SR, params, { reference: 'percentile' })
+        const conv = computeAutoMakeupPlan([x], SR, params, { reference: 'percentile', maxIterations: 200, toleranceDb: 0.001 })
+        const eShip = achieved(x, params, solved.makeupDb)
+        const eConv = achieved(x, params, conv.makeupDb)
+        console.log(`${String(pr).padEnd(4)} ${mix.toFixed(1)}   ${solved.makeupDb.toFixed(2).padStart(7)}  ${eShip.toFixed(2).padStart(6)}   ${conv.makeupDb.toFixed(2).padStart(7)}  ${eConv.toFixed(2).padStart(6)}   ${(conv.makeupDb - solved.makeupDb).toFixed(2).padStart(6)}`)
+      }
     }
   }
 }
+
+/**
+ * The report runs only when this file is the entry point: the stimuli and
+ * `achieved` are importable, and importing must not render the whole matrix.
+ * Same guard as `scripts/fet-ballistics.mjs`.
+ */
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()

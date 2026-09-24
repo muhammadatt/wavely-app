@@ -64,7 +64,7 @@ const needleRot = computed(() => `rotate(${vuFractionToDeg(fraction.value).toFix
     :style="{ width: width + 'px', height: (NATIVE_H * scale).toFixed(1) + 'px' }"
     role="meter"
     aria-label="Gain reduction"
-    :aria-valuenow="Math.abs(reductionDb).toFixed(1)"
+    :aria-valuenow="active ? Math.abs(reductionDb).toFixed(1) : '0.0'"
     aria-valuemin="0"
     aria-valuemax="20"
   >

@@ -1945,7 +1945,9 @@ export function computeFET1176AutoMakeupDb(channelData, sampleRate, params = {},
  * @returns {{makeupDb:number, ceilingDb:number|null, ceilingKneeDb:number|null}}
  */
 export function computeFET1176AutoMakeupPlan(channelData, sampleRate, params = {}, options = {}) {
-  const { minDb = -36, maxDb = 36, reference = 'peak' } = options
+  // Defaults to the Output knob's own travel, so a direct caller can never be
+  // handed a makeup the knob cannot show (or a knee sized for one).
+  const { minDb = FET1176_OUTPUT_MIN_DB, maxDb = FET1176_OUTPUT_MAX_DB, reference = 'peak' } = options
   if (reference !== 'peak' && reference !== 'percentile') {
     throw new Error(`unknown makeup reference: ${reference}`)
   }
