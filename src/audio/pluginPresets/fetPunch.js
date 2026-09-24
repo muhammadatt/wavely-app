@@ -50,11 +50,12 @@
  */
 
 import { definePluginPresets } from './store.js'
+import { FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB } from '../fet1176Processor.js'
 
 export const FET_PUNCH_PRESET_PLUGIN = 'fet-punch'
 
-const OUTPUT_MIN_DB = -36
-const OUTPUT_MAX_DB = 24
+const OUTPUT_MIN_DB = FET1176_OUTPUT_MIN_DB
+const OUTPUT_MAX_DB = FET1176_OUTPUT_MAX_DB
 const RATIOS = ['4', '8', '12', '20', 'all']
 
 function clamp(v, lo, hi) {
