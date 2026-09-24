@@ -3174,6 +3174,18 @@ export function computeAutoMakeupDb(channelData, sampleRate, params = {}, option
  * in any case: the ceiling engages on the top ten-thousandth of samples and the
  * reference is read at the top thousandth.
  */
+/**
+ * The Gain knob's travel, and the range the auto makeup is solved over — one
+ * pair, so the knob can always show the answer the solve gives.
+ *
+ * ⚠ IT WAS -12..+24 ON THE KNOB WHILE THE SOLVE RAN -24..+24, so a measured
+ * makeup below -12 was clamped on the way to the knob and the ceiling knee had
+ * been sized for gain the clamp threw away. Symmetric now, matching FET Punch's
+ * Output, with 0 dB straight up on the dial.
+ */
+export const LA2A_GAIN_MIN_DB = -24
+export const LA2A_GAIN_MAX_DB = 24
+
 export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, options = {}) {
   const { maxIterations = 4, toleranceDb = 0.05, reference = 'peak' } = options
 
@@ -3208,8 +3220,8 @@ export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, opti
     reference,
     maxIterations,
     toleranceDb,
-    minDb: -24,
-    maxDb: 24,
+    minDb: LA2A_GAIN_MIN_DB,
+    maxDb: LA2A_GAIN_MAX_DB,
     /**
      * The kernel's own blend. Its dry path is the input through the same delay
      * the wet path has, so after the solver trims `latencySamples` the dry

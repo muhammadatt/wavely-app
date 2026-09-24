@@ -2,7 +2,7 @@
 import { computed, onMounted, watch } from 'vue'
 import { useLA2A } from '../../composables/useLA2A.js'
 import { LOOKAHEAD_MAX_MS, LA2A_DEFAULTS } from '../../audio/effects/la2aCompressor.js'
-import { SC_EMPH_MAX_DB } from '../../audio/la2aProcessor.js'
+import { SC_EMPH_MAX_DB, LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../../audio/la2aProcessor.js'
 import { INPUT_TRIM_MAX_DB } from '../../audio/dsp/inputAlign.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { OPTO_SMOOTH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
@@ -63,16 +63,15 @@ const off = computed(() => !la2aPreview.value)
 // Peak Reduction in its own 0-100 units, the number presets save.
 const PR_SCALE = engraving(['0', '10', '20', '30', '40', '50', '60', '70', '80', '90', '100'])
 /**
- * Gain in dB across its REAL travel, -12..+24. The design sketch prints
- * -24..+24; engraving that on a -12..+24 knob would put every numeral in the
- * wrong place, so the face prints what the knob does.
+ * Gain in dB across its travel, ±24 with 0 straight up — the same scale as FET
+ * Punch's Output.
  */
-const GAIN_MIN_DB = -12
-const GAIN_MAX_DB = 24
+const GAIN_MIN_DB = LA2A_GAIN_MIN_DB
+const GAIN_MAX_DB = LA2A_GAIN_MAX_DB
 const GAIN_SCALE = (() => {
-  const labels = ['−12', '−6', '0', '+6', '+12', '+18', '+24']
-  // One tick per 2 dB, so every numeral lands on a tick.
-  return { dots: evenAngles(19), labels: evenAngles(labels.length).map((angle, i) => ({ angle, text: labels[i] })) }
+  const labels = ['−24', '−18', '−12', '−6', '0', '+6', '+12', '+18', '+24']
+  // One tick per 3 dB, so every numeral lands on a tick.
+  return { dots: evenAngles(17), labels: evenAngles(labels.length).map((angle, i) => ({ angle, text: labels[i] })) }
 })()
 const PR_TICKS = evenAngles(21)
 const TRIM_DOTS = [DIAL_MIN_DEG, DIAL_MAX_DEG]

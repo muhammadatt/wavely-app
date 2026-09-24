@@ -27,7 +27,7 @@
  */
 
 import { definePluginPresets } from './store.js'
-import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
+import { LOOKAHEAD_MAX_MS, LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../la2aProcessor.js'
 
 /**
  * ⚠ THIS MODULE DELIBERATELY IMPORTS NOTHING FROM `effects/la2aCompressor.js`.
@@ -41,8 +41,8 @@ import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
 
 export const OPTO_SMOOTH_PRESET_PLUGIN = 'opto-smooth'
 
-const GAIN_MIN_DB = -12
-const GAIN_MAX_DB = 24
+const GAIN_MIN_DB = LA2A_GAIN_MIN_DB
+const GAIN_MAX_DB = LA2A_GAIN_MAX_DB
 
 function clamp(v, lo, hi) {
   const n = Number(v)

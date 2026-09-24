@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../audio/la2aProcessor.js'
 import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
@@ -124,8 +125,8 @@ const la2aAutoMakeupBusy = ref(false)
 
 // Gain knob travel — measured makeup is clamped to it so the knob position
 // can never disagree with the value in effect.
-const GAIN_MIN_DB = -12
-const GAIN_MAX_DB = 24
+const GAIN_MIN_DB = LA2A_GAIN_MIN_DB
+const GAIN_MAX_DB = LA2A_GAIN_MAX_DB
 const la2aPreview = ref(false)
 const la2aReduction = ref(0)
 const la2aInputLevels = ref([])
