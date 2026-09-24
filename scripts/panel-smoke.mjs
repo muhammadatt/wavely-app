@@ -37,7 +37,7 @@ const URL_ = `http://localhost:${PORT}/`
 
 /** Command-palette search terms. These are the REGISTRY labels, not our names. */
 const PANELS = [
-  'Opto Comp', 'FET Punch', 'Soft Clipper', 'Scheps Parallel',
+  'Opto Comp', 'FET Punch', 'Soft Clipper', 'Scheps Parallel', 'Punch Chain',
   'Reso', 'EQ', 'Air Boost', 'De-Esser', 'Inflator', 'Tube Sat',
   'Loudness Normalize', 'Auto Leveler',
 ]
@@ -160,6 +160,72 @@ try {
     const ok = opened && fresh.length === 0
     if (!ok) failures++
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name.padEnd(16)} ${opened ? '' : 'did not open (renamed in the registry?) '}${fresh.join(' | ')}`)
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+  }
+
+  /**
+   * The Punch Chain's two readouts, which are the only thing on that panel a
+   * render check cannot see.
+   *
+   * ⚠ IT SHIPPED SHOWING "—" IN BOTH CARDS AND EVERYTHING ELSE PASSED. The
+   * template read `r.value.value` on an array built inside the template, where
+   * Vue has already unwrapped the ref — so the expression was `undefined`, the
+   * formatter returned its placeholder, and the panel opened, metered, solved
+   * its makeup and applied correctly with two dead numbers on it. No console
+   * error, no build error, and `componentBindings.test.js` cannot see it
+   * because the identifiers it names all exist.
+   *
+   * ⚠ LOCATED BY THE TWO LABELS, WHICH BOTH VERSIONS RENDER. Keying off
+   * anything only the fixed panel has would report "did not open" against the
+   * broken one and pass for the wrong reason — the mistake the files-panel
+   * block below records making.
+   *
+   * The probe signal yields 23 phrases and a finite pair (density -9.4, spread
+   * 0.54, measured offline), so "a number" is the right assertion rather than
+   * any particular value.
+   */
+  {
+    const before = errors.length
+    await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
+    await page.keyboard.type('Punch Chain'); await page.waitForTimeout(450)
+    await page.keyboard.press('Enter')
+    // The measurement is debounced and then runs in a worker; it is ~200 ms on
+    // this probe, and this is slack rather than a tuned wait.
+    await page.waitForTimeout(3000)
+
+    const readouts = await page.evaluate(() => {
+      const out = {}
+      for (const label of ['DENSITY', 'LEVEL SPREAD']) {
+        const el = [...document.querySelectorAll('div')]
+          .find(d => d.textContent.trim() === label)
+        /**
+         * The card's FIRST span, which is the value. The label is a div, so
+         * this cannot pick it up.
+         *
+         * ⚠ NOT THE CARD'S WHOLE TEXT, AND THE FIRST CUT OF THIS GOT IT WRONG
+         * AND PASSED AGAINST THE BUG. The card also carries the signed delta,
+         * which is computed in script from refs that were always correct — only
+         * the DISPLAY was dead. A regex over the card found the delta's digits
+         * and reported a number while the value beside it read "—".
+         */
+        out[label] = el?.parentElement?.querySelector('span')?.textContent?.trim() ?? null
+      }
+      return out
+    })
+
+    // The whole string has to be the number: "—" must not pass, and neither
+    // must anything with a digit somewhere in it.
+    const numberOf = (text) => (/^-?\d+(\.\d+)?$/.test(text ?? '') ? Number(text) : NaN)
+    const density = numberOf(readouts.DENSITY)
+    const spread = numberOf(readouts['LEVEL SPREAD'])
+    const fresh = errors.slice(before)
+    const ok = Number.isFinite(density) && Number.isFinite(spread) && fresh.length === 0
+    if (!ok) failures++
+    console.log(
+      `${ok ? 'ok  ' : 'FAIL'}  ${'Punch Chain readouts'.padEnd(16)} `
+      + `${ok ? '' : `density=${readouts.DENSITY ?? 'not found'} spread=${readouts['LEVEL SPREAD'] ?? 'not found'} `}`
+      + fresh.join(' | '),
+    )
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
   }
 

@@ -290,7 +290,7 @@ export function alignDbForRms(gatedRms) {
  * actually taps, not the mean of the channels' powers. See the note on
  * `gatedRmsOfChannels` for what the difference costs.
  */
-function monoRms(channels, start, len) {
+export function monoRms(channels, start, len) {
   const nCh = channels.length
   if (nCh === 0) return 0
   const end = Math.min(channels[0].length, start + len)

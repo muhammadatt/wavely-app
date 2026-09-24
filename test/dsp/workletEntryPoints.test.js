@@ -75,18 +75,41 @@ const ENTRY_POINTS = FILES.filter(isEntryPoint)
 const rel = f => f.slice(AUDIO.length + 1)
 
 /**
- * The one legitimate entry-point-to-entry-point import, allowlisted by name.
+ * The legitimate entry-point-to-entry-point imports, allowlisted by name.
  *
- * ⚠ IT IS AN EXCEPTION, NOT A PRECEDENT, AND IT IS ONLY SAFE BECAUSE THE
+ * ⚠ EACH IS AN EXCEPTION, NOT A PRECEDENT, AND EACH IS ONLY SAFE BECAUSE THE
  * COLLISION WAS DESIGNED FOR. Scheps Parallel COMPOSES `LA2AKernel` — holding
  * the kernel rather than copying it is the whole architecture — so its bundle
  * necessarily carries the LA-2A module, and `la2aProcessor.js` wraps its own
  * `registerProcessor` in a try/catch that swallows exactly NotSupportedError
  * for this reason. Anything added here needs the same two things: a real
  * structural need, and a guarded registration on the imported side.
+ *
+ * ⚠ PUNCH CHAIN COMPOSES BOTH KERNELS, and adding it cost exactly the bug this
+ * rule predicts. `fet1176Processor.js` registered UNGUARDED — nothing had
+ * embedded its kernel before — so the duplicate threw NotSupportedError and
+ * aborted the module, taking the composite's own registration with it. The
+ * symptom was not a dead FET Punch but a dead PUNCH CHAIN: `addModule`
+ * resolved, constructing the node failed with "the node name is not defined",
+ * and the plugin ran silently bypassed. `npm run smoke` did catch that one,
+ * because both panels open into the same AudioContext there — which is
+ * incidental, as this file's header says, and not a reason to rely on it.
+ *
+ * ⚠ THE FIX WAS THE GUARD ON THE IMPORTED SIDE, NOT THE ALLOWLIST ENTRY. The
+ * entry records that the import is intended; the guard is what makes it safe,
+ * and without it this line would only have silenced a real failure. Both
+ * conditions are met for both imports below.
+ *
+ * ⚠ IF A THIRD PLUGIN WANTS TO COMPOSE ONE OF THESE KERNELS, STOP AND EXTRACT
+ * IT INSTEAD. Two is the point at which "shared code belongs in a module that
+ * registers nothing" starts to pay for the refactor, and this list growing is
+ * the signal — the kernels should move to modules of their own with the
+ * processors as thin entry points, exactly as `dsp/satCurves.js` did for the
+ * curves. This list should shrink to empty, not keep growing.
  */
 const ALLOWED = new Map([
   ['schepsProcessor.js', new Set(['la2aProcessor.js'])],
+  ['punchChainProcessor.js', new Set(['la2aProcessor.js', 'fet1176Processor.js'])],
 ])
 const allowed = (from, to) => ALLOWED.get(rel(from))?.has(rel(to)) ?? false
 

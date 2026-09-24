@@ -2110,5 +2110,29 @@ if (typeof registerProcessor === 'function') {
     }
   }
 
-  registerProcessor('fet1176-processor', FET1176WorkletProcessor)
+  /**
+   * Guarded, because this module reaches a worklet scope by more than one
+   * route: its own loader, and as a dependency of any composite worklet that
+   * holds FET1176Kernel — punchChainProcessor.js is the first. Each such chunk
+   * contains its own copy of this file, and two of them can end up in one
+   * AudioContext.
+   *
+   * ⚠ WITHOUT THIS, THE SECOND CHUNK'S REGISTRATION THROWS AND TAKES THE WHOLE
+   * MODULE WITH IT — including the composite's own `registerProcessor`, which
+   * runs after this one. The symptom is not "the FET is registered twice", it
+   * is the COMPOSITE failing to exist at all: `addModule` resolves, then
+   * constructing its node fails with "the node name is not defined" and the
+   * plugin silently runs bypassed. Measured exactly that way by
+   * `npm run smoke` the first time a chunk bundled a second copy.
+   *
+   * la2aProcessor.js has carried this guard since Scheps shipped, for the same
+   * reason; this file did not, because nothing had embedded its kernel yet.
+   * Already-registered is the desired state, so swallow exactly that and
+   * nothing else.
+   */
+  try {
+    registerProcessor('fet1176-processor', FET1176WorkletProcessor)
+  } catch (err) {
+    if (err?.name !== 'NotSupportedError') throw err
+  }
 }

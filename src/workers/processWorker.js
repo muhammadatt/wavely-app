@@ -9,6 +9,7 @@
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupPlan } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
+import { computePunchChainPlan } from '../audio/punchChainProcessor.js'
 import { computeSoftClipperAutoMakeupDb } from '../audio/softClipperProcessor.js'
 import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
 import { measureVoiceProfile } from '../audio/voiceProfile.js'
@@ -82,6 +83,9 @@ self.onmessage = function (e) {
       break
     case 'schepsAutoTrim':
       schepsAutoTrim(channelData, sampleRate, params)
+      break
+    case 'punchChainPlan':
+      punchChainPlan(channelData, sampleRate, params)
       break
     case 'softClipperCeiling':
       softClipperCeiling(channelData, sampleRate, params)
@@ -168,6 +172,27 @@ function schepsAutoTrim(channelData, sampleRate, params) {
       trimDb, correlation, densityDb, ceilingKneeDb,
     } = computeSchepsAutoTrim(channelData, sampleRate, params)
     postDone({ trimDb, correlation, densityDb, ceilingKneeDb })
+  } catch (err) {
+    postReply({ type: 'error', message: err.message })
+  }
+}
+
+/**
+ * Everything the Punch Chain measures for a region — both side-chain
+ * alignments, the makeup, the ceiling and the two readouts the plate prints.
+ *
+ * ⚠ HEAVIER THAN ANY OTHER MEASUREMENT IN THIS WORKER, which is why it matters
+ * that it runs here. It renders each stage once — the FET, then the opto on
+ * that — and everything else is arithmetic: the makeup is closed form and the
+ * readouts come from applying a pointwise output stage to the render already in
+ * hand. Two compressor passes, where the single-plugin solves take one to four
+ * through one. Measured on a 30 s window it runs ~780 ms, down from ~2100 when
+ * the makeup was solved by iterating whole-chain renders. Still far too slow
+ * for the main thread, and the composable's debounce is sized to match.
+ */
+function punchChainPlan(channelData, sampleRate, params) {
+  try {
+    postDone(computePunchChainPlan(channelData, sampleRate, params))
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }

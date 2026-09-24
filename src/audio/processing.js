@@ -27,6 +27,11 @@ import {
   AIR_BAND_DEFAULTS,
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
+import { ensurePunchChainWorklet } from './punchChainWorkletLoader.js'
+import {
+  PUNCH_CHAIN_DEFAULTS, PUNCH_CHAIN_LATENCY_SAMPLES, PUNCH_CHAIN_PREROLL_S,
+  toKernelParams as toPunchChainKernelParams,
+} from './effects/punchChainParams.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
@@ -851,6 +856,115 @@ export function applyAirBandRegion(segments, start, end, params, sampleRate, cha
     processorName: 'air-band-processor',
     kernelParams: toAirBandKernelParams({ ...AIR_BAND_DEFAULTS, ...params }),
   })
+}
+
+/**
+ * Everything the Punch Chain measures for a region, in one worker round trip:
+ * both side-chain alignments, the makeup, the ceiling, and the density and
+ * level-spread readouts the plate prints.
+ *
+ * ⚠ THE SPANS ARE DELIBERATELY NOT ALL THE SAME, exactly as in
+ * `computeLA2AAutoMakeup` and for the same reasons one level up:
+ *
+ *  - the FET's alignment comes from the WHOLE FILE, measured by the caller with
+ *    `regionAlignDb` and passed in. A per-selection offset makes this a
+ *    different compressor on every selection.
+ *  - the makeup and both readouts come from the worker's CAPPED window, because
+ *    solving or measuring them means rendering two compressors.
+ *  - the ceiling comes from the WHOLE REGION, because "never louder than the
+ *    source" is a claim about the source and not about its first thirty
+ *    seconds.
+ *
+ * The Opto's alignment is derived inside the plan from the FET's, so it
+ * inherits the whole-file anchor without needing a whole-file render — see
+ * `computePunchChainPlan`.
+ */
+export function computePunchChainPlan(
+  segments, start, end, kernelParams, sampleRate, channels,
+) {
+  return measureInWorker(
+    'punchChainPlan', segments, start, end, kernelParams, sampleRate, channels,
+  ).then((d) => {
+    const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
+    return {
+      fetAlignDb: d.fetAlignDb,
+      optoAlignDb: d.optoAlignDb,
+      makeupDb: d.makeupDb,
+      ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+      // The measured width only when the solve saw everything the ceiling was
+      // measured over. Null is the conservative fixed knee.
+      ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+        ? d.ceilingKneeDb
+        : null,
+      sourceDensityDb: d.sourceDensityDb,
+      sourceSpreadDb: d.sourceSpreadDb,
+      densityDb: d.densityDb,
+      spreadDb: d.spreadDb,
+    }
+  })
+}
+
+/**
+ * Apply the Punch Chain to a region.
+ *
+ * Resolves `{ buffer, trimDb }` rather than a bare buffer, for the same reason
+ * `applyFET1176Region` does: the peak restore is a per-region measurement the
+ * panel reports.
+ *
+ * ⚠ THE RESTORE IS THE SAME MECHANISM FET PUNCH USES, REUSED RATHER THAN
+ * REIMPLEMENTED — `peakRestoreTrimDb` was already generic over "a rendered
+ * region and its ceiling", and nothing about it was FET-specific. Both plugins
+ * level-match the PERCENTILE, which deliberately leaves the peak under the
+ * source; without the restore this chain landed up to 1.74 dB quieter than FET
+ * Punch at settings where the ceiling was not yet holding the peak.
+ *
+ * Measured across the three narration clips, trim by setting:
+ *
+ *   Input/PR      15/20   30/40   25/60   50/0   60/80   80/90
+ *   Messy          0.11    0.11    0.07   0.07    0.00    0.00
+ *   art_test       0.11    0.08    0.07   0.08    0.01    0.00
+ *   Greenberg      1.74    1.26    0.08   0.08    0.00    0.00
+ *
+ * The same shape FET Punch records: it matters at light settings on peaky
+ * material and is nothing once the ceiling is engaged.
+ *
+ * ⚠ MEASURED ON THIS RENDER, WHICH IS WHY IT LIVES HERE AND NOT IN THE PLAN.
+ * The plan runs on a capped window and `windowPeak <= wholePeak` always, so a
+ * window-derived trim is too generous and would push a late loud passage past
+ * the source peak — the one guarantee the ceiling exists to provide.
+ *
+ * ⚠ AND AFTER THE PRE-ROLL AND LATENCY ARE TRIMMED, necessarily: a peak sitting
+ * in the discarded head is not part of what lands on the timeline.
+ *
+ * ⚠ PREVIEW AND APPLY THEREFORE DIVERGE BY THE TRIM, the same accepted cost FET
+ * Punch carries. What does NOT diverge is the plate: density and level spread
+ * are both invariant to a scalar gain, and this is a scalar applied after the
+ * ceiling, so the two numbers the panel printed stay true of the applied file.
+ *
+ * Latency is both kernels' summed, and the pre-roll is theirs — see
+ * `PUNCH_CHAIN_LATENCY_SAMPLES` and `PUNCH_CHAIN_PREROLL_S`.
+ */
+export async function applyPunchChainRegion(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toPunchChainKernelParams({ ...PUNCH_CHAIN_DEFAULTS, ...params })
+  const buffer = await applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensurePunchChainWorklet,
+    processorName: 'punch-chain-processor',
+    kernelParams,
+    latencySamples: PUNCH_CHAIN_LATENCY_SAMPLES,
+    preRollSamples: Math.round(PUNCH_CHAIN_PREROLL_S * sampleRate),
+  })
+  const channelData = []
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) channelData.push(buffer.getChannelData(ch))
+  /**
+   * getChannelData hands back the buffer's own storage, so this scales in place.
+   *
+   * ⚠ `kernelParams.ceilingDb` IS ABSENT WITH AUTO OFF, and `peakRestoreTrimDb`
+   * returns 0 for that — which is the right answer, not a gap. With AUTO off
+   * the level is the user's and there is no measured ceiling to restore to;
+   * normalising anyway would be the plugin overruling a deliberate setting.
+   */
+  const trimDb = restorePeakToCeiling(channelData, kernelParams.ceilingDb ?? null)
+  return { buffer, trimDb }
 }
 
 /** Apply Scheps Parallel to a region. */
