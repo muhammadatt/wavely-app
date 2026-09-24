@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../audio/la2aProcessor.js'
 import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
@@ -20,6 +21,7 @@ const la2aGain = ref(LA2A_DEFAULTS.gain)
 const la2aR37 = ref(LA2A_DEFAULTS.r37)
 const la2aLookahead = ref(LA2A_DEFAULTS.lookahead)
 const la2aAnalog = ref(LA2A_DEFAULTS.analog)
+const la2aMix = ref(LA2A_DEFAULTS.mix)
 /**
  * The statistic the AUTO makeup solve references. Fixed, not a control.
  *
@@ -123,8 +125,8 @@ const la2aAutoMakeupBusy = ref(false)
 
 // Gain knob travel — measured makeup is clamped to it so the knob position
 // can never disagree with the value in effect.
-const GAIN_MIN_DB = -12
-const GAIN_MAX_DB = 24
+const GAIN_MIN_DB = LA2A_GAIN_MIN_DB
+const GAIN_MAX_DB = LA2A_GAIN_MAX_DB
 const la2aPreview = ref(false)
 const la2aReduction = ref(0)
 const la2aInputLevels = ref([])
@@ -153,6 +155,7 @@ function currentParams() {
     r37: la2aR37.value,
     lookahead: la2aLookahead.value,
     analog: la2aAnalog.value,
+    mix: la2aMix.value,
     /**
      * ⚠ ONLY WHILE AUTO OWNS THE KNOB. The ceiling is the other half of the
      * percentile solve; with AUTO off there is no solve, the gain is the
@@ -197,6 +200,12 @@ function measurementParams() {
      * records for the bench overrides.
      */
     analog: la2aAnalog.value,
+    /**
+     * ⚠ MIX BELONGS IN THE MEASUREMENT: the solve is blend-aware below 1 (see
+     * `solveMakeupPlan`), and without it would solve the wet path alone and
+     * hand a partial-mix patch a makeup that is short by up to 10 dB.
+     */
+    mix: la2aMix.value,
     /**
      * ⚠ THE BENCH TUNING BELONGS IN THE MEASUREMENT, and leaving it out meant
      * the solve modelled a different compressor from the one rendering.
@@ -512,6 +521,9 @@ export function useLA2A() {
   // A compression param, not a trim: it changes which peak survives, so the
   // makeup has to be re-solved and the live tracker's extrema are stale.
   const syncLookahead = (v) => syncCompressionParam('lookahead', la2aLookahead, v)
+  // A compression param as far as the makeup is concerned: the blend decides
+  // how much of the wet path the makeup reaches, so it has to be re-solved.
+  const syncMix = (v) => syncCompressionParam('mix', la2aMix, Math.max(0, Math.min(1, v)))
   /**
    * A COMPRESSION PARAM, NOT A TRIM, for the same reason lookahead is: the curve
    * changes the delivered level, so the makeup has to be re-solved and the live
@@ -661,6 +673,7 @@ export function useLA2A() {
     la2aR37,
     la2aLookahead,
     la2aAnalog,
+    la2aMix,
     la2aAutoMakeup,
     la2aAutoMakeupBusy,
     la2aInputAuto,
@@ -677,6 +690,7 @@ export function useLA2A() {
     syncR37,
     syncLookahead,
     syncAnalog,
+    syncMix,
     toggleAutoMakeup,
     syncInput,
     resetInputAuto,

@@ -94,7 +94,7 @@ test('an untouched bench emits no kernel params at all', () => {
    * ceiling and the input alignment, which are properties of the AUDIO and are
    * spread in only when real. This one has a default and always travels, exactly
    * as `mode` and `peakReduction` do — so its presence is the shape, not a
-   * violation of it.
+   * violation of it. `mix` is the same kind of key, for the same reason.
    */
   assert.deepEqual(toKernelParams(LA2A_DEFAULTS), {
     mode: 'compress',
@@ -103,6 +103,7 @@ test('an untouched bench emits no kernel params at all', () => {
     r37: 100,
     lookaheadMs: 0,
     analog: true,
+    mix: 1,
   })
 })
 

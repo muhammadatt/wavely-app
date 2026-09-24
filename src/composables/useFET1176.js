@@ -9,6 +9,7 @@ import { fet1176Effect, FET1176_DEFAULTS } from '../audio/effects/fet1176Compres
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { INPUT_TRIM_MAX_DB } from '../audio/dsp/inputAlign.js'
+import { FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB } from '../audio/fet1176Processor.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const FET1176_WINDOW_ID = 'fet-punch'
@@ -96,8 +97,8 @@ const fetAutoMakeupBusy = ref(false)
 
 // Output knob travel — measured makeup is clamped to it so the knob position
 // can never disagree with the value in effect.
-const OUTPUT_MIN_DB = -36
-const OUTPUT_MAX_DB = 24
+const OUTPUT_MIN_DB = FET1176_OUTPUT_MIN_DB
+const OUTPUT_MAX_DB = FET1176_OUTPUT_MAX_DB
 
 const fetPreview = ref(false)
 const fetReduction = ref(0)

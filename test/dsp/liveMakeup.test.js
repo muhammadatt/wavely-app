@@ -210,7 +210,7 @@ test('THE LOOP IS STABLE — the trajectory stays bounded and settles', () => {
   // stay inside the knob's own travel throughout, and stop moving by the end.
   const x = material()
   for (const [Kernel, params, knob, lo, hi] of [
-    [LA2AKernel, { peakReduction: 70 }, 'gainDb', -12, 24],
+    [LA2AKernel, { peakReduction: 70 }, 'gainDb', -24, 24],
     [FET1176Kernel, { inputDrive: 55, mix: 1 }, 'outputGainDb', -36, 36],
   ]) {
     const k = new Kernel(SR); k.setParams(params)

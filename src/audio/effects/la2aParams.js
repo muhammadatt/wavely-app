@@ -51,6 +51,12 @@ export const LA2A_DEFAULTS = {
    * entries, so a user who turns it off and saves gets it back off.
    */
   analog: true,
+  /**
+   * Wet/dry blend, 0-1 — parallel compression without a second track. 1 is
+   * the hardware and what every patch saved before the control existed was
+   * auditioned at, so an absent key means 1.
+   */
+  mix: 1,
 }
 
 /**
@@ -79,6 +85,12 @@ export function toKernelParams(params) {
     analog: params.analog !== false,
     r37: params.r37,
     lookaheadMs: params.lookahead,
+    /**
+     * ⚠ SENT EVERY TIME, NOT ONLY WHEN IT DIFFERS FROM 1. The kernel merges
+     * partial params, so a key sent only below 1 could never say "back to 1":
+     * the live worklet would keep the old blend while apply rendered the new.
+     */
+    mix: Number.isFinite(params.mix) ? params.mix : 1,
     ...la2aTuningOverrides(),
     /**
      * ⚠ MEASURED, NOT DIALLED, WHICH IS WHY IT IS NOT IN `LA2A_DEFAULTS`. The
