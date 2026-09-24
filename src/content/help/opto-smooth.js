@@ -14,23 +14,31 @@ export default {
     },
     {
       label: 'Gain',
-      text: 'Makeup level after the compressor, and the tube stage it feeds',
+      text: 'Makeup level after the compressor, and the tube stage it feeds. Hover or drag either big knob to read its value',
     },
     {
-      label: 'AUTO',
+      label: 'Auto Makeup',
       text: 'Sets Gain to give back what the peaks lost, measured on the selection — turning the knob takes over from it',
     },
     {
-      label: 'COMP / LIMIT',
-      text: 'COMP levels at around 3:1, LIMIT holds a harder ceiling',
+      label: 'Comp / Limit',
+      text: 'Comp levels at around 3:1, Limit holds a harder ceiling',
     },
     {
-      label: 'Tube Drive',
-      text: 'How much of the output stage colour you get',
+      label: 'HF Emph',
+      text: 'Side-chain emphasis (the hardware\'s R37 trimmer): Flat is factory; turning it up makes the compressor ignore the low end and ride the presence band instead. It changes what the compressor listens to, not the tone',
     },
     {
-      label: 'R37',
-      text: 'Side-chain emphasis, as a knob rotation: 100 is factory flat, winding down makes the compressor ignore the low end and ride the presence band instead',
+      label: 'Harmonics lamp',
+      text: 'The lamp beside VINTAGE 2A turns the valve and cell colour on or off. Off is clean with exactly the same compression',
+    },
+    {
+      label: 'Pre-Gain',
+      text: 'The line in the bottom-left corner: how hard the compressor is driven to suit this file\'s level, so a Peak Reduction setting does the same on a quiet file as on a hot one. Measured automatically; click it to open the control in place and set it by hand (it turns amber and reads MANUAL until you switch AUTO back on)',
+    },
+    {
+      label: 'Lookahead',
+      text: 'Folded under Pre-Gain; click it to open. Off is the hardware. A few ms lets the compressor catch the first syllable after a pause instead of letting it through',
     },
   ],
 
@@ -44,6 +52,6 @@ export default {
     'It levels phrases, not syllables — a 10 ms attack into a release measured in seconds cannot follow a fast envelope, and that is the character rather than a limitation',
     'Peak-referenced makeup means the output can never come out hotter than the source at any setting',
     'On fast material this can leave the average quieter while making it steadier — reach for FET Punch when you want it louder',
-    'Wind R37 down when plosives are pushing the compressor around, and it will follow the voice instead',
+    'Turn HF Emph up when plosives are pushing the compressor around, and it will follow the voice instead',
   ],
 }

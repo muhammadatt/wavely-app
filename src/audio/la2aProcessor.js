@@ -393,7 +393,7 @@ const SC_HPF_HZ = 80
  * divergence in the reference, not as a constraint on the model.
  */
 const SC_EMPH_HZ = 5975
-const SC_EMPH_MAX_DB = 21.0
+export const SC_EMPH_MAX_DB = 21.0
 /**
  * Rectifier smoothing. The T4 model supplies the real ballistics; this is only
  * meant to take the edge off the rectified waveform.

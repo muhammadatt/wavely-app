@@ -7,6 +7,8 @@ import { clamp01 } from './hardwareDial.js'
  * engraved scale above and below it, and a chrome cap with a centre line.
  *
  * Click anywhere on it to jump the cap there, then drag; Shift drags fine.
+ * `cap` picks the chrome cap (Classic 76) or the black one (Vintage 2A); the
+ * engraving takes its colours from the faceplate's `--hw-*` variables.
  * Wheel, arrow keys, Home/End and double-click-to-reset all work, and it is a
  * `role="slider"` for assistive tech.
  */
@@ -25,6 +27,8 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   label: { type: String, default: '' },
   formatValue: { type: Function, default: (v) => String(v) },
+  /** 'chrome' | 'black' */
+  cap: { type: String, default: 'chrome' },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -136,7 +140,7 @@ function onKeyDown(e) {
     <div v-if="minLabel" class="hf-end" style="left:0">{{ minLabel }}</div>
     <div v-if="maxLabel" class="hf-end" style="right:0">{{ maxLabel }}</div>
     <div class="hf-slot" :style="{ left: PAD - 4 + 'px', right: PAD - 4 + 'px' }" />
-    <div class="hf-cap" :style="{ left: capLeft, width: CAP_W + 'px' }"><div class="hf-cap-line" /></div>
+    <div class="hf-cap" :class="`hf-cap--${cap}`" :style="{ left: capLeft, width: CAP_W + 'px' }"><div class="hf-cap-line" /></div>
   </div>
 </template>
 
@@ -144,21 +148,26 @@ function onKeyDown(e) {
 .hf { position: relative; flex: 0 0 auto; cursor: ew-resize; touch-action: none; outline: none; user-select: none; }
 .hf.is-disabled { cursor: default; }
 .hf:focus-visible { border-radius: 3px; box-shadow: 0 0 0 1.5px rgba(255,164,53,.55); }
-.hf-tick { position: absolute; width: 1px; background: #d9d7d2; }
+.hf-tick { position: absolute; width: 1px; background: var(--hw-fader-tick, #d9d7d2); }
 .hf-end {
   position: absolute; top: 50%; transform: translateY(-50%);
   font: 400 8px/1 Oswald, 'Inter', system-ui, sans-serif; letter-spacing: .06em;
-  color: #f4f2ee; text-shadow: 0 1px 0 rgba(0,0,0,.9); pointer-events: none;
+  color: var(--hw-ink, #f4f2ee); text-shadow: var(--hw-ink-shadow, 0 1px 0 rgba(0,0,0,.9)); pointer-events: none;
 }
 .hf-slot {
   position: absolute; top: 50%; height: 4px; margin-top: -2px; border-radius: 2px; background: #000;
-  box-shadow: inset 0 1px 2px rgba(0,0,0,1), 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,1), 0 1px 0 var(--hw-rim, rgba(255,255,255,.08)), 0 0 0 1px rgba(0,0,0,.6);
 }
 .hf-cap {
   position: absolute; top: 2px; height: 26px; border-radius: 2px; transition: opacity .15s ease;
   background: linear-gradient(90deg,#9ea1a5 0%,#cfd1d3 24%,#f6f6f5 46%,#dcdddf 62%,#a9acb0 100%);
   box-shadow: inset 1px 0 0 rgba(255,255,255,.9), inset -1px 0 0 rgba(0,0,0,.35), 0 3px 5px rgba(0,0,0,.75), 0 0 0 .5px rgba(0,0,0,.7);
 }
+.hf-cap--black {
+  background: linear-gradient(90deg,#141518 0%,#2c2f34 24%,#454950 46%,#2a2d32 62%,#101114 100%);
+  box-shadow: inset 1px 0 0 rgba(255,255,255,.18), inset -1px 0 0 rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.14), 0 3px 5px rgba(0,0,0,.6), 0 0 0 .5px rgba(0,0,0,.85);
+}
 .hf.is-disabled .hf-cap { opacity: .5; }
 .hf-cap-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: #0c0d0e; box-shadow: 1px 0 0 rgba(255,255,255,.5); }
+.hf-cap--black .hf-cap-line { top: 3px; bottom: 3px; border-radius: 1px; background: #e9e9e6; box-shadow: 0 0 3px rgba(255,255,255,.2); }
 </style>

@@ -91,14 +91,14 @@ function onKeyDown(e) {
   position: absolute; top: 0; transform: translateX(-50%); padding: 0; border: 0; background: none;
   cursor: pointer; white-space: nowrap; text-transform: uppercase;
   font: 400 9px/1 Oswald, 'Inter', system-ui, sans-serif; letter-spacing: .1em;
-  color: #9c9993; text-shadow: 0 1px 0 rgba(0,0,0,.9); transition: color .15s ease;
+  color: var(--hw-switch-off, #9c9993); text-shadow: var(--hw-switch-shadow, 0 1px 0 rgba(0,0,0,.9)); transition: color .15s ease;
 }
-.hs-pos.is-on { color: #ffffff; }
+.hs-pos.is-on { color: var(--hw-switch-on, #ffffff); }
 .hs-pos:disabled { cursor: default; }
 .hs-track {
   position: relative; height: 18px; border-radius: 3px; cursor: pointer;
   background: linear-gradient(180deg,#050506 0%,#111214 70%,#1a1b1d 100%);
-  box-shadow: inset 0 2px 4px rgba(0,0,0,.95), inset 0 -1px 0 rgba(255,255,255,.1), 0 1px 0 rgba(255,255,255,.06);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.95), inset 0 -1px 0 rgba(255,255,255,.1), 0 1px 0 var(--hw-rim, rgba(255,255,255,.06));
 }
 .is-disabled .hs-track { cursor: default; }
 .hs-slot { position: absolute; left: 6px; right: 6px; top: 8px; height: 2px; border-radius: 1px; background: #000; box-shadow: 0 1px 0 rgba(255,255,255,.05); }

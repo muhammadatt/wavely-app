@@ -8,7 +8,7 @@ import {
 import { FET1176_DEFAULTS } from '../../audio/effects/fet1176Params.js'
 import HardwareKnob from '../hardware/HardwareKnob.vue'
 import LampButton from '../hardware/LampButton.vue'
-import PreGainToggle from '../hardware/PreGainToggle.vue'
+import FoldedLcd from '../hardware/FoldedLcd.vue'
 import HardwareFader from '../hardware/HardwareFader.vue'
 import HardwareSlideSwitch from '../hardware/HardwareSlideSwitch.vue'
 import ClassicVuMeter from '../hardware/ClassicVuMeter.vue'
@@ -157,7 +157,7 @@ const mixReadout = computed(() => formatPercent(fetMix.value))
  *
  * Off the faceplate: AUTO measures the whole file's gated RMS and is right for
  * nearly every file, so the face shows only a readout and the override sits
- * behind it (PreGainToggle). Stepping it takes over from AUTO, exactly as Output
+ * behind it (FoldedLcd). Stepping it takes over from AUTO, exactly as Output
  * behaves under Auto Makeup; turning AUTO off keeps the measured value as the
  * starting point rather than jumping.
  */
@@ -306,9 +306,10 @@ async function applyAndClose() {
       <div class="c76-bottom">
         <div class="c76-left">
           <!-- Pre-Gain (input alignment) is folded to one line by default and
-               opens in place. See PreGainToggle. -->
-          <PreGainToggle
+               opens in place. See FoldedLcd. -->
+          <FoldedLcd
             class="c76-ctl"
+            name="Pre-Gain"
             :model-value="fetInputAlignDb"
             @update:model-value="syncInputAlign"
             :auto="fetInputAuto"

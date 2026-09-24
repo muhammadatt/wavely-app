@@ -85,7 +85,7 @@ onBeforeUnmount(stop)
 .lcd {
   position: relative; width: 50px; height: 26px; box-sizing: border-box; border: 1px solid #000; border-radius: 2px; overflow: hidden;
   background: linear-gradient(180deg,#07080a 0%,#0d0f12 55%,#060708 100%);
-  box-shadow: inset 0 2px 4px rgba(0,0,0,.95), inset 0 -1px 0 rgba(255,255,255,.07), 0 1px 0 rgba(255,255,255,.09);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.95), inset 0 -1px 0 rgba(255,255,255,.07), 0 1px 0 var(--hw-rim, rgba(255,255,255,.09));
 }
 .lcd-glass { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg,rgba(255,255,255,.1) 0%,rgba(255,255,255,0) 42%), radial-gradient(90% 70% at 50% 120%,rgba(255,164,53,.07),rgba(0,0,0,0) 70%); }
 .lcd-text {
