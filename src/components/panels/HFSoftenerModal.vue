@@ -180,8 +180,8 @@ function segStyle(active, disabled) {
     @close="close"
   >
     <div class="px-[26px] pt-[22px] pb-[26px]">
-      <!-- 12 dB full scale: the deepest the shelf can go, at Amount 100 %. -->
-      <GainReductionBar :reduction-db="-hfReduction" :accent="ACCENT" :full-scale-db="12" title="SHELF DEPTH" />
+      <!-- 24 dB full scale: the deepest the shelf can go, at Amount 100 %. -->
+      <GainReductionBar :reduction-db="-hfReduction" :accent="ACCENT" :full-scale-db="24" title="SHELF DEPTH" />
 
       <div class="flex items-center justify-between gap-[22px] mt-[18px]">
         <LevelMeter :levels="hfInputLevels" label="IN" :height="150" />

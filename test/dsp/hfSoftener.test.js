@@ -231,13 +231,13 @@ test('gain computer: zero below the knee, over/R above it, capped at D_max', () 
   }
 })
 
-test('amount macro: 0 % never engages, 40 % is the tuned default, 100 % is -44 dBFS / 12 dB', () => {
+test('amount macro: 0 % never engages, 40 % is the tuned default, 100 % is -44 dBFS / 24 dB', () => {
   assert.equal(amountToThresholdDb(0), 0)
   assert.equal(amountToMaxDepthDb(0), 0)
   assert.ok(Math.abs(amountToThresholdDb(0.4) - -34) < 1e-9)
   assert.ok(Math.abs(amountToMaxDepthDb(0.4) - 6) < 1e-9)
   assert.ok(Math.abs(amountToThresholdDb(1) - -44) < 1e-9)
-  assert.ok(Math.abs(amountToMaxDepthDb(1) - 12) < 1e-9)
+  assert.ok(Math.abs(amountToMaxDepthDb(1) - 24) < 1e-9)
   for (let a = 0.05; a <= 1; a += 0.05) {
     assert.ok(amountToThresholdDb(a) < amountToThresholdDb(a - 0.05))
     assert.ok(amountToMaxDepthDb(a) > amountToMaxDepthDb(a - 0.05))
@@ -484,13 +484,13 @@ test('release: longer holds steadier through a consonant run', () => {
 
 test('band shape: cuts the sibilance band, leaves the air above 16 kHz, never boosts', () => {
   for (const sr of [44100, 48000, 96000]) {
-    for (const depth of [3, 6, 9, 12]) {
+    for (const depth of [3, 6, 9, 12, 18, 24]) {
       const secs = softenerSections(sr, -depth, 'band')
       const dense = Array.from({ length: 400 }, (_, i) => 100 * Math.pow(10, (i / 399) * Math.log10(0.49 * sr / 100)))
       const db = magnitudeResponseDb(secs, dense, sr)
       const deepest = Math.min(...db)
-      // 0.11 dB at 9 dB of depth, 0.15 at the 12 dB maximum.
-      assert.ok(Math.max(...db) < 0.2, `boost ${Math.max(...db).toFixed(2)} dB at ${sr}/${depth}`)
+      // 0.09 dB at 6 dB of depth, 0.32–0.35 at the 24 dB maximum.
+      assert.ok(Math.max(...db) < 0.02 * depth + 0.05, `boost ${Math.max(...db).toFixed(2)} dB at ${sr}/${depth}`)
       // The compensation is solved per rate, so the depth lands everywhere.
       assert.ok(Math.abs(deepest + depth) < 0.1, `deepest ${deepest.toFixed(2)} for ${depth} dB at ${sr}`)
       const [air] = magnitudeResponseDb(secs, [16000], sr)

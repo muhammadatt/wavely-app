@@ -8,7 +8,7 @@ export default {
   ],
 
   controls: [
-    { label: 'Amount', text: 'How early the cut starts and how deep it can go, up to 12 dB' },
+    { label: 'Amount', text: 'How early the cut starts and how deep it can go, up to 24 dB' },
     { label: 'Context', text: 'How much vowel energy raises the threshold, so a sibilant alone in a gap is treated harder than one inside a word' },
     { label: 'Release', text: 'How long the cut holds after a consonant when no vowel follows — longer is steadier through runs like “sts”' },
     { label: 'Shape', text: 'Band cuts the sibilance region and leaves the air above 11 kHz; Shelf cuts everything above 4.5 kHz' },

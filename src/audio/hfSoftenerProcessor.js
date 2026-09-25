@@ -58,8 +58,8 @@ export const HF_SOFTENER_TUNING = {
   attackMs: 2.0,
   // Band shape: the 4.5 kHz shelf followed by an equal and opposite shelf at
   // 11 kHz, so the cut returns to flat and the air above ~14 kHz is left
-  // alone. Q 0.8 is the widest return that barely boosts (≤ 0.16 dB at the
-  // 12 dB maximum). The two shelves overlap, so the pair bottoms out short of
+  // alone. Q 0.8 is the widest return that barely boosts (≤ 0.35 dB at the
+  // 24 dB maximum). The two shelves overlap, so the pair bottoms out short of
   // its nominal gain — by a factor that grows with depth (×1.17 at 1 dB to
   // ×1.30 at 12, at 44.1 kHz) and with sample rate (×1.51 at 12 dB, 96 kHz).
   // No constant covers that; `bandDepthComp` solves it per rate instead, so
@@ -149,7 +149,7 @@ const FOLLOWER_FLOOR = 1e-15
 /*
  * Amount drives T_base and D_max jointly. The spec pins three points: 0 %
  * never engages (0 dBFS), 40 % is the tuned default (−34 dBFS, 6 dB), 100 %
- * is −44 dBFS and 9 dB — the last depth since raised to 12 dB. Threshold and
+ * is −44 dBFS and 9 dB — the last depth since raised to 24 dB. Threshold and
  * depth rise together at a fixed 3:1, so the HF level that reaches FULL depth
  * barely moves across the knob (−16 dBFS at 40 %, −17 at the spec's 100 %);
  * 9 dB at the top bought only 3 dB over the default on the loudest esses. A power law through them spends most of the knob's
@@ -160,7 +160,7 @@ const AMOUNT_REF = 0.4
 const T_AT_REF = -34
 const T_AT_FULL = -44
 const D_AT_REF = 6
-const D_AT_FULL = 12 // the spec's 9, raised after listening: 9 ran out on hard esses
+const D_AT_FULL = 24 // the spec's 9; raised so the top of the knob reaches well past the default
 const T_EXP = Math.log(T_AT_REF / T_AT_FULL) / Math.log(AMOUNT_REF)
 const D_EXP = Math.log(D_AT_REF / D_AT_FULL) / Math.log(AMOUNT_REF)
 
@@ -174,7 +174,7 @@ export function amountToThresholdDb(amount) {
   return a === 0 ? 0 : T_AT_FULL * Math.pow(a, T_EXP)
 }
 
-/** Amount (0–1) → D_max in dB. 0 → 0, 0.4 → 6, 1 → 12. */
+/** Amount (0–1) → D_max in dB. 0 → 0, 0.4 → 6, 1 → 24. */
 export function amountToMaxDepthDb(amount) {
   const a = clamp(amount, 0, 1)
   return a === 0 ? 0 : D_AT_FULL * Math.pow(a, D_EXP)
@@ -282,14 +282,27 @@ export function bandDepthComp(sampleRate, depthDb, tuning = HF_SOFTENER_TUNING) 
   return table[table.length - 1]
 }
 
+/** Sections in the audio path, whatever the shape. */
+export const AUDIO_SECTIONS = 4
+
 /**
- * The audio path's two sections at a gain — shared with the panel's curve
- * display. 'shelf' is the spec's single shelf (second section an exact
- * identity); 'band' adds the return shelf. At 0 dB both are exact identities.
+ * The audio path's sections at a gain — shared with the panel's curve
+ * display. 'shelf' is the spec's single shelf (the rest exact identities).
+ * 'band' is TWO identical shelf/return pairs, each carrying half the depth.
+ *
+ * ⚠ TWO HALF-DEPTH PAIRS, NOT ONE, because one pair cannot dig deep. Its two
+ * shelves are only 1.3 octaves apart, so past ~15 dB the cut can only deepen
+ * by spreading upward: asked for 24 dB, one pair topped out at −19.3 and cut
+ * 16 kHz by 14 dB — the air the band exists to keep. Responses in dB add when
+ * sections cascade, so two −12 dB pairs are exactly a −24 dB band with the
+ * −12 dB pair's shape: 16 kHz −0.6 dB at 44.1 kHz. At 3–6 dB the two agree
+ * with the single pair to 0.1 dB. At 0 dB every section is an exact identity.
  */
 export function softenerSections(sampleRate, gainDb, shape = 'band', tuning = HF_SOFTENER_TUNING) {
-  if (shape !== 'band') return [shelfSection(sampleRate, gainDb, tuning), IDENTITY]
-  return bandPair(sampleRate, gainDb * bandDepthComp(sampleRate, gainDb, tuning), tuning)
+  if (shape !== 'band') return [shelfSection(sampleRate, gainDb, tuning), IDENTITY, IDENTITY, IDENTITY]
+  const half = gainDb / 2
+  const pair = bandPair(sampleRate, half * bandDepthComp(sampleRate, half, tuning), tuning)
+  return [pair[0], pair[1], pair[0], pair[1]]
 }
 
 /**
@@ -430,10 +443,10 @@ export class HFSoftenerKernel {
     this.pathRot = new Ramp(0, rampSamples)
     this.rotTrim = Math.exp(ROTATOR_DETECTOR_TRIM_DB * LN10_OVER_20)
 
-    // Audio-path coefficients, two sections × 5: `cur` is what the last chunk
-    // ended on.
-    this.coeffCur = new Float64Array(10)
-    this.coeffNext = new Float64Array(10)
+    // Audio-path coefficients, AUDIO_SECTIONS × 5: `cur` is what the last
+    // chunk ended on.
+    this.coeffCur = new Float64Array(AUDIO_SECTIONS * 5)
+    this.coeffNext = new Float64Array(AUDIO_SECTIONS * 5)
     this.shape = 'band'
     this.writeShelf(this.coeffCur, 0)
     const chunk = tuning.coeffUpdateSamples
@@ -485,7 +498,7 @@ export class HFSoftenerKernel {
     // Snap near-zero gain to exactly zero, where each shelf's numerator and
     // denominator are identical and the filter is an exact identity.
     const secs = softenerSections(this.sampleRate, Math.abs(gainDb) < 1e-4 ? 0 : gainDb, this.shape, this.tuning)
-    for (let k = 0; k < 2; k++) {
+    for (let k = 0; k < AUDIO_SECTIONS; k++) {
       const c = secs[k]
       const o = k * 5
       dst[o] = c.b0
@@ -503,7 +516,7 @@ export class HFSoftenerKernel {
         detHp: new Biquad(this.detHpCoeffs),
         lmHp: new Biquad(this.lmHpCoeffs),
         lmLp: new Biquad(this.lmLpCoeffs),
-        z: new Float64Array(4), // z1, z2 per audio-path section
+        z: new Float64Array(AUDIO_SECTIONS * 2), // z1, z2 per audio-path section
         work: new Float64Array(this.tuning.coeffUpdateSamples),
         // Per-chunk scratch: shelf input and detector signal.
         pathBuf: new Float64Array(this.tuning.coeffUpdateSamples),
@@ -606,7 +619,7 @@ export class HFSoftenerKernel {
         const z = s.z
         const w = s.work
         for (let i = 0; i < len; i++) w[i] = s.pathBuf[i]
-        for (let k = 0; k < 2; k++) {
+        for (let k = 0; k < AUDIO_SECTIONS; k++) {
           const o = k * 5
           const d0 = (next[o] - cur[o]) * inv
           const d1 = (next[o + 1] - cur[o + 1]) * inv
