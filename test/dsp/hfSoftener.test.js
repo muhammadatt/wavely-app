@@ -12,6 +12,7 @@ import {
   Follower,
   HF_SOFTENER_TUNING as T,
   HFSoftenerKernel,
+  HF_SOFTENER_KERNEL_DEFAULTS,
   HF_SOFTENER_PREROLL_S,
   ROTATOR_DETECTOR_TRIM_DB,
   adaptiveThresholdDb,
@@ -23,6 +24,7 @@ import {
   rotatorMaxGroupDelayMs,
   rotatorSections,
   shelfSection,
+  softenerSections,
 } from '../../src/audio/hfSoftenerProcessor.js'
 import { highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 
@@ -148,7 +150,7 @@ test('rotator: detector trim level-matches the follower on pink noise', () => {
     const meanDb = rot => {
       const rs = rotatorSections(sr).map(c => new Biquad(c))
       const hp = new Biquad(highpass(sr, T.detHpFreqHz, T.detHpQ))
-      const f = new Follower(sr, T.attackMs, T.releaseMs)
+      const f = new Follower(sr, T.attackMs, HF_SOFTENER_KERNEL_DEFAULTS.releaseMs)
       let sum = 0
       let cnt = 0
       for (let i = 0; i < x.length; i++) {
@@ -399,4 +401,113 @@ test('shelf curve helper matches the depth range', () => {
   const [lo, hi] = magnitudeResponseDb([shelfSection(SR, -6)], [200, 16000], SR)
   assert.ok(Math.abs(lo) < 0.1, `shelf moves the low end by ${lo}`)
   assert.ok(Math.abs(hi - -6) < 0.2, `shelf plateau ${hi}`)
+})
+
+// ── Release, vowel release, band shape ──────────────────────────────────────
+
+/** "s", 25 ms closure, "s", 20 ms, "s" — a fast consonant run with no vowel. */
+function consonantRun(sr) {
+  const rnd = lcg(11)
+  const n = sr * 3
+  const y = new Float32Array(n)
+  const h = new Biquad(highpass(sr, 5000, 0.7))
+  const l = new Biquad(lowpass(sr, 9000, 0.7))
+  const bursts = [[0.3, 0.34], [0.365, 0.405], [0.425, 0.465]]
+  for (let i = 0; i < n; i++) {
+    const t = (i % sr) / sr
+    const v = l.tick(h.tick(rnd()))
+    if (bursts.some(([a, b]) => t >= a && t < b)) y[i] = v * 0.22
+    if (t < 0.3 || t > 0.5) y[i] += 0.06 * Math.sin(2 * Math.PI * 130 * i / sr)
+  }
+  return { y, bursts }
+}
+
+/** Largest recovery (dB) of the shelf inside the run's unvoiced gaps. */
+function gapBounceDb(params) {
+  const { y, bursts } = consonantRun(SR)
+  const g = processHFSoftenerBuffer([y], SR, params, { recordGain: true }).gainDb
+  let worst = 0
+  for (let c = 1; c < 3; c++) {
+    for (let j = 0; j < 2; j++) {
+      const a = Math.round((c + bursts[j][1]) * SR)
+      const b = Math.round((c + bursts[j + 1][0]) * SR)
+      let hi = -99
+      for (let i = a; i < b; i++) hi = Math.max(hi, g[i])
+      let before = 0
+      for (let i = a - Math.round(0.01 * SR); i < a; i++) before = Math.min(before, g[i])
+      worst = Math.max(worst, hi - before)
+    }
+  }
+  return worst
+}
+
+function meanGain(gainDb, a, b) {
+  let s = 0, n = 0
+  for (let i = SR; i < gainDb.length; i++) {
+    const t = (i % SR) / SR
+    if (t >= a && t < b) { s += gainDb[i]; n++ }
+  }
+  return s / n
+}
+
+test('vowel release: the vowel after an "s" keeps its top end', () => {
+  // The dulling that remained after sibilants was release carryover into the
+  // next vowel, not the vowels themselves — measured -1.32 dB over its first
+  // 60 ms at the default, -3.59 at Amount 80 %.
+  const { x } = makeSpeech(SR)
+  for (const amount of [0.4, 0.8]) {
+    const off = processHFSoftenerBuffer([x], SR, { amount, vowelRelease: false }, { recordGain: true }).gainDb
+    const on = processHFSoftenerBuffer([x], SR, { amount, vowelRelease: true }, { recordGain: true }).gainDb
+    const carryOff = meanGain(off, 0.39, 0.45)
+    const carryOn = meanGain(on, 0.39, 0.45)
+    assert.ok(carryOn > carryOff * 0.4, `amount ${amount}: carryover ${carryOff.toFixed(2)} → ${carryOn.toFixed(2)} dB`)
+    // …without giving up the sibilants themselves.
+    for (const [a, b] of [[0.35, 0.39], [0.7, 0.735]]) {
+      const d = meanGain(on, a, b) - meanGain(off, a, b)
+      assert.ok(d < 0.2, `amount ${amount}: sibilant at ${a} s lost ${d.toFixed(2)} dB of reduction`)
+    }
+  }
+})
+
+test('vowel release does not bring back chatter inside a consonant run', () => {
+  const off = gapBounceDb({ vowelRelease: false })
+  const on = gapBounceDb({ vowelRelease: true })
+  assert.ok(Math.abs(on - off) < 0.05, `gap bounce ${off.toFixed(2)} → ${on.toFixed(2)} dB`)
+})
+
+test('release: longer holds steadier through a consonant run', () => {
+  const fast = gapBounceDb({ releaseMs: 30 })
+  const slow = gapBounceDb({ releaseMs: 120 })
+  assert.ok(slow < fast - 0.5, `bounce at 30 ms ${fast.toFixed(2)}, at 120 ms ${slow.toFixed(2)}`)
+})
+
+test('band shape: cuts the sibilance band, leaves the air above 16 kHz, never boosts', () => {
+  for (const sr of [44100, 48000, 96000]) {
+    for (const depth of [3, 6, 9]) {
+      const secs = softenerSections(sr, -depth, 'band')
+      const dense = Array.from({ length: 400 }, (_, i) => 100 * Math.pow(10, (i / 399) * Math.log10(0.49 * sr / 100)))
+      const db = magnitudeResponseDb(secs, dense, sr)
+      const deepest = Math.min(...db)
+      assert.ok(Math.max(...db) < 0.15, `boost ${Math.max(...db).toFixed(2)} dB at ${sr}/${depth}`)
+      // The depth compensation is fitted at 44.1/48 kHz; the bilinear warp
+      // makes the band ~1 dB shallower at 96 kHz and full depth.
+      assert.ok(Math.abs(deepest + depth) < (sr > 48000 ? 1.1 : 0.6), `deepest ${deepest.toFixed(2)} for ${depth} dB at ${sr}`)
+      const [air] = magnitudeResponseDb(secs, [16000], sr)
+      const [shelfAir] = magnitudeResponseDb(softenerSections(sr, -depth, 'shelf'), [16000], sr)
+      assert.ok(air > -0.15 * depth, `16 kHz cut ${air.toFixed(2)} dB at ${sr}/${depth}`)
+      assert.ok(shelfAir < -0.9 * depth, 'the shelf is the one that takes the air')
+    }
+  }
+})
+
+test('both shapes are exact identities at 0 dB', () => {
+  for (const shape of ['shelf', 'band']) {
+    for (const c of softenerSections(SR, 0, shape)) {
+      assert.ok(c.b0 === 1 || Math.abs(c.b0 - 1) < 1e-15)
+      assert.ok(Math.abs(c.b1 - c.a1) < 1e-15 && Math.abs(c.b2 - c.a2) < 1e-15)
+    }
+    const x = pink(SR, 5).map(v => v * 0.01)
+    const { channelData } = processHFSoftenerBuffer([x], SR, { shape })
+    for (let i = 0; i < x.length; i++) assert.equal(channelData[0][i], x[i], `${shape} sample ${i}`)
+  }
 })

@@ -18,6 +18,9 @@ export const HF_SOFTENER_DEFAULTS = {
   amount: 40, // %, drives T_base and D_max jointly
   context: 50, // %, Module C depth; 0 = fixed threshold
   rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
+  release: 60, // ms, HF release outside vowels
+  vowelRelease: true, // let go fast when a vowel starts
+  shape: 'band', // 'shelf' | 'band'
 }
 
 /** Map UI param names to kernel param names. */
@@ -26,6 +29,9 @@ export function toKernelParams(params) {
     amount: params.amount / 100,
     context: params.context / 100,
     rotator: params.rotator,
+    releaseMs: params.release,
+    vowelRelease: params.vowelRelease,
+    shape: params.shape,
   }
 }
 

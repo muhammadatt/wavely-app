@@ -11,8 +11,11 @@
  *   Module A  phase rotator: three all-passes (3.2 / 5.6 / 9 kHz) on the
  *             DETECTOR branch, lowering the sibilant's crest factor so the
  *             follower tracks HF energy rather than individual peaks.
- *   Module B  dynamic HF shelf: 4 kHz HP detector → peak follower (2 / 60 ms)
- *             → soft-knee gain computer → 4.5 kHz shelf, 0 to −D_max dB.
+ *   Module B  dynamic HF shelf: 4 kHz HP detector → peak follower (2 ms
+ *             attack, Release outside vowels, 10 ms inside them) → soft-knee
+ *             gain computer → 4.5 kHz shelf, 0 to −D_max dB. The 'band' shape
+ *             (default) adds an opposite shelf at 11 kHz so the cut returns to
+ *             flat and leaves the air above ~14 kHz alone.
  *   Module C  adaptive threshold: a slow 200 Hz–3 kHz RMS follower raises T
  *             when there is vowel energy for a sibilant to hide under. It only
  *             ever RAISES it — letting it drop in quiet passages would engage
@@ -51,7 +54,27 @@ export const HF_SOFTENER_TUNING = {
   detHpFreqHz: 4000,
   detHpQ: 0.7,
   attackMs: 2.0,
-  releaseMs: 60,
+  // Band shape: the 4.5 kHz shelf followed by an equal and opposite shelf at
+  // 11 kHz, so the cut returns to flat and the air above ~14 kHz is left
+  // alone. Q 0.8 is the widest return that never boosts (≤ 0.11 dB at 9 dB
+  // of depth). The pair bottoms out ~1 dB short of the requested depth, so its
+  // gain is scaled by `bandDepthComp` to keep Amount's max depth meaning the
+  // same thing in both shapes.
+  returnFreqHz: 11000,
+  returnQ: 0.8,
+  bandDepthComp: 1.2,
+  // Vowel release: while the low/mid band is voiced, the HF follower releases
+  // at `vowelReleaseMs` instead of the Release setting. Carryover lands on the
+  // vowel after an "s"; the gaps inside a consonant run are unvoiced, so they
+  // keep the slow release and do not chatter.
+  vowelReleaseMs: 10,
+  voicedAttackMs: 3,
+  // ⚠ 5 ms, not slower: a lingering voicing flag from the vowel BEFORE an "s"
+  // fires the fast release inside the "s" and under-treats it. At 20 ms the
+  // in-phrase sibilant lost 0.5 dB of reduction; at 5 ms it loses 0.1.
+  voicedDecayMs: 5,
+  voicedFloorDb: -40, // L_ref − 20: below this nothing counts as voiced
+  voicedMarginDb: 0, // voiced needs low/mid above the HF envelope by this much
   ratio: 3.0,
   kneeDb: 6.0, // ± around the threshold, quadratic
   // Module C
@@ -74,7 +97,14 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   amount: 0.4, // 0–1
   context: 0.5, // 0–1 → κ 0–0.8
   rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
+  releaseMs: 60, // HF follower release outside vowels, 20–150
+  vowelRelease: true, // let go fast when a vowel starts
+  shape: 'band', // 'shelf' (the spec's) | 'band' (returns to flat above 11 kHz)
 }
+
+export const SHAPES = ['shelf', 'band']
+export const RELEASE_MS_MIN = 20
+export const RELEASE_MS_MAX = 150
 
 export const ROTATOR_MODES = ['off', 'sidechain', 'inpath']
 export const LISTEN_MODES = ['off', 'delta', 'sidechain']
@@ -175,9 +205,25 @@ export function rotatorSections(sampleRate, tuning = HF_SOFTENER_TUNING) {
   return tuning.apFreqsHz.map((f, i) => allpass(sampleRate, f, tuning.apQs[i]))
 }
 
-/** The audio-path shelf at a gain — shared with the panel's curve display. */
+/** The audio-path shelf at a gain. */
 export function shelfSection(sampleRate, gainDb, tuning = HF_SOFTENER_TUNING) {
   return highShelf(sampleRate, tuning.shelfFreqHz, tuning.shelfQ, gainDb, 'q')
+}
+
+const IDENTITY = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }
+
+/**
+ * The audio path's two sections at a gain — shared with the panel's curve
+ * display. 'shelf' is the spec's single shelf (second section an exact
+ * identity); 'band' adds the return shelf. At 0 dB both are exact identities.
+ */
+export function softenerSections(sampleRate, gainDb, shape = 'band', tuning = HF_SOFTENER_TUNING) {
+  if (shape !== 'band') return [shelfSection(sampleRate, gainDb, tuning), IDENTITY]
+  const g = gainDb * tuning.bandDepthComp
+  return [
+    shelfSection(sampleRate, g, tuning),
+    highShelf(sampleRate, tuning.returnFreqHz, tuning.returnQ, -g, 'q'),
+  ]
 }
 
 /**
@@ -299,7 +345,10 @@ export class HFSoftenerKernel {
 
     // Stereo is linked: one detector reading drives one shelf gain on every
     // channel, so the image does not wander on a sibilant panned off-centre.
-    this.hfEnv = new Follower(sampleRate, tuning.attackMs, tuning.releaseMs)
+    this.hfEnv = new Follower(sampleRate, tuning.attackMs, HF_SOFTENER_KERNEL_DEFAULTS.releaseMs)
+    this.relSlow = this.hfEnv.release
+    this.relVowel = riseCoeff(tuning.vowelReleaseMs, sampleRate)
+    this.voiceEnv = new Follower(sampleRate, tuning.voicedAttackMs, tuning.voicedDecayMs)
     this.lmEnv = new Follower(sampleRate, tuning.lmAttackMs, tuning.lmReleaseMs)
     this.gainSmooth = riseCoeff(tuning.gainSmoothMs, sampleRate)
     this.shelfGainDb = 0
@@ -314,9 +363,11 @@ export class HFSoftenerKernel {
     this.pathRot = new Ramp(0, rampSamples)
     this.rotTrim = Math.exp(ROTATOR_DETECTOR_TRIM_DB * LN10_OVER_20)
 
-    // Shelf coefficients: `cur` is what the last chunk ended on.
-    this.coeffCur = new Float64Array(5)
-    this.coeffNext = new Float64Array(5)
+    // Audio-path coefficients, two sections × 5: `cur` is what the last chunk
+    // ended on.
+    this.coeffCur = new Float64Array(10)
+    this.coeffNext = new Float64Array(10)
+    this.shape = 'band'
     this.writeShelf(this.coeffCur, 0)
     const chunk = tuning.coeffUpdateSamples
     this.gainBuf = new Float64Array(chunk)
@@ -339,7 +390,15 @@ export class HFSoftenerKernel {
   setParams(partial, immediate = false) {
     const p = { ...this.params, ...partial }
     if (!ROTATOR_MODES.includes(p.rotator)) p.rotator = HF_SOFTENER_KERNEL_DEFAULTS.rotator
+    if (!SHAPES.includes(p.shape)) p.shape = HF_SOFTENER_KERNEL_DEFAULTS.shape
     this.params = p
+    // Release and shape need no ramp: a release change alters a rate, not a
+    // level, and a shape change lands through the per-chunk coefficient
+    // interpolation like any other gain move.
+    this.relSlow = riseCoeff(clamp(p.releaseMs, RELEASE_MS_MIN, RELEASE_MS_MAX), this.sampleRate)
+    this.vowelRelease = !!p.vowelRelease
+    this.shape = p.shape
+    if (immediate) this.writeShelf(this.coeffCur, this.shelfGainDb)
     this.tBase.set(amountToThresholdDb(p.amount), immediate)
     this.dMax.set(amountToMaxDepthDb(p.amount), immediate)
     this.kappa.set(contextToKappa(p.context), immediate)
@@ -353,14 +412,18 @@ export class HFSoftenerKernel {
   }
 
   writeShelf(dst, gainDb) {
-    // Snap near-zero gain to exactly zero, where the shelf's numerator and
+    // Snap near-zero gain to exactly zero, where each shelf's numerator and
     // denominator are identical and the filter is an exact identity.
-    const c = shelfSection(this.sampleRate, Math.abs(gainDb) < 1e-4 ? 0 : gainDb, this.tuning)
-    dst[0] = c.b0
-    dst[1] = c.b1
-    dst[2] = c.b2
-    dst[3] = c.a1
-    dst[4] = c.a2
+    const secs = softenerSections(this.sampleRate, Math.abs(gainDb) < 1e-4 ? 0 : gainDb, this.shape, this.tuning)
+    for (let k = 0; k < 2; k++) {
+      const c = secs[k]
+      const o = k * 5
+      dst[o] = c.b0
+      dst[o + 1] = c.b1
+      dst[o + 2] = c.b2
+      dst[o + 3] = c.a1
+      dst[o + 4] = c.a2
+    }
   }
 
   ensureChannels(n) {
@@ -370,8 +433,8 @@ export class HFSoftenerKernel {
         detHp: new Biquad(this.detHpCoeffs),
         lmHp: new Biquad(this.lmHpCoeffs),
         lmLp: new Biquad(this.lmLpCoeffs),
-        z1: 0,
-        z2: 0,
+        z: new Float64Array(4), // z1, z2 per audio-path section
+        work: new Float64Array(this.tuning.coeffUpdateSamples),
         // Per-chunk scratch: shelf input and detector signal.
         pathBuf: new Float64Array(this.tuning.coeffUpdateSamples),
         detBuf: new Float64Array(this.tuning.coeffUpdateSamples),
@@ -428,8 +491,23 @@ export class HFSoftenerKernel {
         }
 
         const trim = 1 + detRot * (this.rotTrim - 1)
+        const lmNow = energy / nOut
+        const voice = this.voiceEnv.tick(lmNow)
+        let release = this.relSlow
+        if (this.vowelRelease) {
+          const voiceDb = voice > 0 ? 10 * Math.log10(voice) : -300
+          const hfPrev = this.hfEnv.value
+          const hfPrevDb = hfPrev > 0 ? Math.log(hfPrev) * DB_PER_NEPER : -300
+          // A soft crossover rather than a switch: a hard threshold on two
+          // rippling envelopes flips at a sample-rate-dependent instant, and
+          // measured 0.35 dB apart at 96 kHz; blended over 6 dB it is 0.10.
+          const over = Math.min(voiceDb - tuning.voicedFloorDb, voiceDb - hfPrevDb - tuning.voicedMarginDb)
+          const wv = over <= -3 ? 0 : over >= 3 ? 1 : (over + 3) / 6
+          release = this.relSlow + wv * (this.relVowel - this.relSlow)
+        }
+        this.hfEnv.release = release
         const hf = this.hfEnv.tick(peak * trim)
-        const lmEnergy = this.lmEnv.tick(energy / nOut)
+        const lmEnergy = this.lmEnv.tick(lmNow)
         const hfDb = hf > 0 ? Math.log(hf) * DB_PER_NEPER : -300
         const lmDb = lmEnergy > 0 ? 10 * Math.log10(lmEnergy) : -300
 
@@ -449,32 +527,46 @@ export class HFSoftenerKernel {
       // the 0.5 ms smoothed gain can make. Interpolating coefficients across
       // the chunk (rather than stepping them) is what keeps it zipper-free.
       this.writeShelf(next, gainBuf[len - 1])
-      const d0 = (next[0] - cur[0]) / len
-      const d1 = (next[1] - cur[1]) / len
-      const d2 = (next[2] - cur[2]) / len
-      const d3 = (next[3] - cur[3]) / len
-      const d4 = (next[4] - cur[4]) / len
       const listen = this.listen
+      const inv = 1 / len
 
       for (let ch = 0; ch < nOut; ch++) {
         const s = chans[ch]
         const out = outputChannels[ch]
-        let b0 = cur[0], b1 = cur[1], b2 = cur[2], a1 = cur[3], a2 = cur[4]
-        let z1 = s.z1, z2 = s.z2
-        for (let i = 0; i < len; i++) {
-          b0 += d0; b1 += d1; b2 += d2; a1 += d3; a2 += d4
-          const x = s.pathBuf[i]
-          const y = b0 * x + z1
-          z1 = b1 * x - a1 * y + z2
-          z2 = b2 * x - a2 * y
-          out[off + i] = listen === 'off' ? y : listen === 'delta' ? x - y : s.detBuf[i]
+        const z = s.z
+        const w = s.work
+        for (let i = 0; i < len; i++) w[i] = s.pathBuf[i]
+        for (let k = 0; k < 2; k++) {
+          const o = k * 5
+          const d0 = (next[o] - cur[o]) * inv
+          const d1 = (next[o + 1] - cur[o + 1]) * inv
+          const d2 = (next[o + 2] - cur[o + 2]) * inv
+          const d3 = (next[o + 3] - cur[o + 3]) * inv
+          const d4 = (next[o + 4] - cur[o + 4]) * inv
+          let b0 = cur[o], b1 = cur[o + 1], b2 = cur[o + 2], a1 = cur[o + 3], a2 = cur[o + 4]
+          let z1 = z[2 * k], z2 = z[2 * k + 1]
+          for (let i = 0; i < len; i++) {
+            b0 += d0; b1 += d1; b2 += d2; a1 += d3; a2 += d4
+            const x = w[i]
+            const y = b0 * x + z1
+            z1 = b1 * x - a1 * y + z2
+            z2 = b2 * x - a2 * y
+            w[i] = y
+          }
+          if (Math.abs(z1) < DENORMAL_FLOOR && Math.abs(z2) < DENORMAL_FLOOR) {
+            z1 = 0
+            z2 = 0
+          }
+          z[2 * k] = z1
+          z[2 * k + 1] = z2
         }
-        if (Math.abs(z1) < DENORMAL_FLOOR && Math.abs(z2) < DENORMAL_FLOOR) {
-          z1 = 0
-          z2 = 0
+        if (listen === 'off') {
+          for (let i = 0; i < len; i++) out[off + i] = w[i]
+        } else if (listen === 'delta') {
+          for (let i = 0; i < len; i++) out[off + i] = s.pathBuf[i] - w[i]
+        } else {
+          for (let i = 0; i < len; i++) out[off + i] = s.detBuf[i]
         }
-        s.z1 = z1
-        s.z2 = z2
         for (const bq of s.rot) bq.flushDenormals()
         s.detHp.flushDenormals()
         s.lmHp.flushDenormals()

@@ -11,9 +11,12 @@
 import { computed, onMounted } from 'vue'
 import { useHFSoftener } from '../../composables/useHFSoftener.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { amountToMaxDepthDb, amountToThresholdDb, shelfSection } from '../../audio/hfSoftenerProcessor.js'
+import {
+  amountToMaxDepthDb, amountToThresholdDb, softenerSections, RELEASE_MS_MIN, RELEASE_MS_MAX,
+} from '../../audio/hfSoftenerProcessor.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import Knob from '../knobs/Knob.vue'
+import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -21,9 +24,9 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfContext, hfRotator, hfListen, hfPreview,
+  hfAmount, hfContext, hfRotator, hfRelease, hfVowelRelease, hfShape, hfListen, hfPreview,
   hfReduction, hfThresholdLift, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncContext, syncRotator, syncListen,
+  togglePreview, syncAmount, syncContext, syncRotator, syncRelease, syncVowelRelease, syncShape, syncListen,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -34,6 +37,16 @@ onMounted(() => {
 })
 
 const ACCENT = '#e8b77f'
+
+const SHAPE_OPTIONS = [
+  { value: 'shelf', label: 'SHELF', title: 'Cut everything above 4.5 kHz — the spec’s original shape' },
+  { value: 'band', label: 'BAND', title: 'Cut the sibilance band and return to flat above 11 kHz, so the air stays' },
+]
+
+const VOWEL_OPTIONS = [
+  { value: true, label: 'ON', title: 'Let go within ~10 ms when a vowel starts, so the sound after an S is not dulled' },
+  { value: false, label: 'OFF', title: 'Use the Release setting everywhere' },
+]
 
 const ROTATOR_OPTIONS = [
   { value: 'off', label: 'OFF', title: 'No phase rotation — the detector reads the raw signal' },
@@ -70,7 +83,7 @@ function yFor(db) {
 
 function shelfPath(gainDb) {
   const sr = state.currentFile?.sampleRate ?? 44100
-  const db = magnitudeResponseDb([shelfSection(sr, gainDb)], CURVE_FREQS, sr)
+  const db = magnitudeResponseDb(softenerSections(sr, gainDb, hfShape.value), CURVE_FREQS, sr)
   return CURVE_FREQS.map(
     (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${Math.max(0.5, yFor(db[i])).toFixed(1)}`,
   ).join(' ')
@@ -85,6 +98,10 @@ const thresholdLabel = computed(() => {
   const t = amountToThresholdDb(hfAmount.value / 100)
   return hfAmount.value === 0 ? 'OFF' : `${t.toFixed(0)} dBFS`
 })
+
+function formatMs(v) {
+  return `${Math.round(v)} ms`
+}
 
 function formatPct(v) {
   return `${Math.round(v)}%`
@@ -192,7 +209,7 @@ function segStyle(active, disabled) {
             >{{ gridLabel(f) }}</span>
           </div>
 
-          <div class="flex gap-[38px] mt-[16px]">
+          <div class="flex gap-[22px] mt-[16px]">
             <div class="w-[112px] flex flex-col items-center">
               <Knob
                 :model-value="hfAmount"
@@ -219,13 +236,46 @@ function segStyle(active, disabled) {
                 +{{ hfThresholdLift.toFixed(1) }} dB LIFT
               </span>
             </div>
+            <div class="w-[112px] flex flex-col items-center">
+              <!-- Log travel: the useful choices are 20–60 ms, and a linear
+                   knob would spend two thirds of its sweep above that. -->
+              <Knob
+                :model-value="hfRelease"
+                @update:model-value="syncRelease"
+                :min="RELEASE_MS_MIN" :max="RELEASE_MS_MAX" :step="1" scale="log"
+                label="Release" :accent="ACCENT" :format-value="formatMs" :value-font-px="15"
+                :disabled="!hfPreview"
+              />
+              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+                {{ hfVowelRelease ? 'OUTSIDE VOWELS' : 'EVERYWHERE' }}
+              </span>
+            </div>
           </div>
         </div>
 
         <LevelMeter :levels="hfOutputLevels" label="OUT" :height="150" />
       </div>
 
-      <div class="flex justify-center gap-[36px] mt-[20px]">
+      <div class="flex justify-center gap-[48px] mt-[20px]">
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">SHAPE</span>
+          <DeviceChoiceRocker
+            :model-value="hfShape" :options="SHAPE_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview" label="Cut shape"
+            @update:model-value="syncShape"
+          />
+        </div>
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">VOWEL RELEASE</span>
+          <DeviceChoiceRocker
+            :model-value="hfVowelRelease" :options="VOWEL_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview" label="Vowel release"
+            @update:model-value="syncVowelRelease"
+          />
+        </div>
+      </div>
+
+      <div class="flex justify-center gap-[36px] mt-[18px]">
         <div class="flex flex-col items-center gap-[8px]">
           <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">ROTATOR</span>
           <div class="flex gap-[6px]" role="radiogroup" aria-label="Phase rotator routing">
@@ -258,8 +308,8 @@ function segStyle(active, disabled) {
         class="mt-[16px] text-center"
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
-        A 4.5 kHz shelf that dips only while a consonant spikes, then lets go.
-        Breath and the tops of vowels pass untouched. Listen stays off when you apply.
+        Dips the sibilance band only while a consonant spikes, and lets go as the
+        next vowel starts. Breath and air pass untouched. Listen stays off when you apply.
       </p>
     </div>
   </FloatingWindow>

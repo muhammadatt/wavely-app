@@ -13,6 +13,9 @@ export const HF_SOFTENER_WINDOW_ID = 'hf-softener'
 const hfAmount = ref(HF_SOFTENER_DEFAULTS.amount)
 const hfContext = ref(HF_SOFTENER_DEFAULTS.context)
 const hfRotator = ref(HF_SOFTENER_DEFAULTS.rotator)
+const hfRelease = ref(HF_SOFTENER_DEFAULTS.release)
+const hfVowelRelease = ref(HF_SOFTENER_DEFAULTS.vowelRelease)
+const hfShape = ref(HF_SOFTENER_DEFAULTS.shape)
 // Monitor tap. Never part of the params the apply path renders with.
 const hfListen = ref('off')
 const hfPreview = ref(false)
@@ -27,6 +30,9 @@ function currentParams() {
     amount: hfAmount.value,
     context: hfContext.value,
     rotator: hfRotator.value,
+    release: hfRelease.value,
+    vowelRelease: hfVowelRelease.value,
+    shape: hfShape.value,
   }
 }
 
@@ -118,6 +124,21 @@ export function useHFSoftener() {
     pushParam('rotator', v)
   }
 
+  function syncRelease(v) {
+    hfRelease.value = v
+    pushParam('release', v)
+  }
+
+  function syncVowelRelease(v) {
+    hfVowelRelease.value = v
+    pushParam('vowelRelease', v)
+  }
+
+  function syncShape(v) {
+    hfShape.value = v
+    pushParam('shape', v)
+  }
+
   function syncListen(v) {
     hfListen.value = v
     if (!hfPreview.value) return
@@ -175,6 +196,9 @@ export function useHFSoftener() {
     hfAmount,
     hfContext,
     hfRotator,
+    hfRelease,
+    hfVowelRelease,
+    hfShape,
     hfListen,
     hfPreview,
     hfReduction,
@@ -186,6 +210,9 @@ export function useHFSoftener() {
     syncAmount,
     syncContext,
     syncRotator,
+    syncRelease,
+    syncVowelRelease,
+    syncShape,
     syncListen,
     apply,
     teardown,
