@@ -233,16 +233,18 @@ test('gain computer: zero below the knee, over/R above it, capped at D_max', () 
   }
 })
 
-test('amount macro: 0 % never engages, 40 % is the tuned default, 100 % is -44 dBFS / 24 dB', () => {
+test('amount macro: 0 % never engages; threshold, ratio and depth are linear to -44 dBFS / 6:1 / 24 dB', () => {
   assert.equal(amountToThresholdDb(0), 0)
   assert.equal(amountToMaxDepthDb(0), 0)
-  assert.ok(Math.abs(amountToThresholdDb(0.4) - -34) < 1e-9)
-  assert.ok(Math.abs(amountToMaxDepthDb(0.4) - 6) < 1e-9)
   assert.ok(Math.abs(amountToThresholdDb(1) - -44) < 1e-9)
   assert.ok(Math.abs(amountToMaxDepthDb(1) - 24) < 1e-9)
-  for (let a = 0.05; a <= 1; a += 0.05) {
-    assert.ok(amountToThresholdDb(a) < amountToThresholdDb(a - 0.05))
-    assert.ok(amountToMaxDepthDb(a) > amountToMaxDepthDb(a - 0.05))
+  assert.ok(Math.abs(amountToCompressionRatio(1) - 6) < 1e-9)
+  assert.ok(Math.abs(amountToCompressionRatio(0) - 1) < 1e-9)
+  // Linear: equal steps of the knob give equal steps of each quantity.
+  const step = f => [0.2, 0.4, 0.6, 0.8].map(a => f(a + 0.2) - f(a))
+  for (const f of [amountToThresholdDb, amountToMaxDepthDb, amountToCompressionRatio]) {
+    const d = step(f)
+    for (const v of d) assert.ok(Math.abs(v - d[0]) < 1e-9, `${f.name} is not linear: ${d}`)
   }
   assert.ok(Math.abs(contextToKappa(0.5) - 0.4) < 1e-12)
 })
@@ -558,16 +560,15 @@ test('level alignment: Amount 0 % never engages, even on a very quiet file', () 
 
 // ── Amount-driven ratio ─────────────────────────────────────────────────────
 
-test('ratio: the spec\'s law up to the default, a true 6:1 at 100 %', () => {
-  // The spec's "R" is a divisor — reduction = over / R — so R = 3 is a TRUE
-  // 1.5:1. Raising a divisor makes the cut smaller; the slope must rise.
-  for (const a of [0, 0.2, 0.4]) assert.ok(Math.abs(amountToSlope(a) - 1 / 3) < 1e-12)
-  assert.ok(Math.abs(amountToCompressionRatio(0.4) - 1.5) < 1e-9)
-  assert.ok(Math.abs(amountToCompressionRatio(1) - 6) < 1e-9)
-  for (let a = 0.45; a <= 1; a += 0.05) assert.ok(amountToSlope(a) > amountToSlope(a - 0.05))
+test('ratio: 1:1 at 0 %, 2:1 at the 20 % default, 6:1 at 100 %', () => {
+  assert.equal(amountToSlope(0), 0)
+  assert.ok(Math.abs(amountToCompressionRatio(0.2) - 2) < 1e-9)
+  assert.ok(Math.abs(amountToSlope(1) - 5 / 6) < 1e-12)
 })
 
-test('ratio: the top of the knob digs, the default does not move', () => {
+test('amount: the cut grows in even steps across the dial', () => {
+  // The two earlier maps front-loaded the threshold and back-loaded the
+  // ratio: per-10 % cuts ran -0.2 … -15.6 with each step bigger than the last.
   const { x, labels } = makeSpeech(SR, { seconds: 3 })
   const deepest = a => {
     const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: a }, { recordGain: true })
@@ -578,10 +579,14 @@ test('ratio: the top of the knob digs, the default does not move', () => {
     }
     return { m, breath }
   }
-  const at40 = deepest(0.4)
-  const at100 = deepest(1)
-  // Measured -3.01 and -15.85 dB; at a fixed 1/3 slope 100 % reached -6.3.
-  assert.ok(at40.m > -3.5 && at40.m < -2.5, `default reached ${at40.m.toFixed(2)} dB`)
-  assert.ok(at100.m < -12, `Amount 100 % only reached ${at100.m.toFixed(2)} dB`)
-  assert.ok(at100.breath > -1, `breath cut ${at100.breath.toFixed(2)} dB at Amount 100 %`)
+  const cuts = [0.2, 0.4, 0.6, 0.8, 1].map(a => deepest(a).m)
+  const steps = cuts.map((c, i) => (i === 0 ? c : c - cuts[i - 1]))
+  const mean = cuts[cuts.length - 1] / cuts.length
+  for (const s of steps) {
+    assert.ok(Math.abs(s - mean) < 0.35 * Math.abs(mean), `uneven steps: ${steps.map(v => v.toFixed(2))}`)
+  }
+  // The default keeps the old default's cut; the top still digs.
+  assert.ok(cuts[0] > -3.6 && cuts[0] < -2.4, `default reached ${cuts[0].toFixed(2)} dB`)
+  assert.ok(cuts[4] < -12, `Amount 100 % only reached ${cuts[4].toFixed(2)} dB`)
+  assert.ok(deepest(1).breath > -1, 'breath touched at Amount 100 %')
 })

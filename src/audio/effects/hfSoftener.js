@@ -15,7 +15,7 @@ import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
 
 export const HF_SOFTENER_DEFAULTS = {
-  amount: 40, // %, drives T_base and D_max jointly
+  amount: 20, // %, drives threshold, ratio and depth together — see amountToThresholdDb
   context: 50, // %, Module C depth; 0 = fixed threshold
   rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
   release: 60, // ms, HF release outside vowels

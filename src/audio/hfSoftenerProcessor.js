@@ -78,12 +78,15 @@ export const HF_SOFTENER_TUNING = {
   voicedDecayMs: 5,
   voicedFloorDb: -40, // L_ref − 20: below this nothing counts as voiced
   voicedMarginDb: 0, // voiced needs low/mid above the HF envelope by this much
-  // ⚠ `ratio` IS THE SPEC'S DIVISOR, NOT A COMPRESSION RATIO: its law is
-  // reduction = over / R, so R = 3 cuts a third of the overshoot — a 1.5:1
-  // compressor. A true R:1 cuts over·(1 − 1/R). Raising this divisor makes
-  // the cut SMALLER, which a first attempt at "3:1 → 6:1" did by mistake.
-  ratio: 3.0, // divisor below Amount 40 %: the spec's law, a true 1.5:1
-  compRatioAtFull: 6.0, // TRUE compression ratio at Amount 100 %
+  // The Amount macro — see amountToThresholdDb. Threshold, ratio and depth
+  // all move linearly, so the cut grows in even steps across the dial.
+  // ⚠ The ratio is a TRUE compression ratio (reduction = over·(1 − 1/R)).
+  // The spec wrote reduction = over / R, where its "3" was a true 1.5:1.
+  thresholdAtZeroDb: -28, // limit as Amount → 0 (0 % itself never engages)
+  thresholdAtFullDb: -44,
+  compRatioAtZero: 1.0,
+  compRatioAtFull: 6.0,
+  maxDepthAtFullDb: 24,
   kneeDb: 6.0, // ± around the threshold, quadratic
   // Module C
   lmLowHz: 200,
@@ -110,7 +113,7 @@ export const HF_SOFTENER_TUNING = {
 
 /** User-facing parameters. The four controls, minus Listen (a monitor tap). */
 export const HF_SOFTENER_KERNEL_DEFAULTS = {
-  amount: 0.4, // 0–1
+  amount: 0.2, // 0–1 — the old 40 % default's cut, on the even map
   context: 0.5, // 0–1 → κ 0–0.8
   rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
   releaseMs: 60, // HF follower release outside vowels, 20–150
@@ -152,37 +155,39 @@ const FOLLOWER_FLOOR = 1e-15
 // ── Macros ──────────────────────────────────────────────────────────────────
 
 /*
- * Amount drives T_base and D_max jointly. The spec pins three points: 0 %
- * never engages (0 dBFS), 40 % is the tuned default (−34 dBFS, 6 dB), 100 %
- * is −44 dBFS and 9 dB — the last depth since raised to 24 dB. Threshold and
- * depth rise together at a fixed 3:1, so the HF level that reaches FULL depth
- * barely moves across the knob (−16 dBFS at 40 %, −17 at the spec's 100 %);
- * 9 dB at the top bought only 3 dB over the default on the loudest esses. A power law through them spends most of the knob's
- * travel in the −23 to −44 dBFS region where speech sibilants actually sit,
- * instead of the linear map's first half, which would do nothing audible.
+ * Amount drives threshold, ratio and maximum depth together, each LINEARLY:
+ *
+ *   threshold  −28 → −44 dBFS      ratio  1:1 → 6:1      max depth  0 → 24 dB
+ *
+ * ⚠ LINEAR IN ALL THREE IS WHAT MAKES THE CUT EVEN, AND THE FIRST TWO MAPS
+ * WERE NOT. The spec's power law put most of the threshold's travel in the
+ * first 40 %, and a ratio linear in SLOPE (1.5:1 → 6:1 above 40 %) put most of
+ * the ratio's travel in the last 20 % (2, 3, then 6:1). Measured deepest cut on
+ * synthetic voice per 10 % step: −0.2, −1.0, −2.0, −2.9, −4.5, −6.4, −8.5,
+ * −10.7, −13.1, −15.6 — each step bigger than the last. With these three lines
+ * it is −1.5, −3.0, −4.5 … −15.6: 1.55 dB per 10 %, the same top end.
+ *
+ * The old default's cut (−3.0 dB) now sits at 20 %, which is the new default.
+ * 0 % never engages: threshold 0 dBFS and depth 0.
  */
-const AMOUNT_REF = 0.4
-const T_AT_REF = -34
-const T_AT_FULL = -44
-const D_AT_REF = 6
-const D_AT_FULL = 24 // the spec's 9; raised so the top of the knob reaches well past the default
-const T_EXP = Math.log(T_AT_REF / T_AT_FULL) / Math.log(AMOUNT_REF)
-const D_EXP = Math.log(D_AT_REF / D_AT_FULL) / Math.log(AMOUNT_REF)
 
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
 }
 
-/** Amount (0–1) → T_base in dBFS. 0 → 0 dBFS, 0.4 → −34, 1 → −44. */
-export function amountToThresholdDb(amount) {
-  const a = clamp(amount, 0, 1)
-  return a === 0 ? 0 : T_AT_FULL * Math.pow(a, T_EXP)
+function lerp(a0, a1, t) {
+  return a0 + (a1 - a0) * t
 }
 
-/** Amount (0–1) → D_max in dB. 0 → 0, 0.4 → 6, 1 → 24. */
-export function amountToMaxDepthDb(amount) {
+/** Amount (0–1) → T_base in dBFS. 0 → 0 dBFS (off), then −28 → −44. */
+export function amountToThresholdDb(amount, tuning = HF_SOFTENER_TUNING) {
   const a = clamp(amount, 0, 1)
-  return a === 0 ? 0 : D_AT_FULL * Math.pow(a, D_EXP)
+  return a === 0 ? 0 : lerp(tuning.thresholdAtZeroDb, tuning.thresholdAtFullDb, a)
+}
+
+/** Amount (0–1) → D_max in dB, 0 → 24. */
+export function amountToMaxDepthDb(amount, tuning = HF_SOFTENER_TUNING) {
+  return clamp(amount, 0, 1) * tuning.maxDepthAtFullDb
 }
 
 /**
@@ -194,32 +199,17 @@ export function levelOffsetDbFor(gatedRmsDbfs, tuning = HF_SOFTENER_TUNING) {
   return clamp(gatedRmsDbfs - tuning.nominalLevelDbfs, -tuning.maxLevelOffsetDb, tuning.maxLevelOffsetDb)
 }
 
+/** The true compression ratio at an Amount: 1:1 → 6:1, linear. */
+export function amountToCompressionRatio(amount, tuning = HF_SOFTENER_TUNING) {
+  return lerp(tuning.compRatioAtZero, tuning.compRatioAtFull, clamp(amount, 0, 1))
+}
+
 /**
- * Amount (0–1) → the gain computer's slope: dB of cut per dB over threshold.
- * The spec's 1/3 (a true 1.5:1) up to the 40 % default, then linear in slope
- * to a TRUE 6:1 (5/6) at 100 %.
- *
- * ⚠ THIS IS WHAT MAKES THE TOP OF THE KNOB DIG, NOT D_max. At a fixed 1/3 a
- * 24 dB cut needs the HF band 72 dB over threshold — past full scale; Amount
- * 100 % measured −6.3 dB on synthetic voice. Held at 1/3 below the default so
- * every setting already tuned by ear is bit-identical.
+ * The gain computer's slope — dB of cut per dB over threshold — at an Amount.
+ * 0 at 1:1. The gain computer takes its reciprocal (the spec's divisor).
  */
 export function amountToSlope(amount, tuning = HF_SOFTENER_TUNING) {
-  const a = clamp(amount, 0, 1)
-  const s0 = 1 / tuning.ratio
-  if (a <= AMOUNT_REF) return s0
-  const s1 = 1 - 1 / tuning.compRatioAtFull
-  return s0 + ((a - AMOUNT_REF) / (1 - AMOUNT_REF)) * (s1 - s0)
-}
-
-/** The gain computer's divisor (the spec's R) at an Amount. */
-export function amountToRatio(amount, tuning = HF_SOFTENER_TUNING) {
-  return 1 / amountToSlope(amount, tuning)
-}
-
-/** The true compression ratio at an Amount, for display: 1.5:1 … 6:1. */
-export function amountToCompressionRatio(amount, tuning = HF_SOFTENER_TUNING) {
-  return 1 / (1 - amountToSlope(amount, tuning))
+  return 1 - 1 / amountToCompressionRatio(amount, tuning)
 }
 
 /** Context (0–1) → κ, Module C's modulation depth. 0 = fixed threshold. */
@@ -470,7 +460,9 @@ export class HFSoftenerKernel {
     this.tBase = new Ramp(0, rampSamples)
     this.dMax = new Ramp(0, rampSamples)
     this.kappa = new Ramp(0, rampSamples)
-    this.ratio = new Ramp(tuning.ratio, rampSamples)
+    // The SLOPE is ramped, not the divisor: 1:1 is a divisor of ∞, and a
+    // linear ramp through ∞ is NaN.
+    this.slope = new Ramp(0, rampSamples)
     // 0 → dry into the detector / audio path, 1 → rotated. Ramped so a mode
     // switch mid-playback crossfades instead of stepping phase (a click).
     this.detRot = new Ramp(0, rampSamples)
@@ -516,10 +508,10 @@ export class HFSoftenerKernel {
     const off = clamp(Number(p.levelOffsetDb) || 0, -this.tuning.maxLevelOffsetDb, this.tuning.maxLevelOffsetDb)
     this.levelOffsetDb = off
     // 0 % still means "never engages", whatever the file's level.
-    this.tBase.set(p.amount > 0 ? amountToThresholdDb(p.amount) + off : 0, immediate)
-    this.dMax.set(amountToMaxDepthDb(p.amount), immediate)
+    this.tBase.set(p.amount > 0 ? amountToThresholdDb(p.amount, this.tuning) + off : 0, immediate)
+    this.dMax.set(amountToMaxDepthDb(p.amount, this.tuning), immediate)
     this.kappa.set(contextToKappa(p.context), immediate)
-    this.ratio.set(amountToRatio(p.amount, this.tuning), immediate)
+    this.slope.set(amountToSlope(p.amount, this.tuning), immediate)
     this.detRot.set(p.rotator === 'off' ? 0 : 1, immediate)
     this.pathRot.set(p.rotator === 'inpath' ? 1 : 0, immediate)
   }
@@ -631,7 +623,9 @@ export class HFSoftenerKernel {
 
         const base = this.tBase.tick()
         const tEff = adaptiveThresholdDb(base, lmDb, this.kappa.tick(), tuning.lRefDb + this.levelOffsetDb, tuning.maxShiftDb)
-        const target = gainComputerDb(hfDb, tEff, this.ratio.tick(), this.dMax.tick(), tuning.kneeDb)
+        const slope = this.slope.tick()
+        const dMax = this.dMax.tick()
+        const target = slope > 0 ? gainComputerDb(hfDb, tEff, 1 / slope, dMax, tuning.kneeDb) : 0
         this.shelfGainDb += (target - this.shelfGainDb) * this.gainSmooth
         gainBuf[i] = this.shelfGainDb
         this.lastThresholdLiftDb = tEff - base
