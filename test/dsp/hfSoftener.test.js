@@ -21,6 +21,8 @@ import {
   contextToKappa,
   gainComputerDb,
   levelOffsetDbFor,
+  amountToSlope,
+  amountToCompressionRatio,
   processHFSoftenerBuffer,
   rotatorMaxGroupDelayMs,
   rotatorSections,
@@ -464,8 +466,10 @@ test('vowel release: the vowel after an "s" keeps its top end', () => {
     assert.ok(carryOn > carryOff * 0.4, `amount ${amount}: carryover ${carryOff.toFixed(2)} → ${carryOn.toFixed(2)} dB`)
     // …without giving up the sibilants themselves.
     for (const [a, b] of [[0.35, 0.39], [0.7, 0.735]]) {
-      const d = meanGain(on, a, b) - meanGain(off, a, b)
-      assert.ok(d < 0.2, `amount ${amount}: sibilant at ${a} s lost ${d.toFixed(2)} dB of reduction`)
+      // Relative: above the default the ratio steepens and the cuts scale.
+      const base = meanGain(off, a, b)
+      const d = meanGain(on, a, b) - base
+      assert.ok(d < 0.1 * -base, `amount ${amount}: sibilant at ${a} s lost ${d.toFixed(2)} of ${(-base).toFixed(2)} dB`)
     }
   }
 })
@@ -550,4 +554,34 @@ test('level alignment: Amount 0 % never engages, even on a very quiet file', () 
   const { x } = makeSpeech(SR, { seconds: 2 })
   const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: 0, levelOffsetDb: -24 }, { recordGain: true })
   for (const g of gainDb) assert.equal(Math.abs(g), 0)
+})
+
+// ── Amount-driven ratio ─────────────────────────────────────────────────────
+
+test('ratio: the spec\'s law up to the default, a true 6:1 at 100 %', () => {
+  // The spec's "R" is a divisor — reduction = over / R — so R = 3 is a TRUE
+  // 1.5:1. Raising a divisor makes the cut smaller; the slope must rise.
+  for (const a of [0, 0.2, 0.4]) assert.ok(Math.abs(amountToSlope(a) - 1 / 3) < 1e-12)
+  assert.ok(Math.abs(amountToCompressionRatio(0.4) - 1.5) < 1e-9)
+  assert.ok(Math.abs(amountToCompressionRatio(1) - 6) < 1e-9)
+  for (let a = 0.45; a <= 1; a += 0.05) assert.ok(amountToSlope(a) > amountToSlope(a - 0.05))
+})
+
+test('ratio: the top of the knob digs, the default does not move', () => {
+  const { x, labels } = makeSpeech(SR, { seconds: 3 })
+  const deepest = a => {
+    const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: a }, { recordGain: true })
+    let m = 0, breath = 0
+    for (let i = 0; i < gainDb.length; i++) {
+      m = Math.min(m, gainDb[i])
+      if (labels[i] === 3) breath = Math.min(breath, gainDb[i])
+    }
+    return { m, breath }
+  }
+  const at40 = deepest(0.4)
+  const at100 = deepest(1)
+  // Measured -3.01 and -15.85 dB; at a fixed 1/3 slope 100 % reached -6.3.
+  assert.ok(at40.m > -3.5 && at40.m < -2.5, `default reached ${at40.m.toFixed(2)} dB`)
+  assert.ok(at100.m < -12, `Amount 100 % only reached ${at100.m.toFixed(2)} dB`)
+  assert.ok(at100.breath > -1, `breath cut ${at100.breath.toFixed(2)} dB at Amount 100 %`)
 })

@@ -12,7 +12,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useHFSoftener } from '../../composables/useHFSoftener.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  amountToMaxDepthDb, amountToThresholdDb, softenerSections, RELEASE_MS_MIN, RELEASE_MS_MAX,
+  amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections, RELEASE_MS_MIN, RELEASE_MS_MAX,
 } from '../../audio/hfSoftenerProcessor.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import Knob from '../knobs/Knob.vue'
@@ -100,6 +100,10 @@ const maxDepthDb = computed(() => amountToMaxDepthDb(hfAmount.value / 100))
 const maxPath = computed(() => shelfPath(-maxDepthDb.value))
 const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthDb.value)))
 const liveFill = computed(() => `${livePath.value} L${CURVE_W},0 L0,0 Z`)
+
+// The TRUE compression ratio (1.5:1 at the default, 6:1 at 100 %), not the
+// spec's divisor. Max depth is on the meter's scale and rarely the limit.
+const ratioLabel = computed(() => `${amountToCompressionRatio(hfAmount.value / 100).toFixed(1)}:1`)
 
 const thresholdLabel = computed(() => {
   // The threshold actually in force: the Amount's nominal plus the file's
@@ -228,7 +232,7 @@ function segStyle(active, disabled) {
                 :disabled="!hfPreview"
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ thresholdLabel }} · {{ maxDepthDb.toFixed(1) }} dB
+                {{ thresholdLabel }} · {{ ratioLabel }}
               </span>
             </div>
             <div class="w-[112px] flex flex-col items-center">
