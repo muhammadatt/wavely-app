@@ -13,6 +13,7 @@ import AirBandModal from '../components/panels/AirBandModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
+import HFSoftenerModal from '../components/panels/HFSoftenerModal.vue'
 import AutoLevelModal from '../components/panels/AutoLevelModal.vue'
 import EqModal from '../components/panels/EqModal.vue'
 import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
@@ -409,6 +410,21 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: DeEsserModal,
+  },
+  {
+    // Not a second de-esser: a dynamic shelf for recordings that are already
+    // broadly good. The De-Esser above analyses events on the server; this
+    // reacts in real time and only ever dips while a consonant spikes.
+    id: 'hf-softener',
+    label: 'HF Softener',
+    desc: 'Soften harsh consonants, keep the air',
+    category: 'effects',
+    group: 'Clean',
+    icon: 'softener',
+    keywords: ['sibilance', 'sibilant', 'harsh', 'hard', 'ess', 'de-ess', 'soft', 'soften', 'dynamic shelf', 'high shelf', 'warmth', 'fatso', 'air'],
+    requires: 'selection',
+    surface: 'window',
+    component: HFSoftenerModal,
   },
   {
     id: 'hum-remover',

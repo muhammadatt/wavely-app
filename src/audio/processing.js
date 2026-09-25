@@ -27,6 +27,12 @@ import {
   AIR_BAND_DEFAULTS,
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
+import { ensureHFSoftenerWorklet } from './hfSoftenerWorkletLoader.js'
+import { HF_SOFTENER_PREROLL_S } from './hfSoftenerProcessor.js'
+import {
+  HF_SOFTENER_DEFAULTS,
+  toKernelParams as toHFSoftenerKernelParams,
+} from './effects/hfSoftener.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
@@ -701,10 +707,10 @@ async function applyWorkletRegion(
   //
   // ⚠ OPT-IN, ONE STAGE AT A TIME. Every caller of this function has envelope
   // state and the same bug; turning it on for all of them at once would change
-  // the output of five shipped plugins in one commit. Three ask for it, each
-  // after its own measurement: Tube Saturation (4 s), OptoSmooth (2 s) and
-  // Scheps (2 s) — see the note beside each call site for what its number
-  // buys. The rest keep today's behaviour until each is measured on its own.
+  // the output of five shipped plugins in one commit. Four ask for it, each
+  // after its own measurement: Tube Saturation (4 s), OptoSmooth (2 s),
+  // Scheps (2 s) and the HF Softener (1 s, which it shipped with) — see the
+  // note beside each call site for what its number buys. The rest keep today's behaviour until each is measured on its own.
   //
   // Two of those measurements say pre-roll is not the answer, and they are the
   // reason this is not a flag to switch on everywhere. FET Punch's makeup
@@ -850,6 +856,20 @@ export function applyAirBandRegion(segments, start, end, params, sampleRate, cha
     ensureWorklet: ensureAirBandWorklet,
     processorName: 'air-band-processor',
     kernelParams: toAirBandKernelParams({ ...AIR_BAND_DEFAULTS, ...params }),
+  })
+}
+
+/**
+ * Apply the HF Softener to a region. Zero latency; the pre-roll lets the
+ * envelopes settle on real context so the region starts where a playing
+ * preview would be — see HF_SOFTENER_PREROLL_S.
+ */
+export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureHFSoftenerWorklet,
+    processorName: 'hf-softener-processor',
+    kernelParams: toHFSoftenerKernelParams({ ...HF_SOFTENER_DEFAULTS, ...params }),
+    preRollSamples: Math.round(HF_SOFTENER_PREROLL_S * sampleRate),
   })
 }
 

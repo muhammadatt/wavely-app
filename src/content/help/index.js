@@ -59,6 +59,7 @@ import airBand from './air-band.js'
 import autoLeveler from './auto-leveler.js'
 import clipGainDeesser from './clip-gain-deesser.js'
 import fetPunch from './fet-punch.js'
+import hfSoftener from './hf-softener.js'
 import humRemover from './hum-remover.js'
 import loudness from './loudness.js'
 import manualEq from './manual-eq.js'
@@ -79,6 +80,7 @@ export const HELP = {
   'auto-leveler': autoLeveler,
   'clip-gain-deesser': clipGainDeesser,
   'fet-punch': fetPunch,
+  'hf-softener': hfSoftener,
   'hum-remover': humRemover,
   loudness,
   'manual-eq': manualEq,
