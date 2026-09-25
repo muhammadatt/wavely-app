@@ -2,6 +2,9 @@ import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyHFSoftenerRegion, computePeakCache } from '../audio/processing.js'
+import { regionAlignDb } from '../audio/analysisWindow.js'
+import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
+import { levelOffsetDbFor } from '../audio/hfSoftenerProcessor.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { hfSoftenerEffect, HF_SOFTENER_DEFAULTS } from '../audio/effects/hfSoftener.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -16,6 +19,11 @@ const hfRotator = ref(HF_SOFTENER_DEFAULTS.rotator)
 const hfRelease = ref(HF_SOFTENER_DEFAULTS.release)
 const hfVowelRelease = ref(HF_SOFTENER_DEFAULTS.vowelRelease)
 const hfShape = ref(HF_SOFTENER_DEFAULTS.shape)
+// The file's gated RMS and the offset it puts on every detector level. A
+// property of the audio, measured, never a user setting.
+const hfFileLevelDb = ref(null)
+const hfLevelOffset = ref(0)
+let levelMeasuredFor = null
 // Monitor tap. Never part of the params the apply path renders with.
 const hfListen = ref('off')
 const hfPreview = ref(false)
@@ -33,13 +41,14 @@ function currentParams() {
     release: hfRelease.value,
     vowelRelease: hfVowelRelease.value,
     shape: hfShape.value,
+    levelOffset: hfLevelOffset.value,
   }
 }
 
 export function useHFSoftener() {
   const {
-    state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-    startProcessing, endProcessing, showToast,
+    state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache,
+    startProcessing, endProcessing, showToast, totalDuration,
   } = useEditorState()
   const { openWindow, closeWindow } = useWindows()
 
@@ -89,12 +98,40 @@ export function useHFSoftener() {
     }
   }
 
+  /**
+   * Measure the file's level and move every detector threshold with it, so an
+   * Amount setting means the same thing on a quiet recording and a hot one.
+   *
+   * ⚠ THE WHOLE FILE, NEVER THE SELECTION — the same rule OptoSmooth's input
+   * alignment follows (see `regionAlignDb`). Measured per selection, a phrase
+   * and the paragraph containing it would get different thresholds, and the
+   * same edit applied twice would disagree with itself. Same gated-RMS
+   * statistic too, so the two plugins read one number for one file.
+   */
+  function refreshLevel() {
+    if (!state.currentFile) return
+    const key = `${appState.activeDocumentId}:${state.revision}`
+    if (levelMeasuredFor === key) return
+    const end = totalDuration.value
+    if (!(end > 0)) return
+    // regionAlignDb answers "how far below the alignment target", so the
+    // gated level itself is the target minus that.
+    const gated = ALIGN_TARGET_DBFS - regionAlignDb(
+      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+    )
+    levelMeasuredFor = key
+    hfFileLevelDb.value = gated
+    hfLevelOffset.value = levelOffsetDbFor(gated)
+    pushParam('levelOffset', hfLevelOffset.value)
+  }
+
   function togglePreview() {
     const chain = initChain()
     hfPreview.value = !hfPreview.value
     chain.setEnabled(hfSoftenerEffect.id, hfPreview.value)
 
     if (hfPreview.value) {
+      refreshLevel()
       pushAllParams(chain)
       nodesOf(chain)?.setListen(hfListen.value)
       startMeters(chain)
@@ -151,6 +188,7 @@ export function useHFSoftener() {
 
     const wasPreviewing = hfPreview.value
     if (wasPreviewing) togglePreview()
+    refreshLevel()
 
     startProcessing('Applying HF Softener...')
     try {
@@ -199,6 +237,8 @@ export function useHFSoftener() {
     hfRelease,
     hfVowelRelease,
     hfShape,
+    hfFileLevelDb,
+    hfLevelOffset,
     hfListen,
     hfPreview,
     hfReduction,
@@ -214,6 +254,7 @@ export function useHFSoftener() {
     syncVowelRelease,
     syncShape,
     syncListen,
+    refreshLevel,
     apply,
     teardown,
     openModal,

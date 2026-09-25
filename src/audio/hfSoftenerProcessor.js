@@ -39,7 +39,9 @@
  * plain JSON-serialisable object.
  */
 
-import { allpass, highpass, lowpass, highShelf, groupDelaySeconds, DENORMAL_FLOOR } from './dsp/biquad.js'
+import {
+  allpass, highpass, lowpass, highShelf, groupDelaySeconds, magnitudeResponseDb, DENORMAL_FLOOR,
+} from './dsp/biquad.js'
 import { riseCoeff } from './dsp/envelope.js'
 
 /** Internal constants, fixed at build time. Quoted from the spec's table. */
@@ -56,13 +58,14 @@ export const HF_SOFTENER_TUNING = {
   attackMs: 2.0,
   // Band shape: the 4.5 kHz shelf followed by an equal and opposite shelf at
   // 11 kHz, so the cut returns to flat and the air above ~14 kHz is left
-  // alone. Q 0.8 is the widest return that never boosts (≤ 0.11 dB at 9 dB
-  // of depth). The pair bottoms out ~1 dB short of the requested depth, so its
-  // gain is scaled by `bandDepthComp` to keep Amount's max depth meaning the
-  // same thing in both shapes.
+  // alone. Q 0.8 is the widest return that barely boosts (≤ 0.16 dB at the
+  // 12 dB maximum). The two shelves overlap, so the pair bottoms out short of
+  // its nominal gain — by a factor that grows with depth (×1.17 at 1 dB to
+  // ×1.30 at 12, at 44.1 kHz) and with sample rate (×1.51 at 12 dB, 96 kHz).
+  // No constant covers that; `bandDepthComp` solves it per rate instead, so
+  // the band's deepest point is the depth asked for in both shapes.
   returnFreqHz: 11000,
   returnQ: 0.8,
-  bandDepthComp: 1.2,
   // Vowel release: while the low/mid band is voiced, the HF follower releases
   // at `vowelReleaseMs` instead of the Release setting. Carryover lands on the
   // vowel after an "s"; the gaps inside a consonant run are unvoiced, so they
@@ -85,6 +88,14 @@ export const HF_SOFTENER_TUNING = {
   lmReleaseMs: 150,
   lRefDb: -20,
   maxShiftDb: 8.0,
+  // Level alignment. Every absolute level in the detector — T_base, L_ref,
+  // the voicing floor — is quoted for a file whose gated RMS sits here, and
+  // shifts dB-for-dB with the file's measured level. The detector is linear
+  // (filters, |x| and x² followers), so this makes the gain curve exactly
+  // invariant to how hot the file was recorded. −20 dBFS is the spec's own
+  // "typical speaking vowel" (L_ref), so a file there behaves as specified.
+  nominalLevelDbfs: -20,
+  maxLevelOffsetDb: 24,
   // Implementation
   gainSmoothMs: 0.5,
   macroRampMs: 20,
@@ -100,6 +111,9 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   releaseMs: 60, // HF follower release outside vowels, 20–150
   vowelRelease: true, // let go fast when a vowel starts
   shape: 'band', // 'shelf' (the spec's) | 'band' (returns to flat above 11 kHz)
+  // File property, not a patch value: the file's gated RMS minus the nominal
+  // level. Measured by the caller over the WHOLE file (see levelOffsetDbFor).
+  levelOffsetDb: 0,
 }
 
 export const SHAPES = ['shelf', 'band']
@@ -135,7 +149,10 @@ const FOLLOWER_FLOOR = 1e-15
 /*
  * Amount drives T_base and D_max jointly. The spec pins three points: 0 %
  * never engages (0 dBFS), 40 % is the tuned default (−34 dBFS, 6 dB), 100 %
- * is −44 dBFS and 9 dB. A power law through them spends most of the knob's
+ * is −44 dBFS and 9 dB — the last depth since raised to 12 dB. Threshold and
+ * depth rise together at a fixed 3:1, so the HF level that reaches FULL depth
+ * barely moves across the knob (−16 dBFS at 40 %, −17 at the spec's 100 %);
+ * 9 dB at the top bought only 3 dB over the default on the loudest esses. A power law through them spends most of the knob's
  * travel in the −23 to −44 dBFS region where speech sibilants actually sit,
  * instead of the linear map's first half, which would do nothing audible.
  */
@@ -143,7 +160,7 @@ const AMOUNT_REF = 0.4
 const T_AT_REF = -34
 const T_AT_FULL = -44
 const D_AT_REF = 6
-const D_AT_FULL = 9
+const D_AT_FULL = 12 // the spec's 9, raised after listening: 9 ran out on hard esses
 const T_EXP = Math.log(T_AT_REF / T_AT_FULL) / Math.log(AMOUNT_REF)
 const D_EXP = Math.log(D_AT_REF / D_AT_FULL) / Math.log(AMOUNT_REF)
 
@@ -157,10 +174,19 @@ export function amountToThresholdDb(amount) {
   return a === 0 ? 0 : T_AT_FULL * Math.pow(a, T_EXP)
 }
 
-/** Amount (0–1) → D_max in dB. 0 → 0, 0.4 → 6, 1 → 9. */
+/** Amount (0–1) → D_max in dB. 0 → 0, 0.4 → 6, 1 → 12. */
 export function amountToMaxDepthDb(amount) {
   const a = clamp(amount, 0, 1)
   return a === 0 ? 0 : D_AT_FULL * Math.pow(a, D_EXP)
+}
+
+/**
+ * The file's gated RMS (dBFS) → the offset every detector level shifts by,
+ * clamped. Louder file, higher thresholds.
+ */
+export function levelOffsetDbFor(gatedRmsDbfs, tuning = HF_SOFTENER_TUNING) {
+  if (!Number.isFinite(gatedRmsDbfs)) return 0
+  return clamp(gatedRmsDbfs - tuning.nominalLevelDbfs, -tuning.maxLevelOffsetDb, tuning.maxLevelOffsetDb)
 }
 
 /** Context (0–1) → κ, Module C's modulation depth. 0 = fixed threshold. */
@@ -212,6 +238,50 @@ export function shelfSection(sampleRate, gainDb, tuning = HF_SOFTENER_TUNING) {
 
 const IDENTITY = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }
 
+function bandPair(sampleRate, g, tuning) {
+  return [
+    shelfSection(sampleRate, g, tuning),
+    highShelf(sampleRate, tuning.returnFreqHz, tuning.returnQ, -g, 'q'),
+  ]
+}
+
+const COMP_DEPTHS = [1, 3, 6, 9, 12, 15]
+const compTables = new Map()
+
+/**
+ * The gain multiplier that makes the band's deepest point land exactly on
+ * `depthDb`. Solved by bisection once per sample rate at six depths, then
+ * interpolated — a few ms at construction, nothing per sample.
+ */
+export function bandDepthComp(sampleRate, depthDb, tuning = HF_SOFTENER_TUNING) {
+  const key = `${sampleRate}:${tuning.shelfFreqHz}:${tuning.shelfQ}:${tuning.returnFreqHz}:${tuning.returnQ}`
+  let table = compTables.get(key)
+  if (!table) {
+    const top = 0.49 * sampleRate
+    const grid = Array.from({ length: 240 }, (_, i) => 2000 * Math.pow(top / 2000, i / 239))
+    table = COMP_DEPTHS.map(d => {
+      let lo = 1, hi = 2.5
+      for (let it = 0; it < 30; it++) {
+        const c = (lo + hi) / 2
+        const deepest = Math.min(...magnitudeResponseDb(bandPair(sampleRate, -d * c, tuning), grid, sampleRate))
+        if (deepest > -d) lo = c
+        else hi = c
+      }
+      return (lo + hi) / 2
+    })
+    compTables.set(key, table)
+  }
+  const d = Math.abs(depthDb)
+  if (d <= COMP_DEPTHS[0]) return table[0]
+  for (let i = 1; i < COMP_DEPTHS.length; i++) {
+    if (d <= COMP_DEPTHS[i]) {
+      const t = (d - COMP_DEPTHS[i - 1]) / (COMP_DEPTHS[i] - COMP_DEPTHS[i - 1])
+      return table[i - 1] + t * (table[i] - table[i - 1])
+    }
+  }
+  return table[table.length - 1]
+}
+
 /**
  * The audio path's two sections at a gain — shared with the panel's curve
  * display. 'shelf' is the spec's single shelf (second section an exact
@@ -219,11 +289,7 @@ const IDENTITY = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }
  */
 export function softenerSections(sampleRate, gainDb, shape = 'band', tuning = HF_SOFTENER_TUNING) {
   if (shape !== 'band') return [shelfSection(sampleRate, gainDb, tuning), IDENTITY]
-  const g = gainDb * tuning.bandDepthComp
-  return [
-    shelfSection(sampleRate, g, tuning),
-    highShelf(sampleRate, tuning.returnFreqHz, tuning.returnQ, -g, 'q'),
-  ]
+  return bandPair(sampleRate, gainDb * bandDepthComp(sampleRate, gainDb, tuning), tuning)
 }
 
 /**
@@ -351,6 +417,7 @@ export class HFSoftenerKernel {
     this.voiceEnv = new Follower(sampleRate, tuning.voicedAttackMs, tuning.voicedDecayMs)
     this.lmEnv = new Follower(sampleRate, tuning.lmAttackMs, tuning.lmReleaseMs)
     this.gainSmooth = riseCoeff(tuning.gainSmoothMs, sampleRate)
+    this.levelOffsetDb = 0
     this.shelfGainDb = 0
 
     const rampSamples = (tuning.macroRampMs / 1000) * sampleRate
@@ -399,7 +466,10 @@ export class HFSoftenerKernel {
     this.vowelRelease = !!p.vowelRelease
     this.shape = p.shape
     if (immediate) this.writeShelf(this.coeffCur, this.shelfGainDb)
-    this.tBase.set(amountToThresholdDb(p.amount), immediate)
+    const off = clamp(Number(p.levelOffsetDb) || 0, -this.tuning.maxLevelOffsetDb, this.tuning.maxLevelOffsetDb)
+    this.levelOffsetDb = off
+    // 0 % still means "never engages", whatever the file's level.
+    this.tBase.set(p.amount > 0 ? amountToThresholdDb(p.amount) + off : 0, immediate)
     this.dMax.set(amountToMaxDepthDb(p.amount), immediate)
     this.kappa.set(contextToKappa(p.context), immediate)
     this.detRot.set(p.rotator === 'off' ? 0 : 1, immediate)
@@ -501,7 +571,7 @@ export class HFSoftenerKernel {
           // A soft crossover rather than a switch: a hard threshold on two
           // rippling envelopes flips at a sample-rate-dependent instant, and
           // measured 0.35 dB apart at 96 kHz; blended over 6 dB it is 0.10.
-          const over = Math.min(voiceDb - tuning.voicedFloorDb, voiceDb - hfPrevDb - tuning.voicedMarginDb)
+          const over = Math.min(voiceDb - (tuning.voicedFloorDb + this.levelOffsetDb), voiceDb - hfPrevDb - tuning.voicedMarginDb)
           const wv = over <= -3 ? 0 : over >= 3 ? 1 : (over + 3) / 6
           release = this.relSlow + wv * (this.relVowel - this.relSlow)
         }
@@ -512,7 +582,7 @@ export class HFSoftenerKernel {
         const lmDb = lmEnergy > 0 ? 10 * Math.log10(lmEnergy) : -300
 
         const base = this.tBase.tick()
-        const tEff = adaptiveThresholdDb(base, lmDb, this.kappa.tick(), tuning.lRefDb, tuning.maxShiftDb)
+        const tEff = adaptiveThresholdDb(base, lmDb, this.kappa.tick(), tuning.lRefDb + this.levelOffsetDb, tuning.maxShiftDb)
         const target = gainComputerDb(hfDb, tEff, tuning.ratio, this.dMax.tick(), tuning.kneeDb)
         this.shelfGainDb += (target - this.shelfGainDb) * this.gainSmooth
         gainBuf[i] = this.shelfGainDb

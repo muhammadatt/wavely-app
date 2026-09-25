@@ -21,6 +21,8 @@ export const HF_SOFTENER_DEFAULTS = {
   release: 60, // ms, HF release outside vowels
   vowelRelease: true, // let go fast when a vowel starts
   shape: 'band', // 'shelf' | 'band'
+  // Measured from the whole file, not a user setting — see useHFSoftener.
+  levelOffset: 0, // dB, file gated RMS minus nominal
 }
 
 /** Map UI param names to kernel param names. */
@@ -32,6 +34,7 @@ export function toKernelParams(params) {
     releaseMs: params.release,
     vowelRelease: params.vowelRelease,
     shape: params.shape,
+    levelOffsetDb: params.levelOffset,
   }
 }
 

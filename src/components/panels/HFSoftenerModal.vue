@@ -8,7 +8,7 @@
  * right now, drawn from the same coefficient builder, with the Amount's
  * maximum depth ghosted behind it so the headroom left is visible.
  */
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useHFSoftener } from '../../composables/useHFSoftener.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
@@ -25,12 +25,19 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   hfAmount, hfContext, hfRotator, hfRelease, hfVowelRelease, hfShape, hfListen, hfPreview,
+  hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfThresholdLift, hfInputLevels, hfOutputLevels,
   togglePreview, syncAmount, syncContext, syncRotator, syncRelease, syncVowelRelease, syncShape, syncListen,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
-const { state } = useEditorState()
+const { state, appState } = useEditorState()
+
+// An edit or a document switch changes the file's level, and with it where
+// every threshold sits. Measured only while the window is open.
+watch(() => [state.revision, appState.activeDocumentId], () => {
+  if (hfPreview.value) refreshLevel()
+})
 
 onMounted(() => {
   if (!hfPreview.value) togglePreview()
@@ -95,7 +102,9 @@ const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthD
 const liveFill = computed(() => `${livePath.value} L${CURVE_W},0 L0,0 Z`)
 
 const thresholdLabel = computed(() => {
-  const t = amountToThresholdDb(hfAmount.value / 100)
+  // The threshold actually in force: the Amount's nominal plus the file's
+  // level offset, so the readout names the level the detector compares to.
+  const t = amountToThresholdDb(hfAmount.value / 100) + hfLevelOffset.value
   return hfAmount.value === 0 ? 'OFF' : `${t.toFixed(0)} dBFS`
 })
 
@@ -171,7 +180,7 @@ function segStyle(active, disabled) {
     @close="close"
   >
     <div class="px-[26px] pt-[22px] pb-[26px]">
-      <!-- 12 dB full scale: the deepest the shelf can go is 9 dB. -->
+      <!-- 12 dB full scale: the deepest the shelf can go, at Amount 100 %. -->
       <GainReductionBar :reduction-db="-hfReduction" :accent="ACCENT" :full-scale-db="12" title="SHELF DEPTH" />
 
       <div class="flex items-center justify-between gap-[22px] mt-[18px]">
@@ -305,7 +314,18 @@ function segStyle(active, disabled) {
       </div>
 
       <p
-        class="mt-[16px] text-center"
+        class="mt-[14px] text-center"
+        style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)"
+      >
+        <template v-if="hfFileLevelDb !== null">
+          FILE LEVEL {{ hfFileLevelDb.toFixed(1) }} dBFS · THRESHOLDS
+          {{ hfLevelOffset >= 0 ? '+' : '' }}{{ hfLevelOffset.toFixed(1) }} dB
+        </template>
+        <template v-else>FILE LEVEL —</template>
+      </p>
+
+      <p
+        class="mt-[10px] text-center"
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
         Dips the sibilance band only while a consonant spikes, and lets go as the

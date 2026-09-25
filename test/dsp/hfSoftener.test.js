@@ -20,6 +20,7 @@ import {
   amountToThresholdDb,
   contextToKappa,
   gainComputerDb,
+  levelOffsetDbFor,
   processHFSoftenerBuffer,
   rotatorMaxGroupDelayMs,
   rotatorSections,
@@ -230,13 +231,13 @@ test('gain computer: zero below the knee, over/R above it, capped at D_max', () 
   }
 })
 
-test('amount macro: 0 % never engages, 40 % is the tuned default, 100 % is -44 dBFS / 9 dB', () => {
+test('amount macro: 0 % never engages, 40 % is the tuned default, 100 % is -44 dBFS / 12 dB', () => {
   assert.equal(amountToThresholdDb(0), 0)
   assert.equal(amountToMaxDepthDb(0), 0)
   assert.ok(Math.abs(amountToThresholdDb(0.4) - -34) < 1e-9)
   assert.ok(Math.abs(amountToMaxDepthDb(0.4) - 6) < 1e-9)
   assert.ok(Math.abs(amountToThresholdDb(1) - -44) < 1e-9)
-  assert.ok(Math.abs(amountToMaxDepthDb(1) - 9) < 1e-9)
+  assert.ok(Math.abs(amountToMaxDepthDb(1) - 12) < 1e-9)
   for (let a = 0.05; a <= 1; a += 0.05) {
     assert.ok(amountToThresholdDb(a) < amountToThresholdDb(a - 0.05))
     assert.ok(amountToMaxDepthDb(a) > amountToMaxDepthDb(a - 0.05))
@@ -483,18 +484,20 @@ test('release: longer holds steadier through a consonant run', () => {
 
 test('band shape: cuts the sibilance band, leaves the air above 16 kHz, never boosts', () => {
   for (const sr of [44100, 48000, 96000]) {
-    for (const depth of [3, 6, 9]) {
+    for (const depth of [3, 6, 9, 12]) {
       const secs = softenerSections(sr, -depth, 'band')
       const dense = Array.from({ length: 400 }, (_, i) => 100 * Math.pow(10, (i / 399) * Math.log10(0.49 * sr / 100)))
       const db = magnitudeResponseDb(secs, dense, sr)
       const deepest = Math.min(...db)
-      assert.ok(Math.max(...db) < 0.15, `boost ${Math.max(...db).toFixed(2)} dB at ${sr}/${depth}`)
-      // The depth compensation is fitted at 44.1/48 kHz; the bilinear warp
-      // makes the band ~1 dB shallower at 96 kHz and full depth.
-      assert.ok(Math.abs(deepest + depth) < (sr > 48000 ? 1.1 : 0.6), `deepest ${deepest.toFixed(2)} for ${depth} dB at ${sr}`)
+      // 0.11 dB at 9 dB of depth, 0.15 at the 12 dB maximum.
+      assert.ok(Math.max(...db) < 0.2, `boost ${Math.max(...db).toFixed(2)} dB at ${sr}/${depth}`)
+      // The compensation is solved per rate, so the depth lands everywhere.
+      assert.ok(Math.abs(deepest + depth) < 0.1, `deepest ${deepest.toFixed(2)} for ${depth} dB at ${sr}`)
       const [air] = magnitudeResponseDb(secs, [16000], sr)
       const [shelfAir] = magnitudeResponseDb(softenerSections(sr, -depth, 'shelf'), [16000], sr)
-      assert.ok(air > -0.15 * depth, `16 kHz cut ${air.toFixed(2)} dB at ${sr}/${depth}`)
+      // Near-flat at 44.1/48 kHz; the shelves' shapes differ at 96 kHz and the
+      // band reaches higher there (16 kHz −2.9 dB at 12 dB of depth).
+      assert.ok(air > -(sr > 48000 ? 0.25 : 0.1) * depth, `16 kHz cut ${air.toFixed(2)} dB at ${sr}/${depth}`)
       assert.ok(shelfAir < -0.9 * depth, 'the shelf is the one that takes the air')
     }
   }
@@ -510,4 +513,41 @@ test('both shapes are exact identities at 0 dB', () => {
     const { channelData } = processHFSoftenerBuffer([x], SR, { shape })
     for (let i = 0; i < x.length; i++) assert.equal(channelData[0][i], x[i], `${shape} sample ${i}`)
   }
+})
+
+// ── Level alignment ─────────────────────────────────────────────────────────
+
+test('level alignment: a hotter file with its measured offset gets the same gain curve', () => {
+  // Every detector level moves dB-for-dB with the offset and the detector is
+  // linear, so the curve is invariant — not approximately, to rounding.
+  const { x } = makeSpeech(SR, { seconds: 3 })
+  const ref = processHFSoftenerBuffer([x], SR, { levelOffsetDb: 0 }, { recordGain: true }).gainDb
+  for (const db of [-12, 9]) {
+    const k = Math.pow(10, db / 20)
+    const y = x.map(v => v * k)
+    const g = processHFSoftenerBuffer([y], SR, { levelOffsetDb: db }, { recordGain: true }).gainDb
+    let worst = 0
+    for (let i = 0; i < g.length; i++) worst = Math.max(worst, Math.abs(g[i] - ref[i]))
+    assert.ok(worst < 1e-3, `${db} dB: gain curve moved by ${worst.toFixed(5)} dB`)
+    // And without the offset it would not have been: the premise of the fix.
+    const raw = processHFSoftenerBuffer([y], SR, {}, { recordGain: true }).gainDb
+    let drift = 0
+    for (let i = 0; i < g.length; i++) drift = Math.max(drift, Math.abs(raw[i] - ref[i]))
+    assert.ok(drift > 1, `${db} dB: an unaligned file only moved ${drift.toFixed(2)} dB`)
+  }
+})
+
+test('level alignment: offset is gated RMS minus nominal, clamped', () => {
+  assert.equal(levelOffsetDbFor(-20), 0)
+  assert.equal(levelOffsetDbFor(-26), -6)
+  assert.equal(levelOffsetDbFor(0), 20)
+  assert.equal(levelOffsetDbFor(30), 24)
+  assert.equal(levelOffsetDbFor(-80), -24)
+  assert.equal(levelOffsetDbFor(-Infinity), 0)
+})
+
+test('level alignment: Amount 0 % never engages, even on a very quiet file', () => {
+  const { x } = makeSpeech(SR, { seconds: 2 })
+  const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: 0, levelOffsetDb: -24 }, { recordGain: true })
+  for (const g of gainDb) assert.equal(Math.abs(g), 0)
 })
