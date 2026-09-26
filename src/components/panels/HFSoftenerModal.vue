@@ -2,7 +2,8 @@
 /**
  * HF Softener.
  *
- * Amount is the tuning; Shape picks the cut; Reso is the Threshold of the
+ * Amount is the tuning; Shape picks the cut; Air puts back a few dB of top
+ * after it, on Air Boost's curve; Reso is the Threshold of the
  * optional ResoTame pre-stage, which the HF RESO rocker switches in. Context,
  * Rotator, Release and vowel release were controls while the design was being
  * tuned and are now pinned (50 %, sidechain, 40 ms, on — see useHFSoftener.js). DELTA sits in the
@@ -14,10 +15,11 @@ import { computed, onMounted, watch } from 'vue'
 import { useHFSoftener } from '../../composables/useHFSoftener.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections,
+  amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections, AIR_MAKEUP_MAX_DB,
 } from '../../audio/hfSoftenerProcessor.js'
 import { HF_RESO_THRESHOLD_MIN_DB, HF_RESO_THRESHOLD_MAX_DB } from '../../audio/hfSoftenerResoStage.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
+import { airBandSections } from '../../audio/dsp/airBandCurve.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
@@ -27,10 +29,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfAir, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoThreshold, syncShape, syncLispGuard, syncReso, toggleDelta,
+  togglePreview, syncAmount, syncResoThreshold, syncAir, syncShape, syncLispGuard, syncReso, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -72,6 +74,8 @@ const CURVE_H = 96
 const F_MIN = 100
 const F_MAX = 20000
 const DB_MIN = -10
+// Headroom above 0 dB for the Air makeup's lift.
+const DB_MAX = AIR_MAKEUP_MAX_DB
 
 const CURVE_FREQS = Array.from({ length: 160 }, (_, i) =>
   F_MIN * Math.pow(F_MAX / F_MIN, i / 159),
@@ -83,22 +87,25 @@ function xFor(freqHz) {
 }
 
 function yFor(db) {
-  // 0 dB on the top edge; the shelf only ever cuts.
-  return (db / DB_MIN) * CURVE_H
+  return ((DB_MAX - db) / (DB_MAX - DB_MIN)) * CURVE_H
 }
+const Y0 = yFor(0)
 
+// The cut and the air makeup after it, as one response — what the audio gets.
 function shelfPath(gainDb) {
   const sr = state.currentFile?.sampleRate ?? 44100
-  const db = magnitudeResponseDb(softenerSections(sr, gainDb, hfShape.value), CURVE_FREQS, sr)
+  const secs = softenerSections(sr, gainDb, hfShape.value)
+  if (hfAir.value > 0) secs.push(...airBandSections(sr, hfAir.value))
+  const db = magnitudeResponseDb(secs, CURVE_FREQS, sr)
   return CURVE_FREQS.map(
-    (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${Math.max(0.5, yFor(db[i])).toFixed(1)}`,
+    (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${Math.min(CURVE_H - 0.5, Math.max(0.5, yFor(db[i]))).toFixed(1)}`,
   ).join(' ')
 }
 
 const maxDepthDb = computed(() => amountToMaxDepthDb(hfAmount.value / 100))
 const maxPath = computed(() => shelfPath(-maxDepthDb.value))
 const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthDb.value)))
-const liveFill = computed(() => `${livePath.value} L${CURVE_W},0 L0,0 Z`)
+const liveFill = computed(() => `${livePath.value} L${CURVE_W},${Y0} L0,${Y0} Z`)
 
 // The TRUE compression ratio (1.5:1 at the default, 6:1 at 100 %), not the
 // spec's divisor. Max depth is on the meter's scale and rarely the limit.
@@ -111,6 +118,10 @@ const thresholdLabel = computed(() => {
   return hfAmount.value === 0 ? 'OFF' : `${t.toFixed(0)} dBFS`
 })
 
+
+function formatAir(v) {
+  return v > 0 ? `+${Number(v).toFixed(1)}` : 'OFF'
+}
 
 function formatDb(v) {
   return `${Number(v).toFixed(1)} dB`
@@ -190,7 +201,7 @@ async function applyAndClose() {
               :x1="xFor(f)" :y1="0" :x2="xFor(f)" :y2="CURVE_H"
               stroke="rgba(255,255,255,.07)" stroke-width="1"
             />
-            <line :x1="0" :y1="0.5" :x2="CURVE_W" :y2="0.5" stroke="rgba(255,255,255,.14)" stroke-width="1" />
+            <line :x1="0" :y1="Y0" :x2="CURVE_W" :y2="Y0" stroke="rgba(255,255,255,.14)" stroke-width="1" />
             <path :d="maxPath" :stroke="ACCENT" stroke-opacity="0.3" stroke-dasharray="3 3" stroke-width="1.5" fill="none" />
             <path :d="liveFill" :fill="ACCENT" fill-opacity="0.12" />
             <path :d="livePath" :stroke="ACCENT" stroke-width="2" fill="none" />
@@ -210,7 +221,7 @@ async function applyAndClose() {
             >{{ gridLabel(f) }}</span>
           </div>
 
-          <div class="flex gap-[38px] mt-[16px]">
+          <div class="flex gap-[14px] mt-[16px]">
             <div class="w-[112px] flex flex-col items-center">
               <Knob
                 :model-value="hfAmount"
@@ -221,6 +232,19 @@ async function applyAndClose() {
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
                 {{ thresholdLabel }} · {{ ratioLabel }}
+              </span>
+            </div>
+            <div class="w-[112px] flex flex-col items-center">
+              <Knob
+                :model-value="hfAir"
+                @update:model-value="syncAir"
+                :min="0" :max="AIR_MAKEUP_MAX_DB" :step="0.1"
+                label="Air" :accent="ACCENT" :format-value="formatAir"
+                :disabled="!hfPreview"
+                title="Put back a few dB of top after the cut, on Air Boost's curve. Static: it does not follow the sibilants."
+              />
+              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+                MAKEUP · AIR BAND
               </span>
             </div>
             <div class="w-[112px] flex flex-col items-center">

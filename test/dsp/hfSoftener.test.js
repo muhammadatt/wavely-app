@@ -28,7 +28,9 @@ import {
   rotatorSections,
   shelfSection,
   softenerSections,
+  AIR_MAKEUP_MAX_DB,
 } from '../../src/audio/hfSoftenerProcessor.js'
+import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
 import {
@@ -762,4 +764,33 @@ test('reso threshold: turned down, ResoTame takes the sibilance and the softener
   const msg = `reso on s ${resoHi.toFixed(2)} → ${resoLo.toFixed(2)} dB, softener ${softHi.toFixed(2)} → ${softLo.toFixed(2)} dB`
   assert.ok(Math.abs(resoHi) < 0.1 && resoLo < -6, msg)
   assert.ok(softHi < -2 && softLo > -0.5, msg)
+})
+
+// ── Air makeup ──────────────────────────────────────────────────────────────
+
+test('air makeup: is Air Boost’s curve, sample for sample, when the cut is idle', () => {
+  const sr = 44100
+  const x = pink(sr, 5)
+  // Amount 0 never engages, so the only thing left in the path is the air.
+  const soft = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, airDb: 3 }).channelData[0]
+  const air = processAirBandBuffer([x], sr, { gainDb: 3 }).channelData[0]
+  let worst = 0
+  for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(soft[i] - air[i]))
+  assert.ok(worst < 1e-6, `worst sample difference ${worst}`)
+})
+
+test('air makeup: stays out of delta and out of preair', () => {
+  const sr = 44100
+  const { x } = makeSpeech(sr, { seconds: 2 })
+  const run = (airDb, listen) => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, airDb }, { listen }).channelData[0]
+  assert.deepEqual(run(4, 'delta'), run(0, 'delta'))
+  assert.deepEqual(run(4, 'preair'), run(0, 'off'))
+})
+
+test('air makeup: clamped to the knob range', () => {
+  const k = new HFSoftenerKernel(44100)
+  k.setParams({ airDb: 99 }, true)
+  assert.equal(k.airDb, AIR_MAKEUP_MAX_DB)
+  k.setParams({ airDb: -3 }, true)
+  assert.equal(k.airDb, 0)
 })

@@ -20,6 +20,9 @@ const hfLispGuard = ref(HF_SOFTENER_DEFAULTS.lispGuard)
 // with fixed settings (see hfSoftenerResoStage.js).
 const hfReso = ref(HF_SOFTENER_DEFAULTS.reso)
 const hfResoThreshold = ref(HF_SOFTENER_DEFAULTS.resoThreshold)
+// Air makeup: Air Boost's curve after the cut, to put back the top the cut
+// takes on average.
+const hfAir = ref(HF_SOFTENER_DEFAULTS.air)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
 const hfFileLevelDb = ref(null)
@@ -50,6 +53,7 @@ function currentParams() {
     lispGuard: hfLispGuard.value,
     reso: hfReso.value,
     resoThreshold: hfResoThreshold.value,
+    air: hfAir.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -162,6 +166,11 @@ export function useHFSoftener() {
     pushParam('amount', v)
   }
 
+  function syncAir(v) {
+    hfAir.value = v
+    pushParam('air', v)
+  }
+
   function syncResoThreshold(v) {
     hfResoThreshold.value = v
     pushParam('resoThreshold', v)
@@ -239,6 +248,7 @@ export function useHFSoftener() {
   return {
     hfAmount,
     hfResoThreshold,
+    hfAir,
     hfShape,
     hfLispGuard,
     hfReso,
@@ -254,6 +264,7 @@ export function useHFSoftener() {
     togglePreview,
     syncAmount,
     syncResoThreshold,
+    syncAir,
     syncShape,
     syncLispGuard,
     syncReso,

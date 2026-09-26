@@ -28,6 +28,7 @@ export const HF_SOFTENER_DEFAULTS = {
   lispGuard: true, // never cut a sibilant below the voice-relative floor
   reso: false, // band-limited ResoTame ahead of the softener — see hfSoftenerResoStage.js
   resoThreshold: HF_RESO_THRESHOLD_DEFAULT_DB, // its Threshold (kernel `selectivity`), dB
+  air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
 }
@@ -43,6 +44,7 @@ export function toKernelParams(params) {
     shape: params.shape,
     lispGuard: params.lispGuard,
     levelOffsetDb: params.levelOffset,
+    airDb: params.air,
   }
 }
 
@@ -94,7 +96,9 @@ export function createHFSoftener(audioContext) {
     }
     src.connect(worklet)
     const delta = listen === 'delta'
-    worklet.port.postMessage({ type: 'listen', mode: delta && !withReso ? 'delta' : 'off' })
+    // With the pre-stage in, the softener hands over its output WITHOUT the
+    // air makeup ('preair'), so the wrapper's delta is only what was removed.
+    worklet.port.postMessage({ type: 'listen', mode: delta ? (withReso ? 'preair' : 'delta') : 'off' })
     if (delta && withReso) {
       input.connect(resoDelay)
       resoDelay.connect(preOutput)

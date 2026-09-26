@@ -41,7 +41,9 @@
 
 import {
   allpass, highpass, lowpass, highShelf, groupDelaySeconds, magnitudeResponseDb, DENORMAL_FLOOR,
+  BiquadCascade,
 } from './dsp/biquad.js'
+import { airBandSections, AIR_BANDS } from './dsp/airBandCurve.js'
 import { riseCoeff } from './dsp/envelope.js'
 
 /** Internal constants, fixed at build time. Quoted from the spec's table. */
@@ -136,14 +138,23 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   // File property, not a patch value: the file's gated RMS minus the nominal
   // level. Measured by the caller over the WHOLE file (see levelOffsetDbFor).
   levelOffsetDb: 0,
+  // Static Air Band lift (the Air Boost curve) AFTER the dynamic cut, dB.
+  // 0 is bit-transparent — the stage does not run at all.
+  airDb: 0,
 }
+
+/** Air makeup knob range, dB — "a few dB back", not a second Air Boost. */
+export const AIR_MAKEUP_MAX_DB = 6
 
 export const SHAPES = ['shelf', 'band']
 export const RELEASE_MS_MIN = 20
 export const RELEASE_MS_MAX = 150
 
 export const ROTATOR_MODES = ['off', 'sidechain', 'inpath']
-export const LISTEN_MODES = ['off', 'delta', 'sidechain']
+// 'preair' is the processed output WITHOUT the air makeup: the wrapper builds
+// its own delta (input − output) when a pre-stage is in, and the makeup is not
+// something being removed.
+export const LISTEN_MODES = ['off', 'delta', 'sidechain', 'preair']
 
 /**
  * Detector trim applied while the rotator is in circuit, so switching it does
@@ -495,6 +506,11 @@ export class HFSoftenerKernel {
     const chunk = tuning.coeffUpdateSamples
     this.gainBuf = new Float64Array(chunk)
 
+    // Air makeup: a static cascade after the dynamic cut. Coefficients step on
+    // a change, as Air Boost's do.
+    this.air = new BiquadCascade(AIR_BANDS.length, 2)
+    this.airDb = 0
+
     this.listen = 'off'
     this.meterPeriod = Math.max(1, Math.round(sampleRate / tuning.meterHz))
     this.meterCount = 0
@@ -532,6 +548,14 @@ export class HFSoftenerKernel {
     this.slope.set(amountToSlope(p.amount, this.tuning), immediate)
     this.detRot.set(p.rotator === 'off' ? 0 : 1, immediate)
     this.pathRot.set(p.rotator === 'inpath' ? 1 : 0, immediate)
+    const air = clamp(Number(p.airDb) || 0, 0, AIR_MAKEUP_MAX_DB)
+    if (air !== this.airDb) {
+      // Coming up from 0 the cascade has been idle; start it from rest rather
+      // than on state left over from the last time it ran.
+      if (this.airDb === 0) this.air.reset()
+      this.airDb = air
+      if (air > 0) this.air.setSections(airBandSections(this.sampleRate, air))
+    }
   }
 
   /** Monitor tap. Deliberately not a param: the apply path must never see it. */
@@ -701,7 +725,7 @@ export class HFSoftenerKernel {
           z[2 * k] = z1
           z[2 * k + 1] = z2
         }
-        if (listen === 'off') {
+        if (listen === 'off' || listen === 'preair') {
           for (let i = 0; i < len; i++) out[off + i] = w[i]
         } else if (listen === 'delta') {
           for (let i = 0; i < len; i++) out[off + i] = s.pathBuf[i] - w[i]
@@ -714,6 +738,13 @@ export class HFSoftenerKernel {
         s.lmLp.flushDenormals()
       }
       cur.set(next)
+    }
+
+    // Air makeup, after the cut, on the whole block. Only on the processed
+    // output: delta is what is REMOVED, and the makeup is not removed.
+    if (this.airDb > 0 && this.listen === 'off') {
+      this.air.ensureChannels(nOut)
+      for (let ch = 0; ch < nOut; ch++) this.air.process(outputChannels[ch], outputChannels[ch], n, ch)
     }
 
     this.meterCount += n
