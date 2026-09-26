@@ -10,8 +10,10 @@
  * passes. Ordered this way, a steady ring no longer lifts the softener's
  * detector and keeps it riding.
  *
- * Settings are fixed here rather than on a panel, chosen by measurement on
- * synthetic voice with a 7.5 kHz ring riding the voice envelope (frame 512):
+ * Threshold (the kernel's `selectivity`, the same control ResoTame's panel
+ * calls Threshold) is on the HF Softener's panel; everything else is fixed.
+ * The default was chosen by measurement on synthetic voice with a 7.5 kHz ring
+ * riding the voice envelope (frame 512):
  *
  *   zone 5–12 kHz               ring     ordinary "s"   13–20 kHz
  *   stock (sel 20, cut 36)     −28.5 dB    −0.41 dB      −0.03 dB
@@ -38,16 +40,39 @@ import { RESONANCE_DEFAULTS, toKernelParams } from './resonanceParams.js'
 export const HF_RESO_FRAME_SIZE = 512
 export const HF_RESO_LATENCY_SAMPLES = HF_RESO_FRAME_SIZE
 
+/**
+ * The Threshold knob's range, dB of protrusion above the local spectrum.
+ *
+ * ⚠ IT DECIDES WHICH PEAKS QUALIFY, NOT HOW DEEP THEY ARE CUT. A ring that
+ * clears it comes down ~16–19 dB whatever the setting (depth 1, max cut 24,
+ * then the spread and ballistics), so on a strong ring the knob does nothing.
+ * It bites on MILD rings — a faint 7.5 kHz ring at 36 / 28 / 24 dB: −3.5 /
+ * −15.6 / −17.6 dB.
+ *
+ * The floor is set by the ordinary "s", which is the softener's job: cut
+ * −0.01 / −0.41 / −2.06 / −6.08 dB at 24 / 20 / 16 / 12. 16 is as far as the
+ * knob goes; below it the pre-stage is a second de-esser stacked on the first.
+ */
+export const HF_RESO_THRESHOLD_DEFAULT_DB = 24
+export const HF_RESO_THRESHOLD_MIN_DB = 16
+export const HF_RESO_THRESHOLD_MAX_DB = 36
+
 const OFF = { enabled: false, depth: 0, sharpness: 0.8, selectivity: 20, maxCut: 12, protect: false }
 
 /** 5–12 kHz only; the zones either side are switched off. */
-export const HF_RESO_ZONES = [
-  { id: 'z1', hiHz: 5000, ...OFF },
-  { id: 'z2', hiHz: 12000, enabled: true, depth: 1, sharpness: 0.8, selectivity: 24, maxCut: 24, protect: false },
-  { id: 'z3', hiHz: 20000, ...OFF },
-]
+export function hfResoZones(thresholdDb = HF_RESO_THRESHOLD_DEFAULT_DB) {
+  const t = Number.isFinite(thresholdDb) ? thresholdDb : HF_RESO_THRESHOLD_DEFAULT_DB
+  const selectivity = Math.min(HF_RESO_THRESHOLD_MAX_DB, Math.max(HF_RESO_THRESHOLD_MIN_DB, t))
+  return [
+    { id: 'z1', hiHz: 5000, ...OFF },
+    { id: 'z2', hiHz: 12000, enabled: true, depth: 1, sharpness: 0.8, selectivity, maxCut: 24, protect: false },
+    { id: 'z3', hiHz: 20000, ...OFF },
+  ]
+}
+
+export const HF_RESO_ZONES = hfResoZones()
 
 /** Kernel params for the pre-stage, ready to cross a structured clone. */
-export function hfResoKernelParams() {
-  return toKernelParams({ ...RESONANCE_DEFAULTS, zones: HF_RESO_ZONES, focus: null })
+export function hfResoKernelParams(thresholdDb = HF_RESO_THRESHOLD_DEFAULT_DB) {
+  return toKernelParams({ ...RESONANCE_DEFAULTS, zones: hfResoZones(thresholdDb), focus: null })
 }

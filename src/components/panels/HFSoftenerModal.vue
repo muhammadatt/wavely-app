@@ -2,9 +2,10 @@
 /**
  * HF Softener.
  *
- * Amount and Context are the tuning; Shape picks the cut. Rotator, Release and
- * vowel release were controls while the design was being tuned and are now
- * pinned (sidechain, 40 ms, on — see useHFSoftener.js). DELTA sits in the
+ * Amount is the tuning; Shape picks the cut; Reso is the Threshold of the
+ * optional ResoTame pre-stage, which the HF RESO rocker switches in. Context,
+ * Rotator, Release and vowel release were controls while the design was being
+ * tuned and are now pinned (50 %, sidechain, 40 ms, on — see useHFSoftener.js). DELTA sits in the
  * header like every other plugin's monitor and never reaches the apply path.
  * The curve is the cut the kernel is running right now, drawn from the same
  * coefficient builder, with the Amount's maximum depth ghosted behind it.
@@ -15,6 +16,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import {
   amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections,
 } from '../../audio/hfSoftenerProcessor.js'
+import { HF_RESO_THRESHOLD_MIN_DB, HF_RESO_THRESHOLD_MAX_DB } from '../../audio/hfSoftenerResoStage.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
@@ -25,10 +27,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfContext, hfShape, hfLispGuard, hfReso, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
-  hfReduction, hfThresholdLift, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncContext, syncShape, syncLispGuard, syncReso, toggleDelta,
+  hfReduction, hfInputLevels, hfOutputLevels,
+  togglePreview, syncAmount, syncResoThreshold, syncShape, syncLispGuard, syncReso, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -109,6 +111,10 @@ const thresholdLabel = computed(() => {
   return hfAmount.value === 0 ? 'OFF' : `${t.toFixed(0)} dBFS`
 })
 
+
+function formatDb(v) {
+  return `${Number(v).toFixed(1)} dB`
+}
 
 function formatPct(v) {
   return `${Math.round(v)}%`
@@ -218,17 +224,19 @@ async function applyAndClose() {
               </span>
             </div>
             <div class="w-[112px] flex flex-col items-center">
+              <!-- ResoTame's Threshold, same meaning: how far a peak must
+                   stand above the local spectrum before it is cut. Higher is
+                   gentler. Live only while HF RESO is in. -->
               <Knob
-                :model-value="hfContext"
-                @update:model-value="syncContext"
-                :min="0" :max="100" :step="1"
-                label="Context" :accent="ACCENT" :format-value="formatPct"
-                :disabled="!hfPreview"
+                :model-value="hfResoThreshold"
+                @update:model-value="syncResoThreshold"
+                :min="HF_RESO_THRESHOLD_MIN_DB" :max="HF_RESO_THRESHOLD_MAX_DB" :step="0.5"
+                label="Reso" :accent="ACCENT" :format-value="formatDb"
+                :disabled="!hfPreview || !hfReso"
+                title="Threshold of the ResoTame pre-stage: how far a 5–12 kHz peak must stand above its surroundings before it is cut. Lower catches milder rings; below about 20 it starts cutting ordinary S too."
               />
-              <!-- Deliberately unsmoothed: with Context up, the same sibilant
-                   is treated differently by phrase, and the readout says so. -->
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                +{{ hfThresholdLift.toFixed(1) }} dB LIFT
+                {{ hfReso ? 'THRESHOLD · 5–12k' : 'HF RESO OFF' }}
               </span>
             </div>
           </div>

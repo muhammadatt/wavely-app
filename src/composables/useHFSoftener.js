@@ -14,12 +14,12 @@ export const HF_SOFTENER_WINDOW_ID = 'hf-softener'
 
 // Singleton reactive state shared between the sidebar trigger and the modal.
 const hfAmount = ref(HF_SOFTENER_DEFAULTS.amount)
-const hfContext = ref(HF_SOFTENER_DEFAULTS.context)
 const hfShape = ref(HF_SOFTENER_DEFAULTS.shape)
 const hfLispGuard = ref(HF_SOFTENER_DEFAULTS.lispGuard)
 // The band-limited ResoTame ahead of the softener — an A/B of the pairing,
 // with fixed settings (see hfSoftenerResoStage.js).
 const hfReso = ref(HF_SOFTENER_DEFAULTS.reso)
+const hfResoThreshold = ref(HF_SOFTENER_DEFAULTS.resoThreshold)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
 const hfFileLevelDb = ref(null)
@@ -38,16 +38,18 @@ let meterId = null
 function currentParams() {
   return {
     amount: hfAmount.value,
-    context: hfContext.value,
-    // Pinned after listening, and off the panel: the rotator on the detector
-    // only, a 40 ms release, and the fast release as each vowel starts. The
-    // kernel keeps all three switchable for the bench and the tests.
+    // Pinned after listening, and off the panel: Context at 50 %, the rotator
+    // on the detector only, a 40 ms release, and the fast release as each
+    // vowel starts. The kernel keeps all four switchable for the bench and the
+    // tests.
+    context: HF_SOFTENER_DEFAULTS.context,
     rotator: HF_SOFTENER_DEFAULTS.rotator,
     release: HF_SOFTENER_DEFAULTS.release,
     vowelRelease: HF_SOFTENER_DEFAULTS.vowelRelease,
     shape: hfShape.value,
     lispGuard: hfLispGuard.value,
     reso: hfReso.value,
+    resoThreshold: hfResoThreshold.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -160,9 +162,9 @@ export function useHFSoftener() {
     pushParam('amount', v)
   }
 
-  function syncContext(v) {
-    hfContext.value = v
-    pushParam('context', v)
+  function syncResoThreshold(v) {
+    hfResoThreshold.value = v
+    pushParam('resoThreshold', v)
   }
 
   function syncLispGuard(v) {
@@ -236,7 +238,7 @@ export function useHFSoftener() {
 
   return {
     hfAmount,
-    hfContext,
+    hfResoThreshold,
     hfShape,
     hfLispGuard,
     hfReso,
@@ -251,7 +253,7 @@ export function useHFSoftener() {
     hasSelection,
     togglePreview,
     syncAmount,
-    syncContext,
+    syncResoThreshold,
     syncShape,
     syncLispGuard,
     syncReso,

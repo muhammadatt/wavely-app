@@ -13,7 +13,9 @@
 
 import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
-import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, hfResoKernelParams } from '../hfSoftenerResoStage.js'
+import {
+  HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_THRESHOLD_DEFAULT_DB, hfResoKernelParams,
+} from '../hfSoftenerResoStage.js'
 import { createLevelTap } from './levelTap.js'
 
 export const HF_SOFTENER_DEFAULTS = {
@@ -25,6 +27,7 @@ export const HF_SOFTENER_DEFAULTS = {
   shape: 'band', // 'shelf' | 'band'
   lispGuard: true, // never cut a sibilant below the voice-relative floor
   reso: false, // band-limited ResoTame ahead of the softener — see hfSoftenerResoStage.js
+  resoThreshold: HF_RESO_THRESHOLD_DEFAULT_DB, // its Threshold (kernel `selectivity`), dB
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
 }
@@ -108,7 +111,7 @@ export function createHFSoftener(audioContext) {
       .then(() => {
         if (destroyed || resoNode) return
         resoNode = new AudioWorkletNode(audioContext, 'resonance-processor', {
-          processorOptions: { params: hfResoKernelParams(), frameSize: HF_RESO_FRAME_SIZE },
+          processorOptions: { params: hfResoKernelParams(params.resoThreshold), frameSize: HF_RESO_FRAME_SIZE },
         })
         rewire()
       })
@@ -148,6 +151,10 @@ export function createHFSoftener(audioContext) {
     setParam(name, value) {
       if (!(name in params)) return
       params[name] = value
+      if (name === 'resoThreshold') {
+        resoNode?.port.postMessage({ type: 'params', params: hfResoKernelParams(value) })
+        return
+      }
       if (name === 'reso') {
         ensureReso()
         rewire()

@@ -32,7 +32,8 @@ import {
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
 import {
-  HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams,
+  HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
+  HF_RESO_THRESHOLD_DEFAULT_DB, HF_RESO_THRESHOLD_MIN_DB, HF_RESO_THRESHOLD_MAX_DB,
 } from '../../src/audio/hfSoftenerResoStage.js'
 
 const SR = 48000
@@ -693,4 +694,43 @@ test('reso pre-stage: takes a ring, leaves an ordinary S and the air to the soft
   assert.ok(ringCut < -12, `ring cut ${ringCut.toFixed(2)} dB`)
   assert.ok(Math.abs(sibCut) < 0.25, `ordinary S moved ${sibCut.toFixed(2)} dB`)
   assert.ok(Math.abs(airCut) < 0.1, `air moved ${airCut.toFixed(2)} dB`)
+})
+
+test('reso threshold: sets the zone\'s selectivity, clamped to the knob range', () => {
+  const sel = t => hfResoZones(t).find(z => z.enabled).selectivity
+  assert.equal(sel(undefined), HF_RESO_THRESHOLD_DEFAULT_DB)
+  assert.equal(sel(18), 18)
+  assert.equal(sel(0), HF_RESO_THRESHOLD_MIN_DB)
+  assert.equal(sel(99), HF_RESO_THRESHOLD_MAX_DB)
+  assert.equal(sel(NaN), HF_RESO_THRESHOLD_DEFAULT_DB)
+  // The knob moves only the threshold.
+  const strip = zs => zs.map(({ selectivity, ...rest }) => rest)
+  assert.deepEqual(strip(hfResoZones(14)), strip(hfResoZones(30)))
+})
+
+test('reso threshold: lower catches more of a milder ring', () => {
+  const sr = 44100
+  const { x: clean } = makeSpeech(sr, { seconds: 3 })
+  const env = new Float32Array(clean.length)
+  for (let i = 0, e = 0; i < clean.length; i++) { e = Math.max(Math.abs(clean[i]), e * 0.9995); env[i] = e }
+  // A faint ring. A strong one is cut the same at every threshold — the knob
+  // decides what qualifies, not how deep — so only a mild one can show it.
+  const ringed = clean.map((v, i) => v + 0.001 * env[i] * Math.sin(2 * Math.PI * 7500 * i / sr))
+  const ringDb = (y) => {
+    const f = [new Biquad(bandpass(sr, 7500, 30)), new Biquad(bandpass(sr, 7500, 30))]
+    let s = 0
+    for (let i = 0; i < y.length; i++) { const v = f[1].tick(f[0].tick(y[i])); if (i > sr) s += v * v }
+    return 10 * Math.log10(s + 1e-30)
+  }
+  const cut = (t) => {
+    const r = processResonanceBuffer([ringed], sr, hfResoKernelParams(t), { frameSize: HF_RESO_FRAME_SIZE })
+    const o = new Float32Array(ringed.length)
+    o.set(r.channelData[0].subarray(r.latencySamples))
+    return ringDb(o) - ringDb(ringed)
+  }
+  const c36 = cut(36), c28 = cut(28), c24 = cut(24)
+  const msg = `ring cut at 36/28/24: ${c36.toFixed(2)} / ${c28.toFixed(2)} / ${c24.toFixed(2)} dB`
+  assert.ok(c36 > -6, msg)
+  assert.ok(c24 < c28 && c28 < c36 - 6, msg)
+  assert.ok(c24 < -12, msg)
 })
