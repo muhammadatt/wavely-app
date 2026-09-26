@@ -25,10 +25,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfContext, hfShape, hfLispGuard, hfDelta, hfPreview,
+  hfAmount, hfContext, hfShape, hfLispGuard, hfReso, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfThresholdLift, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncContext, syncShape, syncLispGuard, toggleDelta,
+  togglePreview, syncAmount, syncContext, syncShape, syncLispGuard, syncReso, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -49,6 +49,11 @@ const ACCENT = '#e8b77f'
 const GUARD_OPTIONS = [
   { value: true, label: 'ON', title: 'Never cut an S further below the voice than a normal S sits — stops the lisp, and lets go as the next vowel starts' },
   { value: false, label: 'OFF', title: 'Cut as deep as Amount asks' },
+]
+
+const RESO_OPTIONS = [
+  { value: true, label: 'ON', title: 'Run a band-limited ResoTame (5–12 kHz, peaks only) ahead of the softener — takes rings and whistly S, leaves ordinary S to the softener. Adds 11.6 ms latency' },
+  { value: false, label: 'OFF', title: 'Softener alone' },
 ]
 
 const SHAPE_OPTIONS = [
@@ -247,6 +252,14 @@ async function applyAndClose() {
             :model-value="hfLispGuard" :options="GUARD_OPTIONS" :accent="ACCENT"
             :disabled="!hfPreview" label="Lisp guard"
             @update:model-value="syncLispGuard"
+          />
+        </div>
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">HF RESO</span>
+          <DeviceChoiceRocker
+            :model-value="hfReso" :options="RESO_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview" label="ResoTame pre-stage"
+            @update:model-value="syncReso"
           />
         </div>
       </div>

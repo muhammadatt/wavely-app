@@ -12,6 +12,8 @@
  */
 
 import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
+import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
+import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, hfResoKernelParams } from '../hfSoftenerResoStage.js'
 import { createLevelTap } from './levelTap.js'
 
 export const HF_SOFTENER_DEFAULTS = {
@@ -22,6 +24,7 @@ export const HF_SOFTENER_DEFAULTS = {
   vowelRelease: true, // let go fast when a vowel starts
   shape: 'band', // 'shelf' | 'band'
   lispGuard: true, // never cut a sibilant below the voice-relative floor
+  reso: false, // band-limited ResoTame ahead of the softener — see hfSoftenerResoStage.js
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
 }
@@ -56,8 +59,66 @@ export function createHFSoftener(audioContext) {
   // apply path renders with, and a monitor mode must never be one of them.
   let listen = 'off'
 
-  input.connect(preOutput)
+  // ── Routing ──────────────────────────────────────────────────────────────
+  // input → [ResoTame pre-stage] → softener → preOutput, with DELTA built
+  // here when the pre-stage is in: the softener's own delta would only hear
+  // what IT removed, so the monitor becomes (input delayed by the pre-stage's
+  // latency) − (final output) and covers both stages. ⚠ The delay is a
+  // DelayNode at 512/fs, whose float32 time may land a hair off an integer
+  // sample — a monitoring-only imprecision; apply never uses this path.
+  const inputMonitor = audioContext.createGain()
+  const outputMonitor = audioContext.createGain()
+  preOutput.connect(outputMonitor)
+
+  let resoNode = null
+  const resoDelay = audioContext.createDelay(0.1)
+  resoDelay.delayTime.value = HF_RESO_LATENCY_SAMPLES / audioContext.sampleRate
+  const invert = audioContext.createGain()
+  invert.gain.value = -1
+
+  function rewire() {
+    for (const n of [input, resoNode, worklet, resoDelay, invert]) n?.disconnect()
+    input.connect(inputMonitor)
+    if (!worklet) {
+      input.connect(preOutput)
+      return
+    }
+    const withReso = params.reso && resoNode
+    let src = input
+    if (withReso) {
+      input.connect(resoNode)
+      src = resoNode
+    }
+    src.connect(worklet)
+    const delta = listen === 'delta'
+    worklet.port.postMessage({ type: 'listen', mode: delta && !withReso ? 'delta' : 'off' })
+    if (delta && withReso) {
+      input.connect(resoDelay)
+      resoDelay.connect(preOutput)
+      worklet.connect(invert)
+      invert.connect(preOutput)
+    } else {
+      worklet.connect(preOutput)
+    }
+  }
+
+  function ensureReso() {
+    if (resoNode || !params.reso) return
+    ensureResonanceWorklet(audioContext)
+      .then(() => {
+        if (destroyed || resoNode) return
+        resoNode = new AudioWorkletNode(audioContext, 'resonance-processor', {
+          processorOptions: { params: hfResoKernelParams(), frameSize: HF_RESO_FRAME_SIZE },
+        })
+        rewire()
+      })
+      .catch((err) => {
+        console.error('HF Softener ResoTame pre-stage failed to load, running without it:', err)
+      })
+  }
+
   preOutput.connect(output)
+  rewire() // bypassed until the worklet loads
 
   ensureHFSoftenerWorklet(audioContext)
     .then(() => {
@@ -65,25 +126,17 @@ export function createHFSoftener(audioContext) {
       worklet = new AudioWorkletNode(audioContext, 'hf-softener-processor', {
         processorOptions: { params: toKernelParams(params) },
       })
-      // A monitor mode chosen before the module loaded would otherwise be lost.
-      if (listen !== 'off') worklet.port.postMessage({ type: 'listen', mode: listen })
       worklet.port.onmessage = (e) => {
         if (e.data?.type !== 'gr') return
         reductionDb = e.data.reductionDb
         thresholdLiftDb = e.data.thresholdLiftDb
       }
-      input.disconnect(preOutput)
-      input.connect(worklet)
-      worklet.connect(preOutput)
+      ensureReso()
+      rewire()
     })
     .catch((err) => {
       console.error('HF Softener worklet failed to load, running bypassed:', err)
     })
-
-  const inputMonitor = audioContext.createGain()
-  input.connect(inputMonitor)
-  const outputMonitor = audioContext.createGain()
-  preOutput.connect(outputMonitor)
 
   const inputTap = createLevelTap(audioContext, inputMonitor)
   const outputTap = createLevelTap(audioContext, outputMonitor)
@@ -93,10 +146,14 @@ export function createHFSoftener(audioContext) {
     output,
 
     setParam(name, value) {
-      if (name in params) {
-        params[name] = value
-        worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+      if (!(name in params)) return
+      params[name] = value
+      if (name === 'reso') {
+        ensureReso()
+        rewire()
+        return
       }
+      worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
     },
 
     getParam(name) {
@@ -115,7 +172,7 @@ export function createHFSoftener(audioContext) {
 
     setListen(mode) {
       listen = mode
-      worklet?.port.postMessage({ type: 'listen', mode })
+      rewire()
     },
 
     getInputLevels(channelCount) {
@@ -130,6 +187,9 @@ export function createHFSoftener(audioContext) {
       destroyed = true
       input.disconnect()
       worklet?.disconnect()
+      resoNode?.disconnect()
+      resoDelay.disconnect()
+      invert.disconnect()
       preOutput.disconnect()
       output.disconnect()
       inputMonitor.disconnect()

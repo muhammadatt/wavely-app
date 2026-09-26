@@ -29,6 +29,7 @@ import {
 } from './effects/airBand.js'
 import { ensureHFSoftenerWorklet } from './hfSoftenerWorkletLoader.js'
 import { HF_SOFTENER_PREROLL_S } from './hfSoftenerProcessor.js'
+import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, hfResoKernelParams } from './hfSoftenerResoStage.js'
 import {
   HF_SOFTENER_DEFAULTS,
   toKernelParams as toHFSoftenerKernelParams,
@@ -673,11 +674,17 @@ export function computeVoiceProfile(segments, start, end, sampleRate, channels) 
  */
 async function applyWorkletRegion(
   segments, start, end, sampleRate, channels,
-  { ensureWorklet, processorName, kernelParams, latencySamples = 0, preRollSamples = 0 },
+  { ensureWorklet, processorName, kernelParams, latencySamples = 0, preRollSamples = 0, preStages = [] },
 ) {
   const duration = end - start
   const numSamples = Math.ceil(duration * sampleRate)
-  const latency = Math.max(0, Math.round(latencySamples))
+  // Pre-stages are worklets chained AHEAD of the main one, each with its own
+  // latency; the whole chain's delay is what the render has to trim. Only the
+  // HF Softener's ResoTame pre-stage uses this today — every other caller
+  // passes none and renders exactly as before.
+  const latency = Math.max(0, Math.round(
+    latencySamples + preStages.reduce((sum, st) => sum + (st.latencySamples ?? 0), 0),
+  ))
 
   // ── PRE-ROLL ─────────────────────────────────────────────────────────────
   //
@@ -709,7 +716,7 @@ async function applyWorkletRegion(
   // state and the same bug; turning it on for all of them at once would change
   // the output of five shipped plugins in one commit. Four ask for it, each
   // after its own measurement: Tube Saturation (4 s), OptoSmooth (2 s),
-  // Scheps (2 s) and the HF Softener (1 s, which it shipped with) — see the
+  // Scheps (2 s) and the HF Softener (2 s, for its lisp guard’s 500 ms hold) — see the
   // note beside each call site for what its number buys. The rest keep today's behaviour until each is measured on its own.
   //
   // Two of those measurements say pre-roll is not the answer, and they are the
@@ -732,6 +739,7 @@ async function applyWorkletRegion(
 
   const offlineCtx = new OfflineAudioContext(channels, renderSamples, sampleRate)
   await ensureWorklet(offlineCtx)
+  for (const st of preStages) await st.ensureWorklet(offlineCtx)
 
   const inputBuffer = offlineCtx.createBuffer(channels, renderSamples, sampleRate)
   for (let ch = 0; ch < channels; ch++) {
@@ -754,7 +762,18 @@ async function applyWorkletRegion(
     processorOptions: { params: kernelParams },
   })
 
-  source.connect(node)
+  let upstream = source
+  for (const st of preStages) {
+    const pre = new AudioWorkletNode(offlineCtx, st.processorName, {
+      channelCount: channels,
+      channelCountMode: 'explicit',
+      outputChannelCount: [channels],
+      processorOptions: { params: st.kernelParams, ...(st.processorOptions ?? {}) },
+    })
+    upstream.connect(pre)
+    upstream = pre
+  }
+  upstream.connect(node)
   node.connect(offlineCtx.destination)
   source.start(0)
 
@@ -865,11 +884,24 @@ export function applyAirBandRegion(segments, start, end, params, sampleRate, cha
  * preview would be — see HF_SOFTENER_PREROLL_S.
  */
 export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, channels) {
+  const merged = { ...HF_SOFTENER_DEFAULTS, ...params }
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureHFSoftenerWorklet,
     processorName: 'hf-softener-processor',
-    kernelParams: toHFSoftenerKernelParams({ ...HF_SOFTENER_DEFAULTS, ...params }),
+    kernelParams: toHFSoftenerKernelParams(merged),
     preRollSamples: Math.round(HF_SOFTENER_PREROLL_S * sampleRate),
+    // The RESO switch: a band-limited ResoTame ahead of the softener — see
+    // hfSoftenerResoStage.js. Its 512-sample latency is trimmed with the rest.
+    // ⚠ Like ResoTame itself, its STFT grid phase at the region start cannot
+    // match a running preview, so with RESO on apply is close to the preview
+    // rather than sample-identical.
+    preStages: merged.reso ? [{
+      ensureWorklet: ensureResonanceWorklet,
+      processorName: 'resonance-processor',
+      kernelParams: hfResoKernelParams(),
+      processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
+      latencySamples: HF_RESO_LATENCY_SAMPLES,
+    }] : [],
   })
 }
 

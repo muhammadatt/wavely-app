@@ -12,6 +12,7 @@ export default {
     { label: 'Context', text: 'How much vowel energy raises the threshold, so a sibilant alone in a gap is treated harder than one inside a word' },
     { label: 'Shape', text: 'Band cuts the sibilance region and leaves the air above 11 kHz; Shelf cuts everything above 4.5 kHz' },
     { label: 'Lisp guard', text: 'Stops any S being pulled further below the voice than a normal S sits, so heavy settings cannot turn S into TH' },
+    { label: 'HF Reso', text: 'Runs a band-limited ResoTame ahead of the softener: it takes narrow rings and whistly S between 5 and 12 kHz and leaves ordinary S to the softener. For comparing the pairing; its settings are fixed' },
     { label: 'Delta', text: 'Hear only what is being removed, from the button in the title bar' },
   ],
 
@@ -29,5 +30,6 @@ export default {
     'Shelf depth moves more with Context up — the same S reads differently by phrase, and that is intended',
     'The cut lets go within about 10 ms as each vowel starts, so the sound after an S keeps its top end',
     'Delta is only for monitoring and never affects what gets applied',
+    'With HF Reso on, Delta covers both stages, playback runs about 12 ms late, and the applied result can differ very slightly from the preview, as with ResoTame itself',
   ],
 }

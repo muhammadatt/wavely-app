@@ -17,6 +17,9 @@ const hfAmount = ref(HF_SOFTENER_DEFAULTS.amount)
 const hfContext = ref(HF_SOFTENER_DEFAULTS.context)
 const hfShape = ref(HF_SOFTENER_DEFAULTS.shape)
 const hfLispGuard = ref(HF_SOFTENER_DEFAULTS.lispGuard)
+// The band-limited ResoTame ahead of the softener — an A/B of the pairing,
+// with fixed settings (see hfSoftenerResoStage.js).
+const hfReso = ref(HF_SOFTENER_DEFAULTS.reso)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
 const hfFileLevelDb = ref(null)
@@ -44,6 +47,7 @@ function currentParams() {
     vowelRelease: HF_SOFTENER_DEFAULTS.vowelRelease,
     shape: hfShape.value,
     lispGuard: hfLispGuard.value,
+    reso: hfReso.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -166,6 +170,11 @@ export function useHFSoftener() {
     pushParam('lispGuard', v)
   }
 
+  function syncReso(v) {
+    hfReso.value = v
+    pushParam('reso', v)
+  }
+
   function syncShape(v) {
     hfShape.value = v
     pushParam('shape', v)
@@ -230,6 +239,7 @@ export function useHFSoftener() {
     hfContext,
     hfShape,
     hfLispGuard,
+    hfReso,
     hfFileLevelDb,
     hfLevelOffset,
     hfDelta,
@@ -244,6 +254,7 @@ export function useHFSoftener() {
     syncContext,
     syncShape,
     syncLispGuard,
+    syncReso,
     toggleDelta,
     refreshLevel,
     apply,

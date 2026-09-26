@@ -29,7 +29,11 @@ import {
   shelfSection,
   softenerSections,
 } from '../../src/audio/hfSoftenerProcessor.js'
-import { highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
+import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
+import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
+import {
+  HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams,
+} from '../../src/audio/hfSoftenerResoStage.js'
 
 const SR = 48000
 
@@ -636,4 +640,57 @@ test('lisp guard: the cut lets go as the next vowel starts', () => {
   const off = post(false)
   const on = post(true)
   assert.ok(on > off * 0.5, `post-"s" vowel ${off.toFixed(2)} -> ${on.toFixed(2)} dB`)
+})
+
+// ── HF RESO pre-stage ───────────────────────────────────────────────────────
+
+test('reso pre-stage: 5–12 kHz only, 512-sample frame', () => {
+  const p = hfResoKernelParams()
+  assert.equal(HF_RESO_FRAME_SIZE, 512)
+  assert.equal(HF_RESO_LATENCY_SAMPLES, HF_RESO_FRAME_SIZE)
+  const on = HF_RESO_ZONES.filter(z => z.enabled)
+  assert.equal(on.length, 1)
+  assert.equal(on[0].hiHz, 12000)
+  assert.equal(HF_RESO_ZONES[0].hiHz, 5000)
+  // Survives a structured clone (it crosses into the worklet).
+  assert.deepEqual(structuredClone(p), p)
+})
+
+test('reso pre-stage: takes a ring, leaves an ordinary S and the air to the softener', () => {
+  const sr = 44100
+  const { x: clean, labels } = makeSpeech(sr, { seconds: 4 })
+  // A 7.5 kHz ring excited by the voice, riding its envelope.
+  const env = new Float32Array(clean.length)
+  for (let i = 0, e = 0; i < clean.length; i++) { e = Math.max(Math.abs(clean[i]), e * 0.9995); env[i] = e }
+  const ringed = clean.map((v, i) => v + 0.02 * env[i] * Math.sin(2 * Math.PI * 7500 * i / sr))
+
+  const run = (x) => {
+    const r = processResonanceBuffer([x], sr, hfResoKernelParams(), { frameSize: HF_RESO_FRAME_SIZE })
+    assert.equal(r.latencySamples, HF_RESO_LATENCY_SAMPLES)
+    const o = new Float32Array(x.length)
+    o.set(r.channelData[0].subarray(r.latencySamples))
+    return o
+  }
+  const bandDb = (y, sections, mask) => {
+    const fs = sections.map(c => new Biquad(c))
+    let s = 0
+    for (let i = 0; i < y.length; i++) {
+      let v = y[i]
+      for (const f of fs) v = f.tick(v)
+      if (i > sr && i < y.length - sr / 10 && (!mask || mask(i))) s += v * v
+    }
+    return 10 * Math.log10(s + 1e-30)
+  }
+  const ring = [bandpass(sr, 7500, 30), bandpass(sr, 7500, 30)]
+  const sib = [highpass(sr, 5000, 0.7), highpass(sr, 5000, 0.7), lowpass(sr, 9000, 0.7), lowpass(sr, 9000, 0.7)]
+  const air = [highpass(sr, 13000, 0.7), highpass(sr, 13000, 0.7)]
+
+  const yRing = run(ringed)
+  const yClean = run(clean)
+  const ringCut = bandDb(yRing, ring) - bandDb(ringed, ring)
+  const sibCut = bandDb(yClean, sib, i => labels[i] === 2) - bandDb(clean, sib, i => labels[i] === 2)
+  const airCut = bandDb(yClean, air) - bandDb(clean, air)
+  assert.ok(ringCut < -12, `ring cut ${ringCut.toFixed(2)} dB`)
+  assert.ok(Math.abs(sibCut) < 0.25, `ordinary S moved ${sibCut.toFixed(2)} dB`)
+  assert.ok(Math.abs(airCut) < 0.1, `air moved ${airCut.toFixed(2)} dB`)
 })
