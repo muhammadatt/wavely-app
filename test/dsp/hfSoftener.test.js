@@ -700,12 +700,12 @@ test('reso threshold: sets the zone\'s selectivity, clamped to the knob range', 
   const sel = t => hfResoZones(t).find(z => z.enabled).selectivity
   assert.equal(sel(undefined), HF_RESO_THRESHOLD_DEFAULT_DB)
   assert.equal(sel(18), 18)
-  assert.equal(sel(0), HF_RESO_THRESHOLD_MIN_DB)
+  assert.equal(sel(1), HF_RESO_THRESHOLD_MIN_DB)
   assert.equal(sel(99), HF_RESO_THRESHOLD_MAX_DB)
   assert.equal(sel(NaN), HF_RESO_THRESHOLD_DEFAULT_DB)
   // The knob moves only the threshold.
   const strip = zs => zs.map(({ selectivity, ...rest }) => rest)
-  assert.deepEqual(strip(hfResoZones(14)), strip(hfResoZones(30)))
+  assert.deepEqual(strip(hfResoZones(6)), strip(hfResoZones(30)))
 })
 
 test('reso threshold: lower catches more of a milder ring', () => {
@@ -733,4 +733,33 @@ test('reso threshold: lower catches more of a milder ring', () => {
   assert.ok(c36 > -6, msg)
   assert.ok(c24 < c28 && c28 < c36 - 6, msg)
   assert.ok(c24 < -12, msg)
+})
+
+test('reso threshold: turned down, ResoTame takes the sibilance and the softener backs off', () => {
+  const sr = 44100
+  const { x, labels } = makeSpeech(sr, { seconds: 3 })
+  const sibDb = (y) => {
+    const f = [highpass(sr, 5000, 0.7), highpass(sr, 5000, 0.7), lowpass(sr, 9000, 0.7), lowpass(sr, 9000, 0.7)].map(c => new Biquad(c))
+    let s = 0
+    for (let i = 0; i < y.length; i++) { let v = y[i]; for (const q of f) v = q.tick(v); if (i > sr && labels[i] === 2) s += v * v }
+    return 10 * Math.log10(s + 1e-30)
+  }
+  const reso = (t) => {
+    const r = processResonanceBuffer([x], sr, hfResoKernelParams(t), { frameSize: HF_RESO_FRAME_SIZE })
+    const o = new Float32Array(x.length)
+    o.set(r.channelData[0].subarray(r.latencySamples))
+    return o
+  }
+  const softGrOnS = (y) => {
+    const { gainDb } = processHFSoftenerBuffer([y], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.4 }, { recordGain: true })
+    let s = 0, n = 0
+    for (let i = sr; i < y.length; i++) if (labels[i] === 2) { s += gainDb[i]; n++ }
+    return s / n
+  }
+  const hi = reso(36), lo = reso(9)
+  const resoHi = sibDb(hi) - sibDb(x), resoLo = sibDb(lo) - sibDb(x)
+  const softHi = softGrOnS(hi), softLo = softGrOnS(lo)
+  const msg = `reso on s ${resoHi.toFixed(2)} → ${resoLo.toFixed(2)} dB, softener ${softHi.toFixed(2)} → ${softLo.toFixed(2)} dB`
+  assert.ok(Math.abs(resoHi) < 0.1 && resoLo < -6, msg)
+  assert.ok(softHi < -2 && softLo > -0.5, msg)
 })

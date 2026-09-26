@@ -233,7 +233,7 @@ async function applyAndClose() {
                 :min="HF_RESO_THRESHOLD_MIN_DB" :max="HF_RESO_THRESHOLD_MAX_DB" :step="0.5"
                 label="Reso" :accent="ACCENT" :format-value="formatDb"
                 :disabled="!hfPreview || !hfReso"
-                title="Threshold of the ResoTame pre-stage: how far a 5–12 kHz peak must stand above its surroundings before it is cut. Lower catches milder rings; below about 20 it starts cutting ordinary S too."
+                title="Threshold of the ResoTame pre-stage: how far a 5–12 kHz peak must stand above its surroundings before it is cut. High, it takes only rings and whistles; lower, it takes the sibilance too and the softener backs off. The lisp guard does not limit its cut."
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
                 {{ hfReso ? 'THRESHOLD · 5–12k' : 'HF RESO OFF' }}

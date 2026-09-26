@@ -12,7 +12,7 @@ export default {
     { label: 'Shape', text: 'Band cuts the sibilance region and leaves the air above 11 kHz; Shelf cuts everything above 4.5 kHz' },
     { label: 'Lisp guard', text: 'Stops any S being pulled further below the voice than a normal S sits, so heavy settings cannot turn S into TH' },
     { label: 'HF Reso', text: 'Runs a band-limited ResoTame ahead of the softener: it takes narrow rings and whistly S between 5 and 12 kHz and leaves ordinary S to the softener' },
-    { label: 'Reso', text: 'The pre-stage’s threshold, as on ResoTame: how far a peak must stand above its surroundings before it is cut. Lower catches milder rings; below about 20 dB it starts cutting ordinary S as well, on top of the softener' },
+    { label: 'Reso', text: 'The pre-stage’s threshold, as on ResoTame, and the split between the two stages. High, it takes only rings and whistly S; turned down, it takes the sibilance as well and the softener’s cut shrinks to match. Below about 20 dB the lisp guard no longer limits the total' },
     { label: 'Delta', text: 'Hear only what is being removed, from the button in the title bar' },
   ],
 

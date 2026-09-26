@@ -3,12 +3,13 @@
  * resonance suppressor that runs AHEAD of the softener when its RESO switch is
  * on.
  *
- * The two stages split the work. ResoTame takes narrow peaks that stand above
- * the local spectrum — a whistly "s", a mic or room ring — which the softener
- * could only reach by cutting the whole band. The softener takes the broadband
- * episodic spike of an ordinary "s", which is not a peak and which ResoTame
- * passes. Ordered this way, a steady ring no longer lifts the softener's
- * detector and keeps it riding.
+ * The two stages split the work, and the Threshold knob sets where. High, it
+ * takes only narrow peaks that stand far above the local spectrum — a whistly
+ * "s", a mic or room ring — which the softener could only reach by cutting the
+ * whole band, and leaves the broadband spike of an ordinary "s" to the
+ * softener. Lowered, it takes the sibilance too, spectrally rather than as a
+ * band dip, and the softener backs off by itself: its detector hears what
+ * ResoTame already removed, and its lisp guard reads the same level.
  *
  * Threshold (the kernel's `selectivity`, the same control ResoTame's panel
  * calls Threshold) is on the HF Softener's panel; everything else is fixed.
@@ -41,20 +42,29 @@ export const HF_RESO_FRAME_SIZE = 512
 export const HF_RESO_LATENCY_SAMPLES = HF_RESO_FRAME_SIZE
 
 /**
- * The Threshold knob's range, dB of protrusion above the local spectrum.
+ * The Threshold knob's range, dB of protrusion above the local spectrum —
+ * ResoTame's own range.
  *
- * ⚠ IT DECIDES WHICH PEAKS QUALIFY, NOT HOW DEEP THEY ARE CUT. A ring that
- * clears it comes down ~16–19 dB whatever the setting (depth 1, max cut 24,
- * then the spread and ballistics), so on a strong ring the knob does nothing.
- * It bites on MILD rings — a faint 7.5 kHz ring at 36 / 28 / 24 dB: −3.5 /
- * −15.6 / −17.6 dB.
+ * On rings it decides WHICH qualify, not how deep: a ring that clears it comes
+ * down ~16–19 dB at any setting, so it shows on mild rings (a faint 7.5 kHz
+ * ring at 36 / 28 / 24 dB: −3.5 / −15.6 / −17.6 dB).
  *
- * The floor is set by the ordinary "s", which is the softener's job: cut
- * −0.01 / −0.41 / −2.06 / −6.08 dB at 24 / 20 / 16 / 12. 16 is as far as the
- * knob goes; below it the pre-stage is a second de-esser stacked on the first.
+ * On sibilance it is the HANDOVER. Synthetic voice, Amount 40 %, normal "s":
+ *
+ *   threshold          36     24     20     16     12      9      6      3
+ *   ResoTame on "s"   0.00  −0.01  −0.41  −2.04  −5.98  −9.41 −10.25 −10.77
+ *   softener on "s"  −3.25  −3.25  −3.00  −1.98  −0.37   0.00   0.00   0.00
+ *   both, "s" band   −2.74  −2.75  −2.93  −3.70  −6.29  −9.41 −10.25 −10.77
+ *   vowels 5–12 kHz  −0.73  −0.74  −0.74  −0.67  −0.98  −1.40  −1.49  −1.58
+ *   air 13–20 kHz    −0.77  −0.77  −0.73  −0.62  −0.65  −1.01  −1.19  −1.31
+ *
+ * Vowels below 4 kHz: 0.00 throughout. ⚠ BELOW ~20 THE LISP GUARD NO LONGER
+ * BOUNDS THE TOTAL: it caps only the softener's cut, and at 9 ResoTame alone
+ * takes a normal "s" 9.4 dB where the guard stops the softener at ~6.7. The
+ * cut saturates by ~6 — the "s" is noise, and only so much of it protrudes.
  */
 export const HF_RESO_THRESHOLD_DEFAULT_DB = 24
-export const HF_RESO_THRESHOLD_MIN_DB = 16
+export const HF_RESO_THRESHOLD_MIN_DB = 3
 export const HF_RESO_THRESHOLD_MAX_DB = 36
 
 const OFF = { enabled: false, depth: 0, sharpness: 0.8, selectivity: 20, maxCut: 12, protect: false }
