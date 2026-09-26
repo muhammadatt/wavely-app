@@ -2,7 +2,9 @@
 /**
  * HF Softener.
  *
- * Amount is the tuning; Shape picks the cut; Air puts back a few dB of top
+ * Amount is the tuning; Shape picks the cut; Drive feeds an input waveshaper
+ * ahead of the cut (curve and VOICED/FULL on the SATURATION row, for
+ * auditioning); Air puts back a few dB of top
  * after it, on Air Boost's curve; Reso is the Threshold of the
  * optional ResoTame pre-stage, which the HF RESO rocker switches in. Context,
  * Rotator, Release and vowel release were controls while the design was being
@@ -22,6 +24,8 @@ import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import { airBandSections } from '../../audio/dsp/airBandCurve.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
+import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
+import { SHAPER_CURVES } from '../../audio/dsp/shaperCurves.js'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -29,10 +33,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfAir, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfAir, hfDrive, hfCurve, hfSatMode, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoThreshold, syncAir, syncShape, syncLispGuard, syncReso, toggleDelta,
+  togglePreview, syncAmount, syncResoThreshold, syncAir, syncDrive, syncCurve, syncSatMode, syncShape, syncLispGuard, syncReso, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -58,6 +62,13 @@ const GUARD_OPTIONS = [
 const RESO_OPTIONS = [
   { value: true, label: 'ON', title: 'Run a band-limited ResoTame (5–12 kHz, peaks only) ahead of the softener — takes rings and whistly S, leaves ordinary S to the softener. Adds 11.6 ms latency' },
   { value: false, label: 'OFF', title: 'Softener alone' },
+]
+
+const CURVE_OPTIONS = SHAPER_CURVES.map(c => ({ value: c.id, label: c.label, title: c.title }))
+
+const SAT_MODE_OPTIONS = [
+  { value: 'voiced', label: 'VOICED', title: 'Saturate vowels only — the shaper fades out as each S arrives, so it never adds harmonics to sibilance' },
+  { value: 'full', label: 'FULL', title: 'Saturate everything, sibilants included; the cut downstream cleans up what it adds' },
 ]
 
 const SHAPE_OPTIONS = [
@@ -119,6 +130,10 @@ const thresholdLabel = computed(() => {
 })
 
 
+function formatDrive(v) {
+  return v > 0 ? `${Math.round(v)}%` : 'OFF'
+}
+
 function formatAir(v) {
   return v > 0 ? `+${Number(v).toFixed(1)}` : 'OFF'
 }
@@ -161,7 +176,7 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="hf-softener"
     :z="z"
-    :width="620"
+    :width="700"
     :accent="ACCENT"
     brand-lead="HF"
     brand-tail="SOFTENER"
@@ -248,6 +263,19 @@ async function applyAndClose() {
               </span>
             </div>
             <div class="w-[112px] flex flex-col items-center">
+              <Knob
+                :model-value="hfDrive"
+                @update:model-value="syncDrive"
+                :min="0" :max="100" :step="1"
+                label="Drive" :accent="ACCENT" :format-value="formatDrive"
+                :disabled="!hfPreview"
+                title="Input waveshaper ahead of the cut. 50 % puts every curve at the same distortion on a nominal-level voice, so switching curves compares character, not strength. Adds 50 samples of latency while on."
+              />
+              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+                {{ hfDrive > 0 ? `SAT · ${hfSatMode === 'voiced' ? 'VOWELS' : 'FULL'}` : 'SAT OFF' }}
+              </span>
+            </div>
+            <div class="w-[112px] flex flex-col items-center">
               <!-- ResoTame's Threshold, same meaning: how far a peak must
                    stand above the local spectrum before it is cut. Higher is
                    gentler. Live only while HF RESO is in. -->
@@ -296,6 +324,25 @@ async function applyAndClose() {
         </div>
       </div>
 
+
+      <div class="flex justify-center items-center gap-[48px] mt-[18px]">
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">SAT CURVE</span>
+          <DeviceDetentRotary
+            :model-value="hfCurve" :options="CURVE_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview" label="Saturation curve" :show-label="false"
+            @update:model-value="syncCurve"
+          />
+        </div>
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">SAT MODE</span>
+          <DeviceChoiceRocker
+            :model-value="hfSatMode" :options="SAT_MODE_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview" label="Saturation mode"
+            @update:model-value="syncSatMode"
+          />
+        </div>
+      </div>
 
       <p
         class="mt-[14px] text-center"

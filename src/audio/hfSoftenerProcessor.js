@@ -44,6 +44,8 @@ import {
   BiquadCascade,
 } from './dsp/biquad.js'
 import { airBandSections, AIR_BANDS } from './dsp/airBandCurve.js'
+import { Oversampler, DelayLine, COMPRESSOR_OVERSAMPLE } from './dsp/oversample.js'
+import { shaperCurve, unitDriveU, SHAPER_CURVE_IDS, DEFAULT_SHAPER_CURVE } from './dsp/shaperCurves.js'
 import { riseCoeff } from './dsp/envelope.js'
 
 /** Internal constants, fixed at build time. Quoted from the spec's table. */
@@ -141,6 +143,47 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   // Static Air Band lift (the Air Boost curve) AFTER the dynamic cut, dB.
   // 0 is bit-transparent — the stage does not run at all.
   airDb: 0,
+  // Input waveshaper, ahead of the cut (the spec's deferred module). 0 does not
+  // run it — no oversampler, no latency, bit-identical to before.
+  shaperDrive: 0, // 0–1; 0.5 puts every curve at SHAPER_REF_THD on the reference sine
+  shaperCurve: DEFAULT_SHAPER_CURVE,
+  // 'voiced': drive follows the vowel-release voicing weight, so sibilants and
+  // gaps are never shaped. 'full': shaped all the time, the spec's version —
+  // the cut downstream cleans up what the shaper adds to an "s".
+  shaperMode: 'voiced',
+}
+
+export const SHAPER_MODES = ['voiced', 'full']
+/**
+ * The oversampler's latency, whole base-rate samples. Only while the shaper is
+ * engaged (drive > 0): at 0 the plugin keeps its zero latency.
+ */
+export const SHAPER_LATENCY_SAMPLES = COMPRESSOR_OVERSAMPLE.latencySamples
+/** Drive knob span, dB of pre-gain from 0 to 100 % around the matched midpoint. */
+export const SHAPER_DRIVE_SPAN_DB = 18
+/**
+ * The reference the drive is calibrated at: a sine PEAKING where nominal
+ * speech peaks — the −20 dBFS RMS every other threshold here is aligned to,
+ * plus 12 dB of speech crest factor. With the file's level offset subtracted,
+ * a knob position means the same saturation on a quiet recording and a hot one.
+ *
+ * ⚠ NOT A SINE AT THE SPEECH RMS, which was the first calibration: a sine
+ * peaks 3 dB over its RMS and speech ~12, so the curves met speech peaks ~9 dB
+ * hotter than the sine that set them. Measured at the old midpoint, the odd
+ * curves added distortion 8–12 dB under the vowel and cut its level 2–3 dB —
+ * the middle of the knob was already heavy.
+ */
+export const SHAPER_REF_PEAK_DBFS = -8
+const SHAPER_REF_AMPLITUDE = Math.pow(10, SHAPER_REF_PEAK_DBFS / 20)
+
+/**
+ * Pre-gain into the curve for a Drive setting, before the level offset.
+ * Drive 0.5 puts a nominal-level sine exactly at the curve's calibration point.
+ */
+export function shaperGainFor(curveId, drive, levelOffsetDb = 0) {
+  const u = unitDriveU(curveId)
+  return (u / SHAPER_REF_AMPLITUDE)
+    * Math.pow(10, ((drive - 0.5) * SHAPER_DRIVE_SPAN_DB - levelOffsetDb) / 20)
 }
 
 /** Air makeup knob range, dB — "a few dB back", not a second Air Boost. */
@@ -511,6 +554,15 @@ export class HFSoftenerKernel {
     this.air = new BiquadCascade(AIR_BANDS.length, 2)
     this.airDb = 0
 
+    // Input shaper. Built lazily on first engagement, per channel.
+    this.shaperOn = false
+    this.shaperFn = shaperCurve(DEFAULT_SHAPER_CURVE).f
+    this.shaperGain = 1
+    this.shaperFull = new Ramp(0, rampSamples)
+    // One-pole DC blocker on the shaper's added signal, ~5 Hz: the even-order
+    // curves produce DC, and it must not ride into the output.
+    this.shaperDcCoeff = Math.exp((-2 * Math.PI * 5) / sampleRate)
+
     this.listen = 'off'
     this.meterPeriod = Math.max(1, Math.round(sampleRate / tuning.meterHz))
     this.meterCount = 0
@@ -548,6 +600,17 @@ export class HFSoftenerKernel {
     this.slope.set(amountToSlope(p.amount, this.tuning), immediate)
     this.detRot.set(p.rotator === 'off' ? 0 : 1, immediate)
     this.pathRot.set(p.rotator === 'inpath' ? 1 : 0, immediate)
+    const drive = clamp(Number(p.shaperDrive) || 0, 0, 1)
+    const curveId = SHAPER_CURVE_IDS.includes(p.shaperCurve) ? p.shaperCurve : DEFAULT_SHAPER_CURVE
+    const wasOn = this.shaperOn
+    this.shaperOn = drive > 0
+    if (this.shaperOn && !wasOn) {
+      // Engaging: start the oversamplers, delays and DC state from rest.
+      for (const c of this.channels) this.resetShaperState(c)
+    }
+    this.shaperFn = shaperCurve(curveId).f
+    this.shaperGain = shaperGainFor(curveId, drive, off)
+    this.shaperFull.set(p.shaperMode === 'full' ? 1 : 0, immediate)
     const air = clamp(Number(p.airDb) || 0, 0, AIR_MAKEUP_MAX_DB)
     if (air !== this.airDb) {
       // Coming up from 0 the cascade has been idle; start it from rest rather
@@ -590,7 +653,62 @@ export class HFSoftenerKernel {
         // Per-chunk scratch: shelf input and detector signal.
         pathBuf: new Float64Array(this.tuning.coeffUpdateSamples),
         detBuf: new Float64Array(this.tuning.coeffUpdateSamples),
+        shOs: null,
+        shDelay: null,
+        shDry: new Float64Array(128),
+        shDiff: new Float64Array(128),
+        shDown: new Float64Array(128),
+        shDcX: 0,
+        shDcY: 0,
       })
+      if (this.shaperOn) this.resetShaperState(this.channels[this.channels.length - 1])
+    }
+  }
+
+  resetShaperState(c) {
+    c.shOs = new Oversampler(COMPRESSOR_OVERSAMPLE)
+    c.shDelay = new DelayLine(SHAPER_LATENCY_SAMPLES)
+    c.shDcX = 0
+    c.shDcY = 0
+  }
+
+  /**
+   * Shaper pre-pass for one block: fills each channel's `shDry` (the input,
+   * delayed by the oversampler's latency so the detector stays aligned with
+   * the audio) and `shDiff` (what the curve adds, DC-blocked). The audio path
+   * then takes dry + α·diff, with α from the voicing weight in 'voiced' mode.
+   */
+  runShaper(inputChannels, nOut, n) {
+    const f = this.shaperFn
+    const g = this.shaperGain
+    const inv = 1 / g
+    const a = this.shaperDcCoeff
+    const nIn = inputChannels.length
+    for (let ch = 0; ch < nOut; ch++) {
+      const c = this.channels[ch]
+      if (c.shDry.length < n) {
+        c.shDry = new Float64Array(n)
+        c.shDiff = new Float64Array(n)
+        c.shDown = new Float64Array(n)
+      }
+      const x = inputChannels[ch < nIn ? ch : nIn - 1]
+      const hi = c.shOs.up(x, n)
+      const m = n * c.shOs.factor
+      for (let j = 0; j < m; j++) hi[j] = f(g * hi[j]) * inv
+      c.shOs.down(c.shDown, n)
+      let dx = c.shDcX
+      let dy = c.shDcY
+      for (let i = 0; i < n; i++) {
+        const dry = c.shDelay.push(x[i])
+        c.shDry[i] = dry
+        const d = c.shDown[i] - dry
+        dy = d - dx + a * dy
+        dx = d
+        c.shDiff[i] = dy
+      }
+      if (Math.abs(dy) < DENORMAL_FLOOR) dy = 0
+      c.shDcX = dx
+      c.shDcY = dy
     }
   }
 
@@ -617,6 +735,8 @@ export class HFSoftenerKernel {
     const gainBuf = this.gainBuf
     const cur = this.coeffCur
     const next = this.coeffNext
+    const shaping = this.shaperOn
+    if (shaping) this.runShaper(inputChannels, nOut, n)
 
     for (let off = 0; off < n; off += chunk) {
       const len = Math.min(chunk, n - off)
@@ -629,7 +749,7 @@ export class HFSoftenerKernel {
         let energy = 0
         for (let ch = 0; ch < nOut; ch++) {
           const s = chans[ch]
-          const x = inputChannels[ch < nIn ? ch : nIn - 1][off + i]
+          const x = shaping ? s.shDry[off + i] : inputChannels[ch < nIn ? ch : nIn - 1][off + i]
           // The rotator always runs so its state is warm when switched in.
           let r = x
           for (let k = 0; k < s.rot.length; k++) r = s.rot[k].tick(r)
@@ -646,7 +766,8 @@ export class HFSoftenerKernel {
         const lmNow = energy / nOut
         const voice = this.voiceEnv.tick(lmNow)
         let release = this.relSlow
-        if (this.vowelRelease) {
+        let wv = 0
+        if (this.vowelRelease || shaping) {
           const voiceDb = voice > 0 ? 10 * Math.log10(voice) : -300
           const hfPrev = this.hfEnv.value
           const hfPrevDb = hfPrev > 0 ? Math.log(hfPrev) * DB_PER_NEPER : -300
@@ -654,8 +775,16 @@ export class HFSoftenerKernel {
           // rippling envelopes flips at a sample-rate-dependent instant, and
           // measured 0.35 dB apart at 96 kHz; blended over 6 dB it is 0.10.
           const over = Math.min(voiceDb - (tuning.voicedFloorDb + this.levelOffsetDb), voiceDb - hfPrevDb - tuning.voicedMarginDb)
-          const wv = over <= -3 ? 0 : over >= 3 ? 1 : (over + 3) / 6
-          release = this.relSlow + wv * (this.relVowel - this.relSlow)
+          wv = over <= -3 ? 0 : over >= 3 ? 1 : (over + 3) / 6
+          if (this.vowelRelease) release = this.relSlow + wv * (this.relVowel - this.relSlow)
+        }
+        if (shaping) {
+          // The shaper's share: the voicing weight in 'voiced' mode, all of it
+          // in 'full'. Added to the path here, once the weight for this sample
+          // is known; the detector has already read the dry signal.
+          const full = this.shaperFull.tick()
+          const alpha = wv + full * (1 - wv)
+          for (let ch = 0; ch < nOut; ch++) chans[ch].pathBuf[i] += alpha * chans[ch].shDiff[off + i]
         }
         this.hfEnv.release = release
         const hf = this.hfEnv.tick(peak * trim)

@@ -13,6 +13,7 @@
 
 import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
+import { SHAPER_LATENCY_SAMPLES } from '../hfSoftenerProcessor.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_THRESHOLD_DEFAULT_DB, hfResoKernelParams,
 } from '../hfSoftenerResoStage.js'
@@ -29,6 +30,9 @@ export const HF_SOFTENER_DEFAULTS = {
   reso: false, // band-limited ResoTame ahead of the softener — see hfSoftenerResoStage.js
   resoThreshold: HF_RESO_THRESHOLD_DEFAULT_DB, // its Threshold (kernel `selectivity`), dB
   air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6
+  drive: 0, // input waveshaper, 0–100 %; 0 = off, no latency
+  curve: 'quartic', // shaper curve — see dsp/shaperCurves.js
+  satMode: 'voiced', // 'voiced' (never shapes sibilants) | 'full'
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
 }
@@ -45,6 +49,9 @@ export function toKernelParams(params) {
     lispGuard: params.lispGuard,
     levelOffsetDb: params.levelOffset,
     airDb: params.air,
+    shaperDrive: (params.drive ?? 0) / 100,
+    shaperCurve: params.curve,
+    shaperMode: params.satMode,
   }
 }
 
@@ -82,6 +89,10 @@ export function createHFSoftener(audioContext) {
   invert.gain.value = -1
 
   function rewire() {
+    // The delta's dry side must match the whole chain's latency: the pre-stage
+    // always, the shaper's oversampler only while it is engaged.
+    resoDelay.delayTime.value = (HF_RESO_LATENCY_SAMPLES + (params.drive > 0 ? SHAPER_LATENCY_SAMPLES : 0))
+      / audioContext.sampleRate
     for (const n of [input, resoNode, worklet, resoDelay, invert]) n?.disconnect()
     input.connect(inputMonitor)
     if (!worklet) {
@@ -165,6 +176,8 @@ export function createHFSoftener(audioContext) {
         return
       }
       worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+      if (name === 'drive') resoDelay.delayTime.value = (HF_RESO_LATENCY_SAMPLES + (value > 0 ? SHAPER_LATENCY_SAMPLES : 0))
+        / audioContext.sampleRate
     },
 
     getParam(name) {

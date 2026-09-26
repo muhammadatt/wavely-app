@@ -28,7 +28,7 @@ import {
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
 import { ensureHFSoftenerWorklet } from './hfSoftenerWorkletLoader.js'
-import { HF_SOFTENER_PREROLL_S } from './hfSoftenerProcessor.js'
+import { HF_SOFTENER_PREROLL_S, SHAPER_LATENCY_SAMPLES } from './hfSoftenerProcessor.js'
 import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, hfResoKernelParams } from './hfSoftenerResoStage.js'
 import {
   HF_SOFTENER_DEFAULTS,
@@ -889,6 +889,8 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
     ensureWorklet: ensureHFSoftenerWorklet,
     processorName: 'hf-softener-processor',
     kernelParams: toHFSoftenerKernelParams(merged),
+    // The input shaper's oversampler, only while it is engaged.
+    latencySamples: merged.drive > 0 ? SHAPER_LATENCY_SAMPLES : 0,
     preRollSamples: Math.round(HF_SOFTENER_PREROLL_S * sampleRate),
     // The RESO switch: a band-limited ResoTame ahead of the softener — see
     // hfSoftenerResoStage.js. Its 512-sample latency is trimmed with the rest.

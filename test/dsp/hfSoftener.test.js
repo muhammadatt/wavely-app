@@ -29,7 +29,11 @@ import {
   shelfSection,
   softenerSections,
   AIR_MAKEUP_MAX_DB,
+  SHAPER_LATENCY_SAMPLES,
+  SHAPER_REF_PEAK_DBFS,
+  shaperGainFor,
 } from '../../src/audio/hfSoftenerProcessor.js'
+import { SHAPER_CURVES, SHAPER_REF_THD, sineThd, unitDriveU } from '../../src/audio/dsp/shaperCurves.js'
 import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
@@ -793,4 +797,99 @@ test('air makeup: clamped to the knob range', () => {
   assert.equal(k.airDb, AIR_MAKEUP_MAX_DB)
   k.setParams({ airDb: -3 }, true)
   assert.equal(k.airDb, 0)
+})
+
+// ── Input waveshaper ────────────────────────────────────────────────────────
+
+test('shaper curves: unity slope at zero, matched to the reference THD at their unit drive', () => {
+  for (const c of SHAPER_CURVES) {
+    assert.equal(c.f(0), 0, c.id)
+    const slope = (c.f(1e-6) - c.f(-1e-6)) / 2e-6
+    assert.ok(Math.abs(slope - 1) < 1e-6, `${c.id} slope ${slope}`)
+    const thd = sineThd(c.f, unitDriveU(c.id))
+    assert.ok(Math.abs(thd - SHAPER_REF_THD) < 1e-4, `${c.id} THD ${thd}`)
+  }
+})
+
+test('shaper: drive 0 is the plugin without it, whatever the curve and mode', () => {
+  const sr = 44100
+  const { x } = makeSpeech(sr, { seconds: 2 })
+  const base = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS }).channelData[0]
+  const off = processHFSoftenerBuffer([x], sr, {
+    ...HF_SOFTENER_KERNEL_DEFAULTS, shaperDrive: 0, shaperCurve: 'cubic', shaperMode: 'full',
+  }).channelData[0]
+  assert.deepEqual(off, base)
+})
+
+test('shaper: output lags the input by exactly SHAPER_LATENCY_SAMPLES', () => {
+  const sr = 44100
+  const n = sr
+  const x = new Float32Array(n)
+  // Quiet, so every curve is effectively linear: what is left is the delay.
+  for (let i = 0; i < n; i++) x[i] = 0.001 * Math.sin(2 * Math.PI * 440 * i / sr) + 0.0005 * Math.sin(2 * Math.PI * 3100 * i / sr)
+  const y = processHFSoftenerBuffer([x], sr, {
+    ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, shaperDrive: 0.5, shaperMode: 'full', shaperCurve: 'tanh',
+  }).channelData[0]
+  const L = SHAPER_LATENCY_SAMPLES
+  let worst = 0
+  for (let i = 2000; i < n - L; i++) worst = Math.max(worst, Math.abs(y[i + L] - x[i]))
+  assert.ok(worst < 1e-5, `worst misalignment ${worst}`)
+})
+
+test('shaper: VOICED keeps its harmonics out of hot sibilants and leaves gaps untouched', () => {
+  const sr = 44100
+  const { x: raw, labels } = makeSpeech(sr, { seconds: 3 })
+  // Sibilants 12 dB hot, so they reach the curve at all.
+  const x = raw.map((v, i) => (labels[i] === 2 ? v * 4 : v))
+  const L = SHAPER_LATENCY_SAMPLES
+  const run = (mode) => {
+    const y = processHFSoftenerBuffer([x], sr, {
+      ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, shaperDrive: 1, shaperCurve: 'tanh', shaperMode: mode,
+    }).channelData[0]
+    const o = new Float32Array(x.length)
+    o.set(y.subarray(L))
+    return o
+  }
+  const hfAddedDb = (y) => {
+    const f = [highpass(sr, 5000, 0.7), highpass(sr, 5000, 0.7)].map(c => new Biquad(c))
+    const g = [highpass(sr, 5000, 0.7), highpass(sr, 5000, 0.7)].map(c => new Biquad(c))
+    let d = 0, s = 0
+    for (let i = 0; i < x.length - L; i++) {
+      let a = y[i] - x[i], b = x[i]
+      for (const q of f) a = q.tick(a)
+      for (const q of g) b = q.tick(b)
+      if (i > sr && labels[i] === 2) { d += a * a; s += b * b }
+    }
+    return 10 * Math.log10(d / s)
+  }
+  const voiced = run('voiced'), full = run('full')
+  const v = hfAddedDb(voiced), f = hfAddedDb(full)
+  assert.ok(v < f - 10, `added HF on sibilants: voiced ${v.toFixed(1)} dB, full ${f.toFixed(1)} dB`)
+  // Gaps (label 0, away from any edge) come through as the input, delayed.
+  let worst = 0
+  for (let i = sr; i < x.length - L; i++) {
+    const t = (i % sr) / sr
+    if (t > 0.76 && t < 0.84) worst = Math.max(worst, Math.abs(voiced[i] - x[i]))
+  }
+  assert.ok(worst < 1e-6, `gap difference ${worst}`)
+})
+
+test('shaper: delta hears only the cut, never the shaper', () => {
+  const sr = 44100
+  const { x } = makeSpeech(sr, { seconds: 2 })
+  const d = processHFSoftenerBuffer([x], sr, {
+    ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, shaperDrive: 1, shaperMode: 'full',
+  }, { listen: 'delta' }).channelData[0]
+  let peak = 0
+  for (const v of d) peak = Math.max(peak, Math.abs(v))
+  assert.equal(peak, 0)
+})
+
+test('shaper: drive follows the file level dB for dB, and 0.5 is the calibration point', () => {
+  for (const c of SHAPER_CURVES) {
+    const g0 = shaperGainFor(c.id, 0.5, 0)
+    assert.ok(Math.abs(g0 * Math.pow(10, SHAPER_REF_PEAK_DBFS / 20) - unitDriveU(c.id)) < 1e-9, c.id)
+    const ratioDb = 20 * Math.log10(shaperGainFor(c.id, 0.5, 6) / g0)
+    assert.ok(Math.abs(ratioDb + 6) < 1e-9, `${c.id} offset ${ratioDb}`)
+  }
 })

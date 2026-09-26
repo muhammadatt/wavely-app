@@ -23,6 +23,11 @@ const hfResoThreshold = ref(HF_SOFTENER_DEFAULTS.resoThreshold)
 // Air makeup: Air Boost's curve after the cut, to put back the top the cut
 // takes on average.
 const hfAir = ref(HF_SOFTENER_DEFAULTS.air)
+// Input waveshaper: drive, curve under audition, and whether it follows the
+// voicing (never shaping sibilants) or runs full-time.
+const hfDrive = ref(HF_SOFTENER_DEFAULTS.drive)
+const hfCurve = ref(HF_SOFTENER_DEFAULTS.curve)
+const hfSatMode = ref(HF_SOFTENER_DEFAULTS.satMode)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
 const hfFileLevelDb = ref(null)
@@ -54,6 +59,9 @@ function currentParams() {
     reso: hfReso.value,
     resoThreshold: hfResoThreshold.value,
     air: hfAir.value,
+    drive: hfDrive.value,
+    curve: hfCurve.value,
+    satMode: hfSatMode.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -166,6 +174,21 @@ export function useHFSoftener() {
     pushParam('amount', v)
   }
 
+  function syncDrive(v) {
+    hfDrive.value = v
+    pushParam('drive', v)
+  }
+
+  function syncCurve(v) {
+    hfCurve.value = v
+    pushParam('curve', v)
+  }
+
+  function syncSatMode(v) {
+    hfSatMode.value = v
+    pushParam('satMode', v)
+  }
+
   function syncAir(v) {
     hfAir.value = v
     pushParam('air', v)
@@ -249,6 +272,9 @@ export function useHFSoftener() {
     hfAmount,
     hfResoThreshold,
     hfAir,
+    hfDrive,
+    hfCurve,
+    hfSatMode,
     hfShape,
     hfLispGuard,
     hfReso,
@@ -265,6 +291,9 @@ export function useHFSoftener() {
     syncAmount,
     syncResoThreshold,
     syncAir,
+    syncDrive,
+    syncCurve,
+    syncSatMode,
     syncShape,
     syncLispGuard,
     syncReso,
