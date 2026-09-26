@@ -465,7 +465,8 @@ test('vowel release: the vowel after an "s" keeps its top end', () => {
     const on = processHFSoftenerBuffer([x], SR, { amount, vowelRelease: true }, { recordGain: true }).gainDb
     const carryOff = meanGain(off, 0.39, 0.45)
     const carryOn = meanGain(on, 0.39, 0.45)
-    assert.ok(carryOn > carryOff * 0.4, `amount ${amount}: carryover ${carryOff.toFixed(2)} → ${carryOn.toFixed(2)} dB`)
+    // At the shipped 40 % / 40 ms: -1.93 → -0.77 dB. At least halved.
+    assert.ok(carryOn > carryOff * 0.5, `amount ${amount}: carryover ${carryOff.toFixed(2)} → ${carryOn.toFixed(2)} dB`)
     // …without giving up the sibilants themselves.
     for (const [a, b] of [[0.35, 0.39], [0.7, 0.735]]) {
       // Relative: above the default the ratio steepens and the cuts scale.

@@ -15,17 +15,15 @@ export const HF_SOFTENER_WINDOW_ID = 'hf-softener'
 // Singleton reactive state shared between the sidebar trigger and the modal.
 const hfAmount = ref(HF_SOFTENER_DEFAULTS.amount)
 const hfContext = ref(HF_SOFTENER_DEFAULTS.context)
-const hfRotator = ref(HF_SOFTENER_DEFAULTS.rotator)
-const hfRelease = ref(HF_SOFTENER_DEFAULTS.release)
-const hfVowelRelease = ref(HF_SOFTENER_DEFAULTS.vowelRelease)
 const hfShape = ref(HF_SOFTENER_DEFAULTS.shape)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
 const hfFileLevelDb = ref(null)
 const hfLevelOffset = ref(0)
 let levelMeasuredFor = null
-// Monitor tap. Never part of the params the apply path renders with.
-const hfListen = ref('off')
+// DELTA monitor: hear only what is being removed. Never part of the params
+// the apply path renders with.
+const hfDelta = ref(false)
 const hfPreview = ref(false)
 const hfReduction = ref(0)
 const hfThresholdLift = ref(0)
@@ -37,9 +35,12 @@ function currentParams() {
   return {
     amount: hfAmount.value,
     context: hfContext.value,
-    rotator: hfRotator.value,
-    release: hfRelease.value,
-    vowelRelease: hfVowelRelease.value,
+    // Pinned after listening, and off the panel: the rotator on the detector
+    // only, a 40 ms release, and the fast release as each vowel starts. The
+    // kernel keeps all three switchable for the bench and the tests.
+    rotator: HF_SOFTENER_DEFAULTS.rotator,
+    release: HF_SOFTENER_DEFAULTS.release,
+    vowelRelease: HF_SOFTENER_DEFAULTS.vowelRelease,
     shape: hfShape.value,
     levelOffset: hfLevelOffset.value,
   }
@@ -133,9 +134,11 @@ export function useHFSoftener() {
     if (hfPreview.value) {
       refreshLevel()
       pushAllParams(chain)
-      nodesOf(chain)?.setListen(hfListen.value)
+      nodesOf(chain)?.setListen(hfDelta.value ? 'delta' : 'off')
       startMeters(chain)
     } else {
+      // Bypassed, there is nothing to hear in the delta.
+      hfDelta.value = false
       stopMeters()
     }
   }
@@ -156,30 +159,15 @@ export function useHFSoftener() {
     pushParam('context', v)
   }
 
-  function syncRotator(v) {
-    hfRotator.value = v
-    pushParam('rotator', v)
-  }
-
-  function syncRelease(v) {
-    hfRelease.value = v
-    pushParam('release', v)
-  }
-
-  function syncVowelRelease(v) {
-    hfVowelRelease.value = v
-    pushParam('vowelRelease', v)
-  }
-
   function syncShape(v) {
     hfShape.value = v
     pushParam('shape', v)
   }
 
-  function syncListen(v) {
-    hfListen.value = v
+  function toggleDelta() {
     if (!hfPreview.value) return
-    nodesOf(getEffectChain(getAudioContext()))?.setListen(v)
+    hfDelta.value = !hfDelta.value
+    nodesOf(getEffectChain(getAudioContext()))?.setListen(hfDelta.value ? 'delta' : 'off')
   }
 
   async function apply() {
@@ -211,9 +199,9 @@ export function useHFSoftener() {
 
   function teardown() {
     stopMeters()
-    // Listen is a monitoring aid; never leave the chain auditioning the delta
-    // or the sidechain after the window closes.
-    hfListen.value = 'off'
+    // Delta is a monitoring aid; never leave the chain auditioning it after
+    // the window closes.
+    hfDelta.value = false
     if (hfPreview.value) {
       const chain = getEffectChain(getAudioContext())
       nodesOf(chain)?.setListen('off')
@@ -233,13 +221,10 @@ export function useHFSoftener() {
   return {
     hfAmount,
     hfContext,
-    hfRotator,
-    hfRelease,
-    hfVowelRelease,
     hfShape,
     hfFileLevelDb,
     hfLevelOffset,
-    hfListen,
+    hfDelta,
     hfPreview,
     hfReduction,
     hfThresholdLift,
@@ -249,11 +234,8 @@ export function useHFSoftener() {
     togglePreview,
     syncAmount,
     syncContext,
-    syncRotator,
-    syncRelease,
-    syncVowelRelease,
     syncShape,
-    syncListen,
+    toggleDelta,
     refreshLevel,
     apply,
     teardown,

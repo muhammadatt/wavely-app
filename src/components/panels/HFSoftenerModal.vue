@@ -2,17 +2,18 @@
 /**
  * HF Softener.
  *
- * Four controls, as the spec has it: Amount and Context are the tuning, the
- * Rotator routing is a character choice, and Listen is a monitor tap that
- * never reaches the apply path. The curve is the shelf the kernel is running
- * right now, drawn from the same coefficient builder, with the Amount's
- * maximum depth ghosted behind it so the headroom left is visible.
+ * Amount and Context are the tuning; Shape picks the cut. Rotator, Release and
+ * vowel release were controls while the design was being tuned and are now
+ * pinned (sidechain, 40 ms, on — see useHFSoftener.js). DELTA sits in the
+ * header like every other plugin's monitor and never reaches the apply path.
+ * The curve is the cut the kernel is running right now, drawn from the same
+ * coefficient builder, with the Amount's maximum depth ghosted behind it.
  */
 import { computed, onMounted, watch } from 'vue'
 import { useHFSoftener } from '../../composables/useHFSoftener.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections, RELEASE_MS_MIN, RELEASE_MS_MAX,
+  amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections,
 } from '../../audio/hfSoftenerProcessor.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import Knob from '../knobs/Knob.vue'
@@ -24,10 +25,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfContext, hfRotator, hfRelease, hfVowelRelease, hfShape, hfListen, hfPreview,
+  hfAmount, hfContext, hfShape, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfThresholdLift, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncContext, syncRotator, syncRelease, syncVowelRelease, syncShape, syncListen,
+  togglePreview, syncAmount, syncContext, syncShape, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -50,22 +51,8 @@ const SHAPE_OPTIONS = [
   { value: 'band', label: 'BAND', title: 'Cut the sibilance band and return to flat above 11 kHz, so the air stays' },
 ]
 
-const VOWEL_OPTIONS = [
-  { value: true, label: 'ON', title: 'Let go within ~10 ms when a vowel starts, so the sound after an S is not dulled' },
-  { value: false, label: 'OFF', title: 'Use the Release setting everywhere' },
-]
 
-const ROTATOR_OPTIONS = [
-  { value: 'off', label: 'OFF', title: 'No phase rotation — the detector reads the raw signal' },
-  { value: 'sidechain', label: 'SIDECHAIN', title: 'Rotate the detector only; the audio stays phase-intact' },
-  { value: 'inpath', label: 'IN-PATH', title: 'Rotate the audio too — a character choice, and not safe to sum with a double or second mic' },
-]
 
-const LISTEN_OPTIONS = [
-  { value: 'off', label: 'OFF', title: 'Hear the processed output' },
-  { value: 'delta', label: 'DELTA', title: 'Hear only what is being removed — it should sound like sibilance and nothing else' },
-  { value: 'sidechain', label: 'SIDECHAIN', title: 'Hear what the detector hears' },
-]
 
 // ── Response curve ──────────────────────────────────────────────────────────
 const CURVE_W = 360
@@ -112,9 +99,6 @@ const thresholdLabel = computed(() => {
   return hfAmount.value === 0 ? 'OFF' : `${t.toFixed(0)} dBFS`
 })
 
-function formatMs(v) {
-  return `${Math.round(v)} ms`
-}
 
 function formatPct(v) {
   return `${Math.round(v)}%`
@@ -144,23 +128,6 @@ async function applyAndClose() {
   closeModal()
 }
 
-function segStyle(active, disabled) {
-  return [
-    {
-      padding: '7px 10px', borderRadius: '8px',
-      font: "700 8.5px 'JetBrains Mono',monospace", letterSpacing: '.12em',
-      transition: 'background-color .15s ease, border-color .15s ease',
-    },
-    active
-      ? {
-        background: `color-mix(in srgb, ${ACCENT} 20%, transparent)`,
-        border: `1px solid color-mix(in srgb, ${ACCENT} 55%, transparent)`,
-        color: ACCENT,
-      }
-      : { background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.08)', color: 'rgba(255,255,255,.7)' },
-    disabled ? { opacity: 0.35 } : { opacity: 1 },
-  ]
-}
 </script>
 
 <template>
@@ -172,6 +139,10 @@ function segStyle(active, disabled) {
     brand-lead="HF"
     brand-tail="SOFTENER"
     :engaged="hfPreview"
+    show-delta
+    :delta="hfDelta"
+    :delta-disabled="!hfPreview"
+    delta-title="Hear only what is being removed — it should sound like sibilance and nothing else. Monitoring only; Apply always renders the processed audio."
     show-preview
     previewable
     :previewing="state.isPlaying"
@@ -179,6 +150,7 @@ function segStyle(active, disabled) {
     :apply-disabled="!hfPreview"
     apply-disabled-hint="Turn HF Softener on to apply it"
     @toggle-engaged="togglePreview"
+    @toggle-delta="toggleDelta"
     @toggle-preview="togglePlayback"
     @apply="applyAndClose"
     @close="close"
@@ -222,7 +194,7 @@ function segStyle(active, disabled) {
             >{{ gridLabel(f) }}</span>
           </div>
 
-          <div class="flex gap-[22px] mt-[16px]">
+          <div class="flex gap-[38px] mt-[16px]">
             <div class="w-[112px] flex flex-col items-center">
               <Knob
                 :model-value="hfAmount"
@@ -249,20 +221,6 @@ function segStyle(active, disabled) {
                 +{{ hfThresholdLift.toFixed(1) }} dB LIFT
               </span>
             </div>
-            <div class="w-[112px] flex flex-col items-center">
-              <!-- Log travel: the useful choices are 20–60 ms, and a linear
-                   knob would spend two thirds of its sweep above that. -->
-              <Knob
-                :model-value="hfRelease"
-                @update:model-value="syncRelease"
-                :min="RELEASE_MS_MIN" :max="RELEASE_MS_MAX" :step="1" scale="log"
-                label="Release" :accent="ACCENT" :format-value="formatMs" :value-font-px="15"
-                :disabled="!hfPreview"
-              />
-              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ hfVowelRelease ? 'OUTSIDE VOWELS' : 'EVERYWHERE' }}
-              </span>
-            </div>
           </div>
         </div>
 
@@ -278,44 +236,8 @@ function segStyle(active, disabled) {
             @update:model-value="syncShape"
           />
         </div>
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">VOWEL RELEASE</span>
-          <DeviceChoiceRocker
-            :model-value="hfVowelRelease" :options="VOWEL_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="Vowel release"
-            @update:model-value="syncVowelRelease"
-          />
-        </div>
       </div>
 
-      <div class="flex justify-center gap-[36px] mt-[18px]">
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">ROTATOR</span>
-          <div class="flex gap-[6px]" role="radiogroup" aria-label="Phase rotator routing">
-            <button
-              v-for="o in ROTATOR_OPTIONS" :key="o.value"
-              type="button" role="radio" :aria-checked="hfRotator === o.value"
-              :title="o.title" :disabled="!hfPreview"
-              class="cursor-pointer disabled:cursor-not-allowed"
-              :style="segStyle(hfRotator === o.value, !hfPreview)"
-              @click="syncRotator(o.value)"
-            >{{ o.label }}</button>
-          </div>
-        </div>
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">LISTEN</span>
-          <div class="flex gap-[6px]" role="radiogroup" aria-label="Monitor">
-            <button
-              v-for="o in LISTEN_OPTIONS" :key="o.value"
-              type="button" role="radio" :aria-checked="hfListen === o.value"
-              :title="o.title" :disabled="!hfPreview"
-              class="cursor-pointer disabled:cursor-not-allowed"
-              :style="segStyle(hfListen === o.value, !hfPreview)"
-              @click="syncListen(o.value)"
-            >{{ o.label }}</button>
-          </div>
-        </div>
-      </div>
 
       <p
         class="mt-[14px] text-center"
@@ -333,7 +255,7 @@ function segStyle(active, disabled) {
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
         Dips the sibilance band only while a consonant spikes, and lets go as the
-        next vowel starts. Breath and air pass untouched. Listen stays off when you apply.
+        next vowel starts. Breath and air pass untouched.
       </p>
     </div>
   </FloatingWindow>

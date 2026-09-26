@@ -113,10 +113,10 @@ export const HF_SOFTENER_TUNING = {
 
 /** User-facing parameters. The four controls, minus Listen (a monitor tap). */
 export const HF_SOFTENER_KERNEL_DEFAULTS = {
-  amount: 0.2, // 0–1 — the old 40 % default's cut, on the even map
+  amount: 0.4, // 0–1
   context: 0.5, // 0–1 → κ 0–0.8
   rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
-  releaseMs: 60, // HF follower release outside vowels, 20–150
+  releaseMs: 40, // HF follower release outside vowels. Fixed on the panel
   vowelRelease: true, // let go fast when a vowel starts
   shape: 'band', // 'shelf' (the spec's) | 'band' (returns to flat above 11 kHz)
   // File property, not a patch value: the file's gated RMS minus the nominal
@@ -167,7 +167,9 @@ const FOLLOWER_FLOOR = 1e-15
  * −10.7, −13.1, −15.6 — each step bigger than the last. With these three lines
  * it is −1.5, −3.0, −4.5 … −15.6: 1.55 dB per 10 %, the same top end.
  *
- * The old default's cut (−3.0 dB) now sits at 20 %, which is the new default.
+ * The default stays at 40 %, which on this map cuts about twice what the
+ * spec's 40 % did (−6.1 dB against −3.0 on synthetic voice) — an owner
+ * decision; the old default's depth now sits at 20 %.
  * 0 % never engages: threshold 0 dBFS and depth 0.
  */
 

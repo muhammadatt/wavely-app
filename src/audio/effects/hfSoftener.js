@@ -15,10 +15,10 @@ import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
 
 export const HF_SOFTENER_DEFAULTS = {
-  amount: 20, // %, drives threshold, ratio and depth together — see amountToThresholdDb
+  amount: 40, // %, drives threshold, ratio and depth together — see amountToThresholdDb
   context: 50, // %, Module C depth; 0 = fixed threshold
   rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
-  release: 60, // ms, HF release outside vowels
+  release: 40, // ms, HF release outside vowels — fixed, not on the panel
   vowelRelease: true, // let go fast when a vowel starts
   shape: 'band', // 'shelf' | 'band'
   // Measured from the whole file, not a user setting — see useHFSoftener.
