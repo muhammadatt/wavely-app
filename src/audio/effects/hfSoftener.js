@@ -21,6 +21,7 @@ export const HF_SOFTENER_DEFAULTS = {
   release: 40, // ms, HF release outside vowels — fixed, not on the panel
   vowelRelease: true, // let go fast when a vowel starts
   shape: 'band', // 'shelf' | 'band'
+  lispGuard: true, // never cut a sibilant below the voice-relative floor
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
 }
@@ -34,6 +35,7 @@ export function toKernelParams(params) {
     releaseMs: params.release,
     vowelRelease: params.vowelRelease,
     shape: params.shape,
+    lispGuard: params.lispGuard,
     levelOffsetDb: params.levelOffset,
   }
 }

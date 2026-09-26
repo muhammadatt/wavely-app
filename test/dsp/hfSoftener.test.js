@@ -537,7 +537,9 @@ test('level alignment: a hotter file with its measured offset gets the same gain
     for (let i = 0; i < g.length; i++) worst = Math.max(worst, Math.abs(g[i] - ref[i]))
     assert.ok(worst < 1e-3, `${db} dB: gain curve moved by ${worst.toFixed(5)} dB`)
     // And without the offset it would not have been: the premise of the fix.
-    const raw = processHFSoftenerBuffer([y], SR, {}, { recordGain: true }).gainDb
+    // Guard off: the guard is voice-relative, so it is level-invariant by
+    // itself and would hide what the alignment is for.
+    const raw = processHFSoftenerBuffer([y], SR, { lispGuard: false }, { recordGain: true }).gainDb
     let drift = 0
     for (let i = 0; i < g.length; i++) drift = Math.max(drift, Math.abs(raw[i] - ref[i]))
     assert.ok(drift > 1, `${db} dB: an unaligned file only moved ${drift.toFixed(2)} dB`)
@@ -572,7 +574,9 @@ test('amount: the cut grows in even steps across the dial', () => {
   // ratio: per-10 % cuts ran -0.2 … -15.6 with each step bigger than the last.
   const { x, labels } = makeSpeech(SR, { seconds: 3 })
   const deepest = a => {
-    const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: a }, { recordGain: true })
+    // The MAP's evenness, so guard off — the guard deliberately flattens the
+    // top of the knob on well-behaved sibilants (see the lisp-guard tests).
+    const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: a, lispGuard: false }, { recordGain: true })
     let m = 0, breath = 0
     for (let i = 0; i < gainDb.length; i++) {
       m = Math.min(m, gainDb[i])
@@ -590,4 +594,46 @@ test('amount: the cut grows in even steps across the dial', () => {
   assert.ok(cuts[0] > -3.6 && cuts[0] < -2.4, `default reached ${cuts[0].toFixed(2)} dB`)
   assert.ok(cuts[4] < -12, `Amount 100 % only reached ${cuts[4].toFixed(2)} dB`)
   assert.ok(deepest(1).breath > -1, 'breath touched at Amount 100 %')
+})
+
+// ── Lisp guard ──────────────────────────────────────────────────────────────
+
+test('lisp guard: a normal "s" stops getting deeper, a hot one is still chased', () => {
+  // Measured: normal sibilants 20/40/60/80/100 % -> -2.8 -5.8 -6.7 -6.7 -6.7
+  // with the guard, -2.8 -5.8 -9.0 -12.1 -15.3 without. The default is
+  // untouched on the peak; the top of the knob no longer digs into a normal
+  // "s", which is exactly the lisp it exists to stop.
+  const { x } = makeSpeech(SR, { seconds: 3 })
+  const deepest = (a, guard, y = x) => {
+    const { gainDb } = processHFSoftenerBuffer([y], SR, { amount: a, lispGuard: guard }, { recordGain: true })
+    let m = 0
+    for (const v of gainDb) m = Math.min(m, v)
+    return m
+  }
+  assert.ok(Math.abs(deepest(0.4, true) - deepest(0.4, false)) < 0.2, 'guard moved the default')
+  const g100 = deepest(1, true)
+  assert.ok(g100 > -8, `guard let a normal "s" go to ${g100.toFixed(2)} dB`)
+  assert.ok(deepest(1, false) < g100 - 5, 'the unguarded map should dig much deeper')
+  // A hotter "s" clears the floor by more, so it may still be cut hard.
+  const hot = x.map(v => v * 1.0)
+  const k = Math.pow(10, 12 / 20)
+  // Scale only the sibilant spans.
+  for (let i = 0; i < hot.length; i++) {
+    const t = (i % SR) / SR
+    if ((t >= 0.35 && t < 0.39) || (t >= 0.7 && t < 0.735)) hot[i] = x[i] * k
+  }
+  assert.ok(deepest(1, true, hot) < g100 - 6, 'a hot "s" should still be cut much deeper than a normal one')
+})
+
+test('lisp guard: the cut lets go as the next vowel starts', () => {
+  // The voice level jumps with the vowel, the "s" no longer clears the floor,
+  // and the cap drops to zero — carryover removed by construction.
+  const { x } = makeSpeech(SR)
+  const post = guard => {
+    const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: 1, lispGuard: guard }, { recordGain: true })
+    return meanGain(gainDb, 0.39, 0.45)
+  }
+  const off = post(false)
+  const on = post(true)
+  assert.ok(on > off * 0.5, `post-"s" vowel ${off.toFixed(2)} -> ${on.toFixed(2)} dB`)
 })

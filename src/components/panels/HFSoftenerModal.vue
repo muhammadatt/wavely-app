@@ -25,10 +25,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfContext, hfShape, hfDelta, hfPreview,
+  hfAmount, hfContext, hfShape, hfLispGuard, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfThresholdLift, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncContext, syncShape, toggleDelta,
+  togglePreview, syncAmount, syncContext, syncShape, syncLispGuard, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -45,6 +45,11 @@ onMounted(() => {
 })
 
 const ACCENT = '#e8b77f'
+
+const GUARD_OPTIONS = [
+  { value: true, label: 'ON', title: 'Never cut an S further below the voice than a normal S sits — stops the lisp, and lets go as the next vowel starts' },
+  { value: false, label: 'OFF', title: 'Cut as deep as Amount asks' },
+]
 
 const SHAPE_OPTIONS = [
   { value: 'shelf', label: 'SHELF', title: 'Cut everything above 4.5 kHz — the spec’s original shape' },
@@ -234,6 +239,14 @@ async function applyAndClose() {
             :model-value="hfShape" :options="SHAPE_OPTIONS" :accent="ACCENT"
             :disabled="!hfPreview" label="Cut shape"
             @update:model-value="syncShape"
+          />
+        </div>
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">LISP GUARD</span>
+          <DeviceChoiceRocker
+            :model-value="hfLispGuard" :options="GUARD_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview" label="Lisp guard"
+            @update:model-value="syncLispGuard"
           />
         </div>
       </div>

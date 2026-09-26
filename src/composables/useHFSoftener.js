@@ -16,6 +16,7 @@ export const HF_SOFTENER_WINDOW_ID = 'hf-softener'
 const hfAmount = ref(HF_SOFTENER_DEFAULTS.amount)
 const hfContext = ref(HF_SOFTENER_DEFAULTS.context)
 const hfShape = ref(HF_SOFTENER_DEFAULTS.shape)
+const hfLispGuard = ref(HF_SOFTENER_DEFAULTS.lispGuard)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
 const hfFileLevelDb = ref(null)
@@ -42,6 +43,7 @@ function currentParams() {
     release: HF_SOFTENER_DEFAULTS.release,
     vowelRelease: HF_SOFTENER_DEFAULTS.vowelRelease,
     shape: hfShape.value,
+    lispGuard: hfLispGuard.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -159,6 +161,11 @@ export function useHFSoftener() {
     pushParam('context', v)
   }
 
+  function syncLispGuard(v) {
+    hfLispGuard.value = v
+    pushParam('lispGuard', v)
+  }
+
   function syncShape(v) {
     hfShape.value = v
     pushParam('shape', v)
@@ -222,6 +229,7 @@ export function useHFSoftener() {
     hfAmount,
     hfContext,
     hfShape,
+    hfLispGuard,
     hfFileLevelDb,
     hfLevelOffset,
     hfDelta,
@@ -235,6 +243,7 @@ export function useHFSoftener() {
     syncAmount,
     syncContext,
     syncShape,
+    syncLispGuard,
     toggleDelta,
     refreshLevel,
     apply,

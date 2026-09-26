@@ -96,6 +96,17 @@ export const HF_SOFTENER_TUNING = {
   lmReleaseMs: 150,
   lRefDb: -20,
   maxShiftDb: 8.0,
+  // Lisp guard: a cut may never pull the HF detector below the held voice
+  // level + this floor. The voice level is the 200 Hz–3 kHz energy with a fast
+  // attack and a hold long enough to bridge one sibilant.
+  // ⚠ IN DETECTOR UNITS A NORMAL "S" SITS ~12 dB BELOW THE VOICE (HF peak
+  // follower against low/mid RMS, synthetic voice) — so a floor at or above
+  // 0 blocks every cut. −18 lets a normal "s" go ~2.5 dB under its natural
+  // level at most, at any Amount; uncapped, 100 % took it 8.4 dB under.
+  // Measured once on synthetic voice; a real voice's natural lead may differ.
+  lispGuardFloorDb: -18,
+  voiceAttackMs: 15,
+  voiceHoldMs: 500,
   // Level alignment. Every absolute level in the detector — T_base, L_ref,
   // the voicing floor — is quoted for a file whose gated RMS sits here, and
   // shifts dB-for-dB with the file's measured level. The detector is linear
@@ -119,6 +130,9 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   releaseMs: 40, // HF follower release outside vowels. Fixed on the panel
   vowelRelease: true, // let go fast when a vowel starts
   shape: 'band', // 'shelf' (the spec's) | 'band' (returns to flat above 11 kHz)
+  // Cap each cut so a sibilant never ends more than the floor below the
+  // voice — the lisp guard. It only ever shrinks a cut, so it cannot dull.
+  lispGuard: true,
   // File property, not a patch value: the file's gated RMS minus the nominal
   // level. Measured by the caller over the WHOLE file (see levelOffsetDbFor).
   levelOffsetDb: 0,
@@ -454,6 +468,7 @@ export class HFSoftenerKernel {
     this.relVowel = riseCoeff(tuning.vowelReleaseMs, sampleRate)
     this.voiceEnv = new Follower(sampleRate, tuning.voicedAttackMs, tuning.voicedDecayMs)
     this.lmEnv = new Follower(sampleRate, tuning.lmAttackMs, tuning.lmReleaseMs)
+    this.voiceLevel = new Follower(sampleRate, tuning.voiceAttackMs, tuning.voiceHoldMs)
     this.gainSmooth = riseCoeff(tuning.gainSmoothMs, sampleRate)
     this.levelOffsetDb = 0
     this.shelfGainDb = 0
@@ -505,6 +520,7 @@ export class HFSoftenerKernel {
     // interpolation like any other gain move.
     this.relSlow = riseCoeff(clamp(p.releaseMs, RELEASE_MS_MIN, RELEASE_MS_MAX), this.sampleRate)
     this.vowelRelease = !!p.vowelRelease
+    this.lispGuard = !!p.lispGuard
     this.shape = p.shape
     if (immediate) this.writeShelf(this.coeffCur, this.shelfGainDb)
     const off = clamp(Number(p.levelOffsetDb) || 0, -this.tuning.maxLevelOffsetDb, this.tuning.maxLevelOffsetDb)
@@ -620,6 +636,7 @@ export class HFSoftenerKernel {
         this.hfEnv.release = release
         const hf = this.hfEnv.tick(peak * trim)
         const lmEnergy = this.lmEnv.tick(lmNow)
+        const voiceE = this.voiceLevel.tick(lmNow)
         const hfDb = hf > 0 ? Math.log(hf) * DB_PER_NEPER : -300
         const lmDb = lmEnergy > 0 ? 10 * Math.log10(lmEnergy) : -300
 
@@ -627,7 +644,17 @@ export class HFSoftenerKernel {
         const tEff = adaptiveThresholdDb(base, lmDb, this.kappa.tick(), tuning.lRefDb + this.levelOffsetDb, tuning.maxShiftDb)
         const slope = this.slope.tick()
         const dMax = this.dMax.tick()
-        const target = slope > 0 ? gainComputerDb(hfDb, tEff, 1 / slope, dMax, tuning.kneeDb) : 0
+        let target = slope > 0 ? gainComputerDb(hfDb, tEff, 1 / slope, dMax, tuning.kneeDb) : 0
+        if (this.lispGuard && target < 0) {
+          // ⚠ THE GUARD ALSO REMOVES MOST RELEASE CARRYOVER, BY CONSTRUCTION:
+          // when the next vowel starts the voice level jumps, the "s" no longer
+          // clears the floor, and the cap drops to zero. Measured at 100 % on
+          // hot sibilants: post-"s" vowel −13.0 → −6.5 dB.
+          const voiceDb = voiceE > 0 ? 10 * Math.log10(voiceE) : -300
+          const allowed = hfDb - voiceDb - tuning.lispGuardFloorDb
+          const cap = allowed > 0 ? allowed : 0
+          if (target < -cap) target = -cap
+        }
         this.shelfGainDb += (target - this.shelfGainDb) * this.gainSmooth
         gainBuf[i] = this.shelfGainDb
         this.lastThresholdLiftDb = tEff - base
@@ -739,11 +766,12 @@ export function processHFSoftenerBuffer(channelData, sampleRate, params = {}, { 
 }
 
 /**
- * Envelope memory is 150 ms of low/mid release and 60 ms of HF release; one
- * second of pre-roll puts both far below anything audible, so an applied
- * region starts on the state a playing preview would have had.
+ * Envelope memory is the 500 ms voice-level hold (lisp guard), 150 ms of
+ * low/mid release and the HF release; two seconds of pre-roll is four hold
+ * time constants, so an applied region starts on the state a playing preview
+ * would have had.
  */
-export const HF_SOFTENER_PREROLL_S = 1.0
+export const HF_SOFTENER_PREROLL_S = 2.0
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────
 
