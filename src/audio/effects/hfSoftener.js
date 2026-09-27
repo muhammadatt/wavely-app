@@ -34,6 +34,7 @@ export const HF_SOFTENER_DEFAULTS = {
   curve: 'quartic', // shaper curve — see dsp/shaperCurves.js
   satMode: 'voiced', // 'voiced' (never shapes sibilants) | 'full'
   emph: 'off', // emphasis around the shaper: 'reverse' | 'off' | 'opto'
+  split: 0, // 0–100 %: how the reduction is taken — 0 band cut (tone), 100 broadband duck (level)
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
 }
@@ -54,6 +55,7 @@ export function toKernelParams(params) {
     shaperCurve: params.curve,
     shaperMode: params.satMode,
     shaperEmph: params.emph,
+    split: (params.split ?? 0) / 100,
   }
 }
 
@@ -68,6 +70,7 @@ export function createHFSoftener(audioContext) {
   let destroyed = false
   let reductionDb = 0
   let thresholdLiftDb = 0
+  let broadbandDb = 0
 
   // Monitor tap, kept out of `params` on purpose: parameters are what the
   // apply path renders with, and a monitor mode must never be one of them.
@@ -150,6 +153,7 @@ export function createHFSoftener(audioContext) {
         if (e.data?.type !== 'gr') return
         reductionDb = e.data.reductionDb
         thresholdLiftDb = e.data.thresholdLiftDb
+        broadbandDb = e.data.broadbandDb ?? 0
       }
       ensureReso()
       rewire()
@@ -189,6 +193,11 @@ export function createHFSoftener(audioContext) {
     /** Shelf depth, positive dB — the max since the last meter post. */
     getReduction() {
       return reductionDb
+    },
+
+    /** Broadband share of the reduction (Split), positive dB — max since the last post. */
+    getBroadband() {
+      return broadbandDb
     },
 
     /** How far Context is currently holding the threshold up, dB. */

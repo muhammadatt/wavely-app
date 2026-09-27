@@ -9,6 +9,7 @@ export default {
 
   controls: [
     { label: 'Amount', text: 'How early the cut starts and how hard it bites — threshold, ratio (up to 6:1) and depth (up to 24 dB) rise together in even steps' },
+    { label: 'Split', text: 'How the reduction is taken. Toward 0 % it is a band cut: the voice keeps its level but each S changes tone. Toward 100 % it is a broadband dip: the S keeps its tone but the voice dips a little. The total stays the same, so a mix of both lets each work more gently' },
     { label: 'Shape', text: 'Band cuts the sibilance region and leaves the air above 11 kHz; Shelf cuts everything above 4.5 kHz' },
     { label: 'Lisp guard', text: 'Stops any S being pulled further below the voice than a normal S sits, so heavy settings cannot turn S into TH' },
     { label: 'Drive', text: 'Saturation ahead of the cut, for density and warmth on the voice. At 50 % every curve makes the same amount of distortion, so switching curves compares their character, not their strength' },
@@ -31,7 +32,9 @@ export default {
   notes: [
     'Thresholds follow the file’s own level, so a setting means the same on a quiet recording and a hot one',
     'If the result sounds a touch dull, a dB or two of Air puts the top back — it is Air Boost’s curve, so there is no need for a separate Air Boost pass',
-    'Delta never includes the Air makeup or the saturation: it plays only what the cut removes',
+    'Delta never includes the Air makeup or the saturation: it plays only what the cut removes — the band cut and the broadband dip together',
+    'The meter shows the total taken off each S; the readout under it splits that into TONE (band cut) and LEVEL (broadband dip)',
+    'The lisp guard limits the total, so turning Split toward level cannot sink an S further than the band cut alone could',
     'Saturation adds about 1 ms of latency while Drive is above zero',
     'Below threshold the shelf sits at exactly 0 dB, so quiet material passes through untouched',
     'A sibilant alone in a gap is treated a little harder than one inside a word — the threshold rises slightly with the surrounding vowel energy',

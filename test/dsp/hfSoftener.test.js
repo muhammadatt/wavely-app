@@ -945,3 +945,66 @@ test('shaper emphasis: OPTO distorts the highs harder, REVERSE spares them (sine
   assert.ok(opto > off * 1.3, `5 kHz: opto ${opto} vs off ${off}`)
   assert.ok(rev < off * 0.2, `5 kHz: reverse ${rev} vs off ${off}`)
 })
+
+// ── Split: band cut ↔ broadband duck ────────────────────────────────────────
+
+const splitBandDb = (y, x, sr, lo, hi, mask) => {
+  const mk = () => [highpass(sr, lo, 0.7), highpass(sr, lo, 0.7), lowpass(sr, hi, 0.7), lowpass(sr, hi, 0.7)].map(c => new Biquad(c))
+  const f = mk(), g = mk()
+  let a = 0, b = 0
+  for (let i = 0; i < x.length; i++) {
+    let u = y[i], v = x[i]
+    for (const q of f) u = q.tick(u)
+    for (const q of g) v = q.tick(v)
+    if (i > sr && mask(i)) { a += u * u; b += v * v }
+  }
+  return 10 * Math.log10(a / b)
+}
+
+test('split: the total taken off the "s" band holds across the knob', () => {
+  const sr = 44100
+  const { x, labels } = makeSpeech(sr, { seconds: 3 })
+  const hot = x.map((v, i) => (labels[i] === 2 ? v * 2 : v))
+  const sib = i => labels[i] === 2
+  const cut = split => splitBandDb(
+    processHFSoftenerBuffer([hot], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, split }).channelData[0],
+    hot, sr, 5000, 9000, sib)
+  const c0 = cut(0), c5 = cut(0.5), c1 = cut(1)
+  assert.ok(c0 < -3, `split 0 cut ${c0.toFixed(2)}`)
+  assert.ok(Math.abs(c5 - c0) < 0.6 && Math.abs(c1 - c0) < 0.6, `cuts ${c0.toFixed(2)} / ${c5.toFixed(2)} / ${c1.toFixed(2)}`)
+})
+
+test('split: at 100 % the "s" keeps its tone — the same cut in every band', () => {
+  const sr = 44100
+  const { x: sp, labels } = makeSpeech(sr, { seconds: 3 })
+  const x = sp.map((v, i) => (labels[i] === 2 ? v * 2 : 0))
+  const mid = i => labels[i] === 2 && labels[i - 350] === 2 && labels[i + 350] === 2
+  const run = split => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, lispGuard: false, split }).channelData[0]
+  const tilt = (y) => splitBandDb(y, x, sr, 5000, 9000, mid) - splitBandDb(y, x, sr, 1000, 3000, mid)
+  const t0 = tilt(run(0)), t1 = tilt(run(1))
+  assert.ok(t0 < -5, `band cut tilts the "s": ${t0.toFixed(2)} dB`)
+  assert.ok(Math.abs(t1) < 0.5, `broadband duck keeps the tone: ${t1.toFixed(2)} dB`)
+})
+
+test('split: vowels away from any "s" are untouched at every setting', () => {
+  const sr = 44100
+  const { x, labels } = makeSpeech(sr, { seconds: 3 })
+  const far = i => labels[i] === 1 && (i % sr) / sr < 0.3
+  for (const split of [0, 0.5, 1]) {
+    const y = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, split }).channelData[0]
+    let worst = 0
+    for (let i = sr; i < x.length; i++) if (far(i)) worst = Math.max(worst, Math.abs(y[i] - x[i]))
+    assert.ok(worst < 1e-6, `split ${split}: ${worst}`)
+  }
+})
+
+test('split: delta is exactly what the band cut and the duck removed together', () => {
+  const sr = 44100
+  const { x } = makeSpeech(sr, { seconds: 2 })
+  const p = { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, split: 0.5 }
+  const y = processHFSoftenerBuffer([x], sr, p).channelData[0]
+  const d = processHFSoftenerBuffer([x], sr, p, { listen: 'delta' }).channelData[0]
+  let worst = 0
+  for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(x[i] - y[i] - d[i]))
+  assert.ok(worst < 1e-6, `worst ${worst}`)
+})

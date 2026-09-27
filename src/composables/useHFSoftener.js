@@ -29,6 +29,9 @@ const hfDrive = ref(HF_SOFTENER_DEFAULTS.drive)
 const hfCurve = ref(HF_SOFTENER_DEFAULTS.curve)
 const hfSatMode = ref(HF_SOFTENER_DEFAULTS.satMode)
 const hfEmph = ref(HF_SOFTENER_DEFAULTS.emph)
+// How the reduction is taken: 0 all as the band cut, 100 all as a broadband duck.
+const hfSplit = ref(HF_SOFTENER_DEFAULTS.split)
+const hfBroadband = ref(0)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
 const hfFileLevelDb = ref(null)
@@ -64,6 +67,7 @@ function currentParams() {
     curve: hfCurve.value,
     satMode: hfSatMode.value,
     emph: hfEmph.value,
+    split: hfSplit.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -98,6 +102,7 @@ export function useHFSoftener() {
         hfOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
         hfReduction.value = nodes.getReduction()
         hfThresholdLift.value = nodes.getThresholdLift()
+        hfBroadband.value = nodes.getBroadband?.() ?? 0
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -113,6 +118,7 @@ export function useHFSoftener() {
     hfOutputLevels.value = []
     hfReduction.value = 0
     hfThresholdLift.value = 0
+    hfBroadband.value = 0
   }
 
   function pushAllParams(chain) {
@@ -184,6 +190,11 @@ export function useHFSoftener() {
   function syncCurve(v) {
     hfCurve.value = v
     pushParam('curve', v)
+  }
+
+  function syncSplit(v) {
+    hfSplit.value = v
+    pushParam('split', v)
   }
 
   function syncEmph(v) {
@@ -283,6 +294,8 @@ export function useHFSoftener() {
     hfCurve,
     hfSatMode,
     hfEmph,
+    hfSplit,
+    hfBroadband,
     hfShape,
     hfLispGuard,
     hfReso,
@@ -303,6 +316,7 @@ export function useHFSoftener() {
     syncCurve,
     syncSatMode,
     syncEmph,
+    syncSplit,
     syncShape,
     syncLispGuard,
     syncReso,

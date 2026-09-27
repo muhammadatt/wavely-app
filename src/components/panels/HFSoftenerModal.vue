@@ -2,7 +2,9 @@
 /**
  * HF Softener.
  *
- * Amount is the tuning; Shape picks the cut; Drive feeds an input waveshaper
+ * Amount is the tuning; Split decides how it is taken — as the band cut (tone
+ * changes, level holds) or a broadband duck (tone holds, level dips), same
+ * total on the "s" either way; Shape picks the cut; Drive feeds an input waveshaper
  * ahead of the cut (curve and VOICED/FULL on the SATURATION row, for
  * auditioning); Air puts back a few dB of top
  * after it, on Air Boost's curve; Reso is the Threshold of the
@@ -34,10 +36,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfAir, hfDrive, hfCurve, hfSatMode, hfEmph, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfAir, hfDrive, hfCurve, hfSatMode, hfEmph, hfSplit, hfBroadband, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoThreshold, syncAir, syncDrive, syncCurve, syncSatMode, syncEmph, syncShape, syncLispGuard, syncReso, toggleDelta,
+  togglePreview, syncAmount, syncResoThreshold, syncAir, syncDrive, syncCurve, syncSatMode, syncEmph, syncSplit, syncShape, syncLispGuard, syncReso, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -110,20 +112,23 @@ function yFor(db) {
 }
 const Y0 = yFor(0)
 
-// The cut and the air makeup after it, as one response — what the audio gets.
-function shelfPath(gainDb) {
+// The cut, the broadband duck and the air makeup after them, as one response —
+// what the audio gets. The duck moves the whole curve down.
+function shelfPath(gainDb, levelDb = 0) {
   const sr = state.currentFile?.sampleRate ?? 44100
   const secs = softenerSections(sr, gainDb, hfShape.value)
   if (hfAir.value > 0) secs.push(...airBandSections(sr, hfAir.value))
-  const db = magnitudeResponseDb(secs, CURVE_FREQS, sr)
+  const db = magnitudeResponseDb(secs, CURVE_FREQS, sr).map(v => v + levelDb)
   return CURVE_FREQS.map(
     (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${Math.min(CURVE_H - 0.5, Math.max(0.5, yFor(db[i]))).toFixed(1)}`,
   ).join(' ')
 }
 
 const maxDepthDb = computed(() => amountToMaxDepthDb(hfAmount.value / 100))
-const maxPath = computed(() => shelfPath(-maxDepthDb.value))
-const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthDb.value)))
+const splitFrac = computed(() => hfSplit.value / 100)
+const maxPath = computed(() => shelfPath(-maxDepthDb.value * (1 - splitFrac.value), -maxDepthDb.value * splitFrac.value))
+const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthDb.value), -hfBroadband.value))
+const totalReduction = computed(() => hfReduction.value + hfBroadband.value)
 const liveFill = computed(() => `${livePath.value} L${CURVE_W},${Y0} L0,${Y0} Z`)
 
 // The TRUE compression ratio (1.5:1 at the default, 6:1 at 100 %), not the
@@ -137,6 +142,10 @@ const thresholdLabel = computed(() => {
   return hfAmount.value === 0 ? 'OFF' : `${t.toFixed(0)} dBFS`
 })
 
+
+function fmtCut(v) {
+  return v >= 0.05 ? `−${v.toFixed(1)} dB` : '0.0 dB'
+}
 
 function formatDrive(v) {
   return v > 0 ? `${Math.round(v)}%` : 'OFF'
@@ -184,7 +193,7 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="hf-softener"
     :z="z"
-    :width="700"
+    :width="800"
     :accent="ACCENT"
     brand-lead="HF"
     brand-tail="SOFTENER"
@@ -207,7 +216,15 @@ async function applyAndClose() {
   >
     <div class="px-[26px] pt-[22px] pb-[26px]">
       <!-- 24 dB full scale: the deepest the shelf can go, at Amount 100 %. -->
-      <GainReductionBar :reduction-db="-hfReduction" :accent="ACCENT" :full-scale-db="24" title="SHELF DEPTH" />
+      <!-- The total taken off the "s"; the readout under it says how it was
+           taken — as tone (the band cut) or as level (the broadband duck). -->
+      <GainReductionBar :reduction-db="-totalReduction" :accent="ACCENT" :full-scale-db="24" title="REDUCTION" />
+      <p
+        class="mt-[6px] text-right"
+        style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)"
+      >
+        TONE {{ fmtCut(hfReduction) }} · LEVEL {{ fmtCut(hfBroadband) }}
+      </p>
 
       <div class="flex items-center justify-between gap-[22px] mt-[18px]">
         <LevelMeter :levels="hfInputLevels" label="IN" :height="150" />
@@ -244,8 +261,8 @@ async function applyAndClose() {
             >{{ gridLabel(f) }}</span>
           </div>
 
-          <div class="flex gap-[14px] mt-[16px]">
-            <div class="w-[112px] flex flex-col items-center">
+          <div class="flex gap-[10px] mt-[16px]">
+            <div class="w-[104px] flex flex-col items-center">
               <Knob
                 :model-value="hfAmount"
                 @update:model-value="syncAmount"
@@ -257,7 +274,20 @@ async function applyAndClose() {
                 {{ thresholdLabel }} · {{ ratioLabel }}
               </span>
             </div>
-            <div class="w-[112px] flex flex-col items-center">
+            <div class="w-[104px] flex flex-col items-center">
+              <Knob
+                :model-value="hfSplit"
+                @update:model-value="syncSplit"
+                :min="0" :max="100" :step="1"
+                label="Split" :accent="ACCENT" :format-value="formatPct"
+                :disabled="!hfPreview"
+                title="How the reduction is taken. 0 %: all as the band cut — the level holds but the tone changes on each S. 100 %: all as a broadband duck — the tone holds but the voice dips. The total taken off the S stays the same, and the lisp guard caps it either way."
+              />
+              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+                TONE ↔ LEVEL
+              </span>
+            </div>
+            <div class="w-[104px] flex flex-col items-center">
               <Knob
                 :model-value="hfAir"
                 @update:model-value="syncAir"
@@ -270,7 +300,7 @@ async function applyAndClose() {
                 MAKEUP · AIR BAND
               </span>
             </div>
-            <div class="w-[112px] flex flex-col items-center">
+            <div class="w-[104px] flex flex-col items-center">
               <Knob
                 :model-value="hfDrive"
                 @update:model-value="syncDrive"
@@ -283,7 +313,7 @@ async function applyAndClose() {
                 {{ hfDrive > 0 ? `SAT · ${hfSatMode === 'voiced' ? 'VOWELS' : 'FULL'}` : 'SAT OFF' }}
               </span>
             </div>
-            <div class="w-[112px] flex flex-col items-center">
+            <div class="w-[104px] flex flex-col items-center">
               <!-- ResoTame's Threshold, same meaning: how far a peak must
                    stand above the local spectrum before it is cut. Higher is
                    gentler. Live only while HF RESO is in. -->
@@ -291,7 +321,7 @@ async function applyAndClose() {
                 :model-value="hfResoThreshold"
                 @update:model-value="syncResoThreshold"
                 :min="HF_RESO_THRESHOLD_MIN_DB" :max="HF_RESO_THRESHOLD_MAX_DB" :step="0.5"
-                label="Reso" :accent="ACCENT" :format-value="formatDb"
+                label="Reso" :accent="ACCENT" :format-value="formatDb" :value-font-px="15"
                 :disabled="!hfPreview || !hfReso"
                 title="Threshold of the ResoTame pre-stage: how far a 5–12 kHz peak must stand above its surroundings before it is cut. High, it takes only rings and whistles; lower, it takes the sibilance too and the softener backs off. The lisp guard does not limit its cut."
               />

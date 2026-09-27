@@ -121,6 +121,10 @@ export const HF_SOFTENER_TUNING = {
   maxLevelOffsetDb: 24,
   // Implementation
   gainSmoothMs: 0.5,
+  // The broadband share of the reduction (Split) moves the WHOLE signal, the
+  // fundamental included, so it cannot follow the band cut's 0.5 ms without
+  // modulating the low end audibly. See BROADBAND note at `split`.
+  broadbandSmoothMs: 1,
   macroRampMs: 20,
   coeffUpdateSamples: 16,
   meterHz: 30,
@@ -155,6 +159,11 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   // pushed INTO the curve and taken back out after) or 'reverse' (the mirror —
   // highs pulled out before the curve, put back after).
   shaperEmph: 'off',
+  // How the reduction is TAKEN, 0–1: 0 all as the band cut (tone changes,
+  // level holds), 1 all as a broadband duck (tone holds, level dips). The
+  // total on the "s" is the same at every setting — Amount decides how much,
+  // Split decides the character — and the lisp guard caps the total.
+  split: 0,
 }
 
 /**
@@ -554,6 +563,8 @@ export class HFSoftenerKernel {
     this.lmEnv = new Follower(sampleRate, tuning.lmAttackMs, tuning.lmReleaseMs)
     this.voiceLevel = new Follower(sampleRate, tuning.voiceAttackMs, tuning.voiceHoldMs)
     this.gainSmooth = riseCoeff(tuning.gainSmoothMs, sampleRate)
+    this.bbSmooth = riseCoeff(tuning.broadbandSmoothMs, sampleRate)
+    this.bbGainDb = 0
     this.levelOffsetDb = 0
     this.shelfGainDb = 0
 
@@ -564,6 +575,7 @@ export class HFSoftenerKernel {
     // The SLOPE is ramped, not the divisor: 1:1 is a divisor of ∞, and a
     // linear ramp through ∞ is NaN.
     this.slope = new Ramp(0, rampSamples)
+    this.split = new Ramp(0, rampSamples)
     // 0 → dry into the detector / audio path, 1 → rotated. Ramped so a mode
     // switch mid-playback crossfades instead of stepping phase (a click).
     this.detRot = new Ramp(0, rampSamples)
@@ -578,6 +590,8 @@ export class HFSoftenerKernel {
     this.writeShelf(this.coeffCur, 0)
     const chunk = tuning.coeffUpdateSamples
     this.gainBuf = new Float64Array(chunk)
+    // Broadband gain per sample, linear; all 1 while Split is 0.
+    this.bbBuf = new Float64Array(chunk).fill(1)
 
     // Air makeup: a static cascade after the dynamic cut. Coefficients step on
     // a change, as Air Boost's do.
@@ -600,6 +614,7 @@ export class HFSoftenerKernel {
     this.meterPeriod = Math.max(1, Math.round(sampleRate / tuning.meterHz))
     this.meterCount = 0
     this.meterMaxReduction = 0
+    this.meterMaxBroadband = 0
     this.lastThresholdLiftDb = 0
 
     this.params = { ...HF_SOFTENER_KERNEL_DEFAULTS }
@@ -631,6 +646,7 @@ export class HFSoftenerKernel {
     this.dMax.set(amountToMaxDepthDb(p.amount, this.tuning), immediate)
     this.kappa.set(contextToKappa(p.context), immediate)
     this.slope.set(amountToSlope(p.amount, this.tuning), immediate)
+    this.split.set(clamp(Number(p.split) || 0, 0, 1), immediate)
     this.detRot.set(p.rotator === 'off' ? 0 : 1, immediate)
     this.pathRot.set(p.rotator === 'inpath' ? 1 : 0, immediate)
     const drive = clamp(Number(p.shaperDrive) || 0, 0, 1)
@@ -806,6 +822,7 @@ export class HFSoftenerKernel {
     for (let off = 0; off < n; off += chunk) {
       const len = Math.min(chunk, n - off)
 
+      let bbAny = false
       // ── Detection, per sample ───────────────────────────────────────────
       for (let i = 0; i < len; i++) {
         const detRot = this.detRot.tick()
@@ -873,10 +890,25 @@ export class HFSoftenerKernel {
           const cap = allowed > 0 ? allowed : 0
           if (target < -cap) target = -cap
         }
-        this.shelfGainDb += (target - this.shelfGainDb) * this.gainSmooth
+        // Split the reduction. The two shares ADD on the "s" — the band cut's
+        // gain is its depth in the sibilance band, and the duck takes the same
+        // dB from everything — so the total there is `target` at any Split,
+        // and the lisp guard above has already capped that total.
+        const sp = this.split.tick()
+        this.shelfGainDb += (target * (1 - sp) - this.shelfGainDb) * this.gainSmooth
         gainBuf[i] = this.shelfGainDb
+        const bbTarget = target * sp
+        if (bbTarget !== 0 || this.bbGainDb !== 0) {
+          this.bbGainDb += (bbTarget - this.bbGainDb) * this.bbSmooth
+          // Snap the tail to exactly 0 so Split 0 settles back onto the
+          // untouched path rather than a gain of 0.99999999.
+          if (bbTarget === 0 && this.bbGainDb > -1e-6) this.bbGainDb = 0
+          bbAny = true
+        }
+        this.bbBuf[i] = this.bbGainDb === 0 ? 1 : Math.exp(this.bbGainDb * LN10_OVER_20)
+        if (-this.bbGainDb > this.meterMaxBroadband) this.meterMaxBroadband = -this.bbGainDb
         this.lastThresholdLiftDb = tEff - base
-        if (gainOut) gainOut[off + i] = this.shelfGainDb
+        if (gainOut) gainOut[off + i] = this.shelfGainDb + this.bbGainDb
         if (-this.shelfGainDb > this.meterMaxReduction) this.meterMaxReduction = -this.shelfGainDb
       }
 
@@ -919,6 +951,10 @@ export class HFSoftenerKernel {
           z[2 * k] = z1
           z[2 * k + 1] = z2
         }
+        if (bbAny) {
+          const bb = this.bbBuf
+          for (let i = 0; i < len; i++) w[i] *= bb[i]
+        }
         if (listen === 'off' || listen === 'preair') {
           for (let i = 0; i < len; i++) out[off + i] = w[i]
         } else if (listen === 'delta') {
@@ -954,9 +990,11 @@ export class HFSoftenerKernel {
     this.meterCount = 0
     const m = {
       reductionDb: this.meterMaxReduction,
+      broadbandDb: this.meterMaxBroadband,
       thresholdLiftDb: this.lastThresholdLiftDb,
     }
     this.meterMaxReduction = 0
+    this.meterMaxBroadband = 0
     return m
   }
 }
