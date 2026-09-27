@@ -166,6 +166,8 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
 
 /** Air makeup knob range, dB — "a few dB back", not a second Air Boost. */
 export const AIR_MAKEUP_MAX_DB = 6
+/** The kernel's own clamp: the knob plus the most HF COMP can add. */
+export const AIR_TOTAL_MAX_DB = 2 * AIR_MAKEUP_MAX_DB
 
 export const SHAPES = ['shelf', 'band']
 
@@ -625,7 +627,7 @@ export class HFSoftenerKernel {
     this.detRot.set(p.rotator === 'off' ? 0 : 1, immediate)
     this.pathRot.set(p.rotator === 'inpath' ? 1 : 0, immediate)
     this.airVoiced = p.airMode !== 'static'
-    const air = clamp(Number(p.airDb) || 0, 0, AIR_MAKEUP_MAX_DB)
+    const air = clamp(Number(p.airDb) || 0, 0, AIR_TOTAL_MAX_DB)
     if (air !== this.airDb) {
       // Coming up from 0 the cascade has been idle; start it from rest rather
       // than on state left over from the last time it ran.

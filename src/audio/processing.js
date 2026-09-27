@@ -29,10 +29,11 @@ import {
 } from './effects/airBand.js'
 import { ensureHFSoftenerWorklet } from './hfSoftenerWorkletLoader.js'
 import { HF_SOFTENER_PREROLL_S } from './hfSoftenerProcessor.js'
-import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, hfResoKernelParams } from './hfSoftenerResoStage.js'
+import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from './hfSoftenerResoStage.js'
 import {
   HF_SOFTENER_DEFAULTS,
   toKernelParams as toHFSoftenerKernelParams,
+  resoOn, resoKernelParams,
 } from './effects/hfSoftener.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
@@ -878,7 +879,7 @@ export function measureHFSoftenerAutoAir(segments, start, end, params, sampleRat
   const merged = { ...HF_SOFTENER_DEFAULTS, ...params }
   return measureInWorker('hfSoftenerAutoAir', segments, start, end, {
     kernelParams: toHFSoftenerKernelParams(merged),
-    resoParams: merged.reso ? hfResoKernelParams(merged.resoAmount / 100) : null,
+    resoParams: resoOn(merged) ? resoKernelParams(merged) : null,
     resoFrameSize: HF_RESO_FRAME_SIZE,
   }, sampleRate, channels)
 }
@@ -904,15 +905,15 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
     processorName: 'hf-softener-processor',
     kernelParams: toHFSoftenerKernelParams(merged),
     preRollSamples: Math.round(HF_SOFTENER_PREROLL_S * sampleRate),
-    // The RESO switch: a band-limited ResoTame ahead of the softener — see
+    // The Reso knob above 0: a band-limited ResoTame ahead of the softener — see
     // hfSoftenerResoStage.js. Its 512-sample latency is trimmed with the rest.
     // ⚠ Like ResoTame itself, its STFT grid phase at the region start cannot
     // match a running preview, so with RESO on apply is close to the preview
     // rather than sample-identical.
-    preStages: merged.reso ? [{
+    preStages: resoOn(merged) ? [{
       ensureWorklet: ensureResonanceWorklet,
       processorName: 'resonance-processor',
-      kernelParams: hfResoKernelParams(merged.resoAmount / 100),
+      kernelParams: resoKernelParams(merged),
       processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
       latencySamples: HF_RESO_LATENCY_SAMPLES,
     }] : [],

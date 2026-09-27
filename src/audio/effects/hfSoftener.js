@@ -13,46 +13,11 @@
 
 import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
-import {
-  HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_AMOUNT_DEFAULT, hfResoKernelParams,
-} from '../hfSoftenerResoStage.js'
+import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from '../hfSoftenerResoStage.js'
 import { createLevelTap } from './levelTap.js'
+import { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams } from '../hfSoftenerParams.js'
 
-export const HF_SOFTENER_DEFAULTS = {
-  amount: 40, // %, drives threshold, ratio and depth together — see amountToThresholdDb
-  context: 50, // %, Module C depth; 0 = fixed threshold
-  rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
-  release: 40, // ms, HF release outside vowels — fixed, not on the panel
-  vowelRelease: true, // let go fast when a vowel starts
-  shape: 'band', // 'shelf' | 'band'
-  lispGuard: true, // never cut a sibilant below the voice-relative floor
-  reso: false, // band-limited ResoTame ahead of the softener — see hfSoftenerResoStage.js
-  resoAmount: HF_RESO_AMOUNT_DEFAULT * 100, // 0–100 %: macro over threshold, depth and max cut (HF_RESO_KNOTS)
-  detect: 4000, // Hz, the detector's high-pass corner, 3000–8000 — see detectCompDb
-  air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6
-  airMode: 'voiced', // 'voiced' (vowels only — never lifts the "s" or the gaps) | 'static'
-  split: 0, // 0–100 %: how the reduction is taken — 0 band cut (tone), 100 broadband duck (level)
-  // Measured from the whole file, not a user setting — see useHFSoftener.
-  levelOffset: 0, // dB, file gated RMS minus nominal
-}
-
-/** Map UI param names to kernel param names. */
-export function toKernelParams(params) {
-  return {
-    amount: params.amount / 100,
-    context: params.context / 100,
-    rotator: params.rotator,
-    releaseMs: params.release,
-    vowelRelease: params.vowelRelease,
-    shape: params.shape,
-    lispGuard: params.lispGuard,
-    levelOffsetDb: params.levelOffset,
-    detectHz: params.detect,
-    airDb: params.air,
-    airMode: params.airMode,
-    split: (params.split ?? 0) / 100,
-  }
-}
+export { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams } from '../hfSoftenerParams.js'
 
 export function createHFSoftener(audioContext) {
   const input = audioContext.createGain()
@@ -95,7 +60,7 @@ export function createHFSoftener(audioContext) {
       input.connect(preOutput)
       return
     }
-    const withReso = params.reso && resoNode
+    const withReso = resoOn(params) && resoNode
     let src = input
     if (withReso) {
       input.connect(resoNode)
@@ -117,12 +82,12 @@ export function createHFSoftener(audioContext) {
   }
 
   function ensureReso() {
-    if (resoNode || !params.reso) return
+    if (resoNode || !resoOn(params)) return
     ensureResonanceWorklet(audioContext)
       .then(() => {
         if (destroyed || resoNode) return
         resoNode = new AudioWorkletNode(audioContext, 'resonance-processor', {
-          processorOptions: { params: hfResoKernelParams(params.resoAmount / 100), frameSize: HF_RESO_FRAME_SIZE },
+          processorOptions: { params: resoKernelParams(params), frameSize: HF_RESO_FRAME_SIZE },
         })
         rewire()
       })
@@ -162,14 +127,17 @@ export function createHFSoftener(audioContext) {
 
     setParam(name, value) {
       if (!(name in params)) return
+      const wasOn = resoOn(params)
       params[name] = value
-      if (name === 'resoAmount') {
-        resoNode?.port.postMessage({ type: 'params', params: hfResoKernelParams(value / 100) })
-        return
+      if (name === 'resoAmount' || name === 'lispGuard') {
+        resoNode?.port.postMessage({ type: 'params', params: resoKernelParams(params) })
       }
-      if (name === 'reso') {
-        ensureReso()
-        rewire()
+      if (name === 'resoAmount') {
+        // Crossing 0 puts the pre-stage in or takes it out of the chain.
+        if (resoOn(params) !== wasOn) {
+          ensureReso()
+          rewire()
+        }
         return
       }
       worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })

@@ -1,0 +1,59 @@
+/**
+ * HF Softener's UI params: defaults and the mappings to kernel params, for the
+ * softener and for its Reso pre-stage. Split out of effects/hfSoftener.js so
+ * node can import it — the wrapper pulls Vite `?worker&url` specifiers.
+ */
+
+import { hfResoKernelParams } from './hfSoftenerResoStage.js'
+
+export const HF_SOFTENER_DEFAULTS = {
+  amount: 40, // %, drives threshold, ratio and depth together — see amountToThresholdDb
+  context: 50, // %, Module C depth; 0 = fixed threshold
+  rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
+  release: 40, // ms, HF release outside vowels — fixed, not on the panel
+  vowelRelease: true, // let go fast when a vowel starts
+  shape: 'band', // 'shelf' | 'band'
+  lispGuard: true, // never cut a sibilant below the voice-relative floor
+  // 0–100 %: the band-limited ResoTame ahead of the softener, a macro over its
+  // threshold, depth and max cut (HF_RESO_KNOTS). 0 takes the stage out of the
+  // chain entirely — no latency, bit-identical to the softener alone.
+  resoAmount: 0,
+  detect: 4000, // Hz, the detector's high-pass corner, 3000–8000 — see detectCompDb
+  air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6, the user's own
+  // HF COMP: ADDS the measured compensation to `air` (see hfSoftenerAutoAir.js).
+  comp: true,
+  compAir: 0, // dB, measured by useHFSoftener; never a user setting
+  airMode: 'voiced', // 'voiced' (vowels only — never lifts the "s" or the gaps) | 'static'
+  split: 0, // 0–100 %: how the reduction is taken — 0 band cut (tone), 100 broadband duck (level)
+  // Measured from the whole file, not a user setting — see useHFSoftener.
+  levelOffset: 0, // dB, file gated RMS minus nominal
+}
+
+/** Map UI param names to kernel param names. */
+export function toKernelParams(params) {
+  return {
+    amount: params.amount / 100,
+    context: params.context / 100,
+    rotator: params.rotator,
+    releaseMs: params.release,
+    vowelRelease: params.vowelRelease,
+    shape: params.shape,
+    lispGuard: params.lispGuard,
+    levelOffsetDb: params.levelOffset,
+    detectHz: params.detect,
+    airDb: (params.air ?? 0) + (params.comp ? (params.compAir ?? 0) : 0),
+    airMode: params.airMode,
+    split: (params.split ?? 0) / 100,
+  }
+}
+
+/** The Reso pre-stage is in whenever its knob is above 0. */
+export function resoOn(params) {
+  return (params.resoAmount ?? 0) > 0
+}
+
+/** The pre-stage's kernel params: the macro, and the lisp guard when it is on. */
+export function resoKernelParams(params) {
+  return hfResoKernelParams(params.resoAmount / 100, { lispGuard: params.lispGuard !== false })
+}
+

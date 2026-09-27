@@ -13,10 +13,10 @@ export default {
     { label: 'Shape', text: 'Band cuts the sibilance region and leaves the air above 11 kHz; Shelf cuts everything above 4.5 kHz' },
     { label: 'Lisp guard', text: 'Stops any S being pulled further below the voice than a normal S sits, so heavy settings cannot turn S into TH' },
     { label: 'Detect', text: 'Where the detector starts listening. Raise it if bright vowels are being dipped: an ordinary S reads the same at any setting, but vowel top end drops out of the detector' },
-    { label: 'Air', text: 'Adds top after the cut, on the same curve as Air Boost. Removing sibilance makes the whole file less bright even though the vowels are untouched; with AUTO lit, Air follows the cut and puts back half the top end it measures being removed. Turn the knob to take over' },
+    { label: 'Air', text: 'Adds top after the cut, on the same curve as Air Boost. It is yours: HF Comp adds to it, never changes it' },
+    { label: 'HF Comp', text: 'Removing sibilance makes the whole file less bright even though the vowels are untouched. On, this adds Air to make up for half the top end the cut is measured to take, and follows every setting that changes the cut' },
     { label: 'Air mode', text: 'VOICED lifts the vowels only: the air fades out as each S arrives and stays out of the pauses, so it neither hands the cut back to the sibilants nor lifts room noise. STATIC lifts everything, as Air Boost does' },
-    { label: 'HF Reso', text: 'Runs a band-limited ResoTame ahead of the softener: it takes narrow rings and whistly S between 5 and 12 kHz and leaves ordinary S to the softener' },
-    { label: 'Reso', text: 'How much the ResoTame pre-stage takes, in even steps. On vowels it only ever takes rings and whistles — their top end is left alone at every setting. On the S it takes more as you turn it up, and the softener’s own cut eases off as it does' },
+    { label: 'Reso', text: 'A band-limited ResoTame ahead of the softener; 0 takes it out. On vowels it only ever takes rings and whistles. On the S it takes more as you turn it up, in even steps, and the softener’s own cut eases off as it does. The lisp guard covers it too' },
     { label: 'Delta', text: 'Hear only what is being removed, from the button in the title bar' },
   ],
 

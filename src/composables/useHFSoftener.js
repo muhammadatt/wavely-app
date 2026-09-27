@@ -18,13 +18,13 @@ const hfShape = ref(HF_SOFTENER_DEFAULTS.shape)
 const hfLispGuard = ref(HF_SOFTENER_DEFAULTS.lispGuard)
 // The band-limited ResoTame ahead of the softener — an A/B of the pairing,
 // with fixed settings (see hfSoftenerResoStage.js).
-const hfReso = ref(HF_SOFTENER_DEFAULTS.reso)
 const hfResoAmount = ref(HF_SOFTENER_DEFAULTS.resoAmount)
-// Air makeup: Air Boost's curve after the cut. AUTO owns the knob until it is
-// touched — the same contract as OptoSmooth's Input and Gain — and sets it to
-// a fraction of the top end the chain is measured to remove (hfSoftenerAutoAir.js).
+// Air makeup: Air Boost's curve after the cut, the user's own amount. HF COMP
+// ADDS a measured amount on top — a fraction of the top end the chain removes
+// (hfSoftenerAutoAir.js) — so the knob is never overwritten.
 const hfAir = ref(HF_SOFTENER_DEFAULTS.air)
-const hfAirAuto = ref(true)
+const hfComp = ref(HF_SOFTENER_DEFAULTS.comp)
+const hfCompAir = ref(0)
 const hfAirLossDb = ref(null)
 let autoAirTimer = null
 let autoAirSeq = 0
@@ -64,9 +64,10 @@ function currentParams() {
     vowelRelease: HF_SOFTENER_DEFAULTS.vowelRelease,
     shape: hfShape.value,
     lispGuard: hfLispGuard.value,
-    reso: hfReso.value,
     resoAmount: hfResoAmount.value,
     air: hfAir.value,
+    comp: hfComp.value,
+    compAir: hfCompAir.value,
     airMode: hfAirMode.value,
     split: hfSplit.value,
     detect: hfDetect.value,
@@ -158,13 +159,13 @@ export function useHFSoftener() {
   }
 
   /**
-   * Measure the chain's top-end loss and, while AUTO owns Air, set Air from it.
+   * Measure the chain's top-end loss and, while HF COMP is on, set the compensation from it.
    * Over the selection (the usual capped window), since that is what apply
    * will render; the whole file when nothing is selected. Stale answers — a
-   * newer request went out, or AUTO was dropped meanwhile — are discarded.
+   * newer request went out, or HF COMP was switched off meanwhile — are discarded.
    */
   async function refreshAutoAir() {
-    if (!state.currentFile || !hfAirAuto.value) return
+    if (!state.currentFile || !hfComp.value) return
     const sel = state.selection
     const start = sel ? sel.start : 0
     const end = sel ? sel.end : totalDuration.value
@@ -175,10 +176,10 @@ export function useHFSoftener() {
         state.segments, start, end, currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
       )
-      if (seq !== autoAirSeq || !hfAirAuto.value) return
+      if (seq !== autoAirSeq || !hfComp.value) return
       hfAirLossDb.value = lossDb
-      hfAir.value = airDb
-      pushParam('air', airDb)
+      hfCompAir.value = airDb
+      pushParam('compAir', airDb)
     } catch (err) {
       console.error('HF Softener auto Air failed:', err)
     }
@@ -186,13 +187,14 @@ export function useHFSoftener() {
 
   /** Re-measure shortly after the last change: every control that moves the cut moves the answer. */
   function scheduleAutoAir() {
-    if (!hfAirAuto.value) return
+    if (!hfComp.value) return
     clearTimeout(autoAirTimer)
     autoAirTimer = setTimeout(refreshAutoAir, 250)
   }
 
-  function setAirAuto(on) {
-    hfAirAuto.value = !!on
+  function syncComp(on) {
+    hfComp.value = !!on
+    pushParam('comp', hfComp.value)
     if (on) scheduleAutoAir()
   }
 
@@ -237,9 +239,8 @@ export function useHFSoftener() {
     pushParam('airMode', v)
   }
 
-  /** Touching Air takes it over from AUTO, so a value the user sets sticks. */
+  /** The user's own Air, independent of HF COMP. */
   function syncAir(v) {
-    hfAirAuto.value = false
     hfAir.value = v
     pushParam('air', v)
   }
@@ -262,12 +263,6 @@ export function useHFSoftener() {
     scheduleAutoAir()
   }
 
-  function syncReso(v) {
-    hfReso.value = v
-    pushParam('reso', v)
-    scheduleAutoAir()
-  }
-
   function syncShape(v) {
     hfShape.value = v
     pushParam('shape', v)
@@ -287,9 +282,9 @@ export function useHFSoftener() {
     const wasPreviewing = hfPreview.value
     if (wasPreviewing) togglePreview()
     refreshLevel()
-    // Under AUTO, render with the Air measured for exactly these settings, not
+    // With HF COMP on, render with compensation measured for exactly these settings, not
     // whatever a debounced request last left on the knob.
-    if (hfAirAuto.value) {
+    if (hfComp.value) {
       clearTimeout(autoAirTimer)
       await refreshAutoAir()
     }
@@ -338,7 +333,8 @@ export function useHFSoftener() {
     hfAmount,
     hfResoAmount,
     hfAir,
-    hfAirAuto,
+    hfComp,
+    hfCompAir,
     hfAirLossDb,
     hfDetect,
     hfAirMode,
@@ -346,7 +342,6 @@ export function useHFSoftener() {
     hfBroadband,
     hfShape,
     hfLispGuard,
-    hfReso,
     hfFileLevelDb,
     hfLevelOffset,
     hfDelta,
@@ -360,7 +355,7 @@ export function useHFSoftener() {
     syncAmount,
     syncResoAmount,
     syncAir,
-    setAirAuto,
+    syncComp,
     syncDetect,
     refreshAutoAir,
     scheduleAutoAir,
@@ -368,7 +363,6 @@ export function useHFSoftener() {
     syncSplit,
     syncShape,
     syncLispGuard,
-    syncReso,
     toggleDelta,
     refreshLevel,
     apply,

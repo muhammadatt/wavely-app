@@ -303,6 +303,13 @@ const VOICED_LM_HI_HZ = 3000
 const VOICED_HF_LO_HZ = 4500
 const VOICED_HF_HI_HZ = 12000
 const VOICED_LEAD_DB = 6
+// Lisp guard's held voice level, per frame: the HF Softener's 15 ms attack and
+// 500 ms hold, so the two guards judge an "s" against the same vowel.
+const GUARD_VOICE_ATTACK_MS = 15
+const GUARD_VOICE_HOLD_MS = 500
+// Added to the guard's cap on a voiced frame, scaled by the voicing weight:
+// larger than any max cut, so a fully voiced frame is unguarded.
+const GUARD_VOICED_RELIEF_DB = 96
 const VOICED_XFADE_DB = 3
 
 const PEAK_REF_OCT_COARSE = 3.0
@@ -725,6 +732,12 @@ export class ResonanceKernel {
     this.refMode = p.refMode === 'peak' ? 'peak' : 'cepstral'
     // Off (0) for ResoTame itself; the HF Softener's Reso stage sets it.
     this.voicedFloorDb = Math.max(0, Number(p.voicedSelectivityFloorDb) || 0)
+    // Lisp guard (off for ResoTame itself — the HF Softener's Reso stage sets
+    // it): no frame's cut may take the 4.5–12 kHz band below the HELD voice
+    // level + this floor. See GUARD_* below.
+    this.guardFloorDb = Number.isFinite(p.lispGuardFloorDb) ? p.lispGuardFloorDb : null
+    this.guardAttack = 1 - Math.exp(-this.frameRateMs / GUARD_VOICE_ATTACK_MS)
+    this.guardRelease = 1 - Math.exp(-this.frameRateMs / GUARD_VOICE_HOLD_MS)
 
     /**
      * HARMONIC PROTECTION MEANS SOMETHING DIFFERENT UNDER EACH REFERENCE, and
@@ -984,6 +997,7 @@ export class ResonanceKernel {
     this.detStft?.reset()
     this.f0.reset()
     this.prevGr.fill(0)
+    this.guardVoice = 0
     this.frameIndex = 0
     this.maskCache.clear()
     this.hasDisplayFrame = false
@@ -1351,7 +1365,8 @@ export class ResonanceKernel {
     } = this
 
     const voicedFloor = this.voicedFloorDb
-    const voicing = voicedFloor > 0
+    const guardFloor = this.guardFloorDb
+    const voicing = voicedFloor > 0 || guardFloor !== null
     let lmPow = 0
     let hfPow = 0
     const bw = this.binWidth
@@ -1370,6 +1385,21 @@ export class ResonanceKernel {
     if (voicing) {
       const lead = 10 * Math.log10((lmPow + 1e-30) / (hfPow + 1e-30)) - VOICED_LEAD_DB
       wv = lead <= -VOICED_XFADE_DB ? 0 : lead >= VOICED_XFADE_DB ? 1 : (lead + VOICED_XFADE_DB) / (2 * VOICED_XFADE_DB)
+    }
+    // Lisp guard: the most this frame may take, dB. The voice level is held
+    // (fast attack, slow let-go) so a sibilant is judged against the vowel
+    // before it, not against its own low/mid, which is nearly nothing.
+    let guardCap = Infinity
+    if (guardFloor !== null) {
+      const v = this.guardVoice ?? 0
+      this.guardVoice = v + (lmPow > v ? this.guardAttack : this.guardRelease) * (lmPow - v)
+      const allowed = 10 * Math.log10((hfPow + 1e-30) / (this.guardVoice + 1e-30)) - guardFloor
+      guardCap = allowed > 0 ? allowed : 0
+      // Only where a lisp can happen: on a voiced frame the guard would forbid
+      // any cut at all — a vowel's top end sits far below its own low/mid —
+      // and ring removal is exactly what those frames are for. Voiced frames
+      // are already held at the ring-only threshold, so they cannot lisp.
+      guardCap += wv * GUARD_VOICED_RELIEF_DB
     }
 
     // Pitch drives both the lifter cutoff and the protection mask, so it is
@@ -1565,7 +1595,7 @@ export class ResonanceKernel {
     // number spent on sibilance is a lisp.
     for (let k = 0; k < binCount; k++) {
       const r = reduction[k] * zoneDepth[k]
-      const ceiling = zoneMaxCut[k]
+      const ceiling = zoneMaxCut[k] < guardCap ? zoneMaxCut[k] : guardCap
       reduction[k] = r > ceiling ? ceiling : r
     }
 

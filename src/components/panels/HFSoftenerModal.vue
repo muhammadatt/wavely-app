@@ -31,10 +31,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfReso, hfResoAmount, hfAir, hfAirAuto, hfDetect, hfAirMode, hfSplit, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfResoAmount, hfAir, hfComp, hfCompAir, hfDetect, hfAirMode, hfSplit, hfBroadband, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoAmount, syncAir, setAirAuto, syncDetect, scheduleAutoAir, syncAirMode, syncSplit, syncShape, syncLispGuard, syncReso, toggleDelta,
+  togglePreview, syncAmount, syncResoAmount, syncAir, syncComp, syncDetect, scheduleAutoAir, syncAirMode, syncSplit, syncShape, syncLispGuard, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -62,10 +62,13 @@ const GUARD_OPTIONS = [
   { value: false, label: 'OFF', title: 'Cut as deep as Amount asks' },
 ]
 
-const RESO_OPTIONS = [
-  { value: true, label: 'ON', title: 'Run a band-limited ResoTame (5–12 kHz) ahead of the softener — the Reso knob sets how much: rings first, then sibilance. Adds 11.6 ms latency' },
-  { value: false, label: 'OFF', title: 'Softener alone' },
+const COMP_OPTIONS = [
+  { value: true, label: 'ON', title: 'Add Air to make up for the top end the cut removes: half of what it is measured to take, on the selection. Adds to the Air knob, never replaces it' },
+  { value: false, label: 'OFF', title: 'No compensation: Air is only what the knob says' },
 ]
+
+// What actually reaches the kernel: the knob plus the compensation.
+const totalAir = computed(() => hfAir.value + (hfComp.value ? hfCompAir.value : 0))
 
 const AIR_MODE_OPTIONS = [
   { value: 'voiced', label: 'VOICED', title: 'Lift vowels only — the air fades out as each S arrives and stays out of the gaps, so it never hands the cut back or lifts room noise' },
@@ -108,7 +111,7 @@ const Y0 = yFor(0)
 function shelfPath(gainDb, levelDb = 0) {
   const sr = state.currentFile?.sampleRate ?? 44100
   const secs = softenerSections(sr, gainDb, hfShape.value)
-  if (hfAir.value > 0) secs.push(...airBandSections(sr, hfAir.value))
+  if (totalAir.value > 0) secs.push(...airBandSections(sr, totalAir.value))
   const db = magnitudeResponseDb(secs, CURVE_FREQS, sr).map(v => v + levelDb)
   return CURVE_FREQS.map(
     (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${Math.min(CURVE_H - 0.5, Math.max(0.5, yFor(db[i]))).toFixed(1)}`,
@@ -299,18 +302,11 @@ async function applyAndClose() {
                 :min="0" :max="AIR_MAKEUP_MAX_DB" :step="0.1"
                 label="Air" :accent="ACCENT" :format-value="formatAir"
                 :disabled="!hfPreview"
-                title="Put back a few dB of top after the cut, on Air Boost's curve. AUTO sets it to half the top end the cut is measured to remove; turning the knob takes over. AIR MODE decides whether it follows the vowels or lifts everything."
+                title="Add top after the cut, on Air Boost's curve. HF COMP adds its measured compensation on top of this; AIR MODE decides whether it follows the vowels or lifts everything."
               />
-              <button
-                type="button" class="hf-auto" :class="{ 'hf-auto--on': hfAirAuto }"
-                :disabled="!hfPreview" :aria-pressed="String(hfAirAuto)"
-                :title="hfAirAuto
-                  ? 'Air follows the cut: half the top end it removes, measured on the selection. Turn the knob to take over.'
-                  : 'Air is manual. Click to let it follow the cut again.'"
-                @click="setAirAuto(!hfAirAuto)"
-              >
-                AUTO · {{ hfAirMode === 'voiced' ? 'VOWELS' : 'ALL' }}
-              </button>
+              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+                {{ hfComp ? `+${hfCompAir.toFixed(1)} COMP` : 'NO COMP' }}
+              </span>
             </div>
             <div class="w-[104px] flex flex-col items-center">
               <!-- The ResoTame pre-stage's amount macro (HF_RESO_KNOTS). Live
@@ -320,11 +316,11 @@ async function applyAndClose() {
                 @update:model-value="syncResoAmount"
                 :min="0" :max="100" :step="1"
                 label="Reso" :accent="ACCENT" :format-value="formatPct"
-                :disabled="!hfPreview || !hfReso"
+                :disabled="!hfPreview"
                 title="How much the ResoTame pre-stage takes. The first half catches rings and whistles; the second half takes sibilance too, in even steps, and the softener's own cut eases off as it does. Threshold, depth and cut ceiling move together."
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ !hfReso ? 'HF RESO OFF' : 'RINGS + S · 5–12k' }}
+                {{ hfResoAmount > 0 ? 'RINGS + S · 5–12k' : 'OFF' }}
               </span>
             </div>
           </div>
@@ -351,18 +347,18 @@ async function applyAndClose() {
           />
         </div>
         <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">HF RESO</span>
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">HF COMP</span>
           <DeviceChoiceRocker
-            :model-value="hfReso" :options="RESO_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="ResoTame pre-stage"
-            @update:model-value="syncReso"
+            :model-value="hfComp" :options="COMP_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview" label="HF compensation"
+            @update:model-value="syncComp"
           />
         </div>
         <div class="flex flex-col items-center gap-[8px]">
           <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">AIR MODE</span>
           <DeviceChoiceRocker
             :model-value="hfAirMode" :options="AIR_MODE_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview || !(hfAir > 0)" label="Air mode"
+            :disabled="!hfPreview || !(totalAir > 0)" label="Air mode"
             @update:model-value="syncAirMode"
           />
         </div>
@@ -392,23 +388,3 @@ async function applyAndClose() {
   </FloatingWindow>
 </template>
 
-<style scoped>
-.hf-auto {
-  font: 600 8.5px 'JetBrains Mono', monospace;
-  letter-spacing: 0.08em;
-  padding: 1px 7px;
-  border-radius: 9999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: transparent;
-  color: rgba(255, 255, 255, 0.35);
-  cursor: pointer;
-}
-.hf-auto--on {
-  border-color: rgba(232, 183, 127, 0.55);
-  color: #e8b77f;
-}
-.hf-auto:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-</style>
