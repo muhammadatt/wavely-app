@@ -147,14 +147,14 @@ export const HF_RESO_ZONES = hfResoZones()
 /** Kernel params for the pre-stage, ready to cross a structured clone. */
 /**
  * The lisp guard's floor in THIS stage's units: frame energy 4.5–12 kHz
- * against the held 200 Hz–3 kHz energy. The softener's floor (−18) is in ITS
+ * against the held 200 Hz–3 kHz energy. The softener's floor (−16) is in ITS
  * units (a 4 kHz peak follower against the same held voice), and on the "s"
  * frames of two real narration clips this stage's measure read 1.0 / 1.9 dB
- * lower (median; the synthetic voice disagrees at +3.4) — so −19.5 puts the
+ * lower (median; the synthetic voice disagrees at +3.4) — so −17.5 puts the
  * two guards on the same level and the TOTAL cut, Reso + softener, stops
  * where the softener alone would have.
  */
-export const HF_RESO_LISP_GUARD_FLOOR_DB = -19.5
+export const HF_RESO_LISP_GUARD_FLOOR_DB = -17.5
 
 export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard = true } = {}) {
   return {

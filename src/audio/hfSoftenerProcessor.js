@@ -107,10 +107,19 @@ export const HF_SOFTENER_TUNING = {
   // attack and a hold long enough to bridge one sibilant.
   // ⚠ IN DETECTOR UNITS A NORMAL "S" SITS ~12 dB BELOW THE VOICE (HF peak
   // follower against low/mid RMS, synthetic voice) — so a floor at or above
-  // 0 blocks every cut. −18 lets a normal "s" go ~2.5 dB under its natural
-  // level at most, at any Amount; uncapped, 100 % took it 8.4 dB under.
-  // Measured once on synthetic voice; a real voice's natural lead may differ.
-  lispGuardFloorDb: -18,
+  // 0 blocks every cut. −18 let a normal "s" go ~2.5 dB under its natural
+  // level at most, at any Amount (synthetic voice); uncapped, 100 % took it
+  // 8.4 dB under.
+  // ⚠ −16, NOT −18, MEASURED AGAINST THE SERVER'S clipGainDeEsser CEILINGS
+  // (event peak over ±80 ms voiced RMS, its own scripts, two real clips): at
+  // −18 a guarded "s" stopped at −1.1 / +1.8 dB, 4–7 below the ACX ceiling
+  // (+6) and under every wet-branch one (+3 to +4). −16 stops it at +0.2 /
+  // +2.9 and keeps ~60 % of Amount's travel above 40 % (A40→A100: 0.7 / 1.5 dB
+  // against 1.2 / 2.5). Tighter flattens the knob: −13 reaches +2.9 / +4.4 but
+  // leaves 0.2 / 0.6 dB of travel. The two rules do different jobs — the
+  // server takes half the excess over a ceiling, this is a stop — so the
+  // floor is not meant to reach the ceiling.
+  lispGuardFloorDb: -16,
   voiceAttackMs: 15,
   voiceHoldMs: 500,
   // Level alignment. Every absolute level in the detector — T_base, L_ref,

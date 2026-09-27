@@ -325,8 +325,8 @@ test('context: an isolated sibilant is cut harder than one inside a phrase', () 
     }
     return m
   }
-  const fixed = processHFSoftenerBuffer([x], SR, { context: 0 }, { recordGain: true }).gainDb
-  const ctx = processHFSoftenerBuffer([x], SR, { context: 0.5 }, { recordGain: true }).gainDb
+  const fixed = processHFSoftenerBuffer([x], SR, { context: 0, lispGuard: false }, { recordGain: true }).gainDb
+  const ctx = processHFSoftenerBuffer([x], SR, { context: 0.5, lispGuard: false }, { recordGain: true }).gainDb
   const inPhraseFixed = worst(fixed, 0.35, 0.45)
   const inPhraseCtx = worst(ctx, 0.35, 0.45)
   const isolatedCtx = worst(ctx, 0.7, 0.8)
@@ -347,7 +347,7 @@ test('sample-rate invariance: same stimulus at 44.1 / 48 / 96 kHz, same gain cur
       const burst = t > 0.2 && t < 0.24 ? 0.2 : 0
       x[i] = 0.1 * Math.sin(2 * Math.PI * 300 * t) + burst * Math.sin(2 * Math.PI * 6500 * t)
     }
-    return processHFSoftenerBuffer([x], sr, { amount: 0.6 }, { recordGain: true }).gainDb
+    return processHFSoftenerBuffer([x], sr, { amount: 0.6, lispGuard: false }, { recordGain: true }).gainDb
   }
   const ref = curve(48000)
   for (const sr of [44100, 96000]) {
@@ -475,8 +475,8 @@ test('vowel release: the vowel after an "s" keeps its top end', () => {
   // 60 ms at the default, -3.59 at Amount 80 %.
   const { x } = makeSpeech(SR)
   for (const amount of [0.4, 0.8]) {
-    const off = processHFSoftenerBuffer([x], SR, { amount, vowelRelease: false }, { recordGain: true }).gainDb
-    const on = processHFSoftenerBuffer([x], SR, { amount, vowelRelease: true }, { recordGain: true }).gainDb
+    const off = processHFSoftenerBuffer([x], SR, { amount, vowelRelease: false, lispGuard: false }, { recordGain: true }).gainDb
+    const on = processHFSoftenerBuffer([x], SR, { amount, vowelRelease: true, lispGuard: false }, { recordGain: true }).gainDb
     const carryOff = meanGain(off, 0.39, 0.45)
     const carryOn = meanGain(on, 0.39, 0.45)
     // At the shipped 40 % / 40 ms: -1.93 → -0.77 dB. At least halved.
@@ -613,10 +613,13 @@ test('amount: the cut grows in even steps across the dial', () => {
 // ── Lisp guard ──────────────────────────────────────────────────────────────
 
 test('lisp guard: a normal "s" stops getting deeper, a hot one is still chased', () => {
-  // Measured: normal sibilants 20/40/60/80/100 % -> -2.8 -5.8 -6.7 -6.7 -6.7
-  // with the guard, -2.8 -5.8 -9.0 -12.1 -15.3 without. The default is
-  // untouched on the peak; the top of the knob no longer digs into a normal
-  // "s", which is exactly the lisp it exists to stop.
+  // Measured at the −16 floor: normal sibilants 20/40/60/80/100 % -> -2.8
+  // -4.7 -4.7 -4.7 -4.7 with the guard, -2.8 -5.8 -9.0 -12.1 -15.3 without.
+  // At −18 the default was untouched on the peak (-5.8); −16 reaches it on this
+  // synthetic voice, which is the cost of matching the server's ceilings (on
+  // real narration the default's "s" cut moved -3.3 -> -2.6 / -5.6 -> -5.4 dB).
+  // The top of the knob no longer digs into a normal "s", which is exactly the
+  // lisp it exists to stop.
   const { x } = makeSpeech(SR, { seconds: 3 })
   const deepest = (a, guard, y = x) => {
     const { gainDb } = processHFSoftenerBuffer([y], SR, { amount: a, lispGuard: guard }, { recordGain: true })
@@ -624,9 +627,10 @@ test('lisp guard: a normal "s" stops getting deeper, a hot one is still chased',
     for (const v of gainDb) m = Math.min(m, v)
     return m
   }
-  assert.ok(Math.abs(deepest(0.4, true) - deepest(0.4, false)) < 0.2, 'guard moved the default')
+  assert.ok(Math.abs(deepest(0.2, true) - deepest(0.2, false)) < 0.2, 'guard moved a light setting')
+  assert.ok(deepest(0.4, true) - deepest(0.4, false) < 1.5, 'guard took most of the default')
   const g100 = deepest(1, true)
-  assert.ok(g100 > -8, `guard let a normal "s" go to ${g100.toFixed(2)} dB`)
+  assert.ok(g100 > -6, `guard let a normal "s" go to ${g100.toFixed(2)} dB`)
   assert.ok(deepest(1, false) < g100 - 5, 'the unguarded map should dig much deeper')
   // A hotter "s" clears the floor by more, so it may still be cut hard.
   const hot = x.map(v => v * 1.0)
@@ -726,8 +730,8 @@ test('reso macro: 0 is off, and threshold, depth and max cut each move one way',
   }
 })
 
-const resoRun = (x, sr, amount) => {
-  const r = processResonanceBuffer([x], sr, hfResoKernelParams(amount), { frameSize: HF_RESO_FRAME_SIZE })
+const resoRun = (x, sr, amount, opts) => {
+  const r = processResonanceBuffer([x], sr, hfResoKernelParams(amount, opts), { frameSize: HF_RESO_FRAME_SIZE })
   const o = new Float32Array(x.length)
   o.set(r.channelData[0].subarray(r.latencySamples))
   return o
@@ -790,12 +794,14 @@ test('reso macro: as it takes the sibilance, the softener backs off', () => {
   const sr = 44100
   const { x, labels } = makeRichSpeech(sr)
   const softGrOnS = (y) => {
-    const { gainDb } = processHFSoftenerBuffer([y], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.4 }, { recordGain: true })
+    const { gainDb } = processHFSoftenerBuffer([y], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.4, lispGuard: false }, { recordGain: true })
     let s = 0, n = 0
     for (let i = sr; i < y.length; i++) if (labels[i] === 2) { s += gainDb[i]; n++ }
     return s / n
   }
-  const soft0 = softGrOnS(resoRun(x, sr, 0)), soft1 = softGrOnS(resoRun(x, sr, 1))
+  // Both guards off: this is the handoff through the detector, not the floor.
+  const noGuard = { lispGuard: false }
+  const soft0 = softGrOnS(resoRun(x, sr, 0, noGuard)), soft1 = softGrOnS(resoRun(x, sr, 1, noGuard))
   assert.ok(soft1 > soft0 + 1, `softener on the "s": ${soft0.toFixed(2)} dB at Reso 0 → ${soft1.toFixed(2)} at 100 %`)
 })
 
