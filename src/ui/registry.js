@@ -10,6 +10,7 @@ import FET1176Modal from '../components/panels/FET1176Modal.vue'
 import SoftClipperModal from '../components/panels/SoftClipperModal.vue'
 import SchepsModal from '../components/panels/SchepsModal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
+import SaturationBenchModal from '../components/panels/SaturationBenchModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
@@ -316,6 +317,21 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: VocalSaturationWindow,
+  },
+  {
+    id: 'saturation-bench',
+    label: 'Saturation Bench',
+    desc: 'Stack layers of saturation, each on its own band',
+    category: 'effects',
+    group: 'Tone',
+    icon: 'saturation',
+    keywords: [
+      'saturation', 'saturate', 'exciter', 'excite', 'harmonic', 'warmth', 'drive',
+      'distortion', 'waveshaper', 'tanh', 'quartic', 'layers', 'bench',
+    ],
+    requires: 'selection',
+    surface: 'window',
+    component: SaturationBenchModal,
   },
   {
     id: 'inflator',
