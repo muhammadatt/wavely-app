@@ -290,6 +290,21 @@ const PEAK_SPACING_CAP_BINS = 64
 const PEAK_SPACING_MARGIN = 1.25
 const PEAK_REF_FLOOR_FACTOR = 8
 /** Reference width in octaves at Sharpness 0 and 1 — the detection scale. */
+// Voiced-frame threshold FLOOR (`voicedSelectivityFloorDb`, off by default):
+// on a frame whose low/mid energy leads its sibilance band, the threshold is
+// raised to at least the floor, crossfaded over ±XFADE around LEAD. What it is
+// for: a peak reference measures how a spectrum BENDS, and a vowel whose top
+// plateaus and then rolls off steeply bends like a resonance at the edge —
+// one narrator lost 6.8 dB at 8–12 kHz of vowel to it. A single frame cannot
+// tell that edge from a faint ring at the same level; the frame's voicing can
+// tell it from an "s". See the HF Softener's Reso stage, the one caller.
+const VOICED_LM_LO_HZ = 200
+const VOICED_LM_HI_HZ = 3000
+const VOICED_HF_LO_HZ = 4500
+const VOICED_HF_HI_HZ = 12000
+const VOICED_LEAD_DB = 6
+const VOICED_XFADE_DB = 3
+
 const PEAK_REF_OCT_COARSE = 3.0
 const PEAK_REF_OCT_FINE = 1.2
 /**
@@ -708,6 +723,8 @@ export class ResonanceKernel {
 
     this.softKnee = p.mode !== 'hard'
     this.refMode = p.refMode === 'peak' ? 'peak' : 'cepstral'
+    // Off (0) for ResoTame itself; the HF Softener's Reso stage sets it.
+    this.voicedFloorDb = Math.max(0, Number(p.voicedSelectivityFloorDb) || 0)
 
     /**
      * HARMONIC PROTECTION MEANS SOMETHING DIFFERENT UNDER EACH REFERENCE, and
@@ -1333,9 +1350,26 @@ export class ResonanceKernel {
       softKnee, kneeWidth, zoneDepth, zoneSelectivity, zoneMaxCut,
     } = this
 
+    const voicedFloor = this.voicedFloorDb
+    const voicing = voicedFloor > 0
+    let lmPow = 0
+    let hfPow = 0
+    const bw = this.binWidth
     for (let k = 0; k < binCount; k++) {
       const mag = Math.hypot(specRe[k], specIm[k])
       magDb[k] = 20 * Math.log10(mag + MAG_EPS)
+      if (voicing) {
+        const f = k * bw
+        if (f >= VOICED_LM_LO_HZ && f < VOICED_LM_HI_HZ) lmPow += mag * mag
+        else if (f >= VOICED_HF_LO_HZ && f < VOICED_HF_HI_HZ) hfPow += mag * mag
+      }
+    }
+    // Voicing weight of this frame, 0–1: low/mid over the sibilance band, a
+    // soft crossover so a frame on the boundary is not flipped by ripple.
+    let wv = 0
+    if (voicing) {
+      const lead = 10 * Math.log10((lmPow + 1e-30) / (hfPow + 1e-30)) - VOICED_LEAD_DB
+      wv = lead <= -VOICED_XFADE_DB ? 0 : lead >= VOICED_XFADE_DB ? 1 : (lead + VOICED_XFADE_DB) / (2 * VOICED_XFADE_DB)
     }
 
     // Pitch drives both the lifter cutoff and the protection mask, so it is
@@ -1448,7 +1482,9 @@ export class ResonanceKernel {
       }
       // Threshold and knee come from the zone this bin falls in. DEPTH DOES
       // NOT APPLY HERE — it is applied once, after the spread. See below.
-      const above = detect[k] - envDb[k] - zoneSelectivity[k]
+      const sel = zoneSelectivity[k]
+      const floorLift = voicedFloor > sel ? wv * (voicedFloor - sel) : 0
+      const above = detect[k] - envDb[k] - sel - floorLift
       if (above <= 0) {
         reduction[k] = 0
         continue

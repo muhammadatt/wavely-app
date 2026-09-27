@@ -20,7 +20,7 @@ export default {
     { label: 'Air', text: 'Adds a few dB of top after the cut, on the same curve as Air Boost. Removing sibilance makes the whole file less bright even though the vowels are untouched — this is the way back' },
     { label: 'Air mode', text: 'VOICED lifts the vowels only: the air fades out as each S arrives and stays out of the pauses, so it neither hands the cut back to the sibilants nor lifts room noise. STATIC lifts everything, as Air Boost does' },
     { label: 'HF Reso', text: 'Runs a band-limited ResoTame ahead of the softener: it takes narrow rings and whistly S between 5 and 12 kHz and leaves ordinary S to the softener' },
-    { label: 'Reso', text: 'How much the ResoTame pre-stage takes. The first half catches rings and whistles; the second half takes the sibilance too, in even steps, and the softener’s own cut eases off as it does. It moves threshold, depth and ceiling together, so it never jumps from nothing to too much' },
+    { label: 'Reso', text: 'How much the ResoTame pre-stage takes, in even steps. On vowels it only ever takes rings and whistles — their top end is left alone at every setting. On the S it takes more as you turn it up, and the softener’s own cut eases off as it does' },
     { label: 'Delta', text: 'Hear only what is being removed, from the button in the title bar' },
   ],
 

@@ -3,7 +3,7 @@
  * resonance suppressor that runs AHEAD of the softener when its RESO switch is
  * on.
  *
- * The two stages split the work, and the Threshold knob sets where. High, it
+ * The two stages split the work, and the Reso knob sets where. Low, it
  * takes only narrow peaks that stand far above the local spectrum — a whistly
  * "s", a mic or room ring — which the softener could only reach by cutting the
  * whole band, and leaves the broadband spike of an ordinary "s" to the
@@ -46,42 +46,64 @@ export const HF_RESO_LATENCY_SAMPLES = HF_RESO_FRAME_SIZE
  * THE RESO KNOB IS AN AMOUNT MACRO, 0–1, MOVING THRESHOLD, DEPTH AND MAX CUT
  * TOGETHER — not ResoTame's Threshold. As a bare threshold it was a switch:
  * with depth 1 anything clearing it is removed entirely (∞:1), so the knob
- * decided WHETHER to cut and never HOW MUCH, and the "s" crossed from −0.4 to
- * −7.3 dB within 6 dB of travel. Reported as "goes from doing very little to
- * taking off too much top end".
+ * decided WHETHER to cut and never HOW MUCH. Reported as "goes from doing
+ * very little to taking off too much top end".
  *
- * The law is a knot table, interpolated linearly, fitted by measurement on a
- * synthetic voice with realistic upper formants (energy above 3 kHz at −19.9
- * dB of the vowel — the stock test voice is low-passed and exaggerates vowel
- * losses):
+ * ⚠⚠ AND IT RAN ON ResoTame's 200/500 ms BALLISTICS, WHICH MADE IT A SLOW EQ.
+ * An "s" is 30–40 ms: at a 200 ms attack an isolated one reached −1.6 dB at
+ * 100 %, and the −7.5 the table used to print was reduction BUILT ON THE
+ * VOWELS and carried into the "s" by the 500 ms release — so the "s" cut and
+ * the vowel cost were one quantity. On a real narrator whose vowels plateau
+ * to 10 kHz and then roll off steeply it cost 6.8 dB of vowel 8–12 kHz at
+ * 100 % (1.2 at 30 %). Now: 15/80 ms (the server stage's pair), so an "s" is
+ * cut by its own frames (isolated: −4.3), and VOICED FRAMES HOLD THE MACRO'S
+ * 0 % THRESHOLD (`voicedSelectivityFloorDb` = 21): on vowels the knob moves
+ * only depth and max cut — rings — and the falling threshold reaches only
+ * unvoiced frames, which is where the sibilance is.
  *
- *   - first half: RINGS. Depth ramps 0 → 0.8 while the threshold falls
- *     21 → 12, so 0 % is off and faint rings come in steadily;
- *   - second half: SIBILANCE. Depth holds at 0.8 and the threshold follows the
- *     INVERTED measured curve of "s" cut vs threshold, so each 10 % takes a
- *     similar bite; max cut climbs to 18 dB.
+ * ⚠ What the floor gives up is FAINT rings inside vowels (synthetic, 100 %:
+ * −15.1 → −7.7 dB). A single frame cannot tell a ring at the level of the
+ * vowel's own top end from a vowel spectrum that bends there; a strong ring
+ * is still taken in full (−17.0).
  *
- *   amount      10    20    30    40    50    60    70    80    90   100 %
- *   "s" 5–9k   0.0   0.0   0.0   0.0  −0.2  −1.5  −2.7  −4.6  −5.9  −7.5 dB
- *   faint ring −0.4  −1.2  −3.7  −6.6  −8.6 −10.3 −11.5 −12.8 −13.8 −15.1
- *   strong ring −5.9 −7.0  −8.0  −9.0 −10.0 −11.1 −12.1 −13.2 −14.3 −15.4
- *   vowels 5–12k 0.0  0.0   0.0   0.0   0.0  −0.3  −0.6  −1.0  −1.3  −1.7
- *   air 13–20k  0.0   0.0   0.0   0.0   0.0  −0.2  −0.4  −0.6  −0.7  −0.9
+ * The knots are the previous law WARPED so the "s" comes down in even steps
+ * on REAL narration — two clips, David Greenberg and "Messy and Bright",
+ * averaged (the synthetic voice's "s" no longer tracks real sibilance once
+ * the carryover is gone). Measured before the warp at these ballistics:
+ *
+ *   old amount     30    50    60    70    80    90   100 %
+ *   DG vowels   −0.8  −1.4  −1.9  −2.1  −2.3  −2.4  −2.7 dB (8–12 kHz)
+ *   DG "s"      −0.8  −2.4  −3.7  −4.4  −5.0  −5.3  −5.9
+ *   M&B vowels  −0.1  −0.4  −0.6  −0.7  −0.9  −0.9  −1.1
+ *   M&B "s"     −1.1  −3.3  −4.9  −5.6  −6.3  −6.7  −7.3
+ *   (was, at 100 %: DG vowels −6.8 / "s" −4.5, M&B −4.3 / −5.3)
  *
  * ⚠ The lisp guard still does not bound this stage's cut; the macro's ceiling
- * (−7.5 dB on the "s" at 100 %) is what keeps it near the guard's floor.
+ * is what keeps it near the guard's floor.
  */
 export const HF_RESO_KNOTS = [
   // [amount, threshold dB, depth, max cut dB]
   [0, 21, 0, 6],
-  [0.5, 12, 0.8, 12],
-  [0.6, 9.4, 0.8, 13.2],
-  [0.8, 7.0, 0.8, 15.6],
-  [0.9, 6.4, 0.8, 16.8],
+  [0.1, 16.55, 0.396, 8.97],
+  [0.2, 14.71, 0.559, 10.19],
+  [0.3, 13.36, 0.679, 11.09],
+  [0.4, 12.33, 0.771, 11.78],
+  [0.5, 11.19, 0.8, 12.37],
+  [0.6, 10.01, 0.8, 12.92],
+  [0.7, 8.85, 0.8, 13.75],
+  [0.8, 7.68, 0.8, 14.92],
+  [0.9, 6.5, 0.8, 16.59],
   [1, 5, 0.8, 18],
 ]
 
-export const HF_RESO_AMOUNT_DEFAULT = 0.3
+/** Ballistics: an "s" has to be cut by its own frames. */
+export const HF_RESO_ATTACK_MS = 15
+export const HF_RESO_RELEASE_MS = 80
+
+/** Voiced frames never go below the macro's 0 % threshold. */
+export const HF_RESO_VOICED_FLOOR_DB = HF_RESO_KNOTS[0][1]
+
+export const HF_RESO_AMOUNT_DEFAULT = 0.2
 
 /** Threshold, depth and max cut for a Reso amount, 0–1. */
 export function hfResoMacro(amount = HF_RESO_AMOUNT_DEFAULT) {
@@ -115,5 +137,14 @@ export const HF_RESO_ZONES = hfResoZones()
 
 /** Kernel params for the pre-stage, ready to cross a structured clone. */
 export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT) {
-  return toKernelParams({ ...RESONANCE_DEFAULTS, zones: hfResoZones(amount), focus: null })
+  return {
+    ...toKernelParams({
+      ...RESONANCE_DEFAULTS,
+      attack: HF_RESO_ATTACK_MS,
+      release: HF_RESO_RELEASE_MS,
+      zones: hfResoZones(amount),
+      focus: null,
+    }),
+    voicedSelectivityFloorDb: HF_RESO_VOICED_FLOOR_DB,
+  }
 }

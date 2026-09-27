@@ -40,9 +40,10 @@ import { SHAPER_CURVES, SHAPER_REF_THD, sineThd, unitDriveU } from '../../src/au
 import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
+import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
-  HF_RESO_KNOTS, HF_RESO_AMOUNT_DEFAULT, hfResoMacro,
+  HF_RESO_KNOTS, HF_RESO_AMOUNT_DEFAULT, HF_RESO_VOICED_FLOOR_DB, hfResoMacro,
 } from '../../src/audio/hfSoftenerResoStage.js'
 
 const SR = 48000
@@ -733,42 +734,57 @@ const resoRun = (x, sr, amount) => {
   return o
 }
 
-test('reso macro: the second half takes the "s" in even steps, and vowel top end stays near', () => {
+test('reso macro: an "s" is cut by its own frames, and the cut rises with the knob', () => {
+  // ⚠ At ResoTame's 200/500 ms an isolated "s" reached −1.6 dB at 100 %: the
+  // cut it showed in speech was built on the vowels and carried in.
   const sr = 44100
   const { x, labels } = makeRichSpeech(sr)
   const sib = i => labels[i] === 2
-  const vow = i => labels[i] === 1
-  const cutAt = (a, m, lo, hi) => 10 * Math.log10(hfEnergy(resoRun(x, sr, a), sr, m, lo, hi) / hfEnergy(x, sr, m, lo, hi))
-  const steps = []
-  let last = cutAt(0.5, sib, 5000, 9000)
-  assert.ok(last > -0.5, `nothing on the "s" at 50 %: ${last.toFixed(2)}`)
-  for (const a of [0.6, 0.7, 0.8, 0.9, 1]) {
-    const c = cutAt(a, sib, 5000, 9000)
-    steps.push(last - c)
-    last = c
+  const alone = x.map((v, i) => (sib(i) ? v : 0))
+  const cut = (y, a) => 10 * Math.log10(hfEnergy(resoRun(y, sr, a), sr, sib, 5000, 9000) / hfEnergy(y, sr, sib, 5000, 9000))
+  const isolated = cut(alone, 1)
+  assert.ok(isolated < -3, `isolated "s" at 100 %: ${isolated.toFixed(2)} dB`)
+  const inSpeech = [0.2, 0.5, 0.8, 1].map(a => cut(x, a))
+  for (let i = 1; i < inSpeech.length; i++) {
+    assert.ok(inSpeech[i] < inSpeech[i - 1], `rising: ${inSpeech.map(v => v.toFixed(2)).join(' / ')}`)
   }
-  for (const s of steps) assert.ok(s > 0.7 && s < 2.8, `step sizes ${steps.map(v => v.toFixed(2)).join(' ')}`)
-  const vowels = cutAt(1, vow, 5000, 12000)
-  assert.ok(vowels > -2.5, `vowels 5–12k at 100 %: ${vowels.toFixed(2)} dB`)
 })
 
-test('reso macro: the first half brings faint rings in, and has them by the midpoint', () => {
+test('reso macro: voiced frames hold the ring threshold, so vowel top end stays', () => {
+  const sr = 44100
+  const { x, labels } = makeRichSpeech(sr)
+  const vow = i => labels[i] === 1
+  const run = p => {
+    const r = processResonanceBuffer([x], sr, p, { frameSize: HF_RESO_FRAME_SIZE })
+    const o = new Float32Array(x.length)
+    o.set(r.channelData[0].subarray(r.latencySamples))
+    return o
+  }
+  const cut = y => 10 * Math.log10(hfEnergy(y, sr, vow, 5000, 12000) / hfEnergy(x, sr, vow, 5000, 12000))
+  const held = cut(run(hfResoKernelParams(1)))
+  const unheld = cut(run({ ...hfResoKernelParams(1), voicedSelectivityFloorDb: 0 }))
+  assert.equal(HF_RESO_VOICED_FLOOR_DB, HF_RESO_KNOTS[0][1])
+  assert.ok(held > -0.5 && unheld < -1, `vowels 5–12k at 100 %: ${held.toFixed(2)} held, ${unheld.toFixed(2)} without the floor`)
+  // ResoTame itself never sets it.
+  assert.equal(toResonanceKernelParams(RESONANCE_DEFAULTS).voicedSelectivityFloorDb, undefined)
+})
+
+test('reso macro: a strong ring is taken early and in full', () => {
   const sr = 44100
   const { x } = makeRichSpeech(sr)
   const env = new Float32Array(x.length)
   for (let i = 0, e = 0; i < x.length; i++) { e = Math.max(Math.abs(x[i]), e * 0.9995); env[i] = e }
-  const ringed = x.map((v, i) => v + 0.003 * env[i] * Math.sin(2 * Math.PI * 7500 * i / sr))
+  const ringed = x.map((v, i) => v + 0.02 * env[i] * Math.sin(2 * Math.PI * 7500 * i / sr))
   const ringDb = (y) => {
     const f = [new Biquad(bandpass(sr, 7500, 30)), new Biquad(bandpass(sr, 7500, 30))]
     let s = 0
     for (let i = 0; i < y.length; i++) { const v = f[1].tick(f[0].tick(y[i])); if (i > sr) s += v * v }
     return 10 * Math.log10(s + 1e-30)
   }
-  const cuts = [0, 0.2, 0.4, 0.5].map(a => ringDb(resoRun(ringed, sr, a)) - ringDb(ringed))
+  const cuts = [0, 0.3, 1].map(a => ringDb(resoRun(ringed, sr, a)) - ringDb(ringed))
   const msg = cuts.map(c => c.toFixed(2)).join(' / ')
   assert.ok(Math.abs(cuts[0]) < 0.05, `0 % is off: ${msg}`)
-  assert.ok(cuts[1] > cuts[2] && cuts[2] > cuts[3], `rising: ${msg}`)
-  assert.ok(cuts[3] < -6, `caught by 50 %: ${msg}`)
+  assert.ok(cuts[1] < -6 && cuts[2] < -12, `strong ring: ${msg}`)
 })
 
 test('reso macro: as it takes the sibilance, the softener backs off', () => {

@@ -340,7 +340,7 @@ async function applyAndClose() {
                 title="How much the ResoTame pre-stage takes. The first half catches rings and whistles; the second half takes sibilance too, in even steps, and the softener's own cut eases off as it does. Threshold, depth and cut ceiling move together."
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ !hfReso ? 'HF RESO OFF' : hfResoAmount < 50 ? 'RINGS · 5–12k' : 'RINGS + S · 5–12k' }}
+                {{ !hfReso ? 'HF RESO OFF' : 'RINGS + S · 5–12k' }}
               </span>
             </div>
           </div>
