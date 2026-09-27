@@ -19,7 +19,7 @@ export default {
     { label: 'Sat mode', text: 'Voiced saturates only the vowels and fades out as each S arrives, so it never adds harmonics to sibilance. Full saturates everything and leaves the cut to clean up after it' },
     { label: 'Air', text: 'Puts back a few dB of top after the cut, on the same curve as Air Boost. It is static, so it lifts the air everywhere, not just between sibilants' },
     { label: 'HF Reso', text: 'Runs a band-limited ResoTame ahead of the softener: it takes narrow rings and whistly S between 5 and 12 kHz and leaves ordinary S to the softener' },
-    { label: 'Reso', text: 'The pre-stage’s threshold, as on ResoTame, and the split between the two stages. High, it takes only rings and whistly S; turned down, it takes the sibilance as well and the softener’s cut shrinks to match. Below about 20 dB the lisp guard no longer limits the total' },
+    { label: 'Reso', text: 'How much the ResoTame pre-stage takes. The first half catches rings and whistles; the second half takes the sibilance too, in even steps, and the softener’s own cut eases off as it does. It moves threshold, depth and ceiling together, so it never jumps from nothing to too much' },
     { label: 'Delta', text: 'Hear only what is being removed, from the button in the title bar' },
   ],
 

@@ -19,7 +19,7 @@ const hfLispGuard = ref(HF_SOFTENER_DEFAULTS.lispGuard)
 // The band-limited ResoTame ahead of the softener — an A/B of the pairing,
 // with fixed settings (see hfSoftenerResoStage.js).
 const hfReso = ref(HF_SOFTENER_DEFAULTS.reso)
-const hfResoThreshold = ref(HF_SOFTENER_DEFAULTS.resoThreshold)
+const hfResoAmount = ref(HF_SOFTENER_DEFAULTS.resoAmount)
 // Air makeup: Air Boost's curve after the cut, to put back the top the cut
 // takes on average.
 const hfAir = ref(HF_SOFTENER_DEFAULTS.air)
@@ -63,7 +63,7 @@ function currentParams() {
     shape: hfShape.value,
     lispGuard: hfLispGuard.value,
     reso: hfReso.value,
-    resoThreshold: hfResoThreshold.value,
+    resoAmount: hfResoAmount.value,
     air: hfAir.value,
     drive: hfDrive.value,
     curve: hfCurve.value,
@@ -220,9 +220,9 @@ export function useHFSoftener() {
     pushParam('air', v)
   }
 
-  function syncResoThreshold(v) {
-    hfResoThreshold.value = v
-    pushParam('resoThreshold', v)
+  function syncResoAmount(v) {
+    hfResoAmount.value = v
+    pushParam('resoAmount', v)
   }
 
   function syncLispGuard(v) {
@@ -296,7 +296,7 @@ export function useHFSoftener() {
 
   return {
     hfAmount,
-    hfResoThreshold,
+    hfResoAmount,
     hfAir,
     hfDrive,
     hfCurve,
@@ -319,7 +319,7 @@ export function useHFSoftener() {
     hasSelection,
     togglePreview,
     syncAmount,
-    syncResoThreshold,
+    syncResoAmount,
     syncAir,
     syncDrive,
     syncCurve,

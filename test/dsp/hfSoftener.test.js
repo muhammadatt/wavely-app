@@ -42,7 +42,7 @@ import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../..
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
-  HF_RESO_THRESHOLD_DEFAULT_DB, HF_RESO_THRESHOLD_MIN_DB, HF_RESO_THRESHOLD_MAX_DB,
+  HF_RESO_KNOTS, HF_RESO_AMOUNT_DEFAULT, hfResoMacro,
 } from '../../src/audio/hfSoftenerResoStage.js'
 
 const SR = 48000
@@ -668,7 +668,10 @@ test('reso pre-stage: 5–12 kHz only, 512-sample frame', () => {
 
 test('reso pre-stage: takes a ring, leaves an ordinary S and the air to the softener', () => {
   const sr = 44100
-  const { x: clean, labels } = makeSpeech(sr, { seconds: 4 })
+  // The rich voice: where on the knob the "s" starts to qualify depends on
+  // how much top end the vowels around it carry, and makeSpeech's low-passed
+  // vowels make an "s" stand out ~1.5 dB sooner than realistic ones do.
+  const { x: clean, labels } = makeRichSpeech(sr, { seconds: 4 })
   // A 7.5 kHz ring excited by the voice, riding its envelope.
   const env = new Float32Array(clean.length)
   for (let i = 0, e = 0; i < clean.length; i++) { e = Math.max(Math.abs(clean[i]), e * 0.9995); env[i] = e }
@@ -700,77 +703,85 @@ test('reso pre-stage: takes a ring, leaves an ordinary S and the air to the soft
   const ringCut = bandDb(yRing, ring) - bandDb(ringed, ring)
   const sibCut = bandDb(yClean, sib, i => labels[i] === 2) - bandDb(clean, sib, i => labels[i] === 2)
   const airCut = bandDb(yClean, air) - bandDb(clean, air)
-  assert.ok(ringCut < -12, `ring cut ${ringCut.toFixed(2)} dB`)
+  // At the default amount (30 %, the rings half of the knob).
+  assert.ok(ringCut < -6, `ring cut ${ringCut.toFixed(2)} dB`)
   assert.ok(Math.abs(sibCut) < 0.25, `ordinary S moved ${sibCut.toFixed(2)} dB`)
   assert.ok(Math.abs(airCut) < 0.1, `air moved ${airCut.toFixed(2)} dB`)
 })
 
-test('reso threshold: sets the zone\'s selectivity, clamped to the knob range', () => {
-  const sel = t => hfResoZones(t).find(z => z.enabled).selectivity
-  assert.equal(sel(undefined), HF_RESO_THRESHOLD_DEFAULT_DB)
-  assert.equal(sel(18), 18)
-  assert.equal(sel(1), HF_RESO_THRESHOLD_MIN_DB)
-  assert.equal(sel(99), HF_RESO_THRESHOLD_MAX_DB)
-  assert.equal(sel(NaN), HF_RESO_THRESHOLD_DEFAULT_DB)
-  // The knob moves only the threshold.
-  const strip = zs => zs.map(({ selectivity, ...rest }) => rest)
-  assert.deepEqual(strip(hfResoZones(6)), strip(hfResoZones(30)))
+test('reso macro: 0 is off, and threshold, depth and max cut each move one way', () => {
+  assert.equal(hfResoMacro(0).depth, 0)
+  assert.deepEqual(hfResoMacro(NaN), hfResoMacro(HF_RESO_AMOUNT_DEFAULT))
+  assert.deepEqual(hfResoMacro(-1), hfResoMacro(0))
+  assert.deepEqual(hfResoMacro(2), hfResoMacro(1))
+  for (const [a, t, d, m] of HF_RESO_KNOTS) {
+    const p = hfResoMacro(a)
+    assert.ok(Math.abs(p.selectivity - t) < 1e-9 && Math.abs(p.depth - d) < 1e-9 && Math.abs(p.maxCut - m) < 1e-9, `knot ${a}`)
+  }
+  let prev = hfResoMacro(0)
+  for (let a = 0.01; a <= 1.0001; a += 0.01) {
+    const p = hfResoMacro(a)
+    assert.ok(p.selectivity <= prev.selectivity + 1e-9 && p.depth >= prev.depth - 1e-9 && p.maxCut >= prev.maxCut - 1e-9, `at ${a.toFixed(2)}`)
+    prev = p
+  }
 })
 
-test('reso threshold: lower catches more of a milder ring', () => {
+const resoRun = (x, sr, amount) => {
+  const r = processResonanceBuffer([x], sr, hfResoKernelParams(amount), { frameSize: HF_RESO_FRAME_SIZE })
+  const o = new Float32Array(x.length)
+  o.set(r.channelData[0].subarray(r.latencySamples))
+  return o
+}
+
+test('reso macro: the second half takes the "s" in even steps, and vowel top end stays near', () => {
   const sr = 44100
-  const { x: clean } = makeSpeech(sr, { seconds: 3 })
-  const env = new Float32Array(clean.length)
-  for (let i = 0, e = 0; i < clean.length; i++) { e = Math.max(Math.abs(clean[i]), e * 0.9995); env[i] = e }
-  // A faint ring. A strong one is cut the same at every threshold — the knob
-  // decides what qualifies, not how deep — so only a mild one can show it.
-  const ringed = clean.map((v, i) => v + 0.001 * env[i] * Math.sin(2 * Math.PI * 7500 * i / sr))
+  const { x, labels } = makeRichSpeech(sr)
+  const sib = i => labels[i] === 2
+  const vow = i => labels[i] === 1
+  const cutAt = (a, m, lo, hi) => 10 * Math.log10(hfEnergy(resoRun(x, sr, a), sr, m, lo, hi) / hfEnergy(x, sr, m, lo, hi))
+  const steps = []
+  let last = cutAt(0.5, sib, 5000, 9000)
+  assert.ok(last > -0.5, `nothing on the "s" at 50 %: ${last.toFixed(2)}`)
+  for (const a of [0.6, 0.7, 0.8, 0.9, 1]) {
+    const c = cutAt(a, sib, 5000, 9000)
+    steps.push(last - c)
+    last = c
+  }
+  for (const s of steps) assert.ok(s > 0.7 && s < 2.8, `step sizes ${steps.map(v => v.toFixed(2)).join(' ')}`)
+  const vowels = cutAt(1, vow, 5000, 12000)
+  assert.ok(vowels > -2.5, `vowels 5–12k at 100 %: ${vowels.toFixed(2)} dB`)
+})
+
+test('reso macro: the first half brings faint rings in, and has them by the midpoint', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr)
+  const env = new Float32Array(x.length)
+  for (let i = 0, e = 0; i < x.length; i++) { e = Math.max(Math.abs(x[i]), e * 0.9995); env[i] = e }
+  const ringed = x.map((v, i) => v + 0.003 * env[i] * Math.sin(2 * Math.PI * 7500 * i / sr))
   const ringDb = (y) => {
     const f = [new Biquad(bandpass(sr, 7500, 30)), new Biquad(bandpass(sr, 7500, 30))]
     let s = 0
     for (let i = 0; i < y.length; i++) { const v = f[1].tick(f[0].tick(y[i])); if (i > sr) s += v * v }
     return 10 * Math.log10(s + 1e-30)
   }
-  const cut = (t) => {
-    const r = processResonanceBuffer([ringed], sr, hfResoKernelParams(t), { frameSize: HF_RESO_FRAME_SIZE })
-    const o = new Float32Array(ringed.length)
-    o.set(r.channelData[0].subarray(r.latencySamples))
-    return ringDb(o) - ringDb(ringed)
-  }
-  const c36 = cut(36), c28 = cut(28), c24 = cut(24)
-  const msg = `ring cut at 36/28/24: ${c36.toFixed(2)} / ${c28.toFixed(2)} / ${c24.toFixed(2)} dB`
-  assert.ok(c36 > -6, msg)
-  assert.ok(c24 < c28 && c28 < c36 - 6, msg)
-  assert.ok(c24 < -12, msg)
+  const cuts = [0, 0.2, 0.4, 0.5].map(a => ringDb(resoRun(ringed, sr, a)) - ringDb(ringed))
+  const msg = cuts.map(c => c.toFixed(2)).join(' / ')
+  assert.ok(Math.abs(cuts[0]) < 0.05, `0 % is off: ${msg}`)
+  assert.ok(cuts[1] > cuts[2] && cuts[2] > cuts[3], `rising: ${msg}`)
+  assert.ok(cuts[3] < -6, `caught by 50 %: ${msg}`)
 })
 
-test('reso threshold: turned down, ResoTame takes the sibilance and the softener backs off', () => {
+test('reso macro: as it takes the sibilance, the softener backs off', () => {
   const sr = 44100
-  const { x, labels } = makeSpeech(sr, { seconds: 3 })
-  const sibDb = (y) => {
-    const f = [highpass(sr, 5000, 0.7), highpass(sr, 5000, 0.7), lowpass(sr, 9000, 0.7), lowpass(sr, 9000, 0.7)].map(c => new Biquad(c))
-    let s = 0
-    for (let i = 0; i < y.length; i++) { let v = y[i]; for (const q of f) v = q.tick(v); if (i > sr && labels[i] === 2) s += v * v }
-    return 10 * Math.log10(s + 1e-30)
-  }
-  const reso = (t) => {
-    const r = processResonanceBuffer([x], sr, hfResoKernelParams(t), { frameSize: HF_RESO_FRAME_SIZE })
-    const o = new Float32Array(x.length)
-    o.set(r.channelData[0].subarray(r.latencySamples))
-    return o
-  }
+  const { x, labels } = makeRichSpeech(sr)
   const softGrOnS = (y) => {
     const { gainDb } = processHFSoftenerBuffer([y], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.4 }, { recordGain: true })
     let s = 0, n = 0
     for (let i = sr; i < y.length; i++) if (labels[i] === 2) { s += gainDb[i]; n++ }
     return s / n
   }
-  const hi = reso(36), lo = reso(9)
-  const resoHi = sibDb(hi) - sibDb(x), resoLo = sibDb(lo) - sibDb(x)
-  const softHi = softGrOnS(hi), softLo = softGrOnS(lo)
-  const msg = `reso on s ${resoHi.toFixed(2)} → ${resoLo.toFixed(2)} dB, softener ${softHi.toFixed(2)} → ${softLo.toFixed(2)} dB`
-  assert.ok(Math.abs(resoHi) < 0.1 && resoLo < -6, msg)
-  assert.ok(softHi < -2 && softLo > -0.5, msg)
+  const soft0 = softGrOnS(resoRun(x, sr, 0)), soft1 = softGrOnS(resoRun(x, sr, 1))
+  assert.ok(soft1 > soft0 + 1, `softener on the "s": ${soft0.toFixed(2)} dB at Reso 0 → ${soft1.toFixed(2)} at 100 %`)
 })
 
 // ── Air makeup ──────────────────────────────────────────────────────────────

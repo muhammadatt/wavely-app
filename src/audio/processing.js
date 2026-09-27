@@ -900,7 +900,7 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
     preStages: merged.reso ? [{
       ensureWorklet: ensureResonanceWorklet,
       processorName: 'resonance-processor',
-      kernelParams: hfResoKernelParams(merged.resoThreshold),
+      kernelParams: hfResoKernelParams(merged.resoAmount / 100),
       processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
       latencySamples: HF_RESO_LATENCY_SAMPLES,
     }] : [],

@@ -15,7 +15,7 @@ import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { SHAPER_LATENCY_SAMPLES } from '../hfSoftenerProcessor.js'
 import {
-  HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_THRESHOLD_DEFAULT_DB, hfResoKernelParams,
+  HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_AMOUNT_DEFAULT, hfResoKernelParams,
 } from '../hfSoftenerResoStage.js'
 import { createLevelTap } from './levelTap.js'
 
@@ -28,7 +28,7 @@ export const HF_SOFTENER_DEFAULTS = {
   shape: 'band', // 'shelf' | 'band'
   lispGuard: true, // never cut a sibilant below the voice-relative floor
   reso: false, // band-limited ResoTame ahead of the softener — see hfSoftenerResoStage.js
-  resoThreshold: HF_RESO_THRESHOLD_DEFAULT_DB, // its Threshold (kernel `selectivity`), dB
+  resoAmount: HF_RESO_AMOUNT_DEFAULT * 100, // 0–100 %: macro over threshold, depth and max cut (HF_RESO_KNOTS)
   air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6
   drive: 0, // input waveshaper, 0–100 %; 0 = off, no latency
   curve: 'quartic', // shaper curve — see dsp/shaperCurves.js
@@ -133,7 +133,7 @@ export function createHFSoftener(audioContext) {
       .then(() => {
         if (destroyed || resoNode) return
         resoNode = new AudioWorkletNode(audioContext, 'resonance-processor', {
-          processorOptions: { params: hfResoKernelParams(params.resoThreshold), frameSize: HF_RESO_FRAME_SIZE },
+          processorOptions: { params: hfResoKernelParams(params.resoAmount / 100), frameSize: HF_RESO_FRAME_SIZE },
         })
         rewire()
       })
@@ -174,8 +174,8 @@ export function createHFSoftener(audioContext) {
     setParam(name, value) {
       if (!(name in params)) return
       params[name] = value
-      if (name === 'resoThreshold') {
-        resoNode?.port.postMessage({ type: 'params', params: hfResoKernelParams(value) })
+      if (name === 'resoAmount') {
+        resoNode?.port.postMessage({ type: 'params', params: hfResoKernelParams(value / 100) })
         return
       }
       if (name === 'reso') {

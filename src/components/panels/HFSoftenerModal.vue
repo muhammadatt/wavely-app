@@ -21,7 +21,6 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import {
   amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections, AIR_MAKEUP_MAX_DB,
 } from '../../audio/hfSoftenerProcessor.js'
-import { HF_RESO_THRESHOLD_MIN_DB, HF_RESO_THRESHOLD_MAX_DB } from '../../audio/hfSoftenerResoStage.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import { airBandSections } from '../../audio/dsp/airBandCurve.js'
 import Knob from '../knobs/Knob.vue'
@@ -36,10 +35,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfAir, hfDrive, hfCurve, hfSatMode, hfEmph, hfSplit, hfBand, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfReso, hfResoAmount, hfAir, hfDrive, hfCurve, hfSatMode, hfEmph, hfSplit, hfBand, hfBroadband, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoThreshold, syncAir, syncDrive, syncCurve, syncSatMode, syncEmph, syncSplit, syncBand, syncShape, syncLispGuard, syncReso, toggleDelta,
+  togglePreview, syncAmount, syncResoAmount, syncAir, syncDrive, syncCurve, syncSatMode, syncEmph, syncSplit, syncBand, syncShape, syncLispGuard, syncReso, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -63,7 +62,7 @@ const GUARD_OPTIONS = [
 ]
 
 const RESO_OPTIONS = [
-  { value: true, label: 'ON', title: 'Run a band-limited ResoTame (5–12 kHz, peaks only) ahead of the softener — takes rings and whistly S, leaves ordinary S to the softener. Adds 11.6 ms latency' },
+  { value: true, label: 'ON', title: 'Run a band-limited ResoTame (5–12 kHz) ahead of the softener — the Reso knob sets how much: rings first, then sibilance. Adds 11.6 ms latency' },
   { value: false, label: 'OFF', title: 'Softener alone' },
 ]
 
@@ -167,10 +166,6 @@ function formatDrive(v) {
 
 function formatAir(v) {
   return v > 0 ? `+${Number(v).toFixed(1)}` : 'OFF'
-}
-
-function formatDb(v) {
-  return `${Number(v).toFixed(1)} dB`
 }
 
 function formatPct(v) {
@@ -332,15 +327,15 @@ async function applyAndClose() {
                    stand above the local spectrum before it is cut. Higher is
                    gentler. Live only while HF RESO is in. -->
               <Knob
-                :model-value="hfResoThreshold"
-                @update:model-value="syncResoThreshold"
-                :min="HF_RESO_THRESHOLD_MIN_DB" :max="HF_RESO_THRESHOLD_MAX_DB" :step="0.5"
-                label="Reso" :accent="ACCENT" :format-value="formatDb" :value-font-px="15"
+                :model-value="hfResoAmount"
+                @update:model-value="syncResoAmount"
+                :min="0" :max="100" :step="1"
+                label="Reso" :accent="ACCENT" :format-value="formatPct"
                 :disabled="!hfPreview || !hfReso"
-                title="Threshold of the ResoTame pre-stage: how far a 5–12 kHz peak must stand above its surroundings before it is cut. High, it takes only rings and whistles; lower, it takes the sibilance too and the softener backs off. The lisp guard does not limit its cut."
+                title="How much the ResoTame pre-stage takes. The first half catches rings and whistles; the second half takes sibilance too, in even steps, and the softener's own cut eases off as it does. Threshold, depth and cut ceiling move together."
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ hfReso ? 'THRESHOLD · 5–12k' : 'HF RESO OFF' }}
+                {{ !hfReso ? 'HF RESO OFF' : hfResoAmount < 50 ? 'RINGS · 5–12k' : 'RINGS + S · 5–12k' }}
               </span>
             </div>
           </div>
