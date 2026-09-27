@@ -28,6 +28,7 @@ const hfAir = ref(HF_SOFTENER_DEFAULTS.air)
 const hfDrive = ref(HF_SOFTENER_DEFAULTS.drive)
 const hfCurve = ref(HF_SOFTENER_DEFAULTS.curve)
 const hfSatMode = ref(HF_SOFTENER_DEFAULTS.satMode)
+const hfEmph = ref(HF_SOFTENER_DEFAULTS.emph)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
 const hfFileLevelDb = ref(null)
@@ -62,6 +63,7 @@ function currentParams() {
     drive: hfDrive.value,
     curve: hfCurve.value,
     satMode: hfSatMode.value,
+    emph: hfEmph.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -184,6 +186,11 @@ export function useHFSoftener() {
     pushParam('curve', v)
   }
 
+  function syncEmph(v) {
+    hfEmph.value = v
+    pushParam('emph', v)
+  }
+
   function syncSatMode(v) {
     hfSatMode.value = v
     pushParam('satMode', v)
@@ -275,6 +282,7 @@ export function useHFSoftener() {
     hfDrive,
     hfCurve,
     hfSatMode,
+    hfEmph,
     hfShape,
     hfLispGuard,
     hfReso,
@@ -294,6 +302,7 @@ export function useHFSoftener() {
     syncDrive,
     syncCurve,
     syncSatMode,
+    syncEmph,
     syncShape,
     syncLispGuard,
     syncReso,

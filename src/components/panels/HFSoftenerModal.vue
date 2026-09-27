@@ -25,6 +25,7 @@ import { airBandSections } from '../../audio/dsp/airBandCurve.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
+import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
 import { SHAPER_CURVES } from '../../audio/dsp/shaperCurves.js'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
@@ -33,10 +34,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfAir, hfDrive, hfCurve, hfSatMode, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfAir, hfDrive, hfCurve, hfSatMode, hfEmph, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoThreshold, syncAir, syncDrive, syncCurve, syncSatMode, syncShape, syncLispGuard, syncReso, toggleDelta,
+  togglePreview, syncAmount, syncResoThreshold, syncAir, syncDrive, syncCurve, syncSatMode, syncEmph, syncShape, syncLispGuard, syncReso, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -65,6 +66,13 @@ const RESO_OPTIONS = [
 ]
 
 const CURVE_OPTIONS = SHAPER_CURVES.map(c => ({ value: c.id, label: c.label, title: c.title }))
+
+// An ordered axis — how much of the highs goes INTO the curve — so a slide.
+const EMPH_OPTIONS = [
+  { value: 'reverse', label: 'REV', title: 'OptoSmooth’s pair reversed: highs pulled out before the curve, put back after. Keeps high content clean, but lifts the harmonics the vowels make up there' },
+  { value: 'off', label: 'OFF', title: 'No emphasis: the curve treats every frequency alike' },
+  { value: 'opto', label: 'OPTO', title: 'OptoSmooth’s pair: highs pushed into the curve, taken back out after. The smoothest on voices — its after-shelf trims the harmonics' },
+]
 
 const SAT_MODE_OPTIONS = [
   { value: 'voiced', label: 'VOICED', title: 'Saturate vowels only — the shaper fades out as each S arrives, so it never adds harmonics to sibilance' },
@@ -332,6 +340,14 @@ async function applyAndClose() {
             :model-value="hfCurve" :options="CURVE_OPTIONS" :accent="ACCENT"
             :disabled="!hfPreview" label="Saturation curve" :show-label="false"
             @update:model-value="syncCurve"
+          />
+        </div>
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">EMPH</span>
+          <DeviceTravelSlide
+            :model-value="hfEmph" :options="EMPH_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview" label="Saturation emphasis"
+            @update:model-value="syncEmph"
           />
         </div>
         <div class="flex flex-col items-center gap-[8px]">

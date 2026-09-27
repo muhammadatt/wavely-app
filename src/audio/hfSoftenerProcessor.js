@@ -151,7 +151,37 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   // gaps are never shaped. 'full': shaped all the time, the spec's version —
   // the cut downstream cleans up what the shaper adds to an "s".
   shaperMode: 'voiced',
+  // Pre/de-emphasis around the shaper: 'off', 'opto' (OptoSmooth's pair — highs
+  // pushed INTO the curve and taken back out after) or 'reverse' (the mirror —
+  // highs pulled out before the curve, put back after).
+  shaperEmph: 'off',
 }
+
+/**
+ * ⚠ THE AFTER-SHELF DECIDES WHAT THIS SOUNDS LIKE ON A VOICE, NOT THE BEFORE-
+ * SHELF — which is the opposite of the obvious reading, and the reverse mode
+ * was first named "warm" on that reading. Most of a vowel's distortion comes
+ * from its strong LOW content, and those harmonics land above the corner,
+ * where the de-emphasis shelf then scales them. Synthetic voice, VOICED,
+ * added distortion above 2.3 kHz: OPTO 3–4 dB LESS than off (its after-shelf
+ * cuts), REVERSE 3–5 dB MORE (its after-shelf lifts). REVERSE is only cleaner
+ * up top on content that was already high — a 5 kHz sine drops to 0.17 % THD.
+ * On sines OPTO reproduces OptoSmooth's own profile: Quartic 75 % reads
+ * 3.2 / 2.5 / 5.1 % at 500 / 2k / 5k Hz against OptoSmooth's 2.9–3.7 /
+ * 2.4–2.7 / 5.1–5.2.
+ */
+export const SHAPER_EMPH_MODES = ['reverse', 'off', 'opto']
+/**
+ * OptoSmooth's emphasis pair as it ships: EMPHASIS_CORNER_HZ (2300) and
+ * EMPHASIS_MAX_DB (12) × EMPHASIS_DEFAULT (85) / 100, Q 1/√2.
+ *
+ * ⚠ COPIED, NOT IMPORTED: la2aProcessor.js calls `registerProcessor` at module
+ * scope, and importing it into this worklet would register 'la2a-processor'
+ * twice in one AudioContext — the bug `dsp/airBandCurve.js` exists to avoid.
+ * A test imports both and pins them equal, so the copy cannot drift silently.
+ */
+export const SHAPER_EMPH_CORNER_HZ = 2300
+export const SHAPER_EMPH_DB = 12 * 0.85
 
 export const SHAPER_MODES = ['voiced', 'full']
 /**
@@ -562,6 +592,9 @@ export class HFSoftenerKernel {
     // One-pole DC blocker on the shaper's added signal, ~5 Hz: the even-order
     // curves produce DC, and it must not ride into the output.
     this.shaperDcCoeff = Math.exp((-2 * Math.PI * 5) / sampleRate)
+    this.shaperEmph = 'off'
+    this.emphPre = null
+    this.emphDe = null
 
     this.listen = 'off'
     this.meterPeriod = Math.max(1, Math.round(sampleRate / tuning.meterHz))
@@ -611,6 +644,22 @@ export class HFSoftenerKernel {
     this.shaperFn = shaperCurve(curveId).f
     this.shaperGain = shaperGainFor(curveId, drive, off)
     this.shaperFull.set(p.shaperMode === 'full' ? 1 : 0, immediate)
+    const emph = SHAPER_EMPH_MODES.includes(p.shaperEmph) ? p.shaperEmph : 'off'
+    if (emph !== this.shaperEmph) {
+      this.shaperEmph = emph
+      if (emph !== 'off') {
+        // OPTO boosts into the curve and cuts after; REVERSE is the exact mirror.
+        // Either way the two shelves are exact inverses, so the linear path
+        // is untouched — only what the curve does differs.
+        const db = emph === 'opto' ? SHAPER_EMPH_DB : -SHAPER_EMPH_DB
+        this.emphPre = [highShelf(this.sampleRate, SHAPER_EMPH_CORNER_HZ, Math.SQRT1_2, db)]
+        this.emphDe = [highShelf(this.sampleRate, SHAPER_EMPH_CORNER_HZ, Math.SQRT1_2, -db)]
+        for (const c of this.channels) {
+          c.shPre?.setSections(this.emphPre)
+          c.shDe?.setSections(this.emphDe)
+        }
+      }
+    }
     const air = clamp(Number(p.airDb) || 0, 0, AIR_MAKEUP_MAX_DB)
     if (air !== this.airDb) {
       // Coming up from 0 the cascade has been idle; start it from rest rather
@@ -654,6 +703,9 @@ export class HFSoftenerKernel {
         pathBuf: new Float64Array(this.tuning.coeffUpdateSamples),
         detBuf: new Float64Array(this.tuning.coeffUpdateSamples),
         shOs: null,
+        shPre: null,
+        shDe: null,
+        shPreBuf: new Float64Array(128),
         shDelay: null,
         shDry: new Float64Array(128),
         shDiff: new Float64Array(128),
@@ -667,6 +719,12 @@ export class HFSoftenerKernel {
 
   resetShaperState(c) {
     c.shOs = new Oversampler(COMPRESSOR_OVERSAMPLE)
+    c.shPre = new BiquadCascade(1, 1)
+    c.shDe = new BiquadCascade(1, 1)
+    if (this.emphPre) {
+      c.shPre.setSections(this.emphPre)
+      c.shDe.setSections(this.emphDe)
+    }
     c.shDelay = new DelayLine(SHAPER_LATENCY_SAMPLES)
     c.shDcX = 0
     c.shDcY = 0
@@ -690,12 +748,19 @@ export class HFSoftenerKernel {
         c.shDry = new Float64Array(n)
         c.shDiff = new Float64Array(n)
         c.shDown = new Float64Array(n)
+        c.shPreBuf = new Float64Array(n)
       }
       const x = inputChannels[ch < nIn ? ch : nIn - 1]
-      const hi = c.shOs.up(x, n)
+      const emph = this.shaperEmph !== 'off'
+      // Emphasis at the base rate, as OptoSmooth runs it: pre before the
+      // upsampler, de after the downsampler. Both are LTI, so they commute
+      // with the oversampler's delay and the dry path needs no change.
+      if (emph) c.shPre.process(x, c.shPreBuf, n, 0)
+      const hi = c.shOs.up(emph ? c.shPreBuf : x, n)
       const m = n * c.shOs.factor
       for (let j = 0; j < m; j++) hi[j] = f(g * hi[j]) * inv
       c.shOs.down(c.shDown, n)
+      if (emph) c.shDe.process(c.shDown, c.shDown, n, 0)
       let dx = c.shDcX
       let dy = c.shDcY
       for (let i = 0; i < n; i++) {

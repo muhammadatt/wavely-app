@@ -32,7 +32,10 @@ import {
   SHAPER_LATENCY_SAMPLES,
   SHAPER_REF_PEAK_DBFS,
   shaperGainFor,
+  SHAPER_EMPH_CORNER_HZ,
+  SHAPER_EMPH_DB,
 } from '../../src/audio/hfSoftenerProcessor.js'
+import { EMPHASIS_CORNER_HZ, EMPHASIS_MAX_DB, EMPHASIS_DEFAULT } from '../../src/audio/la2aProcessor.js'
 import { SHAPER_CURVES, SHAPER_REF_THD, sineThd, unitDriveU } from '../../src/audio/dsp/shaperCurves.js'
 import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
@@ -892,4 +895,53 @@ test('shaper: drive follows the file level dB for dB, and 0.5 is the calibration
     const ratioDb = 20 * Math.log10(shaperGainFor(c.id, 0.5, 6) / g0)
     assert.ok(Math.abs(ratioDb + 6) < 1e-9, `${c.id} offset ${ratioDb}`)
   }
+})
+
+test('shaper emphasis: OPTO is OptoSmooth’s shipping pair, copied not imported', () => {
+  assert.equal(SHAPER_EMPH_CORNER_HZ, EMPHASIS_CORNER_HZ)
+  assert.ok(Math.abs(SHAPER_EMPH_DB - EMPHASIS_MAX_DB * EMPHASIS_DEFAULT / 100) < 1e-12)
+})
+
+test('shaper emphasis: the pair cancels on the linear path', () => {
+  const sr = 44100
+  const n = sr
+  const x = new Float32Array(n)
+  for (let i = 0; i < n; i++) x[i] = 0.001 * (Math.sin(2 * Math.PI * 440 * i / sr) + Math.sin(2 * Math.PI * 6100 * i / sr))
+  const L = SHAPER_LATENCY_SAMPLES
+  for (const emph of ['opto', 'reverse']) {
+    const y = processHFSoftenerBuffer([x], sr, {
+      ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, shaperDrive: 0.5, shaperMode: 'full', shaperCurve: 'tanh', shaperEmph: emph,
+    }).channelData[0]
+    let worst = 0
+    for (let i = 4000; i < n - L; i++) worst = Math.max(worst, Math.abs(y[i + L] - x[i]))
+    assert.ok(worst < 1e-5, `${emph}: worst ${worst}`)
+  }
+})
+
+test('shaper emphasis: OPTO distorts the highs harder, REVERSE spares them (sine)', () => {
+  const sr = 44100
+  const n = sr * 2
+  const thdAt = (f0, emph) => {
+    const x = new Float32Array(n)
+    for (let i = 0; i < n; i++) x[i] = Math.pow(10, -8 / 20) * Math.sin(2 * Math.PI * f0 * i / sr)
+    const y = processHFSoftenerBuffer([x], sr, {
+      ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, shaperDrive: 0.75, shaperMode: 'full', shaperCurve: 'quartic', shaperEmph: emph,
+    }).channelData[0]
+    const a = sr, b = n - 4096, N = b - a
+    const pw = (f) => {
+      let c = 0, s = 0
+      for (let i = a; i < b; i++) {
+        const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * (i - a) / N)
+        c += w * y[i] * Math.cos(2 * Math.PI * f * i / sr)
+        s += w * y[i] * Math.sin(2 * Math.PI * f * i / sr)
+      }
+      return c * c + s * s
+    }
+    let h = 0
+    for (let k = 2; k * f0 < 21000; k++) h += pw(k * f0)
+    return Math.sqrt(h / pw(f0))
+  }
+  const off = thdAt(5000, 'off'), opto = thdAt(5000, 'opto'), rev = thdAt(5000, 'reverse')
+  assert.ok(opto > off * 1.3, `5 kHz: opto ${opto} vs off ${off}`)
+  assert.ok(rev < off * 0.2, `5 kHz: reverse ${rev} vs off ${off}`)
 })

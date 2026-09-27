@@ -13,6 +13,7 @@ export default {
     { label: 'Lisp guard', text: 'Stops any S being pulled further below the voice than a normal S sits, so heavy settings cannot turn S into TH' },
     { label: 'Drive', text: 'Saturation ahead of the cut, for density and warmth on the voice. At 50 % every curve makes the same amount of distortion, so switching curves compares their character, not their strength' },
     { label: 'Sat curve', text: 'The saturation shape to audition. Quartic is the even-harmonic warmth OptoSmooth uses; the others add odd harmonics, from gentle (Atan) to edgy (Tanh, Cubic)' },
+    { label: 'Emph', text: 'Emphasis around the saturation. OPTO is OptoSmooth’s: highs pushed into the curve and taken back out, which on a voice comes out smoothest up top. REV is the reverse: it keeps high content clean but brightens the harmonics vowels make' },
     { label: 'Sat mode', text: 'Voiced saturates only the vowels and fades out as each S arrives, so it never adds harmonics to sibilance. Full saturates everything and leaves the cut to clean up after it' },
     { label: 'Air', text: 'Puts back a few dB of top after the cut, on the same curve as Air Boost. It is static, so it lifts the air everywhere, not just between sibilants' },
     { label: 'HF Reso', text: 'Runs a band-limited ResoTame ahead of the softener: it takes narrow rings and whistly S between 5 and 12 kHz and leaves ordinary S to the softener' },

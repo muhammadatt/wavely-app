@@ -33,6 +33,7 @@ export const HF_SOFTENER_DEFAULTS = {
   drive: 0, // input waveshaper, 0–100 %; 0 = off, no latency
   curve: 'quartic', // shaper curve — see dsp/shaperCurves.js
   satMode: 'voiced', // 'voiced' (never shapes sibilants) | 'full'
+  emph: 'off', // emphasis around the shaper: 'reverse' | 'off' | 'opto'
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
 }
@@ -52,6 +53,7 @@ export function toKernelParams(params) {
     shaperDrive: (params.drive ?? 0) / 100,
     shaperCurve: params.curve,
     shaperMode: params.satMode,
+    shaperEmph: params.emph,
   }
 }
 
