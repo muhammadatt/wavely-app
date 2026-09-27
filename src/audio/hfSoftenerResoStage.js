@@ -55,7 +55,7 @@ export const HF_RESO_LATENCY_SAMPLES = HF_RESO_FRAME_SIZE
  * VOWELS and carried into the "s" by the 500 ms release — so the "s" cut and
  * the vowel cost were one quantity. On a real narrator whose vowels plateau
  * to 10 kHz and then roll off steeply it cost 6.8 dB of vowel 8–12 kHz at
- * 100 % (1.2 at 30 %). Now: 15/80 ms (the server stage's pair), so an "s" is
+ * 100 % (1.2 at 30 %). Now: 15/25 ms (see HF_RESO_RELEASE_MS), so an "s" is
  * cut by its own frames (isolated: −4.3), and VOICED FRAMES HOLD THE MACRO'S
  * 0 % THRESHOLD (`voicedSelectivityFloorDb` = 21): on vowels the knob moves
  * only depth and max cut — rings — and the falling threshold reaches only
@@ -96,9 +96,18 @@ export const HF_RESO_KNOTS = [
   [1, 5, 0.8, 18],
 ]
 
-/** Ballistics: an "s" has to be cut by its own frames. */
+/**
+ * Ballistics: an "s" has to be cut by its own frames. ResoTame is slow to keep
+ * gain movement off the low harmonics, where it reads as pitch; nothing that
+ * low reaches a 5–12 kHz zone. Release measured at Reso 100 %, two real clips:
+ * 80 → 25 ms takes the vowel just after an "s" from −3.76 / −3.44 dB to
+ * −1.98 / −1.17 (8–12 kHz), costs the "s" 0.15 / 0.20 dB, and frame-to-frame
+ * gain flutter on vowels FALLS (0.90 → 0.83 dB) rather than rising. 25 ms is
+ * ResoTame's own knob minimum (RESONANCE_RELEASE_MIN_MS); at frame 512 the hop
+ * is ~2.9 ms, so it is well resolved.
+ */
 export const HF_RESO_ATTACK_MS = 15
-export const HF_RESO_RELEASE_MS = 80
+export const HF_RESO_RELEASE_MS = 25
 
 /** Voiced frames never go below the macro's 0 % threshold. */
 export const HF_RESO_VOICED_FLOOR_DB = HF_RESO_KNOTS[0][1]
