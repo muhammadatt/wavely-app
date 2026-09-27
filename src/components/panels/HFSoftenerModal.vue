@@ -36,10 +36,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfAir, hfDrive, hfCurve, hfSatMode, hfEmph, hfSplit, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfReso, hfResoThreshold, hfAir, hfDrive, hfCurve, hfSatMode, hfEmph, hfSplit, hfBand, hfBroadband, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoThreshold, syncAir, syncDrive, syncCurve, syncSatMode, syncEmph, syncSplit, syncShape, syncLispGuard, syncReso, toggleDelta,
+  togglePreview, syncAmount, syncResoThreshold, syncAir, syncDrive, syncCurve, syncSatMode, syncEmph, syncSplit, syncBand, syncShape, syncLispGuard, syncReso, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -74,6 +74,11 @@ const EMPH_OPTIONS = [
   { value: 'reverse', label: 'REV', title: 'OptoSmooth’s pair reversed: highs pulled out before the curve, put back after. Keeps high content clean, but lifts the harmonics the vowels make up there' },
   { value: 'off', label: 'OFF', title: 'No emphasis: the curve treats every frequency alike' },
   { value: 'opto', label: 'OPTO', title: 'OptoSmooth’s pair: highs pushed into the curve, taken back out after. The smoothest on voices — its after-shelf trims the harmonics' },
+]
+
+const BAND_OPTIONS = [
+  { value: 'full', label: 'FULL', title: 'Saturate the whole voice: density and warmth' },
+  { value: 'hf', label: 'HF', title: 'Saturate only above 3 kHz: an exciter — adds harmonic brightness that follows the voice. Use an odd curve; the Quartic does not excite' },
 ]
 
 const SAT_MODE_OPTIONS = [
@@ -146,6 +151,15 @@ const thresholdLabel = computed(() => {
 function fmtCut(v) {
   return v >= 0.05 ? `−${v.toFixed(1)} dB` : '0.0 dB'
 }
+
+const driveCaption = computed(() => {
+  if (!(hfDrive.value > 0)) return 'SAT OFF'
+  // The Quartic's products are even-order and weak at band level: as an
+  // exciter it measures as a no-op, and the panel says so rather than looking broken.
+  if (hfBand.value === 'hf' && hfCurve.value === 'quartic') return 'QUARTIC · NO EXCITE'
+  const what = hfBand.value === 'hf' ? 'EXCITE' : 'SAT'
+  return `${what} · ${hfSatMode.value === 'voiced' ? 'VOWELS' : 'FULL'}`
+})
 
 function formatDrive(v) {
   return v > 0 ? `${Math.round(v)}%` : 'OFF'
@@ -310,7 +324,7 @@ async function applyAndClose() {
                 title="Input waveshaper ahead of the cut. 50 % puts every curve at the same distortion on a nominal-level voice, so switching curves compares character, not strength. Adds 50 samples of latency while on."
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ hfDrive > 0 ? `SAT · ${hfSatMode === 'voiced' ? 'VOWELS' : 'FULL'}` : 'SAT OFF' }}
+                {{ driveCaption }}
               </span>
             </div>
             <div class="w-[104px] flex flex-col items-center">
@@ -378,6 +392,14 @@ async function applyAndClose() {
             :model-value="hfEmph" :options="EMPH_OPTIONS" :accent="ACCENT"
             :disabled="!hfPreview" label="Saturation emphasis"
             @update:model-value="syncEmph"
+          />
+        </div>
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">SAT BAND</span>
+          <DeviceChoiceRocker
+            :model-value="hfBand" :options="BAND_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview" label="Saturation band"
+            @update:model-value="syncBand"
           />
         </div>
         <div class="flex flex-col items-center gap-[8px]">

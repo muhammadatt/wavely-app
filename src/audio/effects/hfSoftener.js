@@ -34,6 +34,7 @@ export const HF_SOFTENER_DEFAULTS = {
   curve: 'quartic', // shaper curve — see dsp/shaperCurves.js
   satMode: 'voiced', // 'voiced' (never shapes sibilants) | 'full'
   emph: 'off', // emphasis around the shaper: 'reverse' | 'off' | 'opto'
+  band: 'full', // what the shaper sees: 'full' | 'hf' (above 3 kHz — an exciter)
   split: 0, // 0–100 %: how the reduction is taken — 0 band cut (tone), 100 broadband duck (level)
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
@@ -55,6 +56,7 @@ export function toKernelParams(params) {
     shaperCurve: params.curve,
     shaperMode: params.satMode,
     shaperEmph: params.emph,
+    shaperBand: params.band,
     split: (params.split ?? 0) / 100,
   }
 }

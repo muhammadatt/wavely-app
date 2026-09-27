@@ -31,6 +31,8 @@ const hfSatMode = ref(HF_SOFTENER_DEFAULTS.satMode)
 const hfEmph = ref(HF_SOFTENER_DEFAULTS.emph)
 // How the reduction is taken: 0 all as the band cut, 100 all as a broadband duck.
 const hfSplit = ref(HF_SOFTENER_DEFAULTS.split)
+// FULL: the shaper saturates the whole voice. HF: only above 3 kHz — an exciter.
+const hfBand = ref(HF_SOFTENER_DEFAULTS.band)
 const hfBroadband = ref(0)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
@@ -68,6 +70,7 @@ function currentParams() {
     satMode: hfSatMode.value,
     emph: hfEmph.value,
     split: hfSplit.value,
+    band: hfBand.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -192,6 +195,11 @@ export function useHFSoftener() {
     pushParam('curve', v)
   }
 
+  function syncBand(v) {
+    hfBand.value = v
+    pushParam('band', v)
+  }
+
   function syncSplit(v) {
     hfSplit.value = v
     pushParam('split', v)
@@ -295,6 +303,7 @@ export function useHFSoftener() {
     hfSatMode,
     hfEmph,
     hfSplit,
+    hfBand,
     hfBroadband,
     hfShape,
     hfLispGuard,
@@ -317,6 +326,7 @@ export function useHFSoftener() {
     syncSatMode,
     syncEmph,
     syncSplit,
+    syncBand,
     syncShape,
     syncLispGuard,
     syncReso,

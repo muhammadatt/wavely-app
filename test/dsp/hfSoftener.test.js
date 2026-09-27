@@ -1008,3 +1008,112 @@ test('split: delta is exactly what the band cut and the duck removed together', 
   for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(x[i] - y[i] - d[i]))
   assert.ok(worst < 1e-6, `worst ${worst}`)
 })
+
+// ── HF exciter (shaper BAND = 'hf') ─────────────────────────────────────────
+
+/**
+ * makeSpeech's vowels are low-passed at 3.5 kHz and carry almost nothing an
+ * exciter can work on, which would make it look inert. These have realistic
+ * upper formants: energy above 3 kHz at −19.9 dB of the vowel, as long-term
+ * speech spectra put it. Same timing and labels as makeSpeech.
+ */
+function makeRichSpeech(sr, { seconds = 3, seed = 3 } = {}) {
+  const rnd = lcg(seed)
+  const n = Math.round(sr * seconds)
+  const x = new Float32Array(n)
+  const labels = new Uint8Array(n)
+  const a = Math.exp(-2 * Math.PI * 500 / sr)
+  let lp = 0
+  const fs = [peaking(sr, 700, 3, 12), peaking(sr, 1200, 3, 10), peaking(sr, 2600, 4, 5), peaking(sr, 3500, 4, 3), lowpass(sr, 4000, 0.6)]
+    .map(c => new Biquad(c))
+  const sh = new Biquad(highpass(sr, 5000, 0.7))
+  const sl = new Biquad(lowpass(sr, 9000, 0.7))
+  let phase = 0
+  for (let i = 0; i < n; i++) {
+    const t = (i % sr) / sr
+    let v = 0
+    let lab = 0
+    const voiced = t < 0.35 || (t >= 0.39 && t < 0.6)
+    let pulse = 0
+    if (voiced) {
+      phase += 130 / sr
+      if (phase >= 1) phase -= 1
+      pulse = phase < 130 / sr ? 1 : 0
+    }
+    lp = (1 - a) * pulse + a * lp
+    let vv = lp
+    for (const f of fs) vv = f.tick(vv)
+    if (voiced) { v = vv * 7.249; lab = 1 }
+    const sib = sl.tick(sh.tick(rnd()))
+    if ((t >= 0.35 && t < 0.39) || (t >= 0.7 && t < 0.735)) {
+      const tt = t < 0.5 ? t - 0.35 : t - 0.7
+      v += sib * Math.pow(10, -22 / 20) * 2.2 * Math.min(1, tt / 0.003)
+      lab = 2
+    }
+    x[i] = v
+    labels[i] = lab
+  }
+  return { x, labels }
+}
+
+const excite = (x, sr, p, tuning) => {
+  const y0 = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, ...p },
+    tuning ? { tuning: { ...T, ...tuning } } : {}).channelData[0]
+  const y = new Float32Array(x.length)
+  y.set(y0.subarray(SHAPER_LATENCY_SAMPLES))
+  return y
+}
+
+const hfEnergy = (y, sr, mask, lo, hi) => {
+  const f = []
+  if (lo) f.push(new Biquad(highpass(sr, lo, 0.7)), new Biquad(highpass(sr, lo, 0.7)))
+  if (hi) f.push(new Biquad(lowpass(sr, hi, 0.7)), new Biquad(lowpass(sr, hi, 0.7)))
+  let s = 0
+  for (let i = 0; i < y.length; i++) {
+    let v = y[i]
+    for (const q of f) v = q.tick(v)
+    if (i > sr && i < y.length - 2000 && mask(i)) s += v * v
+  }
+  return s
+}
+
+test('hf exciter: VOICED brightens vowels and leaves sibilants and gaps alone; FULL excites the "s"', () => {
+  const sr = 44100
+  const { x, labels } = makeRichSpeech(sr)
+  const vow = i => labels[i] === 1
+  const sib = i => labels[i] === 2
+  const gain = (y, m) => 10 * Math.log10(hfEnergy(y, sr, m, 5000) / hfEnergy(x, sr, m, 5000))
+  const voiced = excite(x, sr, { shaperDrive: 1, shaperCurve: 'tanh', shaperBand: 'hf', shaperMode: 'voiced' })
+  const full = excite(x, sr, { shaperDrive: 1, shaperCurve: 'tanh', shaperBand: 'hf', shaperMode: 'full' })
+  assert.ok(gain(voiced, vow) > 1.5, `vowels >5k +${gain(voiced, vow).toFixed(2)} dB`)
+  assert.ok(gain(voiced, sib) < 0.8, `sibilants >5k +${gain(voiced, sib).toFixed(2)} dB`)
+  assert.ok(gain(full, sib) > 1.5, `FULL excites the "s": +${gain(full, sib).toFixed(2)} dB`)
+  let gap = 0
+  for (let i = sr; i < x.length - 2000; i++) {
+    const t = (i % sr) / sr
+    if (t > 0.76 && t < 0.84) gap = Math.max(gap, Math.abs(voiced[i] - x[i]))
+  }
+  assert.ok(gap < 1e-6, `gap ${gap}`)
+})
+
+test('hf exciter: the second high-pass removes the difference tones below the band', () => {
+  const sr = 44100
+  const { x, labels } = makeRichSpeech(sr)
+  const vow = i => labels[i] === 1
+  const below = (post) => {
+    const y = excite(x, sr, { shaperDrive: 1, shaperCurve: 'asym', shaperBand: 'hf' }, { shaperHfPostHp: post })
+    const d = y.map((v, i) => v - x[i])
+    return 10 * Math.log10(hfEnergy(d, sr, vow, 0, 2000) / hfEnergy(x, sr, vow))
+  }
+  const withHp = below(true), without = below(false)
+  assert.ok(withHp < without - 6, `below 2 kHz: ${withHp.toFixed(1)} with, ${without.toFixed(1)} without`)
+})
+
+test('hf exciter: the quartic does not excite (even, weak at band level, linear past its range)', () => {
+  const sr = 44100
+  const { x, labels } = makeRichSpeech(sr)
+  const vow = i => labels[i] === 1
+  const y = excite(x, sr, { shaperDrive: 1, shaperCurve: 'quartic', shaperBand: 'hf' })
+  const g = 10 * Math.log10(hfEnergy(y, sr, vow, 5000) / hfEnergy(x, sr, vow, 5000))
+  assert.ok(Math.abs(g) < 0.3, `quartic HF gain ${g.toFixed(2)} dB`)
+})
