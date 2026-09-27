@@ -35,10 +35,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfReso, hfResoAmount, hfAir, hfDrive, hfCurve, hfSatMode, hfEmph, hfSplit, hfBand, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfReso, hfResoAmount, hfAir, hfAirMode, hfDrive, hfCurve, hfSatMode, hfEmph, hfSplit, hfBand, hfBroadband, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoAmount, syncAir, syncDrive, syncCurve, syncSatMode, syncEmph, syncSplit, syncBand, syncShape, syncLispGuard, syncReso, toggleDelta,
+  togglePreview, syncAmount, syncResoAmount, syncAir, syncAirMode, syncDrive, syncCurve, syncSatMode, syncEmph, syncSplit, syncBand, syncShape, syncLispGuard, syncReso, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -78,6 +78,11 @@ const EMPH_OPTIONS = [
 const BAND_OPTIONS = [
   { value: 'full', label: 'FULL', title: 'Saturate the whole voice: density and warmth' },
   { value: 'hf', label: 'HF', title: 'Saturate only above 3 kHz: an exciter — adds harmonic brightness that follows the voice. Use an odd curve; the Quartic does not excite' },
+]
+
+const AIR_MODE_OPTIONS = [
+  { value: 'voiced', label: 'VOICED', title: 'Lift vowels only — the air fades out as each S arrives and stays out of the gaps, so it never hands the cut back or lifts room noise' },
+  { value: 'static', label: 'STATIC', title: 'Lift everything, as Air Boost does — sibilants and room tone included' },
 ]
 
 const SAT_MODE_OPTIONS = [
@@ -303,10 +308,10 @@ async function applyAndClose() {
                 :min="0" :max="AIR_MAKEUP_MAX_DB" :step="0.1"
                 label="Air" :accent="ACCENT" :format-value="formatAir"
                 :disabled="!hfPreview"
-                title="Put back a few dB of top after the cut, on Air Boost's curve. Static: it does not follow the sibilants."
+                title="Put back a few dB of top after the cut, on Air Boost's curve. AIR MODE decides whether it follows the vowels or lifts everything."
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                MAKEUP · AIR BAND
+                {{ hfAirMode === 'voiced' ? 'AIR BAND · VOWELS' : 'AIR BAND · ALL' }}
               </span>
             </div>
             <div class="w-[104px] flex flex-col items-center">
@@ -367,6 +372,14 @@ async function applyAndClose() {
             :model-value="hfReso" :options="RESO_OPTIONS" :accent="ACCENT"
             :disabled="!hfPreview" label="ResoTame pre-stage"
             @update:model-value="syncReso"
+          />
+        </div>
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">AIR MODE</span>
+          <DeviceChoiceRocker
+            :model-value="hfAirMode" :options="AIR_MODE_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview || !(hfAir > 0)" label="Air mode"
+            @update:model-value="syncAirMode"
           />
         </div>
       </div>

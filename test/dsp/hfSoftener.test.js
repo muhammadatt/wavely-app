@@ -786,11 +786,11 @@ test('reso macro: as it takes the sibilance, the softener backs off', () => {
 
 // ── Air makeup ──────────────────────────────────────────────────────────────
 
-test('air makeup: is Air Boost’s curve, sample for sample, when the cut is idle', () => {
+test('air makeup: STATIC is Air Boost’s curve, sample for sample, when the cut is idle', () => {
   const sr = 44100
   const x = pink(sr, 5)
   // Amount 0 never engages, so the only thing left in the path is the air.
-  const soft = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, airDb: 3 }).channelData[0]
+  const soft = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, airDb: 3, airMode: 'static' }).channelData[0]
   const air = processAirBandBuffer([x], sr, { gainDb: 3 }).channelData[0]
   let worst = 0
   for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(soft[i] - air[i]))
@@ -1127,4 +1127,45 @@ test('hf exciter: the quartic does not excite (even, weak at band level, linear 
   const y = excite(x, sr, { shaperDrive: 1, shaperCurve: 'quartic', shaperBand: 'hf' })
   const g = 10 * Math.log10(hfEnergy(y, sr, vow, 5000) / hfEnergy(x, sr, vow, 5000))
   assert.ok(Math.abs(g) < 0.3, `quartic HF gain ${g.toFixed(2)} dB`)
+})
+
+// ── VOICED air ──────────────────────────────────────────────────────────────
+
+test('voiced air: lifts vowels about as much as STATIC, but not the "s" and not the gaps', () => {
+  const sr = 44100
+  const { x: voice, labels } = makeRichSpeech(sr)
+  // A quiet floor so the gaps have something to lift.
+  const floor = pink(voice.length, 11)
+  const x = voice.map((v, i) => v + floor[i] * 0.002)
+  const run = p => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, ...p }).channelData[0]
+  const y0 = run({ airDb: 0 })
+  const ys = run({ airDb: 4, airMode: 'static' })
+  const yv = run({ airDb: 4, airMode: 'voiced' })
+  const lift = (y, m, lo, hi) => 10 * Math.log10(hfEnergy(y, sr, m, lo, hi) / hfEnergy(y0, sr, m, lo, hi))
+  const vow = i => labels[i] === 1
+  const sib = i => labels[i] === 2
+  // Gaps from 20 ms after the vowel or "s" ends: the lifted decay of the
+  // sound before is not the gap, and at this floor it would dominate it.
+  const gap = i => { const t = (i % sr) / sr; return labels[i] === 0 && ((t > 0.62 && t < 0.7) || t > 0.755) }
+  const vS = lift(ys, vow, 5000, 0), vV = lift(yv, vow, 5000, 0)
+  // Two sibilants: one pressed between vowels (the voicing weight does not
+  // fully let go inside it — about half the lift gets through here, ~10 % on
+  // real narration) and one after a gap, which must get none.
+  const t = i => (i % sr) / sr
+  const sibIn = i => sib(i) && t(i) < 0.5
+  const sibAfterGap = i => sib(i) && t(i) > 0.5
+  const sS = lift(ys, sibIn, 5000, 9000), sV = lift(yv, sibIn, 5000, 9000)
+  const gS = lift(ys, gap, 5000, 0), gV = lift(yv, gap, 5000, 0)
+  assert.ok(vV > 0.9 * vS, `vowels: voiced ${vV.toFixed(2)} vs static ${vS.toFixed(2)} dB`)
+  assert.ok(sV < 0.6 * sS, `"s" between vowels: voiced ${sV.toFixed(2)} vs static ${sS.toFixed(2)} dB`)
+  assert.ok(Math.abs(lift(yv, sibAfterGap, 5000, 9000)) < 0.1, '"s" after a gap gets no air')
+  assert.ok(gS > 2.5 && gV < 0.3, `gaps: voiced ${gV.toFixed(2)} vs static ${gS.toFixed(2)} dB`)
+})
+
+test('voiced air: 0 dB is bit-transparent in either mode, and the default is VOICED', () => {
+  const sr = 44100
+  const { x } = makeSpeech(sr, { seconds: 2 })
+  const run = p => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, ...p }).channelData[0]
+  assert.deepEqual(run({ airDb: 0, airMode: 'voiced' }), run({ airDb: 0, airMode: 'static' }))
+  assert.equal(HF_SOFTENER_KERNEL_DEFAULTS.airMode, 'voiced')
 })

@@ -30,6 +30,7 @@ export const HF_SOFTENER_DEFAULTS = {
   reso: false, // band-limited ResoTame ahead of the softener — see hfSoftenerResoStage.js
   resoAmount: HF_RESO_AMOUNT_DEFAULT * 100, // 0–100 %: macro over threshold, depth and max cut (HF_RESO_KNOTS)
   air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6
+  airMode: 'voiced', // 'voiced' (vowels only — never lifts the "s" or the gaps) | 'static'
   drive: 0, // input waveshaper, 0–100 %; 0 = off, no latency
   curve: 'quartic', // shaper curve — see dsp/shaperCurves.js
   satMode: 'voiced', // 'voiced' (never shapes sibilants) | 'full'
@@ -52,6 +53,7 @@ export function toKernelParams(params) {
     lispGuard: params.lispGuard,
     levelOffsetDb: params.levelOffset,
     airDb: params.air,
+    airMode: params.airMode,
     shaperDrive: (params.drive ?? 0) / 100,
     shaperCurve: params.curve,
     shaperMode: params.satMode,

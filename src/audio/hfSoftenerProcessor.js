@@ -82,6 +82,10 @@ export const HF_SOFTENER_TUNING = {
   voicedDecayMs: 5,
   voicedFloorDb: -40, // L_ref − 20: below this nothing counts as voiced
   voicedMarginDb: 0, // voiced needs low/mid above the HF envelope by this much
+  // VOICED Air: the lift follows the voicing weight through this one-pole, so
+  // it fades rather than steps at a vowel/consonant boundary.
+  airVoicedSmoothMs: 5,
+  airVoicedDropMs: 1,
   // The Amount macro — see amountToThresholdDb. Threshold, ratio and depth
   // all move linearly, so the cut grows in even steps across the dial.
   // ⚠ The ratio is a TRUE compression ratio (reduction = over·(1 − 1/R)).
@@ -150,6 +154,10 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   // Static Air Band lift (the Air Boost curve) AFTER the dynamic cut, dB.
   // 0 is bit-transparent — the stage does not run at all.
   airDb: 0,
+  // 'voiced': the lift follows the voicing weight, so vowels get the air and
+  // sibilants and gaps do not — it cannot hand back the cut. 'static': the
+  // whole signal, as Air Boost does.
+  airMode: 'voiced',
   // Input waveshaper, ahead of the cut (the spec's deferred module). 0 does not
   // run it — no oversampler, no latency, bit-identical to before.
   shaperDrive: 0, // 0–1; 0.5 puts every curve at SHAPER_REF_THD on the reference sine
@@ -632,6 +640,14 @@ export class HFSoftenerKernel {
     // a change, as Air Boost's do.
     this.air = new BiquadCascade(AIR_BANDS.length, 2)
     this.airDb = 0
+    this.airVoiced = true
+    this.airSmooth = riseCoeff(tuning.airVoicedSmoothMs, sampleRate)
+    this.airDrop = riseCoeff(tuning.airVoicedDropMs, sampleRate)
+    this.airW = 0
+    // Per-sample weight for the block and a scratch copy for the lifted path;
+    // grown on demand, since offline renders hand in blocks larger than 128.
+    this.airWBuf = new Float64Array(0)
+    this.airTmp = new Float32Array(0)
 
     // Input shaper. Built lazily on first engagement, per channel.
     this.shaperOn = false
@@ -718,6 +734,7 @@ export class HFSoftenerKernel {
         }
       }
     }
+    this.airVoiced = p.airMode !== 'static'
     const air = clamp(Number(p.airDb) || 0, 0, AIR_MAKEUP_MAX_DB)
     if (air !== this.airDb) {
       // Coming up from 0 the cascade has been idle; start it from rest rather
@@ -889,6 +906,8 @@ export class HFSoftenerKernel {
     const next = this.coeffNext
     const shaping = this.shaperOn
     if (shaping) this.runShaper(inputChannels, nOut, n)
+    const airVoiced = this.airDb > 0 && this.airVoiced && this.listen === 'off'
+    if (airVoiced && this.airWBuf.length < n) this.airWBuf = new Float64Array(n)
 
     for (let off = 0; off < n; off += chunk) {
       const len = Math.min(chunk, n - off)
@@ -920,7 +939,7 @@ export class HFSoftenerKernel {
         const voice = this.voiceEnv.tick(lmNow)
         let release = this.relSlow
         let wv = 0
-        if (this.vowelRelease || shaping) {
+        if (this.vowelRelease || shaping || airVoiced) {
           const voiceDb = voice > 0 ? 10 * Math.log10(voice) : -300
           const hfPrev = this.hfEnv.value
           const hfPrevDb = hfPrev > 0 ? Math.log(hfPrev) * DB_PER_NEPER : -300
@@ -930,6 +949,10 @@ export class HFSoftenerKernel {
           const over = Math.min(voiceDb - (tuning.voicedFloorDb + this.levelOffsetDb), voiceDb - hfPrevDb - tuning.voicedMarginDb)
           wv = over <= -3 ? 0 : over >= 3 ? 1 : (over + 3) / 6
           if (this.vowelRelease) release = this.relSlow + wv * (this.relVowel - this.relSlow)
+        }
+        if (airVoiced) {
+          this.airW += (wv - this.airW) * (wv < this.airW ? this.airDrop : this.airSmooth)
+          this.airWBuf[off + i] = this.airW
         }
         if (shaping) {
           // The shaper's share: the voicing weight in 'voiced' mode, all of it
@@ -1045,7 +1068,24 @@ export class HFSoftenerKernel {
     // output: delta is what is REMOVED, and the makeup is not removed.
     if (this.airDb > 0 && this.listen === 'off') {
       this.air.ensureChannels(nOut)
-      for (let ch = 0; ch < nOut; ch++) this.air.process(outputChannels[ch], outputChannels[ch], n, ch)
+      if (airVoiced) {
+        // Parallel: out + w·(lifted − out). The lift is linear, so a partial
+        // weight is a partial lift (1 + w·(H − 1)), not a comb against itself.
+        // The cascade runs on every sample, so its state is never stale when
+        // the next vowel starts.
+        if (this.airTmp.length < n) this.airTmp = new Float32Array(n)
+        const t = this.airTmp
+        const wb = this.airWBuf
+        for (let ch = 0; ch < nOut; ch++) {
+          const out = outputChannels[ch]
+          this.air.process(out, t, n, ch)
+          for (let i = 0; i < n; i++) out[i] += wb[i] * (t[i] - out[i])
+        }
+      } else {
+        for (let ch = 0; ch < nOut; ch++) this.air.process(outputChannels[ch], outputChannels[ch], n, ch)
+      }
+    } else {
+      this.airW = 0
     }
 
     this.meterCount += n

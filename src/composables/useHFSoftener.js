@@ -23,6 +23,9 @@ const hfResoAmount = ref(HF_SOFTENER_DEFAULTS.resoAmount)
 // Air makeup: Air Boost's curve after the cut, to put back the top the cut
 // takes on average.
 const hfAir = ref(HF_SOFTENER_DEFAULTS.air)
+// VOICED: the lift follows the voicing, so it brightens vowels without
+// handing the cut back to the sibilants. STATIC: Air Boost's behaviour.
+const hfAirMode = ref(HF_SOFTENER_DEFAULTS.airMode)
 // Input waveshaper: drive, curve under audition, and whether it follows the
 // voicing (never shaping sibilants) or runs full-time.
 const hfDrive = ref(HF_SOFTENER_DEFAULTS.drive)
@@ -65,6 +68,7 @@ function currentParams() {
     reso: hfReso.value,
     resoAmount: hfResoAmount.value,
     air: hfAir.value,
+    airMode: hfAirMode.value,
     drive: hfDrive.value,
     curve: hfCurve.value,
     satMode: hfSatMode.value,
@@ -215,6 +219,11 @@ export function useHFSoftener() {
     pushParam('satMode', v)
   }
 
+  function syncAirMode(v) {
+    hfAirMode.value = v
+    pushParam('airMode', v)
+  }
+
   function syncAir(v) {
     hfAir.value = v
     pushParam('air', v)
@@ -298,6 +307,7 @@ export function useHFSoftener() {
     hfAmount,
     hfResoAmount,
     hfAir,
+    hfAirMode,
     hfDrive,
     hfCurve,
     hfSatMode,
@@ -321,6 +331,7 @@ export function useHFSoftener() {
     syncAmount,
     syncResoAmount,
     syncAir,
+    syncAirMode,
     syncDrive,
     syncCurve,
     syncSatMode,
