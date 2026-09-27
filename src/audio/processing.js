@@ -869,6 +869,20 @@ export function applySoftClipperRegion(segments, start, end, params, sampleRate,
   })
 }
 
+/**
+ * The HF Softener's automatic Air for a region: the chain's top-end loss and
+ * the Air it asks for, over the usual capped analysis window. Resolves
+ * `{ lossDb, airDb }`.
+ */
+export function measureHFSoftenerAutoAir(segments, start, end, params, sampleRate, channels) {
+  const merged = { ...HF_SOFTENER_DEFAULTS, ...params }
+  return measureInWorker('hfSoftenerAutoAir', segments, start, end, {
+    kernelParams: toHFSoftenerKernelParams(merged),
+    resoParams: merged.reso ? hfResoKernelParams(merged.resoAmount / 100) : null,
+    resoFrameSize: HF_RESO_FRAME_SIZE,
+  }, sampleRate, channels)
+}
+
 /** Apply Air Band to a region. */
 export function applyAirBandRegion(segments, start, end, params, sampleRate, channels) {
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {

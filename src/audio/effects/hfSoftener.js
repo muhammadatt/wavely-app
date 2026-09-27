@@ -28,6 +28,7 @@ export const HF_SOFTENER_DEFAULTS = {
   lispGuard: true, // never cut a sibilant below the voice-relative floor
   reso: false, // band-limited ResoTame ahead of the softener — see hfSoftenerResoStage.js
   resoAmount: HF_RESO_AMOUNT_DEFAULT * 100, // 0–100 %: macro over threshold, depth and max cut (HF_RESO_KNOTS)
+  detect: 4000, // Hz, the detector's high-pass corner, 3000–8000 — see detectCompDb
   air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6
   airMode: 'voiced', // 'voiced' (vowels only — never lifts the "s" or the gaps) | 'static'
   split: 0, // 0–100 %: how the reduction is taken — 0 band cut (tone), 100 broadband duck (level)
@@ -46,6 +47,7 @@ export function toKernelParams(params) {
     shape: params.shape,
     lispGuard: params.lispGuard,
     levelOffsetDb: params.levelOffset,
+    detectHz: params.detect,
     airDb: params.air,
     airMode: params.airMode,
     split: (params.split ?? 0) / 100,

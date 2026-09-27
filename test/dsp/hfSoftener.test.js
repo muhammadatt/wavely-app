@@ -29,10 +29,14 @@ import {
   shelfSection,
   softenerSections,
   AIR_MAKEUP_MAX_DB,
+  detectCompDb,
+  DETECT_HZ_MIN,
+  DETECT_HZ_MAX,
 } from '../../src/audio/hfSoftenerProcessor.js'
 import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
+import { measureTopLossDb, autoAirDb, AIR_AUTO_FRACTION } from '../../src/audio/hfSoftenerAutoAir.js'
 import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
@@ -987,4 +991,65 @@ test('voiced air: 0 dB is bit-transparent in either mode, and the default is VOI
   const run = p => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, ...p }).channelData[0]
   assert.deepEqual(run({ airDb: 0, airMode: 'voiced' }), run({ airDb: 0, airMode: 'static' }))
   assert.equal(HF_SOFTENER_KERNEL_DEFAULTS.airMode, 'voiced')
+})
+
+// ── Detect ──────────────────────────────────────────────────────────────────
+
+test('detect: 4 kHz is the spec, bit-identical, and the compensation rises with the corner', () => {
+  const sr = 44100
+  const { x } = makeSpeech(sr, { seconds: 2 })
+  const a = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS }).channelData[0]
+  const b = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, detectHz: 4000 }).channelData[0]
+  assert.deepEqual(a, b)
+  assert.equal(HF_SOFTENER_KERNEL_DEFAULTS.detectHz, 4000)
+  assert.equal(detectCompDb(sr, 4000), 0)
+  let last = detectCompDb(sr, DETECT_HZ_MIN)
+  for (const hz of [4000, 5000, 6000, 7000, DETECT_HZ_MAX]) {
+    const c = detectCompDb(sr, hz)
+    assert.ok(c > last, `comp ${hz}: ${c}`)
+    last = c
+  }
+})
+
+test('detect: a raised corner keeps bright vowels out of the detector and the "s" cut holds', () => {
+  const sr = 44100
+  // Vowels with a strong 5–8 kHz region, as on the narrator whose vowels
+  // tripped the detector: the rich voice's vowels lifted +14 dB around 6 kHz.
+  const { x: base, labels } = makeRichSpeech(sr)
+  const lift = new Biquad(peaking(sr, 6000, 1.2, 14))
+  const x = base.map((v, i) => { const y = lift.tick(v); return labels[i] === 1 ? y : v })
+  // Guard off: with it on, both the vowels and the "s" are capped by the voice
+  // level and the detector's contribution is hidden behind the cap.
+  const run = hz => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.6, lispGuard: false, detectHz: hz }, { recordGain: true }).gainDb
+  const stats = g => {
+    let vowelCut = 0, nv = 0, sCut = 0, ns = 0
+    for (let i = sr; i < x.length; i++) {
+      if (labels[i] === 1) { vowelCut += g[i]; nv++ }
+      if (labels[i] === 2) { sCut += g[i]; ns++ }
+    }
+    return { vowel: vowelCut / nv, s: sCut / ns }
+  }
+  const at4 = stats(run(4000)), at6 = stats(run(6500))
+  const msg = `4 kHz vowels ${at4.vowel.toFixed(2)} / s ${at4.s.toFixed(2)}; 6.5 kHz ${at6.vowel.toFixed(2)} / ${at6.s.toFixed(2)}`
+  assert.ok(at4.vowel < -1, `vowels trip the 4 kHz detector: ${msg}`)
+  assert.ok(at6.vowel > at4.vowel * 0.5, `raised corner spares them: ${msg}`)
+  assert.ok(Math.abs(at6.s - at4.s) < 0.5, `the "s" cut holds: ${msg}`)
+})
+
+// ── Auto Air ────────────────────────────────────────────────────────────────
+
+test('auto air: half the measured top-end loss, 0 with no cut, capped at the knob', () => {
+  assert.equal(AIR_AUTO_FRACTION, 0.5)
+  assert.equal(autoAirDb(0), 0)
+  assert.equal(autoAirDb(0.5), 0) // a lift is not a loss
+  assert.equal(autoAirDb(-3), 1.5)
+  assert.equal(autoAirDb(-40), AIR_MAKEUP_MAX_DB)
+  const sr = 44100
+  const { x } = makeRichSpeech(sr)
+  const loss = a => measureTopLossDb([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: a })
+  const l0 = loss(0), l4 = loss(0.4), l8 = loss(0.8)
+  assert.ok(Math.abs(l0) < 0.01, `no cut, no loss: ${l0}`)
+  assert.ok(l4 < -0.3 && l8 < l4, `loss grows with Amount: ${l4.toFixed(2)}, ${l8.toFixed(2)}`)
+  // Air never enters the measurement, whatever the params carry.
+  assert.equal(measureTopLossDb([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.4, airDb: 6 }), l4)
 })

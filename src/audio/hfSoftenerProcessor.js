@@ -135,6 +135,10 @@ export const HF_SOFTENER_TUNING = {
 /** User-facing parameters. The four controls, minus Listen (a monitor tap). */
 export const HF_SOFTENER_KERNEL_DEFAULTS = {
   amount: 0.4, // 0–1
+  // Detector high-pass corner, Hz. Higher keeps bright vowels out of the
+  // detector; the detector's gain is compensated so an ordinary "s" reads the
+  // same at any corner (see detectCompDb). 4000 is the spec's, bit-identical.
+  detectHz: 4000,
   context: 0.5, // 0–1 → κ 0–0.8
   rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
   releaseMs: 40, // HF follower release outside vowels. Fixed on the panel
@@ -164,6 +168,36 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
 export const AIR_MAKEUP_MAX_DB = 6
 
 export const SHAPES = ['shelf', 'band']
+
+/** Detector corner range, Hz. */
+export const DETECT_HZ_MIN = 3000
+export const DETECT_HZ_MAX = 8000
+
+const detectCompCache = new Map()
+/**
+ * Detector gain, dB, that makes an ORDINARY "s" read the same at a raised
+ * corner as at the spec's 4 kHz: the reference sibilant (noise shaped by a
+ * 5 kHz high-pass and a 9 kHz low-pass, 2nd-order each — the test voice's "s")
+ * loses energy through a higher high-pass, and this puts it back. A vowel's
+ * top end sits LOWER than the reference, so it loses more than is put back:
+ * that difference is the whole point of the control. 0 at 4 kHz, exactly.
+ */
+export function detectCompDb(sampleRate, detectHz, tuning = HF_SOFTENER_TUNING) {
+  const key = `${sampleRate}:${detectHz}`
+  if (detectCompCache.has(key)) return detectCompCache.get(key)
+  const grid = []
+  for (let f = 100; f < 0.49 * sampleRate; f *= 1.01) grid.push(f)
+  const ref = [highpass(sampleRate, 5000, 0.7), lowpass(sampleRate, 9000, 0.7)]
+  const energy = hz => {
+    const db = magnitudeResponseDb([...ref, highpass(sampleRate, hz, tuning.detHpQ)], grid, sampleRate)
+    let e = 0
+    for (let i = 0; i < grid.length; i++) e += Math.pow(10, db[i] / 10) * grid[i] // log grid: weight by f
+    return e
+  }
+  const v = detectHz === tuning.detHpFreqHz ? 0 : 10 * Math.log10(energy(tuning.detHpFreqHz) / energy(detectHz))
+  detectCompCache.set(key, v)
+  return v
+}
 export const RELEASE_MS_MIN = 20
 export const RELEASE_MS_MAX = 150
 
@@ -516,6 +550,8 @@ export class HFSoftenerKernel {
     this.detRot = new Ramp(0, rampSamples)
     this.pathRot = new Ramp(0, rampSamples)
     this.rotTrim = Math.exp(ROTATOR_DETECTOR_TRIM_DB * LN10_OVER_20)
+    this.detectHz = tuning.detHpFreqHz
+    this.detGain = 1
 
     // Audio-path coefficients, AUDIO_SECTIONS × 5: `cur` is what the last
     // chunk ended on.
@@ -567,6 +603,13 @@ export class HFSoftenerKernel {
     // level, and a shape change lands through the per-chunk coefficient
     // interpolation like any other gain move.
     this.relSlow = riseCoeff(clamp(p.releaseMs, RELEASE_MS_MIN, RELEASE_MS_MAX), this.sampleRate)
+    const detectHz = clamp(Number(p.detectHz) || this.tuning.detHpFreqHz, DETECT_HZ_MIN, DETECT_HZ_MAX)
+    if (detectHz !== this.detectHz) {
+      this.detectHz = detectHz
+      this.detHpCoeffs = highpass(this.sampleRate, detectHz, this.tuning.detHpQ)
+      for (const c of this.channels) c.detHp.set(this.detHpCoeffs)
+      this.detGain = Math.pow(10, detectCompDb(this.sampleRate, detectHz, this.tuning) / 20)
+    }
     this.vowelRelease = !!p.vowelRelease
     this.lispGuard = !!p.lispGuard
     this.shape = p.shape
@@ -700,7 +743,7 @@ export class HFSoftenerKernel {
           this.airWBuf[off + i] = this.airW
         }
         this.hfEnv.release = release
-        const hf = this.hfEnv.tick(peak * trim)
+        const hf = this.hfEnv.tick(peak * trim * this.detGain)
         const lmEnergy = this.lmEnv.tick(lmNow)
         const voiceE = this.voiceLevel.tick(lmNow)
         const hfDb = hf > 0 ? Math.log(hf) * DB_PER_NEPER : -300

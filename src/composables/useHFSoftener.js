@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { applyHFSoftenerRegion, computePeakCache } from '../audio/processing.js'
+import { applyHFSoftenerRegion, computePeakCache, measureHFSoftenerAutoAir } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { levelOffsetDbFor } from '../audio/hfSoftenerProcessor.js'
@@ -20,9 +20,16 @@ const hfLispGuard = ref(HF_SOFTENER_DEFAULTS.lispGuard)
 // with fixed settings (see hfSoftenerResoStage.js).
 const hfReso = ref(HF_SOFTENER_DEFAULTS.reso)
 const hfResoAmount = ref(HF_SOFTENER_DEFAULTS.resoAmount)
-// Air makeup: Air Boost's curve after the cut, to put back the top the cut
-// takes on average.
+// Air makeup: Air Boost's curve after the cut. AUTO owns the knob until it is
+// touched — the same contract as OptoSmooth's Input and Gain — and sets it to
+// a fraction of the top end the chain is measured to remove (hfSoftenerAutoAir.js).
 const hfAir = ref(HF_SOFTENER_DEFAULTS.air)
+const hfAirAuto = ref(true)
+const hfAirLossDb = ref(null)
+let autoAirTimer = null
+let autoAirSeq = 0
+// The detector's high-pass corner, Hz: raise it when bright vowels trip the cut.
+const hfDetect = ref(HF_SOFTENER_DEFAULTS.detect)
 // VOICED: the lift follows the voicing, so it brightens vowels without
 // handing the cut back to the sibilants. STATIC: Air Boost's behaviour.
 const hfAirMode = ref(HF_SOFTENER_DEFAULTS.airMode)
@@ -62,6 +69,7 @@ function currentParams() {
     air: hfAir.value,
     airMode: hfAirMode.value,
     split: hfSplit.value,
+    detect: hfDetect.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -146,6 +154,46 @@ export function useHFSoftener() {
     hfFileLevelDb.value = gated
     hfLevelOffset.value = levelOffsetDbFor(gated)
     pushParam('levelOffset', hfLevelOffset.value)
+    scheduleAutoAir()
+  }
+
+  /**
+   * Measure the chain's top-end loss and, while AUTO owns Air, set Air from it.
+   * Over the selection (the usual capped window), since that is what apply
+   * will render; the whole file when nothing is selected. Stale answers — a
+   * newer request went out, or AUTO was dropped meanwhile — are discarded.
+   */
+  async function refreshAutoAir() {
+    if (!state.currentFile || !hfAirAuto.value) return
+    const sel = state.selection
+    const start = sel ? sel.start : 0
+    const end = sel ? sel.end : totalDuration.value
+    if (!(end > start)) return
+    const seq = ++autoAirSeq
+    try {
+      const { lossDb, airDb } = await measureHFSoftenerAutoAir(
+        state.segments, start, end, currentParams(),
+        state.currentFile.sampleRate, state.currentFile.channels,
+      )
+      if (seq !== autoAirSeq || !hfAirAuto.value) return
+      hfAirLossDb.value = lossDb
+      hfAir.value = airDb
+      pushParam('air', airDb)
+    } catch (err) {
+      console.error('HF Softener auto Air failed:', err)
+    }
+  }
+
+  /** Re-measure shortly after the last change: every control that moves the cut moves the answer. */
+  function scheduleAutoAir() {
+    if (!hfAirAuto.value) return
+    clearTimeout(autoAirTimer)
+    autoAirTimer = setTimeout(refreshAutoAir, 250)
+  }
+
+  function setAirAuto(on) {
+    hfAirAuto.value = !!on
+    if (on) scheduleAutoAir()
   }
 
   function togglePreview() {
@@ -156,6 +204,7 @@ export function useHFSoftener() {
     if (hfPreview.value) {
       refreshLevel()
       pushAllParams(chain)
+      scheduleAutoAir()
       nodesOf(chain)?.setListen(hfDelta.value ? 'delta' : 'off')
       startMeters(chain)
     } else {
@@ -174,11 +223,13 @@ export function useHFSoftener() {
   function syncAmount(v) {
     hfAmount.value = v
     pushParam('amount', v)
+    scheduleAutoAir()
   }
 
   function syncSplit(v) {
     hfSplit.value = v
     pushParam('split', v)
+    scheduleAutoAir()
   }
 
   function syncAirMode(v) {
@@ -186,29 +237,41 @@ export function useHFSoftener() {
     pushParam('airMode', v)
   }
 
+  /** Touching Air takes it over from AUTO, so a value the user sets sticks. */
   function syncAir(v) {
+    hfAirAuto.value = false
     hfAir.value = v
     pushParam('air', v)
+  }
+
+  function syncDetect(v) {
+    hfDetect.value = v
+    pushParam('detect', v)
+    scheduleAutoAir()
   }
 
   function syncResoAmount(v) {
     hfResoAmount.value = v
     pushParam('resoAmount', v)
+    scheduleAutoAir()
   }
 
   function syncLispGuard(v) {
     hfLispGuard.value = v
     pushParam('lispGuard', v)
+    scheduleAutoAir()
   }
 
   function syncReso(v) {
     hfReso.value = v
     pushParam('reso', v)
+    scheduleAutoAir()
   }
 
   function syncShape(v) {
     hfShape.value = v
     pushParam('shape', v)
+    scheduleAutoAir()
   }
 
   function toggleDelta() {
@@ -224,6 +287,12 @@ export function useHFSoftener() {
     const wasPreviewing = hfPreview.value
     if (wasPreviewing) togglePreview()
     refreshLevel()
+    // Under AUTO, render with the Air measured for exactly these settings, not
+    // whatever a debounced request last left on the knob.
+    if (hfAirAuto.value) {
+      clearTimeout(autoAirTimer)
+      await refreshAutoAir()
+    }
 
     startProcessing('Applying HF Softener...')
     try {
@@ -269,6 +338,9 @@ export function useHFSoftener() {
     hfAmount,
     hfResoAmount,
     hfAir,
+    hfAirAuto,
+    hfAirLossDb,
+    hfDetect,
     hfAirMode,
     hfSplit,
     hfBroadband,
@@ -288,6 +360,10 @@ export function useHFSoftener() {
     syncAmount,
     syncResoAmount,
     syncAir,
+    setAirAuto,
+    syncDetect,
+    refreshAutoAir,
+    scheduleAutoAir,
     syncAirMode,
     syncSplit,
     syncShape,
