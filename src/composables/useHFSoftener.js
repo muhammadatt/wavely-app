@@ -26,16 +26,8 @@ const hfAir = ref(HF_SOFTENER_DEFAULTS.air)
 // VOICED: the lift follows the voicing, so it brightens vowels without
 // handing the cut back to the sibilants. STATIC: Air Boost's behaviour.
 const hfAirMode = ref(HF_SOFTENER_DEFAULTS.airMode)
-// Input waveshaper: drive, curve under audition, and whether it follows the
-// voicing (never shaping sibilants) or runs full-time.
-const hfDrive = ref(HF_SOFTENER_DEFAULTS.drive)
-const hfCurve = ref(HF_SOFTENER_DEFAULTS.curve)
-const hfSatMode = ref(HF_SOFTENER_DEFAULTS.satMode)
-const hfEmph = ref(HF_SOFTENER_DEFAULTS.emph)
 // How the reduction is taken: 0 all as the band cut, 100 all as a broadband duck.
 const hfSplit = ref(HF_SOFTENER_DEFAULTS.split)
-// FULL: the shaper saturates the whole voice. HF: only above 3 kHz — an exciter.
-const hfBand = ref(HF_SOFTENER_DEFAULTS.band)
 const hfBroadband = ref(0)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
@@ -69,12 +61,7 @@ function currentParams() {
     resoAmount: hfResoAmount.value,
     air: hfAir.value,
     airMode: hfAirMode.value,
-    drive: hfDrive.value,
-    curve: hfCurve.value,
-    satMode: hfSatMode.value,
-    emph: hfEmph.value,
     split: hfSplit.value,
-    band: hfBand.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -189,34 +176,9 @@ export function useHFSoftener() {
     pushParam('amount', v)
   }
 
-  function syncDrive(v) {
-    hfDrive.value = v
-    pushParam('drive', v)
-  }
-
-  function syncCurve(v) {
-    hfCurve.value = v
-    pushParam('curve', v)
-  }
-
-  function syncBand(v) {
-    hfBand.value = v
-    pushParam('band', v)
-  }
-
   function syncSplit(v) {
     hfSplit.value = v
     pushParam('split', v)
-  }
-
-  function syncEmph(v) {
-    hfEmph.value = v
-    pushParam('emph', v)
-  }
-
-  function syncSatMode(v) {
-    hfSatMode.value = v
-    pushParam('satMode', v)
   }
 
   function syncAirMode(v) {
@@ -308,12 +270,7 @@ export function useHFSoftener() {
     hfResoAmount,
     hfAir,
     hfAirMode,
-    hfDrive,
-    hfCurve,
-    hfSatMode,
-    hfEmph,
     hfSplit,
-    hfBand,
     hfBroadband,
     hfShape,
     hfLispGuard,
@@ -332,12 +289,7 @@ export function useHFSoftener() {
     syncResoAmount,
     syncAir,
     syncAirMode,
-    syncDrive,
-    syncCurve,
-    syncSatMode,
-    syncEmph,
     syncSplit,
-    syncBand,
     syncShape,
     syncLispGuard,
     syncReso,

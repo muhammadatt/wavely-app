@@ -44,8 +44,6 @@ import {
   BiquadCascade,
 } from './dsp/biquad.js'
 import { airBandSections, AIR_BANDS } from './dsp/airBandCurve.js'
-import { Oversampler, DelayLine, COMPRESSOR_OVERSAMPLE } from './dsp/oversample.js'
-import { shaperCurve, unitDriveU, SHAPER_CURVE_IDS, DEFAULT_SHAPER_CURVE } from './dsp/shaperCurves.js'
 import { riseCoeff } from './dsp/envelope.js'
 
 /** Internal constants, fixed at build time. Quoted from the spec's table. */
@@ -129,9 +127,6 @@ export const HF_SOFTENER_TUNING = {
   // fundamental included, so it cannot follow the band cut's 0.5 ms without
   // modulating the low end audibly. See BROADBAND note at `split`.
   broadbandSmoothMs: 1,
-  // Bench only: the HF band's second high-pass (see SHAPER_HF_SPLIT_HZ). Off
-  // lets the difference tones through, for measuring what it removes.
-  shaperHfPostHp: true,
   macroRampMs: 20,
   coeffUpdateSamples: 16,
   meterHz: 30,
@@ -158,114 +153,11 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   // sibilants and gaps do not — it cannot hand back the cut. 'static': the
   // whole signal, as Air Boost does.
   airMode: 'voiced',
-  // Input waveshaper, ahead of the cut (the spec's deferred module). 0 does not
-  // run it — no oversampler, no latency, bit-identical to before.
-  shaperDrive: 0, // 0–1; 0.5 puts every curve at SHAPER_REF_THD on the reference sine
-  shaperCurve: DEFAULT_SHAPER_CURVE,
-  // 'voiced': drive follows the vowel-release voicing weight, so sibilants and
-  // gaps are never shaped. 'full': shaped all the time, the spec's version —
-  // the cut downstream cleans up what the shaper adds to an "s".
-  shaperMode: 'voiced',
-  // Pre/de-emphasis around the shaper: 'off', 'opto' (OptoSmooth's pair — highs
-  // pushed INTO the curve and taken back out after) or 'reverse' (the mirror —
-  // highs pulled out before the curve, put back after).
-  shaperEmph: 'off',
-  // What the shaper sees: 'full' (the whole voice) or 'hf' (only above
-  // SHAPER_HF_SPLIT_HZ — a voiced-only exciter in VOICED mode).
-  shaperBand: 'full',
   // How the reduction is TAKEN, 0–1: 0 all as the band cut (tone changes,
   // level holds), 1 all as a broadband duck (tone holds, level dips). The
   // total on the "s" is the same at every setting — Amount decides how much,
   // Split decides the character — and the lisp guard caps the total.
   split: 0,
-}
-
-/**
- * ⚠ THE AFTER-SHELF DECIDES WHAT THIS SOUNDS LIKE ON A VOICE, NOT THE BEFORE-
- * SHELF — which is the opposite of the obvious reading, and the reverse mode
- * was first named "warm" on that reading. Most of a vowel's distortion comes
- * from its strong LOW content, and those harmonics land above the corner,
- * where the de-emphasis shelf then scales them. Synthetic voice, VOICED,
- * added distortion above 2.3 kHz: OPTO 3–4 dB LESS than off (its after-shelf
- * cuts), REVERSE 3–5 dB MORE (its after-shelf lifts). REVERSE is only cleaner
- * up top on content that was already high — a 5 kHz sine drops to 0.17 % THD.
- * On sines OPTO reproduces OptoSmooth's own profile: Quartic 75 % reads
- * 3.2 / 2.5 / 5.1 % at 500 / 2k / 5k Hz against OptoSmooth's 2.9–3.7 /
- * 2.4–2.7 / 5.1–5.2.
- */
-export const SHAPER_EMPH_MODES = ['reverse', 'off', 'opto']
-
-/**
- * BAND = 'hf': the curve sees only the voice above this, 4th-order Butterworth
- * (two Q 1/√2 sections). What it ADDS is high-passed again at the same corner
- * and summed onto the untouched full-band signal — no crossover to recombine,
- * nothing to phase-align. The second high-pass is not optional: an even curve
- * fed a band makes DIFFERENCE tones below it (the "s" envelope traced out as a
- * low buzz), which the cut downstream never reaches.
- */
-export const SHAPER_HF_SPLIT_HZ = 3000
-export const SHAPER_BANDS = ['full', 'hf']
-/**
- * The HF band's drive reference, and ⚠ IT IS CALIBRATED ON THE RESULT, NOT ON
- * MATCHED DISTORTION like the full band's. The band's actual peak on nominal
- * speech is ~−22 dBFS (synthetic voice with realistic upper formants: energy
- * above 3 kHz at −19.9 dB of the vowel), and calibrating 1 % THD there made
- * an exciter that excited nothing — Tanh at 100 % added +0.6 dB above 5 kHz.
- * An exciter's job is AUDIBLE harmonics, so the midpoint is set where it
- * brightens vowels about as much as Air +2 dB does (+1.3 dB above 5 kHz):
- * swept −22 / −32 / −38 / −44, at −38 the odd curves add +1.5 to +2.2 dB at
- * 50 % and up to ~3 dB at 100 %, with the added harmonics 10–13 dB under the
- * vowel's own >3 kHz band.
- *
- * ⚠ THE QUARTIC DOES NOT EXCITE AT ANY DRIVE (−0.1 dB above 5 kHz at every
- * reference tried): its products are even-order and weak at band levels, and
- * past |u| = 1 it continues linearly, so pushing harder makes it cleaner.
- */
-export const SHAPER_HF_REF_PEAK_DBFS = -38
-/**
- * OptoSmooth's emphasis pair as it ships: EMPHASIS_CORNER_HZ (2300) and
- * EMPHASIS_MAX_DB (12) × EMPHASIS_DEFAULT (85) / 100, Q 1/√2.
- *
- * ⚠ COPIED, NOT IMPORTED: la2aProcessor.js calls `registerProcessor` at module
- * scope, and importing it into this worklet would register 'la2a-processor'
- * twice in one AudioContext — the bug `dsp/airBandCurve.js` exists to avoid.
- * A test imports both and pins them equal, so the copy cannot drift silently.
- */
-export const SHAPER_EMPH_CORNER_HZ = 2300
-export const SHAPER_EMPH_DB = 12 * 0.85
-
-export const SHAPER_MODES = ['voiced', 'full']
-/**
- * The oversampler's latency, whole base-rate samples. Only while the shaper is
- * engaged (drive > 0): at 0 the plugin keeps its zero latency.
- */
-export const SHAPER_LATENCY_SAMPLES = COMPRESSOR_OVERSAMPLE.latencySamples
-/** Drive knob span, dB of pre-gain from 0 to 100 % around the matched midpoint. */
-export const SHAPER_DRIVE_SPAN_DB = 18
-/**
- * The reference the drive is calibrated at: a sine PEAKING where nominal
- * speech peaks — the −20 dBFS RMS every other threshold here is aligned to,
- * plus 12 dB of speech crest factor. With the file's level offset subtracted,
- * a knob position means the same saturation on a quiet recording and a hot one.
- *
- * ⚠ NOT A SINE AT THE SPEECH RMS, which was the first calibration: a sine
- * peaks 3 dB over its RMS and speech ~12, so the curves met speech peaks ~9 dB
- * hotter than the sine that set them. Measured at the old midpoint, the odd
- * curves added distortion 8–12 dB under the vowel and cut its level 2–3 dB —
- * the middle of the knob was already heavy.
- */
-export const SHAPER_REF_PEAK_DBFS = -8
-const SHAPER_REF_AMPLITUDE = Math.pow(10, SHAPER_REF_PEAK_DBFS / 20)
-
-/**
- * Pre-gain into the curve for a Drive setting, before the level offset.
- * Drive 0.5 puts a nominal-level sine exactly at the curve's calibration point.
- */
-export function shaperGainFor(curveId, drive, levelOffsetDb = 0, band = 'full') {
-  const u = unitDriveU(curveId)
-  const ref = band === 'hf' ? Math.pow(10, SHAPER_HF_REF_PEAK_DBFS / 20) : SHAPER_REF_AMPLITUDE
-  return (u / ref)
-    * Math.pow(10, ((drive - 0.5) * SHAPER_DRIVE_SPAN_DB - levelOffsetDb) / 20)
 }
 
 /** Air makeup knob range, dB — "a few dB back", not a second Air Boost. */
@@ -649,19 +541,6 @@ export class HFSoftenerKernel {
     this.airWBuf = new Float64Array(0)
     this.airTmp = new Float32Array(0)
 
-    // Input shaper. Built lazily on first engagement, per channel.
-    this.shaperOn = false
-    this.shaperFn = shaperCurve(DEFAULT_SHAPER_CURVE).f
-    this.shaperGain = 1
-    this.shaperFull = new Ramp(0, rampSamples)
-    // One-pole DC blocker on the shaper's added signal, ~5 Hz: the even-order
-    // curves produce DC, and it must not ride into the output.
-    this.shaperDcCoeff = Math.exp((-2 * Math.PI * 5) / sampleRate)
-    this.shaperEmph = 'off'
-    this.shaperBand = 'full'
-    this.bandHpCoeffs = [highpass(sampleRate, SHAPER_HF_SPLIT_HZ, Math.SQRT1_2), highpass(sampleRate, SHAPER_HF_SPLIT_HZ, Math.SQRT1_2)]
-    this.emphPre = null
-    this.emphDe = null
 
     this.listen = 'off'
     this.meterPeriod = Math.max(1, Math.round(sampleRate / tuning.meterHz))
@@ -702,38 +581,6 @@ export class HFSoftenerKernel {
     this.split.set(clamp(Number(p.split) || 0, 0, 1), immediate)
     this.detRot.set(p.rotator === 'off' ? 0 : 1, immediate)
     this.pathRot.set(p.rotator === 'inpath' ? 1 : 0, immediate)
-    const drive = clamp(Number(p.shaperDrive) || 0, 0, 1)
-    const curveId = SHAPER_CURVE_IDS.includes(p.shaperCurve) ? p.shaperCurve : DEFAULT_SHAPER_CURVE
-    const wasOn = this.shaperOn
-    this.shaperOn = drive > 0
-    if (this.shaperOn && !wasOn) {
-      // Engaging: start the oversamplers, delays and DC state from rest.
-      for (const c of this.channels) this.resetShaperState(c)
-    }
-    this.shaperFn = shaperCurve(curveId).f
-    const band = SHAPER_BANDS.includes(p.shaperBand) ? p.shaperBand : 'full'
-    if (band !== this.shaperBand) {
-      this.shaperBand = band
-      for (const c of this.channels) this.resetBandState(c)
-    }
-    this.shaperGain = shaperGainFor(curveId, drive, off, band)
-    this.shaperFull.set(p.shaperMode === 'full' ? 1 : 0, immediate)
-    const emph = SHAPER_EMPH_MODES.includes(p.shaperEmph) ? p.shaperEmph : 'off'
-    if (emph !== this.shaperEmph) {
-      this.shaperEmph = emph
-      if (emph !== 'off') {
-        // OPTO boosts into the curve and cuts after; REVERSE is the exact mirror.
-        // Either way the two shelves are exact inverses, so the linear path
-        // is untouched — only what the curve does differs.
-        const db = emph === 'opto' ? SHAPER_EMPH_DB : -SHAPER_EMPH_DB
-        this.emphPre = [highShelf(this.sampleRate, SHAPER_EMPH_CORNER_HZ, Math.SQRT1_2, db)]
-        this.emphDe = [highShelf(this.sampleRate, SHAPER_EMPH_CORNER_HZ, Math.SQRT1_2, -db)]
-        for (const c of this.channels) {
-          c.shPre?.setSections(this.emphPre)
-          c.shDe?.setSections(this.emphDe)
-        }
-      }
-    }
     this.airVoiced = p.airMode !== 'static'
     const air = clamp(Number(p.airDb) || 0, 0, AIR_MAKEUP_MAX_DB)
     if (air !== this.airDb) {
@@ -777,107 +624,7 @@ export class HFSoftenerKernel {
         // Per-chunk scratch: shelf input and detector signal.
         pathBuf: new Float64Array(this.tuning.coeffUpdateSamples),
         detBuf: new Float64Array(this.tuning.coeffUpdateSamples),
-        shOs: null,
-        shPre: null,
-        shDe: null,
-        shPreBuf: new Float64Array(128),
-        shBandIn: new BiquadCascade(2, 1),
-        shBandOut: new BiquadCascade(2, 1),
-        shBandDelay: null,
-        shBandBuf: new Float64Array(128),
-        shDelay: null,
-        shDry: new Float64Array(128),
-        shDiff: new Float64Array(128),
-        shDown: new Float64Array(128),
-        shDcX: 0,
-        shDcY: 0,
       })
-      if (this.shaperOn) this.resetShaperState(this.channels[this.channels.length - 1])
-    }
-  }
-
-  resetBandState(c) {
-    c.shBandIn.setSections(this.bandHpCoeffs)
-    c.shBandOut.setSections(this.bandHpCoeffs)
-    c.shBandIn.reset()
-    c.shBandOut.reset()
-    c.shBandDelay = new DelayLine(SHAPER_LATENCY_SAMPLES)
-  }
-
-  resetShaperState(c) {
-    this.resetBandState(c)
-    c.shOs = new Oversampler(COMPRESSOR_OVERSAMPLE)
-    c.shPre = new BiquadCascade(1, 1)
-    c.shDe = new BiquadCascade(1, 1)
-    if (this.emphPre) {
-      c.shPre.setSections(this.emphPre)
-      c.shDe.setSections(this.emphDe)
-    }
-    c.shDelay = new DelayLine(SHAPER_LATENCY_SAMPLES)
-    c.shDcX = 0
-    c.shDcY = 0
-  }
-
-  /**
-   * Shaper pre-pass for one block: fills each channel's `shDry` (the input,
-   * delayed by the oversampler's latency so the detector stays aligned with
-   * the audio) and `shDiff` (what the curve adds, DC-blocked). The audio path
-   * then takes dry + α·diff, with α from the voicing weight in 'voiced' mode.
-   */
-  runShaper(inputChannels, nOut, n) {
-    const f = this.shaperFn
-    const g = this.shaperGain
-    const inv = 1 / g
-    const a = this.shaperDcCoeff
-    const nIn = inputChannels.length
-    for (let ch = 0; ch < nOut; ch++) {
-      const c = this.channels[ch]
-      if (c.shDry.length < n) {
-        c.shDry = new Float64Array(n)
-        c.shDiff = new Float64Array(n)
-        c.shDown = new Float64Array(n)
-        c.shPreBuf = new Float64Array(n)
-        c.shBandBuf = new Float64Array(n)
-      }
-      const x = inputChannels[ch < nIn ? ch : nIn - 1]
-      const hfBand = this.shaperBand === 'hf'
-      // HF band: the curve sees only the high-passed voice. Its own delayed
-      // copy is what the curve's output is differenced against.
-      let src = x
-      if (hfBand) {
-        c.shBandIn.process(x, c.shBandBuf, n, 0)
-        src = c.shBandBuf
-      }
-      const emph = this.shaperEmph !== 'off'
-      // Emphasis at the base rate, as OptoSmooth runs it: pre before the
-      // upsampler, de after the downsampler. Both are LTI, so they commute
-      // with the oversampler's delay and the dry path needs no change.
-      if (emph) c.shPre.process(src, c.shPreBuf, n, 0)
-      const hi = c.shOs.up(emph ? c.shPreBuf : src, n)
-      const m = n * c.shOs.factor
-      for (let j = 0; j < m; j++) hi[j] = f(g * hi[j]) * inv
-      c.shOs.down(c.shDown, n)
-      if (emph) c.shDe.process(c.shDown, c.shDown, n, 0)
-      let dx = c.shDcX
-      let dy = c.shDcY
-      if (hfBand) {
-        // What the curve added to the band, high-passed again so the
-        // difference tones an even curve makes below the corner never reach
-        // the output. Built in place in shDown.
-        for (let i = 0; i < n; i++) c.shDown[i] -= c.shBandDelay.push(src[i])
-        if (this.tuning.shaperHfPostHp !== false) c.shBandOut.process(c.shDown, c.shDown, n, 0)
-      }
-      for (let i = 0; i < n; i++) {
-        const dry = c.shDelay.push(x[i])
-        c.shDry[i] = dry
-        const d = hfBand ? c.shDown[i] : c.shDown[i] - dry
-        dy = d - dx + a * dy
-        dx = d
-        c.shDiff[i] = dy
-      }
-      if (Math.abs(dy) < DENORMAL_FLOOR) dy = 0
-      c.shDcX = dx
-      c.shDcY = dy
     }
   }
 
@@ -904,8 +651,6 @@ export class HFSoftenerKernel {
     const gainBuf = this.gainBuf
     const cur = this.coeffCur
     const next = this.coeffNext
-    const shaping = this.shaperOn
-    if (shaping) this.runShaper(inputChannels, nOut, n)
     const airVoiced = this.airDb > 0 && this.airVoiced && this.listen === 'off'
     if (airVoiced && this.airWBuf.length < n) this.airWBuf = new Float64Array(n)
 
@@ -921,7 +666,7 @@ export class HFSoftenerKernel {
         let energy = 0
         for (let ch = 0; ch < nOut; ch++) {
           const s = chans[ch]
-          const x = shaping ? s.shDry[off + i] : inputChannels[ch < nIn ? ch : nIn - 1][off + i]
+          const x = inputChannels[ch < nIn ? ch : nIn - 1][off + i]
           // The rotator always runs so its state is warm when switched in.
           let r = x
           for (let k = 0; k < s.rot.length; k++) r = s.rot[k].tick(r)
@@ -939,7 +684,7 @@ export class HFSoftenerKernel {
         const voice = this.voiceEnv.tick(lmNow)
         let release = this.relSlow
         let wv = 0
-        if (this.vowelRelease || shaping || airVoiced) {
+        if (this.vowelRelease || airVoiced) {
           const voiceDb = voice > 0 ? 10 * Math.log10(voice) : -300
           const hfPrev = this.hfEnv.value
           const hfPrevDb = hfPrev > 0 ? Math.log(hfPrev) * DB_PER_NEPER : -300
@@ -953,14 +698,6 @@ export class HFSoftenerKernel {
         if (airVoiced) {
           this.airW += (wv - this.airW) * (wv < this.airW ? this.airDrop : this.airSmooth)
           this.airWBuf[off + i] = this.airW
-        }
-        if (shaping) {
-          // The shaper's share: the voicing weight in 'voiced' mode, all of it
-          // in 'full'. Added to the path here, once the weight for this sample
-          // is known; the detector has already read the dry signal.
-          const full = this.shaperFull.tick()
-          const alpha = wv + full * (1 - wv)
-          for (let ch = 0; ch < nOut; ch++) chans[ch].pathBuf[i] += alpha * chans[ch].shDiff[off + i]
         }
         this.hfEnv.release = release
         const hf = this.hfEnv.tick(peak * trim)

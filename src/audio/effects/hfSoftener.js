@@ -13,7 +13,6 @@
 
 import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
-import { SHAPER_LATENCY_SAMPLES } from '../hfSoftenerProcessor.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_AMOUNT_DEFAULT, hfResoKernelParams,
 } from '../hfSoftenerResoStage.js'
@@ -31,11 +30,6 @@ export const HF_SOFTENER_DEFAULTS = {
   resoAmount: HF_RESO_AMOUNT_DEFAULT * 100, // 0–100 %: macro over threshold, depth and max cut (HF_RESO_KNOTS)
   air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6
   airMode: 'voiced', // 'voiced' (vowels only — never lifts the "s" or the gaps) | 'static'
-  drive: 0, // input waveshaper, 0–100 %; 0 = off, no latency
-  curve: 'quartic', // shaper curve — see dsp/shaperCurves.js
-  satMode: 'voiced', // 'voiced' (never shapes sibilants) | 'full'
-  emph: 'off', // emphasis around the shaper: 'reverse' | 'off' | 'opto'
-  band: 'full', // what the shaper sees: 'full' | 'hf' (above 3 kHz — an exciter)
   split: 0, // 0–100 %: how the reduction is taken — 0 band cut (tone), 100 broadband duck (level)
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
@@ -54,11 +48,6 @@ export function toKernelParams(params) {
     levelOffsetDb: params.levelOffset,
     airDb: params.air,
     airMode: params.airMode,
-    shaperDrive: (params.drive ?? 0) / 100,
-    shaperCurve: params.curve,
-    shaperMode: params.satMode,
-    shaperEmph: params.emph,
-    shaperBand: params.band,
     split: (params.split ?? 0) / 100,
   }
 }
@@ -98,10 +87,6 @@ export function createHFSoftener(audioContext) {
   invert.gain.value = -1
 
   function rewire() {
-    // The delta's dry side must match the whole chain's latency: the pre-stage
-    // always, the shaper's oversampler only while it is engaged.
-    resoDelay.delayTime.value = (HF_RESO_LATENCY_SAMPLES + (params.drive > 0 ? SHAPER_LATENCY_SAMPLES : 0))
-      / audioContext.sampleRate
     for (const n of [input, resoNode, worklet, resoDelay, invert]) n?.disconnect()
     input.connect(inputMonitor)
     if (!worklet) {
@@ -186,8 +171,6 @@ export function createHFSoftener(audioContext) {
         return
       }
       worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
-      if (name === 'drive') resoDelay.delayTime.value = (HF_RESO_LATENCY_SAMPLES + (value > 0 ? SHAPER_LATENCY_SAMPLES : 0))
-        / audioContext.sampleRate
     },
 
     getParam(name) {

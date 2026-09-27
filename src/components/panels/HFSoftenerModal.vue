@@ -4,11 +4,9 @@
  *
  * Amount is the tuning; Split decides how it is taken — as the band cut (tone
  * changes, level holds) or a broadband duck (tone holds, level dips), same
- * total on the "s" either way; Shape picks the cut; Drive feeds an input waveshaper
- * ahead of the cut (curve and VOICED/FULL on the SATURATION row, for
- * auditioning); Air puts back a few dB of top
- * after it, on Air Boost's curve; Reso is the Threshold of the
- * optional ResoTame pre-stage, which the HF RESO rocker switches in. Context,
+ * total on the "s" either way; Shape picks the cut; Air puts back a few dB of
+ * top after it, on Air Boost's curve; Reso is the amount of the optional
+ * ResoTame pre-stage, which the HF RESO rocker switches in. Context,
  * Rotator, Release and vowel release were controls while the design was being
  * tuned and are now pinned (50 %, sidechain, 40 ms, on — see useHFSoftener.js). DELTA sits in the
  * header like every other plugin's monitor and never reaches the apply path.
@@ -25,9 +23,6 @@ import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import { airBandSections } from '../../audio/dsp/airBandCurve.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
-import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
-import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
-import { SHAPER_CURVES } from '../../audio/dsp/shaperCurves.js'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -35,10 +30,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfReso, hfResoAmount, hfAir, hfAirMode, hfDrive, hfCurve, hfSatMode, hfEmph, hfSplit, hfBand, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfReso, hfResoAmount, hfAir, hfAirMode, hfSplit, hfBroadband, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoAmount, syncAir, syncAirMode, syncDrive, syncCurve, syncSatMode, syncEmph, syncSplit, syncBand, syncShape, syncLispGuard, syncReso, toggleDelta,
+  togglePreview, syncAmount, syncResoAmount, syncAir, syncAirMode, syncSplit, syncShape, syncLispGuard, syncReso, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -66,28 +61,9 @@ const RESO_OPTIONS = [
   { value: false, label: 'OFF', title: 'Softener alone' },
 ]
 
-const CURVE_OPTIONS = SHAPER_CURVES.map(c => ({ value: c.id, label: c.label, title: c.title }))
-
-// An ordered axis — how much of the highs goes INTO the curve — so a slide.
-const EMPH_OPTIONS = [
-  { value: 'reverse', label: 'REV', title: 'OptoSmooth’s pair reversed: highs pulled out before the curve, put back after. Keeps high content clean, but lifts the harmonics the vowels make up there' },
-  { value: 'off', label: 'OFF', title: 'No emphasis: the curve treats every frequency alike' },
-  { value: 'opto', label: 'OPTO', title: 'OptoSmooth’s pair: highs pushed into the curve, taken back out after. The smoothest on voices — its after-shelf trims the harmonics' },
-]
-
-const BAND_OPTIONS = [
-  { value: 'full', label: 'FULL', title: 'Saturate the whole voice: density and warmth' },
-  { value: 'hf', label: 'HF', title: 'Saturate only above 3 kHz: an exciter — adds harmonic brightness that follows the voice. Use an odd curve; the Quartic does not excite' },
-]
-
 const AIR_MODE_OPTIONS = [
   { value: 'voiced', label: 'VOICED', title: 'Lift vowels only — the air fades out as each S arrives and stays out of the gaps, so it never hands the cut back or lifts room noise' },
   { value: 'static', label: 'STATIC', title: 'Lift everything, as Air Boost does — sibilants and room tone included' },
-]
-
-const SAT_MODE_OPTIONS = [
-  { value: 'voiced', label: 'VOICED', title: 'Saturate vowels only — the shaper fades out as each S arrives, so it never adds harmonics to sibilance' },
-  { value: 'full', label: 'FULL', title: 'Saturate everything, sibilants included; the cut downstream cleans up what it adds' },
 ]
 
 const SHAPE_OPTIONS = [
@@ -156,18 +132,6 @@ function fmtCut(v) {
   return v >= 0.05 ? `−${v.toFixed(1)} dB` : '0.0 dB'
 }
 
-const driveCaption = computed(() => {
-  if (!(hfDrive.value > 0)) return 'SAT OFF'
-  // The Quartic's products are even-order and weak at band level: as an
-  // exciter it measures as a no-op, and the panel says so rather than looking broken.
-  if (hfBand.value === 'hf' && hfCurve.value === 'quartic') return 'QUARTIC · NO EXCITE'
-  const what = hfBand.value === 'hf' ? 'EXCITE' : 'SAT'
-  return `${what} · ${hfSatMode.value === 'voiced' ? 'VOWELS' : 'FULL'}`
-})
-
-function formatDrive(v) {
-  return v > 0 ? `${Math.round(v)}%` : 'OFF'
-}
 
 function formatAir(v) {
   return v > 0 ? `+${Number(v).toFixed(1)}` : 'OFF'
@@ -315,22 +279,8 @@ async function applyAndClose() {
               </span>
             </div>
             <div class="w-[104px] flex flex-col items-center">
-              <Knob
-                :model-value="hfDrive"
-                @update:model-value="syncDrive"
-                :min="0" :max="100" :step="1"
-                label="Drive" :accent="ACCENT" :format-value="formatDrive"
-                :disabled="!hfPreview"
-                title="Input waveshaper ahead of the cut. 50 % puts every curve at the same distortion on a nominal-level voice, so switching curves compares character, not strength. Adds 50 samples of latency while on."
-              />
-              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ driveCaption }}
-              </span>
-            </div>
-            <div class="w-[104px] flex flex-col items-center">
-              <!-- ResoTame's Threshold, same meaning: how far a peak must
-                   stand above the local spectrum before it is cut. Higher is
-                   gentler. Live only while HF RESO is in. -->
+              <!-- The ResoTame pre-stage's amount macro (HF_RESO_KNOTS). Live
+                   only while HF RESO is in. -->
               <Knob
                 :model-value="hfResoAmount"
                 @update:model-value="syncResoAmount"
@@ -385,40 +335,6 @@ async function applyAndClose() {
       </div>
 
 
-      <div class="flex justify-center items-center gap-[48px] mt-[18px]">
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">SAT CURVE</span>
-          <DeviceDetentRotary
-            :model-value="hfCurve" :options="CURVE_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="Saturation curve" :show-label="false"
-            @update:model-value="syncCurve"
-          />
-        </div>
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">EMPH</span>
-          <DeviceTravelSlide
-            :model-value="hfEmph" :options="EMPH_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="Saturation emphasis"
-            @update:model-value="syncEmph"
-          />
-        </div>
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">SAT BAND</span>
-          <DeviceChoiceRocker
-            :model-value="hfBand" :options="BAND_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="Saturation band"
-            @update:model-value="syncBand"
-          />
-        </div>
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">SAT MODE</span>
-          <DeviceChoiceRocker
-            :model-value="hfSatMode" :options="SAT_MODE_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="Saturation mode"
-            @update:model-value="syncSatMode"
-          />
-        </div>
-      </div>
 
       <p
         class="mt-[14px] text-center"

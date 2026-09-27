@@ -29,14 +29,7 @@ import {
   shelfSection,
   softenerSections,
   AIR_MAKEUP_MAX_DB,
-  SHAPER_LATENCY_SAMPLES,
-  SHAPER_REF_PEAK_DBFS,
-  shaperGainFor,
-  SHAPER_EMPH_CORNER_HZ,
-  SHAPER_EMPH_DB,
 } from '../../src/audio/hfSoftenerProcessor.js'
-import { EMPHASIS_CORNER_HZ, EMPHASIS_MAX_DB, EMPHASIS_DEFAULT } from '../../src/audio/la2aProcessor.js'
-import { SHAPER_CURVES, SHAPER_REF_THD, sineThd, unitDriveU } from '../../src/audio/dsp/shaperCurves.js'
 import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
@@ -829,150 +822,6 @@ test('air makeup: clamped to the knob range', () => {
   assert.equal(k.airDb, 0)
 })
 
-// ── Input waveshaper ────────────────────────────────────────────────────────
-
-test('shaper curves: unity slope at zero, matched to the reference THD at their unit drive', () => {
-  for (const c of SHAPER_CURVES) {
-    assert.equal(c.f(0), 0, c.id)
-    const slope = (c.f(1e-6) - c.f(-1e-6)) / 2e-6
-    assert.ok(Math.abs(slope - 1) < 1e-6, `${c.id} slope ${slope}`)
-    const thd = sineThd(c.f, unitDriveU(c.id))
-    assert.ok(Math.abs(thd - SHAPER_REF_THD) < 1e-4, `${c.id} THD ${thd}`)
-  }
-})
-
-test('shaper: drive 0 is the plugin without it, whatever the curve and mode', () => {
-  const sr = 44100
-  const { x } = makeSpeech(sr, { seconds: 2 })
-  const base = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS }).channelData[0]
-  const off = processHFSoftenerBuffer([x], sr, {
-    ...HF_SOFTENER_KERNEL_DEFAULTS, shaperDrive: 0, shaperCurve: 'cubic', shaperMode: 'full',
-  }).channelData[0]
-  assert.deepEqual(off, base)
-})
-
-test('shaper: output lags the input by exactly SHAPER_LATENCY_SAMPLES', () => {
-  const sr = 44100
-  const n = sr
-  const x = new Float32Array(n)
-  // Quiet, so every curve is effectively linear: what is left is the delay.
-  for (let i = 0; i < n; i++) x[i] = 0.001 * Math.sin(2 * Math.PI * 440 * i / sr) + 0.0005 * Math.sin(2 * Math.PI * 3100 * i / sr)
-  const y = processHFSoftenerBuffer([x], sr, {
-    ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, shaperDrive: 0.5, shaperMode: 'full', shaperCurve: 'tanh',
-  }).channelData[0]
-  const L = SHAPER_LATENCY_SAMPLES
-  let worst = 0
-  for (let i = 2000; i < n - L; i++) worst = Math.max(worst, Math.abs(y[i + L] - x[i]))
-  assert.ok(worst < 1e-5, `worst misalignment ${worst}`)
-})
-
-test('shaper: VOICED keeps its harmonics out of hot sibilants and leaves gaps untouched', () => {
-  const sr = 44100
-  const { x: raw, labels } = makeSpeech(sr, { seconds: 3 })
-  // Sibilants 12 dB hot, so they reach the curve at all.
-  const x = raw.map((v, i) => (labels[i] === 2 ? v * 4 : v))
-  const L = SHAPER_LATENCY_SAMPLES
-  const run = (mode) => {
-    const y = processHFSoftenerBuffer([x], sr, {
-      ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, shaperDrive: 1, shaperCurve: 'tanh', shaperMode: mode,
-    }).channelData[0]
-    const o = new Float32Array(x.length)
-    o.set(y.subarray(L))
-    return o
-  }
-  const hfAddedDb = (y) => {
-    const f = [highpass(sr, 5000, 0.7), highpass(sr, 5000, 0.7)].map(c => new Biquad(c))
-    const g = [highpass(sr, 5000, 0.7), highpass(sr, 5000, 0.7)].map(c => new Biquad(c))
-    let d = 0, s = 0
-    for (let i = 0; i < x.length - L; i++) {
-      let a = y[i] - x[i], b = x[i]
-      for (const q of f) a = q.tick(a)
-      for (const q of g) b = q.tick(b)
-      if (i > sr && labels[i] === 2) { d += a * a; s += b * b }
-    }
-    return 10 * Math.log10(d / s)
-  }
-  const voiced = run('voiced'), full = run('full')
-  const v = hfAddedDb(voiced), f = hfAddedDb(full)
-  assert.ok(v < f - 10, `added HF on sibilants: voiced ${v.toFixed(1)} dB, full ${f.toFixed(1)} dB`)
-  // Gaps (label 0, away from any edge) come through as the input, delayed.
-  let worst = 0
-  for (let i = sr; i < x.length - L; i++) {
-    const t = (i % sr) / sr
-    if (t > 0.76 && t < 0.84) worst = Math.max(worst, Math.abs(voiced[i] - x[i]))
-  }
-  assert.ok(worst < 1e-6, `gap difference ${worst}`)
-})
-
-test('shaper: delta hears only the cut, never the shaper', () => {
-  const sr = 44100
-  const { x } = makeSpeech(sr, { seconds: 2 })
-  const d = processHFSoftenerBuffer([x], sr, {
-    ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, shaperDrive: 1, shaperMode: 'full',
-  }, { listen: 'delta' }).channelData[0]
-  let peak = 0
-  for (const v of d) peak = Math.max(peak, Math.abs(v))
-  assert.equal(peak, 0)
-})
-
-test('shaper: drive follows the file level dB for dB, and 0.5 is the calibration point', () => {
-  for (const c of SHAPER_CURVES) {
-    const g0 = shaperGainFor(c.id, 0.5, 0)
-    assert.ok(Math.abs(g0 * Math.pow(10, SHAPER_REF_PEAK_DBFS / 20) - unitDriveU(c.id)) < 1e-9, c.id)
-    const ratioDb = 20 * Math.log10(shaperGainFor(c.id, 0.5, 6) / g0)
-    assert.ok(Math.abs(ratioDb + 6) < 1e-9, `${c.id} offset ${ratioDb}`)
-  }
-})
-
-test('shaper emphasis: OPTO is OptoSmooth’s shipping pair, copied not imported', () => {
-  assert.equal(SHAPER_EMPH_CORNER_HZ, EMPHASIS_CORNER_HZ)
-  assert.ok(Math.abs(SHAPER_EMPH_DB - EMPHASIS_MAX_DB * EMPHASIS_DEFAULT / 100) < 1e-12)
-})
-
-test('shaper emphasis: the pair cancels on the linear path', () => {
-  const sr = 44100
-  const n = sr
-  const x = new Float32Array(n)
-  for (let i = 0; i < n; i++) x[i] = 0.001 * (Math.sin(2 * Math.PI * 440 * i / sr) + Math.sin(2 * Math.PI * 6100 * i / sr))
-  const L = SHAPER_LATENCY_SAMPLES
-  for (const emph of ['opto', 'reverse']) {
-    const y = processHFSoftenerBuffer([x], sr, {
-      ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, shaperDrive: 0.5, shaperMode: 'full', shaperCurve: 'tanh', shaperEmph: emph,
-    }).channelData[0]
-    let worst = 0
-    for (let i = 4000; i < n - L; i++) worst = Math.max(worst, Math.abs(y[i + L] - x[i]))
-    assert.ok(worst < 1e-5, `${emph}: worst ${worst}`)
-  }
-})
-
-test('shaper emphasis: OPTO distorts the highs harder, REVERSE spares them (sine)', () => {
-  const sr = 44100
-  const n = sr * 2
-  const thdAt = (f0, emph) => {
-    const x = new Float32Array(n)
-    for (let i = 0; i < n; i++) x[i] = Math.pow(10, -8 / 20) * Math.sin(2 * Math.PI * f0 * i / sr)
-    const y = processHFSoftenerBuffer([x], sr, {
-      ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, shaperDrive: 0.75, shaperMode: 'full', shaperCurve: 'quartic', shaperEmph: emph,
-    }).channelData[0]
-    const a = sr, b = n - 4096, N = b - a
-    const pw = (f) => {
-      let c = 0, s = 0
-      for (let i = a; i < b; i++) {
-        const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * (i - a) / N)
-        c += w * y[i] * Math.cos(2 * Math.PI * f * i / sr)
-        s += w * y[i] * Math.sin(2 * Math.PI * f * i / sr)
-      }
-      return c * c + s * s
-    }
-    let h = 0
-    for (let k = 2; k * f0 < 21000; k++) h += pw(k * f0)
-    return Math.sqrt(h / pw(f0))
-  }
-  const off = thdAt(5000, 'off'), opto = thdAt(5000, 'opto'), rev = thdAt(5000, 'reverse')
-  assert.ok(opto > off * 1.3, `5 kHz: opto ${opto} vs off ${off}`)
-  assert.ok(rev < off * 0.2, `5 kHz: reverse ${rev} vs off ${off}`)
-})
-
 // ── Split: band cut ↔ broadband duck ────────────────────────────────────────
 
 const splitBandDb = (y, x, sr, lo, hi, mask) => {
@@ -1036,11 +885,11 @@ test('split: delta is exactly what the band cut and the duck removed together', 
   assert.ok(worst < 1e-6, `worst ${worst}`)
 })
 
-// ── HF exciter (shaper BAND = 'hf') ─────────────────────────────────────────
+// ── Rich synthetic voice (upper formants) ───────────────────────────────────
 
 /**
- * makeSpeech's vowels are low-passed at 3.5 kHz and carry almost nothing an
- * exciter can work on, which would make it look inert. These have realistic
+ * makeSpeech's vowels are low-passed at 3.5 kHz, which understates every top-
+ * end measurement (Reso, Air). These have realistic
  * upper formants: energy above 3 kHz at −19.9 dB of the vowel, as long-term
  * speech spectra put it. Same timing and labels as makeSpeech.
  */
@@ -1083,14 +932,6 @@ function makeRichSpeech(sr, { seconds = 3, seed = 3 } = {}) {
   return { x, labels }
 }
 
-const excite = (x, sr, p, tuning) => {
-  const y0 = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, ...p },
-    tuning ? { tuning: { ...T, ...tuning } } : {}).channelData[0]
-  const y = new Float32Array(x.length)
-  y.set(y0.subarray(SHAPER_LATENCY_SAMPLES))
-  return y
-}
-
 const hfEnergy = (y, sr, mask, lo, hi) => {
   const f = []
   if (lo) f.push(new Biquad(highpass(sr, lo, 0.7)), new Biquad(highpass(sr, lo, 0.7)))
@@ -1104,46 +945,8 @@ const hfEnergy = (y, sr, mask, lo, hi) => {
   return s
 }
 
-test('hf exciter: VOICED brightens vowels and leaves sibilants and gaps alone; FULL excites the "s"', () => {
-  const sr = 44100
-  const { x, labels } = makeRichSpeech(sr)
-  const vow = i => labels[i] === 1
-  const sib = i => labels[i] === 2
-  const gain = (y, m) => 10 * Math.log10(hfEnergy(y, sr, m, 5000) / hfEnergy(x, sr, m, 5000))
-  const voiced = excite(x, sr, { shaperDrive: 1, shaperCurve: 'tanh', shaperBand: 'hf', shaperMode: 'voiced' })
-  const full = excite(x, sr, { shaperDrive: 1, shaperCurve: 'tanh', shaperBand: 'hf', shaperMode: 'full' })
-  assert.ok(gain(voiced, vow) > 1.5, `vowels >5k +${gain(voiced, vow).toFixed(2)} dB`)
-  assert.ok(gain(voiced, sib) < 0.8, `sibilants >5k +${gain(voiced, sib).toFixed(2)} dB`)
-  assert.ok(gain(full, sib) > 1.5, `FULL excites the "s": +${gain(full, sib).toFixed(2)} dB`)
-  let gap = 0
-  for (let i = sr; i < x.length - 2000; i++) {
-    const t = (i % sr) / sr
-    if (t > 0.76 && t < 0.84) gap = Math.max(gap, Math.abs(voiced[i] - x[i]))
-  }
-  assert.ok(gap < 1e-6, `gap ${gap}`)
-})
 
-test('hf exciter: the second high-pass removes the difference tones below the band', () => {
-  const sr = 44100
-  const { x, labels } = makeRichSpeech(sr)
-  const vow = i => labels[i] === 1
-  const below = (post) => {
-    const y = excite(x, sr, { shaperDrive: 1, shaperCurve: 'asym', shaperBand: 'hf' }, { shaperHfPostHp: post })
-    const d = y.map((v, i) => v - x[i])
-    return 10 * Math.log10(hfEnergy(d, sr, vow, 0, 2000) / hfEnergy(x, sr, vow))
-  }
-  const withHp = below(true), without = below(false)
-  assert.ok(withHp < without - 6, `below 2 kHz: ${withHp.toFixed(1)} with, ${without.toFixed(1)} without`)
-})
 
-test('hf exciter: the quartic does not excite (even, weak at band level, linear past its range)', () => {
-  const sr = 44100
-  const { x, labels } = makeRichSpeech(sr)
-  const vow = i => labels[i] === 1
-  const y = excite(x, sr, { shaperDrive: 1, shaperCurve: 'quartic', shaperBand: 'hf' })
-  const g = 10 * Math.log10(hfEnergy(y, sr, vow, 5000) / hfEnergy(x, sr, vow, 5000))
-  assert.ok(Math.abs(g) < 0.3, `quartic HF gain ${g.toFixed(2)} dB`)
-})
 
 // ── VOICED air ──────────────────────────────────────────────────────────────
 
