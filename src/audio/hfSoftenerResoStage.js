@@ -159,7 +159,7 @@ export const HF_RESO_LISP_GUARD_FLOOR_DB = -17.5
 /**
  * The lisp guard's other half here: on a frame whose 5–10 kHz leads its 2–4
  * kHz — a peaked /s/ — no cut may go deeper than HF_RESO_FRICATIVE_CAP_DB,
- * relaxing linearly toward no cap between these tilts (dB). The softener's lisp
+ * sliding from the zone's Max Cut toward it between these tilts (dB). The softener's lisp
  * guard uses the same tilt and thresholds (`tiltFlatDb` / `tiltPeakedDb`),
  * pinned equal by a test. See `peakedFricativeCapDb` in resonanceProcessor.js.
  */

@@ -308,8 +308,8 @@ const VOICED_LEAD_DB = 6
 // what a resonance suppressor removes; the level guard does not bind on a loud
 // "s" (it is allowed plenty), so at Reso 100 the "s" in "fix slide" lost
 // 10.1 dB with it on. On a frame whose 5–10 kHz leads its 2–4 kHz, the cut may
-// not go deeper than the cap, relaxing linearly toward no cap as the tilt
-// falls to the flat threshold; unvoiced frames only. Cap 6 on that "s" at
+// not go deeper than the cap, the cap sliding from the zone's Max Cut toward
+// it by the tilt weight; unvoiced frames only. Cap 6 on that "s" at
 // Reso 20 / 40 / 60 / 100: −3.5 / −4.0 / −4.5 / −5.2 (guard off −4.8 / −6.3 /
 // −7.9 / −13.1). ⚠ A THRESHOLD HOLD WAS TRIED FIRST AND MADE RESO INERT on
 // sibilance (and a cap of 0 with it) — the knob stopped doing anything on the
@@ -1436,12 +1436,6 @@ export class ResonanceKernel {
       // are already held at the ring-only threshold, so they cannot lisp.
       guardCap += wv * GUARD_VOICED_RELIEF_DB
     }
-    // Peaked-fricative depth cap: the cut may not go deeper than fricCapDb on
-    // a peaked /s/, relaxing (by the tilt weight) toward no cap on a flat one.
-    if (fricW > 0) {
-      const cap = this.fricCapDb + (1 - fricW) * GUARD_VOICED_RELIEF_DB
-      if (cap < guardCap) guardCap = cap
-    }
 
     // Pitch drives both the lifter cutoff and the protection mask, so it is
     // measured from the unwindowed frame the STFT kept for us.
@@ -1634,9 +1628,16 @@ export class ResonanceKernel {
     // take out of a band, and the honest answer differs by band: a low-mid
     // resonance can lose 12 dB before it is obviously gone, where the same
     // number spent on sibilance is a lisp.
+    // Peaked-fricative depth cap, SLIDING: the zone's Max Cut is pulled toward
+    // fricCapDb by the frame's tilt weight, so a half-peaked frame gets a cap
+    // halfway between. ⚠ An additive `cap + (1 − w)·96` shipped first and was
+    // a near-switch — it bound only above w ≈ 0.96 at Reso 20 (tilt ≈ 9.7 dB).
+    const fricCap = fricW > 0 ? this.fricCapDb : 0
     for (let k = 0; k < binCount; k++) {
       const r = reduction[k] * zoneDepth[k]
-      const ceiling = zoneMaxCut[k] < guardCap ? zoneMaxCut[k] : guardCap
+      let ceiling = zoneMaxCut[k]
+      if (fricW > 0 && ceiling > fricCap) ceiling -= fricW * (ceiling - fricCap)
+      if (guardCap < ceiling) ceiling = guardCap
       reduction[k] = r > ceiling ? ceiling : r
     }
 
