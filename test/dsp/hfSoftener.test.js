@@ -11,6 +11,8 @@ import {
   Biquad,
   Follower,
   HF_SOFTENER_TUNING as T,
+  HF_SOFTENER_TUNING,
+  lispGuardTiltWeight,
   HFSoftenerKernel,
   HF_SOFTENER_KERNEL_DEFAULTS,
   HF_SOFTENER_PREROLL_S,
@@ -65,7 +67,7 @@ function lcg(seed) {
  * glottal roll-off — a bare pulse train has a flat top end and puts vowels
  * straight into the detector, which no voice does.
  */
-function makeSpeech(sr, { seconds = 5, seed = 3 } = {}) {
+function makeSpeech(sr, { seconds = 5, seed = 3, inPhraseF = false, peakedS = false } = {}) {
   const rnd = lcg(seed)
   const n = Math.round(sr * seconds)
   const x = new Float32Array(n)
@@ -79,6 +81,14 @@ function makeSpeech(sr, { seconds = 5, seed = 3 } = {}) {
   const sl = new Biquad(lowpass(sr, 9000, 0.7))
   const bh = new Biquad(highpass(sr, 300, 0.7))
   const bl = new Biquad(lowpass(sr, 6000, 0.5))
+  // `inPhraseF`: the in-phrase sibilant becomes an /f/ — flat 1–8 kHz, 10 dB
+  // under the /s/, as a real "F" sits.
+  // `peakedS`: a second 5 kHz section under the /s/. The default /s/ reads
+  // ~+8 dB of 5–10 kHz over 2–4 kHz, flatter than a real one (+20 on real
+  // narration), so the tilt-scaled lisp guard partly relaxes on it.
+  const sh2 = new Biquad(highpass(sr, 5000, 0.7))
+  const fh = new Biquad(highpass(sr, 1000, 0.7))
+  const fl = new Biquad(lowpass(sr, 8000, 0.7))
   let phase = 0
   for (let i = 0; i < n; i++) {
     const t = (i % sr) / sr
@@ -96,10 +106,14 @@ function makeSpeech(sr, { seconds = 5, seed = 3 } = {}) {
       v = vowel * 100 * g(-18)
       lab = 1
     }
-    const sib = sl.tick(sh.tick(rnd()))
+    const nz = rnd()
+    const sib0 = sl.tick(sh.tick(nz))
+    const sib = peakedS ? sh2.tick(sib0) : sib0
+    const fri = fl.tick(fh.tick(nz))
     if ((t >= 0.35 && t < 0.39) || (t >= 0.7 && t < 0.735)) {
       const tt = t < 0.5 ? t - 0.35 : t - 0.7
-      v += sib * g(-22) * 2.2 * Math.min(1, tt / 0.003)
+      const ramp = Math.min(1, tt / 0.003)
+      v += inPhraseF && t < 0.5 ? fri * g(-32) * 2.2 * ramp : sib * g(-22) * 2.2 * ramp
       lab = 2
     }
     const br = bl.tick(bh.tick(rnd()))
@@ -612,15 +626,51 @@ test('amount: the cut grows in even steps across the dial', () => {
 
 // ── Lisp guard ──────────────────────────────────────────────────────────────
 
+test('lisp guard: the tilt weight is 0 for a flat fricative, 1 for a peaked one, linear between', () => {
+  const T = HF_SOFTENER_TUNING
+  assert.equal(lispGuardTiltWeight(T.tiltFlatDb - 5), 0)
+  assert.equal(lispGuardTiltWeight(T.tiltFlatDb), 0)
+  assert.equal(lispGuardTiltWeight(T.tiltPeakedDb), 1)
+  assert.equal(lispGuardTiltWeight(T.tiltPeakedDb + 10), 1)
+  assert.ok(Math.abs(lispGuardTiltWeight((T.tiltFlatDb + T.tiltPeakedDb) / 2) - 0.5) < 1e-12)
+})
+
+test('lisp guard: a flat /f/ after a vowel is cut, a peaked /s/ keeps its guard', () => {
+  // The guard judges every fricative against the held voice level, with a
+  // floor set for /s/. An /f/ sits ~10 dB lower, so an untilted guard blocked
+  // it outright after speech (a real "F" in "Fix": 0.0 dB at Amount 40 and
+  // 100). Tilt-scaled, the /f/ gets its unguarded cut back and the /s/ keeps
+  // most of its protection.
+  const cut = (x, amount, guard, tuning, lo, hi) => {
+    const { gainDb } = processHFSoftenerBuffer([x], SR, { amount, lispGuard: guard }, { recordGain: true, tuning })
+    let m = 0
+    for (let i = SR; i < x.length; i++) {
+      const t = (i % SR) / SR
+      if (t >= lo && t < hi) m = Math.min(m, gainDb[i])
+    }
+    return m
+  }
+  const untilted = { ...HF_SOFTENER_TUNING, tiltRelaxDb: 0 }
+  const f = makeSpeech(SR, { seconds: 3, peakedS: true, inPhraseF: true }).x
+  // Measured: unguarded -6.7, untilted 0.0, tilt-scaled -6.7 (Amount 100).
+  assert.ok(cut(f, 1, true, untilted, 0.35, 0.39) > -0.5, 'the untilted guard should block the /f/ — the failure this fixes')
+  const fOn = cut(f, 1, true, undefined, 0.35, 0.39)
+  const fOff = cut(f, 1, false, undefined, 0.35, 0.39)
+  assert.ok(fOn < -4 && fOn < fOff + 0.5, `/f/: ${fOn.toFixed(2)} dB guarded against ${fOff.toFixed(2)} unguarded`)
+  // Measured: untilted -3.6, tilt-scaled -5.2, unguarded -14.1 (Amount 100).
+  const s = makeSpeech(SR, { seconds: 3, peakedS: true }).x
+  const sOn = cut(s, 1, true, undefined, 0.35, 0.39)
+  const sOff = cut(s, 1, false, undefined, 0.35, 0.39)
+  assert.ok(sOn > -6.5 && sOn > sOff + 7, `/s/: ${sOn.toFixed(2)} dB guarded against ${sOff.toFixed(2)} unguarded`)
+})
+
 test('lisp guard: a normal "s" stops getting deeper, a hot one is still chased', () => {
-  // Measured at the −16 floor: normal sibilants 20/40/60/80/100 % -> -2.8
-  // -4.7 -4.7 -4.7 -4.7 with the guard, -2.8 -5.8 -9.0 -12.1 -15.3 without.
-  // At −18 the default was untouched on the peak (-5.8); −16 reaches it on this
-  // synthetic voice, which is the cost of matching the server's ceilings (on
-  // real narration the default's "s" cut moved -3.3 -> -2.6 / -5.6 -> -5.4 dB).
-  // The top of the knob no longer digs into a normal "s", which is exactly the
-  // lisp it exists to stop.
-  const { x } = makeSpeech(SR, { seconds: 3 })
+  // A PEAKED "s" (see makeSpeech): the default one reads flat enough that the
+  // tilt-scaled guard partly lets go of it. Measured at the −16 floor: 20/40/
+  // 60/100 % -> -2.4 -3.8 -5.1 -5.2 with the guard, -2.4 -5.3 -8.3 -14.6
+  // without; +12 dB-hot -15.8. The top of the knob no longer digs into a
+  // normal "s", which is exactly the lisp it exists to stop.
+  const { x } = makeSpeech(SR, { seconds: 3, peakedS: true })
   const deepest = (a, guard, y = x) => {
     const { gainDb } = processHFSoftenerBuffer([y], SR, { amount: a, lispGuard: guard }, { recordGain: true })
     let m = 0
@@ -628,9 +678,9 @@ test('lisp guard: a normal "s" stops getting deeper, a hot one is still chased',
     return m
   }
   assert.ok(Math.abs(deepest(0.2, true) - deepest(0.2, false)) < 0.2, 'guard moved a light setting')
-  assert.ok(deepest(0.4, true) - deepest(0.4, false) < 1.5, 'guard took most of the default')
+  assert.ok(deepest(0.4, true) - deepest(0.4, false) < 2, 'guard took most of the default')
   const g100 = deepest(1, true)
-  assert.ok(g100 > -6, `guard let a normal "s" go to ${g100.toFixed(2)} dB`)
+  assert.ok(g100 > -6.5, `guard let a normal "s" go to ${g100.toFixed(2)} dB`)
   assert.ok(deepest(1, false) < g100 - 5, 'the unguarded map should dig much deeper')
   // A hotter "s" clears the floor by more, so it may still be cut hard.
   const hot = x.map(v => v * 1.0)

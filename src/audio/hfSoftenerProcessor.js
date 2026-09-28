@@ -122,6 +122,34 @@ export const HF_SOFTENER_TUNING = {
   lispGuardFloorDb: -16,
   voiceAttackMs: 15,
   voiceHoldMs: 500,
+  // Tilt-scaled guard. A lisp is an /s/ losing its 5–10 kHz peak; an /f/ or
+  // /θ/ has no peak to lose, and sits far enough below the voice that a floor
+  // tuned for /s/ blocks it outright — a hot "F" after speech measured 0.0 dB
+  // of cut at −16 against −2.5 / −10.9 unguarded (Amount 40 / 100). So the
+  // floor relaxes with the fricative's own tilt, 5–10 kHz energy over 2–4 kHz,
+  // read on the INPUT so the cut cannot feed back into it: full floor at
+  // `tiltPeakedDb` and above, `tiltRelaxDb` lower at `tiltFlatDb` and below.
+  // Instantaneous tilt (these filters): that "F" median +6.4, the "s" beside
+  // it +19.7. ⚠ THE CLASSES OVERLAP AND THE THRESHOLDS ARE A TRADE, NOT A
+  // BOUNDARY: David Greenberg's /s/ and both clips' /ʃ/ peak at 3–5 kHz and
+  // read +2 to +9, among the "F"s. 5/15 gave the "F" its whole unguarded cut
+  // back (−10.9 at Amount 100) but took David's strident events −3.3 → −8.5
+  // (unguarded −10.6) — the guard gone for him. 3/10 gives the "F" −2.5 / −6.0
+  // (Amount 40 / 100), David's strident events −4.4, M&B's −6.9 → −7.3, and
+  // non-strident events −3.6 → −7.0 / −2.8 → −5.0. 2/8 left the "F" −0.8 / −2.7.
+  // ⚠ A /ʃ/ therefore gets a partly relaxed guard; this cue cannot tell it
+  // from an /f/, and neither can the server's (it called this "F" strident).
+  // ⚠ VOICED SAMPLES KEEP THE FULL FLOOR (guard weight = max(tilt, voicing)):
+  // a vowel's tilt is low, and the guard is what keeps bright vowels uncut.
+  tiltMidLoHz: 2000,
+  tiltMidHiHz: 4000,
+  tiltHfLoHz: 5000,
+  tiltHfHiHz: 10000,
+  tiltAttackMs: 2,
+  tiltReleaseMs: 15,
+  tiltFlatDb: 3,
+  tiltPeakedDb: 10,
+  tiltRelaxDb: 20,
   // Level alignment. Every absolute level in the detector — T_base, L_ref,
   // the voicing floor — is quoted for a file whose gated RMS sits here, and
   // shifts dB-for-dB with the file's measured level. The detector is linear
@@ -269,6 +297,17 @@ function lerp(a0, a1, t) {
 }
 
 /** Amount (0–1) → T_base in dBFS. 0 → 0 dBFS (off), then −28 → −44. */
+const BUTTER4_Q = [0.5412, 1.3066]
+
+/**
+ * How much of the lisp guard a fricative gets, 0–1, from its tilt (5–10 kHz
+ * over 2–4 kHz, dB): 1 for a peaked /s/, 0 for a flat /f/ — see `tiltRelaxDb`.
+ */
+export function lispGuardTiltWeight(tiltDb, tuning = HF_SOFTENER_TUNING) {
+  const { tiltFlatDb: lo, tiltPeakedDb: hi } = tuning
+  return tiltDb <= lo ? 0 : tiltDb >= hi ? 1 : (tiltDb - lo) / (hi - lo)
+}
+
 export function amountToThresholdDb(amount, tuning = HF_SOFTENER_TUNING) {
   const a = clamp(amount, 0, 1)
   return a === 0 ? 0 : lerp(tuning.thresholdAtZeroDb, tuning.thresholdAtFullDb, a)
@@ -532,6 +571,16 @@ export class HFSoftenerKernel {
     this.detHpCoeffs = highpass(sampleRate, tuning.detHpFreqHz, tuning.detHpQ)
     this.lmHpCoeffs = highpass(sampleRate, tuning.lmLowHz, tuning.lmQ)
     this.lmLpCoeffs = lowpass(sampleRate, tuning.lmHighHz, tuning.lmQ)
+    const tiltTop = Math.min(tuning.tiltHfHiHz, 0.45 * sampleRate)
+    // 4th-order Butterworth edges (two sections each). ⚠ ONE SECTION PER EDGE
+    // IS TOO SHALLOW: the "s"'s own 5–10 kHz energy leaks into the 2–4 kHz band
+    // and its tilt read +11 against +20 here, into the range an "F" reads.
+    const band = (lo, hi) => [
+      ...BUTTER4_Q.map(q => highpass(sampleRate, lo, q)),
+      ...BUTTER4_Q.map(q => lowpass(sampleRate, hi, q)),
+    ]
+    this.tiltMidCoeffs = band(tuning.tiltMidLoHz, tuning.tiltMidHiHz)
+    this.tiltHfCoeffs = band(tuning.tiltHfLoHz, tiltTop)
     this.channels = []
 
     // Stereo is linked: one detector reading drives one shelf gain on every
@@ -542,6 +591,8 @@ export class HFSoftenerKernel {
     this.voiceEnv = new Follower(sampleRate, tuning.voicedAttackMs, tuning.voicedDecayMs)
     this.lmEnv = new Follower(sampleRate, tuning.lmAttackMs, tuning.lmReleaseMs)
     this.voiceLevel = new Follower(sampleRate, tuning.voiceAttackMs, tuning.voiceHoldMs)
+    this.tiltMid = new Follower(sampleRate, tuning.tiltAttackMs, tuning.tiltReleaseMs)
+    this.tiltHf = new Follower(sampleRate, tuning.tiltAttackMs, tuning.tiltReleaseMs)
     this.gainSmooth = riseCoeff(tuning.gainSmoothMs, sampleRate)
     this.bbSmooth = riseCoeff(tuning.broadbandSmoothMs, sampleRate)
     this.bbGainDb = 0
@@ -673,6 +724,8 @@ export class HFSoftenerKernel {
         detHp: new Biquad(this.detHpCoeffs),
         lmHp: new Biquad(this.lmHpCoeffs),
         lmLp: new Biquad(this.lmLpCoeffs),
+        tiltMid: this.tiltMidCoeffs.map(c => new Biquad(c)),
+        tiltHf: this.tiltHfCoeffs.map(c => new Biquad(c)),
         z: new Float64Array(AUDIO_SECTIONS * 2), // z1, z2 per audio-path section
         work: new Float64Array(this.tuning.coeffUpdateSamples),
         // Per-chunk scratch: shelf input and detector signal.
@@ -718,6 +771,8 @@ export class HFSoftenerKernel {
         const pathRot = this.pathRot.tick()
         let peak = 0
         let energy = 0
+        let midE = 0
+        let hfE = 0
         for (let ch = 0; ch < nOut; ch++) {
           const s = chans[ch]
           const x = inputChannels[ch < nIn ? ch : nIn - 1][off + i]
@@ -731,6 +786,16 @@ export class HFSoftenerKernel {
           const a = det < 0 ? -det : det
           if (a > peak) peak = a
           energy += lm * lm
+          // Always runs, like the rotator, so it is warm when the guard is
+          // switched in mid-playback rather than reading "flat" for a moment.
+          let m = x
+          let h = x
+          for (let k = 0; k < 4; k++) {
+            m = s.tiltMid[k].tick(m)
+            h = s.tiltHf[k].tick(h)
+          }
+          midE += m * m
+          hfE += h * h
         }
 
         const trim = 1 + detRot * (this.rotTrim - 1)
@@ -738,7 +803,7 @@ export class HFSoftenerKernel {
         const voice = this.voiceEnv.tick(lmNow)
         let release = this.relSlow
         let wv = 0
-        if (this.vowelRelease || airVoiced) {
+        if (this.vowelRelease || airVoiced || this.lispGuard) {
           const voiceDb = voice > 0 ? 10 * Math.log10(voice) : -300
           const hfPrev = this.hfEnv.value
           const hfPrevDb = hfPrev > 0 ? Math.log(hfPrev) * DB_PER_NEPER : -300
@@ -757,6 +822,8 @@ export class HFSoftenerKernel {
         const hf = this.hfEnv.tick(peak * trim * this.detGain)
         const lmEnergy = this.lmEnv.tick(lmNow)
         const voiceE = this.voiceLevel.tick(lmNow)
+        const tiltM = this.tiltMid.tick(midE / nOut)
+        const tiltH = this.tiltHf.tick(hfE / nOut)
         const hfDb = hf > 0 ? Math.log(hf) * DB_PER_NEPER : -300
         const lmDb = lmEnergy > 0 ? 10 * Math.log10(lmEnergy) : -300
 
@@ -771,7 +838,10 @@ export class HFSoftenerKernel {
           // clears the floor, and the cap drops to zero. Measured at 100 % on
           // hot sibilants: post-"s" vowel −13.0 → −6.5 dB.
           const voiceDb = voiceE > 0 ? 10 * Math.log10(voiceE) : -300
-          const allowed = hfDb - voiceDb - tuning.lispGuardFloorDb
+          const tiltDb = tiltM > 0 && tiltH > 0 ? 10 * Math.log10(tiltH / tiltM) : tiltH > 0 ? 99 : 0
+          const wt = lispGuardTiltWeight(tiltDb, tuning)
+          const floor = tuning.lispGuardFloorDb - (1 - (wt > wv ? wt : wv)) * tuning.tiltRelaxDb
+          const allowed = hfDb - voiceDb - floor
           const cap = allowed > 0 ? allowed : 0
           if (target < -cap) target = -cap
         }
