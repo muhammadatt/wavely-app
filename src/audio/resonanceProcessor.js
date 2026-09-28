@@ -303,18 +303,14 @@ const VOICED_LM_HI_HZ = 3000
 const VOICED_HF_LO_HZ = 4500
 const VOICED_HF_HI_HZ = 12000
 const VOICED_LEAD_DB = 6
-// Peaked-fricative depth cap (`peakedFricativeCapDb` + `peakedFricativeTiltDb`,
-// off by default). A lisp is an /s/ losing its 5–10 kHz peak, and a peak is
-// what a resonance suppressor removes; the level guard does not bind on a loud
-// "s" (it is allowed plenty), so at Reso 100 the "s" in "fix slide" lost
-// 10.1 dB with it on. On a frame whose 5–10 kHz leads its 2–4 kHz, the cut may
-// not go deeper than the cap, the cap sliding from the zone's Max Cut toward
-// it by the tilt weight; unvoiced frames only. Cap 6 on that "s" at
-// Reso 20 / 40 / 60 / 100: −3.5 / −4.0 / −4.5 / −5.2 (guard off −4.8 / −6.3 /
-// −7.9 / −13.1). ⚠ A THRESHOLD HOLD WAS TRIED FIRST AND MADE RESO INERT on
-// sibilance (and a cap of 0 with it) — the knob stopped doing anything on the
-// "s". The cap keeps the knob. ⚠ The cap bounds DEPTH, not shape: Reso still
-// flattens the "s" peak ~2 dB at any setting it cuts at all.
+// Tilt-scaled lisp guard (`lispGuardTiltDb` [flat, peaked] + `lispGuardTiltRelaxDb`,
+// off by default). The level guard's floor relaxes by up to the relax depth as
+// the frame's 5–10 kHz-over-2–4 kHz tilt falls from peaked to flat — the HF
+// Softener's own rule — so a flat /f/ is not held to a floor set for /s/.
+// ⚠ A FIXED 6 dB DEPTH CAP SHIPPED BEFORE THIS and was dropped when Reso moved
+// AFTER the softener's cut: there the voice-relative guard reads an "s" the
+// softener has already turned down, so it leaves Reso little on all but the
+// hottest — relative, where a fixed cap took the same 6 dB from every "s".
 // Tilt bands are the HF Softener's lisp-guard tilt.
 const TILT_MID_LO_HZ = 2000
 const TILT_MID_HI_HZ = 4000
@@ -753,10 +749,9 @@ export class ResonanceKernel {
     // it): no frame's cut may take the 4.5–12 kHz band below the HELD voice
     // level + this floor. See GUARD_* below.
     this.guardFloorDb = Number.isFinite(p.lispGuardFloorDb) ? p.lispGuardFloorDb : null
-    // Peaked-fricative depth cap (off for ResoTame itself; the HF Softener's
-    // Reso stage sets it with its lisp guard). See the note at TILT_* below.
-    this.fricTilt = Array.isArray(p.peakedFricativeTiltDb) ? p.peakedFricativeTiltDb : null
-    this.fricCapDb = Number.isFinite(p.peakedFricativeCapDb) ? p.peakedFricativeCapDb : null
+    // Tilt scaling for that floor (off for ResoTame itself). See TILT_* below.
+    this.guardTilt = Array.isArray(p.lispGuardTiltDb) ? p.lispGuardTiltDb : null
+    this.guardTiltRelaxDb = Number.isFinite(p.lispGuardTiltRelaxDb) ? p.lispGuardTiltRelaxDb : 0
     this.guardAttack = 1 - Math.exp(-this.frameRateMs / GUARD_VOICE_ATTACK_MS)
     this.guardRelease = 1 - Math.exp(-this.frameRateMs / GUARD_VOICE_HOLD_MS)
 
@@ -1387,8 +1382,8 @@ export class ResonanceKernel {
 
     const voicedFloor = this.voicedFloorDb
     const guardFloor = this.guardFloorDb
-    const fricTilt = this.fricCapDb !== null ? this.fricTilt : null
-    const voicing = voicedFloor > 0 || guardFloor !== null || fricTilt !== null
+    const guardTilt = guardFloor !== null ? this.guardTilt : null
+    const voicing = voicedFloor > 0 || guardFloor !== null
     let lmPow = 0
     let hfPow = 0
     let tiltMid = 0
@@ -1413,14 +1408,6 @@ export class ResonanceKernel {
       const lead = 10 * Math.log10((lmPow + 1e-30) / (hfPow + 1e-30)) - VOICED_LEAD_DB
       wv = lead <= -VOICED_XFADE_DB ? 0 : lead >= VOICED_XFADE_DB ? 1 : (lead + VOICED_XFADE_DB) / (2 * VOICED_XFADE_DB)
     }
-    // Peaked-fricative weight, 0–1, from the frame's tilt; unvoiced only.
-    let fricW = 0
-    if (fricTilt !== null) {
-      const tilt = 10 * Math.log10((tiltHf + 1e-30) / (tiltMid + 1e-30))
-      const [lo, hi] = fricTilt
-      const wt = tilt <= lo ? 0 : tilt >= hi ? 1 : (tilt - lo) / (hi - lo)
-      fricW = wt * (1 - wv)
-    }
     // Lisp guard: the most this frame may take, dB. The voice level is held
     // (fast attack, slow let-go) so a sibilant is judged against the vowel
     // before it, not against its own low/mid, which is nearly nothing.
@@ -1428,7 +1415,15 @@ export class ResonanceKernel {
     if (guardFloor !== null) {
       const v = this.guardVoice ?? 0
       this.guardVoice = v + (lmPow > v ? this.guardAttack : this.guardRelease) * (lmPow - v)
-      const allowed = 10 * Math.log10((hfPow + 1e-30) / (this.guardVoice + 1e-30)) - guardFloor
+      // Tilt-scaled floor: full for a peaked /s/, relaxed for a flat /f/.
+      let floor = guardFloor
+      if (guardTilt !== null) {
+        const tilt = 10 * Math.log10((tiltHf + 1e-30) / (tiltMid + 1e-30))
+        const [lo, hi] = guardTilt
+        const wt = tilt <= lo ? 0 : tilt >= hi ? 1 : (tilt - lo) / (hi - lo)
+        floor -= (1 - wt) * this.guardTiltRelaxDb
+      }
+      const allowed = 10 * Math.log10((hfPow + 1e-30) / (this.guardVoice + 1e-30)) - floor
       guardCap = allowed > 0 ? allowed : 0
       // Only where a lisp can happen: on a voiced frame the guard would forbid
       // any cut at all — a vowel's top end sits far below its own low/mid —
@@ -1628,16 +1623,9 @@ export class ResonanceKernel {
     // take out of a band, and the honest answer differs by band: a low-mid
     // resonance can lose 12 dB before it is obviously gone, where the same
     // number spent on sibilance is a lisp.
-    // Peaked-fricative depth cap, SLIDING: the zone's Max Cut is pulled toward
-    // fricCapDb by the frame's tilt weight, so a half-peaked frame gets a cap
-    // halfway between. ⚠ An additive `cap + (1 − w)·96` shipped first and was
-    // a near-switch — it bound only above w ≈ 0.96 at Reso 20 (tilt ≈ 9.7 dB).
-    const fricCap = fricW > 0 ? this.fricCapDb : 0
     for (let k = 0; k < binCount; k++) {
       const r = reduction[k] * zoneDepth[k]
-      let ceiling = zoneMaxCut[k]
-      if (fricW > 0 && ceiling > fricCap) ceiling -= fricW * (ceiling - fricCap)
-      if (guardCap < ceiling) ceiling = guardCap
+      const ceiling = zoneMaxCut[k] < guardCap ? zoneMaxCut[k] : guardCap
       reduction[k] = r > ceiling ? ceiling : r
     }
 

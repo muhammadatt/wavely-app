@@ -93,6 +93,11 @@ export const HF_SOFTENER_TUNING = {
   compRatioAtZero: 1.0,
   compRatioAtFull: 6.0,
   maxDepthAtFullDb: 24,
+  // Duck (the broadband stage) — its own macro. Same threshold line as the
+  // EQ; a gentler top ratio and half the depth, because it moves the whole
+  // voice's level rather than only its top end.
+  duckRatioAtFull: 4.0,
+  duckMaxDepthAtFullDb: 12,
   kneeDb: 6.0, // ± around the threshold, quadratic
   // Module C
   lmLowHz: 200,
@@ -160,9 +165,10 @@ export const HF_SOFTENER_TUNING = {
   maxLevelOffsetDb: 24,
   // Implementation
   gainSmoothMs: 0.5,
-  // The broadband share of the reduction (Split) moves the WHOLE signal, the
-  // fundamental included, so it cannot follow the band cut's 0.5 ms without
-  // modulating the low end audibly. See BROADBAND note at `split`.
+  // The Duck stage moves the WHOLE signal, the fundamental included, so it
+  // cannot follow the band cut's 0.5 ms without modulating the low end
+  // audibly. 1 ms, not 3: measured on a 150 Hz tone under ducked sibilants,
+  // smoothing only changes splatter above 4 kHz while costing reduction.
   broadbandSmoothMs: 1,
   macroRampMs: 20,
   coeffUpdateSamples: 16,
@@ -171,7 +177,12 @@ export const HF_SOFTENER_TUNING = {
 
 /** User-facing parameters. The four controls, minus Listen (a monitor tap). */
 export const HF_SOFTENER_KERNEL_DEFAULTS = {
-  amount: 0.4, // 0–1
+  // The EQ stage — the dynamic band cut — 0–1. Its detector reads the signal
+  // AFTER the Duck stage, so it takes only what the duck left hot.
+  amount: 0.4,
+  // The Duck stage — a broadband turn-down of the whole "s", shape intact —
+  // 0–1, its own macro (duckTo*). 0 does not run it: bit-identical to EQ only.
+  duck: 0,
   // Detector high-pass corner, Hz. Higher keeps bright vowels out of the
   // detector; the detector's gain is compensated so an ordinary "s" reads the
   // same at any corner (see detectCompDb). 4000 is the spec's, bit-identical.
@@ -194,11 +205,6 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   // sibilants and gaps do not — it cannot hand back the cut. 'static': the
   // whole signal, as Air Boost does.
   airMode: 'voiced',
-  // How the reduction is TAKEN, 0–1: 0 all as the band cut (tone changes,
-  // level holds), 1 all as a broadband duck (tone holds, level dips). The
-  // total on the "s" is the same at every setting — Amount decides how much,
-  // Split decides the character — and the lisp guard caps the total.
-  split: 0,
 }
 
 /** Air makeup knob range, dB — "a few dB back", not a second Air Boost. */
@@ -296,7 +302,6 @@ function lerp(a0, a1, t) {
   return a0 + (a1 - a0) * t
 }
 
-/** Amount (0–1) → T_base in dBFS. 0 → 0 dBFS (off), then −28 → −44. */
 const BUTTER4_Q = [0.5412, 1.3066]
 
 /**
@@ -308,6 +313,7 @@ export function lispGuardTiltWeight(tiltDb, tuning = HF_SOFTENER_TUNING) {
   return tiltDb <= lo ? 0 : tiltDb >= hi ? 1 : (tiltDb - lo) / (hi - lo)
 }
 
+/** Amount (0–1) → T_base in dBFS. 0 → 0 dBFS (off), then −28 → −44. */
 export function amountToThresholdDb(amount, tuning = HF_SOFTENER_TUNING) {
   const a = clamp(amount, 0, 1)
   return a === 0 ? 0 : lerp(tuning.thresholdAtZeroDb, tuning.thresholdAtFullDb, a)
@@ -338,6 +344,25 @@ export function amountToCompressionRatio(amount, tuning = HF_SOFTENER_TUNING) {
  */
 export function amountToSlope(amount, tuning = HF_SOFTENER_TUNING) {
   return 1 - 1 / amountToCompressionRatio(amount, tuning)
+}
+
+/*
+ * Duck, the broadband stage, has its own macro: the EQ's threshold line, a
+ * true ratio 1:1 → 4:1 and a max depth 0 → 12 dB, each linear.
+ */
+/** Duck (0–1) → T_base in dBFS; the EQ's line. */
+export function duckToThresholdDb(duck, tuning = HF_SOFTENER_TUNING) {
+  return amountToThresholdDb(duck, tuning)
+}
+
+/** Duck (0–1) → max depth, 0 → 12 dB. */
+export function duckToMaxDepthDb(duck, tuning = HF_SOFTENER_TUNING) {
+  return clamp(duck, 0, 1) * tuning.duckMaxDepthAtFullDb
+}
+
+/** Duck (0–1) → gain-computer slope; true ratio 1:1 → 4:1. */
+export function duckToSlope(duck, tuning = HF_SOFTENER_TUNING) {
+  return 1 - 1 / lerp(1, tuning.duckRatioAtFull, clamp(duck, 0, 1))
 }
 
 /** Context (0–1) → κ, Module C's modulation depth. 0 = fixed threshold. */
@@ -606,7 +631,9 @@ export class HFSoftenerKernel {
     // The SLOPE is ramped, not the divisor: 1:1 is a divisor of ∞, and a
     // linear ramp through ∞ is NaN.
     this.slope = new Ramp(0, rampSamples)
-    this.split = new Ramp(0, rampSamples)
+    this.duckBase = new Ramp(0, rampSamples)
+    this.duckMax = new Ramp(0, rampSamples)
+    this.duckSlope = new Ramp(0, rampSamples)
     // 0 → dry into the detector / audio path, 1 → rotated. Ramped so a mode
     // switch mid-playback crossfades instead of stepping phase (a click).
     this.detRot = new Ramp(0, rampSamples)
@@ -623,7 +650,7 @@ export class HFSoftenerKernel {
     this.writeShelf(this.coeffCur, 0)
     const chunk = tuning.coeffUpdateSamples
     this.gainBuf = new Float64Array(chunk)
-    // Broadband gain per sample, linear; all 1 while Split is 0.
+    // Duck gain per sample, linear; all 1 while Duck is 0.
     this.bbBuf = new Float64Array(chunk).fill(1)
 
     // Air makeup: a static cascade after the dynamic cut. Coefficients step on
@@ -683,7 +710,10 @@ export class HFSoftenerKernel {
     this.dMax.set(amountToMaxDepthDb(p.amount, this.tuning), immediate)
     this.kappa.set(contextToKappa(p.context), immediate)
     this.slope.set(amountToSlope(p.amount, this.tuning), immediate)
-    this.split.set(clamp(Number(p.split) || 0, 0, 1), immediate)
+    const duck = clamp(Number(p.duck) || 0, 0, 1)
+    this.duckBase.set(duck > 0 ? duckToThresholdDb(duck, this.tuning) + off : 0, immediate)
+    this.duckMax.set(duckToMaxDepthDb(duck, this.tuning), immediate)
+    this.duckSlope.set(duckToSlope(duck, this.tuning), immediate)
     this.detRot.set(p.rotator === 'off' ? 0 : 1, immediate)
     this.pathRot.set(p.rotator === 'inpath' ? 1 : 0, immediate)
     this.airVoiced = p.airMode !== 'static'
@@ -828,40 +858,68 @@ export class HFSoftenerKernel {
         const lmDb = lmEnergy > 0 ? 10 * Math.log10(lmEnergy) : -300
 
         const base = this.tBase.tick()
-        const tEff = adaptiveThresholdDb(base, lmDb, this.kappa.tick(), tuning.lRefDb + this.levelOffsetDb, tuning.maxShiftDb)
+        const kappa = this.kappa.tick()
+        const lRef = tuning.lRefDb + this.levelOffsetDb
+        const tEff = adaptiveThresholdDb(base, lmDb, kappa, lRef, tuning.maxShiftDb)
         const slope = this.slope.tick()
         const dMax = this.dMax.tick()
-        let target = slope > 0 ? gainComputerDb(hfDb, tEff, 1 / slope, dMax, tuning.kneeDb) : 0
-        if (this.lispGuard && target < 0) {
-          // ⚠ THE GUARD ALSO REMOVES MOST RELEASE CARRYOVER, BY CONSTRUCTION:
-          // when the next vowel starts the voice level jumps, the "s" no longer
-          // clears the floor, and the cap drops to zero. Measured at 100 % on
-          // hot sibilants: post-"s" vowel −13.0 → −6.5 dB.
-          const voiceDb = voiceE > 0 ? 10 * Math.log10(voiceE) : -300
+        const dBase = this.duckBase.tick()
+        const dSlope = this.duckSlope.tick()
+        const dDepth = this.duckMax.tick()
+
+        // Lisp guard floor, per sample: tilt-scaled, full on voiced samples.
+        // Shared by both stages — each is capped against the same held voice.
+        let voiceDb = 0
+        let floor = 0
+        if (this.lispGuard) {
+          voiceDb = voiceE > 0 ? 10 * Math.log10(voiceE) : -300
           const tiltDb = tiltM > 0 && tiltH > 0 ? 10 * Math.log10(tiltH / tiltM) : tiltH > 0 ? 99 : 0
           const wt = lispGuardTiltWeight(tiltDb, tuning)
-          const floor = tuning.lispGuardFloorDb - (1 - (wt > wv ? wt : wv)) * tuning.tiltRelaxDb
-          const allowed = hfDb - voiceDb - floor
+          floor = tuning.lispGuardFloorDb - (1 - (wt > wv ? wt : wv)) * tuning.tiltRelaxDb
+        }
+
+        // ── Stage 1: Duck — the whole signal turned down, shape intact ─────
+        // ⚠ THE GUARD ALSO REMOVES MOST RELEASE CARRYOVER, BY CONSTRUCTION:
+        // when the next vowel starts the voice level jumps, the "s" no longer
+        // clears the floor, and the cap drops to zero.
+        let duckTarget = 0
+        if (dSlope > 0) {
+          const tDuck = adaptiveThresholdDb(dBase, lmDb, kappa, lRef, tuning.maxShiftDb)
+          duckTarget = gainComputerDb(hfDb, tDuck, 1 / dSlope, dDepth, tuning.kneeDb)
+          if (this.lispGuard && duckTarget < 0) {
+            const allowed = hfDb - voiceDb - floor
+            const cap = allowed > 0 ? allowed : 0
+            if (duckTarget < -cap) duckTarget = -cap
+          }
+        }
+        if (duckTarget !== 0 || this.bbGainDb !== 0) {
+          this.bbGainDb += (duckTarget - this.bbGainDb) * this.bbSmooth
+          // Snap the tail to exactly 0 so Duck settles back onto the
+          // untouched path rather than a gain of 0.99999999.
+          if (duckTarget === 0 && this.bbGainDb > -1e-6) this.bbGainDb = 0
+          bbAny = true
+        }
+        const duckLin = this.bbGainDb === 0 ? 1 : Math.exp(this.bbGainDb * LN10_OVER_20)
+        this.bbBuf[i] = duckLin
+        if (-this.bbGainDb > this.meterMaxBroadband) this.meterMaxBroadband = -this.bbGainDb
+
+        // ── Stage 2: EQ — the band cut, on what the duck left ──────────────
+        // Its detector hears the ducked "s": the duck is broadband, so what the
+        // EQ's detector reads is the input detector level plus this sample's
+        // duck gain, in dB. ⚠ NOT A SECOND FOLLOWER ON THE DUCKED SIGNAL — that
+        // was built first, and its 40 ms release lagged a deepening duck, so the
+        // EQ read the "s" as hotter than it was and the guard let the two
+        // stages together reach −9.8 dB where it should hold ~−5.
+        const hfEqDb = hfDb + this.bbGainDb
+        let target = slope > 0 ? gainComputerDb(hfEqDb, tEff, 1 / slope, dMax, tuning.kneeDb) : 0
+        if (this.lispGuard && target < 0) {
+          // Read post-duck, so the guard caps the TOTAL of both stages.
+          const allowed = hfEqDb - voiceDb - floor
           const cap = allowed > 0 ? allowed : 0
           if (target < -cap) target = -cap
         }
-        // Split the reduction. The two shares ADD on the "s" — the band cut's
-        // gain is its depth in the sibilance band, and the duck takes the same
-        // dB from everything — so the total there is `target` at any Split,
-        // and the lisp guard above has already capped that total.
-        const sp = this.split.tick()
-        this.shelfGainDb += (target * (1 - sp) - this.shelfGainDb) * this.gainSmooth
+        this.shelfGainDb += (target - this.shelfGainDb) * this.gainSmooth
         gainBuf[i] = this.shelfGainDb
-        const bbTarget = target * sp
-        if (bbTarget !== 0 || this.bbGainDb !== 0) {
-          this.bbGainDb += (bbTarget - this.bbGainDb) * this.bbSmooth
-          // Snap the tail to exactly 0 so Split 0 settles back onto the
-          // untouched path rather than a gain of 0.99999999.
-          if (bbTarget === 0 && this.bbGainDb > -1e-6) this.bbGainDb = 0
-          bbAny = true
-        }
-        this.bbBuf[i] = this.bbGainDb === 0 ? 1 : Math.exp(this.bbGainDb * LN10_OVER_20)
-        if (-this.bbGainDb > this.meterMaxBroadband) this.meterMaxBroadband = -this.bbGainDb
         this.lastThresholdLiftDb = tEff - base
         if (gainOut) gainOut[off + i] = this.shelfGainDb + this.bbGainDb
         if (-this.shelfGainDb > this.meterMaxReduction) this.meterMaxReduction = -this.shelfGainDb

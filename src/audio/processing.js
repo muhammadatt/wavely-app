@@ -675,16 +675,17 @@ export function computeVoiceProfile(segments, start, end, sampleRate, channels) 
  */
 async function applyWorkletRegion(
   segments, start, end, sampleRate, channels,
-  { ensureWorklet, processorName, kernelParams, latencySamples = 0, preRollSamples = 0, preStages = [] },
+  { ensureWorklet, processorName, kernelParams, latencySamples = 0, preRollSamples = 0, preStages = [], postStages = [] },
 ) {
   const duration = end - start
   const numSamples = Math.ceil(duration * sampleRate)
-  // Pre-stages are worklets chained AHEAD of the main one, each with its own
-  // latency; the whole chain's delay is what the render has to trim. Only the
-  // HF Softener's ResoTame pre-stage uses this today — every other caller
-  // passes none and renders exactly as before.
+  // Pre- and post-stages are worklets chained AHEAD of / AFTER the main one,
+  // each with its own latency; the whole chain's delay is what the render has
+  // to trim. Only the HF Softener's Reso post-stage uses this today — every
+  // other caller passes none and renders exactly as before.
+  const stages = [...preStages, ...postStages]
   const latency = Math.max(0, Math.round(
-    latencySamples + preStages.reduce((sum, st) => sum + (st.latencySamples ?? 0), 0),
+    latencySamples + stages.reduce((sum, st) => sum + (st.latencySamples ?? 0), 0),
   ))
 
   // ── PRE-ROLL ─────────────────────────────────────────────────────────────
@@ -740,7 +741,7 @@ async function applyWorkletRegion(
 
   const offlineCtx = new OfflineAudioContext(channels, renderSamples, sampleRate)
   await ensureWorklet(offlineCtx)
-  for (const st of preStages) await st.ensureWorklet(offlineCtx)
+  for (const st of stages) await st.ensureWorklet(offlineCtx)
 
   const inputBuffer = offlineCtx.createBuffer(channels, renderSamples, sampleRate)
   for (let ch = 0; ch < channels; ch++) {
@@ -763,19 +764,26 @@ async function applyWorkletRegion(
     processorOptions: { params: kernelParams },
   })
 
+  const stageNode = st => new AudioWorkletNode(offlineCtx, st.processorName, {
+    channelCount: channels,
+    channelCountMode: 'explicit',
+    outputChannelCount: [channels],
+    processorOptions: { params: st.kernelParams, ...(st.processorOptions ?? {}) },
+  })
   let upstream = source
   for (const st of preStages) {
-    const pre = new AudioWorkletNode(offlineCtx, st.processorName, {
-      channelCount: channels,
-      channelCountMode: 'explicit',
-      outputChannelCount: [channels],
-      processorOptions: { params: st.kernelParams, ...(st.processorOptions ?? {}) },
-    })
+    const pre = stageNode(st)
     upstream.connect(pre)
     upstream = pre
   }
   upstream.connect(node)
-  node.connect(offlineCtx.destination)
+  upstream = node
+  for (const st of postStages) {
+    const post = stageNode(st)
+    upstream.connect(post)
+    upstream = post
+  }
+  upstream.connect(offlineCtx.destination)
   source.start(0)
 
   const rendered = await offlineCtx.startRendering()
@@ -905,12 +913,12 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
     processorName: 'hf-softener-processor',
     kernelParams: toHFSoftenerKernelParams(merged),
     preRollSamples: Math.round(HF_SOFTENER_PREROLL_S * sampleRate),
-    // The Reso knob above 0: a band-limited ResoTame ahead of the softener — see
+    // The Reso knob above 0: a band-limited ResoTame AFTER the softener — see
     // hfSoftenerResoStage.js. Its 512-sample latency is trimmed with the rest.
     // ⚠ Like ResoTame itself, its STFT grid phase at the region start cannot
     // match a running preview, so with RESO on apply is close to the preview
     // rather than sample-identical.
-    preStages: resoOn(merged) ? [{
+    postStages: resoOn(merged) ? [{
       ensureWorklet: ensureResonanceWorklet,
       processorName: 'resonance-processor',
       kernelParams: resoKernelParams(merged),

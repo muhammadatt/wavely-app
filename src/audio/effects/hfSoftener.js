@@ -37,12 +37,14 @@ export function createHFSoftener(audioContext) {
   let listen = 'off'
 
   // ── Routing ──────────────────────────────────────────────────────────────
-  // input → [ResoTame pre-stage] → softener → preOutput, with DELTA built
-  // here when the pre-stage is in: the softener's own delta would only hear
-  // what IT removed, so the monitor becomes (input delayed by the pre-stage's
-  // latency) − (final output) and covers both stages. ⚠ The delay is a
-  // DelayNode at 512/fs, whose float32 time may land a hair off an integer
-  // sample — a monitoring-only imprecision; apply never uses this path.
+  // input → softener (Duck → EQ → Air) → [Reso post-stage] → preOutput.
+  // ⚠ RESO RUNS AFTER THE CUT: turning the "s" down first keeps its shape,
+  // and Reso's voice-relative guard then reads the already-softened "s", so
+  // it is left little to take on all but the hottest. With Reso in, DELTA is
+  // built here — (input delayed by Reso's latency) − (final output) — from
+  // the softener's pre-air output, so it shows only what was removed. ⚠ The
+  // delay is a DelayNode at 512/fs, whose float32 time may land a hair off an
+  // integer sample — a monitoring-only imprecision; apply never uses this path.
   const inputMonitor = audioContext.createGain()
   const outputMonitor = audioContext.createGain()
   preOutput.connect(outputMonitor)
@@ -61,23 +63,20 @@ export function createHFSoftener(audioContext) {
       return
     }
     const withReso = resoOn(params) && resoNode
-    let src = input
-    if (withReso) {
-      input.connect(resoNode)
-      src = resoNode
-    }
-    src.connect(worklet)
+    input.connect(worklet)
     const delta = listen === 'delta'
-    // With the pre-stage in, the softener hands over its output WITHOUT the
-    // air makeup ('preair'), so the wrapper's delta is only what was removed.
+    // With Reso in, the softener hands over its output WITHOUT the air makeup
+    // ('preair'), so the wrapper's delta is only what was removed.
     worklet.port.postMessage({ type: 'listen', mode: delta ? (withReso ? 'preair' : 'delta') : 'off' })
+    const last = withReso ? resoNode : worklet
+    if (withReso) worklet.connect(resoNode)
     if (delta && withReso) {
       input.connect(resoDelay)
       resoDelay.connect(preOutput)
-      worklet.connect(invert)
+      last.connect(invert)
       invert.connect(preOutput)
     } else {
-      worklet.connect(preOutput)
+      last.connect(preOutput)
     }
   }
 
@@ -133,7 +132,7 @@ export function createHFSoftener(audioContext) {
         resoNode?.port.postMessage({ type: 'params', params: resoKernelParams(params) })
       }
       if (name === 'resoAmount') {
-        // Crossing 0 puts the pre-stage in or takes it out of the chain.
+        // Crossing 0 puts the Reso stage in or takes it out of the chain.
         if (resoOn(params) !== wasOn) {
           ensureReso()
           rewire()
@@ -152,7 +151,7 @@ export function createHFSoftener(audioContext) {
       return reductionDb
     },
 
-    /** Broadband share of the reduction (Split), positive dB — max since the last post. */
+    /** The Duck stage's reduction, positive dB — max since the last post. */
     getBroadband() {
       return broadbandDb
     },

@@ -2,11 +2,11 @@
 /**
  * HF Softener.
  *
- * Amount is the tuning; Split decides how it is taken — as the band cut (tone
- * changes, level holds) or a broadband duck (tone holds, level dips), same
- * total on the "s" either way; Shape picks the cut; Air puts back a few dB of
- * top after it, on Air Boost's curve; Reso is the amount of the optional
- * ResoTame pre-stage, which the HF RESO rocker switches in. Context,
+ * The chain runs Duck → EQ → Air → Reso. Duck turns the whole "s" down with its
+ * shape intact; EQ cuts the top of what the duck left (its detector hears the
+ * ducked signal); Shape picks that cut; Air puts back a few dB of top after it,
+ * on Air Boost's curve; Reso is the amount of the ResoTame stage at the end,
+ * out of the chain at 0. Context,
  * Rotator, Release and vowel release were controls while the design was being
  * tuned and are now pinned (50 %, sidechain, 40 ms, on — see useHFSoftener.js). DELTA sits in the
  * header like every other plugin's monitor and never reaches the apply path.
@@ -18,6 +18,7 @@ import { useHFSoftener } from '../../composables/useHFSoftener.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections, AIR_MAKEUP_MAX_DB,
+  duckToMaxDepthDb, duckToThresholdDb, duckToSlope,
   DETECT_HZ_MIN, DETECT_HZ_MAX,
 } from '../../audio/hfSoftenerProcessor.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
@@ -31,10 +32,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfResoAmount, hfAir, hfComp, hfCompAir, hfDetect, hfAirMode, hfSplit, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfShape, hfLispGuard, hfResoAmount, hfAir, hfComp, hfCompAir, hfDetect, hfAirMode, hfDuck, hfBroadband, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoAmount, syncAir, syncComp, syncDetect, scheduleAutoAir, syncAirMode, syncSplit, syncShape, syncLispGuard, toggleDelta,
+  togglePreview, syncAmount, syncResoAmount, syncAir, syncComp, syncDetect, scheduleAutoAir, syncAirMode, syncDuck, syncShape, syncLispGuard, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -119,8 +120,9 @@ function shelfPath(gainDb, levelDb = 0) {
 }
 
 const maxDepthDb = computed(() => amountToMaxDepthDb(hfAmount.value / 100))
-const splitFrac = computed(() => hfSplit.value / 100)
-const maxPath = computed(() => shelfPath(-maxDepthDb.value * (1 - splitFrac.value), -maxDepthDb.value * splitFrac.value))
+const duckMaxDb = computed(() => duckToMaxDepthDb(hfDuck.value / 100))
+// Each stage's ceiling, stacked: the most the two could ever take together.
+const maxPath = computed(() => shelfPath(-maxDepthDb.value, -duckMaxDb.value))
 const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthDb.value), -hfBroadband.value))
 const totalReduction = computed(() => hfReduction.value + hfBroadband.value)
 const liveFill = computed(() => `${livePath.value} L${CURVE_W},${Y0} L0,${Y0} Z`)
@@ -128,6 +130,12 @@ const liveFill = computed(() => `${livePath.value} L${CURVE_W},${Y0} L0,${Y0} Z`
 // The TRUE compression ratio (1.5:1 at the default, 6:1 at 100 %), not the
 // spec's divisor. Max depth is on the meter's scale and rarely the limit.
 const ratioLabel = computed(() => `${amountToCompressionRatio(hfAmount.value / 100).toFixed(1)}:1`)
+
+const duckRatioLabel = computed(() => `${(1 / (1 - duckToSlope(hfDuck.value / 100))).toFixed(1)}:1`)
+const duckThresholdLabel = computed(() => {
+  const t = duckToThresholdDb(hfDuck.value / 100) + hfLevelOffset.value
+  return hfDuck.value === 0 ? 'OFF' : `${t.toFixed(0)} dBFS`
+})
 
 const thresholdLabel = computed(() => {
   // The threshold actually in force: the Amount's nominal plus the file's
@@ -211,14 +219,14 @@ async function applyAndClose() {
   >
     <div class="px-[26px] pt-[22px] pb-[26px]">
       <!-- 24 dB full scale: the deepest the shelf can go, at Amount 100 %. -->
-      <!-- The total taken off the "s"; the readout under it says how it was
-           taken — as tone (the band cut) or as level (the broadband duck). -->
+      <!-- The total taken off the "s"; the readout under it says which stage
+           took it — the Duck (level) or the EQ (tone). -->
       <GainReductionBar :reduction-db="-totalReduction" :accent="ACCENT" :full-scale-db="24" title="REDUCTION" />
       <p
         class="mt-[6px] text-right"
         style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)"
       >
-        TONE {{ fmtCut(hfReduction) }} · LEVEL {{ fmtCut(hfBroadband) }}
+        DUCK {{ fmtCut(hfBroadband) }} · EQ {{ fmtCut(hfReduction) }}
       </p>
 
       <div class="flex items-center justify-between gap-[22px] mt-[18px]">
@@ -259,11 +267,25 @@ async function applyAndClose() {
           <div class="flex gap-[10px] mt-[16px]">
             <div class="w-[104px] flex flex-col items-center">
               <Knob
+                :model-value="hfDuck"
+                @update:model-value="syncDuck"
+                :min="0" :max="100" :step="1"
+                label="Duck" :accent="ACCENT" :format-value="formatPct"
+                :disabled="!hfPreview"
+                title="First stage: turns the whole S down, keeping its shape and tone — the gentlest way to de-ess, like a clip-gain de-esser. Threshold, ratio (up to 4:1) and depth (up to 12 dB) rise together."
+              />
+              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+                {{ duckThresholdLabel }} · {{ duckRatioLabel }}
+              </span>
+            </div>
+            <div class="w-[104px] flex flex-col items-center">
+              <Knob
                 :model-value="hfAmount"
                 @update:model-value="syncAmount"
                 :min="0" :max="100" :step="1"
-                label="Amount" :accent="ACCENT" :format-value="formatPct"
+                label="EQ" :accent="ACCENT" :format-value="formatPct"
                 :disabled="!hfPreview"
+                title="Second stage: a dynamic cut of the top end, on whatever the Duck left hot — it hears the ducked S, so turning Duck up makes it back off. Threshold, ratio (up to 6:1) and depth (up to 24 dB) rise together."
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
                 {{ thresholdLabel }} · {{ ratioLabel }}
@@ -284,19 +306,6 @@ async function applyAndClose() {
             </div>
             <div class="w-[104px] flex flex-col items-center">
               <Knob
-                :model-value="hfSplit"
-                @update:model-value="syncSplit"
-                :min="0" :max="100" :step="1"
-                label="Split" :accent="ACCENT" :format-value="formatPct"
-                :disabled="!hfPreview"
-                title="How the reduction is taken. 0 %: all as the band cut — the level holds but the tone changes on each S. 100 %: all as a broadband duck — the tone holds but the voice dips. The total taken off the S stays the same, and the lisp guard caps it either way."
-              />
-              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                TONE ↔ LEVEL
-              </span>
-            </div>
-            <div class="w-[104px] flex flex-col items-center">
-              <Knob
                 :model-value="hfAir"
                 @update:model-value="syncAir"
                 :min="0" :max="AIR_MAKEUP_MAX_DB" :step="0.1"
@@ -309,15 +318,15 @@ async function applyAndClose() {
               </span>
             </div>
             <div class="w-[104px] flex flex-col items-center">
-              <!-- The ResoTame pre-stage's amount macro (HF_RESO_KNOTS). Live
-                   only while HF RESO is in. -->
+              <!-- The Reso stage's amount macro (HF_RESO_KNOTS), last in the
+                   chain; 0 takes it out. -->
               <Knob
                 :model-value="hfResoAmount"
                 @update:model-value="syncResoAmount"
                 :min="0" :max="100" :step="1"
                 label="Reso" :accent="ACCENT" :format-value="formatPct"
                 :disabled="!hfPreview"
-                title="How much the ResoTame pre-stage takes. The first half catches rings and whistles; the second half takes sibilance too, in even steps, and the softener's own cut eases off as it does. Threshold, depth and cut ceiling move together."
+                title="How much the ResoTame stage at the end of the chain takes. It catches rings and whistles; on an S it only takes what the Duck and EQ left above a normal S, so with the lisp guard on a well-treated S is left alone. Threshold, depth and cut ceiling move together."
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
                 {{ hfResoAmount > 0 ? 'RINGS + S · 5–12k' : 'OFF' }}

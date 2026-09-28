@@ -1,15 +1,14 @@
 /**
- * The HF Softener's optional ResoTame pre-stage: a band-limited, short-frame
- * resonance suppressor that runs AHEAD of the softener when its RESO switch is
- * on.
+ * The HF Softener's optional ResoTame stage: a band-limited, short-frame
+ * resonance suppressor that runs AFTER the softener's cut (Duck → EQ → Air →
+ * Reso), in the chain whenever its knob is above 0.
  *
- * The two stages split the work, and the Reso knob sets where. Low, it
- * takes only narrow peaks that stand far above the local spectrum — a whistly
- * "s", a mic or room ring — which the softener could only reach by cutting the
- * whole band, and leaves the broadband spike of an ordinary "s" to the
- * softener. Lowered, it takes the sibilance too, spectrally rather than as a
- * band dip, and the softener backs off by itself: its detector hears what
- * ResoTame already removed, and its lisp guard reads the same level.
+ * ⚠ IT RAN FIRST UNTIL THE DUCK/EQ SPLIT, and moved because of what it does to
+ * an "s": a resonance suppressor removes PEAKS, and an /s/ whose peak is taken
+ * sounds flatter, not just quieter — the lisp. Turning the "s" down first keeps
+ * its shape, and this stage's voice-relative guard then reads an "s" that is
+ * already near a normal level, so it is left little to take on all but the
+ * hottest. Rings and whistles on vowels are unguarded and taken as before.
  *
  * The panel's Reso knob is an amount macro over threshold, depth and max cut
  * (see HF_RESO_KNOTS). The table below is the earlier THRESHOLD-ONLY
@@ -146,27 +145,29 @@ export const HF_RESO_ZONES = hfResoZones()
 
 /** Kernel params for the pre-stage, ready to cross a structured clone. */
 /**
- * The lisp guard's floor in THIS stage's units: frame energy 4.5–12 kHz
- * against the held 200 Hz–3 kHz energy. The softener's floor (−16) is in ITS
- * units (a 4 kHz peak follower against the same held voice), and on the "s"
- * frames of two real narration clips this stage's measure read 1.0 / 1.9 dB
- * lower (median; the synthetic voice disagrees at +3.4) — so −17.5 puts the
- * two guards on the same level and the TOTAL cut, Reso + softener, stops
- * where the softener alone would have.
+ * The guard's floor, in THIS stage's units: frame energy 4.5–12 kHz against the
+ * held 200 Hz–3 kHz energy. Reso runs AFTER the softener's cut, so this is the
+ * level of a NORMAL "s" for the voice, not the lisp limit: Reso takes only what
+ * the Duck and EQ left above it. ⚠ −17.5 (the softener's lisp floor, carried
+ * over from when Reso ran first) let Reso 40 take a Duck 40 / EQ 20 "s" in
+ * "fix slide" −7.6 → −11.3 dB and flatten its peak 3.3 dB. At −12: −8.5, peak
+ * 1.0 flatter (Reso 100: −8.8); Messy and Bright's strident events −6.0 →
+ * −6.8, David Greenberg's −3.3 → −4.2. −10 leaves ~0.2–0.5 dB. Voiced frames
+ * are unguarded, so rings on vowels are the same at every floor.
  */
-export const HF_RESO_LISP_GUARD_FLOOR_DB = -17.5
+export const HF_RESO_LISP_GUARD_FLOOR_DB = -12
 
 /**
- * The lisp guard's other half here: on a frame whose 5–10 kHz leads its 2–4
- * kHz — a peaked /s/ — no cut may go deeper than HF_RESO_FRICATIVE_CAP_DB,
- * sliding from the zone's Max Cut toward it between these tilts (dB). The softener's lisp
- * guard uses the same tilt and thresholds (`tiltFlatDb` / `tiltPeakedDb`),
- * pinned equal by a test. See `peakedFricativeCapDb` in resonanceProcessor.js.
+ * The guard's floor is TILT-SCALED, as the softener's is: full on a frame whose
+ * 5–10 kHz leads its 2–4 kHz by HF_RESO_GUARD_TILT_DB[1], relaxed by
+ * HF_RESO_GUARD_TILT_RELAX_DB at [0] and below, so a flat /f/ is not held to a
+ * floor set for /s/. Pinned to the softener's `tiltFlatDb` / `tiltPeakedDb` /
+ * `tiltRelaxDb` by a test.
  */
-export const HF_RESO_FRICATIVE_TILT_DB = [3, 10]
-export const HF_RESO_FRICATIVE_CAP_DB = 6
+export const HF_RESO_GUARD_TILT_DB = [3, 10]
+export const HF_RESO_GUARD_TILT_RELAX_DB = 20
 
-export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard = true, fricCapDb = HF_RESO_FRICATIVE_CAP_DB } = {}) {
+export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard = true } = {}) {
   return {
     ...toKernelParams({
       ...RESONANCE_DEFAULTS,
@@ -180,7 +181,7 @@ export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard 
     // message into what it has, so an omitted key keeps its old value and the
     // panel's Lisp Guard switch could turn the guard on but never off again.
     lispGuardFloorDb: lispGuard ? HF_RESO_LISP_GUARD_FLOOR_DB : null,
-    peakedFricativeTiltDb: HF_RESO_FRICATIVE_TILT_DB,
-    peakedFricativeCapDb: lispGuard ? fricCapDb : null,
+    lispGuardTiltDb: HF_RESO_GUARD_TILT_DB,
+    lispGuardTiltRelaxDb: HF_RESO_GUARD_TILT_RELAX_DB,
   }
 }

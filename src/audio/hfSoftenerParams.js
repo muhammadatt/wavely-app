@@ -1,13 +1,18 @@
 /**
  * HF Softener's UI params: defaults and the mappings to kernel params, for the
- * softener and for its Reso pre-stage. Split out of effects/hfSoftener.js so
+ * softener and for its Reso stage. Split out of effects/hfSoftener.js so
  * node can import it — the wrapper pulls Vite `?worker&url` specifiers.
  */
 
 import { hfResoKernelParams } from './hfSoftenerResoStage.js'
 
 export const HF_SOFTENER_DEFAULTS = {
-  amount: 40, // %, drives threshold, ratio and depth together — see amountToThresholdDb
+  // The two cutting stages, in chain order. Duck turns the whole "s" down with
+  // its shape intact; EQ then cuts the top of what the duck left — its
+  // detector hears the ducked signal. Each is a macro over threshold, ratio and
+  // depth (duckTo* / amountTo* in hfSoftenerProcessor.js).
+  duck: 40, // %
+  amount: 20, // %, the EQ stage
   context: 50, // %, Module C depth; 0 = fixed threshold
   rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
   release: 40, // ms, HF release outside vowels — fixed, not on the panel
@@ -24,7 +29,6 @@ export const HF_SOFTENER_DEFAULTS = {
   comp: true,
   compAir: 0, // dB, measured by useHFSoftener; never a user setting
   airMode: 'voiced', // 'voiced' (vowels only — never lifts the "s" or the gaps) | 'static'
-  split: 0, // 0–100 %: how the reduction is taken — 0 band cut (tone), 100 broadband duck (level)
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
 }
@@ -43,7 +47,7 @@ export function toKernelParams(params) {
     detectHz: params.detect,
     airDb: (params.air ?? 0) + (params.comp ? (params.compAir ?? 0) : 0),
     airMode: params.airMode,
-    split: (params.split ?? 0) / 100,
+    duck: (params.duck ?? 0) / 100,
   }
 }
 

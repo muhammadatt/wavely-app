@@ -34,7 +34,7 @@ const hfDetect = ref(HF_SOFTENER_DEFAULTS.detect)
 // handing the cut back to the sibilants. STATIC: Air Boost's behaviour.
 const hfAirMode = ref(HF_SOFTENER_DEFAULTS.airMode)
 // How the reduction is taken: 0 all as the band cut, 100 all as a broadband duck.
-const hfSplit = ref(HF_SOFTENER_DEFAULTS.split)
+const hfDuck = ref(HF_SOFTENER_DEFAULTS.duck)
 const hfBroadband = ref(0)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
@@ -69,7 +69,7 @@ function currentParams() {
     comp: hfComp.value,
     compAir: hfCompAir.value,
     airMode: hfAirMode.value,
-    split: hfSplit.value,
+    duck: hfDuck.value,
     detect: hfDetect.value,
     levelOffset: hfLevelOffset.value,
   }
@@ -228,9 +228,9 @@ export function useHFSoftener() {
     scheduleAutoAir()
   }
 
-  function syncSplit(v) {
-    hfSplit.value = v
-    pushParam('split', v)
+  function syncDuck(v) {
+    hfDuck.value = v
+    pushParam('duck', v)
     scheduleAutoAir()
   }
 
@@ -338,7 +338,7 @@ export function useHFSoftener() {
     hfAirLossDb,
     hfDetect,
     hfAirMode,
-    hfSplit,
+    hfDuck,
     hfBroadband,
     hfShape,
     hfLispGuard,
@@ -360,7 +360,7 @@ export function useHFSoftener() {
     refreshAutoAir,
     scheduleAutoAir,
     syncAirMode,
-    syncSplit,
+    syncDuck,
     syncShape,
     syncLispGuard,
     toggleDelta,

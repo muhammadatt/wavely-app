@@ -9,8 +9,8 @@
  * STATIC's ~3).
  *
  * So the automatic amount follows the chain's measured top-end loss — the
- * softener's cut plus the Reso pre-stage's when it is in, everything Amount,
- * Split, Detect and Reso are doing — as a FRACTION of it, capped at the knob's
+ * softener's cut plus the Reso pre-stage's when it is in, everything Duck,
+ * EQ, Detect and Reso are doing — as a FRACTION of it, capped at the knob's
  * range:
  *
  *   loss   = 10·log10( E_out(>5 kHz) / E_in(>5 kHz) )   over the analysis window, Air 0
@@ -49,20 +49,20 @@ function topEnergy(channels, sampleRate) {
  * @param {Float32Array[]} channelData
  * @param {number} sampleRate
  * @param {object} kernelParams softener kernel params (Air is forced to 0)
- * @param {object|null} resoParams ResoTame kernel params for the pre-stage, or null
+ * @param {object|null} resoParams ResoTame kernel params for the Reso stage (after the softener), or null
  * @param {number} resoFrameSize
  */
 export function measureTopLossDb(channelData, sampleRate, kernelParams, resoParams = null, resoFrameSize = 512) {
-  let x = channelData
+  // The chain's order: the softener (Air forced 0), then Reso when it is in.
+  let y = processHFSoftenerBuffer(channelData, sampleRate, { ...kernelParams, airDb: 0 }).channelData
   if (resoParams) {
-    const r = processResonanceBuffer(channelData, sampleRate, resoParams, { frameSize: resoFrameSize })
-    x = r.channelData.map(c => {
+    const r = processResonanceBuffer(y, sampleRate, resoParams, { frameSize: resoFrameSize })
+    y = r.channelData.map(c => {
       const o = new Float32Array(c.length)
       o.set(c.subarray(r.latencySamples))
       return o
     })
   }
-  const y = processHFSoftenerBuffer(x, sampleRate, { ...kernelParams, airDb: 0 }).channelData
   const before = topEnergy(channelData, sampleRate)
   if (!(before > 0)) return 0
   const after = topEnergy(y, sampleRate)

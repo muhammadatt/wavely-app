@@ -20,6 +20,9 @@ import {
   adaptiveThresholdDb,
   amountToMaxDepthDb,
   amountToThresholdDb,
+  duckToThresholdDb,
+  duckToSlope,
+  duckToMaxDepthDb,
   contextToKappa,
   gainComputerDb,
   levelOffsetDbFor,
@@ -44,7 +47,7 @@ import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn,
 import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
-  HF_RESO_KNOTS, HF_RESO_AMOUNT_DEFAULT, HF_RESO_VOICED_FLOOR_DB, HF_RESO_LISP_GUARD_FLOOR_DB, HF_RESO_FRICATIVE_TILT_DB, HF_RESO_FRICATIVE_CAP_DB, hfResoMacro,
+  HF_RESO_KNOTS, HF_RESO_AMOUNT_DEFAULT, HF_RESO_VOICED_FLOOR_DB, HF_RESO_LISP_GUARD_FLOOR_DB, HF_RESO_GUARD_TILT_DB, HF_RESO_GUARD_TILT_RELAX_DB, hfResoMacro,
 } from '../../src/audio/hfSoftenerResoStage.js'
 
 const SR = 48000
@@ -794,13 +797,10 @@ test('reso macro: an "s" is cut by its own frames, and the cut rises with the kn
   const { x, labels } = makeRichSpeech(sr)
   const sib = i => labels[i] === 2
   const alone = x.map((v, i) => (sib(i) ? v : 0))
-  // Lisp guard off: with it on, the peaked-fricative depth cap bounds the "s"
-  // (next assertion) — this is about the macro and ballistics.
+  // Lisp guard off — this is about the macro and ballistics.
   const cut = (y, a, opts = { lispGuard: false }) => 10 * Math.log10(hfEnergy(resoRun(y, sr, a, opts), sr, sib, 5000, 9000) / hfEnergy(y, sr, sib, 5000, 9000))
   const isolated = cut(alone, 1)
   assert.ok(isolated < -3, `isolated "s" at 100 %: ${isolated.toFixed(2)} dB`)
-  const held = cut(alone, 1, {})
-  assert.ok(held > -(HF_RESO_FRICATIVE_CAP_DB + 1) && held < -1, `isolated "s" at 100 % with the lisp guard: ${held.toFixed(2)} dB`)
   const inSpeech = [0.2, 0.5, 0.8, 1].map(a => cut(x, a))
   for (let i = 1; i < inSpeech.length; i++) {
     assert.ok(inSpeech[i] < inSpeech[i - 1], `rising: ${inSpeech.map(v => v.toFixed(2)).join(' / ')}`)
@@ -892,7 +892,7 @@ test('air makeup: clamped to the knob plus compensation', () => {
   assert.equal(k.airDb, 0)
 })
 
-// ── Split: band cut ↔ broadband duck ────────────────────────────────────────
+// ── Duck → EQ: two serial stages ────────────────────────────────────────────
 
 const splitBandDb = (y, x, sr, lo, hi, mask) => {
   const mk = () => [highpass(sr, lo, 0.7), highpass(sr, lo, 0.7), lowpass(sr, hi, 0.7), lowpass(sr, hi, 0.7)].map(c => new Biquad(c))
@@ -907,47 +907,85 @@ const splitBandDb = (y, x, sr, lo, hi, mask) => {
   return 10 * Math.log10(a / b)
 }
 
-test('split: the total taken off the "s" band holds across the knob', () => {
-  const sr = 44100
-  const { x, labels } = makeSpeech(sr, { seconds: 3 })
-  const hot = x.map((v, i) => (labels[i] === 2 ? v * 2 : v))
-  const sib = i => labels[i] === 2
-  const cut = split => splitBandDb(
-    processHFSoftenerBuffer([hot], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, split }).channelData[0],
-    hot, sr, 5000, 9000, sib)
-  const c0 = cut(0), c5 = cut(0.5), c1 = cut(1)
-  assert.ok(c0 < -3, `split 0 cut ${c0.toFixed(2)}`)
-  assert.ok(Math.abs(c5 - c0) < 0.6 && Math.abs(c1 - c0) < 0.6, `cuts ${c0.toFixed(2)} / ${c5.toFixed(2)} / ${c1.toFixed(2)}`)
-})
+// Run the kernel over a whole buffer and report each stage's deepest cut.
+const stageMax = (x, sr, params) => {
+  const k = new HFSoftenerKernel(sr)
+  k.setParams(params, true)
+  const out = new Float32Array(x.length)
+  for (let o = 0; o < x.length; o += 128) {
+    const n = Math.min(128, x.length - o)
+    k.process([x.subarray(o, o + n)], [out.subarray(o, o + n)], n)
+  }
+  return { eq: k.meterMaxReduction, duck: k.meterMaxBroadband }
+}
 
-test('split: at 100 % the "s" keeps its tone — the same cut in every band', () => {
+test('duck: the Duck alone keeps the "s" tone — the same cut in every band', () => {
   const sr = 44100
   const { x: sp, labels } = makeSpeech(sr, { seconds: 3 })
   const x = sp.map((v, i) => (labels[i] === 2 ? v * 2 : 0))
   const mid = i => labels[i] === 2 && labels[i - 350] === 2 && labels[i + 350] === 2
-  const run = split => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, lispGuard: false, split }).channelData[0]
+  const run = p => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, lispGuard: false, ...p }).channelData[0]
   const tilt = (y) => splitBandDb(y, x, sr, 5000, 9000, mid) - splitBandDb(y, x, sr, 1000, 3000, mid)
-  const t0 = tilt(run(0)), t1 = tilt(run(1))
-  assert.ok(t0 < -5, `band cut tilts the "s": ${t0.toFixed(2)} dB`)
-  assert.ok(Math.abs(t1) < 0.5, `broadband duck keeps the tone: ${t1.toFixed(2)} dB`)
+  const eq = run({ amount: 0.7, duck: 0 }), duck = run({ amount: 0, duck: 1 })
+  assert.ok(tilt(eq) < -5, `the EQ tilts the "s": ${tilt(eq).toFixed(2)} dB`)
+  assert.ok(Math.abs(tilt(duck)) < 0.5, `the Duck keeps the tone: ${tilt(duck).toFixed(2)} dB`)
+  assert.ok(splitBandDb(duck, x, sr, 1000, 3000, mid) < -5, 'the Duck should turn the whole "s" down')
 })
 
-test('split: vowels away from any "s" are untouched at every setting', () => {
+test('duck: its macro — threshold on the EQ line, 1:1 → 4:1, 0 → 12 dB; 0 does not run', () => {
+  assert.equal(duckToThresholdDb(0.4), amountToThresholdDb(0.4))
+  assert.ok(Math.abs(1 / (1 - duckToSlope(1)) - 4) < 1e-9)
+  assert.equal(duckToSlope(0), 0)
+  assert.equal(duckToMaxDepthDb(1), 12)
+  assert.equal(duckToMaxDepthDb(0.5), 6)
+  const sr = 44100
+  const { x } = makeSpeech(sr, { seconds: 2 })
+  assert.equal(stageMax(x, sr, { amount: 0.4, duck: 0 }).duck, 0)
+})
+
+test('duck: the EQ hears the ducked "s", so it backs off as the Duck comes up', () => {
+  const sr = 44100
+  const { x: sp, labels } = makeSpeech(sr, { seconds: 3 })
+  const x = sp.map((v, i) => (labels[i] === 2 ? v * 2 : v))
+  const base = { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, lispGuard: false }
+  const alone = stageMax(x, sr, { ...base, duck: 0 })
+  const after = stageMax(x, sr, { ...base, duck: 0.7 })
+  assert.ok(after.duck > 2, `the Duck took ${after.duck.toFixed(2)} dB`)
+  assert.ok(after.eq < alone.eq - 1, `EQ ${alone.eq.toFixed(2)} alone → ${after.eq.toFixed(2)} after the Duck`)
+})
+
+test('duck: the lisp guard caps the TOTAL of both stages', () => {
+  // The Duck's guard reads the input; the EQ's reads the ducked signal, so the
+  // two together still stop at the guard's floor.
+  const sr = 44100
+  const { x } = makeSpeech(sr, { seconds: 3, peakedS: true })
+  const deepest = (guard) => {
+    const { gainDb } = processHFSoftenerBuffer([x], sr, { amount: 1, duck: 1, lispGuard: guard }, { recordGain: true })
+    let m = 0
+    for (const v of gainDb) m = Math.min(m, v)
+    return m
+  }
+  const guarded = deepest(true), free = deepest(false)
+  assert.ok(guarded > -7, `guarded total ${guarded.toFixed(2)} dB`)
+  assert.ok(free < guarded - 8, `unguarded total ${free.toFixed(2)} dB`)
+})
+
+test('duck: vowels away from any "s" are untouched at every setting', () => {
   const sr = 44100
   const { x, labels } = makeSpeech(sr, { seconds: 3 })
   const far = i => labels[i] === 1 && (i % sr) / sr < 0.3
-  for (const split of [0, 0.5, 1]) {
-    const y = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, split }).channelData[0]
+  for (const duck of [0, 0.5, 1]) {
+    const y = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, duck }).channelData[0]
     let worst = 0
     for (let i = sr; i < x.length; i++) if (far(i)) worst = Math.max(worst, Math.abs(y[i] - x[i]))
-    assert.ok(worst < 1e-6, `split ${split}: ${worst}`)
+    assert.ok(worst < 1e-6, `duck ${duck}: ${worst}`)
   }
 })
 
-test('split: delta is exactly what the band cut and the duck removed together', () => {
+test('duck: delta is exactly what the Duck and the EQ removed together', () => {
   const sr = 44100
   const { x } = makeSpeech(sr, { seconds: 2 })
-  const p = { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, split: 0.5 }
+  const p = { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, duck: 0.5 }
   const y = processHFSoftenerBuffer([x], sr, p).channelData[0]
   const d = processHFSoftenerBuffer([x], sr, p, { listen: 'delta' }).channelData[0]
   let worst = 0
@@ -1185,22 +1223,21 @@ test('reso lisp guard: bounds the "s", leaves rings on vowels to be taken', () =
   assert.ok(inS > -8 && inSFree < -12, `ring inside the "s": ${inS.toFixed(2)} guarded, ${inSFree.toFixed(2)} without`)
 })
 
-test('reso lisp guard: a peaked "s" is cut, but no deeper than the depth cap', () => {
-  // A lisp is an /s/ losing its 5–10 kHz peak, and a peak is what a resonance
-  // suppressor removes; a loud "s" clears the level floor, so the level guard
-  // alone let Reso 100 take the "s" in "fix slide" −10.1 dB. A threshold hold
-  // (tried first) left Reso inert on sibilance; a depth cap keeps the knob.
-  assert.deepEqual(HF_RESO_FRICATIVE_TILT_DB, [T.tiltFlatDb, T.tiltPeakedDb])
-  assert.equal(hfResoKernelParams(0.4).peakedFricativeCapDb, HF_RESO_FRICATIVE_CAP_DB)
-  assert.equal(hfResoKernelParams(0.4, { lispGuard: false }).peakedFricativeCapDb, null)
-  assert.equal(toResonanceKernelParams(RESONANCE_DEFAULTS).peakedFricativeCapDb, undefined)
+test('reso lisp guard: after the cut, Reso takes little from a treated "s"; tilt-scaled', () => {
+  // Reso runs AFTER Duck → EQ, and its floor is a NORMAL "s" level for the
+  // voice, so an "s" the softener has already turned down leaves it little.
+  assert.deepEqual(HF_RESO_GUARD_TILT_DB, [T.tiltFlatDb, T.tiltPeakedDb])
+  assert.equal(HF_RESO_GUARD_TILT_RELAX_DB, T.tiltRelaxDb)
+  assert.deepEqual(hfResoKernelParams(0.4).lispGuardTiltDb, HF_RESO_GUARD_TILT_DB)
+  assert.equal(hfResoKernelParams(0.4).lispGuardFloorDb, HF_RESO_LISP_GUARD_FLOOR_DB)
+  assert.equal(toResonanceKernelParams(RESONANCE_DEFAULTS).lispGuardTiltDb, undefined)
   const sr = 44100
   const { x, labels } = makeRichSpeech(sr)
   const sib = i => labels[i] === 2
-  const cut = opts => 10 * Math.log10(hfEnergy(resoRun(x, sr, 1, opts), sr, sib, 5000, 9000) / hfEnergy(x, sr, sib, 5000, 9000))
-  const capped = cut({}), free = cut({ lispGuard: false })
-  assert.ok(capped > -(HF_RESO_FRICATIVE_CAP_DB + 1) && capped < -1 && capped > free + 1,
-    `Reso 100: "s" ${capped.toFixed(2)} capped, ${free.toFixed(2)} without`)
+  const soft = processHFSoftenerBuffer([x], sr, toSoftenerKernelParams({ ...HF_SOFTENER_DEFAULTS, levelOffset: 0 })).channelData[0]
+  const extra = opts => 10 * Math.log10(hfEnergy(resoRun(soft, sr, 1, opts), sr, sib, 5000, 9000) / hfEnergy(soft, sr, sib, 5000, 9000))
+  const guarded = extra({}), free = extra({ lispGuard: false })
+  assert.ok(guarded > -2.5 && guarded > free + 2, `Reso 100 after the cut: "s" ${guarded.toFixed(2)} guarded, ${free.toFixed(2)} without`)
 })
 
 test('reso lisp guard: switching it OFF reaches the kernel (params merge)', () => {
@@ -1216,6 +1253,5 @@ test('reso lisp guard: switching it OFF reaches the kernel (params merge)', () =
   k.setParams(hfResoKernelParams(1))
   k.setParams(off)
   assert.equal(k.guardFloorDb, null)
-  assert.equal(k.fricCapDb, null)
   assert.ok(fresh.length > 0)
 })
