@@ -156,6 +156,15 @@ export const HF_RESO_ZONES = hfResoZones()
  */
 export const HF_RESO_LISP_GUARD_FLOOR_DB = -17.5
 
+/**
+ * The lisp guard's other half here: frames whose 5–10 kHz leads their 2–4 kHz
+ * — a peaked /s/ — are held at the ring-only threshold with their cut capped
+ * toward 0, weighted linearly between these tilts (dB). The softener's lisp
+ * guard uses the same tilt and thresholds (`tiltFlatDb` / `tiltPeakedDb`),
+ * pinned equal by a test. See `peakedFricativeHoldDb` in resonanceProcessor.js.
+ */
+export const HF_RESO_FRICATIVE_HOLD_DB = [3, 10]
+
 export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard = true } = {}) {
   return {
     ...toKernelParams({
@@ -167,5 +176,6 @@ export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard 
     }),
     voicedSelectivityFloorDb: HF_RESO_VOICED_FLOOR_DB,
     ...(lispGuard ? { lispGuardFloorDb: HF_RESO_LISP_GUARD_FLOOR_DB } : {}),
+    ...(lispGuard ? { peakedFricativeHoldDb: HF_RESO_FRICATIVE_HOLD_DB } : {}),
   }
 }

@@ -303,6 +303,23 @@ const VOICED_LM_HI_HZ = 3000
 const VOICED_HF_LO_HZ = 4500
 const VOICED_HF_HI_HZ = 12000
 const VOICED_LEAD_DB = 6
+// Peaked-fricative hold (`peakedFricativeHoldDb`, off by default). A lisp is
+// an /s/ losing its 5–10 kHz peak, and a peak is exactly what a resonance
+// suppressor removes: at Reso 20 the "s" in "fix slide" lost 4.7 dB of band
+// and 1.9 dB of peak prominence, and the level-based lisp guard did not bind
+// (−4.8 unguarded) because a loud "s" is allowed plenty. So a frame whose
+// 5–10 kHz leads its 2–4 kHz by the peaked threshold is held at the voiced
+// floor AND has its cut capped at 0, both weighted by that tilt (the cap
+// unvoiced only). Measured, Reso 20 / 40 / 60 on strident events: that "s"
+// −4.7 / −6.0 / −7.4 → 0.0; Messy and Bright −1.9 / −3.3 / −4.4 → −0.0 /
+// −0.1 / −0.1; David Greenberg (darker /s/, partly weighted) −1.1 / −1.7 /
+// −2.3 → −0.4 / −0.6 / −0.8. The threshold hold alone left that "s" at −3.2
+// with its peak still 1.8 dB flatter; caps of 4 and 2 dB left 1.9 and 1.2.
+// Tilt bands are the HF Softener's lisp-guard tilt.
+const TILT_MID_LO_HZ = 2000
+const TILT_MID_HI_HZ = 4000
+const TILT_HF_LO_HZ = 5000
+const TILT_HF_HI_HZ = 10000
 // Lisp guard's held voice level, per frame: the HF Softener's 15 ms attack and
 // 500 ms hold, so the two guards judge an "s" against the same vowel.
 const GUARD_VOICE_ATTACK_MS = 15
@@ -736,6 +753,9 @@ export class ResonanceKernel {
     // it): no frame's cut may take the 4.5–12 kHz band below the HELD voice
     // level + this floor. See GUARD_* below.
     this.guardFloorDb = Number.isFinite(p.lispGuardFloorDb) ? p.lispGuardFloorDb : null
+    // Peaked-fricative hold (off for ResoTame itself; the HF Softener's Reso
+    // stage sets it with its lisp guard): [flatDb, peakedDb]. See FRIC_* below.
+    this.fricHold = Array.isArray(p.peakedFricativeHoldDb) ? p.peakedFricativeHoldDb : null
     this.guardAttack = 1 - Math.exp(-this.frameRateMs / GUARD_VOICE_ATTACK_MS)
     this.guardRelease = 1 - Math.exp(-this.frameRateMs / GUARD_VOICE_HOLD_MS)
 
@@ -1366,17 +1386,23 @@ export class ResonanceKernel {
 
     const voicedFloor = this.voicedFloorDb
     const guardFloor = this.guardFloorDb
-    const voicing = voicedFloor > 0 || guardFloor !== null
+    const fricHold = this.fricHold
+    const voicing = voicedFloor > 0 || guardFloor !== null || fricHold !== null
     let lmPow = 0
     let hfPow = 0
+    let tiltMid = 0
+    let tiltHf = 0
     const bw = this.binWidth
     for (let k = 0; k < binCount; k++) {
       const mag = Math.hypot(specRe[k], specIm[k])
       magDb[k] = 20 * Math.log10(mag + MAG_EPS)
       if (voicing) {
         const f = k * bw
-        if (f >= VOICED_LM_LO_HZ && f < VOICED_LM_HI_HZ) lmPow += mag * mag
-        else if (f >= VOICED_HF_LO_HZ && f < VOICED_HF_HI_HZ) hfPow += mag * mag
+        const pw = mag * mag
+        if (f >= VOICED_LM_LO_HZ && f < VOICED_LM_HI_HZ) lmPow += pw
+        else if (f >= VOICED_HF_LO_HZ && f < VOICED_HF_HI_HZ) hfPow += pw
+        if (f >= TILT_MID_LO_HZ && f < TILT_MID_HI_HZ) tiltMid += pw
+        else if (f >= TILT_HF_LO_HZ && f < TILT_HF_HI_HZ) tiltHf += pw
       }
     }
     // Voicing weight of this frame, 0–1: low/mid over the sibilance band, a
@@ -1385,6 +1411,17 @@ export class ResonanceKernel {
     if (voicing) {
       const lead = 10 * Math.log10((lmPow + 1e-30) / (hfPow + 1e-30)) - VOICED_LEAD_DB
       wv = lead <= -VOICED_XFADE_DB ? 0 : lead >= VOICED_XFADE_DB ? 1 : (lead + VOICED_XFADE_DB) / (2 * VOICED_XFADE_DB)
+    }
+    // How strongly this frame is held at the voiced floor: its voicing, or —
+    // with the peaked-fricative hold — its tilt, whichever is larger.
+    let wHold = wv
+    let fricW = 0
+    if (fricHold !== null) {
+      const tilt = 10 * Math.log10((tiltHf + 1e-30) / (tiltMid + 1e-30))
+      const [lo, hi] = fricHold
+      const wt = tilt <= lo ? 0 : tilt >= hi ? 1 : (tilt - lo) / (hi - lo)
+      if (wt > wHold) wHold = wt
+      fricW = wt * (1 - wv)
     }
     // Lisp guard: the most this frame may take, dB. The voice level is held
     // (fast attack, slow let-go) so a sibilant is judged against the vowel
@@ -1400,6 +1437,13 @@ export class ResonanceKernel {
       // and ring removal is exactly what those frames are for. Voiced frames
       // are already held at the ring-only threshold, so they cannot lisp.
       guardCap += wv * GUARD_VOICED_RELIEF_DB
+    }
+    // …and its cut is capped toward 0 by the same weight, unvoiced only. The
+    // threshold alone is not enough: a sharp /s/ peak clears even the
+    // ring-only threshold, and cutting it is what flattens the "s".
+    if (fricW > 0) {
+      const cap = (1 - fricW) * GUARD_VOICED_RELIEF_DB
+      if (cap < guardCap) guardCap = cap
     }
 
     // Pitch drives both the lifter cutoff and the protection mask, so it is
@@ -1513,7 +1557,7 @@ export class ResonanceKernel {
       // Threshold and knee come from the zone this bin falls in. DEPTH DOES
       // NOT APPLY HERE — it is applied once, after the spread. See below.
       const sel = zoneSelectivity[k]
-      const floorLift = voicedFloor > sel ? wv * (voicedFloor - sel) : 0
+      const floorLift = voicedFloor > sel ? wHold * (voicedFloor - sel) : 0
       const above = detect[k] - envDb[k] - sel - floorLift
       if (above <= 0) {
         reduction[k] = 0

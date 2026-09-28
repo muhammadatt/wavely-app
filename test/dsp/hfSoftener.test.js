@@ -44,7 +44,7 @@ import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn,
 import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
-  HF_RESO_KNOTS, HF_RESO_AMOUNT_DEFAULT, HF_RESO_VOICED_FLOOR_DB, HF_RESO_LISP_GUARD_FLOOR_DB, hfResoMacro,
+  HF_RESO_KNOTS, HF_RESO_AMOUNT_DEFAULT, HF_RESO_VOICED_FLOOR_DB, HF_RESO_LISP_GUARD_FLOOR_DB, HF_RESO_FRICATIVE_HOLD_DB, hfResoMacro,
 } from '../../src/audio/hfSoftenerResoStage.js'
 
 const SR = 48000
@@ -794,9 +794,13 @@ test('reso macro: an "s" is cut by its own frames, and the cut rises with the kn
   const { x, labels } = makeRichSpeech(sr)
   const sib = i => labels[i] === 2
   const alone = x.map((v, i) => (sib(i) ? v : 0))
-  const cut = (y, a) => 10 * Math.log10(hfEnergy(resoRun(y, sr, a), sr, sib, 5000, 9000) / hfEnergy(y, sr, sib, 5000, 9000))
+  // Lisp guard off: with it on, the peaked-fricative hold keeps Reso off the
+  // "s" altogether (next assertion) — this is about the macro and ballistics.
+  const cut = (y, a, opts = { lispGuard: false }) => 10 * Math.log10(hfEnergy(resoRun(y, sr, a, opts), sr, sib, 5000, 9000) / hfEnergy(y, sr, sib, 5000, 9000))
   const isolated = cut(alone, 1)
   assert.ok(isolated < -3, `isolated "s" at 100 %: ${isolated.toFixed(2)} dB`)
+  const held = cut(alone, 1, {})
+  assert.ok(held > -0.5, `isolated "s" at 100 % with the lisp guard: ${held.toFixed(2)} dB`)
   const inSpeech = [0.2, 0.5, 0.8, 1].map(a => cut(x, a))
   for (let i = 1; i < inSpeech.length; i++) {
     assert.ok(inSpeech[i] < inSpeech[i - 1], `rising: ${inSpeech.map(v => v.toFixed(2)).join(' / ')}`)
@@ -824,14 +828,16 @@ test('reso macro: voiced frames hold the ring threshold, so vowel top end stays'
 
 test('reso macro: a strong ring is taken early and in full', () => {
   const sr = 44100
-  const { x } = makeRichSpeech(sr)
+  const { x, labels } = makeRichSpeech(sr)
   const env = new Float32Array(x.length)
   for (let i = 0, e = 0; i < x.length; i++) { e = Math.max(Math.abs(x[i]), e * 0.9995); env[i] = e }
   const ringed = x.map((v, i) => v + 0.02 * env[i] * Math.sin(2 * Math.PI * 7500 * i / sr))
+  // On the vowels: the lisp guard's peaked-fricative hold keeps Reso off the
+  // "s" frames, ring and all — see the reso lisp guard test for that trade.
   const ringDb = (y) => {
     const f = [new Biquad(bandpass(sr, 7500, 30)), new Biquad(bandpass(sr, 7500, 30))]
     let s = 0
-    for (let i = 0; i < y.length; i++) { const v = f[1].tick(f[0].tick(y[i])); if (i > sr) s += v * v }
+    for (let i = 0; i < y.length; i++) { const v = f[1].tick(f[0].tick(y[i])); if (i > sr && labels[i] === 1) s += v * v }
     return 10 * Math.log10(s + 1e-30)
   }
   const cuts = [0, 0.3, 1].map(a => ringDb(resoRun(ringed, sr, a)) - ringDb(ringed))
@@ -1161,12 +1167,38 @@ test('reso lisp guard: bounds the "s", leaves rings on vowels to be taken', () =
   const env = new Float32Array(voice.length)
   for (let i = 0, e = 0; i < voice.length; i++) { e = Math.max(Math.abs(voice[i]), e * 0.9995); env[i] = e }
   const ringed = voice.map((v, i) => v + 0.02 * env[i] * Math.sin(2 * Math.PI * 7500 * i / sr))
-  const ringDb = y => {
+  const ringDb = (y, m) => {
     const f = [new Biquad(bandpass(sr, 7500, 30)), new Biquad(bandpass(sr, 7500, 30))]
     let e = 0
-    for (let i = sr; i < y.length; i++) { const v = f[1].tick(f[0].tick(y[i])); e += v * v }
+    for (let i = sr; i < y.length; i++) { const v = f[1].tick(f[0].tick(y[i])); if (m(i)) e += v * v }
     return 10 * Math.log10(e)
   }
-  const ringCut = ringDb(run(ringed, true)) - ringDb(ringed)
-  assert.ok(ringCut < -12, `ring with the guard on: ${ringCut.toFixed(2)} dB`)
+  const vow = i => labels[i] === 1
+  const ringCut = ringDb(run(ringed, true), vow) - ringDb(ringed, vow)
+  assert.ok(ringCut < -12, `ring on vowels with the guard on: ${ringCut.toFixed(2)} dB`)
+  // ⚠ THE TRADE: inside a peaked "s" the hold keeps Reso off the ring too, so
+  // a whistly "s" is left to the softener. Measured at 100 %: −4.6 dB guarded
+  // against −15.3 with the guard off, which is the way back.
+  const inS = ringDb(run(ringed, true), sib) - ringDb(ringed, sib)
+  const inSFree = ringDb(run(ringed, false), sib) - ringDb(ringed, sib)
+  assert.ok(inS > -8 && inSFree < -12, `ring inside the "s": ${inS.toFixed(2)} guarded, ${inSFree.toFixed(2)} without`)
+})
+
+test('reso lisp guard: a peaked "s" is held off entirely, on the softener tilt', () => {
+  // A lisp is an /s/ losing its 5–10 kHz peak, and a peak is what a resonance
+  // suppressor removes; a loud "s" clears the level floor, so without the hold
+  // Reso 20 took the "s" in "fix slide" −4.7 dB and flattened its peak 1.9 dB.
+  assert.deepEqual(HF_RESO_FRICATIVE_HOLD_DB, [T.tiltFlatDb, T.tiltPeakedDb])
+  assert.deepEqual(hfResoKernelParams(0.4).peakedFricativeHoldDb, HF_RESO_FRICATIVE_HOLD_DB)
+  assert.equal(hfResoKernelParams(0.4, { lispGuard: false }).peakedFricativeHoldDb, undefined)
+  assert.equal(toResonanceKernelParams(RESONANCE_DEFAULTS).peakedFricativeHoldDb, undefined)
+  const sr = 44100
+  const { x, labels } = makeRichSpeech(sr)
+  const sib = i => labels[i] === 2
+  // A peaked "s" (the rich speech's is 5–9 kHz noise, steep enough).
+  for (const a of [0.6, 1]) {
+    const on = 10 * Math.log10(hfEnergy(resoRun(x, sr, a), sr, sib, 5000, 9000) / hfEnergy(x, sr, sib, 5000, 9000))
+    const off = 10 * Math.log10(hfEnergy(resoRun(x, sr, a, { lispGuard: false }), sr, sib, 5000, 9000) / hfEnergy(x, sr, sib, 5000, 9000))
+    assert.ok(on > -0.6 && on > off + 0.5, `Reso ${a * 100}: "s" ${on.toFixed(2)} held, ${off.toFixed(2)} without`)
+  }
 })
