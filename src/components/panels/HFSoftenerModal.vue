@@ -358,7 +358,7 @@ async function applyAndClose() {
           <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">AIR MODE</span>
           <DeviceChoiceRocker
             :model-value="hfAirMode" :options="AIR_MODE_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview || !(totalAir > 0)" label="Air mode"
+            :disabled="!hfPreview" label="Air mode"
             @update:model-value="syncAirMode"
           />
         </div>

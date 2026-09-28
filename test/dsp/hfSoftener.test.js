@@ -38,13 +38,13 @@ import {
 } from '../../src/audio/hfSoftenerProcessor.js'
 import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
-import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
+import { processResonanceBuffer, ResonanceKernel } from '../../src/audio/resonanceProcessor.js'
 import { measureTopLossDb, autoAirDb, AIR_AUTO_FRACTION } from '../../src/audio/hfSoftenerAutoAir.js'
 import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams } from '../../src/audio/hfSoftenerParams.js'
 import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
-  HF_RESO_KNOTS, HF_RESO_AMOUNT_DEFAULT, HF_RESO_VOICED_FLOOR_DB, HF_RESO_LISP_GUARD_FLOOR_DB, HF_RESO_FRICATIVE_HOLD_DB, hfResoMacro,
+  HF_RESO_KNOTS, HF_RESO_AMOUNT_DEFAULT, HF_RESO_VOICED_FLOOR_DB, HF_RESO_LISP_GUARD_FLOOR_DB, HF_RESO_FRICATIVE_TILT_DB, HF_RESO_FRICATIVE_CAP_DB, hfResoMacro,
 } from '../../src/audio/hfSoftenerResoStage.js'
 
 const SR = 48000
@@ -794,13 +794,13 @@ test('reso macro: an "s" is cut by its own frames, and the cut rises with the kn
   const { x, labels } = makeRichSpeech(sr)
   const sib = i => labels[i] === 2
   const alone = x.map((v, i) => (sib(i) ? v : 0))
-  // Lisp guard off: with it on, the peaked-fricative hold keeps Reso off the
-  // "s" altogether (next assertion) — this is about the macro and ballistics.
+  // Lisp guard off: with it on, the peaked-fricative depth cap bounds the "s"
+  // (next assertion) — this is about the macro and ballistics.
   const cut = (y, a, opts = { lispGuard: false }) => 10 * Math.log10(hfEnergy(resoRun(y, sr, a, opts), sr, sib, 5000, 9000) / hfEnergy(y, sr, sib, 5000, 9000))
   const isolated = cut(alone, 1)
   assert.ok(isolated < -3, `isolated "s" at 100 %: ${isolated.toFixed(2)} dB`)
   const held = cut(alone, 1, {})
-  assert.ok(held > -0.5, `isolated "s" at 100 % with the lisp guard: ${held.toFixed(2)} dB`)
+  assert.ok(held > -(HF_RESO_FRICATIVE_CAP_DB + 1) && held < -1, `isolated "s" at 100 % with the lisp guard: ${held.toFixed(2)} dB`)
   const inSpeech = [0.2, 0.5, 0.8, 1].map(a => cut(x, a))
   for (let i = 1; i < inSpeech.length; i++) {
     assert.ok(inSpeech[i] < inSpeech[i - 1], `rising: ${inSpeech.map(v => v.toFixed(2)).join(' / ')}`)
@@ -832,7 +832,7 @@ test('reso macro: a strong ring is taken early and in full', () => {
   const env = new Float32Array(x.length)
   for (let i = 0, e = 0; i < x.length; i++) { e = Math.max(Math.abs(x[i]), e * 0.9995); env[i] = e }
   const ringed = x.map((v, i) => v + 0.02 * env[i] * Math.sin(2 * Math.PI * 7500 * i / sr))
-  // On the vowels: the lisp guard's peaked-fricative hold keeps Reso off the
+  // On the vowels: the lisp guard's depth cap bounds what Reso takes on the
   // "s" frames, ring and all — see the reso lisp guard test for that trade.
   const ringDb = (y) => {
     const f = [new Biquad(bandpass(sr, 7500, 30)), new Biquad(bandpass(sr, 7500, 30))]
@@ -1143,7 +1143,9 @@ test('reso lisp guard: follows the Lisp Guard switch, and ResoTame itself never 
   const on = resoKernelParams({ ...HF_SOFTENER_DEFAULTS, resoAmount: 50, lispGuard: true })
   const off = resoKernelParams({ ...HF_SOFTENER_DEFAULTS, resoAmount: 50, lispGuard: false })
   assert.equal(on.lispGuardFloorDb, HF_RESO_LISP_GUARD_FLOOR_DB)
-  assert.ok(!('lispGuardFloorDb' in off))
+  // Explicit null, not an absent key — the kernel merges params, so an absent
+  // key would leave the guard on. See the params-merge test.
+  assert.equal(off.lispGuardFloorDb, null)
   assert.equal(toResonanceKernelParams(RESONANCE_DEFAULTS).lispGuardFloorDb, undefined)
 })
 
@@ -1176,29 +1178,44 @@ test('reso lisp guard: bounds the "s", leaves rings on vowels to be taken', () =
   const vow = i => labels[i] === 1
   const ringCut = ringDb(run(ringed, true), vow) - ringDb(ringed, vow)
   assert.ok(ringCut < -12, `ring on vowels with the guard on: ${ringCut.toFixed(2)} dB`)
-  // ⚠ THE TRADE: inside a peaked "s" the hold keeps Reso off the ring too, so
-  // a whistly "s" is left to the softener. Measured at 100 %: −4.6 dB guarded
-  // against −15.3 with the guard off, which is the way back.
+  // ⚠ THE TRADE: inside a peaked "s" the depth cap bounds the ring's cut too,
+  // so a whistly "s" is only partly treated; the guard off is the way back.
   const inS = ringDb(run(ringed, true), sib) - ringDb(ringed, sib)
   const inSFree = ringDb(run(ringed, false), sib) - ringDb(ringed, sib)
   assert.ok(inS > -8 && inSFree < -12, `ring inside the "s": ${inS.toFixed(2)} guarded, ${inSFree.toFixed(2)} without`)
 })
 
-test('reso lisp guard: a peaked "s" is held off entirely, on the softener tilt', () => {
+test('reso lisp guard: a peaked "s" is cut, but no deeper than the depth cap', () => {
   // A lisp is an /s/ losing its 5–10 kHz peak, and a peak is what a resonance
-  // suppressor removes; a loud "s" clears the level floor, so without the hold
-  // Reso 20 took the "s" in "fix slide" −4.7 dB and flattened its peak 1.9 dB.
-  assert.deepEqual(HF_RESO_FRICATIVE_HOLD_DB, [T.tiltFlatDb, T.tiltPeakedDb])
-  assert.deepEqual(hfResoKernelParams(0.4).peakedFricativeHoldDb, HF_RESO_FRICATIVE_HOLD_DB)
-  assert.equal(hfResoKernelParams(0.4, { lispGuard: false }).peakedFricativeHoldDb, undefined)
-  assert.equal(toResonanceKernelParams(RESONANCE_DEFAULTS).peakedFricativeHoldDb, undefined)
+  // suppressor removes; a loud "s" clears the level floor, so the level guard
+  // alone let Reso 100 take the "s" in "fix slide" −10.1 dB. A threshold hold
+  // (tried first) left Reso inert on sibilance; a depth cap keeps the knob.
+  assert.deepEqual(HF_RESO_FRICATIVE_TILT_DB, [T.tiltFlatDb, T.tiltPeakedDb])
+  assert.equal(hfResoKernelParams(0.4).peakedFricativeCapDb, HF_RESO_FRICATIVE_CAP_DB)
+  assert.equal(hfResoKernelParams(0.4, { lispGuard: false }).peakedFricativeCapDb, null)
+  assert.equal(toResonanceKernelParams(RESONANCE_DEFAULTS).peakedFricativeCapDb, undefined)
   const sr = 44100
   const { x, labels } = makeRichSpeech(sr)
   const sib = i => labels[i] === 2
-  // A peaked "s" (the rich speech's is 5–9 kHz noise, steep enough).
-  for (const a of [0.6, 1]) {
-    const on = 10 * Math.log10(hfEnergy(resoRun(x, sr, a), sr, sib, 5000, 9000) / hfEnergy(x, sr, sib, 5000, 9000))
-    const off = 10 * Math.log10(hfEnergy(resoRun(x, sr, a, { lispGuard: false }), sr, sib, 5000, 9000) / hfEnergy(x, sr, sib, 5000, 9000))
-    assert.ok(on > -0.6 && on > off + 0.5, `Reso ${a * 100}: "s" ${on.toFixed(2)} held, ${off.toFixed(2)} without`)
-  }
+  const cut = opts => 10 * Math.log10(hfEnergy(resoRun(x, sr, 1, opts), sr, sib, 5000, 9000) / hfEnergy(x, sr, sib, 5000, 9000))
+  const capped = cut({}), free = cut({ lispGuard: false })
+  assert.ok(capped > -(HF_RESO_FRICATIVE_CAP_DB + 1) && capped < -1 && capped > free + 1,
+    `Reso 100: "s" ${capped.toFixed(2)} capped, ${free.toFixed(2)} without`)
+})
+
+test('reso lisp guard: switching it OFF reaches the kernel (params merge)', () => {
+  // The kernel merges a params message into what it has, so the guard-off
+  // params must carry explicit nulls — omitted keys left the guard on for
+  // good once it had been on.
+  const sr = 44100
+  const { x } = makeRichSpeech(sr)
+  const off = hfResoKernelParams(1, { lispGuard: false })
+  assert.equal(off.lispGuardFloorDb, null)
+  const fresh = resoRun(x, sr, 1, { lispGuard: false })
+  const k = new ResonanceKernel(sr, { frameSize: HF_RESO_FRAME_SIZE })
+  k.setParams(hfResoKernelParams(1))
+  k.setParams(off)
+  assert.equal(k.guardFloorDb, null)
+  assert.equal(k.fricCapDb, null)
+  assert.ok(fresh.length > 0)
 })

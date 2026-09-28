@@ -157,15 +157,16 @@ export const HF_RESO_ZONES = hfResoZones()
 export const HF_RESO_LISP_GUARD_FLOOR_DB = -17.5
 
 /**
- * The lisp guard's other half here: frames whose 5–10 kHz leads their 2–4 kHz
- * — a peaked /s/ — are held at the ring-only threshold with their cut capped
- * toward 0, weighted linearly between these tilts (dB). The softener's lisp
+ * The lisp guard's other half here: on a frame whose 5–10 kHz leads its 2–4
+ * kHz — a peaked /s/ — no cut may go deeper than HF_RESO_FRICATIVE_CAP_DB,
+ * relaxing linearly toward no cap between these tilts (dB). The softener's lisp
  * guard uses the same tilt and thresholds (`tiltFlatDb` / `tiltPeakedDb`),
- * pinned equal by a test. See `peakedFricativeHoldDb` in resonanceProcessor.js.
+ * pinned equal by a test. See `peakedFricativeCapDb` in resonanceProcessor.js.
  */
-export const HF_RESO_FRICATIVE_HOLD_DB = [3, 10]
+export const HF_RESO_FRICATIVE_TILT_DB = [3, 10]
+export const HF_RESO_FRICATIVE_CAP_DB = 6
 
-export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard = true } = {}) {
+export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard = true, fricCapDb = HF_RESO_FRICATIVE_CAP_DB } = {}) {
   return {
     ...toKernelParams({
       ...RESONANCE_DEFAULTS,
@@ -175,7 +176,11 @@ export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard 
       focus: null,
     }),
     voicedSelectivityFloorDb: HF_RESO_VOICED_FLOOR_DB,
-    ...(lispGuard ? { lispGuardFloorDb: HF_RESO_LISP_GUARD_FLOOR_DB } : {}),
-    ...(lispGuard ? { peakedFricativeHoldDb: HF_RESO_FRICATIVE_HOLD_DB } : {}),
+    // ⚠ EXPLICIT NULLS WHEN OFF, NOT ABSENT KEYS: the kernel MERGES a params
+    // message into what it has, so an omitted key keeps its old value and the
+    // panel's Lisp Guard switch could turn the guard on but never off again.
+    lispGuardFloorDb: lispGuard ? HF_RESO_LISP_GUARD_FLOOR_DB : null,
+    peakedFricativeTiltDb: HF_RESO_FRICATIVE_TILT_DB,
+    peakedFricativeCapDb: lispGuard ? fricCapDb : null,
   }
 }

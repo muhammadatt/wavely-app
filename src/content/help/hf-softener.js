@@ -16,7 +16,7 @@ export default {
     { label: 'Air', text: 'Adds top after the cut, on the same curve as Air Boost. It is yours: HF Comp adds to it, never changes it' },
     { label: 'HF Comp', text: 'Removing sibilance makes the whole file less bright even though the vowels are untouched. On, this adds Air to make up for half the top end the cut is measured to take, and follows every setting that changes the cut' },
     { label: 'Air mode', text: 'VOICED lifts the vowels only: the air fades out as each S arrives and stays out of the pauses, so it neither hands the cut back to the sibilants nor lifts room noise. STATIC lifts everything, as Air Boost does' },
-    { label: 'Reso', text: 'A band-limited ResoTame ahead of the softener; 0 takes it out. On vowels it only ever takes rings and whistles. With the lisp guard on it leaves a clear S alone — cutting an S’s peak is what makes it lisp — so turning it up takes rings, whistles and duller or softer fricatives, and the S stays with the softener. Switch the lisp guard off to let it take the S, whistles inside it included' },
+    { label: 'Reso', text: 'A band-limited ResoTame ahead of the softener; 0 takes it out. On vowels it only ever takes rings and whistles. It takes the S too as you turn it up, but with the lisp guard on never more than a few dB off a clear S — cutting an S’s peak is what makes it lisp. Switch the lisp guard off to let it go deeper' },
     { label: 'Delta', text: 'Hear only what is being removed, from the button in the title bar' },
   ],
 

@@ -303,18 +303,18 @@ const VOICED_LM_HI_HZ = 3000
 const VOICED_HF_LO_HZ = 4500
 const VOICED_HF_HI_HZ = 12000
 const VOICED_LEAD_DB = 6
-// Peaked-fricative hold (`peakedFricativeHoldDb`, off by default). A lisp is
-// an /s/ losing its 5–10 kHz peak, and a peak is exactly what a resonance
-// suppressor removes: at Reso 20 the "s" in "fix slide" lost 4.7 dB of band
-// and 1.9 dB of peak prominence, and the level-based lisp guard did not bind
-// (−4.8 unguarded) because a loud "s" is allowed plenty. So a frame whose
-// 5–10 kHz leads its 2–4 kHz by the peaked threshold is held at the voiced
-// floor AND has its cut capped at 0, both weighted by that tilt (the cap
-// unvoiced only). Measured, Reso 20 / 40 / 60 on strident events: that "s"
-// −4.7 / −6.0 / −7.4 → 0.0; Messy and Bright −1.9 / −3.3 / −4.4 → −0.0 /
-// −0.1 / −0.1; David Greenberg (darker /s/, partly weighted) −1.1 / −1.7 /
-// −2.3 → −0.4 / −0.6 / −0.8. The threshold hold alone left that "s" at −3.2
-// with its peak still 1.8 dB flatter; caps of 4 and 2 dB left 1.9 and 1.2.
+// Peaked-fricative depth cap (`peakedFricativeCapDb` + `peakedFricativeTiltDb`,
+// off by default). A lisp is an /s/ losing its 5–10 kHz peak, and a peak is
+// what a resonance suppressor removes; the level guard does not bind on a loud
+// "s" (it is allowed plenty), so at Reso 100 the "s" in "fix slide" lost
+// 10.1 dB with it on. On a frame whose 5–10 kHz leads its 2–4 kHz, the cut may
+// not go deeper than the cap, relaxing linearly toward no cap as the tilt
+// falls to the flat threshold; unvoiced frames only. Cap 6 on that "s" at
+// Reso 20 / 40 / 60 / 100: −3.5 / −4.0 / −4.5 / −5.2 (guard off −4.8 / −6.3 /
+// −7.9 / −13.1). ⚠ A THRESHOLD HOLD WAS TRIED FIRST AND MADE RESO INERT on
+// sibilance (and a cap of 0 with it) — the knob stopped doing anything on the
+// "s". The cap keeps the knob. ⚠ The cap bounds DEPTH, not shape: Reso still
+// flattens the "s" peak ~2 dB at any setting it cuts at all.
 // Tilt bands are the HF Softener's lisp-guard tilt.
 const TILT_MID_LO_HZ = 2000
 const TILT_MID_HI_HZ = 4000
@@ -753,9 +753,10 @@ export class ResonanceKernel {
     // it): no frame's cut may take the 4.5–12 kHz band below the HELD voice
     // level + this floor. See GUARD_* below.
     this.guardFloorDb = Number.isFinite(p.lispGuardFloorDb) ? p.lispGuardFloorDb : null
-    // Peaked-fricative hold (off for ResoTame itself; the HF Softener's Reso
-    // stage sets it with its lisp guard): [flatDb, peakedDb]. See FRIC_* below.
-    this.fricHold = Array.isArray(p.peakedFricativeHoldDb) ? p.peakedFricativeHoldDb : null
+    // Peaked-fricative depth cap (off for ResoTame itself; the HF Softener's
+    // Reso stage sets it with its lisp guard). See the note at TILT_* below.
+    this.fricTilt = Array.isArray(p.peakedFricativeTiltDb) ? p.peakedFricativeTiltDb : null
+    this.fricCapDb = Number.isFinite(p.peakedFricativeCapDb) ? p.peakedFricativeCapDb : null
     this.guardAttack = 1 - Math.exp(-this.frameRateMs / GUARD_VOICE_ATTACK_MS)
     this.guardRelease = 1 - Math.exp(-this.frameRateMs / GUARD_VOICE_HOLD_MS)
 
@@ -1386,8 +1387,8 @@ export class ResonanceKernel {
 
     const voicedFloor = this.voicedFloorDb
     const guardFloor = this.guardFloorDb
-    const fricHold = this.fricHold
-    const voicing = voicedFloor > 0 || guardFloor !== null || fricHold !== null
+    const fricTilt = this.fricCapDb !== null ? this.fricTilt : null
+    const voicing = voicedFloor > 0 || guardFloor !== null || fricTilt !== null
     let lmPow = 0
     let hfPow = 0
     let tiltMid = 0
@@ -1412,15 +1413,12 @@ export class ResonanceKernel {
       const lead = 10 * Math.log10((lmPow + 1e-30) / (hfPow + 1e-30)) - VOICED_LEAD_DB
       wv = lead <= -VOICED_XFADE_DB ? 0 : lead >= VOICED_XFADE_DB ? 1 : (lead + VOICED_XFADE_DB) / (2 * VOICED_XFADE_DB)
     }
-    // How strongly this frame is held at the voiced floor: its voicing, or —
-    // with the peaked-fricative hold — its tilt, whichever is larger.
-    let wHold = wv
+    // Peaked-fricative weight, 0–1, from the frame's tilt; unvoiced only.
     let fricW = 0
-    if (fricHold !== null) {
+    if (fricTilt !== null) {
       const tilt = 10 * Math.log10((tiltHf + 1e-30) / (tiltMid + 1e-30))
-      const [lo, hi] = fricHold
+      const [lo, hi] = fricTilt
       const wt = tilt <= lo ? 0 : tilt >= hi ? 1 : (tilt - lo) / (hi - lo)
-      if (wt > wHold) wHold = wt
       fricW = wt * (1 - wv)
     }
     // Lisp guard: the most this frame may take, dB. The voice level is held
@@ -1438,11 +1436,10 @@ export class ResonanceKernel {
       // are already held at the ring-only threshold, so they cannot lisp.
       guardCap += wv * GUARD_VOICED_RELIEF_DB
     }
-    // …and its cut is capped toward 0 by the same weight, unvoiced only. The
-    // threshold alone is not enough: a sharp /s/ peak clears even the
-    // ring-only threshold, and cutting it is what flattens the "s".
+    // Peaked-fricative depth cap: the cut may not go deeper than fricCapDb on
+    // a peaked /s/, relaxing (by the tilt weight) toward no cap on a flat one.
     if (fricW > 0) {
-      const cap = (1 - fricW) * GUARD_VOICED_RELIEF_DB
+      const cap = this.fricCapDb + (1 - fricW) * GUARD_VOICED_RELIEF_DB
       if (cap < guardCap) guardCap = cap
     }
 
@@ -1557,7 +1554,7 @@ export class ResonanceKernel {
       // Threshold and knee come from the zone this bin falls in. DEPTH DOES
       // NOT APPLY HERE — it is applied once, after the spread. See below.
       const sel = zoneSelectivity[k]
-      const floorLift = voicedFloor > sel ? wHold * (voicedFloor - sel) : 0
+      const floorLift = voicedFloor > sel ? wv * (voicedFloor - sel) : 0
       const above = detect[k] - envDb[k] - sel - floorLift
       if (above <= 0) {
         reduction[k] = 0
