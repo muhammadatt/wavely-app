@@ -77,8 +77,11 @@ export const HF_RESO_LATENCY_SAMPLES = HF_RESO_FRAME_SIZE
  *   M&B "s"     −1.1  −3.3  −4.9  −5.6  −6.3  −6.7  −7.3
  *   (was, at 100 %: DG vowels −6.8 / "s" −4.5, M&B −4.3 / −5.3)
  *
- * ⚠ The lisp guard still does not bound this stage's cut; the macro's ceiling
- * is what keeps it near the guard's floor.
+ * These figures predate the stage's lisp guard. It now bounds the cut: on an
+ * UNVOICED frame no zone may take the 4.5–12 kHz band below the held voice
+ * level plus `lispGuardFloorDb` (tilt-scaled, see below); VOICED frames are
+ * relieved of it (+ voicing weight × 96 dB), since they already hold the ring-
+ * only threshold and cannot lisp.
  */
 export const HF_RESO_KNOTS = [
   // [amount, threshold dB, depth, max cut dB]

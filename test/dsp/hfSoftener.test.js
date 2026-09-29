@@ -1546,3 +1546,18 @@ test('scope: a T after a closure is flagged as a plosive', () => {
   }
   assert.ok(burstIn > 0.5 && burstOut === 0, `burst weight ${burstIn} in the T, ${burstOut} elsewhere`)
 })
+
+test('HF COMP: the Reso stage is rendered its latency long, so a short selection reads no false loss', () => {
+  // ⚠ Rendered at the input's length and shifted, Reso's last 512 samples came
+  // back as zeros and counted as removed top end: measured on the synthetic
+  // voice, a 50 ms selection read 10.7 dB off, 300 ms 0.8 dB. A Reso that cuts
+  // nothing must now leave the measurement where the softener alone put it.
+  const { x } = makeSpeech(SR, { seconds: 1 })
+  const k = { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0 }
+  for (const secs of [0.05, 0.3]) {
+    const seg = x.subarray(0, Math.round(secs * SR))
+    const alone = measureTopLossDb([seg], SR, k)
+    const withReso = measureTopLossDb([seg], SR, k, hfResoKernelParams(0.01), HF_RESO_FRAME_SIZE)
+    assert.ok(Math.abs(withReso - alone) < 0.05, `${secs * 1000} ms: ${withReso.toFixed(3)} dB with Reso, ${alone.toFixed(3)} without`)
+  }
+})

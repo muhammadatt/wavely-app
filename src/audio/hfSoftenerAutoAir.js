@@ -56,12 +56,20 @@ export function measureTopLossDb(channelData, sampleRate, kernelParams, resoPara
   // The chain's order: the softener (Air forced 0), then Reso when it is in.
   let y = processHFSoftenerBuffer(channelData, sampleRate, { ...kernelParams, airDb: 0 }).channelData
   if (resoParams) {
-    const r = processResonanceBuffer(y, sampleRate, resoParams, { frameSize: resoFrameSize })
-    y = r.channelData.map(c => {
-      const o = new Float32Array(c.length)
-      o.set(c.subarray(r.latencySamples))
+    // ⚠ RENDERED LATENCY SAMPLES LONG, then trimmed back — as the apply path
+    // does. Rendered at the input's length and shifted, the last `latency`
+    // samples came back as zeros, and topEnergy counted that silent tail as
+    // top end the chain removed: a short selection read as a bigger loss and
+    // was handed too much Air.
+    const n = y[0]?.length ?? 0
+    const pad = resoFrameSize
+    const padded = y.map(c => {
+      const o = new Float32Array(n + pad)
+      o.set(c)
       return o
     })
+    const r = processResonanceBuffer(padded, sampleRate, resoParams, { frameSize: resoFrameSize })
+    y = r.channelData.map(c => c.slice(r.latencySamples, r.latencySamples + n))
   }
   const before = topEnergy(channelData, sampleRate)
   if (!(before > 0)) return 0
