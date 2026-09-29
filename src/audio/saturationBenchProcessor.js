@@ -84,7 +84,7 @@ export const SAT_BAND_MAX_HZ = 20000
 export const SAT_BAND_MIN_RATIO = Math.pow(2, 1 / 3)
 
 export const SAT_DRIVE_MIN_DB = -12
-export const SAT_DRIVE_MAX_DB = 30
+export const SAT_DRIVE_MAX_DB = 60
 
 /** Nominal speech crest: a band's reference peak is its gated level + this. */
 export const SAT_REF_CREST_DB = 12
