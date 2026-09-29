@@ -5,6 +5,29 @@
  */
 
 import { hfResoKernelParams } from './hfSoftenerResoStage.js'
+import { HF_SOFTENER_TUNING } from './hfSoftenerProcessor.js'
+
+/**
+ * Guard (0–100 %) → the lisp guard's floor, dB relative to the held voice.
+ * 0 is off; 1–100 run −22 → −10 in a straight line, so 50 % is the −16 that
+ * shipped as the switch's ON. Measured on two real narration clips and the
+ * "Fix slide" clip: −20 and below cut the same as the guard off at the default
+ * Duck 40 / EQ 20 (and within 0.4 dB at Duck 80 / EQ 60), so the knob's bottom
+ * joins OFF without a step; at −10 a strident "s" keeps only −2 to −5.5 dB of
+ * cut and its tilt turns positive (+1 to +3 dB) — the strict end.
+ */
+export const GUARD_FLOOR_LOOSE_DB = -22
+export const GUARD_FLOOR_STRICT_DB = -10
+export function guardToFloorDb(guard) {
+  const g = Math.min(100, Math.max(0, Number(guard) || 0))
+  return GUARD_FLOOR_LOOSE_DB + (g / 100) * (GUARD_FLOOR_STRICT_DB - GUARD_FLOOR_LOOSE_DB)
+}
+
+/** The Guard amount, honouring the retired boolean (`lispGuard: false` = 0). */
+export function guardOf(params) {
+  if (params.lispGuard === false) return 0
+  return params.guard ?? HF_SOFTENER_DEFAULTS.guard
+}
 
 export const HF_SOFTENER_DEFAULTS = {
   // The two cutting stages, in chain order. Duck turns the whole "s" down with
@@ -18,7 +41,12 @@ export const HF_SOFTENER_DEFAULTS = {
   release: 40, // ms, HF release outside vowels — fixed, not on the panel
   vowelRelease: true, // let go fast when a vowel starts
   shape: 'band', // 'shelf' | 'band'
-  lispGuard: true, // never cut a sibilant below the voice-relative floor
+  // Lisp guard strength, 0–100 %: no cut may take an "s" further below the
+  // voice than a floor this sets (guardToFloorDb). 0 = off; 50 = −16 dB.
+  guard: 50,
+  // Plosive bursts (T, K, P) — caught by timing and cut harder, guard lifted.
+  plosives: true,
+  band: 4500, // Hz, the EQ band's lower corner, 3000–6000 — see bandTuningFor
   // 0–100 %: the band-limited ResoTame ahead of the softener, a macro over its
   // threshold, depth and max cut (HF_RESO_KNOTS). 0 takes the stage out of the
   // chain entirely — no latency, bit-identical to the softener alone.
@@ -42,7 +70,10 @@ export function toKernelParams(params) {
     releaseMs: params.release,
     vowelRelease: params.vowelRelease,
     shape: params.shape,
-    lispGuard: params.lispGuard,
+    lispGuard: guardOf(params) > 0,
+    lispGuardFloorDb: guardToFloorDb(guardOf(params)),
+    bursts: params.plosives !== false,
+    bandHz: params.band ?? HF_SOFTENER_DEFAULTS.band,
     levelOffsetDb: params.levelOffset,
     detectHz: params.detect,
     airDb: (params.air ?? 0) + (params.comp ? (params.compAir ?? 0) : 0),
@@ -58,6 +89,10 @@ export function resoOn(params) {
 
 /** The pre-stage's kernel params: the macro, and the lisp guard when it is on. */
 export function resoKernelParams(params) {
-  return hfResoKernelParams(params.resoAmount / 100, { lispGuard: params.lispGuard !== false })
+  const g = guardOf(params)
+  return hfResoKernelParams(params.resoAmount / 100, {
+    lispGuard: g > 0,
+    guardShiftDb: guardToFloorDb(g) - HF_SOFTENER_TUNING.lispGuardFloorDb,
+  })
 }
 

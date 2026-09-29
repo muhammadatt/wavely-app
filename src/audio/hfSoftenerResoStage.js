@@ -167,7 +167,12 @@ export const HF_RESO_LISP_GUARD_FLOOR_DB = -12
 export const HF_RESO_GUARD_TILT_DB = [3, 10]
 export const HF_RESO_GUARD_TILT_RELAX_DB = 20
 
-export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard = true } = {}) {
+/**
+ * `guardShiftDb` moves the floor with the softener's Guard knob: the softener's
+ * floor minus its default (−16), so the two floors stay 4 dB apart at every
+ * Guard setting and the default is −12 exactly.
+ */
+export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard = true, guardShiftDb = 0 } = {}) {
   return {
     ...toKernelParams({
       ...RESONANCE_DEFAULTS,
@@ -180,7 +185,7 @@ export function hfResoKernelParams(amount = HF_RESO_AMOUNT_DEFAULT, { lispGuard 
     // ⚠ EXPLICIT NULLS WHEN OFF, NOT ABSENT KEYS: the kernel MERGES a params
     // message into what it has, so an omitted key keeps its old value and the
     // panel's Lisp Guard switch could turn the guard on but never off again.
-    lispGuardFloorDb: lispGuard ? HF_RESO_LISP_GUARD_FLOOR_DB : null,
+    lispGuardFloorDb: lispGuard ? HF_RESO_LISP_GUARD_FLOOR_DB + guardShiftDb : null,
     lispGuardTiltDb: HF_RESO_GUARD_TILT_DB,
     lispGuardTiltRelaxDb: HF_RESO_GUARD_TILT_RELAX_DB,
   }

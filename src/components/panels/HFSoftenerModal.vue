@@ -10,6 +10,9 @@
  * Rotator, Release and vowel release were controls while the design was being
  * tuned and are now pinned (50 %, sidechain, 40 ms, on — see useHFSoftener.js). DELTA sits in the
  * header like every other plugin's monitor and never reaches the apply path.
+ * ADVANCED opens a second row: Guard (the lisp guard's strength, 0 = off),
+ * Band (the EQ's lower corner — where it cuts, not where it listens; that is
+ * Detect) and Plosives (the T/K/P treatment).
  * The curve is the cut the kernel is running right now, drawn from the same
  * coefficient builder, with the Amount's maximum depth ghosted behind it.
  */
@@ -19,8 +22,9 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import {
   amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections, AIR_MAKEUP_MAX_DB,
   duckToMaxDepthDb, duckToThresholdDb, duckToSlope,
-  DETECT_HZ_MIN, DETECT_HZ_MAX,
+  DETECT_HZ_MIN, DETECT_HZ_MAX, BAND_HZ_MIN, BAND_HZ_MAX, bandTuningFor,
 } from '../../audio/hfSoftenerProcessor.js'
+import { guardToFloorDb } from '../../audio/hfSoftenerParams.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import { airBandSections } from '../../audio/dsp/airBandCurve.js'
 import Knob from '../knobs/Knob.vue'
@@ -32,10 +36,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfLispGuard, hfResoAmount, hfAir, hfComp, hfCompAir, hfDetect, hfAirMode, hfDuck, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfShape, hfGuard, hfPlosives, hfBand, hfAdvancedOpen, hfResoAmount, hfAir, hfComp, hfCompAir, hfDetect, hfAirMode, hfDuck, hfBroadband, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoAmount, syncAir, syncComp, syncDetect, scheduleAutoAir, syncAirMode, syncDuck, syncShape, syncLispGuard, toggleDelta,
+  togglePreview, syncAmount, syncResoAmount, syncAir, syncComp, syncDetect, scheduleAutoAir, syncAirMode, syncDuck, syncShape, syncGuard, syncPlosives, syncBand, toggleDelta,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -58,9 +62,9 @@ onMounted(() => {
 
 const ACCENT = '#e8b77f'
 
-const GUARD_OPTIONS = [
-  { value: true, label: 'ON', title: 'Never cut an S further below the voice than a normal S sits — stops the lisp, and lets go as the next vowel starts' },
-  { value: false, label: 'OFF', title: 'Cut as deep as Amount asks' },
+const PLOSIVE_OPTIONS = [
+  { value: true, label: 'ON', title: 'Catch T, K and P releases — a burst straight out of a stop’s silence — and cut them harder, with the lisp guard lifted: a T cannot lisp' },
+  { value: false, label: 'OFF', title: 'Treat plosive bursts like any other top-end event' },
 ]
 
 const COMP_OPTIONS = [
@@ -77,8 +81,8 @@ const AIR_MODE_OPTIONS = [
 ]
 
 const SHAPE_OPTIONS = [
-  { value: 'shelf', label: 'SHELF', title: 'Cut everything above 4.5 kHz — the spec’s original shape' },
-  { value: 'band', label: 'BAND', title: 'Cut the sibilance band and return to flat above 11 kHz, so the air stays' },
+  { value: 'shelf', label: 'SHELF', title: 'Cut everything above the Band corner — the spec’s original shape' },
+  { value: 'band', label: 'BAND', title: 'Cut the sibilance band and return to flat above it, so the air stays' },
 ]
 
 
@@ -111,7 +115,7 @@ const Y0 = yFor(0)
 // what the audio gets. The duck moves the whole curve down.
 function shelfPath(gainDb, levelDb = 0) {
   const sr = state.currentFile?.sampleRate ?? 44100
-  const secs = softenerSections(sr, gainDb, hfShape.value)
+  const secs = softenerSections(sr, gainDb, hfShape.value, bandTuningFor(hfBand.value))
   if (totalAir.value > 0) secs.push(...airBandSections(sr, totalAir.value))
   const db = magnitudeResponseDb(secs, CURVE_FREQS, sr).map(v => v + levelDb)
   return CURVE_FREQS.map(
@@ -165,6 +169,14 @@ function formatAir(v) {
 function formatPct(v) {
   return `${Math.round(v)}%`
 }
+
+function formatGuard(v) {
+  return v > 0 ? `${Math.round(v)}%` : 'OFF'
+}
+
+const guardLabel = computed(() =>
+  hfGuard.value > 0 ? `FLOOR ${guardToFloorDb(hfGuard.value).toFixed(0)} dB` : 'NO GUARD',
+)
 
 function gridLabel(f) {
   return f >= 1000 ? `${f / 1000}k` : String(f)
@@ -348,14 +360,6 @@ async function applyAndClose() {
           />
         </div>
         <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">LISP GUARD</span>
-          <DeviceChoiceRocker
-            :model-value="hfLispGuard" :options="GUARD_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="Lisp guard"
-            @update:model-value="syncLispGuard"
-          />
-        </div>
-        <div class="flex flex-col items-center gap-[8px]">
           <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">HF COMP</span>
           <DeviceChoiceRocker
             :model-value="hfComp" :options="COMP_OPTIONS" :accent="ACCENT"
@@ -373,7 +377,54 @@ async function applyAndClose() {
         </div>
       </div>
 
+      <div class="flex justify-center mt-[16px]">
+        <button
+          type="button"
+          class="px-[10px] py-[3px] rounded-[4px]"
+          style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.45);border:1px solid rgba(255,255,255,.12)"
+          :aria-expanded="hfAdvancedOpen"
+          @click="hfAdvancedOpen = !hfAdvancedOpen"
+        >
+          ADVANCED {{ hfAdvancedOpen ? '▴' : '▾' }}
+        </button>
+      </div>
 
+      <div v-if="hfAdvancedOpen" class="flex justify-center items-start gap-[28px] mt-[14px]">
+        <div class="w-[104px] flex flex-col items-center">
+          <Knob
+            :model-value="hfGuard"
+            @update:model-value="syncGuard"
+            :min="0" :max="100" :step="1"
+            label="Guard" :accent="ACCENT" :format-value="formatGuard"
+            :disabled="!hfPreview"
+            title="Lisp guard strength. No cut may take an S further below the voice than this floor, so it never ends up quieter than a normal S sits — stops the lisp, and lets go as the next vowel starts. Higher is stricter; 0 turns it off. Covers Reso too."
+          />
+          <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+            {{ guardLabel }}
+          </span>
+        </div>
+        <div class="w-[104px] flex flex-col items-center">
+          <Knob
+            :model-value="hfBand"
+            @update:model-value="syncBand"
+            :min="BAND_HZ_MIN" :max="BAND_HZ_MAX" scale="log" :quantize="quantizeHz"
+            label="Band" :accent="ACCENT" :format-value="formatHz" :value-font-px="17"
+            :disabled="!hfPreview"
+            title="Where the EQ cuts — the band's lower corner. Lower it for an S that sits low (3–5 kHz, common on deeper voices and on SH); raise it for a high, thin S. The band keeps its shape as it moves. Detect decides what triggers the cut; this decides what it takes."
+          />
+          <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+            CUT FROM {{ formatHz(hfBand) }}
+          </span>
+        </div>
+        <div class="flex flex-col items-center gap-[8px] pt-[6px]">
+          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">PLOSIVES</span>
+          <DeviceChoiceRocker
+            :model-value="hfPlosives" :options="PLOSIVE_OPTIONS" :accent="ACCENT"
+            :disabled="!hfPreview" label="Plosives"
+            @update:model-value="syncPlosives"
+          />
+        </div>
+      </div>
 
       <p
         class="mt-[14px] text-center"

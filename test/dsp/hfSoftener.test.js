@@ -38,12 +38,15 @@ import {
   detectCompDb,
   DETECT_HZ_MIN,
   DETECT_HZ_MAX,
+  BAND_HZ_MIN,
+  BAND_HZ_MAX,
+  bandTuningFor,
 } from '../../src/audio/hfSoftenerProcessor.js'
 import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 import { processResonanceBuffer, ResonanceKernel } from '../../src/audio/resonanceProcessor.js'
 import { measureTopLossDb, autoAirDb, AIR_AUTO_FRACTION } from '../../src/audio/hfSoftenerAutoAir.js'
-import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams } from '../../src/audio/hfSoftenerParams.js'
+import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams, guardToFloorDb, GUARD_FLOOR_LOOSE_DB, GUARD_FLOOR_STRICT_DB } from '../../src/audio/hfSoftenerParams.js'
 import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
@@ -1403,4 +1406,71 @@ test('reso lisp guard: switching it OFF reaches the kernel (params merge)', () =
   k.setParams(off)
   assert.equal(k.guardFloorDb, null)
   assert.ok(fresh.length > 0)
+})
+// ── Advanced: Guard, Plosives, Band ─────────────────────────────────────────
+
+test('guard: 0 is off, 50 is the −16 the switch shipped as, 100 the strict end; Reso follows 4 dB above', () => {
+  const k = g => toSoftenerKernelParams({ ...HF_SOFTENER_DEFAULTS, guard: g })
+  assert.equal(k(0).lispGuard, false)
+  assert.equal(k(50).lispGuard, true)
+  assert.equal(k(50).lispGuardFloorDb, T.lispGuardFloorDb)
+  assert.equal(guardToFloorDb(100), GUARD_FLOOR_STRICT_DB)
+  assert.ok(Math.abs(guardToFloorDb(0) - GUARD_FLOOR_LOOSE_DB) < 1e-12)
+  // The retired boolean still reads as off.
+  assert.equal(toSoftenerKernelParams({ ...HF_SOFTENER_DEFAULTS, lispGuard: false }).lispGuard, false)
+  const r = g => resoKernelParams({ ...HF_SOFTENER_DEFAULTS, resoAmount: 50, guard: g }).lispGuardFloorDb
+  assert.equal(r(50), HF_RESO_LISP_GUARD_FLOOR_DB)
+  assert.equal(r(100) - r(50), guardToFloorDb(100) - guardToFloorDb(50))
+  assert.equal(r(0), null)
+})
+
+test('guard: the default is bit-identical to the old switch, and stricter settings cut a normal "s" less', () => {
+  const { x } = makeSpeech(SR, { seconds: 3, peakedS: true })
+  const run = p => processHFSoftenerBuffer([x], SR, { amount: 1, ...p }, { recordGain: true, tuning: NO_BURSTS }).gainDb
+  const old = run({ lispGuard: true })
+  const now = run({ lispGuard: true, lispGuardFloorDb: guardToFloorDb(HF_SOFTENER_DEFAULTS.guard) })
+  for (let i = 0; i < old.length; i++) assert.equal(now[i], old[i])
+  const deepest = g => { let m = 0; for (const v of g) m = Math.min(m, v); return m }
+  const cuts = [20, 50, 80, 100].map(g => deepest(run({ lispGuard: true, lispGuardFloorDb: guardToFloorDb(g) })))
+  for (let i = 1; i < cuts.length; i++) {
+    assert.ok(cuts[i] >= cuts[i - 1] - 1e-9, `Guard should only ever cut less as it rises: ${cuts.map(c => c.toFixed(2)).join(' ')}`)
+  }
+  assert.ok(cuts[3] > cuts[0] + 2, `the knob should have travel: ${cuts.map(c => c.toFixed(2)).join(' ')}`)
+})
+
+test('plosives: off, a T after a closure is not caught and gets no extra cut', () => {
+  const sr = 44100
+  const { x, b0, b1 } = makeBurst(sr)
+  const on = burstRun(x, sr, {})
+  const off = burstRun(x, sr, { bursts: false })
+  assert.ok(on.fired && !off.fired)
+  assert.ok(deepestIn(off.gain, b0, b1) > deepestIn(on.gain, b0, b1) + 2)
+})
+
+test('band: 4.5 kHz is the old band exactly; the return follows only above it', () => {
+  assert.equal(bandTuningFor(T.shelfFreqHz), T)
+  assert.equal(bandTuningFor(BAND_HZ_MIN).returnFreqHz, T.returnFreqHz)
+  assert.ok(Math.abs(bandTuningFor(BAND_HZ_MAX).returnFreqHz / T.returnFreqHz - BAND_HZ_MAX / T.shelfFreqHz) < 1e-12)
+  const { x } = makeSpeech(SR, { seconds: 2 })
+  const a = processHFSoftenerBuffer([x], SR, { amount: 0.6 }).channelData[0]
+  const b = processHFSoftenerBuffer([x], SR, { amount: 0.6, bandHz: 4500 }).channelData[0]
+  for (let i = 0; i < a.length; i++) assert.equal(b[i], a[i])
+})
+
+test('band: full depth at every corner and rate, and the cut moves with the corner', () => {
+  // ⚠ A fixed 11 kHz return could not follow a high corner: at 7 kHz a 24 dB
+  // cut stopped at −20 and took 16 kHz down 4.5–10 dB.
+  for (const sr of [44100, 48000, 96000]) {
+    const grid = Array.from({ length: 300 }, (_, i) => 1000 * Math.pow((0.49 * sr) / 1000, i / 299))
+    for (const hz of [BAND_HZ_MIN, 4500, BAND_HZ_MAX]) {
+      for (const d of [6, 24]) {
+        const r = magnitudeResponseDb(softenerSections(sr, -d, 'band', bandTuningFor(hz)), grid, sr)
+        assert.ok(Math.abs(Math.min(...r) + d) < 0.05, `${sr} ${hz} depth ${d}: deepest ${Math.min(...r).toFixed(2)}`)
+        assert.ok(Math.max(...r) < 0.4, `${sr} ${hz} depth ${d}: boosts ${Math.max(...r).toFixed(2)}`)
+      }
+    }
+    const at3k = hz => magnitudeResponseDb(softenerSections(sr, -12, 'band', bandTuningFor(hz)), [3000], sr)[0]
+    assert.ok(at3k(BAND_HZ_MIN) < at3k(4500) - 3 && at3k(4500) < at3k(BAND_HZ_MAX) - 1,
+      `3 kHz: ${at3k(BAND_HZ_MIN).toFixed(1)} / ${at3k(4500).toFixed(1)} / ${at3k(BAND_HZ_MAX).toFixed(1)} dB`)
+  }
 })

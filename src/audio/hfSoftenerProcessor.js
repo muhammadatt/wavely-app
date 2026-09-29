@@ -247,6 +247,14 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   // Cap each cut so a sibilant never ends more than the floor below the
   // voice — the lisp guard. It only ever shrinks a cut, so it cannot dull.
   lispGuard: true,
+  // The guard's floor, dB relative to the held voice level — the panel's
+  // Guard amount (guardToFloorDb). null: the tuning's `lispGuardFloorDb`.
+  lispGuardFloorDb: null,
+  // Plosive-burst treatment (burst* in the tuning) — the panel's Plosives.
+  bursts: true,
+  // The EQ band's lower corner, Hz — the shelf, not the detector. The panel's
+  // Band. See bandTuningFor for where the return shelf goes.
+  bandHz: 4500,
   // File property, not a patch value: the file's gated RMS minus the nominal
   // level. Measured by the caller over the WHOLE file (see levelOffsetDbFor).
   levelOffsetDb: 0,
@@ -265,6 +273,25 @@ export const AIR_MAKEUP_MAX_DB = 6
 export const AIR_TOTAL_MAX_DB = 2 * AIR_MAKEUP_MAX_DB
 
 export const SHAPES = ['shelf', 'band']
+
+/** EQ band corner range, Hz. */
+export const BAND_HZ_MIN = 3000
+export const BAND_HZ_MAX = 6000
+
+/**
+ * The tuning with the EQ band's corner moved to `bandHz`. Below the tuning's
+ * own corner the return shelf stays put (the band widens downward); above it,
+ * the return moves up in proportion, so the band keeps its shape and slides.
+ * ⚠ A FIXED RETURN CANNOT FOLLOW A HIGH CORNER: at 7 kHz, 0.65 octave under
+ * the 11 kHz return, a 24 dB cut stopped at −20 and took 16 kHz down 4.5 dB
+ * (44.1 kHz) to 10 (96 kHz); 6 kHz already cost 16 kHz 2–5 dB. Moved with the
+ * corner the band reaches full depth at every corner and rate.
+ */
+export function bandTuningFor(bandHz, tuning = HF_SOFTENER_TUNING) {
+  if (bandHz === tuning.shelfFreqHz) return tuning
+  const lift = bandHz > tuning.shelfFreqHz ? bandHz / tuning.shelfFreqHz : 1
+  return { ...tuning, shelfFreqHz: bandHz, returnFreqHz: tuning.returnFreqHz * lift }
+}
 
 /** Detector corner range, Hz. */
 export const DETECT_HZ_MIN = 3000
@@ -717,6 +744,7 @@ export class HFSoftenerKernel {
     this.coeffCur = new Float64Array(AUDIO_SECTIONS * 5)
     this.coeffNext = new Float64Array(AUDIO_SECTIONS * 5)
     this.shape = 'band'
+    this.bandTuning = tuning
     this.writeShelf(this.coeffCur, 0)
     const chunk = tuning.coeffUpdateSamples
     this.gainBuf = new Float64Array(chunk)
@@ -771,6 +799,11 @@ export class HFSoftenerKernel {
     }
     this.vowelRelease = !!p.vowelRelease
     this.lispGuard = !!p.lispGuard
+    this.guardFloorDb = Number.isFinite(p.lispGuardFloorDb) ? p.lispGuardFloorDb : this.tuning.lispGuardFloorDb
+    this.bursts = p.bursts !== false
+    const bandHz = clamp(Number(p.bandHz) || this.tuning.shelfFreqHz, BAND_HZ_MIN, BAND_HZ_MAX)
+    // bandDepthComp caches per corner, so a move costs one solve.
+    if (bandHz !== this.bandTuning.shelfFreqHz) this.bandTuning = bandTuningFor(bandHz, this.tuning)
     this.shape = p.shape
     if (immediate) this.writeShelf(this.coeffCur, this.shelfGainDb)
     const off = clamp(Number(p.levelOffsetDb) || 0, -this.tuning.maxLevelOffsetDb, this.tuning.maxLevelOffsetDb)
@@ -805,7 +838,7 @@ export class HFSoftenerKernel {
   writeShelf(dst, gainDb) {
     // Snap near-zero gain to exactly zero, where each shelf's numerator and
     // denominator are identical and the filter is an exact identity.
-    const secs = softenerSections(this.sampleRate, Math.abs(gainDb) < 1e-4 ? 0 : gainDb, this.shape, this.tuning)
+    const secs = softenerSections(this.sampleRate, Math.abs(gainDb) < 1e-4 ? 0 : gainDb, this.shape, this.bandTuning)
     for (let k = 0; k < AUDIO_SECTIONS; k++) {
       const c = secs[k]
       const o = k * 5
@@ -967,7 +1000,7 @@ export class HFSoftenerKernel {
           voiceDb = voiceE > 0 ? 10 * Math.log10(voiceE) : -300
           const tiltDb = tiltM > 0 && tiltH > 0 ? 10 * Math.log10(tiltH / tiltM) : tiltH > 0 ? 99 : 0
           const wt = lispGuardTiltWeight(tiltDb, tuning)
-          floor = tuning.lispGuardFloorDb - (1 - (wt > wv ? wt : wv)) * tuning.tiltRelaxDb
+          floor = this.guardFloorDb - (1 - (wt > wv ? wt : wv)) * tuning.tiltRelaxDb
         }
 
         // ── Stage 1: Duck — the whole signal turned down, shape intact ─────
@@ -992,7 +1025,7 @@ export class HFSoftenerKernel {
         const rise = hfDb - hist[this.hfHistPos]
         hist[this.hfHistPos] = hfDb
         this.hfHistPos = (this.hfHistPos + 1) % hist.length
-        if (tuning.burstsEnabled && this.burstLeft <= 0 && this.sinceClosure <= this.burstOnsetWindow && rise >= tuning.burstRiseDb) {
+        if (tuning.burstsEnabled && this.bursts && this.burstLeft <= 0 && this.sinceClosure <= this.burstOnsetWindow && rise >= tuning.burstRiseDb) {
           this.burstLeft = this.burstLength
           this.sinceClosure = Infinity
         }

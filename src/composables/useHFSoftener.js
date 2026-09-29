@@ -15,7 +15,12 @@ export const HF_SOFTENER_WINDOW_ID = 'hf-softener'
 // Singleton reactive state shared between the sidebar trigger and the modal.
 const hfAmount = ref(HF_SOFTENER_DEFAULTS.amount)
 const hfShape = ref(HF_SOFTENER_DEFAULTS.shape)
-const hfLispGuard = ref(HF_SOFTENER_DEFAULTS.lispGuard)
+// Lisp guard strength, 0–100 % (0 = off), and the two Advanced controls.
+const hfGuard = ref(HF_SOFTENER_DEFAULTS.guard)
+const hfPlosives = ref(HF_SOFTENER_DEFAULTS.plosives)
+const hfBand = ref(HF_SOFTENER_DEFAULTS.band)
+// Whether the panel's Advanced row is open — view state, not a param.
+const hfAdvancedOpen = ref(false)
 // The band-limited ResoTame ahead of the softener — an A/B of the pairing,
 // with fixed settings (see hfSoftenerResoStage.js).
 const hfResoAmount = ref(HF_SOFTENER_DEFAULTS.resoAmount)
@@ -63,7 +68,9 @@ function currentParams() {
     release: HF_SOFTENER_DEFAULTS.release,
     vowelRelease: HF_SOFTENER_DEFAULTS.vowelRelease,
     shape: hfShape.value,
-    lispGuard: hfLispGuard.value,
+    guard: hfGuard.value,
+    plosives: hfPlosives.value,
+    band: hfBand.value,
     resoAmount: hfResoAmount.value,
     air: hfAir.value,
     comp: hfComp.value,
@@ -257,9 +264,21 @@ export function useHFSoftener() {
     scheduleAutoAir()
   }
 
-  function syncLispGuard(v) {
-    hfLispGuard.value = v
-    pushParam('lispGuard', v)
+  function syncGuard(v) {
+    hfGuard.value = v
+    pushParam('guard', v)
+    scheduleAutoAir()
+  }
+
+  function syncPlosives(v) {
+    hfPlosives.value = v
+    pushParam('plosives', v)
+    scheduleAutoAir()
+  }
+
+  function syncBand(v) {
+    hfBand.value = v
+    pushParam('band', v)
     scheduleAutoAir()
   }
 
@@ -341,7 +360,10 @@ export function useHFSoftener() {
     hfDuck,
     hfBroadband,
     hfShape,
-    hfLispGuard,
+    hfGuard,
+    hfPlosives,
+    hfBand,
+    hfAdvancedOpen,
     hfFileLevelDb,
     hfLevelOffset,
     hfDelta,
@@ -362,7 +384,9 @@ export function useHFSoftener() {
     syncAirMode,
     syncDuck,
     syncShape,
-    syncLispGuard,
+    syncGuard,
+    syncPlosives,
+    syncBand,
     toggleDelta,
     refreshLevel,
     apply,

@@ -128,7 +128,7 @@ export function createHFSoftener(audioContext) {
       if (!(name in params)) return
       const wasOn = resoOn(params)
       params[name] = value
-      if (name === 'resoAmount' || name === 'lispGuard') {
+      if (name === 'resoAmount' || name === 'guard') {
         resoNode?.port.postMessage({ type: 'params', params: resoKernelParams(params) })
       }
       if (name === 'resoAmount') {
