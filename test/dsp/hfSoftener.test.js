@@ -70,6 +70,11 @@ function lcg(seed) {
  * glottal roll-off — a bare pulse train has a flat top end and puts vowels
  * straight into the detector, which no voice does.
  */
+// The synthetic voice's isolated "s" starts abruptly 100 ms after silence,
+// which the plosive-burst detector reads as a T (see burstsEnabled). Tests of
+// other features that use it turn burst handling off.
+const NO_BURSTS = { ...HF_SOFTENER_TUNING, burstsEnabled: false }
+
 function makeSpeech(sr, { seconds = 5, seed = 3, inPhraseF = false, peakedS = false } = {}) {
   const rnd = lcg(seed)
   const n = Math.round(sr * seconds)
@@ -298,7 +303,7 @@ test('zero latency', () => {
 
 test('breath and room tone get 0 dB of reduction; sibilants do not', () => {
   const { x, labels } = makeSpeech(SR)
-  const { gainDb } = processHFSoftenerBuffer([x], SR, {}, { recordGain: true })
+  const { gainDb } = processHFSoftenerBuffer([x], SR, {}, { recordGain: true, tuning: NO_BURSTS })
   let breathMin = 0
   let sibMin = 0
   for (let i = 0; i < x.length; i++) {
@@ -607,7 +612,7 @@ test('amount: the cut grows in even steps across the dial', () => {
   const deepest = a => {
     // The MAP's evenness, so guard off — the guard deliberately flattens the
     // top of the knob on well-behaved sibilants (see the lisp-guard tests).
-    const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: a, lispGuard: false }, { recordGain: true })
+    const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: a, lispGuard: false }, { recordGain: true, tuning: NO_BURSTS })
     let m = 0, breath = 0
     for (let i = 0; i < gainDb.length; i++) {
       m = Math.min(m, gainDb[i])
@@ -675,7 +680,7 @@ test('lisp guard: a normal "s" stops getting deeper, a hot one is still chased',
   // normal "s", which is exactly the lisp it exists to stop.
   const { x } = makeSpeech(SR, { seconds: 3, peakedS: true })
   const deepest = (a, guard, y = x) => {
-    const { gainDb } = processHFSoftenerBuffer([y], SR, { amount: a, lispGuard: guard }, { recordGain: true })
+    const { gainDb } = processHFSoftenerBuffer([y], SR, { amount: a, lispGuard: guard }, { recordGain: true, tuning: NO_BURSTS })
     let m = 0
     for (const v of gainDb) m = Math.min(m, v)
     return m
@@ -960,7 +965,7 @@ test('duck: the lisp guard caps the TOTAL of both stages', () => {
   const sr = 44100
   const { x } = makeSpeech(sr, { seconds: 3, peakedS: true })
   const deepest = (guard) => {
-    const { gainDb } = processHFSoftenerBuffer([x], sr, { amount: 1, duck: 1, lispGuard: guard }, { recordGain: true })
+    const { gainDb } = processHFSoftenerBuffer([x], sr, { amount: 1, duck: 1, lispGuard: guard }, { recordGain: true, tuning: NO_BURSTS })
     let m = 0
     for (const v of gainDb) m = Math.min(m, v)
     return m
@@ -991,6 +996,80 @@ test('duck: delta is exactly what the Duck and the EQ removed together', () => {
   let worst = 0
   for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(x[i] - y[i] - d[i]))
   assert.ok(worst < 1e-6, `worst ${worst}`)
+})
+
+// ── Plosive bursts ──────────────────────────────────────────────────────────
+
+// Vowel, then a gap (the closure), then a noise burst of `burstMs` (3–10 kHz)
+// with an onset ramp of `rampMs`, then vowel again. Returns the signal and the
+// burst's sample span.
+function makeBurst(sr, { gapMs = 40, burstMs = 25, rampMs = 1, level = 0.25, seed = 7 } = {}) {
+  const rnd = lcg(seed)
+  const vowelS = 0.4
+  const n = Math.round(sr * (2 * vowelS + gapMs / 1000 + burstMs / 1000 + 0.05))
+  const x = new Float32Array(n)
+  const glot = new Biquad(lowpass(sr, 400, 0.7))
+  const f1 = new Biquad(peaking(sr, 700, 3, 12))
+  const bh = [new Biquad(highpass(sr, 3000, 0.7)), new Biquad(highpass(sr, 3000, 0.7))]
+  const bl = new Biquad(lowpass(sr, 10000, 0.7))
+  const g0 = Math.round(sr * vowelS), b0 = g0 + Math.round(sr * gapMs / 1000), b1 = b0 + Math.round(sr * burstMs / 1000)
+  let phase = 0
+  for (let i = 0; i < n; i++) {
+    const voiced = i < g0 || i >= b1
+    phase += 130 / sr
+    if (phase >= 1) phase -= 1
+    const vowel = f1.tick(glot.tick(voiced && phase < 130 / sr ? 1 : 0)) * 100 * 0.126
+    let nz = rnd()
+    for (const q of bh) nz = q.tick(nz)
+    nz = bl.tick(nz)
+    const inBurst = i >= b0 && i < b1
+    const ramp = Math.min(1, (i - b0) / Math.max(1, sr * rampMs / 1000))
+    x[i] = (voiced ? vowel : 0) + (inBurst ? nz * level * ramp : 0)
+  }
+  return { x, b0, b1 }
+}
+
+const burstRun = (x, sr, params) => {
+  const k = new HFSoftenerKernel(sr)
+  k.setParams({ ...HF_SOFTENER_KERNEL_DEFAULTS, duck: 0.4, amount: 0.2, ...params }, true)
+  const out = new Float32Array(x.length)
+  const gain = new Float32Array(x.length)
+  for (let o = 0; o < x.length; o += 128) {
+    const n = Math.min(128, x.length - o)
+    k.process([x.subarray(o, o + n)], [out.subarray(o, o + n)], n, gain.subarray(o, o + n))
+  }
+  return { fired: k.burstMeter > 0.5, gain }
+}
+const deepestIn = (g, a, b) => { let m = 0; for (let i = a; i < b; i++) m = Math.min(m, g[i]); return m }
+
+test('bursts: a T after a closure is caught and cut deeper; the lisp guard is lifted on it', () => {
+  const sr = 44100
+  const { x, b0, b1 } = makeBurst(sr)
+  const on = burstRun(x, sr, {})
+  assert.ok(on.fired, 'a sharp burst after a 40 ms closure should be caught')
+  const flat = { ...HF_SOFTENER_TUNING, burstThresholdDropDb: 0, burstExtraDepthDb: 0 }
+  const k = new HFSoftenerKernel(sr, flat)
+  k.setParams({ ...HF_SOFTENER_KERNEL_DEFAULTS, duck: 0.4, amount: 0.2 }, true)
+  const out = new Float32Array(x.length), plain = new Float32Array(x.length)
+  for (let o = 0; o < x.length; o += 128) {
+    const n = Math.min(128, x.length - o)
+    k.process([x.subarray(o, o + n)], [out.subarray(o, o + n)], n, plain.subarray(o, o + n))
+  }
+  const withBoost = deepestIn(on.gain, b0, b1), without = deepestIn(plain, b0, b1)
+  assert.ok(withBoost < without - 2, `burst ${withBoost.toFixed(2)} dB with the boost, ${without.toFixed(2)} without`)
+  // Guard lifted inside the burst: the same with the guard off.
+  const free = deepestIn(burstRun(x, sr, { lispGuard: false }).gain, b0, b1)
+  assert.ok(Math.abs(withBoost - free) < 0.5, `guarded ${withBoost.toFixed(2)} vs unguarded ${free.toFixed(2)}`)
+})
+
+test('bursts: a pause is not a closure, and an "s" building up is not a burst', () => {
+  const sr = 44100
+  // A fricative after a long pause (phrase start): not a stop's closure.
+  assert.equal(burstRun(makeBurst(sr, { gapMs: 400 }).x, sr, {}).fired, false, 'a 400 ms pause should not count')
+  // No closure at all: the burst runs straight out of the vowel.
+  assert.equal(burstRun(makeBurst(sr, { gapMs: 0 }).x, sr, {}).fired, false, 'no closure should mean no burst')
+  // An "s" after a closure that builds over 40 ms rises too slowly to count.
+  assert.equal(burstRun(makeBurst(sr, { rampMs: 40, burstMs: 100 }).x, sr, {}).fired, false, 'a slow-onset "s" should not count')
 })
 
 // ── Rich synthetic voice (upper formants) ───────────────────────────────────

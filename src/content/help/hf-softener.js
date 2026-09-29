@@ -29,6 +29,7 @@ export default {
 
   notes: [
     'Thresholds follow the file’s own level, so a setting means the same on a quiet recording and a hot one',
+    'T, K and P releases — a short burst straight out of a silent closure — are caught automatically and cut harder than S’s, with the lisp guard lifted: a burst cannot lisp',
     'If the result sounds a touch dull, a dB or two of Air puts the top back — it is Air Boost’s curve, so there is no need for a separate Air Boost pass',
     'Delta never includes the Air makeup or the saturation: it plays only what the cut removes — the band cut and the broadband dip together',
     'The meter shows the total taken off each S; the readout under it splits that into DUCK (level) and EQ (tone)',
