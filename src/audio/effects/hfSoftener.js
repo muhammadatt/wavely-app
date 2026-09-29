@@ -14,7 +14,8 @@
 import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from '../hfSoftenerResoStage.js'
-import { createLevelTap } from './levelTap.js'
+import { createLevelTap, createSpectrumTap } from './levelTap.js'
+import { createScopeRing } from '../hfSoftenerScope.js'
 import { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams } from '../hfSoftenerParams.js'
 
 export { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams } from '../hfSoftenerParams.js'
@@ -31,6 +32,12 @@ export function createHFSoftener(audioContext) {
   let reductionDb = 0
   let thresholdLiftDb = 0
   let broadbandDb = 0
+  let resoDb = 0
+  // Lamps: a plosive window opened / the Air lift, since the last meter post.
+  let burstLamp = 0
+  let airLamp = 0
+  // Activity scope: one point per kernel quantum, appended as they arrive.
+  const scope = createScopeRing(audioContext.sampleRate)
 
   // Monitor tap, kept out of `params` on purpose: parameters are what the
   // apply path renders with, and a monitor mode must never be one of them.
@@ -88,6 +95,9 @@ export function createHFSoftener(audioContext) {
         resoNode = new AudioWorkletNode(audioContext, 'resonance-processor', {
           processorOptions: { params: resoKernelParams(params), frameSize: HF_RESO_FRAME_SIZE },
         })
+        resoNode.port.onmessage = (e) => {
+          if (e.data?.type === 'gr') resoDb = e.data.grDb ?? 0
+        }
         rewire()
       })
       .catch((err) => {
@@ -109,6 +119,9 @@ export function createHFSoftener(audioContext) {
         reductionDb = e.data.reductionDb
         thresholdLiftDb = e.data.thresholdLiftDb
         broadbandDb = e.data.broadbandDb ?? 0
+        burstLamp = e.data.burst ?? 0
+        airLamp = e.data.air ?? 0
+        scope.push(e.data.scope)
       }
       ensureReso()
       rewire()
@@ -119,6 +132,9 @@ export function createHFSoftener(audioContext) {
 
   const inputTap = createLevelTap(audioContext, inputMonitor)
   const outputTap = createLevelTap(audioContext, outputMonitor)
+  // The input's spectrum, drawn behind the response curve with the Detect and
+  // Band corners over it. Created on first read, so a closed panel costs no FFT.
+  let spectrumTap = null
 
   return {
     input,
@@ -156,6 +172,27 @@ export function createHFSoftener(audioContext) {
       return broadbandDb
     },
 
+    /** The Reso stage's reduction, positive dB; 0 while it is out. */
+    getReso() {
+      return resoOn(params) && resoNode ? resoDb : 0
+    },
+
+    /** Plosive lamp (0–1) and Air lamp (0–1), from the last meter post. */
+    getLamps() {
+      return { burst: burstLamp, air: airLamp }
+    },
+
+    /** The activity scope's ring — see hfSoftenerScope.js. Read, do not retain. */
+    getScope() {
+      return scope.view()
+    },
+
+    /** The input's spectrum tap, created on first call. */
+    getInputSpectrum() {
+      if (!spectrumTap && !destroyed) spectrumTap = createSpectrumTap(audioContext, inputMonitor)
+      return spectrumTap
+    },
+
     /** How far Context is currently holding the threshold up, dB. */
     getThresholdLift() {
       return thresholdLiftDb
@@ -187,6 +224,7 @@ export function createHFSoftener(audioContext) {
       outputMonitor.disconnect()
       inputTap.destroy()
       outputTap.destroy()
+      spectrumTap?.destroy()
     },
   }
 }

@@ -13,8 +13,13 @@
  * ADVANCED opens a second row: Guard (the lisp guard's strength, 0 = off),
  * Band (the EQ's lower corner — where it cuts, not where it listens; that is
  * Detect) and Plosives (the T/K/P treatment).
- * The curve is the cut the kernel is running right now, drawn from the same
- * coefficient builder, with the Amount's maximum depth ghosted behind it.
+ * The SCOPE at the top is the waveform after the cut with what was removed
+ * painted around it (SoftenerScope, hfSoftenerScope.js); the readout under it
+ * splits the total into Duck, EQ and Reso. The curve is the cut the kernel is
+ * running right now, drawn from the same coefficient builder, with the most
+ * both stages could take ghosted behind it and the input's spectrum under it;
+ * the dotted line is where the detector listens (Detect), the solid one where
+ * the EQ cuts (Band). Lamps on AIR MODE and PLOSIVES light while each acts.
  */
 import { computed, onMounted, watch } from 'vue'
 import { useHFSoftener } from '../../composables/useHFSoftener.js'
@@ -30,7 +35,10 @@ import { airBandSections } from '../../audio/dsp/airBandCurve.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
-import GainReductionBar from '../meters/GainReductionBar.vue'
+import SoftenerScope from '../meters/SoftenerScope.vue'
+import SoftenerSpectrum from '../meters/SoftenerSpectrum.vue'
+import { HF_SCOPE_SECONDS } from '../../audio/hfSoftenerScope.js'
+import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import FloatingWindow from './FloatingWindow.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -40,6 +48,7 @@ const {
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
   togglePreview, syncAmount, syncResoAmount, syncAir, syncComp, syncDetect, scheduleAutoAir, syncAirMode, syncDuck, syncShape, syncGuard, syncPlosives, syncBand, toggleDelta,
+  hfReso, hfBurstLamp, hfAirLamp, getScope, getInputSpectrum,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -61,6 +70,34 @@ onMounted(() => {
 })
 
 const ACCENT = '#e8b77f'
+// The plosive treatment's own colour on the scope and its lamp, and the Detect
+// marker's: each differs from the accent in lightness as well as hue.
+const PLOSIVE_COLOR = '#b9a6f2'
+const DETECT_COLOR = '#8ab8e0'
+const AIR_LAMP_COLOR = '#9fd3c7'
+
+/** A lamp: dark at 0, lit and glowing at 1. */
+function lampStyle(level, colour) {
+  const on = Math.min(1, Math.max(0, level))
+  return {
+    background: on > 0.05 ? colour : 'rgba(255,255,255,.16)',
+    opacity: on > 0.05 ? 0.45 + 0.55 * on : 1,
+    boxShadow: on > 0.05 ? `0 0 ${Math.round(3 + 5 * on)}px ${colour}` : 'none',
+  }
+}
+
+/**
+ * The timeline's peak envelope around the playhead, for the scope's lookahead
+ * (and its history when the effect is bypassed). One scratch per side: both
+ * are read in the same frame. See ClipperScope / SoftClipperModal.
+ */
+const envelopeScratch = { ahead: null, behind: null }
+function envelope(offsetSeconds, seconds, columns) {
+  if (!state.segments?.length) return null
+  const side = offsetSeconds < 0 ? 'behind' : 'ahead'
+  if (envelopeScratch[side]?.length !== columns) envelopeScratch[side] = new Float32Array(columns)
+  return readTimelineEnvelope(state.segments, state.playhead + offsetSeconds, seconds, columns, envelopeScratch[side])
+}
 
 const PLOSIVE_OPTIONS = [
   { value: true, label: 'ON', title: 'Catch T, K and P releases — a burst straight out of a stop’s silence — and cut them harder, with the lisp guard lifted: a T cannot lisp' },
@@ -90,7 +127,7 @@ const SHAPE_OPTIONS = [
 
 // ── Response curve ──────────────────────────────────────────────────────────
 const CURVE_W = 360
-const CURVE_H = 96
+const CURVE_H = 110
 const F_MIN = 100
 const F_MAX = 20000
 const DB_MIN = -10
@@ -128,7 +165,7 @@ const duckMaxDb = computed(() => duckToMaxDepthDb(hfDuck.value / 100))
 // Each stage's ceiling, stacked: the most the two could ever take together.
 const maxPath = computed(() => shelfPath(-maxDepthDb.value, -duckMaxDb.value))
 const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthDb.value), -hfBroadband.value))
-const totalReduction = computed(() => hfReduction.value + hfBroadband.value)
+const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0))
 const liveFill = computed(() => `${livePath.value} L${CURVE_W},${Y0} L0,${Y0} Z`)
 
 // The TRUE compression ratio (1.5:1 at the default, 6:1 at 100 %), not the
@@ -177,6 +214,18 @@ function formatGuard(v) {
 const guardLabel = computed(() =>
   hfGuard.value > 0 ? `FLOOR ${guardToFloorDb(hfGuard.value).toFixed(0)} dB` : 'NO GUARD',
 )
+
+/** A marker's label beside its line, on the side that keeps it on the face. */
+function markerLabelStyle(freqHz, side) {
+  const pct = (xFor(freqHz) / CURVE_W) * 100
+  return {
+    left: `${pct}%`,
+    transform: side === 'left' ? 'translateX(calc(-100% - 4px))' : 'translateX(4px)',
+    font: "700 8px 'JetBrains Mono',monospace",
+    letterSpacing: '.1em',
+    whiteSpace: 'nowrap',
+  }
+}
 
 function gridLabel(f) {
   return f >= 1000 ? `${f / 1000}k` : String(f)
@@ -230,37 +279,74 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="px-[26px] pt-[22px] pb-[26px]">
-      <!-- 24 dB full scale: the deepest the shelf can go, at Amount 100 %. -->
-      <!-- The total taken off the "s"; the readout under it says which stage
-           took it — the Duck (level) or the EQ (tone). -->
-      <GainReductionBar :reduction-db="-totalReduction" :accent="ACCENT" :full-scale-db="24" title="REDUCTION" />
-      <p
-        class="mt-[6px] text-right"
-        style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)"
-      >
-        DUCK {{ fmtCut(hfBroadband) }} · EQ {{ fmtCut(hfReduction) }}
-      </p>
+      <!-- Activity: the waveform with what was removed painted on it. -->
+      <SoftenerScope
+        :data-fn="getScope"
+        :envelope-fn="envelope"
+        :window-seconds="HF_SCOPE_SECONDS * 2"
+        :accent="ACCENT"
+        :plosive-color="PLOSIVE_COLOR"
+        :height="140"
+        title="HF Softener activity: the waveform after the cut, with what was removed around it — playhead at the centre, played audio to its left, audio about to play to its right"
+        @request-play="togglePlayback"
+      />
 
-      <div class="flex items-center justify-between gap-[22px] mt-[18px]">
+      <!-- The total taken off, and which stage took it: the Duck (level), the
+           EQ (tone) and Reso (rings, 5–12 kHz). -->
+      <div class="flex items-baseline justify-between mt-[10px] px-[2px]">
+        <div class="flex items-baseline gap-[12px]">
+          <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">REDUCTION</span>
+          <span style="font:700 20px 'JetBrains Mono',monospace;color:#f3d3ac;font-variant-numeric:tabular-nums;min-width:92px">{{ fmtCut(totalReduction) }}</span>
+        </div>
+        <div class="flex items-center gap-[18px]" style="font:600 10px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.6);font-variant-numeric:tabular-nums">
+          <span>DUCK {{ fmtCut(hfBroadband) }}</span>
+          <span>EQ {{ fmtCut(hfReduction) }}</span>
+          <span>RESO <template v-if="hfResoAmount > 0">{{ fmtCut(hfReso) }}</template><span v-else style="color:rgba(255,255,255,.35)">OFF</span></span>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between gap-[22px] mt-[16px]">
         <LevelMeter :levels="hfInputLevels" label="IN" :height="150" />
 
         <div class="flex-1 flex flex-col items-center">
-          <svg
-            :viewBox="`0 0 ${CURVE_W} ${CURVE_H}`"
-            class="w-full"
-            :style="{ height: `${CURVE_H}px` }"
-            preserveAspectRatio="none"
-          >
-            <line
-              v-for="f in GRID_FREQS" :key="f"
-              :x1="xFor(f)" :y1="0" :x2="xFor(f)" :y2="CURVE_H"
-              stroke="rgba(255,255,255,.07)" stroke-width="1"
-            />
-            <line :x1="0" :y1="Y0" :x2="CURVE_W" :y2="Y0" stroke="rgba(255,255,255,.14)" stroke-width="1" />
-            <path :d="maxPath" :stroke="ACCENT" stroke-opacity="0.3" stroke-dasharray="3 3" stroke-width="1.5" fill="none" />
-            <path :d="liveFill" :fill="ACCENT" fill-opacity="0.12" />
-            <path :d="livePath" :stroke="ACCENT" stroke-width="2" fill="none" />
-          </svg>
+          <!-- The input's spectrum behind the cut's curve, with where the
+               detector listens (Detect) and where the EQ cuts (Band). -->
+          <div class="relative w-full" :style="{ height: `${CURVE_H}px` }">
+            <SoftenerSpectrum :tap-fn="getInputSpectrum" :min-hz="F_MIN" :max-hz="F_MAX" />
+            <svg
+              :viewBox="`0 0 ${CURVE_W} ${CURVE_H}`"
+              class="absolute inset-0 w-full h-full"
+              preserveAspectRatio="none"
+            >
+              <line
+                v-for="f in GRID_FREQS" :key="f"
+                :x1="xFor(f)" :y1="0" :x2="xFor(f)" :y2="CURVE_H"
+                stroke="rgba(255,255,255,.07)" stroke-width="1"
+              />
+              <line :x1="0" :y1="Y0" :x2="CURVE_W" :y2="Y0" stroke="rgba(255,255,255,.14)" stroke-width="1" />
+              <line
+                :x1="xFor(hfDetect)" :y1="0" :x2="xFor(hfDetect)" :y2="CURVE_H"
+                :stroke="DETECT_COLOR" stroke-opacity="0.8" stroke-width="1" stroke-dasharray="2 3"
+                vector-effect="non-scaling-stroke"
+              />
+              <line
+                :x1="xFor(hfBand)" :y1="0" :x2="xFor(hfBand)" :y2="CURVE_H"
+                :stroke="ACCENT" stroke-opacity="0.7" stroke-width="1"
+                vector-effect="non-scaling-stroke"
+              />
+              <path :d="maxPath" :stroke="ACCENT" stroke-opacity="0.3" stroke-dasharray="3 3" stroke-width="1.5" fill="none" />
+              <path :d="liveFill" :fill="ACCENT" fill-opacity="0.12" />
+              <path :d="livePath" :stroke="ACCENT" stroke-width="2" fill="none" />
+            </svg>
+            <span
+              class="absolute bottom-[3px]"
+              :style="{ ...markerLabelStyle(hfDetect, 'left'), color: DETECT_COLOR }"
+            >DETECT {{ formatHz(hfDetect) }}</span>
+            <span
+              class="absolute top-[3px]"
+              :style="{ ...markerLabelStyle(hfBand, 'right'), color: ACCENT }"
+            >BAND {{ formatHz(hfBand) }}</span>
+          </div>
           <div class="relative w-full mt-[4px] h-[10px]">
             <span
               v-for="f in GRID_FREQS" :key="f"
@@ -368,7 +454,14 @@ async function applyAndClose() {
           />
         </div>
         <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">AIR MODE</span>
+          <span class="flex items-center gap-[6px]" style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">
+            AIR MODE
+            <span
+              class="w-[6px] h-[6px] rounded-full"
+              :style="lampStyle(hfAirLamp, AIR_LAMP_COLOR)"
+              title="Lit while the Air lift is being applied — in VOICED mode, on the vowels only"
+            ></span>
+          </span>
           <DeviceChoiceRocker
             :model-value="hfAirMode" :options="AIR_MODE_OPTIONS" :accent="ACCENT"
             :disabled="!hfPreview" label="Air mode"
@@ -417,7 +510,14 @@ async function applyAndClose() {
           </span>
         </div>
         <div class="flex flex-col items-center gap-[8px] pt-[6px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">PLOSIVES</span>
+          <span class="flex items-center gap-[6px]" style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">
+            PLOSIVES
+            <span
+              class="w-[6px] h-[6px] rounded-full"
+              :style="lampStyle(hfPlosives ? hfBurstLamp : 0, PLOSIVE_COLOR)"
+              title="Flashes when a T, K or P release is caught and cut harder"
+            ></span>
+          </span>
           <DeviceChoiceRocker
             :model-value="hfPlosives" :options="PLOSIVE_OPTIONS" :accent="ACCENT"
             :disabled="!hfPreview" label="Plosives"

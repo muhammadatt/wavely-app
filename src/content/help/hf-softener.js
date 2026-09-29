@@ -30,10 +30,12 @@ export default {
   ],
 
   notes: [
+    'The scope at the top is the waveform after the cut: the coloured rim around it is what was removed, and how thick it is is how much. Lavender marks a T, K or P given the plosive treatment; a dashed line inside the rim is where the lisp guard stopped the cut. Left of the playhead is what has played, right of it what is coming (not yet processed, so drawn plain)',
+    'Behind the curve is the input’s spectrum. The dotted line is where the detector starts listening (Detect), the solid one where the EQ cuts (Band): an S sitting below the solid line wants Band lower; vowel energy crossing the dotted line wants Detect higher',
     'Thresholds follow the file’s own level, so a setting means the same on a quiet recording and a hot one',
     'If the result sounds a touch dull, a dB or two of Air puts the top back — it is Air Boost’s curve, so there is no need for a separate Air Boost pass',
     'Delta never includes the Air makeup: it plays only what is removed — the Duck, the EQ and Reso together',
-    'The meter shows the total taken off each S; the readout under it splits that into DUCK (level) and EQ (tone)',
+    'REDUCTION under the scope is the total taken off each S, split into DUCK (level), EQ (tone) and RESO (rings)',
     'The lisp guard limits the total of both stages, so Duck and EQ together cannot sink an S further than a normal S sits',
     'Below threshold the shelf sits at exactly 0 dB, so quiet material passes through untouched',
     'A sibilant alone in a gap is treated a little harder than one inside a word — the threshold rises slightly with the surrounding vowel energy',

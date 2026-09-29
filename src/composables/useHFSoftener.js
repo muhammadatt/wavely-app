@@ -51,6 +51,10 @@ let levelMeasuredFor = null
 const hfDelta = ref(false)
 const hfPreview = ref(false)
 const hfReduction = ref(0)
+// The Reso stage's reduction and the two lamps, read with the other meters.
+const hfReso = ref(0)
+const hfBurstLamp = ref(0)
+const hfAirLamp = ref(0)
 const hfThresholdLift = ref(0)
 const hfInputLevels = ref([])
 const hfOutputLevels = ref([])
@@ -113,10 +117,29 @@ export function useHFSoftener() {
         hfReduction.value = nodes.getReduction()
         hfThresholdLift.value = nodes.getThresholdLift()
         hfBroadband.value = nodes.getBroadband?.() ?? 0
+        hfReso.value = nodes.getReso?.() ?? 0
+        const lamps = nodes.getLamps?.()
+        hfBurstLamp.value = lamps?.burst ?? 0
+        hfAirLamp.value = lamps?.air ?? 0
       }
       meterId = requestAnimationFrame(tick)
     }
     meterId = requestAnimationFrame(tick)
+  }
+
+  /**
+   * The activity scope's ring and the input spectrum tap, or null while the
+   * effect is not in the chain. Functions, not refs: canvases read them every
+   * frame, and typed arrays have no business going through reactivity.
+   */
+  function getScope() {
+    if (!hfPreview.value) return null
+    return nodesOf(getEffectChain(getAudioContext()))?.getScope?.() ?? null
+  }
+
+  function getInputSpectrum() {
+    if (!hfPreview.value) return null
+    return nodesOf(getEffectChain(getAudioContext()))?.getInputSpectrum?.() ?? null
   }
 
   function stopMeters() {
@@ -129,6 +152,9 @@ export function useHFSoftener() {
     hfReduction.value = 0
     hfThresholdLift.value = 0
     hfBroadband.value = 0
+    hfReso.value = 0
+    hfBurstLamp.value = 0
+    hfAirLamp.value = 0
   }
 
   function pushAllParams(chain) {
@@ -369,6 +395,11 @@ export function useHFSoftener() {
     hfDelta,
     hfPreview,
     hfReduction,
+    hfReso,
+    hfBurstLamp,
+    hfAirLamp,
+    getScope,
+    getInputSpectrum,
     hfThresholdLift,
     hfInputLevels,
     hfOutputLevels,

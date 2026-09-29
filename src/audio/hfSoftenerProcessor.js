@@ -715,6 +715,13 @@ export class HFSoftenerKernel {
     this.sinceClosure = Infinity
     this.burstLeft = 0
     this.burstMeter = 0
+    // Activity scope, one point per process() call (see readScope): the input
+    // peak, the peak after Duck and EQ (before Air), how many dB the lisp guard
+    // held back, and whether a plosive-burst window was open.
+    this.scopeIn = 0
+    this.scopeOut = 0
+    this.scopeHeld = 0
+    this.scopeBurst = 0
     this.gainSmooth = riseCoeff(tuning.gainSmoothMs, sampleRate)
     this.bbSmooth = riseCoeff(tuning.broadbandSmoothMs, sampleRate)
     this.bbGainDb = 0
@@ -893,6 +900,10 @@ export class HFSoftenerKernel {
     const next = this.coeffNext
     const airVoiced = this.airDb > 0 && this.airVoiced && this.listen === 'off'
     if (airVoiced && this.airWBuf.length < n) this.airWBuf = new Float64Array(n)
+    let scIn = 0
+    let scOut = 0
+    let scHeld = 0
+    let scBurst = 0
 
     for (let off = 0; off < n; off += chunk) {
       const len = Math.min(chunk, n - off)
@@ -911,6 +922,8 @@ export class HFSoftenerKernel {
         for (let ch = 0; ch < nOut; ch++) {
           const s = chans[ch]
           const x = inputChannels[ch < nIn ? ch : nIn - 1][off + i]
+          if (x > scIn) scIn = x
+          else if (-x > scIn) scIn = -x
           // The rotator always runs so its state is warm when switched in.
           let r = x
           for (let k = 0; k < s.rot.length; k++) r = s.rot[k].tick(r)
@@ -1039,6 +1052,7 @@ export class HFSoftenerKernel {
           if (tuning.burstVoiceGate) wb *= 1 - wl
           this.burstLeft--
           if (wb > this.burstMeter) this.burstMeter = wb
+          if (wb > scBurst) scBurst = wb
         }
         const bDrop = wb * tuning.burstThresholdDropDb
         const bDepth = wb * tuning.burstExtraDepthDb
@@ -1046,6 +1060,7 @@ export class HFSoftenerKernel {
         const guardRelief = wb * 96
 
         let duckTarget = 0
+        let duckHeld = 0
         if (dSlope > 0) {
           const tDuck = adaptiveThresholdDb(dBase, lmDb, kappa, lRef, tuning.maxShiftDb) - bDrop
           const hfD = this.relDuckVowel !== null ? hfDuckDb : hfDb
@@ -1053,7 +1068,10 @@ export class HFSoftenerKernel {
           if (this.lispGuard && duckTarget < 0) {
             const allowed = hfD - voiceDb - floor + guardRelief
             const cap = allowed > 0 ? allowed : 0
-            if (duckTarget < -cap) duckTarget = -cap
+            if (duckTarget < -cap) {
+              duckHeld = -cap - duckTarget
+              duckTarget = -cap
+            }
           }
         }
         if (duckTarget !== 0 || this.bbGainDb !== 0) {
@@ -1080,8 +1098,12 @@ export class HFSoftenerKernel {
           // Read post-duck, so the guard caps the TOTAL of both stages.
           const allowed = hfEqDb - voiceDb - floor + guardRelief
           const cap = allowed > 0 ? allowed : 0
-          if (target < -cap) target = -cap
+          if (target < -cap) {
+            if (duckHeld + (-cap - target) > scHeld) scHeld = duckHeld + (-cap - target)
+            target = -cap
+          }
         }
+        if (duckHeld > scHeld) scHeld = duckHeld
         this.shelfGainDb += (target - this.shelfGainDb) * this.gainSmooth
         gainBuf[i] = this.shelfGainDb
         this.lastThresholdLiftDb = tEff - base
@@ -1132,6 +1154,10 @@ export class HFSoftenerKernel {
           const bb = this.bbBuf
           for (let i = 0; i < len; i++) w[i] *= bb[i]
         }
+        for (let i = 0; i < len; i++) {
+          const a = w[i] < 0 ? -w[i] : w[i]
+          if (a > scOut) scOut = a
+        }
         if (listen === 'off' || listen === 'preair') {
           for (let i = 0; i < len; i++) out[off + i] = w[i]
         } else if (listen === 'delta') {
@@ -1171,6 +1197,10 @@ export class HFSoftenerKernel {
       this.airW = 0
     }
 
+    this.scopeIn = scIn
+    this.scopeOut = scOut
+    this.scopeHeld = scHeld
+    this.scopeBurst = scBurst
     this.meterCount += n
   }
 
@@ -1186,9 +1216,14 @@ export class HFSoftenerKernel {
       reductionDb: this.meterMaxReduction,
       broadbandDb: this.meterMaxBroadband,
       thresholdLiftDb: this.lastThresholdLiftDb,
+      // Lamps: a plosive window opened since the last snapshot; the Air lift
+      // (0–1: the voicing weight in VOICED mode, 1 in STATIC, 0 with Air off).
+      burst: this.burstMeter,
+      air: this.airDb > 0 && this.listen === 'off' ? (this.airVoiced ? this.airW : 1) : 0,
     }
     this.meterMaxReduction = 0
     this.meterMaxBroadband = 0
+    this.burstMeter = 0
     return m
   }
 }
@@ -1230,6 +1265,14 @@ export function processHFSoftenerBuffer(channelData, sampleRate, params = {}, { 
  */
 export const HF_SOFTENER_PREROLL_S = 2.0
 
+/**
+ * Activity-scope points: [input peak, output peak (after Duck and EQ, before
+ * Air), dB the lisp guard held back, plosive-burst weight], one per process()
+ * call. SCOPE_BATCH_MAX bounds the points in one meter message.
+ */
+export const SCOPE_STRIDE = 4
+export const SCOPE_BATCH_MAX = 64
+
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────
 
 if (typeof registerProcessor === 'function') {
@@ -1237,6 +1280,13 @@ if (typeof registerProcessor === 'function') {
     constructor(options) {
       super()
       this.kernel = new HFSoftenerKernel(sampleRate)
+      // Activity-scope points, one per process() call, sent with the meter
+      // message. Sized for the meter period at any rate (30 Hz → ≤ 50 quanta of
+      // 128 at 192 kHz); a host with smaller quanta folds the extra points into
+      // the last slot by max rather than dropping them, which would stretch the
+      // scope's time axis. Reused: postMessage clones synchronously.
+      this.scope = new Float32Array(SCOPE_BATCH_MAX * SCOPE_STRIDE)
+      this.scopeCount = 0
       if (options?.processorOptions?.params) {
         this.kernel.setParams(options.processorOptions.params, true)
       }
@@ -1258,8 +1308,28 @@ if (typeof registerProcessor === 'function') {
       }
 
       this.kernel.process(input, output, n)
-      const m = this.kernel.takeMeter()
-      if (m) this.port.postMessage({ type: 'gr', ...m })
+      const k = this.kernel
+      const sc = this.scope
+      if (this.scopeCount < SCOPE_BATCH_MAX) {
+        const o = this.scopeCount * SCOPE_STRIDE
+        sc[o] = k.scopeIn
+        sc[o + 1] = k.scopeOut
+        sc[o + 2] = k.scopeHeld
+        sc[o + 3] = k.scopeBurst
+        this.scopeCount++
+      } else {
+        const o = (SCOPE_BATCH_MAX - 1) * SCOPE_STRIDE
+        sc[o] = Math.max(sc[o], k.scopeIn)
+        sc[o + 1] = Math.max(sc[o + 1], k.scopeOut)
+        sc[o + 2] = Math.max(sc[o + 2], k.scopeHeld)
+        sc[o + 3] = Math.max(sc[o + 3], k.scopeBurst)
+      }
+      const m = k.takeMeter()
+      if (m) {
+        // Only the filled prefix, so a short batch cannot inject stale points.
+        this.port.postMessage({ type: 'gr', ...m, scope: sc.subarray(0, this.scopeCount * SCOPE_STRIDE) })
+        this.scopeCount = 0
+      }
       return true
     }
   }

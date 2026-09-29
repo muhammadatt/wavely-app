@@ -46,6 +46,7 @@ import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 import { processResonanceBuffer, ResonanceKernel } from '../../src/audio/resonanceProcessor.js'
 import { measureTopLossDb, autoAirDb, AIR_AUTO_FRACTION } from '../../src/audio/hfSoftenerAutoAir.js'
+import { createScopeRing, columnKind, kindRuns } from '../../src/audio/hfSoftenerScope.js'
 import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams, guardToFloorDb, GUARD_FLOOR_LOOSE_DB, GUARD_FLOOR_STRICT_DB } from '../../src/audio/hfSoftenerParams.js'
 import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
@@ -1473,4 +1474,75 @@ test('band: full depth at every corner and rate, and the cut moves with the corn
     assert.ok(at3k(BAND_HZ_MIN) < at3k(4500) - 3 && at3k(4500) < at3k(BAND_HZ_MAX) - 1,
       `3 kHz: ${at3k(BAND_HZ_MIN).toFixed(1)} / ${at3k(4500).toFixed(1)} / ${at3k(BAND_HZ_MAX).toFixed(1)} dB`)
   }
+})
+
+// ── Activity scope ──────────────────────────────────────────────────────────
+
+test('scope ring: appends batches in order, wraps, and reports what it holds', () => {
+  const ring = createScopeRing(128 * 4, 1) // capacity 4
+  const pt = (a) => [a, a / 2, a / 10, 0]
+  ring.push(new Float32Array([...pt(1), ...pt(2), ...pt(3)]))
+  let v = ring.view()
+  assert.equal(v.capacity, 4)
+  assert.equal(v.filled, 3)
+  ring.push(new Float32Array([...pt(4), ...pt(5)]))
+  v = ring.view()
+  assert.equal(v.filled, 4)
+  const order = []
+  for (let i = 0; i < v.filled; i++) order.push(v.inPeak[(v.head - v.filled + i + v.capacity) % v.capacity])
+  assert.deepEqual(order, [2, 3, 4, 5])
+  assert.equal(v.outPeak[(v.head - 1 + 4) % 4], 2.5)
+})
+
+test('scope columns: untouched, treated and plosive, and their runs', () => {
+  assert.equal(columnKind(0.5, 0.5, 0), 0)
+  assert.equal(columnKind(0.5, 0.5 * Math.pow(10, -0.5 / 20), 0), 0)
+  assert.equal(columnKind(0.5, 0.25, 0), 1)
+  assert.equal(columnKind(0.5, 0.25, 1), 2)
+  assert.equal(columnKind(0, 0, 0), 0)
+  const kinds = new Uint8Array([0, 1, 1, 0, 2, 2, 1, 1])
+  assert.deepEqual(kindRuns(kinds, kinds.length, 1), [[1, 2], [6, 7]])
+  assert.deepEqual(kindRuns(kinds, kinds.length, 2), [[4, 5]])
+})
+
+test('scope: the kernel reports the cut on the "s" and nothing on the vowel', () => {
+  const { x, labels } = makeSpeech(SR, { seconds: 3, peakedS: true })
+  const run = (params) => {
+    const k = new HFSoftenerKernel(SR, NO_BURSTS)
+    k.setParams({ ...HF_SOFTENER_KERNEL_DEFAULTS, duck: 0.7, amount: 0.5, ...params }, true)
+    const out = new Float32Array(128)
+    const pts = []
+    for (let o = 0; o + 128 <= x.length; o += 128) {
+      k.process([x.subarray(o, o + 128)], [out], 128)
+      pts.push({ o, lab: labels[o + 64], in: k.scopeIn, out: k.scopeOut, held: k.scopeHeld })
+    }
+    return pts.filter(p => p.o >= SR)
+  }
+  const on = run({})
+  const sib = on.filter(p => p.lab === 2)
+  // Vowels clear of an "s": the block straddling its end and the Duck's 3 ms
+  // vowel release do dip, and the scope should show that.
+  const clear = (p) => { for (let i = Math.max(0, p.o - 0.01 * SR); i < p.o + 128; i++) if (labels[i] === 2) return false; return true }
+  const vow = on.filter(p => p.lab === 1 && p.in > 1e-4 && clear(p))
+  const cut = Math.min(...sib.map(p => 20 * Math.log10(p.out / p.in)))
+  assert.ok(cut < -3, `the "s" should show a cut on the scope (${cut.toFixed(2)} dB)`)
+  const vowMax = Math.max(...vow.map(p => Math.abs(20 * Math.log10(p.out / p.in))))
+  assert.ok(vowMax < 0.75, `vowels should read untouched (${vowMax.toFixed(2)} dB)`)
+  assert.ok(Math.max(...sib.map(p => p.held)) > 0.5, 'the guard should hold something back at Duck 70 / EQ 50')
+  assert.equal(Math.max(...run({ lispGuard: false }).map(p => p.held)), 0, 'no guard, nothing held')
+})
+
+test('scope: a T after a closure is flagged as a plosive', () => {
+  const sr = 44100
+  const { x, b0, b1 } = makeBurst(sr)
+  const k = new HFSoftenerKernel(sr)
+  k.setParams({ ...HF_SOFTENER_KERNEL_DEFAULTS, duck: 0.4, amount: 0.2 }, true)
+  const out = new Float32Array(128)
+  let burstIn = 0, burstOut = 0
+  for (let o = 0; o + 128 <= x.length; o += 128) {
+    k.process([x.subarray(o, o + 128)], [out], 128)
+    if (o >= b0 && o < b1) burstIn = Math.max(burstIn, k.scopeBurst)
+    else if (o < b0 - 4096) burstOut = Math.max(burstOut, k.scopeBurst)
+  }
+  assert.ok(burstIn > 0.5 && burstOut === 0, `burst weight ${burstIn} in the T, ${burstOut} elsewhere`)
 })
