@@ -73,6 +73,7 @@ const MEASUREMENTS = [
   ['softClipperCeiling', { percentile: 0.001 }, 'ceilingDb'],
   ['voiceProfile', {}, 'profile'],
   ['measureLoudness', {}, 'loudness'],
+  ['hfSoftenerAutoAir', { kernelParams: { amount: 0.4 } }, 'airDb'],
   [
     'loudnessNormalize',
     { target: { targetDb: -16, unit: 'LUFS', ceilingDb: -1 }, peakMode: 'limit' },

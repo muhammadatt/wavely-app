@@ -4,7 +4,7 @@
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, loudnessNormalize, adjustVolume, la2aAutoMakeup,
  * fet1176AutoMakeup, softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling,
- * voiceProfile, measureLoudness
+ * voiceProfile, measureLoudness, hfSoftenerAutoAir
  */
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupPlan } from '../audio/fet1176Processor.js'
@@ -14,6 +14,7 @@ import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
 import { measureVoiceProfile } from '../audio/voiceProfile.js'
 import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
 import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
+import { measureTopLossDb, autoAirDb } from '../audio/hfSoftenerAutoAir.js'
 
 /**
  * ⚠ EVERY REPLY MUST CARRY `__id` BACK. The worker is shared and long-lived
@@ -89,8 +90,26 @@ self.onmessage = function (e) {
     case 'voiceProfile':
       voiceProfile(channelData, sampleRate)
       break
+    case 'hfSoftenerAutoAir':
+      hfSoftenerAutoAir(channelData, sampleRate, params)
+      break
     default:
       postReply({ type: 'error', message: `Unknown operation: ${type}` })
+  }
+}
+
+/**
+ * The HF Softener's automatic Air: the chain's top-end loss over the analysis
+ * window (softener plus the Reso pre-stage when it is in), and the Air amount
+ * it asks for — see hfSoftenerAutoAir.js.
+ */
+function hfSoftenerAutoAir(channelData, sampleRate, params) {
+  try {
+    const { kernelParams, resoParams = null, resoFrameSize = 512 } = params ?? {}
+    const lossDb = measureTopLossDb(channelData, sampleRate, kernelParams, resoParams, resoFrameSize)
+    postDone({ lossDb, airDb: autoAirDb(lossDb) })
+  } catch (err) {
+    postReply({ type: 'error', message: err.message })
   }
 }
 

@@ -73,6 +73,9 @@ export const ICONS = {
   hum: '<path d="M2 12c1.5-4 3-4 4.5 0s3 4 4.5 0"/><path d="M13 12c1.5-4 3-4 4.5 0s3 4 4.5 0" opacity=".35"/><path d="M12 4v16" stroke-dasharray="2 2"/>',
   // De-esser: a sibilant burst with a bracket clamping its top — the ceiling
   // being placed on the peak, which is exactly what the control does.
+  // HF softener: a flat line whose top end dips on a shelf, with the undipped
+  // line ghosted above it — the shelf giving way, not a notch or a clamp.
+  softener: '<path d="M2 9h10c3 0 5 6 10 6"/><path d="M12 9h10" stroke-dasharray="2.5 2.5" opacity=".45"/>',
   deesser: '<path d="M3 16c2 0 2.5-6 4.5-6S10 16 12 16s2.5-8 4.5-8S19 16 21 16"/><path d="M5 5h14" stroke-dasharray="3 2"/><path d="M5 4v2M19 4v2"/>',
   // Soft clipper: a waveform peak flattened against a ceiling line — the one
   // thing this stage does, drawn literally rather than as an abstract knob.
