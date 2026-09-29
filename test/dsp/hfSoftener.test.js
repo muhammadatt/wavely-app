@@ -1072,6 +1072,76 @@ test('bursts: a pause is not a closure, and an "s" building up is not a burst', 
   assert.equal(burstRun(makeBurst(sr, { rampMs: 40, burstMs: 100 }).x, sr, {}).fired, false, 'a slow-onset "s" should not count')
 })
 
+// Vowel, a gap, then either a vowel restarting under a short burst of top-end
+// noise (a bright vowel onset — `sMs` 0) or an "s" of `sMs` running into the
+// vowel. Returns the signal, the onset and where the second vowel starts.
+function makeOnset(sr, { gapMs = 40, sMs = 0, rampMs = 1, hfLevel = 0.25, onsetMs = 25, seed = 7 } = {}) {
+  const rnd = lcg(seed)
+  const vowelS = 0.4
+  const n = Math.round(sr * (2 * vowelS + gapMs / 1000 + sMs / 1000))
+  const x = new Float32Array(n)
+  const glot = new Biquad(lowpass(sr, 400, 0.7))
+  const f1 = new Biquad(peaking(sr, 700, 3, 12))
+  const bh = [new Biquad(highpass(sr, 3000, 0.7)), new Biquad(highpass(sr, 3000, 0.7))]
+  const bl = new Biquad(lowpass(sr, 10000, 0.7))
+  const g0 = Math.round(sr * vowelS), b0 = g0 + Math.round(sr * gapMs / 1000), v1 = b0 + Math.round(sr * sMs / 1000)
+  const hfEnd = sMs > 0 ? v1 : b0 + Math.round(sr * onsetMs / 1000)
+  let phase = 0
+  for (let i = 0; i < n; i++) {
+    const voiced = i < g0 || i >= v1
+    phase += 130 / sr
+    if (phase >= 1) phase -= 1
+    const vowel = f1.tick(glot.tick(voiced && phase < 130 / sr ? 1 : 0)) * 100 * 0.126
+    let nz = rnd()
+    for (const q of bh) nz = q.tick(nz)
+    nz = bl.tick(nz)
+    const ramp = Math.min(1, (i - b0) / Math.max(1, sr * rampMs / 1000))
+    x[i] = (voiced ? vowel : 0) + (i >= b0 && i < hfEnd ? nz * hfLevel * ramp : 0)
+  }
+  return { x, b0, v1 }
+}
+
+// The Duck's own gain, per sample, at Duck 40 / EQ 20.
+const duckGain = (x, sr, tuning) => {
+  const k = new HFSoftenerKernel(sr, { ...HF_SOFTENER_TUNING, ...tuning })
+  k.setParams({ ...HF_SOFTENER_KERNEL_DEFAULTS, duck: 0.4, amount: 0.2 }, true)
+  const out = new Float32Array(1)
+  const g = new Float32Array(x.length)
+  for (let i = 0; i < x.length; i++) {
+    k.process([x.subarray(i, i + 1)], [out], 1)
+    g[i] = k.bbGainDb
+  }
+  return { g, fired: k.burstMeter > 0.5 }
+}
+
+test('bursts: a vowel onset after a closure fires the detector but the window closes on the voice', () => {
+  const sr = 44100
+  // A vowel restarting bright and abrupt after a stop's closure passes every
+  // timing test a T does; what gives it away is that the voice band leads.
+  const { x, b0 } = makeOnset(sr, { hfLevel: 0.06 })
+  const open = duckGain(x, sr, { burstVoiceGate: false })
+  const gated = duckGain(x, sr, {})
+  assert.ok(open.fired && gated.fired, 'the onset should still trip the detector')
+  const end = b0 + Math.round(sr * 0.05)
+  const o = deepestIn(open.g, b0, end), g = deepestIn(gated.g, b0, end)
+  assert.ok(o < -1.2, `ungated, the window should duck the vowel onset (${o.toFixed(2)} dB)`)
+  assert.ok(g > -0.5, `gated, the vowel onset should be left nearly alone (${g.toFixed(2)} dB)`)
+})
+
+test('duck: lets go within a few ms when the vowel after an "s" arrives; the "s" is unchanged', () => {
+  const sr = 44100
+  // A slow-onset "s" (no burst) straight into a vowel.
+  const { x, v1 } = makeOnset(sr, { gapMs: 0, sMs: 100, rampMs: 40 })
+  const old = duckGain(x, sr, { duckVowelReleaseMs: null })
+  const now = duckGain(x, sr, {})
+  const at = ms => v1 + Math.round(sr * ms / 1000)
+  assert.ok(old.g[at(10)] < -2, `the detector's own release holds the duck into the vowel (${old.g[at(10)].toFixed(2)} dB at 10 ms)`)
+  assert.ok(now.g[at(10)] > -0.3, `the duck's vowel release lets go (${now.g[at(10)].toFixed(2)} dB at 10 ms)`)
+  let so = 0, sn = 0
+  for (let i = v1 - Math.round(sr * 0.05); i < v1; i++) { so += old.g[i]; sn += now.g[i] }
+  assert.ok(Math.abs(so - sn) / (sr * 0.05) < 0.01, 'the "s" body should be ducked the same')
+})
+
 // ── Rich synthetic voice (upper formants) ───────────────────────────────────
 
 /**

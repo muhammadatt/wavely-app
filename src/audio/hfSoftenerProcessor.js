@@ -184,6 +184,29 @@ export const HF_SOFTENER_TUNING = {
   burstFadeMs: 10,
   burstThresholdDropDb: 6,
   burstExtraDepthDb: 6,
+  // Voice-led cue: the low/mid band (200 Hz–3 kHz, the voicing follower,
+  // 3 ms / 5 ms) against the top band (the detector's own 4 kHz high-pass,
+  // squared, 1 ms / 5 ms), in dB. Weight 0 at voiceLedLoDb and below, 1 at
+  // voiceLedHiDb and above. Both followers are fast, so unlike the voicing
+  // weight — whose margin test reads the SLOW detector and so waits for the
+  // "s" to finish releasing — it flips within a few ms of a vowel starting.
+  voiceLedLoDb: 4,
+  voiceLedHiDb: 10,
+  // ⚠ A BURST WINDOW CLOSES WHERE THE VOICE LEADS. Measured before this: on
+  // real narration most windows were VOWEL ONSETS after a pause or a voiced
+  // stop (the voice band 16–33 dB over the top band in the first 15 ms; real
+  // T's −5 to +7), and inside them the lowered threshold and lifted guard
+  // ducked the vowel 2–4 dB it was otherwise left alone — the voice audible
+  // in Delta. The same gate ends a real T's window when its vowel arrives.
+  burstVoiceGate: true,
+  // The Duck's detector: the same follower as the EQ's, but its release drops
+  // to duckVowelReleaseMs where the voice leads. ⚠ Measured before this: the
+  // Duck still sat at −3.0 / −2.5 / −1.6 / −0.8 dB 5 / 10 / 15 / 20 ms into
+  // the vowel after an "s" (Messy and Bright) — the vowel release follows
+  // the voicing weight, which waits on the slow detector. Harmless on the EQ
+  // (its tail is top band only); on the broadband Duck it is the vowel's own
+  // onset turned down, and most of the voice in Delta. null: no own release.
+  duckVowelReleaseMs: 3,
   // Level alignment. Every absolute level in the detector — T_base, L_ref,
   // the voicing floor — is quoted for a file whose gated RMS sits here, and
   // shifts dB-for-dB with the file's measured level. The detector is linear
@@ -649,6 +672,10 @@ export class HFSoftenerKernel {
     this.tiltHf = new Follower(sampleRate, tuning.tiltAttackMs, tuning.tiltReleaseMs)
     // Plosive-burst detection (see burst* in the tuning).
     this.fullEnv = new Follower(sampleRate, 1, 5)
+    // Voice-led cue (voiceLed* in the tuning) and the Duck's own detector.
+    this.hfFast = new Follower(sampleRate, 1, 5)
+    this.hfDuck = new Follower(sampleRate, tuning.attackMs, HF_SOFTENER_KERNEL_DEFAULTS.releaseMs)
+    this.relDuckVowel = tuning.duckVowelReleaseMs == null ? null : riseCoeff(tuning.duckVowelReleaseMs, sampleRate)
     const ms = v => Math.max(1, Math.round((v / 1000) * sampleRate))
     this.burstClosureMin = ms(tuning.burstClosureMinMs)
     this.burstClosureMax = ms(tuning.burstClosureMaxMs)
@@ -847,6 +874,7 @@ export class HFSoftenerKernel {
         let midE = 0
         let hfE = 0
         let fullE = 0
+        let detE = 0
         for (let ch = 0; ch < nOut; ch++) {
           const s = chans[ch]
           const x = inputChannels[ch < nIn ? ch : nIn - 1][off + i]
@@ -859,6 +887,7 @@ export class HFSoftenerKernel {
           s.pathBuf[i] = x + pathRot * (r - x)
           const a = det < 0 ? -det : det
           if (a > peak) peak = a
+          detE += det * det
           energy += lm * lm
           // Always runs, like the rotator, so it is warm when the guard is
           // switched in mid-playback rather than reading "flat" for a moment.
@@ -894,7 +923,25 @@ export class HFSoftenerKernel {
           this.airWBuf[off + i] = this.airW
         }
         this.hfEnv.release = release
-        const hf = this.hfEnv.tick(peak * trim * this.detGain)
+        const detIn = peak * trim * this.detGain
+        const hf = this.hfEnv.tick(detIn)
+        // Voice-led weight: fast low/mid over fast top band (voiceLed*).
+        const hfFastE = this.hfFast.tick((detE / nOut) * trim * trim * this.detGain * this.detGain)
+        let wl = 0
+        if (voice > 0) {
+          const ledDb = hfFastE > 0 ? 10 * Math.log10(voice / hfFastE) : 300
+          const lo = tuning.voiceLedLoDb
+          const hi = tuning.voiceLedHiDb
+          wl = ledDb <= lo ? 0 : ledDb >= hi ? 1 : (ledDb - lo) / (hi - lo)
+        }
+        // The Duck's detector: the same input and attack, its release dropping
+        // to duckVowelReleaseMs where the voice leads (see the tuning).
+        let hfDuckDb = 0
+        if (this.relDuckVowel !== null) {
+          this.hfDuck.release = release + wl * (this.relDuckVowel > release ? this.relDuckVowel - release : 0)
+          const hd = this.hfDuck.tick(detIn)
+          hfDuckDb = hd > 0 ? Math.log(hd) * DB_PER_NEPER : -300
+        }
         const lmEnergy = this.lmEnv.tick(lmNow)
         const voiceE = this.voiceLevel.tick(lmNow)
         const tiltM = this.tiltMid.tick(midE / nOut)
@@ -955,6 +1002,8 @@ export class HFSoftenerKernel {
           // T burst as voiced, and a cutoff there closed the window ~10 ms in,
           // before the burst's top-band peak (~15 ms after its onset).
           wb = this.burstLeft >= this.burstFade ? 1 : this.burstLeft / this.burstFade
+          // Closed where the voice leads: a vowel onset, or a T's own vowel.
+          if (tuning.burstVoiceGate) wb *= 1 - wl
           this.burstLeft--
           if (wb > this.burstMeter) this.burstMeter = wb
         }
@@ -966,9 +1015,10 @@ export class HFSoftenerKernel {
         let duckTarget = 0
         if (dSlope > 0) {
           const tDuck = adaptiveThresholdDb(dBase, lmDb, kappa, lRef, tuning.maxShiftDb) - bDrop
-          duckTarget = gainComputerDb(hfDb, tDuck, 1 / dSlope, dDepth + bDepth, tuning.kneeDb)
+          const hfD = this.relDuckVowel !== null ? hfDuckDb : hfDb
+          duckTarget = gainComputerDb(hfD, tDuck, 1 / dSlope, dDepth + bDepth, tuning.kneeDb)
           if (this.lispGuard && duckTarget < 0) {
-            const allowed = hfDb - voiceDb - floor + guardRelief
+            const allowed = hfD - voiceDb - floor + guardRelief
             const cap = allowed > 0 ? allowed : 0
             if (duckTarget < -cap) duckTarget = -cap
           }
