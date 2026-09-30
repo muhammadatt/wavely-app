@@ -223,3 +223,120 @@ test('the threshold follows the file\'s voice level, not the knob alone', () => 
   assert.ok(t1.accelThresholdDb > t100.accelThresholdDb)
   assert.equal(t100.accelThresholdDb, t100.thresholdDb)
 })
+
+// ── WARM shape and the two-stage release ────────────────────────────────────
+
+import { onePoleLowpass } from '../../src/audio/dsp/hfLimit.js'
+
+function onePole(x, corner) {
+  const { b0, a1 } = onePoleLowpass(SR, corner)
+  const y = new Float64Array(x.length)
+  let x1 = 0, y1 = 0
+  for (let i = 0; i < x.length; i++) { y1 = b0 * (x[i] + x1) - a1 * y1; x1 = x[i]; y[i] = y1 }
+  return y
+}
+
+test('WARM is bit-transparent below threshold and at Range 0, with the same latency as TIGHT', () => {
+  // Quieter mids than the TIGHT version: WARM's band is a first-order high-pass,
+  // so a −14 dBFS tone at 1.2 kHz reads −26.5 dBFS in it, over the −30 line, and
+  // is rightly cut — a WARM threshold hears more of the spectrum.
+  const x = add(sine(150, 0.5), sine(1200, 0.03), sine(9000, 0.002))
+  const fade = Math.round(0.05 * SR)
+  for (let i = 0; i < fade; i++) x[i] *= 0.5 - 0.5 * Math.cos((Math.PI * i) / fade)
+  for (const p of [{ ...BASE, shape: 'warm' }, { ...BASE, shape: 'warm', threshold: -50, range: 0 }]) {
+    const { channelData: [y], latencySamples: L } = run(x, p)
+    assert.equal(L, hfLimiterLatencySamples(SR))
+    for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
+  }
+})
+
+test('WARM holds its one-pole band at the threshold, with no overshoot', () => {
+  // The output is LP1(x) + g·h, h = x − LP1(x), so the band is recoverable
+  // exactly from the output: y − LP1(x delayed).
+  const T = Math.pow(10, -30 / 20)
+  const x = sine(10000, 0.1)
+  const { channelData: [y], latencySamples: L } = run(x, { ...BASE, shape: 'warm', freq: 3000 })
+  const xd = new Float32Array(x.length)
+  xd.set(x.subarray(0, x.length - L), L)
+  const lp = onePole(xd, 3000)
+  let p = 0
+  for (let i = SR / 4; i < x.length; i++) p = Math.max(p, Math.abs(y[i] - lp[i]))
+  assert.ok(p <= T * 1.0005, `band peak ${db(p).toFixed(3)} dBFS over the −30 ceiling`)
+  assert.ok(p > T * 0.97, `band held at ${db(p).toFixed(2)} dBFS, well under the ceiling`)
+})
+
+test('the WARM curve the panel draws is the cut the kernel applies, and it is a gentle tilt', () => {
+  const range = 12, corner = 2500
+  const g = Math.pow(10, -range / 20)
+  const freqs = [500, 1000, 2000, 2500, 4000, 8000, 15000]
+  const drawn = shelfResponseDb(SR, corner, g, freqs, 'warm')
+  for (let i = 0; i < freqs.length; i++) {
+    const x = sine(freqs[i], 0.25)
+    const { channelData: [y], latencySamples: L } = run(x, {
+      ...BASE, shape: 'warm', freq: corner, threshold: -30, voiceLevelDb: -60, range,
+    })
+    const measured = db(toneAmp(y, freqs[i], SR / 4 + L, SR) / 0.25)
+    assert.ok(Math.abs(measured - drawn[i]) < 0.05, `${freqs[i]} Hz: drawn ${drawn[i].toFixed(3)}, measured ${measured.toFixed(3)}`)
+  }
+  // Unlike TIGHT, WARM reaches below the corner: an octave down it is already cutting.
+  const tight = shelfResponseDb(SR, corner, g, [1000], 'tight')[0]
+  assert.ok(drawn[1] < -0.5 && tight > -0.05, `1 kHz: warm ${drawn[1].toFixed(2)}, tight ${tight.toFixed(2)}`)
+})
+
+/** The shelf gain after every block, from a fresh kernel. */
+function gainTrace(x, p) {
+  const k = new HFLimiterKernel(SR)
+  k.setParams(toKernelParams(p))
+  const out = new Float32Array(128), trace = []
+  for (let off = 0; off + 128 <= x.length; off += 128) {
+    k.process([x.subarray(off, off + 128)], [out], 128)
+    trace.push(k.shelf.gain)
+  }
+  return trace
+}
+
+/** Blocks from the end of a burst until the gain is back within 1 dB. */
+function recoveryBlocks(trace, burstEndBlock) {
+  const lim = Math.pow(10, -1 / 20)
+  for (let i = burstEndBlock; i < trace.length; i++) if (trace[i] >= lim) return i - burstEndBlock
+  return Infinity
+}
+
+test('Tail 0 is the single-stage release, and a Tail below its minimum is off', () => {
+  assert.equal(toKernelParams({ tail: 0 }).tailMs, 0)
+  assert.equal(toKernelParams({ tail: 20 }).tailMs, 0)
+  assert.equal(toKernelParams({ tail: 200 }).tailMs, 200)
+  const x = add(sine(300, 0.2), sine(9000, 0.1))
+  const a = run(x, { ...BASE, tail: 0 }).channelData[0]
+  const b = run(x, { ...BASE, tail: 20 }).channelData[0]
+  for (let i = 0; i < x.length; i++) if (a[i] !== b[i]) assert.fail(`sample ${i} differs`)
+})
+
+test('the Tail is program-dependent: a sustained cut leaves a long tail, a click does not', () => {
+  const P = { ...BASE, release: 20, range: 24 }
+  const n = SR
+  const burst = (ms) => {
+    const x = new Float32Array(n)
+    const len = Math.round((ms / 1000) * SR)
+    x.set(sine(9000, 0.2, len), SR / 10)
+    return { x, end: Math.ceil((SR / 10 + len) / 128) + 1 }
+  }
+  const click = burst(3), long = burst(400)
+  const clickSingle = recoveryBlocks(gainTrace(click.x, { ...P, tail: 0 }), click.end)
+  const clickTail = recoveryBlocks(gainTrace(click.x, { ...P, tail: 300 }), click.end)
+  const longSingle = recoveryBlocks(gainTrace(long.x, { ...P, tail: 0 }), long.end)
+  const longTail = recoveryBlocks(gainTrace(long.x, { ...P, tail: 300 }), long.end)
+  // A click barely charges the slow stage: it recovers nearly as fast as with no Tail.
+  assert.ok(clickTail <= clickSingle * 1.5 + 2, `click: ${clickTail} blocks with Tail vs ${clickSingle} without`)
+  // A sustained cut charges it: recovery is several times slower.
+  assert.ok(longTail > longSingle * 3, `sustained: ${longTail} blocks with Tail vs ${longSingle} without`)
+})
+
+test('the Tail never lets the gain overshoot the lookahead ceiling', () => {
+  const T = Math.pow(10, -30 / 20)
+  const x = add(sine(8000, 0.1), sine(12000, 0.05))
+  const { channelData: [y] } = run(x, { ...BASE, tail: 400 })
+  const p = peak(y, SR / 4)
+  // Both tones sit above TIGHT's transition, so the output IS the band.
+  assert.ok(p <= T * 1.0005, `peak ${db(p).toFixed(3)} dBFS over the −30 ceiling`)
+})

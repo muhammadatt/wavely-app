@@ -12,6 +12,8 @@ export default {
     { label: 'Threshold', text: 'The ceiling for that band, in dB relative to the file’s voice level, so one setting does the same thing on a quiet recording and a hot one' },
     { label: 'Range', text: 'The deepest the shelf may cut, up to 24 dB. Keeps a hard S from turning into a lisp; 0 takes the shelf out' },
     { label: 'Release', text: 'How quickly the top comes back after a bright moment, 5–300 ms' },
+    { label: 'Tail', text: 'A slow second release stage, 40–600 ms. A sustained bright passage charges it and the top comes back slowly; a single click hardly does and recovers at the Release speed. Fully down is off' },
+    { label: 'Shape', text: 'TIGHT is a ceiling on the band above Freq and leaves everything below it alone. WARM is a gentle 6 dB per octave tilt that starts an octave or more below Freq, the way the EL7 Fatso’s Warmth does' },
     { label: 'Transient', text: 'Adds an acceleration limiter after the shelf: a ceiling that tightens 12 dB per octave and acts inside the waveform, for edges too short for any gain to catch. At 1 it only touches the sharpest; at 100 it shares the shelf’s threshold. 0 takes it out. The lamp lights while it acts' },
     { label: 'Output', text: 'Level after the limiter, for matching against bypass' },
     { label: 'Delta', text: 'Hear only what is being removed, from the button in the title bar' },
@@ -30,5 +32,7 @@ export default {
     'The shelf is linear-phase, so the cut never rings or smears the voice',
     'The curve shows the cut being applied right now, with the deepest Range allows dashed behind it',
     'For sibilance on its own, HF Softener knows more about voices; this is the general-purpose ceiling',
+    'For a Fatso Warmth sound, start from WARM, Freq 2.3 kHz, Threshold −1 dB, Range 16 dB, Release 30 ms, Tail off and Output +0.7 dB',
+    'WARM hears more of the spectrum than TIGHT, so at the same Threshold it cuts more often',
   ],
 }

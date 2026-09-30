@@ -12,7 +12,11 @@ export const HF_LIMITER_DEFAULTS = {
   freq: 5000, // Hz — where "bright" starts, for both the detector and the cut
   threshold: -8, // dB relative to the file's voice level (gated RMS)
   range: 12, // dB — the deepest the shelf may cut; 0 takes the shelf out
-  release: 60, // ms
+  release: 60, // ms — the fast (or only) release stage
+  // 'tight': a zero-phase one-octave split, a ceiling on the band above Freq.
+  // 'warm': a one-pole split, the EL7 Fatso's Warmth — a 6 dB/oct tilt.
+  shape: 'tight',
+  tail: 0, // ms — the slow second release stage; 0 is a single-stage release
   transient: 0, // 0–100, the acceleration limiter; 0 is out
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured by the composable, never a
@@ -28,6 +32,8 @@ export const THRESHOLD_MAX_DB = 12
 export const RANGE_MAX_DB = 24
 export const RELEASE_MIN_MS = 5
 export const RELEASE_MAX_MS = 300
+export const TAIL_MIN_MS = 40
+export const TAIL_MAX_MS = 600
 
 /**
  * How far above the shelf's threshold the acceleration limiter sits, dB, at
@@ -67,6 +73,9 @@ export function toKernelParams(params) {
     thresholdDb,
     rangeDb: clamp(p.range, 0, RANGE_MAX_DB),
     releaseMs: clamp(p.release, RELEASE_MIN_MS, RELEASE_MAX_MS),
+    shape: p.shape === 'warm' ? 'warm' : 'tight',
+    // Below its minimum the Tail knob reads OFF, so it is off rather than clamped up.
+    tailMs: p.tail >= TAIL_MIN_MS ? Math.min(p.tail, TAIL_MAX_MS) : 0,
     accel: offset !== null,
     accelThresholdDb: thresholdDb + (offset ?? 0),
     outputGainDb: p.output,
@@ -83,7 +92,8 @@ export function hfLimiterLatencySamples(sampleRate) {
 }
 
 /**
- * Pre-roll for apply, seconds: several of the longest release, so an applied
- * region starts on the gain a playing preview would have had.
+ * Pre-roll for apply, seconds: several of the longest release (the Tail's
+ * 600 ms included), so an applied region starts on the gain a playing preview
+ * would have had.
  */
-export const HF_LIMITER_PREROLL_S = 1.0
+export const HF_LIMITER_PREROLL_S = 3.0

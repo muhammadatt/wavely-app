@@ -4,7 +4,9 @@
  *
  * SHELF is a lookahead dynamic shelf that holds the band above FREQ at the
  * THRESHOLD (relative to the file's voice level), never deeper than RANGE, and
- * lets go over RELEASE. TRANSIENT brings in the acceleration limiter after it
+ * lets go over RELEASE — then, with TAIL up, over a slow second stage that only
+ * a sustained cut charges. SHAPE picks the split: TIGHT is a one-octave
+ * linear-phase ceiling, WARM the EL7 Fatso's 6 dB/oct one-pole tilt. TRANSIENT brings in the acceleration limiter after it
  * — a level limit that tightens 12 dB/oct up the spectrum and acts inside the
  * cycle, for the edges a gain is too slow for; 0 takes it out. Read
  * dsp/hfLimit.js for both designs.
@@ -20,9 +22,10 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { shelfResponseDb } from '../../audio/dsp/hfLimit.js'
 import {
   FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
-  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS,
+  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS,
 } from '../../audio/hfLimiterParams.js'
 import Knob from '../knobs/Knob.vue'
+import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -66,7 +69,7 @@ function yFor(db) {
 const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
 
 function pathFor(gain) {
-  const db = shelfResponseDb(sampleRate.value, hflParams.freq, gain, CURVE_FREQS)
+  const db = shelfResponseDb(sampleRate.value, hflParams.freq, gain, CURVE_FREQS, hflParams.shape)
   return CURVE_FREQS.map(
     (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${yFor(db[i]).toFixed(1)}`,
   ).join(' ')
@@ -97,6 +100,12 @@ const fmtFreq = v => (v >= 10000 ? `${(v / 1000).toFixed(1)}k` : `${(v / 1000).t
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 const fmtRange = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
 const fmtMs = v => `${Math.round(v)}`
+const fmtTail = v => (v < TAIL_MIN_MS ? 'OFF' : `${Math.round(v)}`)
+
+const SHAPE_OPTIONS = [
+  { value: 'tight', label: 'TIGHT', title: 'A one-octave, linear-phase split: a ceiling on the band above Freq, leaving everything below it alone' },
+  { value: 'warm', label: 'WARM', title: 'A gentle 6 dB/oct split, the EL7 Fatso’s Warmth: the whole top end tilts down, starting an octave or more below Freq' },
+]
 const fmtTransient = v => (v <= 0 ? 'OFF' : `${Math.round(v)}`)
 
 function togglePlayback() {
@@ -118,7 +127,7 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="hf-limiter"
     :z="z"
-    :width="620"
+    :width="700"
     :accent="ACCENT"
     brand-lead="HF"
     brand-tail="LIMITER"
@@ -187,36 +196,43 @@ async function applyAndClose() {
         <LevelMeter :levels="hflOutputLevels" label="OUT" :height="150" />
       </div>
 
-      <div class="flex justify-center gap-[18px] mt-[18px]">
-        <div class="w-[92px]" title="Where bright starts: the band above this is what the limiter listens to and turns down">
+      <div class="flex justify-center gap-[12px] mt-[18px]">
+        <div class="w-[80px]" title="Where bright starts: the band above this is what the limiter listens to and turns down">
           <Knob
             :model-value="hflParams.freq" @update:model-value="v => syncParam('freq', v)"
             :min="FREQ_MIN_HZ" :max="FREQ_MAX_HZ" :step="10" scale="log" :value-font-px="13"
             label="Freq" :accent="ACCENT" :format-value="fmtFreq" :disabled="!hflPreview"
           />
         </div>
-        <div class="w-[92px]" title="Where the band is held, dB relative to the file's voice level — the same setting does the same thing on a quiet recording and a hot one">
+        <div class="w-[80px]" title="Where the band is held, dB relative to the file's voice level — the same setting does the same thing on a quiet recording and a hot one">
           <Knob
             :model-value="hflParams.threshold" @update:model-value="v => syncParam('threshold', v)"
             :min="THRESHOLD_MIN_DB" :max="THRESHOLD_MAX_DB" :step="0.5" :value-font-px="13"
             label="Threshold" :accent="ACCENT" :format-value="fmtDb" :disabled="!hflPreview"
           />
         </div>
-        <div class="w-[92px]" title="The deepest the shelf may cut. Keeps a hard S from turning into a lisp; 0 takes the shelf out">
+        <div class="w-[80px]" title="The deepest the shelf may cut. Keeps a hard S from turning into a lisp; 0 takes the shelf out">
           <Knob
             :model-value="hflParams.range" @update:model-value="v => syncParam('range', v)"
             :min="0" :max="RANGE_MAX_DB" :step="0.5" :value-font-px="13"
             label="Range" :accent="ACCENT" :format-value="fmtRange" :disabled="!hflPreview"
           />
         </div>
-        <div class="w-[92px]" title="How quickly the top comes back after a bright moment, ms">
+        <div class="w-[80px]" title="How quickly the top comes back after a bright moment, ms">
           <Knob
             :model-value="hflParams.release" @update:model-value="v => syncParam('release', v)"
             :min="RELEASE_MIN_MS" :max="RELEASE_MAX_MS" :step="1" scale="log" :value-font-px="13"
             label="Release" :accent="ACCENT" :format-value="fmtMs" :disabled="!hflPreview"
           />
         </div>
-        <div class="w-[92px] relative" title="Acceleration limiting for sharp bright edges the shelf is too slow for — a level limit that tightens with frequency and acts inside the waveform. 0 takes it out">
+        <div class="w-[80px]" title="A slow second release stage, ms. A sustained bright passage charges it and the top comes back over this long; a single click barely does and recovers at the Release speed. Fully down is OFF, a single-stage release">
+          <Knob
+            :model-value="hflParams.tail" @update:model-value="v => syncParam('tail', v)"
+            :min="0" :max="TAIL_MAX_MS" :step="5" :value-font-px="13"
+            label="Tail" :accent="ACCENT" :format-value="fmtTail" :disabled="!hflPreview"
+          />
+        </div>
+        <div class="w-[80px] relative" title="Acceleration limiting for sharp bright edges the shelf is too slow for — a level limit that tightens with frequency and acts inside the waveform. 0 takes it out">
           <Knob
             :model-value="hflParams.transient" @update:model-value="v => syncParam('transient', v)"
             :min="0" :max="100" :step="1" :value-font-px="13"
@@ -232,11 +248,22 @@ async function applyAndClose() {
             aria-hidden="true"
           />
         </div>
-        <div class="w-[92px]">
+        <div class="w-[80px]">
           <Knob
             :model-value="hflParams.output" @update:model-value="v => syncParam('output', v)"
             :min="-12" :max="12" :step="0.1" :value-font-px="13" bipolar
             label="Output" :accent="ACCENT" :format-value="fmtDb" :disabled="!hflPreview"
+          />
+        </div>
+      </div>
+
+      <div class="flex justify-center mt-[16px]">
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">SHAPE</span>
+          <DeviceChoiceRocker
+            :model-value="hflParams.shape" :options="SHAPE_OPTIONS" :accent="ACCENT"
+            :disabled="!hflPreview" label="Shape"
+            @update:model-value="v => syncParam('shape', v)"
           />
         </div>
       </div>

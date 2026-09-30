@@ -51,6 +51,8 @@ export class HFLimiterKernel {
       thresholdLin: dbToLin(p.thresholdDb),
       floorLin: dbToLin(-Math.max(0, p.rangeDb)),
       releaseMs: p.releaseMs,
+      shape: p.shape,
+      tailMs: p.tailMs,
     })
     this.accel.setParams({
       cornerHz: p.cornerHz,

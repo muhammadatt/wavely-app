@@ -36,6 +36,37 @@
  *
  * Latency is D (the FIR's centre) + 2L (the lookahead), with D = L.
  *
+ * ── WARM: the same stage on a one-pole split (EL7 Fatso "Warmth") ─────────
+ *
+ *   lp = LP1(x[n − D])       bilinear one-pole at the corner, minimum phase
+ *   h  = x[n − D] − lp       an exact first-order high-pass
+ *   y  = g·x + (1 − g)·lp    a 6 dB/oct shelf that starts an octave or more
+ *                            below the corner and never reaches a floor
+ *
+ * This is the split rejected above for being too gentle to LIMIT — and it is
+ * what the Fatso does. Measured on a Warmth 7 bounce, the cut is g·x + (1−g)·LP1
+ * at ~2.25 kHz to 0.34 dB rms across every depth, and its group delay moves
+ * with g exactly as this blend's does. So it ships as a second shape, not as a
+ * replacement: TIGHT holds a band at a ceiling, WARM tilts the top down the way
+ * tape and the Fatso do. The band guarantee still holds — h is scaled by g
+ * exactly — but h is now everything above ~corner/2 at 6 dB/oct, so a WARM
+ * threshold reads more of the spectrum than a TIGHT one at the same corner.
+ * It runs D samples late like the FIR does, so the two shapes share one
+ * latency and switching between them never moves the audio.
+ *
+ * ── RELEASE: one stage, or two ─────────────────────────────────────────────
+ *
+ * With Tail > 0 the gain is
+ *
+ *   s  = slow follower of gl: falls with `tailChargeMs`, rises with Tail
+ *   g  = instant down to min(gl, s), up toward it with Release
+ *
+ * so a click charges `s` hardly at all and recovers at the Release speed,
+ * while a sustained bright passage charges it and leaves a slow tail — the
+ * program dependence of an opto or a dual-time-constant release. g ≤ s and
+ * g ≤ gl throughout, so the no-overshoot guarantee is untouched. Tail 0 is the
+ * single-stage release, bit for bit.
+ *
  * ── ACCEL: an acceleration limiter (Limen) ─────────────────────────────────
  *
  * A sine of amplitude a at frequency f has second difference a·(2 sin(πf/fs))²,
@@ -169,14 +200,51 @@ export function splitResponse(sampleRate, cornerHz, freqsHz) {
   })
 }
 
+/** One-pole lowpass (bilinear, prewarped) — the WARM split. */
+export function onePoleLowpass(sampleRate, cornerHz) {
+  const K = Math.tan((Math.PI * Math.min(cornerHz, 0.49 * sampleRate)) / sampleRate)
+  const b0 = K / (1 + K)
+  return { b0, a1: (K - 1) / (K + 1) }
+}
+
 /**
- * The shelf's magnitude response at a gain, dB — |g + (1 − g)·H(f)|. Exactly
- * the filter the stage runs, so the panel draws what is being applied.
+ * The shelf's magnitude response at a gain, dB — |g + (1 − g)·H(f)|, with H
+ * the TIGHT split's zero-phase FIR or the WARM split's one-pole. Exactly the
+ * filter the stage runs, so the panel draws what is being applied.
  */
-export function shelfResponseDb(sampleRate, cornerHz, gain, freqsHz) {
+export function shelfResponseDb(sampleRate, cornerHz, gain, freqsHz, shape = 'tight') {
+  if (shape === 'warm') {
+    const { b0, a1 } = onePoleLowpass(sampleRate, cornerHz)
+    return freqsHz.map(f => {
+      const w = (2 * Math.PI * f) / sampleRate
+      // LP1(e^jw) = b0(1 + e^-jw) / (1 + a1·e^-jw)
+      const nr = b0 * (1 + Math.cos(w)), ni = -b0 * Math.sin(w)
+      const dr = 1 + a1 * Math.cos(w), di = -a1 * Math.sin(w)
+      const den = dr * dr + di * di
+      const re = gain + (1 - gain) * ((nr * dr + ni * di) / den)
+      const im = (1 - gain) * ((ni * dr - nr * di) / den)
+      return 10 * Math.log10(Math.max(1e-12, re * re + im * im))
+    })
+  }
   return splitResponse(sampleRate, cornerHz, freqsHz)
     .map(H => 20 * Math.log10(Math.max(1e-6, Math.abs(gain + (1 - gain) * H))))
 }
+
+/**
+ * How fast a sustained cut charges the Tail stage, ms — REASONED, NOT FITTED:
+ * long enough that a single click (a few ms) barely charges it, short enough
+ * that a syllable of bright sibilance does.
+ *
+ * ⚠ THE FATSO BOUNCE COULD NOT FIT IT, because it does not need a second
+ * stage. Fitted against the Warmth 7 gain trajectory, a single 36 ms release
+ * scored 1.16 dB rms and the best two-stage point 1.17: the descent drove the
+ * charge out to 315 ms, where the slow stage never engages. What looks like a
+ * two-stage release on its gain-reduction trace is a one-pole release in
+ * LINEAR gain read in dB — from −14 dB it is at −4.4 dB after 25 ms and takes
+ * another 75 ms to reach −0.4. Tail is a program-dependence control of its
+ * own, not part of the Fatso match.
+ */
+export const TAIL_CHARGE_MS = 50
 
 /**
  * The acceleration bound for a limit of `thresholdLin` at `cornerHz`, at the
@@ -204,17 +272,32 @@ export class ShelfLimiterStage {
     this.xDelay = []
     this.hDelay = []
     this.band = []
+    this.lpX1 = []
+    this.lpY1 = []
     this.gain = 1
+    this.slow = 1
     this.minGain = 1
     this.setParams({ cornerHz: 5000, thresholdLin: 0.1, floorLin: 0.25, releaseMs: 60 })
   }
 
-  setParams({ cornerHz, thresholdLin, floorLin, releaseMs }) {
+  setParams({
+    cornerHz, thresholdLin, floorLin, releaseMs,
+    shape = 'tight', tailMs = 0, tailChargeMs = TAIL_CHARGE_MS,
+  }) {
+    const coeff = ms => Math.exp(-1 / (Math.max(1, ms) * 1e-3 * this.sampleRate))
     this.cornerHz = cornerHz
     this.thresholdLin = thresholdLin
     this.floorLin = floorLin
-    this.releaseCoeff = Math.exp(-1 / (Math.max(1, releaseMs) * 1e-3 * this.sampleRate))
+    this.releaseCoeff = coeff(releaseMs)
+    this.warm = shape === 'warm'
     this.taps = splitTaps(this.sampleRate, cornerHz)
+    const lp = onePoleLowpass(this.sampleRate, cornerHz)
+    this.lpB0 = lp.b0
+    this.lpA1 = lp.a1
+    this.tail = tailMs > 0
+    this.tailCoeff = coeff(tailMs)
+    this.chargeCoeff = coeff(tailChargeMs)
+    if (!this.tail) this.slow = 1
   }
 
   ensureChannels(n) {
@@ -224,6 +307,8 @@ export class ShelfLimiterStage {
       this.xDelay.push(new DelayLine(2 * this.L))
       this.hDelay.push(new DelayLine(2 * this.L))
       this.band.push(new Float64Array(2)) // [x, h] at the FIR centre
+      this.lpX1.push(0)
+      this.lpY1.push(0)
     }
     if (n > this.channels) this.channels = n
   }
@@ -238,6 +323,10 @@ export class ShelfLimiterStage {
     const T = this.thresholdLin
     const floor = this.floorLin
     const rel = this.releaseCoeff
+    const warm = this.warm
+    const b0 = this.lpB0, a1 = this.lpA1
+    const tail = this.tail, tailC = this.tailCoeff, chargeC = this.chargeCoeff
+    let s = this.slow
     let g = this.gain
     let minGain = this.minGain
     let pos = this.histPos
@@ -250,10 +339,17 @@ export class ShelfLimiterStage {
         hist[pos] = x
         hist[pos + len] = x
         // hist[pos + 1 .. pos + len] is the window, oldest first.
-        let lp = 0
         const o = pos + 1
-        for (let k = 0; k < len; k++) lp += taps[k] * hist[o + k]
         const xc = hist[o + D]
+        // The one-pole runs every sample in both shapes, so a switch to WARM
+        // starts from a settled filter rather than from zero.
+        let lp = b0 * (xc + this.lpX1[ch]) - a1 * this.lpY1[ch]
+        this.lpX1[ch] = xc
+        this.lpY1[ch] = lp > -ERROR_FLOOR && lp < ERROR_FLOOR ? 0 : lp
+        if (!warm) {
+          lp = 0
+          for (let k = 0; k < len; k++) lp += taps[k] * hist[o + k]
+        }
         const h = xc - lp
         this.band[ch][0] = xc
         this.band[ch][1] = h
@@ -265,8 +361,15 @@ export class ShelfLimiterStage {
       let req = m > T ? T / m : 1
       if (req < floor) req = floor
       const gl = this.box2.push(this.box1.push(this.min.push(req)))
+      let target = gl
+      if (tail) {
+        // The slow stage: charges only on a sustained cut, lets go over Tail.
+        s = gl < s ? gl - (gl - s) * chargeC : gl - (gl - s) * tailC
+        if (1 - s < UNITY_SNAP) s = 1
+        if (s < target) target = s
+      }
       // Instant down (the lookahead already shaped it), one-pole back up.
-      g = gl < g ? gl : gl - (gl - g) * rel
+      g = target < g ? target : target - (target - g) * rel
       if (1 - g < UNITY_SNAP) g = 1
       if (g < minGain) minGain = g
 
@@ -277,6 +380,7 @@ export class ShelfLimiterStage {
       }
     }
     this.histPos = pos
+    this.slow = s
     this.gain = g
     this.minGain = minGain
   }
