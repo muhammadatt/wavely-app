@@ -3,9 +3,9 @@
  *
  * Kept apart from the worklet so the stages can be embedded elsewhere later
  * (the HF Softener's chain, or after a harmonic-generating saturator in the
- * EL Fatso mould) without taking the plugin's wrapper with them. Each stage is
+ * EL Fatso mould) without taking the plugin's wrapper with them. The stage is
  * block-based, owns its per-channel state, and is BIT-TRANSPARENT BELOW
- * THRESHOLD: both write `dry + correction`, and the correction is exactly zero
+ * THRESHOLD: it writes `dry + correction`, and the correction is exactly zero
  * until something crosses the line. That is the property the HF Softener was
  * built around, and it is what lets a limiter sit on a whole file without
  * touching the parts that did not need it.
@@ -67,42 +67,42 @@
  * g ≤ gl throughout, so the no-overshoot guarantee is untouched. Tail 0 is the
  * single-stage release, bit for bit.
  *
- * ── ACCEL: an acceleration limiter (Limen) ─────────────────────────────────
+ * ── TRANSIENT: an onset softener on the same gain ─────────────────────────
  *
- * A sine of amplitude a at frequency f has second difference a·(2 sin(πf/fs))²,
- * so bounding the waveform's ACCELERATION is a level limit that tightens at
- * 12 dB/oct up the spectrum: low frequencies can be loud, bright transients
- * cannot. That is the whole idea, and it needs no filter bank and no envelope
- * — it acts inside the cycle, so there is no attack to get past.
+ *   f  = peak follower of the band (attack ~instant, release 20 ms)
+ *   s  = slow follower OF f (attack 10 ms, release 20 ms)
+ *   rise = 20·log10(f / s) dB           ~0 on anything steady; jumps on onsets
+ *   cut  = clamp(slope·(rise − floor), 0, Transient) dB, gated below the band's
+ *          threshold, through its OWN lookahead min + triangle
+ *   g    = shelf gain × transient gain  (they stack; Range caps only the shelf)
  *
- * Bounding acceleration directly (a clamped double integrator) is a bang-bang
- * servo and rings. This is built the stable way round:
+ * It reacts to how suddenly the band rises, not to how loud it is, so it takes
+ * clicks, lip smacks and t/k/p bursts — including ones below Threshold — and
+ * lets go as `s` catches up, without reshaping the waveform.
  *
- *   v[n] = x[n] − x[n−1]                              input velocity
- *   w[n] = w[n−1] + clamp(v[n] − w[n−1], ±A)          slew-limited velocity
- *   e[n] = (1 − k)·e[n−1] + (w[n] − v[n])             leaky displacement error
- *   y[n] = x[n] + e[n]
+ * ⚠ `s` FOLLOWS `f`, NOT THE SIGNAL, and that is load-bearing. A vowel's top
+ * end pulses once per pitch period; a slow follower of the raw band charges
+ * only during each brief pulse and sits far under the peaks, so it read a
+ * CONSTANT 22 dB of rise on a steady vowel. Following the peak-held `f`, the
+ * two converge on anything steady (99th percentile ≤ 1.8 dB on vowels and "s").
  *
- * y's velocity is w − k·e, so its acceleration is bounded by A plus the leak,
- * and every piece is first-order stable. The leak makes the correction a
- * high-passed signal (corner a quarter of the limit corner), so it cannot
- * accumulate a DC or low-frequency offset. When nothing clamps, w = v exactly
- * and e decays to exactly zero.
- *
- * It is a waveform shaper and makes harmonics, so it runs 4x oversampled — but
- * ONLY THE CORRECTION is resampled. The dry path is a whole-sample delay, so
- * below threshold the stage is still bit-transparent; the resampling filters
- * never touch the audio unless there is something to add back.
+ * ⚠ IT REPLACED AN ACCELERATION LIMITER (Limen-style) THAT WAS UNUSABLE ON
+ * VOICE. That stage slew-limited the 4x-oversampled waveform's velocity and
+ * integrated the error with a leak, claiming the leak made the correction
+ * high-passed. It does the opposite — a leaky integrator is a LOWPASS — so the
+ * clamping error piled up at and below ~1.25 kHz: on an "s" the correction put
+ * 44 dB more energy at 200–1000 Hz than the "s" had there, was louder than the
+ * "s" itself at every setting, and RAISED the file's peak (−2.6 → −0.2 dBFS).
+ * Noise-like top end (sibilance, breath) clamps nearly every sample at any
+ * threshold that touches it, so no tuning rescues waveform-domain limiting for
+ * narration. The shelf's lookahead already catches every edge, so the stage's
+ * stated purpose — a backstop for transients too fast for a gain — was also
+ * void. Its 4x oversampler went with it (a gain makes no harmonics to alias),
+ * which took 50 samples off the plugin's latency.
  */
 
 import { RunningMin, Boxcar } from './lookaheadLimiter.js'
-import { Oversampler, DelayLine, COMPRESSOR_OVERSAMPLE } from './oversample.js'
-
-/** The accel stage's resampling profile; its round trip is the stage's latency. */
-export const ACCEL_OVERSAMPLE = COMPRESSOR_OVERSAMPLE
-
-/** Accel stage latency, base-rate samples. */
-export const ACCEL_LATENCY_SAMPLES = ACCEL_OVERSAMPLE.latencySamples
+import { DelayLine } from './oversample.js'
 
 /** Shelf lookahead, seconds. The gain's share of the latency is twice this. */
 export const SHELF_LOOKAHEAD_S = 0.001
@@ -122,13 +122,10 @@ export function shelfLatencySamples(sampleRate) {
   return 3 * shelfHalfWidth(sampleRate)
 }
 
-/** The accel correction's leak corner, as a fraction of the limit corner. */
-export const ACCEL_LEAK_RATIO = 0.25
-
 /** Gains this close to 1 are 1. Keeps a release from parking one ulp short. */
 const UNITY_SNAP = 1e-7
 
-/** Below this the accel error is zero, so it cannot linger as denormals. */
+/** Below this the one-pole state is zero, so it cannot linger as denormals. */
 const ERROR_FLOOR = 1e-20
 
 function besselI0(x) {
@@ -247,14 +244,22 @@ export function shelfResponseDb(sampleRate, cornerHz, gain, freqsHz, shape = 'ti
 export const TAIL_CHARGE_MS = 50
 
 /**
- * The acceleration bound for a limit of `thresholdLin` at `cornerHz`, at the
- * rate the stage runs. A sine at the corner and the threshold sits exactly on
- * it; an octave up it is limited 12 dB lower.
+ * The transient softener's detector, ms and dB. See the TRANSIENT note above;
+ * calibrated on synthetic onsets in test/dsp/hfLimiter.test.js.
  */
-export function accelLimitFor(thresholdLin, cornerHz, rate) {
-  const s = 2 * Math.sin(Math.PI * Math.min(cornerHz, 0.49 * rate) / rate)
-  return thresholdLin * s * s
-}
+export const TRANSIENT_FAST_ATTACK_MS = 0.1
+export const TRANSIENT_SLOW_ATTACK_MS = 10
+export const TRANSIENT_RELEASE_MS = 20
+/** Rise below this is steady-state ripple (99th percentile ≤ 1.8 dB) and is ignored. */
+export const TRANSIENT_RISE_FLOOR_DB = 3
+/** dB of cut per dB of rise over the floor, up to the Transient knob. */
+export const TRANSIENT_SLOPE = 0.5
+/**
+ * The softener acts on onsets that reach within this far of the shelf's
+ * threshold (fading in over the next 6 dB), so it can take a click the shelf
+ * never sees without modulating room tone.
+ */
+export const TRANSIENT_GATE_BELOW_DB = 24
 
 export class ShelfLimiterStage {
   constructor(sampleRate) {
@@ -266,6 +271,15 @@ export class ShelfLimiterStage {
     this.min = new RunningMin(2 * L + 1)
     this.box1 = new Boxcar(L + 1)
     this.box2 = new Boxcar(L + 1)
+    // The transient gain has its own lookahead smoother, so it can let go
+    // within milliseconds instead of on the shelf's Release.
+    this.tMin = new RunningMin(2 * L + 1)
+    this.tBox1 = new Boxcar(L + 1)
+    this.tBox2 = new Boxcar(L + 1)
+    this.tFast = 0
+    this.tSlow = 0
+    this.tGain = 1
+    this.minTGain = 1
     this.channels = 0
     this.hist = [] // last 2D+1 inputs, doubled so the FIR reads a flat window
     this.histPos = 0
@@ -282,9 +296,15 @@ export class ShelfLimiterStage {
 
   setParams({
     cornerHz, thresholdLin, floorLin, releaseMs,
-    shape = 'tight', tailMs = 0, tailChargeMs = TAIL_CHARGE_MS,
+    shape = 'tight', tailMs = 0, tailChargeMs = TAIL_CHARGE_MS, transientDb = 0,
   }) {
     const coeff = ms => Math.exp(-1 / (Math.max(1, ms) * 1e-3 * this.sampleRate))
+    const coeffFine = ms => Math.exp(-1 / (ms * 1e-3 * this.sampleRate))
+    this.transientDb = Math.max(0, transientDb)
+    this.tFastAtt = coeffFine(TRANSIENT_FAST_ATTACK_MS)
+    this.tSlowAtt = coeffFine(TRANSIENT_SLOW_ATTACK_MS)
+    this.tRel = coeffFine(TRANSIENT_RELEASE_MS)
+    this.tGateLin = thresholdLin * Math.pow(10, -TRANSIENT_GATE_BELOW_DB / 20)
     this.cornerHz = cornerHz
     this.thresholdLin = thresholdLin
     this.floorLin = floorLin
@@ -326,6 +346,9 @@ export class ShelfLimiterStage {
     const warm = this.warm
     const b0 = this.lpB0, a1 = this.lpA1
     const tail = this.tail, tailC = this.tailCoeff, chargeC = this.chargeCoeff
+    const tMax = this.transientDb
+    const tFA = this.tFastAtt, tSA = this.tSlowAtt, tR = this.tRel, tGate = this.tGateLin
+    let tf = this.tFast, ts = this.tSlow, gt = this.tGain, minTGain = this.minTGain
     let s = this.slow
     let g = this.gain
     let minGain = this.minGain
@@ -373,122 +396,55 @@ export class ShelfLimiterStage {
       if (1 - g < UNITY_SNAP) g = 1
       if (g < minGain) minGain = g
 
+      // Transient: how suddenly the band rose, not how loud it is. The
+      // detectors always run, so turning the knob up starts from settled state.
+      tf = m > tf ? m + (tf - m) * tFA : m + (tf - m) * tR
+      ts = tf > ts ? tf + (ts - tf) * tSA : tf + (ts - tf) * tR
+      let tReq = 1
+      if (tMax > 0 && tf > tGate) {
+        const rise = ts > 0 ? 20 * Math.log10(tf / ts) : TRANSIENT_RISE_FLOOR_DB + tMax / TRANSIENT_SLOPE
+        let cutDb = TRANSIENT_SLOPE * (rise - TRANSIENT_RISE_FLOOR_DB)
+        if (cutDb > 0) {
+          if (cutDb > tMax) cutDb = tMax
+          // Fade in over the 6 dB above the gate, so the gate cannot click.
+          const over = 20 * Math.log10(tf / tGate)
+          if (over < 6) cutDb *= over / 6
+          tReq = Math.pow(10, -cutDb / 20)
+        }
+      }
+      gt = this.tBox2.push(this.tBox1.push(this.tMin.push(tReq)))
+      if (1 - gt < UNITY_SNAP) gt = 1
+      if (gt < minTGain) minTGain = gt
+      // They stack: Range caps the shelf only, Transient caps only this.
+      const gg = g * gt
+
       for (let ch = 0; ch < nCh; ch++) {
         const xd = this.xDelay[ch].push(this.band[ch][0])
         const hd = this.hDelay[ch].push(this.band[ch][1])
-        bufs[ch][i] = g === 1 ? xd : xd + (g - 1) * hd
+        bufs[ch][i] = gg === 1 ? xd : xd + (gg - 1) * hd
       }
     }
     this.histPos = pos
     this.slow = s
     this.gain = g
     this.minGain = minGain
+    this.tFast = tf
+    this.tSlow = ts
+    this.tGain = gt
+    this.minTGain = minTGain
   }
 
-  /** Deepest gain since the last call, linear; resets the hold. */
+  /** Deepest shelf gain since the last call, linear; resets the hold. */
   takeMinGain() {
     const m = this.minGain
     this.minGain = this.gain
     return m
   }
-}
 
-export class AccelLimiterStage {
-  constructor(sampleRate) {
-    this.sampleRate = sampleRate
-    this.rate = sampleRate * ACCEL_OVERSAMPLE.factor
-    this.latencySamples = ACCEL_LATENCY_SAMPLES
-    this.channels = 0
-    this.os = []
-    this.dry = []
-    this.xPrev = []
-    this.w = []
-    this.e = []
-    this.corr = new Float32Array(128)
-    this.clamped = 0
-    this.total = 0
-    this.enabled = true
-    this.setParams({ cornerHz: 5000, thresholdLin: 0.1 })
-  }
-
-  /**
-   * `enabled: false` leaves the stage a pure delay of the same length, so
-   * switching it in and out never moves the plugin's latency.
-   */
-  setParams({ cornerHz, thresholdLin, enabled = true }) {
-    if (enabled && !this.enabled) {
-      // Coming back in: start from rest rather than from whatever the
-      // oversamplers and integrators held when it went out.
-      for (let ch = 0; ch < this.channels; ch++) {
-        this.os[ch].reset()
-        this.xPrev[ch] = 0
-        this.w[ch] = 0
-        this.e[ch] = 0
-      }
-    }
-    this.enabled = enabled
-    this.A = accelLimitFor(thresholdLin, cornerHz, this.rate)
-    this.leak = 1 - Math.exp((-2 * Math.PI * ACCEL_LEAK_RATIO * cornerHz) / this.rate)
-  }
-
-  ensureChannels(n) {
-    for (let ch = this.channels; ch < n; ch++) {
-      this.os.push(new Oversampler(ACCEL_OVERSAMPLE))
-      this.dry.push(new DelayLine(this.latencySamples))
-      this.xPrev.push(0)
-      this.w.push(0)
-      this.e.push(0)
-    }
-    if (n > this.channels) this.channels = n
-  }
-
-  /** In place over `n` samples of every channel in `bufs`. */
-  process(bufs, n) {
-    this.ensureChannels(bufs.length)
-    if (this.corr.length < n) this.corr = new Float32Array(n)
-    if (!this.enabled) {
-      for (let ch = 0; ch < bufs.length; ch++) {
-        const buf = bufs[ch]
-        const dry = this.dry[ch]
-        for (let i = 0; i < n; i++) buf[i] = dry.push(buf[i])
-      }
-      return
-    }
-    const A = this.A
-    const keep = 1 - this.leak
-    let clamped = 0
-    for (let ch = 0; ch < bufs.length; ch++) {
-      const buf = bufs[ch]
-      const hi = this.os[ch].up(buf, n)
-      const len = n * ACCEL_OVERSAMPLE.factor
-      let xPrev = this.xPrev[ch], w = this.w[ch], e = this.e[ch]
-      for (let i = 0; i < len; i++) {
-        const x = hi[i]
-        const v = x - xPrev
-        xPrev = x
-        const dv = v - w
-        if (dv > A) { w += A; clamped++ } else if (dv < -A) { w -= A; clamped++ } else w = v
-        e = e * keep + (w - v)
-        if (e < ERROR_FLOOR && e > -ERROR_FLOOR) e = 0
-        hi[i] = e
-      }
-      this.xPrev[ch] = xPrev
-      this.w[ch] = w
-      this.e[ch] = e
-      this.os[ch].down(this.corr, n)
-      const dry = this.dry[ch]
-      const corr = this.corr
-      for (let i = 0; i < n; i++) buf[i] = dry.push(buf[i]) + corr[i]
-    }
-    this.clamped += clamped
-    this.total += n * ACCEL_OVERSAMPLE.factor * bufs.length
-  }
-
-  /** Fraction of high-rate samples clamped since the last call; resets. */
-  takeActivity() {
-    const a = this.total > 0 ? this.clamped / this.total : 0
-    this.clamped = 0
-    this.total = 0
-    return a
+  /** Deepest transient gain since the last call, linear; resets the hold. */
+  takeMinTransientGain() {
+    const m = this.minTGain
+    this.minTGain = this.tGain
+    return m
   }
 }

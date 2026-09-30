@@ -5035,3 +5035,58 @@ TIGHT best 0.83 (2.05 kHz, Range 6, Release 45) — it cannot reach below the
 corner or cut deep without over-cutting 3–5 kHz; WARM 0.69–0.75 (2.3–2.5 kHz,
 Range 16, Release 24–36, threshold −24 dBFS = knob −1 against this file's
 −22.9 dBFS gated RMS). Scripts were scratch and are not in the repo.
+
+---
+
+## HF Limiter — Transient: acceleration limiter retired, onset softener built (September 2026)
+
+**Owner report:** "When engaged it only adds loud, scratchy distortion, and is
+unusable for narration."
+
+**The retired design.** A Limen-style acceleration limiter: 4x oversample, take
+the velocity `v = x[n] − x[n−1]`, slew-limit it (`w` moves at most `A` per
+sample, `A` = a sine at Freq and the threshold), integrate the error with a
+leak, `e = (1 − k)·e + (w − v)`, output `x + e`, resampling only `e`.
+
+**Measured on synthetic narration** (glottal pulses through formants, "s" noise
+bursts, −20 dBFS gated RMS, shelf off): the change on an "s" was LOUDER than
+the "s" at every setting (+2.7 dB at Transient 1), the file peak ROSE (−2.6 →
+−0.2 dBFS), and at Transient 100 every vowel was distorted (−17.5 dB, ~13 %).
+Correction spectrum over the "s": +44 dB more energy than the "s" at
+200–1000 Hz, +20 dB at 1–2.5 kHz.
+
+**Root cause — a false claim in the design note.** It said the leak made the
+correction high-passed. A leaky integrator is `1/(s + k)`, a LOWPASS: the
+clamping error is integrated and piles up at and below the leak corner
+(~1.25 kHz), in the voice band. Second, noise-like top end — sibilance and
+breath, most of narration's HF — changes direction nearly every sample, so any
+threshold that touches it clamps nearly every sample and rewrites the waveform.
+Third, the stage's purpose (a backstop for transients too fast for a gain) was
+void: the shelf's 1 ms lookahead already catches every edge with no overshoot.
+The tests missed it because they used steady sines and a noise test that only
+checked the output stayed bounded, never that it stayed smaller than the input.
+Checked afterwards against the old kernel: with the shelf off it raised the
+peak 4.5–6.9 dB and the band under ~350 Hz 7–9 dB at Transient 1/50/100 — the
+new "never adds energy or raises the peak" test covers exactly that case.
+
+**The replacement — an onset softener on the shelf's own gain.** No filter of
+its own, no oversampling (a gain makes no harmonics to alias), no extra latency.
+- `f` = peak follower of the band (attack 0.1 ms, release 20 ms); `s` = slow
+  follower OF `f` (attack 10 ms, release 20 ms); rise = 20·log10(f/s).
+- ⚠ First cut had `s` follow the raw band: a vowel's top end pulses at the pitch
+  rate, `s` charged only during each pulse, and steady vowels read a CONSTANT
+  22 dB of rise. Following the peak-held `f`, steady vowels and steady "s" read
+  ~0 (99th percentile ≤ 1.8 dB).
+- cut = 0.5·(rise − 3 dB), capped by the knob (0–12 dB), gated 24 dB below the
+  threshold with a 6 dB fade, through its own lookahead min + triangle so it
+  leads the onset by up to 1 ms and lets go within ms.
+- Stacks multiplicatively with the shelf; Range caps only the shelf. Owner
+  decision: a few-ms dip cannot make an S lisp, so Range should not cap it.
+- A rise out of room tone is steep in dB for ANY sound (a natural "s" read
+  21 dB of max rise), so max rise cannot tell a click from an "s". What does is
+  energy removed over the sound — measured at Transient 12, shelf off: loud
+  click −11.6 dB, t-burst −3.6 (edge, not body), vowel −0.12, natural "s"
+  −0.09, abrupt "s" −0.18 (its first ms dips ~11 dB — the known false trigger).
+  With the shelf engaged a loud click goes −10.7 → −18.3 dB (peak −21 dB for
+  ~1 ms) and a natural "s" −6.51 → −6.72.
+- Latency 3 ms (was 3 ms + 50 samples). Worklet chunk 11.3 → 9.0 kB.

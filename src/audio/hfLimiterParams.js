@@ -6,7 +6,7 @@
  */
 
 import { ALIGN_TARGET_DBFS } from './dsp/inputAlign.js'
-import { ACCEL_LATENCY_SAMPLES, shelfLatencySamples } from './dsp/hfLimit.js'
+import { shelfLatencySamples } from './dsp/hfLimit.js'
 
 export const HF_LIMITER_DEFAULTS = {
   freq: 5000, // Hz — where "bright" starts, for both the detector and the cut
@@ -17,7 +17,9 @@ export const HF_LIMITER_DEFAULTS = {
   // 'warm': a one-pole split, the EL7 Fatso's Warmth — a 6 dB/oct tilt.
   shape: 'tight',
   tail: 0, // ms — the slow second release stage; 0 is a single-stage release
-  transient: 0, // 0–100, the acceleration limiter; 0 is out
+  // dB — the most the onset softener may add on top of the shelf; 0 is off.
+  // It stacks: Range caps only the shelf.
+  transient: 0,
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured by the composable, never a
   // user setting — it is what makes a Threshold mean the same thing on a
@@ -35,15 +37,7 @@ export const RELEASE_MAX_MS = 300
 export const TAIL_MIN_MS = 40
 export const TAIL_MAX_MS = 600
 
-/**
- * How far above the shelf's threshold the acceleration limiter sits, dB, at
- * Transient 1 and at 100. It is a backstop for what the shelf's release lets
- * through and for transients too short for a gain to follow, so at the bottom
- * of its travel it only touches the sharpest edges; at the top it shares the
- * shelf's line.
- */
-export const TRANSIENT_OFFSET_AT_MIN_DB = 18
-export const TRANSIENT_OFFSET_AT_MAX_DB = 0
+export const TRANSIENT_MAX_DB = 12
 
 /** Voice levels outside this are clamped: a near-silent file is not a voice. */
 const VOICE_LEVEL_MIN_DB = -60
@@ -53,13 +47,6 @@ function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
 }
 
-/** Transient knob → accel threshold above the shelf's, dB. Null when out. */
-export function transientOffsetDb(transient) {
-  if (!(transient > 0)) return null
-  const t = clamp(transient, 0, 100) / 100
-  return TRANSIENT_OFFSET_AT_MIN_DB + (TRANSIENT_OFFSET_AT_MAX_DB - TRANSIENT_OFFSET_AT_MIN_DB) * t
-}
-
 /** Map UI param names to kernel param names. */
 export function toKernelParams(params) {
   const p = { ...HF_LIMITER_DEFAULTS, ...params }
@@ -67,7 +54,6 @@ export function toKernelParams(params) {
     ? clamp(p.voiceLevelDb, VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
     : ALIGN_TARGET_DBFS
   const thresholdDb = voice + clamp(p.threshold, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB)
-  const offset = transientOffsetDb(p.transient)
   return {
     cornerHz: clamp(p.freq, FREQ_MIN_HZ, FREQ_MAX_HZ),
     thresholdDb,
@@ -76,19 +62,17 @@ export function toKernelParams(params) {
     shape: p.shape === 'warm' ? 'warm' : 'tight',
     // Below its minimum the Tail knob reads OFF, so it is off rather than clamped up.
     tailMs: p.tail >= TAIL_MIN_MS ? Math.min(p.tail, TAIL_MAX_MS) : 0,
-    accel: offset !== null,
-    accelThresholdDb: thresholdDb + (offset ?? 0),
+    transientDb: clamp(p.transient > 0 ? p.transient : 0, 0, TRANSIENT_MAX_DB),
     outputGainDb: p.output,
   }
 }
 
 /**
- * Plugin latency, samples. CONSTANT for a sample rate: the accel stage stays
- * a delay of its own length while it is out, so the Transient knob crossing 0
- * never moves the audio.
+ * Plugin latency, samples: the shelf's split centre plus its lookahead. Every
+ * control acts on the same gain path, so no setting moves it.
  */
 export function hfLimiterLatencySamples(sampleRate) {
-  return shelfLatencySamples(sampleRate) + ACCEL_LATENCY_SAMPLES
+  return shelfLatencySamples(sampleRate)
 }
 
 /**

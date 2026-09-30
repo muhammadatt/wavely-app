@@ -6,14 +6,14 @@
  * THRESHOLD (relative to the file's voice level), never deeper than RANGE, and
  * lets go over RELEASE — then, with TAIL up, over a slow second stage that only
  * a sustained cut charges. SHAPE picks the split: TIGHT is a one-octave
- * linear-phase ceiling, WARM the EL7 Fatso's 6 dB/oct one-pole tilt. TRANSIENT brings in the acceleration limiter after it
- * — a level limit that tightens 12 dB/oct up the spectrum and acts inside the
- * cycle, for the edges a gain is too slow for; 0 takes it out. Read
- * dsp/hfLimit.js for both designs.
+ * linear-phase ceiling, WARM the EL7 Fatso's 6 dB/oct one-pole tilt. TRANSIENT
+ * deepens the same cut for a few milliseconds on sudden onsets — clicks, lip
+ * smacks, t/k/p bursts, even below THRESHOLD — up to its own depth, stacked on
+ * the shelf's; 0 is off. Read dsp/hfLimit.js for the design.
  *
  * The curve is the shelf the kernel is running right now, from the same split
  * it runs, with the deepest cut RANGE allows ghosted behind it. The lamp by
- * TRANSIENT lights while the acceleration limiter acts. DELTA plays only what
+ * TRANSIENT lights while the onset softener cuts (full at 6 dB). DELTA plays only what
  * was removed and never reaches the apply path.
  */
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
@@ -22,7 +22,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { shelfResponseDb } from '../../audio/dsp/hfLimit.js'
 import {
   FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
-  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS,
+  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB,
 } from '../../audio/hfLimiterParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
@@ -33,7 +33,7 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hflParams, hflPreview, hflDelta, hflReduction, hflAccel,
+  hflParams, hflPreview, hflDelta, hflReduction, hflTransient,
   hflInputLevels, hflOutputLevels,
   togglePreview, syncParam, toggleDelta, apply, teardown, closeModal,
 } = useHFLimiter()
@@ -84,7 +84,7 @@ const liveFill = computed(() => `${livePath.value} L${CURVE_W},0 L0,0 Z`)
 const lamp = ref(0)
 let lampFrame = null
 function lampTick() {
-  const target = Math.min(1, hflAccel.value * 200)
+  const target = Math.min(1, hflTransient.value / 6)
   lamp.value = target > lamp.value ? target : lamp.value * 0.92
   lampFrame = requestAnimationFrame(lampTick)
 }
@@ -106,7 +106,7 @@ const SHAPE_OPTIONS = [
   { value: 'tight', label: 'TIGHT', title: 'A one-octave, linear-phase split: a ceiling on the band above Freq, leaving everything below it alone' },
   { value: 'warm', label: 'WARM', title: 'A gentle 6 dB/oct split, the EL7 Fatso’s Warmth: the whole top end tilts down, starting an octave or more below Freq' },
 ]
-const fmtTransient = v => (v <= 0 ? 'OFF' : `${Math.round(v)}`)
+const fmtTransient = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -232,10 +232,10 @@ async function applyAndClose() {
             label="Tail" :accent="ACCENT" :format-value="fmtTail" :disabled="!hflPreview"
           />
         </div>
-        <div class="w-[80px] relative" title="Acceleration limiting for sharp bright edges the shelf is too slow for — a level limit that tightens with frequency and acts inside the waveform. 0 takes it out">
+        <div class="w-[80px] relative" title="Extra cut on sudden bright onsets — clicks, lip smacks, T, K and P bursts — even below the threshold, for a few milliseconds. Reacts to how suddenly the top end rises, not how loud it is, so a steady S is left to the shelf. Stacks on top of the shelf; 0 is off">
           <Knob
             :model-value="hflParams.transient" @update:model-value="v => syncParam('transient', v)"
-            :min="0" :max="100" :step="1" :value-font-px="13"
+            :min="0" :max="TRANSIENT_MAX_DB" :step="0.5" :value-font-px="13"
             label="Transient" :accent="ACCENT" :format-value="fmtTransient" :disabled="!hflPreview"
           />
           <span
@@ -273,7 +273,7 @@ async function applyAndClose() {
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
         Holds the top end at a ceiling: brightness and harshness on the shelf,
-        sharp edges on Transient. Below the threshold it passes audio untouched.
+        clicks and sharp onsets on Transient. Below the threshold it passes audio untouched.
       </p>
     </div>
   </FloatingWindow>

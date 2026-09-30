@@ -20,7 +20,7 @@ const hflPreview = ref(false)
 // the apply path renders with.
 const hflDelta = ref(false)
 const hflReduction = ref(0)
-const hflAccel = ref(0)
+const hflTransient = ref(0)
 const hflInputLevels = ref([])
 const hflOutputLevels = ref([])
 let meterId = null
@@ -52,7 +52,7 @@ export function useHFLimiter() {
         hflInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
         hflOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
         hflReduction.value = nodes.getReduction()
-        hflAccel.value = nodes.getAccel()
+        hflTransient.value = nodes.getTransient()
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -67,7 +67,7 @@ export function useHFLimiter() {
     hflInputLevels.value = []
     hflOutputLevels.value = []
     hflReduction.value = 0
-    hflAccel.value = 0
+    hflTransient.value = 0
   }
 
   function pushParam(name, value) {
@@ -183,7 +183,7 @@ export function useHFLimiter() {
     hflPreview,
     hflDelta,
     hflReduction,
-    hflAccel,
+    hflTransient,
     hflInputLevels,
     hflOutputLevels,
     hasSelection,

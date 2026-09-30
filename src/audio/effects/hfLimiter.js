@@ -1,8 +1,8 @@
 /**
  * HF Limiter — real-time effect chain wrapper.
  *
- * The DSP lives in ../hfLimiterProcessor.js (a lookahead dynamic shelf, then an
- * optional acceleration limiter; see ../dsp/hfLimit.js) and runs in an
+ * The DSP lives in ../hfLimiterProcessor.js (a lookahead dynamic shelf with an
+ * onset softener on the same gain; see ../dsp/hfLimit.js) and runs in an
  * AudioWorklet. The offline apply path renders through the same worklet in an
  * OfflineAudioContext, so preview and apply share one code path.
  *
@@ -26,7 +26,7 @@ export function createHFLimiter(audioContext) {
   let worklet = null
   let destroyed = false
   let reductionDb = 0
-  let accel = 0
+  let transientDb = 0
   // Monitor tap, kept out of `params` on purpose: parameters are what the
   // apply path renders with, and a monitor mode must never be one of them.
   let listen = 'off'
@@ -43,7 +43,7 @@ export function createHFLimiter(audioContext) {
       worklet.port.onmessage = (e) => {
         if (e.data?.type !== 'gr') return
         reductionDb = e.data.reductionDb
-        accel = e.data.accel
+        transientDb = e.data.transientDb ?? 0
       }
       worklet.port.postMessage({ type: 'listen', mode: listen })
       input.disconnect(preOutput)
@@ -81,9 +81,9 @@ export function createHFLimiter(audioContext) {
       return reductionDb
     },
 
-    /** Share of samples the acceleration limiter clamped, 0–1, since the last post. */
-    getAccel() {
-      return accel
+    /** The onset softener's deepest cut since the last meter post, positive dB. */
+    getTransient() {
+      return transientDb
     },
 
     setListen(mode) {

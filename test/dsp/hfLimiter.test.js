@@ -57,16 +57,19 @@ const run = (x, p) => processHFLimiterBuffer([x], SR, toKernelParams(p))
 // Threshold −30 dBFS absolute: voice −20 plus −10.
 const BASE = { voiceLevelDb: -20, threshold: -10, range: 24, release: 60 }
 
-test('bit-transparent below threshold, delayed by the latency, with the accel stage in or out', () => {
+test('bit-transparent below threshold, delayed by the latency, with Transient on or off', () => {
   // Loud bass and mids plus a top well under the ceiling, faded in: a tone
-  // switched on abruptly IS a sharp edge, and the accel stage rightly takes it.
+  // switched on abruptly IS a sharp edge, and the Transient stage rightly takes it.
   const x = add(sine(150, 0.5), sine(1200, 0.2), sine(9000, 0.005))
   const fade = Math.round(0.05 * SR)
   for (let i = 0; i < fade; i++) x[i] *= 0.5 - 0.5 * Math.cos((Math.PI * i) / fade)
-  for (const transient of [0, 100]) {
+  // Transient acts below Threshold ON PURPOSE (it catches quiet clicks), and a
+  // fade in from digital silence is an onset, so with it on the claim is
+  // "untouched once steady": from 0.1 s, after the fade.
+  for (const [transient, from] of [[0, 0], [12, Math.round(0.1 * SR)]]) {
     const { channelData: [y], latencySamples: L } = run(x, { ...BASE, transient })
     assert.equal(L, hfLimiterLatencySamples(SR))
-    for (let i = L; i < x.length; i++) {
+    for (let i = L + from; i < x.length; i++) {
       if (y[i] !== x[i - L]) assert.fail(`transient ${transient}: sample ${i} differs (${y[i]} vs ${x[i - L]})`)
     }
   }
@@ -143,9 +146,10 @@ test('the split is unity at DC, half at the corner, and monotone at every depth'
   }
 })
 
-test('the latency does not move when Transient crosses 0', () => {
+test('the latency does not move with Transient, and is the shelf\'s alone', () => {
   const L = hfLimiterLatencySamples(SR)
-  for (const transient of [0, 1, 100]) {
+  assert.equal(L, 3 * Math.round(0.001 * SR))
+  for (const transient of [0, 6, 12]) {
     const x = new Float32Array(4096)
     x[100] = 0.001 // far below every threshold
     const { channelData: [y] } = run(x, { ...BASE, transient })
@@ -153,31 +157,112 @@ test('the latency does not move when Transient crosses 0', () => {
   }
 })
 
-test('the acceleration limiter tightens with frequency and leaves the low end alone', () => {
-  const P = { ...BASE, range: 0, transient: 100 }
-  const lowCut = db(peak(run(sine(500, 0.5), P).channelData[0], SR / 4) / 0.5)
-  const at6k = db(peak(run(sine(6000, 0.1), P).channelData[0], SR / 4) / 0.1)
-  const at12k = db(peak(run(sine(12000, 0.1), P).channelData[0], SR / 4) / 0.1)
-  assert.ok(lowCut > -0.01, `500 Hz at −6 dBFS moved ${lowCut.toFixed(3)} dB`)
-  assert.ok(at6k < -2, `6 kHz only ${at6k.toFixed(2)} dB`)
-  assert.ok(at12k < at6k - 3, `12 kHz ${at12k.toFixed(2)} dB is not tighter than 6 kHz ${at6k.toFixed(2)}`)
+// ── Transient: the onset softener ───────────────────────────────────────────
+
+/** Room tone plus one noise event over [att, hold, decay] ms, scaled so its band peak is `bandDb`. */
+function event(att, hold, dec, bandDb, n = Math.round(0.5 * SR), at = Math.round(0.15 * SR), seed = 5) {
+  let r = seed
+  const rnd = () => { r = (r * 16807) % 2147483647; return (r / 2147483647) * 2 - 1 }
+  const x = new Float32Array(n)
+  for (let i = at; i < n; i++) {
+    const t = ((i - at) / SR) * 1000
+    const e = t < att ? t / att : t < att + hold ? 1 : Math.exp(-(t - att - hold) / dec)
+    x[i] = rnd() * e
+  }
+  // Band peak via the kernel's own split: run it with nothing engaged and read h.
+  // Band peak, approximated by the first difference (a +6 dB/oct tilt that
+  // puts noise's energy where the split does).
+  let pk = 0
+  for (let i = 1; i < n; i++) pk = Math.max(pk, Math.abs(x[i] - x[i - 1]) / 2)
+  const g = Math.pow(10, bandDb / 20) / pk
+  for (let i = 0; i < n; i++) x[i] = x[i] * g + 0.00056 * rnd() // room tone at −65 dBFS
+  return { x, at }
+}
+
+/** Deepest transient cut (dB, positive) and the time it takes to let go, block by block. */
+function transientTrace(x, p) {
+  const k = new HFLimiterKernel(SR)
+  k.setParams(toKernelParams(p))
+  const out = new Float32Array(128), cuts = []
+  for (let off = 0; off + 128 <= x.length; off += 128) {
+    k.process([x.subarray(off, off + 128)], [out], 128)
+    const g = k.shelf.takeMinTransientGain()
+    cuts.push(g < 1 ? -20 * Math.log10(g) : 0)
+  }
+  return cuts
+}
+
+test('a click is cut by up to the Transient depth, even below Threshold, and let go within milliseconds', () => {
+  for (const [bandDb, want] of [[-18, [11, 12.01]], [-40, [3, 12.01]]]) {
+    const { x, at } = event(0.05, 0.1, 0.3, bandDb)
+    const cuts = transientTrace(x, { ...BASE, range: 0, transient: 12 })
+    const deepest = Math.max(...cuts)
+    assert.ok(deepest >= want[0] && deepest <= want[1], `click at ${bandDb}: deepest cut ${deepest.toFixed(2)} dB`)
+    const peakBlock = cuts.indexOf(deepest)
+    const back = cuts.findIndex((c, i) => i > peakBlock && c < 0.1)
+    const ms = ((back - peakBlock) * 128 / SR) * 1000
+    assert.ok(back > 0 && ms < 30, `click at ${bandDb}: still cutting ${ms.toFixed(1)} ms later`)
+    // And the cut is on the click, not somewhere else: it peaks within 2 ms of it.
+    assert.ok(Math.abs(peakBlock * 128 - at) < 0.002 * SR + 128, `cut peaks ${((peakBlock * 128 - at) / SR * 1000).toFixed(1)} ms from the click`)
+  }
 })
 
-test('the acceleration limiter is stable: no drift, and it returns to exact silence', () => {
-  const P = { ...BASE, transient: 100 }
-  const n = noise(3 * SR, 0.7)
-  const { channelData: [y] } = run(n, P)
-  let mean = 0
-  for (const v of y) mean += v
-  mean /= y.length
-  assert.ok(Math.abs(mean) < 2e-3, `mean ${mean}`)
-  assert.ok(peak(y) < 1, `peak ${peak(y)}`)
+test('a steady or naturally rising S is left to the shelf', () => {
+  // 20 ms onset, 150 ms body: the shape of an ordinary S out of room tone.
+  const { x } = event(20, 150, 30, -20)
+  const off = run(x, { ...BASE, range: 0, transient: 0 }).channelData[0]
+  const on = run(x, { ...BASE, range: 0, transient: 12 }).channelData[0]
+  let eOff = 0, eOn = 0
+  for (let i = 1; i < x.length; i++) { eOff += (off[i] - off[i - 1]) ** 2; eOn += (on[i] - on[i - 1]) ** 2 }
+  const loss = 10 * Math.log10(eOn / eOff)
+  assert.ok(loss > -0.3, `a natural S lost ${loss.toFixed(2)} dB of top end to Transient 12`)
+})
 
-  const burst = new Float32Array(SR)
-  burst.set(sine(9000, 0.5, 4410))
-  const { channelData: [z] } = run(burst, P)
-  const last = z.findLastIndex(v => v !== 0)
-  assert.ok(last < 0.25 * SR, `still non-zero at ${(last / SR).toFixed(3)} s`)
+test('Transient stacks on the shelf: Range caps the shelf only', () => {
+  const { x } = event(0.05, 0.1, 0.3, -10)
+  // Threshold far below the click so the shelf sits on its 6 dB floor.
+  const P = { ...BASE, threshold: -30, range: 6 }
+  const k = new HFLimiterKernel(SR)
+  k.setParams(toKernelParams({ ...P, transient: 12 }))
+  const out = new Float32Array(128)
+  let deepest = 0
+  for (let off = 0; off + 128 <= x.length; off += 128) {
+    k.process([x.subarray(off, off + 128)], [out], 128)
+    const s = k.shelf.takeMinGain(), t = k.shelf.takeMinTransientGain()
+    deepest = Math.max(deepest, -20 * Math.log10(s * t))
+  }
+  assert.ok(deepest > 6 + 10, `combined cut ${deepest.toFixed(2)} dB never went past Range 6 by the Transient`)
+  assert.ok(deepest <= 6 + 12 + 0.01, `combined cut ${deepest.toFixed(2)} dB is past Range + Transient`)
+})
+
+test('the limiter never adds energy or raises the peak, whatever the settings', () => {
+  // The regression that retired the acceleration limiter: its correction was
+  // louder than an S, put +44 dB into 200–1000 Hz and raised the file peak.
+  const sounds = [event(20, 150, 30, -20).x, event(2, 150, 30, -20).x, event(0.05, 0.1, 0.3, -18).x,
+    add(sine(150, 0.4), sine(3000, 0.1), sine(9000, 0.05))]
+  // Shelf off with Transient on is the case that exposed it: the old stage
+  // raised the peak 4.5–6.9 dB and the band under ~350 Hz 7–9 dB there.
+  const settings = [{}, { range: 0, transient: 12 }, { range: 0, transient: 1 }, { transient: 12 }, { transient: 12, range: 24, threshold: -30 },
+    { shape: 'warm', transient: 12, tail: 300 }, { freq: 2000, transient: 6, threshold: -20 }]
+  const bandsOf = y => {
+    const lo = new Float64Array(y.length)
+    let a = 0
+    for (let i = 0; i < y.length; i++) { a += 0.05 * (y[i] - a); lo[i] = a } // one-pole ~350 Hz split
+    let eLo = 0, eHi = 0, pk = 0
+    for (let i = 0; i < y.length; i++) { eLo += lo[i] ** 2; eHi += (y[i] - lo[i]) ** 2; pk = Math.max(pk, Math.abs(y[i])) }
+    return { eLo, eHi, pk }
+  }
+  for (const x of sounds) {
+    const ref = bandsOf(x)
+    for (const p of settings) {
+      const { channelData: [y], latencySamples: L } = run(x, { ...BASE, ...p })
+      const got = bandsOf(y.subarray(L))
+      const tag = JSON.stringify(p)
+      assert.ok(got.pk <= ref.pk * 1.0001, `${tag}: peak rose ${db(got.pk / ref.pk).toFixed(3)} dB`)
+      assert.ok(got.eLo <= ref.eLo * 1.001, `${tag}: low band gained ${(10 * Math.log10(got.eLo / ref.eLo)).toFixed(3)} dB`)
+      assert.ok(got.eHi <= ref.eHi * 1.001, `${tag}: high band gained ${(10 * Math.log10(got.eHi / ref.eHi)).toFixed(3)} dB`)
+    }
+  }
 })
 
 test('stereo is gain-linked: a bright left turns the right down with it', () => {
@@ -197,7 +282,7 @@ test('stereo is gain-linked: a bright left turns the right down with it', () => 
 
 test('delta is exactly the input minus the output', () => {
   const x = add(sine(300, 0.3), sine(9000, 0.1))
-  const params = toKernelParams({ ...BASE, transient: 50 })
+  const params = toKernelParams({ ...BASE, transient: 6 })
   const ref = processHFLimiterBuffer([x], SR, params).channelData[0]
   const k = new HFLimiterKernel(SR)
   k.setParams(params)
@@ -216,12 +301,10 @@ test('the threshold follows the file\'s voice level, not the knob alone', () => 
   const quiet = toKernelParams({ ...HF_LIMITER_DEFAULTS, voiceLevelDb: -30 })
   const hot = toKernelParams({ ...HF_LIMITER_DEFAULTS, voiceLevelDb: -14 })
   assert.equal(hot.thresholdDb - quiet.thresholdDb, 16)
-  assert.equal(toKernelParams({ transient: 0 }).accel, false)
-  const t1 = toKernelParams({ transient: 1 })
-  const t100 = toKernelParams({ transient: 100 })
-  assert.ok(t1.accel && t100.accel)
-  assert.ok(t1.accelThresholdDb > t100.accelThresholdDb)
-  assert.equal(t100.accelThresholdDb, t100.thresholdDb)
+  assert.equal(toKernelParams({ transient: 0 }).transientDb, 0)
+  assert.equal(toKernelParams({ transient: 6 }).transientDb, 6)
+  assert.equal(toKernelParams({ transient: 40 }).transientDb, 12)
+  assert.equal(toKernelParams({ transient: -3 }).transientDb, 0)
 })
 
 // ── WARM shape and the two-stage release ────────────────────────────────────

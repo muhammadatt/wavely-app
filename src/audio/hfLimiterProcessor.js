@@ -1,17 +1,14 @@
 /**
  * HF Limiter — worklet kernel.
  *
- * Shelf → Accel, both from dsp/hfLimit.js (read that file for the design):
+ * One stage, from dsp/hfLimit.js (read that file for the design): a lookahead
+ * dynamic shelf that holds the band above the corner at the threshold, down to
+ * a Range floor — brightness and harshness, in the HiFal / Limiter 6 HF / Fatso
+ * family — with a TIGHT or WARM split, an optional Tail release stage, and a
+ * transient softener that deepens the same cut on sudden onsets (Transient,
+ * 0 = off). All of it is gain on one band, so there is nothing to oversample.
  *
- *   SHELF   a lookahead, linear-phase dynamic shelf that holds the band above the
- *           corner at the threshold, down to a Range floor — brightness and
- *           harshness, program-dependent, in the HiFal / Limiter 6 HF / Fatso
- *           treble-compression family.
- *   ACCEL   an acceleration limiter (Limen): a level limit that tightens at
- *           12 dB/oct, acting inside the cycle on the transients the shelf's
- *           gain is too slow for. Out while Transient is 0.
- *
- * Bit-transparent below both thresholds, and a constant latency (see
+ * Bit-transparent below threshold, and a constant latency (see
  * `hfLimiterLatencySamples`).
  *
  * This file is BOTH a normal ES module and an AudioWorklet module (registers
@@ -19,7 +16,7 @@
  * `?worker&url` like the others.
  */
 
-import { ShelfLimiterStage, AccelLimiterStage } from './dsp/hfLimit.js'
+import { ShelfLimiterStage } from './dsp/hfLimit.js'
 import { toKernelParams, HF_LIMITER_DEFAULTS } from './hfLimiterParams.js'
 
 export const HF_LIMITER_KERNEL_DEFAULTS = toKernelParams(HF_LIMITER_DEFAULTS)
@@ -30,12 +27,13 @@ const dbToLin = db => Math.exp(db * LN10_OVER_20)
 /** Meter posts every this many 128-sample quanta (~23 ms at 44.1 kHz). */
 const METER_QUANTA = 8
 
+const toDbCut = g => (g < 1 ? -20 * Math.log10(Math.max(g, 1e-6)) : 0)
+
 export class HFLimiterKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
     this.shelf = new ShelfLimiterStage(sampleRate)
-    this.accel = new AccelLimiterStage(sampleRate)
-    this.latencySamples = this.shelf.latencySamples + this.accel.latencySamples
+    this.latencySamples = this.shelf.latencySamples
     this.listen = 'off'
     this.dryDelays = []
     this.dry = []
@@ -53,11 +51,7 @@ export class HFLimiterKernel {
       releaseMs: p.releaseMs,
       shape: p.shape,
       tailMs: p.tailMs,
-    })
-    this.accel.setParams({
-      cornerHz: p.cornerHz,
-      thresholdLin: dbToLin(p.accelThresholdDb),
-      enabled: !!p.accel,
+      transientDb: p.transientDb,
     })
     this.outputLin = dbToLin(p.outputGainDb)
   }
@@ -94,7 +88,6 @@ export class HFLimiterKernel {
     if (delta) this._ensureDry(nOut)
 
     this.shelf.process(outputChannels, n)
-    this.accel.process(outputChannels, n)
 
     const g = this.outputLin
     for (let ch = 0; ch < nOut; ch++) {
@@ -115,13 +108,13 @@ export class HFLimiterKernel {
     }
   }
 
-  /** Meter readings since the last call: shelf depth dB (positive), accel activity 0–1. */
+  /** Meter readings since the last call: shelf and transient depth, dB (positive). */
   takeMeters() {
     const m = this.shelf.takeMinGain()
     return {
       reductionDb: m < 1 ? -20 * Math.log10(Math.max(m, 1e-6)) : 0,
       gainDb: this.shelf.gain < 1 ? 20 * Math.log10(Math.max(this.shelf.gain, 1e-6)) : 0,
-      accel: this.accel.takeActivity(),
+      transientDb: toDbCut(this.shelf.takeMinTransientGain()),
     }
   }
 }
