@@ -1,0 +1,186 @@
+/**
+ * HF Limiter — worklet kernel.
+ *
+ * Shelf → Accel, both from dsp/hfLimit.js (read that file for the design):
+ *
+ *   SHELF   a lookahead, linear-phase dynamic shelf that holds the band above the
+ *           corner at the threshold, down to a Range floor — brightness and
+ *           harshness, program-dependent, in the HiFal / Limiter 6 HF / Fatso
+ *           treble-compression family.
+ *   ACCEL   an acceleration limiter (Limen): a level limit that tightens at
+ *           12 dB/oct, acting inside the cycle on the transients the shelf's
+ *           gain is too slow for. Out while Transient is 0.
+ *
+ * Bit-transparent below both thresholds, and a constant latency (see
+ * `hfLimiterLatencySamples`).
+ *
+ * This file is BOTH a normal ES module and an AudioWorklet module (registers
+ * 'hf-limiter-processor'); it imports from ./dsp/, so its loader goes through
+ * `?worker&url` like the others.
+ */
+
+import { ShelfLimiterStage, AccelLimiterStage } from './dsp/hfLimit.js'
+import { toKernelParams, HF_LIMITER_DEFAULTS } from './hfLimiterParams.js'
+
+export const HF_LIMITER_KERNEL_DEFAULTS = toKernelParams(HF_LIMITER_DEFAULTS)
+
+const LN10_OVER_20 = Math.LN10 / 20
+const dbToLin = db => Math.exp(db * LN10_OVER_20)
+
+/** Meter posts every this many 128-sample quanta (~23 ms at 44.1 kHz). */
+const METER_QUANTA = 8
+
+export class HFLimiterKernel {
+  constructor(sampleRate) {
+    this.sampleRate = sampleRate
+    this.shelf = new ShelfLimiterStage(sampleRate)
+    this.accel = new AccelLimiterStage(sampleRate)
+    this.latencySamples = this.shelf.latencySamples + this.accel.latencySamples
+    this.listen = 'off'
+    this.dryDelays = []
+    this.dry = []
+    this.params = { ...HF_LIMITER_KERNEL_DEFAULTS }
+    this.setParams({})
+  }
+
+  setParams(partial) {
+    const p = { ...this.params, ...partial }
+    this.params = p
+    this.shelf.setParams({
+      cornerHz: p.cornerHz,
+      thresholdLin: dbToLin(p.thresholdDb),
+      floorLin: dbToLin(-Math.max(0, p.rangeDb)),
+      releaseMs: p.releaseMs,
+    })
+    this.accel.setParams({
+      cornerHz: p.cornerHz,
+      thresholdLin: dbToLin(p.accelThresholdDb),
+      enabled: !!p.accel,
+    })
+    this.outputLin = dbToLin(p.outputGainDb)
+  }
+
+  /** 'off' | 'delta' — delta is what was removed, for monitoring only. */
+  setListen(mode) {
+    this.listen = mode === 'delta' ? 'delta' : 'off'
+  }
+
+  _ensureDry(nCh) {
+    while (this.dryDelays.length < nCh) {
+      this.dryDelays.push(new Float64Array(Math.max(1, this.latencySamples)))
+      this.dry.push({ pos: 0 })
+    }
+  }
+
+  /**
+   * @param {Float32Array[]} inputChannels
+   * @param {Float32Array[]} outputChannels
+   * @param {number} n
+   */
+  process(inputChannels, outputChannels, n) {
+    const nIn = inputChannels.length
+    const nOut = outputChannels.length
+    if (nIn === 0 || n === 0) {
+      for (let ch = 0; ch < nOut; ch++) outputChannels[ch].fill(0, 0, n)
+      return
+    }
+    for (let ch = 0; ch < nOut; ch++) {
+      outputChannels[ch].set(inputChannels[ch < nIn ? ch : nIn - 1].subarray(0, n))
+    }
+    const delta = this.listen === 'delta'
+    // The delta needs the input aligned to the output; kept only while asked.
+    if (delta) this._ensureDry(nOut)
+
+    this.shelf.process(outputChannels, n)
+    this.accel.process(outputChannels, n)
+
+    const g = this.outputLin
+    for (let ch = 0; ch < nOut; ch++) {
+      const out = outputChannels[ch]
+      if (delta) {
+        const buf = this.dryDelays[ch]
+        const st = this.dry[ch]
+        const input = inputChannels[ch < nIn ? ch : nIn - 1]
+        for (let i = 0; i < n; i++) {
+          const d = buf[st.pos]
+          buf[st.pos] = input[i]
+          st.pos = st.pos + 1 === buf.length ? 0 : st.pos + 1
+          out[i] = d - out[i]
+        }
+      } else if (g !== 1) {
+        for (let i = 0; i < n; i++) out[i] *= g
+      }
+    }
+  }
+
+  /** Meter readings since the last call: shelf depth dB (positive), accel activity 0–1. */
+  takeMeters() {
+    const m = this.shelf.takeMinGain()
+    return {
+      reductionDb: m < 1 ? -20 * Math.log10(Math.max(m, 1e-6)) : 0,
+      gainDb: this.shelf.gain < 1 ? 20 * Math.log10(Math.max(this.shelf.gain, 1e-6)) : 0,
+      accel: this.accel.takeActivity(),
+    }
+  }
+}
+
+/**
+ * One-shot offline convenience: process a whole buffer through a fresh kernel.
+ * Used by tests and scripts; the app renders through an OfflineAudioContext
+ * running the worklet so preview and apply share one code path. The output is
+ * delayed by the kernel's latency, like the worklet's.
+ */
+export function processHFLimiterBuffer(channelData, sampleRate, kernelParams = {}) {
+  const kernel = new HFLimiterKernel(sampleRate)
+  kernel.setParams(kernelParams)
+  const n = channelData[0].length
+  const output = channelData.map(() => new Float32Array(n))
+  const BLOCK = 128
+  for (let off = 0; off < n; off += BLOCK) {
+    const len = Math.min(BLOCK, n - off)
+    kernel.process(
+      channelData.map(c => c.subarray(off, off + len)),
+      output.map(c => c.subarray(off, off + len)),
+      len,
+    )
+  }
+  return { channelData: output, latencySamples: kernel.latencySamples }
+}
+
+// ── AudioWorklet registration (worklet scope only) ──────────────────────────
+
+if (typeof registerProcessor === 'function') {
+  class HFLimiterWorkletProcessor extends AudioWorkletProcessor {
+    constructor(options) {
+      super()
+      this.kernel = new HFLimiterKernel(sampleRate)
+      if (options?.processorOptions?.params) {
+        this.kernel.setParams(options.processorOptions.params)
+      }
+      this.quanta = 0
+      this.port.onmessage = (e) => {
+        if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
+        else if (e.data?.type === 'listen') this.kernel.setListen(e.data.mode)
+      }
+    }
+
+    process(inputs, outputs) {
+      const input = inputs[0]
+      const output = outputs[0]
+      if (!output || output.length === 0) return true
+      const n = output[0].length
+      if (!input || input.length === 0) {
+        for (const ch of output) ch.fill(0)
+        return true
+      }
+      this.kernel.process(input, output, n)
+      if (++this.quanta >= METER_QUANTA) {
+        this.quanta = 0
+        this.port.postMessage({ type: 'gr', ...this.kernel.takeMeters() })
+      }
+      return true
+    }
+  }
+
+  registerProcessor('hf-limiter-processor', HFLimiterWorkletProcessor)
+}

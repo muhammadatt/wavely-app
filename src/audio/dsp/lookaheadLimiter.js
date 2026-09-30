@@ -46,7 +46,7 @@
  * sample can never be the minimum again while that sample is in the window,
  * so it is dropped.
  */
-class RunningMin {
+export class RunningMin {
   constructor(window) {
     this.window = window
     this.idx = new Int32Array(window + 1)
@@ -87,7 +87,7 @@ class RunningMin {
 }
 
 /** Boxcar average of a fixed length, via a running sum. */
-class Boxcar {
+export class Boxcar {
   constructor(length) {
     this.length = length
     this.buf = new Float64Array(length)

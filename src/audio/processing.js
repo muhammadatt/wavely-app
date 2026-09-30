@@ -35,6 +35,13 @@ import {
   toKernelParams as toHFSoftenerKernelParams,
   resoOn, resoKernelParams,
 } from './effects/hfSoftener.js'
+import { ensureHFLimiterWorklet } from './hfLimiterWorkletLoader.js'
+import {
+  HF_LIMITER_DEFAULTS,
+  HF_LIMITER_PREROLL_S,
+  hfLimiterLatencySamples,
+  toKernelParams as toHFLimiterKernelParams,
+} from './hfLimiterParams.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
@@ -925,6 +932,21 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
       processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
       latencySamples: HF_RESO_LATENCY_SAMPLES,
     }] : [],
+  })
+}
+
+/**
+ * Apply the HF Limiter to a region. Constant latency per sample rate (the
+ * accel stage is a delay of its own length while Transient is 0), and a
+ * pre-roll so the release starts where a playing preview's would be.
+ */
+export function applyHFLimiterRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureHFLimiterWorklet,
+    processorName: 'hf-limiter-processor',
+    kernelParams: toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params }),
+    latencySamples: hfLimiterLatencySamples(sampleRate),
+    preRollSamples: Math.round(HF_LIMITER_PREROLL_S * sampleRate),
   })
 }
 
