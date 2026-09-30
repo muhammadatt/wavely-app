@@ -69,12 +69,12 @@ export const SAT_BENCH_PREROLL_S = 0.5
 
 export const SAT_EMPH_MODES = ['reverse', 'off', 'opto']
 /**
- * OptoSmooth's emphasis pair as it ships: EMPHASIS_CORNER_HZ (2300) and
+ * Originally based on OptoSmooth's emphasis pair as it ships: EMPHASIS_CORNER_HZ (2300) and
  * EMPHASIS_MAX_DB (12) × EMPHASIS_DEFAULT (85) / 100. ⚠ COPIED, NOT IMPORTED:
  * la2aProcessor.js registers a worklet at module scope. A test pins the copy.
  */
 export const SAT_EMPH_CORNER_HZ = 2300
-export const SAT_EMPH_DB = 12 * 0.85
+export const SAT_EMPH_DB = 24 * 0.85
 export const SAT_MODES = ['voiced', 'full']
 
 /** Band edges. At or beyond these an edge is open — no filter at all. */
