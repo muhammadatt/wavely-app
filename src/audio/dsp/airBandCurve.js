@@ -39,4 +39,3 @@ export function airBandSections(sampleRate, gainDb) {
       : highShelf(sampleRate, b.freqHz, b.wOct, b.gRef * scale, 'octaves'),
   )
 }
-

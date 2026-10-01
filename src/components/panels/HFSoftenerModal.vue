@@ -547,4 +547,3 @@ async function applyAndClose() {
     </div>
   </FloatingWindow>
 </template>
-
