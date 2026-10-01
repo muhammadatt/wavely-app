@@ -10,6 +10,7 @@ import {
   toKernelParams, hfLimiterLatencySamples, HF_LIMITER_DEFAULTS,
 } from '../../src/audio/hfLimiterParams.js'
 import { shelfResponseDb, splitResponse, splitTaps } from '../../src/audio/dsp/hfLimit.js'
+import { SAT_LATENCY_SAMPLES, oddSatCurve } from '../../src/audio/dsp/oddSat.js'
 
 const SR = 44100
 
@@ -146,14 +147,16 @@ test('the split is unity at DC, half at the corner, and monotone at every depth'
   }
 })
 
-test('the latency does not move with Transient, and is the shelf\'s alone', () => {
+test('the latency does not move with Transient or Drive', () => {
   const L = hfLimiterLatencySamples(SR)
-  assert.equal(L, 3 * Math.round(0.001 * SR))
-  for (const transient of [0, 6, 12]) {
+  // The saturator's oversampler round trip, then the shelf's split and lookahead.
+  assert.equal(L, SAT_LATENCY_SAMPLES + 3 * Math.round(0.001 * SR))
+  for (const [transient, drive] of [[0, 0], [6, 0], [12, 0], [0, 15]]) {
     const x = new Float32Array(4096)
     x[100] = 0.001 // far below every threshold
-    const { channelData: [y] } = run(x, { ...BASE, transient })
-    assert.equal(y[100 + L], x[100], `transient ${transient}`)
+    const { channelData: [y] } = run(x, { ...BASE, transient, drive })
+    if (drive === 0) assert.equal(y[100 + L], x[100], `transient ${transient}`)
+    else assert.ok(Math.abs(y[100 + L] - x[100]) < 1e-6, `drive ${drive}: impulse at ${L} reads ${y[100 + L]}`)
   }
 })
 
@@ -422,4 +425,85 @@ test('the Tail never lets the gain overshoot the lookahead ceiling', () => {
   const p = peak(y, SR / 4)
   // Both tones sit above TIGHT's transition, so the output IS the band.
   assert.ok(p <= T * 1.0005, `peak ${db(p).toFixed(3)} dBFS over the −30 ceiling`)
+})
+
+
+// ── Drive: the odd-order saturator ahead of the shelf ──────────────────────
+
+/**
+ * Harmonic k of a steady tone at `f`, dB re the fundamental. Hann-weighted: an
+ * unwindowed span that is not a whole number of cycles leaks the fundamental
+ * ~63 dB down at 900 Hz, which read as a third-harmonic floor that was never there.
+ */
+function harmonicDbc(y, f, k, from, to) {
+  const amp = fr => {
+    let c = 0, s = 0
+    for (let i = from; i < to; i++) {
+      const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * (i - from)) / (to - from))
+      const ph = (2 * Math.PI * fr * i) / SR
+      c += w * y[i] * Math.cos(ph)
+      s += w * y[i] * Math.sin(ph)
+    }
+    return Math.hypot(c, s)
+  }
+  return db(amp(k * f) / amp(f))
+}
+
+const SAT = { ...BASE, range: 0 } // shelf out, so only the saturator acts
+
+test('Drive 0 leaves the audio untouched', () => {
+  const x = add(sine(200, 0.5), sine(3000, 0.2))
+  const { channelData: [y], latencySamples: L } = run(x, { ...SAT, drive: 0 })
+  for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
+})
+
+test('Drive is odd-dominant, with even harmonics about 15 dB under the odd', () => {
+  const f = 300
+  for (const drive of [9, 15]) {
+    const { channelData: [y], latencySamples: L } = run(sine(f, 0.3), { ...SAT, drive })
+    const h2 = harmonicDbc(y, f, 2, L + SR / 4, SR), h3 = harmonicDbc(y, f, 3, L + SR / 4, SR)
+    assert.ok(h3 > -60, `drive ${drive}: H3 ${h3.toFixed(1)} dBc — no saturation`)
+    assert.ok(h3 - h2 > 13 && h3 - h2 < 19, `drive ${drive}: H3 ${h3.toFixed(1)}, H2 ${h2.toFixed(1)} dBc`)
+  }
+})
+
+test('the distortion grows at the third-order rate, about 2 dB per dB', () => {
+  const f = 300, at = d => {
+    const { channelData: [y], latencySamples: L } = run(sine(f, 0.1), { ...SAT, drive: d })
+    return harmonicDbc(y, f, 3, L + SR / 4, SR)
+  }
+  const slope = (at(9) - at(3)) / 6
+  assert.ok(slope > 1.8 && slope < 2.2, `H3 grew ${slope.toFixed(2)} dB per dB of Drive`)
+})
+
+test('Drive never makes a sample louder, and leaves quiet material at its own level', () => {
+  for (let u = -8; u <= 8; u += 0.01) assert.ok(Math.abs(oddSatCurve(u)) <= Math.abs(u) + 1e-12, `curve at ${u.toFixed(2)}`)
+  const loud = add(sine(150, 0.5), sine(2000, 0.3), sine(7000, 0.1))
+  const { channelData: [y] } = run(loud, { ...SAT, drive: 24 })
+  // The asymmetry's DC is removed afterwards, which may move a peak by a hair.
+  assert.ok(peak(y) <= peak(loud) * 1.003, `peak ${db(peak(y) / peak(loud)).toFixed(3)} dB`)
+  const quiet = sine(1000, 0.003)
+  const { channelData: [q], latencySamples: L } = run(quiet, { ...SAT, drive: 24 })
+  const g = db(toneAmp(q, 1000, L + SR / 4, SR) / 0.003)
+  assert.ok(Math.abs(g) < 0.05, `a quiet tone moved ${g.toFixed(3)} dB at Drive 24`)
+})
+
+test('Drive follows the file: the same setting saturates a quiet file as much as a hot one', () => {
+  const f = 300
+  const at = (amp, voice) => {
+    const { channelData: [y], latencySamples: L } = run(sine(f, amp), { ...SAT, drive: 12, voiceLevelDb: voice })
+    return harmonicDbc(y, f, 3, L + SR / 4, SR)
+  }
+  const hot = at(0.3, -14), quiet = at(0.3 / 4, -14 - 12.04)
+  assert.ok(Math.abs(hot - quiet) < 0.2, `hot ${hot.toFixed(2)}, 12 dB quieter ${quiet.toFixed(2)} dBc`)
+})
+
+test('Drive is oversampled: a hard-driven 9 kHz tone leaves no aliases', () => {
+  const f = 9000
+  const { channelData: [y], latencySamples: L } = run(sine(f, 0.4), { ...SAT, drive: 24 })
+  // 3·9 kHz = 27 kHz would fold to 17.1 kHz at the base rate; 5·9 kHz to 0.9 kHz.
+  for (const alias of [SR - 3 * f, 5 * f - SR]) {
+    const a = harmonicDbc(y, f, alias / f, L + SR / 4, SR)
+    assert.ok(a < -60, `alias at ${alias.toFixed(0)} Hz: ${a.toFixed(1)} dBc`)
+  }
 })

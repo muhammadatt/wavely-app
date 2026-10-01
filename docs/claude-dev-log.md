@@ -5140,3 +5140,38 @@ INPUT drive and are odd-dominant (third-order growth, even ~15 dB down) — a
 symmetric soft clipper, not the even-leaning quartic OptoSmooth uses. Warmth is
 the dynamic shelf alone. One music clip; the Fatso's compressor state at Input 6
 is unknown.
+
+---
+
+## HF Limiter — Drive: a Fatso-style odd-order saturator ahead of the shelf (October 2026)
+
+Built from the harmonic analysis above (Input 6: odd −25 to −30 dB re output,
+even 14–18 dB under, third-order growth). `dsp/oddSat.js`, first in the
+kernel's chain.
+
+- **Curve:** `f(u) = tanh(k±·u)/k±`, `k± = 1 ± SAT_ASYMMETRY` by the sign of u.
+  Symmetric tanh gives the odd series and a cubic onset; the asymmetry gives
+  the even series. ⚠ An added `x²` term was the obvious way to get even
+  harmonics and was not used: it pushes one half past the input at every
+  level. Each half here is `tanh(k·u)/k`, which never exceeds |u|, so the stage
+  cannot make a sample louder. Its DC goes through a 5 Hz blocker on the
+  correction.
+- **Asymmetry 0.045**, calibrated on a sine: even 15.0 / 15.5 / 16.6 dB under
+  odd where H3 is −43 / −31 / −24 dBc, and both grow at the same third-order
+  rate (0.1 → −8 to −12 dB; 0.035 → −17 to −21).
+- **Level:** pre-gain `SAT_REF_DB + Drive − voiceLevelDb` (−30 dB reference),
+  output ÷ pre-gain: unity small-signal gain, file-relative like Threshold.
+- **Oversampling:** 4x (`COMPRESSOR_OVERSAMPLE`), correction only; dry path a
+  50-sample delay. Drive 0 = that delay alone (bit-exact, constant latency).
+- **Calibration against the Fatso Input 6 render** (true source, shelf out,
+  per-bin linear fit over frames, residual dB re output, 150–400 / 400–1k /
+  1–2.5k / 2.5–6k / 6–15k Hz):
+  Fatso −28.5 / −29.9 / −27.6 / −24.3 / −23.7, peak −2.55 dB, RMS 0.0;
+  Drive 12 −34.1 / −35.3 / −32.9 / −30.0 / −29.8, peak −1.89;
+  **Drive 15 −28.6 / −29.8 / −27.5 / −24.6 / −24.5, peak −3.30, RMS −0.32**;
+  Drive 18 −23.4 / −24.7 / −22.3 / −19.5 / −19.5, peak −5.33.
+  ~2 dB of residual per dB of Drive — the third-order law. The RMS difference
+  (Fatso 0.0) is probably its output makeup.
+- ⚠ A test first read the third harmonic flat at −63 dBc for Drive 3–9: the
+  measurement's unwindowed, non-integer-cycle span leaked the fundamental there.
+  Hann-weighted, H3 grows 1.8–2.2 dB per dB as the curve says.

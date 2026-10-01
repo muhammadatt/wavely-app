@@ -1,12 +1,14 @@
 /**
  * HF Limiter — worklet kernel.
  *
- * One stage, from dsp/hfLimit.js (read that file for the design): a lookahead
+ * Drive → Shelf. DRIVE is the odd-order saturator from dsp/oddSat.js — the
+ * Fatso's Input stage, 4x oversampled, a pure delay at 0. SHELF, from
+ * dsp/hfLimit.js (read that file for the design), is a lookahead
  * dynamic shelf that holds the band above the corner at the threshold, down to
  * a Range floor — brightness and harshness, in the HiFal / Limiter 6 HF / Fatso
  * family — with a TIGHT or WARM split, an optional Tail release stage, and a
  * transient softener that deepens the same cut on sudden onsets (Transient,
- * 0 = off). All of it is gain on one band, so there is nothing to oversample.
+ * 0 = off) — all gain on one band, so the shelf needs no oversampling.
  *
  * Bit-transparent below threshold, and a constant latency (see
  * `hfLimiterLatencySamples`).
@@ -17,6 +19,7 @@
  */
 
 import { ShelfLimiterStage } from './dsp/hfLimit.js'
+import { OddSaturatorStage } from './dsp/oddSat.js'
 import { toKernelParams, HF_LIMITER_DEFAULTS } from './hfLimiterParams.js'
 
 export const HF_LIMITER_KERNEL_DEFAULTS = toKernelParams(HF_LIMITER_DEFAULTS)
@@ -33,7 +36,8 @@ export class HFLimiterKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
     this.shelf = new ShelfLimiterStage(sampleRate)
-    this.latencySamples = this.shelf.latencySamples
+    this.sat = new OddSaturatorStage(sampleRate)
+    this.latencySamples = this.sat.latencySamples + this.shelf.latencySamples
     this.listen = 'off'
     this.dryDelays = []
     this.dry = []
@@ -53,6 +57,7 @@ export class HFLimiterKernel {
       tailMs: p.tailMs,
       transientDb: p.transientDb,
     })
+    this.sat.setParams({ driveLin: dbToLin(p.driveGainDb), enabled: !!p.drive })
     this.outputLin = dbToLin(p.outputGainDb)
   }
 
@@ -87,6 +92,7 @@ export class HFLimiterKernel {
     // The delta needs the input aligned to the output; kept only while asked.
     if (delta) this._ensureDry(nOut)
 
+    this.sat.process(outputChannels, n)
     this.shelf.process(outputChannels, n)
 
     const g = this.outputLin

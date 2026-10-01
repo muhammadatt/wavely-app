@@ -7,6 +7,7 @@
 
 import { ALIGN_TARGET_DBFS } from './dsp/inputAlign.js'
 import { shelfLatencySamples } from './dsp/hfLimit.js'
+import { SAT_LATENCY_SAMPLES } from './dsp/oddSat.js'
 
 export const HF_LIMITER_DEFAULTS = {
   freq: 5000, // Hz — where "bright" starts, for both the detector and the cut
@@ -20,6 +21,9 @@ export const HF_LIMITER_DEFAULTS = {
   // dB — the most the onset softener may add on top of the shelf; 0 is off.
   // It stacks: Range caps only the shelf.
   transient: 0,
+  // dB — the odd-order saturator AHEAD of the shelf (the Fatso's Input stage);
+  // 0 is off. Relative to the file's voice level, like Threshold.
+  drive: 0,
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured by the composable, never a
   // user setting — it is what makes a Threshold mean the same thing on a
@@ -38,6 +42,15 @@ export const TAIL_MIN_MS = 40
 export const TAIL_MAX_MS = 600
 
 export const TRANSIENT_MAX_DB = 12
+export const DRIVE_MAX_DB = 24
+
+/**
+ * Where Drive's scale sits: the saturator's pre-gain is
+ * SAT_REF_DB + Drive − voiceLevelDb, so the file's gated RMS reaches the curve
+ * at SAT_REF_DB + Drive. Calibrated against the Fatso's Input 6 render — see
+ * docs/claude-dev-log.md.
+ */
+export const SAT_REF_DB = -30
 
 /** Voice levels outside this are clamped: a near-silent file is not a voice. */
 const VOICE_LEVEL_MIN_DB = -60
@@ -63,16 +76,19 @@ export function toKernelParams(params) {
     // Below its minimum the Tail knob reads OFF, so it is off rather than clamped up.
     tailMs: p.tail >= TAIL_MIN_MS ? Math.min(p.tail, TAIL_MAX_MS) : 0,
     transientDb: clamp(p.transient > 0 ? p.transient : 0, 0, TRANSIENT_MAX_DB),
+    drive: p.drive > 0,
+    driveGainDb: SAT_REF_DB + clamp(p.drive > 0 ? p.drive : 0, 0, DRIVE_MAX_DB) - voice,
     outputGainDb: p.output,
   }
 }
 
 /**
- * Plugin latency, samples: the shelf's split centre plus its lookahead. Every
- * control acts on the same gain path, so no setting moves it.
+ * Plugin latency, samples: the saturator's oversampler round trip plus the
+ * shelf's split centre and lookahead. CONSTANT: the saturator stays a delay of
+ * its own length at Drive 0, so no setting moves the audio.
  */
 export function hfLimiterLatencySamples(sampleRate) {
-  return shelfLatencySamples(sampleRate)
+  return SAT_LATENCY_SAMPLES + shelfLatencySamples(sampleRate)
 }
 
 /**

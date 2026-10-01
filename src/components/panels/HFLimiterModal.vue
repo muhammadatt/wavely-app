@@ -2,6 +2,9 @@
 /**
  * HF Limiter.
  *
+ * DRIVE, first in the chain, is an odd-order saturator — the Fatso's Input
+ * stage: odd-dominant harmonics (even ~15 dB under), relative to the file's
+ * level; 0 is off. Drive 15 reproduced the Fatso's Input 6 render.
  * SHELF is a lookahead dynamic shelf that holds the band above FREQ at the
  * THRESHOLD (relative to the file's voice level), never deeper than RANGE, and
  * lets go over RELEASE — then, with TAIL up, over a slow second stage that only
@@ -22,7 +25,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { shelfResponseDb } from '../../audio/dsp/hfLimit.js'
 import {
   FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
-  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB,
+  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB, DRIVE_MAX_DB,
 } from '../../audio/hfLimiterParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
@@ -107,6 +110,7 @@ const SHAPE_OPTIONS = [
   { value: 'warm', label: 'WARM', title: 'A gentle 6 dB/oct split, the EL7 Fatso’s Warmth: the whole top end tilts down, starting an octave or more below Freq' },
 ]
 const fmtTransient = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
+const fmtDrive = v => (v <= 0 ? 'OFF' : `+${v.toFixed(1)}`)
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -257,8 +261,15 @@ async function applyAndClose() {
         </div>
       </div>
 
-      <div class="flex justify-center mt-[16px]">
-        <div class="flex flex-col items-center gap-[8px]">
+      <div class="flex justify-center items-end gap-[28px] mt-[16px]">
+        <div class="w-[80px]" title="Odd-order saturation BEFORE the limiter, like the EL7 Fatso's Input: rounds peaks and adds mostly third-harmonic warmth, even harmonics about 15 dB lower. Relative to the file's level, so a setting means the same on a quiet recording and a hot one; quiet material passes at its own level. Around 15 matches the Fatso at Input 6. 0 is off">
+          <Knob
+            :model-value="hflParams.drive" @update:model-value="v => syncParam('drive', v)"
+            :min="0" :max="DRIVE_MAX_DB" :step="0.5" :value-font-px="13"
+            label="Drive" :accent="ACCENT" :format-value="fmtDrive" :disabled="!hflPreview"
+          />
+        </div>
+        <div class="flex flex-col items-center gap-[8px] pb-[22px]">
           <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">SHAPE</span>
           <DeviceChoiceRocker
             :model-value="hflParams.shape" :options="SHAPE_OPTIONS" :accent="ACCENT"
@@ -272,8 +283,8 @@ async function applyAndClose() {
         class="mt-[16px] text-center"
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
-        Holds the top end at a ceiling: brightness and harshness on the shelf,
-        clicks and sharp onsets on Transient. Below the threshold it passes audio untouched.
+        Drive saturates first, then the top end is held at a ceiling: brightness
+        and harshness on the shelf, clicks and sharp onsets on Transient.
       </p>
     </div>
   </FloatingWindow>
