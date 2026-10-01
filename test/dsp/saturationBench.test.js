@@ -222,7 +222,7 @@ test('VOICED keeps an exciter out of sibilants and pauses; FULL excites the "s"'
   const x = voice.map((v, i) => v + floor[i] * 0.002)
   // The 3 kHz-up band's measured reference on this voice (see the calibration
   // test); the app measures it per file.
-  const p = { curve: 'tanh', driveDb: 22, emph: 'reverse', loHz: 3000, refPeakDb: -23 }
+  const p = { curve: 'tanh', driveDb: 27, emph: 'reverse', loHz: 3000, refPeakDb: -23 }
   const y0 = x
   const yv = render(x, sr, layers({ ...p, mode: 'voiced' }))
   const yf = render(x, sr, layers({ ...p, mode: 'full' }))
@@ -233,7 +233,9 @@ test('VOICED keeps an exciter out of sibilants and pauses; FULL excites the "s"'
   const gap = i => labels[i] === 0 && ((t(i) > 0.62 && t(i) < 0.7) || t(i) > 0.755)
   const vV = lift(yv, vow), sV = lift(yv, sib), sF = lift(yf, sib), gV = lift(yv, gap)
   assert.ok(vV > 1, `vowels brightened: ${vV.toFixed(2)} dB`)
-  assert.ok(sV < 0.3 && sF > sV + 0.5, `"s": voiced ${sV.toFixed(2)}, full ${sF.toFixed(2)} dB`)
+  // FULL's margin over VOICED on the "s" was +0.9 dB at ±10.2 dB emphasis; REV at ±20.4 dB takes the
+  // sibilants out before the curve too, so at +27 it is ~+0.3.
+  assert.ok(sV < 0.3 && sF > sV + 0.2, `"s": voiced ${sV.toFixed(2)}, full ${sF.toFixed(2)} dB`)
   assert.ok(Math.abs(gV) < 0.1, `pauses: ${gV.toFixed(3)} dB`)
 })
 
