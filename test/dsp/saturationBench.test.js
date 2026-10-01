@@ -8,13 +8,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   processSaturationBenchBuffer, SaturationBenchKernel, SAT_BENCH_LATENCY_SAMPLES, SAT_BENCH_MAX_LAYERS,
-  SAT_EMPH_CORNER_HZ, SAT_EMPH_DB, SAT_REF_CREST_DB, layerBand, normalizeLayer,
+  SAT_EMPH_CORNER_HZ, SAT_EMPH_DB, SAT_EMPH_Q, SAT_EMPH_TYPES, SAT_EMPH_QUICK, SAT_REF_CREST_DB,
+  emphasisSections, layerBand, layerBandSections, normalizeLayer, SAT_BAND_MIN_HZ,
 } from '../../src/audio/saturationBenchProcessor.js'
 import { measureBandSpectrum, bandRefPeakDb, voicingOffsetDb } from '../../src/audio/saturationBenchAnalysis.js'
 import { toKernelParams, SATURATION_BENCH_DEFAULTS, SAT_BENCH_LAYER_PRESETS } from '../../src/audio/saturationBenchParams.js'
 import { SHAPER_CURVES, SHAPER_REF_THD, sineThd, unitDriveU } from '../../src/audio/dsp/shaperCurves.js'
 import { EMPHASIS_CORNER_HZ, EMPHASIS_MAX_DB, EMPHASIS_DEFAULT } from '../../src/audio/la2aProcessor.js'
-import { BiquadCascade, highpass, lowpass, peaking } from '../../src/audio/dsp/biquad.js'
+import { BiquadCascade, highpass, lowpass, peaking, magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
 
 const L = SAT_BENCH_LATENCY_SAMPLES
 
@@ -191,6 +192,130 @@ test('emphasis: OPTO distorts the highs harder, REVERSE spares them (sine)', () 
   assert.ok(rev < off * 0.2, `5 kHz: reverse ${rev} vs off ${off}`)
 })
 
+test('emphasis: a legacy OPTO / REV / OFF layer migrates to the equivalent filter, bit for bit', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr, { seconds: 2 })
+  const base = { curve: 'tanh', driveDb: 12, mode: 'full', refPeakDb: -10 }
+  for (const [emph, db] of [['opto', SAT_EMPH_DB], ['reverse', -SAT_EMPH_DB], ['off', 0]]) {
+    const n = normalizeLayer({ emph })
+    assert.deepEqual([n.emphType, n.emphHz, n.emphQ, n.emphDb], ['hishelf', SAT_EMPH_CORNER_HZ, SAT_EMPH_Q, db])
+    const a = render(x, sr, layers({ ...base, emph }))
+    const b = render(x, sr, layers({ ...base, emphType: 'hishelf', emphHz: SAT_EMPH_CORNER_HZ, emphQ: SAT_EMPH_Q, emphDb: db }))
+    assert.deepEqual(a, b, emph)
+  }
+  // An explicit gain wins over a stale legacy string.
+  assert.equal(normalizeLayer({ emph: 'opto', emphDb: -3 }).emphDb, -3)
+})
+
+test('emphasis: every shape\'s de-emphasis is the exact inverse of its pre-emphasis', () => {
+  const sr = 44100
+  const freqs = [60, 150, 400, 1000, 2300, 5000, 9000, 15000, 20000]
+  for (const type of SAT_EMPH_TYPES) {
+    for (const [hz, q, db] of [[2300, SAT_EMPH_Q, 20.4], [800, 2.5, -14], [6000, 0.4, 24], [250, 4, 9]]) {
+      const { pre, de } = emphasisSections(type, hz, q, db, sr)
+      const a = magnitudeResponseDb(pre, freqs, sr)
+      const b = magnitudeResponseDb(de, freqs, sr)
+      for (let i = 0; i < freqs.length; i++) {
+        assert.ok(Math.abs(a[i] + b[i]) < 1e-6, `${type} ${hz}/${q}/${db} @ ${freqs[i]}: ${a[i]} + ${b[i]}`)
+      }
+    }
+  }
+})
+
+test('emphasis: 0 dB is off whatever the shape, frequency and Q, and the three shapes aim differently', () => {
+  const sr = 44100
+  const n = sr * 2
+  const tone = f0 => {
+    const x = new Float32Array(n)
+    for (let i = 0; i < n; i++) x[i] = Math.pow(10, -8 / 20) * Math.sin(2 * Math.PI * f0 * i / sr)
+    return x
+  }
+  const base = { curve: 'tanh', driveDb: 0, mode: 'full', refPeakDb: -8 }
+  const x = tone(200)
+  const off = render(x, sr, layers({ ...base, emphDb: 0 }))
+  for (const type of SAT_EMPH_TYPES) {
+    assert.deepEqual(render(x, sr, layers({ ...base, emphType: type, emphHz: 1234, emphQ: 3, emphDb: 0 })), off, type)
+  }
+  // The energy a layer adds on a 200 Hz tone: a low shelf and a bell on it push the tone into the
+  // curve; a high shelf well above it does not.
+  const added = (type, hz, db) => {
+    const y = render(x, sr, layers({ ...base, emphType: type, emphHz: hz, emphQ: 1, emphDb: db }))
+    let e = 0
+    for (let i = sr; i < n; i++) e += (y[i] - x[i]) * (y[i] - x[i])
+    return e
+  }
+  const e0 = added('hishelf', 2300, 0)
+  assert.ok(added('loshelf', 1000, 18) > e0 * 3, 'low shelf')
+  assert.ok(added('bell', 200, 18) > e0 * 3, 'bell')
+  assert.ok(added('hishelf', 2300, 18) < e0 * 1.5, 'high shelf leaves a 200 Hz tone alone')
+})
+
+test('emphasis: out-of-range values are clamped, and the quick buttons are the 2300 Hz pair', () => {
+  const n = normalizeLayer({ emphType: 'nope', emphHz: 1e9, emphQ: 0.001, emphDb: 99 })
+  assert.deepEqual([n.emphType, n.emphHz, n.emphQ, n.emphDb], ['hishelf', 16000, 0.3, 24])
+  assert.equal(SAT_EMPH_QUICK.opto.emphDb, -SAT_EMPH_QUICK.reverse.emphDb)
+  assert.deepEqual(Object.keys(SAT_EMPH_QUICK.off), ['emphDb'])
+})
+
+test('band: the Low knob opens at 1 Hz and its first step is gentle — no cliff off the bottom', () => {
+  assert.equal(SAT_BAND_MIN_HZ, 1)
+  assert.deepEqual(layerBand(1, 20000, 44100), { lo: null, hi: null })
+  assert.deepEqual(layerBand(2, 20000, 44100), { lo: 2, hi: null })
+  // The value is the real corner — no remap.
+  assert.deepEqual(layerBandSections(30, 20000, 44100)[0], highpass(44100, 30, Math.SQRT1_2))
+  const sr = 44100
+  const n = sr * 3
+  // A vowel-like stack with a syllable envelope: an even curve rectifies it and
+  // its added signal is mostly below 60 Hz, which the output-side filter takes.
+  const x = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const env = 0.5 + 0.5 * Math.sin(2 * Math.PI * 3 * i / sr)
+    let v = 0
+    for (let h = 1; h <= 12; h++) v += Math.sin(2 * Math.PI * 140 * h * i / sr) / h
+    x[i] = 0.18 * env * v
+  }
+  const layer = lo => ({
+    curve: 'quartic', driveDb: 0, loHz: lo, hiHz: 400, mode: 'full', refPeakDb: -12,
+    emphType: 'bell', emphHz: 350, emphQ: 0.5, emphDb: 24,
+  })
+  const addedRms = y => {
+    let e = 0
+    for (let i = sr; i < n - L; i++) e += (y[i] - x[i]) ** 2
+    return 10 * Math.log10(e / (n - L - sr))
+  }
+  const open = render(x, sr, layers(layer(1)))
+  // Open is no filter at all: identical to a layer that never set a Low edge.
+  const { loHz, ...noLow } = layer(1)
+  assert.deepEqual(render(x, sr, layers(noLow)), open)
+  const two = addedRms(render(x, sr, layers(layer(2))))
+  const twenty = addedRms(render(x, sr, layers(layer(20))))
+  assert.ok(Math.abs(two - addedRms(open)) < 1.5, `2 Hz: ${two} vs open ${addedRms(open)}`)
+  // What the first click used to be: a 20 Hz corner is a cliff on this material.
+  assert.ok(twenty < addedRms(open) - 4, `20 Hz: ${twenty} vs open ${addedRms(open)}`)
+})
+
+test('amount: scales only what the layer adds — 0 dB is bit-identical, +6 dB doubles the added signal', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr, { seconds: 2 })
+  const base = { curve: 'quartic', driveDb: 30, mode: 'full', refPeakDb: -10 }
+  const ref = render(x, sr, layers(base))
+  assert.deepEqual(render(x, sr, layers({ ...base, amountDb: 0 })), ref)
+  const up = render(x, sr, layers({ ...base, amountDb: 20 * Math.log10(2) }))
+  const down = render(x, sr, layers({ ...base, amountDb: -24 }))
+  let worstUp = 0, worstDown = 0, scale = 0
+  for (let i = sr; i < x.length - L; i++) {
+    const a = ref[i] - x[i]
+    worstUp = Math.max(worstUp, Math.abs((up[i] - x[i]) - 2 * a))
+    worstDown = Math.max(worstDown, Math.abs((down[i] - x[i]) - a * Math.pow(10, -24 / 20)))
+    scale = Math.max(scale, Math.abs(a))
+  }
+  assert.ok(scale > 1e-4, 'the layer must add something to scale')
+  assert.ok(worstUp < 1e-6, `+6 dB: ${worstUp}`)
+  assert.ok(worstDown < 1e-6, `-24 dB: ${worstDown}`)
+  assert.equal(normalizeLayer({ amountDb: 99 }).amountDb, 24)
+  assert.equal(normalizeLayer({}).amountDb, 0)
+})
+
 test('band: what a layer adds stays inside its band', () => {
   const sr = 44100
   const { x, labels } = makeRichSpeech(sr)
@@ -209,7 +334,7 @@ test('band: what a layer adds stays inside its band', () => {
 })
 
 test('band: open edges are no filter at all, and the band never closes', () => {
-  assert.deepEqual(layerBand(20, 20000, 44100), { lo: null, hi: null })
+  assert.deepEqual(layerBand(1, 20000, 44100), { lo: null, hi: null })
   assert.deepEqual(layerBand(3000, 20000, 44100), { lo: 3000, hi: null })
   const tight = layerBand(1000, 1000, 44100)
   assert.ok(tight.hi / tight.lo >= Math.pow(2, 1 / 3) - 1e-9, JSON.stringify(tight))
@@ -222,7 +347,7 @@ test('VOICED keeps an exciter out of sibilants and pauses; FULL excites the "s"'
   const x = voice.map((v, i) => v + floor[i] * 0.002)
   // The 3 kHz-up band's measured reference on this voice (see the calibration
   // test); the app measures it per file.
-  const p = { curve: 'tanh', driveDb: 22, emph: 'reverse', loHz: 3000, refPeakDb: -23 }
+  const p = { curve: 'tanh', driveDb: 27, emph: 'reverse', loHz: 3000, refPeakDb: -23 }
   const y0 = x
   const yv = render(x, sr, layers({ ...p, mode: 'voiced' }))
   const yf = render(x, sr, layers({ ...p, mode: 'full' }))
@@ -233,7 +358,9 @@ test('VOICED keeps an exciter out of sibilants and pauses; FULL excites the "s"'
   const gap = i => labels[i] === 0 && ((t(i) > 0.62 && t(i) < 0.7) || t(i) > 0.755)
   const vV = lift(yv, vow), sV = lift(yv, sib), sF = lift(yf, sib), gV = lift(yv, gap)
   assert.ok(vV > 1, `vowels brightened: ${vV.toFixed(2)} dB`)
-  assert.ok(sV < 0.3 && sF > sV + 0.5, `"s": voiced ${sV.toFixed(2)}, full ${sF.toFixed(2)} dB`)
+  // FULL's margin over VOICED on the "s" was +0.9 dB at ±10.2 dB emphasis; REV at ±20.4 dB takes the
+  // sibilants out before the curve too, so at +27 it is ~+0.3.
+  assert.ok(sV < 0.3 && sF > sV + 0.2, `"s": voiced ${sV.toFixed(2)}, full ${sF.toFixed(2)} dB`)
   assert.ok(Math.abs(gV) < 0.1, `pauses: ${gV.toFixed(3)} dB`)
 })
 

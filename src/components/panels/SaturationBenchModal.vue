@@ -15,19 +15,19 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
-import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import { SHAPER_CURVES } from '../../audio/dsp/shaperCurves.js'
 import {
-  SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ,
+  SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB, SAT_AMOUNT_MIN_DB, SAT_AMOUNT_MAX_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_BAND_HIGH_MIN_HZ,
+  SAT_EMPH_HZ_MIN, SAT_EMPH_HZ_MAX, SAT_EMPH_Q_MIN, SAT_EMPH_Q_MAX, SAT_EMPH_DB_MAX, SAT_EMPH_QUICK,
 } from '../../audio/saturationBenchProcessor.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
   sbLayers, sbPreview, sbDelta, sbInputLevels, sbOutputLevels,
-  togglePreview, toggleDelta, syncLayer, resetLayers, refreshSpectrum,
+  togglePreview, toggleDelta, syncLayer, syncLayerFields, resetLayers, refreshSpectrum,
   apply, teardown, closeModal,
 } = useSaturationBench()
 
@@ -52,12 +52,34 @@ const ON_OPTIONS = [
 
 const CURVE_OPTIONS = SHAPER_CURVES.map(c => ({ value: c.id, label: c.label, title: c.title }))
 
-// An ordered axis — how much of the highs goes INTO the curve — so a slide.
-const EMPH_OPTIONS = [
-  { value: 'reverse', label: 'REV', title: 'Highs pulled out before the curve, put back after. Lifts the harmonics a voice makes up top — an exciter’s setting' },
-  { value: 'off', label: 'OFF', title: 'No emphasis: the curve treats every frequency alike' },
-  { value: 'opto', label: 'OPTO', title: 'OptoSmooth’s pair: highs pushed into the curve, taken back out after. The smoothest on voices — its after-shelf trims the harmonics' },
+// Three KINDS of filter, not a progression — a detent rotary, like the curves.
+const EMPH_TYPE_OPTIONS = [
+  { value: 'hishelf', label: 'HI SHELF', title: 'Everything above the corner goes into the curve harder (or softer, at negative gain). OPTO and REV are this shape' },
+  { value: 'bell', label: 'BELL', title: 'One region around the frequency — a formant or the sibilant band — goes into the curve harder or softer' },
+  { value: 'loshelf', label: 'LO SHELF', title: 'Everything below the corner goes into the curve harder (or softer, at negative gain)' },
 ]
+
+// One-click settings that fill the three knobs. OFF only zeroes the gain, so
+// the shape you dialled survives a toggle.
+const EMPH_QUICK = [
+  { id: 'reverse', label: 'REV', title: 'Highs pulled out before the curve, put back after: 2300 Hz high shelf at −20.4 dB. Lifts the harmonics a voice makes up top — an exciter’s setting' },
+  { id: 'off', label: 'OFF', title: 'No emphasis: the curve treats every frequency alike. Keeps the frequency, Q and shape' },
+  { id: 'opto', label: 'OPTO', title: 'OptoSmooth’s pair: 2300 Hz high shelf at +20.4 dB, highs pushed into the curve and taken back out after. The smoothest on voices' },
+]
+
+function quickActive(l, id) {
+  if (id === 'off') return l.emphDb === 0
+  const q = SAT_EMPH_QUICK[id]
+  return l.emphType === q.emphType && l.emphHz === q.emphHz && l.emphQ === q.emphQ && l.emphDb === q.emphDb
+}
+
+function formatEmphDb(v) {
+  return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
+}
+
+function formatQ(v) {
+  return v.toFixed(2)
+}
 
 const MODE_OPTIONS = [
   { value: 'voiced', label: 'VOICED', title: 'Shape vowels only: the layer fades out as each S arrives and stays out of pauses' },
@@ -66,6 +88,10 @@ const MODE_OPTIONS = [
 
 function formatDrive(v) {
   return `${v > 0 ? '+' : ''}${v.toFixed(0)}`
+}
+
+function formatAmount(v) {
+  return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 }
 
 function formatHz(v) {
@@ -112,7 +138,7 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
   <FloatingWindow
     window-id="saturation-bench"
     :z="z"
-    :width="1000"
+    :width="1410"
     :accent="ACCENT"
     brand-lead="SATURATION"
     brand-tail="BENCH"
@@ -176,6 +202,18 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
             <span :style="CAPTION">dB · MATCHED</span>
           </div>
 
+          <div class="w-[88px] flex flex-col items-center">
+            <Knob
+              :model-value="layer.amountDb"
+              @update:model-value="v => syncLayer(k, 'amountDb', v)"
+              :min="SAT_AMOUNT_MIN_DB" :max="SAT_AMOUNT_MAX_DB" :step="0.5" bipolar
+              label="Amount" :accent="ACCENT" :format-value="formatAmount" :value-font-px="16"
+              :disabled="!sbPreview || !layer.on"
+              title="Level of what this layer adds — the clean signal is never touched. Drive sets how hard the curve bends; Amount sets how loud its result is. Use it when Drive has run out: the Quartic stops growing past about +15 dB of drive."
+            />
+            <span :style="CAPTION">dB · ADDED</span>
+          </div>
+
           <div class="w-[100px] flex flex-col items-center">
             <Knob
               :model-value="layer.loHz"
@@ -183,7 +221,7 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
               :min="SAT_BAND_MIN_HZ" :max="SAT_BAND_MAX_HZ" scale="log" :quantize="quantizeHz"
               label="Low" :accent="ACCENT" :format-value="formatHz" :value-font-px="16"
               :disabled="!sbPreview || !layer.on"
-              title="Bottom of the band this layer saturates. Fully down is open — no high-pass."
+              title="Bottom of the band this layer saturates. Fully down (1 Hz) is open — no high-pass; the next step is a 2 Hz corner, so leaving open is gentle. The value is the real corner."
             />
             <span :style="CAPTION">{{ bandCaption(layer) }}</span>
           </div>
@@ -192,7 +230,7 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
             <Knob
               :model-value="layer.hiHz"
               @update:model-value="v => syncLayer(k, 'hiHz', v)"
-              :min="SAT_BAND_MIN_HZ" :max="SAT_BAND_MAX_HZ" scale="log" :quantize="quantizeHz"
+              :min="SAT_BAND_HIGH_MIN_HZ" :max="SAT_BAND_MAX_HZ" scale="log" :quantize="quantizeHz"
               label="High" :accent="ACCENT" :format-value="formatHz" :value-font-px="16"
               :disabled="!sbPreview || !layer.on"
               title="Top of the band this layer saturates. Fully up is open — no low-pass. What the curve adds is band-passed again, so nothing it makes leaves the band."
@@ -200,13 +238,59 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
             <span :style="CAPTION">&nbsp;</span>
           </div>
 
-          <div class="flex flex-col items-center gap-[8px]">
+          <div class="w-[96px] flex flex-col items-center gap-[6px]">
             <span :style="LABEL">EMPH</span>
-            <DeviceTravelSlide
-              :model-value="layer.emph" :options="EMPH_OPTIONS" :accent="ACCENT" :width="132"
-              :disabled="!sbPreview || !layer.on" :label="`Layer ${k + 1} emphasis`"
-              @update:model-value="v => syncLayer(k, 'emph', v)"
+            <DeviceDetentRotary
+              :model-value="layer.emphType" :options="EMPH_TYPE_OPTIONS" :accent="ACCENT"
+              :disabled="!sbPreview || !layer.on" :label="`Layer ${k + 1} emphasis shape`" :show-label="false"
+              @update:model-value="v => syncLayer(k, 'emphType', v)"
             />
+            <div class="flex gap-[3px]">
+              <button
+                v-for="q in EMPH_QUICK" :key="q.id" type="button" class="sb-quick"
+                :class="{ 'sb-quick-on': quickActive(layer, q.id) }"
+                :disabled="!sbPreview || !layer.on" :title="q.title"
+                @click="syncLayerFields(k, SAT_EMPH_QUICK[q.id])"
+              >
+                {{ q.label }}
+              </button>
+            </div>
+          </div>
+
+          <div class="w-[88px] flex flex-col items-center">
+            <Knob
+              :model-value="layer.emphHz"
+              @update:model-value="v => syncLayer(k, 'emphHz', v)"
+              :min="SAT_EMPH_HZ_MIN" :max="SAT_EMPH_HZ_MAX" scale="log" :quantize="quantizeHz"
+              label="Freq" :accent="ACCENT" :format-value="formatHz" :value-font-px="16"
+              :disabled="!sbPreview || !layer.on"
+              title="Corner of the shelf, or centre of the bell, that the curve sees emphasised."
+            />
+            <span :style="CAPTION">EMPH · HZ</span>
+          </div>
+
+          <div class="w-[88px] flex flex-col items-center">
+            <Knob
+              :model-value="layer.emphQ"
+              @update:model-value="v => syncLayer(k, 'emphQ', v)"
+              :min="SAT_EMPH_Q_MIN" :max="SAT_EMPH_Q_MAX" :step="0.05" scale="log"
+              label="Q" :accent="ACCENT" :format-value="formatQ" :value-font-px="16"
+              :disabled="!sbPreview || !layer.on"
+              title="Width of the bell, or the steepness of the shelf's bend (0.71 is the plain, flat shelf)."
+            />
+            <span :style="CAPTION">&nbsp;</span>
+          </div>
+
+          <div class="w-[88px] flex flex-col items-center">
+            <Knob
+              :model-value="layer.emphDb"
+              @update:model-value="v => syncLayer(k, 'emphDb', v)"
+              :min="-SAT_EMPH_DB_MAX" :max="SAT_EMPH_DB_MAX" :step="0.5" bipolar
+              label="Gain" :accent="ACCENT" :format-value="formatEmphDb" :value-font-px="16"
+              :disabled="!sbPreview || !layer.on"
+              title="Positive pushes this region into the curve harder (OPTO), negative pulls it out (REV), 0 is off. The same filter at the opposite gain undoes it after the curve, so nothing outside what the curve adds changes. On a high band it acts mostly as a drive offset."
+            />
+            <span :style="CAPTION">dB · INTO CURVE</span>
           </div>
 
           <div class="flex flex-col items-center gap-[8px]">
@@ -251,6 +335,30 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
 .sb-reset:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.7);
+}
+.sb-quick {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 9999px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.45);
+  font: 600 8.5px 'JetBrains Mono', monospace;
+  letter-spacing: 0.06em;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.sb-quick:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+.sb-quick-on {
+  border-color: #e89a6f;
+  color: #e89a6f;
+}
+.sb-quick:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .sb-reset:disabled {
   opacity: 0.4;
