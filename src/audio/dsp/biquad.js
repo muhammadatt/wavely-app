@@ -129,6 +129,48 @@ export function highpass(sampleRate, freqHz, q = Math.SQRT1_2) {
 }
 
 /**
+ * Second-order all-pass (RBJ). Flat magnitude, phase only.
+ *
+ * The numerator is the denominator reversed (b0 = a2, b1 = a1, b2 = 1), which
+ * is what makes |H| = 1 at every frequency — tests assert that relationship
+ * directly rather than only measuring the response.
+ */
+export function allpass(sampleRate, freqHz, q = Math.SQRT1_2) {
+  const w0 = (2 * Math.PI * freqHz) / sampleRate
+  const cosW0 = Math.cos(w0)
+  const alpha = Math.sin(w0) / (2 * q)
+  return normalise(1 - alpha, -2 * cosW0, 1 + alpha, 1 + alpha, -2 * cosW0, 1 - alpha)
+}
+
+/**
+ * Group delay of a cascade at one frequency, in seconds.
+ *
+ * −dφ/dω by central difference on the unwrapped phase of H(e^jω). Analytic
+ * enough for the ceilings it is used to assert, and it needs no FFT, so a
+ * worklet can check its own budget at construction.
+ */
+export function groupDelaySeconds(sections, freqHz, sampleRate) {
+  const dw = 1e-4
+  const w = (2 * Math.PI * freqHz) / sampleRate
+  const phase = (ww) => {
+    let ph = 0
+    for (const { b0, b1, b2, a1, a2 } of sections) {
+      const nr = b0 + b1 * Math.cos(ww) + b2 * Math.cos(2 * ww)
+      const ni = -b1 * Math.sin(ww) - b2 * Math.sin(2 * ww)
+      const dr = 1 + a1 * Math.cos(ww) + a2 * Math.cos(2 * ww)
+      const di = -a1 * Math.sin(ww) - a2 * Math.sin(2 * ww)
+      ph += Math.atan2(ni, nr) - Math.atan2(di, dr)
+    }
+    return ph
+  }
+  let d = phase(w + dw) - phase(w - dw)
+  // Each section's atan2 pair can wrap independently; the true step over 2·dw
+  // is tiny, so any multiple of 2π in the difference is a wrap, not delay.
+  d -= 2 * Math.PI * Math.round(d / (2 * Math.PI))
+  return -d / (2 * dw) / sampleRate
+}
+
+/**
  * Constant-skirt-gain bandpass (RBJ, peak gain = Q).
  *
  * Only used for solo monitoring in the manual EQ, where the point is to hear

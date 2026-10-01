@@ -290,6 +290,41 @@ const PEAK_SPACING_CAP_BINS = 64
 const PEAK_SPACING_MARGIN = 1.25
 const PEAK_REF_FLOOR_FACTOR = 8
 /** Reference width in octaves at Sharpness 0 and 1 — the detection scale. */
+// Voiced-frame threshold FLOOR (`voicedSelectivityFloorDb`, off by default):
+// on a frame whose low/mid energy leads its sibilance band, the threshold is
+// raised to at least the floor, crossfaded over ±XFADE around LEAD. What it is
+// for: a peak reference measures how a spectrum BENDS, and a vowel whose top
+// plateaus and then rolls off steeply bends like a resonance at the edge —
+// one narrator lost 6.8 dB at 8–12 kHz of vowel to it. A single frame cannot
+// tell that edge from a faint ring at the same level; the frame's voicing can
+// tell it from an "s". See the HF Softener's Reso stage, the one caller.
+const VOICED_LM_LO_HZ = 200
+const VOICED_LM_HI_HZ = 3000
+const VOICED_HF_LO_HZ = 4500
+const VOICED_HF_HI_HZ = 12000
+const VOICED_LEAD_DB = 6
+// Tilt-scaled lisp guard (`lispGuardTiltDb` [flat, peaked] + `lispGuardTiltRelaxDb`,
+// off by default). The level guard's floor relaxes by up to the relax depth as
+// the frame's 5–10 kHz-over-2–4 kHz tilt falls from peaked to flat — the HF
+// Softener's own rule — so a flat /f/ is not held to a floor set for /s/.
+// ⚠ A FIXED 6 dB DEPTH CAP SHIPPED BEFORE THIS and was dropped when Reso moved
+// AFTER the softener's cut: there the voice-relative guard reads an "s" the
+// softener has already turned down, so it leaves Reso little on all but the
+// hottest — relative, where a fixed cap took the same 6 dB from every "s".
+// Tilt bands are the HF Softener's lisp-guard tilt.
+const TILT_MID_LO_HZ = 2000
+const TILT_MID_HI_HZ = 4000
+const TILT_HF_LO_HZ = 5000
+const TILT_HF_HI_HZ = 10000
+// Lisp guard's held voice level, per frame: the HF Softener's 15 ms attack and
+// 500 ms hold, so the two guards judge an "s" against the same vowel.
+const GUARD_VOICE_ATTACK_MS = 15
+const GUARD_VOICE_HOLD_MS = 500
+// Added to the guard's cap on a voiced frame, scaled by the voicing weight:
+// larger than any max cut, so a fully voiced frame is unguarded.
+const GUARD_VOICED_RELIEF_DB = 96
+const VOICED_XFADE_DB = 3
+
 const PEAK_REF_OCT_COARSE = 3.0
 const PEAK_REF_OCT_FINE = 1.2
 /**
@@ -708,6 +743,17 @@ export class ResonanceKernel {
 
     this.softKnee = p.mode !== 'hard'
     this.refMode = p.refMode === 'peak' ? 'peak' : 'cepstral'
+    // Off (0) for ResoTame itself; the HF Softener's Reso stage sets it.
+    this.voicedFloorDb = Math.max(0, Number(p.voicedSelectivityFloorDb) || 0)
+    // Lisp guard (off for ResoTame itself — the HF Softener's Reso stage sets
+    // it): no frame's cut may take the 4.5–12 kHz band below the HELD voice
+    // level + this floor. See GUARD_* below.
+    this.guardFloorDb = Number.isFinite(p.lispGuardFloorDb) ? p.lispGuardFloorDb : null
+    // Tilt scaling for that floor (off for ResoTame itself). See TILT_* below.
+    this.guardTilt = Array.isArray(p.lispGuardTiltDb) ? p.lispGuardTiltDb : null
+    this.guardTiltRelaxDb = Number.isFinite(p.lispGuardTiltRelaxDb) ? p.lispGuardTiltRelaxDb : 0
+    this.guardAttack = 1 - Math.exp(-this.frameRateMs / GUARD_VOICE_ATTACK_MS)
+    this.guardRelease = 1 - Math.exp(-this.frameRateMs / GUARD_VOICE_HOLD_MS)
 
     /**
      * HARMONIC PROTECTION MEANS SOMETHING DIFFERENT UNDER EACH REFERENCE, and
@@ -967,6 +1013,7 @@ export class ResonanceKernel {
     this.detStft?.reset()
     this.f0.reset()
     this.prevGr.fill(0)
+    this.guardVoice = 0
     this.frameIndex = 0
     this.maskCache.clear()
     this.hasDisplayFrame = false
@@ -1333,9 +1380,56 @@ export class ResonanceKernel {
       softKnee, kneeWidth, zoneDepth, zoneSelectivity, zoneMaxCut,
     } = this
 
+    const voicedFloor = this.voicedFloorDb
+    const guardFloor = this.guardFloorDb
+    const guardTilt = guardFloor !== null ? this.guardTilt : null
+    const voicing = voicedFloor > 0 || guardFloor !== null
+    let lmPow = 0
+    let hfPow = 0
+    let tiltMid = 0
+    let tiltHf = 0
+    const bw = this.binWidth
     for (let k = 0; k < binCount; k++) {
       const mag = Math.hypot(specRe[k], specIm[k])
       magDb[k] = 20 * Math.log10(mag + MAG_EPS)
+      if (voicing) {
+        const f = k * bw
+        const pw = mag * mag
+        if (f >= VOICED_LM_LO_HZ && f < VOICED_LM_HI_HZ) lmPow += pw
+        else if (f >= VOICED_HF_LO_HZ && f < VOICED_HF_HI_HZ) hfPow += pw
+        if (f >= TILT_MID_LO_HZ && f < TILT_MID_HI_HZ) tiltMid += pw
+        else if (f >= TILT_HF_LO_HZ && f < TILT_HF_HI_HZ) tiltHf += pw
+      }
+    }
+    // Voicing weight of this frame, 0–1: low/mid over the sibilance band, a
+    // soft crossover so a frame on the boundary is not flipped by ripple.
+    let wv = 0
+    if (voicing) {
+      const lead = 10 * Math.log10((lmPow + 1e-30) / (hfPow + 1e-30)) - VOICED_LEAD_DB
+      wv = lead <= -VOICED_XFADE_DB ? 0 : lead >= VOICED_XFADE_DB ? 1 : (lead + VOICED_XFADE_DB) / (2 * VOICED_XFADE_DB)
+    }
+    // Lisp guard: the most this frame may take, dB. The voice level is held
+    // (fast attack, slow let-go) so a sibilant is judged against the vowel
+    // before it, not against its own low/mid, which is nearly nothing.
+    let guardCap = Infinity
+    if (guardFloor !== null) {
+      const v = this.guardVoice ?? 0
+      this.guardVoice = v + (lmPow > v ? this.guardAttack : this.guardRelease) * (lmPow - v)
+      // Tilt-scaled floor: full for a peaked /s/, relaxed for a flat /f/.
+      let floor = guardFloor
+      if (guardTilt !== null) {
+        const tilt = 10 * Math.log10((tiltHf + 1e-30) / (tiltMid + 1e-30))
+        const [lo, hi] = guardTilt
+        const wt = tilt <= lo ? 0 : tilt >= hi ? 1 : (tilt - lo) / (hi - lo)
+        floor -= (1 - wt) * this.guardTiltRelaxDb
+      }
+      const allowed = 10 * Math.log10((hfPow + 1e-30) / (this.guardVoice + 1e-30)) - floor
+      guardCap = allowed > 0 ? allowed : 0
+      // Only where a lisp can happen: on a voiced frame the guard would forbid
+      // any cut at all — a vowel's top end sits far below its own low/mid —
+      // and ring removal is exactly what those frames are for. Voiced frames
+      // are already held at the ring-only threshold, so they cannot lisp.
+      guardCap += wv * GUARD_VOICED_RELIEF_DB
     }
 
     // Pitch drives both the lifter cutoff and the protection mask, so it is
@@ -1448,7 +1542,9 @@ export class ResonanceKernel {
       }
       // Threshold and knee come from the zone this bin falls in. DEPTH DOES
       // NOT APPLY HERE — it is applied once, after the spread. See below.
-      const above = detect[k] - envDb[k] - zoneSelectivity[k]
+      const sel = zoneSelectivity[k]
+      const floorLift = voicedFloor > sel ? wv * (voicedFloor - sel) : 0
+      const above = detect[k] - envDb[k] - sel - floorLift
       if (above <= 0) {
         reduction[k] = 0
         continue
@@ -1529,7 +1625,7 @@ export class ResonanceKernel {
     // number spent on sibilance is a lisp.
     for (let k = 0; k < binCount; k++) {
       const r = reduction[k] * zoneDepth[k]
-      const ceiling = zoneMaxCut[k]
+      const ceiling = zoneMaxCut[k] < guardCap ? zoneMaxCut[k] : guardCap
       reduction[k] = r > ceiling ? ceiling : r
     }
 

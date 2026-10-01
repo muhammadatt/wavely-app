@@ -28,27 +28,11 @@
  * gains all scale from one knob. Zero latency.
  */
 
-import { peaking, highShelf, BiquadCascade } from './dsp/biquad.js'
+import { BiquadCascade } from './dsp/biquad.js'
+import { AIR_BANDS as BANDS, airBandSections } from './dsp/airBandCurve.js'
 
-// Per-band gains are quoted at this plateau and scaled linearly from it, so
-// the fitted constants below stay identical to server/pipeline/airBoost.js.
-const REFERENCE_PLATEAU_DB = 12.5932
-
-const BANDS = [
-  // Parametric bells, Q = 0.5. The 2.4/4.8/9.6 kHz gains are negative: they
-  // are corrective shaping that pulls the shelf's broad plateau down into the
-  // Maag's slower sigmoid, not audible cuts. The summed response is
-  // non-negative at every frequency.
-  { freqHz: 600, type: 'bell', q: 0.5, gRef: -0.02733 },
-  { freqHz: 1200, type: 'bell', q: 0.5, gRef: -0.30754 },
-  { freqHz: 2400, type: 'bell', q: 0.5, gRef: -1.18676 },
-  { freqHz: 4800, type: 'bell', q: 0.5, gRef: -0.90883 },
-  { freqHz: 9600, type: 'bell', q: 0.5, gRef: 0.91883 },
-  // Wide high shelf carrying the bulk of the lift. 3.023 octaves ≈ Q 0.4 —
-  // far gentler than the S = 1 a stock BiquadFilterNode highshelf would give,
-  // which is why the coefficients are built here rather than delegated.
-  { freqHz: 14000, type: 'shelf', wOct: 3.023, gRef: 22.54678 },
-]
+// Re-exported: the Air Boost panel draws its curve from here.
+export { airBandSections }
 
 export const AIR_BAND_KERNEL_DEFAULTS = {
   gainDb: 6, // matches the acx_audiobook preset's airBoost.gainDb
@@ -59,16 +43,6 @@ const LN10_OVER_20 = Math.LN10 / 20
 
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
-}
-
-/** Band coefficients for a given air gain — shared with the curve display. */
-export function airBandSections(sampleRate, gainDb) {
-  const scale = gainDb / REFERENCE_PLATEAU_DB
-  return BANDS.map(b =>
-    b.type === 'bell'
-      ? peaking(sampleRate, b.freqHz, b.q, b.gRef * scale, 'q')
-      : highShelf(sampleRate, b.freqHz, b.wOct, b.gRef * scale, 'octaves'),
-  )
 }
 
 export class AirBandKernel {
