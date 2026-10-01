@@ -22,7 +22,6 @@ export function guardToFloorDb(guard) {
   const g = Math.min(100, Math.max(0, Number(guard) || 0))
   return GUARD_FLOOR_LOOSE_DB + (g / 100) * (GUARD_FLOOR_STRICT_DB - GUARD_FLOOR_LOOSE_DB)
 }
-
 /** The Guard amount, honouring the retired boolean (`lispGuard: false` = 0). */
 export function guardOf(params) {
   if (params.lispGuard === false) return 0
@@ -95,4 +94,3 @@ export function resoKernelParams(params) {
     guardShiftDb: guardToFloorDb(g) - HF_SOFTENER_TUNING.lispGuardFloorDb,
   })
 }
-

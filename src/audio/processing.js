@@ -23,6 +23,12 @@ import {
   toKernelParams as toSoftClipperKernelParams,
 } from './effects/softClipper.js'
 import { ensureAirBandWorklet } from './airBandWorkletLoader.js'
+import { ensureSaturationBenchWorklet } from './saturationBenchWorkletLoader.js'
+import {
+  SATURATION_BENCH_DEFAULTS,
+  toKernelParams as toSaturationBenchKernelParams,
+} from './effects/saturationBench.js'
+import { SAT_BENCH_LATENCY_SAMPLES, SAT_BENCH_PREROLL_S } from './saturationBenchProcessor.js'
 import {
   AIR_BAND_DEFAULTS,
   toKernelParams as toAirBandKernelParams,
@@ -905,6 +911,21 @@ export function applyAirBandRegion(segments, start, end, params, sampleRate, cha
     ensureWorklet: ensureAirBandWorklet,
     processorName: 'air-band-processor',
     kernelParams: toAirBandKernelParams({ ...AIR_BAND_DEFAULTS, ...params }),
+  })
+}
+
+/**
+ * Apply Saturation Bench to a region. Its latency is constant (every layer
+ * slot delays, on or off) and is trimmed; the pre-roll settles the voicing
+ * detector and the band filters.
+ */
+export function applySaturationBenchRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureSaturationBenchWorklet,
+    processorName: 'saturation-bench-processor',
+    kernelParams: toSaturationBenchKernelParams({ ...SATURATION_BENCH_DEFAULTS, ...params }),
+    latencySamples: SAT_BENCH_LATENCY_SAMPLES,
+    preRollSamples: Math.round(SAT_BENCH_PREROLL_S * sampleRate),
   })
 }
 
