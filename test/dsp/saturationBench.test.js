@@ -158,9 +158,11 @@ test('drive follows the reference peak dB for dB: level-invariant', () => {
   assert.ok(worst < 1e-5, `worst ${worst}`)
 })
 
-test('emphasis: OPTO is OptoSmooth’s shipping pair, copied not imported', () => {
+test('emphasis: the corner is OptoSmooth’s (copied not imported), the depth is deliberately twice its', () => {
   assert.equal(SAT_EMPH_CORNER_HZ, EMPHASIS_CORNER_HZ)
-  assert.equal(SAT_EMPH_DB, EMPHASIS_MAX_DB * EMPHASIS_DEFAULT / 100)
+  // Set by hand on the bench: 24 × 0.85, against OptoSmooth's 12 × 0.85.
+  assert.equal(SAT_EMPH_DB, 24 * 0.85)
+  assert.equal(SAT_EMPH_DB, 2 * (EMPHASIS_MAX_DB * EMPHASIS_DEFAULT / 100))
 })
 
 test('emphasis: OPTO distorts the highs harder, REVERSE spares them (sine)', () => {
@@ -250,6 +252,35 @@ test('calibration: a band’s reference peak is its gated level plus crest', () 
   const quiet = [{ ...seg[0], sourceBuffer: { numberOfChannels: 1, getChannelData: () => new Float32Array(x.length) } }]
   assert.equal(measureBandSpectrum(quiet, 0, x.length / sr, sr, 1), null)
   assert.equal(bandRefPeakDb(null, 3000, 20000), -8)
+})
+
+test('analysis: channels are measured apart, never summed', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr, { seconds: 4 })
+  const neg = x.map(v => -v)
+  const silent = new Float32Array(x.length)
+  const stereo = (l, r) => [{
+    outputStart: 0, sourceStart: 0, sourceEnd: x.length / sr,
+    sourceBuffer: { numberOfChannels: 2, getChannelData: ch => (ch === 0 ? l : r) },
+  }]
+  const mono = measureBandSpectrum([{ outputStart: 0, sourceStart: 0, sourceEnd: x.length / sr, sourceBuffer: { numberOfChannels: 1, getChannelData: () => x } }], 0, x.length / sr, sr, 1)
+  // Opposite phase on both sides: a mono sum would cancel to null.
+  const anti = measureBandSpectrum(stereo(x, neg), 0, x.length / sr, sr, 2)
+  assert.ok(anti, 'opposite-phase stereo must not cancel')
+  assert.ok(Math.abs(anti.gatedRmsDb - mono.gatedRmsDb) < 1e-6, `${anti.gatedRmsDb} vs ${mono.gatedRmsDb}`)
+  // Hard-panned: the shaper sees the full-level channel, so the reading is per channel's power
+  // averaged with silence — 3 dB under mono, not the 6 dB a (L + R) / 2 sum would give.
+  const panned = measureBandSpectrum(stereo(x, silent), 0, x.length / sr, sr, 2)
+  assert.ok(Math.abs(panned.gatedRmsDb - (mono.gatedRmsDb - 10 * Math.log10(2))) < 1e-6, `${panned.gatedRmsDb}`)
+})
+
+test('analysis: a long file is sampled, not scanned, and agrees with the full read', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr, { seconds: 8 })
+  const seg = [{ outputStart: 0, sourceStart: 0, sourceEnd: x.length / sr, sourceBuffer: { numberOfChannels: 1, getChannelData: () => x } }]
+  const full = measureBandSpectrum(seg, 0, x.length / sr, sr, 1)
+  const sampled = measureBandSpectrum(seg, 0, x.length / sr, sr, 1, { maxRmsBlocks: 32 })
+  assert.ok(Math.abs(full.gatedRmsDb - sampled.gatedRmsDb) < 1.5, `${full.gatedRmsDb} vs ${sampled.gatedRmsDb}`)
 })
 
 test('params: plain, four layers, the factory pair on by default', () => {

@@ -35,7 +35,7 @@
  * curve) needs ~8–10 dB more than OFF for the same brightening, OPTO ~10 less.
  *
  * EMPHASIS wraps the curve in OptoSmooth's pre/de-emphasis pair (2300 Hz,
- * Q 1/√2, ±10.2 dB). The pair are exact inverses, so the linear path is
+ * Q 1/√2, ±20.4 dB — the corner is OptoSmooth's, the depth is twice its 10.2). The pair are exact inverses, so the linear path is
  * untouched — only what the curve does differs. ⚠ On a voice the AFTER-shelf
  * decides, not the before-shelf: a vowel's distortion comes from its strong
  * low content and lands above the corner, so OPTO puts 3–4 dB LESS distortion
@@ -69,9 +69,12 @@ export const SAT_BENCH_PREROLL_S = 0.5
 
 export const SAT_EMPH_MODES = ['reverse', 'off', 'opto']
 /**
- * Originally based on OptoSmooth's emphasis pair as it ships: EMPHASIS_CORNER_HZ (2300) and
- * EMPHASIS_MAX_DB (12) × EMPHASIS_DEFAULT (85) / 100. ⚠ COPIED, NOT IMPORTED:
- * la2aProcessor.js registers a worklet at module scope. A test pins the copy.
+ * The bench's emphasis pair. The corner is OptoSmooth's (EMPHASIS_CORNER_HZ, 2300),
+ * COPIED, NOT IMPORTED: la2aProcessor.js registers a worklet at module scope.
+ * ⚠ THE DEPTH DELIBERATELY NO LONGER MATCHES IT: 24 × 0.85 = 20.4 dB, twice
+ * OptoSmooth's EMPHASIS_MAX_DB (12) × EMPHASIS_DEFAULT (85) / 100 = 10.2 dB —
+ * set by hand on the bench. A test pins the corner to OptoSmooth's and the depth
+ * to this value, so changing either is a decision rather than drift.
  */
 export const SAT_EMPH_CORNER_HZ = 2300
 export const SAT_EMPH_DB = 24 * 0.85
