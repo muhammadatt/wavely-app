@@ -5090,3 +5090,53 @@ its own, no oversampling (a gain makes no harmonics to alias), no extra latency.
   With the shelf engaged a loud click goes −10.7 → −18.3 dB (peak −21 dB for
   ~1 ms) and a natural "s" −6.51 → −6.72.
 - Latency 3 ms (was 3 ms + 50 samples). Worklet chunk 11.3 → 9.0 kB.
+
+---
+
+## EL7 Fatso — harmonic generation across Input and Warmth (October 2026)
+
+Owner supplied the true source (`1_SOUTHERN_SUNRISE.wav`) and a third render
+(`18_FATSO_EL7x_-_Input_6.wav`). ⚠ **CORRECTION TO THE WARMTH ENTRY ABOVE:**
+the file it called "raw" (`2_FATSO_EL7x_-_Input_2.wav`) is the Fatso at Input 2
+with Warmth off, not the source. Its Warmth findings stand — they isolate what
+Warmth adds on top of Input 2 — but "no harmonics" there meant "Warmth adds
+none", not "the Fatso adds none".
+
+**Capture timing.** No render is sample-locked to the source: all drift at
+11.5 ppm (Input 2: 1.4 → 10.5 samples over 8.2 s), i.e. a real-time capture
+against a different clock; Input 6 also drops ~12.7 samples at 1.6 s (Warmth 7's
+13 at 6.7 s is the same defect). Every comparison below removes a per-frame
+(85 ms) fractional delay first; Input 6 is analysed from 1.75 s.
+
+**Method.** Per frame, delay removed, then per bin a least-squares Hammerstein
+fit `Y = H1·X + H2·FFT(x²) + H3·FFT(x³)` pooled over ~300–390 frames (2 ch).
+The energy x² / x³ explain beyond the linear fit is even / odd distortion, in dB
+re output. Control: the same fit with x², x³ from mismatched frames (chance
+level). Compression test: `x·env²` (5 ms smoothed x²) — gain riding — against
+the instantaneous x³, which only waveshaping (harmonics) produces.
+
+| vs source | even (x²) | odd (x³) | chance | odd beyond `x·env²` |
+|---|---|---|---|---|
+| Input 2, 150 Hz–6 kHz | −55 to −63 (≈ chance; −57 vs −66 below 400 Hz) | −45 to −51 | −60 to −66 | −46 to −53 |
+| Input 6, 150 Hz–15 kHz | −39 to −49 | **−25 to −30** | −47 to −52 | **−25 to −32** |
+
+- **Input 2:** a faint, real odd-order trace (~0.3–0.5 %), ~10 dB over chance.
+- **Input 6:** odd-order saturation explains almost the whole non-linear
+  residual (≈3–5 %), even-order 14–18 dB below it. It is WAVESHAPING, not a
+  compressor: the instantaneous cubic out-explains gain riding in every band.
+  Odd share rises 4.4–7.6 dB for a 2.9 dB louder half (≈1.5–2.6 dB/dB; a cubic
+  predicts 2). Peak −5.70 → −8.25 dBFS at unchanged RMS. Below 150 Hz there is
+  also a level-dependent gain component.
+- **Warmth 7 over Input 2:** almost everything it adds is explained by `x·env²`
+  — the dynamic shelf. The cubic beyond that sits 1–5 dB over chance, within
+  what the shelf's fast gain movement can produce: no convincing harmonics.
+- ⚠ The steady-bass-note harmonic series does NOT move (≤ 0.7 dB at H2–H7)
+  even at Input 6 — the source's own harmonics (−6 to −25 dBc) swamp ~−28 dB of
+  added distortion. That instrument is insensitive on this material; the fit is
+  the sensitive one.
+
+**For a Fatso-style stage ahead of the HF Limiter:** the harmonics come from
+INPUT drive and are odd-dominant (third-order growth, even ~15 dB down) — a
+symmetric soft clipper, not the even-leaning quartic OptoSmooth uses. Warmth is
+the dynamic shelf alone. One music clip; the Fatso's compressor state at Input 6
+is unknown.
