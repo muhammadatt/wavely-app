@@ -5,8 +5,11 @@
  */
 
 import {
-  SAT_BENCH_MAX_LAYERS, SAT_LAYER_DEFAULTS, SAT_DEFAULT_REF_PEAK_DB,
+  SAT_BENCH_MAX_LAYERS, SAT_LAYER_DEFAULTS, SAT_DEFAULT_REF_PEAK_DB, SAT_EMPH_QUICK,
 } from './saturationBenchProcessor.js'
+
+/** An emphasis filter at 0 dB: the shape the quick buttons use, switched off. */
+const EMPH_OFF = { ...SAT_EMPH_QUICK.opto, emphDb: 0 }
 
 /**
  * Factory layers: the two combinations that earned their keep in the HF
@@ -16,14 +19,14 @@ import {
  *               the vowels, none added to sibilants or room tone.
  */
 export const SAT_BENCH_LAYER_PRESETS = [
-  { on: true, curve: 'quartic', driveDb: 0, emph: 'opto', loHz: 20, hiHz: 20000, mode: 'full' },
+  { on: true, curve: 'quartic', driveDb: 0, ...SAT_EMPH_QUICK.opto, loHz: 20, hiHz: 20000, mode: 'full' },
   // +27: REV pulls the highs out before the curve (±20.4 dB), so on a high band
   // it needs ~11 dB more drive than OFF for the same brightening (vowels +1.8 dB
   // above 5 kHz here, synthetic voice; OFF gets there by ~+15.5, OPTO already
   // has +1.75 at 0). It was +22 while the pair was ±10.2 dB.
-  { on: true, curve: 'tanh', driveDb: 27, emph: 'reverse', loHz: 3000, hiHz: 20000, mode: 'voiced' },
-  { on: false, curve: 'algebraic', driveDb: 0, emph: 'off', loHz: 20, hiHz: 20000, mode: 'voiced' },
-  { on: false, curve: 'atan', driveDb: 0, emph: 'off', loHz: 20, hiHz: 20000, mode: 'voiced' },
+  { on: true, curve: 'tanh', driveDb: 27, ...SAT_EMPH_QUICK.reverse, loHz: 3000, hiHz: 20000, mode: 'voiced' },
+  { on: false, curve: 'algebraic', driveDb: 0, ...EMPH_OFF, loHz: 20, hiHz: 20000, mode: 'voiced' },
+  { on: false, curve: 'atan', driveDb: 0, ...EMPH_OFF, loHz: 20, hiHz: 20000, mode: 'voiced' },
 ]
 
 export const SATURATION_BENCH_DEFAULTS = {
@@ -46,7 +49,10 @@ export function toKernelParams(params) {
       on: !!l.on,
       curve: String(l.curve),
       driveDb: Number(l.driveDb),
-      emph: String(l.emph),
+      emphType: String(l.emphType),
+      emphHz: Number(l.emphHz),
+      emphQ: Number(l.emphQ),
+      emphDb: Number(l.emphDb),
       loHz: Number(l.loHz),
       hiHz: Number(l.hiHz),
       mode: String(l.mode),

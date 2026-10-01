@@ -34,10 +34,16 @@
  * high band EMPHASIS acts mostly as a drive offset: REV (highs out before the
  * curve) needs ~8–10 dB more than OFF for the same brightening, OPTO ~10 less.
  *
- * EMPHASIS wraps the curve in OptoSmooth's pre/de-emphasis pair (2300 Hz,
- * Q 1/√2, ±20.4 dB — the corner is OptoSmooth's, the depth is twice its 10.2). The pair are exact inverses, so the linear path is
- * untouched — only what the curve does differs. ⚠ On a voice the AFTER-shelf
- * decides, not the before-shelf: a vowel's distortion comes from its strong
+ * EMPHASIS wraps the curve in a pre/de-emphasis pair: one biquad (HI SHELF,
+ * BELL or LO SHELF — frequency, Q, gain) before the curve and its exact
+ * inverse (the same filter at the negated gain) after it. The pair are exact
+ * inverses, so the linear path is untouched — only what the curve does
+ * differs: this chooses WHICH frequencies the curve works hardest on, it is not
+ * a tone control. Positive gain pushes that region into the curve (OPTO),
+ * negative pulls it out (REV), 0 is off and skips both filters. OPTO and REV
+ * are 2300 Hz, Q 1/√2 high shelves at ±20.4 dB — the corner is OptoSmooth's,
+ * the depth is twice its 10.2. ⚠ On a voice the AFTER-filter
+ * decides, not the before-filter: a vowel's distortion comes from its strong
  * low content and lands above the corner, so OPTO puts 3–4 dB LESS distortion
  * above 2.3 kHz than OFF and REV 3–5 dB MORE. REV is only cleaner up top on
  * content that was already high.
@@ -55,7 +61,7 @@
  * scope.
  */
 
-import { BiquadCascade, highpass, lowpass, highShelf, DENORMAL_FLOOR } from './dsp/biquad.js'
+import { BiquadCascade, highpass, lowpass, highShelf, lowShelf, peaking, DENORMAL_FLOOR } from './dsp/biquad.js'
 import { Oversampler, DelayLine, COMPRESSOR_OVERSAMPLE } from './dsp/oversample.js'
 import { riseCoeff } from './dsp/envelope.js'
 import { shaperCurve, unitDriveU, SHAPER_CURVE_IDS } from './dsp/shaperCurves.js'
@@ -67,17 +73,33 @@ export const SAT_BENCH_LATENCY_SAMPLES = SAT_BENCH_MAX_LAYERS * SAT_BENCH_LAYER_
 /** Enough for the voicing detector and band filters to settle. */
 export const SAT_BENCH_PREROLL_S = 0.5
 
-export const SAT_EMPH_MODES = ['reverse', 'off', 'opto']
+/** The pre/de-emphasis filter shapes, in dial order. */
+export const SAT_EMPH_TYPES = ['hishelf', 'bell', 'loshelf']
+export const SAT_EMPH_HZ_MIN = 100
+export const SAT_EMPH_HZ_MAX = 16000
+export const SAT_EMPH_Q_MIN = 0.3
+export const SAT_EMPH_Q_MAX = 4
+export const SAT_EMPH_DB_MAX = 24
 /**
- * The bench's emphasis pair. The corner is OptoSmooth's (EMPHASIS_CORNER_HZ, 2300),
- * COPIED, NOT IMPORTED: la2aProcessor.js registers a worklet at module scope.
- * ⚠ THE DEPTH DELIBERATELY NO LONGER MATCHES IT: 24 × 0.85 = 20.4 dB, twice
- * OptoSmooth's EMPHASIS_MAX_DB (12) × EMPHASIS_DEFAULT (85) / 100 = 10.2 dB —
- * set by hand on the bench. A test pins the corner to OptoSmooth's and the depth
- * to this value, so changing either is a decision rather than drift.
+ * The OPTO / REV quick settings. The corner is OptoSmooth's (EMPHASIS_CORNER_HZ,
+ * 2300), COPIED, NOT IMPORTED: la2aProcessor.js registers a worklet at module
+ * scope. ⚠ THE DEPTH DELIBERATELY NO LONGER MATCHES IT: 24 × 0.85 = 20.4 dB,
+ * twice OptoSmooth's EMPHASIS_MAX_DB (12) × EMPHASIS_DEFAULT (85) / 100 =
+ * 10.2 dB — set by hand on the bench. A test pins the corner to OptoSmooth's
+ * and the depth to this value, so changing either is a decision rather than
+ * drift.
  */
 export const SAT_EMPH_CORNER_HZ = 2300
 export const SAT_EMPH_DB = 24 * 0.85
+export const SAT_EMPH_Q = Math.SQRT1_2
+/** Legacy three-way emphasis, still accepted as input and migrated by `normalizeLayer`. */
+export const SAT_EMPH_MODES = ['reverse', 'off', 'opto']
+/** What each quick button sets. OFF changes only the gain, so the shape survives a toggle. */
+export const SAT_EMPH_QUICK = {
+  opto: { emphType: 'hishelf', emphHz: SAT_EMPH_CORNER_HZ, emphQ: SAT_EMPH_Q, emphDb: SAT_EMPH_DB },
+  reverse: { emphType: 'hishelf', emphHz: SAT_EMPH_CORNER_HZ, emphQ: SAT_EMPH_Q, emphDb: -SAT_EMPH_DB },
+  off: { emphDb: 0 },
+}
 export const SAT_MODES = ['voiced', 'full']
 
 /** Band edges. At or beyond these an edge is open — no filter at all. */
@@ -101,7 +123,10 @@ export const SAT_LAYER_DEFAULTS = {
   on: false,
   curve: 'quartic',
   driveDb: 0,
-  emph: 'off',
+  emphType: 'hishelf',
+  emphHz: SAT_EMPH_CORNER_HZ,
+  emphQ: SAT_EMPH_Q,
+  emphDb: 0,
   loHz: SAT_BAND_MIN_HZ,
   hiHz: SAT_BAND_MAX_HZ,
   mode: 'voiced',
@@ -160,14 +185,37 @@ export function layerGain(curveId, driveDb, refPeakDb) {
   return (unitDriveU(curveId) / Math.pow(10, ref / 20)) * Math.pow(10, d / 20)
 }
 
-/** Normalise one layer's params. */
+/**
+ * The pre/de-emphasis pair for one layer, or null when the gain is 0 (off —
+ * both filters are skipped, so the bypassed path is exactly as before). The
+ * de-emphasis is the same filter at the negated gain, which is its exact
+ * inverse for the peaking and shelf forms (their alpha does not depend on the
+ * gain at a given Q).
+ */
+export function emphasisSections(type, hz, q, db, sampleRate) {
+  if (!(Math.abs(db) >= 1e-3)) return null
+  const f = clamp(hz, SAT_EMPH_HZ_MIN, Math.min(SAT_EMPH_HZ_MAX, 0.45 * sampleRate))
+  const build = { hishelf: highShelf, loshelf: lowShelf, bell: peaking }[type] ?? highShelf
+  return {
+    pre: [build(sampleRate, f, q, db)],
+    de: [build(sampleRate, f, q, -db)],
+  }
+}
+
+/** Normalise one layer's params. A legacy `emph` string migrates to the equivalent filter. */
 export function normalizeLayer(p = {}) {
   const l = { ...SAT_LAYER_DEFAULTS, ...p }
+  if (p.emph !== undefined && p.emphDb === undefined && SAT_EMPH_QUICK[p.emph]) {
+    Object.assign(l, SAT_EMPH_QUICK[p.emph])
+  }
   return {
     on: !!l.on,
     curve: SHAPER_CURVE_IDS.includes(l.curve) ? l.curve : SAT_LAYER_DEFAULTS.curve,
     driveDb: clamp(Number(l.driveDb) || 0, SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB),
-    emph: SAT_EMPH_MODES.includes(l.emph) ? l.emph : 'off',
+    emphType: SAT_EMPH_TYPES.includes(l.emphType) ? l.emphType : SAT_LAYER_DEFAULTS.emphType,
+    emphHz: clamp(Number(l.emphHz) || SAT_EMPH_CORNER_HZ, SAT_EMPH_HZ_MIN, SAT_EMPH_HZ_MAX),
+    emphQ: clamp(Number(l.emphQ) || SAT_EMPH_Q, SAT_EMPH_Q_MIN, SAT_EMPH_Q_MAX),
+    emphDb: clamp(Number(l.emphDb) || 0, -SAT_EMPH_DB_MAX, SAT_EMPH_DB_MAX),
     loHz: Number(l.loHz) || SAT_BAND_MIN_HZ,
     hiHz: Number(l.hiHz) || SAT_BAND_MAX_HZ,
     mode: SAT_MODES.includes(l.mode) ? l.mode : 'voiced',
@@ -346,16 +394,21 @@ class Layer {
         c.bandOut.setSections(this.bandSections)
       }
     }
-    if (next.emph !== prev.emph || !this.emphInit) {
+    if (
+      next.emphType !== prev.emphType || next.emphHz !== prev.emphHz ||
+      next.emphQ !== prev.emphQ || next.emphDb !== prev.emphDb || !this.emphInit
+    ) {
       this.emphInit = true
-      if (next.emph !== 'off') {
-        // OPTO boosts into the curve and cuts after; REVERSE is the mirror.
-        const db = next.emph === 'opto' ? SAT_EMPH_DB : -SAT_EMPH_DB
-        this.emphPre = [highShelf(this.sampleRate, SAT_EMPH_CORNER_HZ, Math.SQRT1_2, db)]
-        this.emphDe = [highShelf(this.sampleRate, SAT_EMPH_CORNER_HZ, Math.SQRT1_2, -db)]
-        for (const c of this.channels) {
-          c.pre.setSections(this.emphPre)
-          c.de.setSections(this.emphDe)
+      const was = this.emphPre !== null
+      const pair = emphasisSections(next.emphType, next.emphHz, next.emphQ, next.emphDb, this.sampleRate)
+      this.emphPre = pair ? pair.pre : null
+      this.emphDe = pair ? pair.de : null
+      for (const c of this.channels) {
+        if (pair) {
+          c.pre.setSections(pair.pre)
+          c.de.setSections(pair.de)
+          // Coming in from off: whatever the filters held is stale.
+          if (!was) { c.pre.reset?.(); c.de.reset?.() }
         }
       }
     }
@@ -418,7 +471,7 @@ class Layer {
     const g = this.gain
     const inv = 1 / g
     const a = this.dcCoeff
-    const emph = this.p.emph !== 'off'
+    const emph = this.emphPre !== null
     const band = this.hasBand
     // The mode ramp is shared by every channel, so tick it once per sample.
     if (!this.alpha || this.alpha.length < n) this.alpha = new Float64Array(n)
