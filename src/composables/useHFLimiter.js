@@ -6,14 +6,16 @@ import { regionAlignDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { hfLimiterEffect, HF_LIMITER_DEFAULTS } from '../audio/effects/hfLimiter.js'
+import { WARMTH_LAYERS } from '../audio/hfLimiterParams.js'
+import { measureBandSpectrum, bandRefPeakDb } from '../audio/saturationBenchAnalysis.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const HF_LIMITER_WINDOW_ID = 'hf-limiter'
 
 // Singleton reactive state shared between the sidebar trigger and the modal.
-// `voiceLevelDb` is in here because the kernel needs it, but it is measured,
-// never set from the panel.
+// `voiceLevelDb` and `warmthRefPeaksDb` are in here because the kernel needs
+// them, but they are measured, never set from the panel.
 const hflParams = reactive({ ...HF_LIMITER_DEFAULTS })
 const hflPreview = ref(false)
 // DELTA monitor: hear only what is being removed. Never part of the params
@@ -97,6 +99,14 @@ export function useHFLimiter() {
     levelMeasuredFor = key
     hflParams.voiceLevelDb = gated
     pushParam('voiceLevelDb', gated)
+    // Warmth's calibration, the Saturation Bench's: each layer's band level on
+    // this file, so a Warmth setting means the same on a quiet take and a hot one.
+    const spectrum = measureBandSpectrum(
+      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+    )
+    const refs = WARMTH_LAYERS.map(l => bandRefPeakDb(spectrum, l.loHz, l.hiHz))
+    hflParams.warmthRefPeaksDb = refs
+    pushParam('warmthRefPeaksDb', refs)
   }
 
   function togglePreview() {
@@ -119,7 +129,7 @@ export function useHFLimiter() {
 
   /** Set one user-facing param. */
   function syncParam(name, value) {
-    if (!(name in hflParams) || name === 'voiceLevelDb') return
+    if (!(name in hflParams) || name === 'voiceLevelDb' || name === 'warmthRefPeaksDb') return
     hflParams[name] = value
     pushParam(name, value)
   }

@@ -1,8 +1,9 @@
 /**
  * HF Limiter — worklet kernel.
  *
- * Drive → Shelf. DRIVE is the odd-order saturator from dsp/oddSat.js — the
- * Fatso's Input stage, 4x oversampled, a pure delay at 0. SHELF, from
+ * Warmth → Shelf. WARMTH is two Saturation Bench layers (dsp/saturationLayers.js,
+ * quartic then tanh, voiced in hfLimiterParams.WARMTH_LAYERS), 4x oversampled,
+ * a pure delay at 0. SHELF, from
  * dsp/hfLimit.js (read that file for the design), is a lookahead
  * dynamic shelf that holds the band above the corner at the threshold, down to
  * a Range floor — brightness and harshness, in the HiFal / Limiter 6 HF / Fatso
@@ -19,8 +20,8 @@
  */
 
 import { ShelfLimiterStage } from './dsp/hfLimit.js'
-import { OddSaturatorStage } from './dsp/oddSat.js'
-import { toKernelParams, HF_LIMITER_DEFAULTS } from './hfLimiterParams.js'
+import { SaturationBenchKernel } from './dsp/saturationLayers.js'
+import { toKernelParams, HF_LIMITER_DEFAULTS, WARMTH_LAYERS } from './hfLimiterParams.js'
 
 export const HF_LIMITER_KERNEL_DEFAULTS = toKernelParams(HF_LIMITER_DEFAULTS)
 
@@ -36,8 +37,9 @@ export class HFLimiterKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
     this.shelf = new ShelfLimiterStage(sampleRate)
-    this.sat = new OddSaturatorStage(sampleRate)
-    this.latencySamples = this.sat.latencySamples + this.shelf.latencySamples
+    this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length })
+    this.warmthInit = false
+    this.latencySamples = this.warmth.latencySamples + this.shelf.latencySamples
     this.listen = 'off'
     this.dryDelays = []
     this.dry = []
@@ -57,7 +59,11 @@ export class HFLimiterKernel {
       tailMs: p.tailMs,
       transientDb: p.transientDb,
     })
-    this.sat.setParams({ driveLin: dbToLin(p.driveGainDb), enabled: !!p.drive })
+    if (p.warmthLayers) {
+      // Ramped like the bench's own knobs, except the first set.
+      this.warmth.setParams({ layers: p.warmthLayers }, !this.warmthInit)
+      this.warmthInit = true
+    }
     this.outputLin = dbToLin(p.outputGainDb)
   }
 
@@ -92,7 +98,8 @@ export class HFLimiterKernel {
     // The delta needs the input aligned to the output; kept only while asked.
     if (delta) this._ensureDry(nOut)
 
-    this.sat.process(outputChannels, n)
+    // In place: the kernel reads each input sample before it writes that output.
+    this.warmth.process(outputChannels, outputChannels, n)
     this.shelf.process(outputChannels, n)
 
     const g = this.outputLin

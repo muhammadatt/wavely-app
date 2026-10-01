@@ -8,7 +8,8 @@ export default {
   ],
 
   controls: [
-    { label: 'Drive', text: 'Saturation before the limiter, like the EL7 Fatso’s Input: it rounds peaks and adds mostly third-harmonic warmth, with even harmonics about 15 dB lower. It follows the file’s level, so a setting means the same on a quiet recording and a hot one, and quiet passages come out at their own level. Around 15 matches the Fatso at Input 6. 0 is off' },
+    { label: 'Warmth', text: 'Low-end body and fatness before the limiter: an even and an odd saturator on the low band, voiced on the Saturation Bench. It lifts and thickens roughly 60–250 Hz rather than adding fizz, and follows the file’s level. Around 8 is the voicing it came from; above that it gets heavy fast. 0 is off' },
+    { label: 'Odd/Even', text: 'Odd (firmer, more edge) to Even (rounder, more sub weight). The total stays about the same as you turn it; 50 is both equally loud' },
     { label: 'Freq', text: 'Where bright starts: the band above it is what the limiter listens to and turns down' },
     { label: 'Threshold', text: 'The ceiling for that band, in dB relative to the file’s voice level, so one setting does the same thing on a quiet recording and a hot one' },
     { label: 'Range', text: 'The deepest the shelf may cut, up to 24 dB. Keeps a hard S from turning into a lisp; 0 takes the shelf out' },
@@ -35,7 +36,7 @@ export default {
     'For sibilance on its own, HF Softener knows more about voices; this is the general-purpose ceiling',
     'An S that starts very abruptly after silence can catch a little Transient in its first millisecond; if an S sounds blunted, lower Transient',
     'For a Fatso Warmth sound, start from WARM, Freq 2.3 kHz, Threshold −1 dB, Range 16 dB, Release 30 ms, Tail off and Output +0.7 dB',
-    'For the Fatso’s Input saturation as well, add Drive 15 — Drive comes first, so the limiter tames the brightness the harmonics add',
+    'Warmth comes first, so the limiter still holds the top end after the low end has been thickened',
     'WARM hears more of the spectrum than TIGHT, so at the same Threshold it cuts more often',
   ],
 }

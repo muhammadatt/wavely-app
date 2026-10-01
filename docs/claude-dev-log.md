@@ -5175,3 +5175,21 @@ kernel's chain.
 - ⚠ A test first read the third harmonic flat at −63 dBc for Drive 3–9: the
   measurement's unwindowed, non-integer-cycle span leaked the fundamental there.
   Hann-weighted, H3 grows 1.8–2.2 dB per dB as the curve says.
+
+## HF Limiter — Warmth and Odd/Even replace Drive (October 2026)
+
+The Fatso-style Drive (`dsp/oddSat.js`) is removed. In its place, the low-end warmth combination voiced on the Saturation Bench runs as two fixed layers on the bench's own kernel, moved to `dsp/saturationLayers.js` so a second worklet can run it without registering the bench processor twice in one AudioWorkletGlobalScope (which throws). Voicing: quartic drive 60, 1–400 Hz, bell 350 Hz Q 0.5 +24; then tanh drive 50, 1–300 Hz, bell 250 Hz Q 0.7 +24; both FULL. Warmth sets the layers' Amount at 3 dB a step with +6 at 10; Odd/Even is an equal-power crossfade, the quartic offset +17.4 dB so 50 is equal added rms (Southern Sunrise: quartic −42.58, tanh −25.19 dBFS added rms at Amount 0).
+
+Measured on Southern Sunrise, shelf out, output vs input per band (20–60 / 60–120 / 120–250 / 250–400 Hz; nothing above moves):
+
+| Setting | 20–60 | 60–120 | 120–250 | 250–400 | peak dBFS |
+|---|---|---|---|---|---|
+| Warmth 3, O/E 50 | −0.6 | −0.3 | +0.7 | −0.2 | −5.6 |
+| Warmth 5, O/E 50 | −0.9 | −0.4 | +1.5 | −0.4 | −5.8 |
+| Warmth 8, O/E 9 (the bench voicing) | −2.8 | +1.7 | +4.9 | −1.5 | −4.1 |
+| Warmth 8, O/E 50 | −1.2 | +0.3 | +4.0 | −0.9 | −3.3 |
+| Warmth 10, O/E 0 | +2.9 | +6.0 | +8.2 | −2.3 | −1.6 |
+| Warmth 10, O/E 50 | +4.2 | +3.5 | +7.5 | −1.3 | −1.0 |
+| Warmth 10, O/E 100 | +10.3 | +0.5 | +2.0 | +1.2 | +2.4 |
+
+⚠ It is not harmonics alone: at these drives the layers saturate even quiet low-band content, and what a layer "adds" includes the band's own reshaped level (a quiet 150 Hz tone moved +5.2 dB at Warmth 10). The first test written for this claimed quiet material passes at its own level and failed; it now asserts only that material above the bands is untouched. ⚠ The +6 dB top overshoots and clips at full Even.

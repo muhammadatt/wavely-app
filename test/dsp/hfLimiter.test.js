@@ -8,9 +8,10 @@ import assert from 'node:assert/strict'
 import { HFLimiterKernel, processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import {
   toKernelParams, hfLimiterLatencySamples, HF_LIMITER_DEFAULTS,
+  WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, warmthLayers,
 } from '../../src/audio/hfLimiterParams.js'
 import { shelfResponseDb, splitResponse, splitTaps } from '../../src/audio/dsp/hfLimit.js'
-import { SAT_LATENCY_SAMPLES, oddSatCurve } from '../../src/audio/dsp/oddSat.js'
+import { processSaturationBenchBuffer } from '../../src/audio/dsp/saturationLayers.js'
 
 const SR = 44100
 
@@ -147,16 +148,16 @@ test('the split is unity at DC, half at the corner, and monotone at every depth'
   }
 })
 
-test('the latency does not move with Transient or Drive', () => {
+test('the latency does not move with Transient or Warmth', () => {
   const L = hfLimiterLatencySamples(SR)
-  // The saturator's oversampler round trip, then the shelf's split and lookahead.
-  assert.equal(L, SAT_LATENCY_SAMPLES + 3 * Math.round(0.001 * SR))
-  for (const [transient, drive] of [[0, 0], [6, 0], [12, 0], [0, 15]]) {
+  // The warmth layers' oversampler round trips, then the shelf's split and lookahead.
+  assert.equal(L, WARMTH_LATENCY_SAMPLES + 3 * Math.round(0.001 * SR))
+  for (const [transient, warmth] of [[0, 0], [6, 0], [12, 0], [0, 6]]) {
     const x = new Float32Array(4096)
     x[100] = 0.001 // far below every threshold
-    const { channelData: [y] } = run(x, { ...BASE, transient, drive })
-    if (drive === 0) assert.equal(y[100 + L], x[100], `transient ${transient}`)
-    else assert.ok(Math.abs(y[100 + L] - x[100]) < 1e-6, `drive ${drive}: impulse at ${L} reads ${y[100 + L]}`)
+    const { channelData: [y] } = run(x, { ...BASE, transient, warmth })
+    if (warmth === 0) assert.equal(y[100 + L], x[100], `transient ${transient}`)
+    else assert.ok(Math.abs(y[100 + L] - x[100]) < 1e-5, `warmth ${warmth}: impulse at ${L} reads ${y[100 + L]}`)
   }
 })
 
@@ -428,7 +429,7 @@ test('the Tail never lets the gain overshoot the lookahead ceiling', () => {
 })
 
 
-// ── Drive: the odd-order saturator ahead of the shelf ──────────────────────
+// ── Warmth: low-end harmonics ahead of the shelf ───────────────────────────
 
 /**
  * Harmonic k of a steady tone at `f`, dB re the fundamental. Hann-weighted: an
@@ -449,61 +450,68 @@ function harmonicDbc(y, f, k, from, to) {
   return db(amp(k * f) / amp(f))
 }
 
-const SAT = { ...BASE, range: 0 } // shelf out, so only the saturator acts
+const WARM = { ...BASE, range: 0 } // shelf out, so only Warmth acts
 
-test('Drive 0 leaves the audio untouched', () => {
+test('Warmth 0 leaves the audio untouched', () => {
   const x = add(sine(200, 0.5), sine(3000, 0.2))
-  const { channelData: [y], latencySamples: L } = run(x, { ...SAT, drive: 0 })
+  const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 0, oddEven: 30 })
   for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
 })
 
-test('Drive is odd-dominant, with even harmonics about 15 dB under the odd', () => {
-  const f = 300
-  for (const drive of [9, 15]) {
-    const { channelData: [y], latencySamples: L } = run(sine(f, 0.3), { ...SAT, drive })
-    const h2 = harmonicDbc(y, f, 2, L + SR / 4, SR), h3 = harmonicDbc(y, f, 3, L + SR / 4, SR)
-    assert.ok(h3 > -60, `drive ${drive}: H3 ${h3.toFixed(1)} dBc — no saturation`)
-    assert.ok(h3 - h2 > 13 && h3 - h2 < 19, `drive ${drive}: H3 ${h3.toFixed(1)}, H2 ${h2.toFixed(1)} dBc`)
+test('Warmth 8 at full Odd is the tanh layer exactly as voiced on the Saturation Bench', () => {
+  const x = add(sine(120, 0.25), sine(240, 0.1), noise(SR, 0.01))
+  const refs = [-14, -16]
+  const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 8, oddEven: 0, warmthRefPeaksDb: refs })
+  const bench = processSaturationBenchBuffer([x], SR, {
+    layers: [{ on: false }, { ...WARMTH_LAYERS[1], on: true, amountDb: 0, refPeakDb: refs[1] }],
+  }, { slots: 2 })
+  const b = bench.channelData[0], Lb = bench.latencySamples
+  let worst = 0, added = 0
+  for (let i = SR / 4; i < x.length - L; i++) {
+    worst = Math.max(worst, Math.abs((y[i + L] - x[i]) - (b[i + Lb] - x[i])))
+    added = Math.max(added, Math.abs(b[i + Lb] - x[i]))
   }
+  assert.ok(added > 1e-3, 'the tanh layer must add something')
+  assert.ok(worst < 1e-6, `differs from the bench by ${worst}`)
 })
 
-test('the distortion grows at the third-order rate, about 2 dB per dB', () => {
-  const f = 300, at = d => {
-    const { channelData: [y], latencySamples: L } = run(sine(f, 0.1), { ...SAT, drive: d })
-    return harmonicDbc(y, f, 3, L + SR / 4, SR)
+test('Odd/Even: 0 is odd-dominant (tanh), 100 even-dominant (quartic)', () => {
+  const f = 120
+  const at = oddEven => {
+    const { channelData: [y], latencySamples: L } = run(sine(f, 0.3), { ...WARM, warmth: 10, oddEven, warmthRefPeaksDb: [-10, -10] })
+    return { h2: harmonicDbc(y, f, 2, L + SR / 4, SR), h3: harmonicDbc(y, f, 3, L + SR / 4, SR) }
   }
-  const slope = (at(9) - at(3)) / 6
-  assert.ok(slope > 1.8 && slope < 2.2, `H3 grew ${slope.toFixed(2)} dB per dB of Drive`)
+  const odd = at(0), even = at(100)
+  assert.ok(odd.h3 > odd.h2 + 10, `Odd: H2 ${odd.h2.toFixed(1)}, H3 ${odd.h3.toFixed(1)} dBc`)
+  assert.ok(even.h2 > even.h3 + 10, `Even: H2 ${even.h2.toFixed(1)}, H3 ${even.h3.toFixed(1)} dBc`)
 })
 
-test('Drive never makes a sample louder, and leaves quiet material at its own level', () => {
-  for (let u = -8; u <= 8; u += 0.01) assert.ok(Math.abs(oddSatCurve(u)) <= Math.abs(u) + 1e-12, `curve at ${u.toFixed(2)}`)
-  const loud = add(sine(150, 0.5), sine(2000, 0.3), sine(7000, 0.1))
-  const { channelData: [y] } = run(loud, { ...SAT, drive: 24 })
-  // The asymmetry's DC is removed afterwards, which may move a peak by a hair.
-  assert.ok(peak(y) <= peak(loud) * 1.003, `peak ${db(peak(y) / peak(loud)).toFixed(3)} dB`)
-  const quiet = sine(1000, 0.003)
-  const { channelData: [q], latencySamples: L } = run(quiet, { ...SAT, drive: 24 })
-  const g = db(toneAmp(q, 1000, L + SR / 4, SR) / 0.003)
-  assert.ok(Math.abs(g) < 0.05, `a quiet tone moved ${g.toFixed(3)} dB at Drive 24`)
+test('the Warmth law: 3 dB a step, equal-power Odd/Even, the quartic matched at 50', () => {
+  const amt = (w, b) => warmthLayers(w, b).map(l => (l.on ? l.amountDb : -Infinity))
+  // Warmth 8 at full Odd is the tanh at Amount 0; each step is 3 dB.
+  assert.ok(Math.abs(amt(8, 0)[1]) < 1e-9)
+  assert.ok(Math.abs(amt(10, 0)[1] - 6) < 1e-9)
+  assert.ok(Math.abs(amt(10, 0)[1] - amt(7, 0)[1] - 9) < 1e-9)
+  // At 50 the two sit WARMTH_EVEN_MATCH_DB apart, each 3 dB under its solo level.
+  const [q, t] = amt(8, 50)
+  assert.ok(Math.abs(q - t - WARMTH_EVEN_MATCH_DB) < 1e-9, `quartic ${q}, tanh ${t}`)
+  assert.ok(Math.abs(t + 3.0103) < 1e-3, `tanh at 50: ${t}`)
+  // The ends take a layer out rather than leaving it at a vanishing level.
+  assert.deepEqual(warmthLayers(8, 0).map(l => l.on), [false, true])
+  assert.deepEqual(warmthLayers(8, 100).map(l => l.on), [true, false])
+  assert.deepEqual(warmthLayers(0, 50).map(l => l.on), [false, false])
+  // Calibration rides along when measured, and only then.
+  assert.equal(warmthLayers(5, 50, [-12, -13])[1].refPeakDb, -13)
+  assert.equal('refPeakDb' in warmthLayers(5, 50)[0], false)
 })
 
-test('Drive follows the file: the same setting saturates a quiet file as much as a hot one', () => {
-  const f = 300
-  const at = (amp, voice) => {
-    const { channelData: [y], latencySamples: L } = run(sine(f, amp), { ...SAT, drive: 12, voiceLevelDb: voice })
-    return harmonicDbc(y, f, 3, L + SR / 4, SR)
-  }
-  const hot = at(0.3, -14), quiet = at(0.3 / 4, -14 - 12.04)
-  assert.ok(Math.abs(hot - quiet) < 0.2, `hot ${hot.toFixed(2)}, 12 dB quieter ${quiet.toFixed(2)} dBc`)
-})
-
-test('Drive is oversampled: a hard-driven 9 kHz tone leaves no aliases', () => {
-  const f = 9000
-  const { channelData: [y], latencySamples: L } = run(sine(f, 0.4), { ...SAT, drive: 24 })
-  // 3·9 kHz = 27 kHz would fold to 17.1 kHz at the base rate; 5·9 kHz to 0.9 kHz.
-  for (const alias of [SR - 3 * f, 5 * f - SR]) {
-    const a = harmonicDbc(y, f, alias / f, L + SR / 4, SR)
-    assert.ok(a < -60, `alias at ${alias.toFixed(0)} Hz: ${a.toFixed(1)} dBc`)
-  }
+test('Warmth works only in its low band: material above it passes untouched', () => {
+  // ⚠ NOT "quiet material passes at its own level": at these drives the layers
+  // saturate even quiet low-band content, and what they add includes the
+  // band's own reshaped level — that is the character (Southern Sunrise at
+  // Warmth 8: +4.9 dB at 120–250 Hz). Above the bands nothing moves.
+  const quiet = sine(1500, 0.003)
+  const { channelData: [q], latencySamples: L } = run(quiet, { ...WARM, warmth: 10, oddEven: 50 })
+  const g = db(toneAmp(q, 1500, L + SR / 4, SR) / 0.003)
+  assert.ok(Math.abs(g) < 0.05, `a 1.5 kHz tone moved ${g.toFixed(3)} dB at Warmth 10`)
 })

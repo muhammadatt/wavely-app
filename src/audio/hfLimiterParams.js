@@ -7,7 +7,7 @@
 
 import { ALIGN_TARGET_DBFS } from './dsp/inputAlign.js'
 import { shelfLatencySamples } from './dsp/hfLimit.js'
-import { SAT_LATENCY_SAMPLES } from './dsp/oddSat.js'
+import { SAT_BENCH_LAYER_LATENCY, SAT_AMOUNT_FLOOR_DB } from './dsp/saturationLayers.js'
 
 export const HF_LIMITER_DEFAULTS = {
   freq: 5000, // Hz — where "bright" starts, for both the detector and the cut
@@ -21,14 +21,21 @@ export const HF_LIMITER_DEFAULTS = {
   // dB — the most the onset softener may add on top of the shelf; 0 is off.
   // It stacks: Range caps only the shelf.
   transient: 0,
-  // dB — the odd-order saturator AHEAD of the shelf (the Fatso's Input stage);
-  // 0 is off. Relative to the file's voice level, like Threshold.
-  drive: 0,
+  // 0–10 — low-end harmonic warmth AHEAD of the shelf: how much of what the two
+  // fixed WARMTH_LAYERS add is mixed in. 0 is off (a pure delay).
+  warmth: 0,
+  // 0–100 — Odd (tanh) to Even (quartic). 50 is equal loudness.
+  oddEven: 50,
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured by the composable, never a
   // user setting — it is what makes a Threshold mean the same thing on a
   // quiet narration and a hot one (the HF Softener's `levelOffset` contract).
   voiceLevelDb: ALIGN_TARGET_DBFS,
+  // Each warmth layer's reference peak, dBFS: the file's gated level in that
+  // layer's band + crest (saturationBenchAnalysis.bandRefPeakDb). Measured,
+  // never a user setting; null until measured, and the layers fall back to
+  // the nominal point.
+  warmthRefPeaksDb: null,
 }
 
 export const FREQ_MIN_HZ = 2000
@@ -42,15 +49,62 @@ export const TAIL_MIN_MS = 40
 export const TAIL_MAX_MS = 600
 
 export const TRANSIENT_MAX_DB = 12
-export const DRIVE_MAX_DB = 24
+export const WARMTH_MAX = 10
+export const ODD_EVEN_MAX = 100
 
 /**
- * Where Drive's scale sits: the saturator's pre-gain is
- * SAT_REF_DB + Drive − voiceLevelDb, so the file's gated RMS reaches the curve
- * at SAT_REF_DB + Drive. Calibrated against the Fatso's Input 6 render — see
- * docs/claude-dev-log.md.
+ * WARMTH — the low-end warmth/fatness combination voiced on the Saturation
+ * Bench, as two fixed layers in series: an even curve (quartic) and an odd one
+ * (tanh), each on the low band with a +24 dB bell pushing the body into the
+ * curve. CHARACTER IS FIXED; the knobs only mix. Both drives are already past
+ * the point where more drive changes anything (the quartic caps at ~5.7 % THD
+ * past ~+15 dB, the tanh flattens past ~+36), so a level knob is the honest
+ * control — Drive would mostly have been a level knob in disguise.
+ *
+ * Order: quartic, then tanh — as voiced. `amountDb` is set per layer by
+ * `warmthLayers`, not here.
  */
-export const SAT_REF_DB = -30
+export const WARMTH_LAYERS = [
+  { curve: 'quartic', driveDb: 60, loHz: 1, hiHz: 400, emphType: 'bell', emphHz: 350, emphQ: 0.5, emphDb: 24, mode: 'full' },
+  { curve: 'tanh', driveDb: 50, loHz: 1, hiHz: 300, emphType: 'bell', emphHz: 250, emphQ: 0.7, emphDb: 24, mode: 'full' },
+]
+
+/**
+ * Warmth's level law: dB on what the layers add, 3 dB per step, +6 at 10. So
+ * Warmth 8 with Odd/Even 0 is the tanh layer exactly as voiced (Amount 0).
+ */
+export const WARMTH_TOP_DB = 6
+export const WARMTH_DB_PER_STEP = 3
+
+/**
+ * How far the quartic sits under the tanh at the voicing above, on the
+ * narration it was voiced on (Southern Sunrise: −42.58 vs −25.19 dBFS added
+ * rms). Added to the quartic so Odd/Even 50 is equal loudness. ⚠ It is a
+ * property of that recording's low band; on other material the balance point
+ * moves a few dB, which the knob absorbs.
+ */
+export const WARMTH_EVEN_MATCH_DB = 17.4
+
+/** Below this the crossfade has taken a layer out; switch it off instead. */
+const WARMTH_LAYER_OFF_DB = SAT_AMOUNT_FLOOR_DB
+
+/**
+ * The two warmth layers' kernel params for a Warmth / Odd/Even setting.
+ * Odd/Even is an equal-power crossfade, so turning it keeps the combined level.
+ */
+export function warmthLayers(warmth, oddEven, refPeaksDb) {
+  const w = clamp(Number(warmth) || 0, 0, WARMTH_MAX)
+  const b = clamp(Number.isFinite(oddEven) ? oddEven : 50, 0, ODD_EVEN_MAX) / ODD_EVEN_MAX
+  const levelDb = WARMTH_TOP_DB - WARMTH_DB_PER_STEP * (WARMTH_MAX - w)
+  const gains = [Math.sin((b * Math.PI) / 2), Math.cos((b * Math.PI) / 2)] // even (quartic), odd (tanh)
+  const offsets = [WARMTH_EVEN_MATCH_DB, 0]
+  return WARMTH_LAYERS.map((l, k) => {
+    const amountDb = levelDb + offsets[k] + 20 * Math.log10(Math.max(gains[k], 1e-12))
+    const on = w > 0 && amountDb > WARMTH_LAYER_OFF_DB
+    const ref = Array.isArray(refPeaksDb) && Number.isFinite(refPeaksDb[k]) ? refPeaksDb[k] : undefined
+    return { ...l, on, amountDb: on ? amountDb : 0, ...(ref === undefined ? {} : { refPeakDb: ref }) }
+  })
+}
 
 /** Voice levels outside this are clamped: a near-silent file is not a voice. */
 const VOICE_LEVEL_MIN_DB = -60
@@ -76,19 +130,21 @@ export function toKernelParams(params) {
     // Below its minimum the Tail knob reads OFF, so it is off rather than clamped up.
     tailMs: p.tail >= TAIL_MIN_MS ? Math.min(p.tail, TAIL_MAX_MS) : 0,
     transientDb: clamp(p.transient > 0 ? p.transient : 0, 0, TRANSIENT_MAX_DB),
-    drive: p.drive > 0,
-    driveGainDb: SAT_REF_DB + clamp(p.drive > 0 ? p.drive : 0, 0, DRIVE_MAX_DB) - voice,
+    warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     outputGainDb: p.output,
   }
 }
 
+/** The Warmth stage's latency: one oversampler round trip per layer. */
+export const WARMTH_LATENCY_SAMPLES = WARMTH_LAYERS.length * SAT_BENCH_LAYER_LATENCY
+
 /**
- * Plugin latency, samples: the saturator's oversampler round trip plus the
- * shelf's split centre and lookahead. CONSTANT: the saturator stays a delay of
- * its own length at Drive 0, so no setting moves the audio.
+ * Plugin latency, samples: the Warmth stage's oversamplers plus the shelf's
+ * split centre and lookahead. CONSTANT: Warmth stays a delay of its own length
+ * at 0, so no setting moves the audio.
  */
 export function hfLimiterLatencySamples(sampleRate) {
-  return SAT_LATENCY_SAMPLES + shelfLatencySamples(sampleRate)
+  return WARMTH_LATENCY_SAMPLES + shelfLatencySamples(sampleRate)
 }
 
 /**
