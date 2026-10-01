@@ -11,7 +11,7 @@ export default {
     { label: 'Layer', text: 'Switches the layer in. Layers run top to bottom, each shaping what the one above left' },
     { label: 'Curve', text: 'The saturation shape. Quartic adds second harmonic for warmth; the odd curves (Tanh, Atan, Algebraic, Cubic) add edge and are the ones that excite' },
     { label: 'Drive', text: 'dB above the matched point. At 0 dB every curve makes the same small amount of distortion on this band, so switching curves compares character, not strength' },
-    { label: 'Low / High', text: 'The band the layer works on. Fully out at either end leaves that side open. What the curve adds stays inside the band' },
+    { label: 'Low / High', text: 'The band the layer works on. Fully out at either end leaves that side open. What the curve adds stays inside the band. Low fades its filter in from 20 Hz rather than switching it on, so an even curve\'s low weight is trimmed gradually' },
     { label: 'Emph', text: 'One filter that boosts or cuts a region on its way INTO the curve; the exact opposite filter undoes it after, so only what the curve does changes. Pick HI SHELF, BELL or LO SHELF, then set Freq, Q and Gain. Positive gain is OPTO-style (pushes the region into the curve harder, trims the harmonics it makes up top — the smoothest on a voice), negative is REV-style (pulls it out, which lifts them), 0 is off. The REV / OFF / OPTO buttons set the 2300 Hz high shelf at −20.4 / 0 / +20.4 dB' },
     { label: 'Mode', text: 'Voiced shapes the vowels only, so nothing is added to sibilants or room tone. Full shapes everything' },
     { label: 'Delta', text: 'Hear only what the layers add' },

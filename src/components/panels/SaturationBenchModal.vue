@@ -205,7 +205,7 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
               :min="SAT_BAND_MIN_HZ" :max="SAT_BAND_MAX_HZ" scale="log" :quantize="quantizeHz"
               label="Low" :accent="ACCENT" :format-value="formatHz" :value-font-px="16"
               :disabled="!sbPreview || !layer.on"
-              title="Bottom of the band this layer saturates. Fully down is open — no high-pass."
+              title="Bottom of the band this layer saturates. Fully down is open — no high-pass. The filter fades in rather than switching in: just above 20 Hz its corner is near 0 Hz and it reaches the knob's value by ~100 Hz, so the low weight an even curve adds is trimmed gradually, not all at once."
             />
             <span :style="CAPTION">{{ bandCaption(layer) }}</span>
           </div>

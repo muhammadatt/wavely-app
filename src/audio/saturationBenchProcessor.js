@@ -170,10 +170,30 @@ export function layerBand(loHz, hiHz, sampleRate) {
   return { lo: lo > SAT_BAND_MIN_HZ ? lo : null, hi: hi < top ? hi : null }
 }
 
+/**
+ * The high-pass corner a Low setting actually gets: `Low − 400 / Low`, so it
+ * reaches 0 Hz — the open band — exactly at SAT_BAND_MIN_HZ (20) and joins the
+ * knob above ~100 Hz (96 Hz at 100, 2999.87 at 3 kHz).
+ *
+ * ⚠ THE FILTER FADES IN; IT DOES NOT SWITCH IN. With a hard corner the first
+ * step off 20 Hz dropped a full 21 Hz high-pass onto what the curve ADDS, and
+ * an even curve's added signal lives mostly below 60 Hz — its difference tones
+ * and the syllable envelope it rectifies. On real narration (quartic, 20–400,
+ * bell 350 Hz +24) 20 → 21 took the layer's added rms −4.9 dB and its peak
+ * −6.7 dB in one click, all of it from the OUTPUT-side filter (the input side
+ * moved it 0.1 dB). Faded, 20 → 21 moves it 0.2 dB and the knob trims the low
+ * end gradually; the open band itself is untouched, bit for bit.
+ */
+export function bandHighpassCornerHz(loHz) {
+  const lo = Number(loHz)
+  if (!(lo > SAT_BAND_MIN_HZ)) return 0
+  return lo - (SAT_BAND_MIN_HZ * SAT_BAND_MIN_HZ) / lo
+}
+
 /** Four sections: HP·HP (or identity) then LP·LP (or identity). */
 export function layerBandSections(loHz, hiHz, sampleRate) {
   const { lo, hi } = layerBand(loHz, hiHz, sampleRate)
-  const hp = lo ? highpass(sampleRate, lo, Math.SQRT1_2) : IDENTITY
+  const hp = lo ? highpass(sampleRate, bandHighpassCornerHz(lo), Math.SQRT1_2) : IDENTITY
   const lp = hi ? lowpass(sampleRate, hi, Math.SQRT1_2) : IDENTITY
   return [hp, hp, lp, lp]
 }

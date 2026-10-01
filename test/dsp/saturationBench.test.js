@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import {
   processSaturationBenchBuffer, SaturationBenchKernel, SAT_BENCH_LATENCY_SAMPLES, SAT_BENCH_MAX_LAYERS,
   SAT_EMPH_CORNER_HZ, SAT_EMPH_DB, SAT_EMPH_Q, SAT_EMPH_TYPES, SAT_EMPH_QUICK, SAT_REF_CREST_DB,
-  emphasisSections, layerBand, normalizeLayer,
+  emphasisSections, layerBand, layerBandSections, bandHighpassCornerHz, normalizeLayer,
 } from '../../src/audio/saturationBenchProcessor.js'
 import { measureBandSpectrum, bandRefPeakDb, voicingOffsetDb } from '../../src/audio/saturationBenchAnalysis.js'
 import { toKernelParams, SATURATION_BENCH_DEFAULTS, SAT_BENCH_LAYER_PRESETS } from '../../src/audio/saturationBenchParams.js'
@@ -255,6 +255,47 @@ test('emphasis: out-of-range values are clamped, and the quick buttons are the 2
   assert.deepEqual([n.emphType, n.emphHz, n.emphQ, n.emphDb], ['hishelf', 16000, 0.3, 24])
   assert.equal(SAT_EMPH_QUICK.opto.emphDb, -SAT_EMPH_QUICK.reverse.emphDb)
   assert.deepEqual(Object.keys(SAT_EMPH_QUICK.off), ['emphDb'])
+})
+
+test('band: the Low edge fades in from open — no cliff at 20 → 20.1 Hz, open untouched', () => {
+  assert.equal(bandHighpassCornerHz(20), 0)
+  assert.equal(bandHighpassCornerHz(10), 0)
+  assert.ok(Math.abs(bandHighpassCornerHz(21) - (21 - 400 / 21)) < 1e-12)
+  assert.ok(Math.abs(bandHighpassCornerHz(100) - 96) < 1e-12)
+  assert.ok(Math.abs(bandHighpassCornerHz(3000) - 3000) < 0.2)
+  const sr = 44100
+  const n = sr * 3
+  // A vowel-like stack with a syllable envelope: an even curve rectifies it and
+  // its added signal is mostly below 60 Hz, which a hard 21 Hz corner stripped.
+  const x = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const env = 0.5 + 0.5 * Math.sin(2 * Math.PI * 3 * i / sr)
+    let v = 0
+    for (let h = 1; h <= 12; h++) v += Math.sin(2 * Math.PI * 140 * h * i / sr) / h
+    x[i] = 0.18 * env * v
+  }
+  const layer = lo => ({
+    curve: 'quartic', driveDb: 0, loHz: lo, hiHz: 400, mode: 'full', refPeakDb: -12,
+    emphType: 'bell', emphHz: 350, emphQ: 0.5, emphDb: 24,
+  })
+  const addedRms = y => {
+    let e = 0
+    for (let i = sr; i < n - L; i++) e += (y[i] - x[i]) ** 2
+    return 10 * Math.log10(e / (n - L - sr))
+  }
+  const open = render(x, sr, layers(layer(20)))
+  const next = render(x, sr, layers(layer(20.1)))
+  const one = render(x, sr, layers(layer(21)))
+  assert.ok(Math.abs(addedRms(next) - addedRms(open)) < 0.05, `20.1: ${addedRms(next)} vs open ${addedRms(open)}`)
+  assert.ok(Math.abs(addedRms(one) - addedRms(open)) < 1.5, `21: ${addedRms(one)} vs open ${addedRms(open)}`)
+  // What the first click used to do: the knob position whose faded corner is
+  // 21 Hz reproduces the old hard step, and it is a cliff on this material.
+  const hard21 = render(x, sr, layers(layer((21 + Math.sqrt(21 * 21 + 1600)) / 2)))
+  assert.ok(addedRms(hard21) < addedRms(open) - 4, `hard 21 Hz: ${addedRms(hard21)} vs open ${addedRms(open)}`)
+  // Open is still no filter at all.
+  assert.deepEqual(layerBandSections(20, 20000, sr).slice(0, 2), [
+    { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }, { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 },
+  ])
 })
 
 test('band: what a layer adds stays inside its band', () => {
