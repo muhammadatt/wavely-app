@@ -125,6 +125,18 @@ export const SAT_BAND_MIN_RATIO = Math.pow(2, 1 / 3)
 export const SAT_DRIVE_MIN_DB = -12
 export const SAT_DRIVE_MAX_DB = 60
 
+/**
+ * AMOUNT: a gain on what the layer ADDS, never on the signal itself, so the
+ * clean path is untouched at any setting and 0 dB is bit-identical to no knob.
+ * ⚠ IT EXISTS BECAUSE DRIVE RUNS OUT ON BOUNDED CURVES: the quartic's
+ * distortion caps at ~5.7 % THD, so past ~+15 dB more drive adds nothing — on
+ * real narration (quartic 1–400 Hz, bell 350 Hz +24) its added rms sat at
+ * −42.6 dBFS from +24 to +60 while a tanh layer beside it reached −25.1. Amount
+ * moves a saturated layer's level dB for dB; Drive moves how hard it bends.
+ */
+export const SAT_AMOUNT_MIN_DB = -24
+export const SAT_AMOUNT_MAX_DB = 24
+
 /** Nominal speech crest: a band's reference peak is its gated level + this. */
 export const SAT_REF_CREST_DB = 12
 /**
@@ -137,6 +149,7 @@ export const SAT_LAYER_DEFAULTS = {
   on: false,
   curve: 'quartic',
   driveDb: 0,
+  amountDb: 0,
   emphType: 'hishelf',
   emphHz: SAT_EMPH_CORNER_HZ,
   emphQ: SAT_EMPH_Q,
@@ -226,6 +239,7 @@ export function normalizeLayer(p = {}) {
     on: !!l.on,
     curve: SHAPER_CURVE_IDS.includes(l.curve) ? l.curve : SAT_LAYER_DEFAULTS.curve,
     driveDb: clamp(Number(l.driveDb) || 0, SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB),
+    amountDb: clamp(Number(l.amountDb) || 0, SAT_AMOUNT_MIN_DB, SAT_AMOUNT_MAX_DB),
     emphType: SAT_EMPH_TYPES.includes(l.emphType) ? l.emphType : SAT_LAYER_DEFAULTS.emphType,
     emphHz: clamp(Number(l.emphHz) || SAT_EMPH_CORNER_HZ, SAT_EMPH_HZ_MIN, SAT_EMPH_HZ_MAX),
     emphQ: clamp(Number(l.emphQ) || SAT_EMPH_Q, SAT_EMPH_Q_MIN, SAT_EMPH_Q_MAX),
@@ -383,6 +397,7 @@ class Layer {
     this.fn = shaperCurve(this.p.curve).f
     this.gain = 1
     this.full = new Ramp(0, rampSamples)
+    this.amount = new Ramp(1, rampSamples)
     this.bandSections = layerBandSections(this.p.loHz, this.p.hiHz, sampleRate)
     this.hasBand = false
     this.emphPre = null
@@ -398,6 +413,7 @@ class Layer {
     this.fn = shaperCurve(next.curve).f
     this.gain = layerGain(next.curve, next.driveDb, next.refPeakDb)
     this.full.set(next.mode === 'full' ? 1 : 0, immediate)
+    this.amount.set(Math.pow(10, next.amountDb / 20), immediate)
     if (next.loHz !== prev.loHz || next.hiHz !== prev.hiHz || !this.bandInit) {
       this.bandInit = true
       const { lo, hi } = layerBand(next.loHz, next.hiHz, this.sampleRate)
@@ -492,7 +508,8 @@ class Layer {
     const alpha = this.alpha
     for (let i = 0; i < n; i++) {
       const full = this.full.tick()
-      alpha[i] = w[i] + full * (1 - w[i])
+      // Amount scales only what the layer adds: alpha weights dy, never dry.
+      alpha[i] = (w[i] + full * (1 - w[i])) * this.amount.tick()
     }
     for (let ch = 0; ch < nCh; ch++) {
       const c = this.channels[ch]

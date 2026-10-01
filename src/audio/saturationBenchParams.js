@@ -20,14 +20,14 @@ const EMPH_OFF = { ...SAT_EMPH_QUICK.opto, emphDb: 0 }
  *               the vowels, none added to sibilants or room tone.
  */
 export const SAT_BENCH_LAYER_PRESETS = [
-  { on: true, curve: 'quartic', driveDb: 0, ...SAT_EMPH_QUICK.opto, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'full' },
+  { on: true, curve: 'quartic', driveDb: 0, amountDb: 0, ...SAT_EMPH_QUICK.opto, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'full' },
   // +27: REV pulls the highs out before the curve (±20.4 dB), so on a high band
   // it needs ~11 dB more drive than OFF for the same brightening (vowels +1.8 dB
   // above 5 kHz here, synthetic voice; OFF gets there by ~+15.5, OPTO already
   // has +1.75 at 0). It was +22 while the pair was ±10.2 dB.
-  { on: true, curve: 'tanh', driveDb: 27, ...SAT_EMPH_QUICK.reverse, loHz: 3000, hiHz: 20000, mode: 'voiced' },
-  { on: false, curve: 'algebraic', driveDb: 0, ...EMPH_OFF, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'voiced' },
-  { on: false, curve: 'atan', driveDb: 0, ...EMPH_OFF, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'voiced' },
+  { on: true, curve: 'tanh', driveDb: 27, amountDb: 0, ...SAT_EMPH_QUICK.reverse, loHz: 3000, hiHz: 20000, mode: 'voiced' },
+  { on: false, curve: 'algebraic', driveDb: 0, amountDb: 0, ...EMPH_OFF, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'voiced' },
+  { on: false, curve: 'atan', driveDb: 0, amountDb: 0, ...EMPH_OFF, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'voiced' },
 ]
 
 export const SATURATION_BENCH_DEFAULTS = {
@@ -50,6 +50,7 @@ export function toKernelParams(params) {
       on: !!l.on,
       curve: String(l.curve),
       driveDb: Number(l.driveDb),
+      amountDb: Number(l.amountDb ?? 0),
       emphType: String(l.emphType),
       emphHz: Number(l.emphHz),
       emphQ: Number(l.emphQ),

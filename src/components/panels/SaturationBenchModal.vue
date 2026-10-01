@@ -19,7 +19,7 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import { SHAPER_CURVES } from '../../audio/dsp/shaperCurves.js'
 import {
-  SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_BAND_HIGH_MIN_HZ,
+  SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB, SAT_AMOUNT_MIN_DB, SAT_AMOUNT_MAX_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_BAND_HIGH_MIN_HZ,
   SAT_EMPH_HZ_MIN, SAT_EMPH_HZ_MAX, SAT_EMPH_Q_MIN, SAT_EMPH_Q_MAX, SAT_EMPH_DB_MAX, SAT_EMPH_QUICK,
 } from '../../audio/saturationBenchProcessor.js'
 
@@ -90,6 +90,10 @@ function formatDrive(v) {
   return `${v > 0 ? '+' : ''}${v.toFixed(0)}`
 }
 
+function formatAmount(v) {
+  return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
+}
+
 function formatHz(v) {
   return v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `${Math.round(v)}`
 }
@@ -134,7 +138,7 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
   <FloatingWindow
     window-id="saturation-bench"
     :z="z"
-    :width="1320"
+    :width="1410"
     :accent="ACCENT"
     brand-lead="SATURATION"
     brand-tail="BENCH"
@@ -196,6 +200,18 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
               title="dB above the matched point: 0 dB puts every curve at 1 % distortion on this band's measured level, so switching curves compares character, not strength. A high band wants +12 to +20 dB to be heard."
             />
             <span :style="CAPTION">dB · MATCHED</span>
+          </div>
+
+          <div class="w-[88px] flex flex-col items-center">
+            <Knob
+              :model-value="layer.amountDb"
+              @update:model-value="v => syncLayer(k, 'amountDb', v)"
+              :min="SAT_AMOUNT_MIN_DB" :max="SAT_AMOUNT_MAX_DB" :step="0.5" bipolar
+              label="Amount" :accent="ACCENT" :format-value="formatAmount" :value-font-px="16"
+              :disabled="!sbPreview || !layer.on"
+              title="Level of what this layer adds — the clean signal is never touched. Drive sets how hard the curve bends; Amount sets how loud its result is. Use it when Drive has run out: the Quartic stops growing past about +15 dB of drive."
+            />
+            <span :style="CAPTION">dB · ADDED</span>
           </div>
 
           <div class="w-[100px] flex flex-col items-center">

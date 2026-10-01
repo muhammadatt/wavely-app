@@ -294,6 +294,28 @@ test('band: the Low knob opens at 1 Hz and its first step is gentle — no cliff
   assert.ok(twenty < addedRms(open) - 4, `20 Hz: ${twenty} vs open ${addedRms(open)}`)
 })
 
+test('amount: scales only what the layer adds — 0 dB is bit-identical, +6 dB doubles the added signal', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr, { seconds: 2 })
+  const base = { curve: 'quartic', driveDb: 30, mode: 'full', refPeakDb: -10 }
+  const ref = render(x, sr, layers(base))
+  assert.deepEqual(render(x, sr, layers({ ...base, amountDb: 0 })), ref)
+  const up = render(x, sr, layers({ ...base, amountDb: 20 * Math.log10(2) }))
+  const down = render(x, sr, layers({ ...base, amountDb: -24 }))
+  let worstUp = 0, worstDown = 0, scale = 0
+  for (let i = sr; i < x.length - L; i++) {
+    const a = ref[i] - x[i]
+    worstUp = Math.max(worstUp, Math.abs((up[i] - x[i]) - 2 * a))
+    worstDown = Math.max(worstDown, Math.abs((down[i] - x[i]) - a * Math.pow(10, -24 / 20)))
+    scale = Math.max(scale, Math.abs(a))
+  }
+  assert.ok(scale > 1e-4, 'the layer must add something to scale')
+  assert.ok(worstUp < 1e-6, `+6 dB: ${worstUp}`)
+  assert.ok(worstDown < 1e-6, `-24 dB: ${worstDown}`)
+  assert.equal(normalizeLayer({ amountDb: 99 }).amountDb, 24)
+  assert.equal(normalizeLayer({}).amountDb, 0)
+})
+
 test('band: what a layer adds stays inside its band', () => {
   const sr = 44100
   const { x, labels } = makeRichSpeech(sr)
