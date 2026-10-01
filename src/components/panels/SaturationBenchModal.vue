@@ -19,7 +19,7 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import { SHAPER_CURVES } from '../../audio/dsp/shaperCurves.js'
 import {
-  SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ,
+  SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_BAND_HIGH_MIN_HZ,
   SAT_EMPH_HZ_MIN, SAT_EMPH_HZ_MAX, SAT_EMPH_Q_MIN, SAT_EMPH_Q_MAX, SAT_EMPH_DB_MAX, SAT_EMPH_QUICK,
 } from '../../audio/saturationBenchProcessor.js'
 
@@ -205,7 +205,7 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
               :min="SAT_BAND_MIN_HZ" :max="SAT_BAND_MAX_HZ" scale="log" :quantize="quantizeHz"
               label="Low" :accent="ACCENT" :format-value="formatHz" :value-font-px="16"
               :disabled="!sbPreview || !layer.on"
-              title="Bottom of the band this layer saturates. Fully down is open — no high-pass. The filter fades in rather than switching in: just above 20 Hz its corner is near 0 Hz and it reaches the knob's value by ~100 Hz, so the low weight an even curve adds is trimmed gradually, not all at once."
+              title="Bottom of the band this layer saturates. Fully down (1 Hz) is open — no high-pass; the next step is a 2 Hz corner, so leaving open is gentle. The value is the real corner."
             />
             <span :style="CAPTION">{{ bandCaption(layer) }}</span>
           </div>
@@ -214,7 +214,7 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
             <Knob
               :model-value="layer.hiHz"
               @update:model-value="v => syncLayer(k, 'hiHz', v)"
-              :min="SAT_BAND_MIN_HZ" :max="SAT_BAND_MAX_HZ" scale="log" :quantize="quantizeHz"
+              :min="SAT_BAND_HIGH_MIN_HZ" :max="SAT_BAND_MAX_HZ" scale="log" :quantize="quantizeHz"
               label="High" :accent="ACCENT" :format-value="formatHz" :value-font-px="16"
               :disabled="!sbPreview || !layer.on"
               title="Top of the band this layer saturates. Fully up is open — no low-pass. What the curve adds is band-passed again, so nothing it makes leaves the band."

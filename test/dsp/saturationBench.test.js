@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import {
   processSaturationBenchBuffer, SaturationBenchKernel, SAT_BENCH_LATENCY_SAMPLES, SAT_BENCH_MAX_LAYERS,
   SAT_EMPH_CORNER_HZ, SAT_EMPH_DB, SAT_EMPH_Q, SAT_EMPH_TYPES, SAT_EMPH_QUICK, SAT_REF_CREST_DB,
-  emphasisSections, layerBand, layerBandSections, bandHighpassCornerHz, normalizeLayer,
+  emphasisSections, layerBand, layerBandSections, normalizeLayer, SAT_BAND_MIN_HZ,
 } from '../../src/audio/saturationBenchProcessor.js'
 import { measureBandSpectrum, bandRefPeakDb, voicingOffsetDb } from '../../src/audio/saturationBenchAnalysis.js'
 import { toKernelParams, SATURATION_BENCH_DEFAULTS, SAT_BENCH_LAYER_PRESETS } from '../../src/audio/saturationBenchParams.js'
@@ -257,16 +257,16 @@ test('emphasis: out-of-range values are clamped, and the quick buttons are the 2
   assert.deepEqual(Object.keys(SAT_EMPH_QUICK.off), ['emphDb'])
 })
 
-test('band: the Low edge fades in from open — no cliff at 20 → 20.1 Hz, open untouched', () => {
-  assert.equal(bandHighpassCornerHz(20), 0)
-  assert.equal(bandHighpassCornerHz(10), 0)
-  assert.ok(Math.abs(bandHighpassCornerHz(21) - (21 - 400 / 21)) < 1e-12)
-  assert.ok(Math.abs(bandHighpassCornerHz(100) - 96) < 1e-12)
-  assert.ok(Math.abs(bandHighpassCornerHz(3000) - 3000) < 0.2)
+test('band: the Low knob opens at 1 Hz and its first step is gentle — no cliff off the bottom', () => {
+  assert.equal(SAT_BAND_MIN_HZ, 1)
+  assert.deepEqual(layerBand(1, 20000, 44100), { lo: null, hi: null })
+  assert.deepEqual(layerBand(2, 20000, 44100), { lo: 2, hi: null })
+  // The value is the real corner — no remap.
+  assert.deepEqual(layerBandSections(30, 20000, 44100)[0], highpass(44100, 30, Math.SQRT1_2))
   const sr = 44100
   const n = sr * 3
   // A vowel-like stack with a syllable envelope: an even curve rectifies it and
-  // its added signal is mostly below 60 Hz, which a hard 21 Hz corner stripped.
+  // its added signal is mostly below 60 Hz, which the output-side filter takes.
   const x = new Float32Array(n)
   for (let i = 0; i < n; i++) {
     const env = 0.5 + 0.5 * Math.sin(2 * Math.PI * 3 * i / sr)
@@ -283,19 +283,15 @@ test('band: the Low edge fades in from open — no cliff at 20 → 20.1 Hz, open
     for (let i = sr; i < n - L; i++) e += (y[i] - x[i]) ** 2
     return 10 * Math.log10(e / (n - L - sr))
   }
-  const open = render(x, sr, layers(layer(20)))
-  const next = render(x, sr, layers(layer(20.1)))
-  const one = render(x, sr, layers(layer(21)))
-  assert.ok(Math.abs(addedRms(next) - addedRms(open)) < 0.05, `20.1: ${addedRms(next)} vs open ${addedRms(open)}`)
-  assert.ok(Math.abs(addedRms(one) - addedRms(open)) < 1.5, `21: ${addedRms(one)} vs open ${addedRms(open)}`)
-  // What the first click used to do: the knob position whose faded corner is
-  // 21 Hz reproduces the old hard step, and it is a cliff on this material.
-  const hard21 = render(x, sr, layers(layer((21 + Math.sqrt(21 * 21 + 1600)) / 2)))
-  assert.ok(addedRms(hard21) < addedRms(open) - 4, `hard 21 Hz: ${addedRms(hard21)} vs open ${addedRms(open)}`)
-  // Open is still no filter at all.
-  assert.deepEqual(layerBandSections(20, 20000, sr).slice(0, 2), [
-    { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }, { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 },
-  ])
+  const open = render(x, sr, layers(layer(1)))
+  // Open is no filter at all: identical to a layer that never set a Low edge.
+  const { loHz, ...noLow } = layer(1)
+  assert.deepEqual(render(x, sr, layers(noLow)), open)
+  const two = addedRms(render(x, sr, layers(layer(2))))
+  const twenty = addedRms(render(x, sr, layers(layer(20))))
+  assert.ok(Math.abs(two - addedRms(open)) < 1.5, `2 Hz: ${two} vs open ${addedRms(open)}`)
+  // What the first click used to be: a 20 Hz corner is a cliff on this material.
+  assert.ok(twenty < addedRms(open) - 4, `20 Hz: ${twenty} vs open ${addedRms(open)}`)
 })
 
 test('band: what a layer adds stays inside its band', () => {
@@ -316,7 +312,7 @@ test('band: what a layer adds stays inside its band', () => {
 })
 
 test('band: open edges are no filter at all, and the band never closes', () => {
-  assert.deepEqual(layerBand(20, 20000, 44100), { lo: null, hi: null })
+  assert.deepEqual(layerBand(1, 20000, 44100), { lo: null, hi: null })
   assert.deepEqual(layerBand(3000, 20000, 44100), { lo: 3000, hi: null })
   const tight = layerBand(1000, 1000, 44100)
   assert.ok(tight.hi / tight.lo >= Math.pow(2, 1 / 3) - 1e-9, JSON.stringify(tight))
