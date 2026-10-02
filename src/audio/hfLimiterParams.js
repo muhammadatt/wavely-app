@@ -26,6 +26,9 @@ export const HF_LIMITER_DEFAULTS = {
   // quartic; they are independent, and 0 is off (both 0: a pure delay).
   odd: 0,
   even: 0,
+  // AUTO makeup for the Warmth stage: take back the integrated loudness Odd
+  // and Even add, so the A/B is the character and not the level.
+  warmthAuto: false,
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured by the composable, never a
   // user setting — it is what makes a Threshold mean the same thing on a
@@ -36,6 +39,9 @@ export const HF_LIMITER_DEFAULTS = {
   // never a user setting; null until measured, and the layers fall back to
   // the nominal point.
   warmthRefPeaksDb: null,
+  // The gain AUTO applies after the Warmth stage, dB: minus the loudness change
+  // the readout measured. Measured, never a user setting; ignored with AUTO off.
+  warmthMakeupDb: 0,
 }
 
 export const FREQ_MIN_HZ = 2000
@@ -50,6 +56,8 @@ export const TAIL_MAX_MS = 600
 
 export const TRANSIENT_MAX_DB = 12
 export const WARMTH_MAX = 10
+/** AUTO makeup never moves the level further than this either way. */
+export const WARMTH_MAKEUP_MAX_DB = 24
 
 /**
  * WARMTH — the low-end warmth/fatness combination voiced on the Saturation
@@ -107,6 +115,12 @@ export function warmthActive(p) {
   return Number(p?.odd) > 0 || Number(p?.even) > 0
 }
 
+/** The makeup gain the kernel applies after the Warmth stage, dB: 0 unless AUTO and a layer is on. */
+export function warmthMakeupDb(p) {
+  if (!p?.warmthAuto || !warmthActive(p) || !Number.isFinite(p.warmthMakeupDb)) return 0
+  return clamp(p.warmthMakeupDb, -WARMTH_MAKEUP_MAX_DB, WARMTH_MAKEUP_MAX_DB)
+}
+
 /** Voice levels outside this are clamped: a near-silent file is not a voice. */
 const VOICE_LEVEL_MIN_DB = -60
 const VOICE_LEVEL_MAX_DB = 0
@@ -132,6 +146,7 @@ export function toKernelParams(params) {
     tailMs: p.tail >= TAIL_MIN_MS ? Math.min(p.tail, TAIL_MAX_MS) : 0,
     transientDb: clamp(p.transient > 0 ? p.transient : 0, 0, TRANSIENT_MAX_DB),
     warmthLayers: warmthLayers(p.odd, p.even, p.warmthRefPeaksDb),
+    warmthMakeupDb: warmthMakeupDb(p),
     outputGainDb: p.output,
   }
 }

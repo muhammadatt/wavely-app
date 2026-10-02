@@ -3,7 +3,8 @@
  *
  * Warmth → Shelf. WARMTH is two Saturation Bench layers (dsp/saturationLayers.js,
  * quartic then tanh, voiced in hfLimiterParams.WARMTH_LAYERS), 4x oversampled,
- * a pure delay at 0. SHELF, from
+ * a pure delay at 0, then its AUTO makeup gain (ahead of the shelf, so the
+ * file-relative Threshold sees a level-matched signal). SHELF, from
  * dsp/hfLimit.js (read that file for the design), is a lookahead
  * dynamic shelf that holds the band above the corner at the threshold, down to
  * a Range floor — brightness and harshness, in the HiFal / Limiter 6 HF / Fatso
@@ -28,6 +29,9 @@ export const HF_LIMITER_KERNEL_DEFAULTS = toKernelParams(HF_LIMITER_DEFAULTS)
 const LN10_OVER_20 = Math.LN10 / 20
 const dbToLin = db => Math.exp(db * LN10_OVER_20)
 
+/** AUTO makeup glides to a new value over about this long (one-pole). */
+const MAKEUP_SMOOTH_MS = 20
+
 /** Meter posts every this many 128-sample quanta (~23 ms at 44.1 kHz). */
 const METER_QUANTA = 8
 
@@ -39,6 +43,9 @@ export class HFLimiterKernel {
     this.shelf = new ShelfLimiterStage(sampleRate)
     this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length })
     this.warmthInit = false
+    this.makeupLin = 1
+    this.makeupTarget = 1
+    this.makeupCoef = 1 - Math.exp(-1 / ((MAKEUP_SMOOTH_MS / 1000) * sampleRate))
     this.latencySamples = this.warmth.latencySamples + this.shelf.latencySamples
     this.listen = 'off'
     this.dryDelays = []
@@ -71,6 +78,8 @@ export class HFLimiterKernel {
       this.warmth.setParams({ layers: p.warmthLayers }, immediate || !this.warmthInit)
       this.warmthInit = true
     }
+    this.makeupTarget = dbToLin(p.warmthMakeupDb || 0)
+    if (immediate) this.makeupLin = this.makeupTarget
     this.outputLin = dbToLin(p.outputGainDb)
   }
 
@@ -107,6 +116,7 @@ export class HFLimiterKernel {
 
     // In place: the kernel reads each input sample before it writes that output.
     this.warmth.process(outputChannels, outputChannels, n)
+    this._makeup(outputChannels, nOut, n)
     this.shelf.process(outputChannels, n)
 
     const g = this.outputLin
@@ -126,6 +136,22 @@ export class HFLimiterKernel {
         for (let i = 0; i < n; i++) out[i] *= g
       }
     }
+  }
+
+  /** The Warmth stage's AUTO makeup, gliding to its target; unity costs nothing. */
+  _makeup(chs, nCh, n) {
+    const t = this.makeupTarget
+    let m = this.makeupLin
+    if (m === t) {
+      if (t !== 1) for (let ch = 0; ch < nCh; ch++) { const c = chs[ch]; for (let i = 0; i < n; i++) c[i] *= t }
+      return
+    }
+    const k = this.makeupCoef
+    for (let i = 0; i < n; i++) {
+      m += (t - m) * k
+      for (let ch = 0; ch < nCh; ch++) chs[ch][i] *= m
+    }
+    this.makeupLin = Math.abs(m - t) < 1e-7 ? t : m
   }
 
   /** Meter readings since the last call: shelf and transient depth, dB (positive). */

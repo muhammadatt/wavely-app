@@ -70,3 +70,18 @@ test('bands only or peak only, on request', () => {
   // Too short to resolve the low bands: no band figures rather than wrong ones.
   assert.equal(measureWarmthReadout([x.subarray(0, 2000)], SR, layers).bandsDb, null)
 })
+
+test('the loudness change is what AUTO takes back: applied, the stage lands at the input loudness', async () => {
+  const { measureIntegratedLufs } = await import('../../src/audio/dsp/loudness.js')
+  const x = voice()
+  assert.ok(Math.abs(measureWarmthReadout([x], SR, warmthLayers(0, 0, REFS)).loudnessDeltaDb) < 1e-9)
+  const p = { odd: 8, even: 2.3, warmthRefPeaksDb: REFS, range: 0 }
+  const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
+  assert.ok(Math.abs(r.loudnessDeltaDb) > 0.5, `Odd 8 / Even 2.3 moved loudness ${r.loudnessDeltaDb} LU`)
+  const auto = processHFLimiterBuffer([x], SR, toKernelParams({ ...p, warmthAuto: true, warmthMakeupDb: -r.loudnessDeltaDb }))
+  const L = auto.latencySamples
+  const y = auto.channelData[0].subarray(L)
+  const lin = measureIntegratedLufs([x.subarray(0, y.length)], SR)
+  const lout = measureIntegratedLufs([y], SR)
+  assert.ok(Math.abs(lout - lin) < 0.05, `AUTO lands ${(lout - lin).toFixed(3)} LU off the input`)
+})

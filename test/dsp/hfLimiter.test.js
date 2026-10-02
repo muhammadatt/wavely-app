@@ -533,3 +533,19 @@ test('Odd/Even work only in their low band: material above it passes untouched',
   const g = db(toneAmp(q, 1500, L + SR / 4, SR) / 0.003)
   assert.ok(Math.abs(g) < 0.05, `a 1.5 kHz tone moved ${g.toFixed(3)} dB at Odd/Even 10`)
 })
+
+test('AUTO makeup: a plain gain after the Warmth stage, only with AUTO on and a layer up', () => {
+  const x = add(sine(120, 0.25), sine(240, 0.1), noise(SR, 0.01))
+  const refs = [-14, -16]
+  const p = { ...WARM, odd: 6, even: 3, warmthRefPeaksDb: refs, warmthMakeupDb: -4 }
+  const off = run(x, p).channelData[0]
+  const on = run(x, { ...p, warmthAuto: true }).channelData[0]
+  const g = 10 ** (-4 / 20)
+  let worst = 0
+  for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(on[i] - off[i] * g))
+  // From rest, the first sample is already at the makeup: no glide in.
+  assert.ok(worst < 1e-6, `AUTO differs from the stage times the makeup by ${worst}`)
+  assert.equal(toKernelParams({ ...p, warmthAuto: false }).warmthMakeupDb, 0)
+  assert.equal(toKernelParams({ ...p, warmthAuto: true, odd: 0, even: 0 }).warmthMakeupDb, 0)
+  assert.equal(toKernelParams({ ...p, warmthAuto: true, warmthMakeupDb: -60 }).warmthMakeupDb, -24)
+})

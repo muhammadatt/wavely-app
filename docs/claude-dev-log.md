@@ -5211,3 +5211,18 @@ Equivalences, measured on Southern Sunrise (SUB / LOW / BODY / LO-MID dB, peak c
 | Odd 10 / Even 10 | +11.2 +6.9 +10.3 −1.3 | +9.6 | +3.9 |
 
 Saved settings carrying `warmth`/`oddEven` are not migrated (the keys are ignored and the layers start off): the HF Limiter has no factory or user presets yet.
+
+## HF Limiter — AUTO makeup for the Warmth stage (October 2026)
+
+A MAKEUP OFF/AUTO switch beside Odd/Even. AUTO applies `−loudnessDeltaDb`, the Warmth stage's change in K-weighted integrated loudness over the selection's analysis window (measured in the readout's bands pass, which already renders the stage), as a gain between the stage and the shelf — before the shelf so the file-relative Threshold sees a level-matched signal. The kernel glides it (one-pole, 20 ms) and jumps on an immediate set, so an offline render from rest starts at the makeup. Apply re-measures if the stored makeup belongs to another Odd/Even, region or revision. The readout's bands and peak include the makeup.
+
+Southern Sunrise (bands / peak change, then with AUTO):
+
+| Setting | Loudness | OFF bands, peak Δ | AUTO bands, peak Δ |
+|---|---|---|---|
+| Odd 8 / Even 2.3 | +1.5 LU | −2.6 +1.8 +4.9 −1.5, +1.6 | −4.1 +0.4 +3.4 −3.0, +0.1 |
+| Odd 10 / Even 0 | +4.0 LU | +3.0 +6.1 +8.1 −2.5, +4.1 | −1.0 +2.1 +4.1 −6.5, +0.1 |
+| Odd 0 / Even 10 | +0.9 LU | +9.7 +0.6 +2.1 +1.1, +8.1 | +8.8 −0.3 +1.2 +0.1, +7.1 |
+| Odd 10 / Even 10 | +5.4 LU | +11.2 +6.9 +10.3 −1.3, +9.6 | +5.8 +1.5 +4.9 −6.7, +4.2 |
+
+⚠ It matches loudness, not peak: K-weighting barely counts the sub Even adds, so AUTO leaves an Even-heavy setting's peak well up. Matching sample peak or unweighted rms instead would let the sub boost pull the whole voice down, which is the opposite of a level-matched A/B.
