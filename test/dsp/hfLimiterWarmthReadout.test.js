@@ -33,7 +33,7 @@ const peakDb = chs => {
 
 test('Warmth 0 reads no change in any band, and the input peak', () => {
   const x = voice()
-  const r = measureWarmthReadout([x], SR, warmthLayers(0, 50, REFS))
+  const r = measureWarmthReadout([x], SR, warmthLayers(0, 0, REFS))
   assert.equal(r.bandsDb.length, WARMTH_READOUT_BANDS.length)
   for (const d of r.bandsDb) assert.ok(Math.abs(d) < 1e-9, `band ${d}`)
   assert.ok(Math.abs(r.peakDb - peakDb([x])) < 1e-9)
@@ -44,14 +44,14 @@ test('Warmth 0 reads no change in any band, and the input peak', () => {
 
 test('the render is aligned to the input: Warmth 0 is the input, sample for sample', () => {
   const x = voice(1)
-  const [y] = renderWarmthAligned([x], SR, warmthLayers(0, 50, REFS))
+  const [y] = renderWarmthAligned([x], SR, warmthLayers(0, 0, REFS))
   assert.equal(y.length, x.length)
   for (let i = 0; i < x.length; i++) if (y[i] !== x[i]) assert.fail(`sample ${i}: ${y[i]} vs ${x[i]}`)
 })
 
 test('the readout moves the low end and reports the stage peak the plugin delivers', () => {
   const x = voice()
-  const p = { warmth: 8, oddEven: 9, warmthRefPeaksDb: REFS, range: 0 }
+  const p = { odd: 8, even: 2.3, warmthRefPeaksDb: REFS, range: 0 }
   const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
   assert.ok(r.bandsDb.some(d => Math.abs(d) > 1), `bands ${r.bandsDb}`)
   // With the shelf out the plugin IS the stage, so their peaks agree...
@@ -64,7 +64,7 @@ test('the readout moves the low end and reports the stage peak the plugin delive
 
 test('bands only or peak only, on request', () => {
   const x = voice(1)
-  const layers = warmthLayers(5, 50, REFS)
+  const layers = warmthLayers(5, 5, REFS)
   assert.equal(measureWarmthReadout([x], SR, layers, { bands: false }).bandsDb, null)
   assert.equal(measureWarmthReadout([x], SR, layers, { peak: false }).peakDb, null)
   // Too short to resolve the low bands: no band figures rather than wrong ones.

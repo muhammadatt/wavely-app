@@ -2,10 +2,10 @@
 /**
  * HF Limiter.
  *
- * WARMTH, first in the chain, adds low-end harmonic warmth: two fixed
- * Saturation Bench layers (quartic for even, tanh for odd, both on the low
- * band). WARMTH sets how much is mixed in, 0 is off; ODD/EVEN crossfades the
- * two at constant level, 50 being equal loudness.
+ * ODD and EVEN, first in the chain, add low-end harmonic warmth: two fixed
+ * Saturation Bench layers (tanh for odd, quartic for even, both on the low
+ * band). Each knob sets how much of its layer is mixed in, independently;
+ * 0 is off. The readout under them reports what the pair did.
  * SHELF is a lookahead dynamic shelf that holds the band above FREQ at the
  * THRESHOLD (relative to the file's voice level), never deeper than RANGE, and
  * lets go over RELEASE — then, with TAIL up, over a slow second stage that only
@@ -26,7 +26,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { shelfResponseDb } from '../../audio/dsp/hfLimit.js'
 import {
   FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
-  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB, WARMTH_MAX, ODD_EVEN_MAX,
+  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB, WARMTH_MAX, warmthActive,
 } from '../../audio/hfLimiterParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
@@ -159,7 +159,6 @@ const SHAPE_OPTIONS = [
 ]
 const fmtTransient = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
 const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
-const fmtOddEven = v => (v <= 0 ? 'ODD' : v >= ODD_EVEN_MAX ? 'EVEN' : `${Math.round(v)}`)
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -311,18 +310,18 @@ async function applyAndClose() {
       </div>
 
       <div class="flex justify-center items-end gap-[28px] mt-[16px]">
-        <div class="w-[80px]" title="Low-end harmonic warmth BEFORE the limiter: an even (quartic) and an odd (tanh) saturator on the low band, voiced for body and fatness. Warmth sets how much of what they add is mixed in — the clean signal is never touched. Calibrated on this file, so a setting means the same on a quiet recording and a hot one. 0 is off">
+        <div class="w-[80px]" title="Odd harmonics on the low end, BEFORE the limiter: a tanh saturator on the low band — firmer, more edge. Sets how much of what it adds is mixed in (3 dB a step); the clean signal is never touched. Calibrated on this file, so a setting means the same on a quiet recording and a hot one. 0 is off">
           <Knob
-            :model-value="hflParams.warmth" @update:model-value="v => syncParam('warmth', v)"
+            :model-value="hflParams.odd" @update:model-value="v => syncParam('odd', v)"
             :min="0" :max="WARMTH_MAX" :step="0.1" :value-font-px="13"
-            label="Warmth" :accent="ACCENT" :format-value="fmtWarmth" :disabled="!hflPreview"
+            label="Odd" :accent="ACCENT" :format-value="fmtWarmth" :disabled="!hflPreview"
           />
         </div>
-        <div class="w-[80px]" title="Odd (tanh: firmer, more edge) to Even (quartic: rounder, fuller). The total stays at the same level as you turn it; 50 is both equally loud">
+        <div class="w-[80px]" title="Even harmonics on the low end, BEFORE the limiter: a quartic saturator on the low band — rounder, fuller. Independent of Odd: the same number adds about the same level, and the two simply add. Watch SUB in the readout. 0 is off">
           <Knob
-            :model-value="hflParams.oddEven" @update:model-value="v => syncParam('oddEven', v)"
-            :min="0" :max="ODD_EVEN_MAX" :step="1" :value-font-px="13"
-            label="Odd/Even" :accent="ACCENT" :format-value="fmtOddEven" :disabled="!hflPreview || hflParams.warmth <= 0"
+            :model-value="hflParams.even" @update:model-value="v => syncParam('even', v)"
+            :min="0" :max="WARMTH_MAX" :step="0.1" :value-font-px="13"
+            label="Even" :accent="ACCENT" :format-value="fmtWarmth" :disabled="!hflPreview"
           />
         </div>
         <div class="flex flex-col items-center gap-[8px] pb-[22px]">
@@ -336,9 +335,9 @@ async function applyAndClose() {
       </div>
 
       <div
-        v-if="hflParams.warmth > 0"
+        v-if="warmthActive(hflParams)"
         class="mt-[12px] flex justify-center items-end gap-[18px]"
-        title="What Warmth does to this selection: each low band's level change, output minus input (bands over the selection, up to its first 30 s), and how much the highest peak over the whole selection moves (after Output), with the new peak level under it. Red: a sub boost, or a peak above −1 dBFS"
+        title="What Odd and Even do to this selection: each low band's level change, output minus input (bands over the selection, up to its first 30 s), and how much the highest peak over the whole selection moves (after Output), with the new peak level under it. Red: a sub boost, or a peak above −1 dBFS"
       >
         <div v-for="c in readoutCells" :key="c.label" class="flex flex-col items-center gap-[3px]">
           <span style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.1em;color:rgba(255,255,255,.4)">{{ c.label }}</span>

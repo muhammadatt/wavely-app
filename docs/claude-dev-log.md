@@ -5193,3 +5193,21 @@ Measured on Southern Sunrise, shelf out, output vs input per band (20–60 / 60�
 | Warmth 10, O/E 100 | +10.3 | +0.5 | +2.0 | +1.2 | +2.4 |
 
 ⚠ It is not harmonics alone: at these drives the layers saturate even quiet low-band content, and what a layer "adds" includes the band's own reshaped level (a quiet 150 Hz tone moved +5.2 dB at Warmth 10). The first test written for this claimed quiet material passes at its own level and failed; it now asserts only that material above the bands is untouched. ⚠ The +6 dB top overshoots and clips at full Even.
+
+## HF Limiter — Odd and Even replace Warmth + Odd/Even (October 2026)
+
+Warmth (level) + Odd/Even (equal-power crossfade, 50 = equal loudness) assumed the useful balance spanned the whole knob. On narration it did not: the preferred setting was O/E 9, close to full Odd, because the quartic is the layer that boosts sub (Even 10 alone: +9.7 dB at 20–60 Hz). The pair is replaced by two independent 0–10 knobs, **Odd** (tanh) and **Even** (quartic), each setting its own layer's Amount by the old law (3 dB a step, +6 at 10, quartic offset +17.4 dB so equal numbers add equal rms on Southern Sunrise). There is no loudness guarantee between them any more; the readout is how the sum is judged.
+
+Equivalences, measured on Southern Sunrise (SUB / LOW / BODY / LO-MID dB, peak change, peak dBFS):
+
+| Setting | Bands | Peak Δ | Peak |
+|---|---|---|---|
+| Odd 2 / Even 2 (old W3, O/E 50) | −0.6 −0.3 +0.7 −0.2 | −0.4 | −6.1 |
+| Odd 8 / Even 2.3 (old W8, O/E 9) | −2.6 +1.8 +4.9 −1.5 | +1.6 | −4.1 |
+| Odd 8 / Even 0 | −2.7 +2.0 +4.8 −1.5 | +1.8 | −3.9 |
+| Odd 8 / Even 6 | −1.9 +1.6 +5.0 −1.5 | +2.1 | −3.6 |
+| Odd 10 / Even 0 | +3.0 +6.1 +8.1 −2.5 | +4.1 | −1.6 |
+| Odd 0 / Even 10 (old W10, O/E 100) | +9.7 +0.6 +2.1 +1.1 | +8.1 | +2.4 |
+| Odd 10 / Even 10 | +11.2 +6.9 +10.3 −1.3 | +9.6 | +3.9 |
+
+Saved settings carrying `warmth`/`oddEven` are not migrated (the keys are ignored and the layers start off): the HF Limiter has no factory or user presets yet.

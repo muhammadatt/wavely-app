@@ -8,7 +8,7 @@ import { regionAlignDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { hfLimiterEffect, HF_LIMITER_DEFAULTS } from '../audio/effects/hfLimiter.js'
-import { WARMTH_LAYERS } from '../audio/hfLimiterParams.js'
+import { WARMTH_LAYERS, warmthActive } from '../audio/hfLimiterParams.js'
 import { measureBandSpectrum, bandRefPeakDb } from '../audio/saturationBenchAnalysis.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
@@ -141,7 +141,7 @@ export function useHFLimiter() {
     if (!(name in hflParams) || name === 'voiceLevelDb' || name === 'warmthRefPeaksDb') return
     hflParams[name] = value
     pushParam(name, value)
-    if (name === 'warmth' || name === 'oddEven') scheduleWarmthReadout()
+    if (name === 'odd' || name === 'even') scheduleWarmthReadout()
   }
 
   /**
@@ -151,7 +151,7 @@ export function useHFLimiter() {
    */
   async function refreshWarmthReadout() {
     const seq = ++readoutSeq
-    if (!state.currentFile || !(hflParams.warmth > 0)) {
+    if (!state.currentFile || !warmthActive(hflParams)) {
       hflWarmthReadout.value = { bandsDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false }
       return
     }
