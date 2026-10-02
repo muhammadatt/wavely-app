@@ -5,8 +5,9 @@
  * ODD and EVEN, first in the chain, add low-end harmonic warmth: two fixed
  * Saturation Bench layers (tanh for odd, quartic for even, both on the low
  * band). Each knob sets how much of its layer is mixed in, independently;
- * 0 is off. MAKEUP AUTO takes back the loudness they add (integrated, over
- * the selection's analysis window), so the A/B is character, not level. The
+ * 0 is off. MAKEUP LOUD takes back the loudness they add (integrated, over
+ * the selection's analysis window), so the A/B is character, not level; PEAK
+ * puts the whole selection's peak back where the source had it. The
  * readout under them reports what the pair did, makeup included.
  * SHELF is a lookahead dynamic shelf that holds the band above FREQ at the
  * THRESHOLD (relative to the file's voice level), never deeper than RANGE, and
@@ -28,10 +29,11 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { shelfResponseDb } from '../../audio/dsp/hfLimit.js'
 import {
   FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
-  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB, WARMTH_MAX, warmthActive, warmthMakeupDb,
+  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB, WARMTH_MAX, warmthActive, warmthMakeupDb, warmthMakeupOn,
 } from '../../audio/hfLimiterParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
+import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -66,16 +68,18 @@ const SUB_WARN_DB = 0
 const PEAK_WARN_DBFS = -1
 const WARN = '#ff7a6b'
 
-// AUTO makeup is applied after the Warmth stage, so every figure below includes it.
+// Makeup is applied after the Warmth stage, so every figure below includes it.
 const makeupDb = computed(() => warmthMakeupDb(hflParams))
 const MAKEUP_OPTIONS = [
   { value: 'off', label: 'OFF', title: 'No makeup: Odd and Even add level as well as character' },
-  { value: 'auto', label: 'AUTO', title: 'Take back the loudness Odd and Even add (integrated loudness over the selection), so the A/B compares character, not level' },
+  { value: 'loud', label: 'LOUD', title: 'Take back the loudness Odd and Even add (integrated loudness over the selection), so the A/B compares character, not level' },
+  { value: 'peak', label: 'PEAK', title: 'Put the selection’s highest peak back where the source had it (measured over the whole selection). Can make the result louder or quieter than the source' },
 ]
 const makeupText = computed(() => {
-  if (!hflParams.warmthAuto) return ''
+  if (!warmthMakeupOn(hflParams)) return ''
   if (!warmthActive(hflParams)) return '0.0 dB'
-  if (hflWarmthReadout.value.bandsPending) return '…'
+  const r = hflWarmthReadout.value
+  if (hflParams.warmthMakeup === 'peak' ? r.peakPending : r.bandsPending) return '…'
   const v = makeupDb.value
   return `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
 })
@@ -340,12 +344,12 @@ async function applyAndClose() {
             label="Even" :accent="ACCENT" :format-value="fmtWarmth" :disabled="!hflPreview"
           />
         </div>
-        <div class="flex flex-col items-center gap-[8px] pb-[8px]" title="AUTO takes back the loudness Odd and Even add — integrated loudness, measured on the selection (up to its first 30 s) — so the A/B compares character, not level. Applied before the limiter, so Threshold sees the matched level">
+        <div class="flex flex-col items-center gap-[8px] pb-[8px]" title="LOUD takes back the loudness Odd and Even add — integrated loudness, measured on the selection (up to its first 30 s) — so the A/B compares character, not level. PEAK puts the selection’s highest peak (over the whole selection) back where the source had it. Applied before the limiter, so Threshold sees the matched level">
           <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">MAKEUP</span>
-          <DeviceChoiceRocker
-            :model-value="hflParams.warmthAuto ? 'auto' : 'off'" :options="MAKEUP_OPTIONS" :accent="ACCENT"
-            :disabled="!hflPreview" label="Makeup"
-            @update:model-value="v => syncParam('warmthAuto', v === 'auto')"
+          <DeviceDetentRotary
+            :model-value="hflParams.warmthMakeup" :options="MAKEUP_OPTIONS" :accent="ACCENT"
+            :disabled="!hflPreview" label="Makeup" :show-label="false"
+            @update:model-value="v => syncParam('warmthMakeup', v)"
           />
           <span style="font:500 9px/1 'JetBrains Mono', monospace;color:rgba(255,255,255,.45);min-height:9px">{{ makeupText }}</span>
         </div>

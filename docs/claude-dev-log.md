@@ -5226,3 +5226,19 @@ Southern Sunrise (bands / peak change, then with AUTO):
 | Odd 10 / Even 10 | +5.4 LU | +11.2 +6.9 +10.3 −1.3, +9.6 | +5.8 +1.5 +4.9 −6.7, +4.2 |
 
 ⚠ It matches loudness, not peak: K-weighting barely counts the sub Even adds, so AUTO leaves an Even-heavy setting's peak well up. Matching sample peak or unweighted rms instead would let the sub boost pull the whole voice down, which is the opposite of a level-matched A/B.
+
+## HF Limiter — PEAK makeup mode (October 2026)
+
+Pure Even read about −1 dB of peak change at modest settings with no makeup under AUTO. Measured on Southern Sunrise, it is not compression: the file's peak is negative-going (−5.70 dBFS against +8.48 dB lower on the positive side), and the quartic lifts both half-waves, so the negative peak falls as the positive one rises — Even 1/3/5: −0.47/−0.97/−1.62 dB on the negative side, +0.51/+0.99/+1.88 on the positive, loudness −0.02/−0.04/−0.05 LU, bands flat. Past ~Even 5 the positive side becomes the peak and the change turns upward. Loudness-matched makeup therefore correctly applies ~0.
+
+The switch is now OFF / LOUD / PEAK (`warmthMakeup`, a three-detent rotary; LOUD is the former AUTO). PEAK applies `inputPeakDb − peakDb` from the readout's whole-selection peak pass, so the output peak lands on the source's:
+
+| Setting | PEAK makeup | Loudness vs source | LOUD would apply |
+|---|---|---|---|
+| Even 1 | +0.47 dB | +0.45 LU | +0.02 |
+| Even 3 | +0.97 dB | +0.93 LU | +0.04 |
+| Even 5 | +0.90 dB | +0.85 LU | +0.05 |
+| Odd 8 / Even 2.3 | −1.58 dB | −0.13 LU | −1.46 |
+| Odd 10 | −4.12 dB | −0.10 LU | −4.02 |
+
+Every case lands the peak at 0.00 dB change. On Odd-led settings the two modes nearly agree; on Even-led ones PEAK turns the headroom into level. Apply waits for the peak pass in PEAK mode (`peakMeasuredFor`) and for the bands pass in LOUD mode (`loudMeasuredFor`).

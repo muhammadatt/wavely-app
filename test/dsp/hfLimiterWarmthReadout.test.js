@@ -78,10 +78,24 @@ test('the loudness change is what AUTO takes back: applied, the stage lands at t
   const p = { odd: 8, even: 2.3, warmthRefPeaksDb: REFS, range: 0 }
   const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
   assert.ok(Math.abs(r.loudnessDeltaDb) > 0.5, `Odd 8 / Even 2.3 moved loudness ${r.loudnessDeltaDb} LU`)
-  const auto = processHFLimiterBuffer([x], SR, toKernelParams({ ...p, warmthAuto: true, warmthMakeupDb: -r.loudnessDeltaDb }))
+  const auto = processHFLimiterBuffer([x], SR, toKernelParams({ ...p, warmthMakeup: 'loud', warmthMakeupDb: -r.loudnessDeltaDb }))
   const L = auto.latencySamples
   const y = auto.channelData[0].subarray(L)
   const lin = measureIntegratedLufs([x.subarray(0, y.length)], SR)
   const lout = measureIntegratedLufs([y], SR)
   assert.ok(Math.abs(lout - lin) < 0.05, `AUTO lands ${(lout - lin).toFixed(3)} LU off the input`)
+})
+
+test('PEAK makeup: the readout peak change, taken back, puts the peak where the source had it', () => {
+  // Pure Even lifts the waveform, so a negative-going peak comes DOWN: the case PEAK exists for.
+  const x = voice()
+  for (let i = 0; i < x.length; i++) x[i] = -x[i]
+  const p = { odd: 0, even: 3, warmthRefPeaksDb: REFS, range: 0 }
+  const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
+  const makeup = r.inputPeakDb - r.peakDb
+  const out = processHFLimiterBuffer([x], SR, toKernelParams({ ...p, warmthMakeup: 'peak', warmthMakeupDb: makeup }))
+  const got = peakDb([out.channelData[0].subarray(out.latencySamples)])
+  assert.ok(Math.abs(got - r.inputPeakDb) < 0.01, `peak ${got.toFixed(3)} vs source ${r.inputPeakDb.toFixed(3)} (makeup ${makeup.toFixed(2)})`)
+  // OFF ignores a measured makeup.
+  assert.equal(toKernelParams({ ...p, warmthMakeup: 'off', warmthMakeupDb: makeup }).warmthMakeupDb, 0)
 })
