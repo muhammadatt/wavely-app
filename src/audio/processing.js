@@ -916,7 +916,11 @@ export function measureHFLimiterWarmthBands(segments, start, end, params, sample
   const { warmthLayers } = toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params })
   return measureInWorker('hfLimiterWarmthReadout', segments, start, end, {
     layers: warmthLayers, bands: true, peak: whole,
-  }, sampleRate, channels).then(d => ({ bandsDb: d.bandsDb, peakDb: whole ? d.peakDb : null }))
+  }, sampleRate, channels).then(d => ({
+    bandsDb: d.bandsDb,
+    peakDb: whole ? d.peakDb : null,
+    inputPeakDb: whole ? d.inputPeakDb : null,
+  }))
 }
 
 /**
@@ -925,7 +929,8 @@ export function measureHFLimiterWarmthBands(segments, start, end, params, sample
  * so it runs on its own worker, and a newer call terminates the one in flight:
  * a knob turn must never queue behind a stale whole-chapter render, and the
  * shared measurement worker is serial. A superseded call rejects with
- * `err.cancelled = true`. Resolves the peak, dBFS.
+ * `err.cancelled = true`. Resolves `{ peakDb, inputPeakDb }`, dBFS — the
+ * stage's output peak and the region's own, over the same span.
  */
 let warmthPeakWorker = null
 let warmthPeakReject = null
@@ -951,7 +956,7 @@ export function measureHFLimiterWarmthPeak(segments, start, end, params, sampleR
     }
     worker.onmessage = (e) => {
       finish()
-      if (e.data?.type === 'done') resolve(e.data.peakDb)
+      if (e.data?.type === 'done') resolve({ peakDb: e.data.peakDb, inputPeakDb: e.data.inputPeakDb })
       else reject(new Error(e.data?.message ?? 'warmth peak failed'))
     }
     worker.onerror = (err) => {

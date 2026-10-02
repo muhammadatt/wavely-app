@@ -37,6 +37,9 @@ test('Warmth 0 reads no change in any band, and the input peak', () => {
   assert.equal(r.bandsDb.length, WARMTH_READOUT_BANDS.length)
   for (const d of r.bandsDb) assert.ok(Math.abs(d) < 1e-9, `band ${d}`)
   assert.ok(Math.abs(r.peakDb - peakDb([x])) < 1e-9)
+  // The source's own peak comes back too, so the panel can print the change: 0 here.
+  assert.ok(Math.abs(r.inputPeakDb - peakDb([x])) < 1e-9)
+  assert.ok(Math.abs(r.peakDb - r.inputPeakDb) < 1e-9)
 })
 
 test('the render is aligned to the input: Warmth 0 is the input, sample for sample', () => {

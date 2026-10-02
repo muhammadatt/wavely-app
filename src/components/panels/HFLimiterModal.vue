@@ -76,13 +76,17 @@ const readoutCells = computed(() => {
     }
   })
 })
+// The peak is shown as a CHANGE against the selection's own peak (Output
+// included), with the absolute level under it for the clipping check.
 const readoutPeak = computed(() => {
   const r = hflWarmthReadout.value
   const out = Number(hflParams.output) || 0
-  const v = r.peakDb == null ? null : r.peakDb + out
+  const abs = r.peakDb == null ? null : r.peakDb + out
+  const delta = abs == null || r.inputPeakDb == null ? null : abs - r.inputPeakDb
   return {
-    text: r.peakPending && v == null ? '…' : v == null ? '—' : v.toFixed(1),
-    warn: v != null && v > PEAK_WARN_DBFS,
+    text: r.peakPending && delta == null ? '…' : delta == null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(1)}`,
+    abs: abs == null ? 'dBFS' : `${abs.toFixed(1)} dBFS`,
+    warn: abs != null && abs > PEAK_WARN_DBFS,
     stale: r.peakPending,
   }
 })
@@ -334,7 +338,7 @@ async function applyAndClose() {
       <div
         v-if="hflParams.warmth > 0"
         class="mt-[12px] flex justify-center items-end gap-[18px]"
-        title="What Warmth does to this selection: each low band's level change, output minus input (bands over the selection, up to its first 30 s), and the highest peak over the whole selection after Output. Red: a sub boost, or a peak above −1 dBFS"
+        title="What Warmth does to this selection: each low band's level change, output minus input (bands over the selection, up to its first 30 s), and how much the highest peak over the whole selection moves (after Output), with the new peak level under it. Red: a sub boost, or a peak above −1 dBFS"
       >
         <div v-for="c in readoutCells" :key="c.label" class="flex flex-col items-center gap-[3px]">
           <span style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.1em;color:rgba(255,255,255,.4)">{{ c.label }}</span>
@@ -348,7 +352,9 @@ async function applyAndClose() {
           <span
             :style="{ font: `600 13px/1 'JetBrains Mono', monospace`, color: readoutPeak.warn ? WARN : 'rgba(255,255,255,.85)', opacity: readoutPeak.stale ? 0.45 : 1 }"
           >{{ readoutPeak.text }}</span>
-          <span style="font:500 8px/1 'JetBrains Mono', monospace;color:rgba(255,255,255,.3)">dBFS</span>
+          <span
+            :style="{ font: `500 8px/1 'JetBrains Mono', monospace`, color: readoutPeak.warn ? WARN : 'rgba(255,255,255,.3)' }"
+          >{{ readoutPeak.abs }}</span>
         </div>
       </div>
 

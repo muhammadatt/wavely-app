@@ -32,7 +32,7 @@ let levelMeasuredFor = null
 // Warmth readout: what the Warmth stage does to the selection's low end, per
 // band, and the peak it leaves (hfLimiterWarmthReadout.js). `bandsDb` /
 // `peakDb` null = not measured; the pending flags say a pass is in flight.
-const hflWarmthReadout = ref({ bandsDb: null, peakDb: null, bandsPending: false, peakPending: false })
+const hflWarmthReadout = ref({ bandsDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false })
 let readoutTimer = null
 let readoutSeq = 0
 
@@ -152,7 +152,7 @@ export function useHFLimiter() {
   async function refreshWarmthReadout() {
     const seq = ++readoutSeq
     if (!state.currentFile || !(hflParams.warmth > 0)) {
-      hflWarmthReadout.value = { bandsDb: null, peakDb: null, bandsPending: false, peakPending: false }
+      hflWarmthReadout.value = { bandsDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false }
       return
     }
     refreshLevel() // the layers' calibration must be this file's before measuring
@@ -164,17 +164,17 @@ export function useHFLimiter() {
     const params = { ...hflParams }
     hflWarmthReadout.value = { ...hflWarmthReadout.value, bandsPending: true, peakPending: true }
     try {
-      const { bandsDb, peakDb } = await measureHFLimiterWarmthBands(
+      const { bandsDb, peakDb, inputPeakDb } = await measureHFLimiterWarmthBands(
         state.segments, start, end, params, sampleRate, channels,
       )
       if (seq !== readoutSeq) return
-      hflWarmthReadout.value = { bandsDb, peakDb, bandsPending: false, peakPending: peakDb === null }
+      hflWarmthReadout.value = { bandsDb, peakDb, inputPeakDb, bandsPending: false, peakPending: peakDb === null }
       if (peakDb !== null) return
-      const wholePeak = await measureHFLimiterWarmthPeak(
+      const whole = await measureHFLimiterWarmthPeak(
         state.segments, start, end, params, sampleRate, channels,
       )
       if (seq !== readoutSeq) return
-      hflWarmthReadout.value = { ...hflWarmthReadout.value, peakDb: wholePeak, peakPending: false }
+      hflWarmthReadout.value = { ...hflWarmthReadout.value, ...whole, peakPending: false }
     } catch (err) {
       if (err?.cancelled || seq !== readoutSeq) return
       console.error('HF Limiter warmth readout failed:', err)

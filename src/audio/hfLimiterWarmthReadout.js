@@ -94,9 +94,11 @@ function peakDbOf(chs) {
  * @param {Float32Array[]} channelData the region, as `renderRegionToBuffer` gives it
  * @param {object[]} layers the two warmth layers' kernel params (`warmthLayers`)
  * @param {{ bands?: boolean, peak?: boolean }} what
- * @returns {{ bandsDb: (number|null)[] | null, peakDb: number | null }}
+ * @returns {{ bandsDb: (number|null)[] | null, peakDb: number | null, inputPeakDb: number | null }}
  *   `bandsDb[i]` is output minus input in WARMTH_READOUT_BANDS[i], null where
- *   the input has nothing there; `peakDb` is the stage's output peak, dBFS.
+ *   the input has nothing there; `peakDb` is the stage's output peak and
+ *   `inputPeakDb` the region's own, both dBFS over the same span, so the panel
+ *   can print the CHANGE.
  */
 export function measureWarmthReadout(channelData, sampleRate, layers, { bands = true, peak = true } = {}) {
   const out = renderWarmthAligned(channelData, sampleRate, layers)
@@ -108,5 +110,5 @@ export function measureWarmthReadout(channelData, sampleRate, layers, { bands = 
       bandsDb = ein.map((e, i) => (e > 1e-20 ? 10 * Math.log10(eout[i] / e) : null))
     }
   }
-  return { bandsDb, peakDb: peak ? peakDbOf(out) : null }
+  return { bandsDb, peakDb: peak ? peakDbOf(out) : null, inputPeakDb: peak ? peakDbOf(channelData) : null }
 }
