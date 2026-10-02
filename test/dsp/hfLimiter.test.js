@@ -475,6 +475,21 @@ test('Warmth 8 at full Odd is the tanh layer exactly as voiced on the Saturation
   assert.ok(worst < 1e-6, `differs from the bench by ${worst}`)
 })
 
+test('a render from rest starts at the setting, not ramping in from the defaults', () => {
+  // The kernel's constructor sets the defaults (Warmth off); the first real
+  // params must jump, or the first 20 ms glide the Warmth amount in from 0 dB.
+  const x = add(sine(120, 0.25), sine(240, 0.1))
+  const refs = [-14, -16]
+  const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 3, oddEven: 0, warmthRefPeaksDb: refs })
+  const bench = processSaturationBenchBuffer([x], SR, {
+    layers: warmthLayers(3, 0, refs),
+  }, { slots: 2 })
+  const b = bench.channelData[0], Lb = bench.latencySamples
+  let worst = 0
+  for (let i = 0; i < 0.05 * SR; i++) worst = Math.max(worst, Math.abs(y[i + L] - b[i + Lb]))
+  assert.ok(worst < 1e-6, `first 50 ms differ by ${worst}`)
+})
+
 test('Odd/Even: 0 is odd-dominant (tanh), 100 even-dominant (quartic)', () => {
   const f = 120
   const at = oddEven => {

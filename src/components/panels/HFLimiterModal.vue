@@ -38,11 +38,54 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   hflParams, hflPreview, hflDelta, hflReduction, hflTransient,
-  hflInputLevels, hflOutputLevels,
-  togglePreview, syncParam, toggleDelta, apply, teardown, closeModal,
+  hflInputLevels, hflOutputLevels, hflWarmthReadout,
+  togglePreview, syncParam, scheduleWarmthReadout, toggleDelta, apply, teardown, closeModal,
 } = useHFLimiter()
 
 const { state } = useEditorState()
+
+// The Warmth readout follows the selection and the file: re-measure when
+// either moves (an edit, a new selection), but only while the panel is live.
+watch(() => [state.selection?.start, state.selection?.end, state.revision], () => {
+  if (hflPreview.value) scheduleWarmthReadout()
+})
+
+// ── Warmth readout ──────────────────────────────────────────────────────────
+// Per band, output minus input, over the selection; the peak over the WHOLE
+// selection plus Output trim (an upper bound: the shelf only lowers peaks).
+const READOUT_BANDS = [
+  { label: 'SUB', range: '20–60' },
+  { label: 'LOW', range: '60–120' },
+  { label: 'BODY', range: '120–250' },
+  { label: 'LO-MID', range: '250–400' },
+]
+/** Flag a sub boost and a peak this close to full scale. */
+const SUB_WARN_DB = 0
+const PEAK_WARN_DBFS = -1
+const WARN = '#ff7a6b'
+
+const readoutCells = computed(() => {
+  const r = hflWarmthReadout.value
+  return READOUT_BANDS.map((b, i) => {
+    const v = r.bandsDb ? r.bandsDb[i] : null
+    return {
+      ...b,
+      text: r.bandsPending && v == null ? '…' : v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
+      warn: i === 0 && v != null && v > SUB_WARN_DB,
+      stale: r.bandsPending,
+    }
+  })
+})
+const readoutPeak = computed(() => {
+  const r = hflWarmthReadout.value
+  const out = Number(hflParams.output) || 0
+  const v = r.peakDb == null ? null : r.peakDb + out
+  return {
+    text: r.peakPending && v == null ? '…' : v == null ? '—' : v.toFixed(1),
+    warn: v != null && v > PEAK_WARN_DBFS,
+    stale: r.peakPending,
+  }
+})
 
 onMounted(() => {
   if (!hflPreview.value) togglePreview()
@@ -285,6 +328,27 @@ async function applyAndClose() {
             :disabled="!hflPreview" label="Shape"
             @update:model-value="v => syncParam('shape', v)"
           />
+        </div>
+      </div>
+
+      <div
+        v-if="hflParams.warmth > 0"
+        class="mt-[12px] flex justify-center items-end gap-[18px]"
+        title="What Warmth does to this selection: each low band's level change, output minus input (bands over the selection, up to its first 30 s), and the highest peak over the whole selection after Output. Red: a sub boost, or a peak above −1 dBFS"
+      >
+        <div v-for="c in readoutCells" :key="c.label" class="flex flex-col items-center gap-[3px]">
+          <span style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.1em;color:rgba(255,255,255,.4)">{{ c.label }}</span>
+          <span
+            :style="{ font: `600 13px/1 'JetBrains Mono', monospace`, color: c.warn ? WARN : 'rgba(255,255,255,.85)', opacity: c.stale ? 0.45 : 1 }"
+          >{{ c.text }}</span>
+          <span style="font:500 8px/1 'JetBrains Mono', monospace;color:rgba(255,255,255,.3)">{{ c.range }}</span>
+        </div>
+        <div class="flex flex-col items-center gap-[3px] pl-[14px]" style="border-left:1px solid rgba(255,255,255,.08)">
+          <span style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.1em;color:rgba(255,255,255,.4)">PEAK</span>
+          <span
+            :style="{ font: `600 13px/1 'JetBrains Mono', monospace`, color: readoutPeak.warn ? WARN : 'rgba(255,255,255,.85)', opacity: readoutPeak.stale ? 0.45 : 1 }"
+          >{{ readoutPeak.text }}</span>
+          <span style="font:500 8px/1 'JetBrains Mono', monospace;color:rgba(255,255,255,.3)">dBFS</span>
         </div>
       </div>
 

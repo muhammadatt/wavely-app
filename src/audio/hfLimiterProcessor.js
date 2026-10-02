@@ -44,10 +44,17 @@ export class HFLimiterKernel {
     this.dryDelays = []
     this.dry = []
     this.params = { ...HF_LIMITER_KERNEL_DEFAULTS }
-    this.setParams({})
+    this.setParams({}, true)
   }
 
-  setParams(partial) {
+  /**
+   * `immediate` jumps the Warmth layers' ramps to the new values. ⚠ THE FIRST
+   * REAL PARAMS MUST BE IMMEDIATE: the constructor has already set the
+   * defaults (Warmth off), so a ramped first set glided the Warmth amount in
+   * over the first 20 ms from 0 dB — a render from rest started louder than
+   * the setting (+0.4 dB of peak on narration at Warmth 3).
+   */
+  setParams(partial, immediate = false) {
     const p = { ...this.params, ...partial }
     this.params = p
     this.shelf.setParams({
@@ -60,8 +67,8 @@ export class HFLimiterKernel {
       transientDb: p.transientDb,
     })
     if (p.warmthLayers) {
-      // Ramped like the bench's own knobs, except the first set.
-      this.warmth.setParams({ layers: p.warmthLayers }, !this.warmthInit)
+      // Ramped like the bench's own knobs, except an immediate set.
+      this.warmth.setParams({ layers: p.warmthLayers }, immediate || !this.warmthInit)
       this.warmthInit = true
     }
     this.outputLin = dbToLin(p.outputGainDb)
@@ -140,7 +147,7 @@ export class HFLimiterKernel {
  */
 export function processHFLimiterBuffer(channelData, sampleRate, kernelParams = {}) {
   const kernel = new HFLimiterKernel(sampleRate)
-  kernel.setParams(kernelParams)
+  kernel.setParams(kernelParams, true)
   const n = channelData[0].length
   const output = channelData.map(() => new Float32Array(n))
   const BLOCK = 128
@@ -163,7 +170,7 @@ if (typeof registerProcessor === 'function') {
       super()
       this.kernel = new HFLimiterKernel(sampleRate)
       if (options?.processorOptions?.params) {
-        this.kernel.setParams(options.processorOptions.params)
+        this.kernel.setParams(options.processorOptions.params, true)
       }
       this.quanta = 0
       this.port.onmessage = (e) => {

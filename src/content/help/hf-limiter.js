@@ -10,6 +10,7 @@ export default {
   controls: [
     { label: 'Warmth', text: 'Low-end body and fatness before the limiter: an even and an odd saturator on the low band, voiced on the Saturation Bench. It lifts and thickens roughly 60–250 Hz rather than adding fizz, and follows the file’s level. Around 8 is the voicing it came from; above that it gets heavy fast. 0 is off' },
     { label: 'Odd/Even', text: 'Odd (firmer, more edge) to Even (rounder, more sub weight). The total stays about the same as you turn it; 50 is both equally loud' },
+    { label: 'Readout', text: 'Under the knobs while Warmth is up: how much each low band moves on this selection (SUB 20–60, LOW 60–120, BODY 120–250, LO-MID 250–400 Hz) and the highest peak over the whole selection after Output. A sub boost or a peak above −1 dBFS shows red' },
     { label: 'Freq', text: 'Where bright starts: the band above it is what the limiter listens to and turns down' },
     { label: 'Threshold', text: 'The ceiling for that band, in dB relative to the file’s voice level, so one setting does the same thing on a quiet recording and a hot one' },
     { label: 'Range', text: 'The deepest the shelf may cut, up to 24 dB. Keeps a hard S from turning into a lisp; 0 takes the shelf out' },

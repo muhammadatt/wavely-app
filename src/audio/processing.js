@@ -905,6 +905,67 @@ export function measureHFSoftenerAutoAir(segments, start, end, params, sampleRat
   }, sampleRate, channels)
 }
 
+/**
+ * The HF Limiter's Warmth readout BANDS for a region, over the usual capped
+ * analysis window. When the window is the whole region the peak comes back
+ * too; otherwise `peakDb` is null and the caller asks
+ * `measureHFLimiterWarmthPeak` for it. Resolves `{ bandsDb, peakDb }`.
+ */
+export function measureHFLimiterWarmthBands(segments, start, end, params, sampleRate, channels) {
+  const whole = analysedWholeRegion(start, end)
+  const { warmthLayers } = toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params })
+  return measureInWorker('hfLimiterWarmthReadout', segments, start, end, {
+    layers: warmthLayers, bands: true, peak: whole,
+  }, sampleRate, channels).then(d => ({ bandsDb: d.bandsDb, peakDb: whole ? d.peakDb : null }))
+}
+
+/**
+ * The Warmth stage's output peak over the WHOLE region — never the capped
+ * window, which can only read it low. It can take seconds on a long selection,
+ * so it runs on its own worker, and a newer call terminates the one in flight:
+ * a knob turn must never queue behind a stale whole-chapter render, and the
+ * shared measurement worker is serial. A superseded call rejects with
+ * `err.cancelled = true`. Resolves the peak, dBFS.
+ */
+let warmthPeakWorker = null
+let warmthPeakReject = null
+export function measureHFLimiterWarmthPeak(segments, start, end, params, sampleRate, channels) {
+  if (warmthPeakWorker) {
+    warmthPeakWorker.terminate()
+    warmthPeakWorker = null
+    const err = new Error('superseded')
+    err.cancelled = true
+    warmthPeakReject?.(err)
+  }
+  const { warmthLayers } = toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params })
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+    warmthPeakWorker = worker
+    warmthPeakReject = reject
+    const finish = () => {
+      worker.terminate()
+      if (warmthPeakWorker === worker) {
+        warmthPeakWorker = null
+        warmthPeakReject = null
+      }
+    }
+    worker.onmessage = (e) => {
+      finish()
+      if (e.data?.type === 'done') resolve(e.data.peakDb)
+      else reject(new Error(e.data?.message ?? 'warmth peak failed'))
+    }
+    worker.onerror = (err) => {
+      finish()
+      reject(err)
+    }
+    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+    worker.postMessage(
+      { __id: 0, type: 'hfLimiterWarmthReadout', channelData, sampleRate, params: { layers: warmthLayers, bands: false, peak: true } },
+      channelData.map(c => c.buffer),
+    )
+  })
+}
+
 /** Apply Air Band to a region. */
 export function applyAirBandRegion(segments, start, end, params, sampleRate, channels) {
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
