@@ -51,7 +51,7 @@ test('the render is aligned to the input: Warmth 0 is the input, sample for samp
 
 test('the readout moves the low end and reports the stage peak the plugin delivers', () => {
   const x = voice()
-  const p = { warmth: 8, oddEven: 9, warmthRefPeaksDb: REFS, range: 0 }
+  const p = { warmth: 8, oddEven: 36, warmthRefPeaksDb: REFS, range: 0 }
   const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
   assert.ok(r.bandsDb.some(d => Math.abs(d) > 1), `bands ${r.bandsDb}`)
   // With the shelf out the plugin IS the stage, so their peaks agree...
@@ -75,7 +75,7 @@ test('the loudness change is what AUTO takes back: applied, the stage lands at t
   const { measureIntegratedLufs } = await import('../../src/audio/dsp/loudness.js')
   const x = voice()
   assert.ok(Math.abs(measureWarmthReadout([x], SR, warmthLayers(0, 50, REFS)).loudnessDeltaDb) < 1e-9)
-  const p = { warmth: 8, oddEven: 9, warmthRefPeaksDb: REFS, range: 0 }
+  const p = { warmth: 8, oddEven: 36, warmthRefPeaksDb: REFS, range: 0 }
   const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
   assert.ok(Math.abs(r.loudnessDeltaDb) > 0.5, `Odd 8 / Even 2.3 moved loudness ${r.loudnessDeltaDb} LU`)
   const auto = processHFLimiterBuffer([x], SR, toKernelParams({ ...p, warmthMakeup: 'loud', warmthMakeupDb: -r.loudnessDeltaDb }))

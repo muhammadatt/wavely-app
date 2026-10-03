@@ -5276,3 +5276,15 @@ The independent Odd and Even knobs were reverted at the owner's request: Warmth 
 | Warmth 10 / O/E 100 | +8.06 | 0.00 | +0.58 | +7.40 +0.20 +1.73 +0.86 |
 
 Where the Odd/Even scale should run is still the owner's open question.
+
+## HF Limiter — Odd/Even narrowed to its useful range (October 2026)
+
+By ear the useful part of the Odd/Even knob was 0–20/25; past it the quartic mostly adds sub. The knob's 0–100 travel now spans that first quarter of the equal-power crossfade (`ODD_EVEN_SPAN` = 0.25, so new = old × 4): 0 is still pure tanh, 100 is where the old scale read 25 (tanh −0.7 dB, quartic −8.3 dB of crossfade gain before its +17.4 match), and full Even is no longer reachable. The bench voicing moves from 9 to 36; the default stays 50 (old 12.5). The readout shows the band levels barely move across the new travel on Southern Sunrise (Warmth 8):
+
+| O/E | SUB | LOW | BODY | LO-MID | Peak Δ | Loudness |
+|---|---|---|---|---|---|---|
+| 0 | −2.7 | +2.0 | +4.8 | −1.5 | +1.8 | +1.5 |
+| 36 | −2.7 | +1.8 | +4.8 | −1.5 | +1.6 | +1.4 |
+| 100 | −2.4 | +1.3 | +4.6 | −1.4 | +1.5 | +1.3 |
+
+So what the knob moves within this range is harmonic character (second against third), not band level.

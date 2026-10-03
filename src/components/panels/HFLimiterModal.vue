@@ -5,7 +5,8 @@
  * WARMTH, first in the chain, adds low-end harmonic warmth: two fixed
  * Saturation Bench layers (quartic for even, tanh for odd, both on the low
  * band). WARMTH sets how much is mixed in, 0 is off; ODD/EVEN crossfades the
- * two at constant level, 50 being equal loudness. MAKEUP LOUD takes back the
+ * two at constant level, over only the useful first quarter of the blend
+ * (ODD_EVEN_SPAN: 100 is a mostly-odd mix, not pure even). MAKEUP LOUD takes back the
  * loudness they add (integrated, over
  * the selection's analysis window), so the A/B is character, not level. GUARD turns
  * down only what they add, only where the sum would pass the selection's own
@@ -187,7 +188,7 @@ const SHAPE_OPTIONS = [
 ]
 const fmtTransient = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
 const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
-const fmtOddEven = v => (v <= 0 ? 'ODD' : v >= ODD_EVEN_MAX ? 'EVEN' : `${Math.round(v)}`)
+const fmtOddEven = v => (v <= 0 ? 'ODD' : `${Math.round(v)}`)
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -346,7 +347,7 @@ async function applyAndClose() {
             label="Warmth" :accent="ACCENT" :format-value="fmtWarmth" :disabled="!hflPreview"
           />
         </div>
-        <div class="w-[80px]" title="Odd (tanh: firmer, more edge) to Even (quartic: rounder, fuller). The total stays at the same level as you turn it; 50 is both equally loud">
+        <div class="w-[80px]" title="From pure Odd (tanh: firmer, more edge) toward Even (quartic: rounder, fuller, more sub). The added level stays about the same as you turn it. The knob covers only the useful part of the blend — past it the even side mostly adds sub; the bench voicing is 36">
           <Knob
             :model-value="hflParams.oddEven" @update:model-value="v => syncParam('oddEven', v)"
             :min="0" :max="ODD_EVEN_MAX" :step="1" :value-font-px="13"

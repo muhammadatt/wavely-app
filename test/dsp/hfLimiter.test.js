@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { HFLimiterKernel, processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import {
   toKernelParams, hfLimiterLatencySamples, HF_LIMITER_DEFAULTS,
-  WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, warmthLayers,
+  WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, ODD_EVEN_SPAN, warmthLayers,
 } from '../../src/audio/hfLimiterParams.js'
 import { shelfResponseDb, splitResponse, splitTaps } from '../../src/audio/dsp/hfLimit.js'
 import { processSaturationBenchBuffer } from '../../src/audio/dsp/saturationLayers.js'
@@ -493,30 +493,37 @@ test('a render from rest starts at the setting, not ramping in from the defaults
   assert.ok(worst < 1e-6, `first 50 ms differ by ${worst}`)
 })
 
-test('Odd/Even: 0 is odd-dominant (tanh), 100 even-dominant (quartic)', () => {
+test('Odd/Even: 0 is pure odd (tanh); turning it up brings in the even (quartic)', () => {
   const f = 120
   const at = oddEven => {
     const { channelData: [y], latencySamples: L } = run(sine(f, 0.3), { ...WARM, warmth: 10, oddEven, warmthRefPeaksDb: [-10, -10] })
     return { h2: harmonicDbc(y, f, 2, L + SR / 4, SR), h3: harmonicDbc(y, f, 3, L + SR / 4, SR) }
   }
-  const odd = at(0), even = at(100)
+  const odd = at(0), mixed = at(100)
   assert.ok(odd.h3 > odd.h2 + 10, `Odd: H2 ${odd.h2.toFixed(1)}, H3 ${odd.h3.toFixed(1)} dBc`)
-  assert.ok(even.h2 > even.h3 + 10, `Even: H2 ${even.h2.toFixed(1)}, H3 ${even.h3.toFixed(1)} dBc`)
+  assert.ok(mixed.h2 > odd.h2 + 10, `100: H2 ${mixed.h2.toFixed(1)} vs ${odd.h2.toFixed(1)} dBc at 0`)
 })
 
-test('the Warmth law: 3 dB a step, equal-power Odd/Even, the quartic matched at 50', () => {
+test('the Warmth law: 3 dB a step, equal-power Odd/Even over the first ODD_EVEN_SPAN of the blend', () => {
   const amt = (w, b) => warmthLayers(w, b).map(l => (l.on ? l.amountDb : -Infinity))
   // Warmth 8 at full Odd is the tanh at Amount 0; each step is 3 dB.
   assert.ok(Math.abs(amt(8, 0)[1]) < 1e-9)
   assert.ok(Math.abs(amt(10, 0)[1] - 6) < 1e-9)
   assert.ok(Math.abs(amt(10, 0)[1] - amt(7, 0)[1] - 9) < 1e-9)
-  // At 50 the two sit WARMTH_EVEN_MATCH_DB apart, each 3 dB under its solo level.
-  const [q, t] = amt(8, 50)
-  assert.ok(Math.abs(q - t - WARMTH_EVEN_MATCH_DB) < 1e-9, `quartic ${q}, tanh ${t}`)
-  assert.ok(Math.abs(t + 3.0103) < 1e-3, `tanh at 50: ${t}`)
-  // The ends take a layer out rather than leaving it at a vanishing level.
+  // Knob 100 is the old scale's 25: the crossfade angle is ODD_EVEN_SPAN · 90°.
+  const th = (ODD_EVEN_SPAN * Math.PI) / 2
+  const [q, t] = amt(8, 100)
+  assert.ok(Math.abs(t - 20 * Math.log10(Math.cos(th))) < 1e-9, `tanh at 100: ${t}`)
+  assert.ok(Math.abs(q - (WARMTH_EVEN_MATCH_DB + 20 * Math.log10(Math.sin(th)))) < 1e-9, `quartic at 100: ${q}`)
+  // Equal power: the two gains' squares sum to one at every position.
+  for (const b of [0, 36, 100]) {
+    const [qq, tt] = amt(8, b)
+    const p = (qq === -Infinity ? 0 : 10 ** ((qq - WARMTH_EVEN_MATCH_DB) / 10)) + 10 ** (tt / 10)
+    assert.ok(Math.abs(p - 1) < 1e-9, `power at ${b}: ${p}`)
+  }
+  // 0 takes the quartic out; 100 keeps both; Warmth 0 takes both out.
   assert.deepEqual(warmthLayers(8, 0).map(l => l.on), [false, true])
-  assert.deepEqual(warmthLayers(8, 100).map(l => l.on), [true, false])
+  assert.deepEqual(warmthLayers(8, 100).map(l => l.on), [true, true])
   assert.deepEqual(warmthLayers(0, 50).map(l => l.on), [false, false])
   // Calibration rides along when measured, and only then.
   assert.equal(warmthLayers(5, 50, [-12, -13])[1].refPeakDb, -13)

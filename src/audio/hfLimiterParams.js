@@ -25,7 +25,8 @@ export const HF_LIMITER_DEFAULTS = {
   // 0–10 — low-end harmonic warmth AHEAD of the shelf: how much of what the two
   // fixed WARMTH_LAYERS add is mixed in. 0 is off (a pure delay).
   warmth: 0,
-  // 0–100 — Odd (tanh) to Even (quartic). 50 is equal loudness.
+  // 0–100 — from pure Odd (tanh) toward Even (quartic), over the useful part
+  // of the crossfade only (ODD_EVEN_SPAN). The bench voicing is 36.
   oddEven: 50,
   // Makeup for the Warmth stage: 'off' or 'loud' — take back the integrated
   // loudness Warmth adds, so the A/B is character, not level. (A 'peak'
@@ -65,6 +66,15 @@ export const TAIL_MAX_MS = 600
 export const TRANSIENT_MAX_DB = 12
 export const WARMTH_MAX = 10
 export const ODD_EVEN_MAX = 100
+/**
+ * How much of the full Odd→Even crossfade the knob covers. The whole crossfade
+ * (pure tanh to pure quartic) was the knob's range at first; by ear only its
+ * first quarter is useful on narration — past it the quartic mostly adds sub
+ * (full Even at Warmth 10: +9.7 dB at 20–60 Hz on Southern Sunrise). So the
+ * knob's travel spans that quarter: 100 is where the old scale read 25, and
+ * the bench voicing (old 9) sits at 36.
+ */
+export const ODD_EVEN_SPAN = 0.25
 export const WARMTH_MAKEUP_MODES = ['off', 'loud']
 /** Makeup never moves the level further than this either way. */
 export const WARMTH_MAKEUP_MAX_DB = 24
@@ -97,9 +107,10 @@ export const WARMTH_DB_PER_STEP = 3
 /**
  * How far the quartic sits under the tanh at the voicing above, on the
  * narration it was voiced on (Southern Sunrise: −42.58 vs −25.19 dBFS added
- * rms). Added to the quartic so Odd/Even 50 is equal loudness. ⚠ It is a
+ * rms). Added to the quartic so the full crossfade's midpoint is equal
+ * loudness (a point the knob no longer reaches: see ODD_EVEN_SPAN). ⚠ It is a
  * property of that recording's low band; on other material the balance point
- * moves a few dB, which the knob absorbs.
+ * moves a few dB.
  */
 export const WARMTH_EVEN_MATCH_DB = 17.4
 
@@ -109,11 +120,12 @@ const WARMTH_LAYER_OFF_DB = SAT_AMOUNT_FLOOR_DB
 /**
  * The two warmth layers' kernel params for a Warmth / Odd/Even setting.
  * Odd/Even is an equal-power crossfade, so turning it keeps the combined
- * added level; the bench voicing is Warmth 8 / Odd/Even 9.
+ * added level, over the first ODD_EVEN_SPAN of the full Odd→Even travel; the
+ * bench voicing is Warmth 8 / Odd/Even 36.
  */
 export function warmthLayers(warmth, oddEven, refPeaksDb) {
   const w = clamp(Number(warmth) || 0, 0, WARMTH_MAX)
-  const b = clamp(Number.isFinite(oddEven) ? oddEven : 50, 0, ODD_EVEN_MAX) / ODD_EVEN_MAX
+  const b = ODD_EVEN_SPAN * clamp(Number.isFinite(oddEven) ? oddEven : 50, 0, ODD_EVEN_MAX) / ODD_EVEN_MAX
   const levelDb = WARMTH_TOP_DB - WARMTH_DB_PER_STEP * (WARMTH_MAX - w)
   const gains = [Math.sin((b * Math.PI) / 2), Math.cos((b * Math.PI) / 2)] // even (quartic), odd (tanh)
   const offsets = [WARMTH_EVEN_MATCH_DB, 0]
