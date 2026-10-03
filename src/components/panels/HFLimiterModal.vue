@@ -2,14 +2,15 @@
 /**
  * HF Limiter.
  *
- * ODD and EVEN, first in the chain, add low-end harmonic warmth: two fixed
- * Saturation Bench layers (tanh for odd, quartic for even, both on the low
- * band). Each knob sets how much of its layer is mixed in, independently;
- * 0 is off. MAKEUP LOUD takes back the loudness they add (integrated, over
+ * WARMTH, first in the chain, adds low-end harmonic warmth: two fixed
+ * Saturation Bench layers (quartic for even, tanh for odd, both on the low
+ * band). WARMTH sets how much is mixed in, 0 is off; ODD/EVEN crossfades the
+ * two at constant level, 50 being equal loudness. MAKEUP LOUD takes back the
+ * loudness they add (integrated, over
  * the selection's analysis window), so the A/B is character, not level. GUARD turns
  * down only what they add, only where the sum would pass the selection's own
  * peak (a lookahead limiter on the added signal, dsp/warmthGuard.js). The
- * readout under them reports what the pair did, makeup included.
+ * readout under the knobs reports what the stage did, makeup included.
  * SHELF is a lookahead dynamic shelf that holds the band above FREQ at the
  * THRESHOLD (relative to the file's voice level), never deeper than RANGE, and
  * lets go over RELEASE — then, with TAIL up, over a slow second stage that only
@@ -30,7 +31,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { shelfResponseDb } from '../../audio/dsp/hfLimit.js'
 import {
   FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
-  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB, WARMTH_MAX, warmthActive, warmthMakeupDb, warmthMakeupOn,
+  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB, WARMTH_MAX, ODD_EVEN_MAX, warmthActive, warmthMakeupDb, warmthMakeupOn,
 } from '../../audio/hfLimiterParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
@@ -71,12 +72,12 @@ const WARN = '#ff7a6b'
 // Makeup is applied after the Warmth stage, so every figure below includes it.
 const makeupDb = computed(() => warmthMakeupDb(hflParams))
 const MAKEUP_OPTIONS = [
-  { value: 'off', label: 'OFF', title: 'No makeup: Odd and Even add level as well as character' },
-  { value: 'loud', label: 'LOUD', title: 'Take back the loudness Odd and Even add (integrated loudness over the selection), so the A/B compares character, not level' },
+  { value: 'off', label: 'OFF', title: 'No makeup: Warmth adds level as well as character' },
+  { value: 'loud', label: 'LOUD', title: 'Take back the loudness Warmth adds (integrated loudness over the selection), so the A/B compares character, not level' },
 ]
 const GUARD_OPTIONS = [
-  { value: 'off', label: 'OFF', title: 'Odd and Even may raise the peak' },
-  { value: 'on', label: 'ON', title: 'Turn down only what Odd and Even add, only where the result would pass the selection’s own peak' },
+  { value: 'off', label: 'OFF', title: 'Warmth may raise the peak' },
+  { value: 'on', label: 'ON', title: 'Turn down only what Warmth adds, only where the result would pass the selection’s own peak' },
 ]
 const guardText = computed(() => {
   if (!hflParams.warmthGuard || !warmthActive(hflParams) || !hflPreview.value) return ''
@@ -186,6 +187,7 @@ const SHAPE_OPTIONS = [
 ]
 const fmtTransient = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
 const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
+const fmtOddEven = v => (v <= 0 ? 'ODD' : v >= ODD_EVEN_MAX ? 'EVEN' : `${Math.round(v)}`)
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -337,21 +339,21 @@ async function applyAndClose() {
       </div>
 
       <div class="flex justify-center items-end gap-[28px] mt-[16px]">
-        <div class="w-[80px]" title="Odd harmonics on the low end, BEFORE the limiter: a tanh saturator on the low band — firmer, more edge. Sets how much of what it adds is mixed in (3 dB a step); the clean signal is never touched. Calibrated on this file, so a setting means the same on a quiet recording and a hot one. 0 is off">
+        <div class="w-[80px]" title="Low-end harmonic warmth BEFORE the limiter: an even (quartic) and an odd (tanh) saturator on the low band, voiced for body and fatness. Warmth sets how much of what they add is mixed in — the clean signal is never touched. Calibrated on this file, so a setting means the same on a quiet recording and a hot one. 0 is off">
           <Knob
-            :model-value="hflParams.odd" @update:model-value="v => syncParam('odd', v)"
+            :model-value="hflParams.warmth" @update:model-value="v => syncParam('warmth', v)"
             :min="0" :max="WARMTH_MAX" :step="0.1" :value-font-px="13"
-            label="Odd" :accent="ACCENT" :format-value="fmtWarmth" :disabled="!hflPreview"
+            label="Warmth" :accent="ACCENT" :format-value="fmtWarmth" :disabled="!hflPreview"
           />
         </div>
-        <div class="w-[80px]" title="Even harmonics on the low end, BEFORE the limiter: a quartic saturator on the low band — rounder, fuller. Independent of Odd: the same number adds about the same level, and the two simply add. Watch SUB in the readout. 0 is off">
+        <div class="w-[80px]" title="Odd (tanh: firmer, more edge) to Even (quartic: rounder, fuller). The total stays at the same level as you turn it; 50 is both equally loud">
           <Knob
-            :model-value="hflParams.even" @update:model-value="v => syncParam('even', v)"
-            :min="0" :max="WARMTH_MAX" :step="0.1" :value-font-px="13"
-            label="Even" :accent="ACCENT" :format-value="fmtWarmth" :disabled="!hflPreview"
+            :model-value="hflParams.oddEven" @update:model-value="v => syncParam('oddEven', v)"
+            :min="0" :max="ODD_EVEN_MAX" :step="1" :value-font-px="13"
+            label="Odd/Even" :accent="ACCENT" :format-value="fmtOddEven" :disabled="!hflPreview || hflParams.warmth <= 0"
           />
         </div>
-        <div class="flex flex-col items-center gap-[8px] pb-[8px]" title="LOUD takes back the loudness Odd and Even add — integrated loudness, measured on the selection (up to its first 30 s) — so the A/B compares character, not level. For headroom, use GUARD. Applied before the limiter, so Threshold sees the matched level">
+        <div class="flex flex-col items-center gap-[8px] pb-[8px]" title="LOUD takes back the loudness Warmth adds — integrated loudness, measured on the selection (up to its first 30 s) — so the A/B compares character, not level. For headroom, use GUARD. Applied before the limiter, so Threshold sees the matched level">
           <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">MAKEUP</span>
           <DeviceChoiceRocker
             :model-value="hflParams.warmthMakeup === 'loud' ? 'loud' : 'off'" :options="MAKEUP_OPTIONS" :accent="ACCENT"
@@ -360,7 +362,7 @@ async function applyAndClose() {
           />
           <span style="font:500 9px/1 'JetBrains Mono', monospace;color:rgba(255,255,255,.45);min-height:9px">{{ makeupText }}</span>
         </div>
-        <div class="flex flex-col items-center gap-[8px] pb-[8px]" title="Peak guard: a lookahead limiter on what Odd and Even ADD, never on the voice. Where the result would pass the selection’s own peak, it turns the added warmth down for a few milliseconds — so the warmth cannot clip or eat headroom on bass peaks, and is left alone everywhere else. The figure is how far it is turning the warmth down right now">
+        <div class="flex flex-col items-center gap-[8px] pb-[8px]" title="Peak guard: a lookahead limiter on what Warmth ADDS, never on the voice. Where the result would pass the selection’s own peak, it turns the added warmth down for a few milliseconds — so the warmth cannot clip or eat headroom on bass peaks, and is left alone everywhere else. The figure is how far it is turning the warmth down right now">
           <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">GUARD</span>
           <DeviceChoiceRocker
             :model-value="hflParams.warmthGuard ? 'on' : 'off'" :options="GUARD_OPTIONS" :accent="ACCENT"
@@ -382,7 +384,7 @@ async function applyAndClose() {
       <div
         v-if="warmthActive(hflParams)"
         class="mt-[12px] flex justify-center items-end gap-[18px]"
-        title="What Odd and Even (with the guard and makeup) do to this selection: each low band's level change, output minus input (bands over the selection, up to its first 30 s), and how much the highest peak over the whole selection moves (after Output), with the new peak level under it. Red: a sub boost, or a peak above −1 dBFS"
+        title="What Warmth (with the guard and makeup) does to this selection: each low band's level change, output minus input (bands over the selection, up to its first 30 s), and how much the highest peak over the whole selection moves (after Output), with the new peak level under it. Red: a sub boost, or a peak above −1 dBFS"
       >
         <div v-for="c in readoutCells" :key="c.label" class="flex flex-col items-center gap-[3px]">
           <span style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.1em;color:rgba(255,255,255,.4)">{{ c.label }}</span>

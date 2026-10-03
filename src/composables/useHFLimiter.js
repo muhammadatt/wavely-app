@@ -149,13 +149,13 @@ export function useHFLimiter() {
     if (!(name in hflParams) || MEASURED.has(name)) return
     hflParams[name] = value
     pushParam(name, value)
-    if (name === 'odd' || name === 'even' || name === 'warmthGuard') scheduleWarmthReadout()
+    if (name === 'warmth' || name === 'oddEven' || name === 'warmthGuard') scheduleWarmthReadout()
     if (name === 'warmthMakeup') updateMakeup()
   }
 
   /** The key a measured makeup belongs to: the setting, the region and the file's state. */
   function makeupKey(start, end) {
-    return `${appState.activeDocumentId}:${state.revision}:${hflParams.odd}:${hflParams.even}:${hflParams.warmthGuard}:${start}:${end}`
+    return `${appState.activeDocumentId}:${state.revision}:${hflParams.warmth}:${hflParams.oddEven}:${hflParams.warmthGuard}:${start}:${end}`
   }
 
   /**

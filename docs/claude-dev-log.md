@@ -5263,3 +5263,16 @@ The prototype ducked the added signal 3.4 % of the time at the bench voicing (�
 ## HF Limiter — PEAK makeup removed (October 2026)
 
 With GUARD holding the peak at the source's by turning down only the added warmth, PEAK makeup had no job left: it held the same peak by cutting the whole selection (spending the warmth's entire loudness gain at the bench voicing), and on pure Even it turned the headroom the quartic frees into level. Removed; MAKEUP is back to a two-way OFF / LOUD rocker. LOUD stays because it answers a different question — level-matching the A/B — that GUARD does not: with GUARD on, Odd 8 / Even 2.3 is still +1.44 LU louder than the source, so an un-matched comparison favours the processed side on loudness alone. A saved `'peak'` reads as OFF (tested).
+
+## HF Limiter — Warmth + Odd/Even restored (October 2026)
+
+The independent Odd and Even knobs were reverted at the owner's request: Warmth (0–10, level) and Odd/Even (0–100, equal-power, 50 = equal added rms) are back, exactly the law they had (`warmthLayers(warmth, oddEven, refs)`). Everything built on top of the independent knobs carries over unchanged — the readout, LOUD makeup and the peak guard all read the two layers' kernel params, not the knobs. The guard re-measured on Southern Sunrise with reachable settings (peak change off → on, loudness with guard):
+
+| Setting | Off peak | Guard peak | Guard loudness | Guard bands (SUB LOW BODY LO-MID) |
+|---|---|---|---|---|
+| Warmth 8 / O/E 9 | +1.56 | 0.00 | +1.42 LU | −2.70 +1.74 +4.77 −1.51 |
+| Warmth 10 / O/E 0 | +4.12 | 0.00 | +3.73 | +2.61 +5.81 +7.61 −2.34 |
+| Warmth 10 / O/E 50 | +4.28 | 0.00 | +2.58 | +3.20 +3.13 +6.91 −1.41 |
+| Warmth 10 / O/E 100 | +8.06 | 0.00 | +0.58 | +7.40 +0.20 +1.73 +0.86 |
+
+Where the Odd/Even scale should run is still the owner's open question.

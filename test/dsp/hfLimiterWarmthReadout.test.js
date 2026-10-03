@@ -33,7 +33,7 @@ const peakDb = chs => {
 
 test('Warmth 0 reads no change in any band, and the input peak', () => {
   const x = voice()
-  const r = measureWarmthReadout([x], SR, warmthLayers(0, 0, REFS))
+  const r = measureWarmthReadout([x], SR, warmthLayers(0, 50, REFS))
   assert.equal(r.bandsDb.length, WARMTH_READOUT_BANDS.length)
   for (const d of r.bandsDb) assert.ok(Math.abs(d) < 1e-9, `band ${d}`)
   assert.ok(Math.abs(r.peakDb - peakDb([x])) < 1e-9)
@@ -44,14 +44,14 @@ test('Warmth 0 reads no change in any band, and the input peak', () => {
 
 test('the render is aligned to the input: Warmth 0 is the input, sample for sample', () => {
   const x = voice(1)
-  const [y] = renderWarmthAligned([x], SR, warmthLayers(0, 0, REFS))
+  const [y] = renderWarmthAligned([x], SR, warmthLayers(0, 50, REFS))
   assert.equal(y.length, x.length)
   for (let i = 0; i < x.length; i++) if (y[i] !== x[i]) assert.fail(`sample ${i}: ${y[i]} vs ${x[i]}`)
 })
 
 test('the readout moves the low end and reports the stage peak the plugin delivers', () => {
   const x = voice()
-  const p = { odd: 8, even: 2.3, warmthRefPeaksDb: REFS, range: 0 }
+  const p = { warmth: 8, oddEven: 9, warmthRefPeaksDb: REFS, range: 0 }
   const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
   assert.ok(r.bandsDb.some(d => Math.abs(d) > 1), `bands ${r.bandsDb}`)
   // With the shelf out the plugin IS the stage, so their peaks agree...
@@ -64,7 +64,7 @@ test('the readout moves the low end and reports the stage peak the plugin delive
 
 test('bands only or peak only, on request', () => {
   const x = voice(1)
-  const layers = warmthLayers(5, 5, REFS)
+  const layers = warmthLayers(5, 50, REFS)
   assert.equal(measureWarmthReadout([x], SR, layers, { bands: false }).bandsDb, null)
   assert.equal(measureWarmthReadout([x], SR, layers, { peak: false }).peakDb, null)
   // Too short to resolve the low bands: no band figures rather than wrong ones.
@@ -74,8 +74,8 @@ test('bands only or peak only, on request', () => {
 test('the loudness change is what AUTO takes back: applied, the stage lands at the input loudness', async () => {
   const { measureIntegratedLufs } = await import('../../src/audio/dsp/loudness.js')
   const x = voice()
-  assert.ok(Math.abs(measureWarmthReadout([x], SR, warmthLayers(0, 0, REFS)).loudnessDeltaDb) < 1e-9)
-  const p = { odd: 8, even: 2.3, warmthRefPeaksDb: REFS, range: 0 }
+  assert.ok(Math.abs(measureWarmthReadout([x], SR, warmthLayers(0, 50, REFS)).loudnessDeltaDb) < 1e-9)
+  const p = { warmth: 8, oddEven: 9, warmthRefPeaksDb: REFS, range: 0 }
   const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
   assert.ok(Math.abs(r.loudnessDeltaDb) > 0.5, `Odd 8 / Even 2.3 moved loudness ${r.loudnessDeltaDb} LU`)
   const auto = processHFLimiterBuffer([x], SR, toKernelParams({ ...p, warmthMakeup: 'loud', warmthMakeupDb: -r.loudnessDeltaDb }))
@@ -87,7 +87,7 @@ test('the loudness change is what AUTO takes back: applied, the stage lands at t
 })
 
 test('a saved PEAK makeup reads as off: the mode is gone', () => {
-  const p = { odd: 0, even: 3, warmthRefPeaksDb: REFS, warmthMakeupDb: 1.2 }
+  const p = { warmth: 3, oddEven: 100, warmthRefPeaksDb: REFS, warmthMakeupDb: 1.2 }
   assert.equal(toKernelParams({ ...p, warmthMakeup: 'peak' }).warmthMakeupDb, 0)
   assert.equal(toKernelParams({ ...p, warmthMakeup: 'off' }).warmthMakeupDb, 0)
   assert.equal(toKernelParams({ ...p, warmthMakeup: 'loud' }).warmthMakeupDb, 1.2)
@@ -96,7 +96,7 @@ test('a saved PEAK makeup reads as off: the mode is gone', () => {
 test('the readout renders the guard: with it on, the peak change is never above zero', () => {
   const x = voice()
   const src = peakDb([x])
-  const p = { odd: 10, even: 4, warmthRefPeaksDb: REFS, warmthCeilingDb: src, range: 0 }
+  const p = { warmth: 10, oddEven: 30, warmthRefPeaksDb: REFS, warmthCeilingDb: src, range: 0 }
   const k = toKernelParams({ ...p, warmthGuard: true })
   const open = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
   const held = measureWarmthReadout([x], SR, k.warmthLayers, { guard: k.warmthGuard })

@@ -8,11 +8,11 @@ export default {
   ],
 
   controls: [
-    { label: 'Odd', text: 'Low-end odd harmonics before the limiter: a tanh saturator on the low band, voiced on the Saturation Bench — firmer, more edge. 3 dB a step on what it adds; follows the file’s level. Around 8 is the voicing it came from. 0 is off' },
-    { label: 'Even', text: 'Low-end even harmonics: a quartic saturator on the same band — rounder, fuller, and the one that adds sub weight. Independent of Odd: the same number adds about the same level, and the two simply add, so watch SUB and PEAK in the readout. The bench voicing is Odd 8 with Even around 2. 0 is off' },
-    { label: 'Makeup', text: 'OFF leaves the level Odd and Even add. LOUD takes back the loudness they add — integrated loudness over the selection (its first 30 s on a long one) — so switching the plugin in and out compares character, not level. The amount shows under the switch, and the readout includes it. Applied before the limiter, so Threshold sees the matched level. LOUD does not protect the peak; GUARD does' },
-    { label: 'Guard', text: 'A peak guard for Odd and Even. The warmth sits on the low end, so it peaks with the bass peaks and can push the result past where the source peaked. With the guard on, only the added warmth is turned down, only for the few milliseconds around those moments, so the result never peaks above the selection’s own peak and the warmth is left alone everywhere else. The figure under the switch is how far it is turning the warmth down right now. Use it with LOUD makeup to keep both the level match and the headroom' },
-    { label: 'Readout', text: 'Under the knobs while Odd or Even is up: how much each low band moves on this selection (SUB 20–60, LOW 60–120, BODY 120–250, LO-MID 250–400 Hz) and how far the highest peak over the whole selection moves after Output, in dB against the selection’s own peak, with the new peak in dBFS under it. A sub boost or a new peak above −1 dBFS shows red' },
+    { label: 'Warmth', text: 'Low-end body and fatness before the limiter: an even and an odd saturator on the low band, voiced on the Saturation Bench. It lifts and thickens roughly 60–250 Hz rather than adding fizz, and follows the file’s level. Around 8 is the voicing it came from; above that it gets heavy fast. 0 is off' },
+    { label: 'Odd/Even', text: 'Odd (firmer, more edge) to Even (rounder, more sub weight). The added level stays about the same as you turn it; 50 is both equally loud. The bench voicing sits near the Odd end (about 9); watch SUB in the readout as you move toward Even' },
+    { label: 'Makeup', text: 'OFF leaves the level Warmth adds. LOUD takes back the loudness Warmth adds — integrated loudness over the selection (its first 30 s on a long one) — so switching the plugin in and out compares character, not level. The amount shows under the switch, and the readout includes it. Applied before the limiter, so Threshold sees the matched level. LOUD does not protect the peak; GUARD does' },
+    { label: 'Guard', text: 'A peak guard for Warmth. The warmth sits on the low end, so it peaks with the bass peaks and can push the result past where the source peaked. With the guard on, only the added warmth is turned down, only for the few milliseconds around those moments, so the result never peaks above the selection’s own peak and the warmth is left alone everywhere else. The figure under the switch is how far it is turning the warmth down right now. Use it with LOUD makeup to keep both the level match and the headroom' },
+    { label: 'Readout', text: 'Under the knobs while Warmth is up: how much each low band moves on this selection (SUB 20–60, LOW 60–120, BODY 120–250, LO-MID 250–400 Hz) and how far the highest peak over the whole selection moves after Output, in dB against the selection’s own peak, with the new peak in dBFS under it. A sub boost or a new peak above −1 dBFS shows red' },
     { label: 'Freq', text: 'Where bright starts: the band above it is what the limiter listens to and turns down' },
     { label: 'Threshold', text: 'The ceiling for that band, in dB relative to the file’s voice level, so one setting does the same thing on a quiet recording and a hot one' },
     { label: 'Range', text: 'The deepest the shelf may cut, up to 24 dB. Keeps a hard S from turning into a lisp; 0 takes the shelf out' },
@@ -39,7 +39,7 @@ export default {
     'For sibilance on its own, HF Softener knows more about voices; this is the general-purpose ceiling',
     'An S that starts very abruptly after silence can catch a little Transient in its first millisecond; if an S sounds blunted, lower Transient',
     'For a Fatso Warmth sound, start from WARM, Freq 2.3 kHz, Threshold −1 dB, Range 16 dB, Release 30 ms, Tail off and Output +0.7 dB',
-    'Odd and Even come first, so the limiter still holds the top end after the low end has been thickened',
+    'Warmth comes first, so the limiter still holds the top end after the low end has been thickened',
     'WARM hears more of the spectrum than TIGHT, so at the same Threshold it cuts more often',
   ],
 }
