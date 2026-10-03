@@ -26,7 +26,7 @@ export const HF_LIMITER_DEFAULTS = {
   // fixed WARMTH_LAYERS add is mixed in. 0 is off (a pure delay).
   warmth: 0,
   // 0–100 — from pure Odd (tanh) toward Even (quartic), over the useful part
-  // of the crossfade only (ODD_EVEN_SPAN). The bench voicing is 36.
+  // of the crossfade only (ODD_EVEN_SPAN). The bench voicing is 36 (at Warmth 5).
   oddEven: 50,
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured by the composable, never a
@@ -87,11 +87,25 @@ export const WARMTH_LAYERS = [
 ]
 
 /**
- * Warmth's level law: dB on what the layers add, 3 dB per step, +6 at 10. So
- * Warmth 8 with Odd/Even 0 is the tanh layer exactly as voiced (Amount 0).
+ * Warmth's level law: LINEAR IN AMPLITUDE. What the layers add scales in
+ * proportion to the knob — Warmth 5 adds half of Warmth 10 — topping out at
+ * +6 dB on the layers' Amount at 10.
+ *
+ * ⚠ IT WAS 3 dB A STEP, AND THAT SOUNDED BACKWARDS. Even dB steps on the
+ * ADDED signal are uneven steps in what you hear: at the bottom the added
+ * signal sits 20+ dB under the voice and moves the sum by almost nothing, so
+ * the effect crept in and then took off near the top (Southern Sunrise, body
+ * 120–250 Hz: +0.5 / +1.0 / +1.9 / +3.6 / +6.3 / +8.1 dB at Warmth 1/3/5/7/9/10;
+ * each step ~1.35× the last). Linear amplitude spreads the change out evenly.
+ * The top (+6 at 10) is unchanged; Warmth 5 is now Amount 0, the bench voicing.
  */
 export const WARMTH_TOP_DB = 6
-export const WARMTH_DB_PER_STEP = 3
+
+/** The Amount (dB) a Warmth setting gives before the Odd/Even split; −∞ at 0. */
+export function warmthLevelDb(warmth) {
+  const w = clamp(Number(warmth) || 0, 0, WARMTH_MAX)
+  return w > 0 ? WARMTH_TOP_DB + 20 * Math.log10(w / WARMTH_MAX) : -Infinity
+}
 
 /**
  * How far the quartic sits under the tanh at the voicing above, on the
@@ -115,7 +129,7 @@ const WARMTH_LAYER_OFF_DB = SAT_AMOUNT_FLOOR_DB
 export function warmthLayers(warmth, oddEven, refPeaksDb) {
   const w = clamp(Number(warmth) || 0, 0, WARMTH_MAX)
   const b = ODD_EVEN_SPAN * clamp(Number.isFinite(oddEven) ? oddEven : 50, 0, ODD_EVEN_MAX) / ODD_EVEN_MAX
-  const levelDb = WARMTH_TOP_DB - WARMTH_DB_PER_STEP * (WARMTH_MAX - w)
+  const levelDb = warmthLevelDb(w)
   const gains = [Math.sin((b * Math.PI) / 2), Math.cos((b * Math.PI) / 2)] // even (quartic), odd (tanh)
   const offsets = [WARMTH_EVEN_MATCH_DB, 0]
   return WARMTH_LAYERS.map((l, k) => {

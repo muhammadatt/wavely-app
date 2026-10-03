@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { HFLimiterKernel, processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import {
   toKernelParams, hfLimiterLatencySamples, HF_LIMITER_DEFAULTS,
-  WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, ODD_EVEN_SPAN, warmthLayers,
+  WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
 } from '../../src/audio/hfLimiterParams.js'
 import { shelfResponseDb, splitResponse, splitTaps } from '../../src/audio/dsp/hfLimit.js'
 import { processSaturationBenchBuffer } from '../../src/audio/dsp/saturationLayers.js'
@@ -461,12 +461,13 @@ test('Warmth 0 leaves the audio untouched', () => {
   for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
 })
 
-test('Warmth 8 at full Odd is the tanh layer exactly as voiced on the Saturation Bench', () => {
+test('Warmth at full Odd is the tanh layer as voiced on the Saturation Bench, at the law\'s Amount', () => {
   const x = add(sine(120, 0.25), sine(240, 0.1), noise(SR, 0.01))
   const refs = [-14, -16]
   const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 8, oddEven: 0, warmthRefPeaksDb: refs })
+  const amountDb = warmthLayers(8, 0)[1].amountDb
   const bench = processSaturationBenchBuffer([x], SR, {
-    layers: [{ on: false }, { ...WARMTH_LAYERS[1], on: true, amountDb: 0, refPeakDb: refs[1] }],
+    layers: [{ on: false }, { ...WARMTH_LAYERS[1], on: true, amountDb, refPeakDb: refs[1] }],
   }, { slots: 2 })
   const b = bench.channelData[0], Lb = bench.latencySamples
   let worst = 0, added = 0
@@ -504,20 +505,25 @@ test('Odd/Even: 0 is pure odd (tanh); turning it up brings in the even (quartic)
   assert.ok(mixed.h2 > odd.h2 + 10, `100: H2 ${mixed.h2.toFixed(1)} vs ${odd.h2.toFixed(1)} dBc at 0`)
 })
 
-test('the Warmth law: 3 dB a step, equal-power Odd/Even over the first ODD_EVEN_SPAN of the blend', () => {
+test('the Warmth law: linear in amplitude to +6 dB, equal-power Odd/Even over the first ODD_EVEN_SPAN of the blend', () => {
   const amt = (w, b) => warmthLayers(w, b).map(l => (l.on ? l.amountDb : -Infinity))
-  // Warmth 8 at full Odd is the tanh at Amount 0; each step is 3 dB.
-  assert.ok(Math.abs(amt(8, 0)[1]) < 1e-9)
-  assert.ok(Math.abs(amt(10, 0)[1] - 6) < 1e-9)
-  assert.ok(Math.abs(amt(10, 0)[1] - amt(7, 0)[1] - 9) < 1e-9)
+  // The top is +6 dB at full Odd; the added amplitude is proportional to the knob.
+  assert.ok(Math.abs(amt(10, 0)[1] - WARMTH_TOP_DB) < 1e-9)
+  for (const w of [1, 2.5, 5, 8]) {
+    const ratio = 10 ** ((amt(w, 0)[1] - amt(10, 0)[1]) / 20)
+    assert.ok(Math.abs(ratio - w / 10) < 1e-12, `Warmth ${w}: amplitude ratio ${ratio}`)
+  }
+  // So Warmth 5 is half of 10: Amount 0, the bench voicing, within float rounding.
+  assert.ok(Math.abs(amt(5, 0)[1] - (WARMTH_TOP_DB + 20 * Math.log10(0.5))) < 1e-9)
   // Knob 100 is the old scale's 25: the crossfade angle is ODD_EVEN_SPAN · 90°.
   const th = (ODD_EVEN_SPAN * Math.PI) / 2
-  const [q, t] = amt(8, 100)
+  const lv = WARMTH_TOP_DB + 20 * Math.log10(0.8) // Warmth 8's level before the split
+  const [q, t] = amt(8, 100).map(v => v - lv)
   assert.ok(Math.abs(t - 20 * Math.log10(Math.cos(th))) < 1e-9, `tanh at 100: ${t}`)
   assert.ok(Math.abs(q - (WARMTH_EVEN_MATCH_DB + 20 * Math.log10(Math.sin(th)))) < 1e-9, `quartic at 100: ${q}`)
   // Equal power: the two gains' squares sum to one at every position.
   for (const b of [0, 36, 100]) {
-    const [qq, tt] = amt(8, b)
+    const [qq, tt] = amt(8, b).map(v => v - lv)
     const p = (qq === -Infinity ? 0 : 10 ** ((qq - WARMTH_EVEN_MATCH_DB) / 10)) + 10 ** (tt / 10)
     assert.ok(Math.abs(p - 1) < 1e-9, `power at ${b}: ${p}`)
   }
