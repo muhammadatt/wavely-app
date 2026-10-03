@@ -99,3 +99,18 @@ test('PEAK makeup: the readout peak change, taken back, puts the peak where the 
   // OFF ignores a measured makeup.
   assert.equal(toKernelParams({ ...p, warmthMakeup: 'off', warmthMakeupDb: makeup }).warmthMakeupDb, 0)
 })
+
+test('the readout renders the guard: with it on, the peak change is never above zero', () => {
+  const x = voice()
+  const src = peakDb([x])
+  const p = { odd: 10, even: 4, warmthRefPeaksDb: REFS, warmthCeilingDb: src, range: 0 }
+  const k = toKernelParams({ ...p, warmthGuard: true })
+  const open = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
+  const held = measureWarmthReadout([x], SR, k.warmthLayers, { guard: k.warmthGuard })
+  assert.ok(open.peakDb > src + 0.5, `the fixture must overshoot: ${(open.peakDb - src).toFixed(2)} dB`)
+  assert.ok(held.peakDb <= src + 1e-5, `guarded readout peak ${(held.peakDb - src).toFixed(4)} dB over the source`)
+  // ...and it is what the plugin delivers (shelf out).
+  const full = processHFLimiterBuffer([x], SR, k)
+  const y = full.channelData[0].subarray(full.latencySamples)
+  assert.ok(Math.abs(peakDb([y]) - held.peakDb) < 1e-3, `plugin ${peakDb([y])} vs readout ${held.peakDb}`)
+})

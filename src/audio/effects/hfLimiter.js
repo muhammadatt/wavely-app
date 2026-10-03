@@ -27,6 +27,7 @@ export function createHFLimiter(audioContext) {
   let destroyed = false
   let reductionDb = 0
   let transientDb = 0
+  let guardDb = 0
   // Monitor tap, kept out of `params` on purpose: parameters are what the
   // apply path renders with, and a monitor mode must never be one of them.
   let listen = 'off'
@@ -44,6 +45,7 @@ export function createHFLimiter(audioContext) {
         if (e.data?.type !== 'gr') return
         reductionDb = e.data.reductionDb
         transientDb = e.data.transientDb ?? 0
+        guardDb = e.data.guardDb ?? 0
       }
       worklet.port.postMessage({ type: 'listen', mode: listen })
       input.disconnect(preOutput)
@@ -84,6 +86,11 @@ export function createHFLimiter(audioContext) {
     /** The onset softener's deepest cut since the last meter post, positive dB. */
     getTransient() {
       return transientDb
+    },
+
+    /** How far the Warmth peak guard turned the added signal down since the last post, positive dB. */
+    getGuard() {
+      return guardDb
     },
 
     setListen(mode) {

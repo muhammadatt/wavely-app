@@ -4,7 +4,7 @@ import { useWindows } from './useWindows.js'
 import {
   applyHFLimiterRegion, computePeakCache, measureHFLimiterWarmthBands, measureHFLimiterWarmthPeak,
 } from '../audio/processing.js'
-import { regionAlignDb } from '../audio/analysisWindow.js'
+import { regionAlignDb, regionPeakDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { hfLimiterEffect, HF_LIMITER_DEFAULTS } from '../audio/effects/hfLimiter.js'
@@ -25,6 +25,8 @@ const hflPreview = ref(false)
 const hflDelta = ref(false)
 const hflReduction = ref(0)
 const hflTransient = ref(0)
+// How far the Warmth peak guard is turning the added signal down, positive dB.
+const hflGuard = ref(0)
 const hflInputLevels = ref([])
 const hflOutputLevels = ref([])
 let meterId = null
@@ -40,7 +42,7 @@ let readoutSeq = 0
 // bands pass; PEAK needs the whole-region peak, which can come later.
 let loudMeasuredFor = null
 let peakMeasuredFor = null
-const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthMakeupDb'])
+const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthMakeupDb', 'warmthCeilingDb'])
 
 export function useHFLimiter() {
   const {
@@ -69,6 +71,7 @@ export function useHFLimiter() {
         hflOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
         hflReduction.value = nodes.getReduction()
         hflTransient.value = nodes.getTransient()
+        hflGuard.value = nodes.getGuard?.() ?? 0
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -84,6 +87,7 @@ export function useHFLimiter() {
     hflOutputLevels.value = []
     hflReduction.value = 0
     hflTransient.value = 0
+    hflGuard.value = 0
   }
 
   function pushParam(name, value) {
@@ -147,13 +151,13 @@ export function useHFLimiter() {
     if (!(name in hflParams) || MEASURED.has(name)) return
     hflParams[name] = value
     pushParam(name, value)
-    if (name === 'odd' || name === 'even') scheduleWarmthReadout()
+    if (name === 'odd' || name === 'even' || name === 'warmthGuard') scheduleWarmthReadout()
     if (name === 'warmthMakeup') updateMakeup()
   }
 
   /** The key a measured makeup belongs to: the setting, the region and the file's state. */
   function makeupKey(start, end) {
-    return `${appState.activeDocumentId}:${state.revision}:${hflParams.odd}:${hflParams.even}:${start}:${end}`
+    return `${appState.activeDocumentId}:${state.revision}:${hflParams.odd}:${hflParams.even}:${hflParams.warmthGuard}:${start}:${end}`
   }
 
   /**
@@ -180,6 +184,20 @@ export function useHFLimiter() {
     return loudMeasuredFor === key
   }
 
+  /**
+   * The peak guard's ceiling: the selection's own peak (the whole file with
+   * nothing selected). Cheap — a scan of the source, no render — so it is
+   * re-read whenever the readout or apply runs.
+   */
+  function refreshCeiling(start, end) {
+    if (!state.currentFile || !(end > start)) return
+    const db = regionPeakDb(state.segments, start, end, state.currentFile.sampleRate, state.currentFile.channels)
+    const v = Number.isFinite(db) ? db : null
+    if (hflParams.warmthCeilingDb === v) return
+    hflParams.warmthCeilingDb = v
+    pushParam('warmthCeilingDb', v)
+  }
+
   function selectionSpan() {
     const sel = state.selection
     return { start: sel ? sel.start : 0, end: sel ? sel.end : totalDuration.value }
@@ -199,6 +217,7 @@ export function useHFLimiter() {
     refreshLevel() // the layers' calibration must be this file's before measuring
     const { start, end } = selectionSpan()
     if (!(end > start)) return
+    refreshCeiling(start, end)
     const key = makeupKey(start, end)
     const { sampleRate, channels } = state.currentFile
     const params = { ...hflParams }
@@ -246,6 +265,7 @@ export function useHFLimiter() {
     const wasPreviewing = hflPreview.value
     if (wasPreviewing) togglePreview()
     refreshLevel()
+    refreshCeiling(start, end)
     // The makeup must belong to THIS setting and region, or the render is at
     // whatever level the last knob position measured.
     if (warmthMakeupOn(hflParams) && warmthActive(hflParams)) {
@@ -302,6 +322,7 @@ export function useHFLimiter() {
     hflDelta,
     hflReduction,
     hflTransient,
+    hflGuard,
     hflInputLevels,
     hflOutputLevels,
     hflWarmthReadout,

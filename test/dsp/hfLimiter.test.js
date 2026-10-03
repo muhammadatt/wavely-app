@@ -12,6 +12,7 @@ import {
 } from '../../src/audio/hfLimiterParams.js'
 import { shelfResponseDb, splitResponse, splitTaps } from '../../src/audio/dsp/hfLimit.js'
 import { processSaturationBenchBuffer } from '../../src/audio/dsp/saturationLayers.js'
+import { warmthGuardLatencySamples } from '../../src/audio/dsp/warmthGuard.js'
 
 const SR = 44100
 
@@ -151,7 +152,7 @@ test('the split is unity at DC, half at the corner, and monotone at every depth'
 test('the latency does not move with Transient or Warmth', () => {
   const L = hfLimiterLatencySamples(SR)
   // The warmth layers' oversampler round trips, then the shelf's split and lookahead.
-  assert.equal(L, WARMTH_LATENCY_SAMPLES + 3 * Math.round(0.001 * SR))
+  assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + 3 * Math.round(0.001 * SR))
   for (const [transient, warmth] of [[0, 0], [6, 0], [12, 0], [0, 6]]) {
     const x = new Float32Array(4096)
     x[100] = 0.001 // far below every threshold
@@ -206,8 +207,10 @@ test('a click is cut by up to the Transient depth, even below Threshold, and let
     const back = cuts.findIndex((c, i) => i > peakBlock && c < 0.1)
     const ms = ((back - peakBlock) * 128 / SR) * 1000
     assert.ok(back > 0 && ms < 30, `click at ${bandDb}: still cutting ${ms.toFixed(1)} ms later`)
-    // And the cut is on the click, not somewhere else: it peaks within 2 ms of it.
-    assert.ok(Math.abs(peakBlock * 128 - at) < 0.002 * SR + 128, `cut peaks ${((peakBlock * 128 - at) / SR * 1000).toFixed(1)} ms from the click`)
+    // And the cut is on the click, not somewhere else: it peaks within 2 ms of
+    // it, as the shelf hears it — behind the Warmth stage and its peak guard.
+    const seen = at + WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR)
+    assert.ok(Math.abs(peakBlock * 128 - seen) < 0.002 * SR + 128, `cut peaks ${((peakBlock * 128 - seen) / SR * 1000).toFixed(1)} ms from the click`)
   }
 })
 
@@ -548,4 +551,46 @@ test('AUTO makeup: a plain gain after the Warmth stage, only with AUTO on and a 
   assert.equal(toKernelParams({ ...p, warmthMakeup: 'off' }).warmthMakeupDb, 0)
   assert.equal(toKernelParams({ ...p, warmthMakeup: 'loud', odd: 0, even: 0 }).warmthMakeupDb, 0)
   assert.equal(toKernelParams({ ...p, warmthMakeup: 'loud', warmthMakeupDb: -60 }).warmthMakeupDb, -24)
+})
+
+// ── Warmth peak guard ────────────────────────────────────────────────────────
+
+const peakOf = (y, from = 0) => { let m = 0; for (let i = from; i < y.length; i++) m = Math.max(m, Math.abs(y[i])); return m }
+
+test('the peak guard holds the result at the source peak, and only touches the added signal', () => {
+  // A bass-heavy voice stand-in: Odd 10 overshoots the source peak by several dB.
+  const x = add(sine(110, 0.3), sine(220, 0.12), noise(SR, 0.01))
+  const refs = [-16, -18]
+  const ceilingDb = 20 * Math.log10(peakOf(x))
+  const p = { ...WARM, odd: 10, even: 0, warmthRefPeaksDb: refs, warmthCeilingDb: ceilingDb }
+  const off = run(x, p)
+  const on = run(x, { ...p, warmthGuard: true })
+  const L = on.latencySamples
+  assert.equal(L, off.latencySamples, 'the guard never moves the audio')
+  const yOff = peakOf(off.channelData[0], L), yOn = peakOf(on.channelData[0], L)
+  assert.ok(yOff > peakOf(x) * 1.2, `the fixture must overshoot: ${(20 * Math.log10(yOff / peakOf(x))).toFixed(2)} dB`)
+  assert.ok(yOn <= peakOf(x) * (1 + 1e-6), `guarded peak ${(20 * Math.log10(yOn / peakOf(x))).toFixed(4)} dB over the source`)
+  // Between the voice and the full warmth: every output sample is x + g·a with 0 ≤ g ≤ 1.
+  const yo = off.channelData[0], yn = on.channelData[0]
+  for (let i = L; i < x.length; i++) {
+    const dry = x[i - L], a = yo[i] - dry, b = yn[i] - dry
+    if (Math.abs(a) > 1e-6) {
+      const g = b / a
+      if (g < -1e-4 || g > 1 + 1e-4) assert.fail(`sample ${i}: gain on the added signal ${g}`)
+    }
+  }
+})
+
+test('the peak guard is a pure delay when it has nothing to catch, or no ceiling', () => {
+  const x = add(sine(110, 0.3), sine(220, 0.12))
+  const refs = [-16, -18]
+  const p = { ...WARM, odd: 4, even: 2, warmthRefPeaksDb: refs }
+  const off = run(x, p).channelData[0]
+  // No ceiling measured: the guard has nothing to hold to.
+  const none = run(x, { ...p, warmthGuard: true }).channelData[0]
+  for (let i = 0; i < x.length; i++) if (none[i] !== off[i]) assert.fail(`no ceiling: sample ${i} differs`)
+  // A ceiling far above anything the stage reaches.
+  const high = run(x, { ...p, warmthGuard: true, warmthCeilingDb: 12 }).channelData[0]
+  for (let i = 0; i < x.length; i++) if (high[i] !== off[i]) assert.fail(`high ceiling: sample ${i} differs`)
+  assert.equal(toKernelParams({ ...p, odd: 0, even: 0, warmthGuard: true, warmthCeilingDb: -6 }).warmthGuard.on, false)
 })

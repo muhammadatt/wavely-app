@@ -22,6 +22,7 @@
 
 import { ShelfLimiterStage } from './dsp/hfLimit.js'
 import { SaturationBenchKernel } from './dsp/saturationLayers.js'
+import { WarmthPeakGuard } from './dsp/warmthGuard.js'
 import { toKernelParams, HF_LIMITER_DEFAULTS, WARMTH_LAYERS } from './hfLimiterParams.js'
 
 export const HF_LIMITER_KERNEL_DEFAULTS = toKernelParams(HF_LIMITER_DEFAULTS)
@@ -43,10 +44,12 @@ export class HFLimiterKernel {
     this.shelf = new ShelfLimiterStage(sampleRate)
     this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length })
     this.warmthInit = false
+    // Lined up against the Warmth output, so its dry is the input delayed by that.
+    this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)
     this.makeupLin = 1
     this.makeupTarget = 1
     this.makeupCoef = 1 - Math.exp(-1 / ((MAKEUP_SMOOTH_MS / 1000) * sampleRate))
-    this.latencySamples = this.warmth.latencySamples + this.shelf.latencySamples
+    this.latencySamples = this.warmth.latencySamples + this.guard.latencySamples + this.shelf.latencySamples
     this.listen = 'off'
     this.dryDelays = []
     this.dry = []
@@ -78,6 +81,7 @@ export class HFLimiterKernel {
       this.warmth.setParams({ layers: p.warmthLayers }, immediate || !this.warmthInit)
       this.warmthInit = true
     }
+    if (p.warmthGuard) this.guard.setParams(p.warmthGuard)
     this.makeupTarget = dbToLin(p.warmthMakeupDb || 0)
     if (immediate) this.makeupLin = this.makeupTarget
     this.outputLin = dbToLin(p.outputGainDb)
@@ -116,6 +120,7 @@ export class HFLimiterKernel {
 
     // In place: the kernel reads each input sample before it writes that output.
     this.warmth.process(outputChannels, outputChannels, n)
+    this.guard.process(inputChannels, outputChannels, n)
     this._makeup(outputChannels, nOut, n)
     this.shelf.process(outputChannels, n)
 
@@ -161,6 +166,8 @@ export class HFLimiterKernel {
       reductionDb: m < 1 ? -20 * Math.log10(Math.max(m, 1e-6)) : 0,
       gainDb: this.shelf.gain < 1 ? 20 * Math.log10(Math.max(this.shelf.gain, 1e-6)) : 0,
       transientDb: toDbCut(this.shelf.takeMinTransientGain()),
+      // How far the peak guard turned the Warmth's added signal down, dB (positive).
+      guardDb: toDbCut(this.guard.takeMinGain()),
     }
   }
 }

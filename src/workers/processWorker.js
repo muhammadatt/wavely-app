@@ -105,8 +105,8 @@ self.onmessage = function (e) {
 /** The HF Limiter's Warmth readout — see hfLimiterWarmthReadout.js. */
 function hfLimiterWarmthReadout(channelData, sampleRate, params) {
   try {
-    const { layers, bands = true, peak = true } = params ?? {}
-    postDone(measureWarmthReadout(channelData, sampleRate, layers, { bands, peak }))
+    const { layers, bands = true, peak = true, guard = null } = params ?? {}
+    postDone(measureWarmthReadout(channelData, sampleRate, layers, { bands, peak, guard }))
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }

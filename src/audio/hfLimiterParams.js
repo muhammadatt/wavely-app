@@ -8,6 +8,7 @@
 import { ALIGN_TARGET_DBFS } from './dsp/inputAlign.js'
 import { shelfLatencySamples } from './dsp/hfLimit.js'
 import { SAT_BENCH_LAYER_LATENCY } from './dsp/saturationLayers.js'
+import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
 
 export const HF_LIMITER_DEFAULTS = {
   freq: 5000, // Hz — where "bright" starts, for both the detector and the cut
@@ -30,6 +31,9 @@ export const HF_LIMITER_DEFAULTS = {
   // loudness Odd and Even add, so the A/B is character, not level) or 'peak'
   // (put the selection's peak back where the source had it).
   warmthMakeup: 'off',
+  // PEAK GUARD: turn down only what Odd and Even ADD, only where the sum would
+  // pass the selection's own peak (dsp/warmthGuard.js).
+  warmthGuard: false,
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured by the composable, never a
   // user setting — it is what makes a Threshold mean the same thing on a
@@ -44,6 +48,9 @@ export const HF_LIMITER_DEFAULTS = {
   // loudness change (LOUD) or the whole-selection peak change (PEAK) the
   // readout measured. Measured, never a user setting; ignored when OFF.
   warmthMakeupDb: 0,
+  // The guard's ceiling: the selection's own peak, dBFS. Measured, never a
+  // user setting; null until measured, and the guard then has no ceiling.
+  warmthCeilingDb: null,
 }
 
 export const FREQ_MIN_HZ = 2000
@@ -155,6 +162,7 @@ export function toKernelParams(params) {
     transientDb: clamp(p.transient > 0 ? p.transient : 0, 0, TRANSIENT_MAX_DB),
     warmthLayers: warmthLayers(p.odd, p.even, p.warmthRefPeaksDb),
     warmthMakeupDb: warmthMakeupDb(p),
+    warmthGuard: { on: !!p.warmthGuard && warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     outputGainDb: p.output,
   }
 }
@@ -163,12 +171,13 @@ export function toKernelParams(params) {
 export const WARMTH_LATENCY_SAMPLES = WARMTH_LAYERS.length * SAT_BENCH_LAYER_LATENCY
 
 /**
- * Plugin latency, samples: the Warmth stage's oversamplers plus the shelf's
- * split centre and lookahead. CONSTANT: Warmth stays a delay of its own length
- * at 0, so no setting moves the audio.
+ * Plugin latency, samples: the Warmth stage's oversamplers, the peak guard's
+ * lookahead, and the shelf's split centre and lookahead. CONSTANT: Warmth and
+ * the guard stay delays of their own length when off, so no setting moves the
+ * audio.
  */
 export function hfLimiterLatencySamples(sampleRate) {
-  return WARMTH_LATENCY_SAMPLES + shelfLatencySamples(sampleRate)
+  return WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate) + shelfLatencySamples(sampleRate)
 }
 
 /**

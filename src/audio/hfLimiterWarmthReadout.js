@@ -21,6 +21,7 @@
  */
 
 import { processSaturationBenchBuffer } from './dsp/saturationLayers.js'
+import { WarmthPeakGuard } from './dsp/warmthGuard.js'
 import { getFFT } from './dsp/fft.js'
 import { measureIntegratedLufs } from './dsp/loudness.js'
 
@@ -33,21 +34,43 @@ const FRAME = 8192
 const MIN_SAMPLES = 4096
 
 /**
- * Render `channelData` through the two warmth layers and return the output
- * aligned to the input, sample for sample (the stage's latency removed, the
- * tail flushed).
+ * Render `channelData` through the two warmth layers — and the peak guard,
+ * when `guard` (`{ on, ceilingDb }`, the kernel's `warmthGuard`) is on — and
+ * return the output aligned to the input, sample for sample (latency removed,
+ * tail flushed). The guard runs on the aligned pair, so it sees exactly the
+ * input and added signal the plugin's guard does.
  */
-export function renderWarmthAligned(channelData, sampleRate, layers) {
+export function renderWarmthAligned(channelData, sampleRate, layers, guard = null) {
   const n = channelData[0].length
+  const pad = 2048
   const padded = channelData.map((c) => {
-    const p = new Float32Array(n + 1024)
+    const p = new Float32Array(n + pad)
     p.set(c)
     return p
   })
   const { channelData: out, latencySamples } = processSaturationBenchBuffer(
     padded, sampleRate, { layers }, { slots: layers.length },
   )
-  return out.map(c => c.subarray(latencySamples, latencySamples + n))
+  const aligned = out.map(c => c.subarray(latencySamples, latencySamples + n))
+  if (!guard?.on) return aligned
+  const g = new WarmthPeakGuard(sampleRate, 0)
+  g.setParams(guard)
+  const L = g.latencySamples
+  const x = channelData.map((c) => {
+    const p = new Float32Array(n + L)
+    p.set(c)
+    return p
+  })
+  const y = aligned.map((c) => {
+    const p = new Float32Array(n + L)
+    p.set(c)
+    return p
+  })
+  for (let off = 0; off < n + L; off += 128) {
+    const len = Math.min(128, n + L - off)
+    g.process(x.map(c => c.subarray(off, off + len)), y.map(c => c.subarray(off, off + len)), len)
+  }
+  return y.map(c => c.subarray(L, L + n))
 }
 
 /** Per-band energy of `chs` (summed over channels), Welch-averaged. */
@@ -94,7 +117,7 @@ function peakDbOf(chs) {
  *
  * @param {Float32Array[]} channelData the region, as `renderRegionToBuffer` gives it
  * @param {object[]} layers the two warmth layers' kernel params (`warmthLayers`)
- * @param {{ bands?: boolean, peak?: boolean }} what
+ * @param {{ bands?: boolean, peak?: boolean, guard?: object }} what — `guard` is the kernel's `warmthGuard`
  * @returns {{ bandsDb: (number|null)[] | null, peakDb: number | null, inputPeakDb: number | null }}
  *   `bandsDb[i]` is output minus input in WARMTH_READOUT_BANDS[i], null where
  *   the input has nothing there; `peakDb` is the stage's output peak and
@@ -103,8 +126,8 @@ function peakDbOf(chs) {
  *   change in integrated loudness, output minus input, LU — what AUTO makeup
  *   takes back off; null where either side has no measurable content.
  */
-export function measureWarmthReadout(channelData, sampleRate, layers, { bands = true, peak = true } = {}) {
-  const out = renderWarmthAligned(channelData, sampleRate, layers)
+export function measureWarmthReadout(channelData, sampleRate, layers, { bands = true, peak = true, guard = null } = {}) {
+  const out = renderWarmthAligned(channelData, sampleRate, layers, guard)
   let bandsDb = null
   let loudnessDeltaDb = null
   if (bands) {

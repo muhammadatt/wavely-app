@@ -5242,3 +5242,20 @@ The switch is now OFF / LOUD / PEAK (`warmthMakeup`, a three-detent rotary; LOUD
 | Odd 10 | −4.12 dB | −0.10 LU | −4.02 |
 
 Every case lands the peak at 0.00 dB change. On Odd-led settings the two modes nearly agree; on Even-led ones PEAK turns the headroom into level. Apply waits for the peak pass in PEAK mode (`peakMeasuredFor`) and for the bands pass in LOUD mode (`loudMeasuredFor`).
+
+## HF Limiter — Warmth peak guard (October 2026)
+
+The Warmth layers sit on the low band, so what they add peaks with the bass peaks and the sum overshoots the source ("doubling up"). Asked whether an internal compressor was the principled fix: no — the overshoot is the added signal lining up in time with the source's peaks, not an excess of energy, so a compressor would thin the warmth over whole syllables and still guarantee nothing about the peak, and compressing the shaper's input only moves the drive, which at these drives barely moves what is added.
+
+Built instead: a lookahead limiter on the ADDED signal only (`dsp/warmthGuard.js`, GUARD switch). `a = y − x`; per sample the largest `gReq ∈ [0,1]` with `|x + g·a| ≤ C`, `C = max(selection peak, |x|)` (the `|x|` term keeps preview of louder material outside the selection, and apply's pre-roll, from zeroing the warmth). The gain is `lookaheadLimiter.js`'s centred running min + triangular smoother (L = 1.5 ms) followed by a 60 ms one-pole that only lags upward, so `g ≤ gReq` everywhere; since `|x + g·a|` is convex in g, every such g is safe. Linked across channels. Placed after the Warmth stage and before makeup, 2L of constant latency (a pure delay when off; tested bit-exact with no ceiling and with a ceiling nothing reaches). The readout renders it (same class on the aligned pair), so LOUD/PEAK makeup and the peak figure include it.
+
+Offline prototype first, then the kernel, on Southern Sunrise (ceiling = source peak, shelf out):
+
+| Setting | Off: peak / loud | Guard: peak / loud | Guard bands (SUB LOW BODY LO-MID) |
+|---|---|---|---|
+| Odd 8 / Even 2.3 | +1.58 / +1.46 | 0.00 / +1.44 | −2.67 +1.79 +4.81 −1.53 |
+| Odd 10 | +4.12 / +4.02 | 0.00 / +3.73 | +2.61 +5.81 +7.61 −2.34 |
+| Even 6 | +0.04 / −0.04 | 0.00 / −0.04 | unchanged |
+| Odd 10 / Even 10 | +9.56 / +5.40 | 0.00 / +4.02 | +7.98 +5.24 +8.66 −1.38 |
+
+The prototype ducked the added signal 3.4 % of the time at the bench voicing (−0.13 dB of its energy), 24 % at Odd 10 and 60 % at 10/10. PEAK makeup reaches the same peak at the bench voicing only by spending the whole +1.5 LU. Ballistics are reasoned, not auditioned. The Transient test's "cut lands within 2 ms of the click" now measures from where the shelf hears the click (behind Warmth and the guard).

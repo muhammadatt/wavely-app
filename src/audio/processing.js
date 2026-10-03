@@ -913,9 +913,9 @@ export function measureHFSoftenerAutoAir(segments, start, end, params, sampleRat
  */
 export function measureHFLimiterWarmthBands(segments, start, end, params, sampleRate, channels) {
   const whole = analysedWholeRegion(start, end)
-  const { warmthLayers } = toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params })
+  const { warmthLayers, warmthGuard } = toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params })
   return measureInWorker('hfLimiterWarmthReadout', segments, start, end, {
-    layers: warmthLayers, bands: true, peak: whole,
+    layers: warmthLayers, guard: warmthGuard, bands: true, peak: whole,
   }, sampleRate, channels).then(d => ({
     bandsDb: d.bandsDb,
     loudnessDeltaDb: d.loudnessDeltaDb,
@@ -943,7 +943,7 @@ export function measureHFLimiterWarmthPeak(segments, start, end, params, sampleR
     err.cancelled = true
     warmthPeakReject?.(err)
   }
-  const { warmthLayers } = toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params })
+  const { warmthLayers, warmthGuard } = toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params })
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
     warmthPeakWorker = worker
@@ -966,7 +966,7 @@ export function measureHFLimiterWarmthPeak(segments, start, end, params, sampleR
     }
     const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
     worker.postMessage(
-      { __id: 0, type: 'hfLimiterWarmthReadout', channelData, sampleRate, params: { layers: warmthLayers, bands: false, peak: true } },
+      { __id: 0, type: 'hfLimiterWarmthReadout', channelData, sampleRate, params: { layers: warmthLayers, guard: warmthGuard, bands: false, peak: true } },
       channelData.map(c => c.buffer),
     )
   })
