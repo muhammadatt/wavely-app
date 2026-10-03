@@ -6,8 +6,7 @@
  * Saturation Bench layers (tanh for odd, quartic for even, both on the low
  * band). Each knob sets how much of its layer is mixed in, independently;
  * 0 is off. MAKEUP LOUD takes back the loudness they add (integrated, over
- * the selection's analysis window), so the A/B is character, not level; PEAK
- * puts the whole selection's peak back where the source had it. GUARD turns
+ * the selection's analysis window), so the A/B is character, not level. GUARD turns
  * down only what they add, only where the sum would pass the selection's own
  * peak (a lookahead limiter on the added signal, dsp/warmthGuard.js). The
  * readout under them reports what the pair did, makeup included.
@@ -35,7 +34,6 @@ import {
 } from '../../audio/hfLimiterParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
-import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -75,7 +73,6 @@ const makeupDb = computed(() => warmthMakeupDb(hflParams))
 const MAKEUP_OPTIONS = [
   { value: 'off', label: 'OFF', title: 'No makeup: Odd and Even add level as well as character' },
   { value: 'loud', label: 'LOUD', title: 'Take back the loudness Odd and Even add (integrated loudness over the selection), so the A/B compares character, not level' },
-  { value: 'peak', label: 'PEAK', title: 'Put the selection’s highest peak back where the source had it (measured over the whole selection). Can make the result louder or quieter than the source' },
 ]
 const GUARD_OPTIONS = [
   { value: 'off', label: 'OFF', title: 'Odd and Even may raise the peak' },
@@ -89,8 +86,7 @@ const guardText = computed(() => {
 const makeupText = computed(() => {
   if (!warmthMakeupOn(hflParams)) return ''
   if (!warmthActive(hflParams)) return '0.0 dB'
-  const r = hflWarmthReadout.value
-  if (hflParams.warmthMakeup === 'peak' ? r.peakPending : r.bandsPending) return '…'
+  if (hflWarmthReadout.value.bandsPending) return '…'
   const v = makeupDb.value
   return `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
 })
@@ -355,11 +351,11 @@ async function applyAndClose() {
             label="Even" :accent="ACCENT" :format-value="fmtWarmth" :disabled="!hflPreview"
           />
         </div>
-        <div class="flex flex-col items-center gap-[8px] pb-[8px]" title="LOUD takes back the loudness Odd and Even add — integrated loudness, measured on the selection (up to its first 30 s) — so the A/B compares character, not level. PEAK puts the selection’s highest peak (over the whole selection) back where the source had it. Applied before the limiter, so Threshold sees the matched level">
+        <div class="flex flex-col items-center gap-[8px] pb-[8px]" title="LOUD takes back the loudness Odd and Even add — integrated loudness, measured on the selection (up to its first 30 s) — so the A/B compares character, not level. For headroom, use GUARD. Applied before the limiter, so Threshold sees the matched level">
           <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">MAKEUP</span>
-          <DeviceDetentRotary
-            :model-value="hflParams.warmthMakeup" :options="MAKEUP_OPTIONS" :accent="ACCENT"
-            :disabled="!hflPreview" label="Makeup" :show-label="false"
+          <DeviceChoiceRocker
+            :model-value="hflParams.warmthMakeup === 'loud' ? 'loud' : 'off'" :options="MAKEUP_OPTIONS" :accent="ACCENT"
+            :disabled="!hflPreview" label="Makeup"
             @update:model-value="v => syncParam('warmthMakeup', v)"
           />
           <span style="font:500 9px/1 'JetBrains Mono', monospace;color:rgba(255,255,255,.45);min-height:9px">{{ makeupText }}</span>

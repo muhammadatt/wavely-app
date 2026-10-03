@@ -27,9 +27,9 @@ export const HF_LIMITER_DEFAULTS = {
   // quartic; they are independent, and 0 is off (both 0: a pure delay).
   odd: 0,
   even: 0,
-  // Makeup for the Warmth stage: 'off', 'loud' (take back the integrated
-  // loudness Odd and Even add, so the A/B is character, not level) or 'peak'
-  // (put the selection's peak back where the source had it).
+  // Makeup for the Warmth stage: 'off' or 'loud' — take back the integrated
+  // loudness Odd and Even add, so the A/B is character, not level. (A 'peak'
+  // mode existed until the GUARD made it redundant; a saved 'peak' reads as off.)
   warmthMakeup: 'off',
   // PEAK GUARD: turn down only what Odd and Even ADD, only where the sum would
   // pass the selection's own peak (dsp/warmthGuard.js).
@@ -44,9 +44,8 @@ export const HF_LIMITER_DEFAULTS = {
   // never a user setting; null until measured, and the layers fall back to
   // the nominal point.
   warmthRefPeaksDb: null,
-  // The gain the makeup mode applies after the Warmth stage, dB: minus the
-  // loudness change (LOUD) or the whole-selection peak change (PEAK) the
-  // readout measured. Measured, never a user setting; ignored when OFF.
+  // The gain LOUD applies after the Warmth stage, dB: minus the loudness
+  // change the readout measured. Measured, never a user setting; ignored when OFF.
   warmthMakeupDb: 0,
   // The guard's ceiling: the selection's own peak, dBFS. Measured, never a
   // user setting; null until measured, and the guard then has no ceiling.
@@ -65,7 +64,7 @@ export const TAIL_MAX_MS = 600
 
 export const TRANSIENT_MAX_DB = 12
 export const WARMTH_MAX = 10
-export const WARMTH_MAKEUP_MODES = ['off', 'loud', 'peak']
+export const WARMTH_MAKEUP_MODES = ['off', 'loud']
 /** Makeup never moves the level further than this either way. */
 export const WARMTH_MAKEUP_MAX_DB = 24
 
@@ -125,9 +124,9 @@ export function warmthActive(p) {
   return Number(p?.odd) > 0 || Number(p?.even) > 0
 }
 
-/** True when a makeup mode is selected. */
+/** True when LOUD makeup is selected. */
 export function warmthMakeupOn(p) {
-  return p?.warmthMakeup === 'loud' || p?.warmthMakeup === 'peak'
+  return p?.warmthMakeup === 'loud'
 }
 
 /** The makeup gain the kernel applies after the Warmth stage, dB: 0 unless a mode is on and a layer is up. */

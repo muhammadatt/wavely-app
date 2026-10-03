@@ -37,11 +37,9 @@ let levelMeasuredFor = null
 const hflWarmthReadout = ref({ bandsDb: null, loudnessDeltaDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false })
 let readoutTimer = null
 let readoutSeq = 0
-// What the last readout measured and for which setting/region, so apply can
-// tell whether the makeup belongs to what it is about to render. LOUD needs the
-// bands pass; PEAK needs the whole-region peak, which can come later.
+// Which setting/region the last readout's loudness change was measured for,
+// so apply can tell whether the makeup belongs to what it is about to render.
 let loudMeasuredFor = null
-let peakMeasuredFor = null
 const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthMakeupDb', 'warmthCeilingDb'])
 
 export function useHFLimiter() {
@@ -161,26 +159,19 @@ export function useHFLimiter() {
   }
 
   /**
-   * The makeup gain for the current mode, from what the readout measured:
-   * LOUD takes back the loudness change, PEAK the whole-selection peak change
-   * (the stage's own, before Output). Measurements are kept whatever the mode,
-   * so switching mode is instant; the kernel ignores the gain when OFF.
+   * LOUD makeup: minus the loudness change the readout measured. Kept whether
+   * LOUD is on or not, so switching it is instant; the kernel ignores it when OFF.
    */
   function updateMakeup() {
     const r = hflWarmthReadout.value
-    let db = 0
-    if (hflParams.warmthMakeup === 'loud' && Number.isFinite(r.loudnessDeltaDb)) db = -r.loudnessDeltaDb
-    if (hflParams.warmthMakeup === 'peak' && Number.isFinite(r.peakDb) && Number.isFinite(r.inputPeakDb)) {
-      db = r.inputPeakDb - r.peakDb
-    }
+    const db = Number.isFinite(r.loudnessDeltaDb) ? -r.loudnessDeltaDb : 0
     if (hflParams.warmthMakeupDb === db) return
     hflParams.warmthMakeupDb = db
     pushParam('warmthMakeupDb', db)
   }
 
-  /** Is the makeup for the current mode measured for this setting and region? */
+  /** Is the makeup measured for this setting and region? */
   function makeupCurrent(key) {
-    if (hflParams.warmthMakeup === 'peak') return peakMeasuredFor === key
     return loudMeasuredFor === key
   }
 
@@ -229,7 +220,6 @@ export function useHFLimiter() {
       if (seq !== readoutSeq) return
       hflWarmthReadout.value = { bandsDb, loudnessDeltaDb, peakDb, inputPeakDb, bandsPending: false, peakPending: peakDb === null }
       loudMeasuredFor = key
-      if (peakDb !== null) peakMeasuredFor = key
       updateMakeup()
       if (peakDb !== null) return
       const whole = await measureHFLimiterWarmthPeak(
@@ -237,8 +227,6 @@ export function useHFLimiter() {
       )
       if (seq !== readoutSeq) return
       hflWarmthReadout.value = { ...hflWarmthReadout.value, ...whole, peakPending: false }
-      peakMeasuredFor = key
-      updateMakeup()
     } catch (err) {
       if (err?.cancelled || seq !== readoutSeq) return
       console.error('HF Limiter warmth readout failed:', err)

@@ -5259,3 +5259,7 @@ Offline prototype first, then the kernel, on Southern Sunrise (ceiling = source 
 | Odd 10 / Even 10 | +9.56 / +5.40 | 0.00 / +4.02 | +7.98 +5.24 +8.66 −1.38 |
 
 The prototype ducked the added signal 3.4 % of the time at the bench voicing (−0.13 dB of its energy), 24 % at Odd 10 and 60 % at 10/10. PEAK makeup reaches the same peak at the bench voicing only by spending the whole +1.5 LU. Ballistics are reasoned, not auditioned. The Transient test's "cut lands within 2 ms of the click" now measures from where the shelf hears the click (behind Warmth and the guard).
+
+## HF Limiter — PEAK makeup removed (October 2026)
+
+With GUARD holding the peak at the source's by turning down only the added warmth, PEAK makeup had no job left: it held the same peak by cutting the whole selection (spending the warmth's entire loudness gain at the bench voicing), and on pure Even it turned the headroom the quartic frees into level. Removed; MAKEUP is back to a two-way OFF / LOUD rocker. LOUD stays because it answers a different question — level-matching the A/B — that GUARD does not: with GUARD on, Odd 8 / Even 2.3 is still +1.44 LU louder than the source, so an un-matched comparison favours the processed side on loudness alone. A saved `'peak'` reads as OFF (tested).
