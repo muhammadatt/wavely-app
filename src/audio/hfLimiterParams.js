@@ -11,20 +11,20 @@ import { SAT_BENCH_LAYER_LATENCY, SAT_AMOUNT_FLOOR_DB } from './dsp/saturationLa
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
 
 export const HF_LIMITER_DEFAULTS = {
-  freq: 5000, // Hz — where "bright" starts, for both the detector and the cut
+  freq: 12000, // Hz — where "bright" starts, for both the detector and the cut
   threshold: -8, // dB relative to the file's voice level (gated RMS)
   range: 12, // dB — the deepest the shelf may cut; 0 takes the shelf out
   release: 60, // ms — the fast (or only) release stage
   // 'tight': a zero-phase one-octave split, a ceiling on the band above Freq.
   // 'warm': a one-pole split, the EL7 Fatso's Warmth — a 6 dB/oct tilt.
-  shape: 'tight',
+  shape: 'warm',
   tail: 0, // ms — the slow second release stage; 0 is a single-stage release
   // dB — the most the onset softener may add on top of the shelf; 0 is off.
   // It stacks: Range caps only the shelf.
   transient: 0,
   // 0–10 — low-end harmonic warmth AHEAD of the shelf: how much of what the two
   // fixed WARMTH_LAYERS add is mixed in. 0 is off (a pure delay).
-  warmth: 0,
+  warmth: 5,
   // 0–100 — from pure Odd (tanh) toward Even (quartic), over the useful part
   // of the crossfade only (ODD_EVEN_SPAN). The bench voicing is 36.
   oddEven: 50,
@@ -81,10 +81,16 @@ export const ODD_EVEN_SPAN = 0.25
  * Order: quartic, then tanh — as voiced. `amountDb` is set per layer by
  * `warmthLayers`, not here.
  */
+//export const WARMTH_LAYERS = [
+//  { curve: 'quartic', driveDb: 60, loHz: 1, hiHz: 400, emphType: 'bell', emphHz: 350, emphQ: 0.5, emphDb: 24, mode: 'full' },
+//  { curve: 'tanh', driveDb: 50, loHz: 1, hiHz: 300, emphType: 'bell', emphHz: 250, emphQ: 0.7, emphDb: 24, mode: 'full' },
+//]
+
 export const WARMTH_LAYERS = [
-  { curve: 'quartic', driveDb: 60, loHz: 1, hiHz: 400, emphType: 'bell', emphHz: 350, emphQ: 0.5, emphDb: 24, mode: 'full' },
-  { curve: 'tanh', driveDb: 50, loHz: 1, hiHz: 300, emphType: 'bell', emphHz: 250, emphQ: 0.7, emphDb: 24, mode: 'full' },
+  { curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14, mode: 'full' },
+  { curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10, mode: 'full' },
 ]
+
 
 /**
  * Warmth's level law: dB on what the layers add, 3 dB per step, +6 at 10. So
