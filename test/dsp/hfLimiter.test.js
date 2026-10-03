@@ -541,22 +541,6 @@ test('Warmth works only in its low band: material above it passes untouched', ()
   assert.ok(Math.abs(g) < 0.05, `a 1.5 kHz tone moved ${g.toFixed(3)} dB at Warmth 10`)
 })
 
-test('AUTO makeup: a plain gain after the Warmth stage, only with AUTO on and a layer up', () => {
-  const x = add(sine(120, 0.25), sine(240, 0.1), noise(SR, 0.01))
-  const refs = [-14, -16]
-  const p = { ...WARM, warmth: 6, oddEven: 30, warmthRefPeaksDb: refs, warmthMakeupDb: -4 }
-  const off = run(x, p).channelData[0]
-  const on = run(x, { ...p, warmthMakeup: 'loud' }).channelData[0]
-  const g = 10 ** (-4 / 20)
-  let worst = 0
-  for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(on[i] - off[i] * g))
-  // From rest, the first sample is already at the makeup: no glide in.
-  assert.ok(worst < 1e-6, `AUTO differs from the stage times the makeup by ${worst}`)
-  assert.equal(toKernelParams({ ...p, warmthMakeup: 'off' }).warmthMakeupDb, 0)
-  assert.equal(toKernelParams({ ...p, warmthMakeup: 'loud', warmth: 0 }).warmthMakeupDb, 0)
-  assert.equal(toKernelParams({ ...p, warmthMakeup: 'loud', warmthMakeupDb: -60 }).warmthMakeupDb, -24)
-})
-
 // ── Warmth peak guard ────────────────────────────────────────────────────────
 
 const peakOf = (y, from = 0) => { let m = 0; for (let i = from; i < y.length; i++) m = Math.max(m, Math.abs(y[i])); return m }
@@ -567,8 +551,9 @@ test('the peak guard holds the result at the source peak, and only touches the a
   const refs = [-16, -18]
   const ceilingDb = 20 * Math.log10(peakOf(x))
   const p = { ...WARM, warmth: 10, oddEven: 0, warmthRefPeaksDb: refs, warmthCeilingDb: ceilingDb }
-  const off = run(x, p)
-  const on = run(x, { ...p, warmthGuard: true })
+  // No ceiling measured: the guard has nothing to hold to, which is the unguarded stage.
+  const off = run(x, { ...p, warmthCeilingDb: null })
+  const on = run(x, p)
   const L = on.latencySamples
   assert.equal(L, off.latencySamples, 'the guard never moves the audio')
   const yOff = peakOf(off.channelData[0], L), yOn = peakOf(on.channelData[0], L)
@@ -589,12 +574,12 @@ test('the peak guard is a pure delay when it has nothing to catch, or no ceiling
   const x = add(sine(110, 0.3), sine(220, 0.12))
   const refs = [-16, -18]
   const p = { ...WARM, warmth: 4, oddEven: 30, warmthRefPeaksDb: refs }
-  const off = run(x, p).channelData[0]
   // No ceiling measured: the guard has nothing to hold to.
-  const none = run(x, { ...p, warmthGuard: true }).channelData[0]
-  for (let i = 0; i < x.length; i++) if (none[i] !== off[i]) assert.fail(`no ceiling: sample ${i} differs`)
-  // A ceiling far above anything the stage reaches.
-  const high = run(x, { ...p, warmthGuard: true, warmthCeilingDb: 12 }).channelData[0]
+  const off = run(x, p).channelData[0]
+  // A ceiling far above anything the stage reaches is the same render, bit for bit.
+  const high = run(x, { ...p, warmthCeilingDb: 12 }).channelData[0]
   for (let i = 0; i < x.length; i++) if (high[i] !== off[i]) assert.fail(`high ceiling: sample ${i} differs`)
-  assert.equal(toKernelParams({ ...p, warmth: 0, warmthGuard: true, warmthCeilingDb: -6 }).warmthGuard.on, false)
+  assert.equal(toKernelParams({ ...p, warmth: 0, warmthCeilingDb: -6 }).warmthGuard.on, false)
+  // Pinned on with Warmth: there is no switch.
+  assert.equal(toKernelParams({ ...p, warmthCeilingDb: -6 }).warmthGuard.on, true)
 })

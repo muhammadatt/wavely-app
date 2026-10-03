@@ -918,7 +918,6 @@ export function measureHFLimiterWarmthBands(segments, start, end, params, sample
     layers: warmthLayers, guard: warmthGuard, bands: true, peak: whole,
   }, sampleRate, channels).then(d => ({
     bandsDb: d.bandsDb,
-    loudnessDeltaDb: d.loudnessDeltaDb,
     peakDb: whole ? d.peakDb : null,
     inputPeakDb: whole ? d.inputPeakDb : null,
   }))

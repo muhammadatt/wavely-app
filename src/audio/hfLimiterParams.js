@@ -28,13 +28,6 @@ export const HF_LIMITER_DEFAULTS = {
   // 0–100 — from pure Odd (tanh) toward Even (quartic), over the useful part
   // of the crossfade only (ODD_EVEN_SPAN). The bench voicing is 36.
   oddEven: 50,
-  // Makeup for the Warmth stage: 'off' or 'loud' — take back the integrated
-  // loudness Warmth adds, so the A/B is character, not level. (A 'peak'
-  // mode existed until the GUARD made it redundant; a saved 'peak' reads as off.)
-  warmthMakeup: 'off',
-  // PEAK GUARD: turn down only what Warmth ADDS, only where the sum would
-  // pass the selection's own peak (dsp/warmthGuard.js).
-  warmthGuard: false,
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured by the composable, never a
   // user setting — it is what makes a Threshold mean the same thing on a
@@ -45,11 +38,10 @@ export const HF_LIMITER_DEFAULTS = {
   // never a user setting; null until measured, and the layers fall back to
   // the nominal point.
   warmthRefPeaksDb: null,
-  // The gain LOUD applies after the Warmth stage, dB: minus the loudness
-  // change the readout measured. Measured, never a user setting; ignored when OFF.
-  warmthMakeupDb: 0,
-  // The guard's ceiling: the selection's own peak, dBFS. Measured, never a
-  // user setting; null until measured, and the guard then has no ceiling.
+  // The Warmth peak guard's ceiling: the selection's own peak, dBFS. The guard
+  // is PINNED ON whenever Warmth is up — Warmth may add density but never the
+  // peak (dsp/warmthGuard.js). Measured, never a user setting; null until
+  // measured, and the guard then has no ceiling.
   warmthCeilingDb: null,
 }
 
@@ -75,9 +67,6 @@ export const ODD_EVEN_MAX = 100
  * the bench voicing (old 9) sits at 36.
  */
 export const ODD_EVEN_SPAN = 0.25
-export const WARMTH_MAKEUP_MODES = ['off', 'loud']
-/** Makeup never moves the level further than this either way. */
-export const WARMTH_MAKEUP_MAX_DB = 24
 
 /**
  * WARMTH — the low-end warmth/fatness combination voiced on the Saturation
@@ -141,16 +130,6 @@ export function warmthLayers(warmth, oddEven, refPeaksDb) {
 export function warmthActive(p) {
   return Number(p?.warmth) > 0
 }
-/** True when LOUD makeup is selected. */
-export function warmthMakeupOn(p) {
-  return p?.warmthMakeup === 'loud'
-}
-
-/** The makeup gain the kernel applies after the Warmth stage, dB: 0 unless a mode is on and a layer is up. */
-export function warmthMakeupDb(p) {
-  if (!warmthMakeupOn(p) || !warmthActive(p) || !Number.isFinite(p.warmthMakeupDb)) return 0
-  return clamp(p.warmthMakeupDb, -WARMTH_MAKEUP_MAX_DB, WARMTH_MAKEUP_MAX_DB)
-}
 
 /** Voice levels outside this are clamped: a near-silent file is not a voice. */
 const VOICE_LEVEL_MIN_DB = -60
@@ -177,8 +156,8 @@ export function toKernelParams(params) {
     tailMs: p.tail >= TAIL_MIN_MS ? Math.min(p.tail, TAIL_MAX_MS) : 0,
     transientDb: clamp(p.transient > 0 ? p.transient : 0, 0, TRANSIENT_MAX_DB),
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
-    warmthMakeupDb: warmthMakeupDb(p),
-    warmthGuard: { on: !!p.warmthGuard && warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
+    // Pinned on with Warmth: there is no switch.
+    warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     outputGainDb: p.output,
   }
 }

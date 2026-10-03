@@ -6,12 +6,11 @@
  * Saturation Bench layers (quartic for even, tanh for odd, both on the low
  * band). WARMTH sets how much is mixed in, 0 is off; ODD/EVEN crossfades the
  * two at constant level, over only the useful first quarter of the blend
- * (ODD_EVEN_SPAN: 100 is a mostly-odd mix, not pure even). MAKEUP LOUD takes back the
- * loudness they add (integrated, over
- * the selection's analysis window), so the A/B is character, not level. GUARD turns
- * down only what they add, only where the sum would pass the selection's own
- * peak (a lookahead limiter on the added signal, dsp/warmthGuard.js). The
- * readout under the knobs reports what the stage did, makeup included.
+ * (ODD_EVEN_SPAN: 100 is a mostly-odd mix, not pure even). The peak GUARD is
+ * pinned on with Warmth: it turns down only what Warmth adds, only where the
+ * sum would pass the selection's own peak (a lookahead limiter on the added
+ * signal, dsp/warmthGuard.js), so Warmth adds density but never peak level.
+ * The readout under the knobs reports what the stage did, guard included.
  * SHELF is a lookahead dynamic shelf that holds the band above FREQ at the
  * THRESHOLD (relative to the file's voice level), never deeper than RANGE, and
  * lets go over RELEASE — then, with TAIL up, over a slow second stage that only
@@ -32,7 +31,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { shelfResponseDb } from '../../audio/dsp/hfLimit.js'
 import {
   FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
-  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB, WARMTH_MAX, ODD_EVEN_MAX, warmthActive, warmthMakeupDb, warmthMakeupOn,
+  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB, WARMTH_MAX, ODD_EVEN_MAX, warmthActive,
 } from '../../audio/hfLimiterParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
@@ -70,33 +69,17 @@ const SUB_WARN_DB = 0
 const PEAK_WARN_DBFS = -1
 const WARN = '#ff7a6b'
 
-// Makeup is applied after the Warmth stage, so every figure below includes it.
-const makeupDb = computed(() => warmthMakeupDb(hflParams))
-const MAKEUP_OPTIONS = [
-  { value: 'off', label: 'OFF', title: 'No makeup: Warmth adds level as well as character' },
-  { value: 'loud', label: 'LOUD', title: 'Take back the loudness Warmth adds (integrated loudness over the selection), so the A/B compares character, not level' },
-]
-const GUARD_OPTIONS = [
-  { value: 'off', label: 'OFF', title: 'Warmth may raise the peak' },
-  { value: 'on', label: 'ON', title: 'Turn down only what Warmth adds, only where the result would pass the selection’s own peak' },
-]
+// The guard is pinned on with Warmth; this is how far it is turning the added warmth down.
 const guardText = computed(() => {
-  if (!hflParams.warmthGuard || !warmthActive(hflParams) || !hflPreview.value) return ''
+  if (!warmthActive(hflParams) || !hflPreview.value) return ''
   const v = hflGuard.value
   return v > 0.05 ? `−${v.toFixed(1)} dB` : '0.0 dB'
-})
-const makeupText = computed(() => {
-  if (!warmthMakeupOn(hflParams)) return ''
-  if (!warmthActive(hflParams)) return '0.0 dB'
-  if (hflWarmthReadout.value.bandsPending) return '…'
-  const v = makeupDb.value
-  return `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
 })
 const readoutCells = computed(() => {
   const r = hflWarmthReadout.value
   return READOUT_BANDS.map((b, i) => {
     const raw = r.bandsDb ? r.bandsDb[i] : null
-    const v = raw == null ? null : raw + makeupDb.value
+    const v = raw
     return {
       ...b,
       text: r.bandsPending && v == null ? '…' : v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
@@ -110,7 +93,7 @@ const readoutCells = computed(() => {
 const readoutPeak = computed(() => {
   const r = hflWarmthReadout.value
   const out = Number(hflParams.output) || 0
-  const abs = r.peakDb == null ? null : r.peakDb + makeupDb.value + out
+  const abs = r.peakDb == null ? null : r.peakDb + out
   const delta = abs == null || r.inputPeakDb == null ? null : abs - r.inputPeakDb
   return {
     text: r.peakPending && delta == null ? '…' : delta == null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(1)}`,
@@ -354,23 +337,9 @@ async function applyAndClose() {
             label="Odd/Even" :accent="ACCENT" :format-value="fmtOddEven" :disabled="!hflPreview || hflParams.warmth <= 0"
           />
         </div>
-        <div class="flex flex-col items-center gap-[8px] pb-[8px]" title="LOUD takes back the loudness Warmth adds — integrated loudness, measured on the selection (up to its first 30 s) — so the A/B compares character, not level. For headroom, use GUARD. Applied before the limiter, so Threshold sees the matched level">
-          <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">MAKEUP</span>
-          <DeviceChoiceRocker
-            :model-value="hflParams.warmthMakeup === 'loud' ? 'loud' : 'off'" :options="MAKEUP_OPTIONS" :accent="ACCENT"
-            :disabled="!hflPreview" label="Makeup"
-            @update:model-value="v => syncParam('warmthMakeup', v)"
-          />
-          <span style="font:500 9px/1 'JetBrains Mono', monospace;color:rgba(255,255,255,.45);min-height:9px">{{ makeupText }}</span>
-        </div>
-        <div class="flex flex-col items-center gap-[8px] pb-[8px]" title="Peak guard: a lookahead limiter on what Warmth ADDS, never on the voice. Where the result would pass the selection’s own peak, it turns the added warmth down for a few milliseconds — so the warmth cannot clip or eat headroom on bass peaks, and is left alone everywhere else. The figure is how far it is turning the warmth down right now">
+        <div class="flex flex-col items-center gap-[8px] pb-[22px]" title="Peak guard, always on with Warmth: Warmth may add density but never raises the selection’s peak. Where the added warmth would push the result past the selection’s own peak, it is turned down for a few milliseconds; the voice itself is never touched. The figure is how far it is turning the warmth down right now">
           <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">GUARD</span>
-          <DeviceChoiceRocker
-            :model-value="hflParams.warmthGuard ? 'on' : 'off'" :options="GUARD_OPTIONS" :accent="ACCENT"
-            :disabled="!hflPreview" label="Peak guard"
-            @update:model-value="v => syncParam('warmthGuard', v === 'on')"
-          />
-          <span style="font:500 9px/1 'JetBrains Mono', monospace;color:rgba(255,255,255,.45);min-height:9px">{{ guardText }}</span>
+          <span style="font:600 12px/1 'JetBrains Mono', monospace;color:rgba(255,255,255,.7);min-width:52px;text-align:center">{{ guardText || '—' }}</span>
         </div>
         <div class="flex flex-col items-center gap-[8px] pb-[22px]">
           <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">SHAPE</span>
@@ -385,7 +354,7 @@ async function applyAndClose() {
       <div
         v-if="warmthActive(hflParams)"
         class="mt-[12px] flex justify-center items-end gap-[18px]"
-        title="What Warmth (with the guard and makeup) does to this selection: each low band's level change, output minus input (bands over the selection, up to its first 30 s), and how much the highest peak over the whole selection moves (after Output), with the new peak level under it. Red: a sub boost, or a peak above −1 dBFS"
+        title="What Warmth (with its peak guard) does to this selection: each low band's level change, output minus input (bands over the selection, up to its first 30 s), and how much the highest peak over the whole selection moves (after Output), with the new peak level under it. Red: a sub boost, or a peak above −1 dBFS"
       >
         <div v-for="c in readoutCells" :key="c.label" class="flex flex-col items-center gap-[3px]">
           <span style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.1em;color:rgba(255,255,255,.4)">{{ c.label }}</span>

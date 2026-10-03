@@ -5288,3 +5288,9 @@ By ear the useful part of the Odd/Even knob was 0–20/25; past it the quartic m
 | 100 | −2.4 | +1.3 | +4.6 | −1.4 | +1.5 | +1.3 |
 
 So what the knob moves within this range is harmonic character (second against third), not band level.
+
+## HF Limiter — guard pinned on, makeup removed (October 2026)
+
+The owner's requirement, stated plainly: Warmth must never raise the selection's peak level (no clipping, no lost headroom); added RMS/density is acceptable. The guard alone guarantees exactly that, so it is now pinned on whenever Warmth is up (`warmthGuard.on = warmthActive(p)`, no user param) and the MAKEUP switch is gone, kernel gain and all (`warmthMakeup`, `warmthMakeupDb`, the readout's integrated-loudness measurement and apply's re-measure-before-render). Removing LOUD also closes the hole found just before: LOUD sat after the guard, so on a setting where Warmth measured slightly quieter (−0.05 LU toward Even on Southern Sunrise) it would have turned the level up and put the peak ~0.05 dB over the guard's ceiling.
+
+What remains true and is not guaranteed: the Output trim comes after the guard and can raise the peak by exactly its own setting (the readout includes it); and the ceiling is the SELECTION's peak, so material louder than it (preview outside the selection, apply's pre-roll) is only held at its own level, never pushed higher.

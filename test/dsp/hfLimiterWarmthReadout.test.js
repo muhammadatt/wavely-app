@@ -71,34 +71,12 @@ test('bands only or peak only, on request', () => {
   assert.equal(measureWarmthReadout([x.subarray(0, 2000)], SR, layers).bandsDb, null)
 })
 
-test('the loudness change is what AUTO takes back: applied, the stage lands at the input loudness', async () => {
-  const { measureIntegratedLufs } = await import('../../src/audio/dsp/loudness.js')
-  const x = voice()
-  assert.ok(Math.abs(measureWarmthReadout([x], SR, warmthLayers(0, 50, REFS)).loudnessDeltaDb) < 1e-9)
-  const p = { warmth: 8, oddEven: 36, warmthRefPeaksDb: REFS, range: 0 }
-  const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
-  assert.ok(Math.abs(r.loudnessDeltaDb) > 0.5, `Odd 8 / Even 2.3 moved loudness ${r.loudnessDeltaDb} LU`)
-  const auto = processHFLimiterBuffer([x], SR, toKernelParams({ ...p, warmthMakeup: 'loud', warmthMakeupDb: -r.loudnessDeltaDb }))
-  const L = auto.latencySamples
-  const y = auto.channelData[0].subarray(L)
-  const lin = measureIntegratedLufs([x.subarray(0, y.length)], SR)
-  const lout = measureIntegratedLufs([y], SR)
-  assert.ok(Math.abs(lout - lin) < 0.05, `AUTO lands ${(lout - lin).toFixed(3)} LU off the input`)
-})
-
-test('a saved PEAK makeup reads as off: the mode is gone', () => {
-  const p = { warmth: 3, oddEven: 100, warmthRefPeaksDb: REFS, warmthMakeupDb: 1.2 }
-  assert.equal(toKernelParams({ ...p, warmthMakeup: 'peak' }).warmthMakeupDb, 0)
-  assert.equal(toKernelParams({ ...p, warmthMakeup: 'off' }).warmthMakeupDb, 0)
-  assert.equal(toKernelParams({ ...p, warmthMakeup: 'loud' }).warmthMakeupDb, 1.2)
-})
-
 test('the readout renders the guard: with it on, the peak change is never above zero', () => {
   const x = voice()
   const src = peakDb([x])
   const p = { warmth: 10, oddEven: 30, warmthRefPeaksDb: REFS, warmthCeilingDb: src, range: 0 }
-  const k = toKernelParams({ ...p, warmthGuard: true })
-  const open = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
+  const k = toKernelParams(p)
+  const open = measureWarmthReadout([x], SR, toKernelParams({ ...p, warmthCeilingDb: null }).warmthLayers)
   const held = measureWarmthReadout([x], SR, k.warmthLayers, { guard: k.warmthGuard })
   assert.ok(open.peakDb > src + 0.5, `the fixture must overshoot: ${(open.peakDb - src).toFixed(2)} dB`)
   assert.ok(held.peakDb <= src + 1e-5, `guarded readout peak ${(held.peakDb - src).toFixed(4)} dB over the source`)

@@ -23,7 +23,6 @@
 import { processSaturationBenchBuffer } from './dsp/saturationLayers.js'
 import { WarmthPeakGuard } from './dsp/warmthGuard.js'
 import { getFFT } from './dsp/fft.js'
-import { measureIntegratedLufs } from './dsp/loudness.js'
 
 /** The bands the readout reports, Hz: sub, low, body, low-mid. */
 export const WARMTH_READOUT_BANDS = [[20, 60], [60, 120], [120, 250], [250, 400]]
@@ -122,23 +121,17 @@ function peakDbOf(chs) {
  *   `bandsDb[i]` is output minus input in WARMTH_READOUT_BANDS[i], null where
  *   the input has nothing there; `peakDb` is the stage's output peak and
  *   `inputPeakDb` the region's own, both dBFS over the same span, so the panel
- *   can print the CHANGE. `loudnessDeltaDb` (with the bands) is the stage's
- *   change in integrated loudness, output minus input, LU — what AUTO makeup
- *   takes back off; null where either side has no measurable content.
+ *   can print the CHANGE.
  */
 export function measureWarmthReadout(channelData, sampleRate, layers, { bands = true, peak = true, guard = null } = {}) {
   const out = renderWarmthAligned(channelData, sampleRate, layers, guard)
   let bandsDb = null
-  let loudnessDeltaDb = null
   if (bands) {
-    const lin = measureIntegratedLufs(channelData, sampleRate)
-    const lout = measureIntegratedLufs(out, sampleRate)
-    if (Number.isFinite(lin) && Number.isFinite(lout)) loudnessDeltaDb = lout - lin
     const ein = bandEnergies(channelData, sampleRate)
     const eout = bandEnergies(out, sampleRate)
     if (ein && eout) {
       bandsDb = ein.map((e, i) => (e > 1e-20 ? 10 * Math.log10(eout[i] / e) : null))
     }
   }
-  return { bandsDb, loudnessDeltaDb, peakDb: peak ? peakDbOf(out) : null, inputPeakDb: peak ? peakDbOf(channelData) : null }
+  return { bandsDb, peakDb: peak ? peakDbOf(out) : null, inputPeakDb: peak ? peakDbOf(channelData) : null }
 }

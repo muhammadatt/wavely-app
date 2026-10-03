@@ -8,7 +8,7 @@ import { regionAlignDb, regionPeakDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { hfLimiterEffect, HF_LIMITER_DEFAULTS } from '../audio/effects/hfLimiter.js'
-import { WARMTH_LAYERS, warmthActive, warmthMakeupOn } from '../audio/hfLimiterParams.js'
+import { WARMTH_LAYERS, warmthActive } from '../audio/hfLimiterParams.js'
 import { measureBandSpectrum, bandRefPeakDb } from '../audio/saturationBenchAnalysis.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
@@ -16,7 +16,7 @@ import { snapshotLevels } from '../audio/effects/levelTap.js'
 export const HF_LIMITER_WINDOW_ID = 'hf-limiter'
 
 // Singleton reactive state shared between the sidebar trigger and the modal.
-// `voiceLevelDb`, `warmthRefPeaksDb` and `warmthMakeupDb` are in here because
+// `voiceLevelDb`, `warmthRefPeaksDb` and `warmthCeilingDb` are in here because
 // the kernel needs them, but they are measured, never set from the panel.
 const hflParams = reactive({ ...HF_LIMITER_DEFAULTS })
 const hflPreview = ref(false)
@@ -34,13 +34,10 @@ let levelMeasuredFor = null
 // Warmth readout: what the Warmth stage does to the selection's low end, per
 // band, and the peak it leaves (hfLimiterWarmthReadout.js). `bandsDb` /
 // `peakDb` null = not measured; the pending flags say a pass is in flight.
-const hflWarmthReadout = ref({ bandsDb: null, loudnessDeltaDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false })
+const hflWarmthReadout = ref({ bandsDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false })
 let readoutTimer = null
 let readoutSeq = 0
-// Which setting/region the last readout's loudness change was measured for,
-// so apply can tell whether the makeup belongs to what it is about to render.
-let loudMeasuredFor = null
-const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthMakeupDb', 'warmthCeilingDb'])
+const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthCeilingDb'])
 
 export function useHFLimiter() {
   const {
@@ -149,30 +146,7 @@ export function useHFLimiter() {
     if (!(name in hflParams) || MEASURED.has(name)) return
     hflParams[name] = value
     pushParam(name, value)
-    if (name === 'warmth' || name === 'oddEven' || name === 'warmthGuard') scheduleWarmthReadout()
-    if (name === 'warmthMakeup') updateMakeup()
-  }
-
-  /** The key a measured makeup belongs to: the setting, the region and the file's state. */
-  function makeupKey(start, end) {
-    return `${appState.activeDocumentId}:${state.revision}:${hflParams.warmth}:${hflParams.oddEven}:${hflParams.warmthGuard}:${start}:${end}`
-  }
-
-  /**
-   * LOUD makeup: minus the loudness change the readout measured. Kept whether
-   * LOUD is on or not, so switching it is instant; the kernel ignores it when OFF.
-   */
-  function updateMakeup() {
-    const r = hflWarmthReadout.value
-    const db = Number.isFinite(r.loudnessDeltaDb) ? -r.loudnessDeltaDb : 0
-    if (hflParams.warmthMakeupDb === db) return
-    hflParams.warmthMakeupDb = db
-    pushParam('warmthMakeupDb', db)
-  }
-
-  /** Is the makeup measured for this setting and region? */
-  function makeupCurrent(key) {
-    return loudMeasuredFor === key
+    if (name === 'warmth' || name === 'oddEven') scheduleWarmthReadout()
   }
 
   /**
@@ -202,25 +176,22 @@ export function useHFLimiter() {
   async function refreshWarmthReadout() {
     const seq = ++readoutSeq
     if (!state.currentFile || !warmthActive(hflParams)) {
-      hflWarmthReadout.value = { bandsDb: null, loudnessDeltaDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false }
+      hflWarmthReadout.value = { bandsDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false }
       return
     }
     refreshLevel() // the layers' calibration must be this file's before measuring
     const { start, end } = selectionSpan()
     if (!(end > start)) return
     refreshCeiling(start, end)
-    const key = makeupKey(start, end)
     const { sampleRate, channels } = state.currentFile
     const params = { ...hflParams }
     hflWarmthReadout.value = { ...hflWarmthReadout.value, bandsPending: true, peakPending: true }
     try {
-      const { bandsDb, loudnessDeltaDb, peakDb, inputPeakDb } = await measureHFLimiterWarmthBands(
+      const { bandsDb, peakDb, inputPeakDb } = await measureHFLimiterWarmthBands(
         state.segments, start, end, params, sampleRate, channels,
       )
       if (seq !== readoutSeq) return
-      hflWarmthReadout.value = { bandsDb, loudnessDeltaDb, peakDb, inputPeakDb, bandsPending: false, peakPending: peakDb === null }
-      loudMeasuredFor = key
-      updateMakeup()
+      hflWarmthReadout.value = { bandsDb, peakDb, inputPeakDb, bandsPending: false, peakPending: peakDb === null }
       if (peakDb !== null) return
       const whole = await measureHFLimiterWarmthPeak(
         state.segments, start, end, params, sampleRate, channels,
@@ -254,15 +225,6 @@ export function useHFLimiter() {
     if (wasPreviewing) togglePreview()
     refreshLevel()
     refreshCeiling(start, end)
-    // The makeup must belong to THIS setting and region, or the render is at
-    // whatever level the last knob position measured.
-    if (warmthMakeupOn(hflParams) && warmthActive(hflParams)) {
-      const { start: s0, end: e0 } = selectionSpan()
-      if (!makeupCurrent(makeupKey(s0, e0))) {
-        clearTimeout(readoutTimer)
-        await refreshWarmthReadout()
-      }
-    }
 
     startProcessing('Applying HF Limiter...')
     try {
