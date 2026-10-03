@@ -58,7 +58,10 @@ function peak(y, from = 0, to = y.length) {
 const db = x => 20 * Math.log10(x)
 const run = (x, p) => processHFLimiterBuffer([x], SR, toKernelParams(p))
 // Threshold −30 dBFS absolute: voice −20 plus −10.
-const BASE = { voiceLevelDb: -20, threshold: -10, range: 24, release: 60 }
+// The shelf's own settings, pinned rather than read from the plugin defaults:
+// those are a voicing choice and move (Warmth on, WARM, 12 kHz), and these
+// tests are about the shelf.
+const BASE = { voiceLevelDb: -20, threshold: -10, range: 24, release: 60, shape: 'tight', freq: 5000, warmth: 0 }
 
 test('bit-transparent below threshold, delayed by the latency, with Transient on or off', () => {
   // Loud bass and mids plus a top well under the ceiling, faded in: a tone
