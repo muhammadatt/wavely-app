@@ -100,7 +100,7 @@ const fmtTone = v => {
   return `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)}k`
 }
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
-const fmtSoftFreq = v => `${(v / 1000).toFixed(v >= 10000 ? 1 : 2)}k`
+const fmtSoftFreq = v => (v < 1000 ? `${Math.round(v)}` : `${(v / 1000).toFixed(v >= 10000 ? 1 : 2)}k`)
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))

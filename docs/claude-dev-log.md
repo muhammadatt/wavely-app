@@ -5535,3 +5535,9 @@ voice and a held 6 kHz tone do not move. PHAT*SS latency is back to Warmth + gua
 Soften's ceiling raised to **36 dB at 10** (`SOFTEN_DB_PER_STEP` 2.4 → 3.6), owner's
 choice. The slope law (0.5 → 1 dB/dB) and the gate are unchanged, so the knob's
 lower travel cuts deeper too (Soften 5 now allows 18 dB).
+
+Soft Freq now reaches down to **500 Hz** (`SOFTEN_FREQ_MIN_HZ` 1000 → 500), owner's
+request; the readout prints Hz below 1 kHz. At Soften 10 on Southern Sunrise, steady
+speech moves −0.01 dB at 500 / 1000 / 3000 Hz alike (whole file −0.05 / −0.04 /
+−0.02 dB): the rise detector still ignores sustained sound with the corner down in
+the voice's body.

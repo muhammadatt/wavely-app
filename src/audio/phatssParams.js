@@ -63,7 +63,7 @@ export const SOFTEN_DB_PER_STEP = 3.6
 /** dB of cut per dB of rise: the HF Limiter's 0.5 at the bottom of the knob, 1 at the top. */
 export const SOFTEN_SLOPE_MIN = 0.5
 export const SOFTEN_SLOPE_MAX = 1
-export const SOFTEN_FREQ_MIN_HZ = 1000
+export const SOFTEN_FREQ_MIN_HZ = 500
 export const SOFTEN_FREQ_MAX_HZ = 12000
 /** Onsets in Soften's band this far under the voice level are left alone (the HF Limiter's default works out to 32). */
 export const SOFTEN_GATE_BELOW_DB = 32

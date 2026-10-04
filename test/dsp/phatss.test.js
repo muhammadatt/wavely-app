@@ -350,6 +350,6 @@ test('Soften maps onto the shelf Transient: deeper ceiling, steeper law, own cor
   assert.equal(k.transientCornerHz, 2500)
   assert.equal(k.transientGateDb, -52)
   assert.ok(Math.abs(toKernelParams({ soften: 5 }).transientSlope - 0.75) < 1e-12)
-  assert.equal(toKernelParams({ softenFreq: 50 }).transientCornerHz, 1000)
+  assert.equal(toKernelParams({ softenFreq: 50 }).transientCornerHz, 500)
   assert.equal(PHATSS_DEFAULTS.soften, 0)
 })
