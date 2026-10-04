@@ -5443,3 +5443,29 @@ delay, so the plugin's existing sound is unchanged until the knob is turned.
 ⚠ Subtle by design and not auditioned when built: at 10 an onset comes down
 ~1.5 dB against the rest of its syllable. If it is too little, the levers are the
 slow attack (longer shaves more and longer) and letting the knob go past 1.
+
+### Soften bench fields (October 2026)
+
+The owner found Soften very subtle and asked for its internals on the panel to
+audition. Added as a SOFTEN BENCH row of DeviceFields under the knobs, live in
+the worklet (`OnsetSoftener.setParams` now takes `floorDb` and `slowAttackMs`;
+`amount` may reach 3): **Floor** 0–6 dB (shipped 3), **Attack** 5–100 ms (30),
+**Scale** 0–3 (1) — Scale multiplies the knob, so it is what Soften 10 means; above
+1 an onset is cut by more than it rose and dips below its settled level. RESET
+returns all three. Measured on Southern Sunrise at Soften 10 (onset crest / first
+30 ms / steady / whole-file rms, dB):
+
+| attack | floor | scale | onset crest | first 30 ms | steady | rms |
+|---|---|---|---|---|---|---|
+| 30 | 3 | 1 (shipped) | −1.47 | −0.97 | −0.01 | −0.18 |
+| 30 | 1.5 | 1 | −2.14 | −1.59 | −0.07 | −0.34 |
+| 30 | 1 | 1 | −2.37 | −1.85 | −0.14 | −0.44 |
+| 50 | 3 | 1 | −1.73 | −1.35 | −0.03 | −0.25 |
+| 30 | 3 | 2 | −2.43 | −1.78 | −0.02 | −0.26 |
+| 50 | 1.5 | 2 | −4.40 | −3.83 | −0.26 | −0.72 |
+| 80 | 1 | 3 | −5.96 | −6.48 | −0.98 | −1.45 |
+
+Scale moves onsets without touching steady speech; Floor is the one that starts
+to move the steady parts (−0.14 dB at 1 dB). The fields are a bench, not a
+settled design — once the owner picks values they should be pinned back off the
+panel or kept as named, deliberate controls.

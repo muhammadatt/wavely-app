@@ -74,6 +74,17 @@ export const ONSET_FAST_ATTACK_MS = 0.1
 export const ONSET_SLOW_ATTACK_MS = 30
 export const ONSET_RELEASE_MS = 40
 export const ONSET_RISE_FLOOR_DB = 3
+/**
+ * Bench ranges for the three settings PHAT*SS exposes as device fields, so
+ * they can be auditioned: the floor, the slow attack, and how far past
+ * "flatten" the knob's top may reach (amount > 1 cuts an onset by more than it
+ * rose — it dips below the settled level).
+ */
+export const ONSET_FLOOR_MIN_DB = 0
+export const ONSET_FLOOR_MAX_DB = 6
+export const ONSET_ATTACK_MIN_MS = 5
+export const ONSET_ATTACK_MAX_MS = 100
+export const ONSET_AMOUNT_MAX = 3
 /** No onset is ever cut deeper than this, whatever the knob. */
 export const ONSET_MAX_CUT_DB = 18
 export const ONSET_DETECT_LO_HZ = 80
@@ -116,13 +127,24 @@ export class OnsetSoftener {
     this.f = 0
     this.s = 0
     this.amount = 0
+    this.floorDb = ONSET_RISE_FLOOR_DB
     this.gateLin = 0
     this.minGain = 1
   }
 
-  /** `amount` — share of each onset's rise removed, 0–1; `voiceLevelDb` — the file's gated RMS. */
-  setParams({ amount, voiceLevelDb } = {}) {
-    if (Number.isFinite(amount)) this.amount = amount < 0 ? 0 : amount > 1 ? 1 : amount
+  /**
+   * `amount` — share of each onset's rise removed (1 flattens it, above 1 dips
+   * below the settled level, up to ONSET_AMOUNT_MAX); `voiceLevelDb` — the
+   * file's gated RMS; `floorDb` — rise never cut; `slowAttackMs` — the slow
+   * follower's attack. The last two default to the shipped constants.
+   */
+  setParams({ amount, voiceLevelDb, floorDb, slowAttackMs } = {}) {
+    if (Number.isFinite(amount)) this.amount = amount < 0 ? 0 : amount > ONSET_AMOUNT_MAX ? ONSET_AMOUNT_MAX : amount
+    if (Number.isFinite(floorDb)) this.floorDb = Math.max(ONSET_FLOOR_MIN_DB, Math.min(ONSET_FLOOR_MAX_DB, floorDb))
+    if (Number.isFinite(slowAttackMs)) {
+      const ms = Math.max(ONSET_ATTACK_MIN_MS, Math.min(ONSET_ATTACK_MAX_MS, slowAttackMs))
+      this.sa = Math.exp(-1 / (ms * 1e-3 * this.sampleRate))
+    }
     if (Number.isFinite(voiceLevelDb)) this.gateLin = 10 ** ((voiceLevelDb - ONSET_GATE_BELOW_DB) / 20)
   }
 
@@ -144,6 +166,7 @@ export class OnsetSoftener {
     // The detector always runs, so turning the knob up starts from settled state.
     for (let ch = 0; ch < nCh; ch++) this.det.process(bufs[ch], this.detBuf[ch], n, ch)
     const amount = this.amount
+    const floorDb = this.floorDb
     const gate = this.gateLin
     const fa = this.fa, sa = this.sa, rel = this.rel
     let f = this.f, s = this.s, minG = this.minGain
@@ -158,7 +181,7 @@ export class OnsetSoftener {
       s = f > s ? f + (s - f) * sa : f + (s - f) * rel
       let req = 1
       if (amount > 0 && f > gate && s > 0) {
-        let cutDb = amount * (20 * Math.log10(f / s) - ONSET_RISE_FLOOR_DB)
+        let cutDb = amount * (20 * Math.log10(f / s) - floorDb)
         if (cutDb > 0) {
           if (cutDb > ONSET_MAX_CUT_DB) cutDb = ONSET_MAX_CUT_DB
           // Fade in over the 6 dB above the gate, so the gate cannot click.

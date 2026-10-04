@@ -64,7 +64,10 @@ export class PhatssKernel {
       this.warmthInit = true
     }
     if (p.warmthGuard) this.guard.setParams(p.warmthGuard)
-    this.soften.setParams({ amount: p.onsetAmount, voiceLevelDb: p.voiceLevelDb })
+    this.soften.setParams({
+      amount: p.onsetAmount, voiceLevelDb: p.voiceLevelDb,
+      floorDb: p.onsetFloorDb, slowAttackMs: p.onsetSlowAttackMs,
+    })
     this.shelf.setParams({
       cornerHz: p.cornerHz,
       thresholdLin: dbToLin(p.thresholdDb),

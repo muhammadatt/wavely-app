@@ -280,9 +280,9 @@ function syllable(amp, at = Math.round(0.3 * SR), n = SR) {
 }
 
 /** Render through the stage alone, aligned to the input. */
-function soften(x, amount, voiceLevelDb = -20, channels = [x]) {
+function soften(x, amount, voiceLevelDb = -20, channels = [x], extra = {}) {
   const st = new OnsetSoftener(SR)
-  st.setParams({ amount, voiceLevelDb })
+  st.setParams({ amount, voiceLevelDb, ...extra })
   const bufs = channels.map(c => Float32Array.from(c))
   for (let o = 0; o < bufs[0].length; o += 128) {
     const len = Math.min(128, bufs[0].length - o)
@@ -349,4 +349,31 @@ test('Soften maps 0–10 onto the share of each onset removed', () => {
   assert.equal(toKernelParams({ soften: 10 }).onsetAmount, 1)
   assert.equal(toKernelParams({ soften: 40 }).onsetAmount, 1)
   assert.equal(PHATSS_DEFAULTS.soften, 0)
+})
+
+test('Soften bench: a lower floor, a longer attack and a Scale past 1 each cut an onset deeper', () => {
+  const at = Math.round(0.3 * SR)
+  const x = syllable(0.2, at)
+  const onset = [at, at + Math.round(0.03 * SR)]
+  const cut = extra => { const [y] = soften(x, extra.amount ?? 1, -20, [x], extra); return levelDb(y, ...onset) - levelDb(x, ...onset) }
+  const base = cut({})
+  assert.ok(cut({ floorDb: 1 }) < base - 0.2, 'a lower floor cuts deeper')
+  assert.ok(cut({ slowAttackMs: 60 }) < base - 0.2, 'a longer attack cuts deeper')
+  assert.ok(cut({ amount: 2 }) < base - 0.5, 'Scale 2 cuts deeper than flatten')
+  // The shipped values are the defaults: passing them changes nothing.
+  const [a] = soften(x, 1)
+  const [b] = soften(x, 1, -20, [x], { floorDb: 3, slowAttackMs: 30 })
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) assert.fail(`sample ${i}: explicit defaults differ`)
+})
+
+test('Soften bench fields map onto the kernel, clamped, with Scale multiplying the knob', () => {
+  const k = toKernelParams({ soften: 5, softenScale: 2, softenFloor: 1.5, softenAttack: 45 })
+  assert.equal(k.onsetAmount, 1)
+  assert.equal(k.onsetFloorDb, 1.5)
+  assert.equal(k.onsetSlowAttackMs, 45)
+  const wild = toKernelParams({ soften: 10, softenScale: 99, softenFloor: -4, softenAttack: 1e6 })
+  assert.equal(wild.onsetAmount, 3)
+  assert.equal(wild.onsetFloorDb, 0)
+  assert.equal(wild.onsetSlowAttackMs, 100)
+  assert.deepEqual([PHATSS_DEFAULTS.softenFloor, PHATSS_DEFAULTS.softenAttack, PHATSS_DEFAULTS.softenScale], [3, 30, 1])
 })

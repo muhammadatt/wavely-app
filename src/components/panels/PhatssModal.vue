@@ -26,9 +26,11 @@ import { usePhatss } from '../../composables/usePhatss.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   WARMTH_MAX, ODD_EVEN_MAX, SOFTEN_MAX, TAME_MAX, TONE_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
-  warmthActive, tapeShelf,
+  ONSET_FLOOR_MIN_DB, ONSET_FLOOR_MAX_DB, ONSET_ATTACK_MIN_MS, ONSET_ATTACK_MAX_MS, ONSET_AMOUNT_MAX,
+  PHATSS_DEFAULTS, warmthActive, tapeShelf,
 } from '../../audio/phatssParams.js'
 import Knob from '../knobs/Knob.vue'
+import DeviceField from '../knobs/DeviceField.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
@@ -98,6 +100,17 @@ const fmtTone = v => {
   return `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)}k`
 }
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
+const fmtFloor = v => v.toFixed(1)
+const fmtAttack = v => `${Math.round(v)}`
+const fmtScale = v => `${v.toFixed(2)}×`
+const parseScale = t => parseFloat(String(t).replace('×', ''))
+
+// Soften's bench fields: back to the shipped voicing.
+const SOFTEN_BENCH_KEYS = ['softenFloor', 'softenAttack', 'softenScale']
+const softenBenchChanged = computed(() => SOFTEN_BENCH_KEYS.some(k => phParams[k] !== PHATSS_DEFAULTS[k]))
+function resetSoftenBench() {
+  for (const k of SOFTEN_BENCH_KEYS) syncParam(k, PHATSS_DEFAULTS[k])
+}
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -188,6 +201,45 @@ async function applyAndClose() {
         </div>
 
         <LevelMeter :levels="phOutputLevels" label="OUT" :height="150" />
+      </div>
+
+      <!-- Soften's internals, exposed for auditioning. -->
+      <div class="mt-[14px] flex justify-center items-end gap-[12px]">
+        <span
+          class="pb-[9px]"
+          style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)"
+        >SOFTEN BENCH</span>
+        <div title="dB of each onset's rise that is never cut. Lower softens every onset more, but steady vowels flicker by about 1–3 dB, so below ~2 the steady parts of syllables start to move too. Shipped at 3">
+          <DeviceField
+            :model-value="phParams.softenFloor" @update:model-value="v => syncParam('softenFloor', v)"
+            :min="ONSET_FLOOR_MIN_DB" :max="ONSET_FLOOR_MAX_DB" :step="0.1"
+            label="Floor" unit="dB" :format-value="fmtFloor"
+            :accent="ACCENT" :disabled="!phPreview" :width="54"
+          />
+        </div>
+        <div title="How long the detector takes to accept a new level, ms. Longer catches more of each syllable's rise and shaves a longer stretch of it; shorter only catches sharp attacks. Shipped at 30">
+          <DeviceField
+            :model-value="phParams.softenAttack" @update:model-value="v => syncParam('softenAttack', v)"
+            :min="ONSET_ATTACK_MIN_MS" :max="ONSET_ATTACK_MAX_MS" :step="1" log
+            label="Attack" unit="ms" :format-value="fmtAttack"
+            :accent="ACCENT" :disabled="!phPreview" :width="54"
+          />
+        </div>
+        <div title="What Soften 10 means. 1 flattens each onset to the level it settles at; above 1 cuts by more than the onset rose, so it dips below the settled level — a ducked attack. Soften scales it, so Soften 5 at Scale 2 is the old Soften 10. Shipped at 1">
+          <DeviceField
+            :model-value="phParams.softenScale" @update:model-value="v => syncParam('softenScale', v)"
+            :min="0" :max="ONSET_AMOUNT_MAX" :step="0.05"
+            label="Scale" :format-value="fmtScale" :parse="parseScale"
+            :accent="ACCENT" :disabled="!phPreview" :width="54"
+          />
+        </div>
+        <button
+          class="pb-[9px]"
+          :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.1em', color: softenBenchChanged ? ACCENT : 'rgba(255,255,255,.25)' }"
+          :disabled="!softenBenchChanged || !phPreview"
+          title="Back to the shipped Floor 3, Attack 30, Scale 1"
+          @click="resetSoftenBench"
+        >RESET</button>
       </div>
 
       <div

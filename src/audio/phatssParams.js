@@ -16,7 +16,12 @@ import { ALIGN_TARGET_DBFS } from './dsp/inputAlign.js'
 import { shelfLatencySamples } from './dsp/hfLimit.js'
 import { SAT_BENCH_LAYER_LATENCY, SAT_AMOUNT_FLOOR_DB } from './dsp/saturationLayers.js'
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
-import { onsetLatencySamples } from './dsp/onsetSoftener.js'
+import {
+  onsetLatencySamples, ONSET_RISE_FLOOR_DB, ONSET_SLOW_ATTACK_MS,
+  ONSET_FLOOR_MIN_DB, ONSET_FLOOR_MAX_DB, ONSET_ATTACK_MIN_MS, ONSET_ATTACK_MAX_MS, ONSET_AMOUNT_MAX,
+} from './dsp/onsetSoftener.js'
+
+export { ONSET_FLOOR_MIN_DB, ONSET_FLOOR_MAX_DB, ONSET_ATTACK_MIN_MS, ONSET_ATTACK_MAX_MS, ONSET_AMOUNT_MAX }
 
 export const PHATSS_DEFAULTS = {
   // 0–10 — low-end harmonic warmth: how much of what the two fixed
@@ -29,6 +34,15 @@ export const PHATSS_DEFAULTS = {
   // ~10 ms the signal takes to settle: a gain on the whole signal, never
   // distortion. 5 halves the jump, 10 flattens it; 0 is off (a pure delay).
   soften: 0,
+  // Soften's internals, on the panel as bench fields for auditioning:
+  // FLOOR — dB of each onset's rise that is never cut (steady vowels flicker
+  // ~1–3 dB, so below ~2 the steady parts start to move); ATTACK — the slow
+  // follower, ms (longer catches more of each syllable and shaves longer);
+  // SCALE — what Soften 10 means: 1 flattens each onset to its settled level,
+  // above 1 dips it below. Shipped values: 3 / 30 / 1.
+  softenFloor: ONSET_RISE_FLOOR_DB,
+  softenAttack: ONSET_SLOW_ATTACK_MS,
+  softenScale: 1,
   // 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
   // together (`tapeShelf`). 0 takes the shelf out. 5 is the HF Limiter's
   // default (−8 dB, Range 12).
@@ -206,7 +220,10 @@ export function toKernelParams(params) {
     thresholdDb: voice + shelf.thresholdRelDb,
     rangeDb: shelf.rangeDb,
     ...TAPE_SHELF,
-    onsetAmount: clamp(Number(p.soften) || 0, 0, SOFTEN_MAX) / SOFTEN_MAX,
+    onsetAmount: (clamp(Number(p.soften) || 0, 0, SOFTEN_MAX) / SOFTEN_MAX) *
+      clamp(Number.isFinite(p.softenScale) ? p.softenScale : 1, 0, ONSET_AMOUNT_MAX),
+    onsetFloorDb: clamp(Number.isFinite(p.softenFloor) ? p.softenFloor : ONSET_RISE_FLOOR_DB, ONSET_FLOOR_MIN_DB, ONSET_FLOOR_MAX_DB),
+    onsetSlowAttackMs: clamp(Number.isFinite(p.softenAttack) ? p.softenAttack : ONSET_SLOW_ATTACK_MS, ONSET_ATTACK_MIN_MS, ONSET_ATTACK_MAX_MS),
     voiceLevelDb: voice,
     outputGainDb: clamp(Number(p.output) || 0, OUTPUT_MIN_DB, OUTPUT_MAX_DB),
   }

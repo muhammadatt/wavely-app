@@ -15,6 +15,7 @@ export default {
     { label: 'Tame', text: 'How hard the tape rounds off the top end. One knob lowers the threshold and deepens the most it may cut together, relative to the file’s voice level, so it acts earlier and goes further as you turn it up. 0 is off; 5 holds the top 8 dB under the voice and cuts at most 12 dB' },
     { label: 'Tone', text: 'Where the top-end tilt starts, 2–12 kHz. The tilt is a gentle 6 dB per octave, so it reaches an octave or more below this' },
     { label: 'Output', text: 'Level after everything, for matching against bypass' },
+    { label: 'Soften bench', text: 'Three fields under the knobs for auditioning Soften. Floor is the dB of each onset’s rise that is never cut (lower softens more, but below about 2 the steady parts of syllables start to move). Attack is how long the detector takes to accept a new level (longer catches more of each syllable and shaves a longer stretch). Scale is what Soften 10 means: 1 flattens each onset, above 1 dips it below the settled level. Reset returns them to 3 dB, 30 ms and 1' },
     { label: 'Readout', text: 'Under the knobs while Warmth is up: how much each low band moves on this selection (SUB 20–60, LOW 60–120, BODY 120–250, LO-MID 250–400 Hz) and how far the highest peak over the whole selection moves after Output, in dB against the selection’s own peak, with the new peak in dBFS under it. A sub boost or a new peak above −1 dBFS shows red' },
   ],
 
