@@ -133,6 +133,14 @@ export function useSaturationBench() {
     pushAll()
   }
 
+  /** Set several fields of one layer at once (the emphasis quick buttons). */
+  function syncLayerFields(k, fields) {
+    const next = sbLayers.value.map(l => ({ ...l }))
+    Object.assign(next[k], fields)
+    sbLayers.value = next
+    pushAll()
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -196,6 +204,7 @@ export function useSaturationBench() {
     togglePreview,
     toggleDelta,
     syncLayer,
+    syncLayerFields,
     resetLayers,
     refreshSpectrum,
     apply,

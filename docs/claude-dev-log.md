@@ -4979,3 +4979,587 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 > Moved verbatim from the root `CLAUDE.md` Implementation Status list, which now carries a short current-state summary. Later fixes: HF COMP's Reso render is now its latency long before trimming (a short selection read a false top-end loss), and the Reso stage's comment no longer says the guard does not bound it.
 
 - HF Softener — dynamic HF shelf per the "Dynamic HF Softener" spec (Modules A/B/C; v2 masking model and the input waveshaper deferred). **Monitoring** (`SoftenerScope.vue`, `SoftenerSpectrum.vue`, `hfSoftenerScope.js`): an ACTIVITY SCOPE on ClipperScope's layout (playhead centred, kernel history left, timeline lookahead right, dimmed) that draws the OUTPUT waveform with what was removed as an accent rim around it, plosive-window treatment in its own colour and a dashed line where the lisp guard stopped the cut; a REDUCTION readout splitting the total into DUCK · EQ · RESO (Reso's own `grDb`, which no meter showed before); the input's spectrum behind the curve with DETECT (dotted) and BAND (solid) marked; lamps on AIR MODE (the voicing weight in VOICED) and PLOSIVES. The kernel reports one scope point per process() call (`SCOPE_STRIDE` 4: input peak, peak after Duck and EQ before Air, dB the guard held back, burst weight), batched into the meter message. ⚠ **REDUCTION LANES HUNG FROM THE TOP EDGE WERE MOCKED UP FIRST AND REJECTED** as a second picture to relate back to the audio; painted on the waveform the rim sits on the "s" it came from, Pro-DS style. ⚠ The waveform is full band, so it is mostly a picture of the Duck: an EQ-heavy setting draws thinner rims than it sounds. ⚠ The guard line is an ESTIMATE — the held dB applied to the output peak, exact for the Duck and generous for the EQ. Panel: Duck, EQ, Detect, Air (makeup), Reso (the Reso stage's amount; 0 = out), Shape, HF COMP, AIR MODE, a header DELTA monitor (never sent to apply), and an **ADVANCED** row: **Guard** (the lisp guard's strength, 0 = off — it replaced the ON/OFF switch), **Band** (the EQ's corner) and **Plosives** (the T/K/P treatment). **Guard** maps 0–100 % onto a floor of −22 → −10 dB in a straight line, so 50 % is the −16 the switch shipped as (bit-identical) and Reso's floor moves with it, 4 dB above. Measured on the real clips: −20 and below cut the same as OFF at Duck 40 / EQ 20 (within 0.4 dB at 80 / 60), so the bottom of the knob joins OFF without a step; at −10 a strident "s" keeps −2 to −5.5 dB and its tilt turns positive. **Band** (3–6 kHz, default 4.5 = bit-identical) moves where the EQ CUTS — Detect moves where it LISTENS, and the two are deliberately independent: raising Detect for bright vowels says nothing about where a voice's "s" sits. At Duck 0 / EQ 60, 3 kHz takes David Greenberg's strident "s" −3.0 → −5.0 dB at 2.5–4.5 kHz and Messy and Bright's −5.6 → −8.4; vowels ≤ 0.2 dB at every corner, since the band only cuts during an "s". At the default EQ 20 the Duck does most of the work and Band moves ~1 dB. ⚠ **THE RETURN SHELF MOVES WITH THE CORNER ABOVE 4.5 kHz** (`bandTuningFor`): held at 11 kHz, a 7 kHz corner stopped a 24 dB cut at −20 and took 16 kHz down 4.5–10 dB, and 6 kHz already cost 16 kHz 2–5; moved in proportion the band reaches full depth at every corner and rate, and a high Band cuts higher air — only during an "s", which is what raising it asks for. Below 4.5 kHz the return stays and the band widens downward. **The chain is Duck → EQ → Air → Reso** — see Duck/EQ and Reso below. Context (50 %), Rotator (sidechain), Release (40 ms) and vowel release (on) were pinned after listening and are off the panel — Context made little audible difference; the kernel keeps them switchable, and the sidechain listen tap, for the bench and tests. ⚠ **Measured against the spec, two of its numbers do not hold**: the rotator's group delay is 0.29 ms worst case above 3 kHz, not ~0.7 ms, and it lowers detector crest factor on impulsive content (~2.4 dB on a glottal pulse train) but RAISES it ~1 dB on fricative noise, which an all-pass cannot make less peaky — so the 3–5 dB claim is unconfirmed and Module A's value is still the open question the spec flags. ⚠ The bypass trim is matched on the PEAK follower's reading (−0.5 dB), not RMS: an all-pass leaves RMS unchanged by construction. `test/dsp/hfSoftener.test.js` carries the spec's objective checks on synthetic voice; real-speech listening across the spec's five categories has not been done. **Three departures from the spec after listening**, each switchable for A/B: (1) ⚠ **the dulling was release CARRYOVER into the vowel after each "s"**, not vowels triggering the detector (vowels far from a sibilant measured 0.00 dB): the follower's release acts on the level, so recovery time scales with how hard the "s" was hit (65 ms at Amount 40 %, 116 at 80 %). **Vowel release** switches the follower to 10 ms while the low/mid band is voiced — post-"s" vowel −1.32 → −0.40 dB (−3.59 → −1.14 at 80 %) with gap chatter in an "s-t-s" run unchanged, since those gaps are unvoiced. ⚠ Two cheaper cures were measured and rejected: a shorter release fixes carryover but bounces 3.1–3.8 dB in consonant-run gaps, and moving the release onto the GAIN with a hold barely helps because it stacks on the detector's own decay. ⚠ The voicing flag decays in 5 ms, not 20: slower, it lingers from the vowel BEFORE an "s" and under-treats it by 0.5 dB. ⚠ It is a soft 6 dB crossover, not a switch — a hard threshold measured 0.35 dB apart at 96 kHz. (2) **Release** applies outside vowels; tuned as a control, now pinned at 40 ms. (3) **Band shape** (default): the 4.5 kHz shelf plus an opposite shelf at 11 kHz Q 0.8, gain ×1.2 so Amount's depth holds — 16 kHz is untouched at 44.1/48 kHz, never boosts > 0.15 dB; ~1 dB shallower at 96 kHz. **EQ (the `amount` param) is three straight lines** (`amountToThresholdDb` and friends): threshold −28 → −44 dBFS, TRUE ratio 1:1 → 6:1, max depth 0 → 24 dB; 0 % never engages; default 40 % (an owner choice: about twice the spec's 40 % cut, −6.1 vs −3.0 dB on synthetic voice). ⚠ The spec's `R` was a DIVISOR (reduction = over / R — its "3" is a true 1.5:1), and raising it cuts LESS, which a first "3:1 → 6:1" attempt did. ⚠ Two earlier maps were uneven in opposite directions — the spec's power-law threshold front-loaded the knob and a ratio linear in SLOPE back-loaded it (2, 3, then 6:1 in the last 20 %); measured per-10 % cuts ran −0.2 … −15.6 with each step bigger than the last. Linear in all three gives −1.5, −3.0 … −15.6, 1.55 dB per 10 %, breath ≤ 0.3 dB at 100 %. The band is built from TWO half-depth shelf/return pairs because one pair cannot dig past ~19 dB without cutting 16 kHz by 14 dB; responses add in dB, so two −12 dB pairs are a −24 dB band with 16 kHz at −0.6 dB. Previously 12 dB: threshold and depth rise together at a fixed 3:1, so the HF level that reaches full depth barely moved across the knob (−16 dBFS at 40 %, −17 at 100 %) and the top of the knob bought only 3 dB. The band's depth compensation is SOLVED per sample rate (`bandDepthComp`), not the ×1.2 constant it started as — the factor runs ×1.17–1.30 with depth at 44.1 kHz and to ×1.51 at 96 kHz, where the band also reaches higher (16 kHz −2.9 dB at 12 dB). **Detect** (3–8 kHz, default 4 kHz = the spec, bit-identical) moves the detector's high-pass corner, because bright vowels trip a 4 kHz detector: on David Greenberg's narration 4.9 % of vowel frames were dipped > 1 dB at Amount 40 (6.0 % at 70) against 0.3 % on Messy and Bright. ⚠ RAISING THE CORNER ALONE ALSO SHRINKS THE "s" CUT (−3.14 → −2.25 dB at 6 kHz), so the detector's gain is COMPENSATED (`detectCompDb`: what a reference "s" — noise, 5 kHz HP · 9 kHz LP — loses through the higher corner, +1.23 dB at 6 kHz): an ordinary "s" reads the same, vowel top end, which sits lower, drops out. Applied as detector gain, so threshold, lisp guard and voicing all move together. Compensated at 6 kHz: David's vowel triggering 4.9 → 0.1 %, his "s" −3.14 → −2.85, Messy and Bright's −5.37 → −5.17. **Thresholds are level-aligned**: T_base, L_ref and the voicing floor all shift dB-for-dB with the whole file's gated RMS (`regionAlignDb`, the same statistic and the same whole-file rule as OptoSmooth) against a nominal −20 dBFS, the spec's own L_ref. The detector is linear, so the gain curve is invariant to recording level to rounding; `levelOffset` is a file property, measured, never a user setting. **Lisp guard** (default on): a cut may never pull the HF detector below a held voice level (200 Hz–3 kHz, 15 ms attack / 500 ms hold) + `lispGuardFloorDb` (**−16**, was −18). ⚠ **SET AGAINST THE SERVER'S `clipGainDeEsser` CEILINGS**, measured in the server's own units (event peak over ±80 ms voiced RMS, its own scripts, two real clips): at −18 a guarded "s" stopped at −1.1 / +1.8 dB, 4–7 below the ACX ceiling (+6) and under every wet-branch ceiling (+3 to +4); −16 stops it at +0.2 / +2.9 and keeps ~60 % of Amount's travel above 40 %. Tighter flattens the knob (−13: +2.9 / +4.4, but 0.2 / 0.6 dB of travel from A40 to A100) — the server takes half the excess over a ceiling and this is a stop, so the floor is not meant to reach it. The figures below were measured at −18. **The floor is TILT-SCALED** (`lispGuardTiltWeight`, `tilt*` tuning): it relaxes by up to 20 dB with the fricative's own 5–10 kHz over 2–4 kHz tilt (4th-order bands, read on the input), full at +10 dB and above, fully relaxed at +3 and below, and voiced samples always keep the full floor. ⚠ A FLOOR SET FOR /s/ BLOCKS AN /f/ OUTRIGHT: a hot "F" in "Fix" after speech got 0.0 dB of cut at −16 (unguarded −2.5 / −10.9 at Amount 40 / 100); tilt-scaled it gets −2.5 / −6.0, and real non-strident events −3.6 → −7.0 (DG) / −2.8 → −5.0 (M&B) at Amount 100. ⚠ THE THRESHOLDS ARE A TRADE, NOT A CLASS BOUNDARY: David Greenberg's /s/ and both clips' /ʃ/ peak at 3–5 kHz and read +2 to +9, among the "F"s — 5/15 gave the "F" its whole cut back but took David's strident events −3.3 → −8.5 (the guard gone for him); 3/10 costs them −3.3 → −4.4 and M&B's −6.9 → −7.3. A /ʃ/ gets a partly relaxed guard; neither this cue nor the server's classifier (which called that "F" strident) can tell it from an /f/. ⚠⚠ **A FIXED 6 dB DEPTH CAP ON PEAKED FRICATIVES (and before it a threshold hold that made Reso inert on sibilance) SHIPPED AND WAS DROPPED** with the move after the cut — a raw cap took the same 6 dB from every "s", where the voice-relative floor takes only what is left above a normal one. ⚠⚠ **THE LISP GUARD SWITCH NEVER TURNED RESO'S GUARD OFF** until the Duck/EQ work: the kernel MERGES params, and the guard-off params omitted the keys, so the old floor stayed live — they are now explicit nulls, pinned by a test. ⚠ In detector units a normal "s" sits ~12 dB BELOW the voice level, so a floor at or above 0 blocks every cut — the first prototype did. It only ever shrinks a cut, so it cannot dull, and it removes most carryover by construction (the vowel's energy lifts the voice level past the "s"): post-"s" vowel at 100 % on hot sibilants −13.0 → −6.5 dB. ⚠ It deliberately FLATTENS THE TOP OF AMOUNT on well-behaved material — normal sibilants on the synthetic voice reach −4.7 dB and stop AT THE DEFAULT 40 % (−6.7 from ~50 % at −18; unguarded −5.8 at 40 %, −15.3 at 100 %), +12 dB-hot ones still reach −16.6. ⚠ At −18 the default was untouched on the peak; at −16 it is not — on real narration the default's "s" cut moved −3.3 → −2.6 / −5.6 → −5.4 dB. So the evenness of the Amount map holds with the guard off only. Pre-roll raised 1 → 2 s for the 500 ms hold. **Duck → EQ: two serial stages, two knobs** (they replaced Amount + Split; defaults Duck 40 / EQ 20). **Duck** turns the whole "s" down, shape and tone intact — the wideband de-esser, like the server's clip-gain de-esser — on its own macro (`duckTo*`: the EQ's threshold line, 1:1 → 4:1, 0 → 12 dB; 1 ms smoothing; 0 does not run). **EQ** is the band cut, and its detector HEARS THE DUCKED "s": it reads the input detector level plus the duck's gain in dB, so it takes only what the duck left and backs off as Duck comes up. ⚠ **SPLITTING ONE TARGET INTO TWO SERIAL GAINS WOULD HAVE CHANGED NOTHING** — a gain and a filter commute — which is why Amount + Split (one target, a share each, a constant total) was retired: with the EQ hearing the duck there is no constant total for Split to divide. ⚠ **THE EQ'S DETECTOR IS NOT A SECOND FOLLOWER ON THE DUCKED SIGNAL** — that was built first, and its 40 ms release lagged a deepening duck, so the EQ read the "s" as hotter than it was and the guard let the two stages reach −9.8 dB where it holds ~−5. The lisp guard caps each stage against the same held voice, the EQ's on the post-duck level, so it caps the TOTAL. EQ-only (Duck 0) is bit-identical to the old Amount/Split 0. **Plosive bursts (T, K, P releases) are caught and cut harder, with the lisp guard lifted** (`burst*` tuning): a closure — the whole band ≥ 15 dB under the held voice for 15–200 ms (a stop's silence, not a pause) — then within 10 ms the top-band detector rising ≥ 12 dB in 5 ms opens a 40 ms window (last 10 ms a fade) in which both stages' thresholds drop 6 dB and depths grow 6 dB. On the Hot Tees clip at Duck 40 / EQ 20 the five T's went −1.7…−6.1 → −5.3…−10.8 dB, S's unchanged; the guard had held "in To" at −7.4 at EQ 100 (−14.6 unguarded). ⚠ TIMING, NOT SPECTRUM: a T burst is peaked like an "s" (tilt +11), so the tilt cue cannot separate them. ⚠ THE WINDOW IS NOT CUT SHORT BY VOICING — the voicing weight reads a broadband burst as voiced, and a cutoff there closed it ~10 ms in, before the burst's peak (~15 ms after onset). ⚠ Fires ~0.6–0.8 /s on narration; k/t-into-s clusters give the "s" onset the treatment (real clips' S's +0.2–0.4 dB, shape no worse). ⚠ An "s" starting ABRUPTLY after 15–200 ms of silence is a false positive — the synthetic voice's isolated "s" is one, so tests of other features pass `burstsEnabled: false`; real "s" onsets (20–40 ms) are pinned as not caught. ⚠⚠ **THE WINDOW CLOSES WHERE THE VOICE LEADS** (`burstVoiceGate`, `voiceLed*`: the fast low/mid band over the fast top band, weight 0 at +4 dB and 1 at +10): most windows on real narration were VOWEL ONSETS after a pause or a voiced stop (voice band 16–33 dB over the top band; real T's −5 to +7, "s" cores under +3 at the 99th percentile), and the lowered threshold and lifted guard ducked those vowels 2–4 dB — the voice audible in Delta. Hot Tees' T's are unchanged to 0.1 dB. **The Duck also has its own vowel release** (`duckVowelReleaseMs` 3, on that same cue): the voicing weight's vowel release waits on the SLOW detector, so the Duck held −2.4 dB 10 ms into the vowel after an "s" — harmless on the EQ, whose tail is top band only, but on a broadband stage it is the vowel's own onset. Together they took the voice band out of the Duck's Delta by 2.7–7.2 dB on four real clips with the top band it removes moved ≤ 0.04 dB and the "s" cuts identical. Measured, default Duck 40 / EQ 20 against the old default (Amount 40): Messy and Bright's "s" −5.4 → −5.9 dB of 4.5–12 kHz with its 5–10 k / 2–4 k tilt changing −3.0 → −1.3; David's −2.8 → −3.0, tilt −1.4 → +0.3; the "s" in "fix slide" −6.9 → −7.5, tilt −5.6 → −2.9. Duck alone moves tilt ≤ 0.6 dB. Vowels away from any "s" are untouched; the vowel just after one dips ≤ 0.4 dB with Duck up. ⚠ The duck's smoothing is 1 ms, not the 3 first guessed: on a 150 Hz tone under ducked sibilants it only changes splatter above 4 kHz, while costing reduction. **Air** (0–6 dB, default 0) is an Air Boost lift AFTER the cut — the same curve by construction, shared from `dsp/airBandCurve.js` (moved out of `airBandProcessor.js`, which registers its own worklet and so cannot be imported into another), and in STATIC mode sample-identical to Air Boost with the cut idle. 0 does not run the stage. ⚠ **AN AUTO AIR AMOUNT WAS CONSIDERED AND NOT BUILT, BECAUSE THE CUT DOES NOT DULL THE VOWELS**: on two real narration clips the softener alone takes ≤ 0.16 dB off vowel top end (≤ 0.8 right after an "s"), so "restore what the cut took" sets Air ≈ 0. What drops is the FILE's top end, 2–7 dB above 5 kHz, because the "s" carries most of it — and matching that hands the cut back (David Greenberg's "s" −3.1 → ~−0.6). **HF COMP (default on) ADDS compensation to the Air knob — never replaces it; the knob is the user's alone — following the chain's measured top-end loss, as HALF of it** (`hfSoftenerAutoAir.js`, worker `hfSoftenerAutoAir`, over the selection's capped window, softener + Reso with Air forced 0, debounced on every control that moves the cut): 10·log10(E_out/E_in) above 5 kHz × 0.5, capped at 6 — David Greenberg +1.0 dB at Amount 40 / +1.3 at 70 / +2.6 with Reso 100, Messy and Bright +2.5 / +3.4 / +4.8. Half, not all: it answers the first impression of dullness, not a restoration of sibilance that is supposed to be gone — and in VOICED mode it lands on the vowels. ⚠ It was first built as an AUTO that OWNED the Air knob (OptoSmooth's contract) and was changed to an additive switch: kernel Air = knob + comp, clamped at `AIR_TOTAL_MAX_DB` (12). Apply re-measures first so it never renders a stale debounced value. **AIR MODE = VOICED** (default) addresses that trade instead: the lift is blended in by the vowel-release voicing weight (`out + w·(lifted − out)`, linear so a partial weight is a partial lift; 1 ms down, 5 ms up), so vowels keep 98 % of STATIC's lift while the "s" gets back 0.3 dB at Air 4 against STATIC's 2.9–3.1, and pauses 0.06 dB against 3.4–4.2 (room noise). ⚠ An "s" pressed between loud vowels still gets about half the lift on the synthetic voice — the voicing weight does not fully let go inside it; not retuned, since it also drives vowel release and SAT MODE. It is never in Delta: the kernel's delta is taken before it, and with HF RESO in the wrapper's delta reads the `preair` listen mode. **The input waveshaper (Drive, SAT CURVE, EMPH, SAT BAND, SAT MODE) was built here, auditioned, and MOVED OUT** to its own layered plugin, Saturation Bench (branch `claude/saturation-bench`): two combinations earned their keep — odd curve + REV + HF + VOICED as a vowel exciter, Quartic + OPTO + FULL + FULL for warmth — and both are saturation jobs, not sibilance ones. The softener is zero-latency again. **Reso** (knob 0 = out of the chain, no latency, bit-identical; default 0 — there is no separate on/off) inserts a band-limited ResoTame (frame 512, 5–12 kHz zone only, max cut 24, `hfSoftenerResoStage.js`) AFTER the softener — last in the chain — with **Reso** on the panel as an AMOUNT MACRO (0–100 %, default 20) over ResoTame's threshold, depth and max cut together — a knot table, `HF_RESO_KNOTS`. ⚠ **IT WAS ResoTame's THRESHOLD AND THAT WAS A SWITCH**: at depth 1 anything clearing the threshold is removed entirely (∞:1), so the knob decided WHETHER to cut, not how much. ⚠⚠ **AND IT RAN ON ResoTame's 200/500 ms BALLISTICS, WHICH MADE IT A SLOW EQ**: an "s" is 30–40 ms, so an isolated one reached −1.6 dB at 100 %, and the "s" cut it showed in speech was reduction BUILT ON THE VOWELS and carried in by the release — "s" cut and vowel cost were one quantity. On David Greenberg's narration (vowels plateau to 10 kHz, then roll off steeply — the peak reference reads that bend as a resonance) it cost 6.8 dB of vowel 8–12 kHz at 100 %. Now **15/25 ms** — the slow default exists to keep gain movement off low harmonics, and nothing that low reaches this zone; 80 → 25 ms release took the vowel just after an "s" from −3.8 / −3.4 to −2.0 / −1.2 dB at 100 %, cost the "s" ≤ 0.2 dB and REDUCED vowel gain flutter — so an "s" is cut by its own frames (isolated −4.3), and **voiced frames hold the macro's 0 % threshold** (`voicedSelectivityFloorDb` = 21, a ResoTame kernel param that is off for ResoTame itself: frame low/mid vs 4.5–12 kHz, crossfaded over 6 dB). On vowels the knob moves only depth and max cut — rings; the falling threshold reaches only unvoiced frames. The knots are the old law WARPED so the "s" comes down evenly on REAL narration (two clips averaged): at 100 % DG vowels −1.8 / "s" −5.7, Messy and Bright −0.1 / −7.1 at the 25 ms release (were −6.8 / −4.5 and −4.3 / −5.3), 0.5–0.8 dB of "s" per 10 %. ⚠⚠ **RESO NOW RUNS AFTER THE CUT, AND IT RAN FIRST BEFORE THAT**: a resonance suppressor removes PEAKS, and an /s/ whose peak is taken sounds flatter, not just quieter — the lisp. Turning the "s" down first (Duck) keeps its shape, and Reso's voice-relative guard then reads an "s" that is already near a normal level. Run first, Reso 40 took the "s" in "fix slide" −6.9 → −9.8 dB and flattened its peak 3.5 dB on top of the old default; run after Duck 40 / EQ 20, it takes −7.5 → −8.5, peak 1.1 flatter, and Reso 100 only −8.7. Messy and Bright's strident events −5.9 → −6.6 / −7.1 at Reso 40 / 100, David's −3.0 → −3.9 / −4.6; rings on vowels unchanged. ⚠ What the floor gives up is FAINT rings inside vowels (synthetic, 100 %: −15.1 → −7.7) — one frame cannot tell a ring at the level of the vowel's own top end from a spectrum bending there; strong rings are still taken in full. ⚠ Two reference shapes were tried first and rejected: a max-of-sides mean stops catching faint rings AND the "s", and a local linear fit costs David's vowels MORE at matched ring catch — the bias that cut his vowels is the same one that caught faint rings. **The Lisp Guard covers Reso too, as a NORMAL-"s" floor** (`lispGuardFloorDb` = `HF_RESO_LISP_GUARD_FLOOR_DB` −12, a ResoTame kernel param off for ResoTame itself, set by the softener's Lisp Guard switch): per frame, no cut may take the 4.5–12 kHz band below the HELD voice level (200 Hz–3 kHz, 15 ms / 500 ms — the softener's own) − 12 dB, so Reso takes only what Duck and EQ left above a normal "s". ⚠ −17.5 (the softener's LISP floor, carried over from when Reso ran first) let Reso 40 take a Duck 40 / EQ 20 "s" −7.6 → −11.3 and flatten its peak 3.3 dB; −12 gives −8.5 and 1.0; −10 leaves ~0.2–0.5 dB. The floor is TILT-SCALED like the softener's (`lispGuardTiltDb` / `lispGuardTiltRelaxDb` = [3, 10] / 20, pinned to the softener's by a test). ⚠ **ONLY ON UNVOICED FRAMES** (cap + voicing weight × 96 dB): on a vowel the rule forbids any cut — its top end sits far below its low/mid — which killed ring removal on vowels; voiced frames already hold the ring-only threshold and cannot lisp. ⚠ Like the softener's, it flattens the top of the Reso knob: Reso 100 alone takes DG's "s" −3.6 rather than −5.7. Apply chains it through `applyWorkletRegion`'s `postStages` (added for it) with its 512 samples in the latency trim; HF COMP's measurement renders the same order. Delta with it on is built in the wrapper (delayed input − output, from the softener's pre-air output) so it covers both stages. With it on, preview and apply are close rather than sample-identical — ResoTame's STFT frame phase, as in ResoTame itself. v2's masking model was considered for the dulling and not built: it changes WHICH frequencies are cut, not how long, and its 21 ms frames and 50 ms per-band release are slower than v1
+
+---
+
+## HF Limiter — EL7 Fatso Warmth analysis (September 2026)
+
+Two bounces supplied by the owner: `2_FATSO_EL7x_-_Input_2.wav` (raw) and
+`11_FATSO_EL7x_-_Input_2_Warmth_7.wav` (Warmth 7, the maximum). Both 96 kHz,
+32-bit float stereo, 8.35 s, sample-aligned, identical peak (−5.94 dBFS). The
+material is music (energy peaks at 50–100 Hz), not voice.
+
+**Capture defect.** At ~6.7 s the processed file jumps 13 samples EARLY
+(integer-lag cross-correlation: 0 before, −13 after) — the bounce dropped
+samples. Everything below uses 0–6.6 s. Before this was found the residual of
+every model sat at −12 dB and the analysis was chasing the glitch.
+
+**What Warmth does — a dynamic one-pole shelf.**
+- Static: +0.7 dB flat.
+- Dynamic: grouping frames by depth and fitting `|g + (1−g)·H(f)|` with one H
+  for all groups: H = one-pole LP at 2251 Hz fits to **0.34 dB rms**; a
+  2nd-order LP 0.56; a raised-cosine split 0.49 (and it wanted 4 octaves, the
+  grid's edge). Depths up to −10.8 dB.
+- Confirmed independently by timing: the effective delay between the files is
+  ~0.3 samples at rest and up to 4.7 samples while cutting, which is the
+  blend's low-frequency group delay `(1−g)/(2π·fc)` at g ≈ −9 dB.
+- A time-varying version of that model (2 ms gain track) takes the residual
+  from −15.9 dB (static gain only) to **−28.0 dB**.
+
+**Ballistics.** Attack under 2 ms. Release reads as two stages in dB (−14 → −6
+in ~25 ms, then to −1 over 100–150 ms) — ⚠ BUT IT IS ONE STAGE. Fitted against
+the 2 ms gain trajectory through our kernel, a single 36 ms release scores 1.16
+dB rms and the best two-stage point 1.17; free descent drives the charge time
+to 315 ms, where the slow stage never engages. A one-pole release in LINEAR gain
+is itself fast-then-slow in dB. The Tail control was built anyway (requested)
+and ships off.
+
+**Level law.** Behaves as a limiter: treble in at −27/−30/−33/−36 dBFS comes
+out at ~−41/−37/−36.5/−37 (2 ms RMS of the one-pole band). Stereo mostly
+unlinked (L/R gain correlation 0.79; with L 6 dB hotter, L −6.7 vs R −2.9 dB —
+only 8 frames); linking costs 0.05 dB of fit.
+
+**Harmonics: none measurable at this setting.** Residual at the bass notes'
+harmonics sits 28–31 dB under the source's own harmonic at every order H1–H7,
+following the source's spectrum (linear mismatch — LF phase ~1°), no order
+standing out. 26–44 kHz output is at or BELOW input at every cut depth, so the
+treble is not saturated into harmonics. During cuts a frame-wise 1/6-octave
+linear model leaves −18 dB at 4–16 kHz (quiet frames −34 to −40): the gain
+moving inside 10 ms, i.e. modulation, not a harmonic series. ⚠ A "0.28-sample
+latency offset" explanation of the HF residual was tried and WITHDRAWN: adding
+the delay made the fit worse (−28.0 → −27.6 dB).
+
+**Match on our kernel** (metric: per-10.7 ms frame, per-band out/in energy in
+0.5–1/1–2/2–4/4–8/8–16 kHz vs the Fatso's, dB rms; gain-only baseline 1.97):
+TIGHT best 0.83 (2.05 kHz, Range 6, Release 45) — it cannot reach below the
+corner or cut deep without over-cutting 3–5 kHz; WARM 0.69–0.75 (2.3–2.5 kHz,
+Range 16, Release 24–36, threshold −24 dBFS = knob −1 against this file's
+−22.9 dBFS gated RMS). Scripts were scratch and are not in the repo.
+
+---
+
+## HF Limiter — Transient: acceleration limiter retired, onset softener built (September 2026)
+
+**Owner report:** "When engaged it only adds loud, scratchy distortion, and is
+unusable for narration."
+
+**The retired design.** A Limen-style acceleration limiter: 4x oversample, take
+the velocity `v = x[n] − x[n−1]`, slew-limit it (`w` moves at most `A` per
+sample, `A` = a sine at Freq and the threshold), integrate the error with a
+leak, `e = (1 − k)·e + (w − v)`, output `x + e`, resampling only `e`.
+
+**Measured on synthetic narration** (glottal pulses through formants, "s" noise
+bursts, −20 dBFS gated RMS, shelf off): the change on an "s" was LOUDER than
+the "s" at every setting (+2.7 dB at Transient 1), the file peak ROSE (−2.6 →
+−0.2 dBFS), and at Transient 100 every vowel was distorted (−17.5 dB, ~13 %).
+Correction spectrum over the "s": +44 dB more energy than the "s" at
+200–1000 Hz, +20 dB at 1–2.5 kHz.
+
+**Root cause — a false claim in the design note.** It said the leak made the
+correction high-passed. A leaky integrator is `1/(s + k)`, a LOWPASS: the
+clamping error is integrated and piles up at and below the leak corner
+(~1.25 kHz), in the voice band. Second, noise-like top end — sibilance and
+breath, most of narration's HF — changes direction nearly every sample, so any
+threshold that touches it clamps nearly every sample and rewrites the waveform.
+Third, the stage's purpose (a backstop for transients too fast for a gain) was
+void: the shelf's 1 ms lookahead already catches every edge with no overshoot.
+The tests missed it because they used steady sines and a noise test that only
+checked the output stayed bounded, never that it stayed smaller than the input.
+Checked afterwards against the old kernel: with the shelf off it raised the
+peak 4.5–6.9 dB and the band under ~350 Hz 7–9 dB at Transient 1/50/100 — the
+new "never adds energy or raises the peak" test covers exactly that case.
+
+**The replacement — an onset softener on the shelf's own gain.** No filter of
+its own, no oversampling (a gain makes no harmonics to alias), no extra latency.
+- `f` = peak follower of the band (attack 0.1 ms, release 20 ms); `s` = slow
+  follower OF `f` (attack 10 ms, release 20 ms); rise = 20·log10(f/s).
+- ⚠ First cut had `s` follow the raw band: a vowel's top end pulses at the pitch
+  rate, `s` charged only during each pulse, and steady vowels read a CONSTANT
+  22 dB of rise. Following the peak-held `f`, steady vowels and steady "s" read
+  ~0 (99th percentile ≤ 1.8 dB).
+- cut = 0.5·(rise − 3 dB), capped by the knob (0–12 dB), gated 24 dB below the
+  threshold with a 6 dB fade, through its own lookahead min + triangle so it
+  leads the onset by up to 1 ms and lets go within ms.
+- Stacks multiplicatively with the shelf; Range caps only the shelf. Owner
+  decision: a few-ms dip cannot make an S lisp, so Range should not cap it.
+- A rise out of room tone is steep in dB for ANY sound (a natural "s" read
+  21 dB of max rise), so max rise cannot tell a click from an "s". What does is
+  energy removed over the sound — measured at Transient 12, shelf off: loud
+  click −11.6 dB, t-burst −3.6 (edge, not body), vowel −0.12, natural "s"
+  −0.09, abrupt "s" −0.18 (its first ms dips ~11 dB — the known false trigger).
+  With the shelf engaged a loud click goes −10.7 → −18.3 dB (peak −21 dB for
+  ~1 ms) and a natural "s" −6.51 → −6.72.
+- Latency 3 ms (was 3 ms + 50 samples). Worklet chunk 11.3 → 9.0 kB.
+
+---
+
+## EL7 Fatso — harmonic generation across Input and Warmth (October 2026)
+
+Owner supplied the true source (`1_SOUTHERN_SUNRISE.wav`) and a third render
+(`18_FATSO_EL7x_-_Input_6.wav`). ⚠ **CORRECTION TO THE WARMTH ENTRY ABOVE:**
+the file it called "raw" (`2_FATSO_EL7x_-_Input_2.wav`) is the Fatso at Input 2
+with Warmth off, not the source. Its Warmth findings stand — they isolate what
+Warmth adds on top of Input 2 — but "no harmonics" there meant "Warmth adds
+none", not "the Fatso adds none".
+
+**Capture timing.** No render is sample-locked to the source: all drift at
+11.5 ppm (Input 2: 1.4 → 10.5 samples over 8.2 s), i.e. a real-time capture
+against a different clock; Input 6 also drops ~12.7 samples at 1.6 s (Warmth 7's
+13 at 6.7 s is the same defect). Every comparison below removes a per-frame
+(85 ms) fractional delay first; Input 6 is analysed from 1.75 s.
+
+**Method.** Per frame, delay removed, then per bin a least-squares Hammerstein
+fit `Y = H1·X + H2·FFT(x²) + H3·FFT(x³)` pooled over ~300–390 frames (2 ch).
+The energy x² / x³ explain beyond the linear fit is even / odd distortion, in dB
+re output. Control: the same fit with x², x³ from mismatched frames (chance
+level). Compression test: `x·env²` (5 ms smoothed x²) — gain riding — against
+the instantaneous x³, which only waveshaping (harmonics) produces.
+
+| vs source | even (x²) | odd (x³) | chance | odd beyond `x·env²` |
+|---|---|---|---|---|
+| Input 2, 150 Hz–6 kHz | −55 to −63 (≈ chance; −57 vs −66 below 400 Hz) | −45 to −51 | −60 to −66 | −46 to −53 |
+| Input 6, 150 Hz–15 kHz | −39 to −49 | **−25 to −30** | −47 to −52 | **−25 to −32** |
+
+- **Input 2:** a faint, real odd-order trace (~0.3–0.5 %), ~10 dB over chance.
+- **Input 6:** odd-order saturation explains almost the whole non-linear
+  residual (≈3–5 %), even-order 14–18 dB below it. It is WAVESHAPING, not a
+  compressor: the instantaneous cubic out-explains gain riding in every band.
+  Odd share rises 4.4–7.6 dB for a 2.9 dB louder half (≈1.5–2.6 dB/dB; a cubic
+  predicts 2). Peak −5.70 → −8.25 dBFS at unchanged RMS. Below 150 Hz there is
+  also a level-dependent gain component.
+- **Warmth 7 over Input 2:** almost everything it adds is explained by `x·env²`
+  — the dynamic shelf. The cubic beyond that sits 1–5 dB over chance, within
+  what the shelf's fast gain movement can produce: no convincing harmonics.
+- ⚠ The steady-bass-note harmonic series does NOT move (≤ 0.7 dB at H2–H7)
+  even at Input 6 — the source's own harmonics (−6 to −25 dBc) swamp ~−28 dB of
+  added distortion. That instrument is insensitive on this material; the fit is
+  the sensitive one.
+
+**For a Fatso-style stage ahead of the HF Limiter:** the harmonics come from
+INPUT drive and are odd-dominant (third-order growth, even ~15 dB down) — a
+symmetric soft clipper, not the even-leaning quartic OptoSmooth uses. Warmth is
+the dynamic shelf alone. One music clip; the Fatso's compressor state at Input 6
+is unknown.
+
+---
+
+## HF Limiter — Drive: a Fatso-style odd-order saturator ahead of the shelf (October 2026)
+
+Built from the harmonic analysis above (Input 6: odd −25 to −30 dB re output,
+even 14–18 dB under, third-order growth). `dsp/oddSat.js`, first in the
+kernel's chain.
+
+- **Curve:** `f(u) = tanh(k±·u)/k±`, `k± = 1 ± SAT_ASYMMETRY` by the sign of u.
+  Symmetric tanh gives the odd series and a cubic onset; the asymmetry gives
+  the even series. ⚠ An added `x²` term was the obvious way to get even
+  harmonics and was not used: it pushes one half past the input at every
+  level. Each half here is `tanh(k·u)/k`, which never exceeds |u|, so the stage
+  cannot make a sample louder. Its DC goes through a 5 Hz blocker on the
+  correction.
+- **Asymmetry 0.045**, calibrated on a sine: even 15.0 / 15.5 / 16.6 dB under
+  odd where H3 is −43 / −31 / −24 dBc, and both grow at the same third-order
+  rate (0.1 → −8 to −12 dB; 0.035 → −17 to −21).
+- **Level:** pre-gain `SAT_REF_DB + Drive − voiceLevelDb` (−30 dB reference),
+  output ÷ pre-gain: unity small-signal gain, file-relative like Threshold.
+- **Oversampling:** 4x (`COMPRESSOR_OVERSAMPLE`), correction only; dry path a
+  50-sample delay. Drive 0 = that delay alone (bit-exact, constant latency).
+- **Calibration against the Fatso Input 6 render** (true source, shelf out,
+  per-bin linear fit over frames, residual dB re output, 150–400 / 400–1k /
+  1–2.5k / 2.5–6k / 6–15k Hz):
+  Fatso −28.5 / −29.9 / −27.6 / −24.3 / −23.7, peak −2.55 dB, RMS 0.0;
+  Drive 12 −34.1 / −35.3 / −32.9 / −30.0 / −29.8, peak −1.89;
+  **Drive 15 −28.6 / −29.8 / −27.5 / −24.6 / −24.5, peak −3.30, RMS −0.32**;
+  Drive 18 −23.4 / −24.7 / −22.3 / −19.5 / −19.5, peak −5.33.
+  ~2 dB of residual per dB of Drive — the third-order law. The RMS difference
+  (Fatso 0.0) is probably its output makeup.
+- ⚠ A test first read the third harmonic flat at −63 dBc for Drive 3–9: the
+  measurement's unwindowed, non-integer-cycle span leaked the fundamental there.
+  Hann-weighted, H3 grows 1.8–2.2 dB per dB as the curve says.
+
+## HF Limiter — Warmth and Odd/Even replace Drive (October 2026)
+
+The Fatso-style Drive (`dsp/oddSat.js`) is removed. In its place, the low-end warmth combination voiced on the Saturation Bench runs as two fixed layers on the bench's own kernel, moved to `dsp/saturationLayers.js` so a second worklet can run it without registering the bench processor twice in one AudioWorkletGlobalScope (which throws). Voicing: quartic drive 60, 1–400 Hz, bell 350 Hz Q 0.5 +24; then tanh drive 50, 1–300 Hz, bell 250 Hz Q 0.7 +24; both FULL. Warmth sets the layers' Amount at 3 dB a step with +6 at 10; Odd/Even is an equal-power crossfade, the quartic offset +17.4 dB so 50 is equal added rms (Southern Sunrise: quartic −42.58, tanh −25.19 dBFS added rms at Amount 0).
+
+Measured on Southern Sunrise, shelf out, output vs input per band (20–60 / 60–120 / 120–250 / 250–400 Hz; nothing above moves):
+
+| Setting | 20–60 | 60–120 | 120–250 | 250–400 | peak dBFS |
+|---|---|---|---|---|---|
+| Warmth 3, O/E 50 | −0.6 | −0.3 | +0.7 | −0.2 | −5.6 |
+| Warmth 5, O/E 50 | −0.9 | −0.4 | +1.5 | −0.4 | −5.8 |
+| Warmth 8, O/E 9 (the bench voicing) | −2.8 | +1.7 | +4.9 | −1.5 | −4.1 |
+| Warmth 8, O/E 50 | −1.2 | +0.3 | +4.0 | −0.9 | −3.3 |
+| Warmth 10, O/E 0 | +2.9 | +6.0 | +8.2 | −2.3 | −1.6 |
+| Warmth 10, O/E 50 | +4.2 | +3.5 | +7.5 | −1.3 | −1.0 |
+| Warmth 10, O/E 100 | +10.3 | +0.5 | +2.0 | +1.2 | +2.4 |
+
+⚠ It is not harmonics alone: at these drives the layers saturate even quiet low-band content, and what a layer "adds" includes the band's own reshaped level (a quiet 150 Hz tone moved +5.2 dB at Warmth 10). The first test written for this claimed quiet material passes at its own level and failed; it now asserts only that material above the bands is untouched. ⚠ The +6 dB top overshoots and clips at full Even.
+
+## HF Limiter — Odd and Even replace Warmth + Odd/Even (October 2026)
+
+Warmth (level) + Odd/Even (equal-power crossfade, 50 = equal loudness) assumed the useful balance spanned the whole knob. On narration it did not: the preferred setting was O/E 9, close to full Odd, because the quartic is the layer that boosts sub (Even 10 alone: +9.7 dB at 20–60 Hz). The pair is replaced by two independent 0–10 knobs, **Odd** (tanh) and **Even** (quartic), each setting its own layer's Amount by the old law (3 dB a step, +6 at 10, quartic offset +17.4 dB so equal numbers add equal rms on Southern Sunrise). There is no loudness guarantee between them any more; the readout is how the sum is judged.
+
+Equivalences, measured on Southern Sunrise (SUB / LOW / BODY / LO-MID dB, peak change, peak dBFS):
+
+| Setting | Bands | Peak Δ | Peak |
+|---|---|---|---|
+| Odd 2 / Even 2 (old W3, O/E 50) | −0.6 −0.3 +0.7 −0.2 | −0.4 | −6.1 |
+| Odd 8 / Even 2.3 (old W8, O/E 9) | −2.6 +1.8 +4.9 −1.5 | +1.6 | −4.1 |
+| Odd 8 / Even 0 | −2.7 +2.0 +4.8 −1.5 | +1.8 | −3.9 |
+| Odd 8 / Even 6 | −1.9 +1.6 +5.0 −1.5 | +2.1 | −3.6 |
+| Odd 10 / Even 0 | +3.0 +6.1 +8.1 −2.5 | +4.1 | −1.6 |
+| Odd 0 / Even 10 (old W10, O/E 100) | +9.7 +0.6 +2.1 +1.1 | +8.1 | +2.4 |
+| Odd 10 / Even 10 | +11.2 +6.9 +10.3 −1.3 | +9.6 | +3.9 |
+
+Saved settings carrying `warmth`/`oddEven` are not migrated (the keys are ignored and the layers start off): the HF Limiter has no factory or user presets yet.
+
+## HF Limiter — AUTO makeup for the Warmth stage (October 2026)
+
+A MAKEUP OFF/AUTO switch beside Odd/Even. AUTO applies `−loudnessDeltaDb`, the Warmth stage's change in K-weighted integrated loudness over the selection's analysis window (measured in the readout's bands pass, which already renders the stage), as a gain between the stage and the shelf — before the shelf so the file-relative Threshold sees a level-matched signal. The kernel glides it (one-pole, 20 ms) and jumps on an immediate set, so an offline render from rest starts at the makeup. Apply re-measures if the stored makeup belongs to another Odd/Even, region or revision. The readout's bands and peak include the makeup.
+
+Southern Sunrise (bands / peak change, then with AUTO):
+
+| Setting | Loudness | OFF bands, peak Δ | AUTO bands, peak Δ |
+|---|---|---|---|
+| Odd 8 / Even 2.3 | +1.5 LU | −2.6 +1.8 +4.9 −1.5, +1.6 | −4.1 +0.4 +3.4 −3.0, +0.1 |
+| Odd 10 / Even 0 | +4.0 LU | +3.0 +6.1 +8.1 −2.5, +4.1 | −1.0 +2.1 +4.1 −6.5, +0.1 |
+| Odd 0 / Even 10 | +0.9 LU | +9.7 +0.6 +2.1 +1.1, +8.1 | +8.8 −0.3 +1.2 +0.1, +7.1 |
+| Odd 10 / Even 10 | +5.4 LU | +11.2 +6.9 +10.3 −1.3, +9.6 | +5.8 +1.5 +4.9 −6.7, +4.2 |
+
+⚠ It matches loudness, not peak: K-weighting barely counts the sub Even adds, so AUTO leaves an Even-heavy setting's peak well up. Matching sample peak or unweighted rms instead would let the sub boost pull the whole voice down, which is the opposite of a level-matched A/B.
+
+## HF Limiter — PEAK makeup mode (October 2026)
+
+Pure Even read about −1 dB of peak change at modest settings with no makeup under AUTO. Measured on Southern Sunrise, it is not compression: the file's peak is negative-going (−5.70 dBFS against +8.48 dB lower on the positive side), and the quartic lifts both half-waves, so the negative peak falls as the positive one rises — Even 1/3/5: −0.47/−0.97/−1.62 dB on the negative side, +0.51/+0.99/+1.88 on the positive, loudness −0.02/−0.04/−0.05 LU, bands flat. Past ~Even 5 the positive side becomes the peak and the change turns upward. Loudness-matched makeup therefore correctly applies ~0.
+
+The switch is now OFF / LOUD / PEAK (`warmthMakeup`, a three-detent rotary; LOUD is the former AUTO). PEAK applies `inputPeakDb − peakDb` from the readout's whole-selection peak pass, so the output peak lands on the source's:
+
+| Setting | PEAK makeup | Loudness vs source | LOUD would apply |
+|---|---|---|---|
+| Even 1 | +0.47 dB | +0.45 LU | +0.02 |
+| Even 3 | +0.97 dB | +0.93 LU | +0.04 |
+| Even 5 | +0.90 dB | +0.85 LU | +0.05 |
+| Odd 8 / Even 2.3 | −1.58 dB | −0.13 LU | −1.46 |
+| Odd 10 | −4.12 dB | −0.10 LU | −4.02 |
+
+Every case lands the peak at 0.00 dB change. On Odd-led settings the two modes nearly agree; on Even-led ones PEAK turns the headroom into level. Apply waits for the peak pass in PEAK mode (`peakMeasuredFor`) and for the bands pass in LOUD mode (`loudMeasuredFor`).
+
+## HF Limiter — Warmth peak guard (October 2026)
+
+The Warmth layers sit on the low band, so what they add peaks with the bass peaks and the sum overshoots the source ("doubling up"). Asked whether an internal compressor was the principled fix: no — the overshoot is the added signal lining up in time with the source's peaks, not an excess of energy, so a compressor would thin the warmth over whole syllables and still guarantee nothing about the peak, and compressing the shaper's input only moves the drive, which at these drives barely moves what is added.
+
+Built instead: a lookahead limiter on the ADDED signal only (`dsp/warmthGuard.js`, GUARD switch). `a = y − x`; per sample the largest `gReq ∈ [0,1]` with `|x + g·a| ≤ C`, `C = max(selection peak, |x|)` (the `|x|` term keeps preview of louder material outside the selection, and apply's pre-roll, from zeroing the warmth). The gain is `lookaheadLimiter.js`'s centred running min + triangular smoother (L = 1.5 ms) followed by a 60 ms one-pole that only lags upward, so `g ≤ gReq` everywhere; since `|x + g·a|` is convex in g, every such g is safe. Linked across channels. Placed after the Warmth stage and before makeup, 2L of constant latency (a pure delay when off; tested bit-exact with no ceiling and with a ceiling nothing reaches). The readout renders it (same class on the aligned pair), so LOUD/PEAK makeup and the peak figure include it.
+
+Offline prototype first, then the kernel, on Southern Sunrise (ceiling = source peak, shelf out):
+
+| Setting | Off: peak / loud | Guard: peak / loud | Guard bands (SUB LOW BODY LO-MID) |
+|---|---|---|---|
+| Odd 8 / Even 2.3 | +1.58 / +1.46 | 0.00 / +1.44 | −2.67 +1.79 +4.81 −1.53 |
+| Odd 10 | +4.12 / +4.02 | 0.00 / +3.73 | +2.61 +5.81 +7.61 −2.34 |
+| Even 6 | +0.04 / −0.04 | 0.00 / −0.04 | unchanged |
+| Odd 10 / Even 10 | +9.56 / +5.40 | 0.00 / +4.02 | +7.98 +5.24 +8.66 −1.38 |
+
+The prototype ducked the added signal 3.4 % of the time at the bench voicing (−0.13 dB of its energy), 24 % at Odd 10 and 60 % at 10/10. PEAK makeup reaches the same peak at the bench voicing only by spending the whole +1.5 LU. Ballistics are reasoned, not auditioned. The Transient test's "cut lands within 2 ms of the click" now measures from where the shelf hears the click (behind Warmth and the guard).
+
+## HF Limiter — PEAK makeup removed (October 2026)
+
+With GUARD holding the peak at the source's by turning down only the added warmth, PEAK makeup had no job left: it held the same peak by cutting the whole selection (spending the warmth's entire loudness gain at the bench voicing), and on pure Even it turned the headroom the quartic frees into level. Removed; MAKEUP is back to a two-way OFF / LOUD rocker. LOUD stays because it answers a different question — level-matching the A/B — that GUARD does not: with GUARD on, Odd 8 / Even 2.3 is still +1.44 LU louder than the source, so an un-matched comparison favours the processed side on loudness alone. A saved `'peak'` reads as OFF (tested).
+
+## HF Limiter — Warmth + Odd/Even restored (October 2026)
+
+The independent Odd and Even knobs were reverted at the owner's request: Warmth (0–10, level) and Odd/Even (0–100, equal-power, 50 = equal added rms) are back, exactly the law they had (`warmthLayers(warmth, oddEven, refs)`). Everything built on top of the independent knobs carries over unchanged — the readout, LOUD makeup and the peak guard all read the two layers' kernel params, not the knobs. The guard re-measured on Southern Sunrise with reachable settings (peak change off → on, loudness with guard):
+
+| Setting | Off peak | Guard peak | Guard loudness | Guard bands (SUB LOW BODY LO-MID) |
+|---|---|---|---|---|
+| Warmth 8 / O/E 9 | +1.56 | 0.00 | +1.42 LU | −2.70 +1.74 +4.77 −1.51 |
+| Warmth 10 / O/E 0 | +4.12 | 0.00 | +3.73 | +2.61 +5.81 +7.61 −2.34 |
+| Warmth 10 / O/E 50 | +4.28 | 0.00 | +2.58 | +3.20 +3.13 +6.91 −1.41 |
+| Warmth 10 / O/E 100 | +8.06 | 0.00 | +0.58 | +7.40 +0.20 +1.73 +0.86 |
+
+Where the Odd/Even scale should run is still the owner's open question.
+
+## HF Limiter — Odd/Even narrowed to its useful range (October 2026)
+
+By ear the useful part of the Odd/Even knob was 0–20/25; past it the quartic mostly adds sub. The knob's 0–100 travel now spans that first quarter of the equal-power crossfade (`ODD_EVEN_SPAN` = 0.25, so new = old × 4): 0 is still pure tanh, 100 is where the old scale read 25 (tanh −0.7 dB, quartic −8.3 dB of crossfade gain before its +17.4 match), and full Even is no longer reachable. The bench voicing moves from 9 to 36; the default stays 50 (old 12.5). The readout shows the band levels barely move across the new travel on Southern Sunrise (Warmth 8):
+
+| O/E | SUB | LOW | BODY | LO-MID | Peak Δ | Loudness |
+|---|---|---|---|---|---|---|
+| 0 | −2.7 | +2.0 | +4.8 | −1.5 | +1.8 | +1.5 |
+| 36 | −2.7 | +1.8 | +4.8 | −1.5 | +1.6 | +1.4 |
+| 100 | −2.4 | +1.3 | +4.6 | −1.4 | +1.5 | +1.3 |
+
+So what the knob moves within this range is harmonic character (second against third), not band level.
+
+## HF Limiter — guard pinned on, makeup removed (October 2026)
+
+The owner's requirement, stated plainly: Warmth must never raise the selection's peak level (no clipping, no lost headroom); added RMS/density is acceptable. The guard alone guarantees exactly that, so it is now pinned on whenever Warmth is up (`warmthGuard.on = warmthActive(p)`, no user param) and the MAKEUP switch is gone, kernel gain and all (`warmthMakeup`, `warmthMakeupDb`, the readout's integrated-loudness measurement and apply's re-measure-before-render). Removing LOUD also closes the hole found just before: LOUD sat after the guard, so on a setting where Warmth measured slightly quieter (−0.05 LU toward Even on Southern Sunrise) it would have turned the level up and put the peak ~0.05 dB over the guard's ceiling.
+
+What remains true and is not guaranteed: the Output trim comes after the guard and can raise the peak by exactly its own setting (the readout includes it); and the ceiling is the SELECTION's peak, so material louder than it (preview outside the selection, apply's pre-roll) is only held at its own level, never pushed higher.
+
+## HF Limiter — Warmth knob made linear in amplitude (October 2026)
+
+By ear the Warmth knob came in slowly and then very fast near the top. Measured: the knob was 3 dB a step on the layers' Amount, i.e. even dB steps on the ADDED signal, and at the bottom that signal sits 20+ dB under the voice so it barely moves the sum. Southern Sunrise, Odd/Even 36, body 120–250 Hz by Warmth 1…10: +0.51 +0.71 +1.00 +1.39 +1.93 +2.65 +3.60 +4.82 +6.32 +8.13 dB — each step ~1.35× the last; loudness +0.03 → +3.89 LU the same way.
+
+Now `Amount = WARMTH_TOP_DB + 20·log10(Warmth/10)` (`warmthLevelDb`): the added amplitude is proportional to the knob, with the same +6 dB top. Body by Warmth 1…10: +1.12 +2.15 +3.11 +3.99 +4.81 +5.57 +6.27 +6.93 +7.55 +8.13 (steps 1.1 → 0.6, gently easing); loudness +0.10 → +3.89 LU in ~0.5 LU steps. The bench voicing (Amount 0) moves from Warmth 8 to 5; the owner asked not to keep the old Warmth 8.
+
+Merged with the owner's re-voicing (`50c5136`): layers quartic (drive 50, 1–250 Hz, bell 280 Q 0.5 +14) + CUBIC (drive 50, 1–220 Hz, bell 240 Q 0.5 +10), defaults WARM / 12 kHz / Warmth 5. Notes: (1) that default was chosen under the old 3 dB-a-step law, where Warmth 5 was Amount −9 dB; under the linear law Warmth 5 is Amount 0 (the old law's 8), and the old 5 is now ~1.8. (2) On Southern Sunrise at Amount 0 the new quartic adds −46.57 dBFS rms and the cubic −25.74: a 20.8 dB gap against `WARMTH_EVEN_MATCH_DB` 17.4, which was measured on the first pair. (3) The shelf tests read their base from the defaults and broke when Warmth defaulted on; they now pin TIGHT / 5 kHz / Warmth 0.
+
+## PHAT*SS — the Warmth circuit moves out of the HF Limiter (October 2026)
+
+The owner asked for the Warmth circuit to leave the HF Limiter and become a tape
+simulation plugin, **PHAT*SS** (Psycho Harmonic Analog Tape * Saturation
+Simulator): the current Warmth controls, plus a version of the HF Limiter's shelf
+with Release, Tail and Transient pinned and one or two macro knobs over Freq,
+Threshold and Range. In/out meters only — no GR meter, no EQ display.
+
+**What moved.** `WARMTH_*`, `ODD_EVEN_SPAN`, `warmthLayers`, `warmthActive` and the
+guard wiring went from `hfLimiterParams.js` / `hfLimiterProcessor.js` to
+`phatassParams.js` / `phatassProcessor.js` unchanged — the user's re-voiced layers,
+the linear Warmth law, the pinned guard, the readout. `hfLimiterWarmthReadout.js`
+became `phatassWarmthReadout.js` (worker op `phatassWarmthReadout`). The warmth and
+guard tests moved to `test/dsp/phatass.test.js` verbatim apart from the plugin they
+run through. The HF Limiter is the shelf alone again: latency back to 3 ms, no
+`immediate` flag on `setParams`, no guard meter.
+
+**The macro.** Two knobs, because Freq is a different question from how hard:
+- **Tame** 0–10: Threshold `2 − 2·Tame` dB re the voice level and Range `2.4·Tame`
+  dB, together — more Tame acts earlier AND may go deeper. 0 takes the shelf out.
+- **Tone** 0–10: corner `2000·6^(Tone/10)` Hz, 2–12 kHz on a log scale.
+
+Tame 5 / Tone 10 is exactly the HF Limiter's default shelf (−8 dB, Range 12,
+12 kHz); with Warmth 0 a PHAT*SS render matches the HF Limiter at those settings
+to < 1e-6 (tested). Pinned: WARM shape, 35 ms release, Tail off, Transient off —
+the setting that matched the Fatso Warmth 7 bounce. ⚠ The Tame slopes (2 dB and
+2.4 dB a step) are reasoned to land the default on the HF Limiter's, not auditioned.
+
+**Soften — not included.** Asked whether Tube Saturation's Soften belongs here.
+Its slew limiter (`dsp/tapeCharacter.js`) is documented to need a clean,
+broadband, oversampled signal just ahead of ONE broadband nonlinearity, with its
+allowance referenced to that nonlinearity's knee — after a nonlinearity or on a
+band-split signal it reverses sign and becomes a distortion generator. PHAT*SS's
+nonlinearities are two parallel layers on a band below ~250 Hz; there is no
+broadband curve for Soften to protect. What Soften audibly does is a broad HF
+shelf, and the tape shelf already does that job linearly, program-dependently and
+with a no-overshoot proof. And the HF Limiter's own history (the Limen-style
+acceleration limiter) is the measured case against waveform-domain limiting on
+narration. If a fixed tape HF loss is ever wanted, Tube Saturation's HF Loss shelf
+is the closer idea — but the dynamic shelf already covers it.
+
+## Saturation Bench — a hysteresis (tape magnetisation) curve (October 2026)
+
+Asked for while scoping PHAT*SS: what the owner wanted from Tube Saturation's
+Soften was a HYSTERESIS effect — transient softening and mild compression — not
+the HF rolloff Soften actually is (a slew limiter with one sample of memory). So
+a real loop was built: a Jiles-Atherton model (`dsp/hysteresis.js`, from the
+published equations — Jiles & Atherton 1986, Chowdhury DAFx 2019 — not from any
+plugin's code), offered on the Saturation Bench as the curve `hysteresis`, the
+kernel's first STATEFUL curve (one state per channel, stepped once per
+oversampled sample; the kernel otherwise unchanged).
+
+**Voicing, and why not the textbook one.** Normalised units (h = H/a, m = M/Ms),
+three shape constants c, K, A.
+- Chowdhury's tape values (c 0.17) EXPAND: the fundamental's gain rises +9.9 dB
+  before saturating — unbiased tape's S-curve. Rejected.
+- Sine sweep for the widest loop that never expands: c 0.6, K 5 (+0.03 dB max,
+  7° of lag at 4× calibration).
+- **Then speech biases itself.** Small fast reversals pull J-A toward the
+  anhysteretic curve (what AC bias does), steeper than the settled loop, so a
+  voice's own harmonics raise its bass: Southern Sunrise full band +6 at c 0.6,
+  20–250 Hz +1.50 dB, whole file +0.99 dB rms. A 120 Hz tone with a 3 kHz
+  ripple at a fifth of its level gains +0.54 dB. Shipped **c 0.8** (1.2° lag,
+  self-bias +0.34 / +0.12 dB at +6 / +12); a test bounds the ripple lift.
+- Output is normalised to the steady-state small-signal gain at the
+  fundamental, not f'(0) (demagnetised, the origin slope is only the reversible
+  part). Drive calibration (1 % THD at the band's reference peak) is measured in
+  steady state on its own sine.
+
+**The three bands** (`node scripts/hysteresis-bands.mjs <wav> [outDir] [drives] [c=…]`),
+Southern Sunrise, one layer, FULL, no emphasis, drive +12, c 0.8. Onset crest is the
+first 20 ms's peak against the 40–150 ms level, change vs dry, 16 onsets;
+compression is the quiet-quartile change minus the loud-quartile change (voiced
+50 ms frames); bands 20–250 / 250–1k / 1–4k / 4–10k / 10k+.
+
+| | peak | onset crest | compression | bands |
+|---|---|---|---|---|
+| low 1–250 Hz | +0.23 | −0.10 | −0.17 (expands) | +0.06 / 0 / 0 / 0 / 0 |
+| 20 Hz–4 kHz | +0.15 | −0.21 | +0.15 | +0.44 / −0.69 / +0.37 / −0.02 / 0 |
+| full band | −4.88 | −2.56 | +0.63 | +0.12 / −0.85 / −0.95 / −1.06 / −0.94 |
+| tanh, full band | −6.87 | −2.59 | +0.89 | −0.92 / −0.98 / −1.01 / −1.10 / −0.97 |
+| hysteresis c 0.6, full | −2.93 | −2.78 | +0.29 | +1.83 / −0.52 / −0.79 / −0.94 / −0.83 |
+
+- **Low band does nothing for transients**, as predicted: speech's onsets are not
+  there, and it slightly expands and raises the peak.
+- **20 Hz–4 kHz barely softens onsets** and tilts the mids (250–1k down, 1–4k up:
+  odd harmonics of the low/mid band land in 1–4 kHz and the 4 kHz edge keeps them).
+- **Full band is the only one that softens transients and compresses** — and it
+  does so like a tanh at the same calibration (onset crest −2.56 vs −2.59). The
+  softening is the SATURATION, not the memory. tanh runs ~30× realtime here,
+  hysteresis ~11×.
+- **What the loop does add: low-level residual that does not go away.** Residual
+  after the best gain, re the signal, full band +12: tanh −21.7 / −57.2 / −86.7 dB
+  at 0 / −20 / −40 dB of level; hysteresis c 0.8 −17.8 / −30.7 / −49.2. Soft
+  syllables carry ~3 % of residual against a tanh's 0.1 % — the grain of
+  unbiased tape. On white/pink noise it is level-independent (~−21 dB).
+
+Renders for audition (8 s, 32-bit float, latency trimmed): dry, the three bands,
+tanh full band, and c 0.6 full band. Nothing is wired into PHAT*SS yet.
+
+## PHAT*SS — Soften, a whole-signal onset softener (October 2026)
+
+After the hysteresis renders the owner decided against adding more distortion
+to PHAT*SS for transient softening, and asked for the HF Limiter's Transient
+mechanism on the whole signal instead, as a knob. Built as `dsp/onsetSoftener.js`,
+placed after the Warmth guard and before the tape shelf: a linked broadband
+gain, so it adds nothing and can only lower a peak.
+
+**Detector, re-derived for the whole signal.**
+- Band 80 Hz–4 kHz, so rumble and sibilance do not trigger it.
+- The fast follower's release is 40 ms, not 20: on the whole signal it rides the
+  voice's fundamental and 20 ms ripples (rise p90 / p99 / p99.9 on narration
+  1.12 / 3.62 / 8.26 dB at 20 ms; 0.67 / 3.27 / 7.32 at 40).
+- The slow follower's attack is 30 ms, not 10: a syllable rises over 10–30 ms
+  and a 10 ms follower keeps up with it. Full Soften on Southern Sunrise
+  (16 onsets; "steady" = 269 loud 10 ms frames within 1.5 dB of their neighbours):
+
+  | slow attack | onset crest | first 30 ms | steady | rms |
+  |---|---|---|---|---|
+  | 10 ms | −0.68 | −0.29 | −0.01 | −0.07 |
+  | 20 ms | −1.18 | −0.68 | −0.01 | −0.13 |
+  | **30 ms** | **−1.47** | **−0.97** | **−0.01** | **−0.18** |
+  | 50 ms | −1.73 | −1.35 | −0.03 | −0.25 |
+
+  An 80 ms release instead of 40 weakened every row by about a third.
+
+**The knob law had to change.** Copied from Transient — a fixed 0.5 dB per dB
+of rise above 3 dB, with the knob as a cap at 1.2 dB a step — most syllable
+onsets never reached even Soften 2's cap, and Soften 2 through 10 measured
+IDENTICAL (peak −2.17 dB everywhere). Now the knob is the share of each onset's
+rise removed: `cut = (soften/10)·(rise − 3)`, 18 dB safety cap. Measured at 30 ms:
+onset crest −0.22 / −0.42 / −0.53 / −0.62 / −0.68 at 2 / 4 / 6 / 8 / 10 under the
+old 10 ms attack — monotone — and −1.47 at 10 under the shipped 30 ms.
+
+Gated 18 dB under the voice level (fading in over 6 dB) so a cough in room tone
+never pumps; 1.5 ms lookahead (3 ms of constant latency); default 0, a pure
+delay, so the plugin's existing sound is unchanged until the knob is turned.
+⚠ Subtle by design and not auditioned when built: at 10 an onset comes down
+~1.5 dB against the rest of its syllable. If it is too little, the levers are the
+slow attack (longer shaves more and longer) and letting the knob go past 1.
+
+### Soften bench fields (October 2026)
+
+The owner found Soften very subtle and asked for its internals on the panel to
+audition. Added as a SOFTEN BENCH row of DeviceFields under the knobs, live in
+the worklet (`OnsetSoftener.setParams` now takes `floorDb` and `slowAttackMs`;
+`amount` may reach 3): **Floor** 0–6 dB (shipped 3), **Attack** 5–100 ms (30),
+**Scale** 0–3 (1) — Scale multiplies the knob, so it is what Soften 10 means; above
+1 an onset is cut by more than it rose and dips below its settled level. RESET
+returns all three. Measured on Southern Sunrise at Soften 10 (onset crest / first
+30 ms / steady / whole-file rms, dB):
+
+| attack | floor | scale | onset crest | first 30 ms | steady | rms |
+|---|---|---|---|---|---|---|
+| 30 | 3 | 1 (shipped) | −1.47 | −0.97 | −0.01 | −0.18 |
+| 30 | 1.5 | 1 | −2.14 | −1.59 | −0.07 | −0.34 |
+| 30 | 1 | 1 | −2.37 | −1.85 | −0.14 | −0.44 |
+| 50 | 3 | 1 | −1.73 | −1.35 | −0.03 | −0.25 |
+| 30 | 3 | 2 | −2.43 | −1.78 | −0.02 | −0.26 |
+| 50 | 1.5 | 2 | −4.40 | −3.83 | −0.26 | −0.72 |
+| 80 | 1 | 3 | −5.96 | −6.48 | −0.98 | −1.45 |
+
+Scale moves onsets without touching steady speech; Floor is the one that starts
+to move the steady parts (−0.14 dB at 1 dB). The fields are a bench, not a
+settled design — once the owner picks values they should be pinned back off the
+panel or kept as named, deliberate controls.
+
+### Soften judged against the syllable's own body (October 2026)
+
+The owner heard that a phrase start after silence was cut harder than other
+syllables, and it is intrinsic to measuring rise against the PAST: after a pause
+the slow follower has decayed to room tone, so the first syllable reads as a
+20–40 dB rise. Southern Sunrise at Soften 10, deepest cut per onset: the onset
+after the clip's quietest gap −7.8 dB against ~−2 for the rest; at floor 1.5 /
+scale 2 / attack 50 it hit the 18 dB cap against ~−5.
+
+Rebuilt so the reading is the SMALLER of two: the rise over the past (unchanged —
+it keeps syllable ENDS untouched, where the level ahead falls away and an
+overshoot-only reading would cut the tail of every word) and the overshoot over
+the syllable's own BODY — the mean of the fast follower 30–80 ms after the sample,
+read through 80 ms of lookahead. A start after silence is then judged like any
+other syllable, and a syllable that steps up with no overshoot is left alone.
+
+Body window and floor, at Soften 10 (onset crest / first 30 ms / steady, dB):
+
+| body | floor 3 | floor 1.5 | floor 0.5 |
+|---|---|---|---|
+| 10–40 ms | −0.00 / −0.04 / −0.00 | −0.07 / −0.31 / −0.03 | −0.23 / −0.68 / −0.16 |
+| 20–60 ms | −0.03 / −0.20 / −0.01 | −0.41 / −0.65 / −0.03 | −0.73 / −1.11 / −0.16 |
+| **30–80 ms** | −0.29 / −0.37 / −0.01 | **−0.71 / −0.87 / −0.04** | −1.09 / −1.38 / −0.17 |
+| 40–100 ms | −0.40 / −0.46 / −0.01 | −0.88 / −1.01 / −0.04 | −1.31 / −1.52 / −0.17 |
+
+10–40 ms overlaps the attack itself, so it reads almost no overshoot. Shipped
+30–80 ms and floor 1.5 (down from 3: an overshoot over the body is smaller than a
+rise over room tone). The after-pause onset now takes −3.9 dB, inside the
+−1.1…−5.2 of the others. Scale 2 / 3: crest −1.32 / −1.73, steady −0.07 / −0.10.
+Cost: 80 ms more constant latency (trimmed on apply; preview runs behind bypass).
+The Attack field keeps its meaning (the past follower) but now only limits the
+cut: shorter catches up sooner and cuts less.
+
+### Soften rebuilt as the shelf's Transient on its own band (October 2026)
+
+The owner auditioned the body-referenced broadband Soften and found it not worth
+its 83 ms of latency: the HF Limiter's Transient knob did the job about as well,
+with less tuning and no latency. Asked for that instead — deeper, with its own
+cutoff that moves independently of (or below) the main shelf.
+
+`dsp/onsetSoftener.js` is removed (recoverable at `4d5fac3`, measurements above).
+`ShelfLimiterStage` gains three optional params:
+- `transientCornerHz` — the Transient detector reads, and its cut acts on, its OWN
+  one-pole split at this corner (computed on the same centred sample as the shelf's
+  band, so no new latency). The cut is applied as a second dynamic shelf CASCADED
+  on the shelf's output, `y + (gt − 1)·(y − LP1(y))`, so the two gains multiply and
+  can never over-subtract (summing two cuts on overlapping bands can drive the top
+  end negative). null keeps the shared band — the HF Limiter is bit-identical
+  (its 20 tests pass unchanged).
+- `transientSlope` — dB of cut per dB of rise (HF Limiter's 0.5 by default).
+- `transientGateLin` — an absolute gate instead of "24 dB under the shelf
+  threshold", so PHAT*SS's gate does not move with Tame.
+
+PHAT*SS: **Soften** 0–10 sets the ceiling 2.4 dB a step (24 at 10) and the slope
+0.5 → 1 across the knob; **Soft Freq** 1–12 kHz (default 3 kHz) is its corner;
+gate 32 dB under the voice level (the HF Limiter's default works out to the same).
+On a 2 ms click over a 150 Hz voice: deepest cut 12 dB at Soften 5, 24 at 10; at
+Soften 10 / 3 kHz it removes more of the click than the HF Limiter's Transient 12 at
+the same corner; 1.5 kHz takes more of a broadband burst than 8 kHz; the steady
+voice and a held 6 kHz tone do not move. PHAT*SS latency is back to Warmth + guard
++ shelf. The SOFTEN BENCH fields are gone with the stage they tuned.
+
+Soften's ceiling raised to **36 dB at 10** (`SOFTEN_DB_PER_STEP` 2.4 → 3.6), owner's
+choice. The slope law (0.5 → 1 dB/dB) and the gate are unchanged, so the knob's
+lower travel cuts deeper too (Soften 5 now allows 18 dB).
+
+Soft Freq now reaches down to **500 Hz** (`SOFTEN_FREQ_MIN_HZ` 1000 → 500), owner's
+request; the readout prints Hz below 1 kHz. At Soften 10 on Southern Sunrise, steady
+speech moves −0.01 dB at 500 / 1000 / 3000 Hz alike (whole file −0.05 / −0.04 /
+−0.02 dB): the rise detector still ignores sustained sound with the corner down in
+the voice's body.
+
+### Soften folded into Tame (October 2026)
+
+The owner found Soften hard to use live: its effect depended on four knobs — its
+own Soften and Soft Freq plus the shelf's Tame and Tone. Now Soften is an ON/OFF
+toggle (a lamp pill with a caption naming the current depth, default OFF), its
+corner PINNED at 500 Hz, and its depth riding TAME (`softenLaw`): 3.6 dB of ceiling
+per Tame step (36 at 10) and a slope of 0.5 → 1 dB of cut per dB of rise across
+Tame's travel, so the top end and the attacks turn down together and Tame 0 takes
+both out (a pure delay, tested). The Soften and Soft Freq knobs are gone.
+
+### PHAT*SS — Tame's Range widened (2.4 → 3.6 dB a step)
+
+Owner: "increase the range of the Tame cut". `TAME_RANGE_PER_STEP_DB` 2.4 → 3.6, so
+Range runs 0 → 36 dB across Tame (18 at the default 5, was 12; 36 at 10, was 24) —
+the same top Soften already rides Tame to, so one knob reads "up to 36 dB" for both.
+Threshold is unchanged (`2 − 2·Tame`), so the shelf starts acting at the same
+place and only its floor goes deeper. Tame 5 / Tone 10 is no longer the HF
+Limiter's default shelf (Range 12); it is the HF Limiter at −8 dB / Range 18 /
+12 kHz, and the Warmth-0 equivalence test now compares against that. The kernel
+has no Range clamp (`floorLin = dbToLin(−rangeDb)`), so 36 needs no other change;
+the HF Limiter's own knob still stops at 24. Not auditioned.

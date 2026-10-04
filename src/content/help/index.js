@@ -59,6 +59,7 @@ import airBand from './air-band.js'
 import autoLeveler from './auto-leveler.js'
 import clipGainDeesser from './clip-gain-deesser.js'
 import fetPunch from './fet-punch.js'
+import hfLimiter from './hf-limiter.js'
 import hfSoftener from './hf-softener.js'
 import humRemover from './hum-remover.js'
 import loudness from './loudness.js'
@@ -66,6 +67,7 @@ import manualEq from './manual-eq.js'
 import noiseReduction from './noise-reduction.js'
 import normalize from './normalize.js'
 import optoSmooth from './opto-smooth.js'
+import phatass from './phatass.js'
 import removeSilence from './remove-silence.js'
 import resonanceSuppressor from './resonance-suppressor.js'
 import saturationBench from './saturation-bench.js'
@@ -81,6 +83,7 @@ export const HELP = {
   'auto-leveler': autoLeveler,
   'clip-gain-deesser': clipGainDeesser,
   'fet-punch': fetPunch,
+  'hf-limiter': hfLimiter,
   'hf-softener': hfSoftener,
   'hum-remover': humRemover,
   loudness,
@@ -88,6 +91,7 @@ export const HELP = {
   'noise-reduction': noiseReduction,
   normalize,
   'opto-smooth': optoSmooth,
+  phatass,
   'remove-silence': removeSilence,
   'resonance-suppressor': resonanceSuppressor,
   'saturation-bench': saturationBench,

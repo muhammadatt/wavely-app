@@ -76,6 +76,11 @@ export const ICONS = {
   // HF softener: a flat line whose top end dips on a shelf, with the undipped
   // line ghosted above it — the shelf giving way, not a notch or a clamp.
   softener: '<path d="M2 9h10c3 0 5 6 10 6"/><path d="M12 9h10" stroke-dasharray="2.5 2.5" opacity=".45"/>',
+  // HF limiter: a line that rises into the top end and is flattened against a
+  // ceiling there — the shelf's ceiling, drawn where it acts.
+  // Tape: two reels and the tape running between them.
+  tape: '<circle cx="7" cy="11" r="4"/><circle cx="17" cy="11" r="4"/><circle cx="7" cy="11" r="1"/><circle cx="17" cy="11" r="1"/><path d="M4 18h16"/>',
+  hflimiter: '<path d="M2 16h8c3 0 4-8 7-8h5"/><path d="M12 8h10" stroke-dasharray="2.5 2.5" opacity=".45"/>',
   deesser: '<path d="M3 16c2 0 2.5-6 4.5-6S10 16 12 16s2.5-8 4.5-8S19 16 21 16"/><path d="M5 5h14" stroke-dasharray="3 2"/><path d="M5 4v2M19 4v2"/>',
   // Soft clipper: a waveform peak flattened against a ceiling line — the one
   // thing this stage does, drawn literally rather than as an abstract knob.

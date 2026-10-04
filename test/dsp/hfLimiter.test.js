@@ -1,0 +1,452 @@
+/**
+ * HF Limiter — the claims the design rests on (see src/audio/dsp/hfLimit.js).
+ *
+ * Run with:  npm test
+ */
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { HFLimiterKernel, processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
+import { toKernelParams, hfLimiterLatencySamples, HF_LIMITER_DEFAULTS } from '../../src/audio/hfLimiterParams.js'
+import { shelfResponseDb, splitResponse, splitTaps } from '../../src/audio/dsp/hfLimit.js'
+
+const SR = 44100
+
+function sine(f, amp, n = SR, phase = 0) {
+  const x = new Float32Array(n)
+  for (let i = 0; i < n; i++) x[i] = amp * Math.sin((2 * Math.PI * f * i) / SR + phase)
+  return x
+}
+
+function add(...xs) {
+  const y = new Float32Array(xs[0].length)
+  for (const x of xs) for (let i = 0; i < y.length; i++) y[i] += x[i]
+  return y
+}
+
+function noise(n, amp, seed = 1) {
+  let s = seed
+  const x = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    s = (s * 16807) % 2147483647
+    x[i] = amp * ((s / 2147483647) * 2 - 1)
+  }
+  return x
+}
+
+/** Amplitude of the component at `f`, by correlation over [from, to). */
+function toneAmp(y, f, from, to) {
+  let c = 0, s = 0
+  for (let i = from; i < to; i++) {
+    const w = (2 * Math.PI * f * i) / SR
+    c += y[i] * Math.cos(w)
+    s += y[i] * Math.sin(w)
+  }
+  return (2 * Math.hypot(c, s)) / (to - from)
+}
+
+function peak(y, from = 0, to = y.length) {
+  let m = 0
+  for (let i = from; i < to; i++) m = Math.max(m, Math.abs(y[i]))
+  return m
+}
+
+const db = x => 20 * Math.log10(x)
+const run = (x, p) => processHFLimiterBuffer([x], SR, toKernelParams(p))
+// Threshold −30 dBFS absolute: voice −20 plus −10.
+// The shelf's own settings, pinned rather than read from the plugin defaults:
+// those are a voicing choice and move (WARM, 12 kHz), and these
+// tests are about the shelf.
+const BASE = { voiceLevelDb: -20, threshold: -10, range: 24, release: 60, shape: 'tight', freq: 5000 }
+
+test('bit-transparent below threshold, delayed by the latency, with Transient on or off', () => {
+  // Loud bass and mids plus a top well under the ceiling, faded in: a tone
+  // switched on abruptly IS a sharp edge, and the Transient stage rightly takes it.
+  const x = add(sine(150, 0.5), sine(1200, 0.2), sine(9000, 0.005))
+  const fade = Math.round(0.05 * SR)
+  for (let i = 0; i < fade; i++) x[i] *= 0.5 - 0.5 * Math.cos((Math.PI * i) / fade)
+  // Transient acts below Threshold ON PURPOSE (it catches quiet clicks), and a
+  // fade in from digital silence is an onset, so with it on the claim is
+  // "untouched once steady": from 0.1 s, after the fade.
+  for (const [transient, from] of [[0, 0], [12, Math.round(0.1 * SR)]]) {
+    const { channelData: [y], latencySamples: L } = run(x, { ...BASE, transient })
+    assert.equal(L, hfLimiterLatencySamples(SR))
+    for (let i = L + from; i < x.length; i++) {
+      if (y[i] !== x[i - L]) assert.fail(`transient ${transient}: sample ${i} differs (${y[i]} vs ${x[i - L]})`)
+    }
+  }
+})
+
+test('the shelf holds the band above the corner at the threshold, with no overshoot', () => {
+  const T = Math.pow(10, -30 / 20)
+  for (const f of [8000, 12000]) {
+    const { channelData: [y] } = run(sine(f, 0.1), BASE)
+    // Well above the transition, the band IS the signal, so the output peak is the band's.
+    const p = peak(y, SR / 4)
+    assert.ok(p <= T * 1.0005, `${f} Hz peak ${db(p).toFixed(3)} dBFS over the −30 ceiling`)
+    assert.ok(p > T * 0.97, `${f} Hz held at ${db(p).toFixed(2)} dBFS, well under the ceiling`)
+  }
+})
+
+test('the bass under a limited top is left alone', () => {
+  const x = add(sine(200, 0.4), sine(10000, 0.1))
+  const { channelData: [y], latencySamples: L } = run(x, BASE)
+  const lo = toneAmp(y, 200, SR / 4 + L, SR)
+  const hi = toneAmp(y, 10000, SR / 4 + L, SR)
+  assert.ok(Math.abs(db(lo / 0.4)) < 0.01, `200 Hz moved ${db(lo / 0.4).toFixed(3)} dB`)
+  assert.ok(db(hi / 0.1) < -8, `10 kHz only came down ${db(hi / 0.1).toFixed(2)} dB`)
+})
+
+test('Range is a floor the cut never goes past', () => {
+  // 40 dB over the ceiling, 6 dB of Range: 6 dB of cut, not 40.
+  const { channelData: [y] } = run(sine(10000, 0.3), { ...BASE, threshold: -50, range: 6 })
+  const p = peak(y, SR / 4)
+  assert.ok(Math.abs(db(p / 0.3) + 6) < 0.05, `cut ${db(p / 0.3).toFixed(3)} dB at Range 6`)
+  // And Range 0 takes the shelf out: bit-transparent however far over.
+  const x = sine(10000, 0.3)
+  const { channelData: [z], latencySamples: L } = run(x, { ...BASE, threshold: -50, range: 0 })
+  for (let i = L; i < x.length; i++) if (z[i] !== x[i - L]) assert.fail(`Range 0 changed sample ${i}`)
+})
+
+test('the curve the panel draws is the cut the kernel applies', () => {
+  // Threshold far below anything: the gain sits on the Range floor, so the
+  // stage is a fixed filter and its tone response can be read off directly.
+  const range = 12
+  const g = Math.pow(10, -range / 20)
+  for (const corner of [3000, 6000]) {
+    const freqs = [1000, corner / 1.5, corner / 1.2, corner, corner * 1.2, corner * 1.5, 15000]
+    const drawn = shelfResponseDb(SR, corner, g, freqs)
+    for (let i = 0; i < freqs.length; i++) {
+      const f = freqs[i]
+      const x = sine(f, 0.25)
+      const { channelData: [y], latencySamples: L } = run(x, {
+        ...BASE, freq: corner, threshold: -30, voiceLevelDb: -60, range,
+      })
+      const measured = db(toneAmp(y, f, SR / 4 + L, SR) / 0.25)
+      assert.ok(
+        Math.abs(measured - drawn[i]) < 0.05,
+        `corner ${corner}, ${f.toFixed(0)} Hz: drawn ${drawn[i].toFixed(3)}, measured ${measured.toFixed(3)}`,
+      )
+    }
+  }
+})
+
+test('the split is unity at DC, half at the corner, and monotone at every depth', () => {
+  for (const corner of [2000, 5000, 12000]) {
+    const taps = splitTaps(SR, corner)
+    assert.ok(Math.abs(taps.reduce((a, b) => a + b, 0) - 1) < 1e-12)
+    assert.ok(Math.abs(splitResponse(SR, corner, [corner])[0] - 0.5) < 0.03)
+    const freqs = Array.from({ length: 200 }, (_, i) => 200 * Math.pow(20000 / 200, i / 199))
+    for (const g of [0.1, 0.5]) {
+      const r = shelfResponseDb(SR, corner, g, freqs)
+      for (let i = 1; i < r.length; i++) {
+        // Window ripple is allowed; a notch or a bump is not.
+        assert.ok(r[i] <= r[i - 1] + 0.02, `corner ${corner} g ${g}: rises at ${freqs[i].toFixed(0)} Hz`)
+        assert.ok(r[i] >= db(g) - 0.05 && r[i] <= 0.02, `corner ${corner} g ${g}: ${r[i].toFixed(3)} dB out of [floor, 0]`)
+      }
+    }
+  }
+})
+
+test('the latency does not move with Transient', () => {
+  const L = hfLimiterLatencySamples(SR)
+  // The shelf's split and lookahead.
+  assert.equal(L, 3 * Math.round(0.001 * SR))
+  for (const transient of [0, 6, 12]) {
+    const x = new Float32Array(4096)
+    x[100] = 0.001 // far below every threshold
+    const { channelData: [y] } = run(x, { ...BASE, transient })
+    assert.equal(y[100 + L], x[100], `transient ${transient}`)
+  }
+})
+
+// ── Transient: the onset softener ───────────────────────────────────────────
+
+/** Room tone plus one noise event over [att, hold, decay] ms, scaled so its band peak is `bandDb`. */
+function event(att, hold, dec, bandDb, n = Math.round(0.5 * SR), at = Math.round(0.15 * SR), seed = 5) {
+  let r = seed
+  const rnd = () => { r = (r * 16807) % 2147483647; return (r / 2147483647) * 2 - 1 }
+  const x = new Float32Array(n)
+  for (let i = at; i < n; i++) {
+    const t = ((i - at) / SR) * 1000
+    const e = t < att ? t / att : t < att + hold ? 1 : Math.exp(-(t - att - hold) / dec)
+    x[i] = rnd() * e
+  }
+  // Band peak via the kernel's own split: run it with nothing engaged and read h.
+  // Band peak, approximated by the first difference (a +6 dB/oct tilt that
+  // puts noise's energy where the split does).
+  let pk = 0
+  for (let i = 1; i < n; i++) pk = Math.max(pk, Math.abs(x[i] - x[i - 1]) / 2)
+  const g = Math.pow(10, bandDb / 20) / pk
+  for (let i = 0; i < n; i++) x[i] = x[i] * g + 0.00056 * rnd() // room tone at −65 dBFS
+  return { x, at }
+}
+
+/** Deepest transient cut (dB, positive) and the time it takes to let go, block by block. */
+function transientTrace(x, p) {
+  const k = new HFLimiterKernel(SR)
+  k.setParams(toKernelParams(p))
+  const out = new Float32Array(128), cuts = []
+  for (let off = 0; off + 128 <= x.length; off += 128) {
+    k.process([x.subarray(off, off + 128)], [out], 128)
+    const g = k.shelf.takeMinTransientGain()
+    cuts.push(g < 1 ? -20 * Math.log10(g) : 0)
+  }
+  return cuts
+}
+
+test('a click is cut by up to the Transient depth, even below Threshold, and let go within milliseconds', () => {
+  for (const [bandDb, want] of [[-18, [11, 12.01]], [-40, [3, 12.01]]]) {
+    const { x, at } = event(0.05, 0.1, 0.3, bandDb)
+    const cuts = transientTrace(x, { ...BASE, range: 0, transient: 12 })
+    const deepest = Math.max(...cuts)
+    assert.ok(deepest >= want[0] && deepest <= want[1], `click at ${bandDb}: deepest cut ${deepest.toFixed(2)} dB`)
+    const peakBlock = cuts.indexOf(deepest)
+    const back = cuts.findIndex((c, i) => i > peakBlock && c < 0.1)
+    const ms = ((back - peakBlock) * 128 / SR) * 1000
+    assert.ok(back > 0 && ms < 30, `click at ${bandDb}: still cutting ${ms.toFixed(1)} ms later`)
+    // And the cut is on the click, not somewhere else: it peaks within 2 ms of
+    // it, as the shelf hears it.
+    assert.ok(Math.abs(peakBlock * 128 - at) < 0.002 * SR + 128, `cut peaks ${((peakBlock * 128 - at) / SR * 1000).toFixed(1)} ms from the click`)
+  }
+})
+
+test('a steady or naturally rising S is left to the shelf', () => {
+  // 20 ms onset, 150 ms body: the shape of an ordinary S out of room tone.
+  const { x } = event(20, 150, 30, -20)
+  const off = run(x, { ...BASE, range: 0, transient: 0 }).channelData[0]
+  const on = run(x, { ...BASE, range: 0, transient: 12 }).channelData[0]
+  let eOff = 0, eOn = 0
+  for (let i = 1; i < x.length; i++) { eOff += (off[i] - off[i - 1]) ** 2; eOn += (on[i] - on[i - 1]) ** 2 }
+  const loss = 10 * Math.log10(eOn / eOff)
+  assert.ok(loss > -0.3, `a natural S lost ${loss.toFixed(2)} dB of top end to Transient 12`)
+})
+
+test('Transient stacks on the shelf: Range caps the shelf only', () => {
+  const { x } = event(0.05, 0.1, 0.3, -10)
+  // Threshold far below the click so the shelf sits on its 6 dB floor.
+  const P = { ...BASE, threshold: -30, range: 6 }
+  const k = new HFLimiterKernel(SR)
+  k.setParams(toKernelParams({ ...P, transient: 12 }))
+  const out = new Float32Array(128)
+  let deepest = 0
+  for (let off = 0; off + 128 <= x.length; off += 128) {
+    k.process([x.subarray(off, off + 128)], [out], 128)
+    const s = k.shelf.takeMinGain(), t = k.shelf.takeMinTransientGain()
+    deepest = Math.max(deepest, -20 * Math.log10(s * t))
+  }
+  assert.ok(deepest > 6 + 10, `combined cut ${deepest.toFixed(2)} dB never went past Range 6 by the Transient`)
+  assert.ok(deepest <= 6 + 12 + 0.01, `combined cut ${deepest.toFixed(2)} dB is past Range + Transient`)
+})
+
+test('the limiter never adds energy or raises the peak, whatever the settings', () => {
+  // The regression that retired the acceleration limiter: its correction was
+  // louder than an S, put +44 dB into 200–1000 Hz and raised the file peak.
+  const sounds = [event(20, 150, 30, -20).x, event(2, 150, 30, -20).x, event(0.05, 0.1, 0.3, -18).x,
+    add(sine(150, 0.4), sine(3000, 0.1), sine(9000, 0.05))]
+  // Shelf off with Transient on is the case that exposed it: the old stage
+  // raised the peak 4.5–6.9 dB and the band under ~350 Hz 7–9 dB there.
+  const settings = [{}, { range: 0, transient: 12 }, { range: 0, transient: 1 }, { transient: 12 }, { transient: 12, range: 24, threshold: -30 },
+    { shape: 'warm', transient: 12, tail: 300 }, { freq: 2000, transient: 6, threshold: -20 }]
+  const bandsOf = y => {
+    const lo = new Float64Array(y.length)
+    let a = 0
+    for (let i = 0; i < y.length; i++) { a += 0.05 * (y[i] - a); lo[i] = a } // one-pole ~350 Hz split
+    let eLo = 0, eHi = 0, pk = 0
+    for (let i = 0; i < y.length; i++) { eLo += lo[i] ** 2; eHi += (y[i] - lo[i]) ** 2; pk = Math.max(pk, Math.abs(y[i])) }
+    return { eLo, eHi, pk }
+  }
+  for (const x of sounds) {
+    const ref = bandsOf(x)
+    for (const p of settings) {
+      const { channelData: [y], latencySamples: L } = run(x, { ...BASE, ...p })
+      const got = bandsOf(y.subarray(L))
+      const tag = JSON.stringify(p)
+      assert.ok(got.pk <= ref.pk * 1.0001, `${tag}: peak rose ${db(got.pk / ref.pk).toFixed(3)} dB`)
+      assert.ok(got.eLo <= ref.eLo * 1.001, `${tag}: low band gained ${(10 * Math.log10(got.eLo / ref.eLo)).toFixed(3)} dB`)
+      assert.ok(got.eHi <= ref.eHi * 1.001, `${tag}: high band gained ${(10 * Math.log10(got.eHi / ref.eHi)).toFixed(3)} dB`)
+    }
+  }
+})
+
+test('stereo is gain-linked: a bright left turns the right down with it', () => {
+  const left = sine(10000, 0.1)
+  const right = sine(10000, 0.01)
+  const k = new HFLimiterKernel(SR)
+  k.setParams(toKernelParams(BASE))
+  const outL = new Float32Array(SR), outR = new Float32Array(SR)
+  for (let off = 0; off < SR; off += 128) {
+    k.process([left.subarray(off, off + 128), right.subarray(off, off + 128)],
+      [outL.subarray(off, off + 128), outR.subarray(off, off + 128)], 128)
+  }
+  const cutL = db(peak(outL, SR / 4) / 0.1)
+  const cutR = db(peak(outR, SR / 4) / 0.01)
+  assert.ok(Math.abs(cutL - cutR) < 0.05, `left ${cutL.toFixed(2)} dB, right ${cutR.toFixed(2)} dB`)
+})
+
+test('delta is exactly the input minus the output', () => {
+  const x = add(sine(300, 0.3), sine(9000, 0.1))
+  const params = toKernelParams({ ...BASE, transient: 6 })
+  const ref = processHFLimiterBuffer([x], SR, params).channelData[0]
+  const k = new HFLimiterKernel(SR)
+  k.setParams(params)
+  k.setListen('delta')
+  const d = new Float32Array(x.length)
+  for (let off = 0; off < x.length; off += 128) {
+    k.process([x.subarray(off, off + 128)], [d.subarray(off, off + 128)], 128)
+  }
+  const L = k.latencySamples
+  for (let i = L; i < x.length; i++) {
+    assert.ok(Math.abs(d[i] - (x[i - L] - ref[i])) < 1e-6, `sample ${i}`)
+  }
+})
+
+test('delta switched on mid-play is exact from its first sample', () => {
+  // The dry delay runs with Delta off too, so turning it on (or off and on
+  // again) never plays a stale or empty ring for the first latency window.
+  const x = add(sine(300, 0.3), sine(9000, 0.1))
+  const params = toKernelParams({ ...BASE, transient: 6 })
+  const ref = processHFLimiterBuffer([x], SR, params).channelData[0]
+  const k = new HFLimiterKernel(SR)
+  k.setParams(params)
+  const y = new Float32Array(x.length)
+  const L = k.latencySamples
+  const B = 128
+  const deltaFrom = 40 * B, offAt = 80 * B, backOn = 90 * B
+  for (let off = 0; off < x.length; off += B) {
+    if (off === deltaFrom || off === backOn) k.setListen('delta')
+    if (off === offAt) k.setListen('off')
+    k.process([x.subarray(off, off + B)], [y.subarray(off, off + B)], B)
+  }
+  for (let i = L; i < x.length; i++) {
+    const delta = (i >= deltaFrom && i < offAt) || i >= backOn
+    const want = delta ? x[i - L] - ref[i] : ref[i]
+    assert.ok(Math.abs(y[i] - want) < 1e-6, `sample ${i} (${delta ? 'delta' : 'out'})`)
+  }
+})
+
+test('the threshold follows the file\'s voice level, not the knob alone', () => {
+  const quiet = toKernelParams({ ...HF_LIMITER_DEFAULTS, voiceLevelDb: -30 })
+  const hot = toKernelParams({ ...HF_LIMITER_DEFAULTS, voiceLevelDb: -14 })
+  assert.equal(hot.thresholdDb - quiet.thresholdDb, 16)
+  assert.equal(toKernelParams({ transient: 0 }).transientDb, 0)
+  assert.equal(toKernelParams({ transient: 6 }).transientDb, 6)
+  assert.equal(toKernelParams({ transient: 40 }).transientDb, 12)
+  assert.equal(toKernelParams({ transient: -3 }).transientDb, 0)
+})
+
+// ── WARM shape and the two-stage release ────────────────────────────────────
+
+import { onePoleLowpass } from '../../src/audio/dsp/hfLimit.js'
+
+function onePole(x, corner) {
+  const { b0, a1 } = onePoleLowpass(SR, corner)
+  const y = new Float64Array(x.length)
+  let x1 = 0, y1 = 0
+  for (let i = 0; i < x.length; i++) { y1 = b0 * (x[i] + x1) - a1 * y1; x1 = x[i]; y[i] = y1 }
+  return y
+}
+
+test('WARM is bit-transparent below threshold and at Range 0, with the same latency as TIGHT', () => {
+  // Quieter mids than the TIGHT version: WARM's band is a first-order high-pass,
+  // so a −14 dBFS tone at 1.2 kHz reads −26.5 dBFS in it, over the −30 line, and
+  // is rightly cut — a WARM threshold hears more of the spectrum.
+  const x = add(sine(150, 0.5), sine(1200, 0.03), sine(9000, 0.002))
+  const fade = Math.round(0.05 * SR)
+  for (let i = 0; i < fade; i++) x[i] *= 0.5 - 0.5 * Math.cos((Math.PI * i) / fade)
+  for (const p of [{ ...BASE, shape: 'warm' }, { ...BASE, shape: 'warm', threshold: -50, range: 0 }]) {
+    const { channelData: [y], latencySamples: L } = run(x, p)
+    assert.equal(L, hfLimiterLatencySamples(SR))
+    for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
+  }
+})
+
+test('WARM holds its one-pole band at the threshold, with no overshoot', () => {
+  // The output is LP1(x) + g·h, h = x − LP1(x), so the band is recoverable
+  // exactly from the output: y − LP1(x delayed).
+  const T = Math.pow(10, -30 / 20)
+  const x = sine(10000, 0.1)
+  const { channelData: [y], latencySamples: L } = run(x, { ...BASE, shape: 'warm', freq: 3000 })
+  const xd = new Float32Array(x.length)
+  xd.set(x.subarray(0, x.length - L), L)
+  const lp = onePole(xd, 3000)
+  let p = 0
+  for (let i = SR / 4; i < x.length; i++) p = Math.max(p, Math.abs(y[i] - lp[i]))
+  assert.ok(p <= T * 1.0005, `band peak ${db(p).toFixed(3)} dBFS over the −30 ceiling`)
+  assert.ok(p > T * 0.97, `band held at ${db(p).toFixed(2)} dBFS, well under the ceiling`)
+})
+
+test('the WARM curve the panel draws is the cut the kernel applies, and it is a gentle tilt', () => {
+  const range = 12, corner = 2500
+  const g = Math.pow(10, -range / 20)
+  const freqs = [500, 1000, 2000, 2500, 4000, 8000, 15000]
+  const drawn = shelfResponseDb(SR, corner, g, freqs, 'warm')
+  for (let i = 0; i < freqs.length; i++) {
+    const x = sine(freqs[i], 0.25)
+    const { channelData: [y], latencySamples: L } = run(x, {
+      ...BASE, shape: 'warm', freq: corner, threshold: -30, voiceLevelDb: -60, range,
+    })
+    const measured = db(toneAmp(y, freqs[i], SR / 4 + L, SR) / 0.25)
+    assert.ok(Math.abs(measured - drawn[i]) < 0.05, `${freqs[i]} Hz: drawn ${drawn[i].toFixed(3)}, measured ${measured.toFixed(3)}`)
+  }
+  // Unlike TIGHT, WARM reaches below the corner: an octave down it is already cutting.
+  const tight = shelfResponseDb(SR, corner, g, [1000], 'tight')[0]
+  assert.ok(drawn[1] < -0.5 && tight > -0.05, `1 kHz: warm ${drawn[1].toFixed(2)}, tight ${tight.toFixed(2)}`)
+})
+
+/** The shelf gain after every block, from a fresh kernel. */
+function gainTrace(x, p) {
+  const k = new HFLimiterKernel(SR)
+  k.setParams(toKernelParams(p))
+  const out = new Float32Array(128), trace = []
+  for (let off = 0; off + 128 <= x.length; off += 128) {
+    k.process([x.subarray(off, off + 128)], [out], 128)
+    trace.push(k.shelf.gain)
+  }
+  return trace
+}
+
+/** Blocks from the end of a burst until the gain is back within 1 dB. */
+function recoveryBlocks(trace, burstEndBlock) {
+  const lim = Math.pow(10, -1 / 20)
+  for (let i = burstEndBlock; i < trace.length; i++) if (trace[i] >= lim) return i - burstEndBlock
+  return Infinity
+}
+
+test('Tail 0 is the single-stage release, and a Tail below its minimum is off', () => {
+  assert.equal(toKernelParams({ tail: 0 }).tailMs, 0)
+  assert.equal(toKernelParams({ tail: 20 }).tailMs, 0)
+  assert.equal(toKernelParams({ tail: 200 }).tailMs, 200)
+  const x = add(sine(300, 0.2), sine(9000, 0.1))
+  const a = run(x, { ...BASE, tail: 0 }).channelData[0]
+  const b = run(x, { ...BASE, tail: 20 }).channelData[0]
+  for (let i = 0; i < x.length; i++) if (a[i] !== b[i]) assert.fail(`sample ${i} differs`)
+})
+
+test('the Tail is program-dependent: a sustained cut leaves a long tail, a click does not', () => {
+  const P = { ...BASE, release: 20, range: 24 }
+  const n = SR
+  const burst = (ms) => {
+    const x = new Float32Array(n)
+    const len = Math.round((ms / 1000) * SR)
+    x.set(sine(9000, 0.2, len), SR / 10)
+    return { x, end: Math.ceil((SR / 10 + len) / 128) + 1 }
+  }
+  const click = burst(3), long = burst(400)
+  const clickSingle = recoveryBlocks(gainTrace(click.x, { ...P, tail: 0 }), click.end)
+  const clickTail = recoveryBlocks(gainTrace(click.x, { ...P, tail: 300 }), click.end)
+  const longSingle = recoveryBlocks(gainTrace(long.x, { ...P, tail: 0 }), long.end)
+  const longTail = recoveryBlocks(gainTrace(long.x, { ...P, tail: 300 }), long.end)
+  // A click barely charges the slow stage: it recovers nearly as fast as with no Tail.
+  assert.ok(clickTail <= clickSingle * 1.5 + 2, `click: ${clickTail} blocks with Tail vs ${clickSingle} without`)
+  // A sustained cut charges it: recovery is several times slower.
+  assert.ok(longTail > longSingle * 3, `sustained: ${longTail} blocks with Tail vs ${longSingle} without`)
+})
+
+test('the Tail never lets the gain overshoot the lookahead ceiling', () => {
+  const T = Math.pow(10, -30 / 20)
+  const x = add(sine(8000, 0.1), sine(12000, 0.05))
+  const { channelData: [y] } = run(x, { ...BASE, tail: 400 })
+  const p = peak(y, SR / 4)
+  // Both tones sit above TIGHT's transition, so the output IS the band.
+  assert.ok(p <= T * 1.0005, `peak ${db(p).toFixed(3)} dBFS over the −30 ceiling`)
+})

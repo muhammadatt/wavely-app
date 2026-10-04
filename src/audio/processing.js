@@ -41,6 +41,20 @@ import {
   toKernelParams as toHFSoftenerKernelParams,
   resoOn, resoKernelParams,
 } from './effects/hfSoftener.js'
+import { ensureHFLimiterWorklet } from './hfLimiterWorkletLoader.js'
+import {
+  HF_LIMITER_DEFAULTS,
+  HF_LIMITER_PREROLL_S,
+  hfLimiterLatencySamples,
+  toKernelParams as toHFLimiterKernelParams,
+} from './hfLimiterParams.js'
+import { ensurePhatassWorklet } from './phatassWorkletLoader.js'
+import {
+  PHATASS_DEFAULTS,
+  PHATASS_PREROLL_S,
+  phatassLatencySamples,
+  toKernelParams as toPhatassKernelParams,
+} from './phatassParams.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
@@ -898,6 +912,78 @@ export function measureHFSoftenerAutoAir(segments, start, end, params, sampleRat
   }, sampleRate, channels)
 }
 
+/**
+ * PHAT*SS's Warmth readout BANDS for a region, over the usual capped
+ * analysis window. When the window is the whole region the peak comes back
+ * too; otherwise `peakDb` is null and the caller asks
+ * `measurePhatassWarmthPeak` for it. Resolves `{ bandsDb, peakDb }`.
+ */
+export function measurePhatassWarmthBands(segments, start, end, params, sampleRate, channels) {
+  const whole = analysedWholeRegion(start, end)
+  const { warmthLayers, warmthGuard } = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
+  return measureInWorker('phatassWarmthReadout', segments, start, end, {
+    layers: warmthLayers, guard: warmthGuard, bands: true, peak: whole,
+  }, sampleRate, channels).then(d => ({
+    bandsDb: d.bandsDb,
+    peakDb: whole ? d.peakDb : null,
+    inputPeakDb: whole ? d.inputPeakDb : null,
+  }))
+}
+
+/**
+ * The Warmth stage's output peak over the WHOLE region — never the capped
+ * window, which can only read it low. It can take seconds on a long selection,
+ * so it runs on its own worker, and a newer call terminates the one in flight:
+ * a knob turn must never queue behind a stale whole-chapter render, and the
+ * shared measurement worker is serial. A superseded call rejects with
+ * `err.cancelled = true`. Resolves `{ peakDb, inputPeakDb }`, dBFS — the
+ * stage's output peak and the region's own, over the same span.
+ */
+let warmthPeakWorker = null
+let warmthPeakReject = null
+/** Terminate the in-flight whole-region Warmth peak pass, if any; it rejects with `err.cancelled`. */
+export function cancelPhatassWarmthPeak() {
+  if (!warmthPeakWorker) return
+  warmthPeakWorker.terminate()
+  warmthPeakWorker = null
+  const err = new Error('superseded')
+  err.cancelled = true
+  const reject = warmthPeakReject
+  warmthPeakReject = null
+  reject?.(err)
+}
+
+export function measurePhatassWarmthPeak(segments, start, end, params, sampleRate, channels) {
+  cancelPhatassWarmthPeak()
+  const { warmthLayers, warmthGuard } = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+    warmthPeakWorker = worker
+    warmthPeakReject = reject
+    const finish = () => {
+      worker.terminate()
+      if (warmthPeakWorker === worker) {
+        warmthPeakWorker = null
+        warmthPeakReject = null
+      }
+    }
+    worker.onmessage = (e) => {
+      finish()
+      if (e.data?.type === 'done') resolve({ peakDb: e.data.peakDb, inputPeakDb: e.data.inputPeakDb })
+      else reject(new Error(e.data?.message ?? 'warmth peak failed'))
+    }
+    worker.onerror = (err) => {
+      finish()
+      reject(err)
+    }
+    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+    worker.postMessage(
+      { __id: 0, type: 'phatassWarmthReadout', channelData, sampleRate, params: { layers: warmthLayers, guard: warmthGuard, bands: false, peak: true } },
+      channelData.map(c => c.buffer),
+    )
+  })
+}
+
 /** Apply Air Band to a region. */
 export function applyAirBandRegion(segments, start, end, params, sampleRate, channels) {
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
@@ -946,6 +1032,35 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
       processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
       latencySamples: HF_RESO_LATENCY_SAMPLES,
     }] : [],
+  })
+}
+
+/**
+ * Apply the HF Limiter to a region. Constant latency per sample rate, and a
+ * pre-roll so the release starts where a playing preview's would be.
+ */
+export function applyHFLimiterRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureHFLimiterWorklet,
+    processorName: 'hf-limiter-processor',
+    kernelParams: toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params }),
+    latencySamples: hfLimiterLatencySamples(sampleRate),
+    preRollSamples: Math.round(HF_LIMITER_PREROLL_S * sampleRate),
+  })
+}
+
+/**
+ * Apply PHAT*SS to a region. Constant latency per sample rate (every stage is
+ * a delay of its own length when idle), and a pre-roll so the shelf's release
+ * starts where a playing preview's would be.
+ */
+export function applyPhatassRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensurePhatassWorklet,
+    processorName: 'phatass-processor',
+    kernelParams: toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params }),
+    latencySamples: phatassLatencySamples(sampleRate),
+    preRollSamples: Math.round(PHATASS_PREROLL_S * sampleRate),
   })
 }
 
