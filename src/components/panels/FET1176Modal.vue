@@ -24,11 +24,11 @@ import { FET_PUNCH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetScHpf, fetMix,
+  fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetAnalog, fetScHpf, fetMix,
   fetAutoMakeup, fetPreview, fetReduction,
   fetInputAlignDb, fetInputAuto, syncInputAlign, enableInputAuto,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
-  syncDrive, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup,
+  syncDrive, syncAnalog, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup,
   apply, teardown, closeModal, refreshKernelTuning,
 } = useFET1176()
 
@@ -48,6 +48,7 @@ const presets = usePluginPresets(FET_PUNCH_PRESET_PLUGIN, {
     release: fetRelease.value,
     ratio: fetRatio.value,
     fetDrive: fetDrive.value,
+    analog: fetAnalog.value,
     scHpf: fetScHpf.value,
     mix: fetMix.value,
     autoMakeup: fetAutoMakeup.value,
@@ -64,6 +65,9 @@ const presets = usePluginPresets(FET_PUNCH_PRESET_PLUGIN, {
     syncRelease(p.release)
     syncRatio(p.ratio)
     syncDrive(p.fetDrive)
+    // Absent in presets saved before the lamp existed, which were auditioned
+    // with the FET stage in — so absent means ON.
+    syncAnalog(p.analog !== false)
     syncScHpf(p.scHpf)
     syncMix(p.mix)
     if (p.autoMakeup) {
@@ -92,11 +96,8 @@ watch(() => state.selection, () => { resetLiveMakeup(); refreshAutoMakeup() }, {
 // itself is the Classic 76 hardware face and carries its own colours.
 const ACCENT = '#79b8ff'
 
-/** Brushed charcoal, with the plate's top and bottom edges catching light. */
-const FACEPLATE = [
-  'repeating-linear-gradient(0deg,rgba(255,255,255,.022) 0px,rgba(255,255,255,0) 1px,rgba(0,0,0,.05) 2px,rgba(255,255,255,0) 3px)',
-  'linear-gradient(180deg,#3c3c3a 0%,#2e2e2c 5%,#262625 24%,#212120 50%,#232322 74%,#2b2b29 92%,#373735 100%)',
-].join(',')
+/** Matte charcoal: no brushing, a soft fall-off from the top edge. */
+const FACEPLATE = 'linear-gradient(178deg,#2f3237 0%,#26292d 46%,#202326 100%)'
 
 const off = computed(() => !fetPreview.value)
 
@@ -166,6 +167,14 @@ function setAlignAuto(on) {
   else syncInputAlign(fetInputAlignDb.value)
 }
 
+/**
+ * The lamp beside the nameplate is HARMONICS, not power: power is the header's
+ * switch. Same contract as OptoSmooth's lamp — off takes the FET stage's
+ * colour out and leaves the compression alone (detector, ballistics and gain
+ * reduction are identical), so it is "whether", not "how much".
+ */
+const toggleHarmonics = () => syncAnalog(!fetAnalog.value)
+
 // Preview is just transport playback: the worklet is already in the chain, so
 // what makes this effect "live" is that the audio is running while you turn the
 // knobs. Reuses the existing toggle-play bus rather than a second play path.
@@ -191,7 +200,7 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="fet-punch"
     :z="z"
-    :width="820"
+    :width="868"
     :top="110"
     :accent="ACCENT"
     :background="FACEPLATE"
@@ -219,7 +228,6 @@ async function applyAndClose() {
     </template>
 
     <div class="c76" :class="{ 'is-off': off }">
-      <div class="c76-sheen" />
       <div v-for="pos in ['tl', 'tr', 'bl', 'br']" :key="pos" class="c76-screw" :class="`c76-screw--${pos}`">
         <div class="c76-screw-slot" />
       </div>
@@ -265,17 +273,18 @@ async function applyAndClose() {
             </div>
           </div>
           <div class="c76-meter-col">
-            <ClassicVuMeter :reduction-db="fetReduction" :active="fetPreview" />
+            <ClassicVuMeter :reduction-db="fetReduction" :active="fetPreview" :width="272" />
             <div class="c76-nameplate">
               <div class="c76-nameplate-row">
-                <!-- The unit's power switch is FET Punch's on/off, the same
-                     state as the lamp in the window header. -->
                 <LampButton
-                  :on="fetPreview"
+                  :on="fetAnalog"
                   :size="20"
-                  class="c76-power"
-                  :title="fetPreview ? 'Turn FET Punch off' : 'Turn FET Punch on'"
-                  @click="togglePreview"
+                  class="c76-harmonics c76-ctl"
+                  :disabled="off"
+                  :title="fetAnalog
+                    ? 'Harmonics on: the FET stage colour. Click for clean — the compression is identical.'
+                    : 'Harmonics off: clean, same compression. Click to bring the colour back.'"
+                  @click="toggleHarmonics"
                 />
                 <div class="c76-model">Classic 76</div>
               </div>
@@ -416,13 +425,7 @@ async function applyAndClose() {
 .c76 {
   position: relative; padding: 24px 30px 24px; overflow: hidden;
   font-family: Oswald, 'Inter', system-ui, sans-serif;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.2), inset 0 -1px 0 rgba(0,0,0,.85);
-}
-.c76-sheen {
-  position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(94deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,0) 20%,rgba(255,255,255,0) 80%,rgba(255,255,255,.04) 100%),
-    linear-gradient(180deg,rgba(255,255,255,.08) 0%,rgba(255,255,255,0) 9%),
-    radial-gradient(140% 90% at 50% 8%,rgba(255,255,255,.05),rgba(255,255,255,0) 62%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -24px 50px rgba(0,0,0,.28);
 }
 .c76-screw {
   position: absolute; width: 15px; height: 15px; border-radius: 50%;
@@ -471,7 +474,7 @@ async function applyAndClose() {
 .c76-meter-col { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .c76-nameplate { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .c76-nameplate-row { display: flex; align-items: center; }
-.c76-power { margin-right: 9px; }
+.c76-harmonics { margin-right: 9px; }
 .c76-model { font-size: 14px; font-weight: 500; letter-spacing: .3em; }
 .c76-kind { font-size: 17px; font-weight: 600; letter-spacing: .14em; color: #ffffff; margin-top: 5px; }
 
@@ -489,9 +492,9 @@ async function applyAndClose() {
 .c76-makeup-title { font-size: 10px; letter-spacing: .16em; margin-top: 5px; }
 .c76-mix { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 
-/* Unit off: the controls go dead and dim; the power lamp and the engraving
-   stay, so the face still reads as the same unit. Knobs dim their own cap
-   (HardwareKnob), so their printed scale is left alone. */
+/* Unit off: the controls go dead and dim; the engraving stays, so the face
+   still reads as the same unit. Knobs dim their own cap (HardwareKnob), so
+   their printed scale is left alone. */
 .c76-ctl { transition: opacity .15s ease; }
 .is-off .c76-ctl:not(.hw-knob) { opacity: .45; }
 </style>

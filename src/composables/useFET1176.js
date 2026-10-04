@@ -6,6 +6,7 @@ import { fet1176TuningState } from '../audio/effects/fet1176Tuning.js'
 import { applyFET1176Region, computeFET1176AutoMakeup, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { fet1176Effect, FET1176_DEFAULTS } from '../audio/effects/fet1176Compressor.js'
+import { fetDriveFor } from '../audio/effects/fet1176Params.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { INPUT_TRIM_MAX_DB } from '../audio/dsp/inputAlign.js'
@@ -21,6 +22,7 @@ const fetAttack = ref(FET1176_DEFAULTS.attack)
 const fetRelease = ref(FET1176_DEFAULTS.release)
 const fetRatio = ref(FET1176_DEFAULTS.ratio)
 const fetDrive = ref(FET1176_DEFAULTS.fetDrive)
+const fetAnalog = ref(FET1176_DEFAULTS.analog)
 const fetScHpf = ref(FET1176_DEFAULTS.scHpf)
 const fetMix = ref(FET1176_DEFAULTS.mix)
 
@@ -128,6 +130,7 @@ function currentParams() {
     release: fetRelease.value,
     ratio: fetRatio.value,
     fetDrive: fetDrive.value,
+    analog: fetAnalog.value,
     scHpf: fetScHpf.value,
     mix: fetMix.value,
     inputAlignDb: fetInputAlignDb.value,
@@ -160,7 +163,9 @@ function measurementParams() {
     attack: fetAttack.value,
     release: fetRelease.value,
     ratio: fetRatio.value,
-    fetDrive: fetDrive.value,
+    // The worker gets kernel params, so the lamp is folded in here as
+    // `toKernelParams` folds it for preview and apply.
+    fetDrive: fetDriveFor({ analog: fetAnalog.value, fetDrive: fetDrive.value }),
     scHpfHz: fetScHpf.value,
     mix: fetMix.value,
     /**
@@ -444,6 +449,7 @@ export function useFET1176() {
   const syncRelease = (v) => syncCompressionParam('release', fetRelease, v)
   const syncRatio = (v) => syncCompressionParam('ratio', fetRatio, v)
   const syncDrive = (v) => syncCompressionParam('fetDrive', fetDrive, v)
+  const syncAnalog = (v) => syncCompressionParam('analog', fetAnalog, v !== false)
   const syncScHpf = (v) => syncCompressionParam('scHpf', fetScHpf, v)
   const syncMix = (v) => syncCompressionParam('mix', fetMix, v)
 
@@ -600,6 +606,7 @@ export function useFET1176() {
     fetRelease,
     fetRatio,
     fetDrive,
+    fetAnalog,
     fetScHpf,
     fetMix,
     fetAutoMakeup,
@@ -616,6 +623,7 @@ export function useFET1176() {
     syncRelease,
     syncRatio,
     syncDrive,
+    syncAnalog,
     syncScHpf,
     syncMix,
     toggleAutoMakeup,

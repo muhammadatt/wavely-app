@@ -85,6 +85,9 @@ function normalize(params) {
     // measured curve. Factory presets all state `fetDrive` explicitly, so this
     // only catches a stored preset that predates the key.
     fetDrive: clamp(params.fetDrive ?? 1, 0, 1),
+    // ⚠ Absent means ON: every preset saved before the lamp existed was
+    // auditioned with the FET stage in, so `false` would re-voice them.
+    analog: params.analog !== false,
     scHpf: clamp(params.scHpf ?? 0, 0, 500),
     mix: clamp(params.mix ?? 1, 0, 1),
     autoMakeup,
@@ -92,7 +95,7 @@ function normalize(params) {
 }
 
 export const FET_PUNCH_PARAM_KEYS = [
-  'inputDrive', 'output', 'attack', 'release', 'ratio', 'fetDrive', 'scHpf', 'mix', 'autoMakeup',
+  'inputDrive', 'output', 'attack', 'release', 'ratio', 'fetDrive', 'analog', 'scHpf', 'mix', 'autoMakeup',
 ]
 
 /**
@@ -146,6 +149,7 @@ export const FET_PUNCH_PRESETS = [
       release: 3,
       ratio: '4',
       fetDrive: 0.35,
+      analog: true,
       scHpf: 0,
       mix: 1,
       autoMakeup: true,
@@ -168,6 +172,7 @@ export const FET_PUNCH_PRESETS = [
       release: 4,
       ratio: '8',
       fetDrive: 0.3,
+      analog: true,
       scHpf: 120,
       mix: 1,
       autoMakeup: true,
@@ -196,6 +201,7 @@ export const FET_PUNCH_PRESETS = [
       release: 1,
       ratio: '4',
       fetDrive: 0.2,
+      analog: true,
       scHpf: 80,
       mix: 1,
       autoMakeup: true,
@@ -220,6 +226,7 @@ export const FET_PUNCH_PRESETS = [
       release: 7,
       ratio: '12',
       fetDrive: 0.5,
+      analog: true,
       scHpf: 100,
       mix: 0.4,
       autoMakeup: true,
@@ -245,6 +252,7 @@ export const FET_PUNCH_PRESETS = [
       release: 7,
       ratio: 'all',
       fetDrive: 0.6,
+      analog: true,
       scHpf: 0,
       // Half wet. All-buttons-in is a distortion and ballistics effect more
       // than a compressor, and at Mix 1 it is a texture rather than a
