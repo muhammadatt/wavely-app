@@ -17,7 +17,6 @@ import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import { processSaturationBenchBuffer } from '../../src/audio/dsp/saturationLayers.js'
 import { warmthGuardLatencySamples } from '../../src/audio/dsp/warmthGuard.js'
 import { shelfLatencySamples } from '../../src/audio/dsp/hfLimit.js'
-import { onsetLatencySamples, OnsetSoftener } from '../../src/audio/dsp/onsetSoftener.js'
 
 const SR = 44100
 
@@ -59,9 +58,9 @@ const run = (x, p) => processPhatssBuffer([x], SR, toKernelParams(p))
 
 // ── The chain ────────────────────────────────────────────────────────────────
 
-test('the latency is Warmth + guard + Soften + shelf, constant at every setting', () => {
+test('the latency is Warmth + guard + shelf, constant at every setting (Soften adds none)', () => {
   const L = phatssLatencySamples(SR)
-  assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + onsetLatencySamples(SR) + shelfLatencySamples(SR))
+  assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + shelfLatencySamples(SR))
   for (const [warmth, tame, soften] of [[0, 0, 0], [0, 10, 0], [6, 0, 0], [10, 10, 10], [0, 0, 10]]) {
     const x = new Float32Array(8192)
     x[100] = 0.001 // far below every threshold
@@ -270,156 +269,87 @@ test('the peak guard is a pure delay when it has nothing to catch, or no ceiling
   assert.equal(toKernelParams({ ...p, warmthCeilingDb: -6 }).warmthGuard.on, true)
 })
 
-// ── Soften: the whole-signal onset softener ─────────────────────────────────
+// ── Soften: the shelf's Transient on its own band ───────────────────────────
 
-/**
- * A 150 Hz syllable from `at`: an attack that overshoots its body by ~6 dB and
- * decays into it over ~15 ms, then holds, over room tone. `pre` is the level of
- * whatever precedes it (0 = silence), held from 0.1 s.
- */
-function syllable(amp, at = Math.round(0.3 * SR), n = SR, pre = 0) {
-  const x = noise(n, 0.0005, 7)
-  for (let i = Math.round(0.1 * SR); i < at; i++) x[i] += pre * Math.sin((2 * Math.PI * 150 * i) / SR)
-  for (let i = at; i < n; i++) {
-    const env = 1 + Math.exp(-(i - at) / (0.015 * SR))
-    x[i] += amp * env * Math.sin((2 * Math.PI * 150 * (i - at)) / SR)
+/** Room tone, a steady 150 Hz voice-like tone, and an HF click burst at `at`. */
+function clickOverVoice(at = Math.round(0.4 * SR), clickAmp = 0.3) {
+  const x = add(sine(150, 0.2), noise(SR, 0.0005, 7))
+  let r = 9
+  for (let i = at; i < at + Math.round(0.002 * SR); i++) {
+    r = (r * 16807) % 2147483647
+    x[i] += clickAmp * ((r / 2147483647) * 2 - 1)
   }
   return x
 }
+const rmsDb = (y, a, b) => { let s = 0; for (let i = a; i < b; i++) s += y[i] * y[i]; return 10 * Math.log10(s / (b - a)) }
+const SOFT = { voiceLevelDb: -20, warmth: 0, tame: 0 }
 
-/** Render through the stage alone, aligned to the input. */
-function soften(x, amount, voiceLevelDb = -20, channels = [x], extra = {}) {
-  const st = new OnsetSoftener(SR)
-  st.setParams({ amount, voiceLevelDb, ...extra })
-  const bufs = channels.map(c => Float32Array.from(c))
-  for (let o = 0; o < bufs[0].length; o += 128) {
-    const len = Math.min(128, bufs[0].length - o)
-    st.process(bufs.map(b => b.subarray(o, o + len)), len)
-  }
-  return bufs.map(b => b.subarray(st.latencySamples))
+/** Energy removed around the click, dB re the click's own energy (0 = all of it). */
+function removedDb(x, y, L, at) {
+  let e = 0, c = 0
+  for (let i = at - 50; i < at + Math.round(0.01 * SR); i++) e += (y[i + L] - x[i]) ** 2
+  for (let i = at; i < at + Math.round(0.002 * SR); i++) c += (x[i] - 0.2 * Math.sin((2 * Math.PI * 150 * i) / SR)) ** 2
+  return 10 * Math.log10(e / c)
 }
 
-const levelDb = (y, a, b) => { let s = 0; for (let i = a; i < b; i++) s += y[i] * y[i]; return 10 * Math.log10(s / (b - a)) }
-
-test('Soften takes an onset down, more as the knob rises, and lets the steady part through', () => {
-  const at = Math.round(0.3 * SR)
-  const x = syllable(0.2, at)
-  const onset = [at, at + Math.round(0.02 * SR)]
-  const steady = [at + Math.round(0.3 * SR), at + Math.round(0.6 * SR)]
-  let prev = 0
-  for (const amount of [0.25, 0.5, 1]) {
-    const [y] = soften(x, amount)
-    const cut = levelDb(y, ...onset) - levelDb(x, ...onset)
-    assert.ok(cut < prev - 0.3, `amount ${amount}: onset ${cut.toFixed(2)} dB (previous ${prev.toFixed(2)})`)
-    prev = cut
-    const st = levelDb(y, ...steady) - levelDb(x, ...steady)
-    assert.ok(Math.abs(st) < 0.01, `amount ${amount}: steady part moved ${st.toFixed(3)} dB`)
+test('Soften cuts a sudden HF burst, more as the knob rises, more than the HF Limiter Transient can', () => {
+  const at = Math.round(0.4 * SR)
+  const x = clickOverVoice(at)
+  let prev = -Infinity
+  for (const soften of [2, 5, 10]) {
+    const { channelData: [y], latencySamples: L } = run(x, { ...SOFT, soften })
+    const r = removedDb(x, y, L, at)
+    assert.ok(r > prev + 0.5, `Soften ${soften}: removed ${r.toFixed(2)} dB re the click (previous ${prev.toFixed(2)})`)
+    prev = r
   }
-  // A 6 dB overshoot decaying over ~15 ms: its first 20 ms lose ~2 dB at full Soften.
-  assert.ok(prev < -1.5, `full Soften takes the onset down only ${prev.toFixed(2)} dB`)
+  // The HF Limiter's Transient at its maximum, same corner and split shape.
+  const h = processHFLimiterBuffer([x], SR, toHFLimiterKernelParams({
+    ...HF_LIMITER_DEFAULTS, voiceLevelDb: -20, range: 0, transient: 12, freq: 3000, shape: 'warm',
+  }))
+  const rh = removedDb(x, h.channelData[0], h.latencySamples, at)
+  assert.ok(prev > rh + 1, `full Soften removed ${prev.toFixed(2)} dB, the HF Limiter's Transient 12 ${rh.toFixed(2)}`)
 })
 
-test('Soften is a gain that never raises a sample, and 0 is a pure delay', () => {
-  const x = syllable(0.3)
-  const [off] = soften(x, 0)
-  for (let i = 0; i < off.length; i++) if (off[i] !== x[i]) assert.fail(`Soften 0: sample ${i} differs`)
-  const [y] = soften(x, 1)
-  for (let i = 0; i < y.length; i++) {
-    if (Math.abs(y[i]) > Math.abs(x[i]) + 1e-9) assert.fail(`sample ${i} raised: ${y[i]} from ${x[i]}`)
-    // Same sign, smaller or equal: a gain in [0, 1], never a waveshape.
-    if (x[i] !== 0 && y[i] / x[i] < 0) assert.fail(`sample ${i} changed sign`)
-  }
+test('Soften leaves steady sound and the voice below its band alone', () => {
+  const at = Math.round(0.4 * SR)
+  const x = clickOverVoice(at)
+  const { channelData: [yr], latencySamples: L } = run(x, { ...SOFT, soften: 10 })
+  const y = yr.subarray(L)
+  // Away from the burst the 150 Hz voice passes untouched.
+  const quiet = [Math.round(0.6 * SR), Math.round(0.9 * SR)]
+  assert.ok(Math.abs(rmsDb(y, ...quiet) - rmsDb(x, ...quiet)) < 0.01, 'the steady voice moved')
+  // During the burst the 150 Hz fundamental barely moves: the cut is on the band above Soft Freq.
+  const f0 = toneAmp(y, 150, at - Math.round(0.002 * SR), at + Math.round(0.02 * SR)) / toneAmp(x, 150, at - Math.round(0.002 * SR), at + Math.round(0.02 * SR))
+  assert.ok(db(f0) > -0.5, `the 150 Hz voice under the click moved ${db(f0).toFixed(2)} dB`)
+  // A steady HF tone (an S held) is not a transient.
+  const s = add(sine(6000, 0.1), noise(SR, 0.0005, 3))
+  const { channelData: [ys], latencySamples: Ls } = run(s, { ...SOFT, soften: 10 })
+  const g = db(toneAmp(ys, 6000, Ls + SR / 2, SR) / 0.1)
+  assert.ok(Math.abs(g) < 0.1, `a steady 6 kHz tone moved ${g.toFixed(2)} dB`)
 })
 
-test('Soften leaves onsets far below the voice level alone, and is linked across channels', () => {
-  const at = Math.round(0.3 * SR)
-  const quiet = syllable(0.002, at) // −57 dBFS peak against a −20 dBFS voice
-  const [q] = soften(quiet, 1)
-  let worst = 0
-  for (let i = 0; i < q.length; i++) worst = Math.max(worst, Math.abs(q[i] - quiet[i]))
-  assert.equal(worst, 0, 'an onset in room tone must not be touched')
-  // A loud onset on the left takes the right down with it, by the same gain.
-  const left = syllable(0.2, at)
-  const right = noise(SR, 0.05, 11)
-  const [, r] = soften(left, 1, -20, [left, right])
-  const i0 = at + Math.round(0.005 * SR)
-  assert.ok(Math.abs(r[i0]) < Math.abs(right[i0]) || right[i0] === 0, 'the right channel follows the left onset')
-  const gL = soften(left, 1, -20, [left, right])[0]
-  for (let i = at; i < at + Math.round(0.02 * SR); i++) {
-    if (Math.abs(left[i]) > 1e-3 && Math.abs(right[i]) > 1e-3) {
-      assert.ok(Math.abs(gL[i] / left[i] - r[i] / right[i]) < 1e-6, `gains differ at ${i}`)
-    }
-  }
+test('Soften has its own corner: moving Soft Freq moves where it cuts, Tone does not', () => {
+  const at = Math.round(0.4 * SR)
+  const x = clickOverVoice(at)
+  const removed = p => { const { channelData: [y], latencySamples: L } = run(x, { ...SOFT, soften: 10, ...p }); return removedDb(x, y, L, at) }
+  // Lower Soft Freq reaches further down the burst's spectrum, so takes more of it.
+  const lo = removed({ softenFreq: 1500 }), hi = removed({ softenFreq: 8000 })
+  assert.ok(lo > hi + 1, `Soft Freq 1.5 kHz removed ${lo.toFixed(2)} dB, 8 kHz ${hi.toFixed(2)}`)
+  // Tone only moves the tape shelf, which is out at Tame 0.
+  const a = run(x, { ...SOFT, soften: 10, tone: 0 }).channelData[0]
+  const b = run(x, { ...SOFT, soften: 10, tone: 10 }).channelData[0]
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) assert.fail(`sample ${i}: Tone changed Soften`)
 })
 
-test('Soften maps 0–10 onto the share of each onset removed', () => {
-  assert.equal(toKernelParams({ soften: 0 }).onsetAmount, 0)
-  assert.equal(toKernelParams({ soften: 5 }).onsetAmount, 0.5)
-  assert.equal(toKernelParams({ soften: 10 }).onsetAmount, 1)
-  assert.equal(toKernelParams({ soften: 40 }).onsetAmount, 1)
+test('Soften maps onto the shelf Transient: deeper ceiling, steeper law, own corner, gate on the voice', () => {
+  const k0 = toKernelParams({ soften: 0, voiceLevelDb: -20 })
+  assert.equal(k0.transientDb, 0)
+  const k = toKernelParams({ soften: 10, softenFreq: 2500, voiceLevelDb: -20 })
+  assert.ok(Math.abs(k.transientDb - 24) < 1e-9)
+  assert.equal(k.transientSlope, 1)
+  assert.equal(k.transientCornerHz, 2500)
+  assert.equal(k.transientGateDb, -52)
+  assert.ok(Math.abs(toKernelParams({ soften: 5 }).transientSlope - 0.75) < 1e-12)
+  assert.equal(toKernelParams({ softenFreq: 50 }).transientCornerHz, 1000)
   assert.equal(PHATSS_DEFAULTS.soften, 0)
-})
-
-test('Soften bench: Floor, Attack and Scale each move the cut the way their labels say', () => {
-  const at = Math.round(0.3 * SR)
-  const x = syllable(0.2, at)
-  const onset = [at, at + Math.round(0.03 * SR)]
-  const cut = extra => { const [y] = soften(x, extra.amount ?? 1, -20, [x], extra); return levelDb(y, ...onset) - levelDb(x, ...onset) }
-  const base = cut({})
-  assert.ok(cut({ floorDb: 0.5 }) < base - 0.2, 'a lower floor cuts deeper')
-  assert.ok(cut({ slowAttackMs: 5 }) > base + 0.2, 'a shorter attack lets the past catch up, so it cuts less')
-  assert.ok(cut({ amount: 2 }) < base - 0.5, 'Scale 2 cuts deeper than flatten')
-  // The shipped values are the defaults: passing them changes nothing.
-  const [a] = soften(x, 1)
-  const [b] = soften(x, 1, -20, [x], { floorDb: 1.5, slowAttackMs: 30 })
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) assert.fail(`sample ${i}: explicit defaults differ`)
-})
-
-test('Soften bench fields map onto the kernel, clamped, with Scale multiplying the knob', () => {
-  const k = toKernelParams({ soften: 5, softenScale: 2, softenFloor: 1.5, softenAttack: 45 })
-  assert.equal(k.onsetAmount, 1)
-  assert.equal(k.onsetFloorDb, 1.5)
-  assert.equal(k.onsetSlowAttackMs, 45)
-  const wild = toKernelParams({ soften: 10, softenScale: 99, softenFloor: -4, softenAttack: 1e6 })
-  assert.equal(wild.onsetAmount, 3)
-  assert.equal(wild.onsetFloorDb, 0)
-  assert.equal(wild.onsetSlowAttackMs, 100)
-  assert.deepEqual([PHATSS_DEFAULTS.softenFloor, PHATSS_DEFAULTS.softenAttack, PHATSS_DEFAULTS.softenScale], [1.5, 30, 1])
-})
-
-const deepestCutDb = (x, y, a, b) => {
-  let m = 0
-  for (let i = a; i < b; i++) if (Math.abs(x[i]) > 1e-3) m = Math.min(m, 20 * Math.log10(Math.abs(y[i] / x[i])))
-  return m
-}
-
-test('Soften judges an onset against its own syllable: after silence and mid-phrase it cuts alike', () => {
-  // The first build measured rise against the PAST, so a start after silence
-  // read as a huge rise and took the deepest cut. Same syllable, two contexts.
-  const at = Math.round(0.4 * SR)
-  const win = [at - Math.round(0.005 * SR), at + Math.round(0.06 * SR)]
-  const afterSilence = syllable(0.2, at)
-  const midPhrase = syllable(0.2, at, SR, 0.08) // preceded by a syllable 8 dB down
-  const [ys] = soften(afterSilence, 1)
-  const [ym] = soften(midPhrase, 1)
-  const cs = deepestCutDb(afterSilence, ys, ...win)
-  const cm = deepestCutDb(midPhrase, ym, ...win)
-  assert.ok(cs < -1 && cm < -1, `both onsets are softened: ${cs.toFixed(2)} / ${cm.toFixed(2)} dB`)
-  assert.ok(Math.abs(cs - cm) < 1, `after silence ${cs.toFixed(2)} dB vs mid-phrase ${cm.toFixed(2)} dB`)
-})
-
-test('Soften leaves a step with no overshoot alone, and never cuts the end of a syllable', () => {
-  const at = Math.round(0.4 * SR)
-  // A tone that steps on and holds: it rose, but it does not overshoot itself.
-  const step = noise(SR, 0.0005, 7)
-  for (let i = at; i < SR; i++) step[i] += 0.2 * Math.sin((2 * Math.PI * 150 * (i - at)) / SR)
-  const [ys] = soften(step, 1)
-  const c = deepestCutDb(step, ys, at, at + Math.round(0.1 * SR))
-  assert.ok(c > -0.3, `a plain step was cut ${c.toFixed(2)} dB`)
-  // A syllable that ends: its body ahead falls away, but nothing rose.
-  const end = noise(SR, 0.0005, 7)
-  for (let i = 0; i < at; i++) end[i] += 0.2 * Math.sin((2 * Math.PI * 150 * i) / SR)
-  const [ye] = soften(end, 1)
-  const ce = deepestCutDb(end, ye, Math.round(0.2 * SR), at)
-  assert.ok(ce > -0.3, `the end of a syllable was cut ${ce.toFixed(2)} dB`)
 })

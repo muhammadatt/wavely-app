@@ -1,21 +1,20 @@
 /**
  * PHAT*SS — worklet kernel.
  *
- * Warmth → Guard → Soften → Tape shelf → Output.
+ * Warmth → Guard → Tape shelf (with Soften on its own band) → Output.
  *
  * WARMTH is two Saturation Bench layers (dsp/saturationLayers.js, voiced in
  * phatssParams.WARMTH_LAYERS), 4x oversampled, a pure delay at 0. Its PEAK
  * GUARD (dsp/warmthGuard.js) is pinned on: what Warmth adds is turned down
  * wherever the sum would pass the selection's own peak, so Warmth adds density
- * but never peak level. SOFTEN (dsp/onsetSoftener.js) takes every syllable
- * onset down for the few ms the signal takes to settle — a broadband gain, so
- * it adds nothing and can only lower a peak. The TAPE SHELF is the HF Limiter's lookahead dynamic
+ * but never peak level. The TAPE SHELF is the HF Limiter's lookahead dynamic
  * shelf (dsp/hfLimit.js) with its shape and timing pinned (phatssParams
  * .TAPE_SHELF) and its corner / threshold / range set by the Tame and Tone
  * macros.
  *
  * Constant latency (see `phatssLatencySamples`), bit-transparent with Warmth,
- * Soften and Tame at 0.
+ * Soften and Tame at 0. SOFTEN is the shelf's Transient detector with its own
+ * band (`transientCornerHz`), deeper than the HF Limiter's, at no extra latency.
  *
  * This file is BOTH a normal ES module and an AudioWorklet module (registers
  * 'phatss-processor'); it imports from ./dsp/, so its loader goes through
@@ -25,7 +24,6 @@
 import { ShelfLimiterStage } from './dsp/hfLimit.js'
 import { SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { WarmthPeakGuard } from './dsp/warmthGuard.js'
-import { OnsetSoftener } from './dsp/onsetSoftener.js'
 import { toKernelParams, PHATSS_DEFAULTS, WARMTH_LAYERS } from './phatssParams.js'
 
 export const PHATSS_KERNEL_DEFAULTS = toKernelParams(PHATSS_DEFAULTS)
@@ -40,10 +38,8 @@ export class PhatssKernel {
     this.warmthInit = false
     // Lined up against the Warmth output, so its dry is the input delayed by that.
     this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)
-    this.soften = new OnsetSoftener(sampleRate)
     this.shelf = new ShelfLimiterStage(sampleRate)
-    this.latencySamples = this.warmth.latencySamples + this.guard.latencySamples +
-      this.soften.latencySamples + this.shelf.latencySamples
+    this.latencySamples = this.warmth.latencySamples + this.guard.latencySamples + this.shelf.latencySamples
     this.params = { ...PHATSS_KERNEL_DEFAULTS }
     this.setParams({}, true)
   }
@@ -64,10 +60,6 @@ export class PhatssKernel {
       this.warmthInit = true
     }
     if (p.warmthGuard) this.guard.setParams(p.warmthGuard)
-    this.soften.setParams({
-      amount: p.onsetAmount, voiceLevelDb: p.voiceLevelDb,
-      floorDb: p.onsetFloorDb, slowAttackMs: p.onsetSlowAttackMs,
-    })
     this.shelf.setParams({
       cornerHz: p.cornerHz,
       thresholdLin: dbToLin(p.thresholdDb),
@@ -76,6 +68,9 @@ export class PhatssKernel {
       shape: p.shape,
       tailMs: p.tailMs,
       transientDb: p.transientDb,
+      transientCornerHz: p.transientCornerHz,
+      transientSlope: p.transientSlope,
+      transientGateLin: Number.isFinite(p.transientGateDb) ? dbToLin(p.transientGateDb) : null,
     })
     this.outputLin = dbToLin(p.outputGainDb)
   }
@@ -98,7 +93,6 @@ export class PhatssKernel {
     // In place: each stage reads a sample before it writes that output.
     this.warmth.process(outputChannels, outputChannels, n)
     this.guard.process(inputChannels, outputChannels, n)
-    this.soften.process(outputChannels, n)
     this.shelf.process(outputChannels, n)
     const g = this.outputLin
     if (g !== 1) {

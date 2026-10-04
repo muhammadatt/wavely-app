@@ -288,6 +288,11 @@ export class ShelfLimiterStage {
     this.band = []
     this.lpX1 = []
     this.lpY1 = []
+    this.tDetX1 = []
+    this.tDetY1 = []
+    this.tOutX1 = []
+    this.tOutY1 = []
+    this.tSplit = false
     this.gain = 1
     this.slow = 1
     this.minGain = 1
@@ -297,6 +302,7 @@ export class ShelfLimiterStage {
   setParams({
     cornerHz, thresholdLin, floorLin, releaseMs,
     shape = 'tight', tailMs = 0, tailChargeMs = TAIL_CHARGE_MS, transientDb = 0,
+    transientCornerHz = null, transientSlope = TRANSIENT_SLOPE, transientGateLin = null,
   }) {
     const coeff = ms => Math.exp(-1 / (Math.max(1, ms) * 1e-3 * this.sampleRate))
     const coeffFine = ms => Math.exp(-1 / (ms * 1e-3 * this.sampleRate))
@@ -304,7 +310,19 @@ export class ShelfLimiterStage {
     this.tFastAtt = coeffFine(TRANSIENT_FAST_ATTACK_MS)
     this.tSlowAtt = coeffFine(TRANSIENT_SLOW_ATTACK_MS)
     this.tRel = coeffFine(TRANSIENT_RELEASE_MS)
-    this.tGateLin = thresholdLin * Math.pow(10, -TRANSIENT_GATE_BELOW_DB / 20)
+    this.tGateLin = Number.isFinite(transientGateLin)
+      ? transientGateLin
+      : thresholdLin * Math.pow(10, -TRANSIENT_GATE_BELOW_DB / 20)
+    this.tSlope = transientSlope > 0 ? transientSlope : TRANSIENT_SLOPE
+    // A SEPARATE TRANSIENT BAND (PHAT*SS): the transient detector listens to,
+    // and cuts, its own one-pole split at `transientCornerHz`, cascaded after
+    // the shelf. null keeps the HF Limiter's shared band, bit for bit.
+    this.tSplit = Number.isFinite(transientCornerHz) && transientCornerHz > 0
+    if (this.tSplit) {
+      const tl = onePoleLowpass(this.sampleRate, transientCornerHz)
+      this.tLpB0 = tl.b0
+      this.tLpA1 = tl.a1
+    }
     this.cornerHz = cornerHz
     this.thresholdLin = thresholdLin
     this.floorLin = floorLin
@@ -329,6 +347,12 @@ export class ShelfLimiterStage {
       this.band.push(new Float64Array(2)) // [x, h] at the FIR centre
       this.lpX1.push(0)
       this.lpY1.push(0)
+      // The separate transient band: one one-pole on the centred input for
+      // the detector, one on the shelf's output for the cut.
+      this.tDetX1.push(0)
+      this.tDetY1.push(0)
+      this.tOutX1.push(0)
+      this.tOutY1.push(0)
     }
     if (n > this.channels) this.channels = n
   }
@@ -348,6 +372,9 @@ export class ShelfLimiterStage {
     const tail = this.tail, tailC = this.tailCoeff, chargeC = this.chargeCoeff
     const tMax = this.transientDb
     const tFA = this.tFastAtt, tSA = this.tSlowAtt, tR = this.tRel, tGate = this.tGateLin
+    const tSlope = this.tSlope
+    const tSplit = this.tSplit
+    const tb0 = this.tLpB0, ta1 = this.tLpA1
     let tf = this.tFast, ts = this.tSlow, gt = this.tGain, minTGain = this.minTGain
     let s = this.slow
     let g = this.gain
@@ -356,6 +383,7 @@ export class ShelfLimiterStage {
     for (let i = 0; i < n; i++) {
       // Split: the band h at the FIR's centre, D samples back.
       let m = 0
+      let mt = 0
       for (let ch = 0; ch < nCh; ch++) {
         const hist = this.hist[ch]
         const x = bufs[ch][i]
@@ -378,7 +406,17 @@ export class ShelfLimiterStage {
         this.band[ch][1] = h
         const a = h < 0 ? -h : h
         if (a > m) m = a
+        if (tSplit) {
+          let tl = tb0 * (xc + this.tDetX1[ch]) - ta1 * this.tDetY1[ch]
+          this.tDetX1[ch] = xc
+          if (tl > -ERROR_FLOOR && tl < ERROR_FLOOR) tl = 0
+          this.tDetY1[ch] = tl
+          const ht = xc - tl
+          const at = ht < 0 ? -ht : ht
+          if (at > mt) mt = at
+        }
       }
+      if (!tSplit) mt = m
       pos = pos + 1 === len ? 0 : pos + 1
 
       let req = m > T ? T / m : 1
@@ -398,12 +436,12 @@ export class ShelfLimiterStage {
 
       // Transient: how suddenly the band rose, not how loud it is. The
       // detectors always run, so turning the knob up starts from settled state.
-      tf = m > tf ? m + (tf - m) * tFA : m + (tf - m) * tR
+      tf = mt > tf ? mt + (tf - mt) * tFA : mt + (tf - mt) * tR
       ts = tf > ts ? tf + (ts - tf) * tSA : tf + (ts - tf) * tR
       let tReq = 1
       if (tMax > 0 && tf > tGate) {
-        const rise = ts > 0 ? 20 * Math.log10(tf / ts) : TRANSIENT_RISE_FLOOR_DB + tMax / TRANSIENT_SLOPE
-        let cutDb = TRANSIENT_SLOPE * (rise - TRANSIENT_RISE_FLOOR_DB)
+        const rise = ts > 0 ? 20 * Math.log10(tf / ts) : TRANSIENT_RISE_FLOOR_DB + tMax / tSlope
+        let cutDb = tSlope * (rise - TRANSIENT_RISE_FLOOR_DB)
         if (cutDb > 0) {
           if (cutDb > tMax) cutDb = tMax
           // Fade in over the 6 dB above the gate, so the gate cannot click.
@@ -415,6 +453,21 @@ export class ShelfLimiterStage {
       gt = this.tBox2.push(this.tBox1.push(this.tMin.push(tReq)))
       if (1 - gt < UNITY_SNAP) gt = 1
       if (gt < minTGain) minTGain = gt
+      if (tSplit) {
+        // Shelf on its band, then the transient's own dynamic shelf cascaded
+        // on the result — a product of two gains, so they never over-subtract.
+        for (let ch = 0; ch < nCh; ch++) {
+          const xd = this.xDelay[ch].push(this.band[ch][0])
+          const hd = this.hDelay[ch].push(this.band[ch][1])
+          const y = g === 1 ? xd : xd + (g - 1) * hd
+          let tl = tb0 * (y + this.tOutX1[ch]) - ta1 * this.tOutY1[ch]
+          this.tOutX1[ch] = y
+          if (tl > -ERROR_FLOOR && tl < ERROR_FLOOR) tl = 0
+          this.tOutY1[ch] = tl
+          bufs[ch][i] = gt === 1 ? y : y + (gt - 1) * (y - tl)
+        }
+        continue
+      }
       // They stack: Range caps the shelf only, Transient caps only this.
       const gg = g * gt
 

@@ -5502,3 +5502,32 @@ rise over room tone). The after-pause onset now takes −3.9 dB, inside the
 Cost: 80 ms more constant latency (trimmed on apply; preview runs behind bypass).
 The Attack field keeps its meaning (the past follower) but now only limits the
 cut: shorter catches up sooner and cuts less.
+
+### Soften rebuilt as the shelf's Transient on its own band (October 2026)
+
+The owner auditioned the body-referenced broadband Soften and found it not worth
+its 83 ms of latency: the HF Limiter's Transient knob did the job about as well,
+with less tuning and no latency. Asked for that instead — deeper, with its own
+cutoff that moves independently of (or below) the main shelf.
+
+`dsp/onsetSoftener.js` is removed (recoverable at `4d5fac3`, measurements above).
+`ShelfLimiterStage` gains three optional params:
+- `transientCornerHz` — the Transient detector reads, and its cut acts on, its OWN
+  one-pole split at this corner (computed on the same centred sample as the shelf's
+  band, so no new latency). The cut is applied as a second dynamic shelf CASCADED
+  on the shelf's output, `y + (gt − 1)·(y − LP1(y))`, so the two gains multiply and
+  can never over-subtract (summing two cuts on overlapping bands can drive the top
+  end negative). null keeps the shared band — the HF Limiter is bit-identical
+  (its 20 tests pass unchanged).
+- `transientSlope` — dB of cut per dB of rise (HF Limiter's 0.5 by default).
+- `transientGateLin` — an absolute gate instead of "24 dB under the shelf
+  threshold", so PHAT*SS's gate does not move with Tame.
+
+PHAT*SS: **Soften** 0–10 sets the ceiling 2.4 dB a step (24 at 10) and the slope
+0.5 → 1 across the knob; **Soft Freq** 1–12 kHz (default 3 kHz) is its corner;
+gate 32 dB under the voice level (the HF Limiter's default works out to the same).
+On a 2 ms click over a 150 Hz voice: deepest cut 12 dB at Soften 5, 24 at 10; at
+Soften 10 / 3 kHz it removes more of the click than the HF Limiter's Transient 12 at
+the same corner; 1.5 kHz takes more of a broadband burst than 8 kHz; the steady
+voice and a held 6 kHz tone do not move. PHAT*SS latency is back to Warmth + guard
++ shelf. The SOFTEN BENCH fields are gone with the stage they tuned.

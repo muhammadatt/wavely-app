@@ -9,11 +9,11 @@
  * on with Warmth: it turns down only what Warmth adds, only where the sum would
  * pass the selection's own peak (dsp/warmthGuard.js).
  *
- * SOFTEN takes down how far each syllable's attack overshoots the syllable's
- * own body (read 30–80 ms ahead), so a phrase start after silence is treated
- * like any other syllable: a broadband gain (dsp/onsetSoftener.js), so it adds
- * no distortion and can only lower a peak. 5 halves each overshoot, 10
- * flattens it. Costs 80 ms of latency, trimmed on apply.
+ * SOFTEN is the HF Limiter's Transient detector on its OWN band (SOFT FREQ,
+ * independent of Tone): it turns that band down for a few milliseconds when it
+ * rises suddenly — clicks, lip smacks, hard consonants, the snap of an onset —
+ * deeper than the HF Limiter's (24 dB ceiling, up to 1 dB of cut per dB of
+ * rise). A gain on a band, never distortion, no latency of its own.
  *
  * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing
  * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
@@ -28,11 +28,9 @@ import { usePhatss } from '../../composables/usePhatss.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   WARMTH_MAX, ODD_EVEN_MAX, SOFTEN_MAX, TAME_MAX, TONE_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
-  ONSET_FLOOR_MIN_DB, ONSET_FLOOR_MAX_DB, ONSET_ATTACK_MIN_MS, ONSET_ATTACK_MAX_MS, ONSET_AMOUNT_MAX,
-  PHATSS_DEFAULTS, warmthActive, tapeShelf,
+  SOFTEN_FREQ_MIN_HZ, SOFTEN_FREQ_MAX_HZ, warmthActive, tapeShelf,
 } from '../../audio/phatssParams.js'
 import Knob from '../knobs/Knob.vue'
-import DeviceField from '../knobs/DeviceField.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
@@ -102,17 +100,7 @@ const fmtTone = v => {
   return `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)}k`
 }
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
-const fmtFloor = v => v.toFixed(1)
-const fmtAttack = v => `${Math.round(v)}`
-const fmtScale = v => `${v.toFixed(2)}×`
-const parseScale = t => parseFloat(String(t).replace('×', ''))
-
-// Soften's bench fields: back to the shipped voicing.
-const SOFTEN_BENCH_KEYS = ['softenFloor', 'softenAttack', 'softenScale']
-const softenBenchChanged = computed(() => SOFTEN_BENCH_KEYS.some(k => phParams[k] !== PHATSS_DEFAULTS[k]))
-function resetSoftenBench() {
-  for (const k of SOFTEN_BENCH_KEYS) syncParam(k, PHATSS_DEFAULTS[k])
-}
+const fmtSoftFreq = v => `${(v / 1000).toFixed(v >= 10000 ? 1 : 2)}k`
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -169,11 +157,18 @@ async function applyAndClose() {
                 label="Odd/Even" :accent="ACCENT" :format-value="fmtOddEven" :disabled="!phPreview || phParams.warmth <= 0"
               />
             </div>
-            <div class="w-[80px]" title="Softens the attack of every syllable, the way tape rounds off transients: wherever a syllable starts louder than it then settles, the whole signal is turned down by part of that overshoot — 5 halves it, 10 flattens it. It compares each attack with the rest of its own syllable, so the first word after a pause is treated like any other. Steady vowels, syllable ends and syllables with no overshoot are untouched. A gain, never distortion, and it can only lower a peak. 0 is off">
+            <div class="w-[80px]" title="Softens sudden attacks the way tape rounds off transients: when the band above Soft Freq rises suddenly — a click, a lip smack, a hard T or K, the snap of an onset — it is turned down for a few milliseconds. It reacts to how suddenly the band rises, not how loud it is, so steady sound and an S are left alone. Deeper than the HF Limiter's Transient. A gain on a band, never distortion. 0 is off">
               <Knob
                 :model-value="phParams.soften" @update:model-value="v => syncParam('soften', v)"
                 :min="0" :max="SOFTEN_MAX" :step="0.1" :value-font-px="13"
                 label="Soften" :accent="ACCENT" :format-value="fmtSoften" :disabled="!phPreview"
+              />
+            </div>
+            <div class="w-[80px]" title="Where Soften listens and cuts, independent of Tone. It is a gentle 6 dB/oct tilt, so it reaches an octave or two below; lower takes in more of the voice's snap, higher only the very top">
+              <Knob
+                :model-value="phParams.softenFreq" @update:model-value="v => syncParam('softenFreq', v)"
+                :min="SOFTEN_FREQ_MIN_HZ" :max="SOFTEN_FREQ_MAX_HZ" :step="10" scale="log" :value-font-px="13"
+                label="Soft Freq" :accent="ACCENT" :format-value="fmtSoftFreq" :disabled="!phPreview || phParams.soften <= 0"
               />
             </div>
           </div>
@@ -205,44 +200,6 @@ async function applyAndClose() {
         <LevelMeter :levels="phOutputLevels" label="OUT" :height="150" />
       </div>
 
-      <!-- Soften's internals, exposed for auditioning. -->
-      <div class="mt-[14px] flex justify-center items-end gap-[12px]">
-        <span
-          class="pb-[9px]"
-          style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)"
-        >SOFTEN BENCH</span>
-        <div title="dB of each attack's overshoot that is never cut. Lower softens every attack more, but below ~1 the steady parts of syllables start to move too. Shipped at 1.5">
-          <DeviceField
-            :model-value="phParams.softenFloor" @update:model-value="v => syncParam('softenFloor', v)"
-            :min="ONSET_FLOOR_MIN_DB" :max="ONSET_FLOOR_MAX_DB" :step="0.1"
-            label="Floor" unit="dB" :format-value="fmtFloor"
-            :accent="ACCENT" :disabled="!phPreview" :width="54"
-          />
-        </div>
-        <div title="How long the detector takes to accept a new level, ms — what counts as the RECENT past. An attack is cut only as far as it both rose over the recent past and overshoots its own syllable, so a shorter Attack catches up sooner and cuts less; longer lets the overshoot reading decide. Shipped at 30">
-          <DeviceField
-            :model-value="phParams.softenAttack" @update:model-value="v => syncParam('softenAttack', v)"
-            :min="ONSET_ATTACK_MIN_MS" :max="ONSET_ATTACK_MAX_MS" :step="1" log
-            label="Attack" unit="ms" :format-value="fmtAttack"
-            :accent="ACCENT" :disabled="!phPreview" :width="54"
-          />
-        </div>
-        <div title="What Soften 10 means. 1 flattens each onset to the level it settles at; above 1 cuts by more than the onset rose, so it dips below the settled level — a ducked attack. Soften scales it, so Soften 5 at Scale 2 is the old Soften 10. Shipped at 1">
-          <DeviceField
-            :model-value="phParams.softenScale" @update:model-value="v => syncParam('softenScale', v)"
-            :min="0" :max="ONSET_AMOUNT_MAX" :step="0.05"
-            label="Scale" :format-value="fmtScale" :parse="parseScale"
-            :accent="ACCENT" :disabled="!phPreview" :width="54"
-          />
-        </div>
-        <button
-          class="pb-[9px]"
-          :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.1em', color: softenBenchChanged ? ACCENT : 'rgba(255,255,255,.25)' }"
-          :disabled="!softenBenchChanged || !phPreview"
-          title="Back to the shipped Floor 1.5, Attack 30, Scale 1"
-          @click="resetSoftenBench"
-        >RESET</button>
-      </div>
 
       <div
         v-if="warmthActive(phParams)"
@@ -271,8 +228,8 @@ async function applyAndClose() {
         class="mt-[16px] text-center"
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
-        Warmth fattens the low end without raising the peak, Soften rounds off each
-        syllable's attack, and Tame rounds off the top the way tape does, starting at Tone.
+        Warmth fattens the low end without raising the peak, Soften rounds off sudden
+        attacks, and Tame rounds off the top the way tape does, starting at Tone.
       </p>
     </div>
   </FloatingWindow>
