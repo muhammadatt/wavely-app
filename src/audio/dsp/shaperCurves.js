@@ -24,6 +24,7 @@
  */
 
 import { makeQuarticSatCurve } from './quarticSatCurve.js'
+import { JilesAtherton, hysteresisSmallGain, hysteresisSineResponse, hysteresisShapeVersion } from './hysteresis.js'
 
 const quartic = makeQuarticSatCurve({ drive: 1 })
 
@@ -73,6 +74,15 @@ export const SHAPER_CURVES = [
     title: 'x − x³/3, flat past ±1: pure third harmonic until it hits the flat, then everything',
     f: u => (u >= 1 ? 2 / 3 : u <= -1 ? -2 / 3 : u - (u * u * u) / 3),
   },
+  {
+    // ⚠ STATEFUL: no `f`. The kernel asks `make()` for one state per channel
+    // and steps it once per oversampled sample (see dsp/hysteresis.js).
+    id: 'hysteresis',
+    label: 'HYSTERESIS',
+    title: 'Tape magnetisation (Jiles-Atherton): the output depends on where the signal has been — softens and slightly lags peaks, compresses as it is pushed, odd harmonics',
+    stateful: true,
+    make: () => new JilesAtherton({ scale: 1 / hysteresisSmallGain() }),
+  },
 ]
 
 export const SHAPER_CURVE_IDS = SHAPER_CURVES.map(c => c.id)
@@ -117,16 +127,23 @@ const unitCache = new Map()
  * and memoised, so a worklet pays for it once.
  */
 export function unitDriveU(id) {
-  if (unitCache.has(id)) return unitCache.get(id)
-  const { f } = shaperCurve(id)
+  const curve = shaperCurve(id)
+  // The hysteresis curve's shape is sweepable module state: key on its version.
+  const key = curve.stateful ? `${id}@${hysteresisShapeVersion()}` : id
+  if (unitCache.has(key)) return unitCache.get(key)
+  const f = curve.f
+  // A stateful curve is measured in steady state on its own sine, in h.
+  const thdAt = curve.stateful
+    ? u => hysteresisSineResponse(u, { samples: 256, cycles: 3 }).thd
+    : u => sineThd(f, u, 256, 24)
   let lo = Math.log(1e-3)
   let hi = Math.log(20)
   for (let i = 0; i < 50; i++) {
     const mid = (lo + hi) / 2
-    if (sineThd(f, Math.exp(mid), 256, 24) < SHAPER_REF_THD) lo = mid
+    if (thdAt(Math.exp(mid)) < SHAPER_REF_THD) lo = mid
     else hi = mid
   }
   const u = Math.exp((lo + hi) / 2)
-  unitCache.set(id, u)
+  unitCache.set(key, u)
   return u
 }

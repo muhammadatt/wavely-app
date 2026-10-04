@@ -400,7 +400,8 @@ class Layer {
   constructor(sampleRate, rampSamples) {
     this.sampleRate = sampleRate
     this.p = normalizeLayer()
-    this.fn = shaperCurve(this.p.curve).f
+    this.curve = shaperCurve(this.p.curve)
+    this.fn = this.curve.f
     this.gain = 1
     this.full = new Ramp(0, rampSamples)
     this.amount = new Ramp(1, rampSamples)
@@ -416,7 +417,10 @@ class Layer {
     const prev = this.p
     const next = normalizeLayer(p)
     this.p = next
-    this.fn = shaperCurve(next.curve).f
+    this.curve = shaperCurve(next.curve)
+    this.fn = this.curve.f
+    // A stateful curve needs one state per channel, fresh on every curve change.
+    if (next.curve !== prev.curve) for (const c of this.channels) c.state = this.curve.stateful ? this.curve.make() : null
     this.gain = layerGain(next.curve, next.driveDb, next.refPeakDb)
     this.full.set(next.mode === 'full' ? 1 : 0, immediate)
     this.amount.set(Math.pow(10, next.amountDb / 20), immediate)
@@ -468,6 +472,7 @@ class Layer {
     c.pre.reset?.()
     c.de.reset?.()
     c.srcDelay.reset()
+    c.state = this.curve.stateful ? this.curve.make() : null
     c.dcX = 0
     c.dcY = 0
   }
@@ -531,7 +536,9 @@ class Layer {
       if (emph) c.pre.process(src, c.preBuf, n, 0)
       const hi = c.os.up(emph ? c.preBuf : src, n)
       const m = n * c.os.factor
-      for (let j = 0; j < m; j++) hi[j] = f(g * hi[j]) * inv
+      const st = c.state
+      if (st) for (let j = 0; j < m; j++) hi[j] = st.step(g * hi[j]) * inv
+      else for (let j = 0; j < m; j++) hi[j] = f(g * hi[j]) * inv
       c.os.down(c.down, n)
       if (emph) c.de.process(c.down, c.down, n, 0)
       // What the curve added to the band.

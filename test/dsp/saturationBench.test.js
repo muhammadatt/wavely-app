@@ -14,6 +14,7 @@ import {
 import { measureBandSpectrum, bandRefPeakDb, voicingOffsetDb } from '../../src/audio/saturationBenchAnalysis.js'
 import { toKernelParams, SATURATION_BENCH_DEFAULTS, SAT_BENCH_LAYER_PRESETS } from '../../src/audio/saturationBenchParams.js'
 import { SHAPER_CURVES, SHAPER_REF_THD, sineThd, unitDriveU } from '../../src/audio/dsp/shaperCurves.js'
+import { JilesAtherton, hysteresisSineResponse, hysteresisSmallGain } from '../../src/audio/dsp/hysteresis.js'
 import { EMPHASIS_CORNER_HZ, EMPHASIS_MAX_DB, EMPHASIS_DEFAULT } from '../../src/audio/la2aProcessor.js'
 import { BiquadCascade, highpass, lowpass, peaking, magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
 
@@ -116,13 +117,74 @@ function render(x, sr, params, options) {
 const layers = (...ls) => ({ layers: ls.map(l => ({ on: true, ...l })) })
 
 test('curves: unity slope at zero, matched to the reference THD at their unit drive', () => {
-  for (const c of SHAPER_CURVES) {
+  for (const c of SHAPER_CURVES.filter(c => !c.stateful)) {
     assert.equal(c.f(0), 0, c.id)
     const slope = (c.f(1e-6) - c.f(-1e-6)) / 2e-6
     assert.ok(Math.abs(slope - 1) < 1e-6, `${c.id} slope ${slope}`)
     const thd = sineThd(c.f, unitDriveU(c.id))
     assert.ok(Math.abs(thd - SHAPER_REF_THD) < 1e-4, `${c.id} THD ${thd}`)
   }
+})
+
+// ── Hysteresis: the one stateful curve ───────────────────────────────────────
+
+test('hysteresis: unity at low level, matched to the reference THD at its unit drive', () => {
+  const scale = 1 / hysteresisSmallGain()
+  const quiet = hysteresisSineResponse(0.01, { scale })
+  assert.ok(Math.abs(quiet.gain - 1) < 1e-9, `small-signal gain ${quiet.gain}`)
+  assert.ok(Math.abs(quiet.lagDeg) < 0.1, `small-signal lag ${quiet.lagDeg}°`)
+  const thd = hysteresisSineResponse(unitDriveU('hysteresis'), { samples: 256, cycles: 3 }).thd
+  assert.ok(Math.abs(thd - SHAPER_REF_THD) < 1e-4, `THD ${thd}`)
+})
+
+test('hysteresis: never expands on a sine — compressive from the calibration point up, with a real loop', () => {
+  const scale = 1 / hysteresisSmallGain()
+  let prev = Infinity
+  for (const h of [0.1, 0.3, 1, 2, 4, 8]) {
+    const r = hysteresisSineResponse(h, { scale })
+    const g = 20 * Math.log10(r.gain)
+    assert.ok(g < 0.25, `h ${h}: +${g.toFixed(2)} dB`)
+    if (h >= 1) assert.ok(g < prev, `h ${h}: gain must fall with level (${g.toFixed(2)} after ${prev.toFixed(2)})`)
+    prev = g
+  }
+  // The memory is there: the fundamental lags, more as it is pushed.
+  const lag = hysteresisSineResponse(2, { scale }).lagDeg
+  assert.ok(lag > 0.8 && lag < 3, `lag at 2×: ${lag.toFixed(2)}°`)
+})
+
+test('hysteresis: a fast ripple biases the slow signal by under 0.5 dB (speech self-bias stays bounded)', () => {
+  // Small reversals pull J-A toward its anhysteretic curve; at the shipped
+  // voicing that lift must stay small, or a voice's own top end expands its bass.
+  const fs = 176400
+  const ja = new JilesAtherton({ scale: 1 / hysteresisSmallGain() })
+  let xy = 0, xx = 0
+  for (let i = 0; i < fs; i++) {
+    const lf = 0.3 * Math.sin((2 * Math.PI * 120 * i) / fs)
+    const y = ja.step(lf + 0.2 * Math.sin((2 * Math.PI * 3000 * i) / fs))
+    if (i > fs / 2) { xy += lf * y; xx += lf * lf }
+  }
+  const g = 20 * Math.log10(xy / xx)
+  assert.ok(g < 0.5, `self-bias +${g.toFixed(2)} dB`)
+})
+
+test('hysteresis: each channel has its own state, and a quiet signal passes at unity gain', () => {
+  const sr = 44100
+  const a = pink(sr, 3)
+  const b = pink(sr, 9)
+  const loud = a.map(v => v * 8)
+  const p = layers({ curve: 'hysteresis', mode: 'full', driveDb: 12 })
+  const st = processSaturationBenchBuffer([loud, b], sr, p).channelData
+  const solo = processSaturationBenchBuffer([b], sr, p).channelData[0]
+  for (let i = 0; i < b.length; i++) if (st[1][i] !== solo[i]) assert.fail(`right channel differs at ${i}: state is shared`)
+  // Quiet: the LEVEL passes at unity once the demagnetised start has settled.
+  // ⚠ Not the waveform: J-A's low-level residual barely falls with level on
+  // broadband material (see dsp/hysteresis.js), so only the gain is asserted.
+  const quiet = b.map(v => v * 1e-3)
+  const y = processSaturationBenchBuffer([quiet], sr, p).channelData[0]
+  let xy = 0, xx = 0
+  for (let i = L + sr / 4; i < quiet.length; i++) { xy += y[i] * quiet[i - L]; xx += quiet[i - L] ** 2 }
+  const g = 20 * Math.log10(xy / xx)
+  assert.ok(Math.abs(g) < 0.5, `quiet gain ${g.toFixed(2)} dB`)
 })
 
 test('latency is constant: every layer off is a pure delay of exactly SAT_BENCH_LATENCY_SAMPLES', () => {

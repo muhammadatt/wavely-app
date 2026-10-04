@@ -5343,3 +5343,62 @@ with a no-overshoot proof. And the HF Limiter's own history (the Limen-style
 acceleration limiter) is the measured case against waveform-domain limiting on
 narration. If a fixed tape HF loss is ever wanted, Tube Saturation's HF Loss shelf
 is the closer idea — but the dynamic shelf already covers it.
+
+## Saturation Bench — a hysteresis (tape magnetisation) curve (October 2026)
+
+Asked for while scoping PHAT*SS: what the owner wanted from Tube Saturation's
+Soften was a HYSTERESIS effect — transient softening and mild compression — not
+the HF rolloff Soften actually is (a slew limiter with one sample of memory). So
+a real loop was built: a Jiles-Atherton model (`dsp/hysteresis.js`, from the
+published equations — Jiles & Atherton 1986, Chowdhury DAFx 2019 — not from any
+plugin's code), offered on the Saturation Bench as the curve `hysteresis`, the
+kernel's first STATEFUL curve (one state per channel, stepped once per
+oversampled sample; the kernel otherwise unchanged).
+
+**Voicing, and why not the textbook one.** Normalised units (h = H/a, m = M/Ms),
+three shape constants c, K, A.
+- Chowdhury's tape values (c 0.17) EXPAND: the fundamental's gain rises +9.9 dB
+  before saturating — unbiased tape's S-curve. Rejected.
+- Sine sweep for the widest loop that never expands: c 0.6, K 5 (+0.03 dB max,
+  7° of lag at 4× calibration).
+- **Then speech biases itself.** Small fast reversals pull J-A toward the
+  anhysteretic curve (what AC bias does), steeper than the settled loop, so a
+  voice's own harmonics raise its bass: Southern Sunrise full band +6 at c 0.6,
+  20–250 Hz +1.50 dB, whole file +0.99 dB rms. A 120 Hz tone with a 3 kHz
+  ripple at a fifth of its level gains +0.54 dB. Shipped **c 0.8** (1.2° lag,
+  self-bias +0.34 / +0.12 dB at +6 / +12); a test bounds the ripple lift.
+- Output is normalised to the steady-state small-signal gain at the
+  fundamental, not f'(0) (demagnetised, the origin slope is only the reversible
+  part). Drive calibration (1 % THD at the band's reference peak) is measured in
+  steady state on its own sine.
+
+**The three bands** (`node scripts/hysteresis-bands.mjs <wav> [outDir] [drives] [c=…]`),
+Southern Sunrise, one layer, FULL, no emphasis, drive +12, c 0.8. Onset crest is the
+first 20 ms's peak against the 40–150 ms level, change vs dry, 16 onsets;
+compression is the quiet-quartile change minus the loud-quartile change (voiced
+50 ms frames); bands 20–250 / 250–1k / 1–4k / 4–10k / 10k+.
+
+| | peak | onset crest | compression | bands |
+|---|---|---|---|---|
+| low 1–250 Hz | +0.23 | −0.10 | −0.17 (expands) | +0.06 / 0 / 0 / 0 / 0 |
+| 20 Hz–4 kHz | +0.15 | −0.21 | +0.15 | +0.44 / −0.69 / +0.37 / −0.02 / 0 |
+| full band | −4.88 | −2.56 | +0.63 | +0.12 / −0.85 / −0.95 / −1.06 / −0.94 |
+| tanh, full band | −6.87 | −2.59 | +0.89 | −0.92 / −0.98 / −1.01 / −1.10 / −0.97 |
+| hysteresis c 0.6, full | −2.93 | −2.78 | +0.29 | +1.83 / −0.52 / −0.79 / −0.94 / −0.83 |
+
+- **Low band does nothing for transients**, as predicted: speech's onsets are not
+  there, and it slightly expands and raises the peak.
+- **20 Hz–4 kHz barely softens onsets** and tilts the mids (250–1k down, 1–4k up:
+  odd harmonics of the low/mid band land in 1–4 kHz and the 4 kHz edge keeps them).
+- **Full band is the only one that softens transients and compresses** — and it
+  does so like a tanh at the same calibration (onset crest −2.56 vs −2.59). The
+  softening is the SATURATION, not the memory. tanh runs ~30× realtime here,
+  hysteresis ~11×.
+- **What the loop does add: low-level residual that does not go away.** Residual
+  after the best gain, re the signal, full band +12: tanh −21.7 / −57.2 / −86.7 dB
+  at 0 / −20 / −40 dB of level; hysteresis c 0.8 −17.8 / −30.7 / −49.2. Soft
+  syllables carry ~3 % of residual against a tanh's 0.1 % — the grain of
+  unbiased tape. On white/pink noise it is level-independent (~−21 dB).
+
+Renders for audition (8 s, 32-bit float, latency trimmed): dry, the three bands,
+tanh full band, and c 0.6 full band. Nothing is wired into PHAT*SS yet.
