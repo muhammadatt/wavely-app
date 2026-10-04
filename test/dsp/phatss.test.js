@@ -17,6 +17,7 @@ import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import { processSaturationBenchBuffer } from '../../src/audio/dsp/saturationLayers.js'
 import { warmthGuardLatencySamples } from '../../src/audio/dsp/warmthGuard.js'
 import { shelfLatencySamples } from '../../src/audio/dsp/hfLimit.js'
+import { onsetLatencySamples, OnsetSoftener } from '../../src/audio/dsp/onsetSoftener.js'
 
 const SR = 44100
 
@@ -58,19 +59,19 @@ const run = (x, p) => processPhatssBuffer([x], SR, toKernelParams(p))
 
 // ── The chain ────────────────────────────────────────────────────────────────
 
-test('the latency is Warmth + guard + shelf, constant at every setting', () => {
+test('the latency is Warmth + guard + Soften + shelf, constant at every setting', () => {
   const L = phatssLatencySamples(SR)
-  assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + shelfLatencySamples(SR))
-  for (const [warmth, tame] of [[0, 0], [0, 10], [6, 0], [10, 10]]) {
+  assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + onsetLatencySamples(SR) + shelfLatencySamples(SR))
+  for (const [warmth, tame, soften] of [[0, 0, 0], [0, 10, 0], [6, 0, 0], [10, 10, 10], [0, 0, 10]]) {
     const x = new Float32Array(4096)
     x[100] = 0.001 // far below every threshold
-    const { channelData: [y], latencySamples } = run(x, { voiceLevelDb: -20, warmth, tame })
+    const { channelData: [y], latencySamples } = run(x, { voiceLevelDb: -20, warmth, tame, soften })
     assert.equal(latencySamples, L)
-    assert.ok(Math.abs(y[100 + L] - x[100]) < 1e-5, `warmth ${warmth} tame ${tame}: impulse at ${L} reads ${y[100 + L]}`)
+    assert.ok(Math.abs(y[100 + L] - x[100]) < 1e-5, `warmth ${warmth} tame ${tame} soften ${soften}: impulse at ${L} reads ${y[100 + L]}`)
   }
 })
 
-test('Warmth 0 and Tame 0 pass the audio through untouched', () => {
+test('Warmth 0, Soften 0 and Tame 0 pass the audio through untouched', () => {
   const x = add(sine(200, 0.5), sine(3000, 0.2), sine(9000, 0.2))
   const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, oddEven: 30 })
   for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
@@ -267,4 +268,85 @@ test('the peak guard is a pure delay when it has nothing to catch, or no ceiling
   assert.equal(toKernelParams({ ...p, warmth: 0, warmthCeilingDb: -6 }).warmthGuard.on, false)
   // Pinned on with Warmth: there is no switch.
   assert.equal(toKernelParams({ ...p, warmthCeilingDb: -6 }).warmthGuard.on, true)
+})
+
+// ── Soften: the whole-signal onset softener ─────────────────────────────────
+
+/** A 150 Hz tone that switches on abruptly at `at` and holds, over room tone. */
+function syllable(amp, at = Math.round(0.3 * SR), n = SR) {
+  const x = noise(n, 0.0005, 7)
+  for (let i = at; i < n; i++) x[i] += amp * Math.sin((2 * Math.PI * 150 * (i - at)) / SR)
+  return x
+}
+
+/** Render through the stage alone, aligned to the input. */
+function soften(x, amount, voiceLevelDb = -20, channels = [x]) {
+  const st = new OnsetSoftener(SR)
+  st.setParams({ amount, voiceLevelDb })
+  const bufs = channels.map(c => Float32Array.from(c))
+  for (let o = 0; o < bufs[0].length; o += 128) {
+    const len = Math.min(128, bufs[0].length - o)
+    st.process(bufs.map(b => b.subarray(o, o + len)), len)
+  }
+  return bufs.map(b => b.subarray(st.latencySamples))
+}
+
+const levelDb = (y, a, b) => { let s = 0; for (let i = a; i < b; i++) s += y[i] * y[i]; return 10 * Math.log10(s / (b - a)) }
+
+test('Soften takes an onset down, more as the knob rises, and lets the steady part through', () => {
+  const at = Math.round(0.3 * SR)
+  const x = syllable(0.2, at)
+  const onset = [at, at + Math.round(0.02 * SR)]
+  const steady = [at + Math.round(0.3 * SR), at + Math.round(0.6 * SR)]
+  let prev = 0
+  for (const amount of [0.25, 0.5, 1]) {
+    const [y] = soften(x, amount)
+    const cut = levelDb(y, ...onset) - levelDb(x, ...onset)
+    assert.ok(cut < prev - 0.3, `amount ${amount}: onset ${cut.toFixed(2)} dB (previous ${prev.toFixed(2)})`)
+    prev = cut
+    const st = levelDb(y, ...steady) - levelDb(x, ...steady)
+    assert.ok(Math.abs(st) < 0.01, `amount ${amount}: steady part moved ${st.toFixed(3)} dB`)
+  }
+  assert.ok(prev < -3, `full Soften takes the onset down only ${prev.toFixed(2)} dB`)
+})
+
+test('Soften is a gain that never raises a sample, and 0 is a pure delay', () => {
+  const x = syllable(0.3)
+  const [off] = soften(x, 0)
+  for (let i = 0; i < off.length; i++) if (off[i] !== x[i]) assert.fail(`Soften 0: sample ${i} differs`)
+  const [y] = soften(x, 1)
+  for (let i = 0; i < y.length; i++) {
+    if (Math.abs(y[i]) > Math.abs(x[i]) + 1e-9) assert.fail(`sample ${i} raised: ${y[i]} from ${x[i]}`)
+    // Same sign, smaller or equal: a gain in [0, 1], never a waveshape.
+    if (x[i] !== 0 && y[i] / x[i] < 0) assert.fail(`sample ${i} changed sign`)
+  }
+})
+
+test('Soften leaves onsets far below the voice level alone, and is linked across channels', () => {
+  const at = Math.round(0.3 * SR)
+  const quiet = syllable(0.002, at) // −57 dBFS peak against a −20 dBFS voice
+  const [q] = soften(quiet, 1)
+  let worst = 0
+  for (let i = 0; i < q.length; i++) worst = Math.max(worst, Math.abs(q[i] - quiet[i]))
+  assert.equal(worst, 0, 'an onset in room tone must not be touched')
+  // A loud onset on the left takes the right down with it, by the same gain.
+  const left = syllable(0.2, at)
+  const right = noise(SR, 0.05, 11)
+  const [, r] = soften(left, 1, -20, [left, right])
+  const i0 = at + Math.round(0.005 * SR)
+  assert.ok(Math.abs(r[i0]) < Math.abs(right[i0]) || right[i0] === 0, 'the right channel follows the left onset')
+  const gL = soften(left, 1, -20, [left, right])[0]
+  for (let i = at; i < at + Math.round(0.02 * SR); i++) {
+    if (Math.abs(left[i]) > 1e-3 && Math.abs(right[i]) > 1e-3) {
+      assert.ok(Math.abs(gL[i] / left[i] - r[i] / right[i]) < 1e-6, `gains differ at ${i}`)
+    }
+  }
+})
+
+test('Soften maps 0–10 onto the share of each onset removed', () => {
+  assert.equal(toKernelParams({ soften: 0 }).onsetAmount, 0)
+  assert.equal(toKernelParams({ soften: 5 }).onsetAmount, 0.5)
+  assert.equal(toKernelParams({ soften: 10 }).onsetAmount, 1)
+  assert.equal(toKernelParams({ soften: 40 }).onsetAmount, 1)
+  assert.equal(PHATSS_DEFAULTS.soften, 0)
 })

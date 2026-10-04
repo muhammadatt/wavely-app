@@ -9,6 +9,10 @@
  * on with Warmth: it turns down only what Warmth adds, only where the sum would
  * pass the selection's own peak (dsp/warmthGuard.js).
  *
+ * SOFTEN takes every syllable onset down for the ~30 ms the signal takes to
+ * settle: a broadband gain (dsp/onsetSoftener.js), so it adds no distortion
+ * and can only lower a peak. 5 halves each onset's jump, 10 flattens it.
+ *
  * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing
  * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
  * match). TAME is a macro for Threshold and Range together, TONE for where the
@@ -21,7 +25,7 @@ import { computed, onMounted, watch } from 'vue'
 import { usePhatss } from '../../composables/usePhatss.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, TONE_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
+  WARMTH_MAX, ODD_EVEN_MAX, SOFTEN_MAX, TAME_MAX, TONE_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
   warmthActive, tapeShelf,
 } from '../../audio/phatssParams.js'
 import Knob from '../knobs/Knob.vue'
@@ -88,6 +92,7 @@ const readoutPeak = computed(() => {
 const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtOddEven = v => (v <= 0 ? 'ODD' : `${Math.round(v)}`)
 const fmtTame = v => (v <= 0 ? 'OFF' : v.toFixed(1))
+const fmtSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtTone = v => {
   const hz = tapeShelf(1, v).cornerHz
   return `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)}k`
@@ -149,6 +154,13 @@ async function applyAndClose() {
                 label="Odd/Even" :accent="ACCENT" :format-value="fmtOddEven" :disabled="!phPreview || phParams.warmth <= 0"
               />
             </div>
+            <div class="w-[80px]" title="Softens the start of every syllable, the way tape rounds off attacks: for the ~30 ms after each onset the whole signal is turned down by part of how far it just jumped — 5 halves the jump, 10 flattens it. It reacts to how suddenly the voice rises, not how loud it is, so steady vowels are untouched. A gain, never distortion, and it can only lower a peak. 0 is off">
+              <Knob
+                :model-value="phParams.soften" @update:model-value="v => syncParam('soften', v)"
+                :min="0" :max="SOFTEN_MAX" :step="0.1" :value-font-px="13"
+                label="Soften" :accent="ACCENT" :format-value="fmtSoften" :disabled="!phPreview"
+              />
+            </div>
           </div>
           <div class="flex justify-center gap-[12px]">
             <div class="w-[80px]" title="How hard the tape rounds off the top end: lowers the threshold and deepens the most it may cut together, relative to the file's voice level. 0 is off">
@@ -205,8 +217,8 @@ async function applyAndClose() {
         class="mt-[16px] text-center"
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
-        Warmth fattens the low end without raising the peak; Tame rounds off the top
-        the way tape does, starting at Tone.
+        Warmth fattens the low end without raising the peak, Soften rounds off each
+        syllable's attack, and Tame rounds off the top the way tape does, starting at Tone.
       </p>
     </div>
   </FloatingWindow>

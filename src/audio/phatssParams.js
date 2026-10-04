@@ -3,7 +3,8 @@
  * their mapping to the kernel, and the latency.
  *
  * Chain: WARMTH (two fixed Saturation Bench layers on the low band) → its PEAK
- * GUARD (pinned on) → a tape-style HF shelf (the HF Limiter's dynamic shelf
+ * GUARD (pinned on) → SOFTEN (a whole-signal onset softener, dsp/onsetSoftener
+ * .js) → a tape-style HF shelf (the HF Limiter's dynamic shelf
  * with its timing pinned and its Freq / Threshold / Range driven by two macro
  * knobs) → Output.
  *
@@ -15,6 +16,7 @@ import { ALIGN_TARGET_DBFS } from './dsp/inputAlign.js'
 import { shelfLatencySamples } from './dsp/hfLimit.js'
 import { SAT_BENCH_LAYER_LATENCY, SAT_AMOUNT_FLOOR_DB } from './dsp/saturationLayers.js'
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
+import { onsetLatencySamples } from './dsp/onsetSoftener.js'
 
 export const PHATSS_DEFAULTS = {
   // 0–10 — low-end harmonic warmth: how much of what the two fixed
@@ -23,6 +25,10 @@ export const PHATSS_DEFAULTS = {
   // 0–100 — from pure Odd toward Even, over the useful part of the crossfade
   // only (ODD_EVEN_SPAN). The bench voicing is 36 (at Warmth 5).
   oddEven: 50,
+  // 0–10 — how much of every syllable onset's jump is taken down for the
+  // ~10 ms the signal takes to settle: a gain on the whole signal, never
+  // distortion. 5 halves the jump, 10 flattens it; 0 is off (a pure delay).
+  soften: 0,
   // 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
   // together (`tapeShelf`). 0 takes the shelf out. 5 is the HF Limiter's
   // default (−8 dB, Range 12).
@@ -46,6 +52,7 @@ export const PHATSS_DEFAULTS = {
 export const WARMTH_MAX = 10
 export const ODD_EVEN_MAX = 100
 export const TAME_MAX = 10
+export const SOFTEN_MAX = 10
 export const TONE_MAX = 10
 export const OUTPUT_MIN_DB = -12
 export const OUTPUT_MAX_DB = 12
@@ -199,6 +206,8 @@ export function toKernelParams(params) {
     thresholdDb: voice + shelf.thresholdRelDb,
     rangeDb: shelf.rangeDb,
     ...TAPE_SHELF,
+    onsetAmount: clamp(Number(p.soften) || 0, 0, SOFTEN_MAX) / SOFTEN_MAX,
+    voiceLevelDb: voice,
     outputGainDb: clamp(Number(p.output) || 0, OUTPUT_MIN_DB, OUTPUT_MAX_DB),
   }
 }
@@ -207,12 +216,14 @@ export function toKernelParams(params) {
 export const WARMTH_LATENCY_SAMPLES = WARMTH_LAYERS.length * SAT_BENCH_LAYER_LATENCY
 
 /**
- * Plugin latency, samples: the Warmth oversamplers, the peak guard's lookahead
- * and the shelf's split centre and lookahead. CONSTANT: every stage stays a
- * delay of its own length when idle, so no setting moves the audio.
+ * Plugin latency, samples: the Warmth oversamplers, the peak guard's lookahead,
+ * Soften's lookahead and the shelf's split centre and lookahead. CONSTANT:
+ * every stage stays a delay of its own length when idle, so no setting moves
+ * the audio.
  */
 export function phatssLatencySamples(sampleRate) {
-  return WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate) + shelfLatencySamples(sampleRate)
+  return WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate) +
+    onsetLatencySamples(sampleRate) + shelfLatencySamples(sampleRate)
 }
 
 /** Pre-roll for apply, seconds: several of the shelf's release. */

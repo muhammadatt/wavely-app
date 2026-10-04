@@ -5402,3 +5402,44 @@ compression is the quiet-quartile change minus the loud-quartile change (voiced
 
 Renders for audition (8 s, 32-bit float, latency trimmed): dry, the three bands,
 tanh full band, and c 0.6 full band. Nothing is wired into PHAT*SS yet.
+
+## PHAT*SS — Soften, a whole-signal onset softener (October 2026)
+
+After the hysteresis renders the owner decided against adding more distortion
+to PHAT*SS for transient softening, and asked for the HF Limiter's Transient
+mechanism on the whole signal instead, as a knob. Built as `dsp/onsetSoftener.js`,
+placed after the Warmth guard and before the tape shelf: a linked broadband
+gain, so it adds nothing and can only lower a peak.
+
+**Detector, re-derived for the whole signal.**
+- Band 80 Hz–4 kHz, so rumble and sibilance do not trigger it.
+- The fast follower's release is 40 ms, not 20: on the whole signal it rides the
+  voice's fundamental and 20 ms ripples (rise p90 / p99 / p99.9 on narration
+  1.12 / 3.62 / 8.26 dB at 20 ms; 0.67 / 3.27 / 7.32 at 40).
+- The slow follower's attack is 30 ms, not 10: a syllable rises over 10–30 ms
+  and a 10 ms follower keeps up with it. Full Soften on Southern Sunrise
+  (16 onsets; "steady" = 269 loud 10 ms frames within 1.5 dB of their neighbours):
+
+  | slow attack | onset crest | first 30 ms | steady | rms |
+  |---|---|---|---|---|
+  | 10 ms | −0.68 | −0.29 | −0.01 | −0.07 |
+  | 20 ms | −1.18 | −0.68 | −0.01 | −0.13 |
+  | **30 ms** | **−1.47** | **−0.97** | **−0.01** | **−0.18** |
+  | 50 ms | −1.73 | −1.35 | −0.03 | −0.25 |
+
+  An 80 ms release instead of 40 weakened every row by about a third.
+
+**The knob law had to change.** Copied from Transient — a fixed 0.5 dB per dB
+of rise above 3 dB, with the knob as a cap at 1.2 dB a step — most syllable
+onsets never reached even Soften 2's cap, and Soften 2 through 10 measured
+IDENTICAL (peak −2.17 dB everywhere). Now the knob is the share of each onset's
+rise removed: `cut = (soften/10)·(rise − 3)`, 18 dB safety cap. Measured at 30 ms:
+onset crest −0.22 / −0.42 / −0.53 / −0.62 / −0.68 at 2 / 4 / 6 / 8 / 10 under the
+old 10 ms attack — monotone — and −1.47 at 10 under the shipped 30 ms.
+
+Gated 18 dB under the voice level (fading in over 6 dB) so a cough in room tone
+never pumps; 1.5 ms lookahead (3 ms of constant latency); default 0, a pure
+delay, so the plugin's existing sound is unchanged until the knob is turned.
+⚠ Subtle by design and not auditioned when built: at 10 an onset comes down
+~1.5 dB against the rest of its syllable. If it is too little, the levers are the
+slow attack (longer shaves more and longer) and letting the knob go past 1.

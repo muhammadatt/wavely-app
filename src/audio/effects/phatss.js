@@ -1,8 +1,8 @@
 /**
  * PHAT*SS — real-time effect chain wrapper.
  *
- * The DSP lives in ../phatssProcessor.js (Warmth → its peak guard → a tape HF
- * shelf) and runs in an AudioWorklet. The offline apply path renders through
+ * The DSP lives in ../phatssProcessor.js (Warmth → its peak guard → Soften →
+ * a tape HF shelf) and runs in an AudioWorklet. The offline apply path renders through
  * the same worklet in an OfflineAudioContext, so preview and apply share one
  * code path.
  *
