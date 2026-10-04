@@ -5551,3 +5551,15 @@ corner PINNED at 500 Hz, and its depth riding TAME (`softenLaw`): 3.6 dB of ceil
 per Tame step (36 at 10) and a slope of 0.5 → 1 dB of cut per dB of rise across
 Tame's travel, so the top end and the attacks turn down together and Tame 0 takes
 both out (a pure delay, tested). The Soften and Soft Freq knobs are gone.
+
+### PHAT*SS — Tame's Range widened (2.4 → 3.6 dB a step)
+
+Owner: "increase the range of the Tame cut". `TAME_RANGE_PER_STEP_DB` 2.4 → 3.6, so
+Range runs 0 → 36 dB across Tame (18 at the default 5, was 12; 36 at 10, was 24) —
+the same top Soften already rides Tame to, so one knob reads "up to 36 dB" for both.
+Threshold is unchanged (`2 − 2·Tame`), so the shelf starts acting at the same
+place and only its floor goes deeper. Tame 5 / Tone 10 is no longer the HF
+Limiter's default shelf (Range 12); it is the HF Limiter at −8 dB / Range 18 /
+12 kHz, and the Warmth-0 equivalence test now compares against that. The kernel
+has no Range clamp (`floorLin = dbToLin(−rangeDb)`), so 36 needs no other change;
+the HF Limiter's own knob still stops at 24. Not auditioned.

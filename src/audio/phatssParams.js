@@ -31,8 +31,8 @@ export const PHATSS_DEFAULTS = {
   // (`softenLaw`). A gain on a band, never distortion, no latency of its own.
   soften: false,
   // 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
-  // together (`tapeShelf`). 0 takes the shelf out. 5 is the HF Limiter's
-  // default (−8 dB, Range 12).
+  // together (`tapeShelf`). 0 takes the shelf out. 5 is −8 dB re the voice,
+  // Range 18; 10 reaches Range 36.
   tame: 5,
   // 0–10 — where the top end starts: the shelf's corner, 2 kHz (0, dark) to
   // 12 kHz (10, only the very top).
@@ -180,13 +180,14 @@ export const TONE_MIN_HZ = 2000
 export const TONE_MAX_HZ = 12000
 export const TAME_THRESHOLD_TOP_DB = 2 // Tame 0: threshold, dB re voice level
 export const TAME_THRESHOLD_PER_STEP_DB = 2 // each Tame step lowers it this much
-export const TAME_RANGE_PER_STEP_DB = 2.4 // and deepens the Range this much
+export const TAME_RANGE_PER_STEP_DB = 3.6 // and deepens the Range this much (36 at 10, Soften's top too)
 
 /**
  * The macro: Tame sets how hard (Threshold and Range together, so the shelf
  * starts acting earlier AND may go deeper), Tone sets where (the corner, on a
- * log scale). Tame 5 / Tone 10 is the HF Limiter's default: −8 dB, Range 12,
- * 12 kHz. Tame 0 takes the shelf out (Range 0).
+ * log scale). Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz — the HF Limiter's
+ * default threshold and corner, half again its Range (the HF Limiter stops at
+ * 24; Tame reaches 36). Tame 0 takes the shelf out (Range 0).
  *
  * @returns {{ cornerHz: number, thresholdRelDb: number, rangeDb: number }}
  */

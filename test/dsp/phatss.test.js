@@ -76,14 +76,14 @@ test('Warmth 0, Soften off and Tame 0 pass the audio through untouched', () => {
   for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
 })
 
-test('the Tame/Tone macro: Tame 5 / Tone 10 is the HF Limiter default shelf', () => {
+test('the Tame/Tone macro: Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz', () => {
   const s = tapeShelf(5, 10)
   assert.ok(Math.abs(s.cornerHz - 12000) < 1e-9)
   assert.equal(s.thresholdRelDb, -8)
-  assert.ok(Math.abs(s.rangeDb - 12) < 1e-9)
+  assert.ok(Math.abs(s.rangeDb - 18) < 1e-9)
   // The ends: Tame 0 is out, Tame 10 the deepest; Tone sweeps 2–12 kHz on a log scale.
   assert.equal(tapeShelf(0, 10).rangeDb, 0)
-  assert.ok(Math.abs(tapeShelf(10, 10).rangeDb - 24) < 1e-9)
+  assert.ok(Math.abs(tapeShelf(10, 10).rangeDb - 36) < 1e-9)
   assert.ok(Math.abs(tapeShelf(5, 0).cornerHz - 2000) < 1e-9)
   assert.ok(Math.abs(tapeShelf(5, 5).cornerHz - Math.sqrt(2000 * 12000)) < 1e-6)
   // Threshold and Range move together, monotone: more Tame acts earlier and deeper.
@@ -101,7 +101,7 @@ test('with Warmth off, the tape shelf is the HF Limiter at the matching settings
   const x = add(sine(300, 0.3), sine(6000, 0.2), noise(SR, 0.05, 3))
   const ph = run(x, { voiceLevelDb: -20, warmth: 0, tame: 5, tone: 10 })
   const hf = processHFLimiterBuffer([x], SR, toHFLimiterKernelParams({
-    ...HF_LIMITER_DEFAULTS, voiceLevelDb: -20, freq: 12000, threshold: -8, range: 12,
+    ...HF_LIMITER_DEFAULTS, voiceLevelDb: -20, freq: 12000, threshold: -8, range: 18,
     shape: 'warm', release: TAPE_SHELF.releaseMs, tail: 0, transient: 0, output: 0,
   }))
   const a = ph.channelData[0], b = hf.channelData[0]
