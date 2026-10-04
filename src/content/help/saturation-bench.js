@@ -9,7 +9,7 @@ export default {
 
   controls: [
     { label: 'Layer', text: 'Switches the layer in. Layers run top to bottom, each shaping what the one above left' },
-    { label: 'Curve', text: 'The saturation shape. Quartic adds second harmonic for warmth; the odd curves (Tanh, Atan, Algebraic, Cubic) add edge and are the ones that excite' },
+    { label: 'Curve', text: 'The saturation shape. Quartic adds second harmonic for warmth; the odd curves (Tanh, Atan, Algebraic, Cubic) add edge and are the ones that excite. Hysteresis is a tape magnetisation model with memory: run full band, it softens onsets and compresses much like Tanh, and adds a grain that stays on quiet passages. It costs about three times as much to run' },
     { label: 'Drive', text: 'dB above the matched point. At 0 dB every curve makes the same small amount of distortion on this band, so switching curves compares character, not strength' },
     { label: 'Amount', text: 'Level of what the layer adds; the clean signal is never touched. Drive sets how hard the curve bends, Amount how loud its result is. The Quartic stops growing past about +15 dB of drive, so raise its Amount instead' },
     { label: 'Low / High', text: 'The band the layer works on. Fully out at either end leaves that side open. What the curve adds stays inside the band. Low runs down to 1 Hz (open), so the first step off open is a 2 Hz corner and an even curve\'s low weight is trimmed gradually' },
