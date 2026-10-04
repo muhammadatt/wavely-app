@@ -12,7 +12,7 @@
  * SOFTEN is the HF Limiter's Transient detector on its OWN band (SOFT FREQ,
  * independent of Tone): it turns that band down for a few milliseconds when it
  * rises suddenly — clicks, lip smacks, hard consonants, the snap of an onset —
- * deeper than the HF Limiter's (24 dB ceiling, up to 1 dB of cut per dB of
+ * deeper than the HF Limiter's (36 dB ceiling, up to 1 dB of cut per dB of
  * rise). A gain on a band, never distortion, no latency of its own.
  *
  * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing

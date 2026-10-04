@@ -5531,3 +5531,7 @@ Soften 10 / 3 kHz it removes more of the click than the HF Limiter's Transient 1
 the same corner; 1.5 kHz takes more of a broadband burst than 8 kHz; the steady
 voice and a held 6 kHz tone do not move. PHAT*SS latency is back to Warmth + guard
 + shelf. The SOFTEN BENCH fields are gone with the stage they tuned.
+
+Soften's ceiling raised to **36 dB at 10** (`SOFTEN_DB_PER_STEP` 2.4 → 3.6), owner's
+choice. The slope law (0.5 → 1 dB/dB) and the gate are unchanged, so the knob's
+lower travel cuts deeper too (Soften 5 now allows 18 dB).

@@ -345,7 +345,7 @@ test('Soften maps onto the shelf Transient: deeper ceiling, steeper law, own cor
   const k0 = toKernelParams({ soften: 0, voiceLevelDb: -20 })
   assert.equal(k0.transientDb, 0)
   const k = toKernelParams({ soften: 10, softenFreq: 2500, voiceLevelDb: -20 })
-  assert.ok(Math.abs(k.transientDb - 24) < 1e-9)
+  assert.ok(Math.abs(k.transientDb - 36) < 1e-9)
   assert.equal(k.transientSlope, 1)
   assert.equal(k.transientCornerHz, 2500)
   assert.equal(k.transientGateDb, -52)

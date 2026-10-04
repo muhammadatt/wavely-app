@@ -27,7 +27,7 @@ export const PHATSS_DEFAULTS = {
   // 0–10 — SOFTEN: the HF Limiter's Transient detector on its own band
   // (the shelf's onset softener — it reacts to how suddenly the band rises,
   // not how loud it is). Deeper than the HF Limiter's: the ceiling on each
-  // cut is SOFTEN_DB_PER_STEP a step (24 dB at 10) and the dB of cut per dB
+  // cut is SOFTEN_DB_PER_STEP a step (36 dB at 10) and the dB of cut per dB
   // of rise grows from 0.5 to 1. 0 is off. A gain on a band, never
   // distortion, and no latency of its own.
   soften: 0,
@@ -58,8 +58,8 @@ export const WARMTH_MAX = 10
 export const ODD_EVEN_MAX = 100
 export const TAME_MAX = 10
 export const SOFTEN_MAX = 10
-/** Soften's ceiling on one cut, dB per knob step (24 at 10; the HF Limiter's Transient stops at 12). */
-export const SOFTEN_DB_PER_STEP = 2.4
+/** Soften's ceiling on one cut, dB per knob step (36 at 10; the HF Limiter's Transient stops at 12). */
+export const SOFTEN_DB_PER_STEP = 3.6
 /** dB of cut per dB of rise: the HF Limiter's 0.5 at the bottom of the knob, 1 at the top. */
 export const SOFTEN_SLOPE_MIN = 0.5
 export const SOFTEN_SLOPE_MAX = 1
