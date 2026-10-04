@@ -43,6 +43,16 @@ export const FET1176_DEFAULTS = {
    * every test and script saw the whole of it.
    */
   fetDrive: 1,
+  /**
+   * The lamp beside the nameplate: the FET stage's colour on or off, the same
+   * contract as OptoSmooth's `analog`. Off zeroes `fetDrive` at the kernel and
+   * nothing else — the detector, ballistics and gain cell are untouched, so the
+   * gain reduction is identical and only the harmonics go. The oversampled path
+   * keeps running so the latency, and with it the apply trim, never moves.
+   * Kept separate from `fetDrive` so switching back restores the preset's own
+   * amount rather than a default.
+   */
+  analog: true,
   scHpf: 0, // sidechain high-pass corner in Hz, 0 = off (stock)
   mix: 1, // wet/dry blend for parallel compression
 }
@@ -63,6 +73,11 @@ export const FET1176_DEFAULTS = {
  * shipping defaults until the bench panel is touched, so an untouched result is
  * behaviourally identical to what this returned before the panel existed.
  */
+/** The FET amount the kernel runs: the patch's own, or 0 with the lamp off. */
+export function fetDriveFor(params) {
+  return params.analog === false ? 0 : params.fetDrive
+}
+
 export function toKernelParams(params) {
   return {
     ...fet1176TuningState(),
@@ -71,7 +86,7 @@ export function toKernelParams(params) {
     attack: params.attack,
     release: params.release,
     ratio: params.ratio,
-    fetDrive: params.fetDrive,
+    fetDrive: fetDriveFor(params),
     scHpfHz: params.scHpf,
     mix: params.mix,
     inputAlignDb: params.inputAlignDb ?? 0,
