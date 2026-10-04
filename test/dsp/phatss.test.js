@@ -63,7 +63,7 @@ test('the latency is Warmth + guard + Soften + shelf, constant at every setting'
   const L = phatssLatencySamples(SR)
   assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + onsetLatencySamples(SR) + shelfLatencySamples(SR))
   for (const [warmth, tame, soften] of [[0, 0, 0], [0, 10, 0], [6, 0, 0], [10, 10, 10], [0, 0, 10]]) {
-    const x = new Float32Array(4096)
+    const x = new Float32Array(8192)
     x[100] = 0.001 // far below every threshold
     const { channelData: [y], latencySamples } = run(x, { voiceLevelDb: -20, warmth, tame, soften })
     assert.equal(latencySamples, L)
@@ -272,10 +272,18 @@ test('the peak guard is a pure delay when it has nothing to catch, or no ceiling
 
 // ── Soften: the whole-signal onset softener ─────────────────────────────────
 
-/** A 150 Hz tone that switches on abruptly at `at` and holds, over room tone. */
-function syllable(amp, at = Math.round(0.3 * SR), n = SR) {
+/**
+ * A 150 Hz syllable from `at`: an attack that overshoots its body by ~6 dB and
+ * decays into it over ~15 ms, then holds, over room tone. `pre` is the level of
+ * whatever precedes it (0 = silence), held from 0.1 s.
+ */
+function syllable(amp, at = Math.round(0.3 * SR), n = SR, pre = 0) {
   const x = noise(n, 0.0005, 7)
-  for (let i = at; i < n; i++) x[i] += amp * Math.sin((2 * Math.PI * 150 * (i - at)) / SR)
+  for (let i = Math.round(0.1 * SR); i < at; i++) x[i] += pre * Math.sin((2 * Math.PI * 150 * i) / SR)
+  for (let i = at; i < n; i++) {
+    const env = 1 + Math.exp(-(i - at) / (0.015 * SR))
+    x[i] += amp * env * Math.sin((2 * Math.PI * 150 * (i - at)) / SR)
+  }
   return x
 }
 
@@ -307,7 +315,8 @@ test('Soften takes an onset down, more as the knob rises, and lets the steady pa
     const st = levelDb(y, ...steady) - levelDb(x, ...steady)
     assert.ok(Math.abs(st) < 0.01, `amount ${amount}: steady part moved ${st.toFixed(3)} dB`)
   }
-  assert.ok(prev < -3, `full Soften takes the onset down only ${prev.toFixed(2)} dB`)
+  // A 6 dB overshoot decaying over ~15 ms: its first 20 ms lose ~2 dB at full Soften.
+  assert.ok(prev < -1.5, `full Soften takes the onset down only ${prev.toFixed(2)} dB`)
 })
 
 test('Soften is a gain that never raises a sample, and 0 is a pure delay', () => {
@@ -351,18 +360,18 @@ test('Soften maps 0–10 onto the share of each onset removed', () => {
   assert.equal(PHATSS_DEFAULTS.soften, 0)
 })
 
-test('Soften bench: a lower floor, a longer attack and a Scale past 1 each cut an onset deeper', () => {
+test('Soften bench: Floor, Attack and Scale each move the cut the way their labels say', () => {
   const at = Math.round(0.3 * SR)
   const x = syllable(0.2, at)
   const onset = [at, at + Math.round(0.03 * SR)]
   const cut = extra => { const [y] = soften(x, extra.amount ?? 1, -20, [x], extra); return levelDb(y, ...onset) - levelDb(x, ...onset) }
   const base = cut({})
-  assert.ok(cut({ floorDb: 1 }) < base - 0.2, 'a lower floor cuts deeper')
-  assert.ok(cut({ slowAttackMs: 60 }) < base - 0.2, 'a longer attack cuts deeper')
+  assert.ok(cut({ floorDb: 0.5 }) < base - 0.2, 'a lower floor cuts deeper')
+  assert.ok(cut({ slowAttackMs: 5 }) > base + 0.2, 'a shorter attack lets the past catch up, so it cuts less')
   assert.ok(cut({ amount: 2 }) < base - 0.5, 'Scale 2 cuts deeper than flatten')
   // The shipped values are the defaults: passing them changes nothing.
   const [a] = soften(x, 1)
-  const [b] = soften(x, 1, -20, [x], { floorDb: 3, slowAttackMs: 30 })
+  const [b] = soften(x, 1, -20, [x], { floorDb: 1.5, slowAttackMs: 30 })
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) assert.fail(`sample ${i}: explicit defaults differ`)
 })
 
@@ -375,5 +384,42 @@ test('Soften bench fields map onto the kernel, clamped, with Scale multiplying t
   assert.equal(wild.onsetAmount, 3)
   assert.equal(wild.onsetFloorDb, 0)
   assert.equal(wild.onsetSlowAttackMs, 100)
-  assert.deepEqual([PHATSS_DEFAULTS.softenFloor, PHATSS_DEFAULTS.softenAttack, PHATSS_DEFAULTS.softenScale], [3, 30, 1])
+  assert.deepEqual([PHATSS_DEFAULTS.softenFloor, PHATSS_DEFAULTS.softenAttack, PHATSS_DEFAULTS.softenScale], [1.5, 30, 1])
+})
+
+const deepestCutDb = (x, y, a, b) => {
+  let m = 0
+  for (let i = a; i < b; i++) if (Math.abs(x[i]) > 1e-3) m = Math.min(m, 20 * Math.log10(Math.abs(y[i] / x[i])))
+  return m
+}
+
+test('Soften judges an onset against its own syllable: after silence and mid-phrase it cuts alike', () => {
+  // The first build measured rise against the PAST, so a start after silence
+  // read as a huge rise and took the deepest cut. Same syllable, two contexts.
+  const at = Math.round(0.4 * SR)
+  const win = [at - Math.round(0.005 * SR), at + Math.round(0.06 * SR)]
+  const afterSilence = syllable(0.2, at)
+  const midPhrase = syllable(0.2, at, SR, 0.08) // preceded by a syllable 8 dB down
+  const [ys] = soften(afterSilence, 1)
+  const [ym] = soften(midPhrase, 1)
+  const cs = deepestCutDb(afterSilence, ys, ...win)
+  const cm = deepestCutDb(midPhrase, ym, ...win)
+  assert.ok(cs < -1 && cm < -1, `both onsets are softened: ${cs.toFixed(2)} / ${cm.toFixed(2)} dB`)
+  assert.ok(Math.abs(cs - cm) < 1, `after silence ${cs.toFixed(2)} dB vs mid-phrase ${cm.toFixed(2)} dB`)
+})
+
+test('Soften leaves a step with no overshoot alone, and never cuts the end of a syllable', () => {
+  const at = Math.round(0.4 * SR)
+  // A tone that steps on and holds: it rose, but it does not overshoot itself.
+  const step = noise(SR, 0.0005, 7)
+  for (let i = at; i < SR; i++) step[i] += 0.2 * Math.sin((2 * Math.PI * 150 * (i - at)) / SR)
+  const [ys] = soften(step, 1)
+  const c = deepestCutDb(step, ys, at, at + Math.round(0.1 * SR))
+  assert.ok(c > -0.3, `a plain step was cut ${c.toFixed(2)} dB`)
+  // A syllable that ends: its body ahead falls away, but nothing rose.
+  const end = noise(SR, 0.0005, 7)
+  for (let i = 0; i < at; i++) end[i] += 0.2 * Math.sin((2 * Math.PI * 150 * i) / SR)
+  const [ye] = soften(end, 1)
+  const ce = deepestCutDb(end, ye, Math.round(0.2 * SR), at)
+  assert.ok(ce > -0.3, `the end of a syllable was cut ${ce.toFixed(2)} dB`)
 })

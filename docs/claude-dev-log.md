@@ -5469,3 +5469,36 @@ Scale moves onsets without touching steady speech; Floor is the one that starts
 to move the steady parts (−0.14 dB at 1 dB). The fields are a bench, not a
 settled design — once the owner picks values they should be pinned back off the
 panel or kept as named, deliberate controls.
+
+### Soften judged against the syllable's own body (October 2026)
+
+The owner heard that a phrase start after silence was cut harder than other
+syllables, and it is intrinsic to measuring rise against the PAST: after a pause
+the slow follower has decayed to room tone, so the first syllable reads as a
+20–40 dB rise. Southern Sunrise at Soften 10, deepest cut per onset: the onset
+after the clip's quietest gap −7.8 dB against ~−2 for the rest; at floor 1.5 /
+scale 2 / attack 50 it hit the 18 dB cap against ~−5.
+
+Rebuilt so the reading is the SMALLER of two: the rise over the past (unchanged —
+it keeps syllable ENDS untouched, where the level ahead falls away and an
+overshoot-only reading would cut the tail of every word) and the overshoot over
+the syllable's own BODY — the mean of the fast follower 30–80 ms after the sample,
+read through 80 ms of lookahead. A start after silence is then judged like any
+other syllable, and a syllable that steps up with no overshoot is left alone.
+
+Body window and floor, at Soften 10 (onset crest / first 30 ms / steady, dB):
+
+| body | floor 3 | floor 1.5 | floor 0.5 |
+|---|---|---|---|
+| 10–40 ms | −0.00 / −0.04 / −0.00 | −0.07 / −0.31 / −0.03 | −0.23 / −0.68 / −0.16 |
+| 20–60 ms | −0.03 / −0.20 / −0.01 | −0.41 / −0.65 / −0.03 | −0.73 / −1.11 / −0.16 |
+| **30–80 ms** | −0.29 / −0.37 / −0.01 | **−0.71 / −0.87 / −0.04** | −1.09 / −1.38 / −0.17 |
+| 40–100 ms | −0.40 / −0.46 / −0.01 | −0.88 / −1.01 / −0.04 | −1.31 / −1.52 / −0.17 |
+
+10–40 ms overlaps the attack itself, so it reads almost no overshoot. Shipped
+30–80 ms and floor 1.5 (down from 3: an overshoot over the body is smaller than a
+rise over room tone). The after-pause onset now takes −3.9 dB, inside the
+−1.1…−5.2 of the others. Scale 2 / 3: crest −1.32 / −1.73, steady −0.07 / −0.10.
+Cost: 80 ms more constant latency (trimmed on apply; preview runs behind bypass).
+The Attack field keeps its meaning (the past follower) but now only limits the
+cut: shorter catches up sooner and cuts less.

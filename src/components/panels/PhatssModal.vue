@@ -9,9 +9,11 @@
  * on with Warmth: it turns down only what Warmth adds, only where the sum would
  * pass the selection's own peak (dsp/warmthGuard.js).
  *
- * SOFTEN takes every syllable onset down for the ~30 ms the signal takes to
- * settle: a broadband gain (dsp/onsetSoftener.js), so it adds no distortion
- * and can only lower a peak. 5 halves each onset's jump, 10 flattens it.
+ * SOFTEN takes down how far each syllable's attack overshoots the syllable's
+ * own body (read 30–80 ms ahead), so a phrase start after silence is treated
+ * like any other syllable: a broadband gain (dsp/onsetSoftener.js), so it adds
+ * no distortion and can only lower a peak. 5 halves each overshoot, 10
+ * flattens it. Costs 80 ms of latency, trimmed on apply.
  *
  * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing
  * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
@@ -167,7 +169,7 @@ async function applyAndClose() {
                 label="Odd/Even" :accent="ACCENT" :format-value="fmtOddEven" :disabled="!phPreview || phParams.warmth <= 0"
               />
             </div>
-            <div class="w-[80px]" title="Softens the start of every syllable, the way tape rounds off attacks: for the ~30 ms after each onset the whole signal is turned down by part of how far it just jumped — 5 halves the jump, 10 flattens it. It reacts to how suddenly the voice rises, not how loud it is, so steady vowels are untouched. A gain, never distortion, and it can only lower a peak. 0 is off">
+            <div class="w-[80px]" title="Softens the attack of every syllable, the way tape rounds off transients: wherever a syllable starts louder than it then settles, the whole signal is turned down by part of that overshoot — 5 halves it, 10 flattens it. It compares each attack with the rest of its own syllable, so the first word after a pause is treated like any other. Steady vowels, syllable ends and syllables with no overshoot are untouched. A gain, never distortion, and it can only lower a peak. 0 is off">
               <Knob
                 :model-value="phParams.soften" @update:model-value="v => syncParam('soften', v)"
                 :min="0" :max="SOFTEN_MAX" :step="0.1" :value-font-px="13"
@@ -209,7 +211,7 @@ async function applyAndClose() {
           class="pb-[9px]"
           style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)"
         >SOFTEN BENCH</span>
-        <div title="dB of each onset's rise that is never cut. Lower softens every onset more, but steady vowels flicker by about 1–3 dB, so below ~2 the steady parts of syllables start to move too. Shipped at 3">
+        <div title="dB of each attack's overshoot that is never cut. Lower softens every attack more, but below ~1 the steady parts of syllables start to move too. Shipped at 1.5">
           <DeviceField
             :model-value="phParams.softenFloor" @update:model-value="v => syncParam('softenFloor', v)"
             :min="ONSET_FLOOR_MIN_DB" :max="ONSET_FLOOR_MAX_DB" :step="0.1"
@@ -217,7 +219,7 @@ async function applyAndClose() {
             :accent="ACCENT" :disabled="!phPreview" :width="54"
           />
         </div>
-        <div title="How long the detector takes to accept a new level, ms. Longer catches more of each syllable's rise and shaves a longer stretch of it; shorter only catches sharp attacks. Shipped at 30">
+        <div title="How long the detector takes to accept a new level, ms — what counts as the RECENT past. An attack is cut only as far as it both rose over the recent past and overshoots its own syllable, so a shorter Attack catches up sooner and cuts less; longer lets the overshoot reading decide. Shipped at 30">
           <DeviceField
             :model-value="phParams.softenAttack" @update:model-value="v => syncParam('softenAttack', v)"
             :min="ONSET_ATTACK_MIN_MS" :max="ONSET_ATTACK_MAX_MS" :step="1" log
@@ -237,7 +239,7 @@ async function applyAndClose() {
           class="pb-[9px]"
           :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.1em', color: softenBenchChanged ? ACCENT : 'rgba(255,255,255,.25)' }"
           :disabled="!softenBenchChanged || !phPreview"
-          title="Back to the shipped Floor 3, Attack 30, Scale 1"
+          title="Back to the shipped Floor 1.5, Attack 30, Scale 1"
           @click="resetSoftenBench"
         >RESET</button>
       </div>

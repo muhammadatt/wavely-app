@@ -5,15 +5,18 @@
  *   d    = the input, linked across channels, through an 80 Hz–4 kHz detector
  *          band (rumble and sibilance do not trigger it)
  *   f    = peak follower of |d|      attack ~instant, release 40 ms
- *   s    = slow follower OF f        attack 30 ms,    release 40 ms
- *   rise = 20·log10(f / s) dB        ~0 on anything steady; jumps on onsets
- *   cut  = clamp(amount·(rise − 3), 0, 18) dB, gated below the voice level,
+ *   — judged D = 80 ms late, so the stage can see where the syllable goes —
+ *   s    = slow follower OF f        attack 30 ms,    release 40 ms (the PAST)
+ *   body = mean of f over 30–80 ms AFTER the sample (the syllable's own level)
+ *   rise = min( 20·log10(f / s), 20·log10(f / body) ) dB
+ *   cut  = clamp(amount·(rise − 1.5), 0, 18) dB, gated below the voice level,
  *          through a lookahead running min + triangle (the shelf's smoother)
  *   out  = x · g                     broadband, every channel the same gain
  *
- * It reacts to how SUDDENLY the signal rises, not how loud it is, so every
- * syllable onset is shaved for the ~30 ms the slow follower takes to catch up
- * — whether the syllable is loud or soft — and steady vowels pass untouched.
+ * It reacts to how far an onset OVERSHOOTS its own syllable, not how loud it
+ * is or what came before it, so a phrase start after silence and a syllable
+ * mid-phrase are treated alike, and steady vowels and syllable ends pass
+ * untouched.
  * It is a gain, never a waveshaper: it adds no harmonics, and it can only
  * lower the level, so it cannot raise a peak.
  *
@@ -57,11 +60,43 @@
  * 1 flattens it to the settled level. `ONSET_MAX_CUT_DB` is only a safety cap.
  * Reasoned and measured on one narration; not auditioned at the time it was built.
  *
+ * ⚠⚠ BODY: THE ONSET IS JUDGED AGAINST ITS OWN SYLLABLE, NOT AGAINST WHAT
+ * CAME BEFORE. The first build measured rise against the slow follower alone —
+ * the past — and the owner heard the consequence: after a pause the follower
+ * has decayed to room tone, so a phrase start reads as a 20–40 dB rise and
+ * takes the deepest cut, while mid-phrase syllables rising a few dB over the
+ * last one barely move. Measured on Southern Sunrise at Soften 10, the onset
+ * after the clip's quietest gap took −7.8 dB against ~−2 for the rest, and at
+ * floor 1.5 / scale 2 / attack 50 it hit the 18 dB cap against ~−5.
+ *
+ * So the reading is now the SMALLER of two: the rise over the past (which keeps
+ * syllable ENDS untouched — there the level ahead falls away, and overshoot over
+ * the body alone would cut the tail of every word) and the overshoot over the
+ * syllable's own body, read through 80 ms of lookahead (which keeps a start
+ * after silence from reading as enormous). A syllable that simply steps up with
+ * no overshoot is left alone. Where the body sits was measured — at Soften 10,
+ * floor 1.5 (onset crest / first 30 ms / steady speech, dB):
+ *
+ *   body window    onset crest   first 30 ms   steady
+ *   10–40 ms       −0.07         −0.31         −0.03   window overlaps the attack
+ *   20–60 ms       −0.41         −0.65         −0.03
+ *   30–80 ms       −0.71         −0.87         −0.04   ← shipped
+ *   40–100 ms      −0.88         −1.01         −0.04   more latency for little
+ *
+ * and the onset after the pause now takes −3.9 dB, inside the −1.1…−5.2 of the
+ * others. ⚠ THE FLOOR MOVED 3 → 1.5: an overshoot over the body is smaller than
+ * a rise over room tone, and at 3 dB the 30–80 window cut −0.29 of crest. At
+ * floor 0.5 steady speech starts to move (−0.17). Scale 2 / 3 reach −1.32 /
+ * −1.73 of onset crest with steady speech at −0.07 / −0.10.
+ *
+ * ⚠ THE COST IS 80 ms OF LATENCY, constant and trimmed by the apply path; in
+ * preview the processed signal runs that far behind bypass.
+ *
  * GATE: only onsets whose detector peak reaches within `ONSET_GATE_BELOW_DB` of
  * the file's voice level (gated RMS) are softened, fading in over the next
  * 6 dB, so a cough in room tone or the noise floor never pumps.
  *
- * LATENCY is 2L (L = `ONSET_LOOKAHEAD_MS`), constant. At amount 0 the required
+ * LATENCY is the body lookahead D plus 2L (L = `ONSET_LOOKAHEAD_MS`), constant. At amount 0 the required
  * gain is exactly 1 everywhere, the smoother's running sums of exact ones stay
  * exactly one, and the stage is a pure delay — bit for bit.
  */
@@ -73,7 +108,7 @@ import { BiquadCascade, highpass, lowpass } from './biquad.js'
 export const ONSET_FAST_ATTACK_MS = 0.1
 export const ONSET_SLOW_ATTACK_MS = 30
 export const ONSET_RELEASE_MS = 40
-export const ONSET_RISE_FLOOR_DB = 3
+export const ONSET_RISE_FLOOR_DB = 1.5
 /**
  * Bench ranges for the three settings PHAT*SS exposes as device fields, so
  * they can be auditioned: the floor, the slow attack, and how far past
@@ -93,6 +128,13 @@ export const ONSET_DETECT_HI_HZ = 4000
 export const ONSET_GATE_BELOW_DB = 18
 /** Lookahead half-width L: the cut is fully down 2L after it starts. */
 export const ONSET_LOOKAHEAD_MS = 1.5
+/**
+ * The syllable's BODY: the mean of the fast follower over this window after
+ * the sample being judged, read through a lookahead of `ONSET_BODY_TO_MS`. An
+ * onset is cut only by how far it overshoots its own body (see BODY above).
+ */
+export const ONSET_BODY_FROM_MS = 30
+export const ONSET_BODY_TO_MS = 80
 
 const UNITY_SNAP = 1e-7
 
@@ -100,18 +142,34 @@ export function onsetHalfWidth(sampleRate) {
   return Math.max(1, Math.round((ONSET_LOOKAHEAD_MS / 1000) * sampleRate))
 }
 
-/** The stage's latency, samples (constant, at any depth). */
+/** The body lookahead D and window length, samples. */
+function bodyDims(sampleRate, fromMs = ONSET_BODY_FROM_MS, toMs = ONSET_BODY_TO_MS) {
+  const D = Math.max(2, Math.round((toMs / 1000) * sampleRate))
+  const W = Math.max(1, Math.min(D, Math.round(((toMs - fromMs) / 1000) * sampleRate)))
+  return { D, W }
+}
+
+/** The stage's latency, samples (constant, at any depth): the body lookahead plus the smoother's 2L. */
 export function onsetLatencySamples(sampleRate) {
-  return 2 * onsetHalfWidth(sampleRate)
+  return bodyDims(sampleRate).D + 2 * onsetHalfWidth(sampleRate)
 }
 
 export class OnsetSoftener {
-  /** `slowAttackMs` / `releaseMs` exist for the measurement scripts; the app uses the defaults. */
-  constructor(sampleRate, { slowAttackMs = ONSET_SLOW_ATTACK_MS, releaseMs = ONSET_RELEASE_MS } = {}) {
+  /** The options exist for the measurement scripts; the app uses the defaults. */
+  constructor(sampleRate, {
+    slowAttackMs = ONSET_SLOW_ATTACK_MS, releaseMs = ONSET_RELEASE_MS,
+    bodyFromMs = ONSET_BODY_FROM_MS, bodyToMs = ONSET_BODY_TO_MS,
+  } = {}) {
     this.sampleRate = sampleRate
     const L = onsetHalfWidth(sampleRate)
     this.L = L
-    this.latencySamples = 2 * L
+    const { D, W } = bodyDims(sampleRate, bodyFromMs, bodyToMs)
+    this.D = D
+    this.latencySamples = D + 2 * L
+    // f is judged D samples late; the body is the mean of the last W samples of f.
+    this.fDelay = new DelayLine(D)
+    this.body = new Boxcar(W)
+    this.body.fill(0)
     this.min = new RunningMin(2 * L + 1)
     this.box1 = new Boxcar(L + 1)
     this.box2 = new Boxcar(L + 1)
@@ -178,15 +236,25 @@ export class OnsetSoftener {
         if (a > m) m = a
       }
       f = m > f ? m + (f - m) * fa : m + (f - m) * rel
-      s = f > s ? f + (s - f) * sa : f + (s - f) * rel
+      // The sample being judged is D back; the body is f over the D−W..D
+      // samples after it, which is the last W samples of f.
+      const body = this.body.push(f)
+      const fd = this.fDelay.push(f)
+      s = fd > s ? fd + (s - fd) * sa : fd + (s - fd) * rel
       let req = 1
-      if (amount > 0 && f > gate && s > 0) {
-        let cutDb = amount * (20 * Math.log10(f / s) - floorDb)
+      if (amount > 0 && fd > gate && s > 0) {
+        // Smaller of the two readings: how far it rose over what came before
+        // (keeps syllable ENDS and steady speech untouched) and how far it
+        // overshoots its own body (keeps a start after silence from reading
+        // as a huge rise).
+        const rise = 20 * Math.log10(fd / s)
+        const over = body > 0 ? 20 * Math.log10(fd / body) : rise
+        let cutDb = amount * ((rise < over ? rise : over) - floorDb)
         if (cutDb > 0) {
           if (cutDb > ONSET_MAX_CUT_DB) cutDb = ONSET_MAX_CUT_DB
           // Fade in over the 6 dB above the gate, so the gate cannot click.
-          const over = 20 * Math.log10(f / gate)
-          if (over < 6) cutDb *= over / 6
+          const aboveGate = 20 * Math.log10(fd / gate)
+          if (aboveGate < 6) cutDb *= aboveGate / 6
           req = Math.pow(10, -cutDb / 20)
         }
       }
