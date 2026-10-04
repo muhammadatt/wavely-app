@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { processPhatssBuffer } from '../../src/audio/phatssProcessor.js'
 import {
-  toKernelParams, phatssLatencySamples, tapeShelf, TAPE_SHELF, PHATSS_DEFAULTS,
+  toKernelParams, phatssLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATSS_DEFAULTS,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
 } from '../../src/audio/phatssParams.js'
 import { HF_LIMITER_DEFAULTS, toKernelParams as toHFLimiterKernelParams } from '../../src/audio/hfLimiterParams.js'
@@ -61,7 +61,7 @@ const run = (x, p) => processPhatssBuffer([x], SR, toKernelParams(p))
 test('the latency is Warmth + guard + shelf, constant at every setting (Soften adds none)', () => {
   const L = phatssLatencySamples(SR)
   assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + shelfLatencySamples(SR))
-  for (const [warmth, tame, soften] of [[0, 0, 0], [0, 10, 0], [6, 0, 0], [10, 10, 10], [0, 0, 10]]) {
+  for (const [warmth, tame, soften] of [[0, 0, false], [0, 10, false], [6, 0, false], [10, 10, true], [0, 5, true]]) {
     const x = new Float32Array(8192)
     x[100] = 0.001 // far below every threshold
     const { channelData: [y], latencySamples } = run(x, { voiceLevelDb: -20, warmth, tame, soften })
@@ -70,7 +70,7 @@ test('the latency is Warmth + guard + shelf, constant at every setting (Soften a
   }
 })
 
-test('Warmth 0, Soften 0 and Tame 0 pass the audio through untouched', () => {
+test('Warmth 0, Soften off and Tame 0 pass the audio through untouched', () => {
   const x = add(sine(200, 0.5), sine(3000, 0.2), sine(9000, 0.2))
   const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, oddEven: 30 })
   for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
@@ -282,7 +282,7 @@ function clickOverVoice(at = Math.round(0.4 * SR), clickAmp = 0.3) {
   return x
 }
 const rmsDb = (y, a, b) => { let s = 0; for (let i = a; i < b; i++) s += y[i] * y[i]; return 10 * Math.log10(s / (b - a)) }
-const SOFT = { voiceLevelDb: -20, warmth: 0, tame: 0 }
+const SOFT = { voiceLevelDb: -20, warmth: 0 }
 
 /** Energy removed around the click, dB re the click's own energy (0 = all of it). */
 function removedDb(x, y, L, at) {
@@ -292,64 +292,52 @@ function removedDb(x, y, L, at) {
   return 10 * Math.log10(e / c)
 }
 
-test('Soften cuts a sudden HF burst, more as the knob rises, more than the HF Limiter Transient can', () => {
+test('Soften rides Tame: off cuts nothing extra, on cuts a sudden burst deeper as Tame rises', () => {
   const at = Math.round(0.4 * SR)
   const x = clickOverVoice(at)
+  // At each Tame, Soften on removes more of the click than Soften off (the shelf alone).
   let prev = -Infinity
-  for (const soften of [2, 5, 10]) {
-    const { channelData: [y], latencySamples: L } = run(x, { ...SOFT, soften })
-    const r = removedDb(x, y, L, at)
-    assert.ok(r > prev + 0.5, `Soften ${soften}: removed ${r.toFixed(2)} dB re the click (previous ${prev.toFixed(2)})`)
-    prev = r
+  for (const tame of [2, 5, 10]) {
+    const off = run(x, { ...SOFT, tame, soften: false })
+    const on = run(x, { ...SOFT, tame, soften: true })
+    const rOff = removedDb(x, off.channelData[0], off.latencySamples, at)
+    const rOn = removedDb(x, on.channelData[0], on.latencySamples, at)
+    assert.ok(rOn > rOff + 0.5, `Tame ${tame}: Soften on removed ${rOn.toFixed(2)} dB, off ${rOff.toFixed(2)}`)
+    assert.ok(rOn > prev, `Tame ${tame}: ${rOn.toFixed(2)} dB, not more than at the lower Tame (${prev.toFixed(2)})`)
+    prev = rOn
   }
-  // The HF Limiter's Transient at its maximum, same corner and split shape.
-  const h = processHFLimiterBuffer([x], SR, toHFLimiterKernelParams({
-    ...HF_LIMITER_DEFAULTS, voiceLevelDb: -20, range: 0, transient: 12, freq: 3000, shape: 'warm',
-  }))
-  const rh = removedDb(x, h.channelData[0], h.latencySamples, at)
-  assert.ok(prev > rh + 1, `full Soften removed ${prev.toFixed(2)} dB, the HF Limiter's Transient 12 ${rh.toFixed(2)}`)
+  // Tame 0 takes Soften out with the shelf: a pure delay.
+  const zero = run(x, { ...SOFT, tame: 0, soften: true })
+  for (let i = zero.latencySamples; i < x.length; i++) if (zero.channelData[0][i] !== x[i - zero.latencySamples]) assert.fail(`Tame 0: sample ${i} differs`)
 })
 
-test('Soften leaves steady sound and the voice below its band alone', () => {
+test('Soften leaves steady sound alone', () => {
   const at = Math.round(0.4 * SR)
   const x = clickOverVoice(at)
-  const { channelData: [yr], latencySamples: L } = run(x, { ...SOFT, soften: 10 })
-  const y = yr.subarray(L)
-  // Away from the burst the 150 Hz voice passes untouched.
-  const quiet = [Math.round(0.6 * SR), Math.round(0.9 * SR)]
-  assert.ok(Math.abs(rmsDb(y, ...quiet) - rmsDb(x, ...quiet)) < 0.01, 'the steady voice moved')
-  // During the burst the 150 Hz fundamental barely moves: the cut is on the band above Soft Freq.
-  const f0 = toneAmp(y, 150, at - Math.round(0.002 * SR), at + Math.round(0.02 * SR)) / toneAmp(x, 150, at - Math.round(0.002 * SR), at + Math.round(0.02 * SR))
-  assert.ok(db(f0) > -0.5, `the 150 Hz voice under the click moved ${db(f0).toFixed(2)} dB`)
-  // A steady HF tone (an S held) is not a transient.
-  const s = add(sine(6000, 0.1), noise(SR, 0.0005, 3))
-  const { channelData: [ys], latencySamples: Ls } = run(s, { ...SOFT, soften: 10 })
-  const g = db(toneAmp(ys, 6000, Ls + SR / 2, SR) / 0.1)
-  assert.ok(Math.abs(g) < 0.1, `a steady 6 kHz tone moved ${g.toFixed(2)} dB`)
+  const on = run(x, { ...SOFT, tame: 10, soften: true }).channelData[0]
+  const off = run(x, { ...SOFT, tame: 10, soften: false }).channelData[0]
+  // Away from the burst, Soften on and off render the same.
+  let worst = 0
+  for (let i = Math.round(0.6 * SR); i < Math.round(0.9 * SR); i++) worst = Math.max(worst, Math.abs(on[i] - off[i]))
+  assert.ok(worst < 1e-4, `steady voice moved by ${worst}`)
+  // A held 6 kHz tone is not a transient.
+  const tone = add(sine(6000, 0.1), noise(SR, 0.0005, 3))
+  const a = run(tone, { ...SOFT, tame: 10, soften: true }).channelData[0]
+  const b = run(tone, { ...SOFT, tame: 10, soften: false }).channelData[0]
+  const g = db(toneAmp(a, 6000, SR / 2, SR) / toneAmp(b, 6000, SR / 2, SR))
+  assert.ok(Math.abs(g) < 0.1, `Soften moved a steady 6 kHz tone ${g.toFixed(2)} dB`)
 })
 
-test('Soften has its own corner: moving Soft Freq moves where it cuts, Tone does not', () => {
-  const at = Math.round(0.4 * SR)
-  const x = clickOverVoice(at)
-  const removed = p => { const { channelData: [y], latencySamples: L } = run(x, { ...SOFT, soften: 10, ...p }); return removedDb(x, y, L, at) }
-  // Lower Soft Freq reaches further down the burst's spectrum, so takes more of it.
-  const lo = removed({ softenFreq: 1500 }), hi = removed({ softenFreq: 8000 })
-  assert.ok(lo > hi + 1, `Soft Freq 1.5 kHz removed ${lo.toFixed(2)} dB, 8 kHz ${hi.toFixed(2)}`)
-  // Tone only moves the tape shelf, which is out at Tame 0.
-  const a = run(x, { ...SOFT, soften: 10, tone: 0 }).channelData[0]
-  const b = run(x, { ...SOFT, soften: 10, tone: 10 }).channelData[0]
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) assert.fail(`sample ${i}: Tone changed Soften`)
-})
-
-test('Soften maps onto the shelf Transient: deeper ceiling, steeper law, own corner, gate on the voice', () => {
-  const k0 = toKernelParams({ soften: 0, voiceLevelDb: -20 })
-  assert.equal(k0.transientDb, 0)
-  const k = toKernelParams({ soften: 10, softenFreq: 2500, voiceLevelDb: -20 })
+test('the Soften law: a toggle, depth and slope from Tame, corner pinned at 500 Hz', () => {
+  assert.deepEqual(softenLaw(false, 10), { depthDb: 0, slope: 1 })
+  assert.equal(softenLaw(true, 0).depthDb, 0)
+  assert.ok(Math.abs(softenLaw(true, 5).depthDb - 18) < 1e-9)
+  assert.ok(Math.abs(softenLaw(true, 10).depthDb - 36) < 1e-9)
+  assert.ok(Math.abs(softenLaw(true, 5).slope - 0.75) < 1e-12)
+  const k = toKernelParams({ soften: true, tame: 10, voiceLevelDb: -20 })
   assert.ok(Math.abs(k.transientDb - 36) < 1e-9)
-  assert.equal(k.transientSlope, 1)
-  assert.equal(k.transientCornerHz, 2500)
+  assert.equal(k.transientCornerHz, 500)
   assert.equal(k.transientGateDb, -52)
-  assert.ok(Math.abs(toKernelParams({ soften: 5 }).transientSlope - 0.75) < 1e-12)
-  assert.equal(toKernelParams({ softenFreq: 50 }).transientCornerHz, 500)
-  assert.equal(PHATSS_DEFAULTS.soften, 0)
+  assert.equal(toKernelParams({ soften: false, tame: 10 }).transientDb, 0)
+  assert.equal(PHATSS_DEFAULTS.soften, false)
 })

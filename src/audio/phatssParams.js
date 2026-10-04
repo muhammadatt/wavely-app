@@ -24,16 +24,12 @@ export const PHATSS_DEFAULTS = {
   // 0–100 — from pure Odd toward Even, over the useful part of the crossfade
   // only (ODD_EVEN_SPAN). The bench voicing is 36 (at Warmth 5).
   oddEven: 50,
-  // 0–10 — SOFTEN: the HF Limiter's Transient detector on its own band
-  // (the shelf's onset softener — it reacts to how suddenly the band rises,
-  // not how loud it is). Deeper than the HF Limiter's: the ceiling on each
-  // cut is SOFTEN_DB_PER_STEP a step (36 dB at 10) and the dB of cut per dB
-  // of rise grows from 0.5 to 1. 0 is off. A gain on a band, never
-  // distortion, and no latency of its own.
-  soften: 0,
-  // Hz — SOFTEN's own corner, independent of Tone: the transient cut is a
-  // gentle one-pole tilt above here, so it reaches an octave or two below.
-  softenFreq: 3000,
+  // SOFTEN (on/off): the HF Limiter's Transient detector on its own band
+  // above SOFTEN_FREQ_HZ — it turns that band down for a few ms when it rises
+  // suddenly, not when it is loud. It has no knob of its own: its depth rides
+  // TAME, so the top-end shelf and the onset softening turn down together
+  // (`softenLaw`). A gain on a band, never distortion, no latency of its own.
+  soften: false,
   // 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
   // together (`tapeShelf`). 0 takes the shelf out. 5 is the HF Limiter's
   // default (−8 dB, Range 12).
@@ -57,14 +53,13 @@ export const PHATSS_DEFAULTS = {
 export const WARMTH_MAX = 10
 export const ODD_EVEN_MAX = 100
 export const TAME_MAX = 10
-export const SOFTEN_MAX = 10
-/** Soften's ceiling on one cut, dB per knob step (36 at 10; the HF Limiter's Transient stops at 12). */
+/** Soften's ceiling on one cut, dB per TAME step (36 at Tame 10; the HF Limiter's Transient stops at 12). */
 export const SOFTEN_DB_PER_STEP = 3.6
-/** dB of cut per dB of rise: the HF Limiter's 0.5 at the bottom of the knob, 1 at the top. */
+/** dB of cut per dB of rise: the HF Limiter's 0.5 at Tame 0, 1 at Tame 10. */
 export const SOFTEN_SLOPE_MIN = 0.5
 export const SOFTEN_SLOPE_MAX = 1
-export const SOFTEN_FREQ_MIN_HZ = 500
-export const SOFTEN_FREQ_MAX_HZ = 12000
+/** Soften's corner, pinned: a one-pole split, so it reaches the voice's snap and body as well as the top. */
+export const SOFTEN_FREQ_HZ = 500
 /** Onsets in Soften's band this far under the voice level are left alone (the HF Limiter's default works out to 32). */
 export const SOFTEN_GATE_BELOW_DB = 32
 export const TONE_MAX = 10
@@ -205,6 +200,21 @@ export function tapeShelf(tame, tone) {
   }
 }
 
+/**
+ * Soften's depth, from the toggle and Tame: off (or Tame 0) is no cut at all;
+ * on, the ceiling is SOFTEN_DB_PER_STEP per Tame step and the slope runs
+ * SOFTEN_SLOPE_MIN → MAX across Tame's travel.
+ *
+ * @returns {{ depthDb: number, slope: number }}
+ */
+export function softenLaw(on, tame) {
+  const t = clamp(Number(tame) || 0, 0, TAME_MAX)
+  return {
+    depthDb: on ? SOFTEN_DB_PER_STEP * t : 0,
+    slope: SOFTEN_SLOPE_MIN + (SOFTEN_SLOPE_MAX - SOFTEN_SLOPE_MIN) * (t / TAME_MAX),
+  }
+}
+
 /** Map UI params to kernel params. */
 export function toKernelParams(params) {
   const p = { ...PHATSS_DEFAULTS, ...params }
@@ -212,7 +222,7 @@ export function toKernelParams(params) {
     ? clamp(p.voiceLevelDb, VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
     : ALIGN_TARGET_DBFS
   const shelf = tapeShelf(p.tame, p.tone)
-  const soften = clamp(Number(p.soften) || 0, 0, SOFTEN_MAX)
+  const soft = softenLaw(p.soften, p.tame)
   return {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     // Pinned on with Warmth: there is no switch.
@@ -221,10 +231,10 @@ export function toKernelParams(params) {
     thresholdDb: voice + shelf.thresholdRelDb,
     rangeDb: shelf.rangeDb,
     ...TAPE_SHELF,
-    // Soften rides the shelf's Transient, on its own band.
-    transientDb: SOFTEN_DB_PER_STEP * soften,
-    transientCornerHz: clamp(Number(p.softenFreq) || 3000, SOFTEN_FREQ_MIN_HZ, SOFTEN_FREQ_MAX_HZ),
-    transientSlope: SOFTEN_SLOPE_MIN + (SOFTEN_SLOPE_MAX - SOFTEN_SLOPE_MIN) * (soften / SOFTEN_MAX),
+    // Soften rides the shelf's Transient, on its own band, at Tame's depth.
+    transientDb: soft.depthDb,
+    transientCornerHz: SOFTEN_FREQ_HZ,
+    transientSlope: soft.slope,
     transientGateDb: voice - SOFTEN_GATE_BELOW_DB,
     voiceLevelDb: voice,
     outputGainDb: clamp(Number(p.output) || 0, OUTPUT_MIN_DB, OUTPUT_MAX_DB),

@@ -9,11 +9,11 @@
  * on with Warmth: it turns down only what Warmth adds, only where the sum would
  * pass the selection's own peak (dsp/warmthGuard.js).
  *
- * SOFTEN is the HF Limiter's Transient detector on its OWN band (SOFT FREQ,
- * independent of Tone): it turns that band down for a few milliseconds when it
- * rises suddenly — clicks, lip smacks, hard consonants, the snap of an onset —
- * deeper than the HF Limiter's (36 dB ceiling, up to 1 dB of cut per dB of
- * rise). A gain on a band, never distortion, no latency of its own.
+ * SOFTEN (a lit toggle) is the HF Limiter's Transient detector on its own band
+ * above 500 Hz: it turns that band down for a few milliseconds when it rises
+ * suddenly — clicks, lip smacks, hard consonants, the snap of an onset. It has
+ * no knob: its depth rides TAME, so the top end and the attacks turn down
+ * together. A gain on a band, never distortion, no latency of its own.
  *
  * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing
  * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
@@ -27,10 +27,11 @@ import { computed, onMounted, watch } from 'vue'
 import { usePhatss } from '../../composables/usePhatss.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  WARMTH_MAX, ODD_EVEN_MAX, SOFTEN_MAX, TAME_MAX, TONE_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
-  SOFTEN_FREQ_MIN_HZ, SOFTEN_FREQ_MAX_HZ, warmthActive, tapeShelf,
+  WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, TONE_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
+  warmthActive, tapeShelf, softenLaw,
 } from '../../audio/phatssParams.js'
 import Knob from '../knobs/Knob.vue'
+import DeviceLampPill from '../knobs/DeviceLampPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
@@ -94,13 +95,17 @@ const readoutPeak = computed(() => {
 const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtOddEven = v => (v <= 0 ? 'ODD' : `${Math.round(v)}`)
 const fmtTame = v => (v <= 0 ? 'OFF' : v.toFixed(1))
-const fmtSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtTone = v => {
   const hz = tapeShelf(1, v).cornerHz
   return `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)}k`
 }
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
-const fmtSoftFreq = v => (v < 1000 ? `${Math.round(v)}` : `${(v / 1000).toFixed(v >= 10000 ? 1 : 2)}k`)
+// Soften has no knob of its own: say how deep Tame currently lets it go.
+const softenCaption = computed(() => {
+  if (!phParams.soften) return 'OFF'
+  const d = softenLaw(true, phParams.tame).depthDb
+  return d > 0 ? `UP TO −${Math.round(d)} dB` : 'TAME IS 0'
+})
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -157,23 +162,19 @@ async function applyAndClose() {
                 label="Odd/Even" :accent="ACCENT" :format-value="fmtOddEven" :disabled="!phPreview || phParams.warmth <= 0"
               />
             </div>
-            <div class="w-[80px]" title="Softens sudden attacks the way tape rounds off transients: when the band above Soft Freq rises suddenly — a click, a lip smack, a hard T or K, the snap of an onset — it is turned down for a few milliseconds. It reacts to how suddenly the band rises, not how loud it is, so steady sound and an S are left alone. Deeper than the HF Limiter's Transient. A gain on a band, never distortion. 0 is off">
-              <Knob
-                :model-value="phParams.soften" @update:model-value="v => syncParam('soften', v)"
-                :min="0" :max="SOFTEN_MAX" :step="0.1" :value-font-px="13"
-                label="Soften" :accent="ACCENT" :format-value="fmtSoften" :disabled="!phPreview"
+            <div class="w-[80px] flex flex-col items-center justify-center gap-[6px] pb-[14px]">
+              <DeviceLampPill
+                :model-value="!!phParams.soften" @update:model-value="v => syncParam('soften', v)"
+                label="SOFTEN" :accent="ACCENT" :disabled="!phPreview"
+                title="Softens sudden attacks the way tape rounds off transients: when the band above 500 Hz rises suddenly — a click, a lip smack, a hard T or K, the snap of an onset — it is turned down for a few milliseconds. It reacts to how suddenly the voice rises, not how loud it is, so steady sound is left alone. How deep it goes follows TAME, so the top end and the attacks turn down together. A gain on a band, never distortion"
               />
-            </div>
-            <div class="w-[80px]" title="Where Soften listens and cuts, independent of Tone. It is a gentle 6 dB/oct tilt, so it reaches an octave or two below; lower takes in more of the voice's snap, higher only the very top">
-              <Knob
-                :model-value="phParams.softenFreq" @update:model-value="v => syncParam('softenFreq', v)"
-                :min="SOFTEN_FREQ_MIN_HZ" :max="SOFTEN_FREQ_MAX_HZ" :step="10" scale="log" :value-font-px="13"
-                label="Soft Freq" :accent="ACCENT" :format-value="fmtSoftFreq" :disabled="!phPreview || phParams.soften <= 0"
-              />
+              <span
+                :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.08em', color: phParams.soften ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.3)' }"
+              >{{ softenCaption }}</span>
             </div>
           </div>
           <div class="flex justify-center gap-[12px]">
-            <div class="w-[80px]" title="How hard the tape rounds off the top end: lowers the threshold and deepens the most it may cut together, relative to the file's voice level. 0 is off">
+            <div class="w-[80px]" title="How hard the tape rounds off the top end: lowers the threshold and deepens the most it may cut together, relative to the file's voice level. With SOFTEN on it also sets how deep sudden attacks are taken down (up to 36 dB at 10). 0 is off">
               <Knob
                 :model-value="phParams.tame" @update:model-value="v => syncParam('tame', v)"
                 :min="0" :max="TAME_MAX" :step="0.1" :value-font-px="13"

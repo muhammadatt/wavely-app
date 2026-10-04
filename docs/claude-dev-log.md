@@ -5541,3 +5541,13 @@ request; the readout prints Hz below 1 kHz. At Soften 10 on Southern Sunrise, st
 speech moves −0.01 dB at 500 / 1000 / 3000 Hz alike (whole file −0.05 / −0.04 /
 −0.02 dB): the rise detector still ignores sustained sound with the corner down in
 the voice's body.
+
+### Soften folded into Tame (October 2026)
+
+The owner found Soften hard to use live: its effect depended on four knobs — its
+own Soften and Soft Freq plus the shelf's Tame and Tone. Now Soften is an ON/OFF
+toggle (a lamp pill with a caption naming the current depth, default OFF), its
+corner PINNED at 500 Hz, and its depth riding TAME (`softenLaw`): 3.6 dB of ceiling
+per Tame step (36 at 10) and a slope of 0.5 → 1 dB of cut per dB of rise across
+Tame's travel, so the top end and the attacks turn down together and Tame 0 takes
+both out (a pure delay, tested). The Soften and Soft Freq knobs are gone.
