@@ -67,7 +67,7 @@ import manualEq from './manual-eq.js'
 import noiseReduction from './noise-reduction.js'
 import normalize from './normalize.js'
 import optoSmooth from './opto-smooth.js'
-import phatss from './phatss.js'
+import phatass from './phatass.js'
 import removeSilence from './remove-silence.js'
 import resonanceSuppressor from './resonance-suppressor.js'
 import saturationBench from './saturation-bench.js'
@@ -91,7 +91,7 @@ export const HELP = {
   'noise-reduction': noiseReduction,
   normalize,
   'opto-smooth': optoSmooth,
-  phatss,
+  phatass,
   'remove-silence': removeSilence,
   'resonance-suppressor': resonanceSuppressor,
   'saturation-bench': saturationBench,

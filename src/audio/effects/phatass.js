@@ -1,7 +1,7 @@
 /**
  * PHAT*SS — real-time effect chain wrapper.
  *
- * The DSP lives in ../phatssProcessor.js (Warmth → its peak guard → Soften →
+ * The DSP lives in ../phatassProcessor.js (Warmth → its peak guard → Soften →
  * a tape HF shelf) and runs in an AudioWorklet. The offline apply path renders through
  * the same worklet in an OfflineAudioContext, so preview and apply share one
  * code path.
@@ -10,29 +10,29 @@
  * audio through unprocessed, then splices the worklet node in.
  */
 
-import { ensurePhatssWorklet } from '../phatssWorkletLoader.js'
+import { ensurePhatassWorklet } from '../phatassWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
-import { PHATSS_DEFAULTS, toKernelParams } from '../phatssParams.js'
+import { PHATASS_DEFAULTS, toKernelParams } from '../phatassParams.js'
 
-export { PHATSS_DEFAULTS, toKernelParams } from '../phatssParams.js'
+export { PHATASS_DEFAULTS, toKernelParams } from '../phatassParams.js'
 
-export function createPhatss(audioContext) {
+export function createPhatass(audioContext) {
   const input = audioContext.createGain()
   // preOutput is a stable internal hand-off — see the note in airBand.js.
   const preOutput = audioContext.createGain()
   const output = audioContext.createGain()
 
-  let params = { ...PHATSS_DEFAULTS }
+  let params = { ...PHATASS_DEFAULTS }
   let worklet = null
   let destroyed = false
 
   input.connect(preOutput)
   preOutput.connect(output)
 
-  ensurePhatssWorklet(audioContext)
+  ensurePhatassWorklet(audioContext)
     .then(() => {
       if (destroyed) return
-      worklet = new AudioWorkletNode(audioContext, 'phatss-processor', {
+      worklet = new AudioWorkletNode(audioContext, 'phatass-processor', {
         processorOptions: { params: toKernelParams(params) },
       })
       input.disconnect(preOutput)
@@ -87,10 +87,10 @@ export function createPhatss(audioContext) {
   }
 }
 
-export const phatssEffect = {
-  id: 'phatss',
+export const phatassEffect = {
+  id: 'phatass',
   name: 'PHAT*SS',
   createNodes(audioContext) {
-    return createPhatss(audioContext)
+    return createPhatass(audioContext)
   },
 }

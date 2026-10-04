@@ -15,7 +15,7 @@
  * window; the peak is a property of the WHOLE region — a capped window can
  * only read it low, and a late loud passage is exactly where a low-end boost
  * clips. So the caller asks for the peak over the whole region separately
- * (see `measurePhatssWarmthPeak`).
+ * (see `measurePhatassWarmthPeak`).
  *
  * Node-importable: no worklet registration, no Vite specifiers.
  */

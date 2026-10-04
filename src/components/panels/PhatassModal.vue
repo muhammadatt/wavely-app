@@ -18,18 +18,18 @@
  * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing
  * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
  * match). TAME is a macro for Threshold and Range together, TONE for where the
- * tilt starts (the corner, 2–12 kHz). See phatssParams.js for the mapping.
+ * tilt starts (the corner, 2–12 kHz). See phatassParams.js for the mapping.
  *
  * In/out meters only. The readout under the Warmth knobs is what the warmth
  * stage did to this selection's low bands and peak.
  */
 import { computed, onMounted, watch } from 'vue'
-import { usePhatss } from '../../composables/usePhatss.js'
+import { usePhatass } from '../../composables/usePhatass.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, TONE_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
   warmthActive, tapeShelf, softenLaw,
-} from '../../audio/phatssParams.js'
+} from '../../audio/phatassParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceLampPill from '../knobs/DeviceLampPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
@@ -40,7 +40,7 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   phParams, phPreview, phInputLevels, phOutputLevels, phWarmthReadout,
   togglePreview, syncParam, scheduleWarmthReadout, apply, teardown, closeModal,
-} = usePhatss()
+} = usePhatass()
 
 const { state } = useEditorState()
 
@@ -124,7 +124,7 @@ async function applyAndClose() {
 
 <template>
   <FloatingWindow
-    window-id="phatss"
+    window-id="phatass"
     :z="z"
     :width="560"
     :accent="ACCENT"

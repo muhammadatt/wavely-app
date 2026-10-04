@@ -1,11 +1,11 @@
 /**
- * PHAT*SS — the Warmth readout (src/audio/phatssWarmthReadout.js).
+ * PHAT*SS — the Warmth readout (src/audio/phatassWarmthReadout.js).
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { measureWarmthReadout, renderWarmthAligned, WARMTH_READOUT_BANDS } from '../../src/audio/phatssWarmthReadout.js'
-import { processPhatssBuffer } from '../../src/audio/phatssProcessor.js'
-import { toKernelParams, warmthLayers } from '../../src/audio/phatssParams.js'
+import { measureWarmthReadout, renderWarmthAligned, WARMTH_READOUT_BANDS } from '../../src/audio/phatassWarmthReadout.js'
+import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
+import { toKernelParams, warmthLayers } from '../../src/audio/phatassParams.js'
 
 const SR = 44100
 const REFS = [-12, -13]
@@ -55,10 +55,10 @@ test('the readout moves the low end and reports the stage peak the plugin delive
   const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
   assert.ok(r.bandsDb.some(d => Math.abs(d) > 1), `bands ${r.bandsDb}`)
   // With the shelf out the plugin IS the stage, so their peaks agree...
-  const full = processPhatssBuffer([x], SR, toKernelParams(p))
+  const full = processPhatassBuffer([x], SR, toKernelParams(p))
   assert.ok(Math.abs(peakDb(full.channelData) - r.peakDb) < 1e-3, `plugin ${peakDb(full.channelData)} vs readout ${r.peakDb}`)
   // ...and with the shelf in, the readout is an upper bound.
-  const shelf = processPhatssBuffer([x], SR, toKernelParams({ ...p, tame: 10 }))
+  const shelf = processPhatassBuffer([x], SR, toKernelParams({ ...p, tame: 10 }))
   assert.ok(peakDb(shelf.channelData) <= r.peakDb + 1e-3, `shelf ${peakDb(shelf.channelData)} over ${r.peakDb}`)
 })
 
@@ -81,7 +81,7 @@ test('the readout renders the guard: with it on, the peak change is never above 
   assert.ok(open.peakDb > src + 0.5, `the fixture must overshoot: ${(open.peakDb - src).toFixed(2)} dB`)
   assert.ok(held.peakDb <= src + 1e-5, `guarded readout peak ${(held.peakDb - src).toFixed(4)} dB over the source`)
   // ...and it is what the plugin delivers (shelf out).
-  const full = processPhatssBuffer([x], SR, k)
+  const full = processPhatassBuffer([x], SR, k)
   const y = full.channelData[0].subarray(full.latencySamples)
   assert.ok(Math.abs(peakDb([y]) - held.peakDb) < 1e-3, `plugin ${peakDb([y])} vs readout ${held.peakDb}`)
 })

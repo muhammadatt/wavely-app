@@ -4,34 +4,34 @@
  * Warmth → Guard → Tape shelf (with Soften on its own band) → Output.
  *
  * WARMTH is two Saturation Bench layers (dsp/saturationLayers.js, voiced in
- * phatssParams.WARMTH_LAYERS), 4x oversampled, a pure delay at 0. Its PEAK
+ * phatassParams.WARMTH_LAYERS), 4x oversampled, a pure delay at 0. Its PEAK
  * GUARD (dsp/warmthGuard.js) is pinned on: what Warmth adds is turned down
  * wherever the sum would pass the selection's own peak, so Warmth adds density
  * but never peak level. The TAPE SHELF is the HF Limiter's lookahead dynamic
- * shelf (dsp/hfLimit.js) with its shape and timing pinned (phatssParams
+ * shelf (dsp/hfLimit.js) with its shape and timing pinned (phatassParams
  * .TAPE_SHELF) and its corner / threshold / range set by the Tame and Tone
  * macros.
  *
- * Constant latency (see `phatssLatencySamples`), bit-transparent with Warmth,
+ * Constant latency (see `phatassLatencySamples`), bit-transparent with Warmth,
  * Soften and Tame at 0. SOFTEN is the shelf's Transient detector with its own
  * band (`transientCornerHz`), deeper than the HF Limiter's, at no extra latency.
  *
  * This file is BOTH a normal ES module and an AudioWorklet module (registers
- * 'phatss-processor'); it imports from ./dsp/, so its loader goes through
+ * 'phatass-processor'); it imports from ./dsp/, so its loader goes through
  * `?worker&url` like the others.
  */
 
 import { ShelfLimiterStage } from './dsp/hfLimit.js'
 import { SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { WarmthPeakGuard } from './dsp/warmthGuard.js'
-import { toKernelParams, PHATSS_DEFAULTS, WARMTH_LAYERS } from './phatssParams.js'
+import { toKernelParams, PHATASS_DEFAULTS, WARMTH_LAYERS } from './phatassParams.js'
 
-export const PHATSS_KERNEL_DEFAULTS = toKernelParams(PHATSS_DEFAULTS)
+export const PHATASS_KERNEL_DEFAULTS = toKernelParams(PHATASS_DEFAULTS)
 
 const LN10_OVER_20 = Math.LN10 / 20
 const dbToLin = db => Math.exp(db * LN10_OVER_20)
 
-export class PhatssKernel {
+export class PhatassKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
     this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length })
@@ -40,7 +40,7 @@ export class PhatssKernel {
     this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)
     this.shelf = new ShelfLimiterStage(sampleRate)
     this.latencySamples = this.warmth.latencySamples + this.guard.latencySamples + this.shelf.latencySamples
-    this.params = { ...PHATSS_KERNEL_DEFAULTS }
+    this.params = { ...PHATASS_KERNEL_DEFAULTS }
     this.setParams({}, true)
   }
 
@@ -110,8 +110,8 @@ export class PhatssKernel {
  * running the worklet so preview and apply share one code path. The output is
  * delayed by the kernel's latency, like the worklet's.
  */
-export function processPhatssBuffer(channelData, sampleRate, kernelParams = {}) {
-  const kernel = new PhatssKernel(sampleRate)
+export function processPhatassBuffer(channelData, sampleRate, kernelParams = {}) {
+  const kernel = new PhatassKernel(sampleRate)
   kernel.setParams(kernelParams, true)
   const n = channelData[0].length
   const output = channelData.map(() => new Float32Array(n))
@@ -130,10 +130,10 @@ export function processPhatssBuffer(channelData, sampleRate, kernelParams = {}) 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────
 
 if (typeof registerProcessor === 'function') {
-  class PhatssWorkletProcessor extends AudioWorkletProcessor {
+  class PhatassWorkletProcessor extends AudioWorkletProcessor {
     constructor(options) {
       super()
-      this.kernel = new PhatssKernel(sampleRate)
+      this.kernel = new PhatassKernel(sampleRate)
       if (options?.processorOptions?.params) {
         this.kernel.setParams(options.processorOptions.params, true)
       }
@@ -156,5 +156,5 @@ if (typeof registerProcessor === 'function') {
     }
   }
 
-  registerProcessor('phatss-processor', PhatssWorkletProcessor)
+  registerProcessor('phatass-processor', PhatassWorkletProcessor)
 }

@@ -69,7 +69,7 @@ export function toKernelParams(params) {
 /**
  * Plugin latency, samples: the shelf's split centre and lookahead. CONSTANT,
  * so no setting moves the audio. (The Warmth stage that once sat ahead of the
- * shelf moved to PHAT*SS, phatssParams.js.)
+ * shelf moved to PHAT*SS, phatassParams.js.)
  */
 export function hfLimiterLatencySamples(sampleRate) {
   return shelfLatencySamples(sampleRate)

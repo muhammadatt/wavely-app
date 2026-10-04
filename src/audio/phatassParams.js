@@ -17,7 +17,7 @@ import { shelfLatencySamples } from './dsp/hfLimit.js'
 import { SAT_BENCH_LAYER_LATENCY, SAT_AMOUNT_FLOOR_DB } from './dsp/saturationLayers.js'
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
 
-export const PHATSS_DEFAULTS = {
+export const PHATASS_DEFAULTS = {
   // 0–10 — low-end harmonic warmth: how much of what the two fixed
   // WARMTH_LAYERS add is mixed in. 0 is off (a pure delay).
   warmth: 5,
@@ -218,7 +218,7 @@ export function softenLaw(on, tame) {
 
 /** Map UI params to kernel params. */
 export function toKernelParams(params) {
-  const p = { ...PHATSS_DEFAULTS, ...params }
+  const p = { ...PHATASS_DEFAULTS, ...params }
   const voice = Number.isFinite(p.voiceLevelDb)
     ? clamp(p.voiceLevelDb, VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
     : ALIGN_TARGET_DBFS
@@ -251,9 +251,9 @@ export const WARMTH_LATENCY_SAMPLES = WARMTH_LAYERS.length * SAT_BENCH_LAYER_LAT
  * CONSTANT: every stage stays a delay of its own length when idle, so no
  * setting moves the audio.
  */
-export function phatssLatencySamples(sampleRate) {
+export function phatassLatencySamples(sampleRate) {
   return WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate) + shelfLatencySamples(sampleRate)
 }
 
 /** Pre-roll for apply, seconds: several of the shelf's release. */
-export const PHATSS_PREROLL_S = 1.0
+export const PHATASS_PREROLL_S = 1.0

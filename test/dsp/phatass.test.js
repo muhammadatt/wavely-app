@@ -7,11 +7,11 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { processPhatssBuffer } from '../../src/audio/phatssProcessor.js'
+import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
-  toKernelParams, phatssLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATSS_DEFAULTS,
+  toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATASS_DEFAULTS,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
-} from '../../src/audio/phatssParams.js'
+} from '../../src/audio/phatassParams.js'
 import { HF_LIMITER_DEFAULTS, toKernelParams as toHFLimiterKernelParams } from '../../src/audio/hfLimiterParams.js'
 import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import { processSaturationBenchBuffer } from '../../src/audio/dsp/saturationLayers.js'
@@ -54,12 +54,12 @@ function toneAmp(y, f, from, to) {
 }
 
 const db = x => 20 * Math.log10(x)
-const run = (x, p) => processPhatssBuffer([x], SR, toKernelParams(p))
+const run = (x, p) => processPhatassBuffer([x], SR, toKernelParams(p))
 
 // ── The chain ────────────────────────────────────────────────────────────────
 
 test('the latency is Warmth + guard + shelf, constant at every setting (Soften adds none)', () => {
-  const L = phatssLatencySamples(SR)
+  const L = phatassLatencySamples(SR)
   assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + shelfLatencySamples(SR))
   for (const [warmth, tame, soften] of [[0, 0, false], [0, 10, false], [6, 0, false], [10, 10, true], [0, 5, true]]) {
     const x = new Float32Array(8192)
@@ -92,7 +92,7 @@ test('the Tame/Tone macro: Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz', () =>
     assert.ok(tapeShelf(t, 10).rangeDb > tapeShelf(t - 1, 10).rangeDb)
   }
   // Shape and timing are pinned, whatever the panel sends.
-  const k = toKernelParams({ ...PHATSS_DEFAULTS, voiceLevelDb: -20 })
+  const k = toKernelParams({ ...PHATASS_DEFAULTS, voiceLevelDb: -20 })
   for (const key of Object.keys(TAPE_SHELF)) assert.equal(k[key], TAPE_SHELF[key], key)
   assert.equal(k.thresholdDb, -28)
 })
@@ -339,5 +339,5 @@ test('the Soften law: a toggle, depth and slope from Tame, corner pinned at 500 
   assert.equal(k.transientCornerHz, 500)
   assert.equal(k.transientGateDb, -52)
   assert.equal(toKernelParams({ soften: false, tame: 10 }).transientDb, 0)
-  assert.equal(PHATSS_DEFAULTS.soften, false)
+  assert.equal(PHATASS_DEFAULTS.soften, false)
 })

@@ -2,37 +2,37 @@ import { reactive, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import {
-  applyPhatssRegion, computePeakCache, measurePhatssWarmthBands, measurePhatssWarmthPeak,
+  applyPhatassRegion, computePeakCache, measurePhatassWarmthBands, measurePhatassWarmthPeak,
 } from '../audio/processing.js'
 import { regionAlignDb, regionPeakDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { getEffectChain } from '../audio/effectChain.js'
-import { phatssEffect, PHATSS_DEFAULTS } from '../audio/effects/phatss.js'
-import { WARMTH_LAYERS, warmthActive } from '../audio/phatssParams.js'
+import { phatassEffect, PHATASS_DEFAULTS } from '../audio/effects/phatass.js'
+import { WARMTH_LAYERS, warmthActive } from '../audio/phatassParams.js'
 import { measureBandSpectrum, bandRefPeakDb } from '../audio/saturationBenchAnalysis.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
-export const PHATSS_WINDOW_ID = 'phatss'
+export const PHATASS_WINDOW_ID = 'phatass'
 
 // Singleton reactive state shared between the sidebar trigger and the modal.
 // `voiceLevelDb`, `warmthRefPeaksDb` and `warmthCeilingDb` are in here because
 // the kernel needs them, but they are measured, never set from the panel.
-const phParams = reactive({ ...PHATSS_DEFAULTS })
+const phParams = reactive({ ...PHATASS_DEFAULTS })
 const phPreview = ref(false)
 const phInputLevels = ref([])
 const phOutputLevels = ref([])
 let meterId = null
 let levelMeasuredFor = null
 // Warmth readout: what the Warmth stage does to the selection's low end, per
-// band, and the peak it leaves (phatssWarmthReadout.js). `bandsDb` /
+// band, and the peak it leaves (phatassWarmthReadout.js). `bandsDb` /
 // `peakDb` null = not measured; the pending flags say a pass is in flight.
 const phWarmthReadout = ref({ bandsDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false })
 let readoutTimer = null
 let readoutSeq = 0
 const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthCeilingDb'])
 
-export function usePhatss() {
+export function usePhatass() {
   const {
     state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache,
     startProcessing, endProcessing, showToast, totalDuration,
@@ -41,12 +41,12 @@ export function usePhatss() {
 
   function initChain() {
     const chain = getEffectChain(getAudioContext())
-    if (!chain.effects.find(e => e.id === phatssEffect.id)) chain.addEffect(phatssEffect)
+    if (!chain.effects.find(e => e.id === phatassEffect.id)) chain.addEffect(phatassEffect)
     return chain
   }
 
   function nodesOf(chain) {
-    return chain.effects.find(e => e.id === phatssEffect.id)?.nodes
+    return chain.effects.find(e => e.id === phatassEffect.id)?.nodes
   }
 
   function startMeters(chain) {
@@ -74,7 +74,7 @@ export function usePhatss() {
 
   function pushParam(name, value) {
     if (!phPreview.value) return
-    getEffectChain(getAudioContext()).updateParam(phatssEffect.id, name, value)
+    getEffectChain(getAudioContext()).updateParam(phatassEffect.id, name, value)
   }
 
   /**
@@ -112,11 +112,11 @@ export function usePhatss() {
   function togglePreview() {
     const chain = initChain()
     phPreview.value = !phPreview.value
-    chain.setEnabled(phatssEffect.id, phPreview.value)
+    chain.setEnabled(phatassEffect.id, phPreview.value)
     if (phPreview.value) {
       refreshLevel()
       for (const [name, value] of Object.entries(phParams)) {
-        chain.updateParam(phatssEffect.id, name, value)
+        chain.updateParam(phatassEffect.id, name, value)
       }
       startMeters(chain)
       scheduleWarmthReadout()
@@ -171,13 +171,13 @@ export function usePhatss() {
     const params = { ...phParams }
     phWarmthReadout.value = { ...phWarmthReadout.value, bandsPending: true, peakPending: true }
     try {
-      const { bandsDb, peakDb, inputPeakDb } = await measurePhatssWarmthBands(
+      const { bandsDb, peakDb, inputPeakDb } = await measurePhatassWarmthBands(
         state.segments, start, end, params, sampleRate, channels,
       )
       if (seq !== readoutSeq) return
       phWarmthReadout.value = { bandsDb, peakDb, inputPeakDb, bandsPending: false, peakPending: peakDb === null }
       if (peakDb !== null) return
-      const whole = await measurePhatssWarmthPeak(
+      const whole = await measurePhatassWarmthPeak(
         state.segments, start, end, params, sampleRate, channels,
       )
       if (seq !== readoutSeq) return
@@ -206,7 +206,7 @@ export function usePhatss() {
 
     startProcessing('Applying PHAT*SS...')
     try {
-      const buffer = await applyPhatssRegion(
+      const buffer = await applyPhatassRegion(
         state.segments, start, end,
         { ...phParams },
         state.currentFile.sampleRate, state.currentFile.channels,
@@ -227,17 +227,17 @@ export function usePhatss() {
     stopMeters()
     if (phPreview.value) {
       const chain = getEffectChain(getAudioContext())
-      chain.setEnabled(phatssEffect.id, false)
+      chain.setEnabled(phatassEffect.id, false)
       phPreview.value = false
     }
   }
 
   function openModal() {
-    openWindow(PHATSS_WINDOW_ID)
+    openWindow(PHATASS_WINDOW_ID)
   }
 
   function closeModal() {
-    closeWindow(PHATSS_WINDOW_ID)
+    closeWindow(PHATASS_WINDOW_ID)
   }
 
   return {

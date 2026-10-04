@@ -16,7 +16,7 @@ import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
 import HFSoftenerModal from '../components/panels/HFSoftenerModal.vue'
 import HFLimiterModal from '../components/panels/HFLimiterModal.vue'
-import PhatssModal from '../components/panels/PhatssModal.vue'
+import PhatassModal from '../components/panels/PhatassModal.vue'
 import AutoLevelModal from '../components/panels/AutoLevelModal.vue'
 import EqModal from '../components/panels/EqModal.vue'
 import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
@@ -339,16 +339,16 @@ export const OPERATIONS = [
   {
     // Psycho Harmonic Analog Tape * Saturation Simulator: the HF Limiter's
     // Warmth circuit, moved out, plus its shelf with shape and timing pinned.
-    id: 'phatss',
+    id: 'phatass',
     label: 'PHAT*SS',
     desc: 'Tape-style warmth and a rounded top end',
     category: 'effects',
     group: 'Tone',
     icon: 'tape',
-    keywords: ['tape', 'phatss', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'fatso', 'odd', 'even'],
+    keywords: ['tape', 'phatass', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'fatso', 'odd', 'even'],
     requires: 'selection',
     surface: 'window',
-    component: PhatssModal,
+    component: PhatassModal,
   },
   {
     id: 'inflator',

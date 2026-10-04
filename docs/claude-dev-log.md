@@ -5313,10 +5313,10 @@ Threshold and Range. In/out meters only — no GR meter, no EQ display.
 
 **What moved.** `WARMTH_*`, `ODD_EVEN_SPAN`, `warmthLayers`, `warmthActive` and the
 guard wiring went from `hfLimiterParams.js` / `hfLimiterProcessor.js` to
-`phatssParams.js` / `phatssProcessor.js` unchanged — the user's re-voiced layers,
+`phatassParams.js` / `phatassProcessor.js` unchanged — the user's re-voiced layers,
 the linear Warmth law, the pinned guard, the readout. `hfLimiterWarmthReadout.js`
-became `phatssWarmthReadout.js` (worker op `phatssWarmthReadout`). The warmth and
-guard tests moved to `test/dsp/phatss.test.js` verbatim apart from the plugin they
+became `phatassWarmthReadout.js` (worker op `phatassWarmthReadout`). The warmth and
+guard tests moved to `test/dsp/phatass.test.js` verbatim apart from the plugin they
 run through. The HF Limiter is the shelf alone again: latency back to 3 ms, no
 `immediate` flag on `setParams`, no guard meter.
 
