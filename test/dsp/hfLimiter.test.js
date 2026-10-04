@@ -6,13 +6,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { HFLimiterKernel, processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
-import {
-  toKernelParams, hfLimiterLatencySamples, HF_LIMITER_DEFAULTS,
-  WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
-} from '../../src/audio/hfLimiterParams.js'
+import { toKernelParams, hfLimiterLatencySamples, HF_LIMITER_DEFAULTS } from '../../src/audio/hfLimiterParams.js'
 import { shelfResponseDb, splitResponse, splitTaps } from '../../src/audio/dsp/hfLimit.js'
-import { processSaturationBenchBuffer } from '../../src/audio/dsp/saturationLayers.js'
-import { warmthGuardLatencySamples } from '../../src/audio/dsp/warmthGuard.js'
 
 const SR = 44100
 
@@ -59,9 +54,9 @@ const db = x => 20 * Math.log10(x)
 const run = (x, p) => processHFLimiterBuffer([x], SR, toKernelParams(p))
 // Threshold −30 dBFS absolute: voice −20 plus −10.
 // The shelf's own settings, pinned rather than read from the plugin defaults:
-// those are a voicing choice and move (Warmth on, WARM, 12 kHz), and these
+// those are a voicing choice and move (WARM, 12 kHz), and these
 // tests are about the shelf.
-const BASE = { voiceLevelDb: -20, threshold: -10, range: 24, release: 60, shape: 'tight', freq: 5000, warmth: 0 }
+const BASE = { voiceLevelDb: -20, threshold: -10, range: 24, release: 60, shape: 'tight', freq: 5000 }
 
 test('bit-transparent below threshold, delayed by the latency, with Transient on or off', () => {
   // Loud bass and mids plus a top well under the ceiling, faded in: a tone
@@ -152,16 +147,15 @@ test('the split is unity at DC, half at the corner, and monotone at every depth'
   }
 })
 
-test('the latency does not move with Transient or Warmth', () => {
+test('the latency does not move with Transient', () => {
   const L = hfLimiterLatencySamples(SR)
-  // The warmth layers' oversampler round trips, then the shelf's split and lookahead.
-  assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + 3 * Math.round(0.001 * SR))
-  for (const [transient, warmth] of [[0, 0], [6, 0], [12, 0], [0, 6]]) {
+  // The shelf's split and lookahead.
+  assert.equal(L, 3 * Math.round(0.001 * SR))
+  for (const transient of [0, 6, 12]) {
     const x = new Float32Array(4096)
     x[100] = 0.001 // far below every threshold
-    const { channelData: [y] } = run(x, { ...BASE, transient, warmth })
-    if (warmth === 0) assert.equal(y[100 + L], x[100], `transient ${transient}`)
-    else assert.ok(Math.abs(y[100 + L] - x[100]) < 1e-5, `warmth ${warmth}: impulse at ${L} reads ${y[100 + L]}`)
+    const { channelData: [y] } = run(x, { ...BASE, transient })
+    assert.equal(y[100 + L], x[100], `transient ${transient}`)
   }
 })
 
@@ -211,9 +205,8 @@ test('a click is cut by up to the Transient depth, even below Threshold, and let
     const ms = ((back - peakBlock) * 128 / SR) * 1000
     assert.ok(back > 0 && ms < 30, `click at ${bandDb}: still cutting ${ms.toFixed(1)} ms later`)
     // And the cut is on the click, not somewhere else: it peaks within 2 ms of
-    // it, as the shelf hears it — behind the Warmth stage and its peak guard.
-    const seen = at + WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR)
-    assert.ok(Math.abs(peakBlock * 128 - seen) < 0.002 * SR + 128, `cut peaks ${((peakBlock * 128 - seen) / SR * 1000).toFixed(1)} ms from the click`)
+    // it, as the shelf hears it.
+    assert.ok(Math.abs(peakBlock * 128 - at) < 0.002 * SR + 128, `cut peaks ${((peakBlock * 128 - at) / SR * 1000).toFixed(1)} ms from the click`)
   }
 })
 
@@ -432,163 +425,4 @@ test('the Tail never lets the gain overshoot the lookahead ceiling', () => {
   const p = peak(y, SR / 4)
   // Both tones sit above TIGHT's transition, so the output IS the band.
   assert.ok(p <= T * 1.0005, `peak ${db(p).toFixed(3)} dBFS over the −30 ceiling`)
-})
-
-
-// ── Warmth: low-end harmonics ahead of the shelf ───────────────────────────
-
-/**
- * Harmonic k of a steady tone at `f`, dB re the fundamental. Hann-weighted: an
- * unwindowed span that is not a whole number of cycles leaks the fundamental
- * ~63 dB down at 900 Hz, which read as a third-harmonic floor that was never there.
- */
-function harmonicDbc(y, f, k, from, to) {
-  const amp = fr => {
-    let c = 0, s = 0
-    for (let i = from; i < to; i++) {
-      const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * (i - from)) / (to - from))
-      const ph = (2 * Math.PI * fr * i) / SR
-      c += w * y[i] * Math.cos(ph)
-      s += w * y[i] * Math.sin(ph)
-    }
-    return Math.hypot(c, s)
-  }
-  return db(amp(k * f) / amp(f))
-}
-
-const WARM = { ...BASE, range: 0 } // shelf out, so only Warmth acts
-
-test('Warmth 0 leaves the audio untouched', () => {
-  const x = add(sine(200, 0.5), sine(3000, 0.2))
-  const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 0, oddEven: 30 })
-  for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
-})
-
-test('Warmth at full Odd is the tanh layer as voiced on the Saturation Bench, at the law\'s Amount', () => {
-  const x = add(sine(120, 0.25), sine(240, 0.1), noise(SR, 0.01))
-  const refs = [-14, -16]
-  const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 8, oddEven: 0, warmthRefPeaksDb: refs })
-  const amountDb = warmthLayers(8, 0)[1].amountDb
-  const bench = processSaturationBenchBuffer([x], SR, {
-    layers: [{ on: false }, { ...WARMTH_LAYERS[1], on: true, amountDb, refPeakDb: refs[1] }],
-  }, { slots: 2 })
-  const b = bench.channelData[0], Lb = bench.latencySamples
-  let worst = 0, added = 0
-  for (let i = SR / 4; i < x.length - L; i++) {
-    worst = Math.max(worst, Math.abs((y[i + L] - x[i]) - (b[i + Lb] - x[i])))
-    added = Math.max(added, Math.abs(b[i + Lb] - x[i]))
-  }
-  assert.ok(added > 1e-3, 'the tanh layer must add something')
-  assert.ok(worst < 1e-6, `differs from the bench by ${worst}`)
-})
-
-test('a render from rest starts at the setting, not ramping in from the defaults', () => {
-  // The kernel's constructor sets the defaults (Warmth off); the first real
-  // params must jump, or the first 20 ms glide the Warmth amount in from 0 dB.
-  const x = add(sine(120, 0.25), sine(240, 0.1))
-  const refs = [-14, -16]
-  const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 3, oddEven: 0, warmthRefPeaksDb: refs })
-  const bench = processSaturationBenchBuffer([x], SR, {
-    layers: warmthLayers(3, 0, refs),
-  }, { slots: 2 })
-  const b = bench.channelData[0], Lb = bench.latencySamples
-  let worst = 0
-  for (let i = 0; i < 0.05 * SR; i++) worst = Math.max(worst, Math.abs(y[i + L] - b[i + Lb]))
-  assert.ok(worst < 1e-6, `first 50 ms differ by ${worst}`)
-})
-
-test('Odd/Even: 0 is pure odd (tanh); turning it up brings in the even (quartic)', () => {
-  const f = 120
-  const at = oddEven => {
-    const { channelData: [y], latencySamples: L } = run(sine(f, 0.3), { ...WARM, warmth: 10, oddEven, warmthRefPeaksDb: [-10, -10] })
-    return { h2: harmonicDbc(y, f, 2, L + SR / 4, SR), h3: harmonicDbc(y, f, 3, L + SR / 4, SR) }
-  }
-  const odd = at(0), mixed = at(100)
-  assert.ok(odd.h3 > odd.h2 + 10, `Odd: H2 ${odd.h2.toFixed(1)}, H3 ${odd.h3.toFixed(1)} dBc`)
-  assert.ok(mixed.h2 > odd.h2 + 10, `100: H2 ${mixed.h2.toFixed(1)} vs ${odd.h2.toFixed(1)} dBc at 0`)
-})
-
-test('the Warmth law: linear in amplitude to +6 dB, equal-power Odd/Even over the first ODD_EVEN_SPAN of the blend', () => {
-  const amt = (w, b) => warmthLayers(w, b).map(l => (l.on ? l.amountDb : -Infinity))
-  // The top is +6 dB at full Odd; the added amplitude is proportional to the knob.
-  assert.ok(Math.abs(amt(10, 0)[1] - WARMTH_TOP_DB) < 1e-9)
-  for (const w of [1, 2.5, 5, 8]) {
-    const ratio = 10 ** ((amt(w, 0)[1] - amt(10, 0)[1]) / 20)
-    assert.ok(Math.abs(ratio - w / 10) < 1e-12, `Warmth ${w}: amplitude ratio ${ratio}`)
-  }
-  // So Warmth 5 is half of 10: Amount 0, the bench voicing, within float rounding.
-  assert.ok(Math.abs(amt(5, 0)[1] - (WARMTH_TOP_DB + 20 * Math.log10(0.5))) < 1e-9)
-  // Knob 100 is the old scale's 25: the crossfade angle is ODD_EVEN_SPAN · 90°.
-  const th = (ODD_EVEN_SPAN * Math.PI) / 2
-  const lv = WARMTH_TOP_DB + 20 * Math.log10(0.8) // Warmth 8's level before the split
-  const [q, t] = amt(8, 100).map(v => v - lv)
-  assert.ok(Math.abs(t - 20 * Math.log10(Math.cos(th))) < 1e-9, `tanh at 100: ${t}`)
-  assert.ok(Math.abs(q - (WARMTH_EVEN_MATCH_DB + 20 * Math.log10(Math.sin(th)))) < 1e-9, `quartic at 100: ${q}`)
-  // Equal power: the two gains' squares sum to one at every position.
-  for (const b of [0, 36, 100]) {
-    const [qq, tt] = amt(8, b).map(v => v - lv)
-    const p = (qq === -Infinity ? 0 : 10 ** ((qq - WARMTH_EVEN_MATCH_DB) / 10)) + 10 ** (tt / 10)
-    assert.ok(Math.abs(p - 1) < 1e-9, `power at ${b}: ${p}`)
-  }
-  // 0 takes the quartic out; 100 keeps both; Warmth 0 takes both out.
-  assert.deepEqual(warmthLayers(8, 0).map(l => l.on), [false, true])
-  assert.deepEqual(warmthLayers(8, 100).map(l => l.on), [true, true])
-  assert.deepEqual(warmthLayers(0, 50).map(l => l.on), [false, false])
-  // Calibration rides along when measured, and only then.
-  assert.equal(warmthLayers(5, 50, [-12, -13])[1].refPeakDb, -13)
-  assert.equal('refPeakDb' in warmthLayers(5, 50)[0], false)
-})
-
-test('Warmth works only in its low band: material above it passes untouched', () => {
-  // ⚠ NOT "quiet material passes at its own level": at these drives the layers
-  // saturate even quiet low-band content, and what they add includes the
-  // band's own reshaped level — that is the character (Southern Sunrise at
-  // Warmth 8: +4.9 dB at 120–250 Hz). Above the bands nothing moves.
-  const quiet = sine(1500, 0.003)
-  const { channelData: [q], latencySamples: L } = run(quiet, { ...WARM, warmth: 10, oddEven: 50 })
-  const g = db(toneAmp(q, 1500, L + SR / 4, SR) / 0.003)
-  assert.ok(Math.abs(g) < 0.05, `a 1.5 kHz tone moved ${g.toFixed(3)} dB at Warmth 10`)
-})
-
-// ── Warmth peak guard ────────────────────────────────────────────────────────
-
-const peakOf = (y, from = 0) => { let m = 0; for (let i = from; i < y.length; i++) m = Math.max(m, Math.abs(y[i])); return m }
-
-test('the peak guard holds the result at the source peak, and only touches the added signal', () => {
-  // A bass-heavy voice stand-in: Odd 10 overshoots the source peak by several dB.
-  const x = add(sine(110, 0.3), sine(220, 0.12), noise(SR, 0.01))
-  const refs = [-16, -18]
-  const ceilingDb = 20 * Math.log10(peakOf(x))
-  const p = { ...WARM, warmth: 10, oddEven: 0, warmthRefPeaksDb: refs, warmthCeilingDb: ceilingDb }
-  // No ceiling measured: the guard has nothing to hold to, which is the unguarded stage.
-  const off = run(x, { ...p, warmthCeilingDb: null })
-  const on = run(x, p)
-  const L = on.latencySamples
-  assert.equal(L, off.latencySamples, 'the guard never moves the audio')
-  const yOff = peakOf(off.channelData[0], L), yOn = peakOf(on.channelData[0], L)
-  assert.ok(yOff > peakOf(x) * 1.2, `the fixture must overshoot: ${(20 * Math.log10(yOff / peakOf(x))).toFixed(2)} dB`)
-  assert.ok(yOn <= peakOf(x) * (1 + 1e-6), `guarded peak ${(20 * Math.log10(yOn / peakOf(x))).toFixed(4)} dB over the source`)
-  // Between the voice and the full warmth: every output sample is x + g·a with 0 ≤ g ≤ 1.
-  const yo = off.channelData[0], yn = on.channelData[0]
-  for (let i = L; i < x.length; i++) {
-    const dry = x[i - L], a = yo[i] - dry, b = yn[i] - dry
-    if (Math.abs(a) > 1e-6) {
-      const g = b / a
-      if (g < -1e-4 || g > 1 + 1e-4) assert.fail(`sample ${i}: gain on the added signal ${g}`)
-    }
-  }
-})
-
-test('the peak guard is a pure delay when it has nothing to catch, or no ceiling', () => {
-  const x = add(sine(110, 0.3), sine(220, 0.12))
-  const refs = [-16, -18]
-  const p = { ...WARM, warmth: 4, oddEven: 30, warmthRefPeaksDb: refs }
-  // No ceiling measured: the guard has nothing to hold to.
-  const off = run(x, p).channelData[0]
-  // A ceiling far above anything the stage reaches is the same render, bit for bit.
-  const high = run(x, { ...p, warmthCeilingDb: 12 }).channelData[0]
-  for (let i = 0; i < x.length; i++) if (high[i] !== off[i]) assert.fail(`high ceiling: sample ${i} differs`)
-  assert.equal(toKernelParams({ ...p, warmth: 0, warmthCeilingDb: -6 }).warmthGuard.on, false)
-  // Pinned on with Warmth: there is no switch.
-  assert.equal(toKernelParams({ ...p, warmthCeilingDb: -6 }).warmthGuard.on, true)
 })

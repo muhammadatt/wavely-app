@@ -1,12 +1,7 @@
 /**
  * HF Limiter — worklet kernel.
  *
- * Warmth → Shelf. WARMTH is two Saturation Bench layers (dsp/saturationLayers.js,
- * quartic then tanh, voiced in hfLimiterParams.WARMTH_LAYERS), 4x oversampled,
- * a pure delay at 0, then its peak guard (pinned on with Warmth: what Warmth
- * adds is turned down wherever the sum would pass the selection's own peak,
- * dsp/warmthGuard.js). SHELF, from
- * dsp/hfLimit.js (read that file for the design), is a lookahead
+ * The SHELF, from dsp/hfLimit.js (read that file for the design), is a lookahead
  * dynamic shelf that holds the band above the corner at the threshold, down to
  * a Range floor — brightness and harshness, in the HiFal / Limiter 6 HF / Fatso
  * family — with a TIGHT or WARM split, an optional Tail release stage, and a
@@ -22,9 +17,7 @@
  */
 
 import { ShelfLimiterStage } from './dsp/hfLimit.js'
-import { SaturationBenchKernel } from './dsp/saturationLayers.js'
-import { WarmthPeakGuard } from './dsp/warmthGuard.js'
-import { toKernelParams, HF_LIMITER_DEFAULTS, WARMTH_LAYERS } from './hfLimiterParams.js'
+import { toKernelParams, HF_LIMITER_DEFAULTS } from './hfLimiterParams.js'
 
 export const HF_LIMITER_KERNEL_DEFAULTS = toKernelParams(HF_LIMITER_DEFAULTS)
 
@@ -40,26 +33,15 @@ export class HFLimiterKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
     this.shelf = new ShelfLimiterStage(sampleRate)
-    this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length })
-    this.warmthInit = false
-    // Lined up against the Warmth output, so its dry is the input delayed by that.
-    this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)
-    this.latencySamples = this.warmth.latencySamples + this.guard.latencySamples + this.shelf.latencySamples
+    this.latencySamples = this.shelf.latencySamples
     this.listen = 'off'
     this.dryDelays = []
     this.dry = []
     this.params = { ...HF_LIMITER_KERNEL_DEFAULTS }
-    this.setParams({}, true)
+    this.setParams({})
   }
 
-  /**
-   * `immediate` jumps the Warmth layers' ramps to the new values. ⚠ THE FIRST
-   * REAL PARAMS MUST BE IMMEDIATE: the constructor has already set the
-   * defaults (Warmth off), so a ramped first set glided the Warmth amount in
-   * over the first 20 ms from 0 dB — a render from rest started louder than
-   * the setting (+0.4 dB of peak on narration at Warmth 3).
-   */
-  setParams(partial, immediate = false) {
+  setParams(partial) {
     const p = { ...this.params, ...partial }
     this.params = p
     this.shelf.setParams({
@@ -71,12 +53,6 @@ export class HFLimiterKernel {
       tailMs: p.tailMs,
       transientDb: p.transientDb,
     })
-    if (p.warmthLayers) {
-      // Ramped like the bench's own knobs, except an immediate set.
-      this.warmth.setParams({ layers: p.warmthLayers }, immediate || !this.warmthInit)
-      this.warmthInit = true
-    }
-    if (p.warmthGuard) this.guard.setParams(p.warmthGuard)
     this.outputLin = dbToLin(p.outputGainDb)
   }
 
@@ -112,8 +88,6 @@ export class HFLimiterKernel {
     if (delta) this._ensureDry(nOut)
 
     // In place: the kernel reads each input sample before it writes that output.
-    this.warmth.process(outputChannels, outputChannels, n)
-    this.guard.process(inputChannels, outputChannels, n)
     this.shelf.process(outputChannels, n)
 
     const g = this.outputLin
@@ -142,8 +116,6 @@ export class HFLimiterKernel {
       reductionDb: m < 1 ? -20 * Math.log10(Math.max(m, 1e-6)) : 0,
       gainDb: this.shelf.gain < 1 ? 20 * Math.log10(Math.max(this.shelf.gain, 1e-6)) : 0,
       transientDb: toDbCut(this.shelf.takeMinTransientGain()),
-      // How far the peak guard turned the Warmth's added signal down, dB (positive).
-      guardDb: toDbCut(this.guard.takeMinGain()),
     }
   }
 }
@@ -156,7 +128,7 @@ export class HFLimiterKernel {
  */
 export function processHFLimiterBuffer(channelData, sampleRate, kernelParams = {}) {
   const kernel = new HFLimiterKernel(sampleRate)
-  kernel.setParams(kernelParams, true)
+  kernel.setParams(kernelParams)
   const n = channelData[0].length
   const output = channelData.map(() => new Float32Array(n))
   const BLOCK = 128
@@ -179,7 +151,7 @@ if (typeof registerProcessor === 'function') {
       super()
       this.kernel = new HFLimiterKernel(sampleRate)
       if (options?.processorOptions?.params) {
-        this.kernel.setParams(options.processorOptions.params, true)
+        this.kernel.setParams(options.processorOptions.params)
       }
       this.quanta = 0
       this.port.onmessage = (e) => {

@@ -1,57 +1,46 @@
 /**
- * HF Limiter — real-time effect chain wrapper.
+ * PHAT*SS — real-time effect chain wrapper.
  *
- * The DSP lives in ../hfLimiterProcessor.js (a lookahead dynamic shelf with an
- * onset softener on the same gain; see ../dsp/hfLimit.js) and runs in an
- * AudioWorklet. The offline apply path renders through the same worklet in an
- * OfflineAudioContext, so preview and apply share one code path.
+ * The DSP lives in ../phatssProcessor.js (Warmth → its peak guard → a tape HF
+ * shelf) and runs in an AudioWorklet. The offline apply path renders through
+ * the same worklet in an OfflineAudioContext, so preview and apply share one
+ * code path.
  *
  * The worklet module loads asynchronously; until it's ready the effect passes
  * audio through unprocessed, then splices the worklet node in.
  */
 
-import { ensureHFLimiterWorklet } from '../hfLimiterWorkletLoader.js'
+import { ensurePhatssWorklet } from '../phatssWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
-import { HF_LIMITER_DEFAULTS, toKernelParams } from '../hfLimiterParams.js'
+import { PHATSS_DEFAULTS, toKernelParams } from '../phatssParams.js'
 
-export { HF_LIMITER_DEFAULTS, toKernelParams } from '../hfLimiterParams.js'
+export { PHATSS_DEFAULTS, toKernelParams } from '../phatssParams.js'
 
-export function createHFLimiter(audioContext) {
+export function createPhatss(audioContext) {
   const input = audioContext.createGain()
   // preOutput is a stable internal hand-off — see the note in airBand.js.
   const preOutput = audioContext.createGain()
   const output = audioContext.createGain()
 
-  let params = { ...HF_LIMITER_DEFAULTS }
+  let params = { ...PHATSS_DEFAULTS }
   let worklet = null
   let destroyed = false
-  let reductionDb = 0
-  let transientDb = 0
-  // Monitor tap, kept out of `params` on purpose: parameters are what the
-  // apply path renders with, and a monitor mode must never be one of them.
-  let listen = 'off'
 
   input.connect(preOutput)
   preOutput.connect(output)
 
-  ensureHFLimiterWorklet(audioContext)
+  ensurePhatssWorklet(audioContext)
     .then(() => {
       if (destroyed) return
-      worklet = new AudioWorkletNode(audioContext, 'hf-limiter-processor', {
+      worklet = new AudioWorkletNode(audioContext, 'phatss-processor', {
         processorOptions: { params: toKernelParams(params) },
       })
-      worklet.port.onmessage = (e) => {
-        if (e.data?.type !== 'gr') return
-        reductionDb = e.data.reductionDb
-        transientDb = e.data.transientDb ?? 0
-      }
-      worklet.port.postMessage({ type: 'listen', mode: listen })
       input.disconnect(preOutput)
       input.connect(worklet)
       worklet.connect(preOutput)
     })
     .catch((err) => {
-      console.error('HF Limiter worklet failed to load, running bypassed:', err)
+      console.error('PHAT*SS worklet failed to load, running bypassed:', err)
     })
 
   const inputMonitor = audioContext.createGain()
@@ -76,21 +65,6 @@ export function createHFLimiter(audioContext) {
       return params[name]
     },
 
-    /** Shelf depth, positive dB — the deepest since the last meter post. */
-    getReduction() {
-      return reductionDb
-    },
-
-    /** The onset softener's deepest cut since the last meter post, positive dB. */
-    getTransient() {
-      return transientDb
-    },
-
-    setListen(mode) {
-      listen = mode
-      worklet?.port.postMessage({ type: 'listen', mode })
-    },
-
     getInputLevels(channelCount) {
       return inputTap.getLevels(channelCount)
     },
@@ -113,10 +87,10 @@ export function createHFLimiter(audioContext) {
   }
 }
 
-export const hfLimiterEffect = {
-  id: 'hf-limiter',
-  name: 'HF Limiter',
+export const phatssEffect = {
+  id: 'phatss',
+  name: 'PHAT*SS',
   createNodes(audioContext) {
-    return createHFLimiter(audioContext)
+    return createPhatss(audioContext)
   },
 }

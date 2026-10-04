@@ -48,6 +48,13 @@ import {
   hfLimiterLatencySamples,
   toKernelParams as toHFLimiterKernelParams,
 } from './hfLimiterParams.js'
+import { ensurePhatssWorklet } from './phatssWorkletLoader.js'
+import {
+  PHATSS_DEFAULTS,
+  PHATSS_PREROLL_S,
+  phatssLatencySamples,
+  toKernelParams as toPhatssKernelParams,
+} from './phatssParams.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
@@ -906,15 +913,15 @@ export function measureHFSoftenerAutoAir(segments, start, end, params, sampleRat
 }
 
 /**
- * The HF Limiter's Warmth readout BANDS for a region, over the usual capped
+ * PHAT*SS's Warmth readout BANDS for a region, over the usual capped
  * analysis window. When the window is the whole region the peak comes back
  * too; otherwise `peakDb` is null and the caller asks
- * `measureHFLimiterWarmthPeak` for it. Resolves `{ bandsDb, peakDb }`.
+ * `measurePhatssWarmthPeak` for it. Resolves `{ bandsDb, peakDb }`.
  */
-export function measureHFLimiterWarmthBands(segments, start, end, params, sampleRate, channels) {
+export function measurePhatssWarmthBands(segments, start, end, params, sampleRate, channels) {
   const whole = analysedWholeRegion(start, end)
-  const { warmthLayers, warmthGuard } = toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params })
-  return measureInWorker('hfLimiterWarmthReadout', segments, start, end, {
+  const { warmthLayers, warmthGuard } = toPhatssKernelParams({ ...PHATSS_DEFAULTS, ...params })
+  return measureInWorker('phatssWarmthReadout', segments, start, end, {
     layers: warmthLayers, guard: warmthGuard, bands: true, peak: whole,
   }, sampleRate, channels).then(d => ({
     bandsDb: d.bandsDb,
@@ -934,7 +941,7 @@ export function measureHFLimiterWarmthBands(segments, start, end, params, sample
  */
 let warmthPeakWorker = null
 let warmthPeakReject = null
-export function measureHFLimiterWarmthPeak(segments, start, end, params, sampleRate, channels) {
+export function measurePhatssWarmthPeak(segments, start, end, params, sampleRate, channels) {
   if (warmthPeakWorker) {
     warmthPeakWorker.terminate()
     warmthPeakWorker = null
@@ -942,7 +949,7 @@ export function measureHFLimiterWarmthPeak(segments, start, end, params, sampleR
     err.cancelled = true
     warmthPeakReject?.(err)
   }
-  const { warmthLayers, warmthGuard } = toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params })
+  const { warmthLayers, warmthGuard } = toPhatssKernelParams({ ...PHATSS_DEFAULTS, ...params })
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
     warmthPeakWorker = worker
@@ -965,7 +972,7 @@ export function measureHFLimiterWarmthPeak(segments, start, end, params, sampleR
     }
     const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
     worker.postMessage(
-      { __id: 0, type: 'hfLimiterWarmthReadout', channelData, sampleRate, params: { layers: warmthLayers, guard: warmthGuard, bands: false, peak: true } },
+      { __id: 0, type: 'phatssWarmthReadout', channelData, sampleRate, params: { layers: warmthLayers, guard: warmthGuard, bands: false, peak: true } },
       channelData.map(c => c.buffer),
     )
   })
@@ -1023,8 +1030,7 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
 }
 
 /**
- * Apply the HF Limiter to a region. Constant latency per sample rate (the
- * accel stage is a delay of its own length while Transient is 0), and a
+ * Apply the HF Limiter to a region. Constant latency per sample rate, and a
  * pre-roll so the release starts where a playing preview's would be.
  */
 export function applyHFLimiterRegion(segments, start, end, params, sampleRate, channels) {
@@ -1034,6 +1040,21 @@ export function applyHFLimiterRegion(segments, start, end, params, sampleRate, c
     kernelParams: toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params }),
     latencySamples: hfLimiterLatencySamples(sampleRate),
     preRollSamples: Math.round(HF_LIMITER_PREROLL_S * sampleRate),
+  })
+}
+
+/**
+ * Apply PHAT*SS to a region. Constant latency per sample rate (every stage is
+ * a delay of its own length when idle), and a pre-roll so the shelf's release
+ * starts where a playing preview's would be.
+ */
+export function applyPhatssRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensurePhatssWorklet,
+    processorName: 'phatss-processor',
+    kernelParams: toPhatssKernelParams({ ...PHATSS_DEFAULTS, ...params }),
+    latencySamples: phatssLatencySamples(sampleRate),
+    preRollSamples: Math.round(PHATSS_PREROLL_S * sampleRate),
   })
 }
 

@@ -4,7 +4,7 @@
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, loudnessNormalize, adjustVolume, la2aAutoMakeup,
  * fet1176AutoMakeup, softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling,
- * voiceProfile, measureLoudness, hfSoftenerAutoAir, hfLimiterWarmthReadout
+ * voiceProfile, measureLoudness, hfSoftenerAutoAir, phatssWarmthReadout
  */
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupPlan } from '../audio/fet1176Processor.js'
@@ -15,7 +15,7 @@ import { measureVoiceProfile } from '../audio/voiceProfile.js'
 import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
 import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
 import { measureTopLossDb, autoAirDb } from '../audio/hfSoftenerAutoAir.js'
-import { measureWarmthReadout } from '../audio/hfLimiterWarmthReadout.js'
+import { measureWarmthReadout } from '../audio/phatssWarmthReadout.js'
 
 /**
  * ⚠ EVERY REPLY MUST CARRY `__id` BACK. The worker is shared and long-lived
@@ -94,16 +94,16 @@ self.onmessage = function (e) {
     case 'hfSoftenerAutoAir':
       hfSoftenerAutoAir(channelData, sampleRate, params)
       break
-    case 'hfLimiterWarmthReadout':
-      hfLimiterWarmthReadout(channelData, sampleRate, params)
+    case 'phatssWarmthReadout':
+      phatssWarmthReadout(channelData, sampleRate, params)
       break
     default:
       postReply({ type: 'error', message: `Unknown operation: ${type}` })
   }
 }
 
-/** The HF Limiter's Warmth readout — see hfLimiterWarmthReadout.js. */
-function hfLimiterWarmthReadout(channelData, sampleRate, params) {
+/** PHAT*SS's Warmth readout — see phatssWarmthReadout.js. */
+function phatssWarmthReadout(channelData, sampleRate, params) {
   try {
     const { layers, bands = true, peak = true, guard = null } = params ?? {}
     postDone(measureWarmthReadout(channelData, sampleRate, layers, { bands, peak, guard }))

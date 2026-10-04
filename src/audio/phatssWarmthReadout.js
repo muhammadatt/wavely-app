@@ -1,5 +1,5 @@
 /**
- * HF Limiter — the Warmth readout: what the Warmth stage does to a region's
+ * PHAT*SS — the Warmth readout: what the Warmth stage does to a region's
  * low end, per band, and the peak it leaves. The panel prints these so a
  * setting can be judged by the numbers, not only by ear.
  *
@@ -15,7 +15,7 @@
  * window; the peak is a property of the WHOLE region — a capped window can
  * only read it low, and a late loud passage is exactly where a low-end boost
  * clips. So the caller asks for the peak over the whole region separately
- * (see `measureHFLimiterWarmthPeak`).
+ * (see `measurePhatssWarmthPeak`).
  *
  * Node-importable: no worklet registration, no Vite specifiers.
  */

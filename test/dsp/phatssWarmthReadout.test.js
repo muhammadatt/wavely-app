@@ -1,11 +1,11 @@
 /**
- * HF Limiter — the Warmth readout (src/audio/hfLimiterWarmthReadout.js).
+ * PHAT*SS — the Warmth readout (src/audio/phatssWarmthReadout.js).
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { measureWarmthReadout, renderWarmthAligned, WARMTH_READOUT_BANDS } from '../../src/audio/hfLimiterWarmthReadout.js'
-import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
-import { toKernelParams, warmthLayers } from '../../src/audio/hfLimiterParams.js'
+import { measureWarmthReadout, renderWarmthAligned, WARMTH_READOUT_BANDS } from '../../src/audio/phatssWarmthReadout.js'
+import { processPhatssBuffer } from '../../src/audio/phatssProcessor.js'
+import { toKernelParams, warmthLayers } from '../../src/audio/phatssParams.js'
 
 const SR = 44100
 const REFS = [-12, -13]
@@ -51,14 +51,14 @@ test('the render is aligned to the input: Warmth 0 is the input, sample for samp
 
 test('the readout moves the low end and reports the stage peak the plugin delivers', () => {
   const x = voice()
-  const p = { warmth: 8, oddEven: 36, warmthRefPeaksDb: REFS, range: 0 }
+  const p = { warmth: 8, oddEven: 36, warmthRefPeaksDb: REFS, tame: 0 }
   const r = measureWarmthReadout([x], SR, toKernelParams(p).warmthLayers)
   assert.ok(r.bandsDb.some(d => Math.abs(d) > 1), `bands ${r.bandsDb}`)
   // With the shelf out the plugin IS the stage, so their peaks agree...
-  const full = processHFLimiterBuffer([x], SR, toKernelParams(p))
+  const full = processPhatssBuffer([x], SR, toKernelParams(p))
   assert.ok(Math.abs(peakDb(full.channelData) - r.peakDb) < 1e-3, `plugin ${peakDb(full.channelData)} vs readout ${r.peakDb}`)
   // ...and with the shelf in, the readout is an upper bound.
-  const shelf = processHFLimiterBuffer([x], SR, toKernelParams({ ...p, range: 24, threshold: -20 }))
+  const shelf = processPhatssBuffer([x], SR, toKernelParams({ ...p, tame: 10 }))
   assert.ok(peakDb(shelf.channelData) <= r.peakDb + 1e-3, `shelf ${peakDb(shelf.channelData)} over ${r.peakDb}`)
 })
 
@@ -74,14 +74,14 @@ test('bands only or peak only, on request', () => {
 test('the readout renders the guard: with it on, the peak change is never above zero', () => {
   const x = voice()
   const src = peakDb([x])
-  const p = { warmth: 10, oddEven: 30, warmthRefPeaksDb: REFS, warmthCeilingDb: src, range: 0 }
+  const p = { warmth: 10, oddEven: 30, warmthRefPeaksDb: REFS, warmthCeilingDb: src, tame: 0 }
   const k = toKernelParams(p)
   const open = measureWarmthReadout([x], SR, toKernelParams({ ...p, warmthCeilingDb: null }).warmthLayers)
   const held = measureWarmthReadout([x], SR, k.warmthLayers, { guard: k.warmthGuard })
   assert.ok(open.peakDb > src + 0.5, `the fixture must overshoot: ${(open.peakDb - src).toFixed(2)} dB`)
   assert.ok(held.peakDb <= src + 1e-5, `guarded readout peak ${(held.peakDb - src).toFixed(4)} dB over the source`)
   // ...and it is what the plugin delivers (shelf out).
-  const full = processHFLimiterBuffer([x], SR, k)
+  const full = processPhatssBuffer([x], SR, k)
   const y = full.channelData[0].subarray(full.latencySamples)
   assert.ok(Math.abs(peakDb([y]) - held.peakDb) < 1e-3, `plugin ${peakDb([y])} vs readout ${held.peakDb}`)
 })

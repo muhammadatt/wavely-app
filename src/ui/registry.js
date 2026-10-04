@@ -16,6 +16,7 @@ import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
 import HFSoftenerModal from '../components/panels/HFSoftenerModal.vue'
 import HFLimiterModal from '../components/panels/HFLimiterModal.vue'
+import PhatssModal from '../components/panels/PhatssModal.vue'
 import AutoLevelModal from '../components/panels/AutoLevelModal.vue'
 import EqModal from '../components/panels/EqModal.vue'
 import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
@@ -336,6 +337,20 @@ export const OPERATIONS = [
     component: SaturationBenchModal,
   },
   {
+    // Psycho Harmonic Analog Tape * Saturation Simulator: the HF Limiter's
+    // Warmth circuit, moved out, plus its shelf with shape and timing pinned.
+    id: 'phatss',
+    label: 'PHAT*SS',
+    desc: 'Tape-style warmth and a rounded top end',
+    category: 'effects',
+    group: 'Tone',
+    icon: 'tape',
+    keywords: ['tape', 'phatss', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'fatso', 'odd', 'even'],
+    requires: 'selection',
+    surface: 'window',
+    component: PhatssModal,
+  },
+  {
     id: 'inflator',
     label: 'Inflator',
     desc: 'Raise quiet detail without raising the ceiling',
@@ -450,7 +465,7 @@ export const OPERATIONS = [
     category: 'effects',
     group: 'Clean',
     icon: 'hflimiter',
-    keywords: ['high frequency', 'hf', 'treble', 'limiter', 'bright', 'harsh', 'sibilance', 'transient', 'hifal', 'limen', 'fatso', 'tape', 'shelf', 'ceiling'],
+    keywords: ['high frequency', 'hf', 'treble', 'limiter', 'bright', 'harsh', 'sibilance', 'transient', 'hifal', 'limen', 'fatso', 'shelf', 'ceiling'],
     requires: 'selection',
     surface: 'window',
     component: HFLimiterModal,

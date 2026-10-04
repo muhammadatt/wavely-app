@@ -5302,3 +5302,44 @@ By ear the Warmth knob came in slowly and then very fast near the top. Measured:
 Now `Amount = WARMTH_TOP_DB + 20·log10(Warmth/10)` (`warmthLevelDb`): the added amplitude is proportional to the knob, with the same +6 dB top. Body by Warmth 1…10: +1.12 +2.15 +3.11 +3.99 +4.81 +5.57 +6.27 +6.93 +7.55 +8.13 (steps 1.1 → 0.6, gently easing); loudness +0.10 → +3.89 LU in ~0.5 LU steps. The bench voicing (Amount 0) moves from Warmth 8 to 5; the owner asked not to keep the old Warmth 8.
 
 Merged with the owner's re-voicing (`50c5136`): layers quartic (drive 50, 1–250 Hz, bell 280 Q 0.5 +14) + CUBIC (drive 50, 1–220 Hz, bell 240 Q 0.5 +10), defaults WARM / 12 kHz / Warmth 5. Notes: (1) that default was chosen under the old 3 dB-a-step law, where Warmth 5 was Amount −9 dB; under the linear law Warmth 5 is Amount 0 (the old law's 8), and the old 5 is now ~1.8. (2) On Southern Sunrise at Amount 0 the new quartic adds −46.57 dBFS rms and the cubic −25.74: a 20.8 dB gap against `WARMTH_EVEN_MATCH_DB` 17.4, which was measured on the first pair. (3) The shelf tests read their base from the defaults and broke when Warmth defaulted on; they now pin TIGHT / 5 kHz / Warmth 0.
+
+## PHAT*SS — the Warmth circuit moves out of the HF Limiter (October 2026)
+
+The owner asked for the Warmth circuit to leave the HF Limiter and become a tape
+simulation plugin, **PHAT*SS** (Psycho Harmonic Analog Tape * Saturation
+Simulator): the current Warmth controls, plus a version of the HF Limiter's shelf
+with Release, Tail and Transient pinned and one or two macro knobs over Freq,
+Threshold and Range. In/out meters only — no GR meter, no EQ display.
+
+**What moved.** `WARMTH_*`, `ODD_EVEN_SPAN`, `warmthLayers`, `warmthActive` and the
+guard wiring went from `hfLimiterParams.js` / `hfLimiterProcessor.js` to
+`phatssParams.js` / `phatssProcessor.js` unchanged — the user's re-voiced layers,
+the linear Warmth law, the pinned guard, the readout. `hfLimiterWarmthReadout.js`
+became `phatssWarmthReadout.js` (worker op `phatssWarmthReadout`). The warmth and
+guard tests moved to `test/dsp/phatss.test.js` verbatim apart from the plugin they
+run through. The HF Limiter is the shelf alone again: latency back to 3 ms, no
+`immediate` flag on `setParams`, no guard meter.
+
+**The macro.** Two knobs, because Freq is a different question from how hard:
+- **Tame** 0–10: Threshold `2 − 2·Tame` dB re the voice level and Range `2.4·Tame`
+  dB, together — more Tame acts earlier AND may go deeper. 0 takes the shelf out.
+- **Tone** 0–10: corner `2000·6^(Tone/10)` Hz, 2–12 kHz on a log scale.
+
+Tame 5 / Tone 10 is exactly the HF Limiter's default shelf (−8 dB, Range 12,
+12 kHz); with Warmth 0 a PHAT*SS render matches the HF Limiter at those settings
+to < 1e-6 (tested). Pinned: WARM shape, 35 ms release, Tail off, Transient off —
+the setting that matched the Fatso Warmth 7 bounce. ⚠ The Tame slopes (2 dB and
+2.4 dB a step) are reasoned to land the default on the HF Limiter's, not auditioned.
+
+**Soften — not included.** Asked whether Tube Saturation's Soften belongs here.
+Its slew limiter (`dsp/tapeCharacter.js`) is documented to need a clean,
+broadband, oversampled signal just ahead of ONE broadband nonlinearity, with its
+allowance referenced to that nonlinearity's knee — after a nonlinearity or on a
+band-split signal it reverses sign and becomes a distortion generator. PHAT*SS's
+nonlinearities are two parallel layers on a band below ~250 Hz; there is no
+broadband curve for Soften to protect. What Soften audibly does is a broad HF
+shelf, and the tape shelf already does that job linearly, program-dependently and
+with a no-overshoot proof. And the HF Limiter's own history (the Limen-style
+acceleration limiter) is the measured case against waveform-domain limiting on
+narration. If a fixed tape HF loss is ever wanted, Tube Saturation's HF Loss shelf
+is the closer idea — but the dynamic shelf already covers it.
