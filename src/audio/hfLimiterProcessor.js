@@ -37,6 +37,7 @@ export class HFLimiterKernel {
     this.listen = 'off'
     this.dryDelays = []
     this.dry = []
+    this.dryOut = []
     this.params = { ...HF_LIMITER_KERNEL_DEFAULTS }
     this.setParams({})
   }
@@ -84,8 +85,22 @@ export class HFLimiterKernel {
       outputChannels[ch].set(inputChannels[ch < nIn ? ch : nIn - 1].subarray(0, n))
     }
     const delta = this.listen === 'delta'
-    // The delta needs the input aligned to the output; kept only while asked.
-    if (delta) this._ensureDry(nOut)
+    // The delta needs the input aligned to the output. The delay runs whether
+    // or not Delta is on, so switching it on mid-play never plays a stale or
+    // empty ring for the first latency window.
+    this._ensureDry(nOut)
+    for (let ch = 0; ch < nOut; ch++) {
+      const buf = this.dryDelays[ch]
+      const st = this.dry[ch]
+      const input = inputChannels[ch < nIn ? ch : nIn - 1]
+      if (!(this.dryOut[ch]?.length >= n)) this.dryOut[ch] = new Float32Array(Math.max(n, 128))
+      const scratch = this.dryOut[ch]
+      for (let i = 0; i < n; i++) {
+        scratch[i] = buf[st.pos]
+        buf[st.pos] = input[i]
+        st.pos = st.pos + 1 === buf.length ? 0 : st.pos + 1
+      }
+    }
 
     // In place: the kernel reads each input sample before it writes that output.
     this.shelf.process(outputChannels, n)
@@ -94,15 +109,8 @@ export class HFLimiterKernel {
     for (let ch = 0; ch < nOut; ch++) {
       const out = outputChannels[ch]
       if (delta) {
-        const buf = this.dryDelays[ch]
-        const st = this.dry[ch]
-        const input = inputChannels[ch < nIn ? ch : nIn - 1]
-        for (let i = 0; i < n; i++) {
-          const d = buf[st.pos]
-          buf[st.pos] = input[i]
-          st.pos = st.pos + 1 === buf.length ? 0 : st.pos + 1
-          out[i] = d - out[i]
-        }
+        const d = this.dryOut[ch]
+        for (let i = 0; i < n; i++) out[i] = d[i] - out[i]
       } else if (g !== 1) {
         for (let i = 0; i < n; i++) out[i] *= g
       }

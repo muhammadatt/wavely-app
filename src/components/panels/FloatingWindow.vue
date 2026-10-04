@@ -364,6 +364,9 @@ onMounted(() => {
     // First open: rest near the top-right so the waveform stays visible.
     pos.value = { x: Math.max(16, window.innerWidth - boxWidth.value - 40), y: props.top }
   }
+  // A window allowed to be narrower than its natural width (`minWidth`) opens
+  // no wider than the viewport has room for; the rest is a no-op.
+  boxWidth.value = clampWidth(boxWidth.value)
   clampToViewport()
 
   // These windows are non-modal by design — audio keeps playing and the

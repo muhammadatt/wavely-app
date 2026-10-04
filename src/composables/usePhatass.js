@@ -2,7 +2,8 @@ import { reactive, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import {
-  applyPhatassRegion, computePeakCache, measurePhatassWarmthBands, measurePhatassWarmthPeak,
+  applyPhatassRegion, cancelPhatassWarmthPeak, computePeakCache, measurePhatassWarmthBands,
+  measurePhatassWarmthPeak,
 } from '../audio/processing.js'
 import { regionAlignDb, regionPeakDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
@@ -24,6 +25,7 @@ const phInputLevels = ref([])
 const phOutputLevels = ref([])
 let meterId = null
 let levelMeasuredFor = null
+let ceilingMeasuredFor = null
 // Warmth readout: what the Warmth stage does to the selection's low end, per
 // band, and the peak it leaves (phatassWarmthReadout.js). `bandsDb` /
 // `peakDb` null = not measured; the pending flags say a pass is in flight.
@@ -111,17 +113,26 @@ export function usePhatass() {
 
   function togglePreview() {
     const chain = initChain()
-    phPreview.value = !phPreview.value
-    chain.setEnabled(phatassEffect.id, phPreview.value)
-    if (phPreview.value) {
+    const on = !phPreview.value
+    if (on) {
+      // Every measured input — the guard's ceiling above all — is known before
+      // the chain is enabled, and pushed in full: an unmeasured ceiling would
+      // let Warmth raise the peak for the first moments of preview.
       refreshLevel()
+      const { start, end } = selectionSpan()
+      refreshCeiling(start, end)
       for (const [name, value] of Object.entries(phParams)) {
         chain.updateParam(phatassEffect.id, name, value)
       }
+    }
+    phPreview.value = on
+    chain.setEnabled(phatassEffect.id, on)
+    if (on) {
       startMeters(chain)
       scheduleWarmthReadout()
     } else {
       stopMeters()
+      cancelWarmthReadout()
     }
   }
 
@@ -135,11 +146,14 @@ export function usePhatass() {
 
   /**
    * The peak guard's ceiling: the selection's own peak (the whole file with
-   * nothing selected). Cheap — a scan of the source, no render — so it is
-   * re-read whenever the readout or apply runs.
+   * nothing selected). A scan of the source, no render, and only re-scanned
+   * when the span or the file changes — it is checked on every knob turn.
    */
   function refreshCeiling(start, end) {
     if (!state.currentFile || !(end > start)) return
+    const key = `${appState.activeDocumentId}:${state.revision}:${start}:${end}`
+    if (ceilingMeasuredFor === key) return
+    ceilingMeasuredFor = key
     const db = regionPeakDb(state.segments, start, end, state.currentFile.sampleRate, state.currentFile.channels)
     const v = Number.isFinite(db) ? db : null
     if (phParams.warmthCeilingDb === v) return
@@ -159,6 +173,7 @@ export function usePhatass() {
    */
   async function refreshWarmthReadout() {
     const seq = ++readoutSeq
+    if (!phPreview.value) return
     if (!state.currentFile || !warmthActive(phParams)) {
       phWarmthReadout.value = { bandsDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false }
       return
@@ -189,10 +204,26 @@ export function usePhatass() {
     }
   }
 
-  /** Re-measure shortly after the last change. */
+  /**
+   * Re-measure shortly after the last change. The guard's ceiling is cheap and
+   * load-bearing, so it follows the selection at once; the readout waits.
+   */
   function scheduleWarmthReadout() {
+    if (phPreview.value) {
+      const { start, end } = selectionSpan()
+      refreshCeiling(start, end)
+    }
     clearTimeout(readoutTimer)
     readoutTimer = setTimeout(refreshWarmthReadout, 250)
+  }
+
+  /** Drop any pending or in-flight readout: nothing renders after the panel stops. */
+  function cancelWarmthReadout() {
+    clearTimeout(readoutTimer)
+    readoutTimer = null
+    readoutSeq++
+    cancelPhatassWarmthPeak()
+    phWarmthReadout.value = { ...phWarmthReadout.value, bandsPending: false, peakPending: false }
   }
 
   async function apply() {
@@ -225,6 +256,7 @@ export function usePhatass() {
 
   function teardown() {
     stopMeters()
+    cancelWarmthReadout()
     if (phPreview.value) {
       const chain = getEffectChain(getAudioContext())
       chain.setEnabled(phatassEffect.id, false)

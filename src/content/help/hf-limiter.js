@@ -28,8 +28,8 @@ export default {
   ],
 
   notes: [
-    'Below the threshold the audio passes through untouched, bit for bit',
-    'The shelf is linear-phase, so the cut never rings or smears the voice',
+    'With Transient off, below the threshold the audio passes through untouched, bit for bit; Transient can still turn a sudden onset down below it',
+    'TIGHT is a linear-phase split, so its cut never rings or smears the voice; WARM is a gentle one-pole split, which shifts phase slightly where it cuts',
     'The curve shows the cut being applied right now, with the deepest Range allows dashed behind it',
     'For sibilance on its own, HF Softener knows more about voices; this is the general-purpose ceiling',
     'For low-end warmth with a gentle tape top end, use PHAT*SS',

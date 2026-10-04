@@ -139,6 +139,7 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
     window-id="saturation-bench"
     :z="z"
     :width="1410"
+    :min-width="720"
     :accent="ACCENT"
     brand-lead="SATURATION"
     brand-tail="BENCH"
@@ -159,7 +160,8 @@ const CAPTION = "font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;
     @apply="applyAndClose"
     @close="close"
   >
-    <div class="px-[22px] pt-[16px] pb-[18px] flex gap-[18px]">
+    <!-- min-w-max: narrower than its full width the window scrolls sideways rather than squeezing the layer rows -->
+    <div class="px-[22px] pt-[16px] pb-[18px] flex gap-[18px] min-w-max">
       <LevelMeter :levels="sbInputLevels" label="IN" :height="520" />
 
       <div class="flex-1 flex flex-col gap-[6px]">

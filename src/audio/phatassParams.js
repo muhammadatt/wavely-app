@@ -68,7 +68,7 @@ export const OUTPUT_MAX_DB = 12
 
 /**
  * How much of the full Odd→Even crossfade the knob covers. The whole crossfade
- * (pure tanh to pure quartic) was the knob's range at first; by ear only its
+ * (pure odd layer to pure quartic) was the knob's range at first; by ear only its
  * first quarter is useful on narration — past it the quartic mostly adds sub
  * (full Even at Warmth 10: +9.7 dB at 20–60 Hz on Southern Sunrise). So the
  * knob's travel spans that quarter: 100 is where the old scale read 25, and
@@ -78,16 +78,18 @@ export const ODD_EVEN_SPAN = 0.25
 
 /**
  * WARMTH — the low-end warmth/fatness combination voiced on the Saturation
- * Bench, as two fixed layers in series: an even curve (quartic) and an odd one
- * (tanh), each on the low band with a +24 dB bell pushing the body into the
- * curve. CHARACTER IS FIXED; the knobs only set how much of each is mixed in.
- * Both drives are already past the point where more drive changes anything
- * (the quartic caps at ~5.7 % THD past ~+15 dB, the tanh flattens past ~+36),
- * so a level knob is the honest control — Drive would mostly have been a
- * level knob in disguise.
+ * Bench, as two fixed layers in series: an even curve (quartic, low band to
+ * 250 Hz, +14 dB bell at 280 Hz) and an odd one (cubic, low band to 220 Hz,
+ * +10 dB bell at 240 Hz), each bell pushing the body into the curve.
+ * CHARACTER IS FIXED; the knobs only set how much of each is mixed in. Both
+ * drives sit past the point where more drive changes much (the quartic caps at
+ * ~5.7 % THD past ~+15 dB), so a level knob is the honest control — Drive
+ * would mostly have been a level knob in disguise.
  *
- * Order: quartic, then tanh — as voiced. `amountDb` is set per layer by
- * `warmthLayers`, not here.
+ * Order: quartic, then cubic — as voiced. `amountDb` is set per layer by
+ * `warmthLayers`, not here. ⚠ The first voicing was quartic 60 / 1–400 Hz /
+ * bell 350 +24 then tanh 50 / 1–300 Hz / bell 250 +24 (kept below for
+ * reference); the Southern Sunrise figures in this file were measured on it.
  */
 //export const WARMTH_LAYERS = [
 //  { curve: 'quartic', driveDb: 60, loHz: 1, hiHz: 400, emphType: 'bell', emphHz: 350, emphQ: 0.5, emphDb: 24, mode: 'full' },
@@ -122,12 +124,14 @@ export function warmthLevelDb(warmth) {
 }
 
 /**
- * How far the quartic sits under the tanh at the voicing above, on the
- * narration it was voiced on (Southern Sunrise: −42.58 vs −25.19 dBFS added
- * rms). Added to the quartic so the full crossfade's midpoint is equal
- * loudness (a point the knob no longer reaches: see ODD_EVEN_SPAN). ⚠ It is a
- * property of that recording's low band; on other material the balance point
- * moves a few dB.
+ * How far the quartic sits under the odd layer, measured on the FIRST voicing
+ * (quartic + tanh, see above) on the narration it was voiced on (Southern
+ * Sunrise: −42.58 vs −25.19 dBFS added rms). Added to the quartic so the full
+ * crossfade's midpoint is equal loudness (a point the knob no longer reaches:
+ * see ODD_EVEN_SPAN). ⚠ The shipping quartic + cubic pair measures a 20.8 dB
+ * gap on the same file, so the even side comes in ~3.4 dB later than this
+ * assumes. It is also a property of that recording's low band; on other
+ * material the balance point moves a few dB.
  */
 export const WARMTH_EVEN_MATCH_DB = 17.4
 

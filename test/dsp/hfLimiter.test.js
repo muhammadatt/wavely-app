@@ -300,6 +300,30 @@ test('delta is exactly the input minus the output', () => {
   }
 })
 
+test('delta switched on mid-play is exact from its first sample', () => {
+  // The dry delay runs with Delta off too, so turning it on (or off and on
+  // again) never plays a stale or empty ring for the first latency window.
+  const x = add(sine(300, 0.3), sine(9000, 0.1))
+  const params = toKernelParams({ ...BASE, transient: 6 })
+  const ref = processHFLimiterBuffer([x], SR, params).channelData[0]
+  const k = new HFLimiterKernel(SR)
+  k.setParams(params)
+  const y = new Float32Array(x.length)
+  const L = k.latencySamples
+  const B = 128
+  const deltaFrom = 40 * B, offAt = 80 * B, backOn = 90 * B
+  for (let off = 0; off < x.length; off += B) {
+    if (off === deltaFrom || off === backOn) k.setListen('delta')
+    if (off === offAt) k.setListen('off')
+    k.process([x.subarray(off, off + B)], [y.subarray(off, off + B)], B)
+  }
+  for (let i = L; i < x.length; i++) {
+    const delta = (i >= deltaFrom && i < offAt) || i >= backOn
+    const want = delta ? x[i - L] - ref[i] : ref[i]
+    assert.ok(Math.abs(y[i] - want) < 1e-6, `sample ${i} (${delta ? 'delta' : 'out'})`)
+  }
+})
+
 test('the threshold follows the file\'s voice level, not the knob alone', () => {
   const quiet = toKernelParams({ ...HF_LIMITER_DEFAULTS, voiceLevelDb: -30 })
   const hot = toKernelParams({ ...HF_LIMITER_DEFAULTS, voiceLevelDb: -14 })

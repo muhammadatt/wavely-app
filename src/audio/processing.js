@@ -941,14 +941,20 @@ export function measurePhatassWarmthBands(segments, start, end, params, sampleRa
  */
 let warmthPeakWorker = null
 let warmthPeakReject = null
+/** Terminate the in-flight whole-region Warmth peak pass, if any; it rejects with `err.cancelled`. */
+export function cancelPhatassWarmthPeak() {
+  if (!warmthPeakWorker) return
+  warmthPeakWorker.terminate()
+  warmthPeakWorker = null
+  const err = new Error('superseded')
+  err.cancelled = true
+  const reject = warmthPeakReject
+  warmthPeakReject = null
+  reject?.(err)
+}
+
 export function measurePhatassWarmthPeak(segments, start, end, params, sampleRate, channels) {
-  if (warmthPeakWorker) {
-    warmthPeakWorker.terminate()
-    warmthPeakWorker = null
-    const err = new Error('superseded')
-    err.cancelled = true
-    warmthPeakReject?.(err)
-  }
+  cancelPhatassWarmthPeak()
   const { warmthLayers, warmthGuard } = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
