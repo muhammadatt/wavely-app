@@ -31,16 +31,23 @@ export const PHATASS_DEFAULTS = {
   // (`softenLaw`). A gain on a band, never distortion, no latency of its own.
   soften: false,
   // 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
-  // together (`tapeShelf`). 0 takes the shelf out. 5 is −8 dB re the voice,
-  // Range 18; 10 reaches Range 36.
+  // together, on the chosen `curve` (`tapeShelf`). 0 takes the shelf out. On
+  // the default 'voice' curve 5 is −4 dB re the voice, Range 12; 10 is −14,
+  // Range 27.
   tame: 5,
-  // 0–10 — where the top end starts: the shelf's corner, 2 kHz (0, dark) to
-  // 12 kHz (10, only the very top).
+  // Tame's law (`tapeShelf`). 'voice' and 'fatso' both pin the corner at 2 kHz:
+  // 'fatso' is fitted to the EL7 Fatso's Warmth knob on music, 'voice' is the
+  // same shape 6 dB lower with the Range opening sooner, voiced on narration.
+  // 'original' is the DEPRECATED Tame/Tone law — off the panel, kept so a
+  // render can still reach it.
+  curve: 'voice',
+  // 0–10 — the 'original' curve's corner only: 2 kHz (0) to 12 kHz (10).
+  // Not on the panel; the 2 kHz curves ignore it.
   tone: 10,
-  // FATSO mode (on/off): Tame follows the law fitted to the EL7 Fatso's Warmth
-  // knob instead (`tapeShelf`) — corner pinned at 2 kHz, a higher threshold and
-  // a shallower Range at the bottom. Tone is ignored while it is on.
-  fatso: false,
+  // Where the shelf LISTENS: '2k' is the band it cuts; '4k' gives the detector
+  // its own split at 4 kHz (threshold DETECT_4K_COMP_DB lower), so sibilance
+  // triggers it before vowel brightness. The cut stays at 2 kHz either way.
+  detect: '2k',
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured, never a user setting — it is
   // what makes the shelf's threshold mean the same on a quiet take and a hot one.
@@ -213,22 +220,59 @@ export const FATSO_RANGE_PER_STEP_DB = 3
 export const FATSO_RANGE_OFFSET_DB = 9
 
 /**
+ * VOICE curve: FATSO's shape moved for narration. On narration the treble's
+ * 10 ms peaks sit ~8 dB lower re the gated RMS than on the Fatso's music clip
+ * (median −7.4 / −8.5 dB on a bright and a dull narration vs +0.7), so FATSO's
+ * thresholds (+10 … +6 at Tame 1–3) are crossed in 0–2 % of windows and the
+ * bottom of the knob does nothing. Threshold `6 − 2·Tame`, Range
+ * `max(3, 3·Tame − 3)` (27 at 10). Measured on the bright clip (4–16 kHz on
+ * sibilant frames / 2–4 kHz on voiced): Tame 1 −1.6 / −0.2, Tame 6 −7.9 / −2.2,
+ * Tame 10 −10.6 / −3.9 dB. ⚠ Two clips, chosen by reasoning, not audition.
+ */
+export const VOICE_THRESHOLD_TOP_DB = 6
+export const VOICE_THRESHOLD_PER_STEP_DB = 2
+export const VOICE_RANGE_MIN_DB = 3
+export const VOICE_RANGE_PER_STEP_DB = 3
+export const VOICE_RANGE_OFFSET_DB = 3
+
+export const TAME_CURVES = ['voice', 'fatso', 'original']
+
+/**
+ * DETECT 4K: the detector's own one-pole split, and how much lower its
+ * threshold sits. The 4 kHz band reads 2–5 dB under the 2 kHz one at the
+ * percentiles the thresholds live at (p90–p99 of 10 ms peaks: bright narration
+ * 3.8 / 1.9, dull 4.8 / 5.0, the Fatso music clip 2.5 / 2.5), so 3 dB keeps the
+ * two positions doing about as much and makes the switch change WHAT triggers
+ * the cut rather than how often. Applies to the 2 kHz curves only.
+ */
+export const DETECT_4K_HZ = 4000
+export const DETECT_4K_COMP_DB = 3
+
+/**
  * The macro: Tame sets how hard (Threshold and Range together, so the shelf
  * starts acting earlier AND may go deeper), Tone sets where (the corner, on a
  * log scale). Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz — the HF Limiter's
  * default threshold and corner, half again its Range (the HF Limiter stops at
- * 24; Tame reaches 36). Tame 0 takes the shelf out (Range 0). `fatso` swaps
- * in FATSO mode's law (above), with the corner pinned and Tone ignored.
+ * 24; Tame reaches 36). Tame 0 takes the shelf out (Range 0). This is the
+ * DEPRECATED 'original' curve; `curve` 'fatso' / 'voice' select the laws above,
+ * with the corner pinned at 2 kHz and Tone ignored.
  *
  * @returns {{ cornerHz: number, thresholdRelDb: number, rangeDb: number }}
  */
-export function tapeShelf(tame, tone, fatso = false) {
+export function tapeShelf(tame, tone, curve = 'original') {
   const t = clamp(Number(tame) || 0, 0, TAME_MAX)
-  if (fatso) {
+  if (curve === 'fatso') {
     return {
       cornerHz: FATSO_CORNER_HZ,
       thresholdRelDb: FATSO_THRESHOLD_TOP_DB - FATSO_THRESHOLD_PER_STEP_DB * t,
       rangeDb: t > 0 ? Math.max(FATSO_RANGE_MIN_DB, FATSO_RANGE_PER_STEP_DB * t - FATSO_RANGE_OFFSET_DB) : 0,
+    }
+  }
+  if (curve === 'voice') {
+    return {
+      cornerHz: FATSO_CORNER_HZ,
+      thresholdRelDb: VOICE_THRESHOLD_TOP_DB - VOICE_THRESHOLD_PER_STEP_DB * t,
+      rangeDb: t > 0 ? Math.max(VOICE_RANGE_MIN_DB, VOICE_RANGE_PER_STEP_DB * t - VOICE_RANGE_OFFSET_DB) : 0,
     }
   }
   const s = clamp(Number.isFinite(tone) ? tone : TONE_MAX, 0, TONE_MAX)
@@ -260,14 +304,17 @@ export function toKernelParams(params) {
   const voice = Number.isFinite(p.voiceLevelDb)
     ? clamp(p.voiceLevelDb, VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
     : ALIGN_TARGET_DBFS
-  const shelf = tapeShelf(p.tame, p.tone, !!p.fatso)
+  const curve = TAME_CURVES.includes(p.curve) ? p.curve : PHATASS_DEFAULTS.curve
+  const shelf = tapeShelf(p.tame, p.tone, curve)
+  const det4k = p.detect === '4k' && curve !== 'original'
   const soft = softenLaw(p.soften, p.tame)
   return {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     cornerHz: shelf.cornerHz,
-    thresholdDb: voice + shelf.thresholdRelDb,
+    thresholdDb: voice + shelf.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
+    detectCornerHz: det4k ? DETECT_4K_HZ : null,
     rangeDb: shelf.rangeDb,
     ...TAPE_SHELF,
     // Soften rides the shelf's Transient, on its own band, at Tame's depth.

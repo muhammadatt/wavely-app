@@ -71,6 +71,7 @@ export class PhatassKernel {
       transientCornerHz: p.transientCornerHz,
       transientSlope: p.transientSlope,
       transientGateLin: Number.isFinite(p.transientGateDb) ? dbToLin(p.transientGateDb) : null,
+      detectCornerHz: p.detectCornerHz,
     })
     this.outputLin = dbToLin(p.outputGainDb)
   }

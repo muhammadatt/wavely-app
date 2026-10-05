@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
+  DETECT_4K_HZ, DETECT_4K_COMP_DB,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
 } from '../../src/audio/phatassParams.js'
 import { HF_LIMITER_DEFAULTS, toKernelParams as toHFLimiterKernelParams } from '../../src/audio/hfLimiterParams.js'
@@ -76,7 +77,7 @@ test('Warmth 0, Soften off and Tame 0 pass the audio through untouched', () => {
   for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
 })
 
-test('the Tame/Tone macro: Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz', () => {
+test('the deprecated original Tame/Tone curve: Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz', () => {
   const s = tapeShelf(5, 10)
   assert.ok(Math.abs(s.cornerHz - 12000) < 1e-9)
   assert.equal(s.thresholdRelDb, -8)
@@ -92,38 +93,87 @@ test('the Tame/Tone macro: Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz', () =>
     assert.ok(tapeShelf(t, 10).rangeDb > tapeShelf(t - 1, 10).rangeDb)
   }
   // Shape and timing are pinned, whatever the panel sends.
-  const k = toKernelParams({ ...PHATASS_DEFAULTS, voiceLevelDb: -20 })
+  const k = toKernelParams({ ...PHATASS_DEFAULTS, curve: 'original', voiceLevelDb: -20 })
   for (const key of Object.keys(TAPE_SHELF)) assert.equal(k[key], TAPE_SHELF[key], key)
   assert.equal(k.thresholdDb, -28)
 })
 
 test('FATSO mode: Tame lands on the fitted Fatso points, corner pinned at 2 kHz, Tone ignored', () => {
-  assert.equal(PHATASS_DEFAULTS.fatso, false)
   // Fatso Warmth 5 / 6 / 7 were fitted at threshold +10 / +4 / 0 dB re the voice,
   // Range ≥ 3 / 3 / ≥ 9 — Tame 1 / 4 / 6 under the law.
   for (const [tame, thr, range] of [[1, 10, 3], [4, 4, 3], [6, 0, 9]]) {
-    const s = tapeShelf(tame, 10, true)
+    const s = tapeShelf(tame, 10, 'fatso')
     assert.equal(s.thresholdRelDb, thr, `Tame ${tame} threshold`)
     assert.ok(Math.abs(s.rangeDb - range) < 1e-9, `Tame ${tame} range ${s.rangeDb}`)
   }
-  for (const tone of [0, 3.7, 10]) assert.equal(tapeShelf(5, tone, true).cornerHz, FATSO_CORNER_HZ)
-  assert.equal(tapeShelf(0, 10, true).rangeDb, 0)
+  for (const tone of [0, 3.7, 10]) assert.equal(tapeShelf(5, tone, 'fatso').cornerHz, FATSO_CORNER_HZ)
+  assert.equal(tapeShelf(0, 10, 'fatso').rangeDb, 0)
   for (let t = 1; t <= 10; t++) {
-    assert.ok(tapeShelf(t, 0, true).thresholdRelDb < tapeShelf(t - 1, 0, true).thresholdRelDb)
-    assert.ok(tapeShelf(t, 0, true).rangeDb >= tapeShelf(t - 1, 0, true).rangeDb)
+    assert.ok(tapeShelf(t, 0, 'fatso').thresholdRelDb < tapeShelf(t - 1, 0, 'fatso').thresholdRelDb)
+    assert.ok(tapeShelf(t, 0, 'fatso').rangeDb >= tapeShelf(t - 1, 0, 'fatso').rangeDb)
   }
-  // The kernel follows the switch; off is the normal law, unchanged.
-  const k = toKernelParams({ ...PHATASS_DEFAULTS, fatso: true, tame: 4, tone: 9, voiceLevelDb: -20 })
+  // The kernel follows the curve.
+  const k = toKernelParams({ ...PHATASS_DEFAULTS, curve: 'fatso', tame: 4, tone: 9, voiceLevelDb: -20 })
   assert.equal(k.cornerHz, FATSO_CORNER_HZ)
   assert.equal(k.thresholdDb, -16)
   assert.equal(k.rangeDb, 3)
-  assert.deepEqual(toKernelParams({ ...PHATASS_DEFAULTS, fatso: false }), toKernelParams(PHATASS_DEFAULTS))
 })
 
-test('FATSO mode with Tame 0 (and Warmth, Soften off) still passes the audio through untouched', () => {
+test('VOICE curve (the default): FATSO\'s shape 6 dB lower, Range opening sooner, corner pinned at 2 kHz', () => {
+  assert.equal(PHATASS_DEFAULTS.curve, 'voice')
+  for (const [tame, thr, range] of [[1, 4, 3], [2, 2, 3], [4, -2, 9], [6, -6, 15], [10, -14, 27]]) {
+    const s = tapeShelf(tame, 10, 'voice')
+    assert.equal(s.thresholdRelDb, thr, `Tame ${tame} threshold`)
+    assert.ok(Math.abs(s.rangeDb - range) < 1e-9, `Tame ${tame} range ${s.rangeDb}`)
+    assert.equal(s.cornerHz, FATSO_CORNER_HZ)
+    // 6 dB under FATSO at every setting.
+    assert.equal(tapeShelf(tame, 10, 'fatso').thresholdRelDb - s.thresholdRelDb, 6)
+  }
+  assert.equal(tapeShelf(0, 10, 'voice').rangeDb, 0)
+  for (let t = 1; t <= 10; t++) {
+    assert.ok(tapeShelf(t, 0, 'voice').thresholdRelDb < tapeShelf(t - 1, 0, 'voice').thresholdRelDb)
+    assert.ok(tapeShelf(t, 0, 'voice').rangeDb >= tapeShelf(t - 1, 0, 'voice').rangeDb)
+  }
+  // An unknown curve falls back to the default rather than to the deprecated one.
+  assert.deepEqual(toKernelParams({ curve: 'nope', tame: 5 }), toKernelParams({ curve: 'voice', tame: 5 }))
+})
+
+test('DETECT: 2K shares the cut band, 4K listens above 4 kHz with the threshold 3 dB lower, the cut stays at 2 kHz', () => {
+  const at = (curve, detect) => toKernelParams({ curve, detect, tame: 5, voiceLevelDb: -20 })
+  assert.equal(PHATASS_DEFAULTS.detect, '2k')
+  for (const curve of ['voice', 'fatso']) {
+    const a = at(curve, '2k'), b = at(curve, '4k')
+    assert.equal(a.detectCornerHz, null)
+    assert.equal(b.detectCornerHz, DETECT_4K_HZ)
+    assert.equal(a.thresholdDb - b.thresholdDb, DETECT_4K_COMP_DB)
+    assert.equal(b.cornerHz, FATSO_CORNER_HZ)
+    assert.equal(a.rangeDb, b.rangeDb)
+  }
+  // The deprecated curve has its own corner: Detect does not apply to it.
+  assert.deepEqual(at('original', '4k'), at('original', '2k'))
+})
+
+test('DETECT 4K cuts a sibilant-band tone harder and a vowel-band tone less than 2K', () => {
+  const base = { warmth: 0, soften: false, voiceLevelDb: -20, curve: 'voice', tame: 6 }
+  const from = Math.floor(0.5 * SR), to = SR - 2000
+  const cut = (f, detect) => {
+    // At the voice level, so neither position reaches the Range floor.
+    const x = sine(f, 0.1)
+    const { channelData: [y], latencySamples: L } = run(x, { ...base, detect })
+    return db(toneAmp(y.subarray(L), f, from - L, to - L) / 0.1)
+  }
+  const s2 = cut(8000, '2k'), s4 = cut(8000, '4k'), v2 = cut(2200, '2k'), v4 = cut(2200, '4k')
+  assert.ok(s4 < s2 - 1, `8 kHz: 4K ${s4.toFixed(2)} vs 2K ${s2.toFixed(2)} dB`)
+  assert.ok(v4 > v2 + 0.3, `2.2 kHz: 4K ${v4.toFixed(2)} vs 2K ${v2.toFixed(2)} dB`)
+  assert.ok(v2 < -1 && s2 < -1, 'both tones are being cut at all')
+})
+
+test('either curve and either detector with Tame 0 (and Warmth, Soften off) pass the audio through untouched', () => {
   const x = add(sine(300, 0.3), noise(SR, 0.2, 7))
-  const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, fatso: true })
-  for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
+  for (const curve of ['voice', 'fatso']) for (const detect of ['2k', '4k']) {
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, curve, detect })
+    for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`${curve}/${detect}: sample ${i} differs`)
+  }
 })
 
 test('FATSO mode cuts the top end from 2 kHz, and only above its higher threshold', () => {
@@ -131,7 +181,7 @@ test('FATSO mode cuts the top end from 2 kHz, and only above its higher threshol
   const n = SR
   const lo = sine(200, 0.1, n), hi = sine(6000, 0.3, n)
   const x = add(lo, hi)
-  const base = { warmth: 0, soften: false, voiceLevelDb: -20, fatso: true }
+  const base = { warmth: 0, soften: false, voiceLevelDb: -20, curve: 'fatso' }
   const from = Math.floor(0.5 * SR), to = n - 2000
   const out = tame => {
     const { channelData: [y], latencySamples: L } = run(x, { ...base, tame })
@@ -149,7 +199,7 @@ test('FATSO mode cuts the top end from 2 kHz, and only above its higher threshol
 
 test('with Warmth off, the tape shelf is the HF Limiter at the matching settings', () => {
   const x = add(sine(300, 0.3), sine(6000, 0.2), noise(SR, 0.05, 3))
-  const ph = run(x, { voiceLevelDb: -20, warmth: 0, tame: 5, tone: 10 })
+  const ph = run(x, { voiceLevelDb: -20, warmth: 0, tame: 5, tone: 10, curve: 'original' })
   const hf = processHFLimiterBuffer([x], SR, toHFLimiterKernelParams({
     ...HF_LIMITER_DEFAULTS, voiceLevelDb: -20, freq: 12000, threshold: -8, range: 18,
     shape: 'warm', release: TAPE_SHELF.releaseMs, tail: 0, transient: 0, output: 0,

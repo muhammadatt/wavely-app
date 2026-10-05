@@ -17,11 +17,11 @@
  *
  * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing
  * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
- * match). TAME is a macro for Threshold and Range together, TONE for where the
- * tilt starts (the corner, 2–12 kHz). See phatassParams.js for the mapping.
- * FATSO (a lit toggle) swaps Tame onto the law fitted to the EL7 Fatso's Warmth
- * knob: corner pinned at 2 kHz (Tone greyed out), a higher threshold and a
- * shallower Range at the bottom of the knob.
+ * match), its corner at 2 kHz. TAME is a macro for Threshold and Range together,
+ * on one of two CURVES: VOICE (voiced on narration) or FATSO (fitted to the EL7
+ * Fatso's Warmth knob on music). DETECT picks where the shelf listens: 2K, the
+ * band it cuts, or 4K, so sibilance triggers it before vowel brightness. The
+ * old Tame/Tone law is deprecated and off the panel. See phatassParams.js.
  *
  * In/out meters only. The readout under the Warmth knobs is what the warmth
  * stage did to this selection's low bands and peak.
@@ -30,11 +30,12 @@ import { computed, onMounted, watch } from 'vue'
 import { usePhatass } from '../../composables/usePhatass.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, TONE_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
+  WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
   warmthActive, tapeShelf, softenLaw,
 } from '../../audio/phatassParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceLampPill from '../knobs/DeviceLampPill.vue'
+import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
@@ -98,10 +99,6 @@ const readoutPeak = computed(() => {
 const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtOddEven = v => (v <= 0 ? 'ODD' : `${Math.round(v)}`)
 const fmtTame = v => (v <= 0 ? 'OFF' : v.toFixed(1))
-const fmtTone = v => {
-  const hz = tapeShelf(1, v, !!phParams.fatso).cornerHz
-  return `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)}k`
-}
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 // Soften has no knob of its own: say how deep Tame currently lets it go.
 const softenCaption = computed(() => {
@@ -110,12 +107,20 @@ const softenCaption = computed(() => {
   return d > 0 ? `UP TO −${Math.round(d)} dB` : 'TAME IS 0'
 })
 
-// FATSO has no knob either: say what Tame currently does under its law.
-const fatsoCaption = computed(() => {
-  if (!phParams.fatso) return 'OFF'
-  const s = tapeShelf(phParams.tame, phParams.tone, true)
-  return s.rangeDb > 0 ? `2k · ≤${Math.round(s.rangeDb)} dB` : 'TAME IS 0'
+const CURVE_OPTIONS = [
+  { value: 'voice', label: 'VOICE', title: 'Tame voiced on narration: it starts on the brightest sibilance at low settings and keeps going deeper to the top of the knob' },
+  { value: 'fatso', label: 'FATSO', title: 'Tame fitted to the Warmth knob of an EL7 Fatso (on music): lighter at the bottom of the knob, about 6 dB later than VOICE everywhere' },
+]
+const DETECT_OPTIONS = [
+  { value: '2k', label: '2K', title: 'The shelf listens to the same band it cuts, everything above 2 kHz: loud vowel brightness and sibilance both trigger it' },
+  { value: '4k', label: '4K', title: 'The shelf listens above 4 kHz but still cuts from 2 kHz: sibilance triggers it before vowel brightness does' },
+]
+// What Tame currently does on the chosen curve.
+const curveCaption = computed(() => {
+  const s = tapeShelf(phParams.tame, phParams.tone, phParams.curve)
+  return s.rangeDb > 0 ? `CUTS UP TO ${Math.round(s.rangeDb)} dB` : 'TAME IS 0'
 })
+const detectCaption = computed(() => (phParams.detect === '4k' ? 'SIBILANCE FIRST' : 'ALL TREBLE'))
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -191,13 +196,6 @@ async function applyAndClose() {
                 label="Tame" :accent="ACCENT" :format-value="fmtTame" :disabled="!phPreview"
               />
             </div>
-            <div class="w-[80px]" title="Where the top-end tilt starts. It is a gentle 6 dB/oct tilt, so it reaches an octave or more below this">
-              <Knob
-                :model-value="phParams.tone" @update:model-value="v => syncParam('tone', v)"
-                :min="0" :max="TONE_MAX" :step="0.1" :value-font-px="13"
-                label="Tone" :accent="ACCENT" :format-value="fmtTone" :disabled="!phPreview || phParams.tame <= 0 || !!phParams.fatso"
-              />
-            </div>
             <div class="w-[80px]">
               <Knob
                 :model-value="phParams.output" @update:model-value="v => syncParam('output', v)"
@@ -205,20 +203,29 @@ async function applyAndClose() {
                 label="Output" :accent="ACCENT" :format-value="fmtDb" :disabled="!phPreview"
               />
             </div>
-            <div class="w-[80px] flex flex-col items-center justify-center gap-[6px] pb-[14px]">
-              <DeviceLampPill
-                :model-value="!!phParams.fatso" @update:model-value="v => syncParam('fatso', v)"
-                label="FATSO" :accent="ACCENT" :disabled="!phPreview"
-                title="Tame behaves like the Warmth knob on an EL7 Fatso: the top end is turned down from 2 kHz (Tone is pinned there), starting only on the loudest treble at low settings and cutting gently at first. Fitted to Fatso Warmth 5, 6 and 7 at Tame 1, 4 and 6 on a file at about −23 dBFS"
-              />
-              <span
-                :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.08em', color: phParams.fatso ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.3)' }"
-              >{{ fatsoCaption }}</span>
-            </div>
           </div>
         </div>
 
         <LevelMeter :levels="phOutputLevels" label="OUT" :height="150" />
+      </div>
+
+      <div class="flex justify-center items-end gap-[28px] mt-[16px]">
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">CURVE</span>
+          <DeviceChoiceRocker
+            :model-value="phParams.curve" :options="CURVE_OPTIONS" :accent="ACCENT"
+            :disabled="!phPreview || phParams.tame <= 0" label="Tame curve" :caption="curveCaption"
+            @update:model-value="v => syncParam('curve', v)"
+          />
+        </div>
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">DETECT</span>
+          <DeviceChoiceRocker
+            :model-value="phParams.detect" :options="DETECT_OPTIONS" :accent="ACCENT"
+            :disabled="!phPreview || phParams.tame <= 0" label="Tame detector" :caption="detectCaption"
+            @update:model-value="v => syncParam('detect', v)"
+          />
+        </div>
       </div>
 
 
@@ -250,7 +257,7 @@ async function applyAndClose() {
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
         Warmth fattens the low end without raising the peak, Soften rounds off sudden
-        attacks, and Tame rounds off the top the way tape does, starting at Tone.
+        attacks, and Tame rounds off the top from 2 kHz the way tape does.
       </p>
     </div>
   </FloatingWindow>

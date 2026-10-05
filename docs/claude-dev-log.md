@@ -5662,3 +5662,49 @@ free fit) with Output +0.06 / +0.23 / +0.59. The travel between and past those
 points is interpolation, and above Tame 6 it is extrapolation (Tame 10: −8 dB,
 Range 21). Soften still rides Tame and is not affected by the switch. Panel: a FATSO lamp pill beside
 Output, caption `2k · ≤N dB` (the current Range). Not auditioned.
+
+### PHAT*SS — VOICE curve, original Tame/Tone deprecated, DETECT 2K/4K (October 2026)
+
+Owner, after auditioning FATSO: it sounds "more taming than just duller", but the
+bottom of the knob is subtle and the top wants more depth. Then: deprecate the
+original curve, keep FATSO and the candidate, put the detector on a toggle.
+
+**Why FATSO's bottom is subtle on narration.** The detector compares each sample
+of the band above 2 kHz (`x − LP1`) against a threshold set from the WHOLE
+file's broadband gated RMS. On narration that band's 10 ms peaks sit far lower
+against the RMS than on the Fatso's music clip: median −7.4 / −8.5 dB (bright /
+dull narration, owner-supplied `Messy_and_Bright` and `art_test_clip_orig`)
+against +0.7, 99th percentile +7.4 / +6.9 against +10.4. FATSO's +10 / +8 / +6
+at Tame 1–3 are crossed in 0–2 % of windows. At the top, by Tame 8–10 the
+threshold is under nearly every peak, so depth is set by how far peaks rise over
+it and turning further mostly adds cuts that are already happening.
+
+**Measured, current FATSO** (energy change, sibilant frames 4–16 kHz / voiced
+frames 2–4 kHz; a frame is sibilant when 4–16 kHz outweighs 100–1000 Hz):
+bright Tame 1 −0.5 / 0, Tame 6 −4.4 / −0.7, Tame 10 −8.9 / −2.7; dull Tame 6
+−0.1 / −1.1, Tame 10 −2.3 / −3.1. On the dull clip the loudest treble is
+VOWELS at 2–4 kHz, so it trims those first and leaves the few sibilants alone.
+
+**VOICE curve** (`curve: 'voice'`, the default): threshold `6 − 2·Tame`, Range
+`max(3, 3·Tame − 3)`. Bright: Tame 1 −1.6 / −0.2, Tame 6 −7.9 / −2.2, Tame 10
+−10.6 / −3.9. Dull: Tame 6 −1.4 / −2.7, Tame 10 −5.6 / −3.9. It no longer matches
+the Fatso bounces (on music Tame 1 would act like Fatso Warmth 6); FATSO stays
+selectable for that.
+
+**Original Tame/Tone deprecated.** Off the panel with the Tone knob (both
+remaining curves pin the corner at 2 kHz, so Tone had nothing to do); still
+reachable as `curve: 'original'`, and still the curve the HF Limiter
+equivalence test runs on. An unknown curve falls back to VOICE, not to it.
+
+**DETECT 2K / 4K.** `ShelfLimiterStage` takes `detectCornerHz`: the detector
+reads its own one-pole split while the cut stays on the shelf's corner. The
+4 kHz band reads 2–5 dB under the 2 kHz one at p90–p99 of 10 ms peaks (bright
+3.8 / 1.9, dull 4.8 / 5.0, music 2.5 / 2.5), so 4K lowers the threshold by
+`DETECT_4K_COMP_DB` = 3 to keep the overall cut about equal and change WHAT
+triggers it. Measured (VOICE, sibilant / vowel): bright Tame 5 −6.7 / −1.6 →
+−7.5 / −1.4, dull Tame 5 −0.8 / −2.1 → −1.1 / −1.7, overall >2 kHz within
+0.3 dB. A modest shift, since the cut is still a 2 kHz shelf over the whole
+treble once triggered. ⚠ With a separate detector the shelf's no-overshoot
+proof no longer applies (it bounds the band being cut) — a tamer, not a
+ceiling. Applies to the 2 kHz curves only; `null` is bit-identical to before
+(the HF Limiter suite is unchanged). Not auditioned.

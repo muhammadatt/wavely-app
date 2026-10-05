@@ -293,6 +293,9 @@ export class ShelfLimiterStage {
     this.tOutX1 = []
     this.tOutY1 = []
     this.tSplit = false
+    this.dDetX1 = []
+    this.dDetY1 = []
+    this.dSplit = false
     this.gain = 1
     this.slow = 1
     this.minGain = 1
@@ -303,6 +306,7 @@ export class ShelfLimiterStage {
     cornerHz, thresholdLin, floorLin, releaseMs,
     shape = 'tight', tailMs = 0, tailChargeMs = TAIL_CHARGE_MS, transientDb = 0,
     transientCornerHz = null, transientSlope = TRANSIENT_SLOPE, transientGateLin = null,
+    detectCornerHz = null,
   }) {
     const coeff = ms => Math.exp(-1 / (Math.max(1, ms) * 1e-3 * this.sampleRate))
     const coeffFine = ms => Math.exp(-1 / (ms * 1e-3 * this.sampleRate))
@@ -322,6 +326,18 @@ export class ShelfLimiterStage {
       const tl = onePoleLowpass(this.sampleRate, transientCornerHz)
       this.tLpB0 = tl.b0
       this.tLpA1 = tl.a1
+    }
+    // A SEPARATE DETECTOR BAND (PHAT*SS's DETECT): the shelf still cuts its own
+    // band at `cornerHz`, but decides how much from a one-pole split of the
+    // input at `detectCornerHz` — so a 4 kHz detector over a 2 kHz cut goes for
+    // sibilance before vowel brightness. ⚠ THE NO-OVERSHOOT PROOF DOES NOT
+    // CARRY OVER: it bounds the band being cut, and the detector is no longer
+    // that band. A tamer, not a ceiling. null keeps the shared band, bit for bit.
+    this.dSplit = Number.isFinite(detectCornerHz) && detectCornerHz > 0
+    if (this.dSplit) {
+      const dl = onePoleLowpass(this.sampleRate, detectCornerHz)
+      this.dLpB0 = dl.b0
+      this.dLpA1 = dl.a1
     }
     this.cornerHz = cornerHz
     this.thresholdLin = thresholdLin
@@ -353,6 +369,8 @@ export class ShelfLimiterStage {
       this.tDetY1.push(0)
       this.tOutX1.push(0)
       this.tOutY1.push(0)
+      this.dDetX1.push(0)
+      this.dDetY1.push(0)
     }
     if (n > this.channels) this.channels = n
   }
@@ -375,6 +393,8 @@ export class ShelfLimiterStage {
     const tSlope = this.tSlope
     const tSplit = this.tSplit
     const tb0 = this.tLpB0, ta1 = this.tLpA1
+    const dSplit = this.dSplit
+    const db0 = this.dLpB0, da1 = this.dLpA1
     let tf = this.tFast, ts = this.tSlow, gt = this.tGain, minTGain = this.minTGain
     let s = this.slow
     let g = this.gain
@@ -404,7 +424,15 @@ export class ShelfLimiterStage {
         const h = xc - lp
         this.band[ch][0] = xc
         this.band[ch][1] = h
-        const a = h < 0 ? -h : h
+        let a = h < 0 ? -h : h
+        if (dSplit) {
+          let dl = db0 * (xc + this.dDetX1[ch]) - da1 * this.dDetY1[ch]
+          this.dDetX1[ch] = xc
+          if (dl > -ERROR_FLOOR && dl < ERROR_FLOOR) dl = 0
+          this.dDetY1[ch] = dl
+          const hd = xc - dl
+          a = hd < 0 ? -hd : hd
+        }
         if (a > m) m = a
         if (tSplit) {
           let tl = tb0 * (xc + this.tDetX1[ch]) - ta1 * this.tDetY1[ch]
