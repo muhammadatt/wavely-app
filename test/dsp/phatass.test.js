@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
-  DETECT_4K_HZ, DETECT_4K_COMP_DB,
+  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
 } from '../../src/audio/phatassParams.js'
 import { HF_LIMITER_DEFAULTS, toKernelParams as toHFLimiterKernelParams } from '../../src/audio/hfLimiterParams.js'
@@ -113,7 +113,7 @@ test('FATSO mode: Tame lands on the fitted Fatso points, corner pinned at 2 kHz,
     assert.ok(tapeShelf(t, 0, 'fatso').rangeDb >= tapeShelf(t - 1, 0, 'fatso').rangeDb)
   }
   // The kernel follows the curve.
-  const k = toKernelParams({ ...PHATASS_DEFAULTS, curve: 'fatso', tame: 4, tone: 9, voiceLevelDb: -20 })
+  const k = toKernelParams({ ...PHATASS_DEFAULTS, curve: 'fatso', detect: CURVE_DETECT.fatso, tame: 4, tone: 9, voiceLevelDb: -20 })
   assert.equal(k.cornerHz, FATSO_CORNER_HZ)
   assert.equal(k.thresholdDb, -16)
   assert.equal(k.rangeDb, 3)
@@ -140,7 +140,9 @@ test('VOICE curve (the default): FATSO\'s shape 6 dB lower, Range opening sooner
 
 test('DETECT: 2K shares the cut band, 4K listens above 4 kHz with the threshold 3 dB lower, the cut stays at 2 kHz', () => {
   const at = (curve, detect) => toKernelParams({ curve, detect, tame: 5, voiceLevelDb: -20 })
-  assert.equal(PHATASS_DEFAULTS.detect, '2k')
+  // The default is the VOICE curve's pair.
+  assert.equal(PHATASS_DEFAULTS.detect, CURVE_DETECT[PHATASS_DEFAULTS.curve])
+  assert.deepEqual(CURVE_DETECT, { voice: '4k', fatso: '2k' })
   for (const curve of ['voice', 'fatso']) {
     const a = at(curve, '2k'), b = at(curve, '4k')
     assert.equal(a.detectCornerHz, null)
@@ -181,7 +183,7 @@ test('FATSO mode cuts the top end from 2 kHz, and only above its higher threshol
   const n = SR
   const lo = sine(200, 0.1, n), hi = sine(6000, 0.3, n)
   const x = add(lo, hi)
-  const base = { warmth: 0, soften: false, voiceLevelDb: -20, curve: 'fatso' }
+  const base = { warmth: 0, soften: false, voiceLevelDb: -20, curve: 'fatso', detect: CURVE_DETECT.fatso }
   const from = Math.floor(0.5 * SR), to = n - 2000
   const out = tame => {
     const { channelData: [y], latencySamples: L } = run(x, { ...base, tame })

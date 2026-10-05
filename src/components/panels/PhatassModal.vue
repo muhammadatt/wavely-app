@@ -31,7 +31,7 @@ import { usePhatass } from '../../composables/usePhatass.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
-  warmthActive, tapeShelf, softenLaw,
+  warmthActive, tapeShelf, softenLaw, CURVE_DETECT,
 } from '../../audio/phatassParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceLampPill from '../knobs/DeviceLampPill.vue'
@@ -121,6 +121,13 @@ const curveCaption = computed(() => {
   return s.rangeDb > 0 ? `CUTS UP TO ${Math.round(s.rangeDb)} dB` : 'TAME IS 0'
 })
 const detectCaption = computed(() => (phParams.detect === '4k' ? 'SIBILANCE FIRST' : 'ALL TREBLE'))
+
+// Each curve brings its paired detector (VOICE + 4K, FATSO + 2K); DETECT can
+// still be moved afterwards.
+function setCurve(v) {
+  syncParam('curve', v)
+  if (CURVE_DETECT[v]) syncParam('detect', CURVE_DETECT[v])
+}
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -215,7 +222,7 @@ async function applyAndClose() {
           <DeviceChoiceRocker
             :model-value="phParams.curve" :options="CURVE_OPTIONS" :accent="ACCENT"
             :disabled="!phPreview || phParams.tame <= 0" label="Tame curve" :caption="curveCaption"
-            @update:model-value="v => syncParam('curve', v)"
+            @update:model-value="setCurve"
           />
         </div>
         <div class="flex flex-col items-center gap-[8px]">

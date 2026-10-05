@@ -5708,3 +5708,12 @@ treble once triggered. ⚠ With a separate detector the shelf's no-overshoot
 proof no longer applies (it bounds the band being cut) — a tamer, not a
 ceiling. Applies to the 2 kHz curves only; `null` is bit-identical to before
 (the HF Limiter suite is unchanged). Not auditioned.
+
+### PHAT*SS — curves paired with detectors (October 2026)
+
+Owner, after auditioning: VOICE pairs well with 4K on narration, FATSO with 2K
+on music. `CURVE_DETECT = { voice: '4k', fatso: '2k' }`; the default detect is
+now 4K (VOICE's pair), and choosing a CURVE on the panel moves DETECT to its
+pair. DETECT stays on the panel and can be set against the pair afterwards —
+kept rather than folded into one four-way switch so the off-pair combinations
+remain auditionable.

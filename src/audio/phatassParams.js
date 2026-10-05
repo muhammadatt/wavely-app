@@ -47,7 +47,8 @@ export const PHATASS_DEFAULTS = {
   // Where the shelf LISTENS: '2k' is the band it cuts; '4k' gives the detector
   // its own split at 4 kHz (threshold DETECT_4K_COMP_DB lower), so sibilance
   // triggers it before vowel brightness. The cut stays at 2 kHz either way.
-  detect: '2k',
+  // Defaults to the VOICE curve's pair (CURVE_DETECT).
+  detect: '4k',
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured, never a user setting — it is
   // what makes the shelf's threshold mean the same on a quiet take and a hot one.
@@ -236,6 +237,13 @@ export const VOICE_RANGE_PER_STEP_DB = 3
 export const VOICE_RANGE_OFFSET_DB = 3
 
 export const TAME_CURVES = ['voice', 'fatso', 'original']
+
+/**
+ * The detector each curve is paired with, by ear: VOICE with 4K on narration,
+ * FATSO with 2K on music. The panel moves DETECT to the pair when CURVE
+ * changes; DETECT can still be set against it.
+ */
+export const CURVE_DETECT = { voice: '4k', fatso: '2k' }
 
 /**
  * DETECT 4K: the detector's own one-pole split, and how much lower its
