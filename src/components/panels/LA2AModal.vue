@@ -389,6 +389,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
                 :min="0" :max="1" :step="0.01"
                 :default-value="1"
                 min-label="0" max-label="100"
+                :tip="formatPercent(la2aMix)"
                 label="Mix" :format-value="formatPercent"
                 :disabled="off"
               />
