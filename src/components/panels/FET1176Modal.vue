@@ -246,10 +246,10 @@ async function applyAndClose() {
             :min="0" :max="100" :step="1"
             :default-value="FET1176_DEFAULTS.inputDrive"
             :dots="INPUT_SCALE.dots" :labels="INPUT_SCALE.labels"
+            :tip="inputReadout"
             label="Input" :format-value="formatInteger"
             :disabled="off"
           />
-          <div class="c76-readout">{{ inputReadout }}</div>
         </div>
 
         <div class="c76-center">
@@ -304,10 +304,10 @@ async function applyAndClose() {
             :min="FET1176_OUTPUT_MIN_DB" :max="FET1176_OUTPUT_MAX_DB" :step="0.1"
             :default-value="0"
             :dots="OUTPUT_SCALE.dots" :labels="OUTPUT_SCALE.labels" :label-radius="80" :label-size="13"
+            :tip="outputReadout"
             label="Output" :format-value="formatSignedDb"
             :disabled="off"
           />
-          <div class="c76-readout">{{ outputReadout }}</div>
         </div>
       </div>
 
@@ -349,10 +349,10 @@ async function applyAndClose() {
               :min="1" :max="7" :step="1"
               :default-value="FET1176_DEFAULTS.attack"
               :dots="BALLISTICS_DOTS" :labels="BALLISTICS_LABELS"
+              :tip="attackReadout"
               label="Attack" :format-value="formatDial"
               :disabled="off"
             />
-            <div class="c76-sub-readout">{{ attackReadout }}</div>
             <div class="c76-small-title">Attack</div>
           </div>
           <div class="c76-small-knob">
@@ -364,10 +364,10 @@ async function applyAndClose() {
               :min="1" :max="7" :step="1"
               :default-value="FET1176_DEFAULTS.release"
               :dots="BALLISTICS_DOTS" :labels="BALLISTICS_LABELS"
+              :tip="releaseReadout"
               label="Release" :format-value="formatDial"
               :disabled="off"
             />
-            <div class="c76-sub-readout">{{ releaseReadout }}</div>
             <div class="c76-small-title">Release</div>
           </div>
         </div>
@@ -400,6 +400,7 @@ async function applyAndClose() {
               :min="0" :max="1" :step="0.01"
               :default-value="1"
               min-label="0" max-label="100"
+              :tip="mixReadout"
               label="Mix" :format-value="formatPercent"
               :disabled="off"
             />
@@ -444,7 +445,6 @@ async function applyAndClose() {
 .c76-title { font-size: 15px; font-weight: 500; letter-spacing: .24em; }
 .c76-small-title { font-size: 11px; font-weight: 500; letter-spacing: .2em; }
 .c76-tiny-title { font-size: 9px; font-weight: 400; letter-spacing: .18em; white-space: nowrap; }
-.c76-readout { margin-top: -12px; font-size: 11px; font-weight: 400; line-height: 1; letter-spacing: .18em; color: #f2f0ec; }
 .c76-sub-readout { font-size: 10px; line-height: 1; letter-spacing: .16em; color: #b9b6b0; }
 .c76-sub-readout--sm { font-size: 9px; letter-spacing: .14em; }
 
