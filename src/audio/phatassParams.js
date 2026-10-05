@@ -37,6 +37,10 @@ export const PHATASS_DEFAULTS = {
   // 0–10 — where the top end starts: the shelf's corner, 2 kHz (0, dark) to
   // 12 kHz (10, only the very top).
   tone: 10,
+  // FATSO mode (on/off): Tame follows the law fitted to the EL7 Fatso's Warmth
+  // knob instead (`tapeShelf`) — corner pinned at 2 kHz, a higher threshold and
+  // a shallower Range at the bottom. Tone is ignored while it is on.
+  fatso: false,
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured, never a user setting — it is
   // what makes the shelf's threshold mean the same on a quiet take and a hot one.
@@ -187,16 +191,46 @@ export const TAME_THRESHOLD_PER_STEP_DB = 2 // each Tame step lowers it this muc
 export const TAME_RANGE_PER_STEP_DB = 3.6 // and deepens the Range this much (36 at 10, Soften's top too)
 
 /**
+ * FATSO mode's law, fitted to four EL7 Fatso bounces (Input 2 with Warmth
+ * 2/5/6/7, one music clip at −23.0 dBFS gated RMS; docs/claude-dev-log.md,
+ * "PHAT*SS — Tame/Tone against the EL7 Fatso's Warmth"). With the corner at the
+ * Fatso's ~2 kHz, its Warmth moves the THRESHOLD (+10 / +4 / 0 dB re the voice
+ * at Warmth 5 / 6 / 7; Warmth 2 does nothing) and its Range opens with it, from
+ * ~3 dB at Warmth 6 to ≥ 9 at 7 — shallower than Tame's own law at the same
+ * threshold. So: threshold `12 − 2·Tame`, Range `max(3, 3·Tame − 9)`, which puts
+ * Warmth 5 / 6 / 7 at Tame 1 / 4 / 6 (fitted points; the travel between and
+ * past them is not measured).
+ *
+ * ⚠ THE FATSO'S THRESHOLD IS ABSOLUTE, ours follows the file's level — the
+ * mapping holds for a file at the fitted clip's level only. A steeper-than-
+ * limiter law and a different release were tried and fit worse.
+ */
+export const FATSO_CORNER_HZ = 2000
+export const FATSO_THRESHOLD_TOP_DB = 12
+export const FATSO_THRESHOLD_PER_STEP_DB = 2
+export const FATSO_RANGE_MIN_DB = 3
+export const FATSO_RANGE_PER_STEP_DB = 3
+export const FATSO_RANGE_OFFSET_DB = 9
+
+/**
  * The macro: Tame sets how hard (Threshold and Range together, so the shelf
  * starts acting earlier AND may go deeper), Tone sets where (the corner, on a
  * log scale). Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz — the HF Limiter's
  * default threshold and corner, half again its Range (the HF Limiter stops at
- * 24; Tame reaches 36). Tame 0 takes the shelf out (Range 0).
+ * 24; Tame reaches 36). Tame 0 takes the shelf out (Range 0). `fatso` swaps
+ * in FATSO mode's law (above), with the corner pinned and Tone ignored.
  *
  * @returns {{ cornerHz: number, thresholdRelDb: number, rangeDb: number }}
  */
-export function tapeShelf(tame, tone) {
+export function tapeShelf(tame, tone, fatso = false) {
   const t = clamp(Number(tame) || 0, 0, TAME_MAX)
+  if (fatso) {
+    return {
+      cornerHz: FATSO_CORNER_HZ,
+      thresholdRelDb: FATSO_THRESHOLD_TOP_DB - FATSO_THRESHOLD_PER_STEP_DB * t,
+      rangeDb: t > 0 ? Math.max(FATSO_RANGE_MIN_DB, FATSO_RANGE_PER_STEP_DB * t - FATSO_RANGE_OFFSET_DB) : 0,
+    }
+  }
   const s = clamp(Number.isFinite(tone) ? tone : TONE_MAX, 0, TONE_MAX)
   return {
     cornerHz: TONE_MIN_HZ * (TONE_MAX_HZ / TONE_MIN_HZ) ** (s / TONE_MAX),
@@ -226,7 +260,7 @@ export function toKernelParams(params) {
   const voice = Number.isFinite(p.voiceLevelDb)
     ? clamp(p.voiceLevelDb, VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
     : ALIGN_TARGET_DBFS
-  const shelf = tapeShelf(p.tame, p.tone)
+  const shelf = tapeShelf(p.tame, p.tone, !!p.fatso)
   const soft = softenLaw(p.soften, p.tame)
   return {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),

@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
-  toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATASS_DEFAULTS,
+  toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
 } from '../../src/audio/phatassParams.js'
 import { HF_LIMITER_DEFAULTS, toKernelParams as toHFLimiterKernelParams } from '../../src/audio/hfLimiterParams.js'
@@ -95,6 +95,56 @@ test('the Tame/Tone macro: Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz', () =>
   const k = toKernelParams({ ...PHATASS_DEFAULTS, voiceLevelDb: -20 })
   for (const key of Object.keys(TAPE_SHELF)) assert.equal(k[key], TAPE_SHELF[key], key)
   assert.equal(k.thresholdDb, -28)
+})
+
+test('FATSO mode: Tame lands on the fitted Fatso points, corner pinned at 2 kHz, Tone ignored', () => {
+  assert.equal(PHATASS_DEFAULTS.fatso, false)
+  // Fatso Warmth 5 / 6 / 7 were fitted at threshold +10 / +4 / 0 dB re the voice,
+  // Range ≥ 3 / 3 / ≥ 9 — Tame 1 / 4 / 6 under the law.
+  for (const [tame, thr, range] of [[1, 10, 3], [4, 4, 3], [6, 0, 9]]) {
+    const s = tapeShelf(tame, 10, true)
+    assert.equal(s.thresholdRelDb, thr, `Tame ${tame} threshold`)
+    assert.ok(Math.abs(s.rangeDb - range) < 1e-9, `Tame ${tame} range ${s.rangeDb}`)
+  }
+  for (const tone of [0, 3.7, 10]) assert.equal(tapeShelf(5, tone, true).cornerHz, FATSO_CORNER_HZ)
+  assert.equal(tapeShelf(0, 10, true).rangeDb, 0)
+  for (let t = 1; t <= 10; t++) {
+    assert.ok(tapeShelf(t, 0, true).thresholdRelDb < tapeShelf(t - 1, 0, true).thresholdRelDb)
+    assert.ok(tapeShelf(t, 0, true).rangeDb >= tapeShelf(t - 1, 0, true).rangeDb)
+  }
+  // The kernel follows the switch; off is the normal law, unchanged.
+  const k = toKernelParams({ ...PHATASS_DEFAULTS, fatso: true, tame: 4, tone: 9, voiceLevelDb: -20 })
+  assert.equal(k.cornerHz, FATSO_CORNER_HZ)
+  assert.equal(k.thresholdDb, -16)
+  assert.equal(k.rangeDb, 3)
+  assert.deepEqual(toKernelParams({ ...PHATASS_DEFAULTS, fatso: false }), toKernelParams(PHATASS_DEFAULTS))
+})
+
+test('FATSO mode with Tame 0 (and Warmth, Soften off) still passes the audio through untouched', () => {
+  const x = add(sine(300, 0.3), noise(SR, 0.2, 7))
+  const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, fatso: true })
+  for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
+})
+
+test('FATSO mode cuts the top end from 2 kHz, and only above its higher threshold', () => {
+  // A loud 6 kHz tone with a 200 Hz bed, voice level pinned so the threshold is known.
+  const n = SR
+  const lo = sine(200, 0.1, n), hi = sine(6000, 0.3, n)
+  const x = add(lo, hi)
+  const base = { warmth: 0, soften: false, voiceLevelDb: -20, fatso: true }
+  const from = Math.floor(0.5 * SR), to = n - 2000
+  const out = tame => {
+    const { channelData: [y], latencySamples: L } = run(x, { ...base, tame })
+    return { hi: toneAmp(y.subarray(L), 6000, from - L, to - L), lo: toneAmp(y.subarray(L), 200, from - L, to - L) }
+  }
+  // Tame 1: threshold −10 dBFS on the band; the 6 kHz peak (−10.5 dBFS) sits under it.
+  const t1 = out(1)
+  assert.ok(Math.abs(db(t1.hi / 0.3)) < 0.1, `Tame 1 cut ${db(t1.hi / 0.3)}`)
+  // Tame 6: threshold −20 dBFS, Range 9 — the tone comes down by up to 9 dB.
+  const t6 = out(6)
+  const cut = db(t6.hi / 0.3)
+  assert.ok(cut < -5 && cut > -9.2, `Tame 6 cut ${cut}`)
+  assert.ok(Math.abs(db(t6.lo / 0.1)) < 1, `200 Hz moved ${db(t6.lo / 0.1)}`)
 })
 
 test('with Warmth off, the tape shelf is the HF Limiter at the matching settings', () => {

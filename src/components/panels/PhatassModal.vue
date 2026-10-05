@@ -19,6 +19,9 @@
  * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
  * match). TAME is a macro for Threshold and Range together, TONE for where the
  * tilt starts (the corner, 2–12 kHz). See phatassParams.js for the mapping.
+ * FATSO (a lit toggle) swaps Tame onto the law fitted to the EL7 Fatso's Warmth
+ * knob: corner pinned at 2 kHz (Tone greyed out), a higher threshold and a
+ * shallower Range at the bottom of the knob.
  *
  * In/out meters only. The readout under the Warmth knobs is what the warmth
  * stage did to this selection's low bands and peak.
@@ -96,7 +99,7 @@ const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtOddEven = v => (v <= 0 ? 'ODD' : `${Math.round(v)}`)
 const fmtTame = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtTone = v => {
-  const hz = tapeShelf(1, v).cornerHz
+  const hz = tapeShelf(1, v, !!phParams.fatso).cornerHz
   return `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)}k`
 }
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
@@ -105,6 +108,13 @@ const softenCaption = computed(() => {
   if (!phParams.soften) return 'OFF'
   const d = softenLaw(true, phParams.tame).depthDb
   return d > 0 ? `UP TO −${Math.round(d)} dB` : 'TAME IS 0'
+})
+
+// FATSO has no knob either: say what Tame currently does under its law.
+const fatsoCaption = computed(() => {
+  if (!phParams.fatso) return 'OFF'
+  const s = tapeShelf(phParams.tame, phParams.tone, true)
+  return s.rangeDb > 0 ? `2k · ≤${Math.round(s.rangeDb)} dB` : 'TAME IS 0'
 })
 
 function togglePlayback() {
@@ -185,7 +195,7 @@ async function applyAndClose() {
               <Knob
                 :model-value="phParams.tone" @update:model-value="v => syncParam('tone', v)"
                 :min="0" :max="TONE_MAX" :step="0.1" :value-font-px="13"
-                label="Tone" :accent="ACCENT" :format-value="fmtTone" :disabled="!phPreview || phParams.tame <= 0"
+                label="Tone" :accent="ACCENT" :format-value="fmtTone" :disabled="!phPreview || phParams.tame <= 0 || !!phParams.fatso"
               />
             </div>
             <div class="w-[80px]">
@@ -194,6 +204,16 @@ async function applyAndClose() {
                 :min="OUTPUT_MIN_DB" :max="OUTPUT_MAX_DB" :step="0.1" :value-font-px="13" bipolar
                 label="Output" :accent="ACCENT" :format-value="fmtDb" :disabled="!phPreview"
               />
+            </div>
+            <div class="w-[80px] flex flex-col items-center justify-center gap-[6px] pb-[14px]">
+              <DeviceLampPill
+                :model-value="!!phParams.fatso" @update:model-value="v => syncParam('fatso', v)"
+                label="FATSO" :accent="ACCENT" :disabled="!phPreview"
+                title="Tame behaves like the Warmth knob on an EL7 Fatso: the top end is turned down from 2 kHz (Tone is pinned there), starting only on the loudest treble at low settings and cutting gently at first. Fitted to Fatso Warmth 5, 6 and 7 at Tame 1, 4 and 6 on a file at about −23 dBFS"
+              />
+              <span
+                :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.08em', color: phParams.fatso ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.3)' }"
+              >{{ fatsoCaption }}</span>
             </div>
           </div>
         </div>

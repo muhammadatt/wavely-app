@@ -5648,3 +5648,17 @@ copy. Also the Fatso cuts reaching down to 1 kHz on its deepest frames.
 through a Fatso cuts more at the same Warmth, and PHAT*SS would not. One music
 clip, not voice. Nothing changed in the code. The scripts were scratch and are
 not in the repo.
+
+### PHAT*SS — FATSO mode (October 2026)
+
+Owner: "add it as a switchable Fatso mode". `fatso` (default false) in
+`PHATASS_DEFAULTS`; `tapeShelf(tame, tone, fatso)` returns the fitted law when on:
+corner pinned at `FATSO_CORNER_HZ` (2000, Tone ignored and greyed in the panel),
+threshold `12 − 2·Tame` dB re the voice, Range `max(3, 3·Tame − 9)` (0 at Tame 0,
+so Tame 0 is still a pure delay — tested). Built through the three fitted points,
+and checked end to end through the real Tame path against the bounces: Warmth 5 /
+6 / 7 are best at Tame 1 / 4 / 6, scoring 0.165 / 0.345 / 0.574 (identical to the
+free fit) with Output +0.06 / +0.23 / +0.59. The travel between and past those
+points is interpolation, and above Tame 6 it is extrapolation (Tame 10: −8 dB,
+Range 21). Soften still rides Tame and is not affected by the switch. Panel: a FATSO lamp pill beside
+Output, caption `2k · ≤N dB` (the current Range). Not auditioned.
