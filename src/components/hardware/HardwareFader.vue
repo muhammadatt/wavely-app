@@ -29,6 +29,11 @@ const props = defineProps({
   formatValue: { type: Function, default: (v) => String(v) },
   /** 'chrome' | 'black' */
   cap: { type: String, default: 'chrome' },
+  /**
+   * A value bubble above the cap while it is dragged, hovered or focused —
+   * the same bubble HardwareKnob's `tip` draws, so the two read as one family.
+   */
+  tip: { type: String, default: null },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -60,6 +65,8 @@ function set(v) {
 
 const root = ref(null)
 const dragging = ref(false)
+const hovered = ref(false)
+const focused = ref(false)
 let lastX = 0
 let dragPct = 0
 
@@ -132,6 +139,10 @@ function onKeyDown(e) {
     @wheel="onWheel"
     @dblclick="onDblClick"
     @keydown="onKeyDown"
+    @pointerenter="hovered = true"
+    @pointerleave="hovered = false"
+    @focus="focused = true"
+    @blur="focused = false"
   >
     <template v-for="(t, i) in tickMarks" :key="i">
       <div class="hf-tick" :style="{ left: t.x + 'px', top: (8 - t.h) + 'px', height: t.h + 'px' }" />
@@ -141,6 +152,13 @@ function onKeyDown(e) {
     <div v-if="maxLabel" class="hf-end" style="right:0">{{ maxLabel }}</div>
     <div class="hf-slot" :style="{ left: PAD - 4 + 'px', right: PAD - 4 + 'px' }" />
     <div class="hf-cap" :class="`hf-cap--${cap}`" :style="{ left: capLeft, width: CAP_W + 'px' }"><div class="hf-cap-line" /></div>
+    <div
+      v-if="tip != null"
+      class="hf-tip"
+      :class="{ 'is-on': dragging || hovered || focused }"
+      aria-hidden="true"
+      :style="{ left: `calc(${capLeft} + ${CAP_W / 2}px)` }"
+    >{{ tip }}</div>
   </div>
 </template>
 
@@ -168,6 +186,17 @@ function onKeyDown(e) {
   box-shadow: inset 1px 0 0 rgba(255,255,255,.18), inset -1px 0 0 rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.14), 0 3px 5px rgba(0,0,0,.6), 0 0 0 .5px rgba(0,0,0,.85);
 }
 .hf.is-disabled .hf-cap { opacity: .5; }
+.hf-tip {
+  position: absolute; bottom: calc(100% + 6px); z-index: 3; pointer-events: none;
+  transform: translate(-50%, 8px); opacity: 0;
+  transition: opacity 140ms ease, transform 140ms ease;
+  padding: 5px 9px; border-radius: 3px;
+  background: linear-gradient(180deg,#0d0f12,#07080a);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 4px 10px rgba(0,0,0,.45);
+  font: 400 15px/1 Oswald, 'Inter', system-ui, sans-serif; letter-spacing: .06em;
+  color: #ffb45a; text-shadow: 0 0 6px rgba(255,140,40,.35); white-space: nowrap;
+}
+.hf-tip.is-on { opacity: 1; transform: translate(-50%, 0); }
 .hf-cap-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: #0c0d0e; box-shadow: 1px 0 0 rgba(255,255,255,.5); }
 .hf-cap--black .hf-cap-line { top: 3px; bottom: 3px; border-radius: 1px; background: #e9e9e6; box-shadow: 0 0 3px rgba(255,255,255,.2); }
 </style>

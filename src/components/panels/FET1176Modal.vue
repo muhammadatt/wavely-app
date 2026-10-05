@@ -246,6 +246,7 @@ async function applyAndClose() {
             :min="0" :max="100" :step="1"
             :default-value="FET1176_DEFAULTS.inputDrive"
             :dots="INPUT_SCALE.dots" :labels="INPUT_SCALE.labels"
+            :tip="inputReadout"
             label="Input" :format-value="formatInteger"
             :disabled="off"
           />
@@ -304,6 +305,7 @@ async function applyAndClose() {
             :min="FET1176_OUTPUT_MIN_DB" :max="FET1176_OUTPUT_MAX_DB" :step="0.1"
             :default-value="0"
             :dots="OUTPUT_SCALE.dots" :labels="OUTPUT_SCALE.labels" :label-radius="80" :label-size="13"
+            :tip="outputReadout"
             label="Output" :format-value="formatSignedDb"
             :disabled="off"
           />
@@ -349,6 +351,7 @@ async function applyAndClose() {
               :min="1" :max="7" :step="1"
               :default-value="FET1176_DEFAULTS.attack"
               :dots="BALLISTICS_DOTS" :labels="BALLISTICS_LABELS"
+              :tip="attackReadout"
               label="Attack" :format-value="formatDial"
               :disabled="off"
             />
@@ -364,6 +367,7 @@ async function applyAndClose() {
               :min="1" :max="7" :step="1"
               :default-value="FET1176_DEFAULTS.release"
               :dots="BALLISTICS_DOTS" :labels="BALLISTICS_LABELS"
+              :tip="releaseReadout"
               label="Release" :format-value="formatDial"
               :disabled="off"
             />
@@ -400,6 +404,7 @@ async function applyAndClose() {
               :min="0" :max="1" :step="0.01"
               :default-value="1"
               min-label="0" max-label="100"
+              :tip="mixReadout"
               label="Mix" :format-value="formatPercent"
               :disabled="off"
             />
