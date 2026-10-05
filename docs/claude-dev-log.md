@@ -5563,3 +5563,88 @@ Limiter's default shelf (Range 12); it is the HF Limiter at −8 dB / Range 18 /
 12 kHz, and the Warmth-0 equivalence test now compares against that. The kernel
 has no Range clamp (`floorLin = dbToLin(−rangeDb)`), so 36 needs no other change;
 the HF Limiter's own knob still stops at 24. Not auditioned.
+
+---
+
+## PHAT*SS — Tame/Tone against the EL7 Fatso's Warmth 2/5/6/7 (October 2026)
+
+Owner supplied four more bounces over `2_FATSO_EL7x_-_Input_2.wav` (Warmth off):
+Warmth 2, 5, 6 and the Warmth 7 already analysed above. Same clip (music,
+96 kHz float stereo, 8.35 s, gated RMS −23.0 dBFS). Question: which Tame/Tone
+reproduces each Warmth level?
+
+**Capture.** The same ~13-sample drop as before, now in three files: Warmth 2 at
+~0.9 s, Warmth 6 at ~3.4 s, Warmth 7 at ~6.7 s, plus ±1 sample of drift. Each
+85 ms block is realigned by integer cross-correlation and blocks next to a jump
+are dropped.
+
+**Metric** (the HF Limiter match's, extended down): per 10.7 ms frame, per band
+out/in energy (dB) in 100–500 / 0.5–1 / 1–2 / 2–4 / 4–8 / 8–16 kHz, ours minus
+the Fatso's, rms over frames and bands after solving the mean as Output. PHAT*SS
+at Warmth 0, Soften off (Warmth adds no harmonics — see above), voice level
+measured from the file as the app does. Gain-only baselines: 0.002 / 0.210 /
+0.556 / 1.357 dB.
+
+**What the Fatso's Warmth does here — strongly non-linear in the knob.**
+- **Warmth 2: nothing** — within 0.04 dB of Input 2 in every band, every frame.
+- Warmth 5: a cut over 1 dB on ~1 % of frames, at most ~3.6 dB.
+- Warmth 6: ~8 % of frames, worst 3–8 dB above 2 kHz.
+- Warmth 7: a third of frames, worst ~10 dB at 8–16 kHz.
+- Its one-pole corner, fitted per file with a free per-frame depth, is ~2 kHz at
+  Warmth 7 and ~1.5 kHz at Warmth 6 (Warmth 5 too weak to say): it does NOT move
+  up with the knob. What moves is the threshold.
+
+**Best Tame/Tone (0.25 grid, then refined):**
+
+| Fatso | Tame / Tone / Output | rms (baseline) |
+|---|---|---|
+| Warmth 2 | Tame 0 | 0.002 (0.002) |
+| Warmth 5 | 1 / 9 / +0.1 | 0.178 (0.210) |
+| Warmth 6 | 1 / 5 / +0.2 | 0.401 (0.556) |
+| Warmth 7 | 2 / 2.5 / +0.4 | 0.633 (1.357) |
+
+The valley runs along a Tame↔Tone diagonal (Warmth 7: Tame 1.75 / Tone 2 is
+0.633 too). ⚠ **TONE IS STANDING IN FOR THRESHOLD.** The fit pulls the corner up
+(10 / 4.9 / 3.1 kHz) though the Fatso's sits near 2 kHz, because Tame cannot put
+the threshold where the Fatso's is: a higher corner feeds the detector less of
+the spectrum, which acts like a higher threshold.
+
+**With the corner pinned at 2 kHz (= Tone 0) and Threshold / Range free**, all
+three fit better, with the threshold doing the work:
+
+| Fatso | Threshold re voice | Range | rms |
+|---|---|---|---|
+| Warmth 5 | +10 dB | any ≥ 3 (never reached) | 0.165 |
+| Warmth 6 | +4 dB | **3** (6 → 0.412, ≥ 9 → 0.438) | 0.345 |
+| Warmth 7 | 0 dB | ≥ 9 (3 → 0.826) | 0.574 |
+
+So ~6 / 4 dB of threshold per Warmth step at the top, and a Range that opens
+with it. Tame cannot reach these: its threshold tops out at +2 dB (and Tame 0
+has Range 0), and at a given threshold it gives more Range than the Fatso
+(Tame law: Range = 1.8·(2 − thr); the Fatso, from two points: ≈ 9 − 1.5·thr).
+Shifting Tame's threshold law to `12 − 2·Tame` (Range unchanged) reaches
+Warmth 5 at Tame 1 (0.165) and Warmth 7 at Tame 6 (0.579), but Warmth 6 only
+0.396, because the coupled Range is too deep there.
+
+**Ruled out:**
+- **A steeper-than-limiter law.** The per-frame depth against the 2 kHz band
+  level LOOKS steeper than ours (Warmth 7: −0.5 / −1.5 / −2.2 / −5.2 / −7.4 dB at
+  −33 … −27 dBFS, about 1.3 dB per dB, against our ~0.8). But a scratch kernel
+  with `req = (T/m)^k` scores worse at every k > 1 (Warmth 7: k 1.5 0.594,
+  k 2 0.612, k 3 0.651). The limiter law (k = 1) is right.
+- **Release.** 20 ms is marginally better than the pinned 35 (Warmth 7 0.565 vs
+  0.574, Warmth 6 0.328 vs 0.345); 50 ms and up is worse. Not worth unpinning.
+- **The macro's coupling as such.** A free four-parameter fit (corner,
+  threshold, Range, release) reaches about what the 2 kHz fit does. What
+  matters is where the threshold sits and how Range relates to it, not that two
+  parameters share one knob.
+
+**The floor no shelf setting removes** (~0.57 dB at Warmth 7): a static tilt, with
+lows +0.57 dB and highs −0.2 in the median frame, which a flat Output cannot
+copy. Also the Fatso cuts reaching down to 1 kHz on its deepest frames.
+
+⚠ **THE FATSO'S THRESHOLD IS ABSOLUTE and ours is relative to the file's level.**
+"+10 / +4 / 0 dB re voice" holds for this clip's −23.0 dBFS. A hotter take
+through a Fatso cuts more at the same Warmth, and PHAT*SS would not. One music
+clip, not voice. Nothing changed in the code. The scripts were scratch and are
+not in the repo.
