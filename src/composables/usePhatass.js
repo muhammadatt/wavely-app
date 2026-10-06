@@ -146,7 +146,8 @@ export function usePhatass() {
     if (!(name in phParams) || MEASURED.has(name)) return
     phParams[name] = value
     pushParam(name, value)
-    if (name === 'warmth' || name === 'oddEven') scheduleWarmthReadout()
+    // TAPE is ahead of Warmth, so Warmth's knobs move the readout, not the makeup.
+    if (name === 'warmth' || name === 'oddEven') scheduleReadout()
     if (name === 'tape') {
       // Until the new measurement lands, never give back more than the knob
       // now asks for (a smaller TAPE takes less off); 0 has nothing to restore.
@@ -163,8 +164,9 @@ export function usePhatass() {
   }
 
   /**
-   * TAPE's makeup: render the selection through Warmth, guard and TAPE and
-   * give back exactly what TAPE took off its peak (phatassTapeMakeup.js).
+   * TAPE's makeup for live preview: what TAPE took off the selection's peak,
+   * by the fast bounded search (phatassTapeMakeup.js) — TAPE is first in the
+   * chain, so nothing else moves it. Apply re-measures the exact way.
    * Resolves the makeup set, or null if superseded.
    */
   async function refreshTapeMakeup() {
@@ -182,6 +184,7 @@ export function usePhatass() {
     try {
       const { makeupDb } = await measurePhatassTapeMakeup(
         state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+        { exact: false },
       )
       if (seq !== tapeSeq) return null
       phTapeMakeup.value = { pending: false }
@@ -275,15 +278,18 @@ export function usePhatass() {
    * Re-measure shortly after the last change. The guard's ceiling is cheap and
    * load-bearing, so it follows the selection at once; the readout waits.
    */
-  function scheduleWarmthReadout() {
+  function scheduleReadout() {
     if (phPreview.value) {
       const { start, end } = selectionSpan()
       refreshCeiling(start, end)
     }
     clearTimeout(readoutTimer)
     readoutTimer = setTimeout(refreshWarmthReadout, 250)
-    // What reaches TAPE moves with Warmth and with the selection, and so does
-    // what it takes off the peak.
+  }
+
+  /** The selection or preview changed: the readout and TAPE's makeup both follow. */
+  function scheduleWarmthReadout() {
+    scheduleReadout()
     if (Number(phParams.tape) > 0) scheduleTapeMakeup()
   }
 

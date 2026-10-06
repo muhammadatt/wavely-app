@@ -100,7 +100,7 @@ self.onmessage = function (e) {
       break
     case 'phatassTapeMakeup':
       try {
-        postDone(measureTapeMakeup(channelData, sampleRate, params))
+        postDone(measureTapeMakeup(channelData, sampleRate, params, { exact: e.data.exact !== false }))
       } catch (err) {
         postReply({ type: 'error', message: err.message })
       }

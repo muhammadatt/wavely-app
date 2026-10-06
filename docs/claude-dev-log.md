@@ -5886,3 +5886,38 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
 - Test "latency … constant": its impulse tolerance now covers Warmth's
   full-band layers, which shave a one-sample impulse at the oversampler's band
   edge the way TAPE does (this failed already on the four-layer commit).
+
+### PHAT*SS — TAPE moved ahead of Warmth; fast makeup (October 2026)
+
+- Owner: TAPE's peak reduction should come BEFORE Warmth, so Warmth works on
+  a smoother signal; and the makeup was too slow in preview on long files to
+  be useful. There was no strong reason for the old order (TAPE was appended
+  after the Warmth guard when it was built).
+- New chain: TAPE → makeup → Warmth → guard → tape shelf → Output. The guard
+  now reads Warmth's input from a copy of TAPE's output (it used to read the
+  plugin input). The guarantee is unchanged: makeup puts the voice peak back
+  on the selection's own peak, which is the guard's ceiling.
+- Why the makeup was slow: it rendered Warmth (four oversampled layers) +
+  guard + TAPE over the whole region on every knob move — 40.5 s per 10 min.
+  With TAPE first its input is the source, so the measurement is TAPE alone
+  (~6 s per 10 min, exact; apply uses this) and Warmth/Odd-Even no longer
+  trigger a re-measure.
+- Preview uses a fast bounded search (`measureTapeMakeup(..., { exact: false })`):
+  1024-sample blocks, bound = input peak over the block ±64 samples, sorted;
+  render loudest first with 512 samples of pre-roll; stop when bound ×
+  0.5 dB (ringing) × 0.1 dB (short-pre-roll error) ≤ best. A first version
+  without the second pass read 0.0006–0.008 dB high on narration and 0.037 dB
+  off on a synthetic take with 5 Hz syllable envelopes — TAPE's 5 Hz DC
+  blocker outlives a 512 pre-roll (128 read 0.027 off; 8192 closed it but cost
+  as much as the exact render). So blocks within 0.2 dB of the best re-render
+  with 8192 of pre-roll. Measured (10 min tiled narration, fast vs exact):
+  bright 0.32 / 0.50 / 1.4 s at TAPE 0.5 / 2 / 6, dull 1.2 / 2.3 / 3.6 s,
+  exact ~6 s; makeup equal to 0.0001 dB in every case.
+- Asked whether the Warmth guard could carry the peak guarantee instead of a
+  measured makeup: no — it only limits what Warmth ADDS and never the voice,
+  so a knob-sized makeup would let sibilant peaks (which lose ~75 % of the
+  knob) pass the source by up to ~4.5 dB at TAPE 6.
+- Side effects, not compensated: Warmth sees the body lifted by the makeup
+  (+1.2–1.7 dB at TAPE 2), so it runs that much hotter with TAPE up; the
+  Warmth readout still renders Warmth on the source (bands close, peak still
+  an upper bound). Neither was auditioned.

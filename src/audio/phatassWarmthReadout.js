@@ -10,6 +10,14 @@
  * the plugin delivers. Rendering the shelf too would cost ~40 % more for no
  * band it can move.
  *
+ * ⚠ IT FEEDS WARMTH THE SOURCE, NOT TAPE'S OUTPUT. TAPE now runs first, so in
+ * the plugin Warmth sees the source soft-clipped and lifted by TAPE's makeup
+ * (+1.2 to +1.7 dB of body at TAPE 2). With TAPE on, the bands are what Warmth
+ * does to the source — close, not exact — and the peak stays an upper bound,
+ * since the makeup puts TAPE's peak back on the source's and the guard holds
+ * Warmth there either way. Rendering TAPE first would add ~6 s per 10 min to
+ * the whole-region peak pass.
+ *
  * ⚠ THE BANDS AND THE PEAK ARE MEASURED OVER DIFFERENT SPANS, ON PURPOSE. The
  * bands are a property of the setting and are answered by the usual capped
  * window; the peak is a property of the WHOLE region — a capped window can
@@ -33,7 +41,7 @@ const FRAME = 8192
 const MIN_SAMPLES = 4096
 
 /**
- * Render `channelData` through the two warmth layers — and the peak guard,
+ * Render `channelData` through the warmth layers — and the peak guard,
  * when `guard` (`{ on, ceilingDb }`, the kernel's `warmthGuard`) is on — and
  * return the output aligned to the input, sample for sample (latency removed,
  * tail flushed). The guard runs on the aligned pair, so it sees exactly the

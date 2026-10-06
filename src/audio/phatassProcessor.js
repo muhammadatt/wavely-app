@@ -1,10 +1,18 @@
 /**
  * PHAT*SS — worklet kernel.
  *
- * Warmth → Guard → TAPE (full-band cubic) → Tape shelf (with Soften on its own band) → Output.
+ * TAPE (full-band cubic) → makeup → Warmth → Guard → Tape shelf (with Soften
+ * on its own band) → Output.
  *
- * WARMTH is two Saturation Bench layers (dsp/saturationLayers.js, voiced in
- * phatassParams.WARMTH_LAYERS), 4x oversampled, a pure delay at 0. Its PEAK
+ * TAPE comes FIRST (owner's call): Warmth then shapes the already-rounded
+ * signal, and TAPE's input is the untouched source, so its makeup depends on
+ * nothing else in the plugin and can be measured fast (phatassTapeMakeup.js).
+ * The makeup puts the voice's peak back on the selection's own, which is the
+ * guard's ceiling, so the "Warmth never raises the peak" guarantee holds
+ * through the reorder unchanged.
+ *
+ * WARMTH is up to four Saturation Bench layers (dsp/saturationLayers.js,
+ * voiced in phatassParams.WARMTH_LAYERS), a pure delay at 0. Its PEAK
  * GUARD (dsp/warmthGuard.js) is pinned on: what Warmth adds is turned down
  * wherever the sum would pass the selection's own peak, so Warmth adds density
  * but never peak level. The TAPE SHELF is the HF Limiter's lookahead dynamic
@@ -36,15 +44,17 @@ const dbToLin = db => Math.exp(db * LN10_OVER_20)
 export class PhatassKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
-    this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length, oversample: slotOversample() })
-    this.warmthInit = false
-    // Lined up against the Warmth output, so its dry is the input delayed by that.
-    this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)
     this.tape = new SaturationBenchKernel(sampleRate, { slots: 1 })
     this.tapeInit = false
+    this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length, oversample: slotOversample() })
+    this.warmthInit = false
+    // Lined up against the Warmth output, so its dry is Warmth's input (TAPE's
+    // output after makeup) delayed by that.
+    this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)
+    this.warmthIn = []
     this.shelf = new ShelfLimiterStage(sampleRate)
-    this.latencySamples = this.warmth.latencySamples + this.guard.latencySamples
-      + this.tape.latencySamples + this.shelf.latencySamples
+    this.latencySamples = this.tape.latencySamples + this.warmth.latencySamples
+      + this.guard.latencySamples + this.shelf.latencySamples
     this.params = { ...PHATASS_KERNEL_DEFAULTS }
     this.setParams({}, true)
   }
@@ -102,8 +112,6 @@ export class PhatassKernel {
       outputChannels[ch].set(inputChannels[ch < nIn ? ch : nIn - 1].subarray(0, n))
     }
     // In place: each stage reads a sample before it writes that output.
-    this.warmth.process(outputChannels, outputChannels, n)
-    this.guard.process(inputChannels, outputChannels, n)
     this.tape.process(outputChannels, outputChannels, n)
     const mk = this.tapeMakeupLin
     if (mk !== 1) {
@@ -112,6 +120,15 @@ export class PhatassKernel {
         for (let i = 0; i < n; i++) out[i] *= mk
       }
     }
+    // The guard needs Warmth's input as well as its output.
+    while (this.warmthIn.length < nOut) this.warmthIn.push(new Float32Array(n))
+    const wIn = this.warmthIn
+    for (let ch = 0; ch < nOut; ch++) {
+      if (wIn[ch].length < n) wIn[ch] = new Float32Array(n)
+      wIn[ch].set(outputChannels[ch].subarray(0, n))
+    }
+    this.warmth.process(outputChannels, outputChannels, n)
+    this.guard.process(wIn, outputChannels, n)
     this.shelf.process(outputChannels, n)
     const g = this.outputLin
     if (g !== 1) {

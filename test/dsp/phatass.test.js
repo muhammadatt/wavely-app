@@ -152,6 +152,47 @@ test('TAPE makeup restores the peak: measured, so it matches the knob on a low t
   }
 })
 
+test('TAPE comes before Warmth: its makeup ignores Warmth, and Warmth still never raises the peak', () => {
+  // A speech-ish signal: voiced body, a bright burst, and level changes.
+  const x = add(sine(120, 0.3), sine(240, 0.15), sine(2600, 0.05))
+  for (let i = 0; i < x.length; i++) x[i] *= 0.4 + 0.6 * Math.abs(Math.sin((2 * Math.PI * 1.7 * i) / SR))
+  const burst = add(sine(6500, 0.35, 4096), noise(4096, 0.1))
+  x.set(burst.map((v, i) => x[20000 + i] + v), 20000)
+  let peak = 0
+  for (const v of x) peak = Math.max(peak, Math.abs(v))
+  const base = { tame: 0, tape: 3, warmthCeilingDb: db(peak), warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14) }
+  const quiet = measureTapeMakeup([x], SR, { ...base, warmth: 0 }).makeupDb
+  const hot = measureTapeMakeup([x], SR, { ...base, warmth: 10, oddEven: 100 }).makeupDb
+  assert.ok(quiet > 0.5)
+  assert.equal(hot, quiet, 'Warmth comes after TAPE and cannot move its makeup')
+  for (const warmth of [0, 5, 10]) {
+    const { channelData: [y], latencySamples: L } = run(x, { ...base, warmth, oddEven: 100, tapeMakeupDb: quiet })
+    let p = 0
+    for (let i = L; i < y.length; i++) p = Math.max(p, Math.abs(y[i]))
+    assert.ok(db(p / peak) < 0.02, `Warmth ${warmth}: peak ${db(p / peak).toFixed(3)} dB over the source`)
+    assert.ok(db(p / peak) > -0.1, `Warmth ${warmth}: peak ${db(p / peak).toFixed(3)} dB, not restored`)
+  }
+})
+
+test('the fast TAPE makeup (preview) reads the exact one (apply) to 0.02 dB', () => {
+  const x = new Float32Array(SR * 3)
+  for (let k = 0; k < 12; k++) {
+    // Syllables of different levels and brightness.
+    const at = k * 11000, a = 0.15 + 0.5 * ((k * 7) % 5) / 4
+    const syl = k % 3 === 2 ? add(sine(7000, a * 0.6, 8000), noise(8000, a * 0.2)) : add(sine(110 + 10 * k, a, 8000), sine(330, a * 0.3, 8000))
+    for (let i = 0; i < 8000; i++) x[at + i] += syl[i] * Math.sin((Math.PI * i) / 8000)
+  }
+  let peak = 0
+  for (const v of x) peak = Math.max(peak, Math.abs(v))
+  for (const tape of [0.5, 2, 4, 6]) {
+    const p = { tape, warmthCeilingDb: db(peak) }
+    const exact = measureTapeMakeup([x], SR, p).makeupDb
+    const fast = measureTapeMakeup([x], SR, p, { exact: false }).makeupDb
+    assert.ok(exact > 0)
+    assert.ok(Math.abs(fast - exact) < 0.02, `TAPE ${tape}: fast ${fast.toFixed(4)} vs exact ${exact.toFixed(4)}`)
+  }
+})
+
 test('TAPE makeup is 0 with TAPE off, and the kernel ignores a stale makeup then', () => {
   const x = sine(110, 0.5, 4096)
   assert.equal(measureTapeMakeup([x], SR, { tape: 0 }).makeupDb, 0)

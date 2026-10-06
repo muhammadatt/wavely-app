@@ -415,8 +415,9 @@ export function toKernelParams(params) {
 }
 
 /**
- * TAPE — a full-band CUBIC soft clipper on the main path, between the Warmth
- * guard and the tape shelf: what a tape machine does to peaks. Measured on a
+ * TAPE — a full-band CUBIC soft clipper, FIRST on the main path (ahead of
+ * Warmth — owner's call, so Warmth shapes the rounded signal; it sat after the
+ * Warmth guard until October 2026): what a tape machine does to peaks. Measured on a
  * Studer A800 emulation (owner-supplied acoustic guitar, dry vs wet, see
  * docs/claude-dev-log.md "PHAT*SS — TAPE"): the peak reduction is a WAVESHAPER,
  * not a compressor — in the loudest 10 ms windows the quiet samples keep their
@@ -440,9 +441,14 @@ export function toKernelParams(params) {
  * that brings the peak back to the selection's own, turning the peak reduction
  * into loudness. ⚠ IT IS MEASURED, NEVER THE KNOB'S NUMBER: a sibilant peak loses
  * only ~75 % of the knob (its harmonics are filtered above Nyquist), so
- * knob-sized makeup would lift it past the source. `tapeMakeupDb` comes from a
- * render of the selection through Warmth, guard and TAPE (`measureTapeMakeup`).
- * The shelf after it only lowers peaks, so the output never passes the source.
+ * knob-sized makeup would lift it past the source. `tapeMakeupDb` comes from
+ * rendering TAPE on the selection (`measureTapeMakeup`: a fast bounded search
+ * for preview, the whole region for apply) — TAPE sees the source, so no other
+ * knob moves it. After the makeup the voice peaks at the selection's own peak,
+ * which is the Warmth guard's ceiling, and the shelf only lowers peaks, so the
+ * output never passes the source. ⚠ The makeup lifts the body Warmth sees
+ * (+1.2 to +1.7 dB at TAPE 2), so Warmth runs that much hotter with TAPE up;
+ * its calibration is measured on the source and not compensated.
  */
 export const TAPE_MAX_DB = 6
 /** Peak re the gated RMS assumed when the selection's peak is not measured yet. */
@@ -475,14 +481,14 @@ export const TAPE_LATENCY_SAMPLES = SAT_BENCH_LAYER_LATENCY
 export const WARMTH_LATENCY_SAMPLES = slotOversample().filter(Boolean).length * SAT_BENCH_LAYER_LATENCY
 
 /**
- * Plugin latency, samples: the Warmth oversamplers, the peak guard's lookahead,
- * TAPE's oversampler and the shelf's split centre and lookahead (Soften shares
+ * Plugin latency, samples: TAPE's oversampler, the Warmth oversamplers, the
+ * peak guard's lookahead and the shelf's split centre and lookahead (Soften shares
  * the shelf's).
  * CONSTANT: every stage stays a delay of its own length when idle, so no
  * setting moves the audio.
  */
 export function phatassLatencySamples(sampleRate) {
-  return WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate) + TAPE_LATENCY_SAMPLES + shelfLatencySamples(sampleRate)
+  return TAPE_LATENCY_SAMPLES + WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate) + shelfLatencySamples(sampleRate)
 }
 
 /** Pre-roll for apply, seconds: several of the shelf's release. */

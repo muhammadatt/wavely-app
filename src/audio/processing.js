@@ -1005,7 +1005,11 @@ export function cancelPhatassTapeMakeup() {
   reject?.(err)
 }
 
-export function measurePhatassTapeMakeup(segments, start, end, params, sampleRate, channels) {
+/**
+ * TAPE's makeup on its own worker. `exact: false` is the fast bounded search
+ * for live preview; apply leaves it exact (phatassTapeMakeup.js).
+ */
+export function measurePhatassTapeMakeup(segments, start, end, params, sampleRate, channels, { exact = true } = {}) {
   cancelPhatassTapeMakeup()
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
@@ -1031,7 +1035,7 @@ export function measurePhatassTapeMakeup(segments, start, end, params, sampleRat
     worker.postMessage(
       // A plain copy: the panel's params are reactive, and a proxied array
       // (warmthRefPeaksDb) cannot be structured-cloned into a worker.
-      { __id: 0, type: 'phatassTapeMakeup', channelData, sampleRate, params: JSON.parse(JSON.stringify(params)) },
+      { __id: 0, type: 'phatassTapeMakeup', channelData, sampleRate, params: JSON.parse(JSON.stringify(params)), exact },
       channelData.map(c => c.buffer),
     )
   })
