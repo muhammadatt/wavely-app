@@ -12,11 +12,11 @@ import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
   DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
-  WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb,
+  WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
 } from '../../src/audio/phatassParams.js'
 import { HF_LIMITER_DEFAULTS, toKernelParams as toHFLimiterKernelParams } from '../../src/audio/hfLimiterParams.js'
 import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
-import { processSaturationBenchBuffer } from '../../src/audio/dsp/saturationLayers.js'
+import { processSaturationBenchBuffer, SAT_BENCH_LAYER_LATENCY } from '../../src/audio/dsp/saturationLayers.js'
 import { warmthGuardLatencySamples } from '../../src/audio/dsp/warmthGuard.js'
 import { shelfLatencySamples } from '../../src/audio/dsp/hfLimit.js'
 import { measureTapeMakeup } from '../../src/audio/phatassTapeMakeup.js'
@@ -69,9 +69,10 @@ test('the latency is Warmth + guard + TAPE + shelf, constant at every setting (S
     x[100] = 0.001 // far below every threshold
     const { channelData: [y], latencySamples } = run(x, { voiceLevelDb: -20, warmth, tame, soften, tape, warmthCeilingDb: -3 })
     assert.equal(latencySamples, L)
-    // TAPE on runs a full-band 4x oversampler, whose band edge (−0.2 dB at
-    // 20 kHz) shaves a one-sample impulse a little; the impulse still lands at L.
-    const tol = tape > 0 ? 0.03 * x[100] : 1e-5
+    // TAPE, and Warmth's full-band layers, run a full-band 4x oversampler,
+    // whose band edge (−0.2 dB at 20 kHz) shaves a one-sample impulse a
+    // little (more with Warmth's Amount above 0 dB); the impulse still lands at L.
+    const tol = tape > 0 || warmth > 0 ? 0.06 * x[100] : 1e-5
     assert.ok(Math.abs(y[100 + L] - x[100]) < tol, `warmth ${warmth} tame ${tame} soften ${soften} tape ${tape}: impulse at ${L} reads ${y[100 + L]}`)
   }
 })
@@ -409,7 +410,7 @@ test('Warmth at full Odd is the odd (cubic) layer as voiced on the Saturation Be
   assert.ok(Math.abs(law[I_ODD].amountDb - warmthLevelDb(8)) < 1e-12)
   const { blend: _b, amountOffsetDb: _o, ...oddSpec } = WARMTH_LAYERS[I_ODD]
   const layers = law.map((l, k) => (k === I_ODD ? { ...oddSpec, on: true, amountDb: law[I_ODD].amountDb, refPeakDb: refs[k] } : l))
-  const bench = processSaturationBenchBuffer([x], SR, { layers }, { slots: SLOTS })
+  const bench = processSaturationBenchBuffer([x], SR, { layers }, { slots: SLOTS, oversample: slotOversample() })
   const b = bench.channelData[0], Lb = bench.latencySamples
   let worst = 0, added = 0
   for (let i = SR / 4; i < x.length - L; i++) {
@@ -428,7 +429,7 @@ test('a render from rest starts at the setting, not ramping in from the defaults
   const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 3, oddEven: 0, warmthRefPeaksDb: refs })
   const bench = processSaturationBenchBuffer([x], SR, {
     layers: warmthLayers(3, 0, refs),
-  }, { slots: SLOTS })
+  }, { slots: SLOTS, oversample: slotOversample() })
   const b = bench.channelData[0], Lb = bench.latencySamples
   let worst = 0
   for (let i = 0; i < 0.05 * SR; i++) worst = Math.max(worst, Math.abs(y[i + L] - b[i + Lb]))
@@ -607,4 +608,15 @@ test('the Soften law: a toggle, depth and slope from Tame, corner pinned at 500 
   assert.equal(k.transientGateDb, -52)
   assert.equal(toKernelParams({ soften: false, tame: 10 }).transientDb, 0)
   assert.equal(PHATASS_DEFAULTS.soften, false)
+})
+
+test('Warmth\'s low layers run at the base rate: no latency, and only a low band may', () => {
+  // As voiced: the even/odd pair is ≤ 250 Hz and runs at 1x; the fixed
+  // full-band and high-band layers keep their oversamplers.
+  assert.deepEqual(slotOversample(), WARMTH_LAYERS.map(l => l.oversample !== false))
+  assert.equal(WARMTH_LATENCY_SAMPLES, slotOversample().filter(Boolean).length * SAT_BENCH_LAYER_LATENCY)
+  for (const l of WARMTH_LAYERS) if (l.oversample === false) assert.ok(l.hiHz <= WARMTH_BASE_RATE_MAX_HZ)
+  const low = { blend: 'odd', curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, oversample: false }
+  assert.doesNotThrow(() => checkWarmthLayers([low]))
+  assert.throws(() => checkWarmthLayers([{ ...low, hiHz: 20000 }]), /low band/)
 })

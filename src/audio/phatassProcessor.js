@@ -26,7 +26,7 @@
 import { ShelfLimiterStage } from './dsp/hfLimit.js'
 import { SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { WarmthPeakGuard } from './dsp/warmthGuard.js'
-import { toKernelParams, PHATASS_DEFAULTS, WARMTH_LAYERS } from './phatassParams.js'
+import { toKernelParams, PHATASS_DEFAULTS, WARMTH_LAYERS, slotOversample } from './phatassParams.js'
 
 export const PHATASS_KERNEL_DEFAULTS = toKernelParams(PHATASS_DEFAULTS)
 
@@ -36,7 +36,7 @@ const dbToLin = db => Math.exp(db * LN10_OVER_20)
 export class PhatassKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
-    this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length })
+    this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length, oversample: slotOversample() })
     this.warmthInit = false
     // Lined up against the Warmth output, so its dry is the input delayed by that.
     this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)

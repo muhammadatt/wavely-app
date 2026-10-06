@@ -132,8 +132,16 @@ export const ODD_EVEN_SPAN = 0.25
  * (the bench's default is VOICED) and `checkWarmthLayers` rejects a layer that
  * asks for 'voiced', so a layer copied from the bench cannot bring it along.
  *
- * Every layer costs 50 samples of latency (`WARMTH_LATENCY_SAMPLES` follows the
- * list) and its own 4x oversampler, and gets its own measured reference peak.
+ * Every layer gets its own measured reference peak and, by default, its own 4x
+ * oversampler and 50 samples of latency (`WARMTH_LATENCY_SAMPLES` follows the
+ * list). `oversample: false` runs a layer at the base rate instead — no
+ * oversampler, no latency. ⚠ LOW BANDS ONLY: what a layer adds is band-passed
+ * again, so a curve's aliases only matter where they land inside its own band.
+ * Measured (1x against 4x, re what the layer adds): the 1–250 Hz quartic and
+ * 1–220 Hz cubic at drive +50 −84.5 to −90.6 dB on two narrations, −109.5 /
+ * −121.8 on music — the same render; the full-band quartic −34.0 and the
+ * 3–20 kHz tanh −17.5 on bright narration, which keep theirs. Each oversampled
+ * layer is ~1 % of a core for live preview (6 s per 10 min of audio offline).
  */
 //export const WARMTH_LAYERS = [
 //  { curve: 'quartic', driveDb: 60, loHz: 1, hiHz: 400, emphType: 'bell', emphHz: 350, emphQ: 0.5, emphDb: 24, mode: 'full' },
@@ -141,17 +149,26 @@ export const ODD_EVEN_SPAN = 0.25
 //]
 
 export const WARMTH_LAYERS = [
-  { blend: 'even', curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14 },
-  { blend: 'odd', curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10 },
-  
-  // A fixed third/fourth layer goes here, e.g. (bench Amount −6 → amountOffsetDb −6)
-  { blend: 'fixed', amountOffsetDb: 0, curve: 'quartic', driveDb: 0, loHz: 1, hiHz: 20000, emphDb: 0, emphType: 'hishelf', emphHz: 2400, emphQ: 0.7, emphDb: -10 },
-  { blend: 'fixed', amountOffsetDb: -6, curve: 'tanh', driveDb: 27, loHz: 3000, hiHz: 20000, emphDb: 0, emphType: 'hishelf', emphHz: 2400, emphQ: 0.7, emphDb: -20 },
+  { blend: 'even', curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14, oversample: false },
+  { blend: 'odd', curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10, oversample: false },
+  // Fixed layers (bench Amount A → amountOffsetDb A). Full band / high band: oversampled.
+  { blend: 'fixed', amountOffsetDb: 0, curve: 'quartic', driveDb: 0, loHz: 1, hiHz: 20000, emphType: 'hishelf', emphHz: 2400, emphQ: 0.7, emphDb: -10 },
+  { blend: 'fixed', amountOffsetDb: -6, curve: 'tanh', driveDb: 27, loHz: 3000, hiHz: 20000, emphType: 'hishelf', emphHz: 2400, emphQ: 0.7, emphDb: -20 },
+]
 
-  ]
+/** Per-slot oversampling for a layer list, as `SaturationBenchKernel` takes it. */
+export function slotOversample(layers = WARMTH_LAYERS) {
+  return layers.map(l => l.oversample !== false)
+}
 
 export const WARMTH_MAX_LAYERS = SAT_BENCH_MAX_LAYERS
 export const WARMTH_BLENDS = ['even', 'odd', 'fixed']
+/**
+ * Highest band top a layer may run at the base rate (`oversample: false`).
+ * Measured clean at 220–250 Hz (−84 dB); 500 is a reasoned margin, not a
+ * measurement — above it, measure 1x against 4x before allowing it.
+ */
+export const WARMTH_BASE_RATE_MAX_HZ = 500
 
 /** Throws unless `layers` is 1–WARMTH_MAX_LAYERS layers with known roles. */
 export function checkWarmthLayers(layers) {
@@ -162,6 +179,9 @@ export function checkWarmthLayers(layers) {
     const blend = l.blend ?? 'fixed'
     if (!WARMTH_BLENDS.includes(blend)) throw new Error(`Warmth layer ${k}: unknown blend '${l.blend}'`)
     if (l.mode !== undefined && l.mode !== 'full') throw new Error(`Warmth layer ${k}: PHAT*SS runs every layer FULL, not '${l.mode}'`)
+    if (l.oversample === false && !(l.hiHz <= WARMTH_BASE_RATE_MAX_HZ)) {
+      throw new Error(`Warmth layer ${k}: oversample: false needs a low band (hiHz ≤ ${WARMTH_BASE_RATE_MAX_HZ}), got ${l.hiHz}`)
+    }
   })
   return layers
 }
@@ -451,8 +471,8 @@ export function tapeLayer(tapeDb, peakDb) {
 /** The TAPE stage's latency: one oversampler round trip, on or off. */
 export const TAPE_LATENCY_SAMPLES = SAT_BENCH_LAYER_LATENCY
 
-/** The Warmth stage's latency: one oversampler round trip per layer. */
-export const WARMTH_LATENCY_SAMPLES = WARMTH_LAYERS.length * SAT_BENCH_LAYER_LATENCY
+/** The Warmth stage's latency: one oversampler round trip per oversampled layer. */
+export const WARMTH_LATENCY_SAMPLES = slotOversample().filter(Boolean).length * SAT_BENCH_LAYER_LATENCY
 
 /**
  * Plugin latency, samples: the Warmth oversamplers, the peak guard's lookahead,

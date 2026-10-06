@@ -48,7 +48,7 @@ export function renderWarmthAligned(channelData, sampleRate, layers, guard = nul
     return p
   })
   const { channelData: out, latencySamples } = processSaturationBenchBuffer(
-    padded, sampleRate, { layers }, { slots: layers.length },
+    padded, sampleRate, { layers }, { slots: layers.length, oversample: layers.map(l => l.oversample !== false) },
   )
   const aligned = out.map(c => c.subarray(latencySamples, latencySamples + n))
   if (!guard?.on) return aligned

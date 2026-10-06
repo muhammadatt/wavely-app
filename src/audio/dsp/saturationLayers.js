@@ -382,23 +382,30 @@ export class VoicingDetector {
 }
 
 /** One layer's per-channel state. */
-function makeLayerChannel() {
+function makeLayerChannel(oversample) {
+  const latency = oversample ? SAT_BENCH_LAYER_LATENCY : 0
   return {
-    os: new Oversampler(COMPRESSOR_OVERSAMPLE),
+    os: oversample ? new Oversampler(COMPRESSOR_OVERSAMPLE) : null,
     bandIn: new BiquadCascade(4, 1),
     bandOut: new BiquadCascade(4, 1),
     pre: new BiquadCascade(1, 1),
     de: new BiquadCascade(1, 1),
-    srcDelay: new DelayLine(SAT_BENCH_LAYER_LATENCY),
-    dryDelay: new DelayLine(SAT_BENCH_LAYER_LATENCY),
+    srcDelay: new DelayLine(latency),
+    dryDelay: new DelayLine(latency),
     dcX: 0,
     dcY: 0,
   }
 }
 
 class Layer {
-  constructor(sampleRate, rampSamples) {
+  /**
+   * `oversample` is fixed for the layer's life, so its latency (50 samples, or
+   * 0 at the base rate) never moves while it runs.
+   */
+  constructor(sampleRate, rampSamples, oversample = true) {
     this.sampleRate = sampleRate
+    this.oversample = oversample
+    this.latency = oversample ? SAT_BENCH_LAYER_LATENCY : 0
     this.p = normalizeLayer()
     this.curve = shaperCurve(this.p.curve)
     this.fn = this.curve.f
@@ -460,7 +467,7 @@ class Layer {
   }
 
   resetChannel(c) {
-    c.os.reset()
+    c.os?.reset()
     c.bandIn.setSections(this.bandSections)
     c.bandOut.setSections(this.bandSections)
     c.bandIn.reset?.()
@@ -479,7 +486,7 @@ class Layer {
 
   ensure(nCh, n) {
     while (this.channels.length < nCh) {
-      const c = makeLayerChannel()
+      const c = makeLayerChannel(this.oversample)
       this.resetChannel(c)
       this.channels.push(c)
     }
@@ -534,12 +541,20 @@ class Layer {
       // Emphasis at the base rate, as OptoSmooth runs it: both shelves are
       // LTI and commute with the oversampler's delay.
       if (emph) c.pre.process(src, c.preBuf, n, 0)
-      const hi = c.os.up(emph ? c.preBuf : src, n)
-      const m = n * c.os.factor
       const st = c.state
-      if (st) for (let j = 0; j < m; j++) hi[j] = st.step(g * hi[j]) * inv
-      else for (let j = 0; j < m; j++) hi[j] = f(g * hi[j]) * inv
-      c.os.down(c.down, n)
+      if (c.os) {
+        const hi = c.os.up(emph ? c.preBuf : src, n)
+        const m = n * c.os.factor
+        if (st) for (let j = 0; j < m; j++) hi[j] = st.step(g * hi[j]) * inv
+        else for (let j = 0; j < m; j++) hi[j] = f(g * hi[j]) * inv
+        c.os.down(c.down, n)
+      } else {
+        // Base rate: for a layer whose band is low enough that its aliases land
+        // above the band it passes back (see SaturationBenchKernel).
+        const u = emph ? c.preBuf : src
+        if (st) for (let i = 0; i < n; i++) c.down[i] = st.step(g * u[i]) * inv
+        else for (let i = 0; i < n; i++) c.down[i] = f(g * u[i]) * inv
+      }
       if (emph) c.de.process(c.down, c.down, n, 0)
       // What the curve added to the band.
       for (let i = 0; i < n; i++) c.down[i] -= c.srcDelay.push(src[i])
@@ -565,16 +580,32 @@ export const SAT_LISTEN_MODES = ['off', 'delta']
 export class SaturationBenchKernel {
   /**
    * `slots` is how many layers run in series; latency is 50 samples per slot,
-   * constant whether a slot is on or not. The bench runs four; the HF
-   * Limiter's Warmth runs two.
+   * constant whether a slot is on or not. The bench runs four; PHAT*SS's
+   * Warmth runs as many as it has layers.
+   *
+   * `oversample` (per slot, default all true) is fixed at construction:
+   * false runs that slot's curve at the base rate, with no oversampler and no
+   * latency. ⚠ ONLY FOR A LOW BAND: the curve's aliases fold anywhere, but the
+   * layer band-passes what it adds again, and below a few hundred Hz almost
+   * nothing lands back inside. Measured on narration and music, a 1–250 Hz
+   * quartic and a 1–220 Hz cubic at drive +50 come out of 1x within −84 dB of
+   * 4x (re what they add); a full-band quartic only −34, a 3–20 kHz tanh −17.5
+   * (`slotOversample` in phatassParams reads the flag from the layer list).
    */
-  constructor(sampleRate, { slots = SAT_BENCH_MAX_LAYERS } = {}) {
+  constructor(sampleRate, { slots = SAT_BENCH_MAX_LAYERS, oversample = null } = {}) {
     this.sampleRate = sampleRate
     this.slots = Math.max(1, Math.round(slots))
-    this.latency = this.slots * SAT_BENCH_LAYER_LATENCY
     const rampSamples = 0.02 * sampleRate
     this.detector = new VoicingDetector(sampleRate)
-    this.layers = Array.from({ length: this.slots }, () => new Layer(sampleRate, rampSamples))
+    this.layers = Array.from(
+      { length: this.slots },
+      (_, k) => new Layer(sampleRate, rampSamples, !(Array.isArray(oversample) && oversample[k] === false)),
+    )
+    // Each slot's voicing lag: the latency of every slot up to and including it.
+    this.lags = []
+    let acc = 0
+    for (const l of this.layers) this.lags.push((acc += l.latency))
+    this.latency = acc
     // Voicing history, so each layer reads the weight for the input sample its
     // output corresponds to. ⚠ It must hold the deepest lag PLUS a whole block:
     // a block's weights are written before any layer reads, and at LATENCY + 1
@@ -644,7 +675,7 @@ export class SaturationBenchKernel {
     const bufs = this.work.slice(0, nOut)
     for (let ch = 0; ch < nOut; ch++) bufs[ch].set(xs[ch].subarray(0, n))
     for (let k = 0; k < this.slots; k++) {
-      const lag = (k + 1) * SAT_BENCH_LAYER_LATENCY
+      const lag = this.lags[k]
       for (let i = 0; i < n; i++) this.wLayer[i] = this.wHist[(((base + i - lag) % H) + H) % H]
       this.layers[k].process(bufs, bufs, n, this.wLayer)
     }
@@ -669,7 +700,7 @@ export class SaturationBenchKernel {
 
 /** Offline render for tests and measurement. */
 export function processSaturationBenchBuffer(channelData, sampleRate, params = {}, options = {}) {
-  const kernel = new SaturationBenchKernel(sampleRate, { slots: options.slots })
+  const kernel = new SaturationBenchKernel(sampleRate, { slots: options.slots, oversample: options.oversample })
   kernel.setParams(params, true)
   if (options.listen) kernel.setListen(options.listen)
   const n = channelData[0].length

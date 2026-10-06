@@ -5856,3 +5856,33 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
   forces `mode: 'full'` (the bench default is VOICED) and `checkWarmthLayers`
   rejects a layer declaring 'voiced'. The shipped layers' explicit
   `mode: 'full'` is dropped as redundant; renders are bit-identical.
+
+### PHAT*SS — Warmth's low layers at the base rate (October 2026)
+
+- Owner asked whether four Warmth layers plus TAPE (five 4x oversamplers)
+  could collapse into two shared ones, since layers 1–2 and 3–4 have similar
+  bands and emphasis. Not exactly: the layers run in SERIES (layer 2 shapes
+  layer 1's output) and each pair's filters differ, so sharing an upsampler
+  means a parallel topology with the filters moved to 4x — a sound change for
+  a modest saving.
+- The better question was which layers need oversampling at all. Each layer
+  band-passes what it ADDS again, so aliases only matter where they land in
+  its own band. 1x against 4x, mismatch re what the layer adds:
+  1–250 Hz quartic +50: −85.5 / −84.5 dB (bright / dull narration), −109.5
+  (music); 1–220 Hz cubic +50: −85.7 / −90.6 / −121.8; full-band quartic 0
+  (−10 dB shelf): −34.0 / — / −50.5; 3–20 kHz tanh +27: −17.5 / — / −26.8.
+- So the kernel takes a per-slot `oversample` flag, FIXED AT CONSTRUCTION so
+  latency never moves; a base-rate slot runs the curve on the base-rate
+  samples and has no latency. The voicing history reads each slot's lag as
+  the running sum of slot latencies. The Saturation Bench itself is
+  unchanged (all slots oversampled).
+- PHAT*SS marks the even/odd pair `oversample: false`; `checkWarmthLayers`
+  allows that only for `hiHz ≤ WARMTH_BASE_RATE_MAX_HZ` (500 — a reasoned
+  margin over the measured 250, not a measurement).
+- Cost: each oversampled layer is ~6 s per 10 min of audio offline. Full
+  render (Warmth 5, TAPE 3, 10 min): 39.2 → 29.5 s; latency 514 → 414
+  samples at 44.1 kHz. The user's two `emphDb: 0` duplicates (dead — the later
+  key won) were removed; renders unchanged.
+- Test "latency … constant": its impulse tolerance now covers Warmth's
+  full-band layers, which shave a one-sample impulse at the oversampler's band
+  edge the way TAPE does (this failed already on the four-layer commit).
