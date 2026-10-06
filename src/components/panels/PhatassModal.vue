@@ -40,6 +40,7 @@ import {
 import Knob from '../knobs/Knob.vue'
 import DeviceLampPill from '../knobs/DeviceLampPill.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
+import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
@@ -126,11 +127,14 @@ const DETECT_OPTIONS = [
   { value: '2k', label: '2K', title: 'The shelf listens to the same band it cuts, everything above 2 kHz: loud vowel brightness and sibilance both trigger it' },
   { value: '4k', label: '4K', title: 'The shelf listens above 4 kHz but still cuts from 2 kHz: sibilance triggers it before vowel brightness does' },
 ]
+// Three shapes, not a progression of one — a detent rotary, as on the Saturation Bench.
 const TAPE_CURVE_OPTIONS = [
   { value: 'cubic', label: 'CUBIC', title: 'Matched to a Studer A800 emulation: only the third harmonic until about 3.5 dB, then the very top is clipped flat' },
   { value: 'tanh', label: 'TANH', title: 'Bends earlier and never goes flat: a little more distortion at light settings, the peak lands closer to the number at heavy ones' },
+  { value: 'algebraic', label: 'ALGEBRAIC', title: 'Bends earliest of the three and never goes flat: the most distortion at every setting, the peak as close to the number as TANH' },
 ]
-const tapeCurveCaption = computed(() => (phParams.tapeCurve === 'tanh' ? 'NEVER FLAT' : 'FLAT PAST 3.5'))
+const tapeCurveCaption = computed(() => (phParams.tapeCurve === 'cubic' ? 'FLAT PAST 3.5' : 'NEVER FLAT'))
+const tapeCurveTitle = computed(() => TAPE_CURVE_OPTIONS.find(o => o.value === phParams.tapeCurve)?.title ?? '')
 // What Tame currently does on the chosen curve.
 const curveCaption = computed(() => {
   const s = tapeShelf(phParams.tame, phParams.tone, phParams.curve)
@@ -212,7 +216,7 @@ async function applyAndClose() {
             </div>
           </div>
           <div class="flex justify-center gap-[12px]">
-            <div class="w-[80px]" title="Takes this many dB off the selection’s loudest peak the way tape saturation does: the top of each wave is rounded off, while everything more than about 9 dB under the peak passes untouched. A waveshaper, not a compressor, so it adds odd harmonics as it works — about 2 % at 1 dB, 4 % at 2 dB, 9 % at 3.5. On CUBIC, past 3.5 dB the very top is clipped flat; TANH never goes flat. Peaks carried by sibilance lose somewhat less than the number. MAKEUP is automatic: what Tape actually took off the peak is measured on the selection and given back, so the peak returns to where it started and the reduction becomes loudness. 0 is off">
+            <div class="w-[80px]" title="Takes this many dB off the selection’s loudest peak the way tape saturation does: the top of each wave is rounded off, while everything more than about 9 dB under the peak passes untouched. A waveshaper, not a compressor, so it adds odd harmonics as it works — about 2 % at 1 dB, 4 % at 2 dB, 9 % at 3.5. On CUBIC, past 3.5 dB the very top is clipped flat; TANH and ALGEBRAIC never go flat. Peaks carried by sibilance lose somewhat less than the number. MAKEUP is automatic: what Tape actually took off the peak is measured on the selection and given back, so the peak returns to where it started and the reduction becomes loudness. 0 is off">
               <Knob
                 :model-value="phParams.tape" @update:model-value="v => syncParam('tape', v)"
                 :min="0" :max="TAPE_MAX_DB" :step="0.1" :value-font-px="13"
@@ -244,13 +248,14 @@ async function applyAndClose() {
       </div>
 
       <div class="flex justify-center items-end gap-[28px] mt-[16px]">
-        <div class="flex flex-col items-center gap-[8px]">
+        <div class="flex flex-col items-center gap-[6px]" :title="tapeCurveTitle">
           <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">TAPE</span>
-          <DeviceChoiceRocker
+          <DeviceDetentRotary
             :model-value="phParams.tapeCurve" :options="TAPE_CURVE_OPTIONS" :accent="ACCENT"
-            :disabled="!phPreview || phParams.tape <= 0" label="Tape curve" :caption="tapeCurveCaption"
+            :disabled="!phPreview || phParams.tape <= 0" label="Tape curve" :show-label="false"
             @update:model-value="v => syncParam('tapeCurve', v)"
           />
+          <span style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.08em;color:rgba(255,255,255,.45)">{{ tapeCurveCaption }}</span>
         </div>
         <div class="flex flex-col items-center gap-[8px]">
           <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">CURVE</span>

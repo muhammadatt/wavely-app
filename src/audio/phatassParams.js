@@ -37,7 +37,7 @@ export const PHATASS_DEFAULTS = {
   // the selection's own peak (`tapeLayer`). 0 is off (a pure delay).
   tape: 0,
   // TAPE's curve (`TAPE_CURVES`): 'cubic' (the Studer fit; a hard clip past
-  // 3.52 dB) or 'tanh' (rounder at the top of the knob, never flat).
+  // 3.52 dB), 'tanh' or 'algebraic' (both never flat; algebraic bends earliest).
   tapeCurve: 'cubic',
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
@@ -472,8 +472,15 @@ export const TAPE_FALLBACK_CREST_DB = 18
  * earlier, so more samples are shaped. What tanh does do better: the peak lands
  * nearer the knob (−5.93 vs −5.75 dB at 6; no flat to ring off) and sibilant
  * peaks lose closer to the number (makeup 4.84 vs 4.55 dB at 6). Not auditioned.
+ *
+ * 'algebraic' (u/√(1 + u²); Studer fit 0.19) is tanh further the same way: it
+ * bends earliest, so it has the most high-order content at every setting
+ * (H7–H41 −84.8 / −66.9 / −52.8 / −44.0 / −39.7 dBc at TAPE 1 / 2 / 3.5 / 5 / 6),
+ * H3+H5 lowest of the three, the most added on narration (−26.3 at 2, −15.5 at
+ * 6), and tanh's peak accuracy (−5.94 dB at 6). Its knob solve is closed form.
+ * Not auditioned.
  */
-export const TAPE_CURVES = ['cubic', 'tanh']
+export const TAPE_CURVES = ['cubic', 'tanh', 'algebraic']
 export const TAPE_CURVE = TAPE_CURVES[0]
 const TAPE_LAYER = {
   amountDb: 0, emphDb: 0, loHz: SAT_BAND_MIN_HZ, hiHz: SAT_BAND_MAX_HZ, mode: 'full',
@@ -481,11 +488,13 @@ const TAPE_LAYER = {
 
 /**
  * The curve's input u at the peak that takes `reductionDb` off it: the u with
- * f(u)/u = 10^(−dB/20). The cubic inverts in closed form; tanh(u)/u falls
- * monotonically from 1, so it is bisected (to ~1e-12, well inside a float).
+ * f(u)/u = 10^(−dB/20). The cubic and algebraic (1/√(1 + u²) = r) invert in
+ * closed form; tanh(u)/u falls monotonically from 1, so it is bisected (to
+ * ~1e-12, well inside a float).
  */
 export function tapePeakU(reductionDb, curve = TAPE_CURVE) {
   const r = Math.pow(10, -Math.max(0, reductionDb) / 20)
+  if (curve === 'algebraic') return Math.sqrt(1 / (r * r) - 1)
   if (curve === 'tanh') {
     if (r >= 1) return 0
     let lo = 0, hi = 1

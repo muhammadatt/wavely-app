@@ -5945,3 +5945,17 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
 - What tanh does better: peak accuracy (110 Hz: −5.93 vs −5.75 dB at TAPE 6,
   −4.96 vs −4.83 at 5) and sibilant peaks lose closer to the knob (bright
   narration makeup at TAPE 6: 4.84 vs 4.55 dB). Neither curve auditioned.
+
+### PHAT*SS — TAPE curve: ALGEBRAIC added (October 2026)
+
+- Owner asked for algebraic (u/√(1 + u²), Studer fit 0.19 dB rms) as a third
+  TAPE curve. Knob solve in closed form: 1/√(1 + u²) = r → u = √(1/r² − 1).
+- Three options no longer fit the two-position `DeviceChoiceRocker`, so the
+  TAPE control is now a `DeviceDetentRotary` (as the Saturation Bench picks its
+  curves), with its caption printed under it.
+- Measured (same instruments as the tanh entry), algebraic vs tanh: H3+H5
+  −30.9 / −25.1 / −20.4 / −17.5 / −16.1 dBc at TAPE 1 / 2 / 3.5 / 5 / 6 (0.0–0.4
+  under tanh); H7–H41 −84.8 / −66.9 / −52.8 / −44.0 / −39.7 (3–4.5 dB more than
+  tanh, and above the cubic even at 5–6); peak −1.00 / −1.99 / −3.48 / −4.96 /
+  −5.94 dB (as tanh). Bright narration: makeup 1.58 / 4.93 dB at TAPE 2 / 6,
+  added −26.3 / −15.5 dB re signal — the most of the three. Not auditioned.
