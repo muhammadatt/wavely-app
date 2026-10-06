@@ -15,6 +15,10 @@
  * no knob: its depth rides TAME, so the top end and the attacks turn down
  * together. A gain on a band, never distortion, no latency of its own.
  *
+ * TAPE takes dB off the peaks the way tape does: a full-band cubic soft
+ * clipper, calibrated on the selection's own peak so the knob reads in dB of
+ * peak reduction. A waveshaper, not a compressor — quiet material is untouched.
+ *
  * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing
  * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
  * match), its corner at 2 kHz. TAME is a macro for Threshold and Range together,
@@ -30,7 +34,7 @@ import { computed, onMounted, watch } from 'vue'
 import { usePhatass } from '../../composables/usePhatass.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
+  WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, TAPE_MAX_DB, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
   warmthActive, tapeShelf, softenLaw, CURVE_DETECT,
 } from '../../audio/phatassParams.js'
 import Knob from '../knobs/Knob.vue'
@@ -99,6 +103,7 @@ const readoutPeak = computed(() => {
 const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtOddEven = v => (v <= 0 ? 'ODD' : `${Math.round(v)}`)
 const fmtTame = v => (v <= 0 ? 'OFF' : v.toFixed(1))
+const fmtTape = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 // Soften has no knob of its own: say how deep Tame currently lets it go.
 const softenCaption = computed(() => {
@@ -196,6 +201,13 @@ async function applyAndClose() {
             </div>
           </div>
           <div class="flex justify-center gap-[12px]">
+            <div class="w-[80px]" title="Takes this many dB off the selection’s loudest peak the way tape saturation does: the top of each wave is rounded off, while everything more than about 9 dB under the peak passes untouched. A waveshaper, not a compressor, so it adds odd harmonics as it works — about 2 % at 1 dB, 4 % at 2 dB, 9 % at 3.5. Past 3.5 dB the very top is clipped flat. Peaks carried by sibilance lose somewhat less than the number. 0 is off">
+              <Knob
+                :model-value="phParams.tape" @update:model-value="v => syncParam('tape', v)"
+                :min="0" :max="TAPE_MAX_DB" :step="0.1" :value-font-px="13"
+                label="Tape" :accent="ACCENT" :format-value="fmtTape" :disabled="!phPreview"
+              />
+            </div>
             <div class="w-[80px]" title="How hard the tape rounds off the top end: lowers the threshold and deepens the most it may cut together, relative to the file's voice level. With SOFTEN on it also sets how deep sudden attacks are taken down (up to 36 dB at 10). 0 is off">
               <Knob
                 :model-value="phParams.tame" @update:model-value="v => syncParam('tame', v)"
@@ -263,8 +275,8 @@ async function applyAndClose() {
         class="mt-[16px] text-center"
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
-        Warmth fattens the low end without raising the peak, Soften rounds off sudden
-        attacks, and Tame rounds off the top from 2 kHz the way tape does.
+        Warmth fattens the low end without raising the peak, Tape rounds off the peaks,
+        Soften rounds off sudden attacks, and Tame rounds off the top from 2 kHz.
       </p>
     </div>
   </FloatingWindow>

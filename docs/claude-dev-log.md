@@ -5717,3 +5717,61 @@ now 4K (VOICE's pair), and choosing a CURVE on the panel moves DETECT to its
 pair. DETECT stays on the panel and can be set against the pair afterwards —
 kept rather than folded into one four-way switch so the off-pair combinations
 remain auditionable.
+
+## PHAT*SS — TAPE: peak reduction from a Studer A800 match (October 2026)
+
+**Owner:** other tape emulations have "more of a compressive, peak reduction
+effect" than PHAT*SS. Supplied an acoustic guitar dry vs through a Studer A800
+emulation (`AllTape_AcousticGuitar_dry_v1.m4a`, `StuderA800_…_wet_v1.m4a`;
+48 kHz stereo AAC 256 kb/s — so the floor of every residual below is codec
+noise, ~−27 dB).
+
+**What the Studer does.**
+- Peak −0.86 → −2.24 dBFS, RMS +1.6 dB, crest 18.4 → 15.4 dB.
+- Delay 1.37 samples, constant through the clip: no wow/flutter.
+- Linear part (cross-spectral, coherence ≥ 0.95 from 80 Hz): head bump +3–5 dB
+  at 63–100 Hz, ~+1 dB mids, top end RISING +2 dB at 4 kHz to +7.7 at 16 kHz.
+  Through that EQ alone the dry would have peaked at +1.6 dBFS, so the
+  nonlinearity takes 3.8 dB off the top.
+- Per sample against the linear prediction: flat to ~9 dB under the peak, then
+  −1.1 / −2.2 / −5.3 dB at −6 / −3 / 0 dB. Per 10 ms window it barely moves
+  (−0.8 dB in the loudest). **A WAVESHAPER, NOT A COMPRESSOR**: inside the
+  loudest windows samples 14–20 dB under the peak keep the baseline gain
+  (+0.35 dB) while those within 3 dB lose 2.4. Nearly symmetric (negative half
+  0.2–0.4 dB more): odd, a trace of even.
+- Bench curves fitted to that gain curve (free drive): **cubic 0.09 dB rms**,
+  tanh 0.17, algebraic 0.19, atan 0.20, asym 0.35, quartic 0.84. Cubic and tanh
+  take the residual past the linear model from −20.9 to −27.4 / −27.2 dB, about
+  80 % of it explained; the rest is consistent with the codec.
+
+**Why this was not already there.** The hysteresis study found full-band
+saturation is the only thing that softens transients and compresses, and that
+the loop did it no better than tanh; the owner then chose gain-based softening
+(Soften) over more distortion. The Studer is the same mechanism.
+
+**Built: TAPE**, owner's choice of cubic and a peak-reduction knob.
+- One Saturation Bench layer (`curve: 'cubic'`, band open at both ends, Amount
+  0, FULL, no emphasis), its own one-slot `SaturationBenchKernel` between the
+  Warmth guard and the tape shelf. 4x oversampled, 50 samples, on or off.
+- The knob is dB of peak reduction, solved in closed form: for f(g·x)/g the
+  gain at the selection's peak P is f(u)/u at u = g·P, and the cubic inverts
+  (`tapePeakU`: u = √(3(1 − r)) up to 3.52 dB, 2/(3r) past it). Drive is set
+  against `refPeakDb` = `warmthCeilingDb` (already measured for the guard;
+  fallback voice level + 18 dB).
+- Measured (Warmth and Tame off; peak / rms / added re signal):
+  guitar 1 → −1.00 / −0.12 / −33.5, 2 → −2.00 / −0.23 / −27.9,
+  3.5 → −3.46 / −0.37 / −23.8, 6 → −5.84 / −0.65 / −18.9;
+  bright narration 1 → −0.77, 2 → −1.50, 3.5 → −2.56, 6 → −4.55 (added the same);
+  dull narration 1 → −0.97, 2 → −1.93, 3.5 → −3.36, 6 → −5.62.
+- ⚠ **A SIBILANT PEAK LOSES LESS THAN THE KNOB SAYS**: the bright clip's peak
+  is centred ~8.9 kHz, so the cubic's third harmonic lands above Nyquist and the
+  oversampler's filter removes it, giving part of the peak back. Accepted: it
+  costs the sibilance less distortion.
+- ⚠ Past 3.52 dB the top is on the cubic's flat — a hard clip — and its
+  band-limited ringing gives ~0.3 dB back at 6 (the test allows 0.5 there).
+- At low level flat to 18 kHz (≤ 0.01 dB); −0.19 dB at 20 kHz and −2.3 at
+  21 kHz, the 4x oversampler's band edge, shared with every bench layer. A
+  one-sample impulse reads 2.4 % low through it, so the latency test allows 3 %
+  with TAPE on.
+- The Studer's linear EQ (head bump, rising top) is NOT copied: the bump overlaps
+  Warmth and the rising top works against Tame. Not auditioned.

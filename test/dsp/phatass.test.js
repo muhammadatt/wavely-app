@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
-  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT,
+  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
 } from '../../src/audio/phatassParams.js'
 import { HF_LIMITER_DEFAULTS, toKernelParams as toHFLimiterKernelParams } from '../../src/audio/hfLimiterParams.js'
@@ -59,16 +59,82 @@ const run = (x, p) => processPhatassBuffer([x], SR, toKernelParams(p))
 
 // ── The chain ────────────────────────────────────────────────────────────────
 
-test('the latency is Warmth + guard + shelf, constant at every setting (Soften adds none)', () => {
+test('the latency is Warmth + guard + TAPE + shelf, constant at every setting (Soften adds none)', () => {
   const L = phatassLatencySamples(SR)
-  assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + shelfLatencySamples(SR))
-  for (const [warmth, tame, soften] of [[0, 0, false], [0, 10, false], [6, 0, false], [10, 10, true], [0, 5, true]]) {
+  assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + TAPE_LATENCY_SAMPLES + shelfLatencySamples(SR))
+  for (const [warmth, tame, soften, tape] of [[0, 0, false, 0], [0, 10, false, 0], [6, 0, false, 0], [10, 10, true, 0], [0, 5, true, 0], [0, 0, false, 6], [8, 8, true, 3]]) {
     const x = new Float32Array(8192)
     x[100] = 0.001 // far below every threshold
-    const { channelData: [y], latencySamples } = run(x, { voiceLevelDb: -20, warmth, tame, soften })
+    const { channelData: [y], latencySamples } = run(x, { voiceLevelDb: -20, warmth, tame, soften, tape, warmthCeilingDb: -3 })
     assert.equal(latencySamples, L)
-    assert.ok(Math.abs(y[100 + L] - x[100]) < 1e-5, `warmth ${warmth} tame ${tame} soften ${soften}: impulse at ${L} reads ${y[100 + L]}`)
+    // TAPE on runs a full-band 4x oversampler, whose band edge (−0.2 dB at
+    // 20 kHz) shaves a one-sample impulse a little; the impulse still lands at L.
+    const tol = tape > 0 ? 0.03 * x[100] : 1e-5
+    assert.ok(Math.abs(y[100 + L] - x[100]) < tol, `warmth ${warmth} tame ${tame} soften ${soften} tape ${tape}: impulse at ${L} reads ${y[100 + L]}`)
   }
+})
+
+// ── TAPE: a full-band cubic soft clipper, knob in dB of peak reduction ──────
+
+test('TAPE: the knob inverts the cubic exactly — f(u)/u at the peak is the knob\'s reduction', () => {
+  const cubic = u => (u >= 1 ? 2 / 3 : u - (u * u * u) / 3)
+  for (let t = 0.1; t <= TAPE_MAX_DB; t += 0.1) {
+    const u = tapePeakU(t)
+    assert.ok(Math.abs(db(cubic(u) / u) + t) < 1e-9, `${t.toFixed(1)} dB: u ${u}`)
+  }
+  assert.equal(tapeLayer(0, -3).on, false)
+  const l = tapeLayer(2, -3)
+  assert.equal(l.on, true)
+  assert.equal(l.curve, 'cubic')
+  assert.equal(l.refPeakDb, -3)
+  assert.equal(l.amountDb, 0)
+  assert.equal(PHATASS_DEFAULTS.tape, 0)
+})
+
+test('TAPE takes its number off a low-frequency peak, and leaves quiet material alone', () => {
+  const peak = 0.7
+  const x = sine(110, peak)
+  for (const tape of [1, 2, 3.5, 6]) {
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, tape, warmthCeilingDb: db(peak) })
+    let p = 0
+    for (let i = L + 2000; i < x.length; i++) p = Math.max(p, Math.abs(y[i]))
+    // Past 3.52 dB the top is on the cubic's flat — a hard clip — and its
+    // band-limited ringing gives a few tenths back.
+    const tol = tape <= 3.5 ? 0.1 : 0.5
+    assert.ok(Math.abs(db(p / peak) + tape) < tol, `TAPE ${tape}: peak moved ${db(p / peak).toFixed(2)} dB`)
+  }
+  // 20 dB under the selection's peak, TAPE 2 moves the fundamental by under 0.05 dB.
+  const q = sine(110, peak / 10)
+  const { channelData: [y], latencySamples: L } = run(q, { warmth: 0, tame: 0, tape: 2, warmthCeilingDb: db(peak) })
+  const a = toneAmp(y.subarray(L), 110, 4000, q.length - L - 100)
+  assert.ok(Math.abs(db(a / (peak / 10))) < 0.05, `quiet sine moved ${db(a / (peak / 10)).toFixed(3)} dB`)
+})
+
+test('TAPE is symmetric: odd harmonics only', () => {
+  const peak = 0.7
+  const x = sine(200, peak)
+  const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, tape: 3, warmthCeilingDb: db(peak) })
+  const from = L + 4000, to = from + 30000
+  const h3 = harmonicDbc(y, 200, 3, from, to), h2 = harmonicDbc(y, 200, 2, from, to)
+  assert.ok(h3 > -30, `H3 ${h3.toFixed(1)} dBc`)
+  assert.ok(h2 < h3 - 40, `H2 ${h2.toFixed(1)} dBc against H3 ${h3.toFixed(1)}`)
+})
+
+test('TAPE at a quiet level is flat to 18 kHz (the 4x oversampler\'s band edge is above it)', () => {
+  for (const f of [100, 1000, 10000, 18000]) {
+    const x = sine(f, 0.001)
+    const amp = tape => {
+      const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, tape, warmthCeilingDb: -3 })
+      return toneAmp(y.subarray(L), f, 4000, x.length - L - 100)
+    }
+    const d = db(amp(6) / amp(0))
+    assert.ok(Math.abs(d) < 0.02, `${f} Hz: ${d.toFixed(3)} dB`)
+  }
+})
+
+test('TAPE with no measured peak calibrates on the voice level + 18 dB', () => {
+  const k = toKernelParams({ tape: 2, voiceLevelDb: -20, warmthCeilingDb: null })
+  assert.equal(k.tapeLayer.refPeakDb, -2)
 })
 
 test('Warmth 0, Soften off and Tame 0 pass the audio through untouched', () => {

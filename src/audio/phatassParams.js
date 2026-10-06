@@ -14,7 +14,10 @@
 
 import { ALIGN_TARGET_DBFS } from './dsp/inputAlign.js'
 import { shelfLatencySamples } from './dsp/hfLimit.js'
-import { SAT_BENCH_LAYER_LATENCY, SAT_AMOUNT_FLOOR_DB } from './dsp/saturationLayers.js'
+import {
+  SAT_BENCH_LAYER_LATENCY, SAT_AMOUNT_FLOOR_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB,
+} from './dsp/saturationLayers.js'
+import { unitDriveU } from './dsp/shaperCurves.js'
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
 
 export const PHATASS_DEFAULTS = {
@@ -30,6 +33,9 @@ export const PHATASS_DEFAULTS = {
   // TAME, so the top-end shelf and the onset softening turn down together
   // (`softenLaw`). A gain on a band, never distortion, no latency of its own.
   soften: false,
+  // 0–TAPE_MAX_DB — TAPE: how many dB a full-band cubic soft clipper takes off
+  // the selection's own peak (`tapeLayer`). 0 is off (a pure delay).
+  tape: 0,
   // 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
   // together, on the chosen `curve` (`tapeShelf`). 0 takes the shelf out. On
   // the default 'voice' curve 5 is −4 dB re the voice, Range 12; 10 is −14,
@@ -56,9 +62,10 @@ export const PHATASS_DEFAULTS = {
   // Each warmth layer's reference peak, dBFS (saturationBenchAnalysis
   // .bandRefPeakDb). Measured, never a user setting; null until measured.
   warmthRefPeaksDb: null,
-  // The Warmth peak guard's ceiling: the selection's own peak, dBFS. The guard
-  // is PINNED ON whenever Warmth is up (dsp/warmthGuard.js). Measured; null
-  // until measured, and the guard then has no ceiling.
+  // The selection's own peak, dBFS: the Warmth peak guard's ceiling (pinned on
+  // whenever Warmth is up, dsp/warmthGuard.js) and the peak TAPE is calibrated
+  // on. Measured; null until measured — the guard then has no ceiling and TAPE
+  // assumes one (`TAPE_FALLBACK_CREST_DB`).
   warmthCeilingDb: null,
 }
 
@@ -320,6 +327,7 @@ export function toKernelParams(params) {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
+    tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB),
     cornerHz: shelf.cornerHz,
     thresholdDb: voice + shelf.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
     detectCornerHz: det4k ? DETECT_4K_HZ : null,
@@ -335,17 +343,67 @@ export function toKernelParams(params) {
   }
 }
 
+/**
+ * TAPE — a full-band CUBIC soft clipper on the main path, between the Warmth
+ * guard and the tape shelf: what a tape machine does to peaks. Measured on a
+ * Studer A800 emulation (owner-supplied acoustic guitar, dry vs wet, see
+ * docs/claude-dev-log.md "PHAT*SS — TAPE"): the peak reduction is a WAVESHAPER,
+ * not a compressor — in the loudest 10 ms windows the quiet samples keep their
+ * gain and only those near the top bend — nearly symmetric, flat to ~9 dB under
+ * the peak, then −1.1 / −2.2 / −5.3 dB at −6 / −3 / 0. The bench's CUBIC
+ * (`u − u³/3`, flat past ±1) fits that curve to 0.09 dB rms (tanh 0.17).
+ *
+ * The knob is PEAK REDUCTION in dB, solved exactly: for f(g·x)/g the gain at
+ * the selection's peak P is f(u)/u with u = g·P, and the cubic inverts in
+ * closed form (`tapePeakU`). So the knob's number is what happens to the peak
+ * sample, on any recording level. ⚠ Past 3.52 dB (u > 1) the top of the wave is
+ * on the cubic's FLAT — a hard clip there; the Studer fit sat at u 1.17 (−4.9 dB
+ * at its peak). ⚠ Distortion rises fast: on narration ~−33 / −27 / −21 dB of
+ * added signal at 1 / 2 / 3.6 dB of peak reduction (≈2 / 4 / 9 %).
+ *
+ * Run on the shared Saturation Bench kernel as one layer with its band open at
+ * both ends and Amount 0, which is exactly a full-band shaper, 4x oversampled,
+ * 50 samples of latency on or off.
+ */
+export const TAPE_MAX_DB = 6
+/** Peak re the gated RMS assumed when the selection's peak is not measured yet. */
+export const TAPE_FALLBACK_CREST_DB = 18
+export const TAPE_CURVE = 'cubic'
+const TAPE_LAYER = {
+  curve: TAPE_CURVE, amountDb: 0, emphDb: 0, loHz: SAT_BAND_MIN_HZ, hiHz: SAT_BAND_MAX_HZ, mode: 'full',
+}
+
+/** The cubic's input u at the peak that takes `reductionDb` off it (f(u)/u = 10^(−dB/20)). */
+export function tapePeakU(reductionDb) {
+  const r = Math.pow(10, -Math.max(0, reductionDb) / 20)
+  return r >= 2 / 3 ? Math.sqrt(3 * (1 - r)) : 2 / (3 * r)
+}
+
+/** The TAPE layer's kernel params for a knob position and the selection's peak. */
+export function tapeLayer(tapeDb, peakDb) {
+  const t = clamp(Number(tapeDb) || 0, 0, TAPE_MAX_DB)
+  if (!(t > 0)) return { ...TAPE_LAYER, on: false, driveDb: 0 }
+  // layerGain = unitDriveU / refPeak · 10^(drive/20): with refPeak = the peak,
+  // u at the peak is unitDriveU · 10^(drive/20).
+  const driveDb = clamp(20 * Math.log10(tapePeakU(t) / unitDriveU(TAPE_CURVE)), SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB)
+  return { ...TAPE_LAYER, on: true, driveDb, refPeakDb: peakDb }
+}
+
+/** The TAPE stage's latency: one oversampler round trip, on or off. */
+export const TAPE_LATENCY_SAMPLES = SAT_BENCH_LAYER_LATENCY
+
 /** The Warmth stage's latency: one oversampler round trip per layer. */
 export const WARMTH_LATENCY_SAMPLES = WARMTH_LAYERS.length * SAT_BENCH_LAYER_LATENCY
 
 /**
- * Plugin latency, samples: the Warmth oversamplers, the peak guard's lookahead
- * and the shelf's split centre and lookahead (Soften shares the shelf's).
+ * Plugin latency, samples: the Warmth oversamplers, the peak guard's lookahead,
+ * TAPE's oversampler and the shelf's split centre and lookahead (Soften shares
+ * the shelf's).
  * CONSTANT: every stage stays a delay of its own length when idle, so no
  * setting moves the audio.
  */
 export function phatassLatencySamples(sampleRate) {
-  return WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate) + shelfLatencySamples(sampleRate)
+  return WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate) + TAPE_LATENCY_SAMPLES + shelfLatencySamples(sampleRate)
 }
 
 /** Pre-roll for apply, seconds: several of the shelf's release. */

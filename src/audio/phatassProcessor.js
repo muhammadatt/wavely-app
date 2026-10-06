@@ -1,7 +1,7 @@
 /**
  * PHAT*SS — worklet kernel.
  *
- * Warmth → Guard → Tape shelf (with Soften on its own band) → Output.
+ * Warmth → Guard → TAPE (full-band cubic) → Tape shelf (with Soften on its own band) → Output.
  *
  * WARMTH is two Saturation Bench layers (dsp/saturationLayers.js, voiced in
  * phatassParams.WARMTH_LAYERS), 4x oversampled, a pure delay at 0. Its PEAK
@@ -10,7 +10,9 @@
  * but never peak level. The TAPE SHELF is the HF Limiter's lookahead dynamic
  * shelf (dsp/hfLimit.js) with its shape and timing pinned (phatassParams
  * .TAPE_SHELF) and its corner / threshold / range set by the Tame and Tone
- * macros.
+ * macros. TAPE is one more bench layer, full band, calibrated on the
+ * selection's peak so its knob reads in dB of peak reduction (phatassParams
+ * `tapeLayer`).
  *
  * Constant latency (see `phatassLatencySamples`), bit-transparent with Warmth,
  * Soften and Tame at 0. SOFTEN is the shelf's Transient detector with its own
@@ -38,8 +40,11 @@ export class PhatassKernel {
     this.warmthInit = false
     // Lined up against the Warmth output, so its dry is the input delayed by that.
     this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)
+    this.tape = new SaturationBenchKernel(sampleRate, { slots: 1 })
+    this.tapeInit = false
     this.shelf = new ShelfLimiterStage(sampleRate)
-    this.latencySamples = this.warmth.latencySamples + this.guard.latencySamples + this.shelf.latencySamples
+    this.latencySamples = this.warmth.latencySamples + this.guard.latencySamples
+      + this.tape.latencySamples + this.shelf.latencySamples
     this.params = { ...PHATASS_KERNEL_DEFAULTS }
     this.setParams({}, true)
   }
@@ -60,6 +65,10 @@ export class PhatassKernel {
       this.warmthInit = true
     }
     if (p.warmthGuard) this.guard.setParams(p.warmthGuard)
+    if (p.tapeLayer) {
+      this.tape.setParams({ layers: [p.tapeLayer] }, immediate || !this.tapeInit)
+      this.tapeInit = true
+    }
     this.shelf.setParams({
       cornerHz: p.cornerHz,
       thresholdLin: dbToLin(p.thresholdDb),
@@ -94,6 +103,7 @@ export class PhatassKernel {
     // In place: each stage reads a sample before it writes that output.
     this.warmth.process(outputChannels, outputChannels, n)
     this.guard.process(inputChannels, outputChannels, n)
+    this.tape.process(outputChannels, outputChannels, n)
     this.shelf.process(outputChannels, n)
     const g = this.outputLin
     if (g !== 1) {
