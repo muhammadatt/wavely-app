@@ -12,6 +12,7 @@ import { phatassEffect, PHATASS_DEFAULTS } from '../audio/effects/phatass.js'
 import { WARMTH_LAYERS, warmthActive } from '../audio/phatassParams.js'
 import { measureBandSpectrum, bandRefPeakDb } from '../audio/saturationBenchAnalysis.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { NeedleSpring, satMeterValue } from '../audio/dsp/saturationMeter.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const PHATASS_WINDOW_ID = 'phatass'
@@ -23,6 +24,10 @@ const phParams = reactive({ ...PHATASS_DEFAULTS })
 const phPreview = ref(false)
 const phInputLevels = ref([])
 const phOutputLevels = ref([])
+// The saturation needle, 0–100, and the reading it is heading for (dB re the
+// clean signal; −Infinity at rest).
+const phSatNeedle = ref(0)
+const phSatDb = ref(-Infinity)
 let meterId = null
 let levelMeasuredFor = null
 let ceilingMeasuredFor = null
@@ -57,13 +62,19 @@ export function usePhatass() {
 
   function startMeters(chain) {
     stopMeters()
-    function tick() {
+    const needle = new NeedleSpring()
+    let last = performance.now()
+    function tick(now) {
       const nodes = nodesOf(chain)
       if (nodes) {
         const chCount = state.currentFile?.channels ?? 1
         phInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
         phOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
+        const db = nodes.getSaturationDb?.() ?? -Infinity
+        phSatDb.value = db
+        phSatNeedle.value = needle.step(satMeterValue(db), Math.max(0, (now - last) / 1000))
       }
+      last = now
       meterId = requestAnimationFrame(tick)
     }
     meterId = requestAnimationFrame(tick)
@@ -76,6 +87,8 @@ export function usePhatass() {
     }
     phInputLevels.value = []
     phOutputLevels.value = []
+    phSatNeedle.value = 0
+    phSatDb.value = -Infinity
   }
 
   function pushParam(name, value) {
@@ -367,6 +380,8 @@ export function usePhatass() {
     phPreview,
     phInputLevels,
     phOutputLevels,
+    phSatNeedle,
+    phSatDb,
     phWarmthReadout,
     phTapeMakeup,
     hasSelection,

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { createVuBallistics, useMeterFrame } from '../meters/ballistics.js'
 import { VU_SCALE, vuFraction, vuFractionToDeg, grToVuFraction } from './hardwareDial.js'
+import { SAT_METER_RED_VALUE } from '../../audio/dsp/saturationMeter.js'
 
 /**
  * The Classic 76 face's amber VU movement, reading gain reduction the way the
@@ -12,6 +13,12 @@ import { VU_SCALE, vuFraction, vuFractionToDeg, grToVuFraction } from './hardwar
  * (`meters/ballistics.js`), so it reads the same quantity at the same speed
  * as the bar meter it replaces. With the unit off the needle drops to its
  * left stop, as a de-energised movement does.
+ *
+ * `face: 'saturation'` engraves the same movement as a SATURATION meter
+ * (PHAT*SS): a linear 0–100 scale, red from `SAT_METER_RED_VALUE`, and the
+ * needle set straight from `value` — the caller has already run it through
+ * its own spring (`dsp/saturationMeter.js`), so the VU damping stays out of
+ * it rather than slowing it twice.
  */
 const props = defineProps({
   /** Gain reduction in dB, either sign (the compressors report it negative). */
@@ -19,7 +26,13 @@ const props = defineProps({
   active: { type: Boolean, default: true },
   /** Displayed width; the face is drawn at 400 px and scaled. */
   width: { type: Number, default: 228 },
+  /** 'vu' (gain reduction, the default) or 'saturation' (0–100 from `value`). */
+  face: { type: String, default: 'vu' },
+  /** The saturation face's needle, 0–100, already damped. */
+  value: { type: Number, default: 0 },
 })
+
+const sat = computed(() => props.face === 'saturation')
 
 const NATIVE_W = 400
 const NATIVE_H = 229 // the face without its nameplate strip, as the design crops it
@@ -29,30 +42,58 @@ const INK = '#2a2420'
 const RED = '#a3201f'
 const MINORS = [-18, -16, -14, -12, -9, -8, -6, -4, -0.5, 0.5, 1.5, 2.5]
 
-const ticks = [
-  ...VU_SCALE.map(([db]) => ({ db, major: true })),
-  ...MINORS.map(db => ({ db, major: false })),
-].map(({ db, major }) => ({
-  rot: `rotate(${vuFractionToDeg(vuFraction(db)).toFixed(2)}deg)`,
+// Every mark as { f: fraction across the face, major, red, text? }.
+const VU_MARKS_ALL = [
+  ...VU_SCALE.map(([db]) => ({ f: vuFraction(db), major: true, red: db >= 0, text: db > 0 ? `+${db}` : String(db) })),
+  ...MINORS.map(db => ({ f: vuFraction(db), major: false, red: db >= 0 })),
+]
+// Saturation: majors every 10, numerals every 20, minors every 5.
+const SAT_MARKS_ALL = Array.from({ length: 21 }, (_, k) => {
+  const v = 5 * k
+  return {
+    f: v / 100,
+    major: v % 10 === 0,
+    red: v >= SAT_METER_RED_VALUE,
+    text: v % 20 === 0 ? String(v) : undefined,
+  }
+})
+const marks = computed(() => (sat.value ? SAT_MARKS_ALL : VU_MARKS_ALL))
+
+const ticks = computed(() => marks.value.map(({ f, major, red }) => ({
+  rot: `rotate(${vuFractionToDeg(f).toFixed(2)}deg)`,
   w: major ? 2.4 : 1.4,
   h: major ? 11 : 6.5,
-  col: db >= 0 ? RED : INK,
-}))
+  col: red ? RED : INK,
+})))
 
-const labels = VU_SCALE.map(([db]) => {
-  const a = vuFractionToDeg(vuFraction(db))
+const labels = computed(() => marks.value.filter(m => m.text !== undefined).map(({ f, red, text }) => {
+  const a = vuFractionToDeg(f)
   return {
     rot: `rotate(${a.toFixed(2)}deg)`,
     counter: `rotate(${(-a).toFixed(2)}deg)`,
-    text: db > 0 ? `+${db}` : String(db),
-    col: db >= 0 ? RED : INK,
+    text,
+    col: red ? RED : INK,
   }
-})
+}))
+
+// The scale arc, ink then red, split where the red zone starts: centre
+// (178, 196.1), radius 145 in the face's 356 × 200 viewBox.
+function arcPoint(f) {
+  const a = (vuFractionToDeg(f) * Math.PI) / 180
+  return `${(178 + 145 * Math.sin(a)).toFixed(1)} ${(196.1 - 145 * Math.cos(a)).toFixed(1)}`
+}
+const redFrom = computed(() => (sat.value ? SAT_METER_RED_VALUE / 100 : vuFraction(0)))
+const inkArc = computed(() => `M${arcPoint(0)} A145 145 0 0 1 ${arcPoint(redFrom.value)}`)
+const redArc = computed(() => `M${arcPoint(redFrom.value)} A145 145 0 0 1 ${arcPoint(1)}`)
 
 const REST = vuFraction(0)
 const needle = createVuBallistics({ initial: REST })
 const fraction = ref(REST)
 useMeterFrame((dt) => {
+  if (sat.value) {
+    fraction.value = props.active ? Math.min(1, Math.max(0, props.value / 100)) : 0
+    return
+  }
   fraction.value = needle.push(props.active ? grToVuFraction(props.reductionDb) : 0, dt)
 })
 const needleRot = computed(() => `rotate(${vuFractionToDeg(fraction.value).toFixed(2)}deg)`)
@@ -63,10 +104,10 @@ const needleRot = computed(() => `rotate(${vuFractionToDeg(fraction.value).toFix
     class="vu-frame"
     :style="{ width: width + 'px', height: (NATIVE_H * scale).toFixed(1) + 'px' }"
     role="meter"
-    aria-label="Gain reduction"
-    :aria-valuenow="active ? Math.abs(reductionDb).toFixed(1) : '0.0'"
+    :aria-label="sat ? 'Saturation' : 'Gain reduction'"
+    :aria-valuenow="sat ? (active ? Math.round(value) : 0) : (active ? Math.abs(reductionDb).toFixed(1) : '0.0')"
     aria-valuemin="0"
-    aria-valuemax="20"
+    :aria-valuemax="sat ? 100 : 20"
   >
     <div class="vu-scaler" :style="{ transform: `scale(${scale})` }">
       <div class="vu-root">
@@ -79,8 +120,8 @@ const needleRot = computed(() => `rotate(${vuFractionToDeg(fraction.value).toFix
             <div class="vu-paper" />
             <div class="vu-lamp" />
             <svg viewBox="0 0 356 200" class="vu-arc">
-              <path d="M70.3 99 A145 145 0 0 1 225.7 59.1" :style="{ fill: 'none', stroke: INK, strokeWidth: '1.7px', strokeLinecap: 'round' }" />
-              <path d="M225.7 59.1 A145 145 0 0 1 285.7 99" :style="{ fill: 'none', stroke: RED, strokeWidth: '3px', strokeLinecap: 'round' }" />
+              <path :d="inkArc" :style="{ fill: 'none', stroke: INK, strokeWidth: '1.7px', strokeLinecap: 'round' }" />
+              <path :d="redArc" :style="{ fill: 'none', stroke: RED, strokeWidth: '3px', strokeLinecap: 'round' }" />
             </svg>
             <div v-for="(t, i) in ticks" :key="'t' + i" class="vu-arm" :style="{ height: '145px', transform: t.rot }">
               <div :style="{ position: 'absolute', top: 0, left: -t.w / 2 + 'px', width: t.w + 'px', height: t.h + 'px', background: t.col, borderRadius: '.5px' }" />
@@ -88,8 +129,8 @@ const needleRot = computed(() => `rotate(${vuFractionToDeg(fraction.value).toFix
             <div v-for="(l, i) in labels" :key="'n' + i" class="vu-arm" :style="{ height: '168px', transform: l.rot }">
               <div class="vu-num" :style="{ color: l.col, transform: l.counter }">{{ l.text }}</div>
             </div>
-            <div class="vu-word">VU</div>
-            <div class="vu-sub">METER</div>
+            <div class="vu-word" :class="{ 'vu-word-long': sat }">{{ sat ? 'SATURATION' : 'VU' }}</div>
+            <div class="vu-sub">{{ sat ? 'ADDED' : 'METER' }}</div>
             <div class="vu-needle-shadow" :style="{ transform: needleRot }" />
             <div class="vu-needle" :style="{ transform: needleRot }" />
             <div class="vu-pivot" />
@@ -125,6 +166,7 @@ const needleRot = computed(() => `rotate(${vuFractionToDeg(fraction.value).toFix
 .vu-arm { position: absolute; left: 50%; bottom: 4px; width: 0; transform-origin: 50% 100%; }
 .vu-num { position: absolute; top: -7px; left: -15px; width: 30px; text-align: center; font-size: 13.5px; font-weight: 600; letter-spacing: .02em; }
 .vu-word { position: absolute; left: 0; right: 0; bottom: 44px; text-align: center; font-size: 19px; font-weight: 700; letter-spacing: .22em; color: #2a2420; text-indent: .22em; }
+.vu-word-long { font-size: 15px; letter-spacing: .18em; text-indent: .18em; }
 .vu-sub { position: absolute; left: 0; right: 0; bottom: 33px; text-align: center; font-size: 8.5px; font-weight: 600; letter-spacing: .32em; color: rgba(42,36,32,.62); text-indent: .32em; }
 .vu-needle-shadow { position: absolute; left: calc(50% + 3px); bottom: 1px; width: 9px; margin-left: -4.5px; height: 150px; transform-origin: 50% 99%; background: rgba(48,36,22,.26); clip-path: polygon(43% 0%, 57% 0%, 100% 100%, 0% 100%); filter: blur(2px); }
 .vu-needle { position: absolute; left: 50%; bottom: 4px; width: 9px; margin-left: -4.5px; height: 153px; transform-origin: 50% 100%; clip-path: polygon(43% 0%, 57% 0%, 100% 100%, 0% 100%); background: linear-gradient(90deg,#5b564e 0%,#1a1713 30%,#0e0c0a 52%,#2b2620 74%,#615b52 100%); }

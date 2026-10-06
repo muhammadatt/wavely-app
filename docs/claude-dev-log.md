@@ -5959,3 +5959,31 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
   tanh, and above the cubic even at 5–6); peak −1.00 / −1.99 / −3.48 / −4.96 /
   −5.94 dB (as tanh). Bright narration: makeup 1.58 / 4.93 dB at TAPE 2 / 6,
   added −26.3 / −15.5 dB re signal — the most of the three. Not auditioned.
+
+### PHAT*SS — SATURATION meter (October 2026)
+
+- Owner, after Waves BB Tubes / Soundtoys Decapitator screenshots: what should
+  drive a saturation meter's needle? Three readings offered (drive into the
+  curve, energy of what is added, peak reduction); owner chose the second.
+- Kernel (`PhatassKernel.enableMeter` / `takeMeter`, off for offline renders):
+  per block, added = (Warmth guard's output) − makeup × input delayed by TAPE +
+  Warmth + guard latency, clean = that delayed, makeup-scaled input; energy
+  sums and a sample count. The shelf and Output are gains, not saturation, and
+  are left out. The worklet posts the sums every 8 quanta (~23 ms).
+- UI (`dsp/saturationMeter.js`): two one-pole energy followers (150 ms),
+  reading = 10·log10(added / clean), resting below −60 dBFS of clean power; a
+  second-order needle spring (2.1 Hz, damping 0.8: 99 % of a step in ~0.3 s,
+  1–2 % overshoot) stepped per animation frame. The face is `ClassicVuMeter`
+  with `face: 'saturation'` (linear 0–100, red from the scale constant, needle
+  set directly so the VU damping does not slow it twice); the VU face for
+  OptoSmooth / FET Punch is unchanged.
+- Measured on two narration clips (whole-clip ratio; 23 ms posts p10/p50/p90):
+  TAPE 1 / 3 / 6 alone −33.5 / −24.9 / −18.9 dB bright, −29.8 / −21.2 / −15.3
+  dull (posts p50 −42 to −28); Warmth 2 / 5 / 10 alone −18.2 / −10.4 / −4.1
+  bright, −21.1 / −13.5 / −7.7 dull (posts up to +2.3); Warmth 5 + TAPE 3 reads
+  as Warmth 5 (−10.1 / −13.2). ⚠ WARMTH DOMINATES: at +50 dB of drive its low
+  layers reshape the whole low band, which counts as added energy. That is
+  honest, not a bug; the scale (−40 → 0, 0 dB → 100, red from −6) was chosen so
+  TAPE still moves the needle in the lower third and Warmth 5 sits near 70.
+- Browser check: dull narration at the defaults (Warmth 5) settles at ~65 in
+  ~0.5 s of playback. Scale, smoothing and spring are reasoned, not auditioned.

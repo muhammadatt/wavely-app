@@ -1,8 +1,8 @@
 /**
  * PHAT*SS — real-time effect chain wrapper.
  *
- * The DSP lives in ../phatassProcessor.js (Warmth → its peak guard → Soften →
- * a tape HF shelf) and runs in an AudioWorklet. The offline apply path renders through
+ * The DSP lives in ../phatassProcessor.js (TAPE → makeup → Warmth → its peak
+ * guard → a tape HF shelf with Soften) and runs in an AudioWorklet. The offline apply path renders through
  * the same worklet in an OfflineAudioContext, so preview and apply share one
  * code path.
  *
@@ -13,6 +13,7 @@
 import { ensurePhatassWorklet } from '../phatassWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
 import { PHATASS_DEFAULTS, toKernelParams } from '../phatassParams.js'
+import { SaturationMeterFollower } from '../dsp/saturationMeter.js'
 
 export { PHATASS_DEFAULTS, toKernelParams } from '../phatassParams.js'
 
@@ -25,6 +26,8 @@ export function createPhatass(audioContext) {
   let params = { ...PHATASS_DEFAULTS }
   let worklet = null
   let destroyed = false
+  // The saturation meter's energy followers, fed by the worklet's posts.
+  const satMeter = new SaturationMeterFollower(audioContext.sampleRate)
 
   input.connect(preOutput)
   preOutput.connect(output)
@@ -35,6 +38,9 @@ export function createPhatass(audioContext) {
       worklet = new AudioWorkletNode(audioContext, 'phatass-processor', {
         processorOptions: { params: toKernelParams(params) },
       })
+      worklet.port.onmessage = (e) => {
+        if (e.data?.type === 'sat') satMeter.push(e.data, e.data.frames)
+      }
       input.disconnect(preOutput)
       input.connect(worklet)
       worklet.connect(preOutput)
@@ -63,6 +69,11 @@ export function createPhatass(audioContext) {
 
     getParam(name) {
       return params[name]
+    },
+
+    /** What TAPE and Warmth are adding, dB re the clean signal (−Infinity at rest). */
+    getSaturationDb() {
+      return satMeter.readingDb
     },
 
     getInputLevels(channelCount) {

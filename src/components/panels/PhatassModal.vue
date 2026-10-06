@@ -41,13 +41,14 @@ import Knob from '../knobs/Knob.vue'
 import DeviceLampPill from '../knobs/DeviceLampPill.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
+import ClassicVuMeter from '../hardware/ClassicVuMeter.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  phParams, phPreview, phInputLevels, phOutputLevels, phWarmthReadout, phTapeMakeup,
+  phParams, phPreview, phInputLevels, phOutputLevels, phSatNeedle, phWarmthReadout, phTapeMakeup,
   togglePreview, syncParam, scheduleWarmthReadout, apply, teardown, closeModal,
 } = usePhatass()
 
@@ -185,6 +186,12 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="px-[26px] pt-[22px] pb-[26px]">
+      <div
+        class="flex justify-center mb-[18px]"
+        title="SATURATION: how much TAPE and Warmth are adding, against the clean signal — the energy of everything they add, averaged over the last fraction of a second. 0 is −40 dB (barely there), 100 is as much added as the signal itself; red from about half. Warmth reads far higher than TAPE: its low layers reshape the whole low band"
+      >
+        <ClassicVuMeter face="saturation" :value="phSatNeedle" :active="phPreview" :width="228" />
+      </div>
       <div class="flex items-center justify-between gap-[22px]">
         <LevelMeter :levels="phInputLevels" label="IN" :height="150" />
 

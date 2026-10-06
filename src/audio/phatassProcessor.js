@@ -34,11 +34,14 @@
 import { ShelfLimiterStage } from './dsp/hfLimit.js'
 import { SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { WarmthPeakGuard } from './dsp/warmthGuard.js'
+import { DelayLine } from './dsp/oversample.js'
 import { toKernelParams, PHATASS_DEFAULTS, WARMTH_LAYERS, slotOversample } from './phatassParams.js'
 
 export const PHATASS_KERNEL_DEFAULTS = toKernelParams(PHATASS_DEFAULTS)
 
 const LN10_OVER_20 = Math.LN10 / 20
+/** The worklet posts the saturation meter's sums every this many 128-sample quanta. */
+const METER_POST_QUANTA = 8
 const dbToLin = db => Math.exp(db * LN10_OVER_20)
 
 export class PhatassKernel {
@@ -57,6 +60,35 @@ export class PhatassKernel {
       + this.guard.latencySamples + this.shelf.latencySamples
     this.params = { ...PHATASS_KERNEL_DEFAULTS }
     this.setParams({}, true)
+    // SATURATION METER (off unless `enableMeter`, so offline renders skip it):
+    // the energy of what TAPE and Warmth ADD, read before the shelf, against the
+    // energy of the clean input as it would arrive there — scaled by the makeup
+    // and delayed by TAPE + Warmth + guard. The shelf and Output are gains, not
+    // saturation, so they stay out of both sums.
+    this.meterOn = false
+    this.meterLag = this.tape.latencySamples + this.warmth.latencySamples + this.guard.latencySamples
+    this.meterDelays = []
+    this.meterAdded = 0
+    this.meterClean = 0
+    this.meterCount = 0
+  }
+
+  /** Start accumulating the saturation meter's energies (the worklet does). */
+  enableMeter() {
+    this.meterOn = true
+  }
+
+  /**
+   * The meter's energy sums since the last call, summed over channels:
+   * `added` is what TAPE and Warmth added, `clean` the makeup-scaled input,
+   * `count` the samples summed (frames × channels).
+   */
+  takeMeter() {
+    const r = { added: this.meterAdded, clean: this.meterClean, count: this.meterCount }
+    this.meterAdded = 0
+    this.meterClean = 0
+    this.meterCount = 0
+    return r
   }
 
   /**
@@ -129,6 +161,25 @@ export class PhatassKernel {
     }
     this.warmth.process(outputChannels, outputChannels, n)
     this.guard.process(wIn, outputChannels, n)
+    if (this.meterOn) {
+      while (this.meterDelays.length < nOut) this.meterDelays.push(new DelayLine(this.meterLag))
+      let added = 0
+      let clean = 0
+      for (let ch = 0; ch < nOut; ch++) {
+        const d = this.meterDelays[ch]
+        const x = inputChannels[ch < nIn ? ch : nIn - 1]
+        const y = outputChannels[ch]
+        for (let i = 0; i < n; i++) {
+          const c = mk * d.push(x[i])
+          const a = y[i] - c
+          added += a * a
+          clean += c * c
+        }
+      }
+      this.meterAdded += added
+      this.meterClean += clean
+      this.meterCount += n * nOut
+    }
     this.shelf.process(outputChannels, n)
     const g = this.outputLin
     if (g !== 1) {
@@ -176,6 +227,8 @@ if (typeof registerProcessor === 'function') {
       this.port.onmessage = (e) => {
         if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
       }
+      this.kernel.enableMeter()
+      this.quanta = 0
     }
 
     process(inputs, outputs) {
@@ -188,6 +241,11 @@ if (typeof registerProcessor === 'function') {
         return true
       }
       this.kernel.process(input, output, n)
+      // Saturation meter: energy sums every METER_POST_QUANTA (~23 ms at 44.1 kHz).
+      if (++this.quanta >= METER_POST_QUANTA) {
+        this.quanta = 0
+        this.port.postMessage({ type: 'sat', frames: METER_POST_QUANTA * n, ...this.kernel.takeMeter() })
+      }
       return true
     }
   }
