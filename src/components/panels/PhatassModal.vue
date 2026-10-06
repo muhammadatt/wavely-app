@@ -46,7 +46,7 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  phParams, phPreview, phInputLevels, phOutputLevels, phWarmthReadout,
+  phParams, phPreview, phInputLevels, phOutputLevels, phWarmthReadout, phTapeMakeup,
   togglePreview, syncParam, scheduleWarmthReadout, apply, teardown, closeModal,
 } = usePhatass()
 
@@ -104,6 +104,12 @@ const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtOddEven = v => (v <= 0 ? 'ODD' : `${Math.round(v)}`)
 const fmtTame = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtTape = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
+// The makeup TAPE gives back: what it measured off the peak, so the peak lands where it started.
+const tapeMakeupCaption = computed(() => {
+  if (!(phParams.tape > 0)) return ''
+  if (phTapeMakeup.value.pending) return 'MAKEUP …'
+  return `MAKEUP +${(Number(phParams.tapeMakeupDb) || 0).toFixed(1)}`
+})
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 // Soften has no knob of its own: say how deep Tame currently lets it go.
 const softenCaption = computed(() => {
@@ -201,12 +207,16 @@ async function applyAndClose() {
             </div>
           </div>
           <div class="flex justify-center gap-[12px]">
-            <div class="w-[80px]" title="Takes this many dB off the selection’s loudest peak the way tape saturation does: the top of each wave is rounded off, while everything more than about 9 dB under the peak passes untouched. A waveshaper, not a compressor, so it adds odd harmonics as it works — about 2 % at 1 dB, 4 % at 2 dB, 9 % at 3.5. Past 3.5 dB the very top is clipped flat. Peaks carried by sibilance lose somewhat less than the number. 0 is off">
+            <div class="w-[80px]" title="Takes this many dB off the selection’s loudest peak the way tape saturation does: the top of each wave is rounded off, while everything more than about 9 dB under the peak passes untouched. A waveshaper, not a compressor, so it adds odd harmonics as it works — about 2 % at 1 dB, 4 % at 2 dB, 9 % at 3.5. Past 3.5 dB the very top is clipped flat. Peaks carried by sibilance lose somewhat less than the number. MAKEUP is automatic: what Tape actually took off the peak is measured on the selection and given back, so the peak returns to where it started and the reduction becomes loudness. 0 is off">
               <Knob
                 :model-value="phParams.tape" @update:model-value="v => syncParam('tape', v)"
                 :min="0" :max="TAPE_MAX_DB" :step="0.1" :value-font-px="13"
                 label="Tape" :accent="ACCENT" :format-value="fmtTape" :disabled="!phPreview"
               />
+              <div
+                class="text-center h-[10px] mt-[4px]"
+                :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.08em', color: 'rgba(255,255,255,.45)' }"
+              >{{ tapeMakeupCaption }}</div>
             </div>
             <div class="w-[80px]" title="How hard the tape rounds off the top end: lowers the threshold and deepens the most it may cut together, relative to the file's voice level. With SOFTEN on it also sets how deep sudden attacks are taken down (up to 36 dB at 10). 0 is off">
               <Knob

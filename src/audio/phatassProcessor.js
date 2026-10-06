@@ -83,6 +83,7 @@ export class PhatassKernel {
       detectCornerHz: p.detectCornerHz,
     })
     this.outputLin = dbToLin(p.outputGainDb)
+    this.tapeMakeupLin = dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0)
   }
 
   /**
@@ -104,6 +105,13 @@ export class PhatassKernel {
     this.warmth.process(outputChannels, outputChannels, n)
     this.guard.process(inputChannels, outputChannels, n)
     this.tape.process(outputChannels, outputChannels, n)
+    const mk = this.tapeMakeupLin
+    if (mk !== 1) {
+      for (let ch = 0; ch < nOut; ch++) {
+        const out = outputChannels[ch]
+        for (let i = 0; i < n; i++) out[i] *= mk
+      }
+    }
     this.shelf.process(outputChannels, n)
     const g = this.outputLin
     if (g !== 1) {

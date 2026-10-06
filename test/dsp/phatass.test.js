@@ -18,6 +18,7 @@ import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import { processSaturationBenchBuffer } from '../../src/audio/dsp/saturationLayers.js'
 import { warmthGuardLatencySamples } from '../../src/audio/dsp/warmthGuard.js'
 import { shelfLatencySamples } from '../../src/audio/dsp/hfLimit.js'
+import { measureTapeMakeup } from '../../src/audio/phatassTapeMakeup.js'
 
 const SR = 44100
 
@@ -130,6 +131,30 @@ test('TAPE at a quiet level is flat to 18 kHz (the 4x oversampler\'s band edge i
     const d = db(amp(6) / amp(0))
     assert.ok(Math.abs(d) < 0.02, `${f} Hz: ${d.toFixed(3)} dB`)
   }
+})
+
+test('TAPE makeup restores the peak: measured, so it matches the knob on a low tone and is smaller on a sibilant-band one', () => {
+  const peak = 0.6
+  for (const [f, tape] of [[110, 1], [110, 2], [110, 3.5], [8000, 3], [8000, 6]]) {
+    const x = sine(f, peak, SR / 2)
+    const base = { warmth: 0, tame: 0, tape, warmthCeilingDb: db(peak) }
+    const { makeupDb } = measureTapeMakeup([x], SR, base)
+    if (f === 110) assert.ok(Math.abs(makeupDb - tape) < 0.2, `${f} Hz TAPE ${tape}: makeup ${makeupDb.toFixed(2)}`)
+    else assert.ok(makeupDb < tape - 0.5 && makeupDb > 0, `${f} Hz TAPE ${tape}: makeup ${makeupDb.toFixed(2)} should be under the knob`)
+    // With the makeup in, the peak is back where it started — never above it.
+    const { channelData: [y], latencySamples: L } = run(x, { ...base, tapeMakeupDb: makeupDb })
+    let p = 0
+    for (let i = L; i < x.length; i++) p = Math.max(p, Math.abs(y[i]))
+    assert.ok(db(p / peak) < 0.02, `${f} Hz TAPE ${tape}: peak ${db(p / peak).toFixed(3)} dB over the source`)
+    assert.ok(db(p / peak) > -0.1, `${f} Hz TAPE ${tape}: peak ${db(p / peak).toFixed(3)} dB, not restored`)
+  }
+})
+
+test('TAPE makeup is 0 with TAPE off, and the kernel ignores a stale makeup then', () => {
+  const x = sine(110, 0.5, 4096)
+  assert.equal(measureTapeMakeup([x], SR, { tape: 0 }).makeupDb, 0)
+  assert.equal(toKernelParams({ tape: 0, tapeMakeupDb: 3 }).tapeMakeupDb, 0)
+  assert.equal(toKernelParams({ tape: 2, tapeMakeupDb: 1.7 }).tapeMakeupDb, 1.7)
 })
 
 test('TAPE with no measured peak calibrates on the voice level + 18 dB', () => {

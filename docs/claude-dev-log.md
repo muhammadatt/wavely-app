@@ -5775,3 +5775,41 @@ the loop did it no better than tanh; the owner then chose gain-based softening
   with TAPE on.
 - The Studer's linear EQ (head bump, rising top) is NOT copied: the bump overlaps
   Warmth and the rising top works against Tame. Not auditioned.
+
+### PHAT*SS — TAPE makeup, automatic and peak-restoring (October 2026)
+
+Owner asked for makeup on TAPE and chose, of three offered, AUTO PEAK-RESTORING
+(over a manual makeup knob, and over an RMS-matched trim for A/B): give back
+what TAPE took off the peak, so the peak returns to the source's and the
+reduction becomes level.
+
+- ⚠ **MEASURED, NOT THE KNOB.** A sibilant peak loses ~75 % of the knob (its
+  harmonics land above Nyquist and the oversampler filters them), so a makeup
+  of the knob's number would lift that peak past the source.
+  `measureTapeMakeup` (`phatassTapeMakeup.js`) renders the WHOLE selection
+  through Warmth, guard and TAPE (shelf, Soften, Output and any old makeup
+  out — they come after it and only lower the peak) and returns source peak −
+  rendered peak. It runs on its own worker that a newer call terminates (the
+  Warmth peak pass's pattern), is debounced 250 ms after TAPE, Warmth, Odd/Even
+  or the selection move, and is re-run before apply so a debounced or interim
+  value never renders.
+- The gain sits right after TAPE, before the shelf, so Tame judges the level
+  that will come out; the shelf only lowers peaks.
+- While a measurement is in flight the makeup is held at min(previous, knob):
+  turning TAPE down never gives back more than the knob now asks for.
+- Measured (Warmth and Tame off): peak lands back on the source to 0.00 dB on
+  all three clips. Makeup / gated-RMS change at TAPE 1 / 2 / 3.5 / 6: bright
+  narration +0.77/+0.62, +1.50/+1.24, +2.56/+2.15, +4.55/+3.83; dull narration
+  +0.97/+0.74, +1.93/+1.52, +3.36/+2.69, +5.62/+4.45; guitar +1.00/+0.88,
+  +2.00/+1.74, +3.46/+3.06, +5.84/+5.13. ~0.8 s to measure 46 s of audio
+  (node), so a whole chapter takes on the order of a minute; preview keeps the
+  interim value meanwhile.
+- Panel: a MAKEUP +x.x caption under the Tape knob ("…" while measuring).
+- ⚠ **Caught only by driving the real panel**: the first build posted the
+  panel's params to the worker as `{ ...phParams }`, which still carries Vue's
+  reactive proxy for `warmthRefPeaksDb`, and `postMessage` threw
+  `DataCloneError` — the makeup stayed +0.0 with TAPE at −4. The unit tests
+  call `measureTapeMakeup` directly and `npm run smoke` never turns TAPE up, so
+  neither could see it. Fixed with a plain JSON copy; in the browser the dull
+  clip at TAPE 4 (Warmth 5) now measures +3.8. The caption shows "…" from the
+  moment a measurement is scheduled, not the interim value.

@@ -2,8 +2,8 @@ import { reactive, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import {
-  applyPhatassRegion, cancelPhatassWarmthPeak, computePeakCache, measurePhatassWarmthBands,
-  measurePhatassWarmthPeak,
+  applyPhatassRegion, cancelPhatassTapeMakeup, cancelPhatassWarmthPeak, computePeakCache,
+  measurePhatassTapeMakeup, measurePhatassWarmthBands, measurePhatassWarmthPeak,
 } from '../audio/processing.js'
 import { regionAlignDb, regionPeakDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
@@ -32,7 +32,11 @@ let ceilingMeasuredFor = null
 const phWarmthReadout = ref({ bandsDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false })
 let readoutTimer = null
 let readoutSeq = 0
-const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthCeilingDb'])
+// TAPE's automatic makeup: `pending` while a whole-selection render is in flight.
+const phTapeMakeup = ref({ pending: false })
+let tapeTimer = null
+let tapeSeq = 0
+const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthCeilingDb', 'tapeMakeupDb'])
 
 export function usePhatass() {
   const {
@@ -133,6 +137,7 @@ export function usePhatass() {
     } else {
       stopMeters()
       cancelWarmthReadout()
+      cancelTapeMakeup()
     }
   }
 
@@ -142,6 +147,68 @@ export function usePhatass() {
     phParams[name] = value
     pushParam(name, value)
     if (name === 'warmth' || name === 'oddEven') scheduleWarmthReadout()
+    if (name === 'tape') {
+      // Until the new measurement lands, never give back more than the knob
+      // now asks for (a smaller TAPE takes less off); 0 has nothing to restore.
+      const interim = value > 0 ? Math.min(phParams.tapeMakeupDb || 0, value) : 0
+      setTapeMakeup(interim)
+      scheduleTapeMakeup()
+    }
+  }
+
+  function setTapeMakeup(db) {
+    if (phParams.tapeMakeupDb === db) return
+    phParams.tapeMakeupDb = db
+    pushParam('tapeMakeupDb', db)
+  }
+
+  /**
+   * TAPE's makeup: render the selection through Warmth, guard and TAPE and
+   * give back exactly what TAPE took off its peak (phatassTapeMakeup.js).
+   * Resolves the makeup set, or null if superseded.
+   */
+  async function refreshTapeMakeup() {
+    const seq = ++tapeSeq
+    if (!state.currentFile || !(Number(phParams.tape) > 0)) {
+      phTapeMakeup.value = { pending: false }
+      setTapeMakeup(0)
+      return 0
+    }
+    refreshLevel()
+    const { start, end } = selectionSpan()
+    if (!(end > start)) return null
+    refreshCeiling(start, end)
+    phTapeMakeup.value = { pending: true }
+    try {
+      const { makeupDb } = await measurePhatassTapeMakeup(
+        state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+      )
+      if (seq !== tapeSeq) return null
+      phTapeMakeup.value = { pending: false }
+      setTapeMakeup(makeupDb)
+      return makeupDb
+    } catch (err) {
+      if (err?.cancelled || seq !== tapeSeq) return null
+      console.error('PHAT*SS tape makeup failed:', err)
+      phTapeMakeup.value = { pending: false }
+      return null
+    }
+  }
+
+  function scheduleTapeMakeup() {
+    // Pending from the moment it is scheduled, so the caption never shows the
+    // interim value as if it were the answer.
+    if (Number(phParams.tape) > 0) phTapeMakeup.value = { pending: true }
+    clearTimeout(tapeTimer)
+    tapeTimer = setTimeout(refreshTapeMakeup, 250)
+  }
+
+  function cancelTapeMakeup() {
+    clearTimeout(tapeTimer)
+    tapeTimer = null
+    tapeSeq++
+    cancelPhatassTapeMakeup()
+    phTapeMakeup.value = { pending: false }
   }
 
   /**
@@ -215,6 +282,9 @@ export function usePhatass() {
     }
     clearTimeout(readoutTimer)
     readoutTimer = setTimeout(refreshWarmthReadout, 250)
+    // What reaches TAPE moves with Warmth and with the selection, and so does
+    // what it takes off the peak.
+    if (Number(phParams.tape) > 0) scheduleTapeMakeup()
   }
 
   /** Drop any pending or in-flight readout: nothing renders after the panel stops. */
@@ -237,6 +307,13 @@ export function usePhatass() {
 
     startProcessing('Applying PHAT*SS...')
     try {
+      // Never apply a stale (debounced or interim) makeup: measure on this span.
+      if (Number(phParams.tape) > 0) {
+        const { makeupDb } = await measurePhatassTapeMakeup(
+          state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+        )
+        setTapeMakeup(makeupDb)
+      }
       const buffer = await applyPhatassRegion(
         state.segments, start, end,
         { ...phParams },
@@ -257,6 +334,7 @@ export function usePhatass() {
   function teardown() {
     stopMeters()
     cancelWarmthReadout()
+    cancelTapeMakeup()
     if (phPreview.value) {
       const chain = getEffectChain(getAudioContext())
       chain.setEnabled(phatassEffect.id, false)
@@ -278,6 +356,7 @@ export function usePhatass() {
     phInputLevels,
     phOutputLevels,
     phWarmthReadout,
+    phTapeMakeup,
     hasSelection,
     togglePreview,
     syncParam,

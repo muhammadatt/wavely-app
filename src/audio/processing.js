@@ -984,6 +984,59 @@ export function measurePhatassWarmthPeak(segments, start, end, params, sampleRat
   })
 }
 
+/**
+ * TAPE's automatic makeup for a region: what TAPE takes off the WHOLE
+ * region's peak (see phatassTapeMakeup.js). Its own worker, terminated by a
+ * newer call like the Warmth peak pass — a knob turn must never queue behind a
+ * stale whole-chapter render. A superseded call rejects with
+ * `err.cancelled = true`. Resolves `{ makeupDb, peakDb, inputPeakDb }`.
+ */
+let tapeMakeupWorker = null
+let tapeMakeupReject = null
+/** Terminate the in-flight TAPE makeup pass, if any; it rejects with `err.cancelled`. */
+export function cancelPhatassTapeMakeup() {
+  if (!tapeMakeupWorker) return
+  tapeMakeupWorker.terminate()
+  tapeMakeupWorker = null
+  const err = new Error('superseded')
+  err.cancelled = true
+  const reject = tapeMakeupReject
+  tapeMakeupReject = null
+  reject?.(err)
+}
+
+export function measurePhatassTapeMakeup(segments, start, end, params, sampleRate, channels) {
+  cancelPhatassTapeMakeup()
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+    tapeMakeupWorker = worker
+    tapeMakeupReject = reject
+    const finish = () => {
+      worker.terminate()
+      if (tapeMakeupWorker === worker) {
+        tapeMakeupWorker = null
+        tapeMakeupReject = null
+      }
+    }
+    worker.onmessage = (e) => {
+      finish()
+      if (e.data?.type === 'done') resolve({ makeupDb: e.data.makeupDb, peakDb: e.data.peakDb, inputPeakDb: e.data.inputPeakDb })
+      else reject(new Error(e.data?.message ?? 'tape makeup failed'))
+    }
+    worker.onerror = (err) => {
+      finish()
+      reject(err)
+    }
+    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+    worker.postMessage(
+      // A plain copy: the panel's params are reactive, and a proxied array
+      // (warmthRefPeaksDb) cannot be structured-cloned into a worker.
+      { __id: 0, type: 'phatassTapeMakeup', channelData, sampleRate, params: JSON.parse(JSON.stringify(params)) },
+      channelData.map(c => c.buffer),
+    )
+  })
+}
+
 /** Apply Air Band to a region. */
 export function applyAirBandRegion(segments, start, end, params, sampleRate, channels) {
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {

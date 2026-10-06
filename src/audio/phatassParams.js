@@ -36,6 +36,10 @@ export const PHATASS_DEFAULTS = {
   // 0–TAPE_MAX_DB — TAPE: how many dB a full-band cubic soft clipper takes off
   // the selection's own peak (`tapeLayer`). 0 is off (a pure delay).
   tape: 0,
+  // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
+  // so the peak returns to where it started (`measureTapeMakeup`). Measured,
+  // never a user setting; applied only while TAPE is up.
+  tapeMakeupDb: 0,
   // 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
   // together, on the chosen `curve` (`tapeShelf`). 0 takes the shelf out. On
   // the default 'voice' curve 5 is −4 dB re the voice, Range 12; 10 is −14,
@@ -328,6 +332,7 @@ export function toKernelParams(params) {
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB),
+    tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb) ? clamp(p.tapeMakeupDb, 0, TAPE_MAX_DB) : 0,
     cornerHz: shelf.cornerHz,
     thresholdDb: voice + shelf.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
     detectCornerHz: det4k ? DETECT_4K_HZ : null,
@@ -364,6 +369,14 @@ export function toKernelParams(params) {
  * Run on the shared Saturation Bench kernel as one layer with its band open at
  * both ends and Amount 0, which is exactly a full-band shaper, 4x oversampled,
  * 50 samples of latency on or off.
+ *
+ * MAKEUP (automatic, owner's choice: peak-restoring): a gain right after TAPE
+ * that brings the peak back to the selection's own, turning the peak reduction
+ * into loudness. ⚠ IT IS MEASURED, NEVER THE KNOB'S NUMBER: a sibilant peak loses
+ * only ~75 % of the knob (its harmonics are filtered above Nyquist), so
+ * knob-sized makeup would lift it past the source. `tapeMakeupDb` comes from a
+ * render of the selection through Warmth, guard and TAPE (`measureTapeMakeup`).
+ * The shelf after it only lowers peaks, so the output never passes the source.
  */
 export const TAPE_MAX_DB = 6
 /** Peak re the gated RMS assumed when the selection's peak is not measured yet. */
