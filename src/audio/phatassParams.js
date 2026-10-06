@@ -143,9 +143,12 @@ export const ODD_EVEN_SPAN = 0.25
 export const WARMTH_LAYERS = [
   { blend: 'even', curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14 },
   { blend: 'odd', curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10 },
+  
   // A fixed third/fourth layer goes here, e.g. (bench Amount −6 → amountOffsetDb −6)
-  // { blend: 'fixed', amountOffsetDb: -6, curve: 'tanh', driveDb: 30, loHz: 1, hiHz: 400, emphDb: 0 },
-]
+  { blend: 'fixed', amountOffsetDb: 0, curve: 'quartic', driveDb: 0, loHz: 1, hiHz: 20000, emphDb: 0, emphType: 'hishelf', emphHz: 2400, emphQ: 0.7, emphDb: -10 },
+  { blend: 'fixed', amountOffsetDb: -6, curve: 'tanh', driveDb: 27, loHz: 3000, hiHz: 20000, emphDb: 0, emphType: 'hishelf', emphHz: 2400, emphQ: 0.7, emphDb: -20 },
+
+  ]
 
 export const WARMTH_MAX_LAYERS = SAT_BENCH_MAX_LAYERS
 export const WARMTH_BLENDS = ['even', 'odd', 'fixed']
