@@ -5813,3 +5813,30 @@ reduction becomes level.
   neither could see it. Fixed with a plain JSON copy; in the browser the dull
   clip at TAPE 4 (Warmth 5) now measures +3.8. The caption shows "…" from the
   moment a measurement is scheduled, not the interim value.
+
+### PHAT*SS — Warmth takes up to four layers (October 2026)
+
+Owner: refactor so WARMTH_LAYERS can hold up to four, the extra ones fixed to
+start. Before this the kernel slot count, latency, calibration and readout
+already followed the list, but `warmthLayers` hard-coded the crossfade as two
+arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
+`undefined`, got a NaN Amount and came back silently OFF.
+
+- Each layer now carries a `blend` role: `even` / `odd` are the crossfade's
+  two sides (the even side still `WARMTH_EVEN_MATCH_DB` up), `fixed` (the
+  default when omitted) follows Warmth's level only, at its own
+  `levelOffsetDb`. The role keys are stripped before the layer reaches the
+  kernel.
+- `WARMTH_MAX_LAYERS` = the bench kernel's 4 slots; `checkWarmthLayers` runs at
+  module load and throws on more than four, none, or an unknown role.
+- **The shipping pair is bit-identical**: a test writes the old two-layer law
+  out by hand and compares `on` / `amountDb` / `refPeakDb` exactly over a grid
+  of Warmth, Odd/Even and calibrations.
+- Checked live with two fixed layers temporarily added (tanh −6 dB, asym
+  −12 dB): latency 414 → 514 samples and `phatassLatencySamples` agrees, the
+  guard still holds the peak on its ceiling, the readout renders all four, and
+  the whole PHAT*SS suite passes. Four voicing tests had assumed exactly two
+  layers (indexing `[1]`, `slots: 2`, deep-equal on `[false, true]`) and now
+  read the pair by role, so adding a fixed layer no longer breaks them.
+- Each added layer costs 50 samples of latency and runs its own 4x oversampler.
+  No layers were added; WARMTH_LAYERS shows a commented example.

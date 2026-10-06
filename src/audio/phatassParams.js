@@ -15,7 +15,7 @@
 import { ALIGN_TARGET_DBFS } from './dsp/inputAlign.js'
 import { shelfLatencySamples } from './dsp/hfLimit.js'
 import {
-  SAT_BENCH_LAYER_LATENCY, SAT_AMOUNT_FLOOR_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB,
+  SAT_BENCH_LAYER_LATENCY, SAT_BENCH_MAX_LAYERS, SAT_AMOUNT_FLOOR_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB,
 } from './dsp/saturationLayers.js'
 import { unitDriveU } from './dsp/shaperCurves.js'
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
@@ -110,7 +110,16 @@ export const ODD_EVEN_SPAN = 0.25
  * would mostly have been a level knob in disguise.
  *
  * Order: quartic, then cubic — as voiced. `amountDb` is set per layer by
- * `warmthLayers`, not here. ⚠ The first voicing was quartic 60 / 1–400 Hz /
+ * `warmthLayers`, not here.
+ *
+ * UP TO `WARMTH_MAX_LAYERS` (4, the bench kernel's slots), in series, each a
+ * bench layer plus a `blend` ROLE:
+ *   'even' / 'odd' — the Odd/Even crossfade's two sides (the quartic sits
+ *                    `WARMTH_EVEN_MATCH_DB` up, as voiced);
+ *   'fixed'        — follows Warmth's level only, at `levelOffsetDb` (default 0)
+ *                    relative to the odd side; Odd/Even does not touch it.
+ * Every layer costs 50 samples of latency (`WARMTH_LATENCY_SAMPLES` follows the
+ * list) and gets its own measured reference peak for its band. ⚠ The first voicing was quartic 60 / 1–400 Hz /
  * bell 350 +24 then tanh 50 / 1–300 Hz / bell 250 +24 (kept below for
  * reference); the Southern Sunrise figures in this file were measured on it.
  */
@@ -120,9 +129,27 @@ export const ODD_EVEN_SPAN = 0.25
 //]
 
 export const WARMTH_LAYERS = [
-  { curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14, mode: 'full' },
-  { curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10, mode: 'full' },
+  { blend: 'even', curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14, mode: 'full' },
+  { blend: 'odd', curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10, mode: 'full' },
+  // A fixed third/fourth layer goes here, e.g.
+  // { blend: 'fixed', levelOffsetDb: -6, curve: 'tanh', driveDb: 30, loHz: 1, hiHz: 400, emphDb: 0, mode: 'full' },
 ]
+
+export const WARMTH_MAX_LAYERS = SAT_BENCH_MAX_LAYERS
+export const WARMTH_BLENDS = ['even', 'odd', 'fixed']
+
+/** Throws unless `layers` is 1–WARMTH_MAX_LAYERS layers with known roles. */
+export function checkWarmthLayers(layers) {
+  if (!Array.isArray(layers) || layers.length < 1 || layers.length > WARMTH_MAX_LAYERS) {
+    throw new Error(`PHAT*SS Warmth takes 1–${WARMTH_MAX_LAYERS} layers, got ${layers?.length}`)
+  }
+  layers.forEach((l, k) => {
+    const blend = l.blend ?? 'fixed'
+    if (!WARMTH_BLENDS.includes(blend)) throw new Error(`Warmth layer ${k}: unknown blend '${l.blend}'`)
+  })
+  return layers
+}
+checkWarmthLayers(WARMTH_LAYERS)
 
 
 /**
@@ -162,19 +189,22 @@ export const WARMTH_EVEN_MATCH_DB = 17.4
 const WARMTH_LAYER_OFF_DB = SAT_AMOUNT_FLOOR_DB
 
 /**
- * The two warmth layers' kernel params for a Warmth / Odd/Even setting.
+ * The warmth layers' kernel params for a Warmth / Odd/Even setting (roles in
+ * WARMTH_LAYERS: the even and odd layers crossfade, fixed layers follow the level).
  * Odd/Even is an equal-power crossfade, so turning it keeps the combined
  * added level, over the first ODD_EVEN_SPAN of the full Odd→Even travel; the
  * bench voicing is Warmth 5 / Odd/Even 36.
  */
-export function warmthLayers(warmth, oddEven, refPeaksDb) {
+export function warmthLayers(warmth, oddEven, refPeaksDb, layers = WARMTH_LAYERS) {
   const w = clamp(Number(warmth) || 0, 0, WARMTH_MAX)
   const b = ODD_EVEN_SPAN * clamp(Number.isFinite(oddEven) ? oddEven : 50, 0, ODD_EVEN_MAX) / ODD_EVEN_MAX
   const levelDb = warmthLevelDb(w)
-  const gains = [Math.sin((b * Math.PI) / 2), Math.cos((b * Math.PI) / 2)] // even (quartic), odd (tanh)
-  const offsets = [WARMTH_EVEN_MATCH_DB, 0]
-  return WARMTH_LAYERS.map((l, k) => {
-    const amountDb = levelDb + offsets[k] + 20 * Math.log10(Math.max(gains[k], 1e-12))
+  // Each role's share of the crossfade, and its level offset.
+  const gain = { even: Math.sin((b * Math.PI) / 2), odd: Math.cos((b * Math.PI) / 2), fixed: 1 }
+  const offset = { even: WARMTH_EVEN_MATCH_DB, odd: 0, fixed: 0 }
+  return layers.map((spec, k) => {
+    const { blend = 'fixed', levelOffsetDb = 0, ...l } = spec
+    const amountDb = levelDb + offset[blend] + levelOffsetDb + 20 * Math.log10(Math.max(gain[blend], 1e-12))
     const on = w > 0 && amountDb > WARMTH_LAYER_OFF_DB
     const ref = Array.isArray(refPeaksDb) && Number.isFinite(refPeaksDb[k]) ? refPeaksDb[k] : undefined
     return { ...l, on, amountDb: on ? amountDb : 0, ...(ref === undefined ? {} : { refPeakDb: ref }) }

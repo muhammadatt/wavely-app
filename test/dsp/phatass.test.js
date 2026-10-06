@@ -12,6 +12,7 @@ import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
   DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
+  WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb,
 } from '../../src/audio/phatassParams.js'
 import { HF_LIMITER_DEFAULTS, toKernelParams as toHFLimiterKernelParams } from '../../src/audio/hfLimiterParams.js'
 import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
@@ -327,6 +328,61 @@ function harmonicDbc(y, f, k, from, to) {
 
 const WARM = { voiceLevelDb: -20, tame: 0 } // shelf out, so only Warmth acts
 
+// Warmth layers by role, so these tests survive fixed layers being added.
+const ROLE = WARMTH_LAYERS.map(l => l.blend ?? 'fixed')
+const I_EVEN = ROLE.indexOf('even'), I_ODD = ROLE.indexOf('odd')
+const pair = list => [list[I_EVEN], list[I_ODD]]
+const SLOTS = WARMTH_LAYERS.length
+
+test('Warmth layers by role: the shipped even/odd pair is exactly the old two-layer law', () => {
+  // The law before roles existed, written out: [quartic, cubic], sin/cos crossfade, quartic +17.4 dB.
+  const legacy = (w, oe, refs) => {
+    const b = ODD_EVEN_SPAN * Math.min(100, Math.max(0, oe)) / 100
+    const levelDb = warmthLevelDb(w)
+    const gains = [Math.sin((b * Math.PI) / 2), Math.cos((b * Math.PI) / 2)]
+    const offsets = [WARMTH_EVEN_MATCH_DB, 0]
+    return [0, 1].map(k => {
+      const amountDb = levelDb + offsets[k] + 20 * Math.log10(Math.max(gains[k], 1e-12))
+      const on = w > 0 && amountDb > -80
+      return { on, amountDb: on ? amountDb : 0, ...(refs ? { refPeakDb: refs[k] } : {}) }
+    })
+  }
+  assert.deepEqual(WARMTH_LAYERS.map(l => l.blend).slice(0, 2), ['even', 'odd'])
+  for (const w of [0, 0.5, 3, 5, 10]) for (const oe of [0, 36, 50, 100]) for (const refs of [undefined, [-12, -13]]) {
+    const got = warmthLayers(w, oe, refs).slice(0, 2)
+    const want = legacy(w, oe, refs)
+    got.forEach((l, k) => {
+      assert.equal(l.on, want[k].on, `w ${w} oe ${oe} layer ${k} on`)
+      assert.equal(l.amountDb, want[k].amountDb, `w ${w} oe ${oe} layer ${k} amount`)
+      assert.equal(l.refPeakDb, want[k].refPeakDb)
+      assert.equal('blend' in l || 'levelOffsetDb' in l, false, 'role keys never reach the kernel')
+    })
+  }
+})
+
+test('a FIXED Warmth layer follows the Warmth level at its offset, and Odd/Even does not touch it', () => {
+  const layers = [...WARMTH_LAYERS.slice(0, 2), { blend: 'fixed', levelOffsetDb: -6, curve: 'tanh', driveDb: 30, loHz: 1, hiHz: 400, mode: 'full' }]
+  for (const w of [2, 5, 10]) {
+    const a = warmthLayers(w, 0, null, layers)[2], b = warmthLayers(w, 100, null, layers)[2]
+    assert.equal(a.amountDb, warmthLevelDb(w) - 6)
+    assert.equal(b.amountDb, a.amountDb)
+    assert.equal(a.on, true)
+    assert.equal(a.curve, 'tanh')
+  }
+  assert.equal(warmthLayers(0, 50, null, layers)[2].on, false)
+  // No role means fixed, no offset.
+  assert.equal(warmthLayers(5, 50, null, [{ curve: 'tanh' }])[0].amountDb, warmthLevelDb(5))
+})
+
+test('Warmth takes 1–4 layers with known roles', () => {
+  assert.equal(WARMTH_MAX_LAYERS, 4)
+  const l = { blend: 'fixed', curve: 'tanh' }
+  assert.doesNotThrow(() => checkWarmthLayers([l, l, l, l]))
+  assert.throws(() => checkWarmthLayers([l, l, l, l, l]), /1–4 layers/)
+  assert.throws(() => checkWarmthLayers([]), /1–4 layers/)
+  assert.throws(() => checkWarmthLayers([{ blend: 'sideways' }]), /unknown blend/)
+})
+
 test('Warmth 0 leaves the audio untouched', () => {
   const x = add(sine(200, 0.5), sine(3000, 0.2))
   const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 0, oddEven: 30 })
@@ -335,12 +391,16 @@ test('Warmth 0 leaves the audio untouched', () => {
 
 test('Warmth at full Odd is the odd (cubic) layer as voiced on the Saturation Bench, at the law\'s Amount', () => {
   const x = add(sine(120, 0.25), sine(240, 0.1), noise(SR, 0.01))
-  const refs = [-14, -16]
+  const refs = WARMTH_LAYERS.map((_, k) => -14 - 2 * k)
   const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 8, oddEven: 0, warmthRefPeaksDb: refs })
-  const amountDb = warmthLayers(8, 0)[1].amountDb
-  const bench = processSaturationBenchBuffer([x], SR, {
-    layers: [{ on: false }, { ...WARMTH_LAYERS[1], on: true, amountDb, refPeakDb: refs[1] }],
-  }, { slots: 2 })
+  // At full Odd the even side is out and the odd side sits at the law's Amount;
+  // any fixed layers ride along as the law sets them.
+  const law = warmthLayers(8, 0, refs)
+  assert.equal(law[I_EVEN].on, false)
+  assert.ok(Math.abs(law[I_ODD].amountDb - warmthLevelDb(8)) < 1e-12)
+  const { blend: _b, levelOffsetDb: _o, ...oddSpec } = WARMTH_LAYERS[I_ODD]
+  const layers = law.map((l, k) => (k === I_ODD ? { ...oddSpec, on: true, amountDb: law[I_ODD].amountDb, refPeakDb: refs[k] } : l))
+  const bench = processSaturationBenchBuffer([x], SR, { layers }, { slots: SLOTS })
   const b = bench.channelData[0], Lb = bench.latencySamples
   let worst = 0, added = 0
   for (let i = SR / 4; i < x.length - L; i++) {
@@ -355,11 +415,11 @@ test('a render from rest starts at the setting, not ramping in from the defaults
   // The kernel's constructor sets the defaults (Warmth off); the first real
   // params must jump, or the first 20 ms glide the Warmth amount in from 0 dB.
   const x = add(sine(120, 0.25), sine(240, 0.1))
-  const refs = [-14, -16]
+  const refs = WARMTH_LAYERS.map((_, k) => -14 - 2 * k)
   const { channelData: [y], latencySamples: L } = run(x, { ...WARM, warmth: 3, oddEven: 0, warmthRefPeaksDb: refs })
   const bench = processSaturationBenchBuffer([x], SR, {
     layers: warmthLayers(3, 0, refs),
-  }, { slots: 2 })
+  }, { slots: SLOTS })
   const b = bench.channelData[0], Lb = bench.latencySamples
   let worst = 0
   for (let i = 0; i < 0.05 * SR; i++) worst = Math.max(worst, Math.abs(y[i + L] - b[i + Lb]))
@@ -367,9 +427,12 @@ test('a render from rest starts at the setting, not ramping in from the defaults
 })
 
 test('Odd/Even: 0 is pure odd (cubic); turning it up brings in the even (quartic)', () => {
+  // The crossfaded pair alone, on the bench kernel — fixed layers would add
+  // harmonics of their own and say nothing about the crossfade.
   const f = 120
   const at = oddEven => {
-    const { channelData: [y], latencySamples: L } = run(sine(f, 0.3), { ...WARM, warmth: 10, oddEven, warmthRefPeaksDb: [-10, -10] })
+    const layers = pair(warmthLayers(10, oddEven, WARMTH_LAYERS.map(() => -10)))
+    const { channelData: [y], latencySamples: L } = processSaturationBenchBuffer([sine(f, 0.3)], SR, { layers }, { slots: 2 })
     return { h2: harmonicDbc(y, f, 2, L + SR / 4, SR), h3: harmonicDbc(y, f, 3, L + SR / 4, SR) }
   }
   const odd = at(0), mixed = at(100)
@@ -378,7 +441,8 @@ test('Odd/Even: 0 is pure odd (cubic); turning it up brings in the even (quartic
 })
 
 test('the Warmth law: linear in amplitude to +6 dB, equal-power Odd/Even over the first ODD_EVEN_SPAN of the blend', () => {
-  const amt = (w, b) => warmthLayers(w, b).map(l => (l.on ? l.amountDb : -Infinity))
+  // [even, odd], by role.
+  const amt = (w, b) => pair(warmthLayers(w, b)).map(l => (l.on ? l.amountDb : -Infinity))
   // The top is +6 dB at full Odd; the added amplitude is proportional to the knob.
   assert.ok(Math.abs(amt(10, 0)[1] - WARMTH_TOP_DB) < 1e-9)
   for (const w of [1, 2.5, 5, 8]) {
@@ -399,12 +463,13 @@ test('the Warmth law: linear in amplitude to +6 dB, equal-power Odd/Even over th
     const p = (qq === -Infinity ? 0 : 10 ** ((qq - WARMTH_EVEN_MATCH_DB) / 10)) + 10 ** (tt / 10)
     assert.ok(Math.abs(p - 1) < 1e-9, `power at ${b}: ${p}`)
   }
-  // 0 takes the quartic out; 100 keeps both; Warmth 0 takes both out.
-  assert.deepEqual(warmthLayers(8, 0).map(l => l.on), [false, true])
-  assert.deepEqual(warmthLayers(8, 100).map(l => l.on), [true, true])
-  assert.deepEqual(warmthLayers(0, 50).map(l => l.on), [false, false])
+  // 0 takes the quartic out; 100 keeps both; Warmth 0 takes every layer out.
+  assert.deepEqual(pair(warmthLayers(8, 0)).map(l => l.on), [false, true])
+  assert.deepEqual(pair(warmthLayers(8, 100)).map(l => l.on), [true, true])
+  assert.ok(warmthLayers(0, 50).every(l => !l.on))
   // Calibration rides along when measured, and only then.
-  assert.equal(warmthLayers(5, 50, [-12, -13])[1].refPeakDb, -13)
+  const refs = WARMTH_LAYERS.map((_, k) => -12 - k)
+  assert.equal(warmthLayers(5, 50, refs)[I_ODD].refPeakDb, refs[I_ODD])
   assert.equal('refPeakDb' in warmthLayers(5, 50)[0], false)
 })
 

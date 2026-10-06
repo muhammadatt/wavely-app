@@ -115,7 +115,7 @@ function peakDbOf(chs) {
  * The readout for one region.
  *
  * @param {Float32Array[]} channelData the region, as `renderRegionToBuffer` gives it
- * @param {object[]} layers the two warmth layers' kernel params (`warmthLayers`)
+ * @param {object[]} layers the warmth layers' kernel params (`warmthLayers`, 1–4 of them)
  * @param {{ bands?: boolean, peak?: boolean, guard?: object }} what — `guard` is the kernel's `warmthGuard`
  * @returns {{ bandsDb: (number|null)[] | null, peakDb: number | null, inputPeakDb: number | null }}
  *   `bandsDb[i]` is output minus input in WARMTH_READOUT_BANDS[i], null where
