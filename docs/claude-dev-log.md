@@ -5840,3 +5840,19 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
   read the pair by role, so adding a fixed layer no longer breaks them.
 - Each added layer costs 50 samples of latency and runs its own 4x oversampler.
   No layers were added; WARMTH_LAYERS shows a commented example.
+
+### PHAT*SS — `amountOffsetDb`, and Warmth is FULL only (October 2026)
+
+- The Warmth layer field `levelOffsetDb` is renamed **`amountOffsetDb`**: the
+  bench kernel already has a `levelOffsetDb` (its voicing detector's level
+  offset), and the two would be confused when copying a layer across. For a
+  fixed layer Amount = `warmthLevelDb(Warmth) + amountOffsetDb`, so a bench
+  Amount A goes in as `amountOffsetDb: A` — within 0.02 dB at Warmth 5, since
+  `warmthLevelDb(5)` = 6 + 20·log10 ½ = −0.0206 (the top is 6 dB, not 6.02;
+  an earlier reply said "exactly 0", which was wrong).
+- **No VOICED mode in PHAT*SS** (owner): its Warmth kernel never received the
+  file's level for the voicing detector, so VOICED layers would have gated on a
+  −20 dBFS assumption. Rather than wiring the level through, `warmthLayers`
+  forces `mode: 'full'` (the bench default is VOICED) and `checkWarmthLayers`
+  rejects a layer declaring 'voiced'. The shipped layers' explicit
+  `mode: 'full'` is dropped as redundant; renders are bit-identical.

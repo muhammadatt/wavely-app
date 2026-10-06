@@ -110,18 +110,30 @@ export const ODD_EVEN_SPAN = 0.25
  * would mostly have been a level knob in disguise.
  *
  * Order: quartic, then cubic — as voiced. `amountDb` is set per layer by
- * `warmthLayers`, not here.
- *
- * UP TO `WARMTH_MAX_LAYERS` (4, the bench kernel's slots), in series, each a
- * bench layer plus a `blend` ROLE:
- *   'even' / 'odd' — the Odd/Even crossfade's two sides (the quartic sits
- *                    `WARMTH_EVEN_MATCH_DB` up, as voiced);
- *   'fixed'        — follows Warmth's level only, at `levelOffsetDb` (default 0)
- *                    relative to the odd side; Odd/Even does not touch it.
- * Every layer costs 50 samples of latency (`WARMTH_LATENCY_SAMPLES` follows the
- * list) and gets its own measured reference peak for its band. ⚠ The first voicing was quartic 60 / 1–400 Hz /
+ * `warmthLayers`, not here. ⚠ The first voicing was quartic 60 / 1–400 Hz /
  * bell 350 +24 then tanh 50 / 1–300 Hz / bell 250 +24 (kept below for
  * reference); the Southern Sunrise figures in this file were measured on it.
+ *
+ * UP TO `WARMTH_MAX_LAYERS` (4, the bench kernel's slots), in series. Each is a
+ * Saturation Bench layer — `curve`, `driveDb`, `loHz` / `hiHz`, `emph*` mean
+ * exactly what they do on the bench, and Drive is calibrated the same way, on
+ * this file's own band level — plus a `blend` ROLE:
+ *   'even' / 'odd' — the Odd/Even crossfade's two sides (the quartic sits
+ *                    `WARMTH_EVEN_MATCH_DB` up, as voiced);
+ *   'fixed'        — follows Warmth's level only; Odd/Even does not touch it.
+ * and an optional `amountOffsetDb` (default 0) added to the Amount the law
+ * gives. For a FIXED layer the Amount is `warmthLevelDb(Warmth) + amountOffsetDb`,
+ * and `warmthLevelDb(5)` is −0.02 dB (6 + 20·log10 ½; the top is 6, not 6.02) —
+ * so a layer voiced on the bench at Amount A goes in as `amountOffsetDb: A` and
+ * lands within 0.02 dB of it at Warmth 5. (Named apart from the
+ * bench kernel's own `levelOffsetDb`, which is its voicing detector's level.)
+ *
+ * ⚠ ALWAYS FULL: PHAT*SS has no VOICED mode. `warmthLayers` forces `mode: 'full'`
+ * (the bench's default is VOICED) and `checkWarmthLayers` rejects a layer that
+ * asks for 'voiced', so a layer copied from the bench cannot bring it along.
+ *
+ * Every layer costs 50 samples of latency (`WARMTH_LATENCY_SAMPLES` follows the
+ * list) and its own 4x oversampler, and gets its own measured reference peak.
  */
 //export const WARMTH_LAYERS = [
 //  { curve: 'quartic', driveDb: 60, loHz: 1, hiHz: 400, emphType: 'bell', emphHz: 350, emphQ: 0.5, emphDb: 24, mode: 'full' },
@@ -129,10 +141,10 @@ export const ODD_EVEN_SPAN = 0.25
 //]
 
 export const WARMTH_LAYERS = [
-  { blend: 'even', curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14, mode: 'full' },
-  { blend: 'odd', curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10, mode: 'full' },
-  // A fixed third/fourth layer goes here, e.g.
-  // { blend: 'fixed', levelOffsetDb: -6, curve: 'tanh', driveDb: 30, loHz: 1, hiHz: 400, emphDb: 0, mode: 'full' },
+  { blend: 'even', curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14 },
+  { blend: 'odd', curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10 },
+  // A fixed third/fourth layer goes here, e.g. (bench Amount −6 → amountOffsetDb −6)
+  // { blend: 'fixed', amountOffsetDb: -6, curve: 'tanh', driveDb: 30, loHz: 1, hiHz: 400, emphDb: 0 },
 ]
 
 export const WARMTH_MAX_LAYERS = SAT_BENCH_MAX_LAYERS
@@ -146,6 +158,7 @@ export function checkWarmthLayers(layers) {
   layers.forEach((l, k) => {
     const blend = l.blend ?? 'fixed'
     if (!WARMTH_BLENDS.includes(blend)) throw new Error(`Warmth layer ${k}: unknown blend '${l.blend}'`)
+    if (l.mode !== undefined && l.mode !== 'full') throw new Error(`Warmth layer ${k}: PHAT*SS runs every layer FULL, not '${l.mode}'`)
   })
   return layers
 }
@@ -203,11 +216,11 @@ export function warmthLayers(warmth, oddEven, refPeaksDb, layers = WARMTH_LAYERS
   const gain = { even: Math.sin((b * Math.PI) / 2), odd: Math.cos((b * Math.PI) / 2), fixed: 1 }
   const offset = { even: WARMTH_EVEN_MATCH_DB, odd: 0, fixed: 0 }
   return layers.map((spec, k) => {
-    const { blend = 'fixed', levelOffsetDb = 0, ...l } = spec
-    const amountDb = levelDb + offset[blend] + levelOffsetDb + 20 * Math.log10(Math.max(gain[blend], 1e-12))
+    const { blend = 'fixed', amountOffsetDb = 0, ...l } = spec
+    const amountDb = levelDb + offset[blend] + amountOffsetDb + 20 * Math.log10(Math.max(gain[blend], 1e-12))
     const on = w > 0 && amountDb > WARMTH_LAYER_OFF_DB
     const ref = Array.isArray(refPeaksDb) && Number.isFinite(refPeaksDb[k]) ? refPeaksDb[k] : undefined
-    return { ...l, on, amountDb: on ? amountDb : 0, ...(ref === undefined ? {} : { refPeakDb: ref }) }
+    return { ...l, mode: 'full', on, amountDb: on ? amountDb : 0, ...(ref === undefined ? {} : { refPeakDb: ref }) }
   })
 }
 

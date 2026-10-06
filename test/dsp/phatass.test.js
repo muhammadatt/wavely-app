@@ -355,13 +355,13 @@ test('Warmth layers by role: the shipped even/odd pair is exactly the old two-la
       assert.equal(l.on, want[k].on, `w ${w} oe ${oe} layer ${k} on`)
       assert.equal(l.amountDb, want[k].amountDb, `w ${w} oe ${oe} layer ${k} amount`)
       assert.equal(l.refPeakDb, want[k].refPeakDb)
-      assert.equal('blend' in l || 'levelOffsetDb' in l, false, 'role keys never reach the kernel')
+      assert.equal('blend' in l || 'amountOffsetDb' in l, false, 'role keys never reach the kernel')
     })
   }
 })
 
 test('a FIXED Warmth layer follows the Warmth level at its offset, and Odd/Even does not touch it', () => {
-  const layers = [...WARMTH_LAYERS.slice(0, 2), { blend: 'fixed', levelOffsetDb: -6, curve: 'tanh', driveDb: 30, loHz: 1, hiHz: 400, mode: 'full' }]
+  const layers = [...WARMTH_LAYERS.slice(0, 2), { blend: 'fixed', amountOffsetDb: -6, curve: 'tanh', driveDb: 30, loHz: 1, hiHz: 400, mode: 'full' }]
   for (const w of [2, 5, 10]) {
     const a = warmthLayers(w, 0, null, layers)[2], b = warmthLayers(w, 100, null, layers)[2]
     assert.equal(a.amountDb, warmthLevelDb(w) - 6)
@@ -370,6 +370,10 @@ test('a FIXED Warmth layer follows the Warmth level at its offset, and Odd/Even 
     assert.equal(a.curve, 'tanh')
   }
   assert.equal(warmthLayers(0, 50, null, layers)[2].on, false)
+  // A bench Amount carries over as amountOffsetDb: within 0.02 dB at Warmth 5
+  // (warmthLevelDb(5) = 6 + 20·log10 ½ = −0.0206).
+  const carried = warmthLayers(5, 50, null, [{ blend: 'fixed', amountOffsetDb: -4, curve: 'tanh' }])[0].amountDb
+  assert.ok(Math.abs(carried - -4) < 0.025, `bench Amount −4 → ${carried}`)
   // No role means fixed, no offset.
   assert.equal(warmthLayers(5, 50, null, [{ curve: 'tanh' }])[0].amountDb, warmthLevelDb(5))
 })
@@ -381,6 +385,11 @@ test('Warmth takes 1–4 layers with known roles', () => {
   assert.throws(() => checkWarmthLayers([l, l, l, l, l]), /1–4 layers/)
   assert.throws(() => checkWarmthLayers([]), /1–4 layers/)
   assert.throws(() => checkWarmthLayers([{ blend: 'sideways' }]), /unknown blend/)
+  // No VOICED mode in PHAT*SS: refused at load, and every layer is sent FULL.
+  assert.throws(() => checkWarmthLayers([{ blend: 'fixed', mode: 'voiced' }]), /FULL/)
+  assert.doesNotThrow(() => checkWarmthLayers([{ blend: 'fixed', mode: 'full' }]))
+  assert.ok(warmthLayers(5, 50).every(l => l.mode === 'full'))
+  assert.ok(warmthLayers(5, 50, null, [{ curve: 'tanh' }]).every(l => l.mode === 'full'))
 })
 
 test('Warmth 0 leaves the audio untouched', () => {
@@ -398,7 +407,7 @@ test('Warmth at full Odd is the odd (cubic) layer as voiced on the Saturation Be
   const law = warmthLayers(8, 0, refs)
   assert.equal(law[I_EVEN].on, false)
   assert.ok(Math.abs(law[I_ODD].amountDb - warmthLevelDb(8)) < 1e-12)
-  const { blend: _b, levelOffsetDb: _o, ...oddSpec } = WARMTH_LAYERS[I_ODD]
+  const { blend: _b, amountOffsetDb: _o, ...oddSpec } = WARMTH_LAYERS[I_ODD]
   const layers = law.map((l, k) => (k === I_ODD ? { ...oddSpec, on: true, amountDb: law[I_ODD].amountDb, refPeakDb: refs[k] } : l))
   const bench = processSaturationBenchBuffer([x], SR, { layers }, { slots: SLOTS })
   const b = bench.channelData[0], Lb = bench.latencySamples
