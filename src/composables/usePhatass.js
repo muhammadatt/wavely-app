@@ -148,6 +148,12 @@ export function usePhatass() {
     pushParam(name, value)
     // TAPE is ahead of Warmth, so Warmth's knobs move the readout, not the makeup.
     if (name === 'warmth' || name === 'oddEven') scheduleReadout()
+    // The curve changes what TAPE takes off a sibilant peak; the interim rule
+    // (never more than the knob) holds for either curve.
+    if (name === 'tapeCurve' && Number(phParams.tape) > 0) {
+      setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape)))
+      scheduleTapeMakeup()
+    }
     if (name === 'tape') {
       // Until the new measurement lands, never give back more than the knob
       // now asks for (a smaller TAPE takes less off); 0 has nothing to restore.

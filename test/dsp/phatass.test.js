@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
-  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer,
+  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
 } from '../../src/audio/phatassParams.js'
@@ -121,6 +121,55 @@ test('TAPE is symmetric: odd harmonics only', () => {
   const h3 = harmonicDbc(y, 200, 3, from, to), h2 = harmonicDbc(y, 200, 2, from, to)
   assert.ok(h3 > -30, `H3 ${h3.toFixed(1)} dBc`)
   assert.ok(h2 < h3 - 40, `H2 ${h2.toFixed(1)} dBc against H3 ${h3.toFixed(1)}`)
+})
+
+test('TAPE TANH: the knob inverts tanh(u)/u, and lands the peak on its number (no flat to ring off)', () => {
+  for (let t = 0.1; t <= TAPE_MAX_DB; t += 0.1) {
+    const u = tapePeakU(t, 'tanh')
+    assert.ok(Math.abs(db(Math.tanh(u) / u) + t) < 1e-9, `${t.toFixed(1)} dB: u ${u}`)
+  }
+  assert.deepEqual(TAPE_CURVES, ['cubic', 'tanh'])
+  assert.equal(PHATASS_DEFAULTS.tapeCurve, 'cubic')
+  assert.equal(tapeLayer(2, -3, 'tanh').curve, 'tanh')
+  assert.equal(tapeLayer(2, -3, 'bogus').curve, 'cubic')
+  assert.equal(toKernelParams({ tape: 2, tapeCurve: 'tanh', warmthCeilingDb: -3 }).tapeLayer.curve, 'tanh')
+  const peak = 0.7
+  const x = sine(110, peak)
+  for (const tape of [1, 2, 3.5, 6]) {
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, tape, tapeCurve: 'tanh', warmthCeilingDb: db(peak) })
+    let p = 0
+    for (let i = L + 2000; i < x.length; i++) p = Math.max(p, Math.abs(y[i]))
+    assert.ok(Math.abs(db(p / peak) + tape) < 0.15, `TAPE ${tape}: peak moved ${db(p / peak).toFixed(2)} dB`)
+  }
+})
+
+test('TAPE: below its flat the cubic is the third harmonic alone; tanh brings every odd order', () => {
+  const f = 110, peak = 0.6
+  const x = sine(f, peak)
+  const high = (tapeCurve) => {
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, tape: 2, tapeCurve, warmthCeilingDb: db(peak) })
+    const from = L + 1000, to = from + 39690 // 99 whole cycles
+    let e = 0
+    for (let k = 7; k <= 21; k += 2) e += Math.pow(10, harmonicDbc(y, f, k, from, to) / 10)
+    return { h3: harmonicDbc(y, f, 3, from, to), high: 10 * Math.log10(e) }
+  }
+  const c = high('cubic'), t = high('tanh')
+  assert.ok(Math.abs(c.h3 - t.h3) < 2, `H3 cubic ${c.h3.toFixed(1)} vs tanh ${t.h3.toFixed(1)} dBc`)
+  assert.ok(c.high < -90 && t.high > -80, `H7–H21 cubic ${c.high.toFixed(1)}, tanh ${t.high.toFixed(1)} dBc`)
+})
+
+test('TAPE TANH makeup restores the peak too', () => {
+  const peak = 0.6
+  for (const [f, tape] of [[110, 2], [110, 6], [8000, 6]]) {
+    const x = sine(f, peak, SR / 2)
+    const base = { warmth: 0, tame: 0, tape, tapeCurve: 'tanh', warmthCeilingDb: db(peak) }
+    const { makeupDb } = measureTapeMakeup([x], SR, base)
+    assert.ok(makeupDb > 0 && makeupDb <= tape + 0.2, `${f} Hz TAPE ${tape}: makeup ${makeupDb.toFixed(2)}`)
+    const { channelData: [y], latencySamples: L } = run(x, { ...base, tapeMakeupDb: makeupDb })
+    let p = 0
+    for (let i = L; i < x.length; i++) p = Math.max(p, Math.abs(y[i]))
+    assert.ok(Math.abs(db(p / peak)) < 0.05, `${f} Hz TAPE ${tape}: peak ${db(p / peak).toFixed(3)} dB re source`)
+  }
 })
 
 test('TAPE at a quiet level is flat to 18 kHz (the 4x oversampler\'s band edge is above it)', () => {

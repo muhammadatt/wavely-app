@@ -5921,3 +5921,27 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
   (+1.2–1.7 dB at TAPE 2), so it runs that much hotter with TAPE up; the
   Warmth readout still renders Warmth on the source (bands close, peak still
   an upper bound). Neither was auditioned.
+
+### PHAT*SS — TAPE curve: CUBIC or TANH (October 2026)
+
+- Owner asked for tanh as a TAPE option after the curve comparison (Studer fit:
+  cubic 0.09 dB rms, tanh 0.17, algebraic 0.19, atan 0.20, asym 0.35,
+  quartic 0.84). Reasoning given for offering it: the cubic is a hard clip past
+  3.52 dB and tanh never goes flat, so the top of the knob "should" be gentler.
+- `tapeCurve` ('cubic' default | 'tanh'), a rocker beside CURVE/DETECT
+  (disabled while TAPE is 0). `tapePeakU(dB, curve)`: cubic closed form as
+  before; tanh(u)/u falls monotonically from 1, so it is bisected (60 steps,
+  tested to 1e-9 dB across the knob). The makeup is measured, so it needed no
+  change; switching the curve re-measures, holding min(previous, knob).
+- ⚠ THE PREDICTION DID NOT HOLD. 110 Hz sine at −4.4 dBFS (H3+H5 / H7–H41,
+  dBc), cubic vs tanh:
+  TAPE 1 −30.6 / −116.4 vs −30.9 / −89.3; 2 −24.3 / −110.2 vs −24.9 / −71.0;
+  3.5 −19.1 / −105.0 vs −20.1 / −56.2; 5 −15.7 / −45.8 vs −17.2 / −46.9;
+  6 −14.2 / −42.7 vs −15.7 / −42.1. Where the cubic clips the high orders are
+  EQUAL; below that tanh has 35–50 dB more of them (every odd order from the
+  start, where the cubic has the third alone). Low orders 0.3–1.5 dB lower on
+  tanh. Bright narration, added re signal: TAPE 2 −28.0 (cubic) / −26.6
+  (tanh), TAPE 6 −18.9 / −16.2 — tanh bends earlier and shapes more samples.
+- What tanh does better: peak accuracy (110 Hz: −5.93 vs −5.75 dB at TAPE 6,
+  −4.96 vs −4.83 at 5) and sibilant peaks lose closer to the knob (bright
+  narration makeup at TAPE 6: 4.84 vs 4.55 dB). Neither curve auditioned.

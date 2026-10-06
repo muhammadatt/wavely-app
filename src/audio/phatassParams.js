@@ -33,9 +33,12 @@ export const PHATASS_DEFAULTS = {
   // TAME, so the top-end shelf and the onset softening turn down together
   // (`softenLaw`). A gain on a band, never distortion, no latency of its own.
   soften: false,
-  // 0–TAPE_MAX_DB — TAPE: how many dB a full-band cubic soft clipper takes off
+  // 0–TAPE_MAX_DB — TAPE: how many dB a full-band soft clipper takes off
   // the selection's own peak (`tapeLayer`). 0 is off (a pure delay).
   tape: 0,
+  // TAPE's curve (`TAPE_CURVES`): 'cubic' (the Studer fit; a hard clip past
+  // 3.52 dB) or 'tanh' (rounder at the top of the knob, never flat).
+  tapeCurve: 'cubic',
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
   // never a user setting; applied only while TAPE is up.
@@ -397,7 +400,7 @@ export function toKernelParams(params) {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
-    tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB),
+    tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve),
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb) ? clamp(p.tapeMakeupDb, 0, TAPE_MAX_DB) : 0,
     cornerHz: shelf.cornerHz,
     thresholdDb: voice + shelf.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
@@ -453,25 +456,59 @@ export function toKernelParams(params) {
 export const TAPE_MAX_DB = 6
 /** Peak re the gated RMS assumed when the selection's peak is not measured yet. */
 export const TAPE_FALLBACK_CREST_DB = 18
-export const TAPE_CURVE = 'cubic'
+/**
+ * TAPE's curves. 'cubic' (default) fits the Studer best (0.09 dB rms) and is
+ * pure third harmonic until the peak reaches its flat at 3.52 dB, where it
+ * becomes a hard clip. 'tanh' fitted it second (0.17) and never goes flat.
+ *
+ * ⚠ "TANH IS GENTLER AT THE TOP" WAS THE PREDICTION AND IT DID NOT HOLD.
+ * 110 Hz sine at −4.4 dBFS, H7–H41 re the fundamental, cubic / tanh:
+ * TAPE 1 −116 / −89, 2 −110 / −71, 3.5 −105 / −56, 5 −45.8 / −46.9,
+ * 6 −42.7 / −42.1 dBc — equal where the cubic clips, and tanh carries far MORE
+ * high-order content below that (it has every odd order from the start; the
+ * cubic has only the third until it reaches its flat). H3+H5 is 0.3–1.5 dB
+ * lower on tanh at every setting. On bright narration tanh adds MORE in total
+ * (−26.6 vs −28.0 dB re signal at TAPE 2, −16.2 vs −18.9 at 6) because it bends
+ * earlier, so more samples are shaped. What tanh does do better: the peak lands
+ * nearer the knob (−5.93 vs −5.75 dB at 6; no flat to ring off) and sibilant
+ * peaks lose closer to the number (makeup 4.84 vs 4.55 dB at 6). Not auditioned.
+ */
+export const TAPE_CURVES = ['cubic', 'tanh']
+export const TAPE_CURVE = TAPE_CURVES[0]
 const TAPE_LAYER = {
-  curve: TAPE_CURVE, amountDb: 0, emphDb: 0, loHz: SAT_BAND_MIN_HZ, hiHz: SAT_BAND_MAX_HZ, mode: 'full',
+  amountDb: 0, emphDb: 0, loHz: SAT_BAND_MIN_HZ, hiHz: SAT_BAND_MAX_HZ, mode: 'full',
 }
 
-/** The cubic's input u at the peak that takes `reductionDb` off it (f(u)/u = 10^(−dB/20)). */
-export function tapePeakU(reductionDb) {
+/**
+ * The curve's input u at the peak that takes `reductionDb` off it: the u with
+ * f(u)/u = 10^(−dB/20). The cubic inverts in closed form; tanh(u)/u falls
+ * monotonically from 1, so it is bisected (to ~1e-12, well inside a float).
+ */
+export function tapePeakU(reductionDb, curve = TAPE_CURVE) {
   const r = Math.pow(10, -Math.max(0, reductionDb) / 20)
+  if (curve === 'tanh') {
+    if (r >= 1) return 0
+    let lo = 0, hi = 1
+    while (Math.tanh(hi) / hi > r) hi *= 2
+    for (let k = 0; k < 60; k++) {
+      const mid = 0.5 * (lo + hi)
+      if (Math.tanh(mid) / mid > r) lo = mid
+      else hi = mid
+    }
+    return 0.5 * (lo + hi)
+  }
   return r >= 2 / 3 ? Math.sqrt(3 * (1 - r)) : 2 / (3 * r)
 }
 
-/** The TAPE layer's kernel params for a knob position and the selection's peak. */
-export function tapeLayer(tapeDb, peakDb) {
+/** The TAPE layer's kernel params for a knob position, the selection's peak and the curve. */
+export function tapeLayer(tapeDb, peakDb, curve = TAPE_CURVE) {
+  const c = TAPE_CURVES.includes(curve) ? curve : TAPE_CURVE
   const t = clamp(Number(tapeDb) || 0, 0, TAPE_MAX_DB)
-  if (!(t > 0)) return { ...TAPE_LAYER, on: false, driveDb: 0 }
+  if (!(t > 0)) return { ...TAPE_LAYER, curve: c, on: false, driveDb: 0 }
   // layerGain = unitDriveU / refPeak · 10^(drive/20): with refPeak = the peak,
   // u at the peak is unitDriveU · 10^(drive/20).
-  const driveDb = clamp(20 * Math.log10(tapePeakU(t) / unitDriveU(TAPE_CURVE)), SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB)
-  return { ...TAPE_LAYER, on: true, driveDb, refPeakDb: peakDb }
+  const driveDb = clamp(20 * Math.log10(tapePeakU(t, c) / unitDriveU(c)), SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB)
+  return { ...TAPE_LAYER, curve: c, on: true, driveDb, refPeakDb: peakDb }
 }
 
 /** The TAPE stage's latency: one oversampler round trip, on or off. */
