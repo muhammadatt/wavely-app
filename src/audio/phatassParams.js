@@ -49,6 +49,10 @@ export const PHATASS_DEFAULTS = {
   // (a kick's low end gets squashed) while the clean path stays flat. 0 ships.
   // Bench only. The TAPE knob keeps its no-push drive (`tapeLayer`).
   tapeLowPush: 0,
+  // dB of HEAD BUMP (`TAPE_HEAD_BUMPS`): a low shelf at TAPE_HEAD_BUMP_HZ AHEAD
+  // of TAPE that stays in the output — the tape machine's low lift, which then
+  // drives the kick into the curve. Only while TAPE is up. 0 ships. Bench only.
+  tapeHeadBump: 0,
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
   // never a user setting; applied only while TAPE is up.
@@ -430,6 +434,7 @@ export function toKernelParams(params) {
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush),
+    headBumpDb: Number(p.tape) > 0 ? clamp(Number(p.tapeHeadBump) || 0, 0, TAPE_HEAD_BUMPS[TAPE_HEAD_BUMPS.length - 1]) : 0,
     tapeOrder: p.tapeOrder === 'last' ? 'last' : 'first',
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb) ? clamp(p.tapeMakeupDb, 0, TAPE_MAKEUP_MAX_DB) : 0,
     cornerHz: shelf.cornerHz,
@@ -593,6 +598,25 @@ export const TAPE_LOW_PUSHES = [0, 6, 12, 18]
  */
 export const TAPE_MAKEUP_MAX_DB = 24
 export const TAPE_LOW_PUSH_HZ = 150
+
+/**
+ * TAPE's HEAD BUMP, bench only: dB of low shelf (TAPE_HEAD_BUMP_HZ, Q 0.7)
+ * AHEAD of TAPE that is NOT undone — unlike the low push, the lift stays in the
+ * output, as a tape machine's does. Fitted on two Studer A800 dry/wet drum
+ * pairs: their linear paths (quiet frames) lift the lows ~+3.5–4 dB under
+ * ~40 Hz re 1 kHz, flat from ~80 Hz. Placed ahead of the curve it reproduces
+ * the drum machine's kick-against-snare balance (energy of the first 100 ms of
+ * each hit, kick minus snare: dry 11.00, Studer 11.64 dB; TAPE 12 alone 10.09,
+ * + bump 3 / 6 dB: 10.89 / 11.67). The same EQ AFTER the curve overshot
+ * (12.66): ahead of it, the clipper takes part of the lift back off the kick.
+ * ⚠ The drums render needs none (Studer −1.86, TAPE 12 alone −1.90, +6: −1.32)
+ * — the two renders were not made at one setting. TAPE's knob is still solved
+ * on the source's peak, so a bumped kick hits the curve harder than the knob
+ * says; the makeup is measured through the bump.
+ */
+export const TAPE_HEAD_BUMPS = [0, 3, 6, 9]
+export const TAPE_HEAD_BUMP_HZ = 40
+export const TAPE_HEAD_BUMP_Q = 0.7
 const TAPE_LOW_PUSH_Q = 0.7
 
 /**

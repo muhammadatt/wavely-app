@@ -36,11 +36,17 @@
  * the chain up to the makeup (Warmth, guard, TAPE) over the whole region — the
  * pre-October-2026 measurement, ~40 s per 10 min.
  *
+ * HEAD BUMP (bench): the low shelf ahead of TAPE is applied to the region once,
+ * up front, and both paths measure TAPE on that — while the makeup still
+ * restores the SOURCE's peak (the bump lifts the kick into the curve; what
+ * comes back out is put on the selection's own peak).
+ *
  * Pure: no worklet, no DOM; runs in the measurement worker and under node.
  */
 
 import { processSaturationBenchBuffer, SaturationBenchKernel } from './dsp/saturationLayers.js'
-import { toKernelParams, PHATASS_DEFAULTS } from './phatassParams.js'
+import { toKernelParams, PHATASS_DEFAULTS, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q } from './phatassParams.js'
+import { BiquadCascade, lowShelf } from './dsp/biquad.js'
 import { processPhatassBuffer } from './phatassProcessor.js'
 
 /** Block size for the fast search, samples. */
@@ -99,6 +105,18 @@ function chainPeak(channelData, sampleRate, p) {
   const kp = toKernelParams({ ...p, tame: 0, soften: 0, output: 0, tapeMakeupDb: 0 })
   const { channelData: out, latencySamples: L } = processPhatassBuffer(padded, sampleRate, kp)
   return peakOf(out, L, Math.min(L + n + 64, n + pad))
+}
+
+/** The region through the head bump, as TAPE hears it in the kernel. */
+function headBumped(channelData, sampleRate, db) {
+  const c = lowShelf(sampleRate, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q, db)
+  return channelData.map((x) => {
+    const bq = new BiquadCascade(1, 1)
+    bq.setSection(0, c)
+    const y = new Float32Array(x.length)
+    bq.process(x, y, x.length, 0)
+    return y
+  })
 }
 
 function fastPeak(channelData, sampleRate, layer) {
@@ -174,9 +192,11 @@ export function measureTapeMakeup(channelData, sampleRate, params, { exact = tru
     return { makeupDb: 0, peakDb: toDb(inPk), inputPeakDb: toDb(inPk) }
   }
   const kp = toKernelParams(p)
+  // The head bump sits inside the chain render already; otherwise TAPE hears the bumped source.
+  const tapeIn = kp.tapeOrder !== 'last' && kp.headBumpDb > 0 ? headBumped(channelData, sampleRate, kp.headBumpDb) : channelData
   const outPk = kp.tapeOrder === 'last'
     ? chainPeak(channelData, sampleRate, p)
-    : exact ? exactPeak(channelData, sampleRate, kp.tapeLayer) : fastPeak(channelData, sampleRate, kp.tapeLayer)
+    : exact ? exactPeak(tapeIn, sampleRate, kp.tapeLayer) : fastPeak(tapeIn, sampleRate, kp.tapeLayer)
   const makeupDb = outPk > 0 ? Math.max(0, toDb(inPk) - toDb(outPk)) : 0
   return { makeupDb, peakDb: toDb(outPk), inputPeakDb: toDb(inPk) }
 }

@@ -7,10 +7,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
+import { processPhatassBuffer, PhatassKernel } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, softenAmount, SOFTEN_MAX, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
-  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ,
+  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
 } from '../../src/audio/phatassParams.js'
@@ -904,4 +904,49 @@ test('TAPE runs to 12 dB: a voiced peak loses nearly its number, and the makeup 
   let pk = 0
   for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
   assert.ok(Math.abs(db(pk / peak)) < 0.05, `peak ${db(pk / peak).toFixed(3)} dB off the source`)
+})
+
+test('TAPE head bump: off ships, and only rides along while TAPE is up', () => {
+  assert.deepEqual(TAPE_HEAD_BUMPS, [0, 3, 6, 9])
+  assert.equal(TAPE_HEAD_BUMP_HZ, 40)
+  assert.equal(PHATASS_DEFAULTS.tapeHeadBump, 0)
+  assert.equal(toKernelParams({ tape: 2, tapeHeadBump: 6 }).headBumpDb, 6)
+  assert.equal(toKernelParams({ tape: 0, tapeHeadBump: 6 }).headBumpDb, 0)
+  assert.equal(toKernelParams({ tape: 2 }).headBumpDb, 0)
+})
+
+test('TAPE head bump below the curve is a low shelf that stays in the output', () => {
+  const x = add(sine(25, 0.002, SR * 2), sine(1000, 0.002, SR * 2))
+  const p = { warmth: 0, tame: 0, soften: 0, tape: 2, tapeHeadBump: 6, tapeMakeupDb: 0, warmthCeilingDb: db(0.8) }
+  const { channelData: [y], latencySamples: L } = run(x, p)
+  const from = SR, to = 2 * SR - 1000
+  const lo = db(toneAmp(y.subarray(L), 25, from, to) / 0.002)
+  const hi = db(toneAmp(y.subarray(L), 1000, from, to) / 0.002)
+  assert.ok(lo > 4.5 && lo < 6.2, `25 Hz lifted ${lo.toFixed(2)} dB`)
+  assert.ok(Math.abs(hi) < 0.1, `1 kHz moved ${hi.toFixed(2)} dB`)
+})
+
+test('TAPE head bump: the makeup is measured through it (fast = exact) and still lands the peak on the source', () => {
+  const { x, peak } = kickTrack()
+  for (const tapeHeadBump of [3, 6, 9]) {
+    const p = { warmth: 0, tame: 0, soften: 0, tape: 6, tapeHeadBump, warmthCeilingDb: db(peak) }
+    const exact = measureTapeMakeup([x], SR, p).makeupDb
+    const fast = measureTapeMakeup([x], SR, p, { exact: false }).makeupDb
+    assert.ok(Math.abs(fast - exact) < 0.02, `bump ${tapeHeadBump}: fast ${fast.toFixed(3)} vs exact ${exact.toFixed(3)}`)
+    const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: exact })
+    let pk = 0
+    for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
+    assert.ok(Math.abs(db(pk / peak)) < 0.05, `bump ${tapeHeadBump}: peak ${db(pk / peak).toFixed(3)} dB off the source`)
+  }
+})
+
+test('the saturation meter does not read the head bump as saturation', () => {
+  const x = add(sine(30, 0.002, SR), sine(800, 0.002, SR))
+  const k = new PhatassKernel(SR)
+  k.setParams(toKernelParams({ warmth: 0, tame: 0, soften: 0, tape: 2, tapeHeadBump: 9, warmthCeilingDb: db(0.8) }), true)
+  k.enableMeter()
+  const out = new Float32Array(128)
+  for (let o = 0; o + 128 <= x.length; o += 128) k.process([x.subarray(o, o + 128)], [out], 128)
+  const m = k.takeMeter()
+  assert.ok(10 * Math.log10(m.added / m.clean) < -40, `meter read ${(10 * Math.log10(m.added / m.clean)).toFixed(1)} dB`)
 })

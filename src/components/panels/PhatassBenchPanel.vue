@@ -1,12 +1,12 @@
 <script setup>
 /**
- * PHAT*SS bench — TAPE's curve, its low push, its place in the chain, and an
- * automatic output trim.
+ * PHAT*SS bench — TAPE's curve, its low push and head bump, its place in the
+ * chain, and an automatic output trim.
  *
  * ⚠ DELIBERATELY PLAIN, AND NOT BUILT FROM THE DEVICE CHROME, like the FET
  * Punch and OptoSmooth benches: the knobs and rockers in `../knobs/` are the
  * product's visual language, and these are not product controls. CUBIC, no push,
- * FIRST and OFF ship; the others are kept to A/B against them, gated off in production
+ * no bump, FIRST and OFF ship; the others are kept to A/B against them, gated off in production
  * (`isPhatassBenchVisible`). They are ordinary PHAT*SS params, so preview and
  * APPLY both read them — what you hear is what renders.
  */
@@ -14,7 +14,7 @@ import { computed, ref } from 'vue'
 import { PHATASS_DEFAULTS } from '../../audio/phatassParams.js'
 
 const props = defineProps({
-  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeOrder`, `outputMakeup` and `outputMakeupDb`). */
+  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `tapeOrder`, `outputMakeup` and `outputMakeupDb`). */
   params: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
   /** The output trim's measurement is in flight. */
@@ -40,6 +40,15 @@ const CHOICES = [
       { id: 6, label: '+6', title: '+6 dB low shelf (150 Hz) into the curve, undone after: the lows saturate first. On drums, TAPE 6 here squashes the kick like the Studer A800' },
       { id: 12, label: '+12', title: '+12 dB low shelf into the curve, undone after. On a drum machine, TAPE 2 here squashes the kick like the Studer A800' },
       { id: 18, label: '+18', title: '+18 dB low shelf into the curve, undone after: past the Studer at most settings' },
+    ],
+  },
+  {
+    key: 'tapeHeadBump', label: 'Head bump',
+    options: [
+      { id: 0, label: 'OFF', title: 'Ships. No low lift' },
+      { id: 3, label: '+3', title: '+3 dB low shelf (40 Hz) ahead of TAPE, kept in the output: the tape machine\'s low lift, driving the kick into the curve' },
+      { id: 6, label: '+6', title: '+6 dB low shelf ahead of TAPE, kept. With TAPE 12 this matches the Studer A800 drum machine\'s kick-against-snare balance (the drums render needed none)' },
+      { id: 9, label: '+9', title: '+9 dB low shelf ahead of TAPE, kept: past both Studer renders' },
     ],
   },
   {
@@ -113,7 +122,7 @@ function reset() {
 
     <div v-if="open" class="mt-3">
       <p class="mb-3 text-[10px] leading-[1.5] text-white/35">
-        A/B TAPE's curve, its place in the chain and an automatic output trim against what ships (CUBIC, no push, FIRST, OFF). With a low push the TAPE knob is a drive: a kick can lose more than its number.
+        A/B TAPE's curve, its place in the chain and an automatic output trim against what ships (CUBIC, no push, no bump, FIRST, OFF). With a low push the TAPE knob is a drive: a kick can lose more than its number.
         Hidden in production builds. Both preview and APPLY read them.
       </p>
 
@@ -163,7 +172,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span v-if="trimText" class="font-mono text-[9px] text-amber-100/60">{{ trimText }}</span>
-        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / {{ params.tapeOrder }} / {{ params.outputMakeup }}</span>
+        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / bump {{ params.tapeHeadBump }} / {{ params.tapeOrder }} / {{ params.outputMakeup }}</span>
       </div>
     </div>
   </div>

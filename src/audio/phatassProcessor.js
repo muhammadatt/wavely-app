@@ -35,7 +35,8 @@ import { ShelfLimiterStage } from './dsp/hfLimit.js'
 import { SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { WarmthPeakGuard } from './dsp/warmthGuard.js'
 import { DelayLine } from './dsp/oversample.js'
-import { toKernelParams, PHATASS_DEFAULTS, WARMTH_LAYERS, slotOversample } from './phatassParams.js'
+import { BiquadCascade, lowShelf } from './dsp/biquad.js'
+import { toKernelParams, PHATASS_DEFAULTS, WARMTH_LAYERS, slotOversample, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q } from './phatassParams.js'
 
 export const PHATASS_KERNEL_DEFAULTS = toKernelParams(PHATASS_DEFAULTS)
 
@@ -48,6 +49,12 @@ export class PhatassKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
     this.tape = new SaturationBenchKernel(sampleRate, { slots: 1 })
+    // TAPE's head bump (bench only): a low shelf ahead of TAPE, kept in the
+    // output; the meter's clean reference runs through its own copy, so a
+    // linear lift never reads as saturation. Zero latency.
+    this.bump = new BiquadCascade(1, 2)
+    this.meterBump = new BiquadCascade(1, 2)
+    this.bumpDb = 0
     this.tapeInit = false
     this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length, oversample: slotOversample() })
     this.warmthInit = false
@@ -68,6 +75,7 @@ export class PhatassKernel {
     this.meterOn = false
     this.meterLag = this.tape.latencySamples + this.warmth.latencySamples + this.guard.latencySamples
     this.meterDelays = []
+    this.meterIn = []
     this.meterAdded = 0
     this.meterClean = 0
     this.meterCount = 0
@@ -126,10 +134,25 @@ export class PhatassKernel {
     })
     this.outputLin = dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0))
     this.tapeMakeupLin = dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0)
+    const bump = Number.isFinite(p.headBumpDb) ? p.headBumpDb : 0
+    if (bump !== this.bumpDb) {
+      // Coefficients only: the filter state carries over, so a change is a step in gain, not a click from rest.
+      if (bump > 0) {
+        const c = lowShelf(this.sampleRate, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q, bump)
+        this.bump.setSection(0, c)
+        this.meterBump.setSection(0, c)
+      }
+      if (!(this.bumpDb > 0)) { this.bump.reset(); this.meterBump.reset() }
+      this.bumpDb = bump
+    }
   }
 
-  /** TAPE, then its makeup gain, in place. */
+  /** The head bump (if any), TAPE, then its makeup gain, in place. */
   tapeAndMakeup(chs, n) {
+    if (this.bumpDb > 0) {
+      this.bump.ensureChannels(chs.length)
+      for (let ch = 0; ch < chs.length; ch++) this.bump.process(chs[ch], chs[ch], n, ch)
+    }
     this.tape.process(chs, chs, n)
     const mk = this.tapeMakeupLin
     if (mk === 1) return
@@ -174,9 +197,19 @@ export class PhatassKernel {
       while (this.meterDelays.length < nOut) this.meterDelays.push(new DelayLine(this.meterLag))
       let added = 0
       let clean = 0
+      const bumped = this.bumpDb > 0
+      if (bumped) {
+        this.meterBump.ensureChannels(nOut)
+        while (this.meterIn.length < nOut) this.meterIn.push(new Float32Array(n))
+      }
       for (let ch = 0; ch < nOut; ch++) {
         const d = this.meterDelays[ch]
-        const x = inputChannels[ch < nIn ? ch : nIn - 1]
+        let x = inputChannels[ch < nIn ? ch : nIn - 1]
+        if (bumped) {
+          if (this.meterIn[ch].length < n) this.meterIn[ch] = new Float32Array(n)
+          this.meterBump.process(x, this.meterIn[ch], n, ch)
+          x = this.meterIn[ch]
+        }
         const y = outputChannels[ch]
         for (let i = 0; i < n; i++) {
           const c = mk * d.push(x[i])

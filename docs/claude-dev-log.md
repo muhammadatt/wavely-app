@@ -6177,3 +6177,45 @@ Peak loss and added distortion (re the signal):
 | Drums | −5.41, added −17.7 | −9.94, added −12.3 | −10.19, added −13.1 |
 
 The fast makeup search equals the exact one (≤ 0.01 dB) up to 12. The makeup cap (24) already covers it. The knob's inversion tests sweep to `TAPE_MAX_DB`, so they now cover the full range.
+
+### PHAT*SS — TAPE head bump on the bench (October 2026)
+
+Owner: with TAPE 12 "the Studer kicks are considerably louder than the snares while ours are more level — is this the Studer's post-saturation EQ?"
+
+**Measurement.** Kick minus snare loudness: the energy of the first 100 ms of each hit, kick hits against snare hits. The "ours" rows are TAPE 6 plus 6 dB of drive, which is TAPE 12.
+
+| Kick − snare (dB) | Drum machine | Drums |
+|---|---|---|
+| Dry | 11.00 | 0.28 |
+| Studer | 11.64 | −1.86 |
+| Studer linear path alone | 13.31 | 0.99 |
+| Ours, TAPE 12 | 10.09 | −1.90 |
+| Ours, TAPE 12, Studer EQ after | 12.66 | −1.20 |
+| Ours, TAPE 12, Studer EQ before (peak re-matched) | 11.94 | −1.14 |
+
+So it is the Studer's low EQ, and it belongs AHEAD of the curve, where the clipper takes part of the lift back off the kick.
+
+**Fitting the shape.** A finer read of the linear paths (|H| re 1 kHz):
+
+| Pair | 15–40 Hz | 45 | 50 | 60 | 80 |
+|---|---|---|---|---|---|
+| Drum machine | +3.2 to +3.7 | +2.2 | +1.4 | +1.1 | +0.5 |
+| Drums | +4.1 at 15–20, falling to +1.4 at 40 | | +1.2 | +0.5 | −0.1 |
+
+That is a low shelf of ~+3.5–4 dB under ~40 Hz. The earlier "+4 to +9 dB at 30–50 Hz" figure included the Studer's flat gain and the coarse FFT, and is withdrawn.
+
+Shelf sweep ahead of TAPE 12 on the drum machine:
+
+| Shelf | +3 | +4.5 | +6 |
+|---|---|---|---|
+| 40 Hz | 10.89 | 11.29 | **11.67** |
+| 60 Hz | 11.22 | 11.69 | 12.11 |
+
+40 Hz follows the fitted shape, so 40 Hz it is.
+
+**Built: `tapeHeadBump` 0/3/6/9 dB**, a low shelf at 40 Hz, Q 0.7.
+- **Placement:** a `BiquadCascade` ahead of TAPE inside `tapeAndMakeup`, so it moves with TAPE in LAST order. It is active only while TAPE is up (`headBumpDb` is 0 with TAPE 0), so TAPE 0 stays a pure delay. Coefficient changes keep the filter state.
+- **Plugin path:** TAPE 12 with bump 0 / 3 / 6 / 9 reads 10.09 / 10.89 / 11.67 / 12.34.
+- **Makeup:** `measureTapeMakeup` shelves the region once up front and measures TAPE on that against the SOURCE's peak; fast equals exact (bare kick, +3/+6/+9). The peak lands on the source to 0.05 dB.
+- **Saturation meter:** its clean reference runs through its own copy of the shelf. A quiet tone pair under +9 reads below −40 dB.
+- **Not covered:** the drums render (dry 0.28, Studer −1.86, TAPE 12 alone −1.90, +6 −1.32) wants none. The two renders were made at different settings.
