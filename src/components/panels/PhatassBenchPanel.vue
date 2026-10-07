@@ -1,11 +1,11 @@
 <script setup>
 /**
- * PHAT*SS bench — TAPE's curve, its place in the chain and what its makeup restores.
+ * PHAT*SS bench — TAPE's curve and its place in the chain.
  *
  * ⚠ DELIBERATELY PLAIN, AND NOT BUILT FROM THE DEVICE CHROME, like the FET
  * Punch and OptoSmooth benches: the knobs and rockers in `../knobs/` are the
- * product's visual language, and these are not product controls. CUBIC, FIRST
- * and PEAK ship; the others are kept to A/B against them, gated off in production
+ * product's visual language, and these are not product controls. CUBIC and
+ * FIRST ship; the others are kept to A/B against them, gated off in production
  * (`isPhatassBenchVisible`). They are ordinary PHAT*SS params, so preview and
  * APPLY both read them — what you hear is what renders.
  */
@@ -13,7 +13,7 @@ import { computed, ref } from 'vue'
 import { PHATASS_DEFAULTS } from '../../audio/phatassParams.js'
 
 const props = defineProps({
-  /** The panel's params (reads `tapeCurve`, `tapeOrder` and `tapeMakeup`). */
+  /** The panel's params (reads `tapeCurve` and `tapeOrder`). */
   params: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
 })
@@ -35,13 +35,6 @@ const CHOICES = [
     options: [
       { id: 'first', label: 'FIRST', title: 'Ships. TAPE → makeup → Warmth: Warmth works on the rounded signal and is never clipped by TAPE' },
       { id: 'last', label: 'LAST', title: 'Warmth → guard → TAPE → makeup, the order before October 2026. The makeup is measured through Warmth (slower on long selections) and re-measures when Warmth moves' },
-    ],
-  },
-  {
-    key: 'tapeMakeup', label: 'Makeup',
-    options: [
-      { id: 'peak', label: 'PEAK', title: 'Ships. Gives back what TAPE took off the peak: the peak lands on the source\'s and the whole reduction becomes level' },
-      { id: 'rms', label: 'RMS', title: 'Gives back what TAPE took off the RMS: the body stays put and the peaks come down — a level-matched A/B. Predicted without a render in preview' },
     ],
   },
 ]
@@ -93,7 +86,7 @@ function reset() {
 
     <div v-if="open" class="mt-3">
       <p class="mb-3 text-[10px] leading-[1.5] text-white/35">
-        A/B TAPE's curve, its place in the chain and its makeup against what ships (CUBIC, FIRST, PEAK).
+        A/B TAPE's curve and its place in the chain against what ships (CUBIC, FIRST).
         Hidden in production builds. Both preview and APPLY read them.
       </p>
 
@@ -142,7 +135,7 @@ function reset() {
           title="Back to the shipping configuration"
           @click="reset"
         >Reset</button>
-        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / {{ params.tapeOrder }} / {{ params.tapeMakeup }}</span>
+        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / {{ params.tapeOrder }}</span>
       </div>
     </div>
   </div>

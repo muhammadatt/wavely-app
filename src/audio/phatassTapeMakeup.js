@@ -36,24 +36,10 @@
  * the chain up to the makeup (Warmth, guard, TAPE) over the whole region — the
  * pre-October-2026 measurement, ~40 s per 10 min.
  *
- * RMS MAKEUP (`tapeMakeup: 'rms'`, bench only): give back what TAPE took off the
- * selection's RMS instead of its peak, so the body stays put and the peaks come
- * down. TAPE FIRST is a memoryless curve on the source (oversampler and DC
- * blocker aside), so the output energy is predicted from a histogram of the
- * source's sample levels — no render: one integer-binned pass over the region
- * (`levelHistogram`, 256 bins per octave read from the float's bits) and one
- * curve evaluation per non-empty bin. Measured against rendered TAPE on guitar
- * and drums, cubic and tanh, TAPE 1–6: within 0.02 dB at every setting. Preview
- * uses the prediction; apply (`exact`) renders TAPE and compares RMS directly.
- * In 'last' order both render the chain up to the makeup with TAPE on and off.
- * ⚠ RMS, not LUFS: K-weighting the added harmonics reads up to 0.2 dB louder on
- * drums, which a histogram cannot see.
- *
  * Pure: no worklet, no DOM; runs in the measurement worker and under node.
  */
 
-import { processSaturationBenchBuffer, SaturationBenchKernel, layerGain } from './dsp/saturationLayers.js'
-import { shaperCurve } from './dsp/shaperCurves.js'
+import { processSaturationBenchBuffer, SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { toKernelParams, PHATASS_DEFAULTS } from './phatassParams.js'
 import { processPhatassBuffer } from './phatassProcessor.js'
 
@@ -83,77 +69,31 @@ function peakOf(chs, from, to) {
 
 const toDb = x => (x > 0 ? 20 * Math.log10(x) : -Infinity)
 
-function msOf(chs, from, to) {
-  let s = 0
-  for (const c of chs) for (let i = from; i < to; i++) s += c[i] * c[i]
-  return s / (chs.length * Math.max(1, to - from))
-}
-
-function padded(channelData, pad) {
+function exactPeak(channelData, sampleRate, layer) {
   const n = channelData[0].length
-  return channelData.map((c) => {
+  // Padded so the latency's worth of tail comes out too.
+  const pad = 4096
+  const padded = channelData.map((c) => {
     const x = new Float32Array(n + pad)
     x.set(c)
     return x
   })
-}
-
-/** TAPE alone over the whole region: `{ out, L, n }`, padded so the latency's worth of tail comes out too. */
-function renderTape(channelData, sampleRate, layer) {
-  const n = channelData[0].length
-  const { channelData: out, latencySamples: L } = processSaturationBenchBuffer(padded(channelData, 4096), sampleRate, { layers: [layer] }, { slots: 1 })
-  return { out, L, n, end: Math.min(L + n + 64, n + 4096) }
+  const { channelData: out, latencySamples: L } = processSaturationBenchBuffer(padded, sampleRate, { layers: [layer] }, { slots: 1 })
+  return peakOf(out, L, Math.min(L + n + 64, n + pad))
 }
 
 /** TAPE last: the whole chain as it reaches the makeup — shelf, Soften, Output and makeup out. */
-function renderChain(channelData, sampleRate, p) {
+function chainPeak(channelData, sampleRate, p) {
   const n = channelData[0].length
+  const pad = 8192
+  const padded = channelData.map((c) => {
+    const x = new Float32Array(n + pad)
+    x.set(c)
+    return x
+  })
   const kp = toKernelParams({ ...p, tame: 0, soften: 0, output: 0, tapeMakeupDb: 0 })
-  const { channelData: out, latencySamples: L } = processPhatassBuffer(padded(channelData, 8192), sampleRate, kp)
-  return { out, L, n, end: Math.min(L + n + 64, n + 8192) }
-}
-
-/**
- * The region's sample levels, binned on the float's own bits: |x|'s exponent
- * and top 8 mantissa bits, so 256 bins per octave (0.024 dB wide) with no log
- * per sample. Each bin keeps its count and its energy; bin 0 (zeros and
- * denormals) carries no energy worth predicting and is dropped.
- */
-export function levelHistogram(channelData) {
-  const count = new Float64Array(1 << 16)
-  const energy = new Float64Array(1 << 16)
-  for (const c of channelData) {
-    const bits = new Uint32Array(c.buffer, c.byteOffset, c.length)
-    for (let i = 0; i < c.length; i++) {
-      const b = (bits[i] & 0x7fffffff) >>> 15
-      count[b]++
-      energy[b] += c[i] * c[i]
-    }
-  }
-  count[0] = 0
-  energy[0] = 0
-  return { count, energy }
-}
-
-/**
- * Output/input energy of a memoryless curve run as f(g·x)/g over a level
- * histogram, dB (≤ 0 for the TAPE curves). Each bin is represented by its rms
- * level; the bins are narrow enough that this is the render to 0.02 dB.
- */
-export function predictTapeRmsDb(hist, layer) {
-  const f = shaperCurve(layer.curve).f
-  const g = layerGain(layer.curve, layer.driveDb, layer.refPeakDb)
-  let out = 0
-  let inp = 0
-  const { count, energy } = hist
-  for (let b = 1; b < count.length; b++) {
-    const k = count[b]
-    if (!k) continue
-    const y = f(g * Math.sqrt(energy[b] / k)) / g
-    out += k * y * y
-    inp += energy[b]
-  }
-  return inp > 0 && out > 0 ? 10 * Math.log10(out / inp) : 0
+  const { channelData: out, latencySamples: L } = processPhatassBuffer(padded, sampleRate, kp)
+  return peakOf(out, L, Math.min(L + n + 64, n + pad))
 }
 
 function fastPeak(channelData, sampleRate, layer) {
@@ -229,37 +169,9 @@ export function measureTapeMakeup(channelData, sampleRate, params, { exact = tru
     return { makeupDb: 0, peakDb: toDb(inPk), inputPeakDb: toDb(inPk) }
   }
   const kp = toKernelParams(p)
-  if (kp.tapeMakeup === 'rms') return { ...rmsMakeup(channelData, sampleRate, p, kp, exact), inputPeakDb: toDb(inPk) }
-  let outPk
-  if (kp.tapeOrder === 'last') {
-    const r = renderChain(channelData, sampleRate, p)
-    outPk = peakOf(r.out, r.L, r.end)
-  } else if (exact) {
-    const r = renderTape(channelData, sampleRate, kp.tapeLayer)
-    outPk = peakOf(r.out, r.L, r.end)
-  } else {
-    outPk = fastPeak(channelData, sampleRate, kp.tapeLayer)
-  }
+  const outPk = kp.tapeOrder === 'last'
+    ? chainPeak(channelData, sampleRate, p)
+    : exact ? exactPeak(channelData, sampleRate, kp.tapeLayer) : fastPeak(channelData, sampleRate, kp.tapeLayer)
   const makeupDb = outPk > 0 ? Math.max(0, toDb(inPk) - toDb(outPk)) : 0
   return { makeupDb, peakDb: toDb(outPk), inputPeakDb: toDb(inPk) }
-}
-
-/** `tapeMakeup: 'rms'`: what TAPE took off the selection's RMS. `peakDb` is NaN when not rendered. */
-function rmsMakeup(channelData, sampleRate, p, kp, exact) {
-  let lossDb
-  let peakDb = NaN
-  if (kp.tapeOrder === 'last') {
-    // TAPE hears Warmth: the chain up to the makeup, TAPE on against TAPE off.
-    const on = renderChain(channelData, sampleRate, p)
-    const off = renderChain(channelData, sampleRate, { ...p, tape: 0 })
-    lossDb = 10 * Math.log10(msOf(on.out, on.L, on.L + on.n) / msOf(off.out, off.L, off.L + off.n))
-    peakDb = toDb(peakOf(on.out, on.L, on.end))
-  } else if (exact) {
-    const r = renderTape(channelData, sampleRate, kp.tapeLayer)
-    lossDb = 10 * Math.log10(msOf(r.out, r.L, r.L + r.n) / msOf(channelData, 0, r.n))
-    peakDb = toDb(peakOf(r.out, r.L, r.end))
-  } else {
-    lossDb = predictTapeRmsDb(levelHistogram(channelData), kp.tapeLayer)
-  }
-  return { makeupDb: Number.isFinite(lossDb) ? Math.max(0, -lossDb) : 0, peakDb }
 }

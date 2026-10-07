@@ -165,9 +165,9 @@ export function usePhatass() {
       scheduleReadout()
       if (phParams.tapeOrder === 'last' && Number(phParams.tape) > 0) scheduleTapeMakeup()
     }
-    // The curve, the order and the makeup mode change what TAPE gives back; the
-    // interim rule (never more than the knob) holds for all of them.
-    if ((name === 'tapeCurve' || name === 'tapeOrder' || name === 'tapeMakeup') && Number(phParams.tape) > 0) {
+    // The curve and the order change what TAPE takes off the peak; the interim
+    // rule (never more than the knob) holds either way.
+    if ((name === 'tapeCurve' || name === 'tapeOrder') && Number(phParams.tape) > 0) {
       setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape)))
       scheduleTapeMakeup()
     }

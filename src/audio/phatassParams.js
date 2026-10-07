@@ -44,11 +44,6 @@ export const PHATASS_DEFAULTS = {
   // shapes the rounded signal) or 'last' (Warmth → guard → TAPE → makeup, the
   // order before October 2026, kept to audition). See `TAPE_ORDERS`.
   tapeOrder: 'first',
-  // What TAPE's makeup gives back (`TAPE_MAKEUPS`): 'peak' (ships — the peak
-  // returns to the source's, the whole reduction becomes level) or 'rms' (the
-  // selection's RMS is unchanged: the body stays put and the peaks come down,
-  // a level-matched A/B). Bench only.
-  tapeMakeup: 'peak',
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
   // never a user setting; applied only while TAPE is up.
@@ -424,7 +419,6 @@ export function toKernelParams(params) {
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve),
     tapeOrder: p.tapeOrder === 'last' ? 'last' : 'first',
-    tapeMakeup: p.tapeMakeup === 'rms' ? 'rms' : 'peak',
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb) ? clamp(p.tapeMakeupDb, 0, TAPE_MAX_DB) : 0,
     cornerHz: shelf.cornerHz,
     thresholdDb: voice + shelf.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
@@ -515,15 +509,6 @@ export const TAPE_CURVES = ['cubic', 'tanh', 'algebraic']
  * (the whole chain, no fast search) and Warmth's knobs re-measure it.
  */
 export const TAPE_ORDERS = ['first', 'last']
-/**
- * What TAPE's automatic makeup restores (`measureTapeMakeup`). 'peak' ships:
- * what TAPE took off the selection's peak, so the peak lands back on the
- * source's. 'rms' gives back only what TAPE took off the selection's RMS —
- * level-matched, the way a reference pair gets matched by hand — which on a
- * peak-solved knob is small, since TAPE barely touches the body (cubic, guitar:
- * +0.12 / +0.23 / +0.36 / +0.65 dB at TAPE 1 / 2 / 3.4 / 6; drums about twice).
- */
-export const TAPE_MAKEUPS = ['peak', 'rms']
 export const TAPE_CURVE = TAPE_CURVES[0]
 const TAPE_LAYER = {
   amountDb: 0, emphDb: 0, loHz: SAT_BAND_MIN_HZ, hiHz: SAT_BAND_MAX_HZ, mode: 'full',
