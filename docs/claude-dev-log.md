@@ -5987,3 +5987,24 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
   TAPE still moves the needle in the lower third and Warmth 5 sits near 70.
 - Browser check: dull narration at the defaults (Warmth 5) settles at ~65 in
   ~0.5 s of playback. Scale, smoothing and spring are reasoned, not auditioned.
+
+### PHAT*SS — TAPE order selectable (October 2026)
+
+- Owner had moved TAPE first without A/B'ing it. Rendered first, at Warmth 5 /
+  Odd/Even 50 / TAPE 3 (cubic) / Tame 5, current (TAPE first) against the
+  pre-reorder processor (`fd48a70^`, same four Warmth layers, makeup measured
+  the old way through Warmth): makeup 2.22 / 2.21, 2.89 / 2.86, 3.00 / 2.97 dB
+  (bright narration / dull narration / guitar); loudness within 0.1 LU; old −
+  current −34.3 / −30.6 / −21.5 dB re the output. Narration's difference is
+  spread 500 Hz–16 kHz (−25 to −30 per band); the guitar's sits under 1 kHz
+  (−21.7 at 100–500 Hz) — TAPE shaving the peaks Warmth's low end creates.
+- Then made selectable to audition live: `tapeOrder` 'first' (default) |
+  'last'. One kernel, the TAPE + makeup step runs before or after Warmth and
+  its guard; latency is the same either way; the saturation meter's reference
+  is unchanged (it reads pre-shelf output against the delayed, makeup-scaled
+  input, valid for both). LAST renders bit-identically to the pre-reorder
+  processor (max |diff| 0 on 10 s of narration).
+- LAST's makeup cannot use the fast search (TAPE hears Warmth): both preview
+  and apply render the chain to the makeup over the whole region, and Warmth /
+  Odd/Even re-measure it. Switching the order re-measures, holding
+  min(previous, knob) meanwhile. Not auditioned.

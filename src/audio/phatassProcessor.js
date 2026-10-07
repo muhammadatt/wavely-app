@@ -128,6 +128,16 @@ export class PhatassKernel {
     this.tapeMakeupLin = dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0)
   }
 
+  /** TAPE, then its makeup gain, in place. */
+  tapeAndMakeup(chs, n) {
+    this.tape.process(chs, chs, n)
+    const mk = this.tapeMakeupLin
+    if (mk === 1) return
+    for (const out of chs) {
+      for (let i = 0; i < n; i++) out[i] *= mk
+    }
+  }
+
   /**
    * @param {Float32Array[]} inputChannels
    * @param {Float32Array[]} outputChannels
@@ -144,14 +154,12 @@ export class PhatassKernel {
       outputChannels[ch].set(inputChannels[ch < nIn ? ch : nIn - 1].subarray(0, n))
     }
     // In place: each stage reads a sample before it writes that output.
-    this.tape.process(outputChannels, outputChannels, n)
+    // `tapeOrder` 'first' (shipping): TAPE → makeup → Warmth → guard. 'last'
+    // (the order before October 2026, kept to audition): Warmth → guard → TAPE
+    // → makeup. Same stages, so the latency is the same either way.
     const mk = this.tapeMakeupLin
-    if (mk !== 1) {
-      for (let ch = 0; ch < nOut; ch++) {
-        const out = outputChannels[ch]
-        for (let i = 0; i < n; i++) out[i] *= mk
-      }
-    }
+    const tapeLast = this.params.tapeOrder === 'last'
+    if (!tapeLast) this.tapeAndMakeup(outputChannels, n)
     // The guard needs Warmth's input as well as its output.
     while (this.warmthIn.length < nOut) this.warmthIn.push(new Float32Array(n))
     const wIn = this.warmthIn
@@ -161,6 +169,7 @@ export class PhatassKernel {
     }
     this.warmth.process(outputChannels, outputChannels, n)
     this.guard.process(wIn, outputChannels, n)
+    if (tapeLast) this.tapeAndMakeup(outputChannels, n)
     if (this.meterOn) {
       while (this.meterDelays.length < nOut) this.meterDelays.push(new DelayLine(this.meterLag))
       let added = 0

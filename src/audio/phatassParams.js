@@ -39,6 +39,10 @@ export const PHATASS_DEFAULTS = {
   // TAPE's curve (`TAPE_CURVES`): 'cubic' (the Studer fit; a hard clip past
   // 3.52 dB), 'tanh' or 'algebraic' (both never flat; algebraic bends earliest).
   tapeCurve: 'cubic',
+  // Where TAPE sits: 'first' (default — TAPE → makeup → Warmth, so Warmth
+  // shapes the rounded signal) or 'last' (Warmth → guard → TAPE → makeup, the
+  // order before October 2026, kept to audition). See `TAPE_ORDERS`.
+  tapeOrder: 'first',
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
   // never a user setting; applied only while TAPE is up.
@@ -401,6 +405,7 @@ export function toKernelParams(params) {
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve),
+    tapeOrder: p.tapeOrder === 'last' ? 'last' : 'first',
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb) ? clamp(p.tapeMakeupDb, 0, TAPE_MAX_DB) : 0,
     cornerHz: shelf.cornerHz,
     thresholdDb: voice + shelf.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
@@ -481,6 +486,16 @@ export const TAPE_FALLBACK_CREST_DB = 18
  * Not auditioned.
  */
 export const TAPE_CURVES = ['cubic', 'tanh', 'algebraic']
+/**
+ * TAPE's place in the chain. 'first' ships; 'last' is the pre-October-2026
+ * order, rendered at Warmth 5 / TAPE 3 against 'first' before it was made
+ * selectable: within 0.1 LU, the difference −34 / −31 dB re the output on
+ * bright / dull narration (spread 500 Hz–16 kHz) and −22 dB on guitar (mostly
+ * under 1 kHz — TAPE clipping Warmth's low end). Not auditioned. ⚠ In 'last'
+ * TAPE's input depends on Warmth, so its makeup is measured through Warmth
+ * (the whole chain, no fast search) and Warmth's knobs re-measure it.
+ */
+export const TAPE_ORDERS = ['first', 'last']
 export const TAPE_CURVE = TAPE_CURVES[0]
 const TAPE_LAYER = {
   amountDb: 0, emphDb: 0, loHz: SAT_BAND_MIN_HZ, hiHz: SAT_BAND_MAX_HZ, mode: 'full',

@@ -31,11 +31,17 @@
  *           by construction (it trusts the two margins), which is why apply
  *           still measures the exact way.
  *
+ * ⚠ WITH `tapeOrder: 'last'` (Warmth → guard → TAPE, kept to audition) TAPE's
+ * input is Warmth's output, so the fast search does not apply: both paths render
+ * the chain up to the makeup (Warmth, guard, TAPE) over the whole region — the
+ * pre-October-2026 measurement, ~40 s per 10 min.
+ *
  * Pure: no worklet, no DOM; runs in the measurement worker and under node.
  */
 
 import { processSaturationBenchBuffer, SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { toKernelParams, PHATASS_DEFAULTS } from './phatassParams.js'
+import { processPhatassBuffer } from './phatassProcessor.js'
 
 /** Block size for the fast search, samples. */
 const BLOCK = 1024
@@ -73,6 +79,20 @@ function exactPeak(channelData, sampleRate, layer) {
     return x
   })
   const { channelData: out, latencySamples: L } = processSaturationBenchBuffer(padded, sampleRate, { layers: [layer] }, { slots: 1 })
+  return peakOf(out, L, Math.min(L + n + 64, n + pad))
+}
+
+/** TAPE last: the whole chain as it reaches the makeup — shelf, Soften, Output and makeup out. */
+function chainPeak(channelData, sampleRate, p) {
+  const n = channelData[0].length
+  const pad = 8192
+  const padded = channelData.map((c) => {
+    const x = new Float32Array(n + pad)
+    x.set(c)
+    return x
+  })
+  const kp = toKernelParams({ ...p, tame: 0, soften: false, output: 0, tapeMakeupDb: 0 })
+  const { channelData: out, latencySamples: L } = processPhatassBuffer(padded, sampleRate, kp)
   return peakOf(out, L, Math.min(L + n + 64, n + pad))
 }
 
@@ -148,8 +168,10 @@ export function measureTapeMakeup(channelData, sampleRate, params, { exact = tru
   if (!(Number(p.tape) > 0) || !(inPk > 0)) {
     return { makeupDb: 0, peakDb: toDb(inPk), inputPeakDb: toDb(inPk) }
   }
-  const layer = toKernelParams(p).tapeLayer
-  const outPk = exact ? exactPeak(channelData, sampleRate, layer) : fastPeak(channelData, sampleRate, layer)
+  const kp = toKernelParams(p)
+  const outPk = kp.tapeOrder === 'last'
+    ? chainPeak(channelData, sampleRate, p)
+    : exact ? exactPeak(channelData, sampleRate, kp.tapeLayer) : fastPeak(channelData, sampleRate, kp.tapeLayer)
   const makeupDb = outPk > 0 ? Math.max(0, toDb(inPk) - toDb(outPk)) : 0
   return { makeupDb, peakDb: toDb(outPk), inputPeakDb: toDb(inPk) }
 }

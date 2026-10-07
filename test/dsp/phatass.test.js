@@ -715,3 +715,33 @@ test('Warmth\'s low layers run at the base rate: no latency, and only a low band
   assert.doesNotThrow(() => checkWarmthLayers([low]))
   assert.throws(() => checkWarmthLayers([{ ...low, hiHz: 20000 }]), /low band/)
 })
+
+test('TAPE order: LAST is the same stages after Warmth — same latency, identical with Warmth off, and its makeup restores the peak', () => {
+  assert.equal(PHATASS_DEFAULTS.tapeOrder, 'first')
+  assert.equal(toKernelParams({ tapeOrder: 'last' }).tapeOrder, 'last')
+  assert.equal(toKernelParams({ tapeOrder: 'bogus' }).tapeOrder, 'first')
+  const peak = 0.6
+  const x = add(sine(110, 0.4), sine(220, 0.15), sine(3000, 0.05))
+  let px = 0
+  for (const v of x) px = Math.max(px, Math.abs(v))
+  const base = { tame: 0, tape: 3, warmthCeilingDb: db(px), warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14) }
+  // Warmth off: TAPE before or after a pure delay is the same render, bit for bit.
+  const a = run(x, { ...base, warmth: 0, tapeMakeupDb: 1.5, tapeOrder: 'first' })
+  const b = run(x, { ...base, warmth: 0, tapeMakeupDb: 1.5, tapeOrder: 'last' })
+  assert.equal(a.latencySamples, b.latencySamples)
+  for (let i = 0; i < x.length; i++) if (a.channelData[0][i] !== b.channelData[0][i]) assert.fail(`sample ${i} differs`)
+  // Warmth on: the orders differ, and LAST's makeup (measured through Warmth) puts the peak back.
+  const p = { ...base, warmth: 6, oddEven: 50, tapeOrder: 'last' }
+  const mk = measureTapeMakeup([x], SR, p).makeupDb
+  assert.equal(measureTapeMakeup([x], SR, p, { exact: false }).makeupDb, mk, 'LAST has no fast path')
+  const last = run(x, { ...p, tapeMakeupDb: mk })
+  const first = run(x, { ...p, tapeOrder: 'first', tapeMakeupDb: measureTapeMakeup([x], SR, { ...p, tapeOrder: 'first' }).makeupDb })
+  let pk = 0, diff = 0
+  for (let i = last.latencySamples; i < x.length; i++) {
+    pk = Math.max(pk, Math.abs(last.channelData[0][i]))
+    diff = Math.max(diff, Math.abs(last.channelData[0][i] - first.channelData[0][i]))
+  }
+  assert.ok(Math.abs(db(pk / px)) < 0.05, `LAST peak ${db(pk / px).toFixed(3)} dB re source`)
+  assert.ok(diff > 1e-3, 'the two orders must differ with Warmth on')
+  void peak
+})

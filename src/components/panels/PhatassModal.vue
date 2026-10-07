@@ -128,6 +128,12 @@ const DETECT_OPTIONS = [
   { value: '2k', label: '2K', title: 'The shelf listens to the same band it cuts, everything above 2 kHz: loud vowel brightness and sibilance both trigger it' },
   { value: '4k', label: '4K', title: 'The shelf listens above 4 kHz but still cuts from 2 kHz: sibilance triggers it before vowel brightness does' },
 ]
+// Where TAPE sits — kept selectable to audition the two orders against each other.
+const TAPE_ORDER_OPTIONS = [
+  { value: 'first', label: 'FIRST', title: 'TAPE rounds the peaks first and Warmth works on the rounded signal; Warmth is never clipped by TAPE' },
+  { value: 'last', label: 'LAST', title: 'Warmth first, then TAPE rounds the peaks of everything, Warmth’s low end included (the order before October 2026). The makeup re-measures when Warmth moves, and takes longer on long selections' },
+]
+const tapeOrderCaption = computed(() => (phParams.tapeOrder === 'last' ? 'AFTER WARMTH' : 'BEFORE WARMTH'))
 // Three shapes, not a progression of one — a detent rotary, as on the Saturation Bench.
 const TAPE_CURVE_OPTIONS = [
   { value: 'cubic', label: 'CUBIC', title: 'Matched to a Studer A800 emulation: only the third harmonic until about 3.5 dB, then the very top is clipped flat' },
@@ -263,6 +269,14 @@ async function applyAndClose() {
             @update:model-value="v => syncParam('tapeCurve', v)"
           />
           <span style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.08em;color:rgba(255,255,255,.45)">{{ tapeCurveCaption }}</span>
+        </div>
+        <div class="flex flex-col items-center gap-[8px]">
+          <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">ORDER</span>
+          <DeviceChoiceRocker
+            :model-value="phParams.tapeOrder" :options="TAPE_ORDER_OPTIONS" :accent="ACCENT"
+            :disabled="!phPreview || phParams.tape <= 0" label="Tape order" :caption="tapeOrderCaption"
+            @update:model-value="v => syncParam('tapeOrder', v)"
+          />
         </div>
         <div class="flex flex-col items-center gap-[8px]">
           <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">CURVE</span>
