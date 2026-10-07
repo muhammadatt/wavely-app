@@ -44,6 +44,11 @@ export const PHATASS_DEFAULTS = {
   // shapes the rounded signal) or 'last' (Warmth → guard → TAPE → makeup, the
   // order before October 2026, kept to audition). See `TAPE_ORDERS`.
   tapeOrder: 'first',
+  // dB of LOW PUSH (`TAPE_LOW_PUSHES`): a low shelf at TAPE_LOW_PUSH_HZ into
+  // TAPE's curve and its exact inverse after it, so the lows saturate first
+  // (a kick's low end gets squashed) while the clean path stays flat. 0 ships.
+  // Bench only. The TAPE knob keeps its no-push drive (`tapeLayer`).
+  tapeLowPush: 0,
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
   // never a user setting; applied only while TAPE is up.
@@ -424,9 +429,9 @@ export function toKernelParams(params) {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
-    tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve),
+    tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush),
     tapeOrder: p.tapeOrder === 'last' ? 'last' : 'first',
-    tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb) ? clamp(p.tapeMakeupDb, 0, TAPE_MAX_DB) : 0,
+    tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb) ? clamp(p.tapeMakeupDb, 0, TAPE_MAKEUP_MAX_DB) : 0,
     cornerHz: shelf.cornerHz,
     thresholdDb: voice + shelf.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
     detectCornerHz: det4k ? DETECT_4K_HZ : null,
@@ -558,15 +563,46 @@ export function tapePeakU(reductionDb, curve = TAPE_CURVE) {
   return r >= 2 / 3 ? Math.sqrt(3 * (1 - r)) : 2 / (3 * r)
 }
 
-/** The TAPE layer's kernel params for a knob position, the selection's peak and the curve. */
-export function tapeLayer(tapeDb, peakDb, curve = TAPE_CURVE) {
+/**
+ * TAPE's LOW PUSH, bench only: dB of low shelf into the curve, undone after it.
+ * Measured on a Studer A800 emulation (drums and drum machine, dry vs wet,
+ * against the Studer's own linear path fitted on quiet frames): it takes a
+ * kick's low end (< 120 Hz) 7.2–7.3 dB down on the loud kicks and 4.7–6.2 on
+ * the softer ones, recovering within the kick (its tail 80–250 ms on is
+ * unchanged) — the lows saturate first, like tape or a transformer. Flat TAPE
+ * reaches −0.4 to −0.6 at TAPE 1 and only −2.7 to −3.2 at TAPE 6. With the
+ * push the kick lands on the Studer's at TAPE 2 / +12 dB (drum machine
+ * −8.7 / −4.7) or TAPE 6 / +6 dB (drums −7.1 / −6.1): push and drive trade, so
+ * no single number is the Studer's. The corner moves it less (TAPE 1 / +12, loud
+ * kicks: −4.2 at 100 Hz, −6.3 at 150, −6.7 at 250).
+ */
+export const TAPE_LOW_PUSHES = [0, 6, 12, 18]
+/**
+ * Ceiling on TAPE's measured makeup, dB. Above the knob's 6 because with a low
+ * push a kick-led peak loses more than the knob (TAPE 3 / +6 on a bare kick:
+ * 6.9 dB) — capped at the knob, the makeup left that peak short of the source.
+ */
+export const TAPE_MAKEUP_MAX_DB = 24
+export const TAPE_LOW_PUSH_HZ = 150
+const TAPE_LOW_PUSH_Q = 0.7
+
+/**
+ * The TAPE layer's kernel params for a knob position, the selection's peak,
+ * the curve and the low push. ⚠ With a push the knob is a DRIVE, solved as if
+ * there were none (owner's choice): a snare-like peak still loses about the
+ * knob, a kick's peak loses more. The makeup is measured, so the peak still
+ * lands back on the source's.
+ */
+export function tapeLayer(tapeDb, peakDb, curve = TAPE_CURVE, lowPushDb = 0) {
   const c = TAPE_CURVES.includes(curve) ? curve : TAPE_CURVE
   const t = clamp(Number(tapeDb) || 0, 0, TAPE_MAX_DB)
   if (!(t > 0)) return { ...TAPE_LAYER, curve: c, on: false, driveDb: 0 }
   // layerGain = unitDriveU / refPeak · 10^(drive/20): with refPeak = the peak,
   // u at the peak is unitDriveU · 10^(drive/20).
   const driveDb = clamp(20 * Math.log10(tapePeakU(t, c) / unitDriveU(c)), SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB)
-  return { ...TAPE_LAYER, curve: c, on: true, driveDb, refPeakDb: peakDb }
+  const push = clamp(Number(lowPushDb) || 0, 0, TAPE_LOW_PUSHES[TAPE_LOW_PUSHES.length - 1])
+  const emph = push > 0 ? { emphType: 'loshelf', emphHz: TAPE_LOW_PUSH_HZ, emphQ: TAPE_LOW_PUSH_Q, emphDb: push } : {}
+  return { ...TAPE_LAYER, ...emph, curve: c, on: true, driveDb, refPeakDb: peakDb }
 }
 
 /** The TAPE stage's latency: one oversampler round trip, on or off. */

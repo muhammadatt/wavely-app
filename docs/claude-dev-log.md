@@ -6078,3 +6078,58 @@ Against the whole render:
 | 103 s mix of narration, guitar and drums | 0.17–0.18 dB | ≤ 0.02 dB |
 
 The composable re-measures on every knob except Output, and waits for TAPE's makeup, which it renders with.
+
+### PHAT*SS — TAPE low push on the bench (October 2026)
+
+Owner: "The Studer has a very different saturation effect on the kick drums than ours." The analysis used two dry/wet pairs from a Studer A800 emulation: the earlier drums, and a new drum machine.
+
+**Method.** For each pair I fitted the Studer's linear path on quiet frames (frames peaking ≥ 15 dB under the top), then compared every kick's < 120 Hz peak against that linear prediction.
+
+Fitted low lift:
+
+| Pair | 30 Hz | 50 Hz | Flat |
+|---|---|---|---|
+| Drums | +5.3 dB | +3.8 dB | +2.5 dB |
+| Drum machine | +8.7 dB | +4.9 dB | +4.2–4.5 dB |
+
+The settings changed between the renders again.
+
+**What the Studer does to the kicks.**
+
+| Pair | Kicks | Loud half | Softer half |
+|---|---|---|---|
+| Drums | 19 | −7.2 dB | −6.2 dB |
+| Drum machine | 12 | −7.3 dB | −4.7 dB |
+
+- The kick tail 80–250 ms on is unchanged: it recovers within the kick, so this is not a compressor with a release.
+- Against the dry signal, the drums' kick lows end 2.2–3.3 dB down despite the linear low lift.
+- Flat TAPE cannot reach this at any setting.
+
+**Built: `tapeLowPush` 0/6/12/18 dB.** A low shelf at 150 Hz, Q 0.7, before TAPE's curve with the exact inverse after (the Saturation Bench layer's emphasis pair), so the lows saturate first and the clean path stays flat (a quiet signal passes to < 1e-4).
+
+Kick low end against the Studer's targets (drum machine −7.3 / −4.7, drums −7.2 / −6.2):
+
+| Setting | Drum machine (loud / soft) | Drums (loud / soft) |
+|---|---|---|
+| Flat TAPE 1 | −0.6 / −0.2 | −0.4 / −0.3 |
+| Flat TAPE 6 | −3.2 / −1.2 | −2.7 / −1.9 |
+| TAPE 1 / +12 | −6.3 / −2.7 | −6.0 / −4.9 |
+| TAPE 2 / +12 | −8.7 / −4.7 | −8.3 / −7.2 |
+| TAPE 6 / +6 | −7.7 / −4.0 | −7.1 / −6.1 |
+
+Push and drive trade, so no single number is the Studer's. The corner moves it less: TAPE 1 / +12 on the drum machine's loud kicks reads −4.2 at 100 Hz, −6.3 at 150 and −6.7 at 250.
+
+**Knob meaning (owner chose option 1).** The knob stays the no-push drive. Re-solving it through the shelf would keep "dB off the peak" honest, but it would cut the drive whenever the peak is a kick, which is the effect we want. So a kick-led peak can lose more than the knob.
+
+**Bugs found on the way.**
+- **Makeup cap.** The makeup was clamped at `TAPE_MAX_DB` (6), and a bare kick at TAPE 3 / +6 needs 6.9, which left the peak 0.44 dB short. It is now `TAPE_MAKEUP_MAX_DB` = 24.
+- **Fast-search margin.** The fast search's short-pre-roll margin (0.1 dB) misread a bare kick at +18 by 0.4 dB, so it is 1 dB with a push.
+
+Fast against exact on narration, drums and guitar (TAPE 1/3/6 × push 6/12/18): every reading within 0.005 dB. On 10 min:
+
+| Material | Push 0 | Push 12 | Exact |
+|---|---|---|---|
+| Drums | 1.1 s | 3.9 s | ~7 s |
+| Narration | 0.5 s | 2.3 s | ~7 s |
+
+With a push the measured makeup is often below the knob on voice and guitar (e.g. narration TAPE 3 / +18 gives 1.41): the peak there is not the lows.

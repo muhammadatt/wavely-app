@@ -57,6 +57,11 @@ const RING_DB = 0.5
 const PRE_ROLL_LONG = 8192
 /** How far the short pre-roll may misread a block, dB (measured ≤ 0.04). */
 const SHORT_ERR_DB = 0.1
+/**
+ * The same with a low push, which makes the short pre-roll misread more (a
+ * bare 55 Hz kick at TAPE 3 / +18 read 0.4 dB off with the 0.1 dB margin).
+ */
+const SHORT_ERR_PUSH_DB = 1
 
 function peakOf(chs, from, to) {
   let m = 0
@@ -132,7 +137,7 @@ function fastPeak(channelData, sampleRate, layer) {
   }
   // Pass 1, short pre-roll: which blocks can hold the peak. The stop rule
   // allows for the short pre-roll reading a block low by up to SHORT_ERR_DB.
-  const err = Math.pow(10, SHORT_ERR_DB / 20)
+  const err = Math.pow(10, (layer.emphDb > 0 ? SHORT_ERR_PUSH_DB : SHORT_ERR_DB) / 20)
   let best = 0
   const found = []
   for (const [inPk, s] of blocks) {

@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, softenAmount, SOFTEN_MAX, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
-  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS,
+  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
 } from '../../src/audio/phatassParams.js'
@@ -828,4 +828,66 @@ test('output trim preview: exact up to its cap, a close estimate past it', () =>
   const pf = measureOutputMakeup([long.x], SR, { ...p, outputMakeup: 'peak' }, { exact: false }).makeupDb
   // The loudest blocks give a lower bound on the output peak: never a smaller trim.
   assert.ok(pf >= pe - 1e-6 && pf - pe < 0.5, `PEAK: sampled ${pf.toFixed(3)} vs whole ${pe.toFixed(3)}`)
+})
+
+/** A kick: a 55 Hz burst with a fast decay, over a light 2 kHz bed. */
+function kickTrack() {
+  const x = new Float32Array(SR * 2)
+  for (let k = 0; k < 4; k++) {
+    const at = Math.round(k * 0.5 * SR)
+    for (let i = 0; i < 0.3 * SR; i++) x[at + i] += 0.8 * Math.exp(-i / (0.08 * SR)) * Math.sin(2 * Math.PI * 55 * i / SR)
+  }
+  for (let i = 0; i < x.length; i++) x[i] += 0.1 * Math.sin(2 * Math.PI * 2000 * i / SR)
+  let peak = 0
+  for (const v of x) peak = Math.max(peak, Math.abs(v))
+  return { x, peak }
+}
+
+test('TAPE low push: off ships, and the knob keeps its no-push drive', () => {
+  assert.deepEqual(TAPE_LOW_PUSHES, [0, 6, 12, 18])
+  assert.equal(PHATASS_DEFAULTS.tapeLowPush, 0)
+  const flat = tapeLayer(2, -3)
+  assert.equal(flat.emphDb, 0)
+  const pushed = tapeLayer(2, -3, 'cubic', 12)
+  assert.equal(pushed.emphType, 'loshelf')
+  assert.equal(pushed.emphHz, TAPE_LOW_PUSH_HZ)
+  assert.equal(pushed.emphDb, 12)
+  assert.equal(pushed.driveDb, flat.driveDb)
+  assert.equal(tapeLayer(0, -3, 'cubic', 12).on, false)
+  assert.equal(toKernelParams({ tape: 2, tapeLowPush: 12, warmthCeilingDb: -3 }).tapeLayer.emphDb, 12)
+})
+
+test('TAPE low push squashes a kick\'s low end and leaves the clean path flat', () => {
+  const { x, peak } = kickTrack()
+  const base = { warmth: 0, tame: 0, soften: 0, tape: 2, warmthCeilingDb: db(peak) }
+  const lowPeak = (y, L) => {
+    // 55 Hz content of the first kick, by correlation over its first 40 ms.
+    return toneAmp(y.subarray(L), 55, 0, Math.round(0.04 * SR))
+  }
+  const flat = run(x, { ...base, tapeMakeupDb: 0 })
+  const pushed = run(x, { ...base, tapeLowPush: 12, tapeMakeupDb: 0 })
+  const dryLow = toneAmp(x, 55, 0, Math.round(0.04 * SR))
+  const flatLoss = db(lowPeak(flat.channelData[0], flat.latencySamples) / dryLow)
+  const pushLoss = db(lowPeak(pushed.channelData[0], pushed.latencySamples) / dryLow)
+  assert.ok(pushLoss < flatLoss - 3, `push ${pushLoss.toFixed(2)} dB vs flat ${flatLoss.toFixed(2)} dB on the kick's low end`)
+  // Below the curve the push is a filter and its exact inverse: a quiet signal comes through untouched.
+  const quiet = add(sine(55, 0.002), sine(2000, 0.002))
+  const q = run(quiet, { ...base, tapeLowPush: 18, tapeMakeupDb: 0, warmthCeilingDb: db(0.8) })
+  let err = 0
+  for (let i = 4096; i < quiet.length - 4096; i++) err = Math.max(err, Math.abs(q.channelData[0][i + q.latencySamples] - quiet[i]))
+  assert.ok(err < 1e-4, `quiet signal moved ${err}`)
+})
+
+test('TAPE low push: the makeup still restores the peak, and the fast search still reads the exact one', () => {
+  const { x, peak } = kickTrack()
+  for (const tapeLowPush of [6, 12, 18]) {
+    const p = { warmth: 0, tame: 0, soften: 0, tape: 3, tapeLowPush, warmthCeilingDb: db(peak) }
+    const exact = measureTapeMakeup([x], SR, p).makeupDb
+    const fast = measureTapeMakeup([x], SR, p, { exact: false }).makeupDb
+    assert.ok(Math.abs(fast - exact) < 0.02, `push ${tapeLowPush}: fast ${fast.toFixed(3)} vs exact ${exact.toFixed(3)}`)
+    const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: exact })
+    let pk = 0
+    for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
+    assert.ok(Math.abs(db(pk / peak)) < 0.05, `push ${tapeLowPush}: peak ${db(pk / peak).toFixed(3)} dB off the source`)
+  }
 })
