@@ -6008,3 +6008,17 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
   and apply render the chain to the makeup over the whole region, and Warmth /
   Odd/Even re-measure it. Switching the order re-measures, holding
   min(previous, knob) meanwhile. Not auditioned.
+
+### PHAT*SS — TAPE curve and order moved to a bench (October 2026)
+
+- Owner: comfortable with FIRST as the default; TAPE order (FIRST/LAST) and
+  TAPE curve (CUBIC/TANH/ALGEBRAIC) move off the panel to a bench hidden from
+  users in production.
+- `PhatassBenchPanel.vue` (plain controls, like the FET Punch and OptoSmooth
+  benches, so it never reads as a feature), at the bottom of the panel behind
+  `isPhatassBenchVisible()` (`effects/phatassBench.js`): on under `vite dev`,
+  or on a deployed build with `localStorage['wavely:phatass-bench'] = '1'`.
+  The two stay ordinary PHAT*SS params, so preview and apply read them and the
+  makeup re-measures on a change; MODIFIED / ↺ / Reset as on the FET bench.
+- Production: the controls are gone, so the params sit at CUBIC / FIRST. The
+  TAPE knob's tooltip and the help drop the curve/order text.
