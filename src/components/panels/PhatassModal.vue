@@ -219,7 +219,7 @@ async function applyAndClose() {
             </div>
           </div>
           <div class="flex justify-center gap-[12px]">
-            <div class="w-[80px]" title="Takes this many dB off the selection’s loudest peak the way tape saturation does: the top of each wave is rounded off, while everything more than about 9 dB under the peak passes untouched. A waveshaper, not a compressor, so it adds odd harmonics as it works — about 2 % at 1 dB, 4 % at 2 dB, 9 % at 3.5. Past 3.5 dB the very top is clipped flat. Peaks carried by sibilance lose somewhat less than the number. MAKEUP is automatic: what Tape actually took off the peak is measured on the selection and given back, so the peak returns to where it started and the reduction becomes loudness. 0 is off">
+            <div class="w-[80px]" title="Takes this many dB off the selection’s loudest peak the way tape saturation does: the top of each wave is rounded off, while everything more than about 9 dB under the peak passes untouched. A waveshaper, not a compressor, so it adds odd harmonics as it works — about 2 % at 1 dB, 4 % at 2 dB, 9 % at 3.5. Past 3.5 dB the very top is clipped flat; 6–12 drives it harder, for dense drums. Peaks carried by sibilance lose somewhat less than the number. MAKEUP is automatic: what Tape actually took off the peak is measured on the selection and given back, so the peak returns to where it started and the reduction becomes loudness. 0 is off">
               <Knob
                 :model-value="phParams.tape" @update:model-value="v => syncParam('tape', v)"
                 :min="0" :max="TAPE_MAX_DB" :step="0.1" :value-font-px="13"

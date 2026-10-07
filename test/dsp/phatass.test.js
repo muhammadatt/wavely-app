@@ -891,3 +891,17 @@ test('TAPE low push: the makeup still restores the peak, and the fast search sti
     assert.ok(Math.abs(db(pk / peak)) < 0.05, `push ${tapeLowPush}: peak ${db(pk / peak).toFixed(3)} dB off the source`)
   }
 })
+
+test('TAPE runs to 12 dB: a voiced peak loses nearly its number, and the makeup still brings it back', () => {
+  assert.equal(TAPE_MAX_DB, 12)
+  const x = add(sine(110, 0.6, SR), sine(220, 0.2, SR))
+  let peak = 0
+  for (const v of x) peak = Math.max(peak, Math.abs(v))
+  const p = { warmth: 0, tame: 0, soften: 0, tape: 12, warmthCeilingDb: db(peak) }
+  const { makeupDb } = measureTapeMakeup([x], SR, p)
+  assert.ok(makeupDb > 10 && makeupDb < 12.5, `makeup ${makeupDb.toFixed(2)} dB`)
+  const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: makeupDb })
+  let pk = 0
+  for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
+  assert.ok(Math.abs(db(pk / peak)) < 0.05, `peak ${db(pk / peak).toFixed(3)} dB off the source`)
+})

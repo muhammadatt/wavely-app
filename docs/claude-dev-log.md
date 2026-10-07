@@ -6133,3 +6133,47 @@ Fast against exact on narration, drums and guitar (TAPE 1/3/6 × push 6/12/18): 
 | Narration | 0.5 s | 2.3 s | ~7 s |
 
 With a push the measured makeup is often below the knob on voice and guitar (e.g. narration TAPE 3 / +18 gives 1.41): the peak there is not the lows.
+
+### PHAT*SS — TAPE knob widened to 12 dB (October 2026)
+
+**Owner feedback.** TAPE 6 + push 6 sounded closest to the Studer on the drum machine, "but lacks the density and crest reduction of the Studer, particularly apparent on the snares."
+
+**Alignment fix first.** The broadband cross-correlation had aligned the pairs wrongly: −345 samples on the drum machine and −37 on the drums. Low frequencies dominate it, and the Studer's EQ shifts their phase. A high-frequency-weighted correlation (second difference) gives +2 samples on both, positive polarity.
+
+The kick numbers survive the fix: they are measured against the fitted linear path, whose H carries the offset. Re-checked at +2:
+
+| Pair | Studer kick lows, loud / soft |
+|---|---|
+| Drum machine | −7.13 / −4.54 |
+| Drums | −7.23 / −6.17 |
+
+**Snares.** 13 snare-led hits per pair, shape measured against the linear path so the figures are gain-free. Peak−body is the 2 ms peak against the 2–30 ms body; tail−body is the 30–150 ms tail against that body.
+
+| Setting | Snare peak−body | Snare tail−body | Kick lows (loud / soft) |
+|---|---|---|---|
+| **Drum machine: Studer** | **−6.30** | **+2.09** | **−7.1 / −4.5** |
+| TAPE 6 | −2.87 | +0.28 | — |
+| TAPE 6 + push 6 | −2.07 | +0.28 | — |
+| TAPE 6 + 6 dB drive, cubic | −6.51 | +1.01 | −7.8 / −4.2 |
+| TAPE 6 + 6 dB drive, tanh | −6.33 | +1.31 | −7.9 / −4.8 |
+| **Drums: Studer** | **−1.65** | **+1.51** | **−7.2 / −6.2** |
+| TAPE 6 + push 6 | −1.52 | +0.89 | −7.1 / −6.1 |
+| TAPE 6 + 6 dB drive | −4.57 | +2.14 | −7.21 / −6.15 |
+| TAPE 6 + 3 dB drive + push 3 | −2.57 | +1.45 | −7.14 / −6.09 |
+
+On the drum machine, crest goes 21.15 dry → 16.32 Studer → 14.21 with TAPE 6 + 6 dB drive.
+
+**What it means.** The drum-machine render was driven harder into the Studer than the drums render, and its density is mostly drive. The tail lift stays short of the Studer (+1.0–1.3 against +2.1) at a matched peak: a memoryless curve does not hold the tail up that much. A slower, compression-like part of tape is possible and unmeasured.
+
+**Built.** `TAPE_MAX_DB` 6 → 12, on the panel knob as well as the bench. 6 dB more drive past TAPE 6 is ≈ TAPE 12 on the cubic, where u at the peak is 2.66. From 6 to 12 the cubic's flat is driven harder.
+
+Peak loss and added distortion (re the signal):
+
+| Material | TAPE 6, cubic | TAPE 12, cubic | TAPE 12, tanh |
+|---|---|---|---|
+| Bright narration | −4.55 dB, added −22.0 | −10.08, added −14.7 | −10.21, added −15.4 |
+| Dull narration | −5.62, added −19.0 | −10.83, added −13.5 | −11.06, added −14.5 |
+| Guitar | −5.29, added −21.5 | −10.14, added −14.1 | −10.43, added −14.6 |
+| Drums | −5.41, added −17.7 | −9.94, added −12.3 | −10.19, added −13.1 |
+
+The fast makeup search equals the exact one (≤ 0.01 dB) up to 12. The makeup cap (24) already covers it. The knob's inversion tests sweep to `TAPE_MAX_DB`, so they now cover the full range.

@@ -496,8 +496,17 @@ export const OUTPUT_MAKEUPS = ['off', 'peak', 'rms']
  * output never passes the source. ⚠ The makeup lifts the body Warmth sees
  * (+1.2 to +1.7 dB at TAPE 2), so Warmth runs that much hotter with TAPE up;
  * its calibration is measured on the source and not compensated.
+ *
+ * ⚠ THE KNOB RUNS TO 12, not 6 (October 2026): a Studer A800 drum-machine
+ * render flattens the snares 6.3 dB under their body and squashes the kick's
+ * lows 7.1 / 4.5 dB under its linear path, which TAPE 6 reached only 2.9 and
+ * 3.2 / 1.2 of — TAPE 6 plus 6 dB more drive (≈ TAPE 12) lands on both (−6.5;
+ * −7.8 / −4.2). Past 3.52 dB the cubic is on its flat, so 6–12 is a hard clip
+ * driven harder: real peaks lose ~84–92 % of the number (narration −10.1 /
+ * −10.8, guitar −10.1, drums −9.9 at 12) and what it adds reaches −12 to
+ * −15 dB re the signal (−18 to −22 at 6). Tanh lands a little nearer the number.
  */
-export const TAPE_MAX_DB = 6
+export const TAPE_MAX_DB = 12
 /** Peak re the gated RMS assumed when the selection's peak is not measured yet. */
 export const TAPE_FALLBACK_CREST_DB = 18
 /**
