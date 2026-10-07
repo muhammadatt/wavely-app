@@ -6022,3 +6022,21 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
   makeup re-measures on a change; MODIFIED / ↺ / Reset as on the FET bench.
 - Production: the controls are gone, so the params sit at CUBIC / FIRST. The
   TAPE knob's tooltip and the help drop the curve/order text.
+
+### PHAT*SS — Soften gets its own knob (October 2026)
+
+- Owner asked to disentangle Soften's depth from Tame. Soften had had its own
+  SOFTEN + SOFT FREQ knobs once and lost them because what it did depended on
+  four controls; folding its depth into Tame fixed that at the cost of coupling.
+  Now: one 0–10 knob, the frequency still pinned at 500 Hz and the gate still
+  relative to the voice level, so it depends on nothing else.
+- `softenLaw(amount)` is the old `softenLaw(on, tame)` with the amount in
+  Tame's place: 3.6 dB of ceiling per step (36 at 10), slope 0.5 → 1 across the
+  travel — Soften s renders exactly what Soften ON did at Tame s. `softenAmount`
+  reads a legacy boolean (`true` → the Tame value, `false` → 0). Default 0 = off,
+  as the toggle's default was OFF.
+- Panel: the lamp toggle became a Soften knob in Warmth's row, with an
+  "UP TO −N dB" caption; Tame's tooltip and help no longer mention Soften.
+- Checked (test): Soften works with Tame 0 — the shelf's Range caps only the
+  shelf, so the Transient cut runs with the shelf out; Soften 0 with Tame 0 is
+  still a pure delay; Tame no longer moves Soften's depth.

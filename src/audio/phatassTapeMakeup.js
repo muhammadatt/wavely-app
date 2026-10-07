@@ -91,7 +91,7 @@ function chainPeak(channelData, sampleRate, p) {
     x.set(c)
     return x
   })
-  const kp = toKernelParams({ ...p, tame: 0, soften: false, output: 0, tapeMakeupDb: 0 })
+  const kp = toKernelParams({ ...p, tame: 0, soften: 0, output: 0, tapeMakeupDb: 0 })
   const { channelData: out, latencySamples: L } = processPhatassBuffer(padded, sampleRate, kp)
   return peakOf(out, L, Math.min(L + n + 64, n + pad))
 }

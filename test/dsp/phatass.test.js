@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
-  toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
+  toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, softenAmount, SOFTEN_MAX, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
   DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
@@ -64,7 +64,7 @@ const run = (x, p) => processPhatassBuffer([x], SR, toKernelParams(p))
 test('the latency is Warmth + guard + TAPE + shelf, constant at every setting (Soften adds none)', () => {
   const L = phatassLatencySamples(SR)
   assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + TAPE_LATENCY_SAMPLES + shelfLatencySamples(SR))
-  for (const [warmth, tame, soften, tape] of [[0, 0, false, 0], [0, 10, false, 0], [6, 0, false, 0], [10, 10, true, 0], [0, 5, true, 0], [0, 0, false, 6], [8, 8, true, 3]]) {
+  for (const [warmth, tame, soften, tape] of [[0, 0, 0, 0], [0, 10, 0, 0], [6, 0, 0, 0], [10, 10, 10, 0], [0, 5, 5, 0], [0, 0, 7, 0], [0, 0, 0, 6], [8, 8, 8, 3]]) {
     const x = new Float32Array(8192)
     x[100] = 0.001 // far below every threshold
     const { channelData: [y], latencySamples } = run(x, { voiceLevelDb: -20, warmth, tame, soften, tape, warmthCeilingDb: -3 })
@@ -655,54 +655,61 @@ function removedDb(x, y, L, at) {
   return 10 * Math.log10(e / c)
 }
 
-test('Soften rides Tame: off cuts nothing extra, on cuts a sudden burst deeper as Tame rises', () => {
+test('Soften is its own knob: more Soften removes more of a burst, Tame does not move it, and it works at Tame 0', () => {
   const at = Math.round(0.4 * SR)
   const x = clickOverVoice(at)
-  // At each Tame, Soften on removes more of the click than Soften off (the shelf alone).
-  let prev = -Infinity
-  for (const tame of [2, 5, 10]) {
-    const off = run(x, { ...SOFT, tame, soften: false })
-    const on = run(x, { ...SOFT, tame, soften: true })
-    const rOff = removedDb(x, off.channelData[0], off.latencySamples, at)
-    const rOn = removedDb(x, on.channelData[0], on.latencySamples, at)
-    assert.ok(rOn > rOff + 0.5, `Tame ${tame}: Soften on removed ${rOn.toFixed(2)} dB, off ${rOff.toFixed(2)}`)
-    assert.ok(rOn > prev, `Tame ${tame}: ${rOn.toFixed(2)} dB, not more than at the lower Tame (${prev.toFixed(2)})`)
-    prev = rOn
+  const removed = (tame, soften) => {
+    const r = run(x, { ...SOFT, tame, soften })
+    return removedDb(x, r.channelData[0], r.latencySamples, at)
   }
-  // Tame 0 takes Soften out with the shelf: a pure delay.
-  const zero = run(x, { ...SOFT, tame: 0, soften: true })
-  for (let i = zero.latencySamples; i < x.length; i++) if (zero.channelData[0][i] !== x[i - zero.latencySamples]) assert.fail(`Tame 0: sample ${i} differs`)
+  // Tame 0: the shelf is out, and Soften alone still takes the burst down — deeper as it rises.
+  let prev = removed(0, 0)
+  for (const soften of [2, 5, 10]) {
+    const r = removed(0, soften)
+    assert.ok(r > prev + 0.5, `Tame 0, Soften ${soften}: removed ${r.toFixed(2)} dB, not more than ${prev.toFixed(2)}`)
+    prev = r
+  }
+  // Soften 0 with Tame 0 is a pure delay.
+  const zero = run(x, { ...SOFT, tame: 0, soften: 0 })
+  for (let i = zero.latencySamples; i < x.length; i++) if (zero.channelData[0][i] !== x[i - zero.latencySamples]) assert.fail(`Tame 0 / Soften 0: sample ${i} differs`)
+  // Tame no longer sets Soften's depth: what Soften adds over the shelf alone does not depend on it.
+  const sDepth = toKernelParams({ ...SOFT, soften: 6, tame: 1 }).transientDb
+  assert.equal(toKernelParams({ ...SOFT, soften: 6, tame: 9 }).transientDb, sDepth)
 })
 
 test('Soften leaves steady sound alone', () => {
   const at = Math.round(0.4 * SR)
   const x = clickOverVoice(at)
-  const on = run(x, { ...SOFT, tame: 10, soften: true }).channelData[0]
-  const off = run(x, { ...SOFT, tame: 10, soften: false }).channelData[0]
+  const on = run(x, { ...SOFT, tame: 10, soften: 10 }).channelData[0]
+  const off = run(x, { ...SOFT, tame: 10, soften: 0 }).channelData[0]
   // Away from the burst, Soften on and off render the same.
   let worst = 0
   for (let i = Math.round(0.6 * SR); i < Math.round(0.9 * SR); i++) worst = Math.max(worst, Math.abs(on[i] - off[i]))
   assert.ok(worst < 1e-4, `steady voice moved by ${worst}`)
   // A held 6 kHz tone is not a transient.
   const tone = add(sine(6000, 0.1), noise(SR, 0.0005, 3))
-  const a = run(tone, { ...SOFT, tame: 10, soften: true }).channelData[0]
-  const b = run(tone, { ...SOFT, tame: 10, soften: false }).channelData[0]
+  const a = run(tone, { ...SOFT, tame: 10, soften: 10 }).channelData[0]
+  const b = run(tone, { ...SOFT, tame: 10, soften: 0 }).channelData[0]
   const g = db(toneAmp(a, 6000, SR / 2, SR) / toneAmp(b, 6000, SR / 2, SR))
   assert.ok(Math.abs(g) < 0.1, `Soften moved a steady 6 kHz tone ${g.toFixed(2)} dB`)
 })
 
-test('the Soften law: a toggle, depth and slope from Tame, corner pinned at 500 Hz', () => {
-  assert.deepEqual(softenLaw(false, 10), { depthDb: 0, slope: 1 })
-  assert.equal(softenLaw(true, 0).depthDb, 0)
-  assert.ok(Math.abs(softenLaw(true, 5).depthDb - 18) < 1e-9)
-  assert.ok(Math.abs(softenLaw(true, 10).depthDb - 36) < 1e-9)
-  assert.ok(Math.abs(softenLaw(true, 5).slope - 0.75) < 1e-12)
-  const k = toKernelParams({ soften: true, tame: 10, voiceLevelDb: -20 })
+test('the Soften law: its own 0–10 knob, the old Tame mapping, corner pinned at 500 Hz', () => {
+  assert.deepEqual(softenLaw(0), { depthDb: 0, slope: 0.5 })
+  assert.ok(Math.abs(softenLaw(5).depthDb - 18) < 1e-9)
+  assert.ok(Math.abs(softenLaw(10).depthDb - 36) < 1e-9)
+  assert.ok(Math.abs(softenLaw(5).slope - 0.75) < 1e-12)
+  assert.equal(softenLaw(25).depthDb, softenLaw(SOFTEN_MAX).depthDb)
+  const k = toKernelParams({ soften: 10, tame: 3, voiceLevelDb: -20 })
   assert.ok(Math.abs(k.transientDb - 36) < 1e-9)
   assert.equal(k.transientCornerHz, 500)
   assert.equal(k.transientGateDb, -52)
-  assert.equal(toKernelParams({ soften: false, tame: 10 }).transientDb, 0)
-  assert.equal(PHATASS_DEFAULTS.soften, false)
+  assert.equal(toKernelParams({ soften: 0, tame: 10 }).transientDb, 0)
+  assert.equal(PHATASS_DEFAULTS.soften, 0)
+  // The old toggle still reads as it did: ON took Tame as the amount, OFF was nothing.
+  assert.equal(softenAmount(true, 7), 7)
+  assert.equal(softenAmount(false, 7), 0)
+  assert.deepEqual(toKernelParams({ soften: true, tame: 7 }).transientDb, toKernelParams({ soften: 7, tame: 7 }).transientDb)
 })
 
 test('Warmth\'s low layers run at the base rate: no latency, and only a low band may', () => {

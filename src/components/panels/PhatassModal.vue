@@ -34,11 +34,10 @@ import { computed, onMounted, watch } from 'vue'
 import { usePhatass } from '../../composables/usePhatass.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, TAPE_MAX_DB, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
+  WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, SOFTEN_MAX, TAPE_MAX_DB, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
   warmthActive, tapeShelf, softenLaw, CURVE_DETECT,
 } from '../../audio/phatassParams.js'
 import Knob from '../knobs/Knob.vue'
-import DeviceLampPill from '../knobs/DeviceLampPill.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import PhatassBenchPanel from './PhatassBenchPanel.vue'
 import { isPhatassBenchVisible } from '../../audio/effects/phatassBench.js'
@@ -115,11 +114,11 @@ const tapeMakeupCaption = computed(() => {
   return `MAKEUP +${(Number(phParams.tapeMakeupDb) || 0).toFixed(1)}`
 })
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
-// Soften has no knob of its own: say how deep Tame currently lets it go.
+const fmtSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
+// What the Soften knob currently allows on one attack.
 const softenCaption = computed(() => {
-  if (!phParams.soften) return 'OFF'
-  const d = softenLaw(true, phParams.tame).depthDb
-  return d > 0 ? `UP TO −${Math.round(d)} dB` : 'TAME IS 0'
+  const d = softenLaw(phParams.soften).depthDb
+  return d > 0 ? `UP TO −${Math.round(d)} dB` : ''
 })
 
 const CURVE_OPTIONS = [
@@ -205,15 +204,16 @@ async function applyAndClose() {
                 label="Odd/Even" :accent="ACCENT" :format-value="fmtOddEven" :disabled="!phPreview || phParams.warmth <= 0"
               />
             </div>
-            <div class="w-[80px] flex flex-col items-center justify-center gap-[6px] pb-[14px]">
-              <DeviceLampPill
-                :model-value="!!phParams.soften" @update:model-value="v => syncParam('soften', v)"
-                label="SOFTEN" :accent="ACCENT" :disabled="!phPreview"
-                title="Softens sudden attacks the way tape rounds off transients: when the band above 500 Hz rises suddenly — a click, a lip smack, a hard T or K, the snap of an onset — it is turned down for a few milliseconds. It reacts to how suddenly the voice rises, not how loud it is, so steady sound is left alone. How deep it goes follows TAME, so the top end and the attacks turn down together. A gain on a band, never distortion"
+            <div class="w-[80px]" title="Softens sudden attacks the way tape rounds off transients: when the band above 500 Hz rises suddenly — a click, a lip smack, a hard T or K, the snap of an onset — it is turned down for a few milliseconds. It reacts to how suddenly the voice rises, not how loud it is, so steady sound is left alone. The knob sets how deep one attack may be taken down (up to 36 dB at 10) and how hard it leans in. A gain on a band, never distortion. 0 is off">
+              <Knob
+                :model-value="phParams.soften" @update:model-value="v => syncParam('soften', v)"
+                :min="0" :max="SOFTEN_MAX" :step="0.1" :value-font-px="13"
+                label="Soften" :accent="ACCENT" :format-value="fmtSoften" :disabled="!phPreview"
               />
-              <span
-                :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.08em', color: phParams.soften ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.3)' }"
-              >{{ softenCaption }}</span>
+              <div
+                class="text-center h-[10px] mt-[4px]"
+                :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.08em', color: 'rgba(255,255,255,.45)' }"
+              >{{ softenCaption }}</div>
             </div>
           </div>
           <div class="flex justify-center gap-[12px]">
@@ -228,7 +228,7 @@ async function applyAndClose() {
                 :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.08em', color: 'rgba(255,255,255,.45)' }"
               >{{ tapeMakeupCaption }}</div>
             </div>
-            <div class="w-[80px]" title="How hard the tape rounds off the top end: lowers the threshold and deepens the most it may cut together, relative to the file's voice level. With SOFTEN on it also sets how deep sudden attacks are taken down (up to 36 dB at 10). 0 is off">
+            <div class="w-[80px]" title="How hard the tape rounds off the top end: lowers the threshold and deepens the most it may cut together, relative to the file's voice level. 0 is off">
               <Knob
                 :model-value="phParams.tame" @update:model-value="v => syncParam('tame', v)"
                 :min="0" :max="TAME_MAX" :step="0.1" :value-font-px="13"

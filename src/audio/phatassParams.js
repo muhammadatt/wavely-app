@@ -27,12 +27,13 @@ export const PHATASS_DEFAULTS = {
   // 0–100 — from pure Odd toward Even, over the useful part of the crossfade
   // only (ODD_EVEN_SPAN). The bench voicing is 36 (at Warmth 5).
   oddEven: 50,
-  // SOFTEN (on/off): the HF Limiter's Transient detector on its own band
+  // 0–SOFTEN_MAX — SOFTEN: the HF Limiter's Transient detector on its own band
   // above SOFTEN_FREQ_HZ — it turns that band down for a few ms when it rises
-  // suddenly, not when it is loud. It has no knob of its own: its depth rides
-  // TAME, so the top-end shelf and the onset softening turn down together
-  // (`softenLaw`). A gain on a band, never distortion, no latency of its own.
-  soften: false,
+  // suddenly, not when it is loud. Its own knob since October 2026 (it rode
+  // TAME before); 0 is off. `softenLaw` maps it exactly as it mapped Tame, so
+  // Soften 5 is what Soften ON at Tame 5 was. A gain on a band, never
+  // distortion, no latency of its own.
+  soften: 0,
   // 0–TAPE_MAX_DB — TAPE: how many dB a full-band soft clipper takes off
   // the selection's own peak (`tapeLayer`). 0 is off (a pure delay).
   tape: 0,
@@ -83,7 +84,9 @@ export const PHATASS_DEFAULTS = {
 export const WARMTH_MAX = 10
 export const ODD_EVEN_MAX = 100
 export const TAME_MAX = 10
-/** Soften's ceiling on one cut, dB per TAME step (36 at Tame 10; the HF Limiter's Transient stops at 12). */
+/** Top of the Soften knob. */
+export const SOFTEN_MAX = 10
+/** Soften's ceiling on one cut, dB per Soften step (36 at 10; the HF Limiter's Transient stops at 12). */
 export const SOFTEN_DB_PER_STEP = 3.6
 /** dB of cut per dB of rise: the HF Limiter's 0.5 at Tame 0, 1 at Tame 10. */
 export const SOFTEN_SLOPE_MIN = 0.5
@@ -376,18 +379,28 @@ export function tapeShelf(tame, tone, curve = 'original') {
 }
 
 /**
- * Soften's depth, from the toggle and Tame: off (or Tame 0) is no cut at all;
- * on, the ceiling is SOFTEN_DB_PER_STEP per Tame step and the slope runs
- * SOFTEN_SLOPE_MIN → MAX across Tame's travel.
+ * Soften's depth from its own knob (0–SOFTEN_MAX): 0 is no cut at all; the
+ * ceiling is SOFTEN_DB_PER_STEP per step and the slope runs SOFTEN_SLOPE_MIN →
+ * MAX across the travel. ⚠ IT RODE TAME UNTIL OCTOBER 2026 (`softenLaw(on,
+ * tame)` with Tame as the amount); the law is unchanged, only its input moved,
+ * so Soften s renders what Soften ON did at Tame s. A legacy `true` (the old
+ * toggle) is read at the given Tame, `false` as 0 — see `softenAmount`.
  *
  * @returns {{ depthDb: number, slope: number }}
  */
-export function softenLaw(on, tame) {
-  const t = clamp(Number(tame) || 0, 0, TAME_MAX)
+export function softenLaw(amount) {
+  const t = clamp(Number(amount) || 0, 0, SOFTEN_MAX)
   return {
-    depthDb: on ? SOFTEN_DB_PER_STEP * t : 0,
-    slope: SOFTEN_SLOPE_MIN + (SOFTEN_SLOPE_MAX - SOFTEN_SLOPE_MIN) * (t / TAME_MAX),
+    depthDb: SOFTEN_DB_PER_STEP * t,
+    slope: SOFTEN_SLOPE_MIN + (SOFTEN_SLOPE_MAX - SOFTEN_SLOPE_MIN) * (t / SOFTEN_MAX),
   }
+}
+
+/** The Soften amount from a param that may still be the old on/off toggle. */
+export function softenAmount(soften, tame) {
+  if (soften === true) return clamp(Number(tame) || 0, 0, SOFTEN_MAX)
+  if (soften === false) return 0
+  return clamp(Number(soften) || 0, 0, SOFTEN_MAX)
 }
 
 /** Map UI params to kernel params. */
@@ -399,7 +412,7 @@ export function toKernelParams(params) {
   const curve = TAME_CURVES.includes(p.curve) ? p.curve : PHATASS_DEFAULTS.curve
   const shelf = tapeShelf(p.tame, p.tone, curve)
   const det4k = p.detect === '4k' && curve !== 'original'
-  const soft = softenLaw(p.soften, p.tame)
+  const soft = softenLaw(softenAmount(p.soften, p.tame))
   return {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     // Pinned on with Warmth: there is no switch.
@@ -412,7 +425,7 @@ export function toKernelParams(params) {
     detectCornerHz: det4k ? DETECT_4K_HZ : null,
     rangeDb: shelf.rangeDb,
     ...TAPE_SHELF,
-    // Soften rides the shelf's Transient, on its own band, at Tame's depth.
+    // Soften rides the shelf's Transient, on its own band, at its own depth.
     transientDb: soft.depthDb,
     transientCornerHz: SOFTEN_FREQ_HZ,
     transientSlope: soft.slope,
