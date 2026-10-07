@@ -124,7 +124,7 @@ export class PhatassKernel {
       transientGateLin: Number.isFinite(p.transientGateDb) ? dbToLin(p.transientGateDb) : null,
       detectCornerHz: p.detectCornerHz,
     })
-    this.outputLin = dbToLin(p.outputGainDb)
+    this.outputLin = dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0))
     this.tapeMakeupLin = dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0)
   }
 

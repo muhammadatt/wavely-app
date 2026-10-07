@@ -2,8 +2,8 @@ import { reactive, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import {
-  applyPhatassRegion, cancelPhatassTapeMakeup, cancelPhatassWarmthPeak, computePeakCache,
-  measurePhatassTapeMakeup, measurePhatassWarmthBands, measurePhatassWarmthPeak,
+  applyPhatassRegion, cancelPhatassOutputMakeup, cancelPhatassTapeMakeup, cancelPhatassWarmthPeak, computePeakCache,
+  measurePhatassOutputMakeup, measurePhatassTapeMakeup, measurePhatassWarmthBands, measurePhatassWarmthPeak,
 } from '../audio/processing.js'
 import { regionAlignDb, regionPeakDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
@@ -41,7 +41,14 @@ let readoutSeq = 0
 const phTapeMakeup = ref({ pending: false })
 let tapeTimer = null
 let tapeSeq = 0
-const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthCeilingDb', 'tapeMakeupDb'])
+// The bench's output trim: `pending` while a render of the chain is in flight.
+const phOutputMakeup = ref({ pending: false })
+let outputTimer = null
+let outputSeq = 0
+const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthCeilingDb', 'tapeMakeupDb', 'outputMakeupDb'])
+// Params that do not change what the output trim measures: Output rides on top
+// of it, and the mode is handled on its own.
+const OUTPUT_TRIM_IGNORES = new Set(['output', 'outputMakeup'])
 
 export function usePhatass() {
   const {
@@ -151,6 +158,7 @@ export function usePhatass() {
       stopMeters()
       cancelWarmthReadout()
       cancelTapeMakeup()
+      cancelOutputMakeup()
     }
   }
 
@@ -178,6 +186,12 @@ export function usePhatass() {
       setTapeMakeup(interim)
       scheduleTapeMakeup()
     }
+    // The bench's output trim hears the whole chain, so every other knob moves
+    // it; the old value holds until the new one lands.
+    if (name === 'outputMakeup') {
+      if (value === 'off') cancelOutputMakeup()
+      else scheduleOutputMakeup()
+    } else if (!OUTPUT_TRIM_IGNORES.has(name)) scheduleOutputMakeup()
   }
 
   function setTapeMakeup(db) {
@@ -212,11 +226,14 @@ export function usePhatass() {
       if (seq !== tapeSeq) return null
       phTapeMakeup.value = { pending: false }
       setTapeMakeup(makeupDb)
+      // The output trim renders with TAPE's makeup in place, so it follows it.
+      scheduleOutputMakeup()
       return makeupDb
     } catch (err) {
       if (err?.cancelled || seq !== tapeSeq) return null
       console.error('PHAT*SS tape makeup failed:', err)
       phTapeMakeup.value = { pending: false }
+      scheduleOutputMakeup()
       return null
     }
   }
@@ -235,6 +252,62 @@ export function usePhatass() {
     tapeSeq++
     cancelPhatassTapeMakeup()
     phTapeMakeup.value = { pending: false }
+  }
+
+  function setOutputMakeup(db) {
+    if (phParams.outputMakeupDb === db) return
+    phParams.outputMakeupDb = db
+    pushParam('outputMakeupDb', db)
+  }
+
+  const outputTrimOn = () => phParams.outputMakeup === 'peak' || phParams.outputMakeup === 'rms'
+
+  /**
+   * The bench's output trim for live preview (phatassOutputMakeup.js): exact
+   * on a selection up to its cap, sampled blocks beyond. Waits for TAPE's
+   * makeup, which it renders with — that measurement schedules this one when
+   * it lands. Apply re-measures the exact way.
+   */
+  async function refreshOutputMakeup() {
+    const seq = ++outputSeq
+    if (!state.currentFile || !outputTrimOn()) {
+      phOutputMakeup.value = { pending: false }
+      return
+    }
+    if (phTapeMakeup.value.pending) return
+    refreshLevel()
+    const { start, end } = selectionSpan()
+    if (!(end > start)) return
+    refreshCeiling(start, end)
+    phOutputMakeup.value = { pending: true }
+    try {
+      const { makeupDb } = await measurePhatassOutputMakeup(
+        state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+        { exact: false },
+      )
+      if (seq !== outputSeq) return
+      phOutputMakeup.value = { pending: false }
+      setOutputMakeup(makeupDb)
+    } catch (err) {
+      if (err?.cancelled || seq !== outputSeq) return
+      console.error('PHAT*SS output trim failed:', err)
+      phOutputMakeup.value = { pending: false }
+    }
+  }
+
+  function scheduleOutputMakeup() {
+    if (!outputTrimOn() || !phPreview.value) return
+    phOutputMakeup.value = { pending: true }
+    clearTimeout(outputTimer)
+    outputTimer = setTimeout(refreshOutputMakeup, 250)
+  }
+
+  function cancelOutputMakeup() {
+    clearTimeout(outputTimer)
+    outputTimer = null
+    outputSeq++
+    cancelPhatassOutputMakeup()
+    phOutputMakeup.value = { pending: false }
   }
 
   /**
@@ -310,10 +383,11 @@ export function usePhatass() {
     readoutTimer = setTimeout(refreshWarmthReadout, 250)
   }
 
-  /** The selection or preview changed: the readout and TAPE's makeup both follow. */
+  /** The selection or preview changed: the readout, TAPE's makeup and the output trim all follow. */
   function scheduleWarmthReadout() {
     scheduleReadout()
     if (Number(phParams.tape) > 0) scheduleTapeMakeup()
+    scheduleOutputMakeup()
   }
 
   /** Drop any pending or in-flight readout: nothing renders after the panel stops. */
@@ -343,6 +417,13 @@ export function usePhatass() {
         )
         setTapeMakeup(makeupDb)
       }
+      // The output trim after it, since it renders with TAPE's makeup in place.
+      if (outputTrimOn()) {
+        const { makeupDb } = await measurePhatassOutputMakeup(
+          state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+        )
+        setOutputMakeup(makeupDb)
+      }
       const buffer = await applyPhatassRegion(
         state.segments, start, end,
         { ...phParams },
@@ -364,6 +445,7 @@ export function usePhatass() {
     stopMeters()
     cancelWarmthReadout()
     cancelTapeMakeup()
+    cancelOutputMakeup()
     if (phPreview.value) {
       const chain = getEffectChain(getAudioContext())
       chain.setEnabled(phatassEffect.id, false)
@@ -388,6 +470,7 @@ export function usePhatass() {
     phSatDb,
     phWarmthReadout,
     phTapeMakeup,
+    phOutputMakeup,
     hasSelection,
     togglePreview,
     syncParam,

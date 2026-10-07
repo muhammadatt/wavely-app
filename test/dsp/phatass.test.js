@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, softenAmount, SOFTEN_MAX, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
-  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES,
+  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
 } from '../../src/audio/phatassParams.js'
@@ -20,6 +20,7 @@ import { processSaturationBenchBuffer, SAT_BENCH_LAYER_LATENCY } from '../../src
 import { warmthGuardLatencySamples } from '../../src/audio/dsp/warmthGuard.js'
 import { shelfLatencySamples } from '../../src/audio/dsp/hfLimit.js'
 import { measureTapeMakeup } from '../../src/audio/phatassTapeMakeup.js'
+import { measureOutputMakeup, PREVIEW_CAP_S } from '../../src/audio/phatassOutputMakeup.js'
 
 const SR = 44100
 
@@ -751,4 +752,80 @@ test('TAPE order: LAST is the same stages after Warmth — same latency, identic
   assert.ok(Math.abs(db(pk / px)) < 0.05, `LAST peak ${db(pk / px).toFixed(3)} dB re source`)
   assert.ok(diff > 1e-3, 'the two orders must differ with Warmth on')
   void peak
+})
+
+/** Syllables of different levels and brightness over `seconds`, with the peak. */
+function syllableTrack(seconds, seed = 1) {
+  const x = new Float32Array(Math.round(SR * seconds))
+  // Levels and types drawn at random, not in a repeating pattern: a loop is a
+  // sampling question of its own (see phatassOutputMakeup.js).
+  let r = seed * 7919
+  const rnd = () => (r = (r * 16807) % 2147483647) / 2147483647
+  for (let k = 0, at = 0; at + 8000 < x.length; k++, at += 11000) {
+    const a = 0.12 + 0.5 * rnd()
+    const syl = rnd() < 0.33 ? add(sine(7000, a * 0.6, 8000), noise(8000, a * 0.2, k + seed)) : add(sine(110 + 10 * (k % 12), a, 8000), sine(330, a * 0.3, 8000))
+    for (let i = 0; i < 8000; i++) x[at + i] += syl[i] * Math.sin((Math.PI * i) / 8000)
+  }
+  let peak = 0
+  for (const v of x) peak = Math.max(peak, Math.abs(v))
+  return { x, peak }
+}
+
+const outStats = (x, p) => {
+  const { channelData: [y], latencySamples: L } = run(x, p)
+  let pk = 0, e = 0
+  for (let i = 0; i < x.length; i++) { const v = y[L + i] ?? 0; pk = Math.max(pk, Math.abs(v)); e += v * v }
+  return { pkDb: db(pk), msDb: 10 * Math.log10(e / x.length) }
+}
+const srcMsDb = (x) => { let e = 0; for (const v of x) e += v * v; return 10 * Math.log10(e / x.length) }
+
+test('output trim: OFF ships, and the kernel ignores a stale trim unless PEAK or RMS is on', () => {
+  assert.deepEqual(OUTPUT_MAKEUPS, ['off', 'peak', 'rms'])
+  assert.equal(PHATASS_DEFAULTS.outputMakeup, 'off')
+  assert.equal(toKernelParams({ outputMakeupDb: -2 }).outputMakeupDb, 0)
+  assert.equal(toKernelParams({ outputMakeup: 'bogus', outputMakeupDb: -2 }).outputMakeupDb, 0)
+  assert.equal(toKernelParams({ outputMakeup: 'rms', outputMakeupDb: -2 }).outputMakeupDb, -2)
+  const { x } = syllableTrack(0.5)
+  assert.equal(measureOutputMakeup([x], SR, { outputMakeup: 'off' }).makeupDb, 0)
+})
+
+test('output trim lands the whole chain on the source: PEAK on its peak, RMS on its RMS, on top of Output and TAPE\'s own makeup', () => {
+  const { x, peak } = syllableTrack(3)
+  const base = { warmth: 6, oddEven: 40, tape: 2.5, tame: 6, soften: 4, warmthCeilingDb: db(peak), voiceLevelDb: srcMsDb(x) }
+  const tapeMakeupDb = measureTapeMakeup([x], SR, base).makeupDb
+  for (const mode of ['peak', 'rms']) {
+    const p = { ...base, tapeMakeupDb, outputMakeup: mode }
+    const { makeupDb } = measureOutputMakeup([x], SR, p)
+    const s = outStats(x, { ...p, outputMakeupDb: makeupDb })
+    if (mode === 'peak') assert.ok(Math.abs(s.pkDb - db(peak)) < 0.02, `PEAK: output peak ${(s.pkDb - db(peak)).toFixed(3)} dB off the source`)
+    else assert.ok(Math.abs(s.msDb - srcMsDb(x)) < 0.02, `RMS: output RMS ${(s.msDb - srcMsDb(x)).toFixed(3)} dB off the source`)
+    // Output rides on top, unchanged.
+    const t = outStats(x, { ...p, outputMakeupDb: makeupDb, output: -3 })
+    assert.ok(Math.abs(t.msDb - s.msDb + 3) < 0.01)
+    // The trim never touches TAPE's makeup.
+    assert.equal(toKernelParams({ ...p, outputMakeupDb: makeupDb }).tapeMakeupDb, tapeMakeupDb)
+  }
+  // Warmth and TAPE's makeup add level, so the level-matched trim pulls down.
+  assert.ok(measureOutputMakeup([x], SR, { ...base, tapeMakeupDb, outputMakeup: 'rms' }).makeupDb < 0)
+})
+
+test('output trim preview: exact up to its cap, a close estimate past it', () => {
+  const short = syllableTrack(2)
+  const p0 = { warmth: 5, tape: 2, tame: 5, warmthCeilingDb: db(short.peak), voiceLevelDb: srcMsDb(short.x) }
+  for (const outputMakeup of ['peak', 'rms']) {
+    const p = { ...p0, outputMakeup }
+    assert.equal(measureOutputMakeup([short.x], SR, p, { exact: false }).makeupDb, measureOutputMakeup([short.x], SR, p).makeupDb)
+  }
+  const long = syllableTrack(PREVIEW_CAP_S + 10, 3)
+  const p = { ...p0, warmthCeilingDb: db(long.peak), voiceLevelDb: srcMsDb(long.x), outputMakeup: 'rms' }
+  const exact = measureOutputMakeup([long.x], SR, p).makeupDb
+  const fast = measureOutputMakeup([long.x], SR, p, { exact: false }).makeupDb
+  // Loose on purpose: pure tones against noise bursts make Warmth's gain swing
+  // ~11 dB from block to block, far more than real material (0.00–0.18 dB, see
+  // phatassOutputMakeup.js), so 40 blocks sample this track coarsely.
+  assert.ok(Math.abs(fast - exact) < 0.35, `RMS: sampled ${fast.toFixed(3)} vs whole ${exact.toFixed(3)}`)
+  const pe = measureOutputMakeup([long.x], SR, { ...p, outputMakeup: 'peak' }).makeupDb
+  const pf = measureOutputMakeup([long.x], SR, { ...p, outputMakeup: 'peak' }, { exact: false }).makeupDb
+  // The loudest blocks give a lower bound on the output peak: never a smaller trim.
+  assert.ok(pf >= pe - 1e-6 && pf - pe < 0.5, `PEAK: sampled ${pf.toFixed(3)} vs whole ${pe.toFixed(3)}`)
 })

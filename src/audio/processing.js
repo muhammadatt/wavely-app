@@ -1041,6 +1041,57 @@ export function measurePhatassTapeMakeup(segments, start, end, params, sampleRat
   })
 }
 
+/**
+ * The bench's output trim for a region (see phatassOutputMakeup.js): a render
+ * of the whole chain. Its own worker, terminated by a newer call like TAPE's
+ * makeup. A superseded call rejects with `err.cancelled = true`. Resolves
+ * `{ makeupDb, outPeakDb, inputPeakDb }`.
+ */
+let outputMakeupWorker = null
+let outputMakeupReject = null
+/** Terminate the in-flight output-trim pass, if any; it rejects with `err.cancelled`. */
+export function cancelPhatassOutputMakeup() {
+  if (!outputMakeupWorker) return
+  outputMakeupWorker.terminate()
+  outputMakeupWorker = null
+  const err = new Error('superseded')
+  err.cancelled = true
+  const reject = outputMakeupReject
+  outputMakeupReject = null
+  reject?.(err)
+}
+
+/** The output trim on its own worker. `exact: false` is the capped preview measurement. */
+export function measurePhatassOutputMakeup(segments, start, end, params, sampleRate, channels, { exact = true } = {}) {
+  cancelPhatassOutputMakeup()
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+    outputMakeupWorker = worker
+    outputMakeupReject = reject
+    const finish = () => {
+      worker.terminate()
+      if (outputMakeupWorker === worker) {
+        outputMakeupWorker = null
+        outputMakeupReject = null
+      }
+    }
+    worker.onmessage = (e) => {
+      finish()
+      if (e.data?.type === 'done') resolve({ makeupDb: e.data.makeupDb, outPeakDb: e.data.outPeakDb, inputPeakDb: e.data.inputPeakDb })
+      else reject(new Error(e.data?.message ?? 'output makeup failed'))
+    }
+    worker.onerror = (err) => {
+      finish()
+      reject(err)
+    }
+    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+    worker.postMessage(
+      { __id: 0, type: 'phatassOutputMakeup', channelData, sampleRate, params: JSON.parse(JSON.stringify(params)), exact },
+      channelData.map(c => c.buffer),
+    )
+  })
+}
+
 /** Apply Air Band to a region. */
 export function applyAirBandRegion(segments, start, end, params, sampleRate, channels) {
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {

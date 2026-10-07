@@ -68,6 +68,13 @@ export const PHATASS_DEFAULTS = {
   // Defaults to the VOICE curve's pair (CURVE_DETECT).
   detect: '4k',
   output: 0, // dB trim
+  // Automatic trim on the plugin's OUTPUT (`OUTPUT_MAKEUPS`), on top of Output:
+  // 'off' (ships), 'peak' (the output's peak back on the source's) or 'rms'
+  // (the output's RMS on the source's — a level-matched A/B of the whole
+  // plugin). Bench only. TAPE's own makeup stays peak-restoring either way.
+  outputMakeup: 'off',
+  // That trim, dB: measured (`measureOutputMakeup`), never a user setting.
+  outputMakeupDb: 0,
   // The whole file's gated RMS, dBFS. Measured, never a user setting — it is
   // what makes the shelf's threshold mean the same on a quiet take and a hot one.
   voiceLevelDb: ALIGN_TARGET_DBFS,
@@ -432,8 +439,22 @@ export function toKernelParams(params) {
     transientGateDb: voice - SOFTEN_GATE_BELOW_DB,
     voiceLevelDb: voice,
     outputGainDb: clamp(Number(p.output) || 0, OUTPUT_MIN_DB, OUTPUT_MAX_DB),
+    outputMakeupDb: OUTPUT_MAKEUPS.includes(p.outputMakeup) && p.outputMakeup !== 'off' && Number.isFinite(p.outputMakeupDb)
+      ? p.outputMakeupDb : 0,
   }
 }
+
+/**
+ * The output trim's modes (bench only). 'off' ships. 'peak' puts the whole
+ * chain's output peak back on the selection's: with TAPE's makeup restoring
+ * its peak and the guard holding Warmth under it, what is left to restore is
+ * mostly what the tape shelf and Soften took. 'rms' puts the output's RMS on
+ * the selection's, so the plugin is level-matched against bypass — negative
+ * whenever Warmth and TAPE's makeup add level. Both are signed. Measured by
+ * rendering the chain (`phatassOutputMakeup.js`): no shortcut exists, since
+ * Warmth, its guard and the shelf are neither memoryless nor static.
+ */
+export const OUTPUT_MAKEUPS = ['off', 'peak', 'rms']
 
 /**
  * TAPE — a full-band CUBIC soft clipper, FIRST on the main path (ahead of

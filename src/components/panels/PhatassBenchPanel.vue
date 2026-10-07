@@ -1,11 +1,12 @@
 <script setup>
 /**
- * PHAT*SS bench — TAPE's curve and its place in the chain.
+ * PHAT*SS bench — TAPE's curve, its place in the chain, and an automatic
+ * output trim.
  *
  * ⚠ DELIBERATELY PLAIN, AND NOT BUILT FROM THE DEVICE CHROME, like the FET
  * Punch and OptoSmooth benches: the knobs and rockers in `../knobs/` are the
- * product's visual language, and these are not product controls. CUBIC and
- * FIRST ship; the others are kept to A/B against them, gated off in production
+ * product's visual language, and these are not product controls. CUBIC, FIRST
+ * and OFF ship; the others are kept to A/B against them, gated off in production
  * (`isPhatassBenchVisible`). They are ordinary PHAT*SS params, so preview and
  * APPLY both read them — what you hear is what renders.
  */
@@ -13,9 +14,11 @@ import { computed, ref } from 'vue'
 import { PHATASS_DEFAULTS } from '../../audio/phatassParams.js'
 
 const props = defineProps({
-  /** The panel's params (reads `tapeCurve` and `tapeOrder`). */
+  /** The panel's params (reads `tapeCurve`, `tapeOrder`, `outputMakeup` and `outputMakeupDb`). */
   params: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
+  /** The output trim's measurement is in flight. */
+  trimPending: { type: Boolean, default: false },
 })
 const emit = defineEmits(['set'])
 
@@ -37,7 +40,22 @@ const CHOICES = [
       { id: 'last', label: 'LAST', title: 'Warmth → guard → TAPE → makeup, the order before October 2026. The makeup is measured through Warmth (slower on long selections) and re-measures when Warmth moves' },
     ],
   },
+  {
+    key: 'outputMakeup', label: 'Output trim',
+    options: [
+      { id: 'off', label: 'OFF', title: 'Ships. No automatic trim: the output is whatever the chain and the Output knob make it' },
+      { id: 'peak', label: 'PEAK', title: 'Trims the whole plugin so its output peak lands on the selection\'s own peak. TAPE\'s makeup is peak-restoring either way' },
+      { id: 'rms', label: 'RMS', title: 'Trims the whole plugin so its output RMS matches the selection\'s: a level-matched A/B against bypass' },
+    ],
+  },
 ]
+
+const trimText = computed(() => {
+  if (props.params.outputMakeup !== 'peak' && props.params.outputMakeup !== 'rms') return ''
+  if (props.trimPending) return 'trim …'
+  const v = Number(props.params.outputMakeupDb) || 0
+  return `trim ${v >= 0 ? '+' : ''}${v.toFixed(2)} dB`
+})
 
 const pristine = computed(() => CHOICES.every(ch => props.params[ch.key] === PHATASS_DEFAULTS[ch.key]))
 
@@ -86,7 +104,7 @@ function reset() {
 
     <div v-if="open" class="mt-3">
       <p class="mb-3 text-[10px] leading-[1.5] text-white/35">
-        A/B TAPE's curve and its place in the chain against what ships (CUBIC, FIRST).
+        A/B TAPE's curve, its place in the chain and an automatic output trim against what ships (CUBIC, FIRST, OFF).
         Hidden in production builds. Both preview and APPLY read them.
       </p>
 
@@ -135,7 +153,8 @@ function reset() {
           title="Back to the shipping configuration"
           @click="reset"
         >Reset</button>
-        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / {{ params.tapeOrder }}</span>
+        <span v-if="trimText" class="font-mono text-[9px] text-amber-100/60">{{ trimText }}</span>
+        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / {{ params.tapeOrder }} / {{ params.outputMakeup }}</span>
       </div>
     </div>
   </div>

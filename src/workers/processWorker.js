@@ -17,6 +17,7 @@ import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
 import { measureTopLossDb, autoAirDb } from '../audio/hfSoftenerAutoAir.js'
 import { measureWarmthReadout } from '../audio/phatassWarmthReadout.js'
 import { measureTapeMakeup } from '../audio/phatassTapeMakeup.js'
+import { measureOutputMakeup } from '../audio/phatassOutputMakeup.js'
 
 /**
  * ⚠ EVERY REPLY MUST CARRY `__id` BACK. The worker is shared and long-lived
@@ -101,6 +102,13 @@ self.onmessage = function (e) {
     case 'phatassTapeMakeup':
       try {
         postDone(measureTapeMakeup(channelData, sampleRate, params, { exact: e.data.exact !== false }))
+      } catch (err) {
+        postReply({ type: 'error', message: err.message })
+      }
+      break
+    case 'phatassOutputMakeup':
+      try {
+        postDone(measureOutputMakeup(channelData, sampleRate, params, { exact: e.data.exact !== false }))
       } catch (err) {
         postReply({ type: 'error', message: err.message })
       }

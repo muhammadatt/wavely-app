@@ -6040,3 +6040,41 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
 - Checked (test): Soften works with Tame 0 — the shelf's Range caps only the
   shelf, so the Transient cut runs with the shelf out; Soften 0 with Tame 0 is
   still a pure delay; Tame no longer moves Soften's depth.
+
+### PHAT*SS — automatic output trim on the bench (October 2026)
+
+**Background.** A Studer A800 emulation's dry/wet pairs (acoustic guitar, drums) turned out to be level-matched by hand, not by a makeup formula:
+- RMS change was +1.63 / −0.41 dB and LUFS +1.66 / −0.63, so there was no RMS or loudness target.
+- The share of the peak loss given back was ~0.5 / ~0.7, so there was no fixed fraction.
+- Quiet-passage gain was flat across level, so there was no running AGC.
+- The two renders also carry different EQ and alignment, so the settings changed between them.
+
+At loudness-matched A/B with TAPE set to the Studer's crest change (guitar TAPE 3.4, drums 1.0), the peaks land within 0.25 dB of each other.
+
+**First attempt, reverted: an RMS mode on TAPE's own makeup.** It predicted the RMS loss from a histogram of sample levels binned on the float's bits, with no render, within 0.02 dB of the render. The owner caught that it level-matched only the pre-Warmth TAPE stage, so TAPE's internal makeup stays peak-restoring always.
+
+**Built: an automatic trim at the plugin's output.** It is a signed gain after the shelf, on top of Output. Modes are OFF (ships) / PEAK / RMS.
+
+| | Mode | Trim |
+|---|---|---|
+| Bright narration | PEAK | +1.5 to +1.7 dB (what the shelf took off a sibilant peak) |
+| Bright narration | RMS | −0.6 to −1.9 dB |
+| Drums ×3 | RMS | −2.6 / −4.1 dB |
+| Narration (24 s clip) | RMS | −1.8 / −3.5 dB |
+
+**Measurement** (`phatassOutputMakeup.js`): it renders the chain with Output and the trim at 0, because Warmth, the guard, the shelf and Soften have no render-free shortcut.
+- Whole region on apply (after TAPE's exact makeup) and in preview up to 30 s.
+- Longer selections in preview render 40 × 0.5 s blocks with 0.25 s run-in (~1.9 s).
+  - RMS takes one block per stratum at a golden-ratio offset. Evenly spaced blocks aliased against a patterned 30 s test track (0.36 dB off). A longer run-in (1–4 s) changed nothing, so the error was sampling.
+  - PEAK takes the loudest-input blocks. That is a lower bound, since the guard lets a quiet block rise to the selection peak, so the preview trim can only run hot.
+
+Against the whole render:
+
+| Material | RMS error | PEAK error |
+|---|---|---|
+| Narration 24 s | 0.00 dB | ≤ 0.02 dB |
+| Narration 46 s | 0.04–0.07 dB | ≤ 0.02 dB |
+| Drums ×3, 53 s | 0.08–0.11 dB | ≤ 0.02 dB |
+| 103 s mix of narration, guitar and drums | 0.17–0.18 dB | ≤ 0.02 dB |
+
+The composable re-measures on every knob except Output, and waits for TAPE's makeup, which it renders with.

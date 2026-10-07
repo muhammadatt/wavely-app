@@ -48,7 +48,7 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  phParams, phPreview, phInputLevels, phOutputLevels, phSatNeedle, phWarmthReadout, phTapeMakeup,
+  phParams, phPreview, phInputLevels, phOutputLevels, phSatNeedle, phWarmthReadout, phTapeMakeup, phOutputMakeup,
   togglePreview, syncParam, scheduleWarmthReadout, apply, teardown, closeModal,
 } = usePhatass()
 
@@ -89,10 +89,12 @@ const readoutCells = computed(() => {
     }
   })
 })
-// A CHANGE against the selection's own peak (Output included), absolute under it.
+// A CHANGE against the selection's own peak (Output and the bench's output trim
+// included), absolute under it.
 const readoutPeak = computed(() => {
   const r = phWarmthReadout.value
-  const out = Number(phParams.output) || 0
+  const trim = phParams.outputMakeup && phParams.outputMakeup !== 'off' ? Number(phParams.outputMakeupDb) || 0 : 0
+  const out = (Number(phParams.output) || 0) + trim
   const abs = r.peakDb == null ? null : r.peakDb + out
   const delta = abs == null || r.inputPeakDb == null ? null : abs - r.inputPeakDb
   return {
@@ -302,7 +304,7 @@ async function applyAndClose() {
       <!-- Bench only: gated off in production builds. See phatassBench.js. -->
       <PhatassBenchPanel
         v-if="showBench"
-        :params="phParams" :disabled="!phPreview"
+        :params="phParams" :disabled="!phPreview" :trim-pending="phOutputMakeup.pending"
         @set="(k, v) => syncParam(k, v)"
       />
     </div>
