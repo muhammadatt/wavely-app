@@ -6040,3 +6040,36 @@ arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
 - Checked (test): Soften works with Tame 0 — the shelf's Range caps only the
   shelf, so the Transient cut runs with the shelf out; Soften 0 with Tame 0 is
   still a pure delay; Tame no longer moves Soften's depth.
+
+### PHAT*SS — RMS makeup on the bench (October 2026)
+
+Question: how does our peak-restoring makeup compare with a Studer A800 emulation's dry/wet pairs (acoustic guitar, drums)? The Studer has no auto makeup; the renders were level-matched by hand. Evidence: the RMS change was +1.63 dB on guitar and −0.41 on drums, and LUFS +1.66 / −0.63, so no RMS or loudness target. "Share of peak loss given back" was ~0.5 / ~0.7, so no fixed fraction. Quiet-passage gain was flat across level (±0.2 dB below −24 dB under the top), so no running AGC. The two renders also carry different EQ (guitar: rising top, +8.6 dB at 16–20 kHz; drums: flat, −5.1 dB at 16–20 kHz) and different alignment, so the settings changed between them. Loudness-matched A/B, TAPE set to the Studer's crest change: guitar TAPE 3.4 (crest −3.02 vs −3.03), drums TAPE 1.0 (−0.72 vs −0.69). Peaks land within 0.25 dB of each other.
+
+Options weighed for a "standard" makeup:
+- PEAK — current, measured.
+- RMS-neutral — histogram.
+- LUFS-neutral — needs a render for exactness.
+- 99.9th-percentile — exact in closed form, since a monotone memoryless map carries quantiles through, but needs a ceiling for bright material.
+- Fixed fraction of the knob — blind.
+- Real-time follower — pumps.
+
+Built: RMS, as `tapeMakeup: 'rms'` on the bench (PEAK still ships).
+
+- **Prediction** (`levelHistogram`, `predictTapeRmsDb` in `phatassTapeMakeup.js`):
+  - Bins |x| on the float's exponent + top 8 mantissa bits (65,536 bins, 0.024 dB wide, no log per sample).
+  - Each bin is represented by its rms level, and out/in energy is Σ count·(f(g·a)/g)² over Σ energy, with g from `layerGain` on the TAPE layer itself.
+  - Prediction errors against the render:
+
+    | Material | Curves | TAPE | Max error |
+    |---|---|---|---|
+    | Guitar | cubic and tanh | 1–6 | ≤ 0.01 dB |
+    | Drums | cubic and tanh | 1–6 | ≤ 0.02 dB |
+    | Drums tiled to 10 min stereo | cubic | 1 / 3.4 / 6 | 0.001 / 0.004 / 0.008 dB |
+
+  - Prediction runs in 0.23–0.29 s against 14 s rendered.
+- **Apply (`exact`):** renders TAPE and compares RMS directly.
+- **LAST order:** renders the chain to the makeup with TAPE on and off; no fast path.
+- **Not predictable:** the peak. A memoryless model predicts the knob exactly, and the oversampler keeps sibilant peaks higher, which is why PEAK still renders.
+- **Measured makeup on guitar, cubic:** +0.12 / +0.23 / +0.36 / +0.65 dB at TAPE 1 / 2 / 3.4 / 6; drums about twice that. TAPE barely touches the body, so RMS-neutral leaves the peaks down by nearly the knob.
+- ⚠ **RMS, not LUFS:** LUFS of the no-makeup render reads up to 0.2 dB below the RMS change on drums (K-weighting the added harmonics).
+- **Re-measure:** the composable re-measures on a `tapeMakeup` change under the same interim rule (never more than the knob).

@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, softenAmount, SOFTEN_MAX, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
-  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES,
+  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, TAPE_MAKEUPS,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
 } from '../../src/audio/phatassParams.js'
@@ -245,6 +245,65 @@ test('the fast TAPE makeup (preview) reads the exact one (apply) to 0.02 dB', ()
     assert.ok(exact > 0)
     assert.ok(Math.abs(fast - exact) < 0.02, `TAPE ${tape}: fast ${fast.toFixed(4)} vs exact ${exact.toFixed(4)}`)
   }
+})
+
+/** Syllables of different levels and brightness, with the peak. */
+function syllables() {
+  const x = new Float32Array(SR * 3)
+  for (let k = 0; k < 12; k++) {
+    const at = k * 11000, a = 0.15 + 0.5 * ((k * 7) % 5) / 4
+    const syl = k % 3 === 2 ? add(sine(7000, a * 0.6, 8000), noise(8000, a * 0.2)) : add(sine(110 + 10 * k, a, 8000), sine(330, a * 0.3, 8000))
+    for (let i = 0; i < 8000; i++) x[at + i] += syl[i] * Math.sin((Math.PI * i) / 8000)
+  }
+  let peak = 0
+  for (const v of x) peak = Math.max(peak, Math.abs(v))
+  return { x, peak }
+}
+
+const msDb = (y, from, to) => {
+  let s = 0
+  for (let i = from; i < to; i++) s += y[i] * y[i]
+  return 10 * Math.log10(s / (to - from))
+}
+
+test('TAPE makeup modes: PEAK ships, RMS is the bench alternative', () => {
+  assert.deepEqual(TAPE_MAKEUPS, ['peak', 'rms'])
+  assert.equal(PHATASS_DEFAULTS.tapeMakeup, 'peak')
+  assert.equal(toKernelParams({ tapeMakeup: 'rms' }).tapeMakeup, 'rms')
+  assert.equal(toKernelParams({ tapeMakeup: 'bogus' }).tapeMakeup, 'peak')
+})
+
+test('RMS makeup: the histogram prediction (preview) reads the render (apply), and the render keeps its RMS', () => {
+  const { x, peak } = syllables()
+  const n = x.length
+  for (const tapeCurve of TAPE_CURVES) for (const tape of [1, 3, 6]) {
+    const p = { tape, tapeCurve, tapeMakeup: 'rms', warmth: 0, tame: 0, soften: 0, warmthCeilingDb: db(peak) }
+    const exact = measureTapeMakeup([x], SR, p).makeupDb
+    const fast = measureTapeMakeup([x], SR, p, { exact: false }).makeupDb
+    const peakMk = measureTapeMakeup([x], SR, { ...p, tapeMakeup: 'peak' }).makeupDb
+    const tag = `${tapeCurve} TAPE ${tape}`
+    assert.ok(exact > 0, `${tag}: no RMS makeup`)
+    assert.ok(Math.abs(fast - exact) < 0.03, `${tag}: predicted ${fast.toFixed(4)} vs rendered ${exact.toFixed(4)}`)
+    assert.ok(exact < peakMk - 0.3, `${tag}: RMS makeup ${exact.toFixed(2)} not under the peak makeup ${peakMk.toFixed(2)}`)
+    const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: exact })
+    assert.ok(Math.abs(msDb(y, L, n) - msDb(x, 0, n - L)) < 0.03, `${tag}: RMS moved ${(msDb(y, L, n) - msDb(x, 0, n - L)).toFixed(3)} dB`)
+    let pk = 0
+    for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
+    assert.ok(db(pk / peak) < -0.3, `${tag}: the peak came back (${db(pk / peak).toFixed(2)} dB)`)
+  }
+})
+
+test('RMS makeup with TAPE last is measured through the chain, TAPE on against off', () => {
+  const { x, peak } = syllables()
+  const p = { tape: 3, tapeMakeup: 'rms', tapeOrder: 'last', warmth: 6, oddEven: 50, tame: 0, soften: 0, warmthCeilingDb: db(peak) }
+  const mk = measureTapeMakeup([x], SR, p).makeupDb
+  assert.equal(measureTapeMakeup([x], SR, p, { exact: false }).makeupDb, mk, 'LAST has no fast path')
+  assert.ok(mk > 0 && mk < measureTapeMakeup([x], SR, { ...p, tapeMakeup: 'peak' }).makeupDb)
+  const n = x.length
+  const off = run(x, { ...p, tape: 0 })
+  const on = run(x, { ...p, tapeMakeupDb: mk })
+  const L = on.latencySamples
+  assert.ok(Math.abs(msDb(on.channelData[0], L, n) - msDb(off.channelData[0], L, n)) < 0.02)
 })
 
 test('TAPE makeup is 0 with TAPE off, and the kernel ignores a stale makeup then', () => {
