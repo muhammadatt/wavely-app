@@ -31,6 +31,7 @@ const CHOICES = [
       { id: 'cubic', label: 'CUBIC', title: 'Ships. Fits the Studer A800 emulation best (0.09 dB rms): only the third harmonic until the peak reaches its flat at 3.52 dB, then a hard clip' },
       { id: 'tanh', label: 'TANH', title: 'Studer fit 0.17. Never flat: more high-order content at light settings, the peak nearer the knob at heavy ones' },
       { id: 'algebraic', label: 'ALGEBRAIC', title: 'Studer fit 0.19. Bends earliest: the most added distortion of the three at every setting' },
+      { id: 'hysteresis', label: 'HYSTERESIS', title: 'The Saturation Bench\'s Jiles-Atherton tape loop: it has memory, so kicks are squashed about twice as hard as snares and peaks round off without a hard clip. Closest per-hit match to the Studer A800 on drums. The knob is calibrated on a steady sine (a hit\'s first cycle can lose less); TAPE 8 ≈ bench drive 13. About 3.5× the CPU, slower makeup' },
     ],
   },
   {

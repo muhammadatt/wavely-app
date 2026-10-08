@@ -6219,3 +6219,42 @@ Shelf sweep ahead of TAPE 12 on the drum machine:
 - **Makeup:** `measureTapeMakeup` shelves the region once up front and measures TAPE on that against the SOURCE's peak; fast equals exact (bare kick, +3/+6/+9). The peak lands on the source to 0.05 dB.
 - **Saturation meter:** its clean reference runs through its own copy of the shelf. A quiet tone pair under +9 reads below −40 dB.
 - **Not covered:** the drums render (dry 0.28, Studer −1.86, TAPE 12 alone −1.90, +6 −1.32) wants none. The two renders were made at different settings.
+
+### PHAT*SS — HYSTERESIS as a TAPE curve (October 2026)
+
+**Owner's report.** On drums, the Saturation Bench's hysteresis layer (full range, no pre-emphasis, drive 13) gives "more of the tape character the Studer shows — the thwap on the kick and the tighter peak attenuation without brickwall limiting".
+
+This followed a per-hit analysis of both Studer A800 drum pairs, measured against each one's linear path. Its findings:
+- **Per hit type,** within 16 dB of the loudest hit:
+
+  | Hit type | Pair | Studer peak | TAPE 12 cubic peak | Studer tail − attack | TAPE 12 cubic tail − attack |
+  |---|---|---|---|---|---|
+  | Kick-led | drum machine | −5.6 dB | −8.4 dB | +5.2 dB | +3.6 dB |
+  | Kick-led | drums | −4.9 dB | −8.4 dB | +4.5 dB | +4.2 dB |
+  | Snare/hat-led | drums | −2.3 dB | −5.0 dB | | |
+
+- **Gain trajectory on loud kicks:** the Studer's gain against its linear path is SMOOTH, −7 to −10 dB held for ~40 ms and recovering over 60–100 ms, like a fast compressor. Ours is spiky cycle by cycle (it cuts only where crests cross the curve), which is the "limiter look".
+- **Curve shape does not fix it:** the best memoryless fits are cubic / tanh / algebraic / atan at 1.19 / 1.13 / 1.16 / 1.23 dB per-hit rms on the drum machine and 0.90 / 0.84 / 0.80 / 0.78 on drums.
+- **Not built:** a fast low-weighted "tape compression" stage was proposed and set aside by the owner.
+
+**The hysteresis layer through the same tests** (bench, full band, no emphasis):
+- Drum machine, drive 13: per-hit error 1.40 dB. Kick −5.9 / tail − attack +2.3; snare −3.2 / +0.6.
+- Drums, drive 10: per-hit error **0.93** dB, the best of anything tried. Kick −4.3 / +1.9; snare −2.7 / +0.1.
+- It squashes kicks ~2× harder than snares with no low push.
+- Its gain is still cycle-wise, not smooth, so the Studer's sustain is not reproduced: tail − attack on kicks is about half.
+
+**Built: `tapeCurve: 'hysteresis'`.**
+- **Knob calibration:** `tapePeakU` bisects, in log u, the loop's steady-state peak out / peak in on a sine, with the layer's scale of 1 / small-signal gain. The loss rises monotonically: −0.41 / −1.64 / −4.46 / −8.57 / −13.42 / −18.98 / −24.84 dB at u 1 / 2 / 4 / 8 / 16 / 32 / 64, the same at N 256 and 1024 because the model is rate-independent. N 128, 24 iterations, memoised per knob value and loop shape; about 2 ms per new position.
+- **Real peaks** (makeup, exact):
+
+  | Material | TAPE 1 | TAPE 3 | TAPE 6 | TAPE 9 | TAPE 12 |
+  |---|---|---|---|---|---|
+  | Bright narration | 0.83 | 2.41 | 4.97 | 7.75 | 10.71 |
+  | Dull narration | 0.93 | 2.77 | 5.50 | 8.40 | 11.23 |
+  | Guitar | 0.79 | 2.51 | 5.32 | 8.39 | 10.95 |
+  | Drums | 0.29 | 1.83 | 4.61 | 7.49 | 10.09 |
+
+  The drums' light-setting shortfall is a hit's first cycle meeting the loop from rest. A steady 110 Hz sine lands within 0.3 dB up to TAPE 6 and −11.4 at 12, where the oversampler band-limits what the loop adds.
+- **Fast makeup search:** equals exact to ≤ 0.01 dB on all four files at TAPE 1–12, and to 0.001 dB on 10 min.
+- **Cost:** ~3.5× cubic. Per 10 min of drums or narration: fast 3.6–5 s (13.6–15 s with low push +12), exact ~21 s.
+- **Knob equivalents** (plugin path, against the Studer): TAPE 8 ≈ bench drive 13 (drum machine kick −5.7 / snare −3.1; drums −5.2 / −3.3). Drums' bench drive 10 is ≈ TAPE 6.5–7.

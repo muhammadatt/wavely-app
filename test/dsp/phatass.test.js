@@ -132,7 +132,7 @@ test('TAPE TANH / ALGEBRAIC: the knob inverts f(u)/u, and lands the peak on its 
       assert.ok(Math.abs(db(f(u) / u) + t) < 1e-9, `${name} ${t.toFixed(1)} dB: u ${u}`)
     }
   }
-  assert.deepEqual(TAPE_CURVES, ['cubic', 'tanh', 'algebraic'])
+  assert.deepEqual(TAPE_CURVES, ['cubic', 'tanh', 'algebraic', 'hysteresis'])
   assert.equal(PHATASS_DEFAULTS.tapeCurve, 'cubic')
   assert.equal(tapeLayer(2, -3, 'tanh').curve, 'tanh')
   assert.equal(tapeLayer(2, -3, 'bogus').curve, 'cubic')
@@ -949,4 +949,26 @@ test('the saturation meter does not read the head bump as saturation', () => {
   for (let o = 0; o + 128 <= x.length; o += 128) k.process([x.subarray(o, o + 128)], [out], 128)
   const m = k.takeMeter()
   assert.ok(10 * Math.log10(m.added / m.clean) < -40, `meter read ${(10 * Math.log10(m.added / m.clean)).toFixed(1)} dB`)
+})
+
+test('TAPE HYSTERESIS: the knob is calibrated on a steady sine, and the makeup still lands the peak (fast = exact)', () => {
+  const x = sine(110, 0.5, SR * 2)
+  for (const tape of [1, 3, 6, 12]) {
+    const p = { warmth: 0, tame: 0, soften: 0, tape, tapeCurve: 'hysteresis', tapeMakeupDb: 0, warmthCeilingDb: db(0.5) }
+    assert.equal(toKernelParams(p).tapeLayer.curve, 'hysteresis')
+    const { channelData: [y], latencySamples: L } = run(x, p)
+    let pk = 0
+    for (let i = L + SR; i < L + 2 * SR - 4096; i++) pk = Math.max(pk, Math.abs(y[i]))
+    // The solve is per-sample; the layer band-limits what the loop adds (4x
+    // oversampled), which gives back a little at the top (TAPE 12: −11.4).
+    assert.ok(Math.abs(db(pk / 0.5) + tape) < 0.75, `TAPE ${tape}: steady sine peak moved ${db(pk / 0.5).toFixed(2)} dB`)
+  }
+  const { x: s, peak } = kickTrack()
+  const p = { warmth: 0, tame: 0, soften: 0, tape: 8, tapeCurve: 'hysteresis', warmthCeilingDb: db(peak) }
+  const exact = measureTapeMakeup([s], SR, p).makeupDb
+  assert.ok(Math.abs(measureTapeMakeup([s], SR, p, { exact: false }).makeupDb - exact) < 0.02)
+  const { channelData: [y], latencySamples: L } = run(s, { ...p, tapeMakeupDb: exact })
+  let pk = 0
+  for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
+  assert.ok(Math.abs(db(pk / peak)) < 0.05, `peak ${db(pk / peak).toFixed(3)} dB off the source`)
 })

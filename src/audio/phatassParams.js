@@ -18,6 +18,7 @@ import {
   SAT_BENCH_LAYER_LATENCY, SAT_BENCH_MAX_LAYERS, SAT_AMOUNT_FLOOR_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB,
 } from './dsp/saturationLayers.js'
 import { unitDriveU } from './dsp/shaperCurves.js'
+import { JilesAtherton, hysteresisSmallGain, hysteresisShapeVersion } from './dsp/hysteresis.js'
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
 
 export const PHATASS_DEFAULTS = {
@@ -537,8 +538,22 @@ export const TAPE_FALLBACK_CREST_DB = 18
  * H3+H5 lowest of the three, the most added on narration (−26.3 at 2, −15.5 at
  * 6), and tanh's peak accuracy (−5.94 dB at 6). Its knob solve is closed form.
  * Not auditioned.
+ *
+ * 'hysteresis' is the Saturation Bench's STATEFUL Jiles-Atherton tape model
+ * (dsp/hysteresis.js) — added after the owner heard more of the Studer's tape
+ * character in it on drums ("the thwap on the kick, tighter peaks without
+ * brickwall limiting"). Measured per hit against the Studer A800 renders as a
+ * bench layer (full band, no emphasis): it squashes kicks ~2× harder than
+ * snares by itself, and lands the per-hit peak reduction better than any
+ * memoryless curve on the drums (per-hit rms error 0.93 dB at bench drive 10,
+ * against TAPE 12 cubic's 2.77) and about level with it on the drum machine
+ * (1.40 at 13, 1.31). It does NOT reproduce the Studer's sustain (tail − attack
+ * on kicks about half). Its knob has no closed form: `tapePeakU` bisects the
+ * steady-state peak loss on a sine (the model is rate-independent, so one
+ * cycle shape serves every frequency), and a hit's first cycle, which meets
+ * the loop from rest, can lose a different amount — the makeup is measured.
  */
-export const TAPE_CURVES = ['cubic', 'tanh', 'algebraic']
+export const TAPE_CURVES = ['cubic', 'tanh', 'algebraic', 'hysteresis']
 /**
  * TAPE's place in the chain. 'first' ships; 'last' is the pre-October-2026
  * order, rendered at Warmth 5 / TAPE 3 against 'first' before it was made
@@ -554,6 +569,46 @@ const TAPE_LAYER = {
   amountDb: 0, emphDb: 0, loHz: SAT_BAND_MIN_HZ, hiHz: SAT_BAND_MAX_HZ, mode: 'full',
 }
 
+const hystPeakCache = new Map()
+
+/** Steady-state peak out / peak in of the hysteresis TAPE layer on a sine of amplitude u. */
+function hysteresisPeakRatio(u) {
+  const ja = new JilesAtherton({ scale: 1 / hysteresisSmallGain() })
+  const N = 128
+  let pk = 0
+  for (let c = 0; c < 4; c++) {
+    for (let i = 0; i < N; i++) {
+      const y = ja.step(u * Math.sin((2 * Math.PI * i) / N))
+      if (c === 3 && Math.abs(y) > pk) pk = Math.abs(y)
+    }
+  }
+  return pk / u
+}
+
+/**
+ * The u at the peak that takes `reductionDb` off a steady sine's peak through
+ * the hysteresis loop: bisected in log u (the loss rises monotonically from
+ * ~0.3, where the loop is still linear, to −25 dB at u 64), memoised per knob
+ * position and loop shape.
+ */
+function hysteresisPeakU(reductionDb) {
+  const t = Math.max(0, reductionDb)
+  if (!(t > 0)) return 0
+  const key = `${t.toFixed(4)}@${hysteresisShapeVersion()}`
+  if (hystPeakCache.has(key)) return hystPeakCache.get(key)
+  const r = Math.pow(10, -t / 20)
+  let lo = Math.log(0.3)
+  let hi = Math.log(256)
+  for (let n = 0; n < 24; n++) {
+    const mid = 0.5 * (lo + hi)
+    if (hysteresisPeakRatio(Math.exp(mid)) > r) lo = mid
+    else hi = mid
+  }
+  const u = Math.exp(0.5 * (lo + hi))
+  hystPeakCache.set(key, u)
+  return u
+}
+
 /**
  * The curve's input u at the peak that takes `reductionDb` off it: the u with
  * f(u)/u = 10^(−dB/20). The cubic and algebraic (1/√(1 + u²) = r) invert in
@@ -561,6 +616,7 @@ const TAPE_LAYER = {
  * ~1e-12, well inside a float).
  */
 export function tapePeakU(reductionDb, curve = TAPE_CURVE) {
+  if (curve === 'hysteresis') return hysteresisPeakU(reductionDb)
   const r = Math.pow(10, -Math.max(0, reductionDb) / 20)
   if (curve === 'algebraic') return Math.sqrt(1 / (r * r) - 1)
   if (curve === 'tanh') {
