@@ -58,6 +58,7 @@ export class TapeCompressor {
   setParams(partial) {
     const p = { ...this.p, ...partial }
     const wasOn = this.p.on
+    const detChanged = p.detector !== this.p.detector
     this.p = p
     this.aAtt = coeff(p.attackMs, this.sampleRate)
     this.aRel = coeff(p.releaseMs, this.sampleRate)
@@ -67,7 +68,8 @@ export class TapeCompressor {
       this.tiltKey = key
       this.sc.setSection(0, highShelf(this.sampleRate, p.tiltHz, Math.SQRT1_2, -Math.max(0, p.tiltDb)))
     }
-    if (p.on && !wasOn) this.reset()
+    // A PEAK envelope holds |x|, an RMS one x²: switching reads the other's state as nonsense.
+    if ((p.on && !wasOn) || detChanged) this.reset()
   }
 
   reset() {

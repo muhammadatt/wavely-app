@@ -6335,3 +6335,67 @@ samples ≥ −0.25 dB of the top 14 / 7 / 7 (TAPE alone 19 / 27 / 51, Studer
 ⚠ Two renders of one emulation, both drums, made at different settings; nothing
 auditioned; nothing measured on voice, where a 1 ms / 16.5 ms gain riding a low vowel's
 ripple may read as distortion — untested.
+
+### PHAT*SS — Tape comp FAST mode (October 2026)
+
+The owner compared Studer / Tape comp / Tape comp + Soften clips on the drum
+machine and heard the opposite of the Studer: Tape comp keeps each hit's sharp
+attack and lifts it back with the makeup, where the Studer attenuates kick,
+snare and hat attacks and keeps more of the overall dynamics; Soften helped the
+snare.
+
+**Attack windows on the owner's clips** (gain vs each output's own linear path,
+window minus the 15–30 ms body, dB): snare Studer −5.4 / −7.2 / −7.5 / −4.5 at
+0–1 / 1–2 / 2–4 / 4–8 ms, Tape comp −2.9 / −3.8 / −3.6 / −2.3, + Soften −10.6 /
+−5.4 / −6.3 / −3.3; hats Studer −1.9 / −2.3 / −1.3, Tape comp ~−0.3, + Soften
+−6.5 / −5.9 / −3.8; kick Studer +0.2 / −3.1 / +1.2, Tape comp +3.0 / +1.4 / +1.7.
+Over the whole drum machine render's loud hits the Studer takes 5.6–6.7 dB off
+the first 2 ms of kicks and snares, Tape comp 3.9–4.7. The drums render does the
+opposite (attacks +1 to +4 above the body) — the two renders were made at
+different settings, the drum machine hotter. On the drum machine the attack loss
+is broadband (all bands for snares; 200 Hz–6 kHz on the kick's click), so it is
+not record pre-emphasis alone.
+
+**New score**: per hit within 12 dB of the loudest, peak plus gain from the
+hit's ONSET (first sample at 10 % of its peak) in 0–2 / 2–5 / 5–10 / 10–25 /
+25–50 / 50–200 ms. HF-band windows were tried and dropped (a kick's HF is mostly
+codec noise; it dominated the score). On this score the shipped SLOW fit is
+1.17 / 1.09 (drum machine / drums) and TAPE 12 alone 1.66 on the drum machine.
+
+**Variants** (coordinate descent; drum machine / drums):
+- SLOW + a fast PEAK stage ahead of TAPE: 0.97 / 1.01–1.03. The fast stage ran to
+  attack 0.01 ms, release ~2 ms. With 1 or 2 ms of lookahead: 1.006 / 1.03 and
+  1.005 / 1.01, release still 1.9–3.5 ms — lookahead buys nothing.
+- TAPE → SLOW (compressor after the curve, timing refitted 0.35 ms / 10 ms):
+  1.09 / 0.97.
+- FAST STAGE ALONE ahead of TAPE (the owner asked): 0.98 / 0.94, from two
+  starting points to the same voicing — attack 0.70–0.85 ms, release 1.8–2.5 ms,
+  ratio 7–12, knee 12, no tilt. Drum machine at stage 14.4 (slow scale) / TAPE
+  10.8; drums 11.3 / TAPE 1.1 — on the drums the stage does nearly everything.
+- All variants keep a ~2 dB peak error on the drum machine (kick peaks −7.6
+  against the Studer's −5.4, snare peaks −7.9 against −9.3).
+
+**What FAST is**: the release is shorter than a kick's half-cycle, so the gain
+moves inside every low cycle — at its voicing and a steady tone at the
+selection's peak: 55 Hz −5.0 → −12.7 dB per cycle, 200 Hz −9.2 → −11.7, 2 kHz a
+steady −10.6. A soft clipper with a short memory: the 0.85 ms attack passes each
+crest's rising edge, the gain lags on the way back up, and whatever rides on a
+crest goes down with it.
+
+**Distortion** (loud hits; per 5 ms frame the best single gain from the clean
+reference, the residual re the signal; AAC round trip of the dry alone −37 /
+−30, so the floor is well below): drum machine kicks / others Studer −13.7 /
+−13.1, FAST −15.6 / −17.2, SLOW −25.2 / −16.7; drums Studer −13.3 / −17.5, FAST
+−16.3 / −20.9, SLOW −17.5 / −25.1. The Studer is the most distorted of the three
+and FAST the closest on kicks — its distortion is part of the match, not a side
+effect. A/B sequences (dry → Studer → SLOW → FAST, loudness-matched): the owner
+preferred FAST.
+
+**Wiring**: `tapeCompMode` SLOW / FAST on the bench, `TAPE_COMP_FAST_VOICING`.
+The 55 Hz calibration is solved per voicing, and the fitted settings land on the
+existing steps (FAST: drum machine 11 / TAPE 11, 0.98; drums 8.5 / TAPE 0.5,
+0.96 against 0.94 at 7.8), so the two modes share `TAPE_COMPS`. The compressor
+resets its envelope when the detector changes (a PEAK envelope holds |x|, an RMS
+one x²). Makeup fast = exact through it with cubic and hysteresis; tests pin the
+calibration, the in-cycle harmonic (FAST's 3rd on 55 Hz > −30 dB and 6 dB over
+SLOW's) and a mid-stream mode switch.

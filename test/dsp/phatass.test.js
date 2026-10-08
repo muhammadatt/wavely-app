@@ -11,7 +11,7 @@ import { processPhatassBuffer, PhatassKernel } from '../../src/audio/phatassProc
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, softenAmount, SOFTEN_MAX, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
   DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ,
-  TAPE_COMPS, TAPE_COMP_VOICING,
+  TAPE_COMPS, TAPE_COMP_VOICING, TAPE_COMP_MODES, TAPE_COMP_FAST_VOICING,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
 } from '../../src/audio/phatassParams.js'
@@ -1040,4 +1040,64 @@ test('the saturation meter does not read tape compression as saturation', () => 
     return 10 * Math.log10(m.added / m.clean)
   }
   assert.ok(meter(14) < -40, `meter read ${meter(14).toFixed(1)} dB`)
+})
+
+test('TAPE compression FAST: slow ships, fast swaps the voicing, and the knob keeps its 55 Hz calibration', () => {
+  assert.deepEqual(TAPE_COMP_MODES, ['slow', 'fast'])
+  assert.equal(PHATASS_DEFAULTS.tapeCompMode, 'slow')
+  assert.equal(toKernelParams({ tape: 2, tapeComp: 8.5 }).tapeComp.detector, TAPE_COMP_VOICING.detector)
+  const k = toKernelParams({ tape: 2, tapeComp: 8.5, tapeCompMode: 'fast' }).tapeComp
+  assert.equal(k.detector, 'peak')
+  assert.equal(k.releaseMs, TAPE_COMP_FAST_VOICING.releaseMs)
+  assert.equal(toKernelParams({ tape: 0, tapeComp: 8.5, tapeCompMode: 'fast' }).tapeComp.on, false)
+  for (const tapeComp of [3, 8.5, 14]) {
+    const p = { warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeComp, tapeCompMode: 'fast', tapeMakeupDb: 0, warmthCeilingDb: db(0.5) }
+    const lo = run(sine(55, 0.5, SR * 2), p)
+    const loDb = db(toneAmp(lo.channelData[0].subarray(lo.latencySamples), 55, SR, 2 * SR - 4096) / 0.5)
+    assert.ok(Math.abs(loDb + tapeComp) < 0.15, `FAST ${tapeComp}: 55 Hz moved ${loDb.toFixed(2)} dB`)
+  }
+})
+
+test('TAPE compression FAST bends each low cycle (a short-memory shaper); SLOW holds its gain across the cycle', () => {
+  // Harmonics of a steady 55 Hz tone: the fast gain swings inside every cycle, the slow one barely.
+  const third = (tapeCompMode) => {
+    const p = { warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeComp: 8.5, tapeCompMode, tapeMakeupDb: 0, warmthCeilingDb: db(0.5) }
+    const { channelData: [y], latencySamples: L } = run(sine(55, 0.5, SR * 2), p)
+    const s = y.subarray(L)
+    return db(toneAmp(s, 165, SR, 2 * SR - 4096) / toneAmp(s, 55, SR, 2 * SR - 4096))
+  }
+  const fast = third('fast')
+  const slow = third('slow')
+  assert.ok(fast > -30, `FAST third harmonic ${fast.toFixed(1)} dB re the fundamental`)
+  assert.ok(fast > slow + 6, `FAST ${fast.toFixed(1)} vs SLOW ${slow.toFixed(1)} dB`)
+})
+
+test('TAPE compression FAST: the makeup is measured through it (fast = exact) and lands the peak on the source', () => {
+  const { x, peak } = kickTrack()
+  for (const tapeCurve of ['cubic', 'hysteresis']) {
+    const p = { warmth: 0, tame: 0, soften: 0, tape: 1, tapeComp: 11, tapeCompMode: 'fast', tapeCurve, warmthCeilingDb: db(peak) }
+    const exact = measureTapeMakeup([x], SR, p).makeupDb
+    const fast = measureTapeMakeup([x], SR, p, { exact: false }).makeupDb
+    assert.ok(exact > 6, `${tapeCurve}: makeup ${exact.toFixed(2)} dB`)
+    assert.ok(Math.abs(fast - exact) < 0.02, `${tapeCurve}: fast ${fast.toFixed(3)} vs exact ${exact.toFixed(3)}`)
+    const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: exact })
+    let pk = 0
+    for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
+    assert.ok(Math.abs(db(pk / peak)) < 0.05, `${tapeCurve}: peak ${db(pk / peak).toFixed(3)} dB off the source`)
+  }
+})
+
+test('TAPE compression: switching the mode mid-stream does not glitch', () => {
+  const k = new PhatassKernel(SR)
+  const base = { warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeComp: 8.5, tapeMakeupDb: 0, warmthCeilingDb: db(0.5) }
+  k.setParams(toKernelParams({ ...base, tapeCompMode: 'slow' }), true)
+  const x = sine(55, 0.5, SR)
+  const out = new Float32Array(x.length)
+  for (let o = 0; o + 128 <= x.length; o += 128) {
+    if (o === 128 * 200) k.setParams(toKernelParams({ ...base, tapeCompMode: 'fast' }))
+    k.process([x.subarray(o, o + 128)], [out.subarray(o, o + 128)], 128)
+  }
+  let pk = 0
+  for (const v of out) pk = Math.max(pk, Math.abs(v))
+  assert.ok(pk <= 0.5 * 1.01, `peak ${pk.toFixed(3)} after the switch`)
 })

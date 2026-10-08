@@ -14,7 +14,7 @@ import { computed, ref } from 'vue'
 import { PHATASS_DEFAULTS } from '../../audio/phatassParams.js'
 
 const props = defineProps({
-  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `tapeComp`, `tapeOrder`, `outputMakeup` and `outputMakeupDb`). */
+  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `tapeComp`, `tapeCompMode`, `tapeOrder`, `outputMakeup` and `outputMakeupDb`). */
   params: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
   /** The output trim's measurement is in flight. */
@@ -61,6 +61,13 @@ const CHOICES = [
       { id: 8.5, label: '8.5', title: '8.5 dB of tape compression. With TAPE 6 this is the Studer A800 drums render (per-hit fit 0.52 dB against 1.38 for the best curve alone)' },
       { id: 11, label: '11', title: '11 dB of tape compression. With TAPE 10.5 this is the Studer A800 drum machine render (fit 0.87 against 1.15)' },
       { id: 14, label: '14', title: '14 dB of tape compression: past both Studer renders' },
+    ],
+  },
+  {
+    key: 'tapeCompMode', label: 'Comp mode',
+    options: [
+      { id: 'slow', label: 'SLOW', title: 'Ships with Tape comp. Low-weighted RMS, 1 ms / 16.5 ms: turns whole kick cycles down and keeps their shape (and their sharp attack)' },
+      { id: 'fast', label: 'FAST', title: 'Peak, 0.85 ms / 1.8 ms: lets go within a kick\'s half-cycle, so it bends each crest — a soft clipper with a short memory. Attenuates kick, snare and hat attacks like the Studer A800 and adds distortion close to its level on kicks. Drum machine: FAST 11 / TAPE 11; drums: FAST 8.5 / TAPE 0.5–1' },
     ],
   },
   {
@@ -134,7 +141,7 @@ function reset() {
 
     <div v-if="open" class="mt-3">
       <p class="mb-3 text-[10px] leading-[1.5] text-white/35">
-        A/B TAPE's curve, its place in the chain and an automatic output trim against what ships (CUBIC, no push, no bump, no comp, FIRST, OFF). With a low push the TAPE knob is a drive: a kick can lose more than its number. Tape comp works only while TAPE is up; the makeup puts the peak back either way.
+        A/B TAPE's curve, its place in the chain and an automatic output trim against what ships (CUBIC, no push, no bump, no comp, FIRST, OFF). With a low push the TAPE knob is a drive: a kick can lose more than its number. Tape comp (and its mode) works only while TAPE is up; the makeup puts the peak back either way.
         Hidden in production builds. Both preview and APPLY read them.
       </p>
 
@@ -184,7 +191,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span v-if="trimText" class="font-mono text-[9px] text-amber-100/60">{{ trimText }}</span>
-        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / bump {{ params.tapeHeadBump }} / comp {{ params.tapeComp }} / {{ params.tapeOrder }} / {{ params.outputMakeup }}</span>
+        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / bump {{ params.tapeHeadBump }} / comp {{ params.tapeComp }} {{ params.tapeCompMode }} / {{ params.tapeOrder }} / {{ params.outputMakeup }}</span>
       </div>
     </div>
   </div>

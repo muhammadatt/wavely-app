@@ -61,6 +61,11 @@ export const PHATASS_DEFAULTS = {
   // the gain reduction a steady low sine at the selection's peak gets. Only while
   // TAPE is up. 0 ships. Bench only.
   tapeComp: 0,
+  // Tape comp's voicing (`TAPE_COMP_MODES`): 'slow' (default — the low-weighted
+  // RMS compressor, whole kick cycles turned down, shape kept) or 'fast' (a peak
+  // stage that lets go within a kick's half-cycle: a soft clipper with a short
+  // memory). Bench only.
+  tapeCompMode: 'slow',
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
   // never a user setting; applied only while TAPE is up.
@@ -443,7 +448,7 @@ export function toKernelParams(params) {
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush),
     headBumpDb: Number(p.tape) > 0 ? clamp(Number(p.tapeHeadBump) || 0, 0, TAPE_HEAD_BUMPS[TAPE_HEAD_BUMPS.length - 1]) : 0,
-    tapeComp: tapeCompParams(p.tape, p.tapeComp, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB),
+    tapeComp: tapeCompParams(p.tape, p.tapeComp, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCompMode),
     tapeOrder: p.tapeOrder === 'last' ? 'last' : 'first',
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb) ? clamp(p.tapeMakeupDb, 0, TAPE_MAKEUP_MAX_DB) : 0,
     cornerHz: shelf.cornerHz,
@@ -714,11 +719,42 @@ export const TAPE_COMP_VOICING = Object.freeze({
   ratio: 6, kneeDb: 7, attackMs: 1, releaseMs: 16.5, detector: 'rms', tiltDb: 4.5, tiltHz: 160,
 })
 
+/**
+ * FAST mode: the same stage with a different fitted voicing — PEAK detector,
+ * attack 0.85 ms, release 1.8 ms, ratio 7.4, knee 12, no tilt. Found after the
+ * owner heard the slow voicing keep each hit's sharp attack (the 1 ms RMS
+ * attack lets the front through, and ahead of the curve it lowers what TAPE
+ * clips) where the Studer attenuates kick, snare and hat attacks. Fitted on the
+ * loud hits (within 12 dB of the loudest; per-hit peak and 0–2 / 2–5 / 5–10 /
+ * 10–25 / 25–50 / 50–200 ms gain from onset) of both Studer drum pairs, alone
+ * ahead of TAPE: drum machine 0.98 at FAST 11 / TAPE 11, drums 0.94 at
+ * FAST 7.8 / TAPE 1 (0.96–0.98 at the 8.5 step), against the slow voicing's
+ * 1.17 / 1.09 on the same score — better than TAPE → slow comp (1.09 / 0.97) or
+ * slow + fast together (0.97 / 1.01). Two starting points converged on the
+ * same voicing; 1–2 ms of lookahead changed nothing.
+ *
+ * ⚠ IT IS A WAVESHAPER WITH MEMORY, NOT A COMPRESSOR: the release is shorter
+ * than a kick's half-cycle, so on a 55 Hz tone at the selection's peak the gain
+ * swings −5.0 → −12.7 dB inside every cycle (200 Hz −9.2 → −11.7; 2 kHz a
+ * steady −10.6). It bends a kick's crests, rising edge first through, and
+ * whatever rides on a crest (snare click, hats) goes down with it. Measured
+ * added distortion on loud hits (residual after a per-5 ms best gain, dB re
+ * signal; AAC floor −30 to −37): drum machine kicks / others Studer −13.7 /
+ * −13.1, FAST −15.6 / −17.2, SLOW −25.2 / −16.7; drums Studer −13.3 / −17.5,
+ * FAST −16.3 / −20.9, SLOW −17.5 / −25.1. The Studer distorts more than either;
+ * FAST is the closer on kicks. Preferred by ear (owner) over SLOW on both A/B
+ * sequences. The knob is the same 55 Hz calibration, solved for this voicing.
+ */
+export const TAPE_COMP_MODES = ['slow', 'fast']
+export const TAPE_COMP_FAST_VOICING = Object.freeze({
+  ratio: 7.4, kneeDb: 12, attackMs: 0.85, releaseMs: 1.8, detector: 'peak', tiltDb: 0, tiltHz: 160,
+})
+
 /** The tape compressor's kernel params: off unless both TAPE and the COMP choice are up. */
-export function tapeCompParams(tapeDb, compDb, peakDb) {
+export function tapeCompParams(tapeDb, compDb, peakDb, mode = 'slow') {
   const c = clamp(Number(compDb) || 0, 0, TAPE_COMPS[TAPE_COMPS.length - 1])
   if (!(Number(tapeDb) > 0) || !(c > 0)) return { ...TAPE_COMP_OFF }
-  const v = TAPE_COMP_VOICING
+  const v = mode === 'fast' ? TAPE_COMP_FAST_VOICING : TAPE_COMP_VOICING
   return { ...v, on: true, thresholdDb: tapeCompThresholdDb(c, peakDb, v) }
 }
 
