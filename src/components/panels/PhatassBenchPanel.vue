@@ -14,7 +14,7 @@ import { computed, ref } from 'vue'
 import { PHATASS_DEFAULTS } from '../../audio/phatassParams.js'
 
 const props = defineProps({
-  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `tapeComp`, `tapeCompMode`, `tapeOrder`, `outputMakeup` and `outputMakeupDb`). */
+  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `tapeHeadBumpPos`, `tapeComp`, `tapeCompMode`, `tapeOrder`, `outputMakeup` and `outputMakeupDb`). */
   params: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
   /** The output trim's measurement is in flight. */
@@ -50,6 +50,13 @@ const CHOICES = [
       { id: 3, label: '+3', title: '+3 dB low shelf (40 Hz) ahead of TAPE, kept in the output: the tape machine\'s low lift, driving the kick into the curve' },
       { id: 6, label: '+6', title: '+6 dB low shelf ahead of TAPE, kept. With TAPE 12 this matches the Studer A800 drum machine\'s kick-against-snare balance (the drums render needed none)' },
       { id: 9, label: '+9', title: '+9 dB low shelf ahead of TAPE, kept: past both Studer renders' },
+    ],
+  },
+  {
+    key: 'tapeHeadBumpPos', label: 'Bump at',
+    options: [
+      { id: 'pre', label: 'PRE', title: 'Ships. The head bump ahead of TAPE: it drives the kick into the curve. Matched the Studer A800 drum machine\'s kick-against-snare balance' },
+      { id: 'post', label: 'POST', title: 'The head bump after TAPE, where a real machine\'s playback head puts it: the lift passes the curve untouched and stays at full size. The makeup may come out as a cut' },
     ],
   },
   {
@@ -191,7 +198,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span v-if="trimText" class="font-mono text-[9px] text-amber-100/60">{{ trimText }}</span>
-        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / bump {{ params.tapeHeadBump }} / comp {{ params.tapeComp }} {{ params.tapeCompMode }} / {{ params.tapeOrder }} / {{ params.outputMakeup }}</span>
+        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / bump {{ params.tapeHeadBump }} {{ params.tapeHeadBumpPos }} / comp {{ params.tapeComp }} {{ params.tapeCompMode }} / {{ params.tapeOrder }} / {{ params.outputMakeup }}</span>
       </div>
     </div>
   </div>

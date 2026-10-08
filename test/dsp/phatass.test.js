@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { processPhatassBuffer, PhatassKernel } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, softenAmount, SOFTEN_MAX, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
-  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ,
+  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_POSITIONS,
   TAPE_COMPS, TAPE_COMP_VOICING, TAPE_COMP_MODES, TAPE_COMP_FAST_VOICING,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
@@ -1100,4 +1100,46 @@ test('TAPE compression: switching the mode mid-stream does not glitch', () => {
   let pk = 0
   for (const v of out) pk = Math.max(pk, Math.abs(v))
   assert.ok(pk <= 0.5 * 1.01, `peak ${pk.toFixed(3)} after the switch`)
+})
+
+test('TAPE head bump POST: pre ships; post is still a low shelf that stays in the output', () => {
+  assert.deepEqual(TAPE_HEAD_BUMP_POSITIONS, ['pre', 'post'])
+  assert.equal(PHATASS_DEFAULTS.tapeHeadBumpPos, 'pre')
+  assert.equal(toKernelParams({ tape: 2, tapeHeadBump: 6, tapeHeadBumpPos: 'post' }).headBumpPos, 'post')
+  const x = add(sine(25, 0.002, SR * 2), sine(1000, 0.002, SR * 2))
+  const p = { warmth: 0, tame: 0, soften: 0, tape: 2, tapeHeadBump: 6, tapeHeadBumpPos: 'post', tapeMakeupDb: 0, warmthCeilingDb: db(0.8) }
+  const { channelData: [y], latencySamples: L } = run(x, p)
+  const lo = db(toneAmp(y.subarray(L), 25, SR, 2 * SR - 1000) / 0.002)
+  const hi = db(toneAmp(y.subarray(L), 1000, SR, 2 * SR - 1000) / 0.002)
+  assert.ok(lo > 4.5 && lo < 6.2, `25 Hz lifted ${lo.toFixed(2)} dB`)
+  assert.ok(Math.abs(hi) < 0.1, `1 kHz moved ${hi.toFixed(2)} dB`)
+})
+
+test('TAPE head bump POST: the lift passes the curve untouched, PRE drives it into the curve', () => {
+  // A loud 30 Hz tone: post, the curve sees the bare tone and the bump lifts what comes out; pre, the curve squashes the lift.
+  const x = sine(30, 0.5, SR * 2)
+  const out = (pos) => {
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, soften: 0, tape: 6, tapeHeadBump: 9, tapeHeadBumpPos: pos, tapeMakeupDb: 0, warmthCeilingDb: db(0.5) })
+    return db(toneAmp(y.subarray(L), 30, SR, 2 * SR - 4096) / 0.5)
+  }
+  const post = out('post')
+  const pre = out('pre')
+  assert.ok(post > pre + 3, `30 Hz: post ${post.toFixed(2)} vs pre ${pre.toFixed(2)} dB`)
+})
+
+test('TAPE head bump POST: the makeup is measured through it, may be a cut, and lands the peak on the source (preview = apply)', () => {
+  const { x, peak } = kickTrack()
+  for (const [tape, tapeHeadBump] of [[1, 9], [6, 6], [12, 3]]) {
+    const p = { warmth: 0, tame: 0, soften: 0, tape, tapeHeadBump, tapeHeadBumpPos: 'post', warmthCeilingDb: db(peak) }
+    const exact = measureTapeMakeup([x], SR, p).makeupDb
+    assert.equal(measureTapeMakeup([x], SR, p, { exact: false }).makeupDb, exact)
+    if (tape === 1) assert.ok(exact < 0, `TAPE 1 / +9 post: makeup ${exact.toFixed(2)} dB should be a cut`)
+    const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: exact })
+    let pk = 0
+    for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
+    assert.ok(Math.abs(db(pk / peak)) < 0.05, `TAPE ${tape} / +${tapeHeadBump}: peak ${db(pk / peak).toFixed(3)} dB off the source`)
+  }
+  // Pre never cuts (the existing contract).
+  assert.equal(toKernelParams({ tape: 2, tapeMakeupDb: -3 }).tapeMakeupDb, 0)
+  assert.equal(toKernelParams({ tape: 2, tapeMakeupDb: -3, tapeHeadBumpPos: 'post' }).tapeMakeupDb, -3)
 })

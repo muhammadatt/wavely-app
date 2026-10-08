@@ -6399,3 +6399,52 @@ resets its envelope when the detector changes (a PEAK envelope holds |x|, an RMS
 one x²). Makeup fast = exact through it with cubic and hysteresis; tests pin the
 calibration, the in-cycle harmonic (FAST's 3rd on 55 Hz > −30 dB and 6 dB over
 SLOW's) and a mid-stream mode switch.
+
+### PHAT*SS — head bump PRE / POST on the bench (October 2026)
+
+The owner asked whether our Jiles-Atherton hysteresis has a head bump of its own,
+on the premise that a real machine's head bump comes from saturation. It does
+not, on either count. A real head bump is a PLAYBACK-head effect: at long
+wavelengths the head's pole pieces and contact length pick up more or less flux,
+giving the bump and the ripples under it — linear and level-independent. The
+J-A equations carry no frequency, so the loop is flat: steady sines 20 Hz–4 kHz
+through the hysteresis TAPE layer read flat to 0.03 dB at −30 dB and within the
+same few tenths everywhere above 100 Hz at any drive. Driven hard there is a lift
+at the very bottom (TAPE 12 at the calibration peak: 20 Hz −8.1 dB, 40 Hz −9.6,
+1 kHz −10.4) — but CUBIC (−8.2 / −9.5 / −10.0) and TANH (−8.3 / −9.6 / −10.2) do
+the same, so it is the layer's 5 Hz DC blocker on what TAPE adds (near 20 Hz it
+shifts the correction out of phase with the dry, so less of the peak cancels),
+not the loop. It grows with drive and vanishes at normal level: not a head bump.
+
+So the bump stays a linear stage, and the bench now has its position:
+`tapeHeadBumpPos` PRE (ships — ahead of TAPE, driving the kick into the curve)
+or POST (after the curve and before the makeup, where a playback head puts it).
+
+**Against the Studer** (loud hits within 12 dB of the loudest: kick − snare
+level over each hit's first 100 ms, absolute; and the onset-window fit against
+the dry run through OUR bump, so it scores only the nonlinear part):
+
+| Drum machine (Studer k−s 12.39, dry 12.68) | k−s | fit |
+|---|---|---|
+| FAST 11 / TAPE 11, no bump | 9.76 | 0.979 |
+| + PRE +3 / +6 / +9 | 10.28 / 10.78 / 11.21 | 1.001 / 1.206 / 1.545 |
+| + POST +3 / +6 / +9 | 11.17 / 12.67 / 14.23 | 0.949 / 0.936 / 0.927 |
+| TAPE 12 alone, no bump | 11.19 | 1.658 |
+| + PRE +3 / +6 / +9 | 11.93 / 12.63 / 13.21 | 1.502 / 1.351 / 1.244 |
+| + POST +3 / +6 / +9 | 12.53 / 13.97 / 15.47 | 1.577 / 1.528 / 1.493 |
+
+With FAST, PRE drives the kick into the fast stage and the curve, which squash
+the lift (+6 dB of bump buys only +1 dB of kick) and worsen the fit; POST passes
+it at full size and leaves the fit alone, landing the balance at +6 (12.67).
+With TAPE 12 alone the earlier finding stands — PRE balances better and fits
+better. The drums render needs no bump in either position (Studer −0.59; FAST
+8.5 / TAPE 1, no bump −0.70; every bump moves it away).
+
+**Makeup**: POST is measured the exact way in preview too (TAPE over the whole
+region, then the shelf, then the peak — the shelf's memory outlasts the fast
+search's 512-sample pre-roll), and it can be a CUT: the lift can leave the peak
+above the source (tested: TAPE 1 / +9 POST on the kick track). `tapeMakeupDb`
+is clamped to ±24 dB in POST and ≥ 0 otherwise; the MAKEUP caption is signed.
+Switching position resets the shelf's state. Tests: the shelf still lands
++6 dB at 25 Hz POST, a loud 30 Hz tone keeps > 3 dB more of the lift POST than
+PRE, and the POST makeup puts the peak back on the source (preview = apply).

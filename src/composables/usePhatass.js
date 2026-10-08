@@ -175,7 +175,7 @@ export function usePhatass() {
     }
     // The curve, the low push, the head bump, the compressor and the order change what TAPE takes off the peak;
     // the interim rule (never more than the knob) holds either way.
-    if ((name === 'tapeCurve' || name === 'tapeOrder' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'tapeComp' || name === 'tapeCompMode') && Number(phParams.tape) > 0) {
+    if ((name === 'tapeCurve' || name === 'tapeOrder' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'tapeComp' || name === 'tapeCompMode' || name === 'tapeHeadBumpPos') && Number(phParams.tape) > 0) {
       setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape)))
       scheduleTapeMakeup()
     }

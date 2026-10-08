@@ -138,6 +138,10 @@ export class PhatassKernel {
     })
     this.outputLin = dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0))
     this.tapeMakeupLin = dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0)
+    if (p.headBumpPos !== this.bumpPos) {
+      this.bump.reset()
+      this.bumpPos = p.headBumpPos
+    }
     const bump = Number.isFinite(p.headBumpDb) ? p.headBumpDb : 0
     if (bump !== this.bumpDb) {
       // Coefficients only: the filter state carries over, so a change is a step in gain, not a click from rest.
@@ -151,14 +155,19 @@ export class PhatassKernel {
     }
   }
 
-  /** The head bump (if any), tape compression (if on), TAPE, then its makeup gain, in place. */
+  applyBump(chs, n) {
+    this.bump.ensureChannels(chs.length)
+    for (let ch = 0; ch < chs.length; ch++) this.bump.process(chs[ch], chs[ch], n, ch)
+  }
+
+  /** The head bump (pre or post), tape compression (if on), TAPE, then its makeup gain, in place. */
   tapeAndMakeup(chs, n) {
-    if (this.bumpDb > 0) {
-      this.bump.ensureChannels(chs.length)
-      for (let ch = 0; ch < chs.length; ch++) this.bump.process(chs[ch], chs[ch], n, ch)
-    }
+    const post = this.params.headBumpPos === 'post'
+    if (this.bumpDb > 0 && !post) this.applyBump(chs, n)
     this.comp.process(chs, n)
     this.tape.process(chs, chs, n)
+    // Post: where a playback head puts it, after the curve and before the makeup.
+    if (this.bumpDb > 0 && post) this.applyBump(chs, n)
     const mk = this.tapeMakeupLin
     if (mk === 1) return
     for (const out of chs) {

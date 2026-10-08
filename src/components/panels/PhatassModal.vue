@@ -113,7 +113,9 @@ const fmtTape = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
 const tapeMakeupCaption = computed(() => {
   if (!(phParams.tape > 0)) return ''
   if (phTapeMakeup.value.pending) return 'MAKEUP …'
-  return `MAKEUP +${(Number(phParams.tapeMakeupDb) || 0).toFixed(1)}`
+  // Signed: with the bench's post head bump the makeup can be a cut.
+  const v = Number(phParams.tapeMakeupDb) || 0
+  return `MAKEUP ${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}`
 })
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 const fmtSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
