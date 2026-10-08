@@ -1,12 +1,12 @@
 <script setup>
 /**
- * PHAT*SS bench — TAPE's curve, its low push and head bump, its place in the
+ * PHAT*SS bench — TAPE's curve, its low push, head bump and compression, its place in the
  * chain, and an automatic output trim.
  *
  * ⚠ DELIBERATELY PLAIN, AND NOT BUILT FROM THE DEVICE CHROME, like the FET
  * Punch and OptoSmooth benches: the knobs and rockers in `../knobs/` are the
  * product's visual language, and these are not product controls. CUBIC, no push,
- * no bump, FIRST and OFF ship; the others are kept to A/B against them, gated off in production
+ * no bump, no comp, FIRST and OFF ship; the others are kept to A/B against them, gated off in production
  * (`isPhatassBenchVisible`). They are ordinary PHAT*SS params, so preview and
  * APPLY both read them — what you hear is what renders.
  */
@@ -14,7 +14,7 @@ import { computed, ref } from 'vue'
 import { PHATASS_DEFAULTS } from '../../audio/phatassParams.js'
 
 const props = defineProps({
-  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `tapeOrder`, `outputMakeup` and `outputMakeupDb`). */
+  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `tapeComp`, `tapeOrder`, `outputMakeup` and `outputMakeupDb`). */
   params: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
   /** The output trim's measurement is in flight. */
@@ -50,6 +50,17 @@ const CHOICES = [
       { id: 3, label: '+3', title: '+3 dB low shelf (40 Hz) ahead of TAPE, kept in the output: the tape machine\'s low lift, driving the kick into the curve' },
       { id: 6, label: '+6', title: '+6 dB low shelf ahead of TAPE, kept. With TAPE 12 this matches the Studer A800 drum machine\'s kick-against-snare balance (the drums render needed none)' },
       { id: 9, label: '+9', title: '+9 dB low shelf ahead of TAPE, kept: past both Studer renders' },
+    ],
+  },
+  {
+    key: 'tapeComp', label: 'Tape comp',
+    options: [
+      { id: 0, label: 'OFF', title: 'Ships. TAPE is a curve only: it flattens the crest of each cycle' },
+      { id: 3, label: '3', title: 'Tape compression: a 55 Hz tone at the selection\'s peak loses 3 dB. A fast (1 ms / 16.5 ms), low-weighted RMS squash ahead of the curve that turns whole kick cycles down and keeps their shape' },
+      { id: 6, label: '6', title: '6 dB of tape compression' },
+      { id: 8.5, label: '8.5', title: '8.5 dB of tape compression. With TAPE 6 this is the Studer A800 drums render (per-hit fit 0.52 dB against 1.38 for the best curve alone)' },
+      { id: 11, label: '11', title: '11 dB of tape compression. With TAPE 10.5 this is the Studer A800 drum machine render (fit 0.87 against 1.15)' },
+      { id: 14, label: '14', title: '14 dB of tape compression: past both Studer renders' },
     ],
   },
   {
@@ -123,7 +134,7 @@ function reset() {
 
     <div v-if="open" class="mt-3">
       <p class="mb-3 text-[10px] leading-[1.5] text-white/35">
-        A/B TAPE's curve, its place in the chain and an automatic output trim against what ships (CUBIC, no push, no bump, FIRST, OFF). With a low push the TAPE knob is a drive: a kick can lose more than its number.
+        A/B TAPE's curve, its place in the chain and an automatic output trim against what ships (CUBIC, no push, no bump, no comp, FIRST, OFF). With a low push the TAPE knob is a drive: a kick can lose more than its number. Tape comp works only while TAPE is up; the makeup puts the peak back either way.
         Hidden in production builds. Both preview and APPLY read them.
       </p>
 
@@ -173,7 +184,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span v-if="trimText" class="font-mono text-[9px] text-amber-100/60">{{ trimText }}</span>
-        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / bump {{ params.tapeHeadBump }} / {{ params.tapeOrder }} / {{ params.outputMakeup }}</span>
+        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / bump {{ params.tapeHeadBump }} / comp {{ params.tapeComp }} / {{ params.tapeOrder }} / {{ params.outputMakeup }}</span>
       </div>
     </div>
   </div>

@@ -41,6 +41,12 @@
  * restores the SOURCE's peak (the bump lifts the kick into the curve; what
  * comes back out is put on the selection's own peak).
  *
+ * TAPE COMPRESSION (bench) is handled the same way: the region runs through
+ * the bump and the compressor once, up front (cheap: no oversampling), and TAPE
+ * is measured on that. The compressor has memory (16.5 ms release), so this is
+ * the continuous stream the kernel sees, not a per-block approximation; the
+ * fast search then only has TAPE to bound, as before.
+ *
  * Pure: no worklet, no DOM; runs in the measurement worker and under node.
  */
 
@@ -48,6 +54,7 @@ import { processSaturationBenchBuffer, SaturationBenchKernel } from './dsp/satur
 import { toKernelParams, PHATASS_DEFAULTS, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q } from './phatassParams.js'
 import { BiquadCascade, lowShelf } from './dsp/biquad.js'
 import { processPhatassBuffer } from './phatassProcessor.js'
+import { TapeCompressor } from './dsp/tapeComp.js'
 
 /** Block size for the fast search, samples. */
 const BLOCK = 1024
@@ -117,6 +124,19 @@ function headBumped(channelData, sampleRate, db) {
     bq.process(x, y, x.length, 0)
     return y
   })
+}
+
+/** The region through the tape compressor, as TAPE hears it in the kernel. */
+function compressed(channelData, sampleRate, compParams) {
+  const tc = new TapeCompressor(sampleRate)
+  tc.setParams(compParams)
+  const out = channelData.map(x => Float32Array.from(x))
+  const n = out[0].length
+  for (let o = 0; o < n; o += 128) {
+    const m = Math.min(128, n - o)
+    tc.process(out.map(c => c.subarray(o, o + m)), m)
+  }
+  return out
 }
 
 function fastPeak(channelData, sampleRate, layer) {
@@ -192,8 +212,9 @@ export function measureTapeMakeup(channelData, sampleRate, params, { exact = tru
     return { makeupDb: 0, peakDb: toDb(inPk), inputPeakDb: toDb(inPk) }
   }
   const kp = toKernelParams(p)
-  // The head bump sits inside the chain render already; otherwise TAPE hears the bumped source.
-  const tapeIn = kp.tapeOrder !== 'last' && kp.headBumpDb > 0 ? headBumped(channelData, sampleRate, kp.headBumpDb) : channelData
+  // The head bump and compressor sit inside the chain render already; otherwise TAPE hears the source through them.
+  let tapeIn = kp.tapeOrder !== 'last' && kp.headBumpDb > 0 ? headBumped(channelData, sampleRate, kp.headBumpDb) : channelData
+  if (kp.tapeOrder !== 'last' && kp.tapeComp?.on) tapeIn = compressed(tapeIn, sampleRate, kp.tapeComp)
   const outPk = kp.tapeOrder === 'last'
     ? chainPeak(channelData, sampleRate, p)
     : exact ? exactPeak(tapeIn, sampleRate, kp.tapeLayer) : fastPeak(tapeIn, sampleRate, kp.tapeLayer)

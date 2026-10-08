@@ -6258,3 +6258,80 @@ This followed a per-hit analysis of both Studer A800 drum pairs, measured agains
 - **Fast makeup search:** equals exact to ≤ 0.01 dB on all four files at TAPE 1–12, and to 0.001 dB on 10 min.
 - **Cost:** ~3.5× cubic. Per 10 min of drums or narration: fast 3.6–5 s (13.6–15 s with low push +12), exact ~21 s.
 - **Knob equivalents** (plugin path, against the Studer): TAPE 8 ≈ bench drive 13 (drum machine kick −5.7 / snare −3.1; drums −5.2 / −3.3). Drums' bench drive 10 is ≈ TAPE 6.5–7.
+
+### PHAT*SS — tape compression on the bench (October 2026)
+
+The owner sent short clips of the Studer A800 and PHAT*SS on the drums render and
+suspected the Studer clips the tops of the kicks. Measured, it is the other way
+round: per kick, gain against each output's own linear path across the kick's
+biggest half-cycle, binned by |linear| / that half-cycle's peak —
+
+| kick @ 0.04 s | 20–40 % | 60–80 % | 95–100 % | samples ≥ −0.25 dB (out / lin) |
+|---|---|---|---|---|
+| Studer | −3.3 | −5.6 | −6.4 | 12 / 10 |
+| owner's PHAT*SS clip | +0.4 | −3.8 | −5.8 | 83 / 5 |
+| hysteresis TAPE 8 | +0.3 | −2.7 | −4.3 | 63 / 3 |
+| cubic TAPE 12 | −0.5 | −4.9 | −7.4 | 65 / 3 |
+
+The Studer lowers the WHOLE cycle — even its quiet part — while material between
+the hits passes untouched, and the cycle stays pointed (the first 1–2 ms of the
+rise follow the dry kick, then the gain drops). Ours passes the bottom of the
+cycle and plateaus at the top: a clip. That is an envelope-timescale gain, which
+no curve can make, so the owner asked for the tape-compression prototype that
+was set aside after the per-hit study.
+
+**Stage** (`dsp/tapeComp.js`, `TapeCompressor`): feed-forward, linked, zero
+latency; detector = input through a high-shelf cut (lows drive it), PEAK or RMS
+(sqrt(2·ms), so a steady sine reads its peak in both); soft-knee dB gain computer;
+one full-band gain. Between the head bump and TAPE's curve, inside
+`tapeAndMakeup`, only while TAPE is up.
+
+**Fit** (scratch harness: per hit within 24 dB of the loudest, gain against the
+Studer's linear path at the peak, 0–10, 10–50 and 50–200 ms; ours rendered with
+makeup 0, so its quiet gain is 1; cost = rms over hits of the four, averaged):
+coordinate descent on threshold-as-COMP, ratio, knee, attack, release, detector,
+tilt depth, tilt corner and TAPE.
+
+- Drums free fit: 0.522 (ratio ~25, knee 8, 1 ms / 16.5 ms, RMS, tilt 5 dB at
+  237 Hz, TAPE 6). Drum machine free fit: 0.843, but its attack ran to the floor
+  (0.07 ms) and its release to 5 ms — waveform following.
+- With the drums timing pinned the drum machine lands 0.859, and ONE shape
+  (ratio 6, knee 7, tilt 4.5 dB at 160 Hz) fits both with only COMP and TAPE
+  free: drums 0.521, drum machine 0.865 (ratio 12: 0.523 / 0.872). Against TAPE
+  alone: cubic 12 1.55 / 1.15, hysteresis 8 1.38 / 1.57.
+- Timing is well determined (drums / drum machine): attack 0.3 → 0.61 / 0.94,
+  1 → 0.52 / 0.87, 3 → 0.72 / 0.90; release 8 → 0.59 / 0.88, 16.5 → 0.52 / 0.87,
+  35 → 0.69 / 0.94, 70 → 0.97 / 1.20; PEAK 1.09 / 1.07; tilt 0 → 0.82 / 1.11,
+  9 → 0.67 / 0.92.
+- COMP alone (TAPE 0): drums 0.71, drum machine 1.77 — TAPE is still needed.
+- Hysteresis after the compressor: drums 0.57 (TAPE 4.4), drum machine 0.93
+  (TAPE 9.25) — slightly worse than cubic.
+- Per class at the drums fit: kick peak −5.00 vs Studer −4.94, 0–10 ms −6.45 vs
+  −6.60, 10–50 −3.39 vs −3.37; snare −2.11 vs −2.34, −1.87 vs −1.76.
+
+**Calibration.** The number is the fundamental loss of a steady 55 Hz tone at
+the selection's peak. The static-curve formula (over = r / (1 − 1/ratio)) read
+COMP 3 as 4.8 dB on the tone: with a 1 ms attack an RMS detector rides the
+tone's own 110 Hz ripple and reads above its RMS. So `tapeCompThresholdDb`
+simulates the stage on the tone and bisects (scale-invariant, so one offset per
+knob value, memoised; ~40 ms the first time). The fitted settings come out at
+COMP 8.5 (drums) and 11 (drum machine) on that scale; the fit is sharp in COMP
+(drums at 6: 1.01, drum machine at 9: 0.98), so those two are steps of their own
+(`TAPE_COMPS` 0 / 3 / 6 / 8.5 / 11 / 14).
+
+**Wiring.** Makeup: the region runs through the bump and the compressor once, up
+front, and TAPE is measured on that — the continuous stream the kernel sees, so
+the fast search stays exact (tested fast = exact with the cubic and hysteresis,
+peak back on the source to 0.05 dB). Meter: the clean reference is multiplied by
+the compressor's per-sample gain, so the gain never reads as saturation (tested
+< −40 dB at COMP 14). The output trim needs nothing: it renders the chain with
+0.25 s of pre-roll, past the 16.5 ms release.
+
+**Within-cycle check on the clip** (COMP 8.5 / TAPE 6 against TAPE 6 alone):
+20–40 % bins −1.3 to −2.0 dB (TAPE alone −0.1 to −0.2, Studer −3.3 to −7.5);
+samples ≥ −0.25 dB of the top 14 / 7 / 7 (TAPE alone 19 / 27 / 51, Studer
+12 / 2 / 4). Closer in shape, still less of the whole-cycle drop than the Studer.
+
+⚠ Two renders of one emulation, both drums, made at different settings; nothing
+auditioned; nothing measured on voice, where a 1 ms / 16.5 ms gain riding a low vowel's
+ripple may read as distortion — untested.

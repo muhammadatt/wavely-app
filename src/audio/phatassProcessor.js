@@ -1,7 +1,7 @@
 /**
  * PHAT*SS — worklet kernel.
  *
- * TAPE (full-band cubic) → makeup → Warmth → Guard → Tape shelf (with Soften
+ * [head bump → tape compression →] TAPE (full-band cubic) → makeup → Warmth → Guard → Tape shelf (with Soften
  * on its own band) → Output.
  *
  * TAPE comes FIRST (owner's call): Warmth then shapes the already-rounded
@@ -36,6 +36,7 @@ import { SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { WarmthPeakGuard } from './dsp/warmthGuard.js'
 import { DelayLine } from './dsp/oversample.js'
 import { BiquadCascade, lowShelf } from './dsp/biquad.js'
+import { TapeCompressor } from './dsp/tapeComp.js'
 import { toKernelParams, PHATASS_DEFAULTS, WARMTH_LAYERS, slotOversample, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q } from './phatassParams.js'
 
 export const PHATASS_KERNEL_DEFAULTS = toKernelParams(PHATASS_DEFAULTS)
@@ -55,6 +56,8 @@ export class PhatassKernel {
     this.bump = new BiquadCascade(1, 2)
     this.meterBump = new BiquadCascade(1, 2)
     this.bumpDb = 0
+    // Tape compression (bench only): after the bump, before the curve. Zero latency.
+    this.comp = new TapeCompressor(sampleRate)
     this.tapeInit = false
     this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length, oversample: slotOversample() })
     this.warmthInit = false
@@ -115,6 +118,7 @@ export class PhatassKernel {
       this.warmthInit = true
     }
     if (p.warmthGuard) this.guard.setParams(p.warmthGuard)
+    if (p.tapeComp) this.comp.setParams(p.tapeComp)
     if (p.tapeLayer) {
       this.tape.setParams({ layers: [p.tapeLayer] }, immediate || !this.tapeInit)
       this.tapeInit = true
@@ -147,12 +151,13 @@ export class PhatassKernel {
     }
   }
 
-  /** The head bump (if any), TAPE, then its makeup gain, in place. */
+  /** The head bump (if any), tape compression (if on), TAPE, then its makeup gain, in place. */
   tapeAndMakeup(chs, n) {
     if (this.bumpDb > 0) {
       this.bump.ensureChannels(chs.length)
       for (let ch = 0; ch < chs.length; ch++) this.bump.process(chs[ch], chs[ch], n, ch)
     }
+    this.comp.process(chs, n)
     this.tape.process(chs, chs, n)
     const mk = this.tapeMakeupLin
     if (mk === 1) return
@@ -198,17 +203,23 @@ export class PhatassKernel {
       let added = 0
       let clean = 0
       const bumped = this.bumpDb > 0
-      if (bumped) {
+      // The compressor's gain is a gain, not saturation: the clean reference
+      // follows it (sample-aligned before the delay; valid in TAPE-first order).
+      const comped = this.comp.p.on && !tapeLast
+      if (bumped || comped) {
         this.meterBump.ensureChannels(nOut)
         while (this.meterIn.length < nOut) this.meterIn.push(new Float32Array(n))
       }
       for (let ch = 0; ch < nOut; ch++) {
         const d = this.meterDelays[ch]
         let x = inputChannels[ch < nIn ? ch : nIn - 1]
-        if (bumped) {
+        if (bumped || comped) {
           if (this.meterIn[ch].length < n) this.meterIn[ch] = new Float32Array(n)
-          this.meterBump.process(x, this.meterIn[ch], n, ch)
-          x = this.meterIn[ch]
+          const m = this.meterIn[ch]
+          if (bumped) this.meterBump.process(x, m, n, ch)
+          else m.set(x.subarray(0, n))
+          if (comped) { const gs = this.comp.gains; for (let i = 0; i < n; i++) m[i] *= gs[i] }
+          x = m
         }
         const y = outputChannels[ch]
         for (let i = 0; i < n; i++) {

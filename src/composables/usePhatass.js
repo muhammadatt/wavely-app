@@ -173,9 +173,9 @@ export function usePhatass() {
       scheduleReadout()
       if (phParams.tapeOrder === 'last' && Number(phParams.tape) > 0) scheduleTapeMakeup()
     }
-    // The curve, the low push, the head bump and the order change what TAPE takes off the peak;
+    // The curve, the low push, the head bump, the compressor and the order change what TAPE takes off the peak;
     // the interim rule (never more than the knob) holds either way.
-    if ((name === 'tapeCurve' || name === 'tapeOrder' || name === 'tapeLowPush' || name === 'tapeHeadBump') && Number(phParams.tape) > 0) {
+    if ((name === 'tapeCurve' || name === 'tapeOrder' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'tapeComp') && Number(phParams.tape) > 0) {
       setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape)))
       scheduleTapeMakeup()
     }

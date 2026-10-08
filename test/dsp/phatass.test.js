@@ -11,6 +11,7 @@ import { processPhatassBuffer, PhatassKernel } from '../../src/audio/phatassProc
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, softenAmount, SOFTEN_MAX, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
   DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ,
+  TAPE_COMPS, TAPE_COMP_VOICING,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
 } from '../../src/audio/phatassParams.js'
@@ -971,4 +972,72 @@ test('TAPE HYSTERESIS: the knob is calibrated on a steady sine, and the makeup s
   let pk = 0
   for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
   assert.ok(Math.abs(db(pk / peak)) < 0.05, `peak ${db(pk / peak).toFixed(3)} dB off the source`)
+})
+
+test('TAPE compression: off ships, only rides along while TAPE is up, and off is bit-exact', () => {
+  assert.deepEqual(TAPE_COMPS, [0, 3, 6, 8.5, 11, 14])
+  assert.equal(PHATASS_DEFAULTS.tapeComp, 0)
+  assert.equal(toKernelParams({ tape: 2, tapeComp: 6 }).tapeComp.on, true)
+  assert.equal(toKernelParams({ tape: 0, tapeComp: 6 }).tapeComp.on, false)
+  assert.equal(toKernelParams({ tape: 2 }).tapeComp.on, false)
+  const { x, peak } = kickTrack()
+  const p = { warmth: 0, tame: 0, soften: 0, tape: 3, tapeMakeupDb: 0, warmthCeilingDb: db(peak) }
+  const a = run(x, p).channelData[0]
+  const b = run(x, { ...p, tapeComp: 0 }).channelData[0]
+  assert.deepEqual(a, b)
+})
+
+test('TAPE compression: a steady low tone at the selection peak loses the COMP number; the detector leans on the lows', () => {
+  for (const tapeComp of [3, 8.5, 14]) {
+    const p = { warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeComp, tapeMakeupDb: 0, warmthCeilingDb: db(0.5) }
+    const lo = run(sine(55, 0.5, SR * 2), p)
+    const loDb = db(toneAmp(lo.channelData[0].subarray(lo.latencySamples), 55, SR, 2 * SR - 4096) / 0.5)
+    assert.ok(Math.abs(loDb + tapeComp) < 0.1, `COMP ${tapeComp}: 55 Hz moved ${loDb.toFixed(2)} dB`)
+    // The same peak at 2 kHz reads TAPE_COMP_VOICING.tiltDb lower, so it is turned down less.
+    const hi = run(sine(2000, 0.5, SR * 2), p)
+    const hiDb = db(toneAmp(hi.channelData[0].subarray(hi.latencySamples), 2000, SR, 2 * SR - 4096) / 0.5)
+    assert.ok(hiDb > loDb + 0.5, `COMP ${tapeComp}: 2 kHz ${hiDb.toFixed(2)} vs 55 Hz ${loDb.toFixed(2)} dB`)
+  }
+  assert.equal(TAPE_COMP_VOICING.detector, 'rms')
+})
+
+test('TAPE compression is a full-band gain that lets go between hits', () => {
+  // The kick track's 2 kHz bed is quiet: it ducks under a kick and is back within the release.
+  const { x, peak } = kickTrack()
+  const p = { warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeComp: 9, tapeMakeupDb: 0, warmthCeilingDb: db(peak) }
+  const { channelData: [y], latencySamples: L } = run(x, p)
+  const bed = (from, to) => db(toneAmp(y.subarray(L), 2000, from, to) / 0.1)
+  const under = bed(Math.round(0.505 * SR), Math.round(0.53 * SR))
+  const after = bed(Math.round(0.85 * SR), Math.round(0.98 * SR))
+  assert.ok(under < -3, `bed under the kick ${under.toFixed(2)} dB`)
+  assert.ok(Math.abs(after) < 0.2, `bed between hits ${after.toFixed(2)} dB`)
+})
+
+test('TAPE compression: the makeup is measured through it (fast = exact) and lands the peak on the source', () => {
+  const { x, peak } = kickTrack()
+  for (const [tapeComp, tapeCurve] of [[8.5, 'cubic'], [14, 'cubic'], [8.5, 'hysteresis']]) {
+    const p = { warmth: 0, tame: 0, soften: 0, tape: 6, tapeComp, tapeCurve, tapeHeadBump: 3, warmthCeilingDb: db(peak) }
+    const exact = measureTapeMakeup([x], SR, p).makeupDb
+    const fast = measureTapeMakeup([x], SR, p, { exact: false }).makeupDb
+    assert.ok(exact > 6, `COMP ${tapeComp}: makeup ${exact.toFixed(2)} dB`)
+    assert.ok(Math.abs(fast - exact) < 0.02, `COMP ${tapeComp} ${tapeCurve}: fast ${fast.toFixed(3)} vs exact ${exact.toFixed(3)}`)
+    const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: exact })
+    let pk = 0
+    for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
+    assert.ok(Math.abs(db(pk / peak)) < 0.05, `COMP ${tapeComp} ${tapeCurve}: peak ${db(pk / peak).toFixed(3)} dB off the source`)
+  }
+})
+
+test('the saturation meter does not read tape compression as saturation', () => {
+  const { x, peak } = kickTrack()
+  const meter = (tapeComp) => {
+    const k = new PhatassKernel(SR)
+    k.setParams(toKernelParams({ warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeComp, warmthCeilingDb: db(peak) }), true)
+    k.enableMeter()
+    const out = new Float32Array(128)
+    for (let o = 0; o + 128 <= x.length; o += 128) k.process([x.subarray(o, o + 128)], [out], 128)
+    const m = k.takeMeter()
+    return 10 * Math.log10(m.added / m.clean)
+  }
+  assert.ok(meter(14) < -40, `meter read ${meter(14).toFixed(1)} dB`)
 })
