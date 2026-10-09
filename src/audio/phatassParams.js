@@ -20,7 +20,6 @@ import {
 import { unitDriveU } from './dsp/shaperCurves.js'
 import { JilesAtherton, hysteresisSmallGain, hysteresisShapeVersion } from './dsp/hysteresis.js'
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
-import { TAPE_COMP_OFF, tapeCompThresholdDb } from './dsp/tapeComp.js'
 
 export const PHATASS_DEFAULTS = {
   // 0–10 — low-end harmonic warmth: how much of what the two fixed
@@ -51,20 +50,6 @@ export const PHATASS_DEFAULTS = {
   // TAPE's curve, before the makeup — the tape machine's playback-head low lift,
   // at full size in the output. Only while TAPE is up. 0 ships. Bench only.
   tapeHeadBump: 0,
-  // dB of TAPE COMPRESSION (`TAPE_COMPS`, `tapeCompParams`): a fast, low-weighted
-  // gain stage before or after TAPE's curve (`tapeCompPos`) — the envelope-timescale
-  // squash the Studer puts on whole kick cycles, which no curve can. The number is
-  // the gain reduction a steady low sine at the selection's peak gets. Only while
-  // TAPE is up. 0 ships. Bench only.
-  tapeComp: 0,
-  // Tape comp's voicing (`TAPE_COMP_MODES`): 'slow' (default — the low-weighted
-  // RMS compressor, whole kick cycles turned down, shape kept) or 'fast' (a peak
-  // stage that lets go within a kick's half-cycle: a soft clipper with a short
-  // memory). Bench only.
-  tapeCompMode: 'slow',
-  // Where Tape comp sits (`TAPE_COMP_POSITIONS`): 'post' (default — after TAPE's
-  // curve, before the head bump) or 'pre' (ahead of the curve). Bench only.
-  tapeCompPos: 'post',
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
   // never a user setting; applied only while TAPE is up.
@@ -447,8 +432,6 @@ export function toKernelParams(params) {
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush),
     headBumpDb: Number(p.tape) > 0 ? clamp(Number(p.tapeHeadBump) || 0, 0, TAPE_HEAD_BUMPS[TAPE_HEAD_BUMPS.length - 1]) : 0,
-    compPos: p.tapeCompPos === 'pre' ? 'pre' : 'post',
-    tapeComp: tapeCompParams(p.tape, p.tapeComp, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCompMode),
     // Signed: the head bump (after the curve) can leave the peak ABOVE the source.
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb)
       ? clamp(p.tapeMakeupDb, -TAPE_MAKEUP_MAX_DB, TAPE_MAKEUP_MAX_DB) : 0,
@@ -696,91 +679,21 @@ export const TAPE_HEAD_BUMP_Q = 0.7
  * peak above the source); with a bump up it is measured the exact way in
  * preview too (the shelf's memory outlasts the fast search's short pre-roll).
  */
-/**
- * Where Tape comp sits, bench only: 'post' (default — after TAPE's curve, before
- * the head bump) or 'pre' (ahead of the curve, where both voicings were fitted).
- * Loud-hit fit on the Studer drum machine with FAST: PRE 11 / TAPE 11 0.979,
- * POST 11.6 / TAPE 10.5 0.960 — a little dirtier (added distortion on loud hits
- * −14.0 / −14.5 dB re signal against −15.7 / −17.1, the Studer −13.7 / −13.1) and
- * 0.5 dB more peak kept; the two orders differ by −21 dB re the signal. On the
- * drums the fit runs TAPE to ~0 either way, so the order does not matter there.
- * ⚠ SLOW was fitted PRE only; POST with SLOW is untuned (its refit after the
- * curve wanted 0.35 ms / 10 ms). With the comp POST the makeup is measured the
- * exact way (TAPE over the region, then the comp, then the bump).
- */
-export const TAPE_COMP_POSITIONS = ['pre', 'post']
 const TAPE_LOW_PUSH_Q = 0.7
 
-/**
- * TAPE COMPRESSION, bench only (dsp/tapeComp.js): fitted AHEAD of TAPE's curve
- * (now a PRE / POST choice, `TAPE_COMP_POSITIONS`, POST default). Measured against two Studer A800 dry/wet drum pairs, the
- * Studer turns a loud kick's WHOLE first cycles down — samples at 20–40 % of
- * the cycle's peak already 3–7 dB under its linear path while quiet material
- * between hits passes untouched, the cycle shrunken but still pointed — and
- * lets go within tens of ms. A curve, memoryless or hysteretic, only flattens
- * the crest (63–83 samples within 0.25 dB of the top on our renders, 4–12 on
- * the Studer's). The VOICING is fitted (simulate-and-match on per-hit peak,
- * 0–10 ms, 10–50 ms and 50–200 ms gain against the Studer's own linear path,
- * hits within 24 dB of the loudest): RMS detector, attack 1 ms, release
- * 16.5 ms, ratio 6, soft knee 7 dB, detector high shelf −4.5 dB at 160 Hz so
- * the lows drive it. ONE voicing fits both renders as well as each one's free
- * fit (drums 0.52 dB rms per-hit error at COMP 8.5 / TAPE 6, free 0.52;
- * drum machine 0.87 at COMP 11 / TAPE 10.5, free 0.84), against TAPE alone
- * 1.55 / 1.15 (cubic 12) and 1.38 / 1.57 (hysteresis 8). Each timing is a
- * clear minimum (drums / drum machine: attack 0.3 → 0.61 / 0.94, 3 → 0.72 /
- * 0.90; release 8 → 0.59 / 0.88, 35 → 0.69 / 0.94; PEAK detector 1.09 / 1.07;
- * no tilt 0.82 / 1.11). COMP alone is not enough on the drum machine (1.77):
- * TAPE still does the crest. The fit is sharp in COMP (drums at COMP 6:
- * 1.01; drum machine at 9: 0.98), hence the 8.5 and 11 steps. The number is
- * the loss of a steady 55 Hz tone at the selection's peak, SOLVED BY SIMULATION
- * (`tapeCompThresholdDb`): the 1 ms attack rides the tone's ripple, so the
- * static curve's arithmetic undershot by ~1.8 dB. ⚠ Two renders of one emulation, both drums;
- * nothing auditioned, nothing on voice.
+/*
+ * TAPE COMPRESSION (October 2026) was built, fitted and REMOVED (owner's call):
+ * a feed-forward compressor around TAPE's curve (dsp/tapeComp.js, recoverable
+ * at 29815f3) — SLOW (RMS, 1 / 16.5 ms, low-weighted) and FAST (peak, 0.85 /
+ * 1.8 ms) voicings, PRE or POST the curve. It fitted the Studer's per-hit
+ * numbers mostly by lowering what the curve clipped on kicks, and by ear and
+ * measured it did not flatten attacks: with no lookahead the first ms of each
+ * hit is through before it acts, so it lowered the BODY and left attacks more
+ * prominent (drum machine, first 2 ms re 15–30 ms body: TAPE only 8.6 dB, SLOW
+ * PRE 9.4, FAST POST 8.5, the Studer 4.0). POST was near-inert besides — its
+ * threshold was calibrated on the source peak but it saw TAPE's pre-makeup
+ * output. Full record in docs/claude-dev-log.md.
  */
-export const TAPE_COMPS = [0, 3, 6, 8.5, 11, 14]
-export const TAPE_COMP_VOICING = Object.freeze({
-  ratio: 6, kneeDb: 7, attackMs: 1, releaseMs: 16.5, detector: 'rms', tiltDb: 4.5, tiltHz: 160,
-})
-
-/**
- * FAST mode: the same stage with a different fitted voicing — PEAK detector,
- * attack 0.85 ms, release 1.8 ms, ratio 7.4, knee 12, no tilt. Found after the
- * owner heard the slow voicing keep each hit's sharp attack (the 1 ms RMS
- * attack lets the front through, and ahead of the curve it lowers what TAPE
- * clips) where the Studer attenuates kick, snare and hat attacks. Fitted on the
- * loud hits (within 12 dB of the loudest; per-hit peak and 0–2 / 2–5 / 5–10 /
- * 10–25 / 25–50 / 50–200 ms gain from onset) of both Studer drum pairs, alone
- * ahead of TAPE: drum machine 0.98 at FAST 11 / TAPE 11, drums 0.94 at
- * FAST 7.8 / TAPE 1 (0.96–0.98 at the 8.5 step), against the slow voicing's
- * 1.17 / 1.09 on the same score — better than TAPE → slow comp (1.09 / 0.97) or
- * slow + fast together (0.97 / 1.01). Two starting points converged on the
- * same voicing; 1–2 ms of lookahead changed nothing.
- *
- * ⚠ IT IS A WAVESHAPER WITH MEMORY, NOT A COMPRESSOR: the release is shorter
- * than a kick's half-cycle, so on a 55 Hz tone at the selection's peak the gain
- * swings −5.0 → −12.7 dB inside every cycle (200 Hz −9.2 → −11.7; 2 kHz a
- * steady −10.6). It bends a kick's crests, rising edge first through, and
- * whatever rides on a crest (snare click, hats) goes down with it. Measured
- * added distortion on loud hits (residual after a per-5 ms best gain, dB re
- * signal; AAC floor −30 to −37): drum machine kicks / others Studer −13.7 /
- * −13.1, FAST −15.6 / −17.2, SLOW −25.2 / −16.7; drums Studer −13.3 / −17.5,
- * FAST −16.3 / −20.9, SLOW −17.5 / −25.1. The Studer distorts more than either;
- * FAST is the closer on kicks. Preferred by ear (owner) over SLOW on both A/B
- * sequences. The knob is the same 55 Hz calibration, solved for this voicing.
- */
-export const TAPE_COMP_MODES = ['slow', 'fast']
-export const TAPE_COMP_FAST_VOICING = Object.freeze({
-  ratio: 7.4, kneeDb: 12, attackMs: 0.85, releaseMs: 1.8, detector: 'peak', tiltDb: 0, tiltHz: 160,
-})
-
-/** The tape compressor's kernel params: off unless both TAPE and the COMP choice are up. */
-export function tapeCompParams(tapeDb, compDb, peakDb, mode = 'slow') {
-  const c = clamp(Number(compDb) || 0, 0, TAPE_COMPS[TAPE_COMPS.length - 1])
-  if (!(Number(tapeDb) > 0) || !(c > 0)) return { ...TAPE_COMP_OFF }
-  const v = mode === 'fast' ? TAPE_COMP_FAST_VOICING : TAPE_COMP_VOICING
-  return { ...v, on: true, thresholdDb: tapeCompThresholdDb(c, peakDb, v) }
-}
-
 /**
  * The TAPE layer's kernel params for a knob position, the selection's peak,
  * the curve and the low push. ⚠ With a push the knob is a DRIVE, solved as if

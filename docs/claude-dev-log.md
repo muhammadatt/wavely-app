@@ -6477,3 +6477,38 @@ that moves inside a cycle, and with FAST PRE + a bump it read −24.6 dB of
 phantom "saturation" on a clean kick track. The reference now follows the chain
 order — the comp's gain on the input (PRE) or TAPE's latency later (POST), then
 the bump — and reads −79 (PRE) / −65 (POST) dB; the test asks for < −50.
+
+### PHAT*SS — Tape comp removed (October 2026)
+
+The owner, on hysteresis / push 6 / bump 3 / comp 8.5 SLOW PRE / output trim
+PEAK: no comp variation had a significant effect on drum attacks, and what the
+SLOW PRE comp did do — cut TAPE's distortion on kicks — was never the goal.
+Measured with those settings (hysteresis TAPE 8, Warmth and shelf off; loud hits
+within 12 dB of the loudest; energy in the first 2 ms / 2–5 ms from onset and
+the hit's peak, each re its own 15–30 ms body, so level and makeup drop out):
+
+| | DM 0–2 ms | DM 2–5 | DM peak | Drums 0–2 | Drums 2–5 | Drums peak |
+|---|---|---|---|---|---|---|
+| dry | 10.5 | 9.1 | 16.9 | −6.8 | −2.2 | 8.3 |
+| Studer | 4.0 | 6.5 | 11.7 | −8.6 | −6.5 | 6.6 |
+| TAPE only | 8.6 | 7.9 | 12.6 | −3.4 | 0.1 | 4.3 |
+| SLOW PRE 8.5 | 9.4 | 8.2 | 13.4 | −1.4 | 2.0 | 5.7 |
+| SLOW POST 8.5 | 8.6 | 7.9 | 12.6 | −3.2 | 0.2 | 4.4 |
+| FAST PRE 8.5 | 8.9 | 7.3 | 12.9 | −2.2 | 0.7 | 4.2 |
+| FAST POST 8.5 | 8.5 | 7.3 | 12.5 | −2.7 | 0.4 | 4.0 |
+| FAST POST 14 | 8.4 | 5.7 | 13.1 | −0.1 | 1.2 | 4.4 |
+
+A feed-forward compressor with no lookahead lets each hit's first millisecond
+through and then lowers the body, so attack-re-body goes UP, not down (SLOW
+PRE). SLOW POST is TAPE only to the decimal: its threshold was calibrated on
+the source's peak, but after the curve it saw TAPE's output before the makeup,
+several dB lower, so it barely engaged. Note also that hysteresis TAPE alone
+RAISES the drums' onset re body (−6.8 → −3.4: it squashes the sustained body
+harder than the quiet start of a hit) where the Studer lowers it (−8.6).
+
+Removed: `dsp/tapeComp.js`, `tapeComp` / `tapeCompMode` / `tapeCompPos` and
+their constants, the kernel stage and its meter alignment, the makeup's
+compressor paths and the bench rows (recoverable at `29815f3`). The chain is
+TAPE's curve → head bump → makeup → Warmth → guard → shelf → Output. A transient
+shaper (fast-vs-slow envelope with a few ms of lookahead) was proposed for the
+attacks and set aside: the owner expects it to suit drums but not other sources.
