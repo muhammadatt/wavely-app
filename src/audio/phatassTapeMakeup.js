@@ -31,27 +31,16 @@
  *           by construction (it trusts the two margins), which is why apply
  *           still measures the exact way.
  *
- * ⚠ WITH `tapeOrder: 'last'` (Warmth → guard → TAPE, kept to audition) TAPE's
- * input is Warmth's output, so the fast search does not apply: both paths render
- * the chain up to the makeup (Warmth, guard, TAPE) over the whole region — the
- * pre-October-2026 measurement, ~40 s per 10 min.
+ * TAPE COMPRESSION PRE (bench): the region runs through the compressor once,
+ * up front (cheap: no oversampling), and TAPE is measured on that — the
+ * continuous stream the kernel sees, so the fast search still has only TAPE to
+ * bound.
  *
- * HEAD BUMP (bench): the low shelf ahead of TAPE is applied to the region once,
- * up front, and both paths measure TAPE on that — while the makeup still
- * restores the SOURCE's peak (the bump lifts the kick into the curve; what
- * comes back out is put on the selection's own peak).
- *
- * TAPE COMPRESSION (bench) is handled the same way: the region runs through
- * the bump and the compressor once, up front (cheap: no oversampling), and TAPE
- * is measured on that. The compressor has memory (16.5 ms release), so this is
- * the continuous stream the kernel sees, not a per-block approximation; the
- * fast search then only has TAPE to bound, as before.
- *
- * HEAD BUMP POST (bench): the bump follows the curve, so the measurement renders
- * TAPE over the whole region and shelves its output — the exact way, in preview
- * as well (the shelf's memory outlasts the fast search's short pre-roll). The
- * lift can leave the peak above the source, so this is the one case where the
- * makeup may come out NEGATIVE.
+ * HEAD BUMP and TAPE COMPRESSION POST (bench) follow the curve, so the
+ * measurement renders TAPE over the whole region, then the compressor, then the
+ * shelf — the exact way, in preview as well (their memory outlasts the fast
+ * search's short pre-roll). The bump can leave the peak ABOVE the source, so
+ * the makeup is signed.
  *
  * Pure: no worklet, no DOM; runs in the measurement worker and under node.
  */
@@ -59,7 +48,6 @@
 import { processSaturationBenchBuffer, SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { toKernelParams, PHATASS_DEFAULTS, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q } from './phatassParams.js'
 import { BiquadCascade, lowShelf } from './dsp/biquad.js'
-import { processPhatassBuffer } from './phatassProcessor.js'
 import { TapeCompressor } from './dsp/tapeComp.js'
 
 /** Block size for the fast search, samples. */
@@ -106,22 +94,8 @@ function exactPeak(channelData, sampleRate, layer) {
   return peakOf(out, L, Math.min(L + n + 64, n + pad))
 }
 
-/** TAPE last: the whole chain as it reaches the makeup — shelf, Soften, Output and makeup out. */
-function chainPeak(channelData, sampleRate, p) {
-  const n = channelData[0].length
-  const pad = 8192
-  const padded = channelData.map((c) => {
-    const x = new Float32Array(n + pad)
-    x.set(c)
-    return x
-  })
-  const kp = toKernelParams({ ...p, tame: 0, soften: 0, output: 0, tapeMakeupDb: 0 })
-  const { channelData: out, latencySamples: L } = processPhatassBuffer(padded, sampleRate, kp)
-  return peakOf(out, L, Math.min(L + n + 64, n + pad))
-}
-
-/** TAPE then the head bump over the whole region (post position), its peak. */
-function postBumpPeak(channelData, sampleRate, kp) {
+/** TAPE, then (POST) the compressor and the head bump, over the whole region: its peak. */
+function postChainPeak(channelData, sampleRate, kp) {
   const n = channelData[0].length
   const pad = 4096
   const padded = channelData.map((c) => {
@@ -129,11 +103,14 @@ function postBumpPeak(channelData, sampleRate, kp) {
     x.set(c)
     return x
   })
-  const { channelData: out, latencySamples: L } = processSaturationBenchBuffer(padded, sampleRate, { layers: [kp.tapeLayer] }, { slots: 1 })
-  return peakOf(headBumped(out, sampleRate, kp.headBumpDb), L, Math.min(L + n + 64, n + pad))
+  const { channelData: tape, latencySamples: L } = processSaturationBenchBuffer(padded, sampleRate, { layers: [kp.tapeLayer] }, { slots: 1 })
+  let out = tape
+  if (kp.tapeComp?.on && kp.compPos !== 'pre') out = compressed(out, sampleRate, kp.tapeComp)
+  if (kp.headBumpDb > 0) out = headBumped(out, sampleRate, kp.headBumpDb)
+  return peakOf(out, L, Math.min(L + n + 64, n + pad))
 }
 
-/** The region through the head bump, as TAPE hears it in the kernel. */
+/** The signal through the head bump. */
 function headBumped(channelData, sampleRate, db) {
   const c = lowShelf(sampleRate, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q, db)
   return channelData.map((x) => {
@@ -232,16 +209,13 @@ export function measureTapeMakeup(channelData, sampleRate, params, { exact = tru
   }
   const kp = toKernelParams(p)
   // The head bump and compressor sit inside the chain render already; otherwise TAPE hears the source through them.
-  const post = kp.headBumpPos === 'post' && kp.headBumpDb > 0
-  let tapeIn = kp.tapeOrder !== 'last' && kp.headBumpDb > 0 && !post ? headBumped(channelData, sampleRate, kp.headBumpDb) : channelData
-  if (kp.tapeOrder !== 'last' && kp.tapeComp?.on) tapeIn = compressed(tapeIn, sampleRate, kp.tapeComp)
-  // A post bump comes after the curve: always the exact render, then the bump, then the peak.
-  const outPk = kp.tapeOrder === 'last'
-    ? chainPeak(channelData, sampleRate, p)
-    : post ? postBumpPeak(tapeIn, sampleRate, kp)
-      : exact ? exactPeak(tapeIn, sampleRate, kp.tapeLayer) : fastPeak(tapeIn, sampleRate, kp.tapeLayer)
-  // Post, the lift can put the peak above the source: then the makeup is a cut.
-  const raw = outPk > 0 ? toDb(inPk) - toDb(outPk) : 0
-  const makeupDb = kp.headBumpPos === 'post' ? raw : Math.max(0, raw)
+  const compPre = kp.tapeComp?.on && kp.compPos === 'pre'
+  const after = kp.headBumpDb > 0 || (kp.tapeComp?.on && !compPre)
+  const tapeIn = compPre ? compressed(channelData, sampleRate, kp.tapeComp) : channelData
+  // Anything after the curve (the bump, a POST comp) means the exact render, preview included.
+  const outPk = after ? postChainPeak(tapeIn, sampleRate, kp)
+    : exact ? exactPeak(tapeIn, sampleRate, kp.tapeLayer) : fastPeak(tapeIn, sampleRate, kp.tapeLayer)
+  // Signed: the bump can leave the peak above the source, and then the makeup is a cut.
+  const makeupDb = outPk > 0 ? toDb(inPk) - toDb(outPk) : 0
   return { makeupDb, peakDb: toDb(outPk), inputPeakDb: toDb(inPk) }
 }

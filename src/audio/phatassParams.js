@@ -42,25 +42,17 @@ export const PHATASS_DEFAULTS = {
   // TAPE's curve (`TAPE_CURVES`): 'cubic' (the Studer fit; a hard clip past
   // 3.52 dB), 'tanh' or 'algebraic' (both never flat; algebraic bends earliest).
   tapeCurve: 'cubic',
-  // Where TAPE sits: 'first' (default — TAPE → makeup → Warmth, so Warmth
-  // shapes the rounded signal) or 'last' (Warmth → guard → TAPE → makeup, the
-  // order before October 2026, kept to audition). See `TAPE_ORDERS`.
-  tapeOrder: 'first',
   // dB of LOW PUSH (`TAPE_LOW_PUSHES`): a low shelf at TAPE_LOW_PUSH_HZ into
   // TAPE's curve and its exact inverse after it, so the lows saturate first
   // (a kick's low end gets squashed) while the clean path stays flat. 0 ships.
   // Bench only. The TAPE knob keeps its no-push drive (`tapeLayer`).
   tapeLowPush: 0,
-  // dB of HEAD BUMP (`TAPE_HEAD_BUMPS`): a low shelf at TAPE_HEAD_BUMP_HZ AHEAD
-  // of TAPE that stays in the output — the tape machine's low lift, which then
-  // drives the kick into the curve. Only while TAPE is up. 0 ships. Bench only.
+  // dB of HEAD BUMP (`TAPE_HEAD_BUMPS`): a low shelf at TAPE_HEAD_BUMP_HZ AFTER
+  // TAPE's curve, before the makeup — the tape machine's playback-head low lift,
+  // at full size in the output. Only while TAPE is up. 0 ships. Bench only.
   tapeHeadBump: 0,
-  // Where the head bump sits (`TAPE_HEAD_BUMP_POSITIONS`): 'pre' (default —
-  // ahead of TAPE, driving the kick into the curve) or 'post' (after TAPE,
-  // where a real machine's playback head puts it). Bench only.
-  tapeHeadBumpPos: 'pre',
   // dB of TAPE COMPRESSION (`TAPE_COMPS`, `tapeCompParams`): a fast, low-weighted
-  // gain stage between the head bump and TAPE's curve — the envelope-timescale
+  // gain stage before or after TAPE's curve (`tapeCompPos`) — the envelope-timescale
   // squash the Studer puts on whole kick cycles, which no curve can. The number is
   // the gain reduction a steady low sine at the selection's peak gets. Only while
   // TAPE is up. 0 ships. Bench only.
@@ -70,6 +62,9 @@ export const PHATASS_DEFAULTS = {
   // stage that lets go within a kick's half-cycle: a soft clipper with a short
   // memory). Bench only.
   tapeCompMode: 'slow',
+  // Where Tape comp sits (`TAPE_COMP_POSITIONS`): 'post' (default — after TAPE's
+  // curve, before the head bump) or 'pre' (ahead of the curve). Bench only.
+  tapeCompPos: 'post',
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
   // never a user setting; applied only while TAPE is up.
@@ -452,12 +447,11 @@ export function toKernelParams(params) {
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush),
     headBumpDb: Number(p.tape) > 0 ? clamp(Number(p.tapeHeadBump) || 0, 0, TAPE_HEAD_BUMPS[TAPE_HEAD_BUMPS.length - 1]) : 0,
-    headBumpPos: p.tapeHeadBumpPos === 'post' ? 'post' : 'pre',
+    compPos: p.tapeCompPos === 'pre' ? 'pre' : 'post',
     tapeComp: tapeCompParams(p.tape, p.tapeComp, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCompMode),
-    tapeOrder: p.tapeOrder === 'last' ? 'last' : 'first',
-    // A post bump can leave the peak ABOVE the source, so its makeup may be negative.
+    // Signed: the head bump (after the curve) can leave the peak ABOVE the source.
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb)
-      ? clamp(p.tapeMakeupDb, p.tapeHeadBumpPos === 'post' ? -TAPE_MAKEUP_MAX_DB : 0, TAPE_MAKEUP_MAX_DB) : 0,
+      ? clamp(p.tapeMakeupDb, -TAPE_MAKEUP_MAX_DB, TAPE_MAKEUP_MAX_DB) : 0,
     cornerHz: shelf.cornerHz,
     thresholdDb: voice + shelf.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
     detectCornerHz: det4k ? DETECT_4K_HZ : null,
@@ -574,16 +568,13 @@ export const TAPE_FALLBACK_CREST_DB = 18
  * the loop from rest, can lose a different amount — the makeup is measured.
  */
 export const TAPE_CURVES = ['cubic', 'tanh', 'algebraic', 'hysteresis']
-/**
- * TAPE's place in the chain. 'first' ships; 'last' is the pre-October-2026
- * order, rendered at Warmth 5 / TAPE 3 against 'first' before it was made
- * selectable: within 0.1 LU, the difference −34 / −31 dB re the output on
- * bright / dull narration (spread 500 Hz–16 kHz) and −22 dB on guitar (mostly
- * under 1 kHz — TAPE clipping Warmth's low end). Not auditioned. ⚠ In 'last'
- * TAPE's input depends on Warmth, so its makeup is measured through Warmth
- * (the whole chain, no fast search) and Warmth's knobs re-measure it.
+/*
+ * TAPE's place in the chain is PINNED FIRST (owner's call, October 2026): TAPE →
+ * makeup → Warmth → guard. The 'last' order (Warmth → guard → TAPE → makeup,
+ * the pre-October-2026 chain) was on the bench to audition and is gone; it
+ * rendered within 0.1 LU of 'first' at Warmth 5 / TAPE 3, the difference −34 /
+ * −31 dB re the output on narration and −22 on guitar.
  */
-export const TAPE_ORDERS = ['first', 'last']
 export const TAPE_CURVE = TAPE_CURVES[0]
 const TAPE_LAYER = {
   amountDb: 0, emphDb: 0, loHz: SAT_BAND_MIN_HZ, hiHz: SAT_BAND_MAX_HZ, mode: 'full',
@@ -677,8 +668,9 @@ export const TAPE_LOW_PUSH_HZ = 150
 
 /**
  * TAPE's HEAD BUMP, bench only: dB of low shelf (TAPE_HEAD_BUMP_HZ, Q 0.7)
- * AHEAD of TAPE that is NOT undone — unlike the low push, the lift stays in the
- * output, as a tape machine's does. Fitted on two Studer A800 dry/wet drum
+ * AFTER TAPE's curve (pinned there, see below) that is NOT undone — unlike the
+ * low push, the lift stays in the output, as a tape machine's does. HISTORY:
+ * it was built AHEAD of the curve, and the figures that follow are from then. Fitted on two Studer A800 dry/wet drum
  * pairs: their linear paths (quiet frames) lift the lows ~+3.5–4 dB under
  * ~40 Hz re 1 kHz, flat from ~80 Hz. Placed ahead of the curve it reproduces
  * the drum machine's kick-against-snare balance (energy of the first 100 ms of
@@ -686,32 +678,42 @@ export const TAPE_LOW_PUSH_HZ = 150
  * + bump 3 / 6 dB: 10.89 / 11.67). The same EQ AFTER the curve overshot
  * (12.66): ahead of it, the clipper takes part of the lift back off the kick.
  * ⚠ The drums render needs none (Studer −1.86, TAPE 12 alone −1.90, +6: −1.32)
- * — the two renders were not made at one setting. TAPE's knob is still solved
- * on the source's peak, so a bumped kick hits the curve harder than the knob
- * says; the makeup is measured through the bump.
+ * — the two renders were not made at one setting. The makeup is measured
+ * through the bump.
  */
 export const TAPE_HEAD_BUMPS = [0, 3, 6, 9]
 export const TAPE_HEAD_BUMP_HZ = 40
 export const TAPE_HEAD_BUMP_Q = 0.7
-/**
- * Where the head bump sits, bench only. 'pre' ships: the lift drives the kick
- * into TAPE's curve, and on the Studer A800 drum machine render it matched the
- * kick-against-snare balance (first 100 ms per hit, kick − snare: Studer 11.64,
- * pre +6 11.67, the same EQ after the curve 12.66). 'post' is where a real
- * machine puts it — the head bump is a PLAYBACK-head effect (recorded
- * wavelength against the pole-piece / contact length), linear, not a product
- * of saturation — so the lift passes the curve untouched and stays in the
- * output at full size. The makeup is then measured through the bump, and may
- * be NEGATIVE (the lift can put the peak above the source); it is measured
- * the exact way in preview too (the bump's memory outlasts the fast search's
- * short pre-roll).
+/*
+ * The head bump is PINNED AFTER THE CURVE (owner's call, October 2026), where a
+ * real machine makes it — a PLAYBACK-head effect (recorded wavelength against
+ * the pole-piece / contact length), linear, not a product of saturation (our
+ * Jiles-Atherton loop has none of its own). It was ahead of the curve first,
+ * then a PRE / POST bench choice: with FAST Tape comp on the Studer drum
+ * machine POST +6 landed the kick − snare balance (12.67 against the Studer's
+ * 12.39) where PRE's lift was squashed by the fast stage and the curve (10.78).
+ * The makeup is measured through it and may be NEGATIVE (the lift can put the
+ * peak above the source); with a bump up it is measured the exact way in
+ * preview too (the shelf's memory outlasts the fast search's short pre-roll).
  */
-export const TAPE_HEAD_BUMP_POSITIONS = ['pre', 'post']
+/**
+ * Where Tape comp sits, bench only: 'post' (default — after TAPE's curve, before
+ * the head bump) or 'pre' (ahead of the curve, where both voicings were fitted).
+ * Loud-hit fit on the Studer drum machine with FAST: PRE 11 / TAPE 11 0.979,
+ * POST 11.6 / TAPE 10.5 0.960 — a little dirtier (added distortion on loud hits
+ * −14.0 / −14.5 dB re signal against −15.7 / −17.1, the Studer −13.7 / −13.1) and
+ * 0.5 dB more peak kept; the two orders differ by −21 dB re the signal. On the
+ * drums the fit runs TAPE to ~0 either way, so the order does not matter there.
+ * ⚠ SLOW was fitted PRE only; POST with SLOW is untuned (its refit after the
+ * curve wanted 0.35 ms / 10 ms). With the comp POST the makeup is measured the
+ * exact way (TAPE over the region, then the comp, then the bump).
+ */
+export const TAPE_COMP_POSITIONS = ['pre', 'post']
 const TAPE_LOW_PUSH_Q = 0.7
 
 /**
- * TAPE COMPRESSION, bench only (dsp/tapeComp.js): between the head bump and
- * TAPE's curve. Measured against two Studer A800 dry/wet drum pairs, the
+ * TAPE COMPRESSION, bench only (dsp/tapeComp.js): fitted AHEAD of TAPE's curve
+ * (now a PRE / POST choice, `TAPE_COMP_POSITIONS`, POST default). Measured against two Studer A800 dry/wet drum pairs, the
  * Studer turns a loud kick's WHOLE first cycles down — samples at 20–40 % of
  * the cycle's peak already 3–7 dB under its linear path while quiet material
  * between hits passes untouched, the cycle shrunken but still pointed — and

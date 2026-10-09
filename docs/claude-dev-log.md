@@ -6448,3 +6448,32 @@ is clamped to ±24 dB in POST and ≥ 0 otherwise; the MAKEUP caption is signed.
 Switching position resets the shelf's state. Tests: the shelf still lands
 +6 dB at 25 Hz POST, a loud 30 Hz tone keeps > 3 dB more of the lift POST than
 PRE, and the POST makeup puts the peak back on the source (preview = apply).
+
+### PHAT*SS — TAPE order and head bump pinned; Tape comp PRE / POST (October 2026)
+
+Owner's call: TAPE's place in the chain is pinned FIRST (the Tape order row and
+the LAST code path are removed: the processor's `tapeLast` branch, the makeup's
+whole-chain `chainPeak` measurement, the composable's Warmth-triggered makeup
+re-measure), and the head bump is pinned AFTER the curve (the Bump at row is
+removed). A new **Comp at** row puts Tape comp PRE (ahead of the curve, where both
+voicings were fitted) or POST (after the curve, before the bump) — POST is the
+default. The chain is now curve → [POST comp] → bump → makeup, with a PRE comp
+ahead of the curve.
+
+POST was the scratch "TAPE → FAST" experiment: on the drum machine's loud hits
+0.960 at FAST 11.6 / TAPE 10.5 against PRE's 0.979, a little dirtier (added
+distortion −14.0 / −14.5 dB re signal against −15.7 / −17.1, the Studer −13.7 /
+−13.1) and 0.5 dB more peak kept; the two orders differ by −21 dB re the signal.
+On the drums the fit runs TAPE to ~0 either way. SLOW was only ever fitted PRE.
+
+**Makeup**: signed everywhere now (the bump after the curve can leave the peak
+above the source). With a bump up or the comp POST it renders TAPE over the
+whole region, then the comp, then the shelf — preview included; PRE comp with no
+bump keeps the fast search (the region is compressed up front).
+
+**Meter bug caught by the new test**: the clean reference first applied the
+bump and then the comp's gain. A shelf with memory does not commute with a gain
+that moves inside a cycle, and with FAST PRE + a bump it read −24.6 dB of
+phantom "saturation" on a clean kick track. The reference now follows the chain
+order — the comp's gain on the input (PRE) or TAPE's latency later (POST), then
+the bump — and reads −79 (PRE) / −65 (POST) dB; the test asks for < −50.

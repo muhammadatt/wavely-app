@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { processPhatassBuffer, PhatassKernel } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, softenAmount, SOFTEN_MAX, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
-  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_POSITIONS,
+  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ, TAPE_COMP_POSITIONS,
   TAPE_COMPS, TAPE_COMP_VOICING, TAPE_COMP_MODES, TAPE_COMP_FAST_VOICING,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
@@ -725,34 +725,13 @@ test('Warmth\'s low layers run at the base rate: no latency, and only a low band
   assert.throws(() => checkWarmthLayers([{ ...low, hiHz: 20000 }]), /low band/)
 })
 
-test('TAPE order: LAST is the same stages after Warmth — same latency, identical with Warmth off, and its makeup restores the peak', () => {
-  assert.equal(PHATASS_DEFAULTS.tapeOrder, 'first')
-  assert.equal(toKernelParams({ tapeOrder: 'last' }).tapeOrder, 'last')
-  assert.equal(toKernelParams({ tapeOrder: 'bogus' }).tapeOrder, 'first')
-  const peak = 0.6
+test('TAPE order is pinned first: a stale tapeOrder param changes nothing', () => {
+  assert.equal('tapeOrder' in PHATASS_DEFAULTS, false)
   const x = add(sine(110, 0.4), sine(220, 0.15), sine(3000, 0.05))
-  let px = 0
-  for (const v of x) px = Math.max(px, Math.abs(v))
-  const base = { tame: 0, tape: 3, warmthCeilingDb: db(px), warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14) }
-  // Warmth off: TAPE before or after a pure delay is the same render, bit for bit.
-  const a = run(x, { ...base, warmth: 0, tapeMakeupDb: 1.5, tapeOrder: 'first' })
-  const b = run(x, { ...base, warmth: 0, tapeMakeupDb: 1.5, tapeOrder: 'last' })
-  assert.equal(a.latencySamples, b.latencySamples)
-  for (let i = 0; i < x.length; i++) if (a.channelData[0][i] !== b.channelData[0][i]) assert.fail(`sample ${i} differs`)
-  // Warmth on: the orders differ, and LAST's makeup (measured through Warmth) puts the peak back.
-  const p = { ...base, warmth: 6, oddEven: 50, tapeOrder: 'last' }
-  const mk = measureTapeMakeup([x], SR, p).makeupDb
-  assert.equal(measureTapeMakeup([x], SR, p, { exact: false }).makeupDb, mk, 'LAST has no fast path')
-  const last = run(x, { ...p, tapeMakeupDb: mk })
-  const first = run(x, { ...p, tapeOrder: 'first', tapeMakeupDb: measureTapeMakeup([x], SR, { ...p, tapeOrder: 'first' }).makeupDb })
-  let pk = 0, diff = 0
-  for (let i = last.latencySamples; i < x.length; i++) {
-    pk = Math.max(pk, Math.abs(last.channelData[0][i]))
-    diff = Math.max(diff, Math.abs(last.channelData[0][i] - first.channelData[0][i]))
-  }
-  assert.ok(Math.abs(db(pk / px)) < 0.05, `LAST peak ${db(pk / px).toFixed(3)} dB re source`)
-  assert.ok(diff > 1e-3, 'the two orders must differ with Warmth on')
-  void peak
+  const base = { tame: 0, tape: 3, warmth: 6, oddEven: 50, tapeMakeupDb: 1.5, warmthCeilingDb: db(0.6), warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14) }
+  const a = run(x, base).channelData[0]
+  const b = run(x, { ...base, tapeOrder: 'last' }).channelData[0]
+  assert.deepEqual(a, b)
 })
 
 /** Syllables of different levels and brightness over `seconds`, with the peak. */
@@ -1102,44 +1081,66 @@ test('TAPE compression: switching the mode mid-stream does not glitch', () => {
   assert.ok(pk <= 0.5 * 1.01, `peak ${pk.toFixed(3)} after the switch`)
 })
 
-test('TAPE head bump POST: pre ships; post is still a low shelf that stays in the output', () => {
-  assert.deepEqual(TAPE_HEAD_BUMP_POSITIONS, ['pre', 'post'])
-  assert.equal(PHATASS_DEFAULTS.tapeHeadBumpPos, 'pre')
-  assert.equal(toKernelParams({ tape: 2, tapeHeadBump: 6, tapeHeadBumpPos: 'post' }).headBumpPos, 'post')
-  const x = add(sine(25, 0.002, SR * 2), sine(1000, 0.002, SR * 2))
-  const p = { warmth: 0, tame: 0, soften: 0, tape: 2, tapeHeadBump: 6, tapeHeadBumpPos: 'post', tapeMakeupDb: 0, warmthCeilingDb: db(0.8) }
-  const { channelData: [y], latencySamples: L } = run(x, p)
-  const lo = db(toneAmp(y.subarray(L), 25, SR, 2 * SR - 1000) / 0.002)
-  const hi = db(toneAmp(y.subarray(L), 1000, SR, 2 * SR - 1000) / 0.002)
-  assert.ok(lo > 4.5 && lo < 6.2, `25 Hz lifted ${lo.toFixed(2)} dB`)
-  assert.ok(Math.abs(hi) < 0.1, `1 kHz moved ${hi.toFixed(2)} dB`)
-})
-
-test('TAPE head bump POST: the lift passes the curve untouched, PRE drives it into the curve', () => {
-  // A loud 30 Hz tone: post, the curve sees the bare tone and the bump lifts what comes out; pre, the curve squashes the lift.
+test('TAPE head bump is pinned after the curve: the lift passes TAPE at full size', () => {
+  assert.equal('tapeHeadBumpPos' in PHATASS_DEFAULTS, false)
+  // A loud 30 Hz tone: the curve sees the bare tone, and the bump lifts what comes out.
   const x = sine(30, 0.5, SR * 2)
-  const out = (pos) => {
-    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, soften: 0, tape: 6, tapeHeadBump: 9, tapeHeadBumpPos: pos, tapeMakeupDb: 0, warmthCeilingDb: db(0.5) })
+  const out = (tapeHeadBump) => {
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, soften: 0, tape: 6, tapeHeadBump, tapeMakeupDb: 0, warmthCeilingDb: db(0.5) })
     return db(toneAmp(y.subarray(L), 30, SR, 2 * SR - 4096) / 0.5)
   }
-  const post = out('post')
-  const pre = out('pre')
-  assert.ok(post > pre + 3, `30 Hz: post ${post.toFixed(2)} vs pre ${pre.toFixed(2)} dB`)
+  const lift = out(9) - out(0)
+  assert.ok(lift > 5.5, `30 Hz lifted ${lift.toFixed(2)} dB through a TAPE 6 curve`)
 })
 
-test('TAPE head bump POST: the makeup is measured through it, may be a cut, and lands the peak on the source (preview = apply)', () => {
+test('TAPE head bump: the makeup is measured through it, may be a cut, and lands the peak on the source (preview = apply)', () => {
   const { x, peak } = kickTrack()
   for (const [tape, tapeHeadBump] of [[1, 9], [6, 6], [12, 3]]) {
-    const p = { warmth: 0, tame: 0, soften: 0, tape, tapeHeadBump, tapeHeadBumpPos: 'post', warmthCeilingDb: db(peak) }
+    const p = { warmth: 0, tame: 0, soften: 0, tape, tapeHeadBump, warmthCeilingDb: db(peak) }
     const exact = measureTapeMakeup([x], SR, p).makeupDb
     assert.equal(measureTapeMakeup([x], SR, p, { exact: false }).makeupDb, exact)
-    if (tape === 1) assert.ok(exact < 0, `TAPE 1 / +9 post: makeup ${exact.toFixed(2)} dB should be a cut`)
+    if (tape === 1) assert.ok(exact < 0, `TAPE 1 / +9: makeup ${exact.toFixed(2)} dB should be a cut`)
     const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: exact })
     let pk = 0
     for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
     assert.ok(Math.abs(db(pk / peak)) < 0.05, `TAPE ${tape} / +${tapeHeadBump}: peak ${db(pk / peak).toFixed(3)} dB off the source`)
   }
-  // Pre never cuts (the existing contract).
-  assert.equal(toKernelParams({ tape: 2, tapeMakeupDb: -3 }).tapeMakeupDb, 0)
-  assert.equal(toKernelParams({ tape: 2, tapeMakeupDb: -3, tapeHeadBumpPos: 'post' }).tapeMakeupDb, -3)
+  assert.equal(toKernelParams({ tape: 2, tapeMakeupDb: -3 }).tapeMakeupDb, -3)
+  assert.equal(toKernelParams({ tape: 0, tapeMakeupDb: -3 }).tapeMakeupDb, 0)
+})
+
+test('Tape comp position: POST ships, PRE is selectable, and both land the peak on the source', () => {
+  assert.deepEqual(TAPE_COMP_POSITIONS, ['pre', 'post'])
+  assert.equal(PHATASS_DEFAULTS.tapeCompPos, 'post')
+  assert.equal(toKernelParams({}).compPos, 'post')
+  assert.equal(toKernelParams({ tapeCompPos: 'pre' }).compPos, 'pre')
+  const { x, peak } = kickTrack()
+  const outs = {}
+  for (const tapeCompPos of ['pre', 'post']) {
+    const p = { warmth: 0, tame: 0, soften: 0, tape: 6, tapeComp: 11, tapeCompMode: 'fast', tapeCompPos, tapeHeadBump: 3, warmthCeilingDb: db(peak) }
+    const exact = measureTapeMakeup([x], SR, p).makeupDb
+    assert.equal(measureTapeMakeup([x], SR, p, { exact: false }).makeupDb, exact)
+    const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: exact })
+    let pk = 0
+    for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
+    assert.ok(Math.abs(db(pk / peak)) < 0.05, `${tapeCompPos}: peak ${db(pk / peak).toFixed(3)} dB off the source`)
+    outs[tapeCompPos] = y
+  }
+  let d = 0
+  for (let i = 0; i < x.length; i++) d = Math.max(d, Math.abs(outs.pre[i] - outs.post[i]))
+  assert.ok(d > 1e-3, 'PRE and POST must render differently')
+})
+
+test('the saturation meter does not read tape compression as saturation, PRE or POST', () => {
+  const { x, peak } = kickTrack()
+  for (const tapeCompPos of ['pre', 'post']) {
+    const k = new PhatassKernel(SR)
+    k.setParams(toKernelParams({ warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeComp: 14, tapeCompPos, tapeHeadBump: 6, warmthCeilingDb: db(peak) }), true)
+    k.enableMeter()
+    const out = new Float32Array(128)
+    for (let o = 0; o + 128 <= x.length; o += 128) k.process([x.subarray(o, o + 128)], [out], 128)
+    const m = k.takeMeter()
+    const r = 10 * Math.log10(m.added / m.clean)
+    assert.ok(r < -50, `${tapeCompPos}: meter read ${r.toFixed(1)} dB`)
+  }
 })

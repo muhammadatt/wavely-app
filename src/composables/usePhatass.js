@@ -167,15 +167,11 @@ export function usePhatass() {
     if (!(name in phParams) || MEASURED.has(name)) return
     phParams[name] = value
     pushParam(name, value)
-    // With TAPE first (the default) Warmth's knobs move the readout, not the
-    // makeup; with TAPE last, TAPE hears Warmth, so they move both.
-    if (name === 'warmth' || name === 'oddEven') {
-      scheduleReadout()
-      if (phParams.tapeOrder === 'last' && Number(phParams.tape) > 0) scheduleTapeMakeup()
-    }
-    // The curve, the low push, the head bump, the compressor and the order change what TAPE takes off the peak;
+    // TAPE comes first, so Warmth's knobs move the readout, not the makeup.
+    if (name === 'warmth' || name === 'oddEven') scheduleReadout()
+    // The curve, the low push, the head bump and the compressor change what TAPE takes off the peak;
     // the interim rule (never more than the knob) holds either way.
-    if ((name === 'tapeCurve' || name === 'tapeOrder' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'tapeComp' || name === 'tapeCompMode' || name === 'tapeHeadBumpPos') && Number(phParams.tape) > 0) {
+    if ((name === 'tapeCurve' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'tapeComp' || name === 'tapeCompMode' || name === 'tapeCompPos') && Number(phParams.tape) > 0) {
       setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape)))
       scheduleTapeMakeup()
     }

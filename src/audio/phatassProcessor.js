@@ -1,7 +1,8 @@
 /**
  * PHAT*SS — worklet kernel.
  *
- * [head bump → tape compression →] TAPE (full-band cubic) → makeup → Warmth → Guard → Tape shelf (with Soften
+ * TAPE (full-band cubic, with tape compression before or after it and the
+ * head bump after it) → makeup → Warmth → Guard → Tape shelf (with Soften
  * on its own band) → Output.
  *
  * TAPE comes FIRST (owner's call): Warmth then shapes the already-rounded
@@ -50,7 +51,7 @@ export class PhatassKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
     this.tape = new SaturationBenchKernel(sampleRate, { slots: 1 })
-    // TAPE's head bump (bench only): a low shelf ahead of TAPE, kept in the
+    // TAPE's head bump (bench only): a low shelf AFTER the curve, kept in the
     // output; the meter's clean reference runs through its own copy, so a
     // linear lift never reads as saturation. Zero latency.
     this.bump = new BiquadCascade(1, 2)
@@ -138,10 +139,6 @@ export class PhatassKernel {
     })
     this.outputLin = dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0))
     this.tapeMakeupLin = dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0)
-    if (p.headBumpPos !== this.bumpPos) {
-      this.bump.reset()
-      this.bumpPos = p.headBumpPos
-    }
     const bump = Number.isFinite(p.headBumpDb) ? p.headBumpDb : 0
     if (bump !== this.bumpDb) {
       // Coefficients only: the filter state carries over, so a change is a step in gain, not a click from rest.
@@ -160,14 +157,17 @@ export class PhatassKernel {
     for (let ch = 0; ch < chs.length; ch++) this.bump.process(chs[ch], chs[ch], n, ch)
   }
 
-  /** The head bump (pre or post), tape compression (if on), TAPE, then its makeup gain, in place. */
+  /**
+   * Tape compression (PRE: ahead of the curve; POST, the default: after it),
+   * TAPE's curve, the head bump (always after the curve, where a playback head
+   * makes it), then the makeup gain — in place.
+   */
   tapeAndMakeup(chs, n) {
-    const post = this.params.headBumpPos === 'post'
-    if (this.bumpDb > 0 && !post) this.applyBump(chs, n)
-    this.comp.process(chs, n)
+    const compPost = this.params.compPos !== 'pre'
+    if (!compPost) this.comp.process(chs, n)
     this.tape.process(chs, chs, n)
-    // Post: where a playback head puts it, after the curve and before the makeup.
-    if (this.bumpDb > 0 && post) this.applyBump(chs, n)
+    if (compPost) this.comp.process(chs, n)
+    if (this.bumpDb > 0) this.applyBump(chs, n)
     const mk = this.tapeMakeupLin
     if (mk === 1) return
     for (const out of chs) {
@@ -191,12 +191,9 @@ export class PhatassKernel {
       outputChannels[ch].set(inputChannels[ch < nIn ? ch : nIn - 1].subarray(0, n))
     }
     // In place: each stage reads a sample before it writes that output.
-    // `tapeOrder` 'first' (shipping): TAPE → makeup → Warmth → guard. 'last'
-    // (the order before October 2026, kept to audition): Warmth → guard → TAPE
-    // → makeup. Same stages, so the latency is the same either way.
+    // TAPE → makeup → Warmth → guard (the order is pinned since October 2026).
     const mk = this.tapeMakeupLin
-    const tapeLast = this.params.tapeOrder === 'last'
-    if (!tapeLast) this.tapeAndMakeup(outputChannels, n)
+    this.tapeAndMakeup(outputChannels, n)
     // The guard needs Warmth's input as well as its output.
     while (this.warmthIn.length < nOut) this.warmthIn.push(new Float32Array(n))
     const wIn = this.warmthIn
@@ -206,33 +203,40 @@ export class PhatassKernel {
     }
     this.warmth.process(outputChannels, outputChannels, n)
     this.guard.process(wIn, outputChannels, n)
-    if (tapeLast) this.tapeAndMakeup(outputChannels, n)
     if (this.meterOn) {
-      while (this.meterDelays.length < nOut) this.meterDelays.push(new DelayLine(this.meterLag))
+      // The clean reference is held back in two parts, TAPE's latency then the
+      // rest, so the compressor's gain can meet it where the compressor ran: on
+      // the input (PRE) or on TAPE's output (POST). Its gain and the head bump
+      // are not saturation, so the reference follows both.
+      const tapeLag = this.tape.latencySamples
+      while (this.meterDelays.length < nOut) this.meterDelays.push([new DelayLine(tapeLag), new DelayLine(this.meterLag - tapeLag)])
       let added = 0
       let clean = 0
       const bumped = this.bumpDb > 0
-      // The compressor's gain is a gain, not saturation: the clean reference
-      // follows it (sample-aligned before the delay; valid in TAPE-first order).
-      const comped = this.comp.p.on && !tapeLast
-      if (bumped || comped) {
-        this.meterBump.ensureChannels(nOut)
-        while (this.meterIn.length < nOut) this.meterIn.push(new Float32Array(n))
-      }
+      const comped = this.comp.p.on
+      const compPost = this.params.compPos !== 'pre'
+      const gs = this.comp.gains
+      if (bumped) this.meterBump.ensureChannels(nOut)
+      while (this.meterIn.length < nOut) this.meterIn.push(new Float32Array(n))
       for (let ch = 0; ch < nOut; ch++) {
-        const d = this.meterDelays[ch]
-        let x = inputChannels[ch < nIn ? ch : nIn - 1]
-        if (bumped || comped) {
-          if (this.meterIn[ch].length < n) this.meterIn[ch] = new Float32Array(n)
-          const m = this.meterIn[ch]
-          if (bumped) this.meterBump.process(x, m, n, ch)
-          else m.set(x.subarray(0, n))
-          if (comped) { const gs = this.comp.gains; for (let i = 0; i < n; i++) m[i] *= gs[i] }
-          x = m
+        const [d1, d2] = this.meterDelays[ch]
+        const x = inputChannels[ch < nIn ? ch : nIn - 1]
+        if (this.meterIn[ch].length < n) this.meterIn[ch] = new Float32Array(n)
+        const m = this.meterIn[ch]
+        // Same order as the chain: the comp's gain (on the input, or on what TAPE
+        // passes on, TAPE's latency later), THEN the bump — a shelf with memory
+        // does not commute with a gain that moves inside a cycle.
+        for (let i = 0; i < n; i++) {
+          let v = x[i]
+          if (comped && !compPost) v *= gs[i]
+          v = d1.push(v)
+          if (comped && compPost) v *= gs[i]
+          m[i] = v
         }
+        if (bumped) this.meterBump.process(m, m, n, ch)
         const y = outputChannels[ch]
         for (let i = 0; i < n; i++) {
-          const c = mk * d.push(x[i])
+          const c = mk * d2.push(m[i])
           const a = y[i] - c
           added += a * a
           clean += c * c

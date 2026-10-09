@@ -1,12 +1,13 @@
 <script setup>
 /**
- * PHAT*SS bench — TAPE's curve, its low push, head bump and compression, its place in the
- * chain, and an automatic output trim.
+ * PHAT*SS bench — TAPE's curve, its low push, head bump and compression (and
+ * where the compression sits), and an automatic output trim. TAPE's place in the
+ * chain (first) and the head bump's (after the curve) are pinned.
  *
  * ⚠ DELIBERATELY PLAIN, AND NOT BUILT FROM THE DEVICE CHROME, like the FET
  * Punch and OptoSmooth benches: the knobs and rockers in `../knobs/` are the
  * product's visual language, and these are not product controls. CUBIC, no push,
- * no bump, no comp, FIRST and OFF ship; the others are kept to A/B against them, gated off in production
+ * no bump, no comp (POST when used) and OFF ship; the others are kept to A/B against them, gated off in production
  * (`isPhatassBenchVisible`). They are ordinary PHAT*SS params, so preview and
  * APPLY both read them — what you hear is what renders.
  */
@@ -14,7 +15,7 @@ import { computed, ref } from 'vue'
 import { PHATASS_DEFAULTS } from '../../audio/phatassParams.js'
 
 const props = defineProps({
-  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `tapeHeadBumpPos`, `tapeComp`, `tapeCompMode`, `tapeOrder`, `outputMakeup` and `outputMakeupDb`). */
+  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `tapeComp`, `tapeCompMode`, `tapeCompPos`, `outputMakeup` and `outputMakeupDb`). */
   params: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
   /** The output trim's measurement is in flight. */
@@ -47,16 +48,9 @@ const CHOICES = [
     key: 'tapeHeadBump', label: 'Head bump',
     options: [
       { id: 0, label: 'OFF', title: 'Ships. No low lift' },
-      { id: 3, label: '+3', title: '+3 dB low shelf (40 Hz) ahead of TAPE, kept in the output: the tape machine\'s low lift, driving the kick into the curve' },
-      { id: 6, label: '+6', title: '+6 dB low shelf ahead of TAPE, kept. With TAPE 12 this matches the Studer A800 drum machine\'s kick-against-snare balance (the drums render needed none)' },
-      { id: 9, label: '+9', title: '+9 dB low shelf ahead of TAPE, kept: past both Studer renders' },
-    ],
-  },
-  {
-    key: 'tapeHeadBumpPos', label: 'Bump at',
-    options: [
-      { id: 'pre', label: 'PRE', title: 'Ships. The head bump ahead of TAPE: it drives the kick into the curve. Matched the Studer A800 drum machine\'s kick-against-snare balance' },
-      { id: 'post', label: 'POST', title: 'The head bump after TAPE, where a real machine\'s playback head puts it: the lift passes the curve untouched and stays at full size. The makeup may come out as a cut' },
+      { id: 3, label: '+3', title: '+3 dB low shelf (40 Hz) after TAPE\'s curve: the playback head\'s low lift, at full size in the output. The makeup may come out as a cut' },
+      { id: 6, label: '+6', title: '+6 dB low shelf after the curve. With FAST Tape comp 11 / TAPE 11 this matches the Studer A800 drum machine\'s kick-against-snare balance (the drums render needed none)' },
+      { id: 9, label: '+9', title: '+9 dB low shelf after the curve: past both Studer renders' },
     ],
   },
   {
@@ -78,10 +72,10 @@ const CHOICES = [
     ],
   },
   {
-    key: 'tapeOrder', label: 'Tape order',
+    key: 'tapeCompPos', label: 'Comp at',
     options: [
-      { id: 'first', label: 'FIRST', title: 'Ships. TAPE → makeup → Warmth: Warmth works on the rounded signal and is never clipped by TAPE' },
-      { id: 'last', label: 'LAST', title: 'Warmth → guard → TAPE → makeup, the order before October 2026. The makeup is measured through Warmth (slower on long selections) and re-measures when Warmth moves' },
+      { id: 'post', label: 'POST', title: 'Default. Tape comp after TAPE\'s curve, before the head bump: the curve hits full-level attacks, then the comp works on what comes out. With FAST on the Studer A800 drum machine a little dirtier and closer to the Studer than PRE' },
+      { id: 'pre', label: 'PRE', title: 'Tape comp ahead of TAPE\'s curve, where both voicings were fitted: it lowers what the curve clips' },
     ],
   },
   {
@@ -148,7 +142,7 @@ function reset() {
 
     <div v-if="open" class="mt-3">
       <p class="mb-3 text-[10px] leading-[1.5] text-white/35">
-        A/B TAPE's curve, its place in the chain and an automatic output trim against what ships (CUBIC, no push, no bump, no comp, FIRST, OFF). With a low push the TAPE knob is a drive: a kick can lose more than its number. Tape comp (and its mode) works only while TAPE is up; the makeup puts the peak back either way.
+        A/B TAPE's curve, its low push, head bump and compression, and an automatic output trim against what ships (CUBIC, no push, no bump, no comp, OFF). TAPE runs first; the head bump follows the curve. With a low push the TAPE knob is a drive: a kick can lose more than its number. Tape comp (and its mode) works only while TAPE is up; the makeup puts the peak back either way.
         Hidden in production builds. Both preview and APPLY read them.
       </p>
 
@@ -198,7 +192,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span v-if="trimText" class="font-mono text-[9px] text-amber-100/60">{{ trimText }}</span>
-        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / bump {{ params.tapeHeadBump }} {{ params.tapeHeadBumpPos }} / comp {{ params.tapeComp }} {{ params.tapeCompMode }} / {{ params.tapeOrder }} / {{ params.outputMakeup }}</span>
+        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / bump {{ params.tapeHeadBump }} / comp {{ params.tapeComp }} {{ params.tapeCompMode }} {{ params.tapeCompPos }} / {{ params.outputMakeup }}</span>
       </div>
     </div>
   </div>
