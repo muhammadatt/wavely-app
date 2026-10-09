@@ -823,17 +823,19 @@ function kickTrack() {
 }
 
 test('TAPE low push: off ships, and the knob keeps its no-push drive', () => {
-  assert.deepEqual(TAPE_LOW_PUSHES, [0, 6, 12, 18])
+  assert.deepEqual(TAPE_LOW_PUSHES, [0, 3, 6])
   assert.equal(PHATASS_DEFAULTS.tapeLowPush, 0)
   const flat = tapeLayer(2, -3)
   assert.equal(flat.emphDb, 0)
-  const pushed = tapeLayer(2, -3, 'cubic', 12)
+  const pushed = tapeLayer(2, -3, 'cubic', 6)
   assert.equal(pushed.emphType, 'loshelf')
   assert.equal(pushed.emphHz, TAPE_LOW_PUSH_HZ)
-  assert.equal(pushed.emphDb, 12)
+  assert.equal(pushed.emphDb, 6)
   assert.equal(pushed.driveDb, flat.driveDb)
-  assert.equal(tapeLayer(0, -3, 'cubic', 12).on, false)
-  assert.equal(toKernelParams({ tape: 2, tapeLowPush: 12, warmthCeilingDb: -3 }).tapeLayer.emphDb, 12)
+  assert.equal(tapeLayer(0, -3, 'cubic', 6).on, false)
+  assert.equal(toKernelParams({ tape: 2, tapeLowPush: 3, warmthCeilingDb: -3 }).tapeLayer.emphDb, 3)
+  // A stored 12 or 18 from before the trim clamps to the new top.
+  assert.equal(toKernelParams({ tape: 2, tapeLowPush: 18, warmthCeilingDb: -3 }).tapeLayer.emphDb, 6)
 })
 
 test('TAPE low push squashes a kick\'s low end and leaves the clean path flat', () => {
@@ -844,14 +846,14 @@ test('TAPE low push squashes a kick\'s low end and leaves the clean path flat', 
     return toneAmp(y.subarray(L), 55, 0, Math.round(0.04 * SR))
   }
   const flat = run(x, { ...base, tapeMakeupDb: 0 })
-  const pushed = run(x, { ...base, tapeLowPush: 12, tapeMakeupDb: 0 })
+  const pushed = run(x, { ...base, tapeLowPush: 6, tapeMakeupDb: 0 })
   const dryLow = toneAmp(x, 55, 0, Math.round(0.04 * SR))
   const flatLoss = db(lowPeak(flat.channelData[0], flat.latencySamples) / dryLow)
   const pushLoss = db(lowPeak(pushed.channelData[0], pushed.latencySamples) / dryLow)
-  assert.ok(pushLoss < flatLoss - 3, `push ${pushLoss.toFixed(2)} dB vs flat ${flatLoss.toFixed(2)} dB on the kick's low end`)
+  assert.ok(pushLoss < flatLoss - 1, `push ${pushLoss.toFixed(2)} dB vs flat ${flatLoss.toFixed(2)} dB on the kick's low end`)
   // Below the curve the push is a filter and its exact inverse: a quiet signal comes through untouched.
   const quiet = add(sine(55, 0.002), sine(2000, 0.002))
-  const q = run(quiet, { ...base, tapeLowPush: 18, tapeMakeupDb: 0, warmthCeilingDb: db(0.8) })
+  const q = run(quiet, { ...base, tapeLowPush: 6, tapeMakeupDb: 0, warmthCeilingDb: db(0.8) })
   let err = 0
   for (let i = 4096; i < quiet.length - 4096; i++) err = Math.max(err, Math.abs(q.channelData[0][i + q.latencySamples] - quiet[i]))
   assert.ok(err < 1e-4, `quiet signal moved ${err}`)
@@ -859,7 +861,7 @@ test('TAPE low push squashes a kick\'s low end and leaves the clean path flat', 
 
 test('TAPE low push: the makeup still restores the peak, and the fast search still reads the exact one', () => {
   const { x, peak } = kickTrack()
-  for (const tapeLowPush of [6, 12, 18]) {
+  for (const tapeLowPush of [3, 6]) {
     const p = { warmth: 0, tame: 0, soften: 0, tape: 3, tapeLowPush, warmthCeilingDb: db(peak) }
     const exact = measureTapeMakeup([x], SR, p).makeupDb
     const fast = measureTapeMakeup([x], SR, p, { exact: false }).makeupDb
@@ -886,12 +888,14 @@ test('TAPE runs to 12 dB: a voiced peak loses nearly its number, and the makeup 
 })
 
 test('TAPE head bump: off ships, and only rides along while TAPE is up', () => {
-  assert.deepEqual(TAPE_HEAD_BUMPS, [0, 3, 6, 9])
+  assert.deepEqual(TAPE_HEAD_BUMPS, [0, 3, 6, 9, 'a800-30', 'a800-15'])
   assert.equal(TAPE_HEAD_BUMP_HZ, 40)
   assert.equal(PHATASS_DEFAULTS.tapeHeadBump, 0)
-  assert.equal(toKernelParams({ tape: 2, tapeHeadBump: 6 }).headBumpDb, 6)
-  assert.equal(toKernelParams({ tape: 0, tapeHeadBump: 6 }).headBumpDb, 0)
-  assert.equal(toKernelParams({ tape: 2 }).headBumpDb, 0)
+  assert.equal(toKernelParams({ tape: 2, tapeHeadBump: 6 }).headBump, 6)
+  assert.equal(toKernelParams({ tape: 2, tapeHeadBump: 'a800-30' }).headBump, 'a800-30')
+  assert.equal(toKernelParams({ tape: 2, tapeHeadBump: 'bogus' }).headBump, 0)
+  assert.equal(toKernelParams({ tape: 0, tapeHeadBump: 6 }).headBump, 0)
+  assert.equal(toKernelParams({ tape: 2 }).headBump, 0)
 })
 
 test('TAPE head bump below the curve is a low shelf that stays in the output', () => {
@@ -980,3 +984,40 @@ test('TAPE head bump: the makeup is measured through it, may be a cut, and lands
   assert.equal(toKernelParams({ tape: 0, tapeMakeupDb: -3 }).tapeMakeupDb, 0)
 })
 
+
+test('TAPE head bump A800 curves: the published 30 ips response, and 15 ips an octave down', () => {
+  const amp = (bump, f) => {
+    const x = sine(f, 0.002, SR * 3)
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeHeadBump: bump, tapeMakeupDb: 0, warmthCeilingDb: db(0.8) })
+    return db(toneAmp(y.subarray(L), f, 2 * SR, 3 * SR - 1000) / 0.002)
+  }
+  // endino.com A800 graph at 30 ips, eye-digitised (dB): 20 −7.8, 45 +1.5, 85 −0.55, 1k 0
+  for (const [f, want, tol] of [[20, -7.8, 0.6], [45, 1.5, 0.4], [85, -0.55, 0.3], [1000, 0, 0.1]]) {
+    const got = amp('a800-30', f)
+    assert.ok(Math.abs(got - want) < tol, `A800 30 ips at ${f} Hz: ${got.toFixed(2)} dB, want ${want}`)
+  }
+  for (const [f, want, tol] of [[10, -7.8, 0.8], [22.5, 1.5, 0.4], [42.5, -0.55, 0.3]]) {
+    const got = amp('a800-15', f)
+    assert.ok(Math.abs(got - want) < tol, `A800 15 ips at ${f} Hz: ${got.toFixed(2)} dB, want ${want}`)
+  }
+})
+
+test('TAPE head bump A800: the makeup is measured through it (preview = apply) and lands the peak on the source; the meter ignores it', () => {
+  const { x, peak } = kickTrack()
+  for (const tapeHeadBump of ['a800-30', 'a800-15']) {
+    const p = { warmth: 0, tame: 0, soften: 0, tape: 6, tapeHeadBump, warmthCeilingDb: db(peak) }
+    const exact = measureTapeMakeup([x], SR, p).makeupDb
+    assert.equal(measureTapeMakeup([x], SR, p, { exact: false }).makeupDb, exact)
+    const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: exact })
+    let pk = 0
+    for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
+    assert.ok(Math.abs(db(pk / peak)) < 0.05, `${tapeHeadBump}: peak ${db(pk / peak).toFixed(3)} dB off the source`)
+    const k = new PhatassKernel(SR)
+    k.setParams(toKernelParams({ warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeHeadBump, warmthCeilingDb: db(peak) }), true)
+    k.enableMeter()
+    const out = new Float32Array(128)
+    for (let o = 0; o + 128 <= x.length; o += 128) k.process([x.subarray(o, o + 128)], [out], 128)
+    const m = k.takeMeter()
+    assert.ok(10 * Math.log10(m.added / m.clean) < -40, `${tapeHeadBump}: meter read ${(10 * Math.log10(m.added / m.clean)).toFixed(1)} dB`)
+  }
+})

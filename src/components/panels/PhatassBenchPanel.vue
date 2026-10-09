@@ -39,9 +39,8 @@ const CHOICES = [
     key: 'tapeLowPush', label: 'Low push',
     options: [
       { id: 0, label: 'OFF', title: 'Ships. TAPE drives every frequency alike' },
+      { id: 3, label: '+3', title: '+3 dB low shelf (150 Hz) into the curve, undone after: the lows saturate a little first' },
       { id: 6, label: '+6', title: '+6 dB low shelf (150 Hz) into the curve, undone after: the lows saturate first. On drums, TAPE 6 here squashes the kick like the Studer A800' },
-      { id: 12, label: '+12', title: '+12 dB low shelf into the curve, undone after. On a drum machine, TAPE 2 here squashes the kick like the Studer A800' },
-      { id: 18, label: '+18', title: '+18 dB low shelf into the curve, undone after: past the Studer at most settings' },
     ],
   },
   {
@@ -51,6 +50,8 @@ const CHOICES = [
       { id: 3, label: '+3', title: '+3 dB low shelf (40 Hz) after TAPE\'s curve: the playback head\'s low lift, at full size in the output. The makeup may come out as a cut' },
       { id: 6, label: '+6', title: '+6 dB low shelf after the curve. The drums render needed none' },
       { id: 9, label: '+9', title: '+9 dB low shelf after the curve: past both Studer renders' },
+      { id: 'a800-30', label: 'A800 30', title: 'The Studer A800 hardware\'s playback low end at 30 ips (published measurement): roll-off below ~35 Hz to −8 dB at 20 Hz, +1.2–1.5 dB at 40–50 Hz, a small dip at 80–90. Fixed depth. Closest to the Studer emulation\'s kick by ear' },
+      { id: 'a800-15', label: 'A800 15', title: 'The same A800 curve an octave down (15 ips): roll-off below ~18 Hz, bump at ~20–25 Hz, dip at ~40–45. Fixed depth' },
     ],
   },
   {

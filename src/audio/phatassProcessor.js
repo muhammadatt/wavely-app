@@ -35,8 +35,8 @@ import { ShelfLimiterStage } from './dsp/hfLimit.js'
 import { SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { WarmthPeakGuard } from './dsp/warmthGuard.js'
 import { DelayLine } from './dsp/oversample.js'
-import { BiquadCascade, lowShelf } from './dsp/biquad.js'
-import { toKernelParams, PHATASS_DEFAULTS, WARMTH_LAYERS, slotOversample, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q } from './phatassParams.js'
+import { BiquadCascade } from './dsp/biquad.js'
+import { toKernelParams, PHATASS_DEFAULTS, WARMTH_LAYERS, slotOversample, headBumpSections, TAPE_HEAD_BUMP_MAX_SECTIONS } from './phatassParams.js'
 
 export const PHATASS_KERNEL_DEFAULTS = toKernelParams(PHATASS_DEFAULTS)
 
@@ -52,9 +52,10 @@ export class PhatassKernel {
     // TAPE's head bump (bench only): a low shelf AFTER the curve, kept in the
     // output; the meter's clean reference runs through its own copy, so a
     // linear lift never reads as saturation. Zero latency.
-    this.bump = new BiquadCascade(1, 2)
-    this.meterBump = new BiquadCascade(1, 2)
-    this.bumpDb = 0
+    this.bump = new BiquadCascade(TAPE_HEAD_BUMP_MAX_SECTIONS, 2)
+    this.meterBump = new BiquadCascade(TAPE_HEAD_BUMP_MAX_SECTIONS, 2)
+    this.bumpKey = 0
+    this.bumpOn = false
     this.tapeInit = false
     this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length, oversample: slotOversample() })
     this.warmthInit = false
@@ -134,16 +135,20 @@ export class PhatassKernel {
     })
     this.outputLin = dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0))
     this.tapeMakeupLin = dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0)
-    const bump = Number.isFinite(p.headBumpDb) ? p.headBumpDb : 0
-    if (bump !== this.bumpDb) {
-      // Coefficients only: the filter state carries over, so a change is a step in gain, not a click from rest.
-      if (bump > 0) {
-        const c = lowShelf(this.sampleRate, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q, bump)
-        this.bump.setSection(0, c)
-        this.meterBump.setSection(0, c)
+    const bumpKey = p.headBump || 0
+    if (bumpKey !== this.bumpKey) {
+      // Coefficients only: the filter state carries over, so a change is a step in response, not a click from rest.
+      const secs = headBumpSections(this.sampleRate, bumpKey)
+      if (secs) {
+        const ident = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }
+        for (let i = 0; i < TAPE_HEAD_BUMP_MAX_SECTIONS; i++) {
+          this.bump.setSection(i, secs[i] || ident)
+          this.meterBump.setSection(i, secs[i] || ident)
+        }
+        if (!this.bumpOn) { this.bump.reset(); this.meterBump.reset() }
       }
-      if (!(this.bumpDb > 0)) { this.bump.reset(); this.meterBump.reset() }
-      this.bumpDb = bump
+      this.bumpOn = !!secs
+      this.bumpKey = bumpKey
     }
   }
 
@@ -155,7 +160,7 @@ export class PhatassKernel {
   /** TAPE's curve, the head bump (after it, where a playback head makes it), then the makeup gain — in place. */
   tapeAndMakeup(chs, n) {
     this.tape.process(chs, chs, n)
-    if (this.bumpDb > 0) this.applyBump(chs, n)
+    if (this.bumpOn) this.applyBump(chs, n)
     const mk = this.tapeMakeupLin
     if (mk === 1) return
     for (const out of chs) {
@@ -197,7 +202,7 @@ export class PhatassKernel {
       while (this.meterDelays.length < nOut) this.meterDelays.push(new DelayLine(this.meterLag))
       let added = 0
       let clean = 0
-      const bumped = this.bumpDb > 0
+      const bumped = this.bumpOn
       if (bumped) this.meterBump.ensureChannels(nOut)
       while (this.meterIn.length < nOut) this.meterIn.push(new Float32Array(n))
       for (let ch = 0; ch < nOut; ch++) {

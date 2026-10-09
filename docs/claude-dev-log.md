@@ -6512,3 +6512,57 @@ compressor paths and the bench rows (recoverable at `29815f3`). The chain is
 TAPE's curve → head bump → makeup → Warmth → guard → shelf → Output. A transient
 shaper (fast-vs-slow envelope with a few ms of lookahead) was proposed for the
 attacks and set aside: the owner expects it to suit drums but not other sources.
+
+### PHAT*SS — playback EQ study, A800 head-bump curves, low push trimmed (October 2026)
+
+**Where the Studer's "softer attacks" were looked for, and what came back.**
+After Tape comp was removed the owner asked whether a waveshaper could soften
+transients. Against hysteresis TAPE 8 (first 2 ms of each loud hit re its 15–30
+ms body; drum machine / drums; Studer 4.0 / −8.6, TAPE alone 8.8 / −5.2): a
+high-shelf pre-emphasis into the curve (tape record EQ) best 7.1 / −5.0 (+18 dB
+at 1.5 kHz); a soft slew-rate shaper ahead of TAPE (250 Hz–4 kHz equivalent)
+8.2–8.8 / −5.2, only dulling the top 1–4 dB. Neither family can tell a hit's
+onset from its body: on the drums the onset is QUIETER than the body.
+
+Most of the metric's gap turned out LINEAR: the dry tracks through the Studer's
+measured linear path alone read 6.4 / −12.7. That path, measured on quiet
+passages (1/12-octave complex response, coherence-weighted): +4.6 dB at 15–20
+Hz falling below ~12, +3.7 at 30–36 Hz, low-frequency group delay ~0.4 ms at
+175 Hz rising to 2.4 at 70, 4 at 32 and ~13 at 18 Hz, and the top rolling off
+−4 to −6 dB at 16 kHz, −14 to −16 at 19.5 kHz. Fitted (level and phase
+weighted separately) as a 7.1 Hz high-pass Q 2.6 · +3.5 dB bell at 22 Hz ·
+an all-pass at ~9 Hz · a 19 kHz lowpass, within ~1 dB / 8° from 13–250 Hz on
+both renders; it needs the all-pass, so it is not minimum phase. A plain
+minimum-phase fit chased the phase and gave up the magnitude.
+
+The owner supplied the A800 HARDWARE's published playback response (endino.com,
+30 ips): +1.5 dB near 45–50 Hz, −0.5 at 85, +0.4 at 140, −8 dB by 20 Hz. Fitted
+to 0.17 dB rms: high-pass 35.3 Hz Q 0.90 · +1.17 dB at 31.25 Hz Q 0.30 · −1.93 dB
+at 82.7 Hz Q 1.83. 15 ips: the same an octave down (owner).
+
+**By ear the metric was wrong.** The owner heard the emulation-fit EQ as the
+rangiest version and no softening at all; the +3 shelf as the tightest; the
+A800 curve as closest to the Studer's kick frequency. The 0–2 ms / body metric
+had rewarded the emulation fit because its low-frequency delay drains the
+first 2 ms into the body — smear, not softening. Not to be used for tightness
+again. What the curves really move is the kick's click-vs-sub balance (loud
+kicks, first 30 ms, 1–8 kHz re < 60 Hz): drum machine Studer −18.2, +3 shelf
+−18.2, A800 30 −17.8, 15 −17.6; drums Studer −17.1, shelf −19.6, A800 30 −18.0,
+15 −18.2 — "tight" was the shelf's extra sub, and the Studer sits on the
+click-forward side.
+
+The emulation's top-end roll-off (two lowpasses, 16 kHz Q 0.67 + 21.5 kHz Q
+0.41, 0.41 dB rms) was tried on the A800 curves as the last candidate for
+"softer transients": the Studer's onsets are BRIGHTER than ours (>8 kHz share of
+a loud hit's first 5 ms: drum machine Studer −29.2, ours −29.8 to −32.1; drums
+−25.8 against −27.9 to −32.2), so the roll-off moved us further away. Still
+untested as the source of the softer impression: the Studer's higher
+distortion on loud hits and its longer sustain after the attack.
+
+**Built**: Head bump gains `a800-30` / `a800-15` (fixed depth, after the curve,
+`TAPE_HEAD_BUMP_CURVES`, `headBumpSections` shared by the kernel and the makeup
+measurement; the kernel's bump cascade is sized to 3 sections and the meter's
+reference runs through its own copy). Low push trimmed to 0 / 3 / 6 (owner:
+12 and 18 too hot; a stored 12 or 18 clamps to 6). Tests pin the A800 curve at
+20 / 45 / 85 Hz / 1 kHz and 15 ips at 10 / 22.5 / 42.5 Hz, the makeup through
+it (preview = apply, peak on the source) and the meter.

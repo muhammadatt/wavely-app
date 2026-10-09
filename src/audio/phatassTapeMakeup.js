@@ -40,8 +40,8 @@
  */
 
 import { processSaturationBenchBuffer, SaturationBenchKernel } from './dsp/saturationLayers.js'
-import { toKernelParams, PHATASS_DEFAULTS, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q } from './phatassParams.js'
-import { BiquadCascade, lowShelf } from './dsp/biquad.js'
+import { toKernelParams, PHATASS_DEFAULTS, headBumpSections } from './phatassParams.js'
+import { BiquadCascade } from './dsp/biquad.js'
 
 /** Block size for the fast search, samples. */
 const BLOCK = 1024
@@ -98,16 +98,16 @@ function postChainPeak(channelData, sampleRate, kp) {
   })
   const { channelData: tape, latencySamples: L } = processSaturationBenchBuffer(padded, sampleRate, { layers: [kp.tapeLayer] }, { slots: 1 })
   let out = tape
-  if (kp.headBumpDb > 0) out = headBumped(out, sampleRate, kp.headBumpDb)
+  if (kp.headBump) out = headBumped(out, sampleRate, kp.headBump)
   return peakOf(out, L, Math.min(L + n + 64, n + pad))
 }
 
 /** The signal through the head bump. */
-function headBumped(channelData, sampleRate, db) {
-  const c = lowShelf(sampleRate, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q, db)
+function headBumped(channelData, sampleRate, bump) {
+  const secs = headBumpSections(sampleRate, bump)
   return channelData.map((x) => {
-    const bq = new BiquadCascade(1, 1)
-    bq.setSection(0, c)
+    const bq = new BiquadCascade(secs.length, 1)
+    secs.forEach((c, i) => bq.setSection(i, c))
     const y = new Float32Array(x.length)
     bq.process(x, y, x.length, 0)
     return y
@@ -189,7 +189,7 @@ export function measureTapeMakeup(channelData, sampleRate, params, { exact = tru
   }
   const kp = toKernelParams(p)
   // A bump after the curve means the exact render, preview included.
-  const outPk = kp.headBumpDb > 0 ? postChainPeak(channelData, sampleRate, kp)
+  const outPk = kp.headBump ? postChainPeak(channelData, sampleRate, kp)
     : exact ? exactPeak(channelData, sampleRate, kp.tapeLayer) : fastPeak(channelData, sampleRate, kp.tapeLayer)
   // Signed: the bump can leave the peak above the source, and then the makeup is a cut.
   const makeupDb = outPk > 0 ? toDb(inPk) - toDb(outPk) : 0

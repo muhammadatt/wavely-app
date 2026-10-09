@@ -20,6 +20,7 @@ import {
 import { unitDriveU } from './dsp/shaperCurves.js'
 import { JilesAtherton, hysteresisSmallGain, hysteresisShapeVersion } from './dsp/hysteresis.js'
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
+import { lowShelf, highpass, peaking } from './dsp/biquad.js'
 
 export const PHATASS_DEFAULTS = {
   // 0–10 — low-end harmonic warmth: how much of what the two fixed
@@ -46,9 +47,10 @@ export const PHATASS_DEFAULTS = {
   // (a kick's low end gets squashed) while the clean path stays flat. 0 ships.
   // Bench only. The TAPE knob keeps its no-push drive (`tapeLayer`).
   tapeLowPush: 0,
-  // dB of HEAD BUMP (`TAPE_HEAD_BUMPS`): a low shelf at TAPE_HEAD_BUMP_HZ AFTER
-  // TAPE's curve, before the makeup — the tape machine's playback-head low lift,
-  // at full size in the output. Only while TAPE is up. 0 ships. Bench only.
+  // HEAD BUMP (`TAPE_HEAD_BUMPS`) AFTER TAPE's curve, before the makeup — the
+  // tape machine's playback-head low end: 3 / 6 / 9 is dB of low shelf at
+  // TAPE_HEAD_BUMP_HZ, 'a800-30' / 'a800-15' the Studer A800 hardware curve at
+  // 30 / 15 ips (`TAPE_HEAD_BUMP_CURVES`). Only while TAPE is up. 0 ships. Bench only.
   tapeHeadBump: 0,
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
@@ -431,7 +433,7 @@ export function toKernelParams(params) {
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush),
-    headBumpDb: Number(p.tape) > 0 ? clamp(Number(p.tapeHeadBump) || 0, 0, TAPE_HEAD_BUMPS[TAPE_HEAD_BUMPS.length - 1]) : 0,
+    headBump: Number(p.tape) > 0 ? headBumpChoice(p.tapeHeadBump) : 0,
     // Signed: the head bump (after the curve) can leave the peak ABOVE the source.
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb)
       ? clamp(p.tapeMakeupDb, -TAPE_MAKEUP_MAX_DB, TAPE_MAKEUP_MAX_DB) : 0,
@@ -640,7 +642,9 @@ export function tapePeakU(reductionDb, curve = TAPE_CURVE) {
  * no single number is the Studer's. The corner moves it less (TAPE 1 / +12, loud
  * kicks: −4.2 at 100 Hz, −6.3 at 150, −6.7 at 250).
  */
-export const TAPE_LOW_PUSHES = [0, 6, 12, 18]
+// Trimmed to 0 / 3 / 6 after listening (owner: 12 and 18 were too hot); a
+// stored 12 or 18 clamps to 6.
+export const TAPE_LOW_PUSHES = [0, 3, 6]
 /**
  * Ceiling on TAPE's measured makeup, dB. Above the knob's 6 because with a low
  * push a kick-led peak loses more than the knob (TAPE 3 / +6 on a bare kick:
@@ -664,9 +668,48 @@ export const TAPE_LOW_PUSH_HZ = 150
  * — the two renders were not made at one setting. The makeup is measured
  * through the bump.
  */
-export const TAPE_HEAD_BUMPS = [0, 3, 6, 9]
+export const TAPE_HEAD_BUMPS = [0, 3, 6, 9, 'a800-30', 'a800-15']
 export const TAPE_HEAD_BUMP_HZ = 40
 export const TAPE_HEAD_BUMP_Q = 0.7
+/**
+ * The Studer A800's measured playback low end (endino.com frequency-response
+ * graph of the hardware, 30 ips), fitted by eye-digitised points to 0.17 dB
+ * rms with three minimum-phase sections: a high-pass at 35.3 Hz (Q 0.90), a
+ * broad +1.17 dB lift at 31.25 Hz (Q 0.30) and a −1.93 dB dip at 82.7 Hz
+ * (Q 1.83) — net +1.2–1.5 dB at 40–50 Hz, −0.6 at 80–90, +0.4 at 140, −8 at
+ * 20 Hz. 15 ips is the same curve an octave down (head-bump frequencies scale
+ * with tape speed), on the owner's reading. Fixed depth.
+ *
+ * WHY: against the Studer emulation's drum renders the hardware curve put the
+ * kick's frequency closest by ear. Measured, it moves the kick's click-vs-sub
+ * balance toward the Studer (drums, first 30 ms of loud kicks, 1–8 kHz re
+ * < 60 Hz: Studer −17.1 dB, 30 ips −18.0, 15 ips −18.2, the +3 shelf −19.6).
+ * A fit to the EMULATION's own measured path (a 7 Hz resonant high-pass, a
+ * 22 Hz bump and a very low all-pass, with 2–13 ms of low-frequency group
+ * delay) was rejected by ear as rangy: its delay smears the kick.
+ */
+export const TAPE_HEAD_BUMP_CURVES = Object.freeze({
+  'a800-30': Object.freeze({ hpHz: 35.3, hpQ: 0.9, liftHz: 31.25, liftQ: 0.3, liftDb: 1.17, dipHz: 82.7, dipQ: 1.83, dipDb: -1.93 }),
+  'a800-15': Object.freeze({ hpHz: 17.65, hpQ: 0.9, liftHz: 15.625, liftQ: 0.3, liftDb: 1.17, dipHz: 41.35, dipQ: 1.83, dipDb: -1.93 }),
+})
+/** Most sections any head bump uses (the kernel sizes its cascade to this). */
+export const TAPE_HEAD_BUMP_MAX_SECTIONS = 3
+
+/** A head-bump choice as kernel params read it: 0 (off), a shelf dB, or a curve id. */
+export function headBumpChoice(v) {
+  if (typeof v === 'string' && TAPE_HEAD_BUMP_CURVES[v]) return v
+  const db = clamp(Number(v) || 0, 0, 9)
+  return db > 0 ? db : 0
+}
+
+/** The head bump's biquad sections at a sample rate, or null when off. */
+export function headBumpSections(sampleRate, bump) {
+  const b = headBumpChoice(bump)
+  if (!b) return null
+  if (typeof b === 'number') return [lowShelf(sampleRate, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q, b)]
+  const c = TAPE_HEAD_BUMP_CURVES[b]
+  return [highpass(sampleRate, c.hpHz, c.hpQ), peaking(sampleRate, c.liftHz, c.liftQ, c.liftDb), peaking(sampleRate, c.dipHz, c.dipQ, c.dipDb)]
+}
 /*
  * The head bump is PINNED AFTER THE CURVE (owner's call, October 2026), where a
  * real machine makes it — a PLAYBACK-head effect (recorded wavelength against
