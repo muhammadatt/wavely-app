@@ -6710,3 +6710,47 @@ narrows as the threshold drops, because the envelope stays up through a run.
 | FATSO | −4.52 / −1.31 / −0.67 | — | −0.13 / −0.16 / −1.10 | — |
 
 Every constant except the emphasis corners is reasoned. Not auditioned.
+
+### PHAT*SS — tape HF shelf rescaled: TAPE through its makeup, not twice (October 2026)
+
+Owner, on the owner's drums (`AllTape_Drums_dry_v1` / `StuderA800_Drums_wet_v1`,
+48 kHz AAC, 17.5 s): the drive-dependent direction is right, but with TAPE at
+8 the shelf was too strong at every setting but OFF.
+
+**Why.** Measured on the dry drums through PHAT*SS at TAPE 8 (makeup measured,
+6.65 dB), against the same chain with HF off, 8–16 kHz by frame level (re the
+−19.65 dBFS voice level): 30 ips −3.3 / −4.6 / −4.6 dB on quiet / mid / loud
+frames, 15 ips −5.8 / −7.0 / −7.2, 7.5 ips −7.5 / −9.3 / −10.0 — a STATIC EQ.
+The threshold dropped 8 dB for TAPE 8 AND TAPE's peak-restoring makeup put
++6.65 dB more into the shelf: the drive counted twice, and with an 80 ms
+release over constant cymbals the envelope never let go.
+
+**The Studer for scale** (aligned −33 samples; band gain per 21 ms frame
+against its own median on quiet frames, by frame level re voice): 2–16 kHz
+0.0 / 0.0 / −0.3 to −0.5 / −1.0 / −2.9 to −3.4 dB on frames under −10 / −10 to
+−4 / −4 to 0 / 0 to 4 / over 4 — but 60–250 Hz and 250 Hz–1 kHz lose −2.8 /
+−2.3 on the loudest too: mostly broadband (tape compression), HF-specific
+~0.5–1 dB on loud frames only. Its quiet-frame response is +2.6 to +3.1 dB flat
+(a level offset).
+
+**Fix.** The explicit TAPE threshold law is removed (`TAPE_HF_DB_PER_TAPE_DB`
+gone, `tapeHfShelfParams(hf, voice)`); the drive reaches the shelf through the
+makeup alone. Slope 0.75 → 0.5, release 80 → 40 ms, thresholds −10 → −4 / −6 /
+−6, Range 9 / 12 / 15 → 4 / 6 / 9. Swept on drums at TAPE 0 / 8 and both
+narration clips at TAPE 0 / 4 (15 ips, slope 0.5, 40 ms, Range 6): −4 gave
+drums T8 −0.3 / −0.6 / −0.4, bright −0.95; −6 −0.6 / −1.1 / −0.9, bright −1.3
+(chosen); 0 and +2 did nearly nothing. 7.5 ips at −8 doubled its TAPE 0 effect
+on drums (−0.9) — −6 kept.
+
+**Installed** (`scripts/phatass-hf-detents.mjs`, now with TAPE's makeup
+measured; sibilant body / onset, or energy above 2 kHz for drums):
+
+| | bright T0 | bright T4 | bright T8 | dull T8 | drums T8 (>2 kHz) |
+|---|---|---|---|---|---|
+| 30 ips | −0.36 / 0.00 | −0.58 / −0.02 | −0.81 / −0.08 | 0.00 | −0.02 |
+| 15 ips | −1.32 / −0.10 | −1.86 / −0.28 | −2.39 / −0.64 | −0.23 | −0.42 |
+| 7.5 ips | −2.03 / −0.28 | −2.82 / −0.63 | −3.83 / −1.26 | −0.68 | −1.01 |
+| FATSO | −4.52 / −1.31 | −5.68 / −2.77 | −6.62 / −4.50 | −2.05 | −3.81 |
+
+⚠ FATSO (the limiter shelf, fitted law, threshold re the source's voice
+level) hears the makeup too and rises with TAPE; left as fitted. Not auditioned.

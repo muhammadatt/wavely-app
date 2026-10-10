@@ -6,7 +6,8 @@
  *
  * For each clip: the tape HF shelf's detector level (the emphasised band's
  * energy, attack 3 / release 80 ms, re the voice level, over active frames)
- * at each speed's emphasis corner, then, for each detent at TAPE 0 and TAPE 6,
+ * at each speed's emphasis corner, then, for each detent at TAPE 0 / 4 / 8
+ * (with TAPE's makeup measured as the app does, since the shelf hears it),
  * the change against the SAME chain with HF off (so TAPE's own effect drops
  * out):
  *
@@ -27,13 +28,14 @@ import { regionAlignDb } from '../src/audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../src/audio/dsp/inputAlign.js'
 import { onePoleLowpass } from '../src/audio/dsp/hfLimit.js'
 import { processPhatassBuffer } from '../src/audio/phatassProcessor.js'
+import { measureTapeMakeup } from '../src/audio/phatassTapeMakeup.js'
 import { toKernelParams, HF_PANEL_DETENTS, TAPE_SPEEDS, TAPE_HF_LAW, tapeHfShelfParams, hfDetentShelf } from '../src/audio/phatassParams.js'
 import { getFFT } from '../src/audio/dsp/fft.js'
 
 const FRAME = 1024
 const HOP = 512
 const ACTIVE_BELOW_DB = 30
-const TAPES = [0, 6]
+const TAPES = [0, 4, 8]
 
 function voiceLevel(x, sr) {
   const seg = { outputStart: 0, sourceStart: 0, sourceEnd: x.length / sr, sourceBuffer: { getChannelData: () => x, numberOfChannels: 1 } }
@@ -129,12 +131,15 @@ for (const path of process.argv.slice(2)) {
   // Classify on the dry, aligned to the renders (which have their latency removed).
   const kinds = classify(x, sr, voice)
   for (const tape of TAPES) {
-    const base = { warmth: 0, soften: 0, tape, voiceLevelDb: voice, warmthCeilingDb: null }
+    let pk = 0
+    for (const v of x) pk = Math.max(pk, Math.abs(v))
+    const base0 = { warmth: 0, soften: 0, tape, voiceLevelDb: voice, warmthCeilingDb: 20 * Math.log10(pk) }
+    const base = { ...base0, tapeMakeupDb: tape > 0 ? measureTapeMakeup([x], sr, base0).makeupDb : 0 }
     const ref = frameBands(render(x, sr, { ...base, hf: 'off' }), sr)
-    console.log(`  TAPE ${tape}:`)
+    console.log(`  TAPE ${tape} (makeup ${base.tapeMakeupDb.toFixed(2)} dB):`)
     for (const hf of HF_PANEL_DETENTS.filter(d => d !== 'off')) {
       const r = compare(kinds, ref, frameBands(render(x, sr, { ...base, hf }), sr))
-      const t = tapeHfShelfParams(hf, voice, tape)
+      const t = tapeHfShelfParams(hf, voice)
       const lim = hfDetentShelf(hf, voice)
       const label = t ? `${TAPE_SPEEDS[hf].label} ips (${(t.thresholdDb - voice).toFixed(1)})` : `${hf} (${(lim.thresholdDb - voice).toFixed(1)})`
       console.log(`    ${label.padEnd(18)} sib ${fmt(r.sib)} (on ${fmt(r.onset)} / body ${fmt(r.body)})  vow ${fmt(r.vow)}  hf ${fmt(r.hf)}  cut% ${r.cutPct.toFixed(1).padStart(5)}`)

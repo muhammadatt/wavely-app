@@ -368,38 +368,33 @@ export const DETECT_4K_COMP_DB = 3
  *
  * The TAPE SPEEDS run the tape HF shelf (`dsp/tapeHfShelf.js`): the top end
  * SAGS with level — an energy detector on the pre-emphasised band, no
- * lookahead, a gentle law (0.75 dB of cut per dB over, through a knee), and a
- * corner that slides down as it cuts — rather than being held at a ceiling. A slower speed has
- * less HF headroom: its emphasis corner (what the detector weights) is lower,
- * its shelf starts lower and slides further, and it may cut deeper. The
- * emphasis corners are the IEC time constants (17.5 / 35 / 70 µs → 9.09 / 4.55 /
- * 2.27 kHz); every other number is REASONED, not fitted (no reference — the
- * owner does not want an A800 match).
+ * lookahead, a gentle law (0.5 dB of cut per dB over, through a knee), and a
+ * corner that slides down as it cuts — rather than being held at a ceiling.
+ * A slower speed has less HF headroom: its emphasis corner (what the detector
+ * weights) is lower, its shelf starts lower and slides further, it starts
+ * sooner and may cut deeper. The emphasis corners are the IEC time constants
+ * (17.5 / 35 / 70 µs → 9.09 / 4.55 / 2.27 kHz); every other number is
+ * REASONED, then scaled down against a reference — see below.
  *
- * TAPE DRIVES IT: hitting tape harder costs HF headroom, so the threshold
- * drops `TAPE_HF_DB_PER_TAPE_DB` per dB of TAPE (owner's call; 1 dB per dB is
- * "hit the tape that much harder"). At TAPE 0 the speeds still act, on the
- * brightest passages.
+ * TAPE DRIVES IT THROUGH ITS MAKEUP, not a second threshold law: the shelf
+ * sits after TAPE's peak-restoring makeup, so a hotter TAPE already arrives
+ * hotter (+6.65 dB of body on the owner's drums at TAPE 8). ⚠ THE FIRST CUT
+ * ALSO DROPPED THE THRESHOLD 1 dB PER dB OF TAPE and counted the drive twice:
+ * on drums at TAPE 8 the envelope never left the cut, a STATIC EQ of −4.5 /
+ * −7.1 / −9.6 dB at 8–16 kHz on every frame, quiet or loud (owner: "too strong
+ * at every setting but OFF").
  *
- * Voiced on two narration clips (scripts/phatass-hf-detents.mjs; change
- * against the same chain with HF off). Sibilant BODY / ONSET at 4–16 kHz,
- * vowels 2–4 kHz, bright clip, TAPE 0 → TAPE 6:
- *
- *   30 ips   −1.8 / −0.2 / −0.0   →  −2.9 / −0.9 / −0.1
- *   15 ips   −3.5 / −0.8 / −0.1   →  −5.0 / −2.4 / −0.5
- *   7.5 ips  −5.0 / −1.7 / −0.8   →  −7.4 / −4.2 / −1.9
- *   (FATSO   −4.5 / −1.3 / −0.7, the lookahead limiter: onsets cut as hard)
- *
- * Dull clip: nothing at 30 / 15 ips at TAPE 0 (−0.2 at 15), −1.0 at 7.5; at
- * TAPE 6 −0.2 / −1.2 / −3.2 — driven hard, even a dull take gives some top.
- * ⚠ The onset/body split is the point and it NARROWS as the threshold drops
- * (the envelope stays up through a run): at 15 ips a −14 threshold read −4.7 /
- * −1.8, and that is why the speeds stop at −10.
- *
- * The threshold is re the voice level and reads the EMPHASISED BAND'S ENERGY,
- * which keeps a dull take mostly alone by itself: on the dull narration clip
- * the 9.1 kHz band's energy never comes within 9 dB of the voice level, on the
- * bright one it reaches +6 (scripts/phatass-hf-detents.mjs).
+ * SCALE, from the owner's Studer A800 drum pair (not a match — a sense of how
+ * much a real machine loses): against its quiet-frame response it loses ~0 on
+ * quiet frames, ~1 dB 0–4 dB over the voice level and ~3 on the loudest — but
+ * the low band loses nearly as much (−2.3 to −2.8 on the loudest), so the
+ * HF-SPECIFIC part is ~0.5–1 dB, on loud frames only. Installed, drums at
+ * TAPE 8, 8–16 kHz on quiet / mid / loud frames: 30 ips −0.07 / −0.07 / −0.04,
+ * 15 ips −0.6 / −1.1 / −0.9, 7.5 ips −1.0 / −2.2 / −2.0; nothing at TAPE 0.
+ * Bright narration, sibilant body / onset at TAPE 0 → TAPE 4: 30 ips −0.4 /
+ * 0.0 → −0.6, 15 ips −1.3 / −0.1 → −1.9 / −0.3, 7.5 ips −2.0 / −0.3 → −2.8 /
+ * −0.6; the dull clip is untouched at 30 / 15 and loses ≤ 0.4 at 7.5
+ * (scripts/phatass-hf-detents.mjs).
  *
  *   'off'   — the top end untouched
  *   'ips30' / 'ips15' / 'ips7' — the tape HF shelf at 30 / 15 / 7.5 ips
@@ -415,20 +410,18 @@ export const DETECT_4K_COMP_DB = 3
 /** A record-emphasis time constant's corner, Hz. */
 const emphasisHz = us => 1 / (2 * Math.PI * us * 1e-6)
 export const TAPE_SPEEDS = Object.freeze({
-  ips30: Object.freeze({ label: '30', detectHz: emphasisHz(17.5), cornerMaxHz: 14000, cornerMinHz: 6000, thresholdRelDb: -10, rangeDb: 9 }),
-  ips15: Object.freeze({ label: '15', detectHz: emphasisHz(35), cornerMaxHz: 10000, cornerMinHz: 4000, thresholdRelDb: -10, rangeDb: 12 }),
-  ips7: Object.freeze({ label: '7.5', detectHz: emphasisHz(70), cornerMaxHz: 7000, cornerMinHz: 2500, thresholdRelDb: -10, rangeDb: 15 }),
+  ips30: Object.freeze({ label: '30', detectHz: emphasisHz(17.5), cornerMaxHz: 14000, cornerMinHz: 6000, thresholdRelDb: -4, rangeDb: 4 }),
+  ips15: Object.freeze({ label: '15', detectHz: emphasisHz(35), cornerMaxHz: 10000, cornerMinHz: 4000, thresholdRelDb: -6, rangeDb: 6 }),
+  ips7: Object.freeze({ label: '7.5', detectHz: emphasisHz(70), cornerMaxHz: 7000, cornerMinHz: 2500, thresholdRelDb: -6, rangeDb: 9 }),
 })
 /** Shared by every speed: law and timing (reasoned). */
 export const TAPE_HF_LAW = Object.freeze({
-  slope: 0.75, // dB of cut per dB over
+  slope: 0.5, // dB of cut per dB over
   kneeDb: 6,
   cutPerOctDb: 6, // the corner drops an octave per 6 dB of cut
   attackMs: 3,
-  releaseMs: 80,
+  releaseMs: 40,
 })
-/** dB the threshold drops per dB of TAPE: hitting the tape harder costs HF headroom. */
-export const TAPE_HF_DB_PER_TAPE_DB = 1
 
 export const HF_DETENTS = Object.freeze({
   off: null,
@@ -446,15 +439,14 @@ export const HF_MODES = Object.freeze([...HF_PANEL_DETENTS, 'bench'])
  * tape speed. `thresholdDb` is absolute dBFS (mean-square level of the
  * emphasised band).
  */
-export function tapeHfShelfParams(hf, voiceLevelDb, tapeDb) {
+export function tapeHfShelfParams(hf, voiceLevelDb) {
   const sp = TAPE_SPEEDS[hf]
   if (!sp) return null
-  const t = clamp(Number(tapeDb) || 0, 0, TAPE_MAX_DB)
   return {
     detectHz: sp.detectHz,
     cornerMaxHz: sp.cornerMaxHz,
     cornerMinHz: sp.cornerMinHz,
-    thresholdDb: voiceLevelDb + sp.thresholdRelDb - TAPE_HF_DB_PER_TAPE_DB * t,
+    thresholdDb: voiceLevelDb + sp.thresholdRelDb,
     rangeDb: sp.rangeDb,
     ...TAPE_HF_LAW,
   }
@@ -566,7 +558,7 @@ export function toKernelParams(params) {
     rangeDb: shelf.rangeDb,
     ...TAPE_SHELF,
     // The tape HF shelf (a tape-speed detent), null when out.
-    tapeHf: tapeHfShelfParams(hf, voice, p.tape),
+    tapeHf: tapeHfShelfParams(hf, voice),
     // Soften rides the shelf's Transient, on its own band, at its own depth.
     transientDb: soft.depthDb,
     transientCornerHz: SOFTEN_FREQ_HZ,

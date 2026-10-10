@@ -138,8 +138,8 @@ const hfOptions = computed(() => (phParams.hf === 'bench'
 // What the current detent may cut at most.
 const hfCaption = computed(() => {
   if (phParams.hf === 'bench') return 'BENCH'
-  const t = tapeHfShelfParams(phParams.hf, phParams.voiceLevelDb, phParams.tape)
-  if (t) return `UP TO −${Math.round(t.rangeDb)} dB${phParams.tape > 0 ? ' · TAPE' : ''}`
+  const t = tapeHfShelfParams(phParams.hf, phParams.voiceLevelDb)
+  if (t) return `UP TO −${Math.round(t.rangeDb)} dB`
   const s = hfDetentShelf(phParams.hf, phParams.voiceLevelDb)
   return s ? `UP TO −${Math.round(s.rangeDb)} dB` : ''
 })

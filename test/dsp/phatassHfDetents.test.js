@@ -16,11 +16,12 @@ import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
   toKernelParams, tapeHfShelfParams, hfDetentShelf, tapeShelf, phatassLatencySamples,
-  HF_DETENTS, HF_PANEL_DETENTS, HF_MODES, TAPE_SPEEDS, TAPE_HF_LAW, TAPE_HF_DB_PER_TAPE_DB, TAPE_MAX_DB,
+  HF_DETENTS, HF_PANEL_DETENTS, HF_MODES, TAPE_SPEEDS, TAPE_HF_LAW,
   PHATASS_DEFAULTS, FATSO_CORNER_HZ, TAPE_SHELF,
 } from '../../src/audio/phatassParams.js'
 import { TapeHfShelf } from '../../src/audio/dsp/tapeHfShelf.js'
 import { highpass } from '../../src/audio/dsp/biquad.js'
+import { measureTapeMakeup } from '../../src/audio/phatassTapeMakeup.js'
 
 const SR = 44100
 const db = x => 20 * Math.log10(x)
@@ -75,7 +76,7 @@ function runShelf(x, p) {
 }
 
 /** A 15 ips shelf with its threshold placed re a known level. */
-const shelfAt = (thresholdDb, extra = {}) => ({ ...tapeHfShelfParams('ips15', 0, 0), thresholdDb, ...extra })
+const shelfAt = (thresholdDb, extra = {}) => ({ ...tapeHfShelfParams('ips15', 0), thresholdDb, ...extra })
 
 /** Narration stand-in: a syllable-gated vowel bed plus 120 ms sibilant bursts `sibDb` re the bed. */
 function narration(seconds, sibDb, seed = 5) {
@@ -129,25 +130,27 @@ test('the HF dial: OFF ships; OFF / 30 / 15 / 7.5 IPS / FATSO on the panel; the 
   }
 })
 
-test('TAPE drives the tape speeds: the threshold drops with TAPE, re the voice level', () => {
+test('the tape speeds\' threshold follows the voice level only — TAPE reaches the shelf through its makeup, never twice', () => {
   for (const hf of ['ips30', 'ips15', 'ips7']) {
-    const at0 = tapeHfShelfParams(hf, -20, 0)
-    assert.equal(at0.thresholdDb, -20 + TAPE_SPEEDS[hf].thresholdRelDb)
-    for (const tape of [1, 6, 12]) {
-      assert.equal(tapeHfShelfParams(hf, -20, tape).thresholdDb, at0.thresholdDb - TAPE_HF_DB_PER_TAPE_DB * tape)
-    }
-    assert.equal(tapeHfShelfParams(hf, -20, 99).thresholdDb, at0.thresholdDb - TAPE_HF_DB_PER_TAPE_DB * TAPE_MAX_DB)
-    assert.equal(tapeHfShelfParams(hf, -27, 0).thresholdDb, at0.thresholdDb - 7)
-    for (const k of Object.keys(TAPE_HF_LAW)) assert.equal(at0[k], TAPE_HF_LAW[k], k)
+    const p = tapeHfShelfParams(hf, -20)
+    assert.equal(p.thresholdDb, -20 + TAPE_SPEEDS[hf].thresholdRelDb)
+    assert.equal(tapeHfShelfParams(hf, -27).thresholdDb, p.thresholdDb - 7)
+    for (const k of Object.keys(TAPE_HF_LAW)) assert.equal(p[k], TAPE_HF_LAW[k], k)
+    // ⚠ The first cut also lowered the threshold 1 dB per dB of TAPE and counted
+    // the drive twice; TAPE must not move it.
+    for (const tape of [0, 6, 12]) assert.deepEqual(toKernelParams({ hf, tape, voiceLevelDb: -20 }).tapeHf, p)
   }
-  for (const hf of ['off', 'fatso', 'bench']) assert.equal(tapeHfShelfParams(hf, -20, 6), null)
+  for (const hf of ['off', 'fatso', 'bench']) assert.equal(tapeHfShelfParams(hf, -20), null)
+  // Slower tape starts sooner.
+  const thr = ['ips30', 'ips15', 'ips7'].map(k => TAPE_SPEEDS[k].thresholdRelDb)
+  assert.ok(thr[1] <= thr[0] && thr[2] <= thr[1])
 })
 
 test('each detent runs one shelf: a tape speed takes the limiter shelf out, FATSO is the fitted law with no tape shelf, OFF neither', () => {
   for (const hf of ['ips30', 'ips15', 'ips7']) {
     const k = toKernelParams({ hf, voiceLevelDb: -20, tape: 3 })
     assert.equal(k.rangeDb, 0, `${hf}: the limiter shelf is out`)
-    assert.deepEqual(k.tapeHf, tapeHfShelfParams(hf, -20, 3))
+    assert.deepEqual(k.tapeHf, tapeHfShelfParams(hf, -20))
   }
   const f = toKernelParams({ hf: 'fatso', voiceLevelDb: -20 })
   const law = tapeShelf(HF_DETENTS.fatso.tame, 10, 'fatso')
@@ -201,7 +204,9 @@ test('tape shelf: an attack goes through bright and the sustained part darkens �
   const att = db(Math.sqrt(10 ** (msDb(y, on, on + first) / 10)) / Math.sqrt(10 ** (msDb(x, on, on + first) / 10)))
   const body = db(toneAmp(y, 8000, on + Math.round(0.3 * SR), n) / 0.3)
   assert.ok(att > -1.5, `the attack lost ${att.toFixed(2)} dB in its first 0.5 ms`)
-  assert.ok(body < -6, `the held tone only came down ${body.toFixed(2)} dB`)
+  // Well over threshold the cut sits at Range; an 8 kHz tone, an octave over the
+  // fully slid corner of the one-pole shelf, gets more than half of it.
+  assert.ok(body < -0.5 * TAPE_SPEEDS.ips15.rangeDb, `the held tone only came down ${body.toFixed(2)} dB`)
   // The limiter shelf beside it does the opposite: its lookahead has the cut in place when the attack arrives.
 })
 
@@ -239,21 +244,32 @@ test('tape shelf: it only ever turns down — no component comes out louder, at 
   }
 })
 
-test('through PHAT*SS: a bright take loses sibilance and keeps its vowels; a dull one is left alone at 30 IPS; TAPE drives it further', () => {
+test('through PHAT*SS: a bright take loses sibilance and keeps its vowels; a dull one is left alone at 30 IPS; more TAPE, more sag', () => {
+  // Each detent against the SAME chain with HF off, so TAPE's own change drops out.
   const run = (take, hf, tape = 0) => {
     const voice = msDb(take.x)
-    const r = processPhatassBuffer([take.x], SR, toKernelParams({ hf, warmth: 0, soften: 0, tape, tapeMakeupDb: 0, voiceLevelDb: voice }))
-    return { sib: partChangeDb(r.channelData[0], r.latencySamples, take.sib), bed: partChangeDb(r.channelData[0], r.latencySamples, take.bed) }
+    let pk = 0
+    for (const v of take.x) pk = Math.max(pk, Math.abs(v))
+    const base = { warmth: 0, soften: 0, tape, voiceLevelDb: voice, warmthCeilingDb: db(pk) }
+    const tapeMakeupDb = tape > 0 ? measureTapeMakeup([take.x], SR, base).makeupDb : 0
+    const render = h => {
+      const r = processPhatassBuffer([take.x], SR, toKernelParams({ ...base, tapeMakeupDb, hf: h }))
+      return r.channelData[0].subarray(r.latencySamples)
+    }
+    const on = render(hf), off = render('off')
+    const proj = (y, part) => { let n = 0, d = 0; for (let i = 0; i < y.length; i++) { n += y[i] * part[i]; d += part[i] * part[i] } return n / d }
+    return {
+      sib: db(Math.abs(proj(on, take.sib) / proj(off, take.sib))),
+      bed: db(Math.abs(proj(on, take.bed) / proj(off, take.bed))),
+    }
   }
   const bright = narration(4, 6), dull = narration(4, -14)
   const b30 = run(bright, 'ips30'), b15 = run(bright, 'ips15'), b7 = run(bright, 'ips7')
-  assert.ok(b30.sib < -0.5, `30 ips on the bright take: ${b30.sib.toFixed(2)} dB`)
+  assert.ok(b30.sib < -0.1, `30 ips on the bright take: ${b30.sib.toFixed(2)} dB`)
   assert.ok(b15.sib < b30.sib && b7.sib < b15.sib, `30 ${b30.sib.toFixed(2)} / 15 ${b15.sib.toFixed(2)} / 7.5 ${b7.sib.toFixed(2)}`)
-  assert.ok(b15.bed > -0.5, `15 ips took ${b15.bed.toFixed(2)} dB off the vowels`)
-  assert.ok(run(dull, 'ips30').sib > -0.1, 'a dull take is left alone at 30 ips')
-  // TAPE drives it: the same detent takes more at TAPE 6, measured on the shelf's
-  // own threshold (rendering TAPE itself would add its own change).
-  const st0 = tapeHfShelfParams('ips15', msDb(bright.x), 0), st6 = tapeHfShelfParams('ips15', msDb(bright.x), 6)
-  const sibOnly = y => partChangeDb(y, 0, bright.sib)
-  assert.ok(sibOnly(runShelf(bright.x, st6)) < sibOnly(runShelf(bright.x, st0)) - 0.5)
+  assert.ok(b15.bed > -0.3, `15 ips took ${b15.bed.toFixed(2)} dB off the vowels`)
+  assert.ok(run(dull, 'ips30').sib > -0.05, 'a dull take is left alone at 30 ips')
+  // TAPE drives it — through the makeup, which brings the tape's output in hotter.
+  const t6 = run(bright, 'ips15', 6)
+  assert.ok(t6.sib < b15.sib - 0.3, `15 ips: TAPE 0 ${b15.sib.toFixed(2)} → TAPE 6 ${t6.sib.toFixed(2)} dB`)
 })
