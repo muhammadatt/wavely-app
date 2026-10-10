@@ -25,7 +25,7 @@ import { lowShelf, highpass, peaking } from './dsp/biquad.js'
 export const PHATASS_DEFAULTS = {
   // 0–10 — low-end harmonic warmth: how much of what the two fixed
   // WARMTH_LAYERS add is mixed in. 0 is off (a pure delay).
-  warmth: 5,
+  warmth: 0,
   // 0–100 — from pure Odd toward Even, over the useful part of the crossfade
   // only (ODD_EVEN_SPAN). The bench voicing is 36 (at Warmth 5).
   oddEven: 50,
@@ -60,13 +60,13 @@ export const PHATASS_DEFAULTS = {
   // together, on the chosen `curve` (`tapeShelf`). 0 takes the shelf out. On
   // the default 'voice' curve 5 is −4 dB re the voice, Range 12; 10 is −14,
   // Range 27.
-  tame: 5,
+  tame: 0,
   // Tame's law (`tapeShelf`). 'voice' and 'fatso' both pin the corner at 2 kHz:
   // 'fatso' is fitted to the EL7 Fatso's Warmth knob on music, 'voice' is the
   // same shape 6 dB lower with the Range opening sooner, voiced on narration.
   // 'original' is the DEPRECATED Tame/Tone law — off the panel, kept so a
   // render can still reach it.
-  curve: 'voice',
+  curve: 'fatso',
   // 0–10 — the 'original' curve's corner only: 2 kHz (0) to 12 kHz (10).
   // Not on the panel; the 2 kHz curves ignore it.
   tone: 10,
@@ -74,7 +74,7 @@ export const PHATASS_DEFAULTS = {
   // its own split at 4 kHz (threshold DETECT_4K_COMP_DB lower), so sibilance
   // triggers it before vowel brightness. The cut stays at 2 kHz either way.
   // Defaults to the VOICE curve's pair (CURVE_DETECT).
-  detect: '4k',
+  detect: '2k',
   output: 0, // dB trim
   // Automatic trim on the plugin's OUTPUT (`OUTPUT_MAKEUPS`), on top of Output:
   // 'off' (ships), 'peak' (the output's peak back on the source's) or 'rms'
@@ -689,7 +689,7 @@ export const TAPE_HEAD_BUMP_Q = 0.7
  * delay) was rejected by ear as rangy: its delay smears the kick.
  */
 export const TAPE_HEAD_BUMP_CURVES = Object.freeze({
-  'a800-30': Object.freeze({ hpHz: 35.3, hpQ: 0.9, liftHz: 31.25, liftQ: 0.3, liftDb: 1.17, dipHz: 82.7, dipQ: 1.83, dipDb: -1.93 }),
+  'a800-30': Object.freeze({ hpHz: 20, hpQ: 0.9, liftHz: 31.25, liftQ: 0.3, liftDb: 1.17, dipHz: 82.7, dipQ: 1.83, dipDb: -1.93 }),
   'a800-15': Object.freeze({ hpHz: 17.65, hpQ: 0.9, liftHz: 15.625, liftQ: 0.3, liftDb: 1.17, dipHz: 41.35, dipQ: 1.83, dipDb: -1.93 }),
 })
 /** Most sections any head bump uses (the kernel sizes its cascade to this). */
