@@ -32,6 +32,7 @@
  */
 
 import { ShelfLimiterStage } from './dsp/hfLimit.js'
+import { TapeHfShelf } from './dsp/tapeHfShelf.js'
 import { SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { WarmthPeakGuard } from './dsp/warmthGuard.js'
 import { DelayLine } from './dsp/oversample.js'
@@ -64,6 +65,9 @@ export class PhatassKernel {
     this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)
     this.warmthIn = []
     this.shelf = new ShelfLimiterStage(sampleRate)
+    // The tape HF shelf (a tape-speed detent): zero latency, so the plugin's
+    // latency is the same whichever detent is up.
+    this.tapeHf = new TapeHfShelf(sampleRate)
     this.latencySamples = this.tape.latencySamples + this.warmth.latencySamples
       + this.guard.latencySamples + this.shelf.latencySamples
     this.params = { ...PHATASS_KERNEL_DEFAULTS }
@@ -133,6 +137,7 @@ export class PhatassKernel {
       transientGateLin: Number.isFinite(p.transientGateDb) ? dbToLin(p.transientGateDb) : null,
       detectCornerHz: p.detectCornerHz,
     })
+    this.tapeHf.setParams(p.tapeHf ?? null)
     this.outputLin = dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0))
     this.tapeMakeupLin = dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0)
     const bumpKey = p.headBump || 0
@@ -226,6 +231,7 @@ export class PhatassKernel {
       this.meterCount += n * nOut
     }
     this.shelf.process(outputChannels, n)
+    this.tapeHf.process(outputChannels, n)
     const g = this.outputLin
     if (g !== 1) {
       for (let ch = 0; ch < nOut; ch++) {

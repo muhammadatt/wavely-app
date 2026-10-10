@@ -39,7 +39,7 @@ export const BAND_SPECTRUM_FFT = 2048
  * The timeline's playing segments as a sorted, non-overlapping run, so a block
  * read can binary-search to its first segment instead of rescanning them all.
  */
-export function indexSegments(segments) {
+function indexSegments(segments) {
   const idx = []
   for (const seg of segments) {
     if (seg.sourceBuffer === null) continue
@@ -50,7 +50,7 @@ export function indexSegments(segments) {
 }
 
 /** One channel of the timeline over [t0, t0 + n/sr), silence where nothing plays. */
-export function readChannel(index, ch, t0, n, sampleRate, out) {
+function readChannel(index, ch, t0, n, sampleRate, out) {
   out.fill(0, 0, n)
   const t1 = t0 + n / sampleRate
   let lo = 0

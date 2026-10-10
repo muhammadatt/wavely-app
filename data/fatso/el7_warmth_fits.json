@@ -12,5 +12,5 @@
     "Warmth6": { "limit": [0.348, 4, 3], "knee3": [0.348, 4, 3], "knee6": [0.348, 4.5, 3], "knee9": [0.345, 6.5, 9], "knee12": [0.335, 6.5, 9], "tanh": [0.380, 9, 6] },
     "Warmth7": { "limit": [0.563, 0.5, 9], "knee3": [0.564, 0.5, 9], "knee6": [0.569, 0.5, 9], "knee9": [0.587, 1, 9], "knee12": [0.607, 1.5, 12], "tanh": [0.703, 2.5, 12] }
   },
-  "verdict": "Limiter law kept. Knees gain <= 0.013 where the Fatso barely acts and lose at Warmth 7 (the FATSO detent's point); tanh is worst everywhere. Steeper-than-limiter laws were already worse (dev log)."
+  "verdict": "Limiter law kept. Knees gain <= 0.013 where the Fatso barely acts and lose at Warmth 7 (the FATSO detent's point); tanh is worst everywhere. Steeper-than-limiter laws were already worse (dev log). The kneeDb / law stage options and the harness --grid that produced gainLawFit were removed afterwards (recoverable at f62bf21)."
 }

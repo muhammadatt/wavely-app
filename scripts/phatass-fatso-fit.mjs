@@ -2,7 +2,7 @@
 /**
  * PHAT*SS — score the tape shelf against EL7 Fatso Warmth bounces.
  *
- *   node scripts/phatass-fatso-fit.mjs <dry.wav> <Warmth 2.wav> <5.wav> <6.wav> <7.wav> [--grid]
+ *   node scripts/phatass-fatso-fit.mjs <dry.wav> <Warmth 2.wav> <5.wav> <6.wav> <7.wav>
  *
  * The owner's bounces (2_FATSO_EL7x_-_Input_2.wav = Warmth off, and Warmth
  * 2 / 5 / 6 / 7 over it; music, 96 kHz float stereo, 8.35 s). Not in the repo
@@ -26,11 +26,13 @@
  *             app measures it (`regionAlignDb`). PHAT*SS at Warmth / TAPE /
  *             Soften 0 is exactly this plus a delay.
  *
- * Without --grid it prints the gain-only baselines and the shipping FATSO
- * law's Tame 1 / 4 / 6 against Warmth 5 / 6 / 7 — the dev log's 0.002 / 0.210
- * / 0.556 / 1.357 and 0.165 / 0.345 / 0.574, which is what validates the
- * rebuild. With --grid it also fits threshold / Range per Warmth under each
- * gain law (the limiter, quadratic soft knees, tanh).
+ * It prints the gain-only baselines and the shipping FATSO law's Tame 1 / 4 /
+ * 6 against Warmth 5 / 6 / 7 — the dev log's 0.002 / 0.210 / 0.556 / 1.357
+ * and 0.165 / 0.345 / 0.574, which is what validates the rebuild.
+ *
+ * ⚠ A --grid that scored soft knees and a tanh law against the limiter law
+ * ran here once (they lost at Warmth 7; data/fatso/el7_warmth_fits.json) and
+ * was removed with the stage options it needed — recoverable at f62bf21.
  */
 
 import { readFileSync } from 'node:fs'
@@ -122,7 +124,7 @@ function renderShelf(dry, sr, p) {
   st.setParams({
     cornerHz: p.cornerHz ?? FATSO_CORNER_HZ, thresholdLin: Math.pow(10, p.thresholdDb / 20),
     floorLin: Math.pow(10, -p.rangeDb / 20), releaseMs: p.releaseMs ?? TAPE_SHELF.releaseMs,
-    shape: TAPE_SHELF.shape, tailMs: 0, kneeDb: p.kneeDb ?? 0, law: p.law ?? 'limit',
+    shape: TAPE_SHELF.shape, tailMs: 0,
   })
   const L = st.latencySamples
   const n = dry[0].length
@@ -153,7 +155,6 @@ function score(dryE, oursE, fatE) {
 // ── main ────────────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'))
-const grid = process.argv.includes('--grid')
 const WARMTHS = [2, 5, 6, 7]
 const { ch: dry, sr } = readWavChannels(args[0])
 const seg = { outputStart: 0, sourceStart: 0, sourceEnd: dry[0].length / sr, sourceBuffer: { getChannelData: c => dry[c], numberOfChannels: dry.length } }
@@ -192,33 +193,4 @@ for (const [w, tame] of [[5, 1], [6, 4], [7, 6]]) {
   const t = tapeShelf(tame, 10, 'fatso')
   const s = sets.find(x => x.w === w)
   console.log(`  Warmth ${w} / Tame ${tame} (thr ${t.thresholdRelDb}, R${t.rangeDb}): ${fmt(score(s.dryE, oursE(s, { thresholdDb: voice + t.thresholdRelDb, rangeDb: t.rangeDb }), s.fatE))}`)
-}
-
-if (grid) {
-  const LAWS = [
-    { name: 'limit', p: {} },
-    { name: 'knee 3', p: { kneeDb: 3 } },
-    { name: 'knee 6', p: { kneeDb: 6 } },
-    { name: 'knee 9', p: { kneeDb: 9 } },
-    { name: 'knee 12', p: { kneeDb: 12 } },
-    { name: 'tanh', p: { law: 'tanh' } },
-  ]
-  const RANGES = [3, 6, 9, 12, 18]
-  console.log('\nbest threshold (re voice) / Range per law, rms (coarse 2 dB grid, then ±1 refined):')
-  for (const s of sets.filter(x => x.w >= 5)) {
-    const line = []
-    for (const law of LAWS) {
-      let best = null
-      const tryP = (thr, R) => {
-        const r = score(s.dryE, oursE(s, { ...law.p, thresholdDb: voice + thr, rangeDb: R }), s.fatE)
-        if (!best || r.rms < best.rms) best = { ...r, thr, R }
-      }
-      for (let thr = -10; thr <= 16; thr += 2) for (const R of RANGES) tryP(thr, R)
-      const c = best
-      for (const thr of [c.thr - 1, c.thr - 0.5, c.thr + 0.5, c.thr + 1]) tryP(thr, c.R)
-      line.push(`${law.name}: ${best.rms.toFixed(3)} @ ${best.thr >= 0 ? '+' : ''}${best.thr} / R${best.R}`)
-      cache.clear()
-    }
-    console.log(`  Warmth ${s.w}: ${line.join('  |  ')}`)
-  }
 }

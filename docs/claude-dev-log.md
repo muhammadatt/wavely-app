@@ -6656,3 +6656,57 @@ quadratic knee cuts (o − K/2)²/2K MORE than the hard law everywhere inside it
 it starts early, it never cuts less; the first draft of the test asserted the
 opposite. The options stay in the stage for the record (bit-identical off,
 pinned by an HF Limiter test); no plugin passes them.
+
+### PHAT*SS — the tape HF shelf: 30 / 15 / 7.5 IPS replace AIR / SMOOTH / DARK (October 2026)
+
+Owner, on the two entries above: the soft-knee fit chased the wrong question
+(a limiter fits a limiter best; recreating the Fatso was never the goal), and
+AIR / SMOOTH / DARK were only a new calibration of the SAME lookahead limiter
+shelf — the level-dependent tape shelf itself had not been built. Decisions:
+replace AIR / SMOOTH / DARK with tape speeds, tie the shelf to TAPE, remove
+the knee code.
+
+**Removed.** `ShelfLimiterStage`'s `kneeDb` / `law` (back to `8279530`
+byte for byte), its test, the Fatso harness's `--grid`;
+`phatassTrebleStats.js` and the `trebleStats` param with its measurement (the
+energy detector below leaves dull takes alone by itself).
+
+**`dsp/tapeHfShelf.js`** — how it differs from the limiter shelf:
+- detector: mean square of the band above the speed's IEC emphasis corner
+  (17.5 / 35 / 70 µs), 3 ms attack / 80 ms release — energy, not peaks;
+- no lookahead: attacks pass bright, sustained brightness darkens (the one
+  measured clue — the Studer renders' onsets were BRIGHTER than ours — points
+  this way; the limiter shelf does the opposite);
+- law: 0.75 dB of cut per dB over through a 6 dB knee, capped at Range — no
+  ceiling;
+- response: the WARM split `g·x + (1−g)·LP1(fc)` with the corner sliding an
+  octave down per 6 dB of cut (coefficients every 8 samples), between
+  14 / 10 / 7 kHz and 6 / 4 / 2.5 kHz — the loss reaches further down as it
+  deepens ("sag");
+- zero latency, bit-transparent below threshold (tested), only ever turns down
+  (tested), linked.
+
+**TAPE drives it**: threshold `voice − 10 − 1·TAPE` dB.
+
+**Detector levels** (re voice, active frames, 3/80 ms): the emphasised band
+separates the clips by speed — at 9.09 kHz bright p98 −2.2 / max +6.2 against
+dull −11.1 / −8.7; at 2.27 kHz they nearly agree (p98 +1.9 / +0.8). So 30 ips
+leaves a dull take alone by construction and 7.5 ips does not.
+
+**Tuning** (15 ips, bright clip, sibilant body / onset / vowel; T0 | T6):
+thr −6, slope 0.5, coupling 0.5, R9: −1.43 / −0.13 / −0.02 | −2.04 (too subtle,
+TAPE barely mattered); −10, 0.75, 1, R12: −3.48 / −0.77 / −0.14 | −5.02 / −2.40
+(chosen); −12: −4.13 / −1.24; −14: −4.67 / −1.82 — the onset/body split
+narrows as the threshold drops, because the envelope stays up through a run.
+30 ips −10 / R9, 7.5 ips −10 / R15.
+
+**Installed** (bright | dull; sibilant body / onset / vowel):
+
+| | TAPE 0 bright | TAPE 6 bright | TAPE 0 dull | TAPE 6 dull |
+|---|---|---|---|---|
+| 30 ips | −1.83 / −0.16 / −0.01 | −2.85 / −0.87 / −0.07 | 0.00 | −0.16 / −0.02 / −0.04 |
+| 15 ips | −3.47 / −0.77 / −0.13 | −5.01 / −2.38 / −0.53 | −0.15 / −0.08 / −0.15 | −1.23 / −0.83 / −0.60 |
+| 7.5 ips | −5.04 / −1.71 / −0.77 | −7.41 / −4.21 / −1.87 | −1.02 / −1.12 / −1.06 | −3.23 / −3.06 / −2.19 |
+| FATSO | −4.52 / −1.31 / −0.67 | — | −0.13 / −0.16 / −1.10 | — |
+
+Every constant except the emphasis corners is reasoned. Not auditioned.

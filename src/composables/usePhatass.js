@@ -11,7 +11,6 @@ import { getEffectChain } from '../audio/effectChain.js'
 import { phatassEffect, PHATASS_DEFAULTS } from '../audio/effects/phatass.js'
 import { WARMTH_LAYERS, warmthActive } from '../audio/phatassParams.js'
 import { measureBandSpectrum, bandRefPeakDb } from '../audio/saturationBenchAnalysis.js'
-import { measureTrebleStats } from '../audio/phatassTrebleStats.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import { NeedleSpring, satMeterValue } from '../audio/dsp/saturationMeter.js'
 
@@ -19,7 +18,7 @@ import { NeedleSpring, satMeterValue } from '../audio/dsp/saturationMeter.js'
 export const PHATASS_WINDOW_ID = 'phatass'
 
 // Singleton reactive state shared between the sidebar trigger and the modal.
-// `voiceLevelDb`, `trebleStats`, `warmthRefPeaksDb` and `warmthCeilingDb` are in here because
+// `voiceLevelDb`, `warmthRefPeaksDb` and `warmthCeilingDb` are in here because
 // the kernel needs them, but they are measured, never set from the panel.
 const phParams = reactive({ ...PHATASS_DEFAULTS })
 const phPreview = ref(false)
@@ -46,7 +45,7 @@ let tapeSeq = 0
 const phOutputMakeup = ref({ pending: false })
 let outputTimer = null
 let outputSeq = 0
-const MEASURED = new Set(['voiceLevelDb', 'trebleStats', 'warmthRefPeaksDb', 'warmthCeilingDb', 'tapeMakeupDb', 'outputMakeupDb'])
+const MEASURED = new Set(['voiceLevelDb', 'warmthRefPeaksDb', 'warmthCeilingDb', 'tapeMakeupDb', 'outputMakeupDb'])
 // Params that do not change what the output trim measures: Output rides on top
 // of it, and the mode is handled on its own.
 const OUTPUT_TRIM_IGNORES = new Set(['output', 'outputMakeup'])
@@ -105,9 +104,8 @@ export function usePhatass() {
   }
 
   /**
-   * Measure the file's voice level and its treble statistics and move the tape
-   * shelf's threshold with them, so an HF detent means the same thing on a
-   * quiet recording and a hot one, a bright take and a dull one.
+   * Measure the file's voice level and move the HF shelves' thresholds with
+   * it, so an HF detent means the same thing on a quiet recording and a hot one.
    *
    * ⚠ THE WHOLE FILE, NEVER THE SELECTION, and the same gated-RMS statistic —
    * the rule OptoSmooth's input alignment and the HF Softener's level offset
@@ -127,13 +125,6 @@ export function usePhatass() {
     levelMeasuredFor = key
     phParams.voiceLevelDb = gated
     pushParam('voiceLevelDb', gated)
-    // The HF detents' calibration: the file's own treble, re that voice level.
-    // Whole file, like the level, so a detent means one thing per file.
-    const treble = measureTrebleStats(
-      state.segments, end, state.currentFile.sampleRate, state.currentFile.channels, gated,
-    )
-    phParams.trebleStats = treble
-    pushParam('trebleStats', treble)
     // Warmth's calibration, the Saturation Bench's: each layer's band level on
     // this file, so a Warmth setting means the same on a quiet take and a hot one.
     const spectrum = measureBandSpectrum(

@@ -21,10 +21,10 @@
  *
  * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing
  * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
- * match), its corner at 2 kHz. HF is a DETENT, not a knob: OFF / AIR / SMOOTH /
- * DARK are calibrated on the file's own treble, inside a window re its voice
- * level (the floor keeps a dull take's character), and FATSO is the fitted law.
- * Tame / CURVE / DETECT, which the detents replace, live on the bench. See
+ * match), its corner at 2 kHz — used by the FATSO detent and the bench's Tame.
+ * HF is a DETENT, not a knob: OFF / 30 / 15 / 7.5 IPS run the TAPE HF SHELF
+ * (dsp/tapeHfShelf.js) — the top end sags with level, attacks stay bright, and
+ * the Tape knob makes it sag sooner — and FATSO is the fitted limiter law. See
  * HF_DETENTS in phatassParams.js.
  *
  * In/out meters only. The readout under the Warmth knobs is what the warmth
@@ -35,7 +35,7 @@ import { usePhatass } from '../../composables/usePhatass.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   WARMTH_MAX, ODD_EVEN_MAX, SOFTEN_MAX, TAPE_MAX_DB, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
-  warmthActive, softenLaw, hfDetentShelf,
+  warmthActive, softenLaw, hfDetentShelf, tapeHfShelfParams,
 } from '../../audio/phatassParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
@@ -126,10 +126,10 @@ const softenCaption = computed(() => {
 
 const HF_OPTIONS = [
   { value: 'off', label: 'OFF', title: 'The top end passes untouched' },
-  { value: 'air', label: 'AIR', title: 'Only the loudest sibilance: an S that jumps out is eased back a few dB, everything else is left alone. Calibrated on this file\'s own treble' },
-  { value: 'smooth', label: 'SMOOTH', title: 'Sibilance and the brightest vowels, more firmly. Calibrated on this file\'s own treble, so a dull take is left mostly alone' },
-  { value: 'dark', label: 'DARK', title: 'The treble generally, the deepest of the detents: the top end rounds off the way hot tape does' },
-  { value: 'fatso', label: 'FATSO', title: 'The top-end law fitted to an EL7 Fatso\'s Warmth (at Warmth 7, on music): it listens from 2 kHz, so bright vowels trigger it as readily as sibilance' },
+  { value: 'ips30', label: '30 IPS', title: 'Tape at 30 inches per second: the most HF headroom. Only the brightest passages sag a little at the very top. Turning Tape up makes it sag sooner' },
+  { value: 'ips15', label: '15 IPS', title: 'Tape at 15 inches per second: bright passages lose some top end, and the loss reaches lower as they get hotter. Attacks stay bright. Turning Tape up makes it sag sooner' },
+  { value: 'ips7', label: '7.5 IPS', title: 'Tape at 7.5 inches per second: the least HF headroom. The top end darkens on anything bright and the loss reaches down into the upper mids. Turning Tape up makes it sag sooner' },
+  { value: 'fatso', label: 'FATSO', title: 'Not tape: the top-end limiter fitted to an EL7 Fatso\'s Warmth (at Warmth 7, on music). It catches peaks from 2 kHz, so bright vowels trigger it as readily as sibilance' },
 ]
 // The bench's Tame has the shelf: show that on the dial rather than no position.
 const hfOptions = computed(() => (phParams.hf === 'bench'
@@ -138,7 +138,9 @@ const hfOptions = computed(() => (phParams.hf === 'bench'
 // What the current detent may cut at most.
 const hfCaption = computed(() => {
   if (phParams.hf === 'bench') return 'BENCH'
-  const s = hfDetentShelf(phParams.hf, phParams.voiceLevelDb, phParams.trebleStats)
+  const t = tapeHfShelfParams(phParams.hf, phParams.voiceLevelDb, phParams.tape)
+  if (t) return `UP TO −${Math.round(t.rangeDb)} dB${phParams.tape > 0 ? ' · TAPE' : ''}`
+  const s = hfDetentShelf(phParams.hf, phParams.voiceLevelDb)
   return s ? `UP TO −${Math.round(s.rangeDb)} dB` : ''
 })
 
@@ -229,7 +231,7 @@ async function applyAndClose() {
             </div>
             <div
               class="w-[96px] flex flex-col items-center"
-              title="How the tape rounds off the top end from 2 kHz. AIR eases back only the loudest sibilance, SMOOTH takes sibilance and the brightest vowels more firmly, DARK rounds off the treble generally. Each is set from this file's own treble and voice level, so it means the same on any recording — and a dull take is left mostly alone. FATSO is the law fitted to an EL7 Fatso's Warmth. OFF passes the top end untouched"
+              title="How the tape loses its top end as it is driven: at 30, 15 or 7.5 IPS the treble sags on bright, hot passages — slower tape sags sooner, deeper and further down — while attacks stay bright. Turning Tape up drives it harder, so the top sags sooner. A dull take is left mostly alone. FATSO is not tape: the top-end limiter fitted to an EL7 Fatso. OFF passes the top end untouched"
             >
               <DeviceDetentRotary
                 :model-value="phParams.hf" :options="hfOptions" :accent="ACCENT"
@@ -282,7 +284,7 @@ async function applyAndClose() {
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
         Warmth fattens the low end without raising the peak, Tape rounds off the peaks,
-        Soften rounds off sudden attacks, and HF rounds off the top from 2 kHz.
+        Soften rounds off sudden attacks, and HF lets the top end sag the way driven tape does.
       </p>
 
       <!-- Bench only: gated off in production builds. See phatassBench.js. -->
