@@ -387,8 +387,8 @@ export const DETECT_4K_COMP_DB = 3
  * itself is voice-level calibrated.
  *
  * The corner stays at the 2 kHz curves' 2 kHz, the shelf at TAPE_SHELF, the
- * gain law the limiter's (the FATSO fit found it right; a soft knee was
- * considered and not built — scoring it needs the Fatso bounces).
+ * gain law the limiter's (steeper laws scored worse in the FATSO fit, and
+ * soft knees / tanh worse at Warmth 7: data/fatso/el7_warmth_fits.json).
  *
  *   'off'    — the shelf out (a pure delay, as Tame 0)
  *   'air'    — the loudest sibilance only

@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { HFLimiterKernel, processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import { toKernelParams, hfLimiterLatencySamples, HF_LIMITER_DEFAULTS } from '../../src/audio/hfLimiterParams.js'
-import { shelfResponseDb, splitResponse, splitTaps } from '../../src/audio/dsp/hfLimit.js'
+import { shelfResponseDb, splitResponse, splitTaps, ShelfLimiterStage } from '../../src/audio/dsp/hfLimit.js'
 
 const SR = 44100
 
@@ -449,4 +449,31 @@ test('the Tail never lets the gain overshoot the lookahead ceiling', () => {
   const p = peak(y, SR / 4)
   // Both tones sit above TIGHT's transition, so the output IS the band.
   assert.ok(p <= T * 1.0005, `peak ${db(p).toFixed(3)} dBFS over the −30 ceiling`)
+})
+
+test('the rejected soft-knee laws stay opt-in: off is the limiter law bit for bit; a knee leaves the band under it alone and meets the limiter above it', () => {
+  // Kept only so scripts/phatass-fatso-fit.mjs --grid can reproduce the
+  // rejection (no plugin passes kneeDb / law).
+  const render = (x, extra) => {
+    const st = new ShelfLimiterStage(SR)
+    st.setParams({ cornerHz: 5000, thresholdLin: 0.1, floorLin: 0.01, releaseMs: 60, shape: 'warm', ...extra })
+    const y = Float32Array.from(x)
+    for (let o = 0; o < y.length; o += 128) st.process([y.subarray(o, Math.min(o + 128, y.length))], Math.min(128, y.length - o))
+    return y
+  }
+  const amp = (y, f) => toneAmp(y, f, SR / 2, SR)
+  const x = add(sine(300, 0.3), sine(8000, 0.3), noise(SR, 0.02, 4))
+  const a = render(x, {}), b = render(x, { kneeDb: 0, law: 'limit' })
+  for (let i = 0; i < x.length; i++) if (a[i] !== b[i]) assert.fail(`sample ${i} differs with the knee off`)
+  // An 8 kHz tone 12 dB under the threshold's knee bottom (knee 6: from −3 dB): untouched.
+  const quiet = sine(8000, 0.025)
+  assert.ok(Math.abs(db(amp(render(quiet, { kneeDb: 6 }), 8000) / amp(render(quiet, {}), 8000))) < 1e-6)
+  // 15 dB over: past the knee's top, the same cut as the limiter (the release smoothing aside).
+  const loud = sine(8000, 0.6)
+  assert.ok(Math.abs(db(amp(render(loud, { kneeDb: 6 }), 8000) / amp(render(loud, {}), 8000))) < 0.05)
+  // Inside the knee it starts early: a centred quadratic knee cuts (o − K/2)²/2K
+  // MORE than the limiter, never less — just under the threshold the limiter
+  // does nothing and the knee already cuts.
+  const mid = sine(8000, 0.1)
+  assert.ok(amp(render(mid, { kneeDb: 6 }), 8000) < amp(render(mid, {}), 8000) * 0.98)
 })

@@ -306,7 +306,7 @@ export class ShelfLimiterStage {
     cornerHz, thresholdLin, floorLin, releaseMs,
     shape = 'tight', tailMs = 0, tailChargeMs = TAIL_CHARGE_MS, transientDb = 0,
     transientCornerHz = null, transientSlope = TRANSIENT_SLOPE, transientGateLin = null,
-    detectCornerHz = null,
+    detectCornerHz = null, kneeDb = 0, law = 'limit',
   }) {
     const coeff = ms => Math.exp(-1 / (Math.max(1, ms) * 1e-3 * this.sampleRate))
     const coeffFine = ms => Math.exp(-1 / (ms * 1e-3 * this.sampleRate))
@@ -339,6 +339,16 @@ export class ShelfLimiterStage {
       this.dLpB0 = dl.b0
       this.dLpA1 = dl.a1
     }
+    // SOFT KNEE — SCORED AND REJECTED, kept for the record (no plugin passes
+    // it): 0 / 'limit' is the limiter law, bit for bit. `kneeDb` > 0 rounds the
+    // corner quadratically over ±kneeDb/2 around the threshold; `law: 'tanh'`
+    // makes the band's output T·tanh(m/T). Against the EL7 Fatso's Warmth 5 / 6
+    // / 7 (`scripts/phatass-fatso-fit.mjs --grid`) the best knee gained ≤ 0.013
+    // dB rms where the Fatso barely acts and LOST at Warmth 7 (0.563 → 0.607 at
+    // 12 dB; tanh 0.703). With steeper laws already worse, the limiter law is
+    // the fit from both sides.
+    this.kneeDb = Math.max(0, kneeDb)
+    this.law = law
     this.cornerHz = cornerHz
     this.thresholdLin = thresholdLin
     this.floorLin = floorLin
@@ -393,6 +403,7 @@ export class ShelfLimiterStage {
     const tSlope = this.tSlope
     const tSplit = this.tSplit
     const tb0 = this.tLpB0, ta1 = this.tLpA1
+    const law = this.law, knee = this.kneeDb
     const dSplit = this.dSplit
     const db0 = this.dLpB0, da1 = this.dLpA1
     let tf = this.tFast, ts = this.tSlow, gt = this.tGain, minTGain = this.minTGain
@@ -447,7 +458,18 @@ export class ShelfLimiterStage {
       if (!tSplit) mt = m
       pos = pos + 1 === len ? 0 : pos + 1
 
-      let req = m > T ? T / m : 1
+      let req
+      if (law === 'tanh') {
+        const u = m / T
+        req = u > 1e-3 ? Math.tanh(u) / u : 1
+      } else if (knee > 0) {
+        const K = knee
+        const over = m > 0 ? 20 * Math.log10(m / T) : -Infinity
+        const cut = over <= -K / 2 ? 0 : over >= K / 2 ? over : (over + K / 2) ** 2 / (2 * K)
+        req = cut > 0 ? Math.pow(10, -cut / 20) : 1
+      } else {
+        req = m > T ? T / m : 1
+      }
       if (req < floor) req = floor
       const gl = this.box2.push(this.box1.push(this.min.push(req)))
       let target = gl

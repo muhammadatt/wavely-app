@@ -6624,3 +6624,35 @@ pairing) and Detect moved to the bench, and moving the slider sets
 `hf: 'bench'`. `saturationBenchAnalysis.js` exports `indexSegments` /
 `readChannel` for the measurement. Existing Tame tests now pass `hf: 'bench'`.
 Not auditioned.
+
+### PHAT*SS — soft knee scored against the Fatso bounces, rejected (October 2026)
+
+The owner re-supplied the five EL7 bounces. `scripts/phatass-fatso-fit.mjs`
+rebuilds the scratch harness from the entry above (audio stays out of the
+repo; readings in `data/fatso/el7_warmth_fits.json`).
+
+**Validation.** One change from the description: block alignment must tolerate
+±2 samples between neighbours. With exact agreement Warmth 7 kept 27 of 98
+blocks — its lag wanders 0–2 from block to block, the Fatso's own phase moving
+with its gain (a one-pole's group delay follows g), while the real drop is ~13.
+With ±2: 95–98 blocks kept, and the shipping FATSO law scores 0.174 / 0.348 /
+0.570 at Warmth 5 / 6 / 7 against the dev log's 0.165 / 0.345 / 0.574;
+gain-only 0.002 / 0.240 / 0.596 / 1.398 against 0.002 / 0.210 / 0.556 / 1.357.
+
+**The fit.** `ShelfLimiterStage` took an opt-in `kneeDb` (quadratic knee
+centred on the threshold) and `law: 'tanh'` (band output T·tanh(m/T)); best
+threshold / Range per law, dB rms:
+
+| | limit | knee 3 | knee 6 | knee 9 | knee 12 | tanh |
+|---|---|---|---|---|---|---|
+| Warmth 5 | 0.168 | 0.162 | 0.159 | 0.157 | 0.155 | 0.175 |
+| Warmth 6 | 0.348 | 0.348 | 0.348 | 0.345 | 0.335 | 0.380 |
+| Warmth 7 | **0.563** | 0.564 | 0.569 | 0.587 | 0.607 | 0.703 |
+
+A knee gains ≤ 0.013 where the Fatso barely acts (Warmth 5 cuts > 1 dB on ~1 %
+of frames) and loses at Warmth 7, the FATSO detent's point. With steeper laws
+already worse, the limiter law is the fit from both sides. ⚠ A centred
+quadratic knee cuts (o − K/2)²/2K MORE than the hard law everywhere inside it —
+it starts early, it never cuts less; the first draft of the test asserted the
+opposite. The options stay in the stage for the record (bit-identical off,
+pinned by an HF Limiter test); no plugin passes them.
