@@ -9,11 +9,11 @@
  * on with Warmth: it turns down only what Warmth adds, only where the sum would
  * pass the selection's own peak (dsp/warmthGuard.js).
  *
- * SOFTEN (a lit toggle) is the HF Limiter's Transient detector on its own band
- * above 500 Hz: it turns that band down for a few milliseconds when it rises
- * suddenly — clicks, lip smacks, hard consonants, the snap of an onset. It has
- * no knob: its depth rides TAME, so the top end and the attacks turn down
- * together. A gain on a band, never distortion, no latency of its own.
+ * SOFTEN is the HF Limiter's Transient detector on its own band above 500 Hz:
+ * it turns that band down for a few milliseconds when it rises suddenly —
+ * clicks, lip smacks, hard consonants, the snap of an onset. Its own knob,
+ * independent of the top-end shelf. A gain on a band, never distortion, no
+ * latency of its own.
  *
  * TAPE takes dB off the peaks the way tape does: a full-band cubic soft
  * clipper, calibrated on the selection's own peak so the knob reads in dB of
@@ -21,11 +21,11 @@
  *
  * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing
  * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
- * match), its corner at 2 kHz. TAME is a macro for Threshold and Range together,
- * on one of two CURVES: VOICE (voiced on narration) or FATSO (fitted to the EL7
- * Fatso's Warmth knob on music). DETECT picks where the shelf listens: 2K, the
- * band it cuts, or 4K, so sibilance triggers it before vowel brightness. The
- * old Tame/Tone law is deprecated and off the panel. See phatassParams.js.
+ * match), its corner at 2 kHz. HF is a DETENT, not a knob: OFF / AIR / SMOOTH /
+ * DARK are calibrated on the file's own treble, inside a window re its voice
+ * level (the floor keeps a dull take's character), and FATSO is the fitted law.
+ * Tame / CURVE / DETECT, which the detents replace, live on the bench. See
+ * HF_DETENTS in phatassParams.js.
  *
  * In/out meters only. The readout under the Warmth knobs is what the warmth
  * stage did to this selection's low bands and peak.
@@ -34,11 +34,11 @@ import { computed, onMounted, watch } from 'vue'
 import { usePhatass } from '../../composables/usePhatass.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  WARMTH_MAX, ODD_EVEN_MAX, TAME_MAX, SOFTEN_MAX, TAPE_MAX_DB, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
-  warmthActive, tapeShelf, softenLaw, CURVE_DETECT,
+  WARMTH_MAX, ODD_EVEN_MAX, SOFTEN_MAX, TAPE_MAX_DB, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
+  warmthActive, softenLaw, hfDetentShelf,
 } from '../../audio/phatassParams.js'
 import Knob from '../knobs/Knob.vue'
-import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
+import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
 import PhatassBenchPanel from './PhatassBenchPanel.vue'
 import { isPhatassBenchVisible } from '../../audio/effects/phatassBench.js'
 import ClassicVuMeter from '../hardware/ClassicVuMeter.vue'
@@ -107,7 +107,6 @@ const readoutPeak = computed(() => {
 
 const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtOddEven = v => (v <= 0 ? 'ODD' : `${Math.round(v)}`)
-const fmtTame = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const fmtTape = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
 // The makeup TAPE gives back: what it measured off the peak, so the peak lands where it started.
 const tapeMakeupCaption = computed(() => {
@@ -125,27 +124,23 @@ const softenCaption = computed(() => {
   return d > 0 ? `UP TO −${Math.round(d)} dB` : ''
 })
 
-const CURVE_OPTIONS = [
-  { value: 'voice', label: 'VOICE', title: 'Tame voiced on narration: it starts on the brightest sibilance at low settings and keeps going deeper to the top of the knob' },
-  { value: 'fatso', label: 'FATSO', title: 'Tame fitted to the Warmth knob of an EL7 Fatso (on music): lighter at the bottom of the knob, about 6 dB later than VOICE everywhere' },
+const HF_OPTIONS = [
+  { value: 'off', label: 'OFF', title: 'The top end passes untouched' },
+  { value: 'air', label: 'AIR', title: 'Only the loudest sibilance: an S that jumps out is eased back a few dB, everything else is left alone. Calibrated on this file\'s own treble' },
+  { value: 'smooth', label: 'SMOOTH', title: 'Sibilance and the brightest vowels, more firmly. Calibrated on this file\'s own treble, so a dull take is left mostly alone' },
+  { value: 'dark', label: 'DARK', title: 'The treble generally, the deepest of the detents: the top end rounds off the way hot tape does' },
+  { value: 'fatso', label: 'FATSO', title: 'The top-end law fitted to an EL7 Fatso\'s Warmth (at Warmth 7, on music): it listens from 2 kHz, so bright vowels trigger it as readily as sibilance' },
 ]
-const DETECT_OPTIONS = [
-  { value: '2k', label: '2K', title: 'The shelf listens to the same band it cuts, everything above 2 kHz: loud vowel brightness and sibilance both trigger it' },
-  { value: '4k', label: '4K', title: 'The shelf listens above 4 kHz but still cuts from 2 kHz: sibilance triggers it before vowel brightness does' },
-]
-// What Tame currently does on the chosen curve.
-const curveCaption = computed(() => {
-  const s = tapeShelf(phParams.tame, phParams.tone, phParams.curve)
-  return s.rangeDb > 0 ? `CUTS UP TO ${Math.round(s.rangeDb)} dB` : 'TAME IS 0'
+// The bench's Tame has the shelf: show that on the dial rather than no position.
+const hfOptions = computed(() => (phParams.hf === 'bench'
+  ? [...HF_OPTIONS, { value: 'bench', label: 'BENCH', title: 'The bench\'s Tame has the top end; pick a position to hand it back' }]
+  : HF_OPTIONS))
+// What the current detent may cut at most.
+const hfCaption = computed(() => {
+  if (phParams.hf === 'bench') return 'BENCH'
+  const s = hfDetentShelf(phParams.hf, phParams.voiceLevelDb, phParams.trebleStats)
+  return s ? `UP TO −${Math.round(s.rangeDb)} dB` : ''
 })
-const detectCaption = computed(() => (phParams.detect === '4k' ? 'SIBILANCE FIRST' : 'ALL TREBLE'))
-
-// Each curve brings its paired detector (VOICE + 4K, FATSO + 2K); DETECT can
-// still be moved afterwards.
-function setCurve(v) {
-  syncParam('curve', v)
-  if (CURVE_DETECT[v]) syncParam('detect', CURVE_DETECT[v])
-}
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -232,12 +227,19 @@ async function applyAndClose() {
                 :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.08em', color: 'rgba(255,255,255,.45)' }"
               >{{ tapeMakeupCaption }}</div>
             </div>
-            <div class="w-[80px]" title="How hard the tape rounds off the top end: lowers the threshold and deepens the most it may cut together, relative to the file's voice level. 0 is off">
-              <Knob
-                :model-value="phParams.tame" @update:model-value="v => syncParam('tame', v)"
-                :min="0" :max="TAME_MAX" :step="0.1" :value-font-px="13"
-                label="Tame" :accent="ACCENT" :format-value="fmtTame" :disabled="!phPreview"
+            <div
+              class="w-[96px] flex flex-col items-center"
+              title="How the tape rounds off the top end from 2 kHz. AIR eases back only the loudest sibilance, SMOOTH takes sibilance and the brightest vowels more firmly, DARK rounds off the treble generally. Each is set from this file's own treble and voice level, so it means the same on any recording — and a dull take is left mostly alone. FATSO is the law fitted to an EL7 Fatso's Warmth. OFF passes the top end untouched"
+            >
+              <DeviceDetentRotary
+                :model-value="phParams.hf" :options="hfOptions" :accent="ACCENT"
+                :disabled="!phPreview" label="HF"
+                @update:model-value="v => syncParam('hf', v)"
               />
+              <div
+                class="text-center h-[10px] mt-[4px]"
+                :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.08em', color: 'rgba(255,255,255,.45)' }"
+              >{{ hfCaption }}</div>
             </div>
             <div class="w-[80px]">
               <Knob
@@ -251,26 +253,6 @@ async function applyAndClose() {
 
         <LevelMeter :levels="phOutputLevels" label="OUT" :height="150" />
       </div>
-
-      <div class="flex justify-center items-end gap-[28px] mt-[16px]">
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">CURVE</span>
-          <DeviceChoiceRocker
-            :model-value="phParams.curve" :options="CURVE_OPTIONS" :accent="ACCENT"
-            :disabled="!phPreview || phParams.tame <= 0" label="Tame curve" :caption="curveCaption"
-            @update:model-value="setCurve"
-          />
-        </div>
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">DETECT</span>
-          <DeviceChoiceRocker
-            :model-value="phParams.detect" :options="DETECT_OPTIONS" :accent="ACCENT"
-            :disabled="!phPreview || phParams.tame <= 0" label="Tame detector" :caption="detectCaption"
-            @update:model-value="v => syncParam('detect', v)"
-          />
-        </div>
-      </div>
-
 
       <div
         v-if="warmthActive(phParams)"
@@ -300,7 +282,7 @@ async function applyAndClose() {
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
         Warmth fattens the low end without raising the peak, Tape rounds off the peaks,
-        Soften rounds off sudden attacks, and Tame rounds off the top from 2 kHz.
+        Soften rounds off sudden attacks, and HF rounds off the top from 2 kHz.
       </p>
 
       <!-- Bench only: gated off in production builds. See phatassBench.js. -->

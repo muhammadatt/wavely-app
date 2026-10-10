@@ -56,7 +56,15 @@ export const PHATASS_DEFAULTS = {
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
   // never a user setting; applied only while TAPE is up.
   tapeMakeupDb: 0,
-  // 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
+  // The tape HF shelf's detent (`HF_DETENTS`): 'off', 'air', 'smooth', 'dark'
+  // or 'fatso' on the panel; 'bench' hands the shelf to the bench's Tame /
+  // CURVE / DETECT below. The calibrated detents read `trebleStats`.
+  hf: 'off',
+  // The file's treble statistics (`phatassTrebleStats.js`). Measured over the
+  // whole file, never a user setting; null until measured (the detents then
+  // use TREBLE_STATS_FALLBACK).
+  trebleStats: null,
+  // BENCH ONLY (hf 'bench'). 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
   // together, on the chosen `curve` (`tapeShelf`). 0 takes the shelf out. On
   // the default 'voice' curve 5 is −4 dB re the voice, Range 12; 10 is −14,
   // Range 27.
@@ -359,6 +367,100 @@ export const DETECT_4K_HZ = 4000
 export const DETECT_4K_COMP_DB = 3
 
 /**
+ * HF — the tape shelf's detent, which replaces the Tame knob on the panel.
+ *
+ * A knob let the user find the threshold by ear; a detent has to land on its
+ * own, on any file. So a calibrated detent places the threshold on the FILE'S
+ * OWN TREBLE (`phatassTrebleStats.js`: percentiles of the detector band's 10 ms
+ * peaks, re the voice level) rather than on broadband RMS — "act on the top few
+ * % of treble events" — inside a window re the voice level:
+ *
+ *   threshold = voice + clamp(stats[detect][percentile] + offsetDb, floorDb, capDb)
+ *
+ * The FLOOR keeps a take whose treble never comes near its voice from having
+ * its top events cut anyway (owner's call: preserve a dull file's character
+ * rather than normalise its brightness away). The CAP is the same argument the
+ * other way: a percentile alone calibrates a uniformly harsh take's harshness
+ * away — when every S is equally loud the 98th percentile sits on top of all
+ * of them and AIR cut −0.13 dB at ANY brightness on a synthetic take (tested).
+ * So the percentile only places the threshold within a 2 dB window; the window
+ * itself is voice-level calibrated.
+ *
+ * The corner stays at the 2 kHz curves' 2 kHz, the shelf at TAPE_SHELF, the
+ * gain law the limiter's (the FATSO fit found it right; a soft knee was
+ * considered and not built — scoring it needs the Fatso bounces).
+ *
+ *   'off'    — the shelf out (a pure delay, as Tame 0)
+ *   'air'    — the loudest sibilance only
+ *   'smooth' — sibilance, a touch of the brightest vowels
+ *   'dark'   — the treble generally; the heaviest
+ *   'fatso'  — the fitted FATSO law at Tame 6 (Fatso Warmth 7) on a 2K
+ *              detector, voice-level calibrated like the fit (stats would move
+ *              it off the fitted point) — the 2 kHz cut on music
+ *   'bench'  — not a detent: Tame / CURVE / DETECT as before (`tapeShelf`)
+ *
+ * Voiced on two narration clips (`scripts/phatass-hf-detents.mjs`), energy
+ * change at 4–16 kHz on sibilant frames / 2–4 kHz on voiced frames, bright
+ * (Messy_and_Bright) | dull (art_test_clip_orig):
+ *
+ *   air     −2.0 / −0.05  |  −0.00 / −0.07   (≈ VOICE Tame 1)
+ *   smooth  −4.0 / −0.20  |  −0.09 / −0.44   (≈ VOICE Tame 3)
+ *   dark    −7.3 / −1.12  |  −0.78 / −1.42   (≈ VOICE Tame 5)
+ *   fatso   −4.2 / −0.67  |  −0.13 / −1.10
+ *
+ * ⚠ THE TWO CLIPS DIFFER ONLY AT THE TOP of the 4 kHz distribution (p98 +3.7
+ * vs +1.4, p99 +5.6 vs +2.1 — the bright clip's sibilance); from p90 down they
+ * agree to 0.1–1.5 dB (p75 −5.84 / −5.79). So on these two the percentile
+ * moves AIR (bright +3.7, dull on its floor) and SMOOTH (−0.05 / −1.54), and
+ * DARK lands at −5.8 on both. Two clips, chosen by reasoning, not audition.
+ */
+export const HF_DETENTS = Object.freeze({
+  off: null,
+  air: Object.freeze({ detect: '4k', percentile: 'p98', offsetDb: 0, floorDb: 2, capDb: 4, rangeDb: 6 }),
+  smooth: Object.freeze({ detect: '4k', percentile: 'p95', offsetDb: -1, floorDb: -2, capDb: 0, rangeDb: 15 }),
+  dark: Object.freeze({ detect: '4k', percentile: 'p75', offsetDb: 0, floorDb: -6, capDb: -4, rangeDb: 21 }),
+  fatso: Object.freeze({ curve: 'fatso', tame: 6 }),
+})
+/** The panel's positions, in order. 'bench' (Tame / CURVE / DETECT) is not among them. */
+export const HF_PANEL_DETENTS = Object.freeze(Object.keys(HF_DETENTS))
+export const HF_MODES = Object.freeze([...HF_PANEL_DETENTS, 'bench'])
+
+/**
+ * Treble statistics used until the file's own are measured: the mean of the
+ * two narration clips the detents were voiced on (bright / dull). Only ever a
+ * stand-in — every render the app makes measures first.
+ */
+export const TREBLE_STATS_FALLBACK = Object.freeze({
+  bands: Object.freeze({
+    '2k': Object.freeze({ p50: -7.1, p75: -1.4, p90: 2.3, p95: 4.1, p98: 6.1, p99: 7.2 }),
+    '4k': Object.freeze({ p50: -11.3, p75: -5.8, p90: -2.0, p95: 0.2, p98: 2.5, p99: 3.9 }),
+  }),
+})
+
+/**
+ * The shelf a calibrated or fixed detent asks for, or null for 'off' / 'bench'
+ * (the caller handles those). `thresholdDb` is absolute dBFS.
+ *
+ * @returns {{ cornerHz: number, thresholdDb: number, rangeDb: number, detectCornerHz: number|null } | null}
+ */
+export function hfDetentShelf(hf, voiceLevelDb, trebleStats) {
+  const d = HF_DETENTS[hf]
+  if (!d) return null
+  if (d.curve) {
+    const s = tapeShelf(d.tame, TONE_MAX, d.curve)
+    return { cornerHz: s.cornerHz, thresholdDb: voiceLevelDb + s.thresholdRelDb, rangeDb: s.rangeDb, detectCornerHz: null }
+  }
+  const band = trebleStats?.bands?.[d.detect] ?? TREBLE_STATS_FALLBACK.bands[d.detect]
+  const pct = Number.isFinite(band?.[d.percentile]) ? band[d.percentile] : TREBLE_STATS_FALLBACK.bands[d.detect][d.percentile]
+  return {
+    cornerHz: FATSO_CORNER_HZ,
+    thresholdDb: voiceLevelDb + clamp(pct + d.offsetDb, d.floorDb, d.capDb),
+    rangeDb: d.rangeDb,
+    detectCornerHz: d.detect === '4k' ? DETECT_4K_HZ : null,
+  }
+}
+
+/**
  * The macro: Tame sets how hard (Threshold and Range together, so the shelf
  * starts acting earlier AND may go deeper), Tone sets where (the corner, on a
  * log scale). Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz — the HF Limiter's
@@ -424,9 +526,19 @@ export function toKernelParams(params) {
   const voice = Number.isFinite(p.voiceLevelDb)
     ? clamp(p.voiceLevelDb, VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
     : ALIGN_TARGET_DBFS
+  const hf = HF_MODES.includes(p.hf) ? p.hf : PHATASS_DEFAULTS.hf
   const curve = TAME_CURVES.includes(p.curve) ? p.curve : PHATASS_DEFAULTS.curve
-  const shelf = tapeShelf(p.tame, p.tone, curve)
   const det4k = p.detect === '4k' && curve !== 'original'
+  const tame = tapeShelf(p.tame, p.tone, curve)
+  const shelf = hf === 'bench'
+    ? {
+        cornerHz: tame.cornerHz,
+        thresholdDb: voice + tame.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
+        rangeDb: tame.rangeDb,
+        detectCornerHz: det4k ? DETECT_4K_HZ : null,
+      }
+    : hfDetentShelf(hf, voice, p.trebleStats)
+      ?? { cornerHz: FATSO_CORNER_HZ, thresholdDb: voice, rangeDb: 0, detectCornerHz: null }
   const soft = softenLaw(softenAmount(p.soften, p.tame))
   return {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
@@ -438,8 +550,8 @@ export function toKernelParams(params) {
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb)
       ? clamp(p.tapeMakeupDb, -TAPE_MAKEUP_MAX_DB, TAPE_MAKEUP_MAX_DB) : 0,
     cornerHz: shelf.cornerHz,
-    thresholdDb: voice + shelf.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
-    detectCornerHz: det4k ? DETECT_4K_HZ : null,
+    thresholdDb: shelf.thresholdDb,
+    detectCornerHz: shelf.detectCornerHz,
     rangeDb: shelf.rangeDb,
     ...TAPE_SHELF,
     // Soften rides the shelf's Transient, on its own band, at its own depth.

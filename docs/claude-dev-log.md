@@ -6566,3 +6566,61 @@ reference runs through its own copy). Low push trimmed to 0 / 3 / 6 (owner:
 12 and 18 too hot; a stored 12 or 18 clamps to 6). Tests pin the A800 curve at
 20 / 45 / 85 Hz / 1 kHz and 15 ips at 10 / 22.5 / 42.5 Hz, the makeup through
 it (preview = apply, peak on the source) and the meter.
+
+### PHAT*SS — HF detents replace the Tame knob (October 2026)
+
+Owner: keep the FATSO fit, but take Tame off the panel in favour of a detent
+with a few HF options; calibrate with a floor (preserve a dull take rather than
+normalise its brightness away). Clips: `Messy_and_Bright_-_Clip.wav` (bright,
+44.1 kHz, voice −20.74 dBFS) and `art_test_clip_orig.wav` (dull, 48 kHz,
+−16.39). Harness: `scripts/phatass-hf-detents.mjs` (the VOICE curve's metric —
+sibilant frames 4–16 kHz, voiced frames 2–4 kHz).
+
+**Why a detent cannot reuse the voice-level threshold as-is.** A knob is placed
+by ear per file; a detent is not. The treble's 10 ms peaks re the gated RMS:
+
+| re voice, dB | 2k p50 / p75 / p90 / p95 / p98 / p99 | 4k p50 / p75 / p90 / p95 / p98 / p99 |
+|---|---|---|
+| bright | −6.7 / −1.8 / 1.9 / 4.0 / 6.1 / 7.4 | −11.2 / −5.8 / −1.9 / 1.0 / 3.7 / 5.6 |
+| dull | −7.4 / −0.9 / 2.7 / 4.2 / 6.1 / 6.9 | −11.3 / −5.8 / −2.0 / −0.5 / 1.4 / 2.1 |
+
+The 2 kHz band barely separates the clips (the dull take's vowels are loud at
+2–4 kHz); the 4 kHz band separates them only at the top — the bright take's
+sibilance. So the detents listen at 4K and read the 4K distribution.
+
+**Law**: `threshold = voice + clamp(pct + offset, floor, cap)`. The floor is the
+owner's. The cap was found by the synthetic test: with every S equally loud the
+98th percentile sits on top of all of them and AIR cut −0.13 dB whether the S's
+were 0 or +18 dB over the bed — a percentile alone calibrates a uniformly harsh
+take's harshness away. A 2 dB window per detent, non-overlapping.
+
+**Installed** (sibilant / vowel, bright | dull):
+
+| detent | law | bright | dull |
+|---|---|---|---|
+| AIR | p98, [+2, +4], R6 | −2.04 / −0.05 (thr +3.7) | −0.00 / −0.07 (floor) |
+| SMOOTH | p95 − 1, [−2, 0], R15 | −4.01 / −0.20 (−0.05) | −0.09 / −0.44 (−1.5) |
+| DARK | p75, [−6, −4], R21 | −7.31 / −1.12 (−5.8) | −0.78 / −1.42 (−5.8) |
+| FATSO | Tame 6, 2K, voice-relative | −4.24 / −0.67 | −0.13 / −1.10 |
+
+For reference, VOICE 4K Tame 1 / 3 / 5 on the bright clip: −1.95 / −4.23 /
+−7.38 — so the three calibrated detents sit near those points. Candidates swept
+on the way: AIR p99 [3,∞] R6 −1.47; SMOOTH p95 [0,∞] R12 −3.48, p90 [−1,∞] R15
+−4.55 (but floor-bound on both clips); DARK p75 [−5,∞] R21 −6.86; 2K-detector
+variants cut the dull take's vowels more for less sibilance (p95 [2,∞] R12:
+−2.41 / −0.20 | −0.01 / −0.29).
+
+**Not built**: a soft-knee gain law (`tanh(u)/u` on the band level). The FATSO
+fit only tested laws steeper than the limiter, never softer; scoring a knee
+needs the Fatso bounces, which are not in the repo.
+
+**Wiring**: `hf` ('off' ships) and measured `trebleStats` in
+`PHATASS_DEFAULTS`; `hfDetentShelf`; `phatassTrebleStats.js` (≤ 240 × 0.5 s
+blocks with 30 ms lead-in for the one-pole, channels apart, windows under
+voice − 30 dB are pauses; 42–84 ms on the clips) measured with the voice level
+in `refreshLevel`, whole file. The panel's Tame knob and CURVE / DETECT
+rockers became one HF rocker; Tame (slider), its curve (with the detector
+pairing) and Detect moved to the bench, and moving the slider sets
+`hf: 'bench'`. `saturationBenchAnalysis.js` exports `indexSegments` /
+`readChannel` for the measurement. Existing Tame tests now pass `hf: 'bench'`.
+Not auditioned.

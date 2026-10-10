@@ -1,7 +1,8 @@
 <script setup>
 /**
- * PHAT*SS bench — TAPE's curve, its low push and head bump, and an automatic
- * output trim. TAPE's place in the
+ * PHAT*SS bench — TAPE's curve, its low push and head bump, an automatic
+ * output trim, and the Tame / CURVE / DETECT controls the HF detents replaced
+ * (moving Tame hands the shelf to them: `hf: 'bench'`). TAPE's place in the
  * chain (first) and the head bump's (after the curve) are pinned.
  *
  * ⚠ DELIBERATELY PLAIN, AND NOT BUILT FROM THE DEVICE CHROME, like the FET
@@ -12,7 +13,7 @@
  * APPLY both read them — what you hear is what renders.
  */
 import { computed, ref } from 'vue'
-import { PHATASS_DEFAULTS } from '../../audio/phatassParams.js'
+import { PHATASS_DEFAULTS, TAME_MAX, CURVE_DETECT } from '../../audio/phatassParams.js'
 
 const props = defineProps({
   /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `outputMakeup` and `outputMakeupDb`). */
@@ -55,6 +56,21 @@ const CHOICES = [
     ],
   },
   {
+    key: 'curve', label: 'Tame curve',
+    options: [
+      { id: 'voice', label: 'VOICE', title: 'Tame voiced on narration: the brightest sibilance at low settings, deeper to the top of the knob' },
+      { id: 'fatso', label: 'FATSO', title: 'Tame fitted to an EL7 Fatso\'s Warmth knob on music: Fatso Warmth 5 / 6 / 7 at Tame 1 / 4 / 6' },
+      { id: 'original', label: 'ORIGINAL', title: 'The deprecated Tame/Tone law (Tone stays at 10, 12 kHz)' },
+    ],
+  },
+  {
+    key: 'detect', label: 'Detect',
+    options: [
+      { id: '2k', label: '2K', title: 'The shelf listens to the band it cuts, everything above 2 kHz' },
+      { id: '4k', label: '4K', title: 'The shelf listens above 4 kHz (threshold 3 dB lower) but still cuts from 2 kHz' },
+    ],
+  },
+  {
     key: 'outputMakeup', label: 'Output trim',
     options: [
       { id: 'off', label: 'OFF', title: 'Ships. No automatic trim: the output is whatever the chain and the Output knob make it' },
@@ -71,11 +87,22 @@ const trimText = computed(() => {
   return `trim ${v >= 0 ? '+' : ''}${v.toFixed(2)} dB`
 })
 
-const pristine = computed(() => CHOICES.every(ch => props.params[ch.key] === PHATASS_DEFAULTS[ch.key]))
+const benchTame = computed(() => props.params.hf === 'bench')
+const pristine = computed(() => !benchTame.value && CHOICES.every(ch => props.params[ch.key] === PHATASS_DEFAULTS[ch.key]))
+
+// Moving Tame takes the shelf off the panel's detent and onto these controls.
+function setTame(v) {
+  if (props.disabled) return
+  if (!benchTame.value) emit('set', 'hf', 'bench')
+  emit('set', 'tame', v)
+}
 
 function set(key, value) {
   if (props.disabled || props.params[key] === value) return
   emit('set', key, value)
+  // Each curve brings its paired detector (VOICE + 4K, FATSO + 2K); Detect can
+  // still be moved afterwards.
+  if (key === 'curve' && CURVE_DETECT[value]) set('detect', CURVE_DETECT[value])
 }
 
 function onKey(e, ch) {
@@ -95,6 +122,7 @@ function onKey(e, ch) {
 
 function reset() {
   for (const ch of CHOICES) set(ch.key, PHATASS_DEFAULTS[ch.key])
+  if (benchTame.value) set('hf', PHATASS_DEFAULTS.hf)
 }
 </script>
 
@@ -118,7 +146,7 @@ function reset() {
 
     <div v-if="open" class="mt-3">
       <p class="mb-3 text-[10px] leading-[1.5] text-white/35">
-        A/B TAPE's curve, its low push and head bump, and an automatic output trim against what ships (CUBIC, no push, no bump, OFF). TAPE runs first; the head bump follows the curve. With a low push the TAPE knob is a drive: a kick can lose more than its number.
+        A/B TAPE's curve, its low push and head bump, and an automatic output trim against what ships (CUBIC, no push, no bump, OFF). Tame, its curve and Detect are the controls the HF detents replaced; Curve and Detect act only while Tame has the shelf. TAPE runs first; the head bump follows the curve. With a low push the TAPE knob is a drive: a kick can lose more than its number.
         Hidden in production builds. Both preview and APPLY read them.
       </p>
 
@@ -156,6 +184,19 @@ function reset() {
             @click="set(ch.key, PHATASS_DEFAULTS[ch.key])"
           >↺</button>
         </div>
+      </div>
+
+      <div class="mt-3 flex items-center gap-2" title="The Tame knob the HF detents replaced. Moving it takes the shelf off the panel's detent (HF shows BENCH TAME) onto Tame / Tame curve / Detect; choosing a detent on the panel hands it back">
+        <span id="phatass-bench-tame" class="w-[70px] shrink-0 text-[10px] text-white/45">Tame</span>
+        <input
+          type="range" :min="0" :max="TAME_MAX" step="0.1" aria-labelledby="phatass-bench-tame"
+          class="flex-1 accent-amber-300 disabled:opacity-30"
+          :value="params.tame" :disabled="disabled"
+          @input="e => setTame(Number(e.target.value))"
+        >
+        <span class="w-[64px] shrink-0 text-right font-mono text-[9px]" :class="benchTame ? 'text-amber-100' : 'text-white/30'">
+          {{ benchTame ? Number(params.tame).toFixed(1) : 'detent' }}
+        </span>
       </div>
 
       <div class="mt-4 flex items-center gap-2">
