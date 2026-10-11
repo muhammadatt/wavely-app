@@ -87,6 +87,8 @@ export const PHATASS_DEFAULTS = {
   outputMakeup: 'off',
   // That trim, dB: measured (`measureOutputMakeup`), never a user setting.
   outputMakeupDb: 0,
+  // BLEND's share of the way to PEAK (`OUTPUT_BLENDS`): 1 is PEAK, 0 is RMS.
+  outputBlend: 0.8,
   // The whole file's gated RMS, dBFS. Measured, never a user setting — it is
   // what makes the shelf's threshold mean the same on a quiet take and a hot one.
   voiceLevelDb: ALIGN_TARGET_DBFS,
@@ -562,13 +564,17 @@ export function toKernelParams(params) {
  * whenever Warmth and TAPE's makeup add level. Both are signed. Measured by
  * rendering the chain (`phatassOutputMakeup.js`): no shortcut exists, since
  * Warmth, its guard and the shelf are neither memoryless nor static.
- * 'mid' is halfway between the two in dB, an audition: on drums at TAPE 10 PEAK
+ * 'blend' sits between the two in dB, `outputBlend` of the way to PEAK
+ * (OUTPUT_BLENDS; 80 % by default, owner's pick over a material-specific rule,
+ * since the plugin serves voice, drums and full mixes alike). On drums at TAPE 10 PEAK
  * is the whole +5 LU TAPE adds (TAPE's makeup already restored the peak, so
  * PEAK trims ~0) and RMS takes it all back (−5.4; integrated LUFS and
  * momentary/short-term percentiles agree within ~0.5 dB) — by ear one too
  * loud, the other too quiet, since a squashed hit level-matched sounds smaller.
  */
-export const OUTPUT_MAKEUPS = ['off', 'peak', 'mid', 'rms']
+export const OUTPUT_MAKEUPS = ['off', 'peak', 'blend', 'rms']
+/** BLEND's shares toward PEAK on the bench (0.5 was the first audition, MID). */
+export const OUTPUT_BLENDS = [0.5, 0.65, 0.8]
 
 /**
  * TAPE — a full-band CUBIC soft clipper, FIRST on the main path (ahead of

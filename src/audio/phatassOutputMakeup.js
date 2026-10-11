@@ -99,11 +99,12 @@ export function measureOutputMakeup(channelData, sampleRate, params, { exact = t
   const n = channelData[0].length
   const inPk = sourcePeak(channelData, 0, n)
   const mode = p.outputMakeup
-  if (mode === 'mid') {
-    // Halfway, in dB, between the two references — each measured its own way.
+  if (mode === 'blend') {
+    // `outputBlend` of the way, in dB, from RMS to PEAK — each measured its own way.
+    const w = Math.min(1, Math.max(0, Number.isFinite(p.outputBlend) ? p.outputBlend : PHATASS_DEFAULTS.outputBlend))
     const pk = measureOutputMakeup(channelData, sampleRate, { ...p, outputMakeup: 'peak' }, { exact })
     const rm = measureOutputMakeup(channelData, sampleRate, { ...p, outputMakeup: 'rms' }, { exact })
-    return { makeupDb: (pk.makeupDb + rm.makeupDb) / 2, outPeakDb: pk.outPeakDb, inputPeakDb: pk.inputPeakDb }
+    return { makeupDb: w * pk.makeupDb + (1 - w) * rm.makeupDb, outPeakDb: pk.outPeakDb, inputPeakDb: pk.inputPeakDb }
   }
   if ((mode !== 'peak' && mode !== 'rms') || !(inPk > 0) || !(n > 0)) {
     return { makeupDb: 0, outPeakDb: toDb(inPk), inputPeakDb: toDb(inPk) }

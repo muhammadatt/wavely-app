@@ -266,7 +266,7 @@ export function usePhatass() {
     pushParam('outputMakeupDb', db)
   }
 
-  const outputTrimOn = () => phParams.outputMakeup === 'peak' || phParams.outputMakeup === 'mid' || phParams.outputMakeup === 'rms'
+  const outputTrimOn = () => phParams.outputMakeup === 'peak' || phParams.outputMakeup === 'blend' || phParams.outputMakeup === 'rms'
 
   /**
    * The bench's output trim for live preview (phatassOutputMakeup.js): exact

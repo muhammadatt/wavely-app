@@ -6810,3 +6810,18 @@ drum file (17.5 s, stereo, defaults: 30 ips, Warmth 0):
   them.
 - **Added MID** to the bench's Output trim: halfway in dB between PEAK and RMS, an audition
   (−2.7 dB here). If it lands, a fixed fraction is the next thing to tune.
+
+**Follow-up (October 2026): MID became BLEND.** The owner heard MID as closer, but did not
+want a rule tied to drum hits, since PHAT*SS serves voice, drums and full mixes. So the trim
+is now a fixed share in dB, `outputBlend` of the way from RMS to PEAK, 80 % by default
+(owner's pick). The bench offers 50 / 65 / 80 %.
+
+On the drums, the trim at each share:
+
+| Share toward PEAK | TAPE 10 | TAPE 4 |
+|---|---|---|
+| 50 % | −2.69 dB | −0.92 dB |
+| 65 % | −1.88 dB | −0.64 dB |
+| 80 % | −1.08 dB | −0.37 dB |
+
+Not auditioned past MID.
