@@ -6754,3 +6754,33 @@ measured; sibilant body / onset, or energy above 2 kHz for drums):
 
 ⚠ FATSO (the limiter shelf, fitted law, threshold re the source's voice
 level) hears the makeup too and rises with TAPE; left as fitted. Not auditioned.
+
+## PHAT*SS — landing prep: Speed detent, paired head bumps, CLEAN/THICK, CHARACTER; Soften moves to HF Softener (October 2026)
+
+Owner's list before landing the plugin:
+
+1. **The detent is the three tape speeds only** (30 / 15 / 7.5 IPS, 30 ships). OFF and FATSO
+   leave the panel and stay reachable on the bench ("Top end" row). Each speed now **brings its
+   head bump** (`tapeHeadBump: 'speed'`): A800 30 / 15 ips as fitted, and a new A800 7.5 ips
+   derived by octave scaling (every frequency halved from 15 ips: 8.825 Hz HP, +1.17 dB at
+   7.8125 Hz, −1.93 dB at 20.675 Hz). It is not measured. The bump still applies only while
+   TAPE > 0. The bench's head-bump row keeps the fixed shelves and adds SPEED.
+   ⚠ The A800 30 ips test now pins the owner's edited high-pass (acf0534, 20 Hz): +0.13 dB
+   at 20 Hz and −0.96 dB at 85 Hz.
+2. **TAPE curve toggle: CLEAN (cubic) / THICK (hysteresis).** These are placeholder names, and
+   the owner may rename them.
+3. **Soften moved to the HF Softener**, in the Reso knob's slot. Reso is off the panel and
+   kept in the code. The law is unchanged. It runs on the HF Limiter's worklet with the shelf
+   out (Range 0), so the HF Limiter kernel now forwards `transientCornerHz`,
+   `transientSlope` and `transientGateDb`; left unset, they keep the HF Limiter
+   bit-identical.
+   **Equivalence:**
+   - Checked against PHAT*SS's Soften at 828e9e3 (Tame 0, everything else off) on 10 s of
+     real narration, with latency aligned.
+   - The maximum difference is 0 at Soften 3, 7 and 10.
+   - Latency is 132 samples here, against PHAT*SS's 414.
+4. **Odd/Even became a CHARACTER toggle**: ROUND = 50, FIRM = 25.
+
+⚠ With 30 ips the default, PHAT*SS at Warmth 0 / TAPE 0 is no longer a pure delay: the
+shelf sags loud top end. The tests that assumed transparency run isolated (`hf: 'off'`,
+`tapeHeadBump: 0`).

@@ -1,8 +1,9 @@
 /**
  * PHAT*SS — worklet kernel.
  *
- * TAPE (full-band cubic, with the head bump after it) → makeup → Warmth → Guard → Tape shelf (with Soften
- * on its own band) → Output.
+ * TAPE (CLEAN cubic or THICK hysteresis, with the speed's head bump after it)
+ * → makeup → Warmth → Guard → limiter shelf (FATSO / bench Tame only) → tape HF
+ * shelf (the Speed dial) → Output.
  *
  * TAPE comes FIRST (owner's call): Warmth then shapes the already-rounded
  * signal, and TAPE's input is the untouched source, so its makeup depends on
@@ -15,16 +16,17 @@
  * voiced in phatassParams.WARMTH_LAYERS), a pure delay at 0. Its PEAK
  * GUARD (dsp/warmthGuard.js) is pinned on: what Warmth adds is turned down
  * wherever the sum would pass the selection's own peak, so Warmth adds density
- * but never peak level. The TAPE SHELF is the HF Limiter's lookahead dynamic
- * shelf (dsp/hfLimit.js) with its shape and timing pinned (phatassParams
- * .TAPE_SHELF) and its corner / threshold / range set by the Tame and Tone
- * macros. TAPE is one more bench layer, full band, calibrated on the
+ * but never peak level. The LIMITER SHELF is the HF Limiter's lookahead
+ * dynamic shelf (dsp/hfLimit.js) with its shape and timing pinned
+ * (phatassParams.TAPE_SHELF), out unless the bench picks FATSO or its Tame.
+ * The TAPE HF SHELF (dsp/tapeHfShelf.js, zero latency) runs at the Speed
+ * dial's tape speed. TAPE is one more bench layer, full band, calibrated on the
  * selection's peak so its knob reads in dB of peak reduction (phatassParams
  * `tapeLayer`).
  *
- * Constant latency (see `phatassLatencySamples`), bit-transparent with Warmth,
- * Soften and Tame at 0. SOFTEN is the shelf's Transient detector with its own
- * band (`transientCornerHz`), deeper than the HF Limiter's, at no extra latency.
+ * Constant latency (see `phatassLatencySamples`), bit-transparent with Warmth
+ * and TAPE at 0 and the top end OFF (a bench setting). SOFTEN, which rode the
+ * limiter shelf's Transient here, moved to the HF Softener.
  *
  * This file is BOTH a normal ES module and an AudioWorklet module (registers
  * 'phatass-processor'); it imports from ./dsp/, so its loader goes through

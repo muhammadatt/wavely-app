@@ -110,10 +110,12 @@ function partChangeDb(y, L, part) {
 
 // ── The dial ─────────────────────────────────────────────────────────────────
 
-test('the HF dial: OFF ships; OFF / 30 / 15 / 7.5 IPS / FATSO on the panel; the bench is not a detent', () => {
-  assert.equal(PHATASS_DEFAULTS.hf, 'off')
-  assert.deepEqual([...HF_PANEL_DETENTS], ['off', 'ips30', 'ips15', 'ips7', 'fatso'])
-  assert.ok(HF_MODES.includes('bench') && !HF_PANEL_DETENTS.includes('bench'))
+test('the Speed dial: 30 IPS ships; the panel offers the three speeds only, OFF / FATSO / bench Tame are the bench\'s', () => {
+  assert.equal(PHATASS_DEFAULTS.hf, 'ips30')
+  assert.deepEqual([...HF_PANEL_DETENTS], ['ips30', 'ips15', 'ips7'])
+  for (const m of ['off', 'fatso', 'bench']) assert.ok(HF_MODES.includes(m) && !HF_PANEL_DETENTS.includes(m), m)
+  // Each speed brings its head bump: the A800 curve at that speed.
+  assert.deepEqual(['ips30', 'ips15', 'ips7'].map(k => TAPE_SPEEDS[k].headBump), ['a800-30', 'a800-15', 'a800-7'])
   assert.equal(PHATASS_DEFAULTS.trebleStats, undefined, 'the treble statistics went with AIR / SMOOTH / DARK')
   // Slower tape, less HF headroom: the detector listens lower, the shelf starts
   // lower and slides further, and it may cut deeper.
@@ -172,8 +174,8 @@ test('each detent runs one shelf: a tape speed takes the limiter shelf out, FATS
 test('the tape shelf adds no latency: every detent renders at the plugin\'s one latency, and OFF passes the audio untouched', () => {
   const L = phatassLatencySamples(SR)
   const { x } = narration(1, 6)
-  for (const hf of HF_PANEL_DETENTS) {
-    const r = processPhatassBuffer([x], SR, toKernelParams({ hf, warmth: 0, soften: 0, tape: 0, voiceLevelDb: msDb(x) }))
+  for (const hf of [...HF_PANEL_DETENTS, 'off', 'fatso']) {
+    const r = processPhatassBuffer([x], SR, toKernelParams({ hf, warmth: 0, tape: 0, voiceLevelDb: msDb(x) }))
     assert.equal(r.latencySamples, L, hf)
     if (hf === 'off') for (let i = L; i < x.length; i++) if (r.channelData[0][i] !== x[i - L]) assert.fail(`OFF: sample ${i} differs`)
   }
@@ -250,7 +252,7 @@ test('through PHAT*SS: a bright take loses sibilance and keeps its vowels; a dul
     const voice = msDb(take.x)
     let pk = 0
     for (const v of take.x) pk = Math.max(pk, Math.abs(v))
-    const base = { warmth: 0, soften: 0, tape, voiceLevelDb: voice, warmthCeilingDb: db(pk) }
+    const base = { warmth: 0, tape, tapeHeadBump: 0, voiceLevelDb: voice, warmthCeilingDb: db(pk) }
     const tapeMakeupDb = tape > 0 ? measureTapeMakeup([take.x], SR, base).makeupDb : 0
     const render = h => {
       const r = processPhatassBuffer([take.x], SR, toKernelParams({ ...base, tapeMakeupDb, hf: h }))

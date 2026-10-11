@@ -39,8 +39,9 @@ import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from './hfSoftenerResoSta
 import {
   HF_SOFTENER_DEFAULTS,
   toKernelParams as toHFSoftenerKernelParams,
-  resoOn, resoKernelParams,
+  resoOn, resoKernelParams, softenOn, softenStageKernelParams,
 } from './effects/hfSoftener.js'
+import { softenLatencySamples } from './hfSoftenerSoftenStage.js'
 import { ensureHFLimiterWorklet } from './hfLimiterWorkletLoader.js'
 import {
   HF_LIMITER_DEFAULTS,
@@ -1133,13 +1134,25 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
     // ⚠ Like ResoTame itself, its STFT grid phase at the region start cannot
     // match a running preview, so with RESO on apply is close to the preview
     // rather than sample-identical.
-    postStages: resoOn(merged) ? [{
-      ensureWorklet: ensureResonanceWorklet,
-      processorName: 'resonance-processor',
-      kernelParams: resoKernelParams(merged),
-      processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
-      latencySamples: HF_RESO_LATENCY_SAMPLES,
-    }] : [],
+    postStages: [
+      ...(resoOn(merged) ? [{
+        ensureWorklet: ensureResonanceWorklet,
+        processorName: 'resonance-processor',
+        kernelParams: resoKernelParams(merged),
+        processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
+        latencySamples: HF_RESO_LATENCY_SAMPLES,
+      }] : []),
+      // The Soften knob above 0: the HF Limiter's kernel with the shelf out and
+      // its Transient on a 500 Hz band — see hfSoftenerSoftenStage.js. Constant
+      // latency (the shelf's 3 ms), trimmed with the rest; no STFT, so it stays
+      // sample-identical to the preview.
+      ...(softenOn(merged) ? [{
+        ensureWorklet: ensureHFLimiterWorklet,
+        processorName: 'hf-limiter-processor',
+        kernelParams: softenStageKernelParams(merged),
+        latencySamples: softenLatencySamples(sampleRate),
+      }] : []),
+    ],
   })
 }
 

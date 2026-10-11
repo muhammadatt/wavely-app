@@ -2,11 +2,11 @@
  * PHAT*SS — Psycho Harmonic Analog Tape * Saturation Simulator. UI params,
  * their mapping to the kernel, and the latency.
  *
- * Chain: WARMTH (two fixed Saturation Bench layers on the low band) → its PEAK
- * GUARD (pinned on) → a tape-style HF shelf, whose Transient detector (SOFTEN)
- * cuts its own band (the HF Limiter's dynamic shelf
- * with its timing pinned and its Freq / Threshold / Range driven by two macro
- * knobs) → Output.
+ * Chain: TAPE (CLEAN cubic or THICK hysteresis; its head bump follows the
+ * tape speed) → makeup → WARMTH (fixed Saturation Bench layers on the low band,
+ * CHARACTER picking their odd/even balance) → its PEAK GUARD (pinned on) → the
+ * HF limiter shelf (FATSO / the bench's Tame only) → the TAPE HF SHELF at the
+ * dial's speed → Output.
  *
  * Lives apart from the worklet and the effect wrapper so the apply path, the
  * composable and the tests can all read it without pulling either in.
@@ -27,20 +27,17 @@ export const PHATASS_DEFAULTS = {
   // WARMTH_LAYERS add is mixed in. 0 is off (a pure delay).
   warmth: 0,
   // 0–100 — from pure Odd toward Even, over the useful part of the crossfade
-  // only (ODD_EVEN_SPAN). The bench voicing is 36 (at Warmth 5).
+  // only (ODD_EVEN_SPAN). On the panel since October 2026 it is the CHARACTER
+  // switch, two positions of this number (`CHARACTERS`): ROUND 50, FIRM 25.
   oddEven: 50,
-  // 0–SOFTEN_MAX — SOFTEN: the HF Limiter's Transient detector on its own band
-  // above SOFTEN_FREQ_HZ — it turns that band down for a few ms when it rises
-  // suddenly, not when it is loud. Its own knob since October 2026 (it rode
-  // TAME before); 0 is off. `softenLaw` maps it exactly as it mapped Tame, so
-  // Soften 5 is what Soften ON at Tame 5 was. A gain on a band, never
-  // distortion, no latency of its own.
-  soften: 0,
   // 0–TAPE_MAX_DB — TAPE: how many dB a full-band soft clipper takes off
   // the selection's own peak (`tapeLayer`). 0 is off (a pure delay).
   tape: 0,
-  // TAPE's curve (`TAPE_CURVES`): 'cubic' (the Studer fit; a hard clip past
-  // 3.52 dB), 'tanh' or 'algebraic' (both never flat; algebraic bends earliest).
+  // TAPE's curve (`TAPE_CURVES`). On the panel a two-way switch
+  // (`TAPE_PANEL_CURVES`): CLEAN = 'cubic' (the Studer guitar fit; only the
+  // third harmonic until a hard clip past 3.52 dB) and THICK = 'hysteresis'
+  // (the Jiles-Atherton loop: memory, kicks squashed ~2× harder than snares,
+  // peaks rounded without a hard clip). 'tanh' / 'algebraic' are bench only.
   tapeCurve: 'cubic',
   // dB of LOW PUSH (`TAPE_LOW_PUSHES`): a low shelf at TAPE_LOW_PUSH_HZ into
   // TAPE's curve and its exact inverse after it, so the lows saturate first
@@ -48,19 +45,21 @@ export const PHATASS_DEFAULTS = {
   // Bench only. The TAPE knob keeps its no-push drive (`tapeLayer`).
   tapeLowPush: 0,
   // HEAD BUMP (`TAPE_HEAD_BUMPS`) AFTER TAPE's curve, before the makeup — the
-  // tape machine's playback-head low end: 3 / 6 / 9 is dB of low shelf at
-  // TAPE_HEAD_BUMP_HZ, 'a800-30' / 'a800-15' the Studer A800 hardware curve at
-  // 30 / 15 ips (`TAPE_HEAD_BUMP_CURVES`). Only while TAPE is up. 0 ships. Bench only.
-  tapeHeadBump: 0,
+  // tape machine's playback-head low end. 'speed' (ships) is the HF dial's tape
+  // speed's own Studer A800 curve (`TAPE_HEAD_BUMP_CURVES`: 'a800-30' /
+  // 'a800-15' / 'a800-7'); the bench can override it with 0, a 3 / 6 / 9 dB
+  // low shelf at TAPE_HEAD_BUMP_HZ or a fixed curve. Only while TAPE is up.
+  tapeHeadBump: 'speed',
   // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
   // so the peak returns to where it started (`measureTapeMakeup`). Measured,
   // never a user setting; applied only while TAPE is up.
   tapeMakeupDb: 0,
-  // The HF detent (`HF_DETENTS`): 'off', a tape speed — 'ips30', 'ips15',
-  // 'ips7' (the tape HF shelf, dsp/tapeHfShelf.js, driven harder by TAPE) — or
-  // 'fatso' (the HF Limiter's shelf on the fitted Fatso law); 'bench' hands the
-  // limiter shelf to the bench's Tame / CURVE / DETECT below.
-  hf: 'off',
+  // The HF dial (`HF_PANEL_DETENTS`): the tape speed — 'ips30', 'ips15' or
+  // 'ips7' — running the tape HF shelf (dsp/tapeHfShelf.js) and choosing the
+  // head bump. 30 ips ships: the most HF headroom, near-transparent at TAPE 0.
+  // The bench also reaches 'off', 'fatso' (the HF Limiter's shelf on the fitted
+  // Fatso law) and 'bench' (its Tame / CURVE / DETECT below).
+  hf: 'ips30',
   // BENCH ONLY (hf 'bench'). 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
   // together, on the chosen `curve` (`tapeShelf`). 0 takes the shelf out. On
   // the default 'voice' curve 5 is −4 dB re the voice, Range 12; 10 is −14,
@@ -104,17 +103,11 @@ export const PHATASS_DEFAULTS = {
 export const WARMTH_MAX = 10
 export const ODD_EVEN_MAX = 100
 export const TAME_MAX = 10
-/** Top of the Soften knob. */
-export const SOFTEN_MAX = 10
-/** Soften's ceiling on one cut, dB per Soften step (36 at 10; the HF Limiter's Transient stops at 12). */
-export const SOFTEN_DB_PER_STEP = 3.6
-/** dB of cut per dB of rise: the HF Limiter's 0.5 at Tame 0, 1 at Tame 10. */
-export const SOFTEN_SLOPE_MIN = 0.5
-export const SOFTEN_SLOPE_MAX = 1
-/** Soften's corner, pinned: a one-pole split, so it reaches the voice's snap and body as well as the top. */
-export const SOFTEN_FREQ_HZ = 500
-/** Onsets in Soften's band this far under the voice level are left alone (the HF Limiter's default works out to 32). */
-export const SOFTEN_GATE_BELOW_DB = 32
+/**
+ * ⚠ SOFTEN MOVED TO THE HF SOFTENER (October 2026, owner's call): its law and
+ * constants live in hfSoftenerSoftenStage.js now, unchanged. PHAT*SS no longer
+ * sets the shelf's Transient, so the limiter shelf's onset path is idle here.
+ */
 export const TONE_MAX = 10
 export const OUTPUT_MIN_DB = -12
 export const OUTPUT_MAX_DB = 12
@@ -128,6 +121,17 @@ export const OUTPUT_MAX_DB = 12
  * the bench voicing (old 9) sits at 36.
  */
 export const ODD_EVEN_SPAN = 0.25
+
+/**
+ * The panel's CHARACTER switch: two positions of Odd/Even, which it replaced
+ * as a knob (owner, October 2026). ROUND 50 is the old knob's default; FIRM 25
+ * leans further to the odd (cubic) layer — firmer, more edge. Odd/Even itself
+ * stays a number, so the bench, presets and tests can still reach any value.
+ */
+export const CHARACTERS = Object.freeze([
+  Object.freeze({ value: 50, label: 'ROUND' }),
+  Object.freeze({ value: 25, label: 'FIRM' }),
+])
 
 /**
  * WARMTH — the low-end warmth/fatness combination voiced on the Saturation
@@ -410,9 +414,9 @@ export const DETECT_4K_COMP_DB = 3
 /** A record-emphasis time constant's corner, Hz. */
 const emphasisHz = us => 1 / (2 * Math.PI * us * 1e-6)
 export const TAPE_SPEEDS = Object.freeze({
-  ips30: Object.freeze({ label: '30', detectHz: emphasisHz(17.5), cornerMaxHz: 14000, cornerMinHz: 6000, thresholdRelDb: -4, rangeDb: 4 }),
-  ips15: Object.freeze({ label: '15', detectHz: emphasisHz(35), cornerMaxHz: 10000, cornerMinHz: 4000, thresholdRelDb: -6, rangeDb: 6 }),
-  ips7: Object.freeze({ label: '7.5', detectHz: emphasisHz(70), cornerMaxHz: 7000, cornerMinHz: 2500, thresholdRelDb: -6, rangeDb: 9 }),
+  ips30: Object.freeze({ label: '30', headBump: 'a800-30', detectHz: emphasisHz(17.5), cornerMaxHz: 14000, cornerMinHz: 6000, thresholdRelDb: -4, rangeDb: 4 }),
+  ips15: Object.freeze({ label: '15', headBump: 'a800-15', detectHz: emphasisHz(35), cornerMaxHz: 10000, cornerMinHz: 4000, thresholdRelDb: -6, rangeDb: 6 }),
+  ips7: Object.freeze({ label: '7.5', headBump: 'a800-7', detectHz: emphasisHz(70), cornerMaxHz: 7000, cornerMinHz: 2500, thresholdRelDb: -6, rangeDb: 9 }),
 })
 /** Shared by every speed: law and timing (reasoned). */
 export const TAPE_HF_LAW = Object.freeze({
@@ -430,9 +434,15 @@ export const HF_DETENTS = Object.freeze({
   ips7: TAPE_SPEEDS.ips7,
   fatso: Object.freeze({ curve: 'fatso', tame: 6 }),
 })
-/** The panel's positions, in order. 'bench' (Tame / CURVE / DETECT) is not among them. */
-export const HF_PANEL_DETENTS = Object.freeze(Object.keys(HF_DETENTS))
-export const HF_MODES = Object.freeze([...HF_PANEL_DETENTS, 'bench'])
+/**
+ * The panel's positions, in order: the three tape speeds and nothing else
+ * (owner, October 2026 — "reduce the detent to the three tape speeds"). OFF,
+ * FATSO and 'bench' (Tame / CURVE / DETECT) stay reachable from the bench.
+ * Each speed brings its own head bump (`headBump`, while TAPE is up) unless
+ * the bench's Head bump row overrides it.
+ */
+export const HF_PANEL_DETENTS = Object.freeze(['ips30', 'ips15', 'ips7'])
+export const HF_MODES = Object.freeze([...HF_PANEL_DETENTS, 'off', 'fatso', 'bench'])
 
 /**
  * The tape HF shelf's params for a detent, or null when the detent is not a
@@ -498,31 +508,6 @@ export function tapeShelf(tame, tone, curve = 'original') {
   }
 }
 
-/**
- * Soften's depth from its own knob (0–SOFTEN_MAX): 0 is no cut at all; the
- * ceiling is SOFTEN_DB_PER_STEP per step and the slope runs SOFTEN_SLOPE_MIN →
- * MAX across the travel. ⚠ IT RODE TAME UNTIL OCTOBER 2026 (`softenLaw(on,
- * tame)` with Tame as the amount); the law is unchanged, only its input moved,
- * so Soften s renders what Soften ON did at Tame s. A legacy `true` (the old
- * toggle) is read at the given Tame, `false` as 0 — see `softenAmount`.
- *
- * @returns {{ depthDb: number, slope: number }}
- */
-export function softenLaw(amount) {
-  const t = clamp(Number(amount) || 0, 0, SOFTEN_MAX)
-  return {
-    depthDb: SOFTEN_DB_PER_STEP * t,
-    slope: SOFTEN_SLOPE_MIN + (SOFTEN_SLOPE_MAX - SOFTEN_SLOPE_MIN) * (t / SOFTEN_MAX),
-  }
-}
-
-/** The Soften amount from a param that may still be the old on/off toggle. */
-export function softenAmount(soften, tame) {
-  if (soften === true) return clamp(Number(tame) || 0, 0, SOFTEN_MAX)
-  if (soften === false) return 0
-  return clamp(Number(soften) || 0, 0, SOFTEN_MAX)
-}
-
 /** Map UI params to kernel params. */
 export function toKernelParams(params) {
   const p = { ...PHATASS_DEFAULTS, ...params }
@@ -542,13 +527,12 @@ export function toKernelParams(params) {
       }
     : hfDetentShelf(hf, voice)
       ?? { cornerHz: FATSO_CORNER_HZ, thresholdDb: voice, rangeDb: 0, detectCornerHz: null }
-  const soft = softenLaw(softenAmount(p.soften, p.tame))
   return {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
     tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush),
-    headBump: Number(p.tape) > 0 ? headBumpChoice(p.tapeHeadBump) : 0,
+    headBump: Number(p.tape) > 0 ? headBumpFor(p.tapeHeadBump, hf) : 0,
     // Signed: the head bump (after the curve) can leave the peak ABOVE the source.
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb)
       ? clamp(p.tapeMakeupDb, -TAPE_MAKEUP_MAX_DB, TAPE_MAKEUP_MAX_DB) : 0,
@@ -559,11 +543,9 @@ export function toKernelParams(params) {
     ...TAPE_SHELF,
     // The tape HF shelf (a tape-speed detent), null when out.
     tapeHf: tapeHfShelfParams(hf, voice),
-    // Soften rides the shelf's Transient, on its own band, at its own depth.
-    transientDb: soft.depthDb,
-    transientCornerHz: SOFTEN_FREQ_HZ,
-    transientSlope: soft.slope,
-    transientGateDb: voice - SOFTEN_GATE_BELOW_DB,
+    // Soften moved to the HF Softener (hfSoftenerSoftenStage.js): the limiter
+    // shelf's Transient stays off here.
+    transientDb: 0,
     voiceLevelDb: voice,
     outputGainDb: clamp(Number(p.output) || 0, OUTPUT_MIN_DB, OUTPUT_MAX_DB),
     outputMakeupDb: OUTPUT_MAKEUPS.includes(p.outputMakeup) && p.outputMakeup !== 'off' && Number.isFinite(p.outputMakeupDb)
@@ -575,7 +557,7 @@ export function toKernelParams(params) {
  * The output trim's modes (bench only). 'off' ships. 'peak' puts the whole
  * chain's output peak back on the selection's: with TAPE's makeup restoring
  * its peak and the guard holding Warmth under it, what is left to restore is
- * mostly what the tape shelf and Soften took. 'rms' puts the output's RMS on
+ * mostly what the HF shelves took. 'rms' puts the output's RMS on
  * the selection's, so the plugin is level-matched against bypass — negative
  * whenever Warmth and TAPE's makeup add level. Both are signed. Measured by
  * rendering the chain (`phatassOutputMakeup.js`): no shortcut exists, since
@@ -670,6 +652,11 @@ export const TAPE_FALLBACK_CREST_DB = 18
  * the loop from rest, can lose a different amount — the makeup is measured.
  */
 export const TAPE_CURVES = ['cubic', 'tanh', 'algebraic', 'hysteresis']
+/** The panel's Tape switch: the two curves it offers, in order. */
+export const TAPE_PANEL_CURVES = Object.freeze([
+  Object.freeze({ value: 'cubic', label: 'CLEAN' }),
+  Object.freeze({ value: 'hysteresis', label: 'THICK' }),
+])
 /*
  * TAPE's place in the chain is PINNED FIRST (owner's call, October 2026): TAPE →
  * makeup → Warmth → guard. The 'last' order (Warmth → guard → TAPE → makeup,
@@ -785,7 +772,11 @@ export const TAPE_LOW_PUSH_HZ = 150
  * — the two renders were not made at one setting. The makeup is measured
  * through the bump.
  */
-export const TAPE_HEAD_BUMPS = [0, 3, 6, 9, 'a800-30', 'a800-15']
+/**
+ * 'speed' (ships) follows the HF dial's tape speed (`TAPE_SPEEDS[hf].headBump`);
+ * the rest are the bench's overrides.
+ */
+export const TAPE_HEAD_BUMPS = ['speed', 0, 3, 6, 9, 'a800-30', 'a800-15', 'a800-7']
 export const TAPE_HEAD_BUMP_HZ = 40
 export const TAPE_HEAD_BUMP_Q = 0.7
 /**
@@ -808,9 +799,20 @@ export const TAPE_HEAD_BUMP_Q = 0.7
 export const TAPE_HEAD_BUMP_CURVES = Object.freeze({
   'a800-30': Object.freeze({ hpHz: 20, hpQ: 0.9, liftHz: 31.25, liftQ: 0.3, liftDb: 1.17, dipHz: 82.7, dipQ: 1.83, dipDb: -1.93 }),
   'a800-15': Object.freeze({ hpHz: 17.65, hpQ: 0.9, liftHz: 15.625, liftQ: 0.3, liftDb: 1.17, dipHz: 41.35, dipQ: 1.83, dipDb: -1.93 }),
+  // 7.5 ips: the 15 ips curve an octave further down, by the same scaling rule.
+  'a800-7': Object.freeze({ hpHz: 8.825, hpQ: 0.9, liftHz: 7.8125, liftQ: 0.3, liftDb: 1.17, dipHz: 20.675, dipQ: 1.83, dipDb: -1.93 }),
 })
 /** Most sections any head bump uses (the kernel sizes its cascade to this). */
 export const TAPE_HEAD_BUMP_MAX_SECTIONS = 3
+
+/**
+ * The head bump in force: the bench's choice, or with 'speed' the dial's tape
+ * speed's own curve (none for OFF / FATSO / the bench's Tame).
+ */
+export function headBumpFor(tapeHeadBump, hf) {
+  if (tapeHeadBump === 'speed') return TAPE_SPEEDS[hf]?.headBump ?? 0
+  return headBumpChoice(tapeHeadBump)
+}
 
 /** A head-bump choice as kernel params read it: 0 (off), a shelf dB, or a curve id. */
 export function headBumpChoice(v) {
@@ -881,8 +883,8 @@ export const WARMTH_LATENCY_SAMPLES = slotOversample().filter(Boolean).length * 
 
 /**
  * Plugin latency, samples: TAPE's oversampler, the Warmth oversamplers, the
- * peak guard's lookahead and the shelf's split centre and lookahead (Soften shares
- * the shelf's).
+ * peak guard's lookahead and the limiter shelf's split centre and lookahead
+ * (the tape HF shelf adds none).
  * CONSTANT: every stage stays a delay of its own length when idle, so no
  * setting moves the audio.
  */

@@ -5,6 +5,7 @@
  */
 
 import { hfResoKernelParams } from './hfSoftenerResoStage.js'
+import { softenKernelParams } from './hfSoftenerSoftenStage.js'
 import { HF_SOFTENER_TUNING } from './hfSoftenerProcessor.js'
 
 /**
@@ -46,10 +47,16 @@ export const HF_SOFTENER_DEFAULTS = {
   // Plosive bursts (T, K, P) — caught by timing and cut harder, guard lifted.
   plosives: true,
   band: 4500, // Hz, the EQ band's lower corner, 3000–6000 — see bandTuningFor
-  // 0–100 %: the band-limited ResoTame ahead of the softener, a macro over its
+  // 0–100 %: the band-limited ResoTame after the softener, a macro over its
   // threshold, depth and max cut (HF_RESO_KNOTS). 0 takes the stage out of the
   // chain entirely — no latency, bit-identical to the softener alone.
+  // ⚠ OFF THE PANEL since October 2026: its knob's slot went to Soften. Kept
+  // (and tested) so it can come back; nothing sets it.
   resoAmount: 0,
+  // 0–10: SOFTEN, the onset softener at the end of the chain
+  // (hfSoftenerSoftenStage.js — moved here from PHAT*SS). 0 takes it out of the
+  // chain entirely: no latency, bit-identical to the softener alone.
+  soften: 0,
   detect: 4000, // Hz, the detector's high-pass corner, 3000–8000 — see detectCompDb
   air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6, the user's own
   // HF COMP: ADDS the measured compensation to `air` (see hfSoftenerAutoAir.js).
@@ -93,4 +100,14 @@ export function resoKernelParams(params) {
     lispGuard: g > 0,
     guardShiftDb: guardToFloorDb(g) - HF_SOFTENER_TUNING.lispGuardFloorDb,
   })
+}
+
+/** The Soften post-stage is in whenever its knob is above 0. */
+export function softenOn(params) {
+  return (Number(params.soften) || 0) > 0
+}
+
+/** The Soften post-stage's kernel params (the HF Limiter's kernel, shelf out). */
+export function softenStageKernelParams(params) {
+  return softenKernelParams(params.soften, params.levelOffset)
 }

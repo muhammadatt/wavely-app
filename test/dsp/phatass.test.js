@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { processPhatassBuffer, PhatassKernel } from '../../src/audio/phatassProcessor.js'
 import {
-  toKernelParams, phatassLatencySamples, tapeShelf, softenLaw, softenAmount, SOFTEN_MAX, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
+  toKernelParams as toKernelParamsShipped, phatassLatencySamples, tapeShelf, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
   DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
@@ -19,8 +19,20 @@ import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import { processSaturationBenchBuffer, SAT_BENCH_LAYER_LATENCY } from '../../src/audio/dsp/saturationLayers.js'
 import { warmthGuardLatencySamples } from '../../src/audio/dsp/warmthGuard.js'
 import { shelfLatencySamples } from '../../src/audio/dsp/hfLimit.js'
-import { measureTapeMakeup } from '../../src/audio/phatassTapeMakeup.js'
-import { measureOutputMakeup, PREVIEW_CAP_S } from '../../src/audio/phatassOutputMakeup.js'
+import { measureTapeMakeup as measureTapeMakeupShipped } from '../../src/audio/phatassTapeMakeup.js'
+import { measureOutputMakeup as measureOutputMakeupShipped, PREVIEW_CAP_S } from '../../src/audio/phatassOutputMakeup.js'
+
+/**
+ * ⚠ THIS SUITE PINS TAPE, WARMTH AND THE LIMITER SHELF WITH THE TOP END OFF AND
+ * NO HEAD BUMP, as it was written. Since October 2026 PHAT*SS ships a tape
+ * speed (30 ips: the tape HF shelf, and the A800 bump while TAPE is up), so
+ * every call here starts from `ISOLATED` and a test that wants the speed asks
+ * for it. The shipping defaults themselves are pinned in phatassHfDetents.test.js.
+ */
+const ISOLATED = { hf: 'off', tapeHeadBump: 0 }
+const toKernelParams = p => toKernelParamsShipped({ ...ISOLATED, ...p })
+const measureTapeMakeup = (c, sr, p, o) => measureTapeMakeupShipped(c, sr, { ...ISOLATED, ...p }, o)
+const measureOutputMakeup = (c, sr, p, o) => measureOutputMakeupShipped(c, sr, { ...ISOLATED, ...p }, o)
 
 const SR = 44100
 
@@ -633,86 +645,6 @@ test('the peak guard is a pure delay when it has nothing to catch, or no ceiling
   assert.equal(toKernelParams({ ...p, warmthCeilingDb: -6 }).warmthGuard.on, true)
 })
 
-// ── Soften: the shelf's Transient on its own band ───────────────────────────
-
-/** Room tone, a steady 150 Hz voice-like tone, and an HF click burst at `at`. */
-function clickOverVoice(at = Math.round(0.4 * SR), clickAmp = 0.3) {
-  const x = add(sine(150, 0.2), noise(SR, 0.0005, 7))
-  let r = 9
-  for (let i = at; i < at + Math.round(0.002 * SR); i++) {
-    r = (r * 16807) % 2147483647
-    x[i] += clickAmp * ((r / 2147483647) * 2 - 1)
-  }
-  return x
-}
-const rmsDb = (y, a, b) => { let s = 0; for (let i = a; i < b; i++) s += y[i] * y[i]; return 10 * Math.log10(s / (b - a)) }
-const SOFT = { voiceLevelDb: -20, warmth: 0, hf: 'bench' }
-
-/** Energy removed around the click, dB re the click's own energy (0 = all of it). */
-function removedDb(x, y, L, at) {
-  let e = 0, c = 0
-  for (let i = at - 50; i < at + Math.round(0.01 * SR); i++) e += (y[i + L] - x[i]) ** 2
-  for (let i = at; i < at + Math.round(0.002 * SR); i++) c += (x[i] - 0.2 * Math.sin((2 * Math.PI * 150 * i) / SR)) ** 2
-  return 10 * Math.log10(e / c)
-}
-
-test('Soften is its own knob: more Soften removes more of a burst, Tame does not move it, and it works at Tame 0', () => {
-  const at = Math.round(0.4 * SR)
-  const x = clickOverVoice(at)
-  const removed = (tame, soften) => {
-    const r = run(x, { ...SOFT, tame, soften })
-    return removedDb(x, r.channelData[0], r.latencySamples, at)
-  }
-  // Tame 0: the shelf is out, and Soften alone still takes the burst down — deeper as it rises.
-  let prev = removed(0, 0)
-  for (const soften of [2, 5, 10]) {
-    const r = removed(0, soften)
-    assert.ok(r > prev + 0.5, `Tame 0, Soften ${soften}: removed ${r.toFixed(2)} dB, not more than ${prev.toFixed(2)}`)
-    prev = r
-  }
-  // Soften 0 with Tame 0 is a pure delay.
-  const zero = run(x, { ...SOFT, tame: 0, soften: 0 })
-  for (let i = zero.latencySamples; i < x.length; i++) if (zero.channelData[0][i] !== x[i - zero.latencySamples]) assert.fail(`Tame 0 / Soften 0: sample ${i} differs`)
-  // Tame no longer sets Soften's depth: what Soften adds over the shelf alone does not depend on it.
-  const sDepth = toKernelParams({ ...SOFT, soften: 6, tame: 1 }).transientDb
-  assert.equal(toKernelParams({ ...SOFT, soften: 6, tame: 9 }).transientDb, sDepth)
-})
-
-test('Soften leaves steady sound alone', () => {
-  const at = Math.round(0.4 * SR)
-  const x = clickOverVoice(at)
-  const on = run(x, { ...SOFT, tame: 10, soften: 10 }).channelData[0]
-  const off = run(x, { ...SOFT, tame: 10, soften: 0 }).channelData[0]
-  // Away from the burst, Soften on and off render the same.
-  let worst = 0
-  for (let i = Math.round(0.6 * SR); i < Math.round(0.9 * SR); i++) worst = Math.max(worst, Math.abs(on[i] - off[i]))
-  assert.ok(worst < 1e-4, `steady voice moved by ${worst}`)
-  // A held 6 kHz tone is not a transient.
-  const tone = add(sine(6000, 0.1), noise(SR, 0.0005, 3))
-  const a = run(tone, { ...SOFT, tame: 10, soften: 10 }).channelData[0]
-  const b = run(tone, { ...SOFT, tame: 10, soften: 0 }).channelData[0]
-  const g = db(toneAmp(a, 6000, SR / 2, SR) / toneAmp(b, 6000, SR / 2, SR))
-  assert.ok(Math.abs(g) < 0.1, `Soften moved a steady 6 kHz tone ${g.toFixed(2)} dB`)
-})
-
-test('the Soften law: its own 0–10 knob, the old Tame mapping, corner pinned at 500 Hz', () => {
-  assert.deepEqual(softenLaw(0), { depthDb: 0, slope: 0.5 })
-  assert.ok(Math.abs(softenLaw(5).depthDb - 18) < 1e-9)
-  assert.ok(Math.abs(softenLaw(10).depthDb - 36) < 1e-9)
-  assert.ok(Math.abs(softenLaw(5).slope - 0.75) < 1e-12)
-  assert.equal(softenLaw(25).depthDb, softenLaw(SOFTEN_MAX).depthDb)
-  const k = toKernelParams({ soften: 10, tame: 3, voiceLevelDb: -20 })
-  assert.ok(Math.abs(k.transientDb - 36) < 1e-9)
-  assert.equal(k.transientCornerHz, 500)
-  assert.equal(k.transientGateDb, -52)
-  assert.equal(toKernelParams({ soften: 0, tame: 10 }).transientDb, 0)
-  assert.equal(PHATASS_DEFAULTS.soften, 0)
-  // The old toggle still reads as it did: ON took Tame as the amount, OFF was nothing.
-  assert.equal(softenAmount(true, 7), 7)
-  assert.equal(softenAmount(false, 7), 0)
-  assert.deepEqual(toKernelParams({ soften: true, tame: 7 }).transientDb, toKernelParams({ soften: 7, tame: 7 }).transientDb)
-})
-
 test('Warmth\'s low layers run at the base rate: no latency, and only a low band may', () => {
   // As voiced: the even/odd pair is ≤ 250 Hz and runs at 1x; the fixed
   // full-band and high-band layers keep their oversamplers.
@@ -887,10 +819,19 @@ test('TAPE runs to 12 dB: a voiced peak loses nearly its number, and the makeup 
   assert.ok(Math.abs(db(pk / peak)) < 0.05, `peak ${db(pk / peak).toFixed(3)} dB off the source`)
 })
 
-test('TAPE head bump: off ships, and only rides along while TAPE is up', () => {
-  assert.deepEqual(TAPE_HEAD_BUMPS, [0, 3, 6, 9, 'a800-30', 'a800-15'])
+test('TAPE head bump: it follows the Speed dial (shipping), the bench can override it, and it only rides along while TAPE is up', () => {
+  assert.deepEqual(TAPE_HEAD_BUMPS, ['speed', 0, 3, 6, 9, 'a800-30', 'a800-15', 'a800-7'])
   assert.equal(TAPE_HEAD_BUMP_HZ, 40)
-  assert.equal(PHATASS_DEFAULTS.tapeHeadBump, 0)
+  assert.equal(PHATASS_DEFAULTS.tapeHeadBump, 'speed')
+  // Following the speed: each speed's own A800 curve; OFF / FATSO / bench Tame have none.
+  for (const [hf, bump] of [['ips30', 'a800-30'], ['ips15', 'a800-15'], ['ips7', 'a800-7'], ['off', 0], ['fatso', 0], ['bench', 0]]) {
+    assert.equal(toKernelParamsShipped({ tape: 2, hf }).headBump, bump, hf)
+    assert.equal(toKernelParamsShipped({ tape: 0, hf }).headBump, 0, `${hf} with TAPE off`)
+  }
+  assert.equal(toKernelParamsShipped({ tape: 2 }).headBump, 'a800-30', 'the shipping speed is 30 ips')
+  // A bench override wins over the speed.
+  assert.equal(toKernelParamsShipped({ tape: 2, hf: 'ips7', tapeHeadBump: 0 }).headBump, 0)
+  assert.equal(toKernelParamsShipped({ tape: 2, hf: 'ips7', tapeHeadBump: 'a800-30' }).headBump, 'a800-30')
   assert.equal(toKernelParams({ tape: 2, tapeHeadBump: 6 }).headBump, 6)
   assert.equal(toKernelParams({ tape: 2, tapeHeadBump: 'a800-30' }).headBump, 'a800-30')
   assert.equal(toKernelParams({ tape: 2, tapeHeadBump: 'bogus' }).headBump, 0)
@@ -985,20 +926,29 @@ test('TAPE head bump: the makeup is measured through it, may be a cut, and lands
 })
 
 
-test('TAPE head bump A800 curves: the published 30 ips response, and 15 ips an octave down', () => {
+test('TAPE head bump A800 curves: 30 ips as edited (high-pass at 20 Hz), 15 ips the published curve an octave down, 7.5 another octave', () => {
   const amp = (bump, f) => {
     const x = sine(f, 0.002, SR * 3)
     const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeHeadBump: bump, tapeMakeupDb: 0, warmthCeilingDb: db(0.8) })
     return db(toneAmp(y.subarray(L), f, 2 * SR, 3 * SR - 1000) / 0.002)
   }
-  // endino.com A800 graph at 30 ips, eye-digitised (dB): 20 −7.8, 45 +1.5, 85 −0.55, 1k 0
-  for (const [f, want, tol] of [[20, -7.8, 0.6], [45, 1.5, 0.4], [85, -0.55, 0.3], [1000, 0, 0.1]]) {
+  // endino.com A800 graph at 30 ips, eye-digitised (dB): 20 −7.8, 45 +1.5, 85 −0.55, 1k 0.
+  // ⚠ The owner moved the 30 ips high-pass from the fitted 35.3 Hz to 20 Hz
+  // (acf0534), which takes out the roll-off and reshapes the dip: as edited it
+  // reads +0.1 at 20 Hz (published −7.8), +1.34 at 45 (+1.5) and −0.96 at 85
+  // (−0.55). The 15 and 7.5 ips curves keep the fitted shape.
+  for (const [f, want, tol] of [[20, 0.13, 0.6], [45, 1.34, 0.4], [85, -0.96, 0.3], [1000, 0, 0.1]]) {
     const got = amp('a800-30', f)
     assert.ok(Math.abs(got - want) < tol, `A800 30 ips at ${f} Hz: ${got.toFixed(2)} dB, want ${want}`)
   }
   for (const [f, want, tol] of [[10, -7.8, 0.8], [22.5, 1.5, 0.4], [42.5, -0.55, 0.3]]) {
     const got = amp('a800-15', f)
     assert.ok(Math.abs(got - want) < tol, `A800 15 ips at ${f} Hz: ${got.toFixed(2)} dB, want ${want}`)
+  }
+  // 7.5 ips: the 15 ips curve an octave further down.
+  for (const [f, want, tol] of [[11.25, 1.5, 0.4], [21.25, -0.55, 0.3], [1000, 0, 0.1]]) {
+    const got = amp('a800-7', f)
+    assert.ok(Math.abs(got - want) < tol, `A800 7.5 ips at ${f} Hz: ${got.toFixed(2)} dB, want ${want}`)
   }
 })
 

@@ -24,6 +24,9 @@ const hfAdvancedOpen = ref(false)
 // The band-limited ResoTame ahead of the softener — an A/B of the pairing,
 // with fixed settings (see hfSoftenerResoStage.js).
 const hfResoAmount = ref(HF_SOFTENER_DEFAULTS.resoAmount)
+// Soften: the onset softener at the end of the chain (hfSoftenerSoftenStage.js),
+// on the panel in the slot Reso's knob had.
+const hfSoften = ref(HF_SOFTENER_DEFAULTS.soften)
 // Air makeup: Air Boost's curve after the cut, the user's own amount. HF COMP
 // ADDS a measured amount on top — a fraction of the top end the chain removes
 // (hfSoftenerAutoAir.js) — so the knob is never overwritten.
@@ -53,6 +56,7 @@ const hfPreview = ref(false)
 const hfReduction = ref(0)
 // The Reso stage's reduction and the two lamps, read with the other meters.
 const hfReso = ref(0)
+const hfSoftenCut = ref(0)
 const hfBurstLamp = ref(0)
 const hfAirLamp = ref(0)
 const hfThresholdLift = ref(0)
@@ -76,6 +80,7 @@ function currentParams() {
     plosives: hfPlosives.value,
     band: hfBand.value,
     resoAmount: hfResoAmount.value,
+    soften: hfSoften.value,
     air: hfAir.value,
     comp: hfComp.value,
     compAir: hfCompAir.value,
@@ -118,6 +123,7 @@ export function useHFSoftener() {
         hfThresholdLift.value = nodes.getThresholdLift()
         hfBroadband.value = nodes.getBroadband?.() ?? 0
         hfReso.value = nodes.getReso?.() ?? 0
+        hfSoftenCut.value = nodes.getSoften?.() ?? 0
         const lamps = nodes.getLamps?.()
         hfBurstLamp.value = lamps?.burst ?? 0
         hfAirLamp.value = lamps?.air ?? 0
@@ -153,6 +159,7 @@ export function useHFSoftener() {
     hfThresholdLift.value = 0
     hfBroadband.value = 0
     hfReso.value = 0
+    hfSoftenCut.value = 0
     hfBurstLamp.value = 0
     hfAirLamp.value = 0
   }
@@ -290,6 +297,12 @@ export function useHFSoftener() {
     scheduleAutoAir()
   }
 
+  // Soften acts on onsets only, so it does not move HF COMP's measurement.
+  function syncSoften(v) {
+    hfSoften.value = v
+    pushParam('soften', v)
+  }
+
   function syncGuard(v) {
     hfGuard.value = v
     pushParam('guard', v)
@@ -377,6 +390,8 @@ export function useHFSoftener() {
   return {
     hfAmount,
     hfResoAmount,
+    hfSoften,
+    hfSoftenCut,
     hfAir,
     hfComp,
     hfCompAir,
@@ -407,6 +422,7 @@ export function useHFSoftener() {
     togglePreview,
     syncAmount,
     syncResoAmount,
+    syncSoften,
     syncAir,
     syncComp,
     syncDetect,

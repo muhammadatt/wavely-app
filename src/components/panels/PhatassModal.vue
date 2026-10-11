@@ -4,28 +4,24 @@
  *
  * WARMTH adds low-end harmonic warmth: two fixed Saturation Bench layers
  * (quartic for even, cubic for odd, both on the low band). WARMTH sets how much
- * is mixed in, 0 is off; ODD/EVEN crossfades the two at constant level over the
- * useful first quarter of the blend (ODD_EVEN_SPAN). The peak guard is pinned
- * on with Warmth: it turns down only what Warmth adds, only where the sum would
- * pass the selection's own peak (dsp/warmthGuard.js).
+ * is mixed in, 0 is off; CHARACTER is a two-way switch over their balance
+ * (ROUND = Odd/Even 50, FIRM = 25 — `CHARACTERS`; it replaced the Odd/Even
+ * knob). The peak guard is pinned on with Warmth: it turns down only what
+ * Warmth adds, only where the sum would pass the selection's own peak
+ * (dsp/warmthGuard.js).
  *
- * SOFTEN is the HF Limiter's Transient detector on its own band above 500 Hz:
- * it turns that band down for a few milliseconds when it rises suddenly —
- * clicks, lip smacks, hard consonants, the snap of an onset. Its own knob,
- * independent of the top-end shelf. A gain on a band, never distortion, no
- * latency of its own.
+ * TAPE takes dB off the peaks the way tape does, calibrated on the selection's
+ * own peak so the knob reads in dB of peak reduction, with automatic
+ * peak-restoring makeup. Its switch picks the curve (`TAPE_PANEL_CURVES`):
+ * CLEAN, the cubic soft clipper, or THICK, the hysteresis tape loop.
  *
- * TAPE takes dB off the peaks the way tape does: a full-band cubic soft
- * clipper, calibrated on the selection's own peak so the knob reads in dB of
- * peak reduction. A waveshaper, not a compressor — quiet material is untouched.
+ * HF is a DETENT, not a knob: the tape speed, 30 / 15 / 7.5 IPS. It runs the
+ * TAPE HF SHELF (dsp/tapeHfShelf.js) — the top end sags with level, attacks
+ * stay bright, and the Tape knob makes it sag sooner — and picks TAPE's head
+ * bump (the A800's playback low end at that speed). See HF_DETENTS in
+ * phatassParams.js. OFF, FATSO and the bench's Tame are on the bench.
  *
- * Then the TAPE SHELF: the HF Limiter's dynamic shelf with its shape and timing
- * pinned (WARM split, 35 ms release, no Tail, no Transient — the Fatso Warmth 7
- * match), its corner at 2 kHz — used by the FATSO detent and the bench's Tame.
- * HF is a DETENT, not a knob: OFF / 30 / 15 / 7.5 IPS run the TAPE HF SHELF
- * (dsp/tapeHfShelf.js) — the top end sags with level, attacks stay bright, and
- * the Tape knob makes it sag sooner — and FATSO is the fitted limiter law. See
- * HF_DETENTS in phatassParams.js.
+ * SOFTEN moved to the HF Softener (October 2026).
  *
  * In/out meters only. The readout under the Warmth knobs is what the warmth
  * stage did to this selection's low bands and peak.
@@ -34,11 +30,12 @@ import { computed, onMounted, watch } from 'vue'
 import { usePhatass } from '../../composables/usePhatass.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  WARMTH_MAX, ODD_EVEN_MAX, SOFTEN_MAX, TAPE_MAX_DB, OUTPUT_MIN_DB, OUTPUT_MAX_DB,
-  warmthActive, softenLaw, hfDetentShelf, tapeHfShelfParams,
+  WARMTH_MAX, TAPE_MAX_DB, OUTPUT_MIN_DB, OUTPUT_MAX_DB, CHARACTERS, TAPE_PANEL_CURVES, TAPE_SPEEDS,
+  warmthActive, hfDetentShelf, tapeHfShelfParams,
 } from '../../audio/phatassParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
+import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import PhatassBenchPanel from './PhatassBenchPanel.vue'
 import { isPhatassBenchVisible } from '../../audio/effects/phatassBench.js'
 import ClassicVuMeter from '../hardware/ClassicVuMeter.vue'
@@ -106,7 +103,6 @@ const readoutPeak = computed(() => {
 })
 
 const fmtWarmth = v => (v <= 0 ? 'OFF' : v.toFixed(1))
-const fmtOddEven = v => (v <= 0 ? 'ODD' : `${Math.round(v)}`)
 const fmtTape = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
 // The makeup TAPE gives back: what it measured off the peak, so the peak lands where it started.
 const tapeMakeupCaption = computed(() => {
@@ -117,32 +113,49 @@ const tapeMakeupCaption = computed(() => {
   return `MAKEUP ${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}`
 })
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
-const fmtSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
-// What the Soften knob currently allows on one attack.
-const softenCaption = computed(() => {
-  const d = softenLaw(phParams.soften).depthDb
-  return d > 0 ? `UP TO −${Math.round(d)} dB` : ''
-})
+const CHARACTER_TITLES = {
+  50: 'Rounder and fuller: more of the even (quartic) layer',
+  25: 'Firmer, with more edge: more of the odd (cubic) layer',
+}
+const CHARACTER_OPTIONS = CHARACTERS.map(c => ({ ...c, title: CHARACTER_TITLES[c.value] }))
+// A bench or legacy Odd/Even off the two positions lights neither half.
+const characterValue = computed(() => Number(phParams.oddEven))
+
+const TAPE_CURVE_TITLES = {
+  cubic: 'A clean soft clipper: rounds off only the top of each wave, adding mostly the third harmonic, and clips flat past about 3.5 dB',
+  hysteresis: 'Magnetic tape\'s own loop, with memory: low, heavy hits like kicks are squashed about twice as hard as snares, and peaks round off without a hard clip. Heavier on the processor',
+}
+const TAPE_CURVE_OPTIONS = TAPE_PANEL_CURVES.map(c => ({ ...c, title: TAPE_CURVE_TITLES[c.value] }))
 
 const HF_OPTIONS = [
-  { value: 'off', label: 'OFF', title: 'The top end passes untouched' },
-  { value: 'ips30', label: '30 IPS', title: 'Tape at 30 inches per second: the most HF headroom. Only the brightest passages sag a little at the very top. Turning Tape up makes it sag sooner' },
-  { value: 'ips15', label: '15 IPS', title: 'Tape at 15 inches per second: bright passages lose some top end, and the loss reaches lower as they get hotter. Attacks stay bright. Turning Tape up makes it sag sooner' },
-  { value: 'ips7', label: '7.5 IPS', title: 'Tape at 7.5 inches per second: the least HF headroom. The top end darkens on anything bright and the loss reaches down into the upper mids. Turning Tape up makes it sag sooner' },
-  { value: 'fatso', label: 'FATSO', title: 'Not tape: the top-end limiter fitted to an EL7 Fatso\'s Warmth (at Warmth 7, on music). It catches peaks from 2 kHz, so bright vowels trigger it as readily as sibilance' },
+  { value: 'ips30', label: '30 IPS', title: 'Tape at 30 inches per second: the most HF headroom. Only the brightest passages sag a little at the very top; the head bump sits lowest and is gentlest' },
+  { value: 'ips15', label: '15 IPS', title: 'Tape at 15 inches per second: bright passages lose some top end, and the loss reaches lower as they get hotter. Attacks stay bright. The head bump moves down an octave' },
+  { value: 'ips7', label: '7.5 IPS', title: 'Tape at 7.5 inches per second: the least HF headroom. The top end darkens on anything bright and the loss reaches into the upper mids; the head bump is an octave lower again' },
 ]
-// The bench's Tame has the shelf: show that on the dial rather than no position.
-const hfOptions = computed(() => (phParams.hf === 'bench'
-  ? [...HF_OPTIONS, { value: 'bench', label: 'BENCH', title: 'The bench\'s Tame has the top end; pick a position to hand it back' }]
-  : HF_OPTIONS))
-// What the current detent may cut at most.
+const BENCH_HF = {
+  off: { value: 'off', label: 'OFF', title: 'Set on the bench: the top end untouched, no head bump' },
+  fatso: { value: 'fatso', label: 'FATSO', title: 'Set on the bench: the top-end limiter fitted to an EL7 Fatso, no head bump' },
+  bench: { value: 'bench', label: 'BENCH', title: 'The bench\'s Tame has the top end; pick a speed to hand it back' },
+}
+// A bench-only position shows on the dial rather than leaving it blank.
+const hfOptions = computed(() => (BENCH_HF[phParams.hf] ? [...HF_OPTIONS, BENCH_HF[phParams.hf]] : HF_OPTIONS))
+// What the current position may cut at most.
 const hfCaption = computed(() => {
   if (phParams.hf === 'bench') return 'BENCH'
   const t = tapeHfShelfParams(phParams.hf, phParams.voiceLevelDb)
   if (t) return `UP TO −${Math.round(t.rangeDb)} dB`
   const s = hfDetentShelf(phParams.hf, phParams.voiceLevelDb)
-  return s ? `UP TO −${Math.round(s.rangeDb)} dB` : ''
+  return s ? `UP TO −${Math.round(s.rangeDb)} dB` : 'TOP UNTOUCHED'
 })
+// What the Tape switch's caption says: the head bump the speed brings.
+const tapeCurveCaption = computed(() => {
+  if (!(phParams.tape > 0)) return 'TAPE IS OFF'
+  if (phParams.tapeHeadBump !== 'speed') return 'BUMP · BENCH'
+  const sp = TAPE_SPEEDS[phParams.hf]
+  return sp ? `BUMP · ${sp.label} IPS` : 'NO BUMP'
+})
+
+const LABEL = "font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)"
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -189,8 +202,8 @@ async function applyAndClose() {
       <div class="flex items-center justify-between gap-[22px]">
         <LevelMeter :levels="phInputLevels" label="IN" :height="150" />
 
-        <div class="flex-1 flex flex-col items-center gap-[14px]">
-          <div class="flex justify-center gap-[12px]">
+        <div class="flex-1 flex flex-col items-center gap-[16px]">
+          <div class="flex justify-center items-start gap-[10px]">
             <div class="w-[80px]" title="Low-end harmonic warmth: an even (quartic) and an odd (cubic) saturator on the low band, voiced for body and fatness. Warmth sets how much of what they add is mixed in — the clean signal is never touched. Calibrated on this file, so a setting means the same on a quiet recording and a hot one. Never raises the selection’s peak: a guard turns the added warmth down for a few milliseconds where it would. 0 is off">
               <Knob
                 :model-value="phParams.warmth" @update:model-value="v => syncParam('warmth', v)"
@@ -198,27 +211,7 @@ async function applyAndClose() {
                 label="Warmth" :accent="ACCENT" :format-value="fmtWarmth" :disabled="!phPreview"
               />
             </div>
-            <div class="w-[80px]" title="From pure Odd (cubic: firmer, more edge) toward Even (quartic: rounder, fuller, more sub). The added level stays about the same as you turn it. The knob covers only the useful part of the blend">
-              <Knob
-                :model-value="phParams.oddEven" @update:model-value="v => syncParam('oddEven', v)"
-                :min="0" :max="ODD_EVEN_MAX" :step="1" :value-font-px="13"
-                label="Odd/Even" :accent="ACCENT" :format-value="fmtOddEven" :disabled="!phPreview || phParams.warmth <= 0"
-              />
-            </div>
-            <div class="w-[80px]" title="Softens sudden attacks the way tape rounds off transients: when the band above 500 Hz rises suddenly — a click, a lip smack, a hard T or K, the snap of an onset — it is turned down for a few milliseconds. It reacts to how suddenly the voice rises, not how loud it is, so steady sound is left alone. The knob sets how deep one attack may be taken down (up to 36 dB at 10) and how hard it leans in. A gain on a band, never distortion. 0 is off">
-              <Knob
-                :model-value="phParams.soften" @update:model-value="v => syncParam('soften', v)"
-                :min="0" :max="SOFTEN_MAX" :step="0.1" :value-font-px="13"
-                label="Soften" :accent="ACCENT" :format-value="fmtSoften" :disabled="!phPreview"
-              />
-              <div
-                class="text-center h-[10px] mt-[4px]"
-                :style="{ font: `600 8.5px/1 'JetBrains Mono', monospace`, letterSpacing: '.08em', color: 'rgba(255,255,255,.45)' }"
-              >{{ softenCaption }}</div>
-            </div>
-          </div>
-          <div class="flex justify-center gap-[12px]">
-            <div class="w-[80px]" title="Takes this many dB off the selection’s loudest peak the way tape saturation does: the top of each wave is rounded off, while everything more than about 9 dB under the peak passes untouched. A waveshaper, not a compressor, so it adds odd harmonics as it works — about 2 % at 1 dB, 4 % at 2 dB, 9 % at 3.5. Past 3.5 dB the very top is clipped flat; 6–12 drives it harder, for dense drums. Peaks carried by sibilance lose somewhat less than the number. MAKEUP is automatic: what Tape actually took off the peak is measured on the selection and given back, so the peak returns to where it started and the reduction becomes loudness. 0 is off">
+            <div class="w-[80px]" title="Takes this many dB off the selection’s loudest peak the way tape saturation does, and gives it back as level: MAKEUP is automatic — what Tape actually took off the peak is measured on the selection and returned, so the peak lands where it started. CLEAN rounds off only the top of each wave; THICK is magnetic tape’s own loop, heavier on kicks. Turning it up also drives the top end into the HF sag, and brings in the speed’s head bump. 0 is off">
               <Knob
                 :model-value="phParams.tape" @update:model-value="v => syncParam('tape', v)"
                 :min="0" :max="TAPE_MAX_DB" :step="0.1" :value-font-px="13"
@@ -231,11 +224,11 @@ async function applyAndClose() {
             </div>
             <div
               class="w-[96px] flex flex-col items-center"
-              title="How the tape loses its top end as it is driven: at 30, 15 or 7.5 IPS the treble sags on bright, hot passages — slower tape sags sooner, deeper and further down — while attacks stay bright. Turning Tape up drives it harder, so the top sags sooner. A dull take is left mostly alone. FATSO is not tape: the top-end limiter fitted to an EL7 Fatso. OFF passes the top end untouched"
+              title="The tape speed. The treble sags on bright, hot passages — slower tape sags sooner, deeper and further down — while attacks stay bright, and turning Tape up drives it harder. The speed also sets Tape’s head bump, the playback head’s low-end lift, an octave lower at each slower speed. A dull take is left mostly alone"
             >
               <DeviceDetentRotary
                 :model-value="phParams.hf" :options="hfOptions" :accent="ACCENT"
-                :disabled="!phPreview" label="HF"
+                :disabled="!phPreview" label="Speed"
                 @update:model-value="v => syncParam('hf', v)"
               />
               <div
@@ -248,6 +241,24 @@ async function applyAndClose() {
                 :model-value="phParams.output" @update:model-value="v => syncParam('output', v)"
                 :min="OUTPUT_MIN_DB" :max="OUTPUT_MAX_DB" :step="0.1" :value-font-px="13" bipolar
                 label="Output" :accent="ACCENT" :format-value="fmtDb" :disabled="!phPreview"
+              />
+            </div>
+          </div>
+          <div class="flex justify-center items-end gap-[28px]">
+            <div class="flex flex-col items-center gap-[8px]" title="The character of Warmth: ROUND leans to the even (quartic) layer — rounder, fuller; FIRM to the odd (cubic) one — firmer, more edge. The added level stays about the same either way">
+              <span :style="LABEL">CHARACTER</span>
+              <DeviceChoiceRocker
+                :model-value="characterValue" :options="CHARACTER_OPTIONS" :accent="ACCENT"
+                :disabled="!phPreview || phParams.warmth <= 0" label="Warmth character"
+                @update:model-value="v => syncParam('oddEven', v)"
+              />
+            </div>
+            <div class="flex flex-col items-center gap-[8px]" title="Which tape Tape drives: CLEAN, a soft clipper that rounds off only the top of each wave, or THICK, magnetic tape’s own loop — heavier on kicks and low hits, peaks rounded without a hard clip">
+              <span :style="LABEL">TAPE</span>
+              <DeviceChoiceRocker
+                :model-value="phParams.tapeCurve" :options="TAPE_CURVE_OPTIONS" :accent="ACCENT"
+                :disabled="!phPreview || phParams.tape <= 0" label="Tape type" :caption="tapeCurveCaption"
+                @update:model-value="v => syncParam('tapeCurve', v)"
               />
             </div>
           </div>
@@ -284,7 +295,7 @@ async function applyAndClose() {
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
         Warmth fattens the low end without raising the peak, Tape rounds off the peaks,
-        Soften rounds off sudden attacks, and HF lets the top end sag the way driven tape does.
+        and the speed sets how the top end sags and where the low end bumps, the way driven tape does.
       </p>
 
       <!-- Bench only: gated off in production builds. See phatassBench.js. -->

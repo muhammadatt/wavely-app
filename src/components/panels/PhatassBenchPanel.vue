@@ -47,12 +47,14 @@ const CHOICES = [
   {
     key: 'tapeHeadBump', label: 'Head bump',
     options: [
-      { id: 0, label: 'OFF', title: 'Ships. No low lift' },
+      { id: 'speed', label: 'SPEED', title: 'Ships. The Speed dial\'s own A800 curve: 30, 15 or 7.5 ips' },
+      { id: 0, label: 'OFF', title: 'No low lift' },
       { id: 3, label: '+3', title: '+3 dB low shelf (40 Hz) after TAPE\'s curve: the playback head\'s low lift, at full size in the output. The makeup may come out as a cut' },
       { id: 6, label: '+6', title: '+6 dB low shelf after the curve. The drums render needed none' },
       { id: 9, label: '+9', title: '+9 dB low shelf after the curve: past both Studer renders' },
       { id: 'a800-30', label: 'A800 30', title: 'The Studer A800 hardware\'s playback low end at 30 ips (published measurement): roll-off below ~35 Hz to −8 dB at 20 Hz, +1.2–1.5 dB at 40–50 Hz, a small dip at 80–90. Fixed depth. Closest to the Studer emulation\'s kick by ear' },
       { id: 'a800-15', label: 'A800 15', title: 'The same A800 curve an octave down (15 ips): roll-off below ~18 Hz, bump at ~20–25 Hz, dip at ~40–45. Fixed depth' },
+      { id: 'a800-7', label: 'A800 7.5', title: 'An octave lower again (7.5 ips): bump at ~10 Hz, dip at ~20' },
     ],
   },
   {
@@ -88,7 +90,13 @@ const trimText = computed(() => {
 })
 
 const benchTame = computed(() => props.params.hf === 'bench')
-const pristine = computed(() => !benchTame.value && CHOICES.every(ch => props.params[ch.key] === PHATASS_DEFAULTS[ch.key]))
+// OFF and FATSO left the Speed dial; the bench is where they live now.
+const BENCH_HF = [
+  { id: 'off', label: 'OFF', title: 'The top end untouched, and no head bump (the bump follows the speed)' },
+  { id: 'fatso', label: 'FATSO', title: 'The HF Limiter\'s shelf on the law fitted to an EL7 Fatso\'s Warmth 7, instead of the tape HF shelf; no head bump' },
+]
+const benchHf = computed(() => benchTame.value || BENCH_HF.some(o => o.id === props.params.hf))
+const pristine = computed(() => !benchHf.value && CHOICES.every(ch => props.params[ch.key] === PHATASS_DEFAULTS[ch.key]))
 
 // Moving Tame takes the shelf off the panel's detent and onto these controls.
 function setTame(v) {
@@ -122,7 +130,7 @@ function onKey(e, ch) {
 
 function reset() {
   for (const ch of CHOICES) set(ch.key, PHATASS_DEFAULTS[ch.key])
-  if (benchTame.value) set('hf', PHATASS_DEFAULTS.hf)
+  if (benchHf.value) set('hf', PHATASS_DEFAULTS.hf)
 }
 </script>
 
@@ -184,6 +192,22 @@ function reset() {
             @click="set(ch.key, PHATASS_DEFAULTS[ch.key])"
           >↺</button>
         </div>
+      </div>
+
+      <div class="mt-3 flex items-center gap-2">
+        <span id="phatass-bench-hf" class="w-[70px] shrink-0 text-[10px] text-white/45">Top end</span>
+        <div role="radiogroup" aria-labelledby="phatass-bench-hf" class="flex gap-1">
+          <button
+            v-for="o in BENCH_HF" :key="o.id" type="button" role="radio"
+            :aria-checked="params.hf === o.id" :title="o.title" :disabled="disabled"
+            class="rounded border px-2 py-[3px] text-[9px] tracking-wide disabled:opacity-30"
+            :class="params.hf === o.id
+              ? 'border-amber-300/60 bg-amber-300/10 text-amber-100'
+              : 'border-white/15 text-white/45 hover:border-white/35 hover:text-white/80'"
+            @click="set('hf', params.hf === o.id ? PHATASS_DEFAULTS.hf : o.id)"
+          >{{ o.label }}</button>
+        </div>
+        <span class="ml-auto font-mono text-[9px] text-white/30">{{ benchHf ? params.hf : 'speed dial' }}</span>
       </div>
 
       <div class="mt-3 flex items-center gap-2" title="The Tame knob the HF detents replaced. Moving it takes the shelf off the panel's detent (HF shows BENCH TAME) onto Tame / Tame curve / Detect; choosing a detent on the panel hands it back">

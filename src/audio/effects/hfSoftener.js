@@ -13,12 +13,14 @@
 
 import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
+import { ensureHFLimiterWorklet } from '../hfLimiterWorkletLoader.js'
+import { softenLatencySamples } from '../hfSoftenerSoftenStage.js'
 import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from '../hfSoftenerResoStage.js'
 import { createLevelTap, createSpectrumTap } from './levelTap.js'
 import { createScopeRing } from '../hfSoftenerScope.js'
-import { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams } from '../hfSoftenerParams.js'
+import { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams, softenOn, softenStageKernelParams } from '../hfSoftenerParams.js'
 
-export { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams } from '../hfSoftenerParams.js'
+export { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams, softenOn, softenStageKernelParams } from '../hfSoftenerParams.js'
 
 export function createHFSoftener(audioContext) {
   const input = audioContext.createGain()
@@ -33,6 +35,7 @@ export function createHFSoftener(audioContext) {
   let thresholdLiftDb = 0
   let broadbandDb = 0
   let resoDb = 0
+  let softenDb = 0
   // Lamps: a plosive window opened / the Air lift, since the last meter post.
   let burstLamp = 0
   let airLamp = 0
@@ -57,29 +60,38 @@ export function createHFSoftener(audioContext) {
   preOutput.connect(outputMonitor)
 
   let resoNode = null
-  const resoDelay = audioContext.createDelay(0.1)
-  resoDelay.delayTime.value = HF_RESO_LATENCY_SAMPLES / audioContext.sampleRate
+  // Soften: the HF Limiter's kernel with the shelf out (hfSoftenerSoftenStage.js),
+  // after Reso. Like Reso it is in the chain only while its knob is above 0.
+  let softenNode = null
+  const postDelay = audioContext.createDelay(0.1)
   const invert = audioContext.createGain()
   invert.gain.value = -1
 
   function rewire() {
-    for (const n of [input, resoNode, worklet, resoDelay, invert]) n?.disconnect()
+    for (const n of [input, resoNode, softenNode, worklet, postDelay, invert]) n?.disconnect()
     input.connect(inputMonitor)
     if (!worklet) {
       input.connect(preOutput)
       return
     }
-    const withReso = resoOn(params) && resoNode
+    // The post-stages in, in chain order, with their latencies.
+    const post = []
+    if (resoOn(params) && resoNode) post.push([resoNode, HF_RESO_LATENCY_SAMPLES])
+    if (softenOn(params) && softenNode) post.push([softenNode, softenLatencySamples(audioContext.sampleRate)])
     input.connect(worklet)
     const delta = listen === 'delta'
-    // With Reso in, the softener hands over its output WITHOUT the air makeup
-    // ('preair'), so the wrapper's delta is only what was removed.
-    worklet.port.postMessage({ type: 'listen', mode: delta ? (withReso ? 'preair' : 'delta') : 'off' })
-    const last = withReso ? resoNode : worklet
-    if (withReso) worklet.connect(resoNode)
-    if (delta && withReso) {
-      input.connect(resoDelay)
-      resoDelay.connect(preOutput)
+    // With a post-stage in, the softener hands over its output WITHOUT the air
+    // makeup ('preair'), so the wrapper's delta is only what was removed.
+    worklet.port.postMessage({ type: 'listen', mode: delta ? (post.length ? 'preair' : 'delta') : 'off' })
+    let last = worklet
+    for (const [node] of post) {
+      last.connect(node)
+      last = node
+    }
+    if (delta && post.length) {
+      postDelay.delayTime.value = post.reduce((s, [, l]) => s + l, 0) / audioContext.sampleRate
+      input.connect(postDelay)
+      postDelay.connect(preOutput)
       last.connect(invert)
       invert.connect(preOutput)
     } else {
@@ -105,6 +117,24 @@ export function createHFSoftener(audioContext) {
       })
   }
 
+  function ensureSoften() {
+    if (softenNode || !softenOn(params)) return
+    ensureHFLimiterWorklet(audioContext)
+      .then(() => {
+        if (destroyed || softenNode) return
+        softenNode = new AudioWorkletNode(audioContext, 'hf-limiter-processor', {
+          processorOptions: { params: softenStageKernelParams(params) },
+        })
+        softenNode.port.onmessage = (e) => {
+          if (e.data?.type === 'gr') softenDb = e.data.transientDb ?? 0
+        }
+        rewire()
+      })
+      .catch((err) => {
+        console.error('HF Softener Soften stage failed to load, running without it:', err)
+      })
+  }
+
   preOutput.connect(output)
   rewire() // bypassed until the worklet loads
 
@@ -124,6 +154,7 @@ export function createHFSoftener(audioContext) {
         scope.push(e.data.scope)
       }
       ensureReso()
+      ensureSoften()
       rewire()
     })
     .catch((err) => {
@@ -143,9 +174,21 @@ export function createHFSoftener(audioContext) {
     setParam(name, value) {
       if (!(name in params)) return
       const wasOn = resoOn(params)
+      const wasSoften = softenOn(params)
       params[name] = value
       if (name === 'resoAmount' || name === 'guard') {
         resoNode?.port.postMessage({ type: 'params', params: resoKernelParams(params) })
+      }
+      if (name === 'soften' || name === 'levelOffset') {
+        softenNode?.port.postMessage({ type: 'params', params: softenStageKernelParams(params) })
+      }
+      if (name === 'soften') {
+        // Crossing 0 puts the Soften stage in or takes it out of the chain.
+        if (softenOn(params) !== wasSoften) {
+          ensureSoften()
+          rewire()
+        }
+        return
       }
       if (name === 'resoAmount') {
         // Crossing 0 puts the Reso stage in or takes it out of the chain.
@@ -175,6 +218,11 @@ export function createHFSoftener(audioContext) {
     /** The Reso stage's reduction, positive dB; 0 while it is out. */
     getReso() {
       return resoOn(params) && resoNode ? resoDb : 0
+    },
+
+    /** The Soften stage's deepest onset cut, positive dB; 0 while it is out. */
+    getSoften() {
+      return softenOn(params) && softenNode ? softenDb : 0
     },
 
     /** Plosive lamp (0–1) and Air lamp (0–1), from the last meter post. */
@@ -216,7 +264,8 @@ export function createHFSoftener(audioContext) {
       input.disconnect()
       worklet?.disconnect()
       resoNode?.disconnect()
-      resoDelay.disconnect()
+      softenNode?.disconnect()
+      postDelay.disconnect()
       invert.disconnect()
       preOutput.disconnect()
       output.disconnect()

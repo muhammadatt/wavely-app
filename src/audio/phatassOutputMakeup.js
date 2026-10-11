@@ -6,7 +6,7 @@
  *
  * Measured by RENDERING the chain with the trim and Output at 0. There is no
  * render-free shortcut: Warmth adds level that depends on the band content,
- * its guard and the tape shelf are dynamic, and Soften reacts to onsets.
+ * its guard and the HF shelves are dynamic.
  *
  *   exact — the whole region. Apply uses this, after TAPE's makeup has been
  *           measured the exact way (the render needs it).

@@ -2,11 +2,14 @@
 /**
  * HF Softener.
  *
- * The chain runs Duck → EQ → Air → Reso. Duck turns the whole "s" down with its
- * shape intact; EQ cuts the top of what the duck left (its detector hears the
- * ducked signal); Shape picks that cut; Air puts back a few dB of top after it,
- * on Air Boost's curve; Reso is the amount of the ResoTame stage at the end,
- * out of the chain at 0. Context,
+ * The chain runs Duck → EQ → Air → [Reso] → Soften. Duck turns the whole "s"
+ * down with its shape intact; EQ cuts the top of what the duck left (its
+ * detector hears the ducked signal); Shape picks that cut; Air puts back a few
+ * dB of top after it, on Air Boost's curve; Soften (moved here from PHAT*SS)
+ * turns the band above 500 Hz down for a few ms on sudden onsets — clicks,
+ * smacks, hard consonants — out of the chain at 0. Reso (the ResoTame stage)
+ * is off the panel since Soften took its knob's slot; it stays in the code at
+ * 0. Context,
  * Rotator, Release and vowel release were controls while the design was being
  * tuned and are now pinned (50 %, sidechain, 40 ms, on — see useHFSoftener.js). DELTA sits in the
  * header like every other plugin's monitor and never reaches the apply path.
@@ -15,7 +18,7 @@
  * Detect) and Plosives (the T/K/P treatment).
  * The SCOPE at the top is the waveform after the cut with what was removed
  * painted around it (SoftenerScope, hfSoftenerScope.js); the readout under it
- * splits the total into Duck, EQ and Reso. The curve is the cut the kernel is
+ * splits the total into Duck and EQ, with Soften's onset cut beside them. The curve is the cut the kernel is
  * running right now, drawn from the same coefficient builder, with the most
  * both stages could take ghosted behind it and the input's spectrum under it;
  * the dotted line is where the detector listens (Detect), the solid one where
@@ -30,6 +33,7 @@ import {
   DETECT_HZ_MIN, DETECT_HZ_MAX, BAND_HZ_MIN, BAND_HZ_MAX, bandTuningFor,
 } from '../../audio/hfSoftenerProcessor.js'
 import { guardToFloorDb } from '../../audio/hfSoftenerParams.js'
+import { softenLaw, SOFTEN_MAX } from '../../audio/hfSoftenerSoftenStage.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import { airBandSections } from '../../audio/dsp/airBandCurve.js'
 import Knob from '../knobs/Knob.vue'
@@ -44,10 +48,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfGuard, hfPlosives, hfBand, hfAdvancedOpen, hfResoAmount, hfAir, hfComp, hfCompAir, hfDetect, hfAirMode, hfDuck, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfShape, hfGuard, hfPlosives, hfBand, hfAdvancedOpen, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfComp, hfCompAir, hfDetect, hfAirMode, hfDuck, hfBroadband, hfDelta, hfPreview,
   hfFileLevelDb, hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoAmount, syncAir, syncComp, syncDetect, scheduleAutoAir, syncAirMode, syncDuck, syncShape, syncGuard, syncPlosives, syncBand, toggleDelta,
+  togglePreview, syncAmount, syncResoAmount, syncSoften, syncAir, syncComp, syncDetect, scheduleAutoAir, syncAirMode, syncDuck, syncShape, syncGuard, syncPlosives, syncBand, toggleDelta,
   hfReso, hfBurstLamp, hfAirLamp, getScope, getInputSpectrum,
   apply, teardown, closeModal,
 } = useHFSoftener()
@@ -166,6 +170,12 @@ const duckMaxDb = computed(() => duckToMaxDepthDb(hfDuck.value / 100))
 const maxPath = computed(() => shelfPath(-maxDepthDb.value, -duckMaxDb.value))
 const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthDb.value), -hfBroadband.value))
 const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0))
+const formatSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
+// What the Soften knob currently allows on one attack.
+const softenCaption = computed(() => {
+  const d = softenLaw(hfSoften.value).depthDb
+  return d > 0 ? `ONSETS · UP TO −${Math.round(d)} dB` : 'OFF'
+})
 const liveFill = computed(() => `${livePath.value} L${CURVE_W},${Y0} L0,${Y0} Z`)
 
 // The TRUE compression ratio (1.5:1 at the default, 6:1 at 100 %), not the
@@ -292,7 +302,7 @@ async function applyAndClose() {
       />
 
       <!-- The total taken off, and which stage took it: the Duck (level), the
-           EQ (tone) and Reso (rings, 5–12 kHz). -->
+           EQ (tone); Soften's onset cut beside them. -->
       <div class="flex items-baseline justify-between mt-[10px] px-[2px]">
         <div class="flex items-baseline gap-[12px]">
           <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">REDUCTION</span>
@@ -301,7 +311,7 @@ async function applyAndClose() {
         <div class="flex items-center gap-[18px]" style="font:600 10px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.6);font-variant-numeric:tabular-nums">
           <span>DUCK {{ fmtCut(hfBroadband) }}</span>
           <span>EQ {{ fmtCut(hfReduction) }}</span>
-          <span>RESO <template v-if="hfResoAmount > 0">{{ fmtCut(hfReso) }}</template><span v-else style="color:rgba(255,255,255,.35)">OFF</span></span>
+          <span title="Soften's deepest onset cut since the last reading — a few milliseconds at a time, on top of the reduction">SOFT <template v-if="hfSoften > 0">{{ fmtCut(hfSoftenCut) }}</template><span v-else style="color:rgba(255,255,255,.35)">OFF</span></span>
         </div>
       </div>
 
@@ -416,18 +426,17 @@ async function applyAndClose() {
               </span>
             </div>
             <div class="w-[104px] flex flex-col items-center">
-              <!-- The Reso stage's amount macro (HF_RESO_KNOTS), last in the
-                   chain; 0 takes it out. -->
+              <!-- Soften (hfSoftenerSoftenStage.js), last in the chain; 0 takes it out. -->
               <Knob
-                :model-value="hfResoAmount"
-                @update:model-value="syncResoAmount"
-                :min="0" :max="100" :step="1"
-                label="Reso" :accent="ACCENT" :format-value="formatPct"
+                :model-value="hfSoften"
+                @update:model-value="syncSoften"
+                :min="0" :max="SOFTEN_MAX" :step="0.1"
+                label="Soften" :accent="ACCENT" :format-value="formatSoften"
                 :disabled="!hfPreview"
-                title="How much the ResoTame stage at the end of the chain takes. It catches rings and whistles; on an S it only takes what the Duck and EQ left above a normal S, so with the lisp guard on a well-treated S is left alone. Threshold, depth and cut ceiling move together."
+                title="Softens sudden attacks: when the band above 500 Hz rises suddenly — a click, a lip smack, a hard T or K, the snap of an onset — it is turned down for a few milliseconds. It reacts to how suddenly the voice rises, not how loud it is, so steady sound is left alone. The knob sets how deep one attack may be taken down (up to 36 dB at 10) and how hard it leans in. A gain on a band, never distortion. 0 is off"
               />
               <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ hfResoAmount > 0 ? 'RINGS + S · 5–12k' : 'OFF' }}
+                {{ softenCaption }}
               </span>
             </div>
           </div>
@@ -490,7 +499,7 @@ async function applyAndClose() {
             :min="0" :max="100" :step="1"
             label="Guard" :accent="ACCENT" :format-value="formatGuard"
             :disabled="!hfPreview"
-            title="Lisp guard strength. No cut may take an S further below the voice than this floor, so it never ends up quieter than a normal S sits — stops the lisp, and lets go as the next vowel starts. Higher is stricter; 0 turns it off. Covers Reso too."
+            title="Lisp guard strength. No cut may take an S further below the voice than this floor, so it never ends up quieter than a normal S sits — stops the lisp, and lets go as the next vowel starts. Higher is stricter; 0 turns it off."
           />
           <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
             {{ guardLabel }}

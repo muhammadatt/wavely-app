@@ -71,9 +71,11 @@ test('PHAT*SS meter: nothing added with TAPE and Warmth off; exactly what TAPE a
   const off = meterOf(x, { warmth: 0, tame: 0, tape: 0, warmthCeilingDb: -6 })
   assert.equal(off.added, 0)
   assert.ok(off.clean > 0 && off.count > 0)
-  // TAPE 3 with its makeup; Tame 0 and Soften off leave the shelf a pure delay,
-  // so the rendered output minus the makeup-scaled input IS what was added.
-  const p = { warmth: 0, tame: 0, soften: false, tape: 3, tapeMakeupDb: 2.5, warmthCeilingDb: -6 }
+  // TAPE 3 with its makeup; with the top end OFF and no head bump everything
+  // after TAPE is a pure delay, so the rendered output minus the makeup-scaled
+  // input IS what was added. (PHAT*SS ships 30 ips, which sags the top and
+  // brings the A800 bump — neither is saturation, and both would show here.)
+  const p = { warmth: 0, hf: 'off', tapeHeadBump: 0, tape: 3, tapeMakeupDb: 2.5, warmthCeilingDb: -6 }
   const m = meterOf(x, p)
   const { channelData: [y], latencySamples: L } = processPhatassBuffer([x], SR, toKernelParams(p))
   const mk = Math.pow(10, 2.5 / 20)

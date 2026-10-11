@@ -169,9 +169,10 @@ export function usePhatass() {
     pushParam(name, value)
     // TAPE comes first, so Warmth's knobs move the readout, not the makeup.
     if (name === 'warmth' || name === 'oddEven') scheduleReadout()
-    // The curve, the low push and the head bump change what TAPE takes off the peak;
-    // the interim rule (never more than the knob) holds either way.
-    if ((name === 'tapeCurve' || name === 'tapeLowPush' || name === 'tapeHeadBump') && Number(phParams.tape) > 0) {
+    // The curve, the low push and the head bump change what TAPE takes off the peak —
+    // and the Speed dial picks the head bump; the interim rule (never more than
+    // the knob) holds either way.
+    if ((name === 'tapeCurve' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'hf') && Number(phParams.tape) > 0) {
       setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape)))
       scheduleTapeMakeup()
     }
