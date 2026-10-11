@@ -6825,3 +6825,22 @@ On the drums, the trim at each share:
 | 80 % | −1.08 dB | −0.37 dB |
 
 Not auditioned past MID.
+
+**BLEND became KEEP (October 2026).** The owner asked whether BLEND still mixed PEAK and RMS
+(it did, with two renders per measurement). They wanted a plain percentage with no RMS pass.
+A share of the PEAK trim cannot work: TAPE's makeup already restores the peak, so the PEAK
+trim is ~0 whenever TAPE is doing the work.
+
+KEEP takes the share from TAPE's own makeup instead, which is already measured. It keeps
+`outputKeep` of that makeup in dB and trims the rest at the output, so nothing re-renders
+(`keepTrimDb`, worked out in `toKernelParams`). The trim sits at the output rather than
+scaling the makeup itself, so Warmth and the HF shelf see the same drive as before.
+
+The default is 85 %, chosen to match BLEND 80 on the drums:
+
+| Drums | BLEND 80 | KEEP 85 |
+|---|---|---|
+| TAPE 10 | −1.08 dB | −1.19 dB |
+| TAPE 4 | −0.37 dB | −0.36 dB |
+
+The bench offers KEEP at 80 / 85 / 90 %. Warmth's added loudness is not trimmed.

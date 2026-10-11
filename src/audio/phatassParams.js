@@ -87,8 +87,8 @@ export const PHATASS_DEFAULTS = {
   outputMakeup: 'off',
   // That trim, dB: measured (`measureOutputMakeup`), never a user setting.
   outputMakeupDb: 0,
-  // BLEND's share of the way to PEAK (`OUTPUT_BLENDS`): 1 is PEAK, 0 is RMS.
-  outputBlend: 0.8,
+  // KEEP's share of TAPE's makeup (`OUTPUT_KEEPS`): the rest is trimmed off the output.
+  outputKeep: 0.85,
   // The whole file's gated RMS, dBFS. Measured, never a user setting — it is
   // what makes the shelf's threshold mean the same on a quiet take and a hot one.
   voiceLevelDb: ALIGN_TARGET_DBFS,
@@ -550,8 +550,9 @@ export function toKernelParams(params) {
     transientDb: 0,
     voiceLevelDb: voice,
     outputGainDb: clamp(Number(p.output) || 0, OUTPUT_MIN_DB, OUTPUT_MAX_DB),
-    outputMakeupDb: OUTPUT_MAKEUPS.includes(p.outputMakeup) && p.outputMakeup !== 'off' && Number.isFinite(p.outputMakeupDb)
-      ? p.outputMakeupDb : 0,
+    outputMakeupDb: p.outputMakeup === 'keep' ? keepTrimDb(p)
+      : OUTPUT_MAKEUPS.includes(p.outputMakeup) && p.outputMakeup !== 'off' && Number.isFinite(p.outputMakeupDb)
+        ? p.outputMakeupDb : 0,
   }
 }
 
@@ -564,17 +565,33 @@ export function toKernelParams(params) {
  * whenever Warmth and TAPE's makeup add level. Both are signed. Measured by
  * rendering the chain (`phatassOutputMakeup.js`): no shortcut exists, since
  * Warmth, its guard and the shelf are neither memoryless nor static.
- * 'blend' sits between the two in dB, `outputBlend` of the way to PEAK
- * (OUTPUT_BLENDS; 80 % by default, owner's pick over a material-specific rule,
- * since the plugin serves voice, drums and full mixes alike). On drums at TAPE 10 PEAK
+ * 'keep' keeps `outputKeep` of TAPE's makeup (in dB) and trims the rest off the
+ * output — no render, the makeup is already measured (`keepTrimDb`). 85 % stands
+ * in for the owner's by-ear pick, BLEND 80 (80 % of the way from RMS to PEAK, two
+ * renders): on drums that trimmed 13.7 % of the makeup at TAPE 10 and 15.5 % at
+ * TAPE 4. A fixed share over a material-specific rule, since the plugin serves
+ * voice, drums and full mixes alike. Warmth's added loudness is not in it (Warmth
+ * never raises the peak, and its density is wanted). On drums at TAPE 10 PEAK
  * is the whole +5 LU TAPE adds (TAPE's makeup already restored the peak, so
  * PEAK trims ~0) and RMS takes it all back (−5.4; integrated LUFS and
  * momentary/short-term percentiles agree within ~0.5 dB) — by ear one too
  * loud, the other too quiet, since a squashed hit level-matched sounds smaller.
  */
-export const OUTPUT_MAKEUPS = ['off', 'peak', 'blend', 'rms']
-/** BLEND's shares toward PEAK on the bench (0.5 was the first audition, MID). */
-export const OUTPUT_BLENDS = [0.5, 0.65, 0.8]
+export const OUTPUT_MAKEUPS = ['off', 'peak', 'keep', 'rms']
+/** KEEP's shares of TAPE's makeup on the bench. */
+export const OUTPUT_KEEPS = [0.8, 0.85, 0.9]
+
+/**
+ * KEEP's output trim, dB: the share of TAPE's makeup NOT kept, taken off the
+ * output. 0 with TAPE off or a makeup ≤ 0 (a head bump lifted the peak: the
+ * makeup added no loudness to give back).
+ */
+export function keepTrimDb(p) {
+  const mk = Number(p.tapeMakeupDb)
+  if (!(Number(p.tape) > 0) || !(mk > 0)) return 0
+  const keep = clamp(Number.isFinite(Number(p.outputKeep)) ? Number(p.outputKeep) : PHATASS_DEFAULTS.outputKeep, 0, 1)
+  return -(1 - keep) * mk
+}
 
 /**
  * TAPE — a full-band CUBIC soft clipper, FIRST on the main path (ahead of

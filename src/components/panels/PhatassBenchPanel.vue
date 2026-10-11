@@ -13,7 +13,7 @@
  * APPLY both read them — what you hear is what renders.
  */
 import { computed, ref } from 'vue'
-import { PHATASS_DEFAULTS, TAME_MAX, CURVE_DETECT, OUTPUT_BLENDS } from '../../audio/phatassParams.js'
+import { PHATASS_DEFAULTS, TAME_MAX, CURVE_DETECT, OUTPUT_KEEPS, keepTrimDb } from '../../audio/phatassParams.js'
 
 const props = defineProps({
   /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `outputMakeup` and `outputMakeupDb`). */
@@ -77,18 +77,23 @@ const CHOICES = [
     options: [
       { id: 'off', label: 'OFF', title: 'Ships. No automatic trim: the output is whatever the chain and the Output knob make it' },
       { id: 'peak', label: 'PEAK', title: 'Trims the whole plugin so its output peak lands on the selection\'s own peak. TAPE\'s makeup is peak-restoring either way' },
-      { id: 'blend', label: 'BLEND', title: 'Between PEAK and RMS, in dB: the Blend row sets how far toward PEAK. Keeps part of the loudness TAPE and Warmth add' },
+      { id: 'keep', label: 'KEEP', title: 'Keeps a share of TAPE\'s makeup (the Keep row) and trims the rest off the output. No measurement: instant' },
       { id: 'rms', label: 'RMS', title: 'Trims the whole plugin so its output RMS matches the selection\'s: a level-matched A/B against bypass' },
     ],
   },
   {
-    key: 'outputBlend', label: 'Blend',
-    options: OUTPUT_BLENDS.map(w => ({ id: w, label: `${Math.round(w * 100)}%`, title: `BLEND trims ${Math.round(w * 100)}% of the way from RMS to PEAK (in dB); acts only while Output trim is on BLEND` })),
+    key: 'outputKeep', label: 'Keep',
+    options: OUTPUT_KEEPS.map(w => ({ id: w, label: `${Math.round(w * 100)}%`, title: `KEEP leaves ${Math.round(w * 100)}% of TAPE's makeup and trims the rest off the output; acts only while Output trim is on KEEP` })),
   },
+
 ]
 
 const trimText = computed(() => {
-  if (!['peak', 'blend', 'rms'].includes(props.params.outputMakeup)) return ''
+  if (props.params.outputMakeup === 'keep') {
+    const v = keepTrimDb(props.params)
+    return `trim ${v >= 0 ? '+' : ''}${v.toFixed(2)} dB`
+  }
+  if (!['peak', 'rms'].includes(props.params.outputMakeup)) return ''
   if (props.trimPending) return 'trim …'
   const v = Number(props.params.outputMakeupDb) || 0
   return `trim ${v >= 0 ? '+' : ''}${v.toFixed(2)} dB`

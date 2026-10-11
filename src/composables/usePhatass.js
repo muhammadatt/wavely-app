@@ -191,7 +191,7 @@ export function usePhatass() {
     // The bench's output trim hears the whole chain, so every other knob moves
     // it; the old value holds until the new one lands.
     if (name === 'outputMakeup') {
-      if (value === 'off') cancelOutputMakeup()
+      if (value === 'off' || value === 'keep') cancelOutputMakeup()
       else scheduleOutputMakeup()
     } else if (!OUTPUT_TRIM_IGNORES.has(name)) scheduleOutputMakeup()
   }
@@ -266,7 +266,8 @@ export function usePhatass() {
     pushParam('outputMakeupDb', db)
   }
 
-  const outputTrimOn = () => phParams.outputMakeup === 'peak' || phParams.outputMakeup === 'blend' || phParams.outputMakeup === 'rms'
+  // Measured trims only: KEEP is a share of TAPE's makeup, worked out in toKernelParams.
+  const outputTrimOn = () => phParams.outputMakeup === 'peak' || phParams.outputMakeup === 'rms'
 
   /**
    * The bench's output trim for live preview (phatassOutputMakeup.js): exact

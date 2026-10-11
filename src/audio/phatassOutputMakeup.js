@@ -33,7 +33,7 @@
  * Pure: no worklet, no DOM; runs in the measurement worker and under node.
  */
 
-import { toKernelParams, PHATASS_DEFAULTS } from './phatassParams.js'
+import { toKernelParams, PHATASS_DEFAULTS, keepTrimDb } from './phatassParams.js'
 import { processPhatassBuffer } from './phatassProcessor.js'
 
 /** Selections up to this long are measured whole even in preview, seconds. */
@@ -99,13 +99,8 @@ export function measureOutputMakeup(channelData, sampleRate, params, { exact = t
   const n = channelData[0].length
   const inPk = sourcePeak(channelData, 0, n)
   const mode = p.outputMakeup
-  if (mode === 'blend') {
-    // `outputBlend` of the way, in dB, from RMS to PEAK — each measured its own way.
-    const w = Math.min(1, Math.max(0, Number.isFinite(p.outputBlend) ? p.outputBlend : PHATASS_DEFAULTS.outputBlend))
-    const pk = measureOutputMakeup(channelData, sampleRate, { ...p, outputMakeup: 'peak' }, { exact })
-    const rm = measureOutputMakeup(channelData, sampleRate, { ...p, outputMakeup: 'rms' }, { exact })
-    return { makeupDb: w * pk.makeupDb + (1 - w) * rm.makeupDb, outPeakDb: pk.outPeakDb, inputPeakDb: pk.inputPeakDb }
-  }
+  // KEEP needs no render: a share of TAPE's (already measured) makeup.
+  if (mode === 'keep') return { makeupDb: keepTrimDb(p), outPeakDb: NaN, inputPeakDb: toDb(inPk) }
   if ((mode !== 'peak' && mode !== 'rms') || !(inPk > 0) || !(n > 0)) {
     return { makeupDb: 0, outPeakDb: toDb(inPk), inputPeakDb: toDb(inPk) }
   }
