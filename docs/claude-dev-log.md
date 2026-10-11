@@ -6784,3 +6784,29 @@ Owner's list before landing the plugin:
 ⚠ With 30 ips the default, PHAT*SS at Warmth 0 / TAPE 0 is no longer a pure delay: the
 shelf sags loud top end. The tests that assumed transparency run isolated (`hf: 'off'`,
 `tapeHeadBump: 0`).
+
+## PHAT*SS — output trim: why PEAK is too loud and RMS too quiet (October 2026)
+
+Owner: on drums at TAPE 10, PEAK sounds too loud, RMS too quiet, and the two sit far apart
+(meters: input −2 to −1.5, PEAK output −0.4 to 0, RMS trim −5.6). Rendered the owner's
+drum file (17.5 s, stereo, defaults: 30 ips, Warmth 0):
+
+| TAPE | TAPE makeup | out − in, integrated LUFS | PEAK trim | RMS trim | LUFS match |
+|---|---|---|---|---|---|
+| 4 | +2.39 | +1.53 | 0.00 | −1.83 | −1.53 |
+| 10 | +7.91 | +5.02 | 0.00 | −5.38 | −5.02 |
+
+- **PEAK trims nothing when only TAPE is in play.** TAPE's own makeup already puts the peak
+  back on the source's, so PEAK is TAPE plus the whole loudness it adds (+5 LU at TAPE 10).
+  PEAK only moves when Warmth or the shelves change the peak.
+- **RMS is not measuring the wrong thing.** Every loudness reference agrees with it at
+  TAPE 10:
+  - integrated LUFS: −5.02
+  - momentary (400 ms) 50/90/99th percentiles: −4.7 / −6.1 / −5.3
+  - short-term (3 s): −5.7 / −5.5 / −5.3
+  - Only 50 ms windows on the hits read deeper, at −7 to −8.
+- **The gap is perceptual.** A squashed hit at matched loudness sounds smaller, because its
+  attack lost far more than its body. Neither match is wrong; the owner's ear lands between
+  them.
+- **Added MID** to the bench's Output trim: halfway in dB between PEAK and RMS, an audition
+  (−2.7 dB here). If it lands, a fixed fraction is the next thing to tune.

@@ -77,13 +77,14 @@ const CHOICES = [
     options: [
       { id: 'off', label: 'OFF', title: 'Ships. No automatic trim: the output is whatever the chain and the Output knob make it' },
       { id: 'peak', label: 'PEAK', title: 'Trims the whole plugin so its output peak lands on the selection\'s own peak. TAPE\'s makeup is peak-restoring either way' },
+      { id: 'mid', label: 'MID', title: 'Halfway, in dB, between PEAK and RMS: part of the loudness TAPE and Warmth add is kept' },
       { id: 'rms', label: 'RMS', title: 'Trims the whole plugin so its output RMS matches the selection\'s: a level-matched A/B against bypass' },
     ],
   },
 ]
 
 const trimText = computed(() => {
-  if (props.params.outputMakeup !== 'peak' && props.params.outputMakeup !== 'rms') return ''
+  if (!['peak', 'mid', 'rms'].includes(props.params.outputMakeup)) return ''
   if (props.trimPending) return 'trim …'
   const v = Number(props.params.outputMakeupDb) || 0
   return `trim ${v >= 0 ? '+' : ''}${v.toFixed(2)} dB`

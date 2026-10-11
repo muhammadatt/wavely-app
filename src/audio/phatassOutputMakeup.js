@@ -99,6 +99,12 @@ export function measureOutputMakeup(channelData, sampleRate, params, { exact = t
   const n = channelData[0].length
   const inPk = sourcePeak(channelData, 0, n)
   const mode = p.outputMakeup
+  if (mode === 'mid') {
+    // Halfway, in dB, between the two references — each measured its own way.
+    const pk = measureOutputMakeup(channelData, sampleRate, { ...p, outputMakeup: 'peak' }, { exact })
+    const rm = measureOutputMakeup(channelData, sampleRate, { ...p, outputMakeup: 'rms' }, { exact })
+    return { makeupDb: (pk.makeupDb + rm.makeupDb) / 2, outPeakDb: pk.outPeakDb, inputPeakDb: pk.inputPeakDb }
+  }
   if ((mode !== 'peak' && mode !== 'rms') || !(inPk > 0) || !(n > 0)) {
     return { makeupDb: 0, outPeakDb: toDb(inPk), inputPeakDb: toDb(inPk) }
   }

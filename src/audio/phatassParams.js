@@ -562,8 +562,13 @@ export function toKernelParams(params) {
  * whenever Warmth and TAPE's makeup add level. Both are signed. Measured by
  * rendering the chain (`phatassOutputMakeup.js`): no shortcut exists, since
  * Warmth, its guard and the shelf are neither memoryless nor static.
+ * 'mid' is halfway between the two in dB, an audition: on drums at TAPE 10 PEAK
+ * is the whole +5 LU TAPE adds (TAPE's makeup already restored the peak, so
+ * PEAK trims ~0) and RMS takes it all back (−5.4; integrated LUFS and
+ * momentary/short-term percentiles agree within ~0.5 dB) — by ear one too
+ * loud, the other too quiet, since a squashed hit level-matched sounds smaller.
  */
-export const OUTPUT_MAKEUPS = ['off', 'peak', 'rms']
+export const OUTPUT_MAKEUPS = ['off', 'peak', 'mid', 'rms']
 
 /**
  * TAPE — a full-band CUBIC soft clipper, FIRST on the main path (ahead of

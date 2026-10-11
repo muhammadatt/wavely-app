@@ -690,8 +690,9 @@ const outStats = (x, p) => {
 }
 const srcMsDb = (x) => { let e = 0; for (const v of x) e += v * v; return 10 * Math.log10(e / x.length) }
 
-test('output trim: OFF ships, and the kernel ignores a stale trim unless PEAK or RMS is on', () => {
-  assert.deepEqual(OUTPUT_MAKEUPS, ['off', 'peak', 'rms'])
+test('output trim: OFF ships, and the kernel ignores a stale trim unless PEAK, MID or RMS is on', () => {
+  assert.deepEqual(OUTPUT_MAKEUPS, ['off', 'peak', 'mid', 'rms'])
+  assert.equal(toKernelParams({ outputMakeup: 'mid', outputMakeupDb: -2 }).outputMakeupDb, -2)
   assert.equal(PHATASS_DEFAULTS.outputMakeup, 'off')
   assert.equal(toKernelParams({ outputMakeupDb: -2 }).outputMakeupDb, 0)
   assert.equal(toKernelParams({ outputMakeup: 'bogus', outputMakeupDb: -2 }).outputMakeupDb, 0)
@@ -1004,4 +1005,14 @@ test('headBumpMaxLiftDb: the largest lift a bump adds, 0 when off', () => {
   assert.ok(Math.abs(headBumpMaxLiftDb(9) - 9) < 0.1)
   const a800 = headBumpMaxLiftDb('a800-30')
   assert.ok(a800 > 0.5 && a800 < 3, `A800 30 ips lifts ${a800.toFixed(2)} dB`)
+})
+
+test('output trim MID is halfway, in dB, between PEAK and RMS', () => {
+  const { x, peak } = syllableTrack(1)
+  const base = { warmth: 5, tape: 4, voiceLevelDb: srcMsDb(x), warmthCeilingDb: db(peak) }
+  base.tapeMakeupDb = measureTapeMakeup([x], SR, base).makeupDb
+  const m = mode => measureOutputMakeup([x], SR, { ...base, outputMakeup: mode }).makeupDb
+  const pk = m('peak'), rm = m('rms'), mid = m('mid')
+  assert.ok(Math.abs(pk - rm) > 0.5, `PEAK ${pk.toFixed(2)} and RMS ${rm.toFixed(2)} should differ for the test to mean anything`)
+  assert.ok(Math.abs(mid - (pk + rm) / 2) < 1e-9)
 })
