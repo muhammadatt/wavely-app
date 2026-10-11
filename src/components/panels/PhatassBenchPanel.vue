@@ -154,7 +154,7 @@ function reset() {
 
     <div v-if="open" class="mt-3">
       <p class="mb-3 text-[10px] leading-[1.5] text-white/35">
-        A/B TAPE's curve, its low push and head bump, and an automatic output trim against what ships (CUBIC, no push, no bump, OFF). Tame, its curve and Detect are the controls the HF detents replaced; Curve and Detect act only while Tame has the shelf. TAPE runs first; the head bump follows the curve. With a low push the TAPE knob is a drive: a kick can lose more than its number.
+        A/B TAPE's curve, its low push and head bump, and an automatic output trim against what ships (the panel's CLEAN / THICK curve, no push, the Speed dial's own bump — SPEED — and OFF). Top end OFF / FATSO and Tame, its curve and Detect are what the Speed dial replaced; Curve and Detect act only while Tame has the shelf. TAPE runs first; the head bump follows the curve. With a low push the TAPE knob is a drive: a kick can lose more than its number.
         Hidden in production builds. Both preview and APPLY read them.
       </p>
 

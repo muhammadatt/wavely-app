@@ -48,6 +48,52 @@ const LN10_OVER_20 = Math.LN10 / 20
 const METER_POST_QUANTA = 8
 const dbToLin = db => Math.exp(db * LN10_OVER_20)
 
+/** A runtime gain change glides this long (linear in amplitude); an immediate set snaps. */
+const GAIN_RAMP_MS = 20
+
+/** A gain applied in place that ramps to each new target instead of stepping. */
+class GainRamp {
+  constructor(sampleRate) {
+    this.rampSamples = Math.max(1, Math.round((GAIN_RAMP_MS / 1000) * sampleRate))
+    this.value = 1
+    this.target = 1
+    this.step = 0
+    this.left = 0
+  }
+
+  set(target, immediate) {
+    if (immediate) {
+      this.value = this.target = target
+      this.left = 0
+      return
+    }
+    if (target === this.target) return
+    this.target = target
+    this.left = this.rampSamples
+    this.step = (target - this.value) / this.rampSamples
+  }
+
+  process(chs, n) {
+    if (this.left === 0) {
+      const g = this.value
+      if (g === 1) return
+      for (const out of chs) for (let i = 0; i < n; i++) out[i] *= g
+      return
+    }
+    const start = this.value
+    const m = Math.min(n, this.left)
+    for (const out of chs) {
+      let g = start
+      for (let i = 0; i < n; i++) {
+        if (i < m) g += this.step
+        out[i] *= i < m ? g : this.target
+      }
+    }
+    this.left -= m
+    this.value = this.left === 0 ? this.target : start + this.step * m
+  }
+}
+
 export class PhatassKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
@@ -72,6 +118,11 @@ export class PhatassKernel {
     this.tapeHf = new TapeHfShelf(sampleRate)
     this.latencySamples = this.tape.latencySamples + this.warmth.latencySamples
       + this.guard.latencySamples + this.shelf.latencySamples
+    // TAPE's makeup and the output gain are measured off the audio thread and
+    // can move several dB at once: a runtime change glides over GAIN_RAMP_MS
+    // rather than stepping (a click); an immediate set snaps.
+    this.tapeMakeupGain = new GainRamp(sampleRate)
+    this.outputGain = new GainRamp(sampleRate)
     this.params = { ...PHATASS_KERNEL_DEFAULTS }
     this.setParams({}, true)
     // SATURATION METER (off unless `enableMeter`, so offline renders skip it):
@@ -140,8 +191,8 @@ export class PhatassKernel {
       detectCornerHz: p.detectCornerHz,
     })
     this.tapeHf.setParams(p.tapeHf ?? null)
-    this.outputLin = dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0))
-    this.tapeMakeupLin = dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0)
+    this.outputGain.set(dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0)), immediate)
+    this.tapeMakeupGain.set(dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0), immediate)
     const bumpKey = p.headBump || 0
     if (bumpKey !== this.bumpKey) {
       // Coefficients only: the filter state carries over, so a change is a step in response, not a click from rest.
@@ -168,11 +219,7 @@ export class PhatassKernel {
   tapeAndMakeup(chs, n) {
     this.tape.process(chs, chs, n)
     if (this.bumpOn) this.applyBump(chs, n)
-    const mk = this.tapeMakeupLin
-    if (mk === 1) return
-    for (const out of chs) {
-      for (let i = 0; i < n; i++) out[i] *= mk
-    }
+    this.tapeMakeupGain.process(chs, n)
   }
 
   /**
@@ -192,7 +239,7 @@ export class PhatassKernel {
     }
     // In place: each stage reads a sample before it writes that output.
     // TAPE → makeup → Warmth → guard (the order is pinned since October 2026).
-    const mk = this.tapeMakeupLin
+    const mk = this.tapeMakeupGain.value // at the block's start: the meter is an estimate
     this.tapeAndMakeup(outputChannels, n)
     // The guard needs Warmth's input as well as its output.
     while (this.warmthIn.length < nOut) this.warmthIn.push(new Float32Array(n))
@@ -234,13 +281,7 @@ export class PhatassKernel {
     }
     this.shelf.process(outputChannels, n)
     this.tapeHf.process(outputChannels, n)
-    const g = this.outputLin
-    if (g !== 1) {
-      for (let ch = 0; ch < nOut; ch++) {
-        const out = outputChannels[ch]
-        for (let i = 0; i < n; i++) out[i] *= g
-      }
-    }
+    this.outputGain.process(outputChannels, n)
   }
 }
 

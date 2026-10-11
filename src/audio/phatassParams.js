@@ -20,7 +20,7 @@ import {
 import { unitDriveU } from './dsp/shaperCurves.js'
 import { JilesAtherton, hysteresisSmallGain, hysteresisShapeVersion } from './dsp/hysteresis.js'
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
-import { lowShelf, highpass, peaking } from './dsp/biquad.js'
+import { lowShelf, highpass, peaking, magnitudeResponseDb } from './dsp/biquad.js'
 
 export const PHATASS_DEFAULTS = {
   // 0–10 — low-end harmonic warmth: how much of what the two fixed
@@ -829,6 +829,19 @@ export function headBumpSections(sampleRate, bump) {
   const c = TAPE_HEAD_BUMP_CURVES[b]
   return [highpass(sampleRate, c.hpHz, c.hpQ), peaking(sampleRate, c.liftHz, c.liftQ, c.liftDb), peaking(sampleRate, c.dipHz, c.dipQ, c.dipDb)]
 }
+/**
+ * The most a head bump lifts any frequency, dB (≥ 0; 0 when off) — the worst
+ * it can add to a peak. Live preview subtracts it from the interim makeup when
+ * the bump changes, so the peak cannot rise while the new makeup is measured.
+ */
+export function headBumpMaxLiftDb(bump, sampleRate = 44100) {
+  const secs = headBumpSections(sampleRate, bump)
+  if (!secs) return 0
+  const freqs = []
+  for (let f = 5; f <= 2000; f *= 1.02) freqs.push(f)
+  return Math.max(0, ...magnitudeResponseDb(secs, freqs, sampleRate))
+}
+
 /*
  * The head bump is PINNED AFTER THE CURVE (owner's call, October 2026), where a
  * real machine makes it — a PLAYBACK-head effect (recorded wavelength against

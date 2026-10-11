@@ -169,7 +169,7 @@ const duckMaxDb = computed(() => duckToMaxDepthDb(hfDuck.value / 100))
 // Each stage's ceiling, stacked: the most the two could ever take together.
 const maxPath = computed(() => shelfPath(-maxDepthDb.value, -duckMaxDb.value))
 const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthDb.value), -hfBroadband.value))
-const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0))
+const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0) + (hfSoften.value > 0 ? hfSoftenCut.value : 0))
 const formatSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 // What the Soften knob currently allows on one attack.
 const softenCaption = computed(() => {

@@ -12,7 +12,7 @@ import {
   toKernelParams as toKernelParamsShipped, phatassLatencySamples, tapeShelf, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
   DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
-  WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ,
+  WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ, headBumpMaxLiftDb,
 } from '../../src/audio/phatassParams.js'
 import { HF_LIMITER_DEFAULTS, toKernelParams as toHFLimiterKernelParams } from '../../src/audio/hfLimiterParams.js'
 import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
@@ -970,4 +970,38 @@ test('TAPE head bump A800: the makeup is measured through it (preview = apply) a
     const m = k.takeMeter()
     assert.ok(10 * Math.log10(m.added / m.clean) < -40, `${tapeHeadBump}: meter read ${(10 * Math.log10(m.added / m.clean)).toFixed(1)} dB`)
   }
+})
+
+test('a runtime makeup or output change glides over ~20 ms instead of stepping; an immediate set snaps', () => {
+  const k = new PhatassKernel(SR)
+  k.setParams(toKernelParams({ warmth: 0, tape: 0 }), true)
+  const n = 128
+  const run = () => {
+    const x = new Float32Array(n).fill(0.1)
+    const y = [new Float32Array(n)]
+    k.process([x], y, n)
+    return y[0]
+  }
+  for (let i = 0; i < 40; i++) run()
+  // +12 dB of output trim arrives from a measurement: no sample-to-sample jump.
+  k.setParams({ outputMakeupDb: 12 })
+  let worst = 0, prev = run()
+  worst = Math.max(worst, ...prev.slice(1).map((v, i) => Math.abs(v - prev[i])))
+  for (let b = 0; b < 10; b++) {
+    const y = run()
+    worst = Math.max(worst, Math.abs(y[0] - prev[n - 1]), ...y.slice(1).map((v, i) => Math.abs(v - y[i])))
+    prev = y
+  }
+  assert.ok(worst < 0.01, `the gain stepped by ${worst} in one sample`)
+  assert.ok(Math.abs(prev[n - 1] - 0.1 * 10 ** (12 / 20)) < 1e-4, 'the ramp lands on the target')
+  // An immediate set (the offline render's) snaps.
+  k.setParams({ outputMakeupDb: 0 }, true)
+  assert.ok(Math.abs(run()[0] - 0.1) < 1e-6)
+})
+
+test('headBumpMaxLiftDb: the largest lift a bump adds, 0 when off', () => {
+  assert.equal(headBumpMaxLiftDb(0), 0)
+  assert.ok(Math.abs(headBumpMaxLiftDb(9) - 9) < 0.1)
+  const a800 = headBumpMaxLiftDb('a800-30')
+  assert.ok(a800 > 0.5 && a800 < 3, `A800 30 ips lifts ${a800.toFixed(2)} dB`)
 })

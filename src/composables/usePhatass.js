@@ -9,7 +9,7 @@ import { regionAlignDb, regionPeakDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { phatassEffect, PHATASS_DEFAULTS } from '../audio/effects/phatass.js'
-import { WARMTH_LAYERS, warmthActive } from '../audio/phatassParams.js'
+import { WARMTH_LAYERS, warmthActive, headBumpFor, headBumpMaxLiftDb } from '../audio/phatassParams.js'
 import { measureBandSpectrum, bandRefPeakDb } from '../audio/saturationBenchAnalysis.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import { NeedleSpring, satMeterValue } from '../audio/dsp/saturationMeter.js'
@@ -165,15 +165,20 @@ export function usePhatass() {
   /** Set one user-facing param. */
   function syncParam(name, value) {
     if (!(name in phParams) || MEASURED.has(name)) return
+    const bumpBefore = headBumpFor(phParams.tapeHeadBump, phParams.hf)
     phParams[name] = value
     pushParam(name, value)
     // TAPE comes first, so Warmth's knobs move the readout, not the makeup.
     if (name === 'warmth' || name === 'oddEven') scheduleReadout()
     // The curve, the low push and the head bump change what TAPE takes off the peak —
-    // and the Speed dial picks the head bump; the interim rule (never more than
-    // the knob) holds either way.
+    // and the Speed dial picks the head bump. Until the new measurement lands,
+    // never give back more than the knob; and a NEW head bump, which sits after
+    // the curve and can lift the peak by itself, takes its largest lift off that
+    // too (keeping the old makeup under a +9 dB bump raised a 55 Hz peak 5.6 dB).
     if ((name === 'tapeCurve' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'hf') && Number(phParams.tape) > 0) {
-      setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape)))
+      const bump = headBumpFor(phParams.tapeHeadBump, phParams.hf)
+      const lift = bump !== bumpBefore ? headBumpMaxLiftDb(bump, state.currentFile?.sampleRate) : 0
+      setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape) - lift))
       scheduleTapeMakeup()
     }
     if (name === 'tape') {
@@ -239,6 +244,10 @@ export function usePhatass() {
     // Pending from the moment it is scheduled, so the caption never shows the
     // interim value as if it were the answer.
     if (Number(phParams.tape) > 0) phTapeMakeup.value = { pending: true }
+    // A measurement already in flight is for the old settings: drop it now, or
+    // it could land in the debounce window and overwrite the interim.
+    tapeSeq++
+    cancelPhatassTapeMakeup()
     clearTimeout(tapeTimer)
     tapeTimer = setTimeout(refreshTapeMakeup, 250)
   }
@@ -295,6 +304,9 @@ export function usePhatass() {
   function scheduleOutputMakeup() {
     if (!outputTrimOn() || !phPreview.value) return
     phOutputMakeup.value = { pending: true }
+    // As for TAPE's makeup: a trim in flight was measured on the old chain.
+    outputSeq++
+    cancelPhatassOutputMakeup()
     clearTimeout(outputTimer)
     outputTimer = setTimeout(refreshOutputMakeup, 250)
   }
