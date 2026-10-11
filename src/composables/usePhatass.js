@@ -175,7 +175,7 @@ export function usePhatass() {
     // never give back more than the knob; and a NEW head bump, which sits after
     // the curve and can lift the peak by itself, takes its largest lift off that
     // too (keeping the old makeup under a +9 dB bump raised a 55 Hz peak 5.6 dB).
-    if ((name === 'tapeCurve' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'hf') && Number(phParams.tape) > 0) {
+    if ((name === 'tapeCurve' || name === 'tapeStep' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'hf') && Number(phParams.tape) > 0) {
       const bump = headBumpFor(phParams.tapeHeadBump, phParams.hf)
       const lift = bump !== bumpBefore ? headBumpMaxLiftDb(bump, state.currentFile?.sampleRate) : 0
       setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape) - lift))

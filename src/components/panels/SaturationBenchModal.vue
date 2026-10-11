@@ -50,7 +50,7 @@ const ON_OPTIONS = [
   { value: false, label: 'OFF', title: 'This layer passes the signal through' },
 ]
 
-const CURVE_OPTIONS = SHAPER_CURVES.map(c => ({ value: c.id, label: c.label, title: c.title }))
+const CURVE_OPTIONS = SHAPER_CURVES.filter(c => !c.hidden).map(c => ({ value: c.id, label: c.label, title: c.title }))
 
 // Three KINDS of filter, not a progression — a detent rotary, like the curves.
 const EMPH_TYPE_OPTIONS = [

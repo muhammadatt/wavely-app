@@ -6844,3 +6844,45 @@ The default is 85 %, chosen to match BLEND 80 on the drums:
 | TAPE 4 | −0.37 dB | −0.36 dB |
 
 The bench offers KEEP at 80 / 85 / 90 %. Warmth's added loudness is not trimmed.
+
+## PHAT*SS — the hysteresis loop made cheaper (October 2026)
+
+The owner asked why THICK is so much slower than the cubic. The Jiles-Atherton step is the
+whole difference: an RK2 step per 4x-oversampled sample, two evaluations each, each with
+`tanh`, `sinh` and three divisions. On drums at TAPE 10, per 10 s of mono:
+
+| | Cubic | THICK |
+|---|---|---|
+| Render | ~300 ms | 580 ms |
+| Exact makeup | 192 ms | 518 ms |
+| The J-A step alone (of THICK's render) | — | ~285 ms |
+
+**Shipped: L and L′ by table.** A cubic Hermite table on |q| ≤ 32 at 1/32, with L′ and L″
+as the knot slopes. It stays under −180 dB from the closed forms, and the step runs ~1.5×
+faster. THICK now renders in 488 ms and the exact makeup takes 346 ms.
+
+**Bench: Loop step EXACT / FAST.** FAST is a variable-step Adams–Bashforth 2: one
+evaluation per step, reusing the last step's slope. Measured against a 16×-substepped
+solution:
+
+| Drive | 1 | 3 | 10 |
+|---|---|---|---|
+| FAST, unguarded | −70 dB | −59 dB | −49 dB |
+| RK2 (EXACT) | −94 dB | −87 dB | −73 dB |
+| Euler (rejected: barely under the curve's own distortion) | −50 dB | −38 dB | −29 dB |
+
+⚠ **Unguarded, it fails on big jumps.** On a noise burst without oversampling it read
+−10 dB of error. Two guards fix that:
+
+- Euler at a reversal, or after a step more than 4× the last.
+- Any step with |dh| > 0.05 takes RK2.
+
+| FAST_MAX_DH | FAST vs EXACT, drums at TAPE 10 | Synthetic burst test |
+|---|---|---|
+| 0.02 | −68 dB | passes |
+| 0.05 (chosen) | −57 dB | passes |
+| 0.1 | −52 dB | passes |
+| 0.3 | — | fails |
+
+Guarded FAST renders THICK in ~350–400 ms against EXACT's 488 (timings vary run to run). It
+is not auditioned.

@@ -39,6 +39,9 @@ export const PHATASS_DEFAULTS = {
   // (the Jiles-Atherton loop: memory, kicks squashed ~2× harder than snares,
   // peaks rounded without a hard clip). 'tanh' / 'algebraic' are bench only.
   tapeCurve: 'cubic',
+  // THICK's integrator (`TAPE_STEPS`, bench only): 'exact' RK2 ships; 'fast' is
+  // the one-evaluation step, ~3× cheaper on the loop, ~−50 dB from it.
+  tapeStep: 'exact',
   // dB of LOW PUSH (`TAPE_LOW_PUSHES`): a low shelf at TAPE_LOW_PUSH_HZ into
   // TAPE's curve and its exact inverse after it, so the lows saturate first
   // (a kick's low end gets squashed) while the clean path stays flat. 0 ships.
@@ -533,7 +536,7 @@ export function toKernelParams(params) {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
-    tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush),
+    tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush, p.tapeStep),
     headBump: Number(p.tape) > 0 ? headBumpFor(p.tapeHeadBump, hf) : 0,
     // Signed: the head bump (after the curve) can leave the peak ABOVE the source.
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb)
@@ -904,16 +907,21 @@ const TAPE_LOW_PUSH_Q = 0.7
  * knob, a kick's peak loses more. The makeup is measured, so the peak still
  * lands back on the source's.
  */
-export function tapeLayer(tapeDb, peakDb, curve = TAPE_CURVE, lowPushDb = 0) {
+/** HYSTERESIS's integrators on the bench: the exact RK2 (ships) or the one-evaluation step. */
+export const TAPE_STEPS = ['exact', 'fast']
+
+export function tapeLayer(tapeDb, peakDb, curve = TAPE_CURVE, lowPushDb = 0, step = 'exact') {
   const c = TAPE_CURVES.includes(curve) ? curve : TAPE_CURVE
+  // The fast step is the same loop, solved and calibrated as the exact one.
+  const layerCurve = c === 'hysteresis' && step === 'fast' ? 'hysteresis-fast' : c
   const t = clamp(Number(tapeDb) || 0, 0, TAPE_MAX_DB)
-  if (!(t > 0)) return { ...TAPE_LAYER, curve: c, on: false, driveDb: 0 }
+  if (!(t > 0)) return { ...TAPE_LAYER, curve: layerCurve, on: false, driveDb: 0 }
   // layerGain = unitDriveU / refPeak · 10^(drive/20): with refPeak = the peak,
   // u at the peak is unitDriveU · 10^(drive/20).
   const driveDb = clamp(20 * Math.log10(tapePeakU(t, c) / unitDriveU(c)), SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB)
   const push = clamp(Number(lowPushDb) || 0, 0, TAPE_LOW_PUSHES[TAPE_LOW_PUSHES.length - 1])
   const emph = push > 0 ? { emphType: 'loshelf', emphHz: TAPE_LOW_PUSH_HZ, emphQ: TAPE_LOW_PUSH_Q, emphDb: push } : {}
-  return { ...TAPE_LAYER, ...emph, curve: c, on: true, driveDb, refPeakDb: peakDb }
+  return { ...TAPE_LAYER, ...emph, curve: layerCurve, on: true, driveDb, refPeakDb: peakDb }
 }
 
 /** The TAPE stage's latency: one oversampler round trip, on or off. */
