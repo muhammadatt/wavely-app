@@ -41,6 +41,20 @@ let readoutSeq = 0
 const phTapeMakeup = ref({ pending: false })
 let tapeTimer = null
 let tapeSeq = 0
+// The EXACT makeup, measured in the background once preview's fast one has
+// landed and the knobs have been still for EXACT_MAKEUP_IDLE_MS, and kept
+// against everything that moves it (`tapeMakeupKey`). Apply uses it instead
+// of rendering TAPE over the selection again — on a long selection that render
+// was the first several seconds of the wait.
+const exactMakeups = new Map() // key → makeupDb, most recent last
+const EXACT_MAKEUP_KEEP = 16
+function rememberExactMakeup(key, makeupDb) {
+  exactMakeups.delete(key)
+  exactMakeups.set(key, makeupDb)
+  if (exactMakeups.size > EXACT_MAKEUP_KEEP) exactMakeups.delete(exactMakeups.keys().next().value)
+}
+let exactTimer = null
+const EXACT_MAKEUP_IDLE_MS = 600
 // The bench's output trim: `pending` while a render of the chain is in flight.
 const phOutputMakeup = ref({ pending: false })
 let outputTimer = null
@@ -196,6 +210,42 @@ export function usePhatass() {
     } else if (!OUTPUT_TRIM_IGNORES.has(name)) scheduleOutputMakeup()
   }
 
+  /** Everything TAPE's makeup depends on: the document, the span and TAPE's own settings. */
+  function tapeMakeupKey(start, end) {
+    return JSON.stringify([
+      appState.activeDocumentId, state.revision, start, end,
+      phParams.tape, phParams.tapeCurve, phParams.tapeStep, phParams.tapeLowPush, phParams.tapeHeadBump, phParams.hf,
+      phParams.warmthCeilingDb, phParams.voiceLevelDb,
+    ])
+  }
+
+  /** After a fast makeup lands: measure the exact one in the background, unless it is already known. */
+  function scheduleExactMakeup(start, end) {
+    clearTimeout(exactTimer)
+    exactTimer = null
+    if (!(Number(phParams.tape) > 0) || !state.currentFile) return
+    const key = tapeMakeupKey(start, end)
+    if (exactMakeups.has(key)) {
+      setTapeMakeup(exactMakeups.get(key))
+      return
+    }
+    exactTimer = setTimeout(async () => {
+      exactTimer = null
+      const seq = tapeSeq
+      try {
+        const { makeupDb } = await measurePhatassTapeMakeup(
+          state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+        )
+        // Anything that moves the makeup bumps tapeSeq and cancels this render.
+        if (seq !== tapeSeq || tapeMakeupKey(start, end) !== key) return
+        rememberExactMakeup(key, makeupDb)
+        setTapeMakeup(makeupDb)
+      } catch (err) {
+        if (!err?.cancelled) console.error('PHAT*SS exact tape makeup failed:', err)
+      }
+    }, EXACT_MAKEUP_IDLE_MS)
+  }
+
   function setTapeMakeup(db) {
     if (phParams.tapeMakeupDb === db) return
     phParams.tapeMakeupDb = db
@@ -219,6 +269,14 @@ export function usePhatass() {
     const { start, end } = selectionSpan()
     if (!(end > start)) return null
     refreshCeiling(start, end)
+    // Settings already measured exactly (back to an earlier position): no render.
+    const known = exactMakeups.get(tapeMakeupKey(start, end))
+    if (known !== undefined) {
+      phTapeMakeup.value = { pending: false }
+      setTapeMakeup(known)
+      scheduleOutputMakeup()
+      return known
+    }
     phTapeMakeup.value = { pending: true }
     try {
       const { makeupDb } = await measurePhatassTapeMakeup(
@@ -230,6 +288,7 @@ export function usePhatass() {
       setTapeMakeup(makeupDb)
       // The output trim renders with TAPE's makeup in place, so it follows it.
       scheduleOutputMakeup()
+      scheduleExactMakeup(start, end)
       return makeupDb
     } catch (err) {
       if (err?.cancelled || seq !== tapeSeq) return null
@@ -248,6 +307,8 @@ export function usePhatass() {
     // it could land in the debounce window and overwrite the interim.
     tapeSeq++
     cancelPhatassTapeMakeup()
+    clearTimeout(exactTimer)
+    exactTimer = null
     clearTimeout(tapeTimer)
     tapeTimer = setTimeout(refreshTapeMakeup, 250)
   }
@@ -255,6 +316,8 @@ export function usePhatass() {
   function cancelTapeMakeup() {
     clearTimeout(tapeTimer)
     tapeTimer = null
+    clearTimeout(exactTimer)
+    exactTimer = null
     tapeSeq++
     cancelPhatassTapeMakeup()
     phTapeMakeup.value = { pending: false }
@@ -420,12 +483,20 @@ export function usePhatass() {
 
     startProcessing('Applying PHAT*SS...')
     try {
-      // Never apply a stale (debounced or interim) makeup: measure on this span.
+      // Never apply a stale (debounced or interim) makeup: the exact one for
+      // this span and these settings — from the background measurement when it
+      // already ran, otherwise measured now.
       if (Number(phParams.tape) > 0) {
-        const { makeupDb } = await measurePhatassTapeMakeup(
-          state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
-        )
-        setTapeMakeup(makeupDb)
+        const key = tapeMakeupKey(start, end)
+        if (exactMakeups.has(key)) {
+          setTapeMakeup(exactMakeups.get(key))
+        } else {
+          const { makeupDb } = await measurePhatassTapeMakeup(
+            state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+          )
+          rememberExactMakeup(key, makeupDb)
+          setTapeMakeup(makeupDb)
+        }
       }
       // The output trim after it, since it renders with TAPE's makeup in place.
       if (outputTrimOn()) {
