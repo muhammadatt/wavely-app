@@ -2,8 +2,7 @@
  * PHAT*SS — worklet kernel.
  *
  * TAPE (CLEAN cubic or THICK hysteresis, with the speed's head bump after it)
- * → makeup → Warmth → Guard → limiter shelf (FATSO / bench Tame only) → tape HF
- * shelf (the Speed dial) → Output.
+ * → makeup → Warmth → Guard → tape HF shelf (the Speed dial) → Output.
  *
  * TAPE comes FIRST (owner's call): Warmth then shapes the already-rounded
  * signal, and TAPE's input is the untouched source, so its makeup depends on
@@ -16,24 +15,22 @@
  * voiced in phatassParams.WARMTH_LAYERS), a pure delay at 0. Its PEAK
  * GUARD (dsp/warmthGuard.js) is pinned on: what Warmth adds is turned down
  * wherever the sum would pass the selection's own peak, so Warmth adds density
- * but never peak level. The LIMITER SHELF is the HF Limiter's lookahead
- * dynamic shelf (dsp/hfLimit.js) with its shape and timing pinned
- * (phatassParams.TAPE_SHELF), out unless the bench picks FATSO or its Tame.
- * The TAPE HF SHELF (dsp/tapeHfShelf.js, zero latency) runs at the Speed
+ * but never peak level. (The HF Limiter's lookahead shelf that once sat here,
+ * for FATSO and the bench's Tame, was removed in October 2026 — see
+ * phatassParams.) The TAPE HF SHELF (dsp/tapeHfShelf.js, zero latency) runs at the Speed
  * dial's tape speed. TAPE is one more bench layer, full band, calibrated on the
  * selection's peak so its knob reads in dB of peak reduction (phatassParams
  * `tapeLayer`).
  *
  * Constant latency (see `phatassLatencySamples`), bit-transparent with Warmth
- * and TAPE at 0 and the top end OFF (a bench setting). SOFTEN, which rode the
- * limiter shelf's Transient here, moved to the HF Softener.
+ * and TAPE at 0 and the top end OFF (a bench setting). SOFTEN moved to the HF
+ * Softener.
  *
  * This file is BOTH a normal ES module and an AudioWorklet module (registers
  * 'phatass-processor'); it imports from ./dsp/, so its loader goes through
  * `?worker&url` like the others.
  */
 
-import { ShelfLimiterStage } from './dsp/hfLimit.js'
 import { TapeHfShelf } from './dsp/tapeHfShelf.js'
 import { SaturationBenchKernel } from './dsp/saturationLayers.js'
 import { WarmthPeakGuard } from './dsp/warmthGuard.js'
@@ -112,12 +109,11 @@ export class PhatassKernel {
     // output after makeup) delayed by that.
     this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)
     this.warmthIn = []
-    this.shelf = new ShelfLimiterStage(sampleRate)
     // The tape HF shelf (a tape-speed detent): zero latency, so the plugin's
     // latency is the same whichever detent is up.
     this.tapeHf = new TapeHfShelf(sampleRate)
     this.latencySamples = this.tape.latencySamples + this.warmth.latencySamples
-      + this.guard.latencySamples + this.shelf.latencySamples
+      + this.guard.latencySamples
     // TAPE's makeup and the output gain are measured off the audio thread and
     // can move several dB at once: a runtime change glides over GAIN_RAMP_MS
     // rather than stepping (a click); an immediate set snaps.
@@ -177,19 +173,6 @@ export class PhatassKernel {
       this.tape.setParams({ layers: [p.tapeLayer] }, immediate || !this.tapeInit)
       this.tapeInit = true
     }
-    this.shelf.setParams({
-      cornerHz: p.cornerHz,
-      thresholdLin: dbToLin(p.thresholdDb),
-      floorLin: dbToLin(-Math.max(0, p.rangeDb)),
-      releaseMs: p.releaseMs,
-      shape: p.shape,
-      tailMs: p.tailMs,
-      transientDb: p.transientDb,
-      transientCornerHz: p.transientCornerHz,
-      transientSlope: p.transientSlope,
-      transientGateLin: Number.isFinite(p.transientGateDb) ? dbToLin(p.transientGateDb) : null,
-      detectCornerHz: p.detectCornerHz,
-    })
     this.tapeHf.setParams(p.tapeHf ?? null)
     this.outputGain.set(dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0)), immediate)
     this.tapeMakeupGain.set(dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0), immediate)
@@ -279,7 +262,6 @@ export class PhatassKernel {
       this.meterClean += clean
       this.meterCount += n * nOut
     }
-    this.shelf.process(outputChannels, n)
     this.tapeHf.process(outputChannels, n)
     this.outputGain.process(outputChannels, n)
   }

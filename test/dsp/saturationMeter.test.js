@@ -68,7 +68,7 @@ function meterOf(x, p) {
 
 test('PHAT*SS meter: nothing added with TAPE and Warmth off; exactly what TAPE adds with it on', () => {
   const x = sine(110, 0.5)
-  const off = meterOf(x, { warmth: 0, tame: 0, tape: 0, warmthCeilingDb: -6 })
+  const off = meterOf(x, { warmth: 0, tape: 0, warmthCeilingDb: -6 })
   assert.equal(off.added, 0)
   assert.ok(off.clean > 0 && off.count > 0)
   // TAPE 3 with its makeup; with the top end OFF and no head bump everything
@@ -93,7 +93,7 @@ test('PHAT*SS meter: Warmth reads, and more Warmth reads more', () => {
   const x = new Float32Array(SR)
   for (let i = 0; i < SR; i++) x[i] = 0.3 * Math.sin((2 * Math.PI * 120 * i) / SR) + 0.1 * Math.sin((2 * Math.PI * 1500 * i) / SR)
   const at = warmth => {
-    const r = meterOf(x, { warmth, oddEven: 50, tame: 0, warmthCeilingDb: -3, warmthRefPeaksDb: [-14, -14, -14, -14] })
+    const r = meterOf(x, { warmth, oddEven: 50, warmthCeilingDb: -3, warmthRefPeaksDb: [-14, -14, -14, -14] })
     return 10 * Math.log10(r.added / r.clean)
   }
   const w2 = at(2), w8 = at(8)

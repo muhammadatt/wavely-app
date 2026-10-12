@@ -1,7 +1,8 @@
 /**
  * PHAT*SS — the claims the design rests on: the Warmth stage and its peak
- * guard (moved here from the HF Limiter), the Tame/Tone macro onto the tape
- * shelf, and the constant latency of the whole chain.
+ * guard (moved here from the HF Limiter), TAPE, and the constant latency of the
+ * whole chain. (The Tame / FATSO limiter shelf and its tests were removed in
+ * October 2026 — recoverable at e427de9.)
  *
  * Run with:  npm test
  */
@@ -9,16 +10,13 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { processPhatassBuffer, PhatassKernel } from '../../src/audio/phatassProcessor.js'
 import {
-  toKernelParams as toKernelParamsShipped, phatassLatencySamples, tapeShelf, TAPE_SHELF, PHATASS_DEFAULTS, FATSO_CORNER_HZ,
-  DETECT_4K_HZ, DETECT_4K_COMP_DB, CURVE_DETECT, TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ,
+  toKernelParams as toKernelParamsShipped, phatassLatencySamples, PHATASS_DEFAULTS,
+  TAPE_LATENCY_SAMPLES, TAPE_MAX_DB, tapePeakU, tapeLayer, TAPE_CURVES, OUTPUT_MAKEUPS, TAPE_LOW_PUSHES, TAPE_LOW_PUSH_HZ, TAPE_HEAD_BUMPS, TAPE_HEAD_BUMP_HZ,
   WARMTH_LAYERS, WARMTH_LATENCY_SAMPLES, WARMTH_EVEN_MATCH_DB, WARMTH_TOP_DB, ODD_EVEN_SPAN, warmthLayers,
   WARMTH_MAX_LAYERS, checkWarmthLayers, warmthLevelDb, slotOversample, WARMTH_BASE_RATE_MAX_HZ, headBumpMaxLiftDb,
 } from '../../src/audio/phatassParams.js'
-import { HF_LIMITER_DEFAULTS, toKernelParams as toHFLimiterKernelParams } from '../../src/audio/hfLimiterParams.js'
-import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import { processSaturationBenchBuffer, SAT_BENCH_LAYER_LATENCY } from '../../src/audio/dsp/saturationLayers.js'
 import { warmthGuardLatencySamples } from '../../src/audio/dsp/warmthGuard.js'
-import { shelfLatencySamples } from '../../src/audio/dsp/hfLimit.js'
 import { measureTapeMakeup as measureTapeMakeupShipped } from '../../src/audio/phatassTapeMakeup.js'
 import { measureOutputMakeup as measureOutputMakeupShipped, PREVIEW_CAP_S } from '../../src/audio/phatassOutputMakeup.js'
 
@@ -74,19 +72,19 @@ const run = (x, p) => processPhatassBuffer([x], SR, toKernelParams(p))
 
 // ── The chain ────────────────────────────────────────────────────────────────
 
-test('the latency is Warmth + guard + TAPE + shelf, constant at every setting (Soften adds none)', () => {
+test('the latency is Warmth + guard + TAPE, constant at every setting (the limiter shelf is gone)', () => {
   const L = phatassLatencySamples(SR)
-  assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + TAPE_LATENCY_SAMPLES + shelfLatencySamples(SR))
-  for (const [warmth, tame, soften, tape] of [[0, 0, 0, 0], [0, 10, 0, 0], [6, 0, 0, 0], [10, 10, 10, 0], [0, 5, 5, 0], [0, 0, 7, 0], [0, 0, 0, 6], [8, 8, 8, 3]]) {
+  assert.equal(L, WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(SR) + TAPE_LATENCY_SAMPLES)
+  for (const [warmth, tape, hf] of [[0, 0, 'off'], [0, 0, 'ips7'], [6, 0, 'off'], [10, 0, 'ips30'], [0, 6, 'off'], [8, 3, 'ips15']]) {
     const x = new Float32Array(8192)
     x[100] = 0.001 // far below every threshold
-    const { channelData: [y], latencySamples } = run(x, { voiceLevelDb: -20, hf: 'bench', warmth, tame, soften, tape, warmthCeilingDb: -3 })
+    const { channelData: [y], latencySamples } = run(x, { voiceLevelDb: -20, hf, warmth, tape, warmthCeilingDb: -3 })
     assert.equal(latencySamples, L)
     // TAPE, and Warmth's full-band layers, run a full-band 4x oversampler,
     // whose band edge (−0.2 dB at 20 kHz) shaves a one-sample impulse a
     // little (more with Warmth's Amount above 0 dB); the impulse still lands at L.
     const tol = tape > 0 || warmth > 0 ? 0.06 * x[100] : 1e-5
-    assert.ok(Math.abs(y[100 + L] - x[100]) < tol, `warmth ${warmth} tame ${tame} soften ${soften} tape ${tape}: impulse at ${L} reads ${y[100 + L]}`)
+    assert.ok(Math.abs(y[100 + L] - x[100]) < tol, `warmth ${warmth} tape ${tape} ${hf}: impulse at ${L} reads ${y[100 + L]}`)
   }
 })
 
@@ -111,7 +109,7 @@ test('TAPE takes its number off a low-frequency peak, and leaves quiet material 
   const peak = 0.7
   const x = sine(110, peak)
   for (const tape of [1, 2, 3.5, 6]) {
-    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, tape, warmthCeilingDb: db(peak) })
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tape, warmthCeilingDb: db(peak) })
     let p = 0
     for (let i = L + 2000; i < x.length; i++) p = Math.max(p, Math.abs(y[i]))
     // Past 3.52 dB the top is on the cubic's flat — a hard clip — and its
@@ -121,7 +119,7 @@ test('TAPE takes its number off a low-frequency peak, and leaves quiet material 
   }
   // 20 dB under the selection's peak, TAPE 2 moves the fundamental by under 0.05 dB.
   const q = sine(110, peak / 10)
-  const { channelData: [y], latencySamples: L } = run(q, { warmth: 0, tame: 0, tape: 2, warmthCeilingDb: db(peak) })
+  const { channelData: [y], latencySamples: L } = run(q, { warmth: 0, tape: 2, warmthCeilingDb: db(peak) })
   const a = toneAmp(y.subarray(L), 110, 4000, q.length - L - 100)
   assert.ok(Math.abs(db(a / (peak / 10))) < 0.05, `quiet sine moved ${db(a / (peak / 10)).toFixed(3)} dB`)
 })
@@ -129,7 +127,7 @@ test('TAPE takes its number off a low-frequency peak, and leaves quiet material 
 test('TAPE is symmetric: odd harmonics only', () => {
   const peak = 0.7
   const x = sine(200, peak)
-  const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, tape: 3, warmthCeilingDb: db(peak) })
+  const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tape: 3, warmthCeilingDb: db(peak) })
   const from = L + 4000, to = from + 30000
   const h3 = harmonicDbc(y, 200, 3, from, to), h2 = harmonicDbc(y, 200, 2, from, to)
   assert.ok(h3 > -30, `H3 ${h3.toFixed(1)} dBc`)
@@ -152,7 +150,7 @@ test('TAPE TANH / ALGEBRAIC: the knob inverts f(u)/u, and lands the peak on its 
   const peak = 0.7
   const x = sine(110, peak)
   for (const tapeCurve of ['tanh', 'algebraic']) for (const tape of [1, 2, 3.5, 6]) {
-    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, tape, tapeCurve, warmthCeilingDb: db(peak) })
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tape, tapeCurve, warmthCeilingDb: db(peak) })
     let p = 0
     for (let i = L + 2000; i < x.length; i++) p = Math.max(p, Math.abs(y[i]))
     assert.ok(Math.abs(db(p / peak) + tape) < 0.15, `${tapeCurve} TAPE ${tape}: peak moved ${db(p / peak).toFixed(2)} dB`)
@@ -163,7 +161,7 @@ test('TAPE: below its flat the cubic is the third harmonic alone; tanh and algeb
   const f = 110, peak = 0.6
   const x = sine(f, peak)
   const high = (tapeCurve) => {
-    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, tape: 2, tapeCurve, warmthCeilingDb: db(peak) })
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tape: 2, tapeCurve, warmthCeilingDb: db(peak) })
     const from = L + 1000, to = from + 39690 // 99 whole cycles
     let e = 0
     for (let k = 7; k <= 21; k += 2) e += Math.pow(10, harmonicDbc(y, f, k, from, to) / 10)
@@ -180,7 +178,7 @@ test('TAPE TANH / ALGEBRAIC makeup restores the peak too', () => {
   const peak = 0.6
   for (const tapeCurve of ['tanh', 'algebraic']) for (const [f, tape] of [[110, 2], [110, 6], [8000, 6]]) {
     const x = sine(f, peak, SR / 2)
-    const base = { warmth: 0, tame: 0, tape, tapeCurve, warmthCeilingDb: db(peak) }
+    const base = { warmth: 0, tape, tapeCurve, warmthCeilingDb: db(peak) }
     const { makeupDb } = measureTapeMakeup([x], SR, base)
     assert.ok(makeupDb > 0 && makeupDb <= tape + 0.2, `${f} Hz TAPE ${tape}: makeup ${makeupDb.toFixed(2)}`)
     const { channelData: [y], latencySamples: L } = run(x, { ...base, tapeMakeupDb: makeupDb })
@@ -194,7 +192,7 @@ test('TAPE at a quiet level is flat to 18 kHz (the 4x oversampler\'s band edge i
   for (const f of [100, 1000, 10000, 18000]) {
     const x = sine(f, 0.001)
     const amp = tape => {
-      const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, tape, warmthCeilingDb: -3 })
+      const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tape, warmthCeilingDb: -3 })
       return toneAmp(y.subarray(L), f, 4000, x.length - L - 100)
     }
     const d = db(amp(6) / amp(0))
@@ -206,7 +204,7 @@ test('TAPE makeup restores the peak: measured, so it matches the knob on a low t
   const peak = 0.6
   for (const [f, tape] of [[110, 1], [110, 2], [110, 3.5], [8000, 3], [8000, 6]]) {
     const x = sine(f, peak, SR / 2)
-    const base = { warmth: 0, tame: 0, tape, warmthCeilingDb: db(peak) }
+    const base = { warmth: 0, tape, warmthCeilingDb: db(peak) }
     const { makeupDb } = measureTapeMakeup([x], SR, base)
     if (f === 110) assert.ok(Math.abs(makeupDb - tape) < 0.2, `${f} Hz TAPE ${tape}: makeup ${makeupDb.toFixed(2)}`)
     else assert.ok(makeupDb < tape - 0.5 && makeupDb > 0, `${f} Hz TAPE ${tape}: makeup ${makeupDb.toFixed(2)} should be under the knob`)
@@ -227,7 +225,7 @@ test('TAPE comes before Warmth: its makeup ignores Warmth, and Warmth still neve
   x.set(burst.map((v, i) => x[20000 + i] + v), 20000)
   let peak = 0
   for (const v of x) peak = Math.max(peak, Math.abs(v))
-  const base = { tame: 0, tape: 3, warmthCeilingDb: db(peak), warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14) }
+  const base = { tape: 3, warmthCeilingDb: db(peak), warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14) }
   const quiet = measureTapeMakeup([x], SR, { ...base, warmth: 0 }).makeupDb
   const hot = measureTapeMakeup([x], SR, { ...base, warmth: 10, oddEven: 100 }).makeupDb
   assert.ok(quiet > 0.5)
@@ -272,149 +270,13 @@ test('TAPE with no measured peak calibrates on the voice level + 18 dB', () => {
   assert.equal(k.tapeLayer.refPeakDb, -2)
 })
 
-test('Warmth 0, Soften off and Tame 0 pass the audio through untouched', () => {
+test('Warmth 0 and TAPE 0 (top end off) pass the audio through untouched', () => {
   const x = add(sine(200, 0.5), sine(3000, 0.2), sine(9000, 0.2))
-  const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, oddEven: 30 })
+  const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, oddEven: 30 })
   for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`sample ${i} differs`)
 })
 
-test('the deprecated original Tame/Tone curve: Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz', () => {
-  const s = tapeShelf(5, 10)
-  assert.ok(Math.abs(s.cornerHz - 12000) < 1e-9)
-  assert.equal(s.thresholdRelDb, -8)
-  assert.ok(Math.abs(s.rangeDb - 18) < 1e-9)
-  // The ends: Tame 0 is out, Tame 10 the deepest; Tone sweeps 2–12 kHz on a log scale.
-  assert.equal(tapeShelf(0, 10).rangeDb, 0)
-  assert.ok(Math.abs(tapeShelf(10, 10).rangeDb - 36) < 1e-9)
-  assert.ok(Math.abs(tapeShelf(5, 0).cornerHz - 2000) < 1e-9)
-  assert.ok(Math.abs(tapeShelf(5, 5).cornerHz - Math.sqrt(2000 * 12000)) < 1e-6)
-  // Threshold and Range move together, monotone: more Tame acts earlier and deeper.
-  for (let t = 1; t <= 10; t++) {
-    assert.ok(tapeShelf(t, 10).thresholdRelDb < tapeShelf(t - 1, 10).thresholdRelDb)
-    assert.ok(tapeShelf(t, 10).rangeDb > tapeShelf(t - 1, 10).rangeDb)
-  }
-  // Shape and timing are pinned, whatever the panel sends.
-  const k = toKernelParams({ ...PHATASS_DEFAULTS, hf: 'bench', curve: 'original', tame: 5, voiceLevelDb: -20 })
-  for (const key of Object.keys(TAPE_SHELF)) assert.equal(k[key], TAPE_SHELF[key], key)
-  assert.equal(k.thresholdDb, -28)
-})
-
-test('FATSO mode: Tame lands on the fitted Fatso points, corner pinned at 2 kHz, Tone ignored', () => {
-  // Fatso Warmth 5 / 6 / 7 were fitted at threshold +10 / +4 / 0 dB re the voice,
-  // Range ≥ 3 / 3 / ≥ 9 — Tame 1 / 4 / 6 under the law.
-  for (const [tame, thr, range] of [[1, 10, 3], [4, 4, 3], [6, 0, 9]]) {
-    const s = tapeShelf(tame, 10, 'fatso')
-    assert.equal(s.thresholdRelDb, thr, `Tame ${tame} threshold`)
-    assert.ok(Math.abs(s.rangeDb - range) < 1e-9, `Tame ${tame} range ${s.rangeDb}`)
-  }
-  for (const tone of [0, 3.7, 10]) assert.equal(tapeShelf(5, tone, 'fatso').cornerHz, FATSO_CORNER_HZ)
-  assert.equal(tapeShelf(0, 10, 'fatso').rangeDb, 0)
-  for (let t = 1; t <= 10; t++) {
-    assert.ok(tapeShelf(t, 0, 'fatso').thresholdRelDb < tapeShelf(t - 1, 0, 'fatso').thresholdRelDb)
-    assert.ok(tapeShelf(t, 0, 'fatso').rangeDb >= tapeShelf(t - 1, 0, 'fatso').rangeDb)
-  }
-  // The kernel follows the curve.
-  const k = toKernelParams({ ...PHATASS_DEFAULTS, hf: 'bench', curve: 'fatso', detect: CURVE_DETECT.fatso, tame: 4, tone: 9, voiceLevelDb: -20 })
-  assert.equal(k.cornerHz, FATSO_CORNER_HZ)
-  assert.equal(k.thresholdDb, -16)
-  assert.equal(k.rangeDb, 3)
-})
-
-test('VOICE curve: FATSO\'s shape 6 dB lower, Range opening sooner, corner pinned at 2 kHz', () => {
-  for (const [tame, thr, range] of [[1, 4, 3], [2, 2, 3], [4, -2, 9], [6, -6, 15], [10, -14, 27]]) {
-    const s = tapeShelf(tame, 10, 'voice')
-    assert.equal(s.thresholdRelDb, thr, `Tame ${tame} threshold`)
-    assert.ok(Math.abs(s.rangeDb - range) < 1e-9, `Tame ${tame} range ${s.rangeDb}`)
-    assert.equal(s.cornerHz, FATSO_CORNER_HZ)
-    // 6 dB under FATSO at every setting.
-    assert.equal(tapeShelf(tame, 10, 'fatso').thresholdRelDb - s.thresholdRelDb, 6)
-  }
-  assert.equal(tapeShelf(0, 10, 'voice').rangeDb, 0)
-  for (let t = 1; t <= 10; t++) {
-    assert.ok(tapeShelf(t, 0, 'voice').thresholdRelDb < tapeShelf(t - 1, 0, 'voice').thresholdRelDb)
-    assert.ok(tapeShelf(t, 0, 'voice').rangeDb >= tapeShelf(t - 1, 0, 'voice').rangeDb)
-  }
-  // An unknown curve falls back to the default rather than to the deprecated one.
-  assert.notEqual(PHATASS_DEFAULTS.curve, 'original')
-  assert.deepEqual(toKernelParams({ hf: 'bench', curve: 'nope', tame: 5 }), toKernelParams({ hf: 'bench', curve: PHATASS_DEFAULTS.curve, tame: 5 }))
-})
-
-test('DETECT: 2K shares the cut band, 4K listens above 4 kHz with the threshold 3 dB lower, the cut stays at 2 kHz', () => {
-  const at = (curve, detect) => toKernelParams({ hf: 'bench', curve, detect, tame: 5, voiceLevelDb: -20 })
-  // The default detector is the default curve's pair.
-  assert.equal(PHATASS_DEFAULTS.detect, CURVE_DETECT[PHATASS_DEFAULTS.curve])
-  assert.deepEqual(CURVE_DETECT, { voice: '4k', fatso: '2k' })
-  for (const curve of ['voice', 'fatso']) {
-    const a = at(curve, '2k'), b = at(curve, '4k')
-    assert.equal(a.detectCornerHz, null)
-    assert.equal(b.detectCornerHz, DETECT_4K_HZ)
-    assert.equal(a.thresholdDb - b.thresholdDb, DETECT_4K_COMP_DB)
-    assert.equal(b.cornerHz, FATSO_CORNER_HZ)
-    assert.equal(a.rangeDb, b.rangeDb)
-  }
-  // The deprecated curve has its own corner: Detect does not apply to it.
-  assert.deepEqual(at('original', '4k'), at('original', '2k'))
-})
-
-test('DETECT 4K cuts a sibilant-band tone harder and a vowel-band tone less than 2K', () => {
-  const base = { warmth: 0, soften: false, voiceLevelDb: -20, hf: 'bench', curve: 'voice', tame: 6 }
-  const from = Math.floor(0.5 * SR), to = SR - 2000
-  const cut = (f, detect) => {
-    // At the voice level, so neither position reaches the Range floor.
-    const x = sine(f, 0.1)
-    const { channelData: [y], latencySamples: L } = run(x, { ...base, detect })
-    return db(toneAmp(y.subarray(L), f, from - L, to - L) / 0.1)
-  }
-  const s2 = cut(8000, '2k'), s4 = cut(8000, '4k'), v2 = cut(2200, '2k'), v4 = cut(2200, '4k')
-  assert.ok(s4 < s2 - 1, `8 kHz: 4K ${s4.toFixed(2)} vs 2K ${s2.toFixed(2)} dB`)
-  assert.ok(v4 > v2 + 0.3, `2.2 kHz: 4K ${v4.toFixed(2)} vs 2K ${v2.toFixed(2)} dB`)
-  assert.ok(v2 < -1 && s2 < -1, 'both tones are being cut at all')
-})
-
-test('either curve and either detector with Tame 0 (and Warmth, Soften off) pass the audio through untouched', () => {
-  const x = add(sine(300, 0.3), noise(SR, 0.2, 7))
-  for (const curve of ['voice', 'fatso']) for (const detect of ['2k', '4k']) {
-    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, hf: 'bench', tame: 0, curve, detect })
-    for (let i = L; i < x.length; i++) if (y[i] !== x[i - L]) assert.fail(`${curve}/${detect}: sample ${i} differs`)
-  }
-})
-
-test('FATSO mode cuts the top end from 2 kHz, and only above its higher threshold', () => {
-  // A loud 6 kHz tone with a 200 Hz bed, voice level pinned so the threshold is known.
-  const n = SR
-  const lo = sine(200, 0.1, n), hi = sine(6000, 0.3, n)
-  const x = add(lo, hi)
-  const base = { warmth: 0, soften: false, voiceLevelDb: -20, hf: 'bench', curve: 'fatso', detect: CURVE_DETECT.fatso }
-  const from = Math.floor(0.5 * SR), to = n - 2000
-  const out = tame => {
-    const { channelData: [y], latencySamples: L } = run(x, { ...base, tame })
-    return { hi: toneAmp(y.subarray(L), 6000, from - L, to - L), lo: toneAmp(y.subarray(L), 200, from - L, to - L) }
-  }
-  // Tame 1: threshold −10 dBFS on the band; the 6 kHz peak (−10.5 dBFS) sits under it.
-  const t1 = out(1)
-  assert.ok(Math.abs(db(t1.hi / 0.3)) < 0.1, `Tame 1 cut ${db(t1.hi / 0.3)}`)
-  // Tame 6: threshold −20 dBFS, Range 9 — the tone comes down by up to 9 dB.
-  const t6 = out(6)
-  const cut = db(t6.hi / 0.3)
-  assert.ok(cut < -5 && cut > -9.2, `Tame 6 cut ${cut}`)
-  assert.ok(Math.abs(db(t6.lo / 0.1)) < 1, `200 Hz moved ${db(t6.lo / 0.1)}`)
-})
-
-test('with Warmth off, the tape shelf is the HF Limiter at the matching settings', () => {
-  const x = add(sine(300, 0.3), sine(6000, 0.2), noise(SR, 0.05, 3))
-  const ph = run(x, { voiceLevelDb: -20, warmth: 0, hf: 'bench', tame: 5, tone: 10, curve: 'original' })
-  const hf = processHFLimiterBuffer([x], SR, toHFLimiterKernelParams({
-    ...HF_LIMITER_DEFAULTS, voiceLevelDb: -20, freq: 12000, threshold: -8, range: 18,
-    shape: 'warm', release: TAPE_SHELF.releaseMs, tail: 0, transient: 0, output: 0,
-  }))
-  const a = ph.channelData[0], b = hf.channelData[0]
-  const off = ph.latencySamples - hf.latencySamples
-  let worst = 0
-  for (let i = hf.latencySamples; i < x.length - off; i++) worst = Math.max(worst, Math.abs(a[i + off] - b[i]))
-  assert.ok(worst < 1e-6, `differs from the HF Limiter by ${worst}`)
-})
-
-// ── Warmth: low-end harmonics ahead of the shelf ───────────────────────────
+// ── Warmth: low-end harmonics ───────────────────────────
 
 /**
  * Harmonic k of a steady tone at `f`, dB re the fundamental. Hann-weighted: an
@@ -435,7 +297,7 @@ function harmonicDbc(y, f, k, from, to) {
   return db(amp(k * f) / amp(f))
 }
 
-const WARM = { voiceLevelDb: -20, tame: 0 } // shelf out, so only Warmth acts
+const WARM = { voiceLevelDb: -20 } // top end off (ISOLATED), so only Warmth acts
 
 // Warmth layers by role, so these tests survive fixed layers being added.
 const ROLE = WARMTH_LAYERS.map(l => l.blend ?? 'fixed')
@@ -659,7 +521,7 @@ test('Warmth\'s low layers run at the base rate: no latency, and only a low band
 test('TAPE order is pinned first: a stale tapeOrder param changes nothing', () => {
   assert.equal('tapeOrder' in PHATASS_DEFAULTS, false)
   const x = add(sine(110, 0.4), sine(220, 0.15), sine(3000, 0.05))
-  const base = { tame: 0, tape: 3, warmth: 6, oddEven: 50, tapeMakeupDb: 1.5, warmthCeilingDb: db(0.6), warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14) }
+  const base = { tape: 3, warmth: 6, oddEven: 50, tapeMakeupDb: 1.5, warmthCeilingDb: db(0.6), warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14) }
   const a = run(x, base).channelData[0]
   const b = run(x, { ...base, tapeOrder: 'last' }).channelData[0]
   assert.deepEqual(a, b)
@@ -702,7 +564,7 @@ test('output trim: OFF ships, and the kernel ignores a stale trim unless PEAK, K
 
 test('output trim lands the whole chain on the source: PEAK on its peak, RMS on its RMS, on top of Output and TAPE\'s own makeup', () => {
   const { x, peak } = syllableTrack(3)
-  const base = { warmth: 6, oddEven: 40, tape: 2.5, hf: 'bench', tame: 6, soften: 4, warmthCeilingDb: db(peak), voiceLevelDb: srcMsDb(x) }
+  const base = { warmth: 6, oddEven: 40, tape: 2.5, hf: 'ips15', warmthCeilingDb: db(peak), voiceLevelDb: srcMsDb(x) }
   const tapeMakeupDb = measureTapeMakeup([x], SR, base).makeupDb
   for (const mode of ['peak', 'rms']) {
     const p = { ...base, tapeMakeupDb, outputMakeup: mode }
@@ -722,7 +584,7 @@ test('output trim lands the whole chain on the source: PEAK on its peak, RMS on 
 
 test('output trim preview: exact up to its cap, a close estimate past it', () => {
   const short = syllableTrack(2)
-  const p0 = { warmth: 5, tape: 2, hf: 'bench', tame: 5, warmthCeilingDb: db(short.peak), voiceLevelDb: srcMsDb(short.x) }
+  const p0 = { warmth: 5, tape: 2, hf: 'ips15', warmthCeilingDb: db(short.peak), voiceLevelDb: srcMsDb(short.x) }
   for (const outputMakeup of ['peak', 'rms']) {
     const p = { ...p0, outputMakeup }
     assert.equal(measureOutputMakeup([short.x], SR, p, { exact: false }).makeupDb, measureOutputMakeup([short.x], SR, p).makeupDb)
@@ -772,7 +634,7 @@ test('TAPE low push: off ships, and the knob keeps its no-push drive', () => {
 
 test('TAPE low push squashes a kick\'s low end and leaves the clean path flat', () => {
   const { x, peak } = kickTrack()
-  const base = { warmth: 0, tame: 0, soften: 0, tape: 2, warmthCeilingDb: db(peak) }
+  const base = { warmth: 0, tape: 2, warmthCeilingDb: db(peak) }
   const lowPeak = (y, L) => {
     // 55 Hz content of the first kick, by correlation over its first 40 ms.
     return toneAmp(y.subarray(L), 55, 0, Math.round(0.04 * SR))
@@ -794,7 +656,7 @@ test('TAPE low push squashes a kick\'s low end and leaves the clean path flat', 
 test('TAPE low push: the makeup still restores the peak, and the fast search still reads the exact one', () => {
   const { x, peak } = kickTrack()
   for (const tapeLowPush of [3, 6]) {
-    const p = { warmth: 0, tame: 0, soften: 0, tape: 3, tapeLowPush, warmthCeilingDb: db(peak) }
+    const p = { warmth: 0, tape: 3, tapeLowPush, warmthCeilingDb: db(peak) }
     const exact = measureTapeMakeup([x], SR, p).makeupDb
     const fast = measureTapeMakeup([x], SR, p, { exact: false }).makeupDb
     assert.ok(Math.abs(fast - exact) < 0.02, `push ${tapeLowPush}: fast ${fast.toFixed(3)} vs exact ${exact.toFixed(3)}`)
@@ -810,7 +672,7 @@ test('TAPE runs to 12 dB: a voiced peak loses nearly its number, and the makeup 
   const x = add(sine(110, 0.6, SR), sine(220, 0.2, SR))
   let peak = 0
   for (const v of x) peak = Math.max(peak, Math.abs(v))
-  const p = { warmth: 0, tame: 0, soften: 0, tape: 12, warmthCeilingDb: db(peak) }
+  const p = { warmth: 0, tape: 12, warmthCeilingDb: db(peak) }
   const { makeupDb } = measureTapeMakeup([x], SR, p)
   assert.ok(makeupDb > 10 && makeupDb < 12.5, `makeup ${makeupDb.toFixed(2)} dB`)
   const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: makeupDb })
@@ -823,8 +685,8 @@ test('TAPE head bump: it follows the Speed dial (shipping), the bench can overri
   assert.deepEqual(TAPE_HEAD_BUMPS, ['speed', 0, 3, 6, 9, 'a800-30', 'a800-15', 'a800-7'])
   assert.equal(TAPE_HEAD_BUMP_HZ, 40)
   assert.equal(PHATASS_DEFAULTS.tapeHeadBump, 'speed')
-  // Following the speed: each speed's own A800 curve; OFF / FATSO / bench Tame have none.
-  for (const [hf, bump] of [['ips30', 'a800-30'], ['ips15', 'a800-15'], ['ips7', 'a800-7'], ['off', 0], ['fatso', 0], ['bench', 0]]) {
+  // Following the speed: each speed's own A800 curve; OFF has none.
+  for (const [hf, bump] of [['ips30', 'a800-30'], ['ips15', 'a800-15'], ['ips7', 'a800-7'], ['off', 0]]) {
     assert.equal(toKernelParamsShipped({ tape: 2, hf }).headBump, bump, hf)
     assert.equal(toKernelParamsShipped({ tape: 0, hf }).headBump, 0, `${hf} with TAPE off`)
   }
@@ -841,7 +703,7 @@ test('TAPE head bump: it follows the Speed dial (shipping), the bench can overri
 
 test('TAPE head bump below the curve is a low shelf that stays in the output', () => {
   const x = add(sine(25, 0.002, SR * 2), sine(1000, 0.002, SR * 2))
-  const p = { warmth: 0, tame: 0, soften: 0, tape: 2, tapeHeadBump: 6, tapeMakeupDb: 0, warmthCeilingDb: db(0.8) }
+  const p = { warmth: 0, tape: 2, tapeHeadBump: 6, tapeMakeupDb: 0, warmthCeilingDb: db(0.8) }
   const { channelData: [y], latencySamples: L } = run(x, p)
   const from = SR, to = 2 * SR - 1000
   const lo = db(toneAmp(y.subarray(L), 25, from, to) / 0.002)
@@ -853,7 +715,7 @@ test('TAPE head bump below the curve is a low shelf that stays in the output', (
 test('TAPE head bump: the makeup is measured through it (fast = exact) and still lands the peak on the source', () => {
   const { x, peak } = kickTrack()
   for (const tapeHeadBump of [3, 6, 9]) {
-    const p = { warmth: 0, tame: 0, soften: 0, tape: 6, tapeHeadBump, warmthCeilingDb: db(peak) }
+    const p = { warmth: 0, tape: 6, tapeHeadBump, warmthCeilingDb: db(peak) }
     const exact = measureTapeMakeup([x], SR, p).makeupDb
     const fast = measureTapeMakeup([x], SR, p, { exact: false }).makeupDb
     assert.ok(Math.abs(fast - exact) < 0.02, `bump ${tapeHeadBump}: fast ${fast.toFixed(3)} vs exact ${exact.toFixed(3)}`)
@@ -867,7 +729,7 @@ test('TAPE head bump: the makeup is measured through it (fast = exact) and still
 test('the saturation meter does not read the head bump as saturation', () => {
   const x = add(sine(30, 0.002, SR), sine(800, 0.002, SR))
   const k = new PhatassKernel(SR)
-  k.setParams(toKernelParams({ warmth: 0, tame: 0, soften: 0, tape: 2, tapeHeadBump: 9, warmthCeilingDb: db(0.8) }), true)
+  k.setParams(toKernelParams({ warmth: 0, tape: 2, tapeHeadBump: 9, warmthCeilingDb: db(0.8) }), true)
   k.enableMeter()
   const out = new Float32Array(128)
   for (let o = 0; o + 128 <= x.length; o += 128) k.process([x.subarray(o, o + 128)], [out], 128)
@@ -878,7 +740,7 @@ test('the saturation meter does not read the head bump as saturation', () => {
 test('TAPE HYSTERESIS: the knob is calibrated on a steady sine, and the makeup still lands the peak (fast = exact)', () => {
   const x = sine(110, 0.5, SR * 2)
   for (const tape of [1, 3, 6, 12]) {
-    const p = { warmth: 0, tame: 0, soften: 0, tape, tapeCurve: 'hysteresis', tapeMakeupDb: 0, warmthCeilingDb: db(0.5) }
+    const p = { warmth: 0, tape, tapeCurve: 'hysteresis', tapeMakeupDb: 0, warmthCeilingDb: db(0.5) }
     assert.equal(toKernelParams(p).tapeLayer.curve, 'hysteresis')
     const { channelData: [y], latencySamples: L } = run(x, p)
     let pk = 0
@@ -888,7 +750,7 @@ test('TAPE HYSTERESIS: the knob is calibrated on a steady sine, and the makeup s
     assert.ok(Math.abs(db(pk / 0.5) + tape) < 0.75, `TAPE ${tape}: steady sine peak moved ${db(pk / 0.5).toFixed(2)} dB`)
   }
   const { x: s, peak } = kickTrack()
-  const p = { warmth: 0, tame: 0, soften: 0, tape: 8, tapeCurve: 'hysteresis', warmthCeilingDb: db(peak) }
+  const p = { warmth: 0, tape: 8, tapeCurve: 'hysteresis', warmthCeilingDb: db(peak) }
   const exact = measureTapeMakeup([s], SR, p).makeupDb
   assert.ok(Math.abs(measureTapeMakeup([s], SR, p, { exact: false }).makeupDb - exact) < 0.02)
   const { channelData: [y], latencySamples: L } = run(s, { ...p, tapeMakeupDb: exact })
@@ -902,7 +764,7 @@ test('TAPE head bump is pinned after the curve: the lift passes TAPE at full siz
   // A loud 30 Hz tone: the curve sees the bare tone, and the bump lifts what comes out.
   const x = sine(30, 0.5, SR * 2)
   const out = (tapeHeadBump) => {
-    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, soften: 0, tape: 6, tapeHeadBump, tapeMakeupDb: 0, warmthCeilingDb: db(0.5) })
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tape: 6, tapeHeadBump, tapeMakeupDb: 0, warmthCeilingDb: db(0.5) })
     return db(toneAmp(y.subarray(L), 30, SR, 2 * SR - 4096) / 0.5)
   }
   const lift = out(9) - out(0)
@@ -912,7 +774,7 @@ test('TAPE head bump is pinned after the curve: the lift passes TAPE at full siz
 test('TAPE head bump: the makeup is measured through it, may be a cut, and lands the peak on the source (preview = apply)', () => {
   const { x, peak } = kickTrack()
   for (const [tape, tapeHeadBump] of [[1, 9], [6, 6], [12, 3]]) {
-    const p = { warmth: 0, tame: 0, soften: 0, tape, tapeHeadBump, warmthCeilingDb: db(peak) }
+    const p = { warmth: 0, tape, tapeHeadBump, warmthCeilingDb: db(peak) }
     const exact = measureTapeMakeup([x], SR, p).makeupDb
     assert.equal(measureTapeMakeup([x], SR, p, { exact: false }).makeupDb, exact)
     if (tape === 1) assert.ok(exact < 0, `TAPE 1 / +9: makeup ${exact.toFixed(2)} dB should be a cut`)
@@ -929,7 +791,7 @@ test('TAPE head bump: the makeup is measured through it, may be a cut, and lands
 test('TAPE head bump A800 curves: 30 ips as edited (high-pass at 20 Hz), 15 ips the published curve an octave down, 7.5 another octave', () => {
   const amp = (bump, f) => {
     const x = sine(f, 0.002, SR * 3)
-    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeHeadBump: bump, tapeMakeupDb: 0, warmthCeilingDb: db(0.8) })
+    const { channelData: [y], latencySamples: L } = run(x, { warmth: 0, tape: 0.01, tapeHeadBump: bump, tapeMakeupDb: 0, warmthCeilingDb: db(0.8) })
     return db(toneAmp(y.subarray(L), f, 2 * SR, 3 * SR - 1000) / 0.002)
   }
   // endino.com A800 graph at 30 ips, eye-digitised (dB): 20 −7.8, 45 +1.5, 85 −0.55, 1k 0.
@@ -955,7 +817,7 @@ test('TAPE head bump A800 curves: 30 ips as edited (high-pass at 20 Hz), 15 ips 
 test('TAPE head bump A800: the makeup is measured through it (preview = apply) and lands the peak on the source; the meter ignores it', () => {
   const { x, peak } = kickTrack()
   for (const tapeHeadBump of ['a800-30', 'a800-15']) {
-    const p = { warmth: 0, tame: 0, soften: 0, tape: 6, tapeHeadBump, warmthCeilingDb: db(peak) }
+    const p = { warmth: 0, tape: 6, tapeHeadBump, warmthCeilingDb: db(peak) }
     const exact = measureTapeMakeup([x], SR, p).makeupDb
     assert.equal(measureTapeMakeup([x], SR, p, { exact: false }).makeupDb, exact)
     const { channelData: [y], latencySamples: L } = run(x, { ...p, tapeMakeupDb: exact })
@@ -963,7 +825,7 @@ test('TAPE head bump A800: the makeup is measured through it (preview = apply) a
     for (let i = L; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]))
     assert.ok(Math.abs(db(pk / peak)) < 0.05, `${tapeHeadBump}: peak ${db(pk / peak).toFixed(3)} dB off the source`)
     const k = new PhatassKernel(SR)
-    k.setParams(toKernelParams({ warmth: 0, tame: 0, soften: 0, tape: 0.01, tapeHeadBump, warmthCeilingDb: db(peak) }), true)
+    k.setParams(toKernelParams({ warmth: 0, tape: 0.01, tapeHeadBump, warmthCeilingDb: db(peak) }), true)
     k.enableMeter()
     const out = new Float32Array(128)
     for (let o = 0; o + 128 <= x.length; o += 128) k.process([x.subarray(o, o + 128)], [out], 128)

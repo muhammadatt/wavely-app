@@ -5,15 +5,19 @@
  * Chain: TAPE (CLEAN cubic or THICK hysteresis; its head bump follows the
  * tape speed) → makeup → WARMTH (fixed Saturation Bench layers on the low band,
  * CHARACTER picking their odd/even balance) → its PEAK GUARD (pinned on) → the
- * HF limiter shelf (FATSO / the bench's Tame only) → the TAPE HF SHELF at the
- * dial's speed → Output.
+ * TAPE HF SHELF at the dial's speed → Output.
+ *
+ * ⚠ THE HF LIMITER'S SHELF IS GONE (October 2026, owner's call): the Tame knob
+ * left the panel for the tape speeds, and the shelf lived on only for the
+ * bench's Tame / CURVE / DETECT and the FATSO position — costing ~20 % of an
+ * idle render and its 3 ms of latency for nothing that shipped. Its laws (the
+ * Fatso fit, VOICE, the original Tame/Tone) are recoverable at e427de9.
  *
  * Lives apart from the worklet and the effect wrapper so the apply path, the
  * composable and the tests can all read it without pulling either in.
  */
 
 import { ALIGN_TARGET_DBFS } from './dsp/inputAlign.js'
-import { shelfLatencySamples } from './dsp/hfLimit.js'
 import {
   SAT_BENCH_LAYER_LATENCY, SAT_BENCH_MAX_LAYERS, SAT_AMOUNT_FLOOR_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB,
 } from './dsp/saturationLayers.js'
@@ -60,28 +64,8 @@ export const PHATASS_DEFAULTS = {
   // The HF dial (`HF_PANEL_DETENTS`): the tape speed — 'ips30', 'ips15' or
   // 'ips7' — running the tape HF shelf (dsp/tapeHfShelf.js) and choosing the
   // head bump. 30 ips ships: the most HF headroom, near-transparent at TAPE 0.
-  // The bench also reaches 'off', 'fatso' (the HF Limiter's shelf on the fitted
-  // Fatso law) and 'bench' (its Tame / CURVE / DETECT below).
+  // The bench also reaches 'off' (the top end untouched).
   hf: 'ips30',
-  // BENCH ONLY (hf 'bench'). 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
-  // together, on the chosen `curve` (`tapeShelf`). 0 takes the shelf out. On
-  // the default 'voice' curve 5 is −4 dB re the voice, Range 12; 10 is −14,
-  // Range 27.
-  tame: 0,
-  // Tame's law (`tapeShelf`). 'voice' and 'fatso' both pin the corner at 2 kHz:
-  // 'fatso' is fitted to the EL7 Fatso's Warmth knob on music, 'voice' is the
-  // same shape 6 dB lower with the Range opening sooner, voiced on narration.
-  // 'original' is the DEPRECATED Tame/Tone law — off the panel, kept so a
-  // render can still reach it.
-  curve: 'fatso',
-  // 0–10 — the 'original' curve's corner only: 2 kHz (0) to 12 kHz (10).
-  // Not on the panel; the 2 kHz curves ignore it.
-  tone: 10,
-  // Where the shelf LISTENS: '2k' is the band it cuts; '4k' gives the detector
-  // its own split at 4 kHz (threshold DETECT_4K_COMP_DB lower), so sibilance
-  // triggers it before vowel brightness. The cut stays at 2 kHz either way.
-  // Defaults to the VOICE curve's pair (CURVE_DETECT).
-  detect: '2k',
   output: 0, // dB trim
   // Automatic trim on the plugin's OUTPUT (`OUTPUT_MAKEUPS`), on top of Output:
   // 'off' (ships), 'peak' (the output's peak back on the source's) or 'rms'
@@ -107,13 +91,10 @@ export const PHATASS_DEFAULTS = {
 
 export const WARMTH_MAX = 10
 export const ODD_EVEN_MAX = 100
-export const TAME_MAX = 10
 /**
  * ⚠ SOFTEN MOVED TO THE HF SOFTENER (October 2026, owner's call): its law and
- * constants live in hfSoftenerSoftenStage.js now, unchanged. PHAT*SS no longer
- * sets the shelf's Transient, so the limiter shelf's onset path is idle here.
+ * constants live in hfSoftenerSoftenStage.js now, unchanged.
  */
-export const TONE_MAX = 10
 export const OUTPUT_MIN_DB = -12
 export const OUTPUT_MAX_DB = 12
 
@@ -300,79 +281,6 @@ function clamp(v, lo, hi) {
 }
 
 /**
- * The tape HF shelf's pinned timing and shape. WARM (the one-pole split, the
- * EL7 Fatso's Warmth) at 35 ms with no Tail and no Transient is the setting the
- * HF Limiter matched to a Fatso Warmth 7 bounce (0.69–0.75 dB rms of band-gain
- * error) — the tape-ish gentle tilt rather than a ceiling.
- */
-export const TAPE_SHELF = { shape: 'warm', releaseMs: 35, tailMs: 0 }
-
-/** The two macro knobs' ends. */
-export const TONE_MIN_HZ = 2000
-export const TONE_MAX_HZ = 12000
-export const TAME_THRESHOLD_TOP_DB = 2 // Tame 0: threshold, dB re voice level
-export const TAME_THRESHOLD_PER_STEP_DB = 2 // each Tame step lowers it this much
-export const TAME_RANGE_PER_STEP_DB = 3.6 // and deepens the Range this much (36 at 10, Soften's top too)
-
-/**
- * FATSO mode's law, fitted to four EL7 Fatso bounces (Input 2 with Warmth
- * 2/5/6/7, one music clip at −23.0 dBFS gated RMS; docs/claude-dev-log.md,
- * "PHAT*SS — Tame/Tone against the EL7 Fatso's Warmth"). With the corner at the
- * Fatso's ~2 kHz, its Warmth moves the THRESHOLD (+10 / +4 / 0 dB re the voice
- * at Warmth 5 / 6 / 7; Warmth 2 does nothing) and its Range opens with it, from
- * ~3 dB at Warmth 6 to ≥ 9 at 7 — shallower than Tame's own law at the same
- * threshold. So: threshold `12 − 2·Tame`, Range `max(3, 3·Tame − 9)`, which puts
- * Warmth 5 / 6 / 7 at Tame 1 / 4 / 6 (fitted points; the travel between and
- * past them is not measured).
- *
- * ⚠ THE FATSO'S THRESHOLD IS ABSOLUTE, ours follows the file's level — the
- * mapping holds for a file at the fitted clip's level only. A steeper-than-
- * limiter law and a different release were tried and fit worse.
- */
-export const FATSO_CORNER_HZ = 2000
-export const FATSO_THRESHOLD_TOP_DB = 12
-export const FATSO_THRESHOLD_PER_STEP_DB = 2
-export const FATSO_RANGE_MIN_DB = 3
-export const FATSO_RANGE_PER_STEP_DB = 3
-export const FATSO_RANGE_OFFSET_DB = 9
-
-/**
- * VOICE curve: FATSO's shape moved for narration. On narration the treble's
- * 10 ms peaks sit ~8 dB lower re the gated RMS than on the Fatso's music clip
- * (median −7.4 / −8.5 dB on a bright and a dull narration vs +0.7), so FATSO's
- * thresholds (+10 … +6 at Tame 1–3) are crossed in 0–2 % of windows and the
- * bottom of the knob does nothing. Threshold `6 − 2·Tame`, Range
- * `max(3, 3·Tame − 3)` (27 at 10). Measured on the bright clip (4–16 kHz on
- * sibilant frames / 2–4 kHz on voiced): Tame 1 −1.6 / −0.2, Tame 6 −7.9 / −2.2,
- * Tame 10 −10.6 / −3.9 dB. ⚠ Two clips, chosen by reasoning, not audition.
- */
-export const VOICE_THRESHOLD_TOP_DB = 6
-export const VOICE_THRESHOLD_PER_STEP_DB = 2
-export const VOICE_RANGE_MIN_DB = 3
-export const VOICE_RANGE_PER_STEP_DB = 3
-export const VOICE_RANGE_OFFSET_DB = 3
-
-export const TAME_CURVES = ['voice', 'fatso', 'original']
-
-/**
- * The detector each curve is paired with, by ear: VOICE with 4K on narration,
- * FATSO with 2K on music. The panel moves DETECT to the pair when CURVE
- * changes; DETECT can still be set against it.
- */
-export const CURVE_DETECT = { voice: '4k', fatso: '2k' }
-
-/**
- * DETECT 4K: the detector's own one-pole split, and how much lower its
- * threshold sits. The 4 kHz band reads 2–5 dB under the 2 kHz one at the
- * percentiles the thresholds live at (p90–p99 of 10 ms peaks: bright narration
- * 3.8 / 1.9, dull 4.8 / 5.0, the Fatso music clip 2.5 / 2.5), so 3 dB keeps the
- * two positions doing about as much and makes the switch change WHAT triggers
- * the cut rather than how often. Applies to the 2 kHz curves only.
- */
-export const DETECT_4K_HZ = 4000
-export const DETECT_4K_COMP_DB = 3
-
-/**
  * HF — the detent that replaces the Tame knob on the panel.
  *
  * The TAPE SPEEDS run the tape HF shelf (`dsp/tapeHfShelf.js`): the top end
@@ -405,11 +313,8 @@ export const DETECT_4K_COMP_DB = 3
  * −0.6; the dull clip is untouched at 30 / 15 and loses ≤ 0.4 at 7.5
  * (scripts/phatass-hf-detents.mjs).
  *
- *   'off'   — the top end untouched
+ *   'off'   — the top end untouched (bench only)
  *   'ips30' / 'ips15' / 'ips7' — the tape HF shelf at 30 / 15 / 7.5 ips
- *   'fatso' — NOT tape: the HF Limiter's lookahead shelf on the fitted FATSO
- *             law at Tame 6 (Fatso Warmth 7), 2K detector, voice-relative
- *   'bench' — not a detent: Tame / CURVE / DETECT on the limiter shelf
  *
  * ⚠ AIR / SMOOTH / DARK, which recalibrated the LIMITER shelf from the file's
  * treble percentiles, were the first version of this dial and were replaced
@@ -437,17 +342,17 @@ export const HF_DETENTS = Object.freeze({
   ips30: TAPE_SPEEDS.ips30,
   ips15: TAPE_SPEEDS.ips15,
   ips7: TAPE_SPEEDS.ips7,
-  fatso: Object.freeze({ curve: 'fatso', tame: 6 }),
 })
 /**
  * The panel's positions, in order: the three tape speeds and nothing else
- * (owner, October 2026 — "reduce the detent to the three tape speeds"). OFF,
- * FATSO and 'bench' (Tame / CURVE / DETECT) stay reachable from the bench.
+ * (owner, October 2026 — "reduce the detent to the three tape speeds"). OFF
+ * stays reachable from the bench. A stored 'fatso' or 'bench' (the removed
+ * limiter shelf) falls back to the default speed.
  * Each speed brings its own head bump (`headBump`, while TAPE is up) unless
  * the bench's Head bump row overrides it.
  */
 export const HF_PANEL_DETENTS = Object.freeze(['ips30', 'ips15', 'ips7'])
-export const HF_MODES = Object.freeze([...HF_PANEL_DETENTS, 'off', 'fatso', 'bench'])
+export const HF_MODES = Object.freeze([...HF_PANEL_DETENTS, 'off'])
 
 /**
  * The tape HF shelf's params for a detent, or null when the detent is not a
@@ -467,52 +372,6 @@ export function tapeHfShelfParams(hf, voiceLevelDb) {
   }
 }
 
-/**
- * The limiter shelf a FIXED detent asks for (FATSO), or null otherwise.
- * `thresholdDb` is absolute dBFS.
- */
-export function hfDetentShelf(hf, voiceLevelDb) {
-  const d = HF_DETENTS[hf]
-  if (!d?.curve) return null
-  const s = tapeShelf(d.tame, TONE_MAX, d.curve)
-  return { cornerHz: s.cornerHz, thresholdDb: voiceLevelDb + s.thresholdRelDb, rangeDb: s.rangeDb, detectCornerHz: null }
-}
-
-/**
- * The macro: Tame sets how hard (Threshold and Range together, so the shelf
- * starts acting earlier AND may go deeper), Tone sets where (the corner, on a
- * log scale). Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz — the HF Limiter's
- * default threshold and corner, half again its Range (the HF Limiter stops at
- * 24; Tame reaches 36). Tame 0 takes the shelf out (Range 0). This is the
- * DEPRECATED 'original' curve; `curve` 'fatso' / 'voice' select the laws above,
- * with the corner pinned at 2 kHz and Tone ignored.
- *
- * @returns {{ cornerHz: number, thresholdRelDb: number, rangeDb: number }}
- */
-export function tapeShelf(tame, tone, curve = 'original') {
-  const t = clamp(Number(tame) || 0, 0, TAME_MAX)
-  if (curve === 'fatso') {
-    return {
-      cornerHz: FATSO_CORNER_HZ,
-      thresholdRelDb: FATSO_THRESHOLD_TOP_DB - FATSO_THRESHOLD_PER_STEP_DB * t,
-      rangeDb: t > 0 ? Math.max(FATSO_RANGE_MIN_DB, FATSO_RANGE_PER_STEP_DB * t - FATSO_RANGE_OFFSET_DB) : 0,
-    }
-  }
-  if (curve === 'voice') {
-    return {
-      cornerHz: FATSO_CORNER_HZ,
-      thresholdRelDb: VOICE_THRESHOLD_TOP_DB - VOICE_THRESHOLD_PER_STEP_DB * t,
-      rangeDb: t > 0 ? Math.max(VOICE_RANGE_MIN_DB, VOICE_RANGE_PER_STEP_DB * t - VOICE_RANGE_OFFSET_DB) : 0,
-    }
-  }
-  const s = clamp(Number.isFinite(tone) ? tone : TONE_MAX, 0, TONE_MAX)
-  return {
-    cornerHz: TONE_MIN_HZ * (TONE_MAX_HZ / TONE_MIN_HZ) ** (s / TONE_MAX),
-    thresholdRelDb: TAME_THRESHOLD_TOP_DB - TAME_THRESHOLD_PER_STEP_DB * t,
-    rangeDb: TAME_RANGE_PER_STEP_DB * t,
-  }
-}
-
 /** Map UI params to kernel params. */
 export function toKernelParams(params) {
   const p = { ...PHATASS_DEFAULTS, ...params }
@@ -520,18 +379,6 @@ export function toKernelParams(params) {
     ? clamp(p.voiceLevelDb, VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
     : ALIGN_TARGET_DBFS
   const hf = HF_MODES.includes(p.hf) ? p.hf : PHATASS_DEFAULTS.hf
-  const curve = TAME_CURVES.includes(p.curve) ? p.curve : PHATASS_DEFAULTS.curve
-  const det4k = p.detect === '4k' && curve !== 'original'
-  const tame = tapeShelf(p.tame, p.tone, curve)
-  const shelf = hf === 'bench'
-    ? {
-        cornerHz: tame.cornerHz,
-        thresholdDb: voice + tame.thresholdRelDb - (det4k ? DETECT_4K_COMP_DB : 0),
-        rangeDb: tame.rangeDb,
-        detectCornerHz: det4k ? DETECT_4K_HZ : null,
-      }
-    : hfDetentShelf(hf, voice)
-      ?? { cornerHz: FATSO_CORNER_HZ, thresholdDb: voice, rangeDb: 0, detectCornerHz: null }
   return {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     // Pinned on with Warmth: there is no switch.
@@ -541,16 +388,8 @@ export function toKernelParams(params) {
     // Signed: the head bump (after the curve) can leave the peak ABOVE the source.
     tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb)
       ? clamp(p.tapeMakeupDb, -TAPE_MAKEUP_MAX_DB, TAPE_MAKEUP_MAX_DB) : 0,
-    cornerHz: shelf.cornerHz,
-    thresholdDb: shelf.thresholdDb,
-    detectCornerHz: shelf.detectCornerHz,
-    rangeDb: shelf.rangeDb,
-    ...TAPE_SHELF,
     // The tape HF shelf (a tape-speed detent), null when out.
     tapeHf: tapeHfShelfParams(hf, voice),
-    // Soften moved to the HF Softener (hfSoftenerSoftenStage.js): the limiter
-    // shelf's Transient stays off here.
-    transientDb: 0,
     voiceLevelDb: voice,
     outputGainDb: clamp(Number(p.output) || 0, OUTPUT_MIN_DB, OUTPUT_MAX_DB),
     outputMakeupDb: p.outputMakeup === 'keep' ? keepTrimDb(p)
@@ -838,7 +677,7 @@ export const TAPE_HEAD_BUMP_MAX_SECTIONS = 3
 
 /**
  * The head bump in force: the bench's choice, or with 'speed' the dial's tape
- * speed's own curve (none for OFF / FATSO / the bench's Tame).
+ * speed's own curve (none for OFF).
  */
 export function headBumpFor(tapeHeadBump, hf) {
   if (tapeHeadBump === 'speed') return TAPE_SPEEDS[hf]?.headBump ?? 0
@@ -938,7 +777,7 @@ export const WARMTH_LATENCY_SAMPLES = slotOversample().filter(Boolean).length * 
  * setting moves the audio.
  */
 export function phatassLatencySamples(sampleRate) {
-  return TAPE_LATENCY_SAMPLES + WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate) + shelfLatencySamples(sampleRate)
+  return TAPE_LATENCY_SAMPLES + WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate)
 }
 
 /** Pre-roll for apply, seconds: several of the shelf's release. */

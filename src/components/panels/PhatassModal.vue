@@ -31,7 +31,7 @@ import { usePhatass } from '../../composables/usePhatass.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   WARMTH_MAX, TAPE_MAX_DB, OUTPUT_MIN_DB, OUTPUT_MAX_DB, CHARACTERS, TAPE_PANEL_CURVES, TAPE_SPEEDS,
-  warmthActive, hfDetentShelf, tapeHfShelfParams,
+  warmthActive, tapeHfShelfParams,
 } from '../../audio/phatassParams.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
@@ -134,18 +134,13 @@ const HF_OPTIONS = [
 ]
 const BENCH_HF = {
   off: { value: 'off', label: 'OFF', title: 'Set on the bench: the top end untouched, no head bump' },
-  fatso: { value: 'fatso', label: 'FATSO', title: 'Set on the bench: the top-end limiter fitted to an EL7 Fatso, no head bump' },
-  bench: { value: 'bench', label: 'BENCH', title: 'The bench\'s Tame has the top end; pick a speed to hand it back' },
 }
 // A bench-only position shows on the dial rather than leaving it blank.
 const hfOptions = computed(() => (BENCH_HF[phParams.hf] ? [...HF_OPTIONS, BENCH_HF[phParams.hf]] : HF_OPTIONS))
 // What the current position may cut at most.
 const hfCaption = computed(() => {
-  if (phParams.hf === 'bench') return 'BENCH'
   const t = tapeHfShelfParams(phParams.hf, phParams.voiceLevelDb)
-  if (t) return `UP TO −${Math.round(t.rangeDb)} dB`
-  const s = hfDetentShelf(phParams.hf, phParams.voiceLevelDb)
-  return s ? `UP TO −${Math.round(s.rangeDb)} dB` : 'TOP UNTOUCHED'
+  return t ? `UP TO −${Math.round(t.rangeDb)} dB` : 'TOP UNTOUCHED'
 })
 // What the Tape switch's caption says: the head bump the speed brings.
 const tapeCurveCaption = computed(() => {

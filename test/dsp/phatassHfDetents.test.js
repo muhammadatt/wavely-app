@@ -1,11 +1,11 @@
 /**
  * Run with:  npm test
  *
- * PHAT*SS — the HF detent (OFF / 30 / 15 / 7.5 IPS / FATSO) and the tape HF
+ * PHAT*SS — the Speed detent (30 / 15 / 7.5 IPS, OFF on the bench) and the tape HF
  * shelf the speeds run (`dsp/tapeHfShelf.js`).
  *
  * ⚠ THE LOAD-BEARING TEST IS ONSET AGAINST BODY. What makes the tape shelf a
- * different thing from the limiter shelf it sits beside is that it listens to
+ * different thing from the limiter shelf it replaced is that it listens to
  * energy with no lookahead: an attack goes through bright and sustained
  * brightness darkens, where a lookahead limiter cuts the attack first. That is
  * a statement about time, so it is tested in time.
@@ -15,9 +15,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { processPhatassBuffer } from '../../src/audio/phatassProcessor.js'
 import {
-  toKernelParams, tapeHfShelfParams, hfDetentShelf, tapeShelf, phatassLatencySamples,
-  HF_DETENTS, HF_PANEL_DETENTS, HF_MODES, TAPE_SPEEDS, TAPE_HF_LAW,
-  PHATASS_DEFAULTS, FATSO_CORNER_HZ, TAPE_SHELF,
+  toKernelParams, tapeHfShelfParams, phatassLatencySamples,
+  HF_PANEL_DETENTS, HF_MODES, TAPE_SPEEDS, TAPE_HF_LAW,
+  PHATASS_DEFAULTS,
 } from '../../src/audio/phatassParams.js'
 import { TapeHfShelf } from '../../src/audio/dsp/tapeHfShelf.js'
 import { highpass } from '../../src/audio/dsp/biquad.js'
@@ -110,10 +110,12 @@ function partChangeDb(y, L, part) {
 
 // ── The dial ─────────────────────────────────────────────────────────────────
 
-test('the Speed dial: 30 IPS ships; the panel offers the three speeds only, OFF / FATSO / bench Tame are the bench\'s', () => {
+test('the Speed dial: 30 IPS ships; the panel offers the three speeds only, OFF is the bench\'s', () => {
   assert.equal(PHATASS_DEFAULTS.hf, 'ips30')
   assert.deepEqual([...HF_PANEL_DETENTS], ['ips30', 'ips15', 'ips7'])
-  for (const m of ['off', 'fatso', 'bench']) assert.ok(HF_MODES.includes(m) && !HF_PANEL_DETENTS.includes(m), m)
+  assert.deepEqual([...HF_MODES], ['ips30', 'ips15', 'ips7', 'off'])
+  // The limiter shelf's positions are gone; a stored one falls back to the shipping speed.
+  for (const m of ['fatso', 'bench']) assert.deepEqual(toKernelParams({ hf: m, voiceLevelDb: -20 }), toKernelParams({ voiceLevelDb: -20 }), m)
   // Each speed brings its head bump: the A800 curve at that speed.
   assert.deepEqual(['ips30', 'ips15', 'ips7'].map(k => TAPE_SPEEDS[k].headBump), ['a800-30', 'a800-15', 'a800-7'])
   assert.equal(PHATASS_DEFAULTS.trebleStats, undefined, 'the treble statistics went with AIR / SMOOTH / DARK')
@@ -148,33 +150,19 @@ test('the tape speeds\' threshold follows the voice level only — TAPE reaches 
   assert.ok(thr[1] <= thr[0] && thr[2] <= thr[1])
 })
 
-test('each detent runs one shelf: a tape speed takes the limiter shelf out, FATSO is the fitted law with no tape shelf, OFF neither', () => {
-  for (const hf of ['ips30', 'ips15', 'ips7']) {
-    const k = toKernelParams({ hf, voiceLevelDb: -20, tape: 3 })
-    assert.equal(k.rangeDb, 0, `${hf}: the limiter shelf is out`)
-    assert.deepEqual(k.tapeHf, tapeHfShelfParams(hf, -20))
-  }
-  const f = toKernelParams({ hf: 'fatso', voiceLevelDb: -20 })
-  const law = tapeShelf(HF_DETENTS.fatso.tame, 10, 'fatso')
-  assert.equal(f.tapeHf, null)
-  assert.deepEqual([f.cornerHz, f.thresholdDb, f.rangeDb, f.detectCornerHz], [FATSO_CORNER_HZ, -20 + law.thresholdRelDb, law.rangeDb, null])
-  assert.deepEqual(hfDetentShelf('fatso', -20), { cornerHz: f.cornerHz, thresholdDb: f.thresholdDb, rangeDb: f.rangeDb, detectCornerHz: null })
+test('each speed runs the tape HF shelf, OFF none; the kernel has no limiter shelf any more', () => {
+  for (const hf of ['ips30', 'ips15', 'ips7']) assert.deepEqual(toKernelParams({ hf, voiceLevelDb: -20, tape: 3 }).tapeHf, tapeHfShelfParams(hf, -20))
   const o = toKernelParams({ hf: 'off', voiceLevelDb: -20 })
   assert.equal(o.tapeHf, null)
-  assert.equal(o.rangeDb, 0)
-  assert.equal(toKernelParams({ hf: 'bench', tame: 5, voiceLevelDb: -20 }).tapeHf, null)
+  for (const key of ['cornerHz', 'thresholdDb', 'rangeDb', 'detectCornerHz', 'shape', 'releaseMs', 'tailMs', 'transientDb']) assert.equal(key in o, false, key)
   // An unknown detent is the shipping one.
   assert.deepEqual(toKernelParams({ hf: 'nope', voiceLevelDb: -20 }), toKernelParams({ hf: PHATASS_DEFAULTS.hf, voiceLevelDb: -20 }))
-  for (const hf of HF_MODES) {
-    const k = toKernelParams({ hf, voiceLevelDb: -20 })
-    for (const key of Object.keys(TAPE_SHELF)) assert.equal(k[key], TAPE_SHELF[key], `${hf} ${key}`)
-  }
 })
 
 test('the tape shelf adds no latency: every detent renders at the plugin\'s one latency, and OFF passes the audio untouched', () => {
   const L = phatassLatencySamples(SR)
   const { x } = narration(1, 6)
-  for (const hf of [...HF_PANEL_DETENTS, 'off', 'fatso']) {
+  for (const hf of HF_MODES) {
     const r = processPhatassBuffer([x], SR, toKernelParams({ hf, warmth: 0, tape: 0, voiceLevelDb: msDb(x) }))
     assert.equal(r.latencySamples, L, hf)
     if (hf === 'off') for (let i = L; i < x.length; i++) if (r.channelData[0][i] !== x[i - L]) assert.fail(`OFF: sample ${i} differs`)

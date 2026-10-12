@@ -1,8 +1,7 @@
 <script setup>
 /**
- * PHAT*SS bench — TAPE's curve, its low push and head bump, an automatic
- * output trim, and the Tame / CURVE / DETECT controls the HF detents replaced
- * (moving Tame hands the shelf to them: `hf: 'bench'`). TAPE's place in the
+ * PHAT*SS bench — TAPE's curve, its loop step, low push and head bump, an
+ * automatic output trim, and the top end OFF. TAPE's place in the
  * chain (first) and the head bump's (after the curve) are pinned.
  *
  * ⚠ DELIBERATELY PLAIN, AND NOT BUILT FROM THE DEVICE CHROME, like the FET
@@ -13,7 +12,7 @@
  * APPLY both read them — what you hear is what renders.
  */
 import { computed, ref } from 'vue'
-import { PHATASS_DEFAULTS, TAME_MAX, CURVE_DETECT, OUTPUT_KEEPS, keepTrimDb } from '../../audio/phatassParams.js'
+import { PHATASS_DEFAULTS, OUTPUT_KEEPS, keepTrimDb } from '../../audio/phatassParams.js'
 
 const props = defineProps({
   /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `outputMakeup` and `outputMakeupDb`). */
@@ -33,7 +32,7 @@ const CHOICES = [
       { id: 'cubic', label: 'CUBIC', title: 'Ships. Fits the Studer A800 emulation best (0.09 dB rms): only the third harmonic until the peak reaches its flat at 3.52 dB, then a hard clip' },
       { id: 'tanh', label: 'TANH', title: 'Studer fit 0.17. Never flat: more high-order content at light settings, the peak nearer the knob at heavy ones' },
       { id: 'algebraic', label: 'ALGEBRAIC', title: 'Studer fit 0.19. Bends earliest: the most added distortion of the three at every setting' },
-      { id: 'hysteresis', label: 'HYSTERESIS', title: 'The Saturation Bench\'s Jiles-Atherton tape loop: it has memory, so kicks are squashed about twice as hard as snares and peaks round off without a hard clip. Closest per-hit match to the Studer A800 on drums. The knob is calibrated on a steady sine (a hit\'s first cycle can lose less); TAPE 8 ≈ bench drive 13. About 1.7× the whole plugin's render time and ~2× the makeup measurement (the Loop step row trades a little accuracy for less)' },
+      { id: 'hysteresis', label: 'HYSTERESIS', title: 'The Saturation Bench\'s Jiles-Atherton tape loop: it has memory, so kicks are squashed about twice as hard as snares and peaks round off without a hard clip. Closest per-hit match to the Studer A800 on drums. The knob is calibrated on a steady sine (a hit\'s first cycle can lose less); TAPE 8 ≈ bench drive 13. About 1.7× the whole plugin\'s render time and ~2× the makeup measurement (the Loop step row trades a little accuracy for less)' },
     ],
   },
   {
@@ -65,21 +64,6 @@ const CHOICES = [
     ],
   },
   {
-    key: 'curve', label: 'Tame curve',
-    options: [
-      { id: 'voice', label: 'VOICE', title: 'Tame voiced on narration: the brightest sibilance at low settings, deeper to the top of the knob' },
-      { id: 'fatso', label: 'FATSO', title: 'Tame fitted to an EL7 Fatso\'s Warmth knob on music: Fatso Warmth 5 / 6 / 7 at Tame 1 / 4 / 6' },
-      { id: 'original', label: 'ORIGINAL', title: 'The deprecated Tame/Tone law (Tone stays at 10, 12 kHz)' },
-    ],
-  },
-  {
-    key: 'detect', label: 'Detect',
-    options: [
-      { id: '2k', label: '2K', title: 'The shelf listens to the band it cuts, everything above 2 kHz' },
-      { id: '4k', label: '4K', title: 'The shelf listens above 4 kHz (threshold 3 dB lower) but still cuts from 2 kHz' },
-    ],
-  },
-  {
     key: 'outputMakeup', label: 'Output trim',
     options: [
       { id: 'off', label: 'OFF', title: 'Ships. No automatic trim: the output is whatever the chain and the Output knob make it' },
@@ -106,28 +90,16 @@ const trimText = computed(() => {
   return `trim ${v >= 0 ? '+' : ''}${v.toFixed(2)} dB`
 })
 
-const benchTame = computed(() => props.params.hf === 'bench')
-// OFF and FATSO left the Speed dial; the bench is where they live now.
+// OFF left the Speed dial; the bench is where it lives now.
 const BENCH_HF = [
   { id: 'off', label: 'OFF', title: 'The top end untouched, and no head bump (the bump follows the speed)' },
-  { id: 'fatso', label: 'FATSO', title: 'The HF Limiter\'s shelf on the law fitted to an EL7 Fatso\'s Warmth 7, instead of the tape HF shelf; no head bump' },
 ]
-const benchHf = computed(() => benchTame.value || BENCH_HF.some(o => o.id === props.params.hf))
+const benchHf = computed(() => BENCH_HF.some(o => o.id === props.params.hf))
 const pristine = computed(() => !benchHf.value && CHOICES.every(ch => props.params[ch.key] === PHATASS_DEFAULTS[ch.key]))
-
-// Moving Tame takes the shelf off the panel's detent and onto these controls.
-function setTame(v) {
-  if (props.disabled) return
-  if (!benchTame.value) emit('set', 'hf', 'bench')
-  emit('set', 'tame', v)
-}
 
 function set(key, value) {
   if (props.disabled || props.params[key] === value) return
   emit('set', key, value)
-  // Each curve brings its paired detector (VOICE + 4K, FATSO + 2K); Detect can
-  // still be moved afterwards.
-  if (key === 'curve' && CURVE_DETECT[value]) set('detect', CURVE_DETECT[value])
 }
 
 function onKey(e, ch) {
@@ -225,19 +197,6 @@ function reset() {
           >{{ o.label }}</button>
         </div>
         <span class="ml-auto font-mono text-[9px] text-white/30">{{ benchHf ? params.hf : 'speed dial' }}</span>
-      </div>
-
-      <div class="mt-3 flex items-center gap-2" title="The Tame knob the HF detents replaced. Moving it takes the shelf off the panel's detent (HF shows BENCH TAME) onto Tame / Tame curve / Detect; choosing a detent on the panel hands it back">
-        <span id="phatass-bench-tame" class="w-[70px] shrink-0 text-[10px] text-white/45">Tame</span>
-        <input
-          type="range" :min="0" :max="TAME_MAX" step="0.1" aria-labelledby="phatass-bench-tame"
-          class="flex-1 accent-amber-300 disabled:opacity-30"
-          :value="params.tame" :disabled="disabled"
-          @input="e => setTame(Number(e.target.value))"
-        >
-        <span class="w-[64px] shrink-0 text-right font-mono text-[9px]" :class="benchTame ? 'text-amber-100' : 'text-white/30'">
-          {{ benchTame ? Number(params.tame).toFixed(1) : 'detent' }}
-        </span>
       </div>
 
       <div class="mt-4 flex items-center gap-2">

@@ -29,7 +29,7 @@ import { ALIGN_TARGET_DBFS } from '../src/audio/dsp/inputAlign.js'
 import { onePoleLowpass } from '../src/audio/dsp/hfLimit.js'
 import { processPhatassBuffer } from '../src/audio/phatassProcessor.js'
 import { measureTapeMakeup } from '../src/audio/phatassTapeMakeup.js'
-import { toKernelParams, HF_PANEL_DETENTS, TAPE_SPEEDS, TAPE_HF_LAW, tapeHfShelfParams, hfDetentShelf } from '../src/audio/phatassParams.js'
+import { toKernelParams, HF_PANEL_DETENTS, TAPE_SPEEDS, TAPE_HF_LAW, tapeHfShelfParams } from '../src/audio/phatassParams.js'
 import { getFFT } from '../src/audio/dsp/fft.js'
 
 const FRAME = 1024
@@ -133,15 +133,14 @@ for (const path of process.argv.slice(2)) {
   for (const tape of TAPES) {
     let pk = 0
     for (const v of x) pk = Math.max(pk, Math.abs(v))
-    const base0 = { warmth: 0, soften: 0, tape, voiceLevelDb: voice, warmthCeilingDb: 20 * Math.log10(pk) }
+    const base0 = { warmth: 0, tape, voiceLevelDb: voice, warmthCeilingDb: 20 * Math.log10(pk) }
     const base = { ...base0, tapeMakeupDb: tape > 0 ? measureTapeMakeup([x], sr, base0).makeupDb : 0 }
     const ref = frameBands(render(x, sr, { ...base, hf: 'off' }), sr)
     console.log(`  TAPE ${tape} (makeup ${base.tapeMakeupDb.toFixed(2)} dB):`)
     for (const hf of HF_PANEL_DETENTS.filter(d => d !== 'off')) {
       const r = compare(kinds, ref, frameBands(render(x, sr, { ...base, hf }), sr))
       const t = tapeHfShelfParams(hf, voice)
-      const lim = hfDetentShelf(hf, voice)
-      const label = t ? `${TAPE_SPEEDS[hf].label} ips (${(t.thresholdDb - voice).toFixed(1)})` : `${hf} (${(lim.thresholdDb - voice).toFixed(1)})`
+      const label = `${TAPE_SPEEDS[hf].label} ips (${(t.thresholdDb - voice).toFixed(1)})`
       console.log(`    ${label.padEnd(18)} sib ${fmt(r.sib)} (on ${fmt(r.onset)} / body ${fmt(r.body)})  vow ${fmt(r.vow)}  hf ${fmt(r.hf)}  cut% ${r.cutPct.toFixed(1).padStart(5)}`)
     }
   }
