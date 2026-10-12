@@ -6886,3 +6886,67 @@ solution:
 
 Guarded FAST renders THICK in ~350–400 ms against EXACT's 488 (timings vary run to run). It
 is not auditioned.
+
+## PHAT*SS — performance pass (October 2026)
+
+Profiled on the owner's drums (17.5 s, stereo). Per 10 s of stereo before the pass: idle
+179 ms; Warmth 5 / TAPE 6 / 30 ips 1148 ms; THICK 1539 ms. The oversamplers' up/down
+filters took 44 % of the typical render. The owner picked #2, #4, then #3 from the review,
+and asked for the Tame limiter to be deprecated outright.
+
+### #4: idle stages
+
+**The limiter shelf is removed.** The HF Limiter's lookahead shelf only served the bench's
+Tame / CURVE / DETECT and FATSO once the Speed dial replaced Tame. It still ran its full
+detector on every render: about 20 % of the idle cost, plus 3 ms of latency.
+
+- Removed from the kernel, params, bench and modal; recoverable at e427de9.
+- A stored `hf: 'fatso' | 'bench'` falls back to the shipping speed.
+- `scripts/phatass-fatso-fit.mjs` went with it; its readings stay in
+  `data/fatso/el7_warmth_fits.json`.
+
+**The Warmth guard is a plain delay while Warmth is off.** It skips its min and smoother
+then. With Warmth off its added signal is 0, so the output is the same. The pipeline
+restarts in its all-1 state when Warmth comes back.
+
+| Setting (per 10 s stereo) | Before | After |
+|---|---|---|
+| Idle | 179 ms | 63 ms |
+| Warmth 5 / TAPE 6 / 30 ips | 1148 ms | 894 ms |
+| THICK | 1539 ms | 1204 ms |
+
+### #2: exact makeup in the background
+
+Once the fast makeup lands and the knobs have been still for 600 ms, the exact makeup is
+measured in the background. It is kept (last 16) against the document, revision, span and
+every TAPE setting that moves it.
+
+- Apply uses a matching value instead of rendering TAPE over the selection again.
+- Returning to an already-measured setting skips the fast search too.
+- Browser check on the drums: fast at 11.9 s, exact at 13.0 s, and no makeup render during
+  apply.
+
+### #3: Warmth readout
+
+**Bands are sampled across the whole selection.** They used to cover only the first 30 s.
+On a 175 s file mixing narration and drums, that window read up to 7.7 dB off the whole
+render (+10.3 at 60–120 Hz against +2.4). Selections up to 15 s now render whole. Longer
+ones render 12 blocks of 1 s, one per stratum at a golden-ratio offset, each with a 0.25 s
+run-in, with energies pooled. Results on the 175 s file:
+
+| Blocks | Worst error, Warmth 5 / 10 | Time |
+|---|---|---|
+| 12 × 1 s (chosen) | 0.41 / 0.58 dB | ~650 ms (the window took 1.3 s) |
+| 16–30 blocks | 0.28–0.57 dB | longer |
+
+A 0.5 s run-in and a faded-in run-in both read the same as the chosen one.
+
+⚠ A synthetic test with hard joins between sections read the 20–60 Hz band 3.5 dB off.
+The cut itself is sub content that the whole render sees and the blocks mostly miss. Test
+material needs smooth joins.
+
+**The whole-region peak pass is gone.** The guard is pinned on with the selection's peak as
+its ceiling, and its no-overshoot proof holds |out| ≤ that peak. Measured 0.000 dB of
+change at Warmth 5 and 10 on the 175 s file. So a long selection reports that bound
+instead of rendering it, which used to cost ~8 s of CPU per 3 min of mono, per knob turn.
+Short selections still measure it.

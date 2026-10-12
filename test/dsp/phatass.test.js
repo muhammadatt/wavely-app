@@ -880,3 +880,43 @@ test('output trim KEEP keeps outputKeep of TAPE\'s makeup (85 % by default) and 
   const { x } = syllableTrack(0.5)
   assert.ok(Math.abs(measureOutputMakeup([x], SR, p).makeupDb - -1.2) < 1e-9)
 })
+
+test('Warmth readout blocks: one per stratum across the whole selection, each with its run-in, inside the selection', async () => {
+  const { readoutBlocks, READOUT_BLOCKS, READOUT_BLOCK_S, READOUT_PREROLL_S } = await import('../../src/audio/phatassWarmthReadout.js')
+  const n = 120 * SR
+  const b = readoutBlocks(n, SR)
+  assert.equal(b.length, READOUT_BLOCKS)
+  for (let k = 0; k < b.length; k++) {
+    const [a, e, skip] = b[k]
+    assert.ok(a >= 0 && e <= n)
+    assert.equal(e - (a + skip), Math.round(READOUT_BLOCK_S * SR))
+    assert.equal(skip, Math.round(READOUT_PREROLL_S * SR))
+    // Inside its own stratum.
+    assert.ok(a + skip >= Math.floor((k * n) / READOUT_BLOCKS) && e <= Math.ceil(((k + 1) * n) / READOUT_BLOCKS) + 1)
+  }
+})
+
+test('Warmth readout sampled bands track the whole render; the guard holds the peak, so a long selection can report its bound', async () => {
+  const { measureWarmthReadout, measureWarmthBandsSampled, readoutBlocks } = await import('../../src/audio/phatassWarmthReadout.js')
+  // 40 s of syllables with a low-heavy part that swells in and out twice — the
+  // material changes across the selection, so a window would misread it.
+  // (Joins are smooth: a hard cut between sections is itself sub content.)
+  const a = syllableTrack(40)
+  const x = new Float32Array(40 * SR)
+  for (let i = 0; i < x.length; i++) {
+    const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * 2 * i) / x.length)
+    x[i] = a.x[i] + w * 0.4 * Math.sin((2 * Math.PI * 70 * i) / SR) * (0.6 + 0.4 * Math.sin((2 * Math.PI * 2 * i) / SR))
+  }
+  let pk = 0
+  for (const v of x) pk = Math.max(pk, Math.abs(v))
+  const kp = toKernelParams({ warmth: 6, oddEven: 40, warmthCeilingDb: db(pk), warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14) })
+  const whole = measureWarmthReadout([x], SR, kp.warmthLayers, { guard: kp.warmthGuard })
+  const blocks = readoutBlocks(x.length, SR).map(([s, e, skip]) => ({ channelData: [x.subarray(s, e)], skip }))
+  const sampled = measureWarmthBandsSampled(blocks, SR, kp.warmthLayers, kp.warmthGuard)
+  for (let i = 0; i < whole.bandsDb.length; i++) {
+    if (whole.bandsDb[i] === null) continue
+    assert.ok(Math.abs(sampled[i] - whole.bandsDb[i]) < 1, `band ${i}: sampled ${sampled[i].toFixed(2)} vs whole ${whole.bandsDb[i].toFixed(2)}`)
+  }
+  // The guard's ceiling is the selection's peak, and the stage never passes it.
+  assert.ok(whole.peakDb <= whole.inputPeakDb + 1e-6, `peak moved ${whole.peakDb - whole.inputPeakDb}`)
+})

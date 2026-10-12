@@ -15,7 +15,7 @@ import { measureVoiceProfile } from '../audio/voiceProfile.js'
 import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
 import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
 import { measureTopLossDb, autoAirDb } from '../audio/hfSoftenerAutoAir.js'
-import { measureWarmthReadout } from '../audio/phatassWarmthReadout.js'
+import { measureWarmthReadout, measureWarmthBandsSampled } from '../audio/phatassWarmthReadout.js'
 import { measureTapeMakeup } from '../audio/phatassTapeMakeup.js'
 import { measureOutputMakeup } from '../audio/phatassOutputMakeup.js'
 
@@ -121,8 +121,9 @@ self.onmessage = function (e) {
 /** PHAT*SS's Warmth readout — see phatassWarmthReadout.js. */
 function phatassWarmthReadout(channelData, sampleRate, params) {
   try {
-    const { layers, bands = true, peak = true, guard = null } = params ?? {}
-    postDone(measureWarmthReadout(channelData, sampleRate, layers, { bands, peak, guard }))
+    const { layers, bands = true, peak = true, guard = null, blocks = null } = params ?? {}
+    if (blocks) postDone({ bandsDb: measureWarmthBandsSampled(blocks, sampleRate, layers, guard) })
+    else postDone(measureWarmthReadout(channelData, sampleRate, layers, { bands, peak, guard }))
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }

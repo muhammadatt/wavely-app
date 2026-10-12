@@ -56,6 +56,7 @@ import {
   phatassLatencySamples,
   toKernelParams as toPhatassKernelParams,
 } from './phatassParams.js'
+import { READOUT_WHOLE_MAX_S, readoutBlocks } from './phatassWarmthReadout.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
@@ -914,75 +915,38 @@ export function measureHFSoftenerAutoAir(segments, start, end, params, sampleRat
 }
 
 /**
- * PHAT*SS's Warmth readout BANDS for a region, over the usual capped
- * analysis window. When the window is the whole region the peak comes back
- * too; otherwise `peakDb` is null and the caller asks
- * `measurePhatassWarmthPeak` for it. Resolves `{ bandsDb, peakDb }`.
+ * PHAT*SS's Warmth readout for a region (see phatassWarmthReadout.js).
+ * Selections up to READOUT_WHOLE_MAX_S are rendered whole, bands and peak.
+ * Longer ones render READOUT_BLOCKS sampled blocks for the bands, and the peak
+ * is the guard's bound — the selection's own peak, scanned, not rendered —
+ * whenever the guard has a ceiling (null otherwise). Resolves
+ * `{ bandsDb, peakDb, inputPeakDb }`.
  */
 export function measurePhatassWarmthBands(segments, start, end, params, sampleRate, channels) {
-  const whole = analysedWholeRegion(start, end)
   const { warmthLayers, warmthGuard } = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
-  return measureInWorker('phatassWarmthReadout', segments, start, end, {
-    layers: warmthLayers, guard: warmthGuard, bands: true, peak: whole,
-  }, sampleRate, channels).then(d => ({
-    bandsDb: d.bandsDb,
-    peakDb: whole ? d.peakDb : null,
-    inputPeakDb: whole ? d.inputPeakDb : null,
+  if (!(end - start > READOUT_WHOLE_MAX_S)) {
+    return measureWholeRegionInWorker('phatassWarmthReadout', segments, start, end, {
+      layers: warmthLayers, guard: warmthGuard, bands: true, peak: true,
+    }, sampleRate, channels).then(d => ({ bandsDb: d.bandsDb, peakDb: d.peakDb, inputPeakDb: d.inputPeakDb }))
+  }
+  const n = Math.floor((end - start) * sampleRate)
+  const blocks = readoutBlocks(n, sampleRate).map(([a, b, skip]) => ({
+    channelData: renderRegionToBuffer(segments, start + a / sampleRate, start + b / sampleRate, sampleRate, channels),
+    skip,
   }))
-}
-
-/**
- * The Warmth stage's output peak over the WHOLE region — never the capped
- * window, which can only read it low. It can take seconds on a long selection,
- * so it runs on its own worker, and a newer call terminates the one in flight:
- * a knob turn must never queue behind a stale whole-chapter render, and the
- * shared measurement worker is serial. A superseded call rejects with
- * `err.cancelled = true`. Resolves `{ peakDb, inputPeakDb }`, dBFS — the
- * stage's output peak and the region's own, over the same span.
- */
-let warmthPeakWorker = null
-let warmthPeakReject = null
-/** Terminate the in-flight whole-region Warmth peak pass, if any; it rejects with `err.cancelled`. */
-export function cancelPhatassWarmthPeak() {
-  if (!warmthPeakWorker) return
-  warmthPeakWorker.terminate()
-  warmthPeakWorker = null
-  const err = new Error('superseded')
-  err.cancelled = true
-  const reject = warmthPeakReject
-  warmthPeakReject = null
-  reject?.(err)
-}
-
-export function measurePhatassWarmthPeak(segments, start, end, params, sampleRate, channels) {
-  cancelPhatassWarmthPeak()
-  const { warmthLayers, warmthGuard } = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
+  const bounded = warmthGuard.on && Number.isFinite(warmthGuard.ceilingDb)
+  const inputPeakDb = bounded ? regionPeakDb(segments, start, end, sampleRate, channels) : null
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
-    warmthPeakWorker = worker
-    warmthPeakReject = reject
-    const finish = () => {
-      worker.terminate()
-      if (warmthPeakWorker === worker) {
-        warmthPeakWorker = null
-        warmthPeakReject = null
-      }
-    }
-    worker.onmessage = (e) => {
-      finish()
-      if (e.data?.type === 'done') resolve({ peakDb: e.data.peakDb, inputPeakDb: e.data.inputPeakDb })
-      else reject(new Error(e.data?.message ?? 'warmth peak failed'))
-    }
-    worker.onerror = (err) => {
-      finish()
-      reject(err)
-    }
-    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
-    worker.postMessage(
-      { __id: 0, type: 'phatassWarmthReadout', channelData, sampleRate, params: { layers: warmthLayers, guard: warmthGuard, bands: false, peak: true } },
-      channelData.map(c => c.buffer),
+    const id = ++measureSeq
+    measurePending.set(id, { resolve, reject })
+    getMeasureWorker().postMessage(
+      {
+        __id: id, type: 'phatassWarmthReadout', channelData: [], sampleRate,
+        params: { layers: warmthLayers, guard: warmthGuard, blocks },
+      },
+      blocks.flatMap(b => b.channelData.map(c => c.buffer)),
     )
-  })
+  }).then(d => ({ bandsDb: d.bandsDb, peakDb: inputPeakDb, inputPeakDb }))
 }
 
 /**

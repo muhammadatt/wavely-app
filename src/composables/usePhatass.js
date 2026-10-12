@@ -2,8 +2,8 @@ import { reactive, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import {
-  applyPhatassRegion, cancelPhatassOutputMakeup, cancelPhatassTapeMakeup, cancelPhatassWarmthPeak, computePeakCache,
-  measurePhatassOutputMakeup, measurePhatassTapeMakeup, measurePhatassWarmthBands, measurePhatassWarmthPeak,
+  applyPhatassRegion, cancelPhatassOutputMakeup, cancelPhatassTapeMakeup, computePeakCache,
+  measurePhatassOutputMakeup, measurePhatassTapeMakeup, measurePhatassWarmthBands,
 } from '../audio/processing.js'
 import { regionAlignDb, regionPeakDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
@@ -407,8 +407,9 @@ export function usePhatass() {
 
   /**
    * Measure the Warmth readout for the selection (the whole file when nothing
-   * is selected): bands over the usual capped window, then the peak over the
-   * whole region on its own cancellable worker. Stale answers are dropped.
+   * is selected): bands sampled across it, and the peak — measured on a short
+   * selection, the guard's bound (the selection's peak) on a long one. Stale
+   * answers are dropped.
    */
   async function refreshWarmthReadout() {
     const seq = ++readoutSeq
@@ -429,13 +430,7 @@ export function usePhatass() {
         state.segments, start, end, params, sampleRate, channels,
       )
       if (seq !== readoutSeq) return
-      phWarmthReadout.value = { bandsDb, peakDb, inputPeakDb, bandsPending: false, peakPending: peakDb === null }
-      if (peakDb !== null) return
-      const whole = await measurePhatassWarmthPeak(
-        state.segments, start, end, params, sampleRate, channels,
-      )
-      if (seq !== readoutSeq) return
-      phWarmthReadout.value = { ...phWarmthReadout.value, ...whole, peakPending: false }
+      phWarmthReadout.value = { bandsDb, peakDb, inputPeakDb, bandsPending: false, peakPending: false }
     } catch (err) {
       if (err?.cancelled || seq !== readoutSeq) return
       console.error('PHAT*SS warmth readout failed:', err)
@@ -468,7 +463,6 @@ export function usePhatass() {
     clearTimeout(readoutTimer)
     readoutTimer = null
     readoutSeq++
-    cancelPhatassWarmthPeak()
     phWarmthReadout.value = { ...phWarmthReadout.value, bandsPending: false, peakPending: false }
   }
 

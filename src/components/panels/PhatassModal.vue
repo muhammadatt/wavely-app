@@ -265,7 +265,7 @@ async function applyAndClose() {
       <div
         v-if="warmthActive(phParams)"
         class="mt-[16px] flex justify-center items-end gap-[18px]"
-        title="What Warmth (with its peak guard) does to this selection: each low band's level change, output minus input (bands over the selection, up to its first 30 s), and how much the highest peak over the whole selection moves (after Output), with the new peak level under it. Red: a sub boost, or a peak above −1 dBFS"
+        title="What Warmth (with its peak guard) does to this selection: each low band's level change, output minus input (bands sampled across the whole selection), and how much the highest peak over the whole selection moves (after Output; the guard never lets Warmth raise it, so on a long selection this is the guard\'s bound rather than a render), with the new peak level under it. Red: a sub boost, or a peak above −1 dBFS"
       >
         <div v-for="c in readoutCells" :key="c.label" class="flex flex-col items-center gap-[3px]">
           <span style="font:600 8.5px/1 'JetBrains Mono', monospace;letter-spacing:.1em;color:rgba(255,255,255,.4)">{{ c.label }}</span>
