@@ -1,0 +1,216 @@
+<script setup>
+/**
+ * PHAT*SS bench — TAPE's curve, its loop step, low push and head bump, an
+ * automatic output trim, and the top end OFF. TAPE's place in the
+ * chain (first) and the head bump's (after the curve) are pinned.
+ *
+ * ⚠ DELIBERATELY PLAIN, AND NOT BUILT FROM THE DEVICE CHROME, like the FET
+ * Punch and OptoSmooth benches: the knobs and rockers in `../knobs/` are the
+ * product's visual language, and these are not product controls. CUBIC, no push,
+ * no bump and OFF ship; the others are kept to A/B against them, gated off in production
+ * (`isPhatassBenchVisible`). They are ordinary PHAT*SS params, so preview and
+ * APPLY both read them — what you hear is what renders.
+ */
+import { computed, ref } from 'vue'
+import { PHATASS_DEFAULTS, OUTPUT_KEEPS, keepTrimDb } from '../../audio/phatassParams.js'
+
+const props = defineProps({
+  /** The panel's params (reads `tapeCurve`, `tapeLowPush`, `tapeHeadBump`, `outputMakeup` and `outputMakeupDb`). */
+  params: { type: Object, required: true },
+  disabled: { type: Boolean, default: false },
+  /** The output trim's measurement is in flight. */
+  trimPending: { type: Boolean, default: false },
+})
+const emit = defineEmits(['set'])
+
+const open = ref(false)
+
+const CHOICES = [
+  {
+    key: 'tapeCurve', label: 'Tape curve',
+    options: [
+      { id: 'cubic', label: 'CUBIC', title: 'Ships. Fits the Studer A800 emulation best (0.09 dB rms): only the third harmonic until the peak reaches its flat at 3.52 dB, then a hard clip' },
+      { id: 'tanh', label: 'TANH', title: 'Studer fit 0.17. Never flat: more high-order content at light settings, the peak nearer the knob at heavy ones' },
+      { id: 'algebraic', label: 'ALGEBRAIC', title: 'Studer fit 0.19. Bends earliest: the most added distortion of the three at every setting' },
+      { id: 'hysteresis', label: 'HYSTERESIS', title: 'The Saturation Bench\'s Jiles-Atherton tape loop: it has memory, so kicks are squashed about twice as hard as snares and peaks round off without a hard clip. Closest per-hit match to the Studer A800 on drums. The knob is calibrated on a steady sine (a hit\'s first cycle can lose less); TAPE 8 ≈ bench drive 13. About 1.7× the whole plugin\'s render time and ~2× the makeup measurement (the Loop step row trades a little accuracy for less)' },
+    ],
+  },
+  {
+    key: 'tapeStep', label: 'Loop step',
+    options: [
+      { id: 'exact', label: 'EXACT', title: 'Ships. THICK\'s hysteresis loop on its RK2 step (two evaluations per oversampled sample)' },
+      { id: 'fast', label: 'FAST', title: 'The same loop on a one-evaluation step: ~3× cheaper on the loop, ~50 dB under the signal from EXACT at heavy drive. Only acts on THICK' },
+    ],
+  },
+  {
+    key: 'tapeLowPush', label: 'Low push',
+    options: [
+      { id: 0, label: 'OFF', title: 'Ships. TAPE drives every frequency alike' },
+      { id: 3, label: '+3', title: '+3 dB low shelf (150 Hz) into the curve, undone after: the lows saturate a little first' },
+      { id: 6, label: '+6', title: '+6 dB low shelf (150 Hz) into the curve, undone after: the lows saturate first. On drums, TAPE 6 here squashes the kick like the Studer A800' },
+    ],
+  },
+  {
+    key: 'tapeHeadBump', label: 'Head bump',
+    options: [
+      { id: 'speed', label: 'SPEED', title: 'Ships. The Speed dial\'s own A800 curve: 30, 15 or 7.5 ips' },
+      { id: 0, label: 'OFF', title: 'No low lift' },
+      { id: 3, label: '+3', title: '+3 dB low shelf (40 Hz) after TAPE\'s curve: the playback head\'s low lift, at full size in the output. The makeup may come out as a cut' },
+      { id: 6, label: '+6', title: '+6 dB low shelf after the curve. The drums render needed none' },
+      { id: 9, label: '+9', title: '+9 dB low shelf after the curve: past both Studer renders' },
+      { id: 'a800-30', label: 'A800 30', title: 'The Studer A800 hardware\'s playback low end at 30 ips (published measurement): roll-off below ~35 Hz to −8 dB at 20 Hz, +1.2–1.5 dB at 40–50 Hz, a small dip at 80–90. Fixed depth. Closest to the Studer emulation\'s kick by ear' },
+      { id: 'a800-15', label: 'A800 15', title: 'The same A800 curve an octave down (15 ips): roll-off below ~18 Hz, bump at ~20–25 Hz, dip at ~40–45. Fixed depth' },
+      { id: 'a800-7', label: 'A800 7.5', title: 'An octave lower again (7.5 ips): bump at ~10 Hz, dip at ~20' },
+    ],
+  },
+  {
+    key: 'outputMakeup', label: 'Output trim',
+    options: [
+      { id: 'off', label: 'OFF', title: 'Ships. No automatic trim: the output is whatever the chain and the Output knob make it' },
+      { id: 'peak', label: 'PEAK', title: 'Trims the whole plugin so its output peak lands on the selection\'s own peak. TAPE\'s makeup is peak-restoring either way' },
+      { id: 'keep', label: 'KEEP', title: 'Keeps a share of TAPE\'s makeup (the Keep row) and trims the rest off the output. No measurement: instant' },
+      { id: 'rms', label: 'RMS', title: 'Trims the whole plugin so its output RMS matches the selection\'s: a level-matched A/B against bypass' },
+    ],
+  },
+  {
+    key: 'outputKeep', label: 'Keep',
+    options: OUTPUT_KEEPS.map(w => ({ id: w, label: `${Math.round(w * 100)}%`, title: `KEEP leaves ${Math.round(w * 100)}% of TAPE's makeup and trims the rest off the output; acts only while Output trim is on KEEP` })),
+  },
+
+]
+
+const trimText = computed(() => {
+  if (props.params.outputMakeup === 'keep') {
+    const v = keepTrimDb(props.params)
+    return `trim ${v >= 0 ? '+' : ''}${v.toFixed(2)} dB`
+  }
+  if (!['peak', 'rms'].includes(props.params.outputMakeup)) return ''
+  if (props.trimPending) return 'trim …'
+  const v = Number(props.params.outputMakeupDb) || 0
+  return `trim ${v >= 0 ? '+' : ''}${v.toFixed(2)} dB`
+})
+
+// OFF left the Speed dial; the bench is where it lives now.
+const BENCH_HF = [
+  { id: 'off', label: 'OFF', title: 'The top end untouched, and no head bump (the bump follows the speed)' },
+]
+const benchHf = computed(() => BENCH_HF.some(o => o.id === props.params.hf))
+const pristine = computed(() => !benchHf.value && CHOICES.every(ch => props.params[ch.key] === PHATASS_DEFAULTS[ch.key]))
+
+function set(key, value) {
+  if (props.disabled || props.params[key] === value) return
+  emit('set', key, value)
+}
+
+function onKey(e, ch) {
+  const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
+  if (!keys.includes(e.key) || props.disabled) return
+  e.preventDefault()
+  const ids = ch.options.map(o => o.id)
+  const cur = Math.max(0, ids.indexOf(props.params[ch.key]))
+  const next = e.key === 'Home' ? 0
+    : e.key === 'End' ? ids.length - 1
+      : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+        ? (cur - 1 + ids.length) % ids.length
+        : (cur + 1) % ids.length
+  set(ch.key, ids[next])
+  e.currentTarget.querySelectorAll('[role="radio"]')[next]?.focus()
+}
+
+function reset() {
+  for (const ch of CHOICES) set(ch.key, PHATASS_DEFAULTS[ch.key])
+  if (benchHf.value) set('hf', PHATASS_DEFAULTS.hf)
+}
+</script>
+
+<template>
+  <div class="mt-5 border-t border-white/10 pt-3">
+    <button
+      type="button"
+      class="flex w-full items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-white/40 hover:text-white/70"
+      @click="open = !open"
+    >
+      <span class="inline-block w-3 text-center">{{ open ? '−' : '+' }}</span>
+      <span>Tape bench</span>
+      <span
+        v-if="!pristine"
+        class="rounded-sm px-1.5 py-px text-[9px] tracking-normal bg-amber-300 text-[#1a1a1a]"
+      >MODIFIED</span>
+      <span class="ml-auto normal-case tracking-normal text-white/25">
+        {{ open ? '' : 'not a shipping control' }}
+      </span>
+    </button>
+
+    <div v-if="open" class="mt-3">
+      <p class="mb-3 text-[10px] leading-[1.5] text-white/35">
+        A/B TAPE's curve, its low push and head bump, and an automatic output trim against what ships (the panel's CLEAN / THICK curve, no push, the Speed dial's own bump — SPEED — and OFF). Top end OFF / FATSO and Tame, its curve and Detect are what the Speed dial replaced; Curve and Detect act only while Tame has the shelf. TAPE runs first; the head bump follows the curve. With a low push the TAPE knob is a drive: a kick can lose more than its number.
+        Hidden in production builds. Both preview and APPLY read them.
+      </p>
+
+      <div v-for="ch in CHOICES" :key="ch.key" class="mt-3">
+        <div class="flex items-center gap-2">
+          <span :id="`phatass-bench-${ch.key}`" class="w-[70px] shrink-0 text-[10px] text-white/45">{{ ch.label }}</span>
+          <div
+            role="radiogroup"
+            :aria-labelledby="`phatass-bench-${ch.key}`"
+            class="flex gap-1"
+            @keydown="onKey($event, ch)"
+          >
+            <button
+              v-for="(o, i) in ch.options"
+              :key="o.id"
+              type="button"
+              role="radio"
+              :aria-checked="params[ch.key] === o.id"
+              :tabindex="params[ch.key] === o.id || (!ch.options.some(x => x.id === params[ch.key]) && i === 0) ? 0 : -1"
+              :title="o.title"
+              :disabled="disabled"
+              class="rounded border px-2 py-[3px] text-[9px] tracking-wide disabled:opacity-30"
+              :class="params[ch.key] === o.id
+                ? 'border-amber-300/60 bg-amber-300/10 text-amber-100'
+                : 'border-white/15 text-white/45 hover:border-white/35 hover:text-white/80'"
+              @click="set(ch.key, o.id)"
+            >{{ o.label }}</button>
+          </div>
+          <button
+            type="button"
+            class="ml-auto w-3 shrink-0 text-white/25 hover:text-white/70"
+            :class="{ 'opacity-0 pointer-events-none': params[ch.key] === PHATASS_DEFAULTS[ch.key] }"
+            title="Back to the shipping choice"
+            :disabled="disabled"
+            @click="set(ch.key, PHATASS_DEFAULTS[ch.key])"
+          >↺</button>
+        </div>
+      </div>
+
+      <div class="mt-3 flex items-center gap-2">
+        <span id="phatass-bench-hf" class="w-[70px] shrink-0 text-[10px] text-white/45">Top end</span>
+        <div role="radiogroup" aria-labelledby="phatass-bench-hf" class="flex gap-1">
+          <button
+            v-for="o in BENCH_HF" :key="o.id" type="button" role="radio"
+            :aria-checked="params.hf === o.id" :title="o.title" :disabled="disabled"
+            class="rounded border px-2 py-[3px] text-[9px] tracking-wide disabled:opacity-30"
+            :class="params.hf === o.id
+              ? 'border-amber-300/60 bg-amber-300/10 text-amber-100'
+              : 'border-white/15 text-white/45 hover:border-white/35 hover:text-white/80'"
+            @click="set('hf', params.hf === o.id ? PHATASS_DEFAULTS.hf : o.id)"
+          >{{ o.label }}</button>
+        </div>
+        <span class="ml-auto font-mono text-[9px] text-white/30">{{ benchHf ? params.hf : 'speed dial' }}</span>
+      </div>
+
+      <div class="mt-4 flex items-center gap-2">
+        <button
+          type="button"
+          class="rounded border border-white/15 px-2 py-[3px] text-[9px] uppercase tracking-wide text-white/45 hover:border-white/35 hover:text-white/80 disabled:opacity-30"
+          :class="{ 'opacity-30 pointer-events-none': pristine }"
+          :disabled="disabled"
+          title="Back to the shipping configuration"
+          @click="reset"
+        >Reset</button>
+        <span v-if="trimText" class="font-mono text-[9px] text-amber-100/60">{{ trimText }}</span>
+        <span class="ml-auto font-mono text-[9px] text-white/30">{{ params.tapeCurve }} / push {{ params.tapeLowPush }} / bump {{ params.tapeHeadBump }} / {{ params.outputMakeup }}</span>
+      </div>
+    </div>
+  </div>
+</template>

@@ -133,28 +133,98 @@ function langevinSlope(q) {
   return 1 / (q * q) - 1 / (s * s)
 }
 
+function langevinCurvature(q) {
+  if (Math.abs(q) < 1e-3) return (-2 * q) / 15
+  const s = Math.sinh(q)
+  return -2 / (q * q * q) + (2 * Math.cosh(q)) / (s * s * s)
+}
+
+/*
+ * L and L' BY TABLE (October 2026): the step's cost was mostly tanh, sinh and
+ * the divisions around them, two evaluations per oversampled sample. Both are
+ * tabulated on |q| ≤ LANGEVIN_TABLE_MAX at LANGEVIN_TABLE_STEP and read by cubic
+ * Hermite — L with its exact slope L' at the knots, L' with L'' — so the read is
+ * C¹ and odd/even by symmetry; past the table L = sign − 1/q and L' = 1/q² (the
+ * exponential terms are under 1e-27 there). Against the closed forms the model's
+ * output moves under −180 dB on drums at drive 1–10, and the step runs ~1.5×
+ * faster (330 → 215 ms per 10 s of mono at 4x).
+ */
+const LANGEVIN_TABLE_MAX = 32
+const LANGEVIN_TABLE_STEP = 1 / 32
+const LANGEVIN_TABLE_N = LANGEVIN_TABLE_MAX / LANGEVIN_TABLE_STEP + 2
+const TL = new Float64Array(LANGEVIN_TABLE_N)
+const TD = new Float64Array(LANGEVIN_TABLE_N)
+const TDD = new Float64Array(LANGEVIN_TABLE_N)
+for (let i = 0; i < LANGEVIN_TABLE_N; i++) {
+  const q = i * LANGEVIN_TABLE_STEP
+  TL[i] = langevin(q)
+  TD[i] = langevinSlope(q)
+  TDD[i] = langevinCurvature(q)
+}
+
+/** The fast step's largest step ratio for its second-order term (see `step`). */
+const AB2_MAX_RATIO = 4
+
+/** The fast step's largest |dh|: a bigger step takes the exact RK2 step instead (see `step`). */
+const FAST_MAX_DH = 0.05
+
 /** One magnetisation state: feed it h, get m. */
 export class JilesAtherton {
-  constructor({ c = shape.c, K = shape.K, A = shape.A, scale = 1 } = {}) {
+  /**
+   * `fast` swaps the RK2 step (two evaluations) for a variable-step
+   * Adams–Bashforth 2 (one evaluation, reusing the last step's slope; Euler at
+   * a reversal, where the slope changes branch, or after a step more than
+   * AB2_MAX_RATIO times the last). A step bigger than FAST_MAX_DH takes the
+   * exact RK2 step: one-evaluation steps go wrong on big jumps (a noise burst
+   * without oversampling read −10 dB of error), and oversampled audio rarely
+   * makes them. A bench A/B. On the loop alone, against a 16×-substepped
+   * solution, the unguarded step landed −70 / −59 / −49 dB under the output at
+   * drive 1 / 3 / 10 (RK2: −94 / −87 / −73); through PHAT*SS on drums at
+   * TAPE 10 the guarded step sits −57 dB from EXACT.
+   */
+  constructor({ c = shape.c, K = shape.K, A = shape.A, scale = 1, fast = false } = {}) {
     this.c = c
     this.K = K
     this.A = A
     this.scale = scale
+    this.fast = fast
     this.m = 0
     this.h = 0
+    this.fPrev = 0
+    this.dhPrev = 0
   }
 
   reset() {
     this.m = 0
     this.h = 0
+    this.fPrev = 0
+    this.dhPrev = 0
   }
 
   _dmdh(m, h, d) {
     const c = this.c
     const A = this.A
     const q = h + A * m
-    const man = langevin(q)
-    const dman = langevinSlope(q)
+    const aq = q < 0 ? -q : q
+    let man
+    let dman
+    if (aq >= LANGEVIN_TABLE_MAX) {
+      man = (q > 0 ? 1 : -1) - 1 / q
+      dman = 1 / (q * q)
+    } else {
+      const u = aq / LANGEVIN_TABLE_STEP
+      const i = u | 0
+      const t = u - i
+      const t2 = t * t
+      const t3 = t2 * t
+      const h00 = 2 * t3 - 3 * t2 + 1
+      const h10 = (t3 - 2 * t2 + t) * LANGEVIN_TABLE_STEP
+      const h01 = 3 * t2 - 2 * t3
+      const h11 = (t3 - t2) * LANGEVIN_TABLE_STEP
+      const L = h00 * TL[i] + h10 * TD[i] + h01 * TL[i + 1] + h11 * TD[i + 1]
+      dman = h00 * TD[i] + h10 * TDD[i] + h01 * TD[i + 1] + h11 * TDD[i + 1]
+      man = q < 0 ? -L : L
+    }
     const dm = man - m
     const irr = dm * d >= 0 ? ((1 - c) * dm) / ((1 - c) * d * this.K - A * dm) : 0
     return (irr + c * dman) / (1 - c * A * dman)
@@ -165,8 +235,24 @@ export class JilesAtherton {
     const dh = h - this.h
     if (dh !== 0) {
       const d = dh > 0 ? 1 : -1
-      const k1 = dh * this._dmdh(this.m, this.h, d)
-      let m = this.m + dh * this._dmdh(this.m + k1 / 2, this.h + dh / 2, d)
+      let m
+      if (this.fast && (dh < FAST_MAX_DH && dh > -FAST_MAX_DH)) {
+        const f = this._dmdh(this.m, this.h, d)
+        // Second order only while the step is steady: same direction, and no
+        // more than AB2_MAX_RATIO times the last. A big step after a tiny one
+        // makes the extrapolation weight dh / 2dh' explode (noise drove it to
+        // −11 dB of error); Euler is safe there.
+        const r = dh / this.dhPrev
+        m = r > 0 && r <= AB2_MAX_RATIO
+          ? this.m + dh * (f + (r / 2) * (f - this.fPrev))
+          : this.m + dh * f
+        this.fPrev = f
+        this.dhPrev = dh
+      } else {
+        const k1 = dh * this._dmdh(this.m, this.h, d)
+        m = this.m + dh * this._dmdh(this.m + k1 / 2, this.h + dh / 2, d)
+        this.dhPrev = 0 // the fast step restarts on Euler after an exact one
+      }
       // Saturation bound; also keeps a pathological step from running away.
       if (!(m <= 1)) m = m > 1 ? 1 : 0
       else if (m < -1) m = -1

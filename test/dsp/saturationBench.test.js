@@ -482,3 +482,46 @@ test('params: plain, four layers, the factory pair on by default', () => {
   kern.setParams(k, true)
   assert.equal(kern.latencySamples, L)
 })
+
+// ── Base-rate slots (oversample: false) ──────────────────────────────────────
+
+const SR = 44100
+
+test('a base-rate slot has no latency, and the kernel latency is the sum of its slots', () => {
+  const k = new SaturationBenchKernel(SR, { slots: 3, oversample: [false, true, false] })
+  assert.equal(k.latencySamples, SAT_BENCH_LATENCY_SAMPLES / SAT_BENCH_MAX_LAYERS)
+  const x = new Float32Array(4096)
+  x[100] = 0.5
+  // All slots off: a pure delay of exactly the oversampled slot's latency.
+  const { channelData: [y], latencySamples } = processSaturationBenchBuffer([x], SR, { layers: [] }, { slots: 3, oversample: [false, true, false] })
+  assert.equal(latencySamples, k.latencySamples)
+  for (let i = 0; i < x.length; i++) assert.equal(y[i], i >= latencySamples ? x[i - latencySamples] : 0)
+  const one = processSaturationBenchBuffer([x], SR, { layers: [] }, { slots: 1, oversample: [false] })
+  assert.equal(one.latencySamples, 0)
+  for (let i = 0; i < x.length; i++) assert.equal(one.channelData[0][i], x[i])
+})
+
+test('a LOW-band layer at the base rate renders what 4x does; a full-band one does not', () => {
+  const x = makeRichSpeech(SR).x
+  const added = (layer, oversample) => {
+    const { channelData: [y], latencySamples: Ly } = processSaturationBenchBuffer([x], SR, { layers: [layer] }, { slots: 1, oversample: [oversample] })
+    const d = new Float64Array(x.length - 64)
+    for (let i = 0; i < d.length; i++) d[i] = y[i + Ly] - x[i]
+    return d
+  }
+  // Mismatch, dB re what the layer adds.
+  const mismatch = (layer) => {
+    const a = added(layer, true), b = added(layer, false)
+    let e = 0, s = 0
+    for (let i = 2000; i < a.length; i++) { e += (a[i] - b[i]) ** 2; s += a[i] ** 2 }
+    assert.ok(s > 0, 'the layer must add something')
+    return 10 * Math.log10(e / s)
+  }
+  const base = { on: true, mode: 'full', amountDb: 0, refPeakDb: -14 }
+  // PHAT*SS's two low layers, as voiced.
+  const lowQ = mismatch({ ...base, curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14 })
+  const lowC = mismatch({ ...base, curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10 })
+  const full = mismatch({ ...base, curve: 'tanh', driveDb: 24, loHz: 1, hiHz: 20000 })
+  assert.ok(lowQ < -60 && lowC < -60, `low layers at 1x: ${lowQ.toFixed(1)} / ${lowC.toFixed(1)} dB re added`)
+  assert.ok(full > -50, `a full-band layer at 1x must alias audibly, read ${full.toFixed(1)} dB`)
+})

@@ -83,6 +83,17 @@ export const SHAPER_CURVES = [
     stateful: true,
     make: () => new JilesAtherton({ scale: 1 / hysteresisSmallGain() }),
   },
+  {
+    // The same loop on the cheaper one-evaluation step (dsp/hysteresis.js,
+    // `fast`). Hidden: PHAT*SS's bench A/Bs it against the exact step; the
+    // drive is calibrated on the exact loop (the two agree to ~−50 dB).
+    id: 'hysteresis-fast',
+    label: 'HYSTERESIS (FAST)',
+    title: 'The hysteresis loop on a cheaper integrator',
+    stateful: true,
+    hidden: true,
+    make: () => new JilesAtherton({ scale: 1 / hysteresisSmallGain(), fast: true }),
+  },
 ]
 
 export const SHAPER_CURVE_IDS = SHAPER_CURVES.map(c => c.id)

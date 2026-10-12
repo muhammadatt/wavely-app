@@ -345,7 +345,7 @@ export const OPERATIONS = [
     category: 'effects',
     group: 'Tone',
     icon: 'tape',
-    keywords: ['tape', 'phatass', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'fatso', 'odd', 'even'],
+    keywords: ['tape', 'phatass', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'odd', 'even'],
     requires: 'selection',
     surface: 'window',
     component: PhatassModal,

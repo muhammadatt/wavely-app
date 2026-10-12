@@ -39,8 +39,9 @@ import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from './hfSoftenerResoSta
 import {
   HF_SOFTENER_DEFAULTS,
   toKernelParams as toHFSoftenerKernelParams,
-  resoOn, resoKernelParams,
+  resoOn, resoKernelParams, softenOn, softenStageKernelParams,
 } from './effects/hfSoftener.js'
+import { softenLatencySamples } from './hfSoftenerSoftenStage.js'
 import { ensureHFLimiterWorklet } from './hfLimiterWorkletLoader.js'
 import {
   HF_LIMITER_DEFAULTS,
@@ -55,6 +56,8 @@ import {
   phatassLatencySamples,
   toKernelParams as toPhatassKernelParams,
 } from './phatassParams.js'
+import { READOUT_WHOLE_MAX_S, readoutBlocks } from './phatassWarmthReadout.js'
+import { chunkCount, planChunks } from './phatassChunks.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
@@ -913,64 +916,82 @@ export function measureHFSoftenerAutoAir(segments, start, end, params, sampleRat
 }
 
 /**
- * PHAT*SS's Warmth readout BANDS for a region, over the usual capped
- * analysis window. When the window is the whole region the peak comes back
- * too; otherwise `peakDb` is null and the caller asks
- * `measurePhatassWarmthPeak` for it. Resolves `{ bandsDb, peakDb }`.
+ * PHAT*SS's Warmth readout for a region (see phatassWarmthReadout.js).
+ * Selections up to READOUT_WHOLE_MAX_S are rendered whole, bands and peak.
+ * Longer ones render READOUT_BLOCKS sampled blocks for the bands, and the peak
+ * is the guard's bound — the selection's own peak, scanned, not rendered —
+ * whenever the guard has a ceiling (null otherwise). Resolves
+ * `{ bandsDb, peakDb, inputPeakDb }`.
  */
 export function measurePhatassWarmthBands(segments, start, end, params, sampleRate, channels) {
-  const whole = analysedWholeRegion(start, end)
   const { warmthLayers, warmthGuard } = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
-  return measureInWorker('phatassWarmthReadout', segments, start, end, {
-    layers: warmthLayers, guard: warmthGuard, bands: true, peak: whole,
-  }, sampleRate, channels).then(d => ({
-    bandsDb: d.bandsDb,
-    peakDb: whole ? d.peakDb : null,
-    inputPeakDb: whole ? d.inputPeakDb : null,
+  if (!(end - start > READOUT_WHOLE_MAX_S)) {
+    return measureWholeRegionInWorker('phatassWarmthReadout', segments, start, end, {
+      layers: warmthLayers, guard: warmthGuard, bands: true, peak: true,
+    }, sampleRate, channels).then(d => ({ bandsDb: d.bandsDb, peakDb: d.peakDb, inputPeakDb: d.inputPeakDb }))
+  }
+  const n = Math.floor((end - start) * sampleRate)
+  const blocks = readoutBlocks(n, sampleRate).map(([a, b, skip]) => ({
+    channelData: renderRegionToBuffer(segments, start + a / sampleRate, start + b / sampleRate, sampleRate, channels),
+    skip,
   }))
+  const bounded = warmthGuard.on && Number.isFinite(warmthGuard.ceilingDb)
+  const inputPeakDb = bounded ? regionPeakDb(segments, start, end, sampleRate, channels) : null
+  return new Promise((resolve, reject) => {
+    const id = ++measureSeq
+    measurePending.set(id, { resolve, reject })
+    getMeasureWorker().postMessage(
+      {
+        __id: id, type: 'phatassWarmthReadout', channelData: [], sampleRate,
+        params: { layers: warmthLayers, guard: warmthGuard, blocks },
+      },
+      blocks.flatMap(b => b.channelData.map(c => c.buffer)),
+    )
+  }).then(d => ({ bandsDb: d.bandsDb, peakDb: inputPeakDb, inputPeakDb }))
 }
 
 /**
- * The Warmth stage's output peak over the WHOLE region — never the capped
- * window, which can only read it low. It can take seconds on a long selection,
- * so it runs on its own worker, and a newer call terminates the one in flight:
- * a knob turn must never queue behind a stale whole-chapter render, and the
- * shared measurement worker is serial. A superseded call rejects with
- * `err.cancelled = true`. Resolves `{ peakDb, inputPeakDb }`, dBFS — the
- * stage's output peak and the region's own, over the same span.
+ * TAPE's automatic makeup for a region: what TAPE takes off the WHOLE
+ * region's peak (see phatassTapeMakeup.js). Its own worker, terminated by a
+ * newer call like the Warmth peak pass — a knob turn must never queue behind a
+ * stale whole-chapter render. A superseded call rejects with
+ * `err.cancelled = true`. Resolves `{ makeupDb, peakDb, inputPeakDb }`.
  */
-let warmthPeakWorker = null
-let warmthPeakReject = null
-/** Terminate the in-flight whole-region Warmth peak pass, if any; it rejects with `err.cancelled`. */
-export function cancelPhatassWarmthPeak() {
-  if (!warmthPeakWorker) return
-  warmthPeakWorker.terminate()
-  warmthPeakWorker = null
+let tapeMakeupWorker = null
+let tapeMakeupReject = null
+/** Terminate the in-flight TAPE makeup pass, if any; it rejects with `err.cancelled`. */
+export function cancelPhatassTapeMakeup() {
+  if (!tapeMakeupWorker) return
+  tapeMakeupWorker.terminate()
+  tapeMakeupWorker = null
   const err = new Error('superseded')
   err.cancelled = true
-  const reject = warmthPeakReject
-  warmthPeakReject = null
+  const reject = tapeMakeupReject
+  tapeMakeupReject = null
   reject?.(err)
 }
 
-export function measurePhatassWarmthPeak(segments, start, end, params, sampleRate, channels) {
-  cancelPhatassWarmthPeak()
-  const { warmthLayers, warmthGuard } = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
+/**
+ * TAPE's makeup on its own worker. `exact: false` is the fast bounded search
+ * for live preview; apply leaves it exact (phatassTapeMakeup.js).
+ */
+export function measurePhatassTapeMakeup(segments, start, end, params, sampleRate, channels, { exact = true } = {}) {
+  cancelPhatassTapeMakeup()
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
-    warmthPeakWorker = worker
-    warmthPeakReject = reject
+    tapeMakeupWorker = worker
+    tapeMakeupReject = reject
     const finish = () => {
       worker.terminate()
-      if (warmthPeakWorker === worker) {
-        warmthPeakWorker = null
-        warmthPeakReject = null
+      if (tapeMakeupWorker === worker) {
+        tapeMakeupWorker = null
+        tapeMakeupReject = null
       }
     }
     worker.onmessage = (e) => {
       finish()
-      if (e.data?.type === 'done') resolve({ peakDb: e.data.peakDb, inputPeakDb: e.data.inputPeakDb })
-      else reject(new Error(e.data?.message ?? 'warmth peak failed'))
+      if (e.data?.type === 'done') resolve({ makeupDb: e.data.makeupDb, peakDb: e.data.peakDb, inputPeakDb: e.data.inputPeakDb })
+      else reject(new Error(e.data?.message ?? 'tape makeup failed'))
     }
     worker.onerror = (err) => {
       finish()
@@ -978,7 +999,60 @@ export function measurePhatassWarmthPeak(segments, start, end, params, sampleRat
     }
     const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
     worker.postMessage(
-      { __id: 0, type: 'phatassWarmthReadout', channelData, sampleRate, params: { layers: warmthLayers, guard: warmthGuard, bands: false, peak: true } },
+      // A plain copy: the panel's params are reactive, and a proxied array
+      // (warmthRefPeaksDb) cannot be structured-cloned into a worker.
+      { __id: 0, type: 'phatassTapeMakeup', channelData, sampleRate, params: JSON.parse(JSON.stringify(params)), exact },
+      channelData.map(c => c.buffer),
+    )
+  })
+}
+
+/**
+ * The bench's output trim for a region (see phatassOutputMakeup.js): a render
+ * of the whole chain. Its own worker, terminated by a newer call like TAPE's
+ * makeup. A superseded call rejects with `err.cancelled = true`. Resolves
+ * `{ makeupDb, outPeakDb, inputPeakDb }`.
+ */
+let outputMakeupWorker = null
+let outputMakeupReject = null
+/** Terminate the in-flight output-trim pass, if any; it rejects with `err.cancelled`. */
+export function cancelPhatassOutputMakeup() {
+  if (!outputMakeupWorker) return
+  outputMakeupWorker.terminate()
+  outputMakeupWorker = null
+  const err = new Error('superseded')
+  err.cancelled = true
+  const reject = outputMakeupReject
+  outputMakeupReject = null
+  reject?.(err)
+}
+
+/** The output trim on its own worker. `exact: false` is the capped preview measurement. */
+export function measurePhatassOutputMakeup(segments, start, end, params, sampleRate, channels, { exact = true } = {}) {
+  cancelPhatassOutputMakeup()
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+    outputMakeupWorker = worker
+    outputMakeupReject = reject
+    const finish = () => {
+      worker.terminate()
+      if (outputMakeupWorker === worker) {
+        outputMakeupWorker = null
+        outputMakeupReject = null
+      }
+    }
+    worker.onmessage = (e) => {
+      finish()
+      if (e.data?.type === 'done') resolve({ makeupDb: e.data.makeupDb, outPeakDb: e.data.outPeakDb, inputPeakDb: e.data.inputPeakDb })
+      else reject(new Error(e.data?.message ?? 'output makeup failed'))
+    }
+    worker.onerror = (err) => {
+      finish()
+      reject(err)
+    }
+    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+    worker.postMessage(
+      { __id: 0, type: 'phatassOutputMakeup', channelData, sampleRate, params: JSON.parse(JSON.stringify(params)), exact },
       channelData.map(c => c.buffer),
     )
   })
@@ -1025,13 +1099,25 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
     // ⚠ Like ResoTame itself, its STFT grid phase at the region start cannot
     // match a running preview, so with RESO on apply is close to the preview
     // rather than sample-identical.
-    postStages: resoOn(merged) ? [{
-      ensureWorklet: ensureResonanceWorklet,
-      processorName: 'resonance-processor',
-      kernelParams: resoKernelParams(merged),
-      processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
-      latencySamples: HF_RESO_LATENCY_SAMPLES,
-    }] : [],
+    postStages: [
+      ...(resoOn(merged) ? [{
+        ensureWorklet: ensureResonanceWorklet,
+        processorName: 'resonance-processor',
+        kernelParams: resoKernelParams(merged),
+        processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
+        latencySamples: HF_RESO_LATENCY_SAMPLES,
+      }] : []),
+      // The Soften knob above 0: the HF Limiter's kernel with the shelf out and
+      // its Transient on a 500 Hz band — see hfSoftenerSoftenStage.js. Constant
+      // latency (the shelf's 3 ms), trimmed with the rest; no STFT, so it stays
+      // sample-identical to the preview.
+      ...(softenOn(merged) ? [{
+        ensureWorklet: ensureHFLimiterWorklet,
+        processorName: 'hf-limiter-processor',
+        kernelParams: softenStageKernelParams(merged),
+        latencySamples: softenLatencySamples(sampleRate),
+      }] : []),
+    ],
   })
 }
 
@@ -1054,14 +1140,73 @@ export function applyHFLimiterRegion(segments, start, end, params, sampleRate, c
  * a delay of its own length when idle), and a pre-roll so the shelf's release
  * starts where a playing preview's would be.
  */
-export function applyPhatassRegion(segments, start, end, params, sampleRate, channels) {
+export async function applyPhatassRegion(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
+  const numSamples = Math.ceil((end - start) * sampleRate)
+  const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 1
+  const count = chunkCount(numSamples, sampleRate, cores)
+  if (count > 1) {
+    try {
+      return await applyPhatassRegionChunked(segments, start, end, kernelParams, sampleRate, channels, count)
+    } catch (err) {
+      // Never lose an apply to the fast path: fall back to the one-thread render.
+      console.error('PHAT*SS parallel apply failed, rendering on one thread:', err)
+    }
+  }
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensurePhatassWorklet,
     processorName: 'phatass-processor',
-    kernelParams: toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params }),
+    kernelParams,
     latencySamples: phatassLatencySamples(sampleRate),
     preRollSamples: Math.round(PHATASS_PREROLL_S * sampleRate),
   })
+}
+
+/**
+ * PHAT*SS apply in parallel chunks (phatassChunks.js): the same input the
+ * one-thread render would see, cut on its block grid, each chunk rendered with
+ * a run-in of the audio before it in a worker of its own, then laid end to end.
+ * Matches the one-thread render to float noise with CLEAN and to ~−87 dB with
+ * THICK (see phatassChunks.js).
+ */
+async function applyPhatassRegionChunked(segments, start, end, kernelParams, sampleRate, channels, count) {
+  const numSamples = Math.ceil((end - start) * sampleRate)
+  const latency = phatassLatencySamples(sampleRate)
+  const preRoll = Math.min(Math.round(PHATASS_PREROLL_S * sampleRate), Math.max(0, Math.floor(start * sampleRate)))
+  const input = renderRegionToBuffer(segments, start - preRoll / sampleRate, end + latency / sampleRate, sampleRate, channels)
+  const plan = planChunks(numSamples, preRoll, latency, sampleRate, count)
+  const workers = []
+  try {
+    const parts = await Promise.all(plan.map((c) => {
+      const data = input.map((src) => {
+        const x = new Float32Array(c.to - c.from)
+        x.set(src.subarray(c.from, Math.min(c.to, src.length)))
+        return x
+      })
+      return new Promise((resolve, reject) => {
+        const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+        workers.push(worker)
+        worker.onmessage = (e) => {
+          if (e.data?.type === 'done') resolve(e.data.channelData)
+          else reject(new Error(e.data?.message ?? 'chunk render failed'))
+        }
+        worker.onerror = reject
+        worker.postMessage(
+          { __id: 0, type: 'phatassRenderChunk', channelData: data, sampleRate, params: { kernelParams, skip: c.skip, length: c.length } },
+          data.map(d => d.buffer),
+        )
+      })
+    }))
+    const out = new AudioBuffer({ length: numSamples, numberOfChannels: channels, sampleRate })
+    for (let ch = 0; ch < channels; ch++) {
+      const y = new Float32Array(numSamples)
+      plan.forEach((c, k) => y.set(parts[k][ch], c.start))
+      out.copyToChannel(y, ch)
+    }
+    return out
+  } finally {
+    for (const w of workers) w.terminate()
+  }
 }
 
 /** Apply Scheps Parallel to a region. */

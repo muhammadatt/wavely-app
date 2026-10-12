@@ -10,12 +10,32 @@
  * the plugin delivers. Rendering the shelf too would cost ~40 % more for no
  * band it can move.
  *
- * ⚠ THE BANDS AND THE PEAK ARE MEASURED OVER DIFFERENT SPANS, ON PURPOSE. The
- * bands are a property of the setting and are answered by the usual capped
- * window; the peak is a property of the WHOLE region — a capped window can
- * only read it low, and a late loud passage is exactly where a low-end boost
- * clips. So the caller asks for the peak over the whole region separately
- * (see `measurePhatassWarmthPeak`).
+ * ⚠ IT FEEDS WARMTH THE SOURCE, NOT TAPE'S OUTPUT. TAPE now runs first, so in
+ * the plugin Warmth sees the source soft-clipped and lifted by TAPE's makeup
+ * (+1.2 to +1.7 dB of body at TAPE 2). With TAPE on, the bands are what Warmth
+ * does to the source — close, not exact — and the peak stays an upper bound,
+ * since the makeup puts TAPE's peak back on the source's and the guard holds
+ * Warmth there either way. Rendering TAPE first would add ~6 s per 10 min to
+ * the whole-region peak pass.
+ *
+ * ⚠ THE BANDS ARE SAMPLED ACROSS THE WHOLE SELECTION, NOT A CAPPED WINDOW
+ * (October 2026). They were the first 30 s, which describes the opening, not
+ * the take: on a 175 s file mixing narration and drums the first 30 s read up
+ * to 7.7 dB off the whole render (+10.3 at 60–120 Hz where the whole read
+ * +2.4). Selections up to READOUT_WHOLE_MAX_S are rendered whole; longer ones
+ * render READOUT_BLOCKS blocks of READOUT_BLOCK_S, one per equal stratum at a
+ * golden-ratio offset (evenly spaced blocks alias against loops), each with
+ * READOUT_PREROLL_S of run-in, energies pooled — 0.41 / 0.58 dB worst on that
+ * file at Warmth 5 / 10, in about half the old window's render time. More or
+ * longer blocks barely helped (0.28–0.57 at 16–30 blocks); the run-in read the
+ * same at 0.25 and 0.5 s, and fading it in from silence changed nothing.
+ * ⚠ THE PEAK IS NOT RENDERED ON A LONG SELECTION — IT IS KNOWN. With Warmth up
+ * the peak guard is pinned on with the selection's own peak as its ceiling, and
+ * its no-overshoot proof holds |out| ≤ max(ceiling, |x|) = that peak: the
+ * stage cannot raise it (measured: 0.000 dB change at Warmth 5 and 10 on the
+ * whole file above). So the caller reports the selection's peak as the bound
+ * and skips the whole-region pass that used to run on its own worker (~8 s of
+ * CPU for 3 min of mono, per knob turn). A short selection still measures it.
  *
  * Node-importable: no worklet registration, no Vite specifiers.
  */
@@ -33,7 +53,7 @@ const FRAME = 8192
 const MIN_SAMPLES = 4096
 
 /**
- * Render `channelData` through the two warmth layers — and the peak guard,
+ * Render `channelData` through the warmth layers — and the peak guard,
  * when `guard` (`{ on, ceilingDb }`, the kernel's `warmthGuard`) is on — and
  * return the output aligned to the input, sample for sample (latency removed,
  * tail flushed). The guard runs on the aligned pair, so it sees exactly the
@@ -48,7 +68,7 @@ export function renderWarmthAligned(channelData, sampleRate, layers, guard = nul
     return p
   })
   const { channelData: out, latencySamples } = processSaturationBenchBuffer(
-    padded, sampleRate, { layers }, { slots: layers.length },
+    padded, sampleRate, { layers }, { slots: layers.length, oversample: layers.map(l => l.oversample !== false) },
   )
   const aligned = out.map(c => c.subarray(latencySamples, latencySamples + n))
   if (!guard?.on) return aligned
@@ -70,6 +90,54 @@ export function renderWarmthAligned(channelData, sampleRate, layers, guard = nul
     g.process(x.map(c => c.subarray(off, off + len)), y.map(c => c.subarray(off, off + len)), len)
   }
   return y.map(c => c.subarray(L, L + n))
+}
+
+/** Selections up to this long are rendered whole for the bands, seconds. */
+export const READOUT_WHOLE_MAX_S = 15
+/** Blocks rendered for a longer selection, and each block's length and run-in, seconds. */
+export const READOUT_BLOCKS = 12
+export const READOUT_BLOCK_S = 1
+export const READOUT_PREROLL_S = 0.25
+
+/**
+ * The sampled blocks for a selection of `n` samples: `[from, to, skip]` each,
+ * `from` including the run-in and `skip` its length. One block per equal
+ * stratum, at a golden-ratio offset inside it.
+ */
+export function readoutBlocks(n, sampleRate) {
+  const blk = Math.round(READOUT_BLOCK_S * sampleRate)
+  const pre = Math.round(READOUT_PREROLL_S * sampleRate)
+  const stratum = n / READOUT_BLOCKS
+  const out = []
+  for (let k = 0; k < READOUT_BLOCKS; k++) {
+    const jitter = ((k + 1) * 0.6180339887498949) % 1
+    const s = Math.min(n - blk, Math.floor(k * stratum + jitter * Math.max(0, stratum - blk)))
+    const a = Math.max(0, s - pre)
+    out.push([a, s + blk, s - a])
+  }
+  return out
+}
+
+/**
+ * The bands from sampled blocks: each `{ channelData, skip }` rendered with
+ * its run-in, the band energies pooled over every block.
+ * @returns {(number|null)[] | null} output minus input per WARMTH_READOUT_BANDS
+ */
+export function measureWarmthBandsSampled(blocks, sampleRate, layers, guard = null) {
+  const ein = WARMTH_READOUT_BANDS.map(() => 0)
+  const eout = WARMTH_READOUT_BANDS.map(() => 0)
+  let any = false
+  for (const b of blocks) {
+    const r = measureWarmthReadout(b.channelData, sampleRate, layers, { guard, skip: b.skip, energies: true })
+    if (!r.ein || !r.eout) continue
+    any = true
+    for (let i = 0; i < ein.length; i++) {
+      ein[i] += r.ein[i]
+      eout[i] += r.eout[i]
+    }
+  }
+  if (!any) return null
+  return ein.map((e, i) => (e > 1e-20 ? 10 * Math.log10(eout[i] / e) : null))
 }
 
 /** Per-band energy of `chs` (summed over channels), Welch-averaged. */
@@ -115,7 +183,7 @@ function peakDbOf(chs) {
  * The readout for one region.
  *
  * @param {Float32Array[]} channelData the region, as `renderRegionToBuffer` gives it
- * @param {object[]} layers the two warmth layers' kernel params (`warmthLayers`)
+ * @param {object[]} layers the warmth layers' kernel params (`warmthLayers`, 1–4 of them)
  * @param {{ bands?: boolean, peak?: boolean, guard?: object }} what — `guard` is the kernel's `warmthGuard`
  * @returns {{ bandsDb: (number|null)[] | null, peakDb: number | null, inputPeakDb: number | null }}
  *   `bandsDb[i]` is output minus input in WARMTH_READOUT_BANDS[i], null where
@@ -123,8 +191,13 @@ function peakDbOf(chs) {
  *   `inputPeakDb` the region's own, both dBFS over the same span, so the panel
  *   can print the CHANGE.
  */
-export function measureWarmthReadout(channelData, sampleRate, layers, { bands = true, peak = true, guard = null } = {}) {
-  const out = renderWarmthAligned(channelData, sampleRate, layers, guard)
+export function measureWarmthReadout(channelData, sampleRate, layers, { bands = true, peak = true, guard = null, skip = 0, energies = false } = {}) {
+  const rendered = renderWarmthAligned(channelData, sampleRate, layers, guard)
+  // `skip`: a run-in rendered for the layers' and guard's state, then dropped.
+  const out = skip > 0 ? rendered.map(c => c.subarray(skip)) : rendered
+  if (skip > 0) channelData = channelData.map(c => c.subarray(skip))
+  // `energies`: the raw band energies, for a caller pooling several blocks.
+  if (energies) return { ein: bandEnergies(channelData, sampleRate), eout: bandEnergies(out, sampleRate) }
   let bandsDb = null
   if (bands) {
     const ein = bandEnergies(channelData, sampleRate)

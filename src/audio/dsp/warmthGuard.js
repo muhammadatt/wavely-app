@@ -73,6 +73,7 @@ export class WarmthPeakGuard {
     this.pos = 0
     this.dryPos = 0
     this.minGain = 1
+    this.idle = false // the lookahead's min/smoother skipped while unguarded
   }
 
   /** `on`; `ceilingDb` — the source's own peak, dBFS (null: no ceiling). */
@@ -105,6 +106,41 @@ export class WarmthPeakGuard {
     const lat = this.latencySamples
     const guarded = this.on && this.ceiling < Infinity
     let minG = this.minGain
+    if (!guarded) {
+      // UNGUARDED (Warmth off, or no ceiling): every request is 1, so once the
+      // lookahead has flushed its min and smoother read 1 and the gain only
+      // relaxes up. Skip them and keep the delay lines and that relaxation —
+      // the output is the same, and with Warmth off `a` is 0, so it is the
+      // delayed input exactly. The pipeline restarts in its all-1 state.
+      this.idle = true
+      for (let i = 0; i < n; i++) {
+        for (let c = 0; c < nCh; c++) {
+          const st = this.ch[c]
+          const raw = input[c < nIn ? c : nIn - 1][i]
+          let x = raw
+          if (D > 0) {
+            x = st.dry[this.dryPos]
+            st.dry[this.dryPos] = raw
+          }
+          const ox = st.x[this.pos]
+          const oa = st.a[this.pos]
+          st.x[this.pos] = x
+          st.a[this.pos] = io[c][i] - x
+          io[c][i] = ox + this.g * oa
+        }
+        if (this.g < 1) this.g += (1 - this.g) * this.relCoef
+        this.pos = this.pos + 1 === lat ? 0 : this.pos + 1
+        if (D > 0) this.dryPos = this.dryPos + 1 === D ? 0 : this.dryPos + 1
+      }
+      this.minGain = minG
+      return
+    }
+    if (this.idle) {
+      this.idle = false
+      this.min.reset()
+      this.box1.fill(1)
+      this.box2.fill(1)
+    }
     for (let i = 0; i < n; i++) {
       let req = 1
       for (let c = 0; c < nCh; c++) {

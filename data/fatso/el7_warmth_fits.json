@@ -1,0 +1,16 @@
+{
+  "source": "Owner's EL7 Fatso bounces over 2_FATSO_EL7x_-_Input_2.wav (Warmth off): Warmth 2 / 5 / 6 / 7. Music, 96 kHz float stereo, 8.35 s, voice level -23.05 dBFS (regionAlignDb). Audio not in the repo.",
+  "harness": "scripts/phatass-fatso-fit.mjs (rebuild of the dev log's scratch harness; per 1024-sample frame and band 100-500 / 0.5-1 / 1-2 / 2-4 / 4-8 / 8-16 kHz, out/in dB, ours minus Fatso, mean solved as Output, rms). Tape shelf alone: WARM, 2 kHz, 35 ms.",
+  "alignment": "85 ms blocks, integer lag in +-24, neighbours within +-2 samples (the Fatso's own gain-dependent phase); blocks kept 95/98, 98/98, 96/98, 95/98.",
+  "validation": {
+    "gainOnly": { "harness": [0.002, 0.240, 0.596, 1.398], "devLog": [0.002, 0.210, 0.556, 1.357] },
+    "fatsoLaw_Warmth5_6_7_atTame1_4_6": { "harness": [0.174, 0.348, 0.570], "devLog": [0.165, 0.345, 0.574] }
+  },
+  "gainLawFit": {
+    "note": "best threshold re voice (dB) / Range, 2 dB grid refined to 0.5 dB; Range from 3/6/9/12/18",
+    "Warmth5": { "limit": [0.168, 9.5, 3], "knee3": [0.162, 9.5, 3], "knee6": [0.159, 10, 3], "knee9": [0.157, 10, 3], "knee12": [0.155, 11, 3], "tanh": [0.175, 14.5, 3] },
+    "Warmth6": { "limit": [0.348, 4, 3], "knee3": [0.348, 4, 3], "knee6": [0.348, 4.5, 3], "knee9": [0.345, 6.5, 9], "knee12": [0.335, 6.5, 9], "tanh": [0.380, 9, 6] },
+    "Warmth7": { "limit": [0.563, 0.5, 9], "knee3": [0.564, 0.5, 9], "knee6": [0.569, 0.5, 9], "knee9": [0.587, 1, 9], "knee12": [0.607, 1.5, 12], "tanh": [0.703, 2.5, 12] }
+  },
+  "verdict": "Limiter law kept. Knees gain <= 0.013 where the Fatso barely acts and lose at Warmth 7 (the FATSO detent's point); tanh is worst everywhere. Steeper-than-limiter laws were already worse (dev log). The kneeDb / law stage options and the harness --grid that produced gainLawFit were removed afterwards (recoverable at f62bf21)."
+}

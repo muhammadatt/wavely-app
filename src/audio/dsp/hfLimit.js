@@ -314,7 +314,7 @@ export class ShelfLimiterStage {
       ? transientGateLin
       : thresholdLin * Math.pow(10, -TRANSIENT_GATE_BELOW_DB / 20)
     this.tSlope = transientSlope > 0 ? transientSlope : TRANSIENT_SLOPE
-    // A SEPARATE TRANSIENT BAND (PHAT*SS): the transient detector listens to,
+    // A SEPARATE TRANSIENT BAND (the HF Softener's Soften): the transient detector listens to,
     // and cuts, its own one-pole split at `transientCornerHz`, cascaded after
     // the shelf. null keeps the HF Limiter's shared band, bit for bit.
     this.tSplit = Number.isFinite(transientCornerHz) && transientCornerHz > 0
@@ -323,6 +323,9 @@ export class ShelfLimiterStage {
       this.tLpB0 = tl.b0
       this.tLpA1 = tl.a1
     }
+    // (A separate DETECTOR band, `detectCornerHz`, served PHAT*SS's DETECT
+    // rocker; it went with PHAT*SS's limiter shelf in October 2026 —
+    // recoverable at e427de9.)
     this.cornerHz = cornerHz
     this.thresholdLin = thresholdLin
     this.floorLin = floorLin

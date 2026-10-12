@@ -164,6 +164,14 @@ class HalfbandStage {
     // Odd-phase taps: h[1], h[3], … h[2M-1].
     this.p1 = new Float64Array(M)
     for (let j = 0; j < M; j++) this.p1[j] = taps[2 * j + 1]
+    // FOLDED: a linear-phase filter's taps are symmetric, so p1[j] = p1[M−1−j]
+    // and each pair of history samples can be added before the multiply —
+    // half the multiplies in the loop every oversampled plugin runs. `q` holds
+    // the first half; an odd M keeps its middle tap in `midTap`. Equal to the
+    // unfolded sum to float rounding (≤ 1e-15 on a 4x round trip).
+    this.H = M >> 1
+    this.q = this.p1.slice(0, this.H)
+    this.midTap = M % 2 === 1 ? this.p1[this.H] : 0
 
     // Histories read [pos + k] = the sample k pushes ago. Each is sized to the
     // deepest index its direction actually reaches: the up path wants
@@ -187,8 +195,9 @@ class HalfbandStage {
    * @param {number} n
    */
   up(input, output, n) {
-    const { p1, M, halfM, upHist } = this
+    const { q, H, midTap: mid, M, halfM, upHist } = this
     const buf = upHist.buf
+    const last = M - 1
 
     for (let i = 0; i < n; i++) {
       upHist.push(input[i])
@@ -198,8 +207,8 @@ class HalfbandStage {
       // nothing to compute here.
       output[2 * i] = buf[base + halfM]
 
-      let acc = 0
-      for (let j = 0; j < M; j++) acc += p1[j] * buf[base + j]
+      let acc = mid === 0 ? 0 : mid * buf[base + H]
+      for (let j = 0; j < H; j++) acc += q[j] * (buf[base + j] + buf[base + last - j])
       output[2 * i + 1] = 2 * acc
     }
   }
@@ -211,9 +220,10 @@ class HalfbandStage {
    * @param {number} n output sample count
    */
   down(input, output, n) {
-    const { p1, M, halfM, downEvenHist, downOddHist } = this
+    const { q, H, midTap: mid, M, halfM, downEvenHist, downOddHist } = this
     const evenBuf = downEvenHist.buf
     const oddBuf = downOddHist.buf
+    const last = M - 1
 
     for (let i = 0; i < n; i++) {
       downEvenHist.push(input[2 * i])
@@ -222,7 +232,8 @@ class HalfbandStage {
       const oddBase = downOddHist.pos + 1 // u_odd[i-1-j] is one further back
 
       let acc = 0.5 * evenBuf[evenBase + halfM]
-      for (let j = 0; j < M; j++) acc += p1[j] * oddBuf[oddBase + j]
+      if (mid !== 0) acc += mid * oddBuf[oddBase + H]
+      for (let j = 0; j < H; j++) acc += q[j] * (oddBuf[oddBase + j] + oddBuf[oddBase + last - j])
       output[i] = acc
     }
   }
@@ -318,6 +329,18 @@ export const COMPRESSOR_OVERSAMPLE = buildProfile({
  * same delay, so anything differencing them must align on each profile's own
  * latency rather than assuming they match.
  */
+/**
+ * 2x on the compressor's stage-1 filter: the 4x profile without its second
+ * stage. For a layer whose aliases a 2x rate already keeps out of the band it
+ * passes back (measured per layer before any is moved to it).
+ */
+export const COMPRESSOR_OVERSAMPLE_2X = buildProfile({
+  name: 'compressor2x',
+  factor: 2,
+  stage1Taps: 93,
+  stage1Beta: 9.5,
+})
+
 export const COMPRESSOR_OVERSAMPLE_8X = buildProfile({
   name: 'compressor8x',
   factor: 8,

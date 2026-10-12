@@ -2,67 +2,99 @@
  * PHAT*SS — Psycho Harmonic Analog Tape * Saturation Simulator. UI params,
  * their mapping to the kernel, and the latency.
  *
- * Chain: WARMTH (two fixed Saturation Bench layers on the low band) → its PEAK
- * GUARD (pinned on) → a tape-style HF shelf, whose Transient detector (SOFTEN)
- * cuts its own band (the HF Limiter's dynamic shelf
- * with its timing pinned and its Freq / Threshold / Range driven by two macro
- * knobs) → Output.
+ * Chain: TAPE (CLEAN cubic or THICK hysteresis; its head bump follows the
+ * tape speed) → makeup → WARMTH (fixed Saturation Bench layers on the low band,
+ * CHARACTER picking their odd/even balance) → its PEAK GUARD (pinned on) → the
+ * TAPE HF SHELF at the dial's speed → Output.
+ *
+ * ⚠ THE HF LIMITER'S SHELF IS GONE (October 2026, owner's call): the Tame knob
+ * left the panel for the tape speeds, and the shelf lived on only for the
+ * bench's Tame / CURVE / DETECT and the FATSO position — costing ~20 % of an
+ * idle render and its 3 ms of latency for nothing that shipped. Its laws (the
+ * Fatso fit, VOICE, the original Tame/Tone) are recoverable at e427de9.
  *
  * Lives apart from the worklet and the effect wrapper so the apply path, the
  * composable and the tests can all read it without pulling either in.
  */
 
 import { ALIGN_TARGET_DBFS } from './dsp/inputAlign.js'
-import { shelfLatencySamples } from './dsp/hfLimit.js'
-import { SAT_BENCH_LAYER_LATENCY, SAT_AMOUNT_FLOOR_DB } from './dsp/saturationLayers.js'
+import {
+  SAT_BENCH_LAYER_LATENCY, SAT_BENCH_MAX_LAYERS, SAT_AMOUNT_FLOOR_DB, SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB,
+} from './dsp/saturationLayers.js'
+import { unitDriveU } from './dsp/shaperCurves.js'
+import { JilesAtherton, hysteresisSmallGain, hysteresisShapeVersion } from './dsp/hysteresis.js'
 import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
+import { lowShelf, highpass, peaking, magnitudeResponseDb } from './dsp/biquad.js'
 
 export const PHATASS_DEFAULTS = {
   // 0–10 — low-end harmonic warmth: how much of what the two fixed
   // WARMTH_LAYERS add is mixed in. 0 is off (a pure delay).
-  warmth: 5,
+  warmth: 0,
   // 0–100 — from pure Odd toward Even, over the useful part of the crossfade
-  // only (ODD_EVEN_SPAN). The bench voicing is 36 (at Warmth 5).
+  // only (ODD_EVEN_SPAN). On the panel since October 2026 it is the CHARACTER
+  // switch, two positions of this number (`CHARACTERS`): ROUND 50, FIRM 25.
   oddEven: 50,
-  // SOFTEN (on/off): the HF Limiter's Transient detector on its own band
-  // above SOFTEN_FREQ_HZ — it turns that band down for a few ms when it rises
-  // suddenly, not when it is loud. It has no knob of its own: its depth rides
-  // TAME, so the top-end shelf and the onset softening turn down together
-  // (`softenLaw`). A gain on a band, never distortion, no latency of its own.
-  soften: false,
-  // 0–10 — how hard the tape HF shelf holds the top end: Threshold and Range
-  // together (`tapeShelf`). 0 takes the shelf out. 5 is −8 dB re the voice,
-  // Range 18; 10 reaches Range 36.
-  tame: 5,
-  // 0–10 — where the top end starts: the shelf's corner, 2 kHz (0, dark) to
-  // 12 kHz (10, only the very top).
-  tone: 10,
+  // 0–TAPE_MAX_DB — TAPE: how many dB a full-band soft clipper takes off
+  // the selection's own peak (`tapeLayer`). 0 is off (a pure delay).
+  tape: 0,
+  // TAPE's curve (`TAPE_CURVES`). On the panel a two-way switch
+  // (`TAPE_PANEL_CURVES`): CLEAN = 'cubic' (the Studer guitar fit; only the
+  // third harmonic until a hard clip past 3.52 dB) and THICK = 'hysteresis'
+  // (the Jiles-Atherton loop: memory, kicks squashed ~2× harder than snares,
+  // peaks rounded without a hard clip). 'tanh' / 'algebraic' are bench only.
+  tapeCurve: 'cubic',
+  // THICK's integrator (`TAPE_STEPS`, bench only): 'exact' RK2 ships; 'fast' is
+  // the one-evaluation step, ~3× cheaper on the loop, ~−50 dB from it.
+  tapeStep: 'exact',
+  // dB of LOW PUSH (`TAPE_LOW_PUSHES`): a low shelf at TAPE_LOW_PUSH_HZ into
+  // TAPE's curve and its exact inverse after it, so the lows saturate first
+  // (a kick's low end gets squashed) while the clean path stays flat. 0 ships.
+  // Bench only. The TAPE knob keeps its no-push drive (`tapeLayer`).
+  tapeLowPush: 0,
+  // HEAD BUMP (`TAPE_HEAD_BUMPS`) AFTER TAPE's curve, before the makeup — the
+  // tape machine's playback-head low end. 'speed' (ships) is the HF dial's tape
+  // speed's own Studer A800 curve (`TAPE_HEAD_BUMP_CURVES`: 'a800-30' /
+  // 'a800-15' / 'a800-7'); the bench can override it with 0, a 3 / 6 / 9 dB
+  // low shelf at TAPE_HEAD_BUMP_HZ or a fixed curve. Only while TAPE is up.
+  tapeHeadBump: 'speed',
+  // TAPE's makeup, dB: what it MEASURED off the selection's peak, given back
+  // so the peak returns to where it started (`measureTapeMakeup`). Measured,
+  // never a user setting; applied only while TAPE is up.
+  tapeMakeupDb: 0,
+  // The HF dial (`HF_PANEL_DETENTS`): the tape speed — 'ips30', 'ips15' or
+  // 'ips7' — running the tape HF shelf (dsp/tapeHfShelf.js) and choosing the
+  // head bump. 30 ips ships: the most HF headroom, near-transparent at TAPE 0.
+  // The bench also reaches 'off' (the top end untouched).
+  hf: 'ips30',
   output: 0, // dB trim
+  // Automatic trim on the plugin's OUTPUT (`OUTPUT_MAKEUPS`), on top of Output:
+  // 'off' (ships), 'peak' (the output's peak back on the source's) or 'rms'
+  // (the output's RMS on the source's — a level-matched A/B of the whole
+  // plugin). Bench only. TAPE's own makeup stays peak-restoring either way.
+  outputMakeup: 'off',
+  // That trim, dB: measured (`measureOutputMakeup`), never a user setting.
+  outputMakeupDb: 0,
+  // KEEP's share of TAPE's makeup (`OUTPUT_KEEPS`): the rest is trimmed off the output.
+  outputKeep: 0.85,
   // The whole file's gated RMS, dBFS. Measured, never a user setting — it is
   // what makes the shelf's threshold mean the same on a quiet take and a hot one.
   voiceLevelDb: ALIGN_TARGET_DBFS,
   // Each warmth layer's reference peak, dBFS (saturationBenchAnalysis
   // .bandRefPeakDb). Measured, never a user setting; null until measured.
   warmthRefPeaksDb: null,
-  // The Warmth peak guard's ceiling: the selection's own peak, dBFS. The guard
-  // is PINNED ON whenever Warmth is up (dsp/warmthGuard.js). Measured; null
-  // until measured, and the guard then has no ceiling.
+  // The selection's own peak, dBFS: the Warmth peak guard's ceiling (pinned on
+  // whenever Warmth is up, dsp/warmthGuard.js) and the peak TAPE is calibrated
+  // on. Measured; null until measured — the guard then has no ceiling and TAPE
+  // assumes one (`TAPE_FALLBACK_CREST_DB`).
   warmthCeilingDb: null,
 }
 
 export const WARMTH_MAX = 10
 export const ODD_EVEN_MAX = 100
-export const TAME_MAX = 10
-/** Soften's ceiling on one cut, dB per TAME step (36 at Tame 10; the HF Limiter's Transient stops at 12). */
-export const SOFTEN_DB_PER_STEP = 3.6
-/** dB of cut per dB of rise: the HF Limiter's 0.5 at Tame 0, 1 at Tame 10. */
-export const SOFTEN_SLOPE_MIN = 0.5
-export const SOFTEN_SLOPE_MAX = 1
-/** Soften's corner, pinned: a one-pole split, so it reaches the voice's snap and body as well as the top. */
-export const SOFTEN_FREQ_HZ = 500
-/** Onsets in Soften's band this far under the voice level are left alone (the HF Limiter's default works out to 32). */
-export const SOFTEN_GATE_BELOW_DB = 32
-export const TONE_MAX = 10
+/**
+ * ⚠ SOFTEN MOVED TO THE HF SOFTENER (October 2026, owner's call): its law and
+ * constants live in hfSoftenerSoftenStage.js now, unchanged.
+ */
 export const OUTPUT_MIN_DB = -12
 export const OUTPUT_MAX_DB = 12
 
@@ -75,6 +107,17 @@ export const OUTPUT_MAX_DB = 12
  * the bench voicing (old 9) sits at 36.
  */
 export const ODD_EVEN_SPAN = 0.25
+
+/**
+ * The panel's CHARACTER switch: two positions of Odd/Even, which it replaced
+ * as a knob (owner, October 2026). ROUND 50 is the old knob's default; FIRM 25
+ * leans further to the odd (cubic) layer — firmer, more edge. Odd/Even itself
+ * stays a number, so the bench, presets and tests can still reach any value.
+ */
+export const CHARACTERS = Object.freeze([
+  Object.freeze({ value: 50, label: 'ROUND' }),
+  Object.freeze({ value: 25, label: 'FIRM' }),
+])
 
 /**
  * WARMTH — the low-end warmth/fatness combination voiced on the Saturation
@@ -90,6 +133,35 @@ export const ODD_EVEN_SPAN = 0.25
  * `warmthLayers`, not here. ⚠ The first voicing was quartic 60 / 1–400 Hz /
  * bell 350 +24 then tanh 50 / 1–300 Hz / bell 250 +24 (kept below for
  * reference); the Southern Sunrise figures in this file were measured on it.
+ *
+ * UP TO `WARMTH_MAX_LAYERS` (4, the bench kernel's slots), in series. Each is a
+ * Saturation Bench layer — `curve`, `driveDb`, `loHz` / `hiHz`, `emph*` mean
+ * exactly what they do on the bench, and Drive is calibrated the same way, on
+ * this file's own band level — plus a `blend` ROLE:
+ *   'even' / 'odd' — the Odd/Even crossfade's two sides (the quartic sits
+ *                    `WARMTH_EVEN_MATCH_DB` up, as voiced);
+ *   'fixed'        — follows Warmth's level only; Odd/Even does not touch it.
+ * and an optional `amountOffsetDb` (default 0) added to the Amount the law
+ * gives. For a FIXED layer the Amount is `warmthLevelDb(Warmth) + amountOffsetDb`,
+ * and `warmthLevelDb(5)` is −0.02 dB (6 + 20·log10 ½; the top is 6, not 6.02) —
+ * so a layer voiced on the bench at Amount A goes in as `amountOffsetDb: A` and
+ * lands within 0.02 dB of it at Warmth 5. (Named apart from the
+ * bench kernel's own `levelOffsetDb`, which is its voicing detector's level.)
+ *
+ * ⚠ ALWAYS FULL: PHAT*SS has no VOICED mode. `warmthLayers` forces `mode: 'full'`
+ * (the bench's default is VOICED) and `checkWarmthLayers` rejects a layer that
+ * asks for 'voiced', so a layer copied from the bench cannot bring it along.
+ *
+ * Every layer gets its own measured reference peak and, by default, its own 4x
+ * oversampler and 50 samples of latency (`WARMTH_LATENCY_SAMPLES` follows the
+ * list). `oversample: false` runs a layer at the base rate instead — no
+ * oversampler, no latency. ⚠ LOW BANDS ONLY: what a layer adds is band-passed
+ * again, so a curve's aliases only matter where they land inside its own band.
+ * Measured (1x against 4x, re what the layer adds): the 1–250 Hz quartic and
+ * 1–220 Hz cubic at drive +50 −84.5 to −90.6 dB on two narrations, −109.5 /
+ * −121.8 on music — the same render; the full-band quartic −34.0 and the
+ * 3–20 kHz tanh −17.5 on bright narration, which keep theirs. Each oversampled
+ * layer is ~1 % of a core for live preview (6 s per 10 min of audio offline).
  */
 //export const WARMTH_LAYERS = [
 //  { curve: 'quartic', driveDb: 60, loHz: 1, hiHz: 400, emphType: 'bell', emphHz: 350, emphQ: 0.5, emphDb: 24, mode: 'full' },
@@ -97,9 +169,43 @@ export const ODD_EVEN_SPAN = 0.25
 //]
 
 export const WARMTH_LAYERS = [
-  { curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14, mode: 'full' },
-  { curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10, mode: 'full' },
+  { blend: 'even', curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14, oversample: false },
+  { blend: 'odd', curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10, oversample: false },
+  // Fixed layers (bench Amount A → amountOffsetDb A). Full band / high band: oversampled.
+  { blend: 'fixed', amountOffsetDb: 0, curve: 'quartic', driveDb: 0, loHz: 1, hiHz: 20000, emphType: 'hishelf', emphHz: 2400, emphQ: 0.7, emphDb: -10 },
+  { blend: 'fixed', amountOffsetDb: -6, curve: 'tanh', driveDb: 27, loHz: 3000, hiHz: 20000, emphType: 'hishelf', emphHz: 2400, emphQ: 0.7, emphDb: -20 },
 ]
+
+/** Per-slot oversampling for a layer list, as `SaturationBenchKernel` takes it. */
+export function slotOversample(layers = WARMTH_LAYERS) {
+  return layers.map(l => l.oversample !== false)
+}
+
+export const WARMTH_MAX_LAYERS = SAT_BENCH_MAX_LAYERS
+export const WARMTH_BLENDS = ['even', 'odd', 'fixed']
+/**
+ * Highest band top a layer may run at the base rate (`oversample: false`).
+ * Measured clean at 220–250 Hz (−84 dB); 500 is a reasoned margin, not a
+ * measurement — above it, measure 1x against 4x before allowing it.
+ */
+export const WARMTH_BASE_RATE_MAX_HZ = 500
+
+/** Throws unless `layers` is 1–WARMTH_MAX_LAYERS layers with known roles. */
+export function checkWarmthLayers(layers) {
+  if (!Array.isArray(layers) || layers.length < 1 || layers.length > WARMTH_MAX_LAYERS) {
+    throw new Error(`PHAT*SS Warmth takes 1–${WARMTH_MAX_LAYERS} layers, got ${layers?.length}`)
+  }
+  layers.forEach((l, k) => {
+    const blend = l.blend ?? 'fixed'
+    if (!WARMTH_BLENDS.includes(blend)) throw new Error(`Warmth layer ${k}: unknown blend '${l.blend}'`)
+    if (l.mode !== undefined && l.mode !== 'full') throw new Error(`Warmth layer ${k}: PHAT*SS runs every layer FULL, not '${l.mode}'`)
+    if (l.oversample === false && !(l.hiHz <= WARMTH_BASE_RATE_MAX_HZ)) {
+      throw new Error(`Warmth layer ${k}: oversample: false needs a low band (hiHz ≤ ${WARMTH_BASE_RATE_MAX_HZ}), got ${l.hiHz}`)
+    }
+  })
+  return layers
+}
+checkWarmthLayers(WARMTH_LAYERS)
 
 
 /**
@@ -139,22 +245,25 @@ export const WARMTH_EVEN_MATCH_DB = 17.4
 const WARMTH_LAYER_OFF_DB = SAT_AMOUNT_FLOOR_DB
 
 /**
- * The two warmth layers' kernel params for a Warmth / Odd/Even setting.
+ * The warmth layers' kernel params for a Warmth / Odd/Even setting (roles in
+ * WARMTH_LAYERS: the even and odd layers crossfade, fixed layers follow the level).
  * Odd/Even is an equal-power crossfade, so turning it keeps the combined
  * added level, over the first ODD_EVEN_SPAN of the full Odd→Even travel; the
  * bench voicing is Warmth 5 / Odd/Even 36.
  */
-export function warmthLayers(warmth, oddEven, refPeaksDb) {
+export function warmthLayers(warmth, oddEven, refPeaksDb, layers = WARMTH_LAYERS) {
   const w = clamp(Number(warmth) || 0, 0, WARMTH_MAX)
   const b = ODD_EVEN_SPAN * clamp(Number.isFinite(oddEven) ? oddEven : 50, 0, ODD_EVEN_MAX) / ODD_EVEN_MAX
   const levelDb = warmthLevelDb(w)
-  const gains = [Math.sin((b * Math.PI) / 2), Math.cos((b * Math.PI) / 2)] // even (quartic), odd (tanh)
-  const offsets = [WARMTH_EVEN_MATCH_DB, 0]
-  return WARMTH_LAYERS.map((l, k) => {
-    const amountDb = levelDb + offsets[k] + 20 * Math.log10(Math.max(gains[k], 1e-12))
+  // Each role's share of the crossfade, and its level offset.
+  const gain = { even: Math.sin((b * Math.PI) / 2), odd: Math.cos((b * Math.PI) / 2), fixed: 1 }
+  const offset = { even: WARMTH_EVEN_MATCH_DB, odd: 0, fixed: 0 }
+  return layers.map((spec, k) => {
+    const { blend = 'fixed', amountOffsetDb = 0, ...l } = spec
+    const amountDb = levelDb + offset[blend] + amountOffsetDb + 20 * Math.log10(Math.max(gain[blend], 1e-12))
     const on = w > 0 && amountDb > WARMTH_LAYER_OFF_DB
     const ref = Array.isArray(refPeaksDb) && Number.isFinite(refPeaksDb[k]) ? refPeaksDb[k] : undefined
-    return { ...l, on, amountDb: on ? amountDb : 0, ...(ref === undefined ? {} : { refPeakDb: ref }) }
+    return { ...l, mode: 'full', on, amountDb: on ? amountDb : 0, ...(ref === undefined ? {} : { refPeakDb: ref }) }
   })
 }
 
@@ -172,51 +281,94 @@ function clamp(v, lo, hi) {
 }
 
 /**
- * The tape HF shelf's pinned timing and shape. WARM (the one-pole split, the
- * EL7 Fatso's Warmth) at 35 ms with no Tail and no Transient is the setting the
- * HF Limiter matched to a Fatso Warmth 7 bounce (0.69–0.75 dB rms of band-gain
- * error) — the tape-ish gentle tilt rather than a ceiling.
+ * HF — the detent that replaces the Tame knob on the panel.
+ *
+ * The TAPE SPEEDS run the tape HF shelf (`dsp/tapeHfShelf.js`): the top end
+ * SAGS with level — an energy detector on the pre-emphasised band, no
+ * lookahead, a gentle law (0.5 dB of cut per dB over, through a knee), and a
+ * corner that slides down as it cuts — rather than being held at a ceiling.
+ * A slower speed has less HF headroom: its emphasis corner (what the detector
+ * weights) is lower, its shelf starts lower and slides further, it starts
+ * sooner and may cut deeper. The emphasis corners are the IEC time constants
+ * (17.5 / 35 / 70 µs → 9.09 / 4.55 / 2.27 kHz); every other number is
+ * REASONED, then scaled down against a reference — see below.
+ *
+ * TAPE DRIVES IT THROUGH ITS MAKEUP, not a second threshold law: the shelf
+ * sits after TAPE's peak-restoring makeup, so a hotter TAPE already arrives
+ * hotter (+6.65 dB of body on the owner's drums at TAPE 8). ⚠ THE FIRST CUT
+ * ALSO DROPPED THE THRESHOLD 1 dB PER dB OF TAPE and counted the drive twice:
+ * on drums at TAPE 8 the envelope never left the cut, a STATIC EQ of −4.5 /
+ * −7.1 / −9.6 dB at 8–16 kHz on every frame, quiet or loud (owner: "too strong
+ * at every setting but OFF").
+ *
+ * SCALE, from the owner's Studer A800 drum pair (not a match — a sense of how
+ * much a real machine loses): against its quiet-frame response it loses ~0 on
+ * quiet frames, ~1 dB 0–4 dB over the voice level and ~3 on the loudest — but
+ * the low band loses nearly as much (−2.3 to −2.8 on the loudest), so the
+ * HF-SPECIFIC part is ~0.5–1 dB, on loud frames only. Installed, drums at
+ * TAPE 8, 8–16 kHz on quiet / mid / loud frames: 30 ips −0.07 / −0.07 / −0.04,
+ * 15 ips −0.6 / −1.1 / −0.9, 7.5 ips −1.0 / −2.2 / −2.0; nothing at TAPE 0.
+ * Bright narration, sibilant body / onset at TAPE 0 → TAPE 4: 30 ips −0.4 /
+ * 0.0 → −0.6, 15 ips −1.3 / −0.1 → −1.9 / −0.3, 7.5 ips −2.0 / −0.3 → −2.8 /
+ * −0.6; the dull clip is untouched at 30 / 15 and loses ≤ 0.4 at 7.5
+ * (scripts/phatass-hf-detents.mjs).
+ *
+ *   'off'   — the top end untouched (bench only)
+ *   'ips30' / 'ips15' / 'ips7' — the tape HF shelf at 30 / 15 / 7.5 ips
+ *
+ * ⚠ AIR / SMOOTH / DARK, which recalibrated the LIMITER shelf from the file's
+ * treble percentiles, were the first version of this dial and were replaced
+ * (owner: "a level dependent HF shelf" meant a different shelf, not a new
+ * calibration of the old one). Recoverable at 8279530.
  */
-export const TAPE_SHELF = { shape: 'warm', releaseMs: 35, tailMs: 0 }
+/** A record-emphasis time constant's corner, Hz. */
+const emphasisHz = us => 1 / (2 * Math.PI * us * 1e-6)
+export const TAPE_SPEEDS = Object.freeze({
+  ips30: Object.freeze({ label: '30', headBump: 'a800-30', detectHz: emphasisHz(17.5), cornerMaxHz: 14000, cornerMinHz: 6000, thresholdRelDb: -4, rangeDb: 4 }),
+  ips15: Object.freeze({ label: '15', headBump: 'a800-15', detectHz: emphasisHz(35), cornerMaxHz: 10000, cornerMinHz: 4000, thresholdRelDb: -6, rangeDb: 6 }),
+  ips7: Object.freeze({ label: '7.5', headBump: 'a800-7', detectHz: emphasisHz(70), cornerMaxHz: 7000, cornerMinHz: 2500, thresholdRelDb: -6, rangeDb: 9 }),
+})
+/** Shared by every speed: law and timing (reasoned). */
+export const TAPE_HF_LAW = Object.freeze({
+  slope: 0.5, // dB of cut per dB over
+  kneeDb: 6,
+  cutPerOctDb: 6, // the corner drops an octave per 6 dB of cut
+  attackMs: 3,
+  releaseMs: 40,
+})
 
-/** The two macro knobs' ends. */
-export const TONE_MIN_HZ = 2000
-export const TONE_MAX_HZ = 12000
-export const TAME_THRESHOLD_TOP_DB = 2 // Tame 0: threshold, dB re voice level
-export const TAME_THRESHOLD_PER_STEP_DB = 2 // each Tame step lowers it this much
-export const TAME_RANGE_PER_STEP_DB = 3.6 // and deepens the Range this much (36 at 10, Soften's top too)
+export const HF_DETENTS = Object.freeze({
+  off: null,
+  ips30: TAPE_SPEEDS.ips30,
+  ips15: TAPE_SPEEDS.ips15,
+  ips7: TAPE_SPEEDS.ips7,
+})
+/**
+ * The panel's positions, in order: the three tape speeds and nothing else
+ * (owner, October 2026 — "reduce the detent to the three tape speeds"). OFF
+ * stays reachable from the bench. A stored 'fatso' or 'bench' (the removed
+ * limiter shelf) falls back to the default speed.
+ * Each speed brings its own head bump (`headBump`, while TAPE is up) unless
+ * the bench's Head bump row overrides it.
+ */
+export const HF_PANEL_DETENTS = Object.freeze(['ips30', 'ips15', 'ips7'])
+export const HF_MODES = Object.freeze([...HF_PANEL_DETENTS, 'off'])
 
 /**
- * The macro: Tame sets how hard (Threshold and Range together, so the shelf
- * starts acting earlier AND may go deeper), Tone sets where (the corner, on a
- * log scale). Tame 5 / Tone 10 is −8 dB, Range 18, 12 kHz — the HF Limiter's
- * default threshold and corner, half again its Range (the HF Limiter stops at
- * 24; Tame reaches 36). Tame 0 takes the shelf out (Range 0).
- *
- * @returns {{ cornerHz: number, thresholdRelDb: number, rangeDb: number }}
+ * The tape HF shelf's params for a detent, or null when the detent is not a
+ * tape speed. `thresholdDb` is absolute dBFS (mean-square level of the
+ * emphasised band).
  */
-export function tapeShelf(tame, tone) {
-  const t = clamp(Number(tame) || 0, 0, TAME_MAX)
-  const s = clamp(Number.isFinite(tone) ? tone : TONE_MAX, 0, TONE_MAX)
+export function tapeHfShelfParams(hf, voiceLevelDb) {
+  const sp = TAPE_SPEEDS[hf]
+  if (!sp) return null
   return {
-    cornerHz: TONE_MIN_HZ * (TONE_MAX_HZ / TONE_MIN_HZ) ** (s / TONE_MAX),
-    thresholdRelDb: TAME_THRESHOLD_TOP_DB - TAME_THRESHOLD_PER_STEP_DB * t,
-    rangeDb: TAME_RANGE_PER_STEP_DB * t,
-  }
-}
-
-/**
- * Soften's depth, from the toggle and Tame: off (or Tame 0) is no cut at all;
- * on, the ceiling is SOFTEN_DB_PER_STEP per Tame step and the slope runs
- * SOFTEN_SLOPE_MIN → MAX across Tame's travel.
- *
- * @returns {{ depthDb: number, slope: number }}
- */
-export function softenLaw(on, tame) {
-  const t = clamp(Number(tame) || 0, 0, TAME_MAX)
-  return {
-    depthDb: on ? SOFTEN_DB_PER_STEP * t : 0,
-    slope: SOFTEN_SLOPE_MIN + (SOFTEN_SLOPE_MAX - SOFTEN_SLOPE_MIN) * (t / TAME_MAX),
+    detectHz: sp.detectHz,
+    cornerMaxHz: sp.cornerMaxHz,
+    cornerMinHz: sp.cornerMinHz,
+    thresholdDb: voiceLevelDb + sp.thresholdRelDb,
+    rangeDb: sp.rangeDb,
+    ...TAPE_HF_LAW,
   }
 }
 
@@ -226,37 +378,406 @@ export function toKernelParams(params) {
   const voice = Number.isFinite(p.voiceLevelDb)
     ? clamp(p.voiceLevelDb, VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
     : ALIGN_TARGET_DBFS
-  const shelf = tapeShelf(p.tame, p.tone)
-  const soft = softenLaw(p.soften, p.tame)
+  const hf = HF_MODES.includes(p.hf) ? p.hf : PHATASS_DEFAULTS.hf
   return {
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
     // Pinned on with Warmth: there is no switch.
     warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
-    cornerHz: shelf.cornerHz,
-    thresholdDb: voice + shelf.thresholdRelDb,
-    rangeDb: shelf.rangeDb,
-    ...TAPE_SHELF,
-    // Soften rides the shelf's Transient, on its own band, at Tame's depth.
-    transientDb: soft.depthDb,
-    transientCornerHz: SOFTEN_FREQ_HZ,
-    transientSlope: soft.slope,
-    transientGateDb: voice - SOFTEN_GATE_BELOW_DB,
+    tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush, p.tapeStep),
+    headBump: Number(p.tape) > 0 ? headBumpFor(p.tapeHeadBump, hf) : 0,
+    // Signed: the head bump (after the curve) can leave the peak ABOVE the source.
+    tapeMakeupDb: Number(p.tape) > 0 && Number.isFinite(p.tapeMakeupDb)
+      ? clamp(p.tapeMakeupDb, -TAPE_MAKEUP_MAX_DB, TAPE_MAKEUP_MAX_DB) : 0,
+    // The tape HF shelf (a tape-speed detent), null when out.
+    tapeHf: tapeHfShelfParams(hf, voice),
     voiceLevelDb: voice,
     outputGainDb: clamp(Number(p.output) || 0, OUTPUT_MIN_DB, OUTPUT_MAX_DB),
+    outputMakeupDb: p.outputMakeup === 'keep' ? keepTrimDb(p)
+      : OUTPUT_MAKEUPS.includes(p.outputMakeup) && p.outputMakeup !== 'off' && Number.isFinite(p.outputMakeupDb)
+        ? p.outputMakeupDb : 0,
   }
 }
 
-/** The Warmth stage's latency: one oversampler round trip per layer. */
-export const WARMTH_LATENCY_SAMPLES = WARMTH_LAYERS.length * SAT_BENCH_LAYER_LATENCY
+/**
+ * The output trim's modes (bench only). 'off' ships. 'peak' puts the whole
+ * chain's output peak back on the selection's: with TAPE's makeup restoring
+ * its peak and the guard holding Warmth under it, what is left to restore is
+ * mostly what the HF shelves took. 'rms' puts the output's RMS on
+ * the selection's, so the plugin is level-matched against bypass — negative
+ * whenever Warmth and TAPE's makeup add level. Both are signed. Measured by
+ * rendering the chain (`phatassOutputMakeup.js`): no shortcut exists, since
+ * Warmth, its guard and the shelf are neither memoryless nor static.
+ * 'keep' keeps `outputKeep` of TAPE's makeup (in dB) and trims the rest off the
+ * output — no render, the makeup is already measured (`keepTrimDb`). 85 % stands
+ * in for the owner's by-ear pick, BLEND 80 (80 % of the way from RMS to PEAK, two
+ * renders): on drums that trimmed 13.7 % of the makeup at TAPE 10 and 15.5 % at
+ * TAPE 4. A fixed share over a material-specific rule, since the plugin serves
+ * voice, drums and full mixes alike. Warmth's added loudness is not in it (Warmth
+ * never raises the peak, and its density is wanted). On drums at TAPE 10 PEAK
+ * is the whole +5 LU TAPE adds (TAPE's makeup already restored the peak, so
+ * PEAK trims ~0) and RMS takes it all back (−5.4; integrated LUFS and
+ * momentary/short-term percentiles agree within ~0.5 dB) — by ear one too
+ * loud, the other too quiet, since a squashed hit level-matched sounds smaller.
+ */
+export const OUTPUT_MAKEUPS = ['off', 'peak', 'keep', 'rms']
+/** KEEP's shares of TAPE's makeup on the bench. */
+export const OUTPUT_KEEPS = [0.8, 0.85, 0.9]
 
 /**
- * Plugin latency, samples: the Warmth oversamplers, the peak guard's lookahead
- * and the shelf's split centre and lookahead (Soften shares the shelf's).
+ * KEEP's output trim, dB: the share of TAPE's makeup NOT kept, taken off the
+ * output. 0 with TAPE off or a makeup ≤ 0 (a head bump lifted the peak: the
+ * makeup added no loudness to give back).
+ */
+export function keepTrimDb(p) {
+  const mk = Number(p.tapeMakeupDb)
+  if (!(Number(p.tape) > 0) || !(mk > 0)) return 0
+  const keep = clamp(Number.isFinite(Number(p.outputKeep)) ? Number(p.outputKeep) : PHATASS_DEFAULTS.outputKeep, 0, 1)
+  return -(1 - keep) * mk
+}
+
+/**
+ * TAPE — a full-band CUBIC soft clipper, FIRST on the main path (ahead of
+ * Warmth — owner's call, so Warmth shapes the rounded signal; it sat after the
+ * Warmth guard until October 2026): what a tape machine does to peaks. Measured on a
+ * Studer A800 emulation (owner-supplied acoustic guitar, dry vs wet, see
+ * docs/claude-dev-log.md "PHAT*SS — TAPE"): the peak reduction is a WAVESHAPER,
+ * not a compressor — in the loudest 10 ms windows the quiet samples keep their
+ * gain and only those near the top bend — nearly symmetric, flat to ~9 dB under
+ * the peak, then −1.1 / −2.2 / −5.3 dB at −6 / −3 / 0. The bench's CUBIC
+ * (`u − u³/3`, flat past ±1) fits that curve to 0.09 dB rms (tanh 0.17).
+ *
+ * The knob is PEAK REDUCTION in dB, solved exactly: for f(g·x)/g the gain at
+ * the selection's peak P is f(u)/u with u = g·P, and the cubic inverts in
+ * closed form (`tapePeakU`). So the knob's number is what happens to the peak
+ * sample, on any recording level. ⚠ Past 3.52 dB (u > 1) the top of the wave is
+ * on the cubic's FLAT — a hard clip there; the Studer fit sat at u 1.17 (−4.9 dB
+ * at its peak). ⚠ Distortion rises fast: on narration ~−33 / −27 / −21 dB of
+ * added signal at 1 / 2 / 3.6 dB of peak reduction (≈2 / 4 / 9 %).
+ *
+ * Run on the shared Saturation Bench kernel as one layer with its band open at
+ * both ends and Amount 0, which is exactly a full-band shaper, 4x oversampled,
+ * 50 samples of latency on or off.
+ *
+ * MAKEUP (automatic, owner's choice: peak-restoring): a gain right after TAPE
+ * that brings the peak back to the selection's own, turning the peak reduction
+ * into loudness. ⚠ IT IS MEASURED, NEVER THE KNOB'S NUMBER: a sibilant peak loses
+ * only ~75 % of the knob (its harmonics are filtered above Nyquist), so
+ * knob-sized makeup would lift it past the source. `tapeMakeupDb` comes from
+ * rendering TAPE on the selection (`measureTapeMakeup`: a fast bounded search
+ * for preview, the whole region for apply) — TAPE sees the source, so no other
+ * knob moves it. After the makeup the voice peaks at the selection's own peak,
+ * which is the Warmth guard's ceiling, and the shelf only lowers peaks, so the
+ * output never passes the source. ⚠ The makeup lifts the body Warmth sees
+ * (+1.2 to +1.7 dB at TAPE 2), so Warmth runs that much hotter with TAPE up;
+ * its calibration is measured on the source and not compensated.
+ *
+ * ⚠ THE KNOB RUNS TO 12, not 6 (October 2026): a Studer A800 drum-machine
+ * render flattens the snares 6.3 dB under their body and squashes the kick's
+ * lows 7.1 / 4.5 dB under its linear path, which TAPE 6 reached only 2.9 and
+ * 3.2 / 1.2 of — TAPE 6 plus 6 dB more drive (≈ TAPE 12) lands on both (−6.5;
+ * −7.8 / −4.2). Past 3.52 dB the cubic is on its flat, so 6–12 is a hard clip
+ * driven harder: real peaks lose ~84–92 % of the number (narration −10.1 /
+ * −10.8, guitar −10.1, drums −9.9 at 12) and what it adds reaches −12 to
+ * −15 dB re the signal (−18 to −22 at 6). Tanh lands a little nearer the number.
+ */
+export const TAPE_MAX_DB = 12
+/** Peak re the gated RMS assumed when the selection's peak is not measured yet. */
+export const TAPE_FALLBACK_CREST_DB = 18
+/**
+ * TAPE's curves. 'cubic' (default) fits the Studer best (0.09 dB rms) and is
+ * pure third harmonic until the peak reaches its flat at 3.52 dB, where it
+ * becomes a hard clip. 'tanh' fitted it second (0.17) and never goes flat.
+ *
+ * ⚠ "TANH IS GENTLER AT THE TOP" WAS THE PREDICTION AND IT DID NOT HOLD.
+ * 110 Hz sine at −4.4 dBFS, H7–H41 re the fundamental, cubic / tanh:
+ * TAPE 1 −116 / −89, 2 −110 / −71, 3.5 −105 / −56, 5 −45.8 / −46.9,
+ * 6 −42.7 / −42.1 dBc — equal where the cubic clips, and tanh carries far MORE
+ * high-order content below that (it has every odd order from the start; the
+ * cubic has only the third until it reaches its flat). H3+H5 is 0.3–1.5 dB
+ * lower on tanh at every setting. On bright narration tanh adds MORE in total
+ * (−26.6 vs −28.0 dB re signal at TAPE 2, −16.2 vs −18.9 at 6) because it bends
+ * earlier, so more samples are shaped. What tanh does do better: the peak lands
+ * nearer the knob (−5.93 vs −5.75 dB at 6; no flat to ring off) and sibilant
+ * peaks lose closer to the number (makeup 4.84 vs 4.55 dB at 6). Not auditioned.
+ *
+ * 'algebraic' (u/√(1 + u²); Studer fit 0.19) is tanh further the same way: it
+ * bends earliest, so it has the most high-order content at every setting
+ * (H7–H41 −84.8 / −66.9 / −52.8 / −44.0 / −39.7 dBc at TAPE 1 / 2 / 3.5 / 5 / 6),
+ * H3+H5 lowest of the three, the most added on narration (−26.3 at 2, −15.5 at
+ * 6), and tanh's peak accuracy (−5.94 dB at 6). Its knob solve is closed form.
+ * Not auditioned.
+ *
+ * 'hysteresis' is the Saturation Bench's STATEFUL Jiles-Atherton tape model
+ * (dsp/hysteresis.js) — added after the owner heard more of the Studer's tape
+ * character in it on drums ("the thwap on the kick, tighter peaks without
+ * brickwall limiting"). Measured per hit against the Studer A800 renders as a
+ * bench layer (full band, no emphasis): it squashes kicks ~2× harder than
+ * snares by itself, and lands the per-hit peak reduction better than any
+ * memoryless curve on the drums (per-hit rms error 0.93 dB at bench drive 10,
+ * against TAPE 12 cubic's 2.77) and about level with it on the drum machine
+ * (1.40 at 13, 1.31). It does NOT reproduce the Studer's sustain (tail − attack
+ * on kicks about half). Its knob has no closed form: `tapePeakU` bisects the
+ * steady-state peak loss on a sine (the model is rate-independent, so one
+ * cycle shape serves every frequency), and a hit's first cycle, which meets
+ * the loop from rest, can lose a different amount — the makeup is measured.
+ */
+export const TAPE_CURVES = ['cubic', 'tanh', 'algebraic', 'hysteresis']
+/** The panel's Tape switch: the two curves it offers, in order. */
+export const TAPE_PANEL_CURVES = Object.freeze([
+  Object.freeze({ value: 'cubic', label: 'CLEAN' }),
+  Object.freeze({ value: 'hysteresis', label: 'THICK' }),
+])
+/*
+ * TAPE's place in the chain is PINNED FIRST (owner's call, October 2026): TAPE →
+ * makeup → Warmth → guard. The 'last' order (Warmth → guard → TAPE → makeup,
+ * the pre-October-2026 chain) was on the bench to audition and is gone; it
+ * rendered within 0.1 LU of 'first' at Warmth 5 / TAPE 3, the difference −34 /
+ * −31 dB re the output on narration and −22 on guitar.
+ */
+export const TAPE_CURVE = TAPE_CURVES[0]
+const TAPE_LAYER = {
+  amountDb: 0, emphDb: 0, loHz: SAT_BAND_MIN_HZ, hiHz: SAT_BAND_MAX_HZ, mode: 'full',
+}
+
+const hystPeakCache = new Map()
+
+/** Steady-state peak out / peak in of the hysteresis TAPE layer on a sine of amplitude u. */
+function hysteresisPeakRatio(u) {
+  const ja = new JilesAtherton({ scale: 1 / hysteresisSmallGain() })
+  const N = 128
+  let pk = 0
+  for (let c = 0; c < 4; c++) {
+    for (let i = 0; i < N; i++) {
+      const y = ja.step(u * Math.sin((2 * Math.PI * i) / N))
+      if (c === 3 && Math.abs(y) > pk) pk = Math.abs(y)
+    }
+  }
+  return pk / u
+}
+
+/**
+ * The u at the peak that takes `reductionDb` off a steady sine's peak through
+ * the hysteresis loop: bisected in log u (the loss rises monotonically from
+ * ~0.3, where the loop is still linear, to −25 dB at u 64), memoised per knob
+ * position and loop shape.
+ */
+function hysteresisPeakU(reductionDb) {
+  const t = Math.max(0, reductionDb)
+  if (!(t > 0)) return 0
+  const key = `${t.toFixed(4)}@${hysteresisShapeVersion()}`
+  if (hystPeakCache.has(key)) return hystPeakCache.get(key)
+  const r = Math.pow(10, -t / 20)
+  let lo = Math.log(0.3)
+  let hi = Math.log(256)
+  for (let n = 0; n < 24; n++) {
+    const mid = 0.5 * (lo + hi)
+    if (hysteresisPeakRatio(Math.exp(mid)) > r) lo = mid
+    else hi = mid
+  }
+  const u = Math.exp(0.5 * (lo + hi))
+  hystPeakCache.set(key, u)
+  return u
+}
+
+/**
+ * The curve's input u at the peak that takes `reductionDb` off it: the u with
+ * f(u)/u = 10^(−dB/20). The cubic and algebraic (1/√(1 + u²) = r) invert in
+ * closed form; tanh(u)/u falls monotonically from 1, so it is bisected (to
+ * ~1e-12, well inside a float).
+ */
+export function tapePeakU(reductionDb, curve = TAPE_CURVE) {
+  if (curve === 'hysteresis') return hysteresisPeakU(reductionDb)
+  const r = Math.pow(10, -Math.max(0, reductionDb) / 20)
+  if (curve === 'algebraic') return Math.sqrt(1 / (r * r) - 1)
+  if (curve === 'tanh') {
+    if (r >= 1) return 0
+    let lo = 0, hi = 1
+    while (Math.tanh(hi) / hi > r) hi *= 2
+    for (let k = 0; k < 60; k++) {
+      const mid = 0.5 * (lo + hi)
+      if (Math.tanh(mid) / mid > r) lo = mid
+      else hi = mid
+    }
+    return 0.5 * (lo + hi)
+  }
+  return r >= 2 / 3 ? Math.sqrt(3 * (1 - r)) : 2 / (3 * r)
+}
+
+/**
+ * TAPE's LOW PUSH, bench only: dB of low shelf into the curve, undone after it.
+ * Measured on a Studer A800 emulation (drums and drum machine, dry vs wet,
+ * against the Studer's own linear path fitted on quiet frames): it takes a
+ * kick's low end (< 120 Hz) 7.2–7.3 dB down on the loud kicks and 4.7–6.2 on
+ * the softer ones, recovering within the kick (its tail 80–250 ms on is
+ * unchanged) — the lows saturate first, like tape or a transformer. Flat TAPE
+ * reaches −0.4 to −0.6 at TAPE 1 and only −2.7 to −3.2 at TAPE 6. With the
+ * push the kick lands on the Studer's at TAPE 2 / +12 dB (drum machine
+ * −8.7 / −4.7) or TAPE 6 / +6 dB (drums −7.1 / −6.1): push and drive trade, so
+ * no single number is the Studer's. The corner moves it less (TAPE 1 / +12, loud
+ * kicks: −4.2 at 100 Hz, −6.3 at 150, −6.7 at 250).
+ */
+// Trimmed to 0 / 3 / 6 after listening (owner: 12 and 18 were too hot); a
+// stored 12 or 18 clamps to 6.
+export const TAPE_LOW_PUSHES = [0, 3, 6]
+/**
+ * Ceiling on TAPE's measured makeup, dB. Above the knob's 6 because with a low
+ * push a kick-led peak loses more than the knob (TAPE 3 / +6 on a bare kick:
+ * 6.9 dB) — capped at the knob, the makeup left that peak short of the source.
+ */
+export const TAPE_MAKEUP_MAX_DB = 24
+export const TAPE_LOW_PUSH_HZ = 150
+
+/**
+ * TAPE's HEAD BUMP, bench only: dB of low shelf (TAPE_HEAD_BUMP_HZ, Q 0.7)
+ * AFTER TAPE's curve (pinned there, see below) that is NOT undone — unlike the
+ * low push, the lift stays in the output, as a tape machine's does. HISTORY:
+ * it was built AHEAD of the curve, and the figures that follow are from then. Fitted on two Studer A800 dry/wet drum
+ * pairs: their linear paths (quiet frames) lift the lows ~+3.5–4 dB under
+ * ~40 Hz re 1 kHz, flat from ~80 Hz. Placed ahead of the curve it reproduces
+ * the drum machine's kick-against-snare balance (energy of the first 100 ms of
+ * each hit, kick minus snare: dry 11.00, Studer 11.64 dB; TAPE 12 alone 10.09,
+ * + bump 3 / 6 dB: 10.89 / 11.67). The same EQ AFTER the curve overshot
+ * (12.66): ahead of it, the clipper takes part of the lift back off the kick.
+ * ⚠ The drums render needs none (Studer −1.86, TAPE 12 alone −1.90, +6: −1.32)
+ * — the two renders were not made at one setting. The makeup is measured
+ * through the bump.
+ */
+/**
+ * 'speed' (ships) follows the HF dial's tape speed (`TAPE_SPEEDS[hf].headBump`);
+ * the rest are the bench's overrides.
+ */
+export const TAPE_HEAD_BUMPS = ['speed', 0, 3, 6, 9, 'a800-30', 'a800-15', 'a800-7']
+export const TAPE_HEAD_BUMP_HZ = 40
+export const TAPE_HEAD_BUMP_Q = 0.7
+/**
+ * The Studer A800's measured playback low end (endino.com frequency-response
+ * graph of the hardware, 30 ips), fitted by eye-digitised points to 0.17 dB
+ * rms with three minimum-phase sections: a high-pass at 35.3 Hz (Q 0.90), a
+ * broad +1.17 dB lift at 31.25 Hz (Q 0.30) and a −1.93 dB dip at 82.7 Hz
+ * (Q 1.83) — net +1.2–1.5 dB at 40–50 Hz, −0.6 at 80–90, +0.4 at 140, −8 at
+ * 20 Hz. 15 ips is the same curve an octave down (head-bump frequencies scale
+ * with tape speed), on the owner's reading. Fixed depth.
+ *
+ * WHY: against the Studer emulation's drum renders the hardware curve put the
+ * kick's frequency closest by ear. Measured, it moves the kick's click-vs-sub
+ * balance toward the Studer (drums, first 30 ms of loud kicks, 1–8 kHz re
+ * < 60 Hz: Studer −17.1 dB, 30 ips −18.0, 15 ips −18.2, the +3 shelf −19.6).
+ * A fit to the EMULATION's own measured path (a 7 Hz resonant high-pass, a
+ * 22 Hz bump and a very low all-pass, with 2–13 ms of low-frequency group
+ * delay) was rejected by ear as rangy: its delay smears the kick.
+ */
+export const TAPE_HEAD_BUMP_CURVES = Object.freeze({
+  'a800-30': Object.freeze({ hpHz: 20, hpQ: 0.9, liftHz: 31.25, liftQ: 0.3, liftDb: 1.17, dipHz: 82.7, dipQ: 1.83, dipDb: -1.93 }),
+  'a800-15': Object.freeze({ hpHz: 17.65, hpQ: 0.9, liftHz: 15.625, liftQ: 0.3, liftDb: 1.17, dipHz: 41.35, dipQ: 1.83, dipDb: -1.93 }),
+  // 7.5 ips: the 15 ips curve an octave further down, by the same scaling rule.
+  'a800-7': Object.freeze({ hpHz: 8.825, hpQ: 0.9, liftHz: 7.8125, liftQ: 0.3, liftDb: 1.17, dipHz: 20.675, dipQ: 1.83, dipDb: -1.93 }),
+})
+/** Most sections any head bump uses (the kernel sizes its cascade to this). */
+export const TAPE_HEAD_BUMP_MAX_SECTIONS = 3
+
+/**
+ * The head bump in force: the bench's choice, or with 'speed' the dial's tape
+ * speed's own curve (none for OFF).
+ */
+export function headBumpFor(tapeHeadBump, hf) {
+  if (tapeHeadBump === 'speed') return TAPE_SPEEDS[hf]?.headBump ?? 0
+  return headBumpChoice(tapeHeadBump)
+}
+
+/** A head-bump choice as kernel params read it: 0 (off), a shelf dB, or a curve id. */
+export function headBumpChoice(v) {
+  if (typeof v === 'string' && TAPE_HEAD_BUMP_CURVES[v]) return v
+  const db = clamp(Number(v) || 0, 0, 9)
+  return db > 0 ? db : 0
+}
+
+/** The head bump's biquad sections at a sample rate, or null when off. */
+export function headBumpSections(sampleRate, bump) {
+  const b = headBumpChoice(bump)
+  if (!b) return null
+  if (typeof b === 'number') return [lowShelf(sampleRate, TAPE_HEAD_BUMP_HZ, TAPE_HEAD_BUMP_Q, b)]
+  const c = TAPE_HEAD_BUMP_CURVES[b]
+  return [highpass(sampleRate, c.hpHz, c.hpQ), peaking(sampleRate, c.liftHz, c.liftQ, c.liftDb), peaking(sampleRate, c.dipHz, c.dipQ, c.dipDb)]
+}
+/**
+ * The most a head bump lifts any frequency, dB (≥ 0; 0 when off) — the worst
+ * it can add to a peak. Live preview subtracts it from the interim makeup when
+ * the bump changes, so the peak cannot rise while the new makeup is measured.
+ */
+export function headBumpMaxLiftDb(bump, sampleRate = 44100) {
+  const secs = headBumpSections(sampleRate, bump)
+  if (!secs) return 0
+  const freqs = []
+  for (let f = 5; f <= 2000; f *= 1.02) freqs.push(f)
+  return Math.max(0, ...magnitudeResponseDb(secs, freqs, sampleRate))
+}
+
+/*
+ * The head bump is PINNED AFTER THE CURVE (owner's call, October 2026), where a
+ * real machine makes it — a PLAYBACK-head effect (recorded wavelength against
+ * the pole-piece / contact length), linear, not a product of saturation (our
+ * Jiles-Atherton loop has none of its own). It was ahead of the curve first,
+ * then a PRE / POST bench choice: with FAST Tape comp on the Studer drum
+ * machine POST +6 landed the kick − snare balance (12.67 against the Studer's
+ * 12.39) where PRE's lift was squashed by the fast stage and the curve (10.78).
+ * The makeup is measured through it and may be NEGATIVE (the lift can put the
+ * peak above the source); with a bump up it is measured the exact way in
+ * preview too (the shelf's memory outlasts the fast search's short pre-roll).
+ */
+const TAPE_LOW_PUSH_Q = 0.7
+
+/*
+ * TAPE COMPRESSION (October 2026) was built, fitted and REMOVED (owner's call):
+ * a feed-forward compressor around TAPE's curve (dsp/tapeComp.js, recoverable
+ * at 29815f3) — SLOW (RMS, 1 / 16.5 ms, low-weighted) and FAST (peak, 0.85 /
+ * 1.8 ms) voicings, PRE or POST the curve. It fitted the Studer's per-hit
+ * numbers mostly by lowering what the curve clipped on kicks, and by ear and
+ * measured it did not flatten attacks: with no lookahead the first ms of each
+ * hit is through before it acts, so it lowered the BODY and left attacks more
+ * prominent (drum machine, first 2 ms re 15–30 ms body: TAPE only 8.6 dB, SLOW
+ * PRE 9.4, FAST POST 8.5, the Studer 4.0). POST was near-inert besides — its
+ * threshold was calibrated on the source peak but it saw TAPE's pre-makeup
+ * output. Full record in docs/claude-dev-log.md.
+ */
+/**
+ * The TAPE layer's kernel params for a knob position, the selection's peak,
+ * the curve and the low push. ⚠ With a push the knob is a DRIVE, solved as if
+ * there were none (owner's choice): a snare-like peak still loses about the
+ * knob, a kick's peak loses more. The makeup is measured, so the peak still
+ * lands back on the source's.
+ */
+/** HYSTERESIS's integrators on the bench: the exact RK2 (ships) or the one-evaluation step. */
+export const TAPE_STEPS = ['exact', 'fast']
+
+export function tapeLayer(tapeDb, peakDb, curve = TAPE_CURVE, lowPushDb = 0, step = 'exact') {
+  const c = TAPE_CURVES.includes(curve) ? curve : TAPE_CURVE
+  // The fast step is the same loop, solved and calibrated as the exact one.
+  const layerCurve = c === 'hysteresis' && step === 'fast' ? 'hysteresis-fast' : c
+  const t = clamp(Number(tapeDb) || 0, 0, TAPE_MAX_DB)
+  if (!(t > 0)) return { ...TAPE_LAYER, curve: layerCurve, on: false, driveDb: 0 }
+  // layerGain = unitDriveU / refPeak · 10^(drive/20): with refPeak = the peak,
+  // u at the peak is unitDriveU · 10^(drive/20).
+  const driveDb = clamp(20 * Math.log10(tapePeakU(t, c) / unitDriveU(c)), SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB)
+  const push = clamp(Number(lowPushDb) || 0, 0, TAPE_LOW_PUSHES[TAPE_LOW_PUSHES.length - 1])
+  const emph = push > 0 ? { emphType: 'loshelf', emphHz: TAPE_LOW_PUSH_HZ, emphQ: TAPE_LOW_PUSH_Q, emphDb: push } : {}
+  return { ...TAPE_LAYER, ...emph, curve: layerCurve, on: true, driveDb, refPeakDb: peakDb }
+}
+
+/** The TAPE stage's latency: one oversampler round trip, on or off. */
+export const TAPE_LATENCY_SAMPLES = SAT_BENCH_LAYER_LATENCY
+
+/** The Warmth stage's latency: one oversampler round trip per oversampled layer. */
+export const WARMTH_LATENCY_SAMPLES = slotOversample().filter(Boolean).length * SAT_BENCH_LAYER_LATENCY
+
+/**
+ * Plugin latency, samples: TAPE's oversampler, the Warmth oversamplers, the
+ * peak guard's lookahead and the limiter shelf's split centre and lookahead
+ * (the tape HF shelf adds none).
  * CONSTANT: every stage stays a delay of its own length when idle, so no
  * setting moves the audio.
  */
 export function phatassLatencySamples(sampleRate) {
-  return WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate) + shelfLatencySamples(sampleRate)
+  return TAPE_LATENCY_SAMPLES + WARMTH_LATENCY_SAMPLES + warmthGuardLatencySamples(sampleRate)
 }
 
 /** Pre-roll for apply, seconds: several of the shelf's release. */

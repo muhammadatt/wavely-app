@@ -5563,3 +5563,1496 @@ Limiter's default shelf (Range 12); it is the HF Limiter at −8 dB / Range 18 /
 12 kHz, and the Warmth-0 equivalence test now compares against that. The kernel
 has no Range clamp (`floorLin = dbToLin(−rangeDb)`), so 36 needs no other change;
 the HF Limiter's own knob still stops at 24. Not auditioned.
+
+---
+
+## PHAT*SS — Tame/Tone against the EL7 Fatso's Warmth 2/5/6/7 (October 2026)
+
+Owner supplied four more bounces over `2_FATSO_EL7x_-_Input_2.wav` (Warmth off):
+Warmth 2, 5, 6 and the Warmth 7 already analysed above. Same clip (music,
+96 kHz float stereo, 8.35 s, gated RMS −23.0 dBFS). Question: which Tame/Tone
+reproduces each Warmth level?
+
+**Capture.** The same ~13-sample drop as before, now in three files: Warmth 2 at
+~0.9 s, Warmth 6 at ~3.4 s, Warmth 7 at ~6.7 s, plus ±1 sample of drift. Each
+85 ms block is realigned by integer cross-correlation and blocks next to a jump
+are dropped.
+
+**Metric** (the HF Limiter match's, extended down): per 10.7 ms frame, per band
+out/in energy (dB) in 100–500 / 0.5–1 / 1–2 / 2–4 / 4–8 / 8–16 kHz, ours minus
+the Fatso's, rms over frames and bands after solving the mean as Output. PHAT*SS
+at Warmth 0, Soften off (Warmth adds no harmonics — see above), voice level
+measured from the file as the app does. Gain-only baselines: 0.002 / 0.210 /
+0.556 / 1.357 dB.
+
+**What the Fatso's Warmth does here — strongly non-linear in the knob.**
+- **Warmth 2: nothing** — within 0.04 dB of Input 2 in every band, every frame.
+- Warmth 5: a cut over 1 dB on ~1 % of frames, at most ~3.6 dB.
+- Warmth 6: ~8 % of frames, worst 3–8 dB above 2 kHz.
+- Warmth 7: a third of frames, worst ~10 dB at 8–16 kHz.
+- Its one-pole corner, fitted per file with a free per-frame depth, is ~2 kHz at
+  Warmth 7 and ~1.5 kHz at Warmth 6 (Warmth 5 too weak to say): it does NOT move
+  up with the knob. What moves is the threshold.
+
+**Best Tame/Tone (0.25 grid, then refined):**
+
+| Fatso | Tame / Tone / Output | rms (baseline) |
+|---|---|---|
+| Warmth 2 | Tame 0 | 0.002 (0.002) |
+| Warmth 5 | 1 / 9 / +0.1 | 0.178 (0.210) |
+| Warmth 6 | 1 / 5 / +0.2 | 0.401 (0.556) |
+| Warmth 7 | 2 / 2.5 / +0.4 | 0.633 (1.357) |
+
+The valley runs along a Tame↔Tone diagonal (Warmth 7: Tame 1.75 / Tone 2 is
+0.633 too). ⚠ **TONE IS STANDING IN FOR THRESHOLD.** The fit pulls the corner up
+(10 / 4.9 / 3.1 kHz) though the Fatso's sits near 2 kHz, because Tame cannot put
+the threshold where the Fatso's is: a higher corner feeds the detector less of
+the spectrum, which acts like a higher threshold.
+
+**With the corner pinned at 2 kHz (= Tone 0) and Threshold / Range free**, all
+three fit better, with the threshold doing the work:
+
+| Fatso | Threshold re voice | Range | rms |
+|---|---|---|---|
+| Warmth 5 | +10 dB | any ≥ 3 (never reached) | 0.165 |
+| Warmth 6 | +4 dB | **3** (6 → 0.412, ≥ 9 → 0.438) | 0.345 |
+| Warmth 7 | 0 dB | ≥ 9 (3 → 0.826) | 0.574 |
+
+So ~6 / 4 dB of threshold per Warmth step at the top, and a Range that opens
+with it. Tame cannot reach these: its threshold tops out at +2 dB (and Tame 0
+has Range 0), and at a given threshold it gives more Range than the Fatso
+(Tame law: Range = 1.8·(2 − thr); the Fatso, from two points: ≈ 9 − 1.5·thr).
+Shifting Tame's threshold law to `12 − 2·Tame` (Range unchanged) reaches
+Warmth 5 at Tame 1 (0.165) and Warmth 7 at Tame 6 (0.579), but Warmth 6 only
+0.396, because the coupled Range is too deep there.
+
+**Ruled out:**
+- **A steeper-than-limiter law.** The per-frame depth against the 2 kHz band
+  level LOOKS steeper than ours (Warmth 7: −0.5 / −1.5 / −2.2 / −5.2 / −7.4 dB at
+  −33 … −27 dBFS, about 1.3 dB per dB, against our ~0.8). But a scratch kernel
+  with `req = (T/m)^k` scores worse at every k > 1 (Warmth 7: k 1.5 0.594,
+  k 2 0.612, k 3 0.651). The limiter law (k = 1) is right.
+- **Release.** 20 ms is marginally better than the pinned 35 (Warmth 7 0.565 vs
+  0.574, Warmth 6 0.328 vs 0.345); 50 ms and up is worse. Not worth unpinning.
+- **The macro's coupling as such.** A free four-parameter fit (corner,
+  threshold, Range, release) reaches about what the 2 kHz fit does. What
+  matters is where the threshold sits and how Range relates to it, not that two
+  parameters share one knob.
+
+**The floor no shelf setting removes** (~0.57 dB at Warmth 7): a static tilt, with
+lows +0.57 dB and highs −0.2 in the median frame, which a flat Output cannot
+copy. Also the Fatso cuts reaching down to 1 kHz on its deepest frames.
+
+⚠ **THE FATSO'S THRESHOLD IS ABSOLUTE and ours is relative to the file's level.**
+"+10 / +4 / 0 dB re voice" holds for this clip's −23.0 dBFS. A hotter take
+through a Fatso cuts more at the same Warmth, and PHAT*SS would not. One music
+clip, not voice. Nothing changed in the code. The scripts were scratch and are
+not in the repo.
+
+### PHAT*SS — FATSO mode (October 2026)
+
+Owner: "add it as a switchable Fatso mode". `fatso` (default false) in
+`PHATASS_DEFAULTS`; `tapeShelf(tame, tone, fatso)` returns the fitted law when on:
+corner pinned at `FATSO_CORNER_HZ` (2000, Tone ignored and greyed in the panel),
+threshold `12 − 2·Tame` dB re the voice, Range `max(3, 3·Tame − 9)` (0 at Tame 0,
+so Tame 0 is still a pure delay — tested). Built through the three fitted points,
+and checked end to end through the real Tame path against the bounces: Warmth 5 /
+6 / 7 are best at Tame 1 / 4 / 6, scoring 0.165 / 0.345 / 0.574 (identical to the
+free fit) with Output +0.06 / +0.23 / +0.59. The travel between and past those
+points is interpolation, and above Tame 6 it is extrapolation (Tame 10: −8 dB,
+Range 21). Soften still rides Tame and is not affected by the switch. Panel: a FATSO lamp pill beside
+Output, caption `2k · ≤N dB` (the current Range). Not auditioned.
+
+### PHAT*SS — VOICE curve, original Tame/Tone deprecated, DETECT 2K/4K (October 2026)
+
+Owner, after auditioning FATSO: it sounds "more taming than just duller", but the
+bottom of the knob is subtle and the top wants more depth. Then: deprecate the
+original curve, keep FATSO and the candidate, put the detector on a toggle.
+
+**Why FATSO's bottom is subtle on narration.** The detector compares each sample
+of the band above 2 kHz (`x − LP1`) against a threshold set from the WHOLE
+file's broadband gated RMS. On narration that band's 10 ms peaks sit far lower
+against the RMS than on the Fatso's music clip: median −7.4 / −8.5 dB (bright /
+dull narration, owner-supplied `Messy_and_Bright` and `art_test_clip_orig`)
+against +0.7, 99th percentile +7.4 / +6.9 against +10.4. FATSO's +10 / +8 / +6
+at Tame 1–3 are crossed in 0–2 % of windows. At the top, by Tame 8–10 the
+threshold is under nearly every peak, so depth is set by how far peaks rise over
+it and turning further mostly adds cuts that are already happening.
+
+**Measured, current FATSO** (energy change, sibilant frames 4–16 kHz / voiced
+frames 2–4 kHz; a frame is sibilant when 4–16 kHz outweighs 100–1000 Hz):
+bright Tame 1 −0.5 / 0, Tame 6 −4.4 / −0.7, Tame 10 −8.9 / −2.7; dull Tame 6
+−0.1 / −1.1, Tame 10 −2.3 / −3.1. On the dull clip the loudest treble is
+VOWELS at 2–4 kHz, so it trims those first and leaves the few sibilants alone.
+
+**VOICE curve** (`curve: 'voice'`, the default): threshold `6 − 2·Tame`, Range
+`max(3, 3·Tame − 3)`. Bright: Tame 1 −1.6 / −0.2, Tame 6 −7.9 / −2.2, Tame 10
+−10.6 / −3.9. Dull: Tame 6 −1.4 / −2.7, Tame 10 −5.6 / −3.9. It no longer matches
+the Fatso bounces (on music Tame 1 would act like Fatso Warmth 6); FATSO stays
+selectable for that.
+
+**Original Tame/Tone deprecated.** Off the panel with the Tone knob (both
+remaining curves pin the corner at 2 kHz, so Tone had nothing to do); still
+reachable as `curve: 'original'`, and still the curve the HF Limiter
+equivalence test runs on. An unknown curve falls back to VOICE, not to it.
+
+**DETECT 2K / 4K.** `ShelfLimiterStage` takes `detectCornerHz`: the detector
+reads its own one-pole split while the cut stays on the shelf's corner. The
+4 kHz band reads 2–5 dB under the 2 kHz one at p90–p99 of 10 ms peaks (bright
+3.8 / 1.9, dull 4.8 / 5.0, music 2.5 / 2.5), so 4K lowers the threshold by
+`DETECT_4K_COMP_DB` = 3 to keep the overall cut about equal and change WHAT
+triggers it. Measured (VOICE, sibilant / vowel): bright Tame 5 −6.7 / −1.6 →
+−7.5 / −1.4, dull Tame 5 −0.8 / −2.1 → −1.1 / −1.7, overall >2 kHz within
+0.3 dB. A modest shift, since the cut is still a 2 kHz shelf over the whole
+treble once triggered. ⚠ With a separate detector the shelf's no-overshoot
+proof no longer applies (it bounds the band being cut) — a tamer, not a
+ceiling. Applies to the 2 kHz curves only; `null` is bit-identical to before
+(the HF Limiter suite is unchanged). Not auditioned.
+
+### PHAT*SS — curves paired with detectors (October 2026)
+
+Owner, after auditioning: VOICE pairs well with 4K on narration, FATSO with 2K
+on music. `CURVE_DETECT = { voice: '4k', fatso: '2k' }`; the default detect is
+now 4K (VOICE's pair), and choosing a CURVE on the panel moves DETECT to its
+pair. DETECT stays on the panel and can be set against the pair afterwards —
+kept rather than folded into one four-way switch so the off-pair combinations
+remain auditionable.
+
+## PHAT*SS — TAPE: peak reduction from a Studer A800 match (October 2026)
+
+**Owner:** other tape emulations have "more of a compressive, peak reduction
+effect" than PHAT*SS. Supplied an acoustic guitar dry vs through a Studer A800
+emulation (`AllTape_AcousticGuitar_dry_v1.m4a`, `StuderA800_…_wet_v1.m4a`;
+48 kHz stereo AAC 256 kb/s — so the floor of every residual below is codec
+noise, ~−27 dB).
+
+**What the Studer does.**
+- Peak −0.86 → −2.24 dBFS, RMS +1.6 dB, crest 18.4 → 15.4 dB.
+- Delay 1.37 samples, constant through the clip: no wow/flutter.
+- Linear part (cross-spectral, coherence ≥ 0.95 from 80 Hz): head bump +3–5 dB
+  at 63–100 Hz, ~+1 dB mids, top end RISING +2 dB at 4 kHz to +7.7 at 16 kHz.
+  Through that EQ alone the dry would have peaked at +1.6 dBFS, so the
+  nonlinearity takes 3.8 dB off the top.
+- Per sample against the linear prediction: flat to ~9 dB under the peak, then
+  −1.1 / −2.2 / −5.3 dB at −6 / −3 / 0 dB. Per 10 ms window it barely moves
+  (−0.8 dB in the loudest). **A WAVESHAPER, NOT A COMPRESSOR**: inside the
+  loudest windows samples 14–20 dB under the peak keep the baseline gain
+  (+0.35 dB) while those within 3 dB lose 2.4. Nearly symmetric (negative half
+  0.2–0.4 dB more): odd, a trace of even.
+- Bench curves fitted to that gain curve (free drive): **cubic 0.09 dB rms**,
+  tanh 0.17, algebraic 0.19, atan 0.20, asym 0.35, quartic 0.84. Cubic and tanh
+  take the residual past the linear model from −20.9 to −27.4 / −27.2 dB, about
+  80 % of it explained; the rest is consistent with the codec.
+
+**Why this was not already there.** The hysteresis study found full-band
+saturation is the only thing that softens transients and compresses, and that
+the loop did it no better than tanh; the owner then chose gain-based softening
+(Soften) over more distortion. The Studer is the same mechanism.
+
+**Built: TAPE**, owner's choice of cubic and a peak-reduction knob.
+- One Saturation Bench layer (`curve: 'cubic'`, band open at both ends, Amount
+  0, FULL, no emphasis), its own one-slot `SaturationBenchKernel` between the
+  Warmth guard and the tape shelf. 4x oversampled, 50 samples, on or off.
+- The knob is dB of peak reduction, solved in closed form: for f(g·x)/g the
+  gain at the selection's peak P is f(u)/u at u = g·P, and the cubic inverts
+  (`tapePeakU`: u = √(3(1 − r)) up to 3.52 dB, 2/(3r) past it). Drive is set
+  against `refPeakDb` = `warmthCeilingDb` (already measured for the guard;
+  fallback voice level + 18 dB).
+- Measured (Warmth and Tame off; peak / rms / added re signal):
+  guitar 1 → −1.00 / −0.12 / −33.5, 2 → −2.00 / −0.23 / −27.9,
+  3.5 → −3.46 / −0.37 / −23.8, 6 → −5.84 / −0.65 / −18.9;
+  bright narration 1 → −0.77, 2 → −1.50, 3.5 → −2.56, 6 → −4.55 (added the same);
+  dull narration 1 → −0.97, 2 → −1.93, 3.5 → −3.36, 6 → −5.62.
+- ⚠ **A SIBILANT PEAK LOSES LESS THAN THE KNOB SAYS**: the bright clip's peak
+  is centred ~8.9 kHz, so the cubic's third harmonic lands above Nyquist and the
+  oversampler's filter removes it, giving part of the peak back. Accepted: it
+  costs the sibilance less distortion.
+- ⚠ Past 3.52 dB the top is on the cubic's flat — a hard clip — and its
+  band-limited ringing gives ~0.3 dB back at 6 (the test allows 0.5 there).
+- At low level flat to 18 kHz (≤ 0.01 dB); −0.19 dB at 20 kHz and −2.3 at
+  21 kHz, the 4x oversampler's band edge, shared with every bench layer. A
+  one-sample impulse reads 2.4 % low through it, so the latency test allows 3 %
+  with TAPE on.
+- The Studer's linear EQ (head bump, rising top) is NOT copied: the bump overlaps
+  Warmth and the rising top works against Tame. Not auditioned.
+
+### PHAT*SS — TAPE makeup, automatic and peak-restoring (October 2026)
+
+Owner asked for makeup on TAPE and chose, of three offered, AUTO PEAK-RESTORING
+(over a manual makeup knob, and over an RMS-matched trim for A/B): give back
+what TAPE took off the peak, so the peak returns to the source's and the
+reduction becomes level.
+
+- ⚠ **MEASURED, NOT THE KNOB.** A sibilant peak loses ~75 % of the knob (its
+  harmonics land above Nyquist and the oversampler filters them), so a makeup
+  of the knob's number would lift that peak past the source.
+  `measureTapeMakeup` (`phatassTapeMakeup.js`) renders the WHOLE selection
+  through Warmth, guard and TAPE (shelf, Soften, Output and any old makeup
+  out — they come after it and only lower the peak) and returns source peak −
+  rendered peak. It runs on its own worker that a newer call terminates (the
+  Warmth peak pass's pattern), is debounced 250 ms after TAPE, Warmth, Odd/Even
+  or the selection move, and is re-run before apply so a debounced or interim
+  value never renders.
+- The gain sits right after TAPE, before the shelf, so Tame judges the level
+  that will come out; the shelf only lowers peaks.
+- While a measurement is in flight the makeup is held at min(previous, knob):
+  turning TAPE down never gives back more than the knob now asks for.
+- Measured (Warmth and Tame off): peak lands back on the source to 0.00 dB on
+  all three clips. Makeup / gated-RMS change at TAPE 1 / 2 / 3.5 / 6: bright
+  narration +0.77/+0.62, +1.50/+1.24, +2.56/+2.15, +4.55/+3.83; dull narration
+  +0.97/+0.74, +1.93/+1.52, +3.36/+2.69, +5.62/+4.45; guitar +1.00/+0.88,
+  +2.00/+1.74, +3.46/+3.06, +5.84/+5.13. ~0.8 s to measure 46 s of audio
+  (node), so a whole chapter takes on the order of a minute; preview keeps the
+  interim value meanwhile.
+- Panel: a MAKEUP +x.x caption under the Tape knob ("…" while measuring).
+- ⚠ **Caught only by driving the real panel**: the first build posted the
+  panel's params to the worker as `{ ...phParams }`, which still carries Vue's
+  reactive proxy for `warmthRefPeaksDb`, and `postMessage` threw
+  `DataCloneError` — the makeup stayed +0.0 with TAPE at −4. The unit tests
+  call `measureTapeMakeup` directly and `npm run smoke` never turns TAPE up, so
+  neither could see it. Fixed with a plain JSON copy; in the browser the dull
+  clip at TAPE 4 (Warmth 5) now measures +3.8. The caption shows "…" from the
+  moment a measurement is scheduled, not the interim value.
+
+### PHAT*SS — Warmth takes up to four layers (October 2026)
+
+Owner: refactor so WARMTH_LAYERS can hold up to four, the extra ones fixed to
+start. Before this the kernel slot count, latency, calibration and readout
+already followed the list, but `warmthLayers` hard-coded the crossfade as two
+arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
+`undefined`, got a NaN Amount and came back silently OFF.
+
+- Each layer now carries a `blend` role: `even` / `odd` are the crossfade's
+  two sides (the even side still `WARMTH_EVEN_MATCH_DB` up), `fixed` (the
+  default when omitted) follows Warmth's level only, at its own
+  `levelOffsetDb`. The role keys are stripped before the layer reaches the
+  kernel.
+- `WARMTH_MAX_LAYERS` = the bench kernel's 4 slots; `checkWarmthLayers` runs at
+  module load and throws on more than four, none, or an unknown role.
+- **The shipping pair is bit-identical**: a test writes the old two-layer law
+  out by hand and compares `on` / `amountDb` / `refPeakDb` exactly over a grid
+  of Warmth, Odd/Even and calibrations.
+- Checked live with two fixed layers temporarily added (tanh −6 dB, asym
+  −12 dB): latency 414 → 514 samples and `phatassLatencySamples` agrees, the
+  guard still holds the peak on its ceiling, the readout renders all four, and
+  the whole PHAT*SS suite passes. Four voicing tests had assumed exactly two
+  layers (indexing `[1]`, `slots: 2`, deep-equal on `[false, true]`) and now
+  read the pair by role, so adding a fixed layer no longer breaks them.
+- Each added layer costs 50 samples of latency and runs its own 4x oversampler.
+  No layers were added; WARMTH_LAYERS shows a commented example.
+
+### PHAT*SS — `amountOffsetDb`, and Warmth is FULL only (October 2026)
+
+- The Warmth layer field `levelOffsetDb` is renamed **`amountOffsetDb`**: the
+  bench kernel already has a `levelOffsetDb` (its voicing detector's level
+  offset), and the two would be confused when copying a layer across. For a
+  fixed layer Amount = `warmthLevelDb(Warmth) + amountOffsetDb`, so a bench
+  Amount A goes in as `amountOffsetDb: A` — within 0.02 dB at Warmth 5, since
+  `warmthLevelDb(5)` = 6 + 20·log10 ½ = −0.0206 (the top is 6 dB, not 6.02;
+  an earlier reply said "exactly 0", which was wrong).
+- **No VOICED mode in PHAT*SS** (owner): its Warmth kernel never received the
+  file's level for the voicing detector, so VOICED layers would have gated on a
+  −20 dBFS assumption. Rather than wiring the level through, `warmthLayers`
+  forces `mode: 'full'` (the bench default is VOICED) and `checkWarmthLayers`
+  rejects a layer declaring 'voiced'. The shipped layers' explicit
+  `mode: 'full'` is dropped as redundant; renders are bit-identical.
+
+### PHAT*SS — Warmth's low layers at the base rate (October 2026)
+
+- Owner asked whether four Warmth layers plus TAPE (five 4x oversamplers)
+  could collapse into two shared ones, since layers 1–2 and 3–4 have similar
+  bands and emphasis. Not exactly: the layers run in SERIES (layer 2 shapes
+  layer 1's output) and each pair's filters differ, so sharing an upsampler
+  means a parallel topology with the filters moved to 4x — a sound change for
+  a modest saving.
+- The better question was which layers need oversampling at all. Each layer
+  band-passes what it ADDS again, so aliases only matter where they land in
+  its own band. 1x against 4x, mismatch re what the layer adds:
+  1–250 Hz quartic +50: −85.5 / −84.5 dB (bright / dull narration), −109.5
+  (music); 1–220 Hz cubic +50: −85.7 / −90.6 / −121.8; full-band quartic 0
+  (−10 dB shelf): −34.0 / — / −50.5; 3–20 kHz tanh +27: −17.5 / — / −26.8.
+- So the kernel takes a per-slot `oversample` flag, FIXED AT CONSTRUCTION so
+  latency never moves; a base-rate slot runs the curve on the base-rate
+  samples and has no latency. The voicing history reads each slot's lag as
+  the running sum of slot latencies. The Saturation Bench itself is
+  unchanged (all slots oversampled).
+- PHAT*SS marks the even/odd pair `oversample: false`; `checkWarmthLayers`
+  allows that only for `hiHz ≤ WARMTH_BASE_RATE_MAX_HZ` (500 — a reasoned
+  margin over the measured 250, not a measurement).
+- Cost: each oversampled layer is ~6 s per 10 min of audio offline. Full
+  render (Warmth 5, TAPE 3, 10 min): 39.2 → 29.5 s; latency 514 → 414
+  samples at 44.1 kHz. The user's two `emphDb: 0` duplicates (dead — the later
+  key won) were removed; renders unchanged.
+- Test "latency … constant": its impulse tolerance now covers Warmth's
+  full-band layers, which shave a one-sample impulse at the oversampler's band
+  edge the way TAPE does (this failed already on the four-layer commit).
+
+### PHAT*SS — TAPE moved ahead of Warmth; fast makeup (October 2026)
+
+- Owner: TAPE's peak reduction should come BEFORE Warmth, so Warmth works on
+  a smoother signal; and the makeup was too slow in preview on long files to
+  be useful. There was no strong reason for the old order (TAPE was appended
+  after the Warmth guard when it was built).
+- New chain: TAPE → makeup → Warmth → guard → tape shelf → Output. The guard
+  now reads Warmth's input from a copy of TAPE's output (it used to read the
+  plugin input). The guarantee is unchanged: makeup puts the voice peak back
+  on the selection's own peak, which is the guard's ceiling.
+- Why the makeup was slow: it rendered Warmth (four oversampled layers) +
+  guard + TAPE over the whole region on every knob move — 40.5 s per 10 min.
+  With TAPE first its input is the source, so the measurement is TAPE alone
+  (~6 s per 10 min, exact; apply uses this) and Warmth/Odd-Even no longer
+  trigger a re-measure.
+- Preview uses a fast bounded search (`measureTapeMakeup(..., { exact: false })`):
+  1024-sample blocks, bound = input peak over the block ±64 samples, sorted;
+  render loudest first with 512 samples of pre-roll; stop when bound ×
+  0.5 dB (ringing) × 0.1 dB (short-pre-roll error) ≤ best. A first version
+  without the second pass read 0.0006–0.008 dB high on narration and 0.037 dB
+  off on a synthetic take with 5 Hz syllable envelopes — TAPE's 5 Hz DC
+  blocker outlives a 512 pre-roll (128 read 0.027 off; 8192 closed it but cost
+  as much as the exact render). So blocks within 0.2 dB of the best re-render
+  with 8192 of pre-roll. Measured (10 min tiled narration, fast vs exact):
+  bright 0.32 / 0.50 / 1.4 s at TAPE 0.5 / 2 / 6, dull 1.2 / 2.3 / 3.6 s,
+  exact ~6 s; makeup equal to 0.0001 dB in every case.
+- Asked whether the Warmth guard could carry the peak guarantee instead of a
+  measured makeup: no — it only limits what Warmth ADDS and never the voice,
+  so a knob-sized makeup would let sibilant peaks (which lose ~75 % of the
+  knob) pass the source by up to ~4.5 dB at TAPE 6.
+- Side effects, not compensated: Warmth sees the body lifted by the makeup
+  (+1.2–1.7 dB at TAPE 2), so it runs that much hotter with TAPE up; the
+  Warmth readout still renders Warmth on the source (bands close, peak still
+  an upper bound). Neither was auditioned.
+
+### PHAT*SS — TAPE curve: CUBIC or TANH (October 2026)
+
+- Owner asked for tanh as a TAPE option after the curve comparison (Studer fit:
+  cubic 0.09 dB rms, tanh 0.17, algebraic 0.19, atan 0.20, asym 0.35,
+  quartic 0.84). Reasoning given for offering it: the cubic is a hard clip past
+  3.52 dB and tanh never goes flat, so the top of the knob "should" be gentler.
+- `tapeCurve` ('cubic' default | 'tanh'), a rocker beside CURVE/DETECT
+  (disabled while TAPE is 0). `tapePeakU(dB, curve)`: cubic closed form as
+  before; tanh(u)/u falls monotonically from 1, so it is bisected (60 steps,
+  tested to 1e-9 dB across the knob). The makeup is measured, so it needed no
+  change; switching the curve re-measures, holding min(previous, knob).
+- ⚠ THE PREDICTION DID NOT HOLD. 110 Hz sine at −4.4 dBFS (H3+H5 / H7–H41,
+  dBc), cubic vs tanh:
+  TAPE 1 −30.6 / −116.4 vs −30.9 / −89.3; 2 −24.3 / −110.2 vs −24.9 / −71.0;
+  3.5 −19.1 / −105.0 vs −20.1 / −56.2; 5 −15.7 / −45.8 vs −17.2 / −46.9;
+  6 −14.2 / −42.7 vs −15.7 / −42.1. Where the cubic clips the high orders are
+  EQUAL; below that tanh has 35–50 dB more of them (every odd order from the
+  start, where the cubic has the third alone). Low orders 0.3–1.5 dB lower on
+  tanh. Bright narration, added re signal: TAPE 2 −28.0 (cubic) / −26.6
+  (tanh), TAPE 6 −18.9 / −16.2 — tanh bends earlier and shapes more samples.
+- What tanh does better: peak accuracy (110 Hz: −5.93 vs −5.75 dB at TAPE 6,
+  −4.96 vs −4.83 at 5) and sibilant peaks lose closer to the knob (bright
+  narration makeup at TAPE 6: 4.84 vs 4.55 dB). Neither curve auditioned.
+
+### PHAT*SS — TAPE curve: ALGEBRAIC added (October 2026)
+
+- Owner asked for algebraic (u/√(1 + u²), Studer fit 0.19 dB rms) as a third
+  TAPE curve. Knob solve in closed form: 1/√(1 + u²) = r → u = √(1/r² − 1).
+- Three options no longer fit the two-position `DeviceChoiceRocker`, so the
+  TAPE control is now a `DeviceDetentRotary` (as the Saturation Bench picks its
+  curves), with its caption printed under it.
+- Measured (same instruments as the tanh entry), algebraic vs tanh: H3+H5
+  −30.9 / −25.1 / −20.4 / −17.5 / −16.1 dBc at TAPE 1 / 2 / 3.5 / 5 / 6 (0.0–0.4
+  under tanh); H7–H41 −84.8 / −66.9 / −52.8 / −44.0 / −39.7 (3–4.5 dB more than
+  tanh, and above the cubic even at 5–6); peak −1.00 / −1.99 / −3.48 / −4.96 /
+  −5.94 dB (as tanh). Bright narration: makeup 1.58 / 4.93 dB at TAPE 2 / 6,
+  added −26.3 / −15.5 dB re signal — the most of the three. Not auditioned.
+
+### PHAT*SS — SATURATION meter (October 2026)
+
+- Owner, after Waves BB Tubes / Soundtoys Decapitator screenshots: what should
+  drive a saturation meter's needle? Three readings offered (drive into the
+  curve, energy of what is added, peak reduction); owner chose the second.
+- Kernel (`PhatassKernel.enableMeter` / `takeMeter`, off for offline renders):
+  per block, added = (Warmth guard's output) − makeup × input delayed by TAPE +
+  Warmth + guard latency, clean = that delayed, makeup-scaled input; energy
+  sums and a sample count. The shelf and Output are gains, not saturation, and
+  are left out. The worklet posts the sums every 8 quanta (~23 ms).
+- UI (`dsp/saturationMeter.js`): two one-pole energy followers (150 ms),
+  reading = 10·log10(added / clean), resting below −60 dBFS of clean power; a
+  second-order needle spring (2.1 Hz, damping 0.8: 99 % of a step in ~0.3 s,
+  1–2 % overshoot) stepped per animation frame. The face is `ClassicVuMeter`
+  with `face: 'saturation'` (linear 0–100, red from the scale constant, needle
+  set directly so the VU damping does not slow it twice); the VU face for
+  OptoSmooth / FET Punch is unchanged.
+- Measured on two narration clips (whole-clip ratio; 23 ms posts p10/p50/p90):
+  TAPE 1 / 3 / 6 alone −33.5 / −24.9 / −18.9 dB bright, −29.8 / −21.2 / −15.3
+  dull (posts p50 −42 to −28); Warmth 2 / 5 / 10 alone −18.2 / −10.4 / −4.1
+  bright, −21.1 / −13.5 / −7.7 dull (posts up to +2.3); Warmth 5 + TAPE 3 reads
+  as Warmth 5 (−10.1 / −13.2). ⚠ WARMTH DOMINATES: at +50 dB of drive its low
+  layers reshape the whole low band, which counts as added energy. That is
+  honest, not a bug; the scale (−40 → 0, 0 dB → 100, red from −6) was chosen so
+  TAPE still moves the needle in the lower third and Warmth 5 sits near 70.
+- Browser check: dull narration at the defaults (Warmth 5) settles at ~65 in
+  ~0.5 s of playback. Scale, smoothing and spring are reasoned, not auditioned.
+
+### PHAT*SS — TAPE order selectable (October 2026)
+
+- Owner had moved TAPE first without A/B'ing it. Rendered first, at Warmth 5 /
+  Odd/Even 50 / TAPE 3 (cubic) / Tame 5, current (TAPE first) against the
+  pre-reorder processor (`fd48a70^`, same four Warmth layers, makeup measured
+  the old way through Warmth): makeup 2.22 / 2.21, 2.89 / 2.86, 3.00 / 2.97 dB
+  (bright narration / dull narration / guitar); loudness within 0.1 LU; old −
+  current −34.3 / −30.6 / −21.5 dB re the output. Narration's difference is
+  spread 500 Hz–16 kHz (−25 to −30 per band); the guitar's sits under 1 kHz
+  (−21.7 at 100–500 Hz) — TAPE shaving the peaks Warmth's low end creates.
+- Then made selectable to audition live: `tapeOrder` 'first' (default) |
+  'last'. One kernel, the TAPE + makeup step runs before or after Warmth and
+  its guard; latency is the same either way; the saturation meter's reference
+  is unchanged (it reads pre-shelf output against the delayed, makeup-scaled
+  input, valid for both). LAST renders bit-identically to the pre-reorder
+  processor (max |diff| 0 on 10 s of narration).
+- LAST's makeup cannot use the fast search (TAPE hears Warmth): both preview
+  and apply render the chain to the makeup over the whole region, and Warmth /
+  Odd/Even re-measure it. Switching the order re-measures, holding
+  min(previous, knob) meanwhile. Not auditioned.
+
+### PHAT*SS — TAPE curve and order moved to a bench (October 2026)
+
+- Owner: comfortable with FIRST as the default; TAPE order (FIRST/LAST) and
+  TAPE curve (CUBIC/TANH/ALGEBRAIC) move off the panel to a bench hidden from
+  users in production.
+- `PhatassBenchPanel.vue` (plain controls, like the FET Punch and OptoSmooth
+  benches, so it never reads as a feature), at the bottom of the panel behind
+  `isPhatassBenchVisible()` (`effects/phatassBench.js`): on under `vite dev`,
+  or on a deployed build with `localStorage['wavely:phatass-bench'] = '1'`.
+  The two stay ordinary PHAT*SS params, so preview and apply read them and the
+  makeup re-measures on a change; MODIFIED / ↺ / Reset as on the FET bench.
+- Production: the controls are gone, so the params sit at CUBIC / FIRST. The
+  TAPE knob's tooltip and the help drop the curve/order text.
+
+### PHAT*SS — Soften gets its own knob (October 2026)
+
+- Owner asked to disentangle Soften's depth from Tame. Soften had had its own
+  SOFTEN + SOFT FREQ knobs once and lost them because what it did depended on
+  four controls; folding its depth into Tame fixed that at the cost of coupling.
+  Now: one 0–10 knob, the frequency still pinned at 500 Hz and the gate still
+  relative to the voice level, so it depends on nothing else.
+- `softenLaw(amount)` is the old `softenLaw(on, tame)` with the amount in
+  Tame's place: 3.6 dB of ceiling per step (36 at 10), slope 0.5 → 1 across the
+  travel — Soften s renders exactly what Soften ON did at Tame s. `softenAmount`
+  reads a legacy boolean (`true` → the Tame value, `false` → 0). Default 0 = off,
+  as the toggle's default was OFF.
+- Panel: the lamp toggle became a Soften knob in Warmth's row, with an
+  "UP TO −N dB" caption; Tame's tooltip and help no longer mention Soften.
+- Checked (test): Soften works with Tame 0 — the shelf's Range caps only the
+  shelf, so the Transient cut runs with the shelf out; Soften 0 with Tame 0 is
+  still a pure delay; Tame no longer moves Soften's depth.
+
+### PHAT*SS — automatic output trim on the bench (October 2026)
+
+**Background.** A Studer A800 emulation's dry/wet pairs (acoustic guitar, drums) turned out to be level-matched by hand, not by a makeup formula:
+- RMS change was +1.63 / −0.41 dB and LUFS +1.66 / −0.63, so there was no RMS or loudness target.
+- The share of the peak loss given back was ~0.5 / ~0.7, so there was no fixed fraction.
+- Quiet-passage gain was flat across level, so there was no running AGC.
+- The two renders also carry different EQ and alignment, so the settings changed between them.
+
+At loudness-matched A/B with TAPE set to the Studer's crest change (guitar TAPE 3.4, drums 1.0), the peaks land within 0.25 dB of each other.
+
+**First attempt, reverted: an RMS mode on TAPE's own makeup.** It predicted the RMS loss from a histogram of sample levels binned on the float's bits, with no render, within 0.02 dB of the render. The owner caught that it level-matched only the pre-Warmth TAPE stage, so TAPE's internal makeup stays peak-restoring always.
+
+**Built: an automatic trim at the plugin's output.** It is a signed gain after the shelf, on top of Output. Modes are OFF (ships) / PEAK / RMS.
+
+| | Mode | Trim |
+|---|---|---|
+| Bright narration | PEAK | +1.5 to +1.7 dB (what the shelf took off a sibilant peak) |
+| Bright narration | RMS | −0.6 to −1.9 dB |
+| Drums ×3 | RMS | −2.6 / −4.1 dB |
+| Narration (24 s clip) | RMS | −1.8 / −3.5 dB |
+
+**Measurement** (`phatassOutputMakeup.js`): it renders the chain with Output and the trim at 0, because Warmth, the guard, the shelf and Soften have no render-free shortcut.
+- Whole region on apply (after TAPE's exact makeup) and in preview up to 30 s.
+- Longer selections in preview render 40 × 0.5 s blocks with 0.25 s run-in (~1.9 s).
+  - RMS takes one block per stratum at a golden-ratio offset. Evenly spaced blocks aliased against a patterned 30 s test track (0.36 dB off). A longer run-in (1–4 s) changed nothing, so the error was sampling.
+  - PEAK takes the loudest-input blocks. That is a lower bound, since the guard lets a quiet block rise to the selection peak, so the preview trim can only run hot.
+
+Against the whole render:
+
+| Material | RMS error | PEAK error |
+|---|---|---|
+| Narration 24 s | 0.00 dB | ≤ 0.02 dB |
+| Narration 46 s | 0.04–0.07 dB | ≤ 0.02 dB |
+| Drums ×3, 53 s | 0.08–0.11 dB | ≤ 0.02 dB |
+| 103 s mix of narration, guitar and drums | 0.17–0.18 dB | ≤ 0.02 dB |
+
+The composable re-measures on every knob except Output, and waits for TAPE's makeup, which it renders with.
+
+### PHAT*SS — TAPE low push on the bench (October 2026)
+
+Owner: "The Studer has a very different saturation effect on the kick drums than ours." The analysis used two dry/wet pairs from a Studer A800 emulation: the earlier drums, and a new drum machine.
+
+**Method.** For each pair I fitted the Studer's linear path on quiet frames (frames peaking ≥ 15 dB under the top), then compared every kick's < 120 Hz peak against that linear prediction.
+
+Fitted low lift:
+
+| Pair | 30 Hz | 50 Hz | Flat |
+|---|---|---|---|
+| Drums | +5.3 dB | +3.8 dB | +2.5 dB |
+| Drum machine | +8.7 dB | +4.9 dB | +4.2–4.5 dB |
+
+The settings changed between the renders again.
+
+**What the Studer does to the kicks.**
+
+| Pair | Kicks | Loud half | Softer half |
+|---|---|---|---|
+| Drums | 19 | −7.2 dB | −6.2 dB |
+| Drum machine | 12 | −7.3 dB | −4.7 dB |
+
+- The kick tail 80–250 ms on is unchanged: it recovers within the kick, so this is not a compressor with a release.
+- Against the dry signal, the drums' kick lows end 2.2–3.3 dB down despite the linear low lift.
+- Flat TAPE cannot reach this at any setting.
+
+**Built: `tapeLowPush` 0/6/12/18 dB.** A low shelf at 150 Hz, Q 0.7, before TAPE's curve with the exact inverse after (the Saturation Bench layer's emphasis pair), so the lows saturate first and the clean path stays flat (a quiet signal passes to < 1e-4).
+
+Kick low end against the Studer's targets (drum machine −7.3 / −4.7, drums −7.2 / −6.2):
+
+| Setting | Drum machine (loud / soft) | Drums (loud / soft) |
+|---|---|---|
+| Flat TAPE 1 | −0.6 / −0.2 | −0.4 / −0.3 |
+| Flat TAPE 6 | −3.2 / −1.2 | −2.7 / −1.9 |
+| TAPE 1 / +12 | −6.3 / −2.7 | −6.0 / −4.9 |
+| TAPE 2 / +12 | −8.7 / −4.7 | −8.3 / −7.2 |
+| TAPE 6 / +6 | −7.7 / −4.0 | −7.1 / −6.1 |
+
+Push and drive trade, so no single number is the Studer's. The corner moves it less: TAPE 1 / +12 on the drum machine's loud kicks reads −4.2 at 100 Hz, −6.3 at 150 and −6.7 at 250.
+
+**Knob meaning (owner chose option 1).** The knob stays the no-push drive. Re-solving it through the shelf would keep "dB off the peak" honest, but it would cut the drive whenever the peak is a kick, which is the effect we want. So a kick-led peak can lose more than the knob.
+
+**Bugs found on the way.**
+- **Makeup cap.** The makeup was clamped at `TAPE_MAX_DB` (6), and a bare kick at TAPE 3 / +6 needs 6.9, which left the peak 0.44 dB short. It is now `TAPE_MAKEUP_MAX_DB` = 24.
+- **Fast-search margin.** The fast search's short-pre-roll margin (0.1 dB) misread a bare kick at +18 by 0.4 dB, so it is 1 dB with a push.
+
+Fast against exact on narration, drums and guitar (TAPE 1/3/6 × push 6/12/18): every reading within 0.005 dB. On 10 min:
+
+| Material | Push 0 | Push 12 | Exact |
+|---|---|---|---|
+| Drums | 1.1 s | 3.9 s | ~7 s |
+| Narration | 0.5 s | 2.3 s | ~7 s |
+
+With a push the measured makeup is often below the knob on voice and guitar (e.g. narration TAPE 3 / +18 gives 1.41): the peak there is not the lows.
+
+### PHAT*SS — TAPE knob widened to 12 dB (October 2026)
+
+**Owner feedback.** TAPE 6 + push 6 sounded closest to the Studer on the drum machine, "but lacks the density and crest reduction of the Studer, particularly apparent on the snares."
+
+**Alignment fix first.** The broadband cross-correlation had aligned the pairs wrongly: −345 samples on the drum machine and −37 on the drums. Low frequencies dominate it, and the Studer's EQ shifts their phase. A high-frequency-weighted correlation (second difference) gives +2 samples on both, positive polarity.
+
+The kick numbers survive the fix: they are measured against the fitted linear path, whose H carries the offset. Re-checked at +2:
+
+| Pair | Studer kick lows, loud / soft |
+|---|---|
+| Drum machine | −7.13 / −4.54 |
+| Drums | −7.23 / −6.17 |
+
+**Snares.** 13 snare-led hits per pair, shape measured against the linear path so the figures are gain-free. Peak−body is the 2 ms peak against the 2–30 ms body; tail−body is the 30–150 ms tail against that body.
+
+| Setting | Snare peak−body | Snare tail−body | Kick lows (loud / soft) |
+|---|---|---|---|
+| **Drum machine: Studer** | **−6.30** | **+2.09** | **−7.1 / −4.5** |
+| TAPE 6 | −2.87 | +0.28 | — |
+| TAPE 6 + push 6 | −2.07 | +0.28 | — |
+| TAPE 6 + 6 dB drive, cubic | −6.51 | +1.01 | −7.8 / −4.2 |
+| TAPE 6 + 6 dB drive, tanh | −6.33 | +1.31 | −7.9 / −4.8 |
+| **Drums: Studer** | **−1.65** | **+1.51** | **−7.2 / −6.2** |
+| TAPE 6 + push 6 | −1.52 | +0.89 | −7.1 / −6.1 |
+| TAPE 6 + 6 dB drive | −4.57 | +2.14 | −7.21 / −6.15 |
+| TAPE 6 + 3 dB drive + push 3 | −2.57 | +1.45 | −7.14 / −6.09 |
+
+On the drum machine, crest goes 21.15 dry → 16.32 Studer → 14.21 with TAPE 6 + 6 dB drive.
+
+**What it means.** The drum-machine render was driven harder into the Studer than the drums render, and its density is mostly drive. The tail lift stays short of the Studer (+1.0–1.3 against +2.1) at a matched peak: a memoryless curve does not hold the tail up that much. A slower, compression-like part of tape is possible and unmeasured.
+
+**Built.** `TAPE_MAX_DB` 6 → 12, on the panel knob as well as the bench. 6 dB more drive past TAPE 6 is ≈ TAPE 12 on the cubic, where u at the peak is 2.66. From 6 to 12 the cubic's flat is driven harder.
+
+Peak loss and added distortion (re the signal):
+
+| Material | TAPE 6, cubic | TAPE 12, cubic | TAPE 12, tanh |
+|---|---|---|---|
+| Bright narration | −4.55 dB, added −22.0 | −10.08, added −14.7 | −10.21, added −15.4 |
+| Dull narration | −5.62, added −19.0 | −10.83, added −13.5 | −11.06, added −14.5 |
+| Guitar | −5.29, added −21.5 | −10.14, added −14.1 | −10.43, added −14.6 |
+| Drums | −5.41, added −17.7 | −9.94, added −12.3 | −10.19, added −13.1 |
+
+The fast makeup search equals the exact one (≤ 0.01 dB) up to 12. The makeup cap (24) already covers it. The knob's inversion tests sweep to `TAPE_MAX_DB`, so they now cover the full range.
+
+### PHAT*SS — TAPE head bump on the bench (October 2026)
+
+Owner: with TAPE 12 "the Studer kicks are considerably louder than the snares while ours are more level — is this the Studer's post-saturation EQ?"
+
+**Measurement.** Kick minus snare loudness: the energy of the first 100 ms of each hit, kick hits against snare hits. The "ours" rows are TAPE 6 plus 6 dB of drive, which is TAPE 12.
+
+| Kick − snare (dB) | Drum machine | Drums |
+|---|---|---|
+| Dry | 11.00 | 0.28 |
+| Studer | 11.64 | −1.86 |
+| Studer linear path alone | 13.31 | 0.99 |
+| Ours, TAPE 12 | 10.09 | −1.90 |
+| Ours, TAPE 12, Studer EQ after | 12.66 | −1.20 |
+| Ours, TAPE 12, Studer EQ before (peak re-matched) | 11.94 | −1.14 |
+
+So it is the Studer's low EQ, and it belongs AHEAD of the curve, where the clipper takes part of the lift back off the kick.
+
+**Fitting the shape.** A finer read of the linear paths (|H| re 1 kHz):
+
+| Pair | 15–40 Hz | 45 | 50 | 60 | 80 |
+|---|---|---|---|---|---|
+| Drum machine | +3.2 to +3.7 | +2.2 | +1.4 | +1.1 | +0.5 |
+| Drums | +4.1 at 15–20, falling to +1.4 at 40 | | +1.2 | +0.5 | −0.1 |
+
+That is a low shelf of ~+3.5–4 dB under ~40 Hz. The earlier "+4 to +9 dB at 30–50 Hz" figure included the Studer's flat gain and the coarse FFT, and is withdrawn.
+
+Shelf sweep ahead of TAPE 12 on the drum machine:
+
+| Shelf | +3 | +4.5 | +6 |
+|---|---|---|---|
+| 40 Hz | 10.89 | 11.29 | **11.67** |
+| 60 Hz | 11.22 | 11.69 | 12.11 |
+
+40 Hz follows the fitted shape, so 40 Hz it is.
+
+**Built: `tapeHeadBump` 0/3/6/9 dB**, a low shelf at 40 Hz, Q 0.7.
+- **Placement:** a `BiquadCascade` ahead of TAPE inside `tapeAndMakeup`, so it moves with TAPE in LAST order. It is active only while TAPE is up (`headBumpDb` is 0 with TAPE 0), so TAPE 0 stays a pure delay. Coefficient changes keep the filter state.
+- **Plugin path:** TAPE 12 with bump 0 / 3 / 6 / 9 reads 10.09 / 10.89 / 11.67 / 12.34.
+- **Makeup:** `measureTapeMakeup` shelves the region once up front and measures TAPE on that against the SOURCE's peak; fast equals exact (bare kick, +3/+6/+9). The peak lands on the source to 0.05 dB.
+- **Saturation meter:** its clean reference runs through its own copy of the shelf. A quiet tone pair under +9 reads below −40 dB.
+- **Not covered:** the drums render (dry 0.28, Studer −1.86, TAPE 12 alone −1.90, +6 −1.32) wants none. The two renders were made at different settings.
+
+### PHAT*SS — HYSTERESIS as a TAPE curve (October 2026)
+
+**Owner's report.** On drums, the Saturation Bench's hysteresis layer (full range, no pre-emphasis, drive 13) gives "more of the tape character the Studer shows — the thwap on the kick and the tighter peak attenuation without brickwall limiting".
+
+This followed a per-hit analysis of both Studer A800 drum pairs, measured against each one's linear path. Its findings:
+- **Per hit type,** within 16 dB of the loudest hit:
+
+  | Hit type | Pair | Studer peak | TAPE 12 cubic peak | Studer tail − attack | TAPE 12 cubic tail − attack |
+  |---|---|---|---|---|---|
+  | Kick-led | drum machine | −5.6 dB | −8.4 dB | +5.2 dB | +3.6 dB |
+  | Kick-led | drums | −4.9 dB | −8.4 dB | +4.5 dB | +4.2 dB |
+  | Snare/hat-led | drums | −2.3 dB | −5.0 dB | | |
+
+- **Gain trajectory on loud kicks:** the Studer's gain against its linear path is SMOOTH, −7 to −10 dB held for ~40 ms and recovering over 60–100 ms, like a fast compressor. Ours is spiky cycle by cycle (it cuts only where crests cross the curve), which is the "limiter look".
+- **Curve shape does not fix it:** the best memoryless fits are cubic / tanh / algebraic / atan at 1.19 / 1.13 / 1.16 / 1.23 dB per-hit rms on the drum machine and 0.90 / 0.84 / 0.80 / 0.78 on drums.
+- **Not built:** a fast low-weighted "tape compression" stage was proposed and set aside by the owner.
+
+**The hysteresis layer through the same tests** (bench, full band, no emphasis):
+- Drum machine, drive 13: per-hit error 1.40 dB. Kick −5.9 / tail − attack +2.3; snare −3.2 / +0.6.
+- Drums, drive 10: per-hit error **0.93** dB, the best of anything tried. Kick −4.3 / +1.9; snare −2.7 / +0.1.
+- It squashes kicks ~2× harder than snares with no low push.
+- Its gain is still cycle-wise, not smooth, so the Studer's sustain is not reproduced: tail − attack on kicks is about half.
+
+**Built: `tapeCurve: 'hysteresis'`.**
+- **Knob calibration:** `tapePeakU` bisects, in log u, the loop's steady-state peak out / peak in on a sine, with the layer's scale of 1 / small-signal gain. The loss rises monotonically: −0.41 / −1.64 / −4.46 / −8.57 / −13.42 / −18.98 / −24.84 dB at u 1 / 2 / 4 / 8 / 16 / 32 / 64, the same at N 256 and 1024 because the model is rate-independent. N 128, 24 iterations, memoised per knob value and loop shape; about 2 ms per new position.
+- **Real peaks** (makeup, exact):
+
+  | Material | TAPE 1 | TAPE 3 | TAPE 6 | TAPE 9 | TAPE 12 |
+  |---|---|---|---|---|---|
+  | Bright narration | 0.83 | 2.41 | 4.97 | 7.75 | 10.71 |
+  | Dull narration | 0.93 | 2.77 | 5.50 | 8.40 | 11.23 |
+  | Guitar | 0.79 | 2.51 | 5.32 | 8.39 | 10.95 |
+  | Drums | 0.29 | 1.83 | 4.61 | 7.49 | 10.09 |
+
+  The drums' light-setting shortfall is a hit's first cycle meeting the loop from rest. A steady 110 Hz sine lands within 0.3 dB up to TAPE 6 and −11.4 at 12, where the oversampler band-limits what the loop adds.
+- **Fast makeup search:** equals exact to ≤ 0.01 dB on all four files at TAPE 1–12, and to 0.001 dB on 10 min.
+- **Cost:** ~3.5× cubic. Per 10 min of drums or narration: fast 3.6–5 s (13.6–15 s with low push +12), exact ~21 s.
+- **Knob equivalents** (plugin path, against the Studer): TAPE 8 ≈ bench drive 13 (drum machine kick −5.7 / snare −3.1; drums −5.2 / −3.3). Drums' bench drive 10 is ≈ TAPE 6.5–7.
+
+### PHAT*SS — tape compression on the bench (October 2026)
+
+The owner sent short clips of the Studer A800 and PHAT*SS on the drums render and
+suspected the Studer clips the tops of the kicks. Measured, it is the other way
+round: per kick, gain against each output's own linear path across the kick's
+biggest half-cycle, binned by |linear| / that half-cycle's peak —
+
+| kick @ 0.04 s | 20–40 % | 60–80 % | 95–100 % | samples ≥ −0.25 dB (out / lin) |
+|---|---|---|---|---|
+| Studer | −3.3 | −5.6 | −6.4 | 12 / 10 |
+| owner's PHAT*SS clip | +0.4 | −3.8 | −5.8 | 83 / 5 |
+| hysteresis TAPE 8 | +0.3 | −2.7 | −4.3 | 63 / 3 |
+| cubic TAPE 12 | −0.5 | −4.9 | −7.4 | 65 / 3 |
+
+The Studer lowers the WHOLE cycle — even its quiet part — while material between
+the hits passes untouched, and the cycle stays pointed (the first 1–2 ms of the
+rise follow the dry kick, then the gain drops). Ours passes the bottom of the
+cycle and plateaus at the top: a clip. That is an envelope-timescale gain, which
+no curve can make, so the owner asked for the tape-compression prototype that
+was set aside after the per-hit study.
+
+**Stage** (`dsp/tapeComp.js`, `TapeCompressor`): feed-forward, linked, zero
+latency; detector = input through a high-shelf cut (lows drive it), PEAK or RMS
+(sqrt(2·ms), so a steady sine reads its peak in both); soft-knee dB gain computer;
+one full-band gain. Between the head bump and TAPE's curve, inside
+`tapeAndMakeup`, only while TAPE is up.
+
+**Fit** (scratch harness: per hit within 24 dB of the loudest, gain against the
+Studer's linear path at the peak, 0–10, 10–50 and 50–200 ms; ours rendered with
+makeup 0, so its quiet gain is 1; cost = rms over hits of the four, averaged):
+coordinate descent on threshold-as-COMP, ratio, knee, attack, release, detector,
+tilt depth, tilt corner and TAPE.
+
+- Drums free fit: 0.522 (ratio ~25, knee 8, 1 ms / 16.5 ms, RMS, tilt 5 dB at
+  237 Hz, TAPE 6). Drum machine free fit: 0.843, but its attack ran to the floor
+  (0.07 ms) and its release to 5 ms — waveform following.
+- With the drums timing pinned the drum machine lands 0.859, and ONE shape
+  (ratio 6, knee 7, tilt 4.5 dB at 160 Hz) fits both with only COMP and TAPE
+  free: drums 0.521, drum machine 0.865 (ratio 12: 0.523 / 0.872). Against TAPE
+  alone: cubic 12 1.55 / 1.15, hysteresis 8 1.38 / 1.57.
+- Timing is well determined (drums / drum machine): attack 0.3 → 0.61 / 0.94,
+  1 → 0.52 / 0.87, 3 → 0.72 / 0.90; release 8 → 0.59 / 0.88, 16.5 → 0.52 / 0.87,
+  35 → 0.69 / 0.94, 70 → 0.97 / 1.20; PEAK 1.09 / 1.07; tilt 0 → 0.82 / 1.11,
+  9 → 0.67 / 0.92.
+- COMP alone (TAPE 0): drums 0.71, drum machine 1.77 — TAPE is still needed.
+- Hysteresis after the compressor: drums 0.57 (TAPE 4.4), drum machine 0.93
+  (TAPE 9.25) — slightly worse than cubic.
+- Per class at the drums fit: kick peak −5.00 vs Studer −4.94, 0–10 ms −6.45 vs
+  −6.60, 10–50 −3.39 vs −3.37; snare −2.11 vs −2.34, −1.87 vs −1.76.
+
+**Calibration.** The number is the fundamental loss of a steady 55 Hz tone at
+the selection's peak. The static-curve formula (over = r / (1 − 1/ratio)) read
+COMP 3 as 4.8 dB on the tone: with a 1 ms attack an RMS detector rides the
+tone's own 110 Hz ripple and reads above its RMS. So `tapeCompThresholdDb`
+simulates the stage on the tone and bisects (scale-invariant, so one offset per
+knob value, memoised; ~40 ms the first time). The fitted settings come out at
+COMP 8.5 (drums) and 11 (drum machine) on that scale; the fit is sharp in COMP
+(drums at 6: 1.01, drum machine at 9: 0.98), so those two are steps of their own
+(`TAPE_COMPS` 0 / 3 / 6 / 8.5 / 11 / 14).
+
+**Wiring.** Makeup: the region runs through the bump and the compressor once, up
+front, and TAPE is measured on that — the continuous stream the kernel sees, so
+the fast search stays exact (tested fast = exact with the cubic and hysteresis,
+peak back on the source to 0.05 dB). Meter: the clean reference is multiplied by
+the compressor's per-sample gain, so the gain never reads as saturation (tested
+< −40 dB at COMP 14). The output trim needs nothing: it renders the chain with
+0.25 s of pre-roll, past the 16.5 ms release.
+
+**Within-cycle check on the clip** (COMP 8.5 / TAPE 6 against TAPE 6 alone):
+20–40 % bins −1.3 to −2.0 dB (TAPE alone −0.1 to −0.2, Studer −3.3 to −7.5);
+samples ≥ −0.25 dB of the top 14 / 7 / 7 (TAPE alone 19 / 27 / 51, Studer
+12 / 2 / 4). Closer in shape, still less of the whole-cycle drop than the Studer.
+
+⚠ Two renders of one emulation, both drums, made at different settings; nothing
+auditioned; nothing measured on voice, where a 1 ms / 16.5 ms gain riding a low vowel's
+ripple may read as distortion — untested.
+
+### PHAT*SS — Tape comp FAST mode (October 2026)
+
+The owner compared Studer / Tape comp / Tape comp + Soften clips on the drum
+machine and heard the opposite of the Studer: Tape comp keeps each hit's sharp
+attack and lifts it back with the makeup, where the Studer attenuates kick,
+snare and hat attacks and keeps more of the overall dynamics; Soften helped the
+snare.
+
+**Attack windows on the owner's clips** (gain vs each output's own linear path,
+window minus the 15–30 ms body, dB): snare Studer −5.4 / −7.2 / −7.5 / −4.5 at
+0–1 / 1–2 / 2–4 / 4–8 ms, Tape comp −2.9 / −3.8 / −3.6 / −2.3, + Soften −10.6 /
+−5.4 / −6.3 / −3.3; hats Studer −1.9 / −2.3 / −1.3, Tape comp ~−0.3, + Soften
+−6.5 / −5.9 / −3.8; kick Studer +0.2 / −3.1 / +1.2, Tape comp +3.0 / +1.4 / +1.7.
+Over the whole drum machine render's loud hits the Studer takes 5.6–6.7 dB off
+the first 2 ms of kicks and snares, Tape comp 3.9–4.7. The drums render does the
+opposite (attacks +1 to +4 above the body) — the two renders were made at
+different settings, the drum machine hotter. On the drum machine the attack loss
+is broadband (all bands for snares; 200 Hz–6 kHz on the kick's click), so it is
+not record pre-emphasis alone.
+
+**New score**: per hit within 12 dB of the loudest, peak plus gain from the
+hit's ONSET (first sample at 10 % of its peak) in 0–2 / 2–5 / 5–10 / 10–25 /
+25–50 / 50–200 ms. HF-band windows were tried and dropped (a kick's HF is mostly
+codec noise; it dominated the score). On this score the shipped SLOW fit is
+1.17 / 1.09 (drum machine / drums) and TAPE 12 alone 1.66 on the drum machine.
+
+**Variants** (coordinate descent; drum machine / drums):
+- SLOW + a fast PEAK stage ahead of TAPE: 0.97 / 1.01–1.03. The fast stage ran to
+  attack 0.01 ms, release ~2 ms. With 1 or 2 ms of lookahead: 1.006 / 1.03 and
+  1.005 / 1.01, release still 1.9–3.5 ms — lookahead buys nothing.
+- TAPE → SLOW (compressor after the curve, timing refitted 0.35 ms / 10 ms):
+  1.09 / 0.97.
+- FAST STAGE ALONE ahead of TAPE (the owner asked): 0.98 / 0.94, from two
+  starting points to the same voicing — attack 0.70–0.85 ms, release 1.8–2.5 ms,
+  ratio 7–12, knee 12, no tilt. Drum machine at stage 14.4 (slow scale) / TAPE
+  10.8; drums 11.3 / TAPE 1.1 — on the drums the stage does nearly everything.
+- All variants keep a ~2 dB peak error on the drum machine (kick peaks −7.6
+  against the Studer's −5.4, snare peaks −7.9 against −9.3).
+
+**What FAST is**: the release is shorter than a kick's half-cycle, so the gain
+moves inside every low cycle — at its voicing and a steady tone at the
+selection's peak: 55 Hz −5.0 → −12.7 dB per cycle, 200 Hz −9.2 → −11.7, 2 kHz a
+steady −10.6. A soft clipper with a short memory: the 0.85 ms attack passes each
+crest's rising edge, the gain lags on the way back up, and whatever rides on a
+crest goes down with it.
+
+**Distortion** (loud hits; per 5 ms frame the best single gain from the clean
+reference, the residual re the signal; AAC round trip of the dry alone −37 /
+−30, so the floor is well below): drum machine kicks / others Studer −13.7 /
+−13.1, FAST −15.6 / −17.2, SLOW −25.2 / −16.7; drums Studer −13.3 / −17.5, FAST
+−16.3 / −20.9, SLOW −17.5 / −25.1. The Studer is the most distorted of the three
+and FAST the closest on kicks — its distortion is part of the match, not a side
+effect. A/B sequences (dry → Studer → SLOW → FAST, loudness-matched): the owner
+preferred FAST.
+
+**Wiring**: `tapeCompMode` SLOW / FAST on the bench, `TAPE_COMP_FAST_VOICING`.
+The 55 Hz calibration is solved per voicing, and the fitted settings land on the
+existing steps (FAST: drum machine 11 / TAPE 11, 0.98; drums 8.5 / TAPE 0.5,
+0.96 against 0.94 at 7.8), so the two modes share `TAPE_COMPS`. The compressor
+resets its envelope when the detector changes (a PEAK envelope holds |x|, an RMS
+one x²). Makeup fast = exact through it with cubic and hysteresis; tests pin the
+calibration, the in-cycle harmonic (FAST's 3rd on 55 Hz > −30 dB and 6 dB over
+SLOW's) and a mid-stream mode switch.
+
+### PHAT*SS — head bump PRE / POST on the bench (October 2026)
+
+The owner asked whether our Jiles-Atherton hysteresis has a head bump of its own,
+on the premise that a real machine's head bump comes from saturation. It does
+not, on either count. A real head bump is a PLAYBACK-head effect: at long
+wavelengths the head's pole pieces and contact length pick up more or less flux,
+giving the bump and the ripples under it — linear and level-independent. The
+J-A equations carry no frequency, so the loop is flat: steady sines 20 Hz–4 kHz
+through the hysteresis TAPE layer read flat to 0.03 dB at −30 dB and within the
+same few tenths everywhere above 100 Hz at any drive. Driven hard there is a lift
+at the very bottom (TAPE 12 at the calibration peak: 20 Hz −8.1 dB, 40 Hz −9.6,
+1 kHz −10.4) — but CUBIC (−8.2 / −9.5 / −10.0) and TANH (−8.3 / −9.6 / −10.2) do
+the same, so it is the layer's 5 Hz DC blocker on what TAPE adds (near 20 Hz it
+shifts the correction out of phase with the dry, so less of the peak cancels),
+not the loop. It grows with drive and vanishes at normal level: not a head bump.
+
+So the bump stays a linear stage, and the bench now has its position:
+`tapeHeadBumpPos` PRE (ships — ahead of TAPE, driving the kick into the curve)
+or POST (after the curve and before the makeup, where a playback head puts it).
+
+**Against the Studer** (loud hits within 12 dB of the loudest: kick − snare
+level over each hit's first 100 ms, absolute; and the onset-window fit against
+the dry run through OUR bump, so it scores only the nonlinear part):
+
+| Drum machine (Studer k−s 12.39, dry 12.68) | k−s | fit |
+|---|---|---|
+| FAST 11 / TAPE 11, no bump | 9.76 | 0.979 |
+| + PRE +3 / +6 / +9 | 10.28 / 10.78 / 11.21 | 1.001 / 1.206 / 1.545 |
+| + POST +3 / +6 / +9 | 11.17 / 12.67 / 14.23 | 0.949 / 0.936 / 0.927 |
+| TAPE 12 alone, no bump | 11.19 | 1.658 |
+| + PRE +3 / +6 / +9 | 11.93 / 12.63 / 13.21 | 1.502 / 1.351 / 1.244 |
+| + POST +3 / +6 / +9 | 12.53 / 13.97 / 15.47 | 1.577 / 1.528 / 1.493 |
+
+With FAST, PRE drives the kick into the fast stage and the curve, which squash
+the lift (+6 dB of bump buys only +1 dB of kick) and worsen the fit; POST passes
+it at full size and leaves the fit alone, landing the balance at +6 (12.67).
+With TAPE 12 alone the earlier finding stands — PRE balances better and fits
+better. The drums render needs no bump in either position (Studer −0.59; FAST
+8.5 / TAPE 1, no bump −0.70; every bump moves it away).
+
+**Makeup**: POST is measured the exact way in preview too (TAPE over the whole
+region, then the shelf, then the peak — the shelf's memory outlasts the fast
+search's 512-sample pre-roll), and it can be a CUT: the lift can leave the peak
+above the source (tested: TAPE 1 / +9 POST on the kick track). `tapeMakeupDb`
+is clamped to ±24 dB in POST and ≥ 0 otherwise; the MAKEUP caption is signed.
+Switching position resets the shelf's state. Tests: the shelf still lands
++6 dB at 25 Hz POST, a loud 30 Hz tone keeps > 3 dB more of the lift POST than
+PRE, and the POST makeup puts the peak back on the source (preview = apply).
+
+### PHAT*SS — TAPE order and head bump pinned; Tape comp PRE / POST (October 2026)
+
+Owner's call: TAPE's place in the chain is pinned FIRST (the Tape order row and
+the LAST code path are removed: the processor's `tapeLast` branch, the makeup's
+whole-chain `chainPeak` measurement, the composable's Warmth-triggered makeup
+re-measure), and the head bump is pinned AFTER the curve (the Bump at row is
+removed). A new **Comp at** row puts Tape comp PRE (ahead of the curve, where both
+voicings were fitted) or POST (after the curve, before the bump) — POST is the
+default. The chain is now curve → [POST comp] → bump → makeup, with a PRE comp
+ahead of the curve.
+
+POST was the scratch "TAPE → FAST" experiment: on the drum machine's loud hits
+0.960 at FAST 11.6 / TAPE 10.5 against PRE's 0.979, a little dirtier (added
+distortion −14.0 / −14.5 dB re signal against −15.7 / −17.1, the Studer −13.7 /
+−13.1) and 0.5 dB more peak kept; the two orders differ by −21 dB re the signal.
+On the drums the fit runs TAPE to ~0 either way. SLOW was only ever fitted PRE.
+
+**Makeup**: signed everywhere now (the bump after the curve can leave the peak
+above the source). With a bump up or the comp POST it renders TAPE over the
+whole region, then the comp, then the shelf — preview included; PRE comp with no
+bump keeps the fast search (the region is compressed up front).
+
+**Meter bug caught by the new test**: the clean reference first applied the
+bump and then the comp's gain. A shelf with memory does not commute with a gain
+that moves inside a cycle, and with FAST PRE + a bump it read −24.6 dB of
+phantom "saturation" on a clean kick track. The reference now follows the chain
+order — the comp's gain on the input (PRE) or TAPE's latency later (POST), then
+the bump — and reads −79 (PRE) / −65 (POST) dB; the test asks for < −50.
+
+### PHAT*SS — Tape comp removed (October 2026)
+
+The owner, on hysteresis / push 6 / bump 3 / comp 8.5 SLOW PRE / output trim
+PEAK: no comp variation had a significant effect on drum attacks, and what the
+SLOW PRE comp did do — cut TAPE's distortion on kicks — was never the goal.
+Measured with those settings (hysteresis TAPE 8, Warmth and shelf off; loud hits
+within 12 dB of the loudest; energy in the first 2 ms / 2–5 ms from onset and
+the hit's peak, each re its own 15–30 ms body, so level and makeup drop out):
+
+| | DM 0–2 ms | DM 2–5 | DM peak | Drums 0–2 | Drums 2–5 | Drums peak |
+|---|---|---|---|---|---|---|
+| dry | 10.5 | 9.1 | 16.9 | −6.8 | −2.2 | 8.3 |
+| Studer | 4.0 | 6.5 | 11.7 | −8.6 | −6.5 | 6.6 |
+| TAPE only | 8.6 | 7.9 | 12.6 | −3.4 | 0.1 | 4.3 |
+| SLOW PRE 8.5 | 9.4 | 8.2 | 13.4 | −1.4 | 2.0 | 5.7 |
+| SLOW POST 8.5 | 8.6 | 7.9 | 12.6 | −3.2 | 0.2 | 4.4 |
+| FAST PRE 8.5 | 8.9 | 7.3 | 12.9 | −2.2 | 0.7 | 4.2 |
+| FAST POST 8.5 | 8.5 | 7.3 | 12.5 | −2.7 | 0.4 | 4.0 |
+| FAST POST 14 | 8.4 | 5.7 | 13.1 | −0.1 | 1.2 | 4.4 |
+
+A feed-forward compressor with no lookahead lets each hit's first millisecond
+through and then lowers the body, so attack-re-body goes UP, not down (SLOW
+PRE). SLOW POST is TAPE only to the decimal: its threshold was calibrated on
+the source's peak, but after the curve it saw TAPE's output before the makeup,
+several dB lower, so it barely engaged. Note also that hysteresis TAPE alone
+RAISES the drums' onset re body (−6.8 → −3.4: it squashes the sustained body
+harder than the quiet start of a hit) where the Studer lowers it (−8.6).
+
+Removed: `dsp/tapeComp.js`, `tapeComp` / `tapeCompMode` / `tapeCompPos` and
+their constants, the kernel stage and its meter alignment, the makeup's
+compressor paths and the bench rows (recoverable at `29815f3`). The chain is
+TAPE's curve → head bump → makeup → Warmth → guard → shelf → Output. A transient
+shaper (fast-vs-slow envelope with a few ms of lookahead) was proposed for the
+attacks and set aside: the owner expects it to suit drums but not other sources.
+
+### PHAT*SS — playback EQ study, A800 head-bump curves, low push trimmed (October 2026)
+
+**Where the Studer's "softer attacks" were looked for, and what came back.**
+After Tape comp was removed the owner asked whether a waveshaper could soften
+transients. Against hysteresis TAPE 8 (first 2 ms of each loud hit re its 15–30
+ms body; drum machine / drums; Studer 4.0 / −8.6, TAPE alone 8.8 / −5.2): a
+high-shelf pre-emphasis into the curve (tape record EQ) best 7.1 / −5.0 (+18 dB
+at 1.5 kHz); a soft slew-rate shaper ahead of TAPE (250 Hz–4 kHz equivalent)
+8.2–8.8 / −5.2, only dulling the top 1–4 dB. Neither family can tell a hit's
+onset from its body: on the drums the onset is QUIETER than the body.
+
+Most of the metric's gap turned out LINEAR: the dry tracks through the Studer's
+measured linear path alone read 6.4 / −12.7. That path, measured on quiet
+passages (1/12-octave complex response, coherence-weighted): +4.6 dB at 15–20
+Hz falling below ~12, +3.7 at 30–36 Hz, low-frequency group delay ~0.4 ms at
+175 Hz rising to 2.4 at 70, 4 at 32 and ~13 at 18 Hz, and the top rolling off
+−4 to −6 dB at 16 kHz, −14 to −16 at 19.5 kHz. Fitted (level and phase
+weighted separately) as a 7.1 Hz high-pass Q 2.6 · +3.5 dB bell at 22 Hz ·
+an all-pass at ~9 Hz · a 19 kHz lowpass, within ~1 dB / 8° from 13–250 Hz on
+both renders; it needs the all-pass, so it is not minimum phase. A plain
+minimum-phase fit chased the phase and gave up the magnitude.
+
+The owner supplied the A800 HARDWARE's published playback response (endino.com,
+30 ips): +1.5 dB near 45–50 Hz, −0.5 at 85, +0.4 at 140, −8 dB by 20 Hz. Fitted
+to 0.17 dB rms: high-pass 35.3 Hz Q 0.90 · +1.17 dB at 31.25 Hz Q 0.30 · −1.93 dB
+at 82.7 Hz Q 1.83. 15 ips: the same an octave down (owner).
+
+**By ear the metric was wrong.** The owner heard the emulation-fit EQ as the
+rangiest version and no softening at all; the +3 shelf as the tightest; the
+A800 curve as closest to the Studer's kick frequency. The 0–2 ms / body metric
+had rewarded the emulation fit because its low-frequency delay drains the
+first 2 ms into the body — smear, not softening. Not to be used for tightness
+again. What the curves really move is the kick's click-vs-sub balance (loud
+kicks, first 30 ms, 1–8 kHz re < 60 Hz): drum machine Studer −18.2, +3 shelf
+−18.2, A800 30 −17.8, 15 −17.6; drums Studer −17.1, shelf −19.6, A800 30 −18.0,
+15 −18.2 — "tight" was the shelf's extra sub, and the Studer sits on the
+click-forward side.
+
+The emulation's top-end roll-off (two lowpasses, 16 kHz Q 0.67 + 21.5 kHz Q
+0.41, 0.41 dB rms) was tried on the A800 curves as the last candidate for
+"softer transients": the Studer's onsets are BRIGHTER than ours (>8 kHz share of
+a loud hit's first 5 ms: drum machine Studer −29.2, ours −29.8 to −32.1; drums
+−25.8 against −27.9 to −32.2), so the roll-off moved us further away. Still
+untested as the source of the softer impression: the Studer's higher
+distortion on loud hits and its longer sustain after the attack.
+
+**Built**: Head bump gains `a800-30` / `a800-15` (fixed depth, after the curve,
+`TAPE_HEAD_BUMP_CURVES`, `headBumpSections` shared by the kernel and the makeup
+measurement; the kernel's bump cascade is sized to 3 sections and the meter's
+reference runs through its own copy). Low push trimmed to 0 / 3 / 6 (owner:
+12 and 18 too hot; a stored 12 or 18 clamps to 6). Tests pin the A800 curve at
+20 / 45 / 85 Hz / 1 kHz and 15 ips at 10 / 22.5 / 42.5 Hz, the makeup through
+it (preview = apply, peak on the source) and the meter.
+
+### PHAT*SS — HF detents replace the Tame knob (October 2026)
+
+Owner: keep the FATSO fit, but take Tame off the panel in favour of a detent
+with a few HF options; calibrate with a floor (preserve a dull take rather than
+normalise its brightness away). Clips: `Messy_and_Bright_-_Clip.wav` (bright,
+44.1 kHz, voice −20.74 dBFS) and `art_test_clip_orig.wav` (dull, 48 kHz,
+−16.39). Harness: `scripts/phatass-hf-detents.mjs` (the VOICE curve's metric —
+sibilant frames 4–16 kHz, voiced frames 2–4 kHz).
+
+**Why a detent cannot reuse the voice-level threshold as-is.** A knob is placed
+by ear per file; a detent is not. The treble's 10 ms peaks re the gated RMS:
+
+| re voice, dB | 2k p50 / p75 / p90 / p95 / p98 / p99 | 4k p50 / p75 / p90 / p95 / p98 / p99 |
+|---|---|---|
+| bright | −6.7 / −1.8 / 1.9 / 4.0 / 6.1 / 7.4 | −11.2 / −5.8 / −1.9 / 1.0 / 3.7 / 5.6 |
+| dull | −7.4 / −0.9 / 2.7 / 4.2 / 6.1 / 6.9 | −11.3 / −5.8 / −2.0 / −0.5 / 1.4 / 2.1 |
+
+The 2 kHz band barely separates the clips (the dull take's vowels are loud at
+2–4 kHz); the 4 kHz band separates them only at the top — the bright take's
+sibilance. So the detents listen at 4K and read the 4K distribution.
+
+**Law**: `threshold = voice + clamp(pct + offset, floor, cap)`. The floor is the
+owner's. The cap was found by the synthetic test: with every S equally loud the
+98th percentile sits on top of all of them and AIR cut −0.13 dB whether the S's
+were 0 or +18 dB over the bed — a percentile alone calibrates a uniformly harsh
+take's harshness away. A 2 dB window per detent, non-overlapping.
+
+**Installed** (sibilant / vowel, bright | dull):
+
+| detent | law | bright | dull |
+|---|---|---|---|
+| AIR | p98, [+2, +4], R6 | −2.04 / −0.05 (thr +3.7) | −0.00 / −0.07 (floor) |
+| SMOOTH | p95 − 1, [−2, 0], R15 | −4.01 / −0.20 (−0.05) | −0.09 / −0.44 (−1.5) |
+| DARK | p75, [−6, −4], R21 | −7.31 / −1.12 (−5.8) | −0.78 / −1.42 (−5.8) |
+| FATSO | Tame 6, 2K, voice-relative | −4.24 / −0.67 | −0.13 / −1.10 |
+
+For reference, VOICE 4K Tame 1 / 3 / 5 on the bright clip: −1.95 / −4.23 /
+−7.38 — so the three calibrated detents sit near those points. Candidates swept
+on the way: AIR p99 [3,∞] R6 −1.47; SMOOTH p95 [0,∞] R12 −3.48, p90 [−1,∞] R15
+−4.55 (but floor-bound on both clips); DARK p75 [−5,∞] R21 −6.86; 2K-detector
+variants cut the dull take's vowels more for less sibilance (p95 [2,∞] R12:
+−2.41 / −0.20 | −0.01 / −0.29).
+
+**Not built**: a soft-knee gain law (`tanh(u)/u` on the band level). The FATSO
+fit only tested laws steeper than the limiter, never softer; scoring a knee
+needs the Fatso bounces, which are not in the repo.
+
+**Wiring**: `hf` ('off' ships) and measured `trebleStats` in
+`PHATASS_DEFAULTS`; `hfDetentShelf`; `phatassTrebleStats.js` (≤ 240 × 0.5 s
+blocks with 30 ms lead-in for the one-pole, channels apart, windows under
+voice − 30 dB are pauses; 42–84 ms on the clips) measured with the voice level
+in `refreshLevel`, whole file. The panel's Tame knob and CURVE / DETECT
+rockers became one HF rocker; Tame (slider), its curve (with the detector
+pairing) and Detect moved to the bench, and moving the slider sets
+`hf: 'bench'`. `saturationBenchAnalysis.js` exports `indexSegments` /
+`readChannel` for the measurement. Existing Tame tests now pass `hf: 'bench'`.
+Not auditioned.
+
+### PHAT*SS — soft knee scored against the Fatso bounces, rejected (October 2026)
+
+The owner re-supplied the five EL7 bounces. `scripts/phatass-fatso-fit.mjs`
+rebuilds the scratch harness from the entry above (audio stays out of the
+repo; readings in `data/fatso/el7_warmth_fits.json`).
+
+**Validation.** One change from the description: block alignment must tolerate
+±2 samples between neighbours. With exact agreement Warmth 7 kept 27 of 98
+blocks — its lag wanders 0–2 from block to block, the Fatso's own phase moving
+with its gain (a one-pole's group delay follows g), while the real drop is ~13.
+With ±2: 95–98 blocks kept, and the shipping FATSO law scores 0.174 / 0.348 /
+0.570 at Warmth 5 / 6 / 7 against the dev log's 0.165 / 0.345 / 0.574;
+gain-only 0.002 / 0.240 / 0.596 / 1.398 against 0.002 / 0.210 / 0.556 / 1.357.
+
+**The fit.** `ShelfLimiterStage` took an opt-in `kneeDb` (quadratic knee
+centred on the threshold) and `law: 'tanh'` (band output T·tanh(m/T)); best
+threshold / Range per law, dB rms:
+
+| | limit | knee 3 | knee 6 | knee 9 | knee 12 | tanh |
+|---|---|---|---|---|---|---|
+| Warmth 5 | 0.168 | 0.162 | 0.159 | 0.157 | 0.155 | 0.175 |
+| Warmth 6 | 0.348 | 0.348 | 0.348 | 0.345 | 0.335 | 0.380 |
+| Warmth 7 | **0.563** | 0.564 | 0.569 | 0.587 | 0.607 | 0.703 |
+
+A knee gains ≤ 0.013 where the Fatso barely acts (Warmth 5 cuts > 1 dB on ~1 %
+of frames) and loses at Warmth 7, the FATSO detent's point. With steeper laws
+already worse, the limiter law is the fit from both sides. ⚠ A centred
+quadratic knee cuts (o − K/2)²/2K MORE than the hard law everywhere inside it —
+it starts early, it never cuts less; the first draft of the test asserted the
+opposite. The options stay in the stage for the record (bit-identical off,
+pinned by an HF Limiter test); no plugin passes them.
+
+### PHAT*SS — the tape HF shelf: 30 / 15 / 7.5 IPS replace AIR / SMOOTH / DARK (October 2026)
+
+Owner, on the two entries above: the soft-knee fit chased the wrong question
+(a limiter fits a limiter best; recreating the Fatso was never the goal), and
+AIR / SMOOTH / DARK were only a new calibration of the SAME lookahead limiter
+shelf — the level-dependent tape shelf itself had not been built. Decisions:
+replace AIR / SMOOTH / DARK with tape speeds, tie the shelf to TAPE, remove
+the knee code.
+
+**Removed.** `ShelfLimiterStage`'s `kneeDb` / `law` (back to `8279530`
+byte for byte), its test, the Fatso harness's `--grid`;
+`phatassTrebleStats.js` and the `trebleStats` param with its measurement (the
+energy detector below leaves dull takes alone by itself).
+
+**`dsp/tapeHfShelf.js`** — how it differs from the limiter shelf:
+- detector: mean square of the band above the speed's IEC emphasis corner
+  (17.5 / 35 / 70 µs), 3 ms attack / 80 ms release — energy, not peaks;
+- no lookahead: attacks pass bright, sustained brightness darkens (the one
+  measured clue — the Studer renders' onsets were BRIGHTER than ours — points
+  this way; the limiter shelf does the opposite);
+- law: 0.75 dB of cut per dB over through a 6 dB knee, capped at Range — no
+  ceiling;
+- response: the WARM split `g·x + (1−g)·LP1(fc)` with the corner sliding an
+  octave down per 6 dB of cut (coefficients every 8 samples), between
+  14 / 10 / 7 kHz and 6 / 4 / 2.5 kHz — the loss reaches further down as it
+  deepens ("sag");
+- zero latency, bit-transparent below threshold (tested), only ever turns down
+  (tested), linked.
+
+**TAPE drives it**: threshold `voice − 10 − 1·TAPE` dB.
+
+**Detector levels** (re voice, active frames, 3/80 ms): the emphasised band
+separates the clips by speed — at 9.09 kHz bright p98 −2.2 / max +6.2 against
+dull −11.1 / −8.7; at 2.27 kHz they nearly agree (p98 +1.9 / +0.8). So 30 ips
+leaves a dull take alone by construction and 7.5 ips does not.
+
+**Tuning** (15 ips, bright clip, sibilant body / onset / vowel; T0 | T6):
+thr −6, slope 0.5, coupling 0.5, R9: −1.43 / −0.13 / −0.02 | −2.04 (too subtle,
+TAPE barely mattered); −10, 0.75, 1, R12: −3.48 / −0.77 / −0.14 | −5.02 / −2.40
+(chosen); −12: −4.13 / −1.24; −14: −4.67 / −1.82 — the onset/body split
+narrows as the threshold drops, because the envelope stays up through a run.
+30 ips −10 / R9, 7.5 ips −10 / R15.
+
+**Installed** (bright | dull; sibilant body / onset / vowel):
+
+| | TAPE 0 bright | TAPE 6 bright | TAPE 0 dull | TAPE 6 dull |
+|---|---|---|---|---|
+| 30 ips | −1.83 / −0.16 / −0.01 | −2.85 / −0.87 / −0.07 | 0.00 | −0.16 / −0.02 / −0.04 |
+| 15 ips | −3.47 / −0.77 / −0.13 | −5.01 / −2.38 / −0.53 | −0.15 / −0.08 / −0.15 | −1.23 / −0.83 / −0.60 |
+| 7.5 ips | −5.04 / −1.71 / −0.77 | −7.41 / −4.21 / −1.87 | −1.02 / −1.12 / −1.06 | −3.23 / −3.06 / −2.19 |
+| FATSO | −4.52 / −1.31 / −0.67 | — | −0.13 / −0.16 / −1.10 | — |
+
+Every constant except the emphasis corners is reasoned. Not auditioned.
+
+### PHAT*SS — tape HF shelf rescaled: TAPE through its makeup, not twice (October 2026)
+
+Owner, on the owner's drums (`AllTape_Drums_dry_v1` / `StuderA800_Drums_wet_v1`,
+48 kHz AAC, 17.5 s): the drive-dependent direction is right, but with TAPE at
+8 the shelf was too strong at every setting but OFF.
+
+**Why.** Measured on the dry drums through PHAT*SS at TAPE 8 (makeup measured,
+6.65 dB), against the same chain with HF off, 8–16 kHz by frame level (re the
+−19.65 dBFS voice level): 30 ips −3.3 / −4.6 / −4.6 dB on quiet / mid / loud
+frames, 15 ips −5.8 / −7.0 / −7.2, 7.5 ips −7.5 / −9.3 / −10.0 — a STATIC EQ.
+The threshold dropped 8 dB for TAPE 8 AND TAPE's peak-restoring makeup put
++6.65 dB more into the shelf: the drive counted twice, and with an 80 ms
+release over constant cymbals the envelope never let go.
+
+**The Studer for scale** (aligned −33 samples; band gain per 21 ms frame
+against its own median on quiet frames, by frame level re voice): 2–16 kHz
+0.0 / 0.0 / −0.3 to −0.5 / −1.0 / −2.9 to −3.4 dB on frames under −10 / −10 to
+−4 / −4 to 0 / 0 to 4 / over 4 — but 60–250 Hz and 250 Hz–1 kHz lose −2.8 /
+−2.3 on the loudest too: mostly broadband (tape compression), HF-specific
+~0.5–1 dB on loud frames only. Its quiet-frame response is +2.6 to +3.1 dB flat
+(a level offset).
+
+**Fix.** The explicit TAPE threshold law is removed (`TAPE_HF_DB_PER_TAPE_DB`
+gone, `tapeHfShelfParams(hf, voice)`); the drive reaches the shelf through the
+makeup alone. Slope 0.75 → 0.5, release 80 → 40 ms, thresholds −10 → −4 / −6 /
+−6, Range 9 / 12 / 15 → 4 / 6 / 9. Swept on drums at TAPE 0 / 8 and both
+narration clips at TAPE 0 / 4 (15 ips, slope 0.5, 40 ms, Range 6): −4 gave
+drums T8 −0.3 / −0.6 / −0.4, bright −0.95; −6 −0.6 / −1.1 / −0.9, bright −1.3
+(chosen); 0 and +2 did nearly nothing. 7.5 ips at −8 doubled its TAPE 0 effect
+on drums (−0.9) — −6 kept.
+
+**Installed** (`scripts/phatass-hf-detents.mjs`, now with TAPE's makeup
+measured; sibilant body / onset, or energy above 2 kHz for drums):
+
+| | bright T0 | bright T4 | bright T8 | dull T8 | drums T8 (>2 kHz) |
+|---|---|---|---|---|---|
+| 30 ips | −0.36 / 0.00 | −0.58 / −0.02 | −0.81 / −0.08 | 0.00 | −0.02 |
+| 15 ips | −1.32 / −0.10 | −1.86 / −0.28 | −2.39 / −0.64 | −0.23 | −0.42 |
+| 7.5 ips | −2.03 / −0.28 | −2.82 / −0.63 | −3.83 / −1.26 | −0.68 | −1.01 |
+| FATSO | −4.52 / −1.31 | −5.68 / −2.77 | −6.62 / −4.50 | −2.05 | −3.81 |
+
+⚠ FATSO (the limiter shelf, fitted law, threshold re the source's voice
+level) hears the makeup too and rises with TAPE; left as fitted. Not auditioned.
+
+## PHAT*SS — landing prep: Speed detent, paired head bumps, CLEAN/THICK, CHARACTER; Soften moves to HF Softener (October 2026)
+
+Owner's list before landing the plugin:
+
+1. **The detent is the three tape speeds only** (30 / 15 / 7.5 IPS, 30 ships). OFF and FATSO
+   leave the panel and stay reachable on the bench ("Top end" row). Each speed now **brings its
+   head bump** (`tapeHeadBump: 'speed'`): A800 30 / 15 ips as fitted, and a new A800 7.5 ips
+   derived by octave scaling (every frequency halved from 15 ips: 8.825 Hz HP, +1.17 dB at
+   7.8125 Hz, −1.93 dB at 20.675 Hz). It is not measured. The bump still applies only while
+   TAPE > 0. The bench's head-bump row keeps the fixed shelves and adds SPEED.
+   ⚠ The A800 30 ips test now pins the owner's edited high-pass (acf0534, 20 Hz): +0.13 dB
+   at 20 Hz and −0.96 dB at 85 Hz.
+2. **TAPE curve toggle: CLEAN (cubic) / THICK (hysteresis).** These are placeholder names, and
+   the owner may rename them.
+3. **Soften moved to the HF Softener**, in the Reso knob's slot. Reso is off the panel and
+   kept in the code. The law is unchanged. It runs on the HF Limiter's worklet with the shelf
+   out (Range 0), so the HF Limiter kernel now forwards `transientCornerHz`,
+   `transientSlope` and `transientGateDb`; left unset, they keep the HF Limiter
+   bit-identical.
+   **Equivalence:**
+   - Checked against PHAT*SS's Soften at 828e9e3 (Tame 0, everything else off) on 10 s of
+     real narration, with latency aligned.
+   - The maximum difference is 0 at Soften 3, 7 and 10.
+   - Latency is 132 samples here, against PHAT*SS's 414.
+4. **Odd/Even became a CHARACTER toggle**: ROUND = 50, FIRM = 25.
+
+⚠ With 30 ips the default, PHAT*SS at Warmth 0 / TAPE 0 is no longer a pure delay: the
+shelf sags loud top end. The tests that assumed transparency run isolated (`hf: 'off'`,
+`tapeHeadBump: 0`).
+
+## PHAT*SS — output trim: why PEAK is too loud and RMS too quiet (October 2026)
+
+Owner: on drums at TAPE 10, PEAK sounds too loud, RMS too quiet, and the two sit far apart
+(meters: input −2 to −1.5, PEAK output −0.4 to 0, RMS trim −5.6). Rendered the owner's
+drum file (17.5 s, stereo, defaults: 30 ips, Warmth 0):
+
+| TAPE | TAPE makeup | out − in, integrated LUFS | PEAK trim | RMS trim | LUFS match |
+|---|---|---|---|---|---|
+| 4 | +2.39 | +1.53 | 0.00 | −1.83 | −1.53 |
+| 10 | +7.91 | +5.02 | 0.00 | −5.38 | −5.02 |
+
+- **PEAK trims nothing when only TAPE is in play.** TAPE's own makeup already puts the peak
+  back on the source's, so PEAK is TAPE plus the whole loudness it adds (+5 LU at TAPE 10).
+  PEAK only moves when Warmth or the shelves change the peak.
+- **RMS is not measuring the wrong thing.** Every loudness reference agrees with it at
+  TAPE 10:
+  - integrated LUFS: −5.02
+  - momentary (400 ms) 50/90/99th percentiles: −4.7 / −6.1 / −5.3
+  - short-term (3 s): −5.7 / −5.5 / −5.3
+  - Only 50 ms windows on the hits read deeper, at −7 to −8.
+- **The gap is perceptual.** A squashed hit at matched loudness sounds smaller, because its
+  attack lost far more than its body. Neither match is wrong; the owner's ear lands between
+  them.
+- **Added MID** to the bench's Output trim: halfway in dB between PEAK and RMS, an audition
+  (−2.7 dB here). If it lands, a fixed fraction is the next thing to tune.
+
+**Follow-up (October 2026): MID became BLEND.** The owner heard MID as closer, but did not
+want a rule tied to drum hits, since PHAT*SS serves voice, drums and full mixes. So the trim
+is now a fixed share in dB, `outputBlend` of the way from RMS to PEAK, 80 % by default
+(owner's pick). The bench offers 50 / 65 / 80 %.
+
+On the drums, the trim at each share:
+
+| Share toward PEAK | TAPE 10 | TAPE 4 |
+|---|---|---|
+| 50 % | −2.69 dB | −0.92 dB |
+| 65 % | −1.88 dB | −0.64 dB |
+| 80 % | −1.08 dB | −0.37 dB |
+
+Not auditioned past MID.
+
+**BLEND became KEEP (October 2026).** The owner asked whether BLEND still mixed PEAK and RMS
+(it did, with two renders per measurement). They wanted a plain percentage with no RMS pass.
+A share of the PEAK trim cannot work: TAPE's makeup already restores the peak, so the PEAK
+trim is ~0 whenever TAPE is doing the work.
+
+KEEP takes the share from TAPE's own makeup instead, which is already measured. It keeps
+`outputKeep` of that makeup in dB and trims the rest at the output, so nothing re-renders
+(`keepTrimDb`, worked out in `toKernelParams`). The trim sits at the output rather than
+scaling the makeup itself, so Warmth and the HF shelf see the same drive as before.
+
+The default is 85 %, chosen to match BLEND 80 on the drums:
+
+| Drums | BLEND 80 | KEEP 85 |
+|---|---|---|
+| TAPE 10 | −1.08 dB | −1.19 dB |
+| TAPE 4 | −0.37 dB | −0.36 dB |
+
+The bench offers KEEP at 80 / 85 / 90 %. Warmth's added loudness is not trimmed.
+
+## PHAT*SS — the hysteresis loop made cheaper (October 2026)
+
+The owner asked why THICK is so much slower than the cubic. The Jiles-Atherton step is the
+whole difference: an RK2 step per 4x-oversampled sample, two evaluations each, each with
+`tanh`, `sinh` and three divisions. On drums at TAPE 10, per 10 s of mono:
+
+| | Cubic | THICK |
+|---|---|---|
+| Render | ~300 ms | 580 ms |
+| Exact makeup | 192 ms | 518 ms |
+| The J-A step alone (of THICK's render) | — | ~285 ms |
+
+**Shipped: L and L′ by table.** A cubic Hermite table on |q| ≤ 32 at 1/32, with L′ and L″
+as the knot slopes. It stays under −180 dB from the closed forms, and the step runs ~1.5×
+faster. THICK now renders in 488 ms and the exact makeup takes 346 ms.
+
+**Bench: Loop step EXACT / FAST.** FAST is a variable-step Adams–Bashforth 2: one
+evaluation per step, reusing the last step's slope. Measured against a 16×-substepped
+solution:
+
+| Drive | 1 | 3 | 10 |
+|---|---|---|---|
+| FAST, unguarded | −70 dB | −59 dB | −49 dB |
+| RK2 (EXACT) | −94 dB | −87 dB | −73 dB |
+| Euler (rejected: barely under the curve's own distortion) | −50 dB | −38 dB | −29 dB |
+
+⚠ **Unguarded, it fails on big jumps.** On a noise burst without oversampling it read
+−10 dB of error. Two guards fix that:
+
+- Euler at a reversal, or after a step more than 4× the last.
+- Any step with |dh| > 0.05 takes RK2.
+
+| FAST_MAX_DH | FAST vs EXACT, drums at TAPE 10 | Synthetic burst test |
+|---|---|---|
+| 0.02 | −68 dB | passes |
+| 0.05 (chosen) | −57 dB | passes |
+| 0.1 | −52 dB | passes |
+| 0.3 | — | fails |
+
+Guarded FAST renders THICK in ~350–400 ms against EXACT's 488 (timings vary run to run). It
+is not auditioned.
+
+## PHAT*SS — performance pass (October 2026)
+
+Profiled on the owner's drums (17.5 s, stereo). Per 10 s of stereo before the pass: idle
+179 ms; Warmth 5 / TAPE 6 / 30 ips 1148 ms; THICK 1539 ms. The oversamplers' up/down
+filters took 44 % of the typical render. The owner picked #2, #4, then #3 from the review,
+and asked for the Tame limiter to be deprecated outright.
+
+### #4: idle stages
+
+**The limiter shelf is removed.** The HF Limiter's lookahead shelf only served the bench's
+Tame / CURVE / DETECT and FATSO once the Speed dial replaced Tame. It still ran its full
+detector on every render: about 20 % of the idle cost, plus 3 ms of latency.
+
+- Removed from the kernel, params, bench and modal; recoverable at e427de9.
+- A stored `hf: 'fatso' | 'bench'` falls back to the shipping speed.
+- `scripts/phatass-fatso-fit.mjs` went with it; its readings stay in
+  `data/fatso/el7_warmth_fits.json`.
+
+**The Warmth guard is a plain delay while Warmth is off.** It skips its min and smoother
+then. With Warmth off its added signal is 0, so the output is the same. The pipeline
+restarts in its all-1 state when Warmth comes back.
+
+| Setting (per 10 s stereo) | Before | After |
+|---|---|---|
+| Idle | 179 ms | 63 ms |
+| Warmth 5 / TAPE 6 / 30 ips | 1148 ms | 894 ms |
+| THICK | 1539 ms | 1204 ms |
+
+### #2: exact makeup in the background
+
+Once the fast makeup lands and the knobs have been still for 600 ms, the exact makeup is
+measured in the background. It is kept (last 16) against the document, revision, span and
+every TAPE setting that moves it.
+
+- Apply uses a matching value instead of rendering TAPE over the selection again.
+- Returning to an already-measured setting skips the fast search too.
+- Browser check on the drums: fast at 11.9 s, exact at 13.0 s, and no makeup render during
+  apply.
+
+### #3: Warmth readout
+
+**Bands are sampled across the whole selection.** They used to cover only the first 30 s.
+On a 175 s file mixing narration and drums, that window read up to 7.7 dB off the whole
+render (+10.3 at 60–120 Hz against +2.4). Selections up to 15 s now render whole. Longer
+ones render 12 blocks of 1 s, one per stratum at a golden-ratio offset, each with a 0.25 s
+run-in, with energies pooled. Results on the 175 s file:
+
+| Blocks | Worst error, Warmth 5 / 10 | Time |
+|---|---|---|
+| 12 × 1 s (chosen) | 0.41 / 0.58 dB | ~650 ms (the window took 1.3 s) |
+| 16–30 blocks | 0.28–0.57 dB | longer |
+
+A 0.5 s run-in and a faded-in run-in both read the same as the chosen one.
+
+⚠ A synthetic test with hard joins between sections read the 20–60 Hz band 3.5 dB off.
+The cut itself is sub content that the whole render sees and the blocks mostly miss. Test
+material needs smooth joins.
+
+**The whole-region peak pass is gone.** The guard is pinned on with the selection's peak as
+its ceiling, and its no-overshoot proof holds |out| ≤ that peak. Measured 0.000 dB of
+change at Warmth 5 and 10 on the 175 s file. So a long selection reports that bound
+instead of rendering it, which used to cost ~8 s of CPU per 3 min of mono, per knob turn.
+Short selections still measure it.
+
+### Parallel chunked apply (October 2026)
+
+PHAT*SS apply now splits regions of 30 s or more into chunks. They render on
+`hardwareConcurrency − 1` workers, at most 8, with chunks of at least 15 s each
+(`phatassChunks.js` plans, `phatassChunkRender.js` renders in the worker), using the same
+kernel as the preview. A chunk renders from 1 s of the real audio before it, and the
+outputs are laid end to end.
+
+⚠ **THE SEAMS FIRST FAILED, AND MORE RUN-IN DID NOT HELP.** On a 175 s narration + drums
+mix, chunked against continuous renders, the worst seam difference relative to the peak
+was:
+
+| Setting | 0.25 s run-in | 1 s | 2 s |
+|---|---|---|---|
+| Warmth 5 / TAPE 8, CLEAN, 30 ips | −37 dB | −34 | −34 |
+| Warmth 10 / TAPE 12, 7.5 ips | −28 dB | −28 | −27 |
+
+Isolated by stage, Warmth and TAPE were exact (−159 dB and bit-identical). The tape HF
+shelf was off for up to 7 s after a seam. Its corner is recomputed every `COEFF_STRIDE`
+samples counted from the start of each 128-sample block, so a chunk whose render starts off
+the continuous render's block grid updates its corner on different samples for the whole
+chunk.
+
+With every chunk start aligned to the grid and 1 s of run-in:
+
+| Setting | Worst seam difference |
+|---|---|
+| CLEAN | −141 / −147 dB (float noise) |
+| THICK | −87 dB (the loop's memory) |
+
+At 0.25 s of run-in, aligned, the worst was −61 to −67 dB. `test/dsp/phatassChunks.test.js`
+pins the plan's grid and coverage, and the stitched render: under −120 dB with CLEAN, under
+−70 dB with THICK.
+
+**Browser, 175 s stereo, Warmth 6.4 / TAPE 7.7, 4-core container:** apply took 25.7 s on
+one thread (`hardwareConcurrency` forced to 1) and 12.9 s with 3 workers. Any error falls
+back to the one-thread worklet render.
+
+### Oversampler: folded halfband taps (October 2026)
+
+`HalfbandStage` (dsp/oversample.js, shared by every oversampled plugin) now adds each
+symmetric pair of history samples before multiplying, so its odd-phase convolution does half
+the multiplies. Against the unfolded code, over a 4x round trip with a `tanh` at the high
+rate, timed per 10 s:
+
+| Profile | Max difference | Before | After | Saving |
+|---|---|---|---|---|
+| Compressor 4x | 8.9e-16 | 134 ms | 108 ms | 20 % |
+| Compressor 8x | 1.0e-15 | 236 ms | 178 ms | 25 % |
+| EQ | 1.1e-15 | 92 ms | 65 ms | 29 % |
+| Vocal sat | 1.1e-15 | 87 ms | 68 ms | 22 % |
+
+PHAT*SS on drums, best of 7, per 10 s of stereo:
+
+- Warmth 5 + TAPE 6: ~920 → ~850 ms (~7 %).
+- TAPE alone: ~280 → ~245 ms (~13 %).
+
+A first prototype that patched the stages from outside measured only 9 % on the round trip.
+A test pins the fold's precondition (every profile's odd-phase taps are symmetric) and the
+equivalence with the plain sum.
+
+### Warmth's oversampled layers at 2x (October 2026): measured, not changed
+
+The owner asked for the 2x measurement. Slots now take an oversampling profile as well as
+true/false (`layerProfile`; `true` is still the 4x compressor profile, so nothing changes).
+`COMPRESSOR_OVERSAMPLE_2X` is the 4x profile's stage-1 filter alone: 46 samples of latency,
+against 50 for 4x.
+
+Each layer was rendered alone at 1x / 2x / 4x and scored against 8x on what it adds:
+`scripts/phatass-warmth-oversample.mjs`, on two narration clips and dry drums. The error is
+the same at Warmth 5 and 10, because Warmth scales what a layer adds and not its drive. The
+error re the signal is shown at Warmth 10, the worst case.
+
+**Full-band quartic** (fixed layer, drive 0, high shelf −10 dB at 2.4 kHz):
+
+| Material | 1x | 2x | 4x | Worst re signal at 2x |
+|---|---|---|---|---|
+| Bright narration | −32.8 | −36.4 | −46.7 | −69.9 |
+| Narration B | −47.4 | −47.8 | −60.1 | −80.4 |
+| Drums | −35.1 | −49.9 | −59.1 | −72.3 |
+
+(dB re what the layer adds.) Note that 2x is barely better than 1x on narration here.
+
+**3 kHz+ tanh** (fixed layer, drive 27, Amount −6, high shelf −20 dB):
+
+| Material | 1x | 2x | 4x | Worst re signal at 2x |
+|---|---|---|---|---|
+| Bright narration | −17.5 | −37.7 | −60.8 | −60.9 |
+| Narration B | −24.3 | −54.6 | −66.8 | −89.8 |
+| Drums | −15.7 | −41.9 | −56.2 | −74.0 |
+
+**Cost per layer, per 10 s of mono:**
+
+| Rate | Time |
+|---|---|
+| 1x | 22–70 ms |
+| 2x | 76–130 ms |
+| 4x | 115–197 ms |
+| 8x | 193–304 ms |
+
+Moving both layers to 2x saves roughly 40 ms per layer per channel per 10 s, about 15–20 %
+of a Warmth 5 / TAPE 6 stereo render.
+
+Not adopted. On the bright clip at Warmth 10, 2x leaves aliasing at −61 dB re the signal,
+in the sibilance band where the oversampler exists to keep grit out. That is an ear call.
