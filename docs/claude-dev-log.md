@@ -6988,3 +6988,26 @@ pins the plan's grid and coverage, and the stitched render: under −120 dB with
 **Browser, 175 s stereo, Warmth 6.4 / TAPE 7.7, 4-core container:** apply took 25.7 s on
 one thread (`hardwareConcurrency` forced to 1) and 12.9 s with 3 workers. Any error falls
 back to the one-thread worklet render.
+
+### Oversampler: folded halfband taps (October 2026)
+
+`HalfbandStage` (dsp/oversample.js, shared by every oversampled plugin) now adds each
+symmetric pair of history samples before multiplying, so its odd-phase convolution does half
+the multiplies. Against the unfolded code, over a 4x round trip with a `tanh` at the high
+rate, timed per 10 s:
+
+| Profile | Max difference | Before | After | Saving |
+|---|---|---|---|---|
+| Compressor 4x | 8.9e-16 | 134 ms | 108 ms | 20 % |
+| Compressor 8x | 1.0e-15 | 236 ms | 178 ms | 25 % |
+| EQ | 1.1e-15 | 92 ms | 65 ms | 29 % |
+| Vocal sat | 1.1e-15 | 87 ms | 68 ms | 22 % |
+
+PHAT*SS on drums, best of 7, per 10 s of stereo:
+
+- Warmth 5 + TAPE 6: ~920 → ~850 ms (~7 %).
+- TAPE alone: ~280 → ~245 ms (~13 %).
+
+A first prototype that patched the stages from outside measured only 9 % on the round trip.
+A test pins the fold's precondition (every profile's odd-phase taps are symmetric) and the
+equivalence with the plain sum.

@@ -269,3 +269,30 @@ test('the soft clipper reports the latency of whichever profile it was given', a
   // producing a third behaviour.
   assert.equal(new SoftClipperKernel(48000, { oversample: 3 }).latencySamples, 50)
 })
+
+test('the folded convolution: every profile\'s odd-phase taps are symmetric, and folding matches the plain sum', async () => {
+  const mod = await import('../../src/audio/dsp/oversample.js')
+  const profiles = Object.entries(mod).filter(([k, v]) => /OVERSAMPLE/.test(k) && v && typeof v === 'object' && v.stage1H)
+  assert.ok(profiles.length >= 3)
+  for (const [name, prof] of profiles) {
+    const os = new mod.Oversampler(prof)
+    for (const st of [os.stage1, os.stage2, os.stage3].filter(Boolean)) {
+      // The fold's precondition: p1[j] = p1[M−1−j].
+      for (let j = 0; j < st.M; j++) assert.ok(Math.abs(st.p1[j] - st.p1[st.M - 1 - j]) < 1e-15, `${name}: tap ${j}`)
+    }
+    // Round trip against the plain (unfolded) convolution, written out here.
+    const n = 4096
+    const x = new Float64Array(n)
+    let r = 3
+    for (let i = 0; i < n; i++) { r = (r * 16807) % 2147483647; x[i] = (r / 2147483647) * 2 - 1 }
+    const st = os.stage1
+    const up = new Float64Array(2 * n)
+    st.up(x, up, n)
+    for (let i = 64; i < n; i++) {
+      let acc = 0
+      for (let j = 0; j < st.M; j++) acc += st.p1[j] * (i - j >= 0 ? x[i - j] : 0)
+      assert.ok(Math.abs(up[2 * i + 1] - 2 * acc) < 1e-12, `${name}: sample ${i}`)
+      assert.equal(up[2 * i], i - st.halfM >= 0 ? x[i - st.halfM] : 0)
+    }
+  }
+})
