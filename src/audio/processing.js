@@ -60,9 +60,6 @@ import { READOUT_WHOLE_MAX_S, readoutBlocks } from './phatassWarmthReadout.js'
 import {
   chunkCount,
   planChunks,
-  HF_SOFTENER_CHUNK_RUN_IN_S,
-  RESONANCE_CHUNK_RUN_IN_S,
-  SAT_BENCH_CHUNK_RUN_IN_S,
 } from './chunkedApply.js'
 import { RESONANCE_FRAME_SIZE, resonanceHopSamples } from './resonanceParams.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
@@ -853,9 +850,9 @@ async function applyWorkletRegion(
  * region is long enough to split, otherwise — and on any error — through the
  * one-thread worklet render.
  *
- * `chunk` is { renderer, runInS, grid }: the kernel's name in chunkRender.js,
- * the run-in each chunk after the first renders from, and the grid its start
- * must sit on (see chunkedApply.js). Every post-stage must name a `renderer`
+ * `chunk` is { renderer, grid }: the kernel's name in chunkRender.js and the
+ * grid each chunk's start must sit on (see chunkedApply.js). The run-in is
+ * CHUNK_RUN_IN_S for every plugin. Every post-stage must name a `renderer`
  * too, or the region renders on one thread.
  */
 async function applyRegion(segments, start, end, sampleRate, channels, opts) {
@@ -894,7 +891,7 @@ async function applyChunkedRegion(segments, start, end, sampleRate, channels, op
     ...postStages.map(st => ({ renderer: st.renderer, kernelParams: st.kernelParams, options: st.processorOptions })),
   ]
   const input = renderRegionToBuffer(segments, start - preRoll / sampleRate, end + latency / sampleRate, sampleRate, channels)
-  const plan = planChunks(numSamples, preRoll, latency, sampleRate, count, { runInS: chunk.runInS, grid: chunk.grid })
+  const plan = planChunks(numSamples, preRoll, latency, sampleRate, count, { grid: chunk.grid })
   const workers = []
   try {
     const parts = await Promise.all(plan.map((c) => {
@@ -948,9 +945,8 @@ export function applyLA2ARegion(segments, start, end, params, sampleRate, channe
     // Bit-exact against a settled preview at this length — see LA2A_PREROLL_S
     // for the measurements and for why nothing in this kernel latches.
     preRollSamples: Math.round(LA2A_PREROLL_S * sampleRate),
-    // The same length settles a seam: nothing latches, so a chunk's state is a
-    // function of its run-in alone.
-    chunk: { renderer: 'la2a', runInS: LA2A_PREROLL_S },
+    // Nothing latches, so a chunk's state is a function of its run-in alone.
+    chunk: { renderer: 'la2a' },
   })
 }
 
@@ -981,7 +977,7 @@ export async function applyFET1176Region(segments, start, end, params, sampleRat
     preRollSamples: Math.round(FET1176_PREROLL_S * sampleRate),
     // ⚠ The peak restore below must see the STITCHED region, never a chunk:
     // a chunk's peak is not the region's, so it runs after this resolves.
-    chunk: { renderer: 'fet1176', runInS: FET1176_PREROLL_S },
+    chunk: { renderer: 'fet1176' },
   })
   const channelData = []
   for (let ch = 0; ch < buffer.numberOfChannels; ch++) channelData.push(buffer.getChannelData(ch))
@@ -1186,7 +1182,7 @@ export function applySaturationBenchRegion(segments, start, end, params, sampleR
     kernelParams: toSaturationBenchKernelParams({ ...SATURATION_BENCH_DEFAULTS, ...params }),
     latencySamples: SAT_BENCH_LATENCY_SAMPLES,
     preRollSamples: Math.round(SAT_BENCH_PREROLL_S * sampleRate),
-    chunk: { renderer: 'saturationBench', runInS: SAT_BENCH_CHUNK_RUN_IN_S },
+    chunk: { renderer: 'saturationBench' },
   })
 }
 
@@ -1207,7 +1203,6 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
     // of its own. Each post-stage names its kernel for the chunk render.
     chunk: {
       renderer: 'hfSoftener',
-      runInS: HF_SOFTENER_CHUNK_RUN_IN_S,
       grid: resoOn(merged) ? resonanceHopSamples(HF_RESO_FRAME_SIZE) : undefined,
     },
     // The Reso knob above 0: a band-limited ResoTame AFTER the softener — see
@@ -1265,8 +1260,7 @@ export function applyPhatassRegion(segments, start, end, params, sampleRate, cha
     kernelParams: toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params }),
     latencySamples: phatassLatencySamples(sampleRate),
     preRollSamples: Math.round(PHATASS_PREROLL_S * sampleRate),
-    // 1 s: CLEAN stitches to float noise, THICK to ~−87 dB (the loop's memory).
-    chunk: { renderer: 'phatass', runInS: 1 },
+    chunk: { renderer: 'phatass' },
   })
 }
 
@@ -1280,7 +1274,7 @@ export function applySchepsRegion(segments, start, end, params, sampleRate, chan
     // Inherits the LA-2A kernel, so it inherits its convergence — see
     // SCHEPS_PREROLL_S. Also bit-exact at this length.
     preRollSamples: Math.round(SCHEPS_PREROLL_S * sampleRate),
-    chunk: { renderer: 'scheps', runInS: SCHEPS_PREROLL_S },
+    chunk: { renderer: 'scheps' },
   })
 }
 
@@ -1476,11 +1470,11 @@ export function applyResonanceRegion(segments, start, end, params, sampleRate, c
     // resonanceProcessor.js. This stage's disagreement is a frame-PHASE error,
     // not a convergence one, and a pre-roll cannot fix it.
     //
-    // ⚠ BUT THE CHUNKS NEED A RUN-IN AND THE HOP GRID, both. Within one apply
-    // the phase IS known — it is the render's own start — so a chunk cut on
-    // the hop grid relative to it agrees with the continuous render; cut on
-    // the 128 grid alone it read −20 dB re the peak for the whole chunk.
-    chunk: { renderer: 'resonance', runInS: RESONANCE_CHUNK_RUN_IN_S, grid: resonanceHopSamples(RESONANCE_FRAME_SIZE) },
+    // ⚠ BUT THE CHUNKS NEED THE HOP GRID. Within one apply the phase IS known —
+    // it is the render's own start — so a chunk cut on the hop grid relative to
+    // it agrees with the continuous render; cut on the 128 grid alone it read
+    // −20 dB re the peak for the whole chunk.
+    chunk: { renderer: 'resonance', grid: resonanceHopSamples(RESONANCE_FRAME_SIZE) },
   })
 }
 

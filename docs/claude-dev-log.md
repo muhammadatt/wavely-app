@@ -7134,3 +7134,58 @@ halves from one value, so they are bit-identical. The loop now runs D + 1 multip
 of 2D + 1. Equal to the plain sum to < 1e-12 (tested). TIGHT stage, best of 7, 30 s stereo:
 406 → 339 ms (−17 %; WARM is 132, so the FIR itself is 274 → 207, −25 %). WARM, the default,
 and the Soften stage do not run the FIR.
+
+### Parallel apply: seams measured on more material; one 6 s run-in (October 2026)
+
+The owner asked what the "small differences" between the parallel and one-thread apply
+actually are, since a click at a seam would make the feature unusable. Measured properly,
+the entry above was wrong on two counts.
+
+**The worklet and the worker kernels render IDENTICALLY.** In Chromium, the worklet render
+against the same chain run continuously on the main thread differed by exactly 0 for all
+seven plugins. The −112 / −132 dB "thread residue" above, put down to denormal flushing on
+the audio thread, was seam residue on that material. The denormal explanation is withdrawn.
+
+**Run-ins tuned on one material were tuned to that material.** The per-plugin run-ins (the
+compressors' and HF Softener's 2 s pre-roll, Saturation Bench 1 s, PHAT*SS 1 s) all
+measured ≤ −140 dB on syllable bursts. Two new materials found residue:
+
+- **Speech with digital-silence gaps.** The HF Softener read −95.1 dBFS, 33 ms after a
+  seam, at 2 s of run-in. It is the base softener; Reso and Soften do not change it. Its
+  trackers settle slowly through silence. 4 s gives −156.5 dBFS; 8 s is exact.
+- **Phrased syllables, no gaps.** Scheps read −113.9 dBFS AT the seam sample, decaying to
+  nothing within 0.5 s. That is the opto cell's slow release. It is not a grid effect:
+  grids of 128 to 4096 samples give the same figure.
+
+Neither residue was a click. Each is a gain-state mismatch that follows the program audio:
+about 0.0005 dB on audio around −10 dBFS, fading over 30–500 ms. The largest jump at a
+seam sample was −113.5 dBFS, about 1/30 of a 16-bit LSB (−90.3 dBFS). Both are still seam
+residue, so they are fixed rather than argued away.
+
+**One run-in for every plugin: `CHUNK_RUN_IN_S` = 6 s.** The test signals now have three
+materials, each in its own file so they run in parallel. They share the `chunkStitch.js`
+harness and measure in ABSOLUTE dBFS. Stitched against continuous, worst over the region:
+
+| Plugin | bursts 2 s / 6 s | gaps 2 s / 6 s | phrased 2 s / 6 s |
+|---|---|---|---|
+| ResoTame | −65.7 / −144.5 | −90.5 / −144.5 | −77.8 / −156.5 |
+| HF Softener (defaults) | −156.5 / exact | −95.1 / exact | −168.6 / exact |
+| HF Softener (Reso + Soften) | −150.5 / exact | −95.1 / exact | −142.2 / exact |
+| Scheps | exact / exact | exact / exact | −113.9 / −168.6 |
+| OptoSmooth PR 70 | exact / exact | exact / exact | −180.6 / exact |
+| PHAT*SS CLEAN | −144.5 / −144.5 | −150.5 / −150.5 | −144.5 / −144.5 |
+| PHAT*SS THICK | −150.5 / exact | −150.5 / exact | −168.6 / −168.6 |
+| Saturation Bench, FET Punch | exact / exact | exact / exact | exact / exact |
+
+The floor is −130 dBFS. Three negative tests pin why the run-in is long: ResoTame on
+bursts, the HF Softener on gaps, and Scheps on phrased all fail the floor at 2 s.
+
+In Chromium on the gaps material, parallel against continuous: every plugin is exact
+except ResoTame (−144.5 dBFS), and no seam shows a step.
+
+The cost is ~7 % on a long region's ~86 s chunks. The whole test suite went from ~170 s
+to ~230 s on 4 cores for the two larger materials.
+
+⚠ The preview/apply PRE-ROLL at a region's start is a separate, older mechanism and is
+unchanged. The HF Softener's 2 s pre-roll has the same −95 dBFS residue there on gapped
+material: equally inaudible, and left alone.

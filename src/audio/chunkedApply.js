@@ -24,8 +24,8 @@
  * pre-roll question asked in the middle of the region: a kernel whose state
  * all decays settles on a run-in as long as its memory, one that latches never
  * does. That is why Tube Saturation is NOT chunked (its skew sign and valley
- * floor depend on history arbitrarily far back), and why `runInS` is per
- * plugin — normally its own pre-roll, which was measured for this.
+ * floor depend on history arbitrarily far back). See CHUNK_RUN_IN_S for why
+ * the run-in is one generous number rather than one per plugin.
  *
  * Pure: no worker, no DOM, no kernel — the plan; the per-chunk render is
  * chunkRender.js (the worker's), kept apart so the main thread does not load
@@ -34,31 +34,30 @@
 
 /** The render block (the worklet quantum, and every process…Buffer's). */
 export const RENDER_BLOCK = 128
-/** Run-in before each chunk after the first when a plugin names none, seconds. */
-export const DEFAULT_RUN_IN_S = 1
 /** Below this a chunk is not worth a worker of its own, seconds. */
 export const MIN_CHUNK_S = 15
 /** Most workers one apply uses. */
 export const MAX_CHUNK_WORKERS = 8
 
-// Run-ins for the plugins whose own pre-roll is not the right number. The
-// compressors (OptoSmooth, Scheps, FET Punch) use their pre-roll as it stands,
-// and so does the HF Softener; PHAT*SS uses DEFAULT_RUN_IN_S.
 /**
- * ResoTame has no pre-roll (its preview gap is grid phase, not memory), but
- * between two chunks of ONE render it does have memory, and a long one: seams
- * on the test material read −38 / −67 / −92 / −119 / −141 dB re the peak at 1 /
- * 2 / 3 / 4 / 6 s of run-in (on its hop grid). 6 s costs a 15 s chunk 40 % more
- * render and a long region's ~86 s chunks 7 %.
+ * Run-in before each chunk after the first, seconds of the real audio before
+ * it — ONE number for every chunked plugin, deliberately.
+ *
+ * ⚠ HOW LONG A KERNEL'S STATE TAKES TO SETTLE DEPENDS ON THE MATERIAL, so a
+ * run-in tuned per plugin on one test signal is tuned to that signal. The
+ * first cut used each plugin's pre-roll (2 s) and measured ≤ −140 dB on
+ * syllable bursts; then speech with digital-silence gaps left the HF Softener
+ * −95 dBFS off 33 ms after a seam (its trackers settle slowly through silence),
+ * and phrased speech left Scheps −115 dBFS off AT the seam (the opto cell's slow
+ * release). Neither was a click — a gain mismatch of ~0.0005 dB, gone within
+ * 0.5 s, under a 16-bit LSB — but both were seam residue. At 6 s every plugin
+ * on every material in test/dsp/chunkedApply*.test.js stitches to ≤ −140 dBFS
+ * or exactly; ResoTame needed 6 s even on the easiest material.
+ *
+ * Costs a long region's ~86 s chunks ~7 % more render; a 30 s region (two
+ * 15 s chunks) still finishes well ahead of one thread.
  */
-export const RESONANCE_CHUNK_RUN_IN_S = 6
-/** Saturation Bench's 0.5 s pre-roll, rounded up: exact at 1 s on the factory layers. */
-export const SAT_BENCH_CHUNK_RUN_IN_S = 1
-/**
- * The HF Softener's own 2 s pre-roll: −150 dB at 2 s, exact from 4 s (−67 dB at
- * 1 s — the lisp guard's 500 ms hold).
- */
-export const HF_SOFTENER_CHUNK_RUN_IN_S = 2
+export const CHUNK_RUN_IN_S = 6
 
 /** How many chunks for a region of `numSamples`, given `cores` available. */
 export function chunkCount(numSamples, sampleRate, cores) {
@@ -78,7 +77,7 @@ export function chunkCount(numSamples, sampleRate, cores) {
  * The first chunk starts where the continuous render does, so its output is
  * that render's exactly.
  */
-export function planChunks(numSamples, preRoll, latency, sampleRate, count, { runInS = DEFAULT_RUN_IN_S, grid = RENDER_BLOCK } = {}) {
+export function planChunks(numSamples, preRoll, latency, sampleRate, count, { runInS = CHUNK_RUN_IN_S, grid = RENDER_BLOCK } = {}) {
   if (!(grid > 0) || grid % RENDER_BLOCK !== 0) {
     throw new Error(`chunk grid must be a multiple of ${RENDER_BLOCK}, got ${grid}`)
   }
