@@ -113,6 +113,7 @@ import {
   DEFAULT_RESONANCE_ZONES,
   buildResonanceZoneCurves,
   resonanceDisplayRange,
+  resonanceHopSamples,
 } from './resonanceParams.js'
 import { buildResonanceFocusCurves } from './resonanceFocus.js'
 
@@ -140,9 +141,6 @@ const FFT_SIZE = 2048
  * and cost latency it cannot afford.
  */
 const SUPPORTED_FRAME_SIZES = [256, 512, 1024, 2048]
-
-/** Hop is structurally a quarter of the frame — see SUPPORTED_FRAME_SIZES. */
-const HOP_DIVISOR = 4
 
 /**
  * Resolve a requested frame to one this kernel can actually run.
@@ -596,7 +594,7 @@ export class ResonanceKernel {
     this.sampleRate = sampleRate
     const frameSize = resolveResonanceFrameSize(options.frameSize)
     this.frameSize = frameSize
-    this.hopSize = frameSize / HOP_DIVISOR
+    this.hopSize = resonanceHopSamples(frameSize)
     this.spectrumRefDb = spectrumRefDb(frameSize)
     this.binCount = (frameSize >>> 1) + 1
     this.binWidth = sampleRate / frameSize

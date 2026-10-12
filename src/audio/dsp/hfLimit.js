@@ -332,6 +332,11 @@ export class ShelfLimiterStage {
     this.releaseCoeff = coeff(releaseMs)
     this.warm = shape === 'warm'
     this.taps = splitTaps(this.sampleRate, cornerHz)
+    // FOLDED: the split is zero-phase, so taps[D − k] = taps[D + k] (exactly —
+    // splitTaps writes both from one value) and each pair of history samples is
+    // added before the multiply, as the oversampler's halfband does. `tapsHalf`
+    // is taps[D..2D]; the TIGHT loop below runs D + 1 multiplies, not 2D + 1.
+    this.tapsHalf = this.taps.subarray(this.D)
     const lp = onePoleLowpass(this.sampleRate, cornerHz)
     this.lpB0 = lp.b0
     this.lpA1 = lp.a1
@@ -364,7 +369,7 @@ export class ShelfLimiterStage {
   process(bufs, n) {
     const nCh = bufs.length
     this.ensureChannels(nCh)
-    const taps = this.taps
+    const half = this.tapsHalf
     const D = this.D
     const len = 2 * D + 1
     const T = this.thresholdLin
@@ -401,8 +406,8 @@ export class ShelfLimiterStage {
         this.lpX1[ch] = xc
         this.lpY1[ch] = lp > -ERROR_FLOOR && lp < ERROR_FLOOR ? 0 : lp
         if (!warm) {
-          lp = 0
-          for (let k = 0; k < len; k++) lp += taps[k] * hist[o + k]
+          lp = half[0] * xc
+          for (let k = 1; k <= D; k++) lp += half[k] * (hist[o + D + k] + hist[o + D - k])
         }
         const h = xc - lp
         this.band[ch][0] = xc

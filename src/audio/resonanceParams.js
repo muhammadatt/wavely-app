@@ -19,6 +19,15 @@ import { copyFocus } from './resonanceFocus.js'
 export const RESONANCE_FRAME_SIZE = 2048
 
 /**
+ * The STFT hop for a frame: always a quarter of it (the kernel's overlap-add is
+ * built around 4x overlap). The kernel reads its hop from here, so the parallel
+ * apply's chunk grid (processing.js) is the same number by construction.
+ */
+export function resonanceHopSamples(frameSize) {
+  return frameSize / 4
+}
+
+/**
  * The pitch range the harmonic-protection mask searches for, in Hz.
  *
  * FIXED, AND THE SWITCH THAT USED TO SET IT IS GONE. It offered VOICE
