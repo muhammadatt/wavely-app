@@ -7056,3 +7056,81 @@ of a Warmth 5 / TAPE 6 stereo render.
 
 Not adopted. On the bright clip at Warmth 10, 2x leaves aliasing at −61 dB re the signal,
 in the sibilance band where the oversampler exists to keep grit out. That is an ear call.
+
+### Parallel apply for six more plugins, and the HF Limiter's TIGHT fold (October 2026)
+
+The owner asked which other plugins should get PHAT*SS's two performance changes. The
+halfband fold was already everywhere it applies: it lives in the shared `HalfbandStage`, so
+every `Oversampler` user had it. The other symmetric FIR in the client is the HF Limiter's
+TIGHT split. Chunked apply was assessed per plugin, by cost and by whether chunks stitch.
+
+**Cost before chunking** (node, per 10 s of stereo, realistic settings): Tube Saturation
+988 ms, ResoTame 886, Saturation Bench (factory layers) 562, Scheps 351, OptoSmooth 312,
+HF Softener 291, Soft Clipper 255, FET Punch 232. Inflator, Manual EQ, HF Limiter, Air Band
+and Hum Notch are 3–181 ms and were left alone.
+
+**The planner and the worker render are shared now.** `phatassChunks.js` became
+`chunkedApply.js` with a per-plugin `runInS` and `grid`. `phatassChunkRender.js` became
+`chunkRender.js`, which renders a chain of stages so the HF Softener's Reso and Soften come
+along. The worker op is `renderChunk`. `applyRegion` in processing.js dispatches: chunked
+when the plugin passes `chunk` and the region makes ≥ 2 chunks, otherwise and on any error
+the worklet render. Pre-roll and latency come from the same helpers on both paths.
+
+⚠ **A chunk must end on a whole 128-sample block.** The HF Softener read −101.4 dB re peak
+over the LAST second of every chunk, flat from 2 s to 8 s of run-in. It resolves something
+per block, and a chunk's last block was short where the continuous render's was full. `to`
+is now rounded up to a block, capped at the render's own end. After that it reads −149.9 dB
+at 2 s and exact from 4 s. PHAT*SS was unaffected by the rounding: −142 / −148 dB with or
+without it.
+
+⚠ **ResoTame needs its hop grid AND a long run-in.** On the 128 grid alone a chunk reads
+−20 dB re peak for its whole length; that is the STFT frame phase. Within one apply the phase
+IS known (it is the render's own start), so cutting on the 512-sample hop fixes it. It also
+has real memory between chunks. Seams on the test material vs run-in:
+
+| Run-in | 1 s | 2 s | 3 s | 4 s | 6 s | 8 s |
+|---|---|---|---|---|---|---|
+| Seam, dB re peak | −37.8 | −66.5 | −91.5 | −119.2 | −140.6 | −146.6 |
+
+6 s ships. `resonanceHopSamples` moved to resonanceParams.js and the kernel reads its hop
+from it, so the grid and the kernel cannot disagree.
+
+**Stitched vs continuous, node, 48 s of stereo** (`test/dsp/chunkedApply.test.js`):
+
+| Plugin | Seam, dB re peak |
+|---|---|
+| Saturation Bench, Scheps, OptoSmooth, FET Punch | exact |
+| HF Softener (defaults / Soften 6 / + Reso) | −149.9 / −148.8 / −148.8 |
+| PHAT*SS CLEAN / THICK | −141.8 / −148.0 |
+| ResoTame | −140.6 |
+
+Run-ins: the compressors and the HF Softener use their pre-roll (2 s), Saturation Bench 1 s,
+ResoTame 6 s, PHAT*SS 1 s.
+
+**In Chromium, 67 s stereo region on 4 cores (3 workers), one thread → parallel:**
+
+| Plugin | One thread | Parallel | Max difference re peak |
+|---|---|---|---|
+| ResoTame | 7.1 s | 3.0 s | −150.7 dB |
+| Saturation Bench | 3.9 s | 1.8 s | exact |
+| Scheps | 2.5 s | 1.5 s | −111.9 dB |
+| OptoSmooth | 1.8 s | 1.4 s | −173.2 dB |
+| HF Softener (Soften 6, Reso 50) | 5.4 s | 3.3 s | −132.2 dB |
+| FET Punch | 1.7 s | 0.9 s | exact |
+| PHAT*SS | 6.6 s | 2.8 s | −153.5 dB |
+
+The browser differences are worklet against worker. The node renders of the same chunks are
+exact, so the browser residue is the two threads' arithmetic, not the seams. That is likely
+denormal flushing on the audio thread, but this was not confirmed.
+
+⚠ **Tube Saturation is not chunked.** Its skew sign and valley floor latch on history
+arbitrarily far back (VOCAL_SAT_PREROLL_S). Synthetic material stitched to −112 dB at 4 s of
+run-in, but a seam on real narration could lean the asymmetry the other way. It needs a
+real-material measurement or a serial state hand-over first. The Soft Clipper's shipping
+`fixed` mode stitches exactly but was left out as marginal; its `adaptive` mode reads −8 dB.
+
+**TIGHT fold** (`ShelfLimiterStage`): the split is zero-phase and `splitTaps` writes both
+halves from one value, so they are bit-identical. The loop now runs D + 1 multiplies instead
+of 2D + 1. Equal to the plain sum to < 1e-12 (tested). TIGHT stage, best of 7, 30 s stereo:
+406 → 339 ms (−17 %; WARM is 132, so the FIR itself is 274 → 207, −25 %). WARM, the default,
+and the Soften stage do not run the FIR.

@@ -57,7 +57,14 @@ import {
   toKernelParams as toPhatassKernelParams,
 } from './phatassParams.js'
 import { READOUT_WHOLE_MAX_S, readoutBlocks } from './phatassWarmthReadout.js'
-import { chunkCount, planChunks } from './phatassChunks.js'
+import {
+  chunkCount,
+  planChunks,
+  HF_SOFTENER_CHUNK_RUN_IN_S,
+  RESONANCE_CHUNK_RUN_IN_S,
+  SAT_BENCH_CHUNK_RUN_IN_S,
+} from './chunkedApply.js'
+import { RESONANCE_FRAME_SIZE, resonanceHopSamples } from './resonanceParams.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
@@ -677,6 +684,22 @@ export function computeVoiceProfile(segments, start, end, sampleRate, channels) 
     .then(d => d.profile ?? null)
 }
 
+/** The whole worklet chain's delay: the plugin's own plus every stage's. */
+function chainLatency(latencySamples, stages) {
+  return Math.max(0, Math.round(
+    latencySamples + stages.reduce((sum, st) => sum + (st.latencySamples ?? 0), 0),
+  ))
+}
+
+/**
+ * The pre-roll a render actually gets: what the plugin asks for, clamped to the
+ * audio the timeline has before the region — see PRE-ROLL in applyWorkletRegion.
+ */
+function regionPreRoll(preRollSamples, start, sampleRate) {
+  const wanted = Math.max(0, Math.round(preRollSamples))
+  return Math.min(wanted, Math.max(0, Math.floor(start * sampleRate)))
+}
+
 /**
  * Render a region through an effect's worklet in an OfflineAudioContext.
  *
@@ -707,9 +730,7 @@ async function applyWorkletRegion(
   // to trim. Only the HF Softener's Reso post-stage uses this today — every
   // other caller passes none and renders exactly as before.
   const stages = [...preStages, ...postStages]
-  const latency = Math.max(0, Math.round(
-    latencySamples + stages.reduce((sum, st) => sum + (st.latencySamples ?? 0), 0),
-  ))
+  const latency = chainLatency(latencySamples, stages)
 
   // ── PRE-ROLL ─────────────────────────────────────────────────────────────
   //
@@ -750,8 +771,7 @@ async function applyWorkletRegion(
   // a bounded reference would. ResoTame's error is the STFT grid phase,
   // (regionStart - preRoll) % hop, which the apply path cannot know; a pre-roll
   // that happens to land hop-aligned looks exact and is not.
-  const wantedPreRoll = Math.max(0, Math.round(preRollSamples))
-  const preRoll = Math.min(wantedPreRoll, Math.max(0, Math.floor(start * sampleRate)))
+  const preRoll = regionPreRoll(preRollSamples, start, sampleRate)
   const renderSamples = preRoll + numSamples + latency
 
   // Pull `latency` extra samples of real audio from past the region where the
@@ -829,6 +849,87 @@ async function applyWorkletRegion(
 }
 
 /**
+ * Apply a region: in parallel chunks when the plugin opts in (`chunk`) and the
+ * region is long enough to split, otherwise — and on any error — through the
+ * one-thread worklet render.
+ *
+ * `chunk` is { renderer, runInS, grid }: the kernel's name in chunkRender.js,
+ * the run-in each chunk after the first renders from, and the grid its start
+ * must sit on (see chunkedApply.js). Every post-stage must name a `renderer`
+ * too, or the region renders on one thread.
+ */
+async function applyRegion(segments, start, end, sampleRate, channels, opts) {
+  const { chunk, preStages = [], postStages = [] } = opts
+  const chunkable = chunk && preStages.length === 0 && postStages.every(st => st.renderer)
+  if (chunkable) {
+    const numSamples = Math.ceil((end - start) * sampleRate)
+    const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 1
+    const count = chunkCount(numSamples, sampleRate, cores)
+    if (count > 1) {
+      try {
+        return await applyChunkedRegion(segments, start, end, sampleRate, channels, opts, count)
+      } catch (err) {
+        // Never lose an apply to the fast path: fall back to the one-thread render.
+        console.error(`${opts.processorName}: parallel apply failed, rendering on one thread:`, err)
+      }
+    }
+  }
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, opts)
+}
+
+/**
+ * A region in parallel chunks (chunkedApply.js): the same input the one-thread
+ * render would see, with the same pre-roll and the same latency, cut on the
+ * plugin's grid, each chunk rendered with a run-in of the audio before it in a
+ * worker of its own, then laid end to end. What each plugin stitches to is
+ * pinned in test/dsp/chunkedApply.test.js.
+ */
+async function applyChunkedRegion(segments, start, end, sampleRate, channels, opts, count) {
+  const { kernelParams, latencySamples = 0, preRollSamples = 0, postStages = [], chunk } = opts
+  const numSamples = Math.ceil((end - start) * sampleRate)
+  const latency = chainLatency(latencySamples, postStages)
+  const preRoll = regionPreRoll(preRollSamples, start, sampleRate)
+  const stages = [
+    { renderer: chunk.renderer, kernelParams, options: opts.processorOptions },
+    ...postStages.map(st => ({ renderer: st.renderer, kernelParams: st.kernelParams, options: st.processorOptions })),
+  ]
+  const input = renderRegionToBuffer(segments, start - preRoll / sampleRate, end + latency / sampleRate, sampleRate, channels)
+  const plan = planChunks(numSamples, preRoll, latency, sampleRate, count, { runInS: chunk.runInS, grid: chunk.grid })
+  const workers = []
+  try {
+    const parts = await Promise.all(plan.map((c) => {
+      const data = input.map((src) => {
+        const x = new Float32Array(c.to - c.from)
+        x.set(src.subarray(c.from, Math.min(c.to, src.length)))
+        return x
+      })
+      return new Promise((resolve, reject) => {
+        const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+        workers.push(worker)
+        worker.onmessage = (e) => {
+          if (e.data?.type === 'done') resolve(e.data.channelData)
+          else reject(new Error(e.data?.message ?? 'chunk render failed'))
+        }
+        worker.onerror = reject
+        worker.postMessage(
+          { __id: 0, type: 'renderChunk', channelData: data, sampleRate, params: { stages, latency, skip: c.skip, length: c.length } },
+          data.map(d => d.buffer),
+        )
+      })
+    }))
+    const out = new AudioBuffer({ length: numSamples, numberOfChannels: channels, sampleRate })
+    for (let ch = 0; ch < channels; ch++) {
+      const y = new Float32Array(numSamples)
+      plan.forEach((c, k) => y.set(parts[k][ch], c.start))
+      out.copyToChannel(y, ch)
+    }
+    return out
+  } finally {
+    for (const w of workers) w.terminate()
+  }
+}
+
+/**
  * Apply OptoSmooth (LA-2A) compression to a region.
  *
  * ⚠ THE LATENCY IS PER-PATCH, NOT A CONSTANT — lookahead adds its own delay on
@@ -839,7 +940,7 @@ async function applyWorkletRegion(
  */
 export function applyLA2ARegion(segments, start, end, params, sampleRate, channels) {
   const merged = { ...LA2A_DEFAULTS, ...params }
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+  return applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureLA2AWorklet,
     processorName: 'la2a-processor',
     kernelParams: toKernelParams(merged),
@@ -847,6 +948,9 @@ export function applyLA2ARegion(segments, start, end, params, sampleRate, channe
     // Bit-exact against a settled preview at this length — see LA2A_PREROLL_S
     // for the measurements and for why nothing in this kernel latches.
     preRollSamples: Math.round(LA2A_PREROLL_S * sampleRate),
+    // The same length settles a seam: nothing latches, so a chunk's state is a
+    // function of its run-in alone.
+    chunk: { renderer: 'la2a', runInS: LA2A_PREROLL_S },
   })
 }
 
@@ -868,13 +972,16 @@ export function applyLA2ARegion(segments, start, end, params, sampleRate, channe
  */
 export async function applyFET1176Region(segments, start, end, params, sampleRate, channels) {
   const kernelParams = toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params })
-  const buffer = await applyWorkletRegion(segments, start, end, sampleRate, channels, {
+  const buffer = await applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureFET1176Worklet,
     processorName: 'fet1176-processor',
     kernelParams,
     latencySamples: FET1176_LATENCY_SAMPLES,
     // Convergent at this length once the tail came off — see FET1176_PREROLL_S.
     preRollSamples: Math.round(FET1176_PREROLL_S * sampleRate),
+    // ⚠ The peak restore below must see the STITCHED region, never a chunk:
+    // a chunk's peak is not the region's, so it runs after this resolves.
+    chunk: { renderer: 'fet1176', runInS: FET1176_PREROLL_S },
   })
   const channelData = []
   for (let ch = 0; ch < buffer.numberOfChannels; ch++) channelData.push(buffer.getChannelData(ch))
@@ -1073,12 +1180,13 @@ export function applyAirBandRegion(segments, start, end, params, sampleRate, cha
  * detector and the band filters.
  */
 export function applySaturationBenchRegion(segments, start, end, params, sampleRate, channels) {
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+  return applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureSaturationBenchWorklet,
     processorName: 'saturation-bench-processor',
     kernelParams: toSaturationBenchKernelParams({ ...SATURATION_BENCH_DEFAULTS, ...params }),
     latencySamples: SAT_BENCH_LATENCY_SAMPLES,
     preRollSamples: Math.round(SAT_BENCH_PREROLL_S * sampleRate),
+    chunk: { renderer: 'saturationBench', runInS: SAT_BENCH_CHUNK_RUN_IN_S },
   })
 }
 
@@ -1089,11 +1197,19 @@ export function applySaturationBenchRegion(segments, start, end, params, sampleR
  */
 export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, channels) {
   const merged = { ...HF_SOFTENER_DEFAULTS, ...params }
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+  return applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureHFSoftenerWorklet,
     processorName: 'hf-softener-processor',
     kernelParams: toHFSoftenerKernelParams(merged),
     preRollSamples: Math.round(HF_SOFTENER_PREROLL_S * sampleRate),
+    // The softener is zero-latency, so Reso's STFT is anchored where the render
+    // starts and its hop (128 at a 512 frame) is the grid; Soften has no grid
+    // of its own. Each post-stage names its kernel for the chunk render.
+    chunk: {
+      renderer: 'hfSoftener',
+      runInS: HF_SOFTENER_CHUNK_RUN_IN_S,
+      grid: resoOn(merged) ? resonanceHopSamples(HF_RESO_FRAME_SIZE) : undefined,
+    },
     // The Reso knob above 0: a band-limited ResoTame AFTER the softener — see
     // hfSoftenerResoStage.js. Its 512-sample latency is trimmed with the rest.
     // ⚠ Like ResoTame itself, its STFT grid phase at the region start cannot
@@ -1103,6 +1219,7 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
       ...(resoOn(merged) ? [{
         ensureWorklet: ensureResonanceWorklet,
         processorName: 'resonance-processor',
+        renderer: 'resonance',
         kernelParams: resoKernelParams(merged),
         processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
         latencySamples: HF_RESO_LATENCY_SAMPLES,
@@ -1114,6 +1231,7 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
       ...(softenOn(merged) ? [{
         ensureWorklet: ensureHFLimiterWorklet,
         processorName: 'hf-limiter-processor',
+        renderer: 'hfLimiter',
         kernelParams: softenStageKernelParams(merged),
         latencySamples: softenLatencySamples(sampleRate),
       }] : []),
@@ -1140,78 +1258,21 @@ export function applyHFLimiterRegion(segments, start, end, params, sampleRate, c
  * a delay of its own length when idle), and a pre-roll so the shelf's release
  * starts where a playing preview's would be.
  */
-export async function applyPhatassRegion(segments, start, end, params, sampleRate, channels) {
-  const kernelParams = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
-  const numSamples = Math.ceil((end - start) * sampleRate)
-  const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 1
-  const count = chunkCount(numSamples, sampleRate, cores)
-  if (count > 1) {
-    try {
-      return await applyPhatassRegionChunked(segments, start, end, kernelParams, sampleRate, channels, count)
-    } catch (err) {
-      // Never lose an apply to the fast path: fall back to the one-thread render.
-      console.error('PHAT*SS parallel apply failed, rendering on one thread:', err)
-    }
-  }
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+export function applyPhatassRegion(segments, start, end, params, sampleRate, channels) {
+  return applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensurePhatassWorklet,
     processorName: 'phatass-processor',
-    kernelParams,
+    kernelParams: toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params }),
     latencySamples: phatassLatencySamples(sampleRate),
     preRollSamples: Math.round(PHATASS_PREROLL_S * sampleRate),
+    // 1 s: CLEAN stitches to float noise, THICK to ~−87 dB (the loop's memory).
+    chunk: { renderer: 'phatass', runInS: 1 },
   })
-}
-
-/**
- * PHAT*SS apply in parallel chunks (phatassChunks.js): the same input the
- * one-thread render would see, cut on its block grid, each chunk rendered with
- * a run-in of the audio before it in a worker of its own, then laid end to end.
- * Matches the one-thread render to float noise with CLEAN and to ~−87 dB with
- * THICK (see phatassChunks.js).
- */
-async function applyPhatassRegionChunked(segments, start, end, kernelParams, sampleRate, channels, count) {
-  const numSamples = Math.ceil((end - start) * sampleRate)
-  const latency = phatassLatencySamples(sampleRate)
-  const preRoll = Math.min(Math.round(PHATASS_PREROLL_S * sampleRate), Math.max(0, Math.floor(start * sampleRate)))
-  const input = renderRegionToBuffer(segments, start - preRoll / sampleRate, end + latency / sampleRate, sampleRate, channels)
-  const plan = planChunks(numSamples, preRoll, latency, sampleRate, count)
-  const workers = []
-  try {
-    const parts = await Promise.all(plan.map((c) => {
-      const data = input.map((src) => {
-        const x = new Float32Array(c.to - c.from)
-        x.set(src.subarray(c.from, Math.min(c.to, src.length)))
-        return x
-      })
-      return new Promise((resolve, reject) => {
-        const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
-        workers.push(worker)
-        worker.onmessage = (e) => {
-          if (e.data?.type === 'done') resolve(e.data.channelData)
-          else reject(new Error(e.data?.message ?? 'chunk render failed'))
-        }
-        worker.onerror = reject
-        worker.postMessage(
-          { __id: 0, type: 'phatassRenderChunk', channelData: data, sampleRate, params: { kernelParams, skip: c.skip, length: c.length } },
-          data.map(d => d.buffer),
-        )
-      })
-    }))
-    const out = new AudioBuffer({ length: numSamples, numberOfChannels: channels, sampleRate })
-    for (let ch = 0; ch < channels; ch++) {
-      const y = new Float32Array(numSamples)
-      plan.forEach((c, k) => y.set(parts[k][ch], c.start))
-      out.copyToChannel(y, ch)
-    }
-    return out
-  } finally {
-    for (const w of workers) w.terminate()
-  }
 }
 
 /** Apply Scheps Parallel to a region. */
 export function applySchepsRegion(segments, start, end, params, sampleRate, channels) {
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+  return applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureSchepsWorklet,
     processorName: 'scheps-processor',
     kernelParams: toSchepsKernelParams({ ...SCHEPS_DEFAULTS, ...params }),
@@ -1219,6 +1280,7 @@ export function applySchepsRegion(segments, start, end, params, sampleRate, chan
     // Inherits the LA-2A kernel, so it inherits its convergence — see
     // SCHEPS_PREROLL_S. Also bit-exact at this length.
     preRollSamples: Math.round(SCHEPS_PREROLL_S * sampleRate),
+    chunk: { renderer: 'scheps', runInS: SCHEPS_PREROLL_S },
   })
 }
 
@@ -1405,7 +1467,7 @@ export function analyzeHumRegion(segments, start, end, sampleRate, channels, opt
  * long and trims. The two compressors do the same for their oversamplers.
  */
 export function applyResonanceRegion(segments, start, end, params, sampleRate, channels) {
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+  return applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureResonanceWorklet,
     processorName: 'resonance-processor',
     kernelParams: toResonanceKernelParams({ ...RESONANCE_DEFAULTS, ...params }),
@@ -1413,6 +1475,12 @@ export function applyResonanceRegion(segments, start, end, params, sampleRate, c
     // ⚠ NO PRE-ROLL, DELIBERATELY — see the note on StftProcessor's use in
     // resonanceProcessor.js. This stage's disagreement is a frame-PHASE error,
     // not a convergence one, and a pre-roll cannot fix it.
+    //
+    // ⚠ BUT THE CHUNKS NEED A RUN-IN AND THE HOP GRID, both. Within one apply
+    // the phase IS known — it is the render's own start — so a chunk cut on
+    // the hop grid relative to it agrees with the continuous render; cut on
+    // the 128 grid alone it read −20 dB re the peak for the whole chunk.
+    chunk: { renderer: 'resonance', runInS: RESONANCE_CHUNK_RUN_IN_S, grid: resonanceHopSamples(RESONANCE_FRAME_SIZE) },
   })
 }
 

@@ -211,18 +211,28 @@ test('the PHAT*SS Warmth readout answers "done", whole and sampled', async () =>
   assert.ok(Array.isArray(sampled.bandsDb))
 })
 
-test('a PHAT*SS apply chunk hands its audio back with "done"', async () => {
+test('an apply chunk hands its audio back with "done"', async () => {
   // ⚠ The parallel apply resolves each chunk on `done` and stitches
   // `channelData` — a reply under another type, or without the audio, fails
   // the whole apply onto the one-thread fallback.
   const { toKernelParams, phatassLatencySamples } = await import('../../src/audio/phatassParams.js')
   const input = tone(1)
   const skip = 4096, length = 8192
-  assert.ok(skip + length + phatassLatencySamples(SR) <= input[0].length)
-  const reply = request('phatassRenderChunk', { channelData: input, params: { kernelParams: toKernelParams({ tape: 3 }), skip, length } })
+  const latency = phatassLatencySamples(SR)
+  assert.ok(skip + length + latency <= input[0].length)
+  const stages = [{ renderer: 'phatass', kernelParams: toKernelParams({ tape: 3 }) }]
+  const reply = request('renderChunk', { channelData: input, params: { stages, latency, skip, length } })
   assert.equal(reply.type, 'done')
   assert.equal(reply.__id, 7, 'the transferring reply must echo the request id')
   assert.equal(reply.channelData.length, 1)
   assert.ok(reply.channelData[0] instanceof Float32Array)
   assert.equal(reply.channelData[0].length, length)
+})
+
+test('an apply chunk for a kernel the worker cannot render answers with an error', () => {
+  const reply = request('renderChunk', {
+    channelData: tone(1), params: { stages: [{ renderer: 'vocalSat', kernelParams: {} }], latency: 0, skip: 0, length: 128 },
+  })
+  assert.equal(reply.type, 'error')
+  assert.match(reply.message, /no chunk renderer/)
 })

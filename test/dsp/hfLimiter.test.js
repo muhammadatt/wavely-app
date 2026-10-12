@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { HFLimiterKernel, processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import { toKernelParams, hfLimiterLatencySamples, HF_LIMITER_DEFAULTS } from '../../src/audio/hfLimiterParams.js'
-import { shelfResponseDb, splitResponse, splitTaps } from '../../src/audio/dsp/hfLimit.js'
+import { ShelfLimiterStage, shelfResponseDb, splitResponse, splitTaps } from '../../src/audio/dsp/hfLimit.js'
 
 const SR = 44100
 
@@ -449,4 +449,33 @@ test('the Tail never lets the gain overshoot the lookahead ceiling', () => {
   const p = peak(y, SR / 4)
   // Both tones sit above TIGHT's transition, so the output IS the band.
   assert.ok(p <= T * 1.0005, `peak ${db(p).toFixed(3)} dBFS over the −30 ceiling`)
+})
+
+test('the TIGHT split\'s taps are exactly symmetric, and the folded FIR is the plain sum', () => {
+  // The fold's precondition: taps[D − k] === taps[D + k] bit for bit.
+  for (const sr of [44100, 48000, 96000]) {
+    for (const hz of [2000, 5000, 12000]) {
+      const taps = splitTaps(sr, hz)
+      const D = (taps.length - 1) / 2
+      for (let k = 1; k <= D; k++) assert.equal(taps[D - k], taps[D + k], `${sr} Hz / ${hz} Hz, tap ±${k}`)
+    }
+  }
+  // And the band the kernel computes is the unfolded convolution's, to float
+  // rounding: h = x[n − D] − Σ taps[k]·x[n − 2D + k].
+  const stage = new ShelfLimiterStage(SR)
+  stage.setParams({ cornerHz: 5000, thresholdLin: 10, floorLin: 0.25, releaseMs: 60, shape: 'tight' })
+  const taps = splitTaps(SR, 5000)
+  const D = (taps.length - 1) / 2
+  const x = noise(4000, 0.5, 7)
+  const one = new Float32Array(1)
+  let worst = 0
+  for (let n = 0; n < x.length; n++) {
+    one[0] = x[n]
+    stage.process([one], 1)
+    if (n < 2 * D) continue
+    let lp = 0
+    for (let k = 0; k <= 2 * D; k++) lp += taps[k] * x[n - 2 * D + k]
+    worst = Math.max(worst, Math.abs(stage.band[0][1] - (x[n - D] - lp)))
+  }
+  assert.ok(worst < 1e-12, `folded vs plain sum: ${worst.toExponential(2)}`)
 })

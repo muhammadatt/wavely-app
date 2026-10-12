@@ -4,7 +4,8 @@
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, loudnessNormalize, adjustVolume, la2aAutoMakeup,
  * fet1176AutoMakeup, softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling,
- * voiceProfile, measureLoudness, hfSoftenerAutoAir, phatassWarmthReadout, phatassTapeMakeup
+ * voiceProfile, measureLoudness, hfSoftenerAutoAir, phatassWarmthReadout, phatassTapeMakeup,
+ * phatassOutputMakeup, renderChunk
  */
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupPlan } from '../audio/fet1176Processor.js'
@@ -16,7 +17,7 @@ import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
 import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
 import { measureTopLossDb, autoAirDb } from '../audio/hfSoftenerAutoAir.js'
 import { measureWarmthReadout, measureWarmthBandsSampled } from '../audio/phatassWarmthReadout.js'
-import { renderPhatassChunk } from '../audio/phatassChunkRender.js'
+import { renderChunk } from '../audio/chunkRender.js'
 import { measureTapeMakeup } from '../audio/phatassTapeMakeup.js'
 import { measureOutputMakeup } from '../audio/phatassOutputMakeup.js'
 
@@ -100,11 +101,11 @@ self.onmessage = function (e) {
     case 'phatassWarmthReadout':
       phatassWarmthReadout(channelData, sampleRate, params)
       break
-    case 'phatassRenderChunk':
-      // One chunk of a parallel PHAT*SS apply (phatassChunks.js); the audio is
+    case 'renderChunk':
+      // One chunk of a parallel apply (chunkedApply.js); the audio is
       // transferred back, not copied.
       try {
-        const out = renderPhatassChunk(channelData, sampleRate, params.kernelParams, params.skip, params.length)
+        const out = renderChunk(channelData, sampleRate, params)
         postDoneTransfer({ channelData: out }, out.map(c => c.buffer))
       } catch (err) {
         postReply({ type: 'error', message: err.message })
