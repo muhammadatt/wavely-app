@@ -74,6 +74,9 @@ const MEASUREMENTS = [
   ['voiceProfile', {}, 'profile'],
   ['measureLoudness', {}, 'loudness'],
   ['hfSoftenerAutoAir', { kernelParams: { amount: 0.4 } }, 'airDb'],
+  ['phatassTapeMakeup', { tape: 4, warmthCeilingDb: -6 }, 'makeupDb'],
+  ['phatassOutputMakeup', { tape: 4, tapeMakeupDb: 2, outputMakeup: 'rms', warmthCeilingDb: -6 }, 'makeupDb'],
+  ['phatassOutputMakeup', { tape: 4, tapeMakeupDb: 2, outputMakeup: 'keep' }, 'makeupDb'],
   [
     'loudnessNormalize',
     { target: { targetDb: -16, unit: 'LUFS', ceilingDb: -1 }, peakMode: 'limit' },
@@ -84,7 +87,7 @@ const MEASUREMENTS = [
 for (const [type, params, key] of MEASUREMENTS) {
   const label = params.reference
     ? `${type} (${params.reference})`
-    : type
+    : params.outputMakeup ? `${type} (${params.outputMakeup})` : type
   test(`${label} answers with type "done"`, () => {
     const reply = request(type, { channelData: tone(), params })
     assert.equal(reply.type, 'done',
@@ -191,4 +194,35 @@ test('a handler that throws answers with an error, not silence', () => {
   const reply = request('la2aAutoMakeup', { channelData: undefined })
   assert.equal(reply.type, 'error')
   assert.ok(reply.message, 'an error reply must say something')
+})
+
+test('the PHAT*SS Warmth readout answers "done", whole and sampled', async () => {
+  const { toKernelParams } = await import('../../src/audio/phatassParams.js')
+  const { warmthLayers, warmthGuard } = toKernelParams({ warmth: 5, warmthCeilingDb: -6, warmthRefPeaksDb: [-14, -14, -14, -14] })
+  const whole = request('phatassWarmthReadout', { channelData: tone(1), params: { layers: warmthLayers, guard: warmthGuard, bands: true, peak: true } })
+  assert.equal(whole.type, 'done')
+  assert.equal(whole.__id, 7)
+  assert.ok(Array.isArray(whole.bandsDb) && Number.isFinite(whole.peakDb))
+  // The sampled path: blocks with their run-in, no top-level channelData.
+  const blocks = [0, 1].map(() => ({ channelData: tone(1.25), skip: Math.round(0.25 * SR) }))
+  const sampled = request('phatassWarmthReadout', { channelData: [], params: { layers: warmthLayers, guard: warmthGuard, blocks } })
+  assert.equal(sampled.type, 'done')
+  assert.equal(sampled.__id, 7)
+  assert.ok(Array.isArray(sampled.bandsDb))
+})
+
+test('a PHAT*SS apply chunk hands its audio back with "done"', async () => {
+  // ⚠ The parallel apply resolves each chunk on `done` and stitches
+  // `channelData` — a reply under another type, or without the audio, fails
+  // the whole apply onto the one-thread fallback.
+  const { toKernelParams, phatassLatencySamples } = await import('../../src/audio/phatassParams.js')
+  const input = tone(1)
+  const skip = 4096, length = 8192
+  assert.ok(skip + length + phatassLatencySamples(SR) <= input[0].length)
+  const reply = request('phatassRenderChunk', { channelData: input, params: { kernelParams: toKernelParams({ tape: 3 }), skip, length } })
+  assert.equal(reply.type, 'done')
+  assert.equal(reply.__id, 7, 'the transferring reply must echo the request id')
+  assert.equal(reply.channelData.length, 1)
+  assert.ok(reply.channelData[0] instanceof Float32Array)
+  assert.equal(reply.channelData[0].length, length)
 })

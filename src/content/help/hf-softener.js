@@ -35,7 +35,7 @@ export default {
     'Thresholds follow the file’s own level, so a setting means the same on a quiet recording and a hot one',
     'If the result sounds a touch dull, a dB or two of Air puts the top back — it is Air Boost’s curve, so there is no need for a separate Air Boost pass',
     'Delta never includes the Air makeup: it plays only what is removed — the Duck, the EQ and Soften together',
-    'REDUCTION under the scope is the total taken off each S, split into DUCK (level), EQ (tone) and RESO (rings)',
+    'REDUCTION under the scope is the total taken off each S, split into DUCK (level), EQ (tone) and SOFT (onsets, while Soften is up)',
     'The lisp guard limits the total of both stages, so Duck and EQ together cannot sink an S further than a normal S sits',
     'Below threshold the shelf sits at exactly 0 dB, so quiet material passes through untouched',
     'A sibilant alone in a gap is treated a little harder than one inside a word — the threshold rises slightly with the surrounding vowel energy',
