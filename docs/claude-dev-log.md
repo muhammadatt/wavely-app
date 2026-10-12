@@ -7011,3 +7011,48 @@ PHAT*SS on drums, best of 7, per 10 s of stereo:
 A first prototype that patched the stages from outside measured only 9 % on the round trip.
 A test pins the fold's precondition (every profile's odd-phase taps are symmetric) and the
 equivalence with the plain sum.
+
+### Warmth's oversampled layers at 2x (October 2026): measured, not changed
+
+The owner asked for the 2x measurement. Slots now take an oversampling profile as well as
+true/false (`layerProfile`; `true` is still the 4x compressor profile, so nothing changes).
+`COMPRESSOR_OVERSAMPLE_2X` is the 4x profile's stage-1 filter alone: 46 samples of latency,
+against 50 for 4x.
+
+Each layer was rendered alone at 1x / 2x / 4x and scored against 8x on what it adds:
+`scripts/phatass-warmth-oversample.mjs`, on two narration clips and dry drums. The error is
+the same at Warmth 5 and 10, because Warmth scales what a layer adds and not its drive. The
+error re the signal is shown at Warmth 10, the worst case.
+
+**Full-band quartic** (fixed layer, drive 0, high shelf −10 dB at 2.4 kHz):
+
+| Material | 1x | 2x | 4x | Worst re signal at 2x |
+|---|---|---|---|---|
+| Bright narration | −32.8 | −36.4 | −46.7 | −69.9 |
+| Narration B | −47.4 | −47.8 | −60.1 | −80.4 |
+| Drums | −35.1 | −49.9 | −59.1 | −72.3 |
+
+(dB re what the layer adds.) Note that 2x is barely better than 1x on narration here.
+
+**3 kHz+ tanh** (fixed layer, drive 27, Amount −6, high shelf −20 dB):
+
+| Material | 1x | 2x | 4x | Worst re signal at 2x |
+|---|---|---|---|---|
+| Bright narration | −17.5 | −37.7 | −60.8 | −60.9 |
+| Narration B | −24.3 | −54.6 | −66.8 | −89.8 |
+| Drums | −15.7 | −41.9 | −56.2 | −74.0 |
+
+**Cost per layer, per 10 s of mono:**
+
+| Rate | Time |
+|---|---|
+| 1x | 22–70 ms |
+| 2x | 76–130 ms |
+| 4x | 115–197 ms |
+| 8x | 193–304 ms |
+
+Moving both layers to 2x saves roughly 40 ms per layer per channel per 10 s, about 15–20 %
+of a Warmth 5 / TAPE 6 stereo render.
+
+Not adopted. On the bright clip at Warmth 10, 2x leaves aliasing at −61 dB re the signal,
+in the sibilance band where the oversampler exists to keep grit out. That is an ear call.

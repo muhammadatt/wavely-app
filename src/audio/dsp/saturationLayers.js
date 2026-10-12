@@ -382,10 +382,17 @@ export class VoicingDetector {
 }
 
 /** One layer's per-channel state. */
+/** A slot's oversampling: true is the 4x compressor profile, false the base rate, or a profile. */
+function layerProfile(oversample) {
+  if (oversample === true) return COMPRESSOR_OVERSAMPLE
+  return oversample && typeof oversample === 'object' ? oversample : null
+}
+
 function makeLayerChannel(oversample) {
-  const latency = oversample ? SAT_BENCH_LAYER_LATENCY : 0
+  const prof = layerProfile(oversample)
+  const latency = prof ? prof.latencySamples : 0
   return {
-    os: oversample ? new Oversampler(COMPRESSOR_OVERSAMPLE) : null,
+    os: prof ? new Oversampler(prof) : null,
     bandIn: new BiquadCascade(4, 1),
     bandOut: new BiquadCascade(4, 1),
     pre: new BiquadCascade(1, 1),
@@ -405,7 +412,8 @@ class Layer {
   constructor(sampleRate, rampSamples, oversample = true) {
     this.sampleRate = sampleRate
     this.oversample = oversample
-    this.latency = oversample ? SAT_BENCH_LAYER_LATENCY : 0
+    const prof = layerProfile(oversample)
+    this.latency = prof ? prof.latencySamples : 0
     this.p = normalizeLayer()
     this.curve = shaperCurve(this.p.curve)
     this.fn = this.curve.f
@@ -599,7 +607,7 @@ export class SaturationBenchKernel {
     this.detector = new VoicingDetector(sampleRate)
     this.layers = Array.from(
       { length: this.slots },
-      (_, k) => new Layer(sampleRate, rampSamples, !(Array.isArray(oversample) && oversample[k] === false)),
+      (_, k) => new Layer(sampleRate, rampSamples, !Array.isArray(oversample) || oversample[k] === true || oversample[k] === undefined ? true : oversample[k]),
     )
     // Each slot's voicing lag: the latency of every slot up to and including it.
     this.lags = []

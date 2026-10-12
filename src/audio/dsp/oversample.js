@@ -329,6 +329,18 @@ export const COMPRESSOR_OVERSAMPLE = buildProfile({
  * same delay, so anything differencing them must align on each profile's own
  * latency rather than assuming they match.
  */
+/**
+ * 2x on the compressor's stage-1 filter: the 4x profile without its second
+ * stage. For a layer whose aliases a 2x rate already keeps out of the band it
+ * passes back (measured per layer before any is moved to it).
+ */
+export const COMPRESSOR_OVERSAMPLE_2X = buildProfile({
+  name: 'compressor2x',
+  factor: 2,
+  stage1Taps: 93,
+  stage1Beta: 9.5,
+})
+
 export const COMPRESSOR_OVERSAMPLE_8X = buildProfile({
   name: 'compressor8x',
   factor: 8,
