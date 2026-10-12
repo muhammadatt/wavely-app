@@ -16,6 +16,7 @@ import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
 import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
 import { measureTopLossDb, autoAirDb } from '../audio/hfSoftenerAutoAir.js'
 import { measureWarmthReadout, measureWarmthBandsSampled } from '../audio/phatassWarmthReadout.js'
+import { renderPhatassChunk } from '../audio/phatassChunkRender.js'
 import { measureTapeMakeup } from '../audio/phatassTapeMakeup.js'
 import { measureOutputMakeup } from '../audio/phatassOutputMakeup.js'
 
@@ -98,6 +99,16 @@ self.onmessage = function (e) {
       break
     case 'phatassWarmthReadout':
       phatassWarmthReadout(channelData, sampleRate, params)
+      break
+    case 'phatassRenderChunk':
+      // One chunk of a parallel PHAT*SS apply (phatassChunks.js); the audio is
+      // transferred back, not copied.
+      try {
+        const out = renderPhatassChunk(channelData, sampleRate, params.kernelParams, params.skip, params.length)
+        postDoneTransfer({ channelData: out }, out.map(c => c.buffer))
+      } catch (err) {
+        postReply({ type: 'error', message: err.message })
+      }
       break
     case 'phatassTapeMakeup':
       try {

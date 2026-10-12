@@ -57,6 +57,7 @@ import {
   toKernelParams as toPhatassKernelParams,
 } from './phatassParams.js'
 import { READOUT_WHOLE_MAX_S, readoutBlocks } from './phatassWarmthReadout.js'
+import { chunkCount, planChunks } from './phatassChunks.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
@@ -1139,14 +1140,73 @@ export function applyHFLimiterRegion(segments, start, end, params, sampleRate, c
  * a delay of its own length when idle), and a pre-roll so the shelf's release
  * starts where a playing preview's would be.
  */
-export function applyPhatassRegion(segments, start, end, params, sampleRate, channels) {
+export async function applyPhatassRegion(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
+  const numSamples = Math.ceil((end - start) * sampleRate)
+  const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 1
+  const count = chunkCount(numSamples, sampleRate, cores)
+  if (count > 1) {
+    try {
+      return await applyPhatassRegionChunked(segments, start, end, kernelParams, sampleRate, channels, count)
+    } catch (err) {
+      // Never lose an apply to the fast path: fall back to the one-thread render.
+      console.error('PHAT*SS parallel apply failed, rendering on one thread:', err)
+    }
+  }
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensurePhatassWorklet,
     processorName: 'phatass-processor',
-    kernelParams: toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params }),
+    kernelParams,
     latencySamples: phatassLatencySamples(sampleRate),
     preRollSamples: Math.round(PHATASS_PREROLL_S * sampleRate),
   })
+}
+
+/**
+ * PHAT*SS apply in parallel chunks (phatassChunks.js): the same input the
+ * one-thread render would see, cut on its block grid, each chunk rendered with
+ * a run-in of the audio before it in a worker of its own, then laid end to end.
+ * Matches the one-thread render to float noise with CLEAN and to ~−87 dB with
+ * THICK (see phatassChunks.js).
+ */
+async function applyPhatassRegionChunked(segments, start, end, kernelParams, sampleRate, channels, count) {
+  const numSamples = Math.ceil((end - start) * sampleRate)
+  const latency = phatassLatencySamples(sampleRate)
+  const preRoll = Math.min(Math.round(PHATASS_PREROLL_S * sampleRate), Math.max(0, Math.floor(start * sampleRate)))
+  const input = renderRegionToBuffer(segments, start - preRoll / sampleRate, end + latency / sampleRate, sampleRate, channels)
+  const plan = planChunks(numSamples, preRoll, latency, sampleRate, count)
+  const workers = []
+  try {
+    const parts = await Promise.all(plan.map((c) => {
+      const data = input.map((src) => {
+        const x = new Float32Array(c.to - c.from)
+        x.set(src.subarray(c.from, Math.min(c.to, src.length)))
+        return x
+      })
+      return new Promise((resolve, reject) => {
+        const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+        workers.push(worker)
+        worker.onmessage = (e) => {
+          if (e.data?.type === 'done') resolve(e.data.channelData)
+          else reject(new Error(e.data?.message ?? 'chunk render failed'))
+        }
+        worker.onerror = reject
+        worker.postMessage(
+          { __id: 0, type: 'phatassRenderChunk', channelData: data, sampleRate, params: { kernelParams, skip: c.skip, length: c.length } },
+          data.map(d => d.buffer),
+        )
+      })
+    }))
+    const out = new AudioBuffer({ length: numSamples, numberOfChannels: channels, sampleRate })
+    for (let ch = 0; ch < channels; ch++) {
+      const y = new Float32Array(numSamples)
+      plan.forEach((c, k) => y.set(parts[k][ch], c.start))
+      out.copyToChannel(y, ch)
+    }
+    return out
+  } finally {
+    for (const w of workers) w.terminate()
+  }
 }
 
 /** Apply Scheps Parallel to a region. */

@@ -6950,3 +6950,41 @@ its ceiling, and its no-overshoot proof holds |out| ≤ that peak. Measured 0.00
 change at Warmth 5 and 10 on the 175 s file. So a long selection reports that bound
 instead of rendering it, which used to cost ~8 s of CPU per 3 min of mono, per knob turn.
 Short selections still measure it.
+
+### Parallel chunked apply (October 2026)
+
+PHAT*SS apply now splits regions of 30 s or more into chunks. They render on
+`hardwareConcurrency − 1` workers, at most 8, with chunks of at least 15 s each
+(`phatassChunks.js` plans, `phatassChunkRender.js` renders in the worker), using the same
+kernel as the preview. A chunk renders from 1 s of the real audio before it, and the
+outputs are laid end to end.
+
+⚠ **THE SEAMS FIRST FAILED, AND MORE RUN-IN DID NOT HELP.** On a 175 s narration + drums
+mix, chunked against continuous renders, the worst seam difference relative to the peak
+was:
+
+| Setting | 0.25 s run-in | 1 s | 2 s |
+|---|---|---|---|
+| Warmth 5 / TAPE 8, CLEAN, 30 ips | −37 dB | −34 | −34 |
+| Warmth 10 / TAPE 12, 7.5 ips | −28 dB | −28 | −27 |
+
+Isolated by stage, Warmth and TAPE were exact (−159 dB and bit-identical). The tape HF
+shelf was off for up to 7 s after a seam. Its corner is recomputed every `COEFF_STRIDE`
+samples counted from the start of each 128-sample block, so a chunk whose render starts off
+the continuous render's block grid updates its corner on different samples for the whole
+chunk.
+
+With every chunk start aligned to the grid and 1 s of run-in:
+
+| Setting | Worst seam difference |
+|---|---|
+| CLEAN | −141 / −147 dB (float noise) |
+| THICK | −87 dB (the loop's memory) |
+
+At 0.25 s of run-in, aligned, the worst was −61 to −67 dB. `test/dsp/phatassChunks.test.js`
+pins the plan's grid and coverage, and the stitched render: under −120 dB with CLEAN, under
+−70 dB with THICK.
+
+**Browser, 175 s stereo, Warmth 6.4 / TAPE 7.7, 4-core container:** apply took 25.7 s on
+one thread (`hardwareConcurrency` forced to 1) and 12.9 s with 3 workers. Any error falls
+back to the one-thread worklet render.
