@@ -266,20 +266,20 @@ const SECOND = 'var(--m-second)'
 
         <div class="eq-strip-chips">
           <ModulaChip
-            :model-value="band.enabled" lamp color="var(--m-ok)"
+            variant="flat" :model-value="band.enabled" :label="band.enabled ? 'ON' : 'OFF'" :color="accent"
             :title="band.enabled ? 'Turn this band off' : 'Turn this band on'"
             :aria-label="`Band ${i + 1} on`"
             @update:model-value="eq.toggleBand(band.id)"
           />
           <ModulaChip
-            :model-value="eq.soloBandId.value === band.id" label="S" :color="SECOND"
+            variant="flat" :model-value="eq.soloBandId.value === band.id" label="S" :color="SECOND"
             :disabled="!band.enabled"
             :title="band.enabled ? 'Hear this band alone' : 'Turn this band on to solo it'"
             :aria-label="`Solo band ${i + 1}`"
             @update:model-value="eq.soloBandId.value === band.id ? eq.clearSolo() : eq.setSolo(band.id)"
           />
           <ModulaChip
-            label="×" danger title="Remove this band" :aria-label="`Remove band ${i + 1}`"
+            variant="flat" label="×" danger title="Remove this band" :aria-label="`Remove band ${i + 1}`"
             @click="eq.removeBand(band.id)"
           />
         </div>
@@ -334,6 +334,6 @@ const SECOND = 'var(--m-second)'
 }
 .eq-strip-shape { width: 56px; }
 .eq-strip-chips { display: flex; gap: 3px; }
-.eq-strip-chips :deep(.m-chip) { padding: 0 6px; }
+.eq-strip-chips :deep(.m-chip) { padding: 0 5px; min-width: 20px; }
 .eq-strip :deep(.m-knob--arc) { gap: 5px; }
 </style>

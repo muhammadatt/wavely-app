@@ -15,6 +15,12 @@ const props = defineProps({
   lamp: { type: Boolean, default: false },
   color: { type: String, default: 'var(--m-accent)' },
   danger: { type: Boolean, default: false },
+  /**
+   * 'raised' (the kit's 3D chip) | 'flat' — a 1 px outline on a faint fill,
+   * lit as a tint of `color` with the label in it. Flat suits a dense row of
+   * per-item buttons, where eight raised strips' worth of shadows read as noise.
+   */
+  variant: { type: String, default: 'raised' },
   disabled: { type: Boolean, default: false },
   title: { type: String, default: '' },
   ariaLabel: { type: String, default: '' },
@@ -29,10 +35,12 @@ function press(e) {
 
 <template>
   <button
-    type="button" class="m-chip m-focusable" :class="{ 'is-on': modelValue === true, 'is-danger': danger }"
+    type="button" class="m-chip m-focusable" :class="[`m-chip--${variant}`, { 'is-on': modelValue === true, 'is-danger': danger }]"
     :disabled="disabled" :title="title || undefined" :aria-label="ariaLabel || undefined"
     :aria-pressed="modelValue === null ? undefined : String(modelValue)"
-    :style="modelValue === true ? { boxShadow: `inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px color-mix(in srgb, ${color} 50%, #000000), 0 4px 8px -4px rgba(0,0,0,.9)` } : null"
+    :style="modelValue !== true ? null : variant === 'flat'
+      ? { color, background: `color-mix(in srgb, ${color} 16%, transparent)`, borderColor: `color-mix(in srgb, ${color} 45%, transparent)` }
+      : { boxShadow: `inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px color-mix(in srgb, ${color} 50%, #000000), 0 4px 8px -4px rgba(0,0,0,.9)` }"
     @click="press"
   >
     <span v-if="lamp" class="m-chip-lamp" :style="modelValue ? { background: color, boxShadow: `0 0 5px ${color}` } : null"></span>
@@ -63,6 +71,14 @@ function press(e) {
 .m-chip.is-danger:hover:not(:disabled) { color: #ff8a7e; }
 .m-chip.is-on { color: var(--m-ink); }
 .m-chip:disabled { opacity: .35; cursor: default; }
+.m-chip--flat {
+  height: 20px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .03);
+  box-shadow: none;
+}
+.m-chip--flat:hover:not(:disabled) { filter: none; background: rgba(255, 255, 255, .07); }
 .m-chip-lamp { width: 6px; height: 6px; border-radius: 50%; background: var(--m-lamp-off); box-shadow: inset 0 1px 1px rgba(0, 0, 0, .7); }
 .m-chip-text { font: 700 9px/1 var(--m-font-ui); letter-spacing: .1em; white-space: nowrap; }
 </style>
