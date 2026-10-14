@@ -426,3 +426,41 @@ test('the extreme corner of the control range is improved, not solved', () => {
   assert.ok(worst > 0.5, `extreme bell deviates by only ${worst.toFixed(2)} dB — `
     + 'better than the 2x profile can do, so this test is measuring something else now')
 })
+
+// ── Input / output trims (the Modula panel's knobs under the meters) ─────────
+
+test('input gain 0 dB is bit-identical to no input stage', async () => {
+  const { processManualEqBuffer } = await import('../../src/audio/eqProcessor.js')
+  const sr = 44100
+  const x = new Float32Array(8192).map((_, i) => 0.3 * Math.sin(2 * Math.PI * 440 * i / sr))
+  const bands = [{ type: 'peaking', frequencyHz: 1000, gainDb: 6, q: 1, enabled: true }]
+  const a = processManualEqBuffer([x], sr, { bands }).channelData?.[0] ?? processManualEqBuffer([x], sr, { bands })[0]
+  const b = processManualEqBuffer([x], sr, { bands, inputGainDb: 0 }).channelData?.[0] ?? processManualEqBuffer([x], sr, { bands, inputGainDb: 0 })[0]
+  assert.deepEqual(a, b)
+})
+
+test('input gain scales what the filters see; with the EQ flat it is a plain gain', async () => {
+  const { processManualEqBuffer } = await import('../../src/audio/eqProcessor.js')
+  const sr = 44100
+  const x = new Float32Array(8192).map((_, i) => 0.2 * Math.sin(2 * Math.PI * 440 * i / sr))
+  const pick = r => r.channelData?.[0] ?? r[0]
+  const flat = pick(processManualEqBuffer([x], sr, { bands: [] }))
+  const up = pick(processManualEqBuffer([x], sr, { bands: [], inputGainDb: 6 }))
+  const g = 10 ** (6 / 20)
+  for (let i = 1000; i < 8000; i += 37) assert.ok(Math.abs(up[i] - g * flat[i]) < 1e-5, `sample ${i}`)
+})
+
+test('a runtime trim change ramps across the next block instead of stepping', async () => {
+  const { ManualEqKernel } = await import('../../src/audio/eqProcessor.js')
+  const k = new ManualEqKernel(44100)
+  k.setParams({ bands: [] })
+  const n = 128
+  const ins = [new Float32Array(n).fill(0.5)]
+  const outs = [new Float32Array(n)]
+  for (let b = 0; b < 40; b++) k.process(ins, outs, n)
+  k.setParams({ outputGainDb: -6 })
+  k.process(ins, outs, n)
+  const o = outs[0]
+  assert.ok(o[0] > o[n - 1] + 0.05, `ramped down within the block: ${o[0]} → ${o[n - 1]}`)
+  assert.ok(Math.abs(o[n - 1] - 0.5 * 10 ** (-6 / 20)) < 1e-3)
+})

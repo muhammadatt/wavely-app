@@ -9,6 +9,7 @@ import FloatingWindow from './FloatingWindow.vue'
 import GeneralView from './eq/GeneralView.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import ModulaButton from '../modula/ModulaButton.vue'
+import ModulaKnob from '../modula/ModulaKnob.vue'
 
 /**
  * The EQ faceplate — a parametric equaliser, on its own.
@@ -24,6 +25,10 @@ const eq = useManualEq()
 const { state } = useEditorState()
 
 const ACCENT = '#e8a33d'
+const METER_H = 214
+const TRIM_MIN_DB = -12
+const TRIM_MAX_DB = 12
+const fmtTrim = v => `${v > 0.05 ? '+' : ''}${(Math.abs(v) < 0.05 ? 0 : v).toFixed(1)} dB`
 
 const presets = usePluginPresets(PARAMETRIC_EQ_PRESET_PLUGIN, {
   read: () => eq.presetParams(),
@@ -78,7 +83,7 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="manual-eq"
     :z="z"
-    :width="800"
+    :width="1040"
     :accent="ACCENT"
     design="modula"
     brand-lead="PARAMETRIC EQ"
@@ -112,18 +117,39 @@ async function applyAndClose() {
       <ModulaButton variant="ghost" size="sm" title="Back to the four neutral bands this opened with" @click="eq.resetBands()">Reset</ModulaButton>
     </div>
 
-    <div class="eq-main">
-      <LevelMeter variant="modula" scale-side="left" :levels="eq.inputLevels.value" label="IN" :height="PLOT_HEIGHT - 26" />
-
-      <div class="eq-plot">
-        <GeneralView
-          :eq="eq" :accent="ACCENT" :sample-rate="sampleRate"
-          :plot-height="PLOT_HEIGHT"
-        />
-      </div>
-
-      <LevelMeter variant="modula" scale-side="right" :levels="eq.outputLevels.value" label="OUT" :height="PLOT_HEIGHT - 26" />
-    </div>
+    <GeneralView
+      :eq="eq" :accent="ACCENT" :sample-rate="sampleRate"
+      :plot-height="PLOT_HEIGHT"
+    >
+      <!-- The meters live on the strip row, pinned to the outside, each with
+           its trim under it: Input ahead of the filters, Output after them. -->
+      <template #left>
+        <LevelMeter variant="modula" scale-side="left" :levels="eq.inputLevels.value" label="IN" :height="METER_H">
+          <template #below>
+            <ModulaKnob
+              variant="trim" :model-value="eq.inputTrim.value" show-value
+              :min="TRIM_MIN_DB" :max="TRIM_MAX_DB" :step="0.1" :default-value="0"
+              :format-value="fmtTrim" aria-label="Input" :disabled="!eq.eqPreview.value"
+              title="Input: gain ahead of the EQ. Double-click to reset"
+              @update:model-value="eq.setInputTrim($event)"
+            />
+          </template>
+        </LevelMeter>
+      </template>
+      <template #right>
+        <LevelMeter variant="modula" scale-side="right" :levels="eq.outputLevels.value" label="OUT" :height="METER_H">
+          <template #below>
+            <ModulaKnob
+              variant="trim" :model-value="eq.outputTrim.value" show-value
+              :min="TRIM_MIN_DB" :max="TRIM_MAX_DB" :step="0.1" :default-value="0"
+              :format-value="fmtTrim" aria-label="Output" :disabled="!eq.eqPreview.value"
+              title="Output: gain after the EQ, for a level-matched A/B against bypass. Double-click to reset"
+              @update:model-value="eq.setOutputTrim($event)"
+            />
+          </template>
+        </LevelMeter>
+      </template>
+    </GeneralView>
   </FloatingWindow>
 </template>
 
@@ -141,14 +167,5 @@ async function applyAndClose() {
   font: 600 9px/1 var(--m-font-mono);
   letter-spacing: .1em;
   color: var(--m-ink-4);
-}
-.eq-main {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-.eq-plot {
-  flex: 1;
-  min-width: 0;
 }
 </style>

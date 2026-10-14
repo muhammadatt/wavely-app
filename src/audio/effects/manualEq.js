@@ -18,6 +18,7 @@ export { EQ_LATENCY_SAMPLES }
 
 export const MANUAL_EQ_DEFAULTS = {
   bands: [],
+  input: 0, // input trim dB, ahead of the filters
   output: 0, // output trim dB, for level-matched A/B
   soloIndex: null,
   soloProbe: null,
@@ -40,6 +41,7 @@ export function toKernelParams(params) {
       q: b.q,
       enabled: b.enabled,
     })),
+    inputGainDb: params.input ?? 0,
     outputGainDb: params.output ?? 0,
     soloIndex: params.soloIndex ?? null,
     // Copied field by field for the same reason the bands are: it arrives as a
@@ -116,8 +118,16 @@ export function createManualEq(audioContext) {
       return params[name]
     },
 
+    // The tap sits ahead of the worklet, where Input is applied, so the IN
+    // meter is offset by Input here: it reads what the filters are fed.
     getInputLevels(channelCount) {
-      return inputTap.getLevels(channelCount)
+      const levels = inputTap.getLevels(channelCount)
+      const g = params.input ?? 0
+      if (!g) return levels
+      return {
+        count: levels.count,
+        channels: levels.channels.map(c => ({ rmsDb: c.rmsDb + g, peakDb: c.peakDb + g })),
+      }
     },
 
     getOutputLevels(channelCount) {

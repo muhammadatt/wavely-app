@@ -210,6 +210,11 @@ const SECOND = 'var(--m-second)'
     />
 
     <!-- ── Band strips ──────────────────────────────────────────────────── -->
+    <!-- Row two: whatever the faceplate pins to its outer edges (the IN and
+         OUT meters) either side of the strips, which take the middle. -->
+    <div class="eq-row2">
+    <div class="eq-row2-side"><slot name="left" /></div>
+    <div class="eq-row2-mid">
     <div v-if="orderedBands.length > 0" class="eq-strips">
       <div
         v-for="(band, i) in orderedBands"
@@ -301,18 +306,29 @@ const SECOND = 'var(--m-second)'
     >
       All {{ eq.maxBands }} bands are in use — remove one to add another.
     </p>
+    </div>
+    <div class="eq-row2-side"><slot name="right" /></div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.eq-strips {
+.eq-row2 {
   margin-top: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.eq-row2-side { flex: none; }
+.eq-row2-mid { flex: 1; min-width: 0; }
+.eq-strips {
   display: flex;
   justify-content: center;
   gap: 8px;
 }
 .eq-strip {
-  width: 76px;
+  /* Wide enough for ON · S · × with a margin either side. */
+  width: 96px;
   flex: none;
   display: flex;
   flex-direction: column;
