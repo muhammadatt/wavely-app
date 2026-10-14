@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useWindows } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { helpFor } from '../../content/help/index.js'
@@ -255,6 +255,19 @@ let resizeStartDelta = 0
 
 const minWidthPx = computed(() => props.minWidth ?? props.width)
 
+// A caller may change its natural width while open (the parametric EQ sizes
+// itself to its band count). Move by the same amount, so a manual widening is
+// kept as an offset rather than snapped away, then re-fit to the viewport.
+// Growing slides the window left as far as it needs to keep its right edge
+// on screen, so a band added near the edge never pushes the strip off it.
+watch(() => props.width, (next, prev) => {
+  const w = Math.max(minWidthPx.value, boxWidth.value + (next - prev))
+  const overflow = pos.value.x + w - (window.innerWidth - 20)
+  if (overflow > 0) pos.value.x = Math.max(16, pos.value.x - overflow)
+  boxWidth.value = clampWidth(w)
+  clampToViewport()
+})
+
 function clampWidth(w) {
   // Leaves the same margin clampToViewport does, so a fully-expanded window
   // still reads as a window rather than a panel welded to the screen edge.
@@ -373,7 +386,12 @@ onMounted(() => {
   // below, which reads it for the first-open case.
   const rememberedSize = getSize(props.windowId)
   if (rememberedSize) {
-    boxWidth.value = clampWidth(rememberedSize.width ?? props.width)
+    // `extra` is how far a drag took the window past its natural width, so a
+    // window whose natural width moves (the EQ follows its band count)
+    // reopens at today's width plus the same widening, not at a stale total.
+    boxWidth.value = clampWidth(rememberedSize.extra != null
+      ? props.width + rememberedSize.extra
+      : rememberedSize.width ?? props.width)
     heightDelta.value = clampHeightDelta(rememberedSize.heightDelta ?? 0)
   }
   emit('update:heightDelta', heightDelta.value)
@@ -499,7 +517,11 @@ function onResizeEnd(e) {
   resizing.value = false
   try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
   clampToViewport()
-  saveSize(props.windowId, { width: boxWidth.value, heightDelta: heightDelta.value })
+  saveSize(props.windowId, {
+    width: boxWidth.value,
+    extra: boxWidth.value - props.width,
+    heightDelta: heightDelta.value,
+  })
 }
 
 /** Back to the size this opened at — the same gesture every knob here resets with. */
@@ -507,7 +529,7 @@ function resetSize() {
   boxWidth.value = props.width
   heightDelta.value = 0
   emit('update:heightDelta', 0)
-  saveSize(props.windowId, { width: boxWidth.value, heightDelta: 0 })
+  saveSize(props.windowId, { width: boxWidth.value, extra: 0, heightDelta: 0 })
 }
 
 // Touching or tabbing into the frame raises it. Without this, two open windows

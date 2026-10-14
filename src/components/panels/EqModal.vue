@@ -64,6 +64,25 @@ const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
 
 const activeBandCount = computed(() => eq.activeBands.value.length)
 
+/*
+ * The window is as wide as its strips need: four (the opening layout) at the
+ * least, growing a strip at a time up to the eight-band limit. The constants
+ * are GeneralView's strip geometry (96 px strips on an 8 px gap) and what sits
+ * around them — the two meter columns, the row's gaps and the body padding —
+ * measured as 1040 px at eight bands.
+ */
+const STRIP_W = 96
+const STRIP_GAP = 8
+const ROW_CHROME_W = 216
+const MIN_STRIPS = 4
+// Four strips alone come to 624 px, under the 660 px at which the footer drops
+// its selection readout; the strips are centred, so the floor costs nothing.
+const MIN_WINDOW_W = 664
+const windowWidth = computed(() => {
+  const n = Math.max(MIN_STRIPS, eq.bands.value.length)
+  return Math.max(MIN_WINDOW_W, ROW_CHROME_W + n * STRIP_W + (n - 1) * STRIP_GAP)
+})
+
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
 }
@@ -83,7 +102,7 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="manual-eq"
     :z="z"
-    :width="1040"
+    :width="windowWidth"
     :accent="ACCENT"
     design="modula"
     brand-lead="PARAMETRIC EQ"
