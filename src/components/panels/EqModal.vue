@@ -145,8 +145,7 @@ async function applyAndClose() {
 .eq-main {
   display: flex;
   align-items: flex-start;
-  /* The meters' readout well is wider than their ladder; this keeps it off the plot. */
-  gap: 20px;
+  gap: 12px;
 }
 .eq-plot {
   flex: 1;

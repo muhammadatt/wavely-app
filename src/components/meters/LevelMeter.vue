@@ -358,6 +358,14 @@ const MODULA_GUTTER = 22
 const SCALE_GAP = 6
 // Everything stacked over and under the ladder is centred on the HOUSING, not
 // on the component, which includes the scale gutter off to one side.
+// The readout well (5ch of 11 px mono plus its padding, 41 px) is wider than
+// the ladder it is centred on (26 px), so it overhangs both sides by ~8 px. The
+// scale gutter already covers the overhang on its own side; this pads the
+// other, so the well never hangs into whatever sits next to the meter.
+const WELL_OVERHANG = 8
+const modulaRoot = computed(() => (modula.value
+  ? { [scaleLeft.value ? 'paddingRight' : 'paddingLeft']: WELL_OVERHANG + 'px' }
+  : null))
 const modulaColumn = computed(() => ({
   width: housingWidth.value + 'px',
   marginLeft: scaleLeft.value ? (MODULA_GUTTER + SCALE_GAP) + 'px' : '0',
@@ -385,7 +393,7 @@ function ariaText(bar) {
   <div
     class="flex"
     :class="isHorizontal ? 'flex-row items-center' : 'flex-col items-start'"
-    :style="{ gap: modula ? '8px' : '7px' }"
+    :style="{ gap: modula ? '8px' : '7px', ...modulaRoot }"
   >
     <!-- Modula: the readout in a well, above the ladder. -->
     <div v-if="modula && showReadout" class="flex justify-center" :style="modulaColumn">
@@ -549,6 +557,12 @@ function ariaText(bar) {
 <style scoped>
 /* The Modula readout: an inset well, fixed at 5ch so a reading changing length never moves the ladder. */
 .lm-well {
+  /* ⚠ NO SHRINK, AND CONTENT-BOX. It sits in a column only as wide as the
+     ladder (26 px), and as a flex item it shrank to it; under the app's global
+     border-box its 5ch also had to hold its own padding. Either alone spilled
+     "-14.5" (37 px) out of the well. Now the 5ch is the text alone. */
+  flex: none;
+  box-sizing: content-box;
   width: 5ch;
   padding: 4px 4px;
   border-radius: 5px;
