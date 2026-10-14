@@ -1,8 +1,9 @@
 <script setup>
 import { computed, ref, onBeforeUnmount } from 'vue'
 import EqPlot from './EqPlot.vue'
-import Knob from '../../knobs/Knob.vue'
 import FilterShapePicker from './FilterShapePicker.vue'
+import ModulaKnob from '../../modula/ModulaKnob.vue'
+import ModulaChip from '../../modula/ModulaChip.vue'
 import {
   PARAM_RANGES, qRangeFor, shapesForBand, quantizeQ,
 } from '../../../audio/eqBands.js'
@@ -119,6 +120,14 @@ function fmtGain(db) {
   return `${db > 0 ? '+' : ''}${db.toFixed(1)}`
 }
 
+/** Typed frequencies accept "2.4k" as well as "2400". */
+function parseHz(raw) {
+  const m = /^\s*([0-9]*[.,]?[0-9]+)\s*(k)?/i.exec(raw)
+  if (!m) return NaN
+  const v = parseFloat(m[1].replace(',', '.'))
+  return m[2] ? v * 1000 : v
+}
+
 function fmtQ(q) {
   return q >= 10 ? String(Math.round(q)) : q.toFixed(1)
 }
@@ -159,8 +168,11 @@ function gainInert(band) {
 function gainLabel(band) {
   if (band.type === 'notch') return 'full cut'
   if (band.type === 'highpass' || band.type === 'lowpass') return 'no gain'
-  return 'gain dB'
+  return 'gain'
 }
+
+/** The kit's second hue: frequency and width are WHERE and HOW WIDE, not how much. */
+const SECOND = 'var(--m-second)'
 </script>
 
 <template>
@@ -174,7 +186,8 @@ function gainLabel(band) {
          This one covers the empty canvas only. The band dots carry their own,
          which the browser prefers over this while the pointer is on one. -->
     <EqPlot
-      title="Click anywhere on the plot to add a band · double-click any knob to type an exact value"
+      design="modula"
+      title="Click anywhere on the plot to add a band · click a value under a knob to type an exact one"
       :bands="eq.bands.value"
       :sample-rate="sampleRate"
       :accent="accent"
@@ -197,48 +210,33 @@ function gainLabel(band) {
     />
 
     <!-- ── Band strips ──────────────────────────────────────────────────── -->
-    <div
-      v-if="orderedBands.length > 0"
-      class="mt-[12px] pt-[12px] flex justify-center gap-x-[8px]"
-      style="border-top:1px solid rgba(255,255,255,.06)"
-    >
+    <div v-if="orderedBands.length > 0" class="eq-strips">
       <div
         v-for="(band, i) in orderedBands"
         :key="band.id"
-        class="flex flex-col items-center w-[64px] shrink-0 rounded-[4px] px-[1px] pb-[4px] transition-colors"
-        :style="{
-          background: hoveredId === band.id ? 'rgba(255,255,255,.045)' : 'transparent',
-          opacity: band.enabled ? 1 : 0.45,
-        }"
+        class="eq-strip"
+        :class="{ 'is-hot': hoveredId === band.id, 'is-off': !band.enabled }"
         @pointerenter="hoveredId = band.id"
         @pointerleave="hoveredId = null"
         @pointerdown="freezeOrder"
       >
-        <span
-          class="mb-[3px]"
-          style="font:600 8px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)"
-        >{{ i + 1 }}</span>
+        <span class="eq-strip-num">{{ i + 1 }}</span>
 
-        <Knob
+        <!-- Gain: the one thing here that is HOW MUCH, so it takes the accent.
+             A notch or pass filter has no gain term — shown, not dimmed. -->
+        <ModulaKnob
+          variant="arc" :size="52" bipolar
           :model-value="gainInert(band) ? 0 : band.gainDb"
           :min="PARAM_RANGES.gainDb[0]" :max="PARAM_RANGES.gainDb[1]" :step="0.1"
-          label=""
-          bipolar
-          :editable="!gainInert(band)"
-          :readonly="gainInert(band)"
-          :accent="accent"
-          :value-font-px="11"
+          :default-value="0" :readonly="gainInert(band)" :editable="!gainInert(band)" show-value
+          :label="gainLabel(band)" :aria-label="`Band ${i + 1} gain`" :color="accent"
           :format-value="gainInert(band) ? () => '—' : fmtGain"
           @update:model-value="eq.setGain(band.id, $event)"
         />
-        <span
-          class="uppercase mt-[4px]"
-          style="font:600 8px/1 'Inter';letter-spacing:.1em"
-          :style="{ color: gainInert(band) ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.45)' }"
-        >{{ gainLabel(band) }}</span>
 
-        <div class="w-full mt-[7px]">
+        <div class="eq-strip-shape">
           <FilterShapePicker
+            design="modula"
             :model-value="band.type"
             :options="shapesForBand(band, eq.bands.value)"
             :accent="accent"
@@ -246,86 +244,52 @@ function gainLabel(band) {
           />
         </div>
 
-        <div class="w-[46px] mt-[7px]">
-          <Knob
-            :model-value="band.frequencyHz"
-            :min="PARAM_RANGES.frequencyHz[0]" :max="PARAM_RANGES.frequencyHz[1]"
-            scale="log"
-            label=""
-            editable
-            :quantize="quantizeHz"
-            :accent="accent"
-            :value-font-px="9"
-            :format-value="fmtHz"
-            @update:model-value="eq.setFrequency(band.id, $event)"
-          />
-        </div>
-        <span
-          class="uppercase mt-[3px]"
-          style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.45)"
-        >freq Hz</span>
+        <ModulaKnob
+          variant="arc" :size="42" scale="log" editable show-value
+          :model-value="band.frequencyHz"
+          :min="PARAM_RANGES.frequencyHz[0]" :max="PARAM_RANGES.frequencyHz[1]"
+          :quantize="quantizeHz" :parse-value="parseHz"
+          label="freq" :aria-label="`Band ${i + 1} frequency`" :color="SECOND"
+          :format-value="v => `${fmtHz(v)} Hz`"
+          @update:model-value="eq.setFrequency(band.id, $event)"
+        />
 
-        <div class="w-[46px] mt-[7px]">
-          <Knob
-            :model-value="band.q"
-            :min="qRangeForBand(band)[0]" :max="qRangeForBand(band)[1]"
-            scale="log"
-            label=""
-            editable
-            :quantize="quantizeQ"
-            :accent="accent"
-            :value-font-px="9"
-            :format-value="fmtQ"
-            @update:model-value="eq.setQ(band.id, $event)"
-          />
-        </div>
-        <span
-          class="uppercase mt-[3px]"
-          style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.45)"
-        >width</span>
+        <ModulaKnob
+          variant="arc" :size="42" scale="log" editable show-value
+          :model-value="band.q"
+          :min="qRangeForBand(band)[0]" :max="qRangeForBand(band)[1]"
+          :quantize="quantizeQ"
+          label="width" :aria-label="`Band ${i + 1} width (Q)`" :color="SECOND"
+          :format-value="v => `Q ${fmtQ(v)}`"
+          @update:model-value="eq.setQ(band.id, $event)"
+        />
 
-        <div class="flex items-center gap-[3px] mt-[7px]">
-          <button
-            type="button"
-            class="px-[5px] py-[3px] rounded-[2px]"
-            style="font:600 8px/1 'Inter';border:1px solid rgba(255,255,255,.12)"
-            :style="{
-              color: band.enabled ? accent : 'rgba(255,255,255,.35)',
-              background: band.enabled
-                ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
-            }"
+        <div class="eq-strip-chips">
+          <ModulaChip
+            :model-value="band.enabled" lamp color="var(--m-ok)"
             :title="band.enabled ? 'Turn this band off' : 'Turn this band on'"
-            @click="eq.toggleBand(band.id)"
-          >{{ band.enabled ? 'ON' : 'OFF' }}</button>
-          <button
-            type="button"
-            class="px-[5px] py-[3px] rounded-[2px]"
-            style="font:600 8px/1 'Inter';border:1px solid rgba(255,255,255,.12)"
-            :style="{
-              color: eq.soloBandId.value === band.id ? accent : 'rgba(255,255,255,.35)',
-              background: eq.soloBandId.value === band.id
-                ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
-              opacity: band.enabled ? 1 : 0.4,
-            }"
+            :aria-label="`Band ${i + 1} on`"
+            @update:model-value="eq.toggleBand(band.id)"
+          />
+          <ModulaChip
+            :model-value="eq.soloBandId.value === band.id" label="S" :color="SECOND"
             :disabled="!band.enabled"
             :title="band.enabled ? 'Hear this band alone' : 'Turn this band on to solo it'"
-            @click="eq.soloBandId.value === band.id ? eq.clearSolo() : eq.setSolo(band.id)"
-          >S</button>
-          <button
-            type="button"
-            class="px-[5px] py-[3px] rounded-[2px]"
-            style="font:600 8px/1 'Inter';border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.35)"
-            title="Remove this band"
+            :aria-label="`Solo band ${i + 1}`"
+            @update:model-value="eq.soloBandId.value === band.id ? eq.clearSolo() : eq.setSolo(band.id)"
+          />
+          <ModulaChip
+            label="×" danger title="Remove this band" :aria-label="`Remove band ${i + 1}`"
             @click="eq.removeBand(band.id)"
-          >×</button>
+          />
         </div>
       </div>
     </div>
 
     <p
       v-else
-      class="mt-[12px] text-center"
-      style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.3)"
+      class="mt-[14px] text-center"
+      style="font:500 10px/1.5 var(--m-font-ui);color:var(--m-ink-4)"
     >
       No bands yet. Click anywhere on the curve to add one.
     </p>
@@ -333,9 +297,43 @@ function gainLabel(band) {
     <p
       v-if="eq.atBandLimit.value"
       class="mt-[8px] text-center"
-      style="font:500 9px/1.4 'Inter';color:rgba(255,190,120,.65)"
+      style="font:600 9px/1.4 var(--m-font-ui);color:var(--m-accent)"
     >
       All {{ eq.maxBands }} bands are in use — remove one to add another.
     </p>
   </div>
 </template>
+
+<style scoped>
+.eq-strips {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+.eq-strip {
+  width: 76px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 4px 9px;
+  border-radius: 12px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+  transition: box-shadow .15s ease, opacity .15s ease;
+}
+.eq-strip.is-hot {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 0 1px color-mix(in srgb, var(--m-accent) 45%, #000);
+}
+.eq-strip.is-off { opacity: .5; }
+.eq-strip-num {
+  font: 600 9px/1 var(--m-font-mono);
+  color: var(--m-ink-4);
+}
+.eq-strip-shape { width: 56px; }
+.eq-strip-chips { display: flex; gap: 3px; }
+.eq-strip-chips :deep(.m-chip) { padding: 0 6px; }
+.eq-strip :deep(.m-knob--arc) { gap: 5px; }
+</style>

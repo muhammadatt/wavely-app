@@ -16,13 +16,15 @@ defineProps({
   modelValue: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
   type: { type: String, default: 'button' },
+  /** 'md' (36 px, the kit's size) | 'sm' (28 px, toolbars). */
+  size: { type: String, default: 'md' },
 })
 const emit = defineEmits(['click', 'update:modelValue'])
 </script>
 
 <template>
   <button
-    :type="type" class="m-btn m-focusable" :class="[`m-btn--${variant}`, { 'is-on': variant === 'toggle' && modelValue }]"
+    :type="type" class="m-btn m-focusable" :class="[`m-btn--${variant}`, `m-btn--${size}`, { 'is-on': variant === 'toggle' && modelValue }]"
     :disabled="disabled" :aria-pressed="variant === 'toggle' ? String(modelValue) : undefined"
     @click="variant === 'toggle' ? emit('update:modelValue', !modelValue) : emit('click', $event)"
   >
@@ -48,6 +50,7 @@ const emit = defineEmits(['click', 'update:modelValue'])
   letter-spacing: .02em;
   transition: filter .15s ease, transform .08s ease, opacity .15s ease;
 }
+.m-btn--sm { height: 28px; padding: 0 12px; font-size: 11px; gap: 6px; }
 .m-btn:hover:not(:disabled) { filter: brightness(1.08); }
 .m-btn:active:not(:disabled) { transform: translateY(1px); }
 .m-btn:disabled { opacity: .4; cursor: default; }

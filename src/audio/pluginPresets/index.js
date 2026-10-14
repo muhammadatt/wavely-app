@@ -11,12 +11,14 @@ import './fetPunch.js'
 import './resoTame.js'
 import './inflator.js'
 import './phatass.js'
+import './parametricEq.js'
 
 import { registerOptoSmoothPresets } from './optoSmooth.js'
 import { registerFetPunchPresets } from './fetPunch.js'
 import { registerResoTamePresets } from './resoTame.js'
 import { registerInflatorPresets } from './inflator.js'
 import { registerPhatassPresets } from './phatass.js'
+import { registerParametricEqPresets } from './parametricEq.js'
 
 export { OPTO_SMOOTH_PRESET_PLUGIN, registerOptoSmoothPresets } from './optoSmooth.js'
 export { FET_PUNCH_PRESET_PLUGIN, registerFetPunchPresets } from './fetPunch.js'
@@ -25,6 +27,7 @@ export {
 } from './resoTame.js'
 export { INFLATOR_PRESET_PLUGIN, registerInflatorPresets } from './inflator.js'
 export { PHATASS_PRESET_PLUGIN, registerPhatassPresets } from './phatass.js'
+export { PARAMETRIC_EQ_PRESET_PLUGIN, registerParametricEqPresets } from './parametricEq.js'
 export * from './store.js'
 
 /**
@@ -39,4 +42,5 @@ export function registerPluginPresets() {
   registerResoTamePresets()
   registerInflatorPresets()
   registerPhatassPresets()
+  registerParametricEqPresets()
 }

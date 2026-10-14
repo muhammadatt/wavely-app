@@ -17,7 +17,7 @@
  * Rotation is −135° … +135° over the travel. Geometry is computed from `size`,
  * so a faceplate can ask for 112 px or 128 px and the ring follows.
  */
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useModulaDrag, DRAG_PROPS } from './useModulaDrag.js'
 import { bipolarOriginPct } from '../knobs/knobGeometry.js'
 import ModulaValueTip from './ModulaValueTip.vue'
@@ -40,6 +40,14 @@ const props = defineProps({
   travelPx: { type: Number, default: null },
   /** LED/tick count around the ring. */
   segments: { type: Number, default: null },
+  /**
+   * Click the printed value to type an exact one (Enter commits, Escape
+   * cancels). The knob's own double-click stays the reset — the kit's
+   * gesture — so typing lives on the number, which is where the eye already is.
+   */
+  editable: { type: Boolean, default: false },
+  /** Parse a typed entry (default: the leading number in it). */
+  parseValue: { type: Function, default: null },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -47,7 +55,7 @@ const DEFAULT_SIZE = { led: 112, ticks: 102, small: 62, arc: 108, trim: 30 }
 const DEFAULT_TRAVEL = { led: 200, ticks: 200, small: 140, arc: 150, trim: 160 }
 const body = computed(() => props.size ?? DEFAULT_SIZE[props.variant])
 
-const { dragging, pct, handlers } = useModulaDrag(
+const { dragging, pct, handlers, setValue } = useModulaDrag(
   props, v => emit('update:modelValue', v),
   { axis: 'y', travelPx: () => props.travelPx ?? DEFAULT_TRAVEL[props.variant] },
 )
@@ -60,6 +68,38 @@ const lit = (f) => {
   return f >= lo && f <= hi
 }
 const text = computed(() => props.formatValue(props.modelValue))
+// ── Type-in ─────────────────────────────────────────────────────────────────
+const editing = ref(false)
+const draft = ref('')
+const inputEl = ref(null)
+async function beginEdit() {
+  if (!props.editable || props.disabled || props.readonly) return
+  draft.value = String(Number(props.modelValue.toFixed(4)))
+  editing.value = true
+  await nextTick()
+  inputEl.value?.focus()
+  inputEl.value?.select()
+}
+function commitEdit() {
+  if (!editing.value) return
+  editing.value = false
+  const raw = String(draft.value).trim()
+  const v = props.parseValue ? props.parseValue(raw) : parseFloat(raw.replace(',', '.'))
+  setValue(v)
+}
+function cancelEdit() { editing.value = false }
+
+// Captions: which line comes first, and what the value line reads.
+const labelFirst = computed(() => props.variant === 'small' || props.variant === 'arc')
+const valueLine = computed(() => {
+  if (props.variant === 'arc') return props.note || props.showValue ? (props.note || text.value) : null
+  return props.showValue ? text.value : null
+})
+const valueClass = computed(() => ({
+  small: 'm-note m-val-small', arc: 'm-note m-val-arc', trim: 'm-note', led: 'm-big-value', ticks: 'm-big-value',
+}[props.variant]))
+const valueEditable = computed(() => props.editable && !props.readonly && !(props.variant === 'arc' && props.note))
+
 const tipOn = computed(() => (props.showTip ?? props.variant !== 'trim') && dragging.value)
 
 // ── LED ring (led) ──────────────────────────────────────────────────────────
@@ -117,7 +157,7 @@ const aria = computed(() => ({
 </script>
 
 <template>
-  <div class="m-knob" :class="[`m-knob--${variant}`, { 'is-disabled': disabled }]">
+  <div class="m-knob" :class="[`m-knob--${variant}`, { 'is-disabled': disabled, 'is-readonly': readonly }]">
     <!-- The trim's index dot, over the knob. -->
     <div v-if="variant === 'trim'" class="m-trim-dot" aria-hidden="true"></div>
 
@@ -200,21 +240,20 @@ const aria = computed(() => ({
     </div>
 
     <!-- Captions ──────────────────────────────────────────────────────────── -->
-    <template v-if="variant === 'small'">
-      <div v-if="label" class="m-caption">{{ label }}</div>
-      <div v-if="showValue" class="m-note" style="font-size:11px">{{ text }}</div>
+    <div v-if="label && labelFirst" class="m-caption" :style="variant === 'arc' ? { color: 'rgba(255,255,255,.55)' } : null">{{ label }}</div>
+    <template v-if="valueLine != null">
+      <input
+        v-if="editing" ref="inputEl" v-model="draft" class="m-val-input" :class="valueClass"
+        :aria-label="`${ariaLabel || label || 'value'}, type a value`"
+        @keydown.enter.prevent="commitEdit" @keydown.esc.prevent.stop="cancelEdit" @blur="commitEdit"
+      >
+      <button
+        v-else-if="valueEditable" type="button" class="m-val-btn" :class="valueClass"
+        :disabled="disabled" title="Click to type a value" @click="beginEdit"
+      >{{ valueLine }}</button>
+      <div v-else :class="valueClass">{{ valueLine }}</div>
     </template>
-    <template v-else-if="variant === 'arc'">
-      <div v-if="label" class="m-caption" style="color:rgba(255,255,255,.55)">{{ label }}</div>
-      <div v-if="note || showValue" class="m-note" style="color:var(--m-ink-4);letter-spacing:.14em">{{ note || text }}</div>
-    </template>
-    <template v-else-if="variant === 'trim'">
-      <div v-if="showValue" class="m-note">{{ text }}</div>
-    </template>
-    <template v-else>
-      <div v-if="showValue" class="m-big-value">{{ text }}</div>
-      <div v-if="label" class="m-caption">{{ label }}</div>
-    </template>
+    <div v-if="label && !labelFirst && variant !== 'trim'" class="m-caption">{{ label }}</div>
   </div>
 </template>
 
@@ -231,7 +270,7 @@ const aria = computed(() => ({
 .m-knob--arc { gap: 7px; }
 .m-knob--trim { gap: 5px; }
 .m-knob.is-disabled { opacity: 0.4; }
-.m-knob.is-disabled :is(.m-cap, .m-arc) { cursor: default; }
+.m-knob:is(.is-disabled, .is-readonly) :is(.m-cap, .m-arc) { cursor: default; }
 
 .m-ring {
   position: relative;
@@ -359,6 +398,30 @@ const aria = computed(() => ({
 }
 
 .m-trim-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--m-ink-4); }
+.m-val-small { font-size: 11px; }
+.m-val-arc { color: var(--m-ink-4); letter-spacing: .14em; }
+.m-val-btn {
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 4px;
+  cursor: text;
+}
+.m-val-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .06); color: var(--m-ink); }
+.m-val-btn:disabled { cursor: default; }
+.m-val-input {
+  width: 7ch;
+  padding: 2px 4px;
+  margin: -2px 0;
+  border: none;
+  outline: none;
+  border-radius: 4px;
+  text-align: center;
+  background: var(--m-well);
+  box-shadow: var(--m-shadow-well), 0 0 0 1px var(--m-second);
+  color: var(--m-ink);
+}
 .m-big-value {
   font: 500 22px/1 var(--m-font-mono);
   color: var(--m-ink);

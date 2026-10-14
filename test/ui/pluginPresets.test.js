@@ -600,3 +600,28 @@ test('FET Punch normalisation keeps the dials on their detents and the ratio on 
   assert.equal(p.scHpf, 0)
   assert.equal(p.mix, 1)
 })
+
+// ── Parametric EQ ────────────────────────────────────────────────────────────
+
+test('parametric EQ: a band set is the same preset in any order, and lights its factory preset', async () => {
+  const { PARAMETRIC_EQ_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { DEFAULT_GENERAL_BANDS } = await import('../../src/audio/eqBands.js')
+  const flat = DEFAULT_GENERAL_BANDS.map(b => ({ ...b, gainDb: 0, enabled: true, id: 'x' }))
+  assert.equal(matchPreset(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: flat }), 'factory:default')
+  assert.equal(matchPreset(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: [...flat].reverse() }), 'factory:default')
+  // Ids are not part of a preset; a moved band is a different one.
+  assert.equal(pickParams(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: flat }).bands[0].id, undefined)
+  assert.equal(matchPreset(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: flat.map((b, i) => (i === 1 ? { ...b, gainDb: 3 } : b)) }), null)
+})
+
+test('parametric EQ: stored bands are clamped and capped at the panel\'s eight', async () => {
+  const { PARAMETRIC_EQ_PRESET_PLUGIN, registerPluginPresets, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const many = Array.from({ length: 12 }, (_, i) => ({ type: 'peaking', frequencyHz: 100 * (i + 1), gainDb: 40, q: 99 }))
+  const { bands } = pickParams(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: many })
+  assert.equal(bands.length, 8)
+  assert.equal(bands[0].gainDb, 18)
+  assert.equal(bands[0].q, 10)
+  assert.equal(pickParams(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: [{ type: 'bogus', frequencyHz: 5 }] }).bands[0].type, 'peaking')
+})

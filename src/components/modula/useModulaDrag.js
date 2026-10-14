@@ -51,8 +51,10 @@ export function useModulaDrag(props, emitValue, { axis = 'y', travelPx = 160 } =
 
   const travel = () => (typeof travelPx === 'function' ? travelPx() : travelPx)
 
+  const inert = () => props.disabled || props.readonly
+
   function onPointerDown(e) {
-    if (props.disabled || e.button > 0) return
+    if (inert() || e.button > 0) return
     e.preventDefault()
     dragging.value = true
     start = axis === 'y' ? e.clientY : e.clientX
@@ -83,13 +85,13 @@ export function useModulaDrag(props, emitValue, { axis = 'y', travelPx = 160 } =
   })
 
   function onWheel(e) {
-    if (props.disabled) return
+    if (inert()) return
     e.preventDefault()
     setPct(pct.value + (e.deltaY < 0 ? 1 : -1) * notch.value * (e.shiftKey ? 1 : 2))
   }
 
   function onKeydown(e) {
-    if (props.disabled) return
+    if (inert()) return
     const big = 0.1
     const map = {
       ArrowUp: notch.value, ArrowRight: notch.value,
@@ -108,8 +110,15 @@ export function useModulaDrag(props, emitValue, { axis = 'y', travelPx = 160 } =
     }
   }
 
+  /** Set a value directly (a typed entry): clamped and quantized like a drag. */
+  function setValue(v) {
+    if (inert() || !Number.isFinite(v)) return
+    const q = quantize(v)
+    if (q !== props.modelValue) emitValue(q)
+  }
+
   function reset() {
-    if (props.disabled || props.defaultValue == null) return
+    if (inert() || props.defaultValue == null) return
     emitValue(quantize(props.defaultValue))
   }
 
@@ -124,7 +133,7 @@ export function useModulaDrag(props, emitValue, { axis = 'y', travelPx = 160 } =
     dblclick: reset,
   }
 
-  return { dragging, pct, handlers, reset, setPct }
+  return { dragging, pct, handlers, reset, setPct, setValue }
 }
 
 /** The shared props every dragged Modula control takes. */
@@ -141,6 +150,12 @@ export const DRAG_PROPS = {
   /** Double-click returns here; null disables the reset. */
   defaultValue: { type: Number, default: null },
   disabled: { type: Boolean, default: false },
+  /**
+   * Shown at full strength but not adjustable: the value is real and worth
+   * reading, there is just nothing to turn (an EQ notch's gain). Unlike
+   * `disabled`, which dims.
+   */
+  readonly: { type: Boolean, default: false },
   formatValue: { type: Function, default: v => String(Math.round(v * 10) / 10) },
   /** Accessible name; falls back to `label`. */
   ariaLabel: { type: String, default: '' },

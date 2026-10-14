@@ -21,6 +21,7 @@ import ModulaPad from './ModulaPad.vue'
 import ModulaSteps from './ModulaSteps.vue'
 import ModulaDetent from './ModulaDetent.vue'
 import ModulaButton from './ModulaButton.vue'
+import ModulaChip from './ModulaChip.vue'
 import ModulaBarMeter from './ModulaBarMeter.vue'
 import ModulaMiniLadder from './ModulaMiniLadder.vue'
 import ModulaVuTube from './ModulaVuTube.vue'
@@ -37,7 +38,7 @@ const v = reactive({
   fin: -6, fout: -12, xover: 400, step: 4, tile: 'spec',
   swA: true, swB: false, mute: false, solo: true, link: true, phase: false, loop: false,
   input: 0, sendA: -10, sendB: -20, output: -3, mixF: 1, tape: 'phat', speed: 'ips15', inTrim: 0, outTrim: 0,
-  pill: true,
+  pill: true, chipOn: true, chipSolo: false, typed: 1200,
 })
 const dbFmt = x => `${x > 0.05 ? '+' : ''}${x.toFixed(1)} dB`
 const fader = x => (x === -Infinity || x <= -80 ? '-∞ dB' : dbFmt(x))
@@ -186,6 +187,15 @@ onUnmounted(() => clearInterval(timer))
           <ModulaButton variant="ghost">Cancel</ModulaButton>
           <ModulaButton v-model="v.loop" variant="toggle">Loop</ModulaButton>
           <ModulaButton variant="primary" disabled>Apply</ModulaButton>
+          <ModulaButton variant="ghost" size="sm">Small</ModulaButton>
+        </div>
+        <h3 style="margin-top:22px">Chips · click-to-type · read-only</h3>
+        <div class="row" style="align-items:center">
+          <ModulaChip v-model="v.chipOn" lamp color="var(--m-ok)" aria-label="On" />
+          <ModulaChip v-model="v.chipSolo" label="S" color="var(--m-second)" />
+          <ModulaChip label="×" danger />
+          <ModulaKnob v-model="v.typed" variant="arc" :size="46" scale="log" :min="20" :max="20000" editable show-value color="var(--m-second)" :format-value="x => `${Math.round(x)} Hz`" label="Freq" />
+          <ModulaKnob :model-value="0" variant="arc" :size="52" bipolar readonly show-value :min="-18" :max="18" :format-value="() => '—'" label="Full cut" />
         </div>
       </section>
 

@@ -2,9 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { useManualEq } from '../../composables/useManualEq.js'
 import { useEditorState } from '../../composables/useEditorState.js'
+import { usePluginPresets } from '../../composables/usePluginPresets.js'
+import { PARAMETRIC_EQ_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import GeneralView from './eq/GeneralView.vue'
+import ModulaLedPill from '../modula/ModulaLedPill.vue'
+import ModulaButton from '../modula/ModulaButton.vue'
 
 /**
  * The EQ faceplate — a parametric equaliser, on its own.
@@ -19,7 +23,12 @@ defineProps({ z: { type: Number, default: 500 } })
 const eq = useManualEq()
 const { state } = useEditorState()
 
-const ACCENT = '#8fd18f'
+const ACCENT = '#e8a33d'
+
+const presets = usePluginPresets(PARAMETRIC_EQ_PRESET_PLUGIN, {
+  read: () => eq.presetParams(),
+  write: p => eq.applyPreset(p),
+})
 
 /**
  * Taller than the 200 px other faceplates use, by what removing the instruction
@@ -69,10 +78,13 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="manual-eq"
     :z="z"
-    :width="720"
+    :width="800"
     :accent="ACCENT"
-    brand-lead="EQ"
-    brand-tail="PARAMETRIC"
+    design="modula"
+    brand-lead="PARAMETRIC EQ"
+    :presets="presets"
+    :presets-disabled="!eq.eqPreview.value"
+    presets-disabled-hint="Turn the EQ on to use presets"
     :engaged="eq.eqPreview.value"
     show-preview
     previewable
@@ -89,47 +101,55 @@ async function applyAndClose() {
     @apply="applyAndClose"
     @close="close"
   >
-    <div class="px-[22px] pt-[18px] pb-[22px]">
-      <div class="flex items-center justify-between mb-[14px] gap-[14px]">
-        <label
-          class="flex items-center gap-[6px] cursor-pointer shrink-0"
-          style="font:600 9px/1 'Inter';letter-spacing:.06em;color:rgba(255,255,255,.4)"
-          title="Draw the live spectrum behind the curve"
-        >
-          <input
-            type="checkbox"
-            :checked="eq.showAnalyzer.value"
-            class="accent-current w-[11px] h-[11px]"
-            @change="eq.showAnalyzer.value = $event.target.checked"
-          >
-          ANALYZER
-        </label>
-        <span
-          v-if="activeBandCount > 0"
-          style="font:600 9px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)"
-        >{{ activeBandCount }} band{{ activeBandCount === 1 ? '' : 's' }} active</span>
+    <div class="eq-toolbar">
+      <ModulaLedPill
+        size="sm" label="ANALYZER" color="var(--m-second)"
+        :model-value="eq.showAnalyzer.value"
+        title="Draw the live spectrum behind the curve"
+        @update:model-value="eq.showAnalyzer.value = $event"
+      />
+      <span class="eq-count">{{ activeBandCount > 0 ? `${activeBandCount} band${activeBandCount === 1 ? '' : 's'} active` : 'flat' }}</span>
+      <ModulaButton variant="ghost" size="sm" title="Back to the four neutral bands this opened with" @click="eq.resetBands()">Reset</ModulaButton>
+    </div>
 
-        <button
-          type="button"
-          class="px-[8px] py-[4px] rounded-[3px]"
-          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4)"
-          title="Back to the four neutral bands this opened with"
-          @click="eq.resetBands()"
-        >RESET</button>
+    <div class="eq-main">
+      <LevelMeter variant="modula" scale-side="left" :levels="eq.inputLevels.value" label="IN" :height="PLOT_HEIGHT - 26" />
+
+      <div class="eq-plot">
+        <GeneralView
+          :eq="eq" :accent="ACCENT" :sample-rate="sampleRate"
+          :plot-height="PLOT_HEIGHT"
+        />
       </div>
 
-      <div class="flex gap-[16px]">
-        <LevelMeter :levels="eq.inputLevels.value" label="IN" :height="PLOT_HEIGHT" />
-
-        <div class="flex-1 min-w-0">
-          <GeneralView
-            :eq="eq" :accent="ACCENT" :sample-rate="sampleRate"
-            :plot-height="PLOT_HEIGHT"
-          />
-        </div>
-
-        <LevelMeter :levels="eq.outputLevels.value" label="OUT" :height="PLOT_HEIGHT" />
-      </div>
+      <LevelMeter variant="modula" scale-side="right" :levels="eq.outputLevels.value" label="OUT" :height="PLOT_HEIGHT - 26" />
     </div>
   </FloatingWindow>
 </template>
+
+<style scoped>
+.eq-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 4px 12px;
+}
+.eq-count {
+  flex: 1;
+  text-align: right;
+  font: 600 9px/1 var(--m-font-mono);
+  letter-spacing: .1em;
+  color: var(--m-ink-4);
+}
+.eq-main {
+  display: flex;
+  align-items: flex-start;
+  /* The meters' readout well is wider than their ladder; this keeps it off the plot. */
+  gap: 20px;
+}
+.eq-plot {
+  flex: 1;
+  min-width: 0;
+}
+</style>
