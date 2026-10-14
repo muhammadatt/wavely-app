@@ -229,7 +229,7 @@ const SECOND = 'var(--m-second)'
           :model-value="gainInert(band) ? 0 : band.gainDb"
           :min="PARAM_RANGES.gainDb[0]" :max="PARAM_RANGES.gainDb[1]" :step="0.1"
           :default-value="0" :readonly="gainInert(band)" :editable="!gainInert(band)" show-value
-          :label="gainLabel(band)" :aria-label="`Band ${i + 1} gain`" :color="accent"
+          :label="gainLabel(band)" :aria-label="`Band ${i + 1} gain`" :color="SECOND"
           :format-value="gainInert(band) ? () => '—' : fmtGain"
           @update:model-value="eq.setGain(band.id, $event)"
         />
@@ -239,7 +239,7 @@ const SECOND = 'var(--m-second)'
             design="modula"
             :model-value="band.type"
             :options="shapesForBand(band, eq.bands.value)"
-            :accent="accent"
+            :accent="SECOND"
             @update:model-value="eq.setType(band.id, $event)"
           />
         </div>
@@ -266,13 +266,13 @@ const SECOND = 'var(--m-second)'
 
         <div class="eq-strip-chips">
           <ModulaChip
-            variant="flat" :model-value="band.enabled" :label="band.enabled ? 'ON' : 'OFF'" :color="accent"
+            variant="flat" :model-value="band.enabled" :label="band.enabled ? 'ON' : 'OFF'" :color="SECOND"
             :title="band.enabled ? 'Turn this band off' : 'Turn this band on'"
             :aria-label="`Band ${i + 1} on`"
             @update:model-value="eq.toggleBand(band.id)"
           />
           <ModulaChip
-            variant="flat" :model-value="eq.soloBandId.value === band.id" label="S" :color="SECOND"
+            variant="flat" :model-value="eq.soloBandId.value === band.id" label="S" color="var(--m-second)"
             :disabled="!band.enabled"
             :title="band.enabled ? 'Hear this band alone' : 'Turn this band on to solo it'"
             :aria-label="`Solo band ${i + 1}`"
@@ -318,7 +318,7 @@ const SECOND = 'var(--m-second)'
   flex-direction: column;
   align-items: center;
   gap: 7px;
-  padding: 7px 4px 9px;
+  padding: 7px 8px 9px;
   border-radius: 12px;
   background: var(--m-panel);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);

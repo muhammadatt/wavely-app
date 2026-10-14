@@ -18,7 +18,7 @@ const props = defineProps({
   /** 'md' (the face's toggles) | 'sm' (30 px, the header). */
   size: { type: String, default: 'md' },
   /** Ring the pill in the lamp's colour when on. */
-  ring: { type: Boolean, default: true },
+  ring: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
   title: { type: String, default: '' },
 })
