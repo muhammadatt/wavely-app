@@ -76,8 +76,16 @@ export function createPhatass(audioContext) {
       return satMeter.readingDb
     },
 
+    // The tap sits ahead of the worklet, where Input is applied, so the IN
+    // meter is offset by Input here: it reads what the plugin is driven with.
     getInputLevels(channelCount) {
-      return inputTap.getLevels(channelCount)
+      const levels = inputTap.getLevels(channelCount)
+      const g = toKernelParams(params).inputGainDb
+      if (!g) return levels
+      return {
+        count: levels.count,
+        channels: levels.channels.map(c => ({ rmsDb: c.rmsDb + g, peakDb: c.peakDb + g })),
+      }
     },
 
     getOutputLevels(channelCount) {

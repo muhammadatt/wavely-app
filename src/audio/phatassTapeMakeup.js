@@ -182,6 +182,13 @@ function fastPeak(channelData, sampleRate, layer) {
  */
 export function measureTapeMakeup(channelData, sampleRate, params, { exact = true } = {}) {
   const p = { ...PHATASS_DEFAULTS, ...params }
+  // TAPE hears the signal after Input, so its makeup restores the DRIVEN peak.
+  const g = Math.pow(10, toKernelParams(p).inputGainDb / 20)
+  if (g !== 1) channelData = channelData.map((c) => {
+    const x = new Float32Array(c.length)
+    for (let i = 0; i < c.length; i++) x[i] = c[i] * g
+    return x
+  })
   const n = channelData[0].length
   const inPk = peakOf(channelData, 0, n)
   if (!(Number(p.tape) > 0) || !(inPk > 0)) {

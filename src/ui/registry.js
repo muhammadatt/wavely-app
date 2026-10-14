@@ -27,6 +27,8 @@ import InflatorWindow from '../components/panels/windows/InflatorWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
 import RemoveSilenceWindow from '../components/panels/windows/RemoveSilenceWindow.vue'
 import SpectrumAnalyzerWindow from '../components/panels/windows/SpectrumAnalyzerWindow.vue'
+import ModulaGalleryWindow from '../components/modula/ModulaGalleryWindow.vue'
+import { DEV_TUNING_PANELS } from '../devFlags.js'
 
 /**
  * The operation registry — the single source of truth for what this app can do.
@@ -527,6 +529,20 @@ export const OPERATIONS = [
     surface: 'window',
     component: SpectrumAnalyzerWindow,
   },
+  // DEV ONLY: every Modula control on one page, for review against the kit
+  // (docs/design/modula). Stubbed out of production builds (vite.config.js).
+  ...(DEV_TUNING_PANELS ? [{
+    id: 'modula-kit',
+    label: 'Modula Kit',
+    desc: 'Developer gallery of the plugin control-surface kit',
+    category: 'effects',
+    group: 'Analysis',
+    icon: 'spectrum',
+    keywords: ['modula', 'kit', 'gallery', 'design', 'components'],
+    requires: 'file',
+    surface: 'window',
+    component: ModulaGalleryWindow,
+  }] : []),
 ]
 
 const OPERATIONS_BY_ID = new Map(OPERATIONS.map(op => [op.id, op]))

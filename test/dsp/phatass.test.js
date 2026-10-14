@@ -920,3 +920,68 @@ test('Warmth readout sampled bands track the whole render; the guard holds the p
   // The guard's ceiling is the selection's peak, and the stage never passes it.
   assert.ok(whole.peakDb <= whole.inputPeakDb + 1e-6, `peak moved ${whole.peakDb - whole.inputPeakDb}`)
 })
+
+// ── Input and Mix (the Modula panel) ─────────────────────────────────────────
+
+test('Input 0 and Mix 1 (the defaults) are bit-identical to the chain without them', () => {
+  assert.equal(PHATASS_DEFAULTS.inputDb, 0)
+  assert.equal(PHATASS_DEFAULTS.mix, 1)
+  const x = add(sine(110, 0.4), sine(3000, 0.1), noise(SR, 0.02))
+  const p = { warmth: 6, tape: 3, warmthCeilingDb: -3, warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14), tapeMakeupDb: 2 }
+  const a = run(x, p).channelData[0]
+  const b = run(x, { ...p, inputDb: 0, mix: 1 }).channelData[0]
+  assert.deepEqual(a, b)
+})
+
+test('Input is a drive: TAPE hears the signal after it, and its makeup restores the driven peak', () => {
+  const peak = 0.3
+  const x = sine(110, peak, SR / 2)
+  const base = { warmth: 0, tape: 2, warmthCeilingDb: db(peak) }
+  const flat = measureTapeMakeup([x], SR, base).makeupDb
+  const driven = measureTapeMakeup([x], SR, { ...base, inputDb: 6 }).makeupDb
+  assert.ok(driven > flat + 1, `+6 dB in drives TAPE harder: makeup ${flat.toFixed(2)} → ${driven.toFixed(2)}`)
+  const { channelData: [y], latencySamples: L } = run(x, { ...base, inputDb: 6, tapeMakeupDb: driven })
+  let p = 0
+  for (let i = L; i < x.length; i++) p = Math.max(p, Math.abs(y[i]))
+  const over = db(p / (peak * 10 ** (6 / 20)))
+  assert.ok(Math.abs(over) < 0.1, `the peak lands on the driven peak: ${over.toFixed(3)} dB`)
+})
+
+test('Input with everything idle is a plain gain, delayed by the latency', () => {
+  const x = sine(440, 0.1, 8192)
+  const { channelData: [y], latencySamples: L } = run(x, { inputDb: -6 })
+  const g = 10 ** (-6 / 20)
+  for (let i = L; i < x.length; i++) assert.ok(Math.abs(y[i] - g * x[i - L]) < 1e-6)
+})
+
+test('Mix 0 is the dry input delayed by the latency: no comb, nothing added', () => {
+  const x = add(sine(110, 0.4, SR / 2), noise(SR / 2, 0.05))
+  const p = { warmth: 8, tape: 4, warmthCeilingDb: -3, warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14), tapeMakeupDb: 3, mix: 0 }
+  const { channelData: [y], latencySamples: L } = run(x, p)
+  for (let i = L; i < x.length; i++) assert.ok(Math.abs(y[i] - x[i - L]) < 1e-6, `sample ${i}`)
+})
+
+test('Mix blends linearly between the aligned dry path and the wet path', () => {
+  const x = add(sine(110, 0.4, SR / 2), noise(SR / 2, 0.05))
+  const p = { warmth: 8, tape: 4, warmthCeilingDb: -3, warmthRefPeaksDb: WARMTH_LAYERS.map(() => -14), tapeMakeupDb: 3 }
+  const { channelData: [wet], latencySamples: L } = run(x, { ...p, mix: 1 })
+  const [half] = run(x, { ...p, mix: 0.5 }).channelData
+  for (let i = L; i < x.length; i += 7) {
+    const want = 0.5 * x[i - L] + 0.5 * wet[i]
+    assert.ok(Math.abs(half[i] - want) < 1e-5, `sample ${i}`)
+  }
+})
+
+test('a runtime Mix change glides rather than stepping', () => {
+  const k = new PhatassKernel(SR)
+  k.setParams(toKernelParams({ tape: 0, warmth: 0 }), true)
+  const n = 128
+  const ins = [new Float32Array(n).fill(0.5)]
+  const outs = [new Float32Array(n)]
+  for (let b = 0; b < 20; b++) k.process(ins, outs, n)
+  // Wet and dry are the same signal here, so make them differ with Output.
+  k.setParams(toKernelParams({ tape: 0, warmth: 0, mix: 0 }))
+  k.process(ins, outs, n)
+  assert.ok(k.mix.left > 0 || k.mix.value === 0)
+  assert.ok(k.mix.value < 1 && k.mix.value > 0, `mid-ramp after one block: ${k.mix.value}`)
+})

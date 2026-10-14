@@ -34,6 +34,7 @@ let ceilingMeasuredFor = null
 // Warmth readout: what the Warmth stage does to the selection's low end, per
 // band, and the peak it leaves (phatassWarmthReadout.js). `bandsDb` /
 // `peakDb` null = not measured; the pending flags say a pass is in flight.
+const WARMTH_READOUT_ON_PANEL = false
 const phWarmthReadout = ref({ bandsDb: null, peakDb: null, inputPeakDb: null, bandsPending: false, peakPending: false })
 let readoutTimer = null
 let readoutSeq = 0
@@ -189,7 +190,7 @@ export function usePhatass() {
     // never give back more than the knob; and a NEW head bump, which sits after
     // the curve and can lift the peak by itself, takes its largest lift off that
     // too (keeping the old makeup under a +9 dB bump raised a 55 Hz peak 5.6 dB).
-    if ((name === 'tapeCurve' || name === 'tapeStep' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'hf') && Number(phParams.tape) > 0) {
+    if ((name === 'inputDb' || name === 'tapeCurve' || name === 'tapeStep' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'hf') && Number(phParams.tape) > 0) {
       const bump = headBumpFor(phParams.tapeHeadBump, phParams.hf)
       const lift = bump !== bumpBefore ? headBumpMaxLiftDb(bump, state.currentFile?.sampleRate) : 0
       setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape) - lift))
@@ -214,7 +215,7 @@ export function usePhatass() {
   function tapeMakeupKey(start, end) {
     return JSON.stringify([
       appState.activeDocumentId, state.revision, start, end,
-      phParams.tape, phParams.tapeCurve, phParams.tapeStep, phParams.tapeLowPush, phParams.tapeHeadBump, phParams.hf,
+      phParams.inputDb, phParams.tape, phParams.tapeCurve, phParams.tapeStep, phParams.tapeLowPush, phParams.tapeHeadBump, phParams.hf,
       phParams.warmthCeilingDb, phParams.voiceLevelDb,
     ])
   }
@@ -448,7 +449,9 @@ export function usePhatass() {
       refreshCeiling(start, end)
     }
     clearTimeout(readoutTimer)
-    readoutTimer = setTimeout(refreshWarmthReadout, 250)
+    // Off the Modula panel (owner's call, October 2026): nothing shows it, so
+    // nothing renders it. The measurement stays, ready to be shown again.
+    if (WARMTH_READOUT_ON_PANEL) readoutTimer = setTimeout(refreshWarmthReadout, 250)
   }
 
   /** The selection or preview changed: the readout, TAPE's makeup and the output trim all follow. */
@@ -528,6 +531,11 @@ export function usePhatass() {
     }
   }
 
+  /** Put a whole param set into effect (a preset): each through syncParam, so makeups follow. */
+  function applyParams(p) {
+    for (const [k, v] of Object.entries(p)) if (phParams[k] !== v) syncParam(k, v)
+  }
+
   function openModal() {
     openWindow(PHATASS_WINDOW_ID)
   }
@@ -549,6 +557,7 @@ export function usePhatass() {
     hasSelection,
     togglePreview,
     syncParam,
+    applyParams,
     scheduleWarmthReadout,
     apply,
     teardown,

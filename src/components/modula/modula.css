@@ -1,0 +1,61 @@
+/**
+ * MODULA — the plugin control-surface kit ("Dark Matter / A2").
+ *
+ * Reference: docs/design/modula/Plugin_UI_Kit.dc.html, with the PHAT*SS and
+ * Inflator faceplates beside it. Every Modula component reads these tokens
+ * rather than restating a colour, so a retune lands everywhere at once.
+ *
+ * Two hues only. ACCENT (amber) is the parameter being moved; SECOND (cyan) is
+ * a mode, a selection or a secondary readout. The ladder palette is the
+ * meters' own and is not an accent.
+ */
+:root {
+  --m-accent: #e8a33d;
+  --m-second: #3fd0de;
+  --m-ok: #8fd48a;
+  --m-hot: #ff5a4e;
+
+  --m-ink: #eaf6f8;
+  --m-ink-2: #c9d0d6;
+  --m-ink-3: #b6bdc4;
+  --m-ink-4: #a0a8b0;
+  --m-ink-off: rgba(255, 255, 255, 0.5);
+
+  /* Surfaces, darkest first. */
+  --m-well: #1a1c20;
+  --m-track: #0e0f11;
+  --m-ladder: #0b0e13;
+  --m-ladder-edge: #1c222c;
+  --m-led-off: #2c3036;
+  --m-lamp-off: #3a3d43;
+
+  --m-chassis: linear-gradient(180deg, #3b3f46, #2b2e34);
+  --m-panel: linear-gradient(180deg, #3a3e45, #2e3136);
+
+  --m-shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.6), 0 6px 12px -6px rgba(0, 0, 0, 0.9);
+  --m-shadow-well: inset 0 2px 5px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.05);
+  --m-shadow-cap: 0 16px 20px -8px rgba(0, 0, 0, 0.95), 0 4px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.65);
+
+  --m-font-ui: 'Inter', system-ui, sans-serif;
+  --m-font-mono: 'JetBrains Mono', monospace;
+}
+
+/* Section caption: 10 px Inter 600, tracked, upper case. */
+.m-caption {
+  font: 600 10px/1 var(--m-font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--m-ink-3);
+}
+
+/* Small mono note under a control. */
+.m-note {
+  font: 500 9px/1 var(--m-font-mono);
+  color: var(--m-ink-2);
+  white-space: nowrap;
+}
+
+.m-focusable:focus-visible {
+  outline: 2px solid #7fe9f6;
+  outline-offset: 2px;
+}

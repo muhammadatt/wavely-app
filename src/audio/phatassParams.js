@@ -27,6 +27,18 @@ import { warmthGuardLatencySamples } from './dsp/warmthGuard.js'
 import { lowShelf, highpass, peaking, magnitudeResponseDb } from './dsp/biquad.js'
 
 export const PHATASS_DEFAULTS = {
+  // dB of INPUT gain, ahead of everything (`INPUT_MIN_DB`..`INPUT_MAX_DB`).
+  // A DRIVE, not a level match: every calibration below (TAPE's peak, Warmth's
+  // band references, the HF shelf's voice level) stays on the SOURCE, so +6
+  // drives TAPE, Warmth and the shelf 6 dB harder. TAPE's makeup is measured
+  // on the driven signal and so restores the DRIVEN peak; the Warmth guard's
+  // ceiling moves with the gain, so Warmth still never raises the peak of what
+  // it is fed. 0 is bit-transparent.
+  inputDb: 0,
+  // 0–1 — dry/wet, after the HF shelf and before Output. The dry path is the
+  // input (after Input) delayed by the plugin's latency, so a blend never
+  // combs. 1 (ships) is the wet path alone, bit-identical to no Mix at all.
+  mix: 1,
   // 0–10 — low-end harmonic warmth: how much of what the two fixed
   // WARMTH_LAYERS add is mixed in. 0 is off (a pure delay).
   warmth: 0,
@@ -97,6 +109,8 @@ export const ODD_EVEN_MAX = 100
  */
 export const OUTPUT_MIN_DB = -12
 export const OUTPUT_MAX_DB = 12
+export const INPUT_MIN_DB = -12
+export const INPUT_MAX_DB = 12
 
 /**
  * How much of the full Odd→Even crossfade the knob covers. The whole crossfade
@@ -110,13 +124,13 @@ export const ODD_EVEN_SPAN = 0.25
 
 /**
  * The panel's CHARACTER switch: two positions of Odd/Even, which it replaced
- * as a knob (owner, October 2026). ROUND 50 is the old knob's default; FIRM 25
+ * as a knob (owner, October 2026). ROUND 50 is the old knob's default; TIGHT 25 (labelled FIRM until the Modula panel)
  * leans further to the odd (cubic) layer — firmer, more edge. Odd/Even itself
  * stays a number, so the bench, presets and tests can still reach any value.
  */
 export const CHARACTERS = Object.freeze([
   Object.freeze({ value: 50, label: 'ROUND' }),
-  Object.freeze({ value: 25, label: 'FIRM' }),
+  Object.freeze({ value: 25, label: 'TIGHT' }),
 ])
 
 /**
@@ -379,10 +393,14 @@ export function toKernelParams(params) {
     ? clamp(p.voiceLevelDb, VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
     : ALIGN_TARGET_DBFS
   const hf = HF_MODES.includes(p.hf) ? p.hf : PHATASS_DEFAULTS.hf
+  const inputGainDb = clamp(Number(p.inputDb) || 0, INPUT_MIN_DB, INPUT_MAX_DB)
   return {
+    inputGainDb,
+    mix: clamp(Number.isFinite(Number(p.mix)) ? Number(p.mix) : 1, 0, 1),
     warmthLayers: warmthLayers(p.warmth, p.oddEven, p.warmthRefPeaksDb),
-    // Pinned on with Warmth: there is no switch.
-    warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : null },
+    // Pinned on with Warmth: there is no switch. The ceiling follows Input —
+    // it is the peak of what Warmth is FED, which Input has moved.
+    warmthGuard: { on: warmthActive(p), ceilingDb: Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb + inputGainDb : null },
     tapeLayer: tapeLayer(p.tape, Number.isFinite(p.warmthCeilingDb) ? p.warmthCeilingDb : voice + TAPE_FALLBACK_CREST_DB, p.tapeCurve, p.tapeLowPush, p.tapeStep),
     headBump: Number(p.tape) > 0 ? headBumpFor(p.tapeHeadBump, hf) : 0,
     // Signed: the head bump (after the curve) can leave the peak ABOVE the source.
@@ -525,7 +543,7 @@ export const TAPE_CURVES = ['cubic', 'tanh', 'algebraic', 'hysteresis']
 /** The panel's Tape switch: the two curves it offers, in order. */
 export const TAPE_PANEL_CURVES = Object.freeze([
   Object.freeze({ value: 'cubic', label: 'CLEAN' }),
-  Object.freeze({ value: 'hysteresis', label: 'THICK' }),
+  Object.freeze({ value: 'hysteresis', label: 'PHAT' }),
 ])
 /*
  * TAPE's place in the chain is PINNED FIRST (owner's call, October 2026): TAPE →

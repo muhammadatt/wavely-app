@@ -14,23 +14,11 @@
 import { ensureInflatorWorklet } from '../inflatorWorkletLoader.js'
 import { INFLATOR_LATENCY_SAMPLES } from '../inflatorProcessor.js'
 import { createLevelTap } from './levelTap.js'
+import { INFLATOR_DEFAULTS } from '../inflatorParams.js'
 
 export { INFLATOR_LATENCY_SAMPLES }
 
-/**
- * ⚠ EFFECT DEFAULTS TO 0.5 WHERE THE REFERENCE SHIPS 0. A VST must be
- * inaudible until asked; this app opens a plugin engaged and metering, and a
- * panel that does nothing on open reads as broken. Every other default here is
- * the reference's.
- */
-export const INFLATOR_DEFAULTS = {
-  inputDb: 0,
-  effect: 0.5,
-  curve: 0,
-  outputDb: 0,
-  clip: false,
-  bandSplit: false,
-}
+export { INFLATOR_DEFAULTS } from '../inflatorParams.js'
 
 /** Map UI param names to kernel param names — 1:1 for this effect. */
 export function toKernelParams(params) {
