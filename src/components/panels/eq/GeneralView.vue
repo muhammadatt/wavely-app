@@ -225,7 +225,7 @@ const SECOND = 'var(--m-second)'
         <!-- Gain: the one thing here that is HOW MUCH, so it takes the accent.
              A notch or pass filter has no gain term — shown, not dimmed. -->
         <ModulaKnob
-          variant="arc" :size="52" bipolar
+          variant="ring" :size="50" bipolar
           :model-value="gainInert(band) ? 0 : band.gainDb"
           :min="PARAM_RANGES.gainDb[0]" :max="PARAM_RANGES.gainDb[1]" :step="0.1"
           :default-value="0" :readonly="gainInert(band)" :editable="!gainInert(band)" show-value
@@ -245,7 +245,7 @@ const SECOND = 'var(--m-second)'
         </div>
 
         <ModulaKnob
-          variant="arc" :size="42" scale="log" editable show-value
+          variant="ring" :size="42" scale="log" editable show-value
           :model-value="band.frequencyHz"
           :min="PARAM_RANGES.frequencyHz[0]" :max="PARAM_RANGES.frequencyHz[1]"
           :quantize="quantizeHz" :parse-value="parseHz"
@@ -255,7 +255,7 @@ const SECOND = 'var(--m-second)'
         />
 
         <ModulaKnob
-          variant="arc" :size="42" scale="log" editable show-value
+          variant="ring" :size="42" scale="log" editable show-value
           :model-value="band.q"
           :min="qRangeForBand(band)[0]" :max="qRangeForBand(band)[1]"
           :quantize="quantizeQ"
@@ -335,5 +335,5 @@ const SECOND = 'var(--m-second)'
 .eq-strip-shape { width: 56px; }
 .eq-strip-chips { display: flex; gap: 3px; }
 .eq-strip-chips :deep(.m-chip) { padding: 0 5px; min-width: 20px; }
-.eq-strip :deep(.m-knob--arc) { gap: 5px; }
+.eq-strip :deep(.m-knob--ring) { gap: 5px; }
 </style>

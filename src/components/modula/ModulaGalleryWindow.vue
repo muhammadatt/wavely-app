@@ -104,6 +104,12 @@ onUnmounted(() => clearInterval(timer))
           <ModulaKnob v-model="v.freq" variant="arc" scale="log" :min="20" :max="20000" :default-value="1200" :format-value="x => (x >= 1000 ? `${(x / 1000).toFixed(1)}k` : Math.round(x))" label="Frequency" note="LOG" />
           <ModulaKnob v-model="v.ratio" variant="arc" :min="1" :max="10" :step="0.1" label="Ratio" note="DISABLED" disabled />
         </div>
+        <h3 style="margin-top:22px">Knobs · ring (quiet, for dense rows)</h3>
+        <div class="row">
+          <ModulaKnob v-model="v.pan" variant="ring" :size="50" bipolar :min="-100" :max="100" :step="1" :default-value="0" color="var(--m-second)" show-value editable :format-value="x => (x === 0 ? 'C' : (x < 0 ? 'L' : 'R') + Math.abs(x))" label="Pan" />
+          <ModulaKnob v-model="v.freq" variant="ring" :size="42" scale="log" :min="20" :max="20000" color="var(--m-second)" show-value editable :format-value="x => (x >= 1000 ? `${(x / 1000).toFixed(1)}k` : Math.round(x))" label="Freq" />
+          <ModulaKnob v-model="v.thr" variant="ring" :size="42" :min="-48" :max="0" :step="0.1" show-value :format-value="x => x.toFixed(1)" label="Threshold" />
+        </div>
       </section>
 
       <section class="card">

@@ -9,6 +9,10 @@
  *   small  62 px, accent pointer bar (ATTACK / RELEASE / TONE / MIX)
  *   arc    MEDIUM, 108 px, an arc and 13 ticks with a dot on the cap; the
  *          only variant that fills BIPOLAR from its zero
+ *   ring   the quiet one: a thin value arc on a dark track around a plain cap
+ *          with one pointer line — no ticks, no dots, no well. For dense
+ *          rows (the EQ's band strips), where eight arc knobs read as noise;
+ *          fills BIPOLAR from its zero like the arc
  *   trim   30 px, a plain white pointer: the trims under the IN/OUT meters
  *
  * The value is never printed on the cap. The large knobs float it in a drag
@@ -24,7 +28,7 @@ import ModulaValueTip from './ModulaValueTip.vue'
 
 const props = defineProps({
   ...DRAG_PROPS,
-  variant: { type: String, default: 'small', validator: v => ['led', 'ticks', 'small', 'arc', 'trim'].includes(v) },
+  variant: { type: String, default: 'small', validator: v => ['led', 'ticks', 'small', 'arc', 'ring', 'trim'].includes(v) },
   /** Diameter of the knob body, px. Defaults per variant. */
   size: { type: Number, default: null },
   label: { type: String, default: '' },
@@ -51,8 +55,8 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue'])
 
-const DEFAULT_SIZE = { led: 112, ticks: 102, small: 62, arc: 108, trim: 30 }
-const DEFAULT_TRAVEL = { led: 200, ticks: 200, small: 140, arc: 150, trim: 160 }
+const DEFAULT_SIZE = { led: 112, ticks: 102, small: 62, arc: 108, ring: 48, trim: 30 }
+const DEFAULT_TRAVEL = { led: 200, ticks: 200, small: 140, arc: 150, ring: 150, trim: 160 }
 const body = computed(() => props.size ?? DEFAULT_SIZE[props.variant])
 
 const { dragging, pct, handlers, setValue } = useModulaDrag(
@@ -90,15 +94,15 @@ function commitEdit() {
 function cancelEdit() { editing.value = false }
 
 // Captions: which line comes first, and what the value line reads.
-const labelFirst = computed(() => props.variant === 'small' || props.variant === 'arc')
+const labelFirst = computed(() => props.variant === 'small' || props.variant === 'arc' || props.variant === 'ring')
 const valueLine = computed(() => {
-  if (props.variant === 'arc') return props.note || props.showValue ? (props.note || text.value) : null
+  if (props.variant === 'arc' || props.variant === 'ring') return props.note || props.showValue ? (props.note || text.value) : null
   return props.showValue ? text.value : null
 })
 const valueClass = computed(() => ({
-  small: 'm-note m-val-small', arc: 'm-note m-val-arc', trim: 'm-note', led: 'm-big-value', ticks: 'm-big-value',
+  small: 'm-note m-val-small', arc: 'm-note m-val-arc', ring: 'm-note m-val-arc', trim: 'm-note', led: 'm-big-value', ticks: 'm-big-value',
 }[props.variant]))
-const valueEditable = computed(() => props.editable && !props.readonly && !(props.variant === 'arc' && props.note))
+const valueEditable = computed(() => props.editable && !props.readonly && !((props.variant === 'arc' || props.variant === 'ring') && props.note))
 
 const tipOn = computed(() => (props.showTip ?? props.variant !== 'trim') && dragging.value)
 
@@ -133,6 +137,13 @@ const arc = computed(() => {
   const lo = Math.min(pct.value, origin.value)
   const hi = Math.max(pct.value, origin.value)
   return { dash: `${((hi - lo) * ARC).toFixed(1)} ${CIRC}`, offset: (-lo * ARC).toFixed(1) }
+})
+// The ring's arc: r 44, 270° of it, so the dash is in its own units.
+const RING_ARC = 207.35
+const ringArc = computed(() => {
+  const lo = Math.min(pct.value, origin.value)
+  const hi = Math.max(pct.value, origin.value)
+  return { dash: `${((hi - lo) * RING_ARC).toFixed(1)} 276.5`, offset: (-lo * RING_ARC).toFixed(1), empty: hi - lo < 0.002 }
 })
 const arcTicks = computed(() => Array.from({ length: 13 }, (_, i) => {
   const t = i / 12
@@ -220,6 +231,26 @@ const aria = computed(() => ({
       </div>
     </div>
 
+    <!-- Ring: a thin value arc and a plain cap ───────────────────────────── -->
+    <div
+      v-else-if="variant === 'ring'" class="m-ringk m-focusable"
+      :style="{ width: `${body}px`, height: `${body}px` }" v-bind="aria" v-on="handlers"
+    >
+      <ModulaValueTip :text="text" :show="tipOn" size="sm" :offset="30" />
+      <svg viewBox="0 0 100 100" class="m-arc-svg">
+        <circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:#16181b;stroke-width:6;stroke-linecap:round;stroke-dasharray:207.3 276.5" />
+        <circle
+          cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)"
+          :style="{ stroke: color, strokeWidth: 6, strokeLinecap: 'round', strokeDasharray: ringArc.dash, strokeDashoffset: ringArc.offset, opacity: ringArc.empty ? 0 : 1 }"
+        />
+      </svg>
+      <div class="m-ring-cap">
+        <div class="m-rot" :style="{ transform: `rotate(${deg}deg)` }">
+          <div class="m-ring-line"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Small and trim ─────────────────────────────────────────────────────── -->
     <div
       v-else class="m-cap m-cap--plain m-focusable"
@@ -267,10 +298,10 @@ const aria = computed(() => ({
   transition: opacity 0.15s ease;
 }
 .m-knob--led, .m-knob--ticks { gap: 12px; }
-.m-knob--arc { gap: 7px; }
+.m-knob--arc, .m-knob--ring { gap: 7px; }
 .m-knob--trim { gap: 5px; }
 .m-knob.is-disabled { opacity: 0.4; }
-.m-knob:is(.is-disabled, .is-readonly) :is(.m-cap, .m-arc) { cursor: default; }
+.m-knob:is(.is-disabled, .is-readonly) :is(.m-cap, .m-arc, .m-ringk) { cursor: default; }
 
 .m-ring {
   position: relative;
@@ -368,6 +399,28 @@ const aria = computed(() => ({
   width: 100%;
   height: 100%;
   overflow: visible;
+}
+.m-ringk {
+  position: relative;
+  touch-action: none;
+  cursor: ns-resize;
+}
+.m-ring-cap {
+  position: absolute;
+  inset: 17%;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #3e4249 0%, #2a2d32 60%, #202226 100%);
+  box-shadow: 0 6px 10px -6px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255, 255, 255, .09), 0 0 0 1px rgba(0, 0, 0, .65);
+}
+.m-ring-line {
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  width: 2px;
+  height: 30%;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--m-ink);
 }
 .m-arc-cap {
   position: absolute;
