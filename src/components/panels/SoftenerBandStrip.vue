@@ -35,9 +35,13 @@ const props = defineProps({
   height: { type: Number, default: 150 },
   /** The curve layer, drawn by the caller in a `viewW × height` viewBox. */
   viewW: { type: Number, default: 360 },
+  /** The cut as it is happening — already smoothed by the caller. */
   curvePath: { type: String, default: '' },
   curveFill: { type: String, default: '' },
-  maxPath: { type: String, default: '' },
+  /** The deepest recent cut, held and then falling — where the last S went. */
+  holdPath: { type: String, default: '' },
+  /** 0–1: how hard it is working right now. Lights the fill and the CUT flag. */
+  activity: { type: Number, default: 0 },
   zeroY: { type: Number, default: 0 },
   gridFreqs: { type: Array, default: () => [] },
   tapFn: { type: Function, default: null },
@@ -135,8 +139,9 @@ const flip = hz => pctFor(hz) > 78
           stroke="rgba(255,255,255,.06)" stroke-width="1" vector-effect="non-scaling-stroke"
         />
         <line :x1="0" :y1="zeroY" :x2="viewW" :y2="zeroY" stroke="rgba(255,255,255,.16)" stroke-width="1" vector-effect="non-scaling-stroke" />
-        <path :d="maxPath" :stroke="accent" stroke-opacity="0.3" stroke-dasharray="3 3" stroke-width="1.5" fill="none" vector-effect="non-scaling-stroke" />
-        <path :d="curveFill" :fill="accent" fill-opacity="0.13" />
+        <!-- The held cut first, so the live one draws over it. -->
+        <path :d="holdPath" :stroke="accent" stroke-opacity="0.45" stroke-width="1.25" fill="none" vector-effect="non-scaling-stroke" />
+        <path :d="curveFill" :fill="accent" :fill-opacity="0.08 + 0.32 * activity" />
         <path :d="curvePath" :stroke="accent" stroke-width="2" fill="none" vector-effect="non-scaling-stroke" />
       </svg>
 
@@ -164,7 +169,7 @@ const flip = hz => pctFor(hz) > 78
       <div
         class="sbs-handle sbs-handle--cut"
         :class="{ 'is-dragging': dragging === 'band', 'is-flip': flip(band) }"
-        :style="{ left: `${pctFor(band)}%`, '--c': accent }"
+        :style="{ left: `${pctFor(band)}%`, '--c': accent, '--glow': activity }"
         role="slider" tabindex="0"
         aria-label="Cut from (EQ band corner)"
         :aria-valuemin="bandMin" :aria-valuemax="bandMax" :aria-valuenow="band"
@@ -240,7 +245,12 @@ const flip = hz => pctFor(hz) > 78
   box-shadow: 0 1px 4px rgba(0, 0, 0, .6);
 }
 .sbs-tab b { font-weight: 800; letter-spacing: .12em; margin-right: 3px; }
-.sbs-handle--cut .sbs-tab { top: 0; }
+.sbs-handle--cut .sbs-tab {
+  top: 0;
+  /* Glows while the de-esser is cutting — the one thing on the strip that
+     says "working now" without being read. */
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .6), 0 0 calc(var(--glow, 0) * 14px) calc(var(--glow, 0) * 2px) var(--c);
+}
 .sbs-handle--listen .sbs-tab { bottom: 0; }
 .sbs-handle.is-flip .sbs-tab {
   left: auto;

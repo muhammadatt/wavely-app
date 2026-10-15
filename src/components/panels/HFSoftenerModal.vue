@@ -12,7 +12,7 @@
  * useHFSoftener.js).
  *
  * TOP: the frequency strip — the input's spectrum, the cut the kernel is
- * running (with the most both stages could take ghosted behind it), and the
+ * running (damped, with the deepest recent cut held as a thin line), and the
  * two corners as handles: CUT (Band, where the EQ cuts) hung from the top and
  * LISTEN (Detect, where the detector listens) standing on the bottom. Two
  * handles, not linked — see SoftenerBandStrip.
@@ -22,12 +22,12 @@
  * (the waveform after the cut, with what was removed painted around it).
  * DELTA sits in the header and never reaches the apply path.
  */
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useHFSoftener } from '../../composables/useHFSoftener.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections, AIR_MAKEUP_MAX_DB,
-  duckToMaxDepthDb, duckToThresholdDb, duckToSlope,
+  duckToThresholdDb, duckToSlope,
   DETECT_HZ_MIN, DETECT_HZ_MAX, BAND_HZ_MIN, BAND_HZ_MAX, bandTuningFor,
 } from '../../audio/hfSoftenerProcessor.js'
 import { guardToFloorDb, HF_SOFTENER_DEFAULTS } from '../../audio/hfSoftenerParams.js'
@@ -38,6 +38,7 @@ import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
+import { createPeakHold, lampFraction, useMeterFrame } from '../meters/ballistics.js'
 import SoftenerScope from '../meters/SoftenerScope.vue'
 import SoftenerBandStrip from './SoftenerBandStrip.vue'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
@@ -168,10 +169,48 @@ function shelfPath(gainDb, levelDb = 0) {
 }
 
 const maxDepthDb = computed(() => amountToMaxDepthDb(hfAmount.value / 100))
-const duckMaxDb = computed(() => duckToMaxDepthDb(hfDuck.value / 100))
-// Each stage's ceiling, stacked: the most the two could ever take together.
-const maxPath = computed(() => shelfPath(-maxDepthDb.value, -duckMaxDb.value))
-const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthDb.value), -hfBroadband.value))
+
+/**
+ * WHAT THE STRIP DRAWS IS DAMPED, and the raw reading was the problem.
+ *
+ * The kernel reports both stages' gain every frame, and an "s" is 30–40 ms —
+ * two or three frames — so the raw curve strobed: down for a frame, back up,
+ * down again, with nothing on screen long enough to read as "it cut there".
+ * Each stage now drives the curve through an envelope with an INSTANT attack
+ * (an "s" lands on the frame it happens) and a 20 dB/s fall after an 80 ms
+ * hold, so a cut becomes one dip that eases back over a few hundred ms. A
+ * second, slower hold (1.2 s, then 10 dB/s) draws the deepest recent cut as a
+ * thin line — where the last "s" went, still on screen while you look.
+ *
+ * The dashed ceiling (the most both stages could take) was a third curve and
+ * came off: it is a property of the knobs, not of what is happening, and it
+ * competed with the two that are.
+ */
+const LIVE = { holdMs: 80, fallPerSec: 20 }
+const HELD = { holdMs: 1200, fallPerSec: 10 }
+const liveDuck = createPeakHold(LIVE)
+const liveEq = createPeakHold(LIVE)
+const heldDuck = createPeakHold(HELD)
+const heldEq = createPeakHold(HELD)
+const shownDuck = ref(0)
+const shownEq = ref(0)
+const heldDuckDb = ref(0)
+const heldEqDb = ref(0)
+useMeterFrame((dt) => {
+  const eq = Math.min(hfReduction.value, maxDepthDb.value)
+  shownDuck.value = liveDuck.push(hfBroadband.value, dt)
+  shownEq.value = liveEq.push(eq, dt)
+  heldDuckDb.value = heldDuck.push(hfBroadband.value, dt)
+  heldEqDb.value = heldEq.push(eq, dt)
+})
+// Not computed on the raw reading: the same instant-attack envelope, so the
+// glow and the curve always agree. Full at 6 dB of total cut.
+const activity = computed(() => lampFraction(shownDuck.value + shownEq.value, 6))
+
+const livePath = computed(() => shelfPath(-shownEq.value, -shownDuck.value))
+// Hidden while nothing has been cut lately, so an idle strip is just the flat line.
+const holdPath = computed(() => (heldDuckDb.value + heldEqDb.value < 0.1
+  ? '' : shelfPath(-heldEqDb.value, -heldDuckDb.value)))
 const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0) + (hfSoften.value > 0 ? hfSoftenCut.value : 0))
 const formatSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const airCaption = computed(() => (hfComp.value ? `+${hfCompAir.value.toFixed(1)} dB comp` : 'no comp'))
@@ -276,7 +315,7 @@ async function applyAndClose() {
         :detect-min="DETECT_HZ_MIN" :detect-max="DETECT_HZ_MAX"
         :band-default="D.band" :detect-default="D.detect"
         :min-hz="F_MIN" :max-hz="F_MAX" :height="CURVE_H" :view-w="CURVE_W"
-        :curve-path="livePath" :curve-fill="liveFill" :max-path="maxPath" :zero-y="Y0"
+        :curve-path="livePath" :curve-fill="liveFill" :hold-path="holdPath" :activity="activity" :zero-y="Y0"
         :grid-freqs="GRID_FREQS" :tap-fn="getInputSpectrum"
         :accent="ACCENT" :listen-color="LISTEN_COLOR" :disabled="!hfPreview"
         @update:band="syncBand" @update:detect="syncDetect"
