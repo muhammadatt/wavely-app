@@ -29,11 +29,12 @@
   --m-led-off: #2c3036;
   --m-lamp-off: #3a3d43;
 
-  /* Slate, not the kit's neutral grey (#3b3f46 → #2b2e34): the same lightness
-     on the editor's own blue (#0e1116 / #141922), so a window reads as part
-     of the app rather than a grey box set on it. */
-  --m-chassis: linear-gradient(180deg, #343c48, #232932);
-  --m-panel: linear-gradient(180deg, #363e4a, #2a313b);
+  /* Steel, not the kit's neutral grey (#3b3f46 → #2b2e34): the grey read as
+     dingy against the editor's blue-black (#0e1116 / #141922), so the chassis
+     takes the editor's hue. Chosen in the app over a darker slate and an
+     ink. */
+  --m-chassis: linear-gradient(180deg, #3a4452, #262d37);
+  --m-panel: linear-gradient(180deg, #3c4655, #2c343f);
 
   --m-shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.6), 0 6px 12px -6px rgba(0, 0, 0, 0.9);
   --m-shadow-well: inset 0 2px 5px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.05);

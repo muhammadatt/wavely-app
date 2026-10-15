@@ -1,11 +1,12 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import {
-  useSpectrumAnalyzer, FFT_OPTIONS, SLOPE_OPTIONS,
+  useSpectrumAnalyzer, FFT_OPTIONS, SLOPE_OPTIONS, SMOOTHING_DEFAULT, FLOOR_DEFAULT_DB,
 } from '../../../composables/useSpectrumAnalyzer.js'
 import FloatingWindow from '../FloatingWindow.vue'
-import DeviceTravelSlide from '../../knobs/DeviceTravelSlide.vue'
-import DeviceSlider from '../../knobs/DeviceSlider.vue'
+import ModulaSegmented from '../../modula/ModulaSegmented.vue'
+import ModulaLedPill from '../../modula/ModulaLedPill.vue'
+import ModulaKnob from '../../modula/ModulaKnob.vue'
 import SpectrumDisplay from '../../meters/SpectrumDisplay.vue'
 
 /**
@@ -25,8 +26,10 @@ const {
   start, detach, close, frameFn,
 } = useSpectrumAnalyzer()
 
-// Cyan: unclaimed by any effect, and the colour an analyzer is expected to be.
-const ACCENT = '#5bc8ff'
+// The kit's second hue (--m-second), as a literal because the plot tints it on
+// a canvas: cyan is the colour an analyzer is expected to be, and in the kit it
+// already means "where", which is what a spectrum shows.
+const ACCENT = '#3fd0de'
 
 const display = ref(null)
 
@@ -35,6 +38,7 @@ onUnmounted(detach)
 
 const percent = v => `${Math.round(v * 100)}%`
 const decibels = v => `${Math.round(v)} dB`
+
 
 function togglePeakHold() {
   showPeakHold.value = !showPeakHold.value
@@ -48,116 +52,101 @@ function togglePeakHold() {
     :z="z"
     :width="700"
     :accent="ACCENT"
-    brand-lead="SPECTRUM"
-    brand-tail="ANALYZER"
+    design="modula"
+    brand-lead="SPECTRUM ANALYZER"
     :show-engage="false"
     @close="close"
   >
     <template #header-center>
-      <!-- Freeze belongs in the header rather than with the settings below: it
-           is the one control you reach for while looking at the plot, usually
-           the instant something interesting goes past. -->
-      <!-- Neutral like every other control in the chrome: this is a monitoring
-           state, and the accent belongs to the plot below. -->
-      <button
-        class="freeze-chip px-3 py-1.5 rounded-full border cursor-pointer transition-colors"
-        :class="{ 'freeze-chip--on': frozen }"
-        :aria-pressed="String(frozen)"
+      <!-- Freeze and peak hold belong in the header rather than with the
+           settings below: they are what you reach for while looking at the
+           plot, usually the instant something interesting goes past. -->
+      <ModulaLedPill
+        size="sm" label="FREEZE" color="var(--m-second)"
+        :model-value="frozen"
         title="Hold the display where it is, to read a moment that has gone past"
         @pointerdown.stop
-        @click="frozen = !frozen"
-      >FREEZE</button>
+        @update:model-value="frozen = $event"
+      />
+      <!-- Turning it on starts a fresh hold. -->
+      <ModulaLedPill
+        size="sm" label="PEAK HOLD" color="var(--m-second)"
+        :model-value="showPeakHold"
+        title="Outline showing where the trace has peaked. Turning it on starts a fresh hold."
+        @pointerdown.stop
+        @update:model-value="togglePeakHold"
+      />
     </template>
 
-    <div class="px-[22px] pt-[18px] pb-[20px]">
-      <SpectrumDisplay
-        ref="display"
-        :frame-fn="frameFn"
-        :slope="slope"
-        :floor-db="floorDb"
-        :show-peak-hold="showPeakHold"
-        :frozen="frozen"
-        :accent="ACCENT"
-        :height="270"
-      />
+    <SpectrumDisplay
+      ref="display"
+      design="modula"
+      :frame-fn="frameFn"
+      :slope="slope"
+      :floor-db="floorDb"
+      :show-peak-hold="showPeakHold"
+      :frozen="frozen"
+      :accent="ACCENT"
+      :height="270"
+    />
 
-      <div class="mt-[16px] pt-[14px] flex items-end gap-[20px]"
-           style="border-top:1px solid rgba(255,255,255,.06)">
-        <DeviceTravelSlide
-          class="shrink-0"
-          v-model="fftSize"
-          :options="FFT_OPTIONS"
-          :accent="ACCENT"
-          caption="Resolution"
-          label="FFT size"
-          :width="146"
-        />
-        <DeviceTravelSlide
-          class="shrink-0"
-          v-model="slope"
-          :options="SLOPE_OPTIONS"
-          :accent="ACCENT"
-          caption="Tilt dB/oct"
-          label="Tilt"
-          :width="122"
-        />
-
-        <!-- Peak hold reads as a lamp rather than a switch bank: it is on or
-             off, and clicking it while it is already on restarts the hold,
-             which is the other thing anyone wants from it. -->
-        <button
-          class="shrink-0 px-[13px] py-[7px] rounded-full cursor-pointer transition-colors"
-          :style="{
-            background: showPeakHold ? `color-mix(in srgb, ${ACCENT} 18%, transparent)` : 'transparent',
-            border: `1px solid ${showPeakHold ? `color-mix(in srgb, ${ACCENT} 45%, transparent)` : 'rgba(255,255,255,.1)'}`,
-            font: `700 9px 'JetBrains Mono',monospace`,
-            letterSpacing: '.12em',
-            color: showPeakHold ? `color-mix(in srgb, ${ACCENT} 65%, #ffffff)` : 'rgba(255,255,255,.4)',
-          }"
-          :aria-pressed="String(showPeakHold)"
-          title="Outline showing where the trace has peaked. Click again to clear it."
-          @click="togglePeakHold"
-        >PEAK HOLD</button>
+    <!-- The settings, on one panel: the two switches say which spectrum you
+         are looking at, the two knobs how it settles and how deep it reads. -->
+    <div class="sa-panel">
+      <div class="sa-group">
+        <span class="m-caption">Resolution</span>
+        <ModulaSegmented v-model="fftSize" :options="FFT_OPTIONS" aria-label="FFT size" />
+      </div>
+      <div class="sa-group">
+        <span class="m-caption">Tilt <span class="sa-unit">dB/oct</span></span>
+        <ModulaSegmented v-model="slope" :options="SLOPE_OPTIONS" aria-label="Tilt" />
       </div>
 
-      <div class="mt-[15px] grid grid-cols-2 gap-x-[30px]">
-        <DeviceSlider
-          v-model="smoothing"
-          :min="0" :max="0.95" :step="0.01"
-          label="Averaging" :accent="ACCENT" :format-value="percent"
-        />
-        <DeviceSlider
-          v-model="floorDb"
-          :min="-140" :max="-40" :step="5"
-          label="Floor" :accent="ACCENT" :format-value="decibels"
-        />
+      <span class="sa-rule" aria-hidden="true"></span>
+
+      <div class="sa-knobs">
+      <ModulaKnob
+        variant="small" :size="44" show-value editable
+        v-model="smoothing" :min="0" :max="0.95" :step="0.01" :default-value="SMOOTHING_DEFAULT"
+        label="Averaging" :color="ACCENT" :format-value="percent"
+        :parse-value="t => parseFloat(t) / 100"
+        title="How much each frame is averaged with the last: higher is steadier, lower follows faster. Double-click to reset"
+      />
+      <ModulaKnob
+        variant="small" :size="44" show-value editable
+        v-model="floorDb" :min="-140" :max="-40" :step="5" :default-value="FLOOR_DEFAULT_DB"
+        label="Floor" :color="ACCENT" :format-value="decibels"
+        title="The bottom of the plot's dB range. The top is 0 dBFS. Double-click to reset"
+      />
       </div>
     </div>
   </FloatingWindow>
 </template>
 
 <style scoped>
-/* Matches the harness's own monitoring chips: off is an outline, on is a raised
-   white wash. A value step rather than a colour change, so the plugin hue never
-   reaches the chrome. */
-.freeze-chip {
-  background: transparent;
-  border-color: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.45);
-  font: 700 9px 'JetBrains Mono', monospace;
-  letter-spacing: 0.16em;
+.sa-panel {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 18px;
+  border-radius: 14px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
 }
-.freeze-chip:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.7);
+.sa-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
-.freeze-chip--on {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: #eaf6f8;
-}
-.freeze-chip--on:hover {
-  background: rgba(255, 255, 255, 0.16);
-  color: #eaf6f8;
+.sa-unit { text-transform: none; letter-spacing: .06em; }
+.sa-knobs { display: flex; gap: 20px; }
+.sa-rule {
+  align-self: stretch;
+  width: 1px;
+  background: rgba(0, 0, 0, .35);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, .04);
 }
 </style>
