@@ -7,6 +7,7 @@ import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import Icon from '../ui/Icon.vue'
 import HelpOverlay from './HelpOverlay.vue'
 import ModulaPresetBrowser from '../modula/ModulaPresetBrowser.vue'
+import ModulaLedPill from '../modula/ModulaLedPill.vue'
 
 /**
  * The plugin harness — the chassis every effect window is mounted into.
@@ -654,8 +655,17 @@ function requestClose() {
         positions.
       -->
       <div class="flex items-center gap-2">
+        <!-- Modula: a lamp pill in the kit's second hue — DELTA is monitoring,
+             a mode rather than a value, the hue the kit gives modes. -->
+        <ModulaLedPill
+          v-if="showDelta && modula"
+          size="sm" label="DELTA" color="var(--m-second)"
+          :model-value="delta" :disabled="deltaDisabled" :title="deltaTitle"
+          @pointerdown.stop
+          @update:model-value="emit('toggle-delta')"
+        />
         <button
-          v-if="showDelta"
+          v-if="showDelta && !modula"
           type="button"
           class="win-chip"
           :class="{ 'win-chip--on': delta }"

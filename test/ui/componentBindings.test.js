@@ -73,6 +73,8 @@ const FILES = [
   // here: its frame's `:style` binding carries `//` comments, which this
   // coarse reader takes for identifiers.)
   'src/components/panels/PhatassModal.vue',
+  'src/components/panels/SchepsModal.vue',
+  'src/components/panels/HFLimiterModal.vue',
   'src/components/panels/windows/InflatorWindow.vue',
   'src/components/panels/windows/SpectrumAnalyzerWindow.vue',
   'src/components/panels/windows/NormalizeWindow.vue',

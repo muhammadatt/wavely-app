@@ -625,3 +625,32 @@ test('parametric EQ: stored bands are clamped and capped at the panel\'s eight',
   assert.equal(bands[0].q, 10)
   assert.equal(pickParams(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: [{ type: 'bogus', frequencyHz: 5 }] }).bands[0].type, 'peaking')
 })
+
+// ── Scheps Parallel and HF Limiter ───────────────────────────────────────────
+
+test('Scheps presets: the panel defaults light Default, and no measured value is a param', async () => {
+  const { SCHEPS_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { SCHEPS_DEFAULTS } = await import('../../src/audio/effects/schepsParams.js')
+  const live = { ...SCHEPS_DEFAULTS, autoTrim: true }
+  assert.equal(matchPreset(SCHEPS_PRESET_PLUGIN, live), 'factory:default')
+  const picked = pickParams(SCHEPS_PRESET_PLUGIN, { ...live, wetTrimDb: 3, ceilingDb: -1, inputAlignDb: 6 })
+  for (const k of ['wetTrimDb', 'correlation', 'densityDb', 'ceilingDb', 'ceilingKneeDb', 'inputAlignDb']) {
+    assert.equal(k in picked, false, k)
+  }
+  assert.equal(pickParams(SCHEPS_PRESET_PLUGIN, { character: 'bogus', squash: 400, output: -99 }).character, SCHEPS_DEFAULTS.character)
+  assert.equal(pickParams(SCHEPS_PRESET_PLUGIN, { squash: 400 }).squash, 100)
+  assert.equal(pickParams(SCHEPS_PRESET_PLUGIN, { output: -99 }).output, -12)
+})
+
+test('HF Limiter presets: the panel defaults light Default; the voice level stays out', async () => {
+  const { HF_LIMITER_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { HF_LIMITER_DEFAULTS } = await import('../../src/audio/hfLimiterParams.js')
+  assert.equal(matchPreset(HF_LIMITER_PRESET_PLUGIN, { ...HF_LIMITER_DEFAULTS }), 'factory:default')
+  assert.equal('voiceLevelDb' in pickParams(HF_LIMITER_PRESET_PLUGIN, { ...HF_LIMITER_DEFAULTS }), false)
+  const p = pickParams(HF_LIMITER_PRESET_PLUGIN, { freq: 100, shape: 'bogus', range: -3 })
+  assert.equal(p.freq, 2000)
+  assert.equal(p.shape, HF_LIMITER_DEFAULTS.shape)
+  assert.equal(p.range, 0)
+})

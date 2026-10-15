@@ -349,6 +349,15 @@ export function useScheps() {
     pushParam('output', v)
   }
 
+  /** A preset's controls, through the same paths a knob turn takes. */
+  function applyParams(p) {
+    if (p.character !== undefined && p.character !== schepsCharacter.value) syncCharacter(p.character)
+    if (p.squash !== undefined) syncSquash(p.squash)
+    if (p.mix !== undefined) syncMix(p.mix)
+    if (p.output !== undefined) syncOutput(p.output)
+    if (p.autoTrim !== undefined && !!p.autoTrim !== schepsAutoTrim.value) toggleAutoTrim()
+  }
+
   function toggleAutoTrim() {
     schepsAutoTrim.value = !schepsAutoTrim.value
     if (schepsAutoTrim.value) {
@@ -460,6 +469,7 @@ export function useScheps() {
     syncMix,
     syncOutput,
     toggleAutoTrim,
+    applyParams,
     refreshAutoTrim,
     apply,
     teardown,
