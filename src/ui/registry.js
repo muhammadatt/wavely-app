@@ -24,8 +24,6 @@ import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import LoudnessWindow from '../components/panels/windows/LoudnessWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import InflatorWindow from '../components/panels/windows/InflatorWindow.vue'
-import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
-import RemoveSilenceWindow from '../components/panels/windows/RemoveSilenceWindow.vue'
 import SpectrumAnalyzerWindow from '../components/panels/windows/SpectrumAnalyzerWindow.vue'
 import ModulaGalleryWindow from '../components/modula/ModulaGalleryWindow.vue'
 import { DEV_TUNING_PANELS } from '../devFlags.js'
@@ -105,7 +103,20 @@ export const CATEGORIES = [
  * under Effects opens as a window. Two adjacent rows in one list never behave
  * differently — that inconsistency is what this replaces.
  */
-export const OPERATIONS = [
+/**
+ * RELEASE GATING — which operations a production build shows.
+ *
+ * An entry marked `release: 'dev'` is work in progress: it is in every dev
+ * server and in a build made with VITE_DEV_PANELS=1 (the same switch as the
+ * tuning panels, see devFlags.js), and absent from a production build — not in
+ * the toolbar, the rail, the command palette or the window layer, because all
+ * four read OPERATIONS below. Shipping one is deleting its `release` line.
+ *
+ * ⚠ HIDDEN, NOT STRIPPED. The component is still imported here, so its code is
+ * in the production bundle; there is just no way to reach it. Only the Modula
+ * Kit gallery is also stubbed out of the bundle (vite.config.js).
+ */
+const ALL_OPERATIONS = [
 
   // ---- Edit: clipboard verbs (immediate) ----
   // These duplicate SelectionBar's buttons on purpose. The bar is a shortcut
@@ -298,6 +309,7 @@ export const OPERATIONS = [
     // steer the compressor's sidechain, and what the user is reaching for is a
     // parallel compression sound. The EQ is the mechanism, not the offer.
     id: 'scheps-parallel',
+    release: 'dev',
     label: 'Scheps Parallel',
     desc: 'Blend in a squashed, EQ-steered copy',
     category: 'effects',
@@ -313,6 +325,7 @@ export const OPERATIONS = [
   },
   {
     id: 'vocal-saturation',
+    release: 'dev',
     label: 'Tube Saturation',
     desc: 'Warm tube-like saturation',
     category: 'effects',
@@ -325,6 +338,7 @@ export const OPERATIONS = [
   },
   {
     id: 'saturation-bench',
+    release: 'dev',
     label: 'Saturation Bench',
     desc: 'Stack layers of saturation, each on its own band',
     category: 'effects',
@@ -384,6 +398,7 @@ export const OPERATIONS = [
     // EQ — one pool, two views — which is why the two still look related; see
     // useEqInstance.js for why they were separated.
     id: 'voicerx',
+    release: 'dev',
     label: 'VoiceRx',
     desc: 'Find what’s wrong with a voice recording',
     category: 'effects',
@@ -435,6 +450,7 @@ export const OPERATIONS = [
   },
   {
     id: 'clip-gain-deesser',
+    release: 'dev',
     label: 'De-Esser',
     desc: 'Tame harsh S and F sounds',
     category: 'effects',
@@ -484,30 +500,6 @@ export const OPERATIONS = [
     surface: 'window',
     component: HumRemoverModal,
   },
-  {
-    id: 'noise-reduction',
-    label: 'Noise Reduction',
-    desc: 'Remove background noise',
-    category: 'effects',
-    group: 'Clean',
-    icon: 'noise',
-    keywords: ['denoise', 'hiss', 'background', 'deepfilternet', 'clean'],
-    requires: 'selection',
-    surface: 'window',
-    component: NoiseReductionWindow,
-  },
-  {
-    id: 'remove-silence',
-    label: 'Remove Silence',
-    desc: 'Remove quiet sections',
-    category: 'effects',
-    group: 'Clean',
-    icon: 'removeSilence',
-    keywords: ['gap', 'pause', 'dead air', 'tighten', 'trim silence'],
-    requires: 'selection',
-    surface: 'window',
-    component: RemoveSilenceWindow,
-  },
 
   // ---- Analysis ----
   // Its own group because it is the one entry here that measures rather than
@@ -531,8 +523,9 @@ export const OPERATIONS = [
   },
   // DEV ONLY: every Modula control on one page, for review against the kit
   // (docs/design/modula). Stubbed out of production builds (vite.config.js).
-  ...(DEV_TUNING_PANELS ? [{
+  {
     id: 'modula-kit',
+    release: 'dev',
     label: 'Modula Kit',
     desc: 'Developer gallery of the plugin control-surface kit',
     category: 'effects',
@@ -542,8 +535,19 @@ export const OPERATIONS = [
     requires: 'file',
     surface: 'window',
     component: ModulaGalleryWindow,
-  }] : []),
+  },
 ]
+
+/** Shown in this build: everything released, plus WIP under a dev build. */
+export function isReleased(op, devBuild = DEV_TUNING_PANELS) {
+  return op.release !== 'dev' || devBuild
+}
+
+export const OPERATIONS = ALL_OPERATIONS.filter(op => isReleased(op))
+
+/** Ids hidden from production builds — for tests and the bundle check. */
+export const DEV_ONLY_OPERATION_IDS = ALL_OPERATIONS
+  .filter(op => op.release === 'dev').map(op => op.id)
 
 const OPERATIONS_BY_ID = new Map(OPERATIONS.map(op => [op.id, op]))
 const CATEGORIES_BY_ID = new Map(CATEGORIES.map(c => [c.id, c]))

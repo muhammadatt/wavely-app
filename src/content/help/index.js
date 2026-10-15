@@ -64,11 +64,9 @@ import hfSoftener from './hf-softener.js'
 import humRemover from './hum-remover.js'
 import loudness from './loudness.js'
 import manualEq from './manual-eq.js'
-import noiseReduction from './noise-reduction.js'
 import normalize from './normalize.js'
 import optoSmooth from './opto-smooth.js'
 import phatass from './phatass.js'
-import removeSilence from './remove-silence.js'
 import resonanceSuppressor from './resonance-suppressor.js'
 import saturationBench from './saturation-bench.js'
 import schepsParallel from './scheps-parallel.js'
@@ -88,11 +86,9 @@ export const HELP = {
   'hum-remover': humRemover,
   loudness,
   'manual-eq': manualEq,
-  'noise-reduction': noiseReduction,
   normalize,
   'opto-smooth': optoSmooth,
   phatass,
-  'remove-silence': removeSilence,
   'resonance-suppressor': resonanceSuppressor,
   'saturation-bench': saturationBench,
   'scheps-parallel': schepsParallel,
