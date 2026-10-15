@@ -81,9 +81,8 @@ test('⚠ ResoTame cut on the render-block grid alone does NOT stitch — the ho
   assert.ok(got > -60, `off the hop grid the chunks should disagree audibly; got ${got.toFixed(1)} dBFS`)
 })
 
-test('⚠ ResoTame\'s memory needs the long run-in even on this material', () => {
-  const mat = MATERIALS.bursts()
-  const [, build] = PLUGINS.find(([name]) => name.startsWith('ResoTame'))
-  const got = seamDbfs(mat, build(mat.xs), { runInS: 2 })
-  assert.ok(got > -100, `at 2 s of run-in ResoTame's seams should still show; got ${got.toFixed(1)} dBFS`)
-})
+// RETIRED: "ResoTame's memory needs the long run-in even on this material"
+// asserted that a 2 s run-in still left an audible seam (> −100 dBFS). It
+// pinned the old 200/500 ms ballistics; at the 50/200 ms defaults ResoTame
+// settles within 2 s (−132.5 dBFS), so its premise no longer holds. The 6 s
+// shared run-in stays, and the stitch tests above still hold it to the floor.
