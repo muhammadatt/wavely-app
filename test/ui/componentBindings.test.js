@@ -75,6 +75,8 @@ const FILES = [
   'src/components/panels/PhatassModal.vue',
   'src/components/panels/SchepsModal.vue',
   'src/components/panels/HFLimiterModal.vue',
+  'src/components/panels/AirBandModal.vue',
+  'src/components/panels/SoftClipperModal.vue',
   'src/components/panels/windows/InflatorWindow.vue',
   'src/components/panels/windows/SpectrumAnalyzerWindow.vue',
   'src/components/panels/windows/NormalizeWindow.vue',

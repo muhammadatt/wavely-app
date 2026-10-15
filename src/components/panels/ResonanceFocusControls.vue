@@ -25,18 +25,20 @@
  */
 import { computed } from 'vue'
 import { RESONANCE_FOCUS_RANGES } from '../../audio/resonanceFocus.js'
-import { bright, tint } from '../../ui/accent.js'
-import Knob from '../knobs/Knob.vue'
+import ModulaKnob from '../modula/ModulaKnob.vue'
+import { RESONANCE_FOCUS_GLOBAL } from '../../audio/resonanceFocus.js'
 
 const props = defineProps({
   focus: { type: Object, required: true },
-    accent: { type: String, default: '#8de0a8' },
+  accent: { type: String, default: 'var(--m-accent)' },
   disabled: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:focus'])
 
 const R = RESONANCE_FOCUS_RANGES
+/** Double-click resets to the stock global, the one every factory patch starts from. */
+const DEF = RESONANCE_FOCUS_GLOBAL
 const g = computed(() => props.focus.global)
 
 function setGlobal(name, value) {
@@ -53,90 +55,58 @@ const pct = v => `${Math.round(v * 100)}%`
        ⚠ THE LABELS ARE THE SHIPPING PANEL'S — Threshold / Sharp / Depth, the
        same three words ResonanceZoneControls uses for the same three settings.
        An A/B between two targeting models must not also be an A/B between two
-       vocabularies. They are also short enough to fit a 58 px knob: rendered at
-       full length, "Sensitivity" and "Sharpness" overlapped their neighbours
-       and the row was unreadable. -->
-  <!-- ⚠ ON A PLATE, AND THE ARGUMENT AGAINST ONE WAS WRONG. It was left
-       unplated on the reasoning that a plate is what this panel uses to mean
-       "one thing selected out of several", which these are not. True of the
-       zone plate's PURPOSE and beside the point about its EFFECT: without a
-       background the three knobs float in a flex-1 slot wider than they are,
-       and centring them only moves the gap to both ends — reported as looking
-       off-centre, which is what a group with no edges in a track it does not
-       fill always looks like. The plate is the same one ResonanceZoneControls
-       wears, so the row reads the same under either model.
+       vocabularies.
 
-       HARMONICS STAYS OUTSIDE IT. The plate is the detector — the three
-       settings that decide what counts as a resonance and how much of it goes.
-       Harmonic protection is a statement about which frequencies to leave
-       alone, which is targeting, and it is the one targeting rule that is not
-       a node. Different kind of thing, so it sits beside the box rather than
-       in it. -->
-  <div class="flex items-center justify-center gap-[10px]">
-    <div
-      class="flex items-center gap-[9px] rounded-[7px] px-[10px] py-[9px]"
-      :style="{
-        background: 'rgba(0,0,0,.28)',
-        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accent} 20%, transparent)`,
-        opacity: disabled ? 0.4 : 1,
-      }"
-    >
-    <div class="w-[68px] shrink-0">
-      <Knob
-        :model-value="g.selectivity" @update:model-value="setGlobal('selectivity', $event)"
-        :min="R.selectivity.min" :max="R.selectivity.max" :step="0.5" :value-font-px="11"
-        label="Threshold" :accent="accent" :format-value="plain" :disabled="disabled"
-        title="The global detection threshold. Use focus nodes to offset this."
-      />
-    </div>
-    <div class="w-[68px] shrink-0">
-      <!-- ⚠ GLOBAL, AND THAT IS THE DESIGN RATHER THAN A SIMPLIFICATION.
-           Sharpness says WHAT SHAPE counts as a resonance — a property of the
-           detector. A node's Width says WHERE you are paying attention — a
-           property of the map. Keeping them on different axes is what stops the
-           panel having to explain "node Q versus sharpness", which is the
-           question that sinks every node-style resonance suppressor.
+       The plate is the Modula panel ResoTame's control row sits on, so this
+       group carries no background of its own — the rules either side of it in
+       that row are what mark it as the detector. HARMONICS STAYS OUTSIDE IT:
+       harmonic protection is a statement about which frequencies to leave
+       alone, which is targeting rather than detection. -->
+  <div class="rfc" :class="{ 'is-disabled': disabled }">
+    <ModulaKnob
+      variant="small" :size="44" show-value editable
+      :model-value="g.selectivity" :min="R.selectivity.min" :max="R.selectivity.max" :step="0.5"
+      :default-value="DEF?.selectivity ?? null"
+      label="Threshold" :color="accent" :format-value="plain" :disabled="disabled"
+      title="The global detection threshold. Use focus nodes to offset this. Double-click to reset"
+      @update:model-value="setGlobal('selectivity', $event)"
+    />
+    <!-- ⚠ GLOBAL, AND THAT IS THE DESIGN RATHER THAN A SIMPLIFICATION.
+         Sharpness says WHAT SHAPE counts as a resonance — a property of the
+         detector. A node's Width says WHERE you are paying attention — a
+         property of the map. It is also what keeps the kernel on its uniform
+         fast path: one sharpness means one reference envelope. -->
+    <ModulaKnob
+      variant="small" :size="44" show-value editable :parse-value="t => parseFloat(t) / 100"
+      :model-value="g.sharpness" :min="R.sharpness.min" :max="R.sharpness.max" :step="0.01"
+      :default-value="DEF?.sharpness ?? null"
+      label="Sharp" :color="accent" :format-value="pct" :disabled="disabled"
+      title="What shape counts as a resonance. Not a node width. Double-click to reset"
+      @update:model-value="setGlobal('sharpness', $event)"
+    />
+    <ModulaKnob
+      variant="small" :size="44" show-value editable :parse-value="t => parseFloat(t) / 100"
+      :model-value="g.depth" :min="R.depth.min" :max="R.depth.max" :step="0.01"
+      :default-value="DEF?.depth ?? null"
+      label="Depth" :color="accent" :format-value="pct" :disabled="disabled"
+      title="How much of what is found gets removed. Double-click to reset"
+      @update:model-value="setGlobal('depth', $event)"
+    />
 
-           It is also what keeps the kernel on its uniform fast path: the
-           reference envelope's scale is a property of the whole transform, so
-           each DISTINCT sharpness costs one more inverse FFT per frame. One
-           value means one envelope, always. -->
-      <Knob
-        :model-value="g.sharpness" @update:model-value="setGlobal('sharpness', $event)"
-        :min="R.sharpness.min" :max="R.sharpness.max" :step="0.01" :value-font-px="11"
-        label="Sharp" :accent="accent" :format-value="pct" :disabled="disabled"
-        title="What shape counts as a resonance. Not a node width."
-      />
-    </div>
-    <div class="w-[68px] shrink-0">
-      <Knob
-        :model-value="g.depth" @update:model-value="setGlobal('depth', $event)"
-        :min="R.depth.min" :max="R.depth.max" :step="0.01" :value-font-px="11"
-        label="Depth" :accent="accent" :format-value="pct" :disabled="disabled"
-        title="How much of what is found gets removed."
-      />
-    </div>
-    </div>
-
-    <!-- ⚠ HARMONIC PROTECTION MOVED TO THE PANEL HEADER, and its CEILING went
-         with it — as a number in the button's tooltip rather than as a control.
-         Both were here inside a `hidden` wrapper, so neither had been reachable
-         for some time; moving the switch is what made that visible.
-
-         The switch is global with a ceiling because the flag it replaced was per
-         zone, and it loses nothing measured: the mask blocks 67-88% of every
-         octave from 60 Hz to 20 kHz, which is real protection down where
-         partials are widely spaced and a blanket veto up where sibilance lives.
-         "Protect the fundamental region, work freely above 5 kHz" is the setting
-         the effect most wants, and that is a statement about a FREQUENCY rather
-         than about a partition — one switch and one ceiling say it directly, and
-         say the same thing on every file, where a per-zone flag says it only if
-         the zones happen to be placed sensibly on this particular voice.
-
-         ⚠ `protectCeilHz` IS THEREFORE PINNED AT ITS DEFAULT, 5000 Hz. It is
-         still a parameter and the kernel still reads it; nothing sets it. If it
-         earns a control again it belongs beside the switch, not back here — this
-         plate is the DETECTOR, three knobs describing one decision, and a
-         frequency bound is a different kind of statement. -->
+    <!-- ⚠ MAX CUT AND THE HARMONIC CEILING HAVE NO CONTROL HERE. `maxCut` is
+         still a parameter at its stock value (the row has no room for it, the
+         same call the zone panel made), and `protectCeilHz` lives beside the
+         harmonic switch on the panel, not on this plate: a frequency bound is
+         a different kind of statement from the three knobs of one decision. -->
   </div>
 </template>
+
+<style scoped>
+.rfc {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 14px;
+}
+.rfc.is-disabled { opacity: .5; }
+</style>

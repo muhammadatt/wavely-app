@@ -14,10 +14,10 @@
 import { ensureAirBandWorklet } from '../airBandWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
 
-export const AIR_BAND_DEFAULTS = {
-  air: 6, // dB of air lift, 0–24
-  output: 0, // output trim dB, for level-matched A/B
-}
+// Imported and re-exported (not just re-exported): this module uses it below.
+import { AIR_BAND_DEFAULTS } from '../airBandParams.js'
+
+export { AIR_BAND_DEFAULTS }
 
 /** Map UI param names to kernel param names. */
 export function toKernelParams(params) {

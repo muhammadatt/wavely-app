@@ -349,6 +349,9 @@ const housingWidth = computed(() =>
 const visibleTicks = computed(() => TICKS.filter(t => t > props.floorDb))
 
 const modula = computed(() => props.variant === 'modula' && !isHorizontal.value)
+// Modula laid on its side (the Soft Clipper's IN/OUT pair): the same ladder,
+// with the readout in its well and the kit's caption after it.
+const modulaH = computed(() => props.variant === 'modula' && isHorizontal.value)
 // The Modula scale: 0 dB is engraved as well, and every working-range mark
 // carries its numeral; the gutter is wider for the larger figures.
 const MODULA_LABELLED = new Set([0, -6, -12, -18, -24, -36])
@@ -534,6 +537,11 @@ function ariaText(bar) {
         <slot name="below" />
       </div>
     </template>
+
+    <div v-else-if="modulaH && (showReadout || label)" class="flex flex-row items-center gap-[8px]">
+      <span v-if="showReadout" class="lm-well" :style="{ color: clipped ? '#ff9d90' : undefined }">{{ readout }}</span>
+      <span v-if="label" style="font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd">{{ label }}</span>
+    </div>
 
     <div
       v-else-if="showReadout || label"

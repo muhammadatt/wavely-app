@@ -4,16 +4,26 @@ import { useAirBand } from '../../composables/useAirBand.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { airBandSections } from '../../audio/airBandProcessor.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
-import Knob from '../knobs/Knob.vue'
+import ModulaKnob from '../modula/ModulaKnob.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginPresets } from '../../composables/usePluginPresets.js'
+import { AIR_BOOST_PRESET_PLUGIN } from '../../audio/pluginPresets/airBoost.js'
+import {
+  AIR_BAND_DEFAULTS, AIR_MAX_DB, AIR_OUTPUT_MIN_DB, AIR_OUTPUT_MAX_DB,
+} from '../../audio/airBandParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
   airBandAir, airBandOutput, airBandPreview, airBandInputLevels, airBandOutputLevels,
-  togglePreview, syncAir, syncOutput, apply, teardown, closeModal,
+  togglePreview, syncAir, syncOutput, applyParams, apply, teardown, closeModal,
 } = useAirBand()
+
+const presets = usePluginPresets(AIR_BOOST_PRESET_PLUGIN, {
+  read: () => ({ air: airBandAir.value, output: airBandOutput.value }),
+  write: p => applyParams(p),
+})
 
 const { state } = useEditorState()
 
@@ -22,13 +32,14 @@ onMounted(() => {
   if (!airBandPreview.value) togglePreview()
 })
 
-const ACCENT = '#7fd4e8'
+const ACCENT = '#e8a33d'
+const METER_H = 200
 
 // ── Response curve ──────────────────────────────────────────────────────────
 // Drawn from the same coefficient builders the kernel uses, so what is on
 // screen is the filter that is running rather than a redrawn approximation.
 const CURVE_W = 360
-const CURVE_H = 96
+const CURVE_H = 112
 const F_MIN = 100
 const F_MAX = 20000
 const DB_MAX = 14
@@ -64,11 +75,11 @@ const curveFill = computed(
 )
 
 function formatAir(v) {
-  return `+${v.toFixed(1)}`
+  return `+${v.toFixed(1)} dB`
 }
 
 function formatOutput(v) {
-  return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
+  return `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
 }
 
 function gridLabel(f) {
@@ -115,31 +126,36 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="air-band"
     :z="z"
-    :width="600"
+    :width="680"
     :accent="ACCENT"
-    brand-lead="AIR"
-    brand-tail="BOOST"
+    design="modula"
+    brand-lead="AIR BOOST"
+    :presets="presets"
+    :presets-disabled="!airBandPreview"
+    presets-disabled-hint="Turn Air Boost on to use presets"
     :engaged="airBandPreview"
     show-preview
     previewable
     :previewing="state.isPlaying"
     show-apply
     :apply-disabled="!airBandPreview"
-    apply-disabled-hint="Turn AirBoost on to apply it"
+    apply-disabled-hint="Turn Air Boost on to apply it"
     @toggle-engaged="togglePreview"
     @toggle-preview="togglePlayback"
     @apply="applyAndClose"
     @close="close"
   >
-    <div class="px-[26px] pt-[22px] pb-[26px]">
-      <div class="flex items-center justify-between gap-[22px]">
-        <LevelMeter :levels="airBandInputLevels" label="IN" :height="120" />
+    <div class="ab-grid">
+      <div class="ab-meter">
+        <LevelMeter variant="modula" scale-side="left" :levels="airBandInputLevels" label="IN" :height="METER_H" />
+      </div>
 
-        <div class="flex-1 flex flex-col items-center">
-          <!-- Response curve -->
+      <div class="ab-panel">
+        <!-- Response curve, from the same coefficient builders the kernel runs. -->
+        <div>
           <svg
             :viewBox="`0 0 ${CURVE_W} ${CURVE_H}`"
-            class="w-full"
+            class="ab-well"
             :style="{ height: `${CURVE_H}px` }"
             preserveAspectRatio="none"
           >
@@ -149,59 +165,94 @@ async function applyAndClose() {
               stroke="rgba(255,255,255,.07)" stroke-width="1"
             />
             <line
-              :x1="0" :y1="CURVE_H" :x2="CURVE_W" :y2="CURVE_H"
-              stroke="rgba(255,255,255,.14)" stroke-width="1"
+              :x1="0" :y1="CURVE_H - 0.5" :x2="CURVE_W" :y2="CURVE_H - 0.5"
+              stroke="rgba(255,255,255,.16)" stroke-width="1"
             />
-            <path :d="curveFill" :fill="ACCENT" fill-opacity="0.12" />
+            <path :d="curveFill" :fill="ACCENT" fill-opacity="0.14" />
             <path :d="curvePath" :stroke="ACCENT" stroke-width="2" fill="none" />
           </svg>
-          <div class="relative w-full mt-[4px] h-[10px]">
-            <span
-              v-for="f in GRID_FREQS" :key="f"
-              class="absolute top-0"
-              :style="{
-                ...gridLabelStyle(f),
-                fontWeight: 600,
-                fontSize: '8px',
-                fontFamily: 'JetBrains Mono, monospace',
-                letterSpacing: '0.08em',
-                color: 'rgba(255,255,255,.28)',
-              }"
-            >{{ gridLabel(f) }}</span>
-          </div>
-
-          <div class="flex gap-[38px] mt-[16px]">
-            <div class="w-[128px]">
-              <Knob
-                :model-value="airBandAir"
-                @update:model-value="syncAir"
-                :min="0" :max="12" :step="0.1"
-                label="Air" :accent="ACCENT" :format-value="formatAir"
-                :disabled="!airBandPreview"
-              />
-            </div>
-            <div class="w-[92px]">
-              <Knob
-                :model-value="airBandOutput"
-                @update:model-value="syncOutput"
-                :min="-12" :max="12" :step="0.1" :value-font-px="13"
-                label="Output" :accent="ACCENT" :format-value="formatOutput"
-                :disabled="!airBandPreview"
-              />
-            </div>
+          <div class="ab-axis">
+            <span v-for="f in GRID_FREQS" :key="f" :style="gridLabelStyle(f)">{{ gridLabel(f) }}</span>
           </div>
         </div>
 
-        <LevelMeter :levels="airBandOutputLevels" label="OUT" :height="120" />
+        <ModulaKnob
+          variant="ticks" :size="88" show-value editable
+          :model-value="airBandAir" :min="0" :max="AIR_MAX_DB" :step="0.1"
+          :default-value="AIR_BAND_DEFAULTS.air"
+          label="Air" :color="ACCENT" :format-value="formatAir" :disabled="!airBandPreview"
+          title="How much air: the whole shelf and its five bells scale together. Double-click to reset; click the value to type one"
+          @update:model-value="syncAir"
+        />
       </div>
 
-      <p
-        class="mt-[16px] text-center"
-        style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
-      >
-        Maag-style air lift — a wide shelf shaped by five overlapping bells.
-        Adds presence without the harshness of a narrow high boost.
-      </p>
+      <div class="ab-meter">
+        <LevelMeter variant="modula" scale-side="right" :levels="airBandOutputLevels" label="OUT" :height="METER_H">
+          <template #below>
+            <ModulaKnob
+              variant="trim" :model-value="airBandOutput" show-value
+              :min="AIR_OUTPUT_MIN_DB" :max="AIR_OUTPUT_MAX_DB" :step="0.1"
+              :default-value="AIR_BAND_DEFAULTS.output" :format-value="formatOutput"
+              aria-label="Output" :disabled="!airBandPreview"
+              title="Output: a trim for a level-matched A/B. Double-click to reset"
+              @update:model-value="syncOutput"
+            />
+          </template>
+        </LevelMeter>
+      </div>
     </div>
+
+    <p class="ab-about">
+      Maag-style air lift — a wide shelf shaped by five overlapping bells.
+      Adds presence without the harshness of a narrow high boost.
+    </p>
   </FloatingWindow>
 </template>
+
+<style scoped>
+.ab-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+.ab-meter {
+  display: flex;
+  justify-content: center;
+  padding: 12px 4px;
+}
+.ab-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  padding: 14px 14px 16px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.ab-panel > :deep(.m-knob) { align-self: center; }
+.ab-well {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  background: #0b0e13;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, .85), 0 0 0 1px #1c222c, 0 1px 0 rgba(255, 255, 255, .05);
+}
+.ab-axis {
+  position: relative;
+  height: 10px;
+  margin-top: 4px;
+  font: 600 8px/1 var(--m-font-mono);
+  letter-spacing: .08em;
+  color: var(--m-ink-4);
+}
+.ab-axis span { position: absolute; top: 0; }
+.ab-about {
+  margin: 12px 8px 0;
+  text-align: center;
+  font: 500 10px/1.5 var(--m-font-ui);
+  color: var(--m-ink-4);
+}
+</style>

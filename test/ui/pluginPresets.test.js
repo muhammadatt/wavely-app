@@ -654,3 +654,12 @@ test('HF Limiter presets: the panel defaults light Default; the voice level stay
   assert.equal(p.shape, HF_LIMITER_DEFAULTS.shape)
   assert.equal(p.range, 0)
 })
+
+test('Air Boost presets: the panel defaults light Default, and stored values are clamped to the panel', async () => {
+  const { AIR_BOOST_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { AIR_BAND_DEFAULTS } = await import('../../src/audio/airBandParams.js')
+  assert.equal(matchPreset(AIR_BOOST_PRESET_PLUGIN, { ...AIR_BAND_DEFAULTS }), 'factory:default')
+  assert.equal(pickParams(AIR_BOOST_PRESET_PLUGIN, { air: 30, output: 0 }).air, 12)
+  assert.equal(pickParams(AIR_BOOST_PRESET_PLUGIN, { air: 3, output: -40 }).output, -12)
+})

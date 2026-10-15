@@ -4,9 +4,10 @@ import { useSoftClipper } from '../../composables/useSoftClipper.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import { SCOPE_SECONDS } from '../../audio/effects/softClipper.js'
-import Knob from '../knobs/Knob.vue'
-import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
-import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
+import ModulaKnob from '../modula/ModulaKnob.vue'
+import ModulaSegmented from '../modula/ModulaSegmented.vue'
+import ModulaChip from '../modula/ModulaChip.vue'
+import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import ClipperScope from '../meters/ClipperScope.vue'
 import { lampFraction } from '../meters/ballistics.js'
@@ -68,11 +69,10 @@ onMounted(() => {
   if (!clipperPreview.value) togglePreview()
 })
 
-// A colour of its own, distinct from the two compressors it typically
-// precedes (OptoSmooth's amber, FET Punch's steel blue) — this is a
-// transient-taming stage, not a compressor, and the panel should read
-// differently at a glance.
-const ACCENT = '#ff8f6b'
+// The kit's amber, like every Modula panel. The admin tuning panel keeps its
+// own warning amber so an override still reads as one.
+const ACCENT = '#e8a33d'
+const TUNING = '#ffb020'
 
 // The THRESHOLD mode switch is gone: the panel is fixed-ceiling only. See
 // useSoftClipper's thresholdMode note for why adaptive stopped being offered.
@@ -181,12 +181,14 @@ async function applyAndClose() {
 }
 
 function formatGain(v) {
-  return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
+  return `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
 }
 
 function formatDb(v) {
-  return v.toFixed(1)
+  return `${v.toFixed(1)} dBFS`
 }
+
+const LIMITER_OPTIONS = LIMITER_MODES.map(m => ({ value: m.id, label: m.label, title: m.title }))
 
 // A preset re-runs for a changed region, but only while one is active — once
 // the ceiling has been turned by hand it is the user's number. Debounced,
@@ -249,19 +251,6 @@ const scopeHeight = computed(() => SCOPE_H + heightDelta.value)
  */
 const PANEL_W = 900
 
-/**
- * ⚠ THE FACEPLATE IS LIT SO THE WELLS READ AS RECESSED. It was
- * `#1a1613 -> #0d0a08`, which is darker than the control band's own
- * `rgba(0,0,0,.28)` wash and barely lighter than the display's `#07090b` — so
- * the two sunken areas, which are most of the panel, had almost no edge against
- * the surface they are sunk into. The layout reads as depth or it reads as
- * nothing, and it was reading as nothing.
- *
- * Warm, because the accent is, and still dark enough that the display is
- * plainly the brightest thing on the panel — which it should be, since it is
- * the instrument.
- */
-const FACEPLATE = 'linear-gradient(155deg,#2b2320,#191310 62%)'
 
 /**
  * ⚠ THE STRIP'S TWO LIVE READINGS ARE DAMPED IN THE COMPOSABLE, beside the loop
@@ -340,12 +329,14 @@ const engagedText = computed(() => `${clipperEngagedReadout.value.toFixed(0)}%`)
  * 396 in the design, against its 1040 faceplate — a little under half the body
  * width, so the pair spans it with the two readouts between them. At 900 that
  * same proportion is 336; a fixed 396 would have the two meters and their
- * readouts filling the row edge to edge with nothing between them.
+ * readouts filling the row edge to edge with nothing between them. Modula's
+ * readout well and caption sit beside each ladder, so it is 300 here: at 336
+ * the OUT caption ran past the body's edge.
  *
  * The ladder rounds this down to whole segments internally (see LevelMeter's
  * `rows`), so a few pixels either way costs a segment at most.
  */
-const METER_LEN = 336
+const METER_LEN = 300
 
 /**
  * How close the ceiling has to be to a setter's value to count as "this is what
@@ -399,9 +390,8 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
     :width="PANEL_W"
     :top="72"
     :accent="ACCENT"
-    brand-lead="SOFT"
-    brand-tail="CLIPPER"
-    :background="FACEPLATE"
+    design="modula"
+    brand-lead="SOFT CLIPPER"
     :engaged="clipperPreview"
     show-delta
     :delta="clipperDelta"
@@ -421,7 +411,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
     @apply="applyAndClose"
     @close="close"
   >
-    <div style="padding:20px 26px 24px;display:flex;flex-direction:column;gap:16px">
+    <div class="sc-face">
       <!-- ── Readout strip ────────────────────────────────────────────────
            Right-aligned above the display: three readings about the stage, in
            the order they answer questions about it — is it clipping, how hard,
@@ -429,336 +419,325 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
 
            ⚠ RESIDUAL IS NOT HERE. It is on the tuning panel instead: it is the
            reading that separates two settings the other two agree on, which is
-           a research question rather than a working one, and the design gives
-           this strip three slots. -->
-      <div style="display:flex;align-items:center;justify-content:flex-end;gap:20px;padding:0 4px">
-        <div style="display:flex;align-items:center;gap:8px">
+           a research question rather than a working one. -->
+      <div class="sc-strip">
+        <div class="sc-strip-item">
           <span
-            style="width:15px;height:15px;border-radius:50%;border:1px solid rgba(255,255,255,.12)"
+            class="sc-lamp"
             :style="{
-              background: `color-mix(in srgb, ${ACCENT} ${(lampBrightness * 100).toFixed(1)}%, #1a1512)`,
+              background: `color-mix(in srgb, ${ACCENT} ${(lampBrightness * 100).toFixed(1)}%, var(--m-led-off))`,
               boxShadow: lampBrightness > 0.02
                 ? `0 0 ${(4 + lampBrightness * 12).toFixed(1)}px color-mix(in srgb, ${ACCENT} ${(lampBrightness * 70).toFixed(0)}%, transparent)`
                 : 'none',
             }"
           ></span>
-          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">CLIP LAMP</span>
+          <span class="m-caption">Clip</span>
         </div>
-        <span style="width:1px;height:12px;background:rgba(255,255,255,.09)"></span>
-        <!-- ⚠ FIXED WIDTH AND TABULAR FIGURES. These change every tenth of a
-             second, and a proportional numeral set re-flows the row on every
-             digit change — "3.2" and "0.4" are different widths, and so are
-             "9%" and "100%". The label after them then slides, which reads as
-             the whole strip twitching. Right-aligned inside the fixed box so
-             the decimal point stays put as the integer digit comes and goes. -->
-        <div style="display:flex;align-items:baseline;gap:7px">
-          <span style="font:700 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.72);font-variant-numeric:tabular-nums;min-width:30px;text-align:right">{{ peakOverText }}</span>
-          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">dB PEAK</span>
+        <span class="sc-strip-rule"></span>
+        <!-- ⚠ FIXED WIDTH AND TABULAR FIGURES: these change every tenth of a
+             second, and a proportional numeral re-flows the row on every digit. -->
+        <div class="sc-strip-item">
+          <span class="sc-num" style="font-variant-numeric:tabular-nums;min-width:30px;text-align:right">{{ peakOverText }}</span>
+          <span class="m-caption"><span style="text-transform:none">dB</span> peak</span>
         </div>
-        <span style="width:1px;height:12px;background:rgba(255,255,255,.09)"></span>
-        <div style="display:flex;align-items:baseline;gap:7px">
-          <span style="font:700 11px 'JetBrains Mono',monospace;color:#ffb094;font-variant-numeric:tabular-nums;min-width:34px;text-align:right">{{ engagedText }}</span>
-          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">ENGAGED</span>
+        <span class="sc-strip-rule"></span>
+        <div class="sc-strip-item">
+          <span class="sc-num" style="font-variant-numeric:tabular-nums;min-width:34px;text-align:right" :style="{ color: ACCENT }">{{ engagedText }}</span>
+          <span class="m-caption">Engaged</span>
         </div>
       </div>
 
       <!-- ── The instrument ───────────────────────────────────────────────
            THIS IS THE CONTROL SURFACE, not an illustration of one. The ceiling
            line is the primary control: drag it and the whole picture re-shades
-           live, because the shading is computed against the current threshold
-           rather than the one each point was recorded under. The knob below is
-           the precise way to reach the same number, not the primary way. -->
-      <ClipperScope
-        :data-fn="getScope"
-        :envelope-fn="envelope"
-        :window-seconds="SCOPE_SECONDS * 2"
-        mode="fixed"
-        :fixed-threshold-db="fixedThresholdDb"
-        @update:fixed-threshold-db="syncFixedThreshold"
-        :headroom-db="headroomDb"
-        @update:headroom-db="syncHeadroom"
-        @request-play="togglePlayback"
-        :accent="ACCENT"
-        :height="scopeHeight"
-        title="Clipper scope: input envelope against the ceiling, playhead at the centre — played audio to its left, audio about to play to its right. Drag the line to set the ceiling."
-      />
+           live. The knob below is the precise way to reach the same number. -->
+      <div class="sc-well">
+        <ClipperScope
+          :data-fn="getScope"
+          :envelope-fn="envelope"
+          :window-seconds="SCOPE_SECONDS * 2"
+          mode="fixed"
+          :fixed-threshold-db="fixedThresholdDb"
+          @update:fixed-threshold-db="syncFixedThreshold"
+          :headroom-db="headroomDb"
+          @update:headroom-db="syncHeadroom"
+          @request-play="togglePlayback"
+          :accent="ACCENT"
+          :height="scopeHeight"
+          title="Clipper scope: input envelope against the ceiling, playhead at the centre — played audio to its left, audio about to play to its right. Drag the line to set the ceiling."
+        />
+      </div>
 
       <!-- ── Level ladders ────────────────────────────────────────────────
-           HORIZONTAL AND SIDE BY SIDE, which is the design's reading of what
-           these are for: IN and OUT are a comparison, and a comparison wants
-           the two scales parallel and adjacent rather than at opposite edges of
-           the faceplate with the display between them.
-
-           Rotated rather than reimplemented — the ladder, its zones and its
-           clip lamp are the same instrument every other plugin uses, and a
-           second horizontal variant would be the same thing twice. -->
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:24px">
+           HORIZONTAL AND SIDE BY SIDE: IN and OUT are a comparison, and a
+           comparison wants the two scales parallel and adjacent. -->
+      <div class="sc-meters">
         <LevelMeter
-          label="IN"
-          orientation="horizontal"
-          :levels="clipperInputLevels"
-          :height="METER_LEN"
-          :show-scale="false"
+          variant="modula" label="IN" orientation="horizontal"
+          :levels="clipperInputLevels" :height="METER_LEN" :show-scale="false"
         />
         <LevelMeter
-          label="OUT"
-          orientation="horizontal"
-          :levels="clipperOutputLevels"
-          :height="METER_LEN"
-          :show-scale="false"
+          variant="modula" label="OUT" orientation="horizontal"
+          :levels="clipperOutputLevels" :height="METER_LEN" :show-scale="false"
         />
       </div>
 
       <!-- ── Control band ─────────────────────────────────────────────────
-           One strip: the two knobs at its ends, the two decisions in the
-           middle. The ceiling knob sits beside the setters that write it and
-           the line that drags it, so the three controls for one number are
-           finally adjacent and in reading order — press a setter, see the
-           number, nudge it. -->
-      <div style="display:flex;align-items:center;gap:18px;padding:16px 22px;border-radius:12px;background:rgba(0,0,0,.28);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
-        <div style="width:92px;flex-shrink:0">
-          <Knob
-            :model-value="fixedThresholdDb"
-            @update:model-value="syncFixedThreshold"
-            :min="-24" :max="-1" :step="0.5"
-            label="Ceiling" :accent="ACCENT" :format-value="formatDb"
-            :value-font-px="15"
-            :disabled="!clipperPreview"
-            :title="ceilingTitle"
-          />
-        </div>
+           The two knobs at its ends, the two decisions in the middle. The
+           ceiling knob sits beside the setters that write it and the line
+           that drags it, so the three controls for one number are adjacent. -->
+      <div class="sc-band">
+        <ModulaKnob
+          variant="ticks" :size="72" show-value editable
+          :model-value="fixedThresholdDb" :min="-24" :max="-1" :step="0.5"
+          label="Ceiling" :color="ACCENT" :format-value="formatDb"
+          :disabled="!clipperPreview" :title="ceilingTitle"
+          @update:model-value="syncFixedThreshold"
+        />
 
-        <div style="width:1px;align-self:stretch;background:rgba(255,255,255,.07);flex-shrink:0"></div>
+        <span class="sc-rule" aria-hidden="true"></span>
 
-        <div style="flex:1;display:flex;align-items:flex-start;justify-content:space-evenly;gap:28px">
+        <div class="sc-middle">
           <!-- ── The setters ─────────────────────────────────────────────
-               ⚠ THESE DO NOT LATCH, AND THAT IS THE DESIGN'S POINT. A latching
-               bank claims to own the value, which stops being true the moment
-               the knob or the line is touched — the readout-that-goes-stale
-               failure this panel has hit before. The line under the bank
-               reports which preset the ceiling is CURRENTLY sitting on, derived
-               live rather than remembered — so it goes out by itself the moment
-               the knob or the line moves the value elsewhere. -->
-          <div style="display:flex;flex-direction:column;align-items:center;gap:9px;flex-shrink:0">
-            <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4);white-space:nowrap">SET CEILING</span>
-            <div style="display:flex;align-items:stretch;gap:8px">
-              <button
+               ⚠ THESE DO NOT LATCH. Each lamp is DERIVED from the live
+               ceiling, so it lights when the ceiling sits on that preset's
+               value and goes out by itself the moment the knob or the line
+               moves it — nothing remembered, nothing to go stale. -->
+          <div class="sc-group">
+            <span class="m-caption">Set ceiling</span>
+            <div class="sc-setters">
+              <ModulaChip
                 v-for="p in ceilingSetters"
                 :key="p.id"
-                type="button"
+                lamp
+                :model-value="p.active"
+                :label="p.label"
+                :color="ACCENT"
                 :title="ceilingDisabledReason ?? p.title"
                 :disabled="!!ceilingDisabledReason || !p.ready"
                 @click="setCeilingFromPreset(p.id)"
-                class="cursor-pointer disabled:cursor-not-allowed"
-                :style="[
-                  {
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    padding: '9px 14px', borderRadius: '10px',
-                    transition: 'background-color .15s ease, border-color .15s ease',
-                  },
-                  p.active
-                    ? {
-                      background: `color-mix(in srgb, ${ACCENT} 20%, transparent)`,
-                      border: `1px solid color-mix(in srgb, ${ACCENT} 55%, transparent)`,
-                    }
-                    : { background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.08)' },
-                  (!!ceilingDisabledReason || !p.ready)
-                    ? { opacity: .3, filter: 'grayscale(1)' }
-                    : { opacity: 1 },
-                ]"
-              >
-                <span
-                  style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.12em"
-                  :style="{ color: p.active ? '#ffb094' : 'rgba(255,255,255,.75)' }"
-                >{{ p.label }}</span>
-              </button>
+              />
             </div>
-
-            <!-- ⚠ RESERVED HEIGHT, NOT A CONDITIONAL. The line is empty
-                 whenever the ceiling is not sitting on a preset, which is most
-                 of the time — and an element that disappears would change the
-                 band's height every time the ceiling was nudged off a preset
-                 value, jumping the display above it. Always present, always one
-                 line, sometimes blank. -->
-            <span
-              style="font:600 8.5px 'Inter',system-ui;letter-spacing:.08em;white-space:nowrap;color:rgba(255,255,255,.35);min-height:11px;font-variant-numeric:tabular-nums"
-            >{{ setterCaption }}</span>
+            <!-- ⚠ RESERVED HEIGHT, NOT A CONDITIONAL: an element that came and
+                 went would jump the display every time the ceiling left a preset. -->
+            <span class="m-note sc-note">{{ setterCaption }}</span>
           </div>
 
           <!-- ── Peak control ───────────────────────────────────────────── -->
-          <div style="display:flex;flex-direction:column;align-items:center;gap:9px;flex-shrink:0">
-            <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4);white-space:nowrap">PEAK CONTROL</span>
-            <DeviceChoiceRocker
-              :model-value="limiterMode"
+          <div class="sc-group">
+            <span class="m-caption">Peak control</span>
+            <ModulaSegmented
+              :model-value="limiterMode" :options="LIMITER_OPTIONS"
+              aria-label="Peak control" :disabled="!clipperPreview"
               @update:model-value="setLimiterMode"
-              :options="LIMITER_MODES.map(m => ({ value: m.id, label: m.label, title: m.title }))"
-              :accent="ACCENT"
-              :caption="limiterCaption"
-              :disabled="!clipperPreview"
-              label="Peak control"
             />
+            <span class="m-note sc-note">{{ limiterCaption }}</span>
           </div>
         </div>
 
-        <div style="width:1px;align-self:stretch;background:rgba(255,255,255,.07);flex-shrink:0"></div>
+        <span class="sc-rule" aria-hidden="true"></span>
 
         <!-- ── Output ───────────────────────────────────────────────────
-             ⚠ THE TRAVEL IS 0..+24, NOT ±6, and it had to widen. As a pure
-             A/B trim ±6 was plenty; as makeup it is not — the four ceiling
-             presets ask for +9.1 to +10.4 dB on real material, so the old knob
-             could not reach any of them.
-
-             ⚠ AND IT IS UNIPOLAR: nothing in this stage raises the peak, so
-             the measured makeup is never negative and the -12 dB this knob
-             used to carry was travel AUTO could not reach. It also pushed
-             0 dB round to about 10 o'clock; it is now the counter-clockwise
-             stop, which is where a gain knob's zero belongs. -->
-        <div style="width:92px;flex-shrink:0;display:flex;flex-direction:column;align-items:center">
-          <div class="relative w-full" :style="{ opacity: autoMakeup ? 0.78 : 1 }">
-            <Knob
+             ⚠ THE TRAVEL IS 0..+24 AND UNIPOLAR: as makeup it must reach the
+             +9 to +10 dB the ceiling presets ask for, and nothing in this
+             stage raises the peak, so a negative makeup is travel AUTO could
+             never reach. The knob stays draggable while AUTO is lit: touching
+             it takes over and drops AUTO. -->
+        <div class="sc-output">
+          <div :style="{ opacity: autoMakeup ? 0.78 : 1 }">
+            <ModulaKnob
+              variant="ticks" :size="72" show-value editable
               :model-value="outputTrimDb"
-              @update:model-value="syncOutputTrim"
               :min="SOFT_CLIPPER_MAKEUP_MIN_DB" :max="SOFT_CLIPPER_MAKEUP_MAX_DB" :step="0.1"
-              label="Output" :accent="ACCENT" :format-value="formatGain"
-              :value-font-px="15"
+              label="Output" :color="ACCENT" :format-value="formatGain"
               :disabled="!clipperPreview"
               title="Makeup gain. AUTO hands back what the ceiling took off the peaks, so the output peak lands where the source's was."
+              @update:model-value="syncOutputTrim"
             />
-            <!-- ⚠ NO AUTO BADGE ON THE KNOB, unlike OptoSmooth and FET Punch,
-                 and both reasons were only visible by rendering it. This knob
-                 is 92 px with a 15 px numeral where theirs are 78 px, so a pill
-                 pinned to its top-right is CLIPPED by the column and sits on
-                 the arc. And it would be the second AUTO in a 92 px column —
-                 the button is 40 px below it with only the label between. The
-                 dimmed knob plus the lit button say it once, which is enough
-                 when the two are always on screen together. -->
           </div>
-          <!-- The knob stays draggable while AUTO is lit: touching it takes
-               over and drops AUTO, which is the only way a user can set an
-               output gain and have it stick. Discarding the drag instead reads
-               as a broken knob — the failure OptoSmooth shipped once. -->
-          <button
-            class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
-            :style="{
-              background: autoMakeup ? 'rgba(245,166,35,.16)' : 'rgba(255,255,255,.05)',
-              border: `1px solid ${autoMakeup ? 'rgba(245,166,35,.42)' : 'rgba(255,255,255,.09)'}`,
-              color: autoMakeup ? '#f7c877' : 'rgba(255,255,255,.4)',
-              font: `700 8.5px 'JetBrains Mono',monospace`,
-              letterSpacing: '.1em',
-              opacity: clipperPreview ? 1 : 0.4,
-            }"
-            :disabled="!clipperPreview"
+          <ModulaLedPill
+            size="sm" label="AUTO" :color="ACCENT"
+            :model-value="autoMakeup" :disabled="!clipperPreview"
             :title="autoMakeup
               ? 'Auto makeup on. Click to take manual control.'
               : 'Auto makeup off. Click to hand the removed peak back as gain.'"
-            @click="toggleAutoMakeup"
-          >AUTO</button>
+            @update:model-value="toggleAutoMakeup"
+          />
         </div>
       </div>
 
       <!-- ⚠ HIDDEN ADMIN TUNING PANEL — see softClipperTuning.js. Off unless
-           ?softClipperTuning=1 (or the localStorage key) is set, so the shipped
-           panel stays a ceiling, two knobs and the presets. The amber badge is
-           the same signal VoiceRx's baseline override uses, for the same
-           reason: an override that is not visibly an override is how a
-           measurement gets taken against the wrong build.
+           ?softClipperTuning=1 (or the localStorage key) is set. The amber
+           badge is the same signal VoiceRx's baseline override uses: an
+           override that is not visibly an override is how a measurement gets
+           taken against the wrong build.
 
-           TWO KINDS OF CONTROL LIVE HERE and the difference matters. Limiter,
-           Knee and HF Emphasis are SHIPPED kernel behaviour whose knobs are
-           hidden because they are research controls — the kernel's defaults
-           are what a user gets either way, and turning one here changes only
-           this session. The Drive ratios are SCAFFOLDING: they override fixed
-           constants, and they come out once the ratios are chosen. -->
-      <div v-if="tuningOn" class="mt-[16px] pt-[12px]" style="border-top:1px dashed rgba(255,176,32,.35)">
-        <div class="flex items-center justify-center mb-[10px]">
-          <span style="font:700 8px 'Inter',system-ui;letter-spacing:.08em;color:rgba(255,176,32,.9)">
-            ⚠ ADMIN TUNING — NOT SHIPPED
-          </span>
-          <!-- ⚠ RESIDUAL LIVES HERE NOW, not on the faceplate. It is the
-               reading that separates two settings the lamp and ENGAGED agree
-               on — measured, peak reduction can move 0.1 dB across a knob
-               while the residual moves 2.5 — which makes it a research
-               instrument rather than a working one. The design gives the
-               readout strip three slots; this is the one that came off. -->
-          <span style="font:600 8px ui-monospace,monospace;color:rgba(255,255,255,.45)">
+           Limiter, Knee and HF Emphasis are SHIPPED kernel behaviour whose
+           knobs are hidden because they are research controls — turning one
+           here changes only this session. -->
+      <div v-if="tuningOn" class="sc-tuning">
+        <div class="sc-tuning-head">
+          <span>⚠ ADMIN TUNING — NOT SHIPPED</span>
+          <!-- ⚠ RESIDUAL LIVES HERE, not on the faceplate: it separates two
+               settings the lamp and ENGAGED agree on, a research reading. -->
+          <span class="m-note">
             {{ clipperResidualDbc <= -120 ? '—' : clipperResidualDbc.toFixed(1) }} dBc RESIDUAL
           </span>
         </div>
 
-        <!-- Shipped behaviour, hidden controls. -->
-        <div class="flex justify-center items-start gap-[16px]">
-          <div class="w-[74px]">
-            <!-- THE HYBRID PEAK PATH. A lookahead limiter ahead of the curve,
-                 taking peaks down with a smooth gain envelope instead of by
-                 reshaping samples — so its error is intermodulation and
-                 slight pumping rather than the harmonic series the curve
-                 makes. The knob is a BALANCE: it decides how the peak control
-                 is shared, not how much of it there is. The ceiling still sets
-                 that.
-                 ⚠ OFF THE FACEPLATE BECAUSE IT CHANGES THE STAGE'S LATENCY
-                 while engaged (50 samples -> 242): toggling it under a running
-                 preview shifts the timeline by that much, which is a research
-                 control's business and not a user's. See LIMITER_MAX_ABOVE_DB. -->
-            <Knob
-              :model-value="limiter"
+        <div class="sc-tuning-row">
+          <!-- THE HYBRID PEAK PATH: a lookahead limiter ahead of the curve. A
+               BALANCE, not an amount — the ceiling still sets that. ⚠ Off the
+               faceplate because it changes the stage's latency while engaged
+               (50 samples -> 242). See LIMITER_MAX_ABOVE_DB. -->
+          <div class="sc-group">
+            <ModulaKnob
+              variant="small" :size="44" show-value
+              :model-value="limiter" :min="0" :max="100" :step="1"
+              label="Limiter" :color="TUNING" :format-value="v => v.toFixed(0)"
+              :disabled="!clipperPreview"
               @update:model-value="syncLimiter"
-              :min="0" :max="100" :step="1"
-              label="Limiter" accent="#ffb020" :format-value="v => v.toFixed(0)"
-              :value-font-px="13"
-              :disabled="!clipperPreview"
             />
-            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-              {{ limiterMode ? limiterMode.toUpperCase() : 'between modes' }}
-            </p>
+            <span class="m-note">{{ limiterMode ? limiterMode.toUpperCase() : 'between modes' }}</span>
           </div>
-          <div class="w-[74px]">
-            <!-- AIMING, not cleanliness. The detector reads the unfiltered
-                 downmix while the curve sees the pre-emphasised one, so this
-                 decides WHICH transients get worked on. Peak-matched, 0 is the
-                 cleanest setting by 2.2-3.4 dB and there is no interior
-                 optimum — so there is nothing here for a user to find by
-                 turning it, and the pinned value is a judgement rather than a
-                 measurement. That is exactly why the knob is here: the aiming
-                 has never been measured, and this is how it gets measured.
-                 The caption reads back the lift the compensation is giving the
-                 threshold, which is the most direct evidence of what the knob
-                 is doing on THIS material — near zero means this passage has
-                 nothing above the corner to aim at. -->
-            <Knob
-              :model-value="emphasisDb"
+          <!-- AIMING, not cleanliness: decides WHICH transients get worked on.
+               The caption reads back the lift the compensation gives the
+               threshold on THIS material. -->
+          <div class="sc-group">
+            <ModulaKnob
+              variant="small" :size="44" show-value
+              :model-value="emphasisDb" :min="0" :max="12" :step="0.5"
+              label="HF Emph" :color="TUNING" :format-value="v => v.toFixed(1)"
+              :disabled="!clipperPreview"
               @update:model-value="syncEmphasis"
-              :min="0" :max="12" :step="0.5"
-              label="HF Emph" accent="#ffb020" :format-value="v => v.toFixed(1)"
-              :value-font-px="13"
-              :disabled="!clipperPreview"
             />
-            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-              aiming · lift {{ clipperLiftDb.toFixed(2) }} dB
-            </p>
+            <span class="m-note">aiming · lift {{ clipperLiftDb.toFixed(2) }} dB</span>
+          </div>
+          <!-- The knee. Depth-matched at the anchor, so this moves character
+               and not amount. -->
+          <div class="sc-group">
+            <span class="m-caption">Knee</span>
+            <ModulaSegmented
+              :model-value="shape" :options="SHAPE_OPTIONS" :color="TUNING"
+              aria-label="Knee" :disabled="!clipperPreview"
+              @update:model-value="setShape"
+            />
+            <span class="m-note">{{ SHAPE_CAPTION[shape] }}</span>
           </div>
         </div>
-
-        <!-- The knee. Depth-matched at the anchor, so this moves character and
-             not amount — and peak-matched it is worth at most 0.7 dB against
-             HF Emphasis's 3.4, which is why it is the one that came off the
-             faceplate rather than Drive. -->
-        <div class="flex items-center justify-center gap-[9px] mt-[12px]">
-          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">KNEE</span>
-          <DeviceTravelSlide
-            :model-value="shape"
-            @update:model-value="setShape"
-            :options="SHAPE_OPTIONS"
-            accent="#ffb020"
-            :disabled="!clipperPreview"
-            :width="120"
-            label="Knee"
-          />
-          <span style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            {{ SHAPE_CAPTION[shape] }}
-          </span>
-        </div>
-
       </div>
     </div>
   </FloatingWindow>
 </template>
+
+<style scoped>
+.sc-face {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.sc-strip {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  padding: 0 4px;
+}
+.sc-strip-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sc-strip-rule {
+  width: 1px;
+  height: 12px;
+  background: rgba(0, 0, 0, .35);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, .05);
+}
+.sc-lamp {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .6);
+}
+.sc-num {
+  font: 700 12px/1 var(--m-font-mono);
+  color: var(--m-ink);
+}
+.sc-well {
+  padding: 3px;
+  border-radius: 9px;
+  background: #0b0e13;
+  box-shadow: var(--m-shadow-well), 0 0 0 1px #1c222c;
+}
+.sc-meters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 0 4px;
+}
+.sc-band {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 20px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.sc-band > * { flex-shrink: 0; }
+.sc-rule {
+  align-self: stretch;
+  width: 1px;
+  background: rgba(0, 0, 0, .35);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, .04);
+}
+.sc-middle {
+  flex: 1 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-evenly;
+  gap: 28px;
+}
+.sc-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+}
+.sc-setters {
+  display: flex;
+  gap: 8px;
+}
+.sc-note {
+  min-height: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.sc-output {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.sc-tuning {
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 176, 32, .35);
+}
+.sc-tuning-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  font: 700 8px var(--m-font-ui);
+  letter-spacing: .08em;
+  color: rgba(255, 176, 32, .9);
+}
+.sc-tuning-row {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 28px;
+}
+</style>
