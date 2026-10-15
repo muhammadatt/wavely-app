@@ -25,10 +25,7 @@ import {
   setNodeParam,
 } from '../meters/resonanceFocusNodes.js'
 import FocusNodePanel from './FocusNodePanel.vue'
-import Icon from '../ui/Icon.vue'
-import DeviceField from '../knobs/DeviceField.vue'
 import ModulaKnob from '../modula/ModulaKnob.vue'
-import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import ModulaChip from '../modula/ModulaChip.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
@@ -132,7 +129,8 @@ onMounted(() => {
   if (!resPreview.value) togglePreview()
 })
 
-const ACCENT = '#e8a33d'
+const ACCENT = '#8fd48a'
+const SECOND = '#e8a33d'
 
 /**
  * The threshold offset the plot draws its dotted line and its crossings from.
@@ -253,7 +251,7 @@ function toggleOverlay(key) {
 const overlayButtons = computed(() => [
   {
     key: 'removed',
-    label: 'REMOVED',
+    label: 'RESONANCE',
     on: overlays.value.removed,
     title: 'The suppression trace — what is being taken out',
   },
@@ -263,6 +261,7 @@ const overlayButtons = computed(() => [
     on: overlays.value.spectrum,
     title: 'Input level and the detection threshold across it, for placing zone boundaries',
   },
+  /*
   {
     key: 'found',
     label: 'RESONANCE',
@@ -297,22 +296,6 @@ const overlayButtons = computed(() => [
 const percent = v => `${Math.round(v * 100)}%`
 const ms = v => `${Math.round(v)} ms`
 const db = v => `${Math.round(v)}`
-/**
- * The harmonic mask's two positions.
- *
- * ⚠ THE ICON MOVED INTO THE "ON" LABEL. A glyph is what told this control apart
- * from the view switches it used to sit among; among knobs that job is done by
- * shape, and a switch that carried an icon on only one of its two cells would
- * read as the cells meaning different KINDS of thing rather than two states of
- * one. The caption underneath carries the name instead, which is what every
- * other switch on this faceplate does.
- */
-const HARMONIC_MODES = [
-  { value: 'on', label: 'ON', title: 'Hold the harmonics of the tracked voice, below the ceiling' },
-  { value: 'off', label: 'OFF', title: 'Treat harmonics like any other peak. It will thin the material' },
-]
-
-const protectHz = v => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)))
 const signedDb = v => `${v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1)} dB`
 
 /**
@@ -430,7 +413,7 @@ async function applyAndClose() {
           variant="flat"
           :model-value="o.on"
           :label="o.label"
-          color="var(--m-second)"
+          color="var(--m-accent)"
           :title="o.title"
           @click="toggleOverlay(o.key)"
         />
@@ -494,7 +477,7 @@ async function applyAndClose() {
         variant="small" :size="44" show-value editable
         :model-value="resAttack" :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5"
         :default-value="RESONANCE_DEFAULTS.attack"
-        label="Attack" :color="ACCENT" :format-value="ms" :disabled="!resPreview"
+        label="Attack" :color="SECOND" :format-value="ms" :disabled="!resPreview"
         title="How fast the detector closes on a resonance. Double-click to reset"
         @update:model-value="syncAttack"
       />
@@ -502,61 +485,19 @@ async function applyAndClose() {
         variant="small" :size="44" show-value editable
         :model-value="resRelease" :min="RESONANCE_RELEASE_MIN_MS" :max="2000" :step="10"
         :default-value="RESONANCE_DEFAULTS.release"
-        label="Release" :color="ACCENT" :format-value="ms" :disabled="!resPreview"
+        label="Release" :color="SECOND" :format-value="ms" :disabled="!resPreview"
         title="How fast it lets go. Double-click to reset"
         @update:model-value="syncRelease"
       />
 
       <span class="rt-rule" aria-hidden="true"></span>
 
-      <!-- ⚠ HARMONIC PROTECTION SITS WITH THE DETECTOR SETTINGS, not with the
-           view switches: it changes the audio. A two-position switch rather
-           than a lit button, so the state is legible from the one control.
-           ⚠ FOCUS MODE ONLY — under zones it is per zone, behind HARM. -->
-      <div v-if="focusMode" class="rt-harm">
-        <span class="rt-harm-head">
-          <Icon
-            name="harmonics" :size="13" :stroke-width="1.8"
-            :style="{ color: resFocus.global.protect ? ACCENT : 'var(--m-ink-4)' }"
-          />
-          <span class="m-caption">Harmonics</span>
-        </span>
-        <ModulaSegmented
-          :model-value="resFocus.global.protect ? 'on' : 'off'"
-          :options="HARMONIC_MODES"
-          aria-label="Harmonic protection"
-          :disabled="!resPreview"
-          @update:model-value="syncFocus({
-            ...resFocus,
-            global: { ...resFocus.global, protect: $event === 'on' },
-          })"
-        />
-        <!-- The ceiling only exists while the mask does, and the slot keeps
-             its height either way. -->
-        <span class="rt-harm-ceil">
-          <DeviceField
-            v-if="resFocus.global.protect"
-            :model-value="resFocus.global.protectCeilHz"
-            :min="RESONANCE_FOCUS_RANGES.protectCeilHz.min"
-            :max="RESONANCE_FOCUS_RANGES.protectCeilHz.max"
-            :step="10" log
-            label="Up to" unit="Hz" :format-value="protectHz"
-            :accent="ACCENT" :disabled="!resPreview" :width="64"
-            @update:model-value="syncFocus({
-              ...resFocus, global: { ...resFocus.global, protectCeilHz: $event },
-            })"
-          />
-        </span>
-      </div>
-
-      <span v-if="focusMode" class="rt-rule" aria-hidden="true"></span>
-
       <!-- min-width 0 so the middle is what gives way if the row runs short. -->
       <div class="rt-middle">
         <ResonanceFocusControls
           v-if="focusMode"
           :focus="resFocus"
-          :accent="ACCENT"
+          :accent="SECOND"
           :disabled="!resPreview"
           @update:focus="syncFocus"
         />
@@ -567,7 +508,7 @@ async function applyAndClose() {
           :delta-zone="resDeltaZone"
           :pitch-range-caption="pitchRangeCaption"
           :ref-mode="resRefMode"
-          :accent="ACCENT"
+          :accent="SECOND"
           :disabled="!resPreview"
           @update:zones="syncZones"
           @zone-delta="toggleZoneDelta"
@@ -581,18 +522,23 @@ async function applyAndClose() {
         variant="small" :size="44" show-value editable :parse-value="t => parseFloat(t) / 100"
         :model-value="resMix" :min="0" :max="1" :step="0.01"
         :default-value="RESONANCE_DEFAULTS.mix"
-        label="Mix" :color="ACCENT" :format-value="percent" :disabled="!resPreview"
+        label="Mix" :color="SECOND" :format-value="percent" :disabled="!resPreview"
         title="How much of the detector's work reaches the output. Double-click to reset"
         @update:model-value="syncMix"
       />
-      <ModulaKnob
-        variant="small" :size="44" show-value editable bipolar
-        :model-value="resTrim" :min="-12" :max="12" :step="0.5"
-        :default-value="RESONANCE_DEFAULTS.trim"
-        label="Trim" :color="ACCENT" :format-value="signedDb" :disabled="!resPreview"
-        title="Output gain, for an honest A/B against the bypass. Double-click to reset"
-        @update:model-value="syncTrim"
-      />
+      <!-- ⚠ FIXED WIDTH: the printed value runs from "0.0 dB" to "-12.0 dB", and
+           a column sized by its text moves everything beside it as the digits
+           change. The width holds the widest reading. -->
+      <div class="rt-fixed">
+        <ModulaKnob
+          variant="small" :size="44" show-value editable bipolar
+          :model-value="resTrim" :min="-12" :max="12" :step="0.5"
+          :default-value="RESONANCE_DEFAULTS.trim"
+          label="Trim" :color="SECOND" :format-value="signedDb" :disabled="!resPreview"
+          title="Output gain, for an honest A/B against the bypass. Double-click to reset"
+          @update:model-value="syncTrim"
+        />
+      </div>
     </div>
   </FloatingWindow>
 </template>
@@ -643,20 +589,13 @@ async function applyAndClose() {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
 }
 .rt-panel > * { flex-shrink: 0; }
+.rt-fixed { width: 60px; display: flex; justify-content: center; }
 .rt-rule {
   align-self: stretch;
   width: 1px;
   background: rgba(0, 0, 0, .35);
   box-shadow: 1px 0 0 rgba(255, 255, 255, .04);
 }
-.rt-harm {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 7px;
-}
-.rt-harm-head { display: flex; align-items: center; gap: 6px; }
-.rt-harm-ceil { min-height: 30px; display: flex; align-items: center; }
 .rt-middle {
   flex: 1 1 auto !important;
   min-width: 0;

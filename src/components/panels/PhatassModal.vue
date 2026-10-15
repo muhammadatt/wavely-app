@@ -253,7 +253,8 @@ async function applyAndClose() {
   min-width: 0;
   padding: 12px 14px 10px;
   border-radius: 16px;
-  background: linear-gradient(180deg, #0c0d0e, #18191a);
+  /* background: linear-gradient(180deg, #0c0d0e, #18191a); */
+  background: var(--m-well);
   box-shadow: inset 0 2px 10px rgba(0, 0, 0, .8), 0 0 0 1px rgba(0, 0, 0, .5);
 }
 .ph-meter {
@@ -282,6 +283,7 @@ async function applyAndClose() {
   display: flex;
   flex-direction: column;
   border-radius: 16px;
+  background: var(--m-panel);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05), 0 0 0 1px rgba(0, 0, 0, .5);
 }
 .ph-module-head {

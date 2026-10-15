@@ -213,14 +213,14 @@ const aria = computed(() => ({
       <div class="m-arc-well"></div>
       <svg viewBox="0 0 100 100" class="m-arc-svg">
         <circle cx="50" cy="49.4" r="42" fill="none" transform="rotate(135 50 49.4)" style="stroke:rgba(0,0,0,.6);stroke-width:3;stroke-linecap:round;stroke-dasharray:197.9 263.9" />
-        <circle cx="50" cy="50" r="42" fill="none" transform="rotate(135 50 50)" style="stroke:#24272c;stroke-width:3;stroke-linecap:round;stroke-dasharray:197.9 263.9" />
+        <circle cx="50" cy="50" r="42" fill="none" transform="rotate(135 50 50)" style="stroke:#232a33;stroke-width:3;stroke-linecap:round;stroke-dasharray:197.9 263.9" />
         <circle
           cx="50" cy="50" r="42" fill="none" transform="rotate(135 50 50)"
           :style="{ stroke: color, strokeWidth: 2.4, strokeLinecap: 'round', strokeDasharray: arc.dash, strokeDashoffset: arc.offset, filter: `drop-shadow(0 0 1.5px ${color})` }"
         />
         <template v-for="(t, i) in arcTicks" :key="i">
           <line :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2" transform="translate(0 -.6)" style="stroke:rgba(0,0,0,.6);stroke-width:1.6;stroke-linecap:round" />
-          <line :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2" :style="{ stroke: t.on ? color : '#24272c', strokeWidth: 1.6, strokeLinecap: 'round' }" />
+          <line :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2" :style="{ stroke: t.on ? color : '#232a33', strokeWidth: 1.6, strokeLinecap: 'round' }" />
         </template>
       </svg>
       <div class="m-arc-cap">
@@ -238,7 +238,7 @@ const aria = computed(() => ({
     >
       <ModulaValueTip :text="text" :show="tipOn" size="sm" :offset="30" />
       <svg viewBox="0 0 100 100" class="m-arc-svg">
-        <circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:#16181b;stroke-width:6;stroke-linecap:round;stroke-dasharray:207.3 276.5" />
+        <circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:#141920;stroke-width:6;stroke-linecap:round;stroke-dasharray:207.3 276.5" />
         <circle
           cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)"
           :style="{ stroke: color, strokeWidth: 6, strokeLinecap: 'round', strokeDasharray: ringArc.dash, strokeDashoffset: ringArc.offset, opacity: ringArc.empty ? 0 : 1 }"
@@ -310,7 +310,7 @@ const aria = computed(() => ({
 }
 .m-ring--well {
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 40%, #24272c, #1d1f23);
+  background: radial-gradient(circle at 50% 40%, #232a33, #1b2027);
   box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.7), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
 }
 .m-led {
@@ -345,16 +345,18 @@ const aria = computed(() => ({
 }
 .m-cap:active { cursor: grabbing; }
 .m-cap--led {
-  background: linear-gradient(160deg, #454a52 0%, #2c3036 52%, #1c1e22 100%);
+  background: linear-gradient(160deg, #4d596a 0%, #323b48 52%, #222931 100%);
   box-shadow: 0 16px 26px -12px rgba(0, 0, 0, 0.95), inset 0 2px 2px rgba(255, 255, 255, 0.1), inset 0 -7px 12px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.7);
 }
 .m-cap--ticks {
-  background: linear-gradient(160deg, #4a4e56 0%, #2f3239 52%, #1f2126 100%);
-  box-shadow: 0 20px 32px -14px rgba(0, 0, 0, 0.95), inset 0 2px 2px rgba(255, 255, 255, 0.1), inset 0 -8px 14px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.7), 0 0 0 6px #24272c, 0 0 0 7px rgba(0, 0, 0, 0.6);
+  background: linear-gradient(160deg, #505c6e 0%, #353e4b 52%, #242b34 100%);
+  box-shadow: 0 20px 32px -14px rgba(0, 0, 0, 0.95), inset 0 2px 2px rgba(255, 255, 255, 0.1), inset 0 -8px 14px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.7), 0 0 0 6px #232a33, 0 0 0 7px rgba(0, 0, 0, 0.6);
 }
 .m-cap--plain {
-  background: linear-gradient(160deg, #3e4249 0%, #282b30 55%, #1d1f23 100%);
-  box-shadow: 0 12px 20px -10px rgba(0, 0, 0, 0.9), inset 0 1px 1px rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.65);
+  /* Steel-tinted to sit on --m-panel (#3c4655 → #2c343f): the old neutral grey
+     read as a dull patch on the blue-grey chassis. Lighter lip, darker foot. */
+  background: linear-gradient(160deg, #4d596a 0%, #323b48 55%, #222931 100%);
+  box-shadow: 0 12px 20px -10px rgba(0, 0, 0, 0.9), inset 0 1px 1px rgba(255, 255, 255, 0.14), 0 0 0 1px rgba(8, 11, 16, 0.7);
 }
 .m-knob--trim .m-cap--plain {
   box-shadow: 0 8px 14px -8px rgba(0, 0, 0, 0.95), inset 0 1px 1px rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.65);
@@ -362,11 +364,11 @@ const aria = computed(() => ({
 .m-cap-inner {
   position: absolute;
   border-radius: 50%;
-  background: linear-gradient(160deg, #3b4047, #24272c);
+  background: linear-gradient(160deg, #3c4757, #27303b);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 .m-cap-inner--step {
-  background: linear-gradient(160deg, #3d424a, #25282d);
+  background: linear-gradient(160deg, #3e4959, #28313c);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 .m-rot {
@@ -390,7 +392,7 @@ const aria = computed(() => ({
   position: absolute;
   inset: 10%;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 40%, #24272c, #1d1f23);
+  background: radial-gradient(circle at 50% 40%, #232a33, #1b2027);
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.7), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
 }
 .m-arc-svg {
@@ -409,8 +411,9 @@ const aria = computed(() => ({
   position: absolute;
   inset: 17%;
   border-radius: 50%;
-  background: linear-gradient(160deg, #3e4249 0%, #2a2d32 60%, #202226 100%);
-  box-shadow: 0 6px 10px -6px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255, 255, 255, .09), 0 0 0 1px rgba(0, 0, 0, .65);
+  /* Same steel tint as the plain cap, for the EQ strips. */
+  background: linear-gradient(160deg, #4d596a 0%, #323b48 60%, #222931 100%);
+  box-shadow: 0 6px 10px -6px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255, 255, 255, .13), 0 0 0 1px rgba(8, 11, 16, .7);
 }
 .m-ring-line {
   position: absolute;
@@ -429,7 +432,7 @@ const aria = computed(() => ({
   width: 68%;
   height: 68%;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 38%, #3a3e45 74%, #5a5f67 89%, #686d75 94%, #2a2d32 100%);
+  background: radial-gradient(circle at 50% 38%, #3a4452 74%, #576374 89%, #657184 94%, #28303a 100%);
   box-shadow: inset 0 1.5px 1px rgba(255, 255, 255, 0.16), inset 0 -3px 6px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.7), 0 6px 12px rgba(0, 0, 0, 0.45);
 }
 .m-arc-face {
@@ -437,8 +440,8 @@ const aria = computed(() => ({
   inset: 9%;
   border-radius: 50%;
   overflow: hidden;
-  background: linear-gradient(160deg, #464a51, #383b41);
-  box-shadow: 0 0 0 1.5px #1c1e22, 0 1px 0 1.5px rgba(255, 255, 255, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: linear-gradient(160deg, #4a5666, #3a4452);
+  box-shadow: 0 0 0 1.5px #171c23, 0 1px 0 1.5px rgba(255, 255, 255, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 .m-arc-dot {
   position: absolute;

@@ -674,8 +674,8 @@ export const RESONANCE_DEFAULTS = {
   // depth rather than jitter, and a narrator with an unusually resonant room is
   // the case that wants it — the sweep is the argument for the range, this pair
   // is the argument for where to start.
-  attack: 200, // ms
-  release: 500, // ms
+  attack: 50, // ms
+  release: 200, // ms
   mode: 'soft', // 'soft' | 'hard'
   // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS above.
   refMode: 'peak',

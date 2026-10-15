@@ -206,8 +206,7 @@ async function applyAndClose() {
 <style scoped>
 .inf-grid {
   display: grid;
-  grid-template-columns: auto auto auto;
-  justify-content: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
   align-items: start;
 }

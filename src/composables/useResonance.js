@@ -347,7 +347,12 @@ export function useResonance() {
    * per gesture is a rule with a gesture missing from it.
    */
   const syncFocus = (v) => {
-    resFocus.value = v
+    // ⚠ HARMONIC PROTECTION IS PINNED OFF. Its switch left the panel; it stays a
+    // parameter (the kernel and its tests are untouched), but every patch that
+    // reaches the session — a preset, a stored patch, a panel edit — lands with
+    // it off, so a stored `protect: true` cannot colour a render nobody can see
+    // the reason for.
+    resFocus.value = v?.global?.protect ? { ...v, global: { ...v.global, protect: false } } : v
     if (soloId !== null) {
       const at = (v?.nodes ?? []).findIndex(n => n.id === soloId)
       if (at < 0) clearFocusSolo()

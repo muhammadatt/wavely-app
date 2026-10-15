@@ -35,6 +35,7 @@
      ink. */
   --m-chassis: linear-gradient(180deg, #3a4452, #262d37);
   --m-panel: linear-gradient(180deg, #3c4655, #2c343f);
+  
 
   --m-shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.6), 0 6px 12px -6px rgba(0, 0, 0, 0.9);
   --m-shadow-well: inset 0 2px 5px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.05);

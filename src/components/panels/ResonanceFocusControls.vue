@@ -59,9 +59,8 @@ const pct = v => `${Math.round(v * 100)}%`
 
        The plate is the Modula panel ResoTame's control row sits on, so this
        group carries no background of its own — the rules either side of it in
-       that row are what mark it as the detector. HARMONICS STAYS OUTSIDE IT:
-       harmonic protection is a statement about which frequencies to leave
-       alone, which is targeting rather than detection. -->
+       that row are what mark it as the detector. Harmonic protection has no
+       control on the panel: it is pinned off in `syncFocus`. -->
   <div class="rfc" :class="{ 'is-disabled': disabled }">
     <ModulaKnob
       variant="small" :size="44" show-value editable
@@ -93,11 +92,9 @@ const pct = v => `${Math.round(v * 100)}%`
       @update:model-value="setGlobal('depth', $event)"
     />
 
-    <!-- ⚠ MAX CUT AND THE HARMONIC CEILING HAVE NO CONTROL HERE. `maxCut` is
-         still a parameter at its stock value (the row has no room for it, the
-         same call the zone panel made), and `protectCeilHz` lives beside the
-         harmonic switch on the panel, not on this plate: a frequency bound is
-         a different kind of statement from the three knobs of one decision. -->
+    <!-- ⚠ MAX CUT HAS NO CONTROL HERE. `maxCut` is still a parameter at its
+         stock value (the row has no room for it, the same call the zone panel
+         made). -->
   </div>
 </template>
 
