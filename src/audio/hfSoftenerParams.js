@@ -62,7 +62,11 @@ export const HF_SOFTENER_DEFAULTS = {
   // HF COMP: ADDS the measured compensation to `air` (see hfSoftenerAutoAir.js).
   comp: true,
   compAir: 0, // dB, measured by useHFSoftener; never a user setting
-  airMode: 'voiced', // 'voiced' (vowels only — never lifts the "s" or the gaps) | 'static'
+  // 'voiced' (vowels only — never lifts the "s" or the gaps) | 'static'.
+  // ⚠ PINNED TO VOICED and off the panel since the Modula redesign (owner's
+  // call): STATIC hands the cut back on every "s" and lifts the room in the
+  // gaps. The kernel still takes both, for the bench and the tests.
+  airMode: 'voiced',
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
 }

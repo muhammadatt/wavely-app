@@ -76,6 +76,8 @@ const FILES = [
   'src/components/panels/SchepsModal.vue',
   'src/components/panels/HFLimiterModal.vue',
   'src/components/panels/AirBandModal.vue',
+  'src/components/panels/HFSoftenerModal.vue',
+  'src/components/panels/SoftenerBandStrip.vue',
   'src/components/panels/SoftClipperModal.vue',
   'src/components/panels/windows/InflatorWindow.vue',
   'src/components/panels/windows/SpectrumAnalyzerWindow.vue',

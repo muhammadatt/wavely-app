@@ -1,28 +1,26 @@
 <script setup>
 /**
- * HF Softener.
+ * HF Softener — Modula, laid out after the SSL DeEss.
  *
  * The chain runs Duck → EQ → Air → [Reso] → Soften. Duck turns the whole "s"
  * down with its shape intact; EQ cuts the top of what the duck left (its
  * detector hears the ducked signal); Shape picks that cut; Air puts back a few
- * dB of top after it, on Air Boost's curve; Soften (moved here from PHAT*SS)
- * turns the band above 500 Hz down for a few ms on sudden onsets — clicks,
- * smacks, hard consonants — out of the chain at 0. Reso (the ResoTame stage)
- * is off the panel since Soften took its knob's slot; it stays in the code at
- * 0. Context,
- * Rotator, Release and vowel release were controls while the design was being
- * tuned and are now pinned (50 %, sidechain, 40 ms, on — see useHFSoftener.js). DELTA sits in the
- * header like every other plugin's monitor and never reaches the apply path.
- * ADVANCED opens a second row: Guard (the lisp guard's strength, 0 = off),
- * Band (the EQ's lower corner — where it cuts, not where it listens; that is
- * Detect) and Plosives (the T/K/P treatment).
- * The SCOPE at the top is the waveform after the cut with what was removed
- * painted around it (SoftenerScope, hfSoftenerScope.js); the readout under it
- * splits the total into Duck and EQ, with Soften's onset cut beside them. The curve is the cut the kernel is
- * running right now, drawn from the same coefficient builder, with the most
- * both stages could take ghosted behind it and the input's spectrum under it;
- * the dotted line is where the detector listens (Detect), the solid one where
- * the EQ cuts (Band). Lamps on AIR MODE and PLOSIVES light while each acts.
+ * dB of top after it, on Air Boost's curve, on the vowels only (Air Mode is
+ * PINNED to VOICED and off the panel); Soften turns the band above 500 Hz down
+ * for a few ms on sudden onsets, out of the chain at 0. Reso is off the panel
+ * at 0. Context, Rotator, Release and vowel release are pinned (see
+ * useHFSoftener.js).
+ *
+ * TOP: the frequency strip — the input's spectrum, the cut the kernel is
+ * running (with the most both stages could take ghosted behind it), and the
+ * two corners as handles: CUT (Band, where the EQ cuts) hung from the top and
+ * LISTEN (Detect, where the detector listens) standing on the bottom. Two
+ * handles, not linked — see SoftenerBandStrip.
+ * MIDDLE: the controls in four groups — DE-ESS (Duck, EQ, Shape), PROTECT
+ * (Guard, Plosives), AIR (Air, HF COMP) and SOFTEN.
+ * BOTTOM: the reduction split into Duck · EQ · Soften, over the activity scope
+ * (the waveform after the cut, with what was removed painted around it).
+ * DELTA sits in the header and never reaches the apply path.
  */
 import { computed, onMounted, watch } from 'vue'
 import { useHFSoftener } from '../../composables/useHFSoftener.js'
@@ -32,15 +30,18 @@ import {
   duckToMaxDepthDb, duckToThresholdDb, duckToSlope,
   DETECT_HZ_MIN, DETECT_HZ_MAX, BAND_HZ_MIN, BAND_HZ_MAX, bandTuningFor,
 } from '../../audio/hfSoftenerProcessor.js'
-import { guardToFloorDb } from '../../audio/hfSoftenerParams.js'
+import { guardToFloorDb, HF_SOFTENER_DEFAULTS } from '../../audio/hfSoftenerParams.js'
 import { softenLaw, SOFTEN_MAX } from '../../audio/hfSoftenerSoftenStage.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import { airBandSections } from '../../audio/dsp/airBandCurve.js'
-import Knob from '../knobs/Knob.vue'
-import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
+import ModulaKnob from '../modula/ModulaKnob.vue'
+import ModulaSegmented from '../modula/ModulaSegmented.vue'
+import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import SoftenerScope from '../meters/SoftenerScope.vue'
-import SoftenerSpectrum from '../meters/SoftenerSpectrum.vue'
+import SoftenerBandStrip from './SoftenerBandStrip.vue'
+import { usePluginPresets } from '../../composables/usePluginPresets.js'
+import { HF_SOFTENER_PRESET_PLUGIN } from '../../audio/pluginPresets/hfSoftener.js'
 import { HF_SCOPE_SECONDS } from '../../audio/hfSoftenerScope.js'
 import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import FloatingWindow from './FloatingWindow.vue'
@@ -48,15 +49,25 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfGuard, hfPlosives, hfBand, hfAdvancedOpen, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfComp, hfCompAir, hfDetect, hfAirMode, hfDuck, hfBroadband, hfDelta, hfPreview,
-  hfFileLevelDb, hfLevelOffset, refreshLevel,
+  hfAmount, hfShape, hfGuard, hfPlosives, hfBand, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfComp, hfCompAir, hfDetect, hfDuck, hfBroadband, hfDelta, hfPreview,
+  hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncResoAmount, syncSoften, syncAir, syncComp, syncDetect, scheduleAutoAir, syncAirMode, syncDuck, syncShape, syncGuard, syncPlosives, syncBand, toggleDelta,
+  togglePreview, syncAmount, syncSoften, syncAir, syncComp, syncDetect, scheduleAutoAir, syncDuck, syncShape, syncGuard, syncPlosives, syncBand, applyParams, toggleDelta,
   hfReso, hfBurstLamp, hfAirLamp, getScope, getInputSpectrum,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
 const { state, appState } = useEditorState()
+
+const presets = usePluginPresets(HF_SOFTENER_PRESET_PLUGIN, {
+  read: () => ({
+    duck: hfDuck.value, amount: hfAmount.value, shape: hfShape.value, guard: hfGuard.value,
+    plosives: hfPlosives.value, band: hfBand.value, detect: hfDetect.value, air: hfAir.value,
+    comp: hfComp.value, soften: hfSoften.value,
+  }),
+  write: p => applyParams(p),
+})
+const D = HF_SOFTENER_DEFAULTS
 
 // An edit or a document switch changes the file's level, and with it where
 // every threshold sits. Measured only while the window is open.
@@ -73,11 +84,12 @@ onMounted(() => {
   if (!hfPreview.value) togglePreview()
 })
 
-const ACCENT = '#e8b77f'
-// The plosive treatment's own colour on the scope and its lamp, and the Detect
-// marker's: each differs from the accent in lightness as well as hue.
+// The kit's amber. The plosive treatment keeps its own colour on the scope and
+// its lamp, and LISTEN takes the kit's second hue (a "where", not an amount).
+const ACCENT = '#e8a33d'
 const PLOSIVE_COLOR = '#b9a6f2'
-const DETECT_COLOR = '#8ab8e0'
+const LISTEN_COLOR = '#3fd0de'
+const METER_H = 150
 const AIR_LAMP_COLOR = '#9fd3c7'
 
 /** A lamp: dark at 0, lit and glowing at 1. */
@@ -103,23 +115,11 @@ function envelope(offsetSeconds, seconds, columns) {
   return readTimelineEnvelope(state.segments, state.playhead + offsetSeconds, seconds, columns, envelopeScratch[side])
 }
 
-const PLOSIVE_OPTIONS = [
-  { value: true, label: 'ON', title: 'Catch T, K and P releases — a burst straight out of a stop’s silence — and cut them harder, with the lisp guard lifted: a T cannot lisp' },
-  { value: false, label: 'OFF', title: 'Treat plosive bursts like any other top-end event' },
-]
 
-const COMP_OPTIONS = [
-  { value: true, label: 'ON', title: 'Add Air to make up for the top end the cut removes: half of what it is measured to take, on the selection. Adds to the Air knob, never replaces it' },
-  { value: false, label: 'OFF', title: 'No compensation: Air is only what the knob says' },
-]
 
 // What actually reaches the kernel: the knob plus the compensation.
 const totalAir = computed(() => hfAir.value + (hfComp.value ? hfCompAir.value : 0))
 
-const AIR_MODE_OPTIONS = [
-  { value: 'voiced', label: 'VOICED', title: 'Lift vowels only — the air fades out as each S arrives and stays out of the gaps, so it never hands the cut back or lifts room noise' },
-  { value: 'static', label: 'STATIC', title: 'Lift everything, as Air Boost does — sibilants and room tone included' },
-]
 
 const SHAPE_OPTIONS = [
   { value: 'shelf', label: 'SHELF', title: 'Cut everything above the Band corner — the spec’s original shape' },
@@ -130,9 +130,12 @@ const SHAPE_OPTIONS = [
 
 
 // ── Response curve ──────────────────────────────────────────────────────────
-const CURVE_W = 360
-const CURVE_H = 110
-const F_MIN = 100
+// The strip's axis starts at 500 Hz, not 100: the two handles live between
+// 3 and 8 kHz, and the octaves below the voice's top end are what the space
+// is spent on otherwise. The Duck still shows — it moves the whole curve.
+const CURVE_W = 400
+const CURVE_H = 150
+const F_MIN = 500
 const F_MAX = 20000
 const DB_MIN = -10
 // Headroom above 0 dB for the Air makeup's lift.
@@ -141,7 +144,7 @@ const DB_MAX = AIR_MAKEUP_MAX_DB
 const CURVE_FREQS = Array.from({ length: 160 }, (_, i) =>
   F_MIN * Math.pow(F_MAX / F_MIN, i / 159),
 )
-const GRID_FREQS = [100, 1000, 4500, 10000, 20000]
+const GRID_FREQS = [1000, 2000, 3000, 4000, 6000, 8000, 12000, 16000]
 
 function xFor(freqHz) {
   return (Math.log2(freqHz / F_MIN) / Math.log2(F_MAX / F_MIN)) * CURVE_W
@@ -171,10 +174,11 @@ const maxPath = computed(() => shelfPath(-maxDepthDb.value, -duckMaxDb.value))
 const livePath = computed(() => shelfPath(-Math.min(hfReduction.value, maxDepthDb.value), -hfBroadband.value))
 const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0) + (hfSoften.value > 0 ? hfSoftenCut.value : 0))
 const formatSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
+const airCaption = computed(() => (hfComp.value ? `+${hfCompAir.value.toFixed(1)} dB comp` : 'no comp'))
 // What the Soften knob currently allows on one attack.
 const softenCaption = computed(() => {
   const d = softenLaw(hfSoften.value).depthDb
-  return d > 0 ? `ONSETS · UP TO −${Math.round(d)} dB` : 'OFF'
+  return d > 0 ? `onsets · up to −${Math.round(d)} dB` : 'off'
 })
 const liveFill = computed(() => `${livePath.value} L${CURVE_W},${Y0} L0,${Y0} Z`)
 
@@ -201,16 +205,8 @@ function fmtCut(v) {
 }
 
 
-function formatHz(v) {
-  return `${(v / 1000).toFixed(1)}k`
-}
-
-function quantizeHz(v) {
-  return Math.round(v / 100) * 100
-}
-
 function formatAir(v) {
-  return v > 0 ? `+${Number(v).toFixed(1)}` : 'OFF'
+  return v > 0 ? `+${Number(v).toFixed(1)} dB` : 'OFF'
 }
 
 function formatPct(v) {
@@ -222,30 +218,8 @@ function formatGuard(v) {
 }
 
 const guardLabel = computed(() =>
-  hfGuard.value > 0 ? `FLOOR ${guardToFloorDb(hfGuard.value).toFixed(0)} dB` : 'NO GUARD',
+  hfGuard.value > 0 ? `floor ${guardToFloorDb(hfGuard.value).toFixed(0)} dB` : 'no guard',
 )
-
-/** A marker's label beside its line, on the side that keeps it on the face. */
-function markerLabelStyle(freqHz, side) {
-  const pct = (xFor(freqHz) / CURVE_W) * 100
-  return {
-    left: `${pct}%`,
-    transform: side === 'left' ? 'translateX(calc(-100% - 4px))' : 'translateX(4px)',
-    font: "700 8px 'JetBrains Mono',monospace",
-    letterSpacing: '.1em',
-    whiteSpace: 'nowrap',
-  }
-}
-
-function gridLabel(f) {
-  return f >= 1000 ? `${f / 1000}k` : String(f)
-}
-
-function gridLabelStyle(freqHz) {
-  if (freqHz <= F_MIN) return { left: '0%', transform: 'none' }
-  if (freqHz >= F_MAX) return { left: '100%', transform: 'translateX(-100%)' }
-  return { left: `${(xFor(freqHz) / CURVE_W) * 100}%`, transform: 'translateX(-50%)' }
-}
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -267,10 +241,13 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="hf-softener"
     :z="z"
-    :width="800"
+    :width="820"
     :accent="ACCENT"
-    brand-lead="HF"
-    brand-tail="SOFTENER"
+    design="modula"
+    brand-lead="HF SOFTENER"
+    :presets="presets"
+    :presets-disabled="!hfPreview"
+    presets-disabled-hint="Turn HF Softener on to use presets"
     :engaged="hfPreview"
     show-delta
     :delta="hfDelta"
@@ -288,271 +265,240 @@ async function applyAndClose() {
     @apply="applyAndClose"
     @close="close"
   >
-    <div class="px-[26px] pt-[22px] pb-[26px]">
-      <!-- Activity: the waveform with what was removed painted on it. -->
+    <!-- ── Frequency strip, between the meters ───────────────────────────── -->
+    <div class="hs-top">
+      <div class="hs-meter">
+        <LevelMeter variant="modula" scale-side="left" :levels="hfInputLevels" label="IN" :height="METER_H" />
+      </div>
+      <SoftenerBandStrip
+        :band="hfBand" :detect="hfDetect"
+        :band-min="BAND_HZ_MIN" :band-max="BAND_HZ_MAX"
+        :detect-min="DETECT_HZ_MIN" :detect-max="DETECT_HZ_MAX"
+        :band-default="D.band" :detect-default="D.detect"
+        :min-hz="F_MIN" :max-hz="F_MAX" :height="CURVE_H" :view-w="CURVE_W"
+        :curve-path="livePath" :curve-fill="liveFill" :max-path="maxPath" :zero-y="Y0"
+        :grid-freqs="GRID_FREQS" :tap-fn="getInputSpectrum"
+        :accent="ACCENT" :listen-color="LISTEN_COLOR" :disabled="!hfPreview"
+        @update:band="syncBand" @update:detect="syncDetect"
+      />
+      <div class="hs-meter">
+        <LevelMeter variant="modula" scale-side="right" :levels="hfOutputLevels" label="OUT" :height="METER_H" />
+      </div>
+    </div>
+
+    <!-- ── The controls, grouped by what they do ─────────────────────────── -->
+    <div class="hs-panel">
+      <!-- DE-ESS: the two cutting stages, in chain order, and the cut's shape. -->
+      <div class="hs-group">
+        <span class="m-caption">De-ess</span>
+        <div class="hs-knobs">
+          <div class="hs-knob">
+            <ModulaKnob
+              variant="small" :size="50" show-value editable
+              :model-value="hfDuck" :min="0" :max="100" :step="1" :default-value="D.duck"
+              label="Duck" :color="ACCENT" :format-value="formatPct" :disabled="!hfPreview"
+              title="First stage: turns the whole S down, keeping its shape and tone — the gentlest way to de-ess. Threshold, ratio (up to 4:1) and depth (up to 12 dB) rise together. Double-click to reset"
+              @update:model-value="syncDuck"
+            />
+            <span class="m-note">{{ duckThresholdLabel }} · {{ duckRatioLabel }}</span>
+          </div>
+          <div class="hs-knob">
+            <ModulaKnob
+              variant="small" :size="50" show-value editable
+              :model-value="hfAmount" :min="0" :max="100" :step="1" :default-value="D.amount"
+              label="EQ" :color="ACCENT" :format-value="formatPct" :disabled="!hfPreview"
+              title="Second stage: a dynamic cut of the top end, on whatever the Duck left hot — it hears the ducked S, so turning Duck up makes it back off. Threshold, ratio (up to 6:1) and depth (up to 24 dB) rise together. Double-click to reset"
+              @update:model-value="syncAmount"
+            />
+            <span class="m-note">{{ thresholdLabel }} · {{ ratioLabel }}</span>
+          </div>
+        </div>
+        <ModulaSegmented
+          :model-value="hfShape" :options="SHAPE_OPTIONS"
+          aria-label="Cut shape" :disabled="!hfPreview"
+          @update:model-value="syncShape"
+        />
+      </div>
+
+      <span class="hs-rule" aria-hidden="true"></span>
+
+      <!-- PROTECT: what the cut is not allowed to do, and the T/K/P exception. -->
+      <div class="hs-group">
+        <span class="m-caption">Protect</span>
+        <div class="hs-knob">
+          <ModulaKnob
+            variant="small" :size="50" show-value editable
+            :model-value="hfGuard" :min="0" :max="100" :step="1" :default-value="D.guard"
+            label="Guard" :color="ACCENT" :format-value="formatGuard" :disabled="!hfPreview"
+            title="Lisp guard strength. No cut may take an S further below the voice than this floor, so it never ends up quieter than a normal S sits. Higher is stricter; 0 turns it off. Double-click to reset"
+            @update:model-value="syncGuard"
+          />
+          <span class="m-note">{{ guardLabel }}</span>
+        </div>
+        <span class="hs-lampwrap">
+          <ModulaLedPill
+            size="sm" label="PLOSIVES" :color="ACCENT"
+            :model-value="hfPlosives" :disabled="!hfPreview"
+            title="Catch T, K and P releases — a burst straight out of a stop's silence — and cut them harder, with the lisp guard lifted"
+            @update:model-value="syncPlosives"
+          />
+          <span
+            class="hs-lamp" :style="lampStyle(hfBurstLamp, PLOSIVE_COLOR)"
+            title="Lit while a plosive burst is being treated"
+          ></span>
+        </span>
+      </div>
+
+      <span class="hs-rule" aria-hidden="true"></span>
+
+      <!-- AIR: what goes back on top after the cut — on the vowels only. -->
+      <div class="hs-group">
+        <span class="m-caption hs-caption">
+          Air
+          <span
+            class="hs-lamp" :style="lampStyle(hfAirLamp, AIR_LAMP_COLOR)"
+            title="Lit while the Air lift is being applied — on the vowels only"
+          ></span>
+        </span>
+        <div class="hs-knob">
+          <ModulaKnob
+            variant="small" :size="50" show-value editable
+            :model-value="hfAir" :min="0" :max="AIR_MAKEUP_MAX_DB" :step="0.1" :default-value="D.air"
+            label="Air" :color="ACCENT" :format-value="formatAir" :disabled="!hfPreview"
+            title="Add top after the cut, on Air Boost's curve, on the vowels only. HF COMP adds its measured compensation on top of this. Double-click to reset"
+            @update:model-value="syncAir"
+          />
+          <span class="m-note">{{ airCaption }}</span>
+        </div>
+        <ModulaLedPill
+          size="sm" label="HF COMP" :color="ACCENT"
+          :model-value="hfComp" :disabled="!hfPreview"
+          title="Add Air to make up for the top end the cut removes: half of what it is measured to take, on the selection. Adds to the Air knob, never replaces it"
+          @update:model-value="syncComp"
+        />
+      </div>
+
+      <span class="hs-rule" aria-hidden="true"></span>
+
+      <!-- SOFTEN: onsets, not sibilance — last in the chain. -->
+      <div class="hs-group">
+        <span class="m-caption">Soften</span>
+        <div class="hs-knob">
+          <ModulaKnob
+            variant="small" :size="50" show-value editable
+            :model-value="hfSoften" :min="0" :max="SOFTEN_MAX" :step="0.1" :default-value="D.soften"
+            label="Soften" :color="ACCENT" :format-value="formatSoften" :disabled="!hfPreview"
+            title="Softens sudden attacks: when the band above 500 Hz rises suddenly — a click, a lip smack, a hard T or K — it is turned down for a few milliseconds. It reacts to how suddenly the voice rises, not how loud it is. 0 is off. Double-click to reset"
+            @update:model-value="syncSoften"
+          />
+          <span class="m-note">{{ softenCaption }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── What it took, and where ───────────────────────────────────────── -->
+    <div class="hs-readout">
+      <span class="hs-total">
+        <span class="m-caption">Reduction</span>
+        <span class="hs-total-num">{{ fmtCut(totalReduction) }}</span>
+      </span>
+      <span class="hs-split">
+        <span>DUCK {{ fmtCut(hfBroadband) }}</span>
+        <span>EQ {{ fmtCut(hfReduction) }}</span>
+        <span title="Soften's deepest onset cut since the last reading — a few milliseconds at a time, on top of the reduction">SOFT <template v-if="hfSoften > 0">{{ fmtCut(hfSoftenCut) }}</template><span v-else class="hs-off">OFF</span></span>
+      </span>
+    </div>
+    <div class="hs-scope">
       <SoftenerScope
         :data-fn="getScope"
         :envelope-fn="envelope"
         :window-seconds="HF_SCOPE_SECONDS * 2"
         :accent="ACCENT"
         :plosive-color="PLOSIVE_COLOR"
-        :height="140"
+        :height="124"
         title="HF Softener activity: the waveform after the cut, with what was removed around it — playhead at the centre, played audio to its left, audio about to play to its right"
         @request-play="togglePlayback"
       />
-
-      <!-- The total taken off, and which stage took it: the Duck (level), the
-           EQ (tone); Soften's onset cut beside them. -->
-      <div class="flex items-baseline justify-between mt-[10px] px-[2px]">
-        <div class="flex items-baseline gap-[12px]">
-          <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">REDUCTION</span>
-          <span style="font:700 20px 'JetBrains Mono',monospace;color:#f3d3ac;font-variant-numeric:tabular-nums;min-width:92px">{{ fmtCut(totalReduction) }}</span>
-        </div>
-        <div class="flex items-center gap-[18px]" style="font:600 10px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.6);font-variant-numeric:tabular-nums">
-          <span>DUCK {{ fmtCut(hfBroadband) }}</span>
-          <span>EQ {{ fmtCut(hfReduction) }}</span>
-          <span title="Soften's deepest onset cut since the last reading — a few milliseconds at a time, on top of the reduction">SOFT <template v-if="hfSoften > 0">{{ fmtCut(hfSoftenCut) }}</template><span v-else style="color:rgba(255,255,255,.35)">OFF</span></span>
-        </div>
-      </div>
-
-      <div class="flex items-center justify-between gap-[22px] mt-[16px]">
-        <LevelMeter :levels="hfInputLevels" label="IN" :height="150" />
-
-        <div class="flex-1 flex flex-col items-center">
-          <!-- The input's spectrum behind the cut's curve, with where the
-               detector listens (Detect) and where the EQ cuts (Band). -->
-          <div class="relative w-full" :style="{ height: `${CURVE_H}px` }">
-            <SoftenerSpectrum :tap-fn="getInputSpectrum" :min-hz="F_MIN" :max-hz="F_MAX" />
-            <svg
-              :viewBox="`0 0 ${CURVE_W} ${CURVE_H}`"
-              class="absolute inset-0 w-full h-full"
-              preserveAspectRatio="none"
-            >
-              <line
-                v-for="f in GRID_FREQS" :key="f"
-                :x1="xFor(f)" :y1="0" :x2="xFor(f)" :y2="CURVE_H"
-                stroke="rgba(255,255,255,.07)" stroke-width="1"
-              />
-              <line :x1="0" :y1="Y0" :x2="CURVE_W" :y2="Y0" stroke="rgba(255,255,255,.14)" stroke-width="1" />
-              <line
-                :x1="xFor(hfDetect)" :y1="0" :x2="xFor(hfDetect)" :y2="CURVE_H"
-                :stroke="DETECT_COLOR" stroke-opacity="0.8" stroke-width="1" stroke-dasharray="2 3"
-                vector-effect="non-scaling-stroke"
-              />
-              <line
-                :x1="xFor(hfBand)" :y1="0" :x2="xFor(hfBand)" :y2="CURVE_H"
-                :stroke="ACCENT" stroke-opacity="0.7" stroke-width="1"
-                vector-effect="non-scaling-stroke"
-              />
-              <path :d="maxPath" :stroke="ACCENT" stroke-opacity="0.3" stroke-dasharray="3 3" stroke-width="1.5" fill="none" />
-              <path :d="liveFill" :fill="ACCENT" fill-opacity="0.12" />
-              <path :d="livePath" :stroke="ACCENT" stroke-width="2" fill="none" />
-            </svg>
-            <span
-              class="absolute bottom-[3px]"
-              :style="{ ...markerLabelStyle(hfDetect, 'left'), color: DETECT_COLOR }"
-            >DETECT {{ formatHz(hfDetect) }}</span>
-            <span
-              class="absolute top-[3px]"
-              :style="{ ...markerLabelStyle(hfBand, 'right'), color: ACCENT }"
-            >BAND {{ formatHz(hfBand) }}</span>
-          </div>
-          <div class="relative w-full mt-[4px] h-[10px]">
-            <span
-              v-for="f in GRID_FREQS" :key="f"
-              class="absolute top-0"
-              :style="{
-                ...gridLabelStyle(f),
-                fontWeight: 600,
-                fontSize: '8px',
-                fontFamily: 'JetBrains Mono, monospace',
-                letterSpacing: '0.08em',
-                color: 'rgba(255,255,255,.28)',
-              }"
-            >{{ gridLabel(f) }}</span>
-          </div>
-
-          <div class="flex gap-[10px] mt-[16px]">
-            <div class="w-[104px] flex flex-col items-center">
-              <Knob
-                :model-value="hfDuck"
-                @update:model-value="syncDuck"
-                :min="0" :max="100" :step="1"
-                label="Duck" :accent="ACCENT" :format-value="formatPct"
-                :disabled="!hfPreview"
-                title="First stage: turns the whole S down, keeping its shape and tone — the gentlest way to de-ess, like a clip-gain de-esser. Threshold, ratio (up to 4:1) and depth (up to 12 dB) rise together."
-              />
-              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ duckThresholdLabel }} · {{ duckRatioLabel }}
-              </span>
-            </div>
-            <div class="w-[104px] flex flex-col items-center">
-              <Knob
-                :model-value="hfAmount"
-                @update:model-value="syncAmount"
-                :min="0" :max="100" :step="1"
-                label="EQ" :accent="ACCENT" :format-value="formatPct"
-                :disabled="!hfPreview"
-                title="Second stage: a dynamic cut of the top end, on whatever the Duck left hot — it hears the ducked S, so turning Duck up makes it back off. Threshold, ratio (up to 6:1) and depth (up to 24 dB) rise together."
-              />
-              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ thresholdLabel }} · {{ ratioLabel }}
-              </span>
-            </div>
-            <div class="w-[104px] flex flex-col items-center">
-              <Knob
-                :model-value="hfDetect"
-                @update:model-value="syncDetect"
-                :min="DETECT_HZ_MIN" :max="DETECT_HZ_MAX" scale="log" :quantize="quantizeHz"
-                label="Detect" :accent="ACCENT" :format-value="formatHz" :value-font-px="17"
-                :disabled="!hfPreview"
-                title="Where the detector starts listening. Raise it when bright vowels trip the cut: an ordinary S is compensated to read the same at any setting, while vowel top end, which sits lower, drops out of the detector."
-              />
-              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                ABOVE {{ formatHz(hfDetect) }}
-              </span>
-            </div>
-            <div class="w-[104px] flex flex-col items-center">
-              <Knob
-                :model-value="hfAir"
-                @update:model-value="syncAir"
-                :min="0" :max="AIR_MAKEUP_MAX_DB" :step="0.1"
-                label="Air" :accent="ACCENT" :format-value="formatAir"
-                :disabled="!hfPreview"
-                title="Add top after the cut, on Air Boost's curve. HF COMP adds its measured compensation on top of this; AIR MODE decides whether it follows the vowels or lifts everything."
-              />
-              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ hfComp ? `+${hfCompAir.toFixed(1)} COMP` : 'NO COMP' }}
-              </span>
-            </div>
-            <div class="w-[104px] flex flex-col items-center">
-              <!-- Soften (hfSoftenerSoftenStage.js), last in the chain; 0 takes it out. -->
-              <Knob
-                :model-value="hfSoften"
-                @update:model-value="syncSoften"
-                :min="0" :max="SOFTEN_MAX" :step="0.1"
-                label="Soften" :accent="ACCENT" :format-value="formatSoften"
-                :disabled="!hfPreview"
-                title="Softens sudden attacks: when the band above 500 Hz rises suddenly — a click, a lip smack, a hard T or K, the snap of an onset — it is turned down for a few milliseconds. It reacts to how suddenly the voice rises, not how loud it is, so steady sound is left alone. The knob sets how deep one attack may be taken down (up to 36 dB at 10) and how hard it leans in. A gain on a band, never distortion. 0 is off"
-              />
-              <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-                {{ softenCaption }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <LevelMeter :levels="hfOutputLevels" label="OUT" :height="150" />
-      </div>
-
-      <div class="flex justify-center gap-[48px] mt-[20px]">
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">SHAPE</span>
-          <DeviceChoiceRocker
-            :model-value="hfShape" :options="SHAPE_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="Cut shape"
-            @update:model-value="syncShape"
-          />
-        </div>
-        <div class="flex flex-col items-center gap-[8px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">HF COMP</span>
-          <DeviceChoiceRocker
-            :model-value="hfComp" :options="COMP_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="HF compensation"
-            @update:model-value="syncComp"
-          />
-        </div>
-        <div class="flex flex-col items-center gap-[8px]">
-          <span class="flex items-center gap-[6px]" style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">
-            AIR MODE
-            <span
-              class="w-[6px] h-[6px] rounded-full"
-              :style="lampStyle(hfAirLamp, AIR_LAMP_COLOR)"
-              title="Lit while the Air lift is being applied — in VOICED mode, on the vowels only"
-            ></span>
-          </span>
-          <DeviceChoiceRocker
-            :model-value="hfAirMode" :options="AIR_MODE_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="Air mode"
-            @update:model-value="syncAirMode"
-          />
-        </div>
-      </div>
-
-      <div class="flex justify-center mt-[16px]">
-        <button
-          type="button"
-          class="px-[10px] py-[3px] rounded-[4px]"
-          style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.45);border:1px solid rgba(255,255,255,.12)"
-          :aria-expanded="hfAdvancedOpen"
-          @click="hfAdvancedOpen = !hfAdvancedOpen"
-        >
-          ADVANCED {{ hfAdvancedOpen ? '▴' : '▾' }}
-        </button>
-      </div>
-
-      <div v-if="hfAdvancedOpen" class="flex justify-center items-start gap-[28px] mt-[14px]">
-        <div class="w-[104px] flex flex-col items-center">
-          <Knob
-            :model-value="hfGuard"
-            @update:model-value="syncGuard"
-            :min="0" :max="100" :step="1"
-            label="Guard" :accent="ACCENT" :format-value="formatGuard"
-            :disabled="!hfPreview"
-            title="Lisp guard strength. No cut may take an S further below the voice than this floor, so it never ends up quieter than a normal S sits — stops the lisp, and lets go as the next vowel starts. Higher is stricter; 0 turns it off."
-          />
-          <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-            {{ guardLabel }}
-          </span>
-        </div>
-        <div class="w-[104px] flex flex-col items-center">
-          <Knob
-            :model-value="hfBand"
-            @update:model-value="syncBand"
-            :min="BAND_HZ_MIN" :max="BAND_HZ_MAX" scale="log" :quantize="quantizeHz"
-            label="Band" :accent="ACCENT" :format-value="formatHz" :value-font-px="17"
-            :disabled="!hfPreview"
-            title="Where the EQ cuts — the band's lower corner. Lower it for an S that sits low (3–5 kHz, common on deeper voices and on SH); raise it for a high, thin S. The band keeps its shape as it moves. Detect decides what triggers the cut; this decides what it takes."
-          />
-          <span style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)">
-            CUT FROM {{ formatHz(hfBand) }}
-          </span>
-        </div>
-        <div class="flex flex-col items-center gap-[8px] pt-[6px]">
-          <span class="flex items-center gap-[6px]" style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4)">
-            PLOSIVES
-            <span
-              class="w-[6px] h-[6px] rounded-full"
-              :style="lampStyle(hfPlosives ? hfBurstLamp : 0, PLOSIVE_COLOR)"
-              title="Flashes when a T, K or P release is caught and cut harder"
-            ></span>
-          </span>
-          <DeviceChoiceRocker
-            :model-value="hfPlosives" :options="PLOSIVE_OPTIONS" :accent="ACCENT"
-            :disabled="!hfPreview" label="Plosives"
-            @update:model-value="syncPlosives"
-          />
-        </div>
-      </div>
-
-      <p
-        class="mt-[14px] text-center"
-        style="font:600 8.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)"
-      >
-        <template v-if="hfFileLevelDb !== null">
-          FILE LEVEL {{ hfFileLevelDb.toFixed(1) }} dBFS · THRESHOLDS
-          {{ hfLevelOffset >= 0 ? '+' : '' }}{{ hfLevelOffset.toFixed(1) }} dB
-        </template>
-        <template v-else>FILE LEVEL —</template>
-      </p>
-
-      <p
-        class="mt-[10px] text-center"
-        style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
-      >
-        Dips the sibilance band only while a consonant spikes, and lets go as the
-        next vowel starts. Breath and air pass untouched.
-      </p>
     </div>
   </FloatingWindow>
 </template>
+
+<style scoped>
+.hs-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+.hs-meter {
+  display: flex;
+  justify-content: center;
+  padding: 0 4px;
+}
+.hs-panel {
+  margin-top: 12px;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 18px 14px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.hs-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.hs-caption { display: flex; align-items: center; gap: 6px; }
+.hs-knobs { display: flex; gap: 16px; }
+.hs-knob {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.hs-rule {
+  align-self: stretch;
+  width: 1px;
+  background: rgba(0, 0, 0, .35);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, .04);
+}
+.hs-lampwrap { display: flex; align-items: center; gap: 7px; }
+.hs-lamp {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.hs-readout {
+  margin: 14px 2px 8px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.hs-total { display: flex; align-items: baseline; gap: 12px; }
+.hs-total-num {
+  min-width: 92px;
+  font: 700 19px/1 var(--m-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--m-accent);
+}
+.hs-split {
+  display: flex;
+  gap: 18px;
+  font: 600 10px/1 var(--m-font-mono);
+  letter-spacing: .08em;
+  font-variant-numeric: tabular-nums;
+  color: var(--m-ink-3);
+}
+.hs-off { color: var(--m-ink-4); }
+.hs-scope {
+  padding: 3px;
+  border-radius: 9px;
+  background: #0b0e13;
+  box-shadow: var(--m-shadow-well), 0 0 0 1px #1c222c;
+}
+</style>

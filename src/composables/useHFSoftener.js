@@ -19,8 +19,6 @@ const hfShape = ref(HF_SOFTENER_DEFAULTS.shape)
 const hfGuard = ref(HF_SOFTENER_DEFAULTS.guard)
 const hfPlosives = ref(HF_SOFTENER_DEFAULTS.plosives)
 const hfBand = ref(HF_SOFTENER_DEFAULTS.band)
-// Whether the panel's Advanced row is open — view state, not a param.
-const hfAdvancedOpen = ref(false)
 // The band-limited ResoTame ahead of the softener — an A/B of the pairing,
 // with fixed settings (see hfSoftenerResoStage.js).
 const hfResoAmount = ref(HF_SOFTENER_DEFAULTS.resoAmount)
@@ -327,6 +325,25 @@ export function useHFSoftener() {
     scheduleAutoAir()
   }
 
+  /**
+   * A preset's controls, through the same paths a knob turn takes. The Air
+   * Mode is pinned (VOICED) and the measured values (HF COMP's figure, the
+   * file's level) are not preset params, so neither arrives here.
+   */
+  function applyParams(p) {
+    const set = (key, ref, sync) => { if (p[key] !== undefined && p[key] !== ref.value) sync(p[key]) }
+    set('duck', hfDuck, syncDuck)
+    set('amount', hfAmount, syncAmount)
+    set('shape', hfShape, syncShape)
+    set('guard', hfGuard, syncGuard)
+    set('plosives', hfPlosives, syncPlosives)
+    set('band', hfBand, syncBand)
+    set('detect', hfDetect, syncDetect)
+    set('air', hfAir, syncAir)
+    set('comp', hfComp, syncComp)
+    set('soften', hfSoften, syncSoften)
+  }
+
   function toggleDelta() {
     if (!hfPreview.value) return
     hfDelta.value = !hfDelta.value
@@ -404,7 +421,6 @@ export function useHFSoftener() {
     hfGuard,
     hfPlosives,
     hfBand,
-    hfAdvancedOpen,
     hfFileLevelDb,
     hfLevelOffset,
     hfDelta,
@@ -434,6 +450,7 @@ export function useHFSoftener() {
     syncGuard,
     syncPlosives,
     syncBand,
+    applyParams,
     toggleDelta,
     refreshLevel,
     apply,
