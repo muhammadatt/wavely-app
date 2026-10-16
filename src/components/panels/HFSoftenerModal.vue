@@ -11,15 +11,16 @@
  * at 0. Context, Rotator, Release and vowel release are pinned (see
  * useHFSoftener.js).
  *
- * TOP: the frequency strip — the input's spectrum, the cut the kernel is
- * running (damped, with the deepest recent cut held as a thin line), and the
- * two corners as handles: CUT (Band, where the EQ cuts) hung from the top and
+ * TOP: the frequency strip — the input's spectrum, the cut's RANGE (static:
+ * the most the EQ may take, then the Air lift), and the two corners as
+ * handles: CUT (Band, where the EQ cuts) hung from the top and
  * LISTEN (Detect, where the detector listens) standing on the bottom. Two
  * handles, not linked — see SoftenerBandStrip.
  * MIDDLE: the controls in four groups — DE-ESS (Duck, EQ, Shape), PROTECT
  * (Guard, Plosives), AIR (Air, HF COMP) and SOFTEN.
  * BOTTOM: the reduction split into Duck · EQ · Soften, over the activity scope
- * (the waveform after the cut, with what was removed painted around it).
+ * (the waveform, shaded full height wherever it de-essed). That is where
+ * "when" lives; the strip only says "where and how far".
  * DELTA sits in the header and never reaches the apply path.
  */
 import { computed, onMounted, ref, watch } from 'vue'
@@ -38,7 +39,6 @@ import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
-import { createPeakHold, lampFraction, useMeterFrame } from '../meters/ballistics.js'
 import SoftenerScope from '../meters/SoftenerScope.vue'
 import SoftenerBandStrip from './SoftenerBandStrip.vue'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
@@ -171,46 +171,16 @@ function shelfPath(gainDb, levelDb = 0) {
 const maxDepthDb = computed(() => amountToMaxDepthDb(hfAmount.value / 100))
 
 /**
- * WHAT THE STRIP DRAWS IS DAMPED, and the raw reading was the problem.
+ * The strip draws the cut's RANGE — the EQ at its maximum depth for the
+ * current knob, then the Air lift — and it moves only when a setting does.
  *
- * The kernel reports both stages' gain every frame, and an "s" is 30–40 ms —
- * two or three frames — so the raw curve strobed: down for a frame, back up,
- * down again, with nothing on screen long enough to read as "it cut there".
- * Each stage now drives the curve through an envelope with an INSTANT attack
- * (an "s" lands on the frame it happens) and a 20 dB/s fall after an 80 ms
- * hold, so a cut becomes one dip that eases back over a few hundred ms. A
- * second, slower hold (1.2 s, then 10 dB/s) draws the deepest recent cut as a
- * thin line — where the last "s" went, still on screen while you look.
- *
- * The dashed ceiling (the most both stages could take) was a third curve and
- * came off: it is a property of the knobs, not of what is happening, and it
- * competed with the two that are.
+ * ⚠ It drew the live cut twice before and both were rejected as busy: raw
+ * (an "s" is two or three frames, so it strobed), then damped with a held
+ * line and a glowing CUT flag. When the Softener is working is the scope's
+ * job now, as full-height shading on the waveform. The Duck is broadband and
+ * would only slide the whole curve down, so it is not drawn here.
  */
-const LIVE = { holdMs: 80, fallPerSec: 20 }
-const HELD = { holdMs: 1200, fallPerSec: 10 }
-const liveDuck = createPeakHold(LIVE)
-const liveEq = createPeakHold(LIVE)
-const heldDuck = createPeakHold(HELD)
-const heldEq = createPeakHold(HELD)
-const shownDuck = ref(0)
-const shownEq = ref(0)
-const heldDuckDb = ref(0)
-const heldEqDb = ref(0)
-useMeterFrame((dt) => {
-  const eq = Math.min(hfReduction.value, maxDepthDb.value)
-  shownDuck.value = liveDuck.push(hfBroadband.value, dt)
-  shownEq.value = liveEq.push(eq, dt)
-  heldDuckDb.value = heldDuck.push(hfBroadband.value, dt)
-  heldEqDb.value = heldEq.push(eq, dt)
-})
-// Not computed on the raw reading: the same instant-attack envelope, so the
-// glow and the curve always agree. Full at 6 dB of total cut.
-const activity = computed(() => lampFraction(shownDuck.value + shownEq.value, 6))
-
-const livePath = computed(() => shelfPath(-shownEq.value, -shownDuck.value))
-// Hidden while nothing has been cut lately, so an idle strip is just the flat line.
-const holdPath = computed(() => (heldDuckDb.value + heldEqDb.value < 0.1
-  ? '' : shelfPath(-heldEqDb.value, -heldDuckDb.value)))
+const rangePath = computed(() => shelfPath(-maxDepthDb.value))
 const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0) + (hfSoften.value > 0 ? hfSoftenCut.value : 0))
 const formatSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const airCaption = computed(() => (hfComp.value ? `+${hfCompAir.value.toFixed(1)} dB comp` : 'no comp'))
@@ -219,7 +189,7 @@ const softenCaption = computed(() => {
   const d = softenLaw(hfSoften.value).depthDb
   return d > 0 ? `onsets · up to −${Math.round(d)} dB` : 'off'
 })
-const liveFill = computed(() => `${livePath.value} L${CURVE_W},${Y0} L0,${Y0} Z`)
+const rangeFill = computed(() => `${rangePath.value} L${CURVE_W},${Y0} L0,${Y0} Z`)
 
 // The TRUE compression ratio (1.5:1 at the default, 6:1 at 100 %), not the
 // spec's divisor. Max depth is on the meter's scale and rarely the limit.
@@ -315,7 +285,7 @@ async function applyAndClose() {
         :detect-min="DETECT_HZ_MIN" :detect-max="DETECT_HZ_MAX"
         :band-default="D.band" :detect-default="D.detect"
         :min-hz="F_MIN" :max-hz="F_MAX" :height="CURVE_H" :view-w="CURVE_W"
-        :curve-path="livePath" :curve-fill="liveFill" :hold-path="holdPath" :activity="activity" :zero-y="Y0"
+        :curve-path="rangePath" :curve-fill="rangeFill" :zero-y="Y0"
         :grid-freqs="GRID_FREQS" :tap-fn="getInputSpectrum"
         :accent="ACCENT" :listen-color="LISTEN_COLOR" :disabled="!hfPreview"
         @update:band="syncBand" @update:detect="syncDetect"
@@ -455,7 +425,7 @@ async function applyAndClose() {
         :accent="ACCENT"
         :plosive-color="PLOSIVE_COLOR"
         :height="124"
-        title="HF Softener activity: the waveform after the cut, with what was removed around it — playhead at the centre, played audio to its left, audio about to play to its right"
+        title="HF Softener activity: the waveform, shaded wherever it de-essed — playhead at the centre, played audio to its left, audio about to play to its right"
         @request-play="togglePlayback"
       />
     </div>

@@ -46,7 +46,7 @@ import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 import { processResonanceBuffer, ResonanceKernel } from '../../src/audio/resonanceProcessor.js'
 import { measureTopLossDb, autoAirDb, AIR_AUTO_FRACTION } from '../../src/audio/hfSoftenerAutoAir.js'
-import { createScopeRing, columnKind, kindRuns } from '../../src/audio/hfSoftenerScope.js'
+import { createScopeRing, columnKind, kindRuns, shadeColumns, SHADE_FALL_DB } from '../../src/audio/hfSoftenerScope.js'
 import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams, guardToFloorDb, GUARD_FLOOR_LOOSE_DB, GUARD_FLOOR_STRICT_DB } from '../../src/audio/hfSoftenerParams.js'
 import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
@@ -1503,6 +1503,37 @@ test('scope columns: untouched, treated and plosive, and their runs', () => {
   const kinds = new Uint8Array([0, 1, 1, 0, 2, 2, 1, 1])
   assert.deepEqual(kindRuns(kinds, kinds.length, 1), [[1, 2], [6, 7]])
   assert.deepEqual(kindRuns(kinds, kinds.length, 2), [[4, 5]])
+})
+
+test('scope shading: a flickering cut reads as one region, starting where it starts', () => {
+  // 6 dB cut on alternate columns through an "s", then the voice clean again.
+  const n = 60
+  const inP = new Float32Array(n).fill(0.5)
+  const outP = new Float32Array(n).fill(0.5)
+  const burst = new Float32Array(n)
+  const held = new Float32Array(n)
+  for (let i = 10; i < 30; i += 2) outP[i] = 0.25
+  held[20] = 2
+  const depth = new Float32Array(n)
+  const kind = new Uint8Array(n)
+  const guard = new Uint8Array(n)
+  shadeColumns(inP, outP, burst, held, n, depth, kind, guard)
+  const runs = kindRuns(kind, n, 1)
+  assert.equal(runs.length, 1, 'one block, not a comb')
+  assert.equal(runs[0][0], 10, 'the attack is instant')
+  // Released over (6.02 - 0.75) / fall columns after the last cut.
+  assert.ok(Math.abs(runs[0][1] - (28 + Math.floor((20 * Math.log10(2) - 0.75) / SHADE_FALL_DB))) <= 1)
+  assert.equal(kind[0], 0)
+  assert.equal(kind[n - 1], 0)
+  // The guard marks the region from where it held, and lets go with it.
+  assert.equal(guard[19], 0)
+  assert.equal(guard[20], 1)
+  assert.equal(guard[runs[0][1]], 1)
+  assert.equal(guard[runs[0][1] + 1], 0)
+  // A burst inside the window turns the region plosive.
+  burst[10] = 1
+  shadeColumns(inP, outP, burst, held, n, depth, kind, guard)
+  assert.deepEqual(kindRuns(kind, n, 2), runs)
 })
 
 test('scope: the kernel reports the cut on the "s" and nothing on the vowel', () => {
