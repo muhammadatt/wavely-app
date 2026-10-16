@@ -41,6 +41,10 @@ export function createHFSoftener(audioContext) {
   let airLamp = 0
   // Activity scope: one point per kernel quantum, appended as they arrive.
   const scope = createScopeRing(audioContext.sampleRate)
+  // Held while the transport is stopped: the worklet keeps running on
+  // silence, and without the hold that silence scrolled what just played
+  // off the scope within its two seconds of history.
+  let scopeHeld = false
 
   // Monitor tap, kept out of `params` on purpose: parameters are what the
   // apply path renders with, and a monitor mode must never be one of them.
@@ -151,7 +155,7 @@ export function createHFSoftener(audioContext) {
         broadbandDb = e.data.broadbandDb ?? 0
         burstLamp = e.data.burst ?? 0
         airLamp = e.data.air ?? 0
-        scope.push(e.data.scope)
+        if (!scopeHeld) scope.push(e.data.scope)
       }
       ensureReso()
       ensureSoften()
@@ -233,6 +237,16 @@ export function createHFSoftener(audioContext) {
     /** The activity scope's ring — see hfSoftenerScope.js. Read, do not retain. */
     getScope() {
       return scope.view()
+    },
+
+    /** Freeze (or release) the scope's history — see `scopeHeld`. */
+    holdScope(on) {
+      scopeHeld = !!on
+    },
+
+    /** Drop the scope's history, e.g. after a seek made it describe other audio. */
+    clearScope() {
+      scope.clear()
     },
 
     /** The input's spectrum tap, created on first call. */

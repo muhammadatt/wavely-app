@@ -141,6 +141,17 @@ export function useHFSoftener() {
     return nodesOf(getEffectChain(getAudioContext()))?.getScope?.() ?? null
   }
 
+  /** Freeze the scope while the transport is stopped; see the effect wrapper. */
+  function holdScope(on) {
+    if (!hfPreview.value) return
+    nodesOf(getEffectChain(getAudioContext()))?.holdScope?.(on)
+  }
+
+  function clearScope() {
+    if (!hfPreview.value) return
+    nodesOf(getEffectChain(getAudioContext()))?.clearScope?.()
+  }
+
   function getInputSpectrum() {
     if (!hfPreview.value) return null
     return nodesOf(getEffectChain(getAudioContext()))?.getInputSpectrum?.() ?? null
@@ -430,6 +441,8 @@ export function useHFSoftener() {
     hfBurstLamp,
     hfAirLamp,
     getScope,
+    holdScope,
+    clearScope,
     getInputSpectrum,
     hfThresholdLift,
     hfInputLevels,

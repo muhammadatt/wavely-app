@@ -39,6 +39,7 @@ import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
+import { createPeakHold, useMeterFrame } from '../meters/ballistics.js'
 import SoftenerScope from '../meters/SoftenerScope.vue'
 import SoftenerBandStrip from './SoftenerBandStrip.vue'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
@@ -54,7 +55,7 @@ const {
   hfLevelOffset, refreshLevel,
   hfReduction, hfInputLevels, hfOutputLevels,
   togglePreview, syncAmount, syncSoften, syncAir, syncComp, syncDetect, scheduleAutoAir, syncDuck, syncShape, syncGuard, syncPlosives, syncBand, applyParams, toggleDelta,
-  hfReso, hfBurstLamp, hfAirLamp, getScope, getInputSpectrum,
+  hfReso, hfBurstLamp, hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
   apply, teardown, closeModal,
 } = useHFSoftener()
 
@@ -84,6 +85,22 @@ watch(() => [state.revision, appState.activeDocumentId], () => {
 onMounted(() => {
   if (!hfPreview.value) togglePreview()
 })
+
+// The scope freezes on what last played while the transport is stopped, and
+// starts over if playback resumes somewhere else (a seek, a click on the
+// timeline): its history would describe audio that is no longer behind the
+// playhead.
+let stoppedAt = null
+watch(() => [state.isPlaying, hfPreview.value], ([playing]) => {
+  if (playing) {
+    if (stoppedAt !== null && Math.abs(state.playhead - stoppedAt) > 0.25) clearScope()
+    stoppedAt = null
+    holdScope(false)
+  } else {
+    stoppedAt = state.playhead
+    holdScope(true)
+  }
+}, { immediate: true })
 
 // The kit's amber. The plosive treatment keeps its own colour on the scope and
 // its lamp, and LISTEN takes the kit's second hue (a "where", not an amount).
@@ -182,6 +199,33 @@ const maxDepthDb = computed(() => amountToMaxDepthDb(hfAmount.value / 100))
  */
 const rangePath = computed(() => shelfPath(-maxDepthDb.value))
 const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0) + (hfSoften.value > 0 ? hfSoftenCut.value : 0))
+
+/**
+ * THE READOUT IS HELD, NOT LIVE. Read raw, each figure changed every frame —
+ * an "s" is 30–40 ms, so a number was on screen for one or two frames before
+ * the next one replaced it. Each figure now holds its peak for a second and
+ * then falls at 6 dB/s, and the text refreshes at most 5 times a second, so
+ * what is printed is "the most it took just now" and stays long enough to read.
+ */
+const READOUT_HOLD = { holdMs: 1000, fallPerSec: 6 }
+const READOUT_EVERY_MS = 200
+const readoutHolds = { total: createPeakHold(READOUT_HOLD), duck: createPeakHold(READOUT_HOLD), eq: createPeakHold(READOUT_HOLD), soft: createPeakHold(READOUT_HOLD) }
+const shown = ref({ total: 0, duck: 0, eq: 0, soft: 0 })
+let sinceReadout = 0
+useMeterFrame((dt) => {
+  const h = readoutHolds
+  const next = {
+    total: h.total.push(totalReduction.value, dt),
+    duck: h.duck.push(hfBroadband.value, dt),
+    eq: h.eq.push(hfReduction.value, dt),
+    soft: h.soft.push(hfSoftenCut.value, dt),
+  }
+  sinceReadout += dt
+  if (sinceReadout >= READOUT_EVERY_MS) {
+    sinceReadout = 0
+    shown.value = next
+  }
+})
 const formatSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 const airCaption = computed(() => (hfComp.value ? `+${hfCompAir.value.toFixed(1)} dB comp` : 'no comp'))
 // What the Soften knob currently allows on one attack.
@@ -409,12 +453,12 @@ async function applyAndClose() {
     <div class="hs-readout">
       <span class="hs-total">
         <span class="m-caption">Reduction</span>
-        <span class="hs-total-num">{{ fmtCut(totalReduction) }}</span>
+        <span class="hs-total-num">{{ fmtCut(shown.total) }}</span>
       </span>
       <span class="hs-split">
-        <span>DUCK {{ fmtCut(hfBroadband) }}</span>
-        <span>EQ {{ fmtCut(hfReduction) }}</span>
-        <span title="Soften's deepest onset cut since the last reading — a few milliseconds at a time, on top of the reduction">SOFT <template v-if="hfSoften > 0">{{ fmtCut(hfSoftenCut) }}</template><span v-else class="hs-off">OFF</span></span>
+        <span>DUCK {{ fmtCut(shown.duck) }}</span>
+        <span>EQ {{ fmtCut(shown.eq) }}</span>
+        <span title="Soften's deepest recent onset cut — a few milliseconds at a time, on top of the reduction. Held for a second so it can be read">SOFT <template v-if="hfSoften > 0">{{ fmtCut(shown.soft) }}</template><span v-else class="hs-off">OFF</span></span>
       </span>
     </div>
     <div class="hs-scope">
@@ -424,6 +468,7 @@ async function applyAndClose() {
         :window-seconds="HF_SCOPE_SECONDS * 2"
         :accent="ACCENT"
         :plosive-color="PLOSIVE_COLOR"
+        :held="!state.isPlaying"
         :height="124"
         title="HF Softener activity: the waveform, shaded wherever it de-essed — playhead at the centre, played audio to its left, audio about to play to its right"
         @request-play="togglePlayback"

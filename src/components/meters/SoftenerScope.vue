@@ -22,7 +22,10 @@ import { kindRuns, shadeColumns } from '../../audio/hfSoftenerScope.js'
  * to its right, drawn dimmer because the Softener has not seen that audio yet
  * — it cannot be shaded, since the cut depends on what came just before. When
  * the ring is not live (bypass, stopped transport) the left half falls back to
- * the timeline too, so the picture always moves as one waveform.
+ * the timeline too, so the picture always moves as one waveform. A STOPPED
+ * transport is not that case: the wrapper freezes the ring on what last
+ * played (`held`), and it stays shaded until playback moves on — the first
+ * version let the worklet's idle silence scroll it off in two seconds.
  *
  * Marks (smoothed into regions by shadeColumns, hfSoftenerScope.js):
  *   accent wash    — de-essed by the Duck and EQ; stronger the deeper the cut
@@ -37,6 +40,11 @@ const props = defineProps({
    * peak envelope around the playhead; see ClipperScope's envelopeFn.
    */
   envelopeFn: { type: Function, default: null },
+  /**
+   * The transport is stopped and the ring is frozen on what last played: keep
+   * drawing it as measured history, not as stale, so the shading stays put.
+   */
+  held: { type: Boolean, default: false },
   /** Total seconds across the face: twice the ring's history. */
   windowSeconds: { type: Number, default: 4 },
   accent: { type: String, default: '#e8b77f' },
@@ -103,7 +111,7 @@ function draw(dtMs) {
     staleMs += dtMs
   }
   const haveRing = scope !== null && scope.filled > 0
-  const ringLive = haveRing && staleMs < STALE_MS
+  const ringLive = haveRing && (props.held || staleMs < STALE_MS)
 
   ctx.fillStyle = '#08060a'
   ctx.fillRect(0, 0, w, h)
