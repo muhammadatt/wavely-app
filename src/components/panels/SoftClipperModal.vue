@@ -488,7 +488,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
            that drags it, so the three controls for one number are adjacent. -->
       <div class="sc-band">
         <ModulaKnob
-          variant="ticks" :size="72" show-value editable
+          variant="ticks" :size="126" show-value editable
           :model-value="fixedThresholdDb" :min="-24" :max="-1" :step="0.5"
           label="Ceiling" :color="ACCENT" :format-value="formatDb"
           :disabled="!clipperPreview" :title="ceilingTitle"
@@ -546,7 +546,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
         <div class="sc-output">
           <div :style="{ opacity: autoMakeup ? 0.78 : 1 }">
             <ModulaKnob
-              variant="ticks" :size="72" show-value editable
+              variant="ticks" :size="126" show-value editable
               :model-value="outputTrimDb"
               :min="SOFT_CLIPPER_MAKEUP_MIN_DB" :max="SOFT_CLIPPER_MAKEUP_MAX_DB" :step="0.1"
               label="Output" :color="ACCENT" :format-value="formatGain"

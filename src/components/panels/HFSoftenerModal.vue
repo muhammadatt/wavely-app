@@ -17,7 +17,7 @@
  * LISTEN (Detect, where the detector listens) standing on the bottom. Two
  * handles, not linked — see SoftenerBandStrip.
  * MIDDLE: the controls in four groups — DE-ESS (Duck, EQ, Shape), PROTECT
- * (Guard, Plosives), AIR (Air, HF COMP) and SOFTEN.
+ * (Guard), AIR (HF Restore, AUTO) and SOFTEN (Transient Softener, Plosives).
  * BOTTOM: the reduction split into Duck · EQ · Soften, over the activity scope
  * (the waveform, shaded full height wherever it de-essed). That is where
  * "when" lives; the strip only says "where and how far".
@@ -27,16 +27,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useHFSoftener } from '../../composables/useHFSoftener.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  amountToMaxDepthDb, amountToThresholdDb, amountToCompressionRatio, softenerSections, AIR_MAKEUP_MAX_DB,
-  duckToThresholdDb, duckToSlope,
-  DETECT_HZ_MIN, DETECT_HZ_MAX, BAND_HZ_MIN, BAND_HZ_MAX, bandTuningFor,
+  AIR_MAKEUP_MAX_DB,
+  DETECT_HZ_MIN, DETECT_HZ_MAX, DETECT_HI_MIN, DETECT_HI_MAX, DETECT_MIN_RATIO,
 } from '../../audio/hfSoftenerProcessor.js'
-import { guardToFloorDb, HF_SOFTENER_DEFAULTS } from '../../audio/hfSoftenerParams.js'
+import { guardToFloorDb, amountSplitOf, HF_SOFTENER_DEFAULTS } from '../../audio/hfSoftenerParams.js'
 import { softenLaw, SOFTEN_MAX } from '../../audio/hfSoftenerSoftenStage.js'
-import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
-import { airBandSections } from '../../audio/dsp/airBandCurve.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
-import ModulaSegmented from '../modula/ModulaSegmented.vue'
+import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import { createPeakHold, useMeterFrame } from '../meters/ballistics.js'
@@ -51,10 +48,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfShape, hfGuard, hfPlosives, hfBand, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfComp, hfCompAir, hfDetect, hfDuck, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfSplit, hfTotal, hfGuard, hfPlosives, hfBand, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfAirLossDb, hfComp, hfDetect, hfDetectHigh, hfAudition, hfDuck, hfBroadband, hfDelta, hfPreview,
   hfLevelOffset, refreshLevel,
-  hfReduction, hfInputLevels, hfOutputLevels,
-  togglePreview, syncAmount, syncSoften, syncAir, syncComp, syncDetect, scheduleAutoAir, syncDuck, syncShape, syncGuard, syncPlosives, syncBand, applyParams, toggleDelta,
+  hfReduction, hfOutputLevels,
+  togglePreview, syncSoften, syncAir, syncComp, syncDetect, syncDetectHigh, scheduleAutoAir, syncTotal, syncSplit, syncGuard, syncPlosives, applyParams, toggleDelta, toggleAudition,
   hfReso, hfBurstLamp, hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
   apply, teardown, closeModal,
 } = useHFSoftener()
@@ -63,8 +60,8 @@ const { state, appState } = useEditorState()
 
 const presets = usePluginPresets(HF_SOFTENER_PRESET_PLUGIN, {
   read: () => ({
-    duck: hfDuck.value, amount: hfAmount.value, shape: hfShape.value, guard: hfGuard.value,
-    plosives: hfPlosives.value, band: hfBand.value, detect: hfDetect.value, air: hfAir.value,
+    duck: hfDuck.value, amount: hfAmount.value, guard: hfGuard.value,
+    plosives: hfPlosives.value, band: hfBand.value, detect: hfDetect.value, detectHigh: hfDetectHigh.value, air: hfAir.value,
     comp: hfComp.value, soften: hfSoften.value,
   }),
   write: p => applyParams(p),
@@ -135,69 +132,30 @@ function envelope(offsetSeconds, seconds, columns) {
 
 
 
-// What actually reaches the kernel: the knob plus the compensation.
-const totalAir = computed(() => hfAir.value + (hfComp.value ? hfCompAir.value : 0))
 
 
-const SHAPE_OPTIONS = [
-  { value: 'shelf', label: 'SHELF', title: 'Cut everything above the Band corner — the spec’s original shape' },
-  { value: 'band', label: 'BAND', title: 'Cut the sibilance band and return to flat above it, so the air stays' },
-]
+// The Amount and its Split are a view over the two stages (useHFSoftener): what
+// each stage actually got, as a note under the knob.
+const stageNote = computed(() => `WIDE ${Math.round(hfDuck.value)} · SPLIT ${Math.round(hfAmount.value)}`)
+const formatSplit = v => (v <= 0 ? 'ALL WIDE' : v >= 100 ? 'ALL SPLIT' : `${100 - Math.round(v)} / ${Math.round(v)}`)
+const AMOUNT_DEFAULT = amountSplitOf(D.duck, D.amount).total
+const SPLIT_DEFAULT = amountSplitOf(D.duck, D.amount).split
 
 
 
 
-// ── Response curve ──────────────────────────────────────────────────────────
+// ── Detector strip ──────────────────────────────────────────────────────────
 // The strip's axis starts at 500 Hz, not 100: the two handles live between
 // 3 and 8 kHz, and the octaves below the voice's top end are what the space
-// is spent on otherwise. The Duck still shows — it moves the whole curve.
+// is spent on otherwise.
 const CURVE_W = 400
-const CURVE_H = 150
+// The well fills the row: the OUT meter sets the row's height (211 px with its
+// readout and caption), less the strip's 14 px axis.
+const CURVE_H = 197
 const F_MIN = 500
 const F_MAX = 20000
-const DB_MIN = -10
-// Headroom above 0 dB for the Air makeup's lift.
-const DB_MAX = AIR_MAKEUP_MAX_DB
-
-const CURVE_FREQS = Array.from({ length: 160 }, (_, i) =>
-  F_MIN * Math.pow(F_MAX / F_MIN, i / 159),
-)
 const GRID_FREQS = [1000, 2000, 3000, 4000, 6000, 8000, 12000, 16000]
 
-function xFor(freqHz) {
-  return (Math.log2(freqHz / F_MIN) / Math.log2(F_MAX / F_MIN)) * CURVE_W
-}
-
-function yFor(db) {
-  return ((DB_MAX - db) / (DB_MAX - DB_MIN)) * CURVE_H
-}
-const Y0 = yFor(0)
-
-// The cut, the broadband duck and the air makeup after them, as one response —
-// what the audio gets. The duck moves the whole curve down.
-function shelfPath(gainDb, levelDb = 0) {
-  const sr = state.currentFile?.sampleRate ?? 44100
-  const secs = softenerSections(sr, gainDb, hfShape.value, bandTuningFor(hfBand.value))
-  if (totalAir.value > 0) secs.push(...airBandSections(sr, totalAir.value))
-  const db = magnitudeResponseDb(secs, CURVE_FREQS, sr).map(v => v + levelDb)
-  return CURVE_FREQS.map(
-    (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${Math.min(CURVE_H - 0.5, Math.max(0.5, yFor(db[i]))).toFixed(1)}`,
-  ).join(' ')
-}
-
-const maxDepthDb = computed(() => amountToMaxDepthDb(hfAmount.value / 100))
-
-/**
- * The strip draws the cut's RANGE — the EQ at its maximum depth for the
- * current knob, then the Air lift — and it moves only when a setting does.
- *
- * ⚠ It drew the live cut twice before and both were rejected as busy: raw
- * (an "s" is two or three frames, so it strobed), then damped with a held
- * line and a glowing CUT flag. When the Softener is working is the scope's
- * job now, as full-height shading on the waveform. The Duck is broadband and
- * would only slide the whole curve down, so it is not drawn here.
- */
-const rangePath = computed(() => shelfPath(-maxDepthDb.value))
 const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0) + (hfSoften.value > 0 ? hfSoftenCut.value : 0))
 
 /**
@@ -211,8 +169,13 @@ const READOUT_HOLD = { holdMs: 1000, fallPerSec: 6 }
 const READOUT_EVERY_MS = 200
 const readoutHolds = { total: createPeakHold(READOUT_HOLD), duck: createPeakHold(READOUT_HOLD), eq: createPeakHold(READOUT_HOLD), soft: createPeakHold(READOUT_HOLD) }
 const shown = ref({ total: 0, duck: 0, eq: 0, soft: 0 })
+// The de-ess lamp: lit by either stage's cut, held a moment so a 30 ms "s" is seen
+// (the cut itself reads once or twice a frame). Full at 3 dB.
+const deessHold = createPeakHold({ holdMs: 120, fallPerSec: 20 })
+const deessLamp = ref(0)
 let sinceReadout = 0
 useMeterFrame((dt) => {
+  deessLamp.value = Math.round(Math.min(1, deessHold.push(Math.max(hfBroadband.value, hfReduction.value), dt) / 3) * 20) / 20
   const h = readoutHolds
   const next = {
     total: h.total.push(totalReduction.value, dt),
@@ -227,29 +190,14 @@ useMeterFrame((dt) => {
   }
 })
 const formatSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
-const airCaption = computed(() => (hfComp.value ? `+${hfCompAir.value.toFixed(1)} dB comp` : 'no comp'))
+// AUTO: the knob is the measurement, so say what it measured; manual says so.
+const airCaption = computed(() => (hfComp.value
+  ? (hfAirLossDb.value == null ? 'auto' : `auto · ${hfAirLossDb.value.toFixed(1)} dB`)
+  : 'manual'))
 // What the Soften knob currently allows on one attack.
 const softenCaption = computed(() => {
   const d = softenLaw(hfSoften.value).depthDb
   return d > 0 ? `onsets · up to −${Math.round(d)} dB` : 'off'
-})
-const rangeFill = computed(() => `${rangePath.value} L${CURVE_W},${Y0} L0,${Y0} Z`)
-
-// The TRUE compression ratio (1.5:1 at the default, 6:1 at 100 %), not the
-// spec's divisor. Max depth is on the meter's scale and rarely the limit.
-const ratioLabel = computed(() => `${amountToCompressionRatio(hfAmount.value / 100).toFixed(1)}:1`)
-
-const duckRatioLabel = computed(() => `${(1 / (1 - duckToSlope(hfDuck.value / 100))).toFixed(1)}:1`)
-const duckThresholdLabel = computed(() => {
-  const t = duckToThresholdDb(hfDuck.value / 100) + hfLevelOffset.value
-  return hfDuck.value === 0 ? 'OFF' : `${t.toFixed(0)} dBFS`
-})
-
-const thresholdLabel = computed(() => {
-  // The threshold actually in force: the Amount's nominal plus the file's
-  // level offset, so the readout names the level the detector compares to.
-  const t = amountToThresholdDb(hfAmount.value / 100) + hfLevelOffset.value
-  return hfAmount.value === 0 ? 'OFF' : `${t.toFixed(0)} dBFS`
 })
 
 
@@ -318,21 +266,18 @@ async function applyAndClose() {
     @apply="applyAndClose"
     @close="close"
   >
-    <!-- ── Frequency strip, between the meters ───────────────────────────── -->
+    <!-- ── Frequency strip, beside the output meter ──────────────────────── -->
     <div class="hs-top">
-      <div class="hs-meter">
-        <LevelMeter variant="modula" scale-side="left" :levels="hfInputLevels" label="IN" :height="METER_H" />
-      </div>
       <SoftenerBandStrip
-        :band="hfBand" :detect="hfDetect"
-        :band-min="BAND_HZ_MIN" :band-max="BAND_HZ_MAX"
+        :detect="hfDetect" :detect-high="hfDetectHigh"
         :detect-min="DETECT_HZ_MIN" :detect-max="DETECT_HZ_MAX"
-        :band-default="D.band" :detect-default="D.detect"
+        :high-min="DETECT_HI_MIN" :high-max="DETECT_HI_MAX" :min-ratio="DETECT_MIN_RATIO"
+        :detect-default="D.detect" :high-default="D.detectHigh"
         :min-hz="F_MIN" :max-hz="F_MAX" :height="CURVE_H" :view-w="CURVE_W"
-        :curve-path="rangePath" :curve-fill="rangeFill" :zero-y="Y0"
         :grid-freqs="GRID_FREQS" :tap-fn="getInputSpectrum"
-        :accent="ACCENT" :listen-color="LISTEN_COLOR" :disabled="!hfPreview"
-        @update:band="syncBand" @update:detect="syncDetect"
+        :listen-color="LISTEN_COLOR" :disabled="!hfPreview"
+        :audition="hfAudition"
+        @update:detect="syncDetect" @update:detect-high="syncDetectHigh" @update:audition="toggleAudition"
       />
       <div class="hs-meter">
         <LevelMeter variant="modula" scale-side="right" :levels="hfOutputLevels" label="OUT" :height="METER_H" />
@@ -341,56 +286,95 @@ async function applyAndClose() {
 
     <!-- ── The controls, grouped by what they do ─────────────────────────── -->
     <div class="hs-panel">
-      <!-- DE-ESS: the two cutting stages, in chain order, and the cut's shape. -->
+      <!-- DE-ESS: one Amount, split between the two cutting stages. -->
       <div class="hs-group">
-        <span class="m-caption">De-ess</span>
-        <div class="hs-knobs">
-          <div class="hs-knob">
-            <ModulaKnob
-              variant="small" :size="50" show-value editable
-              :model-value="hfDuck" :min="0" :max="100" :step="1" :default-value="D.duck"
-              label="Duck" :color="ACCENT" :format-value="formatPct" :disabled="!hfPreview"
-              title="First stage: turns the whole S down, keeping its shape and tone — the gentlest way to de-ess. Threshold, ratio (up to 4:1) and depth (up to 12 dB) rise together. Double-click to reset"
-              @update:model-value="syncDuck"
-            />
-            <span class="m-note">{{ duckThresholdLabel }} · {{ duckRatioLabel }}</span>
-          </div>
-          <div class="hs-knob">
-            <ModulaKnob
-              variant="small" :size="50" show-value editable
-              :model-value="hfAmount" :min="0" :max="100" :step="1" :default-value="D.amount"
-              label="EQ" :color="ACCENT" :format-value="formatPct" :disabled="!hfPreview"
-              title="Second stage: a dynamic cut of the top end, on whatever the Duck left hot — it hears the ducked S, so turning Duck up makes it back off. Threshold, ratio (up to 6:1) and depth (up to 24 dB) rise together. Double-click to reset"
-              @update:model-value="syncAmount"
-            />
-            <span class="m-note">{{ thresholdLabel }} · {{ ratioLabel }}</span>
-          </div>
+        <span class="m-caption hs-caption">
+          De-ess
+          <span
+            class="hs-lamp" :style="lampStyle(deessLamp, ACCENT)"
+            title="Lit while the de-esser is cutting: the wide band Duck or the split band EQ is taking something off"
+          ></span>
+        </span>
+        <div class="hs-knob">
+          <ModulaKnob
+            variant="arc" :size="100" editable
+            :model-value="hfTotal" :min="0" :max="100" :step="1" :default-value="AMOUNT_DEFAULT"
+            label="Amount" :color="ACCENT" :format-value="formatPct" :disabled="!hfPreview"
+            title="How much de-essing, shared between the two stages by the Split below: the wide band Duck (turns the whole S down, keeping its shape and tone) and the split band EQ (a dynamic cut of the top end, on whatever the Duck left hot). Double-click to reset"
+            @update:model-value="syncTotal"
+          />
         </div>
-        <ModulaSegmented
-          :model-value="hfShape" :options="SHAPE_OPTIONS"
-          aria-label="Cut shape" :disabled="!hfPreview"
-          @update:model-value="syncShape"
+        <ModulaFillSlider
+          orientation="horizontal" :length="200"
+          :model-value="hfSplit" :min="0" :max="100" :step="1" :default-value="SPLIT_DEFAULT"
+          label="Split" :ends="['WIDE BAND', 'SPLIT BAND']" :format-value="formatSplit"
+          color="var(--m-accent)" :disabled="!hfPreview"
+          aria-label="Split between wide band and split band"
+          title="Where the Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
+          @update:model-value="syncSplit"
         />
       </div>
 
       <span class="hs-rule" aria-hidden="true"></span>
 
-      <!-- PROTECT: what the cut is not allowed to do, and the T/K/P exception. -->
+      <!-- PROTECT: what the cut is not allowed to do. -->
       <div class="hs-group">
-        <span class="m-caption">Protect</span>
+        <span class="m-caption">Hi</span>
         <div class="hs-knob">
           <ModulaKnob
-            variant="small" :size="50" show-value editable
+            variant="arc" :size="100" show-value editable
             :model-value="hfGuard" :min="0" :max="100" :step="1" :default-value="D.guard"
-            label="Guard" :color="ACCENT" :format-value="formatGuard" :disabled="!hfPreview"
+            label="Lisp Guard" :color="ACCENT" :format-value="formatGuard" :disabled="!hfPreview"
             title="Lisp guard strength. No cut may take an S further below the voice than this floor, so it never ends up quieter than a normal S sits. Higher is stricter; 0 turns it off. Double-click to reset"
             @update:model-value="syncGuard"
           />
           <span class="m-note">{{ guardLabel }}</span>
         </div>
+      </div>
+
+      <span class="hs-rule" aria-hidden="true"></span>
+
+      <!-- AIR: what goes back on top after the cut — on the vowels only. -->
+      <div class="hs-group">
+        <span class="m-caption hs-caption">Lo
+        </span>
+        <div class="hs-knob">
+          <ModulaKnob
+            variant="arc" :size="100" show-value editable
+            :model-value="hfAir" :min="0" :max="AIR_MAKEUP_MAX_DB" :step="0.1" :default-value="D.air"
+            label="HF Restore" :color="ACCENT" :format-value="formatAir" :disabled="!hfPreview"
+            title="Add top after the cut, on Air Boost's curve, on the vowels only. While AUTO is lit this is the measured amount; turn it to take over (AUTO drops and the value stays). Double-click to reset"
+            @update:model-value="syncAir"
+          />
+          <span class="m-note">{{ airCaption }}</span>
+        </div>
+        <ModulaLedPill
+          size="sm" label="AUTO" :color="ACCENT"
+          :model-value="hfComp" :disabled="!hfPreview"
+          title="Set HF Restore automatically: half of the top end the cut is measured to take off the selection is put back on the vowels, and it follows the other controls. Turn the knob to take over; AUTO drops and keeps the value"
+          @update:model-value="syncComp"
+        />
+      </div>
+
+      <span class="hs-rule" aria-hidden="true"></span>
+
+      <!-- SOFTEN: onsets, not sibilance — last in the chain — with the T/K/P burst treatment. -->
+      <div class="hs-group">
+        <span class="m-caption"></span>
+        <div class="hs-knob">
+          <ModulaKnob
+            variant="small" :size="40" show-value editable
+            :model-value="hfSoften" :min="0" :max="SOFTEN_MAX" :step="0.1" :default-value="D.soften"
+            label="Soften Transients" :color="ACCENT" :format-value="formatSoften" :disabled="!hfPreview"
+            title="Softens sudden attacks: when the band above 500 Hz rises suddenly — a click, a lip smack, a hard T or K — it is turned down for a few milliseconds. It reacts to how suddenly the voice rises, not how loud it is. 0 is off. Double-click to reset"
+            @update:model-value="syncSoften"
+          />
+          <span class="m-note">{{ softenCaption }}</span>
+        </div>
         <span class="hs-lampwrap">
+          <span class="m-note">Soften Plosives</span>
           <ModulaLedPill
-            size="sm" label="PLOSIVES" :color="ACCENT"
+            size="sm" label="ON" :color="ACCENT"
             :model-value="hfPlosives" :disabled="!hfPreview"
             title="Catch T, K and P releases — a burst straight out of a stop's silence — and cut them harder, with the lisp guard lifted"
             @update:model-value="syncPlosives"
@@ -400,52 +384,6 @@ async function applyAndClose() {
             title="Lit while a plosive burst is being treated"
           ></span>
         </span>
-      </div>
-
-      <span class="hs-rule" aria-hidden="true"></span>
-
-      <!-- AIR: what goes back on top after the cut — on the vowels only. -->
-      <div class="hs-group">
-        <span class="m-caption hs-caption">
-          Air
-          <span
-            class="hs-lamp" :style="lampStyle(hfAirLamp, AIR_LAMP_COLOR)"
-            title="Lit while the Air lift is being applied — on the vowels only"
-          ></span>
-        </span>
-        <div class="hs-knob">
-          <ModulaKnob
-            variant="small" :size="50" show-value editable
-            :model-value="hfAir" :min="0" :max="AIR_MAKEUP_MAX_DB" :step="0.1" :default-value="D.air"
-            label="Air" :color="ACCENT" :format-value="formatAir" :disabled="!hfPreview"
-            title="Add top after the cut, on Air Boost's curve, on the vowels only. HF COMP adds its measured compensation on top of this. Double-click to reset"
-            @update:model-value="syncAir"
-          />
-          <span class="m-note">{{ airCaption }}</span>
-        </div>
-        <ModulaLedPill
-          size="sm" label="HF COMP" :color="ACCENT"
-          :model-value="hfComp" :disabled="!hfPreview"
-          title="Add Air to make up for the top end the cut removes: half of what it is measured to take, on the selection. Adds to the Air knob, never replaces it"
-          @update:model-value="syncComp"
-        />
-      </div>
-
-      <span class="hs-rule" aria-hidden="true"></span>
-
-      <!-- SOFTEN: onsets, not sibilance — last in the chain. -->
-      <div class="hs-group">
-        <span class="m-caption">Soften</span>
-        <div class="hs-knob">
-          <ModulaKnob
-            variant="small" :size="50" show-value editable
-            :model-value="hfSoften" :min="0" :max="SOFTEN_MAX" :step="0.1" :default-value="D.soften"
-            label="Soften" :color="ACCENT" :format-value="formatSoften" :disabled="!hfPreview"
-            title="Softens sudden attacks: when the band above 500 Hz rises suddenly — a click, a lip smack, a hard T or K — it is turned down for a few milliseconds. It reacts to how suddenly the voice rises, not how loud it is. 0 is off. Double-click to reset"
-            @update:model-value="syncSoften"
-          />
-          <span class="m-note">{{ softenCaption }}</span>
-        </div>
       </div>
     </div>
 
@@ -480,7 +418,7 @@ async function applyAndClose() {
 <style scoped>
 .hs-top {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: start;
 }

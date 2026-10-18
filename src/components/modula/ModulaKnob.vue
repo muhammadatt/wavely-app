@@ -18,8 +18,12 @@
  * The value is never printed on the cap. The large knobs float it in a drag
  * tip; the small ones print it under the label (`showValue`).
  *
- * Rotation is −135° … +135° over the travel. Geometry is computed from `size`,
- * so a faceplate can ask for 112 px or 128 px and the ring follows.
+ * Rotation is −135° … +135° over the travel.
+ *
+ * ⚠ `size` IS THE OUTER SIZE, RING INCLUDED, FOR EVERY VARIANT — the box the knob
+ * occupies in the layout. The cap sits inside it: 72 % of it for led (the ring
+ * scales with the knob), 68 % for arc, size − 54 px for ticks, all of it for the
+ * ringless variants. So the same `size` on two variants is the same footprint.
  */
 import { computed, nextTick, ref } from 'vue'
 import { useModulaDrag, DRAG_PROPS } from './useModulaDrag.js'
@@ -55,9 +59,24 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue'])
 
-const DEFAULT_SIZE = { led: 112, ticks: 102, small: 62, arc: 108, ring: 48, trim: 30 }
+/** Outer size, ring included. */
+const DEFAULT_SIZE = { led: 156, ticks: 156, small: 62, arc: 108, ring: 48, trim: 30 }
+/** The cap diameter the shadows and pointer widths were written for. */
+const DESIGN_CAP = { led: 112, ticks: 102, small: 62, arc: 108, ring: 48, trim: 30 }
 const DEFAULT_TRAVEL = { led: 200, ticks: 200, small: 140, arc: 150, ring: 150, trim: 160 }
-const body = computed(() => props.size ?? DEFAULT_SIZE[props.variant])
+const outer = computed(() => props.size ?? DEFAULT_SIZE[props.variant])
+/** The cap, which is what the knob's own geometry is measured on. */
+const body = computed(() => {
+  if (props.variant === 'led') return outer.value * DESIGN_CAP.led / DEFAULT_SIZE.led
+  if (props.variant === 'ticks') return outer.value - 54
+  return outer.value
+})
+/**
+ * Size relative to the variant's design size. The cap shadows are written for
+ * that size and multiplied by this, so a 44 px knob keeps a 62 px knob's
+ * proportions instead of being mostly inner shadow. 1 px outlines stay 1 px.
+ */
+const scaleK = computed(() => +(body.value / DESIGN_CAP[props.variant]).toFixed(3))
 
 const { dragging, pct, handlers, setValue } = useModulaDrag(
   props, v => emit('update:modelValue', v),
@@ -107,12 +126,14 @@ const valueEditable = computed(() => props.editable && !props.readonly && !((pro
 const tipOn = computed(() => (props.showTip ?? props.variant !== 'trim') && dragging.value)
 
 // ── LED ring (led) ──────────────────────────────────────────────────────────
-// The ring box is the knob plus 44 px; LEDs sit 3.5 px inside its edge.
-const ledBox = computed(() => body.value + 44)
+// The ring box IS the outer size; the LEDs sit 9 px (at the design size) inside
+// its edge, and the dots and that inset scale with the knob.
+const ledBox = computed(() => outer.value)
+const ledDot = computed(() => Math.max(3, 6 * scaleK.value))
 const leds = computed(() => {
   const n = props.segments ?? 21
   const c = ledBox.value / 2
-  const r = c - 9
+  const r = c - 9 * scaleK.value
   return Array.from({ length: n }, (_, i) => {
     const f = i / (n - 1)
     const a = (-135 + 270 * f) * Math.PI / 180
@@ -121,7 +142,7 @@ const leds = computed(() => {
 })
 
 // ── Tick ring (ticks) ───────────────────────────────────────────────────────
-const tickBox = computed(() => body.value + 54)
+const tickBox = computed(() => outer.value)
 const ticks = computed(() => {
   const n = props.segments ?? 21
   return Array.from({ length: n }, (_, i) => {
@@ -168,7 +189,7 @@ const aria = computed(() => ({
 </script>
 
 <template>
-  <div class="m-knob" :class="[`m-knob--${variant}`, { 'is-disabled': disabled, 'is-readonly': readonly }]">
+  <div class="m-knob" :class="[`m-knob--${variant}`, { 'is-disabled': disabled, 'is-readonly': readonly }]" :style="{ '--k': scaleK }">
     <!-- The trim's index dot, over the knob. -->
     <div v-if="variant === 'trim'" class="m-trim-dot" aria-hidden="true"></div>
 
@@ -177,12 +198,12 @@ const aria = computed(() => ({
       <ModulaValueTip :text="text" :show="tipOn" />
       <div
         v-for="(l, i) in leds" :key="i" class="m-led"
-        :style="{ left: `${l.l}px`, top: `${l.t}px`, background: l.on ? color : 'var(--m-led-off)', boxShadow: l.on ? `0 0 6px ${color}` : 'inset 0 1px 1px rgba(0,0,0,.6)' }"
+        :style="{ left: `${l.l}px`, top: `${l.t}px`, width: `${ledDot}px`, height: `${ledDot}px`, margin: `${-ledDot / 2}px 0 0 ${-ledDot / 2}px`, background: l.on ? color : 'var(--m-led-off)', boxShadow: l.on ? `0 0 ${ledDot}px ${color}` : 'inset 0 1px 1px rgba(0,0,0,.6)' }"
       ></div>
       <div class="m-cap m-cap--led m-focusable" :style="{ width: `${body}px`, height: `${body}px` }" v-bind="aria" v-on="handlers">
         <div class="m-cap-inner" :style="{ inset: `${Math.round(body * 0.116)}px` }"></div>
         <div class="m-rot" :style="{ transform: `rotate(${deg}deg)` }">
-          <div class="m-bar" :style="{ top: `${Math.round(body * 0.152)}px`, height: `${Math.round(body * 0.232)}px`, width: '4px', marginLeft: '-2px', background: color, boxShadow: `0 0 6px ${color}` }"></div>
+          <div class="m-bar" :style="{ top: `${Math.round(body * 0.152)}px`, height: `${Math.round(body * 0.232)}px`, width: `${Math.max(2, 4 * scaleK).toFixed(1)}px`, marginLeft: `${(-Math.max(2, 4 * scaleK) / 2).toFixed(2)}px`, background: color, boxShadow: `0 0 ${ledDot}px ${color}` }"></div>
         </div>
       </div>
     </div>
@@ -212,21 +233,19 @@ const aria = computed(() => ({
       <ModulaValueTip :text="text" :show="tipOn" :offset="34" />
       <div class="m-arc-well"></div>
       <svg viewBox="0 0 100 100" class="m-arc-svg">
-        <circle cx="50" cy="49.4" r="42" fill="none" transform="rotate(135 50 49.4)" style="stroke:rgba(0,0,0,.6);stroke-width:3;stroke-linecap:round;stroke-dasharray:197.9 263.9" />
-        <circle cx="50" cy="50" r="42" fill="none" transform="rotate(135 50 50)" style="stroke:#232a33;stroke-width:3;stroke-linecap:round;stroke-dasharray:197.9 263.9" />
+        <circle cx="50" cy="50" r="42" fill="none" transform="rotate(135 50 50)" style="stroke:var(--m-led-off);stroke-width:3;stroke-linecap:round;stroke-dasharray:197.9 263.9" />
         <circle
           cx="50" cy="50" r="42" fill="none" transform="rotate(135 50 50)"
-          :style="{ stroke: color, strokeWidth: 2.4, strokeLinecap: 'round', strokeDasharray: arc.dash, strokeDashoffset: arc.offset, filter: `drop-shadow(0 0 1.5px ${color})` }"
+          :style="{ stroke: color, strokeWidth: 3, strokeLinecap: 'round', strokeDasharray: arc.dash, strokeDashoffset: arc.offset, filter: `drop-shadow(0 0 1px ${color})` }"
         />
         <template v-for="(t, i) in arcTicks" :key="i">
-          <line :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2" transform="translate(0 -.6)" style="stroke:rgba(0,0,0,.6);stroke-width:1.6;stroke-linecap:round" />
-          <line :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2" :style="{ stroke: t.on ? color : '#232a33', strokeWidth: 1.6, strokeLinecap: 'round' }" />
+          <line :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2" :style="{ stroke: t.on ? color : 'var(--m-led-off)', strokeWidth: 1.6, strokeLinecap: 'round' }" />
         </template>
       </svg>
       <div class="m-arc-cap">
         <div class="m-arc-face"></div>
         <div class="m-rot" :style="{ transform: `rotate(${deg}deg)` }">
-          <div class="m-arc-dot" :style="{ background: color, boxShadow: `0 0 4px ${color}` }"></div>
+          <div class="m-arc-dot" :style="{ background: color, boxShadow: `0 0 2px ${color}` }"></div>
         </div>
       </div>
     </div>
@@ -238,15 +257,15 @@ const aria = computed(() => ({
     >
       <ModulaValueTip :text="text" :show="tipOn" size="sm" :offset="30" />
       <svg viewBox="0 0 100 100" class="m-arc-svg">
-        <circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:#141920;stroke-width:6;stroke-linecap:round;stroke-dasharray:207.3 276.5" />
+        <circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:var(--m-led-off);stroke-width:3.5;stroke-linecap:round;stroke-dasharray:207.3 276.5" />
         <circle
           cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)"
-          :style="{ stroke: color, strokeWidth: 6, strokeLinecap: 'round', strokeDasharray: ringArc.dash, strokeDashoffset: ringArc.offset, opacity: ringArc.empty ? 0 : 1 }"
+          :style="{ stroke: color, strokeWidth: 3.5, strokeLinecap: 'round', strokeDasharray: ringArc.dash, strokeDashoffset: ringArc.offset, opacity: ringArc.empty ? 0 : 1, filter: `drop-shadow(0 0 4px ${color})` }"
         />
       </svg>
       <div class="m-ring-cap">
         <div class="m-rot" :style="{ transform: `rotate(${deg}deg)` }">
-          <div class="m-ring-line"></div>
+          <div class="m-ring-line" :style="{ background: color, boxShadow: `0 0 5px ${color}` }"></div>
         </div>
       </div>
     </div>
@@ -258,6 +277,7 @@ const aria = computed(() => ({
       :title="variant === 'trim' ? 'Drag · double-click to reset' : undefined"
     >
       <ModulaValueTip :text="text" :show="tipOn" size="sm" :offset="variant === 'trim' ? 32 : 34" />
+      <div v-if="variant !== 'trim'" class="m-cap-inner" :style="{ inset: `${Math.round(body * 0.116)}px` }"></div>
       <div class="m-rot" :style="{ transform: `rotate(${deg}deg)` }">
         <div
           v-if="variant === 'trim'" class="m-bar"
@@ -265,7 +285,7 @@ const aria = computed(() => ({
         ></div>
         <div
           v-else class="m-bar"
-          :style="{ top: `${Math.round(body * 0.13)}px`, height: `${Math.round(body * 0.24)}px`, width: '3px', marginLeft: '-1.5px', background: color, boxShadow: `0 0 6px ${color}` }"
+          :style="{ top: `${Math.round(body * 0.13)}px`, height: `${Math.round(body * 0.24)}px`, width: `${Math.max(2, 3 * scaleK).toFixed(1)}px`, marginLeft: `${(-Math.max(2, 3 * scaleK) / 2).toFixed(2)}px`, background: color, boxShadow: `0 0 ${Math.max(3, 6 * scaleK).toFixed(1)}px ${color}` }"
         ></div>
       </div>
     </div>
@@ -346,7 +366,9 @@ const aria = computed(() => ({
 .m-cap:active { cursor: grabbing; }
 .m-cap--led {
   background: linear-gradient(160deg, #4d596a 0%, #323b48 52%, #222931 100%);
-  box-shadow: 0 16px 26px -12px rgba(0, 0, 0, 0.95), inset 0 2px 2px rgba(255, 255, 255, 0.1), inset 0 -7px 12px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.7);
+  /* The shadows are specified for the 112 px cap and scaled by --k, so a 50 px
+     knob keeps the same proportions instead of being mostly inner shadow. */
+  box-shadow: 0 calc(16px * var(--k, 1)) calc(26px * var(--k, 1)) calc(-12px * var(--k, 1)) rgba(0, 0, 0, 0.95), inset 0 calc(2px * var(--k, 1)) calc(2px * var(--k, 1)) rgba(255, 255, 255, 0.1), inset 0 calc(-7px * var(--k, 1)) calc(12px * var(--k, 1)) rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.7);
 }
 .m-cap--ticks {
   background: linear-gradient(160deg, #505c6e 0%, #353e4b 52%, #242b34 100%);
@@ -355,8 +377,8 @@ const aria = computed(() => ({
 .m-cap--plain {
   /* Steel-tinted to sit on --m-panel (#3c4655 → #2c343f): the old neutral grey
      read as a dull patch on the blue-grey chassis. Lighter lip, darker foot. */
-  background: linear-gradient(160deg, #4d596a 0%, #323b48 55%, #222931 100%);
-  box-shadow: 0 12px 20px -10px rgba(0, 0, 0, 0.9), inset 0 1px 1px rgba(255, 255, 255, 0.14), 0 0 0 1px rgba(8, 11, 16, 0.7);
+  background: linear-gradient(160deg, #4d596a 0%, #323b48 52%, #222931 100%);
+  box-shadow: 0 calc(12px * var(--k, 1)) calc(20px * var(--k, 1)) calc(-10px * var(--k, 1)) rgba(0, 0, 0, 0.95), inset 0 calc(1.5px * var(--k, 1)) calc(1.5px * var(--k, 1)) rgba(255, 255, 255, 0.1), inset 0 calc(-5px * var(--k, 1)) calc(9px * var(--k, 1)) rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.7);
 }
 .m-knob--trim .m-cap--plain {
   box-shadow: 0 8px 14px -8px rgba(0, 0, 0, 0.95), inset 0 1px 1px rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.65);
@@ -388,12 +410,14 @@ const aria = computed(() => ({
   touch-action: none;
   cursor: ns-resize;
 }
+/* FLAT AND TRANSPARENT: the face shows through. A recess read as the knob
+   sunk into the panel and a raised bezel as a second disc; the separation from
+   the track is the gap the smaller cap leaves. */
 .m-arc-well {
   position: absolute;
   inset: 10%;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 40%, #232a33, #1b2027);
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.7), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  background: transparent;
 }
 .m-arc-svg {
   position: absolute;
@@ -411,45 +435,51 @@ const aria = computed(() => ({
   position: absolute;
   inset: 17%;
   border-radius: 50%;
-  /* Same steel tint as the plain cap, for the EQ strips. */
-  background: linear-gradient(160deg, #4d596a 0%, #323b48 60%, #222931 100%);
-  box-shadow: 0 6px 10px -6px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255, 255, 255, .13), 0 0 0 1px rgba(8, 11, 16, .7);
+  /* The led knob's cap, at the strip's scale. */
+  background: linear-gradient(160deg, #4d596a 0%, #323b48 52%, #222931 100%);
+  box-shadow: 0 calc(6px * var(--k, 1)) calc(10px * var(--k, 1)) calc(-6px * var(--k, 1)) rgba(0, 0, 0, .95), inset 0 calc(1px * var(--k, 1)) calc(1px * var(--k, 1)) rgba(255, 255, 255, .1), inset 0 calc(-3px * var(--k, 1)) calc(5px * var(--k, 1)) rgba(0, 0, 0, .55), 0 0 0 1px rgba(0, 0, 0, .7);
 }
 .m-ring-line {
   position: absolute;
   left: 50%;
   top: 8%;
-  width: 2px;
+  width: max(2px, calc(3px * var(--k, 1)));
   height: 30%;
-  margin-left: -1px;
-  border-radius: 1px;
-  background: var(--m-ink);
+  transform: translateX(-50%);
+  border-radius: 2px;
 }
+/* The RIMMED cap: a raised metal lip round a lighter dial face. Steel-tinted to
+   sit on the chassis, with the led knob's soft outline and the gap to the track
+   the smaller cap leaves. */
 .m-arc-cap {
   position: absolute;
+  /* 68% puts the track the same fraction of the cap's diameter away as the led
+     knob's LED ring (about 9% clear), where 56% left it 22%. */
   left: 16%;
   top: 16%;
   width: 68%;
   height: 68%;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 38%, #3a4452 74%, #576374 89%, #657184 94%, #28303a 100%);
-  box-shadow: inset 0 1.5px 1px rgba(255, 255, 255, 0.16), inset 0 -3px 6px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.7), 0 6px 12px rgba(0, 0, 0, 0.45);
+  background: radial-gradient(circle at 50% 38%, #404b5b 74%, #66758b 89%, #7a8aa1 94%, #394353 100%);
+  box-shadow: inset 0 calc(1.5px * var(--k, 1)) calc(1px * var(--k, 1)) rgba(255, 255, 255, 0.18), inset 0 calc(-3px * var(--k, 1)) calc(6px * var(--k, 1)) rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.7), 0 calc(5px * var(--k, 1)) calc(9px * var(--k, 1)) rgba(0, 0, 0, 0.4);
 }
 .m-arc-face {
   position: absolute;
+  /* Rim width: the old Knob.vue's, 9% of a 68% cap (6.1% of the knob) — the
+     cap is 68% again, so it is the same 9%. */
   inset: 9%;
   border-radius: 50%;
   overflow: hidden;
-  background: linear-gradient(160deg, #4a5666, #3a4452);
-  box-shadow: 0 0 0 1.5px #171c23, 0 1px 0 1.5px rgba(255, 255, 255, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: linear-gradient(160deg, #5b687c, #414d5f);
+  box-shadow: 0 0 0 1.5px #37414f, inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 .m-arc-dot {
   position: absolute;
-  top: 15%;
+  top: 16%;
   left: 50%;
   transform: translateX(-50%);
-  width: 6%;
-  height: 6%;
+  width: 10%;
+  height: 10%;
   border-radius: 50%;
 }
 

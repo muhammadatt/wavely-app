@@ -40,7 +40,10 @@ export const HF_SOFTENER_DEFAULTS = {
   rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
   release: 40, // ms, HF release outside vowels — fixed, not on the panel
   vowelRelease: true, // let go fast when a vowel starts
-  shape: 'band', // 'shelf' | 'band'
+  // ⚠ PINNED TO SHELF and off the panel (owner's call): the EQ cuts everything
+  // above the Band corner. The kernel still takes 'band' (cut the sibilance band
+  // and return to flat above it), for the bench and the tests.
+  shape: 'shelf', // 'shelf' | 'band'
   // Lisp guard strength, 0–100 %: no cut may take an "s" further below the
   // voice than a floor this sets (guardToFloorDb). 0 = off; 50 = −16 dB.
   guard: 50,
@@ -58,10 +61,14 @@ export const HF_SOFTENER_DEFAULTS = {
   // chain entirely: no latency, bit-identical to the softener alone.
   soften: 0,
   detect: 4000, // Hz, the detector's high-pass corner, 3000–8000 — see detectCompDb
-  air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6, the user's own
-  // HF COMP: ADDS the measured compensation to `air` (see hfSoftenerAutoAir.js).
+  // Hz, the detector's low-pass corner, 4000–20000; 20000 is OFF (detector is high-pass only).
+  detectHigh: 20000,
+  air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6: the one value in effect
+  // AUTO (HF RESTORE): while on, the measurement owns `air` — it writes the
+  // knob (hfSoftenerAutoAir.js) — and touching the knob takes over and turns it
+  // off, keeping the value, as the compressors' auto makeup does. The key keeps
+  // its old name (`comp`) so saved presets still read.
   comp: true,
-  compAir: 0, // dB, measured by useHFSoftener; never a user setting
   // 'voiced' (vowels only — never lifts the "s" or the gaps) | 'static'.
   // ⚠ PINNED TO VOICED and off the panel since the Modula redesign (owner's
   // call): STATIC hands the cut back on every "s" and lifts the room in the
@@ -69,6 +76,30 @@ export const HF_SOFTENER_DEFAULTS = {
   airMode: 'voiced',
   // Measured from the whole file, not a user setting — see useHFSoftener.
   levelOffset: 0, // dB, file gated RMS minus nominal
+}
+
+/**
+ * The panel's AMOUNT and SPLIT are a view over the two cutting stages, Duck
+ * (wide band) and EQ (split band): the Amount is shared between them, `split`
+ * being the % that goes to the EQ. Duck and EQ stay the state and what presets
+ * store, so nothing here changes the kernel or a saved patch.
+ *
+ * ⚠ THIS IS NOT THE OLD AMOUNT + SPLIT (retired in the kernel, see the dev log):
+ * that divided ONE target between two serial gains, which changes nothing since
+ * a gain and a filter commute. This divides two MACROS, each driving its own
+ * stage, so the Split moves real threshold, ratio and depth.
+ */
+export function splitAmount(total, split) {
+  const t = Math.min(100, Math.max(0, Number(total) || 0))
+  const s = Math.min(100, Math.max(0, Number(split) || 0)) / 100
+  const r = v => Math.round(v * 100) / 100
+  return { duck: r(t * (1 - s)), amount: r(t * s) }
+}
+
+/** The inverse: the Amount (capped at 100) and the Split (null when both stages are 0). */
+export function amountSplitOf(duck, amount) {
+  const sum = (Number(duck) || 0) + (Number(amount) || 0)
+  return { total: Math.min(100, sum), split: sum > 0 ? Math.round((100 * (Number(amount) || 0)) / sum) : null }
 }
 
 /** Map UI param names to kernel param names. */
@@ -86,7 +117,8 @@ export function toKernelParams(params) {
     bandHz: params.band ?? HF_SOFTENER_DEFAULTS.band,
     levelOffsetDb: params.levelOffset,
     detectHz: params.detect,
-    airDb: (params.air ?? 0) + (params.comp ? (params.compAir ?? 0) : 0),
+    detectHiHz: params.detectHigh ?? HF_SOFTENER_DEFAULTS.detectHigh,
+    airDb: params.air ?? 0,
     airMode: params.airMode,
     duck: (params.duck ?? 0) / 100,
   }

@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyHFSoftenerRegion, computePeakCache, measureHFSoftenerAutoAir } from '../audio/processing.js'
@@ -7,6 +7,7 @@ import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { levelOffsetDbFor } from '../audio/hfSoftenerProcessor.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { hfSoftenerEffect, HF_SOFTENER_DEFAULTS } from '../audio/effects/hfSoftener.js'
+import { splitAmount, amountSplitOf } from '../audio/hfSoftenerParams.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -14,7 +15,6 @@ export const HF_SOFTENER_WINDOW_ID = 'hf-softener'
 
 // Singleton reactive state shared between the sidebar trigger and the modal.
 const hfAmount = ref(HF_SOFTENER_DEFAULTS.amount)
-const hfShape = ref(HF_SOFTENER_DEFAULTS.shape)
 // Lisp guard strength, 0–100 % (0 = off), and the two Advanced controls.
 const hfGuard = ref(HF_SOFTENER_DEFAULTS.guard)
 const hfPlosives = ref(HF_SOFTENER_DEFAULTS.plosives)
@@ -25,22 +25,29 @@ const hfResoAmount = ref(HF_SOFTENER_DEFAULTS.resoAmount)
 // Soften: the onset softener at the end of the chain (hfSoftenerSoftenStage.js),
 // on the panel in the slot Reso's knob had.
 const hfSoften = ref(HF_SOFTENER_DEFAULTS.soften)
-// Air makeup: Air Boost's curve after the cut, the user's own amount. HF COMP
-// ADDS a measured amount on top — a fraction of the top end the chain removes
-// (hfSoftenerAutoAir.js) — so the knob is never overwritten.
+// Air makeup: Air Boost's curve after the cut — ONE value, the knob's. While AUTO
+// (`hfComp`) is on the measurement writes it (a fraction of the top end the
+// chain removes, hfSoftenerAutoAir.js); touching the knob takes over.
 const hfAir = ref(HF_SOFTENER_DEFAULTS.air)
 const hfComp = ref(HF_SOFTENER_DEFAULTS.comp)
-const hfCompAir = ref(0)
 const hfAirLossDb = ref(null)
 let autoAirTimer = null
 let autoAirSeq = 0
 // The detector's high-pass corner, Hz: raise it when bright vowels trip the cut.
 const hfDetect = ref(HF_SOFTENER_DEFAULTS.detect)
+const hfDetectHigh = ref(HF_SOFTENER_DEFAULTS.detectHigh)
 // VOICED: the lift follows the voicing, so it brightens vowels without
 // handing the cut back to the sibilants. STATIC: Air Boost's behaviour.
 const hfAirMode = ref(HF_SOFTENER_DEFAULTS.airMode)
 // How the reduction is taken: 0 all as the band cut, 100 all as a broadband duck.
 const hfDuck = ref(HF_SOFTENER_DEFAULTS.duck)
+// AMOUNT and SPLIT are a view over Duck (wide band) and EQ (split band), not a
+// third control: duck = amount x (1 - split), eq = amount x split, so the two
+// stages always share the Amount. Duck and EQ stay the state and what presets
+// store; the Split is remembered here because it cannot be read back from a
+// pair that is 0 / 0.
+const hfSplit = ref(amountSplitOf(HF_SOFTENER_DEFAULTS.duck, HF_SOFTENER_DEFAULTS.amount).split)
+const hfTotal = computed(() => amountSplitOf(hfDuck.value, hfAmount.value).total)
 const hfBroadband = ref(0)
 // The file's gated RMS and the offset it puts on every detector level. A
 // property of the audio, measured, never a user setting.
@@ -50,6 +57,10 @@ let levelMeasuredFor = null
 // DELTA monitor: hear only what is being removed. Never part of the params
 // the apply path renders with.
 const hfDelta = ref(false)
+// AUDITION monitor: hear only what the detector hears (its band). Same rule as
+// DELTA, and the two are exclusive — one monitor tap at a time.
+const hfAudition = ref(false)
+const listenMode = () => (hfAudition.value ? 'sidechain' : hfDelta.value ? 'delta' : 'off')
 const hfPreview = ref(false)
 const hfReduction = ref(0)
 // The Reso stage's reduction and the two lamps, read with the other meters.
@@ -73,7 +84,7 @@ function currentParams() {
     rotator: HF_SOFTENER_DEFAULTS.rotator,
     release: HF_SOFTENER_DEFAULTS.release,
     vowelRelease: HF_SOFTENER_DEFAULTS.vowelRelease,
-    shape: hfShape.value,
+    shape: HF_SOFTENER_DEFAULTS.shape, // pinned
     guard: hfGuard.value,
     plosives: hfPlosives.value,
     band: hfBand.value,
@@ -81,10 +92,10 @@ function currentParams() {
     soften: hfSoften.value,
     air: hfAir.value,
     comp: hfComp.value,
-    compAir: hfCompAir.value,
     airMode: hfAirMode.value,
     duck: hfDuck.value,
     detect: hfDetect.value,
+    detectHigh: hfDetectHigh.value,
     levelOffset: hfLevelOffset.value,
   }
 }
@@ -208,10 +219,10 @@ export function useHFSoftener() {
   }
 
   /**
-   * Measure the chain's top-end loss and, while HF COMP is on, set the compensation from it.
+   * Measure the chain's top-end loss and, while AUTO is on, set the Air knob from it.
    * Over the selection (the usual capped window), since that is what apply
    * will render; the whole file when nothing is selected. Stale answers — a
-   * newer request went out, or HF COMP was switched off meanwhile — are discarded.
+   * newer request went out, or AUTO was dropped meanwhile — are discarded.
    */
   async function refreshAutoAir() {
     if (!state.currentFile || !hfComp.value) return
@@ -227,8 +238,9 @@ export function useHFSoftener() {
       )
       if (seq !== autoAirSeq || !hfComp.value) return
       hfAirLossDb.value = lossDb
-      hfCompAir.value = airDb
-      pushParam('compAir', airDb)
+      // AUTO owns the knob: the measurement IS its value.
+      hfAir.value = airDb
+      pushParam('air', airDb)
     } catch (err) {
       console.error('HF Softener auto Air failed:', err)
     }
@@ -241,10 +253,15 @@ export function useHFSoftener() {
     autoAirTimer = setTimeout(refreshAutoAir, 250)
   }
 
+  /** The AUTO pill. On: the measurement takes the knob. Off: the knob keeps what it holds. */
   function syncComp(on) {
-    hfComp.value = !!on
-    pushParam('comp', hfComp.value)
-    if (on) scheduleAutoAir()
+    if (!on) {
+      disableAuto()
+      return
+    }
+    hfComp.value = true
+    pushParam('comp', true)
+    scheduleAutoAir()
   }
 
   function togglePreview() {
@@ -256,11 +273,12 @@ export function useHFSoftener() {
       refreshLevel()
       pushAllParams(chain)
       scheduleAutoAir()
-      nodesOf(chain)?.setListen(hfDelta.value ? 'delta' : 'off')
+      nodesOf(chain)?.setListen(listenMode())
       startMeters(chain)
     } else {
       // Bypassed, there is nothing to hear in the delta.
       hfDelta.value = false
+      hfAudition.value = false
       stopMeters()
     }
   }
@@ -288,15 +306,33 @@ export function useHFSoftener() {
     pushParam('airMode', v)
   }
 
-  /** The user's own Air, independent of HF COMP. */
+  /**
+   * The Air knob. Touching it while AUTO is on takes over: AUTO drops, and any
+   * measurement still in flight is discarded so it cannot land afterwards and
+   * move a knob the user now owns. The value stays where they put it.
+   */
   function syncAir(v) {
+    if (hfComp.value) disableAuto()
     hfAir.value = v
     pushParam('air', v)
+  }
+
+  function disableAuto() {
+    hfComp.value = false
+    autoAirSeq++
+    clearTimeout(autoAirTimer)
+    pushParam('comp', false)
   }
 
   function syncDetect(v) {
     hfDetect.value = v
     pushParam('detect', v)
+    scheduleAutoAir()
+  }
+
+  function syncDetectHigh(v) {
+    hfDetectHigh.value = v
+    pushParam('detectHigh', v)
     scheduleAutoAir()
   }
 
@@ -306,7 +342,7 @@ export function useHFSoftener() {
     scheduleAutoAir()
   }
 
-  // Soften acts on onsets only, so it does not move HF COMP's measurement.
+  // Soften acts on onsets only, so it does not move AUTO's measurement.
   function syncSoften(v) {
     hfSoften.value = v
     pushParam('soften', v)
@@ -330,35 +366,58 @@ export function useHFSoftener() {
     scheduleAutoAir()
   }
 
-  function syncShape(v) {
-    hfShape.value = v
-    pushParam('shape', v)
-    scheduleAutoAir()
+  /** Spread an Amount over the two stages by the Split (the % that goes to the EQ). */
+  function spread(total, split) {
+    const { duck, amount } = splitAmount(total, split)
+    syncDuck(duck)
+    syncAmount(amount)
+  }
+
+  function syncTotal(v) {
+    spread(v, hfSplit.value)
+  }
+
+  function syncSplit(v) {
+    hfSplit.value = v
+    spread(hfTotal.value, v)
   }
 
   /**
    * A preset's controls, through the same paths a knob turn takes. The Air
-   * Mode is pinned (VOICED) and the measured values (HF COMP's figure, the
+   * Mode is pinned (VOICED) and the measured values (AUTO's measured figure, the
    * file's level) are not preset params, so neither arrives here.
    */
   function applyParams(p) {
     const set = (key, ref, sync) => { if (p[key] !== undefined && p[key] !== ref.value) sync(p[key]) }
     set('duck', hfDuck, syncDuck)
     set('amount', hfAmount, syncAmount)
-    set('shape', hfShape, syncShape)
     set('guard', hfGuard, syncGuard)
     set('plosives', hfPlosives, syncPlosives)
     set('band', hfBand, syncBand)
     set('detect', hfDetect, syncDetect)
-    set('air', hfAir, syncAir)
+    set('detectHigh', hfDetectHigh, syncDetectHigh)
+    // AUTO first: when it is on the measurement owns the Air, and a preset's
+    // stored value must not take the knob over.
     set('comp', hfComp, syncComp)
+    if (!hfComp.value) set('air', hfAir, syncAir)
     set('soften', hfSoften, syncSoften)
+    // The Split follows what the preset put in the two stages (kept when both are 0).
+    const { split } = amountSplitOf(hfDuck.value, hfAmount.value)
+    if (split !== null) hfSplit.value = split
   }
 
   function toggleDelta() {
     if (!hfPreview.value) return
     hfDelta.value = !hfDelta.value
-    nodesOf(getEffectChain(getAudioContext()))?.setListen(hfDelta.value ? 'delta' : 'off')
+    if (hfDelta.value) hfAudition.value = false
+    nodesOf(getEffectChain(getAudioContext()))?.setListen(listenMode())
+  }
+
+  function toggleAudition() {
+    if (!hfPreview.value) return
+    hfAudition.value = !hfAudition.value
+    if (hfAudition.value) hfDelta.value = false
+    nodesOf(getEffectChain(getAudioContext()))?.setListen(listenMode())
   }
 
   async function apply() {
@@ -368,7 +427,7 @@ export function useHFSoftener() {
     const wasPreviewing = hfPreview.value
     if (wasPreviewing) togglePreview()
     refreshLevel()
-    // With HF COMP on, render with compensation measured for exactly these settings, not
+    // With AUTO on, render with the Air measured for exactly these settings, not
     // whatever a debounced request last left on the knob.
     if (hfComp.value) {
       clearTimeout(autoAirTimer)
@@ -399,6 +458,7 @@ export function useHFSoftener() {
     // Delta is a monitoring aid; never leave the chain auditioning it after
     // the window closes.
     hfDelta.value = false
+    hfAudition.value = false
     if (hfPreview.value) {
       const chain = getEffectChain(getAudioContext())
       nodesOf(chain)?.setListen('off')
@@ -422,13 +482,15 @@ export function useHFSoftener() {
     hfSoftenCut,
     hfAir,
     hfComp,
-    hfCompAir,
     hfAirLossDb,
     hfDetect,
+    hfDetectHigh,
+    hfAudition,
     hfAirMode,
     hfDuck,
     hfBroadband,
-    hfShape,
+    hfSplit,
+    hfTotal,
     hfGuard,
     hfPlosives,
     hfBand,
@@ -455,16 +517,19 @@ export function useHFSoftener() {
     syncAir,
     syncComp,
     syncDetect,
+    syncDetectHigh,
     refreshAutoAir,
     scheduleAutoAir,
     syncAirMode,
     syncDuck,
-    syncShape,
+    syncTotal,
+    syncSplit,
     syncGuard,
     syncPlosives,
     syncBand,
     applyParams,
     toggleDelta,
+    toggleAudition,
     refreshLevel,
     apply,
     teardown,

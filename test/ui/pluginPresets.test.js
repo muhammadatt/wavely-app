@@ -673,8 +673,10 @@ test('HF Softener presets: the panel defaults light Default; the pinned and meas
   for (const k of ['airMode', 'compAir', 'levelOffset', 'resoAmount', 'context', 'rotator', 'release']) {
     assert.equal(k in picked, false, k)
   }
-  const p = pickParams(HF_SOFTENER_PRESET_PLUGIN, { band: 9000, detect: 100, shape: 'bogus' })
+  const p = pickParams(HF_SOFTENER_PRESET_PLUGIN, { band: 9000, detect: 100, shape: 'band' })
   assert.equal(p.band, 6000)
   assert.equal(p.detect, 3000)
-  assert.equal(p.shape, HF_SOFTENER_DEFAULTS.shape)
+  // Shape is pinned to shelf: a preset can neither carry nor set it.
+  assert.equal('shape' in p, false)
+  assert.equal(HF_SOFTENER_DEFAULTS.shape, 'shelf')
 })

@@ -164,7 +164,7 @@ async function applyAndClose() {
             <div class="ph-module-body">
               <div title="DRIVE: takes this many dB off the selection's loudest peak the way tape saturation does, and gives it back as level — the makeup is measured, so the peak lands where it started. Turning it up also drives the top end into the HF sag and brings in the speed's head bump. Double-click for off">
                 <ModulaKnob
-                  variant="led" :size="112" :model-value="phParams.tape"
+                  variant="led" :size="156" :model-value="phParams.tape"
                   :min="0" :max="TAPE_MAX_DB" :step="0.1" :default-value="PHATASS_DEFAULTS.tape"
                   :format-value="fmtDrive" label="Drive" :color="ACCENT" :disabled="!phPreview"
                   @update:model-value="v => syncParam('tape', v)"
@@ -190,7 +190,7 @@ async function applyAndClose() {
             <div class="ph-module-body">
               <div title="WARMTH: low-end harmonic warmth — an even (quartic) and an odd (cubic) saturator on the low band, voiced for body. It sets how much of what they add is mixed in; the clean signal is never touched. Calibrated on this file, and never raises the selection's peak: a guard turns the added warmth down for a few milliseconds where it would. Double-click for off">
                 <ModulaKnob
-                  variant="ticks" :size="102" :model-value="phParams.warmth"
+                  variant="ticks" :size="156" :model-value="phParams.warmth"
                   :min="0" :max="WARMTH_MAX" :step="0.1" :default-value="PHATASS_DEFAULTS.warmth"
                   :format-value="fmtWarmth" label="Warmth" :color="ACCENT" :disabled="!phPreview"
                   @update:model-value="v => syncParam('warmth', v)"

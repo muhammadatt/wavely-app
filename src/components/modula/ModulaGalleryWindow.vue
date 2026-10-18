@@ -82,8 +82,8 @@ onUnmounted(() => clearInterval(timer))
       <section class="card wide">
         <h3>Large knobs · LED ring / tick ring</h3>
         <div class="row">
-          <ModulaKnob v-model="v.gain" variant="led" :size="128" :min="-60" :max="12" :step="0.1" :default-value="0" color="var(--m-second)" :format-value="dbFmt" label="Gain" show-value />
-          <ModulaKnob v-model="v.drive" variant="ticks" :size="118" :min="0" :max="100" :step="1" :default-value="42" :format-value="x => `${x}%`" label="Drive" show-value />
+          <ModulaKnob v-model="v.gain" variant="led" :size="178" :min="-60" :max="12" :step="0.1" :default-value="0" color="var(--m-second)" :format-value="dbFmt" label="Gain" show-value />
+          <ModulaKnob v-model="v.drive" variant="ticks" :size="172" :min="0" :max="100" :step="1" :default-value="42" :format-value="x => `${x}%`" label="Drive" show-value />
           <div class="col">
             <h3>Small knobs</h3>
             <div class="row">
@@ -218,9 +218,11 @@ onUnmounted(() => clearInterval(timer))
 .card {
   min-width: 0;
   padding: 22px;
-  border-radius: 20px;
-  background: linear-gradient(180deg, #34383f, #292c31);
-  box-shadow: 0 30px 50px -28px rgba(0, 0, 0, .95), inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .55);
+  border-radius: 16px;
+  /* The same group surface the shipping panels use (HF Softener, Inflator), so
+     the kit shows each control against the background it actually sits on. */
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
 }
 .wide { grid-column: 1 / -1; }
 h3 { margin: 0 0 20px; font: 600 11px/1 var(--m-font-ui); letter-spacing: .14em; text-transform: uppercase; color: #aeb6bd; }

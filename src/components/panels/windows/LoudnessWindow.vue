@@ -421,7 +421,7 @@ function toastFor(report, appliedUnit) {
       <div class="ln-panel">
         <div class="ln-knob">
           <ModulaKnob
-            variant="led" :size="105" show-value editable
+            variant="led" :size="146" show-value editable
             v-model="targetDb" :min="targetRange.min" :max="targetRange.max" :step="0.1"
             :default-value="initial.targetDb"
             label="Target" :color="ACCENT" :format-value="plain"
@@ -432,7 +432,7 @@ function toastFor(report, appliedUnit) {
 
         <div class="ln-knob">
           <ModulaKnob
-            variant="ticks" :size="85" show-value editable
+            variant="ticks" :size="139" show-value editable
             v-model="ceilingDb" :min="-9" :max="0" :step="0.1"
             :default-value="initial.ceilingDb"
             label="Ceiling" :color="ACCENT" :format-value="plain"

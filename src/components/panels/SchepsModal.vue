@@ -258,7 +258,7 @@ async function applyAndClose() {
           </div>
 
           <ModulaKnob
-            variant="ticks" :size="76" show-value editable
+            variant="ticks" :size="130" show-value editable
             :model-value="schepsSquash" :min="0" :max="100" :step="1"
             :default-value="SCHEPS_DEFAULTS.squash"
             label="Squash" :color="ACCENT" :format-value="formatSquash" :disabled="!schepsPreview"
@@ -266,7 +266,7 @@ async function applyAndClose() {
             @update:model-value="syncSquash"
           />
           <ModulaKnob
-            variant="ticks" :size="76" show-value editable
+            variant="ticks" :size="130" show-value editable
             :model-value="schepsMix" :min="0" :max="100" :step="1"
             :default-value="SCHEPS_DEFAULTS.mix"
             label="Mix" :color="ACCENT" :format-value="formatMix" :disabled="!schepsPreview"

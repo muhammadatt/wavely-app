@@ -84,15 +84,18 @@ export function createHFSoftener(audioContext) {
     if (softenOn(params) && softenNode) post.push([softenNode, softenLatencySamples(audioContext.sampleRate)])
     input.connect(worklet)
     const delta = listen === 'delta'
+    // AUDITION: the detector's own signal (its band), straight out of the
+    // softener — the post-stages would only process a signal that is not audio.
+    const audition = listen === 'sidechain'
     // With a post-stage in, the softener hands over its output WITHOUT the air
     // makeup ('preair'), so the wrapper's delta is only what was removed.
-    worklet.port.postMessage({ type: 'listen', mode: delta ? (post.length ? 'preair' : 'delta') : 'off' })
+    worklet.port.postMessage({ type: 'listen', mode: audition ? 'sidechain' : delta ? (post.length ? 'preair' : 'delta') : 'off' })
     let last = worklet
-    for (const [node] of post) {
+    for (const [node] of audition ? [] : post) {
       last.connect(node)
       last = node
     }
-    if (delta && post.length) {
+    if (delta && post.length && !audition) {
       postDelay.delayTime.value = post.reduce((s, [, l]) => s + l, 0) / audioContext.sampleRate
       input.connect(postDelay)
       postDelay.connect(preOutput)

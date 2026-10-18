@@ -38,6 +38,8 @@ import {
   detectCompDb,
   DETECT_HZ_MIN,
   DETECT_HZ_MAX,
+  DETECT_HI_MIN,
+  DETECT_HI_MAX,
   BAND_HZ_MIN,
   BAND_HZ_MAX,
   bandTuningFor,
@@ -47,7 +49,7 @@ import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../..
 import { processResonanceBuffer, ResonanceKernel } from '../../src/audio/resonanceProcessor.js'
 import { measureTopLossDb, autoAirDb, AIR_AUTO_FRACTION } from '../../src/audio/hfSoftenerAutoAir.js'
 import { createScopeRing, columnKind, kindRuns, shadeColumns, SHADE_FALL_DB } from '../../src/audio/hfSoftenerScope.js'
-import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams, guardToFloorDb, GUARD_FLOOR_LOOSE_DB, GUARD_FLOOR_STRICT_DB } from '../../src/audio/hfSoftenerParams.js'
+import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams, guardToFloorDb, splitAmount, amountSplitOf, GUARD_FLOOR_LOOSE_DB, GUARD_FLOOR_STRICT_DB } from '../../src/audio/hfSoftenerParams.js'
 import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
@@ -1268,6 +1270,60 @@ test('detect: 4 kHz is the spec, bit-identical, and the compensation rises with 
   }
 })
 
+test('amount + split: the Amount is shared between Duck and EQ, and the default pair round-trips', () => {
+  assert.deepEqual(splitAmount(60, 0), { duck: 60, amount: 0 })
+  assert.deepEqual(splitAmount(60, 100), { duck: 0, amount: 60 })
+  assert.deepEqual(splitAmount(100, 50), { duck: 50, amount: 50 })
+  // The two stages always add up to the Amount.
+  for (const [t, s] of [[37, 13], [80, 66], [5, 33]]) {
+    const { duck, amount } = splitAmount(t, s)
+    assert.ok(Math.abs(duck + amount - t) <= 0.01, `${t}/${s}`)
+  }
+  // The shipped Duck 40 / EQ 20 is Amount 60, Split 33 — and comes back out of it.
+  const back = amountSplitOf(HF_SOFTENER_DEFAULTS.duck, HF_SOFTENER_DEFAULTS.amount)
+  assert.deepEqual(back, { total: 60, split: 33 })
+  assert.deepEqual(amountSplitOf(0, 0), { total: 0, split: null })
+  assert.equal(amountSplitOf(80, 60).total, 100) // an old pair past 100 caps, never wraps
+  assert.equal(HF_SOFTENER_DEFAULTS.shape, 'shelf')
+})
+
+test('detect high: the top of its range is OFF, bit-identical, and a lower corner is compensated', () => {
+  const sr = 44100
+  const { x } = makeSpeech(sr, { seconds: 2 })
+  const a = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS }).channelData[0]
+  const b = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, detectHiHz: DETECT_HI_MAX }).channelData[0]
+  assert.deepEqual(a, b)
+  assert.equal(HF_SOFTENER_KERNEL_DEFAULTS.detectHiHz, DETECT_HI_MAX)
+  assert.equal(detectCompDb(sr, 4000, undefined, DETECT_HI_MAX), 0)
+  let last = 0
+  for (const hz of [12000, 9000, 7000, 5500]) {
+    const c = detectCompDb(sr, 4000, undefined, hz)
+    assert.ok(c > last, `comp at high ${hz}: ${c}`)
+    last = c
+  }
+})
+
+test('audition: the detector band is what plays, and HIGH takes the top off it', () => {
+  const sr = 44100
+  const n = sr
+  const tone = hz => Float32Array.from({ length: n }, (_, i) => 0.3 * Math.sin((2 * Math.PI * hz * i) / sr))
+  const rmsOf = a => { let e = 0; for (let i = n >> 1; i < n; i++) e += a[i] * a[i]; return Math.sqrt(e / (n >> 1)) }
+  const heard = (hz, p) => rmsOf(processHFSoftenerBuffer([tone(hz)], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, ...p }, { listen: 'sidechain' }).channelData[0])
+  // High-pass only: 6 kHz passes, 1 kHz does not.
+  assert.ok(heard(6000, {}) > 10 * heard(1000, {}))
+  // With the low-pass at 7 kHz, 12 kHz drops to under half of 6 kHz.
+  assert.ok(heard(6000, { detectHiHz: 7000 }) > 2 * heard(12000, { detectHiHz: 7000 }))
+  // And without it, 12 kHz is as loud as 6 kHz.
+  assert.ok(heard(12000, {}) > 0.8 * heard(6000, {}))
+})
+
+test('detect high: never closer to the low corner than DETECT_MIN_RATIO', () => {
+  const sr = 44100
+  const { x } = makeSpeech(sr, { seconds: 1 })
+  const at = p => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, ...p }).channelData[0]
+  assert.deepEqual(at({ detectHz: 6000, detectHiHz: DETECT_HI_MIN }), at({ detectHz: 6000, detectHiHz: 7500 }))
+})
+
 test('detect: a raised corner keeps bright vowels out of the detector and the "s" cut holds', () => {
   const sr = 44100
   // Vowels with a strong 5–8 kHz region, as on the narrator whose vowels
@@ -1320,12 +1376,15 @@ test('params: Reso is in exactly when its knob is above 0, and off by default', 
   assert.ok(!('reso' in HF_SOFTENER_DEFAULTS), 'no separate RESO switch')
 })
 
-test('params: HF COMP adds to the Air knob and never replaces it', () => {
+test('params: the Air knob is the one value in effect, whether AUTO wrote it or the user did', () => {
   const at = p => toSoftenerKernelParams({ ...HF_SOFTENER_DEFAULTS, ...p }).airDb
-  assert.equal(at({ air: 2, comp: true, compAir: 1.5 }), 3.5)
-  assert.equal(at({ air: 2, comp: false, compAir: 1.5 }), 2)
-  assert.equal(at({ air: 0, comp: true, compAir: 1.5 }), 1.5)
+  // No separate compensation is added on top: a knob at 0 means no Air.
+  assert.equal(at({ air: 2, comp: true }), 2)
+  assert.equal(at({ air: 2, comp: false }), 2)
+  assert.equal(at({ air: 0, comp: true }), 0)
+  assert.equal(at({ air: 0, comp: false, compAir: 1.5 }), 0)
   assert.equal(HF_SOFTENER_DEFAULTS.comp, true)
+  assert.ok(!('compAir' in HF_SOFTENER_DEFAULTS))
 })
 
 // ── Lisp guard over the Reso pre-stage ──────────────────────────────────────

@@ -1,58 +1,52 @@
 <script setup>
 /**
- * The HF Softener's frequency strip: the input's spectrum, the RANGE of the
- * cut (the most the EQ may take, with the Air lift after it), and the two
- * corners as handles on it — the SSL DeEss layout.
+ * The HF Softener's frequency strip: the input's spectrum and the DETECTOR's
+ * band - what it listens to - as a shaded range with a LOW and a HIGH handle,
+ * plus a LIVE / MONITOR toggle: MONITOR plays only that band.
  *
- * ⚠ IT IS STATIC ON PURPOSE. It drew the live cut first — raw, then damped
- * with a held line and a glow — and both read as busy: two moving curves on a
- * strip whose job is setting where and how far. When it is cutting is the
- * activity scope's job (full-height shading on the waveform).
- *
- *   CUT (Band)      a solid flag hung from the top: where the EQ cuts.
- *   LISTEN (Detect) a dashed marker standing on the bottom: where the detector
- *                   starts listening.
- *
- * ⚠ TWO HANDLES, NOT ONE, AND NOT LINKED. They answer opposite problems: a
- * bright voice whose vowels trip the detector wants LISTEN up, and the same
- * voice's low "s" wants CUT down. One knob over both would trade one fix for
- * the other (see the dev log, "HF Softener — full entry"). They share a strip
- * so the pair reads as one control surface, not so they move together.
+ * It shows the detector and nothing about the cut. It drew the cut's range
+ * first (and the live cut before that, raw and then damped) and both were
+ * dropped: when the Softener is cutting is the activity scope's job (full-height
+ * shading on the waveform), and the EQ's own corner (Band) is off the panel and
+ * stays at its default. What is left to place is where the detector
+ * listens: raise LOW when bright vowels trip the cut, lower HIGH to keep air
+ * and breath out of it. MONITOR makes that audible - the detector's own signal
+ * is what you hear, so a vowel that leaks into the range is obvious.
  *
  * Each handle is a slider for a keyboard and a screen reader: arrows step
- * 100 Hz (Shift 10), Home/End go to the ends, and double-click resets — the
+ * 100 Hz (Shift 10), Home/End go to the ends, and double-click resets - the
  * kit's gesture.
  */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import SoftenerSpectrum from '../meters/SoftenerSpectrum.vue'
 
 const props = defineProps({
-  band: { type: Number, required: true },
+  /** The detector's band: LOW is its high-pass corner, HIGH its low-pass (top of range = off). */
   detect: { type: Number, required: true },
-  bandMin: { type: Number, required: true },
-  bandMax: { type: Number, required: true },
+  detectHigh: { type: Number, required: true },
   detectMin: { type: Number, required: true },
   detectMax: { type: Number, required: true },
-  bandDefault: { type: Number, default: null },
+  highMin: { type: Number, required: true },
+  highMax: { type: Number, required: true },
+  /** The closest the two may sit, as a ratio. */
+  minRatio: { type: Number, default: 1.25 },
   detectDefault: { type: Number, default: null },
+  highDefault: { type: Number, default: null },
   /** The strip's axis, Hz. */
   minHz: { type: Number, default: 500 },
   maxHz: { type: Number, default: 20000 },
   height: { type: Number, default: 150 },
-  /** The curve layer, drawn by the caller in a `viewW × height` viewBox. */
+  /** The grid layer's viewBox width, with `height`. */
   viewW: { type: Number, default: 360 },
-  /** The cut's range — what the settings allow, not what is happening. */
-  curvePath: { type: String, default: '' },
-  curveFill: { type: String, default: '' },
-  zeroY: { type: Number, default: 0 },
   gridFreqs: { type: Array, default: () => [] },
   tapFn: { type: Function, default: null },
-  accent: { type: String, default: 'var(--m-accent)' },
   listenColor: { type: String, default: 'var(--m-second)' },
+  /** AUDITION: the monitor is playing the detector's band. */
+  audition: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:band', 'update:detect'])
+const emit = defineEmits(['update:detect', 'update:detectHigh', 'update:audition'])
 
 const stripEl = ref(null)
 const span = () => Math.log2(props.maxHz / props.minHz)
@@ -60,9 +54,21 @@ const pctFor = hz => (Math.log2(hz / props.minHz) / span()) * 100
 const quantize = (hz, step) => Math.round(hz / step) * step
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 
+// Each handle stops short of the other by minRatio. The top of HIGH's range is
+// "off", so while it sits there LOW has the whole of its own range.
 const HANDLES = {
-  band: { min: () => props.bandMin, max: () => props.bandMax, def: () => props.bandDefault, value: () => props.band },
-  detect: { min: () => props.detectMin, max: () => props.detectMax, def: () => props.detectDefault, value: () => props.detect },
+  detect: {
+    min: () => props.detectMin,
+    max: () => (props.detectHigh >= props.highMax ? props.detectMax : Math.min(props.detectMax, props.detectHigh / props.minRatio)),
+    def: () => props.detectDefault,
+    value: () => props.detect,
+  },
+  detectHigh: {
+    min: () => Math.max(props.highMin, props.detect * props.minRatio),
+    max: () => props.highMax,
+    def: () => props.highDefault,
+    value: () => props.detectHigh,
+  },
 }
 
 function set(which, hz) {
@@ -72,6 +78,7 @@ function set(which, hz) {
 }
 
 const dragging = ref(null)
+const atTop = computed(() => props.detectHigh >= props.highMax)
 
 function hzAt(clientX) {
   const r = stripEl.value.getBoundingClientRect()
@@ -123,6 +130,12 @@ const gridLabel = f => (f >= 1000 ? `${f / 1000}k` : String(f))
 
 /** A tab sits right of its line, and flips left near the right edge. */
 const flip = hz => pctFor(hz) > 78
+
+const shade = computed(() => ({
+  left: `${pctFor(props.detect)}%`,
+  width: `${pctFor(props.detectHigh) - pctFor(props.detect)}%`,
+  '--c': props.listenColor,
+}))
 </script>
 
 <template>
@@ -140,21 +153,21 @@ const flip = hz => pctFor(hz) > 78
           :x1="(pctFor(f) / 100) * viewW" :y1="0" :x2="(pctFor(f) / 100) * viewW" :y2="height"
           stroke="rgba(255,255,255,.06)" stroke-width="1" vector-effect="non-scaling-stroke"
         />
-        <line :x1="0" :y1="zeroY" :x2="viewW" :y2="zeroY" stroke="rgba(255,255,255,.16)" stroke-width="1" vector-effect="non-scaling-stroke" />
-        <path :d="curveFill" :fill="accent" fill-opacity="0.16" />
-        <path :d="curvePath" :stroke="accent" stroke-width="2" fill="none" vector-effect="non-scaling-stroke" />
       </svg>
 
-      <!-- LISTEN: a dashed marker standing on the bottom edge. -->
+      <!-- The detector's band, shaded: only what is inside is heard by it. -->
+      <div class="sbs-shade" :style="shade"></div>
+
+      <!-- LOW: where the detector starts listening (its high-pass corner). -->
       <div
-        class="sbs-handle sbs-handle--listen"
+        class="sbs-handle sbs-handle--lo"
         :class="{ 'is-dragging': dragging === 'detect', 'is-flip': flip(detect) }"
         :style="{ left: `${pctFor(detect)}%`, '--c': listenColor }"
         role="slider" tabindex="0"
-        aria-label="Listen from (detector corner)"
-        :aria-valuemin="detectMin" :aria-valuemax="detectMax" :aria-valuenow="detect"
+        aria-label="Detector low corner"
+        :aria-valuemin="HANDLES.detect.min()" :aria-valuemax="HANDLES.detect.max()" :aria-valuenow="detect"
         :aria-valuetext="fmtHz(detect)"
-        title="LISTEN — where the detector starts listening. Raise it when bright vowels trip the cut: an ordinary S is compensated to read the same at any setting. Drag, or use the arrow keys; double-click to reset"
+        title="LOW - where the detector starts listening. Raise it when bright vowels trip the cut: an ordinary S is compensated to read the same at any setting. Drag, or use the arrow keys; double-click to reset"
         @pointerdown="onDown('detect', $event)"
         @pointermove="onMove('detect', $event)"
         @pointerup="onUp" @pointercancel="onUp"
@@ -162,27 +175,43 @@ const flip = hz => pctFor(hz) > 78
         @dblclick="onReset('detect')"
       >
         <span class="sbs-line"></span>
-        <span class="sbs-tab"><b>LISTEN</b> {{ fmtHz(detect) }}</span>
+        <span class="sbs-tab"><b>LOW</b> {{ fmtHz(detect) }}</span>
       </div>
 
-      <!-- CUT: a solid flag hung from the top edge. -->
+      <!-- HIGH: where it stops (its low-pass corner); at the top it is out of the circuit. -->
       <div
-        class="sbs-handle sbs-handle--cut"
-        :class="{ 'is-dragging': dragging === 'band', 'is-flip': flip(band) }"
-        :style="{ left: `${pctFor(band)}%`, '--c': accent }"
+        class="sbs-handle sbs-handle--hi"
+        :class="{ 'is-dragging': dragging === 'detectHigh', 'is-edge': atTop }"
+        :style="{ left: `${pctFor(detectHigh)}%`, '--c': listenColor }"
         role="slider" tabindex="0"
-        aria-label="Cut from (EQ band corner)"
-        :aria-valuemin="bandMin" :aria-valuemax="bandMax" :aria-valuenow="band"
-        :aria-valuetext="fmtHz(band)"
-        title="CUT — where the EQ cuts, the band's lower corner. Lower it for an S that sits low (deeper voices, SH); raise it for a high, thin S. Drag, or use the arrow keys; double-click to reset"
-        @pointerdown="onDown('band', $event)"
-        @pointermove="onMove('band', $event)"
+        aria-label="Detector high corner"
+        :aria-valuemin="HANDLES.detectHigh.min()" :aria-valuemax="highMax" :aria-valuenow="detectHigh"
+        :aria-valuetext="atTop ? 'off' : fmtHz(detectHigh)"
+        title="HIGH - where the detector stops listening. Lower it to keep air and breath out of the detector; at the top it is off. Drag, or use the arrow keys; double-click to reset"
+        @pointerdown="onDown('detectHigh', $event)"
+        @pointermove="onMove('detectHigh', $event)"
         @pointerup="onUp" @pointercancel="onUp"
-        @keydown="onKey('band', $event)"
-        @dblclick="onReset('band')"
+        @keydown="onKey('detectHigh', $event)"
+        @dblclick="onReset('detectHigh')"
       >
         <span class="sbs-line"></span>
-        <span class="sbs-tab"><b>CUT</b> {{ fmtHz(band) }}</span>
+        <span class="sbs-tab"><b>HIGH</b> {{ atTop ? 'OFF' : fmtHz(detectHigh) }}</span>
+      </div>
+
+      <!-- LIVE / MONITOR: the processed audio, or only what the detector hears. -->
+      <div class="sbs-mode" role="group" aria-label="Output monitor" :style="{ '--c': listenColor }">
+        <button
+          type="button" class="sbs-mode-btn" :class="{ 'is-on': !audition }"
+          :disabled="disabled" :aria-pressed="!audition"
+          title="LIVE - the processed audio, as Apply will render it"
+          @click="audition && emit('update:audition', false)"
+        >LIVE</button>
+        <button
+          type="button" class="sbs-mode-btn" :class="{ 'is-on': audition }"
+          :disabled="disabled" :aria-pressed="audition"
+          title="MONITOR - play only what the detector hears (the shaded band). Use it to check that vowels and breath stay out of the range. Monitoring only; Apply always renders the processed audio"
+          @click="!audition && emit('update:audition', true)"
+        >MONITOR</button>
       </div>
     </div>
 
@@ -216,8 +245,12 @@ const flip = hz => pctFor(hz) > 78
   margin-left: -7px;
   cursor: ew-resize;
   touch-action: none;
+  user-select: none;
   outline: none;
 }
+/* At the top of the range the line would sit on the well's clipped edge, where
+   only half the handle can be grabbed: pull it fully inside. */
+.sbs-handle.is-edge { margin-left: -14px; }
 .sbs.is-disabled .sbs-handle { cursor: default; }
 .sbs-line {
   position: absolute;
@@ -228,8 +261,16 @@ const flip = hz => pctFor(hz) > 78
   background: var(--c);
   opacity: .85;
 }
-.sbs-handle--listen .sbs-line {
+.sbs-handle--lo .sbs-line,
+.sbs-handle--hi .sbs-line {
   background: repeating-linear-gradient(to bottom, var(--c) 0 3px, transparent 3px 6px);
+}
+.sbs-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  pointer-events: none;
 }
 .sbs-tab {
   position: absolute;
@@ -245,8 +286,11 @@ const flip = hz => pctFor(hz) > 78
   box-shadow: 0 1px 4px rgba(0, 0, 0, .6);
 }
 .sbs-tab b { font-weight: 800; letter-spacing: .12em; margin-right: 3px; }
-.sbs-handle--cut .sbs-tab { top: 0; }
-.sbs-handle--listen .sbs-tab { bottom: 0; }
+.sbs-handle--hi .sbs-tab { top: 0; }
+.sbs-handle--lo .sbs-tab { bottom: 0; }
+/* HIGH's tab always hangs to the left, into the shaded range, and from the top
+   so it cannot meet LOW's tab (bottom, to the right) when the two are close. */
+.sbs-handle--hi .sbs-tab,
 .sbs-handle.is-flip .sbs-tab {
   left: auto;
   right: 7px;
@@ -256,6 +300,33 @@ const flip = hz => pctFor(hz) > 78
 .sbs-handle:hover .sbs-line,
 .sbs-handle.is-dragging .sbs-line { opacity: 1; width: 2px; left: 6px; }
 .sbs-handle:focus-visible .sbs-tab { outline: 2px solid #7fe9f6; outline-offset: 1px; }
+
+/* Two halves of one pill: the lit half is the mode you are hearing. */
+.sbs-mode {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 999px;
+  background: rgba(11, 14, 19, .8);
+}
+.sbs-mode-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--m-ink-3);
+  font: 700 9px/1 var(--m-font-ui);
+  letter-spacing: .14em;
+  cursor: pointer;
+}
+.sbs-mode-btn:hover:not(:disabled):not(.is-on) { color: #fff; }
+.sbs-mode-btn:disabled { cursor: default; }
+.sbs-mode-btn:focus-visible { outline: 2px solid #7fe9f6; outline-offset: 1px; }
+.sbs-mode-btn.is-on { color: #0b0e13; background: var(--c); box-shadow: 0 0 8px color-mix(in srgb, var(--c) 55%, transparent); }
 
 .sbs-axis {
   position: relative;

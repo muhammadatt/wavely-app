@@ -239,6 +239,10 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   // detector; the detector's gain is compensated so an ordinary "s" reads the
   // same at any corner (see detectCompDb). 4000 is the spec's, bit-identical.
   detectHz: 4000,
+  // Detector low-pass corner, Hz: with detectHz it makes the detector a BAND.
+  // At DETECT_HI_MAX (20000) the low-pass is out of the circuit altogether —
+  // bit-identical to the high-pass-only detector this had before.
+  detectHiHz: 20000,
   context: 0.5, // 0–1 → κ 0–0.8
   rotator: 'sidechain', // 'off' | 'sidechain' | 'inpath'
   releaseMs: 40, // HF follower release outside vowels. Fixed on the panel
@@ -269,7 +273,7 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
 
 /** Air makeup knob range, dB — "a few dB back", not a second Air Boost. */
 export const AIR_MAKEUP_MAX_DB = 6
-/** The kernel's own clamp: the knob plus the most HF COMP can add. */
+/** The kernel's own clamp (left at its old width: it was the knob plus the most compensation could add). */
 export const AIR_TOTAL_MAX_DB = 2 * AIR_MAKEUP_MAX_DB
 
 export const SHAPES = ['shelf', 'band']
@@ -296,6 +300,11 @@ export function bandTuningFor(bandHz, tuning = HF_SOFTENER_TUNING) {
 /** Detector corner range, Hz. */
 export const DETECT_HZ_MIN = 3000
 export const DETECT_HZ_MAX = 8000
+/** Detector low-pass corner range, Hz. The top of the range IS off. */
+export const DETECT_HI_MIN = 4000
+export const DETECT_HI_MAX = 20000
+/** The closest the two detector corners may sit, as a ratio (a quarter-octave-ish floor). */
+export const DETECT_MIN_RATIO = 1.25
 
 const detectCompCache = new Map()
 /**
@@ -306,19 +315,22 @@ const detectCompCache = new Map()
  * top end sits LOWER than the reference, so it loses more than is put back:
  * that difference is the whole point of the control. 0 at 4 kHz, exactly.
  */
-export function detectCompDb(sampleRate, detectHz, tuning = HF_SOFTENER_TUNING) {
-  const key = `${sampleRate}:${detectHz}`
+export function detectCompDb(sampleRate, detectHz, tuning = HF_SOFTENER_TUNING, detectHiHz = DETECT_HI_MAX) {
+  const key = `${sampleRate}:${detectHz}:${detectHiHz}`
   if (detectCompCache.has(key)) return detectCompCache.get(key)
   const grid = []
   for (let f = 100; f < 0.49 * sampleRate; f *= 1.01) grid.push(f)
   const ref = [highpass(sampleRate, 5000, 0.7), lowpass(sampleRate, 9000, 0.7)]
-  const energy = hz => {
-    const db = magnitudeResponseDb([...ref, highpass(sampleRate, hz, tuning.detHpQ)], grid, sampleRate)
+  const energy = (hz, hi = DETECT_HI_MAX) => {
+    const lp = hi < DETECT_HI_MAX ? [lowpass(sampleRate, hi, tuning.detHpQ)] : []
+    const db = magnitudeResponseDb([...ref, highpass(sampleRate, hz, tuning.detHpQ), ...lp], grid, sampleRate)
     let e = 0
     for (let i = 0; i < grid.length; i++) e += Math.pow(10, db[i] / 10) * grid[i] // log grid: weight by f
     return e
   }
-  const v = detectHz === tuning.detHpFreqHz ? 0 : 10 * Math.log10(energy(tuning.detHpFreqHz) / energy(detectHz))
+  const v = detectHz === tuning.detHpFreqHz && detectHiHz >= DETECT_HI_MAX
+    ? 0
+    : 10 * Math.log10(energy(tuning.detHpFreqHz) / energy(detectHz, detectHiHz))
   detectCompCache.set(key, v)
   return v
 }
@@ -744,6 +756,11 @@ export class HFSoftenerKernel {
     this.pathRot = new Ramp(0, rampSamples)
     this.rotTrim = Math.exp(ROTATOR_DETECTOR_TRIM_DB * LN10_OVER_20)
     this.detectHz = tuning.detHpFreqHz
+    this.detectHiHz = DETECT_HI_MAX
+    // The detector's low-pass. Out of the circuit (and never ticked) at the top
+    // of its range; its coefficients only matter once a corner is set.
+    this.detLpOn = false
+    this.detLpCoeffs = lowpass(sampleRate, 0.45 * sampleRate, tuning.detHpQ)
     this.detGain = 1
 
     // Audio-path coefficients, AUDIO_SECTIONS × 5: `cur` is what the last
@@ -798,12 +815,29 @@ export class HFSoftenerKernel {
     // interpolation like any other gain move.
     this.relSlow = riseCoeff(clamp(p.releaseMs, RELEASE_MS_MIN, RELEASE_MS_MAX), this.sampleRate)
     const detectHz = clamp(Number(p.detectHz) || this.tuning.detHpFreqHz, DETECT_HZ_MIN, DETECT_HZ_MAX)
+    // The high corner is never nearer the low one than DETECT_MIN_RATIO, and at
+    // the top of its range the low-pass is out altogether.
+    const hiRaw = clamp(Number(p.detectHiHz) || DETECT_HI_MAX, DETECT_HI_MIN, DETECT_HI_MAX)
+    const detectHiHz = hiRaw >= DETECT_HI_MAX ? DETECT_HI_MAX : Math.max(hiRaw, detectHz * DETECT_MIN_RATIO)
     if (detectHz !== this.detectHz) {
       this.detectHz = detectHz
       this.detHpCoeffs = highpass(this.sampleRate, detectHz, this.tuning.detHpQ)
       for (const c of this.channels) c.detHp.set(this.detHpCoeffs)
-      this.detGain = Math.pow(10, detectCompDb(this.sampleRate, detectHz, this.tuning) / 20)
     }
+    if (detectHiHz !== this.detectHiHz) {
+      const on = detectHiHz < DETECT_HI_MAX
+      if (on) {
+        this.detLpCoeffs = lowpass(this.sampleRate, detectHiHz, this.tuning.detHpQ)
+        for (const c of this.channels) {
+          c.detLp.set(this.detLpCoeffs)
+          // Coming in from out of circuit: start from rest, not stale state.
+          if (!this.detLpOn) { c.detLp.z1 = 0; c.detLp.z2 = 0 }
+        }
+      }
+      this.detLpOn = on
+      this.detectHiHz = detectHiHz
+    }
+    this.detGain = Math.pow(10, detectCompDb(this.sampleRate, this.detectHz, this.tuning, this.detectHiHz) / 20)
     this.vowelRelease = !!p.vowelRelease
     this.lispGuard = !!p.lispGuard
     this.guardFloorDb = Number.isFinite(p.lispGuardFloorDb) ? p.lispGuardFloorDb : this.tuning.lispGuardFloorDb
@@ -862,6 +896,7 @@ export class HFSoftenerKernel {
       this.channels.push({
         rot: this.rotatorCoeffs.map(c => new Biquad(c)),
         detHp: new Biquad(this.detHpCoeffs),
+        detLp: new Biquad(this.detLpCoeffs),
         lmHp: new Biquad(this.lmHpCoeffs),
         lmLp: new Biquad(this.lmLpCoeffs),
         tiltMid: this.tiltMidCoeffs.map(c => new Biquad(c)),
@@ -927,7 +962,8 @@ export class HFSoftenerKernel {
           // The rotator always runs so its state is warm when switched in.
           let r = x
           for (let k = 0; k < s.rot.length; k++) r = s.rot[k].tick(r)
-          const det = s.detHp.tick(x + detRot * (r - x))
+          const hp = s.detHp.tick(x + detRot * (r - x))
+          const det = this.detLpOn ? s.detLp.tick(hp) : hp
           const lm = s.lmLp.tick(s.lmHp.tick(x))
           s.detBuf[i] = det
           s.pathBuf[i] = x + pathRot * (r - x)
@@ -1167,6 +1203,7 @@ export class HFSoftenerKernel {
         }
         for (const bq of s.rot) bq.flushDenormals()
         s.detHp.flushDenormals()
+        if (this.detLpOn) s.detLp.flushDenormals()
         s.lmHp.flushDenormals()
         s.lmLp.flushDenormals()
       }

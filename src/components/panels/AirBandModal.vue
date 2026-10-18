@@ -177,7 +177,7 @@ async function applyAndClose() {
         </div>
 
         <ModulaKnob
-          variant="led" :size="105" show-value editable
+          variant="led" :size="146" show-value editable
           :model-value="airBandAir" :min="0" :max="AIR_MAX_DB" :step="0.1"
           :default-value="AIR_BAND_DEFAULTS.air"
           label="Air" :color="ACCENT" :format-value="formatAir" :disabled="!airBandPreview"
