@@ -1390,8 +1390,10 @@ test('params: the Air knob is the one value in effect, whether AUTO wrote it or 
 // ── Lisp guard over the Reso pre-stage ──────────────────────────────────────
 
 test('reso lisp guard: follows the Lisp Guard switch, and ResoTame itself never sets it', () => {
-  const on = resoKernelParams({ ...HF_SOFTENER_DEFAULTS, resoAmount: 50, lispGuard: true })
-  const off = resoKernelParams({ ...HF_SOFTENER_DEFAULTS, resoAmount: 50, lispGuard: false })
+  // Guard 50 is the old switch's ON (−16 dB); the panel's default has since
+  // moved (to 100), so pin it rather than read the default.
+  const on = resoKernelParams({ ...HF_SOFTENER_DEFAULTS, guard: 50, resoAmount: 50, lispGuard: true })
+  const off = resoKernelParams({ ...HF_SOFTENER_DEFAULTS, guard: 50, resoAmount: 50, lispGuard: false })
   assert.equal(on.lispGuardFloorDb, HF_RESO_LISP_GUARD_FLOOR_DB)
   // Explicit null, not an absent key — the kernel merges params, so an absent
   // key would leave the guard on. See the params-merge test.
@@ -1484,11 +1486,12 @@ test('guard: 0 is off, 50 is the −16 the switch shipped as, 100 the strict end
   assert.equal(r(0), null)
 })
 
-test('guard: the default is bit-identical to the old switch, and stricter settings cut a normal "s" less', () => {
+test('guard: 50 % is bit-identical to the old switch, and stricter settings cut a normal "s" less', () => {
   const { x } = makeSpeech(SR, { seconds: 3, peakedS: true })
   const run = p => processHFSoftenerBuffer([x], SR, { amount: 1, ...p }, { recordGain: true, tuning: NO_BURSTS }).gainDb
   const old = run({ lispGuard: true })
-  const now = run({ lispGuard: true, lispGuardFloorDb: guardToFloorDb(HF_SOFTENER_DEFAULTS.guard) })
+  // 50 %, not the default: the default moved to 100 (owner's call), 50 is still the old ON.
+  const now = run({ lispGuard: true, lispGuardFloorDb: guardToFloorDb(50) })
   for (let i = 0; i < old.length; i++) assert.equal(now[i], old[i])
   const deepest = g => { let m = 0; for (const v of g) m = Math.min(m, v); return m }
   const cuts = [20, 50, 80, 100].map(g => deepest(run({ lispGuard: true, lispGuardFloorDb: guardToFloorDb(g) })))

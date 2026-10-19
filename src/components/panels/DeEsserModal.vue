@@ -61,7 +61,11 @@ const { state, appState } = useEditorState()
 const presets = usePluginPresets(HF_SOFTENER_PRESET_PLUGIN, {
   read: () => ({
     duck: hfDuck.value, amount: hfAmount.value, guard: hfGuard.value,
-    plosives: hfPlosives.value, band: hfBand.value, detect: hfDetect.value, detectHigh: hfDetectHigh.value, air: hfAir.value,
+    plosives: hfPlosives.value, band: hfBand.value, detect: hfDetect.value, detectHigh: hfDetectHigh.value,
+    // Under AUTO the knob holds a MEASUREMENT of this selection, which is the
+    // file's, not the patch's: store the default, so a preset never carries it
+    // and AUTO never makes one read as modified. applyParams ignores it anyway.
+    air: hfComp.value ? D.air : hfAir.value,
     comp: hfComp.value, soften: hfSoften.value,
   }),
   write: p => applyParams(p),

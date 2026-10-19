@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 /**
  * MODULA SEGMENTED SWITCH — one of N, lit cap on a sunken tray.
  *
@@ -18,6 +19,14 @@ const props = defineProps({
   ariaLabel: { type: String, default: '' },
 })
 const emit = defineEmits(['update:modelValue'])
+
+// The option holding the tab stop: the lit one, or the first when none is —
+// a value off the switch (a preset's Odd/Even 36, a bench-only tape curve)
+// would otherwise leave every option at -1 and the group unreachable.
+const tabStop = computed(() => {
+  const i = props.options.findIndex(o => o.value === props.modelValue)
+  return i < 0 ? 0 : i
+})
 
 function pick(v) {
   if (!props.disabled && v !== props.modelValue) emit('update:modelValue', v)
@@ -43,7 +52,7 @@ function onKey(e, i) {
       v-for="(o, i) in options" :key="String(o.value)" type="button"
       class="m-seg-opt m-focusable" :class="{ 'is-on': o.value === modelValue }"
       role="radio" :aria-checked="String(o.value === modelValue)"
-      :tabindex="o.value === modelValue ? 0 : -1"
+      :tabindex="i === tabStop ? 0 : -1"
       :disabled="disabled" :title="o.title"
       :style="o.value === modelValue ? { color } : null"
       @click="pick(o.value)" @keydown="onKey($event, i)"

@@ -181,6 +181,7 @@ export function usePhatass() {
   function syncParam(name, value) {
     if (!(name in phParams) || MEASURED.has(name)) return
     const bumpBefore = headBumpFor(phParams.tapeHeadBump, phParams.hf)
+    const inputBefore = Number(phParams.inputDb) || 0
     phParams[name] = value
     pushParam(name, value)
     // TAPE comes first, so Warmth's knobs move the readout, not the makeup.
@@ -193,7 +194,13 @@ export function usePhatass() {
     if ((name === 'inputDb' || name === 'tapeCurve' || name === 'tapeStep' || name === 'tapeLowPush' || name === 'tapeHeadBump' || name === 'hf') && Number(phParams.tape) > 0) {
       const bump = headBumpFor(phParams.tapeHeadBump, phParams.hf)
       const lift = bump !== bumpBefore ? headBumpMaxLiftDb(bump, state.currentFile?.sampleRate) : 0
-      setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape) - lift))
+      // Less Input drives TAPE less, so it takes less off the peak — at most
+      // dB for dB, since a clipper's output peak never falls as its input
+      // rises. The knob alone is no bound then; take the drop off as well, so
+      // the interim makeup errs quiet rather than lifting the preview above
+      // what the measurement will settle on.
+      const inputDrop = name === 'inputDb' ? Math.max(0, inputBefore - Number(value)) : 0
+      setTapeMakeup(Math.min(phParams.tapeMakeupDb || 0, Number(phParams.tape) - lift) - inputDrop)
       scheduleTapeMakeup()
     }
     if (name === 'tape') {
@@ -445,6 +452,11 @@ export function usePhatass() {
    */
   function scheduleReadout() {
     if (phPreview.value) {
+      // The calibration too (keyed on the document and revision, so a no-op on
+      // a knob turn): it used to ride on the readout, and with the readout off
+      // the panel an edit under TAPE 0 / trim OFF left preview on the old
+      // file's thresholds while Apply re-measured them.
+      refreshLevel()
       const { start, end } = selectionSpan()
       refreshCeiling(start, end)
     }
