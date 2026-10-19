@@ -43,18 +43,18 @@ import {
   BAND_HZ_MIN,
   BAND_HZ_MAX,
   bandTuningFor,
-} from '../../src/audio/hfSoftenerProcessor.js'
+} from '../../src/audio/deEsserProcessor.js'
 import { processAirBandBuffer } from '../../src/audio/airBandProcessor.js'
 import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../../src/audio/dsp/biquad.js'
 import { processResonanceBuffer, ResonanceKernel } from '../../src/audio/resonanceProcessor.js'
-import { measureTopLossDb, autoAirDb, AIR_AUTO_FRACTION } from '../../src/audio/hfSoftenerAutoAir.js'
-import { createScopeRing, columnKind, kindRuns, shadeColumns, SHADE_FALL_DB } from '../../src/audio/hfSoftenerScope.js'
-import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams, guardToFloorDb, splitAmount, amountSplitOf, GUARD_FLOOR_LOOSE_DB, GUARD_FLOOR_STRICT_DB } from '../../src/audio/hfSoftenerParams.js'
+import { measureTopLossDb, autoAirDb, AIR_AUTO_FRACTION } from '../../src/audio/deEsserAutoAir.js'
+import { createScopeRing, columnKind, kindRuns, shadeColumns, SHADE_FALL_DB } from '../../src/audio/deEsserScope.js'
+import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams, guardToFloorDb, splitAmount, amountSplitOf, GUARD_FLOOR_LOOSE_DB, GUARD_FLOOR_STRICT_DB } from '../../src/audio/deEsserParams.js'
 import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
   HF_RESO_KNOTS, HF_RESO_AMOUNT_DEFAULT, HF_RESO_VOICED_FLOOR_DB, HF_RESO_LISP_GUARD_FLOOR_DB, HF_RESO_GUARD_TILT_DB, HF_RESO_GUARD_TILT_RELAX_DB, hfResoMacro,
-} from '../../src/audio/hfSoftenerResoStage.js'
+} from '../../src/audio/deEsserResoStage.js'
 
 const SR = 48000
 

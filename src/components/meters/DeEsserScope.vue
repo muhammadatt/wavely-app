@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useMeterFrame } from './ballistics.js'
-import { kindRuns, shadeColumns } from '../../audio/hfSoftenerScope.js'
+import { kindRuns, shadeColumns } from '../../audio/deEsserScope.js'
 
 /**
  * HF Softener's activity scope: the waveform, with every stretch the
@@ -27,13 +27,13 @@ import { kindRuns, shadeColumns } from '../../audio/hfSoftenerScope.js'
  * played (`held`), and it stays shaded until playback moves on — the first
  * version let the worklet's idle silence scroll it off in two seconds.
  *
- * Marks (smoothed into regions by shadeColumns, hfSoftenerScope.js):
+ * Marks (smoothed into regions by shadeColumns, deEsserScope.js):
  *   accent wash    — de-essed by the Duck and EQ; stronger the deeper the cut
  *   plosive wash   — the same, inside a T/K/P burst window (guard lifted)
  *   bar on bottom  — the lisp guard held the cut back somewhere in the region
  */
 const props = defineProps({
-  /** Returns the effect's scope ring (hfSoftenerScope.js), or null. */
+  /** Returns the effect's scope ring (deEsserScope.js), or null. */
   dataFn: { type: Function, required: true },
   /**
    * `(offsetSeconds, seconds, columns) => Float32Array | null` — the timeline's
@@ -50,7 +50,7 @@ const props = defineProps({
   accent: { type: String, default: '#e8b77f' },
   plosiveColor: { type: String, default: '#b9a6f2' },
   height: { type: Number, default: 140 },
-  title: { type: String, default: 'HF Softener activity' },
+  title: { type: String, default: 'De-Esser activity' },
 })
 
 const emit = defineEmits(['requestPlay'])

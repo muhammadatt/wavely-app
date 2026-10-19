@@ -105,7 +105,7 @@ export const WARMTH_MAX = 10
 export const ODD_EVEN_MAX = 100
 /**
  * ⚠ SOFTEN MOVED TO THE HF SOFTENER (October 2026, owner's call): its law and
- * constants live in hfSoftenerSoftenStage.js now, unchanged.
+ * constants live in deEsserSoftenStage.js now, unchanged.
  */
 export const OUTPUT_MIN_DB = -12
 export const OUTPUT_MAX_DB = 12

@@ -13,7 +13,7 @@ import { processSchepsBuffer } from './schepsProcessor.js'
 import { processFET1176Buffer } from './fet1176Processor.js'
 import { processResonanceBuffer } from './resonanceProcessor.js'
 import { processSaturationBenchBuffer } from './dsp/saturationLayers.js'
-import { processHFSoftenerBuffer } from './hfSoftenerProcessor.js'
+import { processHFSoftenerBuffer } from './deEsserProcessor.js'
 import { processHFLimiterBuffer } from './hfLimiterProcessor.js'
 import { processPhatassBuffer } from './phatassProcessor.js'
 

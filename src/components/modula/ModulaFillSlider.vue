@@ -19,6 +19,8 @@ const props = defineProps({
   color: { type: String, default: 'var(--m-accent)' },
   /** `[left, right]` captions under a horizontal slider. */
   ends: { type: Array, default: null },
+  /** true fills in one flat colour, without the dark-to-bright gradient that reads as magnitude. */
+  flat: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -60,7 +62,7 @@ const aria = computed(() => ({
     </div>
     <div class="m-fs-hslot m-focusable" v-bind="aria" v-on="handlers">
       <div class="m-fs-hchan"></div>
-      <div class="m-fs-hfill" :style="{ width: `${pct * 100}%`, background: `linear-gradient(90deg, ${deep}, ${color})` }"></div>
+      <div class="m-fs-hfill" :style="{ width: `${pct * 100}%`, background: flat ? color : `linear-gradient(90deg, ${deep}, ${color})` }"></div>
       <div class="m-fs-knob" :style="{ left: `calc(${pct} * (100% - 26px))` }"></div>
     </div>
     <div v-if="ends" class="m-fs-ends"><span>{{ ends[0] }}</span><span>{{ ends[1] }}</span></div>

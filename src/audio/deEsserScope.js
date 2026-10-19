@@ -16,7 +16,7 @@
  * the ear reads as "the s got quieter".
  */
 
-import { SCOPE_STRIDE } from './hfSoftenerProcessor.js'
+import { SCOPE_STRIDE } from './deEsserProcessor.js'
 
 export { SCOPE_STRIDE }
 

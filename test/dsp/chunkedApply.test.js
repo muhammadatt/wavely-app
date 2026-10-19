@@ -15,7 +15,7 @@ import {
 import { renderChunk } from '../../src/audio/chunkRender.js'
 import { RESONANCE_DEFAULTS, RESONANCE_FRAME_SIZE, resonanceHopSamples, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import { ResonanceKernel } from '../../src/audio/resonanceProcessor.js'
-import { HF_RESO_FRAME_SIZE } from '../../src/audio/hfSoftenerResoStage.js'
+import { HF_RESO_FRAME_SIZE } from '../../src/audio/deEsserResoStage.js'
 import { MATERIALS, PLUGINS, SEAM_FLOOR_DBFS, seamDbfs } from './chunkStitch.js'
 
 const SR = 44100

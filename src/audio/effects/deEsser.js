@@ -1,7 +1,7 @@
 /**
  * HF Softener — real-time effect chain wrapper.
  *
- * The DSP lives in ../hfSoftenerProcessor.js (dynamic 4.5 kHz shelf, HF
+ * The DSP lives in ../deEsserProcessor.js (dynamic 4.5 kHz shelf, HF
  * detector with an optional phase rotator, adaptive threshold from low/mid
  * energy) and runs in an AudioWorklet. The offline apply path renders through
  * the same worklet in an OfflineAudioContext, so preview and apply share one
@@ -11,16 +11,16 @@
  * audio through unprocessed, then splices the worklet node in.
  */
 
-import { ensureHFSoftenerWorklet } from '../hfSoftenerWorkletLoader.js'
+import { ensureHFSoftenerWorklet } from '../deEsserWorkletLoader.js'
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { ensureHFLimiterWorklet } from '../hfLimiterWorkletLoader.js'
-import { softenLatencySamples } from '../hfSoftenerSoftenStage.js'
-import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from '../hfSoftenerResoStage.js'
+import { softenLatencySamples } from '../deEsserSoftenStage.js'
+import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from '../deEsserResoStage.js'
 import { createLevelTap, createSpectrumTap } from './levelTap.js'
-import { createScopeRing } from '../hfSoftenerScope.js'
-import { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams, softenOn, softenStageKernelParams } from '../hfSoftenerParams.js'
+import { createScopeRing } from '../deEsserScope.js'
+import { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams, softenOn, softenStageKernelParams } from '../deEsserParams.js'
 
-export { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams, softenOn, softenStageKernelParams } from '../hfSoftenerParams.js'
+export { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams, softenOn, softenStageKernelParams } from '../deEsserParams.js'
 
 export function createHFSoftener(audioContext) {
   const input = audioContext.createGain()
@@ -64,7 +64,7 @@ export function createHFSoftener(audioContext) {
   preOutput.connect(outputMonitor)
 
   let resoNode = null
-  // Soften: the HF Limiter's kernel with the shelf out (hfSoftenerSoftenStage.js),
+  // Soften: the HF Limiter's kernel with the shelf out (deEsserSoftenStage.js),
   // after Reso. Like Reso it is in the chain only while its knob is above 0.
   let softenNode = null
   const postDelay = audioContext.createDelay(0.1)
@@ -237,7 +237,7 @@ export function createHFSoftener(audioContext) {
       return { burst: burstLamp, air: airLamp }
     },
 
-    /** The activity scope's ring — see hfSoftenerScope.js. Read, do not retain. */
+    /** The activity scope's ring — see deEsserScope.js. Read, do not retain. */
     getScope() {
       return scope.view()
     },
@@ -297,7 +297,7 @@ export function createHFSoftener(audioContext) {
 
 export const hfSoftenerEffect = {
   id: 'hf-softener',
-  name: 'HF Softener',
+  name: 'De-Esser',
   createNodes(audioContext) {
     return createHFSoftener(audioContext)
   },

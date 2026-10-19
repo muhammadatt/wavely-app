@@ -18,7 +18,7 @@
  * kit's gesture.
  */
 import { computed, ref } from 'vue'
-import SoftenerSpectrum from '../meters/SoftenerSpectrum.vue'
+import DeEsserSpectrum from '../meters/DeEsserSpectrum.vue'
 
 const props = defineProps({
   /** The detector's band: LOW is its high-pass corner, HIGH its low-pass (top of range = off). */
@@ -141,7 +141,7 @@ const shade = computed(() => ({
 <template>
   <div class="sbs" :class="{ 'is-disabled': disabled }">
     <div ref="stripEl" class="sbs-well" :style="{ height: `${height}px` }">
-      <SoftenerSpectrum v-if="tapFn" :tap-fn="tapFn" :min-hz="minHz" :max-hz="maxHz" />
+      <DeEsserSpectrum v-if="tapFn" :tap-fn="tapFn" :min-hz="minHz" :max-hz="maxHz" />
       <svg
         :viewBox="`0 0 ${viewW} ${height}`"
         class="sbs-curve"

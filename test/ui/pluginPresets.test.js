@@ -667,7 +667,7 @@ test('Air Boost presets: the panel defaults light Default, and stored values are
 test('HF Softener presets: the panel defaults light Default; the pinned and measured values stay out', async () => {
   const { HF_SOFTENER_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
   registerPluginPresets()
-  const { HF_SOFTENER_DEFAULTS } = await import('../../src/audio/hfSoftenerParams.js')
+  const { HF_SOFTENER_DEFAULTS } = await import('../../src/audio/deEsserParams.js')
   assert.equal(matchPreset(HF_SOFTENER_PRESET_PLUGIN, { ...HF_SOFTENER_DEFAULTS }), 'factory:default')
   const picked = pickParams(HF_SOFTENER_PRESET_PLUGIN, { ...HF_SOFTENER_DEFAULTS, airMode: 'static', compAir: 3 })
   for (const k of ['airMode', 'compAir', 'levelOffset', 'resoAmount', 'context', 'rotator', 'release']) {

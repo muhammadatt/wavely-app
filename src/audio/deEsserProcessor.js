@@ -27,11 +27,11 @@
  * Below threshold the shelf sits at exactly 0 dB, and an RBJ shelf at 0 dB has
  * identical numerator and denominator, so the processor is BIT-transparent
  * there rather than merely near it. That is the mechanism behind "preserve
- * air", and `test/dsp/hfSoftener.test.js` pins it.
+ * air", and `test/dsp/deEsser.test.js` pins it.
  *
  * This file is BOTH a normal ES module and an AudioWorklet module (registers
  * 'hf-softener-processor'). It imports from ./dsp/, which is why its loader
- * pulls it through `?worker&url` — see hfSoftenerWorkletLoader.js.
+ * pulls it through `?worker&url` — see deEsserWorkletLoader.js.
  *
  * Portability (a Python port is anticipated): time constants live in ms and
  * are converted at the running rate, biquad state is explicit, the gain

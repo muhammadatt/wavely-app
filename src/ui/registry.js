@@ -13,8 +13,8 @@ import AirBandModal from '../components/panels/AirBandModal.vue'
 import SaturationBenchModal from '../components/panels/SaturationBenchModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
+import SibilanceEditorModal from '../components/panels/SibilanceEditorModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
-import HFSoftenerModal from '../components/panels/HFSoftenerModal.vue'
 import HFLimiterModal from '../components/panels/HFLimiterModal.vue'
 import PhatassModal from '../components/panels/PhatassModal.vue'
 import AutoLevelModal from '../components/panels/AutoLevelModal.vue'
@@ -451,30 +451,30 @@ const ALL_OPERATIONS = [
   {
     id: 'clip-gain-deesser',
     release: 'dev',
-    label: 'De-Esser',
-    desc: 'Tame harsh S and F sounds',
+    label: 'Sibilance Editor',
+    desc: 'Find harsh S and F events and turn each down',
     category: 'effects',
     group: 'Clean',
     icon: 'deesser',
-    keywords: ['de-ess', 'deesser', 'sibilance', 'sibilant', 'harsh', 'ess', 'fricative', 'clip gain'],
+    keywords: ['sibilance editor', 'sibilance', 'sibilant', 'harsh', 'ess', 'fricative', 'clip gain'],
     requires: 'selection',
     surface: 'window',
-    component: DeEsserModal,
+    component: SibilanceEditorModal,
   },
   {
-    // Not a second de-esser: a dynamic shelf for recordings that are already
-    // broadly good. The De-Esser above analyses events on the server; this
-    // reacts in real time and only ever dips while a consonant spikes.
+    // The real-time de-esser: dips the top end only while a consonant spikes.
+    // The Sibilance Editor above is the event-based version: it analyses the
+    // selection and rides clip gain on each event.
     id: 'hf-softener',
-    label: 'HF Softener',
-    desc: 'Soften harsh consonants, keep the air',
+    label: 'De-Esser',
+    desc: 'Soften harsh S sounds, keep the air',
     category: 'effects',
     group: 'Clean',
     icon: 'softener',
-    keywords: ['sibilance', 'sibilant', 'harsh', 'hard', 'ess', 'de-ess', 'soft', 'soften', 'dynamic shelf', 'high shelf', 'warmth', 'fatso', 'air'],
+    keywords: ['sibilance', 'sibilant', 'harsh', 'hard', 'ess', 'de-ess', 'deesser', 'hf softener', 'soft', 'soften', 'dynamic shelf', 'high shelf', 'warmth', 'fatso', 'air'],
     requires: 'selection',
     surface: 'window',
-    component: HFSoftenerModal,
+    component: DeEsserModal,
   },
   {
     id: 'hf-limiter',

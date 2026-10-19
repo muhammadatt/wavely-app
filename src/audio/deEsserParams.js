@@ -1,12 +1,12 @@
 /**
  * HF Softener's UI params: defaults and the mappings to kernel params, for the
- * softener and for its Reso stage. Split out of effects/hfSoftener.js so
+ * softener and for its Reso stage. Split out of effects/deEsser.js so
  * node can import it — the wrapper pulls Vite `?worker&url` specifiers.
  */
 
-import { hfResoKernelParams } from './hfSoftenerResoStage.js'
-import { softenKernelParams } from './hfSoftenerSoftenStage.js'
-import { HF_SOFTENER_TUNING } from './hfSoftenerProcessor.js'
+import { hfResoKernelParams } from './deEsserResoStage.js'
+import { softenKernelParams } from './deEsserSoftenStage.js'
+import { HF_SOFTENER_TUNING } from './deEsserProcessor.js'
 
 /**
  * Guard (0–100 %) → the lisp guard's floor, dB relative to the held voice.
@@ -33,7 +33,7 @@ export const HF_SOFTENER_DEFAULTS = {
   // The two cutting stages, in chain order. Duck turns the whole "s" down with
   // its shape intact; EQ then cuts the top of what the duck left — its
   // detector hears the ducked signal. Each is a macro over threshold, ratio and
-  // depth (duckTo* / amountTo* in hfSoftenerProcessor.js).
+  // depth (duckTo* / amountTo* in deEsserProcessor.js).
   duck: 40, // %
   amount: 20, // %, the EQ stage
   context: 50, // %, Module C depth; 0 = fixed threshold
@@ -46,9 +46,9 @@ export const HF_SOFTENER_DEFAULTS = {
   shape: 'shelf', // 'shelf' | 'band'
   // Lisp guard strength, 0–100 %: no cut may take an "s" further below the
   // voice than a floor this sets (guardToFloorDb). 0 = off; 50 = −16 dB.
-  guard: 50,
+  guard: 100,
   // Plosive bursts (T, K, P) — caught by timing and cut harder, guard lifted.
-  plosives: true,
+  plosives: false,
   band: 4500, // Hz, the EQ band's lower corner, 3000–6000 — see bandTuningFor
   // 0–100 %: the band-limited ResoTame after the softener, a macro over its
   // threshold, depth and max cut (HF_RESO_KNOTS). 0 takes the stage out of the
@@ -57,7 +57,7 @@ export const HF_SOFTENER_DEFAULTS = {
   // (and tested) so it can come back; nothing sets it.
   resoAmount: 0,
   // 0–10: SOFTEN, the onset softener at the end of the chain
-  // (hfSoftenerSoftenStage.js — moved here from PHAT*SS). 0 takes it out of the
+  // (deEsserSoftenStage.js — moved here from PHAT*SS). 0 takes it out of the
   // chain entirely: no latency, bit-identical to the softener alone.
   soften: 0,
   detect: 4000, // Hz, the detector's high-pass corner, 3000–8000 — see detectCompDb
@@ -65,7 +65,7 @@ export const HF_SOFTENER_DEFAULTS = {
   detectHigh: 20000,
   air: 0, // dB of Air Band lift after the cut — Air Boost's curve, 0–6: the one value in effect
   // AUTO (HF RESTORE): while on, the measurement owns `air` — it writes the
-  // knob (hfSoftenerAutoAir.js) — and touching the knob takes over and turns it
+  // knob (deEsserAutoAir.js) — and touching the knob takes over and turns it
   // off, keeping the value, as the compressors' auto makeup does. The key keeps
   // its old name (`comp`) so saved presets still read.
   comp: true,
@@ -74,7 +74,7 @@ export const HF_SOFTENER_DEFAULTS = {
   // call): STATIC hands the cut back on every "s" and lifts the room in the
   // gaps. The kernel still takes both, for the bench and the tests.
   airMode: 'voiced',
-  // Measured from the whole file, not a user setting — see useHFSoftener.
+  // Measured from the whole file, not a user setting — see useDeEsser.
   levelOffset: 0, // dB, file gated RMS minus nominal
 }
 

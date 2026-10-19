@@ -14,11 +14,11 @@
  */
 
 import { definePluginPresets } from './store.js'
-import { HF_SOFTENER_DEFAULTS } from '../hfSoftenerParams.js'
+import { HF_SOFTENER_DEFAULTS } from '../deEsserParams.js'
 import {
   AIR_MAKEUP_MAX_DB, BAND_HZ_MIN, BAND_HZ_MAX, DETECT_HZ_MIN, DETECT_HZ_MAX, DETECT_HI_MIN, DETECT_HI_MAX,
-} from '../hfSoftenerProcessor.js'
-import { SOFTEN_MAX } from '../hfSoftenerSoftenStage.js'
+} from '../deEsserProcessor.js'
+import { SOFTEN_MAX } from '../deEsserSoftenStage.js'
 
 export const HF_SOFTENER_PRESET_PLUGIN = 'hf-softener'
 

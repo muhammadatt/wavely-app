@@ -73,7 +73,7 @@ const MEASUREMENTS = [
   ['softClipperCeiling', { percentile: 0.001 }, 'ceilingDb'],
   ['voiceProfile', {}, 'profile'],
   ['measureLoudness', {}, 'loudness'],
-  ['hfSoftenerAutoAir', { kernelParams: { amount: 0.4 } }, 'airDb'],
+  ['deEsserAutoAir', { kernelParams: { amount: 0.4 } }, 'airDb'],
   ['phatassTapeMakeup', { tape: 4, warmthCeilingDb: -6 }, 'makeupDb'],
   ['phatassOutputMakeup', { tape: 4, tapeMakeupDb: 2, outputMakeup: 'rms', warmthCeilingDb: -6 }, 'makeupDb'],
   ['phatassOutputMakeup', { tape: 4, tapeMakeupDb: 2, outputMakeup: 'keep' }, 'makeupDb'],

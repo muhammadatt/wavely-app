@@ -29,10 +29,10 @@ import { SAT_BENCH_LATENCY_SAMPLES, SAT_BENCH_PREROLL_S } from '../../src/audio/
 import {
   HF_SOFTENER_DEFAULTS, toKernelParams as toHFSoftenerKernelParams,
   resoKernelParams, softenStageKernelParams,
-} from '../../src/audio/hfSoftenerParams.js'
-import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from '../../src/audio/hfSoftenerResoStage.js'
-import { softenLatencySamples } from '../../src/audio/hfSoftenerSoftenStage.js'
-import { HF_SOFTENER_PREROLL_S } from '../../src/audio/hfSoftenerProcessor.js'
+} from '../../src/audio/deEsserParams.js'
+import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from '../../src/audio/deEsserResoStage.js'
+import { softenLatencySamples } from '../../src/audio/deEsserSoftenStage.js'
+import { HF_SOFTENER_PREROLL_S } from '../../src/audio/deEsserProcessor.js'
 
 export const SR = 44100
 
