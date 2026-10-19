@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useAirBand } from '../../composables/useAirBand.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { airBandSections } from '../../audio/airBandProcessor.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
@@ -29,7 +30,9 @@ const { state } = useEditorState()
 
 // Default to engaged when the panel opens, matching the other plugin windows.
 onMounted(() => {
-  if (!airBandPreview.value) togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!airBandPreview.value && !hasChainSlot('air-band')) togglePreview()
 })
 
 const ACCENT = '#8fd48a'

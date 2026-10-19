@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { fet1176TuningState } from '../audio/effects/fet1176Tuning.js'
 import { applyFET1176Region, computeFET1176AutoMakeup, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
@@ -263,21 +264,25 @@ export function useFET1176() {
    * DOCUMENT, not the revision, so editing a file the user trimmed by hand
    * leaves their setting alone.
    */
-  function refreshInputAlign() {
+  function refreshInputAlign(segments = state.segments) {
     if (!state.currentFile) return
-    const key = timelineKey()
+    // `segments` is the document's timeline, or — during a chain apply — the
+    // chain's running result, which is no revision of the document: always
+    // measured, and recorded under a key no real revision matches.
+    const own = segments === state.segments
+    const key = own ? timelineKey() : `${appState.activeDocumentId}:chain`
     const sameDoc = fetAlignedFor !== null
       && fetAlignedFor.split(':')[0] === String(appState.activeDocumentId)
     if (!fetInputAuto.value) {
       if (sameDoc) return
       fetInputAuto.value = true
-    } else if (fetAlignedFor === key) {
+    } else if (own && fetAlignedFor === key) {
       return
     }
     const end = totalDuration.value
     if (!(end > 0)) return
     const db = regionAlignDb(
-      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+      segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
     fetAlignedFor = key
     fetInputAlignDb.value = db
@@ -348,7 +353,7 @@ export function useFET1176() {
    * number so a fast knob drag can't have an older measurement land after
    * a newer one.
    */
-  async function refreshAutoMakeup() {
+  async function refreshAutoMakeup(segments = state.segments) {
     if (!fetAutoMakeup.value || !state.currentFile) return
 
     /**
@@ -370,7 +375,7 @@ export function useFET1176() {
     fetAutoMakeupBusy.value = true
     try {
       const { makeupDb, ceilingDb, ceilingKneeDb } = await computeFET1176AutoMakeup(
-        state.segments, start, end,
+        segments, start, end,
         measurementParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
         MAKEUP_REFERENCE,
@@ -517,6 +522,21 @@ export function useFET1176() {
       .find(e => e.id === fet1176Effect.id)?.nodes?.resetMakeupTracker?.()
   }
 
+  /** What apply re-measures first, so it renders with exact rather than live values. */
+  async function prepareApply(segments = state.segments) {
+    refreshInputAlign(segments)
+    if (fetAutoMakeup.value) await refreshAutoMakeup(segments)
+  }
+
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applyFET1176Region(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -537,8 +557,7 @@ export function useFET1176() {
      * much reduction the cell applies, so a makeup solved against a stale one
      * is solved for a compressor doing a different amount of work.
      */
-    refreshInputAlign()
-    if (fetAutoMakeup.value) await refreshAutoMakeup()
+    await prepareApply()
 
     const wasPreviewing = fetPreview.value
     if (wasPreviewing) togglePreview()
@@ -554,11 +573,7 @@ export function useFET1176() {
        * between a number the user can check and gain that appeared from
        * nowhere. See `peakRestoreTrimDb`.
        */
-      const { buffer, trimDb } = await applyFET1176Region(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels
-      )
+      const { buffer, trimDb } = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'FET Punch compression')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -575,13 +590,20 @@ export function useFET1176() {
 
   function teardown() {
     stopMeters()
-    if (fetPreview.value) {
-      const ctx = getAudioContext()
-      const chain = getEffectChain(ctx)
-      chain.setEnabled(fet1176Effect.id, false)
-      fetPreview.value = false
-    }
   }
+
+  registerChainPlugin({
+    id: fet1176Effect.id,
+    windowId: FET1176_WINDOW_ID,
+    label: 'FET Punch',
+    isActive: () => fetPreview.value,
+    setActive: (on) => { if (fetPreview.value !== on) togglePreview() },
+    render: async (segments, start, end) => {
+      await prepareApply(segments)
+      return (await renderRegion(segments, start, end)).buffer
+    },
+    resume: () => startMeters(initChain()),
+  })
 
   // Open/close delegate to the window manager, which owns the open set and the
   // stacking order. Kept on the composable so call sites don't need to know the

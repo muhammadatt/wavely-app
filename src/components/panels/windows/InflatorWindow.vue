@@ -13,6 +13,7 @@
  */
 import { computed, onMounted } from 'vue'
 import { useInflator } from '../../../composables/useInflator.js'
+import { hasChainSlot } from '../../../composables/usePluginChain.js'
 import { useEditorState } from '../../../composables/useEditorState.js'
 import { usePluginPresets } from '../../../composables/usePluginPresets.js'
 import { INFLATOR_PRESET_PLUGIN } from '../../../audio/pluginPresets/index.js'
@@ -46,7 +47,9 @@ const presets = usePluginPresets(INFLATOR_PRESET_PLUGIN, {
 
 // Default to engaged when the panel opens, matching the other plugin windows.
 onMounted(() => {
-  if (!inPreview.value) togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!inPreview.value && !hasChainSlot('inflator')) togglePreview()
 })
 
 const ACCENT = '#e8a33d'

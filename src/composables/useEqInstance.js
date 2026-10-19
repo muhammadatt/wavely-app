@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { applyManualEqRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -261,6 +262,15 @@ export function createEqInstance({
 
     // ── Apply ───────────────────────────────────────────────────────────────
 
+    /** Render [start, end) of `segments` with the current bands, uncommitted. */
+    function renderRegion(segments, start, end) {
+      return applyManualEqRegion(
+        segments, start, end,
+        { bands: bands.value, input: inputTrim.value, output: outputTrim.value },
+        state.currentFile.sampleRate, state.currentFile.channels,
+      )
+    }
+
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
@@ -271,11 +281,7 @@ export function createEqInstance({
 
       startProcessing(`Applying ${label}...`)
       try {
-        const buffer = await applyManualEqRegion(
-          state.segments, start, end,
-          { bands: bands.value, input: inputTrim.value, output: outputTrim.value },
-          state.currentFile.sampleRate, state.currentFile.channels,
-        )
+        const buffer = await renderRegion(state.segments, start, end)
         const bufferId = replaceRegion(start, end, buffer, label)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
@@ -288,16 +294,24 @@ export function createEqInstance({
       }
     }
 
+    // The window closing stops the meters and drops solo (a monitoring state)
+    // only: the EQ keeps its slot in the chain until it is removed there.
     function teardown() {
       stopMeters()
-      if (eqPreview.value) {
-        const chain = getEffectChain(getAudioContext())
-        chain.setEnabled(effect.id, false)
-        eqPreview.value = false
-      }
       soloBandId.value = null
       soloProbe.value = null
+      pushBands()
     }
+
+    registerChainPlugin({
+      id: effect.id,
+      windowId,
+      label,
+      isActive: () => eqPreview.value,
+      setActive: (on) => { if (eqPreview.value !== on) togglePreview() },
+      render: renderRegion,
+      resume: () => startMeters(initChain()),
+    })
 
     return {
       // state

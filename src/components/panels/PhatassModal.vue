@@ -20,6 +20,7 @@
  */
 import { computed, onMounted, watch } from 'vue'
 import { usePhatass } from '../../composables/usePhatass.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { PHATASS_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
@@ -58,7 +59,9 @@ watch(() => [state.selection?.start, state.selection?.end, state.revision], () =
 })
 
 onMounted(() => {
-  if (!phPreview.value) togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!phPreview.value && !hasChainSlot('phatass')) togglePreview()
 })
 
 const ACCENT = '#e8a33d'

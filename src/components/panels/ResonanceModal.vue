@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { RESONANCE_FOCUS_RANGES, focusThresholdFn } from '../../audio/resonanceFocus.js'
 import {
   RESONANCE_DEFAULTS,
@@ -126,7 +127,9 @@ const presets = usePluginPresets(RESO_TAME_PRESET_PLUGIN, {
 const { state } = useEditorState()
 
 onMounted(() => {
-  if (!resPreview.value) togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!resPreview.value && !hasChainSlot('resonance-suppressor')) togglePreview()
 })
 
 const ACCENT = '#8fd48a'

@@ -1,11 +1,12 @@
 import { computed, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { applyHFSoftenerRegion, computePeakCache, measureHFSoftenerAutoAir } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { levelOffsetDbFor } from '../audio/deEsserProcessor.js'
-import { getEffectChain } from '../audio/effectChain.js'
+import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { hfSoftenerEffect, HF_SOFTENER_DEFAULTS } from '../audio/effects/deEsser.js'
 import { splitAmount, amountSplitOf } from '../audio/deEsserParams.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -200,16 +201,20 @@ export function useDeEsser() {
    * same edit applied twice would disagree with itself. Same gated-RMS
    * statistic too, so the two plugins read one number for one file.
    */
-  function refreshLevel() {
+  function refreshLevel(segments = state.segments) {
     if (!state.currentFile) return
-    const key = `${appState.activeDocumentId}:${state.revision}`
-    if (levelMeasuredFor === key) return
+    // `segments` is the document's timeline, or — during a chain apply — the
+    // chain's running result, which is no revision of the document: always
+    // measured, and recorded under a key no real revision matches.
+    const own = segments === state.segments
+    const key = own ? `${appState.activeDocumentId}:${state.revision}` : `${appState.activeDocumentId}:chain`
+    if (own && levelMeasuredFor === key) return
     const end = totalDuration.value
     if (!(end > 0)) return
     // regionAlignDb answers "how far below the alignment target", so the
     // gated level itself is the target minus that.
     const gated = ALIGN_TARGET_DBFS - regionAlignDb(
-      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+      segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
     levelMeasuredFor = key
     hfFileLevelDb.value = gated
@@ -224,7 +229,7 @@ export function useDeEsser() {
    * will render; the whole file when nothing is selected. Stale answers — a
    * newer request went out, or AUTO was dropped meanwhile — are discarded.
    */
-  async function refreshAutoAir() {
+  async function refreshAutoAir(segments = state.segments) {
     if (!state.currentFile || !hfComp.value) return
     const sel = state.selection
     const start = sel ? sel.start : 0
@@ -233,7 +238,7 @@ export function useDeEsser() {
     const seq = ++autoAirSeq
     try {
       const { lossDb, airDb } = await measureHFSoftenerAutoAir(
-        state.segments, start, end, currentParams(),
+        segments, start, end, currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
       )
       if (seq !== autoAirSeq || !hfComp.value) return
@@ -420,27 +425,37 @@ export function useDeEsser() {
     nodesOf(getEffectChain(getAudioContext()))?.setListen(listenMode())
   }
 
+  /** What apply re-measures first, so it renders with exact rather than live values. */
+  async function prepareApply(segments = state.segments) {
+    refreshLevel(segments)
+    // With AUTO on, render with the Air measured for exactly these settings, not
+    // whatever a debounced request last left on the knob.
+    if (hfComp.value) {
+      clearTimeout(autoAirTimer)
+      await refreshAutoAir(segments)
+    }
+  }
+
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applyHFSoftenerRegion(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
 
     const wasPreviewing = hfPreview.value
     if (wasPreviewing) togglePreview()
-    refreshLevel()
-    // With AUTO on, render with the Air measured for exactly these settings, not
-    // whatever a debounced request last left on the knob.
-    if (hfComp.value) {
-      clearTimeout(autoAirTimer)
-      await refreshAutoAir()
-    }
+    await prepareApply()
 
     startProcessing('Applying HF Softener...')
     try {
-      const buffer = await applyHFSoftenerRegion(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'HF Softener')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -459,13 +474,22 @@ export function useDeEsser() {
     // the window closes.
     hfDelta.value = false
     hfAudition.value = false
-    if (hfPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      nodesOf(chain)?.setListen('off')
-      chain.setEnabled(hfSoftenerEffect.id, false)
-      hfPreview.value = false
-    }
+    const chain = getEffectChainIfExists()
+    if (chain) nodesOf(chain)?.setListen('off')
   }
+
+  registerChainPlugin({
+    id: hfSoftenerEffect.id,
+    windowId: HF_SOFTENER_WINDOW_ID,
+    label: 'HF Softener',
+    isActive: () => hfPreview.value,
+    setActive: (on) => { if (hfPreview.value !== on) togglePreview() },
+    render: async (segments, start, end) => {
+      await prepareApply(segments)
+      return renderRegion(segments, start, end)
+    },
+    resume: () => startMeters(initChain()),
+  })
 
   function openModal() {
     openWindow(HF_SOFTENER_WINDOW_ID)

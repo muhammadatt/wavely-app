@@ -1,9 +1,21 @@
 <script setup>
+import { computed } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
+import { useWindows } from '../composables/useWindows.js'
+import { usePluginChain } from '../composables/usePluginChain.js'
 import { CATEGORIES } from '../ui/registry.js'
 import Icon from './ui/Icon.vue'
 
 const { state, setActiveTool, hasFile, openCommandPalette } = useEditorState()
+const { openWindow, isOpen } = useWindows()
+const { slots, liveSlots, bypassed } = usePluginChain()
+
+// The chain plays whether or not its window is open, so the toolbar says so.
+const chainTitle = computed(() => {
+  if (!slots.value.length) return 'Plugin chain — empty'
+  if (bypassed.value) return `Plugin chain — ${slots.value.length} plugin(s), bypassed`
+  return `Plugin chain — ${liveSlots.value.length} of ${slots.value.length} live`
+})
 
 // The category list lives in the registry, so the toolbar and the rail can no
 // longer disagree about which tools exist.
@@ -47,8 +59,27 @@ const tools = CATEGORIES
     </div>
     <!-- Undo/Redo moved to the TopBar, next to Export. This spacer stays: it
          balances the search button on the left so the tool group sits centred
-         rather than drifting right. -->
-    <div class="flex-1"></div>
+         rather than drifting right. It also holds the chain's button: the
+         chain plays with every plugin window closed, so it needs a door that
+         is always on screen. -->
+    <div class="flex-1 min-w-0 flex items-center justify-end">
+      <button
+        type="button"
+        class="tool-btn chain-btn"
+        :class="{ 'is-active': isOpen('plugin-chain') }"
+        :disabled="!hasFile"
+        :title="chainTitle"
+        @click="openWindow('plugin-chain')"
+      >
+        <Icon name="chain" :size="15" class="tool-btn__icon" />
+        Chain
+        <span
+          v-if="slots.length"
+          class="chain-count"
+          :class="{ 'is-live': liveSlots.length && !bypassed }"
+        >{{ liveSlots.length }}/{{ slots.length }}</span>
+      </button>
+    </div>
   </div>
 </template>
 
@@ -167,5 +198,19 @@ const tools = CATEGORIES
 }
 .tool-group::-webkit-scrollbar {
   display: none;
+}
+
+.chain-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, .08);
+  color: var(--color-text-softer);
+}
+.chain-count.is-live {
+  background: rgba(232, 163, 61, .2);
+  color: #e8a33d;
 }
 </style>

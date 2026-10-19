@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, watch } from 'vue'
 import { useScheps } from '../../composables/useScheps.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { pultecNetSections, pultecSections } from '../../audio/dsp/pultec.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
@@ -41,7 +42,9 @@ const { state } = useEditorState()
 
 // Default to engaged when the panel opens, matching the other plugin windows.
 onMounted(() => {
-  if (!schepsPreview.value) togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!schepsPreview.value && !hasChainSlot('scheps-parallel')) togglePreview()
 })
 
 // The trim is measured from the selected region, so a new selection needs a

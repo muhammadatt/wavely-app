@@ -14,6 +14,7 @@
  */
 import { computed, onMounted } from 'vue'
 import { useAutoLevel } from '../../composables/useAutoLevel.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
@@ -32,7 +33,9 @@ const {
 const { state } = useEditorState()
 
 onMounted(() => {
-  if (!preview.value) togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!preview.value && !hasChainSlot('auto-leveler')) togglePreview()
 })
 
 const ACCENT = '#9ee6a8'

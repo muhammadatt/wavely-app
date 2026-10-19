@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, watch } from 'vue'
 import { useFET1176 } from '../../composables/useFET1176.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   attackSecondsForDial, releaseSecondsForDial, FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB,
@@ -83,7 +84,9 @@ const { state } = useEditorState()
 
 // Default to engaged when the panel opens
 onMounted(() => {
-  if (!fetPreview.value) togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!fetPreview.value && !hasChainSlot('fet-punch')) togglePreview()
 })
 
 // The makeup is measured from the selected region, so a new selection needs

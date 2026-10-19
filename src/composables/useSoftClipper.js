@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import {
   applySoftClipperRegion, computePeakCache, computeSoftClipperCeiling,
   computeSoftClipperAutoMakeup,
@@ -597,6 +598,15 @@ export function useSoftClipper() {
     scheduleAutoMakeup()
   }
 
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applySoftClipperRegion(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -606,11 +616,7 @@ export function useSoftClipper() {
 
     startProcessing('Applying Soft Clipper...')
     try {
-      const buffer = await applySoftClipperRegion(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'Soft Clip')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -641,12 +647,6 @@ export function useSoftClipper() {
     makeupThrottle?.cancel()
     makeupSeq++
     autoMakeupBusy.value = false
-    if (clipperPreview.value) {
-      const ctx = getAudioContext()
-      const chain = getEffectChain(ctx)
-      chain.setEnabled(softClipperEffect.id, false)
-      clipperPreview.value = false
-    }
     // Leaving DELTA latched would hand the next session a residual-only
     // monitor under a header that no longer says so. Read off the chain rather
     // than a retained handle — apply() has already dropped the meter loop's.
@@ -656,6 +656,16 @@ export function useSoftClipper() {
         .find(e => e.id === softClipperEffect.id)?.nodes?.setMonitorDelta(false)
     }
   }
+
+  registerChainPlugin({
+    id: softClipperEffect.id,
+    windowId: SOFT_CLIPPER_WINDOW_ID,
+    label: 'Soft Clipper',
+    isActive: () => clipperPreview.value,
+    setActive: (on) => { if (clipperPreview.value !== on) togglePreview() },
+    render: renderRegion,
+    resume: () => startMeters(initChain()),
+  })
 
   function openModal() {
     openWindow(SOFT_CLIPPER_WINDOW_ID)

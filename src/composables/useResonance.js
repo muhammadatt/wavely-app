@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { applyResonanceRegion, computePeakCache, computeVoiceProfile } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { resonanceEffect, RESONANCE_DEFAULTS } from '../audio/effects/resonance.js'
@@ -473,6 +474,15 @@ export function useResonance() {
     }
   }
 
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applyResonanceRegion(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -482,11 +492,7 @@ export function useResonance() {
 
     startProcessing('Suppressing resonances...')
     try {
-      const buffer = await applyResonanceRegion(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'resonance suppression')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -501,11 +507,6 @@ export function useResonance() {
 
   function teardown() {
     stopMeters()
-    if (resPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      chain.setEnabled(resonanceEffect.id, false)
-      resPreview.value = false
-    }
     // Cleared on the node too, not just in the ref. The effect entry outlives
     // this panel, so a mode left set on it would come back the next time the
     // preview was switched on — under a header that no longer said so. Read off
@@ -525,10 +526,24 @@ export function useResonance() {
     // would put a stale F0 beside boundaries that were never placed from it.
     resVoiceProfile.value = null
     if (wasMonitoring) {
-      getEffectChainIfExists()?.effects
-        .find(e => e.id === resonanceEffect.id)?.nodes?.setMonitorDelta(false)
+      // Still in the chain and live: re-push the zones and focus without the
+      // isolation (and the delta off) — the slot keeps playing after the
+      // window closes, so the node must stop monitoring now, not on re-enable.
+      const chain = getEffectChainIfExists()
+      if (chain && resPreview.value) pushAllParams(chain)
+      else chain?.effects.find(e => e.id === resonanceEffect.id)?.nodes?.setMonitorDelta(false)
     }
   }
+
+  registerChainPlugin({
+    id: resonanceEffect.id,
+    windowId: RESONANCE_WINDOW_ID,
+    label: 'ResoTame',
+    isActive: () => resPreview.value,
+    setActive: (on) => { if (resPreview.value !== on) togglePreview() },
+    render: renderRegion,
+    resume: () => startMeters(initChain()),
+  })
 
   function openModal() {
     openWindow(RESONANCE_WINDOW_ID)

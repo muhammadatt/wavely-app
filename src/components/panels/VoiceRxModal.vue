@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useVoiceRx } from '../../composables/useVoiceRx.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { isBandActive } from '../../audio/eqBands.js'
 import LevelMeter from '../meters/LevelMeter.vue'
@@ -35,7 +36,9 @@ const hoveredRowRegion = ref(null)
 const hoveredPlotRegion = ref(null)
 
 onMounted(() => {
-  if (!vox.eqPreview.value) vox.togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!vox.eqPreview.value && !hasChainSlot('voicerx')) vox.togglePreview()
 })
 
 const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)

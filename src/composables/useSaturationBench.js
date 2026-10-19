@@ -1,8 +1,9 @@
 import { ref, computed } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { applySaturationBenchRegion, computePeakCache } from '../audio/processing.js'
-import { getEffectChain } from '../audio/effectChain.js'
+import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import {
   saturationBenchEffect, SAT_BENCH_LAYER_PRESETS,
 } from '../audio/effects/saturationBench.js'
@@ -61,15 +62,19 @@ export function useSaturationBench() {
    * selection-sized measurement would re-voice every layer as the selection
    * moved.
    */
-  function refreshSpectrum() {
+  function refreshSpectrum(segments = state.segments) {
     if (!state.currentFile) return
-    const key = `${appState.activeDocumentId}:${state.revision}`
-    if (measuredFor === key) return
+    // `segments` is the document's timeline, or — during a chain apply — the
+    // chain's running result, which is no revision of the document: always
+    // measured, and recorded under a key no real revision matches.
+    const own = segments === state.segments
+    const key = own ? `${appState.activeDocumentId}:${state.revision}` : `${appState.activeDocumentId}:chain`
+    if (own && measuredFor === key) return
     const end = totalDuration.value
     if (!(end > 0)) return
     measuredFor = key
     sbSpectrum.value = measureBandSpectrum(
-      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+      segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
     pushAll()
   }
@@ -141,21 +146,31 @@ export function useSaturationBench() {
     pushAll()
   }
 
+  /** What apply re-measures first, so it renders with exact rather than live values. */
+  async function prepareApply(segments = state.segments) {
+    refreshSpectrum(segments)
+  }
+
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applySaturationBenchRegion(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
 
     const wasPreviewing = sbPreview.value
     if (wasPreviewing) togglePreview()
-    refreshSpectrum()
+    await prepareApply()
 
     startProcessing('Applying Saturation Bench...')
     try {
-      const buffer = await applySaturationBenchRegion(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'Saturation Bench')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -170,14 +185,22 @@ export function useSaturationBench() {
 
   function teardown() {
     stopMeters()
-    if (sbPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      chain.updateParam(saturationBenchEffect.id, 'delta', false)
-      chain.setEnabled(saturationBenchEffect.id, false)
-      sbPreview.value = false
-    }
+    getEffectChainIfExists()?.updateParam(saturationBenchEffect.id, 'delta', false)
     sbDelta.value = false
   }
+
+  registerChainPlugin({
+    id: saturationBenchEffect.id,
+    windowId: SATURATION_BENCH_WINDOW_ID,
+    label: 'Saturation Bench',
+    isActive: () => sbPreview.value,
+    setActive: (on) => { if (sbPreview.value !== on) togglePreview() },
+    render: async (segments, start, end) => {
+      await prepareApply(segments)
+      return renderRegion(segments, start, end)
+    },
+    resume: () => startMeters(initChain()),
+  })
 
   function resetLayers() {
     sbLayers.value = SAT_BENCH_LAYER_PRESETS.map(l => ({ ...l }))

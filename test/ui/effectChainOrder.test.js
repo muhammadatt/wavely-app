@@ -1,0 +1,122 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+
+import { EffectChain } from '../../src/audio/effectChain.js'
+
+/**
+ * The chain's slots: membership that outlives a bypass, an order the user
+ * controls, and a master bypass — checked on the audio graph the chain
+ * actually wires, not on its bookkeeping alone.
+ */
+
+// A node that records what it is connected to.
+function fakeNode(name) {
+  return {
+    name,
+    out: new Set(),
+    connect(n) { this.out.add(n) },
+    disconnect() { this.out.clear() },
+  }
+}
+
+function fakeContext() {
+  const destination = fakeNode('destination')
+  let n = 0
+  return { destination, createGain: () => fakeNode(`gain${n++}`) }
+}
+
+function fakeEffect(id) {
+  return {
+    id,
+    name: id,
+    createNodes: () => {
+      const input = fakeNode(`${id}.in`)
+      const output = fakeNode(`${id}.out`)
+      return { input, output, setParam() {}, getParam() {} }
+    },
+  }
+}
+
+// Walk the graph from the chain input and name every effect the signal passes.
+function signalPath(chain) {
+  const path = []
+  let node = chain.inputNode
+  for (let hops = 0; hops < 20; hops++) {
+    const [next] = node.out
+    if (!next || next === chain.outputNode) break
+    const entry = chain.effects.find(e => e.nodes.input === next)
+    path.push(entry.id)
+    node = entry.nodes.output
+  }
+  return path
+}
+
+function chainWith(...ids) {
+  const chain = new EffectChain(fakeContext())
+  for (const id of ids) chain.addEffect(fakeEffect(id))
+  return chain
+}
+
+test('engaging appends a slot: the default order is the order plugins were turned on', () => {
+  // Built (opened) a, b, c — but turned on c, then a.
+  const chain = chainWith('a', 'b', 'c')
+  chain.setEnabled('c', true)
+  chain.setEnabled('a', true)
+  assert.deepEqual(chain.members().map(e => e.id), ['c', 'a'])
+  assert.deepEqual(signalPath(chain), ['c', 'a'])
+})
+
+test('a bypassed slot keeps its place and comes back to it', () => {
+  const chain = chainWith('a', 'b', 'c')
+  for (const id of ['a', 'b', 'c']) chain.setEnabled(id, true)
+  chain.setEnabled('b', false)
+  assert.deepEqual(chain.members().map(e => e.id), ['a', 'b', 'c'])
+  assert.deepEqual(signalPath(chain), ['a', 'c'])
+  chain.setEnabled('b', true)
+  assert.deepEqual(signalPath(chain), ['a', 'b', 'c'])
+})
+
+test('moveEffect reorders the audio, not just the list', () => {
+  const chain = chainWith('a', 'b', 'c')
+  for (const id of ['a', 'b', 'c']) chain.setEnabled(id, true)
+  chain.moveEffect('c', 0)
+  assert.deepEqual(signalPath(chain), ['c', 'a', 'b'])
+  chain.moveEffect('c', 99) // clamped to the end
+  assert.deepEqual(signalPath(chain), ['a', 'b', 'c'])
+  chain.moveEffect('a', 1)
+  assert.deepEqual(signalPath(chain), ['b', 'a', 'c'])
+})
+
+test('removing a slot takes it out; re-engaging puts it at the end', () => {
+  const chain = chainWith('a', 'b', 'c')
+  for (const id of ['a', 'b', 'c']) chain.setEnabled(id, true)
+  chain.removeFromChain('a')
+  assert.deepEqual(chain.members().map(e => e.id), ['b', 'c'])
+  assert.deepEqual(signalPath(chain), ['b', 'c'])
+  chain.setEnabled('a', true)
+  assert.deepEqual(signalPath(chain), ['b', 'c', 'a'])
+})
+
+test('the master bypass empties the path and keeps every slot', () => {
+  const chain = chainWith('a', 'b')
+  chain.setEnabled('a', true)
+  chain.setEnabled('b', true)
+  chain.setBypassed(true)
+  assert.deepEqual(signalPath(chain), [])
+  assert.ok(chain.inputNode.out.has(chain.outputNode))
+  assert.deepEqual(chain.members().map(e => [e.id, e.enabled]), [['a', true], ['b', true]])
+  chain.setBypassed(false)
+  assert.deepEqual(signalPath(chain), ['a', 'b'])
+})
+
+test('every change notifies listeners', () => {
+  const chain = chainWith('a', 'b')
+  let calls = 0
+  chain.onChange(() => calls++)
+  chain.setEnabled('a', true)
+  chain.setEnabled('b', true)
+  chain.moveEffect('b', 0)
+  chain.setBypassed(true)
+  chain.removeFromChain('a')
+  assert.equal(calls, 5)
+})

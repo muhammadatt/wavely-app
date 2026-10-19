@@ -1,6 +1,7 @@
-import { computed, ref, watch } from 'vue'
+import { computed, effectScope, ref, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { analyzeVoiceActivity } from '../api/analyze.js'
 import { applyAutoLevelRegion, computePeakCache, renderRegionToBuffer } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
@@ -67,6 +68,9 @@ let meterId = null
  * exact, read straight out of the curve.
  */
 const METER_TAU_MS = 120
+
+// The app-lifetime scope holding the stale-curve guard — see its use below.
+let staleGuard = null
 
 export function useAutoLevel() {
   const {
@@ -213,9 +217,17 @@ export function useAutoLevel() {
   // A stale curve must leave the chain, not merely grey out the panel: the
   // segments are positioned against the analysed region, so once the audio
   // under them changes they apply phrase gains to unrelated phrases.
-  watch(isStale, (stale) => {
-    if (stale) pushCurve()
-  })
+  //
+  // ⚠ IN A DETACHED SCOPE, CREATED ONCE: the leveler keeps playing in the chain
+  // after its window closes, and a watcher made in the window's setup would die
+  // with it — leaving a stale curve riding gain over edited audio. (The
+  // computeds it reads keep working after unmount; only watchers are scoped.)
+  if (!staleGuard) {
+    staleGuard = effectScope(true)
+    staleGuard.run(() => watch(isStale, (stale) => {
+      if (stale) pushCurve()
+    }))
+  }
 
   function syncParam(name, value) {
     params.value = { ...params.value, [name]: value }
@@ -302,6 +314,14 @@ export function useAutoLevel() {
     }
   }
 
+  /** Apply a solved curve to [start, end) of `segments`, uncommitted. */
+  function renderCurve(segments, start, end, curve) {
+    return applyAutoLevelRegion(
+      segments, start, end, curve.segments, analyzedRegion.value.start,
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
   async function apply() {
     if (!state.selection || !curveValid.value) return
     const { start, end } = state.selection
@@ -313,10 +333,7 @@ export function useAutoLevel() {
 
     startProcessing('Levelling...')
     try {
-      const buffer = applyAutoLevelRegion(
-        state.segments, start, end, curve.segments, analyzedRegion.value.start,
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = renderCurve(state.segments, start, end, curve)
       const bufferId = replaceRegion(start, end, buffer, 'auto-levelling')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -337,10 +354,28 @@ export function useAutoLevel() {
     }
   }
 
+  // The window closing stops the meters only: the leveler keeps its slot in
+  // the chain, live or bypassed, until it is removed there.
   function teardown() {
-    if (preview.value) togglePreview()
     stopMeters()
   }
+
+  registerChainPlugin({
+    id: autoLevelerEffect.id,
+    windowId: AUTOLEVEL_WINDOW_ID,
+    label: 'Auto Leveler',
+    isActive: () => preview.value,
+    setActive: (on) => { if (preview.value !== on) togglePreview() },
+    unavailable: () => (curveValid.value ? '' : 'analyse the selection first'),
+    render: async (segments, start, end) => {
+      const curve = rebuildCurve()
+      if (!curve) throw new Error('Auto Leveler has no curve — analyse the selection first')
+      return renderCurve(segments, start, end, curve)
+    },
+    resume: () => startMeters(initChain()),
+    // The audio changed, so the clips no longer describe it.
+    afterApply: () => clearAnalysis(),
+  })
 
   return {
     params, preview, analyzing, prepared, solved, vad,

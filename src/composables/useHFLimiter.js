@@ -1,12 +1,13 @@
 import { reactive, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import {
   applyHFLimiterRegion, computePeakCache,
 } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
-import { getEffectChain } from '../audio/effectChain.js'
+import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { hfLimiterEffect, HF_LIMITER_DEFAULTS } from '../audio/effects/hfLimiter.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
@@ -88,14 +89,18 @@ export function useHFLimiter() {
    * selection, a phrase and the paragraph around it would get different
    * thresholds and the same edit applied twice would disagree with itself.
    */
-  function refreshLevel() {
+  function refreshLevel(segments = state.segments) {
     if (!state.currentFile) return
-    const key = `${appState.activeDocumentId}:${state.revision}`
-    if (levelMeasuredFor === key) return
+    // `segments` is the document's timeline, or — during a chain apply — the
+    // chain's running result, which is no revision of the document: always
+    // measured, and recorded under a key no real revision matches.
+    const own = segments === state.segments
+    const key = own ? `${appState.activeDocumentId}:${state.revision}` : `${appState.activeDocumentId}:chain`
+    if (own && levelMeasuredFor === key) return
     const end = totalDuration.value
     if (!(end > 0)) return
     const gated = ALIGN_TARGET_DBFS - regionAlignDb(
-      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+      segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
     levelMeasuredFor = key
     hflParams.voiceLevelDb = gated
@@ -140,21 +145,31 @@ export function useHFLimiter() {
     nodesOf(getEffectChain(getAudioContext()))?.setListen(hflDelta.value ? 'delta' : 'off')
   }
 
+  /** What apply re-measures first, so it renders with exact rather than live values. */
+  async function prepareApply(segments = state.segments) {
+    refreshLevel(segments)
+  }
+
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applyHFLimiterRegion(
+      segments, start, end,
+      { ...hflParams },
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
 
     const wasPreviewing = hflPreview.value
     if (wasPreviewing) togglePreview()
-    refreshLevel()
+    await prepareApply()
 
     startProcessing('Applying HF Limiter...')
     try {
-      const buffer = await applyHFLimiterRegion(
-        state.segments, start, end,
-        { ...hflParams },
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'HF Limiter')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -172,13 +187,22 @@ export function useHFLimiter() {
     // Delta is a monitoring aid; never leave the chain auditioning it after
     // the window closes.
     hflDelta.value = false
-    if (hflPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      nodesOf(chain)?.setListen('off')
-      chain.setEnabled(hfLimiterEffect.id, false)
-      hflPreview.value = false
-    }
+    const chain = getEffectChainIfExists()
+    if (chain) nodesOf(chain)?.setListen('off')
   }
+
+  registerChainPlugin({
+    id: hfLimiterEffect.id,
+    windowId: HF_LIMITER_WINDOW_ID,
+    label: 'HF Limiter',
+    isActive: () => hflPreview.value,
+    setActive: (on) => { if (hflPreview.value !== on) togglePreview() },
+    render: async (segments, start, end) => {
+      await prepareApply(segments)
+      return renderRegion(segments, start, end)
+    },
+    resume: () => startMeters(initChain()),
+  })
 
   function openModal() {
     openWindow(HF_LIMITER_WINDOW_ID)

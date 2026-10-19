@@ -11,6 +11,7 @@
  */
 import { onMounted, watch } from 'vue'
 import { useSaturationBench } from '../../composables/useSaturationBench.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
@@ -40,7 +41,9 @@ watch(() => [state.revision, appState.activeDocumentId], () => {
 })
 
 onMounted(() => {
-  if (!sbPreview.value) togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!sbPreview.value && !hasChainSlot('saturation-bench')) togglePreview()
 })
 
 const ACCENT = '#e89a6f'

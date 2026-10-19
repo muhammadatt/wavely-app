@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { applySchepsRegion, computeSchepsTrim, computePeakCache } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { getEffectChain } from '../audio/effectChain.js'
@@ -234,14 +235,18 @@ export function useScheps() {
    * ⚠ AND BEFORE THE TRIM SOLVE, which consumes it — the trim renders the wet
    * path, so a stale offset means levelling the wrong compressor.
    */
-  function refreshInputAlign() {
+  function refreshInputAlign(segments = state.segments) {
     if (!state.currentFile) return
-    const key = `${appState.activeDocumentId}:${state.revision}`
-    if (alignedFor === key) return // already measured for this exact timeline
+    // `segments` is the document's timeline, or — during a chain apply — the
+    // chain's running result, which is no revision of the document: always
+    // measured, and recorded under a key no real revision matches.
+    const own = segments === state.segments
+    const key = own ? `${appState.activeDocumentId}:${state.revision}` : `${appState.activeDocumentId}:chain`
+    if (own && alignedFor === key) return // already measured for this exact timeline
     const end = totalDuration.value
     if (!(end > 0)) return
     const db = regionAlignDb(
-      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+      segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
     alignedFor = key
     schepsInputAlignDb.value = db
@@ -394,6 +399,20 @@ export function useScheps() {
     pushParam('ceilingKneeDb', null)
   }
 
+  /** What apply re-measures first, so it renders with exact rather than live values. */
+  async function prepareApply(segments = state.segments) {
+    refreshInputAlign(segments)
+  }
+
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applySchepsRegion(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -405,18 +424,14 @@ export function useScheps() {
      * was opened. Applying against a stale offset would render a different
      * compressor from the one auditioned.
      */
-    refreshInputAlign()
+    await prepareApply()
 
     const wasPreviewing = schepsPreview.value
     if (wasPreviewing) togglePreview()
 
     startProcessing('Applying Scheps Parallel...')
     try {
-      const buffer = await applySchepsRegion(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'Scheps Parallel')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -431,12 +446,20 @@ export function useScheps() {
 
   function teardown() {
     stopMeters()
-    if (schepsPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      chain.setEnabled(schepsEffect.id, false)
-      schepsPreview.value = false
-    }
   }
+
+  registerChainPlugin({
+    id: schepsEffect.id,
+    windowId: SCHEPS_WINDOW_ID,
+    label: 'Scheps Parallel',
+    isActive: () => schepsPreview.value,
+    setActive: (on) => { if (schepsPreview.value !== on) togglePreview() },
+    render: async (segments, start, end) => {
+      await prepareApply(segments)
+      return renderRegion(segments, start, end)
+    },
+    resume: () => startMeters(initChain()),
+  })
 
   function openModal() {
     openWindow(SCHEPS_WINDOW_ID)

@@ -5,6 +5,7 @@ import { applyInflatorRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { inflatorEffect, INFLATOR_DEFAULTS } from '../audio/effects/inflator.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { registerChainPlugin } from './usePluginChain.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const INFLATOR_WINDOW_ID = 'inflator'
@@ -134,6 +135,15 @@ export function useInflator() {
   const syncClip = v => syncParam('clip', inClip, v)
   const syncBandSplit = v => syncParam('bandSplit', inBandSplit, v)
 
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applyInflatorRegion(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -143,11 +153,7 @@ export function useInflator() {
 
     startProcessing('Inflating...')
     try {
-      const buffer = await applyInflatorRegion(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'inflator')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -160,14 +166,21 @@ export function useInflator() {
     }
   }
 
+  // The window closing stops the meters only: the plugin keeps its slot in
+  // the chain, live or bypassed, until it is removed there.
   function teardown() {
     stopMeters()
-    if (inPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      chain.setEnabled(inflatorEffect.id, false)
-      inPreview.value = false
-    }
   }
+
+  registerChainPlugin({
+    id: inflatorEffect.id,
+    windowId: INFLATOR_WINDOW_ID,
+    label: 'Inflator',
+    isActive: () => inPreview.value,
+    setActive: (on) => { if (inPreview.value !== on) togglePreview() },
+    render: renderRegion,
+    resume: () => startMeters(initChain()),
+  })
 
   function openModal() {
     openWindow(INFLATOR_WINDOW_ID)

@@ -1,6 +1,7 @@
-import { computed, ref, watch } from 'vue'
+import { computed, effectScope, ref, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { analyzeSibilance } from '../api/analyze.js'
 import { applyDeEsserRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
@@ -51,6 +52,9 @@ const preview = ref(false)
 const reductionDb = ref(0)
 const inputLevels = ref([])
 const outputLevels = ref([])
+
+// The app-lifetime scope holding the stale-envelope guard — see its use below.
+let staleGuard = null
 const treatedCount = ref(0)
 const maxReductionDb = ref(0)
 let meterId = null
@@ -213,9 +217,17 @@ export function useSibilanceEditor() {
   // Going stale has to take the envelope out of the chain, not just change the
   // status text. Until this existed the effect kept applying measurements from
   // a region — or a file — that was no longer under the playhead.
-  watch(isStale, (stale) => {
-    if (stale) pushEnvelope()
-  })
+  //
+  // ⚠ IN A DETACHED SCOPE, CREATED ONCE: the de-esser keeps playing in the
+  // chain after its window closes, and a watcher made in the window's setup
+  // would die with it. (The computeds it reads keep working after unmount;
+  // only watchers are scoped.)
+  if (!staleGuard) {
+    staleGuard = effectScope(true)
+    staleGuard.run(() => watch(isStale, (stale) => {
+      if (stale) pushEnvelope()
+    }))
+  }
 
   /** Every attenuation control routes through here. */
   function syncParam(name, value) {
@@ -281,13 +293,8 @@ export function useSibilanceEditor() {
     }
   }
 
-  async function apply() {
-    if (!state.selection || !envelopeValid.value) return
-    const { start, end } = state.selection
-
-    const envelope = rebuildEnvelope()
-    if (!envelope) return
-
+  /** Apply the envelope to [start, end) of `segments`, uncommitted. */
+  function renderEnvelope(segments, start, end, envelope) {
     // The envelope spans the analysed region; apply writes back only the
     // current selection, so take the slice that lines up with it.
     const sampleRate = state.currentFile.sampleRate
@@ -297,16 +304,25 @@ export function useSibilanceEditor() {
       Math.max(0, offset),
       Math.min(envelope.deviation.length, Math.max(0, offset) + length),
     )
+    return applyDeEsserRegion(
+      segments, start, end, slice,
+      sampleRate, state.currentFile.channels,
+    )
+  }
+
+  async function apply() {
+    if (!state.selection || !envelopeValid.value) return
+    const { start, end } = state.selection
+
+    const envelope = rebuildEnvelope()
+    if (!envelope) return
 
     const wasPreviewing = preview.value
     if (wasPreviewing) togglePreview()
 
     startProcessing('De-essing...')
     try {
-      const buffer = applyDeEsserRegion(
-        state.segments, start, end, slice,
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = renderEnvelope(state.segments, start, end, envelope)
       const bufferId = replaceRegion(start, end, buffer, 'de-essing')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -321,10 +337,28 @@ export function useSibilanceEditor() {
     }
   }
 
+  // The window closing stops the meters only: the de-esser keeps its slot in
+  // the chain, live or bypassed, until it is removed there.
   function teardown() {
-    if (preview.value) togglePreview()
     stopMeters()
   }
+
+  registerChainPlugin({
+    id: clipGainDeEsserEffect.id,
+    windowId: DEESSER_WINDOW_ID,
+    label: 'Clip-Gain De-Esser',
+    isActive: () => preview.value,
+    setActive: (on) => { if (preview.value !== on) togglePreview() },
+    unavailable: () => (envelopeValid.value ? '' : 'analyse the selection first'),
+    render: async (segments, start, end) => {
+      const envelope = rebuildEnvelope()
+      if (!envelope) throw new Error('De-Esser has no envelope — analyse the selection first')
+      return renderEnvelope(segments, start, end, envelope)
+    },
+    resume: () => startMeters(initChain()),
+    // The audio changed, so the measurements no longer describe it.
+    afterApply: () => clearAnalysis(),
+  })
 
   return {
     params, preview, analysis, analyzing, measuredEvents,

@@ -164,6 +164,65 @@ try {
   }
 
   /**
+   * The plugin chain, checked for what it DOES: a plugin keeps its slot after
+   * its window closes, the arrows reorder, and Apply commits every live slot in
+   * order as one edit and bypasses them afterwards.
+   */
+  {
+    const before = errors.length
+    const openOp = async (name) => {
+      await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
+      await page.keyboard.type(name); await page.waitForTimeout(450)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
+    }
+    const chainWin = page.locator('.win-frame').filter({ hasText: 'PLUGIN CHAIN' })
+    const rowNames = () => chainWin.locator('.pc-name').allInnerTexts()
+
+    // Every panel above auto-engaged and is still in the chain — itself the
+    // property under test. Start from an empty chain.
+    await openOp('Plugin Chain')
+    const kept = (await rowNames()).length
+    const clear = chainWin.getByRole('button', { name: 'Clear' })
+    if (await clear.count()) await clear.click()
+    await page.waitForTimeout(300)
+    const cleared = (await rowNames()).length === 0
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+
+    // Two plugins, each window closed again straight away.
+    await openOp('Inflator'); await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+    await openOp('Air Boost'); await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+
+    await openOp('Plugin Chain')
+    const order1 = await rowNames()
+    await chainWin.getByRole('button', { name: 'Move Inflator later' }).click()
+    await page.waitForTimeout(300)
+    const order2 = await rowNames()
+
+    await chainWin.locator('.win-apply').click()
+    const toast = await page.getByText('Chain applied — AirBoost → Inflator').waitFor({ timeout: 20000 })
+      .then(() => true, () => false)
+    await page.waitForTimeout(500)
+    const pills = await chainWin.locator('.pc-row .m-pill-text').allInnerTexts()
+    const bypassedAfter = pills.length === 2 && pills.every(t => t === 'BYPASS')
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+
+    const fresh = errors.slice(before)
+    const ok = kept >= 2 && cleared
+      && order1.join(',') === 'Inflator,AirBoost' && order2.join(',') === 'AirBoost,Inflator'
+      && toast && bypassedAfter && fresh.length === 0
+    if (!ok) failures++
+    const why = [
+      kept >= 2 ? '' : `closed panels left ${kept} slot(s) in the chain; `,
+      cleared ? '' : 'Clear did not empty the chain; ',
+      order1.join(',') === 'Inflator,AirBoost' ? '' : `slots not in engage order (${order1.join(',')}); `,
+      order2.join(',') === 'AirBoost,Inflator' ? '' : `move did not reorder (${order2.join(',')}); `,
+      toast ? '' : 'Apply did not report the chain in order; ',
+      bypassedAfter ? '' : `slots not bypassed after apply (${pills.join(',')}); `,
+    ].join('')
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Plugin chain'.padEnd(16)} ${why}${fresh.join(' | ')}`)
+  }
+
+  /**
    * The files panel, which is not a plugin window and so is not in PANELS.
    *
    * ⚠ THIS CHECKS WHAT EACH CONTROL DOES, NOT ONLY THAT THE PANEL RENDERS, and

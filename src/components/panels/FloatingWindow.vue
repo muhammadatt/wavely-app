@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useWindows } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
+import { chainWindowMounted } from '../../composables/usePluginChain.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import Icon from '../ui/Icon.vue'
@@ -382,6 +383,10 @@ let previouslyFocused = null
 const label = computed(() => `${props.brandLead} ${props.brandTail}`.trim())
 
 onMounted(() => {
+  // A plugin keeps playing in the chain while its window is closed, with its
+  // meters stopped; reopening the window brings them back.
+  chainWindowMounted(props.windowId)
+
   // A window that was resized before is reopened at the size it was left, the
   // same courtesy the position gets. Restored before the position fallback
   // below, which reads it for the first-open case.

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useHumRemover } from '../../composables/useHumRemover.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
@@ -19,7 +20,9 @@ const {
 const { state } = useEditorState()
 
 onMounted(() => {
-  if (!humPreview.value) togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!humPreview.value && !hasChainSlot('hum-remover')) togglePreview()
 })
 
 const ACCENT = '#c9a7ff'

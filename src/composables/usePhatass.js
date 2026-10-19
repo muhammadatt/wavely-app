@@ -1,6 +1,7 @@
 import { reactive, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import {
   applyPhatassRegion, cancelPhatassOutputMakeup, cancelPhatassTapeMakeup, computePeakCache,
   measurePhatassOutputMakeup, measurePhatassTapeMakeup, measurePhatassWarmthBands,
@@ -128,14 +129,18 @@ export function usePhatass() {
    * selection, a phrase and the paragraph around it would get different
    * thresholds and the same edit applied twice would disagree with itself.
    */
-  function refreshLevel() {
+  function refreshLevel(segments = state.segments) {
     if (!state.currentFile) return
-    const key = `${appState.activeDocumentId}:${state.revision}`
-    if (levelMeasuredFor === key) return
+    // `segments` is the document's timeline, or — during a chain apply — the
+    // chain's running result, which is no revision of the document: always
+    // measured, and recorded under a key no real revision matches.
+    const own = segments === state.segments
+    const key = own ? `${appState.activeDocumentId}:${state.revision}` : `${appState.activeDocumentId}:chain`
+    if (own && levelMeasuredFor === key) return
     const end = totalDuration.value
     if (!(end > 0)) return
     const gated = ALIGN_TARGET_DBFS - regionAlignDb(
-      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+      segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
     levelMeasuredFor = key
     phParams.voiceLevelDb = gated
@@ -143,7 +148,7 @@ export function usePhatass() {
     // Warmth's calibration, the Saturation Bench's: each layer's band level on
     // this file, so a Warmth setting means the same on a quiet take and a hot one.
     const spectrum = measureBandSpectrum(
-      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+      segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
     const refs = WARMTH_LAYERS.map(l => bandRefPeakDb(spectrum, l.loHz, l.hiHz))
     phParams.warmthRefPeaksDb = refs
@@ -396,12 +401,15 @@ export function usePhatass() {
    * nothing selected). A scan of the source, no render, and only re-scanned
    * when the span or the file changes — it is checked on every knob turn.
    */
-  function refreshCeiling(start, end) {
+  function refreshCeiling(start, end, segments = state.segments) {
     if (!state.currentFile || !(end > start)) return
-    const key = `${appState.activeDocumentId}:${state.revision}:${start}:${end}`
-    if (ceilingMeasuredFor === key) return
+    const own = segments === state.segments
+    const key = own
+      ? `${appState.activeDocumentId}:${state.revision}:${start}:${end}`
+      : `${appState.activeDocumentId}:chain`
+    if (own && ceilingMeasuredFor === key) return
     ceilingMeasuredFor = key
-    const db = regionPeakDb(state.segments, start, end, state.currentFile.sampleRate, state.currentFile.channels)
+    const db = regionPeakDb(segments, start, end, state.currentFile.sampleRate, state.currentFile.channels)
     const v = Number.isFinite(db) ? db : null
     if (phParams.warmthCeilingDb === v) return
     phParams.warmthCeilingDb = v
@@ -481,44 +489,57 @@ export function usePhatass() {
     phWarmthReadout.value = { ...phWarmthReadout.value, bandsPending: false, peakPending: false }
   }
 
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applyPhatassRegion(
+      segments, start, end,
+      { ...phParams },
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
+  /** The measurements apply needs exact for this span, measured on the source. */
+  async function prepareApply(start, end, segments = state.segments) {
+    // During a chain apply `segments` is the chain's running result: measured
+    // fresh, and never read from or written to the per-revision makeup cache.
+    const own = segments === state.segments
+    refreshLevel(segments)
+    refreshCeiling(start, end, segments)
+    // Never apply a stale (debounced or interim) makeup: the exact one for
+    // this span and these settings — from the background measurement when it
+    // already ran, otherwise measured now.
+    if (Number(phParams.tape) > 0) {
+      const key = tapeMakeupKey(start, end)
+      if (own && exactMakeups.has(key)) {
+        setTapeMakeup(exactMakeups.get(key))
+      } else {
+        const { makeupDb } = await measurePhatassTapeMakeup(
+          segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+        )
+        if (own) rememberExactMakeup(key, makeupDb)
+        setTapeMakeup(makeupDb)
+      }
+    }
+    // The output trim after it, since it renders with TAPE's makeup in place.
+    if (outputTrimOn()) {
+      const { makeupDb } = await measurePhatassOutputMakeup(
+        segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+      )
+      setOutputMakeup(makeupDb)
+    }
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
 
     const wasPreviewing = phPreview.value
     if (wasPreviewing) togglePreview()
-    refreshLevel()
-    refreshCeiling(start, end)
 
     startProcessing('Applying PHAT*SS...')
     try {
-      // Never apply a stale (debounced or interim) makeup: the exact one for
-      // this span and these settings — from the background measurement when it
-      // already ran, otherwise measured now.
-      if (Number(phParams.tape) > 0) {
-        const key = tapeMakeupKey(start, end)
-        if (exactMakeups.has(key)) {
-          setTapeMakeup(exactMakeups.get(key))
-        } else {
-          const { makeupDb } = await measurePhatassTapeMakeup(
-            state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
-          )
-          rememberExactMakeup(key, makeupDb)
-          setTapeMakeup(makeupDb)
-        }
-      }
-      // The output trim after it, since it renders with TAPE's makeup in place.
-      if (outputTrimOn()) {
-        const { makeupDb } = await measurePhatassOutputMakeup(
-          state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
-        )
-        setOutputMakeup(makeupDb)
-      }
-      const buffer = await applyPhatassRegion(
-        state.segments, start, end,
-        { ...phParams },
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      await prepareApply(start, end)
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'PHAT*SS')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -536,12 +557,20 @@ export function usePhatass() {
     cancelWarmthReadout()
     cancelTapeMakeup()
     cancelOutputMakeup()
-    if (phPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      chain.setEnabled(phatassEffect.id, false)
-      phPreview.value = false
-    }
   }
+
+  registerChainPlugin({
+    id: phatassEffect.id,
+    windowId: PHATASS_WINDOW_ID,
+    label: 'PHAT*SS',
+    isActive: () => phPreview.value,
+    setActive: (on) => { if (phPreview.value !== on) togglePreview() },
+    render: async (segments, start, end) => {
+      await prepareApply(start, end, segments)
+      return renderRegion(segments, start, end)
+    },
+    resume: () => startMeters(initChain()),
+  })
 
   /** Put a whole param set into effect (a preset): each through syncParam, so makeups follow. */
   function applyParams(p) {

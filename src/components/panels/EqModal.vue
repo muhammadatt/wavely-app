@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useManualEq } from '../../composables/useManualEq.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { PARAMETRIC_EQ_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
@@ -56,8 +57,9 @@ onMounted(() => {
   // Opens with a starting layout rather than a bare plot — four unity bands,
   // so this cannot change what the user hears.
   eq.seedGeneralBands()
-  // Default to engaged when the panel opens, matching the other plugin windows.
-  if (!eq.eqPreview.value) eq.togglePreview()
+  // Default to engaged when the panel opens, matching the other plugin windows
+  // — unless the EQ already has a slot, whose ON/BYPASS opening must not undo.
+  if (!eq.eqPreview.value && !hasChainSlot('manual-eq')) eq.togglePreview()
 })
 
 const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)

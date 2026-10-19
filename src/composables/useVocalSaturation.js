@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { applyVocalSatRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import {
@@ -146,6 +147,15 @@ export function useVocalSaturation() {
   const syncHighDriveMult = v => syncParam('highDriveMult', vsHighDriveMult, v)
   const syncHfLoss = v => syncParam('hfLoss', vsHfLoss, v)
 
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applyVocalSatRegion(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -155,11 +165,7 @@ export function useVocalSaturation() {
 
     startProcessing('Saturating...')
     try {
-      const buffer = await applyVocalSatRegion(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'tube saturation')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -174,12 +180,17 @@ export function useVocalSaturation() {
 
   function teardown() {
     stopMeters()
-    if (vsPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      chain.setEnabled(vocalSatEffect.id, false)
-      vsPreview.value = false
-    }
   }
+
+  registerChainPlugin({
+    id: vocalSatEffect.id,
+    windowId: VOCAL_SAT_WINDOW_ID,
+    label: 'Tube Saturation',
+    isActive: () => vsPreview.value,
+    setActive: (on) => { if (vsPreview.value !== on) togglePreview() },
+    render: renderRegion,
+    resume: () => startMeters(initChain()),
+  })
 
   function openModal() {
     openWindow(VOCAL_SAT_WINDOW_ID)

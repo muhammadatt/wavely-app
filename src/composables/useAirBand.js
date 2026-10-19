@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { applyAirBandRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { airBandEffect, AIR_BAND_DEFAULTS } from '../audio/effects/airBand.js'
@@ -106,6 +107,15 @@ export function useAirBand() {
     if (p.output !== undefined) syncOutput(p.output)
   }
 
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applyAirBandRegion(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -115,11 +125,7 @@ export function useAirBand() {
 
     startProcessing('Applying AirBoost...')
     try {
-      const buffer = await applyAirBandRegion(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'AirBoost')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -134,12 +140,17 @@ export function useAirBand() {
 
   function teardown() {
     stopMeters()
-    if (airBandPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      chain.setEnabled(airBandEffect.id, false)
-      airBandPreview.value = false
-    }
   }
+
+  registerChainPlugin({
+    id: airBandEffect.id,
+    windowId: AIR_BAND_WINDOW_ID,
+    label: 'AirBoost',
+    isActive: () => airBandPreview.value,
+    setActive: (on) => { if (airBandPreview.value !== on) togglePreview() },
+    render: renderRegion,
+    resume: () => startMeters(initChain()),
+  })
 
   function openModal() {
     openWindow(AIR_BAND_WINDOW_ID)

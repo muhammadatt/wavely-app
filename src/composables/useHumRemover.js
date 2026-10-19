@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import {
   analyzeHumRegion,
   applyHumNotchRegion,
@@ -219,6 +220,15 @@ export function useHumRemover() {
     }
   }
 
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applyHumNotchRegion(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels,
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -228,11 +238,7 @@ export function useHumRemover() {
 
     startProcessing('Removing hum...')
     try {
-      const buffer = await applyHumNotchRegion(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels,
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'hum removal')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -249,12 +255,18 @@ export function useHumRemover() {
 
   function teardown() {
     stopMeters()
-    if (humPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      chain.setEnabled(humNotchEffect.id, false)
-      humPreview.value = false
-    }
   }
+
+  registerChainPlugin({
+    id: humNotchEffect.id,
+    windowId: HUM_REMOVER_WINDOW_ID,
+    label: 'Hum Remover',
+    isActive: () => humPreview.value,
+    setActive: (on) => { if (humPreview.value !== on) togglePreview() },
+    render: renderRegion,
+    resume: () => startMeters(initChain()),
+    afterApply: () => clearAnalysis(),
+  })
 
   function openModal() {
     openWindow(HUM_REMOVER_WINDOW_ID)

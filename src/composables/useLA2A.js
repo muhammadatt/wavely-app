@@ -4,6 +4,7 @@ import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { applyLA2ARegion, computeLA2AAutoMakeup, computePeakCache } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { INPUT_TRIM_MAX_DB } from '../audio/dsp/inputAlign.js'
@@ -357,9 +358,13 @@ export function useLA2A() {
     return state.currentFile ? `${appState.activeDocumentId}:${state.revision}` : null
   }
 
-  function refreshInputAlign() {
+  function refreshInputAlign(segments = state.segments) {
     if (!state.currentFile) return
-    const key = timelineKey()
+    // `segments` is the document's timeline, or — during a chain apply — the
+    // chain's running result, which is no revision of the document: always
+    // measured, and recorded under a key no real revision matches.
+    const own = segments === state.segments
+    const key = own ? timelineKey() : `${appState.activeDocumentId}:chain`
 
     /**
      * ⚠ A MANUAL TRIM BELONGS TO THE FILE IT WAS DIALLED ON, so a different
@@ -377,14 +382,14 @@ export function useLA2A() {
     if (!la2aInputAuto.value) {
       if (sameDoc) return
       la2aInputAuto.value = true
-    } else if (alignedFor === key) {
+    } else if (own && alignedFor === key) {
       return // already measured for this exact timeline
     }
 
     const end = totalDuration.value
     if (!(end > 0)) return
     const db = regionAlignDb(
-      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+      segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
     alignedFor = key
     la2aInputDb.value = db
@@ -426,7 +431,7 @@ export function useLA2A() {
    * number so a fast knob drag can't have an older measurement land after
    * a newer one.
    */
-  async function refreshAutoMakeup() {
+  async function refreshAutoMakeup(segments = state.segments) {
     /**
      * ⚠ ALIGNMENT IS BROUGHT UP TO DATE BEFORE THE AUTO GUARD, NOT AFTER IT.
      * It sat below and that was a second staleness hole with nothing to do with
@@ -435,7 +440,7 @@ export function useLA2A() {
      * the selection watcher that drives this function never refreshed it, and
      * preview ran on whatever offset was left over.
      */
-    refreshInputAlign()
+    refreshInputAlign(segments)
     if (!la2aAutoMakeup.value || !state.currentFile) return
 
     /**
@@ -457,7 +462,7 @@ export function useLA2A() {
     la2aAutoMakeupBusy.value = true
     try {
       const { makeupDb, ceilingDb, ceilingKneeDb } = await computeLA2AAutoMakeup(
-        state.segments, start, end,
+        segments, start, end,
         measurementParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
         MAKEUP_REFERENCE,
@@ -596,6 +601,21 @@ export function useLA2A() {
     }
   }
 
+  /** What apply re-measures first, so it renders with exact rather than live values. */
+  async function prepareApply(segments = state.segments) {
+    refreshInputAlign(segments)
+    if (la2aAutoMakeup.value) await refreshAutoMakeup(segments)
+  }
+
+  /** Render [start, end) of `segments` with the current settings, uncommitted. */
+  function renderRegion(segments, start, end) {
+    return applyLA2ARegion(
+      segments, start, end,
+      currentParams(),
+      state.currentFile.sampleRate, state.currentFile.channels
+    )
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -617,19 +637,14 @@ export function useLA2A() {
      * happened to be left over from the last time the panel was opened, or
      * against none. It also has to run BEFORE the solve, which consumes it.
      */
-    refreshInputAlign()
-    if (la2aAutoMakeup.value) await refreshAutoMakeup()
+    await prepareApply()
 
     const wasPreviewing = la2aPreview.value
     if (wasPreviewing) togglePreview()
 
     startProcessing('Applying LA-2A...')
     try {
-      const buffer = await applyLA2ARegion(
-        state.segments, start, end,
-        currentParams(),
-        state.currentFile.sampleRate, state.currentFile.channels
-      )
+      const buffer = await renderRegion(state.segments, start, end)
       const bufferId = replaceRegion(start, end, buffer, 'LA-2A compression')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
@@ -644,13 +659,20 @@ export function useLA2A() {
 
   function teardown() {
     stopMeters()
-    if (la2aPreview.value) {
-      const ctx = getAudioContext()
-      const chain = getEffectChain(ctx)
-      chain.setEnabled(la2aEffect.id, false)
-      la2aPreview.value = false
-    }
   }
+
+  registerChainPlugin({
+    id: la2aEffect.id,
+    windowId: LA2A_WINDOW_ID,
+    label: 'OptoSmooth',
+    isActive: () => la2aPreview.value,
+    setActive: (on) => { if (la2aPreview.value !== on) togglePreview() },
+    render: async (segments, start, end) => {
+      await prepareApply(segments)
+      return renderRegion(segments, start, end)
+    },
+    resume: () => startMeters(initChain()),
+  })
 
   // Open/close delegate to the window manager, which owns the open set and the
   // stacking order. Kept on the composable so call sites don't need to know the

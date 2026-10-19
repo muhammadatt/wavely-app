@@ -25,6 +25,7 @@ import LoudnessWindow from '../components/panels/windows/LoudnessWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import InflatorWindow from '../components/panels/windows/InflatorWindow.vue'
 import SpectrumAnalyzerWindow from '../components/panels/windows/SpectrumAnalyzerWindow.vue'
+import PluginChainWindow from '../components/panels/windows/PluginChainWindow.vue'
 import ModulaGalleryWindow from '../components/modula/ModulaGalleryWindow.vue'
 import { DEV_TUNING_PANELS } from '../devFlags.js'
 
@@ -264,6 +265,20 @@ const ALL_OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: LoudnessWindow,
+  },
+  // The rack every engaged plugin plays through — reorder, bypass, and apply
+  // them all at once. First in Effects because it is how the rest combine.
+  {
+    id: 'plugin-chain',
+    label: 'Plugin Chain',
+    desc: 'Order, bypass and apply every active plugin at once',
+    category: 'effects',
+    group: 'Chain',
+    icon: 'chain',
+    keywords: ['chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],
+    requires: 'selection',
+    surface: 'window',
+    component: PluginChainWindow,
   },
   {
     id: 'opto-smooth',

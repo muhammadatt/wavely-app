@@ -18,6 +18,7 @@
  */
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useHFLimiter } from '../../composables/useHFLimiter.js'
+import { hasChainSlot } from '../../composables/usePluginChain.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { shelfResponseDb } from '../../audio/dsp/hfLimit.js'
 import {
@@ -55,7 +56,9 @@ const D = HF_LIMITER_DEFAULTS
 const { state } = useEditorState()
 
 onMounted(() => {
-  if (!hflPreview.value) togglePreview()
+  // A plugin that already has a slot keeps its ON/BYPASS: opening its
+  // editor from the chain must not un-bypass it.
+  if (!hflPreview.value && !hasChainSlot('hf-limiter')) togglePreview()
 })
 
 const ACCENT = '#e8a33d'
