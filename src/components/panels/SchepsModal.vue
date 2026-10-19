@@ -4,11 +4,17 @@ import { useScheps } from '../../composables/useScheps.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { pultecNetSections, pultecSections } from '../../audio/dsp/pultec.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
-import Knob from '../knobs/Knob.vue'
-import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
+import ModulaKnob from '../modula/ModulaKnob.vue'
+import ModulaSegmented from '../modula/ModulaSegmented.vue'
+import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginPresets } from '../../composables/usePluginPresets.js'
+import {
+  SCHEPS_PRESET_PLUGIN, SCHEPS_OUTPUT_MIN_DB, SCHEPS_OUTPUT_MAX_DB,
+} from '../../audio/pluginPresets/scheps.js'
+import { SCHEPS_DEFAULTS } from '../../audio/effects/schepsParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -17,8 +23,19 @@ const {
   schepsAutoTrim, schepsAutoTrimBusy, schepsWetTrimDb,
   schepsPreview, schepsReduction, schepsInputLevels, schepsOutputLevels,
   togglePreview, syncCharacter, syncSquash, syncMix, syncOutput,
-  toggleAutoTrim, refreshAutoTrim, apply, teardown, closeModal,
+  toggleAutoTrim, applyParams, refreshAutoTrim, apply, teardown, closeModal,
 } = useScheps()
+
+const presets = usePluginPresets(SCHEPS_PRESET_PLUGIN, {
+  read: () => ({
+    character: schepsCharacter.value,
+    squash: schepsSquash.value,
+    mix: schepsMix.value,
+    output: schepsOutput.value,
+    autoTrim: schepsAutoTrim.value,
+  }),
+  write: p => applyParams(p),
+})
 
 const { state } = useEditorState()
 
@@ -31,7 +48,8 @@ onMounted(() => {
 // fresh measurement.
 watch(() => state.selection, () => refreshAutoTrim(), { deep: true })
 
-const ACCENT = '#c98bd8'
+const ACCENT = '#e8a33d'
+const METER_H = 214
 
 const CHARACTER_OPTIONS = [
   { value: 'thick', label: 'THICK', title: 'Bass-forward: the low end comes back louder than it left' },
@@ -111,19 +129,25 @@ function formatSquash(v) {
 }
 
 function formatMix(v) {
-  return String(Math.round(v))
+  return `${Math.round(v)}%`
 }
 
 function formatOutput(v) {
-  return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
+  return `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
 }
 
 const trimReadout = computed(() => {
-  if (!schepsAutoTrim.value) return 'OFF'
-  if (schepsAutoTrimBusy.value) return '···'
+  if (!schepsAutoTrim.value) return 'wet path unmatched'
+  if (schepsAutoTrimBusy.value) return 'measuring…'
   const v = schepsWetTrimDb.value
-  return `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
+  return `wet ${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
 })
+
+const TRACE_KEY = [
+  { d: '3 3', c: 'rgba(255,255,255,.45)', t: 'Into compressor' },
+  { d: '1 3', c: 'rgba(255,255,255,.45)', t: 'Recovery' },
+  { d: '', c: ACCENT, t: 'Net' },
+]
 
 // Preview is transport playback — the worklet is already in the chain, so what
 // makes it live is that audio is running while you turn the knob.
@@ -146,10 +170,13 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="scheps-parallel"
     :z="z"
-    :width="680"
+    :width="740"
     :accent="ACCENT"
-    brand-lead="SCHEPS"
-    brand-tail="PARALLEL"
+    design="modula"
+    brand-lead="SCHEPS PARALLEL"
+    :presets="presets"
+    :presets-disabled="!schepsPreview"
+    presets-disabled-hint="Turn Scheps Parallel on to use presets"
     :engaged="schepsPreview"
     show-preview
     previewable
@@ -162,19 +189,21 @@ async function applyAndClose() {
     @apply="applyAndClose"
     @close="close"
   >
-    <div class="px-[26px] pt-[20px] pb-[26px]">
-      <!-- The wet path's gain reduction, not the summed output's: the blend
-           only passes a fraction of it on. -->
-      <GainReductionBar :reduction-db="schepsReduction" :accent="ACCENT" />
+    <div class="sc-grid">
+      <div class="sc-meter">
+        <LevelMeter variant="modula" scale-side="left" :levels="schepsInputLevels" label="IN" :height="METER_H" />
+      </div>
 
-      <div class="flex items-start justify-between gap-[20px] mt-[20px]">
-        <LevelMeter :levels="schepsInputLevels" label="IN" :height="150" />
+      <div class="sc-panel">
+        <!-- The wet path's gain reduction, not the summed output's: the blend
+             only passes a fraction of it on. -->
+        <GainReductionBar :reduction-db="schepsReduction" :accent="ACCENT" />
 
-        <div class="flex-1 flex flex-col items-center">
-          <!-- Response curve: pre, post, and the net of the two -->
+        <!-- Response curve: pre, post, and the net of the two -->
+        <div class="sc-curve">
           <svg
             :viewBox="`0 0 ${CURVE_W} ${CURVE_H}`"
-            class="w-full"
+            class="sc-well"
             :style="{ height: `${CURVE_H}px` }"
             preserveAspectRatio="none"
           >
@@ -189,44 +218,23 @@ async function applyAndClose() {
               :stroke="d === 0 ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.05)'"
               stroke-width="1"
             />
-            <path :d="netFill" :fill="ACCENT" fill-opacity="0.1" />
+            <path :d="netFill" :fill="ACCENT" fill-opacity="0.12" />
             <path
-              :d="prePath" stroke="rgba(255,255,255,.3)" stroke-width="1.25"
+              :d="prePath" stroke="rgba(255,255,255,.34)" stroke-width="1.25"
               fill="none" stroke-dasharray="3 3"
             />
             <path
-              :d="postPath" stroke="rgba(255,255,255,.3)" stroke-width="1.25"
+              :d="postPath" stroke="rgba(255,255,255,.34)" stroke-width="1.25"
               fill="none" stroke-dasharray="1 3"
             />
             <path :d="netPath" :stroke="ACCENT" stroke-width="2" fill="none" />
           </svg>
-          <div class="relative w-full mt-[3px] h-[10px]">
-            <span
-              v-for="f in GRID_FREQS" :key="f"
-              class="absolute top-0"
-              :style="{
-                ...gridLabelStyle(f),
-                fontWeight: 600,
-                fontSize: '8px',
-                fontFamily: 'JetBrains Mono, monospace',
-                letterSpacing: '0.08em',
-                color: 'rgba(255,255,255,.28)',
-              }"
-            >{{ gridLabel(f) }}</span>
+          <div class="sc-axis">
+            <span v-for="f in GRID_FREQS" :key="f" :style="gridLabelStyle(f)">{{ gridLabel(f) }}</span>
           </div>
-
           <!-- Trace key. Without it the two faint traces read as decoration. -->
-          <div class="flex gap-[16px] mt-[9px]">
-            <span
-              v-for="k in [
-                { d: '3 3', c: 'rgba(255,255,255,.4)', t: 'Into compressor' },
-                { d: '1 3', c: 'rgba(255,255,255,.4)', t: 'Recovery' },
-                { d: '', c: ACCENT, t: 'Net' },
-              ]"
-              :key="k.t"
-              class="flex items-center gap-[5px]"
-              style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.34)"
-            >
+          <div class="sc-key">
+            <span v-for="k in TRACE_KEY" :key="k.t">
               <svg width="14" height="4" style="overflow:visible">
                 <line
                   x1="0" y1="2" x2="14" y2="2"
@@ -236,81 +244,145 @@ async function applyAndClose() {
               {{ k.t }}
             </span>
           </div>
-
-          <DeviceChoiceRocker
-            :model-value="schepsCharacter"
-            @update:model-value="syncCharacter"
-            :options="CHARACTER_OPTIONS"
-            :accent="ACCENT"
-            :disabled="!schepsPreview"
-            label="Character"
-            :caption="CHARACTER_CAPTION[schepsCharacter]"
-            class="mt-[16px]"
-          />
-
-          <div class="flex gap-[30px] mt-[16px] justify-center">
-            <div class="w-[124px]">
-              <Knob
-                :model-value="schepsSquash"
-                @update:model-value="syncSquash"
-                :min="0" :max="100" :step="1"
-                label="Squash" :accent="ACCENT" :format-value="formatSquash"
-                :disabled="!schepsPreview"
-              />
-            </div>
-            <div class="w-[124px] flex flex-col items-center">
-              <Knob
-                :model-value="schepsMix"
-                @update:model-value="syncMix"
-                :min="0" :max="100" :step="1"
-                label="Mix" :accent="ACCENT" :format-value="formatMix"
-                :disabled="!schepsPreview"
-              />
-              <!-- Auto trim sets the wet path's gain BEFORE the blend sums, so
-                   pushing Mix changes character rather than loudness. Switching
-                   it off drops to a textbook equal-power crossfade with the wet
-                   path at whatever level the chain leaves it. -->
-              <button
-                class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
-                :style="{
-                  background: schepsAutoTrim ? 'color-mix(in srgb, ' + ACCENT + ' 16%, transparent)' : 'rgba(255,255,255,.05)',
-                  border: `1px solid ${schepsAutoTrim ? 'color-mix(in srgb, ' + ACCENT + ' 42%, transparent)' : 'rgba(255,255,255,.09)'}`,
-                  color: schepsAutoTrim ? 'color-mix(in srgb, ' + ACCENT + ' 55%, #ffffff)' : 'rgba(255,255,255,.4)',
-                  font: `700 8.5px 'JetBrains Mono',monospace`,
-                  letterSpacing: '.1em',
-                  opacity: schepsPreview ? 1 : 0.4,
-                }"
-                :disabled="!schepsPreview"
-                :title="schepsAutoTrim
-                  ? 'Auto trim on: the wet path is level-matched to the dry one, so Mix is a character control. Click to switch it off.'
-                  : 'Auto trim off: the wet path runs at whatever level the chain leaves it. Click to level-match it.'"
-                @click="toggleAutoTrim"
-              >TRIM {{ trimReadout }}</button>
-            </div>
-            <div class="w-[96px]">
-              <Knob
-                :model-value="schepsOutput"
-                @update:model-value="syncOutput"
-                :min="-12" :max="12" :step="0.1" :value-font-px="13"
-                label="Output" :accent="ACCENT" :format-value="formatOutput"
-                :disabled="!schepsPreview" bipolar
-              />
-            </div>
-          </div>
         </div>
 
-        <LevelMeter :levels="schepsOutputLevels" label="OUT" :height="150" />
+        <div class="sc-controls">
+          <div class="sc-col">
+            <span class="m-caption">Character</span>
+            <ModulaSegmented
+              :model-value="schepsCharacter" :options="CHARACTER_OPTIONS"
+              aria-label="Character" :disabled="!schepsPreview"
+              @update:model-value="syncCharacter"
+            />
+            <span class="m-note">{{ CHARACTER_CAPTION[schepsCharacter] }}</span>
+          </div>
+
+          <ModulaKnob
+            variant="ticks" :size="130" show-value editable
+            :model-value="schepsSquash" :min="0" :max="100" :step="1"
+            :default-value="SCHEPS_DEFAULTS.squash"
+            label="Squash" :color="ACCENT" :format-value="formatSquash" :disabled="!schepsPreview"
+            title="How hard the opto cell rides the wet copy. Double-click to reset"
+            @update:model-value="syncSquash"
+          />
+          <ModulaKnob
+            variant="ticks" :size="130" show-value editable
+            :model-value="schepsMix" :min="0" :max="100" :step="1"
+            :default-value="SCHEPS_DEFAULTS.mix"
+            label="Mix" :color="ACCENT" :format-value="formatMix" :disabled="!schepsPreview"
+            title="How much of the squashed copy sits under the original. Double-click to reset"
+            @update:model-value="syncMix"
+          />
+
+          <!-- Auto trim sets the wet path's gain BEFORE the blend sums, so
+               pushing Mix changes character rather than loudness. Switching
+               it off drops to a textbook equal-power crossfade with the wet
+               path at whatever level the chain leaves it. -->
+          <div class="sc-col">
+            <ModulaLedPill
+              label="AUTO TRIM" :color="ACCENT"
+              :model-value="schepsAutoTrim" :disabled="!schepsPreview"
+              :title="schepsAutoTrim
+                ? 'Auto trim on: the wet path is level-matched to the dry one, so Mix is a character control. Click to switch it off.'
+                : 'Auto trim off: the wet path runs at whatever level the chain leaves it. Click to level-match it.'"
+              @update:model-value="toggleAutoTrim"
+            />
+            <span class="m-note">{{ trimReadout }}</span>
+          </div>
+        </div>
       </div>
 
-      <p
-        class="mt-[16px] text-center"
-        style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
-      >
-        Andrew Scheps' vocal trick: a Pultec pushes the lows out of the way and
-        lifts 8 kHz so the opto cell rides the voice instead of the plosives, a
-        second Pultec puts the low end back, and the whole squashed copy is
-        blended under the original.
-      </p>
+      <div class="sc-meter">
+        <LevelMeter variant="modula" scale-side="right" :levels="schepsOutputLevels" label="OUT" :height="METER_H">
+          <template #below>
+            <ModulaKnob
+              variant="trim" :model-value="schepsOutput" show-value
+              :min="SCHEPS_OUTPUT_MIN_DB" :max="SCHEPS_OUTPUT_MAX_DB" :step="0.1"
+              :default-value="SCHEPS_DEFAULTS.output" :format-value="formatOutput"
+              aria-label="Output" :disabled="!schepsPreview"
+              title="Output: a trim on the whole plugin, after the blend. Double-click to reset"
+              @update:model-value="syncOutput"
+            />
+          </template>
+        </LevelMeter>
+      </div>
     </div>
+
+    <p class="sc-about">
+      Andrew Scheps' vocal trick: a Pultec pushes the lows out of the way and
+      lifts 8 kHz so the opto cell rides the voice instead of the plosives, a
+      second Pultec puts the low end back, and the whole squashed copy is
+      blended under the original.
+    </p>
   </FloatingWindow>
 </template>
+
+<style scoped>
+.sc-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+.sc-meter {
+  display: flex;
+  justify-content: center;
+  padding: 12px 4px;
+}
+.sc-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 14px 16px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.sc-curve { display: flex; flex-direction: column; }
+.sc-well {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  background: #0b0e13;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, .85), 0 0 0 1px #1c222c, 0 1px 0 rgba(255, 255, 255, .05);
+}
+.sc-axis {
+  position: relative;
+  height: 10px;
+  margin-top: 4px;
+  font: 600 8px/1 var(--m-font-mono);
+  letter-spacing: .08em;
+  color: var(--m-ink-4);
+}
+.sc-axis span { position: absolute; top: 0; }
+.sc-key {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 8px;
+  font: 600 8px/1 var(--m-font-mono);
+  letter-spacing: .08em;
+  color: var(--m-ink-4);
+}
+.sc-key span { display: flex; align-items: center; gap: 5px; }
+.sc-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 8px;
+  padding-top: 4px;
+}
+.sc-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.sc-about {
+  margin: 12px 8px 0;
+  text-align: center;
+  font: 500 10px/1.5 var(--m-font-ui);
+  color: var(--m-ink-4);
+}
+</style>

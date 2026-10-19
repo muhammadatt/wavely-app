@@ -1,8 +1,14 @@
 /**
  * PHAT*SS — worklet kernel.
  *
- * TAPE (CLEAN cubic or THICK hysteresis, with the speed's head bump after it)
- * → makeup → Warmth → Guard → tape HF shelf (the Speed dial) → Output.
+ * Input → TAPE (CLEAN cubic or THICK hysteresis, with the speed's head bump
+ * after it) → makeup → Warmth → Guard → tape HF shelf (the Speed dial) → Mix
+ * → Output.
+ *
+ * INPUT is a drive (see PHATASS_DEFAULTS.inputDb). MIX blends against the
+ * input after Input, delayed by the plugin's whole latency so the blend is
+ * phase-aligned; at Mix 1 the dry path is computed but never reaches the
+ * output, so the render is bit-identical to a kernel with no Mix.
  *
  * TAPE comes FIRST (owner's call): Warmth then shapes the already-rounded
  * signal, and TAPE's input is the untouched source, so its makeup depends on
@@ -91,6 +97,57 @@ class GainRamp {
   }
 }
 
+/** A 0–1 blend that ramps like GainRamp: wet at 1, dry at 0. */
+class MixRamp {
+  constructor(sampleRate) {
+    this.rampSamples = Math.max(1, Math.round((GAIN_RAMP_MS / 1000) * sampleRate))
+    this.value = 1
+    this.target = 1
+    this.step = 0
+    this.left = 0
+  }
+
+  set(target, immediate) {
+    if (immediate) {
+      this.value = this.target = target
+      this.left = 0
+      return
+    }
+    if (target === this.target) return
+    this.target = target
+    this.left = this.rampSamples
+    this.step = (target - this.value) / this.rampSamples
+  }
+
+  /** wet ← dry + m·(wet − dry), in place on `wet`. */
+  process(wet, dry, n) {
+    if (this.left === 0) {
+      const m = this.value
+      if (m === 1) return
+      for (let ch = 0; ch < wet.length; ch++) {
+        const w = wet[ch]
+        const d = dry[ch]
+        for (let i = 0; i < n; i++) w[i] = d[i] + m * (w[i] - d[i])
+      }
+      return
+    }
+    const start = this.value
+    const k = Math.min(n, this.left)
+    for (let ch = 0; ch < wet.length; ch++) {
+      const w = wet[ch]
+      const d = dry[ch]
+      let m = start
+      for (let i = 0; i < n; i++) {
+        if (i < k) m += this.step
+        const mm = i < k ? m : this.target
+        w[i] = d[i] + mm * (w[i] - d[i])
+      }
+    }
+    this.left -= k
+    this.value = this.left === 0 ? this.target : start + this.step * k
+  }
+}
+
 export class PhatassKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
@@ -119,6 +176,12 @@ export class PhatassKernel {
     // rather than stepping (a click); an immediate set snaps.
     this.tapeMakeupGain = new GainRamp(sampleRate)
     this.outputGain = new GainRamp(sampleRate)
+    this.inputGain = new GainRamp(sampleRate)
+    this.mix = new MixRamp(sampleRate)
+    // The dry path: the input after Input, held back by the whole latency.
+    this.dryIn = []
+    this.dryDelays = []
+    this.dryOut = []
     this.params = { ...PHATASS_KERNEL_DEFAULTS }
     this.setParams({}, true)
     // SATURATION METER (off unless `enableMeter`, so offline renders skip it):
@@ -174,6 +237,8 @@ export class PhatassKernel {
       this.tapeInit = true
     }
     this.tapeHf.setParams(p.tapeHf ?? null)
+    this.inputGain.set(dbToLin(Number.isFinite(p.inputGainDb) ? p.inputGainDb : 0), immediate)
+    this.mix.set(Number.isFinite(p.mix) ? Math.min(1, Math.max(0, p.mix)) : 1, immediate)
     this.outputGain.set(dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0)), immediate)
     this.tapeMakeupGain.set(dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0), immediate)
     const bumpKey = p.headBump || 0
@@ -220,6 +285,15 @@ export class PhatassKernel {
     for (let ch = 0; ch < nOut; ch++) {
       outputChannels[ch].set(inputChannels[ch < nIn ? ch : nIn - 1].subarray(0, n))
     }
+    this.inputGain.process(outputChannels, n)
+    // The input after Input: the saturation meter's clean reference and Mix's
+    // dry path both start here.
+    while (this.dryIn.length < nOut) this.dryIn.push(new Float32Array(n))
+    const dry = this.dryIn
+    for (let ch = 0; ch < nOut; ch++) {
+      if (dry[ch].length < n) dry[ch] = new Float32Array(n)
+      dry[ch].set(outputChannels[ch].subarray(0, n))
+    }
     // In place: each stage reads a sample before it writes that output.
     // TAPE → makeup → Warmth → guard (the order is pinned since October 2026).
     const mk = this.tapeMakeupGain.value // at the block's start: the meter is an estimate
@@ -244,7 +318,7 @@ export class PhatassKernel {
       while (this.meterIn.length < nOut) this.meterIn.push(new Float32Array(n))
       for (let ch = 0; ch < nOut; ch++) {
         const d = this.meterDelays[ch]
-        let x = inputChannels[ch < nIn ? ch : nIn - 1]
+        let x = dry[ch]
         if (bumped) {
           if (this.meterIn[ch].length < n) this.meterIn[ch] = new Float32Array(n)
           this.meterBump.process(x, this.meterIn[ch], n, ch)
@@ -263,6 +337,18 @@ export class PhatassKernel {
       this.meterCount += n * nOut
     }
     this.tapeHf.process(outputChannels, n)
+    // Mix: the dry path is always fed, so a move off 1 blends against real
+    // history rather than the delay line's silence.
+    while (this.dryDelays.length < nOut) this.dryDelays.push(new DelayLine(this.latencySamples))
+    while (this.dryOut.length < nOut) this.dryOut.push(new Float32Array(n))
+    for (let ch = 0; ch < nOut; ch++) {
+      if (this.dryOut[ch].length < n) this.dryOut[ch] = new Float32Array(n)
+      const d = this.dryDelays[ch]
+      const x = dry[ch]
+      const y = this.dryOut[ch]
+      for (let i = 0; i < n; i++) y[i] = d.push(x[i])
+    }
+    this.mix.process(outputChannels, this.dryOut, n)
     this.outputGain.process(outputChannels, n)
   }
 }

@@ -13,8 +13,8 @@ import AirBandModal from '../components/panels/AirBandModal.vue'
 import SaturationBenchModal from '../components/panels/SaturationBenchModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
+import SibilanceEditorModal from '../components/panels/SibilanceEditorModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
-import HFSoftenerModal from '../components/panels/HFSoftenerModal.vue'
 import HFLimiterModal from '../components/panels/HFLimiterModal.vue'
 import PhatassModal from '../components/panels/PhatassModal.vue'
 import AutoLevelModal from '../components/panels/AutoLevelModal.vue'
@@ -24,9 +24,9 @@ import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import LoudnessWindow from '../components/panels/windows/LoudnessWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import InflatorWindow from '../components/panels/windows/InflatorWindow.vue'
-import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
-import RemoveSilenceWindow from '../components/panels/windows/RemoveSilenceWindow.vue'
 import SpectrumAnalyzerWindow from '../components/panels/windows/SpectrumAnalyzerWindow.vue'
+import ModulaGalleryWindow from '../components/modula/ModulaGalleryWindow.vue'
+import { DEV_TUNING_PANELS } from '../devFlags.js'
 
 /**
  * The operation registry — the single source of truth for what this app can do.
@@ -103,7 +103,20 @@ export const CATEGORIES = [
  * under Effects opens as a window. Two adjacent rows in one list never behave
  * differently — that inconsistency is what this replaces.
  */
-export const OPERATIONS = [
+/**
+ * RELEASE GATING — which operations a production build shows.
+ *
+ * An entry marked `release: 'dev'` is work in progress: it is in every dev
+ * server and in a build made with VITE_DEV_PANELS=1 (the same switch as the
+ * tuning panels, see devFlags.js), and absent from a production build — not in
+ * the toolbar, the rail, the command palette or the window layer, because all
+ * four read OPERATIONS below. Shipping one is deleting its `release` line.
+ *
+ * ⚠ HIDDEN, NOT STRIPPED. The component is still imported here, so its code is
+ * in the production bundle; there is just no way to reach it. Only the Modula
+ * Kit gallery is also stubbed out of the bundle (vite.config.js).
+ */
+const ALL_OPERATIONS = [
 
   // ---- Edit: clipboard verbs (immediate) ----
   // These duplicate SelectionBar's buttons on purpose. The bar is a shortcut
@@ -296,6 +309,7 @@ export const OPERATIONS = [
     // steer the compressor's sidechain, and what the user is reaching for is a
     // parallel compression sound. The EQ is the mechanism, not the offer.
     id: 'scheps-parallel',
+    release: 'dev',
     label: 'Scheps Parallel',
     desc: 'Blend in a squashed, EQ-steered copy',
     category: 'effects',
@@ -311,6 +325,7 @@ export const OPERATIONS = [
   },
   {
     id: 'vocal-saturation',
+    release: 'dev',
     label: 'Tube Saturation',
     desc: 'Warm tube-like saturation',
     category: 'effects',
@@ -323,6 +338,7 @@ export const OPERATIONS = [
   },
   {
     id: 'saturation-bench',
+    release: 'dev',
     label: 'Saturation Bench',
     desc: 'Stack layers of saturation, each on its own band',
     category: 'effects',
@@ -382,6 +398,7 @@ export const OPERATIONS = [
     // EQ — one pool, two views — which is why the two still look related; see
     // useEqInstance.js for why they were separated.
     id: 'voicerx',
+    release: 'dev',
     label: 'VoiceRx',
     desc: 'Find what’s wrong with a voice recording',
     category: 'effects',
@@ -433,30 +450,31 @@ export const OPERATIONS = [
   },
   {
     id: 'clip-gain-deesser',
-    label: 'De-Esser',
-    desc: 'Tame harsh S and F sounds',
+    release: 'dev',
+    label: 'Sibilance Editor',
+    desc: 'Find harsh S and F events and turn each down',
     category: 'effects',
     group: 'Clean',
     icon: 'deesser',
-    keywords: ['de-ess', 'deesser', 'sibilance', 'sibilant', 'harsh', 'ess', 'fricative', 'clip gain'],
+    keywords: ['sibilance editor', 'sibilance', 'sibilant', 'harsh', 'ess', 'fricative', 'clip gain'],
     requires: 'selection',
     surface: 'window',
-    component: DeEsserModal,
+    component: SibilanceEditorModal,
   },
   {
-    // Not a second de-esser: a dynamic shelf for recordings that are already
-    // broadly good. The De-Esser above analyses events on the server; this
-    // reacts in real time and only ever dips while a consonant spikes.
+    // The real-time de-esser: dips the top end only while a consonant spikes.
+    // The Sibilance Editor above is the event-based version: it analyses the
+    // selection and rides clip gain on each event.
     id: 'hf-softener',
-    label: 'HF Softener',
-    desc: 'Soften harsh consonants, keep the air',
+    label: 'De-Esser',
+    desc: 'Soften harsh S sounds, keep the air',
     category: 'effects',
     group: 'Clean',
     icon: 'softener',
-    keywords: ['sibilance', 'sibilant', 'harsh', 'hard', 'ess', 'de-ess', 'soft', 'soften', 'dynamic shelf', 'high shelf', 'warmth', 'fatso', 'air'],
+    keywords: ['sibilance', 'sibilant', 'harsh', 'hard', 'ess', 'de-ess', 'deesser', 'hf softener', 'soft', 'soften', 'dynamic shelf', 'high shelf', 'warmth', 'fatso', 'air'],
     requires: 'selection',
     surface: 'window',
-    component: HFSoftenerModal,
+    component: DeEsserModal,
   },
   {
     id: 'hf-limiter',
@@ -482,30 +500,6 @@ export const OPERATIONS = [
     surface: 'window',
     component: HumRemoverModal,
   },
-  {
-    id: 'noise-reduction',
-    label: 'Noise Reduction',
-    desc: 'Remove background noise',
-    category: 'effects',
-    group: 'Clean',
-    icon: 'noise',
-    keywords: ['denoise', 'hiss', 'background', 'deepfilternet', 'clean'],
-    requires: 'selection',
-    surface: 'window',
-    component: NoiseReductionWindow,
-  },
-  {
-    id: 'remove-silence',
-    label: 'Remove Silence',
-    desc: 'Remove quiet sections',
-    category: 'effects',
-    group: 'Clean',
-    icon: 'removeSilence',
-    keywords: ['gap', 'pause', 'dead air', 'tighten', 'trim silence'],
-    requires: 'selection',
-    surface: 'window',
-    component: RemoveSilenceWindow,
-  },
 
   // ---- Analysis ----
   // Its own group because it is the one entry here that measures rather than
@@ -527,7 +521,33 @@ export const OPERATIONS = [
     surface: 'window',
     component: SpectrumAnalyzerWindow,
   },
+  // DEV ONLY: every Modula control on one page, for review against the kit
+  // (docs/design/modula). Stubbed out of production builds (vite.config.js).
+  {
+    id: 'modula-kit',
+    release: 'dev',
+    label: 'Modula Kit',
+    desc: 'Developer gallery of the plugin control-surface kit',
+    category: 'effects',
+    group: 'Analysis',
+    icon: 'spectrum',
+    keywords: ['modula', 'kit', 'gallery', 'design', 'components'],
+    requires: 'file',
+    surface: 'window',
+    component: ModulaGalleryWindow,
+  },
 ]
+
+/** Shown in this build: everything released, plus WIP under a dev build. */
+export function isReleased(op, devBuild = DEV_TUNING_PANELS) {
+  return op.release !== 'dev' || devBuild
+}
+
+export const OPERATIONS = ALL_OPERATIONS.filter(op => isReleased(op))
+
+/** Ids hidden from production builds — for tests and the bundle check. */
+export const DEV_ONLY_OPERATION_IDS = ALL_OPERATIONS
+  .filter(op => op.release === 'dev').map(op => op.id)
 
 const OPERATIONS_BY_ID = new Map(OPERATIONS.map(op => [op.id, op]))
 const CATEGORIES_BY_ID = new Map(CATEGORIES.map(c => [c.id, c]))

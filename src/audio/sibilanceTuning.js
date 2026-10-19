@@ -92,7 +92,7 @@ export const SIBILANCE_TUNING_DEFAULTS = {
   boundary_p95_relax_db: 1.5,
   boundary_flatness_relax: 0.02,
   // De-esser stage settings, not detector params — see splitTuning in
-  // useDeEsser.js. Here because they invalidate the analysis just the same.
+  // useSibilanceEditor.js. Here because they invalidate the analysis just the same.
   minDurationMs: 25,
   contextWindowMs: 80,
 }

@@ -3,6 +3,7 @@ import { useWindows } from './useWindows.js'
 import { createEqInstance } from './useEqInstance.js'
 import { manualEqEffect } from '../audio/effects/manualEq.js'
 import { createBand, DEFAULT_GENERAL_BANDS } from '../audio/eqBands.js'
+import { PARAMETRIC_EQ_MAX_BANDS, presetBand } from '../audio/pluginPresets/parametricEq.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const MANUAL_EQ_WINDOW_ID = 'manual-eq'
@@ -25,7 +26,7 @@ export const MANUAL_EQ_WINDOW_ID = 'manual-eq'
  * VoiceRx keeps the higher limit: its bands are role knobs, and there are nine
  * roles.
  */
-const GENERAL_MAX_BANDS = 8
+const GENERAL_MAX_BANDS = PARAMETRIC_EQ_MAX_BANDS
 
 const instance = createEqInstance({
   effect: manualEqEffect,
@@ -99,5 +100,16 @@ export function useManualEq() {
     seedGeneralBands()
   }
 
-  return { ...api, showAnalyzer, dbRange, seedGeneralBands, resetBands }
+  /** The band set as a preset stores it (pluginPresets/parametricEq.js). */
+  function presetParams() {
+    return { bands: api.bands.value.map(presetBand) }
+  }
+
+  /** Put a preset's band set into effect, replacing the current one. */
+  function applyPreset(p) {
+    api.clearBands()
+    api.adoptBands((p.bands ?? []).map(b => ({ ...b, origin: 'manual_general' })))
+  }
+
+  return { ...api, showAnalyzer, dbRange, seedGeneralBands, resetBands, presetParams, applyPreset }
 }

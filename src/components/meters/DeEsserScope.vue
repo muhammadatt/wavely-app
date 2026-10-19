@@ -1,49 +1,56 @@
 <script setup>
 import { ref } from 'vue'
 import { useMeterFrame } from './ballistics.js'
-import { columnKind, kindRuns } from '../../audio/hfSoftenerScope.js'
+import { kindRuns, shadeColumns } from '../../audio/deEsserScope.js'
 
 /**
- * HF Softener's activity scope: the waveform with what the Softener removed
- * painted on it, the way Pro-DS shows treated regions.
+ * HF Softener's activity scope: the waveform, with every stretch the
+ * Softener worked on SHADED full height — the way most de-essers mark the
+ * regions they treat.
  *
- * WHY ON THE WAVEFORM AND NOT AS REDUCTION LANES. The first mockup hung the
- * Duck and EQ reductions from the top edge on a dB scale, and it was rejected
- * from review as not user-friendly: two lanes on their own axis are a second
- * picture to relate back to the audio. Drawn on the waveform, the removed
- * energy sits exactly on the "s" it came from — the grey shape is what you
- * hear, the coloured rim around it is what went, and its thickness is how
- * much. The Duck / EQ split lives in the readout under the scope.
+ * ⚠ IT WAS A RIM, AND THE RIM COULD NOT BE SEEN. The first version painted
+ * only the removed energy, as a coloured edge between the input and output
+ * envelopes — exact, but a few pixels thick on a typical 4–8 dB cut, and the
+ * plosive and guard marks were thinner still. Full-height shading answers
+ * the question the scope is for ("is it working, and where") at a glance;
+ * how DEEP it cut is the shading's strength, and the exact figures are in the
+ * readout above. Before that, reduction lanes on a dB axis were rejected as a
+ * second picture to relate back to the audio.
  *
  * Layout is ClipperScope's, for the reasons argued there: the playhead at the
  * CENTRE, the kernel's measured history to its left, the timeline ahead of it
  * to its right, drawn dimmer because the Softener has not seen that audio yet
  * — it cannot be shaded, since the cut depends on what came just before. When
  * the ring is not live (bypass, stopped transport) the left half falls back to
- * the timeline too, so the picture always moves as one waveform.
+ * the timeline too, so the picture always moves as one waveform. A STOPPED
+ * transport is not that case: the wrapper freezes the ring on what last
+ * played (`held`), and it stays shaded until playback moves on — the first
+ * version let the worklet's idle silence scroll it off in two seconds.
  *
- * Three marks:
- *   accent rim    — removed by the Duck and EQ (output under input by ≥ 0.75 dB)
- *   plosive rim   — the same, inside a T/K/P burst window (guard lifted)
- *   dashed line   — where the waveform would have gone WITHOUT the lisp guard;
- *                   the gap between it and the grey is what the guard kept.
- *                   An estimate: the held dB applied to the output peak, which
- *                   is exact for the Duck and generous for the EQ's band cut.
+ * Marks (smoothed into regions by shadeColumns, deEsserScope.js):
+ *   accent wash    — de-essed by the Duck and EQ; stronger the deeper the cut
+ *   plosive wash   — the same, inside a T/K/P burst window (guard lifted)
+ *   bar on bottom  — the lisp guard held the cut back somewhere in the region
  */
 const props = defineProps({
-  /** Returns the effect's scope ring (hfSoftenerScope.js), or null. */
+  /** Returns the effect's scope ring (deEsserScope.js), or null. */
   dataFn: { type: Function, required: true },
   /**
    * `(offsetSeconds, seconds, columns) => Float32Array | null` — the timeline's
    * peak envelope around the playhead; see ClipperScope's envelopeFn.
    */
   envelopeFn: { type: Function, default: null },
+  /**
+   * The transport is stopped and the ring is frozen on what last played: keep
+   * drawing it as measured history, not as stale, so the shading stays put.
+   */
+  held: { type: Boolean, default: false },
   /** Total seconds across the face: twice the ring's history. */
   windowSeconds: { type: Number, default: 4 },
   accent: { type: String, default: '#e8b77f' },
   plosiveColor: { type: String, default: '#b9a6f2' },
   height: { type: Number, default: 140 },
-  title: { type: String, default: 'HF Softener activity' },
+  title: { type: String, default: 'De-Esser activity' },
 })
 
 const emit = defineEmits(['requestPlay'])
@@ -59,7 +66,11 @@ const ampToUnit = (a) => Math.pow(Math.min(1, Math.max(0, a)), SCALE_EXP)
 
 const LOOKAHEAD_COLUMNS = 512
 const PREDICTED_ALPHA = 0.45
-const HELD_DB = 0.5
+// Wash opacity: faint at the threshold, full at FULL_DB of cut.
+const WASH_MIN = 0.16
+const WASH_MAX = 0.5
+const FULL_DB = 9
+const BAR_H = 3
 const STALE_MS = 300
 
 // Scratch for the history half, sized for the largest ring any rate produces
@@ -68,7 +79,10 @@ const SCRATCH = 8192
 const hIn = new Float32Array(SCRATCH)
 const hOut = new Float32Array(SCRATCH)
 const hHeld = new Float32Array(SCRATCH)
+const hBurst = new Float32Array(SCRATCH)
+const hDepth = new Float32Array(SCRATCH)
 const hKind = new Uint8Array(SCRATCH)
+const hGuard = new Uint8Array(SCRATCH)
 
 let staleMs = 0
 let lastHead = -1
@@ -97,7 +111,7 @@ function draw(dtMs) {
     staleMs += dtMs
   }
   const haveRing = scope !== null && scope.filled > 0
-  const ringLive = haveRing && staleMs < STALE_MS
+  const ringLive = haveRing && (props.held || staleMs < STALE_MS)
 
   ctx.fillStyle = '#08060a'
   ctx.fillRect(0, 0, w, h)
@@ -126,10 +140,11 @@ function draw(dtMs) {
       hIn[i] = scope.inPeak[k]
       hOut[i] = scope.outPeak[k]
       hHeld[i] = scope.held[k]
-      hKind[i] = columnKind(hIn[i], hOut[i], scope.burst[k])
+      hBurst[i] = scope.burst[k]
     }
+    shadeColumns(hIn, hOut, hBurst, hHeld, m, hDepth, hKind, hGuard)
     const step = centreX / Math.max(1, scope.capacity - 1)
-    drawHistory(ctx, m, centreX - (m - 1) * step, step, mid, half, ringLive ? 1 : 0.35)
+    drawHistory(ctx, m, centreX - (m - 1) * step, step, h, mid, half, ringLive ? 1 : 0.35)
   } else if (behind) {
     drawEnvelope(ctx, behind, LOOKAHEAD_COLUMNS, centreX - (LOOKAHEAD_COLUMNS - 1) * lookStep, lookStep, mid, half, PREDICTED_ALPHA)
   }
@@ -158,55 +173,60 @@ function drawEnvelope(ctx, peaks, n, x0, step, mid, half, alpha) {
 }
 
 /**
- * The measured half: the output envelope in grey, then a rim from the output
- * out to the input on every treated run, then the guard's line inside it.
+ * The measured half: the shading first, full height, then the output waveform
+ * over it in grey so the audio stays readable through the wash.
  */
-function drawHistory(ctx, n, x0, step, mid, half, alpha) {
+function drawHistory(ctx, n, x0, step, h, mid, half, alpha) {
   if (n <= 0) return
   const xAt = (i) => x0 + i * step
-  drawEnvelope(ctx, hOut, n, x0, step, mid, half, alpha)
-
-  ctx.globalAlpha = alpha
-  // Each column is a slice of time, so a run is widened by half a column at
-  // each end — a one-column "s" onset would otherwise be a zero-width polygon.
+  // Each column is a slice of time, so a column is drawn half a step either
+  // side of its point — a one-column onset is still a visible stripe.
   const pad = Math.max(step / 2, 0.5)
+
+  // One rect per device-independent pixel, at the deepest column landing in
+  // it: columns are narrower than a pixel at most widths, and overlapping
+  // translucent rects would stack their alpha into false depth.
+  let px = -1
+  let pxDepth = 0
+  let pxKind = 0
+  const flush = () => {
+    if (pxKind === 0) return
+    ctx.fillStyle = pxKind === 2 ? props.plosiveColor : props.accent
+    ctx.globalAlpha = alpha * (WASH_MIN + (WASH_MAX - WASH_MIN) * Math.min(1, pxDepth / FULL_DB))
+    ctx.fillRect(px, BAR_H, 1, h - 2 * BAR_H)
+  }
+  for (let i = 0; i < n; i++) {
+    const x = Math.floor(xAt(i))
+    if (x !== px) {
+      flush()
+      px = x
+      pxDepth = 0
+      pxKind = 0
+    }
+    if (hKind[i] !== 0) {
+      pxDepth = Math.max(pxDepth, hDepth[i])
+      pxKind = Math.max(pxKind, hKind[i])
+    }
+  }
+  flush()
+  // A solid edge along the top marks each region's extent at any depth.
+  ctx.globalAlpha = alpha
   for (const [kind, colour] of [[1, props.accent], [2, props.plosiveColor]]) {
     ctx.fillStyle = colour
     for (const [from, to] of kindRuns(hKind, n, kind)) {
-      for (const sign of [-1, 1]) {
-        ctx.beginPath()
-        ctx.moveTo(xAt(from) - pad, mid + sign * ampToUnit(hIn[from]) * half)
-        for (let i = from; i <= to; i++) ctx.lineTo(xAt(i), mid + sign * ampToUnit(hIn[i]) * half)
-        ctx.lineTo(xAt(to) + pad, mid + sign * ampToUnit(hIn[to]) * half)
-        ctx.lineTo(xAt(to) + pad, mid + sign * ampToUnit(hOut[to]) * half)
-        for (let i = to; i >= from; i--) ctx.lineTo(xAt(i), mid + sign * ampToUnit(hOut[i]) * half)
-        ctx.lineTo(xAt(from) - pad, mid + sign * ampToUnit(hOut[from]) * half)
-        ctx.closePath()
-        ctx.fill()
-      }
+      ctx.fillRect(xAt(from) - pad, 0, xAt(to) - xAt(from) + 2 * pad, BAR_H)
     }
   }
+  ctx.globalAlpha = 1
 
-  // The guard: where the output WOULD have been, on runs where it held back.
-  ctx.strokeStyle = 'rgba(255,255,255,.9)'
-  ctx.lineWidth = 1.25
-  ctx.setLineDash([2, 2])
-  for (const sign of [-1, 1]) {
-    ctx.beginPath()
-    let pen = false
-    for (let i = 0; i < n; i++) {
-      if (hHeld[i] >= HELD_DB && hKind[i] !== 0) {
-        const y = mid + sign * ampToUnit(hOut[i] * Math.pow(10, -hHeld[i] / 20)) * half
-        if (pen) ctx.lineTo(xAt(i), y)
-        else ctx.moveTo(xAt(i), y)
-        pen = true
-      } else {
-        pen = false
-      }
-    }
-    ctx.stroke()
+  drawEnvelope(ctx, hOut, n, x0, step, mid, half, alpha)
+
+  // The guard: a bar along the bottom where it held the cut back.
+  ctx.globalAlpha = alpha
+  ctx.fillStyle = 'rgba(255,255,255,.85)'
+  for (const [from, to] of kindRuns(hGuard, n, 1)) {
+    ctx.fillRect(xAt(from) - pad, h - BAR_H, xAt(to) - xAt(from) + 2 * pad, BAR_H)
   }
-  ctx.setLineDash([])
   ctx.globalAlpha = 1
 }
 
@@ -232,27 +252,19 @@ function drawLegend(ctx, h) {
   const y = h - 7
   ctx.font = "600 8px 'JetBrains Mono',monospace"
   ctx.textAlign = 'left'
+  // A dark backing, so the key reads over a shaded region.
+  ctx.fillStyle = 'rgba(8,6,10,.75)'
+  ctx.fillRect(2, y - 10, 196, 14)
   let x = 6
-  for (const [colour, text, dashed] of [
-    [props.accent, 'REMOVED', false],
+  for (const [colour, text, bar] of [
+    [props.accent, 'DE-ESSED', false],
     [props.plosiveColor, 'PLOSIVE', false],
-    ['rgba(255,255,255,.9)', 'GUARD KEPT', true],
+    ['rgba(255,255,255,.85)', 'GUARD', true],
   ]) {
-    if (dashed) {
-      ctx.strokeStyle = colour
-      ctx.lineWidth = 1.25
-      ctx.setLineDash([2, 2])
-      ctx.beginPath()
-      ctx.moveTo(x, y - 2)
-      ctx.lineTo(x + 9, y - 2)
-      ctx.stroke()
-      ctx.setLineDash([])
-      x += 13
-    } else {
-      ctx.fillStyle = colour
-      ctx.fillRect(x, y - 5, 7, 6)
-      x += 11
-    }
+    ctx.fillStyle = colour
+    if (bar) ctx.fillRect(x, y - 3, 9, BAR_H)
+    else ctx.fillRect(x, y - 5, 7, 6)
+    x += bar ? 13 : 11
     ctx.fillStyle = 'rgba(255,255,255,.4)'
     ctx.fillText(text, x, y)
     x += ctx.measureText(text).width + 14

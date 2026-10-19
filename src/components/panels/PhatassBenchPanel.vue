@@ -39,7 +39,7 @@ const CHOICES = [
     key: 'tapeStep', label: 'Loop step',
     options: [
       { id: 'exact', label: 'EXACT', title: 'Ships. THICK\'s hysteresis loop on its RK2 step (two evaluations per oversampled sample)' },
-      { id: 'fast', label: 'FAST', title: 'The same loop on a one-evaluation step: ~3× cheaper on the loop, ~50 dB under the signal from EXACT at heavy drive. Only acts on THICK' },
+      { id: 'fast', label: 'FAST', title: 'The same loop on a one-evaluation step: ~3× cheaper on the loop, ~50 dB under the signal from EXACT at heavy drive. Only acts on PHAT' },
     ],
   },
   {

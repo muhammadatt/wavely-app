@@ -1,7 +1,7 @@
 /**
  * Run with:  npm test
  *
- * HF Softener — the Soften post-stage (hfSoftenerSoftenStage.js): an onset
+ * HF Softener — the Soften post-stage (deEsserSoftenStage.js): an onset
  * softener on the band above 500 Hz, moved here from PHAT*SS and run on the
  * HF Limiter's kernel with its shelf out.
  *
@@ -18,8 +18,8 @@ import { processHFLimiterBuffer } from '../../src/audio/hfLimiterProcessor.js'
 import {
   softenLaw, softenKernelParams, softenLatencySamples,
   SOFTEN_MAX, SOFTEN_FREQ_HZ, SOFTEN_GATE_BELOW_DB, SOFTEN_NOMINAL_DBFS,
-} from '../../src/audio/hfSoftenerSoftenStage.js'
-import { HF_SOFTENER_DEFAULTS, softenOn, softenStageKernelParams } from '../../src/audio/hfSoftenerParams.js'
+} from '../../src/audio/deEsserSoftenStage.js'
+import { HF_SOFTENER_DEFAULTS, softenOn, softenStageKernelParams } from '../../src/audio/deEsserParams.js'
 import { shelfLatencySamples } from '../../src/audio/dsp/hfLimit.js'
 
 const SR = 44100

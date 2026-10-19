@@ -23,7 +23,7 @@
  * Node-importable: no worklet registration reaches here through these imports.
  */
 
-import { processHFSoftenerBuffer, AIR_MAKEUP_MAX_DB } from './hfSoftenerProcessor.js'
+import { processHFSoftenerBuffer, AIR_MAKEUP_MAX_DB } from './deEsserProcessor.js'
 import { processResonanceBuffer } from './resonanceProcessor.js'
 import { BiquadCascade, highpass } from './dsp/biquad.js'
 

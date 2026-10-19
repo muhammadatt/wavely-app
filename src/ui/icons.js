@@ -67,7 +67,6 @@ export const ICONS = {
   // Resonance: a spectrum with one peak protruding, and the cut being taken
   // out of it — a narrow notch pushed down onto the spike.
   resonance: '<path d="M2 18c3 0 3.5-3 5-3s2 3 4 3"/><path d="M11 18c1-6 2-12 4-12s3 6 4 12"/><path d="M19 18c1 0 1.5-2 3-2"/><path d="M15 3v6" stroke-dasharray="2 2" opacity=".5"/>',
-  noise: '<path d="M12 2a3 3 0 013 3v7a3 3 0 01-6 0V5a3 3 0 013-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 23h8"/>',
   // Hum: a steady sine with a notch taken out of its middle — the mains tone
   // and the cut being placed on it.
   hum: '<path d="M2 12c1.5-4 3-4 4.5 0s3 4 4.5 0"/><path d="M13 12c1.5-4 3-4 4.5 0s3 4 4.5 0" opacity=".35"/><path d="M12 4v16" stroke-dasharray="2 2"/>',
@@ -91,7 +90,6 @@ export const ICONS = {
   // with a tall narrow peak so it is not mistaken for `eq`, whose curve is
   // smooth and centred.
   spectrum: '<path d="M3 20V9M6.5 20v-5M10 20V4M13.5 20v-8M17 20V7M20.5 20v-4"/><path d="M2 22h20" opacity=".35"/>',
-  removeSilence: '<path d="M3 6v12M7 9v6"/><path d="M9.5 12h5"/><path d="M17 9v6M21 6v12"/>',
 
   // Presets — keyed by preset id so PresetsPanel can look them up directly
   acx_audiobook: '<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>',

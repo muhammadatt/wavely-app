@@ -36,6 +36,7 @@ export function createEqInstance({
   const bands = ref([])
   const eqPreview = ref(false)
   const outputTrim = ref(0)
+  const inputTrim = ref(0)
   const soloBandId = ref(null)
   /**
    * A region being auditioned that has no band — `{ type, frequencyHz, q }`.
@@ -86,7 +87,18 @@ export function createEqInstance({
       chain.updateParam(effect.id, 'bands', bands.value)
       chain.updateParam(effect.id, 'soloIndex', soloIndex())
       chain.updateParam(effect.id, 'soloProbe', soloProbe.value)
+      chain.updateParam(effect.id, 'input', inputTrim.value)
       chain.updateParam(effect.id, 'output', outputTrim.value)
+    }
+
+    /** The input and output trims, dB. Panel settings, not part of a band set or a preset. */
+    function setInputTrim(db) {
+      inputTrim.value = db
+      if (eqPreview.value) getEffectChain(getAudioContext()).updateParam(effect.id, 'input', db)
+    }
+    function setOutputTrim(db) {
+      outputTrim.value = db
+      if (eqPreview.value) getEffectChain(getAudioContext()).updateParam(effect.id, 'output', db)
     }
 
     function startMeters(chain) {
@@ -261,7 +273,7 @@ export function createEqInstance({
       try {
         const buffer = await applyManualEqRegion(
           state.segments, start, end,
-          { bands: bands.value, output: outputTrim.value },
+          { bands: bands.value, input: inputTrim.value, output: outputTrim.value },
           state.currentFile.sampleRate, state.currentFile.channels,
         )
         const bufferId = replaceRegion(start, end, buffer, label)
@@ -289,7 +301,7 @@ export function createEqInstance({
 
     return {
       // state
-      bands, eqPreview, outputTrim, soloBandId, soloProbe, inputLevels, outputLevels,
+      bands, eqPreview, inputTrim, outputTrim, setInputTrim, setOutputTrim, soloBandId, soloProbe, inputLevels, outputLevels,
       hasSelection, atBandLimit, maxBands,
       activeBands: computed(() => bands.value.filter(isBandActive)),
 

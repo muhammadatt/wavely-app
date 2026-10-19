@@ -20,6 +20,13 @@ const inBandSplit = ref(INFLATOR_DEFAULTS.bandSplit)
 const inPreview = ref(false)
 const inInputLevels = ref([])
 const inOutputLevels = ref([])
+// What the curve is adding right now, dB per channel: output RMS less input RMS,
+// with Input and Output taken out (both taps sit outside those gains' reach in
+// opposite ways — the input tap is ahead of Input, the output tap after
+// Output). Quiet passages read the curve's full small-signal lift, loud ones
+// nearly nothing: the Inflator's whole effect, metered.
+const inLiftDb = ref([])
+const LIFT_GATE_DB = -60
 let meterId = null
 
 function currentParams() {
@@ -59,6 +66,11 @@ export function useInflator() {
         const chCount = state.currentFile?.channels ?? 1
         inInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
         inOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
+        inLiftDb.value = inInputLevels.value.map((lin, ch) => {
+          const lout = inOutputLevels.value[ch]
+          if (!lout || !(lin.rmsDb > LIFT_GATE_DB)) return 0
+          return Math.max(0, (lout.rmsDb - inOutputDb.value) - (lin.rmsDb + inInputDb.value))
+        })
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -72,6 +84,7 @@ export function useInflator() {
     }
     inInputLevels.value = []
     inOutputLevels.value = []
+    inLiftDb.value = []
   }
 
   function pushAllParams(chain) {
@@ -102,6 +115,16 @@ export function useInflator() {
   function syncParam(name, refVar, value) {
     refVar.value = value
     pushParam(name, value)
+  }
+
+  /** Put a whole param set into effect (a preset). */
+  function applyParams(p) {
+    syncParam('inputDb', inInputDb, p.inputDb)
+    syncParam('effect', inEffect, p.effect)
+    syncParam('curve', inCurve, p.curve)
+    syncParam('outputDb', inOutputDb, p.outputDb)
+    syncParam('clip', inClip, p.clip)
+    syncParam('bandSplit', inBandSplit, p.bandSplit)
   }
 
   const syncInputDb = v => syncParam('inputDb', inInputDb, v)
@@ -164,7 +187,10 @@ export function useInflator() {
     inPreview,
     inInputLevels,
     inOutputLevels,
+    inLiftDb,
     hasSelection,
+    currentParams,
+    applyParams,
     togglePreview,
     syncInputDb,
     syncEffect,

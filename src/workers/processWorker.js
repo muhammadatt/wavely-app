@@ -4,7 +4,7 @@
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, loudnessNormalize, adjustVolume, la2aAutoMakeup,
  * fet1176AutoMakeup, softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling,
- * voiceProfile, measureLoudness, hfSoftenerAutoAir, phatassWarmthReadout, phatassTapeMakeup,
+ * voiceProfile, measureLoudness, deEsserAutoAir, phatassWarmthReadout, phatassTapeMakeup,
  * phatassOutputMakeup, renderChunk
  */
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
@@ -15,7 +15,7 @@ import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
 import { measureVoiceProfile } from '../audio/voiceProfile.js'
 import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
 import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
-import { measureTopLossDb, autoAirDb } from '../audio/hfSoftenerAutoAir.js'
+import { measureTopLossDb, autoAirDb } from '../audio/deEsserAutoAir.js'
 import { measureWarmthReadout, measureWarmthBandsSampled } from '../audio/phatassWarmthReadout.js'
 import { renderChunk } from '../audio/chunkRender.js'
 import { measureTapeMakeup } from '../audio/phatassTapeMakeup.js'
@@ -95,8 +95,8 @@ self.onmessage = function (e) {
     case 'voiceProfile':
       voiceProfile(channelData, sampleRate)
       break
-    case 'hfSoftenerAutoAir':
-      hfSoftenerAutoAir(channelData, sampleRate, params)
+    case 'deEsserAutoAir':
+      deEsserAutoAir(channelData, sampleRate, params)
       break
     case 'phatassWarmthReadout':
       phatassWarmthReadout(channelData, sampleRate, params)
@@ -144,9 +144,9 @@ function phatassWarmthReadout(channelData, sampleRate, params) {
 /**
  * The HF Softener's automatic Air: the chain's top-end loss over the analysis
  * window (softener plus the Reso pre-stage when it is in), and the Air amount
- * it asks for — see hfSoftenerAutoAir.js.
+ * it asks for — see deEsserAutoAir.js.
  */
-function hfSoftenerAutoAir(channelData, sampleRate, params) {
+function deEsserAutoAir(channelData, sampleRate, params) {
   try {
     const { kernelParams, resoParams = null, resoFrameSize = 512 } = params ?? {}
     const lossDb = measureTopLossDb(channelData, sampleRate, kernelParams, resoParams, resoFrameSize)

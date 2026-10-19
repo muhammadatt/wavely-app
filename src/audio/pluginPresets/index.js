@@ -9,16 +9,37 @@
 import './optoSmooth.js'
 import './fetPunch.js'
 import './resoTame.js'
+import './inflator.js'
+import './phatass.js'
+import './parametricEq.js'
+import './scheps.js'
+import './hfLimiter.js'
+import './airBoost.js'
+import './deEsser.js'
 
 import { registerOptoSmoothPresets } from './optoSmooth.js'
 import { registerFetPunchPresets } from './fetPunch.js'
 import { registerResoTamePresets } from './resoTame.js'
+import { registerInflatorPresets } from './inflator.js'
+import { registerPhatassPresets } from './phatass.js'
+import { registerParametricEqPresets } from './parametricEq.js'
+import { registerSchepsPresets } from './scheps.js'
+import { registerHfLimiterPresets } from './hfLimiter.js'
+import { registerAirBoostPresets } from './airBoost.js'
+import { registerHfSoftenerPresets } from './deEsser.js'
 
 export { OPTO_SMOOTH_PRESET_PLUGIN, registerOptoSmoothPresets } from './optoSmooth.js'
 export { FET_PUNCH_PRESET_PLUGIN, registerFetPunchPresets } from './fetPunch.js'
 export {
   RESO_TAME_PRESET_PLUGIN, registerResoTamePresets, RESO_TAME_STOCK_ZONES,
 } from './resoTame.js'
+export { INFLATOR_PRESET_PLUGIN, registerInflatorPresets } from './inflator.js'
+export { PHATASS_PRESET_PLUGIN, registerPhatassPresets } from './phatass.js'
+export { PARAMETRIC_EQ_PRESET_PLUGIN, registerParametricEqPresets } from './parametricEq.js'
+export { SCHEPS_PRESET_PLUGIN, registerSchepsPresets } from './scheps.js'
+export { HF_LIMITER_PRESET_PLUGIN, registerHfLimiterPresets } from './hfLimiter.js'
+export { AIR_BOOST_PRESET_PLUGIN, registerAirBoostPresets } from './airBoost.js'
+export { HF_SOFTENER_PRESET_PLUGIN, registerHfSoftenerPresets } from './deEsser.js'
 export * from './store.js'
 
 /**
@@ -31,4 +52,11 @@ export function registerPluginPresets() {
   registerOptoSmoothPresets()
   registerFetPunchPresets()
   registerResoTamePresets()
+  registerInflatorPresets()
+  registerPhatassPresets()
+  registerParametricEqPresets()
+  registerSchepsPresets()
+  registerHfLimiterPresets()
+  registerAirBoostPresets()
+  registerHfSoftenerPresets()
 }

@@ -16,7 +16,7 @@
  * the ear reads as "the s got quieter".
  */
 
-import { SCOPE_STRIDE } from './hfSoftenerProcessor.js'
+import { SCOPE_STRIDE } from './deEsserProcessor.js'
 
 export { SCOPE_STRIDE }
 
@@ -95,4 +95,47 @@ export function kindRuns(kinds, n, kind) {
     }
   }
   return runs
+}
+
+/** dB a column's shaded depth may fall per column (~2.9 ms at 44.1 kHz). */
+export const SHADE_FALL_DB = 0.4
+
+/**
+ * The scope's SHADING: per column, how deep the cut was (dB), what kind it
+ * was, and whether the lisp guard held back — smoothed so a treated "s" reads
+ * as one block, not a comb.
+ *
+ * The raw per-quantum cut flickers across the threshold inside one "s" (the
+ * Duck and EQ follow the waveform's own ripple), so drawn as-is the shading
+ * broke into slivers. Depth here falls at most SHADE_FALL_DB per column — an
+ * instant attack and a ~40 ms release from 6 dB — which bridges those gaps
+ * without moving the start of a treated region. Kind and guard ride the same
+ * envelope: a column is treated while its smoothed depth is ≥ TREATED_DB, a
+ * plosive while a burst window was open within the region, guarded while the
+ * guard held ≥ 0.5 dB anywhere in it.
+ *
+ * Writes `depth`, `kind` (0/1/2 as columnKind) and `guard` (0/1) for [0, n).
+ */
+export function shadeColumns(inPeak, outPeak, burst, held, n, depth, kind, guard, fallDb = SHADE_FALL_DB) {
+  let d = 0
+  let plosive = false
+  let guarded = false
+  for (let i = 0; i < n; i++) {
+    const a = inPeak[i]
+    const b = outPeak[i]
+    const raw = a > 0 && b > 0 ? Math.max(0, 20 * Math.log10(a / b)) : 0
+    const fresh = raw >= TREATED_DB
+    d = Math.max(raw, d - fallDb)
+    const on = d >= TREATED_DB
+    if (!on) {
+      plosive = false
+      guarded = false
+    } else if (fresh) {
+      if (burst[i] >= PLOSIVE_WEIGHT) plosive = true
+      if (held[i] >= 0.5) guarded = true
+    }
+    depth[i] = on ? d : 0
+    kind[i] = on ? (plosive ? 2 : 1) : 0
+    guard[i] = on && guarded ? 1 : 0
+  }
 }

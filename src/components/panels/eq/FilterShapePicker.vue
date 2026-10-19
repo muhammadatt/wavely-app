@@ -19,6 +19,8 @@ const props = defineProps({
   options: { type: Array, required: true },
   accent: { type: String, default: '#8fd18f' },
   disabled: { type: Boolean, default: false },
+  /** 'classic' | 'modula' — the kit's inset well for the button and its list. */
+  design: { type: String, default: 'classic' },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -70,8 +72,9 @@ onBeforeUnmount(() => {
   <div class="relative" data-shape-picker>
     <button
       type="button"
-      class="w-full flex items-center justify-center rounded-[3px] py-[3px] transition-colors"
-      :style="{
+      class="w-full flex items-center justify-center py-[3px] transition-colors"
+      :class="design === 'modula' ? ['fsp-well', { 'is-open': open }] : 'rounded-[3px]'"
+      :style="design === 'modula' ? { opacity: disabled ? 0.4 : 1 } : {
         border: `1px solid ${open ? accent : 'rgba(255,255,255,.12)'}`,
         background: open ? `color-mix(in srgb, ${accent} 14%, transparent)` : 'rgba(0,0,0,.25)',
         opacity: disabled ? 0.4 : 1,
@@ -95,7 +98,8 @@ onBeforeUnmount(() => {
     <div
       v-if="open"
       class="absolute left-1/2 -translate-x-1/2 top-[calc(100%+4px)] z-30 p-[5px] rounded-[4px]"
-      style="width:150px;background:#141a1f;border:1px solid rgba(255,255,255,.14);box-shadow:0 10px 24px rgba(0,0,0,.6)"
+      :class="design === 'modula' ? 'fsp-list' : ''"
+      :style="design === 'modula' ? 'width:160px' : 'width:150px;background:#141a1f;border:1px solid rgba(255,255,255,.14);box-shadow:0 10px 24px rgba(0,0,0,.6)'"
       role="listbox"
     >
       <button
@@ -137,3 +141,19 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.fsp-well {
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  background: #1a1c20;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .8), 0 1px 0 rgba(255, 255, 255, .05);
+}
+.fsp-well.is-open { box-shadow: inset 0 2px 5px rgba(0, 0, 0, .8), 0 0 0 1px #3fd0de; }
+.fsp-list {
+  border-radius: 8px;
+  background: #1a1c20;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(255, 255, 255, .05), 0 14px 28px -8px rgba(0, 0, 0, .9);
+}
+</style>

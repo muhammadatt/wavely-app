@@ -24,8 +24,15 @@ import {
   FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
   RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TAIL_MIN_MS, TAIL_MAX_MS, TRANSIENT_MAX_DB,
 } from '../../audio/hfLimiterParams.js'
-import Knob from '../knobs/Knob.vue'
-import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
+import {
+  HF_LIMITER_DEFAULTS,
+} from '../../audio/hfLimiterParams.js'
+import {
+  HF_LIMITER_PRESET_PLUGIN, HF_LIMITER_PARAM_KEYS, HF_LIMITER_OUTPUT_MIN_DB, HF_LIMITER_OUTPUT_MAX_DB,
+} from '../../audio/pluginPresets/hfLimiter.js'
+import { usePluginPresets } from '../../composables/usePluginPresets.js'
+import ModulaKnob from '../modula/ModulaKnob.vue'
+import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -35,8 +42,15 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   hflParams, hflPreview, hflDelta, hflReduction, hflTransient,
   hflInputLevels, hflOutputLevels,
-  togglePreview, syncParam, toggleDelta, apply, teardown, closeModal,
+  togglePreview, syncParam, applyParams, toggleDelta, apply, teardown, closeModal,
 } = useHFLimiter()
+
+const presets = usePluginPresets(HF_LIMITER_PRESET_PLUGIN, {
+  read: () => Object.fromEntries(HF_LIMITER_PARAM_KEYS.map(k => [k, hflParams[k]])),
+  write: p => applyParams(p),
+})
+
+const D = HF_LIMITER_DEFAULTS
 
 const { state } = useEditorState()
 
@@ -44,11 +58,12 @@ onMounted(() => {
   if (!hflPreview.value) togglePreview()
 })
 
-const ACCENT = '#e8b07f'
+const ACCENT = '#e8a33d'
+const METER_H = 214
 
 // ── Response curve ──────────────────────────────────────────────────────────
-const CURVE_W = 360
-const CURVE_H = 96
+const CURVE_W = 420
+const CURVE_H = 132
 const F_MIN = 500
 const F_MAX = 20000
 const DB_MIN = -RANGE_MAX_DB
@@ -96,17 +111,23 @@ function gridLabel(f) {
   return f >= 1000 ? `${f / 1000}k` : String(f)
 }
 
-const fmtFreq = v => (v >= 10000 ? `${(v / 1000).toFixed(1)}k` : `${(v / 1000).toFixed(2)}k`)
-const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
-const fmtRange = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
-const fmtMs = v => `${Math.round(v)}`
-const fmtTail = v => (v < TAIL_MIN_MS ? 'OFF' : `${Math.round(v)}`)
+const fmtFreq = v => (v >= 10000 ? `${(v / 1000).toFixed(1)}k Hz` : `${(v / 1000).toFixed(2)}k Hz`)
+const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
+const fmtRange = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)} dB`)
+const fmtMs = v => `${Math.round(v)} ms`
+const fmtTail = v => (v < TAIL_MIN_MS ? 'OFF' : `${Math.round(v)} ms`)
+/** Typed entry for Freq: "6.5k" or "6500". */
+function parseHz(t) {
+  const m = String(t).trim().match(/^(-?\d*\.?\d+)\s*(k)?/i)
+  if (!m) return NaN
+  return parseFloat(m[1]) * (m[2] ? 1000 : 1)
+}
 
 const SHAPE_OPTIONS = [
   { value: 'tight', label: 'TIGHT', title: 'A one-octave, linear-phase split: a ceiling on the band above Freq, leaving everything below it alone' },
   { value: 'warm', label: 'WARM', title: 'A gentle 6 dB/oct split, the EL7 Fatso’s Warmth: the whole top end tilts down, starting an octave or more below Freq' },
 ]
-const fmtTransient = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)}`)
+const fmtTransient = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)} dB`)
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -127,10 +148,13 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="hf-limiter"
     :z="z"
-    :width="700"
+    :width="760"
     :accent="ACCENT"
-    brand-lead="HF"
-    brand-tail="LIMITER"
+    design="modula"
+    brand-lead="HF LIMITER"
+    :presets="presets"
+    :presets-disabled="!hflPreview"
+    presets-disabled-hint="Turn HF Limiter on to use presets"
     :engaged="hflPreview"
     show-delta
     :delta="hflDelta"
@@ -148,19 +172,23 @@ async function applyAndClose() {
     @apply="applyAndClose"
     @close="close"
   >
-    <div class="px-[26px] pt-[22px] pb-[26px]">
-      <GainReductionBar
-        :reduction-db="-hflReduction" :accent="ACCENT"
-        :full-scale-db="RANGE_MAX_DB" ballistics="none" title="HF REDUCTION"
-      />
+    <div class="hl-grid">
+      <div class="hl-meter">
+        <LevelMeter variant="modula" scale-side="left" :levels="hflInputLevels" label="IN" :height="METER_H" />
+      </div>
 
-      <div class="flex items-center justify-between gap-[22px] mt-[18px]">
-        <LevelMeter :levels="hflInputLevels" label="IN" :height="150" />
+      <div class="hl-display">
+        <GainReductionBar
+          :reduction-db="-hflReduction" :accent="ACCENT"
+          :full-scale-db="RANGE_MAX_DB" ballistics="none" title="HF REDUCTION"
+        />
 
-        <div class="flex-1 flex flex-col items-center">
+        <!-- The shelf the kernel is running right now, with the deepest cut
+             RANGE allows ghosted behind it and FREQ dashed. -->
+        <div>
           <svg
             :viewBox="`0 0 ${CURVE_W} ${CURVE_H}`"
-            class="w-full"
+            class="hl-well"
             :style="{ height: `${CURVE_H}px` }"
             preserveAspectRatio="none"
           >
@@ -169,111 +197,181 @@ async function applyAndClose() {
               :x1="xFor(f)" :y1="0" :x2="xFor(f)" :y2="CURVE_H"
               stroke="rgba(255,255,255,.07)" stroke-width="1"
             />
-            <line :x1="0" :y1="0" :x2="CURVE_W" :y2="0" stroke="rgba(255,255,255,.14)" stroke-width="1" />
+            <line :x1="0" :y1="0.5" :x2="CURVE_W" :y2="0.5" stroke="rgba(255,255,255,.16)" stroke-width="1" />
             <line
               :x1="xFor(hflParams.freq)" :y1="0" :x2="xFor(hflParams.freq)" :y2="CURVE_H"
-              :stroke="ACCENT" stroke-opacity=".35" stroke-width="1" stroke-dasharray="3 3"
+              :stroke="ACCENT" stroke-opacity=".4" stroke-width="1" stroke-dasharray="3 3"
             />
-            <path :d="floorPath" stroke="rgba(255,255,255,.22)" stroke-width="1.2" fill="none" stroke-dasharray="4 3" />
-            <path :d="liveFill" :fill="ACCENT" fill-opacity="0.12" />
+            <path :d="floorPath" stroke="rgba(255,255,255,.26)" stroke-width="1.2" fill="none" stroke-dasharray="4 3" />
+            <path :d="liveFill" :fill="ACCENT" fill-opacity="0.14" />
             <path :d="livePath" :stroke="ACCENT" stroke-width="2" fill="none" />
           </svg>
-          <div class="relative w-full mt-[4px] h-[10px]">
+          <div class="hl-axis">
             <span
               v-for="f in GRID_FREQS" :key="f"
-              class="absolute top-0"
               :style="{
                 left: `${(xFor(f) / CURVE_W) * 100}%`,
                 transform: f >= F_MAX ? 'translateX(-100%)' : 'translateX(-50%)',
-                fontWeight: 600, fontSize: '8px',
-                fontFamily: 'JetBrains Mono, monospace',
-                letterSpacing: '0.08em', color: 'rgba(255,255,255,.28)',
               }"
             >{{ gridLabel(f) }}</span>
           </div>
         </div>
 
-        <LevelMeter :levels="hflOutputLevels" label="OUT" :height="150" />
-      </div>
-
-      <div class="flex justify-center gap-[12px] mt-[18px]">
-        <div class="w-[80px]" title="Where bright starts: the band above this is what the limiter listens to and turns down">
-          <Knob
-            :model-value="hflParams.freq" @update:model-value="v => syncParam('freq', v)"
-            :min="FREQ_MIN_HZ" :max="FREQ_MAX_HZ" :step="10" scale="log" :value-font-px="13"
-            label="Freq" :accent="ACCENT" :format-value="fmtFreq" :disabled="!hflPreview"
-          />
-        </div>
-        <div class="w-[80px]" title="Where the band is held, dB relative to the file's voice level — the same setting does the same thing on a quiet recording and a hot one">
-          <Knob
-            :model-value="hflParams.threshold" @update:model-value="v => syncParam('threshold', v)"
-            :min="THRESHOLD_MIN_DB" :max="THRESHOLD_MAX_DB" :step="0.5" :value-font-px="13"
-            label="Threshold" :accent="ACCENT" :format-value="fmtDb" :disabled="!hflPreview"
-          />
-        </div>
-        <div class="w-[80px]" title="The deepest the shelf may cut. Keeps a hard S from turning into a lisp; 0 takes the shelf out">
-          <Knob
-            :model-value="hflParams.range" @update:model-value="v => syncParam('range', v)"
-            :min="0" :max="RANGE_MAX_DB" :step="0.5" :value-font-px="13"
-            label="Range" :accent="ACCENT" :format-value="fmtRange" :disabled="!hflPreview"
-          />
-        </div>
-        <div class="w-[80px]" title="How quickly the top comes back after a bright moment, ms">
-          <Knob
-            :model-value="hflParams.release" @update:model-value="v => syncParam('release', v)"
-            :min="RELEASE_MIN_MS" :max="RELEASE_MAX_MS" :step="1" scale="log" :value-font-px="13"
-            label="Release" :accent="ACCENT" :format-value="fmtMs" :disabled="!hflPreview"
-          />
-        </div>
-        <div class="w-[80px]" title="A slow second release stage, ms. A sustained bright passage charges it and the top comes back over this long; a single click barely does and recovers at the Release speed. Fully down is OFF, a single-stage release">
-          <Knob
-            :model-value="hflParams.tail" @update:model-value="v => syncParam('tail', v)"
-            :min="0" :max="TAIL_MAX_MS" :step="5" :value-font-px="13"
-            label="Tail" :accent="ACCENT" :format-value="fmtTail" :disabled="!hflPreview"
-          />
-        </div>
-        <div class="w-[80px] relative" title="Extra cut on sudden bright onsets — clicks, lip smacks, T, K and P bursts — even below the threshold, for a few milliseconds. Reacts to how suddenly the top end rises, not how loud it is, so a steady S is left to the shelf. Stacks on top of the shelf; 0 is off">
-          <Knob
-            :model-value="hflParams.transient" @update:model-value="v => syncParam('transient', v)"
-            :min="0" :max="TRANSIENT_MAX_DB" :step="0.5" :value-font-px="13"
-            label="Transient" :accent="ACCENT" :format-value="fmtTransient" :disabled="!hflPreview"
-          />
-          <span
-            class="absolute top-[2px] right-[6px] w-[7px] h-[7px] rounded-full"
-            :style="{
-              background: ACCENT,
-              opacity: 0.12 + 0.88 * lamp,
-              boxShadow: lamp > 0.05 ? `0 0 ${6 * lamp}px ${ACCENT}` : 'none',
-            }"
-            aria-hidden="true"
-          />
-        </div>
-        <div class="w-[80px]">
-          <Knob
-            :model-value="hflParams.output" @update:model-value="v => syncParam('output', v)"
-            :min="-12" :max="12" :step="0.1" :value-font-px="13" bipolar
-            label="Output" :accent="ACCENT" :format-value="fmtDb" :disabled="!hflPreview"
-          />
-        </div>
-      </div>
-
-      <div class="flex justify-center items-end gap-[28px] mt-[16px]">
-        <div class="flex flex-col items-center gap-[8px] pb-[22px]">
-          <span style="font:600 9px/1 'JetBrains Mono', monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">SHAPE</span>
-          <DeviceChoiceRocker
-            :model-value="hflParams.shape" :options="SHAPE_OPTIONS" :accent="ACCENT"
-            :disabled="!hflPreview" label="Shape"
+        <div class="hl-shape">
+          <span class="m-caption">Shape</span>
+          <ModulaSegmented
+            :model-value="hflParams.shape" :options="SHAPE_OPTIONS"
+            aria-label="Shape" :disabled="!hflPreview"
             @update:model-value="v => syncParam('shape', v)"
           />
         </div>
       </div>
 
-      <p
-        class="mt-[16px] text-center"
-        style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
-      >
-        The top end is held at a ceiling: brightness and harshness on the shelf, clicks and sharp onsets on Transient.
-      </p>
+      <div class="hl-meter">
+        <LevelMeter variant="modula" scale-side="right" :levels="hflOutputLevels" label="OUT" :height="METER_H">
+          <template #below>
+            <ModulaKnob
+              variant="trim" :model-value="hflParams.output" show-value
+              :min="HF_LIMITER_OUTPUT_MIN_DB" :max="HF_LIMITER_OUTPUT_MAX_DB" :step="0.1"
+              :default-value="D.output" :format-value="fmtDb"
+              aria-label="Output" :disabled="!hflPreview"
+              title="Output: a trim after the limiter. Double-click to reset"
+              @update:model-value="v => syncParam('output', v)"
+            />
+          </template>
+        </LevelMeter>
+      </div>
+    </div>
+
+    <!-- The shelf's four controls, then the slow tail and the onset softener. -->
+    <div class="hl-knobs">
+      <ModulaKnob
+        variant="small" :size="52" show-value editable :parse-value="parseHz"
+        :model-value="hflParams.freq" :min="FREQ_MIN_HZ" :max="FREQ_MAX_HZ" :step="10" scale="log"
+        :default-value="D.freq" label="Freq" :color="ACCENT" :format-value="fmtFreq" :disabled="!hflPreview"
+        title="Where bright starts: the band above this is what the limiter listens to and turns down. Double-click to reset"
+        @update:model-value="v => syncParam('freq', v)"
+      />
+      <ModulaKnob
+        variant="small" :size="52" show-value editable
+        :model-value="hflParams.threshold" :min="THRESHOLD_MIN_DB" :max="THRESHOLD_MAX_DB" :step="0.5"
+        :default-value="D.threshold" label="Threshold" :color="ACCENT" :format-value="fmtDb" :disabled="!hflPreview"
+        title="Where the band is held, dB relative to the file's voice level — the same setting does the same thing on a quiet recording and a hot one. Double-click to reset"
+        @update:model-value="v => syncParam('threshold', v)"
+      />
+      <ModulaKnob
+        variant="small" :size="52" show-value editable :parse-value="t => Math.abs(parseFloat(t))"
+        :model-value="hflParams.range" :min="0" :max="RANGE_MAX_DB" :step="0.5"
+        :default-value="D.range" label="Range" :color="ACCENT" :format-value="fmtRange" :disabled="!hflPreview"
+        title="The deepest the shelf may cut. Keeps a hard S from turning into a lisp; 0 takes the shelf out. Double-click to reset"
+        @update:model-value="v => syncParam('range', v)"
+      />
+      <ModulaKnob
+        variant="small" :size="52" show-value editable
+        :model-value="hflParams.release" :min="RELEASE_MIN_MS" :max="RELEASE_MAX_MS" :step="1" scale="log"
+        :default-value="D.release" label="Release" :color="ACCENT" :format-value="fmtMs" :disabled="!hflPreview"
+        title="How quickly the top comes back after a bright moment. Double-click to reset"
+        @update:model-value="v => syncParam('release', v)"
+      />
+      <span class="hl-rule" aria-hidden="true"></span>
+      <ModulaKnob
+        variant="small" :size="52" show-value editable
+        :model-value="hflParams.tail" :min="0" :max="TAIL_MAX_MS" :step="5"
+        :default-value="D.tail" label="Tail" :color="ACCENT" :format-value="fmtTail" :disabled="!hflPreview"
+        title="A slow second release stage. A sustained bright passage charges it and the top comes back over this long; a single click barely does and recovers at the Release speed. Fully down is OFF, a single-stage release. Double-click to reset"
+        @update:model-value="v => syncParam('tail', v)"
+      />
+      <div class="hl-transient">
+        <ModulaKnob
+          variant="small" :size="52" show-value editable :parse-value="t => Math.abs(parseFloat(t))"
+          :model-value="hflParams.transient" :min="0" :max="TRANSIENT_MAX_DB" :step="0.5"
+          :default-value="D.transient" label="Transient" :color="ACCENT" :format-value="fmtTransient" :disabled="!hflPreview"
+          title="Extra cut on sudden bright onsets — clicks, lip smacks, T, K and P bursts — even below the threshold, for a few milliseconds. Reacts to how suddenly the top end rises, not how loud it is, so a steady S is left to the shelf. Stacks on top of the shelf; 0 is off. Double-click to reset"
+          @update:model-value="v => syncParam('transient', v)"
+        />
+        <!-- Lights while the onset softener cuts (full at 6 dB). -->
+        <span
+          class="hl-lamp"
+          :style="{
+            background: ACCENT,
+            opacity: 0.12 + 0.88 * lamp,
+            boxShadow: lamp > 0.05 ? `0 0 ${6 * lamp}px ${ACCENT}` : 'none',
+          }"
+          aria-hidden="true"
+        />
+      </div>
     </div>
   </FloatingWindow>
 </template>
+
+<style scoped>
+.hl-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+.hl-meter {
+  display: flex;
+  justify-content: center;
+  padding: 12px 4px;
+}
+.hl-display {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 14px 14px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.hl-well {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  background: #0b0e13;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, .85), 0 0 0 1px #1c222c, 0 1px 0 rgba(255, 255, 255, .05);
+}
+.hl-axis {
+  position: relative;
+  height: 10px;
+  margin-top: 4px;
+  font: 600 8px/1 var(--m-font-mono);
+  letter-spacing: .08em;
+  color: var(--m-ink-4);
+}
+.hl-axis span { position: absolute; top: 0; }
+.hl-shape {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.hl-knobs {
+  margin-top: 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-around;
+  gap: 8px;
+  padding: 14px 12px 12px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.hl-rule {
+  align-self: stretch;
+  width: 1px;
+  background: rgba(0, 0, 0, .35);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, .04);
+}
+.hl-transient { position: relative; }
+.hl-lamp {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+</style>

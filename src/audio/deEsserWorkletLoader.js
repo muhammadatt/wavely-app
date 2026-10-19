@@ -3,7 +3,7 @@
  * OfflineAudioContext, once per context. `?worker&url` bundles the kernel with
  * what it imports from ./dsp/ — see airBandWorkletLoader.js for why.
  */
-import workletUrl from './hfSoftenerProcessor.js?worker&url'
+import workletUrl from './deEsserProcessor.js?worker&url'
 
 const loadPromises = new WeakMap()
 

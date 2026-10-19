@@ -70,8 +70,10 @@ export const SCHEPS_DEFAULTS = {
    * ⚠ HELD HERE WHERE OPTOSMOOTH DELIBERATELY KEEPS ITS OWN OUT OF
    * `LA2A_DEFAULTS`, and the difference is presets. There, a measured value in
    * the defaults would be saved into patches and apply one file's peak to
-   * another; Scheps has no preset collection, and it already holds the three
-   * values above here for the reason this needs to be here too.
+   * another. Scheps' presets (`pluginPresets/scheps.js`) name their keys
+   * explicitly and none of the measured ones, so nothing here reaches a patch;
+   * and it already holds the three values above here for the reason this
+   * needs to be here too.
    */
   ceilingDb: null,
   /** The ceiling's knee width, dB, measured alongside it. See `ceilingKneeDbFor`. */

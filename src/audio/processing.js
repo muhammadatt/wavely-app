@@ -33,15 +33,15 @@ import {
   AIR_BAND_DEFAULTS,
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
-import { ensureHFSoftenerWorklet } from './hfSoftenerWorkletLoader.js'
-import { HF_SOFTENER_PREROLL_S } from './hfSoftenerProcessor.js'
-import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from './hfSoftenerResoStage.js'
+import { ensureHFSoftenerWorklet } from './deEsserWorkletLoader.js'
+import { HF_SOFTENER_PREROLL_S } from './deEsserProcessor.js'
+import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from './deEsserResoStage.js'
 import {
   HF_SOFTENER_DEFAULTS,
   toKernelParams as toHFSoftenerKernelParams,
   resoOn, resoKernelParams, softenOn, softenStageKernelParams,
-} from './effects/hfSoftener.js'
-import { softenLatencySamples } from './hfSoftenerSoftenStage.js'
+} from './effects/deEsser.js'
+import { softenLatencySamples } from './deEsserSoftenStage.js'
 import { ensureHFLimiterWorklet } from './hfLimiterWorkletLoader.js'
 import {
   HF_LIMITER_DEFAULTS,
@@ -1011,7 +1011,7 @@ export function applySoftClipperRegion(segments, start, end, params, sampleRate,
  */
 export function measureHFSoftenerAutoAir(segments, start, end, params, sampleRate, channels) {
   const merged = { ...HF_SOFTENER_DEFAULTS, ...params }
-  return measureInWorker('hfSoftenerAutoAir', segments, start, end, {
+  return measureInWorker('deEsserAutoAir', segments, start, end, {
     kernelParams: toHFSoftenerKernelParams(merged),
     resoParams: resoOn(merged) ? resoKernelParams(merged) : null,
     resoFrameSize: HF_RESO_FRAME_SIZE,
@@ -1206,7 +1206,7 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
       grid: resoOn(merged) ? resonanceHopSamples(HF_RESO_FRAME_SIZE) : undefined,
     },
     // The Reso knob above 0: a band-limited ResoTame AFTER the softener — see
-    // hfSoftenerResoStage.js. Its 512-sample latency is trimmed with the rest.
+    // deEsserResoStage.js. Its 512-sample latency is trimmed with the rest.
     // ⚠ Like ResoTame itself, its STFT grid phase at the region start cannot
     // match a running preview, so with RESO on apply is close to the preview
     // rather than sample-identical.
@@ -1220,7 +1220,7 @@ export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, 
         latencySamples: HF_RESO_LATENCY_SAMPLES,
       }] : []),
       // The Soften knob above 0: the HF Limiter's kernel with the shelf out and
-      // its Transient on a 500 Hz band — see hfSoftenerSoftenStage.js. Constant
+      // its Transient on a 500 Hz band — see deEsserSoftenStage.js. Constant
       // latency (the shelf's 3 ms), trimmed with the rest; no STFT, so it stays
       // sample-identical to the preview.
       ...(softenOn(merged) ? [{

@@ -69,6 +69,25 @@ const FILES = [
   'src/components/panels/ResonanceModal.vue',
   'src/components/panels/ResonanceZoneControls.vue',
   'src/components/panels/ResonanceZoneCount.vue',
+  // The Modula kit and the panels converted to it. (FloatingWindow is not
+  // here: its frame's `:style` binding carries `//` comments, which this
+  // coarse reader takes for identifiers.)
+  'src/components/panels/PhatassModal.vue',
+  'src/components/panels/SchepsModal.vue',
+  'src/components/panels/HFLimiterModal.vue',
+  'src/components/panels/AirBandModal.vue',
+  'src/components/panels/DeEsserModal.vue',
+  'src/components/panels/DeEsserBandStrip.vue',
+  'src/components/panels/SoftClipperModal.vue',
+  'src/components/panels/windows/InflatorWindow.vue',
+  'src/components/panels/windows/SpectrumAnalyzerWindow.vue',
+  'src/components/panels/windows/NormalizeWindow.vue',
+  'src/components/panels/windows/LoudnessWindow.vue',
+  'src/components/meters/SpectrumDisplay.vue',
+  'src/components/meters/LevelMeter.vue',
+  ...readdirSync(join(ROOT, 'src/components/modula'))
+    .filter(f => f.endsWith('.vue'))
+    .map(f => `src/components/modula/${f}`),
 ]
 
 /**

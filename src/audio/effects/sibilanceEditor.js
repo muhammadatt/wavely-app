@@ -321,7 +321,7 @@ export function createClipGainDeEsser(audioContext) {
 
 export const clipGainDeEsserEffect = {
   id: 'clip-gain-deesser',
-  name: 'Clip-Gain De-Esser',
+  name: 'Sibilance Editor',
   latencySamples: 0,
   createNodes(audioContext) {
     return createClipGainDeEsser(audioContext)

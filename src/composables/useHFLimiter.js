@@ -127,6 +127,13 @@ export function useHFLimiter() {
     pushParam(name, value)
   }
 
+  /** A preset's controls, through the same path a knob turn takes. */
+  function applyParams(p) {
+    for (const [k, v] of Object.entries(p)) {
+      if (v !== undefined && hflParams[k] !== v) syncParam(k, v)
+    }
+  }
+
   function toggleDelta() {
     if (!hflPreview.value) return
     hflDelta.value = !hflDelta.value
@@ -192,6 +199,7 @@ export function useHFLimiter() {
     hasSelection,
     togglePreview,
     syncParam,
+    applyParams,
     toggleDelta,
     apply,
     teardown,

@@ -29,11 +29,13 @@ const fftSize = ref(4096)
  * on its own rather than as texture behind a curve, and an unaveraged FFT of
  * speech flickers too fast to read a level off.
  */
-const smoothing = ref(0.72)
+export const SMOOTHING_DEFAULT = 0.72
+const smoothing = ref(SMOOTHING_DEFAULT)
 /** Tilt, dB per octave. 4.5 is the usual setting for programme material. */
 const slope = ref(4.5)
 /** Bottom of the dB window. The top is fixed at 0 dBFS — there is nothing above it. */
-const floorDb = ref(-100)
+export const FLOOR_DEFAULT_DB = -100
+const floorDb = ref(FLOOR_DEFAULT_DB)
 const showPeakHold = ref(true)
 /** Freeze the display, to read a moment that has already gone past. */
 const frozen = ref(false)

@@ -100,6 +100,12 @@ export function useAirBand() {
     pushParam('output', v)
   }
 
+  /** A preset's controls, through the same paths a knob turn takes. */
+  function applyParams(p) {
+    if (p.air !== undefined) syncAir(p.air)
+    if (p.output !== undefined) syncOutput(p.output)
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -153,6 +159,7 @@ export function useAirBand() {
     togglePreview,
     syncAir,
     syncOutput,
+    applyParams,
     apply,
     teardown,
     openModal,

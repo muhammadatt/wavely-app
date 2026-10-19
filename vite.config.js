@@ -20,7 +20,7 @@ import tailwindcss from '@tailwindcss/vite'
  * import then resolved to the stub and the panel rendered nothing at all, with
  * no error to explain it. loadEnv reads the .env files exactly as Vite does.
  */
-const DEV_ONLY_MODULES = [/SibilanceTuningPanel\.vue$/]
+const DEV_ONLY_MODULES = [/SibilanceTuningPanel\.vue$/, /ModulaGalleryWindow\.vue$/]
 
 function stripDevOnlyModules(enabled) {
   const STUB = '\0dev-only-stub'

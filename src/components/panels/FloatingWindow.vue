@@ -1,11 +1,13 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useWindows } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import Icon from '../ui/Icon.vue'
 import HelpOverlay from './HelpOverlay.vue'
+import ModulaPresetBrowser from '../modula/ModulaPresetBrowser.vue'
+import ModulaLedPill from '../modula/ModulaLedPill.vue'
 
 /**
  * The plugin harness — the chassis every effect window is mounted into.
@@ -172,6 +174,25 @@ const props = defineProps({
    * against a runaway drag it can enforce on the caller's behalf.
    */
   maxHeightDelta: { type: Number, default: 360 },
+
+  /**
+   * 'classic' | 'modula'. MODULA is the control-surface kit's chrome
+   * (docs/design/modula): one lifted chassis with the face set into it, the
+   * name in the plugin's hue over white, a round help and close, the preset
+   * browser in the centre, ON/BYPASS as a lamp pill in a fixed slot, and a
+   * footer of Select all · Preview · Apply. Opt-in per plugin, so the panels
+   * convert one at a time; everything else this component does — dragging,
+   * focus, help, the scroll ceiling, the footer's narrow-window steps — is
+   * the same in both.
+   */
+  design: { type: String, default: 'classic' },
+  /**
+   * A `usePluginPresets` instance. Under Modula it puts the preset browser in
+   * the header's centre column (classic windows slot PresetMenu themselves).
+   */
+  presets: { type: Object, default: null },
+  presetsDisabled: { type: Boolean, default: false },
+  presetsDisabledHint: { type: String, default: '' },
 })
 
 const emit = defineEmits([
@@ -198,6 +219,7 @@ const { focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize }
 const { state, hasSelection, selectAll } = useEditorState()
 
 const accent = computed(() => props.accent)
+const modula = computed(() => props.design === 'modula')
 
 /**
  * Help for THIS effect, looked up by the id the harness was already given.
@@ -233,6 +255,19 @@ let resizeStartWidth = 0
 let resizeStartDelta = 0
 
 const minWidthPx = computed(() => props.minWidth ?? props.width)
+
+// A caller may change its natural width while open (the parametric EQ sizes
+// itself to its band count). Move by the same amount, so a manual widening is
+// kept as an offset rather than snapped away, then re-fit to the viewport.
+// Growing slides the window left as far as it needs to keep its right edge
+// on screen, so a band added near the edge never pushes the strip off it.
+watch(() => props.width, (next, prev) => {
+  const w = Math.max(minWidthPx.value, boxWidth.value + (next - prev))
+  const overflow = pos.value.x + w - (window.innerWidth - 20)
+  if (overflow > 0) pos.value.x = Math.max(16, pos.value.x - overflow)
+  boxWidth.value = clampWidth(w)
+  clampToViewport()
+})
 
 function clampWidth(w) {
   // Leaves the same margin clampToViewport does, so a fully-expanded window
@@ -352,7 +387,12 @@ onMounted(() => {
   // below, which reads it for the first-open case.
   const rememberedSize = getSize(props.windowId)
   if (rememberedSize) {
-    boxWidth.value = clampWidth(rememberedSize.width ?? props.width)
+    // `extra` is how far a drag took the window past its natural width, so a
+    // window whose natural width moves (the EQ follows its band count)
+    // reopens at today's width plus the same widening, not at a stale total.
+    boxWidth.value = clampWidth(rememberedSize.extra != null
+      ? props.width + rememberedSize.extra
+      : rememberedSize.width ?? props.width)
     heightDelta.value = clampHeightDelta(rememberedSize.heightDelta ?? 0)
   }
   emit('update:heightDelta', heightDelta.value)
@@ -478,7 +518,11 @@ function onResizeEnd(e) {
   resizing.value = false
   try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
   clampToViewport()
-  saveSize(props.windowId, { width: boxWidth.value, heightDelta: heightDelta.value })
+  saveSize(props.windowId, {
+    width: boxWidth.value,
+    extra: boxWidth.value - props.width,
+    heightDelta: heightDelta.value,
+  })
 }
 
 /** Back to the size this opened at — the same gesture every knob here resets with. */
@@ -486,7 +530,7 @@ function resetSize() {
   boxWidth.value = props.width
   heightDelta.value = 0
   emit('update:heightDelta', 0)
-  saveSize(props.windowId, { width: boxWidth.value, heightDelta: 0 })
+  saveSize(props.windowId, { width: boxWidth.value, extra: 0, heightDelta: 0 })
 }
 
 // Touching or tabbing into the frame raises it. Without this, two open windows
@@ -524,6 +568,7 @@ function requestClose() {
     ref="frameEl"
     class="win-frame fixed rounded-[18px] overflow-hidden flex flex-col"
     :data-chrome="chrome"
+    :data-design="design"
     role="dialog"
     :aria-label="label"
     tabindex="-1"
@@ -578,12 +623,14 @@ function requestClose() {
         the one button that disposes of the window.
       -->
       <div class="flex items-center gap-2.5">
-        <span style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
+        <!-- Modula: one word mark in the plugin's hue over white, no rule. -->
+        <span v-if="modula" class="win-brand-m">{{ brandLead }}{{ brandTail }}</span>
+        <span v-else style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
           {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.85)">{{ brandTail }}</span></template>
         </span>
         <!-- The short rule, not `--tall`: it is dividing a 13 px word from an
              icon, where the tall one divides two 30 px chips. -->
-        <span v-if="help" class="win-rule"></span>
+        <span v-if="help && !modula" class="win-rule"></span>
         <button
           v-if="help"
           type="button"
@@ -595,7 +642,8 @@ function requestClose() {
           @pointerdown.stop
           @click="helpOpen = !helpOpen"
         >
-          <Icon name="help" :size="15" :stroke-width="2" />
+          <span v-if="modula" style="font:700 12px/1 'Inter',system-ui,sans-serif">?</span>
+          <Icon v-else name="help" :size="15" :stroke-width="2" />
         </button>
       </div>
 
@@ -607,8 +655,17 @@ function requestClose() {
         positions.
       -->
       <div class="flex items-center gap-2">
+        <!-- Modula: a lamp pill in the kit's second hue — DELTA is monitoring,
+             a mode rather than a value, the hue the kit gives modes. -->
+        <ModulaLedPill
+          v-if="showDelta && modula"
+          size="sm" label="DELTA" color="var(--m-second)"
+          :model-value="delta" :disabled="deltaDisabled" :title="deltaTitle"
+          @pointerdown.stop
+          @update:model-value="emit('toggle-delta')"
+        />
         <button
-          v-if="showDelta"
+          v-if="showDelta && !modula"
           type="button"
           class="win-chip"
           :class="{ 'win-chip--on': delta }"
@@ -620,12 +677,34 @@ function requestClose() {
         >
           <span class="win-chip-text">DELTA</span>
         </button>
+        <ModulaPresetBrowser
+          v-if="modula && presets"
+          class="win-presets-m"
+          :presets="presets"
+          :disabled="presetsDisabled"
+          :disabled-hint="presetsDisabledHint"
+        />
         <slot name="header-center" />
       </div>
 
       <div class="flex items-center justify-end gap-2.5">
+        <!-- Modula: a fixed 96 px slot, so ON and BYPASS (different lengths)
+             never move the close button. -->
+        <span v-if="showEngage && modula" class="win-engage-slot-m">
+          <button
+            type="button"
+            class="win-pill-m"
+            :aria-pressed="String(engaged)"
+            title="Engage or bypass the effect"
+            @pointerdown.stop
+            @click="emit('toggle-engaged')"
+          >
+            <span class="win-pill-lamp-m" :class="{ 'is-on': engaged }"></span>
+            <span class="win-pill-text-m" :class="{ 'is-on': engaged }">{{ engaged ? 'ON' : 'BYPASS' }}</span>
+          </button>
+        </span>
         <button
-          v-if="showEngage"
+          v-if="showEngage && !modula"
           type="button"
           class="win-chip"
           :class="{ 'win-chip--on': engaged }"
@@ -650,7 +729,8 @@ function requestClose() {
           @pointerdown.stop
           @click="requestClose"
         >
-          <Icon name="close" :size="14" :stroke-width="2.5" />
+          <span v-if="modula" style="font:400 17px/1 'Inter',system-ui,sans-serif;margin-top:-1px">×</span>
+          <Icon v-else name="close" :size="14" :stroke-width="2.5" />
         </button>
       </div>
     </div>
@@ -733,7 +813,8 @@ function requestClose() {
         title="Select the whole file"
         @click="selectAll()"
       >
-        <Icon name="selectAll" :size="13" :stroke-width="2" />
+        <span v-if="modula" class="win-selectall-box-m"></span>
+        <Icon v-else name="selectAll" :size="13" :stroke-width="2" />
         <span>Select all</span>
       </button>
 
@@ -766,8 +847,9 @@ function requestClose() {
             :aria-pressed="String(previewing)"
             @click="emit('toggle-preview')"
           >
-            <Icon :name="previewing ? 'stop' : 'play'" :size="13" />
-            <span class="win-btn-label">{{ previewing ? 'Stop preview' : 'Preview' }}</span>
+            <span v-if="modula" class="win-play-m" :class="{ 'is-on': previewing }"></span>
+            <Icon v-else :name="previewing ? 'stop' : 'play'" :size="13" />
+            <span class="win-btn-label">{{ previewing ? (modula ? 'Stop' : 'Stop preview') : 'Preview' }}</span>
           </button>
         </span>
 
@@ -779,7 +861,8 @@ function requestClose() {
           :title="applyTitle"
           @click="emit('apply')"
         >
-          <Icon :name="applyIcon" :size="15" :stroke-width="2.5" />
+          <span v-if="modula" style="font:700 12px/1 'Inter',system-ui,sans-serif">✓</span>
+          <Icon v-else :name="applyIcon" :size="15" :stroke-width="2.5" />
           <span class="win-btn-label">{{ applyLabel }}</span>
           <span class="win-btn-label-short">{{ applyLabelShort }}</span>
         </button>
@@ -1238,6 +1321,158 @@ function requestClose() {
   .win-apply .win-btn-label-short {
     display: inline;
   }
+}
+
+/* ── MODULA ─────────────────────────────────────────────────────────────────
+   The control-surface kit's chrome (docs/design/modula, "PLUGIN CHROME"). One
+   lifted chassis, no separate face plane: the face is the chassis, inset by
+   14 px, and the header and footer are separated from it by a dark rule over
+   a 4 % lit edge rather than by planes of their own. */
+.win-frame[data-design='modula'] {
+  border-radius: 22px;
+  background: var(--m-chassis);
+  box-shadow: 0 60px 90px -50px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.6);
+  color: var(--m-ink);
+}
+/* Space-between, as the kit draws it: the preset browser sits between the
+   name and the switches rather than on the window's axis. A centred column
+   needs twice the wider side's width, which a long name like CAMBRIDGE
+   INFLATOR turns into an overflow. */
+[data-design='modula'] .win-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 58px;
+  padding: 2px 18px 0;
+  gap: 16px;
+  background: transparent;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.32);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+[data-design='modula'] .win-face {
+  background: transparent;
+}
+[data-design='modula'] .win-body {
+  padding: 14px;
+}
+[data-design='modula'] .win-footer {
+  height: 60px;
+  padding: 0 16px;
+  background: transparent;
+  border-top: 1px solid rgba(0, 0, 0, 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.win-brand-m {
+  white-space: nowrap;
+  font: 800 13px/1 var(--m-font-ui);
+  letter-spacing: 0.14em;
+  color: color-mix(in srgb, var(--face, #e8a33d) 20%, #fff);
+}
+/* Help and close: round, raised, no fill. */
+[data-design='modula'] .win-icon-btn {
+  border-radius: 50%;
+  background: transparent;
+  color: var(--m-ink-2);
+  box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.65);
+}
+[data-design='modula'] .win-icon-btn:hover,
+[data-design='modula'] .win-icon-btn--on {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--m-ink);
+}
+[data-design='modula'] .win-header > div {
+  min-width: 0;
+}
+[data-design='modula'] .win-header > div:first-child,
+[data-design='modula'] .win-header > div:last-child {
+  flex: none;
+}
+.win-presets-m {
+  width: 200px;
+  flex: 0 1 200px;
+}
+[data-design='modula'] .win-rule--tall {
+  height: 22px;
+  margin: 0 3px;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+.win-engage-slot-m {
+  width: 96px;
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+}
+.win-pill-m {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 13px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  background: transparent;
+  box-shadow: var(--m-shadow-raised);
+}
+.win-pill-m:hover { filter: brightness(1.08); }
+.win-pill-m:focus-visible { outline: 2px solid #7fe9f6; outline-offset: 2px; }
+.win-pill-lamp-m {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--m-lamp-off);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.7);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.win-pill-lamp-m.is-on { background: var(--m-ok); box-shadow: 0 0 6px var(--m-ok); }
+.win-pill-text-m {
+  font: 700 10px/1 var(--m-font-ui);
+  letter-spacing: 0.14em;
+  color: var(--m-ink-3);
+}
+.win-pill-text-m.is-on { color: var(--m-ink); }
+
+/* Footer: Select all is a dashed square in an outline; Preview is raised;
+   Apply is the light primary. All 32 px, radius 9. */
+[data-design='modula'] .win-selectall {
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--m-ink-3);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+[data-design='modula'] .win-selectall:hover { color: var(--m-ink); box-shadow: inset 0 0 0 1px rgba(232, 163, 61, 0.7); }
+.win-selectall-box-m { width: 10px; height: 10px; box-sizing: border-box; border-radius: 2px; border: 1.5px dashed currentColor; }
+[data-design='modula'] .win-sel { color: var(--m-ink-4); }
+[data-design='modula'] .win-preview {
+  min-width: 0;
+  height: 32px;
+  padding: 0 14px;
+  gap: 8px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--m-ink);
+  font: 600 12px var(--m-font-ui);
+  box-shadow: var(--m-shadow-raised);
+}
+[data-design='modula'] .win-preview:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); }
+[data-design='modula'] .win-preview--on { background: transparent; }
+.win-play-m { width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--m-ink); }
+.win-play-m.is-on { border-left-color: var(--m-accent); }
+[data-design='modula'] .win-apply {
+  height: 32px;
+  padding: 0 14px;
+  gap: 7px;
+  border-radius: 9px;
+  color: #1b1d21;
+  font: 600 12px var(--m-font-ui);
+  background: linear-gradient(180deg, #f2f4f7, #d9dde3);
+  box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(0, 0, 0, 0.55), 0 6px 12px -6px rgba(0, 0, 0, 0.9);
 }
 
 @keyframes pluginBounceIn {
