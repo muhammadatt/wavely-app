@@ -164,6 +164,136 @@ try {
   }
 
   /**
+   * The plugin chain, checked for what it DOES: opening plugins adds nothing
+   * to it; a plugin outside the chain opens alone and the chain counts as a
+   * plugin; a plugin IN the chain still opens alone as its solo copy; the Add picker is the way in and its plugins open beside the chain
+   * with no Apply of their own; the arrows reorder; Apply commits every live
+   * slot in order as one edit and bypasses them afterwards.
+   */
+  {
+    const before = errors.length
+    const openOp = async (name) => {
+      await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
+      await page.keyboard.type(name); await page.waitForTimeout(450)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
+    }
+    const frames = () => page.locator('.win-frame').count()
+    const chainWin = page.locator('.win-frame').filter({ hasText: 'PLUGIN CHAIN' })
+    const rowNames = () => chainWin.locator('.pc-name').allInnerTexts()
+    const addFromPicker = async (label) => {
+      await chainWin.getByRole('button', { name: '+ Add plugin' }).dispatchEvent('click'); await page.waitForTimeout(300)
+      await page.keyboard.type(label); await page.waitForTimeout(250)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
+    }
+
+    // A plugin outside the chain opens alone, and the chain counts as a plugin.
+    await openOp('Inflator')
+    await openOp('Air Boost')
+    const soloWindows = await frames()
+    await openOp('Plugin Chain')
+    const chainReplaced = (await frames()) === 1 && (await chainWin.count()) === 1
+    // Every panel opened above — none of them joined the chain.
+    const kept = (await rowNames()).length
+
+    // The picker is the way in; its plugins open beside the chain.
+    await addFromPicker('Inflator')
+    await addFromPicker('Air Boost')
+    const groupWindows = await frames()
+    const inflatorWin = page.locator('.win-frame').filter({ hasText: 'IN CHAIN · 1' })
+    const memberApplyOff = await inflatorWin.locator('.win-apply').isDisabled().catch(() => false)
+
+    // A plugin outside the chain bypasses it (it must preview what its own
+    // Apply writes), and the chain STAYS bypassed when it closes: only the
+    // user turns it back on, from the chain window's master switch.
+    const chainBadge = () => page.locator('.chain-count').innerText().catch(() => '')
+    const liveBefore = await chainBadge()
+    await openOp('Opto Comp')
+    const pausedBadge = await chainBadge()
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+    const closedBadge = await chainBadge()
+    const masterOn = async () => {
+      await chainWin.locator('.win-pill-m').first().dispatchEvent('click'); await page.waitForTimeout(300)
+    }
+    await openOp('Plugin Chain')
+    await masterOn()
+    const resumedBadge = await chainBadge()
+    const pauseOk = liveBefore === 'ACTIVE' && pausedBadge === 'BYPASSED' && closedBadge === 'BYPASSED'
+      && resumedBadge === 'ACTIVE'
+
+    // A plugin that is ALSO in the chain still opens on its own: its solo copy,
+    // alone, with a live Apply and no IN CHAIN badge — the chain suspended
+    // underneath and its slot untouched.
+    await openOp('Inflator')
+    const soloCopyAlone = (await frames()) === 1
+      && (await page.locator('.win-frame').filter({ hasText: 'IN CHAIN' }).count()) === 0
+      && !(await page.locator('.win-frame .win-apply').isDisabled())
+      && (await chainBadge()) === 'BYPASSED'
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+    await openOp('Plugin Chain')
+    const slotKept = (await rowNames()).join(',') === 'Inflator,AirBoost' && (await chainBadge()) === 'BYPASSED'
+    await masterOn()
+
+    const order1 = await rowNames()
+    await chainWin.getByRole('button', { name: 'Move Inflator later' }).dispatchEvent('click')
+    await page.waitForTimeout(300)
+    const order2 = await rowNames()
+
+    await chainWin.locator('.win-apply').dispatchEvent('click')
+    const toast = await page.getByText('Chain applied — AirBoost → Inflator').waitFor({ timeout: 20000 })
+      .then(() => true, () => false)
+    await page.waitForTimeout(500)
+    // The whole chain is bypassed; each slot keeps its own ON.
+    const pills = await chainWin.locator('.pc-row .m-pill-text').allInnerTexts()
+    const masterPill = await chainWin.locator('.win-pill-m').first().getAttribute('aria-pressed')
+    const bypassedAfter = pills.length === 2 && pills.every(t => t === 'ON') && masterPill === 'false'
+      && (await page.locator('.chain-count').innerText()) === 'BYPASSED'
+      && await chainWin.locator('.win-apply').isDisabled()
+
+    // A plugin can take more than one slot; the slots are numbered, and a
+    // removed one's number is the next to be handed out again.
+    await addFromPicker('Inflator')
+    const twice = (await rowNames()).join(',')
+    await chainWin.getByRole('button', { name: 'Remove Inflator 1 from the chain' }).dispatchEvent('click')
+    await page.waitForTimeout(300)
+    const afterRemove = (await rowNames()).join(',')
+    await addFromPicker('Inflator')
+    const readded = (await rowNames()).join(',')
+    const repeatsOk = twice === 'AirBoost,Inflator 1,Inflator 2' && afterRemove === 'AirBoost,Inflator'
+      && readded === 'AirBoost,Inflator 2,Inflator 1'
+
+    // A plugin outside the chain takes the whole chain group off the screen.
+    await openOp('Opto Comp')
+    const soloAfterGroup = await frames()
+    await openOp('Plugin Chain')
+    await chainWin.getByRole('button', { name: 'Clear' }).dispatchEvent('click'); await page.waitForTimeout(300)
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+
+    const fresh = errors.slice(before)
+    const ok = soloWindows === 1 && chainReplaced && kept === 0 && groupWindows === 3 && memberApplyOff
+      && order1.join(',') === 'Inflator,AirBoost' && order2.join(',') === 'AirBoost,Inflator'
+      && toast && bypassedAfter && soloAfterGroup === 1 && pauseOk && soloCopyAlone && slotKept && repeatsOk
+      && fresh.length === 0
+    if (!ok) failures++
+    const why = [
+      soloWindows === 1 ? '' : `${soloWindows} solo plugin windows open at once; `,
+      chainReplaced ? '' : 'opening the chain did not replace the open plugin; ',
+      kept === 0 ? '' : `opening panels put ${kept} plugin(s) in the chain; `,
+      groupWindows === 3 ? '' : `chain + 2 plugins should be 3 windows, got ${groupWindows}; `,
+      memberApplyOff ? '' : 'a plugin in the chain still has a live Apply; ',
+      order1.join(',') === 'Inflator,AirBoost' ? '' : `picker did not append in order (${order1.join(',')}); `,
+      order2.join(',') === 'AirBoost,Inflator' ? '' : `move did not reorder (${order2.join(',')}); `,
+      toast ? '' : 'Apply did not report the chain in order; ',
+      bypassedAfter ? '' : `apply should bypass the chain and keep the slots on (slots ${pills.join(',')}, chain ON=${masterPill}); `,
+      soloAfterGroup === 1 ? '' : `a solo plugin left ${soloAfterGroup} windows open; `,
+      pauseOk ? '' : `chain should bypass for a solo plugin, stay bypassed after it closes and come back on its switch (${liveBefore} → ${pausedBadge} → ${closedBadge} → ${resumedBadge}); `,
+      soloCopyAlone ? '' : 'a plugin in the chain did not open on its own with its own Apply; ',
+      slotKept ? '' : 'opening the solo copy disturbed the chain slot; ',
+      repeatsOk ? '' : `repeat slots misnumbered (${twice} / ${afterRemove} / ${readded}); `,
+    ].join('')
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Plugin chain'.padEnd(16)} ${why}${fresh.join(' | ')}`)
+  }
+
+  /**
    * The files panel, which is not a plugin window and so is not in PANELS.
    *
    * ⚠ THIS CHECKS WHAT EACH CONTROL DOES, NOT ONLY THAT THE PANEL RENDERS, and

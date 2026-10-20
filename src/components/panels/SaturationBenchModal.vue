@@ -9,8 +9,9 @@
  * curve, which is what makes an A/B between curves a comparison of character.
  * DELTA plays only what the layers add.
  */
-import { onMounted, watch } from 'vue'
+import { onMounted } from 'vue'
 import { useSaturationBench } from '../../composables/useSaturationBench.js'
+import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
@@ -27,20 +28,16 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   sbLayers, sbPreview, sbDelta, sbInputLevels, sbOutputLevels,
-  togglePreview, toggleDelta, syncLayer, syncLayerFields, resetLayers, refreshSpectrum,
+  togglePreview, toggleDelta, syncLayer, syncLayerFields, resetLayers, 
   apply, teardown, closeModal,
 } = useSaturationBench()
 
-const { state, appState } = useEditorState()
-
-// An edit or a document switch changes the file, and with it every layer's
-// calibration. Measured only while the window is engaged.
-watch(() => [state.revision, appState.activeDocumentId], () => {
-  if (sbPreview.value) refreshSpectrum()
-})
+const { state } = useEditorState()
 
 onMounted(() => {
-  if (!sbPreview.value) togglePreview()
+  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
+  // must not un-bypass its slot.
+  if (!sbPreview.value && currentPluginCopy() === 'solo') togglePreview()
 })
 
 const ACCENT = '#e89a6f'
