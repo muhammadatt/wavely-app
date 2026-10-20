@@ -46,9 +46,21 @@ test('the chain and the plugins in it open together', () => {
   // A plugin outside the chain takes the whole group off the screen.
   w.openWindow('opto-smooth')
   assert.deepEqual([...w.windows], ['opto-smooth'])
-  // And a chain plugin takes the solo plugin off it.
+  // And a chain plugin takes the solo plugin off it — and brings the chain
+  // with it, since that is where its Apply lives.
   w.openWindow('inflator')
-  assert.deepEqual([...w.windows], ['inflator'])
+  assert.deepEqual([...w.windows], ['plugin-chain', 'inflator'])
+})
+
+test('a solo plugin window is what suspends the chain, whatever its ON says', async () => {
+  const { isSoloPluginWindow } = await import('../../src/composables/useWindows.js')
+  withSlots('inflator')
+  assert.equal(isSoloPluginWindow('opto-smooth'), true)
+  assert.equal(isSoloPluginWindow('normalize'), true, 'no live preview, still a solo window')
+  assert.equal(isSoloPluginWindow('inflator'), false)
+  assert.equal(isSoloPluginWindow('plugin-chain'), false)
+  assert.equal(isSoloPluginWindow('spectrum-analyzer'), false)
+  setChainSlotPredicate(() => false)
 })
 
 test('the analyzer stays open beside either group', () => {

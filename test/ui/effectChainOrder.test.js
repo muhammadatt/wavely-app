@@ -100,6 +100,22 @@ test('suspension and the master bypass never overwrite each other', () => {
   assert.deepEqual(signalPath(chain), ['a'])
 })
 
+test('an open solo window suspends the chain even with its plugin bypassed', () => {
+  // Bypassing a solo plugin to A/B it must compare against the DRY audio,
+  // not bring the chain back underneath.
+  const chain = chainWith('a', 'x')
+  engage(chain, 'a')
+  chain.setSoloOpen(true)
+  chain.setEnabled('x', true)
+  assert.deepEqual(signalPath(chain), ['x'])
+  chain.setEnabled('x', false)
+  assert.deepEqual(signalPath(chain), [])
+  assert.equal(chain.suspended, true)
+  // The window closing is what brings the chain back.
+  chain.setSoloOpen(false)
+  assert.deepEqual(signalPath(chain), ['a'])
+})
+
 test('a bypassed slot keeps its place and comes back to it', () => {
   const chain = chainWith('a', 'b', 'c')
   for (const id of ['a', 'b', 'c']) engage(chain, id)

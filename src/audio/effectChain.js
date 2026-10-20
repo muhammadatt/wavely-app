@@ -33,6 +33,8 @@ export class EffectChain {
     this.outputNode.connect(audioContext.destination)
     this.effects = []
     this.bypassed = false
+    // A plugin window outside the chain is open (see setSoloOpen).
+    this.soloOpen = false
     this.listeners = new Set()
     this.inputNode.connect(this.outputNode)
   }
@@ -85,9 +87,25 @@ export class EffectChain {
     this._rebuildChain()
   }
 
-  /** True while a plugin outside the chain is auditioned: the chain is out of the path. */
+  /**
+   * True while a plugin outside the chain is open or auditioned: the chain is
+   * out of the path.
+   *
+   * ⚠ THE WINDOW, NOT ONLY THE PLUGIN'S ON. Suspending on the audition alone
+   * meant BYPASSing a solo plugin to A/B it brought the chain back underneath
+   * — the "dry" side of the comparison was the chain — and a solo window with
+   * no live preview at all (Peak / Loudness Normalize) never suspended it, so
+   * the chain played under a window whose Apply writes the original audio.
+   */
   get suspended() {
-    return this.effects.some(e => !e.member && e.enabled)
+    return this.soloOpen || this.effects.some(e => !e.member && e.enabled)
+  }
+
+  /** The window manager's half of `suspended`: a solo plugin window is open. */
+  setSoloOpen(open) {
+    if (this.soloOpen === !!open) return
+    this.soloOpen = !!open
+    this._rebuildChain()
   }
 
   /** The chain's slots, in processing order. */
@@ -171,7 +189,7 @@ export class EffectChain {
     // An audition plays alone; otherwise the chain's live slots, in order.
     const auditioned = this.effects.filter(e => !e.member && e.enabled)
     const active = auditioned.length > 0 ? auditioned
-      : this.bypassed ? []
+      : this.bypassed || this.soloOpen ? []
         : this.effects.filter(e => e.member && e.enabled)
 
     if (active.length === 0) {

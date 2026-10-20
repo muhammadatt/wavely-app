@@ -1,6 +1,6 @@
-import { ref, computed } from 'vue'
+import { ref, computed, effectScope, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
-import { useWindows, setChainSlotPredicate } from './useWindows.js'
+import { useWindows, setChainSlotPredicate, isSoloPluginWindow } from './useWindows.js'
 import { getEffectChain, getEffectChainIfExists, onEffectChainCreated } from '../audio/effectChain.js'
 import { replaceRegionWithBuffer } from '../audio/operations.js'
 import { computePeakCache } from '../audio/processing.js'
@@ -85,7 +85,23 @@ function addDef(def) {
   if (chain?.bypassed) chain.setBypassed(false)
 }
 
+// Each slot's ON as last seen, to notice one being switched on (see sync).
+let lastEnabled = new Map()
+
 function sync(chain) {
+  // A slot switched ON while the chain is bypassed is someone asking to hear
+  // it — from its own window as much as from the rack — so it lifts the
+  // master bypass. (The rack's lamp already did; the plugin's own lamp did
+  // not, and after an Apply turned a plugin "on" into silence.) A slot just
+  // added has no previous state and is handled by addDef.
+  const members = chain.members()
+  const switchedOn = members.some(e => e.enabled && lastEnabled.get(e.id) === false)
+  lastEnabled = new Map(members.map(e => [e.id, e.enabled]))
+  if (switchedOn && chain.bypassed) {
+    chain.setBypassed(false) // re-enters sync with the new state
+    return
+  }
+
   bypassed.value = chain.bypassed
   suspended.value = chain.suspended
   slots.value = chain.members().map(e => ({
@@ -96,8 +112,18 @@ function sync(chain) {
   }))
 }
 
+// Whether a plugin window outside the chain is open — the chain is suspended
+// while one is (EffectChain.suspended). Watched for the app's lifetime, in a
+// scope of its own: no component owns this.
+const { windows } = useWindows()
+const soloOpen = computed(() => windows.some(isSoloPluginWindow))
+effectScope(true).run(() => {
+  watch(soloOpen, open => getEffectChainIfExists()?.setSoloOpen(open))
+})
+
 onEffectChainCreated((chain) => {
   chain.onChange(() => sync(chain))
+  chain.setSoloOpen(soloOpen.value)
   sync(chain)
 })
 
@@ -122,7 +148,7 @@ export function chainStatusFor(windowId) {
   const def = defForWindow(windowId)
   if (!def) return null
   const index = slots.value.findIndex(s => s.id === def.id)
-  return { member: index !== -1, position: index + 1 }
+  return { member: index !== -1, position: index + 1, chainBypassed: bypassed.value }
 }
 
 /** A plugin window mounted: finish a pending add, or bring a live plugin's meters back. */

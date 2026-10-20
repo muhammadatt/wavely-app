@@ -47,6 +47,9 @@ export function setChainSlotPredicate(fn) {
 
 const inChainGroup = id => id === CHAIN_WINDOW_ID || hasSlot(id)
 
+/** A plugin window that is not the chain's: while one is open the chain is suspended. */
+export const isSoloPluginWindow = id => isPluginWindow(id) && !inChainGroup(id)
+
 // Last known position per window id. Deliberately outside the reactive list and
 // never cleared: closing a window and reopening it should put it back where the
 // user dragged it, not fling it to the default corner again.
@@ -79,6 +82,12 @@ export function useWindows() {
         if (!isPluginWindow(other)) continue
         if (chainSide && inChainGroup(other)) continue
         openIds.splice(i, 1)
+      }
+      // A plugin in the chain opens WITH the chain: its Apply lives there, and
+      // opened on its own (from the Effects menu, say) it read "Applies with
+      // the chain" with no chain in sight.
+      if (chainSide && id !== CHAIN_WINDOW_ID && !openIds.includes(CHAIN_WINDOW_ID)) {
+        openIds.push(CHAIN_WINDOW_ID)
       }
     }
     openIds.push(id)

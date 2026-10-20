@@ -704,14 +704,17 @@ function requestClose() {
           :disabled="presetsDisabled"
           :disabled-hint="presetsDisabledHint"
         />
+        <!-- Says BYPASSED with the chain: the plugin's own lamp can read ON
+             while the chain around it is out of circuit and nothing is heard. -->
         <button
           v-if="inChain"
           type="button"
           class="win-chain-pill is-member"
-          title="Open the Plugin Chain"
+          :class="{ 'is-bypassed': inChain.chainBypassed }"
+          :title="inChain.chainBypassed ? 'The Plugin Chain is bypassed — open it to turn it on' : 'Open the Plugin Chain'"
           @pointerdown.stop
           @click="openWindow('plugin-chain')"
-        >IN CHAIN · {{ inChain.position }}</button>
+        >IN CHAIN · {{ inChain.position }}{{ inChain.chainBypassed ? ' · BYPASSED' : '' }}</button>
         <slot name="header-center" />
       </div>
 
@@ -1067,6 +1070,10 @@ function requestClose() {
 .win-chain-pill.is-member {
   border-color: rgba(232, 163, 61, .45);
   color: #e8a33d;
+}
+.win-chain-pill.is-member.is-bypassed {
+  border-color: rgba(255, 255, 255, .14);
+  color: rgba(234, 246, 248, .55);
 }
 .win-chip {
   display: flex;
