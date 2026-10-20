@@ -25,7 +25,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useDeEsser } from '../../composables/useDeEsser.js'
-import { hasChainSlot } from '../../composables/usePluginChain.js'
+import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   AIR_MAKEUP_MAX_DB,
@@ -85,9 +85,9 @@ watch(() => [state.revision, appState.activeDocumentId], () => {
 })
 
 onMounted(() => {
-  // A plugin that already has a slot keeps its ON/BYPASS: opening its
-  // editor from the chain must not un-bypass it.
-  if (!hfPreview.value && !hasChainSlot('hf-softener')) togglePreview()
+  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
+  // must not un-bypass its slot.
+  if (!hfPreview.value && currentPluginCopy() === 'solo') togglePreview()
 })
 
 // The scope freezes on what last played while the transport is stopped, and

@@ -5,6 +5,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import {
   chainWindowMounted, chainWindowUnmounted, chainStatusFor,
 } from '../../composables/usePluginChain.js'
+import { currentPluginCopy, idForCopy } from '../../composables/pluginCopies.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import Icon from '../ui/Icon.vue'
@@ -224,6 +225,11 @@ const { state, hasSelection, selectAll } = useEditorState()
 const accent = computed(() => props.accent)
 const modula = computed(() => props.design === 'modula')
 
+// The window this harness IS: the plugin's id for its solo copy, `<id>@chain`
+// for the copy in the Plugin Chain (pluginCopies.js). Faceplates pass the solo
+// id either way; help is keyed by it.
+const windowId = idForCopy(props.windowId, currentPluginCopy())
+
 /**
  * Help for THIS effect, looked up by the id the harness was already given.
  *
@@ -388,7 +394,7 @@ let previouslyFocused = null
 // writes it, in order with the rest. Joining happens only from the chain's
 // Add picker, so a plugin outside the chain shows nothing here.
 const inChain = computed(() => {
-  const status = chainStatusFor(props.windowId)
+  const status = chainStatusFor(windowId)
   return status?.member ? status : null
 })
 
@@ -398,12 +404,12 @@ const label = computed(() => `${props.brandLead} ${props.brandTail}`.trim())
 onMounted(() => {
   // A plugin keeps playing in the chain while its window is closed, with its
   // meters stopped; reopening the window brings them back.
-  chainWindowMounted(props.windowId)
+  chainWindowMounted(windowId)
 
   // A window that was resized before is reopened at the size it was left, the
   // same courtesy the position gets. Restored before the position fallback
   // below, which reads it for the first-open case.
-  const rememberedSize = getSize(props.windowId)
+  const rememberedSize = getSize(windowId)
   if (rememberedSize) {
     // `extra` is how far a drag took the window past its natural width, so a
     // window whose natural width moves (the EQ follows its band count)
@@ -415,7 +421,7 @@ onMounted(() => {
   }
   emit('update:heightDelta', heightDelta.value)
 
-  const remembered = getPosition(props.windowId)
+  const remembered = getPosition(windowId)
   if (remembered) {
     pos.value = { ...remembered }
   } else {
@@ -448,10 +454,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   // However the window closed — ×, Escape, or replaced by another plugin.
-  chainWindowUnmounted(props.windowId)
+  chainWindowUnmounted(windowId)
   window.removeEventListener('resize', onViewportResize)
   bodyRo?.disconnect()
-  savePosition(props.windowId, pos.value)
+  savePosition(windowId, pos.value)
   // Return focus only if it is still inside this window; if the user has since
   // clicked the waveform, yanking it back would be worse than leaving it.
   if (frameEl.value?.contains(document.activeElement)) {
@@ -498,7 +504,7 @@ function onDragEnd(e) {
   // On pointercancel the capture is already implicitly released
   try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
   clampToViewport()
-  savePosition(props.windowId, pos.value)
+  savePosition(windowId, pos.value)
 }
 
 /**
@@ -538,7 +544,7 @@ function onResizeEnd(e) {
   resizing.value = false
   try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
   clampToViewport()
-  saveSize(props.windowId, {
+  saveSize(windowId, {
     width: boxWidth.value,
     extra: boxWidth.value - props.width,
     heightDelta: heightDelta.value,
@@ -550,13 +556,13 @@ function resetSize() {
   boxWidth.value = props.width
   heightDelta.value = 0
   emit('update:heightDelta', 0)
-  saveSize(props.windowId, { width: boxWidth.value, extra: 0, heightDelta: 0 })
+  saveSize(windowId, { width: boxWidth.value, extra: 0, heightDelta: 0 })
 }
 
 // Touching or tabbing into the frame raises it. Without this, two open windows
 // keep whatever order they happened to mount in.
 function raise() {
-  focusWindow(props.windowId)
+  focusWindow(windowId)
 }
 
 // Escape closes the window focus is actually in, which is not necessarily the
@@ -579,7 +585,7 @@ function onEscape(e) {
 // still emitted for owners that need to tear down a preview chain first.
 function requestClose() {
   emit('close')
-  closeWindow(props.windowId)
+  closeWindow(windowId)
 }
 </script>
 

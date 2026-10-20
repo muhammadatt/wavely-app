@@ -5,7 +5,8 @@
  * + ADD PLUGIN opens a picker (the Search Operations palette, narrowed to the
  * plugins that can run in the chain); picking one appends it and opens it to
  * tune. That picker is the ONLY way into the chain — opening a plugin from the
- * rail auditions it on its own, and closes this window (useWindows.js).
+ * rail opens its own SOLO copy, with its own settings and Apply, and closes this
+ * window (useWindows.js); a slot is the plugin's separate CHAIN copy.
  * Plugins in the chain may all be open beside this window, and none of them
  * has an Apply of its own: this window's Apply is the one.
  *
@@ -21,6 +22,7 @@
 import { computed, ref } from 'vue'
 import { useEditorState } from '../../../composables/useEditorState.js'
 import { usePluginChain } from '../../../composables/usePluginChain.js'
+import { baseId } from '../../../composables/pluginCopies.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import PluginPicker from '../../PluginPicker.vue'
 import ModulaLedPill from '../../modula/ModulaLedPill.vue'
@@ -44,7 +46,8 @@ const applyLabel = computed(() => {
 
 // ── Add picker ──────────────────────────────────────────────────────────────
 const pickerOpen = ref(false)
-const memberWindowIds = computed(() => slots.value.map(s => s.windowId))
+// The picker lists plugins by their own (solo) ids; a slot is the chain's copy.
+const memberWindowIds = computed(() => slots.value.map(s => baseId(s.windowId)))
 
 function pick(id) {
   pickerOpen.value = false

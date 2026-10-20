@@ -1,6 +1,7 @@
 import { ref, computed, effectScope, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
-import { useWindows, setChainSlotPredicate, isSoloPluginWindow } from './useWindows.js'
+import { useWindows, isSoloPluginWindow } from './useWindows.js'
+import { idForCopy } from './pluginCopies.js'
 import { getEffectChain, getEffectChainIfExists, onEffectChainCreated } from '../audio/effectChain.js'
 import { replaceRegionWithBuffer } from '../audio/operations.js'
 import { computePeakCache } from '../audio/processing.js'
@@ -20,16 +21,19 @@ import { computePeakCache } from '../audio/processing.js'
  * it: every live slot rendered in order over the selection, committed as ONE
  * undo step.
  *
- * Opening a plugin from the rail or the palette does NOT add it: it is
- * auditioned on its own, after the chain, until its window closes — so
- * "which plugins are in the chain" has one answer, the list, rather than
- * depending on which windows happened to be opened. The window manager keeps
- * the two apart: the chain and its plugins' windows open together, and a
- * plugin outside the chain opens alone (useWindows.js). A plugin in the chain
- * has no Apply of its own — the chain's Apply is the only one.
+ * A slot is the plugin's CHAIN COPY (pluginCopies.js): its own settings, its
+ * own node and its own window, `<id>@chain`. Opening a plugin from the rail or
+ * the palette opens its SOLO copy, which is never in the chain: it is
+ * auditioned on its own until its window closes, with an Apply of its own —
+ * whether or not the same plugin also has a slot. So "which plugins are in the
+ * chain" has one answer, the list, rather than depending on which windows
+ * happened to be opened. The window manager keeps the two apart: the chain and
+ * its copies' windows open together, and a solo plugin opens alone
+ * (useWindows.js). A chain copy has no Apply of its own — the chain's Apply is
+ * the only one.
  *
- * Each plugin composable registers a `ChainPlugin` (below) the first time it
- * is used. The registration is how the chain reaches a plugin's own state —
+ * Each copy of a plugin registers a `ChainPlugin` (below) the first time it is
+ * used — the solo copy too, so its window closing can switch its audition off. The registration is how the chain reaches a plugin's own state —
  * its ON/BYPASS (which stays the source of truth for whether the slot is live,
  * so the plugin's window and the chain can never disagree) and its apply path.
  *
@@ -58,13 +62,9 @@ const bypassed = ref(false)
 // A plugin outside the chain is being auditioned, so the chain is out of the
 // signal path until its window closes — see EffectChain.
 const suspended = ref(false)
-// Windows asked to join the chain before their plugin had registered (its
-// composable runs in the window's setup); finished when the window mounts.
+// Chain copies asked to join the chain before they had registered (a copy's
+// composable first runs in its window's setup); finished when the window mounts.
 const pendingAdds = new Set()
-
-// The chain group, for the window manager: a plugin with a slot, or one on its
-// way to one, opens beside the chain rather than replacing it.
-setChainSlotPredicate(windowId => pendingAdds.has(windowId) || hasChainSlot(windowId))
 
 function defForWindow(windowId) {
   for (const def of plugins.values()) if (def.windowId === windowId) return def
@@ -75,7 +75,7 @@ function isMember(id) {
   return slots.value.some(s => s.id === id)
 }
 
-/** Turn a plugin on and give it a slot at the end of the chain. */
+/** Turn a chain copy on and give it a slot at the end of the chain. */
 function addDef(def) {
   // On first: that is what builds its chain entry, which addToChain needs.
   if (!def.isActive()) def.setActive(true)
@@ -191,8 +191,12 @@ export function usePluginChain() {
     if (on && chain().bypassed) chain().setBypassed(false)
   }
 
-  /** Add the plugin edited in `windowId` to the end of the chain and open it to tune. */
-  function add(windowId) {
+  /**
+   * Add the plugin whose (solo) window is `pluginId` to the end of the chain —
+   * its chain copy, which starts from the default settings — and open it to tune.
+   */
+  function add(pluginId) {
+    const windowId = idForCopy(pluginId, 'chain')
     const def = defForWindow(windowId)
     if (def) addDef(def)
     else pendingAdds.add(windowId)

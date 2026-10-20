@@ -2,179 +2,196 @@ import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
+import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { applyAirBandRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
-import { airBandEffect, AIR_BAND_DEFAULTS } from '../audio/effects/airBand.js'
+import { airBandEffect as soloAirBandEffect, AIR_BAND_DEFAULTS } from '../audio/effects/airBand.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const AIR_BAND_WINDOW_ID = 'air-band'
 
-// Singleton reactive state shared between the sidebar trigger and the modal.
-const airBandAir = ref(AIR_BAND_DEFAULTS.air)
-const airBandOutput = ref(AIR_BAND_DEFAULTS.output)
-const airBandPreview = ref(false)
-const airBandInputLevels = ref([])
-const airBandOutputLevels = ref([])
-let meterId = null
+/**
+ * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
+ * has its own state, its own node in the EffectChain and its own window.
+ */
+const copies = pluginCopies((copy) => {
+  const airBandEffect = effectForCopy(soloAirBandEffect, copy)
+  const windowId = idForCopy(AIR_BAND_WINDOW_ID, copy)
 
-function currentParams() {
-  return {
-    air: airBandAir.value,
-    output: airBandOutput.value,
-  }
-}
+  // Reactive state shared by every caller of this copy.
+  const airBandAir = ref(AIR_BAND_DEFAULTS.air)
+  const airBandOutput = ref(AIR_BAND_DEFAULTS.output)
+  const airBandPreview = ref(false)
+  const airBandInputLevels = ref([])
+  const airBandOutputLevels = ref([])
+  let meterId = null
 
-export function useAirBand() {
-  const {
-    state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-    startProcessing, endProcessing, showToast,
-  } = useEditorState()
-  const { openWindow, closeWindow } = useWindows()
-
-  function initChain() {
-    const ctx = getAudioContext()
-    const chain = getEffectChain(ctx)
-    if (!chain.effects.find(e => e.id === airBandEffect.id)) {
-      chain.addEffect(airBandEffect)
+  function currentParams() {
+    return {
+      air: airBandAir.value,
+      output: airBandOutput.value,
     }
-    return chain
   }
 
-  function startMeters(chain) {
-    stopMeters()
-    function tick() {
-      const nodes = chain.effects.find(e => e.id === airBandEffect.id)?.nodes
-      if (nodes) {
-        // Only meter channels the source really has: the splitter is
-        // discrete, so asking for stereo on a mono file adds a dead bar.
-        const chCount = state.currentFile?.channels ?? 1
-        airBandInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
-        airBandOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
+  function useAirBand() {
+    const {
+      state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
+      startProcessing, endProcessing, showToast,
+    } = useEditorState()
+    const { openWindow, closeWindow } = useWindows()
+
+    function initChain() {
+      const ctx = getAudioContext()
+      const chain = getEffectChain(ctx)
+      if (!chain.effects.find(e => e.id === airBandEffect.id)) {
+        chain.addEffect(airBandEffect)
+      }
+      return chain
+    }
+
+    function startMeters(chain) {
+      stopMeters()
+      function tick() {
+        const nodes = chain.effects.find(e => e.id === airBandEffect.id)?.nodes
+        if (nodes) {
+          // Only meter channels the source really has: the splitter is
+          // discrete, so asking for stereo on a mono file adds a dead bar.
+          const chCount = state.currentFile?.channels ?? 1
+          airBandInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
+          airBandOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
+        }
+        meterId = requestAnimationFrame(tick)
       }
       meterId = requestAnimationFrame(tick)
     }
-    meterId = requestAnimationFrame(tick)
-  }
 
-  function stopMeters() {
-    if (meterId !== null) {
-      cancelAnimationFrame(meterId)
-      meterId = null
+    function stopMeters() {
+      if (meterId !== null) {
+        cancelAnimationFrame(meterId)
+        meterId = null
+      }
+      airBandInputLevels.value = []
+      airBandOutputLevels.value = []
     }
-    airBandInputLevels.value = []
-    airBandOutputLevels.value = []
-  }
 
-  function pushAllParams(chain) {
-    for (const [name, value] of Object.entries(currentParams())) {
+    function pushAllParams(chain) {
+      for (const [name, value] of Object.entries(currentParams())) {
+        chain.updateParam(airBandEffect.id, name, value)
+      }
+    }
+
+    function togglePreview() {
+      const chain = initChain()
+      airBandPreview.value = !airBandPreview.value
+      chain.setEnabled(airBandEffect.id, airBandPreview.value)
+
+      if (airBandPreview.value) {
+        pushAllParams(chain)
+        startMeters(chain)
+      } else {
+        stopMeters()
+      }
+    }
+
+    function pushParam(name, value) {
+      if (!airBandPreview.value) return
+      const chain = getEffectChain(getAudioContext())
       chain.updateParam(airBandEffect.id, name, value)
     }
-  }
 
-  function togglePreview() {
-    const chain = initChain()
-    airBandPreview.value = !airBandPreview.value
-    chain.setEnabled(airBandEffect.id, airBandPreview.value)
+    function syncAir(v) {
+      airBandAir.value = v
+      pushParam('air', v)
+    }
 
-    if (airBandPreview.value) {
-      pushAllParams(chain)
-      startMeters(chain)
-    } else {
+    function syncOutput(v) {
+      airBandOutput.value = v
+      pushParam('output', v)
+    }
+
+    /** A preset's controls, through the same paths a knob turn takes. */
+    function applyParams(p) {
+      if (p.air !== undefined) syncAir(p.air)
+      if (p.output !== undefined) syncOutput(p.output)
+    }
+
+    /** Render [start, end) of `segments` with the current settings, uncommitted. */
+    function renderRegion(segments, start, end) {
+      return applyAirBandRegion(
+        segments, start, end,
+        currentParams(),
+        state.currentFile.sampleRate, state.currentFile.channels,
+      )
+    }
+
+    async function apply() {
+      if (!state.selection) return
+      const { start, end } = state.selection
+
+      const wasPreviewing = airBandPreview.value
+      if (wasPreviewing) togglePreview()
+
+      startProcessing('Applying AirBoost...')
+      try {
+        const buffer = await renderRegion(state.segments, start, end)
+        const bufferId = replaceRegion(start, end, buffer, 'AirBoost')
+        const cache = await computePeakCache(buffer, 256)
+        setPeakCache(bufferId, cache)
+        showToast('AirBoost applied')
+      } catch (err) {
+        console.error('AirBoost failed:', err)
+        showToast('AirBoost failed')
+      } finally {
+        endProcessing()
+      }
+    }
+
+    function teardown() {
       stopMeters()
     }
-  }
 
-  function pushParam(name, value) {
-    if (!airBandPreview.value) return
-    const chain = getEffectChain(getAudioContext())
-    chain.updateParam(airBandEffect.id, name, value)
-  }
+    registerChainPlugin({
+      id: airBandEffect.id,
+      windowId,
+      label: 'AirBoost',
+      isActive: () => airBandPreview.value,
+      setActive: (on) => { if (airBandPreview.value !== on) togglePreview() },
+      render: renderRegion,
+      resume: () => startMeters(initChain()),
+      suspend: teardown,
+    })
 
-  function syncAir(v) {
-    airBandAir.value = v
-    pushParam('air', v)
-  }
+    function openModal() {
+      openWindow(windowId)
+    }
 
-  function syncOutput(v) {
-    airBandOutput.value = v
-    pushParam('output', v)
-  }
+    function closeModal() {
+      closeWindow(windowId)
+    }
 
-  /** A preset's controls, through the same paths a knob turn takes. */
-  function applyParams(p) {
-    if (p.air !== undefined) syncAir(p.air)
-    if (p.output !== undefined) syncOutput(p.output)
-  }
-
-  /** Render [start, end) of `segments` with the current settings, uncommitted. */
-  function renderRegion(segments, start, end) {
-    return applyAirBandRegion(
-      segments, start, end,
-      currentParams(),
-      state.currentFile.sampleRate, state.currentFile.channels,
-    )
-  }
-
-  async function apply() {
-    if (!state.selection) return
-    const { start, end } = state.selection
-
-    const wasPreviewing = airBandPreview.value
-    if (wasPreviewing) togglePreview()
-
-    startProcessing('Applying AirBoost...')
-    try {
-      const buffer = await renderRegion(state.segments, start, end)
-      const bufferId = replaceRegion(start, end, buffer, 'AirBoost')
-      const cache = await computePeakCache(buffer, 256)
-      setPeakCache(bufferId, cache)
-      showToast('AirBoost applied')
-    } catch (err) {
-      console.error('AirBoost failed:', err)
-      showToast('AirBoost failed')
-    } finally {
-      endProcessing()
+    return {
+      airBandAir,
+      airBandOutput,
+      airBandPreview,
+      airBandInputLevels,
+      airBandOutputLevels,
+      hasSelection,
+      togglePreview,
+      syncAir,
+      syncOutput,
+      applyParams,
+      apply,
+      teardown,
+      openModal,
+      closeModal,
     }
   }
 
-  function teardown() {
-    stopMeters()
-  }
+  return useAirBand
+})
 
-  registerChainPlugin({
-    id: airBandEffect.id,
-    windowId: AIR_BAND_WINDOW_ID,
-    label: 'AirBoost',
-    isActive: () => airBandPreview.value,
-    setActive: (on) => { if (airBandPreview.value !== on) togglePreview() },
-    render: renderRegion,
-    resume: () => startMeters(initChain()),
-    suspend: teardown,
-  })
-
-  function openModal() {
-    openWindow(AIR_BAND_WINDOW_ID)
-  }
-
-  function closeModal() {
-    closeWindow(AIR_BAND_WINDOW_ID)
-  }
-
-  return {
-    airBandAir,
-    airBandOutput,
-    airBandPreview,
-    airBandInputLevels,
-    airBandOutputLevels,
-    hasSelection,
-    togglePreview,
-    syncAir,
-    syncOutput,
-    applyParams,
-    apply,
-    teardown,
-    openModal,
-    closeModal,
-  }
+/** The copy the calling window edits (the solo copy outside a plugin window). */
+export function useAirBand() {
+  return copies()()
 }

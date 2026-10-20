@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useSoftClipper } from '../../composables/useSoftClipper.js'
-import { hasChainSlot } from '../../composables/usePluginChain.js'
+import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import { SCOPE_SECONDS } from '../../audio/effects/softClipper.js'
@@ -67,9 +67,9 @@ function envelope(offsetSeconds, seconds, columns) {
 
 // Default to engaged when the panel opens
 onMounted(() => {
-  // A plugin that already has a slot keeps its ON/BYPASS: opening its
-  // editor from the chain must not un-bypass it.
-  if (!clipperPreview.value && !hasChainSlot('soft-clipper')) togglePreview()
+  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
+  // must not un-bypass its slot.
+  if (!clipperPreview.value && currentPluginCopy() === 'solo') togglePreview()
 })
 
 // The kit's amber, like every Modula panel. The admin tuning panel keeps its

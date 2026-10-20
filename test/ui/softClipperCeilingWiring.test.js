@@ -294,13 +294,13 @@ test('the two ceiling measurements supersede independently', () => {
   assert.match(src, /let choicesSeq = 0/, 'the two measurements share one counter again')
 
   const choices = src.slice(src.indexOf('async function measureCeilingChoices'))
-  const choicesBody = choices.slice(0, choices.indexOf('\n  }\n'))
+  const choicesBody = choices.slice(0, choices.indexOf('\n    }\n'))
   assert.match(choicesBody, /\+\+choicesSeq/)
   assert.doesNotMatch(choicesBody, /ceilingSeq/,
     'labelling the buttons still touches the placement counter')
 
   const place = src.slice(src.indexOf('async function applyCeilingPreset'))
-  const placeBody = place.slice(0, place.indexOf('\n  }\n'))
+  const placeBody = place.slice(0, place.indexOf('\n    }\n'))
   assert.doesNotMatch(placeBody, /choicesSeq/,
     'placing the ceiling still touches the labelling counter')
 

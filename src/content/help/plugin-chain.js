@@ -14,7 +14,7 @@ export default {
   ],
 
   controls: [
-    { label: '+ Add plugin', text: 'Opens a search of every effect that can run in the chain — type to filter, then press Enter or click. It joins the end and its window opens beside this one. An effect already in the chain is marked and cannot be added twice' },
+    { label: '+ Add plugin', text: 'Opens a search of every effect that can run in the chain — type to filter, then press Enter or click. It joins the end, starting from its default settings, and its window opens beside this one. An effect already in the chain is marked and cannot be added twice' },
     { label: 'ON / BYPASS (header)', text: 'Takes the whole chain out of circuit at once so you can hear the file as it is; each slot keeps its own state' },
     { label: 'ON / BYPASS (slot)', text: 'The plugin’s own power switch — the same one as in its window. A bypassed slot keeps its place and is skipped by Apply' },
     { label: 'Arrows and drag', text: 'Move a slot earlier or later. The top slot processes first' },
@@ -30,6 +30,7 @@ export default {
     'Opening an effect from the toolbar or the search does not add it to the chain: it opens on its own, closing this window and the chain’s effect windows, and the chain pauses until you close it, even while that effect is bypassed — so it previews, and compares against, exactly what its own Apply writes. The toolbar’s Chain button reads BYPASSED meanwhile, just as it does when you bypass the chain yourself',
     'This window and the effects in the chain can all be open together. The Spectrum Analyzer can stay open beside anything',
     'Peak and Loudness Normalize measure and set level in one step, so they cannot run in the chain and are not in the list',
-    'An effect outside the chain still has its own Apply, which writes that effect alone',
+    'An effect in the chain is a separate copy from the same effect opened from the toolbar or the search. Each has its own settings, so you can use an effect on its own — with its own Apply — while it also sits in the chain, and neither changes the other',
+    'An effect opened on its own still has its own Apply, which writes that effect alone',
   ],
 }

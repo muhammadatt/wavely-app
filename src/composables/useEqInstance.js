@@ -31,8 +31,8 @@ import {
 export function createEqInstance({
   effect, windowId, label, maxBands = MAX_BANDS, frequencyPolicy = 'forfeit',
 }) {
-  // Module-scope-per-instance: created once at import and shared by every
-  // caller of the owning composable, so a plugin's state survives its window
+  // Per instance: created once per copy of the owning plugin (pluginCopies.js)
+  // and shared by every caller of that copy, so its state survives its window
   // being closed and reopened.
   const bands = ref([])
   const eqPreview = ref(false)

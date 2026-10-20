@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useVocalSaturation } from '../../../composables/useVocalSaturation.js'
-import { hasChainSlot } from '../../../composables/usePluginChain.js'
+import { currentPluginCopy } from '../../../composables/pluginCopies.js'
 // Bound rather than retyped: HARDNESS_MIN is an aliasing measurement, and a
 // panel that drifted from it would hand the curve an n the kernel then clamps,
 // leaving a knob whose last stretch of travel does nothing.
@@ -31,9 +31,9 @@ const { state } = useEditorState()
 
 // Default to engaged when the panel opens, matching the other plugin windows.
 onMounted(() => {
-  // A plugin that already has a slot keeps its ON/BYPASS: opening its
-  // editor from the chain must not un-bypass it.
-  if (!vsPreview.value && !hasChainSlot('vocal-saturation')) togglePreview()
+  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
+  // must not un-bypass its slot.
+  if (!vsPreview.value && currentPluginCopy() === 'solo') togglePreview()
 })
 
 const ACCENT = '#ff8a5b'

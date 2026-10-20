@@ -71,7 +71,7 @@ test('the delta monitor is on whenever any of the three asks for it', () => {
  */
 test('teardown clears it, as it does the other monitors', () => {
   const t = SRC.slice(SRC.indexOf('function teardown'))
-  const end = t.indexOf('\n  }')
+  const end = t.indexOf('\n    }')
   assert.match(t.slice(0, end), /resSoloNode\.value = -1/)
   // Beside the other two, so the three cannot drift apart.
   assert.match(t.slice(0, end), /resDeltaZone\.value = -1/)

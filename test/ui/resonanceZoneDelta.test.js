@@ -71,8 +71,10 @@ test('THE COMPOSABLE KEEPS THE ZONE DELTA OUT OF WHAT APPLY RENDERS', async () =
   const src = (await readFile(
     new URL('../../src/composables/useResonance.js', import.meta.url), 'utf8'))
     .replace(/\r\n/g, '\n')
+  // Indented one level: the plugin's state lives inside its per-copy factory
+  // (pluginCopies.js), so the function closes on a two-space brace.
   const body = src.slice(src.indexOf('function currentParams()'))
-  const end = body.indexOf('\n}\n')
+  const end = body.indexOf('\n  }\n')
   assert.ok(end > 0, 'currentParams end not found — the slice below would be the whole module')
   const params = body.slice(0, end)
   assert.ok(!params.includes('resDeltaZone'), 'currentParams must not consult the zone delta')

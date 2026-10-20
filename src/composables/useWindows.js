@@ -1,4 +1,5 @@
 import { reactive, computed } from 'vue'
+import { isChainCopyId } from './pluginCopies.js'
 
 /**
  * Floating window manager.
@@ -20,10 +21,12 @@ const openIds = reactive([])
  * playing, and the Modula kit is a dev gallery. Every other window is a
  * PLUGIN window, and plugin windows open in one of two groups:
  *
- *   the CHAIN group — the Plugin Chain window and the windows of plugins that
- *                     have a slot in it. Any number of these may be open at
- *                     once: they are one rack, edited together.
- *   a SOLO plugin   — any other plugin, opened on its own.
+ *   the CHAIN group — the Plugin Chain window and the windows of the plugin
+ *                     copies in it (`<id>@chain`, see pluginCopies.js). Any
+ *                     number of these may be open at once: they are one rack,
+ *                     edited together.
+ *   a SOLO plugin   — a plugin's own copy, opened on its own — whether or not
+ *                     the same plugin also has a slot in the chain.
  *
  * The two never share the screen. Opening a chain-group window closes a solo
  * plugin's; opening a solo plugin closes every other plugin window, the chain
@@ -37,15 +40,7 @@ export const CHAIN_WINDOW_ID = 'plugin-chain'
 
 const isPluginWindow = id => !ALONGSIDE_WINDOW_IDS.has(id)
 
-// Whether a plugin window belongs to the chain group beyond the chain window
-// itself — answered by the chain (usePluginChain sets it), which imports this
-// module and so cannot be imported from it.
-let hasSlot = () => false
-export function setChainSlotPredicate(fn) {
-  hasSlot = fn
-}
-
-const inChainGroup = id => id === CHAIN_WINDOW_ID || hasSlot(id)
+const inChainGroup = id => id === CHAIN_WINDOW_ID || isChainCopyId(id)
 
 /** A plugin window that is not the chain's: while one is open the chain is suspended. */
 export const isSoloPluginWindow = id => isPluginWindow(id) && !inChainGroup(id)
@@ -83,9 +78,7 @@ export function useWindows() {
         if (chainSide && inChainGroup(other)) continue
         openIds.splice(i, 1)
       }
-      // A plugin in the chain opens WITH the chain: its Apply lives there, and
-      // opened on its own (from the Effects menu, say) it read "Applies with
-      // the chain" with no chain in sight.
+      // A chain copy opens WITH the chain: its Apply lives there.
       if (chainSide && id !== CHAIN_WINDOW_ID && !openIds.includes(CHAIN_WINDOW_ID)) {
         openIds.push(CHAIN_WINDOW_ID)
       }

@@ -166,7 +166,7 @@ try {
   /**
    * The plugin chain, checked for what it DOES: opening plugins adds nothing
    * to it; a plugin outside the chain opens alone and the chain counts as a
-   * plugin; the Add picker is the way in and its plugins open beside the chain
+   * plugin; a plugin IN the chain still opens alone as its solo copy; the Add picker is the way in and its plugins open beside the chain
    * with no Apply of their own; the arrows reorder; Apply commits every live
    * slot in order as one edit and bypasses them afterwards.
    */
@@ -211,7 +211,18 @@ try {
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
     const resumedBadge = await chainBadge()
     const pauseOk = liveBefore === 'ACTIVE' && pausedBadge === 'BYPASSED' && resumedBadge === 'ACTIVE'
+
+    // A plugin that is ALSO in the chain still opens on its own: its solo copy,
+    // alone, with a live Apply and no IN CHAIN badge — the chain suspended
+    // underneath and its slot untouched.
+    await openOp('Inflator')
+    const soloCopyAlone = (await frames()) === 1
+      && (await page.locator('.win-frame').filter({ hasText: 'IN CHAIN' }).count()) === 0
+      && !(await page.locator('.win-frame .win-apply').isDisabled())
+      && (await chainBadge()) === 'BYPASSED'
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
     await openOp('Plugin Chain')
+    const slotKept = (await rowNames()).join(',') === 'Inflator,AirBoost' && (await chainBadge()) === 'ACTIVE'
 
     const order1 = await rowNames()
     await chainWin.getByRole('button', { name: 'Move Inflator later' }).dispatchEvent('click')
@@ -239,7 +250,8 @@ try {
     const fresh = errors.slice(before)
     const ok = soloWindows === 1 && chainReplaced && kept === 0 && groupWindows === 3 && memberApplyOff
       && order1.join(',') === 'Inflator,AirBoost' && order2.join(',') === 'AirBoost,Inflator'
-      && toast && bypassedAfter && soloAfterGroup === 1 && pauseOk && fresh.length === 0
+      && toast && bypassedAfter && soloAfterGroup === 1 && pauseOk && soloCopyAlone && slotKept
+      && fresh.length === 0
     if (!ok) failures++
     const why = [
       soloWindows === 1 ? '' : `${soloWindows} solo plugin windows open at once; `,
@@ -253,6 +265,8 @@ try {
       bypassedAfter ? '' : `apply should bypass the chain and keep the slots on (slots ${pills.join(',')}, chain ON=${masterPill}); `,
       soloAfterGroup === 1 ? '' : `a solo plugin left ${soloAfterGroup} windows open; `,
       pauseOk ? '' : `chain did not pause for a solo plugin and come back (${liveBefore} → ${pausedBadge} → ${resumedBadge}); `,
+      soloCopyAlone ? '' : 'a plugin in the chain did not open on its own with its own Apply; ',
+      slotKept ? '' : 'opening the solo copy disturbed the chain slot; ',
     ].join('')
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Plugin chain'.padEnd(16)} ${why}${fresh.join(' | ')}`)
   }

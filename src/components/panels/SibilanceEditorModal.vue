@@ -10,7 +10,7 @@
  */
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import { useSibilanceEditor } from '../../composables/useSibilanceEditor.js'
-import { hasChainSlot } from '../../composables/usePluginChain.js'
+import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { DEV_TUNING_PANELS } from '../../devFlags.js'
 import Knob from '../knobs/Knob.vue'
@@ -31,9 +31,9 @@ const {
 const { state } = useEditorState()
 
 onMounted(() => {
-  // A plugin that already has a slot keeps its ON/BYPASS: opening its
-  // editor from the chain must not un-bypass it.
-  if (!preview.value && !hasChainSlot('clip-gain-deesser')) togglePreview()
+  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
+  // must not un-bypass its slot.
+  if (!preview.value && currentPluginCopy() === 'solo') togglePreview()
 })
 
 const ACCENT = '#7ec8ff'
