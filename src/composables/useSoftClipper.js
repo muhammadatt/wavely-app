@@ -677,6 +677,35 @@ const copies = pluginCopies((copy, life) => {
       }
     }
 
+    /**
+     * The settings a chain slot renders with. Its ceiling and makeup are
+     * MEASURED on the selection, so later in a chain they must be measured on
+     * what the slots before it produced — what applying the plugins one at a
+     * time would have measured — not on the unprocessed file the panel reads.
+     * A ceiling the user set (by hand or from a preset button) is theirs and is
+     * kept; one still following the region, and an AUTO makeup, are re-measured.
+     * At the head of the chain the segments are the file's and nothing changes.
+     */
+    async function chainRenderParams(segments, start, end) {
+      const params = currentParams()
+      if (segments === state.segments) return params
+      const { sampleRate, channels } = state.currentFile
+      if (!userSetCeiling) {
+        const preset = presetById(ceilingPreset.value ?? DEFAULT_CEILING_PRESET)
+        const measured = preset
+          ? await computeSoftClipperCeiling(segments, start, end, preset.percentile, sampleRate, channels)
+          : null
+        if (measured !== null) params.fixedThresholdDb = measured
+      }
+      if (autoMakeup.value) {
+        const { outputTrimDb: _ignored, ...rest } = params
+        const makeupDb = await computeSoftClipperAutoMakeup(segments, start, end, rest, sampleRate, channels)
+        params.outputTrimDb = Math.max(
+          SOFT_CLIPPER_MAKEUP_MIN_DB, Math.min(SOFT_CLIPPER_MAKEUP_MAX_DB, makeupDb))
+      }
+      return params
+    }
+
     registerChainPlugin({
       id: softClipperEffect.id,
       windowId,
@@ -684,7 +713,11 @@ const copies = pluginCopies((copy, life) => {
       dispose: life.dispose,
       isActive: () => clipperPreview.value,
       setActive: (on) => { if (clipperPreview.value !== on) togglePreview() },
-      render: renderRegion,
+      render: async (segments, start, end) => applySoftClipperRegion(
+        segments, start, end,
+        await chainRenderParams(segments, start, end),
+        state.currentFile.sampleRate, state.currentFile.channels,
+      ),
       resume: () => startMeters(initChain()),
       suspend: teardown,
     })

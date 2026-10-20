@@ -121,11 +121,14 @@ export function useManualEq() {
  * this composable's lifecycle. The bands arrive as plain specs with no role —
  * once they are here they are ordinary parametric bands, and the frequency and
  * Q that VoiceRx measured is all that survives the trip.
+ *
+ * `copy` is which EQ receives them: the solo one by default, or a chain copy
+ * when VoiceRx is itself a slot (see sendToEq in useVoiceRx.js).
  */
-export function receiveBands(specs) {
-  const result = copies('solo')().adoptBands(
+export function receiveBands(specs, { copy = 'solo', open = true } = {}) {
+  const result = copies(copy)().adoptBands(
     specs.map(s => ({ ...s, role: null, origin: 'manual_general' })),
   )
-  useWindows().openWindow(MANUAL_EQ_WINDOW_ID)
+  if (open) useWindows().openWindow(idForCopy(MANUAL_EQ_WINDOW_ID, copy))
   return result
 }

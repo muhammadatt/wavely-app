@@ -65,6 +65,14 @@ const bypassed = ref(false)
 // A plugin outside the chain is being auditioned, so the chain is out of the
 // signal path until its window closes — see EffectChain.
 const suspended = ref(false)
+// A chain Apply is rendering. The chain and its copies' windows are frozen
+// meanwhile (FloatingWindow), and every edit to the rack is refused: a slot
+// removed or a knob turned mid-render would change, or dispose, what is being
+// rendered — or cancel a measurement the render is waiting on.
+const applying = ref(false)
+
+/** Whether a chain Apply is rendering right now (read-only). */
+export const chainApplying = computed(() => applying.value)
 // Chain copies asked to join the chain before they had registered (a copy's
 // composable first runs in its window's setup); finished when the window mounts.
 const pendingAdds = new Set()
@@ -221,6 +229,7 @@ export function usePluginChain() {
   const liveSlots = computed(() => slots.value.filter(s => s.active))
 
   function setSlotActive(id, on) {
+    if (applying.value) return
     const def = plugins.get(id)
     if (def) def.setActive(on)
     else chain().setEnabled(id, on)
@@ -229,22 +238,35 @@ export function usePluginChain() {
   }
 
   /**
-   * Add the plugin whose (solo) window is `pluginId` to the end of the chain —
-   * a new chain copy of it, starting from its default settings, numbered with
-   * the lowest number its other slots leave free — and open it to tune.
+   * Add the plugin whose (solo) window is `pluginId` to the chain — a new chain
+   * copy of it, starting from its default settings, numbered with the lowest
+   * number its other slots leave free — and open it to tune. At the end, or
+   * straight after the slot `after`.
+   *
+   * `prepare(copy)` runs first, to set the new copy up before it joins (VoiceRx
+   * handing its bands to an EQ); it builds the copy, so the slot is added at
+   * once rather than when its window mounts.
    */
-  function add(pluginId) {
+  function add(pluginId, { after = null, prepare = null } = {}) {
+    if (applying.value) return
     const taken = new Set([...slots.value.map(s => s.windowId), ...pendingAdds])
     let n = 1
     while (taken.has(idForCopy(pluginId, chainCopy(n)))) n++
     const windowId = idForCopy(pluginId, chainCopy(n))
+    prepare?.(chainCopy(n))
     const def = defForWindow(windowId)
-    if (def) addDef(def)
-    else pendingAdds.add(windowId)
+    if (def) {
+      addDef(def)
+      const at = after === null ? -1 : slots.value.findIndex(s => s.id === after)
+      if (at !== -1) chain().moveEffect(def.id, at + 1)
+    } else {
+      pendingAdds.add(windowId)
+    }
     openWindow(windowId)
   }
 
   function remove(id) {
+    if (applying.value) return
     const def = plugins.get(id)
     def?.setActive(false)
     def?.suspend?.()
@@ -259,16 +281,19 @@ export function usePluginChain() {
   }
 
   function clear() {
+    if (applying.value) return
     for (const s of [...slots.value]) remove(s.id)
     // An empty chain starts over, not bypassed.
     chain().setBypassed(false)
   }
 
   function move(id, toIndex) {
+    if (applying.value) return
     chain().moveEffect(id, toIndex)
   }
 
   function setBypassed(on) {
+    if (applying.value) return
     chain().setBypassed(on)
   }
 
@@ -309,6 +334,7 @@ export function usePluginChain() {
    * chain back on is one switch, ready for the next selection.
    */
   async function apply() {
+    if (applying.value) return false
     const blocker = applyBlocker()
     if (blocker) {
       showToast(blocker)
@@ -322,14 +348,26 @@ export function usePluginChain() {
     const docId = appState.activeDocumentId
     const names = labels.join(' → ')
 
+    // The slots read the file's rate and channels from the ACTIVE document as
+    // they render, so a tab switch part-way would render the rest against the
+    // other file. Refused rather than repaired: nothing is committed.
+    const sameDocument = () => {
+      if (appState.activeDocumentId !== docId) {
+        throw new Error('switched files during the chain — nothing was applied')
+      }
+    }
+
+    applying.value = true
     startProcessing(`Applying chain (${defs.length} plugin${defs.length === 1 ? '' : 's'})...`, docId)
     try {
       let segments = state.segments
       let buffer = null
       for (let i = 0; i < defs.length; i++) {
+        sameDocument()
         updateProcessingStage(`${i + 1}/${defs.length} · ${labels[i]}`, docId)
         updateProcessingProgress(i / defs.length, docId)
         buffer = await defs[i].render(segments, start, end)
+        sameDocument()
         segments = replaceRegionWithBuffer(segments, start, end, buffer, `chain-scratch-${i}`)
       }
       const bufferId = replaceRegion(start, end, buffer, `Chain: ${names}`, docId)
@@ -343,6 +381,7 @@ export function usePluginChain() {
       showToast(`Chain failed${err?.message ? `: ${err.message}` : ''}`)
       return false
     } finally {
+      applying.value = false
       endProcessing(docId)
     }
   }

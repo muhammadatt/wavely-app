@@ -1,11 +1,11 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { useWindows } from '../../composables/useWindows.js'
+import { useWindows, CHAIN_WINDOW_ID } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  chainWindowMounted, chainWindowUnmounted, chainStatusFor,
+  chainWindowMounted, chainWindowUnmounted, chainStatusFor, chainApplying,
 } from '../../composables/usePluginChain.js'
-import { currentPluginCopy, idForCopy, chainCopyNumber } from '../../composables/pluginCopies.js'
+import { currentPluginCopy, idForCopy, chainCopyNumber, isChainCopyId } from '../../composables/pluginCopies.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import Icon from '../ui/Icon.vue'
@@ -398,6 +398,10 @@ const inChain = computed(() => {
   return status?.member ? status : null
 })
 
+// While the chain applies, the chain and its copies' windows take no input: a
+// knob turned or a slot removed mid-render would change what is being rendered.
+const frozen = computed(() => chainApplying.value && (windowId === CHAIN_WINDOW_ID || isChainCopyId(windowId)))
+
 // Accessible name, read off the brand mark.
 const label = computed(() => `${props.brandLead} ${props.brandTail}`.trim())
 
@@ -596,6 +600,9 @@ function requestClose() {
   <div
     ref="frameEl"
     class="win-frame fixed rounded-[18px] overflow-hidden flex flex-col"
+    :class="{ 'is-frozen': frozen }"
+    :inert="frozen"
+    :aria-busy="frozen || undefined"
     :data-chrome="chrome"
     :data-design="design"
     role="dialog"
@@ -1540,4 +1547,5 @@ function requestClose() {
   0% { opacity: 0; transform: scale(0.94) translateY(8px); }
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
+.win-frame.is-frozen { filter: saturate(.6) brightness(.85); transition: filter .15s; }
 </style>

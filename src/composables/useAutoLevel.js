@@ -325,10 +325,35 @@ const copies = pluginCopies((copy, life) => {
       }
     }
 
+    /**
+     * The curve for a chain slot that is NOT first: the phrases and their
+     * loudness are measured on what the slots before it produced, as applying
+     * the plugins one at a time would — the panel's analysis describes the
+     * unprocessed file, and a compressor or EQ upstream moves every clip's
+     * loudness. The same settings, a fresh analysis (one VAD round trip).
+     * Null when that audio has nothing to level.
+     */
+    async function curveForChain(segments, start, end) {
+      const { sampleRate, channels } = state.currentFile
+      const result = await analyzeVoiceActivity({ segments, start, end, sampleRate, channels })
+      const mono = monoMixdown(renderRegionToBuffer(segments, start, end, sampleRate, channels))
+      const prep = prepareAutoLevel({
+        audio: mono,
+        sampleRate,
+        frameVoiced: expandVoicedRuns(result.voicedRuns, result.numFrames),
+        frameDurationS: result.frameDurationS,
+        noiseFloorDbfs: result.noiseFloorDbfs,
+      })
+      if (!prep.applicable) return null
+      const solvedHere = solveAutoLevel(prep, params.value)
+      if (!solvedHere.applied) return null
+      return { segments: solvedHere.segments, startSec: start, sampleRate }
+    }
+
     /** Apply a solved curve to [start, end) of `segments`, uncommitted. */
     function renderCurve(segments, start, end, curve) {
       return applyAutoLevelRegion(
-        segments, start, end, curve.segments, analyzedRegion.value.start,
+        segments, start, end, curve.segments, curve.startSec,
         state.currentFile.sampleRate, state.currentFile.channels,
       )
     }
@@ -380,8 +405,13 @@ const copies = pluginCopies((copy, life) => {
       setActive: (on) => { if (preview.value !== on) togglePreview() },
       unavailable: () => (curveValid.value ? '' : 'analyse the selection first'),
       render: async (segments, start, end) => {
-        const curve = rebuildCurve()
-        if (!curve) throw new Error('Auto Leveler has no curve — analyse the selection first')
+        if (segments === state.segments) {
+          const curve = rebuildCurve()
+          if (!curve) throw new Error('Auto Leveler has no curve — analyse the selection first')
+          return renderCurve(segments, start, end, curve)
+        }
+        // Nothing to level in what the slots before it produced: it passes through.
+        const curve = await curveForChain(segments, start, end) ?? { segments: [], startSec: start }
         return renderCurve(segments, start, end, curve)
       },
       resume: () => startMeters(initChain()),

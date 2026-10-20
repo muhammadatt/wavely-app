@@ -7189,3 +7189,59 @@ to ~230 s on 4 cores for the two larger materials.
 ⚠ The preview/apply PRE-ROLL at a region's start is a separate, older mechanism and is
 unchanged. The HF Softener's 2 s pre-roll has the same −95 dBFS residue there on gapped
 material: equally inaudible, and left alone.
+
+## Plugin Chain — a formal rack, and plugin copies (October 2026)
+
+**What it replaced.** Plugins ran in series in the order their windows were first opened.
+There was no way to reorder them, closing a window took its plugin out of the chain, and
+committing the chain meant pressing each window's Apply in turn, one undo step per plugin.
+
+**Slots outlive windows; the picker is the only way in.** Opening a plugin from the rail
+auditions it. Before the picker existed, "which plugins are in the chain" depended on
+which windows happened to be open. Peak Normalize, for example, opened and never joined.
+
+**Two window groups that never share the screen.** Having plugins in the chain and plugins
+outside it open side by side made it impossible to tell which Apply did what. The chain
+window counts as a plugin window.
+
+**Suspend on the WINDOW, not on the plugin's ON.** Suspending on the audition alone had
+two failures. Bypassing a solo plugin to A/B it brought the chain back underneath, so the
+"dry" side of the comparison was the chain. And Peak / Loudness Normalize (no live preview)
+played over the chain. A solo plugin must preview exactly what its own Apply writes: the
+source through it alone. Before this, preview was "chain + plugin" and Apply was "plugin on
+the original".
+
+**The master bypass is set on opening a solo plugin and NOT lifted on close** (owner's
+call). Coming back by itself put the chain under audio the solo plugin had just changed.
+
+**Apply bypasses the whole chain, not each slot.** Which slots were on is the user's setup.
+Clearing each one meant rebuilding it for the next selection.
+
+**Copies.** Each plugin existed once (module-level singleton state). A plugin in the chain
+therefore could not be opened and applied on its own: the Effects menu reached its slot,
+brought the chain window and had no Apply. Every chainable plugin now has a solo copy and
+one chain copy per slot. The copy approach was chosen over "shared settings, solo mode"
+(tweaking it solo would change the slot) and over "explain + remove from chain" (it
+couldn't be used both ways).
+
+**Disposal.** At first a removed slot's copy was kept and reused, so re-adding a plugin
+brought back the removed slot's settings, despite the docs claiming defaults. With any
+number of copies, a removed copy has to really end, or its timers and measurements keep
+running and its node keeps its place in the EffectChain.
+
+**Owned worker jobs.** PHAT*SS's TAPE makeup and output trim each ran as one pass for the
+whole app. A solo PHAT*SS and a chain PHAT*SS, or two in the chain, cancelled each other's
+measurement on every knob turn, and neither makeup settled.
+
+**Running-segment measurements, round two (review before the PR).** The first pass covered
+the plugins whose measurements are local (alignment, makeup, ceilings, file level, TAPE
+makeup). Four slots still read the unprocessed file:
+- Soft Clipper's region-following ceiling and AUTO makeup.
+- Auto Leveler's VAD clip curve.
+- The Clip-Gain De-Esser's detected events.
+- VoiceRx's band transfer, which sent a chain slot's bands to the SOLO EQ. That took them
+  out of the chain, and opening the solo EQ closed the chain's windows.
+
+All four now take the running segments. VoiceRx transfers to an EQ slot placed straight
+after it, so what is heard does not change. Hum Remover keeps its detected frequencies,
+since upstream processing does not move hum.

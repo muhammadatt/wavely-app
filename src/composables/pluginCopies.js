@@ -100,7 +100,15 @@ export function pluginCopies(define) {
       }
       entry = { life }
       copies.set(copy, entry)
-      entry.use = scope.run(() => define(copy, life))
+      try {
+        entry.use = scope.run(() => define(copy, life))
+        if (entry.use === undefined) throw new Error('plugin copy definition failed')
+      } catch (err) {
+        // Not cached half-built: the next ask tries again rather than handing
+        // every later window an undefined composable.
+        life.dispose()
+        throw err
+      }
     }
     return entry.use
   }

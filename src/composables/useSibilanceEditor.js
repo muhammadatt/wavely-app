@@ -304,6 +304,25 @@ const copies = pluginCopies((copy, life) => {
       }
     }
 
+    /**
+     * The envelope for a chain slot that is NOT first: the sibilant events are
+     * detected and measured on what the slots before it produced, as applying
+     * the plugins one at a time would — the panel's analysis describes the
+     * unprocessed file, and an EQ, compressor or saturator upstream moves every
+     * event's peak against its context. Same settings, a fresh detection.
+     */
+    async function envelopeForChain(segments, start, end) {
+      const { sampleRate, channels } = state.currentFile
+      const { detection, minDurationMs, contextWindowMs } = splitTuning(tuning.value)
+      const result = await analyzeSibilance({
+        segments, start, end, sampleRate, channels,
+        params: pruneUndefined({ detection, minDurationMs, contextWindowMs }),
+      })
+      const numSamples = Math.ceil((end - start) * sampleRate)
+      const rendered = renderDeEsserEnvelope(result.measuredEvents, numSamples, sampleRate, params.value)
+      return { deviation: rendered.deviation, startSec: start }
+    }
+
     /** Apply the envelope to [start, end) of `segments`, uncommitted. */
     function renderEnvelope(segments, start, end, envelope) {
       // The envelope spans the analysed region; apply writes back only the
@@ -363,7 +382,9 @@ const copies = pluginCopies((copy, life) => {
       setActive: (on) => { if (preview.value !== on) togglePreview() },
       unavailable: () => (envelopeValid.value ? '' : 'analyse the selection first'),
       render: async (segments, start, end) => {
-        const envelope = rebuildEnvelope()
+        const envelope = segments === state.segments
+          ? rebuildEnvelope()
+          : await envelopeForChain(segments, start, end)
         if (!envelope) throw new Error('De-Esser has no envelope — analyse the selection first')
         return renderEnvelope(segments, start, end, envelope)
       },

@@ -1080,6 +1080,9 @@ function ownedWorkerJob(type, resultKeys, failMessage) {
   function run(segments, start, end, params, sampleRate, channels, { exact = true, owner = 'default' } = {}) {
     cancel(owner)
     return new Promise((resolve, reject) => {
+      // Rendered before the worker exists: if it throws, nothing is left
+      // running or registered for this owner.
+      const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
       const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
       jobs.set(owner, { worker, reject })
       const finish = () => {
@@ -1095,7 +1098,6 @@ function ownedWorkerJob(type, resultKeys, failMessage) {
         finish()
         reject(err)
       }
-      const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
       worker.postMessage(
         // A plain copy: the panel's params are reactive, and a proxied array
         // (warmthRefPeaksDb) cannot be structured-cloned into a worker.

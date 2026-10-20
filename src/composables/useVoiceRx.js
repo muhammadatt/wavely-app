@@ -1,7 +1,8 @@
 import { ref, computed, shallowRef } from 'vue'
 import { useWindows } from './useWindows.js'
 import { createEqInstance } from './useEqInstance.js'
-import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
+import { pluginCopies, effectForCopy, idForCopy, baseId, copyOfId } from './pluginCopies.js'
+import { usePluginChain } from './usePluginChain.js'
 import { voiceRxEqEffect } from '../audio/effects/manualEq.js'
 import { renderRegionToBuffer } from '../audio/processing.js'
 import {
@@ -15,7 +16,7 @@ import {
   resolveBaseline, resolveThresholdScale, DEFAULT_BASELINE, DEFAULT_THRESHOLD_SCALE,
 } from '../audio/voicerx/baselineOverride.js'
 import { getTimelineDuration } from '../audio/operations.js'
-import { receiveBands } from './useManualEq.js'
+import { receiveBands, MANUAL_EQ_WINDOW_ID } from './useManualEq.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const VOICERX_WINDOW_ID = 'voicerx'
@@ -487,6 +488,30 @@ const copies = pluginCopies((copy, life) => {
      * behind is the analysis, so the suggestions come straight back and the
      * diagnosis is not lost.
      */
+    /**
+     * VoiceRx as a chain slot hands its bands to an EQ IN THE CHAIN, straight
+     * after it — the EQ slot already there, or a new one put there. Moved to the
+     * solo EQ they would leave the chain (and opening the solo EQ closes the
+     * chain's windows), so the corrections would silently stop being applied.
+     * Straight after, so what is heard does not change: the bands are linear
+     * and nothing comes between them and where they were.
+     */
+    function sendToChainEq(specs) {
+      const ownId = effectForCopy(voiceRxEqEffect, copy).id
+      const { slots, add } = usePluginChain()
+      const at = slots.value.findIndex(s => s.id === ownId)
+      const next = at === -1 ? null : slots.value[at + 1]
+      if (next?.windowId && baseId(next.windowId) === MANUAL_EQ_WINDOW_ID) {
+        return receiveBands(specs, { copy: copyOfId(next.windowId) })
+      }
+      let result = { added: 0, dropped: specs.length }
+      add(MANUAL_EQ_WINDOW_ID, {
+        after: at === -1 ? null : ownId,
+        prepare: (eqCopy) => { result = receiveBands(specs, { copy: eqCopy, open: false }) },
+      })
+      return result
+    }
+
     function sendToEq() {
       const specs = api.activeBands.value.map(b => ({
         type: b.type,
@@ -497,7 +522,7 @@ const copies = pluginCopies((copy, life) => {
       }))
       if (specs.length === 0) return
 
-      const { added, dropped } = receiveBands(specs)
+      const { added, dropped } = copy === 'solo' ? receiveBands(specs) : sendToChainEq(specs)
       // Stays engaged. The pool is empty now so the node is transparent, and
       // leaving it on means the next suggestion applied here is audible at once
       // rather than needing the plugin switched back on first.
