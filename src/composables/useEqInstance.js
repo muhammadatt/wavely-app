@@ -311,6 +311,7 @@ export function createEqInstance({
       setActive: (on) => { if (eqPreview.value !== on) togglePreview() },
       render: renderRegion,
       resume: () => startMeters(initChain()),
+      suspend: teardown,
     })
 
     return {

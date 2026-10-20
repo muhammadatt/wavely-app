@@ -13,10 +13,17 @@ import { computePeakCache } from '../audio/processing.js'
  * out of the chain; and committing the chain meant pressing each window's
  * Apply in turn, one undo step per plugin.
  *
- * Now every engaged plugin has a SLOT that outlives its window. The Plugin
- * Chain window lists the slots in processing order and can reorder, bypass,
- * remove and re-open them, bypass the whole chain at once, and apply it: every
- * live slot rendered in order over the selection, committed as ONE undo step.
+ * Now a plugin joins the chain only through the Plugin Chain window's Add list
+ * (or the + CHAIN pill on its own window), and its SLOT outlives its window.
+ * The Plugin Chain window lists the slots in processing order and can reorder,
+ * bypass, remove and re-open them, bypass the whole chain at once, and apply
+ * it: every live slot rendered in order over the selection, committed as ONE
+ * undo step.
+ *
+ * Opening a plugin from the rail or the palette does NOT add it: it is
+ * auditioned on its own, after the chain, until its window closes — so
+ * "which plugins are in the chain" has one answer, the list, rather than
+ * depending on which windows happened to be opened.
  *
  * Each plugin composable registers a `ChainPlugin` (below) the first time it
  * is used. The registration is how the chain reaches a plugin's own state —
@@ -37,6 +44,7 @@ import { computePeakCache } from '../audio/processing.js'
  *   segments too, or the chain would not equal applying the plugins one at a
  *   time. Measured that way it is bit-identical to doing so.
  * @property {() => void} [resume]       restart the panel's meters (window reopened)
+ * @property {() => void} [suspend]      the window closed: stop meters, clear monitoring states
  * @property {() => void} [afterApply]   the audio changed under the plugin (e.g. drop a stale analysis)
  * @property {() => string} [unavailable] a reason it cannot render right now, or ''
  */
@@ -44,6 +52,25 @@ import { computePeakCache } from '../audio/processing.js'
 const plugins = new Map()
 const slots = ref([])
 const bypassed = ref(false)
+// Windows asked to join the chain before their plugin had registered (its
+// composable runs in the window's setup); finished when the window mounts.
+const pendingAdds = new Set()
+
+function defForWindow(windowId) {
+  for (const def of plugins.values()) if (def.windowId === windowId) return def
+  return null
+}
+
+function isMember(id) {
+  return slots.value.some(s => s.id === id)
+}
+
+/** Turn a plugin on and give it a slot at the end of the chain. */
+function addDef(def) {
+  // On first: that is what builds its chain entry, which addToChain needs.
+  if (!def.isActive()) def.setActive(true)
+  getEffectChainIfExists()?.addToChain(def.id)
+}
 
 function sync(chain) {
   bypassed.value = chain.bypassed
@@ -72,11 +99,37 @@ export function hasChainSlot(windowId) {
   return slots.value.some(s => s.windowId === windowId)
 }
 
-/** A plugin window mounted: if its plugin is already live in the chain, bring its meters back. */
+/**
+ * The chain status a plugin window shows: null for a window whose plugin cannot
+ * join the chain, otherwise whether it has a slot and where. Reactive on the
+ * slots; the registration it also reads is made in the window's own setup.
+ */
+export function chainStatusFor(windowId) {
+  const def = defForWindow(windowId)
+  if (!def) return null
+  const index = slots.value.findIndex(s => s.id === def.id)
+  return { member: index !== -1, position: index + 1 }
+}
+
+/** A plugin window mounted: finish a pending add, or bring a live plugin's meters back. */
 export function chainWindowMounted(windowId) {
-  for (const def of plugins.values()) {
-    if (def.windowId === windowId && def.isActive()) def.resume?.()
-  }
+  const def = defForWindow(windowId)
+  if (!def) return
+  if (pendingAdds.delete(windowId)) addDef(def)
+  else if (def.isActive()) def.resume?.()
+}
+
+/**
+ * A plugin window unmounted, however it closed (× , Escape, or replaced by
+ * another plugin). A slot keeps playing with its meters stopped; a plugin that
+ * was only being auditioned goes off with its window.
+ */
+export function chainWindowUnmounted(windowId) {
+  pendingAdds.delete(windowId)
+  const def = defForWindow(windowId)
+  if (!def) return
+  def.suspend?.()
+  if (def.isActive() && !isMember(def.id)) def.setActive(false)
 }
 
 export function usePluginChain() {
@@ -96,6 +149,14 @@ export function usePluginChain() {
     else chain().setEnabled(id, on)
     // Engaging a slot is asking to hear it: lift the master bypass too.
     if (on && chain().bypassed) chain().setBypassed(false)
+  }
+
+  /** Add the plugin edited in `windowId` to the end of the chain and open it to tune. */
+  function add(windowId) {
+    const def = defForWindow(windowId)
+    if (def) addDef(def)
+    else pendingAdds.add(windowId)
+    openWindow(windowId)
   }
 
   function remove(id) {
@@ -191,6 +252,7 @@ export function usePluginChain() {
   return {
     slots,
     liveSlots,
+    add,
     bypassed,
     setSlotActive,
     remove,

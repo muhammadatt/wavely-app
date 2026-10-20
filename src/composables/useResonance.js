@@ -543,6 +543,7 @@ export function useResonance() {
     setActive: (on) => { if (resPreview.value !== on) togglePreview() },
     render: renderRegion,
     resume: () => startMeters(initChain()),
+    suspend: teardown,
   })
 
   function openModal() {

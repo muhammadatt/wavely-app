@@ -665,6 +665,7 @@ export function useSoftClipper() {
     setActive: (on) => { if (clipperPreview.value !== on) togglePreview() },
     render: renderRegion,
     resume: () => startMeters(initChain()),
+    suspend: teardown,
   })
 
   function openModal() {

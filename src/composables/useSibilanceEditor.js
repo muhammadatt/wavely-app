@@ -356,6 +356,7 @@ export function useSibilanceEditor() {
       return renderEnvelope(segments, start, end, envelope)
     },
     resume: () => startMeters(initChain()),
+    suspend: teardown,
     // The audio changed, so the measurements no longer describe it.
     afterApply: () => clearAnalysis(),
   })

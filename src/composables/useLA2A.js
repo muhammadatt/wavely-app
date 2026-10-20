@@ -672,6 +672,7 @@ export function useLA2A() {
       return renderRegion(segments, start, end)
     },
     resume: () => startMeters(initChain()),
+    suspend: teardown,
   })
 
   // Open/close delegate to the window manager, which owns the open set and the

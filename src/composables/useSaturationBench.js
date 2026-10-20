@@ -200,6 +200,7 @@ export function useSaturationBench() {
       return renderRegion(segments, start, end)
     },
     resume: () => startMeters(initChain()),
+    suspend: teardown,
   })
 
   function resetLayers() {

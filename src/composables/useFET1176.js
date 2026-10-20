@@ -603,6 +603,7 @@ export function useFET1176() {
       return (await renderRegion(segments, start, end)).buffer
     },
     resume: () => startMeters(initChain()),
+    suspend: teardown,
   })
 
   // Open/close delegate to the window manager, which owns the open set and the

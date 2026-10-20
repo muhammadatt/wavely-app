@@ -6,18 +6,19 @@ let instance = null
  *
  * Each entry has two flags, and they are not the same thing:
  *
- *   member   — the effect has a SLOT in the chain. It keeps it until removed,
- *              whether or not its window is open, so building a chain no
- *              longer means keeping every plugin window on screen.
- *   enabled  — the slot is live (the plugin's ON/BYPASS, its "preview").
+ *   member   — the effect has a SLOT in the chain. Only `addToChain` gives
+ *              it one (appended at the end); it keeps it until removed,
+ *              whether or not its window is open.
+ *   enabled  — the effect is live (the plugin's ON/BYPASS, its "preview").
  *              A bypassed slot keeps its place in the order.
  *
- * Engaging an effect that has no slot yet appends one at the end, so the
- * default order is still the order plugins were turned on — but it is now only
- * a default: `moveEffect` reorders.
+ * An effect that is enabled WITHOUT a slot is being auditioned: a plugin whose
+ * window is open on its own. It plays after the chain, so what you hear while
+ * tuning it is the chain plus it, and it is not part of the chain's Apply.
  *
  * `bypassed` is the chain's master bypass: every slot out of circuit at once,
- * each keeping its own state for when the chain comes back.
+ * each keeping its own state for when the chain comes back. An auditioned
+ * effect is not a slot and is not bypassed by it.
  */
 export class EffectChain {
   constructor(audioContext) {
@@ -64,14 +65,18 @@ export class EffectChain {
   setEnabled(id, enabled) {
     const entry = this.effects.find(e => e.id === id)
     if (!entry) return
-    if (enabled && !entry.member) {
-      // A new slot goes to the end of the chain: move the entry past every
-      // current member so array order stays chain order.
-      entry.member = true
-      this.effects.splice(this.effects.indexOf(entry), 1)
-      this.effects.push(entry)
-    }
     entry.enabled = enabled
+    this._rebuildChain()
+  }
+
+  /** Give an effect a slot at the end of the chain. A no-op for a member. */
+  addToChain(id) {
+    const entry = this.effects.find(e => e.id === id)
+    if (!entry || entry.member) return
+    // Move the entry past every current member so array order stays chain order.
+    entry.member = true
+    const members = this.members().filter(e => e !== entry)
+    this.effects = [...members, entry, ...this.effects.filter(e => !e.member)]
     this._rebuildChain()
   }
 
@@ -153,7 +158,11 @@ export class EffectChain {
       entry.nodes.output.disconnect()
     }
 
-    const active = this.bypassed ? [] : this.effects.filter(e => e.member && e.enabled)
+    // The chain's live slots in order, then whatever is being auditioned.
+    const active = [
+      ...(this.bypassed ? [] : this.effects.filter(e => e.member && e.enabled)),
+      ...this.effects.filter(e => !e.member && e.enabled),
+    ]
 
     if (active.length === 0) {
       this.inputNode.connect(this.outputNode)

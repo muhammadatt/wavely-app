@@ -8,12 +8,13 @@ export default {
   ],
 
   steps: [
-    'Open an effect and turn it on — it joins the end of the chain',
+    'Press + Add plugin and pick an effect — it joins the end of the chain and opens so you can tune it',
     'Close its window when you are done tuning it; it keeps playing in the chain',
     'Reorder, bypass or remove slots here, then select a region and press Apply',
   ],
 
   controls: [
+    { label: '+ Add plugin', text: 'Lists every effect that can run in the chain. Picking one adds it to the end and opens its window. An effect already in the chain is marked and cannot be added twice' },
     { label: 'ON / BYPASS (header)', text: 'Takes the whole chain out of circuit at once so you can hear the file as it is; each slot keeps its own state' },
     { label: 'ON / BYPASS (slot)', text: 'The plugin’s own power switch — the same one as in its window. A bypassed slot keeps its place and is skipped by Apply' },
     { label: 'Arrows and drag', text: 'Move a slot earlier or later. The top slot processes first' },
@@ -26,6 +27,9 @@ export default {
   notes: [
     'Each plugin renders what the slot before it produced, exactly as if you had applied them one at a time in that order',
     'Measured values such as auto makeup are re-measured on what actually reaches each plugin, so a plugin late in the chain can land a little differently from the preview, which measures the unprocessed file',
+    'Opening an effect from the toolbar or the search does not add it to the chain: it plays on its own, after the chain, until you close it — press + CHAIN in its window to add it',
+    'Only one effect window is open at a time; opening another replaces it. This window and the Spectrum Analyzer stay open beside it',
+    'Peak and Loudness Normalize measure and set level in one step, so they cannot run in the chain and are not in the list',
     'A plugin’s own Apply still writes that plugin alone',
   ],
 }

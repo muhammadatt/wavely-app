@@ -265,6 +265,7 @@ export function useHumRemover() {
     setActive: (on) => { if (humPreview.value !== on) togglePreview() },
     render: renderRegion,
     resume: () => startMeters(initChain()),
+    suspend: teardown,
     afterApply: () => clearAnalysis(),
   })
 

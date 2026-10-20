@@ -570,6 +570,7 @@ export function usePhatass() {
       return renderRegion(segments, start, end)
     },
     resume: () => startMeters(initChain()),
+    suspend: teardown,
   })
 
   /** Put a whole param set into effect (a preset): each through syncParam, so makeups follow. */

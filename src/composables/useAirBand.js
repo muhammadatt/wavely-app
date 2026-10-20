@@ -150,6 +150,7 @@ export function useAirBand() {
     setActive: (on) => { if (airBandPreview.value !== on) togglePreview() },
     render: renderRegion,
     resume: () => startMeters(initChain()),
+    suspend: teardown,
   })
 
   function openModal() {

@@ -15,6 +15,17 @@ import { reactive, computed } from 'vue'
 // entry is topmost. WindowLayer maps index to z-index.
 const openIds = reactive([])
 
+/**
+ * Windows that may stay open beside a plugin. Every other window is a plugin,
+ * and plugins open ONE AT A TIME: opening one closes whichever plugin window
+ * was open. Multi-plugin work happens in the Plugin Chain, which is why the
+ * chain itself is on this list — it is where you see the other plugins — along
+ * with the analyzer, which reads whatever the chain is doing.
+ */
+export const ALONGSIDE_WINDOW_IDS = new Set(['plugin-chain', 'spectrum-analyzer', 'modula-kit'])
+
+const isPluginWindow = id => !ALONGSIDE_WINDOW_IDS.has(id)
+
 // Last known position per window id. Deliberately outside the reactive list and
 // never cleared: closing a window and reopening it should put it back where the
 // user dragged it, not fling it to the default corner again.
@@ -31,11 +42,19 @@ export function useWindows() {
     return openIds.includes(id)
   }
 
-  /** Open a window, or raise it if it is already open. */
+  /**
+   * Open a window, or raise it if it is already open. A plugin window replaces
+   * the plugin window already open, if any — see ALONGSIDE_WINDOW_IDS.
+   */
   function openWindow(id) {
     if (isOpen(id)) {
       focusWindow(id)
       return
+    }
+    if (isPluginWindow(id)) {
+      for (let i = openIds.length - 1; i >= 0; i--) {
+        if (isPluginWindow(openIds[i])) openIds.splice(i, 1)
+      }
     }
     openIds.push(id)
   }

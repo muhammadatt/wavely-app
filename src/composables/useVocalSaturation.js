@@ -190,6 +190,7 @@ export function useVocalSaturation() {
     setActive: (on) => { if (vsPreview.value !== on) togglePreview() },
     render: renderRegion,
     resume: () => startMeters(initChain()),
+    suspend: teardown,
   })
 
   function openModal() {

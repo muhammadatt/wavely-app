@@ -2,7 +2,9 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useWindows } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { chainWindowMounted } from '../../composables/usePluginChain.js'
+import {
+  chainWindowMounted, chainWindowUnmounted, chainStatusFor, usePluginChain,
+} from '../../composables/usePluginChain.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import Icon from '../ui/Icon.vue'
@@ -212,7 +214,7 @@ const emit = defineEmits([
   'update:heightDelta',
 ])
 
-const { focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize } = useWindows()
+const { openWindow, focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize } = useWindows()
 // The harness reads the selection itself rather than taking it as a prop.
 // Every plugin was passing the same `hasSelection` through to the same row and
 // printing the same unmet message; one readout that is right by construction
@@ -379,6 +381,16 @@ function updateOverflow() {
 // Whatever had focus when this opened, so closing can hand it back.
 let previouslyFocused = null
 
+// ── Chain pill ──────────────────────────────────────────────────────────────
+// A plugin that can join the chain says whether it has: + CHAIN adds it to the
+// end, IN CHAIN · n opens the rack. Null (no pill) for every other window.
+const pluginChain = usePluginChain()
+const chainStatus = computed(() => chainStatusFor(props.windowId))
+function onChainPill() {
+  if (chainStatus.value?.member) openWindow('plugin-chain')
+  else pluginChain.add(props.windowId)
+}
+
 // Accessible name, read off the brand mark.
 const label = computed(() => `${props.brandLead} ${props.brandTail}`.trim())
 
@@ -434,6 +446,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  // However the window closed — ×, Escape, or replaced by another plugin.
+  chainWindowUnmounted(props.windowId)
   window.removeEventListener('resize', onViewportResize)
   bodyRo?.disconnect()
   savePosition(props.windowId, pos.value)
@@ -689,6 +703,15 @@ function requestClose() {
           :disabled="presetsDisabled"
           :disabled-hint="presetsDisabledHint"
         />
+        <button
+          v-if="chainStatus"
+          type="button"
+          class="win-chain-pill"
+          :class="{ 'is-member': chainStatus.member }"
+          :title="chainStatus.member ? 'Open the Plugin Chain' : 'Add this plugin to the end of the Plugin Chain'"
+          @pointerdown.stop
+          @click="onChainPill"
+        >{{ chainStatus.member ? `IN CHAIN · ${chainStatus.position}` : '+ CHAIN' }}</button>
         <slot name="header-center" />
       </div>
 
@@ -1028,6 +1051,23 @@ function requestClose() {
    One shape for both, because they are the same kind of control. Off is an
    outline, on is a raised white wash — a value step rather than a colour
    change, which is what keeps the hue out of the chrome. */
+.win-chain-pill {
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(255, 255, 255, .04);
+  color: rgba(234, 246, 248, .7);
+  font: 700 9.5px/1 'JetBrains Mono', monospace;
+  letter-spacing: .12em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.win-chain-pill:hover { background: rgba(255, 255, 255, .09); color: #eaf6f8; }
+.win-chain-pill.is-member {
+  border-color: rgba(232, 163, 61, .45);
+  color: #e8a33d;
+}
 .win-chip {
   display: flex;
   align-items: center;

@@ -459,6 +459,7 @@ export function useScheps() {
       return renderRegion(segments, start, end)
     },
     resume: () => startMeters(initChain()),
+    suspend: teardown,
   })
 
   function openModal() {

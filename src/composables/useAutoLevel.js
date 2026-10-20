@@ -373,6 +373,7 @@ export function useAutoLevel() {
       return renderCurve(segments, start, end, curve)
     },
     resume: () => startMeters(initChain()),
+    suspend: teardown,
     // The audio changed, so the clips no longer describe it.
     afterApply: () => clearAnalysis(),
   })
