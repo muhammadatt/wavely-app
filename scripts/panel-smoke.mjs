@@ -210,7 +210,7 @@ try {
     const pausedBadge = await chainBadge()
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
     const resumedBadge = await chainBadge()
-    const pauseOk = liveBefore === '2/2' && pausedBadge === 'PAUSED' && resumedBadge === '2/2'
+    const pauseOk = liveBefore === 'ACTIVE' && pausedBadge === 'BYPASSED' && resumedBadge === 'ACTIVE'
     await openOp('Plugin Chain')
 
     const order1 = await rowNames()

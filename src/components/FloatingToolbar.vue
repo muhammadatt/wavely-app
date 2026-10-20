@@ -10,12 +10,19 @@ const { state, setActiveTool, hasFile, openCommandPalette } = useEditorState()
 const { openWindow, isOpen } = useWindows()
 const { slots, liveSlots, bypassed, suspended } = usePluginChain()
 
-// The chain plays whether or not its window is open, so the toolbar says so.
+// The chain plays whether or not its window is open, so the toolbar says so —
+// in TWO states only. Whatever takes the chain out of the signal (the user's
+// master bypass, a plugin outside the chain being open, or every slot switched
+// off) reads the same BYPASSED: to the ear they are the same thing. Which one
+// it is goes in the tooltip.
+const chainActive = computed(() => liveSlots.value.length > 0 && !bypassed.value && !suspended.value)
 const chainTitle = computed(() => {
-  if (!slots.value.length) return 'Plugin chain — empty'
-  if (suspended.value) return 'Plugin chain — paused while a plugin outside it is open, so that plugin previews exactly what its Apply writes'
-  if (bypassed.value) return `Plugin chain — ${slots.value.length} plugin(s), bypassed`
-  return `Plugin chain — ${liveSlots.value.length} of ${slots.value.length} live`
+  const n = slots.value.length
+  if (!n) return 'Plugin chain — empty'
+  if (chainActive.value) return `Plugin chain — active, ${liveSlots.value.length} of ${n} plugin(s) on`
+  if (suspended.value) return 'Plugin chain — bypassed while a plugin outside it is open, so that plugin previews exactly what its Apply writes'
+  if (bypassed.value) return 'Plugin chain — bypassed'
+  return 'Plugin chain — bypassed: every plugin in it is switched off'
 })
 
 // The category list lives in the registry, so the toolbar and the rail can no
@@ -77,8 +84,8 @@ const tools = CATEGORIES
         <span
           v-if="slots.length"
           class="chain-count"
-          :class="{ 'is-live': liveSlots.length && !bypassed && !suspended }"
-        >{{ suspended ? 'PAUSED' : `${liveSlots.length}/${slots.length}` }}</span>
+          :class="{ 'is-live': chainActive }"
+        >{{ chainActive ? 'ACTIVE' : 'BYPASSED' }}</span>
       </button>
     </div>
   </div>
