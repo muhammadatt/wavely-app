@@ -13,12 +13,17 @@ let instance = null
  *              A bypassed slot keeps its place in the order.
  *
  * An effect that is enabled WITHOUT a slot is being auditioned: a plugin whose
- * window is open on its own. It plays after the chain, so what you hear while
- * tuning it is the chain plus it, and it is not part of the chain's Apply.
+ * window is open on its own. ⚠ WHILE ANYTHING IS AUDITIONED THE CHAIN IS
+ * SUSPENDED — out of the signal path entirely, every slot keeping its state —
+ * so what the auditioned plugin previews is exactly what its own Apply writes:
+ * the source through that plugin alone. Playing the chain underneath it made
+ * the preview "chain + plugin" while Apply rendered "plugin on the original",
+ * two different things under one button. The chain comes back the moment the
+ * audition ends (its window closing turns the plugin off).
  *
  * `bypassed` is the chain's master bypass: every slot out of circuit at once,
- * each keeping its own state for when the chain comes back. An auditioned
- * effect is not a slot and is not bypassed by it.
+ * each keeping its own state for when the chain comes back. It is the user's
+ * switch; `suspended` is the audition's, and the two never overwrite each other.
  */
 export class EffectChain {
   constructor(audioContext) {
@@ -78,6 +83,11 @@ export class EffectChain {
     const members = this.members().filter(e => e !== entry)
     this.effects = [...members, entry, ...this.effects.filter(e => !e.member)]
     this._rebuildChain()
+  }
+
+  /** True while a plugin outside the chain is auditioned: the chain is out of the path. */
+  get suspended() {
+    return this.effects.some(e => !e.member && e.enabled)
   }
 
   /** The chain's slots, in processing order. */
@@ -158,11 +168,11 @@ export class EffectChain {
       entry.nodes.output.disconnect()
     }
 
-    // The chain's live slots in order, then whatever is being auditioned.
-    const active = [
-      ...(this.bypassed ? [] : this.effects.filter(e => e.member && e.enabled)),
-      ...this.effects.filter(e => !e.member && e.enabled),
-    ]
+    // An audition plays alone; otherwise the chain's live slots, in order.
+    const auditioned = this.effects.filter(e => !e.member && e.enabled)
+    const active = auditioned.length > 0 ? auditioned
+      : this.bypassed ? []
+        : this.effects.filter(e => e.member && e.enabled)
 
     if (active.length === 0) {
       this.inputNode.connect(this.outputNode)

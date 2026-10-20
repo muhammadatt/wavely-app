@@ -72,24 +72,32 @@ test('adding appends a slot: the default order is the order plugins were added',
   assert.deepEqual(signalPath(chain), ['c', 'a'])
 })
 
-test('turning a plugin on does not add it: it is auditioned after the chain', () => {
+test('turning a plugin on does not add it: it is auditioned ALONE, the chain suspended', () => {
   const chain = chainWith('a', 'b', 'x')
   engage(chain, 'a')
   engage(chain, 'b')
   chain.setEnabled('x', true) // a plugin window opened on its own
   assert.deepEqual(chain.members().map(e => e.id), ['a', 'b'])
-  assert.deepEqual(signalPath(chain), ['a', 'b', 'x'])
-  // Its slot, if it is then added, is the end of the chain proper.
-  chain.addToChain('x')
-  assert.deepEqual(chain.members().map(e => e.id), ['a', 'b', 'x'])
+  // What the audition previews must be what its own Apply writes: the source
+  // through it alone — not the chain plus it.
+  assert.deepEqual(signalPath(chain), ['x'])
+  assert.equal(chain.suspended, true)
+  // Its window closing turns it off, and the chain comes back as it was.
+  chain.setEnabled('x', false)
+  assert.equal(chain.suspended, false)
+  assert.deepEqual(signalPath(chain), ['a', 'b'])
 })
 
-test('the master bypass takes out the slots, not an auditioned plugin', () => {
+test('suspension and the master bypass never overwrite each other', () => {
   const chain = chainWith('a', 'x')
   engage(chain, 'a')
-  chain.setEnabled('x', true)
   chain.setBypassed(true)
+  chain.setEnabled('x', true)
   assert.deepEqual(signalPath(chain), ['x'])
+  chain.setEnabled('x', false)
+  assert.deepEqual(signalPath(chain), [], 'still bypassed after the audition')
+  chain.setBypassed(false)
+  assert.deepEqual(signalPath(chain), ['a'])
 })
 
 test('a bypassed slot keeps its place and comes back to it', () => {

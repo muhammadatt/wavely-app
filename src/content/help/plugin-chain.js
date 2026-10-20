@@ -27,7 +27,7 @@ export default {
   notes: [
     'Each plugin renders what the slot before it produced, exactly as if you had applied them one at a time in that order',
     'Measured values such as auto makeup are re-measured on what actually reaches each plugin, so a plugin late in the chain can land a little differently from the preview, which measures the unprocessed file',
-    'Opening an effect from the toolbar or the search does not add it to the chain: it opens on its own, closing this window and the chain’s effect windows, and plays after the chain until you close it',
+    'Opening an effect from the toolbar or the search does not add it to the chain: it opens on its own, closing this window and the chain’s effect windows, and the chain pauses until you close it — so that effect previews exactly what its own Apply writes. The toolbar’s Chain button reads PAUSED meanwhile',
     'This window and the effects in the chain can all be open together. The Spectrum Analyzer can stay open beside anything',
     'Peak and Loudness Normalize measure and set level in one step, so they cannot run in the chain and are not in the list',
     'An effect outside the chain still has its own Apply, which writes that effect alone',

@@ -202,6 +202,17 @@ try {
     const inflatorWin = page.locator('.win-frame').filter({ hasText: 'IN CHAIN · 1' })
     const memberApplyOff = await inflatorWin.locator('.win-apply').isDisabled().catch(() => false)
 
+    // A plugin outside the chain pauses it (it must preview what its own Apply
+    // writes); closing it brings the chain back.
+    const chainBadge = () => page.locator('.chain-count').innerText().catch(() => '')
+    const liveBefore = await chainBadge()
+    await openOp('Opto Comp')
+    const pausedBadge = await chainBadge()
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+    const resumedBadge = await chainBadge()
+    const pauseOk = liveBefore === '2/2' && pausedBadge === 'PAUSED' && resumedBadge === '2/2'
+    await openOp('Plugin Chain')
+
     const order1 = await rowNames()
     await chainWin.getByRole('button', { name: 'Move Inflator later' }).dispatchEvent('click')
     await page.waitForTimeout(300)
@@ -224,7 +235,7 @@ try {
     const fresh = errors.slice(before)
     const ok = soloWindows === 1 && chainReplaced && kept === 0 && groupWindows === 3 && memberApplyOff
       && order1.join(',') === 'Inflator,AirBoost' && order2.join(',') === 'AirBoost,Inflator'
-      && toast && bypassedAfter && soloAfterGroup === 1 && fresh.length === 0
+      && toast && bypassedAfter && soloAfterGroup === 1 && pauseOk && fresh.length === 0
     if (!ok) failures++
     const why = [
       soloWindows === 1 ? '' : `${soloWindows} solo plugin windows open at once; `,
@@ -237,6 +248,7 @@ try {
       toast ? '' : 'Apply did not report the chain in order; ',
       bypassedAfter ? '' : `slots not bypassed after apply (${pills.join(',')}); `,
       soloAfterGroup === 1 ? '' : `a solo plugin left ${soloAfterGroup} windows open; `,
+      pauseOk ? '' : `chain did not pause for a solo plugin and come back (${liveBefore} → ${pausedBadge} → ${resumedBadge}); `,
     ].join('')
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Plugin chain'.padEnd(16)} ${why}${fresh.join(' | ')}`)
   }

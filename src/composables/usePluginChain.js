@@ -55,6 +55,9 @@ import { computePeakCache } from '../audio/processing.js'
 const plugins = new Map()
 const slots = ref([])
 const bypassed = ref(false)
+// A plugin outside the chain is being auditioned, so the chain is out of the
+// signal path until its window closes — see EffectChain.
+const suspended = ref(false)
 // Windows asked to join the chain before their plugin had registered (its
 // composable runs in the window's setup); finished when the window mounts.
 const pendingAdds = new Set()
@@ -81,6 +84,7 @@ function addDef(def) {
 
 function sync(chain) {
   bypassed.value = chain.bypassed
+  suspended.value = chain.suspended
   slots.value = chain.members().map(e => ({
     id: e.id,
     active: e.enabled,
@@ -265,6 +269,7 @@ export function usePluginChain() {
     liveSlots,
     add,
     bypassed,
+    suspended,
     setSlotActive,
     remove,
     clear,

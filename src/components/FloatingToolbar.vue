@@ -8,11 +8,12 @@ import Icon from './ui/Icon.vue'
 
 const { state, setActiveTool, hasFile, openCommandPalette } = useEditorState()
 const { openWindow, isOpen } = useWindows()
-const { slots, liveSlots, bypassed } = usePluginChain()
+const { slots, liveSlots, bypassed, suspended } = usePluginChain()
 
 // The chain plays whether or not its window is open, so the toolbar says so.
 const chainTitle = computed(() => {
   if (!slots.value.length) return 'Plugin chain — empty'
+  if (suspended.value) return 'Plugin chain — paused while a plugin outside it is open, so that plugin previews exactly what its Apply writes'
   if (bypassed.value) return `Plugin chain — ${slots.value.length} plugin(s), bypassed`
   return `Plugin chain — ${liveSlots.value.length} of ${slots.value.length} live`
 })
@@ -76,8 +77,8 @@ const tools = CATEGORIES
         <span
           v-if="slots.length"
           class="chain-count"
-          :class="{ 'is-live': liveSlots.length && !bypassed }"
-        >{{ liveSlots.length }}/{{ slots.length }}</span>
+          :class="{ 'is-live': liveSlots.length && !bypassed && !suspended }"
+        >{{ suspended ? 'PAUSED' : `${liveSlots.length}/${slots.length}` }}</span>
       </button>
     </div>
   </div>
