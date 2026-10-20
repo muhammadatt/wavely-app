@@ -18,7 +18,7 @@
  * explanatory paragraph are off this panel (owner's call); the tooltips carry
  * what the captions said. The bench rows still render under it in dev builds.
  */
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import { usePhatass } from '../../composables/usePhatass.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
@@ -43,7 +43,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   phParams, phPreview, phInputLevels, phOutputLevels, phSatNeedle, phOutputMakeup,
-  togglePreview, syncParam, applyParams, scheduleWarmthReadout, apply, teardown, closeModal,
+  togglePreview, syncParam, applyParams, apply, teardown, closeModal,
 } = usePhatass()
 
 const { state } = useEditorState()
@@ -51,11 +51,6 @@ const { state } = useEditorState()
 const presets = usePluginPresets(PHATASS_PRESET_PLUGIN, {
   read: () => Object.fromEntries(PHATASS_PARAM_KEYS.map(k => [k, phParams[k]])),
   write: p => applyParams(p),
-})
-
-// TAPE's makeup (and the bench's trim) follow the selection and the file, only while the panel is live.
-watch(() => [state.selection?.start, state.selection?.end, state.revision], () => {
-  if (phPreview.value) scheduleWarmthReadout()
 })
 
 onMounted(() => {

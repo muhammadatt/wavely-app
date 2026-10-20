@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
@@ -202,6 +202,9 @@ const copies = pluginCopies((copy, life) => {
     makeupThrottle?.cancel()
     makeupSeq++
   })
+
+  // Whether this copy's file-following watchers are installed (see below).
+  let following = false
 
   function useFET1176() {
     const { state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
@@ -606,6 +609,23 @@ const copies = pluginCopies((copy, life) => {
 
     function teardown() {
       stopMeters()
+    }
+
+    // The measurements that follow the selection and the file run for as long
+    // as this copy can be HEARD, not only while its window is open: a chain
+    // slot keeps playing with its window closed, and its preview would
+    // otherwise keep the last selection's numbers. Installed once per copy,
+    // in the copy's own scope, so they stop when a removed slot is disposed.
+    if (!following) {
+      following = true
+      life.scope.run(() => {
+        const { isOpen } = useWindows()
+        watch(() => state.selection, () => {
+          // A new selection is new material: the live tracker's extrema describe
+          // the old region, so they are cleared before the measurement re-runs.
+          if (fetPreview.value || isOpen(windowId)) { resetLiveMakeup(); refreshAutoMakeup() }
+        }, { deep: true })
+      })
     }
 
     registerChainPlugin({

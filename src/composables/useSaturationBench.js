@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
@@ -48,6 +48,9 @@ const copies = pluginCopies((copy, life) => {
       levelOffset: sbLevelOffset.value,
     }
   }
+
+  // Whether this copy's file-following watchers are installed (see below).
+  let following = false
 
   function useSaturationBench() {
     const {
@@ -196,6 +199,21 @@ const copies = pluginCopies((copy, life) => {
       stopMeters()
       getEffectChainIfExists()?.updateParam(saturationBenchEffect.id, 'delta', false)
       sbDelta.value = false
+    }
+
+    // The measurements that follow the selection and the file run for as long
+    // as this copy can be HEARD, not only while its window is open: a chain
+    // slot keeps playing with its window closed, and its preview would
+    // otherwise keep the last selection's numbers. Installed once per copy,
+    // in the copy's own scope, so they stop when a removed slot is disposed.
+    if (!following) {
+      following = true
+      life.scope.run(() => {
+        const { appState } = useEditorState()
+        watch(() => [state.revision, appState.activeDocumentId], () => {
+          if (sbPreview.value) refreshSpectrum()
+        })
+      })
     }
 
     registerChainPlugin({

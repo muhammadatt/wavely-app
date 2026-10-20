@@ -302,9 +302,14 @@ const hasFooter = computed(() => props.showApply || props.showPreview)
 // A selection is what Apply acts on. Without one the footer offers to make one
 // rather than printing a notice about its absence — "select all" is a button,
 // "make a selection to apply" is a complaint.
-const applyBlocked = computed(() => !!inChain.value || props.applyDisabled || (props.requiresSelection && !hasSelection.value))
+// Nothing applies over a file that is already being processed: two renders of
+// the same selection would each commit, the later one overwriting the earlier
+// (a solo plugin opened while the chain was applying could do exactly that).
+const busy = computed(() => !!state.isProcessing)
+const applyBlocked = computed(() => !!inChain.value || busy.value || props.applyDisabled || (props.requiresSelection && !hasSelection.value))
 const applyTitle = computed(() => {
   if (inChain.value) return 'This plugin is in the Plugin Chain — apply it from the chain'
+  if (busy.value) return 'This file is still being processed — wait for it to finish'
   if (props.applyDisabled) return props.applyDisabledHint
   if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
   return ''

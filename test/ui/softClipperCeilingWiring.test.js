@@ -160,7 +160,11 @@ test('the panel is fixed-only and offers the presets', () => {
   assert.doesNotMatch(src, /setThresholdMode/, 'the panel must not set the mode any more')
   assert.match(src, /v-for="p in ceilingSetters"/, 'the ceiling setters must be reachable')
   assert.match(src, /setCeilingFromPreset\(p\.id\)/)
-  assert.match(src, /watch\(\(\) => state\.selection/, 're-measure when the region changes')
+  // The region-follower lives in the composable, in the copy's own scope, so
+  // a chain slot keeps following the selection with its window closed.
+  assert.match(read('../../src/composables/useSoftClipper.js'),
+    /watch\(\(\) => state\.selection,[\s\S]{0,120}scheduleCeilingPreset\(\)/,
+    're-measure when the region changes')
   // ⚠ THE CAPTION REPORTS THE CURRENT SETTING, NOT A PREVIEW. It names the
   // preset the ceiling is sitting on and prints its dBFS, and reads empty the
   // rest of the time.

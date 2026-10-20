@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useSoftClipper } from '../../composables/useSoftClipper.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
@@ -30,7 +30,7 @@ const {
   SOFT_CLIPPER_MAKEUP_MIN_DB, SOFT_CLIPPER_MAKEUP_MAX_DB,
   syncFixedThreshold,
   setShape, apply, teardown, closeModal,
-  ceilingBusy, CEILING_PRESETS, scheduleCeilingPreset,
+  ceilingBusy, CEILING_PRESETS, 
   ceilingChoices, setCeilingFromPreset,
 } = useSoftClipper()
 
@@ -129,7 +129,6 @@ const SHAPE_CAPTION = {
   tanh4: '3 dB over → −0.2 · 8 → −3.3 · 12 → −5.1 dB',
 }
 
-
 /**
  * Why the ceiling presets cannot be clicked, or null when they can.
  *
@@ -193,13 +192,6 @@ function formatDb(v) {
 
 const LIMITER_OPTIONS = LIMITER_MODES.map(m => ({ value: m.id, label: m.label, title: m.title }))
 
-// A preset re-runs for a changed region, but only while one is active — once
-// the ceiling has been turned by hand it is the user's number. Debounced,
-// because dragging a selection edge is a stream of these.
-watch(() => state.selection, () => scheduleCeilingPreset(), { deep: true })
-
-
-
 /**
  * Display height — where it opens, and the only thing a resize spends.
  *
@@ -253,7 +245,6 @@ const scopeHeight = computed(() => SCOPE_H + heightDelta.value)
  * only ever expands, and the size is remembered per window.
  */
 const PANEL_W = 900
-
 
 /**
  * ⚠ THE STRIP'S TWO LIVE READINGS ARE DAMPED IN THE COMPOSABLE, beside the loop
@@ -324,8 +315,6 @@ const peakOverText = computed(() =>
   (clipperReductionReadout.value < 0.05 ? '—' : clipperReductionReadout.value.toFixed(1)))
 const engagedText = computed(() => `${clipperEngagedReadout.value.toFixed(0)}%`)
 
-
-
 /**
  * Length of the horizontal IN/OUT ladders.
  *
@@ -382,7 +371,6 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
     active: ready && Math.abs(db - fixedThresholdDb.value) <= SETTER_MATCH_DB,
   }
 }))
-
 
 </script>
 

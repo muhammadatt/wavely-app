@@ -59,13 +59,15 @@ function onKeydown(e) {
   if (e.key === 'ArrowDown') { e.preventDefault(); move(1) }
   else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1) }
   else if (e.key === 'Enter') { e.preventDefault(); pick(results.value[cursor.value]) }
-  else if (e.key === 'Escape') {
-    // Stop here, or EditorScreen's global handler goes on to close the chain
-    // window underneath the picker.
-    e.preventDefault()
-    e.stopPropagation()
-    emit('close')
-  }
+}
+
+// Escape anywhere inside the picker — the search field or a result button
+// tabbed to — closes the picker and nothing else. Stopped here, or
+// EditorScreen's global handler goes on to close the window underneath.
+function onEscape(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  emit('close')
 }
 </script>
 
@@ -74,6 +76,7 @@ function onKeydown(e) {
     class="fixed inset-0 flex items-start justify-center pt-[14vh] px-4"
     style="z-index:700;background:rgba(6,9,12,.55);backdrop-filter:blur(3px)"
     @click.self="emit('close')"
+    @keydown.esc="onEscape"
   >
     <div
       class="picker w-full max-w-[540px] rounded-2xl overflow-hidden"

@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../audio/la2aProcessor.js'
 import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { createMeasureThrottle } from './measureThrottle.js'
@@ -258,6 +258,9 @@ const copies = pluginCopies((copy, life) => {
     makeupThrottle?.cancel()
     makeupSeq++
   })
+
+  // Whether this copy's file-following watchers are installed (see below).
+  let following = false
 
   function useLA2A() {
     const { state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
@@ -675,6 +678,21 @@ const copies = pluginCopies((copy, life) => {
 
     function teardown() {
       stopMeters()
+    }
+
+    // The measurements that follow the selection and the file run for as long
+    // as this copy can be HEARD, not only while its window is open: a chain
+    // slot keeps playing with its window closed, and its preview would
+    // otherwise keep the last selection's numbers. Installed once per copy,
+    // in the copy's own scope, so they stop when a removed slot is disposed.
+    if (!following) {
+      following = true
+      life.scope.run(() => {
+        const { isOpen } = useWindows()
+        watch(() => state.selection, () => {
+          if (la2aPreview.value || isOpen(windowId)) refreshAutoMakeup()
+        }, { deep: true })
+      })
     }
 
     registerChainPlugin({

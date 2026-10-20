@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useScheps } from '../../composables/useScheps.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
@@ -24,7 +24,7 @@ const {
   schepsAutoTrim, schepsAutoTrimBusy, schepsWetTrimDb,
   schepsPreview, schepsReduction, schepsInputLevels, schepsOutputLevels,
   togglePreview, syncCharacter, syncSquash, syncMix, syncOutput,
-  toggleAutoTrim, applyParams, refreshAutoTrim, apply, teardown, closeModal,
+  toggleAutoTrim, applyParams, apply, teardown, closeModal,
 } = useScheps()
 
 const presets = usePluginPresets(SCHEPS_PRESET_PLUGIN, {
@@ -46,10 +46,6 @@ onMounted(() => {
   // must not un-bypass its slot.
   if (!schepsPreview.value && currentPluginCopy() === 'solo') togglePreview()
 })
-
-// The trim is measured from the selected region, so a new selection needs a
-// fresh measurement.
-watch(() => state.selection, () => refreshAutoTrim(), { deep: true })
 
 const ACCENT = '#e8a33d'
 const METER_H = 214

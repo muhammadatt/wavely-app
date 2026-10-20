@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useLA2A } from '../../composables/useLA2A.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { LOOKAHEAD_MAX_MS, LA2A_DEFAULTS } from '../../audio/effects/la2aCompressor.js'
@@ -28,7 +28,7 @@ const {
   la2aAnalog, syncAnalog, la2aMix, syncMix,
   la2aPreview, la2aReduction,
   togglePreview, syncMode, syncPeakReduction, syncGain,
-  syncR37, syncLookahead, toggleAutoMakeup, refreshAutoMakeup,
+  syncR37, syncLookahead, toggleAutoMakeup, 
   refreshKernelTuning,
   la2aInputAuto, la2aInputDb, syncInput, resetInputAuto,
   apply, teardown, closeModal,
@@ -48,10 +48,6 @@ onMounted(() => {
   // must not un-bypass its slot.
   if (!la2aPreview.value && currentPluginCopy() === 'solo') togglePreview()
 })
-
-// The makeup is measured from the selected region, so a new selection needs
-// a fresh measurement.
-watch(() => state.selection, () => { refreshAutoMakeup() }, { deep: true })
 
 // The window chrome keeps OptoSmooth's amber; the faceplate is the Vintage 2A
 // hardware face and carries its own colours.

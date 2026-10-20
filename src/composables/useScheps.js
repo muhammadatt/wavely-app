@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
@@ -167,6 +167,9 @@ const copies = pluginCopies((copy, life) => {
     trimTimer = null
     trimSeq++
   })
+
+  // Whether this copy's file-following watchers are installed (see below).
+  let following = false
 
   function useScheps() {
     const {
@@ -463,6 +466,21 @@ const copies = pluginCopies((copy, life) => {
 
     function teardown() {
       stopMeters()
+    }
+
+    // The measurements that follow the selection and the file run for as long
+    // as this copy can be HEARD, not only while its window is open: a chain
+    // slot keeps playing with its window closed, and its preview would
+    // otherwise keep the last selection's numbers. Installed once per copy,
+    // in the copy's own scope, so they stop when a removed slot is disposed.
+    if (!following) {
+      following = true
+      life.scope.run(() => {
+        const { isOpen } = useWindows()
+        watch(() => state.selection, () => {
+          if (schepsPreview.value || isOpen(windowId)) refreshAutoTrim()
+        }, { deep: true })
+      })
     }
 
     registerChainPlugin({

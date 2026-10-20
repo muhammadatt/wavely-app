@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
@@ -117,6 +117,9 @@ const copies = pluginCopies((copy, life) => {
     autoAirTimer = null
     autoAirSeq++
   })
+
+  // Whether this copy's file-following watchers are installed (see below).
+  let following = false
 
   function useDeEsser() {
     const {
@@ -493,6 +496,24 @@ const copies = pluginCopies((copy, life) => {
       hfAudition.value = false
       const chain = getEffectChainIfExists()
       if (chain) nodesOf(chain)?.setListen('off')
+    }
+
+    // The measurements that follow the selection and the file run for as long
+    // as this copy can be HEARD, not only while its window is open: a chain
+    // slot keeps playing with its window closed, and its preview would
+    // otherwise keep the last selection's numbers. Installed once per copy,
+    // in the copy's own scope, so they stop when a removed slot is disposed.
+    if (!following) {
+      following = true
+      life.scope.run(() => {
+        const { appState } = useEditorState()
+        watch(() => state.selection, () => {
+          if (hfPreview.value) scheduleAutoAir()
+        }, { deep: true })
+        watch(() => [state.revision, appState.activeDocumentId], () => {
+          if (hfPreview.value) refreshLevel()
+        })
+      })
     }
 
     registerChainPlugin({
