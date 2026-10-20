@@ -7,6 +7,8 @@ import ToastNotification from './components/ToastNotification.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import WaveformContextMenu from './components/WaveformContextMenu.vue'
 import WindowLayer from './components/WindowLayer.vue'
+import AuthDialog from './components/AuthDialog.vue'
+import { useAuth } from './composables/useAuth.js'
 
 // ProcessingOverlay is no longer mounted here — it now renders inside the
 // waveform area so a job on one document doesn't block the whole app.
@@ -14,6 +16,10 @@ import WindowLayer from './components/WindowLayer.vue'
 // Floating effect windows are no longer listed here either: WindowLayer renders
 // whatever the window manager has open, so adding one is a registry entry.
 const { appState } = useEditorState()
+
+// Started here rather than on first use so an auth redirect (email link,
+// password reset) is handled on load even before the top bar renders.
+const { state: authState } = useAuth()
 </script>
 
 <template>
@@ -29,5 +35,6 @@ const { appState } = useEditorState()
     v-if="appState.contextMenu"
     :key="`${appState.contextMenu.x},${appState.contextMenu.y}`"
   />
+  <AuthDialog v-if="authState.dialog" />
   <ToastNotification />
 </template>

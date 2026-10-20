@@ -307,7 +307,7 @@ These apply only to the `acx_audiobook` preset:
 
 ### Not Yet Implemented
 
-- **User authentication** — No auth system
+- **User authentication** — PARTIAL. Supabase Auth sign-in (email/password, magic link, reset, optional OAuth in a popup) in the app, bearer-token verification on the server and `GET /api/me` (user + plan derived from `subscriptions`) are built; everything is OFF until the Supabase env vars are set, and no feature is gated yet. Plans/feature gating, account presets and Stripe are next. See `docs/user-accounts.md`
 - **Payment / tier enforcement** — Gate logic not present; all tiers currently serve same output
 - **Batch processing** — Sprint 5; multi-file + cross-chapter consistency pass
 - **API access** — Sprint 6 / Pro tier
@@ -470,6 +470,7 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 | `docs/scheps_vocal_chain_thick_spec.md` | ✓ Present | Scheps Parallel, "Thick" character: signal chain, reference knob positions and the measured target curves. Authoritative on what the curves *are*; the biquad fit that reproduces them is `scripts/fit-pultec-curves.mjs`. Companion data: `data/pultec_curves/scheps_thick_curve_data.csv`. |
 | `docs/scheps_vocal_chain_presence_spec.md` | ✓ Present | The complementary "Presence" character. Read alongside the Thick spec — the two share a signal chain and differ only in curve data. Note the post-EQ cut is anchored at 20 kHz deliberately; the Naming Note explains why the preset is not called "Airy". |
 | `docs/fet1176_capture_protocol.md` | ✓ Present | FET Punch (1176) reference capture protocol: control-parity check, the four-bounce null test, the 38-bounce capture matrix and what the tooling's self-test already settled. Companion to `scripts/fet-ballistics.mjs`. |
+| `docs/user-accounts.md` | ✓ Present | User accounts: Supabase setup per environment, env vars, schema/RLS rules, client and server auth architecture, and the remaining steps (gating, presets, Stripe). |
 | `docs/acx_production_workflow.md` | ✗ Not present | ACX narrator workflow reference. Context for why features exist and where Instant Polish fits in the production chain. |
 | `docs/instant_polish_gtm.md` | ✗ Not present | Go-to-market strategy. Positioning, pricing, launch plan, SEO content map. |
 

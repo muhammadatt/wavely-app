@@ -5,6 +5,9 @@ import { processRoute } from './routes/process.js'
 import { jobsRoute }   from './routes/jobs.js'
 import { spotRoute }   from './routes/spot.js'
 import { analyzeRoute } from './routes/analyze.js'
+import { meRoute } from './routes/me.js'
+import { readAuthConfig, createTokenVerifier } from './lib/auth.js'
+import { getSupabaseAdmin } from './lib/supabaseAdmin.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -83,6 +86,28 @@ const analyzeLimiter = rateLimit({
 })
 app.use('/api/analyze', analyzeLimiter)
 
+// Account reads are cheap (one token check, two indexed selects) but run on
+// every page load and sign-in, so the budget is the widest of the lot.
+const accountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300,                  // 300 requests per window per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many account requests, please try again later' },
+  validate: { xForwardedForHeader: false },
+})
+app.use('/api/me', accountLimiter)
+
+// Accounts (Supabase). Optional: with SUPABASE_URL unset the server runs
+// exactly as before and /api/me answers 503, which the client reads as
+// "accounts are off". See docs/user-accounts.md.
+const authConfig = readAuthConfig()
+const verifyAccessToken = authConfig.supabaseUrl ? createTokenVerifier(authConfig) : null
+const supabaseAdmin = getSupabaseAdmin(authConfig)
+if (verifyAccessToken && !supabaseAdmin) {
+  console.warn('SUPABASE_URL is set but SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY is not — /api/me will answer 503')
+}
+
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.0.1' })
@@ -99,6 +124,9 @@ app.use('/api', spotRoute)
 
 // Analysis endpoints (synchronous — return measurements as JSON)
 app.use('/api', analyzeRoute)
+
+// Signed-in user's account and plan
+app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))
 
 const server = app.listen(PORT, () => {
   console.log(`Wavely server listening on port ${PORT}`)
