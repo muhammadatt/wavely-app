@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { useEditorState } from './useEditorState.js'
-import { useWindows } from './useWindows.js'
+import { useWindows, setChainSlotPredicate } from './useWindows.js'
 import { getEffectChain, getEffectChainIfExists, onEffectChainCreated } from '../audio/effectChain.js'
 import { replaceRegionWithBuffer } from '../audio/operations.js'
 import { computePeakCache } from '../audio/processing.js'
@@ -13,8 +13,8 @@ import { computePeakCache } from '../audio/processing.js'
  * out of the chain; and committing the chain meant pressing each window's
  * Apply in turn, one undo step per plugin.
  *
- * Now a plugin joins the chain only through the Plugin Chain window's Add list
- * (or the + CHAIN pill on its own window), and its SLOT outlives its window.
+ * Now a plugin joins the chain only through the Plugin Chain window's Add
+ * picker, and its SLOT outlives its window.
  * The Plugin Chain window lists the slots in processing order and can reorder,
  * bypass, remove and re-open them, bypass the whole chain at once, and apply
  * it: every live slot rendered in order over the selection, committed as ONE
@@ -23,7 +23,10 @@ import { computePeakCache } from '../audio/processing.js'
  * Opening a plugin from the rail or the palette does NOT add it: it is
  * auditioned on its own, after the chain, until its window closes — so
  * "which plugins are in the chain" has one answer, the list, rather than
- * depending on which windows happened to be opened.
+ * depending on which windows happened to be opened. The window manager keeps
+ * the two apart: the chain and its plugins' windows open together, and a
+ * plugin outside the chain opens alone (useWindows.js). A plugin in the chain
+ * has no Apply of its own — the chain's Apply is the only one.
  *
  * Each plugin composable registers a `ChainPlugin` (below) the first time it
  * is used. The registration is how the chain reaches a plugin's own state —
@@ -55,6 +58,10 @@ const bypassed = ref(false)
 // Windows asked to join the chain before their plugin had registered (its
 // composable runs in the window's setup); finished when the window mounts.
 const pendingAdds = new Set()
+
+// The chain group, for the window manager: a plugin with a slot, or one on its
+// way to one, opens beside the chain rather than replacing it.
+setChainSlotPredicate(windowId => pendingAdds.has(windowId) || hasChainSlot(windowId))
 
 function defForWindow(windowId) {
   for (const def of plugins.values()) if (def.windowId === windowId) return def
@@ -138,7 +145,7 @@ export function usePluginChain() {
     state, appState, replaceRegion, setPeakCache,
     startProcessing, updateProcessingStage, updateProcessingProgress, endProcessing, showToast,
   } = editor
-  const { openWindow } = useWindows()
+  const { openWindow, closeWindow } = useWindows()
 
   const chain = () => getEffectChain(editor.getAudioContext())
   const liveSlots = computed(() => slots.value.filter(s => s.active))
@@ -160,8 +167,12 @@ export function usePluginChain() {
   }
 
   function remove(id) {
-    plugins.get(id)?.setActive(false)
+    const def = plugins.get(id)
+    def?.setActive(false)
     chain().removeFromChain(id)
+    // Out of the chain, its window would be a solo plugin open beside the
+    // chain — exactly what the window groups forbid.
+    if (def) closeWindow(def.windowId)
   }
 
   function clear() {

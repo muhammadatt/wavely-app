@@ -16,15 +16,36 @@ import { reactive, computed } from 'vue'
 const openIds = reactive([])
 
 /**
- * Windows that may stay open beside a plugin. Every other window is a plugin,
- * and plugins open ONE AT A TIME: opening one closes whichever plugin window
- * was open. Multi-plugin work happens in the Plugin Chain, which is why the
- * chain itself is on this list — it is where you see the other plugins — along
- * with the analyzer, which reads whatever the chain is doing.
+ * Windows that may stay open beside anything: the analyzer reads whatever is
+ * playing, and the Modula kit is a dev gallery. Every other window is a
+ * PLUGIN window, and plugin windows open in one of two groups:
+ *
+ *   the CHAIN group — the Plugin Chain window and the windows of plugins that
+ *                     have a slot in it. Any number of these may be open at
+ *                     once: they are one rack, edited together.
+ *   a SOLO plugin   — any other plugin, opened on its own.
+ *
+ * The two never share the screen. Opening a chain-group window closes a solo
+ * plugin's; opening a solo plugin closes every other plugin window, the chain
+ * group included (its slots keep playing — only their windows close). Having
+ * plugins that are in the chain and plugins that are not open side by side
+ * made it impossible to tell which Apply did what.
  */
-export const ALONGSIDE_WINDOW_IDS = new Set(['plugin-chain', 'spectrum-analyzer', 'modula-kit'])
+export const ALONGSIDE_WINDOW_IDS = new Set(['spectrum-analyzer', 'modula-kit'])
+
+export const CHAIN_WINDOW_ID = 'plugin-chain'
 
 const isPluginWindow = id => !ALONGSIDE_WINDOW_IDS.has(id)
+
+// Whether a plugin window belongs to the chain group beyond the chain window
+// itself — answered by the chain (usePluginChain sets it), which imports this
+// module and so cannot be imported from it.
+let hasSlot = () => false
+export function setChainSlotPredicate(fn) {
+  hasSlot = fn
+}
+
+const inChainGroup = id => id === CHAIN_WINDOW_ID || hasSlot(id)
 
 // Last known position per window id. Deliberately outside the reactive list and
 // never cleared: closing a window and reopening it should put it back where the
@@ -43,8 +64,8 @@ export function useWindows() {
   }
 
   /**
-   * Open a window, or raise it if it is already open. A plugin window replaces
-   * the plugin window already open, if any — see ALONGSIDE_WINDOW_IDS.
+   * Open a window, or raise it if it is already open. A plugin window closes
+   * the plugin windows it may not share the screen with — see the groups above.
    */
   function openWindow(id) {
     if (isOpen(id)) {
@@ -52,8 +73,12 @@ export function useWindows() {
       return
     }
     if (isPluginWindow(id)) {
+      const chainSide = inChainGroup(id)
       for (let i = openIds.length - 1; i >= 0; i--) {
-        if (isPluginWindow(openIds[i])) openIds.splice(i, 1)
+        const other = openIds[i]
+        if (!isPluginWindow(other)) continue
+        if (chainSide && inChainGroup(other)) continue
+        openIds.splice(i, 1)
       }
     }
     openIds.push(id)

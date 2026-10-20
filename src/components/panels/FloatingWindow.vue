@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useWindows } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  chainWindowMounted, chainWindowUnmounted, chainStatusFor, usePluginChain,
+  chainWindowMounted, chainWindowUnmounted, chainStatusFor,
 } from '../../composables/usePluginChain.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
@@ -296,8 +296,9 @@ const hasFooter = computed(() => props.showApply || props.showPreview)
 // A selection is what Apply acts on. Without one the footer offers to make one
 // rather than printing a notice about its absence — "select all" is a button,
 // "make a selection to apply" is a complaint.
-const applyBlocked = computed(() => props.applyDisabled || (props.requiresSelection && !hasSelection.value))
+const applyBlocked = computed(() => !!inChain.value || props.applyDisabled || (props.requiresSelection && !hasSelection.value))
 const applyTitle = computed(() => {
+  if (inChain.value) return 'This plugin is in the Plugin Chain — apply it from the chain'
   if (props.applyDisabled) return props.applyDisabledHint
   if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
   return ''
@@ -381,15 +382,15 @@ function updateOverflow() {
 // Whatever had focus when this opened, so closing can hand it back.
 let previouslyFocused = null
 
-// ── Chain pill ──────────────────────────────────────────────────────────────
-// A plugin that can join the chain says whether it has: + CHAIN adds it to the
-// end, IN CHAIN · n opens the rack. Null (no pill) for every other window.
-const pluginChain = usePluginChain()
-const chainStatus = computed(() => chainStatusFor(props.windowId))
-function onChainPill() {
-  if (chainStatus.value?.member) openWindow('plugin-chain')
-  else pluginChain.add(props.windowId)
-}
+// ── Chain membership ────────────────────────────────────────────────────────
+// A plugin with a slot in the Plugin Chain says so (IN CHAIN · n, which opens
+// the rack) and has NO APPLY of its own: the chain's Apply is the one that
+// writes it, in order with the rest. Joining happens only from the chain's
+// Add picker, so a plugin outside the chain shows nothing here.
+const inChain = computed(() => {
+  const status = chainStatusFor(props.windowId)
+  return status?.member ? status : null
+})
 
 // Accessible name, read off the brand mark.
 const label = computed(() => `${props.brandLead} ${props.brandTail}`.trim())
@@ -704,14 +705,13 @@ function requestClose() {
           :disabled-hint="presetsDisabledHint"
         />
         <button
-          v-if="chainStatus"
+          v-if="inChain"
           type="button"
-          class="win-chain-pill"
-          :class="{ 'is-member': chainStatus.member }"
-          :title="chainStatus.member ? 'Open the Plugin Chain' : 'Add this plugin to the end of the Plugin Chain'"
+          class="win-chain-pill is-member"
+          title="Open the Plugin Chain"
           @pointerdown.stop
-          @click="onChainPill"
-        >{{ chainStatus.member ? `IN CHAIN · ${chainStatus.position}` : '+ CHAIN' }}</button>
+          @click="openWindow('plugin-chain')"
+        >IN CHAIN · {{ inChain.position }}</button>
         <slot name="header-center" />
       </div>
 
@@ -891,8 +891,8 @@ function requestClose() {
         >
           <span v-if="modula" style="font:700 12px/1 'Inter',system-ui,sans-serif">✓</span>
           <Icon v-else :name="applyIcon" :size="15" :stroke-width="2.5" />
-          <span class="win-btn-label">{{ applyLabel }}</span>
-          <span class="win-btn-label-short">{{ applyLabelShort }}</span>
+          <span class="win-btn-label">{{ inChain ? 'Applies with the chain' : applyLabel }}</span>
+          <span class="win-btn-label-short">{{ inChain ? 'In chain' : applyLabelShort }}</span>
         </button>
       </div>
     </div>

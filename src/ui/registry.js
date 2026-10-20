@@ -659,8 +659,8 @@ export const WINDOW_COMPONENTS = Object.fromEntries(
  * Scoring only has to separate an exact label hit from a keyword hit from a
  * loose fuzzy hit — the list is short enough that finer ranking is noise.
  */
-export function searchOperations(query, { categoryId = null } = {}) {
-  const pool = categoryId ? operationsIn(categoryId) : OPERATIONS
+export function searchOperations(query, { categoryId = null, pool: only = null } = {}) {
+  const pool = only ?? (categoryId ? operationsIn(categoryId) : OPERATIONS)
   const q = query.trim().toLowerCase()
   if (!q) return pool
 

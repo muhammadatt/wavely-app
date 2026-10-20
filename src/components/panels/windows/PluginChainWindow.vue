@@ -2,10 +2,12 @@
 /**
  * PLUGIN CHAIN — the rack every engaged plugin plays through.
  *
- * + ADD PLUGIN pops out the list of plugins that can run in the chain; picking
- * one appends it and opens it to tune. That list is the ONLY way into the
- * chain (besides the + CHAIN pill on a plugin's own window) — opening a plugin
- * from the rail auditions it on its own.
+ * + ADD PLUGIN opens a picker (the Search Operations palette, narrowed to the
+ * plugins that can run in the chain); picking one appends it and opens it to
+ * tune. That picker is the ONLY way into the chain — opening a plugin from the
+ * rail auditions it on its own, and closes this window (useWindows.js).
+ * Plugins in the chain may all be open beside this window, and none of them
+ * has an Apply of its own: this window's Apply is the one.
  *
  * One row per slot, in processing order (top runs first): its lamp is the
  * plugin's own ON/BYPASS, EDIT reopens its faceplate, the arrows (or a drag)
@@ -16,11 +18,11 @@
  * The rack is a view: the slots live in the EffectChain (see
  * usePluginChain.js), so a plugin's window and this one can never disagree.
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useEditorState } from '../../../composables/useEditorState.js'
 import { usePluginChain } from '../../../composables/usePluginChain.js'
-import { chainPlugins } from '../../../ui/registry.js'
 import FloatingWindow from '../FloatingWindow.vue'
+import PluginPicker from '../../PluginPicker.vue'
 import ModulaLedPill from '../../modula/ModulaLedPill.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -40,39 +42,14 @@ const applyLabel = computed(() => {
   return n > 1 ? `Apply ${n} plugins to selection` : 'Apply chain to selection'
 })
 
-// ── Add list ────────────────────────────────────────────────────────────────
-const addOpen = ref(false)
-const addEl = ref(null)
-const menuEl = ref(null)
-
-// The chain-capable plugins in the registry's order, bucketed by its groups.
-// Read at render, never at module load: the registry imports this window.
-const addGroups = computed(() => {
-  const inChain = new Set(slots.value.map(s => s.windowId))
-  const groups = []
-  const byName = new Map()
-  for (const op of chainPlugins()) {
-    let g = byName.get(op.group)
-    if (!g) { g = { group: op.group, items: [] }; byName.set(op.group, g); groups.push(g) }
-    g.items.push({ id: op.id, label: op.label, desc: op.desc, member: inChain.has(op.id) })
-  }
-  return groups
-})
+// ── Add picker ──────────────────────────────────────────────────────────────
+const pickerOpen = ref(false)
+const memberWindowIds = computed(() => slots.value.map(s => s.windowId))
 
 function pick(id) {
-  addOpen.value = false
+  pickerOpen.value = false
   add(id)
 }
-
-function onOutside(e) {
-  if (addEl.value?.contains(e.target) || menuEl.value?.contains(e.target)) return
-  addOpen.value = false
-}
-watch(addOpen, (open) => {
-  if (open) document.addEventListener('pointerdown', onOutside, true)
-  else document.removeEventListener('pointerdown', onOutside, true)
-})
-onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutside, true))
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -136,34 +113,13 @@ function onDragEnd() {
             title="Take every plugin out of the chain"
             @click="clear()"
           >Clear</button>
-          <span ref="addEl" class="pc-add">
-            <button
-              type="button" class="pc-text-btn pc-add-btn"
-              :aria-expanded="String(addOpen)" aria-haspopup="menu"
-              title="Add a plugin to the end of the chain"
-              @click="addOpen = !addOpen"
-            >+ Add plugin</button>
-          </span>
-        </span>
-      </div>
-
-      <!-- In the panel's flow rather than floating over it: the window body is
-           a scroller, and a short chain would clip a pop-over. -->
-      <div v-if="addOpen" ref="menuEl" class="pc-menu" role="menu" @keydown.esc.stop="addOpen = false">
-        <div v-for="g in addGroups" :key="g.group" class="pc-menu-group">
-          <div class="pc-menu-caption">{{ g.group }}</div>
           <button
-            v-for="item in g.items" :key="item.id"
-            type="button" role="menuitem" class="pc-menu-item"
-            :disabled="item.member"
-            :title="item.member ? `${item.label} is already in the chain` : item.desc"
-            @click="pick(item.id)"
-          >
-            <span class="pc-menu-label">{{ item.label }}</span>
-            <span v-if="item.member" class="pc-menu-tag">IN CHAIN</span>
-            <span v-else class="pc-menu-desc">{{ item.desc }}</span>
-          </button>
-        </div>
+            type="button" class="pc-text-btn pc-add-btn"
+            aria-haspopup="dialog"
+            title="Add a plugin to the end of the chain"
+            @click="pickerOpen = true"
+          >+ Add plugin</button>
+        </span>
       </div>
 
       <ol v-if="slots.length" class="pc-list" :class="{ 'is-bypassed': bypassed }">
@@ -226,6 +182,17 @@ function onDragEnd() {
       </p>
     </div>
   </FloatingWindow>
+
+  <!-- To the body: the window is a transformed, clipped box, and the picker is
+       a full-screen dialog like the palette it mirrors. -->
+  <Teleport to="body">
+    <PluginPicker
+      v-if="pickerOpen"
+      :in-chain="memberWindowIds"
+      @pick="pick"
+      @close="pickerOpen = false"
+    />
+  </Teleport>
 </template>
 
 <style scoped>
@@ -249,56 +216,7 @@ function onDragEnd() {
   align-items: center;
   gap: 6px;
 }
-.pc-add { position: relative; }
 .pc-add-btn { color: var(--m-accent); }
-.pc-menu {
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 6px;
-  border-radius: 12px;
-  background: #1d232c;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, .7), 0 16px 32px -8px rgba(0, 0, 0, .9);
-}
-.pc-menu-caption {
-  padding: 8px 8px 4px;
-  font: 700 8.5px/1 var(--m-font-mono);
-  letter-spacing: .16em;
-  text-transform: uppercase;
-  color: var(--m-ink-4);
-}
-.pc-menu-item {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 8px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-.pc-menu-item:hover:not(:disabled) { background: rgba(255, 255, 255, .07); }
-.pc-menu-item:disabled { cursor: default; opacity: .5; }
-.pc-menu-label {
-  flex-shrink: 0;
-  font: 600 12px/1.2 var(--m-font-ui);
-  color: var(--m-ink);
-}
-.pc-menu-desc {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: 500 10.5px/1.2 var(--m-font-ui);
-  color: var(--m-ink-4);
-}
-.pc-menu-tag {
-  margin-left: auto;
-  font: 700 8.5px/1 var(--m-font-mono);
-  letter-spacing: .12em;
-  color: var(--m-accent);
-}
 .pc-caption {
   font: 700 9px/1 var(--m-font-mono);
   letter-spacing: .16em;
