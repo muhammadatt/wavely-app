@@ -19,7 +19,7 @@ export const HUM_REMOVER_WINDOW_ID = 'hum-remover'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const humNotchEffect = effectForCopy(soloHumNotchEffect, copy)
   const windowId = idForCopy(HUM_REMOVER_WINDOW_ID, copy)
 
@@ -270,6 +270,7 @@ const copies = pluginCopies((copy) => {
       id: humNotchEffect.id,
       windowId,
       label: 'Hum Remover',
+      dispose: life.dispose,
       isActive: () => humPreview.value,
       setActive: (on) => { if (humPreview.value !== on) togglePreview() },
       render: renderRegion,

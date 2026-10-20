@@ -37,10 +37,11 @@ export const VOICERX_WINDOW_ID = 'voicerx'
  * One copy per use — the solo copy or the chain's (pluginCopies.js) — each with
  * its own bands, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const instance = createEqInstance({
     effect: effectForCopy(voiceRxEqEffect, copy),
     windowId: idForCopy(VOICERX_WINDOW_ID, copy),
+    life,
     label: 'VoiceRx',
     // A band here is the control for a named characteristic, so its range is a
     // wall rather than the general EQ's trapdoor — see clampBandToRole.

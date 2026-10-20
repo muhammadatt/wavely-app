@@ -1,4 +1,4 @@
-import { computed, effectScope, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
@@ -22,7 +22,7 @@ export const AUTOLEVEL_WINDOW_ID = 'auto-leveler'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const autoLevelerEffect = effectForCopy(soloAutoLevelerEffect, copy)
   const windowId = idForCopy(AUTOLEVEL_WINDOW_ID, copy)
 
@@ -78,7 +78,7 @@ const copies = pluginCopies((copy) => {
    */
   const METER_TAU_MS = 120
 
-  // The app-lifetime scope holding the stale-curve guard — see its use below.
+  // The scope holding the stale-curve guard (the copy's own) — see its use below.
   let staleGuard = null
 
   function useAutoLevel() {
@@ -227,12 +227,14 @@ const copies = pluginCopies((copy) => {
     // segments are positioned against the analysed region, so once the audio
     // under them changes they apply phrase gains to unrelated phrases.
     //
-    // ⚠ IN A DETACHED SCOPE, CREATED ONCE: the leveler keeps playing in the chain
+    // ⚠ IN THE COPY'S SCOPE, CREATED ONCE: the leveler keeps playing in the chain
     // after its window closes, and a watcher made in the window's setup would die
     // with it — leaving a stale curve riding gain over edited audio. (The
     // computeds it reads keep working after unmount; only watchers are scoped.)
+    // The copy's scope stops when the copy is disposed (pluginCopies.js); a
+    // detached scope of its own would have outlived a removed slot.
     if (!staleGuard) {
-      staleGuard = effectScope(true)
+      staleGuard = life.scope
       staleGuard.run(() => watch(isStale, (stale) => {
         if (stale) pushCurve()
       }))
@@ -373,6 +375,7 @@ const copies = pluginCopies((copy) => {
       id: autoLevelerEffect.id,
       windowId,
       label: 'Auto Leveler',
+      dispose: life.dispose,
       isActive: () => preview.value,
       setActive: (on) => { if (preview.value !== on) togglePreview() },
       unavailable: () => (curveValid.value ? '' : 'analyse the selection first'),

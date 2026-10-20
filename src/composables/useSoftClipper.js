@@ -29,7 +29,7 @@ export const SOFT_CLIPPER_WINDOW_ID = 'soft-clipper'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const softClipperEffect = effectForCopy(soloSoftClipperEffect, copy)
   const windowId = idForCopy(SOFT_CLIPPER_WINDOW_ID, copy)
 
@@ -216,6 +216,17 @@ const copies = pluginCopies((copy) => {
     const { outputTrimDb: _ignored, ...rest } = currentParams()
     return rest
   }
+
+  // A chain copy whose slot is removed is disposed (pluginCopies.js): nothing
+  // it scheduled may run on, and a pass still in flight must land nowhere.
+  life.onDispose(() => {
+    makeupThrottle?.cancel()
+    makeupSeq++
+    clearTimeout(ceilingTimer)
+    ceilingTimer = null
+    ceilingSeq++
+    choicesSeq++
+  })
 
   function useSoftClipper() {
     const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast } = useEditorState()
@@ -670,6 +681,7 @@ const copies = pluginCopies((copy) => {
       id: softClipperEffect.id,
       windowId,
       label: 'Soft Clipper',
+      dispose: life.dispose,
       isActive: () => clipperPreview.value,
       setActive: (on) => { if (clipperPreview.value !== on) togglePreview() },
       render: renderRegion,

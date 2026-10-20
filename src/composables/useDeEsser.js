@@ -19,7 +19,7 @@ export const HF_SOFTENER_WINDOW_ID = 'hf-softener'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const hfSoftenerEffect = effectForCopy(soloHfSoftenerEffect, copy)
   const windowId = idForCopy(HF_SOFTENER_WINDOW_ID, copy)
 
@@ -109,6 +109,14 @@ const copies = pluginCopies((copy) => {
       levelOffset: hfLevelOffset.value,
     }
   }
+
+  // A chain copy whose slot is removed is disposed (pluginCopies.js): nothing
+  // it scheduled may run on, and a pass still in flight must land nowhere.
+  life.onDispose(() => {
+    clearTimeout(autoAirTimer)
+    autoAirTimer = null
+    autoAirSeq++
+  })
 
   function useDeEsser() {
     const {
@@ -491,6 +499,7 @@ const copies = pluginCopies((copy) => {
       id: hfSoftenerEffect.id,
       windowId,
       label: 'HF Softener',
+      dispose: life.dispose,
       isActive: () => hfPreview.value,
       setActive: (on) => { if (hfPreview.value !== on) togglePreview() },
       render: async (segments, start, end) => {

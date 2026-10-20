@@ -23,9 +23,11 @@ export const PHATASS_WINDOW_ID = 'phatass'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const phatassEffect = effectForCopy(soloPhatassEffect, copy)
   const windowId = idForCopy(PHATASS_WINDOW_ID, copy)
+  // Whose measurements these are: each copy has its own in-flight passes.
+  const owner = phatassEffect.id
 
   // Reactive state shared by every caller of this copy.
   // `voiceLevelDb`, `warmthRefPeaksDb` and `warmthCeilingDb` are in here because
@@ -74,6 +76,18 @@ const copies = pluginCopies((copy) => {
   // Params that do not change what the output trim measures: Output rides on top
   // of it, and the mode is handled on its own.
   const OUTPUT_TRIM_IGNORES = new Set(['output', 'outputMakeup'])
+
+  // A chain copy whose slot is removed is disposed (pluginCopies.js): nothing
+  // it scheduled may run on, and a pass still in flight must land nowhere.
+  life.onDispose(() => {
+    for (const t of [readoutTimer, tapeTimer, exactTimer, outputTimer]) clearTimeout(t)
+    readoutTimer = tapeTimer = exactTimer = outputTimer = null
+    readoutSeq++
+    tapeSeq++
+    outputSeq++
+    cancelPhatassTapeMakeup(owner)
+    cancelPhatassOutputMakeup(owner)
+  })
 
   function usePhatass() {
     const {
@@ -257,6 +271,7 @@ const copies = pluginCopies((copy) => {
         try {
           const { makeupDb } = await measurePhatassTapeMakeup(
             state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+            { owner },
           )
           // Anything that moves the makeup bumps tapeSeq and cancels this render.
           if (seq !== tapeSeq || tapeMakeupKey(start, end) !== key) return
@@ -303,7 +318,7 @@ const copies = pluginCopies((copy) => {
       try {
         const { makeupDb } = await measurePhatassTapeMakeup(
           state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
-          { exact: false },
+          { exact: false, owner },
         )
         if (seq !== tapeSeq) return null
         phTapeMakeup.value = { pending: false }
@@ -328,7 +343,7 @@ const copies = pluginCopies((copy) => {
       // A measurement already in flight is for the old settings: drop it now, or
       // it could land in the debounce window and overwrite the interim.
       tapeSeq++
-      cancelPhatassTapeMakeup()
+      cancelPhatassTapeMakeup(owner)
       clearTimeout(exactTimer)
       exactTimer = null
       clearTimeout(tapeTimer)
@@ -341,7 +356,7 @@ const copies = pluginCopies((copy) => {
       clearTimeout(exactTimer)
       exactTimer = null
       tapeSeq++
-      cancelPhatassTapeMakeup()
+      cancelPhatassTapeMakeup(owner)
       phTapeMakeup.value = { pending: false }
     }
 
@@ -375,7 +390,7 @@ const copies = pluginCopies((copy) => {
       try {
         const { makeupDb } = await measurePhatassOutputMakeup(
           state.segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
-          { exact: false },
+          { exact: false, owner },
         )
         if (seq !== outputSeq) return
         phOutputMakeup.value = { pending: false }
@@ -392,7 +407,7 @@ const copies = pluginCopies((copy) => {
       phOutputMakeup.value = { pending: true }
       // As for TAPE's makeup: a trim in flight was measured on the old chain.
       outputSeq++
-      cancelPhatassOutputMakeup()
+      cancelPhatassOutputMakeup(owner)
       clearTimeout(outputTimer)
       outputTimer = setTimeout(refreshOutputMakeup, 250)
     }
@@ -401,7 +416,7 @@ const copies = pluginCopies((copy) => {
       clearTimeout(outputTimer)
       outputTimer = null
       outputSeq++
-      cancelPhatassOutputMakeup()
+      cancelPhatassOutputMakeup(owner)
       phOutputMakeup.value = { pending: false }
     }
 
@@ -524,6 +539,7 @@ const copies = pluginCopies((copy) => {
         } else {
           const { makeupDb } = await measurePhatassTapeMakeup(
             segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+            { owner },
           )
           if (own) rememberExactMakeup(key, makeupDb)
           setTapeMakeup(makeupDb)
@@ -533,6 +549,7 @@ const copies = pluginCopies((copy) => {
       if (outputTrimOn()) {
         const { makeupDb } = await measurePhatassOutputMakeup(
           segments, start, end, { ...phParams }, state.currentFile.sampleRate, state.currentFile.channels,
+          { owner },
         )
         setOutputMakeup(makeupDb)
       }
@@ -572,6 +589,7 @@ const copies = pluginCopies((copy) => {
       id: phatassEffect.id,
       windowId,
       label: 'PHAT*SS',
+      dispose: life.dispose,
       isActive: () => phPreview.value,
       setActive: (on) => { if (phPreview.value !== on) togglePreview() },
       render: async (segments, start, end) => {

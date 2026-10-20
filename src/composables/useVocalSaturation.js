@@ -17,7 +17,7 @@ export const VOCAL_SAT_WINDOW_ID = 'vocal-saturation'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const vocalSatEffect = effectForCopy(soloVocalSatEffect, copy)
   const windowId = idForCopy(VOCAL_SAT_WINDOW_ID, copy)
 
@@ -195,6 +195,7 @@ const copies = pluginCopies((copy) => {
       id: vocalSatEffect.id,
       windowId,
       label: 'Tube Saturation',
+      dispose: life.dispose,
       isActive: () => vsPreview.value,
       setActive: (on) => { if (vsPreview.value !== on) togglePreview() },
       render: renderRegion,

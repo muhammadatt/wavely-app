@@ -9,10 +9,11 @@ import Icon from './ui/Icon.vue'
  *
  * Same look, same fuzzy ranking, same keys (type to filter, ↑/↓, Enter, Esc),
  * so adding to the chain is a gesture the user already knows. A plugin already
- * in the chain is listed but marked and cannot be picked twice.
+ * in the chain is marked with how many slots it has, and can be added again —
+ * each slot is a copy of its own (composables/pluginCopies.js).
  */
 const props = defineProps({
-  /** Window ids of the plugins already in the chain. */
+  /** Window ids of the plugins already in the chain, once per slot. */
   inChain: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['pick', 'close'])
@@ -22,13 +23,16 @@ const cursor = ref(0)
 const inputEl = ref(null)
 const listEl = ref(null)
 
-const members = computed(() => new Set(props.inChain))
+const slotCounts = computed(() => {
+  const counts = new Map()
+  for (const id of props.inChain) counts.set(id, (counts.get(id) ?? 0) + 1)
+  return counts
+})
 const results = computed(() => searchOperations(query.value, { pool: chainPlugins() }))
-const pickable = op => op && !members.value.has(op.id)
+const inChainCount = op => slotCounts.value.get(op.id) ?? 0
 
-// Re-searching invalidates whatever the cursor was pointing at; start on the
-// first entry that can actually be picked.
-watch(results, () => { cursor.value = Math.max(0, results.value.findIndex(pickable)) }, { immediate: true })
+// Re-searching invalidates whatever the cursor was pointing at.
+watch(results, () => { cursor.value = 0 }, { immediate: true })
 
 onMounted(() => {
   inputEl.value?.focus()
@@ -48,7 +52,7 @@ async function scrollCursorIntoView() {
 }
 
 function pick(op) {
-  if (pickable(op)) emit('pick', op.id)
+  if (op) emit('pick', op.id)
 }
 
 function onKeydown(e) {
@@ -98,8 +102,7 @@ function onKeydown(e) {
           type="button"
           class="picker-row w-full flex items-center gap-[11px] px-3 py-[10px] rounded-[10px] border-none cursor-pointer text-left"
           :data-active="i === cursor"
-          :class="[i === cursor ? 'is-active' : '', pickable(op) ? '' : 'opacity-45 cursor-default']"
-          :aria-disabled="String(!pickable(op))"
+          :class="i === cursor ? 'is-active' : ''"
           @click="pick(op)"
           @mousemove="cursor = i"
         >
@@ -112,8 +115,8 @@ function onKeydown(e) {
           </div>
           <span
             class="shrink-0 text-[9.5px] font-extrabold uppercase tracking-[.1em]"
-            :class="pickable(op) ? 'text-text-faint' : 'picker-member'"
-          >{{ pickable(op) ? op.group : 'In chain' }}</span>
+            :class="inChainCount(op) ? 'picker-member' : 'text-text-faint'"
+          >{{ inChainCount(op) > 1 ? `In chain ×${inChainCount(op)}` : inChainCount(op) ? 'In chain' : op.group }}</span>
         </button>
 
         <div v-if="!results.length" class="px-3 py-8 text-center text-[12px] font-medium text-text-faint">

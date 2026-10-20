@@ -20,7 +20,7 @@ export const LA2A_WINDOW_ID = 'opto-smooth'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const la2aEffect = effectForCopy(soloLa2aEffect, copy)
   const windowId = idForCopy(LA2A_WINDOW_ID, copy)
 
@@ -251,6 +251,13 @@ const copies = pluginCopies((copy) => {
         ? { inputAlignDb: la2aInputDb.value } : {}),
     }
   }
+
+  // A chain copy whose slot is removed is disposed (pluginCopies.js): nothing
+  // it scheduled may run on, and a pass still in flight must land nowhere.
+  life.onDispose(() => {
+    makeupThrottle?.cancel()
+    makeupSeq++
+  })
 
   function useLA2A() {
     const { state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
@@ -674,6 +681,7 @@ const copies = pluginCopies((copy) => {
       id: la2aEffect.id,
       windowId,
       label: 'OptoSmooth',
+      dispose: life.dispose,
       isActive: () => la2aPreview.value,
       setActive: (on) => { if (la2aPreview.value !== on) togglePreview() },
       render: async (segments, start, end) => {

@@ -1,7 +1,7 @@
 import { ref, computed, effectScope, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows, isSoloPluginWindow } from './useWindows.js'
-import { idForCopy } from './pluginCopies.js'
+import { idForCopy, baseId, chainCopy, chainCopyNumber, copyOfId, isChainCopyId } from './pluginCopies.js'
 import { getEffectChain, getEffectChainIfExists, onEffectChainCreated } from '../audio/effectChain.js'
 import { replaceRegionWithBuffer } from '../audio/operations.js'
 import { computePeakCache } from '../audio/processing.js'
@@ -21,8 +21,10 @@ import { computePeakCache } from '../audio/processing.js'
  * it: every live slot rendered in order over the selection, committed as ONE
  * undo step.
  *
- * A slot is the plugin's CHAIN COPY (pluginCopies.js): its own settings, its
- * own node and its own window, `<id>@chain`. Opening a plugin from the rail or
+ * A slot is a CHAIN COPY of its plugin (pluginCopies.js): its own settings,
+ * its own node and its own window, `<id>@chain-<n>` — so one plugin can take
+ * several slots, the way a DAW inserts it twice. Removing a slot DISPOSES its
+ * copy, and adding the plugin again starts from its defaults. Opening a plugin from the rail or
  * the palette opens its SOLO copy, which is never in the chain: it is
  * auditioned on its own until its window closes, with an Apply of its own —
  * whether or not the same plugin also has a slot. So "which plugins are in the
@@ -54,6 +56,7 @@ import { computePeakCache } from '../audio/processing.js'
  * @property {() => void} [suspend]      the window closed: stop meters, clear monitoring states
  * @property {() => void} [afterApply]   the audio changed under the plugin (e.g. drop a stale analysis)
  * @property {() => string} [unavailable] a reason it cannot render right now, or ''
+ * @property {() => void} [dispose]      end this copy of the plugin (its slot was removed)
  */
 
 const plugins = new Map()
@@ -104,12 +107,32 @@ function sync(chain) {
 
   bypassed.value = chain.bypassed
   suspended.value = chain.suspended
-  slots.value = chain.members().map(e => ({
-    id: e.id,
-    active: e.enabled,
-    label: plugins.get(e.id)?.label ?? e.name ?? e.id,
-    windowId: plugins.get(e.id)?.windowId ?? null,
-  }))
+  // A plugin with more than one slot numbers them, by copy rather than by
+  // position, so a slot keeps its name when the chain is reordered.
+  const perPlugin = new Map()
+  for (const e of members) perPlugin.set(baseId(e.id), (perPlugin.get(baseId(e.id)) ?? 0) + 1)
+  slots.value = members.map((e) => {
+    const name = plugins.get(e.id)?.label ?? e.name ?? e.id
+    const number = chainCopyNumber(copyOfId(e.id))
+    return {
+      id: e.id,
+      active: e.enabled,
+      label: perPlugin.get(baseId(e.id)) > 1 && number ? `${name} ${number}` : name,
+      windowId: plugins.get(e.id)?.windowId ?? null,
+    }
+  })
+}
+
+/**
+ * Take a chain copy out of existence: its node out of the EffectChain, its
+ * registration forgotten, and the copy's own timers, watchers and in-flight
+ * measurements ended (`dispose`, pluginCopies.js). Its window must already be
+ * closing — what is left of it on unmount finds no registration to touch.
+ */
+function disposeCopy(def) {
+  plugins.delete(def.id)
+  getEffectChainIfExists()?.removeEffect(def.id)
+  def.dispose?.()
 }
 
 // Whether a plugin window outside the chain is open — the chain is suspended
@@ -181,6 +204,9 @@ export function chainWindowUnmounted(windowId) {
   if (!def) return
   def.suspend?.()
   if (def.isActive() && !isMember(def.id)) def.setActive(false)
+  // A chain copy that never got its slot (its window closed before the add
+  // finished) has nothing to come back to.
+  if (isChainCopyId(def.id) && !isMember(def.id)) disposeCopy(def)
 }
 
 export function usePluginChain() {
@@ -204,10 +230,14 @@ export function usePluginChain() {
 
   /**
    * Add the plugin whose (solo) window is `pluginId` to the end of the chain —
-   * its chain copy, which starts from the default settings — and open it to tune.
+   * a new chain copy of it, starting from its default settings, numbered with
+   * the lowest number its other slots leave free — and open it to tune.
    */
   function add(pluginId) {
-    const windowId = idForCopy(pluginId, 'chain')
+    const taken = new Set([...slots.value.map(s => s.windowId), ...pendingAdds])
+    let n = 1
+    while (taken.has(idForCopy(pluginId, chainCopy(n)))) n++
+    const windowId = idForCopy(pluginId, chainCopy(n))
     const def = defForWindow(windowId)
     if (def) addDef(def)
     else pendingAdds.add(windowId)
@@ -217,10 +247,15 @@ export function usePluginChain() {
   function remove(id) {
     const def = plugins.get(id)
     def?.setActive(false)
+    def?.suspend?.()
     chain().removeFromChain(id)
-    // Out of the chain, its window would be a solo plugin open beside the
-    // chain — exactly what the window groups forbid.
-    if (def) closeWindow(def.windowId)
+    if (def) {
+      // Out of the chain its window would have nothing to edit.
+      closeWindow(def.windowId)
+      disposeCopy(def)
+    } else {
+      chain().removeEffect(id)
+    }
   }
 
   function clear() {
@@ -253,7 +288,7 @@ export function usePluginChain() {
       const def = plugins.get(s.id)
       if (!def) return `${s.label} can’t be applied from the chain`
       const why = def.unavailable?.()
-      if (why) return `${def.label}: ${why}`
+      if (why) return `${s.label}: ${why}`
     }
     return ''
   }
@@ -281,17 +316,18 @@ export function usePluginChain() {
     }
     const { start, end } = state.selection
     const defs = liveSlots.value.map(s => plugins.get(s.id))
+    const labels = liveSlots.value.map(s => s.label)
     // Pinned to the document the chain was applied to: a long render can
     // outlast a tab switch, and `state` follows the active tab.
     const docId = appState.activeDocumentId
-    const names = defs.map(d => d.label).join(' → ')
+    const names = labels.join(' → ')
 
     startProcessing(`Applying chain (${defs.length} plugin${defs.length === 1 ? '' : 's'})...`, docId)
     try {
       let segments = state.segments
       let buffer = null
       for (let i = 0; i < defs.length; i++) {
-        updateProcessingStage(`${i + 1}/${defs.length} · ${defs[i].label}`, docId)
+        updateProcessingStage(`${i + 1}/${defs.length} · ${labels[i]}`, docId)
         updateProcessingProgress(i / defs.length, docId)
         buffer = await defs[i].render(segments, start, end)
         segments = replaceRegionWithBuffer(segments, start, end, buffer, `chain-scratch-${i}`)

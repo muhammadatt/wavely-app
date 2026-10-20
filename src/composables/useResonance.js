@@ -42,7 +42,7 @@ export const resTargeting = resolveTargeting()
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const resonanceEffect = effectForCopy(soloResonanceEffect, copy)
   const windowId = idForCopy(RESONANCE_WINDOW_ID, copy)
 
@@ -235,6 +235,12 @@ const copies = pluginCopies((copy) => {
       mode: resMode.value,
     }
   }
+
+  // A chain copy whose slot is removed is disposed (pluginCopies.js): nothing
+  // it scheduled may run on, and a pass still in flight must land nowhere.
+  life.onDispose(() => {
+    placementSeq++
+  })
 
   function useResonance() {
     const {
@@ -548,6 +554,7 @@ const copies = pluginCopies((copy) => {
       id: resonanceEffect.id,
       windowId,
       label: 'ResoTame',
+      dispose: life.dispose,
       isActive: () => resPreview.value,
       setActive: (on) => { if (resPreview.value !== on) togglePreview() },
       render: renderRegion,

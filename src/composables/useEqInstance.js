@@ -29,7 +29,7 @@ import {
  * nothing here knows what a role is.
  */
 export function createEqInstance({
-  effect, windowId, label, maxBands = MAX_BANDS, frequencyPolicy = 'forfeit',
+  effect, windowId, label, maxBands = MAX_BANDS, frequencyPolicy = 'forfeit', life = null,
 }) {
   // Per instance: created once per copy of the owning plugin (pluginCopies.js)
   // and shared by every caller of that copy, so its state survives its window
@@ -307,6 +307,7 @@ export function createEqInstance({
       id: effect.id,
       windowId,
       label,
+      dispose: life?.dispose,
       isActive: () => eqPreview.value,
       setActive: (on) => { if (eqPreview.value !== on) togglePreview() },
       render: renderRegion,

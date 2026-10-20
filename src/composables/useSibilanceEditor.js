@@ -1,4 +1,4 @@
-import { computed, effectScope, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
@@ -20,7 +20,7 @@ export const DEESSER_WINDOW_ID = 'clip-gain-deesser'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const clipGainDeEsserEffect = effectForCopy(soloClipGainDeEsserEffect, copy)
   const windowId = idForCopy(DEESSER_WINDOW_ID, copy)
 
@@ -62,7 +62,7 @@ const copies = pluginCopies((copy) => {
   const inputLevels = ref([])
   const outputLevels = ref([])
 
-  // The app-lifetime scope holding the stale-envelope guard — see its use below.
+  // The scope holding the stale-envelope guard (the copy's own) — see its use below.
   let staleGuard = null
   const treatedCount = ref(0)
   const maxReductionDb = ref(0)
@@ -227,12 +227,14 @@ const copies = pluginCopies((copy) => {
     // status text. Until this existed the effect kept applying measurements from
     // a region — or a file — that was no longer under the playhead.
     //
-    // ⚠ IN A DETACHED SCOPE, CREATED ONCE: the de-esser keeps playing in the
+    // ⚠ IN THE COPY'S SCOPE, CREATED ONCE: the de-esser keeps playing in the
     // chain after its window closes, and a watcher made in the window's setup
     // would die with it. (The computeds it reads keep working after unmount;
-    // only watchers are scoped.)
+    // only watchers are scoped.) The copy's scope stops when the copy is
+    // disposed (pluginCopies.js); a detached scope of its own would have
+    // outlived a removed slot.
     if (!staleGuard) {
-      staleGuard = effectScope(true)
+      staleGuard = life.scope
       staleGuard.run(() => watch(isStale, (stale) => {
         if (stale) pushEnvelope()
       }))
@@ -356,6 +358,7 @@ const copies = pluginCopies((copy) => {
       id: clipGainDeEsserEffect.id,
       windowId,
       label: 'Clip-Gain De-Esser',
+      dispose: life.dispose,
       isActive: () => preview.value,
       setActive: (on) => { if (preview.value !== on) togglePreview() },
       unavailable: () => (envelopeValid.value ? '' : 'analyse the selection first'),

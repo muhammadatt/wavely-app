@@ -21,7 +21,7 @@ export const FET1176_WINDOW_ID = 'fet-punch'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const fet1176Effect = effectForCopy(soloFet1176Effect, copy)
   const windowId = idForCopy(FET1176_WINDOW_ID, copy)
 
@@ -195,6 +195,13 @@ const copies = pluginCopies((copy) => {
       makeupMaxDb: OUTPUT_MAX_DB,
     }
   }
+
+  // A chain copy whose slot is removed is disposed (pluginCopies.js): nothing
+  // it scheduled may run on, and a pass still in flight must land nowhere.
+  life.onDispose(() => {
+    makeupThrottle?.cancel()
+    makeupSeq++
+  })
 
   function useFET1176() {
     const { state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
@@ -605,6 +612,7 @@ const copies = pluginCopies((copy) => {
       id: fet1176Effect.id,
       windowId,
       label: 'FET Punch',
+      dispose: life.dispose,
       isActive: () => fetPreview.value,
       setActive: (on) => { if (fetPreview.value !== on) togglePreview() },
       render: async (segments, start, end) => {

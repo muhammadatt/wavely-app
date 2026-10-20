@@ -14,12 +14,12 @@ export default {
   ],
 
   controls: [
-    { label: '+ Add plugin', text: 'Opens a search of every effect that can run in the chain — type to filter, then press Enter or click. It joins the end, starting from its default settings, and its window opens beside this one. An effect already in the chain is marked and cannot be added twice' },
+    { label: '+ Add plugin', text: 'Opens a search of every effect that can run in the chain — type to filter, then press Enter or click. It joins the end, starting from its default settings, and its window opens beside this one. An effect can be added more than once — each slot has its own settings, and the slots are numbered (OptoSmooth 1, OptoSmooth 2)' },
     { label: 'ON / BYPASS (header)', text: 'Takes the whole chain out of circuit at once so you can hear the file as it is; each slot keeps its own state' },
     { label: 'ON / BYPASS (slot)', text: 'The plugin’s own power switch — the same one as in its window. A bypassed slot keeps its place and is skipped by Apply' },
     { label: 'Arrows and drag', text: 'Move a slot earlier or later. The top slot processes first' },
     { label: 'Edit', text: 'Opens the plugin’s window to change its settings' },
-    { label: '×', text: 'Takes the plugin out of the chain' },
+    { label: '×', text: 'Takes the plugin out of the chain. Its settings go with it: adding it again starts from its defaults' },
     { label: 'Clear', text: 'Takes every plugin out of the chain' },
     { label: 'Apply', text: 'Renders every live slot over the selection in chain order and commits the result as one undo step, then bypasses the whole chain so the processing is not heard twice. Each plugin keeps its own ON / BYPASS, so turning the chain back on is one switch. Apply is off while the chain is bypassed, since it would write processing you cannot hear. It is the only Apply for a plugin in the chain — their own windows say In chain instead' },
   ],

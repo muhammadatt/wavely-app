@@ -33,10 +33,11 @@ const GENERAL_MAX_BANDS = PARAMETRIC_EQ_MAX_BANDS
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own bands, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const instance = createEqInstance({
     effect: effectForCopy(manualEqEffect, copy),
     windowId: idForCopy(MANUAL_EQ_WINDOW_ID, copy),
+    life,
     label: 'EQ',
     maxBands: GENERAL_MAX_BANDS,
   })

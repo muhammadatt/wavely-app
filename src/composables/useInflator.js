@@ -15,7 +15,7 @@ export const INFLATOR_WINDOW_ID = 'inflator'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const inflatorEffect = effectForCopy(soloInflatorEffect, copy)
   const windowId = idForCopy(INFLATOR_WINDOW_ID, copy)
 
@@ -185,6 +185,7 @@ const copies = pluginCopies((copy) => {
       id: inflatorEffect.id,
       windowId,
       label: 'Inflator',
+      dispose: life.dispose,
       isActive: () => inPreview.value,
       setActive: (on) => { if (inPreview.value !== on) togglePreview() },
       render: renderRegion,

@@ -1054,112 +1054,80 @@ export function measurePhatassWarmthBands(segments, start, end, params, sampleRa
 }
 
 /**
- * TAPE's automatic makeup for a region: what TAPE takes off the WHOLE
- * region's peak (see phatassTapeMakeup.js). Its own worker, terminated by a
- * newer call like the Warmth peak pass — a knob turn must never queue behind a
- * stale whole-chapter render. A superseded call rejects with
- * `err.cancelled = true`. Resolves `{ makeupDb, peakDb, inputPeakDb }`.
+ * A measurement that runs on a worker of its own, one pass per OWNER at a time:
+ * a newer call from the same owner terminates the older one — a knob turn must
+ * never queue behind a stale whole-chapter render — and a superseded call
+ * rejects with `err.cancelled = true`.
+ *
+ * ⚠ PER OWNER, NOT PER PROCESS. The owner is the plugin copy asking (its
+ * EffectChain id): with one pass for the whole app, two copies of PHAT*SS — the
+ * solo one and one in the chain, or two in the chain — cancelled each other's
+ * measurements on every knob turn and neither makeup ever settled.
  */
-let tapeMakeupWorker = null
-let tapeMakeupReject = null
-/** Terminate the in-flight TAPE makeup pass, if any; it rejects with `err.cancelled`. */
-export function cancelPhatassTapeMakeup() {
-  if (!tapeMakeupWorker) return
-  tapeMakeupWorker.terminate()
-  tapeMakeupWorker = null
-  const err = new Error('superseded')
-  err.cancelled = true
-  const reject = tapeMakeupReject
-  tapeMakeupReject = null
-  reject?.(err)
+function ownedWorkerJob(type, resultKeys, failMessage) {
+  const jobs = new Map() // owner → { worker, reject }
+
+  function cancel(owner = 'default') {
+    const job = jobs.get(owner)
+    if (!job) return
+    jobs.delete(owner)
+    job.worker.terminate()
+    const err = new Error('superseded')
+    err.cancelled = true
+    job.reject(err)
+  }
+
+  function run(segments, start, end, params, sampleRate, channels, { exact = true, owner = 'default' } = {}) {
+    cancel(owner)
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+      jobs.set(owner, { worker, reject })
+      const finish = () => {
+        worker.terminate()
+        if (jobs.get(owner)?.worker === worker) jobs.delete(owner)
+      }
+      worker.onmessage = (e) => {
+        finish()
+        if (e.data?.type === 'done') resolve(Object.fromEntries(resultKeys.map(k => [k, e.data[k]])))
+        else reject(new Error(e.data?.message ?? failMessage))
+      }
+      worker.onerror = (err) => {
+        finish()
+        reject(err)
+      }
+      const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+      worker.postMessage(
+        // A plain copy: the panel's params are reactive, and a proxied array
+        // (warmthRefPeaksDb) cannot be structured-cloned into a worker.
+        { __id: 0, type, channelData, sampleRate, params: JSON.parse(JSON.stringify(params)), exact },
+        channelData.map(c => c.buffer),
+      )
+    })
+  }
+
+  return { run, cancel }
 }
 
 /**
- * TAPE's makeup on its own worker. `exact: false` is the fast bounded search
- * for live preview; apply leaves it exact (phatassTapeMakeup.js).
+ * TAPE's automatic makeup for a region: what TAPE takes off the WHOLE
+ * region's peak (see phatassTapeMakeup.js), on its own worker per owner (see
+ * ownedWorkerJob). `exact: false` is the fast bounded search for live preview;
+ * apply leaves it exact. Resolves `{ makeupDb, peakDb, inputPeakDb }`.
  */
-export function measurePhatassTapeMakeup(segments, start, end, params, sampleRate, channels, { exact = true } = {}) {
-  cancelPhatassTapeMakeup()
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
-    tapeMakeupWorker = worker
-    tapeMakeupReject = reject
-    const finish = () => {
-      worker.terminate()
-      if (tapeMakeupWorker === worker) {
-        tapeMakeupWorker = null
-        tapeMakeupReject = null
-      }
-    }
-    worker.onmessage = (e) => {
-      finish()
-      if (e.data?.type === 'done') resolve({ makeupDb: e.data.makeupDb, peakDb: e.data.peakDb, inputPeakDb: e.data.inputPeakDb })
-      else reject(new Error(e.data?.message ?? 'tape makeup failed'))
-    }
-    worker.onerror = (err) => {
-      finish()
-      reject(err)
-    }
-    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
-    worker.postMessage(
-      // A plain copy: the panel's params are reactive, and a proxied array
-      // (warmthRefPeaksDb) cannot be structured-cloned into a worker.
-      { __id: 0, type: 'phatassTapeMakeup', channelData, sampleRate, params: JSON.parse(JSON.stringify(params)), exact },
-      channelData.map(c => c.buffer),
-    )
-  })
-}
+const tapeMakeupJob = ownedWorkerJob('phatassTapeMakeup', ['makeupDb', 'peakDb', 'inputPeakDb'], 'tape makeup failed')
+export const measurePhatassTapeMakeup = tapeMakeupJob.run
+/** Terminate `owner`'s in-flight TAPE makeup pass, if any; it rejects with `err.cancelled`. */
+export const cancelPhatassTapeMakeup = tapeMakeupJob.cancel
 
 /**
  * The bench's output trim for a region (see phatassOutputMakeup.js): a render
- * of the whole chain. Its own worker, terminated by a newer call like TAPE's
- * makeup. A superseded call rejects with `err.cancelled = true`. Resolves
- * `{ makeupDb, outPeakDb, inputPeakDb }`.
+ * of the whole chain, on its own worker per owner. `exact: false` is the capped
+ * preview measurement. Resolves `{ makeupDb, outPeakDb, inputPeakDb }`.
  */
-let outputMakeupWorker = null
-let outputMakeupReject = null
-/** Terminate the in-flight output-trim pass, if any; it rejects with `err.cancelled`. */
-export function cancelPhatassOutputMakeup() {
-  if (!outputMakeupWorker) return
-  outputMakeupWorker.terminate()
-  outputMakeupWorker = null
-  const err = new Error('superseded')
-  err.cancelled = true
-  const reject = outputMakeupReject
-  outputMakeupReject = null
-  reject?.(err)
-}
-
-/** The output trim on its own worker. `exact: false` is the capped preview measurement. */
-export function measurePhatassOutputMakeup(segments, start, end, params, sampleRate, channels, { exact = true } = {}) {
-  cancelPhatassOutputMakeup()
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
-    outputMakeupWorker = worker
-    outputMakeupReject = reject
-    const finish = () => {
-      worker.terminate()
-      if (outputMakeupWorker === worker) {
-        outputMakeupWorker = null
-        outputMakeupReject = null
-      }
-    }
-    worker.onmessage = (e) => {
-      finish()
-      if (e.data?.type === 'done') resolve({ makeupDb: e.data.makeupDb, outPeakDb: e.data.outPeakDb, inputPeakDb: e.data.inputPeakDb })
-      else reject(new Error(e.data?.message ?? 'output makeup failed'))
-    }
-    worker.onerror = (err) => {
-      finish()
-      reject(err)
-    }
-    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
-    worker.postMessage(
-      { __id: 0, type: 'phatassOutputMakeup', channelData, sampleRate, params: JSON.parse(JSON.stringify(params)), exact },
-      channelData.map(c => c.buffer),
-    )
-  })
-}
+const outputMakeupJob = ownedWorkerJob('phatassOutputMakeup', ['makeupDb', 'outPeakDb', 'inputPeakDb'], 'output makeup failed')
+export const measurePhatassOutputMakeup = outputMakeupJob.run
+/** Terminate `owner`'s in-flight output-trim pass, if any; it rejects with `err.cancelled`. */
+export const cancelPhatassOutputMakeup = outputMakeupJob.cancel
 
 /** Apply Air Band to a region. */
 export function applyAirBandRegion(segments, start, end, params, sampleRate, channels) {

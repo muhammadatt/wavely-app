@@ -5,7 +5,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import {
   chainWindowMounted, chainWindowUnmounted, chainStatusFor,
 } from '../../composables/usePluginChain.js'
-import { currentPluginCopy, idForCopy } from '../../composables/pluginCopies.js'
+import { currentPluginCopy, idForCopy, chainCopyNumber } from '../../composables/pluginCopies.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import Icon from '../ui/Icon.vue'
@@ -425,8 +425,11 @@ onMounted(() => {
   if (remembered) {
     pos.value = { ...remembered }
   } else {
-    // First open: rest near the top-right so the waveform stays visible.
-    pos.value = { x: Math.max(16, window.innerWidth - boxWidth.value - 40), y: props.top }
+    // First open: rest near the top-right so the waveform stays visible. A
+    // second or third chain copy of the same plugin steps down and left, or it
+    // would open exactly on top of the first.
+    const step = 28 * Math.max(0, chainCopyNumber(currentPluginCopy()) - 1)
+    pos.value = { x: Math.max(16, window.innerWidth - boxWidth.value - 40 - step), y: props.top + step }
   }
   // A window allowed to be narrower than its natural width (`minWidth`) opens
   // no wider than the viewport has room for; the rest is a no-op.

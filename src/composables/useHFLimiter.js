@@ -19,7 +19,7 @@ export const HF_LIMITER_WINDOW_ID = 'hf-limiter'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const hfLimiterEffect = effectForCopy(soloHfLimiterEffect, copy)
   const windowId = idForCopy(HF_LIMITER_WINDOW_ID, copy)
 
@@ -204,6 +204,7 @@ const copies = pluginCopies((copy) => {
       id: hfLimiterEffect.id,
       windowId,
       label: 'HF Limiter',
+      dispose: life.dispose,
       isActive: () => hflPreview.value,
       setActive: (on) => { if (hflPreview.value !== on) togglePreview() },
       render: async (segments, start, end) => {

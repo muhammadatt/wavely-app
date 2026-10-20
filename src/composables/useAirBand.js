@@ -15,7 +15,7 @@ export const AIR_BAND_WINDOW_ID = 'air-band'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const airBandEffect = effectForCopy(soloAirBandEffect, copy)
   const windowId = idForCopy(AIR_BAND_WINDOW_ID, copy)
 
@@ -155,6 +155,7 @@ const copies = pluginCopies((copy) => {
       id: airBandEffect.id,
       windowId,
       label: 'AirBoost',
+      dispose: life.dispose,
       isActive: () => airBandPreview.value,
       setActive: (on) => { if (airBandPreview.value !== on) togglePreview() },
       render: renderRegion,

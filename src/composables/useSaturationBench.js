@@ -21,7 +21,7 @@ export const SATURATION_BENCH_WINDOW_ID = 'saturation-bench'
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
-const copies = pluginCopies((copy) => {
+const copies = pluginCopies((copy, life) => {
   const saturationBenchEffect = effectForCopy(soloSaturationBenchEffect, copy)
   const windowId = idForCopy(SATURATION_BENCH_WINDOW_ID, copy)
 
@@ -202,6 +202,7 @@ const copies = pluginCopies((copy) => {
       id: saturationBenchEffect.id,
       windowId,
       label: 'Saturation Bench',
+      dispose: life.dispose,
       isActive: () => sbPreview.value,
       setActive: (on) => { if (sbPreview.value !== on) togglePreview() },
       render: async (segments, start, end) => {

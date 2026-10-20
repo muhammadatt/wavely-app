@@ -249,6 +249,18 @@ try {
       && (await page.locator('.chain-count').innerText()) === 'BYPASSED'
       && await chainWin.locator('.win-apply').isDisabled()
 
+    // A plugin can take more than one slot; the slots are numbered, and a
+    // removed one's number is the next to be handed out again.
+    await addFromPicker('Inflator')
+    const twice = (await rowNames()).join(',')
+    await chainWin.getByRole('button', { name: 'Remove Inflator 1 from the chain' }).dispatchEvent('click')
+    await page.waitForTimeout(300)
+    const afterRemove = (await rowNames()).join(',')
+    await addFromPicker('Inflator')
+    const readded = (await rowNames()).join(',')
+    const repeatsOk = twice === 'AirBoost,Inflator 1,Inflator 2' && afterRemove === 'AirBoost,Inflator'
+      && readded === 'AirBoost,Inflator 2,Inflator 1'
+
     // A plugin outside the chain takes the whole chain group off the screen.
     await openOp('Opto Comp')
     const soloAfterGroup = await frames()
@@ -259,7 +271,7 @@ try {
     const fresh = errors.slice(before)
     const ok = soloWindows === 1 && chainReplaced && kept === 0 && groupWindows === 3 && memberApplyOff
       && order1.join(',') === 'Inflator,AirBoost' && order2.join(',') === 'AirBoost,Inflator'
-      && toast && bypassedAfter && soloAfterGroup === 1 && pauseOk && soloCopyAlone && slotKept
+      && toast && bypassedAfter && soloAfterGroup === 1 && pauseOk && soloCopyAlone && slotKept && repeatsOk
       && fresh.length === 0
     if (!ok) failures++
     const why = [
@@ -276,6 +288,7 @@ try {
       pauseOk ? '' : `chain should bypass for a solo plugin, stay bypassed after it closes and come back on its switch (${liveBefore} → ${pausedBadge} → ${closedBadge} → ${resumedBadge}); `,
       soloCopyAlone ? '' : 'a plugin in the chain did not open on its own with its own Apply; ',
       slotKept ? '' : 'opening the solo copy disturbed the chain slot; ',
+      repeatsOk ? '' : `repeat slots misnumbered (${twice} / ${afterRemove} / ${readded}); `,
     ].join('')
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Plugin chain'.padEnd(16)} ${why}${fresh.join(' | ')}`)
   }
