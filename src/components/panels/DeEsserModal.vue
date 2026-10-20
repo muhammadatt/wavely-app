@@ -25,6 +25,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useDeEsser } from '../../composables/useDeEsser.js'
+import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   AIR_MAKEUP_MAX_DB,
@@ -72,19 +73,10 @@ const presets = usePluginPresets(HF_SOFTENER_PRESET_PLUGIN, {
 })
 const D = HF_SOFTENER_DEFAULTS
 
-// An edit or a document switch changes the file's level, and with it where
-// every threshold sits. Measured only while the window is open.
-// Auto Air measures over the selection, so a new selection is a new answer.
-watch(() => state.selection, () => {
-  if (hfPreview.value) scheduleAutoAir()
-}, { deep: true })
-
-watch(() => [state.revision, appState.activeDocumentId], () => {
-  if (hfPreview.value) refreshLevel()
-})
-
 onMounted(() => {
-  if (!hfPreview.value) togglePreview()
+  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
+  // must not un-bypass its slot.
+  if (!hfPreview.value && currentPluginCopy() === 'solo') togglePreview()
 })
 
 // The scope freezes on what last played while the transport is stopped, and
@@ -134,19 +126,12 @@ function envelope(offsetSeconds, seconds, columns) {
   return readTimelineEnvelope(state.segments, state.playhead + offsetSeconds, seconds, columns, envelopeScratch[side])
 }
 
-
-
-
-
 // The Amount and its Split are a view over the two stages (useDeEsser): what
 // each stage actually got, as a note under the knob.
 const stageNote = computed(() => `WIDE ${Math.round(hfDuck.value)} · SPLIT ${Math.round(hfAmount.value)}`)
 const formatSplit = v => (v <= 0 ? 'ALL WIDE' : v >= 100 ? 'ALL SPLIT' : `${100 - Math.round(v)} / ${Math.round(v)}`)
 const AMOUNT_DEFAULT = amountSplitOf(D.duck, D.amount).total
 const SPLIT_DEFAULT = amountSplitOf(D.duck, D.amount).split
-
-
-
 
 // ── Detector strip ──────────────────────────────────────────────────────────
 // The strip's axis starts at 500 Hz, not 100: the two handles live between
@@ -204,11 +189,9 @@ const softenCaption = computed(() => {
   return d > 0 ? `onsets · up to −${Math.round(d)} dB` : 'off'
 })
 
-
 function fmtCut(v) {
   return v >= 0.05 ? `−${v.toFixed(1)} dB` : '0.0 dB'
 }
-
 
 function formatAir(v) {
   return v > 0 ? `+${Number(v).toFixed(1)} dB` : 'OFF'

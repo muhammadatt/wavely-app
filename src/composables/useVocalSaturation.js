@@ -1,240 +1,270 @@
 import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
+import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { applyVocalSatRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import {
-  vocalSatEffect, VOCAL_SAT_DEFAULTS, VOCAL_SAT_MODES, VOCAL_SAT_CURVES, VOCAL_SAT_ASYM_MODES,
+  vocalSatEffect as soloVocalSatEffect, VOCAL_SAT_DEFAULTS, VOCAL_SAT_MODES, VOCAL_SAT_CURVES, VOCAL_SAT_ASYM_MODES,
 } from '../audio/effects/vocalSat.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const VOCAL_SAT_WINDOW_ID = 'vocal-saturation'
 
-// Singleton reactive state shared between the sidebar trigger and the modal.
-const vsDrive = ref(VOCAL_SAT_DEFAULTS.drive)
-const vsWetDry = ref(VOCAL_SAT_DEFAULTS.wetDry)
-const vsAsymmetry = ref(VOCAL_SAT_DEFAULTS.asymmetry)
-const vsAsymMode = ref(VOCAL_SAT_DEFAULTS.asymMode)
-const vsMode = ref(VOCAL_SAT_DEFAULTS.mode)
-const vsEmphasis = ref(VOCAL_SAT_DEFAULTS.emphasis)
-const vsSoften = ref(VOCAL_SAT_DEFAULTS.soften)
-const vsTame = ref(VOCAL_SAT_DEFAULTS.tame)
-const vsAutoDrive = ref(VOCAL_SAT_DEFAULTS.autoDrive)
-const vsHardness = ref(VOCAL_SAT_DEFAULTS.hardness)
-const vsCurve = ref(VOCAL_SAT_DEFAULTS.curve)
-const vsLowCrossover = ref(VOCAL_SAT_DEFAULTS.lowCrossover)
-const vsMidCrossover = ref(VOCAL_SAT_DEFAULTS.midCrossover)
-const vsLowDriveMult = ref(VOCAL_SAT_DEFAULTS.lowDriveMult)
-const vsMidDriveMult = ref(VOCAL_SAT_DEFAULTS.midDriveMult)
-const vsHighDriveMult = ref(VOCAL_SAT_DEFAULTS.highDriveMult)
-const vsHfLoss = ref(VOCAL_SAT_DEFAULTS.hfLoss)
+/**
+ * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
+ * has its own state, its own node in the EffectChain and its own window.
+ */
+const copies = pluginCopies((copy, life) => {
+  const vocalSatEffect = effectForCopy(soloVocalSatEffect, copy)
+  const windowId = idForCopy(VOCAL_SAT_WINDOW_ID, copy)
 
-const vsPreview = ref(false)
-const vsInputLevels = ref([])
-const vsOutputLevels = ref([])
-let meterId = null
+  // Reactive state shared by every caller of this copy.
+  const vsDrive = ref(VOCAL_SAT_DEFAULTS.drive)
+  const vsWetDry = ref(VOCAL_SAT_DEFAULTS.wetDry)
+  const vsAsymmetry = ref(VOCAL_SAT_DEFAULTS.asymmetry)
+  const vsAsymMode = ref(VOCAL_SAT_DEFAULTS.asymMode)
+  const vsMode = ref(VOCAL_SAT_DEFAULTS.mode)
+  const vsEmphasis = ref(VOCAL_SAT_DEFAULTS.emphasis)
+  const vsSoften = ref(VOCAL_SAT_DEFAULTS.soften)
+  const vsTame = ref(VOCAL_SAT_DEFAULTS.tame)
+  const vsAutoDrive = ref(VOCAL_SAT_DEFAULTS.autoDrive)
+  const vsHardness = ref(VOCAL_SAT_DEFAULTS.hardness)
+  const vsCurve = ref(VOCAL_SAT_DEFAULTS.curve)
+  const vsLowCrossover = ref(VOCAL_SAT_DEFAULTS.lowCrossover)
+  const vsMidCrossover = ref(VOCAL_SAT_DEFAULTS.midCrossover)
+  const vsLowDriveMult = ref(VOCAL_SAT_DEFAULTS.lowDriveMult)
+  const vsMidDriveMult = ref(VOCAL_SAT_DEFAULTS.midDriveMult)
+  const vsHighDriveMult = ref(VOCAL_SAT_DEFAULTS.highDriveMult)
+  const vsHfLoss = ref(VOCAL_SAT_DEFAULTS.hfLoss)
 
-function currentParams() {
-  return {
-    drive: vsDrive.value,
-    wetDry: vsWetDry.value,
-    asymmetry: vsAsymmetry.value,
-    asymMode: vsAsymMode.value,
-    mode: vsMode.value,
-    emphasis: vsEmphasis.value,
-    soften: vsSoften.value,
-    tame: vsTame.value,
-    autoDrive: vsAutoDrive.value,
-    hardness: vsHardness.value,
-    curve: vsCurve.value,
-    lowCrossover: vsLowCrossover.value,
-    midCrossover: vsMidCrossover.value,
-    lowDriveMult: vsLowDriveMult.value,
-    midDriveMult: vsMidDriveMult.value,
-    highDriveMult: vsHighDriveMult.value,
-    hfLoss: vsHfLoss.value,
-  }
-}
+  const vsPreview = ref(false)
+  const vsInputLevels = ref([])
+  const vsOutputLevels = ref([])
+  let meterId = null
 
-export function useVocalSaturation() {
-  const {
-    state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-    startProcessing, endProcessing, showToast,
-  } = useEditorState()
-  const { openWindow, closeWindow } = useWindows()
-
-  function initChain() {
-    const ctx = getAudioContext()
-    const chain = getEffectChain(ctx)
-    if (!chain.effects.find(e => e.id === vocalSatEffect.id)) {
-      chain.addEffect(vocalSatEffect)
+  function currentParams() {
+    return {
+      drive: vsDrive.value,
+      wetDry: vsWetDry.value,
+      asymmetry: vsAsymmetry.value,
+      asymMode: vsAsymMode.value,
+      mode: vsMode.value,
+      emphasis: vsEmphasis.value,
+      soften: vsSoften.value,
+      tame: vsTame.value,
+      autoDrive: vsAutoDrive.value,
+      hardness: vsHardness.value,
+      curve: vsCurve.value,
+      lowCrossover: vsLowCrossover.value,
+      midCrossover: vsMidCrossover.value,
+      lowDriveMult: vsLowDriveMult.value,
+      midDriveMult: vsMidDriveMult.value,
+      highDriveMult: vsHighDriveMult.value,
+      hfLoss: vsHfLoss.value,
     }
-    return chain
   }
 
-  function startMeters(chain) {
-    stopMeters()
-    function tick() {
-      const nodes = chain.effects.find(e => e.id === vocalSatEffect.id)?.nodes
-      if (nodes) {
-        // Only meter channels the source really has: the splitter is
-        // discrete, so asking for stereo on a mono file adds a dead bar.
-        const chCount = state.currentFile?.channels ?? 1
-        vsInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
-        vsOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
+  function useVocalSaturation() {
+    const {
+      state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
+      startProcessing, endProcessing, showToast,
+    } = useEditorState()
+    const { openWindow, closeWindow } = useWindows()
+
+    function initChain() {
+      const ctx = getAudioContext()
+      const chain = getEffectChain(ctx)
+      if (!chain.effects.find(e => e.id === vocalSatEffect.id)) {
+        chain.addEffect(vocalSatEffect)
+      }
+      return chain
+    }
+
+    function startMeters(chain) {
+      stopMeters()
+      function tick() {
+        const nodes = chain.effects.find(e => e.id === vocalSatEffect.id)?.nodes
+        if (nodes) {
+          // Only meter channels the source really has: the splitter is
+          // discrete, so asking for stereo on a mono file adds a dead bar.
+          const chCount = state.currentFile?.channels ?? 1
+          vsInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
+          vsOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
+        }
+        meterId = requestAnimationFrame(tick)
       }
       meterId = requestAnimationFrame(tick)
     }
-    meterId = requestAnimationFrame(tick)
-  }
 
-  function stopMeters() {
-    if (meterId !== null) {
-      cancelAnimationFrame(meterId)
-      meterId = null
+    function stopMeters() {
+      if (meterId !== null) {
+        cancelAnimationFrame(meterId)
+        meterId = null
+      }
+      vsInputLevels.value = []
+      vsOutputLevels.value = []
     }
-    vsInputLevels.value = []
-    vsOutputLevels.value = []
-  }
 
-  function pushAllParams(chain) {
-    for (const [name, value] of Object.entries(currentParams())) {
+    function pushAllParams(chain) {
+      for (const [name, value] of Object.entries(currentParams())) {
+        chain.updateParam(vocalSatEffect.id, name, value)
+      }
+    }
+
+    function togglePreview() {
+      const chain = initChain()
+      vsPreview.value = !vsPreview.value
+      chain.setEnabled(vocalSatEffect.id, vsPreview.value)
+
+      if (vsPreview.value) {
+        pushAllParams(chain)
+        startMeters(chain)
+      } else {
+        stopMeters()
+      }
+    }
+
+    function pushParam(name, value) {
+      if (!vsPreview.value) return
+      const chain = getEffectChain(getAudioContext())
       chain.updateParam(vocalSatEffect.id, name, value)
     }
-  }
 
-  function togglePreview() {
-    const chain = initChain()
-    vsPreview.value = !vsPreview.value
-    chain.setEnabled(vocalSatEffect.id, vsPreview.value)
-
-    if (vsPreview.value) {
-      pushAllParams(chain)
-      startMeters(chain)
-    } else {
-      stopMeters()
+    function syncParam(name, refVar, value) {
+      refVar.value = value
+      pushParam(name, value)
     }
-  }
 
-  function pushParam(name, value) {
-    if (!vsPreview.value) return
-    const chain = getEffectChain(getAudioContext())
-    chain.updateParam(vocalSatEffect.id, name, value)
-  }
+    const syncDrive = v => syncParam('drive', vsDrive, v)
+    const syncWetDry = v => syncParam('wetDry', vsWetDry, v)
+    const syncAsymmetry = v => syncParam('asymmetry', vsAsymmetry, v)
+    const syncAsymMode = v => syncParam('asymMode', vsAsymMode, v)
+    const syncMode = v => syncParam('mode', vsMode, v)
+    const syncEmphasis = v => syncParam('emphasis', vsEmphasis, v)
+    const syncSoften = v => syncParam('soften', vsSoften, v)
+    const syncTame = v => syncParam('tame', vsTame, v)
+    const syncAutoDrive = v => syncParam('autoDrive', vsAutoDrive, v)
+    const syncHardness = v => syncParam('hardness', vsHardness, v)
+    const syncCurve = v => syncParam('curve', vsCurve, v)
+    const syncLowCrossover = v => syncParam('lowCrossover', vsLowCrossover, v)
+    const syncMidCrossover = v => syncParam('midCrossover', vsMidCrossover, v)
+    const syncLowDriveMult = v => syncParam('lowDriveMult', vsLowDriveMult, v)
+    const syncMidDriveMult = v => syncParam('midDriveMult', vsMidDriveMult, v)
+    const syncHighDriveMult = v => syncParam('highDriveMult', vsHighDriveMult, v)
+    const syncHfLoss = v => syncParam('hfLoss', vsHfLoss, v)
 
-  function syncParam(name, refVar, value) {
-    refVar.value = value
-    pushParam(name, value)
-  }
-
-  const syncDrive = v => syncParam('drive', vsDrive, v)
-  const syncWetDry = v => syncParam('wetDry', vsWetDry, v)
-  const syncAsymmetry = v => syncParam('asymmetry', vsAsymmetry, v)
-  const syncAsymMode = v => syncParam('asymMode', vsAsymMode, v)
-  const syncMode = v => syncParam('mode', vsMode, v)
-  const syncEmphasis = v => syncParam('emphasis', vsEmphasis, v)
-  const syncSoften = v => syncParam('soften', vsSoften, v)
-  const syncTame = v => syncParam('tame', vsTame, v)
-  const syncAutoDrive = v => syncParam('autoDrive', vsAutoDrive, v)
-  const syncHardness = v => syncParam('hardness', vsHardness, v)
-  const syncCurve = v => syncParam('curve', vsCurve, v)
-  const syncLowCrossover = v => syncParam('lowCrossover', vsLowCrossover, v)
-  const syncMidCrossover = v => syncParam('midCrossover', vsMidCrossover, v)
-  const syncLowDriveMult = v => syncParam('lowDriveMult', vsLowDriveMult, v)
-  const syncMidDriveMult = v => syncParam('midDriveMult', vsMidDriveMult, v)
-  const syncHighDriveMult = v => syncParam('highDriveMult', vsHighDriveMult, v)
-  const syncHfLoss = v => syncParam('hfLoss', vsHfLoss, v)
-
-  async function apply() {
-    if (!state.selection) return
-    const { start, end } = state.selection
-
-    const wasPreviewing = vsPreview.value
-    if (wasPreviewing) togglePreview()
-
-    startProcessing('Saturating...')
-    try {
-      const buffer = await applyVocalSatRegion(
-        state.segments, start, end,
+    /** Render [start, end) of `segments` with the current settings, uncommitted. */
+    function renderRegion(segments, start, end) {
+      return applyVocalSatRegion(
+        segments, start, end,
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
       )
-      const bufferId = replaceRegion(start, end, buffer, 'tube saturation')
-      const cache = await computePeakCache(buffer, 256)
-      setPeakCache(bufferId, cache)
-      showToast('Tube saturation applied')
-    } catch (err) {
-      console.error('Tube saturation failed:', err)
-      showToast('Tube saturation failed')
-    } finally {
-      endProcessing()
+    }
+
+    async function apply() {
+      if (!state.selection) return
+      const { start, end } = state.selection
+
+      const wasPreviewing = vsPreview.value
+      if (wasPreviewing) togglePreview()
+
+      startProcessing('Saturating...')
+      try {
+        const buffer = await renderRegion(state.segments, start, end)
+        const bufferId = replaceRegion(start, end, buffer, 'tube saturation')
+        const cache = await computePeakCache(buffer, 256)
+        setPeakCache(bufferId, cache)
+        showToast('Tube saturation applied')
+      } catch (err) {
+        console.error('Tube saturation failed:', err)
+        showToast('Tube saturation failed')
+      } finally {
+        endProcessing()
+      }
+    }
+
+    function teardown() {
+      stopMeters()
+    }
+
+    registerChainPlugin({
+      id: vocalSatEffect.id,
+      windowId,
+      label: 'Tube Saturation',
+      dispose: life.dispose,
+      isActive: () => vsPreview.value,
+      setActive: (on) => { if (vsPreview.value !== on) togglePreview() },
+      render: renderRegion,
+      resume: () => startMeters(initChain()),
+      suspend: teardown,
+    })
+
+    function openModal() {
+      openWindow(windowId)
+    }
+
+    function closeModal() {
+      closeWindow(windowId)
+    }
+
+    return {
+      vsDrive,
+      vsWetDry,
+      vsAsymmetry,
+      vsAsymMode,
+      VOCAL_SAT_ASYM_MODES,
+      vsHardness,
+      vsCurve,
+      VOCAL_SAT_CURVES,
+      vsMode,
+      vsEmphasis,
+      vsSoften,
+      vsTame,
+      vsAutoDrive,
+      VOCAL_SAT_MODES,
+      vsLowCrossover,
+      vsMidCrossover,
+      vsLowDriveMult,
+      vsMidDriveMult,
+      vsHighDriveMult,
+      vsHfLoss,
+      vsPreview,
+      vsInputLevels,
+      vsOutputLevels,
+      hasSelection,
+      togglePreview,
+      syncDrive,
+      syncWetDry,
+      syncAsymmetry,
+      syncAsymMode,
+      syncHardness,
+      syncCurve,
+      syncMode,
+      syncEmphasis,
+      syncSoften,
+      syncTame,
+      syncAutoDrive,
+      syncLowCrossover,
+      syncMidCrossover,
+      syncLowDriveMult,
+      syncMidDriveMult,
+      syncHighDriveMult,
+      syncHfLoss,
+      apply,
+      teardown,
+      openModal,
+      closeModal,
     }
   }
 
-  function teardown() {
-    stopMeters()
-    if (vsPreview.value) {
-      const chain = getEffectChain(getAudioContext())
-      chain.setEnabled(vocalSatEffect.id, false)
-      vsPreview.value = false
-    }
-  }
+  return useVocalSaturation
+})
 
-  function openModal() {
-    openWindow(VOCAL_SAT_WINDOW_ID)
-  }
-
-  function closeModal() {
-    closeWindow(VOCAL_SAT_WINDOW_ID)
-  }
-
-  return {
-    vsDrive,
-    vsWetDry,
-    vsAsymmetry,
-    vsAsymMode,
-    VOCAL_SAT_ASYM_MODES,
-    vsHardness,
-    vsCurve,
-    VOCAL_SAT_CURVES,
-    vsMode,
-    vsEmphasis,
-    vsSoften,
-    vsTame,
-    vsAutoDrive,
-    VOCAL_SAT_MODES,
-    vsLowCrossover,
-    vsMidCrossover,
-    vsLowDriveMult,
-    vsMidDriveMult,
-    vsHighDriveMult,
-    vsHfLoss,
-    vsPreview,
-    vsInputLevels,
-    vsOutputLevels,
-    hasSelection,
-    togglePreview,
-    syncDrive,
-    syncWetDry,
-    syncAsymmetry,
-    syncAsymMode,
-    syncHardness,
-    syncCurve,
-    syncMode,
-    syncEmphasis,
-    syncSoften,
-    syncTame,
-    syncAutoDrive,
-    syncLowCrossover,
-    syncMidCrossover,
-    syncLowDriveMult,
-    syncMidDriveMult,
-    syncHighDriveMult,
-    syncHfLoss,
-    apply,
-    teardown,
-    openModal,
-    closeModal,
-  }
+/** The copy the calling window edits (the solo copy outside a plugin window). */
+export function useVocalSaturation() {
+  return copies()()
 }

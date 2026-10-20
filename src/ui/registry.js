@@ -25,6 +25,7 @@ import LoudnessWindow from '../components/panels/windows/LoudnessWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import InflatorWindow from '../components/panels/windows/InflatorWindow.vue'
 import SpectrumAnalyzerWindow from '../components/panels/windows/SpectrumAnalyzerWindow.vue'
+import PluginChainWindow from '../components/panels/windows/PluginChainWindow.vue'
 import ModulaGalleryWindow from '../components/modula/ModulaGalleryWindow.vue'
 import { DEV_TUNING_PANELS } from '../devFlags.js'
 
@@ -265,6 +266,20 @@ const ALL_OPERATIONS = [
     surface: 'window',
     component: LoudnessWindow,
   },
+  // The rack every engaged plugin plays through — reorder, bypass, and apply
+  // them all at once. First in Effects because it is how the rest combine.
+  {
+    id: 'plugin-chain',
+    label: 'Plugin Chain',
+    desc: 'Order, bypass and apply every active plugin at once',
+    category: 'effects',
+    group: 'Chain',
+    icon: 'chain',
+    keywords: ['chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],
+    requires: 'selection',
+    surface: 'window',
+    component: PluginChainWindow,
+  },
   {
     id: 'opto-smooth',
     label: 'Opto Comp',
@@ -274,6 +289,8 @@ const ALL_OPERATIONS = [
     icon: 'opto',
     keywords: ['la-2a', 'la2a', 'compressor', 'opto', 'tube', 'leveler', 'smooth'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: LA2AModal,
   },
@@ -286,6 +303,8 @@ const ALL_OPERATIONS = [
     icon: 'fet',
     keywords: ['1176', 'compressor', 'fet', 'punch', 'aggressive', 'fast'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: FET1176Modal,
   },
@@ -301,6 +320,8 @@ const ALL_OPERATIONS = [
     icon: 'clipper',
     keywords: ['clip', 'clipper', 'transient', 'plosive', 'peak', 'soft clip', 'saturation'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: SoftClipperModal,
   },
@@ -320,6 +341,8 @@ const ALL_OPERATIONS = [
       'mix', 'thick', 'presence', 'vocal', 'compressor', 'new york',
     ],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: SchepsModal,
   },
@@ -333,6 +356,8 @@ const ALL_OPERATIONS = [
     icon: 'saturation',
     keywords: ['tube', 'warmth', 'harmonic', 'drive', 'distortion', 'analog'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: VocalSaturationWindow,
   },
@@ -349,6 +374,8 @@ const ALL_OPERATIONS = [
       'distortion', 'waveshaper', 'tanh', 'quartic', 'layers', 'bench',
     ],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: SaturationBenchModal,
   },
@@ -363,6 +390,8 @@ const ALL_OPERATIONS = [
     icon: 'tape',
     keywords: ['tape', 'phatass', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'odd', 'even'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: PhatassModal,
   },
@@ -378,6 +407,8 @@ const ALL_OPERATIONS = [
       'presence', 'thickness', 'curve', 'harmonic', 'clip', 'band split',
     ],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: InflatorWindow,
   },
@@ -390,6 +421,8 @@ const ALL_OPERATIONS = [
     icon: 'eq',
     keywords: ['equalizer', 'equaliser', 'eq', 'parametric', 'frequency', 'tone', 'bass', 'treble', 'filter'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: EqModal,
   },
@@ -406,6 +439,8 @@ const ALL_OPERATIONS = [
     icon: 'voicerx',
     keywords: ['voice', 'diagnose', 'analyze', 'analyse', 'muddy', 'boxy', 'harsh', 'nasal', 'eq', 'doctor', 'fix'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: VoiceRxModal,
   },
@@ -418,6 +453,8 @@ const ALL_OPERATIONS = [
     icon: 'air',
     keywords: ['air', 'maag', 'shelf', 'high', 'presence', 'sheen', 'treble', 'eq'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: AirBandModal,
   },
@@ -430,6 +467,8 @@ const ALL_OPERATIONS = [
     icon: 'resonance',
     keywords: ['resonance', 'soothe', 'harsh', 'ring', 'room mode', 'dynamic eq', 'peak'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: ResonanceModal,
   },
@@ -445,6 +484,8 @@ const ALL_OPERATIONS = [
       'clip gain', 'consistency', 'even', 'volume', 'quiet passage', 'acx',
     ],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: AutoLevelModal,
   },
@@ -458,6 +499,8 @@ const ALL_OPERATIONS = [
     icon: 'deesser',
     keywords: ['sibilance editor', 'sibilance', 'sibilant', 'harsh', 'ess', 'fricative', 'clip gain'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: SibilanceEditorModal,
   },
@@ -473,6 +516,8 @@ const ALL_OPERATIONS = [
     icon: 'softener',
     keywords: ['sibilance', 'sibilant', 'harsh', 'hard', 'ess', 'de-ess', 'deesser', 'hf softener', 'soft', 'soften', 'dynamic shelf', 'high shelf', 'warmth', 'fatso', 'air'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: DeEsserModal,
   },
@@ -485,6 +530,8 @@ const ALL_OPERATIONS = [
     icon: 'hflimiter',
     keywords: ['high frequency', 'hf', 'treble', 'limiter', 'bright', 'harsh', 'sibilance', 'transient', 'hifal', 'limen', 'fatso', 'shelf', 'ceiling'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: HFLimiterModal,
   },
@@ -497,6 +544,8 @@ const ALL_OPERATIONS = [
     icon: 'hum',
     keywords: ['hum', 'buzz', 'mains', 'ground loop', '50hz', '60hz', 'notch', 'electrical'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: HumRemoverModal,
   },
@@ -588,6 +637,16 @@ export function groupedOperations(categoryId) {
   return groups
 }
 
+/**
+ * The plugins that can take a slot in the Plugin Chain — the ones marked
+ * `chain: true`, which are exactly those that run live in the playback chain.
+ * Peak and Loudness Normalize, the analyzer and the chain itself cannot, which
+ * is why the chain is filled from this list rather than by opening windows.
+ */
+export function chainPlugins() {
+  return OPERATIONS.filter(op => op.chain)
+}
+
 /** Registry entries that open as floating windows, keyed by id. */
 export const WINDOW_COMPONENTS = Object.fromEntries(
   OPERATIONS.filter(op => op.surface === 'window').map(op => [op.id, op.component])
@@ -600,8 +659,8 @@ export const WINDOW_COMPONENTS = Object.fromEntries(
  * Scoring only has to separate an exact label hit from a keyword hit from a
  * loose fuzzy hit — the list is short enough that finer ranking is noise.
  */
-export function searchOperations(query, { categoryId = null } = {}) {
-  const pool = categoryId ? operationsIn(categoryId) : OPERATIONS
+export function searchOperations(query, { categoryId = null, pool: only = null } = {}) {
+  const pool = only ?? (categoryId ? operationsIn(categoryId) : OPERATIONS)
   const q = query.trim().toLowerCase()
   if (!q) return pool
 

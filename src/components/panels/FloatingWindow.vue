@@ -1,7 +1,11 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { useWindows } from '../../composables/useWindows.js'
+import { useWindows, CHAIN_WINDOW_ID } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
+import {
+  chainWindowMounted, chainWindowUnmounted, chainStatusFor, chainApplying,
+} from '../../composables/usePluginChain.js'
+import { currentPluginCopy, idForCopy, chainCopyNumber, isChainCopyId } from '../../composables/pluginCopies.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import Icon from '../ui/Icon.vue'
@@ -211,7 +215,7 @@ const emit = defineEmits([
   'update:heightDelta',
 ])
 
-const { focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize } = useWindows()
+const { openWindow, focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize } = useWindows()
 // The harness reads the selection itself rather than taking it as a prop.
 // Every plugin was passing the same `hasSelection` through to the same row and
 // printing the same unmet message; one readout that is right by construction
@@ -220,6 +224,11 @@ const { state, hasSelection, selectAll } = useEditorState()
 
 const accent = computed(() => props.accent)
 const modula = computed(() => props.design === 'modula')
+
+// The window this harness IS: the plugin's id for its solo copy, `<id>@chain`
+// for the copy in the Plugin Chain (pluginCopies.js). Faceplates pass the solo
+// id either way; help is keyed by it.
+const windowId = idForCopy(props.windowId, currentPluginCopy())
 
 /**
  * Help for THIS effect, looked up by the id the harness was already given.
@@ -293,8 +302,14 @@ const hasFooter = computed(() => props.showApply || props.showPreview)
 // A selection is what Apply acts on. Without one the footer offers to make one
 // rather than printing a notice about its absence — "select all" is a button,
 // "make a selection to apply" is a complaint.
-const applyBlocked = computed(() => props.applyDisabled || (props.requiresSelection && !hasSelection.value))
+// Nothing applies over a file that is already being processed: two renders of
+// the same selection would each commit, the later one overwriting the earlier
+// (a solo plugin opened while the chain was applying could do exactly that).
+const busy = computed(() => !!state.isProcessing)
+const applyBlocked = computed(() => !!inChain.value || busy.value || props.applyDisabled || (props.requiresSelection && !hasSelection.value))
 const applyTitle = computed(() => {
+  if (inChain.value) return 'This plugin is in the Plugin Chain — apply it from the chain'
+  if (busy.value) return 'This file is still being processed — wait for it to finish'
   if (props.applyDisabled) return props.applyDisabledHint
   if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
   return ''
@@ -378,14 +393,32 @@ function updateOverflow() {
 // Whatever had focus when this opened, so closing can hand it back.
 let previouslyFocused = null
 
+// ── Chain membership ────────────────────────────────────────────────────────
+// A plugin with a slot in the Plugin Chain says so (IN CHAIN · n, which opens
+// the rack) and has NO APPLY of its own: the chain's Apply is the one that
+// writes it, in order with the rest. Joining happens only from the chain's
+// Add picker, so a plugin outside the chain shows nothing here.
+const inChain = computed(() => {
+  const status = chainStatusFor(windowId)
+  return status?.member ? status : null
+})
+
+// While the chain applies, the chain and its copies' windows take no input: a
+// knob turned or a slot removed mid-render would change what is being rendered.
+const frozen = computed(() => chainApplying.value && (windowId === CHAIN_WINDOW_ID || isChainCopyId(windowId)))
+
 // Accessible name, read off the brand mark.
 const label = computed(() => `${props.brandLead} ${props.brandTail}`.trim())
 
 onMounted(() => {
+  // A plugin keeps playing in the chain while its window is closed, with its
+  // meters stopped; reopening the window brings them back.
+  chainWindowMounted(windowId)
+
   // A window that was resized before is reopened at the size it was left, the
   // same courtesy the position gets. Restored before the position fallback
   // below, which reads it for the first-open case.
-  const rememberedSize = getSize(props.windowId)
+  const rememberedSize = getSize(windowId)
   if (rememberedSize) {
     // `extra` is how far a drag took the window past its natural width, so a
     // window whose natural width moves (the EQ follows its band count)
@@ -397,12 +430,15 @@ onMounted(() => {
   }
   emit('update:heightDelta', heightDelta.value)
 
-  const remembered = getPosition(props.windowId)
+  const remembered = getPosition(windowId)
   if (remembered) {
     pos.value = { ...remembered }
   } else {
-    // First open: rest near the top-right so the waveform stays visible.
-    pos.value = { x: Math.max(16, window.innerWidth - boxWidth.value - 40), y: props.top }
+    // First open: rest near the top-right so the waveform stays visible. A
+    // second or third chain copy of the same plugin steps down and left, or it
+    // would open exactly on top of the first.
+    const step = 28 * Math.max(0, chainCopyNumber(currentPluginCopy()) - 1)
+    pos.value = { x: Math.max(16, window.innerWidth - boxWidth.value - 40 - step), y: props.top + step }
   }
   // A window allowed to be narrower than its natural width (`minWidth`) opens
   // no wider than the viewport has room for; the rest is a no-op.
@@ -429,9 +465,11 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  // However the window closed — ×, Escape, or replaced by another plugin.
+  chainWindowUnmounted(windowId)
   window.removeEventListener('resize', onViewportResize)
   bodyRo?.disconnect()
-  savePosition(props.windowId, pos.value)
+  savePosition(windowId, pos.value)
   // Return focus only if it is still inside this window; if the user has since
   // clicked the waveform, yanking it back would be worse than leaving it.
   if (frameEl.value?.contains(document.activeElement)) {
@@ -478,7 +516,7 @@ function onDragEnd(e) {
   // On pointercancel the capture is already implicitly released
   try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
   clampToViewport()
-  savePosition(props.windowId, pos.value)
+  savePosition(windowId, pos.value)
 }
 
 /**
@@ -518,7 +556,7 @@ function onResizeEnd(e) {
   resizing.value = false
   try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
   clampToViewport()
-  saveSize(props.windowId, {
+  saveSize(windowId, {
     width: boxWidth.value,
     extra: boxWidth.value - props.width,
     heightDelta: heightDelta.value,
@@ -530,13 +568,13 @@ function resetSize() {
   boxWidth.value = props.width
   heightDelta.value = 0
   emit('update:heightDelta', 0)
-  saveSize(props.windowId, { width: boxWidth.value, extra: 0, heightDelta: 0 })
+  saveSize(windowId, { width: boxWidth.value, extra: 0, heightDelta: 0 })
 }
 
 // Touching or tabbing into the frame raises it. Without this, two open windows
 // keep whatever order they happened to mount in.
 function raise() {
-  focusWindow(props.windowId)
+  focusWindow(windowId)
 }
 
 // Escape closes the window focus is actually in, which is not necessarily the
@@ -559,7 +597,7 @@ function onEscape(e) {
 // still emitted for owners that need to tear down a preview chain first.
 function requestClose() {
   emit('close')
-  closeWindow(props.windowId)
+  closeWindow(windowId)
 }
 </script>
 
@@ -567,6 +605,9 @@ function requestClose() {
   <div
     ref="frameEl"
     class="win-frame fixed rounded-[18px] overflow-hidden flex flex-col"
+    :class="{ 'is-frozen': frozen }"
+    :inert="frozen"
+    :aria-busy="frozen || undefined"
     :data-chrome="chrome"
     :data-design="design"
     role="dialog"
@@ -684,6 +725,17 @@ function requestClose() {
           :disabled="presetsDisabled"
           :disabled-hint="presetsDisabledHint"
         />
+        <!-- Says BYPASSED with the chain: the plugin's own lamp can read ON
+             while the chain around it is out of circuit and nothing is heard. -->
+        <button
+          v-if="inChain"
+          type="button"
+          class="win-chain-pill is-member"
+          :class="{ 'is-bypassed': inChain.chainBypassed }"
+          :title="inChain.chainBypassed ? 'The Plugin Chain is bypassed — open it to turn it on' : 'Open the Plugin Chain'"
+          @pointerdown.stop
+          @click="openWindow('plugin-chain')"
+        >IN CHAIN · {{ inChain.position }}{{ inChain.chainBypassed ? ' · BYPASSED' : '' }}</button>
         <slot name="header-center" />
       </div>
 
@@ -863,8 +915,8 @@ function requestClose() {
         >
           <span v-if="modula" style="font:700 12px/1 'Inter',system-ui,sans-serif">✓</span>
           <Icon v-else :name="applyIcon" :size="15" :stroke-width="2.5" />
-          <span class="win-btn-label">{{ applyLabel }}</span>
-          <span class="win-btn-label-short">{{ applyLabelShort }}</span>
+          <span class="win-btn-label">{{ inChain ? 'Applies with the chain' : applyLabel }}</span>
+          <span class="win-btn-label-short">{{ inChain ? 'In chain' : applyLabelShort }}</span>
         </button>
       </div>
     </div>
@@ -1023,6 +1075,27 @@ function requestClose() {
    One shape for both, because they are the same kind of control. Off is an
    outline, on is a raised white wash — a value step rather than a colour
    change, which is what keeps the hue out of the chrome. */
+.win-chain-pill {
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(255, 255, 255, .04);
+  color: rgba(234, 246, 248, .7);
+  font: 700 9.5px/1 'JetBrains Mono', monospace;
+  letter-spacing: .12em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.win-chain-pill:hover { background: rgba(255, 255, 255, .09); color: #eaf6f8; }
+.win-chain-pill.is-member {
+  border-color: rgba(232, 163, 61, .45);
+  color: #e8a33d;
+}
+.win-chain-pill.is-member.is-bypassed {
+  border-color: rgba(255, 255, 255, .14);
+  color: rgba(234, 246, 248, .55);
+}
 .win-chip {
   display: flex;
   align-items: center;
@@ -1479,4 +1552,5 @@ function requestClose() {
   0% { opacity: 0; transform: scale(0.94) translateY(8px); }
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
+.win-frame.is-frozen { filter: saturate(.6) brightness(.85); transition: filter .15s; }
 </style>
