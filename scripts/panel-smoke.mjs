@@ -222,8 +222,12 @@ try {
     const toast = await page.getByText('Chain applied — AirBoost → Inflator').waitFor({ timeout: 20000 })
       .then(() => true, () => false)
     await page.waitForTimeout(500)
+    // The whole chain is bypassed; each slot keeps its own ON.
     const pills = await chainWin.locator('.pc-row .m-pill-text').allInnerTexts()
-    const bypassedAfter = pills.length === 2 && pills.every(t => t === 'BYPASS')
+    const masterPill = await chainWin.locator('.win-pill-m').first().getAttribute('aria-pressed')
+    const bypassedAfter = pills.length === 2 && pills.every(t => t === 'ON') && masterPill === 'false'
+      && (await page.locator('.chain-count').innerText()) === 'BYPASSED'
+      && await chainWin.locator('.win-apply').isDisabled()
 
     // A plugin outside the chain takes the whole chain group off the screen.
     await openOp('Opto Comp')
@@ -246,7 +250,7 @@ try {
       order1.join(',') === 'Inflator,AirBoost' ? '' : `picker did not append in order (${order1.join(',')}); `,
       order2.join(',') === 'AirBoost,Inflator' ? '' : `move did not reorder (${order2.join(',')}); `,
       toast ? '' : 'Apply did not report the chain in order; ',
-      bypassedAfter ? '' : `slots not bypassed after apply (${pills.join(',')}); `,
+      bypassedAfter ? '' : `apply should bypass the chain and keep the slots on (slots ${pills.join(',')}, chain ON=${masterPill}); `,
       soloAfterGroup === 1 ? '' : `a solo plugin left ${soloAfterGroup} windows open; `,
       pauseOk ? '' : `chain did not pause for a solo plugin and come back (${liveBefore} → ${pausedBadge} → ${resumedBadge}); `,
     ].join('')

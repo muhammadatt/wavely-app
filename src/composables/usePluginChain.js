@@ -79,7 +79,10 @@ function isMember(id) {
 function addDef(def) {
   // On first: that is what builds its chain entry, which addToChain needs.
   if (!def.isActive()) def.setActive(true)
-  getEffectChainIfExists()?.addToChain(def.id)
+  const chain = getEffectChainIfExists()
+  chain?.addToChain(def.id)
+  // Adding is asking to hear it — the chain is bypassed after every Apply.
+  if (chain?.bypassed) chain.setBypassed(false)
 }
 
 function sync(chain) {
@@ -181,6 +184,8 @@ export function usePluginChain() {
 
   function clear() {
     for (const s of [...slots.value]) remove(s.id)
+    // An empty chain starts over, not bypassed.
+    chain().setBypassed(false)
   }
 
   function move(id, toIndex) {
@@ -199,6 +204,9 @@ export function usePluginChain() {
   /** Why the chain can't be applied right now, or ''. */
   function applyBlocker() {
     if (!state.selection) return 'Make a selection on the waveform first'
+    // What Apply writes must be what is heard: a bypassed chain previews the
+    // dry audio, so it cannot apply its slots. (It is bypassed after every Apply.)
+    if (bypassed.value) return 'Turn the chain on to apply it'
     if (liveSlots.value.length === 0) return 'Turn on at least one plugin in the chain'
     for (const s of liveSlots.value) {
       const def = plugins.get(s.id)
@@ -219,10 +227,10 @@ export function usePluginChain() {
    * still comes from the real audio before the selection, as it does when the
    * plugins are applied one at a time.
    *
-   * Afterwards every applied slot is bypassed, as a single plugin's Apply
-   * turns its own preview off: the processing is now in the audio, and leaving
-   * the chain live would play it twice. The chain itself stays built, ready
-   * for the next selection.
+   * Afterwards the WHOLE CHAIN is bypassed (the master bypass), not each slot:
+   * the processing is now in the audio and leaving the chain live would play it
+   * twice, but which slots were on is the user's setup and is kept — turning the
+   * chain back on is one switch, ready for the next selection.
    */
   async function apply() {
     const blocker = applyBlocker()
@@ -249,10 +257,8 @@ export function usePluginChain() {
       }
       const bufferId = replaceRegion(start, end, buffer, `Chain: ${names}`, docId)
       setPeakCache(bufferId, await computePeakCache(buffer, 256))
-      for (const def of defs) {
-        def.setActive(false)
-        def.afterApply?.()
-      }
+      chain().setBypassed(true)
+      for (const def of defs) def.afterApply?.()
       showToast(`Chain applied — ${names}`)
       return true
     } catch (err) {

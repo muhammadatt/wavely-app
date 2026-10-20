@@ -21,7 +21,7 @@ export default {
     { label: 'Edit', text: 'Opens the plugin’s window to change its settings' },
     { label: '×', text: 'Takes the plugin out of the chain' },
     { label: 'Clear', text: 'Takes every plugin out of the chain' },
-    { label: 'Apply', text: 'Renders every live slot over the selection in chain order and commits the result as one undo step, then bypasses those slots so the processing is not heard twice. It is the only Apply for a plugin in the chain — their own windows say In chain instead' },
+    { label: 'Apply', text: 'Renders every live slot over the selection in chain order and commits the result as one undo step, then bypasses the whole chain so the processing is not heard twice. Each plugin keeps its own ON / BYPASS, so turning the chain back on is one switch. Apply is off while the chain is bypassed, since it would write processing you cannot hear. It is the only Apply for a plugin in the chain — their own windows say In chain instead' },
   ],
 
   notes: [
