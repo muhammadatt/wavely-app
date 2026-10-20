@@ -20,8 +20,8 @@ const chainTitle = computed(() => {
   const n = slots.value.length
   if (!n) return 'Plugin chain — empty'
   if (chainActive.value) return `Plugin chain — active, ${liveSlots.value.length} of ${n} plugin(s) on`
-  if (suspended.value) return 'Plugin chain — bypassed while a plugin outside it is open, so that plugin previews exactly what its Apply writes'
-  if (bypassed.value) return 'Plugin chain — bypassed'
+  if (suspended.value) return 'Plugin chain — bypassed while a plugin outside it is open, so that plugin previews exactly what its Apply writes. Turn it back on in the chain window'
+  if (bypassed.value) return 'Plugin chain — bypassed. Turn it on in the chain window'
   return 'Plugin chain — bypassed: every plugin in it is switched off'
 })
 

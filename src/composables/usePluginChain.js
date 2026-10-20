@@ -115,10 +115,21 @@ function sync(chain) {
 // Whether a plugin window outside the chain is open — the chain is suspended
 // while one is (EffectChain.suspended). Watched for the app's lifetime, in a
 // scope of its own: no component owns this.
+//
+// Opening one also sets the MASTER BYPASS, so the chain stays off after the
+// plugin closes until the user turns it back on. Coming back by itself on
+// close put the chain under audio the user had just changed with the solo
+// plugin, without being asked. The suspension still covers the time the
+// window is open, so nothing else can bring the chain back underneath it.
 const { windows } = useWindows()
 const soloOpen = computed(() => windows.some(isSoloPluginWindow))
 effectScope(true).run(() => {
-  watch(soloOpen, open => getEffectChainIfExists()?.setSoloOpen(open))
+  watch(soloOpen, (open) => {
+    const chain = getEffectChainIfExists()
+    if (!chain) return
+    chain.setSoloOpen(open)
+    if (open && !chain.bypassed && chain.members().length) chain.setBypassed(true)
+  })
 })
 
 onEffectChainCreated((chain) => {

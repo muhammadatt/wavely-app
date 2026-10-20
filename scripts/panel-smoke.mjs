@@ -202,15 +202,23 @@ try {
     const inflatorWin = page.locator('.win-frame').filter({ hasText: 'IN CHAIN · 1' })
     const memberApplyOff = await inflatorWin.locator('.win-apply').isDisabled().catch(() => false)
 
-    // A plugin outside the chain pauses it (it must preview what its own Apply
-    // writes); closing it brings the chain back.
+    // A plugin outside the chain bypasses it (it must preview what its own
+    // Apply writes), and the chain STAYS bypassed when it closes: only the
+    // user turns it back on, from the chain window's master switch.
     const chainBadge = () => page.locator('.chain-count').innerText().catch(() => '')
     const liveBefore = await chainBadge()
     await openOp('Opto Comp')
     const pausedBadge = await chainBadge()
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+    const closedBadge = await chainBadge()
+    const masterOn = async () => {
+      await chainWin.locator('.win-pill-m').first().dispatchEvent('click'); await page.waitForTimeout(300)
+    }
+    await openOp('Plugin Chain')
+    await masterOn()
     const resumedBadge = await chainBadge()
-    const pauseOk = liveBefore === 'ACTIVE' && pausedBadge === 'BYPASSED' && resumedBadge === 'ACTIVE'
+    const pauseOk = liveBefore === 'ACTIVE' && pausedBadge === 'BYPASSED' && closedBadge === 'BYPASSED'
+      && resumedBadge === 'ACTIVE'
 
     // A plugin that is ALSO in the chain still opens on its own: its solo copy,
     // alone, with a live Apply and no IN CHAIN badge — the chain suspended
@@ -222,7 +230,8 @@ try {
       && (await chainBadge()) === 'BYPASSED'
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
     await openOp('Plugin Chain')
-    const slotKept = (await rowNames()).join(',') === 'Inflator,AirBoost' && (await chainBadge()) === 'ACTIVE'
+    const slotKept = (await rowNames()).join(',') === 'Inflator,AirBoost' && (await chainBadge()) === 'BYPASSED'
+    await masterOn()
 
     const order1 = await rowNames()
     await chainWin.getByRole('button', { name: 'Move Inflator later' }).dispatchEvent('click')
@@ -264,7 +273,7 @@ try {
       toast ? '' : 'Apply did not report the chain in order; ',
       bypassedAfter ? '' : `apply should bypass the chain and keep the slots on (slots ${pills.join(',')}, chain ON=${masterPill}); `,
       soloAfterGroup === 1 ? '' : `a solo plugin left ${soloAfterGroup} windows open; `,
-      pauseOk ? '' : `chain did not pause for a solo plugin and come back (${liveBefore} → ${pausedBadge} → ${resumedBadge}); `,
+      pauseOk ? '' : `chain should bypass for a solo plugin, stay bypassed after it closes and come back on its switch (${liveBefore} → ${pausedBadge} → ${closedBadge} → ${resumedBadge}); `,
       soloCopyAlone ? '' : 'a plugin in the chain did not open on its own with its own Apply; ',
       slotKept ? '' : 'opening the solo copy disturbed the chain slot; ',
     ].join('')
