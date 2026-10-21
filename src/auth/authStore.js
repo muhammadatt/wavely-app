@@ -67,7 +67,7 @@ export function createAuthStore({
     accountError: null,
     // null | 'signIn' | 'signUp' | 'reset' | 'recovery'
     dialog: null,
-    // The feature id an upgrade prompt is open for, or null.
+    // The feature id an upgrade prompt is open for ('plan' from the account menu), or null.
     upgradeFor: null,
   })
 
@@ -217,7 +217,8 @@ export function createAuthStore({
     state.dialog = null
   }
 
-  function openUpgrade(featureId) {
+  /** Open the upgrade prompt, for a feature or (no argument) for the plan itself. */
+  function openUpgrade(featureId = 'plan') {
     if (client) state.upgradeFor = featureId
   }
 

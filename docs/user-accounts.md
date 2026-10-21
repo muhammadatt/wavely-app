@@ -1,8 +1,9 @@
 # User Accounts — Setup and Architecture
 
-> Status: sign-in, `GET /api/me`, plans and feature gating, and presets in the
-> account are built. Stripe billing (checkout, portal, webhooks) is next — until
-> then the upgrade prompt's button reads "coming soon".
+> Status: sign-in, `GET /api/me`, plans and feature gating, presets in the
+> account, and Stripe billing (Checkout, the customer portal, webhooks) are
+> built. Billing is off until its env vars are set; until then the upgrade
+> prompt's button reads "coming soon".
 
 ## How it fits together
 
@@ -177,9 +178,91 @@ features are actually enforced.
   backends: `local`, `account` (`src/auth/presetBackend.js`) and `none`.
   `useAuth` switches between them as the session changes.
 
+## Billing (Stripe)
+
+### How it works
+
+```
+Upgrade prompt ──POST /api/billing/checkout──▶ server ──▶ Stripe Checkout session
+   │  (opens a NEW TAB, so unsaved edits stay put)            │
+   ▼                                                           ▼
+ new tab: Stripe Checkout ── pays ──▶ returns to app?checkout=success&session_id=…
+                                        │ POST /api/billing/checkout/complete
+                                        │   → server re-fetches the subscription, upserts the row
+                                        │ BroadcastChannel → editor tab reloads /api/me → Pro
+                                        └ the tab closes itself
+Stripe ──webhook──▶ POST /api/billing/webhook ──▶ same sync (renewals, cancels, failed cards)
+```
+
+- **One sync for every path.** The webhook and the checkout return both call
+  `syncSubscription(id)`. It **re-fetches** the subscription from Stripe rather
+  than trusting the event's payload, so events that arrive late, twice or out of
+  order all settle on Stripe's current state.
+- **Ownership.** Each user gets one Stripe customer, stored as
+  `profiles.stripe_customer_id`. The user id travels on the Checkout session
+  and in the subscription's metadata.
+- **Plans come from config.** Price ids map to plans through env vars. A price
+  the server doesn't know is stored as `unknown` and grants nothing.
+- **No double billing.** Checkout is refused (409) while the user has an active
+  subscription. Switching monthly ↔ yearly and cancelling happen in Stripe's
+  customer portal ("Manage billing" in the account menu).
+- **Return URLs** are checked against the CORS allowlist, so Checkout can't be
+  used as an open redirect.
+- **Plan changes apply immediately.** A sync clears the server's cached plan
+  for that user, so the server stops refusing Pro requests at once.
+
+### Setup
+
+1. **Product and prices.** In Stripe (test mode first), create a product "Pro"
+   with a recurring monthly price and/or a yearly one.
+2. **Customer portal.** In Settings → Billing → Customer portal, enable:
+   - updating the payment method,
+   - cancelling (at period end),
+   - switching between the Pro prices.
+3. **Webhook.** Add an endpoint `https://<api-host>/api/billing/webhook`
+   listening for:
+   - `checkout.session.completed`
+   - `customer.subscription.created`
+   - `customer.subscription.updated`
+   - `customer.subscription.deleted`
+   - `customer.subscription.paused`
+   - `customer.subscription.resumed`
+
+   Copy its signing secret.
+4. **Server env** (`server/.env`):
+
+   | Variable | Value |
+   |---|---|
+   | `STRIPE_SECRET_KEY` | `sk_test_…` / `sk_live_…` (or a restricted key with Customers, Checkout Sessions, Billing Portal and Subscriptions write, Prices read) |
+   | `STRIPE_WEBHOOK_SECRET` | the endpoint's `whsec_…` |
+   | `STRIPE_PRICE_PRO_MONTHLY` | `price_…` (optional if yearly is set) |
+   | `STRIPE_PRICE_PRO_YEARLY` | `price_…` (optional if monthly is set) |
+
+   Billing switches on only when accounts are configured too (Supabase vars).
+   The frontend needs no new variables: it asks `GET /api/billing/prices`
+   whether billing is on and what it costs.
+5. **Local testing:**
+
+   ```
+   stripe listen --forward-to localhost:3001/api/billing/webhook
+   ```
+
+   Put the secret this prints in `STRIPE_WEBHOOK_SECRET`, then pay with card
+   `4242 4242 4242 4242`.
+
+### Code
+
+| Piece | Where |
+|---|---|
+| Sync, customer, Checkout, portal, prices | `server/lib/billing.js` |
+| Routes + webhook (raw body, mounted before `express.json()`) | `server/routes/billing.js` |
+| Browser client, new-tab flow, return handling | `src/auth/billing.js`, via `useBilling()` |
+| Upgrade prompt (prices, monthly/yearly) | `src/components/UpgradeDialog.vue` |
+| Account menu (Upgrade / Manage billing / renewal date) | `src/components/AccountMenu.vue` |
+
 ## Next steps
 
-1. **Stripe**: Checkout from the upgrade prompt, the customer portal, and
-   webhooks writing `subscriptions` and `profiles.stripe_customer_id`.
-2. **Optional:** gate the preset chain (`/api/process`). It isn't listed as Pro
+1. **Optional:** gate the preset chain (`/api/process`). It isn't listed as Pro
    today.
+2. **Export tiers** (MP3 128 kbps free, WAV for paid — see CLAUDE.md "Freemium
+   Gates"), once pricing is settled.

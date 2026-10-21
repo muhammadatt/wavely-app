@@ -147,3 +147,18 @@ test('the plan resolver caches per user for its TTL', async () => {
   await planFor('u-pro')
   assert.equal(reads, 3)
 })
+
+test('invalidate drops one user’s cached plan so an upgrade lands at once', async () => {
+  let plan = 'free'
+  let reads = 0
+  const admin = {
+    from: () => ({ select: () => ({ eq: async () => { reads++; return { data: plan === 'pro' ? [{ plan: 'pro', status: 'active' }] : [], error: null } } }) }),
+  }
+  const planFor = createPlanResolver(admin, { ttlMs: 60_000, now: () => 0 })
+  assert.equal(await planFor('u1'), 'free')
+  plan = 'pro'
+  assert.equal(await planFor('u1'), 'free', 'cached')
+  planFor.invalidate('u1')
+  assert.equal(await planFor('u1'), 'pro')
+  assert.equal(reads, 2)
+})

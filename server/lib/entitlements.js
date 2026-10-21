@@ -38,12 +38,14 @@ export async function probeDurationS(filePath) {
 
 /**
  * userId -> plan, cached briefly. A gated route is hit in bursts (analyse,
- * tweak, analyse again), and one subscriptions read per burst is plenty — a
- * cancelled plan takes effect within `ttlMs`.
+ * tweak, analyse again), and one subscriptions read per burst is plenty.
+ * Billing drops a user's entry (`planFor.invalidate`) whenever it syncs their
+ * subscription, so an upgrade or cancellation lands at once; `ttlMs` only
+ * bounds a change made behind the server's back (a hand-edited row).
  */
 export function createPlanResolver(admin, { ttlMs = 60_000, now = Date.now } = {}) {
   const cache = new Map()
-  return async function planFor(userId) {
+  async function planFor(userId) {
     const hit = cache.get(userId)
     if (hit && now() - hit.at < ttlMs) return hit.plan
     const { data, error } = await admin
@@ -56,6 +58,9 @@ export function createPlanResolver(admin, { ttlMs = 60_000, now = Date.now } = {
     if (cache.size > 10_000) cache.delete(cache.keys().next().value)
     return plan
   }
+  /** Forget a user's cached plan — billing calls this when a subscription changes. */
+  planFor.invalidate = (userId) => cache.delete(userId)
+  return planFor
 }
 
 function bearerToken(req) {

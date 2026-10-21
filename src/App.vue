@@ -11,6 +11,7 @@ import AuthDialog from './components/AuthDialog.vue'
 import UpgradeDialog from './components/UpgradeDialog.vue'
 import { onPresetError } from './audio/pluginPresets/store.js'
 import { useAuth } from './composables/useAuth.js'
+import { useBilling } from './composables/useBilling.js'
 
 // ProcessingOverlay is no longer mounted here — it now renders inside the
 // waveform area so a job on one document doesn't block the whole app.
@@ -26,6 +27,17 @@ const { state: authState } = useAuth()
 // Presets save to the account behind the menu; a write that fails is rolled
 // back by the store, and this is where the user hears about it.
 onPresetError(({ message }) => showToast(message, 5000))
+
+// Finish a return from Stripe Checkout or the billing portal (when it landed in
+// this tab rather than the one we opened), and follow plan changes made in
+// other tabs. A no-op with accounts off.
+useBilling().start().then(result => {
+  // Only a confirmed plan earns the welcome: a payment Stripe is still
+  // processing has no subscription yet, and the webhook will bring it.
+  if (result?.kind === 'success') {
+    showToast(result.plan === 'pro' ? 'Welcome to Pro!' : 'Payment received — your plan will update shortly', 5000)
+  }
+})
 </script>
 
 <template>

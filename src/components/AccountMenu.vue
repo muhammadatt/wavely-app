@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useAuth } from '../composables/useAuth.js'
 import { useEditorState } from '../composables/useEditorState.js'
+import { useBilling } from '../composables/useBilling.js'
 import BaseButton from './ui/BaseButton.vue'
 
 /**
@@ -28,6 +29,28 @@ onMounted(() => window.addEventListener('click', onWindowClick))
 onUnmounted(() => window.removeEventListener('click', onWindowClick))
 
 const { showToast } = useEditorState()
+const billing = useBilling()
+
+/** "Renews 21 Nov 2026" / "Ends 21 Nov 2026" / "Payment failed — update your card". */
+const subscriptionLine = computed(() => {
+  const sub = state.account?.subscription
+  if (!sub) return ''
+  if (sub.status === 'past_due') return 'Payment failed — update your card'
+  if (!sub.currentPeriodEnd) return ''
+  const date = new Date(sub.currentPeriodEnd).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  return `${sub.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${date}`
+})
+
+function upgrade() {
+  open.value = false
+  auth.openUpgrade()
+}
+
+async function manageBilling() {
+  open.value = false
+  const { error } = await billing.manage()
+  if (error) showToast(error, 5000)
+}
 
 async function signOut() {
   open.value = false
@@ -84,7 +107,7 @@ async function signOut() {
             class="text-[11px] text-[rgba(255,255,255,.45)] truncate"
           >{{ user?.email }}</div>
           <div class="mt-[6px] text-[11px] text-[rgba(255,255,255,.55)]">
-            {{ planLabel }} plan
+            {{ planLabel }} plan<template v-if="subscriptionLine"> · {{ subscriptionLine }}</template>
           </div>
           <div
             v-if="state.accountError"
@@ -93,6 +116,18 @@ async function signOut() {
           >Couldn’t load your plan: {{ state.accountError }}</div>
         </div>
         <div class="py-1">
+          <button
+            v-if="!isPaid"
+            class="w-full text-left px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
+            style="color:#e0b84a"
+            @click="upgrade"
+          >Upgrade to Pro</button>
+          <button
+            v-if="state.account?.subscription"
+            class="w-full text-left px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
+            style="color:#eaf6f8"
+            @click="manageBilling"
+          >Manage billing</button>
           <button
             class="w-full text-left px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
             style="color:#eaf6f8"
