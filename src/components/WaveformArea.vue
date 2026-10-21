@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { renderWaveform, renderOverlay, RULER_GUTTER_HEIGHT } from '../audio/renderer.js'
 import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import { useEditorState } from '../composables/useEditorState.js'
+import { useCanvasRecovery } from '../composables/useCanvasRecovery.js'
 import { hitSelectionEdge, selectionDragAnchor } from '../audio/selectionDrag.js'
 
 const {
@@ -479,6 +480,10 @@ watch(peakCacheVersion, () => drawAll())
 // This also covers plain window resizes, so there is no window 'resize'
 // listener: that fired a second, identical redraw for every window resize.
 let resizeObserver = null
+
+// Both canvases paint on demand, so a dropped GPU backing store would leave
+// them blank until the next edit or tab switch.
+useCanvasRecovery(() => [canvas.value, overlayCanvas.value], drawAll)
 
 onMounted(() => {
   drawAll()
