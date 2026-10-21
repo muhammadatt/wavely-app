@@ -67,6 +67,7 @@ import manualEq from './manual-eq.js'
 import normalize from './normalize.js'
 import optoSmooth from './opto-smooth.js'
 import phatass from './phatass.js'
+import pluginChain from './plugin-chain.js'
 import resonanceSuppressor from './resonance-suppressor.js'
 import saturationBench from './saturation-bench.js'
 import schepsParallel from './scheps-parallel.js'
@@ -94,6 +95,7 @@ export const HELP = {
   'scheps-parallel': schepsParallel,
   'soft-clipper': softClipper,
   'spectrum-analyzer': spectrumAnalyzer,
+  'plugin-chain': pluginChain,
   'inflator': inflator,
   'vocal-saturation': vocalSaturation,
   voicerx,

@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useFET1176 } from '../../composables/useFET1176.js'
+import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   attackSecondsForDial, releaseSecondsForDial, FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB,
@@ -28,7 +29,7 @@ const {
   fetAutoMakeup, fetPreview, fetReduction,
   fetInputAlignDb, fetInputAuto, syncInputAlign, enableInputAuto,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
-  syncDrive, syncAnalog, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup,
+  syncDrive, syncAnalog, syncScHpf, syncMix, toggleAutoMakeup, 
   apply, teardown, closeModal, refreshKernelTuning,
 } = useFET1176()
 
@@ -83,14 +84,10 @@ const { state } = useEditorState()
 
 // Default to engaged when the panel opens
 onMounted(() => {
-  if (!fetPreview.value) togglePreview()
+  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
+  // must not un-bypass its slot.
+  if (!fetPreview.value && currentPluginCopy() === 'solo') togglePreview()
 })
-
-// The makeup is measured from the selected region, so a new selection needs
-// a fresh measurement.
-// A new selection is new material: the live tracker's extrema describe the old
-// region, so they are cleared before the offline measurement re-runs.
-watch(() => state.selection, () => { resetLiveMakeup(); refreshAutoMakeup() }, { deep: true })
 
 // The window chrome keeps the app's steel blue for FET Punch; the faceplate
 // itself is the Classic 76 hardware face and carries its own colours.

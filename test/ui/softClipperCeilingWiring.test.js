@@ -160,7 +160,11 @@ test('the panel is fixed-only and offers the presets', () => {
   assert.doesNotMatch(src, /setThresholdMode/, 'the panel must not set the mode any more')
   assert.match(src, /v-for="p in ceilingSetters"/, 'the ceiling setters must be reachable')
   assert.match(src, /setCeilingFromPreset\(p\.id\)/)
-  assert.match(src, /watch\(\(\) => state\.selection/, 're-measure when the region changes')
+  // The region-follower lives in the composable, in the copy's own scope, so
+  // a chain slot keeps following the selection with its window closed.
+  assert.match(read('../../src/composables/useSoftClipper.js'),
+    /watch\(\(\) => state\.selection,[\s\S]{0,120}scheduleCeilingPreset\(\)/,
+    're-measure when the region changes')
   // ⚠ THE CAPTION REPORTS THE CURRENT SETTING, NOT A PREVIEW. It names the
   // preset the ceiling is sitting on and prints its dBFS, and reads empty the
   // rest of the time.
@@ -294,13 +298,13 @@ test('the two ceiling measurements supersede independently', () => {
   assert.match(src, /let choicesSeq = 0/, 'the two measurements share one counter again')
 
   const choices = src.slice(src.indexOf('async function measureCeilingChoices'))
-  const choicesBody = choices.slice(0, choices.indexOf('\n  }\n'))
+  const choicesBody = choices.slice(0, choices.indexOf('\n    }\n'))
   assert.match(choicesBody, /\+\+choicesSeq/)
   assert.doesNotMatch(choicesBody, /ceilingSeq/,
     'labelling the buttons still touches the placement counter')
 
   const place = src.slice(src.indexOf('async function applyCeilingPreset'))
-  const placeBody = place.slice(0, place.indexOf('\n  }\n'))
+  const placeBody = place.slice(0, place.indexOf('\n    }\n'))
   assert.doesNotMatch(placeBody, /choicesSeq/,
     'placing the ceiling still touches the labelling counter')
 
