@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue'
 import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
@@ -174,7 +174,7 @@ const copies = pluginCopies((copy, life) => {
   function useScheps() {
     const {
       state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, showToast, totalDuration,
+      startProcessing, endProcessing, pinActiveDocument, showToast, totalDuration,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -436,6 +436,9 @@ const copies = pluginCopies((copy, life) => {
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument('Scheps Parallel')
 
       /**
        * ⚠ RE-MEASURED HERE EVEN THOUGH THE TRIM IS NOT. The trim is held in state
@@ -449,18 +452,19 @@ const copies = pluginCopies((copy, life) => {
       const wasPreviewing = schepsPreview.value
       if (wasPreviewing) togglePreview()
 
-      startProcessing('Applying Scheps Parallel...')
+      startProcessing('Applying Scheps Parallel...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, 'Scheps Parallel')
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'Scheps Parallel', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Scheps Parallel applied')
       } catch (err) {
         console.error('Scheps Parallel failed:', err)
-        showToast('Scheps Parallel failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'Scheps Parallel failed')
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 

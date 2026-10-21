@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
@@ -121,7 +121,7 @@ const copies = pluginCopies((copy, life) => {
   function useDeEsser() {
     const {
       state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, showToast, totalDuration,
+      startProcessing, endProcessing, pinActiveDocument, showToast, totalDuration,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -456,23 +456,27 @@ const copies = pluginCopies((copy, life) => {
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument('De-Esser')
 
       const wasPreviewing = hfPreview.value
       if (wasPreviewing) togglePreview()
       await prepareApply()
 
-      startProcessing('Applying HF Softener...')
+      startProcessing('Applying HF Softener...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, 'HF Softener')
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'HF Softener', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('HF Softener applied')
       } catch (err) {
         console.error('HF Softener failed:', err)
-        showToast('HF Softener failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'HF Softener failed')
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 

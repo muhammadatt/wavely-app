@@ -8,7 +8,7 @@ import ModulaKnob from '../../modula/ModulaKnob.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  state, getAudioContext, replaceRegion, setPeakCache,
+  state, appState, getAudioContext, replaceRegion, setPeakCache,
   startProcessing, endProcessing, showToast, totalDuration,
 } = useEditorState()
 
@@ -28,14 +28,18 @@ async function applyNormalize(useSelection = true) {
 
   if (start >= end) return
 
-  startProcessing('Normalizing...')
+  // Pinned to this document: the render below reads it before its first
+  // await, but tabs stay usable while it runs, and the defaults follow the
+  // active tab — the commit and the status would land on another file.
+  const docId = appState.activeDocumentId
+  startProcessing('Normalizing...', docId)
   try {
     const ctx = getAudioContext()
     const buffer = await normalizeRegion(
       state.segments, start, end, targetPeak.value,
       ctx, state.currentFile.sampleRate, state.currentFile.channels
     )
-    const bufferId = replaceRegion(start, end, buffer, 'normalization')
+    const bufferId = replaceRegion(start, end, buffer, 'normalization', docId)
 
     // Recompute peak cache for new buffer
     const cache = await computePeakCache(buffer, 256)
@@ -46,7 +50,7 @@ async function applyNormalize(useSelection = true) {
     console.error('Normalize failed:', err)
     showToast('Normalization failed')
   } finally {
-    endProcessing()
+    endProcessing(docId)
   }
 }
 </script>

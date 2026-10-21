@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { applyManualEqRegion, computePeakCache } from '../audio/processing.js'
@@ -57,7 +57,7 @@ export function createEqInstance({
   function use() {
     const {
       state, getAudioContext, replaceRegion, setPeakCache, hasSelection,
-      startProcessing, endProcessing, showToast,
+      startProcessing, endProcessing, pinActiveDocument, showToast,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -274,23 +274,27 @@ export function createEqInstance({
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument(label)
 
       const wasPreviewing = eqPreview.value
       if (wasPreviewing) togglePreview()
       clearSolo()
 
-      startProcessing(`Applying ${label}...`)
+      startProcessing(`Applying ${label}...`, pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, label)
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, label, pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast(`${label} applied`)
       } catch (err) {
         console.error(`${label} failed:`, err)
-        showToast(`${label} failed`)
+        showToast(err instanceof DocumentSwitchedError ? err.message : `${label} failed`)
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 

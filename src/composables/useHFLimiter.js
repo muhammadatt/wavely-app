@@ -1,5 +1,5 @@
 import { reactive, ref } from 'vue'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
@@ -42,7 +42,7 @@ const copies = pluginCopies((copy, life) => {
   function useHFLimiter() {
     const {
       state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, showToast, totalDuration,
+      startProcessing, endProcessing, pinActiveDocument, showToast, totalDuration,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -171,23 +171,27 @@ const copies = pluginCopies((copy, life) => {
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument('HF Limiter')
 
       const wasPreviewing = hflPreview.value
       if (wasPreviewing) togglePreview()
       await prepareApply()
 
-      startProcessing('Applying HF Limiter...')
+      startProcessing('Applying HF Limiter...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, 'HF Limiter')
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'HF Limiter', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('HF Limiter applied')
       } catch (err) {
         console.error('HF Limiter failed:', err)
-        showToast('HF Limiter failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'HF Limiter failed')
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 

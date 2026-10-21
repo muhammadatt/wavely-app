@@ -469,6 +469,7 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 
 - **`outputStart` recalculation:** After any delete/trim/paste, recalculate from scratch for every segment. Do not attempt partial updates.
 - **AudioContext on user gesture.** Never on page load.
+- **Pin every apply to its document.** File tabs stay usable while an apply renders and `state` follows the active tab, so the `docId` defaults of `startProcessing` / `replaceRegion` / `endProcessing` land on whatever file is active at the END. Capture `pinActiveDocument(name)` first, pass `pin.docId` to all three, and `pin.check()` after the last await before committing (refuses with a toast if the user switched files at any point, a switch away and back included). `test/ui/pinDocument.test.js` fails on any call that leaves the docId out.
 - **Float32Array throughout.** Web Audio API uses [-1.0, 1.0] range.
 - **Canvas pixel ratio.** Multiply canvas width/height by `devicePixelRatio` or waveforms are blurry on retina.
 
