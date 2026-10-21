@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
@@ -232,7 +232,7 @@ const copies = pluginCopies((copy, life) => {
   let following = false
 
   function useSoftClipper() {
-    const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast } = useEditorState()
+    const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, pinActiveDocument, showToast } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
     function initChain() {
@@ -633,22 +633,26 @@ const copies = pluginCopies((copy, life) => {
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument('Soft Clipper')
 
       const wasPreviewing = clipperPreview.value
       if (wasPreviewing) togglePreview()
 
-      startProcessing('Applying Soft Clipper...')
+      startProcessing('Applying Soft Clipper...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, 'Soft Clip')
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'Soft Clip', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Soft Clipper applied')
       } catch (err) {
         console.error('Soft Clipper failed:', err)
-        showToast('Soft Clipper failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'Soft Clipper failed')
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 

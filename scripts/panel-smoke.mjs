@@ -39,7 +39,7 @@ const URL_ = `http://localhost:${PORT}/`
 const PANELS = [
   'Opto Comp', 'FET Punch', 'Soft Clipper', 'Scheps Parallel',
   'Reso', 'EQ', 'Air Boost', 'De-Esser', 'HF Softener', 'HF Limiter', 'PHAT*SS', 'Saturation Bench', 'Inflator', 'Tube Sat',
-  'Loudness Normalize', 'Auto Leveler',
+  'Loudness Normalize', 'Auto Leveler', 'Plosive Tamer',
 ]
 
 function writeProbeWav(path) {

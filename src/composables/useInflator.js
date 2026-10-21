@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyInflatorRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
@@ -53,7 +53,7 @@ const copies = pluginCopies((copy, life) => {
   function useInflator() {
     const {
       state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, showToast,
+      startProcessing, endProcessing, pinActiveDocument, showToast,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -156,22 +156,26 @@ const copies = pluginCopies((copy, life) => {
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument('Inflator')
 
       const wasPreviewing = inPreview.value
       if (wasPreviewing) togglePreview()
 
-      startProcessing('Inflating...')
+      startProcessing('Inflating...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, 'inflator')
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'inflator', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Inflator applied')
       } catch (err) {
         console.error('Inflator failed:', err)
-        showToast('Inflator failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'Inflator failed')
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 

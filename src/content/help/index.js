@@ -68,6 +68,7 @@ import normalize from './normalize.js'
 import optoSmooth from './opto-smooth.js'
 import phatass from './phatass.js'
 import pluginChain from './plugin-chain.js'
+import plosive from './plosive.js'
 import resonanceSuppressor from './resonance-suppressor.js'
 import saturationBench from './saturation-bench.js'
 import schepsParallel from './scheps-parallel.js'
@@ -90,6 +91,7 @@ export const HELP = {
   normalize,
   'opto-smooth': optoSmooth,
   phatass,
+  plosive,
   'resonance-suppressor': resonanceSuppressor,
   'saturation-bench': saturationBench,
   'scheps-parallel': schepsParallel,

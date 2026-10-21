@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
@@ -207,7 +207,7 @@ const copies = pluginCopies((copy, life) => {
   let following = false
 
   function useFET1176() {
-    const { state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
+    const { state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, pinActiveDocument, showToast, totalDuration} = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
     function initChain() {
@@ -559,6 +559,9 @@ const copies = pluginCopies((copy, life) => {
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument('FET Punch')
 
       /**
        * ⚠ RE-MEASURE BEFORE APPLYING, because the knob may be answering for a
@@ -581,7 +584,7 @@ const copies = pluginCopies((copy, life) => {
       const wasPreviewing = fetPreview.value
       if (wasPreviewing) togglePreview()
 
-      startProcessing('Applying FET Punch...')
+      startProcessing('Applying FET Punch...', pin.docId)
       try {
         /**
          * ⚠ THE PEAK RESTORE HAPPENS INSIDE apply AND IS REPORTED, NOT SILENT.
@@ -593,7 +596,8 @@ const copies = pluginCopies((copy, life) => {
          * nowhere. See `peakRestoreTrimDb`.
          */
         const { buffer, trimDb } = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, 'FET Punch compression')
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'FET Punch compression', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast(Math.abs(trimDb) >= 0.05
@@ -601,9 +605,9 @@ const copies = pluginCopies((copy, life) => {
           : 'FET Punch compression applied')
       } catch (err) {
         console.error('FET Punch failed:', err)
-        showToast('FET Punch compression failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'FET Punch compression failed')
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 

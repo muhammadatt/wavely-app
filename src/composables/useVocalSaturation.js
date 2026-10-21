@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
@@ -70,7 +70,7 @@ const copies = pluginCopies((copy, life) => {
   function useVocalSaturation() {
     const {
       state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, showToast,
+      startProcessing, endProcessing, pinActiveDocument, showToast,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -168,22 +168,26 @@ const copies = pluginCopies((copy, life) => {
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument('Tube Saturation')
 
       const wasPreviewing = vsPreview.value
       if (wasPreviewing) togglePreview()
 
-      startProcessing('Saturating...')
+      startProcessing('Saturating...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, 'tube saturation')
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'tube saturation', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Tube saturation applied')
       } catch (err) {
         console.error('Tube saturation failed:', err)
-        showToast('Tube saturation failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'Tube saturation failed')
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 

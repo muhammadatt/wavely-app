@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
@@ -245,7 +245,7 @@ const copies = pluginCopies((copy, life) => {
   function useResonance() {
     const {
       state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, showToast,
+      startProcessing, endProcessing, pinActiveDocument, showToast,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -501,22 +501,26 @@ const copies = pluginCopies((copy, life) => {
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument('ResoTame')
 
       const wasPreviewing = resPreview.value
       if (wasPreviewing) togglePreview()
 
-      startProcessing('Suppressing resonances...')
+      startProcessing('Suppressing resonances...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, 'resonance suppression')
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'resonance suppression', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Resonance suppression applied')
       } catch (err) {
         console.error('Resonance suppression failed:', err)
-        showToast('Resonance suppression failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'Resonance suppression failed')
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 

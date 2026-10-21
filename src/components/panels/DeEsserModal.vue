@@ -17,7 +17,8 @@
  * LISTEN (Detect, where the detector listens) standing on the bottom. Two
  * handles, not linked — see DeEsserBandStrip.
  * MIDDLE: the controls in four groups — DE-ESS (Duck, EQ, Shape), PROTECT
- * (Guard), AIR (HF Restore, AUTO) and SOFTEN (Transient Softener, Plosives).
+ * (Guard), AIR (HF Restore, AUTO) and SOFTEN (Transient Softener). The T/K/P
+ * burst treatment that sat beside Soften moved to the Plosive Tamer.
  * BOTTOM: the reduction split into Duck · EQ · Soften, over the activity scope
  * (the waveform, shaded full height wherever it de-essed). That is where
  * "when" lives; the strip only says "where and how far".
@@ -35,7 +36,6 @@ import { guardToFloorDb, amountSplitOf, HF_SOFTENER_DEFAULTS } from '../../audio
 import { softenLaw, SOFTEN_MAX } from '../../audio/deEsserSoftenStage.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
-import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import { createPeakHold, useMeterFrame } from '../meters/ballistics.js'
 import DeEsserScope from '../meters/DeEsserScope.vue'
@@ -49,11 +49,11 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  hfAmount, hfSplit, hfTotal, hfGuard, hfPlosives, hfBand, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfAirLossDb, hfComp, hfDetect, hfDetectHigh, hfAudition, hfDuck, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfSplit, hfTotal, hfGuard, hfBand, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfAirLossDb, hfComp, hfDetect, hfDetectHigh, hfAudition, hfDuck, hfBroadband, hfDelta, hfPreview,
   hfLevelOffset, refreshLevel,
   hfReduction, hfOutputLevels,
-  togglePreview, syncSoften, syncAir, syncComp, syncDetect, syncDetectHigh, scheduleAutoAir, syncTotal, syncSplit, syncGuard, syncPlosives, applyParams, toggleDelta, toggleAudition,
-  hfReso, hfBurstLamp, hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
+  togglePreview, syncSoften, syncAir, syncComp, syncDetect, syncDetectHigh, scheduleAutoAir, syncTotal, syncSplit, syncGuard, applyParams, toggleDelta, toggleAudition,
+  hfReso, hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
   apply, teardown, closeModal,
 } = useDeEsser()
 
@@ -62,7 +62,7 @@ const { state, appState } = useEditorState()
 const presets = usePluginPresets(HF_SOFTENER_PRESET_PLUGIN, {
   read: () => ({
     duck: hfDuck.value, amount: hfAmount.value, guard: hfGuard.value,
-    plosives: hfPlosives.value, band: hfBand.value, detect: hfDetect.value, detectHigh: hfDetectHigh.value,
+    band: hfBand.value, detect: hfDetect.value, detectHigh: hfDetectHigh.value,
     // Under AUTO the knob holds a MEASUREMENT of this selection, which is the
     // file's, not the patch's: store the default, so a preset never carries it
     // and AUTO never makes one read as modified. applyParams ignores it anyway.
@@ -95,10 +95,8 @@ watch(() => [state.isPlaying, hfPreview.value], ([playing]) => {
   }
 }, { immediate: true })
 
-// The kit's amber. The plosive treatment keeps its own colour on the scope and
-// its lamp, and LISTEN takes the kit's second hue (a "where", not an amount).
+// The kit's amber. LISTEN takes the kit's second hue (a "where", not an amount).
 const ACCENT = '#e8a33d'
-const PLOSIVE_COLOR = '#b9a6f2'
 const LISTEN_COLOR = '#3fd0de'
 const METER_H = 150
 const AIR_LAMP_COLOR = '#9fd3c7'
@@ -342,7 +340,7 @@ async function applyAndClose() {
 
       <span class="hs-rule" aria-hidden="true"></span>
 
-      <!-- SOFTEN: onsets, not sibilance — last in the chain — with the T/K/P burst treatment. -->
+      <!-- SOFTEN: onsets, not sibilance — last in the chain. -->
       <div class="hs-group" style="display:none">
         <span class="m-caption"></span>
         <div class="hs-knob">
@@ -355,19 +353,6 @@ async function applyAndClose() {
           />
           <span class="m-note">{{ softenCaption }}</span>
         </div>
-        <span class="hs-lampwrap">
-          <span class="m-note">Soften Plosives</span>
-          <ModulaLedPill
-            size="sm" label="ON" :color="ACCENT"
-            :model-value="hfPlosives" :disabled="!hfPreview"
-            title="Catch T, K and P releases — a burst straight out of a stop's silence — and cut them harder, with the lisp guard lifted"
-            @update:model-value="syncPlosives"
-          />
-          <span
-            class="hs-lamp" :style="lampStyle(hfBurstLamp, PLOSIVE_COLOR)"
-            title="Lit while a plosive burst is being treated"
-          ></span>
-        </span>
       </div>
     </div>
 
@@ -389,7 +374,6 @@ async function applyAndClose() {
         :envelope-fn="envelope"
         :window-seconds="HF_SCOPE_SECONDS * 2"
         :accent="ACCENT"
-        :plosive-color="PLOSIVE_COLOR"
         :held="!state.isPlaying"
         :height="124"
         title="De-Esser activity: the waveform, shaded wherever it de-essed — playhead at the centre, played audio to its left, audio about to play to its right"
@@ -456,7 +440,6 @@ async function applyAndClose() {
 .hs-auto-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 0, 0, .5); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
 .hs-auto.is-on { color: var(--hs-auto); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .6), 0 0 0 1px color-mix(in oklab, var(--hs-auto) 45%, #000); }
 .hs-auto.is-on .hs-auto-dot { background: var(--hs-auto); box-shadow: 0 0 6px var(--hs-auto); }
-.hs-lampwrap { display: flex; align-items: center; gap: 7px; }
 .hs-lamp {
   width: 6px;
   height: 6px;

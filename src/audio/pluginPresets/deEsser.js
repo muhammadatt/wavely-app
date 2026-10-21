@@ -2,12 +2,14 @@
  * HF Softener presets.
  *
  * The panel's controls and nothing else: Duck and EQ (the panel's Amount and
- * Split are a view over this pair; Shape is pinned to shelf), Guard, Plosives,
+ * Split are a view over this pair; Shape is pinned to shelf), Guard,
  * Band (no longer on the panel), Detect (low and high), Air, AUTO (stored as
  * `comp`) and Soften. Air Mode is pinned to VOICED and is
  * not a preset param; what is MEASURED (AUTO's figure, the file's level) is
  * a property of the file, never the patch; the pinned tuning (Context,
  * Rotator, Release, Reso) stays out so a menu click can never move it.
+ * A stored `plosives` (the burst treatment, since moved to the Plosive Tamer)
+ * is dropped on load.
  *
  * One factory preset ships, the plugin's own opening state; voicings beyond it
  * are the owner's to cut.
@@ -23,7 +25,7 @@ import { SOFTEN_MAX } from '../deEsserSoftenStage.js'
 export const HF_SOFTENER_PRESET_PLUGIN = 'hf-softener'
 
 export const HF_SOFTENER_PARAM_KEYS = [
-  'duck', 'amount', 'guard', 'plosives', 'band', 'detect', 'detectHigh', 'air', 'comp', 'soften',
+  'duck', 'amount', 'guard', 'band', 'detect', 'detectHigh', 'air', 'comp', 'soften',
 ]
 
 function clamp(v, lo, hi, fallback) {
@@ -38,7 +40,6 @@ function normalize(p) {
     duck: clamp(p.duck, 0, 100, d.duck),
     amount: clamp(p.amount, 0, 100, d.amount),
     guard: clamp(p.guard, 0, 100, d.guard),
-    plosives: p.plosives === undefined ? d.plosives : !!p.plosives,
     band: clamp(p.band, BAND_HZ_MIN, BAND_HZ_MAX, d.band),
     detect: clamp(p.detect, DETECT_HZ_MIN, DETECT_HZ_MAX, d.detect),
     detectHigh: clamp(p.detectHigh, DETECT_HI_MIN, DETECT_HI_MAX, d.detectHigh),

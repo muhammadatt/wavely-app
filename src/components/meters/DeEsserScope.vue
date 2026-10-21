@@ -29,7 +29,10 @@ import { kindRuns, shadeColumns } from '../../audio/deEsserScope.js'
  *
  * Marks (smoothed into regions by shadeColumns, deEsserScope.js):
  *   accent wash    — de-essed by the Duck and EQ; stronger the deeper the cut
- *   plosive wash   — the same, inside a T/K/P burst window (guard lifted)
+ *   plosive wash   — the same, where the ring's plosive mark is set. Only the
+ *                    Plosive Tamer sets it (a T/K/P burst cut; its accent wash
+ *                    is then a pop cut), since the De-Esser's burst treatment
+ *                    moved there
  *   bar on bottom  — the lisp guard held the cut back somewhere in the region
  */
 const props = defineProps({
@@ -49,6 +52,8 @@ const props = defineProps({
   windowSeconds: { type: Number, default: 4 },
   accent: { type: String, default: '#e8b77f' },
   plosiveColor: { type: String, default: '#b9a6f2' },
+  /** The key's words for each mark; a null entry leaves that mark out of the key. */
+  legend: { type: Object, default: () => ({ treated: 'DE-ESSED', plosive: null, guard: 'GUARD' }) },
   height: { type: Number, default: 140 },
   title: { type: String, default: 'De-Esser activity' },
 })
@@ -252,15 +257,18 @@ function drawLegend(ctx, h) {
   const y = h - 7
   ctx.font = "600 8px 'JetBrains Mono',monospace"
   ctx.textAlign = 'left'
+  const entries = [
+    [props.accent, props.legend.treated, false],
+    [props.plosiveColor, props.legend.plosive, false],
+    ['rgba(255,255,255,.85)', props.legend.guard, true],
+  ].filter(e => e[1])
   // A dark backing, so the key reads over a shaded region.
+  let width = 8
+  for (const [, text, bar] of entries) width += (bar ? 13 : 11) + ctx.measureText(text).width + 14
   ctx.fillStyle = 'rgba(8,6,10,.75)'
-  ctx.fillRect(2, y - 10, 196, 14)
+  ctx.fillRect(2, y - 10, width - 10, 14)
   let x = 6
-  for (const [colour, text, bar] of [
-    [props.accent, 'DE-ESSED', false],
-    [props.plosiveColor, 'PLOSIVE', false],
-    ['rgba(255,255,255,.85)', 'GUARD', true],
-  ]) {
+  for (const [colour, text, bar] of entries) {
     ctx.fillStyle = colour
     if (bar) ctx.fillRect(x, y - 3, 9, BAR_H)
     else ctx.fillRect(x, y - 5, 7, 6)

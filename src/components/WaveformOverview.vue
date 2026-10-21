@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { renderWaveform } from '../audio/renderer.js'
+import { useCanvasRecovery } from '../composables/useCanvasRecovery.js'
 import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import { useEditorState } from '../composables/useEditorState.js'
 
@@ -156,6 +157,8 @@ watch(peakCacheVersion, () => drawMini())
 // width without the window ever resizing. It covers window resizes too, so
 // there is no separate window 'resize' listener.
 let resizeObserver = null
+
+useCanvasRecovery(() => [canvas.value], drawMini)
 
 onMounted(() => {
   updateStripWidth()

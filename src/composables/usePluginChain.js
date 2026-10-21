@@ -1,5 +1,5 @@
 import { ref, computed, effectScope, watch } from 'vue'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows, isSoloPluginWindow } from './useWindows.js'
 import { idForCopy, baseId, chainCopy, chainCopyNumber, copyOfId, isChainCopyId } from './pluginCopies.js'
 import { getEffectChain, getEffectChainIfExists, onEffectChainCreated } from '../audio/effectChain.js'
@@ -223,6 +223,7 @@ export function usePluginChain() {
   const {
     state, appState, replaceRegion, setPeakCache,
     startProcessing, updateProcessingStage, updateProcessingProgress, endProcessing, showToast,
+    pinActiveDocument,
   } = editor
   const { openWindow, closeWindow } = useWindows()
 
@@ -348,17 +349,15 @@ export function usePluginChain() {
     const labels = liveSlots.value.map(s => s.label)
     // Pinned to the document the chain was applied to: a long render can
     // outlast a tab switch, and `state` follows the active tab.
-    const docId = appState.activeDocumentId
+    const pin = pinActiveDocument('The chain')
+    const docId = pin.docId
     const names = labels.join(' → ')
 
     // The slots read the file's rate and channels from the ACTIVE document as
     // they render, so a tab switch part-way would render the rest against the
-    // other file. Refused rather than repaired: nothing is committed.
-    const sameDocument = () => {
-      if (appState.activeDocumentId !== docId) {
-        throw new Error('switched files during the chain — nothing was applied')
-      }
-    }
+    // other file. Refused rather than repaired: nothing is committed — and
+    // that includes a switch away and back (pinActiveDocument).
+    const sameDocument = () => pin.check()
 
     applying.value = true
     startProcessing(`Applying chain (${defs.length} plugin${defs.length === 1 ? '' : 's'})...`, docId)
@@ -381,7 +380,7 @@ export function usePluginChain() {
       return true
     } catch (err) {
       console.error('Plugin chain failed:', err)
-      showToast(`Chain failed${err?.message ? `: ${err.message}` : ''}`)
+      showToast(err instanceof DocumentSwitchedError ? err.message : `Chain failed${err?.message ? `: ${err.message}` : ''}`)
       return false
     } finally {
       applying.value = false

@@ -47,8 +47,6 @@ export const HF_SOFTENER_DEFAULTS = {
   // Lisp guard strength, 0–100 %: no cut may take an "s" further below the
   // voice than a floor this sets (guardToFloorDb). 0 = off; 50 = −16 dB.
   guard: 100,
-  // Plosive bursts (T, K, P) — caught by timing and cut harder, guard lifted.
-  plosives: false,
   band: 4500, // Hz, the EQ band's lower corner, 3000–6000 — see bandTuningFor
   // 0–100 %: the band-limited ResoTame after the softener, a macro over its
   // threshold, depth and max cut (HF_RESO_KNOTS). 0 takes the stage out of the
@@ -113,7 +111,6 @@ export function toKernelParams(params) {
     shape: params.shape,
     lispGuard: guardOf(params) > 0,
     lispGuardFloorDb: guardToFloorDb(guardOf(params)),
-    bursts: params.plosives !== false,
     bandHz: params.band ?? HF_SOFTENER_DEFAULTS.band,
     levelOffsetDb: params.levelOffset,
     detectHz: params.detect,

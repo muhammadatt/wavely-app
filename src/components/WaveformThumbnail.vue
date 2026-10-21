@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
+import { useCanvasRecovery } from '../composables/useCanvasRecovery.js'
 import { getSegmentDuration, getTimelineDuration } from '../audio/operations.js'
 
 /**
@@ -94,6 +95,7 @@ function draw() {
 }
 
 onMounted(draw)
+useCanvasRecovery(() => [canvas.value], draw)
 watch(
   () => [props.doc?.id, props.doc?.segments, props.width, props.height, peakCacheVersion.value],
   draw,
