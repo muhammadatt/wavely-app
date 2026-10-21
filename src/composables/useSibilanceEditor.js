@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
@@ -84,7 +84,7 @@ const copies = pluginCopies((copy, life) => {
   function useSibilanceEditor() {
     const {
       state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, showToast,
+      startProcessing, endProcessing, pinActiveDocument, showToast,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -343,6 +343,9 @@ const copies = pluginCopies((copy, life) => {
     async function apply() {
       if (!state.selection || !envelopeValid.value) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument('Sibilance Editor')
 
       const envelope = rebuildEnvelope()
       if (!envelope) return
@@ -350,10 +353,11 @@ const copies = pluginCopies((copy, life) => {
       const wasPreviewing = preview.value
       if (wasPreviewing) togglePreview()
 
-      startProcessing('De-essing...')
+      startProcessing('De-essing...', pin.docId)
       try {
         const buffer = renderEnvelope(state.segments, start, end, envelope)
-        const bufferId = replaceRegion(start, end, buffer, 'de-essing')
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'de-essing', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast(`De-essed ${treatedCount.value} event${treatedCount.value === 1 ? '' : 's'}`)
@@ -361,9 +365,9 @@ const copies = pluginCopies((copy, life) => {
         clearAnalysis()
       } catch (err) {
         console.error('De-esser apply failed:', err)
-        showToast('De-esser apply failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'De-esser apply failed')
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 

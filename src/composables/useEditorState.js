@@ -192,6 +192,17 @@ function buffersFor(docId) {
   return s
 }
 
+/**
+ * Thrown by a pinned job's `check()` when the active document is no longer the
+ * one the job started on. Its message is what the user should be told.
+ */
+export class DocumentSwitchedError extends Error {
+  constructor(what) {
+    super(`${what} was not applied: you switched files while it rendered`)
+    this.name = 'DocumentSwitchedError'
+  }
+}
+
 export function useEditorState() {
   // Computed
   const totalDuration = computed(() => getTimelineDuration(state.segments))
@@ -674,6 +685,26 @@ export function useEditorState() {
   }
 
   // ── Processing (per document) ──────────────────────────────────────────────
+  /**
+   * Pin an apply to the document that is active now. File tabs stay usable
+   * while it renders, and `state` follows the active tab, so a job that read
+   * `state` after an await would read the OTHER file and the default docId
+   * would commit into it. Pass `docId` to the processing and commit calls, and
+   * call `check()` after the last await before committing: it throws a
+   * DocumentSwitchedError if the user switched files, so nothing is committed
+   * (the Plugin Chain's rule — refused rather than repaired, because the
+   * measurements and renders may have read either file).
+   */
+  function pinActiveDocument(what) {
+    const docId = appState.activeDocumentId
+    return {
+      docId,
+      check() {
+        if (appState.activeDocumentId !== docId) throw new DocumentSwitchedError(what)
+      },
+    }
+  }
+
   function startProcessing(message, docId = appState.activeDocumentId) {
     const doc = getDocument(docId)
     if (!doc) return
@@ -773,6 +804,7 @@ export function useEditorState() {
     // Documents
     createDocument,
     getDocument,
+    pinActiveDocument,
     setActiveDocument,
     closeDocument,
     closeDocuments,

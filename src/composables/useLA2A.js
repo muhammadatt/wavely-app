@@ -2,7 +2,7 @@ import { ref, watch } from 'vue'
 import { LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../audio/la2aProcessor.js'
 import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { createMeasureThrottle } from './measureThrottle.js'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
@@ -263,7 +263,7 @@ const copies = pluginCopies((copy, life) => {
   let following = false
 
   function useLA2A() {
-    const { state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
+    const { state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, pinActiveDocument, showToast, totalDuration} = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
     function initChain() {
@@ -638,6 +638,9 @@ const copies = pluginCopies((copy, life) => {
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument('OptoSmooth')
 
       /**
        * ⚠ RE-MEASURE BEFORE APPLYING, because the knob may be holding a LIVE
@@ -661,18 +664,19 @@ const copies = pluginCopies((copy, life) => {
       const wasPreviewing = la2aPreview.value
       if (wasPreviewing) togglePreview()
 
-      startProcessing('Applying LA-2A...')
+      startProcessing('Applying LA-2A...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, 'LA-2A compression')
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'LA-2A compression', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('LA-2A compression applied')
       } catch (err) {
         console.error('LA-2A failed:', err)
-        showToast('LA-2A compression failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'LA-2A compression failed')
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 
