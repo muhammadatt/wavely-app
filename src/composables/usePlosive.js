@@ -1,4 +1,4 @@
-import { reactive, ref } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
@@ -36,6 +36,7 @@ const copies = pluginCopies((copy, life) => {
   const plOutputLevels = ref([])
   let meterId = null
   let levelMeasuredFor = null
+  let following = false
   const MEASURED = new Set(['voiceLevelDb'])
 
   function usePlosive() {
@@ -182,27 +183,37 @@ const copies = pluginCopies((copy, life) => {
       refreshLevel(segments)
     }
 
-    /** Render [start, end) of `segments` with the current settings, uncommitted. */
-    function renderRegion(segments, start, end) {
+    /**
+     * Render [start, end) of `segments` with the current settings, uncommitted.
+     * `file` defaults to the active one; apply passes the file it started on.
+     */
+    function renderRegion(segments, start, end, file = state.currentFile) {
       return applyPlosiveRegion(
         segments, start, end,
         { ...plParams },
-        state.currentFile.sampleRate, state.currentFile.channels,
+        file.sampleRate, file.channels,
       )
     }
 
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: file tabs stay usable
+      // during the render, and `state` follows the active tab. The commit and
+      // the processing status go to this document, or nowhere if it closed.
+      const docId = appState.activeDocumentId
+      const segments = state.segments
+      const file = state.currentFile
 
       const wasPreviewing = plPreview.value
       if (wasPreviewing) togglePreview()
-      await prepareApply()
+      await prepareApply(segments)
 
-      startProcessing('Applying Plosive Tamer...')
+      startProcessing('Applying Plosive Tamer...', docId)
       try {
-        const buffer = await renderRegion(state.segments, start, end)
-        const bufferId = replaceRegion(start, end, buffer, 'Plosive Tamer')
+        const buffer = await renderRegion(segments, start, end, file)
+        const bufferId = replaceRegion(start, end, buffer, 'Plosive Tamer', docId)
+        if (bufferId == null) return // the document closed while rendering
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Plosive Tamer applied')
@@ -210,7 +221,7 @@ const copies = pluginCopies((copy, life) => {
         console.error('Plosive Tamer failed:', err)
         showToast('Plosive Tamer failed')
       } finally {
-        endProcessing()
+        endProcessing(docId)
       }
     }
 
@@ -221,6 +232,19 @@ const copies = pluginCopies((copy, life) => {
       plDelta.value = false
       const chain = getEffectChainIfExists()
       if (chain) nodesOf(chain)?.setListen('off')
+    }
+
+    // The voice level follows the file for as long as this copy can be HEARD,
+    // not only while its window is open: a chain slot keeps playing with its
+    // window closed (the De-Esser's rule). Installed once per copy, in the
+    // copy's own scope, so it stops when a removed slot is disposed.
+    if (!following) {
+      following = true
+      life.scope.run(() => {
+        watch(() => [state.revision, appState.activeDocumentId], () => {
+          if (plPreview.value) refreshLevel()
+        })
+      })
     }
 
     registerChainPlugin({
