@@ -17,6 +17,7 @@ import Knob from '../knobs/Knob.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { useEntitlements } from '../../composables/useEntitlements.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -120,6 +121,10 @@ async function applyAndClose() {
   teardown()
   closeModal()
 }
+
+// Longest stretch the server will analyse for this user (Infinity with Pro).
+const entitlements = useEntitlements()
+const previewLimit = computed(() => entitlements.previewLimit('sibilanceEditor'))
 </script>
 
 <template>
@@ -135,6 +140,7 @@ async function applyAndClose() {
     previewable
     :previewing="state.isPlaying"
     show-apply
+    apply-feature="sibilanceEditor"
     :apply-disabled="!preview || !envelopeValid || treatedCount === 0"
     :apply-disabled-hint="!preview
       ? 'Turn the Sibilance Editor on to apply it'
@@ -178,6 +184,11 @@ async function applyAndClose() {
                 style="font:500 9.5px/1.4 'Inter';color:rgba(255,255,255,.3);max-width:280px"
               >Runs once on the server. The controls below re-shape the result
                 without re-detecting.</div>
+              <div
+                v-if="previewLimit !== Infinity"
+                class="mt-[4px]"
+                style="font:600 10px/1.45 'Inter',system-ui,sans-serif;color:#e0b84a"
+              >Free preview: analyses the first {{ previewLimit }} s. Pro analyses the whole selection.</div>
             </div>
             <button
               class="px-[18px] py-[9px] rounded-lg cursor-pointer transition-all disabled:cursor-default"

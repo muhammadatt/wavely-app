@@ -28,8 +28,7 @@ import { unlink } from 'fs/promises'
 import { withAnalysisContext } from '../pipeline/index.js'
 import { applyClipGainDeEsser } from '../pipeline/clipGainDeEsser.js'
 import { FRAME_DURATION_S } from '../pipeline/frameAnalysis.js'
-
-const router = Router()
+import { openGate } from '../lib/entitlements.js'
 
 const upload = multer({
   dest: path.resolve(import.meta.dirname, '..', 'uploads'),
@@ -193,51 +192,60 @@ async function runVadAnalysis(inputPath) {
 }
 
 const KINDS = {
-  sibilance: { label: 'Sibilance', run: runSibilanceAnalysis },
-  vad:       { label: 'Voice activity', run: runVadAnalysis },
+  sibilance: { label: 'Sibilance', run: runSibilanceAnalysis, feature: 'sibilanceEditor' },
+  vad:       { label: 'Voice activity', run: runVadAnalysis, feature: 'autoLevel' },
 }
 
-router.post('/analyze/:kind', upload.single('file'), async (req, res) => {
-  const uploadedPath = req.file?.path
+/**
+ * @param {object}   [deps]
+ * @param {Function} [deps.gate]  entitlement gate factory (lib/entitlements.js);
+ *                                the default lets every request through
+ */
+export function createAnalyzeRoute({ gate = openGate } = {}) {
+  const router = Router()
 
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No audio file provided' })
-    }
+  router.post('/analyze/:kind', upload.single('file'), gate(req => KINDS[req.params.kind]?.feature ?? null), async (req, res) => {
+    const uploadedPath = req.file?.path
 
-    const kind = KINDS[req.params.kind]
-    if (!kind) {
-      return res.status(400).json({
-        error: `Unknown analysis kind: ${req.params.kind}`,
-        supported: Object.keys(KINDS),
-      })
-    }
-
-    let params = {}
-    if (req.body?.params) {
-      try {
-        params = JSON.parse(req.body.params)
-      } catch {
-        return res.status(400).json({ error: 'params is not valid JSON' })
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No audio file provided' })
       }
+
+      const kind = KINDS[req.params.kind]
+      if (!kind) {
+        return res.status(400).json({
+          error: `Unknown analysis kind: ${req.params.kind}`,
+          supported: Object.keys(KINDS),
+        })
+      }
+
+      let params = {}
+      if (req.body?.params) {
+        try {
+          params = JSON.parse(req.body.params)
+        } catch {
+          return res.status(400).json({ error: 'params is not valid JSON' })
+        }
+      }
+
+      const started = Date.now()
+      const result = await kind.run(uploadedPath, params)
+      console.log(
+        `[analyze/${req.params.kind}] ${Date.now() - started}ms — ` +
+        (result.voicedRuns
+          ? `${result.voicedRuns.length} voiced runs / ${result.numFrames} frames`
+          : `${result.detectedCount ?? 0} events`),
+      )
+
+      res.json(result)
+    } catch (err) {
+      console.error(`[analyze/${req.params.kind}] failed:`, err)
+      res.status(500).json({ error: err.message ?? 'Analysis failed' })
+    } finally {
+      if (uploadedPath) await unlink(uploadedPath).catch(() => {})
     }
+  })
 
-    const started = Date.now()
-    const result = await kind.run(uploadedPath, params)
-    console.log(
-      `[analyze/${req.params.kind}] ${Date.now() - started}ms — ` +
-      (result.voicedRuns
-        ? `${result.voicedRuns.length} voiced runs / ${result.numFrames} frames`
-        : `${result.detectedCount ?? 0} events`),
-    )
-
-    res.json(result)
-  } catch (err) {
-    console.error(`[analyze/${req.params.kind}] failed:`, err)
-    res.status(500).json({ error: err.message ?? 'Analysis failed' })
-  } finally {
-    if (uploadedPath) await unlink(uploadedPath).catch(() => {})
-  }
-})
-
-export { router as analyzeRoute }
+  return router
+}

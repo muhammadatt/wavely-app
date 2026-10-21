@@ -5,6 +5,7 @@ import { idForCopy, baseId, chainCopy, chainCopyNumber, copyOfId, isChainCopyId 
 import { getEffectChain, getEffectChainIfExists, onEffectChainCreated } from '../audio/effectChain.js'
 import { replaceRegionWithBuffer } from '../audio/operations.js'
 import { computePeakCache } from '../audio/processing.js'
+import { useEntitlements } from './useEntitlements.js'
 
 /**
  * The plugin chain — a formal rack over the live EffectChain.
@@ -340,6 +341,8 @@ export function usePluginChain() {
       showToast(blocker)
       return false
     }
+    // Preview is free; writing the chain into the audio is Pro.
+    if (!useEntitlements().request('pluginChainApply')) return false
     const { start, end } = state.selection
     const defs = liveSlots.value.map(s => plugins.get(s.id))
     const labels = liveSlots.value.map(s => s.label)

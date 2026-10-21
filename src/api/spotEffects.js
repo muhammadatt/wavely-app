@@ -15,6 +15,7 @@
  */
 
 import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
+import { authHeaders, serverError } from './serverError.js'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -43,13 +44,11 @@ export async function runSpotEffect({
 
   const res = await fetch(`${API_BASE}/api/spot/${operation}`, {
     method: 'POST',
+    headers: await authHeaders(),
     body: formData,
   })
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: `Spot effect failed: ${res.status}` }))
-    throw new Error(body.error || `Spot effect failed: ${res.status}`)
-  }
+  if (!res.ok) throw await serverError(res, 'Spot effect failed')
 
   return await res.blob()
 }

@@ -67,6 +67,8 @@ export function createAuthStore({
     accountError: null,
     // null | 'signIn' | 'signUp' | 'reset' | 'recovery'
     dialog: null,
+    // The feature id an upgrade prompt is open for, or null.
+    upgradeFor: null,
   })
 
   const user = computed(() => state.session?.user ?? null)
@@ -210,12 +212,20 @@ export function createAuthStore({
     state.dialog = null
   }
 
+  function openUpgrade(featureId) {
+    if (client) state.upgradeFor = featureId
+  }
+
+  function closeUpgrade() {
+    state.upgradeFor = null
+  }
+
   return {
     state, user, isSignedIn, plan,
     start, loadAccount, getAccessToken,
     signInWithPassword, signUp, sendMagicLink, signInWithProvider,
     sendPasswordReset, updatePassword, signOut,
-    openDialog, closeDialog,
+    openDialog, closeDialog, openUpgrade, closeUpgrade,
   }
 }
 

@@ -98,6 +98,7 @@ function onDragEnd() {
     previewable
     :previewing="state.isPlaying"
     show-apply
+    apply-feature="pluginChainApply"
     :apply-label="applyLabel"
     apply-label-short="Apply chain"
     :apply-disabled="!!blocker"

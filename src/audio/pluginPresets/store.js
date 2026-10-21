@@ -23,10 +23,23 @@
  *    plugin's defaults moving underneath it. `definePluginPresets` throws on
  *    an incomplete factory preset rather than filling the gap in.
  *
- * User presets live in localStorage. They are normalised on the way in AND on
- * the way out, so a preset written by an older build cannot push an
- * out-of-range value at a kernel — the panel clamps its knobs, and a stored
- * value never went through a knob.
+ * User presets are normalised on the way in AND on the way out, so a preset
+ * written by an older build cannot push an out-of-range value at a kernel —
+ * the panel clamps its knobs, and a stored value never went through a knob.
+ *
+ * WHERE THEY ARE STORED is a pluggable BACKEND (`setPresetBackend`):
+ *
+ *   local    localStorage. The default, and what a build WITHOUT accounts uses —
+ *            so a deployment with no Supabase configured behaves as it always has.
+ *   account  the signed-in user's `user_presets` rows (src/auth/presetBackend.js).
+ *   none     accounts are on and nobody is signed in: no user presets, and
+ *            saving is refused. Saving requires an account; there is no
+ *            browser-only fallback once accounts exist (owner's call).
+ *
+ * The API stays SYNCHRONOUS over an in-memory mirror: menus read the mirror,
+ * writes update it at once and persist behind it. A remote write that fails
+ * is rolled back and reported through `onPresetError`, so the menu never goes
+ * on showing a preset the account does not have.
  */
 
 export const PRESET_STORAGE_KEY = 'wavely.pluginPresets.v1'
@@ -38,6 +51,30 @@ const definitions = new Map()
 let userPresets = null
 
 const listeners = new Set()
+const errorListeners = new Set()
+
+/**
+ * Where user presets persist. `load()` may be async (the account backend
+ * fetches); `save` / `remove` are fire-and-forget from the mirror's point of
+ * view and reject on failure.
+ */
+const localBackend = {
+  kind: 'local',
+  canSave: true,
+  load: loadFromLocalStorage,
+  save: persistLocal,
+  remove: persistLocal,
+}
+
+const noBackend = {
+  kind: 'none',
+  canSave: false,
+  load: () => new Map(),
+}
+
+let backend = localBackend
+/** Bumped on every backend switch, so a slow load for the old one is dropped. */
+let backendGeneration = 0
 
 /**
  * Deep copy of a plain params value.
@@ -131,6 +168,9 @@ export function resetPluginPresets() {
   definitions.clear()
   userPresets = null
   listeners.clear()
+  errorListeners.clear()
+  backend = localBackend
+  backendGeneration++
 }
 
 /** Notified whenever the user's own collection changes. */
@@ -155,29 +195,118 @@ function storage() {
 function loadUserPresets() {
   if (userPresets) return userPresets
   userPresets = new Map()
-  const store = storage()
-  if (!store) return userPresets
-  try {
-    const raw = store.getItem(PRESET_STORAGE_KEY)
-    if (!raw) return userPresets
-    const parsed = JSON.parse(raw)
-    for (const [pluginId, list] of Object.entries(parsed ?? {})) {
-      if (!Array.isArray(list)) continue
-      userPresets.set(pluginId, list.filter(p => p && p.id && p.name).map(p => ({
-        id: String(p.id),
-        name: String(p.name),
-        params: clonePlain(p.params ?? {}),
-      })))
-    }
-  } catch {
-    // A corrupt or unreadable store is an empty one. Presets are a
-    // convenience; refusing to open a plugin over them would not be.
-    userPresets = new Map()
+  const loaded = backend.load()
+  if (loaded && typeof loaded.then === 'function') {
+    const generation = backendGeneration
+    loaded.then(map => {
+      if (generation !== backendGeneration) return
+      userPresets = sanitizeLoaded(map)
+      emit()
+    }, err => {
+      if (generation !== backendGeneration) return
+      reportError(err, 'load')
+    })
+  } else {
+    userPresets = sanitizeLoaded(loaded)
   }
   return userPresets
 }
 
-function persist() {
+function sanitizeLoaded(map) {
+  const out = new Map()
+  for (const [pluginId, list] of map ?? []) {
+    if (!Array.isArray(list)) continue
+    out.set(pluginId, list.filter(p => p && p.id && p.name).map(p => ({
+      id: String(p.id),
+      name: String(p.name),
+      params: clonePlain(p.params ?? {}),
+    })))
+  }
+  return out
+}
+
+function loadFromLocalStorage() {
+  const store = storage()
+  if (!store) return new Map()
+  try {
+    const raw = store.getItem(PRESET_STORAGE_KEY)
+    if (!raw) return new Map()
+    return new Map(Object.entries(JSON.parse(raw) ?? {}))
+  } catch {
+    // A corrupt or unreadable store is an empty one. Presets are a
+    // convenience; refusing to open a plugin over them would not be.
+    return new Map()
+  }
+}
+
+/**
+ * Switch where user presets live. The mirror is dropped and reloaded from the
+ * new backend; a load still in flight for the previous one is ignored.
+ *
+ *   setPresetBackend('local' | 'none')   or   setPresetBackend(backendObject)
+ */
+export function setPresetBackend(next) {
+  const resolved = next === 'local' ? localBackend
+    : next === 'none' || next == null ? noBackend
+      : next
+  backend = resolved
+  backendGeneration++
+  userPresets = null
+  loadUserPresets()
+  emit()
+}
+
+/** 'local' | 'account' | 'none' — what the menus should say about saving. */
+export function presetBackendKind() {
+  return backend.kind
+}
+
+/** Can the current backend save presets at all? (False while signed out with accounts on.) */
+export function canSaveUserPresets() {
+  return backend.canSave === true
+}
+
+/** Notified with `{ message, op }` when a backend load or write fails. */
+export function onPresetError(fn) {
+  errorListeners.add(fn)
+  return () => errorListeners.delete(fn)
+}
+
+function reportError(err, op) {
+  const message = err?.message ?? String(err)
+  for (const fn of [...errorListeners]) fn({ message, op })
+}
+
+/**
+ * Run a backend write behind the mirror; on failure restore `snapshot` (the
+ * plugin's list as it was) and report.
+ */
+function persistBehind(op, pluginId, snapshot, write) {
+  const generation = backendGeneration
+  let pending
+  try {
+    pending = write()
+  } catch (err) {
+    pending = Promise.reject(err)
+  }
+  if (!pending || typeof pending.then !== 'function') return
+  pending.then(applyServerId => {
+    if (generation !== backendGeneration || typeof applyServerId !== 'function') return
+    applyServerId(loadUserPresets())
+    emit()
+  }, err => {
+    if (generation !== backendGeneration) return
+    loadUserPresets().set(pluginId, snapshot)
+    emit()
+    reportError(err, op)
+  })
+}
+
+function snapshotList(pluginId) {
+  return (loadUserPresets().get(pluginId) ?? []).map(p => ({ ...p, params: clonePlain(p.params) }))
+}
+
+function persistLocal() {
   const store = storage()
   if (!store) return
   try {
@@ -279,11 +408,17 @@ export function saveUserPreset(pluginId, name, params) {
   if (!def) throw new Error(`saveUserPreset: unknown plugin "${pluginId}"`)
   const trimmed = String(name ?? '').trim()
   if (!trimmed) throw new Error('saveUserPreset: a preset needs a name')
+  if (!backend.canSave) {
+    const err = new Error('Sign in to save presets.')
+    err.code = 'sign_in_required'
+    throw err
+  }
   if (def.factory.some(p => p.name.toLowerCase() === trimmed.toLowerCase())) {
     throw new Error(`"${trimmed}" is a built-in preset. Choose another name.`)
   }
 
   const all = loadUserPresets()
+  const snapshot = snapshotList(pluginId)
   const list = all.get(pluginId) ?? []
   const picked = pickParams(pluginId, params)
   const existing = list.find(p => p.name.toLowerCase() === trimmed.toLowerCase())
@@ -293,11 +428,11 @@ export function saveUserPreset(pluginId, name, params) {
     existing.name = trimmed
     saved = existing
   } else {
-    saved = { id: makeId(trimmed), name: trimmed, params: picked }
+    saved = { id: backend.makeId?.(trimmed) ?? makeId(trimmed), name: trimmed, params: picked }
     list.push(saved)
   }
   all.set(pluginId, list)
-  persist()
+  persistBehind('save', pluginId, snapshot, () => backend.save(pluginId, { ...saved, params: clonePlain(picked) }, all))
   emit()
   return { id: saved.id, name: saved.name, source: 'user' }
 }
@@ -305,12 +440,13 @@ export function saveUserPreset(pluginId, name, params) {
 /** Remove one of the user's own presets. Factory presets are not removable. */
 export function deleteUserPreset(pluginId, presetId) {
   const all = loadUserPresets()
+  const snapshot = snapshotList(pluginId)
   const list = all.get(pluginId) ?? []
   const idx = list.findIndex(p => p.id === presetId)
   if (idx === -1) return false
   list.splice(idx, 1)
   all.set(pluginId, list)
-  persist()
+  persistBehind('delete', pluginId, snapshot, () => backend.remove(pluginId, presetId, all))
   emit()
   return true
 }

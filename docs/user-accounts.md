@@ -1,8 +1,8 @@
 # User Accounts — Setup and Architecture
 
-> Status: steps 1–2 of the user-system plan are built (sign-in in the app, token
-> verification and `GET /api/me` on the server). Plans/feature gating, presets
-> in the account and Stripe billing are next.
+> Status: sign-in, `GET /api/me`, plans and feature gating, and presets in the
+> account are built. Stripe billing (checkout, portal, webhooks) is next — until
+> then the upgrade prompt's button reads "coming soon".
 
 ## How it fits together
 
@@ -43,9 +43,10 @@ Every existing feature works signed out, with or without accounts configured.
 
 1. Create a project at supabase.com (one per environment is simplest: e.g.
    `wavely-staging`, `wavely-prod`).
-2. Apply the schema: `supabase/migrations/20261020000000_accounts.sql` — via the
-   Supabase CLI (`supabase link` then `supabase db push`) or by pasting it into
-   the SQL editor.
+2. Apply the schema — every file in `supabase/migrations/`, in name order
+   (`…_accounts.sql`, then `…_user_presets.sql`) — via the Supabase CLI
+   (`supabase link` then `supabase db push`) or by pasting each into the SQL
+   editor.
 3. **Authentication → URL Configuration**
    - *Site URL*: the app's main URL, e.g. `https://app.example.com`.
    - *Redirect URLs*: every origin the app is served from. Email links and OAuth
@@ -91,6 +92,11 @@ Every existing feature works signed out, with or without accounts configured.
 | Auth state machine (session, account, dialog) | `src/auth/authStore.js`, via `useAuth()` |
 | Sign-in / sign-up / reset dialog | `src/components/AuthDialog.vue` |
 | Top-bar account control | `src/components/AccountMenu.vue` |
+| Plan/feature table (shared with the server) | `src/auth/plans.js` |
+| Client entitlement checks | `src/auth/entitlements.js`, via `useEntitlements()` |
+| Upgrade prompt | `src/components/UpgradeDialog.vue` |
+| Server enforcement + free preview | `server/lib/entitlements.js` |
+| Account preset storage | `src/auth/presetBackend.js`, `supabase/migrations/…_user_presets.sql` |
 
 ### Database rules worth knowing
 
@@ -109,14 +115,71 @@ Every existing feature works signed out, with or without accounts configured.
   signs in too (supabase-js syncs tabs). Because the flow is PKCE, the link must
   be opened in the same browser it was requested from.
 - `useAuth().getAccessToken()` returns the current token for calls to our API.
-  Existing API calls do not send it yet — that comes with feature gating.
+  The analysis and spot-effect calls send it (`src/api/serverError.js`).
+
+## Plans and feature gating
+
+**One table, `src/auth/plans.js`, read by both the app and the API server.**
+Each feature names the lowest plan that unlocks it; higher plans inherit it.
+The ladder is: signed out → `free` (any account) → `pro`.
+
+| Feature id | Needs | What it gates | Enforced by |
+|---|---|---|---|
+| `savePresets` | account | Saving plugin presets | UI and database (RLS) |
+| `pluginChainApply` | Pro | Plugin Chain **Apply**. Preview is free | UI only |
+| `autoLevel` | Pro | Auto Leveler analysis and Apply | **Server** (`/api/analyze/vad`) |
+| `sibilanceEditor` | Pro | Sibilance Editor analysis and Apply | **Server** (`/api/analyze/sibilance`) |
+| `spotEffects` | Pro | `/api/spot/*` (no callers today) | **Server** |
+
+- **Adding a gate:** add an entry to `FEATURES`, then use it in the UI.
+  - `apply-feature="<id>"` on a `FloatingWindow` locks its Apply button.
+  - `feature: '<id>'` on a registry entry shows a PRO tag in the rail and the command palette.
+  - `useEntitlements().request('<id>')` guards any action in code.
+- **Adding a tier:** add it to `PLAN_ORDER` and move the `requires` of the
+  features it unlocks.
+- **Accounts off means no gating.** The app allows everything, and the
+  server's gate lets every request through.
+
+### Free previews of server features
+
+Server features accept non-Pro requests on up to `FREE_PREVIEW_SECONDS` (30)
+of audio, so anyone can hear the result before paying.
+
+- **Server side:** `server/lib/entitlements.js` reads the uploaded file's
+  duration with ffprobe and does not trust the client.
+  - A longer upload without Pro gets **402** with `{ code: 'upgrade_required', feature, requires, previewSeconds }`.
+  - If the duration can't be read, the request is refused.
+  - Plans are cached per user for 60 s.
+- **App side:** when a non-Pro user presses Analyse, the selection is narrowed
+  to its first 30 s before anything is uploaded, and a caption says so. Apply
+  stays Pro. A 402 opens the upgrade prompt.
+
+### Limits of browser-side gates
+
+Browser-side gates are product limits, not security. The DSP ships to every
+visitor, so a determined user can get around a hidden Apply. Only server
+features are actually enforced.
+
+## Presets in the account
+
+- **Accounts on, signed in:** user presets are rows in `public.user_presets`,
+  one per (user, plugin, name). The browser reads and writes them with the
+  user's own session, under RLS.
+  - Saving shows up in the menu immediately.
+  - A failed write is rolled back and shown as a toast.
+  - Each user can save up to 1000 presets.
+- **Accounts on, signed out:** there are no user presets. "Save as…" reads
+  "Sign in to save presets…" and opens sign-up. There is no browser-only
+  fallback (owner's call), and presets saved earlier in `localStorage` are not
+  migrated.
+- **Accounts off:** presets save to `localStorage` exactly as before.
+- **Code:** the store (`src/audio/pluginPresets/store.js`) has pluggable
+  backends: `local`, `account` (`src/auth/presetBackend.js`) and `none`.
+  `useAuth` switches between them as the session changes.
 
 ## Next steps
 
-1. **Plans and feature gating** — a plan → features map shared by client and
-   server; UI locks built on the registry's release gating; `optionalAuth` /
-   `requireAuth` on the server routes that need it.
-2. **Presets in the account** — a `user_presets` table; migrate localStorage
-   presets at first sign-in.
-3. **Stripe** — Checkout, the customer portal and webhooks writing
-   `subscriptions`.
+1. **Stripe**: Checkout from the upgrade prompt, the customer portal, and
+   webhooks writing `subscriptions` and `profiles.stripe_customer_id`.
+2. **Optional:** gate the preset chain (`/api/process`). It isn't listed as Pro
+   today.

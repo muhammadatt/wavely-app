@@ -143,8 +143,10 @@ function onKeydown(e) {
 </script>
 
 <template>
+  <!-- z 690: above every floating window (500 and up, one step per window) —
+       these open FROM a plugin window — and below the command palette. -->
   <div
-    class="fixed inset-0 z-[450] flex items-start justify-center pt-[12vh] px-4"
+    class="fixed inset-0 z-[690] flex items-start justify-center pt-[12vh] px-4"
     style="background:rgba(5,7,9,.6);backdrop-filter:blur(5px)"
     @click.self="close"
     @keydown="onKeydown"

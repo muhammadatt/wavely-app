@@ -3,11 +3,12 @@ import cors from 'cors'
 import rateLimit from 'express-rate-limit'
 import { processRoute } from './routes/process.js'
 import { jobsRoute }   from './routes/jobs.js'
-import { spotRoute }   from './routes/spot.js'
-import { analyzeRoute } from './routes/analyze.js'
+import { createSpotRoute }    from './routes/spot.js'
+import { createAnalyzeRoute } from './routes/analyze.js'
 import { meRoute } from './routes/me.js'
 import { readAuthConfig, createTokenVerifier } from './lib/auth.js'
 import { getSupabaseAdmin } from './lib/supabaseAdmin.js'
+import { createEntitlementGate, createPlanResolver } from './lib/entitlements.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -108,6 +109,14 @@ if (verifyAccessToken && !supabaseAdmin) {
   console.warn('SUPABASE_URL is set but SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY is not — /api/me will answer 503')
 }
 
+// Plan enforcement for server-processing features (src/auth/plans.js). Needs
+// both the verifier and the database; with either missing it lets everything
+// through, as before accounts existed.
+const gate = createEntitlementGate({
+  verify: verifyAccessToken,
+  planFor: supabaseAdmin ? createPlanResolver(supabaseAdmin) : null,
+})
+
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.0.1' })
@@ -120,10 +129,10 @@ app.use('/api', processRoute)
 app.use('/api', jobsRoute)
 
 // Spot effect endpoint (synchronous — returns processed WAV directly)
-app.use('/api', spotRoute)
+app.use('/api', createSpotRoute({ gate }))
 
 // Analysis endpoints (synchronous — return measurements as JSON)
-app.use('/api', analyzeRoute)
+app.use('/api', createAnalyzeRoute({ gate }))
 
 // Signed-in user's account and plan
 app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))

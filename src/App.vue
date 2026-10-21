@@ -8,6 +8,8 @@ import CommandPalette from './components/CommandPalette.vue'
 import WaveformContextMenu from './components/WaveformContextMenu.vue'
 import WindowLayer from './components/WindowLayer.vue'
 import AuthDialog from './components/AuthDialog.vue'
+import UpgradeDialog from './components/UpgradeDialog.vue'
+import { onPresetError } from './audio/pluginPresets/store.js'
 import { useAuth } from './composables/useAuth.js'
 
 // ProcessingOverlay is no longer mounted here — it now renders inside the
@@ -15,11 +17,15 @@ import { useAuth } from './composables/useAuth.js'
 //
 // Floating effect windows are no longer listed here either: WindowLayer renders
 // whatever the window manager has open, so adding one is a registry entry.
-const { appState } = useEditorState()
+const { appState, showToast } = useEditorState()
 
 // Started here rather than on first use so an auth redirect (email link,
 // password reset) is handled on load even before the top bar renders.
 const { state: authState } = useAuth()
+
+// Presets save to the account behind the menu; a write that fails is rolled
+// back by the store, and this is where the user hears about it.
+onPresetError(({ message }) => showToast(message, 5000))
 </script>
 
 <template>
@@ -35,6 +41,7 @@ const { state: authState } = useAuth()
     v-if="appState.contextMenu"
     :key="`${appState.contextMenu.x},${appState.contextMenu.y}`"
   />
+  <UpgradeDialog v-if="authState.upgradeFor" />
   <AuthDialog v-if="authState.dialog" />
   <ToastNotification />
 </template>

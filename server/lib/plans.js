@@ -1,14 +1,16 @@
 /**
  * Which plan a user is on, derived from their subscription rows.
  *
- * This is the minimal piece `/api/me` needs. What each plan UNLOCKS is a
- * separate concern (feature gating) and does not live here yet.
+ * The plan ladder and what each rung unlocks live in the shared table
+ * (src/auth/plans.js); this file only turns Stripe state into a rung.
  */
+
+import { PLAN_ORDER } from '../../src/auth/plans.js'
 
 export const FREE_PLAN = 'free'
 
 /** Plan ids a subscription row may carry, ordered lowest to highest. */
-export const PAID_PLANS = ['pro']
+export const PAID_PLANS = PLAN_ORDER.filter(p => p !== FREE_PLAN)
 
 /**
  * Stripe statuses that grant the plan. `past_due` is included on purpose: it

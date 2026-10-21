@@ -14,6 +14,7 @@
 import {
   renderRegionToBuffer, floatChannelsToWavBlob, renderVadWavBlob,
 } from '../audio/processing.js'
+import { authHeaders, serverError } from './serverError.js'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -61,13 +62,11 @@ export async function analyzeSibilance({
 
   const res = await fetch(`${API_BASE}/api/analyze/sibilance`, {
     method: 'POST',
+    headers: await authHeaders(),
     body: formData,
   })
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: `Analysis failed: ${res.status}` }))
-    throw new Error(body.error || `Analysis failed: ${res.status}`)
-  }
+  if (!res.ok) throw await serverError(res, 'Analysis failed')
 
   const result = await res.json()
   return {
@@ -113,13 +112,11 @@ export async function analyzeVoiceActivity({ segments, start, end, sampleRate, c
 
   const res = await fetch(`${API_BASE}/api/analyze/vad`, {
     method: 'POST',
+    headers: await authHeaders(),
     body: formData,
   })
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: `Analysis failed: ${res.status}` }))
-    throw new Error(body.error || `Analysis failed: ${res.status}`)
-  }
+  if (!res.ok) throw await serverError(res, 'Analysis failed')
 
   return res.json()
 }

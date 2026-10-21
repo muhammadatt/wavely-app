@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { useEntitlements } from './useEntitlements.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { analyzeVoiceActivity } from '../api/analyze.js'
@@ -84,8 +85,9 @@ const copies = pluginCopies((copy, life) => {
   function useAutoLevel() {
     const {
       state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, showToast,
+      startProcessing, endProcessing, showToast, setSelection,
     } = useEditorState()
+    const entitlements = useEntitlements()
     const { openWindow, closeWindow } = useWindows()
 
     /**
@@ -267,8 +269,22 @@ const copies = pluginCopies((copy, life) => {
      * whole plugin. Rendering again afterwards costs a fraction of the wait that
      * just happened.
      */
+    /**
+     * Without Pro the server analyses at most FREE_PREVIEW_SECONDS. Rather than
+     * sending a chapter to be refused, narrow the selection to its opening
+     * stretch first, so what is analysed, previewed and shown are one region.
+     */
+    function narrowToPreview() {
+      const limit = entitlements.previewLimit('autoLevel')
+      const { start, end } = state.selection
+      if (end - start <= limit) return
+      setSelection(start, start + limit)
+      showToast(`Free preview: the first ${limit} s of your selection — Pro analyses all of it`, 5000)
+    }
+
     async function analyze() {
       if (!state.selection || !state.currentFile) return
+      narrowToPreview()
       const { start, end } = state.selection
       const { sampleRate, channels } = state.currentFile
 
@@ -319,7 +335,7 @@ const copies = pluginCopies((copy, life) => {
         }
       } catch (err) {
         console.error('Voice-activity analysis failed:', err)
-        showToast(err.message ?? 'Auto Leveler analysis failed')
+        if (!entitlements.handleServerRefusal(err)) showToast(err.message ?? 'Auto Leveler analysis failed')
       } finally {
         analyzing.value = false
       }
@@ -360,6 +376,7 @@ const copies = pluginCopies((copy, life) => {
 
     async function apply() {
       if (!state.selection || !curveValid.value) return
+      if (!entitlements.request('autoLevel')) return
       const { start, end } = state.selection
       const curve = rebuildCurve()
       if (!curve) return
