@@ -7245,3 +7245,57 @@ makeup). Four slots still read the unprocessed file:
 All four now take the running segments. VoiceRx transfers to an EQ slot placed straight
 after it, so what is heard does not change. Hum Remover keeps its detected frequencies,
 since upstream processing does not move hum.
+
+## Plosive Tamer — the De-Esser's plosive detector as its own plugin (October 2026)
+
+The De-Esser carried a T/K/P burst treatment ("Plosives"): a closure, then a sharp
+top-band onset, opened a 40 ms window inside which both de-ess stages' thresholds
+dropped 6 dB, their depths grew 6 dB and the lisp guard was lifted. Its switch sat in the
+panel's `display:none` Soften group and defaulted off, so no shipping render used it. The
+owner asked for it to become a standalone plugin and to grow, and for the De-Esser copy
+to go.
+
+**Two stages.** A "plosive" on narration is two different defects:
+- POP, the P/B air blast on the capsule: a thump below ~150 Hz. Nothing in the app handled
+  it apart from the server's advisory flag (`riskAssessment.js`, 50–150 Hz spikes).
+- BURST, the T/K/P release: what the De-Esser's detector caught.
+
+**POP detection.** The first idea, the low band standing over the voice band, cuts a deep
+voice's held "oo" for its whole length: a low male vowel can put more energy under 120 Hz
+than over 240. What a pop has and a vowel lacks is a sudden JUMP in the low band. So a pop
+opens only when the low band rises `popRiseDb` within 20 ms and, within 15 ms of that rise,
+stands `popRatioDb` over the voice band. It then stays open while the excess holds (−3 dB
+hysteresis, at most 250 ms), cut by the excess and capped at Depth. A vowel onset after
+silence also jumps, but its voice band arrives with it, so the ratio test spares it.
+85/100/120 Hz synthetic voices pass bit-identical at Sensitivity 100.
+
+At Sensitivity 100 (a 5 dB jump) one thump was counted twice: its 45 Hz ripple closed the
+pop and reopened it. An 80 ms refractory period after a pop opens fixed that.
+
+**BURST.** The detector moved over constant for constant; Sensitivity 50 is its 12 dB. In
+the De-Esser the burst window rode the de-ess cut. Here it drives a dynamic low-pass of its
+own, `Depth · window`, above Freq. The voice-led gate that closes the window on a vowel
+onset is weaker here: on the ported test the De-Esser's broadband Duck went from −1.2 to
+under −0.5 dB, while this top-band cut goes from 5.9 to 3.4 dB, because the onset's noise
+sits in the band being cut.
+
+**Gain path.** Both required gains run through `LookaheadLimiter`'s centred min +
+triangular smoother (4 ms half-width, 8 ms of constant latency), then an upward-only
+release. The cut is therefore fully in place by the sample that needed it. Both cuts use the
+`g·x + (1−g)·filter(x)` form: exactly x at g = 1, so the plugin is bit-transparent wherever
+nothing is caught. The boxcars' rounding residue is snapped onto exactly 1.
+
+**What was removed from the De-Esser.** The burst tuning, state, detection and the
+threshold/depth/guard terms; `bursts` / `plosives` from the kernel, the params, the
+composable, the panel's hidden toggle and lamp, the presets (a stored `plosives` is
+dropped) and the help. The panel default was off, so every De-Esser render made with the
+app's params is unchanged. Kernel-level tests that ran with the kernel's own default
+(`bursts: true`) had turned bursts off through `NO_BURSTS`; that tuning is gone, and the
+suite passes unchanged without it.
+
+The activity scope keeps its four-slot ring because the Plosive Tamer draws on the same
+component; the De-Esser's plosive mark is now always 0. The scope gained a `legend` prop so
+each plugin labels its own marks.
+
+All thresholds and both Sensitivity lines are reasoned from synthetic material and have not
+been auditioned. The plugin ships dev-gated.

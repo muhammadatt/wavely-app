@@ -16,6 +16,7 @@ import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import SibilanceEditorModal from '../components/panels/SibilanceEditorModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
 import HFLimiterModal from '../components/panels/HFLimiterModal.vue'
+import PlosiveModal from '../components/panels/PlosiveModal.vue'
 import PhatassModal from '../components/panels/PhatassModal.vue'
 import AutoLevelModal from '../components/panels/AutoLevelModal.vue'
 import EqModal from '../components/panels/EqModal.vue'
@@ -534,6 +535,23 @@ const ALL_OPERATIONS = [
     chain: true,
     surface: 'window',
     component: HFLimiterModal,
+  },
+  {
+    // Real-time plosive repair: the low thump of a P or B, and the top-end
+    // burst of a T, K or P release (the latter moved out of the De-Esser).
+    id: 'plosive',
+    release: 'dev',
+    label: 'Plosive Tamer',
+    desc: 'Take the thump out of P and B, the spit out of T and K',
+    category: 'effects',
+    group: 'Clean',
+    icon: 'plosive',
+    keywords: ['plosive', 'pop', 'popping', 'p pop', 'thump', 'boom', 'breath blast', 'pop filter', 'deplosive', 'de-plosive', 'burst', 'spit'],
+    requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
+    surface: 'window',
+    component: PlosiveModal,
   },
   {
     id: 'hum-remover',

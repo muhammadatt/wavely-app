@@ -13,7 +13,6 @@ export default {
     { label: 'Shape', text: 'Band cuts the sibilance region and leaves the air above it; Shelf cuts everything above the Band corner' },
     { label: 'Guard', text: 'Under Advanced. The lisp guard: stops any S being pulled further below the voice than a normal S sits, so heavy settings cannot turn S into TH. Higher is stricter (a naturally lispy or dark voice); lower lets a hot, strident S go deeper; 0 turns it off. Flatter fricatives like F, which sit naturally quieter and cannot lisp, get less of it, so a hot F can still be reduced' },
     { label: 'Band', text: 'Under Advanced. Where the EQ cuts — the band’s lower corner, 3–6 kHz, default 4.5. Lower it for an S that sits low (deeper voices, SH); raise it for a high, thin S. The band keeps its shape as it moves. Detect decides what sets the cut off; Band decides what it takes' },
-    { label: 'Plosives', text: 'Under Advanced. On, T, K and P releases — a short burst straight out of a stop’s silence — are caught and cut harder than S’s, with the lisp guard lifted: a burst cannot lisp. Turn it off if an S that starts abruptly after a pause is being hit too hard' },
     { label: 'Detect', text: 'Where the detector starts listening. Raise it if bright vowels are being dipped: an ordinary S reads the same at any setting, but vowel top end drops out of the detector' },
     { label: 'Air', text: 'Adds top after the cut, on the same curve as Air Boost. It is yours: HF Comp adds to it, never changes it' },
     { label: 'HF Comp', text: 'Removing sibilance makes the whole file less bright even though the vowels are untouched. On, this adds Air to make up for half the top end the cut is measured to take, and follows every setting that changes the cut' },
@@ -30,7 +29,7 @@ export default {
   ],
 
   notes: [
-    'The scope at the top is the waveform after the cut: the coloured rim around it is what was removed, and how thick it is is how much. Lavender marks a T, K or P given the plosive treatment; a dashed line inside the rim is where the lisp guard stopped the cut. Left of the playhead is what has played, right of it what is coming (not yet processed, so drawn plain)',
+    'The scope at the top is the waveform after the cut: the coloured rim around it is what was removed, and how thick it is is how much. A dashed line inside the rim is where the lisp guard stopped the cut. Left of the playhead is what has played, right of it what is coming (not yet processed, so drawn plain)',
     'Behind the curve is the input’s spectrum. The dotted line is where the detector starts listening (Detect), the solid one where the EQ cuts (Band): an S sitting below the solid line wants Band lower; vowel energy crossing the dotted line wants Detect higher',
     'Thresholds follow the file’s own level, so a setting means the same on a quiet recording and a hot one',
     'If the result sounds a touch dull, a dB or two of Air puts the top back — it is Air Boost’s curve, so there is no need for a separate Air Boost pass',

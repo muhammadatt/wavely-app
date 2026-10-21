@@ -680,3 +680,24 @@ test('HF Softener presets: the panel defaults light Default; the pinned and meas
   assert.equal('shape' in p, false)
   assert.equal(HF_SOFTENER_DEFAULTS.shape, 'shelf')
 })
+
+test('HF Softener presets: a stored Plosives (moved to the Plosive Tamer) is dropped', async () => {
+  const { HF_SOFTENER_PRESET_PLUGIN, registerPluginPresets, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { HF_SOFTENER_DEFAULTS } = await import('../../src/audio/deEsserParams.js')
+  assert.equal('plosives' in pickParams(HF_SOFTENER_PRESET_PLUGIN, { ...HF_SOFTENER_DEFAULTS, plosives: true }), false)
+  assert.equal('plosives' in HF_SOFTENER_DEFAULTS, false)
+})
+
+test('Plosive Tamer presets: the panel defaults light Default; the voice level stays out; values clamp', async () => {
+  const { PLOSIVE_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { PLOSIVE_DEFAULTS } = await import('../../src/audio/plosiveParams.js')
+  assert.equal(matchPreset(PLOSIVE_PRESET_PLUGIN, { ...PLOSIVE_DEFAULTS }), 'factory:default')
+  assert.equal('voiceLevelDb' in pickParams(PLOSIVE_PRESET_PLUGIN, { ...PLOSIVE_DEFAULTS }), false)
+  const p = pickParams(PLOSIVE_PRESET_PLUGIN, { popFreq: 10, popDepth: 99, burstSensitivity: -5, burstLength: 1000 })
+  assert.equal(p.popFreq, 60)
+  assert.equal(p.popDepth, 24)
+  assert.equal(p.burstSensitivity, 0)
+  assert.equal(p.burstLength, 80)
+})

@@ -23,6 +23,7 @@ test('the work-in-progress plugins are hidden from production builds', () => {
   assert.deepEqual(devOnlyIds(registry), [
     'clip-gain-deesser',
     'modula-kit',
+    'plosive',
     'saturation-bench',
     'scheps-parallel',
     'vocal-saturation',
