@@ -155,50 +155,18 @@ export const HF_SOFTENER_TUNING = {
   tiltFlatDb: 3,
   tiltPeakedDb: 10,
   tiltRelaxDb: 20,
-  // Plosive bursts — T, K, P releases. A /t/ release is a short burst of noise
-  // (15–30 ms) straight out of a silent closure, and it is hot in the top end
-  // but cannot lisp. Judged by level alone the bursts came in under the "s"
-  // (Hot Tees clip, Duck 40 / EQ 20: T's −1.7 to −6.1 dB against the S's −5.1
-  // to −7.0), and at heavier settings the guard held some, since a T burst is
-  // peaked like an "s" (tilt +11) and judged against the vowel before it. What
-  // separates them is TIMING: a closure — the whole band ≥ burstClosureDb under
-  // the held voice for burstClosureMinMs–MaxMs (a stop's silence, not a pause)
-  // — then, within burstOnsetWindowMs, the top-band detector rising
-  // ≥ burstRiseDb in burstRiseMs, which an "s" (building over 20–40 ms) does
-  // not. That opens a burst window of burstLengthMs (the last burstFadeMs a
-  // fade), inside which both stages' thresholds drop and depths grow, and the lisp
-  // guard is lifted.
-  // ⚠ Known false positive: an "s" that starts ABRUPTLY (≤ ~5 ms) after
-  // 15–200 ms of silence reads as a burst for its first burstLengthMs — the
-  // synthetic test voice's isolated "s" does exactly that. Real "s" onsets
-  // build over 20–40 ms and are not caught (pinned by a test); on real
-  // narration the S's moved 0.2–0.4 dB.
-  burstsEnabled: true,
-  burstClosureDb: 15,
-  burstClosureMinMs: 15,
-  burstClosureMaxMs: 200,
-  burstOnsetWindowMs: 10,
-  burstRiseDb: 12,
-  burstRiseMs: 5,
-  burstLengthMs: 40,
-  burstFadeMs: 10,
-  burstThresholdDropDb: 6,
-  burstExtraDepthDb: 6,
+  // ⚠ The plosive-burst treatment (T, K, P releases caught by timing and cut
+  // harder, guard lifted) MOVED to the Plosive Tamer in October 2026, which
+  // runs the same detector with a cut of its own — see plosiveProcessor.js.
   // Voice-led cue: the low/mid band (200 Hz–3 kHz, the voicing follower,
   // 3 ms / 5 ms) against the top band (the detector's own 4 kHz high-pass,
   // squared, 1 ms / 5 ms), in dB. Weight 0 at voiceLedLoDb and below, 1 at
   // voiceLedHiDb and above. Both followers are fast, so unlike the voicing
   // weight — whose margin test reads the SLOW detector and so waits for the
   // "s" to finish releasing — it flips within a few ms of a vowel starting.
+  // It drops the Duck's release where the voice leads (duckVowelReleaseMs).
   voiceLedLoDb: 4,
   voiceLedHiDb: 10,
-  // ⚠ A BURST WINDOW CLOSES WHERE THE VOICE LEADS. Measured before this: on
-  // real narration most windows were VOWEL ONSETS after a pause or a voiced
-  // stop (the voice band 16–33 dB over the top band in the first 15 ms; real
-  // T's −5 to +7), and inside them the lowered threshold and lifted guard
-  // ducked the vowel 2–4 dB it was otherwise left alone — the voice audible
-  // in Delta. The same gate ends a real T's window when its vowel arrives.
-  burstVoiceGate: true,
   // The Duck's detector: the same follower as the EQ's, but its release drops
   // to duckVowelReleaseMs where the voice leads. ⚠ Measured before this: the
   // Duck still sat at −3.0 / −2.5 / −1.6 / −0.8 dB 5 / 10 / 15 / 20 ms into
@@ -254,8 +222,6 @@ export const HF_SOFTENER_KERNEL_DEFAULTS = {
   // The guard's floor, dB relative to the held voice level — the panel's
   // Guard amount (guardToFloorDb). null: the tuning's `lispGuardFloorDb`.
   lispGuardFloorDb: null,
-  // Plosive-burst treatment (burst* in the tuning) — the panel's Plosives.
-  bursts: true,
   // The EQ band's lower corner, Hz — the shelf, not the detector. The panel's
   // Band. See bandTuningFor for where the return shelf goes.
   bandHz: 4500,
@@ -709,31 +675,16 @@ export class HFSoftenerKernel {
     this.voiceLevel = new Follower(sampleRate, tuning.voiceAttackMs, tuning.voiceHoldMs)
     this.tiltMid = new Follower(sampleRate, tuning.tiltAttackMs, tuning.tiltReleaseMs)
     this.tiltHf = new Follower(sampleRate, tuning.tiltAttackMs, tuning.tiltReleaseMs)
-    // Plosive-burst detection (see burst* in the tuning).
-    this.fullEnv = new Follower(sampleRate, 1, 5)
     // Voice-led cue (voiceLed* in the tuning) and the Duck's own detector.
     this.hfFast = new Follower(sampleRate, 1, 5)
     this.hfDuck = new Follower(sampleRate, tuning.attackMs, HF_SOFTENER_KERNEL_DEFAULTS.releaseMs)
     this.relDuckVowel = tuning.duckVowelReleaseMs == null ? null : riseCoeff(tuning.duckVowelReleaseMs, sampleRate)
-    const ms = v => Math.max(1, Math.round((v / 1000) * sampleRate))
-    this.burstClosureMin = ms(tuning.burstClosureMinMs)
-    this.burstClosureMax = ms(tuning.burstClosureMaxMs)
-    this.burstOnsetWindow = ms(tuning.burstOnsetWindowMs)
-    this.burstLength = ms(tuning.burstLengthMs)
-    this.burstFade = ms(tuning.burstFadeMs)
-    this.hfHist = new Float64Array(ms(tuning.burstRiseMs)).fill(-300)
-    this.hfHistPos = 0
-    this.closureRun = 0
-    this.sinceClosure = Infinity
-    this.burstLeft = 0
-    this.burstMeter = 0
     // Activity scope, one point per process() call (see readScope): the input
     // peak, the peak after Duck and EQ (before Air), how many dB the lisp guard
-    // held back, and whether a plosive-burst window was open.
+    // held back.
     this.scopeIn = 0
     this.scopeOut = 0
     this.scopeHeld = 0
-    this.scopeBurst = 0
     this.gainSmooth = riseCoeff(tuning.gainSmoothMs, sampleRate)
     this.bbSmooth = riseCoeff(tuning.broadbandSmoothMs, sampleRate)
     this.bbGainDb = 0
@@ -841,7 +792,6 @@ export class HFSoftenerKernel {
     this.vowelRelease = !!p.vowelRelease
     this.lispGuard = !!p.lispGuard
     this.guardFloorDb = Number.isFinite(p.lispGuardFloorDb) ? p.lispGuardFloorDb : this.tuning.lispGuardFloorDb
-    this.bursts = p.bursts !== false
     const bandHz = clamp(Number(p.bandHz) || this.tuning.shelfFreqHz, BAND_HZ_MIN, BAND_HZ_MAX)
     // bandDepthComp caches per corner, so a move costs one solve.
     if (bandHz !== this.bandTuning.shelfFreqHz) this.bandTuning = bandTuningFor(bandHz, this.tuning)
@@ -938,7 +888,6 @@ export class HFSoftenerKernel {
     let scIn = 0
     let scOut = 0
     let scHeld = 0
-    let scBurst = 0
 
     for (let off = 0; off < n; off += chunk) {
       const len = Math.min(chunk, n - off)
@@ -952,7 +901,6 @@ export class HFSoftenerKernel {
         let energy = 0
         let midE = 0
         let hfE = 0
-        let fullE = 0
         let detE = 0
         for (let ch = 0; ch < nOut; ch++) {
           const s = chans[ch]
@@ -981,7 +929,6 @@ export class HFSoftenerKernel {
           }
           midE += m * m
           hfE += h * h
-          fullE += x * x
         }
 
         const trim = 1 + detRot * (this.rotTrim - 1)
@@ -1056,53 +1003,15 @@ export class HFSoftenerKernel {
         // ⚠ THE GUARD ALSO REMOVES MOST RELEASE CARRYOVER, BY CONSTRUCTION:
         // when the next vowel starts the voice level jumps, the "s" no longer
         // clears the floor, and the cap drops to zero.
-        // ── Plosive burst: closure, then a sharp top-band onset ────────────
-        const fullLev = this.fullEnv.tick(fullE / nOut)
-        const heldDb = voiceE > 0 ? 10 * Math.log10(voiceE) : -300
-        const fullDb = fullLev > 0 ? 10 * Math.log10(fullLev) : -300
-        if (heldDb > -200 && fullDb < heldDb - tuning.burstClosureDb) {
-          this.closureRun++
-        } else {
-          if (this.closureRun > 0) {
-            const run = this.closureRun
-            this.sinceClosure = run >= this.burstClosureMin && run <= this.burstClosureMax ? 0 : Infinity
-            this.closureRun = 0
-          }
-          this.sinceClosure++
-        }
-        const hist = this.hfHist
-        const rise = hfDb - hist[this.hfHistPos]
-        hist[this.hfHistPos] = hfDb
-        this.hfHistPos = (this.hfHistPos + 1) % hist.length
-        if (tuning.burstsEnabled && this.bursts && this.burstLeft <= 0 && this.sinceClosure <= this.burstOnsetWindow && rise >= tuning.burstRiseDb) {
-          this.burstLeft = this.burstLength
-          this.sinceClosure = Infinity
-        }
-        let wb = 0
-        if (this.burstLeft > 0) {
-          // ⚠ NOT CUT SHORT BY VOICING: the voicing weight reads a broadband
-          // T burst as voiced, and a cutoff there closed the window ~10 ms in,
-          // before the burst's top-band peak (~15 ms after its onset).
-          wb = this.burstLeft >= this.burstFade ? 1 : this.burstLeft / this.burstFade
-          // Closed where the voice leads: a vowel onset, or a T's own vowel.
-          if (tuning.burstVoiceGate) wb *= 1 - wl
-          this.burstLeft--
-          if (wb > this.burstMeter) this.burstMeter = wb
-          if (wb > scBurst) scBurst = wb
-        }
-        const bDrop = wb * tuning.burstThresholdDropDb
-        const bDepth = wb * tuning.burstExtraDepthDb
-        // Lifted inside a burst: a T cannot lisp.
-        const guardRelief = wb * 96
 
         let duckTarget = 0
         let duckHeld = 0
         if (dSlope > 0) {
-          const tDuck = adaptiveThresholdDb(dBase, lmDb, kappa, lRef, tuning.maxShiftDb) - bDrop
+          const tDuck = adaptiveThresholdDb(dBase, lmDb, kappa, lRef, tuning.maxShiftDb)
           const hfD = this.relDuckVowel !== null ? hfDuckDb : hfDb
-          duckTarget = gainComputerDb(hfD, tDuck, 1 / dSlope, dDepth + bDepth, tuning.kneeDb)
+          duckTarget = gainComputerDb(hfD, tDuck, 1 / dSlope, dDepth, tuning.kneeDb)
           if (this.lispGuard && duckTarget < 0) {
-            const allowed = hfD - voiceDb - floor + guardRelief
+            const allowed = hfD - voiceDb - floor
             const cap = allowed > 0 ? allowed : 0
             if (duckTarget < -cap) {
               duckHeld = -cap - duckTarget
@@ -1129,10 +1038,10 @@ export class HFSoftenerKernel {
         // EQ read the "s" as hotter than it was and the guard let the two
         // stages together reach −9.8 dB where it should hold ~−5.
         const hfEqDb = hfDb + this.bbGainDb
-        let target = slope > 0 ? gainComputerDb(hfEqDb, tEff - bDrop, 1 / slope, dMax + bDepth, tuning.kneeDb) : 0
+        let target = slope > 0 ? gainComputerDb(hfEqDb, tEff, 1 / slope, dMax, tuning.kneeDb) : 0
         if (this.lispGuard && target < 0) {
           // Read post-duck, so the guard caps the TOTAL of both stages.
-          const allowed = hfEqDb - voiceDb - floor + guardRelief
+          const allowed = hfEqDb - voiceDb - floor
           const cap = allowed > 0 ? allowed : 0
           if (target < -cap) {
             if (duckHeld + (-cap - target) > scHeld) scHeld = duckHeld + (-cap - target)
@@ -1237,7 +1146,6 @@ export class HFSoftenerKernel {
     this.scopeIn = scIn
     this.scopeOut = scOut
     this.scopeHeld = scHeld
-    this.scopeBurst = scBurst
     this.meterCount += n
   }
 
@@ -1253,14 +1161,12 @@ export class HFSoftenerKernel {
       reductionDb: this.meterMaxReduction,
       broadbandDb: this.meterMaxBroadband,
       thresholdLiftDb: this.lastThresholdLiftDb,
-      // Lamps: a plosive window opened since the last snapshot; the Air lift
-      // (0–1: the voicing weight in VOICED mode, 1 in STATIC, 0 with Air off).
-      burst: this.burstMeter,
+      // The Air lamp (0–1: the voicing weight in VOICED mode, 1 in STATIC, 0
+      // with Air off).
       air: this.airDb > 0 && this.listen === 'off' ? (this.airVoiced ? this.airW : 1) : 0,
     }
     this.meterMaxReduction = 0
     this.meterMaxBroadband = 0
-    this.burstMeter = 0
     return m
   }
 }
@@ -1304,8 +1210,10 @@ export const HF_SOFTENER_PREROLL_S = 2.0
 
 /**
  * Activity-scope points: [input peak, output peak (after Duck and EQ, before
- * Air), dB the lisp guard held back, plosive-burst weight], one per process()
- * call. SCOPE_BATCH_MAX bounds the points in one meter message.
+ * Air), dB the lisp guard held back, a plosive mark], one per process() call.
+ * The mark is always 0 here since the burst treatment moved out; the Plosive
+ * Tamer shares the ring and its drawing and sets it on a burst cut.
+ * SCOPE_BATCH_MAX bounds the points in one meter message.
  */
 export const SCOPE_STRIDE = 4
 export const SCOPE_BATCH_MAX = 64
@@ -1352,14 +1260,13 @@ if (typeof registerProcessor === 'function') {
         sc[o] = k.scopeIn
         sc[o + 1] = k.scopeOut
         sc[o + 2] = k.scopeHeld
-        sc[o + 3] = k.scopeBurst
+        sc[o + 3] = 0
         this.scopeCount++
       } else {
         const o = (SCOPE_BATCH_MAX - 1) * SCOPE_STRIDE
         sc[o] = Math.max(sc[o], k.scopeIn)
         sc[o + 1] = Math.max(sc[o + 1], k.scopeOut)
         sc[o + 2] = Math.max(sc[o + 2], k.scopeHeld)
-        sc[o + 3] = Math.max(sc[o + 3], k.scopeBurst)
       }
       const m = k.takeMeter()
       if (m) {

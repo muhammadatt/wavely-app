@@ -75,6 +75,7 @@ const FILES = [
   'src/components/panels/PhatassModal.vue',
   'src/components/panels/SchepsModal.vue',
   'src/components/panels/HFLimiterModal.vue',
+  'src/components/panels/PlosiveModal.vue',
   'src/components/panels/AirBandModal.vue',
   'src/components/panels/DeEsserModal.vue',
   'src/components/panels/DeEsserBandStrip.vue',

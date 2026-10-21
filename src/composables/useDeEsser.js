@@ -25,9 +25,8 @@ const copies = pluginCopies((copy, life) => {
 
   // Reactive state shared by every caller of this copy.
   const hfAmount = ref(HF_SOFTENER_DEFAULTS.amount)
-  // Lisp guard strength, 0–100 % (0 = off), and the two Advanced controls.
+  // Lisp guard strength, 0–100 % (0 = off), and the Band corner.
   const hfGuard = ref(HF_SOFTENER_DEFAULTS.guard)
-  const hfPlosives = ref(HF_SOFTENER_DEFAULTS.plosives)
   const hfBand = ref(HF_SOFTENER_DEFAULTS.band)
   // The band-limited ResoTame ahead of the softener — an A/B of the pairing,
   // with fixed settings (see deEsserResoStage.js).
@@ -73,10 +72,9 @@ const copies = pluginCopies((copy, life) => {
   const listenMode = () => (hfAudition.value ? 'sidechain' : hfDelta.value ? 'delta' : 'off')
   const hfPreview = ref(false)
   const hfReduction = ref(0)
-  // The Reso stage's reduction and the two lamps, read with the other meters.
+  // The Reso stage's reduction and the Air lamp, read with the other meters.
   const hfReso = ref(0)
   const hfSoftenCut = ref(0)
-  const hfBurstLamp = ref(0)
   const hfAirLamp = ref(0)
   const hfThresholdLift = ref(0)
   const hfInputLevels = ref([])
@@ -96,7 +94,6 @@ const copies = pluginCopies((copy, life) => {
       vowelRelease: HF_SOFTENER_DEFAULTS.vowelRelease,
       shape: HF_SOFTENER_DEFAULTS.shape, // pinned
       guard: hfGuard.value,
-      plosives: hfPlosives.value,
       band: hfBand.value,
       resoAmount: hfResoAmount.value,
       soften: hfSoften.value,
@@ -155,7 +152,6 @@ const copies = pluginCopies((copy, life) => {
           hfReso.value = nodes.getReso?.() ?? 0
           hfSoftenCut.value = nodes.getSoften?.() ?? 0
           const lamps = nodes.getLamps?.()
-          hfBurstLamp.value = lamps?.burst ?? 0
           hfAirLamp.value = lamps?.air ?? 0
         }
         meterId = requestAnimationFrame(tick)
@@ -201,7 +197,6 @@ const copies = pluginCopies((copy, life) => {
       hfBroadband.value = 0
       hfReso.value = 0
       hfSoftenCut.value = 0
-      hfBurstLamp.value = 0
       hfAirLamp.value = 0
     }
 
@@ -379,12 +374,6 @@ const copies = pluginCopies((copy, life) => {
       scheduleAutoAir()
     }
 
-    function syncPlosives(v) {
-      hfPlosives.value = v
-      pushParam('plosives', v)
-      scheduleAutoAir()
-    }
-
     function syncBand(v) {
       hfBand.value = v
       pushParam('band', v)
@@ -417,7 +406,6 @@ const copies = pluginCopies((copy, life) => {
       set('duck', hfDuck, syncDuck)
       set('amount', hfAmount, syncAmount)
       set('guard', hfGuard, syncGuard)
-      set('plosives', hfPlosives, syncPlosives)
       set('band', hfBand, syncBand)
       set('detect', hfDetect, syncDetect)
       set('detectHigh', hfDetectHigh, syncDetectHigh)
@@ -556,7 +544,6 @@ const copies = pluginCopies((copy, life) => {
       hfSplit,
       hfTotal,
       hfGuard,
-      hfPlosives,
       hfBand,
       hfFileLevelDb,
       hfLevelOffset,
@@ -564,7 +551,6 @@ const copies = pluginCopies((copy, life) => {
       hfPreview,
       hfReduction,
       hfReso,
-      hfBurstLamp,
       hfAirLamp,
       getScope,
       holdScope,
@@ -589,7 +575,6 @@ const copies = pluginCopies((copy, life) => {
       syncTotal,
       syncSplit,
       syncGuard,
-      syncPlosives,
       syncBand,
       applyParams,
       toggleDelta,

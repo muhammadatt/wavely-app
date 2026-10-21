@@ -36,8 +36,7 @@ export function createHFSoftener(audioContext) {
   let broadbandDb = 0
   let resoDb = 0
   let softenDb = 0
-  // Lamps: a plosive window opened / the Air lift, since the last meter post.
-  let burstLamp = 0
+  // Lamp: the Air lift, since the last meter post.
   let airLamp = 0
   // Activity scope: one point per kernel quantum, appended as they arrive.
   const scope = createScopeRing(audioContext.sampleRate)
@@ -156,7 +155,6 @@ export function createHFSoftener(audioContext) {
         reductionDb = e.data.reductionDb
         thresholdLiftDb = e.data.thresholdLiftDb
         broadbandDb = e.data.broadbandDb ?? 0
-        burstLamp = e.data.burst ?? 0
         airLamp = e.data.air ?? 0
         if (!scopeHeld) scope.push(e.data.scope)
       }
@@ -232,9 +230,9 @@ export function createHFSoftener(audioContext) {
       return softenOn(params) && softenNode ? softenDb : 0
     },
 
-    /** Plosive lamp (0–1) and Air lamp (0–1), from the last meter post. */
+    /** Air lamp (0–1), from the last meter post. */
     getLamps() {
-      return { burst: burstLamp, air: airLamp }
+      return { air: airLamp }
     },
 
     /** The activity scope's ring — see deEsserScope.js. Read, do not retain. */

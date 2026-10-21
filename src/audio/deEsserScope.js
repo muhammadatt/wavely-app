@@ -3,8 +3,10 @@
  * graph so it can be tested in node.
  *
  * The kernel reports one point per process() call (SCOPE_STRIDE floats: input
- * peak, output peak after Duck and EQ, dB the lisp guard held back, plosive
- * burst weight). The wrapper appends them to a ring; the scope component reads
+ * peak, output peak after Duck and EQ, dB the lisp guard held back, a plosive
+ * mark). The Plosive Tamer reports the same four (its input peak delayed to
+ * line up, its output, 0, and 1 where a T/K/P burst was cut) and draws on the
+ * same component; the De-Esser's mark is always 0. The wrapper appends them to a ring; the scope component reads
  * the ring each frame and draws the OUTPUT waveform with what was removed
  * around it, the way Pro-DS paints treated regions on the waveform itself.
  *
@@ -26,7 +28,7 @@ export const HF_SCOPE_SECONDS = 2
 /** A column counts as treated when output sits this far under input, dB. */
 export const TREATED_DB = 0.75
 
-/** A column counts as a plosive when the burst window weight reached this. */
+/** A column counts as a plosive when the plosive mark reached this. */
 export const PLOSIVE_WEIGHT = 0.5
 
 /**

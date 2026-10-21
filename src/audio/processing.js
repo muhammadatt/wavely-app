@@ -49,6 +49,11 @@ import {
   hfLimiterLatencySamples,
   toKernelParams as toHFLimiterKernelParams,
 } from './hfLimiterParams.js'
+import { ensurePlosiveWorklet } from './plosiveWorkletLoader.js'
+import {
+  PLOSIVE_DEFAULTS, PLOSIVE_PREROLL_S, plosiveLatencySamples,
+  toKernelParams as toPlosiveKernelParams,
+} from './plosiveParams.js'
 import { ensurePhatassWorklet } from './phatassWorkletLoader.js'
 import {
   PHATASS_DEFAULTS,
@@ -1215,6 +1220,21 @@ export function applyHFLimiterRegion(segments, start, end, params, sampleRate, c
     kernelParams: toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params }),
     latencySamples: hfLimiterLatencySamples(sampleRate),
     preRollSamples: Math.round(HF_LIMITER_PREROLL_S * sampleRate),
+  })
+}
+
+/**
+ * Apply the Plosive Tamer to a region. Constant latency (the lookahead), and a
+ * pre-roll so the held voice level the closure test reads starts where a
+ * playing preview's would be.
+ */
+export function applyPlosiveRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensurePlosiveWorklet,
+    processorName: 'plosive-processor',
+    kernelParams: toPlosiveKernelParams({ ...PLOSIVE_DEFAULTS, ...params }),
+    latencySamples: plosiveLatencySamples(sampleRate),
+    preRollSamples: Math.round(PLOSIVE_PREROLL_S * sampleRate),
   })
 }
 
