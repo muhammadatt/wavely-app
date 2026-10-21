@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { useAuth } from '../composables/useAuth.js'
+import { useModalFocus } from '../composables/useModalFocus.js'
 import { AUTH_PROVIDERS } from '../auth/config.js'
 
 /**
@@ -135,7 +136,12 @@ async function provider(p) {
   if (r.error) error.value = r.error
 }
 
+// Focus moves in on open, Tab stays inside, and focus returns to the opener.
+const root = ref(null)
+const { trapTab } = useModalFocus(root)
+
 function onKeydown(e) {
+  trapTab(e)
   // Keep the editor's global shortcuts (space, delete, Ctrl+Z…) out of the form.
   e.stopPropagation()
   if (e.key === 'Escape') close()
@@ -146,6 +152,8 @@ function onKeydown(e) {
   <!-- z 690: above every floating window (500 and up, one step per window) —
        these open FROM a plugin window — and below the command palette. -->
   <div
+    ref="root"
+    tabindex="-1"
     class="fixed inset-0 z-[690] flex items-start justify-center pt-[12vh] px-4"
     style="background:rgba(5,7,9,.6);backdrop-filter:blur(5px)"
     @click.self="close"

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useAuth } from '../composables/useAuth.js'
+import { useEditorState } from '../composables/useEditorState.js'
 import BaseButton from './ui/BaseButton.vue'
 
 /**
@@ -26,9 +27,13 @@ function onWindowClick(e) {
 onMounted(() => window.addEventListener('click', onWindowClick))
 onUnmounted(() => window.removeEventListener('click', onWindowClick))
 
+const { showToast } = useEditorState()
+
 async function signOut() {
   open.value = false
-  await auth.signOut()
+  const { error } = await auth.signOut()
+  // Still signed in — say so rather than leaving the menu looking unchanged.
+  if (error) showToast(`Couldn’t sign out: ${error}`, 5000)
 }
 </script>
 

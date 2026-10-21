@@ -194,16 +194,33 @@ test('the OAuth popup closes itself once it has a session', () => {
   assert.equal(closed, 1)
 })
 
-test('sign out clears the account even if the network call fails', async () => {
+test('a failed sign-out reports the error and leaves the session intact', async () => {
   const client = fakeClient({ signOut: async () => { throw new Error('Failed to fetch') } })
   const store = makeStore(client)
   store.start()
   client.emit('SIGNED_IN', session())
   await tick()
-  assert.ok(store.state.account)
+  const account = store.state.account
   const r = await store.signOut()
   assert.match(r.error, /Could not reach/)
+  assert.equal(store.state.status, 'signedIn')
+  assert.equal(store.state.account, account, 'the account is not blanked under a live session')
+  assert.equal(await store.getAccessToken(), 'tok-u1')
+  assert.equal(store.plan.value, 'free')
+})
+
+test('a successful sign-out clears everything through the SIGNED_OUT event', async () => {
+  const client = fakeClient()
+  const store = makeStore(client)
+  store.start()
+  client.emit('SIGNED_IN', session())
+  await tick()
+  assert.equal((await store.signOut()).error, null)
+  client.emit('SIGNED_OUT', null)
+  await tick()
+  assert.equal(store.state.status, 'signedOut')
   assert.equal(store.state.account, null)
+  assert.equal(store.plan.value, null)
 })
 
 test('the account fetcher sends the bearer token and maps 503 to null', async () => {

@@ -1,6 +1,7 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useAuth } from '../composables/useAuth.js'
+import { useModalFocus } from '../composables/useModalFocus.js'
 import { FEATURES, FREE_PREVIEW_SECONDS, PLAN_LABELS } from '../auth/plans.js'
 
 /**
@@ -37,7 +38,12 @@ function account(mode) {
   auth.openDialog(mode)
 }
 
+// Focus moves in on open, Tab stays inside, and focus returns to the opener.
+const root = ref(null)
+const { trapTab } = useModalFocus(root)
+
 function onKeydown(e) {
+  trapTab(e)
   e.stopPropagation()
   if (e.key === 'Escape') close()
 }
@@ -47,6 +53,7 @@ function onKeydown(e) {
   <!-- z 690: above every floating window (500 and up, one step per window) —
        these open FROM a plugin window — and below the command palette. -->
   <div
+    ref="root"
     v-if="feature"
     class="fixed inset-0 z-[690] flex items-start justify-center pt-[14vh] px-4"
     style="background:rgba(5,7,9,.6);backdrop-filter:blur(5px)"
@@ -83,14 +90,14 @@ function onKeydown(e) {
           <div class="mt-4 text-[12.5px] leading-[1.5] text-[rgba(255,255,255,.55)]">
             Create a free account first — you can upgrade from it.
           </div>
-          <button class="up-btn up-btn--primary mt-4" @click="account('signUp')">Create account</button>
+          <button class="up-btn up-btn--primary mt-4" data-autofocus @click="account('signUp')">Create account</button>
           <button class="up-btn up-btn--ghost mt-2" @click="account('signIn')">Sign in</button>
         </template>
         <template v-else>
           <button class="up-btn up-btn--primary mt-5" disabled title="Checkout is not open yet">
             Upgrade to {{ planLabel }} — coming soon
           </button>
-          <button class="up-btn up-btn--ghost mt-2" @click="close">Not now</button>
+          <button class="up-btn up-btn--ghost mt-2" data-autofocus @click="close">Not now</button>
         </template>
       </div>
     </div>

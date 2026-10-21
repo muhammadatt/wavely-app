@@ -187,14 +187,19 @@ export function createAuthStore({
   const updatePassword = (password) =>
     run(() => client.auth.updateUser({ password }))
 
-  async function signOut() {
-    const result = await run(() => client.auth.signOut())
-    // Clear locally even if the server call failed (offline): the user asked
-    // to be signed out of THIS browser, and supabase-js has dropped its copy.
-    accountRequest++
-    state.account = null
-    state.accountError = null
-    return result
+  /**
+   * Sign out. On success supabase-js drops its session and emits SIGNED_OUT,
+   * and `applySession` clears everything from there — one path for every way
+   * a session ends.
+   *
+   * ⚠ ON FAILURE NOTHING IS CLEARED HERE. supabase-js keeps its session when
+   * the revoke call fails (offline, say), so the user IS still signed in:
+   * blanking the account alone left a store that read signed-in, still sent
+   * tokens and still showed account presets, with a menu that said nothing.
+   * The error is returned for the caller to show; state stays consistent.
+   */
+  function signOut() {
+    return run(() => client.auth.signOut())
   }
 
   /** Current access token, for calls to our API. null when signed out. */

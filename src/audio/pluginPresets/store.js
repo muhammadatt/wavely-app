@@ -37,9 +37,22 @@
  *            browser-only fallback once accounts exist (owner's call).
  *
  * The API stays SYNCHRONOUS over an in-memory mirror: menus read the mirror,
- * writes update it at once and persist behind it. A remote write that fails
- * is rolled back and reported through `onPresetError`, so the menu never goes
- * on showing a preset the account does not have.
+ * writes update it at once and persist behind it.
+ *
+ * ⚠ A REMOTE WRITE IS NOT UNDONE BY RESTORING A SNAPSHOT. A snapshot taken
+ * before one write also predates every write after it, so restoring it on a
+ * failure erased later saves that had succeeded and resurrected deletes. And a
+ * load is a snapshot too: a SELECT that started before a save and answered
+ * after it replaced the mirror and dropped the new preset. Both are handled by
+ * one WRITE JOURNAL instead:
+ *
+ *   - every remote write is an idempotent `apply(map)` (save = upsert by name,
+ *     delete = remove by id), applied to the mirror at once and journalled;
+ *   - a load re-applies, over what it fetched, every write still pending or
+ *     settled after the load began — the ones the SELECT may not have seen;
+ *   - a FAILED write is reported and triggers a reload: the account is the
+ *     truth, and re-reading it (with the other writes replayed) is the only
+ *     rollback that cannot clobber a neighbour.
  */
 
 export const PRESET_STORAGE_KEY = 'wavely.pluginPresets.v1'
@@ -75,6 +88,12 @@ const noBackend = {
 let backend = localBackend
 /** Bumped on every backend switch, so a slow load for the old one is dropped. */
 let backendGeneration = 0
+
+/** Remote writes not yet safe to forget: [{ apply, state, settledAt }]. */
+let journal = []
+/** Bumped as each load starts; a write settling at tick ≥ a load's start may be missing from it. */
+let loadTick = 0
+let loadsInFlight = 0
 
 /**
  * Deep copy of a plain params value.
@@ -171,6 +190,8 @@ export function resetPluginPresets() {
   errorListeners.clear()
   backend = localBackend
   backendGeneration++
+  journal = []
+  loadsInFlight = 0
 }
 
 /** Notified whenever the user's own collection changes. */
@@ -195,21 +216,46 @@ function storage() {
 function loadUserPresets() {
   if (userPresets) return userPresets
   userPresets = new Map()
-  const loaded = backend.load()
-  if (loaded && typeof loaded.then === 'function') {
-    const generation = backendGeneration
-    loaded.then(map => {
-      if (generation !== backendGeneration) return
-      userPresets = sanitizeLoaded(map)
-      emit()
-    }, err => {
-      if (generation !== backendGeneration) return
-      reportError(err, 'load')
-    })
-  } else {
-    userPresets = sanitizeLoaded(loaded)
-  }
+  startLoad()
   return userPresets
+}
+
+/**
+ * Read the backend into the mirror. A synchronous backend answers at once; an
+ * async one replaces the mirror when it answers — unless a newer load or a
+ * backend switch has superseded it — with the journal replayed on top.
+ */
+function startLoad() {
+  const loaded = backend.load()
+  if (!loaded || typeof loaded.then !== 'function') {
+    userPresets = sanitizeLoaded(loaded)
+    return
+  }
+  const generation = backendGeneration
+  const startedAt = ++loadTick
+  loadsInFlight++
+  loaded.then(map => {
+    if (generation !== backendGeneration) return
+    loadsInFlight--
+    if (startedAt !== loadTick) return pruneJournal() // a newer load is coming
+    const next = sanitizeLoaded(map)
+    for (const op of journal) {
+      if (op.state === 'pending' || (op.state === 'done' && op.settledAt >= startedAt)) op.apply(next)
+    }
+    userPresets = next
+    pruneJournal()
+    emit()
+  }, err => {
+    if (generation !== backendGeneration) return
+    loadsInFlight--
+    pruneJournal()
+    reportError(err, 'load')
+  })
+}
+
+/** Settled writes matter only to a load that was already running when they settled. */
+function pruneJournal() {
+  if (loadsInFlight === 0) journal = journal.filter(op => op.state === 'pending')
 }
 
 function sanitizeLoaded(map) {
@@ -278,10 +324,14 @@ function reportError(err, op) {
 }
 
 /**
- * Run a backend write behind the mirror; on failure restore `snapshot` (the
- * plugin's list as it was) and report.
+ * Apply a write to the mirror now and persist it behind. `apply(map)` must be
+ * idempotent: it may run again over a later load (see the journal note at the
+ * top). `write()` may resolve a function, which reconciles the mirror with
+ * what the backend actually stored (a canonical id).
  */
-function persistBehind(op, pluginId, snapshot, write) {
+function mutate(opName, apply, write) {
+  apply(loadUserPresets())
+  emit()
   const generation = backendGeneration
   let pending
   try {
@@ -289,21 +339,44 @@ function persistBehind(op, pluginId, snapshot, write) {
   } catch (err) {
     pending = Promise.reject(err)
   }
-  if (!pending || typeof pending.then !== 'function') return
-  pending.then(applyServerId => {
-    if (generation !== backendGeneration || typeof applyServerId !== 'function') return
-    applyServerId(loadUserPresets())
-    emit()
+  if (!pending || typeof pending.then !== 'function') return // synchronous (local) backend
+  const op = { apply, state: 'pending', settledAt: Infinity }
+  journal.push(op)
+  pending.then(reconcile => {
+    if (generation !== backendGeneration) return
+    op.state = 'done'
+    op.settledAt = loadTick
+    if (typeof reconcile === 'function') {
+      reconcile(loadUserPresets())
+      emit()
+    }
+    pruneJournal()
   }, err => {
     if (generation !== backendGeneration) return
-    loadUserPresets().set(pluginId, snapshot)
-    emit()
-    reportError(err, op)
+    op.state = 'failed'
+    reportError(err, opName)
+    startLoad()
   })
 }
 
-function snapshotList(pluginId) {
-  return (loadUserPresets().get(pluginId) ?? []).map(p => ({ ...p, params: clonePlain(p.params) }))
+/** Save `preset` into `map` by name, case-insensitively, keeping an existing entry's id. */
+function upsertByName(map, pluginId, preset) {
+  const list = map.get(pluginId) ?? []
+  const existing = list.find(p => p.name.toLowerCase() === preset.name.toLowerCase())
+  if (existing) {
+    existing.name = preset.name
+    existing.params = clonePlain(preset.params)
+  } else {
+    list.push({ id: preset.id, name: preset.name, params: clonePlain(preset.params) })
+  }
+  map.set(pluginId, list)
+}
+
+function removeById(map, pluginId, presetId) {
+  const list = map.get(pluginId)
+  if (!list) return
+  const idx = list.findIndex(p => p.id === presetId)
+  if (idx !== -1) list.splice(idx, 1)
 }
 
 function persistLocal() {
@@ -417,37 +490,45 @@ export function saveUserPreset(pluginId, name, params) {
     throw new Error(`"${trimmed}" is a built-in preset. Choose another name.`)
   }
 
-  const all = loadUserPresets()
-  const snapshot = snapshotList(pluginId)
-  const list = all.get(pluginId) ?? []
+  const list = loadUserPresets().get(pluginId) ?? []
   const picked = pickParams(pluginId, params)
   const existing = list.find(p => p.name.toLowerCase() === trimmed.toLowerCase())
-  let saved
-  if (existing) {
-    existing.params = picked
-    existing.name = trimmed
-    saved = existing
-  } else {
-    saved = { id: backend.makeId?.(trimmed) ?? makeId(trimmed), name: trimmed, params: picked }
-    list.push(saved)
+  const preset = {
+    id: existing?.id ?? backend.makeId?.(trimmed) ?? makeId(trimmed),
+    name: trimmed,
+    params: picked,
   }
-  all.set(pluginId, list)
-  persistBehind('save', pluginId, snapshot, () => backend.save(pluginId, { ...saved, params: clonePlain(picked) }, all))
-  emit()
-  return { id: saved.id, name: saved.name, source: 'user' }
+  mutate(
+    'save',
+    (map) => upsertByName(map, pluginId, preset),
+    () => {
+      const result = backend.save(pluginId, preset, { existing: !!existing })
+      return result && typeof result.then === 'function' ? result.then(adoptCanonicalId) : result
+    },
+  )
+
+  /** The backend may report the row it actually wrote — another tab saved this name first. */
+  function adoptCanonicalId(canonicalId) {
+    if (!canonicalId || canonicalId === preset.id) return null
+    const staleId = preset.id
+    preset.id = canonicalId
+    return (map) => {
+      const entry = (map.get(pluginId) ?? []).find(p => p.id === staleId)
+      if (entry) entry.id = canonicalId
+    }
+  }
+  return { id: preset.id, name: preset.name, source: 'user' }
 }
 
 /** Remove one of the user's own presets. Factory presets are not removable. */
 export function deleteUserPreset(pluginId, presetId) {
-  const all = loadUserPresets()
-  const snapshot = snapshotList(pluginId)
-  const list = all.get(pluginId) ?? []
-  const idx = list.findIndex(p => p.id === presetId)
-  if (idx === -1) return false
-  list.splice(idx, 1)
-  all.set(pluginId, list)
-  persistBehind('delete', pluginId, snapshot, () => backend.remove(pluginId, presetId, all))
-  emit()
+  const list = loadUserPresets().get(pluginId) ?? []
+  if (!list.some(p => p.id === presetId)) return false
+  mutate(
+    'delete',
+    (map) => removeById(map, pluginId, presetId),
+    () => backend.remove(pluginId, presetId),
+  )
   return true
 }
 
