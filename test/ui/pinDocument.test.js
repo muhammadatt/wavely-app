@@ -31,9 +31,33 @@ test('a pinned job passes while its document is active and refuses once the user
     assert.equal(err.message, 'HF Limiter was not applied: you switched files while it rendered')
     return true
   })
-  // Back on the original file, the job may commit again.
+  // Back on the original file it still refuses: a render that ran while B
+  // was active may have read B.
   editor.setActiveDocument(a)
-  pin.check()
+  assert.throws(() => pin.check(), DocumentSwitchedError)
+})
+
+test('a switch away and back refuses even when no check ran in between', () => {
+  const editor = useEditorState()
+  const { docId: a } = editor.createDocument('round-a.wav', fakeBuffer())
+  const { docId: b } = editor.createDocument('round-b.wav', fakeBuffer(), { activate: false })
+  const pin = editor.pinActiveDocument('PHAT*SS')
+  editor.setActiveDocument(b)
+  editor.setActiveDocument(a)
+  assert.equal(editor.appState.activeDocumentId, a)
+  assert.throws(() => pin.check(), DocumentSwitchedError)
+})
+
+test('closing the active document is a switch; staying put is not', () => {
+  const editor = useEditorState()
+  const { docId: a } = editor.createDocument('close-a.wav', fakeBuffer())
+  const { docId: c } = editor.createDocument('close-c.wav', fakeBuffer(), { activate: false })
+  const stay = editor.pinActiveDocument('Stay')
+  editor.setActiveDocument(a) // already active: not a change
+  editor.closeDocument(c) // closing a background tab moves nothing
+  stay.check()
+  editor.closeDocument(a)
+  assert.throws(() => stay.check(), DocumentSwitchedError)
 })
 
 test('processing status lands on the pinned document, not the active one', () => {

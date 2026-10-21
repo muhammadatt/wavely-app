@@ -117,6 +117,9 @@ const docSaveTargets = new Map()
 // do for dirty-checking, but a global one means a stale revision can never
 // collide with a live one after an undo/redo shuffle.
 let revisionSeq = 0
+// Bumped every time the active document changes, so a pinned job can tell
+// "never left" from "left and came back" (pinActiveDocument).
+let activationSeq = 0
 
 // Map<docId, { undo: HistoryEntry[], redo: HistoryEntry[] }>, where a
 // HistoryEntry is `{ segments, label, revision }` — the timeline as it stood
@@ -385,6 +388,7 @@ export function useEditorState() {
     const prev = activeDocument.value
     if (prev) prev.isPlaying = false
     appState.activeDocumentId = docId
+    activationSeq++
   }
 
   /**
@@ -453,6 +457,7 @@ export function useEditorState() {
       // Prefer the tab that slid into this slot, else the one before it.
       const next = appState.documents[idx] ?? appState.documents[idx - 1] ?? null
       appState.activeDocumentId = next?.id ?? null
+      activationSeq++
     }
     peakCacheVersion.value++
   }
@@ -691,16 +696,22 @@ export function useEditorState() {
    * `state` after an await would read the OTHER file and the default docId
    * would commit into it. Pass `docId` to the processing and commit calls, and
    * call `check()` after the last await before committing: it throws a
-   * DocumentSwitchedError if the user switched files, so nothing is committed
-   * (the Plugin Chain's rule — refused rather than repaired, because the
+   * DocumentSwitchedError if the user switched files at any point since the
+   * pin, so nothing is committed (refused rather than repaired, because the
    * measurements and renders may have read either file).
+   *
+   * ⚠ ANY SWITCH SINCE THE PIN, NOT "ANOTHER FILE IS ACTIVE NOW". Comparing
+   * ids passes an A → B → A round trip, yet a render that started while B was
+   * active read B's segments and would commit them into A. The check reads
+   * `activationSeq`, which every change of the active document bumps.
    */
   function pinActiveDocument(what) {
     const docId = appState.activeDocumentId
+    const seq = activationSeq
     return {
       docId,
       check() {
-        if (appState.activeDocumentId !== docId) throw new DocumentSwitchedError(what)
+        if (activationSeq !== seq || appState.activeDocumentId !== docId) throw new DocumentSwitchedError(what)
       },
     }
   }
