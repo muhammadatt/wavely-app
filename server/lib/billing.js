@@ -215,12 +215,21 @@ export function createBilling({ stripe, admin, prices, onPlanChanged = () => {} 
     }
     const customer = await ensureCustomer(user)
     const session = await stripe.checkout.sessions.create({
+      // The Checkout Studio parameters (SDK >= 21 names the hosted page `hosted_page`)
+      ui_mode: 'hosted_page',
+      billing_address_collection: 'auto',
+      phone_number_collection: { enabled: false },
+      automatic_tax: { enabled: false },
+      allow_promotion_codes: false,
+      payment_method_collection: 'always',
+      submit_type: 'auto',
+      integration_identifier: 'hosted_web_0001',
+      origin_context: 'web',
       mode: 'subscription',
       customer,
       client_reference_id: user.id,
       line_items: [{ price: price.id, quantity: 1 }],
       subscription_data: { metadata: { user_id: user.id } },
-      allow_promotion_codes: true,
       success_url: withParams(returnUrl, { checkout: 'success', session_id: '{CHECKOUT_SESSION_ID}' }),
       cancel_url: withParams(returnUrl, { checkout: 'cancel' }),
     })

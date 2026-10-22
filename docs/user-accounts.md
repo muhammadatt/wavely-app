@@ -69,7 +69,7 @@ Every existing feature works signed out, with or without accounts configured.
 | `VITE_SUPABASE_URL` | `https://<project-ref>.supabase.co` |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | the project's publishable key (`sb_publishable_…`). The legacy anon key also works, as `VITE_SUPABASE_ANON_KEY`. Public by design. |
 | `VITE_AUTH_PROVIDERS` | optional, e.g. `google` — only providers enabled in the dashboard |
-| `VITE_API_BASE_URL` | already used: the API server's origin when it is on another domain |
+| `VITE_API_BASE_URL` | the API server's origin when it is on another domain, e.g. `https://api.crisp.fm`. Vite inlines it at build time, so redeploy after changing it. |
 
 ### 3. API server env (`server/.env`)
 
@@ -78,7 +78,18 @@ Every existing feature works signed out, with or without accounts configured.
 | `SUPABASE_URL` | same project URL |
 | `SUPABASE_SECRET_KEY` | the secret key (`sb_secret_…`), or the legacy `SUPABASE_SERVICE_ROLE_KEY`. **Server only — it bypasses row-level security.** |
 | `SUPABASE_JWT_SECRET` | only if the project still signs tokens with the legacy HS256 secret. Projects on asymmetric JWT signing keys need nothing here. |
-| `CORS_ORIGINS` / `CORS_ORIGIN_PATTERNS` | must include the frontend origin(s), as today. |
+| `CORS_ORIGINS` | comma-separated exact frontend origins, e.g. `https://app.example.com,https://staging.example.com`. Unset falls back to the localhost dev origins, so it **must** be set in production. |
+| `CORS_ORIGIN_PATTERNS` | comma-separated regexes for origins you can't list, i.e. Vercel preview URLs, e.g. `^https://wavely-app(-[a-z0-9-]+)?\.vercel\.app$`. Anchor with `^…$`: the check is `pattern.test(origin)`, so an unanchored pattern matches anywhere in the string. |
+
+CORS lives **only in Express** (`server/index.js`). If Apache or another proxy
+fronts the API, do not add `Access-Control-*` headers there as well: the browser
+rejects a response with duplicate `Access-Control-Allow-Origin` values. The
+proxy just has to forward `Origin` and `OPTIONS` requests to Node, which
+`ProxyPass /api` does. Restart the Node process after changing either variable.
+
+Billing return URLs (Checkout and the customer portal) are checked against this
+same allowlist, so a frontend origin missing here breaks billing as well as API
+calls. A rejected origin is logged as `CORS rejected origin: …`.
 
 ## What's in the code
 
