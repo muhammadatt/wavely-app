@@ -4,7 +4,7 @@ export default {
   whenToUse: [
     'You want the recording to sound denser and more present',
     'Transients are poking out of an otherwise even performance',
-    'Opto Comp left the take steady but not loud enough',
+    'LA Vintage 2A left the take steady but not loud enough',
   ],
 
   controls: [
@@ -53,7 +53,7 @@ export default {
   ],
 
   notes: [
-    'It reaches for peaks rather than the body, so it typically adds 1 to 2 dB of average level where Opto Comp adds none',
+    'It reaches for peaks rather than the body, so it typically adds 1 to 2 dB of average level where LA Vintage 2A adds none',
     'Turn on SC HPF before reaching for a slower attack when plosives are the problem',
   ],
 }

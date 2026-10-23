@@ -48,7 +48,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '../..')
 
 /**
- * The ResoTame surface, plus the preset menu. Widening this to every .vue is
+ * The Reso Soothe surface, plus the preset menu. Widening this to every .vue is
  * the obvious next step.
  *
  * PresetMenu is here because it is the one component outside this panel that
@@ -223,7 +223,7 @@ for (const rel of FILES) {
   })
 }
 
-test('the file list covers every ResoTame component', () => {
+test('the file list covers every Reso Soothe component', () => {
   // ⚠ A LIST THAT SILENTLY STOPS COVERING THINGS IS WORSE THAN NO LIST. A new
   // component in these folders named Resonance* or Focus* is part of this panel
   // and belongs above.

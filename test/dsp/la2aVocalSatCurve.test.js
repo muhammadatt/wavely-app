@@ -1,5 +1,5 @@
 /**
- * OptoSmooth's imported Tube Saturation curve — the two selectors, and the
+ * LA Vintage 2A's imported Tube Saturation curve — the two selectors, and the
  * guarantee that neither of them exists as far as the default patch is
  * concerned.
  *
@@ -65,7 +65,7 @@ const run = (params) => processLA2ABuffer(
 ).channelData[0]
 
 test('the shipping patch is the audition patch, exactly', () => {
-  // Pins what OptoSmooth and Scheps sound like out of the box. Every one of
+  // Pins what LA Vintage 2A and Scheps sound like out of the box. Every one of
   // these was chosen by ear; if a refactor moves one, that is a change to the
   // product's sound and it should have to come through this test.
   //

@@ -68,14 +68,14 @@ const ALL_CATEGORIES = [
     id: 'level',
     label: 'Level',
     icon: 'loudness',
-    desc: 'Hit a peak or loudness target, even out phrases',
+    desc: 'Hit a peak or loudness target, set volume and fades',
     panel: null,
   },
   {
     id: 'dynamics',
     label: 'Dynamics',
     icon: 'dynamics',
-    desc: 'Compress, limit and add density',
+    desc: 'Even out phrases, compress, limit and add density',
     panel: null,
   },
   {
@@ -123,10 +123,10 @@ const ALL_CATEGORIES = [
  *             the state's own consumers, and reaching back into it would make
  *             the import order matter.
  *
- * Surface is fixed per category, not per operation: everything under Edit opens
+ * Surface is fixed per category, with one exception: everything under Edit opens
  * in the rail (or runs immediately, for the parameterless verbs), everything
- * under Level, Dynamics, Tone and Clean opens as a window. Two adjacent rows in one list never behave
- * differently — that inconsistency is what this replaces.
+ * under Level, Dynamics, Tone and Clean opens as a window — except Fade and
+ * Volume, which sit in Level but open in the rail.
  */
 /**
  * RELEASE GATING — which operations a production build shows.
@@ -241,32 +241,8 @@ const ALL_OPERATIONS = [
     surface: 'rail',
     component: SilencePanel,
   },
-  {
-    id: 'fade',
-    label: 'Fade',
-    desc: 'Shape the volume curve at the selection edges',
-    category: 'edit',
-    group: 'Shape',
-    icon: 'fade',
-    keywords: ['fade in', 'fade out', 'ramp', 'curve', 'taper'],
-    requires: 'selection',
-    surface: 'rail',
-    component: FadePanel,
-  },
-  {
-    id: 'volume',
-    label: 'Volume',
-    desc: 'Adjust the volume of the selected region',
-    category: 'edit',
-    group: 'Shape',
-    icon: 'volume',
-    keywords: ['gain', 'louder', 'quieter', 'amplify', 'db'],
-    requires: 'selection',
-    surface: 'rail',
-    component: VolumePanel,
-  },
 
-  // ---- Level (windows) ----
+  // ---- Level (windows, plus the Fade and Volume rail views) ----
   {
     id: 'normalize',
     // "Normalize" on its own stopped being a name the moment there were two of
@@ -298,11 +274,39 @@ const ALL_OPERATIONS = [
     surface: 'window',
     component: LoudnessWindow,
   },
+  // Fade and Volume are parameter-light, so they open in the rail like the Edit
+  // verbs rather than as windows; the rail's detail view works in any category.
   {
+    id: 'fade',
+    label: 'Fade',
+    desc: 'Shape the volume curve at the selection edges',
+    category: 'level',
+    icon: 'fade',
+    keywords: ['fade in', 'fade out', 'ramp', 'curve', 'taper'],
+    requires: 'selection',
+    surface: 'rail',
+    component: FadePanel,
+  },
+  {
+    id: 'volume',
+    label: 'Volume',
+    desc: 'Adjust the volume of the selected region',
+    category: 'level',
+    icon: 'volume',
+    keywords: ['gain', 'louder', 'quieter', 'amplify', 'db'],
+    requires: 'selection',
+    surface: 'rail',
+    component: VolumePanel,
+  },
+
+  // ---- Dynamics (windows) ----
+  {
+    // First in Dynamics: it evens out phrases ahead of the compressors, which
+    // would otherwise work harder on the loud ones.
     id: 'auto-leveler',
     label: 'Auto Leveler',
     desc: 'Even out level between phrases',
-    category: 'level',
+    category: 'dynamics',
     icon: 'autolevel',
     keywords: [
       'level', 'leveller', 'leveler', 'auto level', 'ride', 'gain riding',
@@ -315,8 +319,6 @@ const ALL_OPERATIONS = [
     surface: 'window',
     component: AutoLevelModal,
   },
-
-  // ---- Dynamics (windows) ----
   {
     // Filed under Dynamics, ahead of the compressors in the panel: the whole
     // point is to run before them, taming plosive peaks so they don't slip
@@ -335,11 +337,11 @@ const ALL_OPERATIONS = [
   },
   {
     id: 'opto-smooth',
-    label: 'Opto Comp',
+    label: 'LA Vintage 2A',
     desc: 'Subtle, transparent compressor',
     category: 'dynamics',
     icon: 'opto',
-    keywords: ['la-2a', 'la2a', 'compressor', 'opto', 'tube', 'leveler', 'smooth'],
+    keywords: ['la-2a', 'la2a', 'compressor', 'opto', 'opto comp', 'optosmooth', 'tube', 'leveler', 'smooth'],
     requires: 'selection',
     // Runs live in the playback chain, so it can take a slot — see chainPlugins().
     chain: true,
@@ -348,11 +350,11 @@ const ALL_OPERATIONS = [
   },
   {
     id: 'fet-punch',
-    label: 'FET Punch',
+    label: 'LA Classic 76',
     desc: 'Peak compressor/limiter',
     category: 'dynamics',
     icon: 'fet',
-    keywords: ['1176', 'compressor', 'fet', 'punch', 'aggressive', 'fast'],
+    keywords: ['1176', 'compressor', 'fet', 'fet punch', 'punch', 'aggressive', 'fast'],
     requires: 'selection',
     // Runs live in the playback chain, so it can take a slot — see chainPlugins().
     chain: true,
@@ -381,7 +383,7 @@ const ALL_OPERATIONS = [
   },
   {
     id: 'inflator',
-    label: 'Inflator',
+    label: 'Cambridge Inflator',
     desc: 'Raise quiet detail without raising the ceiling',
     category: 'dynamics',
     icon: 'saturation',
@@ -537,12 +539,12 @@ const ALL_OPERATIONS = [
   },
   {
     id: 'resonance-suppressor',
-    label: 'Reso Smooth',
+    label: 'Reso Soothe',
     desc: 'Soothe harsh resonances',
     category: 'clean',
     group: 'Harshness',
     icon: 'resonance',
-    keywords: ['resonance', 'soothe', 'harsh', 'ring', 'room mode', 'dynamic eq', 'peak'],
+    keywords: ['resonance', 'soothe', 'reso smooth', 'resotame', 'harsh', 'ring', 'room mode', 'dynamic eq', 'peak'],
     requires: 'selection',
     // Runs live in the playback chain, so it can take a slot — see chainPlugins().
     chain: true,

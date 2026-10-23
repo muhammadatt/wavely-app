@@ -797,7 +797,7 @@ const resoRun = (x, sr, amount, opts) => {
 }
 
 test('reso macro: an "s" is cut by its own frames, and the cut rises with the knob', () => {
-  // ⚠ At ResoTame's 200/500 ms an isolated "s" reached −1.6 dB at 100 %: the
+  // ⚠ At Reso Soothe's 200/500 ms an isolated "s" reached −1.6 dB at 100 %: the
   // cut it showed in speech was built on the vowels and carried in.
   const sr = 44100
   const { x, labels } = makeRichSpeech(sr)
@@ -828,7 +828,7 @@ test('reso macro: voiced frames hold the ring threshold, so vowel top end stays'
   const unheld = cut(run({ ...hfResoKernelParams(1), voicedSelectivityFloorDb: 0 }))
   assert.equal(HF_RESO_VOICED_FLOOR_DB, HF_RESO_KNOTS[0][1])
   assert.ok(held > -0.5 && unheld < -1, `vowels 5–12k at 100 %: ${held.toFixed(2)} held, ${unheld.toFixed(2)} without the floor`)
-  // ResoTame itself never sets it.
+  // Reso Soothe itself never sets it.
   assert.equal(toResonanceKernelParams(RESONANCE_DEFAULTS).voicedSelectivityFloorDb, undefined)
 })
 
@@ -1296,7 +1296,7 @@ test('params: the Air knob is the one value in effect, whether AUTO wrote it or 
 
 // ── Lisp guard over the Reso pre-stage ──────────────────────────────────────
 
-test('reso lisp guard: follows the Lisp Guard switch, and ResoTame itself never sets it', () => {
+test('reso lisp guard: follows the Lisp Guard switch, and Reso Soothe itself never sets it', () => {
   // Guard 50 is the old switch's ON (−16 dB); the panel's default has since
   // moved (to 100), so pin it rather than read the default.
   const on = resoKernelParams({ ...HF_SOFTENER_DEFAULTS, guard: 50, resoAmount: 50, lispGuard: true })

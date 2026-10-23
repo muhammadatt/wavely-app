@@ -78,7 +78,7 @@ function runClosedLoop(kernel, x, knob) {
  *
  * The rendered file is unaffected: apply uses the offline solve.
  */
-test('OptoSmooth: converges on the offline solve with the loop closed', () => {
+test('LA Vintage 2A: converges on the offline solve with the loop closed', () => {
   const x = material()
   // Without the emphasis pair the closed form is exact and is held to it.
   for (const peakReduction of [55, 70, 85]) {
@@ -167,7 +167,7 @@ test('on ordinary material the closed form is well inside half a dB', () => {
   }
 })
 
-test('FET Punch: exact at Mix 1, where the dry share is zero', () => {
+test('LA Classic 76: exact at Mix 1, where the dry share is zero', () => {
   const x = material()
   for (const inputDrive of [40, 55, 75]) {
     const p = { inputDrive, attack: 4, release: 5, ratio: '4', fetDrive: 0.35, scHpfHz: 0, mix: 1 }
@@ -190,7 +190,7 @@ test('FET Punch: exact at Mix 1, where the dry share is zero', () => {
   }
 })
 
-test('FET Punch: reports nothing at parallel settings, where the bound is loose', () => {
+test('LA Classic 76: reports nothing at parallel settings, where the bound is loose', () => {
   // The live bound is (P - max|a|) / max|b|, and those maxima need not fall on
   // the same sample, so below Mix 1 it is safe but slack — measured 3.35 dB
   // under the truth at Mix 0.3. A preview several dB quieter than the render it

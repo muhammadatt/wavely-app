@@ -503,7 +503,7 @@ const copies = pluginCopies((copy, life) => {
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
-      const pin = pinActiveDocument('ResoTame')
+      const pin = pinActiveDocument('Reso Soothe')
 
       const wasPreviewing = resPreview.value
       if (wasPreviewing) togglePreview()
@@ -557,7 +557,7 @@ const copies = pluginCopies((copy, life) => {
     registerChainPlugin({
       id: resonanceEffect.id,
       windowId,
-      label: 'ResoTame',
+      label: 'Reso Soothe',
       dispose: life.dispose,
       isActive: () => resPreview.value,
       setActive: (on) => { if (resPreview.value !== on) togglePreview() },

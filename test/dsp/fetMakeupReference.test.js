@@ -19,8 +19,8 @@
  * is no longer a property of the arithmetic.
  *
  * The reference and the ceiling themselves live in `dsp/makeupReference.js`,
- * shared with OptoSmooth; `makeupReference.test.js` covers them as maths and
- * this covers what FET Punch does with them.
+ * shared with LA Vintage 2A; `makeupReference.test.js` covers them as maths and
+ * this covers what LA Classic 76 does with them.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -193,7 +193,7 @@ test('the solve is exact at Mix 1 and still solved below it', () => {
     const plan = computeFET1176AutoMakeupPlan([x], SR, params, { reference: 'percentile' })
     /**
      * ⚠ MEASURED THROUGH THE RENDER, NOT THE SOLVE'S OWN ARITHMETIC. The point
-     * of pinning it at every Mix is that the iteration OptoSmooth uses would
+     * of pinning it at every Mix is that the iteration LA Vintage 2A uses would
      * not converge here — three passes at Mix 0.3 came out 6.1 dB short — so
      * this asserts the answer against the audio that actually comes out.
      */
@@ -232,8 +232,8 @@ test('an unknown reference is refused rather than silently defaulted', () => {
  * is not free. `setParam` re-maps the whole panel object and posts it, and the
  * kernel MERGES a partial — so an omitted key means "unchanged", not "null",
  * and a measured ceiling would stay armed against a gain the user now owns.
- * OptoSmooth hit exactly that and needed `withMeasuredClears` to dig out,
- * because its mapping spreads these keys conditionally. FET Punch's maps them
+ * LA Vintage 2A hit exactly that and needed `withMeasuredClears` to dig out,
+ * because its mapping spreads these keys conditionally. LA Classic 76's maps them
  * unconditionally, so the clear already reaches the kernel — this pins that
  * difference rather than leaving it to chance, since making the mapping
  * conditional would reintroduce a silent, preview-only divergence.

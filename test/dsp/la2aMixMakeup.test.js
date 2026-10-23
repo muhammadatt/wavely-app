@@ -1,5 +1,5 @@
 /**
- * OptoSmooth's auto makeup at partial Mix.
+ * LA Vintage 2A's auto makeup at partial Mix.
  *
  * ⚠ THE PLAIN LOOP STALLED HERE, AND ITS OUTPUT LEVEL HID IT. It adds the whole
  * dB error to the makeup each pass, which assumes a dB of makeup moves the

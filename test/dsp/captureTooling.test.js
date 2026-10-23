@@ -2,7 +2,7 @@
  * Run with:  npm test
  *
  * Guards on the shared capture-tooling library under `scripts/lib/`, which the
- * LA-2A and FET Punch reference-measurement suites both build on.
+ * LA-2A and LA Classic 76 reference-measurement suites both build on.
  *
  * These are not tests that the DSP is "correct" — the scripts' own `--selftest`
  * modes do that against a kernel with known constants. They pin the three

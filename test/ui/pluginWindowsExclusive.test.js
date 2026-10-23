@@ -53,7 +53,7 @@ test('a plugin that is also in the chain still opens on its own, as its solo cop
   const w = fresh()
   w.openWindow('plugin-chain')
   w.openWindow('inflator@chain-1')
-  // From the Effects menu: the solo Inflator, with an Apply of its own. Its
+  // From the Effects menu: the solo Cambridge Inflator, with an Apply of its own. Its
   // chain copy keeps its slot; only the chain group's windows close.
   w.openWindow('inflator')
   assert.deepEqual([...w.windows], ['inflator'])

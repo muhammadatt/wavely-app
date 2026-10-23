@@ -14,7 +14,7 @@ export default {
   ],
 
   controls: [
-    { label: '+ Add plugin', text: 'Opens a search of every effect that can run in the chain — type to filter, then press Enter or click. It joins the end, starting from its default settings, and its window opens beside this one. An effect can be added more than once — each slot has its own settings, and the slots are numbered (OptoSmooth 1, OptoSmooth 2)' },
+    { label: '+ Add plugin', text: 'Opens a search of every effect that can run in the chain — type to filter, then press Enter or click. It joins the end, starting from its default settings, and its window opens beside this one. An effect can be added more than once — each slot has its own settings, and the slots are numbered (LA Vintage 2A 1, LA Vintage 2A 2)' },
     { label: 'ON / BYPASS (header)', text: 'Takes the whole chain out of circuit at once so you can hear the file as it is; each slot keeps its own state' },
     { label: 'ON / BYPASS (slot)', text: 'The plugin’s own power switch — the same one as in its window. A bypassed slot keeps its place and is skipped by Apply' },
     { label: 'Arrows and drag', text: 'Move a slot earlier or later. The top slot processes first' },

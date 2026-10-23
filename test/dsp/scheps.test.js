@@ -266,7 +266,7 @@ test('stereo channels stay independent in the EQ and shared in the detector', ()
  * these tests were rewritten around that rather than loosened. The old ones
  * asserted the wet path's LOUD PARTS land on the dry one's, which was the
  * invariant while the trim solved for loud parts; it now solves for the same
- * statistic OptoSmooth does, so that is what has to be checked.
+ * statistic LA Vintage 2A does, so that is what has to be checked.
  *
  * ⚠ AND IT IS CHECKED IN THE SPEECH BAND, because that is the domain the trim
  * solves in — matching broadband would let the Pultec low-frequency moves
@@ -553,7 +553,7 @@ const peakOf = (x) => {
  * it clipped.
  *
  * ⚠ AND THE CEILING IS AT THIS PLUGIN'S OUTPUT, NOT ON THE EMBEDDED LA-2A. In
- * OptoSmooth the kernel is the last stage so its internal ceiling bounds what
+ * LA Vintage 2A the kernel is the last stage so its internal ceiling bounds what
  * leaves; here the post EQ and the dry sum both come after it, so a ceiling
  * inside the kernel would be undone downstream. The test that matters is the
  * one at Mix well below 1, where the dry path — which the kernel never sees at
@@ -580,7 +580,7 @@ test('the ceiling holds the output under the source peak at every blend', () => 
 })
 
 /**
- * The failure pinned as a failure, exactly as OptoSmooth's is: if this ever
+ * The failure pinned as a failure, exactly as LA Vintage 2A's is: if this ever
  * stops overshooting, the blend has become self-bounding and the ceiling is
  * unnecessary — which is a finding, not a passing test.
  */
@@ -684,7 +684,7 @@ test('the default Squash is the calibrated one, not the value it drifted to', ()
  * taper, the ballistics, R37's mechanism, the cell and tube laws — reach it by
  * construction and always have. The bench tuning is module STATE, read when
  * kernel params are BUILT, and Scheps built its own: a tuning session moved
- * OptoSmooth and left Scheps at the shipping constants, with nothing saying so.
+ * LA Vintage 2A and left Scheps at the shipping constants, with nothing saying so.
  *
  * These tests are on the seam rather than the sound, because the seam is what
  * broke: the value has to survive `toKernelParams` and then the allowlist in
@@ -760,7 +760,7 @@ test('the bench cannot override what Scheps pins', () => {
  * reaches the preview and the apply through `toKernelParams`; the trim builds
  * its params by hand in `useScheps.measurementParams` and was solving against
  * the SHIPPING constants while the audio played through the BENCH ones. On
- * OptoSmooth, where the same gap existed, that was worth up to 1.14 dB of makeup
+ * LA Vintage 2A, where the same gap existed, that was worth up to 1.14 dB of makeup
  * error — and a level error is the one thing a distortion bench cannot have,
  * because it exists to be judged by ear and loudness dominates an A/B.
  *

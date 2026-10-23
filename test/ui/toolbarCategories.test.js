@@ -35,10 +35,9 @@ test('every operation sits in its menu, in order', () => {
     edit: [
       'Clipboard: cut', 'Clipboard: copy', 'Clipboard: paste', 'Clipboard: select-all',
       'Arrange: trim', 'Arrange: split', 'Arrange: silence',
-      'Shape: fade', 'Shape: volume',
     ],
-    level: ['normalize', 'loudness', 'auto-leveler'],
-    dynamics: ['soft-clipper', 'opto-smooth', 'fet-punch', 'scheps-parallel', 'inflator'],
+    level: ['normalize', 'loudness', 'fade', 'volume'],
+    dynamics: ['auto-leveler', 'soft-clipper', 'opto-smooth', 'fet-punch', 'scheps-parallel', 'inflator'],
     tone: ['manual-eq', 'voicerx', 'air-band', 'phatass', 'vocal-saturation', 'saturation-bench'],
     clean: [
       'Harshness: hf-softener', 'Harshness: clip-gain-deesser', 'Harshness: hf-limiter',

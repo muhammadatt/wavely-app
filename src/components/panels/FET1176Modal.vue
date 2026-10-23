@@ -201,15 +201,15 @@ async function applyAndClose() {
     :top="110"
     :accent="ACCENT"
     :background="FACEPLATE"
-    brand-lead="FET"
-    brand-tail="PUNCH"
+    brand-lead="LA CLASSIC"
+    brand-tail="76"
     :engaged="fetPreview"
     show-preview
     previewable
     :previewing="state.isPlaying"
     show-apply
     :apply-disabled="!fetPreview"
-    apply-disabled-hint="Turn FET Punch on to apply it"
+    apply-disabled-hint="Turn LA Classic 76 on to apply it"
     @toggle-engaged="togglePreview"
     @toggle-preview="togglePlayback"
     @apply="applyAndClose"
@@ -220,7 +220,7 @@ async function applyAndClose() {
         :presets="presets"
         :accent="ACCENT"
         :disabled="!fetPreview"
-        disabled-hint="Turn FET Punch on to use presets"
+        disabled-hint="Turn LA Classic 76 on to use presets"
       />
     </template>
 

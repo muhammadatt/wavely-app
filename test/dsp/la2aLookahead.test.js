@@ -1,7 +1,7 @@
 /**
  * Run with:  npm test
  *
- * OptoSmooth's optional lookahead. See LOOKAHEAD_MAX_MS in la2aProcessor.js for
+ * LA Vintage 2A's optional lookahead. See LOOKAHEAD_MAX_MS in la2aProcessor.js for
  * what it is for and what it costs; these tests pin the four claims the feature
  * rests on, each of which fails silently if it stops being true.
  *

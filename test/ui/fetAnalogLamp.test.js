@@ -17,7 +17,7 @@ test('the Classic 76 lamp zeroes the FET stage and nothing else', () => {
   assert.deepEqual(restOff, restOn)
 })
 
-test('FET Punch presets carry the lamp, and absent means on', () => {
+test('LA Classic 76 presets carry the lamp, and absent means on', () => {
   assert.ok(FET_PUNCH_PRESETS.every(p => p.params.analog === true))
   const { normalize } = getPluginPresetDef(FET_PUNCH_PRESET_PLUGIN)
   assert.equal(normalize({}).analog, true)

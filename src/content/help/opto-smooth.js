@@ -55,7 +55,7 @@ export default {
   notes: [
     'It levels phrases, not syllables — a 10 ms attack into a release measured in seconds cannot follow a fast envelope, and that is the character rather than a limitation',
     'Peak-referenced makeup means the output can never come out hotter than the source at any setting',
-    'On fast material this can leave the average quieter while making it steadier — reach for FET Punch when you want it louder',
+    'On fast material this can leave the average quieter while making it steadier — reach for LA Classic 76 when you want it louder',
     'Turn HF Emph up when plosives are pushing the compressor around, and it will follow the voice instead',
   ],
 }

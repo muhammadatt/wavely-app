@@ -3,7 +3,7 @@
  *
  * THE AUTO-MAKEUP ANALYSIS WINDOW, and the cold-detector bug that moved it.
  *
- * Reported from use: a file peak-normalised to −1 dBFS came out of FET Punch on
+ * Reported from use: a file peak-normalised to −1 dBFS came out of LA Classic 76 on
  * the stock Vocal Punch preset at −3.14 dBFS, looking as though no makeup had
  * been applied. 8.10 dB had been, against the 10.25 a whole-file measurement
  * asks for — the shortfall being one cold-start transient at the head of a

@@ -640,7 +640,7 @@ const copies = pluginCopies((copy, life) => {
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
-      const pin = pinActiveDocument('OptoSmooth')
+      const pin = pinActiveDocument('LA Vintage 2A')
 
       /**
        * ⚠ RE-MEASURE BEFORE APPLYING, because the knob may be holding a LIVE
@@ -702,7 +702,7 @@ const copies = pluginCopies((copy, life) => {
     registerChainPlugin({
       id: la2aEffect.id,
       windowId,
-      label: 'OptoSmooth',
+      label: 'LA Vintage 2A',
       dispose: life.dispose,
       isActive: () => la2aPreview.value,
       setActive: (on) => { if (la2aPreview.value !== on) togglePreview() },

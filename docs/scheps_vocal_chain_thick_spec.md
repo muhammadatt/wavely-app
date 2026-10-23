@@ -22,7 +22,7 @@ Input ──┬── dry path ────────────────�
         │                                                     │
         └── wet path:                                         ├──▶ Mix (equal-power) ──▶ Output Trim ──▶ Output
              PultecStage(pre)  [Low Cut / High Boost]
-             → OptoSmooth (existing LA-2A engine, reused as-is)
+             → LA Vintage 2A (existing LA-2A engine, reused as-is)
              → PultecStage(post) [Low Boost / High Cut]
 ```
 
