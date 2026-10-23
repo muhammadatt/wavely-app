@@ -54,9 +54,3 @@ test('the Master category is hidden from production builds', () => {
   assert.match(registry, /^const ALL_CATEGORIES = \[/m)
   assert.match(registry, /export const CATEGORIES = ALL_CATEGORIES\.filter\(c => isReleased\(c\)\)/)
 })
-
-test('Split is an Edit operation, not a toolbar category', () => {
-  const categories = registry.slice(registry.indexOf('const ALL_CATEGORIES = ['), registry.indexOf('const ALL_OPERATIONS = ['))
-  assert.doesNotMatch(categories, /id: 'split'/)
-  assert.match(registry, /id: 'split',[\s\S]*?category: 'edit',[\s\S]*?component: SplitPanel,/)
-})

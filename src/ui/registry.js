@@ -59,14 +59,37 @@ const ALL_CATEGORIES = [
     id: 'edit',
     label: 'Edit',
     icon: 'copy',
-    desc: 'Shape and clean up the content',
+    desc: 'Cut, arrange and shape the content',
+    panel: null,
+  },
+  // Effects are split by the job the user came to do rather than kept as one
+  // long list: hit a level, control dynamics, shape tone, clean up problems.
+  {
+    id: 'level',
+    label: 'Level',
+    icon: 'loudness',
+    desc: 'Hit a peak or loudness target, even out phrases',
     panel: null,
   },
   {
-    id: 'effects',
-    label: 'Effects',
-    icon: 'effects',
-    desc: 'Apply to selection or full track',
+    id: 'dynamics',
+    label: 'Dynamics',
+    icon: 'dynamics',
+    desc: 'Compress, limit and add density',
+    panel: null,
+  },
+  {
+    id: 'tone',
+    label: 'Tone',
+    icon: 'eq',
+    desc: 'EQ, air and saturation',
+    panel: null,
+  },
+  {
+    id: 'clean',
+    label: 'Clean',
+    icon: 'clean',
+    desc: 'Tame sibilance, harshness, resonances and hum',
     panel: null,
   },
   {
@@ -84,8 +107,9 @@ const ALL_CATEGORIES = [
 /**
  * Every individual operation.
  *
- *   category  which top-level list it appears in
- *   group     section heading within that list
+ *   category  which top-level list it appears in; null keeps it out of the
+ *             toolbar's lists (it is still in the command palette)
+ *   group     section heading within that list; omitted, no heading
  *   requires  'selection' | 'clipboard' | 'file' | null — gates the row, the
  *             palette entry and the context-menu item
  *   surface   'rail'      opens as a detail view inside the rail
@@ -101,7 +125,7 @@ const ALL_CATEGORIES = [
  *
  * Surface is fixed per category, not per operation: everything under Edit opens
  * in the rail (or runs immediately, for the parameterless verbs), everything
- * under Effects opens as a window. Two adjacent rows in one list never behave
+ * under Level, Dynamics, Tone and Clean opens as a window. Two adjacent rows in one list never behave
  * differently — that inconsistency is what this replaces.
  */
 /**
@@ -118,8 +142,7 @@ const ALL_CATEGORIES = [
  * Kit gallery is also stubbed out of the bundle (vite.config.js).
  */
 const ALL_OPERATIONS = [
-
-  // ---- Edit: clipboard verbs (immediate) ----
+  // ---- Edit (rail, or immediate for the clipboard verbs) ----
   // These duplicate SelectionBar's buttons on purpose. The bar is a shortcut
   // strip; a user browsing "Edit" or searching "copy" still expects to find
   // them, and both surfaces now read from this one definition.
@@ -128,7 +151,7 @@ const ALL_OPERATIONS = [
     label: 'Cut',
     desc: 'Remove the selection and put it on the clipboard',
     category: 'edit',
-    group: 'Selection',
+    group: 'Clipboard',
     icon: 'cut',
     keywords: ['clipboard', 'remove', 'delete', 'ctrl+x'],
     requires: 'selection',
@@ -143,7 +166,7 @@ const ALL_OPERATIONS = [
     label: 'Copy',
     desc: 'Put the selection on the clipboard',
     category: 'edit',
-    group: 'Selection',
+    group: 'Clipboard',
     icon: 'copy',
     keywords: ['clipboard', 'duplicate', 'ctrl+c'],
     requires: 'selection',
@@ -158,7 +181,7 @@ const ALL_OPERATIONS = [
     label: 'Paste',
     desc: 'Insert the clipboard at the playhead',
     category: 'edit',
-    group: 'Selection',
+    group: 'Clipboard',
     icon: 'paste',
     keywords: ['clipboard', 'insert', 'ctrl+v'],
     requires: 'clipboard',
@@ -173,21 +196,19 @@ const ALL_OPERATIONS = [
     label: 'Select All',
     desc: 'Select the entire track',
     category: 'edit',
-    group: 'Selection',
+    group: 'Clipboard',
     icon: 'selectAll',
     keywords: ['everything', 'whole', 'ctrl+a'],
     requires: null,
     surface: 'immediate',
     action: editor => editor.selectAll(),
   },
-
-  // ---- Edit (rail) ----
   {
     id: 'trim',
     label: 'Trim',
     desc: 'Remove audio outside or inside your selection',
     category: 'edit',
-    group: 'Selection',
+    group: 'Arrange',
     icon: 'trim',
     keywords: ['crop', 'cut', 'keep', 'remove', 'outside', 'inside'],
     requires: 'selection',
@@ -201,7 +222,7 @@ const ALL_OPERATIONS = [
     label: 'Split',
     desc: 'Cut the clip in two at the playhead or the selection edges',
     category: 'edit',
-    group: 'Selection',
+    group: 'Arrange',
     icon: 'split',
     keywords: ['divide', 'cut', 'separate', 'clips', 'pieces', 'playhead', 'razor'],
     requires: 'file',
@@ -213,7 +234,7 @@ const ALL_OPERATIONS = [
     label: 'Silence',
     desc: 'Replace the selected region with silence',
     category: 'edit',
-    group: 'Selection',
+    group: 'Arrange',
     icon: 'silence',
     keywords: ['mute', 'blank', 'quiet', 'erase'],
     requires: 'selection',
@@ -225,7 +246,7 @@ const ALL_OPERATIONS = [
     label: 'Fade',
     desc: 'Shape the volume curve at the selection edges',
     category: 'edit',
-    group: 'Level',
+    group: 'Shape',
     icon: 'fade',
     keywords: ['fade in', 'fade out', 'ramp', 'curve', 'taper'],
     requires: 'selection',
@@ -237,7 +258,7 @@ const ALL_OPERATIONS = [
     label: 'Volume',
     desc: 'Adjust the volume of the selected region',
     category: 'edit',
-    group: 'Level',
+    group: 'Shape',
     icon: 'volume',
     keywords: ['gain', 'louder', 'quieter', 'amplify', 'db'],
     requires: 'selection',
@@ -245,8 +266,7 @@ const ALL_OPERATIONS = [
     component: VolumePanel,
   },
 
-
-  // ---- Effects (windows) ----
+  // ---- Level (windows) ----
   {
     id: 'normalize',
     // "Normalize" on its own stopped being a name the moment there were two of
@@ -256,8 +276,7 @@ const ALL_OPERATIONS = [
     // the same word.
     label: 'Peak Normalize',
     desc: 'Put the loudest peak at a chosen level',
-    category: 'effects',
-    group: 'Dynamics',
+    category: 'level',
     icon: 'normalize',
     keywords: ['peak', 'level', 'maximize', 'gain', 'amplify'],
     requires: 'selection',
@@ -268,8 +287,7 @@ const ALL_OPERATIONS = [
     id: 'loudness',
     label: 'Loudness Normalize',
     desc: 'Hit a delivery target like ACX, Spotify or -16 LUFS',
-    category: 'effects',
-    group: 'Dynamics',
+    category: 'level',
     icon: 'loudness',
     keywords: [
       'lufs', 'loudness', 'level', 'acx', 'spotify', 'apple', 'youtube',
@@ -280,27 +298,46 @@ const ALL_OPERATIONS = [
     surface: 'window',
     component: LoudnessWindow,
   },
-  // The rack every engaged plugin plays through — reorder, bypass, and apply
-  // them all at once. First in Effects because it is how the rest combine.
   {
-    id: 'plugin-chain',
-    label: 'Plugin Chain',
-    desc: 'Order, bypass and apply every active plugin at once',
-    category: 'effects',
-    group: 'Chain',
-    icon: 'chain',
-    keywords: ['chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],
+    id: 'auto-leveler',
+    label: 'Auto Leveler',
+    desc: 'Even out level between phrases',
+    category: 'level',
+    icon: 'autolevel',
+    keywords: [
+      'level', 'leveller', 'leveler', 'auto level', 'ride', 'gain riding',
+      'clip gain', 'consistency', 'even', 'volume', 'quiet passage', 'acx',
+    ],
     requires: 'selection',
-    feature: 'pluginChainApply',
+    feature: 'autoLevel',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
-    component: PluginChainWindow,
+    component: AutoLevelModal,
+  },
+
+  // ---- Dynamics (windows) ----
+  {
+    // Filed under Dynamics, ahead of the compressors in the panel: the whole
+    // point is to run before them, taming plosive peaks so they don't slip
+    // past a compressor's attack and get amplified by makeup gain.
+    id: 'soft-clipper',
+    label: 'Soft Clipper',
+    desc: 'Tame transient peaks before compression',
+    category: 'dynamics',
+    icon: 'clipper',
+    keywords: ['clip', 'clipper', 'transient', 'plosive', 'peak', 'soft clip', 'saturation'],
+    requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
+    surface: 'window',
+    component: SoftClipperModal,
   },
   {
     id: 'opto-smooth',
     label: 'Opto Comp',
     desc: 'Subtle, transparent compressor',
-    category: 'effects',
-    group: 'Dynamics',
+    category: 'dynamics',
     icon: 'opto',
     keywords: ['la-2a', 'la2a', 'compressor', 'opto', 'tube', 'leveler', 'smooth'],
     requires: 'selection',
@@ -313,8 +350,7 @@ const ALL_OPERATIONS = [
     id: 'fet-punch',
     label: 'FET Punch',
     desc: 'Peak compressor/limiter',
-    category: 'effects',
-    group: 'Dynamics',
+    category: 'dynamics',
     icon: 'fet',
     keywords: ['1176', 'compressor', 'fet', 'punch', 'aggressive', 'fast'],
     requires: 'selection',
@@ -324,23 +360,6 @@ const ALL_OPERATIONS = [
     component: FET1176Modal,
   },
   {
-    // Filed under Dynamics, ahead of the compressors in the panel: the whole
-    // point is to run before them, taming plosive peaks so they don't slip
-    // past a compressor's attack and get amplified by makeup gain.
-    id: 'soft-clipper',
-    label: 'Soft Clipper',
-    desc: 'Tame transient peaks before compression',
-    category: 'effects',
-    group: 'Dynamics',
-    icon: 'clipper',
-    keywords: ['clip', 'clipper', 'transient', 'plosive', 'peak', 'soft clip', 'saturation'],
-    requires: 'selection',
-    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
-    chain: true,
-    surface: 'window',
-    component: SoftClipperModal,
-  },
-  {
     // Filed under Dynamics rather than Tone: the two Pultec stages are there to
     // steer the compressor's sidechain, and what the user is reaching for is a
     // parallel compression sound. The EQ is the mechanism, not the offer.
@@ -348,8 +367,7 @@ const ALL_OPERATIONS = [
     release: 'dev',
     label: 'Scheps Parallel',
     desc: 'Blend in a squashed, EQ-steered copy',
-    category: 'effects',
-    group: 'Dynamics',
+    category: 'dynamics',
     icon: 'parallel',
     keywords: [
       'scheps', 'parallel', 'pultec', 'eqp-1a', 'la-2a', 'trick', 'blend',
@@ -362,60 +380,10 @@ const ALL_OPERATIONS = [
     component: SchepsModal,
   },
   {
-    id: 'vocal-saturation',
-    release: 'dev',
-    label: 'Tube Saturation',
-    desc: 'Warm tube-like saturation',
-    category: 'effects',
-    group: 'Tone',
-    icon: 'saturation',
-    keywords: ['tube', 'warmth', 'harmonic', 'drive', 'distortion', 'analog'],
-    requires: 'selection',
-    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
-    chain: true,
-    surface: 'window',
-    component: VocalSaturationWindow,
-  },
-  {
-    id: 'saturation-bench',
-    release: 'dev',
-    label: 'Saturation Bench',
-    desc: 'Stack layers of saturation, each on its own band',
-    category: 'effects',
-    group: 'Tone',
-    icon: 'saturation',
-    keywords: [
-      'saturation', 'saturate', 'exciter', 'excite', 'harmonic', 'warmth', 'drive',
-      'distortion', 'waveshaper', 'tanh', 'quartic', 'layers', 'bench',
-    ],
-    requires: 'selection',
-    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
-    chain: true,
-    surface: 'window',
-    component: SaturationBenchModal,
-  },
-  {
-    // Psycho Harmonic Analog Tape * Saturation Simulator: the HF Limiter's
-    // Warmth circuit, moved out, plus its shelf with shape and timing pinned.
-    id: 'phatass',
-    label: 'PHAT*SS',
-    desc: 'Tape-style warmth and a rounded top end',
-    category: 'effects',
-    group: 'Tone',
-    icon: 'tape',
-    keywords: ['tape', 'phatass', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'odd', 'even'],
-    requires: 'selection',
-    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
-    chain: true,
-    surface: 'window',
-    component: PhatassModal,
-  },
-  {
     id: 'inflator',
     label: 'Inflator',
     desc: 'Raise quiet detail without raising the ceiling',
-    category: 'effects',
-    group: 'Dynamics',
+    category: 'dynamics',
     icon: 'saturation',
     keywords: [
       'inflator', 'inflate', 'sonnox', 'density', 'loudness', 'punch',
@@ -427,12 +395,13 @@ const ALL_OPERATIONS = [
     surface: 'window',
     component: InflatorWindow,
   },
+
+  // ---- Tone (windows) ----
   {
     id: 'manual-eq',
     label: 'EQ',
     desc: 'Parametric equalizer',
-    category: 'effects',
-    group: 'Tone',
+    category: 'tone',
     icon: 'eq',
     keywords: ['equalizer', 'equaliser', 'eq', 'parametric', 'frequency', 'tone', 'bass', 'treble', 'filter'],
     requires: 'selection',
@@ -449,8 +418,7 @@ const ALL_OPERATIONS = [
     release: 'dev',
     label: 'VoiceRx',
     desc: 'Find what’s wrong with a voice recording',
-    category: 'effects',
-    group: 'Tone',
+    category: 'tone',
     icon: 'voicerx',
     keywords: ['voice', 'diagnose', 'analyze', 'analyse', 'muddy', 'boxy', 'harsh', 'nasal', 'eq', 'doctor', 'fix'],
     requires: 'selection',
@@ -463,8 +431,7 @@ const ALL_OPERATIONS = [
     id: 'air-band',
     label: 'Air Boost',
     desc: 'Add air and sparkle',
-    category: 'effects',
-    group: 'Tone',
+    category: 'tone',
     icon: 'air',
     keywords: ['air', 'maag', 'shelf', 'high', 'presence', 'sheen', 'treble', 'eq'],
     requires: 'selection',
@@ -474,44 +441,77 @@ const ALL_OPERATIONS = [
     component: AirBandModal,
   },
   {
-    id: 'resonance-suppressor',
-    label: 'Reso Smooth',
-    desc: 'Soothe harsh resonances',
-    category: 'effects',
-    group: 'Tone',
-    icon: 'resonance',
-    keywords: ['resonance', 'soothe', 'harsh', 'ring', 'room mode', 'dynamic eq', 'peak'],
+    // Psycho Harmonic Analog Tape * Saturation Simulator: the HF Limiter's
+    // Warmth circuit, moved out, plus its shelf with shape and timing pinned.
+    id: 'phatass',
+    label: 'PHAT*SS',
+    desc: 'Tape-style warmth and a rounded top end',
+    category: 'tone',
+    icon: 'tape',
+    keywords: ['tape', 'phatass', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'odd', 'even'],
     requires: 'selection',
     // Runs live in the playback chain, so it can take a slot — see chainPlugins().
     chain: true,
     surface: 'window',
-    component: ResonanceModal,
+    component: PhatassModal,
   },
   {
-    id: 'auto-leveler',
-    label: 'Auto Leveler',
-    desc: 'Even out level between phrases',
-    category: 'effects',
-    group: 'Level',
-    icon: 'autolevel',
-    keywords: [
-      'level', 'leveller', 'leveler', 'auto level', 'ride', 'gain riding',
-      'clip gain', 'consistency', 'even', 'volume', 'quiet passage', 'acx',
-    ],
+    id: 'vocal-saturation',
+    release: 'dev',
+    label: 'Tube Saturation',
+    desc: 'Warm tube-like saturation',
+    category: 'tone',
+    icon: 'saturation',
+    keywords: ['tube', 'warmth', 'harmonic', 'drive', 'distortion', 'analog'],
     requires: 'selection',
-    feature: 'autoLevel',
     // Runs live in the playback chain, so it can take a slot — see chainPlugins().
     chain: true,
     surface: 'window',
-    component: AutoLevelModal,
+    component: VocalSaturationWindow,
+  },
+  {
+    id: 'saturation-bench',
+    release: 'dev',
+    label: 'Saturation Bench',
+    desc: 'Stack layers of saturation, each on its own band',
+    category: 'tone',
+    icon: 'saturation',
+    keywords: [
+      'saturation', 'saturate', 'exciter', 'excite', 'harmonic', 'warmth', 'drive',
+      'distortion', 'waveshaper', 'tanh', 'quartic', 'layers', 'bench',
+    ],
+    requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
+    surface: 'window',
+    component: SaturationBenchModal,
+  },
+
+  // ---- Clean (windows) ----
+  {
+    // The real-time de-esser: dips the top end only while a consonant spikes.
+    // The Sibilance Editor above is the event-based version: it analyses the
+    // selection and rides clip gain on each event.
+    id: 'hf-softener',
+    label: 'De-Esser',
+    desc: 'Soften harsh S sounds, keep the air',
+    category: 'clean',
+    group: 'Harshness',
+    icon: 'softener',
+    keywords: ['sibilance', 'sibilant', 'harsh', 'hard', 'ess', 'de-ess', 'deesser', 'hf softener', 'soft', 'soften', 'dynamic shelf', 'high shelf', 'warmth', 'fatso', 'air'],
+    requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
+    surface: 'window',
+    component: DeEsserModal,
   },
   {
     id: 'clip-gain-deesser',
     release: 'dev',
     label: 'Sibilance Editor',
     desc: 'Find harsh S and F events and turn each down',
-    category: 'effects',
-    group: 'Clean',
+    category: 'clean',
+    group: 'Harshness',
     icon: 'deesser',
     keywords: ['sibilance editor', 'sibilance', 'sibilant', 'harsh', 'ess', 'fricative', 'clip gain'],
     requires: 'selection',
@@ -522,28 +522,11 @@ const ALL_OPERATIONS = [
     component: SibilanceEditorModal,
   },
   {
-    // The real-time de-esser: dips the top end only while a consonant spikes.
-    // The Sibilance Editor above is the event-based version: it analyses the
-    // selection and rides clip gain on each event.
-    id: 'hf-softener',
-    label: 'De-Esser',
-    desc: 'Soften harsh S sounds, keep the air',
-    category: 'effects',
-    group: 'Clean',
-    icon: 'softener',
-    keywords: ['sibilance', 'sibilant', 'harsh', 'hard', 'ess', 'de-ess', 'deesser', 'hf softener', 'soft', 'soften', 'dynamic shelf', 'high shelf', 'warmth', 'fatso', 'air'],
-    requires: 'selection',
-    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
-    chain: true,
-    surface: 'window',
-    component: DeEsserModal,
-  },
-  {
     id: 'hf-limiter',
     label: 'HF Limiter',
     desc: 'Put a ceiling on brightness, harshness and edges',
-    category: 'effects',
-    group: 'Clean',
+    category: 'clean',
+    group: 'Harshness',
     icon: 'hflimiter',
     keywords: ['high frequency', 'hf', 'treble', 'limiter', 'bright', 'harsh', 'sibilance', 'transient', 'hifal', 'limen', 'fatso', 'shelf', 'ceiling'],
     requires: 'selection',
@@ -553,14 +536,28 @@ const ALL_OPERATIONS = [
     component: HFLimiterModal,
   },
   {
+    id: 'resonance-suppressor',
+    label: 'Reso Smooth',
+    desc: 'Soothe harsh resonances',
+    category: 'clean',
+    group: 'Harshness',
+    icon: 'resonance',
+    keywords: ['resonance', 'soothe', 'harsh', 'ring', 'room mode', 'dynamic eq', 'peak'],
+    requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
+    surface: 'window',
+    component: ResonanceModal,
+  },
+  {
     // Real-time plosive repair: the low thump of a P or B, and the top-end
     // burst of a T, K or P release (the latter moved out of the De-Esser).
     id: 'plosive',
     release: 'dev',
     label: 'Plosive Tamer',
     desc: 'Take the thump out of P and B, the spit out of T and K',
-    category: 'effects',
-    group: 'Clean',
+    category: 'clean',
+    group: 'Pops & Hum',
     icon: 'plosive',
     keywords: ['plosive', 'pop', 'popping', 'p pop', 'thump', 'boom', 'breath blast', 'pop filter', 'deplosive', 'de-plosive', 'burst', 'spit'],
     requires: 'selection',
@@ -573,8 +570,8 @@ const ALL_OPERATIONS = [
     id: 'hum-remover',
     label: 'Hum Remover',
     desc: 'Remove electrical hum',
-    category: 'effects',
-    group: 'Clean',
+    category: 'clean',
+    group: 'Pops & Hum',
     icon: 'hum',
     keywords: ['hum', 'buzz', 'mains', 'ground loop', '50hz', '60hz', 'notch', 'electrical'],
     requires: 'selection',
@@ -583,17 +580,15 @@ const ALL_OPERATIONS = [
     surface: 'window',
     component: HumRemoverModal,
   },
-
-  // ---- Analysis ----
   // Its own group because it is the one entry here that measures rather than
   // changes: it needs a file and a transport, not a selection, and it has no
-  // Apply. Filing it under Dynamics or Tone would put a row that alters nothing
-  // in a list where every other row does.
+  // Apply. Filed under Clean because finding a problem is what it is mostly
+  // used for, and last so a row that alters nothing sits apart from the rest.
   {
     id: 'spectrum-analyzer',
     label: 'Spectrum Analyzer',
     desc: 'See what is in the file, frequency by frequency',
-    category: 'effects',
+    category: 'clean',
     group: 'Analysis',
     icon: 'spectrum',
     keywords: [
@@ -611,13 +606,30 @@ const ALL_OPERATIONS = [
     release: 'dev',
     label: 'Modula Kit',
     desc: 'Developer gallery of the plugin control-surface kit',
-    category: 'effects',
+    category: 'clean',
     group: 'Analysis',
     icon: 'spectrum',
     keywords: ['modula', 'kit', 'gallery', 'design', 'components'],
     requires: 'file',
     surface: 'window',
     component: ModulaGalleryWindow,
+  },
+
+  // ---- Not in a toolbar category ----
+  // The rack every engaged plugin plays through — reorder, bypass, and apply
+  // them all at once. Its door is the toolbar's Chain button, which is always
+  // on screen, so it takes no row in a category list; the palette still finds it.
+  {
+    id: 'plugin-chain',
+    label: 'Plugin Chain',
+    desc: 'Order, bypass and apply every active plugin at once',
+    category: null,
+    icon: 'chain',
+    keywords: ['chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],
+    requires: 'selection',
+    feature: 'pluginChainApply',
+    surface: 'window',
+    component: PluginChainWindow,
   },
 ]
 
