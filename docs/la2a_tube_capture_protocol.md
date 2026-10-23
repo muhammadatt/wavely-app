@@ -1,4 +1,4 @@
-# OptoSmooth Tube Stage — LAEA Capture Protocol
+# LA Vintage 2A Tube Stage — LAEA Capture Protocol
 
 > Companion tooling: `scripts/la2a-tube-capture-tones.mjs`, `scripts/la2a-tube-fit.mjs`
 > Reference: `TUBE_DRIVE_LIN` / `TUBE_BIAS` in `src/audio/la2aProcessor.js`
@@ -121,7 +121,7 @@ produce it, because its Gain drives a `tanh` that saturates.
 
 ## What this answers, and what it does not
 
-OptoSmooth's output tube stage is a fixed, level-driven `tanh` waveshaper:
+LA Vintage 2A's output tube stage is a fixed, level-driven `tanh` waveshaper:
 `f(x) = (tanh(d·x + b) − tanh(b)) / (d·(1 − tanh(b)²))`. Its two constants,
 `TUBE_DRIVE_LIN` (`d`) and `TUBE_BIAS` (`b`), are calibrated against a single
 published fact — the LA-2A's own spec of under 0.5% THD at nominal level — at

@@ -38,7 +38,7 @@ export const SR = 44100
 
 /**
  * The floor every plugin's seams must stay under, dBFS. Measured at
- * CHUNK_RUN_IN_S the worst is −144.5 (ResoTame and PHAT*SS CLEAN); a 16-bit
+ * CHUNK_RUN_IN_S the worst is −144.5 (Reso Soothe and PHAT*SS CLEAN); a 16-bit
  * LSB is −90.3, so a regression past this floor is still far from audible —
  * the floor catches it while it is a number and not yet a sound.
  */
@@ -63,7 +63,7 @@ function memo(make) {
 export const MATERIALS = Object.fromEntries(Object.entries({
   /**
    * Syllable-like bursts over a wandering low tone, with noise and a 7 kHz
-   * partial, phrased loud / quiet. The first material; ResoTame's memory shows
+   * partial, phrased loud / quiet. The first material; Reso Soothe's memory shows
    * here (−67 dB re peak at 2 s of run-in).
    */
   bursts() {
@@ -177,7 +177,7 @@ function phatass(p) {
 export const PLUGINS = [
   ['PHAT*SS CLEAN, Warmth and TAPE up, 7.5 ips', phatass({ warmth: 8, tape: 8, hf: 'ips7' })],
   ['PHAT*SS THICK', phatass({ warmth: 5, tape: 8, tapeCurve: 'hysteresis' })],
-  ['ResoTame, on its hop grid', () => ({
+  ['Reso Soothe, on its hop grid', () => ({
     stages: [{ renderer: 'resonance', kernelParams: toResonanceKernelParams(RESONANCE_DEFAULTS) }],
     latency: RESONANCE_FRAME_SIZE, preRollS: 0, grid: resonanceHopSamples(RESONANCE_FRAME_SIZE),
   })],
@@ -189,7 +189,7 @@ export const PLUGINS = [
     stages: [{ renderer: 'scheps', kernelParams: toSchepsKernelParams(SCHEPS_DEFAULTS) }],
     latency: SCHEPS_LATENCY_SAMPLES, preRollS: SCHEPS_PREROLL_S,
   })],
-  ['OptoSmooth at Peak Reduction 70', () => {
+  ['LA Vintage 2A at Peak Reduction 70', () => {
     const merged = { ...LA2A_DEFAULTS, peakReduction: 70 }
     return {
       stages: [{ renderer: 'la2a', kernelParams: toLA2AKernelParams(merged) }],
@@ -199,7 +199,7 @@ export const PLUGINS = [
   ['HF Softener, defaults', hfSoftener({})],
   ['HF Softener, Soften 6', hfSoftener({ soften: 6 })],
   ['HF Softener, Reso and Soften', hfSoftener({ soften: 6, resoAmount: 50 })],
-  ['FET Punch at Input 70', () => ({
+  ['LA Classic 76 at Input 70', () => ({
     stages: [{ renderer: 'fet1176', kernelParams: toFETKernelParams({ ...FET1176_DEFAULTS, input: 70 }) }],
     latency: FET1176_LATENCY_SAMPLES, preRollS: FET1176_PREROLL_S,
   })],

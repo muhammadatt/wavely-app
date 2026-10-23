@@ -12,15 +12,15 @@
  * QUESTION: does anything in the kernel LATCH, or does all of its state decay?
  *
  *   decays only  -> a finite pre-roll reaches BIT-EXACT
- *     OptoSmooth   ballistics driven by the input
+ *     LA Vintage 2A   ballistics driven by the input
  *     Scheps       holds the LA-2A kernel, so it inherits that
  *
  *   latches      -> no pre-roll can ever be exact
- *     FET Punch    `trkInPeak` is a running maximum, never decays
+ *     LA Classic 76    `trkInPeak` is a running maximum, never decays
  *     Tube Sat     sticky skew sign, and a valley floor that only creeps up
  *
  *   neither      -> not a convergence problem at all
- *     ResoTame     an STFT frame-PHASE error; see its own test below
+ *     Reso Soothe     an STFT frame-PHASE error; see its own test below
  *     Auto Leveler no kernel and no state: preview schedules the solved gain
  *                  curve onto an AudioParam and apply expands the same segment
  *                  list, so the two are equal by construction rather than by
@@ -96,10 +96,10 @@ test('a cold apply really does differ — the premise of the whole pre-roll', ()
   // If this ever stops being true the pre-roll is dead weight and should come
   // out of applyWorkletRegion rather than being carried indefinitely.
   const cold = worstDiff(processLA2ABuffer, { peakReduction: 75, mode: 'limit' }, 0)
-  assert.ok(cold > 1e-3, `a cold OptoSmooth apply should differ; got ${cold.toExponential(2)}`)
+  assert.ok(cold > 1e-3, `a cold LA Vintage 2A apply should differ; got ${cold.toExponential(2)}`)
 })
 
-test('OptoSmooth is BIT-EXACT at its wired pre-roll', () => {
+test('LA Vintage 2A is BIT-EXACT at its wired pre-roll', () => {
   // Nothing here latches: every piece of state is driven by the input and its
   // influence decays, so after a few time constants the state is a function of
   // recent input alone.
@@ -109,7 +109,7 @@ test('OptoSmooth is BIT-EXACT at its wired pre-roll', () => {
     { peakReduction: 90, mode: 'limit' },
   ]) {
     const diff = worstDiff(processLA2ABuffer, params, Math.round(LA2A_PREROLL_S * SR))
-    assert.equal(diff, 0, `OptoSmooth ${JSON.stringify(params)} not exact: ${diff.toExponential(2)}`)
+    assert.equal(diff, 0, `LA Vintage 2A ${JSON.stringify(params)} not exact: ${diff.toExponential(2)}`)
   }
 })
 
@@ -118,7 +118,7 @@ test('Scheps is BIT-EXACT at its wired pre-roll, because it holds that kernel', 
   assert.equal(diff, 0, `Scheps not exact: ${diff.toExponential(2)}`)
 })
 
-test('⚠ ResoTame is grid-phase limited, which a pre-roll cannot fix', () => {
+test('⚠ Reso Soothe is grid-phase limited, which a pre-roll cannot fix', () => {
   // NOT A CONVERGENCE PROBLEM, WHICH IS WHY NO PRE-ROLL IS WIRED FOR IT. An
   // STFT reconstructs on a grid anchored at sample 0 of whatever it is handed,
   // so what decides agreement is the ABSOLUTE phase `(regionStart - preRoll) %
@@ -133,7 +133,7 @@ test('⚠ ResoTame is grid-phase limited, which a pre-roll cannot fix', () => {
   const settledOnGrid = hop * 861
   assert.equal(
     worstDiffAt(processResonanceBuffer, {}, hop * 173, settledOnGrid), 0,
-    'with the phase preserved, ResoTame should agree exactly',
+    'with the phase preserved, Reso Soothe should agree exactly',
   )
   // Seven samples off, and it does not — despite an identical amount of
   // lead-in. That is the proof it is phase and not convergence.
@@ -192,7 +192,7 @@ function historyStillShowsThrough(processFn, params, leadInSamples) {
 test('the wired pre-roll exceeds the kernels\' actual memory', () => {
   // WHAT MAKES THE PRE-ROLL CONSTANTS SOUND, and the guard if a time constant
   // is ever lengthened past them. Feeding two histories 33 dB apart and then an
-  // identical lead-in, OptoSmooth's output over the region is IDENTICAL — its
+  // identical lead-in, LA Vintage 2A's output over the region is IDENTICAL — its
   // state is fully determined by the last 2 s, which is exactly why 2 s of
   // pre-roll reproduces the preview bit for bit.
   //
@@ -200,12 +200,12 @@ test('the wired pre-roll exceeds the kernels\' actual memory', () => {
   // NOTHING FOR THESE TWO. A seed only sets where the state begins, and by the
   // end of a lead-in longer than the memory, where it began has been forgotten.
   // Seeding is a way to shrink a cold-start TRANSIENT, not a way to make two
-  // different starting points agree — FET Punch already seeds on its first
+  // different starting points agree — LA Classic 76 already seeds on its first
   // block and is the one stage that cannot converge at all.
   assert.equal(
     historyStillShowsThrough(processLA2ABuffer, { peakReduction: 75, mode: 'limit' }, SR * LA2A_PREROLL_S),
     0,
-    'OptoSmooth: history before the pre-roll window should not reach the output',
+    'LA Vintage 2A: history before the pre-roll window should not reach the output',
   )
   assert.ok(
     historyStillShowsThrough(processSchepsBuffer, {}, SR * SCHEPS_PREROLL_S) < 1e-6,
@@ -216,7 +216,7 @@ test('the wired pre-roll exceeds the kernels\' actual memory', () => {
 test('⚠ the soft clipper\'s adaptive mode is why it stays deprecated', () => {
   // Its memory far outruns any pre-roll anyone would wire: with a 2 s lead-in,
   // history from before that lead-in still reaches the output at ~0.9 — three
-  // orders of magnitude past OptoSmooth's exact zero. The tracker has ~20 dB to
+  // orders of magnitude past LA Vintage 2A's exact zero. The tracker has ~20 dB to
   // travel from SPEECH_INIT_HOLD_DB at a 3 s time constant.
   //
   // ⚠ AND THE SHIPPING MODE IS FINE. `fixed` has no tracker to be cold and is
@@ -244,10 +244,10 @@ test('⚠ the soft clipper\'s adaptive mode is why it stays deprecated', () => {
  * 0 when the release was fitted to FETish, which has no exposure limb, and the
  * worst difference over a 2 s lead-in went from 1.64e-1 to 7.11e-15.
  *
- * `preRollSamples` is wired for FET Punch now. What is pinned here is that it
+ * `preRollSamples` is wired for LA Classic 76 now. What is pinned here is that it
  * earns it.
  */
-test('FET Punch converges on a pre-roll, now that the tail is gone', () => {
+test('LA Classic 76 converges on a pre-roll, now that the tail is gone', () => {
   const cold = worstDiff(processFET1176Buffer, { inputDrive: 70, attack: 1, release: 1 }, 0)
   assert.ok(cold > 1e-2, `no lead-in should be visibly wrong; got ${cold.toExponential(2)}`)
 
@@ -309,7 +309,7 @@ test('the input-alignment offset introduces no state, so the pre-roll still conv
     const diff = worstDiff(
       processLA2ABuffer, { peakReduction: 60, inputAlignDb }, Math.round(LA2A_PREROLL_S * SR),
     )
-    assert.equal(diff, 0, `OptoSmooth align ${inputAlignDb} dB not exact: ${diff.toExponential(2)}`)
+    assert.equal(diff, 0, `LA Vintage 2A align ${inputAlignDb} dB not exact: ${diff.toExponential(2)}`)
   }
   const scheps = worstDiff(processSchepsBuffer, { inputAlignDb: -6 }, Math.round(SCHEPS_PREROLL_S * SR))
   assert.ok(scheps < 1e-7, `Scheps with alignment not exact: ${scheps.toExponential(2)}`)

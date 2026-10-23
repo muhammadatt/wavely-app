@@ -64,7 +64,7 @@ test('the re-voicing debt is recorded, not silent', () => {
 })
 
 /**
- * ⚠ THE OFFSET GOES ON THE DETECTOR, NOT ON `inputLin`. OptoSmooth can ride the
+ * ⚠ THE OFFSET GOES ON THE DETECTOR, NOT ON `inputLin`. LA Vintage 2A can ride the
  * side-chain drive because `scDriveDb` is side-chain only; here `inputLin` gains
  * the AUDIO as well, so folding the offset into it would raise the output level
  * and drive the saturator harder — the "input gain that has to undo itself

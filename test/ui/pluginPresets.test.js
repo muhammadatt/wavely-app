@@ -66,7 +66,7 @@ function withStorage(fn) {
 function isolate() {
   resetPluginPresets()
   registerPluginPresets()
-  // ResoTame registers only the LIVE model's table under its own id, so the
+  // Reso Soothe registers only the LIVE model's table under its own id, so the
   // other model's collection has to be asked for by name.
   registerResoTamePresets(DEFAULT_TARGETING === 'zones' ? 'focus' : 'zones')
 }
@@ -332,12 +332,12 @@ test('paramsEqual is structural over nested arrays and objects', () => {
 const RESO_TAME_PRESETS = resoTamePresetsFor(DEFAULT_TARGETING)
 
 const COLLECTIONS = [
-  ['OptoSmooth', OPTO_SMOOTH_PRESET_PLUGIN, OPTO_SMOOTH_PRESETS, OPTO_SMOOTH_PARAM_KEYS],
-  ['FET Punch', FET_PUNCH_PRESET_PLUGIN, FET_PUNCH_PRESETS, FET_PUNCH_PARAM_KEYS],
-  ['ResoTame', RESO_TAME_PRESET_PLUGIN, RESO_TAME_PRESETS, RESO_TAME_PARAM_KEYS],
+  ['LA Vintage 2A', OPTO_SMOOTH_PRESET_PLUGIN, OPTO_SMOOTH_PRESETS, OPTO_SMOOTH_PARAM_KEYS],
+  ['LA Classic 76', FET_PUNCH_PRESET_PLUGIN, FET_PUNCH_PRESETS, FET_PUNCH_PARAM_KEYS],
+  ['Reso Soothe', RESO_TAME_PRESET_PLUGIN, RESO_TAME_PRESETS, RESO_TAME_PARAM_KEYS],
   // The other targeting model's table is authored content, not dead code: the
   // flag is what reaches it, and it has to hold up to the same rules.
-  ['ResoTame (zones)', resoTamePluginId('zones'), RESO_TAME_ZONE_PRESETS, RESO_TAME_PARAM_KEYS],
+  ['Reso Soothe (zones)', resoTamePluginId('zones'), RESO_TAME_ZONE_PRESETS, RESO_TAME_PARAM_KEYS],
 ]
 
 for (const [label, pluginId, presets, keys] of COLLECTIONS) {
@@ -406,7 +406,7 @@ test('the auto-owned makeup knob is not part of the comparison while AUTO is on'
   assert.equal(matchPreset(FET_PUNCH_PRESET_PLUGIN, fetAuto), FET_PUNCH_PRESETS[0].id)
 })
 
-test('ResoTame presets carry neither the reference mode nor any monitoring state', () => {
+test('Reso Soothe presets carry neither the reference mode nor any monitoring state', () => {
   isolate()
   // refMode is a build-level research override and the two references disagree
   // about what Selectivity measures by an order of magnitude. The monitoring
@@ -470,7 +470,7 @@ test('normalisation cannot switch the targeting model out from under a session',
   assert.equal(dropped.focus, null, 'a focus patch survived into a zone collection')
 })
 
-test('every ResoTame focus patch is one the panel could have produced', () => {
+test('every Reso Soothe focus patch is one the panel could have produced', () => {
   isolate()
   const R = RESONANCE_FOCUS_RANGES
   for (const p of RESO_TAME_FOCUS_PRESETS) {
@@ -511,7 +511,7 @@ test('a focus node that stands a band down carries a NEGATIVE amount', () => {
   assert.ok(stoodDown.biasDb < 0, 'Sibilance Tame does not stand the bottom down')
 })
 
-test('every ResoTame zone set is one the editor could have produced', () => {
+test('every Reso Soothe zone set is one the editor could have produced', () => {
   isolate()
   const R = RESONANCE_ZONE_RANGES
   for (const p of RESO_TAME_ZONE_PRESETS) {
@@ -536,7 +536,7 @@ test('every ResoTame zone set is one the editor could have produced', () => {
   }
 })
 
-test('ResoTame normalisation repairs a stored zone set rather than passing it on', () => {
+test('Reso Soothe normalisation repairs a stored zone set rather than passing it on', () => {
   isolate()
   // Unlike a knob value, a stored zone set never went through a control. Out of
   // order, out of range, and stopping short of the top are all reachable from
@@ -560,7 +560,7 @@ test('ResoTame normalisation repairs a stored zone set rather than passing it on
   }
 })
 
-test('ResoTame normalisation repairs a stored focus patch too', () => {
+test('Reso Soothe normalisation repairs a stored focus patch too', () => {
   isolate()
   const repaired = pickParams(resoTamePluginId('focus'), {
     ...RESO_TAME_FOCUS_PRESETS[0].params,
@@ -583,7 +583,7 @@ test('ResoTame normalisation repairs a stored focus patch too', () => {
   assert.equal(repaired.focus.nodes[0].biasDb, R.biasDb.max)
 })
 
-test('FET Punch normalisation keeps the dials on their detents and the ratio on a real position', () => {
+test('LA Classic 76 normalisation keeps the dials on their detents and the ratio on a real position', () => {
   isolate()
   const p = pickParams(FET_PUNCH_PRESET_PLUGIN, {
     inputDrive: 200, output: 0, attack: 4.5, release: 99, ratio: '3',

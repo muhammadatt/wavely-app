@@ -211,15 +211,15 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
     :top="110"
     :accent="ACCENT"
     :background="FACEPLATE"
-    brand-lead="OPTO"
-    brand-tail="SMOOTH"
+    brand-lead="LA VINTAGE"
+    brand-tail="2A"
     :engaged="la2aPreview"
     show-preview
     previewable
     :previewing="state.isPlaying"
     show-apply
     :apply-disabled="!la2aPreview"
-    apply-disabled-hint="Turn OptoSmooth on to apply it"
+    apply-disabled-hint="Turn LA Vintage 2A on to apply it"
     @toggle-engaged="togglePreview"
     @toggle-preview="togglePlayback"
     @apply="applyAndClose"
@@ -230,7 +230,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
         :presets="presets"
         :accent="ACCENT"
         :disabled="!la2aPreview"
-        disabled-hint="Turn OptoSmooth on to use presets"
+        disabled-hint="Turn LA Vintage 2A on to use presets"
       />
     </template>
 

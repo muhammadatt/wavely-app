@@ -51,7 +51,7 @@ test('a grid that is not a multiple of the render block is refused', () => {
   assert.throws(() => planChunks(SR * 60, 0, 0, SR, 3, { grid: 100 }), /multiple of 128/)
 })
 
-test('ResoTame\'s chunk grid is its kernel\'s own hop', () => {
+test('Reso Soothe\'s chunk grid is its kernel\'s own hop', () => {
   for (const frameSize of [RESONANCE_FRAME_SIZE, HF_RESO_FRAME_SIZE]) {
     assert.equal(resonanceHopSamples(frameSize), new ResonanceKernel(SR, { frameSize }).hopSize)
   }
@@ -71,7 +71,7 @@ for (const [name, build] of PLUGINS) {
   })
 }
 
-test('⚠ ResoTame cut on the render-block grid alone does NOT stitch — the hop grid is load-bearing', () => {
+test('⚠ Reso Soothe cut on the render-block grid alone does NOT stitch — the hop grid is load-bearing', () => {
   const mat = MATERIALS.bursts()
   const reso = {
     stages: [{ renderer: 'resonance', kernelParams: toResonanceKernelParams(RESONANCE_DEFAULTS) }],
@@ -81,8 +81,8 @@ test('⚠ ResoTame cut on the render-block grid alone does NOT stitch — the ho
   assert.ok(got > -60, `off the hop grid the chunks should disagree audibly; got ${got.toFixed(1)} dBFS`)
 })
 
-// RETIRED: "ResoTame's memory needs the long run-in even on this material"
+// RETIRED: "Reso Soothe's memory needs the long run-in even on this material"
 // asserted that a 2 s run-in still left an audible seam (> −100 dBFS). It
-// pinned the old 200/500 ms ballistics; at the 50/200 ms defaults ResoTame
+// pinned the old 200/500 ms ballistics; at the 50/200 ms defaults Reso Soothe
 // settles within 2 s (−132.5 dBFS), so its premise no longer holds. The 6 s
 // shared run-in stays, and the stitch tests above still hold it to the floor.

@@ -221,9 +221,9 @@ test('drive follows the reference peak dB for dB: level-invariant', () => {
   assert.ok(worst < 1e-5, `worst ${worst}`)
 })
 
-test('emphasis: the corner is OptoSmooth’s (copied not imported), the depth is deliberately twice its', () => {
+test('emphasis: the corner is LA Vintage 2A’s (copied not imported), the depth is deliberately twice its', () => {
   assert.equal(SAT_EMPH_CORNER_HZ, EMPHASIS_CORNER_HZ)
-  // Set by hand on the bench: 24 × 0.85, against OptoSmooth's 12 × 0.85.
+  // Set by hand on the bench: 24 × 0.85, against LA Vintage 2A's 12 × 0.85.
   assert.equal(SAT_EMPH_DB, 24 * 0.85)
   assert.equal(SAT_EMPH_DB, 2 * (EMPHASIS_MAX_DB * EMPHASIS_DEFAULT / 100))
 })

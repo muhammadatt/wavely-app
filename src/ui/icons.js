@@ -20,6 +20,11 @@ export const ICONS = {
   effects: '<path d="M5 21v-6M5 11V3M12 21v-9M12 8V3M19 21v-4M19 13V3"/><path d="M2.5 15h5M9.5 12h5M16.5 17h5"/>',
   // Master: a VU-style gauge. The old glyph was a star, which reads as
   // "favourite" everywhere else in software, not "final, measured output".
+  // Dynamics: a compressor's transfer curve — 1:1 up to the knee, then bent
+  // over, with the uncompressed line dashed above it.
+  dynamics: '<path d="M3 21h18M3 21V3" opacity=".45"/><path d="M3 21l9-9 9-4"/><path d="M12 12l8-8" stroke-dasharray="2 2" opacity=".45"/>',
+  // Clean: a sparkle — the problem removed, not the tool that removes it.
+  clean: '<path d="M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z"/>',
   master: '<path d="M3.5 18a9 9 0 1117 0"/><path d="M12 18l4.5-5"/><circle cx="12" cy="18" r="1.3"/>',
 
   // Edit operations

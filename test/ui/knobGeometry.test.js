@@ -30,8 +30,8 @@ import {
 import { LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../../src/audio/la2aProcessor.js'
 
 /**
- * The two makeup knobs AUTO writes into, both ±24 now: OptoSmooth's Gain went
- * from -12..+24 to match the range its solve always ran over, and FET Punch's
+ * The two makeup knobs AUTO writes into, both ±24 now: LA Vintage 2A's Gain went
+ * from -12..+24 to match the range its solve always ran over, and LA Classic 76's
  * Output is derived from its Input drive law. Pinned against the constants
  * themselves rather than repeated here; the soft clipper's Output is unipolar
  * 0..+24 and pinned separately below.
@@ -80,7 +80,7 @@ test("the soft clipper's Output puts 0 dB at the counter-clockwise stop", () => 
 })
 
 test('every symmetric bipolar knob is untouched, to the last bit', () => {
-  // Scheps Output, ResoTame Trim, the Inflator's two, the EQ gain knobs. These
+  // Scheps Output, Reso Soothe Trim, the Cambridge Inflator's two, the EQ gain knobs. These
   // were all correct under the hardcoded midpoint, so the fix is only allowed
   // to be a fix if they do not move at all.
   for (const [min, max] of [[-12, 12], [-6, 6], [-50, 50], [-24, 24]]) {
@@ -99,15 +99,15 @@ test('a bipolar range with no zero in it fills from its nearest end', () => {
 
 test('the other two makeup knobs put 0 dB straight up', () => {
   // Neither is bipolar — both fill from the minimum — so this pins the reading
-  // rather than a fill. ⚠ Both DO use their negative travel — OptoSmooth's
-  // makeup sits before the tube stage and FET Punch's Input drives the audio
+  // rather than a fill. ⚠ Both DO use their negative travel — LA Vintage 2A's
+  // makeup sits before the tube stage and LA Classic 76's Input drives the audio
   // path — so the soft clipper's move to a unipolar range does not transfer to
   // them. Both were symmetrised, not cut.
   assert.equal(valueToPct(0, ...LA2A_GAIN), 0.5)
   assert.equal(valueToPct(0, ...FET_OUTPUT), 0.5)
 })
 
-test("OptoSmooth's Gain knob covers exactly the range its makeup is solved over", () => {
+test("LA Vintage 2A's Gain knob covers exactly the range its makeup is solved over", () => {
   // A narrower knob clamps a measured answer on the way to the dial, which is
   // what -12..+24 did against a -24..+24 solve.
   assert.equal(LA2A_GAIN_MIN_DB, -LA2A_GAIN_MAX_DB)

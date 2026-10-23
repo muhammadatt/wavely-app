@@ -1,7 +1,7 @@
 /**
  * Run with:  npm test
  *
- * FET Punch's static curve, after it was replaced by one measured from Analog
+ * LA Classic 76's static curve, after it was replaced by one measured from Analog
  * Obsession FETish (`npm run fet:curve`).
  *
  * ⚠ THIS CHANGED THE VOICING OF EVERY FET PUNCH RENDER. The guards that matter

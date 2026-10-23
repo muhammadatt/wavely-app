@@ -99,14 +99,14 @@ async function applyAndClose() {
     brand-lead="CAMBRIDGE INFLATOR"
     :presets="presets"
     :presets-disabled="!inPreview"
-    presets-disabled-hint="Turn Inflator on to use presets"
+    presets-disabled-hint="Turn Cambridge Inflator on to use presets"
     :engaged="inPreview"
     show-preview
     previewable
     :previewing="state.isPlaying"
     show-apply
     :apply-disabled="!inPreview"
-    apply-disabled-hint="Turn Inflator on to apply it"
+    apply-disabled-hint="Turn Cambridge Inflator on to apply it"
     @toggle-engaged="togglePreview"
     @toggle-preview="togglePlayback"
     @apply="applyAndClose"
@@ -122,7 +122,7 @@ async function applyAndClose() {
               :min="INFLATOR_INPUT_MIN_DB" :max="INFLATOR_INPUT_MAX_DB" :step="0.1"
               :default-value="INFLATOR_DEFAULTS.inputDb" :format-value="decibels"
               aria-label="Input" :disabled="!inPreview"
-              title="Input: drives the curve harder. The Inflator is not level-invariant, so this changes how much of the signal the curve lifts. Double-click to reset"
+              title="Input: drives the curve harder. The Cambridge Inflator is not level-invariant, so this changes how much of the signal the curve lifts. Double-click to reset"
               @update:model-value="syncInputDb"
             />
           </template>

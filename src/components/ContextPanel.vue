@@ -14,7 +14,7 @@ import Icon from './ui/Icon.vue'
  * shows is decided entirely by the registry — there is no per-category branch
  * here any more, and no v-if chain to keep in sync with the toolbar.
  *
- * Categories carrying a bespoke `panel` (Split, Presets) render it directly and
+ * Categories carrying a bespoke `panel` (Master) render it directly and
  * skip the list level; they aren't lists of operations.
  */
 const { state, closeRail, setRailOperation } = useEditorState()

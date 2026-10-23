@@ -11,7 +11,7 @@
  * aborted — so one of the two plugins is silently dead, decided by load order.
  *
  * It shipped: `la2aProcessor.js` imported the transfer curves from
- * `vocalSatProcessor.js`, which registers `vocal-sat-processor`. OptoSmooth or
+ * `vocalSatProcessor.js`, which registers `vocal-sat-processor`. LA Vintage 2A or
  * Scheps loaded alongside Tube Saturation in one AudioContext would have
  * broken one of them. `npm run smoke` did not see it — it opens panels, and
  * whether two worklets ever share a context there is incidental — and no unit
@@ -122,7 +122,7 @@ test('no worklet entry point reaches another one through its imports', () => {
 
 test('the curves are still Tube Saturation\'s own, not a second copy', () => {
   // The whole reason for importing rather than pasting. If satCurves.js were
-  // ever forked, a retune of Tube Saturation would stop reaching OptoSmooth.
+  // ever forked, a retune of Tube Saturation would stop reaching LA Vintage 2A.
   const proc = source.get(join(AUDIO, 'vocalSatProcessor.js'))
   assert.match(proc, /from '\.\/dsp\/satCurves\.js'/,
     'vocalSatProcessor must consume the shared curves, not redefine them')

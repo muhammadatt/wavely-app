@@ -1,4 +1,4 @@
-# FET Punch (1176) — Reference Capture Protocol
+# LA Classic 76 (1176) — Reference Capture Protocol
 
 > Companion tooling: `scripts/fet-ballistics.mjs`, `scripts/lib/gainTrace.js`
 > Target constants: `src/audio/fet1176Processor.js`
@@ -15,7 +15,7 @@ anything.** The input taper and its −18 dBFS threshold reference, the four rat
 knees, both ballistics ranges, `TAIL_FRACTION` / `TAIL_MULT`, all seven
 all-buttons-in constants and `fetDrive` were each chosen to reproduce a
 *described* behaviour — a datasheet number, a review, a general account of what
-an 1176 does. The module's header says so plainly. OptoSmooth went through the
+an 1176 does. The module's header says so plainly. LA Vintage 2A went through the
 same phase and came out the other side with three constants that had been
 fitted to the wrong plugin entirely.
 
@@ -150,7 +150,7 @@ raises level and compression together and Output brings it back. FETish
 compensates that internally: the knob drives the detector and the audio comes
 out at the same level.
 
-That is precisely the distinction this codebase already drew for OptoSmooth: a
+That is precisely the distinction this codebase already drew for LA Vintage 2A: a
 **drive offset**, not an input gain (`dsp/inputAlign.js`, and the ledger entry
 insisting the two are different things even when they render identically).
 
@@ -862,7 +862,7 @@ constants before it is pointed at one whose constants are not.
    scored on crest factor (scale-invariant, so immune to whatever makeup was
    dialled by hand), delivered ratio, and gain-envelope error. Never in the fit.
 5. Then, before anything ships: a `FET_LEGACY_PATCH` and a test pinning it —
-   a retune changes **every existing FET Punch render** and there is currently no
+   a retune changes **every existing LA Classic 76 render** and there is currently no
    way back. And the five factory presets in `src/audio/pluginPresets/fetPunch.js`
    are calibrated against today's kernel; the Scheps inheritance bug, which
    shipped **4× the intended gain reduction** because a recalibration landed on

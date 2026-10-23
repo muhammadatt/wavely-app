@@ -9,7 +9,7 @@
  * answers with any other word is not a warning or a wrong number — it is a
  * measurement that never lands, with the panel still claiming AUTO and the knob
  * sitting whereever it was. A handler posting `type: 'complete'` did exactly
- * that: OptoSmooth's auto makeup stopped working entirely, and the only symptom
+ * that: LA Vintage 2A's auto makeup stopped working entirely, and the only symptom
  * anyone could see was that two settings produced identical output.
  *
  * Nothing else covers this seam. The worker is not reachable from the app's
@@ -110,7 +110,7 @@ test('the ceiling solvers carry the knee back with them, never the level alone',
     channelData: audio, params: { peakReduction: 70, reference: 'percentile' },
   })
   assert.equal(percentile.type, 'done')
-  assert.ok('ceilingKneeDb' in percentile, 'OptoSmooth must return a knee with its ceiling')
+  assert.ok('ceilingKneeDb' in percentile, 'LA Vintage 2A must return a knee with its ceiling')
   assert.ok(Number.isFinite(percentile.ceilingKneeDb))
 
   // The peak reference needs no ceiling, so the key is present and null rather
@@ -125,12 +125,12 @@ test('the ceiling solvers carry the knee back with them, never the level alone',
   assert.equal(scheps.type, 'done')
   assert.ok('ceilingKneeDb' in scheps, 'Scheps must return a knee with its ceiling')
 
-  // FET Punch shares the mechanism and therefore the failure mode.
+  // LA Classic 76 shares the mechanism and therefore the failure mode.
   const fetBody = request('fet1176AutoMakeup', {
     channelData: audio, params: { inputDrive: 70, reference: 'percentile' },
   })
   assert.equal(fetBody.type, 'done')
-  assert.ok('ceilingKneeDb' in fetBody, 'FET Punch must return a knee with its ceiling')
+  assert.ok('ceilingKneeDb' in fetBody, 'LA Classic 76 must return a knee with its ceiling')
   assert.ok(Number.isFinite(fetBody.ceilingKneeDb))
   const fetPeak = request('fet1176AutoMakeup', {
     channelData: audio, params: { inputDrive: 70 },
@@ -139,7 +139,7 @@ test('the ceiling solvers carry the knee back with them, never the level alone',
   assert.equal(fetPeak.ceilingKneeDb, null)
 })
 
-test('the two FET Punch references really do return different makeup', () => {
+test('the two LA Classic 76 references really do return different makeup', () => {
   const audio = tone(1)
   const byPeak = request('fet1176AutoMakeup', {
     channelData: audio, params: { inputDrive: 70 },
@@ -153,7 +153,7 @@ test('the two FET Punch references really do return different makeup', () => {
     'the reference is being dropped somewhere between the message and the solve')
 })
 
-test('the two OptoSmooth references really do return different makeup', () => {
+test('the two LA Vintage 2A references really do return different makeup', () => {
   const audio = tone(1)
   const byPeak = request('la2aAutoMakeup', {
     channelData: audio, params: { peakReduction: 60 },

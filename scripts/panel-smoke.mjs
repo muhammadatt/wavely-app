@@ -21,7 +21,7 @@
  * ⚠ IT ASSERTS "OPENED", NOT JUST "NO ERROR". A panel whose command-palette
  * entry has been renamed silently fails to open and then reports clean, which is
  * how the first run of this missed OptoSmooth entirely — its registry label is
- * "Opto Comp". A miss is a failure.
+ * "Opto Comp" (now "LA Vintage 2A"). A miss is a failure.
  *
  * The audio is generated here rather than read from data/corpus/, which is
  * gitignored: this checks that panels render, not what they sound like.
@@ -37,8 +37,8 @@ const URL_ = `http://localhost:${PORT}/`
 
 /** Command-palette search terms. These are the REGISTRY labels, not our names. */
 const PANELS = [
-  'Opto Comp', 'FET Punch', 'Soft Clipper', 'Scheps Parallel',
-  'Reso', 'EQ', 'Air Boost', 'De-Esser', 'HF Softener', 'HF Limiter', 'PHAT*SS', 'Saturation Bench', 'Inflator', 'Tube Sat',
+  'LA Vintage 2A', 'LA Classic 76', 'Soft Clipper', 'Scheps Parallel',
+  'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'HF Softener', 'HF Limiter', 'PHAT*SS', 'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
   'Loudness Normalize', 'Auto Leveler', 'Plosive Tamer',
 ]
 
@@ -207,7 +207,7 @@ try {
     // user turns it back on, from the chain window's master switch.
     const chainBadge = () => page.locator('.chain-count').innerText().catch(() => '')
     const liveBefore = await chainBadge()
-    await openOp('Opto Comp')
+    await openOp('LA Vintage 2A')
     const pausedBadge = await chainBadge()
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
     const closedBadge = await chainBadge()
@@ -230,16 +230,16 @@ try {
       && (await chainBadge()) === 'BYPASSED'
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
     await openOp('Plugin Chain')
-    const slotKept = (await rowNames()).join(',') === 'Inflator,AirBoost' && (await chainBadge()) === 'BYPASSED'
+    const slotKept = (await rowNames()).join(',') === 'Cambridge Inflator,AirBoost' && (await chainBadge()) === 'BYPASSED'
     await masterOn()
 
     const order1 = await rowNames()
-    await chainWin.getByRole('button', { name: 'Move Inflator later' }).dispatchEvent('click')
+    await chainWin.getByRole('button', { name: 'Move Cambridge Inflator later' }).dispatchEvent('click')
     await page.waitForTimeout(300)
     const order2 = await rowNames()
 
     await chainWin.locator('.win-apply').dispatchEvent('click')
-    const toast = await page.getByText('Chain applied — AirBoost → Inflator').waitFor({ timeout: 20000 })
+    const toast = await page.getByText('Chain applied — AirBoost → Cambridge Inflator').waitFor({ timeout: 20000 })
       .then(() => true, () => false)
     await page.waitForTimeout(500)
     // The whole chain is bypassed; each slot keeps its own ON.
@@ -253,16 +253,16 @@ try {
     // removed one's number is the next to be handed out again.
     await addFromPicker('Inflator')
     const twice = (await rowNames()).join(',')
-    await chainWin.getByRole('button', { name: 'Remove Inflator 1 from the chain' }).dispatchEvent('click')
+    await chainWin.getByRole('button', { name: 'Remove Cambridge Inflator 1 from the chain' }).dispatchEvent('click')
     await page.waitForTimeout(300)
     const afterRemove = (await rowNames()).join(',')
     await addFromPicker('Inflator')
     const readded = (await rowNames()).join(',')
-    const repeatsOk = twice === 'AirBoost,Inflator 1,Inflator 2' && afterRemove === 'AirBoost,Inflator'
-      && readded === 'AirBoost,Inflator 2,Inflator 1'
+    const repeatsOk = twice === 'AirBoost,Cambridge Inflator 1,Cambridge Inflator 2' && afterRemove === 'AirBoost,Cambridge Inflator'
+      && readded === 'AirBoost,Cambridge Inflator 2,Cambridge Inflator 1'
 
     // A plugin outside the chain takes the whole chain group off the screen.
-    await openOp('Opto Comp')
+    await openOp('LA Vintage 2A')
     const soloAfterGroup = await frames()
     await openOp('Plugin Chain')
     await chainWin.getByRole('button', { name: 'Clear' }).dispatchEvent('click'); await page.waitForTimeout(300)
@@ -270,7 +270,7 @@ try {
 
     const fresh = errors.slice(before)
     const ok = soloWindows === 1 && chainReplaced && kept === 0 && groupWindows === 3 && memberApplyOff
-      && order1.join(',') === 'Inflator,AirBoost' && order2.join(',') === 'AirBoost,Inflator'
+      && order1.join(',') === 'Cambridge Inflator,AirBoost' && order2.join(',') === 'AirBoost,Cambridge Inflator'
       && toast && bypassedAfter && soloAfterGroup === 1 && pauseOk && soloCopyAlone && slotKept && repeatsOk
       && fresh.length === 0
     if (!ok) failures++
@@ -280,8 +280,8 @@ try {
       kept === 0 ? '' : `opening panels put ${kept} plugin(s) in the chain; `,
       groupWindows === 3 ? '' : `chain + 2 plugins should be 3 windows, got ${groupWindows}; `,
       memberApplyOff ? '' : 'a plugin in the chain still has a live Apply; ',
-      order1.join(',') === 'Inflator,AirBoost' ? '' : `picker did not append in order (${order1.join(',')}); `,
-      order2.join(',') === 'AirBoost,Inflator' ? '' : `move did not reorder (${order2.join(',')}); `,
+      order1.join(',') === 'Cambridge Inflator,AirBoost' ? '' : `picker did not append in order (${order1.join(',')}); `,
+      order2.join(',') === 'AirBoost,Cambridge Inflator' ? '' : `move did not reorder (${order2.join(',')}); `,
       toast ? '' : 'Apply did not report the chain in order; ',
       bypassedAfter ? '' : `apply should bypass the chain and keep the slots on (slots ${pills.join(',')}, chain ON=${masterPill}); `,
       soloAfterGroup === 1 ? '' : `a solo plugin left ${soloAfterGroup} windows open; `,

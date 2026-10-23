@@ -158,7 +158,7 @@ const copies = pluginCopies((copy, life) => {
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
-      const pin = pinActiveDocument('Inflator')
+      const pin = pinActiveDocument('Cambridge Inflator')
 
       const wasPreviewing = inPreview.value
       if (wasPreviewing) togglePreview()
@@ -170,10 +170,10 @@ const copies = pluginCopies((copy, life) => {
         const bufferId = replaceRegion(start, end, buffer, 'inflator', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
-        showToast('Inflator applied')
+        showToast('Cambridge Inflator applied')
       } catch (err) {
         console.error('Inflator failed:', err)
-        showToast(err instanceof DocumentSwitchedError ? err.message : 'Inflator failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'Cambridge Inflator failed')
       } finally {
         endProcessing(pin.docId)
       }
@@ -188,7 +188,7 @@ const copies = pluginCopies((copy, life) => {
     registerChainPlugin({
       id: inflatorEffect.id,
       windowId,
-      label: 'Inflator',
+      label: 'Cambridge Inflator',
       dispose: life.dispose,
       isActive: () => inPreview.value,
       setActive: (on) => { if (inPreview.value !== on) togglePreview() },

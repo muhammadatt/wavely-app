@@ -71,7 +71,7 @@ const dBc = (y, k) => 20 * Math.log10(Math.max(harmonic(y, k), 1e-30) / harmonic
 /**
  * ⚠ RUNS ON `LA2A_LEGACY_PATCH`, WHICH IS NO LONGER THE KERNEL DEFAULT. Every
  * assertion below validates the fitted `tanh` valve and the Moore-derived T4
- * gain modulation. OptoSmooth now ships Tube Saturation's curve at both stages,
+ * gain modulation. LA Vintage 2A now ships Tube Saturation's curve at both stages,
  * so these have to ask for the model they are about — they were written when it
  * was simply what a bare kernel did.
  *

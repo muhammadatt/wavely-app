@@ -561,7 +561,7 @@ const copies = pluginCopies((copy, life) => {
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
-      const pin = pinActiveDocument('FET Punch')
+      const pin = pinActiveDocument('LA Classic 76')
 
       /**
        * ⚠ RE-MEASURE BEFORE APPLYING, because the knob may be answering for a
@@ -584,7 +584,7 @@ const copies = pluginCopies((copy, life) => {
       const wasPreviewing = fetPreview.value
       if (wasPreviewing) togglePreview()
 
-      startProcessing('Applying FET Punch...', pin.docId)
+      startProcessing('Applying LA Classic 76...', pin.docId)
       try {
         /**
          * ⚠ THE PEAK RESTORE HAPPENS INSIDE apply AND IS REPORTED, NOT SILENT.
@@ -597,15 +597,15 @@ const copies = pluginCopies((copy, life) => {
          */
         const { buffer, trimDb } = await renderRegion(state.segments, start, end)
         pin.check()
-        const bufferId = replaceRegion(start, end, buffer, 'FET Punch compression', pin.docId)
+        const bufferId = replaceRegion(start, end, buffer, 'LA Classic 76 compression', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast(Math.abs(trimDb) >= 0.05
-          ? `FET Punch applied — peak restored ${trimDb >= 0 ? '+' : ''}${trimDb.toFixed(2)} dB`
-          : 'FET Punch compression applied')
+          ? `LA Classic 76 applied — peak restored ${trimDb >= 0 ? '+' : ''}${trimDb.toFixed(2)} dB`
+          : 'LA Classic 76 compression applied')
       } catch (err) {
         console.error('FET Punch failed:', err)
-        showToast(err instanceof DocumentSwitchedError ? err.message : 'FET Punch compression failed')
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'LA Classic 76 compression failed')
       } finally {
         endProcessing(pin.docId)
       }
@@ -635,7 +635,7 @@ const copies = pluginCopies((copy, life) => {
     registerChainPlugin({
       id: fet1176Effect.id,
       windowId,
-      label: 'FET Punch',
+      label: 'LA Classic 76',
       dispose: life.dispose,
       isActive: () => fetPreview.value,
       setActive: (on) => { if (fetPreview.value !== on) togglePreview() },

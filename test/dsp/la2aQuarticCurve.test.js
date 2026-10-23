@@ -237,7 +237,7 @@ test('the curve change did not move gain reduction, so presets need no re-cut', 
    * The detector sits ahead of the gain cell and never sees the shaper, so swapping
    * the curve cannot move the envelope. `OPTO_SMOOTH_PARAM_KEYS` stores knob
    * positions and no curve keys, so a preset means the same gain reduction it
-   * always did. If this ever fails, every OptoSmooth preset has silently drifted
+   * always did. If this ever fails, every LA Vintage 2A preset has silently drifted
    * and needs the `fet-recut-presets.mjs` treatment.
    */
   const x = passage()

@@ -30,7 +30,7 @@ test('a chain copy is the solo id with a numbered suffix, and maps back', () => 
 })
 
 test('a chain copy is the same effect under its own EffectChain id', () => {
-  const effect = { id: 'inflator', name: 'Inflator', createNodes() {} }
+  const effect = { id: 'inflator', name: 'Cambridge Inflator', createNodes() {} }
   assert.equal(effectForCopy(effect, 'solo'), effect)
   const chained = effectForCopy(effect, chainCopy(2))
   assert.equal(chained.id, 'inflator@chain-2')
