@@ -54,14 +54,7 @@ import { DEV_TUNING_PANELS } from '../devFlags.js'
  * Bespoke panels must not import this module: it imports them, and a cycle
  * would leave these bindings undefined while the array below is built.
  */
-export const CATEGORIES = [
-  {
-    id: 'split',
-    label: 'Split',
-    icon: 'split',
-    desc: 'Cut the file into separate pieces',
-    panel: SplitPanel,
-  },
+const ALL_CATEGORIES = [
   {
     id: 'edit',
     label: 'Edit',
@@ -82,6 +75,9 @@ export const CATEGORIES = [
     icon: 'master',
     desc: 'One-click mastering chains',
     panel: PresetsPanel,
+    // Dev-only for now: gated by the same switch as the operations'
+    // `release: 'dev'` below, so a production toolbar has no Master button.
+    release: 'dev',
   },
 ]
 
@@ -197,6 +193,20 @@ const ALL_OPERATIONS = [
     requires: 'selection',
     surface: 'rail',
     component: TrimPanel,
+  },
+  {
+    // Was a top-level toolbar category of its own; it is one edit among the
+    // others, so it lives in the Edit list now.
+    id: 'split',
+    label: 'Split',
+    desc: 'Cut the clip in two at the playhead or the selection edges',
+    category: 'edit',
+    group: 'Selection',
+    icon: 'split',
+    keywords: ['divide', 'cut', 'separate', 'clips', 'pieces', 'playhead', 'razor'],
+    requires: 'file',
+    surface: 'rail',
+    component: SplitPanel,
   },
   {
     id: 'silence',
@@ -617,6 +627,9 @@ export function isReleased(op, devBuild = DEV_TUNING_PANELS) {
 }
 
 export const OPERATIONS = ALL_OPERATIONS.filter(op => isReleased(op))
+
+/** The toolbar's categories in this build — gated like the operations. */
+export const CATEGORIES = ALL_CATEGORIES.filter(c => isReleased(c))
 
 /** Ids hidden from production builds — for tests and the bundle check. */
 export const DEV_ONLY_OPERATION_IDS = ALL_OPERATIONS

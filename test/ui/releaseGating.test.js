@@ -46,3 +46,17 @@ test('the placeholder Noise Reduction and Remove Silence panels are gone', () =>
     'src/components/panels/windows/RemoveSilenceWindow.vue',
   ]) assert.equal(existsSync(new URL(f, ROOT)), false, f)
 })
+
+test('the Master category is hidden from production builds', () => {
+  // Categories gate the same way operations do; the toolbar reads the filtered
+  // CATEGORIES, never the full list.
+  assert.match(registry, /id: 'master',[\s\S]*?release: 'dev',\s*\n\s*\},\s*\n\]/)
+  assert.match(registry, /^const ALL_CATEGORIES = \[/m)
+  assert.match(registry, /export const CATEGORIES = ALL_CATEGORIES\.filter\(c => isReleased\(c\)\)/)
+})
+
+test('Split is an Edit operation, not a toolbar category', () => {
+  const categories = registry.slice(registry.indexOf('const ALL_CATEGORIES = ['), registry.indexOf('const ALL_OPERATIONS = ['))
+  assert.doesNotMatch(categories, /id: 'split'/)
+  assert.match(registry, /id: 'split',[\s\S]*?category: 'edit',[\s\S]*?component: SplitPanel,/)
+})
