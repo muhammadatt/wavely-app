@@ -46,11 +46,17 @@ as $$
   );
 $$;
 
--- Revoke direct execution from public roles
-revoke execute on function private.is_team_member(bigint) from PUBLIC, anon, authenticated, service_role;
+-- Only the role the policy runs as may execute it. SECURITY DEFINER changes
+-- the privileges INSIDE the function, but the caller still needs EXECUTE to
+-- call it, and a policy calls it as the querying role — revoking it from
+-- `authenticated` makes every query under the policy fail with "permission
+-- denied". The private (non-exposed) schema already keeps it off the Data API.
+revoke execute on function private.is_team_member(bigint) from PUBLIC, anon;
+grant execute on function private.is_team_member(bigint) to authenticated;
 
--- Use in policy (indexed lookup, not per-row check)
+-- Use in policy (indexed lookup, not per-row check), scoped to that role
 create policy team_orders_policy on orders
+  to authenticated
   using ((select private.is_team_member(team_id)));
 ```
 

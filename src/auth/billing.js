@@ -145,6 +145,23 @@ function defaultChannel(name) {
   return typeof BroadcastChannel === 'function' ? new BroadcastChannel(name) : null
 }
 
+/**
+ * What to tell the user after a Checkout return, or null for nothing.
+ *
+ * Only a CONFIRMED plan earns the welcome. A payment Stripe is still
+ * processing has no subscription yet (the webhook will bring it), and a
+ * confirmation that failed is reported as a failure, never dressed up as
+ * "payment received".
+ */
+export function checkoutReturnMessage(result) {
+  if (result?.kind !== 'success') return null
+  if (result.error) {
+    return { text: `Couldn’t confirm your subscription: ${result.error}. It will update once Stripe confirms the payment.`, ms: 8000 }
+  }
+  if (result.plan === 'pro') return { text: 'Welcome to Pro!', ms: 5000 }
+  return { text: 'Payment received — your plan will update shortly', ms: 5000 }
+}
+
 /** "$9" / "$90" / "€12.50" for a Stripe unit amount. */
 export function formatPrice(amount, currency, locale) {
   if (!Number.isFinite(amount)) return ''

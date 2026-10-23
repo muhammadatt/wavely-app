@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   createBillingClient, openInBillingTab, handleBillingReturn, onAccountChangedElsewhere,
-  formatPrice, BILLING_WINDOW_NAME,
+  formatPrice, BILLING_WINDOW_NAME, checkoutReturnMessage,
 } from '../../src/auth/billing.js'
 
 function fakeWin(href, name = '') {
@@ -150,4 +150,15 @@ test('formatPrice drops zero cents', () => {
   assert.equal(formatPrice(900, 'usd', 'en-US'), '$9')
   assert.equal(formatPrice(1250, 'eur', 'en-US'), '€12.50')
   assert.equal(formatPrice(null, 'usd'), '')
+})
+
+test('the checkout-return message never calls a failed confirmation a success', () => {
+  assert.equal(checkoutReturnMessage(null), null)
+  assert.equal(checkoutReturnMessage({ kind: 'cancel' }), null)
+  assert.equal(checkoutReturnMessage({ kind: 'portal' }), null)
+  assert.equal(checkoutReturnMessage({ kind: 'success', plan: 'pro' }).text, 'Welcome to Pro!')
+  assert.match(checkoutReturnMessage({ kind: 'success', plan: null }).text, /Payment received/)
+  const failed = checkoutReturnMessage({ kind: 'success', error: 'timeout' })
+  assert.match(failed.text, /^Couldn’t confirm your subscription: timeout/)
+  assert.doesNotMatch(failed.text, /Payment received|Welcome/)
 })
