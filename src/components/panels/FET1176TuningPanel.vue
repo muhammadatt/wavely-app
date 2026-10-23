@@ -147,6 +147,26 @@ const CHOICES = [
     ],
   },
   {
+    key: 'detector', label: 'Detector',
+    options: [
+      {
+        id: 'feedforward', label: 'FWD',
+        title: 'SHIPS. The detector reads the input after the attenuator. Every fit in '
+          + 'this plugin was made on it',
+      },
+      {
+        id: 'feedback', label: 'FBK',
+        title: 'PROTOTYPE. The detector reads the cell’s output, as the hardware’s does. '
+          + 'Same static curve (exact), same release once the signal drops away; above '
+          + 'threshold the loop speeds the attack up by about the ratio, so the attack '
+          + 'ladder is slowed 4× to land 4:1 where FWD does — and 8/12/20 then attack '
+          + '2-3× faster than 4:1, where FWD gives every button the same time. Less '
+          + 'waveform-tracking distortion at the fast dials. Refitted to the same FETish '
+          + 'table (2.30 % rms either way — the data cannot tell them apart)',
+      },
+    ],
+  },
+  {
     key: 'releaseSchedule', label: 'Release',
     options: [
       {
@@ -267,7 +287,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span class="ml-auto font-mono text-[9px] text-white/30">
-          {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.attackSchedule }} / {{ vals.ratioThreshold }} / {{ vals.releaseSchedule }}
+          {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.attackSchedule }} / {{ vals.ratioThreshold }} / {{ vals.releaseSchedule }} / {{ vals.detector }}
         </span>
       </div>
     </div>

@@ -7299,3 +7299,68 @@ each plugin labels its own marks.
 
 All thresholds and both Sensitivity lines are reasoned from synthetic material and have not
 been auditioned. The plugin ships dev-gated.
+
+## LA Classic 76 (FET Punch) — feedback detector prototype and ballistics refit (October 2026)
+
+`detector: 'feedforward' | 'feedback'` on the kernel and the bench (`Detector`, FWD / FBK).
+**Feed-forward still ships**; the default render is bit-identical to before the switch existed.
+
+**Topology.** The feedback detector reads the cell's output before the FET shaper, Output and
+Mix, at the base rate. ⚠ Tapping after the downsampler would put the oversampler's 50 samples
+inside the loop against a 20 µs attack. ⚠ Tapping after Output would break auto makeup's
+`out = a + b·g` closed form. ⚠ Leaving the shaper out keeps input alignment exact.
+
+**Static curve: unchanged, exactly.** The feedback law is the feed-forward one re-expressed on
+output overshoot: `o = x − G(x)` maps to `G(x)`. Each sample is solved in closed form, with no
+one-sample delay, from `x − (1 − c)·G(x) = over − (1 − c)·gr`: piecewise across the knee, the
+linear segment and all-buttons' quadratic/floor segments. A constant-|x| tone settles to
+1e-14 dB of feed-forward on every button, across the knee. ⚠ On a sine the two differ by
+≤ 0.15 dB, because the unsmoothed detector ripples inside the cycle and the loop evens it out.
+⚠ A `y[n−1]` loop would limit-cycle at attack 7 / 20:1 (coefficient ~0.7 × loop gain ~19).
+The implicit solve is stable there (tested).
+
+**Release: unchanged.** Every release probe drops to −50 dBFS, below threshold, where the loop
+asks for zero and is open. The FETish seven-dial ladder comes out within 0.49 % in both
+topologies, and the depth table at the fitted dial 4.82 reads 4.1 / 4.2 %. `RELEASE_*` carries
+over untouched. ⚠ On program material that releases while still above threshold, the feedback
+release IS faster (the same ~R× loop speed-up). No capture measures that.
+
+**Attack: refitted** (`npm run fet:fbrefit`, against `FETISH_ATTACK_TABLE`):
+
+| | ladder scale | k | rms |
+|---|---|---|---|
+| feed-forward (re-run, grid) | ×1.000 | −0.090 | 2.30 % |
+| **feedback** | **×4.000** | **−0.095** | **2.30 %** |
+| feedback, no depth schedule | ×3.99 | — | 36.5 % |
+
+- ⚠⚠ **The data cannot tell the topologies apart.** t63 is quantised to 6–12 % of the deep rows,
+  and both land on the same quanta.
+- ⚠ **The loop does not explain the depth dependence by itself**, so the schedule stays, at
+  nearly the same slope.
+- ⚠ **A golden search stalls on this staircase objective.** The first fitter returned 3.45 %
+  for feed-forward at its own shipping constants. It now uses a grid.
+- ⚠ **Scales either side of the optimum land on adjacent quanta.** 3.957 and 4.000 both scored
+  2.30 % on one run and 6.3 / 2.3 % on the next, after the drive solve moved. The optimum is a
+  plateau.
+
+**What feedback changes audibly: attack becomes ratio-dependent.** Settled −12 dBFS square,
+Input 70, feedback over feed-forward t63:
+
+| | 4:1 | 8:1 | 12:1 | 20:1 | all |
+|---|---|---|---|---|---|
+| dial 1 | 1.00 | 0.49 | 0.33 | 0.20 | 0.97 |
+| dial 4 | 1.17 | 0.50 | 0.33 | 0.17 | 1.25 |
+
+Feed-forward gives every numbered button the same time. Either reference only measured attack
+at 4:1, so ⚠ **nothing says whether the faster high ratios are right**. The cheapest
+discriminating capture is `bursts.wav` at 20:1 against 4:1, same Input and same attack dial.
+
+**All-buttons lag: 1.5 under feedback** (`FB_ALL_ATTACK_LAG`), against CLA-76's all/4:1 ratio
+of 0.721. ⚠⚠ Feedback brings the "late attack" back, for a structural reason. All-buttons
+leaves the knee near 20:1, so its loop is far faster than 4:1's: 0.488 at a lag of 1. This
+instrument reads feed-forward at 0.767 at lag 1 (0.95 to match), not the 0.721 recorded with
+the full bursts plan, so compare lags within one instrument only. Steps are 0.047, so 1.45–1.55
+are indistinguishable.
+
+**Not done.** No preset re-cut (feedback is a bench prototype). Nothing auditioned. CPU: two
+closed-form solves per sample on the mono base-rate detector, not benchmarked.
