@@ -11,12 +11,15 @@
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
+    "@supabase/supabase-js": "^2.118.0",
     "cors": "^2.8.5",
     "ebur128-wasm": "^3.0.0",
     "express": "^5.1.0",
     "express-rate-limit": "^8.3.2",
+    "jose": "^6.2.12",
     "meyda": "^5.6.3",
     "multer": "^2.1.1",
+    "stripe": "^23.0.0",
     "uuid": "^13.0.0"
   }
 }

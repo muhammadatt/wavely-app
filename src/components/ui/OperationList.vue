@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { groupedOperations, searchOperations } from '../../ui/registry.js'
 import Icon from './Icon.vue'
+import PlanBadge from './PlanBadge.vue'
 
 /**
  * The searchable, grouped list of operations in a category.
@@ -77,6 +78,7 @@ function select(op) {
           <div class="text-[13px] font-bold text-text truncate">{{ op.label }}</div>
           <div class="text-[11px] font-medium mt-[1px] text-text-muted truncate">{{ op.desc }}</div>
         </div>
+        <PlanBadge :feature="op.feature" />
         <!-- A chevron promises "this opens something", so the verbs that just
              run don't get one. -->
         <Icon

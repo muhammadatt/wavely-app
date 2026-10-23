@@ -95,6 +95,9 @@ export const CATEGORIES = [
  *   surface   'rail'      opens as a detail view inside the rail
  *             'window'    opens as a floating window
  *             'immediate' runs on click; no parameters, so nothing opens
+ *   feature   optional plan feature (src/auth/plans.js) the operation's Apply
+ *             needs. The row stays open to everyone — preview is free — and
+ *             shows a PRO tag while the user's plan lacks it
  *   action    required for 'immediate'. Receives the editor state object rather
  *             than calling useEditorState() here — this module is imported by
  *             the state's own consumers, and reaching back into it would make
@@ -278,6 +281,7 @@ const ALL_OPERATIONS = [
     icon: 'chain',
     keywords: ['chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],
     requires: 'selection',
+    feature: 'pluginChainApply',
     surface: 'window',
     component: PluginChainWindow,
   },
@@ -485,6 +489,7 @@ const ALL_OPERATIONS = [
       'clip gain', 'consistency', 'even', 'volume', 'quiet passage', 'acx',
     ],
     requires: 'selection',
+    feature: 'autoLevel',
     // Runs live in the playback chain, so it can take a slot — see chainPlugins().
     chain: true,
     surface: 'window',
@@ -500,6 +505,7 @@ const ALL_OPERATIONS = [
     icon: 'deesser',
     keywords: ['sibilance editor', 'sibilance', 'sibilant', 'harsh', 'ess', 'fricative', 'clip gain'],
     requires: 'selection',
+    feature: 'sibilanceEditor',
     // Runs live in the playback chain, so it can take a slot — see chainPlugins().
     chain: true,
     surface: 'window',

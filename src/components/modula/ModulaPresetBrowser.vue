@@ -90,6 +90,7 @@ function revert() {
   close()
 }
 async function startSave() {
+  if (!props.presets.requestSave()) { close(); return }
   saving.value = true
   error.value = ''
   draft.value = active.value && active.value.source === 'user' ? active.value.name : ''
@@ -178,7 +179,7 @@ onBeforeUnmount(() => {
 
       <div class="m-pb-rule"></div>
       <div v-if="dirty && active && !disabled" class="m-pb-item m-pb-action" @click="revert">Revert to {{ active.name }}</div>
-      <div v-if="!saving" class="m-pb-item m-pb-action" @click="startSave">Save as…</div>
+      <div v-if="!saving" class="m-pb-item m-pb-action" @click="startSave">{{ presets.saveAllowed.value ? 'Save as…' : 'Sign in to save presets…' }}</div>
       <form v-else class="m-pb-save" @submit.prevent="commitSave">
         <input ref="nameInput" v-model="draft" class="m-pb-input" placeholder="Preset name" maxlength="48" @keydown.esc.stop.prevent="endSave">
         <button type="submit" class="m-pb-save-btn">Save</button>

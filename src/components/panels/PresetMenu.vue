@@ -138,6 +138,7 @@ function revert() {
 }
 
 async function startSave() {
+  if (!props.presets.requestSave()) { closeMenu(); return }
   saving.value = true
   error.value = ''
   // Seed with the active name so overwriting one's own preset is a click
@@ -311,7 +312,7 @@ onBeforeUnmount(() => {
         class="w-full text-left px-3.5 py-2 border-none bg-transparent cursor-pointer"
         style="font:600 10.5px 'Inter';color:rgba(234,246,248,.7)"
         @click="startSave"
-      >Save current settings…</button>
+      >{{ presets.saveAllowed.value ? 'Save current settings…' : 'Sign in to save presets…' }}</button>
 
       <div v-else class="px-3 py-2.5">
         <input

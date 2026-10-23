@@ -322,8 +322,8 @@ These apply only to the `acx_audiobook` preset:
 
 ### Not Yet Implemented
 
-- **User authentication** — No auth system
-- **Payment / tier enforcement** — Gate logic not present; all tiers currently serve same output
+- **User authentication** — PARTIAL. Supabase sign-in, `GET /api/me`, plan gating from ONE shared table (`src/auth/plans.js`: presets need an account; Plugin Chain Apply, Auto Leveler, Sibilance Editor and `/api/spot` need Pro, the server ones enforced by `server/lib/entitlements.js` with a free 30 s preview) and presets stored in the account (`user_presets`, no browser-only fallback once accounts are on) are built. Stripe billing is built too: Checkout and the customer portal open in a NEW TAB (never navigate the editor away from unsaved work), and every path — webhook or checkout return — re-fetches the subscription from Stripe and upserts it (`server/lib/billing.js`), so out-of-order webhooks cannot leave stale state. Everything is OFF until the Supabase (and, for billing, Stripe) env vars are set. See `docs/user-accounts.md`
+- **Export tiers** — the Freemium Gates table below (MP3 for free, WAV for paid) is not enforced yet; plan gating covers plugins and server features only
 - **Batch processing** — Sprint 5; multi-file + cross-chapter consistency pass
 - **API access** — Sprint 6 / Pro tier
 - **Test infrastructure** — Partial. `npm test` routes through `scripts/run-tests.mjs`, which runs `node --test` with `--test-concurrency` set to `availableParallelism()` and forwards explicit file targets. Coverage is still unit-only on client-side DSP/editor logic (`test/dsp/`, `test/voicerx/`, `test/ui/`); there are no integration/E2E tests, and no server-pipeline or async-job-flow coverage — with one exception: the auto-leveler suite imports `server/pipeline/autoLeveler.js` and asserts the client port produces the same gain curve, which is the only place a client port is checked against the server implementation rather than against hand-written expectations. `npm run smoke` remains the guard for module-scope wiring failures (for example, broken composable/panel exports or missing re-export imports), so run it before merging changes that touch composables, effect wrappers, or params modules.
@@ -486,6 +486,7 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 | `docs/scheps_vocal_chain_thick_spec.md` | ✓ Present | Scheps Parallel, "Thick" character: signal chain, reference knob positions and the measured target curves. Authoritative on what the curves *are*; the biquad fit that reproduces them is `scripts/fit-pultec-curves.mjs`. Companion data: `data/pultec_curves/scheps_thick_curve_data.csv`. |
 | `docs/scheps_vocal_chain_presence_spec.md` | ✓ Present | The complementary "Presence" character. Read alongside the Thick spec — the two share a signal chain and differ only in curve data. Note the post-EQ cut is anchored at 20 kHz deliberately; the Naming Note explains why the preset is not called "Airy". |
 | `docs/fet1176_capture_protocol.md` | ✓ Present | FET Punch (1176) reference capture protocol: control-parity check, the four-bounce null test, the 38-bounce capture matrix and what the tooling's self-test already settled. Companion to `scripts/fet-ballistics.mjs`. |
+| `docs/user-accounts.md` | ✓ Present | User accounts: Supabase setup per environment, env vars, schema/RLS rules, client and server auth architecture, and the remaining steps (gating, presets, Stripe). |
 | `docs/acx_production_workflow.md` | ✗ Not present | ACX narrator workflow reference. Context for why features exist and where Instant Polish fits in the production chain. |
 | `docs/instant_polish_gtm.md` | ✗ Not present | Go-to-market strategy. Positioning, pricing, launch plan, SEO content map. |
 

@@ -9,6 +9,7 @@ import { currentPluginCopy, idForCopy, chainCopyNumber, isChainCopyId } from '..
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import Icon from '../ui/Icon.vue'
+import { useEntitlements } from '../../composables/useEntitlements.js'
 import HelpOverlay from './HelpOverlay.vue'
 import ModulaPresetBrowser from '../modula/ModulaPresetBrowser.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
@@ -138,6 +139,13 @@ const props = defineProps({
    */
   applyDisabled: { type: Boolean, default: false },
   applyDisabledHint: { type: String, default: '' },
+  /**
+   * A plan feature (src/auth/plans.js) Apply needs. Without it the button stays
+   * PRESSABLE and carries a PRO tag: pressing it opens the upgrade prompt
+   * rather than emitting `apply`. Preview is never gated — hearing the result
+   * first is the point.
+   */
+  applyFeature: { type: String, default: null },
   /**
    * Whether Apply needs a selection. True for every effect that processes a
    * region, which is all of them today; false leaves Apply live on an empty
@@ -307,11 +315,20 @@ const hasFooter = computed(() => props.showApply || props.showPreview)
 // (a solo plugin opened while the chain was applying could do exactly that).
 const busy = computed(() => !!state.isProcessing)
 const applyBlocked = computed(() => !!inChain.value || busy.value || props.applyDisabled || (props.requiresSelection && !hasSelection.value))
+const entitlements = useEntitlements()
+const applyLocked = computed(() => !!props.applyFeature && !entitlements.can(props.applyFeature))
+
+function onApplyClick() {
+  if (props.applyFeature && !entitlements.request(props.applyFeature)) return
+  emit('apply')
+}
+
 const applyTitle = computed(() => {
   if (inChain.value) return 'This plugin is in the Plugin Chain — apply it from the chain'
   if (busy.value) return 'This file is still being processed — wait for it to finish'
   if (props.applyDisabled) return props.applyDisabledHint
   if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
+  if (applyLocked.value) return `${entitlements.hint(props.applyFeature)} — preview is free`
   return ''
 })
 
@@ -911,12 +928,13 @@ function requestClose() {
           class="win-apply"
           :disabled="applyBlocked"
           :title="applyTitle"
-          @click="emit('apply')"
+          @click="onApplyClick"
         >
           <span v-if="modula" style="font:700 12px/1 'Inter',system-ui,sans-serif">✓</span>
           <Icon v-else :name="applyIcon" :size="15" :stroke-width="2.5" />
           <span class="win-btn-label">{{ inChain ? 'Applies with the chain' : applyLabel }}</span>
           <span class="win-btn-label-short">{{ inChain ? 'In chain' : applyLabelShort }}</span>
+          <span v-if="applyLocked && !inChain" class="win-apply-pro">PRO</span>
         </button>
       </div>
     </div>
@@ -1286,6 +1304,15 @@ function requestClose() {
 .win-apply:disabled {
   opacity: 0.4;
   cursor: default;
+}
+/* The plan lock. Gold, the account menu's Pro colour, so the two read as one idea. */
+.win-apply-pro {
+  font: 700 8.5px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.1em;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: #e0b84a;
+  color: #14100e;
 }
 .win-apply:focus-visible {
   outline: 2px solid #7fe9f6;

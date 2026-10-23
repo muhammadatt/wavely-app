@@ -3,8 +3,15 @@ import cors from 'cors'
 import rateLimit from 'express-rate-limit'
 import { processRoute } from './routes/process.js'
 import { jobsRoute }   from './routes/jobs.js'
-import { spotRoute }   from './routes/spot.js'
-import { analyzeRoute } from './routes/analyze.js'
+import { createSpotRoute }    from './routes/spot.js'
+import { createAnalyzeRoute } from './routes/analyze.js'
+import { meRoute } from './routes/me.js'
+import { readAuthConfig, createTokenVerifier } from './lib/auth.js'
+import { getSupabaseAdmin } from './lib/supabaseAdmin.js'
+import { createEntitlementGate, createPlanResolver } from './lib/entitlements.js'
+import Stripe from 'stripe'
+import { readBillingConfig, createBilling } from './lib/billing.js'
+import { createBillingRoutes, createBillingWebhook } from './routes/billing.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -27,22 +34,61 @@ const allowedPatterns = process.env.CORS_ORIGIN_PATTERNS
   ? process.env.CORS_ORIGIN_PATTERNS.split(',').map(p => new RegExp(p.trim()))
   : []
 
+/**
+ * Is this a frontend origin we serve? Shared by CORS and by billing, which
+ * must only send the browser back (from Stripe Checkout / the portal) to one.
+ */
+function isAllowedOrigin(origin) {
+  if (allowedOrigins.includes(origin)) return true
+  if (allowedPatterns.some(pattern => pattern.test(origin))) return true
+  // Allow local development and testing domains, including LAN IPs
+  return /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin) || origin.endsWith('.test')
+}
+
 app.use(cors({
   origin(origin, callback) {
     // Allow requests with no origin (server-to-server, curl, etc.) or "null" origin (file://) in dev
     if (!origin || origin === 'null') return callback(null, true)
-    if (allowedOrigins.includes(origin)) return callback(null, true)
-    if (allowedPatterns.some(pattern => pattern.test(origin))) return callback(null, true)
-
-    // Allow local development and testing domains, including LAN IPs
-    if (/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin) || origin.endsWith('.test')) {
-      return callback(null, true)
-    }
+    if (isAllowedOrigin(origin)) return callback(null, true)
 
     console.error(`CORS rejected origin: ${origin}`)
     callback(new Error('Not allowed by CORS'))
   },
 }))
+
+// ── Accounts and billing — configured before the body parsers ───────────────
+//
+// Accounts (Supabase) and billing (Stripe) are both optional: with their env
+// vars unset the server runs exactly as before. See docs/user-accounts.md.
+const authConfig = readAuthConfig()
+const verifyAccessToken = authConfig.supabaseUrl ? createTokenVerifier(authConfig) : null
+const supabaseAdmin = getSupabaseAdmin(authConfig)
+if (verifyAccessToken && !supabaseAdmin) {
+  console.warn('SUPABASE_URL is set but SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY is not — /api/me will answer 503')
+}
+
+const planFor = supabaseAdmin ? createPlanResolver(supabaseAdmin) : null
+
+const billingConfig = readBillingConfig()
+const stripe = billingConfig.secretKey ? new Stripe(billingConfig.secretKey) : null
+const billing = stripe && supabaseAdmin && verifyAccessToken && billingConfig.prices.length
+  ? createBilling({
+      stripe,
+      admin: supabaseAdmin,
+      prices: billingConfig.prices,
+      // A plan change must reach the entitlement gate now, not after its cache expires.
+      onPlanChanged: (userId) => planFor?.invalidate(userId),
+    })
+  : null
+if (stripe && !billing) {
+  console.warn('STRIPE_SECRET_KEY is set but accounts or STRIPE_PRICE_* are not configured — billing is off')
+}
+if (billing && !billingConfig.webhookSecret) {
+  console.warn('STRIPE_WEBHOOK_SECRET is not set — subscriptions will only sync when a browser returns from Checkout')
+}
+
+// ⚠ Before express.json(): the webhook verifies Stripe's signature over the raw bytes.
+app.use('/api', createBillingWebhook({ stripe, billing, webhookSecret: billingConfig.webhookSecret }))
 
 app.use(express.json())
 
@@ -83,6 +129,27 @@ const analyzeLimiter = rateLimit({
 })
 app.use('/api/analyze', analyzeLimiter)
 
+// Account reads are cheap (one token check, two indexed selects) but run on
+// every page load and sign-in, so the budget is the widest of the lot.
+const accountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300,                  // 300 requests per window per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many account requests, please try again later' },
+  validate: { xForwardedForHeader: false },
+})
+app.use('/api/me', accountLimiter)
+
+// Billing calls share the account budget. (The webhook is mounted earlier and
+// answers before this runs, so a Stripe retry burst is never rate-limited.)
+app.use('/api/billing', accountLimiter)
+
+// Plan enforcement for server-processing features (src/auth/plans.js). Needs
+// both the verifier and the database; with either missing it lets everything
+// through, as before accounts existed.
+const gate = createEntitlementGate({ verify: verifyAccessToken, planFor })
+
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.0.1' })
@@ -95,10 +162,16 @@ app.use('/api', processRoute)
 app.use('/api', jobsRoute)
 
 // Spot effect endpoint (synchronous — returns processed WAV directly)
-app.use('/api', spotRoute)
+app.use('/api', createSpotRoute({ gate }))
 
 // Analysis endpoints (synchronous — return measurements as JSON)
-app.use('/api', analyzeRoute)
+app.use('/api', createAnalyzeRoute({ gate }))
+
+// Signed-in user's account and plan
+app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))
+
+// Checkout, the customer portal and prices (Stripe)
+app.use('/api', createBillingRoutes({ verify: verifyAccessToken, billing, isAllowedOrigin }))
 
 const server = app.listen(PORT, () => {
   console.log(`Wavely server listening on port ${PORT}`)
