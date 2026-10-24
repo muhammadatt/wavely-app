@@ -473,14 +473,13 @@ const ALL_OPERATIONS = [
   },
   {
     id: 'saturation-bench',
-    release: 'dev',
-    label: 'Saturation Bench',
+    label: 'Saturation Workbench',
     desc: 'Stack layers of saturation, each on its own band',
     category: 'tone',
     icon: 'saturation',
     keywords: [
       'saturation', 'saturate', 'exciter', 'excite', 'harmonic', 'warmth', 'drive',
-      'distortion', 'waveshaper', 'tanh', 'quartic', 'layers', 'bench',
+      'distortion', 'waveshaper', 'tanh', 'quartic', 'layers', 'bench', 'workbench',
     ],
     requires: 'selection',
     // Runs live in the playback chain, so it can take a slot — see chainPlugins().

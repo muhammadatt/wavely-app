@@ -173,6 +173,19 @@ const copies = pluginCopies((copy, life) => {
       pushAll()
     }
 
+    /**
+     * Load a preset's stack. Layers arrive complete (the preset module normalises
+     * them), so this replaces the lot; the old slots' reset targets stay the
+     * slot's factory layer. A solo is dropped — slots may have moved.
+     */
+    function applyParams(p) {
+      if (Array.isArray(p.layers)) sbLayers.value = p.layers.map(l => ({ ...l }))
+      if (Number.isFinite(p.inputDb)) sbInputDb.value = p.inputDb
+      if (Number.isFinite(p.outputDb)) sbOutputDb.value = p.outputDb
+      clearSolo()
+      pushAll()
+    }
+
     /** Set several fields of one layer at once (the emphasis quick buttons). */
     function syncLayerFields(k, fields) {
       const next = sbLayers.value.map(l => ({ ...l }))
@@ -225,23 +238,23 @@ const copies = pluginCopies((copy, life) => {
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
-      const pin = pinActiveDocument('Saturation Bench')
+      const pin = pinActiveDocument('Saturation Workbench')
 
       const wasPreviewing = sbPreview.value
       if (wasPreviewing) togglePreview()
       await prepareApply()
 
-      startProcessing('Applying Saturation Bench...', pin.docId)
+      startProcessing('Applying Saturation Workbench...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
         pin.check()
-        const bufferId = replaceRegion(start, end, buffer, 'Saturation Bench', pin.docId)
+        const bufferId = replaceRegion(start, end, buffer, 'Saturation Workbench', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
-        showToast('Saturation Bench applied')
+        showToast('Saturation Workbench applied')
       } catch (err) {
-        console.error('Saturation Bench failed:', err)
-        showToast(err instanceof DocumentSwitchedError ? err.message : 'Saturation Bench failed')
+        console.error('Saturation Workbench failed:', err)
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'Saturation Workbench failed')
       } finally {
         endProcessing(pin.docId)
       }
@@ -273,7 +286,7 @@ const copies = pluginCopies((copy, life) => {
     registerChainPlugin({
       id: saturationBenchEffect.id,
       windowId,
-      label: 'Saturation Bench',
+      label: 'Saturation Workbench',
       dispose: life.dispose,
       isActive: () => sbPreview.value,
       setActive: (on) => { if (sbPreview.value !== on) togglePreview() },
@@ -299,7 +312,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     return {
-      sbInputDb, sbOutputDb, syncTrim, sbSolo, setSolo,
+      sbInputDb, sbOutputDb, syncTrim, sbSolo, setSolo, applyParams,
       sbLayers,
       sbPreview,
       sbDelta,

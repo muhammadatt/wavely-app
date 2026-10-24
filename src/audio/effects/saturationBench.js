@@ -113,7 +113,7 @@ export function createSaturationBench(audioContext) {
 
 export const saturationBenchEffect = {
   id: 'saturation-bench',
-  name: 'Saturation Bench',
+  name: 'Saturation Workbench',
   createNodes(audioContext) {
     return createSaturationBench(audioContext)
   },

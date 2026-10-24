@@ -1,6 +1,6 @@
 <script setup>
 /**
- * Saturation Bench: four layers of waveshaping in series, one strip each.
+ * Saturation Workbench (file and ids keep the old name): four layers of waveshaping in series, one strip each.
  *
  * Every strip is the same instrument — curve, drive, the band it works on and
  * the emphasis around the curve — so layers are built by stacking rather than by
@@ -27,6 +27,8 @@ import ModulaReadout from '../modula/ModulaReadout.vue'
 import SaturationEmphasisPlot from './SaturationEmphasisPlot.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginPresets } from '../../composables/usePluginPresets.js'
+import { SATURATION_BENCH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 import { SHAPER_CURVES } from '../../audio/dsp/shaperCurves.js'
 import { SAT_BENCH_LAYER_PRESETS } from '../../audio/saturationBenchParams.js'
 import {
@@ -38,11 +40,17 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   sbLayers, sbInputDb, sbOutputDb, syncTrim, sbSolo, setSolo, sbPreview, sbDelta, sbInputLevels, sbOutputLevels,
-  togglePreview, toggleDelta, syncLayer, syncLayerFields, addLayer, removeLayer, resetLayers,
+  togglePreview, toggleDelta, applyParams, syncLayer, syncLayerFields, addLayer, removeLayer, resetLayers,
   apply, teardown, closeModal,
 } = useSaturationBench()
 
 const { state } = useEditorState()
+
+// A preset is the whole stack and the trims; SOLO and everything measured stay out.
+const presets = usePluginPresets(SATURATION_BENCH_PRESET_PLUGIN, {
+  read: () => ({ layers: sbLayers.value, inputDb: sbInputDb.value, outputDb: sbOutputDb.value }),
+  write: p => applyParams(p),
+})
 
 onMounted(() => {
   // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
@@ -179,7 +187,10 @@ async function applyAndClose() {
     :min-width="680"
     :accent="ACCENT"
     design="modula"
-    brand-lead="SATURATION BENCH"
+    :presets="presets"
+    :presets-disabled="!sbPreview"
+    presets-disabled-hint="Turn Saturation Workbench on to use presets"
+    brand-lead="SATURATION WORKBENCH"
     :engaged="sbPreview"
     show-delta
     :delta="sbDelta"
@@ -190,7 +201,7 @@ async function applyAndClose() {
     :previewing="state.isPlaying"
     show-apply
     :apply-disabled="!sbPreview"
-    apply-disabled-hint="Turn Saturation Bench on to apply it"
+    apply-disabled-hint="Turn Saturation Workbench on to apply it"
     @toggle-engaged="togglePreview"
     @toggle-delta="toggleDelta"
     @toggle-preview="togglePlayback"

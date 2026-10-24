@@ -24,7 +24,6 @@ test('the work-in-progress plugins are hidden from production builds', () => {
     'clip-gain-deesser',
     'modula-kit',
     'plosive',
-    'saturation-bench',
     'scheps-parallel',
     'vocal-saturation',
     'voicerx',

@@ -17,6 +17,7 @@ import './hfLimiter.js'
 import './airBoost.js'
 import './deEsser.js'
 import './plosive.js'
+import './saturationBench.js'
 
 import { registerOptoSmoothPresets } from './optoSmooth.js'
 import { registerFetPunchPresets } from './fetPunch.js'
@@ -29,6 +30,7 @@ import { registerHfLimiterPresets } from './hfLimiter.js'
 import { registerAirBoostPresets } from './airBoost.js'
 import { registerHfSoftenerPresets } from './deEsser.js'
 import { registerPlosivePresets } from './plosive.js'
+import { registerSaturationBenchPresets } from './saturationBench.js'
 
 export { OPTO_SMOOTH_PRESET_PLUGIN, registerOptoSmoothPresets } from './optoSmooth.js'
 export { FET_PUNCH_PRESET_PLUGIN, registerFetPunchPresets } from './fetPunch.js'
@@ -43,6 +45,7 @@ export { HF_LIMITER_PRESET_PLUGIN, registerHfLimiterPresets } from './hfLimiter.
 export { AIR_BOOST_PRESET_PLUGIN, registerAirBoostPresets } from './airBoost.js'
 export { HF_SOFTENER_PRESET_PLUGIN, registerHfSoftenerPresets } from './deEsser.js'
 export { PLOSIVE_PRESET_PLUGIN, registerPlosivePresets } from './plosive.js'
+export { SATURATION_BENCH_PRESET_PLUGIN, registerSaturationBenchPresets } from './saturationBench.js'
 export * from './store.js'
 
 /**
@@ -63,4 +66,5 @@ export function registerPluginPresets() {
   registerAirBoostPresets()
   registerHfSoftenerPresets()
   registerPlosivePresets()
+  registerSaturationBenchPresets()
 }

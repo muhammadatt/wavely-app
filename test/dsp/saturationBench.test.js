@@ -605,3 +605,27 @@ test('a muted layer reaches the kernel as off; a row that is not in use stays of
   const kp = toKernelParams({ layers })
   assert.deepEqual(kp.layers.map(l => l.on), [true, false, false, false])
 })
+
+test('factory presets: normalise to themselves, keep rows in use contiguous, and stay inside the layer limits', async () => {
+  const { SATURATION_BENCH_PRESETS, SATURATION_BENCH_PRESET_PLUGIN } = await import('../../src/audio/pluginPresets/saturationBench.js')
+  const { pickParams } = await import('../../src/audio/pluginPresets/store.js')
+  const { toKernelParams } = await import('../../src/audio/saturationBenchParams.js')
+  assert.ok(SATURATION_BENCH_PRESETS.length >= 5)
+  for (const p of SATURATION_BENCH_PRESETS) {
+    const n = pickParams(SATURATION_BENCH_PRESET_PLUGIN, p.params)
+    assert.deepEqual(pickParams(SATURATION_BENCH_PRESET_PLUGIN, n), n, `${p.name} is stable under normalize`)
+    assert.equal(n.layers.length, SAT_BENCH_MAX_LAYERS, p.name)
+    const flags = n.layers.map(l => l.on)
+    assert.ok(flags[0], `${p.name}: the first layer is in use`)
+    assert.deepEqual(flags, [...flags].sort((a, b) => b - a), `${p.name}: rows in use are contiguous`)
+    for (const l of n.layers) {
+      assert.ok(l.hiHz > l.loHz, `${p.name}: band`)
+      assert.equal(l.mode, 'full')
+      assert.equal(l.refPeakDb, undefined, 'nothing measured is stored')
+    }
+    assert.equal(toKernelParams({ layers: n.layers }).layers.filter(l => l.on).length, flags.filter(Boolean).length)
+  }
+  // The opening state is exactly the panel's own defaults.
+  const def = SATURATION_BENCH_PRESETS.find(p => p.id === 'factory:default')
+  assert.equal(def.params.layers.filter(l => l.on).length, 2)
+})
