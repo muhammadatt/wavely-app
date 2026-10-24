@@ -66,14 +66,8 @@ const fileMeta = computed(() => {
     style="background:linear-gradient(rgb(20, 25, 34), rgb(14, 17, 22));"
   >
     <!-- Logo -->
-    <div class="flex items-center gap-[13px] shrink-0">
-      <div
-        class="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center"
-        style="background:linear-gradient(135deg,#7ef0ff,#25b6d0);box-shadow:0 0 16px rgba(53,211,230,.5)"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#08161a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h3l2-6 3 13 3-16 2 9h5"/></svg>
-      </div>
-      <span class="font-['Inter'] text-[15px] font-extrabold tracking-[0.2em] text-[#eaf6f8]">WAVELY</span>
+    <div class="flex items-center shrink-0">
+      <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[26px] w-auto select-none" draggable="false" />
     </div>
 
     <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)]"></div>

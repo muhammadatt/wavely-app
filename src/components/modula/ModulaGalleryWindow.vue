@@ -19,6 +19,8 @@ import ModulaSwitch from './ModulaSwitch.vue'
 import ModulaLedPill from './ModulaLedPill.vue'
 import ModulaPad from './ModulaPad.vue'
 import ModulaSteps from './ModulaSteps.vue'
+import ModulaField from './ModulaField.vue'
+import ModulaRangeSlider from './ModulaRangeSlider.vue'
 import ModulaDetent from './ModulaDetent.vue'
 import ModulaButton from './ModulaButton.vue'
 import ModulaChip from './ModulaChip.vue'
@@ -39,8 +41,11 @@ const v = reactive({
   swA: true, swB: false, mute: false, solo: true, link: true, phase: false, loop: false,
   input: 0, sendA: -10, sendB: -20, output: -3, mixF: 1, tape: 'phat', speed: 'ips15', inTrim: 0, outTrim: 0,
   pill: true, chipOn: true, chipSolo: false, typed: 1200,
+  fieldDb: -6, fieldHz: 1200, fieldPick: 2, rangeLo: 200, rangeHi: 8000,
 })
 const dbFmt = x => `${x > 0.05 ? '+' : ''}${x.toFixed(1)} dB`
+const PICKS = ['QUARTIC', 'ASYM', 'ATAN', 'ALGEBRAIC', 'TANH', 'CUBIC', 'HYSTERESIS']
+const fmtHzField = x => (x >= 1000 ? `${(x / 1000).toFixed(2)}k Hz` : `${Math.round(x)} Hz`)
 const fader = x => (x === -Infinity || x <= -80 ? '-∞ dB' : dbFmt(x))
 
 // A wandering test signal for the meters.
@@ -109,6 +114,7 @@ onUnmounted(() => clearInterval(timer))
           <ModulaKnob v-model="v.pan" variant="ring" :size="50" bipolar :min="-100" :max="100" :step="1" :default-value="0" color="var(--m-second)" show-value editable :format-value="x => (x === 0 ? 'C' : (x < 0 ? 'L' : 'R') + Math.abs(x))" label="Pan" />
           <ModulaKnob v-model="v.freq" variant="ring" :size="42" scale="log" :min="20" :max="20000" color="var(--m-second)" show-value editable :format-value="x => (x >= 1000 ? `${(x / 1000).toFixed(1)}k` : Math.round(x))" label="Freq" />
           <ModulaKnob v-model="v.thr" variant="ring" :size="42" :min="-48" :max="0" :step="0.1" show-value :format-value="x => x.toFixed(1)" label="Threshold" />
+          <ModulaKnob v-model="v.thr" variant="plain" :size="32" :min="-48" :max="0" :step="0.1" show-value :format-value="x => x.toFixed(1)" label="Plain" />
         </div>
       </section>
 
@@ -143,6 +149,28 @@ onUnmounted(() => clearInterval(timer))
             <ModulaLedPill v-model="v.pill" label="BAND SPLIT" />
             <ModulaDetent v-model="v.speed" :options="[{ value: 'ips7', label: '7.5' }, { value: 'ips15', label: '15' }, { value: 'ips30', label: '30' }]" label="Tape speed (IPS)" />
           </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>Fields · drag, click to type, scroll</h3>
+        <div class="col" style="gap:22px">
+          <div class="row">
+            <ModulaField v-model="v.fieldDb" :min="-24" :max="24" :step="0.5" :default-value="0" label="Trim" :format-value="dbFmt" />
+            <ModulaField v-model="v.fieldHz" :min="20" :max="20000" :step="1" log :default-value="1200" label="Freq" :format-value="fmtHzField" :width="96" />
+          </div>
+          <div class="row">
+            <ModulaField
+              v-model="v.fieldPick" :min="0" :max="PICKS.length - 1" :step="1" arrows wrap :width="116" label="Curve"
+              :format-value="i => PICKS[Math.round(i)]"
+              :parse="t => PICKS.findIndex(n => n.startsWith(t.trim().toUpperCase()))"
+            />
+          </div>
+          <h3>Range slider · two caps, one span</h3>
+          <ModulaRangeSlider
+            v-model:lo="v.rangeLo" v-model:hi="v.rangeHi" :min="1" :max="20000" :hi-min="20" :min-ratio="Math.pow(2, 1 / 3)"
+            :lo-default="1" :hi-default="20000" label="Band" :reading="`${fmtHzField(v.rangeLo)} – ${fmtHzField(v.rangeHi)}`" :format-value="fmtHzField"
+          />
         </div>
       </section>
 

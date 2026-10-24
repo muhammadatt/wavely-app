@@ -26,7 +26,7 @@ function layout() {
   return out
 }
 
-test('the toolbar is Edit, Level, Dynamics, Tone, Clean, then Master', () => {
+test('the toolbar is Edit, Level, Dynamics, Tone, Fix, then Master', () => {
   assert.deepEqual(categoryIds, ['edit', 'level', 'dynamics', 'tone', 'clean', 'master'])
 })
 

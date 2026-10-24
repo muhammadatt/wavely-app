@@ -87,7 +87,7 @@ const ALL_CATEGORIES = [
   },
   {
     id: 'clean',
-    label: 'Clean',
+    label: 'Fix',
     icon: 'clean',
     desc: 'Tame sibilance, harshness, resonances and hum',
     panel: null,
@@ -125,7 +125,7 @@ const ALL_CATEGORIES = [
  *
  * Surface is fixed per category, with one exception: everything under Edit opens
  * in the rail (or runs immediately, for the parameterless verbs), everything
- * under Level, Dynamics, Tone and Clean opens as a window — except Fade and
+ * under Level, Dynamics, Tone and Fix opens as a window — except Fade and
  * Volume, which sit in Level but open in the rail.
  */
 /**
@@ -489,7 +489,7 @@ const ALL_OPERATIONS = [
     component: SaturationBenchModal,
   },
 
-  // ---- Clean (windows) ----
+  // ---- Fix (windows) ----
   {
     // The real-time de-esser: dips the top end only while a consonant spikes.
     // The Sibilance Editor above is the event-based version: it analyses the
@@ -584,7 +584,7 @@ const ALL_OPERATIONS = [
   },
   // Its own group because it is the one entry here that measures rather than
   // changes: it needs a file and a transport, not a selection, and it has no
-  // Apply. Filed under Clean because finding a problem is what it is mostly
+  // Apply. Filed under Fix because finding a problem is what it is mostly
   // used for, and last so a row that alters nothing sits apart from the rest.
   {
     id: 'spectrum-analyzer',

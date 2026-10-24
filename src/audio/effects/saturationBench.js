@@ -27,6 +27,17 @@ export function createSaturationBench(audioContext) {
   let worklet = null
   let destroyed = false
   let delta = false
+  // Slot heard alone (preview only, never in `params`, so apply cannot see it), or null.
+  let solo = null
+
+  function kernelParams() {
+    const kp = toKernelParams(params)
+    if (solo !== null) {
+      // Every other layer is a pure delay; the soloed one runs even if muted.
+      kp.layers.forEach((l, k) => { l.on = k === solo && !!params.layers?.[k]?.on })
+    }
+    return kp
+  }
 
   input.connect(preOutput)
   preOutput.connect(output)
@@ -35,7 +46,7 @@ export function createSaturationBench(audioContext) {
     .then(() => {
       if (destroyed) return
       worklet = new AudioWorkletNode(audioContext, 'saturation-bench-processor', {
-        processorOptions: { params: toKernelParams(params) },
+        processorOptions: { params: kernelParams() },
       })
       worklet.port.postMessage({ type: 'listen', mode: delta ? 'delta' : 'off' })
       input.disconnect(preOutput)
@@ -63,12 +74,18 @@ export function createSaturationBench(audioContext) {
         worklet?.port.postMessage({ type: 'listen', mode: delta ? 'delta' : 'off' })
         return
       }
+      if (name === 'solo') {
+        solo = Number.isInteger(value) ? value : null
+        worklet?.port.postMessage({ type: 'params', params: kernelParams() })
+        return
+      }
       if (!(name in params)) return
       params[name] = value
-      worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+      worklet?.port.postMessage({ type: 'params', params: kernelParams() })
     },
 
     getParam(name) {
+      if (name === 'solo') return solo
       return name === 'delta' ? delta : params[name]
     },
 

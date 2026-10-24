@@ -13,6 +13,9 @@
  *          with one pointer line — no ticks, no dots, no well. For dense
  *          rows (the EQ's band strips), where eight arc knobs read as noise;
  *          fills BIPOLAR from its zero like the arc
+ *   plain  the ring knob's cap and accent pointer with nothing round it — no arc,
+ *          no track, no ring. For the smallest controls in a dense row, where
+ *          the value is read off a caption and the ring would only be noise
  *   trim   30 px, a plain white pointer: the trims under the IN/OUT meters
  *
  * The value is never printed on the cap. The large knobs float it in a drag
@@ -32,7 +35,7 @@ import ModulaValueTip from './ModulaValueTip.vue'
 
 const props = defineProps({
   ...DRAG_PROPS,
-  variant: { type: String, default: 'small', validator: v => ['led', 'ticks', 'small', 'arc', 'ring', 'trim'].includes(v) },
+  variant: { type: String, default: 'small', validator: v => ['led', 'ticks', 'small', 'arc', 'ring', 'plain', 'trim'].includes(v) },
   /** Diameter of the knob body, px. Defaults per variant. */
   size: { type: Number, default: null },
   label: { type: String, default: '' },
@@ -60,10 +63,10 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 /** Outer size, ring included. */
-const DEFAULT_SIZE = { led: 156, ticks: 156, small: 62, arc: 108, ring: 48, trim: 30 }
+const DEFAULT_SIZE = { led: 156, ticks: 156, small: 62, arc: 108, ring: 48, plain: 30, trim: 30 }
 /** The cap diameter the shadows and pointer widths were written for. */
-const DESIGN_CAP = { led: 112, ticks: 102, small: 62, arc: 108, ring: 48, trim: 30 }
-const DEFAULT_TRAVEL = { led: 200, ticks: 200, small: 140, arc: 150, ring: 150, trim: 160 }
+const DESIGN_CAP = { led: 112, ticks: 102, small: 62, arc: 108, ring: 48, plain: 32, trim: 30 }
+const DEFAULT_TRAVEL = { led: 200, ticks: 200, small: 140, arc: 150, ring: 150, plain: 150, trim: 160 }
 const outer = computed(() => props.size ?? DEFAULT_SIZE[props.variant])
 /** The cap, which is what the knob's own geometry is measured on. */
 const body = computed(() => {
@@ -113,15 +116,17 @@ function commitEdit() {
 function cancelEdit() { editing.value = false }
 
 // Captions: which line comes first, and what the value line reads.
-const labelFirst = computed(() => props.variant === 'small' || props.variant === 'arc' || props.variant === 'ring')
+/** The two knobs captioned like the arc: label first, the value (or note) under it. */
+const ringLike = computed(() => props.variant === 'ring' || props.variant === 'plain')
+const labelFirst = computed(() => props.variant === 'small' || props.variant === 'arc' || ringLike.value)
 const valueLine = computed(() => {
-  if (props.variant === 'arc' || props.variant === 'ring') return props.note || props.showValue ? (props.note || text.value) : null
+  if (props.variant === 'arc' || ringLike.value) return props.note || props.showValue ? (props.note || text.value) : null
   return props.showValue ? text.value : null
 })
 const valueClass = computed(() => ({
-  small: 'm-note m-val-small', arc: 'm-note m-val-arc', ring: 'm-note m-val-arc', trim: 'm-note', led: 'm-big-value', ticks: 'm-big-value',
+  small: 'm-note m-val-small', arc: 'm-note m-val-arc', ring: 'm-note m-val-arc', plain: 'm-note m-val-arc', trim: 'm-note', led: 'm-big-value', ticks: 'm-big-value',
 }[props.variant]))
-const valueEditable = computed(() => props.editable && !props.readonly && !((props.variant === 'arc' || props.variant === 'ring') && props.note))
+const valueEditable = computed(() => props.editable && !props.readonly && !((props.variant === 'arc' || ringLike.value) && props.note))
 
 const tipOn = computed(() => (props.showTip ?? props.variant !== 'trim') && dragging.value)
 
@@ -270,6 +275,17 @@ const aria = computed(() => ({
       </div>
     </div>
 
+    <!-- Plain: the ring knob's cap and pointer, nothing round it ─────────── -->
+    <div
+      v-else-if="variant === 'plain'" class="m-plain m-focusable"
+      :style="{ width: `${body}px`, height: `${body}px` }" v-bind="aria" v-on="handlers"
+    >
+      <ModulaValueTip :text="text" :show="tipOn" size="sm" :offset="24" />
+      <div class="m-rot" :style="{ transform: `rotate(${deg}deg)` }">
+        <div class="m-ring-line" :style="{ background: color, boxShadow: `0 0 5px ${color}` }"></div>
+      </div>
+    </div>
+
     <!-- Small and trim ─────────────────────────────────────────────────────── -->
     <div
       v-else class="m-cap m-cap--plain m-focusable"
@@ -318,10 +334,10 @@ const aria = computed(() => ({
   transition: opacity 0.15s ease;
 }
 .m-knob--led, .m-knob--ticks { gap: 12px; }
-.m-knob--arc, .m-knob--ring { gap: 7px; }
+.m-knob--arc, .m-knob--ring, .m-knob--plain { gap: 7px; }
 .m-knob--trim { gap: 5px; }
 .m-knob.is-disabled { opacity: 0.4; }
-.m-knob:is(.is-disabled, .is-readonly) :is(.m-cap, .m-arc, .m-ringk) { cursor: default; }
+.m-knob:is(.is-disabled, .is-readonly) :is(.m-cap, .m-arc, .m-ringk, .m-plain) { cursor: default; }
 
 .m-ring {
   position: relative;
@@ -436,6 +452,16 @@ const aria = computed(() => ({
   inset: 17%;
   border-radius: 50%;
   /* The led knob's cap, at the strip's scale. */
+  background: linear-gradient(160deg, #4d596a 0%, #323b48 52%, #222931 100%);
+  box-shadow: 0 calc(6px * var(--k, 1)) calc(10px * var(--k, 1)) calc(-6px * var(--k, 1)) rgba(0, 0, 0, .95), inset 0 calc(1px * var(--k, 1)) calc(1px * var(--k, 1)) rgba(255, 255, 255, .1), inset 0 calc(-3px * var(--k, 1)) calc(5px * var(--k, 1)) rgba(0, 0, 0, .55), 0 0 0 1px rgba(0, 0, 0, .7);
+}
+.m-plain {
+  position: relative;
+  flex: none;
+  border-radius: 50%;
+  cursor: ns-resize;
+  touch-action: none;
+  /* The ring knob's cap, filling the whole box: nothing round it. */
   background: linear-gradient(160deg, #4d596a 0%, #323b48 52%, #222931 100%);
   box-shadow: 0 calc(6px * var(--k, 1)) calc(10px * var(--k, 1)) calc(-6px * var(--k, 1)) rgba(0, 0, 0, .95), inset 0 calc(1px * var(--k, 1)) calc(1px * var(--k, 1)) rgba(255, 255, 255, .1), inset 0 calc(-3px * var(--k, 1)) calc(5px * var(--k, 1)) rgba(0, 0, 0, .55), 0 0 0 1px rgba(0, 0, 0, .7);
 }

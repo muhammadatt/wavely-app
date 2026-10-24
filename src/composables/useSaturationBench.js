@@ -8,6 +8,7 @@ import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import {
   saturationBenchEffect as soloSaturationBenchEffect, SAT_BENCH_LAYER_PRESETS,
 } from '../audio/effects/saturationBench.js'
+import { addLayer as addLayerTo, removeLayer as removeLayerFrom } from '../audio/saturationBenchParams.js'
 import {
   measureBandSpectrum, bandRefPeakDb, voicingOffsetDb,
 } from '../audio/saturationBenchAnalysis.js'
@@ -27,8 +28,13 @@ const copies = pluginCopies((copy, life) => {
 
   // Reactive state shared by every caller of this copy.
   const sbLayers = ref(SAT_BENCH_LAYER_PRESETS.map(l => ({ ...l })))
+  // The IN / OUT trims either side of the layers, dB.
+  const sbInputDb = ref(0)
+  const sbOutputDb = ref(0)
   const sbPreview = ref(false)
   const sbDelta = ref(false)
+  // The slot heard alone, or null. Preview only: it is never in currentParams().
+  const sbSolo = ref(null)
   const sbInputLevels = ref([])
   const sbOutputLevels = ref([])
   // The file's gated long-term spectrum: what every layer's drive is calibrated
@@ -46,6 +52,8 @@ const copies = pluginCopies((copy, life) => {
       layers: sbLayers.value.map(l => ({ ...l })),
       refPeaks: [...sbRefPeaks.value],
       levelOffset: sbLevelOffset.value,
+      inputDb: sbInputDb.value,
+      outputDb: sbOutputDb.value,
     }
   }
 
@@ -130,10 +138,18 @@ const copies = pluginCopies((copy, life) => {
         refreshSpectrum()
         pushAll()
         chain.updateParam(saturationBenchEffect.id, 'delta', sbDelta.value)
+        chain.updateParam(saturationBenchEffect.id, 'solo', sbSolo.value)
         startMeters(chain)
       } else {
         stopMeters()
       }
+    }
+
+    /** Hear one layer alone (null = all). Preview only; apply never sees it. */
+    function setSolo(k) {
+      sbSolo.value = k === sbSolo.value ? null : k
+      if (!sbPreview.value) return
+      getEffectChain(getAudioContext()).updateParam(saturationBenchEffect.id, 'solo', sbSolo.value)
     }
 
     function toggleDelta() {
@@ -150,10 +166,42 @@ const copies = pluginCopies((copy, life) => {
       pushAll()
     }
 
+    /** Set the input or output trim. */
+    function syncTrim(which, db) {
+      if (which === 'input') sbInputDb.value = db
+      else sbOutputDb.value = db
+      pushAll()
+    }
+
     /** Set several fields of one layer at once (the emphasis quick buttons). */
     function syncLayerFields(k, fields) {
       const next = sbLayers.value.map(l => ({ ...l }))
       Object.assign(next[k], fields)
+      sbLayers.value = next
+      pushAll()
+    }
+
+    /** Slots move when rows are added or removed, so a solo would land on the wrong layer. */
+    function clearSolo() {
+      if (sbSolo.value === null) return
+      sbSolo.value = null
+      if (sbPreview.value) getEffectChain(getAudioContext()).updateParam(saturationBenchEffect.id, 'solo', null)
+    }
+
+    /** Bring in the next unused layer as a new row (its slot's settings). */
+    function addLayer() {
+      const next = addLayerTo(sbLayers.value)
+      if (!next) return
+      clearSolo()
+      sbLayers.value = next
+      pushAll()
+    }
+
+    /** Take a row out; the rows below move up and its settings are kept for adding it back. */
+    function removeLayer(k) {
+      const next = removeLayerFrom(sbLayers.value, k)
+      if (!next) return
+      clearSolo()
       sbLayers.value = next
       pushAll()
     }
@@ -203,6 +251,8 @@ const copies = pluginCopies((copy, life) => {
       stopMeters()
       getEffectChainIfExists()?.updateParam(saturationBenchEffect.id, 'delta', false)
       sbDelta.value = false
+      sbSolo.value = null
+      getEffectChainIfExists()?.updateParam(saturationBenchEffect.id, 'solo', null)
     }
 
     // The measurements that follow the selection and the file run for as long
@@ -249,6 +299,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     return {
+      sbInputDb, sbOutputDb, syncTrim, sbSolo, setSolo,
       sbLayers,
       sbPreview,
       sbDelta,
@@ -261,6 +312,8 @@ const copies = pluginCopies((copy, life) => {
       toggleDelta,
       syncLayer,
       syncLayerFields,
+      addLayer,
+      removeLayer,
       resetLayers,
       refreshSpectrum,
       apply,

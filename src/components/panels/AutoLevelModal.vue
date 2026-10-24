@@ -11,12 +11,19 @@
  * simplified "amount" knob. This plugin exists for the user who is going to
  * check the result against ACX, and a leveler whose caps and deadband are
  * hidden cannot be reasoned about against a compliance report.
+ *
+ * Modula layout: the gain bar and the analysis sit in the centre well between
+ * the IN and OUT ladders, the four live controls under them, and the target
+ * mode with its two knobs in a second row.
  */
 import { computed, onMounted } from 'vue'
 import { useAutoLevel } from '../../composables/useAutoLevel.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import Knob from '../knobs/Knob.vue'
+import { AUTOLEVEL_DEFAULTS } from '../../audio/dsp/autoLevel.js'
+import ModulaKnob from '../modula/ModulaKnob.vue'
+import ModulaButton from '../modula/ModulaButton.vue'
+import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainRideBar from '../meters/GainRideBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -39,11 +46,19 @@ onMounted(() => {
   if (!preview.value && currentPluginCopy() === 'solo') togglePreview()
 })
 
-const ACCENT = '#9ee6a8'
+const ACCENT = '#e8a33d'
+const METER_H = 190
+const D = AUTOLEVEL_DEFAULTS
 
-const oneDp = v => v.toFixed(1)
-const twoDp = v => v.toFixed(2)
-const secs = v => `${Math.round(v)}`
+const fmtDb = v => `${v.toFixed(2)} dB`
+const fmtDb1 = v => `${v.toFixed(1)} dB`
+const fmtSecs = v => `${Math.round(v)} s`
+const fmtFloor = v => `${v.toFixed(0)} dBFS`
+
+const TARGET_OPTIONS = [
+  { value: 'global', label: 'WHOLE SELECTION', title: 'One level held throughout the selection' },
+  { value: 'running_median', label: 'ROLLING', title: 'Follows a moving median, so a deliberate change in delivery survives' },
+]
 
 function fmtTime(sec) {
   const m = Math.floor(sec / 60)
@@ -93,6 +108,9 @@ const applyHint = computed(() => {
   return skipReason.value ?? 'Nothing to level'
 })
 
+/** The live controls work only on a fresh analysis with the leveler on. */
+const controlsOff = computed(() => !preview.value || !hasAnalysis.value)
+
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
 }
@@ -116,10 +134,10 @@ const previewLimit = computed(() => entitlements.previewLimit('autoLevel'))
   <FloatingWindow
     window-id="auto-leveler"
     :z="z"
-    :width="640"
+    :width="700"
     :accent="ACCENT"
-    brand-lead="AUTO"
-    brand-tail="LEVEL"
+    design="modula"
+    brand-lead="AUTO LEVELER"
     :engaged="preview"
     show-preview
     previewable
@@ -133,173 +151,196 @@ const previewLimit = computed(() => entitlements.previewLimit('autoLevel'))
     @apply="applyAndClose"
     @close="close"
   >
-    <div class="px-[26px] pt-[22px] pb-[24px]">
-      <!-- Signed, because the boosts are the point. 12 dB half-scale matches
-           the default caps: a bar whose ends are unreachable wastes its width. -->
-      <GainRideBar :gain-db="gainDb" :accent="ACCENT" :full-scale-db="12" />
-
-      <div class="flex items-start justify-between gap-[20px] mt-[20px]">
-        <LevelMeter :levels="inputLevels" label="IN" :height="176" />
-
-        <div class="flex-1">
-          <!-- Analyse: the frozen half -->
-          <div class="flex items-center justify-between gap-[16px]">
-            <div>
-              <div
-                style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.14em;
-                       color:rgba(255,255,255,.42)"
-              >SPEECH DETECTION</div>
-              <div
-                class="mt-[2px]"
-                style="font:500 9.5px/1.4 'Inter';color:rgba(255,255,255,.3);max-width:290px"
-              >Runs once on the server. Phrase segmentation and every control
-                below are computed here from the result.</div>
-              <div
-                v-if="previewLimit !== Infinity"
-                class="mt-[4px]"
-                style="font:600 10px/1.45 'Inter',system-ui,sans-serif;color:#e0b84a"
-              >Free preview: analyses the first {{ previewLimit }} s. Pro analyses the whole selection.</div>
-            </div>
-            <button
-              class="px-[18px] py-[9px] rounded-lg cursor-pointer transition-all disabled:cursor-default"
-              :style="{
-                background: analyzing ? 'rgba(255,255,255,.05)' : 'rgba(158,230,168,.16)',
-                border: `1px solid ${analyzing ? 'rgba(255,255,255,.09)' : 'rgba(158,230,168,.42)'}`,
-                color: analyzing ? 'rgba(255,255,255,.4)' : '#cdf3d4',
-                font: `700 10px 'JetBrains Mono',monospace`,
-                letterSpacing: '.1em',
-                opacity: hasSelection ? 1 : 0.4,
-              }"
-              :disabled="analyzing || !hasSelection"
-              @click="analyze"
-            >{{ analyzing ? 'ANALYSING…' : 'ANALYSE' }}</button>
-          </div>
-
-          <!-- Targeting: the live half -->
-          <div
-            class="mt-[16px] pt-[14px] grid grid-cols-2 gap-x-[26px] gap-y-[14px]"
-            style="border-top:1px solid rgba(255,255,255,.06)"
-          >
-            <div class="w-[104px]">
-              <Knob
-                :model-value="params.deadband_db"
-                @update:model-value="v => syncParam('deadband_db', v)"
-                :min="0" :max="6" :step="0.05" :value-font-px="12"
-                label="Deadband dB" :accent="ACCENT" :format-value="twoDp"
-                :disabled="!preview || !hasAnalysis"
-              />
-            </div>
-            <div class="w-[104px]">
-              <Knob
-                :model-value="params.knee_db"
-                @update:model-value="v => syncParam('knee_db', v)"
-                :min="0.1" :max="6" :step="0.1" :value-font-px="12"
-                label="Knee dB" :accent="ACCENT" :format-value="oneDp"
-                :disabled="!preview || !hasAnalysis"
-              />
-            </div>
-            <div class="w-[104px]">
-              <Knob
-                :model-value="params.max_up_db"
-                @update:model-value="v => syncParam('max_up_db', v)"
-                :min="0" :max="18" :step="0.5" :value-font-px="12"
-                label="Max Boost dB" :accent="ACCENT" :format-value="oneDp"
-                :disabled="!preview || !hasAnalysis"
-              />
-            </div>
-            <div class="w-[104px]">
-              <Knob
-                :model-value="params.max_down_db"
-                @update:model-value="v => syncParam('max_down_db', v)"
-                :min="0" :max="18" :step="0.5" :value-font-px="12"
-                label="Max Cut dB" :accent="ACCENT" :format-value="oneDp"
-                :disabled="!preview || !hasAnalysis"
-              />
-            </div>
-          </div>
-
-          <p
-            class="mt-[12px]"
-            :style="{
-              font: `500 10px/1.5 'Inter'`,
-              color: isStale || skipReason ? '#ffb27a' : 'rgba(255,255,255,.35)',
-            }"
-          >{{ statusLine }}</p>
-
-          <p
-            v-if="capNote"
-            class="mt-[6px]"
-            style="font:500 10px/1.5 'Inter';color:#ffb27a"
-          >{{ capNote }}</p>
-        </div>
-
-        <LevelMeter :levels="outputLevels" label="OUT" :height="176" />
+    <div class="al-grid">
+      <div class="al-meter">
+        <LevelMeter variant="modula" scale-side="left" :levels="inputLevels" label="IN" :height="METER_H" />
       </div>
 
-      <!-- Target: what each phrase is levelled towards -->
-      <div
-        class="flex items-center justify-between mt-[16px] pt-[14px]"
-        style="border-top:1px solid rgba(255,255,255,.06)"
-      >
-        <div style="max-width:250px">
-          <p style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.3)">
-            What each phrase is levelled towards. <b>Whole selection</b> holds one
-            level throughout; <b>rolling</b> follows a moving median, so a
-            deliberate change in delivery survives.
-          </p>
-          <button
-            class="mt-[8px] px-[10px] py-[4px] rounded cursor-pointer"
-            style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.1em;
-                   background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);
-                   color:rgba(255,255,255,.45)"
-            @click="resetParams"
-          >RESET</button>
+      <div class="al-display">
+        <!-- Signed, because the boosts are the point. 12 dB half-scale matches
+             the default caps: a bar whose ends are unreachable wastes its width. -->
+        <GainRideBar :gain-db="gainDb" :accent="ACCENT" :full-scale-db="12" />
+
+        <!-- Analyse: the frozen half -->
+        <div class="al-analyse">
+          <div class="al-analyse-text">
+            <span class="m-caption">Speech detection</span>
+            <p class="al-hint">
+              Runs once on the server. Phrase segmentation and every control
+              below are computed here from the result.
+            </p>
+            <p v-if="previewLimit !== Infinity" class="al-warn">
+              Free preview: analyses the first {{ previewLimit }} s. Pro analyses the whole selection.
+            </p>
+          </div>
+          <ModulaButton
+            variant="accent" :disabled="analyzing || !hasSelection"
+            @click="analyze"
+          >{{ analyzing ? 'Analysing…' : 'Analyse' }}</ModulaButton>
         </div>
 
-        <div class="flex items-center gap-[18px]">
-          <div class="flex rounded-lg overflow-hidden" style="border:1px solid rgba(255,255,255,.09)">
-            <button
-              v-for="mode in [
-                { id: 'global', label: 'WHOLE SELECTION' },
-                { id: 'running_median', label: 'ROLLING' },
-              ]"
-              :key="mode.id"
-              class="px-[12px] py-[7px] cursor-pointer transition-all"
-              :style="{
-                background: params.target_mode === mode.id
-                  ? 'rgba(158,230,168,.16)' : 'transparent',
-                color: params.target_mode === mode.id
-                  ? '#cdf3d4' : 'rgba(255,255,255,.38)',
-                font: `700 8.5px 'JetBrains Mono',monospace`,
-                letterSpacing: '.1em',
-                opacity: (!preview || !hasAnalysis) ? 0.4 : 1,
-              }"
-              :disabled="!preview || !hasAnalysis"
-              @click="syncParam('target_mode', mode.id)"
-            >{{ mode.label }}</button>
-          </div>
+        <p class="al-status" :class="{ 'is-warn': isStale || skipReason }">{{ statusLine }}</p>
+        <p v-if="capNote" class="al-status is-warn">{{ capNote }}</p>
+      </div>
 
-          <div class="w-[86px]">
-            <Knob
-              :model-value="params.target_window_s"
-              @update:model-value="v => syncParam('target_window_s', v)"
-              :min="10" :max="120" :step="5" :value-font-px="11"
-              label="Window s" :accent="ACCENT" :format-value="secs"
-              :disabled="!preview || !hasAnalysis || params.target_mode !== 'running_median'"
-            />
-          </div>
+      <div class="al-meter">
+        <LevelMeter variant="modula" scale-side="right" :levels="outputLevels" label="OUT" :height="METER_H" />
+      </div>
+    </div>
 
-          <div class="w-[86px]">
-            <Knob
-              :model-value="params.noise_floor_target_dbfs"
-              @update:model-value="v => syncParam('noise_floor_target_dbfs', v)"
-              :min="-80" :max="-40" :step="1" :value-font-px="11"
-              label="Floor dBFS" :accent="ACCENT" :format-value="v => v.toFixed(0)"
-              :disabled="!preview || !hasAnalysis"
-            />
-          </div>
-        </div>
+    <!-- Targeting: the live half -->
+    <div class="al-knobs">
+      <ModulaKnob
+        variant="small" :size="52" show-value editable
+        :model-value="params.deadband_db" :min="0" :max="6" :step="0.05"
+        :default-value="D.deadband_db" label="Deadband" :color="ACCENT" :format-value="fmtDb"
+        :disabled="controlsOff"
+        title="How far a phrase may sit from the target before it is touched at all. Double-click to reset"
+        @update:model-value="v => syncParam('deadband_db', v)"
+      />
+      <ModulaKnob
+        variant="small" :size="52" show-value editable
+        :model-value="params.knee_db" :min="0.1" :max="6" :step="0.1"
+        :default-value="D.knee_db" label="Knee" :color="ACCENT" :format-value="fmtDb1"
+        :disabled="controlsOff"
+        title="How gently the correction fades in past the deadband. Double-click to reset"
+        @update:model-value="v => syncParam('knee_db', v)"
+      />
+      <ModulaKnob
+        variant="small" :size="52" show-value editable
+        :model-value="params.max_up_db" :min="0" :max="18" :step="0.5"
+        :default-value="D.max_up_db" label="Max Boost" :color="ACCENT" :format-value="fmtDb1"
+        :disabled="controlsOff"
+        title="The most any phrase is lifted. Double-click to reset"
+        @update:model-value="v => syncParam('max_up_db', v)"
+      />
+      <ModulaKnob
+        variant="small" :size="52" show-value editable
+        :model-value="params.max_down_db" :min="0" :max="18" :step="0.5"
+        :default-value="D.max_down_db" label="Max Cut" :color="ACCENT" :format-value="fmtDb1"
+        :disabled="controlsOff"
+        title="The most any phrase is turned down. Double-click to reset"
+        @update:model-value="v => syncParam('max_down_db', v)"
+      />
+    </div>
+
+    <!-- Target: what each phrase is levelled towards -->
+    <div class="al-target">
+      <div class="al-target-text">
+        <p class="al-hint">
+          What each phrase is levelled towards. <b>Whole selection</b> holds one
+          level throughout; <b>rolling</b> follows a moving median, so a
+          deliberate change in delivery survives.
+        </p>
+        <ModulaButton variant="ghost" size="sm" @click="resetParams">Reset</ModulaButton>
+      </div>
+
+      <div class="al-target-controls">
+        <ModulaSegmented
+          :model-value="params.target_mode" :options="TARGET_OPTIONS"
+          aria-label="Target" :disabled="controlsOff"
+          @update:model-value="v => syncParam('target_mode', v)"
+        />
+        <ModulaKnob
+          variant="small" :size="44" show-value editable
+          :model-value="params.target_window_s" :min="10" :max="120" :step="5"
+          :default-value="D.target_window_s" label="Window" :color="ACCENT" :format-value="fmtSecs"
+          :disabled="controlsOff || params.target_mode !== 'running_median'"
+          title="How much recent speech the rolling median looks at. Double-click to reset"
+          @update:model-value="v => syncParam('target_window_s', v)"
+        />
+        <ModulaKnob
+          variant="small" :size="44" show-value editable
+          :model-value="params.noise_floor_target_dbfs" :min="-80" :max="-40" :step="1"
+          :default-value="D.noise_floor_target_dbfs" label="Floor" :color="ACCENT" :format-value="fmtFloor"
+          :disabled="controlsOff"
+          title="The room-tone level boosts are not allowed to push past. Double-click to reset"
+          @update:model-value="v => syncParam('noise_floor_target_dbfs', v)"
+        />
       </div>
     </div>
   </FloatingWindow>
 </template>
+
+<style scoped>
+.al-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+.al-meter {
+  display: flex;
+  justify-content: center;
+  padding: 12px 4px;
+}
+.al-display {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.al-analyse {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, .35);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, .04);
+}
+.al-analyse-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.al-hint {
+  margin: 0;
+  font: 500 10px/1.5 var(--m-font-ui);
+  color: var(--m-ink-4);
+}
+.al-hint b { font-weight: 700; color: var(--m-ink-3); }
+.al-warn {
+  margin: 0;
+  font: 600 10px/1.45 var(--m-font-ui);
+  color: var(--m-accent);
+}
+.al-status {
+  margin: 0;
+  font: 500 10px/1.5 var(--m-font-ui);
+  color: var(--m-ink-3);
+}
+.al-status.is-warn { color: #ffb27a; }
+.al-knobs,
+.al-target {
+  margin-top: 12px;
+  padding: 14px 12px 12px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.al-knobs {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-around;
+  gap: 8px;
+}
+.al-target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.al-target-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 250px;
+}
+.al-target-controls {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+</style>

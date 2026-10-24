@@ -1,10 +1,23 @@
 <script setup>
+/**
+ * Hum Remover.
+ *
+ * Analyse finds mains hum and its harmonics on the selection; each harmonic is
+ * a row the user can tick, and every ticked one gets a narrow notch. Width and
+ * depth are live.
+ *
+ * Modula layout: the mains choice, the Analyse row and the harmonic table sit
+ * in the centre well between the IN and OUT ladders, the two notch controls in
+ * a panel below.
+ */
 import { computed, onMounted } from 'vue'
 import { useHumRemover } from '../../composables/useHumRemover.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import Knob from '../knobs/Knob.vue'
-import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
+import { HUM_NOTCH_DEFAULTS } from '../../audio/effects/humNotch.js'
+import ModulaKnob from '../modula/ModulaKnob.vue'
+import ModulaButton from '../modula/ModulaButton.vue'
+import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
@@ -25,7 +38,9 @@ onMounted(() => {
   if (!humPreview.value && currentPluginCopy() === 'solo') togglePreview()
 })
 
-const ACCENT = '#c9a7ff'
+const ACCENT = '#e8a33d'
+const METER_H = 214
+const D = HUM_NOTCH_DEFAULTS
 
 const MAINS_OPTIONS = [
   { value: 60, label: '60 Hz', title: 'US, Canada, Japan (east)' },
@@ -57,11 +72,11 @@ const statusLine = computed(() => {
 })
 
 function formatQ(v) {
-  return String(Math.round(v))
+  return `Q ${Math.round(v)}`
 }
 
 function formatDepth(v) {
-  return `−${v.toFixed(0)}`
+  return `−${v.toFixed(0)} dB`
 }
 
 /**
@@ -137,10 +152,10 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="hum-remover"
     :z="z"
-    :width="620"
+    :width="700"
     :accent="ACCENT"
-    brand-lead="HUM"
-    brand-tail="REMOVER"
+    design="modula"
+    brand-lead="HUM REMOVER"
     :engaged="humPreview"
     show-preview
     previewable
@@ -155,155 +170,210 @@ async function applyAndClose() {
     @apply="applyAndClose"
     @close="close"
   >
-    <div class="px-[26px] pt-[22px] pb-[24px]">
-      <div class="flex items-start justify-between gap-[20px]">
-        <LevelMeter :levels="humInputLevels" label="IN" :height="176" />
+    <div class="hr-grid">
+      <div class="hr-meter">
+        <LevelMeter variant="modula" scale-side="left" :levels="humInputLevels" label="IN" :height="METER_H" />
+      </div>
 
-        <div class="flex-1">
-          <!-- Mains frequency + analyse -->
-          <div class="flex items-center justify-between gap-[16px]">
-            <DeviceChoiceRocker
-              :model-value="humFundamental"
+      <div class="hr-display">
+        <!-- Mains frequency + analyse -->
+        <div class="hr-top">
+          <div class="hr-mains">
+            <span class="m-caption">Mains frequency</span>
+            <ModulaSegmented
+              :model-value="humFundamental" :options="MAINS_OPTIONS"
+              aria-label="Mains frequency" :disabled="humAnalyzing"
               @update:model-value="setFundamental"
-              :options="MAINS_OPTIONS"
-              :accent="ACCENT"
-              :disabled="humAnalyzing"
-              label="Mains frequency"
-              caption="Mains frequency"
             />
+          </div>
+          <ModulaButton
+            variant="accent" :disabled="humAnalyzing || !hasSelection"
+            @click="analyze"
+          >{{ humAnalyzing ? 'Analysing…' : 'Analyse' }}</ModulaButton>
+        </div>
+
+        <!-- Harmonic table -->
+        <div class="hr-table">
+          <div class="hr-row hr-head">
+            <span></span><span>Freq</span><span>Above floor</span><span class="hr-right">Δ dB</span>
+          </div>
+
+          <div v-if="humHarmonics.length === 0" class="hr-empty">No analysis yet.</div>
+
+          <div v-for="h in humHarmonics" :key="h.frequency" class="hr-row hr-item">
+            <!-- Reads as a checkbox to assistive tech: the visual tick and
+                 the accent fill are the only other cue that a row is on. -->
             <button
-              class="px-[18px] py-[9px] rounded-lg cursor-pointer transition-all disabled:cursor-default"
-              :style="{
-                background: humAnalyzing ? 'rgba(255,255,255,.05)' : 'rgba(201,167,255,.16)',
-                border: `1px solid ${humAnalyzing ? 'rgba(255,255,255,.09)' : 'rgba(201,167,255,.42)'}`,
-                color: humAnalyzing ? 'rgba(255,255,255,.4)' : '#dcc7ff',
-                font: `700 10px 'JetBrains Mono',monospace`,
-                letterSpacing: '.1em',
-                opacity: hasSelection ? 1 : 0.4,
-              }"
-              :disabled="humAnalyzing || !hasSelection"
-              @click="analyze"
-            >{{ humAnalyzing ? 'ANALYSING…' : 'ANALYSE' }}</button>
-          </div>
-
-          <!-- Harmonic table -->
-          <div class="mt-[16px]">
-            <div
-              class="grid items-center gap-x-[10px] pb-[6px] uppercase"
-              style="grid-template-columns:26px 62px 1fr 58px;font:700 8.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.28);border-bottom:1px solid rgba(255,255,255,.06)"
+              class="hr-check m-focusable" :class="{ 'is-on': h.enabled }"
+              role="checkbox"
+              :aria-checked="h.enabled"
+              :aria-label="harmonicToggleLabel(h)"
+              :title="h.enabled ? 'Notching this frequency' : 'Leave this frequency alone'"
+              :disabled="h.deltaDb === null"
+              @click="toggleHarmonic(h.frequency)"
             >
-              <span></span><span>Freq</span><span>Above floor</span><span class="text-right">Δ dB</span>
-            </div>
-
-            <div v-if="humHarmonics.length === 0"
-                 class="py-[22px] text-center"
-                 style="font:500 10.5px 'Inter';color:rgba(255,255,255,.3)">
-              No analysis yet.
-            </div>
-
-            <div
-              v-for="h in humHarmonics" :key="h.frequency"
-              class="grid items-center gap-x-[10px] py-[7px]"
-              style="grid-template-columns:26px 62px 1fr 58px;border-bottom:1px solid rgba(255,255,255,.04)"
-            >
-              <!-- Reads as a checkbox to assistive tech: the visual tick and
-                   the accent fill are the only other cue that a row is on. -->
-              <button
-                class="w-[16px] h-[16px] rounded-[4px] cursor-pointer transition-all"
-                :style="{
-                  background: h.enabled ? ACCENT : 'transparent',
-                  border: `1px solid ${h.enabled ? ACCENT : 'rgba(255,255,255,.22)'}`,
-                }"
-                role="checkbox"
-                :aria-checked="h.enabled"
-                :aria-label="harmonicToggleLabel(h)"
-                :title="h.enabled ? 'Notching this frequency' : 'Leave this frequency alone'"
-                :disabled="h.deltaDb === null"
-                @click="toggleHarmonic(h.frequency)"
+              <svg
+                v-if="h.enabled" viewBox="0 0 24 24" class="hr-tick"
+                fill="none" stroke="currentColor" stroke-width="4"
+                stroke-linecap="round" stroke-linejoin="round"
+                aria-hidden="true"
               >
-                <svg v-if="h.enabled" viewBox="0 0 24 24" class="w-full h-full"
-                     fill="none" stroke="#1a1024" stroke-width="4"
-                     stroke-linecap="round" stroke-linejoin="round"
-                     aria-hidden="true">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              </button>
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </button>
 
-              <span style="font:600 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.72)">
-                {{ h.frequency }}
-              </span>
+            <span class="hr-freq">{{ h.frequency }}</span>
 
-              <!-- Prominence bar, plus why a harmonic was left unticked -->
-              <div class="flex items-center gap-[8px]">
-                <div class="flex-1 h-[5px] rounded-full overflow-hidden"
-                     style="background:rgba(255,255,255,.06)">
-                  <div
-                    class="h-full rounded-full transition-all"
-                    :style="{
-                      width: `${deltaWidth(h.deltaDb)}%`,
-                      background: h.flagged ? ACCENT : 'rgba(255,255,255,.2)',
-                    }"
-                  />
-                </div>
-                <span
-                  v-if="h.matchesPitchedSource"
-                  :title="pitchedTooltip(h)"
-                  style="font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:#ffb27a;white-space:nowrap"
-                >IN SOURCE</span>
-                <span
-                  v-else-if="rejectionLabel(h)"
-                  style="font:500 8.5px 'Inter';color:rgba(255,255,255,.26);white-space:nowrap"
-                >{{ rejectionLabel(h) }}</span>
+            <!-- Prominence bar, plus why a harmonic was left unticked -->
+            <div class="hr-bar-cell">
+              <div class="hr-track">
+                <div
+                  class="hr-fill" :class="{ 'is-flagged': h.flagged }"
+                  :style="{ width: `${deltaWidth(h.deltaDb)}%` }"
+                />
               </div>
-
-              <span class="text-right"
-                    style="font:600 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.55)">
-                {{ h.deltaDb === null ? '—' : h.deltaDb.toFixed(1) }}
-              </span>
+              <span v-if="h.matchesPitchedSource" class="hr-tag is-warn" :title="pitchedTooltip(h)">IN SOURCE</span>
+              <span v-else-if="rejectionLabel(h)" class="hr-tag">{{ rejectionLabel(h) }}</span>
             </div>
-          </div>
 
-          <p
-            class="mt-[12px]"
-            :style="{
-              font: `500 10px/1.5 'Inter'`,
-              color: isStale ? '#ffb27a' : 'rgba(255,255,255,.35)',
-            }"
-          >{{ statusLine }}</p>
-        </div>
-
-        <LevelMeter :levels="humOutputLevels" label="OUT" :height="176" />
-      </div>
-
-      <!-- Notch shape -->
-      <div class="flex items-center justify-between mt-[18px] pt-[16px]"
-           style="border-top:1px solid rgba(255,255,255,.06)">
-        <p style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.3);max-width:320px">
-          Narrow cuts at the mains frequency and its harmonics. Deeper and wider
-          removes more hum but takes more of the recording with it.
-        </p>
-        <div class="flex gap-[26px]">
-          <div class="w-[80px]">
-            <Knob
-              :model-value="humQ"
-              @update:model-value="syncQ"
-              :min="5" :max="60" :step="1" :value-font-px="13"
-              label="Width Q" :accent="ACCENT" :format-value="formatQ"
-              :disabled="!humPreview"
-            />
-          </div>
-          <div class="w-[80px]">
-            <Knob
-              :model-value="humDepth"
-              @update:model-value="syncDepth"
-              :min="0" :max="40" :step="1" :value-font-px="13"
-              label="Depth dB" :accent="ACCENT" :format-value="formatDepth"
-              :disabled="!humPreview"
-            />
+            <span class="hr-right hr-delta">{{ h.deltaDb === null ? '—' : h.deltaDb.toFixed(1) }}</span>
           </div>
         </div>
+
+        <p class="hr-status" :class="{ 'is-warn': isStale }">{{ statusLine }}</p>
       </div>
 
+      <div class="hr-meter">
+        <LevelMeter variant="modula" scale-side="right" :levels="humOutputLevels" label="OUT" :height="METER_H" />
+      </div>
+    </div>
+
+    <!-- Notch shape -->
+    <div class="hr-shape">
+      <p class="hr-hint">
+        Narrow cuts at the mains frequency and its harmonics. Deeper and wider
+        removes more hum but takes more of the recording with it.
+      </p>
+      <div class="hr-knobs">
+        <ModulaKnob
+          variant="small" :size="52" show-value editable
+          :model-value="humQ" :min="5" :max="60" :step="1"
+          :default-value="D.q" label="Width" :color="ACCENT" :format-value="formatQ"
+          :disabled="!humPreview"
+          title="How narrow each notch is: higher Q cuts less around the hum. Double-click to reset"
+          @update:model-value="syncQ"
+        />
+        <ModulaKnob
+          variant="small" :size="52" show-value editable :parse-value="t => Math.abs(parseFloat(t))"
+          :model-value="humDepth" :min="0" :max="40" :step="1"
+          :default-value="D.depth" label="Depth" :color="ACCENT" :format-value="formatDepth"
+          :disabled="!humPreview"
+          title="How far each notch cuts. Double-click to reset"
+          @update:model-value="syncDepth"
+        />
+      </div>
     </div>
   </FloatingWindow>
 </template>
+
+<style scoped>
+.hr-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+.hr-meter { display: flex; justify-content: center; padding: 12px 4px; }
+.hr-display {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.hr-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.hr-mains { display: flex; flex-direction: column; gap: 8px; }
+.hr-table {
+  padding: 8px 10px 4px;
+  border-radius: 10px;
+  background: #0b0e13;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, .85), 0 0 0 1px #1c222c, 0 1px 0 rgba(255, 255, 255, .05);
+}
+.hr-row {
+  display: grid;
+  grid-template-columns: 26px 62px 1fr 58px;
+  align-items: center;
+  column-gap: 10px;
+}
+.hr-head {
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  font: 700 8.5px/1 var(--m-font-mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--m-ink-4);
+}
+.hr-item { padding: 7px 0; border-bottom: 1px solid rgba(255, 255, 255, .05); }
+.hr-item:last-child { border-bottom: none; }
+.hr-right { text-align: right; }
+.hr-empty {
+  padding: 22px 0;
+  text-align: center;
+  font: 500 10.5px var(--m-font-ui);
+  color: var(--m-ink-4);
+}
+.hr-check {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, .3);
+  color: #1b1408;
+}
+.hr-check.is-on { background: var(--m-accent); border-color: var(--m-accent); }
+.hr-check:disabled { opacity: .4; cursor: default; }
+.hr-tick { display: block; width: 100%; height: 100%; }
+.hr-freq { font: 600 11px var(--m-font-mono); color: var(--m-ink-2); }
+.hr-bar-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hr-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, .08);
+}
+.hr-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .28);
+  transition: width .15s ease;
+}
+.hr-fill.is-flagged { background: var(--m-accent); }
+.hr-tag {
+  font: 500 8.5px var(--m-font-ui);
+  color: var(--m-ink-4);
+  white-space: nowrap;
+}
+.hr-tag.is-warn { font: 700 7.5px var(--m-font-mono); letter-spacing: .08em; color: #ffb27a; }
+.hr-delta { font: 600 11px var(--m-font-mono); color: var(--m-ink-3); }
+.hr-status { margin: 0; font: 500 10px/1.5 var(--m-font-ui); color: var(--m-ink-3); }
+.hr-status.is-warn { color: #ffb27a; }
+.hr-shape {
+  margin-top: 12px;
+  padding: 14px 16px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.hr-hint { margin: 0; max-width: 300px; font: 500 10px/1.5 var(--m-font-ui); color: var(--m-ink-4); }
+.hr-knobs { display: flex; gap: 26px; }
+</style>

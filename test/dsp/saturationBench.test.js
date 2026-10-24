@@ -12,7 +12,9 @@ import {
   emphasisSections, layerBand, layerBandSections, normalizeLayer, SAT_BAND_MIN_HZ,
 } from '../../src/audio/saturationBenchProcessor.js'
 import { measureBandSpectrum, bandRefPeakDb, voicingOffsetDb } from '../../src/audio/saturationBenchAnalysis.js'
-import { toKernelParams, SATURATION_BENCH_DEFAULTS, SAT_BENCH_LAYER_PRESETS } from '../../src/audio/saturationBenchParams.js'
+import {
+  toKernelParams, SATURATION_BENCH_DEFAULTS, SAT_BENCH_LAYER_PRESETS, layerCount, addLayer, removeLayer,
+} from '../../src/audio/saturationBenchParams.js'
 import { SHAPER_CURVES, SHAPER_REF_THD, sineThd, unitDriveU } from '../../src/audio/dsp/shaperCurves.js'
 import { JilesAtherton, hysteresisSineResponse, hysteresisSmallGain } from '../../src/audio/dsp/hysteresis.js'
 import { EMPHASIS_CORNER_HZ, EMPHASIS_MAX_DB, EMPHASIS_DEFAULT } from '../../src/audio/la2aProcessor.js'
@@ -312,6 +314,58 @@ test('emphasis: 0 dB is off whatever the shape, frequency and Q, and the three s
   assert.ok(added('hishelf', 2300, 18) < e0 * 1.5, 'high shelf leaves a 200 Hz tone alone')
 })
 
+test('emphasis: the bypass is a 0 dB pair — bit-identical to Gain 0, and the gain it leaves alone comes back exactly', () => {
+  const sr = 44100
+  const n = sr * 2
+  const x = new Float32Array(n)
+  for (let i = 0; i < n; i++) x[i] = Math.pow(10, -8 / 20) * Math.sin(2 * Math.PI * 3000 * i / sr)
+  const base = { curve: 'tanh', driveDb: 6, mode: 'full', refPeakDb: -8, emphType: 'hishelf', emphHz: 2300, emphQ: 0.71 }
+  const on = render(x, sr, layers({ ...base, emphDb: 20.4 }))
+  const bypassed = render(x, sr, layers({ ...base, emphDb: 20.4, emphOn: false }))
+  const flat = render(x, sr, layers({ ...base, emphDb: 0 }))
+  assert.deepEqual(bypassed, flat, 'bypassed with Gain 20.4 renders as Gain 0')
+  assert.notDeepEqual(on, flat, 'the pair does something while it is on')
+  // `emphOn` absent is on: layers saved before the switch existed keep their sound.
+  assert.deepEqual(render(x, sr, layers({ ...base, emphDb: 20.4, emphOn: true })), on)
+  assert.equal(normalizeLayer({ emphDb: 20.4, emphOn: false }).emphDb, 20.4, 'the knob value survives the bypass')
+  assert.equal(normalizeLayer({ emphDb: 20.4 }).emphOn, true)
+})
+
+test('rows: the layers in use are contiguous from the top; add brings in the next slot, remove keeps the rest in order', () => {
+  const factory = SAT_BENCH_LAYER_PRESETS.map(l => ({ ...l }))
+  assert.equal(layerCount(factory), 2)
+  const three = addLayer(factory)
+  assert.deepEqual(three.map(l => l.on), [true, true, true, false])
+  assert.equal(three[2].curve, factory[2].curve, 'the new row is the slot as it stood')
+  assert.equal(layerCount(addLayer(three)), 4)
+  assert.equal(addLayer(addLayer(three)), null, 'nothing left to add')
+  // Removing the first row: the rest move up in order, and the removed layer waits just below them, off, with its settings.
+  const tuned = three.map((l, i) => (i === 0 ? { ...l, driveDb: 7.5 } : { ...l }))
+  const less = removeLayer(tuned, 0)
+  assert.deepEqual(less.map(l => l.on), [true, true, false, false])
+  assert.deepEqual(less.slice(0, 2).map(l => l.curve), [tuned[1].curve, tuned[2].curve])
+  assert.equal(less[2].curve, tuned[0].curve)
+  assert.equal(less[2].driveDb, 7.5, 'its settings are kept')
+  // Adding again brings back exactly that layer, at the bottom of the rows.
+  const back = addLayer(less)
+  assert.deepEqual(back.map(l => l.on), [true, true, true, false])
+  assert.equal(back[2].curve, tuned[0].curve)
+  assert.equal(back[2].driveDb, 7.5)
+  // The last row stays, and a row that is not in use cannot be removed.
+  assert.equal(removeLayer(factory.map((l, i) => ({ ...l, on: i === 0 })), 0), null)
+  assert.equal(removeLayer(factory, 3), null)
+  // The helpers never touch their input.
+  assert.deepEqual(factory.map(l => l.on), [true, true, false, false])
+})
+
+test('params: every bench layer is FULL whatever a stored state says, and the bypass reaches the kernel', () => {
+  for (const l of SAT_BENCH_LAYER_PRESETS) assert.equal(l.mode, 'full')
+  const k = toKernelParams({ layers: [{ ...SAT_BENCH_LAYER_PRESETS[1], mode: 'voiced', emphOn: false }] })
+  assert.equal(k.layers[0].mode, 'full')
+  assert.equal(k.layers[0].emphOn, false)
+  assert.equal(toKernelParams({ layers: [{ ...SAT_BENCH_LAYER_PRESETS[1] }] }).layers[0].emphOn, true)
+})
+
 test('emphasis: out-of-range values are clamped, and the quick buttons are the 2300 Hz pair', () => {
   const n = normalizeLayer({ emphType: 'nope', emphHz: 1e9, emphQ: 0.001, emphDb: 99 })
   assert.deepEqual([n.emphType, n.emphHz, n.emphQ, n.emphDb], ['hishelf', 16000, 0.3, 24])
@@ -524,4 +578,30 @@ test('a LOW-band layer at the base rate renders what 4x does; a full-band one do
   const full = mismatch({ ...base, curve: 'tanh', driveDb: 24, loHz: 1, hiHz: 20000 })
   assert.ok(lowQ < -60 && lowC < -60, `low layers at 1x: ${lowQ.toFixed(1)} / ${lowC.toFixed(1)} dB re added`)
   assert.ok(full > -50, `a full-band layer at 1x must alias audibly, read ${full.toFixed(1)} dB`)
+})
+
+test('IN / OUT trims: a pure delay scales by the trim, and 0 / 0 is bit-identical', () => {
+  const sr = 44100
+  const x = pink(sr, 2)
+  const L = SAT_BENCH_MAX_LAYERS * 50
+  const base = processSaturationBenchBuffer([x], sr, { layers: [] }).channelData[0]
+  const zero = processSaturationBenchBuffer([x], sr, { layers: [], inputDb: 0, outputDb: 0 }).channelData[0]
+  assert.deepEqual(zero, base)
+  const y = processSaturationBenchBuffer([x], sr, { layers: [], inputDb: -6, outputDb: 6 }).channelData[0]
+  let worst = 0
+  for (let i = 0; i < x.length - L; i++) worst = Math.max(worst, Math.abs(y[i + L] - x[i]))
+  assert.ok(worst < 1e-6, `in −6 / out +6 is unity, off by ${worst}`)
+  const o = processSaturationBenchBuffer([x], sr, { layers: [], outputDb: -6 }).channelData[0]
+  const k = Math.pow(10, -6 / 20)
+  let w2 = 0
+  for (let i = 0; i < x.length - L; i++) w2 = Math.max(w2, Math.abs(o[i + L] - x[i] * k))
+  assert.ok(w2 < 1e-6, `output −6 dB scales by ${k}, off by ${w2}`)
+})
+
+test('a muted layer reaches the kernel as off; a row that is not in use stays off', async () => {
+  const { toKernelParams, SAT_BENCH_LAYER_PRESETS } = await import('../../src/audio/saturationBenchParams.js')
+  const layers = SAT_BENCH_LAYER_PRESETS.map(l => ({ ...l }))
+  layers[1].muted = true
+  const kp = toKernelParams({ layers })
+  assert.deepEqual(kp.layers.map(l => l.on), [true, false, false, false])
 })

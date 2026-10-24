@@ -160,6 +160,9 @@ export const SAT_LAYER_DEFAULTS = {
   emphHz: SAT_EMPH_CORNER_HZ,
   emphQ: SAT_EMPH_Q,
   emphDb: 0,
+  // Bypass for the pre-emphasis pair. Off acts as emphDb 0 without touching it,
+  // so the gain knob keeps its value across a toggle.
+  emphOn: true,
   loHz: SAT_BAND_MIN_HZ,
   hiHz: SAT_BAND_MAX_HZ,
   mode: 'voiced',
@@ -250,6 +253,7 @@ export function normalizeLayer(p = {}) {
     emphHz: clamp(Number(l.emphHz) || SAT_EMPH_CORNER_HZ, SAT_EMPH_HZ_MIN, SAT_EMPH_HZ_MAX),
     emphQ: clamp(Number(l.emphQ) || SAT_EMPH_Q, SAT_EMPH_Q_MIN, SAT_EMPH_Q_MAX),
     emphDb: clamp(Number(l.emphDb) || 0, -SAT_EMPH_DB_MAX, SAT_EMPH_DB_MAX),
+    emphOn: l.emphOn !== false,
     loHz: Number(l.loHz) || SAT_BAND_MIN_HZ,
     hiHz: Number(l.hiHz) || SAT_BAND_MAX_HZ,
     mode: SAT_MODES.includes(l.mode) ? l.mode : 'voiced',
@@ -451,11 +455,13 @@ class Layer {
     }
     if (
       next.emphType !== prev.emphType || next.emphHz !== prev.emphHz ||
-      next.emphQ !== prev.emphQ || next.emphDb !== prev.emphDb || !this.emphInit
+      next.emphQ !== prev.emphQ || next.emphDb !== prev.emphDb ||
+      next.emphOn !== prev.emphOn || !this.emphInit
     ) {
       this.emphInit = true
       const was = this.emphPre !== null
-      const pair = emphasisSections(next.emphType, next.emphHz, next.emphQ, next.emphDb, this.sampleRate)
+      // Bypassed is a 0 dB pair, which emphasisSections turns into no filters.
+      const pair = emphasisSections(next.emphType, next.emphHz, next.emphQ, next.emphOn ? next.emphDb : 0, this.sampleRate)
       this.emphPre = pair ? pair.pre : null
       this.emphDe = pair ? pair.de : null
       for (const c of this.channels) {
@@ -625,6 +631,13 @@ export class SaturationBenchKernel {
     this.work = []
     this.dryDelays = []
     this.listen = 'off'
+    // Trims either side of the layers (the bench panel's IN / OUT knobs): linear
+    // gain, current and target, ramped across each block. 1 / 1 is bit-identical.
+    this.inCur = 1
+    this.inTarget = 1
+    this.outCur = 1
+    this.outTarget = 1
+    this.inWork = []
     this.setParams(SAT_BENCH_KERNEL_DEFAULTS, true)
   }
 
@@ -634,6 +647,14 @@ export class SaturationBenchKernel {
 
   setParams(p = {}, immediate = false) {
     if (Number.isFinite(p.levelOffsetDb)) this.detector.levelOffsetDb = clamp(p.levelOffsetDb, -24, 24)
+    if (Number.isFinite(p.inputDb)) {
+      this.inTarget = Math.pow(10, clamp(p.inputDb, -24, 24) / 20)
+      if (immediate) this.inCur = this.inTarget
+    }
+    if (Number.isFinite(p.outputDb)) {
+      this.outTarget = Math.pow(10, clamp(p.outputDb, -24, 24) / 20)
+      if (immediate) this.outCur = this.outTarget
+    }
     const layers = Array.isArray(p.layers) ? p.layers : []
     for (let k = 0; k < this.slots; k++) {
       if (layers[k]) this.layers[k].set(layers[k], immediate)
@@ -651,8 +672,22 @@ export class SaturationBenchKernel {
       for (let ch = 0; ch < nOut; ch++) outputs[ch].fill(0, 0, n)
       return
     }
-    const xs = []
+    let xs = []
     for (let ch = 0; ch < nOut; ch++) xs.push(inputs[ch < nIn ? ch : nIn - 1])
+    if (this.inCur !== 1 || this.inTarget !== 1) {
+      // The input trim: everything below, the voicing detector and DELTA's dry
+      // reference included, sees the trimmed signal.
+      const g0 = this.inCur
+      const step = (this.inTarget - g0) / n
+      xs = xs.map((x, ch) => {
+        while (this.inWork.length <= ch) this.inWork.push(new Float64Array(n))
+        if (this.inWork[ch].length < n) this.inWork[ch] = new Float64Array(n)
+        const w = this.inWork[ch]
+        for (let i = 0; i < n; i++) w[i] = x[i] * (g0 + step * (i + 1))
+        return w
+      })
+      this.inCur = this.inTarget
+    }
     if (this.wNow.length < n) {
       this.wNow = new Float64Array(n)
       this.wLayer = new Float64Array(n)
@@ -702,6 +737,15 @@ export class SaturationBenchKernel {
           out[i] = y[i]
         }
       }
+    }
+    if (this.outCur !== 1 || this.outTarget !== 1) {
+      const g0 = this.outCur
+      const step = (this.outTarget - g0) / n
+      for (let ch = 0; ch < nOut; ch++) {
+        const out = outputs[ch]
+        for (let i = 0; i < n; i++) out[i] *= g0 + step * (i + 1)
+      }
+      this.outCur = this.outTarget
     }
   }
 }

@@ -16,25 +16,62 @@ const EMPH_OFF = { ...SAT_EMPH_QUICK.opto, emphDb: 0 }
  * Factory layers: the two combinations that earned their keep in the HF
  * Softener, where this was built, plus two spare slots.
  *   1 WARMTH  — Quartic, OPTO, full band, FULL: density without edge.
- *   2 EXCITER — Tanh (odd), REV, 3 kHz up, VOICED: harmonic brightness on
- *               the vowels, none added to sibilants or room tone.
+ *   2 EXCITER — Tanh (odd), REV, 3 kHz up, FULL: harmonic brightness up top.
+ *               (It was VOICED, which kept it off sibilants and room tone,
+ *               until the mode left the panel.)
  */
 export const SAT_BENCH_LAYER_PRESETS = [
-  { on: true, curve: 'quartic', driveDb: 0, amountDb: 0, ...SAT_EMPH_QUICK.opto, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'full' },
+  { on: true, curve: 'quartic', driveDb: 0, amountDb: 0, ...SAT_EMPH_QUICK.opto, emphOn: true, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'full' },
   // +27: REV pulls the highs out before the curve (±20.4 dB), so on a high band
   // it needs ~11 dB more drive than OFF for the same brightening (vowels +1.8 dB
   // above 5 kHz here, synthetic voice; OFF gets there by ~+15.5, OPTO already
   // has +1.75 at 0). It was +22 while the pair was ±10.2 dB.
-  { on: true, curve: 'tanh', driveDb: 27, amountDb: 0, ...SAT_EMPH_QUICK.reverse, loHz: 3000, hiHz: 20000, mode: 'voiced' },
-  { on: false, curve: 'algebraic', driveDb: 0, amountDb: 0, ...EMPH_OFF, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'voiced' },
-  { on: false, curve: 'atan', driveDb: 0, amountDb: 0, ...EMPH_OFF, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'voiced' },
+  { on: true, curve: 'tanh', driveDb: 27, amountDb: 0, ...SAT_EMPH_QUICK.reverse, emphOn: true, loHz: 3000, hiHz: 20000, mode: 'full' },
+  { on: false, curve: 'algebraic', driveDb: 0, amountDb: 0, ...EMPH_OFF, emphOn: true, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'full' },
+  { on: false, curve: 'atan', driveDb: 0, amountDb: 0, ...EMPH_OFF, emphOn: true, loHz: SAT_BAND_MIN_HZ, hiHz: 20000, mode: 'full' },
 ]
+
+/**
+ * The bench's rows are its ON layers, contiguous from the top: a layer in use is
+ * a visible row, and a slot not in use is simply not shown. These keep it that
+ * way, so the panel never has to reason about gaps.
+ */
+export function layerCount(layers) {
+  return layers.filter(l => l.on).length
+}
+
+/** Bring in the next unused slot, keeping whatever it last held. Null when all are in use. */
+export function addLayer(layers) {
+  const j = layers.findIndex(l => !l.on)
+  if (j < 0) return null
+  const next = layers.map(l => ({ ...l }))
+  next[j].on = true
+  return next
+}
+
+/**
+ * Take row `k` out. It drops just below the rows still in use, switched off, so
+ * those stay contiguous at the top in order — and the next add brings back
+ * exactly this layer with its settings, like an undo, rather than a blank slot.
+ * The last row cannot be removed: with none the plugin does nothing at all.
+ * Null when there is nothing to do.
+ */
+export function removeLayer(layers, k) {
+  if (!layers[k]?.on || layerCount(layers) <= 1) return null
+  const next = layers.map(l => ({ ...l }))
+  const [gone] = next.splice(k, 1)
+  next.splice(layerCount(next), 0, { ...gone, on: false })
+  return next
+}
 
 export const SATURATION_BENCH_DEFAULTS = {
   layers: SAT_BENCH_LAYER_PRESETS.map(l => ({ ...l })),
   // Measured from the whole file, never a user setting — see useSaturationBench.
   refPeaks: Array(SAT_BENCH_MAX_LAYERS).fill(SAT_DEFAULT_REF_PEAK_DB),
   levelOffset: 0,
+  // Trims either side of the layers, dB. Part of the patch.
+  inputDb: 0,
+  outputDb: 0,
 }
 
 /**
@@ -47,7 +84,9 @@ export function toKernelParams(params) {
   for (let k = 0; k < SAT_BENCH_MAX_LAYERS; k++) {
     const l = params.layers?.[k] ?? SAT_LAYER_DEFAULTS
     layers.push({
-      on: !!l.on,
+      // `on` is the row being in use; `muted` is the panel's ON switch, which keeps
+      // the layer in the stack as a pure delay (latency stays constant).
+      on: !!l.on && !l.muted,
       curve: String(l.curve),
       driveDb: Number(l.driveDb),
       amountDb: Number(l.amountDb ?? 0),
@@ -55,12 +94,19 @@ export function toKernelParams(params) {
       emphHz: Number(l.emphHz),
       emphQ: Number(l.emphQ),
       emphDb: Number(l.emphDb),
+      emphOn: l.emphOn !== false,
       loHz: Number(l.loHz),
       hiHz: Number(l.hiHz),
-      mode: String(l.mode),
+      // Pinned: the panel has no VOICED option, whatever an old state carries.
+      mode: 'full',
       refPeakDb: Number(params.refPeaks?.[k] ?? SAT_DEFAULT_REF_PEAK_DB),
     })
   }
-  return { levelOffsetDb: Number(params.levelOffset) || 0, layers }
+  return {
+    levelOffsetDb: Number(params.levelOffset) || 0,
+    inputDb: Number(params.inputDb) || 0,
+    outputDb: Number(params.outputDb) || 0,
+    layers,
+  }
 }
 

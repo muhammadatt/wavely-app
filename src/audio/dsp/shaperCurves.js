@@ -41,7 +41,7 @@ export const SHAPER_CURVES = [
   {
     id: 'quartic',
     label: 'QUARTIC',
-    title: 'OptoSmooth’s output-stage curve: second harmonic, almost no odd — warmth without edge',
+    title: 'LA Vintage 2A’s output-stage curve: second harmonic, almost no odd — warmth without edge',
     f: u => quartic.transferAt(u, 1),
   },
   {
