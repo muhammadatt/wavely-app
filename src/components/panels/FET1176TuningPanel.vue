@@ -160,7 +160,8 @@ const CHOICES = [
           + 'Same static curve (exact), same release once the signal drops away; above '
           + 'threshold the loop speeds the attack up by about the ratio, so the attack '
           + 'ladder is slowed 4× to land 4:1 where FWD does — and 8/12/20 then attack '
-          + '2-3× faster than 4:1, where FWD gives every button the same time. Less '
+          + '2-3× faster than 4:1, where FWD gives every button the same time — and CLA-76 '
+          + 'agrees: its 20:1 attacks at 0.29× its 4:1 (FBK predicts 0.27, FWD 1.24). Less '
           + 'waveform-tracking distortion at the fast dials. Refitted to the same FETish '
           + 'table (2.30 % rms either way — the data cannot tell them apart)',
       },

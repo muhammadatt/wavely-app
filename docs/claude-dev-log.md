@@ -7364,3 +7364,55 @@ are indistinguishable.
 
 **Not done.** No preset re-cut (feedback is a bench prototype). Nothing auditioned. CPU: two
 closed-form solves per sample on the mono base-rate detector, not benchmarked.
+
+### The topology test: CLA-76 20:1 against 4:1 (October 2026)
+
+Two CLA-76 `bursts.wav` bounces: `cla76_bursts_r4_I3_a1_r3.wav` and
+`cla76_bursts_r20_I3_a1_r3.wav`. Same Input (I3), attack dial 1 and release dial 3; only the
+ratio button moved. ⚠ They were bounced at **48 kHz**, so they are read with
+`npm run fet:ballistics -- --rate 48000` (`fet-ballistics.mjs --fit --rate 48000`). The 4 kHz
+probe survives that rate intact, but t63 is read in half-period steps (125 µs), ~9 % of the
+20:1 reading. Both bounces end 4–6 s short and carry CLA-76's demo mute grid (20 / 40 / 60 s).
+The tool schedules around both.
+
+| | settled GR | attack t63 per hold (0.05 / 0.2 / 1 / 3 s) |
+|---|---|---|
+| CLA-76 4:1 | 10.91 dB | 4688 / 5438 / 4938 / 4938 µs |
+| CLA-76 20:1 | 8.43 dB | 1438 at every hold |
+
+**20:1 over 4:1 = 0.291** (0.26–0.31 across holds). Our kernel, rendered the reference's way
+(`r20OverR4` in `fet-feedback-refit.mjs`: one Input, set where 4:1 settles at 10.91 dB, both
+buttons through it, the real burst plan at 48 kHz, read by `analyseCapture`):
+
+| | 20:1 / 4:1 |
+|---|---|
+| **CLA-76** | **0.291** |
+| feedback | **0.268** |
+| feed-forward | **1.244** |
+
+- ⚠⚠ **Feed-forward gets the sign wrong.** 20:1 settles shallower (the moving threshold), and
+  the attack depth schedule makes a shallower reduction attack *slower*.
+- **Feedback was calibrated at 4:1 only**, so 0.27 is an out-of-sample prediction, inside the
+  reference's own spread across holds.
+- **Release does not change the verdict.** With our release slowed to the reference's ~1.75 s
+  (it reads 1.44–1.95 s at its "dial 3"), the ratios are 1.244 / 0.256. Bursts sit 17 s apart,
+  ~9 time constants, so no reduction carries into the next burst.
+- `test/dsp/fetFeedbackDetector.test.js` pins both on a one-burst plan.
+
+**Side findings, not resolved:**
+
+1. **Depth at 20:1 is 1.6 dB off, in both topologies.** At the shared Input we settle at
+   10.04 dB (feed-forward) and 10.12 (feedback), against CLA-76's 8.43. The moving threshold
+   was fitted on stairs at attack dial 7. At dial 1, CLA-76 separates the buttons by 2.48 dB and
+   we separate them by 0.87. Its 4:1 depth also moves with the attack dial: 10.91 here at a1,
+   9.66 on the earlier a4 capture at the same I3. Settled depth on a sine depending on the
+   attack dial is something our unsmoothed-rectifier detector does differently. Its own
+   question; the topology question doesn't depend on it.
+2. **CLA-76's release at "dial 3" reads 1.4–1.95 s**, ~15× its dial-4 all-buttons readings
+   (77–124 ms) and far past our dial 1 (268–338 ms). Either the release knob was not where the
+   name says, or CLA-76's release dial is not ours. Worth confirming before using these files
+   for release.
+3. **These two DO stretch with exposure at constant depth**: 1774 → 1953 ms (4:1) and
+   1444 → 1749 ms (20:1) from the 0.05 s to the 3 s hold, where depth barely moves. The
+   depth schedule cannot explain that, unlike the all-buttons capture. It may be a tail at
+   this slow release setting. Release-limb finding only.

@@ -351,9 +351,12 @@ export const ATTACK_DEPTH_K = -0.0926
  * — feedback with no schedule is 36.5 % out, feed-forward's null is 36.4 % —
  * so the schedule stays, at nearly the same slope.
  *
- * ⚠ CALIBRATED AT 4:1 ONLY, which is the only ratio either reference measured
- * attack on. At 8, 12 and 20 the loop makes these dials 2-3x faster again than
- * 4:1, and no capture says whether that is right.
+ * ⚠ CALIBRATED AT 4:1 ONLY, and 20:1 is then a PREDICTION — which CLA-76
+ * confirms. Same Input, same dial, only the button moved: its 20:1 attacks at
+ * 0.291x its 4:1 t63 (`CLA76_R20_OVER_R4` in the refit script). The loop
+ * predicts 0.27; feed-forward predicts 1.24, the wrong sign, because its depth
+ * schedule makes 20:1's shallower reduction attack slower. 8:1 and 12:1 are
+ * interpolated, not measured.
  */
 export const FB_ATTACK_SCALE = 4.0
 export const FB_ATTACK_DEPTH_K = -0.095

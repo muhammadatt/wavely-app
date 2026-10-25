@@ -146,3 +146,19 @@ test('the bench accepts the detector and refuses anything else', async () => {
   t.resetFET1176Tuning()
   assert.deepEqual(t.fet1176TuningOverrides(), {})
 })
+
+test('CLA-76 20:1 vs 4:1: feedback predicts the held-out ratio, feed-forward the wrong sign', async () => {
+  // ⚠ A ONE-BURST plan at the capture's rate, so the suite stays fast; the full
+  // burst plan is what `npm run fet:fbrefit` reports (0.27 / 1.24 against 0.29).
+  // The attack is read on the same 1 s settle either way.
+  const { r20OverR4, CLA76_R20_OVER_R4 } = await import('../../scripts/fet-feedback-refit.mjs')
+  const { snapToZeroCrossing } = await import('../../scripts/lib/probeStimulus.js')
+  const up = snapToZeroCrossing(1.0, 4000)
+  const down = snapToZeroCrossing(up + 1.0, 4000)
+  const plan = { events: [{ tag: 'b', T: 1.0, freqHz: 4000, hiDb: -12, up, down }], spans: [], seconds: down + 3, lowDb: -50 }
+  const ff = r20OverR4('feedforward', { plan, iters: 10 })
+  const fb = r20OverR4('feedback', { plan, iters: 10 })
+  assert.ok(ff.ratio > 1, `feed-forward ${ff.ratio}: 20:1 should read SLOWER, the wrong sign`)
+  assert.ok(Math.abs(fb.ratio - CLA76_R20_OVER_R4.ratio) < 0.08,
+    `feedback ${fb.ratio} against CLA-76 ${CLA76_R20_OVER_R4.ratio}`)
+})

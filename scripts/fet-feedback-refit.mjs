@@ -26,9 +26,13 @@
  *                  attacks ~3.7x faster at 4:1. A ladder scale and the depth
  *                  slope are refitted together, as `fet-attack-depth` did.
  *   all-buttons    The lag, against CLA-76's 0.721.
+ *
+ * AND ONE HELD-OUT TEST, which nothing above was fitted to: CLA-76's attack at
+ * 20:1 against 4:1, same Input, same dial (`CLA76_R20_OVER_R4`). It is the one
+ * observable the two topologies disagree on by a factor of four.
  */
 import { basename } from 'node:path'
-import { analyseCapture } from './fet-ballistics.mjs'
+import { analyseCapture, burstPlan } from './fet-ballistics.mjs'
 import { buildProbe, snapToZeroCrossing } from './lib/probeStimulus.js'
 import { FETISH_ATTACK_TABLE } from './fet-attack-depth.mjs'
 import { FETISH_DEPTH_TABLE } from './fet-release-depth.mjs'
@@ -53,6 +57,62 @@ export const FETISH_RELEASE_LADDER = [
  * ratio, which is the only reason it can be read at all.
  */
 export const CLA76_ALL_OVER_4 = { ratio: 0.721, allDepthDb: 13.34, r4DepthDb: 9.66 }
+
+/**
+ * CLA-76, `cla76_bursts_r4_I3_a1_r3.wav` against `cla76_bursts_r20_I3_a1_r3.wav`
+ * (October 2026): the same Input (I3), attack dial 1 and release dial 3, only the
+ * ratio button moved. Read by `npm run fet:ballistics -- --rate 48000` — the
+ * bounces are at 48 kHz, so t63 is quantised to ~125 us here, ~9 % of the 20:1
+ * reading.
+ *
+ * ⚠⚠ THE TOPOLOGY VERDICT. 20:1 attacks 3.4x FASTER than 4:1 while settling
+ * SHALLOWER (8.43 against 10.91 dB, the moving threshold). Feed-forward predicts
+ * the opposite sign — its depth schedule makes a shallower reduction attack
+ * slower, so it reads 1.24 — and the feedback loop predicts 0.27, having been
+ * calibrated at 4:1 only. Unchanged with our release slowed to the reference's
+ * ~1.75 s (1.24 / 0.26).
+ *
+ * The ladder offset cancels in the ratio (CLA-76 is slower than our dial 1 at
+ * every setting, as the dev log records), which is why it is a ratio.
+ */
+export const CLA76_R20_OVER_R4 = {
+  ratio: 0.291, perHold: [0.307, 0.264, 0.291, 0.291],
+  r4: { depthDb: 10.91, t63Us: 4938 }, r20: { depthDb: 8.43, t63Us: 1438 },
+  attack: 1, sampleRate: 48000,
+}
+
+/**
+ * Our 20:1-over-4:1 attack ratio, the reference's construction: one Input, set
+ * where 4:1 settles at the reference's 4:1 depth, both buttons through it.
+ *
+ * ⚠ The REAL burst plan, at the capture's rate, through `analyseCapture` — the
+ * instrument that read the reference. A shortened plan would change the hold the
+ * t63 is read on. `plan`/`sampleRate` are overridable for the test only.
+ */
+export function r20OverR4(detector, { sampleRate = CLA76_R20_OVER_R4.sampleRate, plan: pl = burstPlan(), iters = 14 } = {}) {
+  const stim = buildProbe(pl, sampleRate)
+  const run = p => {
+    const k = new FET1176Kernel(sampleRate)
+    k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
+      attack: CLA76_R20_OVER_R4.attack, release: 1, detector, ...p })
+    const y = new Float32Array(stim.x.length)
+    for (let f = 0; f < y.length; f += 128) {
+      const l = Math.min(128, y.length - f)
+      k.process([stim.x.subarray(f, f + l)], [y.subarray(f, f + l)], l)
+    }
+    return analyseCapture(y, pl, stim, sampleRate, 0).at(-1)
+  }
+  let lo = 0, hi = 100
+  for (let i = 0; i < iters; i++) {
+    const m = (lo + hi) / 2
+    if (run({ ratio: '4', inputDrive: m }).grDb < CLA76_R20_OVER_R4.r4.depthDb) lo = m; else hi = m
+  }
+  const inputDrive = (lo + hi) / 2
+  const r4 = run({ ratio: '4', inputDrive })
+  const r20 = run({ ratio: '20', inputDrive })
+  return { inputDrive, ratio: r20.attackT63 / r4.attackT63,
+    r4: { depthDb: r4.grDb, t63Us: r4.attackT63 * 1e6 }, r20: { depthDb: r20.grDb, t63Us: r20.attackT63 * 1e6 } }
+}
 
 function plan(holdS) {
   const up = snapToZeroCrossing(1.0, PROBE_HZ)
@@ -274,6 +334,16 @@ function fit() {
   }
   const inst = allOverFour('feedback', { scale: FB_ATTACK_SCALE, k: FB_ATTACK_DEPTH_K }, FB_ALL_ATTACK_LAG)
   console.log(`  installed FB_ALL_ATTACK_LAG ${FB_ALL_ATTACK_LAG}: ${inst.ratio.toFixed(3)}`)
+
+  const R = CLA76_R20_OVER_R4
+  console.log(`\nHELD OUT — 20:1 over 4:1 attack, same Input (CLA-76 ${R.ratio}, ` +
+    `${R.r4.depthDb} / ${R.r20.depthDb} dB; per hold ${R.perHold.join(' / ')}):`)
+  for (const det of ['feedforward', 'feedback']) {
+    const r = r20OverR4(det)
+    console.log(`  ${det.padEnd(12)} ${r.ratio.toFixed(3)}   (Input ${r.inputDrive.toFixed(1)}: ` +
+      `4:1 ${r.r4.depthDb.toFixed(2)} dB ${r.r4.t63Us.toFixed(0)} us, 20:1 ${r.r20.depthDb.toFixed(2)} dB ${r.r20.t63Us.toFixed(0)} us)`)
+  }
+  console.log('  ⚠ Nothing above was fitted to this. Feed-forward gets the SIGN wrong.')
   console.log()
 }
 
