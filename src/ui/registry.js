@@ -13,6 +13,7 @@ import AirBandModal from '../components/panels/AirBandModal.vue'
 import SaturationBenchModal from '../components/panels/SaturationBenchModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
+import NoiseReductionModal from '../components/panels/NoiseReductionModal.vue'
 import SibilanceEditorModal from '../components/panels/SibilanceEditorModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
 import HFLimiterModal from '../components/panels/HFLimiterModal.vue'
@@ -489,6 +490,22 @@ const ALL_OPERATIONS = [
   },
 
   // ---- Fix (windows) ----
+  {
+    // First under Fix: noise is the most common thing a user opens it for.
+    // Server-side (DeepFilterNet3 / RNNoise), so no live preview and no chain
+    // slot — the window auditions a processed copy instead.
+    id: 'noise-reduction',
+    label: 'Noise Reduction',
+    desc: 'Remove background noise, hiss and room tone',
+    category: 'clean',
+    group: 'Noise',
+    icon: 'noise',
+    keywords: ['denoise', 'noise', 'hiss', 'background', 'room tone', 'deepfilternet', 'df3', 'rnnoise', 'clean'],
+    requires: 'selection',
+    feature: 'noiseReduction',
+    surface: 'window',
+    component: NoiseReductionModal,
+  },
   {
     // The real-time de-esser: dips the top end only while a consonant spikes.
     // The Sibilance Editor above is the event-based version: it analyses the

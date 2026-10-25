@@ -141,7 +141,8 @@ The ladder is: signed out → `free` (any account) → `pro`.
 | `pluginChainApply` | Pro | Plugin Chain **Apply**. Preview is free | UI only |
 | `autoLevel` | Pro | Auto Leveler analysis and Apply | **Server** (`/api/analyze/vad`) |
 | `sibilanceEditor` | Pro | Sibilance Editor analysis and Apply | **Server** (`/api/analyze/sibilance`) |
-| `spotEffects` | Pro | `/api/spot/*` (no callers today) | **Server** |
+| `noiseReduction` | Pro | Noise Reduction **Apply**; processing up to 30 s to audition is free | **Server** (`/api/spot/noise_reduction`) |
+| `spotEffects` | Pro | Any other `/api/spot/*` operation (no callers today) | **Server** |
 
 - **Adding a gate:** add an entry to `FEATURES`, then use it in the UI.
   - `apply-feature="<id>"` on a `FloatingWindow` locks its Apply button.

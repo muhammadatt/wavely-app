@@ -50,6 +50,7 @@ export const FEATURES = {
   // Server processing: Pro, with a short preview for everyone else.
   autoLevel: { requires: 'pro', label: 'Auto Leveler', server: true, preview: true },
   sibilanceEditor: { requires: 'pro', label: 'Sibilance Editor', server: true, preview: true },
+  noiseReduction: { requires: 'pro', label: 'Noise Reduction', server: true, preview: true },
   spotEffects: { requires: 'pro', label: 'Server spot effects', server: true, preview: true },
 }
 

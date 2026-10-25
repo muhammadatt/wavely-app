@@ -7,9 +7,9 @@
  *
  * Currently unused by the client: vocal saturation was the only caller and now
  * runs in an AudioWorklet (src/audio/vocalSatProcessor.js), which removed the
- * upload round-trip. Kept because it is still the right shape for the spot
- * operations that genuinely have to run server-side — noise reduction being
- * the obvious one, since DeepFilterNet3 has no browser implementation here.
+ * upload round-trip. Kept for synchronous spot operations. Noise reduction
+ * does NOT use it: its route is job-based (`async` in server/routes/spot.js),
+ * and its client is src/api/noiseReduction.js.
  * The server's /api/spot/vocal_saturation route also remains, and the preset
  * chain's own Python vocalSaturation stage is untouched.
  */
