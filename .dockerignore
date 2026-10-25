@@ -1,0 +1,16 @@
+# Build context for server/Dockerfile (built from the repo root).
+# Whitelist: only the server and the two shared modules it imports from src/.
+*
+!server/
+!src/audio/presets.js
+!src/auth/plans.js
+
+server/node_modules
+server/.env
+server/.env.*
+!server/.env.example
+server/.venv
+server/uploads/*
+server/logs
+server/pipeline-logs
+**/__pycache__
