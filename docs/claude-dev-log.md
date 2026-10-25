@@ -7501,3 +7501,18 @@ constant |x| feedback settles identically to 1e-14 dB; on a sine it settles ≤ 
 
 Full suite 1813/1813, including chunked-apply seams and preview/apply convergence, which now
 run on feedback.
+
+**Review follow-up (Copilot on muhammadatt/wavely-app#177).** The feedback branch test ran a
+second implicit solve per sample (`_solveFeedback(over, gr, 0) > gr`). It is the same test as
+`grTarget > gr`: F(x) = x − G(x) is strictly increasing, so G(over) > gr ⇔ the loop's ask > gr.
+Replaced, and the output did not change: 0 differing samples of 46.2 M across 60 settings on the
+owner's bass DI (5 ratios × attack 1/4/7 × release 1/7 × both `fbRelease`).
+
+CPU, 70 s of mono at 20:1, attack 4:
+
+| path | before | after | feed-forward |
+|---|---|---|---|
+| oversampled (preview / apply) | 552 ms | 499 ms | 531 ms |
+| base rate (measurement) | 163 ms (+18 %) | 136 ms | 146 ms |
+
+Feedback is at feed-forward's cost in both paths, within timing noise.

@@ -1702,10 +1702,11 @@ export class FET1176Kernel {
       // recovery depend on how dense the program was.
       const gr = grMain + grTail
       // In feedback the branch is decided by what the detector asks for if
-      // this sample changed nothing — the output overshoot as it stands.
-      const attacking = this.feedback
-        ? this._solveFeedback(over, gr, 0) > gr
-        : grTarget > gr
+      // this sample changed nothing — `_solveFeedback(over, gr, 0) > gr` — and
+      // that is the SAME TEST as feed-forward's: F(x) = x − G(x) is strictly
+      // increasing (G's slope < 1), so G(over) > gr ⇔ the loop's ask > gr. No
+      // solve needed to choose the branch; only the gain update needs one.
+      const attacking = grTarget > gr
       if (attacking) {
         /**
          * \u26a0\u26a0 INDEXED ON THE TARGET, NOT ON THE CURRENT REDUCTION, AND THE
