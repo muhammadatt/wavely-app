@@ -7416,3 +7416,39 @@ buttons through it, the real burst plan at 48 kHz, read by `analyseCapture`):
    1444 → 1749 ms (20:1) from the 0.05 s to the 3 s hold, where depth barely moves. The
    depth schedule cannot explain that, unlike the all-buttons capture. It may be a tail at
    this slow release setting. Release-limb finding only.
+
+### Feedback release: open by default, after the owner heard bass distort (October 2026)
+
+**Report:** the FBK detector distorted more than FWD on a bass track at the fastest release.
+Measured on the owner's dry bass DI (`AllTape_Bass_dry_v1`, 17.5 s), saturator off, both
+topologies matched to 6 dB average reduction. The metric is the gain-modulation product: the
+input times the gain minus its 20 ms-smoothed self.
+
+| release 7 | FWD | FBK (release in loop) | FBK − FWD |
+|---|---|---|---|
+| 4:1, attack 4 / 7 | −14.5 / −14.2 dB | −13.3 / −13.1 | +1.2 / +1.1 |
+| 20:1, attack 4 / 7 | −14.0 / −13.7 | −12.6 / −12.6 | +1.4 / +1.1 |
+
+At release 4 the gap is +0.5 dB.
+
+**Cause: the calibration was half-applied.** The attack ladder was slowed ×4 so 4:1 lands on
+the documented times. The release was left alone because every release capture drops below
+threshold, where the loop is open and FBK equals FWD. A bass cycle's falling half is still
+above threshold, though. There the loop sped the release up by ~R×, and the gain recovered
+inside each cycle. On a held 55 Hz tone at release 7 the per-cycle gain swing was 1.12 dB (FWD)
+against 1.93 dB (FBK) at 4:1, and 1.39 against 2.56 at 20:1. ⚠ This was the opposite of the
+prediction made when the prototype was proposed ("less waveform-tracking distortion at the fast
+dials"). That held for the attack limb and not for the release.
+
+**Fix: `fbRelease: 'open'`, now the default.** The loop still decides whether the cell is
+releasing, but the release runs toward the settled reduction on the documented dial constant,
+as feed-forward's does. Results:
+
+- Swing on the held tone is identical to FWD.
+- Bass modulation is ±0.0 to +0.3 dB from FWD.
+- The FETish attack table reads 2.85 % (2.30 with the loop release: one 125 µs step on one row).
+- CLA-76's 20:1/4:1 ratio reads 0.256 (0.268 with the loop release), against 0.291.
+
+`'loop'` stays selectable. ⚠ No capture on either reference measures in-loop release, so the
+loop release is neither confirmed nor ruled out. It is only further from the documented times
+the plugin is built on.

@@ -157,13 +157,13 @@ const CHOICES = [
       {
         id: 'feedback', label: 'FBK',
         title: 'PROTOTYPE. The detector reads the cell’s output, as the hardware’s does. '
-          + 'Same static curve (exact), same release once the signal drops away; above '
-          + 'threshold the loop speeds the attack up by about the ratio, so the attack '
-          + 'ladder is slowed 4× to land 4:1 where FWD does — and 8/12/20 then attack '
-          + '2-3× faster than 4:1, where FWD gives every button the same time — and CLA-76 '
-          + 'agrees: its 20:1 attacks at 0.29× its 4:1 (FBK predicts 0.27, FWD 1.24). Less '
-          + 'waveform-tracking distortion at the fast dials. Refitted to the same FETish '
-          + 'table (2.30 % rms either way — the data cannot tell them apart)',
+          + 'Same static curve (exact). The loop speeds the ATTACK up by about the ratio, so '
+          + 'the attack ladder is slowed 4× to land 4:1 on the documented times, and 8/12/20 '
+          + 'then attack 2-3× faster than 4:1 where FWD gives every button the same time — '
+          + 'CLA-76 agrees: its 20:1 attacks at 0.29× its 4:1 (FBK 0.26, FWD 1.24). RELEASE '
+          + 'runs on the documented dial times as FWD’s does: released through the loop it ran '
+          + '~R× fast whenever the signal stayed up, and rode bass cycles at the fast dials '
+          + '(+1.1 to +1.4 dB of modulation product against FWD at release 7)',
       },
     ],
   },

@@ -162,3 +162,25 @@ test('CLA-76 20:1 vs 4:1: feedback predicts the held-out ratio, feed-forward the
   assert.ok(Math.abs(fb.ratio - CLA76_R20_OVER_R4.ratio) < 0.08,
     `feedback ${fb.ratio} against CLA-76 ${CLA76_R20_OVER_R4.ratio}`)
 })
+
+test('fast release on bass: feedback rides the waveform no harder than feed-forward', () => {
+  // ⚠ The regression: with the release solved through the loop, a bass cycle's
+  // falling half (still above threshold) recovered ~R× faster than the dial, so
+  // the gain rode each cycle — 1.93 dB of swing at 4:1 / release 7 against
+  // feed-forward's 1.12, and audible distortion. `fbRelease: 'open'` (default)
+  // releases on the documented constant.
+  const x = Float32Array.from({ length: SR }, (_, i) => 0.5 * Math.sin(2 * Math.PI * 55 * i / SR))
+  const swing = p => {
+    const { gr } = render({ attack: 7, release: 7, inputDrive: 50, ...p }, x)
+    let lo = Infinity, hi = -Infinity
+    for (let i = SR / 2; i < SR; i++) { lo = Math.min(lo, gr[i]); hi = Math.max(hi, gr[i]) }
+    return hi - lo
+  }
+  for (const ratio of ['4', '20']) {
+    const ff = swing({ ratio })
+    const fb = swing({ ratio, detector: 'feedback' })
+    const loop = swing({ ratio, detector: 'feedback', fbRelease: 'loop' })
+    assert.ok(Math.abs(fb - ff) < 0.05, `ratio ${ratio}: feedback swings ${fb.toFixed(2)} dB, feed-forward ${ff.toFixed(2)}`)
+    assert.ok(loop > ff * 1.5, `ratio ${ratio}: the loop release should be the one that rides (${loop.toFixed(2)})`)
+  }
+})

@@ -346,7 +346,8 @@ export const ATTACK_DEPTH_K = -0.0926
  * needs ×4.0 — applied to whichever ladder `attackRange` picks.
  *
  * ⚠⚠ THE FIT DOES NOT PREFER EITHER TOPOLOGY. Both reach the same 2.30 % rms on
- * a grid; t63 is quantised to 6-12 % of the deep rows, so the table cannot see
+ * a grid (fitted with the release in the loop; the default `fbRelease: 'open'`
+ * reads 2.85 %, one 125 us step on one row); t63 is quantised to 6-12 % of the deep rows, so the table cannot see
  * the difference. And the loop does NOT explain the depth dependence by itself
  * — feedback with no schedule is 36.5 % out, feed-forward's null is 36.4 % —
  * so the schedule stays, at nearly the same slope.
@@ -888,6 +889,34 @@ export const FET1176_KERNEL_DEFAULTS = {
    */
   detector: 'feedforward',
   /**
+   * How the FEEDBACK detector releases. Read only when `detector` is 'feedback'.
+   *   'open' — DEFAULT. The loop decides WHETHER it is releasing; the release
+   *            itself runs toward the settled reduction on the documented dial
+   *            constant, exactly as feed-forward's does.
+   *   'loop' — the release is solved through the loop too, which is what a
+   *            feedback circuit does.
+   *
+   * ⚠⚠ 'loop' MAKES THE ABOVE-THRESHOLD RELEASE ~R× FASTER THAN THE DIAL, AND
+   * THAT IS DISTORTION ON BASS. Every release capture drops below threshold,
+   * where the loop is open, so the release ladder matched under both. On a bass
+   * note, though, each cycle's falling half is still above threshold, so the
+   * gain recovers within the cycle and rides the waveform. On a dry bass DI at
+   * a matched 6 dB of average reduction, release 7, 'loop' read +1.1 to +1.4 dB
+   * more gain-modulation product than feed-forward at 4:1 and 20:1 (+0.5 at
+   * release 4). 'open' is ±0.0 to +0.3 dB.
+   *
+   * ⚠ IT IS THE ATTACK'S CALIBRATION APPLIED TO THE RELEASE. The attack ladder
+   * was slowed ×4 so 4:1 lands on the documented times; leaving the release in
+   * the loop had it running faster than documented whenever the signal stays up.
+   * It costs the validated attack behaviour nothing measurable: the FETish attack
+   * table reads 2.85 % (2.30 'loop', one 125 µs step on one row) and CLA-76's
+   * 20:1-over-4:1 0.256 (0.268 'loop') against the reference's 0.291.
+   *
+   * ⚠ No capture measures in-loop release on either reference, so 'loop' is
+   * neither confirmed nor ruled out — only further from the documented times.
+   */
+  fbRelease: 'open',
+  /**
    * Detector offset in dB that makes a knob position mean the same reduction on
    * every file. Null/absent is 0 \u2014 the un-aligned behaviour. Measured per file
    * from gated RMS, never stored in a preset: it is a property of the FILE.
@@ -1194,6 +1223,8 @@ export class FET1176Kernel {
     this.isAllButtons = String(p.ratio) === 'all'
     // Absent resolves to the default, for the reason `ratioThreshold` gives.
     this.feedback = (p.detector == null ? FET1176_KERNEL_DEFAULTS.detector : p.detector) === 'feedback'
+    this.feedbackRelease = this.feedback &&
+      (p.fbRelease == null ? FET1176_KERNEL_DEFAULTS.fbRelease : p.fbRelease) === 'loop'
     /**
      * ⚠ THE ALL-BUTTONS LAW IS OVERRIDABLE SO IT CAN BE FITTED, and every one of
      * these five is currently a GUESS — no capture from either reference stands
@@ -1716,9 +1747,11 @@ export class FET1176Kernel {
           else if (idx >= this.releaseLut.length) idx = this.releaseLut.length - 1
           rc = this.releaseLut[idx]
         }
-        // ⚠ The loop is solved on the two stages' combined rate, which is exact
-        // while the tail is off — and it is, in every mode.
-        const target = this.feedback
+        // ⚠ Only under `fbRelease: 'loop'` — by default feedback releases toward
+        // the settled target like feed-forward, on the documented constant (see
+        // `fbRelease`). The loop is solved on the two stages' combined rate,
+        // which is exact while the tail is off — and it is, in every mode.
+        const target = this.feedbackRelease
           ? this._solveFeedback(over, gr, this.mainFraction * rc + this.tailFraction * this.tailCoef)
           : grTarget
         grMain += (target * this.mainFraction - grMain) * rc
