@@ -336,6 +336,32 @@ const RELEASE_FASTEST_S = 0.03318
 export const ATTACK_DEPTH_REF_DB = 15.9
 export const ATTACK_DEPTH_K = -0.0926
 
+/**
+ * FEEDBACK DETECTOR ATTACK, refitted with `npm run fet:fbrefit` against the same
+ * FETish attack-vs-depth table the pair above was fitted on.
+ *
+ * ⚠ THE LOOP SPEEDS THE ATTACK UP, SO THE CONSTANT HAS TO SLOW DOWN. Above
+ * threshold the effective rate is ~`c·R / (1 + c·(R − 1))` for a constant `c`
+ * at ratio R, so the same dial attacks ~3.7x faster at 4:1. Fitted, the ladder
+ * needs ×4.0 — applied to whichever ladder `attackRange` picks.
+ *
+ * ⚠⚠ THE FIT DOES NOT PREFER EITHER TOPOLOGY. Both reach the same 2.30 % rms on
+ * a grid (fitted with the release in the loop; the default `fbRelease: 'open'`
+ * reads 2.85 %, one 125 us step on one row); t63 is quantised to 6-12 % of the deep rows, so the table cannot see
+ * the difference. And the loop does NOT explain the depth dependence by itself
+ * — feedback with no schedule is 36.5 % out, feed-forward's null is 36.4 % —
+ * so the schedule stays, at nearly the same slope.
+ *
+ * ⚠ CALIBRATED AT 4:1 ONLY, and 20:1 is then a PREDICTION — which CLA-76
+ * confirms. Same Input, same dial, only the button moved: its 20:1 attacks at
+ * 0.291x its 4:1 t63 (`CLA76_R20_OVER_R4` in the refit script). The loop
+ * predicts 0.27; feed-forward predicts 1.24, the wrong sign, because its depth
+ * schedule makes 20:1's shallower reduction attack slower. 8:1 and 12:1 are
+ * interpolated, not measured.
+ */
+export const FB_ATTACK_SCALE = 4.0
+export const FB_ATTACK_DEPTH_K = -0.095
+
 // Exported alongside the attack pair so the preset re-cut can read the schedule
 // analytically instead of re-deriving it — see `scripts/fet-recut-presets.mjs`.
 export const RELEASE_DEPTH_REF_DB = 12.5
@@ -736,6 +762,21 @@ export function allButtonsGr(overDb, halfKneeDb, atKnee = ALL_INCR_AT_KNEE,
  */
 const ALL_ATTACK_LAG = 1
 // ...and the FET is driven much harder, which is most of the "sound".
+/**
+ * The all-buttons lag under the FEEDBACK detector, refitted against the same
+ * CLA-76 all-buttons-over-4:1 ratio (0.721) by `npm run fet:fbrefit`.
+ *
+ * ⚠⚠ FEEDBACK BRINGS THE "LATE ATTACK" BACK, AND FOR A REASON FEED-FORWARD DID
+ * NOT HAVE. All-buttons runs near 20:1 out of the knee, so its loop gain is far
+ * above 4:1's and the loop alone makes it much FASTER than the reference says:
+ * 0.49 at a lag of 1 against 0.721. It takes 1.5 to put it back. Feed-forward
+ * reads ~0.77 at 1 through this same instrument — the lag is a property of the
+ * topology, not of the mode.
+ *
+ * ⚠ One capture, one reference, read in t63 steps of ~0.047; 1.45-1.55 are
+ * indistinguishable.
+ */
+export const FB_ALL_ATTACK_LAG = 1.5
 const ALL_FET_BOOST = 1.6
 
 /**
@@ -826,6 +867,63 @@ export const FET1176_KERNEL_DEFAULTS = {
   /** dB⁻¹ slope of that schedule, negative. Read only when it is 'depth'. */
   attackDepthK: ATTACK_DEPTH_K,
   releaseSchedule: 'depth',
+  /**
+   * Detector topology.
+   *   'feedback'    — SHIPS (October 2026). The detector reads the cell's
+   *                   OUTPUT, as the hardware's does. See `_solveFeedback`.
+   *   'feedforward' — the detector reads the input after the attenuator. What
+   *                   shipped before, and what every fit before the switch was
+   *                   made on; `FET_LEGACY_PATCH` selects it.
+   *
+   * ⚠⚠ WHY IT SHIPS: CLA-76's 20:1-vs-4:1 bursts pair (same Input and dial)
+   * attacks at 0.291x, feedback predicts 0.26, feed-forward 1.24 — the wrong
+   * sign. At 4:1, all-buttons and fast attack the two are within −35 to −56 dB
+   * of each other on real material; the audible difference is the 8/12/20
+   * buttons catching onsets harder at slow-to-medium attack.
+   *
+   * ⚠ THE STATIC CURVE IS THE SAME IN BOTH, BY CONSTRUCTION. The feedback gain
+   * computer is the feed-forward law re-expressed against output overshoot, so
+   * a settled tone lands on the same reduction and every static fit (knee law,
+   * moving threshold, all-buttons law) carries over untouched. Only the
+   * dynamics differ — and they differ a lot: above threshold the loop speeds
+   * both limbs up by roughly the ratio, so at one dial 20:1 tracks ~5x faster
+   * than 4:1. Below threshold there is no loop and the release is the dial's.
+   *
+   * ⚠ IT TAPS BEFORE THE FET SHAPER, OUTPUT AND MIX. The shaper is excluded so
+   * the loop stays homogeneous in dB (input alignment stays exact) and needs no
+   * oversampler inside it — 50 samples of loop delay against a 20 us attack
+   * would oscillate. Output and Mix are excluded so `out = a + b·g` still holds
+   * and auto makeup keeps its closed form.
+   */
+  detector: 'feedback',
+  /**
+   * How the FEEDBACK detector releases. Read only when `detector` is 'feedback'.
+   *   'open' — DEFAULT. The loop decides WHETHER it is releasing; the release
+   *            itself runs toward the settled reduction on the documented dial
+   *            constant, exactly as feed-forward's does.
+   *   'loop' — the release is solved through the loop too, which is what a
+   *            feedback circuit does.
+   *
+   * ⚠⚠ 'loop' MAKES THE ABOVE-THRESHOLD RELEASE ~R× FASTER THAN THE DIAL, AND
+   * THAT IS DISTORTION ON BASS. Every release capture drops below threshold,
+   * where the loop is open, so the release ladder matched under both. On a bass
+   * note, though, each cycle's falling half is still above threshold, so the
+   * gain recovers within the cycle and rides the waveform. On a dry bass DI at
+   * a matched 6 dB of average reduction, release 7, 'loop' read +1.1 to +1.4 dB
+   * more gain-modulation product than feed-forward at 4:1 and 20:1 (+0.5 at
+   * release 4). 'open' is ±0.0 to +0.3 dB.
+   *
+   * ⚠ IT IS THE ATTACK'S CALIBRATION APPLIED TO THE RELEASE. The attack ladder
+   * was slowed ×4 so 4:1 lands on the documented times; leaving the release in
+   * the loop had it running faster than documented whenever the signal stays up.
+   * It costs the validated attack behaviour nothing measurable: the FETish attack
+   * table reads 2.85 % (2.30 'loop', one 125 µs step on one row) and CLA-76's
+   * 20:1-over-4:1 0.256 (0.268 'loop') against the reference's 0.291.
+   *
+   * ⚠ No capture measures in-loop release on either reference, so 'loop' is
+   * neither confirmed nor ruled out — only further from the documented times.
+   */
+  fbRelease: 'open',
   /**
    * Detector offset in dB that makes a knob position mean the same reduction on
    * every file. Null/absent is 0 \u2014 the un-aligned behaviour. Measured per file
@@ -988,6 +1086,7 @@ export const FET_LEGACY_PATCH = {
   attackSchedule: 'none',
   // The pre-capture kernel held one threshold for every ratio button.
   ratioThreshold: 'fixed',
+  detector: 'feedforward',
 }
 
 /**
@@ -1131,6 +1230,10 @@ export class FET1176Kernel {
     const sr = this.sampleRate
 
     this.isAllButtons = String(p.ratio) === 'all'
+    // Absent resolves to the default, for the reason `ratioThreshold` gives.
+    this.feedback = (p.detector == null ? FET1176_KERNEL_DEFAULTS.detector : p.detector) === 'feedback'
+    this.feedbackRelease = this.feedback &&
+      (p.fbRelease == null ? FET1176_KERNEL_DEFAULTS.fbRelease : p.fbRelease) === 'loop'
     /**
      * ⚠ THE ALL-BUTTONS LAW IS OVERRIDABLE SO IT CAN BE FITTED, and every one of
      * these five is currently a GUESS — no capture from either reference stands
@@ -1143,7 +1246,8 @@ export class FET1176Kernel {
     this.allIncrFallPerDb = Number.isFinite(p.allIncrFallPerDb)
       ? p.allIncrFallPerDb : ALL_INCR_FALL_PER_DB
     this.allIncrFloor = Number.isFinite(p.allIncrFloor) ? p.allIncrFloor : ALL_INCR_FLOOR
-    this.allAttackLag = Number.isFinite(p.allAttackLag) ? p.allAttackLag : ALL_ATTACK_LAG
+    this.allAttackLag = Number.isFinite(p.allAttackLag) ? p.allAttackLag
+      : this.feedback ? FB_ALL_ATTACK_LAG : ALL_ATTACK_LAG
     const allDrop = Number.isFinite(p.allThresholdDropDb) ? p.allThresholdDropDb : ALL_THRESHOLD_DROP_DB
     if (this.isAllButtons) {
       this.thresholdDb = THRESHOLD_DBFS - allDrop
@@ -1202,6 +1306,7 @@ export class FET1176Kernel {
     // t63 grows 21-25 % from a 50 ms hold to a 3 s one.
     let attackS = attackSecondsForDial(p.attack, p.attackRange)
     if (this.isAllButtons) attackS *= this.allAttackLag
+    if (this.feedback) attackS *= FB_ATTACK_SCALE
     const releaseS = dialToSeconds(p.release, RELEASE_SLOWEST_S, RELEASE_FASTEST_S)
 
     this.attackCoef = 1 - Math.exp(-1 / (sr * attackS))
@@ -1223,7 +1328,11 @@ export class FET1176Kernel {
      */
     this.attackScheduled = p.attackSchedule === 'depth'
     if (this.attackScheduled) {
-      const ka = Number.isFinite(p.attackDepthK) ? p.attackDepthK : ATTACK_DEPTH_K
+      // ⚠ Feedback has its own slope, and its own key so a feed-forward
+      // `attackDepthK` (which every kernel carries as a default) cannot leak in.
+      const ka = this.feedback
+        ? (Number.isFinite(p.fbAttackDepthK) ? p.fbAttackDepthK : FB_ATTACK_DEPTH_K)
+        : (Number.isFinite(p.attackDepthK) ? p.attackDepthK : ATTACK_DEPTH_K)
       const n = Math.round(RELEASE_DEPTH_MAX_DB / RELEASE_LUT_STEP_DB) + 1
       if (!this.attackLut || this.attackLut.length !== n) this.attackLut = new Float64Array(n)
       for (let i = 0; i < n; i++) {
@@ -1419,6 +1528,65 @@ export class FET1176Kernel {
   }
 
   /**
+   * FEEDBACK DETECTOR: the reduction this sample settles on, solved within the
+   * sample.
+   *
+   * The detector reads the cell's output, `over − gr'`, so the reduction it
+   * asks for depends on the reduction it is producing. The feedback law is the
+   * feed-forward one re-parameterised: an output overshoot `o` maps to
+   * `G(x)` where `o = x − G(x)` and `G` is `_grForOvershoot` — so a held level
+   * settles on exactly the feed-forward reduction. One ballistic step
+   * `gr' = gr + c·(G(x) − gr)` with `o = over − gr'` then reduces to
+   *
+   *   x − a·G(x) = over − a·gr,   a = 1 − c
+   *
+   * which is monotone in x (G's slope is under 1 everywhere) and piecewise
+   * linear/quadratic, so it is solved in closed form, segment by segment.
+   *
+   * ⚠⚠ ZERO-DELAY, NOT `y[n−1]`. The textbook loop reads last sample's output;
+   * here the attack coefficient is ~0.7 at dial 7 and the loop gain ~19 at
+   * 20:1, and their product being far above 1 is a limit cycle. The implicit
+   * solve is unconditionally stable.
+   *
+   * @returns {number} G(x) — the target the ballistic step moves toward
+   */
+  _solveFeedback(over, gr, c) {
+    const a = 1 - c
+    const rhs = over - a * gr
+    const h = this.halfKnee
+    // Below the knee: no reduction asked for, so x = rhs.
+    if (rhs <= -h) return 0
+    // Knee: G = A·t²/(2K), t = x + h, K = 2h. Solved for the smaller root,
+    // in the cancellation-free form.
+    const A = this.isAllButtons ? this.allIncrAtKnee : this.slope
+    const aA = a * A
+    const rhsAtExit = h * (1 - aA) // F(h) = h − a·A·h
+    if (rhs <= rhsAtExit) {
+      const r = rhs + h
+      const disc = 1 - aA * r / h
+      const t = 2 * r / (1 + Math.sqrt(disc > 0 ? disc : 0))
+      return A * t * t / (4 * h)
+    }
+    if (!this.isAllButtons) {
+      // Linear above the knee: x(1 − a·s) = rhs.
+      return this.slope * rhs / (1 - aA)
+    }
+    // All-buttons above the knee: G = gk + A·u − f·u²/2 (u = x − h) until the
+    // slope meets its floor at uMax, then straight at the floor slope.
+    const f = this.allIncrFallPerDb
+    const fl = this.allIncrFloor
+    const gk = A * h
+    const uMax = f > 0 ? (A - fl) / f : Infinity
+    const b = rhs - h + a * gk // u·(1 − aA) + a·f·u²/2 = b
+    const p = 1 - aA
+    const u = f > 0 ? 2 * b / (p + Math.sqrt(p * p + 2 * a * f * b)) : b / p
+    if (u <= uMax) return gk + A * u - f * u * u / 2
+    const gMax = gk + A * uMax - f * uMax * uMax / 2
+    const u2 = (rhs - h + a * gMax - a * fl * uMax) / (1 - a * fl)
+    return gMax + fl * (u2 - uMax)
+  }
+
+  /**
    * Process one block.
    *
    * @param {Float32Array[]} inputChannels  - per-channel input (any count)
@@ -1524,13 +1692,22 @@ export class FET1176Kernel {
       // meaningful time constant on the way back down.
       const rect = sc < 0 ? -sc : sc
       const levelDb = (rect > 1e-6 ? 20 * Math.log10(rect) : -120) + this.inputAlignDb
-      const grTarget = this._grForOvershoot(levelDb - this.thresholdDb)
+      const over = levelDb - this.thresholdDb
+      // The SETTLED reduction for this level — feed-forward's target, and in
+      // feedback what the attack schedule indexes on (see the attack branch).
+      const grTarget = this._grForOvershoot(over)
 
       // Attack pulls both stages toward their share of the target together;
       // release lets each stage decay at its own rate, which is what makes
       // recovery depend on how dense the program was.
       const gr = grMain + grTail
-      if (grTarget > gr) {
+      // In feedback the branch is decided by what the detector asks for if
+      // this sample changed nothing — `_solveFeedback(over, gr, 0) > gr` — and
+      // that is the SAME TEST as feed-forward's: F(x) = x − G(x) is strictly
+      // increasing (G's slope < 1), so G(over) > gr ⇔ the loop's ask > gr. No
+      // solve needed to choose the branch; only the gain update needs one.
+      const attacking = grTarget > gr
+      if (attacking) {
         /**
          * \u26a0\u26a0 INDEXED ON THE TARGET, NOT ON THE CURRENT REDUCTION, AND THE
          * RELEASE SCHEDULE'S CHOICE IS WRONG HERE. At the START of every attack
@@ -1554,7 +1731,15 @@ export class FET1176Kernel {
           else if (idx >= this.attackLut.length) idx = this.attackLut.length - 1
           ac = this.attackLut[idx]
         }
-        const delta = (grTarget - gr) * ac
+        /**
+         * ⚠ IN FEEDBACK THE SCHEDULE STILL INDEXES ON `grTarget`, THE SETTLED
+         * REDUCTION. The loop's own target is implicit — it depends on `ac` —
+         * so it cannot choose `ac`; the settled depth is the same "where it is
+         * heading" the argument above rests on, and it is the same number
+         * feed-forward indexes on.
+         */
+        const target = this.feedback ? this._solveFeedback(over, gr, ac) : grTarget
+        const delta = (target - gr) * ac
         grMain += delta * this.mainFraction
         grTail += delta * this.tailFraction
       } else {
@@ -1572,8 +1757,15 @@ export class FET1176Kernel {
           else if (idx >= this.releaseLut.length) idx = this.releaseLut.length - 1
           rc = this.releaseLut[idx]
         }
-        grMain += (grTarget * this.mainFraction - grMain) * rc
-        grTail += (grTarget * this.tailFraction - grTail) * this.tailCoef
+        // ⚠ Only under `fbRelease: 'loop'` — by default feedback releases toward
+        // the settled target like feed-forward, on the documented constant (see
+        // `fbRelease`). The loop is solved on the two stages' combined rate,
+        // which is exact while the tail is off — and it is, in every mode.
+        const target = this.feedbackRelease
+          ? this._solveFeedback(over, gr, this.mainFraction * rc + this.tailFraction * this.tailCoef)
+          : grTarget
+        grMain += (target * this.mainFraction - grMain) * rc
+        grTail += (target * this.tailFraction - grTail) * this.tailCoef
       }
 
       const grNow = grMain + grTail

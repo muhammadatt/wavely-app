@@ -72,7 +72,9 @@ const stim = () => (cachedStim ||= buildProbe(plan, SR))
 export function measureAt(stimGainDb, params) {
   const k = new FET1176Kernel(SR)
   const { ladderScale, ...kernelParams } = params
-  k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
+  // ⚠ Feed-forward pinned: this fits ATTACK_DEPTH_K, a feed-forward constant.
+  // Feedback's pair is fitted by `fet-feedback-refit.mjs`.
+  k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false, detector: 'feedforward',
     inputDrive: 100, ratio: '4', attack: 4, release: 4, ...kernelParams })
   /**
    * ⚠ THE LADDER SCALE IS POKED, NOT PASSED. `ATTACK_SLOWEST_S` and its partner

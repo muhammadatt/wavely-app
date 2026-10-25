@@ -94,6 +94,18 @@ export const FET1176_TUNING_DEFAULTS = Object.freeze({
    * it did and wants its Input turned up.
    */
   ratioThreshold: FET1176_KERNEL_DEFAULTS.ratioThreshold,
+  /**
+   * 'feedback' ships (October 2026); 'feedforward' is the topology before it
+   * and what `FET_LEGACY_PATCH` selects. Feedback is the hardware topology — the
+   * detector reads the cell's output.
+   *
+   * ⚠ IT CARRIES ITS OWN ATTACK CALIBRATION (`FB_ATTACK_SCALE`,
+   * `FB_ATTACK_DEPTH_K`, `FB_ALL_ATTACK_LAG`), so switching it does not leave
+   * the dials 3.7x fast at 4:1 — the 4:1 attack lands where feed-forward's does
+   * and the higher buttons get faster, which is the topology's whole audible
+   * difference. Same static curve, same release when the signal drops away.
+   */
+  detector: FET1176_KERNEL_DEFAULTS.detector,
 })
 
 /**
@@ -112,6 +124,7 @@ const POSITIONS = new Set(['preInput', 'preCell', 'postCell'])
 const ATTACK_RANGES = new Set(['datasheet', 'fetish'])
 const SCHEDULES = new Set(['depth', 'none'])
 const RATIO_THRESHOLDS = new Set(['fixed', 'moving'])
+const DETECTORS = new Set(['feedforward', 'feedback'])
 
 let tuning = { ...FET1176_TUNING_DEFAULTS }
 const listeners = new Set()
@@ -184,6 +197,7 @@ export function setFET1176Tuning(patch) {
     if (k === 'releaseSchedule' && !SCHEDULES.has(v)) continue
     if (k === 'attackSchedule' && !SCHEDULES.has(v)) continue
     if (k === 'ratioThreshold' && !RATIO_THRESHOLDS.has(v)) continue
+    if (k === 'detector' && !DETECTORS.has(v)) continue
     if (tuning[k] !== v) { tuning[k] = v; changed = true }
   }
   if (changed) for (const fn of listeners) fn()

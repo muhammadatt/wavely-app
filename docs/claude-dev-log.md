@@ -7299,3 +7299,220 @@ each plugin labels its own marks.
 
 All thresholds and both Sensitivity lines are reasoned from synthetic material and have not
 been auditioned. The plugin ships dev-gated.
+
+## LA Classic 76 (FET Punch) — feedback detector prototype and ballistics refit (October 2026)
+
+`detector: 'feedforward' | 'feedback'` on the kernel and the bench (`Detector`, FWD / FBK).
+**Feed-forward still ships**; the default render is bit-identical to before the switch existed.
+
+**Topology.** The feedback detector reads the cell's output before the FET shaper, Output and
+Mix, at the base rate. ⚠ Tapping after the downsampler would put the oversampler's 50 samples
+inside the loop against a 20 µs attack. ⚠ Tapping after Output would break auto makeup's
+`out = a + b·g` closed form. ⚠ Leaving the shaper out keeps input alignment exact.
+
+**Static curve: unchanged, exactly.** The feedback law is the feed-forward one re-expressed on
+output overshoot: `o = x − G(x)` maps to `G(x)`. Each sample is solved in closed form, with no
+one-sample delay, from `x − (1 − c)·G(x) = over − (1 − c)·gr`: piecewise across the knee, the
+linear segment and all-buttons' quadratic/floor segments. A constant-|x| tone settles to
+1e-14 dB of feed-forward on every button, across the knee. ⚠ On a sine the two differ by
+≤ 0.15 dB, because the unsmoothed detector ripples inside the cycle and the loop evens it out.
+⚠ A `y[n−1]` loop would limit-cycle at attack 7 / 20:1 (coefficient ~0.7 × loop gain ~19).
+The implicit solve is stable there (tested).
+
+**Release: unchanged.** Every release probe drops to −50 dBFS, below threshold, where the loop
+asks for zero and is open. The FETish seven-dial ladder comes out within 0.49 % in both
+topologies, and the depth table at the fitted dial 4.82 reads 4.1 / 4.2 %. `RELEASE_*` carries
+over untouched. ⚠ On program material that releases while still above threshold, the feedback
+release IS faster (the same ~R× loop speed-up). No capture measures that.
+
+**Attack: refitted** (`npm run fet:fbrefit`, against `FETISH_ATTACK_TABLE`):
+
+| | ladder scale | k | rms |
+|---|---|---|---|
+| feed-forward (re-run, grid) | ×1.000 | −0.090 | 2.30 % |
+| **feedback** | **×4.000** | **−0.095** | **2.30 %** |
+| feedback, no depth schedule | ×3.99 | — | 36.5 % |
+
+- ⚠⚠ **The data cannot tell the topologies apart.** t63 is quantised to 6–12 % of the deep rows,
+  and both land on the same quanta.
+- ⚠ **The loop does not explain the depth dependence by itself**, so the schedule stays, at
+  nearly the same slope.
+- ⚠ **A golden search stalls on this staircase objective.** The first fitter returned 3.45 %
+  for feed-forward at its own shipping constants. It now uses a grid.
+- ⚠ **Scales either side of the optimum land on adjacent quanta.** 3.957 and 4.000 both scored
+  2.30 % on one run and 6.3 / 2.3 % on the next, after the drive solve moved. The optimum is a
+  plateau.
+
+**What feedback changes audibly: attack becomes ratio-dependent.** Settled −12 dBFS square,
+Input 70, feedback over feed-forward t63:
+
+| | 4:1 | 8:1 | 12:1 | 20:1 | all |
+|---|---|---|---|---|---|
+| dial 1 | 1.00 | 0.49 | 0.33 | 0.20 | 0.97 |
+| dial 4 | 1.17 | 0.50 | 0.33 | 0.17 | 1.25 |
+
+Feed-forward gives every numbered button the same time. Either reference only measured attack
+at 4:1, so ⚠ **nothing says whether the faster high ratios are right**. The cheapest
+discriminating capture is `bursts.wav` at 20:1 against 4:1, same Input and same attack dial.
+
+**All-buttons lag: 1.5 under feedback** (`FB_ALL_ATTACK_LAG`), against CLA-76's all/4:1 ratio
+of 0.721. ⚠⚠ Feedback brings the "late attack" back, for a structural reason. All-buttons
+leaves the knee near 20:1, so its loop is far faster than 4:1's: 0.488 at a lag of 1. This
+instrument reads feed-forward at 0.767 at lag 1 (0.95 to match), not the 0.721 recorded with
+the full bursts plan, so compare lags within one instrument only. Steps are 0.047, so 1.45–1.55
+are indistinguishable.
+
+**Not done.** No preset re-cut (feedback is a bench prototype). Nothing auditioned. CPU: two
+closed-form solves per sample on the mono base-rate detector, not benchmarked.
+
+### The topology test: CLA-76 20:1 against 4:1 (October 2026)
+
+Two CLA-76 `bursts.wav` bounces: `cla76_bursts_r4_I3_a1_r3.wav` and
+`cla76_bursts_r20_I3_a1_r3.wav`. Same Input (I3), attack dial 1 and release dial 3; only the
+ratio button moved. ⚠ They were bounced at **48 kHz**, so they are read with
+`npm run fet:ballistics -- --rate 48000` (`fet-ballistics.mjs --fit --rate 48000`). The 4 kHz
+probe survives that rate intact, but t63 is read in half-period steps (125 µs), ~9 % of the
+20:1 reading. Both bounces end 4–6 s short and carry CLA-76's demo mute grid (20 / 40 / 60 s).
+The tool schedules around both.
+
+| | settled GR | attack t63 per hold (0.05 / 0.2 / 1 / 3 s) |
+|---|---|---|
+| CLA-76 4:1 | 10.91 dB | 4688 / 5438 / 4938 / 4938 µs |
+| CLA-76 20:1 | 8.43 dB | 1438 at every hold |
+
+**20:1 over 4:1 = 0.291** (0.26–0.31 across holds). Our kernel, rendered the reference's way
+(`r20OverR4` in `fet-feedback-refit.mjs`: one Input, set where 4:1 settles at 10.91 dB, both
+buttons through it, the real burst plan at 48 kHz, read by `analyseCapture`):
+
+| | 20:1 / 4:1 |
+|---|---|
+| **CLA-76** | **0.291** |
+| feedback | **0.268** |
+| feed-forward | **1.244** |
+
+- ⚠⚠ **Feed-forward gets the sign wrong.** 20:1 settles shallower (the moving threshold), and
+  the attack depth schedule makes a shallower reduction attack *slower*.
+- **Feedback was calibrated at 4:1 only**, so 0.27 is an out-of-sample prediction, inside the
+  reference's own spread across holds.
+- **Release does not change the verdict.** With our release slowed to the reference's ~1.75 s
+  (it reads 1.44–1.95 s at its "dial 3"), the ratios are 1.244 / 0.256. Bursts sit 17 s apart,
+  ~9 time constants, so no reduction carries into the next burst.
+- `test/dsp/fetFeedbackDetector.test.js` pins both on a one-burst plan.
+
+**Side findings, not resolved:**
+
+1. **Depth at 20:1 is 1.6 dB off, in both topologies.** At the shared Input we settle at
+   10.04 dB (feed-forward) and 10.12 (feedback), against CLA-76's 8.43. The moving threshold
+   was fitted on stairs at attack dial 7. At dial 1, CLA-76 separates the buttons by 2.48 dB and
+   we separate them by 0.87. Its 4:1 depth also moves with the attack dial: 10.91 here at a1,
+   9.66 on the earlier a4 capture at the same I3. Settled depth on a sine depending on the
+   attack dial is something our unsmoothed-rectifier detector does differently. Its own
+   question; the topology question doesn't depend on it.
+2. **CLA-76's release at "dial 3" reads 1.4–1.95 s**, ~15× its dial-4 all-buttons readings
+   (77–124 ms) and far past our dial 1 (268–338 ms). Either the release knob was not where the
+   name says, or CLA-76's release dial is not ours. Worth confirming before using these files
+   for release.
+3. **These two DO stretch with exposure at constant depth**: 1774 → 1953 ms (4:1) and
+   1444 → 1749 ms (20:1) from the 0.05 s to the 3 s hold, where depth barely moves. The
+   depth schedule cannot explain that, unlike the all-buttons capture. It may be a tail at
+   this slow release setting. Release-limb finding only.
+
+### Feedback release: open by default, after the owner heard bass distort (October 2026)
+
+**Report:** the FBK detector distorted more than FWD on a bass track at the fastest release.
+Measured on the owner's dry bass DI (`AllTape_Bass_dry_v1`, 17.5 s), saturator off, both
+topologies matched to 6 dB average reduction. The metric is the gain-modulation product: the
+input times the gain minus its 20 ms-smoothed self.
+
+| release 7 | FWD | FBK (release in loop) | FBK − FWD |
+|---|---|---|---|
+| 4:1, attack 4 / 7 | −14.5 / −14.2 dB | −13.3 / −13.1 | +1.2 / +1.1 |
+| 20:1, attack 4 / 7 | −14.0 / −13.7 | −12.6 / −12.6 | +1.4 / +1.1 |
+
+At release 4 the gap is +0.5 dB.
+
+**Cause: the calibration was half-applied.** The attack ladder was slowed ×4 so 4:1 lands on
+the documented times. The release was left alone because every release capture drops below
+threshold, where the loop is open and FBK equals FWD. A bass cycle's falling half is still
+above threshold, though. There the loop sped the release up by ~R×, and the gain recovered
+inside each cycle. On a held 55 Hz tone at release 7 the per-cycle gain swing was 1.12 dB (FWD)
+against 1.93 dB (FBK) at 4:1, and 1.39 against 2.56 at 20:1. ⚠ This was the opposite of the
+prediction made when the prototype was proposed ("less waveform-tracking distortion at the fast
+dials"). That held for the attack limb and not for the release.
+
+**Fix: `fbRelease: 'open'`, now the default.** The loop still decides whether the cell is
+releasing, but the release runs toward the settled reduction on the documented dial constant,
+as feed-forward's does. Results:
+
+- Swing on the held tone is identical to FWD.
+- Bass modulation is ±0.0 to +0.3 dB from FWD.
+- The FETish attack table reads 2.85 % (2.30 with the loop release: one 125 µs step on one row).
+- CLA-76's 20:1/4:1 ratio reads 0.256 (0.268 with the loop release), against 0.291.
+
+`'loop'` stays selectable. ⚠ No capture on either reference measures in-loop release, so the
+loop release is neither confirmed nor ruled out. It is only further from the documented times
+the plugin is built on.
+
+### The feedback detector SHIPS (October 2026)
+
+Owner's call, after listening: `detector: 'feedback'` is the default, with
+`fbRelease: 'open'`. Feed-forward stays on the bench (FWD) and in `FET_LEGACY_PATCH`.
+
+**What the switch changes, on the owner's dry bass DI at Input 60.** The FWD−FBK difference
+signal against the output:
+
+| | null depth |
+|---|---|
+| 4:1, all attacks | −50 to −56 dB |
+| all-buttons | −36 to −54 dB |
+| any ratio at attack 7 | −44 to −56 dB |
+| 8:1 at attack 1–4 | −21 to −34 dB |
+| 20:1 at attack 1–4 | −16 to −29 dB |
+
+At 8:1 and 20:1 with slow-to-medium attack, peaks come out 1.2–2.1 dB lower on 8:1 and
+2.9–4.2 dB lower on 20:1. Elsewhere the switch is inaudible by construction: 4:1 is the attack
+calibration point, the release runs on the documented times and the static curve is exact.
+
+**Presets.** Re-solved on Input against the `AS_CUT_AVG_GR` targets with the shipping kernel.
+The dials did not move: they mean the documented times, which feedback keeps, and the faster
+attack at 8:1 / 12:1 is the point of the switch, not drift to undo.
+
+| preset | before | after |
+|---|---|---|
+| vocal-punch | 4.14 dB | unchanged (−0.07 from target) |
+| gentle-ride | 3.12 dB | unchanged (−0.12) |
+| parallel-thickener | 6.48 dB | unchanged (−0.06) |
+| consonant-control | Input 57 → 5.59 dB (+0.13) | **Input 56 → 5.37 dB (−0.09)** |
+| all-buttons-in | Input 55 → 9.62 dB vs its as-cut 9.77 (−0.15, at the tolerance) | **Input 56 → 9.85 dB (+0.08)** |
+
+⚠ `npm run fet:recut` could not run here: a shallow clone has no `57e1877`. The test's pinned
+as-cut figures carried the target instead, so the dial choice was not re-run. It reads only the
+documented constants, which did not change.
+
+**Instruments pinned to feed-forward.** `runKernel` in `fet-ballistics.mjs`, and `measureAt` in
+`fet-attack-depth.mjs` and `fet-release-depth.mjs`, now set `detector: 'feedforward'` ahead of
+the caller's params. That is the same reason `runKernel` already pins the schedules: every
+number in the record was taken on feed-forward, and an instrument that follows the product
+default cannot be compared against its own history. Pass `detector: 'feedback'` to measure the
+shipping kernel. `fet-feedback-refit.mjs` names both topologies explicitly.
+⚠ The static fits (knee law, moving threshold, all-buttons law) were made on feed-forward. On a
+constant |x| feedback settles identically to 1e-14 dB; on a sine it settles ≤ 0.15 dB apart
+(the unsmoothed detector's in-cycle ripple), so those fits carry over to within that.
+
+Full suite 1813/1813, including chunked-apply seams and preview/apply convergence, which now
+run on feedback.
+
+**Review follow-up (Copilot on muhammadatt/wavely-app#177).** The feedback branch test ran a
+second implicit solve per sample (`_solveFeedback(over, gr, 0) > gr`). It is the same test as
+`grTarget > gr`: F(x) = x − G(x) is strictly increasing, so G(over) > gr ⇔ the loop's ask > gr.
+Replaced, and the output did not change: 0 differing samples of 46.2 M across 60 settings on the
+owner's bass DI (5 ratios × attack 1/4/7 × release 1/7 × both `fbRelease`).
+
+CPU, 70 s of mono at 20:1, attack 4:
+
+| path | before | after | feed-forward |
+|---|---|---|---|
+| oversampled (preview / apply) | 552 ms | 499 ms | 531 ms |
+| base rate (measurement) | 163 ms (+18 %) | 136 ms | 146 ms |
+
+Feedback is at feed-forward's cost in both paths, within timing noise.

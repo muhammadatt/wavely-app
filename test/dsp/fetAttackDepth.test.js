@@ -10,7 +10,7 @@ const SR = 96000
 
 function render(params) {
   const k = new FET1176Kernel(SR)
-  k.setParams({ outputGainDb: 0, mix: 1, oversample: false, inputDrive: 85, ...params })
+  k.setParams({ outputGainDb: 0, mix: 1, oversample: false, inputDrive: 85, detector: 'feedforward', ...params })
   const x = new Float32Array(SR)
   for (let i = 0; i < x.length; i++) {
     x[i] = (i < SR * 0.5 ? 0.3 : 0.002) * Math.sin(2 * Math.PI * 4000 * i / SR)
@@ -54,7 +54,8 @@ test('off is bit-identical, even with a slope set', () => {
 test('on, a deeper reduction attacks faster; off, it barely moves', () => {
   const grOf = (params, drive) => {
     const k = new FET1176Kernel(SR)
-    k.setParams({ outputGainDb: 0, mix: 1, oversample: false, inputDrive: drive,
+    // ⚠ Feed-forward: `attackDepthK` is its slope. Feedback reads `fbAttackDepthK`.
+    k.setParams({ outputGainDb: 0, mix: 1, oversample: false, inputDrive: drive, detector: 'feedforward',
       ratio: '4', attack: 1, release: 4, fetDrive: 0, ...params })
     const x = new Float32Array(SR / 2)
     for (let i = 0; i < x.length; i++) x[i] = 0.3 * Math.sin(2 * Math.PI * 4000 * i / SR)

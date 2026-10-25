@@ -147,6 +147,28 @@ const CHOICES = [
     ],
   },
   {
+    key: 'detector', label: 'Detector',
+    options: [
+      {
+        id: 'feedback', label: 'FBK',
+        title: 'SHIPS. The detector reads the cell’s output, as the hardware’s does. Same '
+          + 'static curve as FWD (exact). The loop speeds the ATTACK up by about the ratio, so '
+          + 'the attack ladder is slowed 4× to land 4:1 on the documented times, and 8/12/20 '
+          + 'then attack 2-3× faster than 4:1 — CLA-76 agrees: its 20:1 attacks at 0.29× its '
+          + '4:1 (FBK 0.26, FWD 1.24). RELEASE runs on the documented dial times, as FWD’s '
+          + 'does. Audibly different from FWD only on 8/12/20 at slow-to-medium attack, where '
+          + 'onsets are caught harder',
+      },
+      {
+        id: 'feedforward', label: 'FWD',
+        title: 'The detector reads the input after the attenuator — what shipped until '
+          + 'October 2026, and what FET_LEGACY_PATCH selects. Every button attacks at the same '
+          + 'time, which CLA-76 contradicts. Within −35 to −56 dB of FBK at 4:1, all-buttons '
+          + 'and fast attack',
+      },
+    ],
+  },
+  {
     key: 'releaseSchedule', label: 'Release',
     options: [
       {
@@ -267,7 +289,7 @@ function reset() {
           @click="reset"
         >Reset</button>
         <span class="ml-auto font-mono text-[9px] text-white/30">
-          {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.attackSchedule }} / {{ vals.ratioThreshold }} / {{ vals.releaseSchedule }}
+          {{ vals.fetPosition }} / {{ vals.attackRange }} / {{ vals.attackSchedule }} / {{ vals.ratioThreshold }} / {{ vals.releaseSchedule }} / {{ vals.detector }}
         </span>
       </div>
     </div>

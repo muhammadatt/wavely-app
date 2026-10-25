@@ -163,7 +163,10 @@ export const FET_PUNCH_PRESETS = [
       // ⚠ 53 -> 57 WHEN THE MOVING THRESHOLD SHIPPED. This preset is on 8:1, so
       // its threshold rose 1.71 dB and it needed the Input back to deliver what
       // it was cut for.
-      inputDrive: 57,
+      // ⚠ 57 -> 56 WHEN THE FEEDBACK DETECTOR SHIPPED. Its faster attack on 8:1
+      // took 5.59 dB at 57 against the 5.46 it was cut for; 56 reads 5.37.
+      // Dials unchanged: they mean the documented times, which feedback keeps.
+      inputDrive: 56,
       output: 0,
       // Fast enough to catch a consonant rather than ride behind it, with the
       // side-chain high-passed at 120 Hz so the fundamental is not what sets
@@ -246,7 +249,9 @@ export const FET_PUNCH_PRESETS = [
       // ⚠ Both ballistics dials sit at the end of their travel, so their
       // residuals (-23 % attack, +56 % release) are a floor, not a rounding —
       // `ALL_ATTACK_LAG` going 2.5 -> 1 moved the attack out of reach at dial 7.
-      inputDrive: 55,
+      // ⚠ 55 -> 56 WHEN THE FEEDBACK DETECTOR SHIPPED: 55 read 9.62 against the
+      // as-cut 9.77 (−0.15, at the test's tolerance), 56 reads 9.85 (+0.08).
+      inputDrive: 56,
       output: 0,
       attack: 7,
       release: 7,
