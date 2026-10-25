@@ -78,7 +78,9 @@ const stim = () => (cachedStim ||= buildProbe(plan, SR))
 export function measureAt(stimGainDb, params) {
   const k = new FET1176Kernel(SR)
   const { tailFraction, ...kernelParams } = params
-  k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
+  // ⚠ Feed-forward pinned, as `runKernel` is: the record was taken on it.
+  // (The release limb renders identically under feedback below threshold.)
+  k.setParams({ outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false, detector: 'feedforward',
     inputDrive: 100, ratio: '4', attack: 4, release: 4, ...kernelParams })
   /**
    * \u26a0 THE TAIL HAS TO COME OFF FOR A FETish FIT AND THAT IS NOT A DETAIL. The

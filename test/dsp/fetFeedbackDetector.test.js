@@ -1,7 +1,8 @@
 /**
  * Run with:  npm test
  *
- * FET Punch's FEEDBACK detector — the prototype topology behind `detector`.
+ * LA Classic 76's FEEDBACK detector — the shipping topology behind `detector`
+ * (feed-forward until October 2026, still selectable).
  *
  * What it must keep from feed-forward, exactly: the static curve, the release
  * once the signal drops away, the output-gain identity auto makeup solves
@@ -28,7 +29,9 @@ function square(db, seconds, silentS = 0) {
 /** Render sample by sample, returning output and the GR trace. */
 function render(params, x) {
   const k = new FET1176Kernel(SR)
-  k.setParams({ oversample: false, fetDrive: 0, outputGainDb: 0, mix: 1, ...params })
+  // ⚠ Feed-forward unless a case asks for feedback, so every comparison below
+  // names both sides; the shipping default is checked on its own.
+  k.setParams({ oversample: false, fetDrive: 0, outputGainDb: 0, mix: 1, detector: 'feedforward', ...params })
   const y = new Float32Array(x.length)
   const gr = new Float64Array(x.length)
   for (let i = 0; i < x.length; i++) {
@@ -40,17 +43,21 @@ function render(params, x) {
 
 const RATIOS = ['4', '8', '12', '20', 'all']
 
-test('feed-forward ships, and an absent value resolves to it', () => {
-  assert.equal(FET1176_KERNEL_DEFAULTS.detector, 'feedforward')
-  // ⚠ Not in FET_LEGACY_PATCH: the patch carries only keys that differ from the
-  // shipping defaults (the bench sends diffs), and the old kernel was feed-forward.
-  assert.ok(!('detector' in FET_LEGACY_PATCH))
+test('feedback ships, an absent value resolves to it, and the legacy patch keeps feed-forward', () => {
+  assert.equal(FET1176_KERNEL_DEFAULTS.detector, 'feedback')
+  assert.equal(FET_LEGACY_PATCH.detector, 'feedforward')
   const x = square(-6, 0.2)
-  const a = render({}, x).y
-  const b = render({ detector: undefined }, x).y
-  const c = render({ detector: 'feedforward' }, x).y
-  assert.deepEqual(b, a)
-  assert.deepEqual(c, a)
+  const raw = p => {
+    const k = new FET1176Kernel(SR)
+    k.setParams({ oversample: false, fetDrive: 0, ratio: '20', attack: 3, inputDrive: 70, ...p })
+    const y = new Float32Array(x.length)
+    k.process([x], [y], x.length)
+    return y
+  }
+  const a = raw({})
+  assert.deepEqual(raw({ detector: undefined }), a)
+  assert.deepEqual(raw({ detector: 'feedback' }), a)
+  assert.notDeepEqual(raw({ detector: 'feedforward' }), a)
 })
 
 test('the static curve is identical: a held level settles on the same reduction', () => {
@@ -139,10 +146,10 @@ test('Output stays outside the loop, so auto makeup keeps out = a + b·g', () =>
 test('the bench accepts the detector and refuses anything else', async () => {
   const t = await import('../../src/audio/effects/fet1176Tuning.js')
   t.resetFET1176Tuning()
-  assert.equal(t.getFET1176Tuning().detector, 'feedforward')
+  assert.equal(t.getFET1176Tuning().detector, 'feedback')
   assert.equal(t.setFET1176Tuning({ detector: 'sideways' }), false)
-  assert.equal(t.setFET1176Tuning({ detector: 'feedback' }), true)
-  assert.deepEqual(t.fet1176TuningOverrides(), { detector: 'feedback' })
+  assert.equal(t.setFET1176Tuning({ detector: 'feedforward' }), true)
+  assert.deepEqual(t.fet1176TuningOverrides(), { detector: 'feedforward' })
   t.resetFET1176Tuning()
   assert.deepEqual(t.fet1176TuningOverrides(), {})
 })

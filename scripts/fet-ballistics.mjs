@@ -470,10 +470,16 @@ export function runKernel(x, sampleRate, params) {
    * against it, and should be done deliberately and re-measured, not inherited.
    *
    * The fitters that are fitting a schedule pass it explicitly.
+   *
+   * ⚠ THE DETECTOR IS PINNED TO FEED-FORWARD FOR THE SAME REASON. Feedback
+   * shipped in October 2026, after every capture in the record was compared
+   * against this instrument; letting the new default leak in would move dial
+   * tables, matched measurements and stairs readings under their recorded
+   * numbers. Pass `detector: 'feedback'` to measure the shipping kernel.
    */
   k.setParams({
     outputGainDb: 0, mix: 1, fetDrive: 0, oversample: false,
-    attackSchedule: 'none', releaseSchedule: 'depth',
+    attackSchedule: 'none', releaseSchedule: 'depth', detector: 'feedforward',
     ...kernelParams,
   })
   /**

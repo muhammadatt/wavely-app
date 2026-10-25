@@ -95,7 +95,8 @@ export const FET1176_TUNING_DEFAULTS = Object.freeze({
    */
   ratioThreshold: FET1176_KERNEL_DEFAULTS.ratioThreshold,
   /**
-   * 'feedforward' ships; 'feedback' is the PROTOTYPE hardware topology — the
+   * 'feedback' ships (October 2026); 'feedforward' is the topology before it
+   * and what `FET_LEGACY_PATCH` selects. Feedback is the hardware topology — the
    * detector reads the cell's output.
    *
    * ⚠ IT CARRIES ITS OWN ATTACK CALIBRATION (`FB_ATTACK_SCALE`,

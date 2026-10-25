@@ -7452,3 +7452,52 @@ as feed-forward's does. Results:
 `'loop'` stays selectable. ⚠ No capture on either reference measures in-loop release, so the
 loop release is neither confirmed nor ruled out. It is only further from the documented times
 the plugin is built on.
+
+### The feedback detector SHIPS (October 2026)
+
+Owner's call, after listening: `detector: 'feedback'` is the default, with
+`fbRelease: 'open'`. Feed-forward stays on the bench (FWD) and in `FET_LEGACY_PATCH`.
+
+**What the switch changes, on the owner's dry bass DI at Input 60.** The FWD−FBK difference
+signal against the output:
+
+| | null depth |
+|---|---|
+| 4:1, all attacks | −50 to −56 dB |
+| all-buttons | −36 to −54 dB |
+| any ratio at attack 7 | −44 to −56 dB |
+| 8:1 at attack 1–4 | −21 to −34 dB |
+| 20:1 at attack 1–4 | −16 to −29 dB |
+
+At 8:1 and 20:1 with slow-to-medium attack, peaks come out 1.2–2.1 dB lower on 8:1 and
+2.9–4.2 dB lower on 20:1. Elsewhere the switch is inaudible by construction: 4:1 is the attack
+calibration point, the release runs on the documented times and the static curve is exact.
+
+**Presets.** Re-solved on Input against the `AS_CUT_AVG_GR` targets with the shipping kernel.
+The dials did not move: they mean the documented times, which feedback keeps, and the faster
+attack at 8:1 / 12:1 is the point of the switch, not drift to undo.
+
+| preset | before | after |
+|---|---|---|
+| vocal-punch | 4.14 dB | unchanged (−0.07 from target) |
+| gentle-ride | 3.12 dB | unchanged (−0.12) |
+| parallel-thickener | 6.48 dB | unchanged (−0.06) |
+| consonant-control | Input 57 → 5.59 dB (+0.13) | **Input 56 → 5.37 dB (−0.09)** |
+| all-buttons-in | Input 55 → 9.62 dB vs its as-cut 9.77 (−0.15, at the tolerance) | **Input 56 → 9.85 dB (+0.08)** |
+
+⚠ `npm run fet:recut` could not run here: a shallow clone has no `57e1877`. The test's pinned
+as-cut figures carried the target instead, so the dial choice was not re-run. It reads only the
+documented constants, which did not change.
+
+**Instruments pinned to feed-forward.** `runKernel` in `fet-ballistics.mjs`, and `measureAt` in
+`fet-attack-depth.mjs` and `fet-release-depth.mjs`, now set `detector: 'feedforward'` ahead of
+the caller's params. That is the same reason `runKernel` already pins the schedules: every
+number in the record was taken on feed-forward, and an instrument that follows the product
+default cannot be compared against its own history. Pass `detector: 'feedback'` to measure the
+shipping kernel. `fet-feedback-refit.mjs` names both topologies explicitly.
+⚠ The static fits (knee law, moving threshold, all-buttons law) were made on feed-forward. On a
+constant |x| feedback settles identically to 1e-14 dB; on a sine it settles ≤ 0.15 dB apart
+(the unsmoothed detector's in-cycle ripple), so those fits carry over to within that.
+
+Full suite 1813/1813, including chunked-apply seams and preview/apply convergence, which now
+run on feedback.

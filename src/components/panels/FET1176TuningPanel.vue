@@ -150,20 +150,21 @@ const CHOICES = [
     key: 'detector', label: 'Detector',
     options: [
       {
-        id: 'feedforward', label: 'FWD',
-        title: 'SHIPS. The detector reads the input after the attenuator. Every fit in '
-          + 'this plugin was made on it',
+        id: 'feedback', label: 'FBK',
+        title: 'SHIPS. The detector reads the cell’s output, as the hardware’s does. Same '
+          + 'static curve as FWD (exact). The loop speeds the ATTACK up by about the ratio, so '
+          + 'the attack ladder is slowed 4× to land 4:1 on the documented times, and 8/12/20 '
+          + 'then attack 2-3× faster than 4:1 — CLA-76 agrees: its 20:1 attacks at 0.29× its '
+          + '4:1 (FBK 0.26, FWD 1.24). RELEASE runs on the documented dial times, as FWD’s '
+          + 'does. Audibly different from FWD only on 8/12/20 at slow-to-medium attack, where '
+          + 'onsets are caught harder',
       },
       {
-        id: 'feedback', label: 'FBK',
-        title: 'PROTOTYPE. The detector reads the cell’s output, as the hardware’s does. '
-          + 'Same static curve (exact). The loop speeds the ATTACK up by about the ratio, so '
-          + 'the attack ladder is slowed 4× to land 4:1 on the documented times, and 8/12/20 '
-          + 'then attack 2-3× faster than 4:1 where FWD gives every button the same time — '
-          + 'CLA-76 agrees: its 20:1 attacks at 0.29× its 4:1 (FBK 0.26, FWD 1.24). RELEASE '
-          + 'runs on the documented dial times as FWD’s does: released through the loop it ran '
-          + '~R× fast whenever the signal stayed up, and rode bass cycles at the fast dials '
-          + '(+1.1 to +1.4 dB of modulation product against FWD at release 7)',
+        id: 'feedforward', label: 'FWD',
+        title: 'The detector reads the input after the attenuator — what shipped until '
+          + 'October 2026, and what FET_LEGACY_PATCH selects. Every button attacks at the same '
+          + 'time, which CLA-76 contradicts. Within −35 to −56 dB of FBK at 4:1, all-buttons '
+          + 'and fast attack',
       },
     ],
   },

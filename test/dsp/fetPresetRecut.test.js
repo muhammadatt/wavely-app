@@ -77,7 +77,8 @@ for (const preset of FET_PUNCH_PRESETS) {
 /**
  * ⚠ ALL-BUTTONS WAS RE-CUT LAST AND ITS BALLISTICS DIALS COULD NOT MOVE. Both
  * sit at the end of their travel, so Input carried the whole correction: 70 ->
- * 55 for 9.77 -> 9.63 dB of average reduction. The dials are pinned here
+ * 55 for 9.77 -> 9.63 dB of average reduction (56 since the feedback detector
+ * shipped, 9.85). The dials are pinned here
  * because the interesting failure is a quiet edit to them, not to the drive.
  */
 test('all-buttons is re-cut, and its ballistics are at the travel end', () => {
@@ -88,7 +89,7 @@ test('all-buttons is re-cut, and its ballistics are at the travel end', () => {
     'all-buttons has a measured law now, so it must be held to its as-cut voicing')
   assert.deepEqual(
     { inputDrive: all.params.inputDrive, attack: all.params.attack, release: all.params.release },
-    { inputDrive: 55, attack: 7, release: 7 })
+    { inputDrive: 56, attack: 7, release: 7 })
 })
 
 /**

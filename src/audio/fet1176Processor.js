@@ -868,10 +868,18 @@ export const FET1176_KERNEL_DEFAULTS = {
   attackDepthK: ATTACK_DEPTH_K,
   releaseSchedule: 'depth',
   /**
-   * Detector topology — a PROTOTYPE on the bench, not shipping.
-   *   'feedforward' — SHIPS. The detector reads the input after the attenuator.
-   *   'feedback'    — the detector reads the cell's OUTPUT, as the hardware's
-   *                   does. See `_solveFeedback`.
+   * Detector topology.
+   *   'feedback'    — SHIPS (October 2026). The detector reads the cell's
+   *                   OUTPUT, as the hardware's does. See `_solveFeedback`.
+   *   'feedforward' — the detector reads the input after the attenuator. What
+   *                   shipped before, and what every fit before the switch was
+   *                   made on; `FET_LEGACY_PATCH` selects it.
+   *
+   * ⚠⚠ WHY IT SHIPS: CLA-76's 20:1-vs-4:1 bursts pair (same Input and dial)
+   * attacks at 0.291x, feedback predicts 0.26, feed-forward 1.24 — the wrong
+   * sign. At 4:1, all-buttons and fast attack the two are within −35 to −56 dB
+   * of each other on real material; the audible difference is the 8/12/20
+   * buttons catching onsets harder at slow-to-medium attack.
    *
    * ⚠ THE STATIC CURVE IS THE SAME IN BOTH, BY CONSTRUCTION. The feedback gain
    * computer is the feed-forward law re-expressed against output overshoot, so
@@ -887,7 +895,7 @@ export const FET1176_KERNEL_DEFAULTS = {
    * would oscillate. Output and Mix are excluded so `out = a + b·g` still holds
    * and auto makeup keeps its closed form.
    */
-  detector: 'feedforward',
+  detector: 'feedback',
   /**
    * How the FEEDBACK detector releases. Read only when `detector` is 'feedback'.
    *   'open' — DEFAULT. The loop decides WHETHER it is releasing; the release
@@ -1078,6 +1086,7 @@ export const FET_LEGACY_PATCH = {
   attackSchedule: 'none',
   // The pre-capture kernel held one threshold for every ratio button.
   ratioThreshold: 'fixed',
+  detector: 'feedforward',
 }
 
 /**
