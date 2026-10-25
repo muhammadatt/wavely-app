@@ -22,6 +22,9 @@ import ModulaSteps from './ModulaSteps.vue'
 import ModulaField from './ModulaField.vue'
 import ModulaRangeSlider from './ModulaRangeSlider.vue'
 import ModulaDetent from './ModulaDetent.vue'
+import ModulaDrumCounter from './ModulaDrumCounter.vue'
+import ModulaLatchBank from './ModulaLatchBank.vue'
+import ModulaReel from './ModulaReel.vue'
 import ModulaButton from './ModulaButton.vue'
 import ModulaChip from './ModulaChip.vue'
 import ModulaBarMeter from './ModulaBarMeter.vue'
@@ -39,13 +42,20 @@ const v = reactive({
   thr: -18, pan: 0, freq: 1200, ratio: 4,
   fin: -6, fout: -12, xover: 400, step: 4, tile: 'spec',
   swA: true, swB: false, mute: false, solo: true, link: true, phase: false, loop: false,
-  input: 0, sendA: -10, sendB: -20, output: -3, mixF: 1, tape: 'phat', speed: 'ips15', inTrim: 0, outTrim: 0,
+  input: 0, sendA: -10, sendB: -20, output: -3, mixF: 1, tape: 'phat', speed: 'ips15', reelOn: true, inTrim: 0, outTrim: 0,
   pill: true, chipOn: true, chipSolo: false, typed: 1200,
   fieldDb: -6, fieldHz: 1200, fieldPick: 2, rangeLo: 200, rangeHi: 8000,
 })
 const dbFmt = x => `${x > 0.05 ? '+' : ''}${x.toFixed(1)} dB`
 const PICKS = ['QUARTIC', 'ASYM', 'ATAN', 'ALGEBRAIC', 'TANH', 'CUBIC', 'HYSTERESIS']
 const fmtHzField = x => (x >= 1000 ? `${(x / 1000).toFixed(2)}k Hz` : `${Math.round(x)} Hz`)
+// One value behind every tape-speed control below, as on the layout study.
+const SPEEDS = [
+  { value: 'ips30', label: '30', period: 1.6 },
+  { value: 'ips15', label: '15', period: 3.2 },
+  { value: 'ips7', label: '7.5', period: 6.4 },
+]
+const reelPeriod = () => SPEEDS.find(o => o.value === v.speed)?.period ?? 1.6
 const fader = x => (x === -Infinity || x <= -80 ? '-∞ dB' : dbFmt(x))
 
 // A wandering test signal for the meters.
@@ -230,6 +240,20 @@ onUnmounted(() => clearInterval(timer))
           <ModulaChip label="×" danger />
           <ModulaKnob v-model="v.typed" variant="arc" :size="46" scale="log" :min="20" :max="20000" editable show-value color="var(--m-second)" :format-value="x => `${Math.round(x)} Hz`" label="Freq" />
           <ModulaKnob :model-value="0" variant="arc" :size="52" bipolar readonly show-value :min="-18" :max="18" :format-value="() => '—'" label="Full cut" />
+        </div>
+      </section>
+
+      <section class="card wide">
+        <h3>Tape transport · one value behind all four</h3>
+        <div class="row" style="align-items:center;gap:40px">
+          <div class="col" style="align-items:center;gap:16px">
+            <ModulaReel :size="100" :spinning="v.reelOn" :period="reelPeriod()" />
+            <ModulaDrumCounter v-model="v.speed" :options="SPEEDS" label="Tape speed (IPS)" />
+            <ModulaSwitch v-model="v.reelOn" label="Spin" />
+          </div>
+          <div class="col"><h3>Drum counter</h3><ModulaDrumCounter v-model="v.speed" :options="SPEEDS" orientation="vertical" label="IPS" /></div>
+          <div class="col"><h3>Latching key bank</h3><ModulaLatchBank v-model="v.speed" :options="SPEEDS" label="IPS" /></div>
+          <div class="col"><h3>Disabled</h3><ModulaLatchBank v-model="v.speed" :options="SPEEDS" :key-width="44" :key-height="64" disabled /></div>
         </div>
       </section>
 
