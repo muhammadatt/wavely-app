@@ -65,7 +65,7 @@ const freeNote = computed(() => {
     return `You can try it free on up to ${FREE_PREVIEW_SECONDS} seconds of audio — select a shorter passage to preview.`
   }
   if (state.upgradeFor === 'pluginChainApply') {
-    return 'Previewing the chain is free — upgrading lets you apply it to your audio.'
+    return 'Upgrade now to apply this chain to your audio.'
   }
   return ''
 })

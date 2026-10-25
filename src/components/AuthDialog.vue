@@ -38,7 +38,7 @@ const title = computed(() => ({
 
 const subtitle = computed(() => ({
   signIn: 'Save presets to your account and pick up where you left off.',
-  signUp: 'Free. Everything you can do today keeps working without one.',
+  signUp: 'Sign up for free to save presets to your account.',
   reset: 'We’ll email you a link to set a new password.',
   recovery: 'Signed in from your reset link — set a password to finish.',
 }[mode.value] ?? ''))

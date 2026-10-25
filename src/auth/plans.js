@@ -45,7 +45,7 @@ export const FEATURES = {
   savePresets: { requires: 'free', label: 'Saving presets' },
 
   // Real-time plugins: full preview for everyone, Apply needs Pro.
-  pluginChainApply: { requires: 'pro', label: 'Applying the Plugin Chain' },
+  pluginChainApply: { requires: 'pro', label: 'The Plugin Chain' },
 
   // Server processing: Pro, with a short preview for everyone else.
   autoLevel: { requires: 'pro', label: 'Auto Leveler', server: true, preview: true },
