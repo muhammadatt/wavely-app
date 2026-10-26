@@ -3,6 +3,7 @@ import { useEditorState } from './composables/useEditorState.js'
 import EditorScreen from './components/EditorScreen.vue'
 import FilesPanel from './components/FilesPanel.vue'
 import ExportDialog from './components/ExportDialog.vue'
+import SaveDialog from './components/SaveDialog.vue'
 import ToastNotification from './components/ToastNotification.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import WaveformContextMenu from './components/WaveformContextMenu.vue'
@@ -42,6 +43,7 @@ useBilling().start().then(result => {
   <EditorScreen />
   <FilesPanel v-if="appState.filesPanelOpen" />
   <ExportDialog v-if="appState.exportDialogOpen" />
+  <SaveDialog v-if="appState.saveDialog" :key="appState.saveDialog.docId" />
   <WindowLayer />
   <CommandPalette v-if="appState.commandPaletteOpen" />
   <!-- Keyed on position: right-clicking while the menu is open nulls and re-sets

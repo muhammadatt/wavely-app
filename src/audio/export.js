@@ -1,6 +1,8 @@
 import { renderRegionToBuffer } from './processing.js'
 import { getTimelineDuration } from './operations.js'
 import { toWavFileName, downloadBlob } from './download.js'
+import { encodeWav } from './wavEncode.js'
+import { resample } from './dsp/resample.js'
 
 /**
  * Render a timeline to a WAV ArrayBuffer.
@@ -28,51 +30,21 @@ export function exportAsWav(segments, sampleRate, channels, fileName) {
 }
 
 /**
- * Encode Float32Array channel data as WAV.
- * Manual encoding — 44-byte header + 16-bit PCM data.
+ * Render a timeline for Save: at the chosen sample format and rate.
+ *
+ * The timeline renders at the document's rate (the AudioContext's) and is then
+ * converted — `resample` is a windowed sinc, not the browser's linear
+ * interpolation. Same rate in and out skips the conversion entirely, so a save
+ * at the document's own rate is the same samples Export writes.
+ *
+ * @param {{ bits: number, float: boolean, sampleRate: number }} format
+ * @returns {ArrayBuffer|null} null when the timeline is empty
  */
-function encodeWav(channelData, sampleRate, numChannels) {
-  const numSamples = channelData[0].length
-  const bytesPerSample = 2 // 16-bit
-  const dataSize = numSamples * numChannels * bytesPerSample
-  const buffer = new ArrayBuffer(44 + dataSize)
-  const view = new DataView(buffer)
+export function renderTimelineForSave(segments, docRate, channels, { bits, float, sampleRate }) {
+  const totalDuration = getTimelineDuration(segments)
+  if (totalDuration === 0) return null
 
-  // RIFF header
-  writeString(view, 0, 'RIFF')
-  view.setUint32(4, 36 + dataSize, true)
-  writeString(view, 8, 'WAVE')
-
-  // fmt chunk
-  writeString(view, 12, 'fmt ')
-  view.setUint32(16, 16, true) // chunk size
-  view.setUint16(20, 1, true) // PCM format
-  view.setUint16(22, numChannels, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true) // byte rate
-  view.setUint16(32, numChannels * bytesPerSample, true) // block align
-  view.setUint16(34, 16, true) // bits per sample
-
-  // data chunk
-  writeString(view, 36, 'data')
-  view.setUint32(40, dataSize, true)
-
-  // Interleave samples and convert to 16-bit
-  let offset = 44
-  for (let i = 0; i < numSamples; i++) {
-    for (let ch = 0; ch < numChannels; ch++) {
-      const sample = Math.max(-1, Math.min(1, channelData[ch][i]))
-      const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF
-      view.setInt16(offset, intSample, true)
-      offset += 2
-    }
-  }
-
-  return buffer
-}
-
-function writeString(view, offset, str) {
-  for (let i = 0; i < str.length; i++) {
-    view.setUint8(offset + i, str.charCodeAt(i))
-  }
+  let channelData = renderRegionToBuffer(segments, 0, totalDuration, docRate, channels)
+  if (sampleRate !== docRate) channelData = channelData.map(ch => resample(ch, docRate, sampleRate))
+  return encodeWav(channelData, sampleRate, channels, { bits, float })
 }
