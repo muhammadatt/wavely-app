@@ -23,7 +23,6 @@ import ModulaButton from '../modula/ModulaButton.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import { useEntitlements } from '../../composables/useEntitlements.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -132,10 +131,6 @@ async function applyAndClose() {
   teardown()
   closeModal()
 }
-
-// Longest stretch the server will analyse for this user (Infinity with Pro).
-const entitlements = useEntitlements()
-const previewLimit = computed(() => entitlements.previewLimit('sibilanceEditor'))
 </script>
 
 <template>
@@ -191,9 +186,6 @@ const previewLimit = computed(() => entitlements.previewLimit('sibilanceEditor')
             <p class="se-hint">
               Runs once on the server. The controls below re-shape the result
               without re-detecting.
-            </p>
-            <p v-if="previewLimit !== Infinity" class="se-warn">
-              Free preview: analyses the first {{ previewLimit }} s. Pro analyses the whole selection.
             </p>
           </div>
           <ModulaButton
@@ -340,11 +332,6 @@ const previewLimit = computed(() => entitlements.previewLimit('sibilanceEditor')
   margin: 0;
   font: 500 10px/1.5 var(--m-font-ui);
   color: var(--m-ink-4);
-}
-.se-warn {
-  margin: 0;
-  font: 600 10px/1.45 var(--m-font-ui);
-  color: var(--m-accent);
 }
 .se-status {
   margin: 0;

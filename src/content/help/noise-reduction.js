@@ -12,21 +12,21 @@ export default {
     { label: 'Max reduction', text: 'The most DF3 may take out at any frequency and moment. Lower keeps more of the edges of S, F and breath sounds; MAX is uncapped' },
     { label: 'Protect consonants', text: 'Keeps the original audio where speech is detected but RNNoise would suppress it, which is usually the start of an S or F' },
     { label: 'Mix', text: 'How much of the denoised audio to use. Below 100% blends the original back in to hide artefacts, at the cost of some noise' },
-    { label: 'Process and Listen', text: 'Processes the selection on the server, then plays it from the start. Original and Denoised switch sides while it plays' },
+    { label: 'Preview and Listen', text: 'Processes up to 30 seconds on the server, starting at the playhead (or the whole selection if it is shorter), then plays it. Original and Denoised switch sides while it plays' },
   ],
 
   steps: [
     'Select the noisy passage, or the whole file',
-    'Press Process and wait for the server',
+    'Put the playhead on the noisiest passage and press Preview',
     'Listen, switching between Original and Denoised',
-    'If the voice sounds watery or the S sounds are dulled, lower Max reduction or Mix. Mix changes straight away, while the other settings need another Process',
-    'Apply writes exactly what you heard',
+    'If the voice sounds watery or the S sounds are dulled, lower Max reduction or Mix. Mix changes straight away, while the other settings need another Preview',
+    'Apply processes the whole selection with the same settings',
   ],
 
   notes: [
     'Noise reduction runs on the server, so there is no real-time preview and it cannot take a Plugin Chain slot',
     'Run it before compression or loudness normalisation, since both bring the noise floor up',
     'The level is left as the model returned it. It is not re-normalised the way the mastering presets do',
-    'Free accounts can process the first 30 seconds of a selection to hear the result. Applying needs Pro',
+    'Preview works the same on every plan. Applying needs Pro',
   ],
 }

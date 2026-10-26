@@ -26,10 +26,16 @@ export const PLAN_ORDER = ['free', 'pro']
 export const PLAN_LABELS = { free: 'Free', pro: 'Pro' }
 
 /**
- * Server features may be run by anyone on a short clip, so the result can be
- * HEARD before it is paid for — the preview-before-paywall rule — while a whole
- * file's worth of server time stays a Pro thing. The client sends at most this
- * much; the server re-checks the decoded duration rather than trusting it.
+ * Server features that RENDER audio may be run by anyone on a short clip, so the
+ * result can be HEARD before it is paid for — the preview-before-paywall rule —
+ * while a whole file's worth of server time stays a Pro thing. The server
+ * re-checks the decoded duration rather than trusting the client.
+ *
+ * Analysis-only routes (Auto Leveler's VAD, the Sibilance Editor's events) are
+ * NOT gated this way: they return measurements, the DSP that uses them runs in
+ * the browser, and a 30 s analysis made both plugins useless on the chapters
+ * they exist for. They are open to everyone up to a size cap
+ * (server/routes/analyze.js) and only their Apply is Pro.
  */
 export const FREE_PREVIEW_SECONDS = 30
 
@@ -47,9 +53,12 @@ export const FEATURES = {
   // Real-time plugins: full preview for everyone, Apply needs Pro.
   pluginChainApply: { requires: 'pro', label: 'The Plugin Chain' },
 
-  // Server processing: Pro, with a short preview for everyone else.
-  autoLevel: { requires: 'pro', label: 'Auto Leveler', server: true, preview: true },
-  sibilanceEditor: { requires: 'pro', label: 'Sibilance Editor', server: true, preview: true },
+  // Server ANALYSIS, browser DSP: the analysis is open to everyone (any
+  // length, up to the analyze route's cap); Apply needs Pro.
+  autoLevel: { requires: 'pro', label: 'Auto Leveler' },
+  sibilanceEditor: { requires: 'pro', label: 'Sibilance Editor' },
+
+  // Server RENDERING: Pro, with a short preview for everyone else.
   noiseReduction: { requires: 'pro', label: 'Noise Reduction', server: true, preview: true },
   spotEffects: { requires: 'pro', label: 'Server spot effects', server: true, preview: true },
 }

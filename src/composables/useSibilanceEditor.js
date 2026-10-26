@@ -85,7 +85,7 @@ const copies = pluginCopies((copy, life) => {
   function useSibilanceEditor() {
     const {
       state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, pinActiveDocument, showToast, setSelection,
+      startProcessing, endProcessing, pinActiveDocument, showToast,
     } = useEditorState()
     const entitlements = useEntitlements()
     const { openWindow, closeWindow } = useWindows()
@@ -267,22 +267,8 @@ const copies = pluginCopies((copy, life) => {
     }
 
     /** Run sibilance detection over the current selection. */
-    /**
-     * Without Pro the server analyses at most FREE_PREVIEW_SECONDS. Rather than
-     * sending a chapter to be refused, narrow the selection to its opening
-     * stretch first, so what is analysed, previewed and shown are one region.
-     */
-    function narrowToPreview() {
-      const limit = entitlements.previewLimit('sibilanceEditor')
-      const { start, end } = state.selection
-      if (end - start <= limit) return
-      setSelection(start, start + limit)
-      showToast(`Free preview: the first ${limit} s of your selection — Pro analyses all of it`, 5000)
-    }
-
     async function analyze() {
       if (!state.selection || !state.currentFile) return
-      narrowToPreview()
       const { start, end } = state.selection
 
       analyzing.value = true

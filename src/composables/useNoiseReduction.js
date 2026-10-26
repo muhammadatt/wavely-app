@@ -8,6 +8,7 @@ import {
   NOISE_REDUCTION_DEFAULTS,
   NR_ENGINE_LABELS,
   blendDryWet,
+  previewWindow,
   serverParamsKey,
 } from '../audio/noiseReductionParams.js'
 
@@ -19,19 +20,22 @@ export const NOISE_REDUCTION_WINDOW_ID = 'noise-reduction'
  * server (see src/audio/noiseReductionParams.js for what each setting means).
  *
  * THERE IS NO LIVE PREVIEW, so the plugin has an audition of its own instead.
- * Process sends the selection once and holds what comes back next to what was
- * sent; Listen plays the pair from the start of the region straight to the
- * output, with Original / Denoised switching between them and Mix blending
- * them, both live, because both are gains on audio already in hand. Apply
- * commits that same blend — what was auditioned is what lands, sample for
- * sample — or processes first when there is nothing current to commit.
+ * Preview sends up to NR_PREVIEW_SECONDS — the selection if it fits, else that
+ * much from the playhead (previewWindow) — and holds what comes back next to
+ * what was sent; Listen plays the pair straight to the output, with Original /
+ * Denoised switching between them and Mix blending them, both live, because
+ * both are gains on audio already in hand. Apply processes the whole selection
+ * and commits the same blend — or, when the preview already covers the whole
+ * selection, commits the previewed audio itself, sample for sample.
  *
  * ONE COPY, NOT pluginCopies(). The plugin cannot take a Plugin Chain slot: a
  * slot needs a node in the live chain, and a model that runs on the server has
  * none. So there is only ever the solo window to back.
  *
- * Free users may process up to FREE_PREVIEW_SECONDS to hear the result (the
- * server checks the same limit); Apply needs Pro (`applyFeature` on the window).
+ * The preview is the same on every plan — short for Pro too, so a setting is a
+ * 30 s round trip rather than a chapter — and the server's free-preview limit
+ * is what lets a free user run it. Apply needs Pro (`applyFeature` on the
+ * window); the server refuses a longer upload from anyone else.
  */
 
 const params = reactive({ ...NOISE_REDUCTION_DEFAULTS })
@@ -140,7 +144,7 @@ export function useNoiseReduction() {
       if (!out || seq !== processSeq) return null
       pin.check()
       if (state.revision !== revision) {
-        showToast('Audio changed during noise reduction — process again')
+        showToast('Audio changed during noise reduction — try again')
         return null
       }
       result.value = {
@@ -160,23 +164,15 @@ export function useNoiseReduction() {
   }
 
   /**
-   * Process the selection to audition it. A user without the full feature gets
-   * the first FREE_PREVIEW_SECONDS — the selection itself is left alone, so
-   * Apply still names the region the user chose.
+   * Process the preview window (see previewWindow) and start listening to it.
+   * The selection is left alone, so Apply still names the region the user
+   * chose.
    */
-  async function process() {
+  async function preview() {
     if (!state.selection || !state.currentFile || processing.value) return
-    const { start, end } = state.selection
-    const limit = entitlements.previewLimit('noiseReduction')
-    const stop = Math.min(end, start + limit)
-    if (stop < end) {
-      showToast(`Free preview: the first ${limit} s of your selection — Pro processes all of it`, 5000)
-    }
-    const r = await processRegion(start, stop, 'Reducing noise')
-    if (r) {
-      showToast('Processed — Listen to compare, then Apply')
-      startAudition()
-    }
+    const { start, end } = previewWindow(state.selection, state.playhead)
+    const r = await processRegion(start, end, 'Previewing noise reduction')
+    if (r) startAudition()
   }
 
   // ── Audition ──────────────────────────────────────────────────────────────
@@ -321,7 +317,7 @@ export function useNoiseReduction() {
     setMix,
     setListenTo,
     resetParams,
-    process,
+    preview,
     toggleAudition,
     stopAudition,
     apply,

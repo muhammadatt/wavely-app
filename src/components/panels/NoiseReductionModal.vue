@@ -4,19 +4,24 @@
  *
  * DeepFilterNet3 and/or RNNoise on the selection, run on the server. There is
  * no real-time preview — the models do not run in the browser — so the centre
- * well is the plugin's own audition: Process the selection once, then Listen,
- * switching Original / Denoised and turning Mix live against the held result.
- * Apply commits exactly what was heard (see useNoiseReduction.js).
+ * well is the plugin's own audition: Preview processes up to 30 s from the
+ * playhead, then Listen switches Original / Denoised and turns Mix live against
+ * the held result. Apply processes the whole selection with the same settings
+ * (see useNoiseReduction.js). The footer has no Preview of its own: the one in
+ * the well is the preview, and two buttons of that name would be one too many.
  *
  * Modula layout: the engine choice and the audition row in the centre well,
  * the engine settings and Mix in a panel below.
  */
 import { computed, onUnmounted } from 'vue'
 import { useNoiseReduction } from '../../composables/useNoiseReduction.js'
+import { useEditorState } from '../../composables/useEditorState.js'
 import {
   NOISE_REDUCTION_DEFAULTS,
   NR_DF3_LIMIT_MIN_DB,
   NR_DF3_LIMIT_MAX_DB,
+  NR_PREVIEW_SECONDS,
+  previewWindow,
   usesDf3,
   usesRnnoise,
 } from '../../audio/noiseReductionParams.js'
@@ -32,8 +37,10 @@ const {
   params, processing, listening, listenTo, hasResult, resultCoversSelection, isStale,
   hasSelection, result,
   setEngine, setDf3Limit, setProtectConsonants, setMix, setListenTo,
-  process, toggleAudition, apply, teardown, closeModal,
+  preview, toggleAudition, apply, teardown, closeModal,
 } = useNoiseReduction()
+
+const { state } = useEditorState()
 
 onUnmounted(teardown)
 
@@ -54,17 +61,37 @@ const LISTEN_OPTIONS = [
 const df3On = computed(() => usesDf3(params.engine))
 const rnnoiseOn = computed(() => usesRnnoise(params.engine))
 
+function clock(t) {
+  const m = Math.floor(t / 60)
+  const s = (t - m * 60).toFixed(1).padStart(4, '0')
+  return `${m}:${s}`
+}
+
+/** What Preview would process now — shown before it is pressed. */
+const nextWindow = computed(() => (state.selection ? previewWindow(state.selection, state.playhead) : null))
+
+const previewTitle = computed(() => {
+  const w = nextWindow.value
+  if (!w) return 'Select the audio to clean up first'
+  return `Process ${clock(w.start)}–${clock(w.end)} on the server and play it. ` +
+    `Up to ${NR_PREVIEW_SECONDS} s from the playhead, or the whole selection when it is shorter`
+})
+
 const statusLine = computed(() => {
   if (processing.value) return 'Processing on the server…'
   if (!hasSelection.value) return 'Select the audio to clean up.'
-  if (isStale.value) return 'The audio or a setting changed since processing — process again to listen.'
-  if (!hasResult.value) return 'Process the selection to hear the result before you apply it.'
-  const r = result.value
-  const secs = (r.end - r.start).toFixed(1)
-  if (!resultCoversSelection.value) {
-    return `Holding ${secs} s processed from a different region — Apply processes the selection again.`
+  if (isStale.value) return 'The audio or a setting changed since the preview — preview again to listen.'
+  if (!hasResult.value) {
+    const w = nextWindow.value
+    return `Preview processes ${clock(w.start)}–${clock(w.end)} so you can hear it before applying. ` +
+      'Move the playhead to preview a different passage.'
   }
-  return `${secs} s processed. Mix and Original / Denoised are live; Apply writes what you hear.`
+  const r = result.value
+  const span = `${clock(r.start)}–${clock(r.end)}`
+  if (resultCoversSelection.value) {
+    return `Previewing the whole selection (${span}). Mix and Original / Denoised are live; Apply writes what you hear.`
+  }
+  return `Previewing ${span}. Mix and Original / Denoised are live; Apply processes the whole selection with these settings.`
 })
 
 function formatLimit(v) {
@@ -91,9 +118,6 @@ async function applyAndClose() {
     design="modula"
     brand-lead="NOISE REDUCTION"
     :show-engage="false"
-    show-preview
-    :previewable="false"
-    preview-hint="Real-time preview isn’t available for server noise reduction — use Process and Listen in the window"
     show-apply
     apply-feature="noiseReduction"
     :apply-disabled="processing"
@@ -113,14 +137,15 @@ async function applyAndClose() {
         </div>
         <ModulaButton
           variant="accent" :disabled="processing || !hasSelection"
-          @click="process"
-        >{{ processing ? 'Processing…' : 'Process' }}</ModulaButton>
+          :title="previewTitle"
+          @click="preview"
+        >{{ processing ? 'Processing…' : 'Preview' }}</ModulaButton>
       </div>
 
       <div class="nr-audition">
         <ModulaButton
           :model-value="listening" :disabled="!hasResult || processing"
-          :title="hasResult ? 'Play the processed region from its start' : 'Process the selection first'"
+          :title="hasResult ? 'Play the previewed passage from its start' : 'Preview first'"
           @click="toggleAudition"
         >{{ listening ? '■ Stop' : '▶ Listen' }}</ModulaButton>
         <ModulaSegmented

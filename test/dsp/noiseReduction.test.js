@@ -7,9 +7,11 @@ import {
   parseServerParams,
   serverParamsKey,
   blendDryWet,
+  previewWindow,
+  NR_PREVIEW_SECONDS,
 } from '../../src/audio/noiseReductionParams.js'
 import { decodeWav } from '../../src/audio/wavDecode.js'
-import { FEATURES } from '../../src/auth/plans.js'
+import { FEATURES, FREE_PREVIEW_SECONDS } from '../../src/auth/plans.js'
 
 test('the defaults send DF3 at the chain’s heavy tier and keep Mix in the browser', () => {
   assert.deepEqual(toServerParams(NOISE_REDUCTION_DEFAULTS), {
@@ -64,6 +66,26 @@ test('noise reduction is a server feature with a free preview', () => {
   assert.deepEqual(FEATURES.noiseReduction, {
     requires: 'pro', label: 'Noise Reduction', server: true, preview: true,
   })
+})
+
+test('the preview is the free limit, so every plan gets the same one', () => {
+  assert.equal(NR_PREVIEW_SECONDS, FREE_PREVIEW_SECONDS)
+})
+
+test('Preview takes a short selection whole', () => {
+  assert.deepEqual(previewWindow({ start: 10, end: 25 }, 12), { start: 10, end: 25 })
+  assert.deepEqual(previewWindow({ start: 10, end: 40 }, 35), { start: 10, end: 40 })
+})
+
+test('on a long selection Preview starts at the playhead and stays inside', () => {
+  const sel = { start: 0, end: 600 }
+  assert.deepEqual(previewWindow(sel, 120, 30), { start: 120, end: 150 })
+  // Near the end it slides back so the window stays full length.
+  assert.deepEqual(previewWindow(sel, 590, 30), { start: 570, end: 600 })
+  // A playhead outside the selection (or none) falls back to its start.
+  assert.deepEqual(previewWindow({ start: 100, end: 700 }, 50, 30), { start: 100, end: 130 })
+  assert.deepEqual(previewWindow({ start: 100, end: 700 }, 700, 30), { start: 100, end: 130 })
+  assert.deepEqual(previewWindow({ start: 100, end: 700 }, null, 30), { start: 100, end: 130 })
 })
 
 // ── WAV decode ────────────────────────────────────────────────────────────────

@@ -38,7 +38,9 @@ test('signed out: saving asks for an account, Pro features ask for an upgrade', 
   assert.deepEqual(auth.calls, [['dialog', 'signUp'], ['upgrade', 'pluginChainApply']])
   assert.match(e.hint('savePresets'), /^Sign in/)
   assert.match(e.hint('autoLevel'), /Pro feature/)
-  assert.equal(e.previewLimit('autoLevel'), FREE_PREVIEW_SECONDS)
+  assert.equal(e.previewLimit('noiseReduction'), FREE_PREVIEW_SECONDS)
+  // Analysis plugins have no server preview to limit: only their Apply is Pro.
+  assert.equal(e.previewLimit('autoLevel'), 0)
 })
 
 test('free plan saves presets but not Pro features; Pro has everything; it tracks the plan live', () => {
@@ -46,11 +48,11 @@ test('free plan saves presets but not Pro features; Pro has everything; it track
   const e = createEntitlements(auth)
   assert.equal(e.can('savePresets'), true)
   assert.equal(e.can('pluginChainApply'), false)
-  assert.equal(e.previewLimit('sibilanceEditor'), FREE_PREVIEW_SECONDS)
+  assert.equal(e.previewLimit('noiseReduction'), FREE_PREVIEW_SECONDS)
 
   auth.state.plan = 'pro'
   assert.equal(e.can('pluginChainApply'), true)
-  assert.equal(e.previewLimit('sibilanceEditor'), Infinity)
+  assert.equal(e.previewLimit('noiseReduction'), Infinity)
   assert.equal(e.hint('autoLevel'), '')
 })
 

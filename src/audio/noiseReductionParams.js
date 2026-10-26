@@ -16,6 +16,8 @@
  * listening and costs no round trip.
  */
 
+import { FREE_PREVIEW_SECONDS } from '../auth/plans.js'
+
 /**
  * The engines. `both` is the ACX Audiobook preset's order — DF3 first for the
  * broadband floor, then RNNoise for what DF3 leaves — not the reverse: RNNoise
@@ -23,6 +25,14 @@
  * second pass would have done anyway.
  */
 export const NR_ENGINES = ['df3', 'rnnoise', 'both']
+
+/**
+ * How much Preview processes, in seconds — the free preview limit, so the
+ * preview is the same on every plan and the server's gate admits it for anyone.
+ * Short on purpose for Pro too: a setting is judged on a passage, and waiting
+ * on a whole chapter to hear one is the slow loop this replaces.
+ */
+export const NR_PREVIEW_SECONDS = FREE_PREVIEW_SECONDS
 
 export const NR_ENGINE_LABELS = {
   df3: 'DeepFilterNet3',
@@ -48,6 +58,25 @@ export const NOISE_REDUCTION_DEFAULTS = {
   // the ACX preset, and on here.
   protectConsonants: true,
   mix: 1, // 0–1, wet share, applied in the browser
+}
+
+/**
+ * The stretch Preview processes: the whole selection when it fits, else
+ * `length` seconds starting at the playhead — where the user is listening —
+ * or at the selection's start when the playhead is outside it. A window that
+ * would run past the end is slid back so it stays full length.
+ *
+ * @param {{ start: number, end: number }} selection
+ * @param {number|null} playhead  seconds
+ * @param {number} [length]
+ * @returns {{ start: number, end: number }}
+ */
+export function previewWindow(selection, playhead, length = NR_PREVIEW_SECONDS) {
+  const { start, end } = selection
+  if (end - start <= length) return { start, end }
+  const inside = Number.isFinite(playhead) && playhead >= start && playhead < end
+  const from = Math.min(inside ? playhead : start, end - length)
+  return { start: from, end: from + length }
 }
 
 /** True when `engine` runs that model. */

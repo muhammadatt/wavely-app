@@ -139,9 +139,9 @@ The ladder is: signed out → `free` (any account) → `pro`.
 |---|---|---|---|
 | `savePresets` | account | Saving plugin presets | UI and database (RLS) |
 | `pluginChainApply` | Pro | Plugin Chain **Apply**. Preview is free | UI only |
-| `autoLevel` | Pro | Auto Leveler analysis and Apply | **Server** (`/api/analyze/vad`) |
-| `sibilanceEditor` | Pro | Sibilance Editor analysis and Apply | **Server** (`/api/analyze/sibilance`) |
-| `noiseReduction` | Pro | Noise Reduction **Apply**; processing up to 30 s to audition is free | **Server** (`/api/spot/noise_reduction`) |
+| `autoLevel` | Pro | Auto Leveler **Apply**. The analysis (`/api/analyze/vad`) is open to everyone | UI only |
+| `sibilanceEditor` | Pro | Sibilance Editor **Apply**. The analysis (`/api/analyze/sibilance`) is open to everyone | UI only |
+| `noiseReduction` | Pro | Noise Reduction **Apply** (the whole selection). Preview (≤ 30 s) is the same on every plan | **Server** (`/api/spot/noise_reduction`) |
 | `spotEffects` | Pro | Any other `/api/spot/*` operation (no callers today) | **Server** |
 
 - **Adding a gate:** add an entry to `FEATURES`, then use it in the UI.
@@ -155,17 +155,26 @@ The ladder is: signed out → `free` (any account) → `pro`.
 
 ### Free previews of server features
 
-Server features accept non-Pro requests on up to `FREE_PREVIEW_SECONDS` (30)
-of audio, so anyone can hear the result before paying.
+Server features that **render audio** (Noise Reduction, `/api/spot/*`)
+accept non-Pro requests on up to `FREE_PREVIEW_SECONDS` (30) of audio, so
+anyone can hear the result before paying.
+
+Server **analysis** (`/api/analyze/*`: Auto Leveler's speech map, the
+Sibilance Editor's events) is not plan-gated at all. It returns measurements,
+the DSP runs in the browser, and a 30 s analysis made both plugins useless on
+the chapters they are for. Only their Apply is Pro. Every request is capped at
+`ANALYSIS_MAX_SECONDS` (2 hours, any plan; **413** `{ code: 'too_long' }`
+past it), behind the route's rate limit.
 
 - **Server side:** `server/lib/entitlements.js` reads the uploaded file's
   duration with ffprobe and does not trust the client.
   - A longer upload without Pro gets **402** with `{ code: 'upgrade_required', feature, requires, previewSeconds }`.
   - If the duration can't be read, the request is refused.
   - Plans are cached per user for 60 s.
-- **App side:** when a non-Pro user presses Analyse, the selection is narrowed
-  to its first 30 s before anything is uploaded, and a caption says so. Apply
-  stays Pro. A 402 opens the upgrade prompt.
+- **App side:** Noise Reduction's Preview processes at most 30 s on every
+  plan (the selection, or 30 s from the playhead), so the free limit never
+  shows up as a refusal. Apply processes the whole selection and needs Pro. A
+  402 opens the upgrade prompt.
 
 ### Limits of browser-side gates
 
