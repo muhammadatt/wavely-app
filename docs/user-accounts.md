@@ -83,6 +83,7 @@ Every existing feature works signed out, with or without accounts configured.
 | `MAX_CONCURRENT_JOBS` / `MAX_QUEUED_JOBS` / `MAX_JOBS_PER_CLIENT` | mastering job queue (defaults 2 / 10 / 2) |
 | `MAX_CONCURRENT_ANALYSES` / `MAX_ANALYSES_PER_CLIENT` | shared limit on `/api/spot` and `/api/analyze` (defaults 4 / 2). Full is refused (503 / 429) before the upload, never queued |
 | `SUBPROCESS_TIMEOUT_MS` / `PROBE_TIMEOUT_MS` | kill limits for pipeline processes (defaults 60 min / 2 min) |
+| `USAGE_RETENTION_DAYS` | days of `usage_events` rows to keep; the server deletes older ones daily (default 90, `0` keeps all) |
 | `CORS_ORIGIN_PATTERNS` | comma-separated regexes for origins you can't list, i.e. Vercel preview URLs, e.g. `^https://wavely-app(-[a-z0-9-]+)?\.vercel\.app$`. Anchor with `^…$`: the check is `pattern.test(origin)`, so an unanchored pattern matches anywhere in the string. |
 
 CORS lives **only in Express** (`server/index.js`). If Apache or another proxy
@@ -113,6 +114,7 @@ calls. A rejected origin is logged as `CORS rejected origin: …`.
 | Upgrade prompt | `src/components/UpgradeDialog.vue` |
 | Server enforcement + free preview | `server/lib/entitlements.js` |
 | Account preset storage | `src/auth/presetBackend.js`, `supabase/migrations/…_user_presets.sql` |
+| Usage history, account blocking | `server/lib/usage.js`, `server/lib/requestLog.js`, `supabase/migrations/…_usage_and_blocking.sql` |
 
 ### Database rules worth knowing
 
@@ -121,6 +123,10 @@ calls. A rejected origin is logged as `CORS rejected origin: …`.
   Stripe customer id is server-written.
 - `subscriptions`: users can read their own rows; only the server writes them.
   Entitled statuses are `active`, `trialing` and `past_due` (the dunning window).
+- `usage_events`: one row per served server-processing request; users can read
+  their own rows, only the server writes them.
+- `profiles.blocked_at` / `blocked_reason`: operator-only (outside the
+  `display_name` column grant).
 
 ### Client behaviour worth knowing
 
@@ -183,6 +189,64 @@ visitor can only be limited per IP, so a new server feature should default to
   (`requires: 'free'`); a 401 `sign_in_required` opens the sign-in dialog. Mastering cannot narrow a
   whole file, so a signed-out user with more than 30 s is asked to sign in
   before the upload.
+
+### Investigating and blocking an account
+
+Every request to `/api/process`, `/api/spot` and `/api/analyze` — served or
+refused — writes one JSON line to the server's stdout (`server/lib/requestLog.js`):
+
+```
+{"evt":"api","t":"2026-10-26T18:02:11.204Z","route":"/api/analyze/vad","user":"<uuid>","ip":"203.0.113.9","status":200,"code":null,"feature":"autoLevel","mode":"preview","bytes":2817212,"audio_s":29.8,"ms":812}
+```
+
+`code` is the refusal code (`rate_limited`, `sign_in_required`,
+`upgrade_required`, `too_many_jobs`, `server_busy`, `account_blocked`) and
+`user` is null for a signed-out caller. Keep these logs: whatever runs Node
+(systemd's journal, pm2, Docker) must retain stdout, or they are gone at the
+next restart. Find one account's requests with, e.g.,
+`journalctl -u wavely -o cat | grep '"evt":"api"' | jq 'select(.user == "<uuid>")'`.
+
+Each SERVED request (or server failure) also writes a `usage_events` row —
+for mastering, when the job ends. Refusals are only in the log. One account's
+last week:
+
+```sql
+select feature, mode, count(*) as requests,
+       round(sum(audio_seconds) / 60) as audio_minutes
+from public.usage_events
+where user_id = '<uuid>' and created_at > now() - interval '7 days'
+group by feature, mode
+order by audio_minutes desc nulls last;
+```
+
+The heaviest accounts:
+
+```sql
+select user_id, count(*) as requests, round(sum(audio_seconds) / 60) as audio_minutes
+from public.usage_events
+where created_at > now() - interval '24 hours'
+group by user_id
+order by audio_minutes desc nulls last
+limit 20;
+```
+
+**To block an account** from server processing (the SQL editor runs as an
+operator):
+
+```sql
+update public.profiles
+set blocked_at = now(), blocked_reason = 'what happened, and the ticket/date'
+where id = '<uuid>';
+```
+
+The server re-reads the flag at least once a minute, then answers every server
+feature with **403** `{ code: 'account_blocked' }`, before the upload is read.
+Clear both columns to unblock. Blocking does not sign the user out or touch
+their subscription — cancel or refund that in Stripe if you need to, and ban
+them in Supabase Auth (Authentication → Users) if they should not sign in at
+all; a ban alone leaves their current access token valid for up to an hour,
+which is what the flag closes. A failed flag lookup lets the request through
+(a database hiccup must not lock everyone out).
 
 ### Limits of browser-side gates
 

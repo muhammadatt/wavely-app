@@ -76,3 +76,19 @@ test('at the shared limit spot and analyze refuse before the upload', async () =
     assert.equal(other.headers['retry-after'], '60')
   })
 })
+
+test('a blocked account is refused 403 before the upload on analyze, spot and mastering', async () => {
+  const { createProcessRoute } = await import('../routes/process.js')
+  const blocking = createEntitlementGate({ verify, planFor, isBlocked: async id => id === 'tok-pro', probeDuration: async () => 5 })
+  const app = express.Router()
+  app.use(createAnalyzeRoute({ gate: blocking }))
+  app.use(createSpotRoute({ gate: blocking }))
+  app.use(createProcessRoute({ gate: blocking, verify }))
+  await withServer(app, async (base) => {
+    for (const path of ['/api/analyze/vad', '/api/spot/vocal_saturation', '/api/process']) {
+      const res = await neverEndingUpload(`${base}${path}`, 'tok-pro')
+      assert.equal(res.status, 403, path)
+      assert.equal(res.body.code, 'account_blocked')
+    }
+  })
+})

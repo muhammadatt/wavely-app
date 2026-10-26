@@ -46,8 +46,10 @@ const SUPPORTED_EXTENSIONS = new Set([
  * @param {Function} [deps.verify]  access-token verifier, so the job limit can
  *                                  count per account; null counts per IP
  * @param {object}   [deps.queue]   job queue (lib/jobQueue.js)
+ * @param {object}   [deps.usage]   usage recorder (lib/usage.js); the row is
+ *                                  written when the JOB ends, not the request
  */
-export function createProcessRoute({ gate = openGate, verify = null, queue = createJobQueue() } = {}) {
+export function createProcessRoute({ gate = openGate, verify = null, queue = createJobQueue(), usage = null } = {}) {
   const router = Router()
 
   // Refuse at the limit before multer reads the body.
@@ -57,7 +59,10 @@ export function createProcessRoute({ gate = openGate, verify = null, queue = cre
     next()
   }
 
-  router.post('/process', optionalAuth(verify), admit, upload.single('file'), gate(() => 'mastering'), async (req, res) => {
+  // gate.signIn lets signed-out callers through (mastering's preview is open
+  // to them) but refuses a blocked account before the upload.
+  const mastering = () => 'mastering'
+  router.post('/process', optionalAuth(verify), gate.signIn(mastering), admit, upload.single('file'), gate(mastering), async (req, res) => {
     const uploadedPath = req.file?.path
     let jobAccepted = false
 
@@ -135,6 +140,18 @@ export function createProcessRoute({ gate = openGate, verify = null, queue = cre
 
       const jobId = createJob()
       let startTime = null
+      // The request ends at the 202; the usage row describes the job.
+      res.locals.usageRecordedLater = true
+      const recordUsage = outcome => usage?.record({
+        userId: req.user?.id ?? null,
+        ip: req.ip,
+        feature: 'mastering',
+        mode: req.entitlement?.mode ?? null,
+        audioSeconds: req.audioSeconds,
+        uploadBytes: req.file.size,
+        outcome,
+        durationMs: startTime == null ? null : Date.now() - startTime,
+      })
       const pipeline = queue.submit(client, () => {
         startTime = Date.now()
         setJobProgress(jobId, null)
@@ -152,6 +169,7 @@ export function createProcessRoute({ gate = openGate, verify = null, queue = cre
       pipeline
         .then(({ outputPath, report, peaks }) => {
           completeJob(jobId, { report, peaks, outputPath })
+          recordUsage('ok')
           const elapsed    = ((Date.now() - startTime) / 1000).toFixed(1)
           const certStatus = report.acx_certification
             ? `acx=${report.acx_certification.certificate}`
@@ -160,6 +178,7 @@ export function createProcessRoute({ gate = openGate, verify = null, queue = cre
         })
         .catch(err => {
           failJob(jobId, err.message)
+          recordUsage('error')
           console.error(`Job ${jobId} failed:`, err)
         })
         .finally(() => {

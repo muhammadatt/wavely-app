@@ -84,8 +84,17 @@ function bearerToken(req) {
  * reading the body, so an anonymous flood never reaches the disk:
  *   { error, code: 'sign_in_required', feature }
  * It leaves `req.user` set (null when signed out) for the gate to reuse.
+ *
+ * Both refuse a BLOCKED account (`isBlocked`, lib/usage.js) with 403:
+ *   { error, code: 'account_blocked' }
+ * — `gate.signIn` before the upload, the gate after it for routes without
+ * `gate.signIn` in front.
+ *
+ * For the request log and the usage record (lib/requestLog.js) the gate also
+ * sets `req.feature` and, when there is an upload, `req.audioSeconds` (the
+ * decoded duration, probed once and shared with the preview check).
  */
-export function createEntitlementGate({ verify, planFor, probeDuration = probeDurationS }) {
+export function createEntitlementGate({ verify, planFor, isBlocked = null, probeDuration = probeDurationS }) {
   const enabled = !!(verify && planFor)
 
   /** The caller's user, or null. Set once per request on `req.user`. */
@@ -112,6 +121,25 @@ export function createEntitlementGate({ verify, planFor, probeDuration = probeDu
     })
   }
 
+  function refuseBlocked(res) {
+    return res.status(403).json({
+      error: 'This account has been suspended from server processing. Contact support if you think this is a mistake.',
+      code: 'account_blocked',
+    })
+  }
+
+  async function blocked(user) {
+    return !!(user && isBlocked && await isBlocked(user.id))
+  }
+
+  /** Decoded duration of the upload, probed at most once per request. */
+  async function audioSeconds(req) {
+    if (req.audioSeconds === undefined) {
+      req.audioSeconds = req.file?.path ? await probeDuration(req.file.path) : null
+    }
+    return req.audioSeconds
+  }
+
   /** Nothing in this feature is open to a signed-out caller. */
   const closedToSignedOut = featureId => !hasFeature(null, featureId) && !allowsPreview(featureId, null)
 
@@ -120,9 +148,14 @@ export function createEntitlementGate({ verify, planFor, probeDuration = probeDu
       if (!enabled) return next()
       const featureId = featureOf(req)
       if (!featureId) return next()
+      req.feature = featureId
 
       let plan = null
       const user = await identify(req)
+      if (await blocked(user)) {
+        if (req.file?.path) await unlink(req.file.path).catch(() => {})
+        return refuseBlocked(res)
+      }
       if (user) {
         plan = await planFor(user.id).catch(err => {
           // A database hiccup must not lock a paying user out of a preview,
@@ -135,6 +168,7 @@ export function createEntitlementGate({ verify, planFor, probeDuration = probeDu
 
       if (hasFeature(plan, featureId)) {
         req.entitlement = { plan, mode: 'full' }
+        await audioSeconds(req)  // for the usage record only; never refuses
         return next()
       }
 
@@ -145,7 +179,7 @@ export function createEntitlementGate({ verify, planFor, probeDuration = probeDu
 
       const preview = allowsPreview(featureId, plan)
       if (preview && req.file?.path) {
-        const duration = await probeDuration(req.file.path)
+        const duration = await audioSeconds(req)
         if (duration != null && duration <= FREE_PREVIEW_SECONDS + PREVIEW_TOLERANCE_S) {
           req.entitlement = { plan, mode: 'preview' }
           return next()
@@ -171,8 +205,11 @@ export function createEntitlementGate({ verify, planFor, probeDuration = probeDu
     return async (req, res, next) => {
       if (!enabled) return next()
       const featureId = featureOf(req)
-      if (!featureId || !closedToSignedOut(featureId)) return next()
-      if (await identify(req)) return next()
+      if (!featureId) return next()
+      req.feature = featureId
+      const user = await identify(req)
+      if (await blocked(user)) return refuseBlocked(res)
+      if (user || !closedToSignedOut(featureId)) return next()
       return refuseSignIn(res, featureId)
     }
   }

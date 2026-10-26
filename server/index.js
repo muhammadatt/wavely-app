@@ -12,6 +12,8 @@ import { createEntitlementGate, createPlanResolver } from './lib/entitlements.js
 import Stripe from 'stripe'
 import { readBillingConfig, createBilling } from './lib/billing.js'
 import { createJobQueue, readJobQueueConfig, readRequestLimitConfig, holdSlot } from './lib/jobQueue.js'
+import { createUsageRecorder, createBlockResolver, readUsageRetentionDays } from './lib/usage.js'
+import { requestLog } from './lib/requestLog.js'
 import { createBillingRoutes, createBillingWebhook } from './routes/billing.js'
 
 const app = express()
@@ -76,6 +78,13 @@ if (verifyAccessToken && !supabaseAdmin) {
 
 const planFor = supabaseAdmin ? createPlanResolver(supabaseAdmin) : null
 
+// Usage history and account blocking (supabase/migrations/…_usage_and_blocking.sql).
+// Both need the service-role client; without it nothing is recorded and
+// nobody is blocked.
+const usage = createUsageRecorder(supabaseAdmin)
+const isBlocked = supabaseAdmin ? createBlockResolver(supabaseAdmin) : null
+usage.startPruning(readUsageRetentionDays())
+
 const billingConfig = readBillingConfig()
 const stripe = billingConfig.secretKey ? new Stripe(billingConfig.secretKey) : null
 const billing = stripe && supabaseAdmin && verifyAccessToken && billingConfig.prices.length
@@ -99,13 +108,18 @@ app.use('/api', createBillingWebhook({ stripe, billing, webhookSecret: billingCo
 
 app.use(express.json())
 
+// One JSON log line per server-processing request — served or refused — and
+// its usage row (lib/requestLog.js). Mounted BEFORE the rate limiters so a
+// 429 is logged like any other refusal.
+app.use(['/api/process', '/api/spot', '/api/analyze'], requestLog({ usage }))
+
 // Rate limit the processing endpoint to prevent abuse
 const processLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 30,                   // 30 requests per window per IP
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many processing requests, please try again later' },
+  message: { error: 'Too many processing requests, please try again later', code: 'rate_limited' },
   // Suppress X-Forwarded-For validation — Apache proxy handles IP forwarding
   // and trust proxy is already set above.
   validate: { xForwardedForHeader: false },
@@ -118,7 +132,7 @@ const spotLimiter = rateLimit({
   max: 120,                  // 120 requests per window per IP
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many spot-effect requests, please try again later' },
+  message: { error: 'Too many spot-effect requests, please try again later', code: 'rate_limited' },
   validate: { xForwardedForHeader: false },
 })
 app.use('/api/spot', spotLimiter)
@@ -131,7 +145,7 @@ const analyzeLimiter = rateLimit({
   max: 120,                  // 120 requests per window per IP
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many analysis requests, please try again later' },
+  message: { error: 'Too many analysis requests, please try again later', code: 'rate_limited' },
   validate: { xForwardedForHeader: false },
 })
 app.use('/api/analyze', analyzeLimiter)
@@ -155,7 +169,7 @@ app.use('/api/billing', accountLimiter)
 // Plan enforcement for server-processing features (src/auth/plans.js). Needs
 // both the verifier and the database; with either missing it lets everything
 // through, as before accounts existed.
-const gate = createEntitlementGate({ verify: verifyAccessToken, planFor })
+const gate = createEntitlementGate({ verify: verifyAccessToken, planFor, isBlocked })
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -167,7 +181,7 @@ app.get('/api/health', (_req, res) => {
 // have in flight (MAX_CONCURRENT_JOBS / MAX_QUEUED_JOBS / MAX_JOBS_PER_CLIENT).
 const jobQueueConfig = readJobQueueConfig()
 console.log(`Job queue: ${jobQueueConfig.concurrency} running, ${jobQueueConfig.maxQueued} queued, ${jobQueueConfig.maxPerClient} per client`)
-app.use('/api', createProcessRoute({ gate, verify: verifyAccessToken, queue: createJobQueue(jobQueueConfig) }))
+app.use('/api', createProcessRoute({ gate, verify: verifyAccessToken, queue: createJobQueue(jobQueueConfig), usage }))
 
 // Job status + download endpoints (polled by client after submission)
 app.use('/api', jobsRoute)

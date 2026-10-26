@@ -207,3 +207,42 @@ test('invalidate drops one user’s cached plan so an upgrade lands at once', as
   assert.equal(await planFor('u1'), 'pro')
   assert.equal(reads, 2)
 })
+
+test('a blocked account is refused with 403 before and after the upload, whatever its plan', async () => {
+  const isBlocked = async id => id === 'tok-pro'
+  const gate = createEntitlementGate({ verify, planFor, isBlocked, probeDuration: async () => 10 })
+
+  const file = await tempUpload()
+  const after = await run(gate, 'autoLevel', req('tok-pro', file))
+  assert.equal(after.passed, false)
+  assert.equal(after.response.statusCode, 403)
+  assert.equal(after.response.body.code, 'account_blocked')
+  assert.equal(await exists(file), false, 'the upload is deleted')
+
+  for (const feature of ['autoLevel', 'mastering']) {
+    const r = req('tok-pro')
+    const response = res()
+    let passed = false
+    await gate.signIn(() => feature)(r, response, () => { passed = true })
+    assert.equal(passed, false, feature)
+    assert.equal(response.statusCode, 403)
+  }
+
+  // Other accounts, and signed-out mastering previews, are untouched.
+  assert.equal((await run(gate, 'autoLevel', req('tok-free', await tempUpload()))).passed, true)
+  assert.equal((await run(gate, 'mastering', req(null, await tempUpload()))).passed, true)
+})
+
+test('the gate leaves the feature and the decoded duration for the request log, probing once', async () => {
+  let probes = 0
+  const gate = createEntitlementGate({ verify, planFor, probeDuration: async () => { probes++; return 12.5 } })
+  const pro = req('tok-pro', await tempUpload())
+  await run(gate, 'sibilanceEditor', pro)
+  assert.equal(pro.feature, 'sibilanceEditor')
+  assert.equal(pro.audioSeconds, 12.5, 'measured for a full-plan request too')
+
+  const free = req('tok-free', await tempUpload())
+  await run(gate, 'sibilanceEditor', free)
+  assert.equal(free.audioSeconds, 12.5)
+  assert.equal(probes, 2, 'one probe per request, shared with the preview check')
+})
