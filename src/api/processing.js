@@ -14,6 +14,7 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
+import { authHeaders, serverError } from './serverError.js'
 
 const POLL_INTERVAL_MS = 3000       // 3 s between status checks
 const MAX_POLL_ATTEMPTS = 400       // 400 × 3 s = 20 min max wait
@@ -49,11 +50,12 @@ export async function processAudioOnServer({
   if (voiceFixerMode != null) formData.append('voicefixer_mode',    String(voiceFixerMode))
   if (clearervoiceModel)      formData.append('clearervoice_model', clearervoiceModel)
 
-  const submitRes = await fetch(`${API_BASE}/api/process`, { method: 'POST', body: formData })
-  if (!submitRes.ok) {
-    const body = await submitRes.json().catch(() => ({ error: 'Unknown error' }))
-    throw new Error(body.error || `Submit failed: ${submitRes.status}`)
-  }
+  // The token makes the job count against the account rather than the IP, and
+  // lifts the signed-out preview limit (a 402 otherwise — see `mastering`).
+  const submitRes = await fetch(`${API_BASE}/api/process`, {
+    method: 'POST', body: formData, headers: await authHeaders(),
+  })
+  if (!submitRes.ok) throw await serverError(submitRes, 'Submit failed')
   const { jobId } = await submitRes.json()
 
   // ── 3. Poll for completion ─────────────────────────────────────────────────

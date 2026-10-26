@@ -88,9 +88,13 @@ export function createEntitlementGate({ verify, planFor, probeDuration = probeDu
 
       let plan = null
       const token = bearerToken(req)
-      if (token) {
+      // A route that already identified the caller (optionalAuth, ahead of
+      // the upload) set `req.user`: null for an invalid token, so no re-check.
+      const known = req.user !== undefined
+      if (known ? req.user : token) {
         try {
-          const user = await verify(token)
+          const user = known ? req.user : await verify(token)
+          req.user = user
           plan = await planFor(user.id).catch(err => {
             // A database hiccup must not lock a paying user out of a preview,
             // nor hand them the full feature: treat as free, which still
@@ -118,10 +122,11 @@ export function createEntitlementGate({ verify, planFor, probeDuration = probeDu
 
       if (req.file?.path) await unlink(req.file.path).catch(() => {})
       const requires = requiredPlan(featureId)
+      const needs = requires === 'free' ? 'a free account' : `a ${requires === 'pro' ? 'Pro' : requires} plan`
       res.status(402).json({
         error: allowsPreview(featureId)
-          ? `${FEATURES[featureId].label} on more than ${FREE_PREVIEW_SECONDS} seconds of audio needs a ${requires === 'pro' ? 'Pro' : requires} plan.`
-          : `${FEATURES[featureId].label} needs a ${requires === 'pro' ? 'Pro' : requires} plan.`,
+          ? `${FEATURES[featureId].label} on more than ${FREE_PREVIEW_SECONDS} seconds of audio needs ${needs}.`
+          : `${FEATURES[featureId].label} needs ${needs}.`,
         code: 'upgrade_required',
         feature: featureId,
         requires,

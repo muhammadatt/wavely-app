@@ -51,6 +51,11 @@ export const FEATURES = {
   autoLevel: { requires: 'pro', label: 'Auto Leveler', server: true, preview: true },
   sibilanceEditor: { requires: 'pro', label: 'Sibilance Editor', server: true, preview: true },
   spotEffects: { requires: 'pro', label: 'Server spot effects', server: true, preview: true },
+
+  // The preset mastering chain: any account, so the whole-file result stays
+  // free while the most expensive server work is tied to a sign-in. Signed-out
+  // visitors still get the preview on a short clip.
+  mastering: { requires: 'free', label: 'Mastering', server: true, preview: true },
 }
 
 /** Rank of a plan: -1 signed out, 0 free, 1 pro… Unknown plans rank as signed out. */

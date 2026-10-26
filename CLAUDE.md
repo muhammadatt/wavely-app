@@ -94,8 +94,11 @@ The server uses a job-based async model to avoid proxy timeouts on long-running 
 - `POST /api/process` returns `202 Accepted` immediately with a `jobId`
 - Client polls `GET /api/jobs/:jobId` every 3 seconds until status is `complete` or `failed`
 - `GET /api/jobs/:jobId/download` streams the processed file
-- Jobs are held in-memory; they expire after 1 hour. A server restart loses in-progress jobs.
+- Jobs are held in-memory; finished jobs expire 1 hour after they finish (unfinished ones never expire). A server restart loses in-progress jobs.
 - Rate limit: 30 requests per 15-minute window per IP
+- **Admission:** `server/lib/jobQueue.js` caps pipelines running at once (`MAX_CONCURRENT_JOBS`, 2), jobs waiting (`MAX_QUEUED_JOBS`, 10 — beyond it 503 + `Retry-After`) and jobs one caller has queued or running (`MAX_JOBS_PER_CLIENT`, 2 — beyond it 429). A caller is the account when signed in, else the IP. Checked BEFORE multer reads the upload, and again at enqueue. A waiting job polls as `processing` with progress "Waiting in line (…)"
+- **Gate:** `/api/process` is the `mastering` feature — any account; signed out gets the 30 s preview only (402 otherwise)
+- **Subprocess timeouts:** every child the pipeline starts (legacy Python spawns, the persistent Python worker, FFmpeg/FFprobe, DeEsser, noise-reduce, hum decode) is SIGKILLed past `SUBPROCESS_TIMEOUT_MS` (60 min; FFprobe `PROBE_TIMEOUT_MS`, 2 min) via `server/lib/subprocessTimeout.js`. A timed-out persistent worker is DETACHED before it is killed, so the task queued behind it gets a fresh worker rather than failing with the dying one. Hang guards, not cost controls
 
 **This is the only submission model for preset chain processing.** Do not add a synchronous path — even short files can take 30+ seconds once dereverberation and source separation are in the chain.
 
@@ -326,7 +329,7 @@ These apply only to the `acx_audiobook` preset:
 
 ### Not Yet Implemented
 
-- **User authentication** — PARTIAL. Supabase sign-in, `GET /api/me`, plan gating from ONE shared table (`src/auth/plans.js`: presets need an account; Plugin Chain Apply, Auto Leveler, Sibilance Editor and `/api/spot` need Pro, the server ones enforced by `server/lib/entitlements.js` with a free 30 s preview) and presets stored in the account (`user_presets`, no browser-only fallback once accounts are on) are built. Stripe billing is built too: Checkout and the customer portal open in a NEW TAB (never navigate the editor away from unsaved work), and every path — webhook or checkout return — re-fetches the subscription from Stripe and upserts it (`server/lib/billing.js`), so out-of-order webhooks cannot leave stale state. Everything is OFF until the Supabase (and, for billing, Stripe) env vars are set. See `docs/user-accounts.md`
+- **User authentication** — PARTIAL. Supabase sign-in, `GET /api/me`, plan gating from ONE shared table (`src/auth/plans.js`: presets and full-file mastering need an account; Plugin Chain Apply, Auto Leveler, Sibilance Editor and `/api/spot` need Pro, the server ones enforced by `server/lib/entitlements.js` with a free 30 s preview) and presets stored in the account (`user_presets`, no browser-only fallback once accounts are on) are built. Stripe billing is built too: Checkout and the customer portal open in a NEW TAB (never navigate the editor away from unsaved work), and every path — webhook or checkout return — re-fetches the subscription from Stripe and upserts it (`server/lib/billing.js`), so out-of-order webhooks cannot leave stale state. Everything is OFF until the Supabase (and, for billing, Stripe) env vars are set. See `docs/user-accounts.md`
 - **Export tiers** — the Freemium Gates table below (MP3 for free, WAV for paid) is not enforced yet; plan gating covers plugins and server features only
 - **Batch processing** — Sprint 5; multi-file + cross-chapter consistency pass
 - **API access** — Sprint 6 / Pro tier

@@ -142,6 +142,7 @@ The ladder is: signed out → `free` (any account) → `pro`.
 | `autoLevel` | Pro | Auto Leveler analysis and Apply | **Server** (`/api/analyze/vad`) |
 | `sibilanceEditor` | Pro | Sibilance Editor analysis and Apply | **Server** (`/api/analyze/sibilance`) |
 | `spotEffects` | Pro | `/api/spot/*` (no callers today) | **Server** |
+| `mastering` | account | Preset mastering chain (`/api/process`). Signed out: the 30 s preview only | **Server** (`/api/process`) |
 
 - **Adding a gate:** add an entry to `FEATURES`, then use it in the UI.
   - `apply-feature="<id>"` on a `FloatingWindow` locks its Apply button.
@@ -154,8 +155,9 @@ The ladder is: signed out → `free` (any account) → `pro`.
 
 ### Free previews of server features
 
-Server features accept non-Pro requests on up to `FREE_PREVIEW_SECONDS` (30)
-of audio, so anyone can hear the result before paying.
+Server features accept non-entitled requests (non-Pro, or signed out for
+`mastering`) on up to `FREE_PREVIEW_SECONDS` (30) of audio, so anyone can hear
+the result before paying.
 
 - **Server side:** `server/lib/entitlements.js` reads the uploaded file's
   duration with ffprobe and does not trust the client.
@@ -164,7 +166,10 @@ of audio, so anyone can hear the result before paying.
   - Plans are cached per user for 60 s.
 - **App side:** when a non-Pro user presses Analyse, the selection is narrowed
   to its first 30 s before anything is uploaded, and a caption says so. Apply
-  stays Pro. A 402 opens the upgrade prompt.
+  stays Pro. A 402 opens the upgrade prompt — or the sign-in dialog when the
+  feature only needs an account (`requires: 'free'`). Mastering cannot narrow a
+  whole file, so a signed-out user with more than 30 s is asked to sign in
+  before the upload.
 
 ### Limits of browser-side gates
 

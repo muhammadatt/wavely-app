@@ -54,10 +54,14 @@ export function createEntitlements(auth) {
     return allowsPreview(featureId) ? FREE_PREVIEW_SECONDS : 0
   }
 
-  /** Handle an API error: true if it was an upgrade refusal (and the prompt is open). */
+  /**
+   * Handle an API error: true if it was a plan refusal (and the prompt is
+   * open). A feature any account unlocks asks for a sign-in, not an upgrade.
+   */
   function handleServerRefusal(err) {
     if (!err?.upgrade) return false
-    auth.openUpgrade(err.upgrade.feature)
+    if (err.upgrade.requires === 'free') auth.openDialog('signUp')
+    else auth.openUpgrade(err.upgrade.feature)
     return true
   }
 

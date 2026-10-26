@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
-import { processRoute } from './routes/process.js'
+import { createProcessRoute } from './routes/process.js'
 import { jobsRoute }   from './routes/jobs.js'
 import { createSpotRoute }    from './routes/spot.js'
 import { createAnalyzeRoute } from './routes/analyze.js'
@@ -11,6 +11,7 @@ import { getSupabaseAdmin } from './lib/supabaseAdmin.js'
 import { createEntitlementGate, createPlanResolver } from './lib/entitlements.js'
 import Stripe from 'stripe'
 import { readBillingConfig, createBilling } from './lib/billing.js'
+import { createJobQueue, readJobQueueConfig } from './lib/jobQueue.js'
 import { createBillingRoutes, createBillingWebhook } from './routes/billing.js'
 
 const app = express()
@@ -155,8 +156,12 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.0.1' })
 })
 
-// Processing endpoint (submit job — returns 202 + jobId immediately)
-app.use('/api', processRoute)
+// Processing endpoint (submit job — returns 202 + jobId immediately). The
+// queue caps how many preset chains run at once and how many one caller may
+// have in flight (MAX_CONCURRENT_JOBS / MAX_QUEUED_JOBS / MAX_JOBS_PER_CLIENT).
+const jobQueueConfig = readJobQueueConfig()
+console.log(`Job queue: ${jobQueueConfig.concurrency} running, ${jobQueueConfig.maxQueued} queued, ${jobQueueConfig.maxPerClient} per client`)
+app.use('/api', createProcessRoute({ gate, verify: verifyAccessToken, queue: createJobQueue(jobQueueConfig) }))
 
 // Job status + download endpoints (polled by client after submission)
 app.use('/api', jobsRoute)

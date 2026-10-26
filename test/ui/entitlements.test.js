@@ -63,6 +63,18 @@ test('a server 402 opens the upgrade prompt; other errors are left to the caller
   assert.deepEqual(auth.calls, [['upgrade', 'autoLevel']])
 })
 
+test('a server 402 for a feature any account unlocks asks for a sign-in, not an upgrade', () => {
+  const auth = fakeAuth('signedOut')
+  const e = createEntitlements(auth)
+  const err = Object.assign(new Error('needs an account'), { upgrade: { feature: 'mastering', requires: 'free' } })
+  assert.equal(e.handleServerRefusal(err), true)
+  assert.deepEqual(auth.calls, [['dialog', 'signUp']])
+  assert.equal(e.previewLimit('mastering'), FREE_PREVIEW_SECONDS)
+  auth.state.status = 'signedIn'
+  auth.state.plan = 'free'
+  assert.equal(e.previewLimit('mastering'), Infinity)
+})
+
 test('every registry `feature` and apply-feature names a real feature', () => {
   const sources = [
     'src/ui/registry.js',
