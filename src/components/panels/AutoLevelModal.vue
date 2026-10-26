@@ -27,6 +27,7 @@ import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainRideBar from '../meters/GainRideBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { useEntitlements } from '../../composables/useEntitlements.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -123,6 +124,11 @@ async function applyAndClose() {
   teardown()
   closeModal()
 }
+
+// The analysis needs an account (a free one), not a plan: say so before the
+// click rather than after it. Empty when signed in or accounts are off.
+const entitlements = useEntitlements()
+const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign in (free) to analyse. Applying needs Pro.' : ''))
 </script>
 
 <template>
@@ -164,6 +170,7 @@ async function applyAndClose() {
               Runs once on the server. Phrase segmentation and every control
               below are computed here from the result.
             </p>
+            <p v-if="signInNote" class="al-hint al-signin">{{ signInNote }}</p>
           </div>
           <ModulaButton
             variant="accent" :disabled="analyzing || !hasSelection"
@@ -286,6 +293,7 @@ async function applyAndClose() {
   box-shadow: 0 -1px 0 rgba(255, 255, 255, .04);
 }
 .al-analyse-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.al-hint.al-signin { color: #ffb27a; }
 .al-hint {
   margin: 0;
   font: 500 10px/1.5 var(--m-font-ui);

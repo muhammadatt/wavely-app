@@ -165,8 +165,8 @@ app.use('/api', jobsRoute)
 app.use('/api', createSpotRoute({ gate }))
 
 // Analysis endpoints (synchronous — return measurements as JSON)
-// Not plan-gated: measurements only, open to everyone up to a size cap.
-app.use('/api', createAnalyzeRoute())
+// Needs an account, not a plan: measurements only, capped per request.
+app.use('/api', createAnalyzeRoute({ gate }))
 
 // Signed-in user's account and plan
 app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))

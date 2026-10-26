@@ -269,6 +269,9 @@ const copies = pluginCopies((copy, life) => {
     /** Run sibilance detection over the current selection. */
     async function analyze() {
       if (!state.selection || !state.currentFile) return
+      // The analysis needs an account (a free one will do), not a plan:
+      // signed out, this opens the sign-in dialog instead of uploading.
+      if (!entitlements.request('audioAnalysis')) return
       const { start, end } = state.selection
 
       analyzing.value = true

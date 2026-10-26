@@ -56,6 +56,21 @@ test('free plan saves presets but not Pro features; Pro has everything; it track
   assert.equal(e.hint('autoLevel'), '')
 })
 
+test('analysis needs an account, not a plan', () => {
+  const out = createEntitlements(fakeAuth('signedOut'))
+  assert.equal(out.blocker('audioAnalysis'), 'signIn')
+  const free = createEntitlements(fakeAuth('signedIn', 'free'))
+  assert.equal(free.can('audioAnalysis'), true)
+})
+
+test('a server 401 sign_in_required opens the sign-in dialog, not the upgrade prompt', () => {
+  const auth = fakeAuth('signedOut')
+  const e = createEntitlements(auth)
+  const err = Object.assign(new Error('sign in'), { signIn: { feature: 'audioAnalysis' } })
+  assert.equal(e.handleServerRefusal(err), true)
+  assert.deepEqual(auth.calls, [['dialog', 'signUp']])
+})
+
 test('a server 402 opens the upgrade prompt; other errors are left to the caller', () => {
   const auth = fakeAuth('signedIn', 'free')
   const e = createEntitlements(auth)

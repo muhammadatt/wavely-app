@@ -271,6 +271,9 @@ const copies = pluginCopies((copy, life) => {
      */
     async function analyze() {
       if (!state.selection || !state.currentFile) return
+      // The analysis needs an account (a free one will do), not a plan:
+      // signed out, this opens the sign-in dialog instead of uploading.
+      if (!entitlements.request('audioAnalysis')) return
       const { start, end } = state.selection
       const { sampleRate, channels } = state.currentFile
 

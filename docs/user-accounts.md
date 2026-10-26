@@ -139,8 +139,9 @@ The ladder is: signed out → `free` (any account) → `pro`.
 |---|---|---|---|
 | `savePresets` | account | Saving plugin presets | UI and database (RLS) |
 | `pluginChainApply` | Pro | Plugin Chain **Apply**. Preview is free | UI only |
-| `autoLevel` | Pro | Auto Leveler **Apply**. The analysis (`/api/analyze/vad`) is open to everyone | UI only |
-| `sibilanceEditor` | Pro | Sibilance Editor **Apply**. The analysis (`/api/analyze/sibilance`) is open to everyone | UI only |
+| `audioAnalysis` | account | `/api/analyze/*` — Auto Leveler and Sibilance Editor analysis, any length up to 2 h | **Server** (401 when signed out) |
+| `autoLevel` | Pro | Auto Leveler **Apply** | UI only |
+| `sibilanceEditor` | Pro | Sibilance Editor **Apply** | UI only |
 | `noiseReduction` | Pro | Noise Reduction **Apply** (the whole selection). Preview (≤ 30 s) is the same on every plan | **Server** (`/api/spot/noise_reduction`) |
 | `spotEffects` | Pro | Any other `/api/spot/*` operation (no callers today) | **Server** |
 
@@ -160,11 +161,16 @@ accept non-Pro requests on up to `FREE_PREVIEW_SECONDS` (30) of audio, so
 anyone can hear the result before paying.
 
 Server **analysis** (`/api/analyze/*`: Auto Leveler's speech map, the
-Sibilance Editor's events) is not plan-gated at all. It returns measurements,
-the DSP runs in the browser, and a 30 s analysis made both plugins useless on
-the chapters they are for. Only their Apply is Pro. Every request is capped at
-`ANALYSIS_MAX_SECONDS` (2 hours, any plan; **413** `{ code: 'too_long' }`
-past it), behind the route's rate limit.
+Sibilance Editor's events) needs an account (`audioAnalysis`, any plan) and no
+preview limit. It returns measurements, the DSP runs in the browser, and a
+30 s analysis made both plugins useless on the chapters they are for. Only
+their Apply is Pro.
+
+- Signed out (or a bad token): **401** `{ code: 'sign_in_required', feature, requires: 'free' }`.
+  The app asks for an account before uploading, and a 401 opens the sign-in
+  dialog rather than the upgrade prompt.
+- Every request is capped at `ANALYSIS_MAX_SECONDS` (2 hours, any plan; **413**
+  `{ code: 'too_long' }` past it), behind the route's rate limit.
 
 - **Server side:** `server/lib/entitlements.js` reads the uploaded file's
   duration with ffprobe and does not trust the client.

@@ -34,8 +34,8 @@ export const PLAN_LABELS = { free: 'Free', pro: 'Pro' }
  * Analysis-only routes (Auto Leveler's VAD, the Sibilance Editor's events) are
  * NOT gated this way: they return measurements, the DSP that uses them runs in
  * the browser, and a 30 s analysis made both plugins useless on the chapters
- * they exist for. They are open to everyone up to a size cap
- * (server/routes/analyze.js) and only their Apply is Pro.
+ * they exist for. They need an account (`audioAnalysis`) and nothing more, up
+ * to a size cap (server/routes/analyze.js); only their Apply is Pro.
  */
 export const FREE_PREVIEW_SECONDS = 30
 
@@ -53,8 +53,9 @@ export const FEATURES = {
   // Real-time plugins: full preview for everyone, Apply needs Pro.
   pluginChainApply: { requires: 'pro', label: 'The Plugin Chain' },
 
-  // Server ANALYSIS, browser DSP: the analysis is open to everyone (any
-  // length, up to the analyze route's cap); Apply needs Pro.
+  // Server ANALYSIS, browser DSP: the analysis needs any account (any length,
+  // up to the analyze route's cap) — a sign-in, never a payment; Apply needs Pro.
+  audioAnalysis: { requires: 'free', label: 'Audio analysis', server: true },
   autoLevel: { requires: 'pro', label: 'Auto Leveler' },
   sibilanceEditor: { requires: 'pro', label: 'Sibilance Editor' },
 

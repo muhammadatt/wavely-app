@@ -162,3 +162,19 @@ test('invalidate drops one user’s cached plan so an upgrade lands at once', as
   assert.equal(await planFor('u1'), 'pro')
   assert.equal(reads, 2)
 })
+
+test('a feature any account unlocks: signed in passes, signed out gets 401 sign_in_required', async () => {
+  const gate = createEntitlementGate({ verify, planFor, probeDuration: async () => 3600 })
+  for (const token of ['tok-free', 'tok-pro']) {
+    const r = await run(gate, 'audioAnalysis', req(token, await tempUpload()))
+    assert.equal(r.passed, true, token)
+    assert.equal(r.entitlement.mode, 'full')
+  }
+  const file = await tempUpload()
+  const r = await run(gate, 'audioAnalysis', req(null, file))
+  assert.equal(r.passed, false)
+  assert.equal(r.response.statusCode, 401)
+  assert.equal(r.response.body.code, 'sign_in_required')
+  assert.equal(r.response.body.requires, 'free')
+  assert.equal(await exists(file), false)
+})
