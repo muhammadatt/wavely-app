@@ -38,7 +38,13 @@ export const FREE_PREVIEW_SECONDS = 30
  *
  *   requires  lowest plan that may use it ('free' = any account)
  *   server    enforced by the API, not just hidden in the UI
- *   preview   non-entitled users may run it on ≤ FREE_PREVIEW_SECONDS of audio
+ *   preview   who else may run it on ≤ FREE_PREVIEW_SECONDS of audio:
+ *               'account'  any signed-in user (signed out: sign in first)
+ *               'anyone'   signed out too
+ *
+ * Server time spent on a signed-out visitor is spent on someone who cannot be
+ * rate-limited by anything but their IP, so a preview needs an account unless
+ * the feature IS the first-run experience (mastering).
  */
 export const FEATURES = {
   // Anything stored against the user needs somewhere to store it.
@@ -47,15 +53,15 @@ export const FEATURES = {
   // Real-time plugins: full preview for everyone, Apply needs Pro.
   pluginChainApply: { requires: 'pro', label: 'The Plugin Chain' },
 
-  // Server processing: Pro, with a short preview for everyone else.
-  autoLevel: { requires: 'pro', label: 'Auto Leveler', server: true, preview: true },
-  sibilanceEditor: { requires: 'pro', label: 'Sibilance Editor', server: true, preview: true },
-  spotEffects: { requires: 'pro', label: 'Server spot effects', server: true, preview: true },
+  // Server processing: Pro, with a short preview for any other account.
+  autoLevel: { requires: 'pro', label: 'Auto Leveler', server: true, preview: 'account' },
+  sibilanceEditor: { requires: 'pro', label: 'Sibilance Editor', server: true, preview: 'account' },
+  spotEffects: { requires: 'pro', label: 'Server spot effects', server: true, preview: 'account' },
 
   // The preset mastering chain: any account, so the whole-file result stays
   // free while the most expensive server work is tied to a sign-in. Signed-out
   // visitors still get the preview on a short clip.
-  mastering: { requires: 'free', label: 'Mastering', server: true, preview: true },
+  mastering: { requires: 'free', label: 'Mastering', server: true, preview: 'anyone' },
 }
 
 /** Rank of a plan: -1 signed out, 0 free, 1 pro… Unknown plans rank as signed out. */
@@ -77,10 +83,23 @@ export function hasFeature(plan, featureId) {
   return have >= 0 && have >= need
 }
 
-/** May a non-entitled user still run it on a short clip? */
-export function allowsPreview(featureId) {
+/** Does the feature have a short-clip preview at all (for someone)? */
+export function hasPreview(featureId) {
   requiredPlan(featureId)
-  return FEATURES[featureId].preview === true
+  return FEATURES[featureId].preview != null
+}
+
+/** Does its preview need a signed-in user? */
+export function previewNeedsAccount(featureId) {
+  requiredPlan(featureId)
+  return FEATURES[featureId].preview === 'account'
+}
+
+/** May a non-entitled user on `plan` (null = signed out) run it on a short clip? */
+export function allowsPreview(featureId, plan) {
+  requiredPlan(featureId)
+  const preview = FEATURES[featureId].preview
+  return preview === 'anyone' || (preview === 'account' && planRank(plan) >= 0)
 }
 
 /**

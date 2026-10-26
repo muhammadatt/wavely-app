@@ -1,14 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
-import { readdir } from 'node:fs/promises'
-import path from 'node:path'
 
 import { createProcessRoute } from '../routes/process.js'
 import { createEntitlementGate } from '../lib/entitlements.js'
 import { createJobQueue } from '../lib/jobQueue.js'
-
-const UPLOADS = path.resolve(import.meta.dirname, '..', 'uploads')
+import { neverEndingUpload } from './helpers/neverEndingUpload.js'
 const PLANS = { 'tok-free': 'free', 'tok-pro': 'pro' }
 const verify = async (token) => {
   if (!PLANS[token]) throw new Error('bad token')
@@ -37,10 +34,8 @@ function upload(base, { token, preset = 'not_a_preset' } = {}) {
   })
 }
 
-const uploads = () => readdir(UPLOADS).catch(() => [])
-
-test('signed out and longer than the preview: 402 asking for a free account; the upload is deleted', async () => {
-  const before = await uploads()
+// (That a refused upload is deleted is the gate's own test, in entitlements.test.js.)
+test('signed out and longer than the preview: 402 asking for a free account', async () => {
   const gate = createEntitlementGate({ verify, planFor, probeDuration: async () => 300 })
   await withServer(createProcessRoute({ gate, verify }), async (base) => {
     const res = await upload(base)
@@ -54,7 +49,6 @@ test('signed out and longer than the preview: 402 asking for a free account; the
     // An invalid token is signed out, not an error.
     assert.equal((await upload(base, { token: 'expired' })).status, 402)
   })
-  assert.deepEqual(await uploads(), before)
 })
 
 test('any account, or a short clip signed out, gets past the gate (to validation)', async () => {
@@ -71,21 +65,19 @@ test('any account, or a short clip signed out, gets past the gate (to validation
 })
 
 test('at the job limit the request is refused before the upload is read', async () => {
-  const before = await uploads()
   const queue = createJobQueue({ concurrency: 1, maxQueued: 0, maxPerClient: 1 })
   const hold = new Promise(() => {})
   queue.submit('user:tok-free', () => hold)  // this account's one job, running
 
   await withServer(createProcessRoute({ verify, queue }), async (base) => {
-    const mine = await upload(base, { token: 'tok-free' })
+    const mine = await neverEndingUpload(`${base}/api/process`, 'tok-free')
     assert.equal(mine.status, 429)
-    assert.equal((await mine.json()).code, 'too_many_jobs')
+    assert.equal(mine.body.code, 'too_many_jobs')
 
     // Someone else: the one slot is taken and the line holds nobody.
-    const other = await upload(base, { token: 'tok-pro' })
+    const other = await neverEndingUpload(`${base}/api/process`, 'tok-pro')
     assert.equal(other.status, 503)
-    assert.equal(other.headers.get('retry-after'), '60')
-    assert.equal((await other.json()).code, 'server_busy')
+    assert.equal(other.headers['retry-after'], '60')
+    assert.equal(other.body.code, 'server_busy')
   })
-  assert.deepEqual(await uploads(), before, 'refused uploads never reached disk')
 })

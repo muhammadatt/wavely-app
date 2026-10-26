@@ -79,6 +79,10 @@ Every existing feature works signed out, with or without accounts configured.
 | `SUPABASE_SECRET_KEY` | the secret key (`sb_secret_…`), or the legacy `SUPABASE_SERVICE_ROLE_KEY`. **Server only — it bypasses row-level security.** |
 | `SUPABASE_JWT_SECRET` | only if the project still signs tokens with the legacy HS256 secret. Projects on asymmetric JWT signing keys need nothing here. |
 | `CORS_ORIGINS` | comma-separated exact frontend origins, e.g. `https://app.example.com,https://staging.example.com`. Unset falls back to the localhost dev origins, so it **must** be set in production. |
+| `HOST` | interface Node listens on. Default `127.0.0.1`: only the reverse proxy on the same machine can reach it, which is what makes the per-IP rate limits trustworthy (`trust proxy` believes `X-Forwarded-For`). Point the proxy at `http://127.0.0.1:3001`. Set `0.0.0.0` only when the proxy runs on another host or container, and firewall the port to it. |
+| `MAX_CONCURRENT_JOBS` / `MAX_QUEUED_JOBS` / `MAX_JOBS_PER_CLIENT` | mastering job queue (defaults 2 / 10 / 2) |
+| `MAX_CONCURRENT_ANALYSES` / `MAX_ANALYSES_PER_CLIENT` | shared limit on `/api/spot` and `/api/analyze` (defaults 4 / 2). Full is refused (503 / 429) before the upload, never queued |
+| `SUBPROCESS_TIMEOUT_MS` / `PROBE_TIMEOUT_MS` | kill limits for pipeline processes (defaults 60 min / 2 min) |
 | `CORS_ORIGIN_PATTERNS` | comma-separated regexes for origins you can't list, i.e. Vercel preview URLs, e.g. `^https://wavely-app(-[a-z0-9-]+)?\.vercel\.app$`. Anchor with `^…$`: the check is `pattern.test(origin)`, so an unanchored pattern matches anywhere in the string. |
 
 CORS lives **only in Express** (`server/index.js`). If Apache or another proxy
@@ -139,9 +143,9 @@ The ladder is: signed out → `free` (any account) → `pro`.
 |---|---|---|---|
 | `savePresets` | account | Saving plugin presets | UI and database (RLS) |
 | `pluginChainApply` | Pro | Plugin Chain **Apply**. Preview is free | UI only |
-| `autoLevel` | Pro | Auto Leveler analysis and Apply | **Server** (`/api/analyze/vad`) |
-| `sibilanceEditor` | Pro | Sibilance Editor analysis and Apply | **Server** (`/api/analyze/sibilance`) |
-| `spotEffects` | Pro | `/api/spot/*` (no callers today) | **Server** |
+| `autoLevel` | Pro | Auto Leveler analysis and Apply. Free account: 30 s preview; signed out: nothing | **Server** (`/api/analyze/vad`) |
+| `sibilanceEditor` | Pro | Sibilance Editor analysis and Apply. Free account: 30 s preview; signed out: nothing | **Server** (`/api/analyze/sibilance`) |
+| `spotEffects` | Pro | `/api/spot/*` (no callers today). Free account: 30 s preview; signed out: nothing | **Server** |
 | `mastering` | account | Preset mastering chain (`/api/process`). Signed out: the 30 s preview only | **Server** (`/api/process`) |
 
 - **Adding a gate:** add an entry to `FEATURES`, then use it in the UI.
@@ -155,19 +159,28 @@ The ladder is: signed out → `free` (any account) → `pro`.
 
 ### Free previews of server features
 
-Server features accept non-entitled requests (non-Pro, or signed out for
-`mastering`) on up to `FREE_PREVIEW_SECONDS` (30) of audio, so anyone can hear
-the result before paying.
+Server features accept non-entitled requests on up to `FREE_PREVIEW_SECONDS`
+(30) of audio, so the result can be heard before paying. Who gets the preview
+is the feature's `preview` field: `'account'` (any signed-in user — Auto
+Leveler, Sibilance Editor, spot effects) or `'anyone'` (signed out too — only
+`mastering`, the first-run experience). Server time spent on an anonymous
+visitor can only be limited per IP, so a new server feature should default to
+`'account'`.
 
 - **Server side:** `server/lib/entitlements.js` reads the uploaded file's
   duration with ffprobe and does not trust the client.
+  - A signed-out request for a feature with nothing open to them gets **401**
+    `{ code: 'sign_in_required', feature }` from `gate.signIn`, which runs
+    BEFORE multer, so the upload is never read.
   - A longer upload without Pro gets **402** with `{ code: 'upgrade_required', feature, requires, previewSeconds }`.
   - If the duration can't be read, the request is refused.
   - Plans are cached per user for 60 s.
-- **App side:** when a non-Pro user presses Analyse, the selection is narrowed
-  to its first 30 s before anything is uploaded, and a caption says so. Apply
-  stays Pro. A 402 opens the upgrade prompt — or the sign-in dialog when the
-  feature only needs an account (`requires: 'free'`). Mastering cannot narrow a
+- **App side:** a signed-out user who presses Analyse gets the sign-in dialog
+  (`requestPreview`) and the caption says a free account previews 30 s. A
+  signed-in non-Pro user's selection is narrowed to its first 30 s before
+  anything is uploaded, and a caption says so. Apply stays Pro. A 402 opens the
+  upgrade prompt — or the sign-in dialog when the feature only needs an account
+  (`requires: 'free'`); a 401 `sign_in_required` opens the sign-in dialog. Mastering cannot narrow a
   whole file, so a signed-out user with more than 30 s is asked to sign in
   before the upload.
 

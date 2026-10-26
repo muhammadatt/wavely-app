@@ -11,11 +11,17 @@ import { getSupabaseAdmin } from './lib/supabaseAdmin.js'
 import { createEntitlementGate, createPlanResolver } from './lib/entitlements.js'
 import Stripe from 'stripe'
 import { readBillingConfig, createBilling } from './lib/billing.js'
-import { createJobQueue, readJobQueueConfig } from './lib/jobQueue.js'
+import { createJobQueue, readJobQueueConfig, readRequestLimitConfig, holdSlot } from './lib/jobQueue.js'
 import { createBillingRoutes, createBillingWebhook } from './routes/billing.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
+// Loopback only by default: the reverse proxy on this machine is the one way
+// in. Reachable directly, a client could set X-Forwarded-For to anything and
+// get a fresh rate limit on every request (see `trust proxy` below). Set
+// HOST=0.0.0.0 only where the proxy is on another host or in another container
+// — and then firewall the port to that proxy.
+const HOST = process.env.HOST || '127.0.0.1'
 
 // Trust the first proxy hop (Apache reverse proxy on the same machine).
 // Required for express-rate-limit to correctly identify client IPs via
@@ -166,11 +172,17 @@ app.use('/api', createProcessRoute({ gate, verify: verifyAccessToken, queue: cre
 // Job status + download endpoints (polled by client after submission)
 app.use('/api', jobsRoute)
 
+// Spot effects and analyses share one concurrency limit: both are synchronous
+// and both land on the Python worker pool. Full means refused, never queued.
+const requestLimitConfig = readRequestLimitConfig()
+console.log(`Spot/analyze limit: ${requestLimitConfig.concurrency} running, ${requestLimitConfig.maxPerClient} per client`)
+const limit = holdSlot(createJobQueue(requestLimitConfig))
+
 // Spot effect endpoint (synchronous — returns processed WAV directly)
-app.use('/api', createSpotRoute({ gate }))
+app.use('/api', createSpotRoute({ gate, limit }))
 
 // Analysis endpoints (synchronous — return measurements as JSON)
-app.use('/api', createAnalyzeRoute({ gate }))
+app.use('/api', createAnalyzeRoute({ gate, limit }))
 
 // Signed-in user's account and plan
 app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))
@@ -178,8 +190,8 @@ app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))
 // Checkout, the customer portal and prices (Stripe)
 app.use('/api', createBillingRoutes({ verify: verifyAccessToken, billing, isAllowedOrigin }))
 
-const server = app.listen(PORT, () => {
-  console.log(`Wavely server listening on port ${PORT}`)
+const server = app.listen(PORT, HOST, () => {
+  console.log(`Wavely server listening on ${HOST}:${PORT}`)
 })
 
 // ── Proxy-safe timeout configuration ─────────────────────────────────────────

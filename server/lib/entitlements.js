@@ -4,11 +4,12 @@
  * Only `server: true` features are enforced, and only here: these are the ones
  * that spend server time, which is the resource gating exists to protect.
  *
- * A request that is not entitled is still served when the feature allows a
- * PREVIEW and the uploaded audio is short (≤ FREE_PREVIEW_SECONDS) — so anyone
- * can hear the result on a clip before paying, while a whole chapter's worth of
- * analysis stays Pro. The duration is DECODED from the upload, never taken
- * from the client.
+ * A request that is not entitled is still served when the feature allows its
+ * caller a PREVIEW and the uploaded audio is short (≤ FREE_PREVIEW_SECONDS) —
+ * so the result can be heard on a clip before paying, while a whole chapter's
+ * worth of analysis stays Pro. The duration is DECODED from the upload, never
+ * taken from the client. Most previews need an account (`preview: 'account'`);
+ * a signed-out caller is then refused before the upload is read.
  *
  * With accounts not configured on this server the gate is a pass-through:
  * exactly the pre-accounts behaviour, matching a frontend built without them.
@@ -69,42 +70,67 @@ function bearerToken(req) {
 }
 
 /**
- * Build the gate factory. `gate(featureOf)` returns middleware that must run
- * AFTER multer (it reads `req.file`). `featureOf(req)` names the feature, or
- * null to let the route deal with the request (an unknown kind, say).
+ * Build the gate factory.
  *
- * On refusal the upload is deleted here, since the route's own cleanup never
- * runs, and the response is 402 with a body the client can act on:
+ * `gate(featureOf)` returns middleware that must run AFTER multer (it reads
+ * `req.file`). `featureOf(req)` names the feature, or null to let the route
+ * deal with the request (an unknown kind, say). On refusal the upload is
+ * deleted here, since the route's own cleanup never runs, and the response is
+ * 402 with a body the client can act on:
  *   { error, code: 'upgrade_required', feature, requires, previewSeconds }
+ *
+ * `gate.signIn(featureOf)` runs BEFORE multer: when a signed-out caller could
+ * not use the feature at all — not even its preview — it answers 401 without
+ * reading the body, so an anonymous flood never reaches the disk:
+ *   { error, code: 'sign_in_required', feature }
+ * It leaves `req.user` set (null when signed out) for the gate to reuse.
  */
 export function createEntitlementGate({ verify, planFor, probeDuration = probeDurationS }) {
   const enabled = !!(verify && planFor)
 
-  return function gate(featureOf) {
+  /** The caller's user, or null. Set once per request on `req.user`. */
+  async function identify(req) {
+    if (req.user !== undefined) return req.user
+    const token = bearerToken(req)
+    req.user = null
+    if (token) {
+      try {
+        req.user = await verify(token)
+      } catch {
+        // invalid or expired token: as signed out
+      }
+    }
+    return req.user
+  }
+
+  function refuseSignIn(res, featureId) {
+    res.set?.('WWW-Authenticate', 'Bearer')
+    return res.status(401).json({
+      error: `Sign in to use ${FEATURES[featureId].label}.`,
+      code: 'sign_in_required',
+      feature: featureId,
+    })
+  }
+
+  /** Nothing in this feature is open to a signed-out caller. */
+  const closedToSignedOut = featureId => !hasFeature(null, featureId) && !allowsPreview(featureId, null)
+
+  function gate(featureOf) {
     return async (req, res, next) => {
       if (!enabled) return next()
       const featureId = featureOf(req)
       if (!featureId) return next()
 
       let plan = null
-      const token = bearerToken(req)
-      // A route that already identified the caller (optionalAuth, ahead of
-      // the upload) set `req.user`: null for an invalid token, so no re-check.
-      const known = req.user !== undefined
-      if (known ? req.user : token) {
-        try {
-          const user = known ? req.user : await verify(token)
-          req.user = user
-          plan = await planFor(user.id).catch(err => {
-            // A database hiccup must not lock a paying user out of a preview,
-            // nor hand them the full feature: treat as free, which still
-            // leaves the preview path open.
-            console.error('[entitlements]', err.message)
-            return FREE_PLAN
-          })
-        } catch {
-          plan = null // invalid or expired token: as signed out
-        }
+      const user = await identify(req)
+      if (user) {
+        plan = await planFor(user.id).catch(err => {
+          // A database hiccup must not lock a paying user out of a preview,
+          // nor hand them the full feature: treat as free, which still
+          // leaves the preview path open.
+          console.error('[entitlements]', err.message)
+          return FREE_PLAN
+        })
       }
 
       if (hasFeature(plan, featureId)) {
@@ -112,7 +138,13 @@ export function createEntitlementGate({ verify, planFor, probeDuration = probeDu
         return next()
       }
 
-      if (allowsPreview(featureId) && req.file?.path) {
+      if (!user && closedToSignedOut(featureId)) {
+        if (req.file?.path) await unlink(req.file.path).catch(() => {})
+        return refuseSignIn(res, featureId)
+      }
+
+      const preview = allowsPreview(featureId, plan)
+      if (preview && req.file?.path) {
         const duration = await probeDuration(req.file.path)
         if (duration != null && duration <= FREE_PREVIEW_SECONDS + PREVIEW_TOLERANCE_S) {
           req.entitlement = { plan, mode: 'preview' }
@@ -124,17 +156,30 @@ export function createEntitlementGate({ verify, planFor, probeDuration = probeDu
       const requires = requiredPlan(featureId)
       const needs = requires === 'free' ? 'a free account' : `a ${requires === 'pro' ? 'Pro' : requires} plan`
       res.status(402).json({
-        error: allowsPreview(featureId)
+        error: preview
           ? `${FEATURES[featureId].label} on more than ${FREE_PREVIEW_SECONDS} seconds of audio needs ${needs}.`
           : `${FEATURES[featureId].label} needs ${needs}.`,
         code: 'upgrade_required',
         feature: featureId,
         requires,
-        previewSeconds: allowsPreview(featureId) ? FREE_PREVIEW_SECONDS : null,
+        previewSeconds: preview ? FREE_PREVIEW_SECONDS : null,
       })
     }
   }
+
+  gate.signIn = function signIn(featureOf) {
+    return async (req, res, next) => {
+      if (!enabled) return next()
+      const featureId = featureOf(req)
+      if (!featureId || !closedToSignedOut(featureId)) return next()
+      if (await identify(req)) return next()
+      return refuseSignIn(res, featureId)
+    }
+  }
+
+  return gate
 }
 
 /** The no-accounts gate: lets everything through. */
 export const openGate = () => (_req, _res, next) => next()
+openGate.signIn = openGate

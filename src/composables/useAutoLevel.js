@@ -284,6 +284,8 @@ const copies = pluginCopies((copy, life) => {
 
     async function analyze() {
       if (!state.selection || !state.currentFile) return
+      // Signed out there is no preview: ask for a sign-in before rendering.
+      if (!entitlements.requestPreview('autoLevel')) return
       narrowToPreview()
       const { start, end } = state.selection
       const { sampleRate, channels } = state.currentFile

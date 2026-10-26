@@ -48,7 +48,40 @@ export function readJobQueueConfig() {
   }
 }
 
-export function createJobQueue({ concurrency = 2, maxQueued = 10, maxPerClient = 2 } = {}) {
+/**
+ * The limit shared by the synchronous server-processing routes (/api/spot,
+ * /api/analyze). They never wait in line — a request held behind others would
+ * run into the proxy's timeout — so the queue refuses as soon as it is full.
+ *
+ *   MAX_CONCURRENT_ANALYSES    default 4
+ *   MAX_ANALYSES_PER_CLIENT    default 2
+ */
+export function readRequestLimitConfig() {
+  return {
+    concurrency:  readCount('MAX_CONCURRENT_ANALYSES', 4, 1),
+    maxQueued:    0,
+    maxPerClient: readCount('MAX_ANALYSES_PER_CLIENT', 2, 1),
+    messages: {
+      tooMany: n => `You already have ${n} server analys${n === 1 ? 'is' : 'es'} running — wait for one to finish.`,
+      busy: 'The server is busy — please try again in a minute.',
+    },
+  }
+}
+
+const DEFAULT_MESSAGES = {
+  tooMany: n => `You already have ${n} mastering job${n === 1 ? '' : 's'} in progress — wait for one to finish.`,
+  busy: 'The server is busy — please try again in a few minutes.',
+}
+
+/**
+ * @param {object} [opts]
+ * @param {number} [opts.concurrency]
+ * @param {number} [opts.maxQueued]     0 = never wait: refuse once every slot is busy
+ * @param {number} [opts.maxPerClient]
+ * @param {{ tooMany?: (n: number) => string, busy?: string }} [opts.messages]
+ */
+export function createJobQueue({ concurrency = 2, maxQueued = 10, maxPerClient = 2, messages = {} } = {}) {
+  const text = { ...DEFAULT_MESSAGES, ...messages }
   /** @type {{ client: string, run: Function, onPosition?: Function, resolve: Function, reject: Function }[]} */
   const waiting = []
   const perClient = new Map()  // client -> jobs queued + running
@@ -57,13 +90,10 @@ export function createJobQueue({ concurrency = 2, maxQueued = 10, maxPerClient =
   /** Why `client` cannot submit now, or null if it can. Does not reserve anything. */
   function refusal(client) {
     if ((perClient.get(client) ?? 0) >= maxPerClient) {
-      return new QueueRefusal(
-        'too_many_jobs',
-        `You already have ${maxPerClient} mastering job${maxPerClient === 1 ? '' : 's'} in progress — wait for one to finish.`,
-      )
+      return new QueueRefusal('too_many_jobs', text.tooMany(maxPerClient))
     }
     if (running >= concurrency && waiting.length >= maxQueued) {
-      return new QueueRefusal('server_busy', 'The server is busy — please try again in a few minutes.')
+      return new QueueRefusal('server_busy', text.busy)
     }
     return null
   }
@@ -117,4 +147,48 @@ export function createJobQueue({ concurrency = 2, maxQueued = 10, maxPerClient =
   }
 
   return { refusal, submit, stats }
+}
+
+/** Who a request counts against: the account when signed in, else the IP. */
+export function clientOf(req) {
+  return req.user?.id ? `user:${req.user.id}` : `ip:${req.ip}`
+}
+
+export function sendRefusal(res, refusal) {
+  if (refusal.status === 503) res.set('Retry-After', '60')
+  return res.status(refusal.status).json({ error: refusal.message, code: refusal.code })
+}
+
+/**
+ * Middleware for SYNCHRONOUS routes: take a slot in `queue` for the whole life
+ * of the request — upload, processing and response — or refuse it at once
+ * (build the queue with `maxQueued: 0`; a request cannot wait in line behind a
+ * proxy timeout). Runs before multer, after anything that sets `req.user`.
+ *
+ * The route handler CLAIMS the slot (`res.locals.slot.claim()`, which returns
+ * the release) and releases it when its work is done — not when the client
+ * hangs up, or a client could abort mid-render and start another while the
+ * first still holds a worker. A request refused before the handler runs (a
+ * multer error, the plan gate) releases when its response closes.
+ */
+export function holdSlot(queue) {
+  return (req, res, next) => {
+    let release
+    const done = new Promise(resolve => { release = resolve })
+    try {
+      queue.submit(clientOf(req), () => done).catch(() => {})
+    } catch (err) {
+      if (err instanceof QueueRefusal) return sendRefusal(res, err)
+      throw err
+    }
+    let claimed = false
+    res.locals.slot = {
+      claim() {
+        claimed = true
+        return release
+      },
+    }
+    res.once('close', () => { if (!claimed) release() })
+    next()
+  }
 }

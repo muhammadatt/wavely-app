@@ -28,7 +28,7 @@ import { PRESETS, OUTPUT_PROFILES, resolveOutputProfileId } from '../presets.js'
 import { createJob, completeJob, failJob, setJobProgress } from '../lib/jobStore.js'
 import { openGate } from '../lib/entitlements.js'
 import { optionalAuth } from '../lib/auth.js'
-import { createJobQueue } from '../lib/jobQueue.js'
+import { createJobQueue, clientOf, sendRefusal } from '../lib/jobQueue.js'
 
 const upload = multer({
   dest: path.resolve(import.meta.dirname, '..', 'uploads'),
@@ -38,16 +38,6 @@ const upload = multer({
 const SUPPORTED_EXTENSIONS = new Set([
   '.wav', '.mp3', '.flac', '.aiff', '.aif', '.m4a', '.aac', '.ogg',
 ])
-
-/** Who a job counts against: the account when signed in, else the IP. */
-function clientOf(req) {
-  return req.user?.id ? `user:${req.user.id}` : `ip:${req.ip}`
-}
-
-function sendRefusal(res, refusal) {
-  if (refusal.status === 503) res.set('Retry-After', '60')
-  return res.status(refusal.status).json({ error: refusal.message, code: refusal.code })
-}
 
 /**
  * @param {object}   [deps]

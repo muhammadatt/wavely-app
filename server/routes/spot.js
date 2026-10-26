@@ -46,15 +46,22 @@ const OPERATIONS = {
   },
 }
 
+const unlimited = (_req, _res, next) => next()
+
 /**
  * @param {object}   [deps]
  * @param {Function} [deps.gate]  entitlement gate factory (lib/entitlements.js);
  *                                the default lets every request through
+ * @param {Function} [deps.limit] concurrency middleware (holdSlot in
+ *                                lib/jobQueue.js); runs before the upload
  */
-export function createSpotRoute({ gate = openGate } = {}) {
+export function createSpotRoute({ gate = openGate, limit = unlimited } = {}) {
   const router = Router()
+  const featureOf = req => (OPERATIONS[req.params.operation] ? 'spotEffects' : null)
 
-  router.post('/spot/:operation', upload.single('file'), gate(req => (OPERATIONS[req.params.operation] ? 'spotEffects' : null)), async (req, res) => {
+  // Sign-in and the concurrency slot are checked BEFORE multer reads the body.
+  router.post('/spot/:operation', gate.signIn(featureOf), limit, upload.single('file'), gate(featureOf), async (req, res) => {
+    const releaseSlot = res.locals.slot?.claim()
     const uploadedPath = req.file?.path
     let outputPath = null
 
@@ -98,6 +105,7 @@ export function createSpotRoute({ gate = openGate } = {}) {
         res.status(500).json({ error: err.message || 'Spot processing failed' })
       }
     } finally {
+      releaseSlot?.()
       if (uploadedPath) await unlink(uploadedPath).catch(() => {})
     }
   })

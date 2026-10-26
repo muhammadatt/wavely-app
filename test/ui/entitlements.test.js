@@ -38,7 +38,38 @@ test('signed out: saving asks for an account, Pro features ask for an upgrade', 
   assert.deepEqual(auth.calls, [['dialog', 'signUp'], ['upgrade', 'pluginChainApply']])
   assert.match(e.hint('savePresets'), /^Sign in/)
   assert.match(e.hint('autoLevel'), /Pro feature/)
+  // Server previews need an account — except mastering's.
+  assert.equal(e.previewLimit('autoLevel'), 0)
+  assert.equal(e.previewLimit('mastering'), FREE_PREVIEW_SECONDS)
+})
+
+test('requestPreview: signed out asks for a sign-in; a free account previews; Pro is unlimited', () => {
+  const auth = fakeAuth('signedOut')
+  const e = createEntitlements(auth)
+  for (const id of ['autoLevel', 'sibilanceEditor', 'spotEffects']) {
+    assert.equal(e.requestPreview(id), false, id)
+  }
+  assert.deepEqual(auth.calls, [['dialog', 'signUp'], ['dialog', 'signUp'], ['dialog', 'signUp']])
+  assert.equal(e.requestPreview('mastering'), true)
+
+  auth.state.status = 'signedIn'
+  auth.state.plan = 'free'
+  assert.equal(e.requestPreview('autoLevel'), true)
   assert.equal(e.previewLimit('autoLevel'), FREE_PREVIEW_SECONDS)
+  auth.state.plan = 'pro'
+  assert.equal(e.previewLimit('autoLevel'), Infinity)
+  assert.equal(auth.calls.length, 3, 'no further prompts')
+
+  const off = createEntitlements(fakeAuth('disabled'))
+  assert.equal(off.requestPreview('autoLevel'), true)
+})
+
+test('a server 401 sign_in_required opens the sign-in dialog', () => {
+  const auth = fakeAuth('signedOut')
+  const e = createEntitlements(auth)
+  const err = Object.assign(new Error('Sign in'), { signIn: { code: 'sign_in_required', feature: 'autoLevel' } })
+  assert.equal(e.handleServerRefusal(err), true)
+  assert.deepEqual(auth.calls, [['dialog', 'signUp']])
 })
 
 test('free plan saves presets but not Pro features; Pro has everything; it tracks the plan live', () => {
