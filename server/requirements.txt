@@ -9,7 +9,6 @@
 # ── PyTorch (pinned for deepfilternet compatibility) ─────────────────────────
 # deepfilternet 0.5.6 uses torchaudio.backend.common.AudioMetaData and
 # torchaudio.info(), both removed in torchaudio 2.1. Pin must stay below 2.1.
-# clearvoice requires torchaudio>=2.0.2, so 2.0.1/2.0.2 is the minimum valid pair.
 torch==2.0.1
 torchaudio==2.0.2
 
@@ -40,12 +39,6 @@ demucs>=4.0.0
 # WHAM! checkpoint (~20 MB) downloaded from HuggingFace on first run.
 # Install after demucs to avoid torch version conflicts.
 # asteroid>=0.7.0
-
-# ── ClearVoice pipeline ────────────────────────────────────────────────────────
-
-# clearervoice_enhance.py (speech enhancement/separation via ClearerVoice-Studio)
-# Pretrained model weights downloaded on first run from HuggingFace/ModelScope.
-clearvoice>=0.0.1
 
 # ── Dereverberation stage ─────────────────────────────────────────────────────
 

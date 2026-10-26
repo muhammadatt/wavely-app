@@ -173,8 +173,6 @@ The pipeline is **fully config-driven**. There is no hardcoded stage ordering. E
 
 **Separation & extension (Noise Eraser):** `tonalPretreatment`, `separateVocals` (Demucs or ConvTasNet), `separationValidation`, `bandwidthExtension` (AP-BWE or LavaSR)
 
-**ClearerVoice path:** `clearerVoiceEnhance` (mossformer2_48k or frcrn_16k)
-
 **Special effects:** `harmonicExciter`, `vocalSaturation`, `roomPresence`
 
 **Output & reporting:** `normalize`, `truePeakLimit`, `acxCertification`, `qualityAdvisory`, `encode`, `extractPeaks`, `roomTonePad`
@@ -219,7 +217,7 @@ See `docs/instant_polish_compliance_model_v2.md` for full flag definitions, JSON
 
 - **ACX Audiobook:** Clean, transparent, controlled dynamics. Highest priority on noise reduction quality and artifact-free output. Conservative compression. Dual NR pass (DF3 → RNNoise).
 - **Podcast Ready:** Punchy, intimate, compressed. More aggressive EQ. LUFS target (not RMS). Stereo preserved for dual-host. Vocal saturation + room presence added for character.
-- **General Clean:** Pragmatic. Uses ClearerVoice enhancement for broad-band cleanup. More aggressive de-esser. No strong tonal character.
+- **General Clean:** Pragmatic. DF3 noise reduction with broad-band cleanup. More aggressive de-esser. No strong tonal character.
 - **Noise Eraser:** Voice extraction, not noise reduction. Prioritizes noise removal over voice transparency. Uses Demucs source separation. Output may have a "dry booth" quality.
 
 ---
@@ -318,11 +316,11 @@ These apply only to the `acx_audiobook` preset:
 
 **Backend:**
 - Config-driven pipeline architecture — all 4 presets share a single orchestrator; stage sequences declared per-preset in `src/audio/presets.js`
-- Stage registry (`server/pipeline/stages.js`): 29 stage functions including correctiveEQ, referenceEQ, airBoost, clipGainDeEss, spectralSubtraction, resonanceSuppressor, vocalSaturation, roomPresence, autoLevel, parallelCompress, vocalExpander, clickRemove, humDetect, tonalPretreatment, separateVocals, separationValidation, clearerVoiceEnhance, bandwidthExtension, vadGate
+- Stage registry (`server/pipeline/stages.js`): 29 stage functions including correctiveEQ, referenceEQ, airBoost, clipGainDeEss, spectralSubtraction, resonanceSuppressor, vocalSaturation, roomPresence, autoLevel, parallelCompress, vocalExpander, clickRemove, humDetect, tonalPretreatment, separateVocals, separationValidation, bandwidthExtension, vadGate
 - Noise Eraser as a preset (same runner, different stages array): spectral subtraction → DF3 → tonal pretreatment → Demucs separation → separation validation → bandwidth extension
 - Async job architecture (POST → 202 + jobId → polling → download)
 - Rate limiting, CORS, temp file cleanup, job TTL
-- Python integrations: DeepFilterNet3, RNNoise, Demucs, ConvTasNet, AP-BWE / LavaSR, ClearerVoice
+- Python integrations: DeepFilterNet3, RNNoise, Demucs, ConvTasNet, AP-BWE / LavaSR (ClearerVoice was removed in October 2026)
 
 ### Not Yet Implemented
 
@@ -392,7 +390,6 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 | Noise reduction | DeepFilterNet3 (`deepfilternet` / `libdf`), RNNoise (`pyrnnoise`), DTLN |
 | Source separation (Noise Eraser) | Demucs `htdemucs_ft` (primary); ConvTasNet via `asteroid` (fallback) |
 | Bandwidth extension | AP-BWE (`ap_bwe`), LavaSR — available but currently disabled in presets |
-| Speech enhancement (General Clean) | ClearerVoice (`mossformer2_48k` or `frcrn_16k`) |
 | Spectral analysis | Meyda.js (in-process, Node.js) |
 | Enhancement EQ | FFmpeg `equalizer` filter (parametric biquad IIR) |
 | Compression / dynamics | Custom DSP (JavaScript) — compression, parallel compression, vocal expander, auto leveler |
@@ -428,7 +425,7 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 4. ✓ **Sprint 4** — Preset and output profile architecture: separate preset/output profile configs → Podcast Ready, General Clean → LUFS normalization path → output profile selector in UI → output measurements reporting for non-ACX profiles
 5. ✓ **Sprint NE-1** — Noise Eraser core path: spectral subtraction → DF3 → tonal pretreatment → Demucs separation → separation validation → Stage 5–7; ConvTasNet (asteroid) added as fallback
 6. ✓ **Sprint Auto-Leveler** — Auto Leveler + pipeline refactor: VAD-gated gain riding → silence analysis framework unified on frame-based measurement → pipeline becomes fully config-driven via preset `stages` array
-7. ✓ **Sprint Pipeline Expansion** — Extended stage registry: clip-gain de-esser → corrective EQ → reference EQ → air boost → resonance suppressor → vocal saturation → room presence → spectral subtraction → click remover → hum detector → vocal expander → parallel compression → ClearerVoice integration (General Clean) → multi-pass crest-factor compression for all presets
+7. ✓ **Sprint Pipeline Expansion** — Extended stage registry: clip-gain de-esser → corrective EQ → reference EQ → air boost → resonance suppressor → vocal saturation → room presence → spectral subtraction → click remover → hum detector → vocal expander → parallel compression → ClearerVoice integration (General Clean; since removed) → multi-pass crest-factor compression for all presets
 8. ✗ **Sprint 5** — Batch processing (ACX): batch analysis → per-file processing → consistency pass → batch report *(Creator tier gate — primary differentiator for narrators)*
 9. ✗ **Sprint 6** — Commercial library evaluation: Krisp vs. DeepFilterNet3 on real narrator recordings
 10. ✗ **Sprint NE-3** — Noise Eraser benchmarking: test corpus across noise floor severity levels → validate bandwidth extension → Demucs vs. ConvTasNet comparison
@@ -490,6 +487,7 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 | `docs/scheps_vocal_chain_thick_spec.md` | ✓ Present | Scheps Parallel, "Thick" character: signal chain, reference knob positions and the measured target curves. Authoritative on what the curves *are*; the biquad fit that reproduces them is `scripts/fit-pultec-curves.mjs`. Companion data: `data/pultec_curves/scheps_thick_curve_data.csv`. |
 | `docs/scheps_vocal_chain_presence_spec.md` | ✓ Present | The complementary "Presence" character. Read alongside the Thick spec — the two share a signal chain and differ only in curve data. Note the post-EQ cut is anchored at 20 kHz deliberately; the Naming Note explains why the preset is not called "Airy". |
 | `docs/fet1176_capture_protocol.md` | ✓ Present | LA Classic 76 (1176) reference capture protocol: control-parity check, the four-bounce null test, the 38-bounce capture matrix and what the tooling's self-test already settled. Companion to `scripts/fet-ballistics.mjs`. |
+| `docs/deployment.md` | ✓ Present | Backend deployment: the `server/Dockerfile` image (built from the repo root, with `data/reference_curves/` copied in, models cached in a `/models` volume), Coolify production / staging / PR-preview setup, environment variables per environment. |
 | `docs/user-accounts.md` | ✓ Present | User accounts: Supabase setup per environment, env vars, schema/RLS rules, client and server auth architecture, and the remaining steps (gating, presets, Stripe). |
 | `docs/acx_production_workflow.md` | ✗ Not present | ACX narrator workflow reference. Context for why features exist and where Instant Polish fits in the production chain. |
 | `docs/instant_polish_gtm.md` | ✗ Not present | Go-to-market strategy. Positioning, pricing, launch plan, SEO content map. |
