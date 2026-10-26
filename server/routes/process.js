@@ -71,15 +71,6 @@ router.post('/process', upload.single('file'), async (req, res) => {
       presetOverrides.separationModel = req.body.separation_model
     }
 
-    // clearervoice_eraser: model override
-    if (req.body.clearervoice_model && preset === 'clearervoice_eraser') {
-      const allowedModels = ['mossformer2_48k', 'frcrn_16k']
-      if (!allowedModels.includes(req.body.clearervoice_model)) {
-        return res.status(400).json({ error: `Invalid clearervoice_model: ${req.body.clearervoice_model}` })
-      }
-      presetOverrides.clearervoiceModel = req.body.clearervoice_model
-    }
-
     // voicefixer: mode override (0 | 1 | 2)
     if (req.body.voicefixer_mode != null && preset === 'voicefixer') {
       const mode = parseInt(req.body.voicefixer_mode, 10)
@@ -91,7 +82,6 @@ router.post('/process', upload.single('file'), async (req, res) => {
 
     const overrideSummary = [
       presetOverrides.separationModel   && `model=${presetOverrides.separationModel}`,
-      presetOverrides.clearervoiceModel && `clearervoice_model=${presetOverrides.clearervoiceModel}`,
       presetOverrides.voiceFixerMode    != null && `voicefixer_mode=${presetOverrides.voiceFixerMode}`,
     ].filter(Boolean).join(' ')
 

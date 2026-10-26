@@ -1,8 +1,9 @@
 # Instant Polish API server: Express plus the Python/PyTorch pipeline.
 #
 # Build from the REPOSITORY ROOT. The server imports two shared modules from
-# src/ (src/audio/presets.js and src/auth/plans.js), so the build context has
-# to contain both server/ and src/:
+# src/ (src/audio/presets.js and src/auth/plans.js) and reads the referenceEQ
+# stage's curves from data/reference_curves/, so the build context has to
+# contain all three:
 #
 #   docker build -f server/Dockerfile -t wavely-server .
 #   docker run -p 3001:3001 --env-file server/.env -v wavely-models:/models wavely-server
@@ -10,7 +11,7 @@
 # The root .dockerignore whitelists what the image needs, so the client app,
 # test data and mockups never reach the build.
 #
-# Model weights (DeepFilterNet3, Demucs, ClearerVoice, ...) are NOT baked in:
+# Model weights (DeepFilterNet3, Demucs, ...) are NOT baked in:
 # each downloads on first use into /models. Mount a persistent volume there or
 # every redeploy downloads them again. See docs/deployment.md.
 #
@@ -65,15 +66,14 @@ WORKDIR /app
 COPY --from=node-deps /app/server/node_modules server/node_modules
 COPY src/audio/presets.js src/audio/presets.js
 COPY src/auth/plans.js    src/auth/plans.js
+COPY data/reference_curves data/reference_curves
 COPY server server
 
 # Model caches all live under /models (one volume):
 #   DeepFilterNet3 → $XDG_CACHE_HOME/DeepFilterNet
 #   Demucs, torch.hub → $TORCH_HOME
-#   Hugging Face (LavaSR, ClearerVoice, AP-BWE) → $HF_HOME
+#   Hugging Face (LavaSR, AP-BWE) → $HF_HOME
 #   numba's compiled kernels → $NUMBA_CACHE_DIR
-#   ClearerVoice's own checkpoints/ dir, which it resolves against the Python
-#   worker's cwd (server/scripts) → symlinked into the volume.
 ENV PATH=/opt/venv/bin:$PATH \
     NODE_ENV=production \
     PORT=3001 \
@@ -86,8 +86,7 @@ ENV PATH=/opt/venv/bin:$PATH \
 
 # Non-root. server/ stays writable for uploads/ and pipeline logs.
 RUN useradd --create-home --uid 1000 app \
- && mkdir -p /models/clearvoice server/uploads \
- && ln -s /models/clearvoice server/scripts/checkpoints \
+ && mkdir -p /models server/uploads \
  && chown -R app:app /models /app/server
 USER app
 

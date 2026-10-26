@@ -10,10 +10,10 @@ app, a staging app and optional per-PR previews.
 
 | File | Purpose |
 |---|---|
-| `server/Dockerfile` | Node 22 + Python 3.11 venv (CPU PyTorch 2.0.1, DeepFilterNet3, Demucs, ClearerVoice, Silero, …). |
-| `.dockerignore` (repo root) | Whitelist: `server/` plus the two shared modules the server imports from `src/` (`src/audio/presets.js`, `src/auth/plans.js`). |
+| `server/Dockerfile` | Node 22 + Python 3.11 venv (CPU PyTorch 2.0.1, DeepFilterNet3, Demucs, Silero, …). |
+| `.dockerignore` (repo root) | Whitelist: `server/`, the two shared modules the server imports from `src/` (`src/audio/presets.js`, `src/auth/plans.js`) and `data/reference_curves/` (the `referenceEQ` stage's curves). |
 
-**Build from the repository root**, not `server/`, because of the `src/` imports:
+**Build from the repository root**, not `server/`, because of the `src/` and `data/` dependencies:
 
 ```bash
 docker build -f server/Dockerfile -t wavely-server .
@@ -28,9 +28,9 @@ Facts the rest of this guide relies on:
 - **No apt-get, no compiler.** Every Python and Node dependency installs from a
   prebuilt wheel or tarball; ffmpeg comes from `@ffmpeg-installer`.
 - **Model weights are not baked in.** DeepFilterNet3 (~170 MB), Demucs
-  (~350 MB), ClearerVoice etc. download on first use into **`/models`**
-  (`XDG_CACHE_HOME`, `TORCH_HOME`, `HF_HOME`, `NUMBA_CACHE_DIR` and ClearerVoice's
-  `checkpoints/` all point there). **Mount a persistent volume at `/models`**, or
+  (~350 MB) etc. download on first use into **`/models`**
+  (`XDG_CACHE_HOME`, `TORCH_HOME`, `HF_HOME` and `NUMBA_CACHE_DIR` all point
+  there). **Mount a persistent volume at `/models`**, or
   every redeploy downloads them again and the first job after a deploy is slow.
 - **CPU PyTorch** by default. On an NVIDIA host, build with
   `--build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu118`.
