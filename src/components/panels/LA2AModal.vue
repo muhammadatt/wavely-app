@@ -487,14 +487,18 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
 .v2a-auto-label { font-size: 9px; font-weight: 400; line-height: 1.25; letter-spacing: .16em; text-transform: uppercase; text-shadow: none; }
 .v2a-center { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .v2a-nameplate { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.v2a-nameplate-row { display: flex; align-items: center; gap: 10px; }
-.v2a-harmonics { margin-right: 9px; }
+/* The lamp hangs off the left of the name, outside the flow, so both lines of
+   lettering centre on the meter's axis rather than on name + lamp. */
+.v2a-nameplate-row { position: relative; display: flex; align-items: center; }
+.v2a-harmonics { position: absolute; right: calc(100% + 16px); top: 50%; transform: translateY(-50%); }
+/* Letter-spacing trails the last glyph too; the matching indent puts the ink,
+   not the box, on centre. */
 .v2a-model {
-  font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: .06em; text-transform: uppercase;
+  font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: .06em; padding-left: .06em; text-transform: uppercase;
   color: #b3262b; text-shadow: 0 1px 0 rgba(255,255,255,.5);
 }
 .v2a-kind {
-  font-size: 11px; font-weight: 400; line-height: 1; letter-spacing: .16em; text-transform: uppercase;
+  font-size: 11px; font-weight: 400; line-height: 1; letter-spacing: .16em; padding-left: .16em; text-transform: uppercase;
   color: #232527;
 }
 
