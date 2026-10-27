@@ -294,13 +294,12 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
 
 <template>
   <div
-    class="fixed inset-0 z-[450] flex items-start justify-center pt-[10vh] px-4"
-    style="background:rgba(5,7,9,.6);backdrop-filter:blur(5px)"
+    class="fixed inset-0 z-[450] flex items-start justify-center pt-[10vh] px-4 dialog-scrim"
     @click.self="close"
   >
     <div
-      class="w-full max-w-[460px] flex flex-col rounded-[18px] overflow-hidden font-['Inter']"
-      style="background:linear-gradient(155deg,#181c22,#0d1013);box-shadow:0 24px 60px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.07);animation:bounceIn .28s cubic-bezier(.34,1.4,.64,1) both"
+      class="w-full max-w-[460px] flex flex-col rounded-[18px] overflow-hidden font-['Inter'] dialog-surface"
+      style="animation:bounceIn .28s cubic-bezier(.34,1.4,.64,1) both"
       role="dialog"
       aria-modal="true"
       aria-labelledby="save-dialog-title"

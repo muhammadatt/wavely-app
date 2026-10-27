@@ -122,3 +122,33 @@ body {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Dialogs and menus ────────────────────────────────────────────────────────
+   Shared by the modal dialogs (Save, Export, Files, Sign in, Upgrade) and the
+   top-bar menus. The panel used to fade #181c22 → #0d1013 over a #0e1116 page,
+   so a dialog read as a hole in the page rather than something on top of it.
+   Now the scrim sinks the page further, and the panel is a step LIGHTER than
+   the page with a lit top edge, a hairline border and a dark outer ring. */
+.dialog-scrim {
+  background: rgba(2, 4, 6, 0.78);
+  backdrop-filter: blur(6px);
+}
+
+.dialog-surface {
+  background: linear-gradient(160deg, #2c343f 0%, #232a33 55%, #1f252d 100%);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 28px 70px rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* A menu has no scrim behind it, so it needs its edge more than a dialog. */
+.menu-surface {
+  background: linear-gradient(160deg, #2c343f, #222831);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 16px 40px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}

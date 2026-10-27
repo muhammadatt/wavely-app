@@ -97,8 +97,7 @@ async function signOut() {
 
       <div
         v-if="open"
-        class="absolute right-0 top-[36px] z-[400] w-[230px] rounded-[12px] overflow-hidden font-['Inter']"
-        style="background:linear-gradient(155deg,#181c22,#0d1013);box-shadow:0 16px 40px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.08)"
+        class="absolute right-0 top-[36px] z-[400] w-[230px] rounded-[12px] overflow-hidden font-['Inter'] menu-surface"
       >
         <div class="px-4 pt-3 pb-[10px] border-b border-[rgba(255,255,255,.07)]">
           <div class="text-[12.5px] font-bold text-[#eaf6f8] truncate">{{ displayName }}</div>

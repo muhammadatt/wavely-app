@@ -143,8 +143,7 @@ const fileMeta = computed(() => {
           </button>
           <div
             v-if="saveMenuOpen"
-            class="absolute right-0 top-[34px] z-[400] min-w-[150px] rounded-[10px] overflow-hidden py-1"
-            style="background:linear-gradient(155deg,#181c22,#0d1013);box-shadow:0 16px 40px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.08)"
+            class="absolute right-0 top-[34px] z-[400] min-w-[150px] rounded-[10px] overflow-hidden py-1 menu-surface"
           >
             <button
               class="w-full text-left px-3 py-[7px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
