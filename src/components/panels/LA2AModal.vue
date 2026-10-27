@@ -11,11 +11,10 @@ import PresetMenu from './PresetMenu.vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import HardwareKnob from '../hardware/HardwareKnob.vue'
 import HardwareSlideSwitch from '../hardware/HardwareSlideSwitch.vue'
-import HardwareFader from '../hardware/HardwareFader.vue'
 import LampButton from '../hardware/LampButton.vue'
 import FoldedLcd from '../hardware/FoldedLcd.vue'
-import ClassicVuMeter from '../hardware/ClassicVuMeter.vue'
-import { engraving, evenAngles, formatSignedDb, DIAL_MIN_DEG, DIAL_MAX_DEG } from '../hardware/hardwareDial.js'
+import MachinedVuMeter from '../hardware/MachinedVuMeter.vue'
+import { engraving, evenAngles, formatSignedDb } from '../hardware/hardwareDial.js'
 import FloatingWindow from './FloatingWindow.vue'
 import LA2ATuningPanel from './LA2ATuningPanel.vue'
 import { isLA2ATuningVisible } from '../../audio/effects/la2aTuning.js'
@@ -54,7 +53,7 @@ onMounted(() => {
 const ACCENT = '#f5a623'
 
 /** Brushed silver, lit from above. */
-const FACEPLATE = 'linear-gradient(180deg,#dddedd,#d2d4d3 55%,#c4c7c6)'
+const FACEPLATE = 'linear-gradient(180deg,#e2e3e2,#d8d9d8 55%,#cdcfce)'
 
 const off = computed(() => !la2aPreview.value)
 
@@ -73,11 +72,11 @@ const GAIN_SCALE = (() => {
   return { dots: evenAngles(17), labels: evenAngles(labels.length).map((angle, i) => ({ angle, text: labels[i] })) }
 })()
 const PR_TICKS = evenAngles(21)
-const TRIM_DOTS = [DIAL_MIN_DEG, DIAL_MAX_DEG]
-const EMPH_LABELS = [
-  { angle: DIAL_MIN_DEG, text: 'FLAT' },
-  { angle: DIAL_MAX_DEG, text: 'HF' },
-]
+/** The two small knobs: eleven ticks, words at the stops (and 50 on Mix). */
+const SMALL_TICKS = evenAngles(11)
+const smallScale = (texts) => evenAngles(texts.length).map((angle, i) => ({ angle, text: texts[i] }))
+const EMPH_LABELS = smallScale(['FLAT', '', '', '', 'HF'])
+const MIX_LABELS = smallScale(['DRY', '', '50', '', 'WET'])
 
 const MODE_OPTIONS = [
   { value: 'compress', label: 'Comp', title: 'Compress — around 3:1, levelling' },
@@ -101,7 +100,7 @@ const formatEmph = (v) => {
   return db < 0.05 ? 'Flat' : `+${db.toFixed(1)} dB`
 }
 
-// ── Readouts (the face prints none under the big knobs: they show on hover,
+// ── Readouts (the face prints none under its knobs: they show on hover,
 // focus or drag, as the bubble the design calls for) ──────────────────────────
 const prTip = computed(() => String(Math.round(la2aPeakReduction.value)))
 const gainTip = computed(() => formatSignedDb(la2aGain.value))
@@ -236,19 +235,22 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
 
     <div class="v2a" :class="{ 'is-off': off }">
       <div class="v2a-ear v2a-ear--l" aria-hidden="true">
-        <div class="v2a-ear-slot" />
-        <div class="v2a-ear-screw"><div class="v2a-ear-screw-slot" /></div>
-        <div class="v2a-ear-slot" />
+        <div class="v2a-ear-slot v2a-ear-slot--top" />
+        <div class="v2a-ear-slot v2a-ear-slot--bottom" />
       </div>
 
       <div class="v2a-main">
+        <div class="v2a-screw v2a-screw--tl" aria-hidden="true"><div class="v2a-screw-slot" /></div>
+        <div class="v2a-screw v2a-screw--tr" aria-hidden="true"><div class="v2a-screw-slot" /></div>
+        <div class="v2a-screw v2a-screw--bl" aria-hidden="true"><div class="v2a-screw-slot" /></div>
+        <div class="v2a-screw v2a-screw--br" aria-hidden="true"><div class="v2a-screw-slot" /></div>
+
         <!-- ── Top row: Peak Reduction · meter · Gain ─────────────────────── -->
         <div class="v2a-top">
           <div class="v2a-col">
-            <div class="v2a-title">Peak Reduction</div>
             <HardwareKnob
               class="v2a-ctl"
-              variant="chrome"
+              variant="bakelite"
               :model-value="la2aPeakReduction"
               @update:model-value="syncPeakReduction"
               :min="0" :max="100" :step="1"
@@ -259,16 +261,17 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
               label="Peak Reduction" :format-value="v => String(Math.round(v))"
               :disabled="off"
             />
+            <div class="v2a-title">Peak Reduction</div>
           </div>
 
           <div class="v2a-center">
-            <ClassicVuMeter :reduction-db="la2aReduction" :active="la2aPreview" :width="272" />
+            <MachinedVuMeter :reduction-db="la2aReduction" :active="la2aPreview" />
             <div class="v2a-nameplate">
               <div class="v2a-nameplate-row">
                 <LampButton
                   class="v2a-harmonics v2a-ctl"
                   :on="la2aAnalog"
-                  :size="20"
+                  :size="22"
                   :disabled="off"
                   :title="la2aAnalog
                     ? 'Harmonics on: the valve and cell colour. Click for clean — the compression is identical.'
@@ -282,12 +285,11 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
           </div>
 
           <div class="v2a-col">
-            <div class="v2a-title">Gain</div>
             <!-- Stays draggable while Auto Makeup is lit: touching it takes
                  over and drops AUTO, so a gain the user sets actually sticks. -->
             <HardwareKnob
               class="v2a-ctl"
-              variant="chrome"
+              variant="bakelite"
               :model-value="la2aGain"
               @update:model-value="syncGain"
               :min="GAIN_MIN_DB" :max="GAIN_MAX_DB" :step="0.1"
@@ -298,10 +300,28 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
               label="Gain" :format-value="formatSignedDb"
               :disabled="off"
             />
+            <div class="v2a-title v2a-title--gain">
+              Gain
+              <!-- Auto makeup drives the Gain knob to whatever restores the
+                   input's level; touching Gain takes over and drops AUTO. -->
+              <div class="v2a-auto">
+                <LampButton
+                  class="v2a-ctl"
+                  :on="la2aAutoMakeup"
+                  :size="22"
+                  :disabled="off"
+                  :title="la2aAutoMakeup
+                    ? 'Auto makeup on. Click to take manual control of Gain.'
+                    : 'Auto makeup off. Click to let the plugin set the output gain.'"
+                  @click="toggleAutoMakeup"
+                />
+                <span class="v2a-auto-label">Auto</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- ── Bottom row: folded settings · mode + HF emph · makeup ──────── -->
+        <!-- ── Bottom row: folded settings · mode + HF emph · mix ─────────── -->
         <div class="v2a-bottom">
           <div class="v2a-left">
             <FoldedLcd
@@ -343,65 +363,51 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
               :disabled="off"
               label="Mode"
             />
-            <div class="v2a-emph">
+            <div class="v2a-small-knob">
               <HardwareKnob
-                class="v2a-ctl"
-                variant="trim"
+                class="v2a-ctl v2a-knob-sm"
+                variant="bakelite-sm"
                 :model-value="hfEmph"
                 @update:model-value="setHfEmph"
                 :min="0" :max="100" :step="1"
                 :default-value="0"
-                :dots="TRIM_DOTS" :labels="EMPH_LABELS"
+                mark-style="line" :dots="SMALL_TICKS" :labels="EMPH_LABELS"
+                rotate-labels
+                :tip="formatEmph(hfEmph)"
                 label="HF emphasis (R37)" :format-value="formatEmph"
                 :disabled="off"
               />
-              <div class="v2a-emph-read">{{ formatEmph(hfEmph) }}</div>
-              <div class="v2a-emph-title">HF Emph</div>
+              <div class="v2a-small-title">HF Emph</div>
             </div>
           </div>
 
           <div class="v2a-right">
-            <div class="v2a-makeup">
-              <!-- Auto makeup drives the Gain knob to whatever restores the
-                   input's level; touching Gain takes over and drops AUTO. -->
-              <LampButton
-                class="v2a-ctl"
-                :on="la2aAutoMakeup"
-                :size="36"
-                :disabled="off"
-                :title="la2aAutoMakeup
-                  ? 'Auto makeup on. Click to take manual control of Gain.'
-                  : 'Auto makeup off. Click to let the plugin set the output gain.'"
-                @click="toggleAutoMakeup"
-              />
-              <div class="v2a-small">Auto Makeup</div>
-            </div>
             <!-- Blends the untouched input back in — parallel compression
                  without a second track. Auto Makeup solves through the blend,
                  so the Gain it sets is right at every Mix. -->
-            <div class="v2a-mix">
-              <HardwareFader
-                class="v2a-ctl"
-                cap="black"
+            <div class="v2a-small-knob">
+              <HardwareKnob
+                class="v2a-ctl v2a-knob-md"
+                variant="bakelite-md"
                 :model-value="la2aMix"
                 @update:model-value="syncMix"
                 :min="0" :max="1" :step="0.01"
                 :default-value="1"
-                min-label="0" max-label="100"
+                mark-style="line" :dots="SMALL_TICKS" :labels="MIX_LABELS"
+                rotate-labels
                 :tip="formatPercent(la2aMix)"
                 label="Mix" :format-value="formatPercent"
                 :disabled="off"
               />
-              <div class="v2a-mix-read">{{ formatPercent(la2aMix) }}</div>
-              <div class="v2a-mix-title">Mix</div>
+              <div class="v2a-small-title">Mix</div>
             </div>
           </div>
         </div>
       </div>
+
       <div class="v2a-ear v2a-ear--r" aria-hidden="true">
-        <div class="v2a-ear-slot" />
-        <div class="v2a-ear-screw"><div class="v2a-ear-screw-slot" /></div>
-        <div class="v2a-ear-slot" />
+        <div class="v2a-ear-slot v2a-ear-slot--top" />
+        <div class="v2a-ear-slot v2a-ear-slot--bottom" />
       </div>
     </div>
 
@@ -440,53 +446,68 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
   font-family: Oswald, 'Inter', system-ui, sans-serif;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
 }
-.v2a-ear {
-  width: 42px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center;
-  justify-content: space-between; padding: 22px 0;
-  background: linear-gradient(180deg,#e2e3e2,#cfd1d0 55%,#bfc2c1);
-}
-.v2a-ear--l { box-shadow: inset -1px 0 0 rgba(0,0,0,.1); }
-.v2a-ear--r { box-shadow: inset 1px 0 0 rgba(0,0,0,.1); }
-.v2a-ear-slot { width: 9px; height: 26px; border-radius: 4px; background: #b9bcbb; box-shadow: inset 0 1px 3px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.6); }
-.v2a-ear-screw { position: relative; width: 13px; height: 13px; border-radius: 50%; background: radial-gradient(circle at 36% 30%,#f2f4f6,#9da2a6 62%,#71767a); box-shadow: inset 0 -1px 2px rgba(0,0,0,.4), 0 1px 0 rgba(255,255,255,.6); }
-.v2a-ear-screw-slot { position: absolute; left: 2px; right: 2px; top: 5.5px; height: 2px; border-radius: 1px; background: rgba(0,0,0,.4); transform: rotate(28deg); }
-.v2a-ear--r .v2a-ear-screw-slot { transform: rotate(-36deg); }
+.v2a-ear { position: relative; width: 42px; flex: 0 0 auto; background: linear-gradient(180deg,#e4e5e4,#d3d5d4 55%,#c3c6c5); }
+.v2a-ear--l { box-shadow: inset -1px 0 0 rgba(0,0,0,.14); }
+.v2a-ear--r { box-shadow: inset 1px 0 0 rgba(0,0,0,.14); }
+/* The rack slots, cut through to the window behind. */
+.v2a-ear-slot { position: absolute; width: 22px; height: 10px; background: #1c1d1f; box-shadow: inset 0 1px 2px rgba(0,0,0,.8); }
+.v2a-ear-slot--top { top: 40px; }
+.v2a-ear-slot--bottom { bottom: 52px; }
+.v2a-ear--l .v2a-ear-slot { left: 0; border-radius: 0 5px 5px 0; }
+.v2a-ear--r .v2a-ear-slot { right: 0; border-radius: 5px 0 0 5px; }
 
 .v2a-main { flex: 1; min-width: 0; position: relative; padding: 24px 18px; }
+.v2a-screw {
+  position: absolute; width: 11px; height: 11px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 36% 30%,#f2f4f6,#9da2a6 62%,#71767a);
+  box-shadow: inset 0 -1px 2px rgba(0,0,0,.4), 0 1px 0 rgba(255,255,255,.6);
+}
+.v2a-screw-slot { position: absolute; left: 2px; right: 2px; top: 4.5px; height: 2px; background: rgba(0,0,0,.4); }
+.v2a-screw--tl { left: 12px; top: 12px; }
+.v2a-screw--tr { right: 12px; top: 12px; }
+.v2a-screw--bl { left: 12px; bottom: 10px; }
+.v2a-screw--br { right: 12px; bottom: 10px; }
+.v2a-screw--tl .v2a-screw-slot { transform: rotate(28deg); }
+.v2a-screw--tr .v2a-screw-slot { transform: rotate(-36deg); }
+.v2a-screw--bl .v2a-screw-slot { transform: rotate(-60deg); }
+.v2a-screw--br .v2a-screw-slot { transform: rotate(12deg); }
+
 .v2a-top { position: relative; display: flex; align-items: flex-start; justify-content: space-between; }
 .v2a-col { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+/* Engraved under the knob, tucked into the bottom of its dial box. */
 .v2a-title {
+  position: relative; margin-top: -14px;
   font-size: 15px; font-weight: 500; line-height: 1; letter-spacing: .24em; text-transform: uppercase;
   white-space: nowrap; color: #2f3134; text-shadow: 0 1px 0 rgba(255,255,255,.6);
 }
-.v2a-center { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.v2a-nameplate { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.v2a-nameplate-row { display: flex; align-items: center; }
+.v2a-auto {
+  position: absolute; right: calc(100% + 14px); top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: row-reverse; align-items: center; gap: 7px;
+}
+.v2a-auto-label { font-size: 9px; font-weight: 400; line-height: 1.25; letter-spacing: .16em; text-transform: uppercase; text-shadow: none; }
+.v2a-center { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.v2a-nameplate { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.v2a-nameplate-row { display: flex; align-items: center; gap: 10px; }
 .v2a-harmonics { margin-right: 9px; }
 .v2a-model {
-  font-size: 20px; font-weight: 600; line-height: 1; letter-spacing: .3em; text-transform: uppercase;
-  color: #b0322a; text-shadow: 0 1px 0 rgba(255,255,255,.5);
+  font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: .06em; text-transform: uppercase;
+  color: #b3262b; text-shadow: 0 1px 0 rgba(255,255,255,.5);
 }
 .v2a-kind {
-  margin-top: 5px; font-size: 12px; font-weight: 400; line-height: 1; letter-spacing: .14em; text-transform: uppercase;
-  color: #232527; text-shadow: 0 1px 0 rgba(255,255,255,.6);
+  font-size: 11px; font-weight: 400; line-height: 1; letter-spacing: .16em; text-transform: uppercase;
+  color: #232527;
 }
 
-.v2a-bottom { position: relative; margin-top: 10px; display: grid; grid-template-columns: 196px 1fr 196px; align-items: stretch; }
-.v2a-left { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 18px; }
-.v2a-mid { display: flex; align-items: center; justify-content: center; gap: 44px; }
-.v2a-emph { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-.v2a-emph-read { margin-top: -10px; font-size: 9px; line-height: 1; letter-spacing: .14em; color: #55585b; }
-.v2a-emph-title { font-size: 8px; line-height: 1; letter-spacing: .2em; padding-left: .2em; text-transform: uppercase; color: #484a4d; }
-.v2a-right { display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 18px; }
-.v2a-makeup { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-.v2a-small {
-  margin-top: 3px; padding-left: .16em; font-size: 10px; line-height: 1; letter-spacing: .16em;
-  text-transform: uppercase; white-space: nowrap; color: #2f3134;
-}
-.v2a-mix { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-.v2a-mix-read { font-size: 9px; line-height: 1; letter-spacing: .14em; text-transform: uppercase; color: #55585b; }
-.v2a-mix-title { font-size: 9px; line-height: 1; letter-spacing: .18em; text-transform: uppercase; color: #2f3134; }
+.v2a-bottom { position: relative; margin-top: -18px; display: grid; grid-template-columns: 196px 1fr 196px; align-items: end; }
+.v2a-left { display: flex; flex-direction: column; align-items: center; gap: 18px; padding-bottom: 4px; }
+.v2a-mid { display: flex; align-items: center; justify-content: center; gap: 44px; padding: 30px 0 4px; }
+.v2a-right { display: flex; align-items: flex-end; justify-content: center; }
+.v2a-small-knob { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+/* The dial boxes are square; the design's are trimmed top and bottom. */
+.v2a-knob-sm { margin: -6px 0; }
+.v2a-knob-md { margin: -6px 0; }
+.v2a-small-knob :deep(.hw-numeral) { letter-spacing: .1em; }
+.v2a-small-title { margin-top: 3px; font-size: 10px; line-height: 1; letter-spacing: .18em; padding-left: .18em; text-transform: uppercase; color: #2f3134; }
 .v2a-bench { display: flow-root; padding: 0 26px 20px; background: #1d2027; }
 
 /* Unit off: the controls go dead and dim; the engraving stays. Knobs dim

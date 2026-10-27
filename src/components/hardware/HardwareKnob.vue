@@ -10,7 +10,10 @@ import { clamp01, pctToDeg, polar } from './hardwareDial.js'
  *  - `small`   fluted skirt, chrome cap, black dot (Classic 76 Attack/Release)
  *  - `mini`    chrome cap, black dot
  *  - `chrome`  black body, chrome cap, pointer bar, fixed centre screw (Vintage 2A Peak Reduction/Gain)
- *  - `trim`    a small slotted trimmer in a recessed well (Vintage 2A HF Emph)
+ *  - `trim`    a small slotted trimmer in a recessed well
+ *  - `bakelite`, `bakelite-md`, `bakelite-sm`  a black moulded knob with a
+ *              pointed skirt and white pointer bar, large / medium / small
+ *              (Vintage 2A Peak Reduction and Gain / Mix / HF Emph)
  *
  * The engraving's colours come from CSS custom properties (`--hw-ink`,
  * `--hw-ink-shadow`, `--hw-mark`, `--hw-mark-shadow`) with the dark Classic 76
@@ -62,7 +65,12 @@ const SPECS = {
   mini: { box: 86, cap: 42, dotR: 30, dotD: 2.4, labelR: 40, labelPx: 10 },
   chrome: { box: 196, cap: 112, dotR: 72, dotD: 3, labelR: 88, labelPx: 11 },
   trim: { box: 88, cap: 26, dotR: 22, dotD: 2.8, labelR: 36, labelPx: 9 },
+  bakelite: { box: 196, cap: 100, dotR: 55, dotD: 3, labelR: 67, labelPx: 13 },
+  'bakelite-md': { box: 96, cap: 46, dotR: 27, dotD: 2.4, labelR: 35, labelPx: 9.5 },
+  'bakelite-sm': { box: 80, cap: 40, dotR: 23, dotD: 2.4, labelR: 30, labelPx: 9.5 },
 }
+const BAKELITE = new Set(['bakelite', 'bakelite-md', 'bakelite-sm'])
+const bakelite = computed(() => BAKELITE.has(props.variant))
 const spec = computed(() => SPECS[props.variant] ?? SPECS.large)
 const dotR = computed(() => props.dotRadius ?? spec.value.dotR)
 const dotD = computed(() => props.dotSize ?? spec.value.dotD)
@@ -168,6 +176,7 @@ function onKeyDown(e) {
       <div
         v-for="(a, i) in dots" :key="'d' + i"
         class="hw-line"
+        :class="{ 'hw-line--short': variant === 'bakelite-md' || variant === 'bakelite-sm' }"
         :style="{ transform: `translate(-50%,-50%) rotate(${a}deg) translateY(-${dotR}px)` }"
       />
     </template>
@@ -237,6 +246,11 @@ function onKeyDown(e) {
           <div class="hw-c-chrome-shade" />
           <div class="hw-c-bar" />
         </template>
+        <template v-else-if="bakelite">
+          <div class="hw-b-skirt" />
+          <div class="hw-b-body" />
+          <div class="hw-b-bar" />
+        </template>
         <template v-else-if="variant === 'trim'">
           <div class="hw-t-screw"><div class="hw-t-slot" /></div>
         </template>
@@ -261,6 +275,7 @@ function onKeyDown(e) {
   position: absolute; left: 50%; top: 50%; width: 1.5px; height: 7px; border-radius: .75px;
   background: var(--hw-mark, #f0eee9); box-shadow: var(--hw-mark-shadow, 0 1px 0 rgba(0,0,0,.8));
 }
+.hw-line--short { height: 5px; box-shadow: none; }
 .hw-numeral {
   position: absolute;
   font-family: Oswald, 'Inter', system-ui, sans-serif; line-height: 1;
@@ -289,6 +304,9 @@ function onKeyDown(e) {
 .hw-cap--large { background: #07080a; box-shadow: 0 11px 16px rgba(0,0,0,.6), 0 3px 5px rgba(0,0,0,.72); }
 .hw-cap--small, .hw-cap--mini { background: #0a0a0b; box-shadow: 0 9px 14px rgba(0,0,0,.68), 0 2px 4px rgba(0,0,0,.85); }
 .hw-cap--chrome { background: radial-gradient(120% 120% at 34% 20%,#3b3f45 0%,#1b1d20 46%,#0a0b0c 100%); box-shadow: 0 16px 24px rgba(0,0,0,.5), 0 4px 7px rgba(0,0,0,.7), inset 0 1px 1px rgba(255,255,255,.14); }
+/* The bakelite body is a rotor child (its pointed skirt has to turn with it),
+   so the cap itself paints nothing. */
+.hw-cap--bakelite, .hw-cap--bakelite-md, .hw-cap--bakelite-sm { background: transparent; }
 .hw-cap--trim { background: radial-gradient(circle at 50% 50%,#8c9194 0%,#6a6f73 70%,#4a4e52 100%); box-shadow: inset 0 1px 2px rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.7); }
 .hw-rotor { position: absolute; inset: 0; border-radius: 50%; }
 .hw-rotor > div { position: absolute; border-radius: 50%; }
@@ -315,4 +333,23 @@ function onKeyDown(e) {
 .hw-t-screw { inset: 2px; background: radial-gradient(circle at 36% 30%,#f2f4f6,#9da2a6 62%,#71767a); box-shadow: inset 0 -1px 2px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.45); }
 .hw-t-slot { position: absolute; left: 50%; top: 3px; bottom: 3px; width: 3px; margin-left: -1.5px; border-radius: 1.5px; background: rgba(0,0,0,.5); box-shadow: 0 1px 0 rgba(255,255,255,.5); }
 .hw-rotor > .hw-pip { left: 50%; top: 9px; width: 7.5px; height: 7.5px; margin-left: -3.75px; background: radial-gradient(circle at 40% 30%,#26292e,#070809); box-shadow: inset 0 1px 1px rgba(255,255,255,.22), 0 0 0 .5px rgba(255,255,255,.3); }
+.hw-rotor > .hw-b-skirt {
+  left: 50%; transform: rotate(45deg); border-radius: 7px 2px 7px 2px;
+  background: linear-gradient(135deg,#3a3b3d,#0c0c0d 70%); box-shadow: 0 8px 12px rgba(0,0,0,.35);
+}
+.hw-b-body {
+  inset: 0;
+  background: radial-gradient(120% 120% at 34% 22%,#46474a 0%,#1a1a1c 42%,#070708 100%);
+  box-shadow: 0 14px 20px rgba(0,0,0,.42), 0 3px 6px rgba(0,0,0,.6), inset 0 1px 1px rgba(255,255,255,.18);
+}
+.hw-rotor > .hw-b-bar { left: 50%; border-radius: 2px; background: #f4f3ef; box-shadow: 0 1px 1px rgba(0,0,0,.6); }
+.hw-cap--bakelite .hw-b-skirt { top: -6px; width: 28px; height: 28px; margin-left: -14px; }
+.hw-cap--bakelite .hw-b-bar { top: -5px; width: 4px; height: 36px; margin-left: -2px; }
+.hw-cap--bakelite-md .hw-b-skirt { top: -3px; width: 14px; height: 14px; margin-left: -7px; border-radius: 4px 1px 4px 1px; }
+.hw-cap--bakelite-md .hw-b-bar { top: -2px; width: 3px; height: 18px; margin-left: -1.5px; border-radius: 1.5px; }
+.hw-cap--bakelite-sm .hw-b-skirt { top: -2px; width: 12px; height: 12px; margin-left: -6px; border-radius: 4px 1px 4px 1px; }
+.hw-cap--bakelite-sm .hw-b-bar { top: -1px; width: 3px; height: 15px; margin-left: -1.5px; border-radius: 1.5px; }
+.hw-cap--bakelite-md .hw-b-body, .hw-cap--bakelite-sm .hw-b-body {
+  box-shadow: 0 8px 12px rgba(0,0,0,.4), 0 2px 4px rgba(0,0,0,.6), inset 0 1px 1px rgba(255,255,255,.18);
+}
 </style>
