@@ -250,7 +250,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
           <div class="v2a-col">
             <HardwareKnob
               class="v2a-ctl"
-              variant="bakelite"
+              variant="large"
               :model-value="la2aPeakReduction"
               @update:model-value="syncPeakReduction"
               :min="0" :max="100" :step="1"
@@ -289,7 +289,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
                  over and drops AUTO, so a gain the user sets actually sticks. -->
             <HardwareKnob
               class="v2a-ctl"
-              variant="bakelite"
+              variant="large"
               :model-value="la2aGain"
               @update:model-value="syncGain"
               :min="GAIN_MIN_DB" :max="GAIN_MAX_DB" :step="0.1"
@@ -474,9 +474,9 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
 
 .v2a-top { position: relative; display: flex; align-items: flex-start; justify-content: space-between; }
 .v2a-col { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-/* Engraved under the knob, tucked into the bottom of its dial box. */
+/* Engraved under the knob, clear of its bottom numerals. */
 .v2a-title {
-  position: relative; margin-top: -14px;
+  position: relative; margin-top: 6px;
   font-size: 15px; font-weight: 500; line-height: 1; letter-spacing: .24em; text-transform: uppercase;
   white-space: nowrap; color: #2f3134; text-shadow: 0 1px 0 rgba(255,255,255,.6);
 }
