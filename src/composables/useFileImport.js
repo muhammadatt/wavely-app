@@ -4,6 +4,7 @@ import { decodeAudioFile, isSupportedFormat, SUPPORTED_FORMATS } from '../audio/
 import { computePeakCache } from '../audio/processing.js'
 import { parseSourceFormat, SOURCE_HEADER_BYTES } from '../audio/sourceFormat.js'
 import { isCancellation } from '../audio/fileSave.js'
+import { useWorkingFolder } from './useWorkingFolder.js'
 
 /**
  * Shared file import. Every entry point into the app — the empty state, the
@@ -146,7 +147,9 @@ export function useFileImport() {
     if (typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function') {
       let handles
       try {
+        const startIn = useWorkingFolder().folder.value
         handles = await window.showOpenFilePicker({
+          ...(startIn ? { startIn } : {}),
           multiple,
           types: [{
             description: 'Audio',

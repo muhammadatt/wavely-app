@@ -6,6 +6,7 @@ import {
   writeFileToHandle, saveTargetKind, downloadFile,
 } from '../audio/fileSave.js'
 import { savePlan, toSaveFileName } from '../audio/saveFormat.js'
+import { useWorkingFolder } from './useWorkingFolder.js'
 
 /**
  * Save / Save As.
@@ -21,7 +22,8 @@ import { savePlan, toSaveFileName } from '../audio/saveFormat.js'
  * location shown as that file's folder. Confirming it either writes straight
  * over the original (same name and extension — `savePlan`'s 'replace') or
  * opens the system save dialog already in that folder with the name filled
- * in, so the location is one click to confirm.
+ * in, so the location is one click to confirm — or, with a working folder
+ * (`useWorkingFolder`) holding the destination, writes straight into it.
  */
 
 // App-wide rather than per-component: the tab strip, the command bar and the
@@ -37,6 +39,7 @@ export function useFileSave() {
     markDocumentSaved, getSaveTarget, setSaveTarget,
     getSaveSettings, setSaveSettings, getSourceHandle,
   } = useEditorState()
+  const workingFolder = useWorkingFolder()
 
   /**
    * The handle a Save is anchored to: the file last saved to, else the file
@@ -131,22 +134,45 @@ export function useFileSave() {
    *
    * @param {string} docId
    * @param {{ fileName: string, format: string, bitDepth: string, sampleRate: number,
-   *           bitrate: number, chosenHandle?: FileSystemFileHandle|null }} choice
+   *           bitrate: number, chosenHandle?: FileSystemFileHandle|null,
+   *           folderTarget?: { segments: string[], explicit?: boolean }|null }} choice
    * @returns {Promise<boolean>} whether the document is now on disk
    */
-  async function confirmSave(docId, { fileName, format, bitDepth, sampleRate, bitrate, chosenHandle = null }) {
+  async function confirmSave(docId, {
+    fileName, format, bitDepth, sampleRate, bitrate, chosenHandle = null, folderTarget = null,
+  }) {
     const doc = getDocument(docId)
     if (!doc || isSaving.value) return false
 
     const anchor = anchorHandleFor(docId)
     const plan = savePlan({
-      supportsInPlace: canSaveInPlace(), chosenHandle, anchorHandle: anchor, fileName, format,
+      supportsInPlace: canSaveInPlace(), chosenHandle, anchorHandle: anchor, folderTarget, fileName, format,
     })
 
     let handle = null
+    // A file this Save created in the working folder; removed again if the
+    // save fails, so a failed encode does not leave an empty file behind.
+    let created = null
     if (plan === 'chosen') handle = chosenHandle
     else if (plan === 'replace') handle = anchor
-    else if (plan === 'pick') {
+    else if (plan === 'folder') {
+      const name = toSaveFileName(fileName, format)
+      try {
+        // Permission first, inside the click's user gesture.
+        if (!await workingFolder.ensureFolderPermission()) {
+          showToast(`Save needs permission to write to ${workingFolder.folderName.value}`)
+          return false
+        }
+        const dir = await workingFolder.directoryAt(folderTarget.segments)
+        const existing = await workingFolder.existingFile(dir, name)
+        handle = existing ?? await dir.getFileHandle(name, { create: true })
+        if (!existing) created = { dir, name }
+      } catch (err) {
+        console.error('Working folder write failed:', err)
+        showToast(`Couldn't write to ${workingFolder.folderName.value ?? 'the working folder'}`)
+        return false
+      }
+    } else if (plan === 'pick') {
       try {
         handle = await pickSaveTarget(fileName, anchor, format)
       } catch (err) {
@@ -165,7 +191,10 @@ export function useFileSave() {
     isSaving.value = true
     try {
       const ok = await writeTo(doc, handle, settings)
-      if (!ok) return false
+      if (!ok) {
+        if (created) created.dir.removeEntry(created.name).catch(() => {})
+        return false
+      }
       // Adopt the destination only once something has actually been written to
       // it — a handle that failed its first write is not a place later Saves
       // should silently go.

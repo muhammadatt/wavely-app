@@ -11,8 +11,9 @@ import { encodeWav, wavHeaderBytes } from '../../src/audio/wavEncode.js'
 import { parseSourceFormat } from '../../src/audio/sourceFormat.js'
 import {
   defaultSaveSettings, estimateSaveBytes, formatAvailable, normalizeSettings,
-  qualityLossWarning, savePlan, sampleRateOptions, toSaveFileName, wavBytesFor,
+  qualityLossWarning, savePlan, sampleRateOptions, toSaveFileName, wavBytesFor, formatFolderPath,
 } from '../../src/audio/saveFormat.js'
+import { directoryPathIn } from '../../src/composables/useWorkingFolder.js'
 
 const ch = (...v) => Float32Array.from(v)
 
@@ -226,4 +227,38 @@ test('save filenames: a matching extension kept as typed, an audio one swapped, 
   assert.equal(toSaveFileName('take. ', 'wav'), 'take.wav')
   // A dotfile has no extension to keep: it gets one, it is not taken for one.
   assert.equal(toSaveFileName('.wav'), '.wav.wav')
+})
+
+// ── Working folder ──────────────────────────────────────────────────────────
+
+test('a working-folder destination writes straight in; the original\u2019s name still replaces it', () => {
+  const inside = { segments: ['Raw'], explicit: false }
+  const base = { supportsInPlace: true, anchorHandle: { name: 'ch01.wav' }, folderTarget: inside }
+  assert.equal(savePlan({ ...base, fileName: 'ch01 edit.wav' }), 'folder')
+  assert.equal(savePlan({ ...base, fileName: 'ch01.wav' }), 'replace')
+  // No original at all (a drop with no handle): the folder, not the system dialog.
+  assert.equal(savePlan({ supportsInPlace: true, folderTarget: { segments: [] }, fileName: 'x.wav' }), 'folder')
+  // Change… still wins, and no write API still downloads.
+  assert.equal(savePlan({ ...base, chosenHandle: { name: 'y.wav' }, fileName: 'y.wav' }), 'chosen')
+  assert.equal(savePlan({ ...base, supportsInPlace: false, fileName: 'x.wav' }), 'download')
+})
+
+test('“Save to the folder instead” outranks replacing an original that lives outside it', () => {
+  const p = { supportsInPlace: true, anchorHandle: { name: 'ch01.wav' }, folderTarget: { segments: [], explicit: true }, fileName: 'ch01.wav' }
+  assert.equal(savePlan(p), 'folder')
+})
+
+test('folder locations read relative to the working folder', () => {
+  assert.equal(formatFolderPath('Ch Audiobook', []), 'Ch Audiobook')
+  assert.equal(formatFolderPath('Ch Audiobook', ['Raw takes', 'Day 2']), 'Ch Audiobook › Raw takes › Day 2')
+})
+
+test('directoryPathIn drops the file’s own name, and is null outside or on error', async () => {
+  const root = {
+    resolve: async h => (h.name === 'out.wav' ? null : h.name === 'bad.wav' ? Promise.reject(new Error('x')) : ['Raw', h.name]),
+  }
+  assert.deepEqual(await directoryPathIn(root, { name: 'ch01.wav' }), ['Raw'])
+  assert.equal(await directoryPathIn(root, { name: 'out.wav' }), null)
+  assert.equal(await directoryPathIn(root, { name: 'bad.wav' }), null)
+  assert.equal(await directoryPathIn(null, { name: 'ch01.wav' }), null)
 })

@@ -2,31 +2,35 @@
 import { computed, ref, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileSave } from '../composables/useFileSave.js'
+import { useWorkingFolder } from '../composables/useWorkingFolder.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { formatSize, WAV_SIZE_LIMIT } from '../audio/exportPlan.js'
 import { isCancellation, pickSaveTarget } from '../audio/fileSave.js'
 import {
   BIT_DEPTHS, FORMATS, FORMAT_IDS, MP3_BITRATES, bitDepthById, sampleRateOptions,
   defaultSaveSettings, normalizeSettings, formatAvailable, qualityLossWarning,
-  formatRate, estimateSaveBytes, savePlan, toSaveFileName,
+  formatRate, estimateSaveBytes, savePlan, toSaveFileName, formatFolderPath,
 } from '../audio/saveFormat.js'
 import BaseButton from './ui/BaseButton.vue'
 
 /**
  * The Save dialog: name, location, format (WAV / FLAC / MP3), bit depth or
- * bitrate, and sample rate, before anything is written. Opens on the first Save of a document and on every Save As;
- * later Saves reuse what was confirmed here (useFileSave).
+ * bitrate, and sample rate, before anything is written. Opens on the first
+ * Save of a document and on every Save As; later Saves reuse what was
+ * confirmed here (useFileSave).
  *
- * ⚠ A WEB PAGE CANNOT SHOW OR TYPE A FOLDER PATH. "Location" is therefore a
- * description — the original file's folder, a folder chosen with Change…, or
- * the downloads folder — and choosing a different one goes through the system
- * save dialog, opened in the original's folder. What the page CAN do is write
- * straight back to the file it was opened from, which is what Save does when
- * the name is left as it is.
+ * ⚠ A WEB PAGE IS NEVER TOLD AN ABSOLUTE PATH. With a WORKING FOLDER set
+ * (useWorkingFolder) the location is shown relative to it — "Ch Audiobook ›
+ * Raw takes" — and a Save there writes straight in with no system dialog.
+ * Outside it, "Location" stays a description (the original's folder, a folder
+ * chosen with Change…, the downloads folder) and a new name goes through the
+ * system save dialog, opened in the original's folder.
  */
 
 const { appState, getDocument, showToast, getSaveTarget, getSaveSettings } = useEditorState()
 const { confirmSave, anchorHandleFor, isSaving, saveProgress, canSaveInPlace } = useFileSave()
+const wf = useWorkingFolder()
+const folderName = wf.folderName
 
 const docId = appState.saveDialog?.docId
 const doc = computed(() => getDocument(docId))
@@ -74,14 +78,67 @@ watch(fileName, name => {
   if (chosenHandle.value && toSaveFileName(name, format.value) !== chosenHandle.value.name) chosenHandle.value = null
 })
 
+// ── Working folder ──────────────────────────────────────────────────────────
+const folderSupported = supportsInPlace && wf.supported
+// Where the original (or the last save) and a Change… destination sit inside
+// the working folder, as directory names; null when outside it or unknown.
+const anchorInFolder = ref(null)
+const chosenInFolder = ref(null)
+// "Save to <folder> instead", for an original that lives outside it.
+const useFolderRoot = ref(false)
+watch(wf.folder, async () => {
+  useFolderRoot.value = false
+  anchorInFolder.value = anchor ? await wf.locate(anchor) : null
+  chosenInFolder.value = chosenHandle.value ? await wf.locate(chosenHandle.value) : null
+}, { immediate: true })
+watch(chosenHandle, async h => { chosenInFolder.value = h ? await wf.locate(h) : null })
+
+const folderTarget = computed(() => {
+  if (!folderSupported || !wf.folder.value || chosenHandle.value) return null
+  if (useFolderRoot.value) return { segments: [], explicit: true }
+  if (anchorInFolder.value) return { segments: anchorInFolder.value, explicit: false }
+  if (!anchor) return { segments: [], explicit: false }
+  return null
+})
+
 const plan = computed(() => savePlan({
-  supportsInPlace, chosenHandle: chosenHandle.value, anchorHandle: anchor,
+  supportsInPlace, chosenHandle: chosenHandle.value, anchorHandle: anchor, folderTarget: folderTarget.value,
   fileName: fileName.value, format: format.value,
 }))
 
+// Whether a 'folder' Save would land on a file that is already there — said
+// out loud, since it overwrites with no system dialog to warn about it.
+const replacesInFolder = ref(false)
+let existsSeq = 0
+watch([plan, folderTarget, fileName, format], async () => {
+  const seq = ++existsSeq
+  if (plan.value !== 'folder') { replacesInFolder.value = false; return }
+  let exists = false
+  try {
+    const dir = await wf.directoryAt(folderTarget.value.segments)
+    exists = !!await wf.existingFile(dir, toSaveFileName(fileName.value, format.value))
+  } catch {
+    // No read permission yet this visit: unknown, and the Save will ask.
+  }
+  if (seq === existsSeq) replacesInFolder.value = exists
+}, { immediate: true })
+
+async function pickFolder() {
+  if (isSaving.value) return
+  try {
+    await wf.chooseFolder(chosenHandle.value ?? anchor)
+  } catch (err) {
+    console.error('Folder picker failed:', err)
+    showToast("Couldn't open the folder picker")
+  }
+}
+
 const locationText = computed(() => {
   if (!supportsInPlace) return 'Your downloads folder'
-  if (chosenHandle.value) return 'The folder you chose'
+  if (chosenHandle.value) {
+    return chosenInFolder.value ? formatFolderPath(folderName.value, chosenInFolder.value) : 'The folder you chose'
+  }
+  if (folderTarget.value) return formatFolderPath(folderName.value, folderTarget.value.segments)
   if (anchor) return anchorIsLastSave
     ? `Same folder as the last save (${anchor.name})`
     : `Same folder as the original (${anchor.name})`
@@ -92,6 +149,9 @@ const planText = computed(() => {
   switch (plan.value) {
     case 'replace': return `Replaces ${anchor.name}.`
     case 'chosen': return `Saves as ${chosenHandle.value.name}.`
+    case 'folder': return replacesInFolder.value
+      ? `Replaces ${toSaveFileName(fileName.value, format.value)} there.`
+      : 'Saves straight into that folder.'
     case 'download': return 'Your browser can’t write files directly, so this downloads.'
     default: return anchor
       ? 'You’ll confirm in the system dialog, opened in that folder.'
@@ -148,7 +208,7 @@ function close() {
 async function changeLocation() {
   if (isSaving.value) return
   try {
-    const handle = await pickSaveTarget(fileName.value, chosenHandle.value ?? anchor, format.value)
+    const handle = await pickSaveTarget(fileName.value, chosenHandle.value ?? anchor ?? wf.folder.value, format.value)
     chosenHandle.value = handle
     fileName.value = handle.name
   } catch (err) {
@@ -164,6 +224,7 @@ async function save() {
     fileName: fileName.value,
     ...settings.value,
     chosenHandle: chosenHandle.value,
+    folderTarget: folderTarget.value,
   })
   if (ok && appState.saveDialog?.docId === docId) appState.saveDialog = null
 }
@@ -230,6 +291,25 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
               aria-label="Change location"
               @click="changeLocation"
             >Change…</BaseButton>
+          </div>
+          <div v-if="folderSupported" class="flex flex-wrap items-center gap-x-[6px] gap-y-[2px] text-[11px] leading-snug text-[rgba(255,255,255,.45)]">
+            <template v-if="folderName">
+              <span>Working folder: <span class="font-semibold text-[rgba(255,255,255,.7)]">{{ folderName }}</span></span>
+              <span aria-hidden="true">·</span>
+              <button class="sd-link" :disabled="isSaving" @click="pickFolder">Change</button>
+              <span aria-hidden="true">·</span>
+              <button class="sd-link" :disabled="isSaving" @click="wf.clearFolder()">Remove</button>
+              <template v-if="anchor && !anchorInFolder && !chosenHandle">
+                <span aria-hidden="true">·</span>
+                <button class="sd-link" :disabled="isSaving" @click="useFolderRoot = !useFolderRoot">
+                  {{ useFolderRoot ? 'Use the original’s folder' : `Save to ${folderName} instead` }}
+                </button>
+              </template>
+            </template>
+            <template v-else>
+              <span>Set a working folder to see where files go and save without the system dialog.</span>
+              <button class="sd-link" :disabled="isSaving" @click="pickFolder">Set working folder…</button>
+            </template>
           </div>
         </div>
 
@@ -330,6 +410,16 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
 .sd-readonly {
   background: transparent;
   color: rgba(255,255,255,.7);
+}
+.sd-link {
+  color: #35d3e6;
+  font-weight: 600;
+}
+.sd-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.sd-link:disabled {
+  opacity: .4;
 }
 .sd-seg {
   display: flex;

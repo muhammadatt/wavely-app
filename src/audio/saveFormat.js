@@ -179,12 +179,25 @@ export function estimateSaveBytes(seconds, channels, settings) {
 }
 
 /**
+ * A location inside the working folder as the dialog shows it:
+ * "Ch Audiobook › Raw takes". Relative to the folder by necessity — a page is
+ * never told absolute paths (see useWorkingFolder.js).
+ */
+export function formatFolderPath(folderName, segments = []) {
+  return [folderName, ...segments].join(' › ')
+}
+
+/**
  * Where a confirmed Save goes.
  *
  *   'download' — no write API in this browser; the bytes go to the downloads folder
  *   'chosen'   — the user already picked a destination with Change location…
  *   'replace'  — the name matches the file the anchor handle points at: write
  *                over it with no further dialog
+ *   'folder'   — a destination inside the working folder is in effect: write
+ *                straight into that directory under the typed name. An
+ *                `explicit` one (the user chose the folder over the
+ *                original's) outranks 'replace'
  *   'pick'     — anything else: open the system save dialog in the anchor's
  *                folder with the name filled in, to confirm the location
  *
@@ -192,14 +205,20 @@ export function estimateSaveBytes(seconds, channels, settings) {
  * from. ⚠ 'replace' NEEDS THE EXTENSION TO MATCH TOO, and gets it for free: the
  * name is compared after `toSaveFileName` gives it the chosen format's
  * extension, so FLAC bytes can never land in an .mp3 or a .wav — saving
- * take.mp3 as WAV names take.wav and goes to the system dialog.
+ * take.mp3 as WAV names take.wav and goes to the system dialog (or, with a
+ * working folder destination, straight into it).
  *
  * @param {{ supportsInPlace: boolean, chosenHandle?: object|null,
- *           anchorHandle?: object|null, fileName: string, format?: string }} p
+ *           anchorHandle?: object|null, folderTarget?: object|null,
+ *           fileName: string, format?: string }} p
  */
-export function savePlan({ supportsInPlace, chosenHandle = null, anchorHandle = null, fileName, format = 'wav' }) {
+export function savePlan({ supportsInPlace, chosenHandle = null, anchorHandle = null, folderTarget = null, fileName, format = 'wav' }) {
   if (!supportsInPlace) return 'download'
   if (chosenHandle) return 'chosen'
+  // Picked over the original on purpose ("Save to <folder> instead"): the
+  // folder wins even under the original's name.
+  if (folderTarget?.explicit) return 'folder'
   if (anchorHandle?.name && anchorHandle.name === toSaveFileName(fileName, format)) return 'replace'
+  if (folderTarget) return 'folder'
   return 'pick'
 }
