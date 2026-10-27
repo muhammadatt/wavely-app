@@ -549,6 +549,15 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
   color: rgba(255,255,255,.6);
   transition: background-color .15s, color .15s;
 }
+/* A divider between items, drawn as an inset shadow so it takes no width.
+   None on either side of the selected item: its fill is the edge there. */
+.sd-seg button + button {
+  box-shadow: inset 1px 0 0 rgba(255,255,255,.1);
+}
+.sd-seg button.on,
+.sd-seg button.on + button {
+  box-shadow: none;
+}
 .sd-seg button.on {
   background: #35d3e6;
   color: #08161a;
