@@ -101,6 +101,19 @@ export function encodeWav(channelData, sampleRate, numChannels, { bits = 16, flo
 }
 
 /**
+ * One channel as integer samples at `bits` (16 or 24), quantized exactly as
+ * the WAV encoder does — so a FLAC and a WAV saved at the same depth decode to
+ * the same samples.
+ */
+export function toIntSamples(channel, bits) {
+  const neg = bits === 24 ? 0x800000 : 0x8000
+  const pos = neg - 1
+  const out = new Int32Array(channel.length)
+  for (let i = 0; i < channel.length; i++) out[i] = quantize(channel[i], neg, pos)
+  return out
+}
+
+/**
  * Clip to [-1, 1] and scale asymmetrically — negative full scale reaches the
  * format's minimum, positive stops one code short — then round to the nearest
  * code. NaN (a render fault) comes out as silence rather than an arbitrary code.

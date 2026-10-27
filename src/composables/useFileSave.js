@@ -3,9 +3,9 @@ import { useEditorState } from './useEditorState.js'
 import { renderTimelineForSave } from '../audio/export.js'
 import {
   canSaveInPlace, isCancellation, pickSaveTarget, ensureWritePermission,
-  writeWavToHandle, saveTargetKind, downloadWav,
+  writeFileToHandle, saveTargetKind, downloadFile,
 } from '../audio/fileSave.js'
-import { bitDepthById, savePlan, toSaveFileName } from '../audio/saveFormat.js'
+import { savePlan, toSaveFileName } from '../audio/saveFormat.js'
 
 /**
  * Save / Save As.
@@ -16,17 +16,20 @@ import { bitDepthById, savePlan, toSaveFileName } from '../audio/saveFormat.js'
  * format it was last saved in, and says one word when it lands.
  *
  * The first Save on a document, and every Save As, opens the Save dialog
- * (`SaveDialog.vue`): name, bit depth and sample rate, pre-filled from the file
- * the document was opened from, with the location shown as that file's folder.
- * Confirming it either writes straight over the original (same name, a WAV —
- * `savePlan`'s 'replace') or opens the system save dialog already in that
- * folder with the name filled in, so the location is one click to confirm.
+ * (`SaveDialog.vue`): name, format (WAV / FLAC / MP3), depth or bitrate and
+ * sample rate, pre-filled from the file the document was opened from, with the
+ * location shown as that file's folder. Confirming it either writes straight
+ * over the original (same name and extension — `savePlan`'s 'replace') or
+ * opens the system save dialog already in that folder with the name filled
+ * in, so the location is one click to confirm.
  */
 
 // App-wide rather than per-component: the tab strip, the command bar and the
 // keyboard handler all need to know a write is in flight, and two of them can
 // be looking at the same document.
 const isSaving = ref(false)
+// { stage: 'render'|'resample'|'encode'|'write', fraction } while a save runs.
+const saveProgress = ref(null)
 
 export function useFileSave() {
   const {
@@ -48,7 +51,7 @@ export function useFileSave() {
    * Render and write, assuming a destination is already settled.
    * @param {object} doc
    * @param {FileSystemFileHandle|null} handle null = download
-   * @param {{ bitDepth: string, sampleRate: number, fileName: string }} settings
+   * @param {{ format: string, bitDepth: string, sampleRate: number, bitrate: number, fileName: string }} settings
    * @returns {Promise<boolean>} whether the document is now on disk
    */
   async function writeTo(doc, handle, settings) {
@@ -70,20 +73,21 @@ export function useFileSave() {
 
     // Yield: the render is synchronous and long enough on a full chapter to
     // swallow the frame that would have shown the button going busy.
+    saveProgress.value = { stage: 'render', fraction: 0 }
     await new Promise(r => setTimeout(r, 0))
 
-    const depth = bitDepthById(settings.bitDepth)
-    let wav
+    let file
     try {
-      wav = renderTimelineForSave(doc.segments, doc.currentFile.sampleRate, doc.currentFile.channels, {
-        bits: depth.bits, float: depth.float, sampleRate: settings.sampleRate,
-      })
+      file = await renderTimelineForSave(
+        doc.segments, doc.currentFile.sampleRate, doc.currentFile.channels, settings,
+        { onProgress: (stage, fraction) => { saveProgress.value = { stage, fraction } } },
+      )
     } catch (err) {
       console.error(`Failed to render ${doc.name}:`, err)
       showToast(`Couldn't save ${doc.name}`)
       return false
     }
-    if (!wav) {
+    if (!file) {
       showToast('Nothing to save — the timeline is empty')
       return false
     }
@@ -91,15 +95,16 @@ export function useFileSave() {
     if (!handle) {
       // No write API in this browser. The bytes still reach the disk, just via
       // the download folder and under whatever name it picks on a collision.
-      const savedAs = toSaveFileName(settings.fileName)
-      downloadWav(wav, savedAs)
+      const savedAs = toSaveFileName(settings.fileName, settings.format)
+      downloadFile(file.bytes, savedAs, file.mime)
       markDocumentSaved(doc.id)
       showToast(`Saved ${savedAs} to your downloads`)
       return true
     }
 
+    saveProgress.value = { stage: 'write', fraction: 1 }
     try {
-      await writeWavToHandle(handle, wav)
+      await writeFileToHandle(handle, file.bytes, file.mime)
     } catch (err) {
       console.error(`Failed to write ${doc.name}:`, err)
       showToast(`Couldn't write ${handle.name ?? doc.name}`)
@@ -125,17 +130,17 @@ export function useFileSave() {
    * the user gesture, so nothing slow may run before them.
    *
    * @param {string} docId
-   * @param {{ fileName: string, bitDepth: string, sampleRate: number,
-   *           chosenHandle?: FileSystemFileHandle|null }} choice
+   * @param {{ fileName: string, format: string, bitDepth: string, sampleRate: number,
+   *           bitrate: number, chosenHandle?: FileSystemFileHandle|null }} choice
    * @returns {Promise<boolean>} whether the document is now on disk
    */
-  async function confirmSave(docId, { fileName, bitDepth, sampleRate, chosenHandle = null }) {
+  async function confirmSave(docId, { fileName, format, bitDepth, sampleRate, bitrate, chosenHandle = null }) {
     const doc = getDocument(docId)
     if (!doc || isSaving.value) return false
 
     const anchor = anchorHandleFor(docId)
     const plan = savePlan({
-      supportsInPlace: canSaveInPlace(), chosenHandle, anchorHandle: anchor, fileName,
+      supportsInPlace: canSaveInPlace(), chosenHandle, anchorHandle: anchor, fileName, format,
     })
 
     let handle = null
@@ -143,7 +148,7 @@ export function useFileSave() {
     else if (plan === 'replace') handle = anchor
     else if (plan === 'pick') {
       try {
-        handle = await pickSaveTarget(fileName, anchor)
+        handle = await pickSaveTarget(fileName, anchor, format)
       } catch (err) {
         // Cancelling a save dialog is an ordinary thing to do and needs no toast.
         if (isCancellation(err)) return false
@@ -153,7 +158,10 @@ export function useFileSave() {
       }
     }
 
-    const settings = { bitDepth, sampleRate, fileName: handle?.name ?? toSaveFileName(fileName) }
+    const settings = {
+      format, bitDepth, sampleRate, bitrate,
+      fileName: handle?.name ?? toSaveFileName(fileName, format),
+    }
     isSaving.value = true
     try {
       const ok = await writeTo(doc, handle, settings)
@@ -169,6 +177,7 @@ export function useFileSave() {
       return true
     } finally {
       isSaving.value = false
+      saveProgress.value = null
     }
   }
 
@@ -193,8 +202,9 @@ export function useFileSave() {
       return await writeTo(doc, kind === 'write' ? handle : null, settings)
     } finally {
       isSaving.value = false
+      saveProgress.value = null
     }
   }
 
-  return { saveDocument, saveDocumentAs, confirmSave, anchorHandleFor, isSaving, canSaveInPlace }
+  return { saveDocument, saveDocumentAs, confirmSave, anchorHandleFor, isSaving, saveProgress, canSaveInPlace }
 }

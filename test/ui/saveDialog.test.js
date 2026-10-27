@@ -10,8 +10,8 @@ import assert from 'node:assert/strict'
 import { encodeWav, wavHeaderBytes } from '../../src/audio/wavEncode.js'
 import { parseSourceFormat } from '../../src/audio/sourceFormat.js'
 import {
-  defaultSaveSettings, qualityLossWarning, savePlan, sampleRateOptions,
-  toSaveFileName, wavBytesFor,
+  defaultSaveSettings, estimateSaveBytes, formatAvailable, normalizeSettings,
+  qualityLossWarning, savePlan, sampleRateOptions, toSaveFileName, wavBytesFor,
 } from '../../src/audio/saveFormat.js'
 
 const ch = (...v) => Float32Array.from(v)
@@ -122,33 +122,70 @@ test('lossy and unreadable files fall back to the extension', () => {
 
 const wav24 = { container: 'wav', lossy: false, bitDepth: 24, float: false, sampleRate: 44100, channels: 1 }
 
-test('defaults keep the source’s depth and rate, so accepting them loses nothing', () => {
-  assert.deepEqual(defaultSaveSettings(wav24, 48000), { bitDepth: '24', sampleRate: 44100 })
-  assert.equal(qualityLossWarning(defaultSaveSettings(wav24, 48000), wav24), null)
-  assert.deepEqual(defaultSaveSettings({ ...wav24, bitDepth: 32, float: true }, 48000).bitDepth, '32f')
-  assert.deepEqual(defaultSaveSettings({ ...wav24, bitDepth: 16 }, 48000).bitDepth, '16')
-  // Nothing known: 16-bit at the document's rate, as Save always wrote.
-  assert.deepEqual(defaultSaveSettings(null, 48000), { bitDepth: '16', sampleRate: 48000 })
-  assert.deepEqual(defaultSaveSettings({ container: 'mp3', lossy: true, sampleRate: null }, 48000), { bitDepth: '16', sampleRate: 48000 })
+test('defaults keep the source’s format, depth and rate, so accepting them loses nothing', () => {
+  assert.deepEqual(defaultSaveSettings(wav24, 48000, 1), { format: 'wav', bitDepth: '24', sampleRate: 44100, bitrate: 192 })
+  assert.equal(qualityLossWarning(defaultSaveSettings(wav24, 48000, 1), wav24), null)
+  assert.equal(defaultSaveSettings({ ...wav24, bitDepth: 32, float: true }, 48000).bitDepth, '32f')
+  assert.equal(defaultSaveSettings({ ...wav24, bitDepth: 16 }, 48000).bitDepth, '16')
+  // Nothing known: 16-bit WAV at the document's rate, as Save always wrote.
+  assert.deepEqual(defaultSaveSettings(null, 48000), { format: 'wav', bitDepth: '16', sampleRate: 48000, bitrate: 192 })
+  // An AIFF or an M4A has no format of its own on offer: WAV.
+  assert.equal(defaultSaveSettings({ ...wav24, container: 'aiff' }, 48000).format, 'wav')
+  assert.equal(defaultSaveSettings({ container: 'm4a', lossy: true, sampleRate: null }, 48000).format, 'wav')
+})
+
+test('a FLAC original defaults to FLAC; an MP3 to MP3 at its own bitrate, rounded up', () => {
+  const flac = { container: 'flac', lossy: false, bitDepth: 24, float: false, sampleRate: 96000, channels: 2 }
+  assert.deepEqual(defaultSaveSettings(flac, 48000), { format: 'flac', bitDepth: '24', sampleRate: 96000, bitrate: 192 })
+  const mp3 = { container: 'mp3', lossy: true, bitDepth: null, float: false, sampleRate: 44100, channels: 2, bitrate: 128 }
+  assert.deepEqual(defaultSaveSettings(mp3, 48000), { format: 'mp3', bitDepth: '16', sampleRate: 44100, bitrate: 128 })
+  assert.equal(defaultSaveSettings({ ...mp3, bitrate: 112 }, 48000).bitrate, 128)
+  assert.equal(defaultSaveSettings({ ...mp3, bitrate: null }, 48000).bitrate, 192) // VBR: ACX's rate
+  // A 22.05 kHz MP3 has no MPEG-1 rate of its own: the next one up.
+  assert.equal(defaultSaveSettings({ ...mp3, sampleRate: 22050 }, 48000).sampleRate, 32000)
+})
+
+test('switching format fixes what the new one cannot write', () => {
+  assert.deepEqual(normalizeSettings({ format: 'flac', bitDepth: '32f', sampleRate: 96000, bitrate: 192 }),
+    { format: 'flac', bitDepth: '24', sampleRate: 96000, bitrate: 192 })
+  assert.equal(normalizeSettings({ format: 'mp3', bitDepth: '24', sampleRate: 96000, bitrate: 192 }).sampleRate, 48000)
+  assert.equal(normalizeSettings({ format: 'mp3', bitDepth: '24', sampleRate: 44100, bitrate: 192 }, 6).format, 'wav')
+  assert.equal(formatAvailable('mp3', 2), true)
+  assert.equal(formatAvailable('mp3', 6), false)
+  assert.equal(formatAvailable('flac', 6), true)
 })
 
 test('a lower depth or rate than a lossless original is called out; a lossy one never is', () => {
-  assert.match(qualityLossWarning({ bitDepth: '16', sampleRate: 44100 }, wav24), /24-bit → 16-bit/)
-  assert.match(qualityLossWarning({ bitDepth: '24', sampleRate: 22050 }, wav24), /44\.1 kHz → 22\.05 kHz/)
-  assert.equal(qualityLossWarning({ bitDepth: '32f', sampleRate: 96000 }, wav24), null)
-  assert.match(qualityLossWarning({ bitDepth: '24', sampleRate: 44100 }, { ...wav24, bitDepth: 32, float: true }), /float/)
-  assert.equal(qualityLossWarning({ bitDepth: '16', sampleRate: 22050 }, { container: 'mp3', lossy: true }), null)
+  const w = x => ({ format: 'wav', ...x })
+  assert.match(qualityLossWarning(w({ bitDepth: '16', sampleRate: 44100 }), wav24), /24-bit → 16-bit/)
+  assert.match(qualityLossWarning(w({ bitDepth: '24', sampleRate: 22050 }), wav24), /44\.1 kHz → 22\.05 kHz/)
+  assert.equal(qualityLossWarning(w({ bitDepth: '32f', sampleRate: 96000 }), wav24), null)
+  assert.match(qualityLossWarning(w({ bitDepth: '24', sampleRate: 44100 }), { ...wav24, bitDepth: 32, float: true }), /float/)
+  assert.equal(qualityLossWarning(w({ bitDepth: '16', sampleRate: 22050 }), { container: 'mp3', lossy: true }), null)
 })
 
-test('the rate list carries an odd source rate and the document rate', () => {
-  const opts = sampleRateOptions({ sampleRate: 47952 }, 48000)
+test('the rate list carries an odd source rate and the document rate; MP3 lists only its own', () => {
+  const opts = sampleRateOptions('wav', { sampleRate: 47952 }, 48000)
   assert.ok(opts.includes(47952) && opts.includes(44100))
   assert.deepEqual(opts, [...opts].sort((a, b) => a - b))
+  assert.deepEqual(sampleRateOptions('mp3', { sampleRate: 47952 }, 48000), [32000, 44100, 48000])
 })
 
-test('size estimate follows depth and rate, header included', () => {
+test('MP3 warns about lossy output; re-encoding a lossy original says so, with the bitrate drop', () => {
+  assert.match(qualityLossWarning({ format: 'mp3', sampleRate: 44100, bitrate: 192 }, wav24), /MP3 is lossy/)
+  const mp3 = { container: 'mp3', lossy: true, sampleRate: 44100, bitrate: 192 }
+  assert.match(qualityLossWarning({ format: 'mp3', sampleRate: 44100, bitrate: 128 }, mp3), /lossy original.*192 → 128 kbps/)
+  assert.equal(qualityLossWarning({ format: 'flac', bitDepth: '16', sampleRate: 44100 }, mp3), null)
+  assert.match(qualityLossWarning({ format: 'flac', bitDepth: '24', sampleRate: 44100 }, { ...wav24, bitDepth: 32, float: true }), /float → 24-bit/)
+})
+
+test('size estimate follows format, depth and rate', () => {
   assert.equal(wavBytesFor(1, 2, { bitDepth: '24', sampleRate: 48000 }), 48000 * 2 * 3 + 44)
   assert.equal(wavBytesFor(1, 1, { bitDepth: '32f', sampleRate: 44100 }), 44100 * 4 + 58)
+  assert.deepEqual(estimateSaveBytes(60, 2, { format: 'mp3', bitrate: 192, sampleRate: 44100 }), { bytes: 1440000, approx: false })
+  const flac = estimateSaveBytes(60, 1, { format: 'flac', bitDepth: '16', sampleRate: 44100 })
+  assert.equal(flac.approx, true)
+  assert.ok(flac.bytes < wavBytesFor(60, 1, { bitDepth: '16', sampleRate: 44100 }))
 })
 
 // ── Where a Save goes ───────────────────────────────────────────────────────
@@ -163,9 +200,12 @@ test('keeping a WAV’s name replaces it; any other name confirms in the system 
   assert.equal(savePlan({ supportsInPlace: true, anchorHandle: null, fileName: 'x.wav' }), 'pick')
 })
 
-test('an MP3 original is never replaced — the output is always WAV', () => {
+test('an original is replaced only in its own format — the extension is part of the name', () => {
   const anchor = { name: 'take.mp3' }
-  assert.equal(savePlan({ supportsInPlace: true, anchorHandle: anchor, fileName: 'take.mp3' }), 'pick')
+  assert.equal(savePlan({ supportsInPlace: true, anchorHandle: anchor, fileName: 'take.mp3', format: 'wav' }), 'pick')
+  assert.equal(savePlan({ supportsInPlace: true, anchorHandle: anchor, fileName: 'take.mp3', format: 'mp3' }), 'replace')
+  assert.equal(savePlan({ supportsInPlace: true, anchorHandle: { name: 'take.flac' }, fileName: 'take', format: 'flac' }), 'replace')
+  assert.equal(savePlan({ supportsInPlace: true, anchorHandle: { name: 'take.flac' }, fileName: 'take.flac', format: 'wav' }), 'pick')
   assert.equal(toSaveFileName('take.mp3'), 'take.wav')
 })
 
@@ -175,10 +215,15 @@ test('a destination chosen with Change… wins; no write API always downloads', 
   assert.equal(savePlan({ supportsInPlace: false, chosenHandle: chosen, fileName: 'a.wav' }), 'download')
 })
 
-test('save filenames: .wav kept as typed, anything else swapped', () => {
+test('save filenames: a matching extension kept as typed, an audio one swapped, others appended', () => {
   assert.equal(toSaveFileName('Take 2.WAV'), 'Take 2.WAV')
   assert.equal(toSaveFileName('Take 2'), 'Take 2.wav')
   assert.equal(toSaveFileName('mix.flac'), 'mix.wav')
+  assert.equal(toSaveFileName('mix.wav', 'flac'), 'mix.flac')
+  assert.equal(toSaveFileName('mix.FLAC', 'flac'), 'mix.FLAC')
+  assert.equal(toSaveFileName('mix.m4a', 'mp3'), 'mix.mp3')
+  assert.equal(toSaveFileName('Chapter 1.2', 'mp3'), 'Chapter 1.2.mp3')
+  assert.equal(toSaveFileName('take. ', 'wav'), 'take.wav')
   // A dotfile has no extension to keep: it gets one, it is not taken for one.
   assert.equal(toSaveFileName('.wav'), '.wav.wav')
 })

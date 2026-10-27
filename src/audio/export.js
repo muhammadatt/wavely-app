@@ -2,7 +2,6 @@ import { renderRegionToBuffer } from './processing.js'
 import { getTimelineDuration } from './operations.js'
 import { toWavFileName, downloadBlob } from './download.js'
 import { encodeWav } from './wavEncode.js'
-import { resample } from './dsp/resample.js'
 
 /**
  * Render a timeline to a WAV ArrayBuffer.
@@ -30,21 +29,41 @@ export function exportAsWav(segments, sampleRate, channels, fileName) {
 }
 
 /**
- * Render a timeline for Save: at the chosen sample format and rate.
+ * Render a timeline for Save, in the chosen format, depth and rate.
  *
- * The timeline renders at the document's rate (the AudioContext's) and is then
- * converted — `resample` is a windowed sinc, not the browser's linear
- * interpolation. Same rate in and out skips the conversion entirely, so a save
- * at the document's own rate is the same samples Export writes.
+ * The timeline renders here at the document's rate (the AudioContext's); the
+ * resample and the encode run in a worker (`encodeWorker.js`) — MP3 and FLAC
+ * encodes of a long chapter take long enough to freeze the page otherwise.
+ * `resample` is a windowed sinc, not the browser's linear interpolation, and
+ * equal rates skip it, so a WAV at the document's rate is the same samples
+ * Export writes.
  *
- * @param {{ bits: number, float: boolean, sampleRate: number }} format
- * @returns {ArrayBuffer|null} null when the timeline is empty
+ * @param {{ format: string, bitDepth: string, sampleRate: number, bitrate: number }} settings
+ * @param {{ onProgress?: (stage: 'resample'|'encode', fraction: number) => void }} [options]
+ * @returns {Promise<{ bytes: Uint8Array, mime: string }|null>} null when the timeline is empty
  */
-export function renderTimelineForSave(segments, docRate, channels, { bits, float, sampleRate }) {
+export async function renderTimelineForSave(segments, docRate, channels, settings, { onProgress } = {}) {
   const totalDuration = getTimelineDuration(segments)
   if (totalDuration === 0) return null
 
-  let channelData = renderRegionToBuffer(segments, 0, totalDuration, docRate, channels)
-  if (sampleRate !== docRate) channelData = channelData.map(ch => resample(ch, docRate, sampleRate))
-  return encodeWav(channelData, sampleRate, channels, { bits, float })
+  const channelData = renderRegionToBuffer(segments, 0, totalDuration, docRate, channels)
+  // Transferred, not copied: the render's arrays are fresh and unused after
+  // this. A view onto a larger buffer would hand the worker more than it
+  // should own, so those are copied.
+  const owned = channelData.map(ch => (ch.byteOffset === 0 && ch.byteLength === ch.buffer.byteLength ? ch : ch.slice()))
+
+  const worker = new Worker(new URL('../workers/encodeWorker.js', import.meta.url), { type: 'module' })
+  try {
+    return await new Promise((resolve, reject) => {
+      worker.onmessage = ({ data }) => {
+        if (data.type === 'progress') onProgress?.(data.stage, data.fraction)
+        else if (data.type === 'done') resolve({ bytes: data.bytes, mime: data.mime })
+        else reject(new Error(data.message ?? 'encode failed'))
+      }
+      worker.onerror = e => reject(new Error(e.message || 'encode worker failed'))
+      worker.postMessage({ channelData: owned, fromRate: docRate, settings }, owned.map(ch => ch.buffer))
+    })
+  } finally {
+    worker.terminate()
+  }
 }

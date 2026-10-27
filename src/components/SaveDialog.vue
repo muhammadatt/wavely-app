@@ -6,14 +6,15 @@ import { getTimelineDuration } from '../audio/operations.js'
 import { formatSize, WAV_SIZE_LIMIT } from '../audio/exportPlan.js'
 import { isCancellation, pickSaveTarget } from '../audio/fileSave.js'
 import {
-  BIT_DEPTHS, bitDepthById, sampleRateOptions, defaultSaveSettings,
-  qualityLossWarning, formatRate, wavBytesFor, savePlan, toSaveFileName,
+  BIT_DEPTHS, FORMATS, FORMAT_IDS, MP3_BITRATES, bitDepthById, sampleRateOptions,
+  defaultSaveSettings, normalizeSettings, formatAvailable, qualityLossWarning,
+  formatRate, estimateSaveBytes, savePlan, toSaveFileName,
 } from '../audio/saveFormat.js'
 import BaseButton from './ui/BaseButton.vue'
 
 /**
- * The Save dialog: name, location, bit depth and sample rate, before anything
- * is written. Opens on the first Save of a document and on every Save As;
+ * The Save dialog: name, location, format (WAV / FLAC / MP3), bit depth or
+ * bitrate, and sample rate, before anything is written. Opens on the first Save of a document and on every Save As;
  * later Saves reuse what was confirmed here (useFileSave).
  *
  * ⚠ A WEB PAGE CANNOT SHOW OR TYPE A FOLDER PATH. "Location" is therefore a
@@ -25,7 +26,7 @@ import BaseButton from './ui/BaseButton.vue'
  */
 
 const { appState, getDocument, showToast, getSaveTarget, getSaveSettings } = useEditorState()
-const { confirmSave, anchorHandleFor, isSaving, canSaveInPlace } = useFileSave()
+const { confirmSave, anchorHandleFor, isSaving, saveProgress, canSaveInPlace } = useFileSave()
 
 const docId = appState.saveDialog?.docId
 const doc = computed(() => getDocument(docId))
@@ -37,22 +38,45 @@ const source = doc.value?.currentFile?.sourceFormat ?? null
 const docRate = doc.value?.currentFile?.sampleRate ?? 44100
 const channels = doc.value?.currentFile?.channels ?? 1
 
-const initial = getSaveSettings(docId) ?? defaultSaveSettings(source, docRate)
-const fileName = ref(toSaveFileName(doc.value?.name ?? 'untitled.wav'))
+const remembered = getSaveSettings(docId)
+const initial = remembered ? normalizeSettings(remembered, channels) : defaultSaveSettings(source, docRate, channels)
+const format = ref(initial.format)
+const fileName = ref(toSaveFileName(doc.value?.name ?? 'untitled', initial.format))
 const bitDepth = ref(initial.bitDepth)
 const sampleRate = ref(initial.sampleRate)
-const rateOptions = sampleRateOptions(source, docRate)
+const bitrate = ref(initial.bitrate)
+const rateOptions = computed(() => sampleRateOptions(format.value, source, docRate))
+const depthOptions = computed(() => BIT_DEPTHS.filter(d => FORMATS[format.value].depths.includes(d.id)))
+
+/**
+ * Switch format: the name takes the new extension, and a depth or rate the
+ * new format cannot write moves to the nearest one it can (32-bit float →
+ * 24-bit for FLAC, 96 kHz → 48 kHz for MP3). Switching back does not restore
+ * them — the readout always shows what will be written.
+ */
+function setFormat(next) {
+  if (isSaving.value || !formatAvailable(next, channels)) return
+  const fixed = normalizeSettings({
+    format: next, bitDepth: bitDepth.value, sampleRate: sampleRate.value, bitrate: bitrate.value,
+  }, channels)
+  format.value = fixed.format
+  bitDepth.value = fixed.bitDepth
+  sampleRate.value = fixed.sampleRate
+  bitrate.value = fixed.bitrate
+  fileName.value = toSaveFileName(fileName.value, fixed.format)
+}
 
 // A destination picked with Change…. Editing the name afterwards drops it: the
 // handle names one file, and saving it under another name would write to the
 // file the user just typed over.
 const chosenHandle = ref(null)
 watch(fileName, name => {
-  if (chosenHandle.value && toSaveFileName(name) !== chosenHandle.value.name) chosenHandle.value = null
+  if (chosenHandle.value && toSaveFileName(name, format.value) !== chosenHandle.value.name) chosenHandle.value = null
 })
 
 const plan = computed(() => savePlan({
-  supportsInPlace, chosenHandle: chosenHandle.value, anchorHandle: anchor, fileName: fileName.value,
+  supportsInPlace, chosenHandle: chosenHandle.value, anchorHandle: anchor,
+  fileName: fileName.value, format: format.value,
 }))
 
 const locationText = computed(() => {
@@ -79,20 +103,41 @@ const sourceText = computed(() => {
   if (!source) return null
   const parts = [source.container.toUpperCase()]
   if (source.bitDepth) parts.push(source.float ? '32-bit float' : `${source.bitDepth}-bit`)
+  if (source.container === 'mp3') parts.push(source.bitrate ? `${source.bitrate} kbps` : 'VBR')
   if (source.sampleRate) parts.push(formatRate(source.sampleRate))
   if (source.channels) parts.push(source.channels === 1 ? 'mono' : source.channels === 2 ? 'stereo' : `${source.channels} ch`)
   return parts.join(' · ')
 })
 
-const warning = computed(() => qualityLossWarning({ bitDepth: bitDepth.value, sampleRate: sampleRate.value }, source))
+const settings = computed(() => ({
+  format: format.value, bitDepth: bitDepth.value, sampleRate: sampleRate.value, bitrate: bitrate.value,
+}))
 
-const bytes = computed(() => {
+const warning = computed(() => qualityLossWarning(settings.value, source))
+
+const size = computed(() => {
   const d = doc.value ? getTimelineDuration(doc.value.segments) : 0
-  return wavBytesFor(d, channels, { bitDepth: bitDepth.value, sampleRate: sampleRate.value })
+  return estimateSaveBytes(d, channels, settings.value)
 })
-const tooBig = computed(() => bytes.value > WAV_SIZE_LIMIT)
+// Only WAV has 32-bit size fields; FLAC counts samples in 36 bits and MP3 has
+// no length field at all.
+const tooBig = computed(() => format.value === 'wav' && size.value.bytes > WAV_SIZE_LIMIT)
 
-const nameValid = computed(() => fileName.value.trim().replace(/\.wav$/i, '').length > 0)
+const summary = computed(() => {
+  const f = FORMATS[format.value]
+  const detail = format.value === 'mp3' ? `${bitrate.value} kbps CBR` : bitDepthById(bitDepth.value).label
+  return `${f.label} · ${detail} · ${formatRate(sampleRate.value)} · ${size.value.approx ? '≈ ' : ''}${formatSize(size.value.bytes)}`
+})
+
+const STAGE_LABELS = { render: 'Rendering', resample: 'Converting rate', encode: 'Encoding', write: 'Writing' }
+const progressText = computed(() => {
+  const p = saveProgress.value
+  if (!p) return 'Saving…'
+  const label = p.stage === 'encode' ? `Encoding ${FORMATS[format.value].label}` : STAGE_LABELS[p.stage] ?? 'Saving'
+  return p.stage === 'render' || p.stage === 'write' ? `${label}…` : `${label}… ${Math.round(p.fraction * 100)}%`
+})
+
+const nameValid = computed(() => fileName.value.trim().replace(/\.[a-z0-9]+$/i, '').length > 0)
 const canSave = computed(() => !!doc.value && nameValid.value && !tooBig.value && !isSaving.value)
 
 function close() {
@@ -103,7 +148,7 @@ function close() {
 async function changeLocation() {
   if (isSaving.value) return
   try {
-    const handle = await pickSaveTarget(fileName.value, chosenHandle.value ?? anchor)
+    const handle = await pickSaveTarget(fileName.value, chosenHandle.value ?? anchor, format.value)
     chosenHandle.value = handle
     fileName.value = handle.name
   } catch (err) {
@@ -117,8 +162,7 @@ async function save() {
   if (!canSave.value) return
   const ok = await confirmSave(docId, {
     fileName: fileName.value,
-    bitDepth: bitDepth.value,
-    sampleRate: sampleRate.value,
+    ...settings.value,
     chosenHandle: chosenHandle.value,
   })
   if (ok && appState.saveDialog?.docId === docId) appState.saveDialog = null
@@ -143,11 +187,21 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
       aria-labelledby="save-dialog-title"
     >
       <!-- Header -->
-      <div class="px-5 pt-[18px] pb-[14px] border-b border-[rgba(255,255,255,.07)]">
+      <div class="relative pl-5 pr-12 pt-[18px] pb-[14px] border-b border-[rgba(255,255,255,.07)]">
         <div id="save-dialog-title" class="text-[15px] font-bold text-[#eaf6f8]">Save</div>
         <div v-if="sourceText" class="mt-[3px] text-[11.5px] text-[rgba(255,255,255,.42)]">
           Original: <span class="font-['JetBrains_Mono'] font-semibold">{{ sourceText }}</span>
         </div>
+        <button
+          class="absolute top-[14px] right-[14px] w-[28px] h-[28px] rounded-[8px] flex items-center justify-center transition-colors hover:bg-[rgba(255,255,255,.1)] disabled:opacity-40 disabled:hover:bg-transparent"
+          style="color:rgba(255,255,255,.6)"
+          aria-label="Close"
+          title="Close"
+          :disabled="isSaving"
+          @click="close"
+        >
+          <svg viewBox="0 0 24 24" class="w-[14px] h-[14px] fill-none stroke-current" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
       </div>
 
       <div class="px-5 py-4 flex flex-col gap-[14px]">
@@ -180,20 +234,40 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
         </div>
 
         <!-- Format -->
-        <div class="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-[6px] items-end">
+        <div class="flex flex-col gap-[6px]">
           <span class="sd-label">Format</span>
-          <span class="sd-label">Bit depth</span>
+          <div class="sd-seg" role="radiogroup" aria-label="Format">
+            <button
+              v-for="id in FORMAT_IDS"
+              :key="id"
+              :class="{ on: format === id }"
+              role="radio"
+              :aria-checked="format === id"
+              :disabled="isSaving || !formatAvailable(id, channels)"
+              :title="formatAvailable(id, channels) ? '' : 'MP3 carries mono or stereo only'"
+              @click="setFormat(id)"
+            >{{ FORMATS[id].label }}</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-[6px] items-end">
+          <span class="sd-label">{{ format === 'mp3' ? 'Bitrate' : 'Bit depth' }}</span>
           <span class="sd-label">Sample rate</span>
 
-          <div class="sd-field font-['JetBrains_Mono'] text-center px-3">WAV</div>
-          <div class="flex rounded-[8px] overflow-hidden" style="box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)" role="radiogroup" aria-label="Bit depth">
+          <select
+            v-if="format === 'mp3'"
+            v-model.number="bitrate"
+            class="sd-field pr-2"
+            aria-label="Bitrate"
+            :disabled="isSaving"
+          >
+            <option v-for="b in MP3_BITRATES" :key="b" :value="b">{{ b }} kbps CBR{{ b === 192 ? ' (ACX)' : '' }}</option>
+          </select>
+          <div v-else class="sd-seg" role="radiogroup" aria-label="Bit depth">
             <button
-              v-for="d in BIT_DEPTHS"
+              v-for="d in depthOptions"
               :key="d.id"
-              class="flex-1 py-[7px] text-[11.5px] font-bold transition-colors"
-              :style="bitDepth === d.id
-                ? 'background:#35d3e6;color:#08161a'
-                : 'color:rgba(255,255,255,.6)'"
+              :class="{ on: bitDepth === d.id }"
               role="radio"
               :aria-checked="bitDepth === d.id"
               :disabled="isSaving"
@@ -209,8 +283,8 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
           {{ warning }}
         </div>
         <div v-if="tooBig" class="text-[11px] font-bold leading-snug text-[#ff8a80]">
-          This file would be {{ formatSize(bytes) }} — over the 4 GB a WAV's own size fields can
-          address. Pick a lower depth or rate, or split it.
+          This file would be {{ formatSize(size.bytes) }} — over the 4 GB a WAV's own size fields can
+          address. Pick FLAC, a lower depth or rate, or split it.
         </div>
       </div>
 
@@ -218,15 +292,13 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
       <div class="px-5 py-[13px] border-t border-[rgba(255,255,255,.07)]">
         <div class="mb-[10px] text-[11px] leading-snug text-[rgba(255,255,255,.5)]">
           {{ planText }}
-          <span class="font-['JetBrains_Mono'] font-semibold text-[rgba(255,255,255,.35)]">
-            · {{ bitDepthById(bitDepth).label }} · {{ formatRate(sampleRate) }} · {{ formatSize(bytes) }}
-          </span>
+          <span class="font-['JetBrains_Mono'] font-semibold text-[rgba(255,255,255,.35)]">· {{ summary }}</span>
         </div>
         <div class="flex items-center gap-2">
           <div class="flex-1"></div>
           <BaseButton size="sm" color="ghost" :pill="false" :disabled="isSaving" @click="close">Cancel</BaseButton>
           <BaseButton size="md" :pill="false" :disabled="!canSave" @click="save">
-            {{ isSaving ? 'Saving…' : plan === 'replace' ? 'Save & replace' : plan === 'pick' ? 'Save…' : 'Save' }}
+            {{ isSaving ? progressText : plan === 'replace' ? 'Save & replace' : plan === 'pick' ? 'Save…' : 'Save' }}
           </BaseButton>
         </div>
       </div>
@@ -258,6 +330,28 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
 .sd-readonly {
   background: transparent;
   color: rgba(255,255,255,.7);
+}
+.sd-seg {
+  display: flex;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.1);
+}
+.sd-seg button {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: rgba(255,255,255,.6);
+  transition: background-color .15s, color .15s;
+}
+.sd-seg button.on {
+  background: #35d3e6;
+  color: #08161a;
+}
+.sd-seg button:disabled:not(.on) {
+  color: rgba(255,255,255,.25);
+  cursor: not-allowed;
 }
 select.sd-field option {
   background: #14181d;

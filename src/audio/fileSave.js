@@ -23,7 +23,7 @@
  * long as the tab.
  */
 import { downloadBlob } from './download.js'
-import { toSaveFileName } from './saveFormat.js'
+import { FORMATS, toSaveFileName } from './saveFormat.js'
 
 /** True when this browser can write back to a file the user picked. */
 export function canSaveInPlace() {
@@ -36,9 +36,9 @@ export function isCancellation(err) {
 }
 
 /**
- * Ask for a save destination. `suggestedName` is normalised to .wav — the file
- * we write is a WAV whatever the source format was, and offering to write WAV
- * bytes under an .mp3 name produces a file nothing can open.
+ * Ask for a save destination. `suggestedName` is given the chosen format's
+ * extension — offering to write FLAC bytes under a .wav name produces a file
+ * nothing can open — and the picker filters to that format.
  *
  * `startIn` is a handle the dialog should open beside — the file last saved
  * to, or the one the document was opened from. A FILE handle opens its parent
@@ -47,10 +47,11 @@ export function isCancellation(err) {
  *
  * @returns {Promise<FileSystemFileHandle>} rejects with AbortError if cancelled
  */
-export function pickSaveTarget(suggestedName, startIn = null) {
+export function pickSaveTarget(suggestedName, startIn = null, format = 'wav') {
+  const f = FORMATS[format] ?? FORMATS.wav
   const options = {
-    suggestedName: toSaveFileName(suggestedName || 'untitled.wav'),
-    types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }],
+    suggestedName: toSaveFileName(suggestedName || 'untitled', f.id),
+    types: [{ description: `${f.label} audio`, accept: { [f.mime]: [f.ext] } }],
   }
   if (startIn) options.startIn = startIn
   return window.showSaveFilePicker(options)
@@ -87,10 +88,10 @@ export async function ensureWritePermission(handle) {
  * matters more than it looks: a writable left open holds the browser's swap
  * copy, and on some platforms the original is not restored until it closes.
  */
-export async function writeWavToHandle(handle, arrayBuffer) {
+export async function writeFileToHandle(handle, bytes, mime) {
   const writable = await handle.createWritable()
   try {
-    await writable.write(new Blob([arrayBuffer], { type: 'audio/wav' }))
+    await writable.write(new Blob([bytes], { type: mime }))
   } catch (err) {
     await writable.abort?.()
     throw err
@@ -114,6 +115,6 @@ export function saveTargetKind(handle, supportsInPlace = canSaveInPlace()) {
 }
 
 /** Save-as-download fallback, for browsers with no write API. */
-export function downloadWav(arrayBuffer, fileName) {
-  downloadBlob(new Blob([arrayBuffer], { type: 'audio/wav' }), toSaveFileName(fileName))
+export function downloadFile(bytes, fileName, mime) {
+  downloadBlob(new Blob([bytes], { type: mime }), fileName)
 }
