@@ -220,6 +220,23 @@ const size = computed(() => {
 // no length field at all.
 const tooBig = computed(() => format.value === 'wav' && size.value.bytes > WAV_SIZE_LIMIT)
 
+/**
+ * Every warning, in one place and one style, under the format controls: the
+ * overwrite (from the location), quality loss, and the WAV size ceiling.
+ */
+const notices = computed(() => {
+  const list = []
+  if (overwrites.value) list.push({ kind: 'warn', text: planText.value })
+  if (warning.value) list.push({ kind: 'warn', text: warning.value.replace(/\.$/, '') })
+  if (tooBig.value) {
+    list.push({
+      kind: 'error',
+      text: `This file would be ${formatSize(size.value.bytes)}, over the 4 GB a WAV can address — pick FLAC, a lower depth or rate, or split it`,
+    })
+  }
+  return list
+})
+
 const sizeText = computed(() => `${size.value.approx ? '≈ ' : ''}${formatSize(size.value.bytes)}`)
 
 const STAGE_LABELS = { render: 'Rendering', resample: 'Converting rate', encode: 'Encoding', write: 'Writing' }
@@ -342,9 +359,10 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
               @click="browse"
             >Browse…</BaseButton>
           </div>
-          <div class="sd-outcome" :class="{ warn: overwrites }">
-            <svg v-if="overwrites" viewBox="0 0 24 24" class="w-[13px] h-[13px] shrink-0 fill-none stroke-current" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>
-            <span class="min-w-0">{{ planText }}</span>
+          <!-- What saving here does. An overwrite is a warning and joins the
+               others under the format controls; this line keeps the rest. -->
+          <div v-if="!overwrites || canSwitchToFolder" class="sd-outcome">
+            <span v-if="!overwrites" class="min-w-0">{{ planText }}</span>
             <button
               v-if="canSwitchToFolder"
               class="sd-link ml-auto shrink-0"
@@ -402,11 +420,12 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
             </select>
           </div>
 
-          <div v-if="warning" class="sd-note warn">{{ warning }}</div>
-          <div v-if="tooBig" class="sd-note error">
-            This file would be {{ formatSize(size.bytes) }} — over the 4 GB a WAV's own size fields can
-            address. Pick FLAC, a lower depth or rate, or split it.
-          </div>
+          <ul v-if="notices.length" class="flex flex-col gap-[5px] mt-[2px]" aria-live="polite">
+            <li v-for="n in notices" :key="n.text" class="sd-note" :class="n.kind">
+              <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] shrink-0 mt-[1px] fill-none stroke-current" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>
+              <span class="min-w-0">{{ n.text }}</span>
+            </li>
+          </ul>
         </div>
       </div>
 
@@ -485,10 +504,6 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
   line-height: 1.35;
   color: rgba(255,255,255,.5);
 }
-.sd-outcome.warn {
-  color: #e0b84a;
-  font-weight: 600;
-}
 .sd-size {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
@@ -496,6 +511,9 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
   color: rgba(255,255,255,.4);
 }
 .sd-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   font-size: 11px;
   font-weight: 600;
   line-height: 1.35;
