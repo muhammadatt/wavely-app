@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileSave } from '../composables/useFileSave.js'
 import { useWorkingFolder } from '../composables/useWorkingFolder.js'
@@ -7,9 +7,10 @@ import { getTimelineDuration } from '../audio/operations.js'
 import { formatSize, WAV_SIZE_LIMIT } from '../audio/exportPlan.js'
 import { isCancellation, pickSaveTarget } from '../audio/fileSave.js'
 import {
-  BIT_DEPTHS, FORMATS, FORMAT_IDS, MP3_BITRATES, bitDepthById, sampleRateOptions,
+  BIT_DEPTHS, FORMATS, FORMAT_IDS, MP3_BITRATES, sampleRateOptions,
   defaultSaveSettings, normalizeSettings, formatAvailable, qualityLossWarning,
   formatRate, estimateSaveBytes, savePlan, toSaveFileName, formatFolderPath,
+  splitAudioName, formatForExtension, extensionFor,
 } from '../audio/saveFormat.js'
 import BaseButton from './ui/BaseButton.vue'
 
@@ -45,7 +46,6 @@ const channels = doc.value?.currentFile?.channels ?? 1
 const remembered = getSaveSettings(docId)
 const initial = remembered ? normalizeSettings(remembered, channels) : defaultSaveSettings(source, docRate, channels)
 const format = ref(initial.format)
-const fileName = ref(toSaveFileName(doc.value?.name ?? 'untitled', initial.format))
 const bitDepth = ref(initial.bitDepth)
 const sampleRate = ref(initial.sampleRate)
 const bitrate = ref(initial.bitrate)
@@ -67,15 +67,40 @@ function setFormat(next) {
   bitDepth.value = fixed.bitDepth
   sampleRate.value = fixed.sampleRate
   bitrate.value = fixed.bitrate
-  fileName.value = toSaveFileName(fileName.value, fixed.format)
 }
 
-// A destination picked with Change…. Editing the name afterwards drops it: the
-// handle names one file, and saving it under another name would write to the
-// file the user just typed over.
+// A destination picked with Browse…. Editing the name afterwards drops it:
+// the handle names one file, and saving it under another name would write to
+// the file the user just typed over.
 const chosenHandle = ref(null)
+
+// The name is edited WITHOUT its extension; the format supplies that, so
+// switching format never rewrites what was typed. The extension keeps the
+// case of the file it would replace ("Chapter01.WAV").
+const nameInput = ref(null)
+const baseName = ref(splitAudioName(doc.value?.name ?? '').base || 'untitled')
+const extension = computed(() => extensionFor(format.value, chosenHandle.value?.name, anchor?.name))
+const fileName = computed(() => baseName.value.trim().replace(/[.\s]+$/, '') + extension.value)
+
+/**
+ * Tidy the typed name on blur / Enter: an audio extension typed into it is
+ * taken off, and if it names a format ("take.flac"), the format follows.
+ */
+function commitName() {
+  const { base, ext } = splitAudioName(baseName.value)
+  if (!ext) return
+  baseName.value = base
+  const f = formatForExtension(ext)
+  if (f && f !== format.value) setFormat(f)
+}
+
 watch(fileName, name => {
-  if (chosenHandle.value && toSaveFileName(name, format.value) !== chosenHandle.value.name) chosenHandle.value = null
+  if (chosenHandle.value && name !== chosenHandle.value.name) chosenHandle.value = null
+})
+
+onMounted(() => {
+  nameInput.value?.focus()
+  nameInput.value?.select()
 })
 
 // ── Working folder ──────────────────────────────────────────────────────────
@@ -139,24 +164,36 @@ const locationText = computed(() => {
     return chosenInFolder.value ? formatFolderPath(folderName.value, chosenInFolder.value) : 'The folder you chose'
   }
   if (folderTarget.value) return formatFolderPath(folderName.value, folderTarget.value.segments)
-  if (anchor) return anchorIsLastSave
-    ? `Same folder as the last save (${anchor.name})`
-    : `Same folder as the original (${anchor.name})`
+  // The outcome line under it names the file, so this does not repeat it.
+  if (anchor) return anchorIsLastSave ? 'Same folder as the last save' : 'Same folder as the original'
   return 'Chosen in the next step'
 })
 
+// Whether this Save writes over a file that exists — the one consequence
+// worth colour, since 'replace' and 'folder' do it with no system dialog.
+const overwrites = computed(() => plan.value === 'replace' || (plan.value === 'folder' && replacesInFolder.value))
+
 const planText = computed(() => {
   switch (plan.value) {
-    case 'replace': return `Replaces ${anchor.name}.`
-    case 'chosen': return `Saves as ${chosenHandle.value.name}.`
+    case 'replace': return `Replaces ${anchor.name}`
+    case 'chosen': return `Saves as ${chosenHandle.value.name}`
     case 'folder': return replacesInFolder.value
-      ? `Replaces ${toSaveFileName(fileName.value, format.value)} there.`
-      : 'Saves straight into that folder.'
-    case 'download': return 'Your browser can’t write files directly, so this downloads.'
+      ? `Replaces ${fileName.value} in this folder`
+      : 'Saves straight into this folder'
+    case 'download': return 'Downloads — this browser can’t write files directly'
     default: return anchor
-      ? 'You’ll confirm in the system dialog, opened in that folder.'
-      : 'You’ll pick the folder in the system dialog.'
+      ? 'You’ll confirm in the system dialog, opened in this folder'
+      : 'You’ll choose the folder in the system dialog'
   }
+})
+
+// "Save to <folder> instead", offered for an original outside the folder.
+const canSwitchToFolder = computed(() => !!folderName.value && !!anchor && !anchorInFolder.value && !chosenHandle.value)
+
+const saveLabel = computed(() => {
+  if (isSaving.value) return progressText.value
+  if (overwrites.value) return 'Replace'
+  return plan.value === 'pick' ? 'Save…' : 'Save'
 })
 
 const sourceText = computed(() => {
@@ -183,11 +220,7 @@ const size = computed(() => {
 // no length field at all.
 const tooBig = computed(() => format.value === 'wav' && size.value.bytes > WAV_SIZE_LIMIT)
 
-const summary = computed(() => {
-  const f = FORMATS[format.value]
-  const detail = format.value === 'mp3' ? `${bitrate.value} kbps CBR` : bitDepthById(bitDepth.value).label
-  return `${f.label} · ${detail} · ${formatRate(sampleRate.value)} · ${size.value.approx ? '≈ ' : ''}${formatSize(size.value.bytes)}`
-})
+const sizeText = computed(() => `${size.value.approx ? '≈ ' : ''}${formatSize(size.value.bytes)}`)
 
 const STAGE_LABELS = { render: 'Rendering', resample: 'Converting rate', encode: 'Encoding', write: 'Writing' }
 const progressText = computed(() => {
@@ -197,7 +230,7 @@ const progressText = computed(() => {
   return p.stage === 'render' || p.stage === 'write' ? `${label}…` : `${label}… ${Math.round(p.fraction * 100)}%`
 })
 
-const nameValid = computed(() => fileName.value.trim().replace(/\.[a-z0-9]+$/i, '').length > 0)
+const nameValid = computed(() => splitAudioName(baseName.value).base.trim().replace(/[.\s]+$/, '').length > 0)
 const canSave = computed(() => !!doc.value && nameValid.value && !tooBig.value && !isSaving.value)
 
 function close() {
@@ -205,12 +238,19 @@ function close() {
   appState.saveDialog = null
 }
 
-async function changeLocation() {
+async function browse() {
   if (isSaving.value) return
+  commitName()
   try {
     const handle = await pickSaveTarget(fileName.value, chosenHandle.value ?? anchor ?? wf.folder.value, format.value)
+    // The system dialog lets any name through; an extension of another
+    // format switches the format rather than writing it under a wrong one.
+    const { base, ext } = splitAudioName(handle.name)
+    const f = formatForExtension(ext)
+    if (!f) { showToast('Choose a name ending in .wav, .flac or .mp3'); return }
+    if (f !== format.value) setFormat(f)
     chosenHandle.value = handle
-    fileName.value = handle.name
+    baseName.value = base
   } catch (err) {
     if (isCancellation(err)) return
     console.error('Save picker failed:', err)
@@ -219,6 +259,7 @@ async function changeLocation() {
 }
 
 async function save() {
+  commitName()
   if (!canSave.value) return
   const ok = await confirmSave(docId, {
     fileName: fileName.value,
@@ -265,57 +306,60 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
         </button>
       </div>
 
-      <div class="px-5 py-4 flex flex-col gap-[14px]">
-        <!-- Name -->
-        <label class="flex flex-col gap-[6px]">
-          <span class="sd-label">File name</span>
-          <input
-            v-model="fileName"
-            class="sd-field"
-            aria-label="File name"
-            spellcheck="false"
-            :disabled="isSaving"
-            @keydown.enter.prevent="save"
-          />
-        </label>
+      <div class="px-5 pt-4 pb-5 flex flex-col gap-[16px]">
+        <!-- Name: edited without its extension, which follows the format -->
+        <div class="flex flex-col gap-[6px]">
+          <label for="sd-name" class="sd-label">File name</label>
+          <div class="sd-field sd-name flex items-center gap-[2px]" :class="{ disabled: isSaving }">
+            <input
+              id="sd-name"
+              ref="nameInput"
+              v-model="baseName"
+              class="flex-1 min-w-0 bg-transparent outline-none"
+              spellcheck="false"
+              autocomplete="off"
+              :disabled="isSaving"
+              @blur="commitName"
+              @keydown.enter.prevent="save"
+            />
+            <span class="sd-ext" aria-label="Extension">{{ extension }}</span>
+          </div>
+        </div>
 
-        <!-- Location -->
+        <!-- Location, and what saving there will do -->
         <div class="flex flex-col gap-[6px]">
           <span class="sd-label">Location</span>
           <div class="flex items-center gap-2">
-            <div class="sd-field sd-readonly flex-1 min-w-0 truncate" :title="locationText">{{ locationText }}</div>
+            <div class="flex-1 min-w-0 flex items-center gap-[8px] text-[12.5px] font-semibold text-[#eaf6f8]" :title="locationText">
+              <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] text-[rgba(255,255,255,.4)] shrink-0 fill-none stroke-current" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              <span class="truncate">{{ locationText }}</span>
+            </div>
             <BaseButton
               v-if="supportsInPlace"
               size="sm" color="ghost" :pill="false"
               :disabled="isSaving"
-              aria-label="Change location"
-              @click="changeLocation"
-            >Change…</BaseButton>
+              title="Choose a location in the system dialog"
+              @click="browse"
+            >Browse…</BaseButton>
           </div>
-          <div v-if="folderSupported" class="flex flex-wrap items-center gap-x-[6px] gap-y-[2px] text-[11px] leading-snug text-[rgba(255,255,255,.45)]">
-            <template v-if="folderName">
-              <span>Working folder: <span class="font-semibold text-[rgba(255,255,255,.7)]">{{ folderName }}</span></span>
-              <span aria-hidden="true">·</span>
-              <button class="sd-link" :disabled="isSaving" @click="pickFolder">Change</button>
-              <span aria-hidden="true">·</span>
-              <button class="sd-link" :disabled="isSaving" @click="wf.clearFolder()">Remove</button>
-              <template v-if="anchor && !anchorInFolder && !chosenHandle">
-                <span aria-hidden="true">·</span>
-                <button class="sd-link" :disabled="isSaving" @click="useFolderRoot = !useFolderRoot">
-                  {{ useFolderRoot ? 'Use the original’s folder' : `Save to ${folderName} instead` }}
-                </button>
-              </template>
-            </template>
-            <template v-else>
-              <span>Set a working folder to see where files go and save without the system dialog.</span>
-              <button class="sd-link" :disabled="isSaving" @click="pickFolder">Set working folder…</button>
-            </template>
+          <div class="sd-outcome" :class="{ warn: overwrites }">
+            <svg v-if="overwrites" viewBox="0 0 24 24" class="w-[13px] h-[13px] shrink-0 fill-none stroke-current" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>
+            <span class="min-w-0">{{ planText }}</span>
+            <button
+              v-if="canSwitchToFolder"
+              class="sd-link ml-auto shrink-0"
+              :disabled="isSaving"
+              @click="useFolderRoot = !useFolderRoot"
+            >{{ useFolderRoot ? 'Use the original’s folder' : `Save to ${folderName} instead` }}</button>
           </div>
         </div>
 
         <!-- Format -->
-        <div class="flex flex-col gap-[6px]">
-          <span class="sd-label">Format</span>
+        <div class="flex flex-col gap-[8px]">
+          <div class="flex items-baseline justify-between">
+            <span class="sd-label">Format</span>
+            <span class="sd-size" title="Estimated file size">{{ sizeText }}</span>
+          </div>
           <div class="sd-seg" role="radiogroup" aria-label="Format">
             <button
               v-for="id in FORMAT_IDS"
@@ -328,59 +372,74 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
               @click="setFormat(id)"
             >{{ FORMATS[id].label }}</button>
           </div>
-        </div>
 
-        <div class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-[6px] items-end">
-          <span class="sd-label">{{ format === 'mp3' ? 'Bitrate' : 'Bit depth' }}</span>
-          <span class="sd-label">Sample rate</span>
+          <div class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-[6px] items-end mt-[4px]">
+            <span class="sd-label">{{ format === 'mp3' ? 'Bitrate' : 'Bit depth' }}</span>
+            <span class="sd-label">Sample rate</span>
 
-          <select
-            v-if="format === 'mp3'"
-            v-model.number="bitrate"
-            class="sd-field pr-2"
-            aria-label="Bitrate"
-            :disabled="isSaving"
-          >
-            <option v-for="b in MP3_BITRATES" :key="b" :value="b">{{ b }} kbps CBR{{ b === 192 ? ' (ACX)' : '' }}</option>
-          </select>
-          <div v-else class="sd-seg" role="radiogroup" aria-label="Bit depth">
-            <button
-              v-for="d in depthOptions"
-              :key="d.id"
-              :class="{ on: bitDepth === d.id }"
-              role="radio"
-              :aria-checked="bitDepth === d.id"
+            <select
+              v-if="format === 'mp3'"
+              v-model.number="bitrate"
+              class="sd-field pr-2"
+              aria-label="Bitrate"
               :disabled="isSaving"
-              @click="bitDepth = d.id"
-            >{{ d.label.replace(' PCM', '') }}</button>
+            >
+              <option v-for="b in MP3_BITRATES" :key="b" :value="b">{{ b }} kbps CBR{{ b === 192 ? ' (ACX)' : '' }}</option>
+            </select>
+            <div v-else class="sd-seg" role="radiogroup" aria-label="Bit depth">
+              <button
+                v-for="d in depthOptions"
+                :key="d.id"
+                :class="{ on: bitDepth === d.id }"
+                role="radio"
+                :aria-checked="bitDepth === d.id"
+                :disabled="isSaving"
+                @click="bitDepth = d.id"
+              >{{ d.label.replace(' PCM', '') }}</button>
+            </div>
+            <select v-model.number="sampleRate" class="sd-field pr-2" aria-label="Sample rate" :disabled="isSaving">
+              <option v-for="r in rateOptions" :key="r" :value="r">{{ formatRate(r) }}</option>
+            </select>
           </div>
-          <select v-model.number="sampleRate" class="sd-field pr-2" aria-label="Sample rate" :disabled="isSaving">
-            <option v-for="r in rateOptions" :key="r" :value="r">{{ formatRate(r) }}</option>
-          </select>
-        </div>
 
-        <div v-if="warning" class="text-[11px] font-bold leading-snug text-[#e0b84a]">
-          {{ warning }}
-        </div>
-        <div v-if="tooBig" class="text-[11px] font-bold leading-snug text-[#ff8a80]">
-          This file would be {{ formatSize(size.bytes) }} — over the 4 GB a WAV's own size fields can
-          address. Pick FLAC, a lower depth or rate, or split it.
+          <div v-if="warning" class="sd-note warn">{{ warning }}</div>
+          <div v-if="tooBig" class="sd-note error">
+            This file would be {{ formatSize(size.bytes) }} — over the 4 GB a WAV's own size fields can
+            address. Pick FLAC, a lower depth or rate, or split it.
+          </div>
         </div>
       </div>
 
-      <!-- Footer -->
-      <div class="px-5 py-[13px] border-t border-[rgba(255,255,255,.07)]">
-        <div class="mb-[10px] text-[11px] leading-snug text-[rgba(255,255,255,.5)]">
-          {{ planText }}
-          <span class="font-['JetBrains_Mono'] font-semibold text-[rgba(255,255,255,.35)]">· {{ summary }}</span>
+      <!-- Footer: the working folder (an app setting) on the left, actions right -->
+      <div class="px-5 py-[12px] border-t border-[rgba(255,255,255,.07)] flex items-center gap-2">
+        <div v-if="folderSupported" class="flex-1 min-w-0 flex items-center gap-[7px] text-[11px] text-[rgba(255,255,255,.45)]">
+          <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] shrink-0 fill-none stroke-current" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+          <template v-if="folderName">
+            <span class="truncate" :title="`Working folder: ${folderName}`">
+              <span class="sr-only">Working folder: </span><span class="font-semibold text-[rgba(255,255,255,.7)]">{{ folderName }}</span>
+            </span>
+            <button class="sd-link shrink-0" :disabled="isSaving" title="Choose a different working folder" @click="pickFolder">Change</button>
+            <button
+              class="sd-icon shrink-0"
+              :disabled="isSaving"
+              aria-label="Remove working folder"
+              title="Remove working folder"
+              @click="wf.clearFolder()"
+            >
+              <svg viewBox="0 0 24 24" class="w-[11px] h-[11px] fill-none stroke-current" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </template>
+          <button
+            v-else
+            class="sd-link truncate"
+            :disabled="isSaving"
+            title="Show where files go, and save into the folder without the system dialog"
+            @click="pickFolder"
+          >Set working folder</button>
         </div>
-        <div class="flex items-center gap-2">
-          <div class="flex-1"></div>
-          <BaseButton size="sm" color="ghost" :pill="false" :disabled="isSaving" @click="close">Cancel</BaseButton>
-          <BaseButton size="md" :pill="false" :disabled="!canSave" @click="save">
-            {{ isSaving ? progressText : plan === 'replace' ? 'Save & replace' : plan === 'pick' ? 'Save…' : 'Save' }}
-          </BaseButton>
-        </div>
+        <div v-else class="flex-1"></div>
+        <BaseButton size="sm" color="ghost" :pill="false" :disabled="isSaving" @click="close">Cancel</BaseButton>
+        <BaseButton size="md" :pill="false" :disabled="!canSave" @click="save">{{ saveLabel }}</BaseButton>
       </div>
     </div>
   </div>
@@ -404,12 +463,67 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
   color: #eaf6f8;
   outline: none;
 }
-.sd-field:focus {
+.sd-field:focus,
+.sd-name:focus-within {
   box-shadow: inset 0 0 0 1px #35d3e6;
 }
-.sd-readonly {
-  background: transparent;
-  color: rgba(255,255,255,.7);
+.sd-name.disabled {
+  opacity: .6;
+}
+.sd-ext {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  color: rgba(255,255,255,.4);
+  user-select: none;
+}
+.sd-outcome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(255,255,255,.5);
+}
+.sd-outcome.warn {
+  color: #e0b84a;
+  font-weight: 600;
+}
+.sd-size {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(255,255,255,.4);
+}
+.sd-note {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.sd-note.warn { color: #e0b84a; }
+.sd-note.error { color: #ff8a80; }
+.sd-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,.5);
+}
+.sd-icon:hover:not(:disabled) {
+  background: rgba(255,255,255,.1);
+  color: rgba(255,255,255,.8);
+}
+.sd-link:focus-visible,
+.sd-icon:focus-visible,
+.sd-seg button:focus-visible {
+  outline: 2px solid #35d3e6;
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+.sd-seg button:focus-visible {
+  outline-offset: -2px;
 }
 .sd-link {
   color: #35d3e6;

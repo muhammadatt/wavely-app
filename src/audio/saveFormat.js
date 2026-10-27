@@ -155,6 +155,37 @@ export function toSaveFileName(fileName, format = 'wav') {
   return (base || trimmed || 'untitled') + ext
 }
 
+/**
+ * A filename as the dialog edits it: the base, and a trailing audio extension
+ * (as written, case kept) or ''. "Chapter 1.2" has no audio extension, so its
+ * base is the whole name.
+ */
+export function splitAudioName(name) {
+  const trimmed = String(name ?? '').trim()
+  const m = trimmed.match(AUDIO_EXTENSIONS)
+  return m && m.index > 0 ? { base: trimmed.slice(0, m.index), ext: m[0] } : { base: trimmed, ext: '' }
+}
+
+/** The format an extension names, or null (".wav" → 'wav', ".m4a" → null). */
+export function formatForExtension(ext) {
+  const lower = String(ext ?? '').toLowerCase()
+  return FORMAT_IDS.find(id => FORMATS[id].ext === lower) ?? null
+}
+
+/**
+ * The extension a Save in `format` writes, taking its case from the first of
+ * `names` that already has it — so a file called "Chapter01.WAV" is saved back
+ * under that exact name rather than a lower-case twin.
+ */
+export function extensionFor(format, ...names) {
+  const ext = (FORMATS[format] ?? FORMATS.wav).ext
+  for (const name of names) {
+    const own = splitAudioName(name).ext
+    if (own && own.toLowerCase() === ext) return own
+  }
+  return ext
+}
+
 /** WAV bytes for a timeline of `seconds` at these settings. */
 export function wavBytesFor(seconds, channels, settings) {
   const depth = bitDepthById(settings.bitDepth)

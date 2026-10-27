@@ -12,6 +12,7 @@ import { parseSourceFormat } from '../../src/audio/sourceFormat.js'
 import {
   defaultSaveSettings, estimateSaveBytes, formatAvailable, normalizeSettings,
   qualityLossWarning, savePlan, sampleRateOptions, toSaveFileName, wavBytesFor, formatFolderPath,
+  splitAudioName, formatForExtension, extensionFor,
 } from '../../src/audio/saveFormat.js'
 import { directoryPathIn } from '../../src/composables/useWorkingFolder.js'
 
@@ -261,4 +262,22 @@ test('directoryPathIn drops the file’s own name, and is null outside or on err
   assert.equal(await directoryPathIn(root, { name: 'out.wav' }), null)
   assert.equal(await directoryPathIn(root, { name: 'bad.wav' }), null)
   assert.equal(await directoryPathIn(null, { name: 'ch01.wav' }), null)
+})
+
+// ── Name editing ────────────────────────────────────────────────────────────
+
+test('the name is edited without its audio extension; other dots are part of the name', () => {
+  assert.deepEqual(splitAudioName('Chapter01.WAV'), { base: 'Chapter01', ext: '.WAV' })
+  assert.deepEqual(splitAudioName(' take.mp3 '), { base: 'take', ext: '.mp3' })
+  assert.deepEqual(splitAudioName('Chapter 1.2'), { base: 'Chapter 1.2', ext: '' })
+  assert.deepEqual(splitAudioName('.wav'), { base: '.wav', ext: '' })
+  assert.equal(formatForExtension('.FLAC'), 'flac')
+  assert.equal(formatForExtension('.m4a'), null)
+})
+
+test('the extension keeps the case of the file it would replace', () => {
+  assert.equal(extensionFor('wav', 'Chapter01.WAV'), '.WAV')
+  assert.equal(extensionFor('flac', 'Chapter01.WAV'), '.flac')
+  assert.equal(extensionFor('mp3', null, 'x.MP3'), '.MP3')
+  assert.equal(extensionFor('wav'), '.wav')
 })
