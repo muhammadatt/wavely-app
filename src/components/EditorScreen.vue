@@ -25,7 +25,7 @@ const {
   documents, cycleDocument, setActiveDocument, closeDocument,
   documentHasUnsavedWork, anyUnsavedWork, activeDoc,
 } = useEditorState()
-const { importFiles, promptForFiles } = useFileImport()
+const { importDataTransfer, promptForFiles } = useFileImport()
 const { saveDocument, saveDocumentAs } = useFileSave()
 const { closeTopWindow, anyWindowOpen } = useWindows()
 
@@ -66,7 +66,7 @@ function onDrop(e) {
   e.preventDefault()
   dragDepth.value = 0
   isDragOver.value = false
-  importFiles(e.dataTransfer.files)
+  importDataTransfer(e.dataTransfer)
 }
 
 // A shortcut must never reach the timeline from inside a text field — the guard
@@ -81,6 +81,7 @@ function closeTopModal() {
   if (appState.contextMenu) { closeContextMenu(); return true }
   if (appState.commandPaletteOpen) { closeCommandPalette(); return true }
   if (closeTopWindow()) return true
+  if (appState.saveDialog) { appState.saveDialog = null; return true }
   if (appState.exportDialogOpen) { appState.exportDialogOpen = false; return true }
   if (appState.filesPanelOpen) { appState.filesPanelOpen = false; return true }
   return false
@@ -92,7 +93,8 @@ function handleKeydown(e) {
   const key = e.key.toLowerCase()
   const inText = isTextField(e.target)
   const modalOpen = anyWindowOpen.value || appState.commandPaletteOpen ||
-    appState.contextMenu || appState.exportDialogOpen || appState.filesPanelOpen
+    appState.contextMenu || appState.exportDialogOpen || appState.filesPanelOpen ||
+    appState.saveDialog
 
   // Escape — close the top modal, then the selection, then the rail.
   if (e.key === 'Escape') {

@@ -89,6 +89,8 @@ const appState = reactive({
   // above the rail and the floating windows.
   contextMenu: null,
   exportDialogOpen: false,
+  // { docId } while the Save dialog is open for that document, else null.
+  saveDialog: null,
   filesPanelOpen: false,
   toasts: [],
 })
@@ -111,6 +113,16 @@ const docBuffers = new Map()
 // internal slots, and calling createWritable() through a Vue proxy of one
 // throws "Illegal invocation". Same reason the buffer pool lives out here.
 const docSaveTargets = new Map()
+
+// Map<docId, { bitDepth, sampleRate, fileName }> — the settings the last Save
+// used, so a later Save (button / Ctrl+S) writes the same format silently.
+const docSaveSettings = new Map()
+
+// Map<docId, FileSystemFileHandle> — the file the document was opened from, when
+// it came through the file-open API or a drag-drop that yielded a handle. Read
+// access only until the user confirms a Save that replaces it. Outside the
+// reactive tree for the same reason as docSaveTargets.
+const docSourceHandles = new Map()
 
 // Monotonic across every document, so a revision number identifies a timeline
 // state uniquely and for the life of the session. A per-document counter would
@@ -312,7 +324,7 @@ export function useEditorState() {
   }
 
   // ── Documents ──────────────────────────────────────────────────────────────
-  function makeDocument(name, audioBuffer) {
+  function makeDocument(name, audioBuffer, sourceFormat = null) {
     const docId = uuidv4()
     const bufferId = uuidv4()
     const openedAt = ++revisionSeq
@@ -341,6 +353,9 @@ export function useEditorState() {
         duration: audioBuffer.duration,
         sampleRate: audioBuffer.sampleRate,
         channels: audioBuffer.numberOfChannels,
+        // The file as it was on disk (depth, rate, container) — read from its
+        // header at import, since decoding forgets it. Null when unknown.
+        sourceFormat,
       },
       selectedPreset: lastPreset,
       selectedOutputProfile: lastOutputProfile,
@@ -364,8 +379,9 @@ export function useEditorState() {
    * Create a document from a decoded buffer and make it active.
    * @returns {{ docId: string, bufferId: string }}
    */
-  function createDocument(name, audioBuffer, { activate = true } = {}) {
-    const doc = makeDocument(name, audioBuffer)
+  function createDocument(name, audioBuffer, { activate = true, sourceFormat = null, sourceHandle = null } = {}) {
+    const doc = makeDocument(name, audioBuffer, sourceFormat)
+    if (sourceHandle) docSourceHandles.set(doc.id, sourceHandle)
     appState.documents.push(doc)
 
     bufferPool.set(doc.bufferId, audioBuffer)
@@ -409,10 +425,14 @@ export function useEditorState() {
     appState.documents.some(d => d.revision !== d.savedRevision)
   )
 
-  /** Record that the document's current timeline is what's now on disk. */
-  function markDocumentSaved(docId) {
+  /**
+   * Record that the document's timeline at `revision` (default: now) is what's
+   * on disk. A Save passes the revision it rendered, so an edit made while it
+   * encoded stays unsaved.
+   */
+  function markDocumentSaved(docId, revision) {
     const doc = getDocument(docId)
-    if (doc) doc.savedRevision = doc.revision
+    if (doc) doc.savedRevision = revision ?? doc.revision
   }
 
   /** The file handle this document last saved to, or undefined. */
@@ -422,6 +442,20 @@ export function useEditorState() {
 
   function setSaveTarget(docId, handle) {
     docSaveTargets.set(docId, handle)
+  }
+
+  /** The settings the last Save of this document used, or undefined. */
+  function getSaveSettings(docId) {
+    return docSaveSettings.get(docId)
+  }
+
+  function setSaveSettings(docId, settings) {
+    docSaveSettings.set(docId, { ...settings })
+  }
+
+  /** The handle of the file this document was opened from, or undefined. */
+  function getSourceHandle(docId) {
+    return docSourceHandles.get(docId)
   }
 
   function closeDocument(docId) {
@@ -448,6 +482,8 @@ export function useEditorState() {
     docBuffers.delete(docId)
     docHistory.delete(docId)
     docSaveTargets.delete(docId)
+    docSaveSettings.delete(docId)
+    docSourceHandles.delete(docId)
 
     const wasActive = appState.activeDocumentId === docId
     appState.documents.splice(idx, 1)
@@ -827,6 +863,9 @@ export function useEditorState() {
     markDocumentSaved,
     getSaveTarget,
     setSaveTarget,
+    getSaveSettings,
+    setSaveSettings,
+    getSourceHandle,
 
     // Edit operations
     performTrimToSelection,
