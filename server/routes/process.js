@@ -25,7 +25,7 @@ import path from 'path'
 import { unlink } from 'fs/promises'
 import { processAudio } from '../pipeline/index.js'
 import { PRESETS, OUTPUT_PROFILES, resolveOutputProfileId } from '../presets.js'
-import { createJob, completeJob, failJob, setJobProgress } from '../lib/jobStore.js'
+import { createJob, completeJob, failJob, setJobProgress, setJobQueuePosition } from '../lib/jobStore.js'
 import { openGate } from '../lib/entitlements.js'
 import { optionalAuth } from '../lib/auth.js'
 import { createJobQueue, clientOf, sendRefusal } from '../lib/jobQueue.js'
@@ -130,8 +130,8 @@ export function createProcessRoute({ gate = openGate, verify = null, queue = cre
 
       const jobId = createJob()
       let startTime = null
-      // The request ends at the 202; the usage row describes the job.
-      res.locals.usageRecordedLater = true
+      // The request ends at the 202; the usage row describes the job, so it is
+      // written here when the job ends rather than through trackWork.
       const recordUsage = outcome => usage?.record({
         userId: req.user?.id ?? null,
         ip: req.ip,
@@ -144,10 +144,14 @@ export function createProcessRoute({ gate = openGate, verify = null, queue = cre
       })
       const pipeline = queue.submit(client, () => {
         startTime = Date.now()
+        setJobQueuePosition(jobId, null)
         setJobProgress(jobId, null)
         return processAudio(uploadedPath, req.file.originalname, preset, outputProfile, presetOverrides)
       }, {
-        onPosition: n => setJobProgress(jobId, n === 1 ? 'Waiting in line (next up)' : `Waiting in line (${n - 1} ahead of you)`),
+        onPosition: n => {
+          setJobQueuePosition(jobId, n)
+          setJobProgress(jobId, n === 1 ? 'Waiting in line (next up)' : `Waiting in line (${n - 1} ahead of you)`)
+        },
       })
       jobAccepted = true
 

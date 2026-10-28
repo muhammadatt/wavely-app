@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
 
-import { requestLog } from '../lib/requestLog.js'
+import { requestLog, trackWork } from '../lib/requestLog.js'
 
 async function withApp(setup, fn) {
   const lines = []
@@ -32,7 +32,10 @@ function asServed(req, { user = { id: 'u1' }, feature = 'autoLevel', mode = 'pre
 
 test('a served request: one JSON line with who, what and how much, and a usage row', async () => {
   await withApp(app => {
-    app.post('/api/analyze/vad', (req, res) => { asServed(req); res.json({ ok: true }) })
+    app.post('/api/analyze/vad', async (req, res) => {
+      asServed(req)
+      res.json(await trackWork(res, Promise.resolve({ ok: true })))
+    })
   }, async (base, { lines, recorded }) => {
     await fetch(`${base}/api/analyze/vad?x=1`, { method: 'POST' })
     await settle()
@@ -78,19 +81,58 @@ test('a refusal is logged with its code (json or send) and records no usage', as
   })
 })
 
-test('a server failure records an error row; a deferred route records nothing here', async () => {
+test('failed work records an error row; a request that never reached the work records none', async () => {
   await withApp(app => {
-    app.post('/api/analyze/x', (req, res) => { asServed(req); res.status(500).json({ error: 'boom' }) })
+    app.post('/api/analyze/x', async (req, res) => {
+      asServed(req)
+      try {
+        await trackWork(res, Promise.reject(new Error('boom')))
+      } catch {
+        res.status(500).json({ error: 'boom' })
+      }
+    })
+    // A queue refusal after the gate set the feature: logged, but no work, no row.
+    app.post('/api/analyze/y', (req, res) => {
+      req.feature = 'autoLevel'
+      res.status(503).json({ error: 'busy', code: 'server_busy' })
+    })
+    // Mastering's 202 never tracks work here; the job records its own row.
     app.post('/api/process', (req, res) => {
       asServed(req, { feature: 'mastering', mode: 'full' })
-      res.locals.usageRecordedLater = true
       res.status(202).json({ jobId: 'j1' })
     })
   }, async (base, { lines, recorded }) => {
     await fetch(`${base}/api/analyze/x`, { method: 'POST' })
+    await fetch(`${base}/api/analyze/y`, { method: 'POST' })
     await fetch(`${base}/api/process`, { method: 'POST' })
     await settle()
-    assert.deepEqual(lines.map(l => l.status), [500, 202])
+    assert.deepEqual(lines.map(l => [l.status, l.code]), [[500, null], [503, 'server_busy'], [202, null]])
     assert.deepEqual(recorded.map(r => [r.feature, r.outcome]), [['autoLevel', 'error']])
+  })
+})
+
+test('a client that hangs up mid-work: logged as aborted at once, usage recorded when the work settles', async () => {
+  let finishWork
+  const work = new Promise(resolve => { finishWork = resolve })
+  await withApp(app => {
+    app.post('/api/spot/slow', async (req, res) => {
+      asServed(req, { feature: 'spotEffects', mode: 'full' })
+      await trackWork(res, work)
+      if (!res.writableEnded) res.json({ ok: true })
+    })
+  }, async (base, { lines, recorded }) => {
+    const controller = new AbortController()
+    const pending = fetch(`${base}/api/spot/slow`, { method: 'POST', signal: controller.signal }).catch(() => {})
+    await settle()
+    controller.abort()
+    await pending
+    await settle()
+    assert.equal(lines.length, 1)
+    assert.equal(lines[0].aborted, true)
+    assert.equal(recorded.length, 0, 'not recorded as ok at the disconnect')
+
+    finishWork()
+    await settle()
+    assert.deepEqual(recorded.map(r => [r.feature, r.outcome]), [['spotEffects', 'ok']])
   })
 })

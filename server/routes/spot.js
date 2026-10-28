@@ -20,6 +20,7 @@ import { unlink } from 'fs/promises'
 import { tempPath, removeTmp } from '../lib/ffmpeg.js'
 import { runVocalSaturation } from '../pipeline/enhancement.js'
 import { openGate } from '../lib/entitlements.js'
+import { trackWork } from '../lib/requestLog.js'
 
 const upload = multer({
   dest: path.resolve(import.meta.dirname, '..', 'uploads'),
@@ -59,21 +60,29 @@ export function createSpotRoute({ gate = openGate, limit = unlimited } = {}) {
   const router = Router()
   const featureOf = req => (OPERATIONS[req.params.operation] ? 'spotEffects' : null)
 
+  // An unknown spot operation is refused first: it has no feature, so the sign-in
+  // check would wave it through to take a slot and an upload it can never use.
+  const known = (req, res, next) => {
+    if (OPERATIONS[req.params.operation]) return next()
+    res.status(400).json({ error: `Unknown spot operation: ${req.params.operation}`, supported: Object.keys(OPERATIONS) })
+  }
+
   // Sign-in and the concurrency slot are checked BEFORE multer reads the body.
-  router.post('/spot/:operation', gate.signIn(featureOf), limit, upload.single('file'), gate(featureOf), async (req, res) => {
-    const releaseSlot = res.locals.slot?.claim()
+  router.post('/spot/:operation', known, gate.signIn(featureOf), limit, upload.single('file'), gate(featureOf), async (req, res) => {
+    const slot = res.locals.slot
+    const releaseSlot = slot?.claim()
     const uploadedPath = req.file?.path
     let outputPath = null
 
     try {
+      // The client left while the gate was checking; its slot is already free.
+      if (slot && !releaseSlot) return
+
       if (!req.file) {
         return res.status(400).json({ error: 'No audio file provided' })
       }
 
       const op = OPERATIONS[req.params.operation]
-      if (!op) {
-        return res.status(400).json({ error: `Unknown spot operation: ${req.params.operation}` })
-      }
 
       let params = {}
       if (req.body.params) {
@@ -86,7 +95,7 @@ export function createSpotRoute({ gate = openGate, limit = unlimited } = {}) {
 
       outputPath = tempPath('.wav')
       const start = Date.now()
-      await op.run(uploadedPath, outputPath, params)
+      await trackWork(res, op.run(uploadedPath, outputPath, params))
       const elapsed = ((Date.now() - start) / 1000).toFixed(2)
       console.log(`[spot] ${req.params.operation} ${elapsed}s (${req.file.size} bytes in)`)
 

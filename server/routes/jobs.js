@@ -19,7 +19,8 @@ const router = Router()
 // ── GET /api/jobs/:jobId ──────────────────────────────────────────────────────
 // Returns the current job status.
 //
-// While processing:  { status: 'processing', progress: string|null }
+// While processing:  { status: 'processing', progress: string|null, queuePosition: number|null }
+//                    (queuePosition is set while the job waits for a slot)
 // On success:        { status: 'done', report: object, peaks: object[] }
 // On failure:        { status: 'error', error: string }
 
@@ -31,7 +32,7 @@ router.get('/jobs/:jobId', (req, res) => {
   }
 
   if (job.status === 'processing') {
-    return res.json({ status: 'processing', progress: job.progress })
+    return res.json({ status: 'processing', progress: job.progress, queuePosition: job.queuePosition ?? null })
   }
 
   if (job.status === 'error') {

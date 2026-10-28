@@ -15,9 +15,8 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
 import { authHeaders, serverError } from './serverError.js'
+import { pollJob } from './pollJob.js'
 
-const POLL_INTERVAL_MS = 3000       // 3 s between status checks
-const MAX_POLL_ATTEMPTS = 400       // 400 × 3 s = 20 min max wait
 
 /**
  * Send audio to the server for preset processing.
@@ -58,26 +57,17 @@ export async function processAudioOnServer({
   const { jobId } = await submitRes.json()
 
   // ── 3. Poll for completion ─────────────────────────────────────────────────
-  let job = null
-  for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
-    await sleep(POLL_INTERVAL_MS)
-
-    const pollRes = await fetch(`${API_BASE}/api/jobs/${jobId}`)
-    if (!pollRes.ok) {
-      const body = await pollRes.json().catch(() => ({}))
-      throw new Error(body.error || `Status check failed: ${pollRes.status}`)
-    }
-
-    job = await pollRes.json()
-
-    if (job.status === 'done')  break
-    if (job.status === 'error') throw new Error(job.error || 'Processing failed on server')
-    if (onProgress && job.progress) onProgress(job.progress)
-  }
-
-  if (!job || job.status !== 'done') {
-    throw new Error('Processing timed out — please try again with a shorter file')
-  }
+  const job = await pollJob({
+    fetchStatus: async () => {
+      const pollRes = await fetch(`${API_BASE}/api/jobs/${jobId}`)
+      if (!pollRes.ok) {
+        const body = await pollRes.json().catch(() => ({}))
+        throw new Error(body.error || `Status check failed: ${pollRes.status}`)
+      }
+      return pollRes.json()
+    },
+    onProgress,
+  })
 
   // ── 4. Download audio ──────────────────────────────────────────────────────
   const dlRes = await fetch(`${API_BASE}/api/jobs/${jobId}/download`)
@@ -88,10 +78,6 @@ export async function processAudioOnServer({
   const audioBlob = await dlRes.blob()
 
   return { report: job.report, peaks: job.peaks, audioBlob }
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 /**

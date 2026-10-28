@@ -170,6 +170,11 @@ export function sendRefusal(res, refusal) {
  * hangs up, or a client could abort mid-render and start another while the
  * first still holds a worker. A request refused before the handler runs (a
  * multer error, the plan gate) releases when its response closes.
+ *
+ * ⚠ A client can also hang up AFTER the upload but BEFORE the handler — while
+ * the plan gate awaits a lookup or a probe. The close releases the slot then,
+ * so `claim()` returns null and the handler must do no work: claiming a slot
+ * that was already given back would run outside the limits.
  */
 export function holdSlot(queue) {
   return (req, res, next) => {
@@ -182,13 +187,20 @@ export function holdSlot(queue) {
       throw err
     }
     let claimed = false
+    let lost = false
     res.locals.slot = {
+      /** The release function, or null if the client already left. */
       claim() {
+        if (lost) return null
         claimed = true
         return release
       },
     }
-    res.once('close', () => { if (!claimed) release() })
+    res.once('close', () => {
+      if (claimed) return
+      lost = true
+      release()
+    })
     next()
   }
 }

@@ -30,6 +30,8 @@ const jobs = new Map()
  * @typedef {Object} Job
  * @property {JobStatus} status
  * @property {string|null} progress  - Human-readable stage description
+ * @property {number|null} queuePosition - 1-based place in the job queue while
+ *                                         waiting; null once the pipeline runs
  * @property {string|null} error     - Error message when status === 'error'
  * @property {object|null} report    - Processing report when status === 'done'
  * @property {object[]|null} peaks   - Peak data when status === 'done'
@@ -47,6 +49,7 @@ export function createJob() {
   jobs.set(jobId, {
     status:     'processing',
     progress:   null,
+    queuePosition: null,
     error:      null,
     report:     null,
     peaks:      null,
@@ -90,6 +93,17 @@ export function failJob(jobId, message) {
   const job = jobs.get(jobId)
   if (!job) return
   Object.assign(job, { status: 'error', error: message, finishedAt: Date.now() })
+}
+
+/**
+ * Record a waiting job's place in the job queue, or null once it starts. The
+ * client excludes queue time from its processing deadline (src/api/processing.js).
+ * @param {string} jobId
+ * @param {number|null} position
+ */
+export function setJobQueuePosition(jobId, position) {
+  const job = jobs.get(jobId)
+  if (job) job.queuePosition = position
 }
 
 /**

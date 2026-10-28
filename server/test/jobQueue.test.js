@@ -158,3 +158,13 @@ test('an unclaimed slot (refused before the handler ran) frees when the response
   await tick(); await tick()
   assert.equal(queue.refusal('b'), null)
 })
+
+test('a client that leaves before the handler claims its slot gets nothing to claim', async () => {
+  const queue = createJobQueue({ concurrency: 1, maxQueued: 0, maxPerClient: 1 })
+  const { res } = through(holdSlot(queue), { user: { id: 'a' } })
+  res.emit('close')  // hung up while the gate was still probing the upload
+  await tick(); await tick()
+  assert.equal(res.locals.slot.claim(), null, 'the handler must do no work')
+  assert.equal(queue.refusal('b'), null, 'and the slot is free for someone else')
+  assert.equal(queue.stats().running, 0)
+})

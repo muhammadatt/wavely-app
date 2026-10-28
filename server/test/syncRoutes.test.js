@@ -92,3 +92,19 @@ test('a blocked account is refused 403 before the upload on analyze, spot and ma
     }
   })
 })
+
+test('an unknown kind or operation is 400 before sign-in, the slot and the upload', async () => {
+  const queue = createJobQueue({ concurrency: 1, maxQueued: 0, maxPerClient: 1 })
+  const limit = holdSlot(queue)
+  const app = express.Router()
+  app.use(createAnalyzeRoute({ gate, limit }))
+  app.use(createSpotRoute({ gate, limit }))
+  await withServer(app, async (base) => {
+    for (const path of ['/api/analyze/nope', '/api/spot/nope']) {
+      const res = await neverEndingUpload(`${base}${path}`)
+      assert.equal(res.status, 400, path)
+      assert.match(res.body.error, /Unknown/)
+    }
+  })
+  assert.equal(queue.stats().running, 0, 'no slot was taken')
+})

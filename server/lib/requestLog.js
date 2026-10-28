@@ -14,10 +14,13 @@
  * `code` is the refusal code from the response body (`sign_in_required`,
  * `upgrade_required`, `too_many_jobs`, …) when there is one.
  *
- * The usage row is written when the request was SERVED (2xx) or failed on the
- * server (5xx) — never for a 4xx refusal, which did no work. A route whose
- * work outlives the request (mastering's 202) sets
- * `res.locals.usageRecordedLater` and records its own row when the job ends.
+ * The usage row describes WORK, not the response: a route hands its work to
+ * `trackWork(res, promise)` and the row is written when that promise settles —
+ * 'ok' or 'error', timed from the request's start. A request that never
+ * reached the work (any refusal, 4xx or 503) writes no row, and a client that
+ * hangs up mid-render does not turn a render still running into an 'ok' at the
+ * moment of the disconnect. A route whose work outlives the request
+ * (mastering's 202) records its own row when the job ends instead.
  *
  * Fields the line reads, set by the middleware after it:
  *   req.user          lib/auth.js / the entitlement gate
@@ -37,6 +40,24 @@ export function requestLog({ usage = null, log = line => console.log(line), now 
     res.json = body => {
       if (res.statusCode >= 400 && body && typeof body.code === 'string') code = body.code
       return json(body)
+    }
+
+    res.locals.trackWork = promise => {
+      // Settled work is recorded even if the response is long gone.
+      Promise.resolve(promise).then(() => 'ok', () => 'error').then(outcome => {
+        if (!usage || !req.feature) return
+        usage.record({
+          userId: req.user?.id ?? null,
+          ip: req.ip ?? null,
+          feature: req.feature,
+          mode: req.entitlement?.mode ?? null,
+          audioSeconds: req.audioSeconds,
+          uploadBytes: req.file?.size,
+          outcome,
+          durationMs: now() - started,
+        })
+      })
+      return promise
     }
 
     let done = false
@@ -60,20 +81,6 @@ export function requestLog({ usage = null, log = line => console.log(line), now 
       }
       if (!res.writableFinished) entry.aborted = true
       log(JSON.stringify(entry))
-
-      const served = status < 400 || status >= 500
-      if (usage && req.feature && served && !res.locals.usageRecordedLater) {
-        usage.record({
-          userId: entry.user,
-          ip: entry.ip,
-          feature: req.feature,
-          mode: entry.mode,
-          audioSeconds: req.audioSeconds,
-          uploadBytes: req.file?.size,
-          outcome: status >= 500 ? 'error' : 'ok',
-          durationMs: entry.ms,
-        })
-      }
     }
     res.once('finish', finish)
     res.once('close', finish)
@@ -84,4 +91,12 @@ export function requestLog({ usage = null, log = line => console.log(line), now 
 function contentLength(req) {
   const n = Number(req.headers?.['content-length'])
   return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Hand a route's work to the request log so its usage row is written when the
+ * work settles. Returns the promise unchanged; a no-op without the log.
+ */
+export function trackWork(res, promise) {
+  return res.locals?.trackWork ? res.locals.trackWork(promise) : promise
 }

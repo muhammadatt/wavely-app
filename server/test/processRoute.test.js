@@ -81,3 +81,17 @@ test('at the job limit the request is refused before the upload is read', async 
     assert.equal(other.body.code, 'server_busy')
   })
 })
+
+test('a waiting job reports its place in line; a running one reports null', async () => {
+  const { jobsRoute } = await import('../routes/jobs.js')
+  const { createJob, setJobQueuePosition, setJobProgress } = await import('../lib/jobStore.js')
+  const id = createJob()
+  setJobQueuePosition(id, 3)
+  setJobProgress(id, 'Waiting in line (2 ahead of you)')
+  await withServer(jobsRoute, async (base) => {
+    assert.deepEqual(await (await fetch(`${base}/api/jobs/${id}`)).json(),
+      { status: 'processing', progress: 'Waiting in line (2 ahead of you)', queuePosition: 3 })
+    setJobQueuePosition(id, null)
+    assert.equal((await (await fetch(`${base}/api/jobs/${id}`)).json()).queuePosition, null)
+  })
+})
