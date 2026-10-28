@@ -6,6 +6,9 @@
 defineProps({
   modelValue: { type: Boolean, default: false },
   label: { type: String, default: '' },
+  // Names the switch for assistive tech when there is no visible `label`
+  // beside it (a caption placed elsewhere does not label the button).
+  ariaLabel: { type: String, default: '' },
   color: { type: String, default: 'var(--m-accent)' },
   disabled: { type: Boolean, default: false },
 })
@@ -17,7 +20,7 @@ const emit = defineEmits(['update:modelValue'])
     <span class="m-switch-lamp" :style="modelValue ? { background: color, boxShadow: `0 0 6px ${color}` } : null"></span>
     <button
       type="button" class="m-switch-track m-focusable" role="switch" :aria-checked="String(modelValue)"
-      :aria-label="label || undefined" :disabled="disabled" @click="emit('update:modelValue', !modelValue)"
+      :aria-label="ariaLabel || label || undefined" :disabled="disabled" @click="emit('update:modelValue', !modelValue)"
     >
       <span class="m-switch-puck" :style="{ left: modelValue ? '51px' : '3px' }"></span>
     </button>

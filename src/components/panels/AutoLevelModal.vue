@@ -125,9 +125,10 @@ async function applyAndClose() {
   closeModal()
 }
 
-// Longest stretch the server will analyse for this user (Infinity with Pro).
+// The analysis needs an account (a free one), not a plan: say so before the
+// click rather than after it. Empty when signed in or accounts are off.
 const entitlements = useEntitlements()
-const previewLimit = computed(() => entitlements.previewLimit('autoLevel'))
+const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign in (free) to analyse. Applying needs Pro.' : ''))
 </script>
 
 <template>
@@ -169,9 +170,7 @@ const previewLimit = computed(() => entitlements.previewLimit('autoLevel'))
               Runs once on the server. Phrase segmentation and every control
               below are computed here from the result.
             </p>
-            <p v-if="previewLimit !== Infinity" class="al-warn">
-              Free preview: analyses the first {{ previewLimit }} s. Pro analyses the whole selection.
-            </p>
+            <p v-if="signInNote" class="al-hint al-signin">{{ signInNote }}</p>
           </div>
           <ModulaButton
             variant="accent" :disabled="analyzing || !hasSelection"
@@ -294,17 +293,13 @@ const previewLimit = computed(() => entitlements.previewLimit('autoLevel'))
   box-shadow: 0 -1px 0 rgba(255, 255, 255, .04);
 }
 .al-analyse-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.al-hint.al-signin { color: #ffb27a; }
 .al-hint {
   margin: 0;
   font: 500 10px/1.5 var(--m-font-ui);
   color: var(--m-ink-4);
 }
 .al-hint b { font-weight: 700; color: var(--m-ink-3); }
-.al-warn {
-  margin: 0;
-  font: 600 10px/1.45 var(--m-font-ui);
-  color: var(--m-accent);
-}
 .al-status {
   margin: 0;
   font: 500 10px/1.5 var(--m-font-ui);

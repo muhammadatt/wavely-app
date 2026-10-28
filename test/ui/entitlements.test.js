@@ -38,7 +38,9 @@ test('signed out: saving asks for an account, Pro features ask for an upgrade', 
   assert.deepEqual(auth.calls, [['dialog', 'signUp'], ['upgrade', 'pluginChainApply']])
   assert.match(e.hint('savePresets'), /^Sign in/)
   assert.match(e.hint('autoLevel'), /Pro feature/)
-  assert.equal(e.previewLimit('autoLevel'), FREE_PREVIEW_SECONDS)
+  assert.equal(e.previewLimit('noiseReduction'), FREE_PREVIEW_SECONDS)
+  // Analysis plugins have no server preview to limit: only their Apply is Pro.
+  assert.equal(e.previewLimit('autoLevel'), 0)
 })
 
 test('free plan saves presets but not Pro features; Pro has everything; it tracks the plan live', () => {
@@ -46,12 +48,27 @@ test('free plan saves presets but not Pro features; Pro has everything; it track
   const e = createEntitlements(auth)
   assert.equal(e.can('savePresets'), true)
   assert.equal(e.can('pluginChainApply'), false)
-  assert.equal(e.previewLimit('sibilanceEditor'), FREE_PREVIEW_SECONDS)
+  assert.equal(e.previewLimit('noiseReduction'), FREE_PREVIEW_SECONDS)
 
   auth.state.plan = 'pro'
   assert.equal(e.can('pluginChainApply'), true)
-  assert.equal(e.previewLimit('sibilanceEditor'), Infinity)
+  assert.equal(e.previewLimit('noiseReduction'), Infinity)
   assert.equal(e.hint('autoLevel'), '')
+})
+
+test('analysis needs an account, not a plan', () => {
+  const out = createEntitlements(fakeAuth('signedOut'))
+  assert.equal(out.blocker('audioAnalysis'), 'signIn')
+  const free = createEntitlements(fakeAuth('signedIn', 'free'))
+  assert.equal(free.can('audioAnalysis'), true)
+})
+
+test('a server 401 sign_in_required opens the sign-in dialog, not the upgrade prompt', () => {
+  const auth = fakeAuth('signedOut')
+  const e = createEntitlements(auth)
+  const err = Object.assign(new Error('sign in'), { signIn: { feature: 'audioAnalysis' } })
+  assert.equal(e.handleServerRefusal(err), true)
+  assert.deepEqual(auth.calls, [['dialog', 'signUp']])
 })
 
 test('a server 402 opens the upgrade prompt; other errors are left to the caller', () => {
