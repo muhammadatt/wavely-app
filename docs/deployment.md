@@ -240,7 +240,10 @@ the host lets anyone forge their IP and reset every per-IP rate limit.
   `req.ip` (which the rate limiter keys on) may be Cloudflare's edge IP rather
   than the user's. Check one request's logged IP after cutover. If it's a
   Cloudflare address, the rate limits are effectively shared across users.
-- **Upload size.** Cloudflare's free/pro plans cap request bodies at 100 MB.
+  The fix, and the edge rules to put in front of the API, are in
+  `docs/cloudflare.md`.
+- **Upload size.** Cloudflare's free/pro plans cap request bodies at 100 MB —
+  about 9 minutes of the float WAV mastering uploads (`docs/cloudflare.md` §0.3).
   Traefik adds no limit of its own.
 - **Request log.** Every `/api/process`, `/api/spot` and `/api/analyze`
   request writes one `{"evt":"api",…}` JSON line to stdout (account, IP,
