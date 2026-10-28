@@ -1,4 +1,5 @@
 <script setup>
+import { FREE_PREVIEW_SECONDS } from '../../auth/plans.js'
 /**
  * Auto Leveler.
  *
@@ -169,7 +170,10 @@ const previewLimit = computed(() => entitlements.previewLimit('autoLevel'))
               Runs once on the server. Phrase segmentation and every control
               below are computed here from the result.
             </p>
-            <p v-if="previewLimit !== Infinity" class="al-warn">
+            <p v-if="previewLimit === 0" class="al-warn">
+              Sign in to analyse — a free account previews the first {{ FREE_PREVIEW_SECONDS }} s.
+            </p>
+            <p v-else-if="previewLimit !== Infinity" class="al-warn">
               Free preview: analyses the first {{ previewLimit }} s. Pro analyses the whole selection.
             </p>
           </div>

@@ -47,21 +47,42 @@ export function createEntitlements(auth) {
 
   /**
    * Longest selection (seconds) this user may send for a server feature, or
-   * Infinity when not limited. Matches the server's check.
+   * Infinity when not limited. Matches the server's check. 0 when this user
+   * gets no preview at all (signed out, for a preview that needs an account).
    */
   function previewLimit(featureId) {
     if (can(featureId)) return Infinity
-    return allowsPreview(featureId) ? FREE_PREVIEW_SECONDS : 0
+    return allowsPreview(featureId, auth.plan.value) ? FREE_PREVIEW_SECONDS : 0
   }
 
-  /** Handle an API error: true if it was an upgrade refusal (and the prompt is open). */
+  /**
+   * Gate a server feature's preview: true when the user may send at least a
+   * preview; otherwise opens the sign-in (or upgrade) prompt and returns false.
+   * Call it before rendering or uploading anything.
+   */
+  function requestPreview(featureId) {
+    if (previewLimit(featureId) > 0) return true
+    if (auth.plan.value == null) auth.openDialog('signUp')
+    else auth.openUpgrade(featureId)
+    return false
+  }
+
+  /**
+   * Handle an API error: true if it was a plan refusal (and the prompt is
+   * open). A feature any account unlocks asks for a sign-in, not an upgrade.
+   */
   function handleServerRefusal(err) {
+    if (err?.signIn) {
+      auth.openDialog('signUp')
+      return true
+    }
     if (!err?.upgrade) return false
-    auth.openUpgrade(err.upgrade.feature)
+    if (err.upgrade.requires === 'free') auth.openDialog('signUp')
+    else auth.openUpgrade(err.upgrade.feature)
     return true
   }
 
-  return { gatingActive, can, blocker, hint, request, previewLimit, handleServerRefusal }
+  return { gatingActive, can, blocker, hint, request, previewLimit, requestPreview, handleServerRefusal }
 }
 
 function lowerFirst(s) {

@@ -6,7 +6,7 @@
 # contain all three:
 #
 #   docker build -f server/Dockerfile -t wavely-server .
-#   docker run -p 3001:3001 --env-file server/.env -v wavely-models:/models wavely-server
+#   docker run -p 127.0.0.1:3001:3001 --env-file server/.env -v wavely-models:/models wavely-server
 #
 # The root .dockerignore whitelists what the image needs, so the client app,
 # test data and mockups never reach the build.
@@ -74,8 +74,15 @@ COPY server server
 #   Demucs, torch.hub → $TORCH_HOME
 #   Hugging Face (LavaSR, AP-BWE) → $HF_HOME
 #   numba's compiled kernels → $NUMBA_CACHE_DIR
+# HOST: index.js listens on 127.0.0.1 by default, which inside a container is
+# unreachable from the proxy (Traefik runs in another container) — while the
+# HEALTHCHECK below, probing 127.0.0.1 from inside, still passes. So the image
+# listens on every interface, and the PORT must only ever be reached through
+# the proxy: never publish it on the host (no Coolify "Ports Mappings"), or a
+# client can forge X-Forwarded-For and reset every per-IP rate limit.
 ENV PATH=/opt/venv/bin:$PATH \
     NODE_ENV=production \
+    HOST=0.0.0.0 \
     PORT=3001 \
     SEPARATION_PYTHON=/opt/venv/bin/python \
     XDG_CACHE_HOME=/models/cache \

@@ -22,6 +22,7 @@ import path from 'path'
 import fs from 'fs'
 import { decodeToFloat32, tempPath, removeTmp, padStart } from '../lib/ffmpeg.js'
 import { spawnPython, spawnPythonJsonResult } from './spawnPython.js'
+import { killAfter, timeoutError } from '../lib/subprocessTimeout.js'
 
 // --- DeepFilter invocation strategy ---
 // DEEPFILTER_BINARY (env): path to a pre-built deep-filter CLI binary.
@@ -262,6 +263,7 @@ function spawnProcess(executable, args, label) {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, OMP_NUM_THREADS: NUM_THREADS, MKL_NUM_THREADS: NUM_THREADS, TORCH_NUM_THREADS: NUM_THREADS },
     })
+    const watch = killAfter(proc, label)
 
     let stdout = ''
     let stderr = ''
@@ -275,6 +277,7 @@ function spawnProcess(executable, args, label) {
     })
 
     proc.on('close', (code, signal) => {
+      if (watch.timedOut) return reject(timeoutError(label))
       if (stdout.trim()) console.log(`[${label}] ${stdout.trim()}`)
       // CLI binary (deep-filter.exe) writes progress to stderr; log it on success too.
       if (stderr.trim() && code === 0) console.log(`[${label}] ${stderr.trim()}`)

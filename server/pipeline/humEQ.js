@@ -34,6 +34,7 @@ import { spawn }     from 'child_process'
 import { copyFile }  from 'fs/promises'
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg'
 import { runFfmpeg } from '../lib/exec-ffmpeg.js'
+import { killAfter, timeoutError } from '../lib/subprocessTimeout.js'
 
 const FFMPEG_PATH = ffmpegInstaller.path
 
@@ -291,10 +292,12 @@ function decodeToPcm(inputPath, maxSamples) {
       '-f',  'f32le',             // raw float32 little-endian
       '-',                        // stdout
     ])
+    const watch = killAfter(proc, '[hum-detect] FFmpeg decode')
 
     proc.stdout.on('data', chunk => chunks.push(chunk))
 
     proc.on('close', code => {
+      if (watch.timedOut) return reject(timeoutError('[hum-detect] FFmpeg decode'))
       // FFmpeg may exit non-zero (e.g. code 1) when the -t limit is hit mid-stream
       // on some builds; treat any output as success if we got data.
       if (code !== 0 && chunks.length === 0) {

@@ -1,4 +1,5 @@
 <script setup>
+import { FREE_PREVIEW_SECONDS } from '../../auth/plans.js'
 /**
  * Sibilance Editor (the clip-gain de-esser).
  *
@@ -192,7 +193,10 @@ const previewLimit = computed(() => entitlements.previewLimit('sibilanceEditor')
               Runs once on the server. The controls below re-shape the result
               without re-detecting.
             </p>
-            <p v-if="previewLimit !== Infinity" class="se-warn">
+            <p v-if="previewLimit === 0" class="se-warn">
+              Sign in to analyse — a free account previews the first {{ FREE_PREVIEW_SECONDS }} s.
+            </p>
+            <p v-else-if="previewLimit !== Infinity" class="se-warn">
               Free preview: analyses the first {{ previewLimit }} s. Pro analyses the whole selection.
             </p>
           </div>

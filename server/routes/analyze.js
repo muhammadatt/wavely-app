@@ -29,6 +29,7 @@ import { withAnalysisContext } from '../pipeline/index.js'
 import { applyClipGainDeEsser } from '../pipeline/clipGainDeEsser.js'
 import { FRAME_DURATION_S } from '../pipeline/frameAnalysis.js'
 import { openGate } from '../lib/entitlements.js'
+import { trackWork } from '../lib/requestLog.js'
 
 const upload = multer({
   dest: path.resolve(import.meta.dirname, '..', 'uploads'),
@@ -196,29 +197,41 @@ const KINDS = {
   vad:       { label: 'Voice activity', run: runVadAnalysis, feature: 'autoLevel' },
 }
 
+const unlimited = (_req, _res, next) => next()
+
 /**
  * @param {object}   [deps]
  * @param {Function} [deps.gate]  entitlement gate factory (lib/entitlements.js);
  *                                the default lets every request through
+ * @param {Function} [deps.limit] concurrency middleware (holdSlot in
+ *                                lib/jobQueue.js); runs before the upload
  */
-export function createAnalyzeRoute({ gate = openGate } = {}) {
+export function createAnalyzeRoute({ gate = openGate, limit = unlimited } = {}) {
   const router = Router()
+  const featureOf = req => KINDS[req.params.kind]?.feature ?? null
 
-  router.post('/analyze/:kind', upload.single('file'), gate(req => KINDS[req.params.kind]?.feature ?? null), async (req, res) => {
+  // An unknown analysis kind is refused first: it has no feature, so the sign-in
+  // check would wave it through to take a slot and an upload it can never use.
+  const known = (req, res, next) => {
+    if (KINDS[req.params.kind]) return next()
+    res.status(400).json({ error: `Unknown analysis kind: ${req.params.kind}`, supported: Object.keys(KINDS) })
+  }
+
+  // Sign-in and the concurrency slot are checked BEFORE multer reads the body.
+  router.post('/analyze/:kind', known, gate.signIn(featureOf), limit, upload.single('file'), gate(featureOf), async (req, res) => {
+    const slot = res.locals.slot
+    const releaseSlot = slot?.claim()
     const uploadedPath = req.file?.path
 
     try {
+      // The client left while the gate was checking; its slot is already free.
+      if (slot && !releaseSlot) return
+
       if (!req.file) {
         return res.status(400).json({ error: 'No audio file provided' })
       }
 
       const kind = KINDS[req.params.kind]
-      if (!kind) {
-        return res.status(400).json({
-          error: `Unknown analysis kind: ${req.params.kind}`,
-          supported: Object.keys(KINDS),
-        })
-      }
 
       let params = {}
       if (req.body?.params) {
@@ -230,7 +243,7 @@ export function createAnalyzeRoute({ gate = openGate } = {}) {
       }
 
       const started = Date.now()
-      const result = await kind.run(uploadedPath, params)
+      const result = await trackWork(res, kind.run(uploadedPath, params))
       console.log(
         `[analyze/${req.params.kind}] ${Date.now() - started}ms — ` +
         (result.voicedRuns
@@ -243,6 +256,7 @@ export function createAnalyzeRoute({ gate = openGate } = {}) {
       console.error(`[analyze/${req.params.kind}] failed:`, err)
       res.status(500).json({ error: err.message ?? 'Analysis failed' })
     } finally {
+      releaseSlot?.()
       if (uploadedPath) await unlink(uploadedPath).catch(() => {})
     }
   })

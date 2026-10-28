@@ -30,6 +30,7 @@ import os from 'os'
 import path from 'path'
 
 import { runPython } from './pythonWorker.js'
+import { killAfter, timeoutError } from '../lib/subprocessTimeout.js'
 
 export const PYTHON = process.env.SEPARATION_PYTHON ?? 'python3'
 export const DEVICE = process.env.SEPARATION_DEVICE ?? 'auto'
@@ -149,6 +150,7 @@ function legacySpawn(script, args, label, extraEnv, capture) {
         ...extraEnv,
       },
     })
+    const watch = killAfter(proc, label)
 
     let stdout = ''
     let stderr = ''
@@ -173,6 +175,7 @@ function legacySpawn(script, args, label, extraEnv, capture) {
     })
 
     proc.on('close', (code, signal) => {
+      if (watch.timedOut) return reject(timeoutError(label))
       if (code === 0 && signal === null) {
         if (capture) {
           try {
@@ -218,6 +221,7 @@ function legacySpawnJsonResult(script, args, label, extraEnv) {
         ...extraEnv,
       },
     })
+    const watch = killAfter(proc, label)
 
     let stdout       = ''
     let stderr       = ''
@@ -247,6 +251,7 @@ function legacySpawnJsonResult(script, args, label, extraEnv) {
     })
 
     proc.on('close', (code, signal) => {
+      if (watch.timedOut) return reject(timeoutError(label))
       // Flush any partial trailing stdout line that wasn't terminated.
       if (stdoutBuffer.trim() && !stdoutBuffer.startsWith('JSON_RESULT:')) {
         console.log(`[${label}] ${stdoutBuffer.trim()}`)

@@ -209,6 +209,12 @@ production for cores.
 Don't set `PORT` unless you also change *Ports Exposes*. The image defaults to
 3001.
 
+Don't set `HOST`, and don't add *Ports Mappings*. The image listens on
+`0.0.0.0` (outside a container the server defaults to `127.0.0.1`) so Traefik
+can reach it over Coolify's network. The API must only be reachable through
+the proxy: `server/index.js` trusts `X-Forwarded-For`, so a port published on
+the host lets anyone forge their IP and reset every per-IP rate limit.
+
 ---
 
 ## 7. Migrating from the current VPS
@@ -234,8 +240,16 @@ Don't set `PORT` unless you also change *Ports Exposes*. The image defaults to
   `req.ip` (which the rate limiter keys on) may be Cloudflare's edge IP rather
   than the user's. Check one request's logged IP after cutover. If it's a
   Cloudflare address, the rate limits are effectively shared across users.
-- **Upload size.** Cloudflare's free/pro plans cap request bodies at 100 MB.
+  The fix, and the edge rules to put in front of the API, are in
+  `docs/cloudflare.md`.
+- **Upload size.** Cloudflare's free/pro plans cap request bodies at 100 MB —
+  about 9 minutes of the float WAV mastering uploads (`docs/cloudflare.md` §0.3).
   Traefik adds no limit of its own.
+- **Request log.** Every `/api/process`, `/api/spot` and `/api/analyze`
+  request writes one `{"evt":"api",…}` JSON line to stdout (account, IP,
+  status, refusal code). Coolify's log view is not long-term storage; ship
+  stdout somewhere that keeps it if you need it for abuse investigations — see
+  `docs/user-accounts.md`, "Investigating and blocking an account".
 - **Logs.** Coolify shows container stdout/stderr per app. `PIPELINE_LOG=1` writes
   per-run JSON under `server/logs` inside the container, which is lost on
   redeploy unless you add a second volume there.

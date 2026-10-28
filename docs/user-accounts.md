@@ -79,6 +79,11 @@ Every existing feature works signed out, with or without accounts configured.
 | `SUPABASE_SECRET_KEY` | the secret key (`sb_secret_…`), or the legacy `SUPABASE_SERVICE_ROLE_KEY`. **Server only — it bypasses row-level security.** |
 | `SUPABASE_JWT_SECRET` | only if the project still signs tokens with the legacy HS256 secret. Projects on asymmetric JWT signing keys need nothing here. |
 | `CORS_ORIGINS` | comma-separated exact frontend origins, e.g. `https://app.example.com,https://staging.example.com`. Unset falls back to the localhost dev origins, so it **must** be set in production. |
+| `HOST` | interface Node listens on. Default `127.0.0.1`: only the reverse proxy on the same machine can reach it, which is what makes the per-IP rate limits trustworthy (`trust proxy` believes `X-Forwarded-For`). Point the proxy at `http://127.0.0.1:3001`. Set `0.0.0.0` only when the proxy runs on another host or container, and firewall the port to it. |
+| `MAX_CONCURRENT_JOBS` / `MAX_QUEUED_JOBS` / `MAX_JOBS_PER_CLIENT` | mastering job queue (defaults 2 / 10 / 2) |
+| `MAX_CONCURRENT_ANALYSES` / `MAX_ANALYSES_PER_CLIENT` | shared limit on `/api/spot` and `/api/analyze` (defaults 4 / 2). Full is refused (503 / 429) before the upload, never queued |
+| `SUBPROCESS_TIMEOUT_MS` / `PROBE_TIMEOUT_MS` | kill limits for pipeline processes (defaults 60 min / 2 min) |
+| `USAGE_RETENTION_DAYS` | days of `usage_events` rows to keep; the server deletes older ones daily (default 90, `0` keeps all) |
 | `CORS_ORIGIN_PATTERNS` | comma-separated regexes for origins you can't list, i.e. Vercel preview URLs, e.g. `^https://wavely-app(-[a-z0-9-]+)?\.vercel\.app$`. Anchor with `^…$`: the check is `pattern.test(origin)`, so an unanchored pattern matches anywhere in the string. |
 
 CORS lives **only in Express** (`server/index.js`). If Apache or another proxy
@@ -109,6 +114,7 @@ calls. A rejected origin is logged as `CORS rejected origin: …`.
 | Upgrade prompt | `src/components/UpgradeDialog.vue` |
 | Server enforcement + free preview | `server/lib/entitlements.js` |
 | Account preset storage | `src/auth/presetBackend.js`, `supabase/migrations/…_user_presets.sql` |
+| Usage history, account blocking | `server/lib/usage.js`, `server/lib/requestLog.js`, `supabase/migrations/…_usage_and_blocking.sql` |
 
 ### Database rules worth knowing
 
@@ -117,6 +123,10 @@ calls. A rejected origin is logged as `CORS rejected origin: …`.
   Stripe customer id is server-written.
 - `subscriptions`: users can read their own rows; only the server writes them.
   Entitled statuses are `active`, `trialing` and `past_due` (the dunning window).
+- `usage_events`: one row per served server-processing request; users can read
+  their own rows, only the server writes them.
+- `profiles.blocked_at` / `blocked_reason`: operator-only (outside the
+  `display_name` column grant).
 
 ### Client behaviour worth knowing
 
@@ -139,9 +149,10 @@ The ladder is: signed out → `free` (any account) → `pro`.
 |---|---|---|---|
 | `savePresets` | account | Saving plugin presets | UI and database (RLS) |
 | `pluginChainApply` | Pro | Plugin Chain **Apply**. Preview is free | UI only |
-| `autoLevel` | Pro | Auto Leveler analysis and Apply | **Server** (`/api/analyze/vad`) |
-| `sibilanceEditor` | Pro | Sibilance Editor analysis and Apply | **Server** (`/api/analyze/sibilance`) |
-| `spotEffects` | Pro | `/api/spot/*` (no callers today) | **Server** |
+| `autoLevel` | Pro | Auto Leveler analysis and Apply. Free account: 30 s preview; signed out: nothing | **Server** (`/api/analyze/vad`) |
+| `sibilanceEditor` | Pro | Sibilance Editor analysis and Apply. Free account: 30 s preview; signed out: nothing | **Server** (`/api/analyze/sibilance`) |
+| `spotEffects` | Pro | `/api/spot/*` (no callers today). Free account: 30 s preview; signed out: nothing | **Server** |
+| `mastering` | account | Preset mastering chain (`/api/process`). Signed out: the 30 s preview only | **Server** (`/api/process`) |
 
 - **Adding a gate:** add an entry to `FEATURES`, then use it in the UI.
   - `apply-feature="<id>"` on a `FloatingWindow` locks its Apply button.
@@ -154,17 +165,88 @@ The ladder is: signed out → `free` (any account) → `pro`.
 
 ### Free previews of server features
 
-Server features accept non-Pro requests on up to `FREE_PREVIEW_SECONDS` (30)
-of audio, so anyone can hear the result before paying.
+Server features accept non-entitled requests on up to `FREE_PREVIEW_SECONDS`
+(30) of audio, so the result can be heard before paying. Who gets the preview
+is the feature's `preview` field: `'account'` (any signed-in user — Auto
+Leveler, Sibilance Editor, spot effects) or `'anyone'` (signed out too — only
+`mastering`, the first-run experience). Server time spent on an anonymous
+visitor can only be limited per IP, so a new server feature should default to
+`'account'`.
 
 - **Server side:** `server/lib/entitlements.js` reads the uploaded file's
   duration with ffprobe and does not trust the client.
+  - A signed-out request for a feature with nothing open to them gets **401**
+    `{ code: 'sign_in_required', feature }` from `gate.signIn`, which runs
+    BEFORE multer, so the upload is never read.
   - A longer upload without Pro gets **402** with `{ code: 'upgrade_required', feature, requires, previewSeconds }`.
   - If the duration can't be read, the request is refused.
   - Plans are cached per user for 60 s.
-- **App side:** when a non-Pro user presses Analyse, the selection is narrowed
-  to its first 30 s before anything is uploaded, and a caption says so. Apply
-  stays Pro. A 402 opens the upgrade prompt.
+- **App side:** a signed-out user who presses Analyse gets the sign-in dialog
+  (`requestPreview`) and the caption says a free account previews 30 s. A
+  signed-in non-Pro user's selection is narrowed to its first 30 s before
+  anything is uploaded, and a caption says so. Apply stays Pro. A 402 opens the
+  upgrade prompt — or the sign-in dialog when the feature only needs an account
+  (`requires: 'free'`); a 401 `sign_in_required` opens the sign-in dialog. Mastering cannot narrow a
+  whole file, so a signed-out user with more than 30 s is asked to sign in
+  before the upload.
+
+### Investigating and blocking an account
+
+Every request to `/api/process`, `/api/spot` and `/api/analyze` — served or
+refused — writes one JSON line to the server's stdout (`server/lib/requestLog.js`):
+
+```
+{"evt":"api","t":"2026-10-26T18:02:11.204Z","route":"/api/analyze/vad","user":"<uuid>","ip":"203.0.113.9","status":200,"code":null,"feature":"autoLevel","mode":"preview","bytes":2817212,"audio_s":29.8,"ms":812}
+```
+
+`code` is the refusal code (`rate_limited`, `sign_in_required`,
+`upgrade_required`, `too_many_jobs`, `server_busy`, `account_blocked`) and
+`user` is null for a signed-out caller. Keep these logs: whatever runs Node
+(systemd's journal, pm2, Docker) must retain stdout, or they are gone at the
+next restart. Find one account's requests with, e.g.,
+`journalctl -u wavely -o cat | grep '"evt":"api"' | jq 'select(.user == "<uuid>")'`.
+
+Each SERVED request (or server failure) also writes a `usage_events` row —
+for mastering, when the job ends. Refusals are only in the log. One account's
+last week:
+
+```sql
+select feature, mode, count(*) as requests,
+       round(sum(audio_seconds) / 60) as audio_minutes
+from public.usage_events
+where user_id = '<uuid>' and created_at > now() - interval '7 days'
+group by feature, mode
+order by audio_minutes desc nulls last;
+```
+
+The heaviest accounts:
+
+```sql
+select user_id, count(*) as requests, round(sum(audio_seconds) / 60) as audio_minutes
+from public.usage_events
+where created_at > now() - interval '24 hours'
+group by user_id
+order by audio_minutes desc nulls last
+limit 20;
+```
+
+**To block an account** from server processing (the SQL editor runs as an
+operator):
+
+```sql
+update public.profiles
+set blocked_at = now(), blocked_reason = 'what happened, and the ticket/date'
+where id = '<uuid>';
+```
+
+The server re-reads the flag at least once a minute, then answers every server
+feature with **403** `{ code: 'account_blocked' }`, before the upload is read.
+Clear both columns to unblock. Blocking does not sign the user out or touch
+their subscription — cancel or refund that in Stripe if you need to, and ban
+them in Supabase Auth (Authentication → Users) if they should not sign in at
+all; a ban alone leaves their current access token valid for up to an hour,
+which is what the flag closes. A failed flag lookup lets the request through
+(a database hiccup must not lock everyone out).
 
 ### Limits of browser-side gates
 

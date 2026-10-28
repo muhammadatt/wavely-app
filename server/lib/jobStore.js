@@ -14,7 +14,9 @@
 import { randomUUID } from 'crypto'
 import { unlink }     from 'fs/promises'
 
-// Jobs expire 1 hour after creation whether retrieved or not.
+// Finished jobs expire 1 hour after they finish, whether retrieved or not.
+// Unfinished ones never expire here: they may be waiting in the job queue, and
+// the subprocess timeouts (lib/subprocessTimeout.js) bound how long they run.
 const JOB_TTL_MS      = 60 * 60 * 1000
 // Cleanup runs every 5 minutes.
 const CLEANUP_INTERVAL = 5 * 60 * 1000
@@ -28,11 +30,14 @@ const jobs = new Map()
  * @typedef {Object} Job
  * @property {JobStatus} status
  * @property {string|null} progress  - Human-readable stage description
+ * @property {number|null} queuePosition - 1-based place in the job queue while
+ *                                         waiting; null once the pipeline runs
  * @property {string|null} error     - Error message when status === 'error'
  * @property {object|null} report    - Processing report when status === 'done'
  * @property {object[]|null} peaks   - Peak data when status === 'done'
  * @property {string|null} outputPath - Path to processed audio file on disk
  * @property {number} createdAt
+ * @property {number|null} finishedAt
  */
 
 /**
@@ -44,11 +49,13 @@ export function createJob() {
   jobs.set(jobId, {
     status:     'processing',
     progress:   null,
+    queuePosition: null,
     error:      null,
     report:     null,
     peaks:      null,
     outputPath: null,
     createdAt:  Date.now(),
+    finishedAt: null,
   })
   return jobId
 }
@@ -69,8 +76,12 @@ export function getJob(jobId) {
  */
 export function completeJob(jobId, { report, peaks, outputPath }) {
   const job = jobs.get(jobId)
-  if (!job) return
-  Object.assign(job, { status: 'done', report, peaks, outputPath })
+  if (!job) {
+    // Expired or never existed: nobody can download it, so don't leak the file.
+    unlink(outputPath).catch(() => {})
+    return
+  }
+  Object.assign(job, { status: 'done', report, peaks, outputPath, finishedAt: Date.now() })
 }
 
 /**
@@ -81,7 +92,18 @@ export function completeJob(jobId, { report, peaks, outputPath }) {
 export function failJob(jobId, message) {
   const job = jobs.get(jobId)
   if (!job) return
-  Object.assign(job, { status: 'error', error: message })
+  Object.assign(job, { status: 'error', error: message, finishedAt: Date.now() })
+}
+
+/**
+ * Record a waiting job's place in the job queue, or null once it starts. The
+ * client excludes queue time from its processing deadline (src/api/processing.js).
+ * @param {string} jobId
+ * @param {number|null} position
+ */
+export function setJobQueuePosition(jobId, position) {
+  const job = jobs.get(jobId)
+  if (job) job.queuePosition = position
 }
 
 /**
@@ -99,7 +121,7 @@ export function setJobProgress(jobId, progress) {
 async function cleanExpiredJobs() {
   const cutoff = Date.now() - JOB_TTL_MS
   for (const [id, job] of jobs) {
-    if (job.createdAt < cutoff) {
+    if (job.finishedAt != null && job.finishedAt < cutoff) {
       if (job.outputPath) await unlink(job.outputPath).catch(() => {})
       jobs.delete(id)
     }
