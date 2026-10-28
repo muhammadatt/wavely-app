@@ -1,0 +1,40 @@
+==Airy==
+
+P1
+
+Atten3_8@100hz_Boost3_6@8khz
+
+Atten 3.8 @ 100hz
+Boost 3.6 @ 8khz
+Bandwidth: 10
+
+P2
+
+Boost2_8@100hz_Atten1_8@20khz
+
+Boost 2.8 @ 100hz
+Atten 1.8 @ 10khz
+Bandwidth: 10
+
+==Bassy==
+
+Pre
+
+Atten4_2@100hz_Boost5_2@8khz
+
+Atten 4.2 @ 100hz
+Boost 5.2 @ 8khz
+Bandwidth: 7
+
+Post
+
+Boost_5_8@100hz_Atten3_2@10khz
+
+Boost 5.8 @ 100hz
+Atten 3.0 @ 10khz
+Bandwidth: 7
+
+
+LA2A heavy compression 
+HiFreq all the way to 0
+10-20db GR
