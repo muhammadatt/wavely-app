@@ -176,7 +176,7 @@ test('the rate list carries an odd source rate and the document rate; MP3 lists 
 test('MP3 warns about lossy output; re-encoding a lossy original says so, with the bitrate drop', () => {
   assert.match(qualityLossWarning({ format: 'mp3', sampleRate: 44100, bitrate: 192 }, wav24), /MP3 is lossy/)
   const mp3 = { container: 'mp3', lossy: true, sampleRate: 44100, bitrate: 192 }
-  assert.match(qualityLossWarning({ format: 'mp3', sampleRate: 44100, bitrate: 128 }, mp3), /lossy original.*192 → 128 kbps/)
+  assert.match(qualityLossWarning({ format: 'mp3', sampleRate: 44100, bitrate: 128 }, mp3), /Lower than the original.*192 → 128 kbps/)
   assert.equal(qualityLossWarning({ format: 'flac', bitDepth: '16', sampleRate: 44100 }, mp3), null)
   assert.match(qualityLossWarning({ format: 'flac', bitDepth: '24', sampleRate: 44100 }, { ...wav24, bitDepth: 32, float: true }), /float → 24-bit/)
 })

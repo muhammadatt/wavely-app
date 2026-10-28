@@ -135,7 +135,7 @@ body {
 }
 
 .dialog-surface {
-  background: linear-gradient(160deg, #2c343f 0%, #232a33 55%, #1f252d 100%);
+  background: var(--color-gray-800);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.55),
     0 28px 70px rgba(0, 0, 0, 0.6),

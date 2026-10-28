@@ -122,7 +122,7 @@ export function qualityLossWarning(settings, sourceFormat) {
     }
     const detail = parts.length ? ` (${parts.join(', ')})` : ''
     if (!src) return parts.length ? `Lower than the original${detail}.` : null
-    if (src.lossy) return `Re-encoding a lossy original loses a little more quality each time${detail}.`
+    if (src.lossy) return parts.length ? `Lower than the original${detail}.` : null
     return `MP3 is lossy — keep a WAV or FLAC of the master${detail}.`
   }
 
