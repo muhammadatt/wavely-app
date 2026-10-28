@@ -172,14 +172,43 @@ function mp3Header(view, i) {
   }
 }
 
-function parseMp3(view) {
-  let i = 0
-  // ID3v2: 10-byte header, a syncsafe size, and a 10-byte footer if flagged.
-  if (fourCC(view, 0).startsWith('ID3') && view.byteLength >= 10) {
-    const size = ((view.getUint8(6) & 0x7f) << 21) | ((view.getUint8(7) & 0x7f) << 14)
-      | ((view.getUint8(8) & 0x7f) << 7) | (view.getUint8(9) & 0x7f)
-    i = 10 + size + (view.getUint8(5) & 0x10 ? 10 : 0)
+/**
+ * Where the audio starts after a leading ID3v2 tag — 10-byte header, a
+ * syncsafe size, and a 10-byte footer if flagged — or 0 when there is none.
+ */
+export function id3v2End(bytes) {
+  const view = bytes instanceof DataView ? bytes : new DataView(bytes)
+  if (view.byteLength < 10 || !fourCC(view, 0).startsWith('ID3')) return 0
+  const size = ((view.getUint8(6) & 0x7f) << 21) | ((view.getUint8(7) & 0x7f) << 14)
+    | ((view.getUint8(8) & 0x7f) << 7) | (view.getUint8(9) & 0x7f)
+  return 10 + size + (view.getUint8(5) & 0x10 ? 10 : 0)
+}
+
+/**
+ * Read a file's format from a Blob / File, fetching only what it needs.
+ *
+ * ⚠ A FIXED PREFIX IS NOT ENOUGH FOR MP3: an ID3v2 tag carrying cover art is
+ * routinely larger than SOURCE_HEADER_BYTES, so the first audio frame sat past
+ * the bytes read and a 320 kbps original defaulted to 192 with no warning.
+ * When the tag runs past (or nearly to) the end of the prefix, the frames are
+ * read from just after the tag instead.
+ *
+ * @param {Blob} file
+ * @returns {Promise<SourceFormat>}
+ */
+export async function readSourceFormat(file) {
+  const head = await file.slice(0, SOURCE_HEADER_BYTES).arrayBuffer()
+  const tagEnd = id3v2End(head)
+  if (tagEnd > 0 && tagEnd + 8192 > head.byteLength && tagEnd < file.size) {
+    const frames = await file.slice(tagEnd, tagEnd + SOURCE_HEADER_BYTES).arrayBuffer()
+    const viaFrames = parseSourceFormat(frames, file.name)
+    if (viaFrames.container === 'mp3' && viaFrames.sampleRate) return viaFrames
   }
+  return parseSourceFormat(head, file.name)
+}
+
+function parseMp3(view) {
+  let i = id3v2End(view)
   // The first header that is followed by another where its length says —
   // a lone 0xFFE pattern inside tag data or garbage is not a frame.
   for (; i + 4 <= view.byteLength; i++) {

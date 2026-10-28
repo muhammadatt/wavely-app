@@ -425,10 +425,14 @@ export function useEditorState() {
     appState.documents.some(d => d.revision !== d.savedRevision)
   )
 
-  /** Record that the document's current timeline is what's now on disk. */
-  function markDocumentSaved(docId) {
+  /**
+   * Record that the document's timeline at `revision` (default: now) is what's
+   * on disk. A Save passes the revision it rendered, so an edit made while it
+   * encoded stays unsaved.
+   */
+  function markDocumentSaved(docId, revision) {
     const doc = getDocument(docId)
-    if (doc) doc.savedRevision = doc.revision
+    if (doc) doc.savedRevision = revision ?? doc.revision
   }
 
   /** The file handle this document last saved to, or undefined. */

@@ -58,7 +58,7 @@ export async function renderTimelineForSave(segments, docRate, channels, setting
       worker.onmessage = ({ data }) => {
         if (data.type === 'progress') onProgress?.(data.stage, data.fraction)
         else if (data.type === 'done') resolve({ bytes: data.bytes, mime: data.mime })
-        else reject(new Error(data.message ?? 'encode failed'))
+        else reject(Object.assign(new Error(data.message ?? 'encode failed'), { name: data.name ?? 'Error' }))
       }
       worker.onerror = e => reject(new Error(e.message || 'encode worker failed'))
       worker.postMessage({ channelData: owned, fromRate: docRate, settings }, owned.map(ch => ch.buffer))

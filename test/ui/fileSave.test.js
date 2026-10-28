@@ -200,3 +200,16 @@ test('the .wav name is idempotent and survives awkward inputs', () => {
   // Dots inside the name are not extensions.
   assert.equal(toWavFileName('ch.01.take3.flac'), 'ch.01.take3.wav')
 })
+
+test('a save marks the revision it rendered, so an edit made while it encoded stays unsaved', () => {
+  const editor = useEditorState()
+  const docId = freshDocument(editor, 'encoding.wav')
+  editor.state.selection = { start: 1, end: 2 }
+  editor.performCut()
+  const rendered = editor.getDocument(docId).revision
+  editor.performSplit() // an edit landing while the worker encodes
+  editor.markDocumentSaved(docId, rendered)
+  assert.equal(editor.documentHasUnsavedWork(docId), true)
+  editor.markDocumentSaved(docId)
+  assert.equal(editor.documentHasUnsavedWork(docId), false)
+})

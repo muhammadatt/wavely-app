@@ -5,7 +5,7 @@ import {
   canSaveInPlace, isCancellation, pickSaveTarget, ensureWritePermission,
   writeFileToHandle, saveTargetKind, downloadFile,
 } from '../audio/fileSave.js'
-import { savePlan, toSaveFileName } from '../audio/saveFormat.js'
+import { savePlan, toSaveFileName, splitAudioName, formatForExtension, FORMATS } from '../audio/saveFormat.js'
 import { useWorkingFolder } from './useWorkingFolder.js'
 
 /**
@@ -79,6 +79,12 @@ export function useFileSave() {
     saveProgress.value = { stage: 'render', fraction: 0 }
     await new Promise(r => setTimeout(r, 0))
 
+    // The revision these bytes are of. Editing stays open while the worker
+    // encodes, so marking the document's revision AT THE END would call an edit
+    // made during the encode saved, and closing the tab would lose it silently.
+    // The render reads `doc.segments` synchronously before its first await, so
+    // this is exactly the state written.
+    const revision = doc.revision
     let file
     try {
       file = await renderTimelineForSave(
@@ -87,7 +93,8 @@ export function useFileSave() {
       )
     } catch (err) {
       console.error(`Failed to render ${doc.name}:`, err)
-      showToast(`Couldn't save ${doc.name}`)
+      // A too-long WAV says why and what to do; anything else is a fault.
+      showToast(err?.name === 'WavTooLargeError' ? err.message : `Couldn't save ${doc.name}`, 6000)
       return false
     }
     if (!file) {
@@ -100,7 +107,7 @@ export function useFileSave() {
       // the download folder and under whatever name it picks on a collision.
       const savedAs = toSaveFileName(settings.fileName, settings.format)
       downloadFile(file.bytes, savedAs, file.mime)
-      markDocumentSaved(doc.id)
+      markDocumentSaved(doc.id, revision)
       showToast(`Saved ${savedAs} to your downloads`)
       return true
     }
@@ -114,7 +121,7 @@ export function useFileSave() {
       return false
     }
 
-    markDocumentSaved(doc.id)
+    markDocumentSaved(doc.id, revision)
     showToast(`Saved ${handle.name ?? doc.name}`)
     return true
   }
@@ -135,15 +142,33 @@ export function useFileSave() {
    * @param {string} docId
    * @param {{ fileName: string, format: string, bitDepth: string, sampleRate: number,
    *           bitrate: number, chosenHandle?: FileSystemFileHandle|null,
-   *           folderTarget?: { segments: string[], explicit?: boolean }|null }} choice
-   * @returns {Promise<boolean>} whether the document is now on disk
+   *           folderTarget?: { segments: string[], explicit?: boolean }|null,
+   *           replaceAcknowledged?: boolean }} choice
+   * @returns {Promise<true|false|'exists'>} true when the document is on disk;
+   *   'exists' when a working-folder Save found a file of that name the dialog
+   *   had not warned about — nothing is written, and the dialog must show the
+   *   overwrite and be confirmed again
    */
-  async function confirmSave(docId, {
-    fileName, format, bitDepth, sampleRate, bitrate, chosenHandle = null, folderTarget = null,
-  }) {
+  async function confirmSave(docId, choice) {
     const doc = getDocument(docId)
     if (!doc || isSaving.value) return false
+    // Held from the first await, not just around the write: two quick clicks
+    // must not both resolve a destination and write it (and a failed one's
+    // cleanup must not remove the other's file).
+    isSaving.value = true
+    try {
+      return await runConfirmedSave(doc, choice)
+    } finally {
+      isSaving.value = false
+      saveProgress.value = null
+    }
+  }
 
+  async function runConfirmedSave(doc, {
+    fileName, format, bitDepth, sampleRate, bitrate, chosenHandle = null, folderTarget = null,
+    replaceAcknowledged = false,
+  }) {
+    const docId = doc.id
     const anchor = anchorHandleFor(docId)
     const plan = savePlan({
       supportsInPlace: canSaveInPlace(), chosenHandle, anchorHandle: anchor, folderTarget, fileName, format,
@@ -165,6 +190,10 @@ export function useFileSave() {
         }
         const dir = await workingFolder.directoryAt(folderTarget.segments)
         const existing = await workingFolder.existingFile(dir, name)
+        // The dialog's own check can miss a file (no read permission yet this
+        // visit, or a lookup still in flight). Now that it can see, an
+        // overwrite it did not show is refused and handed back to it.
+        if (existing && !replaceAcknowledged) return 'exists'
         handle = existing ?? await dir.getFileHandle(name, { create: true })
         if (!existing) created = { dir, name }
       } catch (err) {
@@ -182,32 +211,32 @@ export function useFileSave() {
         showToast("Couldn't open the save dialog")
         return false
       }
+      // The system dialog lets any name through: FLAC bytes under a .wav name
+      // is a file nothing opens, and it would be remembered for later Saves.
+      if (formatForExtension(splitAudioName(handle.name).ext) !== format) {
+        showToast(`Choose a name ending in ${FORMATS[format].ext} to save as ${FORMATS[format].label}`, 5000)
+        return false
+      }
     }
 
     const settings = {
       format, bitDepth, sampleRate, bitrate,
       fileName: handle?.name ?? toSaveFileName(fileName, format),
     }
-    isSaving.value = true
-    try {
-      const ok = await writeTo(doc, handle, settings)
-      if (!ok) {
-        if (created) created.dir.removeEntry(created.name).catch(() => {})
-        return false
-      }
-      // Adopt the destination only once something has actually been written to
-      // it — a handle that failed its first write is not a place later Saves
-      // should silently go.
-      if (handle) setSaveTarget(doc.id, handle)
-      setSaveSettings(doc.id, settings)
-      // The tab now names the file on disk, which is the whole point of having
-      // chosen a name. Renaming is not an edit, so it leaves the document clean.
-      if (settings.fileName !== doc.name) renameDocument(doc.id, settings.fileName)
-      return true
-    } finally {
-      isSaving.value = false
-      saveProgress.value = null
+    const ok = await writeTo(doc, handle, settings)
+    if (!ok) {
+      if (created) created.dir.removeEntry(created.name).catch(() => {})
+      return false
     }
+    // Adopt the destination only once something has actually been written to
+    // it — a handle that failed its first write is not a place later Saves
+    // should silently go.
+    if (handle) setSaveTarget(docId, handle)
+    setSaveSettings(docId, settings)
+    // The tab now names the file on disk, which is the whole point of having
+    // chosen a name. Renaming is not an edit, so it leaves the document clean.
+    if (settings.fileName !== doc.name) renameDocument(docId, settings.fileName)
+    return true
   }
 
   /**

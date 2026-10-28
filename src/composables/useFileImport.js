@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { decodeAudioFile, isSupportedFormat, SUPPORTED_FORMATS } from '../audio/loader.js'
 import { computePeakCache } from '../audio/processing.js'
-import { parseSourceFormat, SOURCE_HEADER_BYTES } from '../audio/sourceFormat.js'
+import { readSourceFormat } from '../audio/sourceFormat.js'
 import { isCancellation } from '../audio/fileSave.js'
 import { useWorkingFolder } from './useWorkingFolder.js'
 
@@ -74,9 +74,7 @@ export function useFileImport() {
 
         let sourceFormat = null
         try {
-          sourceFormat = parseSourceFormat(
-            await file.slice(0, SOURCE_HEADER_BYTES).arrayBuffer(), file.name
-          )
+          sourceFormat = await readSourceFormat(file)
         } catch (err) {
           console.warn(`Couldn't read the header of ${file.name}:`, err)
         }

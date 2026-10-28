@@ -281,3 +281,31 @@ test('the extension keeps the case of the file it would replace', () => {
   assert.equal(extensionFor('mp3', null, 'x.MP3'), '.MP3')
   assert.equal(extensionFor('wav'), '.wav')
 })
+
+// ── Review fixes ────────────────────────────────────────────────────────────
+
+test('the WAV encoder itself refuses a render past the 32-bit size fields', async () => {
+  const { WavTooLargeError } = await import('../../src/audio/wavEncode.js')
+  // Only `.length` is read before the check, so no 4 GB buffer is needed.
+  const huge = { length: 2 ** 30 }
+  assert.throws(() => encodeWav([huge, huge], 44100, 2, { bits: 16 }), WavTooLargeError)
+  assert.throws(() => encodeWav([huge], 44100, 1, { bits: 32, float: true }), /4 GB/)
+})
+
+test('an MP3 whose ID3 tag outgrows the header prefix still reports its own bitrate', async () => {
+  const { readSourceFormat, SOURCE_HEADER_BYTES } = await import('../../src/audio/sourceFormat.js')
+  // A 100 KB ID3v2 tag (cover art), then 320 kbps 44.1 kHz stereo frames.
+  const tagBody = SOURCE_HEADER_BYTES + 40000
+  const tag = new Uint8Array(10 + tagBody)
+  tag.set([0x49, 0x44, 0x33, 4, 0, 0])
+  tag[6] = (tagBody >> 21) & 0x7f; tag[7] = (tagBody >> 14) & 0x7f; tag[8] = (tagBody >> 7) & 0x7f; tag[9] = tagBody & 0x7f
+  const frameLen = Math.floor(144000 * 320 / 44100)
+  const frames = new Uint8Array(frameLen * 4)
+  for (let f = 0; f < 4; f++) frames.set([0xff, 0xfb, 0xe0, 0x00], f * frameLen) // 320 kbps, 44.1 kHz, stereo
+  const file = new File([tag, frames], 'cover.mp3')
+  const fmt = await readSourceFormat(file)
+  assert.equal(fmt.bitrate, 320)
+  assert.equal(fmt.sampleRate, 44100)
+  // The fixed prefix alone could not see a frame.
+  assert.equal(parseSourceFormat(await file.slice(0, SOURCE_HEADER_BYTES).arrayBuffer(), 'cover.mp3').bitrate ?? null, null)
+})

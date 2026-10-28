@@ -17,6 +17,17 @@
  * integer formats clip at full scale because they have to.
  */
 
+/** The largest value a RIFF size field can hold. */
+export const WAV_MAX_RIFF_BYTES = 0xffffffff
+
+/** Thrown for a render too long for WAV's 32-bit size fields. */
+export class WavTooLargeError extends Error {
+  constructor(bytes) {
+    super(`This file would be ${(bytes / 1e9).toFixed(2)} GB — over the 4 GB a WAV can hold. Save as FLAC, or at a lower depth or rate.`)
+    this.name = 'WavTooLargeError'
+  }
+}
+
 /** Bytes in front of the sample data for a given format. */
 export function wavHeaderBytes({ float = false } = {}) {
   // Float carries an 18-byte fmt chunk (cbSize = 0) and the `fact` chunk the
@@ -40,6 +51,12 @@ export function encodeWav(channelData, sampleRate, numChannels, { bits = 16, flo
   const blockAlign = numChannels * bytesPerSample
   const dataSize = numSamples * blockAlign
   const headerSize = wavHeaderBytes({ float })
+  // RIFF and data sizes are 32-bit fields. Past them the file is written
+  // happily and read back as garbage, so refuse here — every Save path comes
+  // through this, including the silent re-saves that skip the dialog's check.
+  if (headerSize - 8 + dataSize > WAV_MAX_RIFF_BYTES) {
+    throw new WavTooLargeError(headerSize + dataSize)
+  }
   const buffer = new ArrayBuffer(headerSize + dataSize)
   const view = new DataView(buffer)
 

@@ -3,6 +3,7 @@ import { computed, ref, watch, onMounted } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileSave } from '../composables/useFileSave.js'
 import { useWorkingFolder } from '../composables/useWorkingFolder.js'
+import { useModalFocus } from '../composables/useModalFocus.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { formatSize, WAV_SIZE_LIMIT } from '../audio/exportPlan.js'
 import { isCancellation, pickSaveTarget } from '../audio/fileSave.js'
@@ -85,8 +86,18 @@ const fileName = computed(() => baseName.value.trim().replace(/[.\s]+$/, '') + e
 /**
  * Tidy the typed name on blur / Enter: an audio extension typed into it is
  * taken off, and if it names a format ("take.flac"), the format follows.
+ *
+ * ⚠ ONLY AFTER THE USER TYPED. The name the dialog opens with, and one the
+ * system dialog returned, are stems already — a file called "take.mp3.wav"
+ * opens with the stem "take.mp3", and reading that as an extension switched
+ * the format to MP3 on the first blur with no edit at all. Clearing the flag
+ * after one pass also makes blur-then-Save idempotent: a second pass cannot
+ * strip a second suffix.
  */
+const nameEdited = ref(false)
 function commitName() {
+  if (!nameEdited.value) return
+  nameEdited.value = false
   const { base, ext } = splitAudioName(baseName.value)
   if (!ext) return
   baseName.value = base
@@ -97,6 +108,21 @@ function commitName() {
 watch(fileName, name => {
   if (chosenHandle.value && name !== chosenHandle.value.name) chosenHandle.value = null
 })
+
+// Focus stays inside while the dialog is open and returns to the opener on
+// close. Registered BEFORE the hook below so it records the opener first.
+const root = ref(null)
+const { trapTab } = useModalFocus(root)
+
+function onKeydown(e) {
+  trapTab(e)
+  // The editor's shortcuts listen on window; none belong to a form.
+  e.stopPropagation()
+  if (e.key === 'Escape') { e.preventDefault(); close() }
+  // …but with propagation stopped, Ctrl+S would reach the browser's own
+  // "save page" instead.
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') e.preventDefault()
+}
 
 onMounted(() => {
   nameInput.value?.focus()
@@ -133,17 +159,22 @@ const plan = computed(() => savePlan({
 
 // Whether a 'folder' Save would land on a file that is already there — said
 // out loud, since it overwrites with no system dialog to warn about it.
-const replacesInFolder = ref(false)
+// THREE states: true / false / null = not known (the lookup is in flight, or
+// there is no read permission yet this visit). Unknown is never treated as
+// absent: confirmSave re-checks once it can see, and hands an unwarned
+// overwrite back ('exists') instead of writing it.
+const replacesInFolder = ref(null)
 let existsSeq = 0
 watch([plan, folderTarget, fileName, format], async () => {
   const seq = ++existsSeq
   if (plan.value !== 'folder') { replacesInFolder.value = false; return }
-  let exists = false
+  replacesInFolder.value = null
+  let exists = null
   try {
     const dir = await wf.directoryAt(folderTarget.value.segments)
     exists = !!await wf.existingFile(dir, toSaveFileName(fileName.value, format.value))
   } catch {
-    // No read permission yet this visit: unknown, and the Save will ask.
+    // No read permission yet this visit: stays unknown.
   }
   if (seq === existsSeq) replacesInFolder.value = exists
 }, { immediate: true })
@@ -171,15 +202,15 @@ const locationText = computed(() => {
 
 // Whether this Save writes over a file that exists — the one consequence
 // worth colour, since 'replace' and 'folder' do it with no system dialog.
-const overwrites = computed(() => plan.value === 'replace' || (plan.value === 'folder' && replacesInFolder.value))
+const overwrites = computed(() => plan.value === 'replace' || (plan.value === 'folder' && replacesInFolder.value === true))
 
 const planText = computed(() => {
   switch (plan.value) {
     case 'replace': return `Replaces ${anchor.name}`
     case 'chosen': return `Saves as ${chosenHandle.value.name}`
-    case 'folder': return replacesInFolder.value
+    case 'folder': return replacesInFolder.value === true
       ? `Replaces ${fileName.value} in this folder`
-      : 'Saves straight into this folder'
+      : replacesInFolder.value === false ? 'Saves straight into this folder' : 'Saves into this folder'
     case 'download': return 'Downloads — this browser can’t write files directly'
     default: return anchor
       ? 'You’ll confirm in the system dialog, opened in this folder'
@@ -283,8 +314,18 @@ async function save() {
     ...settings.value,
     chosenHandle: chosenHandle.value,
     folderTarget: folderTarget.value,
+    // Only an overwrite the dialog actually showed counts as agreed to.
+    replaceAcknowledged: overwrites.value,
   })
-  if (ok && appState.saveDialog?.docId === docId) appState.saveDialog = null
+  if (ok === 'exists') {
+    // The file was there all along and the dialog could not see it (no read
+    // permission until this click). Nothing was written: show the warning and
+    // let the next click be the one that agrees to replace it.
+    existsSeq++
+    replacesInFolder.value = true
+    return
+  }
+  if (ok === true && appState.saveDialog?.docId === docId) appState.saveDialog = null
 }
 
 // The document can close underneath the dialog (the files panel stays usable);
@@ -294,8 +335,11 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
 
 <template>
   <div
-    class="fixed inset-0 z-[450] flex items-start justify-center pt-[10vh] px-4 dialog-scrim"
+    ref="root"
+    tabindex="-1"
+    class="fixed inset-0 z-[450] flex items-start justify-center pt-[10vh] px-4 dialog-scrim outline-none"
     @click.self="close"
+    @keydown="onKeydown"
   >
     <div
       class="w-full max-w-[460px] flex flex-col rounded-[18px] overflow-hidden font-['Inter'] dialog-surface"
@@ -335,6 +379,7 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
               spellcheck="false"
               autocomplete="off"
               :disabled="isSaving"
+              @input="nameEdited = true"
               @blur="commitName"
               @keydown.enter.prevent="save"
             />

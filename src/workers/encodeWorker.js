@@ -27,6 +27,6 @@ self.onmessage = async ({ data }) => {
     })
     self.postMessage({ type: 'done', bytes, mime }, [bytes.buffer])
   } catch (err) {
-    self.postMessage({ type: 'error', message: err?.message ?? String(err) })
+    self.postMessage({ type: 'error', name: err?.name, message: err?.message ?? String(err) })
   }
 }
