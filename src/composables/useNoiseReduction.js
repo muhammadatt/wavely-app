@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useEntitlements } from './useEntitlements.js'
 import { useWindows } from './useWindows.js'
@@ -53,6 +53,11 @@ const listenTo = ref('denoised')
 
 let audition = null // { sources, dryGain, wetGain }
 let processSeq = 0
+/**
+ * Bumped by teardown. A Preview answered after its window closed must not
+ * start playing: there would be nothing on screen to stop it with.
+ */
+let auditionToken = 0
 
 const SAME_TIME_EPS = 1e-6
 
@@ -171,8 +176,10 @@ export function useNoiseReduction() {
   async function preview() {
     if (!state.selection || !state.currentFile || processing.value) return
     const { start, end } = previewWindow(state.selection, state.playhead)
+    const token = auditionToken
     const r = await processRegion(start, end, 'Previewing noise reduction')
-    if (r) startAudition()
+    // The result is kept either way; only the auto-play waits on the window.
+    if (r && token === auditionToken) startAudition()
   }
 
   // ── Audition ──────────────────────────────────────────────────────────────
@@ -223,12 +230,23 @@ export function useNoiseReduction() {
     const at = ctx.currentTime + 0.03
     drySrc.start(at)
     wetSrc.start(at)
-    const session = { sources: [drySrc, wetSrc], dryGain, wetGain }
+    const session = { sources: [drySrc, wetSrc], dryGain, wetGain, unwatch: null }
     wetSrc.onended = () => {
       if (audition === session) stopAudition()
     }
     audition = session
     listening.value = true
+    // The audition plays held audio, so it must end when that audio stops
+    // describing the timeline or the settings (an edit, a tab switch, a new
+    // Engine / Max reduction / Protect consonants), and when the main
+    // transport starts — the audition does not set `isPlaying`, so Play would
+    // otherwise talk over it. Lives exactly as long as the session.
+    session.unwatch = watch(
+      [() => hasResult.value, () => state.isPlaying],
+      ([current, playing]) => {
+        if (audition === session && (!current || playing)) stopAudition()
+      },
+    )
   }
 
   function stopAudition() {
@@ -240,6 +258,7 @@ export function useNoiseReduction() {
       }
       audition.dryGain.disconnect()
       audition.wetGain.disconnect()
+      audition.unwatch?.()
       audition = null
     }
     listening.value = false
@@ -290,6 +309,7 @@ export function useNoiseReduction() {
   }
 
   function teardown() {
+    auditionToken++
     stopAudition()
   }
 

@@ -144,8 +144,8 @@ async function applyAndClose() {
 
       <div class="nr-audition">
         <ModulaButton
-          :model-value="listening" :disabled="!hasResult || processing"
-          :title="hasResult ? 'Play the previewed passage from its start' : 'Preview first'"
+          :model-value="listening" :disabled="!listening && (!hasResult || processing)"
+          :title="listening ? 'Stop listening' : hasResult ? 'Play the previewed passage from its start' : 'Preview first'"
           @click="toggleAudition"
         >{{ listening ? '■ Stop' : '▶ Listen' }}</ModulaButton>
         <ModulaSegmented
@@ -181,6 +181,7 @@ async function applyAndClose() {
         >
           <ModulaSwitch
             :model-value="params.protectConsonants" :color="ACCENT"
+            aria-label="Protect consonants"
             :disabled="!rnnoiseOn || processing"
             @update:model-value="setProtectConsonants"
           />
