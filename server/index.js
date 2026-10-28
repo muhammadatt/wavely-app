@@ -225,3 +225,8 @@ const server = app.listen(PORT, HOST, () => {
 // requests on a persistent connection, not the duration of an active upload.
 server.keepAliveTimeout = 75_000  // 75 s — safely above typical proxy keepalive
 server.headersTimeout   = 80_000  // must be strictly greater than keepAliveTimeout
+
+// In a container node runs as PID 1, where SIGTERM has no default handler —
+// without this, every redeploy waits out the platform's kill timeout. Jobs are
+// in memory either way, so there is nothing to drain.
+process.on('SIGTERM', () => process.exit(0))

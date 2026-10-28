@@ -1,0 +1,18 @@
+# Build context for server/Dockerfile (built from the repo root).
+# Whitelist: the server, the two shared modules it imports from src/, and the
+# referenceEQ stage's curves.
+*
+!server/
+!src/audio/presets.js
+!src/auth/plans.js
+!data/reference_curves/
+
+server/node_modules
+server/.env
+server/.env.*
+!server/.env.example
+server/.venv
+server/uploads/*
+server/logs
+server/pipeline-logs
+**/__pycache__

@@ -34,7 +34,7 @@ const MAX_POLL_ATTEMPTS = 400       // 400 × 3 s = 20 min max wait
  */
 export async function processAudioOnServer({
   segments, sampleRate, channels, fileName, presetId, outputProfileId,
-  separationModel, resembleMode, voiceFixerMode, clearervoiceModel,
+  separationModel, resembleMode, voiceFixerMode,
   onProgress,
 }) {
   // ── 1. Render timeline to WAV blob ─────────────────────────────────────────
@@ -48,7 +48,6 @@ export async function processAudioOnServer({
   if (separationModel)        formData.append('separation_model',  separationModel)
   if (resembleMode)           formData.append('resemble_mode',      resembleMode)
   if (voiceFixerMode != null) formData.append('voicefixer_mode',    String(voiceFixerMode))
-  if (clearervoiceModel)      formData.append('clearervoice_model', clearervoiceModel)
 
   // The token makes the job count against the account rather than the IP, and
   // lifts the signed-out preview limit (a 402 otherwise — see `mastering`).

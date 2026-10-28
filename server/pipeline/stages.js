@@ -53,7 +53,7 @@ import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyClipGainDeEsser } from './clipGainDeEsser.js'
 import { applyCompression } from './compression.js'
-import { runSeparation, runClearerVoice } from './separation.js'
+import { runSeparation } from './separation.js'
 import { writeFile, rm } from 'fs/promises'
 import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, runThroatClickAttenuator, applyResonanceSuppression, applyBreathReduction, runSpectralSubtraction, runRoomPresence } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
@@ -1220,8 +1220,7 @@ export async function referenceEQ(ctx) {
 // ── Stage: Resonance Suppressor ───────────────────────────────────────────────
 // Soothe2-inspired dynamic spectral resonance suppressor. In STANDARD_PIPELINE
 // it runs immediately before correctiveEQ (and before normalize). Only included
-// in STANDARD_PIPELINE — excluded from noise_eraser and clearervoice_eraser by
-// pipeline omission.
+// in STANDARD_PIPELINE — excluded from noise_eraser by pipeline omission.
 
 export async function resonanceSuppressor(ctx) {
   const outPath = ctx.tmp('.wav')
@@ -2451,32 +2450,6 @@ export async function bandwidthExtension(ctx) {
     ...(postEq?.enabled && {
       postEq: { applied: true, freq: postEq.freq ?? 9000, q: postEq.q ?? 2, gainDb: postEq.gainDb },
     }),
-  }
-}
-
-// ── CE Stage: ClearerVoice speech enhancement (CE-3) ─────────────────────────
-// Single-model replacement for Demucs/ConvTasNet vocal separation (NE-3).
-// ClearerVoice SE models operate on mono audio; stereo inputs are mixed to mono
-// inside the Python script, so no explicit monoMixdown stage is needed before
-// or after this stage.
-
-export async function clearerVoiceEnhance(ctx) {
-  // Save the pre-enhancement path for NE-4 validation comparison.
-  ctx.nePreSeparationPath = ctx.currentPath
-
-  const model   = ctx.preset.clearerVoiceEnhance?.model ?? 'mossformer2_48k'
-  const outPath = ctx.tmp('.wav')
-
-  ctx.log(`[CE-3] Starting ClearerVoice enhancement (${model}) — this may take several minutes`)
-  await runClearerVoice(ctx.currentPath, outPath, model)
-  ctx.currentPath = outPath
-
-  // ClearerVoice outputs mono regardless of input channel count.
-  ctx.results.stereoToMono = ctx.inputChannels > 1
-
-  ctx.results.separation = {
-    model:   `clearervoice_${model}`,
-    applied: true,
   }
 }
 

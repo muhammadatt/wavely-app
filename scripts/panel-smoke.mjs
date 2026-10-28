@@ -88,6 +88,10 @@ const executablePath = process.env.SMOKE_CHROMIUM
   ?? (existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined)
 const browser = await chromium.launch(executablePath ? { executablePath } : {})
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+// Opening goes through showOpenFilePicker where the browser has it, and
+// Playwright raises no 'filechooser' for that picker. Hide it so the app falls
+// back to the <input type="file"> path, which Playwright can drive.
+await page.addInitScript(() => { window.showOpenFilePicker = undefined })
 const errors = []
 page.on('pageerror', e => errors.push(`PAGEERROR ${e.message}`))
 /**

@@ -424,8 +424,6 @@ function fmt(value) {
  *   - hint        — quality/speed label derived from preset-specific options:
  *                     separationModel:   'demucs'        → 'Quality'
  *                                        'convtasnet'    → 'Fast'
- *                     clearervoiceModel: 'mossformer2_48k' → 'Quality'
- *                                        'frcrn_16k'     → 'Fast'
  *                   Omitted for presets that have no quality/speed toggle.
  *   - shortId     — first 6 hex characters of the full UUID (without dashes)
  *
@@ -443,10 +441,8 @@ function makeRunSlug(preset, runId) {
   const shortId = runId.replace(/-/g, '').slice(0, 6)
 
   let hint = ''
-  if      (preset.separationModel   === 'convtasnet')      hint = 'Fast'
-  else if (preset.separationModel   === 'demucs')          hint = 'Quality'
-  else if (preset.clearervoiceModel === 'frcrn_16k')       hint = 'Fast'
-  else if (preset.clearervoiceModel === 'mossformer2_48k') hint = 'Quality'
+  if      (preset.separationModel === 'convtasnet') hint = 'Fast'
+  else if (preset.separationModel === 'demucs')     hint = 'Quality'
 
   return hint ? `${name} - ${hint}-${shortId}` : `${name}-${shortId}`
 }

@@ -2,25 +2,28 @@
  * Saving a document back to a file on disk.
  *
  * Export renders a timeline and hands the bytes to the download folder; saving
- * renders the same bytes and writes them to a file the user already named, in
- * place, with no dialog. The render half is shared — `renderTimelineToWav` is
- * the one path that turns an EDL into bytes, and nothing here duplicates it.
+ * renders it at the format chosen in the Save dialog and writes it to a file
+ * the user named, in place. The render half is shared — `renderRegionToBuffer`
+ * is the one path that turns an EDL into samples, and nothing here duplicates it.
  *
  * The write half needs the File System Access API, which is Chromium-only on
  * the desktop today. Everywhere else this degrades to the download the export
  * path already does: same bytes, worse ergonomics, never a dead button.
  *
- * WHAT IS DELIBERATELY NOT HERE: a handle for the file the document was opened
- * from. Two reasons, and neither is effort. A handle from an *open* picker
- * points at the user's source recording, and this app can only encode 16-bit
- * WAV — so a silent Ctrl+S would overwrite a 24-bit master with a reduced-depth
- * render of itself, which is data loss dressed as a convenience. And a document
- * does not survive a reload (buffers are in memory only), so persisting handles
- * in IndexedDB would restore a write target with nothing left to write to it.
- * Every handle in this app therefore comes from a *save* picker: the user has
- * seen the filename and agreed to it before anything is written.
+ * WRITING OVER THE FILE A DOCUMENT WAS OPENED FROM is allowed, but only from
+ * the Save dialog and only once the user has seen the name and the format. It
+ * was refused outright at first, for two reasons that still shape the rules:
+ * the encoder could only write 16-bit, so a silent Ctrl+S would have replaced a
+ * 24-bit master with a reduced-depth render of itself; and a document does not
+ * survive a reload (buffers are in memory only), so handles are never persisted
+ * — a restored write target would have nothing left to write to it. The
+ * encoder now writes 16, 24 and 32-bit float, the dialog defaults to the
+ * source's own depth and rate and says when a choice is lower, and only a WAV
+ * is ever replaced (`savePlan` in saveFormat.js). Handles still live only as
+ * long as the tab.
  */
-import { toWavFileName, downloadBlob } from './download.js'
+import { downloadBlob } from './download.js'
+import { FORMATS, toSaveFileName } from './saveFormat.js'
 
 /** True when this browser can write back to a file the user picked. */
 export function canSaveInPlace() {
@@ -33,17 +36,25 @@ export function isCancellation(err) {
 }
 
 /**
- * Ask for a save destination. `suggestedName` is normalised to .wav — the file
- * we write is a WAV whatever the source format was, and offering to write WAV
- * bytes under an .mp3 name produces a file nothing can open.
+ * Ask for a save destination. `suggestedName` is given the chosen format's
+ * extension — offering to write FLAC bytes under a .wav name produces a file
+ * nothing can open — and the picker filters to that format.
+ *
+ * `startIn` is a handle the dialog should open beside — the file last saved
+ * to, or the one the document was opened from. A FILE handle opens its parent
+ * folder, which is exactly "the original file's folder". Without one the
+ * browser picks (usually Documents, or wherever it last saved).
  *
  * @returns {Promise<FileSystemFileHandle>} rejects with AbortError if cancelled
  */
-export function pickSaveTarget(suggestedName) {
-  return window.showSaveFilePicker({
-    suggestedName: toWavFileName(suggestedName || 'untitled.wav'),
-    types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }],
-  })
+export function pickSaveTarget(suggestedName, startIn = null, format = 'wav') {
+  const f = FORMATS[format] ?? FORMATS.wav
+  const options = {
+    suggestedName: toSaveFileName(suggestedName || 'untitled', f.id),
+    types: [{ description: `${f.label} audio`, accept: { [f.mime]: [f.ext] } }],
+  }
+  if (startIn) options.startIn = startIn
+  return window.showSaveFilePicker(options)
 }
 
 /**
@@ -77,10 +88,10 @@ export async function ensureWritePermission(handle) {
  * matters more than it looks: a writable left open holds the browser's swap
  * copy, and on some platforms the original is not restored until it closes.
  */
-export async function writeWavToHandle(handle, arrayBuffer) {
+export async function writeFileToHandle(handle, bytes, mime) {
   const writable = await handle.createWritable()
   try {
-    await writable.write(new Blob([arrayBuffer], { type: 'audio/wav' }))
+    await writable.write(new Blob([bytes], { type: mime }))
   } catch (err) {
     await writable.abort?.()
     throw err
@@ -104,6 +115,6 @@ export function saveTargetKind(handle, supportsInPlace = canSaveInPlace()) {
 }
 
 /** Save-as-download fallback, for browsers with no write API. */
-export function downloadWav(arrayBuffer, fileName) {
-  downloadBlob(new Blob([arrayBuffer], { type: 'audio/wav' }), toWavFileName(fileName))
+export function downloadFile(bytes, fileName, mime) {
+  downloadBlob(new Blob([bytes], { type: mime }), fileName)
 }
