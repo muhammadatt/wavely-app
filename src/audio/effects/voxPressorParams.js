@@ -39,8 +39,18 @@ export const VOX_DEFAULTS = {
 /** Map panel params to kernel params. */
 export function toKernelParams(p) {
   return {
-    peaksOn: p.peaks > 0,
-    bodyOn: p.body > 0,
+    /**
+     * ⚠ A STAGE RUNS ONLY ONCE ITS OFFSET IS MEASURED. Unmeasured, the kernel's
+     * offset is 0, which is no setting at all: it puts the 1176's threshold
+     * wherever the file's level happens to sit. On a −22 dBFS voice that read
+     * ~5 dB of Peaks reduction with excursions to 18 and left the LA-2A idle,
+     * identically at every knob position — reported as "tons of gain reduction
+     * from Peaks even at 0.5 and almost none from Body". Bypassed (a delay
+     * line, so the latency does not move) is the honest state until the solve
+     * lands.
+     */
+    peaksOn: p.peaks > 0 && Number.isFinite(p.peaksAlignDb),
+    bodyOn: p.body > 0 && Number.isFinite(p.bodyAlignDb),
     outputDb: Number.isFinite(p.output) ? p.output : 0,
     listen: p.listen ?? 'off',
     makeupDb: Number.isFinite(p.makeupDb) ? p.makeupDb : 0,

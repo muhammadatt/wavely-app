@@ -252,3 +252,18 @@ test('zero targets switch the stages off', () => {
   assert.equal(r.bodyOn, false)
   assert.ok(Math.abs(r.makeupDb) < 1e-9)
 })
+
+test('a stage with no measured offset is bypassed, not run uncalibrated', async () => {
+  const { toKernelParams, VOX_DEFAULTS } = await import('../../src/audio/effects/voxPressorParams.js')
+  const unmeasured = toKernelParams({ ...VOX_DEFAULTS })
+  assert.equal(unmeasured.peaksOn, false)
+  assert.equal(unmeasured.bodyOn, false)
+  // And so the kernel renders a pure delay until the solve lands.
+  const { channelData, latencySamples } = processVoxPressorBuffer([speech], SR, unmeasured)
+  for (let i = latencySamples; i < speech.length; i++) {
+    if (channelData[0][i] !== speech[i - latencySamples]) assert.fail(`sample ${i} differs`)
+  }
+  const measured = toKernelParams({ ...VOX_DEFAULTS, peaksAlignDb: -10, bodyAlignDb: 6 })
+  assert.equal(measured.peaksOn, true)
+  assert.equal(measured.bodyOn, true)
+})

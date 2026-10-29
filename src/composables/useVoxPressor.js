@@ -82,7 +82,7 @@ const copies = pluginCopies((copy, life) => {
   function useVoxPressor() {
     const {
       state, appState, getAudioContext, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, pinActiveDocument, showToast, hasSelection,
+      startProcessing, endProcessing, pinActiveDocument, showToast, hasSelection, totalDuration,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -184,9 +184,26 @@ const copies = pluginCopies((copy, life) => {
       }
     }
 
+    /**
+     * What the preview is solved for: the selection, or the whole file when
+     * there is none.
+     *
+     * ⚠ THE WHOLE FILE FALLBACK IS NOT A NICETY. The first build solved only
+     * for a selection, so a panel opened with nothing selected played through
+     * an UNSOLVED kernel — see `toKernelParams` for what that sounded like.
+     * Apply still needs a selection; this only decides what the preview hears.
+     */
+    function previewRegion() {
+      if (state.selection) return state.selection
+      const end = totalDuration.value
+      return end > 0 ? { start: 0, end } : null
+    }
+
     function refreshSolve() {
-      if (!state.selection || !state.currentFile) return null
-      const { start, end } = state.selection
+      if (!state.currentFile) return null
+      const region = previewRegion()
+      if (!region) return null
+      const { start, end } = region
       inFlight = solve(state.segments, start, end).catch((err) => {
         console.error('VoxPressor solve failed:', err)
         return false
@@ -285,6 +302,22 @@ const copies = pluginCopies((copy, life) => {
         watch(() => state.selection, () => {
           if (voxPreview.value || isOpen(windowId)) scheduleSolve()
         }, { deep: true })
+        // A different file, or an edit to this one: the measurements describe
+        // audio that is no longer there. Drop the offsets first, so the stages
+        // go back to bypass rather than running another file's calibration
+        // while the new solve is in flight.
+        watch(() => `${appState.activeDocumentId}:${state.revision}`, () => {
+          if (!(voxPreview.value || isOpen(windowId))) return
+          // The makeup goes with them: it was solved for those stages, and
+          // left on it would lift the bypassed signal by several dB.
+          voxMeasured.value = { ...voxMeasured.value, peaksAlignDb: null, bodyAlignDb: null, makeupDb: 0 }
+          pushParam('peaksAlignDb', null)
+          pushParam('bodyAlignDb', null)
+          pushParam('makeupDb', 0)
+          voxReadout.value = null
+          solveSeq++
+          scheduleSolve()
+        })
       })
     }
 

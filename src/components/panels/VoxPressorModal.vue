@@ -52,7 +52,7 @@ const peaksNote = computed(() => {
   if (voxPeaks.value <= 0) return 'stage out'
   if (voxBusy.value) return 'solving…'
   const r = voxReadout.value
-  if (!r) return '—'
+  if (!r) return 'not measured yet · bypassed'
   const reached = `−${r.peaksDb.toFixed(1)} dB on peaks`
   return r.peaksLimited ? `${reached} · voice crest too low` : reached
 })
@@ -70,7 +70,7 @@ const bodyNote = computed(() => {
   if (voxBody.value <= 0) return 'stage out'
   if (voxBusy.value) return 'solving…'
   const r = voxReadout.value
-  return r ? `${r.bodyDb.toFixed(1)} dB avg leveling` : '—'
+  return r ? `${r.bodyDb.toFixed(1)} dB avg leveling` : 'not measured yet · bypassed'
 })
 
 const measuredNote = computed(() => {
