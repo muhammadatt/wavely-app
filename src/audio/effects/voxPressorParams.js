@@ -4,7 +4,7 @@
  * schepsParams.js, for the same reason: `voxPressor.js` imports the
  * `?worker&url` loader, which only Vite resolves).
  */
-import { PEAKS_MAX_DB, BODY_MAX_DB, PEAKS_BODY_WARN_DB } from '../voxPressorSolve.js'
+import { PEAKS_BODY_WARN_DB } from '../voxPressorSolve.js'
 import { voxLatencySamples } from '../voxPressorProcessor.js'
 import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
 
@@ -22,17 +22,29 @@ export const BODY_LOOKAHEAD_STEPS_MS = Object.freeze([0, 5, 10, LOOKAHEAD_MAX_MS
 
 export const VOX_OUTPUT_MIN_DB = -12
 export const VOX_OUTPUT_MAX_DB = 12
-export { PEAKS_MAX_DB, BODY_MAX_DB, PEAKS_BODY_WARN_DB }
+export { PEAKS_BODY_WARN_DB }
 
 /**
  * The panel's state. `peaks`, `body` and `output` are the user's; everything
- * under MEASURED comes from `solveVoxPressor` and never enters a preset.
+ * under MEASURED is measured (`alignDb` from the whole file's gated RMS, the
+ * rest by `measureVoxPressor`) and never enters a preset.
  */
 export const VOX_DEFAULTS = {
-  /** dB off the loudest voice peaks (0 = Peaks stage out). */
-  peaks: 3,
-  /** dB of average leveling on voiced material (0 = Body stage out). */
-  body: 4,
+  /**
+   * The 1176's Input, 0–100 (0 = Peaks stage out). 26 takes ~3 dB off the
+   * loudest peaks on both of the owner's clips (2.7 / 3.8 dB, 0.01 dB of
+   * voice) — calibrated on those two, not auditioned. ⚠ The knob is steep for
+   * this job: on those clips Input 20 is ~1 dB and 40 is ~9, with the voice
+   * itself pulled down 3 dB there. ⚠ And voices differ: synthetic narration
+   * (crest 20 dB) reads 6.75 dB at 26.
+   */
+  peaks: 26,
+  /**
+   * The LA-2A's Peak Reduction, 0–100 (0 = Body stage out). 57 is 3.4–3.8 dB
+   * of average leveling on both clips (≈ 2.3 dB per 10 points from 40 up;
+   * the two clips agree to 0.4 dB at every setting).
+   */
+  body: 57,
   /** Manual trim after the ceiling, dB. */
   output: 0,
   /** 'off' | 'peaks' | 'body' — monitor a detector. Never saved. */
@@ -43,9 +55,12 @@ export const VOX_DEFAULTS = {
    */
   bodyLookaheadMs: 0,
   // ── MEASURED ──
+  /**
+   * The file's alignment, dB (`alignDbForRms` on the WHOLE file's gated RMS,
+   * LA Vintage 2A's and LA Classic 76's): both detectors' offset.
+   */
+  alignDb: null,
   cornerHz: null,
-  peaksAlignDb: null,
-  bodyAlignDb: null,
   // Per-stage makeup, limiter ceilings and restores (see `solveStageMakeup`).
   peaksMakeupDb: 0,
   peaksCeilingDb: null,
@@ -56,12 +71,12 @@ export const VOX_DEFAULTS = {
   makeupDb: 0,
 }
 
-/** The keys a solve measures: never a user setting, never in a preset. */
+/** The keys `measureVoxPressor` measures: never a user setting, never in a preset. */
 export const VOX_MEASURED_KEYS = Object.freeze([
   // Ceilings first: they reach the live node as separate messages, and a
   // raised makeup must never run against an old ceiling (see useLA2A).
   'peaksCeilingDb', 'bodyCeilingDb',
-  'cornerHz', 'peaksAlignDb', 'bodyAlignDb',
+  'cornerHz',
   'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb',
 ])
 
@@ -69,17 +84,17 @@ export const VOX_MEASURED_KEYS = Object.freeze([
 export function toKernelParams(p) {
   return {
     /**
-     * ⚠ A STAGE RUNS ONLY ONCE ITS OFFSET IS MEASURED. Unmeasured, the kernel's
-     * offset is 0, which is no setting at all: it puts the 1176's threshold
-     * wherever the file's level happens to sit. On a −22 dBFS voice that read
-     * ~5 dB of Peaks reduction with excursions to 18 and left the LA-2A idle,
-     * identically at every knob position — reported as "tons of gain reduction
-     * from Peaks even at 0.5 and almost none from Body". Bypassed (a delay
-     * line, so the latency does not move) is the honest state until the solve
-     * lands.
+     * ⚠ A STAGE RUNS ONLY ONCE THE FILE'S ALIGNMENT IS MEASURED. Unaligned,
+     * the offset is 0, which puts both thresholds wherever the file's level
+     * happens to sit: the first build read ~5 dB of 1176 reduction with
+     * excursions to 18 on a −22 dBFS voice at every knob position. Bypassed (a
+     * delay line, so the latency does not move) until it lands — which is one
+     * synchronous pass over the file, so in practice at once.
      */
-    peaksOn: p.peaks > 0 && Number.isFinite(p.peaksAlignDb),
-    bodyOn: p.body > 0 && Number.isFinite(p.bodyAlignDb),
+    peaksOn: p.peaks > 0 && Number.isFinite(p.alignDb),
+    bodyOn: p.body > 0 && Number.isFinite(p.alignDb),
+    peaksInput: knob(p.peaks),
+    bodyPeakReduction: knob(p.body),
     outputDb: Number.isFinite(p.output) ? p.output : 0,
     listen: p.listen ?? 'off',
     makeupDb: Number.isFinite(p.makeupDb) ? p.makeupDb : 0,
@@ -87,8 +102,7 @@ export function toKernelParams(p) {
     // Measured values cross only when real, so an unmeasured panel leaves the
     // kernel on its own defaults rather than on a NaN.
     ...(Number.isFinite(p.cornerHz) ? { cornerHz: p.cornerHz } : {}),
-    ...(Number.isFinite(p.peaksAlignDb) ? { peaksAlignDb: p.peaksAlignDb } : {}),
-    ...(Number.isFinite(p.bodyAlignDb) ? { bodyAlignDb: p.bodyAlignDb } : {}),
+    ...(Number.isFinite(p.alignDb) ? { peaksAlignDb: p.alignDb, bodyAlignDb: p.alignDb } : {}),
     peaksMakeupDb: Number.isFinite(p.peaksMakeupDb) ? p.peaksMakeupDb : 0,
     peaksRestoreDb: Number.isFinite(p.peaksRestoreDb) ? p.peaksRestoreDb : 0,
     bodyMakeupDb: Number.isFinite(p.bodyMakeupDb) ? p.bodyMakeupDb : 0,
@@ -96,6 +110,11 @@ export function toKernelParams(p) {
     peaksCeilingDb: Number.isFinite(p.peaksCeilingDb) ? p.peaksCeilingDb : null,
     bodyCeilingDb: Number.isFinite(p.bodyCeilingDb) ? p.bodyCeilingDb : null,
   }
+}
+
+function knob(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0
 }
 
 /** The Body lookahead in effect, ms (0 when unset or out of range). */

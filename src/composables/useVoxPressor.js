@@ -4,10 +4,11 @@ import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
-  applyVoxPressorRegion, computeVoxPressorSolve, computeVoxPressorExact, computePeakCache,
+  applyVoxPressorRegion, computeVoxPressorMeasure, computeVoxPressorExact, computePeakCache,
 } from '../audio/processing.js'
-import { analysedWholeRegion } from '../audio/analysisWindow.js'
-import { toKernelParams, VOX_MEASURED_KEYS, bodyLookaheadOf } from '../audio/effects/voxPressorParams.js'
+import { analysedWholeRegion, regionAlignDb } from '../audio/analysisWindow.js'
+import { getSegmentDuration } from '../audio/operations.js'
+import { toKernelParams, VOX_MEASURED_KEYS } from '../audio/effects/voxPressorParams.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { voxPressorEffect as soloEffect, VOX_DEFAULTS } from '../audio/effects/voxPressor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -26,15 +27,18 @@ const copies = pluginCopies((copy, life) => {
   const voxBody = ref(VOX_DEFAULTS.body)
   const voxOutput = ref(VOX_DEFAULTS.output)
   const voxListen = ref(VOX_DEFAULTS.listen)
-  /** BENCH: the LA-2A's lookahead, ms. Solved with, so it re-solves. */
+  /** BENCH: the LA-2A's lookahead, ms. Measured with, so it re-measures. */
   const voxBodyLookahead = ref(VOX_DEFAULTS.bodyLookaheadMs)
+  /** The file's alignment (whole file, gated RMS), and which timeline it is for. */
+  const voxAlignDb = ref(VOX_DEFAULTS.alignDb)
+  let alignedFor = null
 
   /**
-   * Everything `solveVoxPressor` measured, plus the readouts. The kernel
-   * values ride in `currentParams()` so preview and apply cannot disagree.
+   * Everything `measureVoxPressor` measured. The kernel values ride in
+   * `currentParams()` so preview and apply cannot disagree.
    */
   const voxMeasured = ref(Object.fromEntries(MEASURED.map(k => [k, VOX_DEFAULTS[k]])))
-  /** What the solve reached: { peaksDb, peaksBodyDb, peaksLimited, bodyDb } or null. */
+  /** The readouts: { peaksDb, peaksBodyDb, bodyDb } at the knobs measured, or null. */
   const voxReadout = ref(null)
   const voxBusy = ref(false)
 
@@ -46,7 +50,7 @@ const copies = pluginCopies((copy, life) => {
   let meterId = null
 
   // The corner is a property of the material, not of the knobs: measured with
-  // the first solve on a region and handed back to every later one.
+  // the first measurement on a region and handed back to every later one.
   let cornerFor = null
   /** Which (timeline, selection, knobs) the measured values belong to. */
   let solvedFor = null
@@ -65,6 +69,7 @@ const copies = pluginCopies((copy, life) => {
       output: voxOutput.value,
       listen: voxListen.value,
       bodyLookaheadMs: voxBodyLookahead.value,
+      alignDb: voxAlignDb.value,
       ...voxMeasured.value,
     }
   }
@@ -142,42 +147,59 @@ const copies = pluginCopies((copy, life) => {
       }
     }
 
-    /** The key a solve belongs to: the timeline, the region and both targets. */
-    function solveKey(segments, start, end) {
-      const own = segments === state.segments
-      const doc = own ? `${appState.activeDocumentId}:${state.revision}` : `${appState.activeDocumentId}:chain`
-      return `${doc}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}`
+    function timelineKey(segments) {
+      return segments === state.segments
+        ? `${appState.activeDocumentId}:${state.revision}` : `${appState.activeDocumentId}:chain`
     }
 
     /**
-     * Solve for `[start, end)` of `segments` and store the result. Superseded
-     * calls are discarded by sequence number, so a knob drag cannot have an
-     * older solve land after a newer one.
+     * The file's alignment, over the WHOLE timeline (LA Vintage 2A's and LA
+     * Classic 76's contract: one operating point for the whole file, whatever
+     * is selected). Synchronous and cheap, so the stages come out of bypass at
+     * once; re-measured only when the timeline changes.
+     */
+    function ensureAlignment(segments) {
+      const key = timelineKey(segments)
+      if (alignedFor === key && segments === state.segments) return
+      const end = segments === state.segments
+        ? totalDuration.value
+        : segments.reduce((t, seg) => Math.max(t, seg.outputStart + getSegmentDuration(seg)), 0)
+      if (!(end > 0)) return
+      const db = regionAlignDb(segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels)
+      alignedFor = key
+      voxAlignDb.value = db
+      pushParam('alignDb', db)
+    }
+
+    /** The key a measurement belongs to: the timeline, the region and every setting it reads. */
+    function solveKey(segments, start, end) {
+      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}`
+    }
+
+    /**
+     * Measure `[start, end)` of `segments` at the current knobs and store the
+     * result. Superseded calls are discarded by sequence number, so a knob drag
+     * cannot have an older measurement land after a newer one.
      */
     async function solve(segments, start, end) {
+      ensureAlignment(segments)
       const seq = ++solveSeq
       const key = solveKey(segments, start, end)
       const regionKey = key.split('|').slice(0, 3).join('|')
       voxBusy.value = true
       try {
-        const r = await computeVoxPressorSolve(segments, start, end, {
-          peaksDb: voxPeaks.value,
-          bodyDb: voxBody.value,
-          // ⚠ The lookahead belongs in the measurement (see useLA2A): it moves
-          // what the opto does to every onset, so the offset and makeup with it.
-          bodyBench: { lookaheadMs: bodyLookaheadOf(currentParams()) },
-          ...(cornerFor === regionKey ? { cornerHz: voxMeasured.value.cornerHz } : {}),
-          ...(Number.isFinite(voxMeasured.value.bodyAlignDb) ? { bodyGuess: voxMeasured.value.bodyAlignDb } : {}),
-        }, state.currentFile.sampleRate, state.currentFile.channels)
+        const kp = toKernelParams(currentParams())
+        if (cornerFor !== regionKey) delete kp.cornerHz
+        const r = await computeVoxPressorMeasure(
+          segments, start, end, kp, state.currentFile.sampleRate, state.currentFile.channels,
+        )
         if (seq !== solveSeq) return false
         cornerFor = regionKey
         const next = {}
         for (const k of MEASURED) next[k] = r[k] ?? null
         voxMeasured.value = next
         for (const k of MEASURED) pushParam(k, next[k])
-        voxReadout.value = {
-          peaksDb: r.peaksDb, peaksBodyDb: r.peaksBodyDb, peaksLimited: r.peaksLimited, bodyDb: r.bodyDb,
-        }
+        voxReadout.value = { peaksDb: r.peaksDb, peaksBodyDb: r.peaksBodyDb, bodyDb: r.bodyDb }
         solvedFor = key
         return true
       } finally {
@@ -186,7 +208,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     /**
-     * What the preview is solved for: the selection, or the whole file when
+     * What the preview is measured for: the selection, or the whole file when
      * there is none.
      *
      * ⚠ THE WHOLE FILE FALLBACK IS NOT A NICETY. The first build solved only
@@ -202,11 +224,12 @@ const copies = pluginCopies((copy, life) => {
 
     function refreshSolve() {
       if (!state.currentFile) return null
+      ensureAlignment(state.segments)
       const region = previewRegion()
       if (!region) return null
       const { start, end } = region
       inFlight = solve(state.segments, start, end).catch((err) => {
-        console.error('VoxPressor solve failed:', err)
+        console.error('VoxPressor measurement failed:', err)
         return false
       })
       return inFlight
@@ -260,9 +283,10 @@ const copies = pluginCopies((copy, life) => {
 
     /**
      * Make sure the measured values belong to `segments` and the current
-     * knobs before rendering: re-solve unless the last solve is exactly this.
+     * knobs before rendering: re-measure unless the last measurement is exactly this.
      */
     async function prepareApply(segments, start, end) {
+      ensureAlignment(segments)
       if (solvedFor !== solveKey(segments, start, end) || segments !== state.segments) {
         await solve(segments, start, end)
       }
@@ -270,8 +294,8 @@ const copies = pluginCopies((copy, life) => {
        * ⚠ EXACT RESTORES FOR A REGION LONGER THAN THE SOLVE'S WINDOW. Each
        * stage restores its peak to its ceiling, and the window's peak is only
        * a lower bound on the region's — so its restores are too generous and
-       * would push the passage it never saw into the ceilings. Re-measured over
-       * the whole region at the offsets and makeups just solved.
+       * would push the passage it never saw into the limiters. Re-measured over
+       * the whole region at the makeups just measured.
        */
       if (!analysedWholeRegion(start, end)) {
         const exact = await computeVoxPressorExact(
@@ -327,21 +351,21 @@ const copies = pluginCopies((copy, life) => {
           if (voxPreview.value || isOpen(windowId)) scheduleSolve()
         }, { deep: true })
         // A different file, or an edit to this one: the measurements describe
-        // audio that is no longer there. Drop the offsets first, so the stages
-        // go back to bypass rather than running another file's calibration
-        // while the new solve is in flight.
+        // audio that is no longer there. Re-align at once (cheap), and drop the
+        // makeups and ceilings — another file's makeup would lift this one by
+        // several dB, and its ceiling would limit at the wrong peak — until the
+        // new measurement lands.
         watch(() => `${appState.activeDocumentId}:${state.revision}`, () => {
           if (!(voxPreview.value || isOpen(windowId))) return
-          // The makeup goes with them: it was solved for those stages, and
-          // left on it would lift the bypassed signal by several dB.
           const cleared = {
-            peaksAlignDb: null, bodyAlignDb: null,
+            peaksCeilingDb: null, bodyCeilingDb: null,
             peaksMakeupDb: 0, peaksRestoreDb: 0, bodyMakeupDb: 0, makeupDb: 0,
           }
           voxMeasured.value = { ...voxMeasured.value, ...cleared }
           for (const [k, v] of Object.entries(cleared)) pushParam(k, v)
           voxReadout.value = null
           solveSeq++
+          if (state.currentFile) ensureAlignment(state.segments)
           scheduleSolve()
         })
       })
@@ -354,7 +378,7 @@ const copies = pluginCopies((copy, life) => {
       dispose: life.dispose,
       isActive: () => voxPreview.value,
       setActive: (on) => { if (voxPreview.value !== on) togglePreview() },
-      // Solved against the chain's running segments, never the document's.
+      // Measured against the chain's running segments, never the document's.
       render: async (segments, start, end) => {
         await prepareApply(segments, start, end)
         return renderRegion(segments, start, end)

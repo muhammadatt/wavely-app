@@ -1,25 +1,32 @@
 /**
- * VoxPressor's per-file solves: what the Peaks and Body knobs MEAN on this
- * recording. See docs/voxpressor_spec.md §4.2 and §5.
+ * VoxPressor's per-file measurements: the readouts under the knobs and each
+ * stage's makeup. See docs/voxpressor_spec.md §4.2 and §5.
  *
- * Neither compressor's knob is exposed. Each stage is driven by a detector-only
- * offset (`peaksAlignDb`, `bodyAlignDb` — the kernels' `inputAlignDb`), so the
- * audio gain through a stage never moves when a knob does, and each knob is a
- * TARGET this module solves for:
+ * The knobs are the compressors' own — Peaks is the 1176's Input, Body the
+ * LA-2A's Peak Reduction — each offset by the file's gated-RMS alignment, so a
+ * position means the same at any recording level and the compression answers
+ * a knob move at once. Nothing here moves a knob. What it measures, from one
+ * render per stage:
  *
- * - PEAKS (dB) — how far the 1176 takes the loudest peaks down: the median,
- *   over the loudest blocks, of each block's input peak minus its output peak.
- *   The solve always goes where the knob asks; what it costs the voice is
- *   MEASURED (`peaksBodyDb`, the median level drop on the voiced blocks) and
- *   reported, and the panel warns past `PEAKS_BODY_WARN_DB`. See that constant
- *   for the fixed floor this replaced.
- * - BODY (dB) — the LA-2A's average gain reduction over the voiced blocks of
- *   what the Peaks stage left.
+ * - PEAKS (readout) — how far the 1176 took the loudest peaks down: the
+ *   median, over the loudest blocks, of each block's input peak minus its
+ *   output peak; and what it cost the voice (`peaksBodyDb`, the median level
+ *   drop on the voiced blocks), which the panel warns about past
+ *   `PEAKS_BODY_WARN_DB`.
+ * - BODY (readout) — the LA-2A's average gain reduction over the voiced blocks
+ *   of what the Peaks stage left.
  * - MAKEUP — PER STAGE (`solveStageMakeup`), as the owner's hand-built
  *   1176 → LA-2A chain does it: each stage makes up its own level with the
  *   compressors' shared 99.9th-percentile reference, runs into a lookahead
  *   LIMITER at the source's peak, and has its peak restored to that ceiling.
  *   Always on, no switch (owner's call).
+ *
+ * ⚠ THE KNOBS WERE TARGETS FIRST, SOLVED BY A SECANT SEARCH over each stage's
+ * detector offset ("Peaks 3" = 3 dB off the peaks on every voice). Replaced
+ * by direct knobs (owner's call): beyond the gated-RMS alignment the search
+ * moved the offset only 1.1–1.2 dB (Peaks) and 0.3–0.4 dB (Body) between two
+ * real clips 3.3 dB apart in crest, while it cost a 4–7 s wait on every knob
+ * move during which the old setting kept playing.
  *
  * ⚠ WHY PER STAGE. One peak restore after both compressors (the previous
  * build) could not match the chain: the LA-2A's slow opto lowers the sustained
@@ -38,8 +45,8 @@
  * hear sibilance (`peaksTap`).
 
  * ⚠ SEQUENTIAL, AND EACH STAGE IS MEASURED ON WHAT IT HEARS. Peaks on the
- * input; Body on the Peaks output (rendered once at the solved offset and then
- * fed to a kernel with Peaks bypassed, which at the base rate is a zero-length
+ * input; Body on the Peaks output (rendered once with its makeup and then fed
+ * to a kernel with Peaks bypassed, which at the base rate is a zero-length
  * delay, so it is the chain exactly); each stage's makeup on its own output.
  *
  * ⚠ ALL RENDERS ARE BASE RATE (`oversample: false`), as every compressor's
@@ -47,8 +54,7 @@
  * both modes, so the gain trajectory is the same; only the inter-sample detail
  * of the audio differs, which a block peak or a percentile barely sees.
  */
-import { processVoxPressorBuffer, VoxPressorKernel, peaksTap } from './voxPressorProcessor.js'
-import { VoiceDetector } from './dsp/voiceDetector.js'
+import { processVoxPressorBuffer } from './voxPressorProcessor.js'
 import { measureVoiceProfile } from './voiceProfile.js'
 import { gatedRmsOfChannels } from './dsp/inputAlign.js'
 import { peakOfChannels, solveMakeupPlan } from './dsp/makeupReference.js'
@@ -76,14 +82,6 @@ export const VOICED_GATE_DB = 10
  * warn, don't cap. 0.5 is reasoned.
  */
 export const PEAKS_BODY_WARN_DB = 0.5
-/** Solve tolerance, dB, and the iteration cap. */
-const TOL_DB = 0.05
-const MAX_ITER = 12
-const ALIGN_RANGE_DB = 60
-
-export const PEAKS_MAX_DB = 10
-export const BODY_MAX_DB = 10
-
 function db(v) {
   return v > 0 ? 20 * Math.log10(v) : -Infinity
 }
@@ -144,200 +142,82 @@ export function referenceBlocks(channels, sampleRate) {
 }
 
 /**
- * Root-find f(x) = target for a monotone-increasing f, from a guess.
- *
- * Secant steps from the guess, safeguarded by a bracket that tightens as the
- * signs of f − target come in; any step that leaves the bracket bisects it
- * instead. Starting near the answer is the whole saving: each evaluation is a
- * render of the region, and a bracket opened at the ±60 dB extremes spends
- * most of its renders discovering what a decent guess already knows.
- *
- * @param {number} slope  expected df/dx near the answer, for the first step
- * @returns {{ x: number, value: number, reached: boolean }}
- */
-function solveFromGuess(f, target, guess, lo, hi, slope) {
-  const clampX = x => (x < lo ? lo : x > hi ? hi : x)
-  let a = lo
-  let b = hi
-  let x0 = clampX(guess)
-  let f0 = f(x0)
-  if (Math.abs(f0 - target) <= TOL_DB) return { x: x0, value: f0, reached: true }
-  if (f0 < target) a = x0
-  else b = x0
-  let x1 = clampX(x0 + (target - f0) / slope)
-  if (x1 === x0) {
-    // Already pinned at a bound in the direction the answer lies.
-    return { x: x0, value: f0, reached: false }
-  }
-  let f1 = f(x1)
-  for (let i = 0; i < MAX_ITER; i++) {
-    if (Math.abs(f1 - target) <= TOL_DB) return { x: x1, value: f1, reached: true }
-    if (f1 < target) a = Math.max(a, x1)
-    else b = Math.min(b, x1)
-    // At a bound and still short of the target in its direction: done.
-    if ((x1 === hi && f1 < target) || (x1 === lo && f1 > target)) {
-      return { x: x1, value: f1, reached: false }
-    }
-    let x2 = f1 !== f0 ? x1 - (f1 - target) * (x1 - x0) / (f1 - f0) : NaN
-    if (!Number.isFinite(x2) || x2 <= a || x2 >= b) {
-      // Out of the bracket (or no slope): bisect what is known, or step out
-      // by the expected slope when one side is still open.
-      x2 = a > lo && b < hi ? 0.5 * (a + b) : clampX(x1 + (target - f1) / slope)
-      if (x2 === x1) return { x: x1, value: f1, reached: false }
-    }
-    x0 = x1
-    f0 = f1
-    x1 = x2
-    f1 = f(x1)
-  }
-  return { x: x1, value: f1, reached: Math.abs(f1 - target) <= 2 * TOL_DB }
-}
-
-/**
- * Solve VoxPressor for one region.
+ * Measure VoxPressor for one region at the current knobs: the readouts and
+ * every stage's makeup, ceiling and restore.
  *
  * @param {Float32Array[]} channels   the region (or its analysis window)
  * @param {number} sampleRate
- * @param {object} p
- * @param {number} p.peaksDb          Peaks knob, dB off the loudest peaks (0 = off)
- * @param {number} p.bodyDb           Body knob, dB of average leveling (0 = off)
- * @param {object} [p.peaksBench]     bench overrides, forwarded to the kernel
- * @param {object} [p.bodyBench]
- * @param {number|null} [p.cornerHz] the voice's rumble corner, if already
+ * @param {object} p                  KERNEL params (`toKernelParams`): the
+ *   knobs, `peaksOn` / `bodyOn`, both alignments and the bench
+ * @param {number|null} [p.cornerHz]  the voice's rumble corner, if already
  *   measured (null = unmeasurable; absent = measure it here)
- * @param {number} [p.bodyGuess]      a starting point for the Body solve —
- *   the last solve's `bodyAlignDb`
  */
-export function solveVoxPressor(channels, sampleRate, p = {}) {
-  const peaksTarget = Math.max(0, Math.min(PEAKS_MAX_DB, Number(p.peaksDb) || 0))
-  const bodyTarget = Math.max(0, Math.min(BODY_MAX_DB, Number(p.bodyDb) || 0))
-  const bench = { peaksBench: p.peaksBench ?? null, bodyBench: p.bodyBench ?? null }
-
-  // The corner is a property of the file, not of the knobs: callers that solve
-  // repeatedly measure it once and pass it in (it is ~40 % of a solve's cost).
+export function measureVoxPressor(channels, sampleRate, p = {}) {
+  // The corner is a property of the file, not of the knobs: callers that
+  // measure repeatedly measure it once and pass it in.
   const cornerHz = p.cornerHz === undefined
     ? (measureVoiceProfile(channels, sampleRate)?.cornerHz ?? null)
     : p.cornerHz
-  const base = { ...bench, oversample: false, makeupDb: 0, outputDb: 0 }
-  // Bench A/B of the Peaks detector's sibilance shelf; absent = the kernel default.
-  if (typeof p.peaksSibilance === 'boolean') base.peaksSibilance = p.peaksSibilance
-  if (cornerHz) base.cornerHz = cornerHz
-
-  const inPeak = peakOfChannels(channels)
-  if (!(inPeak > 0)) {
-    return {
-      cornerHz, peaksOn: false, bodyOn: false, peaksAlignDb: 0, bodyAlignDb: 0,
-      peaksMakeupDb: 0, peaksCeilingDb: null, peaksRestoreDb: 0,
-      bodyMakeupDb: 0, bodyCeilingDb: null,
-      makeupDb: 0,
-      peaksDb: 0, peaksBodyDb: 0, peaksLimited: false, bodyDb: 0,
-    }
+  const base = {
+    ...p, oversample: false, listen: 'off', outputDb: 0, makeupDb: 0,
+    peaksMakeupDb: 0, peaksCeilingDb: null, bodyMakeupDb: 0, bodyCeilingDb: null,
   }
-  const ref = referenceBlocks(channels, sampleRate)
+  if (cornerHz) base.cornerHz = cornerHz
+  else delete base.cornerHz
+
+  const none = {
+    cornerHz,
+    peaksMakeupDb: 0, peaksCeilingDb: null, peaksRestoreDb: 0,
+    bodyMakeupDb: 0, bodyCeilingDb: null, makeupDb: 0,
+    peaksDb: 0, peaksBodyDb: 0, bodyDb: 0,
+  }
+  const inPeak = peakOfChannels(channels)
+  if (!(inPeak > 0)) return none
   // Both stages' limiters hold the SOURCE's peak.
   const ceilingDb = db(inPeak)
+  const out = { ...none }
 
   // ── PEAKS ──
-  let peaksAlignDb = 0
-  let peaksDb = 0
-  let peaksBodyDb = 0
-  let peaksLimited = false
-  let peaksMakeupDb = 0
-  let peaksCeilingDb = null
-  let peaksRestoreDb = 0
   let afterPeaks = channels
-  const peaksOn = peaksTarget > 0
-  if (peaksOn) {
-    // The kernel's own terms, for the first guess below:
-    // over = detLevel + inputDriveDb + align − threshold.
-    const probe = new VoxPressorKernel(sampleRate)
-    probe.setParams(base)
-    const fet = probe.fet
-    const det = new VoiceDetector(sampleRate, peaksTap(probe.params.peaksSibilance))
-    det.setCornerHz(cornerHz)
-    const detSig = det.process(channels, channels[0].length).slice()
-    const hi = ALIGN_RANGE_DB
-    const lo = -ALIGN_RANGE_DB
-
-    let last = null
-    const measure = (align) => {
-      const out = processVoxPressorBuffer(channels, sampleRate, {
-        ...base, peaksOn: true, bodyOn: false, peaksAlignDb: align,
-      }, { compensate: true }).channelData
-      last = { align, out, ...peaksAndBodyDb(channels, out, sampleRate, ref.loudestIdx, ref.voicedIdx) }
-      return last.peaksDb
-    }
-    // First guess from the static curve: put the loudest peaks' detector level
-    // `target / slope` dB over the threshold. The knee and the ballistics make
-    // the real reduction a little less; the secant takes it from there.
-    const W = Math.round(SOLVE_BLOCK_S * sampleRate)
-    const detPeaks = ref.loudestIdx.map((k) => {
-      let m = 0
-      for (let i = k * W; i < (k + 1) * W; i++) {
-        const a = detSig[i] < 0 ? -detSig[i] : detSig[i]
-        if (a > m) m = a
-      }
-      return db(m)
-    })
-    const slope = fet.slope > 0 ? fet.slope : 0.9
-    const guess = fet.thresholdDb - median(detPeaks) - fet.inputDriveDb + peaksTarget / slope
-    const r = solveFromGuess(measure, peaksTarget, guess, lo, hi, slope)
-    // `last` is the render at r.x unless the bracket ends returned early.
-    if (!last || last.align !== r.x) measure(r.x)
-    peaksAlignDb = r.x
-    peaksDb = last.peaksDb
-    peaksBodyDb = last.bodyDb
-    // Only when the whole offset range cannot reach the target — material too
-    // quiet or too short to measure, not a guard.
-    peaksLimited = !r.reached && r.x >= hi - 1e-9
-
+  if (p.peaksOn) {
+    const ref = referenceBlocks(channels, sampleRate)
+    const raw = renderPeaks(channels, sampleRate, base, {})
+    const r = peaksAndBodyDb(channels, raw, sampleRate, ref.loudestIdx, ref.voicedIdx)
+    out.peaksDb = r.peaksDb
+    out.peaksBodyDb = r.bodyDb
     // The 1176 stage's own makeup, limiter and peak restore. The restore is
     // folded into its Output, ahead of the limiter: it only ever lifts a peak
     // that landed under the ceiling, so the limiter has nothing new to catch.
-    const m = solveStageMakeup(channels, (chs, extra) => renderPeaks(chs, sampleRate, base, peaksAlignDb, extra), {
+    const m = solveStageMakeup(channels, (chs, extra) => renderPeaks(chs, sampleRate, base, extra), {
       gain: 'peaksMakeupDb', ceiling: 'peaksCeilingDb',
     }, ceilingDb)
-    peaksRestoreDb = m.restoreDb
-    peaksMakeupDb = m.gainDb + m.restoreDb
-    peaksCeilingDb = m.ceilingDb
-    afterPeaks = renderPeaks(channels, sampleRate, base, peaksAlignDb, {
-      peaksMakeupDb, peaksCeilingDb,
+    out.peaksRestoreDb = m.restoreDb
+    out.peaksMakeupDb = m.gainDb + m.restoreDb
+    out.peaksCeilingDb = m.ceilingDb
+    afterPeaks = renderPeaks(channels, sampleRate, base, {
+      peaksMakeupDb: out.peaksMakeupDb, peaksCeilingDb: out.peaksCeilingDb,
     })
   }
 
-  // ── BODY ── measured on what the 1176 stage put out, makeup and all.
-  let bodyAlignDb = 0
-  let bodyDb = 0
-  let bodyMakeupDb = 0
-  let bodyCeilingDb = null
-  let bodyRestoreDb = 0
-  const bodyOn = bodyTarget > 0
-  if (bodyOn) {
+  // ── BODY ── on what the 1176 stage put out, makeup and all.
+  if (p.bodyOn) {
+    // In the chain the kernel takes the Body offset net of the Peaks makeup;
+    // rendered alone (Peaks bypassed) it has to be passed that way.
+    const bodyAlignDb = bodyAlignFor(p, out.peaksMakeupDb)
     const midRef = referenceBlocks(afterPeaks, sampleRate)
     const W = Math.round(SOLVE_BLOCK_S * sampleRate)
-    let last = null
-    const measure = (align) => {
-      const r = renderBody(afterPeaks, sampleRate, base, align, {}, { meter: true })
-      // Average cell reduction over the voiced blocks, from the cell's own
-      // meter (one value per 128-sample kernel block).
-      const per = W / 128
-      let s = 0
-      let c = 0
-      for (const k of midRef.voicedIdx) {
-        const from = Math.floor(k * per)
-        const to = Math.min(r.bodyGr.length, Math.floor((k + 1) * per))
-        for (let j = from; j < to; j++) { s += r.bodyGr[j]; c++ }
-      }
-      last = { align, out: r.channelData, value: c > 0 ? s / c : 0 }
-      return last.value
+    const r = renderBody(afterPeaks, sampleRate, base, bodyAlignDb, {}, { meter: true })
+    // Average cell reduction over the voiced blocks, from the cell's own meter
+    // (one value per 128-sample kernel block).
+    const per = W / 128
+    let sum = 0
+    let count = 0
+    for (const k of midRef.voicedIdx) {
+      const from = Math.floor(k * per)
+      const to = Math.min(r.bodyGr.length, Math.floor((k + 1) * per))
+      for (let j = from; j < to; j++) { sum += r.bodyGr[j]; count++ }
     }
-    // No closed-form guess for an opto cell's AVERAGE reduction; a caller
-    // re-solving after a knob move passes the last answer (`p.bodyGuess`).
-    const guess = Number.isFinite(p.bodyGuess) ? p.bodyGuess : 0
-    const r = solveFromGuess(measure, bodyTarget, guess, -ALIGN_RANGE_DB, ALIGN_RANGE_DB, 0.6)
-    if (!last || last.align !== r.x) measure(r.x)
-    bodyAlignDb = r.x
-    bodyDb = last.value
+    out.bodyDb = count > 0 ? sum / count : 0
 
     // The LA-2A stage's own makeup (its Gain, before the valve — so the plan
     // iterates renders), limiter at the source peak, and peak restore, which
@@ -345,21 +225,17 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
     const m = solveStageMakeup(afterPeaks, (chs, extra) => renderBody(chs, sampleRate, base, bodyAlignDb, extra).channelData, {
       gain: 'bodyMakeupDb', ceiling: 'bodyCeilingDb',
     }, ceilingDb)
-    bodyMakeupDb = m.gainDb
-    bodyCeilingDb = m.ceilingDb
-    bodyRestoreDb = m.restoreDb
+    out.bodyMakeupDb = m.gainDb
+    out.bodyCeilingDb = m.ceilingDb
+    out.makeupDb = m.restoreDb
   }
+  return out
+}
 
-  return {
-    cornerHz,
-    peaksOn, bodyOn,
-    peaksAlignDb, bodyAlignDb,
-    peaksMakeupDb, peaksCeilingDb, peaksRestoreDb,
-    bodyMakeupDb, bodyCeilingDb,
-    makeupDb: bodyRestoreDb,
-    peaksDb, peaksBodyDb, peaksLimited,
-    bodyDb,
-  }
+/** The Body stage's detector offset when rendered with the Peaks stage bypassed. */
+function bodyAlignFor(p, peaksMakeupDb) {
+  const a = Number.isFinite(p.bodyAlignDb) ? p.bodyAlignDb : 0
+  return p.peaksOn ? a - peaksMakeupDb : a
 }
 
 /**
@@ -423,10 +299,10 @@ export function restoreToCeilingDb(ceilingDb, peakDb) {
   return Math.max(-24, Math.min(24, ceilingDb - peakDb))
 }
 
-/** Render the Peaks stage alone (base rate) — the solve's and the exact pass's. */
-function renderPeaks(channels, sampleRate, base, alignDb, extra = {}) {
+/** Render the Peaks stage alone (base rate) — the measurement's and the exact pass's. */
+function renderPeaks(channels, sampleRate, base, extra = {}) {
   return processVoxPressorBuffer(channels, sampleRate, {
-    ...base, peaksOn: true, bodyOn: false, peaksAlignDb: alignDb, ...extra,
+    ...base, peaksOn: true, bodyOn: false, ...extra,
   }, { compensate: true }).channelData
 }
 
@@ -439,17 +315,17 @@ function renderBody(channels, sampleRate, base, alignDb, extra = {}, opts = {}) 
 
 /**
  * EXACT per-stage restores over a WHOLE region, for one longer than the
- * solve's analysis window. Returns the solved params with the restores, the
- * ceilings and the Body offset corrected.
+ * measurement's analysis window. Returns the params with the restores and the
+ * ceilings corrected.
  *
  * ⚠ A WINDOW'S PEAK IS ONLY A LOWER BOUND ON THE REGION'S, so a restore
  * derived from it is too generous and pushes the passage it never saw into
- * the ceiling (the LA Classic 76 peak-restore lesson in CLAUDE.md). The
- * makeups and offsets stay the window's, as every compressor's do; the two
- * restores are re-measured here, and the Body offset follows the 1176
- * stage's level change (level and drive add in dB in the LA-2A's detector).
+ * the limiter (the LA Classic 76 peak-restore lesson in CLAUDE.md). The
+ * makeups stay the window's, as every compressor's do; the two restores are
+ * re-measured here. The Body stage follows the 1176 stage's new makeup by
+ * itself (its offset is taken net of it).
  *
- * @param {object} solved        the solve's result (kernel params)
+ * @param {object} solved        kernel params with the measurement applied
  * @param {number} sourcePeakDb  the whole region's peak, dBFS
  */
 export function measureVoxPressorExact(channels, sampleRate, solved, sourcePeakDb) {
@@ -458,27 +334,21 @@ export function measureVoxPressorExact(channels, sampleRate, solved, sourcePeakD
   let peaksMakeupDb = 0
   let peaksCeilingDb = null
   let peaksRestoreDb = 0
-  let shiftDb = 0
   if (solved.peaksOn) {
     const gainDb = solved.peaksMakeupDb - solved.peaksRestoreDb
-    const madeUp = renderPeaks(channels, sampleRate, base, solved.peaksAlignDb, {
+    const madeUp = renderPeaks(channels, sampleRate, base, {
       peaksMakeupDb: gainDb, peaksCeilingDb: sourcePeakDb,
     })
     peaksRestoreDb = restoreToCeilingDb(sourcePeakDb, db(peakOfChannels(madeUp)))
     peaksMakeupDb = gainDb + peaksRestoreDb
     peaksCeilingDb = sourcePeakDb
-    shiftDb = peaksRestoreDb - solved.peaksRestoreDb
-    stage1 = renderPeaks(channels, sampleRate, base, solved.peaksAlignDb, {
-      peaksMakeupDb, peaksCeilingDb,
-    })
+    stage1 = renderPeaks(channels, sampleRate, base, { peaksMakeupDb, peaksCeilingDb })
   }
-  let bodyAlignDb = solved.bodyAlignDb
   let bodyCeilingDb = null
   let makeupDb = 0
   if (solved.bodyOn) {
-    bodyAlignDb = solved.bodyAlignDb - shiftDb
     bodyCeilingDb = sourcePeakDb
-    const out = renderBody(stage1, sampleRate, base, bodyAlignDb, {
+    const out = renderBody(stage1, sampleRate, base, bodyAlignFor(solved, peaksMakeupDb), {
       bodyMakeupDb: solved.bodyMakeupDb, bodyCeilingDb,
     }).channelData
     makeupDb = restoreToCeilingDb(bodyCeilingDb, db(peakOfChannels(out)))
@@ -486,7 +356,7 @@ export function measureVoxPressorExact(channels, sampleRate, solved, sourcePeakD
   return {
     ...solved,
     peaksMakeupDb, peaksCeilingDb, peaksRestoreDb,
-    bodyAlignDb, bodyCeilingDb,
+    bodyCeilingDb,
     makeupDb,
   }
 }

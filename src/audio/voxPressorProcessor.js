@@ -18,10 +18,10 @@
  * constant, ballistic law and saturation curve in either compressor reaches
  * this plugin with no conforming change. What is new here is only what they
  * LISTEN TO (`dsp/voiceDetector.js`, through each kernel's `sidechain`
- * argument) and how they are DRIVEN — both compressors are steered by a
- * detector-only offset (`inputAlignDb`) that the solves in
- * `voxPressorSolve.js` set per file, so neither one's audio gain moves when a
- * knob does.
+ * argument) and how they are DRIVEN — the knobs are the compressors' own
+ * (the 1176's Input, the LA-2A's Peak Reduction) on a detector-only offset
+ * (`inputAlignDb`) set from the file's gated RMS, and the 1176's Output
+ * cancels its Input, so neither stage's audio gain moves when a knob does.
  *
  * ⚠ THE BODY DETECTOR READS THE PEAKS OUTPUT, NOT THE INPUT. That is what
  * makes 76 → 2A work: the opto rides a signal whose onsets the FET has already
@@ -50,48 +50,41 @@ import { LinkedPeakLimiter, peakLimiterLatencySamples } from './dsp/peakLimiter.
 const LN10_OVER_20 = Math.LN10 / 20
 
 /**
- * The 1176 as a peak catcher. Everything but the detector offset is pinned —
- * the Peaks knob asks for dB off the loudest peaks and the solve finds the
- * offset that delivers it.
+ * The 1176 as a peak catcher. The Peaks knob IS its Input (`peaksInput`),
+ * offset by the file's gated-RMS alignment as LA Classic 76's is; the rest is
+ * pinned.
  *
  * ⚠ ALL REASONED, TO AUDITION:
  * - ratio 12 — limiting, not leveling. The moving threshold puts 12:1's
- *   threshold 2.7 dB above 4:1's; the solve absorbs it.
+ *   threshold 2.7 dB above 4:1's.
  * - attack 6, release 6 (7 is fastest on both) — fast enough to take a
  *   consonant onset, one short of the end so a vowel's first cycle is not
  *   sliced and the release does not ride bass cycles.
  * - fetDrive 0 — a CLEAN peak trimmer. The colour in this plugin is the
  *   LA-2A's; a FET shaper running on every sample would colour the body the
  *   Peaks stage is promising to leave alone. On the bench.
- * - Input at 50 with Output cancelling its drive: the audio gain through the
- *   stage is unity, and the knee — which reads the KNOB's drive, not the
- *   aligned one (`kneeDbForDrive`) — is the knob-50 knee whatever the solve
- *   does.
+ * - Output cancels the Input's drive, so the audio gain through the stage is
+ *   unity before its makeup and the knob moves only the compression (and the
+ *   knee, which reads the knob's drive: `kneeDbForDrive`).
  */
-export const PEAKS_INPUT_KNOB = 50
 export const PEAKS_PATCH = Object.freeze({
   ratio: '12',
   attack: 6,
   release: 6,
   fetDrive: 0,
-  inputDrive: PEAKS_INPUT_KNOB,
-  outputGainDb: -inputDriveDbForKnob(PEAKS_INPUT_KNOB),
   mix: 1,
   scHpfHz: 0,
   ceilingDb: null,
 })
 
 /**
- * The LA-2A as the leveler. Peak Reduction is pinned at its calibrated middle
- * and the solve moves the detector offset instead, so the panel's Body number
- * is a target amount of leveling rather than a knob position whose meaning
- * depends on the file. Everything else is the shipping LA Vintage 2A —
- * including its quartic cell and valve, which are this plugin's colour.
+ * The LA-2A as the leveler. The Body knob IS its Peak Reduction
+ * (`bodyPeakReduction`), offset by the file's alignment as LA Vintage 2A's is.
+ * Everything else is the shipping LA Vintage 2A — including its quartic cell
+ * and valve, which are this plugin's colour.
  */
-export const BODY_PEAK_REDUCTION = 50
 export const BODY_PATCH = Object.freeze({
   mode: 'compress',
-  peakReduction: BODY_PEAK_REDUCTION,
   gainDb: 0,
   mix: 1,
   lookaheadMs: 0,
@@ -105,7 +98,14 @@ export const VOX_KERNEL_DEFAULTS = {
   /** Stage on/off. Off is a pure delay of the stage's latency. */
   peaksOn: true,
   bodyOn: true,
-  /** Detector offsets, dB — MEASURED by the solves, never a user setting. */
+  /** The knobs: the 1176's Input and the LA-2A's Peak Reduction (0–100). */
+  peaksInput: 50,
+  bodyPeakReduction: 50,
+  /**
+   * Detector offsets, dB — the file's gated-RMS alignment (`alignDbForRms`),
+   * MEASURED, never a user setting. The Body stage's is taken net of the
+   * Peaks stage's makeup (see `setParams`).
+   */
   peaksAlignDb: 0,
   bodyAlignDb: 0,
   /** The speaker's rumble corner, Hz — measured (voiceProfile.js). */
@@ -116,7 +116,7 @@ export const VOX_KERNEL_DEFAULTS = {
    * its peak restore folded in), the LA-2A's to its Gain (before its valve),
    * with its restore in `makeupDb` after it. Each stage then runs into a
    * LOOKAHEAD LIMITER at the source's peak (`dsp/peakLimiter.js`). All
-   * MEASURED (`solveVoxPressor`), never user settings.
+   * MEASURED (`measureVoxPressor`), never user settings.
    */
   peaksMakeupDb: 0,
   peaksCeilingDb: null,
@@ -209,19 +209,31 @@ export class VoxPressorKernel {
     this.bodyOn = p.bodyOn !== false
     this.stageLatency = this.oversampleOn ? OVERSAMPLE_LATENCY_SAMPLES : 0
 
+    const peaksInput = finite(p.peaksInput, 50, 0, 100)
+    const peaksMakeupDb = finite(p.peaksMakeupDb, 0, -36, 36)
     this.fet.setParams({
       ...PEAKS_PATCH,
+      inputDrive: peaksInput,
       ...(p.peaksBench ?? {}),
       inputAlignDb: finite(p.peaksAlignDb, 0, -60, 60),
-      // The patch's Output cancels the Input drive; the stage's makeup rides on it.
-      outputGainDb: PEAKS_PATCH.outputGainDb + finite(p.peaksMakeupDb, 0, -36, 36),
+      // Output cancels the Input's drive; the stage's makeup rides on it.
+      outputGainDb: -inputDriveDbForKnob(peaksInput) + peaksMakeupDb,
       ceilingDb: null,
       oversample: this.oversampleOn,
     })
     this.la2a.setParams({
       ...BODY_PATCH,
+      peakReduction: finite(p.bodyPeakReduction, 50, 0, 100),
       ...(p.bodyBench ?? {}),
-      inputAlignDb: finite(p.bodyAlignDb, 0, -60, 60),
+      /**
+       * ⚠ NET OF THE PEAKS STAGE'S MAKEUP. The LA-2A hears the 1176 stage's
+       * output, which its makeup lifts by several dB (+4.7 on "Messy and
+       * Bright" at the default). Aligned on the source alone, the Body knob's
+       * meaning would move with the Peaks knob, and every makeup measurement
+       * landing would shift the leveling under the listener. Level and drive
+       * add in dB in the detector, so this cancels it exactly.
+       */
+      inputAlignDb: finite(p.bodyAlignDb, 0, -60, 60) - (this.peaksOn ? peaksMakeupDb : 0),
       gainDb: finite(p.bodyMakeupDb, 0, -24, 24),
       ceilingDb: null,
       oversample: this.oversampleOn,
@@ -394,7 +406,7 @@ export class VoxPressorKernel {
 }
 
 /**
- * Process a whole buffer through a fresh kernel. The tests and the solves use
+ * Process a whole buffer through a fresh kernel. The tests and the measurements use
  * this; the app renders through the worklet (preview) and an
  * OfflineAudioContext running the same worklet (apply).
  */
@@ -402,7 +414,7 @@ export function processVoxPressorBuffer(channelData, sampleRate, params = {}, { 
   const kernel = new VoxPressorKernel(sampleRate)
   kernel.setParams(params)
   // `compensate`: render `latency` samples long and drop the head, so the
-  // output lines up with the input sample for sample (what the solves compare).
+  // output lines up with the input sample for sample (what the measurements compare).
   const lat = compensate ? kernel.latencySamples : 0
   const len = channelData[0].length
   if (lat > 0) {

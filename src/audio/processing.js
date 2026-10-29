@@ -657,28 +657,29 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
 }
 
 /**
- * Solve VoxPressor for a region: what Peaks and Body mean on this recording.
- * Resolves `solveVoxPressor`'s result (see voxPressorSolve.js) with the
- * limiters' ceiling re-measured over the WHOLE region.
+ * Measure VoxPressor for a region at its current knobs: the readouts and each
+ * stage's makeup. Resolves `measureVoxPressor`'s result (see voxPressorSolve.js)
+ * with the limiters' ceiling re-measured over the WHOLE region.
  *
- * ⚠ THE SAME TWO-SPAN CONTRACT AS `computeLA2AAutoMakeup`: the solve renders
- * both kernels several times, so it runs on the worker's capped window; the
+ * ⚠ THE SAME TWO-SPAN CONTRACT AS `computeLA2AAutoMakeup`: the measurement
+ * renders both kernels several times, so it runs on the worker's capped window; the
  * ceiling is the guarantee and is a claim about the whole source, so it comes
  * from `regionPeakDb` — the window's peak would hold a louder passage the
  * window never saw down to it.
  *
- * @param {{ peaksDb: number, bodyDb: number, cornerHz?: number|null, bodyGuess?: number, bodyBench?: object }} targets
+ * @param {object} kernelParams  `toKernelParams` of the panel (cornerHz
+ *   included when already measured)
  */
-export function computeVoxPressorSolve(segments, start, end, targets, sampleRate, channels) {
+export function computeVoxPressorMeasure(segments, start, end, kernelParams, sampleRate, channels) {
   return measureInWorker(
-    'voxPressorSolve', segments, start, end, targets, sampleRate, channels,
+    'voxPressorMeasure', segments, start, end, kernelParams, sampleRate, channels,
   ).then(({ type, ...d }) => {
     const peakDb = regionPeakDb(segments, start, end, sampleRate, channels)
     const ceilingDb = Number.isFinite(peakDb) ? peakDb : null
     return {
       ...d,
-      peaksCeilingDb: d.peaksOn ? ceilingDb : null,
-      bodyCeilingDb: d.bodyOn ? ceilingDb : null,
+      peaksCeilingDb: kernelParams.peaksOn ? ceilingDb : null,
+      bodyCeilingDb: kernelParams.bodyOn ? ceilingDb : null,
     }
   })
 }

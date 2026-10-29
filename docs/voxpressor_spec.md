@@ -130,8 +130,8 @@ BODY SC** and compare against a plain LA Vintage 2A.
 
 | Knob | Range | Default | What it does |
 |---|---|---|---|
-| **Peaks** | 0–10 dB | 3 | dB taken off the loudest voice peaks by the 76 (§4.2). Solved per file. 0 = stage out, a pure delay |
-| **Body** | 0–100 | 40 | Average leveling by the 2A: target avg GR on voiced material, ~0–10 dB *(reasoned)*, solved per file on the Peaks stage's output |
+| **Peaks** | 0–100 | 26 | The 76's **Input**, aligned to the file's gated RMS (§4.2). Readout: dB off the loudest peaks, voice touched. 0 = stage out, a pure delay |
+| **Body** | 0–100 | 57 | The 2A's **Peak Reduction**, aligned the same way and net of the Peaks stage's makeup. Readout: avg leveling on voiced material. 0 = stage out |
 | **De-ess** | 0–100 | 40 | HF Softener **Amount** (Split pinned at its default 33; Guard 100) |
 | **Parallel** | 0–100 % (+ PRESENCE / THICK toggle) | 30, PRESENCE | Scheps Parallel's **Mix** (§4.4). The squashed, Pultec-coloured LA-2A copy blended under the voice. 0 = stage out, a pure delay |
 | **Air** | 0–6 dB | 1.5 | Air Boost curve (`dsp/airBandCurve.js`), VOICED mode only (vowels), the HF Softener's existing Air path |
@@ -148,38 +148,52 @@ MONITOR contract).
 
 ### 4.2 Peaks — the 1176 as an automatic peak trimmer
 
-**What the user sets:** one number, "dB off the loudest peaks". Same contract
-as PHAT*SS's TAPE knob (the dB taken off the selection's peak, solved per file).
-Everything else on the 1176 is pinned or solved.
+**What the user sets:** the 1176's Input, offset by the file's gated-RMS
+alignment exactly as LA Classic 76 aligns (`regionAlignDb` over the whole
+file), so a position means the same at any recording level. Everything else on
+the 1176 is pinned. The panel reads back what it did.
 
 **Pinned patch** *(reasoned, to audition)* — the classic peak-catcher setting:
 
 | 1176 control | Value | Why |
 |---|---|---|
-| Ratio | 12:1 | Limiting, not leveling. The moving threshold (`ratioThreshold: 'moving'`) raises it 2.7 dB over 4:1, which the solve absorbs |
+| Ratio | 12:1 | Limiting, not leveling. The moving threshold (`ratioThreshold: 'moving'`) raises it 2.7 dB over 4:1 |
 | Attack | dial 6 | Fast enough to take a consonant onset, one short of 7 so the first cycle of a vowel isn't sliced |
 | Release | dial 6 | Recovers within tens of ms so the body between peaks is untouched. Not 7: at 7 the feed-forward release rode bass cycles (+1.1 to +1.4 dB of modulation). `fbRelease: 'open'` fixed that, but 6 keeps the margin |
-| Output | 0 | Makeup is VoxPressor's, at the end |
+| Output | −Input's drive | Unity through the stage; the stage's makeup rides on it |
 | Mix | 1 | Parallel is VoxPressor's own Mix |
-| Input | **solved** | See below |
+| Input | **the Peaks knob** | Aligned to the file |
 
-**The solve (built, `voxPressorSolve.js`).** The 1176's Input knob stays at 50
-with Output cancelling its drive, so the audio gain through the stage is unity;
-the solve moves a **detector-only offset** (`inputAlignDb`) instead:
+**The readouts (`measureVoxPressor`, one render per stage, in the worker):**
+"dB off the peaks" splits the region into 100 ms blocks, takes the loudest
+10 % by peak (5–60 blocks), and reads the **median** over those blocks of input
+peak − output peak; Body reads the LA-2A's average cell reduction on the voiced
+blocks of the Peaks output. Measured together with each stage's makeup —
+3–4 s on 36–46 s of narration — while the knobs themselves act at once.
 
-1. **What "dB off the peaks" means:** split the region into 100 ms blocks; take
-   the loudest 10 % by peak (5–60 blocks); the reduction is the **median** over
-   those blocks of input peak − output peak.
-2. **First guess from the static curve** (put the loudest peaks' detector level
-   `target / slope` dB over the threshold), then a safeguarded secant on
-   renders of the 1176 alone at the base rate. 3–5 renders.
-3. **Re-solved before apply** unless the last solve was for exactly this
-   timeline, region and pair of targets.
+**History: the knobs were TARGETS first (owner's call to replace them).**
+Peaks was "dB off the peaks" and Body "dB of average leveling", each solved by a
+safeguarded secant over a detector-only offset, so "Peaks 3" meant 3 dB on any
+voice. Beyond the gated-RMS alignment the solve moved the offset only
+1.1–1.2 dB (Peaks) and 0.3–0.4 dB (Body) between the owner's two clips (crest
+16.6 vs 19.9 dB) — at the price of a 4–7 s wait on every knob move, during
+which the old setting kept playing. ⚠ What it was absorbing is real, though:
+synthetic narration (crest 20.2 dB) reads 6.75 dB off its peaks at Input 26,
+where the two real clips read 2.7 and 3.8.
 
-Measured: on 30 s of synthetic narration at −34 / −24 / −14 dBFS the solve lands
-Peaks within 0.05 dB and the offset shifts by exactly 10 dB per 10 dB of level;
-a whole solve (Peaks + Body + makeup) takes 1.2–1.6 s when the voice corner is
-already known (the first solve on a region also measures it, ~1.2 s more).
+**Calibration (owner's clips, aligned):**
+
+| Input | 20 | 26 | 30 | 40 | 50 |
+|---|---|---|---|---|---|
+| Messy and Bright: dB off peaks / voice | 0.4 / 0.00 | 2.7 / 0.01 | 4.5 / 0.38 | 8.8 / 3.14 | 12.9 / 7.00 |
+| David Greenberg | 1.2 / 0.00 | 3.8 / 0.01 | 5.6 / 0.30 | 9.8 / 3.00 | 13.9 / 6.67 |
+
+| Peak Reduction (Input 25) | 40 | 50 | 57 | 60 | 70 |
+|---|---|---|---|---|---|
+| Messy and Bright: avg leveling | 0.5 | 2.3 | 3.8 | 4.7 | 7.5 |
+| David Greenberg | 0.4 | 1.9 | 3.4 | 4.3 | 7.1 |
+
+⚠ The Input knob is steep for a peak trimmer: the useful span is ~20–35.
 
 **Keeping it on the peaks — warn, don't cap (owner's decision).** The knob
 always delivers what it asks for; what that costs the voice is measured and
@@ -188,16 +202,14 @@ shown:
 - **Voice readout:** under the Peaks knob, "voice touched X dB" is the median
   level drop on the voiced blocks. Past `PEAKS_BODY_WARN_DB` (0.5 dB,
   *reasoned*) it turns amber and adds "compressing the voice".
-- **Why no cap:** stage 1 shipped a fixed floor (the knee kept ≥ 8 dB over the
+- **Why no cap:** an early build shipped a fixed floor (the knee kept ≥ 8 dB over the
   detector's gated level). On a real narration clip (−1 dBFS peak, −20.9 dBFS
   gated) it stopped Peaks at 2.57 dB for every setting from 3 to 10 while the
-  voice measured 0.01 dB touched. Uncapped, the same clip reads (Peaks →
-  voice touched): 3 → 0.01, 4 → 0.07, 6 → 0.62, 8 → 1.84, 10 → 3.45 dB.
+  voice measured 0.01 dB touched.
 
 **Why not fully automatic (no knob)?** How much peak to take is a taste call
 (narration ~2–3 dB, podcast punch ~5–6). A fixed crest target would be wrong
-on half the voices. One knob in dB is the smallest honest control, and AUTO
-could be a preset value rather than a mode.
+on half the voices.
 
 ### 4.3 Density — the Cambridge Inflator, anchored to the ceiling
 
@@ -310,19 +322,18 @@ All measured once per file / selection, in the worker, against the **running
 
 | Measurement | Source | Used by |
 |---|---|---|
-| Gated RMS → voiced-block gate | `dsp/inputAlign.js` | Body solve; Peaks voice-touched readout; makeup |
+| Gated RMS (whole file) → alignment | `regionAlignDb` | Both detectors' offset (Body's net of the Peaks makeup) |
+| Gated RMS → voiced-block gate | `dsp/inputAlign.js` | Body readout; Peaks voice-touched readout |
 | Rumble corner, median F0 | `voiceProfile.js` | Detector HP |
-| Loudest blocks (by peak), voiced blocks (gated RMS − 10 dB) | `referenceBlocks` | Peaks / Body solves |
-| Peaks offset | secant on 1176 renders (§4.2) | 76 `inputAlignDb` |
-| Body offset | secant on LA-2A renders of the Peaks output; avg cell GR on voiced blocks | 2A `inputAlignDb` (Peak Reduction pinned at 50) |
+| Loudest blocks (by peak), voiced blocks (gated RMS − 10 dB) | `referenceBlocks` | Peaks / Body readouts |
 | Parallel trim, correlation, density, alignment | `computeSchepsAutoTrim` on the Body output | Parallel stage |
 | Post-compression gated RMS | render of stages [1]–[3] on ≤ 400 blocks | De-ess `levelOffset` |
 | Makeup, per stage | `solveStageMakeup`: `solveMakeupPlan` (percentile) per stage, a lookahead limiter at the source peak, restore to it; both restores re-measured over the whole region before apply when the region outgrew the window | 1176 Output; LA-2A Gain + the restore after the chain |
 | Source peak | `peakOfChannels` | Ceiling; Density anchor |
 
-⚠ **The solves are sequential.** Peaks first (on the input), then Body (on the
+⚠ **The measurements are sequential.** Peaks first (on the input), then Body (on the
 Peaks output), then Parallel's trim (on the Body output), then the de-ess
-offset and makeup. Moving a knob invalidates every solve after its stage;
+offset and makeup. Moving a knob invalidates every measurement after its stage;
 Parallel's Mix and character invalidate only de-ess and makeup. Cache by
 document + span + the knobs upstream of each solve.
 
@@ -365,7 +376,7 @@ A preset stores the eight panel values and the Parallel character only. *All rea
 src/audio/voxPressorParams.js        panel ↔ kernel mapping, defaults, pinned Peaks patch
 src/audio/voxPressorProcessor.js     VoxPressorKernel + worklet registration
 src/audio/voxPressorWorkletLoader.js ?worker&url loader
-src/audio/voxPressorSolve.js         Peaks / Body solves (worker side)
+src/audio/voxPressorSolve.js         readouts + per-stage makeup (worker side)
 src/audio/dsp/voiceDetector.js       §3 detector filter, two taps
 src/audio/effects/voxPressor.js      effect wrapper
 src/composables/useVoxPressor.js     pluginCopies, measurements, chain registration

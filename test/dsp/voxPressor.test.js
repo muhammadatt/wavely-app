@@ -20,10 +20,11 @@ import {
   voiceDetectorSections, PLOSIVE_SHELF_DB, SIBILANCE_SHELF_DB,
 } from '../../src/audio/dsp/voiceDetector.js'
 import {
-  solveVoxPressor, PEAKS_BODY_WARN_DB, measureVoxPressorExact,
+  measureVoxPressor, PEAKS_BODY_WARN_DB, measureVoxPressorExact,
 } from '../../src/audio/voxPressorSolve.js'
 import { magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
-import { gatedRmsOfChannels } from '../../src/audio/dsp/inputAlign.js'
+import { gatedRmsOfChannels, inputAlignDbFor } from '../../src/audio/dsp/inputAlign.js'
+import { toKernelParams, VOX_DEFAULTS } from '../../src/audio/effects/voxPressorParams.js'
 
 const SR = 44100
 const db = v => 20 * Math.log10(v)
@@ -247,27 +248,31 @@ test('listen plays a detector instead of the output', () => {
   assert.ok(peak(out) > 0 && peak(out) < peak(x) * 1.5)
 })
 
-// ── Solves ──────────────────────────────────────────────────────────────────
+// ── Knobs and measurement ───────────────────────────────────────────────────
+
+/**
+ * What the app does: kernel params from the panel (knobs + the file's
+ * alignment), then the measurement, with both limiters at the source peak.
+ */
+function measure(x, panel = {}, extra = {}) {
+  const kp = toKernelParams({
+    ...VOX_DEFAULTS, alignDb: inputAlignDbFor([x], SR), cornerHz: 70, ...panel,
+  })
+  const r = measureVoxPressor([x], SR, { ...kp, ...extra })
+  return { kp, r, params: { ...kp, ...extra, ...r } }
+}
 
 const LEVELS = [-34, -24, -14]
-const solved = LEVELS.map((levelDb) => {
+const atDefaults = LEVELS.map((levelDb) => {
   const x = narration(SR, { seconds: 12, levelDb })
-  return { levelDb, x, r: solveVoxPressor([x], SR, { peaksDb: 3, bodyDb: 4, wholeRegion: true, cornerHz: 70 }) }
+  return { levelDb, x, ...measure(x) }
 })
 
-test('Peaks and Body land on their targets', () => {
-  for (const { levelDb, r } of solved) {
-    assert.ok(Math.abs(r.peaksDb - 3) <= 0.1, `${levelDb}: peaks ${r.peaksDb.toFixed(3)}`)
-    assert.ok(Math.abs(r.bodyDb - 4) <= 0.1, `${levelDb}: body ${r.bodyDb.toFixed(3)}`)
-    assert.equal(r.peaksLimited, false)
-  }
-})
-
-test('the solves are level-invariant: offsets track the file, results do not', () => {
-  const [a, b, c] = solved.map(s => s.r)
+test('aligned knobs do the same at any recording level', () => {
+  const [a, b, c] = atDefaults.map(s => s.r)
   for (const [lo, hi] of [[a, b], [b, c]]) {
-    assert.ok(Math.abs((lo.peaksAlignDb - hi.peaksAlignDb) - 10) < 0.2, 'peaks offset follows level')
-    assert.ok(Math.abs((lo.bodyAlignDb - hi.bodyAlignDb) - 10) < 0.3, 'body offset follows level')
+    assert.ok(Math.abs(lo.peaksDb - hi.peaksDb) < 0.2, `peaks ${lo.peaksDb.toFixed(2)} vs ${hi.peaksDb.toFixed(2)}`)
+    assert.ok(Math.abs(lo.bodyDb - hi.bodyDb) < 0.3, `body ${lo.bodyDb.toFixed(2)} vs ${hi.bodyDb.toFixed(2)}`)
     // ⚠ THE LA-2A STAGE'S MAKEUP IS NOT EXACTLY LEVEL-INVARIANT, AND THAT IS
     // THE LA-2A: its output valve is driven by absolute level by design, so a
     // hotter file shapes its loudest samples differently. The 1176 stage is
@@ -276,84 +281,99 @@ test('the solves are level-invariant: offsets track the file, results do not', (
     assert.ok(Math.abs(total(lo) - total(hi)) < 0.6,
       `LA-2A makeup ${total(lo).toFixed(2)} vs ${total(hi).toFixed(2)} dB across 10 dB of level`)
   }
+  // And the defaults do something on narration.
+  assert.ok(a.peaksDb > 1 && a.bodyDb > 1, `defaults: peaks ${a.peaksDb.toFixed(2)}, body ${a.bodyDb.toFixed(2)}`)
 })
 
 test('the 1176 stage\'s makeup is exactly level-invariant', () => {
-  const makeups = [-34, -24, -14].map(levelDb => solveVoxPressor(
-    [narration(SR, { seconds: 12, levelDb })], SR, { peaksDb: 3, bodyDb: 0, cornerHz: 70 },
-  ).peaksMakeupDb)
+  const makeups = LEVELS.map(levelDb => measure(narration(SR, { seconds: 12, levelDb }), { body: 0 }).r.peaksMakeupDb)
   assert.ok(Math.max(...makeups) - Math.min(...makeups) < 0.02, makeups.map(m => m.toFixed(3)).join(' / '))
 })
 
-test('at Peaks 3 the 1176 leaves the body alone', () => {
-  for (const { levelDb, r } of solved) {
+test('a light Peaks takes the peaks and leaves the voice alone', () => {
+  // ⚠ NOT AT THE DEFAULT. Input 26 is calibrated on the owner's two clips
+  // (~3 dB off their peaks, 0.1–0.4 dB of voice); this synthetic narration is
+  // peakier and reads 6.75 dB off its peaks there, 1.06 of voice. That spread
+  // between voices is exactly what the retired target solve absorbed.
+  for (const { levelDb, x } of atDefaults) {
+    const { r } = measure(x, { peaks: 20, body: 0 })
+    assert.ok(r.peaksDb > 2, `${levelDb}: only ${r.peaksDb.toFixed(2)} dB off the peaks`)
     assert.ok(r.peaksBodyDb < 0.5, `${levelDb}: body touched ${r.peaksBodyDb.toFixed(2)} dB`)
   }
 })
 
-test('Peaks is never capped: a large target is reached and its cost reported', () => {
-  // Warn, don't cap (owner's call). The fixed floor this replaced stopped a real
-  // clip at 2.57 dB for every setting from 3 to 10; the knob must now deliver.
-  const { x } = solved[1]
-  const reached = [4, 7, 10].map(t => solveVoxPressor([x], SR, { peaksDb: t, bodyDb: 0, cornerHz: 70 }))
-  for (const [i, t] of [4, 7, 10].entries()) {
-    assert.equal(reached[i].peaksLimited, false, `Peaks ${t} limited`)
-    assert.ok(Math.abs(reached[i].peaksDb - t) <= 0.1, `Peaks ${t}: reached ${reached[i].peaksDb.toFixed(2)}`)
-  }
-  // The cost is measured and grows with the knob; at 10 it is well past the
-  // warning, which is what the panel's amber note reports.
-  assert.ok(reached[0].peaksBodyDb <= reached[1].peaksBodyDb && reached[1].peaksBodyDb <= reached[2].peaksBodyDb)
-  assert.ok(reached[2].peaksBodyDb > PEAKS_BODY_WARN_DB,
-    `voice touched ${reached[2].peaksBodyDb.toFixed(2)} dB at Peaks 10`)
+test('Peaks is never capped: more Input takes more off, and its cost is reported', () => {
+  // Warn, don't cap (owner's call): the knob goes where it is turned and the
+  // readout says what it is costing the voice.
+  const { x } = atDefaults[1]
+  const runs = [20, 30, 45].map(v => measure(x, { peaks: v, body: 0 }).r)
+  assert.ok(runs[0].peaksDb < runs[1].peaksDb && runs[1].peaksDb < runs[2].peaksDb,
+    runs.map(r => r.peaksDb.toFixed(2)).join(' / '))
+  assert.ok(runs[0].peaksBodyDb <= runs[1].peaksBodyDb && runs[1].peaksBodyDb <= runs[2].peaksBodyDb)
+  assert.ok(runs[2].peaksBodyDb > PEAKS_BODY_WARN_DB,
+    `voice touched ${runs[2].peaksBodyDb.toFixed(2)} dB at Input 45`)
+})
+
+test('the Body stage does not move when the Peaks makeup does', () => {
+  // The LA-2A hears the 1176 stage's made-up output; its offset is taken net
+  // of that makeup, so a makeup measurement landing never shifts the leveling.
+  const x = atDefaults[1].x
+  const kp = { ...atDefaults[1].kp, oversample: false }
+  const gr = m => processVoxPressorBuffer([x], SR, { ...kp, peaksMakeupDb: m }, { meter: true }).bodyGr
+  const a = gr(0)
+  const b = gr(6)
+  let worst = 0
+  for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i]))
+  assert.ok(worst < 0.01, `Body reduction moved ${worst.toFixed(4)} dB with 6 dB of Peaks makeup`)
 })
 
 test('makeup restores the source peak, and the voice comes out louder', () => {
-  for (const { levelDb, x, r } of solved) {
-    const params = { ...VOX_KERNEL_DEFAULTS, ...r, cornerHz: 70 }
-    // Base rate: what the solve measured. The peak lands back on the source's,
-    // a hair under it where the ceiling's 0.5 dB margin bends the top sample.
-    const base = processVoxPressorBuffer([x], SR, { ...params, oversample: false }).channelData
+  for (const { levelDb, x, params } of atDefaults) {
+    const p = { ...params, peaksCeilingDb: db(peak(x)), bodyCeilingDb: db(peak(x)) }
+    // Base rate: what was measured. The limiters hold the peak on the source's.
+    const base = processVoxPressorBuffer([x], SR, { ...p, oversample: false }, { compensate: true }).channelData
     const dPeak = db(peak(base[0])) - db(peak(x))
-    assert.ok(dPeak <= 0 && dPeak > -0.3, `${levelDb}: peak moved ${dPeak.toFixed(3)} dB`)
-    // What Peaks 3 / Body 4 took off the peaks comes back as level.
+    assert.ok(dPeak <= 1e-6 && dPeak > -0.3, `${levelDb}: peak moved ${dPeak.toFixed(3)} dB`)
+    // What the compressors took off the peaks comes back as level.
     const gain = db(gatedRmsOfChannels(base, SR)) - db(gatedRmsOfChannels([x], SR))
     assert.ok(gain > 1, `${levelDb}: only ${gain.toFixed(2)} dB louder`)
     // The rendered (oversampled) path never exceeds the source peak.
-    const out = processVoxPressorBuffer([x], SR, params).channelData[0]
+    const out = processVoxPressorBuffer([x], SR, p).channelData[0]
     assert.ok(peak(out) <= peak(x), `${levelDb}: peak ${db(peak(x)).toFixed(3)} → ${db(peak(out)).toFixed(3)}`)
   }
 })
 
-test('the exact whole-region pass reproduces a whole-region solve', () => {
+test('the exact whole-region pass reproduces a whole-region measurement', () => {
   // Apply re-measures the per-stage restores this way when the region outgrew
-  // the solve's window; on a region the solve saw whole, the two must agree.
-  const { x, r } = solved[1]
-  const exact = measureVoxPressorExact([x], SR, { ...r, cornerHz: 70 }, r.peaksCeilingDb)
-  for (const k of ['peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb', 'bodyAlignDb', 'bodyCeilingDb', 'makeupDb']) {
-    assert.ok(Math.abs(exact[k] - r[k]) < 1e-6, `${k}: ${exact[k]} vs ${r[k]}`)
+  // the measurement's window; on a region measured whole, the two must agree.
+  const { x, params } = atDefaults[1]
+  const exact = measureVoxPressorExact([x], SR, params, params.peaksCeilingDb)
+  for (const k of ['peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb', 'bodyCeilingDb', 'makeupDb']) {
+    assert.ok(Math.abs(exact[k] - params[k]) < 1e-6, `${k}: ${exact[k]} vs ${params[k]}`)
   }
 })
 
-test('zero targets switch the stages off', () => {
-  const r = solveVoxPressor([speech], SR, { peaksDb: 0, bodyDb: 0, cornerHz: 70 })
-  assert.equal(r.peaksOn, false)
-  assert.equal(r.bodyOn, false)
-  assert.ok(Math.abs(r.makeupDb) < 1e-9)
+test('knobs at 0 switch the stages off', () => {
+  const { kp, r } = measure(speech, { peaks: 0, body: 0 })
+  assert.equal(kp.peaksOn, false)
+  assert.equal(kp.bodyOn, false)
+  assert.ok(Math.abs(r.makeupDb) < 1e-9 && Math.abs(r.peaksMakeupDb) < 1e-9)
 })
 
-test('a stage with no measured offset is bypassed, not run uncalibrated', async () => {
-  const { toKernelParams, VOX_DEFAULTS } = await import('../../src/audio/effects/voxPressorParams.js')
-  const unmeasured = toKernelParams({ ...VOX_DEFAULTS })
-  assert.equal(unmeasured.peaksOn, false)
-  assert.equal(unmeasured.bodyOn, false)
-  // And so the kernel renders a pure delay until the solve lands.
-  const { channelData, latencySamples } = processVoxPressorBuffer([speech], SR, unmeasured)
+test('a stage is bypassed until the file is aligned, not run uncalibrated', () => {
+  const unaligned = toKernelParams({ ...VOX_DEFAULTS })
+  assert.equal(unaligned.peaksOn, false)
+  assert.equal(unaligned.bodyOn, false)
+  // And so the kernel renders a pure delay until the alignment lands.
+  const { channelData, latencySamples } = processVoxPressorBuffer([speech], SR, unaligned)
   for (let i = latencySamples; i < speech.length; i++) {
     if (channelData[0][i] !== speech[i - latencySamples]) assert.fail(`sample ${i} differs`)
   }
-  const measured = toKernelParams({ ...VOX_DEFAULTS, peaksAlignDb: -10, bodyAlignDb: 6 })
-  assert.equal(measured.peaksOn, true)
-  assert.equal(measured.bodyOn, true)
+  const aligned = toKernelParams({ ...VOX_DEFAULTS, alignDb: 3 })
+  assert.equal(aligned.peaksOn, true)
+  assert.equal(aligned.bodyOn, true)
+  assert.equal(aligned.peaksInput, VOX_DEFAULTS.peaks)
+  assert.equal(aligned.bodyPeakReduction, VOX_DEFAULTS.body)
 })
 
 test('Peaks trims a sibilant spike instead of letting it set the makeup', () => {
@@ -373,12 +393,12 @@ test('Peaks trims a sibilant spike instead of letting it set the makeup', () => 
     prev = w
   }
   const gain = (sib) => {
-    const r = solveVoxPressor([x], SR, { peaksDb: 3, bodyDb: 0, cornerHz: 70, peaksSibilance: sib })
-    const out = processVoxPressorBuffer([x], SR, { ...r, peaksSibilance: sib, oversample: false }).channelData
+    const { params } = measure(x, { body: 0 }, { peaksSibilance: sib })
+    const out = processVoxPressorBuffer([x], SR, { ...params, oversample: false }).channelData
     return db(gatedRmsOfChannels(out, SR)) - db(gatedRmsOfChannels([x], SR))
   }
   const deaf = gain(true)
   const hearing = gain(false)
   assert.ok(hearing > deaf + 1, `hearing sibilance ${hearing.toFixed(2)} dB vs deaf ${deaf.toFixed(2)} dB`)
-  assert.ok(hearing > 1, `Peaks 3 should make the voice louder: ${hearing.toFixed(2)} dB`)
+  assert.ok(hearing > 1, `the default Peaks should make the voice louder: ${hearing.toFixed(2)} dB`)
 })

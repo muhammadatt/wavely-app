@@ -9,7 +9,7 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import {
-  VOX_DEFAULTS, VOX_OUTPUT_MIN_DB, VOX_OUTPUT_MAX_DB, PEAKS_MAX_DB, BODY_MAX_DB,
+  VOX_DEFAULTS, VOX_OUTPUT_MIN_DB, VOX_OUTPUT_MAX_DB,
   PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS,
 } from '../../audio/effects/voxPressorParams.js'
 
@@ -49,28 +49,27 @@ const LOOKAHEAD_OPTIONS = BODY_LOOKAHEAD_STEPS_MS.map(ms => ({
     : `Delay the audio ${ms} ms so the opto's gain meets each onset early (adds ${ms} ms of latency; pre-ducks consonants at the top)`,
 }))
 
-function formatDb(v) {
-  return v > 0 ? `${v.toFixed(1)} dB` : 'OFF'
+function formatKnob(v) {
+  return v > 0 ? String(Math.round(v)) : 'OFF'
 }
 
 function formatOutput(v) {
   return `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
 }
 
-/** Peaks: what was reached, and whether the 1176 is reaching into the voice. */
+// The readouts are MEASURED at the knobs (`measureVoxPressor`): the knobs act
+// at once, the numbers follow when the measurement lands.
 const peaksNote = computed(() => {
   if (voxPeaks.value <= 0) return 'stage out'
-  if (voxBusy.value) return 'solving…'
   const r = voxReadout.value
-  if (!r) return 'not measured yet · bypassed'
-  const reached = `−${r.peaksDb.toFixed(1)} dB on peaks`
-  return r.peaksLimited ? `${reached} · could not reach` : reached
+  if (!r) return voxBusy.value ? 'measuring…' : '—'
+  return `−${r.peaksDb.toFixed(1)} dB on peaks`
 })
 // A warning, never a cap: the knob always goes where it is turned, and this
 // says when that has started lowering the voice itself (PEAKS_BODY_WARN_DB).
 const peaksWarn = computed(() => {
   const r = voxReadout.value
-  return !!r && voxPeaks.value > 0 && (r.peaksLimited || r.peaksBodyDb > PEAKS_BODY_WARN_DB)
+  return !!r && voxPeaks.value > 0 && r.peaksBodyDb > PEAKS_BODY_WARN_DB
 })
 const bodyTouchNote = computed(() => {
   const r = voxReadout.value
@@ -81,10 +80,13 @@ const bodyTouchNote = computed(() => {
 
 const bodyNote = computed(() => {
   if (voxBody.value <= 0) return 'stage out'
-  if (voxBusy.value) return 'solving…'
   const r = voxReadout.value
-  return r ? `${r.bodyDb.toFixed(1)} dB avg leveling` : 'not measured yet · bypassed'
+  if (!r) return voxBusy.value ? 'measuring…' : '—'
+  return `${r.bodyDb.toFixed(1)} dB avg leveling`
 })
+// The numbers on screen describe the knobs they were measured at; while a
+// newer measurement is in flight they are dimmed rather than blanked.
+const stale = computed(() => voxBusy.value && !!voxReadout.value)
 
 const measuredNote = computed(() => {
   const m = voxMeasured.value
@@ -144,25 +146,25 @@ async function applyAndClose() {
           <div class="vp-col">
             <ModulaKnob
               variant="ticks" :size="130" show-value editable
-              :model-value="voxPeaks" :min="0" :max="PEAKS_MAX_DB" :step="0.5"
+              :model-value="voxPeaks" :min="0" :max="100" :step="1"
               :default-value="VOX_DEFAULTS.peaks"
-              label="Peaks" :color="PEAKS_COLOR" :format-value="formatDb" :disabled="!voxPreview"
-              title="dB the 1176 takes off the loudest voice peaks, solved for this file. Double-click to reset"
+              label="Peaks · 1176 Input" :color="PEAKS_COLOR" :format-value="formatKnob" :disabled="!voxPreview"
+              title="The 1176's Input (12:1, fast), aligned to this file's level. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncPeaks"
             />
-            <span class="m-note" :class="{ 'vp-warn': peaksWarn }">{{ peaksNote }}</span>
-            <span class="m-note" :class="{ 'vp-warn': peaksWarn }">{{ bodyTouchNote }}</span>
+            <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ peaksNote }}</span>
+            <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ bodyTouchNote }}</span>
           </div>
           <div class="vp-col">
             <ModulaKnob
               variant="ticks" :size="130" show-value editable
-              :model-value="voxBody" :min="0" :max="BODY_MAX_DB" :step="0.5"
+              :model-value="voxBody" :min="0" :max="100" :step="1"
               :default-value="VOX_DEFAULTS.body"
-              label="Body" :color="ACCENT" :format-value="formatDb" :disabled="!voxPreview"
-              title="Average dB of leveling the LA-2A does on the voice, solved for this file. Double-click to reset"
+              label="Body · LA-2A Peak Red." :color="ACCENT" :format-value="formatKnob" :disabled="!voxPreview"
+              title="The LA-2A's Peak Reduction, aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncBody"
             />
-            <span class="m-note">{{ bodyNote }}</span>
+            <span class="m-note" :class="{ 'vp-stale': stale }">{{ bodyNote }}</span>
           </div>
         </div>
 
@@ -254,6 +256,7 @@ async function applyAndClose() {
 .vp-measured { text-align: center; }
 .vp-bench { padding-top: 8px; border-top: 1px dashed rgba(255, 255, 255, .08); }
 .vp-warn { color: #f0b429; }
+.vp-stale { opacity: .55; }
 .vp-about {
   margin: 12px 8px 0;
   text-align: center;
