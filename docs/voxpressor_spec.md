@@ -130,7 +130,7 @@ BODY SC** and compare against a plain LA Vintage 2A.
 
 | Knob | Range | Default | What it does |
 |---|---|---|---|
-| **Peaks** | 0–100 | 26 | The 76's **Input**, aligned to the file's gated RMS (§4.2). Readout: dB off the loudest peaks, voice touched. 0 = stage out, a pure delay |
+| **Peaks** | 0–10 | 3 | The 76's detector drive on a linear scale (Input pinned at 26), aligned to the file's gated RMS (§4.2): ≈ N dB off the loudest peaks of typical narration. Readout: dB off the loudest peaks, voice touched. 0 = stage out, a pure delay |
 | **Body** | 0–100 | 57 | The 2A's **Peak Reduction**, aligned the same way and net of the Peaks stage's makeup. Readout: avg leveling on voiced material. 0 = stage out |
 | **De-ess** | 0–100 | 40 | HF Softener **Amount** (Split pinned at its default 33; Guard 100) |
 | **Parallel** | 0–100 % (+ PRESENCE / THICK toggle) | 30, PRESENCE | Scheps Parallel's **Mix** (§4.4). The squashed, Pultec-coloured LA-2A copy blended under the voice. 0 = stage out, a pure delay |
@@ -148,10 +148,17 @@ MONITOR contract).
 
 ### 4.2 Peaks — the 1176 as an automatic peak trimmer
 
-**What the user sets:** the 1176's Input, offset by the file's gated-RMS
+**What the user sets:** Peaks 0–10, the 1176's detector drive on a linear
+scale (`peaksDriveDb`, 1.13 dB a step), on top of the file's gated-RMS
 alignment exactly as LA Classic 76 aligns (`regionAlignDb` over the whole
-file), so a position means the same at any recording level. Everything else on
-the 1176 is pinned. The panel reads back what it did.
+file), so a position means the same at any recording level. The Input is
+pinned at 26, so the knee (which reads the Input's drive) never moves.
+Calibrated so Peaks N ≈ N dB off the loudest peaks of typical narration:
+with the Input pinned, each dB of drive takes 0.88–0.90 dB off the peaks,
+linearly past 10 dB, and both owner clips are first caught 3.9 dB under
+Input 26's drive (Peaks 0). Measured at Peaks 3: 2.3 / 3.3 dB on the clips,
+6.4 on synthetic narration. Everything else on the 1176 is pinned. The panel
+reads back what it did.
 
 **Pinned patch** *(reasoned, to audition)* — the classic peak-catcher setting:
 
@@ -162,7 +169,7 @@ the 1176 is pinned. The panel reads back what it did.
 | Release | dial 6 | Recovers within tens of ms so the body between peaks is untouched. Not 7: at 7 the feed-forward release rode bass cycles (+1.1 to +1.4 dB of modulation). `fbRelease: 'open'` fixed that, but 6 keeps the margin |
 | Output | −Input's drive | Unity through the stage; the stage's makeup rides on it |
 | Mix | 1 | Parallel is VoxPressor's own Mix |
-| Input | **the Peaks knob** | Aligned to the file |
+| Input | 26, pinned | The Peaks knob moves the detector drive instead |
 
 **The readouts (`measureVoxPressor`, one render per stage, in the worker):**
 "dB off the peaks" splits the region into 100 ms blocks, takes the loudest
@@ -195,7 +202,8 @@ where the two real clips read 2.7 and 3.8.
 | Messy and Bright: avg leveling | 0.5 | 2.3 | 3.8 | 4.7 | 7.5 |
 | David Greenberg | 0.4 | 1.9 | 3.4 | 4.3 | 7.1 |
 
-⚠ The Input knob is steep for a peak trimmer: the useful span is ~20–35.
+⚠ That is why Peaks is not the Input knob any more: the useful span was
+Input ~20–35, a quarter of its travel, and the knee moved with it.
 
 **Keeping it on the peaks — warn, don't cap (owner's decision).** The knob
 always delivers what it asks for; what that costs the voice is measured and
@@ -485,9 +493,23 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
    than a plain LA Vintage 2A on plosive-heavy takes (synthetic tests say the
    difference is small, see §3); (c) settled: per-stage makeup.
 
-1. **Peaks as proposed?** One knob in dB off the loudest peaks, 76 patch pinned
-   at 12:1 / attack 6 / release 6, uncapped with a voice-touched warning. Or keep
-   a punch control on the panel (e.g. attack 4 ↔ 7)?
+1. **The 1176's timing — the pinned attack 6 / release 6 can be destructive.**
+   Owner, October 2026: the 1176 imparts modulation distortion on some voices
+   at fast attack / release, and a pinned setting must not be one that harms a
+   voice. Measured (modulation products re the signal):
+   - Held vowels at ~6 dB of reduction, attack 6, release dial 1 → 7:
+     70 Hz −39.8 → −20.0 dBc, 100 Hz −43.0 → −21.7, 140 Hz −46.0 → −21.7,
+     200 Hz −53.3 → −32.9. At the shipped release 6: −21.6 / −23.1 / −26.0 /
+     −36.3. Release moves it ~4 dB a step; attack (release 6, dial 1 → 7)
+     only 5–6 dB over its whole travel. Low voices are the exposed ones.
+   - On real speech (the gain trajectory's motion above 20 Hz, voice-weighted,
+     Peaks 3), attack and release both matter: release 6 → 3 buys 2–4 dB,
+     attack 6 → 1 buys 2–7 dB. Slower pairs catch less per knob step
+     (Messy and Bright: A6/R6 2.5 dB off peaks, −28.9 dBc; A3/R3 2.1, −33.5;
+     A2/R3 1.7, −35.0) and touch the voice slightly more.
+   Options: a voice-adaptive release from the measured F0 (the profile is
+   already measured for the detector), safer fixed timing, or a SPEED control
+   with a modulation readout that warns as Peaks' voice-touched does.
 2. **Plosives in the Peaks detector** — let the 76 see them (proposed, so it
    can trim them) or de-weight them for the 76 too and leave plosive peaks to
    the ceiling / Plosive Tamer?

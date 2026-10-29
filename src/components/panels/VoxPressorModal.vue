@@ -10,7 +10,7 @@ import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import {
   VOX_DEFAULTS, VOX_OUTPUT_MIN_DB, VOX_OUTPUT_MAX_DB,
-  PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS,
+  PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX,
 } from '../../audio/effects/voxPressorParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -48,6 +48,10 @@ const LOOKAHEAD_OPTIONS = BODY_LOOKAHEAD_STEPS_MS.map(ms => ({
     ? 'No lookahead: the LA-2A as the hardware is'
     : `Delay the audio ${ms} ms so the opto's gain meets each onset early (adds ${ms} ms of latency; pre-ducks consonants at the top)`,
 }))
+
+function formatPeaks(v) {
+  return v > 0 ? v.toFixed(1) : 'OFF'
+}
 
 function formatKnob(v) {
   return v > 0 ? String(Math.round(v)) : 'OFF'
@@ -146,10 +150,10 @@ async function applyAndClose() {
           <div class="vp-col">
             <ModulaKnob
               variant="ticks" :size="130" show-value editable
-              :model-value="voxPeaks" :min="0" :max="100" :step="1"
+              :model-value="voxPeaks" :min="0" :max="PEAKS_MAX" :step="0.5"
               :default-value="VOX_DEFAULTS.peaks"
-              label="Peaks · 1176 Input" :color="PEAKS_COLOR" :format-value="formatKnob" :disabled="!voxPreview"
-              title="The 1176's Input (12:1, fast), aligned to this file's level. 0 takes the stage out. Double-click to reset"
+              label="Peaks" :color="PEAKS_COLOR" :format-value="formatPeaks" :disabled="!voxPreview"
+              title="How hard the 1176 catches the loudest peaks: about that many dB off them on typical narration (the note below says what it took on this file). 0 takes the stage out. Double-click to reset"
               @update:model-value="syncPeaks"
             />
             <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ peaksNote }}</span>

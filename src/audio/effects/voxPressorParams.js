@@ -5,7 +5,7 @@
  * `?worker&url` loader, which only Vite resolves).
  */
 import { PEAKS_BODY_WARN_DB } from '../voxPressorSolve.js'
-import { voxLatencySamples } from '../voxPressorProcessor.js'
+import { voxLatencySamples, PEAKS_INPUT_KNOB } from '../voxPressorProcessor.js'
 import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
 
 /**
@@ -16,6 +16,36 @@ import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
  */
 export const VOX_LATENCY_SAMPLES = voxLatencySamples({}, 44100)
 export { voxLatencySamples }
+
+/**
+ * THE PEAKS SCALE: 0–10, linear in the 1176's detector drive, calibrated so
+ * Peaks N takes about N dB off the loudest peaks of typical narration.
+ *
+ * Measured with the Input pinned at 26 and the drive stepped (owner's two
+ * clips, 30 s each): once peaks are caught, each dB of drive takes 0.88–0.90 dB
+ * off them, linearly to 10 dB and beyond, on both clips and on synthetic
+ * narration — at 12:1 the stage is a limiter. Both clips start being caught
+ * ~3.9 dB under Input 26's drive (−3.5 / −4.3), so that is Peaks 0, and a
+ * step is 1 / 0.885 = 1.13 dB of drive. Predicted at Peaks 3: 2.6 / 3.5 dB;
+ * at 10: 9.6 / 10.8.
+ *
+ * ⚠ A CALIBRATED SCALE, NOT A TARGET. A peakier voice reads more: synthetic
+ * narration (crest 20 dB) takes ~6.4 dB at Peaks 3. The panel's readout is
+ * the measured figure for the file. (Solving every voice onto the scale was
+ * the retired target solve — see voxPressorSolve.js.)
+ *
+ * Why not the 1176's own Input: over this range it moves drive almost evenly
+ * (~0.5 dB a point, 15–40), but that is a quarter of its travel, the numbers
+ * mean nothing on their own, and the knee would move with it.
+ */
+export const PEAKS_MAX = 10
+export const PEAKS_ZERO_DRIVE_DB = -3.9
+export const PEAKS_DRIVE_PER_STEP_DB = 1.13
+
+/** The detector drive Peaks `x` adds over the file's alignment, dB. */
+export function peaksDriveDb(x) {
+  return PEAKS_ZERO_DRIVE_DB + PEAKS_DRIVE_PER_STEP_DB * x
+}
 
 /** The bench's Body lookahead steps, ms (LA Vintage 2A's own control). */
 export const BODY_LOOKAHEAD_STEPS_MS = Object.freeze([0, 5, 10, LOOKAHEAD_MAX_MS])
@@ -31,14 +61,10 @@ export { PEAKS_BODY_WARN_DB }
  */
 export const VOX_DEFAULTS = {
   /**
-   * The 1176's Input, 0–100 (0 = Peaks stage out). 26 takes ~3 dB off the
-   * loudest peaks on both of the owner's clips (2.7 / 3.8 dB, 0.01 dB of
-   * voice) — calibrated on those two, not auditioned. ⚠ The knob is steep for
-   * this job: on those clips Input 20 is ~1 dB and 40 is ~9, with the voice
-   * itself pulled down 3 dB there. ⚠ And voices differ: synthetic narration
-   * (crest 20 dB) reads 6.75 dB at 26.
+   * Peaks, 0–10 (0 = stage out): about N dB off the loudest peaks of
+   * typical narration (`peaksDriveDb`).
    */
-  peaks: 26,
+  peaks: 3,
   /**
    * The LA-2A's Peak Reduction, 0–100 (0 = Body stage out). 57 is 3.4–3.8 dB
    * of average leveling on both clips (≈ 2.3 dB per 10 points from 40 up;
@@ -93,7 +119,7 @@ export function toKernelParams(p) {
      */
     peaksOn: p.peaks > 0 && Number.isFinite(p.alignDb),
     bodyOn: p.body > 0 && Number.isFinite(p.alignDb),
-    peaksInput: knob(p.peaks),
+    peaksInput: PEAKS_INPUT_KNOB,
     bodyPeakReduction: knob(p.body),
     outputDb: Number.isFinite(p.output) ? p.output : 0,
     listen: p.listen ?? 'off',
@@ -102,7 +128,10 @@ export function toKernelParams(p) {
     // Measured values cross only when real, so an unmeasured panel leaves the
     // kernel on its own defaults rather than on a NaN.
     ...(Number.isFinite(p.cornerHz) ? { cornerHz: p.cornerHz } : {}),
-    ...(Number.isFinite(p.alignDb) ? { peaksAlignDb: p.alignDb, bodyAlignDb: p.alignDb } : {}),
+    ...(Number.isFinite(p.alignDb) ? {
+      peaksAlignDb: p.alignDb + peaksDriveDb(Math.max(0, Math.min(PEAKS_MAX, Number(p.peaks) || 0))),
+      bodyAlignDb: p.alignDb,
+    } : {}),
     peaksMakeupDb: Number.isFinite(p.peaksMakeupDb) ? p.peaksMakeupDb : 0,
     peaksRestoreDb: Number.isFinite(p.peaksRestoreDb) ? p.peaksRestoreDb : 0,
     bodyMakeupDb: Number.isFinite(p.bodyMakeupDb) ? p.bodyMakeupDb : 0,

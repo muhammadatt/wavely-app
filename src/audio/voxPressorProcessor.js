@@ -50,9 +50,10 @@ import { LinkedPeakLimiter, peakLimiterLatencySamples } from './dsp/peakLimiter.
 const LN10_OVER_20 = Math.LN10 / 20
 
 /**
- * The 1176 as a peak catcher. The Peaks knob IS its Input (`peaksInput`),
- * offset by the file's gated-RMS alignment as LA Classic 76's is; the rest is
- * pinned.
+ * The 1176 as a peak catcher. Its Input is PINNED (`PEAKS_INPUT_KNOB`, so the
+ * knee — which reads the Input's drive, `kneeDbForDrive` — never moves); the
+ * Peaks knob moves only the detector's drive (`peaksAlignDb`, on top of the
+ * file's gated-RMS alignment), on the linear 0–10 scale `peaksDriveDb` sets.
  *
  * ⚠ ALL REASONED, TO AUDITION:
  * - ratio 12 — limiting, not leveling. The moving threshold puts 12:1's
@@ -67,6 +68,7 @@ const LN10_OVER_20 = Math.LN10 / 20
  *   unity before its makeup and the knob moves only the compression (and the
  *   knee, which reads the knob's drive: `kneeDbForDrive`).
  */
+export const PEAKS_INPUT_KNOB = 26
 export const PEAKS_PATCH = Object.freeze({
   ratio: '12',
   attack: 6,
@@ -99,7 +101,7 @@ export const VOX_KERNEL_DEFAULTS = {
   peaksOn: true,
   bodyOn: true,
   /** The knobs: the 1176's Input and the LA-2A's Peak Reduction (0–100). */
-  peaksInput: 50,
+  peaksInput: PEAKS_INPUT_KNOB,
   bodyPeakReduction: 50,
   /**
    * Detector offsets, dB — the file's gated-RMS alignment (`alignDbForRms`),
@@ -209,7 +211,7 @@ export class VoxPressorKernel {
     this.bodyOn = p.bodyOn !== false
     this.stageLatency = this.oversampleOn ? OVERSAMPLE_LATENCY_SAMPLES : 0
 
-    const peaksInput = finite(p.peaksInput, 50, 0, 100)
+    const peaksInput = finite(p.peaksInput, PEAKS_INPUT_KNOB, 0, 100)
     const peaksMakeupDb = finite(p.peaksMakeupDb, 0, -36, 36)
     this.fet.setParams({
       ...PEAKS_PATCH,

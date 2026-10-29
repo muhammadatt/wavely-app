@@ -10,7 +10,7 @@ export default {
   controls: [
     {
       label: 'Peaks',
-      text: 'The 1176\'s Input, aligned to the file\'s level so a setting means the same on a quiet or a loud recording. The note under it says how many dB it takes off the loudest peaks. 0 takes the stage out',
+      text: 'How hard the 1176 catches the loudest peaks, 0–10: about that many dB off them on typical narration, at any recording level. A peakier voice gives up more; the note under it says what it took on this file. 0 takes the stage out',
     },
     {
       label: 'Body',
@@ -28,7 +28,7 @@ export default {
 
   steps: [
     'Select the passage and leave Peaks and Body where they open',
-    'Raise Peaks until the loudest syllables stop jumping out; small moves matter (around 20 it barely touches, around 40 it is limiting hard). If the note under it turns amber, the 1176 is reaching into the voice',
+    'Raise Peaks until the loudest syllables stop jumping out. If the note under it turns amber, the 1176 is reaching into the voice',
     'Raise Body until the level stops wandering. Expect it louder than bypass: what the compressors take off the peaks comes back as level',
   ],
 

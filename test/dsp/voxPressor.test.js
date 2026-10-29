@@ -13,7 +13,7 @@ import { narration } from '../helpers/narration.js'
 import { LA2AKernel } from '../../src/audio/la2aProcessor.js'
 import { FET1176Kernel } from '../../src/audio/fet1176Processor.js'
 import {
-  processVoxPressorBuffer, VOX_KERNEL_DEFAULTS, peaksTap, BODY_TAP, voxLatencySamples,
+  processVoxPressorBuffer, VOX_KERNEL_DEFAULTS, peaksTap, BODY_TAP, voxLatencySamples, PEAKS_INPUT_KNOB,
 } from '../../src/audio/voxPressorProcessor.js'
 import { LinkedPeakLimiter } from '../../src/audio/dsp/peakLimiter.js'
 import {
@@ -24,7 +24,9 @@ import {
 } from '../../src/audio/voxPressorSolve.js'
 import { magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
 import { gatedRmsOfChannels, inputAlignDbFor } from '../../src/audio/dsp/inputAlign.js'
-import { toKernelParams, VOX_DEFAULTS } from '../../src/audio/effects/voxPressorParams.js'
+import {
+  toKernelParams, VOX_DEFAULTS, peaksDriveDb, PEAKS_DRIVE_PER_STEP_DB,
+} from '../../src/audio/effects/voxPressorParams.js'
 
 const SR = 44100
 const db = v => 20 * Math.log10(v)
@@ -291,27 +293,27 @@ test('the 1176 stage\'s makeup is exactly level-invariant', () => {
 })
 
 test('a light Peaks takes the peaks and leaves the voice alone', () => {
-  // ⚠ NOT AT THE DEFAULT. Input 26 is calibrated on the owner's two clips
-  // (~3 dB off their peaks, 0.1–0.4 dB of voice); this synthetic narration is
-  // peakier and reads 6.75 dB off its peaks there, 1.06 of voice. That spread
-  // between voices is exactly what the retired target solve absorbed.
+  // ⚠ NOT AT THE DEFAULT. The Peaks scale is calibrated on the owner's two
+  // clips (Peaks 3 ≈ 3 dB off their peaks, 0.01 dB of voice); this synthetic
+  // narration is peakier and gives up ~6.4 dB at 3. That spread between voices
+  // is exactly what the retired target solve absorbed.
   for (const { levelDb, x } of atDefaults) {
-    const { r } = measure(x, { peaks: 20, body: 0 })
+    const { r } = measure(x, { peaks: 1, body: 0 })
     assert.ok(r.peaksDb > 2, `${levelDb}: only ${r.peaksDb.toFixed(2)} dB off the peaks`)
     assert.ok(r.peaksBodyDb < 0.5, `${levelDb}: body touched ${r.peaksBodyDb.toFixed(2)} dB`)
   }
 })
 
-test('Peaks is never capped: more Input takes more off, and its cost is reported', () => {
+test('Peaks is never capped: more takes more off, and its cost is reported', () => {
   // Warn, don't cap (owner's call): the knob goes where it is turned and the
   // readout says what it is costing the voice.
   const { x } = atDefaults[1]
-  const runs = [20, 30, 45].map(v => measure(x, { peaks: v, body: 0 }).r)
+  const runs = [1, 4, 8].map(v => measure(x, { peaks: v, body: 0 }).r)
   assert.ok(runs[0].peaksDb < runs[1].peaksDb && runs[1].peaksDb < runs[2].peaksDb,
     runs.map(r => r.peaksDb.toFixed(2)).join(' / '))
   assert.ok(runs[0].peaksBodyDb <= runs[1].peaksBodyDb && runs[1].peaksBodyDb <= runs[2].peaksBodyDb)
   assert.ok(runs[2].peaksBodyDb > PEAKS_BODY_WARN_DB,
-    `voice touched ${runs[2].peaksBodyDb.toFixed(2)} dB at Input 45`)
+    `voice touched ${runs[2].peaksBodyDb.toFixed(2)} dB at Peaks 8`)
 })
 
 test('the Body stage does not move when the Peaks makeup does', () => {
@@ -372,8 +374,21 @@ test('a stage is bypassed until the file is aligned, not run uncalibrated', () =
   const aligned = toKernelParams({ ...VOX_DEFAULTS, alignDb: 3 })
   assert.equal(aligned.peaksOn, true)
   assert.equal(aligned.bodyOn, true)
-  assert.equal(aligned.peaksInput, VOX_DEFAULTS.peaks)
+  assert.equal(aligned.peaksInput, PEAKS_INPUT_KNOB)
   assert.equal(aligned.bodyPeakReduction, VOX_DEFAULTS.body)
+})
+
+test('the Peaks scale is linear in detector drive, Peaks 0 its first catch', () => {
+  // The knob adds `PEAKS_DRIVE_PER_STEP_DB` of detector drive a step, on top
+  // of the file's alignment; at 12:1 that is ~0.9 dB off the peaks a dB.
+  const kp = v => toKernelParams({ ...VOX_DEFAULTS, peaks: v, alignDb: 2 })
+  assert.ok(Math.abs((kp(5).peaksAlignDb - kp(3).peaksAlignDb) - 2 * PEAKS_DRIVE_PER_STEP_DB) < 1e-9)
+  assert.ok(Math.abs(kp(3).peaksAlignDb - (2 + peaksDriveDb(3))) < 1e-9)
+  assert.equal(kp(3).bodyAlignDb, 2)
+  const { x } = atDefaults[1]
+  const steps = [4, 6, 8].map(v => measure(x, { peaks: v, body: 0 }).r.peaksDb)
+  const perStep = [(steps[1] - steps[0]) / 2, (steps[2] - steps[1]) / 2]
+  for (const d of perStep) assert.ok(d > 0.8 && d < 1.2, `${d.toFixed(2)} dB off the peaks per step`)
 })
 
 test('Peaks trims a sibilant spike instead of letting it set the makeup', () => {
