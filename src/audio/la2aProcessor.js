@@ -2443,8 +2443,14 @@ export class LA2AKernel {
    * @param {Float32Array[]} inputChannels  - per-channel input (any count)
    * @param {Float32Array[]} outputChannels - per-channel output to fill
    * @param {number} n                      - samples in this block
+   * @param {Float32Array} [sidechain]      - optional external detector signal,
+   *   mono, in the input's units. Replaces the mono mix of the input as what the
+   *   detector hears; the kernel's own HPF and R37 emphasis still run on it, and
+   *   the audio path is untouched. Absent, the kernel is bit-identical to what
+   *   it was before this argument existed. VoxPressor feeds its voice detector
+   *   through here (dsp/voiceDetector.js).
    */
-  process(inputChannels, outputChannels, n) {
+  process(inputChannels, outputChannels, n, sidechain) {
     // A non-finite value anywhere in the cell's state is unrecoverable on its
     // own: env, gr and relPhase all feed back into themselves, so one NaN makes
     // every future block NaN and the effect goes silent for good.
@@ -2497,10 +2503,15 @@ export class LA2AKernel {
     let makeupLinSmoothed = this.makeupLinSmoothed
 
     for (let i = 0; i < n; i++) {
-      // Mono sidechain tap
-      let x = inputChannels[0][i]
-      for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
-      x *= chScale
+      // Mono sidechain tap, or the caller's detector signal
+      let x
+      if (sidechain) {
+        x = sidechain[i]
+      } else {
+        x = inputChannels[0][i]
+        for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
+        x *= chScale
+      }
 
       // Sidechain frequency mapping: 80 Hz HPF, then the R37 emphasis filter.
       hpfLp += (x - hpfLp) * this.hpfLpCoef

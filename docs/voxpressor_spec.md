@@ -1,8 +1,11 @@
 # VoxPressor — Vocal Dynamics & Enhancement Plugin Spec
 
-> Status: **DRAFT for owner review** (October 2026). Nothing here is built. Every
-> number marked *reasoned* is a starting point to be measured or auditioned, per
-> this repo's habit of saying which numbers are which.
+> Status: **DRAFT for owner review** (October 2026). **Stage 1 is built** (dev
+> only, registry id `vox-pressor`): the voice detector and the Peaks (1176) →
+> Body (LA-2A) core with level-matched makeup and the source-peak ceiling.
+> Parallel, De-ess, Air and Density are not built yet. Every number marked
+> *reasoned* is a starting point to be measured or auditioned, per this repo's
+> habit of saying which numbers are which.
 
 ---
 
@@ -46,7 +49,7 @@ in ─ INPUT ALIGN (drive offset, detector only)
    ├─ [3] PARALLEL — SchepsKernel, PRESENCE (or THICK): Pultec push → LA-2A → Pultec recovery, blended with its own delayed dry
    ├─ [4] DE-ESS  — HFSoftenerKernel (Duck + EQ, lisp guard)
    ├─ [5] AIR     — Air Boost curve, voiced-only
-   ├─ MAKEUP      — percentile reference + source-peak soft ceiling (dsp/makeupReference.js)
+   ├─ MAKEUP      — level-matched (gated RMS) + source-peak soft ceiling (dsp/makeupReference.js)
    ├─ [6] DENSITY — InflatorKernel, anchored so the ceiling sits at f(1) = 1, Clip on
    └─ MIX         — delay-compensated dry/wet (equal-power, as Scheps)
        └─ OUTPUT trim ─ out
@@ -79,13 +82,15 @@ in ─ INPUT ALIGN (drive offset, detector only)
 
 ## 3. The voice detector (the one genuinely new DSP block)
 
-Fed from the aligned input. Built once, tapped twice.
+One filter design, two instances. The PEAKS tap reads the input; the BODY tap
+reads the **Peaks output**, so the opto rides a signal whose onsets the 1176
+has already taken (stage 1, `dsp/voiceDetector.js`).
 
 1. **High-pass at the speaker's rumble corner** — `measureVoiceProfile().cornerHz`
    (`voiceProfile.js`, the same number VoiceRx and Reso Soothe use: 40–100 Hz,
    measured once per file). 2nd order. Falls back to 80 Hz if the profile
    returns `null` (too few voiced frames).
-2. **Plosive de-weighting** — a further 6 dB/oct shelf down below 150 Hz
+2. **Plosive de-weighting** — a low shelf, −10 dB below 150 Hz
    *(reasoned)*, so a "p" that passes the high-pass still doesn't dominate.
 3. **Sibilance de-weighting** — a high-shelf cut, −9 dB above 5 kHz *(reasoned)*.
    The compressors should ride the vowels; sibilance is the de-esser's job. Without
@@ -98,16 +103,24 @@ Fed from the aligned input. Built once, tapped twice.
 | BODY (2A) | ✓ | ✓ | ✓ | An opto release is hundreds of ms to seconds: a plosive in its detector ducks the rest of the phrase |
 | PEAKS (76) | ✓ | **✗** | ✓ | A plosive is often the loudest peak in a narration take. The FET's release is tens of ms, so catching one costs a few ms of gain, and *not* catching it leaves it to the ceiling. Peaks the FET can't see are peaks the Peaks knob can't trim |
 
-**Wiring.** Neither kernel takes an external sidechain today. Add an opt-in
-`sidechainIn` (per-sample detector buffer) to `LA2AKernel` and `FET1176Kernel`,
-**bit-identical when unset** (same contract as the FET's `transientCornerHz`
-forwarding on the HF Limiter). Test: `undefined sidechain renders bit-identical`
-for both kernels.
+**Wiring (built).** Both kernels take an optional fourth `process()` argument,
+`sidechain`: a mono detector signal that replaces their own mono tap. Absent,
+both are unchanged; fed their own mono tap, both render bit-identically
+(tested). The LA-2A's own 80 Hz one-pole HPF and R37 still run on it.
 
-⚠ The FET ships with a **feedback** detector (reads the cell output). An
-external sidechain is necessarily feed-forward on the *detector filter*, but the
-loop can stay feedback by filtering the cell output with the same voice filter.
-Implement it that way — the attack fit (`FB_ATTACK_*`) assumes feedback.
+The FET's **feedback** detector needs no special handling: the loop is solved
+in dB on the detector's level (`_solveFeedback`), so a filtered detector signal
+closes the same loop. (The earlier note here proposed filtering the cell output
+instead; reading the code showed it is unnecessary.)
+
+⚠ **Measured on synthetic narration, the detector's plosive and sibilance
+shaping barely matters to this LA-2A model.** Its own side-chain already
+high-passes at 80 Hz and its detector is slow, so even a plain LA-2A gains at
+most ~0.65 dB of average reduction from loud plosive puffs; the Body tap cuts
+that by a third or more (pinned in `test/dsp/voxPressor.test.js`). Sibilance
+moved neither compressor measurably. Whether real plosives and real "s" sounds
+behave the same way needs real recordings: audition with **Listen: PEAKS SC /
+BODY SC** and compare against a plain LA Vintage 2A.
 
 ---
 
@@ -150,30 +163,36 @@ Everything else on the 1176 is pinned or solved.
 | Mix | 1 | Parallel is VoxPressor's own Mix |
 | Input | **solved** | See below |
 
-**The solve.** Input drive is bisected so that the 76's gain reduction at the
-voice's loudest peaks equals the knob:
+**The solve (built, `voxPressorSolve.js`).** The 1176's Input knob stays at 50
+with Output cancelling its drive, so the audio gain through the stage is unity;
+the solve moves a **detector-only offset** (`inputAlignDb`) instead:
 
-1. **Reference peak:** the 99.9th percentile of |x| on the aligned input
-   (`percentileOfChannels(…, MAKEUP_PERCENTILE)`), the same "loudest thing that
-   isn't a one-sample outlier" statistic the makeup reference uses.
-2. **Measure GR at those samples** on a render of the 76 alone. Only the loudest
-   blocks matter, so use PHAT*SS's **fast bounded search**: sort blocks by input
-   peak, render loudest first with pre-roll, stop once no remaining block can
-   reach the reference. Typically a few seconds of audio per solve.
-3. **Re-solve exactly on apply**, cached by document + span + Peaks.
+1. **What "dB off the peaks" means:** split the region into 100 ms blocks; take
+   the loudest 10 % by peak (5–60 blocks); the reduction is the **median** over
+   those blocks of input peak − output peak.
+2. **First guess from the static curve** (put the loudest peaks' detector level
+   `target / slope` dB over the threshold), then a safeguarded secant on
+   renders of the 1176 alone at the base rate. 3–5 renders.
+3. **Re-solved before apply** unless the last solve was for exactly this
+   timeline, region and pair of targets.
+
+Measured: on 30 s of synthetic narration at −34 / −24 / −14 dBFS the solve lands
+Peaks within 0.05 dB and the offset shifts by exactly 10 dB per 10 dB of level;
+a whole solve (Peaks + Body + makeup) takes 1.2–1.6 s when the voice corner is
+already known (the first solve on a region also measures it, ~1.2 s more).
 
 **Keeping it on the peaks — the body guard.** The knob is a target, and a large
 target on a low-crest voice would push the threshold into the body. So:
 
-- **Threshold floor:** the solve never sets the effective threshold below the
-  file's gated RMS + 6 dB *(reasoned)*. If the target needs more, it stops
-  there.
+- **Threshold floor:** the solve never lets the 1176's knee start below the
+  detector signal's gated RMS + 8 dB (`PEAKS_FLOOR_DB`, *reasoned*). If the
+  target needs more, it stops there.
 - **Report the shortfall:** the knob's readout then shows what was achieved
   ("3.0 → 2.1 dB, voice crest too low"), the same honesty Loudness Normalize's
   SAFE mode uses.
-- **Body GR meter:** the PEAKS bar shows median GR on voiced blocks under the
-  peak GR. If the median goes over 0.5 dB, it turns amber: the 76 is compressing
-  the voice, not trimming it.
+- **Body readout:** under the Peaks knob, "body touched X dB" is the median level
+  drop on the voiced blocks. Over 0.5 dB (or at the floor) it turns amber: the
+  76 is compressing the voice, not trimming it. Measured at Peaks 3: 0.02–0.1 dB.
 
 **Why not fully automatic (no knob)?** How much peak to take is a taste call
 (narration ~2–3 dB, podcast punch ~5–6). A fixed crest target would be wrong
@@ -293,12 +312,12 @@ All measured once per file / selection, in the worker, against the **running
 |---|---|---|
 | Gated RMS → input align | `dsp/inputAlign.js` | Both compressor stages' drive offset; Peaks threshold floor |
 | Rumble corner, median F0 | `voiceProfile.js` | Detector HP |
-| Reference peak (99.9th pct) | `percentileOfChannels` | Peaks solve |
-| Peaks drive | bounded search over loudest blocks (§4.2) | 76 Input |
-| Body drive | sampled render of [1]–[2], bisected | 2A Peak Reduction |
+| Loudest blocks (by peak), voiced blocks (gated RMS − 10 dB) | `referenceBlocks` | Peaks / Body solves |
+| Peaks offset | secant on 1176 renders (§4.2) | 76 `inputAlignDb` |
+| Body offset | secant on LA-2A renders of the Peaks output; avg cell GR on voiced blocks | 2A `inputAlignDb` (Peak Reduction pinned at 50) |
 | Parallel trim, correlation, density, alignment | `computeSchepsAutoTrim` on the Body output | Parallel stage |
 | Post-compression gated RMS | render of stages [1]–[3] on ≤ 400 blocks | De-ess `levelOffset` |
-| Makeup plan | `solveMakeupPlan` (iterated — the 2A's valve makes output non-affine) | Output AUTO |
+| Makeup | closed form: gated RMS in − gated RMS out (the makeup is the last multiply) | Output AUTO |
 | Source peak | `peakOfChannels` | Ceiling; Density anchor |
 
 ⚠ **The solves are sequential.** Peaks first (on the input), then Body (on the
@@ -401,11 +420,27 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
   76 → 2A core, the built-in de-esser.
 - **No Presence EQ** (owner, October 2026): replaced by a parallel LA-2A
   stage, the embedded Scheps Parallel in its PRESENCE character.
+- **Makeup is level-matched, not percentile-referenced** (stage 1, October
+  2026). The compressors' shared 99.9th-percentile reference is near-peak by
+  design, and the Peaks stage exists to move exactly those samples: referenced
+  to them, the makeup handed back what the 1176 took (+7.0 dB at Peaks 3 /
+  Body 4) and the soft ceiling did the peak control as a clipper. Matched on
+  the gated level instead, the voice comes out as loud as it went in and the
+  peaks come out lower; Loudness Normalize spends the headroom. *Owner to
+  confirm by ear.*
 - **No breath / room expander** (owner, October 2026): too hard to tune for
   the value. Compression will lift breaths and room tone between phrases;
   that is left to Noise Reduction or the preset chain's `vocalExpander`.
 
 ## 11. Open decisions for the owner
+
+0. **Stage 1 audition** (dev panel, registry id `vox-pressor`): does the 1176 →
+   LA-2A core sound right on real narration at the default Peaks 3 / Body 4?
+   Specifically: (a) does Peaks 3 take the loudest syllables down without
+   audible clamping; (b) does the voice detector make the LA-2A ride better
+   than a plain LA Vintage 2A on plosive-heavy takes (synthetic tests say the
+   difference is small, see §3); (c) is the level-matched makeup the right
+   default?
 
 1. **Peaks as proposed?** One knob in dB off the loudest peaks, 76 patch pinned
    at 12:1 / attack 6 / release 6, threshold floor at gated RMS + 6 dB. Or keep

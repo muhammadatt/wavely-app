@@ -27,6 +27,7 @@ test('the work-in-progress plugins are hidden from production builds', () => {
     'scheps-parallel',
     'vocal-saturation',
     'voicerx',
+    'vox-pressor',
   ])
 })
 
