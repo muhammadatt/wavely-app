@@ -10,6 +10,7 @@ import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import {
   VOX_DEFAULTS, VOX_OUTPUT_MIN_DB, VOX_OUTPUT_MAX_DB, PEAKS_MAX_DB, BODY_MAX_DB,
+  PEAKS_BODY_WARN_DB,
 } from '../../audio/effects/voxPressorParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -54,16 +55,19 @@ const peaksNote = computed(() => {
   const r = voxReadout.value
   if (!r) return 'not measured yet · bypassed'
   const reached = `−${r.peaksDb.toFixed(1)} dB on peaks`
-  return r.peaksLimited ? `${reached} · voice crest too low` : reached
+  return r.peaksLimited ? `${reached} · could not reach` : reached
 })
+// A warning, never a cap: the knob always goes where it is turned, and this
+// says when that has started lowering the voice itself (PEAKS_BODY_WARN_DB).
 const peaksWarn = computed(() => {
   const r = voxReadout.value
-  return !!r && voxPeaks.value > 0 && (r.peaksLimited || r.peaksBodyDb > 0.5)
+  return !!r && voxPeaks.value > 0 && (r.peaksLimited || r.peaksBodyDb > PEAKS_BODY_WARN_DB)
 })
 const bodyTouchNote = computed(() => {
   const r = voxReadout.value
   if (!r || voxPeaks.value <= 0) return ''
-  return `body touched ${r.peaksBodyDb.toFixed(1)} dB`
+  const touched = `voice touched ${r.peaksBodyDb.toFixed(1)} dB`
+  return r.peaksBodyDb > PEAKS_BODY_WARN_DB ? `${touched} · compressing the voice` : touched
 })
 
 const bodyNote = computed(() => {

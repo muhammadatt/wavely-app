@@ -34,7 +34,7 @@ export default {
 
   notes: [
     'The output is matched to the input\'s level, so the peaks come out lower: that headroom is for Loudness Normalize to use',
-    'Peaks stops short of its number when the voice has too little difference between its peaks and its body, and says so',
+    'Peaks always goes where you turn it. When it starts lowering the voice itself, not just the peaks, the note under it turns amber and says by how much',
     'Development stage: this window covers the compressor core only',
   ],
 }

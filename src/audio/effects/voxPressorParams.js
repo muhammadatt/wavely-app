@@ -5,14 +5,14 @@
  * `?worker&url` loader, which only Vite resolves).
  */
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
-import { PEAKS_MAX_DB, BODY_MAX_DB } from '../voxPressorSolve.js'
+import { PEAKS_MAX_DB, BODY_MAX_DB, PEAKS_BODY_WARN_DB } from '../voxPressorSolve.js'
 
 /** Two oversampled kernels in series, constant whether a stage is on or off. */
 export const VOX_LATENCY_SAMPLES = 2 * OVERSAMPLE_LATENCY_SAMPLES
 
 export const VOX_OUTPUT_MIN_DB = -12
 export const VOX_OUTPUT_MAX_DB = 12
-export { PEAKS_MAX_DB, BODY_MAX_DB }
+export { PEAKS_MAX_DB, BODY_MAX_DB, PEAKS_BODY_WARN_DB }
 
 /**
  * The panel's state. `peaks`, `body` and `output` are the user's; everything

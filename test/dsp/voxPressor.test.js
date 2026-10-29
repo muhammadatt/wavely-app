@@ -18,7 +18,7 @@ import {
 import {
   voiceDetectorSections, PLOSIVE_SHELF_DB, SIBILANCE_SHELF_DB,
 } from '../../src/audio/dsp/voiceDetector.js'
-import { solveVoxPressor, PEAKS_FLOOR_DB } from '../../src/audio/voxPressorSolve.js'
+import { solveVoxPressor, PEAKS_BODY_WARN_DB } from '../../src/audio/voxPressorSolve.js'
 import { magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
 import { gatedRmsOfChannels } from '../../src/audio/dsp/inputAlign.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../../src/audio/dsp/oversample.js'
@@ -223,13 +223,20 @@ test('at Peaks 3 the 1176 leaves the body alone', () => {
   }
 })
 
-test('a target past the floor stops at the floor and says so', () => {
+test('Peaks is never capped: a large target is reached and its cost reported', () => {
+  // Warn, don't cap (owner's call). The fixed floor this replaced stopped a real
+  // clip at 2.57 dB for every setting from 3 to 10; the knob must now deliver.
   const { x } = solved[1]
-  const r = solveVoxPressor([x], SR, { peaksDb: 10, bodyDb: 0, cornerHz: 70 })
-  assert.equal(r.peaksLimited, true)
-  assert.ok(r.peaksDb < 10)
-  assert.ok(r.peaksBodyDb < 1, `body touched ${r.peaksBodyDb.toFixed(2)} dB at the floor`)
-  assert.ok(PEAKS_FLOOR_DB > 0)
+  const reached = [4, 7, 10].map(t => solveVoxPressor([x], SR, { peaksDb: t, bodyDb: 0, cornerHz: 70 }))
+  for (const [i, t] of [4, 7, 10].entries()) {
+    assert.equal(reached[i].peaksLimited, false, `Peaks ${t} limited`)
+    assert.ok(Math.abs(reached[i].peaksDb - t) <= 0.1, `Peaks ${t}: reached ${reached[i].peaksDb.toFixed(2)}`)
+  }
+  // The cost is measured and grows with the knob; at 10 it is well past the
+  // warning, which is what the panel's amber note reports.
+  assert.ok(reached[0].peaksBodyDb <= reached[1].peaksBodyDb && reached[1].peaksBodyDb <= reached[2].peaksBodyDb)
+  assert.ok(reached[2].peaksBodyDb > PEAKS_BODY_WARN_DB,
+    `voice touched ${reached[2].peaksBodyDb.toFixed(2)} dB at Peaks 10`)
 })
 
 test('makeup is level-matched and the ceiling holds the source peak', () => {

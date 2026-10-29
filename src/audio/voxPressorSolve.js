@@ -9,9 +9,10 @@
  *
  * - PEAKS (dB) — how far the 1176 takes the loudest peaks down: the median,
  *   over the loudest blocks, of each block's input peak minus its output peak.
- *   A body guard keeps it on the peaks: the 1176's knee may not start below
- *   the detector's gated level + `PEAKS_FLOOR_DB`, and if the target needs
- *   more, the solve stops there and reports what it reached.
+ *   The solve always goes where the knob asks; what it costs the voice is
+ *   MEASURED (`peaksBodyDb`, the median level drop on the voiced blocks) and
+ *   reported, and the panel warns past `PEAKS_BODY_WARN_DB`. See that constant
+ *   for the fixed floor this replaced.
  * - BODY (dB) — the LA-2A's average gain reduction over the voiced blocks of
  *   what the Peaks stage left.
  * - MAKEUP — the gain that puts the output's GATED LEVEL back on the input's
@@ -58,11 +59,20 @@ const LOUDEST_MAX = 60
 /** Voiced = block RMS within this many dB of the gated level. Reasoned. */
 export const VOICED_GATE_DB = 10
 /**
- * The 1176's knee may not start lower than this far above the detector's
- * gated level. Reasoned: a vowel's own peaks sit ~8-12 dB over its RMS, so 8
- * leaves the louder vowel peaks reachable and keeps the knee off the body.
+ * How much the Peaks stage may lower the voice itself (median level drop on
+ * the voiced blocks, dB) before the panel warns. A WARNING, NOT A CAP.
+ *
+ * ⚠ IT REPLACED A FIXED FLOOR THAT CAPPED THE KNOB. The first build kept the
+ * 1176's knee ≥ 8 dB over the detector's gated level, a reasoned proxy for
+ * "stay off the voice". On a real narration clip (−1 dBFS peak, −20.9 dBFS
+ * gated) it stopped Peaks at 2.57 dB for every setting from 3 to 10 — while
+ * the voice it was protecting measured 0.01 dB touched. Measured past it, the
+ * same clip took 5.0 dB off its peaks for 0.24 dB of voice, 5.9 for 0.55, 6.7
+ * for 0.97. The proxy was wrong by several dB, and a knob that silently stops
+ * responding is worse than one that says what it is costing. Owner's call:
+ * warn, don't cap. 0.5 is reasoned.
  */
-export const PEAKS_FLOOR_DB = 8
+export const PEAKS_BODY_WARN_DB = 0.5
 /** Solve tolerance, dB, and the iteration cap. */
 const TOL_DB = 0.05
 const MAX_ITER = 12
@@ -228,17 +238,15 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
   let afterPeaks = channels
   const peaksOn = peaksTarget > 0
   if (peaksOn) {
-    // The floor, in the kernel's own terms: the knee starts at
-    // over = −halfKnee, with over = detLevel + inputDriveDb + align − threshold.
+    // The kernel's own terms, for the first guess below:
+    // over = detLevel + inputDriveDb + align − threshold.
     const probe = new VoxPressorKernel(sampleRate)
     probe.setParams(base)
     const fet = probe.fet
     const det = new VoiceDetector(sampleRate, { plosive: false })
     det.setCornerHz(cornerHz)
     const detSig = det.process(channels, channels[0].length).slice()
-    const detGatedDb = db(gatedRmsOfChannels([detSig], sampleRate))
-    const ceilAlign = fet.thresholdDb - fet.halfKnee - (detGatedDb + PEAKS_FLOOR_DB) - fet.inputDriveDb
-    const hi = Math.min(ALIGN_RANGE_DB, ceilAlign)
+    const hi = ALIGN_RANGE_DB
     const lo = -ALIGN_RANGE_DB
 
     let last = null
@@ -263,12 +271,14 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
     })
     const slope = fet.slope > 0 ? fet.slope : 0.9
     const guess = fet.thresholdDb - median(detPeaks) - fet.inputDriveDb + peaksTarget / slope
-    const r = solveFromGuess(measure, peaksTarget, guess, lo, Math.max(lo, hi), slope)
+    const r = solveFromGuess(measure, peaksTarget, guess, lo, hi, slope)
     // `last` is the render at r.x unless the bracket ends returned early.
     if (!last || last.align !== r.x) measure(r.x)
     peaksAlignDb = r.x
     peaksDb = last.peaksDb
     peaksBodyDb = last.bodyDb
+    // Only when the whole offset range cannot reach the target — material too
+    // quiet or too short to measure, not a guard.
     peaksLimited = !r.reached && r.x >= hi - 1e-9
     afterPeaks = last.out
   }

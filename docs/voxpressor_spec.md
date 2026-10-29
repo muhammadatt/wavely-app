@@ -181,18 +181,18 @@ Peaks within 0.05 dB and the offset shifts by exactly 10 dB per 10 dB of level;
 a whole solve (Peaks + Body + makeup) takes 1.2–1.6 s when the voice corner is
 already known (the first solve on a region also measures it, ~1.2 s more).
 
-**Keeping it on the peaks — the body guard.** The knob is a target, and a large
-target on a low-crest voice would push the threshold into the body. So:
+**Keeping it on the peaks — warn, don't cap (owner's decision).** The knob
+always delivers what it asks for; what that costs the voice is measured and
+shown:
 
-- **Threshold floor:** the solve never lets the 1176's knee start below the
-  detector signal's gated RMS + 8 dB (`PEAKS_FLOOR_DB`, *reasoned*). If the
-  target needs more, it stops there.
-- **Report the shortfall:** the knob's readout then shows what was achieved
-  ("3.0 → 2.1 dB, voice crest too low"), the same honesty Loudness Normalize's
-  SAFE mode uses.
-- **Body readout:** under the Peaks knob, "body touched X dB" is the median level
-  drop on the voiced blocks. Over 0.5 dB (or at the floor) it turns amber: the
-  76 is compressing the voice, not trimming it. Measured at Peaks 3: 0.02–0.1 dB.
+- **Voice readout:** under the Peaks knob, "voice touched X dB" is the median
+  level drop on the voiced blocks. Past `PEAKS_BODY_WARN_DB` (0.5 dB,
+  *reasoned*) it turns amber and adds "compressing the voice".
+- **Why no cap:** stage 1 shipped a fixed floor (the knee kept ≥ 8 dB over the
+  detector's gated level). On a real narration clip (−1 dBFS peak, −20.9 dBFS
+  gated) it stopped Peaks at 2.57 dB for every setting from 3 to 10 while the
+  voice measured 0.01 dB touched. Uncapped, the same clip reads (Peaks →
+  voice touched): 3 → 0.01, 4 → 0.07, 6 → 0.62, 8 → 1.84, 10 → 3.45 dB.
 
 **Why not fully automatic (no knob)?** How much peak to take is a taste call
 (narration ~2–3 dB, podcast punch ~5–6). A fixed crest target would be wrong
@@ -297,7 +297,7 @@ They are different mechanisms, but presets should not max both (§11).
 
 ### 4.6 Advanced (dev bench, gated like the PHAT*SS bench)
 
-Peaks patch (ratio, attack, release, threshold floor), Body ballistics, detector
+Peaks patch (ratio, attack, release, Input = knee width), Body ballistics, detector
 corner/shelf depths per tap, Parallel Squash, Inflator Curve and Band Split, the Color switch,
 chain-order A/B, `VOX_LEGACY_PATCH`. Nothing on the bench ships to presets.
 
@@ -310,7 +310,7 @@ All measured once per file / selection, in the worker, against the **running
 
 | Measurement | Source | Used by |
 |---|---|---|
-| Gated RMS → input align | `dsp/inputAlign.js` | Both compressor stages' drive offset; Peaks threshold floor |
+| Gated RMS → voiced-block gate | `dsp/inputAlign.js` | Body solve; Peaks voice-touched readout; makeup |
 | Rumble corner, median F0 | `voiceProfile.js` | Detector HP |
 | Loudest blocks (by peak), voiced blocks (gated RMS − 10 dB) | `referenceBlocks` | Peaks / Body solves |
 | Peaks offset | secant on 1176 renders (§4.2) | 76 `inputAlignDb` |
@@ -401,8 +401,8 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
 - Peaks: GR at the reference peak within ±0.3 dB of the knob across −30…−6 dBFS
   input levels, while median voiced GR stays under 0.5 dB at Peaks ≤ 4 on
   narration.
-- Peaks: on a low-crest file the solve stops at the threshold floor and reports
-  the shortfall rather than compressing the body.
+- Peaks: never capped — 4 / 7 / 10 dB are each reached to ±0.1 dB, and the
+  voice-touched figure grows with the knob and passes the warning by 10.
 - Body's avg GR within ±0.5 dB of target across −30…−6 dBFS input levels.
 - Parallel at matched settings is sample-identical to standalone Scheps Parallel
   fed the Body stage's output.
@@ -443,7 +443,7 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
    default?
 
 1. **Peaks as proposed?** One knob in dB off the loudest peaks, 76 patch pinned
-   at 12:1 / attack 6 / release 6, threshold floor at gated RMS + 6 dB. Or keep
+   at 12:1 / attack 6 / release 6, uncapped with a voice-touched warning. Or keep
    a punch control on the panel (e.g. attack 4 ↔ 7)?
 2. **Plosives in the Peaks detector** — let the 76 see them (proposed, so it
    can trim them) or de-weight them for the 76 too and leave plosive peaks to
