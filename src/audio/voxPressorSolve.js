@@ -67,7 +67,7 @@
  * both modes, so the gain trajectory is the same; only the inter-sample detail
  * of the audio differs, which a block peak or a percentile barely sees.
  */
-import { processVoxPressorBuffer } from './voxPressorProcessor.js'
+import { processVoxPressorBuffer, VoxPressorKernel } from './voxPressorProcessor.js'
 import { measureVoiceProfile } from './voiceProfile.js'
 import { gatedRmsOfChannels } from './dsp/inputAlign.js'
 import {
@@ -169,20 +169,23 @@ export function referenceBlocks(channels, sampleRate) {
  *   measured (null = unmeasurable; absent = measure it here)
  */
 export function measureVoxPressor(channels, sampleRate, p = {}) {
-  // The corner is a property of the file, not of the knobs: callers that
-  // measure repeatedly measure it once and pass it in.
-  const cornerHz = p.cornerHz === undefined
-    ? (measureVoiceProfile(channels, sampleRate)?.cornerHz ?? null)
-    : p.cornerHz
+  // The corner and the median F0 are properties of the file, not of the
+  // knobs: callers that measure repeatedly measure them once and pass them in.
+  // ⚠ The F0 is read BEFORE anything renders: SPEED AUTO takes the 1176's
+  // release from it, and a makeup measured at another release is stale.
+  const profile = p.cornerHz === undefined ? measureVoiceProfile(channels, sampleRate) : null
+  const cornerHz = profile ? (profile.cornerHz ?? null) : p.cornerHz
+  const voiceF0Hz = profile ? (profile.medianF0Hz ?? null) : (p.voiceF0Hz ?? null)
   const base = {
     ...p, oversample: false, listen: 'off', outputDb: 0, makeupDb: 0,
     peaksMakeupDb: 0, peaksCeilingDb: null, bodyMakeupDb: 0, bodyCeilingDb: null,
+    voiceF0Hz,
   }
   if (cornerHz) base.cornerHz = cornerHz
   else delete base.cornerHz
 
   const none = {
-    cornerHz,
+    cornerHz, voiceF0Hz, peaksRippleDb: null,
     peaksMakeupDb: 0, peaksCeilingDb: null, peaksRestoreDb: 0,
     bodyMakeupDb: 0, bodyCeilingDb: null, makeupDb: 0,
     peaksDb: 0, peaksBodyDb: 0, bodyDb: 0,
@@ -203,6 +206,7 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
     const r = peaksAndBodyDb(channels, raw, sampleRate, ref.loudestIdx, ref.voicedIdx)
     out.peaksDb = r.peaksDb
     out.peaksBodyDb = r.bodyDb
+    out.peaksRippleDb = peaksRippleDb(channels, sampleRate, base)
     const gainDb = percentileMakeupDb(channels, raw)
     const st = peaksStage(raw, gainDb, ceilingDb, sampleRate)
     out.peaksRestoreDb = st.restoreDb
@@ -305,6 +309,72 @@ function peaksStage(raw, gainDb, ceilingDb, sampleRate) {
   // gives the limiter nothing new; re-run so the samples are the kernel's.
   if (restoreDb !== 0) out = limitChannels(scale(gainDb + restoreDb), ceilingDb, sampleRate)
   return { restoreDb, out }
+}
+
+/**
+ * Where the gain modulation is measured: motion of the 1176's gain faster than
+ * this is distortion, slower is compression. Reasoned: under any voice's F0,
+ * over the syllable rate.
+ */
+export const RIPPLE_SPLIT_HZ = 20
+/**
+ * The panel warns past this much gain-ripple product, dB re the voice.
+ *
+ * ⚠ REASONED, NOT AUDITIONED, AND THE METRIC CANNOT SEPARATE RIPPLE FROM THE
+ * ATTACK'S CATCH: on real speech it rises with how hard Peaks works as much as
+ * with speed (owner's clips, Peaks 3 → 6: −31.0 → −24.5 / −25.7 → −22.9 on
+ * AUTO; FAST to GENTLE spans 4.5–5 dB at either). −22 stays quiet on both
+ * clips at Peaks 3 at every speed (worst FAST −23.8) and fires on heavy FAST
+ * (David Greenberg at Peaks 6, −20.9) and on peaky synthetic narration.
+ * ⚠ RESTRICTING IT TO SUSTAINED REDUCTION WAS TRIED AND IS WRONG: a fast
+ * release on a low voice recovers fully between cycles, so its AVERAGE
+ * reduction stays under 1 dB while it ripples on every cycle — the
+ * destructive case, which the restricted version scored as nothing.
+ */
+export const PEAKS_RIPPLE_WARN_DB = -22
+
+/**
+ * The 1176 stage's GAIN RIPPLE, dB re the voice: the products of its gain
+ * moving faster than `RIPPLE_SPLIT_HZ` (its gain divided by its own 20 Hz
+ * zero-phase smoothing, minus one), weighted by the voice it multiplies.
+ *
+ * ⚠ READ FROM THE GAIN ITSELF, NOT FROM THE AUDIO. A residual against the
+ * input over short windows barely moved with the release on real speech
+ * (−27.7 vs −28.7 dB), because it counts the attack's legitimate catch as much
+ * as the ripple. The detector reads only its sidechain, so the kernel is run
+ * on a CONSTANT with the voice as its detector and its output is g(t) exactly.
+ */
+export function peaksRippleDb(channels, sampleRate, base) {
+  const k = new VoxPressorKernel(sampleRate)
+  k.setParams({ ...base, peaksOn: true, bodyOn: false, oversample: false, peaksMakeupDb: 0 })
+  const n = channels[0].length
+  const sc = k.peaksDetector.process(channels, n).slice()
+  const g = new Float32Array(n)
+  const ones = new Float32Array(128).fill(1)
+  for (let o = 0; o < n; o += 128) {
+    const len = Math.min(128, n - o)
+    k.fet.process([ones.subarray(0, len)], [g.subarray(o, o + len)], len, sc.subarray(o, o + len))
+  }
+  // Zero-phase two-pole smoothing of the gain (forward, then backward).
+  const c = 1 - Math.exp(-2 * Math.PI * RIPPLE_SPLIT_HZ / sampleRate)
+  const sm = new Float64Array(n)
+  let a = g[0]
+  let b = g[0]
+  for (let i = 0; i < n; i++) { a += (g[i] - a) * c; b += (a - b) * c; sm[i] = b }
+  a = sm[n - 1]
+  b = sm[n - 1]
+  for (let i = n - 1; i >= 0; i--) { a += (sm[i] - a) * c; b += (a - b) * c; sm[i] = b }
+  let num = 0
+  let den = 0
+  for (let i = 0; i < n; i++) {
+    let x = 0
+    for (const ch of channels) x += ch[i]
+    x /= channels.length
+    const m = sm[i] > 0 ? g[i] / sm[i] - 1 : 0
+    num += m * m * x * x
+    den += x * x
+  }
+  return num > 0 && den > 0 ? 10 * Math.log10(num / den) : -Infinity
 }
 
 /** The Body stage's detector offset when rendered with the Peaks stage bypassed. */

@@ -131,6 +131,7 @@ BODY SC** and compare against a plain LA Vintage 2A.
 | Knob | Range | Default | What it does |
 |---|---|---|---|
 | **Peaks** | 0–10 | 3 | The 76's detector drive on a linear scale (Input pinned at 26), aligned to the file's gated RMS (§4.2): ≈ N dB off the loudest peaks of typical narration. Readout: dB off the loudest peaks, voice touched. 0 = stage out, a pure delay |
+| **Speed** | AUTO / GENTLE / NORMAL / FAST | AUTO | The 76's attack / release (§10): AUTO sets the release from the voice's pitch. Readout: gain ripple, amber past −22 dB |
 | **Body** | 0–100 | 57 | The 2A's **Peak Reduction**, aligned the same way and net of the Peaks stage's makeup. Readout: avg leveling on voiced material. 0 = stage out |
 | **De-ess** | 0–100 | 40 | HF Softener **Amount** (Split pinned at its default 33; Guard 100) |
 | **Parallel** | 0–100 % (+ PRESENCE / THICK toggle) | 30, PRESENCE | Scheps Parallel's **Mix** (§4.4). The squashed, Pultec-coloured LA-2A copy blended under the voice. 0 = stage out, a pure delay |
@@ -480,6 +481,18 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
 - **The 1176 hears sibilance** (October 2026): with a sibilance shelf on its
   detector one bright "s" on "Messy and Bright" escaped it and, under the
   single-restore makeup, left the clip 3.6 dB quieter. See `peaksTap`.
+- **SPEED: AUTO / GENTLE / NORMAL / FAST, with a gain-ripple warning**
+  (owner, October 2026). GENTLE A3/R3, NORMAL A4/R4, FAST A6/R6 (the first
+  build's pinned timing). AUTO: attack 4, release 16 pitch periods of the
+  measured median F0 (100 Hz → 160 ms), clamped to GENTLE..FAST, NORMAL until
+  the F0 is measured. Owner's clips, Peaks 3 (dB off peaks / ripple dB):
+  Messy and Bright (184 Hz) AUTO 2.7 / −29.5, GENTLE 2.6 / −32.0, FAST
+  3.1 / −27.5; David Greenberg (144 Hz) AUTO 3.3 / −25.1, GENTLE 3.2 / −28.2,
+  FAST 3.8 / −23.2. The warning (−22) fires on FAST at Peaks 6 on David
+  Greenberg (−20.5). ⚠ The ripple figure also rises with how hard Peaks
+  works; see `PEAKS_RIPPLE_WARN_DB`. ⚠ A slower speed holds the voice down
+  longer after each peak. To audition: a low male narrator (≤ 110 Hz) —
+  neither real clip is one.
 - **No breath / room expander** (owner, October 2026): too hard to tune for
   the value. Compression will lift breaths and room tone between phrases;
   that is left to Noise Reduction or the preset chain's `vocalExpander`.
@@ -493,7 +506,8 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
    than a plain LA Vintage 2A on plosive-heavy takes (synthetic tests say the
    difference is small, see §3); (c) settled: per-stage makeup.
 
-1. **The 1176's timing — the pinned attack 6 / release 6 can be destructive.**
+1. **DECIDED (see §10): SPEED.** The measurements that led to it:
+   **The 1176's timing — the pinned attack 6 / release 6 can be destructive.**
    Owner, October 2026: the 1176 imparts modulation distortion on some voices
    at fast attack / release, and a pinned setting must not be one that harms a
    voice. Measured (modulation products re the signal):

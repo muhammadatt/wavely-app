@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 import { useVoxPressor } from '../../composables/useVoxPressor.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
+import { releaseSecondsForDial } from '../../audio/fet1176Processor.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
@@ -10,16 +11,16 @@ import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import {
   VOX_DEFAULTS, VOX_OUTPUT_MIN_DB, VOX_OUTPUT_MAX_DB,
-  PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX,
+  PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PEAKS_RIPPLE_WARN_DB, peaksTiming,
 } from '../../audio/effects/voxPressorParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead,
+  voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
-  togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead,
+  togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
   apply, teardown, closeModal,
 } = useVoxPressor()
 
@@ -38,6 +39,14 @@ const LISTEN_OPTIONS = [
   { value: 'off', label: 'OUTPUT', title: 'Hear the processed voice' },
   { value: 'peaks', label: 'PEAKS SC', title: 'Hear what the 1176 listens to: rumble turned down, plosives and sibilance kept so it can trim them' },
   { value: 'body', label: 'BODY SC', title: 'Hear what the LA-2A listens to: rumble, plosives and sibilance turned down, after the 1176' },
+]
+
+// The 1176's SPEED (`PEAKS_SPEEDS`): AUTO follows the voice's pitch.
+const SPEED_OPTIONS = [
+  { value: 'auto', label: 'AUTO', title: 'Release follows the voice: slow enough for its pitch that the gain does not ripple on each cycle' },
+  { value: 'gentle', label: 'GENTLE', title: 'Slow attack and release: the cleanest, catches the least' },
+  { value: 'normal', label: 'NORMAL', title: 'Medium attack and release' },
+  { value: 'fast', label: 'FAST', title: 'Fast attack and release: grabs every onset; can ripple on low voices' },
 ]
 
 // BENCH: LA Vintage 2A's own Lookahead on the Body stage. Off ships.
@@ -82,6 +91,19 @@ const bodyTouchNote = computed(() => {
   return r.peaksBodyDb > PEAKS_BODY_WARN_DB ? `${touched} · compressing the voice` : touched
 })
 
+// Gain ripple: the 1176 moving its gain within the voice's own cycles. A
+// warning, never a limit, like the voice-touched note.
+const rippleWarn = computed(() => {
+  const r = voxReadout.value
+  return !!r && voxPeaks.value > 0 && Number.isFinite(r.peaksRippleDb) && r.peaksRippleDb > PEAKS_RIPPLE_WARN_DB
+})
+const rippleNote = computed(() => {
+  const r = voxReadout.value
+  if (!r || voxPeaks.value <= 0 || !Number.isFinite(r.peaksRippleDb)) return ''
+  const v = `ripple ${r.peaksRippleDb.toFixed(0)} dB`
+  return rippleWarn.value ? `${v} · distorting${voxSpeed.value === 'gentle' ? '' : ', try GENTLE'}` : v
+})
+
 const bodyNote = computed(() => {
   if (voxBody.value <= 0) return 'stage out'
   const r = voxReadout.value
@@ -95,11 +117,16 @@ const stale = computed(() => voxBusy.value && !!voxReadout.value)
 const measuredNote = computed(() => {
   const m = voxMeasured.value
   const corner = Number.isFinite(m.cornerHz) ? `voice corner ${Math.round(m.cornerHz)} Hz` : 'voice corner 80 Hz (default)'
+  const t = peaksTiming(voxSpeed.value, m.voiceF0Hz)
+  const release = `release ${Math.round(releaseSecondsForDial(t.release) * 1000)} ms`
+  const speed = voxSpeed.value === 'auto'
+    ? (Number.isFinite(m.voiceF0Hz) ? `F0 ${Math.round(m.voiceF0Hz)} Hz → ${release}` : `${release} until F0 is measured`)
+    : release
   // Per-stage makeup, restores included: the 1176's lands on its Output, the
   // LA-2A's is its Gain plus the restore after the chain.
   const sign = v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
   const makeup = `makeup 1176 ${sign(m.peaksMakeupDb ?? 0)} · LA-2A ${sign((m.bodyMakeupDb ?? 0) + (m.makeupDb ?? 0))} dB`
-  return `${corner} · ${makeup}`
+  return `${corner} · ${speed} · ${makeup}`
 })
 
 function togglePlayback() {
@@ -158,6 +185,7 @@ async function applyAndClose() {
             />
             <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ peaksNote }}</span>
             <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ bodyTouchNote }}</span>
+            <span class="m-note" :class="{ 'vp-warn': rippleWarn, 'vp-stale': stale }">{{ rippleNote }}</span>
           </div>
           <div class="vp-col">
             <ModulaKnob
@@ -172,6 +200,14 @@ async function applyAndClose() {
           </div>
         </div>
 
+        <div class="vp-listen">
+          <span class="m-caption">Speed</span>
+          <ModulaSegmented
+            :model-value="voxSpeed" :options="SPEED_OPTIONS"
+            aria-label="Peaks speed" :disabled="!voxPreview || voxPeaks <= 0"
+            @update:model-value="syncSpeed"
+          />
+        </div>
         <div class="vp-listen">
           <span class="m-caption">Listen</span>
           <ModulaSegmented
@@ -249,7 +285,7 @@ async function applyAndClose() {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  min-height: 190px;
+  min-height: 206px;
 }
 .vp-listen {
   display: flex;

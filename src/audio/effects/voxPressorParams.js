@@ -4,8 +4,10 @@
  * schepsParams.js, for the same reason: `voxPressor.js` imports the
  * `?worker&url` loader, which only Vite resolves).
  */
-import { PEAKS_BODY_WARN_DB } from '../voxPressorSolve.js'
-import { voxLatencySamples, PEAKS_INPUT_KNOB } from '../voxPressorProcessor.js'
+import { PEAKS_BODY_WARN_DB, PEAKS_RIPPLE_WARN_DB } from '../voxPressorSolve.js'
+import {
+  voxLatencySamples, PEAKS_INPUT_KNOB, PEAKS_SPEED_IDS, peaksTiming,
+} from '../voxPressorProcessor.js'
 import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
 
 /**
@@ -25,9 +27,10 @@ export { voxLatencySamples }
  * clips, 30 s each): once peaks are caught, each dB of drive takes 0.88–0.90 dB
  * off them, linearly to 10 dB and beyond, on both clips and on synthetic
  * narration — at 12:1 the stage is a limiter. Both clips start being caught
- * ~3.9 dB under Input 26's drive (−3.5 / −4.3), so that is Peaks 0, and a
- * step is 1 / 0.885 = 1.13 dB of drive. Predicted at Peaks 3: 2.6 / 3.5 dB;
- * at 10: 9.6 / 10.8.
+ * ~3.9 dB under Input 26's drive (−3.5 / −4.3) at attack 6, and a step is
+ * 1 / 0.885 = 1.13 dB of drive. ⚠ RE-ZEROED TO −3.3 FOR ATTACK 4 (SPEED
+ * AUTO / NORMAL), which catches ~0.5 dB less per setting: measured at Peaks 3
+ * on AUTO before the shift, 2.1 / 2.8 dB.
  *
  * ⚠ A CALIBRATED SCALE, NOT A TARGET. A peakier voice reads more: synthetic
  * narration (crest 20 dB) takes ~6.4 dB at Peaks 3. The panel's readout is
@@ -39,7 +42,7 @@ export { voxLatencySamples }
  * mean nothing on their own, and the knee would move with it.
  */
 export const PEAKS_MAX = 10
-export const PEAKS_ZERO_DRIVE_DB = -3.9
+export const PEAKS_ZERO_DRIVE_DB = -3.3
 export const PEAKS_DRIVE_PER_STEP_DB = 1.13
 
 /** The detector drive Peaks `x` adds over the file's alignment, dB. */
@@ -52,7 +55,7 @@ export const BODY_LOOKAHEAD_STEPS_MS = Object.freeze([0, 5, 10, LOOKAHEAD_MAX_MS
 
 export const VOX_OUTPUT_MIN_DB = -12
 export const VOX_OUTPUT_MAX_DB = 12
-export { PEAKS_BODY_WARN_DB }
+export { PEAKS_BODY_WARN_DB, PEAKS_RIPPLE_WARN_DB, PEAKS_SPEED_IDS, peaksTiming }
 
 /**
  * The panel's state. `peaks`, `body` and `output` are the user's; everything
@@ -65,6 +68,11 @@ export const VOX_DEFAULTS = {
    * typical narration (`peaksDriveDb`).
    */
   peaks: 3,
+  /**
+   * The 1176's SPEED: 'auto' (release from the voice's F0) | 'gentle' |
+   * 'normal' | 'fast' — see `PEAKS_SPEEDS`.
+   */
+  speed: 'auto',
   /**
    * The LA-2A's Peak Reduction, 0–100 (0 = Body stage out). 57 is 3.4–3.8 dB
    * of average leveling on both clips (≈ 2.3 dB per 10 points from 40 up;
@@ -87,6 +95,8 @@ export const VOX_DEFAULTS = {
    */
   alignDb: null,
   cornerHz: null,
+  /** The voice's median F0, Hz — SPEED AUTO's release follows it. */
+  voiceF0Hz: null,
   // Per-stage makeup, limiter ceilings and restores (see `measureVoxPressor`).
   peaksMakeupDb: 0,
   peaksCeilingDb: null,
@@ -102,7 +112,7 @@ export const VOX_MEASURED_KEYS = Object.freeze([
   // Ceilings first: they reach the live node as separate messages, and a
   // raised makeup must never run against an old ceiling (see useLA2A).
   'peaksCeilingDb', 'bodyCeilingDb',
-  'cornerHz',
+  'cornerHz', 'voiceF0Hz',
   'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb',
 ])
 
@@ -120,6 +130,8 @@ export function toKernelParams(p) {
     peaksOn: p.peaks > 0 && Number.isFinite(p.alignDb),
     bodyOn: p.body > 0 && Number.isFinite(p.alignDb),
     peaksInput: PEAKS_INPUT_KNOB,
+    peaksSpeed: PEAKS_SPEED_IDS.includes(p.speed) ? p.speed : 'auto',
+    voiceF0Hz: Number.isFinite(p.voiceF0Hz) ? p.voiceF0Hz : null,
     bodyPeakReduction: knob(p.body),
     outputDb: Number.isFinite(p.output) ? p.output : 0,
     listen: p.listen ?? 'off',

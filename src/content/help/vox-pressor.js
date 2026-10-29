@@ -13,6 +13,10 @@ export default {
       text: 'How hard the 1176 catches the loudest peaks, 0–10: about that many dB off them on typical narration, at any recording level. A peakier voice gives up more; the note under it says what it took on this file. 0 takes the stage out',
     },
     {
+      label: 'Speed',
+      text: 'How fast the 1176 grabs and lets go. AUTO (the default) lets go slowly enough for this voice\'s pitch that the gain does not ripple on every cycle — a low voice gets a slower release. GENTLE is the cleanest and catches the least; FAST grabs every onset and can distort low voices. The ripple note under Peaks turns amber when it is distorting',
+    },
+    {
       label: 'Body',
       text: 'The LA-2A\'s Peak Reduction, aligned the same way. The note under it says how many dB of average leveling it does on the voice. 0 takes the stage out',
     },

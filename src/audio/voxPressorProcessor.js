@@ -40,7 +40,7 @@
  * bundles the kernels it imports — see voxPressorWorkletLoader.js.
  */
 
-import { FET1176Kernel, inputDriveDbForKnob } from './fet1176Processor.js'
+import { FET1176Kernel, inputDriveDbForKnob, releaseSecondsForDial } from './fet1176Processor.js'
 import { LA2AKernel, la2aLatencySamples } from './la2aProcessor.js'
 import { VoiceDetector, DEFAULT_CORNER_HZ } from './dsp/voiceDetector.js'
 import { DelayLine, OVERSAMPLE_LATENCY_SAMPLES } from './dsp/oversample.js'
@@ -58,9 +58,7 @@ const LN10_OVER_20 = Math.LN10 / 20
  * ⚠ ALL REASONED, TO AUDITION:
  * - ratio 12 — limiting, not leveling. The moving threshold puts 12:1's
  *   threshold 2.7 dB above 4:1's.
- * - attack 6, release 6 (7 is fastest on both) — fast enough to take a
- *   consonant onset, one short of the end so a vowel's first cycle is not
- *   sliced and the release does not ride bass cycles.
+ * - attack and release come from SPEED (`peaksTiming`), not from here.
  * - fetDrive 0 — a CLEAN peak trimmer. The colour in this plugin is the
  *   LA-2A's; a FET shaper running on every sample would colour the body the
  *   Peaks stage is promising to leave alone. On the bench.
@@ -71,8 +69,6 @@ const LN10_OVER_20 = Math.LN10 / 20
 export const PEAKS_INPUT_KNOB = 26
 export const PEAKS_PATCH = Object.freeze({
   ratio: '12',
-  attack: 6,
-  release: 6,
   fetDrive: 0,
   mix: 1,
   scHpfHz: 0,
@@ -93,6 +89,59 @@ export const BODY_PATCH = Object.freeze({
   ceilingDb: null,
 })
 
+/**
+ * SPEED — the 1176's attack and release, as dials (fractional dials are real
+ * times: the kernel interpolates geometrically between dial 1 and dial 7).
+ *
+ * ⚠ THE FIRST BUILD PINNED attack 6 / release 6 (37 µs / 56 ms) AND THAT IS
+ * DESTRUCTIVE ON LOW VOICES. A release short against the pitch period lets the
+ * gain recover between a voice's own cycles and re-catch the next one: the gain
+ * ripples at the pitch and modulates the voice. Held vowels at ~6 dB of
+ * reduction, attack 6, modulation products re the signal at release 6:
+ * −21.6 dBc at 70 Hz, −23.1 at 100, −26.0 at 140, −36.3 at 200; each release
+ * dial step slower buys ~4 dB, attack only ~1 (5–6 dB over its travel). On
+ * real speech attack matters as much (a fast attack snaps onto every peak).
+ *
+ * - GENTLE  attack 3 / release 3 (234 µs / 260 ms)
+ * - NORMAL  attack 4 / release 4 (126 µs / 156 ms)
+ * - FAST    attack 6 / release 6 (37 µs / 56 ms) — the old pinned setting
+ * - AUTO    attack 4, release `PEAKS_AUTO_RELEASE_CYCLES` pitch periods of the
+ *           voice's measured median F0, between FAST's and GENTLE's release;
+ *           NORMAL until the F0 is measured.
+ * Reasoned from the measurements, not auditioned (owner's call on the set).
+ */
+export const PEAKS_SPEEDS = Object.freeze({
+  gentle: Object.freeze({ attack: 3, release: 3 }),
+  normal: Object.freeze({ attack: 4, release: 4 }),
+  fast: Object.freeze({ attack: 6, release: 6 }),
+})
+export const PEAKS_SPEED_IDS = Object.freeze(['auto', 'gentle', 'normal', 'fast'])
+/**
+ * AUTO's release in pitch periods. From the held-vowel table, ~−30 dBc at
+ * 6 dB of reduction wanted ~14 periods (70 Hz ~ 200 ms, 100 Hz ~ 156, 140 Hz
+ * ~ 93); 16 leaves a margin: 70 Hz → 229 ms, 100 → 160, 140 → 114, 200 → 80.
+ */
+export const PEAKS_AUTO_RELEASE_CYCLES = 16
+export const PEAKS_AUTO_ATTACK = 4
+
+/** The release dial (fractional) for a time in seconds. */
+export function releaseDialForSeconds(s) {
+  const slow = releaseSecondsForDial(1)
+  const fast = releaseSecondsForDial(7)
+  const t = Math.log(s / slow) / Math.log(fast / slow)
+  return Math.max(1, Math.min(7, 1 + 6 * t))
+}
+
+/** Attack / release dials for a SPEED and the voice's median F0 (Hz, or null). */
+export function peaksTiming(speed, voiceF0Hz) {
+  if (PEAKS_SPEEDS[speed]) return { ...PEAKS_SPEEDS[speed] }
+  if (!(voiceF0Hz > 0)) return { ...PEAKS_SPEEDS.normal }
+  const releaseS = PEAKS_AUTO_RELEASE_CYCLES / voiceF0Hz
+  const release = Math.max(PEAKS_SPEEDS.gentle.release, Math.min(PEAKS_SPEEDS.fast.release,
+    releaseDialForSeconds(releaseS)))
+  return { attack: PEAKS_AUTO_ATTACK, release }
+}
+
 /** Makeup and output smoothing, as the kernels' own Gain / Output (8 ms). */
 const GAIN_SMOOTH_MS = 8
 
@@ -102,6 +151,9 @@ export const VOX_KERNEL_DEFAULTS = {
   bodyOn: true,
   /** The knobs: the 1176's Input and the LA-2A's Peak Reduction (0–100). */
   peaksInput: PEAKS_INPUT_KNOB,
+  /** SPEED ('auto' | 'gentle' | 'normal' | 'fast') and the voice's F0 it reads. */
+  peaksSpeed: 'auto',
+  voiceF0Hz: null,
   bodyPeakReduction: 50,
   /**
    * Detector offsets, dB — the file's gated-RMS alignment (`alignDbForRms`),
@@ -215,6 +267,7 @@ export class VoxPressorKernel {
     const peaksMakeupDb = finite(p.peaksMakeupDb, 0, -36, 36)
     this.fet.setParams({
       ...PEAKS_PATCH,
+      ...peaksTiming(p.peaksSpeed, p.voiceF0Hz),
       inputDrive: peaksInput,
       ...(p.peaksBench ?? {}),
       inputAlignDb: finite(p.peaksAlignDb, 0, -60, 60),

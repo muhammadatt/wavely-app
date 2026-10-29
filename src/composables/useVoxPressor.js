@@ -28,6 +28,8 @@ const copies = pluginCopies((copy, life) => {
   const voxBody = ref(VOX_DEFAULTS.body)
   const voxOutput = ref(VOX_DEFAULTS.output)
   const voxListen = ref(VOX_DEFAULTS.listen)
+  /** The 1176's SPEED. Measured with (AUTO and the fixed speeds catch differently). */
+  const voxSpeed = ref(VOX_DEFAULTS.speed)
   /** BENCH: the LA-2A's lookahead, ms. Measured with, so it re-measures. */
   const voxBodyLookahead = ref(VOX_DEFAULTS.bodyLookaheadMs)
   /** The file's alignment (whole file, gated RMS), and which timeline it is for. */
@@ -74,6 +76,7 @@ const copies = pluginCopies((copy, life) => {
       body: voxBody.value,
       output: voxOutput.value,
       listen: voxListen.value,
+      speed: voxSpeed.value,
       bodyLookaheadMs: voxBodyLookahead.value,
       alignDb: voxAlignDb.value,
       ...voxMeasured.value,
@@ -178,7 +181,7 @@ const copies = pluginCopies((copy, life) => {
 
     /** The key a measurement belongs to: the timeline, the region and every setting it reads. */
     function solveKey(segments, start, end) {
-      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}`
+      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}`
     }
 
     /**
@@ -194,7 +197,11 @@ const copies = pluginCopies((copy, life) => {
       voxBusy.value = true
       try {
         const kp = toKernelParams(currentParams())
-        if (cornerFor !== regionKey) delete kp.cornerHz
+        // A new region measures its own voice: corner and F0 together.
+        if (cornerFor !== regionKey) {
+          delete kp.cornerHz
+          delete kp.voiceF0Hz
+        }
         // The LA-2A stage's makeup solve starts from the last answer, so a
         // knob move usually converges in one render.
         if (Number.isFinite(voxMeasured.value.bodyMakeupDb)) kp.bodyMakeupGuess = voxMeasured.value.bodyMakeupDb
@@ -207,7 +214,9 @@ const copies = pluginCopies((copy, life) => {
         for (const k of MEASURED) next[k] = r[k] ?? null
         voxMeasured.value = next
         for (const k of MEASURED) pushParam(k, next[k])
-        voxReadout.value = { peaksDb: r.peaksDb, peaksBodyDb: r.peaksBodyDb, bodyDb: r.bodyDb }
+        voxReadout.value = {
+          peaksDb: r.peaksDb, peaksBodyDb: r.peaksBodyDb, bodyDb: r.bodyDb, peaksRippleDb: r.peaksRippleDb,
+        }
         solvedFor = key
         return true
       } finally {
@@ -258,6 +267,12 @@ const copies = pluginCopies((copy, life) => {
     function syncBody(v) {
       voxBody.value = v
       pushParam('body', v)
+      scheduleSolve()
+    }
+
+    function syncSpeed(v) {
+      voxSpeed.value = v
+      pushParam('speed', v)
       scheduleSolve()
     }
 
@@ -392,11 +407,11 @@ const copies = pluginCopies((copy, life) => {
     }
 
     return {
-      voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead,
+      voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,
-      togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead,
+      togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
       refreshSolve, apply, teardown, openModal, closeModal,
     }
   }

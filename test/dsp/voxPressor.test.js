@@ -14,8 +14,10 @@ import { LA2AKernel } from '../../src/audio/la2aProcessor.js'
 import { FET1176Kernel } from '../../src/audio/fet1176Processor.js'
 import {
   processVoxPressorBuffer, VOX_KERNEL_DEFAULTS, peaksTap, BODY_TAP, voxLatencySamples, PEAKS_INPUT_KNOB,
+  peaksTiming, PEAKS_SPEEDS,
 } from '../../src/audio/voxPressorProcessor.js'
 import { LinkedPeakLimiter } from '../../src/audio/dsp/peakLimiter.js'
+import { releaseSecondsForDial } from '../../src/audio/fet1176Processor.js'
 import {
   voiceDetectorSections, PLOSIVE_SHELF_DB, SIBILANCE_SHELF_DB,
 } from '../../src/audio/dsp/voiceDetector.js'
@@ -292,15 +294,22 @@ test('the 1176 stage\'s makeup is exactly level-invariant', () => {
   assert.ok(Math.max(...makeups) - Math.min(...makeups) < 0.02, makeups.map(m => m.toFixed(3)).join(' / '))
 })
 
-test('a light Peaks takes the peaks and leaves the voice alone', () => {
+test('a light Peaks takes the peaks and barely touches the voice, at every speed', () => {
   // ⚠ NOT AT THE DEFAULT. The Peaks scale is calibrated on the owner's two
-  // clips (Peaks 3 ≈ 3 dB off their peaks, 0.01 dB of voice); this synthetic
-  // narration is peakier and gives up ~6.4 dB at 3. That spread between voices
-  // is exactly what the retired target solve absorbed.
+  // clips (Peaks 3 ≈ 3 dB off their peaks, ≤ 0.04 dB of voice); this synthetic
+  // narration is far peakier and gives up ~6 dB at 3.
+  // ⚠ A SLOWER SPEED TOUCHES THE VOICE MORE — its release holds the gain down
+  // after each peak — which is the price GENTLE pays for its lower ripple.
   for (const { levelDb, x } of atDefaults) {
-    const { r } = measure(x, { peaks: 1, body: 0 })
-    assert.ok(r.peaksDb > 2, `${levelDb}: only ${r.peaksDb.toFixed(2)} dB off the peaks`)
-    assert.ok(r.peaksBodyDb < 0.5, `${levelDb}: body touched ${r.peaksBodyDb.toFixed(2)} dB`)
+    const touched = {}
+    for (const speed of ['fast', 'normal', 'gentle']) {
+      const { r } = measure(x, { peaks: 0.5, body: 0, speed })
+      assert.ok(r.peaksDb > 2, `${levelDb} ${speed}: only ${r.peaksDb.toFixed(2)} dB off the peaks`)
+      assert.ok(r.peaksBodyDb < 1, `${levelDb} ${speed}: body touched ${r.peaksBodyDb.toFixed(2)} dB`)
+      touched[speed] = r.peaksBodyDb
+    }
+    assert.ok(touched.fast < touched.normal && touched.normal < touched.gentle,
+      `${levelDb}: ${JSON.stringify(touched)}`)
   }
 })
 
@@ -389,6 +398,30 @@ test('the Peaks scale is linear in detector drive, Peaks 0 its first catch', () 
   const steps = [4, 6, 8].map(v => measure(x, { peaks: v, body: 0 }).r.peaksDb)
   const perStep = [(steps[1] - steps[0]) / 2, (steps[2] - steps[1]) / 2]
   for (const d of perStep) assert.ok(d > 0.8 && d < 1.2, `${d.toFixed(2)} dB off the peaks per step`)
+})
+
+test('SPEED AUTO sets the release from the voice\'s pitch, inside GENTLE..FAST', () => {
+  const rel = f0 => releaseSecondsForDial(peaksTiming('auto', f0).release)
+  // Sixteen pitch periods: a low voice gets a slower release than a high one.
+  assert.ok(Math.abs(rel(100) - 0.16) < 0.002, `${rel(100)} s at 100 Hz`)
+  assert.ok(rel(70) > rel(140) && rel(140) > rel(200))
+  // Never slower than GENTLE, never faster than FAST.
+  assert.equal(peaksTiming('auto', 20).release, PEAKS_SPEEDS.gentle.release)
+  assert.equal(peaksTiming('auto', 2000).release, PEAKS_SPEEDS.fast.release)
+  // Unmeasured: NORMAL. Fixed speeds ignore the pitch.
+  assert.deepEqual(peaksTiming('auto', null), { ...PEAKS_SPEEDS.normal })
+  assert.deepEqual(peaksTiming('fast', 70), { ...PEAKS_SPEEDS.fast })
+})
+
+test('the measurement reports the voice\'s F0 and a gain ripple that falls with a slower speed', () => {
+  const { x } = atDefaults[1]
+  const at = speed => measure(x, { body: 0, speed }, { cornerHz: undefined }).r
+  const fast = at('fast')
+  const gentle = at('gentle')
+  assert.ok(fast.voiceF0Hz > 60 && fast.voiceF0Hz < 400, `F0 ${fast.voiceF0Hz}`)
+  assert.ok(Number.isFinite(fast.peaksRippleDb) && Number.isFinite(gentle.peaksRippleDb))
+  assert.ok(gentle.peaksRippleDb < fast.peaksRippleDb - 1,
+    `ripple ${gentle.peaksRippleDb.toFixed(1)} (gentle) vs ${fast.peaksRippleDb.toFixed(1)} (fast)`)
 })
 
 test('Peaks trims a sibilant spike instead of letting it set the makeup', () => {
