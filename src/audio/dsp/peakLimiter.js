@@ -24,6 +24,7 @@
  */
 
 import { RunningMin, Boxcar } from './lookaheadLimiter.js'
+import { float32AtOrBelow } from './makeupReference.js'
 
 /**
  * Half-width of the lookahead, ms: the gain is fully down 2L after it starts
@@ -58,6 +59,9 @@ export class LinkedPeakLimiter {
     this.lines = []
     this.pos = 0
     this.minGain = 1
+    // Consecutive samples whose request was 1: once the min window and both
+    // boxcars hold nothing else, an idle limiter is a delay line.
+    this.quiet = 0
   }
 
   /** The ceiling, linear (≤ 0 or non-finite: none — a pure delay). */
@@ -73,6 +77,7 @@ export class LinkedPeakLimiter {
     this.pos = 0
     this.g = 1
     this.minGain = 1
+    this.quiet = 0
   }
 
   /** Limit `io` in place; its output is delayed by `latencySamples`. */
@@ -81,8 +86,30 @@ export class LinkedPeakLimiter {
     const lat = this.latencySamples
     while (this.lines.length < nCh) this.lines.push(new Float32Array(lat))
     const T = this.threshold
+    /**
+     * IDLE FAST PATH: no ceiling, the gain back at exactly 1 and every stage of
+     * the lookahead flushed to 1 (2L + 1 for the min window, L + 1 for each
+     * boxcar). Pushing more ones would leave all of them unchanged, so the
+     * output is the delayed input, bit for bit, and the pushes are skipped.
+     */
+    if (T === 0 && this.g === 1 && this.quiet > 4 * this.L + 3) {
+      for (let c = 0; c < nCh; c++) {
+        const line = this.lines[c]
+        const x = io[c]
+        let pos = this.pos
+        for (let i = 0; i < n; i++) {
+          const v = x[i]
+          x[i] = line[pos]
+          line[pos] = v
+          pos = pos + 1 === lat ? 0 : pos + 1
+        }
+      }
+      this.pos = (this.pos + n) % lat
+      return
+    }
     let g = this.g
     let minG = this.minGain
+    let quiet = this.quiet
     for (let i = 0; i < n; i++) {
       let req = 1
       if (T > 0) {
@@ -95,6 +122,7 @@ export class LinkedPeakLimiter {
           }
         }
       }
+      quiet = req === 1 ? quiet + 1 : 0
       const s = this.box2.push(this.box1.push(this.min.push(req)))
       g = s < g ? s : g + (s - g) * this.relCoef
       if (g < minG) minG = g
@@ -111,6 +139,7 @@ export class LinkedPeakLimiter {
     // limiter is exact again.
     this.g = g > 1 - 1e-9 ? 1 : g
     this.minGain = minG
+    this.quiet = quiet
   }
 
   /** Lowest gain since the last call (1 = untouched). */
@@ -119,4 +148,24 @@ export class LinkedPeakLimiter {
     this.minGain = 1
     return m
   }
+}
+
+/**
+ * Run a fresh limiter over whole channels at `ceilingDb`, latency removed, so
+ * the result lines up with `channels` — the measurements' offline copy of what
+ * the kernel's limiter does to the same samples.
+ */
+export function limitChannels(channels, ceilingDb, sampleRate) {
+  const lim = new LinkedPeakLimiter(sampleRate)
+  // The kernel's own rounding (`VoxPressorKernel._ceilingLin`), so the two agree.
+  lim.setThreshold(Number.isFinite(ceilingDb) ? float32AtOrBelow(Math.exp(ceilingDb * (Math.LN10 / 20))) : 0)
+  const len = channels[0].length
+  const L = lim.latencySamples
+  const io = channels.map((c) => {
+    const q = new Float32Array(len + L)
+    q.set(c, 0)
+    return q
+  })
+  lim.process(io, len + L)
+  return io.map(c => c.subarray(L, L + len))
 }

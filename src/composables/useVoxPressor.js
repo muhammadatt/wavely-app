@@ -8,6 +8,7 @@ import {
 } from '../audio/processing.js'
 import { analysedWholeRegion, regionAlignDb } from '../audio/analysisWindow.js'
 import { getSegmentDuration } from '../audio/operations.js'
+import { createMeasureThrottle } from './measureThrottle.js'
 import { toKernelParams, VOX_MEASURED_KEYS } from '../audio/effects/voxPressorParams.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { voxPressorEffect as soloEffect, VOX_DEFAULTS } from '../audio/effects/voxPressor.js'
@@ -56,11 +57,16 @@ const copies = pluginCopies((copy, life) => {
   let solvedFor = null
   let inFlight = null
 
-  const SOLVE_DEBOUNCE_MS = 120
-  let solveTimer = null
+  /**
+   * One measurement in flight at a time, re-run with the CURRENT knobs the
+   * moment it lands (`createMeasureThrottle`, as LA Vintage 2A's and LA
+   * Classic 76's makeups). ⚠ IT REPLACED A LEADING-EDGE DEBOUNCE that measured
+   * the knob's value at the START of a drag and then nothing until 120 ms
+   * after release — with the two passes queued in the shared worker, the
+   * readout and makeup trailed the knob by two whole measurements.
+   */
+  let solveThrottle = null
   let solveSeq = 0
-  let burstActive = false
-  let burstDirty = false
 
   function currentParams() {
     return {
@@ -75,8 +81,7 @@ const copies = pluginCopies((copy, life) => {
   }
 
   life.onDispose(() => {
-    clearTimeout(solveTimer)
-    solveTimer = null
+    solveThrottle?.cancel()
     solveSeq++
   })
 
@@ -190,6 +195,9 @@ const copies = pluginCopies((copy, life) => {
       try {
         const kp = toKernelParams(currentParams())
         if (cornerFor !== regionKey) delete kp.cornerHz
+        // The LA-2A stage's makeup solve starts from the last answer, so a
+        // knob move usually converges in one render.
+        if (Number.isFinite(voxMeasured.value.bodyMakeupDb)) kp.bodyMakeupGuess = voxMeasured.value.bodyMakeupDb
         const r = await computeVoxPressorMeasure(
           segments, start, end, kp, state.currentFile.sampleRate, state.currentFile.channels,
         )
@@ -235,22 +243,10 @@ const copies = pluginCopies((copy, life) => {
       return inFlight
     }
 
+    if (!solveThrottle) solveThrottle = createMeasureThrottle(async () => { await refreshSolve() })
+
     function scheduleSolve() {
-      if (!burstActive) {
-        burstActive = true
-        burstDirty = false
-        refreshSolve()
-      } else {
-        burstDirty = true
-      }
-      if (solveTimer !== null) clearTimeout(solveTimer)
-      solveTimer = setTimeout(() => {
-        solveTimer = null
-        const trailing = burstDirty
-        burstActive = false
-        burstDirty = false
-        if (trailing) refreshSolve()
-      }, SOLVE_DEBOUNCE_MS)
+      solveThrottle.schedule()
     }
 
     function syncPeaks(v) {

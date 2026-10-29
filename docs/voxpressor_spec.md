@@ -169,7 +169,9 @@ the 1176 is pinned. The panel reads back what it did.
 10 % by peak (5–60 blocks), and reads the **median** over those blocks of input
 peak − output peak; Body reads the LA-2A's average cell reduction on the voiced
 blocks of the Peaks output. Measured together with each stage's makeup —
-3–4 s on 36–46 s of narration — while the knobs themselves act at once.
+one kernel render for the 1176 stage, one or two for the LA-2A, the limiters
+offline: 0.6–0.8 s per 30 s window during a drag (1.1–1.8 s cold), on the
+compressors' `createMeasureThrottle` — while the knobs themselves act at once.
 
 **History: the knobs were TARGETS first (owner's call to replace them).**
 Peaks was "dB off the peaks" and Body "dB of average leveling", each solved by a
@@ -328,7 +330,7 @@ All measured once per file / selection, in the worker, against the **running
 | Loudest blocks (by peak), voiced blocks (gated RMS − 10 dB) | `referenceBlocks` | Peaks / Body readouts |
 | Parallel trim, correlation, density, alignment | `computeSchepsAutoTrim` on the Body output | Parallel stage |
 | Post-compression gated RMS | render of stages [1]–[3] on ≤ 400 blocks | De-ess `levelOffset` |
-| Makeup, per stage | `solveStageMakeup`: `solveMakeupPlan` (percentile) per stage, a lookahead limiter at the source peak, restore to it; both restores re-measured over the whole region before apply when the region outgrew the window | 1176 Output; LA-2A Gain + the restore after the chain |
+| Makeup, per stage | `measureVoxPressor`: percentile makeup per stage (the 1176's in closed form, the LA-2A's by `solveMakeupPlan`, warm-started), a lookahead limiter at the source peak, restore to it; both restores re-measured over the whole region before apply when the region outgrew the window | 1176 Output; LA-2A Gain + the restore after the chain |
 | Source peak | `peakOfChannels` | Ceiling; Density anchor |
 
 ⚠ **The measurements are sequential.** Peaks first (on the input), then Body (on the

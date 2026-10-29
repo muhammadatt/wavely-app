@@ -15,11 +15,24 @@
  *   `PEAKS_BODY_WARN_DB`.
  * - BODY (readout) — the LA-2A's average gain reduction over the voiced blocks
  *   of what the Peaks stage left.
- * - MAKEUP — PER STAGE (`solveStageMakeup`), as the owner's hand-built
- *   1176 → LA-2A chain does it: each stage makes up its own level with the
- *   compressors' shared 99.9th-percentile reference, runs into a lookahead
- *   LIMITER at the source's peak, and has its peak restored to that ceiling.
- *   Always on, no switch (owner's call).
+ * - MAKEUP — PER STAGE, as the owner's hand-built 1176 → LA-2A chain does
+ *   it: each stage makes up its own level with the compressors' shared
+ *   99.9th-percentile reference, runs into a lookahead LIMITER at the
+ *   source's peak, and has its peak restored to that ceiling. Always on, no
+ *   switch (owner's call). The 1176's in closed form (`percentileMakeupDb`),
+ *   the LA-2A's by `solveMakeupPlan`.
+ *
+ * ⚠ A LIMITER, NOT THE COMPRESSORS' SOFT CEILING. The percentile makeup lifts
+ * a few onsets 3–4 dB over the ceiling (0.15 % of "Messy and Bright"'s samples
+ * at Body 4). The plugins' own `softCeiling` bends them with a tanh, which
+ * distorts on loud transients (owner's verdict: the harmonics this chain is
+ * tuned for are the LA-2A's, not the ceiling's). The limiter takes them down
+ * with a gain.
+ *
+ * ⚠ ONE KERNEL RENDER PER STAGE, AND THE LIMITERS OFFLINE (`limitChannels`).
+ * The first build re-rendered the kernel for every makeup step and every
+ * restore: 3.2 s on 30 s of narration against LA Vintage 2A's 0.75 s, felt as
+ * the makeup and readouts lagging both standalone plugins.
  *
  * ⚠ THE KNOBS WERE TARGETS FIRST, SOLVED BY A SECANT SEARCH over each stage's
  * detector offset ("Peaks 3" = 3 dB off the peaks on every voice). Replaced
@@ -57,7 +70,10 @@
 import { processVoxPressorBuffer } from './voxPressorProcessor.js'
 import { measureVoiceProfile } from './voiceProfile.js'
 import { gatedRmsOfChannels } from './dsp/inputAlign.js'
-import { peakOfChannels, solveMakeupPlan } from './dsp/makeupReference.js'
+import {
+  peakOfChannels, solveMakeupPlan, percentileOfChannels, MAKEUP_PERCENTILE,
+} from './dsp/makeupReference.js'
+import { limitChannels } from './dsp/peakLimiter.js'
 
 /** Block length for the peak and voiced-level statistics, seconds. */
 export const SOLVE_BLOCK_S = 0.1
@@ -181,22 +197,18 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   let afterPeaks = channels
   if (p.peaksOn) {
     const ref = referenceBlocks(channels, sampleRate)
+    // ONE render of the 1176 stage, at unity: the readouts, the makeup and the
+    // stage's output all come from it (see `peaksStage`).
     const raw = renderPeaks(channels, sampleRate, base, {})
     const r = peaksAndBodyDb(channels, raw, sampleRate, ref.loudestIdx, ref.voicedIdx)
     out.peaksDb = r.peaksDb
     out.peaksBodyDb = r.bodyDb
-    // The 1176 stage's own makeup, limiter and peak restore. The restore is
-    // folded into its Output, ahead of the limiter: it only ever lifts a peak
-    // that landed under the ceiling, so the limiter has nothing new to catch.
-    const m = solveStageMakeup(channels, (chs, extra) => renderPeaks(chs, sampleRate, base, extra), {
-      gain: 'peaksMakeupDb', ceiling: 'peaksCeilingDb',
-    }, ceilingDb)
-    out.peaksRestoreDb = m.restoreDb
-    out.peaksMakeupDb = m.gainDb + m.restoreDb
-    out.peaksCeilingDb = m.ceilingDb
-    afterPeaks = renderPeaks(channels, sampleRate, base, {
-      peaksMakeupDb: out.peaksMakeupDb, peaksCeilingDb: out.peaksCeilingDb,
-    })
+    const gainDb = percentileMakeupDb(channels, raw)
+    const st = peaksStage(raw, gainDb, ceilingDb, sampleRate)
+    out.peaksRestoreDb = st.restoreDb
+    out.peaksMakeupDb = gainDb + st.restoreDb
+    out.peaksCeilingDb = ceilingDb
+    afterPeaks = st.out
   }
 
   // ── BODY ── on what the 1176 stage put out, makeup and all.
@@ -206,7 +218,41 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
     const bodyAlignDb = bodyAlignFor(p, out.peaksMakeupDb)
     const midRef = referenceBlocks(afterPeaks, sampleRate)
     const W = Math.round(SOLVE_BLOCK_S * sampleRate)
-    const r = renderBody(afterPeaks, sampleRate, base, bodyAlignDb, {}, { meter: true })
+    /**
+     * The LA-2A stage's own makeup (its Gain, before the valve — so the plan
+     * iterates renders), limiter at the source peak, and peak restore, which
+     * lands as the gain between the LA-2A and its limiter (`makeupDb`).
+     *
+     * ⚠ THREE RENDERS BECAME ONE OR TWO, and each saving rests on a fact about
+     * this kernel, measured: (1) its gain reduction does not depend on its
+     * makeup (0.000000 dB apart at 0 and +6), so the readout's meter comes
+     * from whichever render the plan makes first; (2) the plan starts from
+     * the caller's last answer (`p.bodyMakeupGuess`), so a knob move usually
+     * converges in one render; (3) the CONVERGED RENDER IS KEPT AS THE STAGE —
+     * its makeup is the rendered value, within the plan's 0.05 dB tolerance of
+     * the next step — and the limiter and the restore run offline on it, as
+     * the 1176 stage's do, instead of a final kernel render.
+     */
+    let first = null
+    let last = null
+    solveMakeupPlan({
+      channelData: afterPeaks,
+      render: (chs, extra) => {
+        const rr = renderBody(chs, sampleRate, base, bodyAlignDb, extra, { meter: first === null })
+        if (first === null) first = rr
+        return rr.channelData
+      },
+      onRender: (o, makeupDb) => { last = { out: o, makeupDb } },
+      initialDb: p.bodyMakeupGuess,
+      gainKey: 'bodyMakeupDb',
+      reference: 'percentile',
+      minDb: -24,
+      maxDb: 24,
+    })
+    out.bodyMakeupDb = last ? last.makeupDb : 0
+    out.bodyCeilingDb = ceilingDb
+    out.makeupDb = last ? restoreToCeilingDb(ceilingDb, db(peakOfChannels(limitChannels(last.out, ceilingDb, sampleRate)))) : 0
+    const r = first
     // Average cell reduction over the voiced blocks, from the cell's own meter
     // (one value per 128-sample kernel block).
     const per = W / 128
@@ -217,80 +263,54 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
       const to = Math.min(r.bodyGr.length, Math.floor((k + 1) * per))
       for (let j = from; j < to; j++) { sum += r.bodyGr[j]; count++ }
     }
-    out.bodyDb = count > 0 ? sum / count : 0
-
-    // The LA-2A stage's own makeup (its Gain, before the valve — so the plan
-    // iterates renders), limiter at the source peak, and peak restore, which
-    // lands as the gain between the LA-2A and its limiter (`makeupDb`).
-    const m = solveStageMakeup(afterPeaks, (chs, extra) => renderBody(chs, sampleRate, base, bodyAlignDb, extra).channelData, {
-      gain: 'bodyMakeupDb', ceiling: 'bodyCeilingDb',
-    }, ceilingDb)
-    out.bodyMakeupDb = m.gainDb
-    out.bodyCeilingDb = m.ceilingDb
-    out.makeupDb = m.restoreDb
+    out.bodyDb = r && count > 0 ? sum / count : 0
   }
   return out
+}
+
+/**
+ * The 1176 stage's percentile makeup, in CLOSED FORM: its Output is the last
+ * multiply on its path at Mix 1, so the stage's output is `raw · g` exactly and
+ * the 99.9th percentile scales with it — one render answers it, as LA Classic
+ * 76's own plan does (`computeFET1176AutoMakeupPlan`). Iterating renders here
+ * cost four or five of them for the same number.
+ */
+function percentileMakeupDb(input, raw) {
+  const a = percentileOfChannels(input, MAKEUP_PERCENTILE)
+  const b = percentileOfChannels(raw, MAKEUP_PERCENTILE)
+  if (!(a > 0) || !(b > 0)) return 0
+  return Math.max(-24, Math.min(24, db(a) - db(b)))
+}
+
+/**
+ * The 1176 stage at a makeup, from its unity render: `raw` scaled, into the
+ * limiter at `ceilingDb`, with the peak restore that puts the stage's peak on
+ * the ceiling — all offline on the samples, no kernel render. The kernel
+ * applies the same gain on its Output and the same limiter
+ * (`limitChannels` is that limiter, run whole), so this is the chain to
+ * float rounding.
+ *
+ * @returns {{ restoreDb: number, out: Float32Array[] }}
+ */
+function peaksStage(raw, gainDb, ceilingDb, sampleRate) {
+  const scale = (g) => raw.map((c) => {
+    const k = 10 ** (g / 20)
+    const q = new Float32Array(c.length)
+    for (let i = 0; i < c.length; i++) q[i] = c[i] * k
+    return q
+  })
+  let out = limitChannels(scale(gainDb), ceilingDb, sampleRate)
+  const restoreDb = restoreToCeilingDb(ceilingDb, db(peakOfChannels(out)))
+  // A restore only ever lifts a stage that landed under the ceiling, so it
+  // gives the limiter nothing new; re-run so the samples are the kernel's.
+  if (restoreDb !== 0) out = limitChannels(scale(gainDb + restoreDb), ceilingDb, sampleRate)
+  return { restoreDb, out }
 }
 
 /** The Body stage's detector offset when rendered with the Peaks stage bypassed. */
 function bodyAlignFor(p, peaksMakeupDb) {
   const a = Number.isFinite(p.bodyAlignDb) ? p.bodyAlignDb : 0
   return p.peaksOn ? a - peaksMakeupDb : a
-}
-
-/**
- * One stage's own makeup, as LA Vintage 2A and LA Classic 76 make up on their
- * own (`dsp/makeupReference.js`, shared, not copied): the 99.9th-percentile
- * reference via `solveMakeupPlan`, a lookahead LIMITER at `ceilingDb` (the
- * source's peak), and then the stage's peak restored to that ceiling.
- *
- * ⚠ WHY PER STAGE. The owner's hand-built 1176 → LA-2A chain makes up at each
- * plugin, and that is where its loudness comes from. A single peak restore
- * after both compressors cannot match it: the opto's slow attack lowers the
- * sustained voice more than each syllable's onset, so the chain's crest grows
- * and one restore at the end hands back only what the peak-to-body gap
- * shrank. On the owner's "Messy and Bright" clip that was +1.0 dB at Peaks 3 /
- * Body 4 against the chain's +3.3; per stage it is +3.5. Owner's call.
- *
- * ⚠ A LIMITER, NOT THE COMPRESSORS' SOFT CEILING. The percentile makeup lifts
- * a few onsets 3–4 dB over the ceiling (0.15 % of that clip's samples at Body
- * 4). The plugins' own `softCeiling` bends them with a tanh, which distorts on
- * loud transients (owner's verdict: the harmonics this chain is tuned for are
- * the LA-2A's, not the ceiling's). The limiter takes them down with a gain.
- *
- * THE RESTORE NEEDS NO SECOND RENDER: rendered at the plan's makeup, the
- * stage's peak lands at or under the ceiling. If under, lifting by the gap puts
- * the peak exactly on the ceiling and every other sample under it, so the
- * limiter has nothing new to do; if on, the gap is 0.
- *
- * @param {(chs: Float32Array[], extra: object) => Float32Array[]} render
- *   a latency-compensated render of the stage alone
- * @param {{ gain: string, ceiling: string }} keys  kernel param names; the
- *   caller places the restore (the 1176's in its Output, the LA-2A's after it)
- * @param {number} ceilingDb  the limiter's ceiling, dBFS (the source's peak)
- * @returns {{ gainDb, ceilingDb, restoreDb, out }} `out` is the stage
- *   rendered with its makeup and limiter but BEFORE the restore
- */
-export function solveStageMakeup(input, render, keys, ceilingDb) {
-  const plan = solveMakeupPlan({
-    channelData: input,
-    render: (chs, extra) => render(chs, { ...extra, [keys.ceiling]: null }),
-    gainKey: keys.gain,
-    reference: 'percentile',
-    minDb: -24,
-    maxDb: 24,
-  })
-  const ceiling = Number.isFinite(ceilingDb) ? ceilingDb : plan.ceilingDb
-  if (!Number.isFinite(ceiling)) {
-    return { gainDb: 0, ceilingDb: null, restoreDb: 0, out: input }
-  }
-  const out = render(input, { [keys.gain]: plan.makeupDb, [keys.ceiling]: ceiling })
-  return {
-    gainDb: plan.makeupDb,
-    ceilingDb: ceiling,
-    restoreDb: restoreToCeilingDb(ceiling, db(peakOfChannels(out))),
-    out,
-  }
 }
 
 /** The gain that puts a rendered peak back on its ceiling. */
@@ -336,22 +356,23 @@ export function measureVoxPressorExact(channels, sampleRate, solved, sourcePeakD
   let peaksRestoreDb = 0
   if (solved.peaksOn) {
     const gainDb = solved.peaksMakeupDb - solved.peaksRestoreDb
-    const madeUp = renderPeaks(channels, sampleRate, base, {
-      peaksMakeupDb: gainDb, peaksCeilingDb: sourcePeakDb,
-    })
-    peaksRestoreDb = restoreToCeilingDb(sourcePeakDb, db(peakOfChannels(madeUp)))
+    const raw = renderPeaks(channels, sampleRate, base, { peaksMakeupDb: 0, peaksCeilingDb: null })
+    const st = peaksStage(raw, gainDb, sourcePeakDb, sampleRate)
+    peaksRestoreDb = st.restoreDb
     peaksMakeupDb = gainDb + peaksRestoreDb
     peaksCeilingDb = sourcePeakDb
-    stage1 = renderPeaks(channels, sampleRate, base, { peaksMakeupDb, peaksCeilingDb })
+    stage1 = st.out
   }
   let bodyCeilingDb = null
   let makeupDb = 0
   if (solved.bodyOn) {
     bodyCeilingDb = sourcePeakDb
+    // The same arithmetic as `measureVoxPressor`: the LA-2A at its makeup,
+    // then the limiter offline.
     const out = renderBody(stage1, sampleRate, base, bodyAlignFor(solved, peaksMakeupDb), {
-      bodyMakeupDb: solved.bodyMakeupDb, bodyCeilingDb,
+      bodyMakeupDb: solved.bodyMakeupDb, bodyCeilingDb: null,
     }).channelData
-    makeupDb = restoreToCeilingDb(bodyCeilingDb, db(peakOfChannels(out)))
+    makeupDb = restoreToCeilingDb(bodyCeilingDb, db(peakOfChannels(limitChannels(out, bodyCeilingDb, sampleRate))))
   }
   return {
     ...solved,

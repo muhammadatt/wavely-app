@@ -584,11 +584,19 @@ export function percentileBlendGain(dry, wet, mix, targetRef, minDb, maxDb, scra
  * @param mix      the renderer's wet/dry blend, 0-1; its dry path must be the
  *                 input itself, aligned by `latency`
  * @param mixKey   the renderer's param for it, set to 1 for the wet-only renders
+ * @param initialDb  the makeup the first render tries (mix 1 only). A caller
+ *                   re-solving after a small change passes its last answer
+ *                   and usually converges in ONE render; 0 is the default and
+ *                   leaves every existing answer bit-identical
+ * @param onRender (out, makeupDb) => void, called with each render at mix 1
+ *                 (latency trimmed) — so a caller can keep the last one instead
+ *                 of rendering the converged makeup again
  */
 export function solveMakeupPlan({
   channelData, render, latencySamples = 0, gainKey = 'gainDb',
   reference = 'peak', maxIterations = 4, toleranceDb = 0.05,
   minDb = -24, maxDb = 24, mix = 1, mixKey = 'mix',
+  initialDb = 0, onRender = null,
 }) {
   if (reference !== 'peak' && reference !== 'percentile') {
     throw new Error(`unknown makeup reference: ${reference}`)
@@ -632,7 +640,7 @@ export function solveMakeupPlan({
     })
   }
 
-  let makeupDb = 0
+  let makeupDb = Number.isFinite(initialDb) ? Math.max(minDb, Math.min(maxDb, initialDb)) : 0
   let lastOutPeak = 0
   let lastMakeupDb = 0
   for (let i = 0; i < maxIterations; i++) {
@@ -640,6 +648,7 @@ export function solveMakeupPlan({
     const out = latencySamples > 0
       ? rendered.map((ch) => ch.subarray(latencySamples, latencySamples + len))
       : rendered
+    if (onRender) onRender(out, makeupDb)
     lastOutPeak = peakOfChannels(out)
     lastMakeupDb = makeupDb
     const outRef = measureRef(out)

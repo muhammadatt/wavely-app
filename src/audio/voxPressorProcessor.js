@@ -342,7 +342,10 @@ export class VoxPressorKernel {
     const mid = this.midViews
 
     // ── PEAKS ──
-    const peaksSc = this.peaksDetector.process(inputChannels, n)
+    // A detector nothing reads is skipped: it is ~half the cost of a render
+    // with its stage bypassed, which is what the measurements mostly run.
+    const peaksSc = this.peaksOn || this.listen === 'peaks'
+      ? this.peaksDetector.process(inputChannels, n) : null
     if (this.peaksOn) {
       this.fet.process(inputChannels, mid, n, peaksSc)
     } else {
@@ -358,7 +361,8 @@ export class VoxPressorKernel {
     this.peaksLimiter.process(mid, n)
 
     // ── BODY ── (its detector hears what PEAKS left)
-    const bodySc = this.bodyDetector.process(mid, n)
+    const bodySc = this.bodyOn || this.listen === 'body'
+      ? this.bodyDetector.process(mid, n) : null
     if (this.bodyOn) {
       this.la2a.process(mid, outputChannels, n, bodySc)
     } else {

@@ -61,7 +61,7 @@ export const VOX_DEFAULTS = {
    */
   alignDb: null,
   cornerHz: null,
-  // Per-stage makeup, limiter ceilings and restores (see `solveStageMakeup`).
+  // Per-stage makeup, limiter ceilings and restores (see `measureVoxPressor`).
   peaksMakeupDb: 0,
   peaksCeilingDb: null,
   peaksRestoreDb: 0,
