@@ -87,6 +87,10 @@ const rel = f => f.slice(AUDIO.length + 1)
  */
 const ALLOWED = new Map([
   ['schepsProcessor.js', new Set(['la2aProcessor.js'])],
+  // VoxPressor composes BOTH compressors on the same terms: it holds
+  // FET1176Kernel and LA2AKernel rather than copies (docs/voxpressor_spec.md),
+  // and both modules swallow exactly NotSupportedError on registration.
+  ['voxPressorProcessor.js', new Set(['la2aProcessor.js', 'fet1176Processor.js'])],
 ])
 const allowed = (from, to) => ALLOWED.get(rel(from))?.has(rel(to)) ?? false
 
