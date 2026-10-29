@@ -17,7 +17,7 @@ the one dynamics tool a narrator reaches for:
 | Plosives / chest thump trip the detector and duck the whole word | LA-2A: R37 tilt only. 1176: optional one-pole `scHpfHz`, off by default | Voice-shaped detector: high-pass at the speaker's own rumble corner, plosives and sibilance turned down |
 | "s" sounds get louder after compression (body is pulled down, sibilance isn't) | Separate HF Softener, user must know to add it *after* | De-ess is built in, placed after the compressor, linked to it |
 | Two serial compressors (76 → 2A) is the standard vocal chain, but it takes two windows and nine 1176/LA-2A controls to stage | Chain them manually in the Plugin Chain | Two knobs that say what they do: **Peaks** (dB off the loudest peaks, the 76) and **Body** (average leveling, the 2A) |
-| "Enhance" (presence, air, density) is four more plugins | EQ, Air Boost, Cambridge Inflator, Saturation Workbench | Three voice-aimed knobs, each measurement-calibrated |
+| "Enhance" (presence, air, density) is four more plugins | Scheps Parallel, Air Boost, Cambridge Inflator, Saturation Workbench | Three knobs: **Parallel** (Scheps' Pultec → LA-2A trick), **Air**, **Density** |
 
 **Positioning:** the Mode 2 / Mode 3 user's single "make my voice sound
 produced" plugin. It is *not* the mastering chain — no loudness target, no ACX
@@ -43,10 +43,11 @@ in ─ INPUT ALIGN (drive offset, detector only)
    │                                                              ▼
    ├─ [1] PEAKS   — FET1176Kernel, pinned peak-catcher patch  ◄── detector (no plosive shelf, §3)
    ├─ [2] BODY    — LA2AKernel (opto, rides the phrase)       ◄── detector (full)
-   ├─ [3] DE-ESS  — HFSoftenerKernel (Duck + EQ, lisp guard)
-   ├─ [4] TONE    — Presence bell (dynamic) · Air (voiced-only)
+   ├─ [3] PARALLEL — SchepsKernel, PRESENCE (or THICK): Pultec push → LA-2A → Pultec recovery, blended with its own delayed dry
+   ├─ [4] DE-ESS  — HFSoftenerKernel (Duck + EQ, lisp guard)
+   ├─ [5] AIR     — Air Boost curve, voiced-only
    ├─ MAKEUP      — percentile reference + source-peak soft ceiling (dsp/makeupReference.js)
-   ├─ [5] DENSITY — InflatorKernel, anchored so the ceiling sits at f(1) = 1, Clip on
+   ├─ [6] DENSITY — InflatorKernel, anchored so the ceiling sits at f(1) = 1, Clip on
    └─ MIX         — delay-compensated dry/wet (equal-power, as Scheps)
        └─ OUTPUT trim ─ out
 ```
@@ -57,12 +58,18 @@ in ─ INPUT ALIGN (drive offset, detector only)
   the opto isn't yanked by them and can ride the phrase smoothly. Reversing it
   makes the 2A pump on every plosive that survives. *(Owner may want this as a
   bench A/B; see §11.)*
-- **De-ess after compression.** Compression raises sibilance relative to the
-  body; a de-esser before it is undone. The HF Softener's thresholds already
+- **Parallel after the serial pair.** It is a layer added to the finished
+  dynamics, the way it is run on a console: the squashed copy is blended under
+  a voice that is already level, so it adds density without making the level
+  ride any harder.
+- **De-ess after compression *and* the parallel stage.** Compression raises
+  sibilance relative to the body, and the parallel stage's pre-EQ is an 8 kHz
+  push into a cell that then spends its reduction on sibilance (Scheps'
+  own module notes this). A de-esser before either is undone. The HF Softener's thresholds already
   follow the file's gated RMS (`levelOffset`), so it needs to hear the
   *post-compression* level — the kernel is fed a re-measured offset (§5).
-- **Tone after dynamics.** Presence and air pushed into a compressor get
-  compressed back out; after it they stay where the user put them.
+- **Air after the de-esser.** Air pushed into a compressor gets compressed
+  back out, and Air before the de-esser just hands it more to cut.
 - **Density after makeup and the ceiling.** The Inflator's curve is defined
   against full scale, so it has to see a signal whose peak is known. After the
   ceiling, the loudest sample is at most the source peak, which is exactly the
@@ -113,7 +120,7 @@ Implement it that way — the attack fit (`FB_ATTACK_*`) assumes feedback.
 | **Peaks** | 0–10 dB | 3 | dB taken off the loudest voice peaks by the 76 (§4.2). Solved per file. 0 = stage out, a pure delay |
 | **Body** | 0–100 | 40 | Average leveling by the 2A: target avg GR on voiced material, ~0–10 dB *(reasoned)*, solved per file on the Peaks stage's output |
 | **De-ess** | 0–100 | 40 | HF Softener **Amount** (Split pinned at its default 33; Guard 100) |
-| **Presence** | −6…+6 dB | +1.5 | Dynamic bell at the voice's presence peak (2–5 kHz, placed from VoiceRx's analysis). Boost is *ducked* while the de-esser cuts, so it can't feed the sibilance it is next to |
+| **Parallel** | 0–100 % (+ PRESENCE / THICK toggle) | 30, PRESENCE | Scheps Parallel's **Mix** (§4.4). The squashed, Pultec-coloured LA-2A copy blended under the voice. 0 = stage out, a pure delay |
 | **Air** | 0–6 dB | 1.5 | Air Boost curve (`dsp/airBandCurve.js`), VOICED mode only (vowels), the HF Softener's existing Air path |
 | **Density** | 0–100 % | 30 | Cambridge Inflator **Effect** (§4.3). Lifts the body up to +3.5 dB under a fixed peak, with odd harmonics on the loudest syllables |
 | **Mix** | 0–100 % | 100 | Parallel blend against delay-compensated dry |
@@ -214,7 +221,54 @@ duplicated the LA-2A's even harmonics.
 DENSE only (the 2A's shapers off, via a clean patch) / TUBE only (Density
 forced to 0). If DENSE-only wins by ear it can be promoted.
 
-### 4.4 Meters
+### 4.4 Parallel — Scheps Parallel, embedded
+
+**Embed `SchepsKernel` rather than a second bare LA-2A.** It already *is* a
+parallel LA-2A built for presence and density on voice, and everything a bare
+parallel copy would need is solved there:
+
+- **Pre-EQ that aims the cell.** The Pultec push cuts ~4.7 dB of lows before the
+  LA-2A and lifts 8 kHz, with R37 pinned fully counter-clockwise, so the cell
+  rides the presence band instead of ducking on chest and plosives. The recovery
+  EQ after it is a real, measured curve, not an exact inverse, and that residue
+  is the sound.
+- **Two characters, both measured:** **PRESENCE** (8 kHz push, 20 kHz recovery;
+  `docs/scheps_vocal_chain_presence_spec.md`) and **THICK** (net +4 dB at 30 Hz;
+  `docs/scheps_vocal_chain_thick_spec.md`). PRESENCE ships as the default, since
+  that is what this stage is for; THICK is a toggle beside the knob.
+- **Its own delay-compensated dry path** inside the kernel, so the blend doesn't
+  comb-filter.
+- **A mix law that keeps level while adding density:** equal power, corrected
+  for the measured dry/wet correlation, and passing through the compression's
+  yield (`densityDb`) so turning Parallel up *gently raises loudness* instead of
+  being level-flat. That is the density being asked for.
+- **Auto wet trim, input alignment, and a ceiling at its own output** (the
+  source peak), all measured (`computeSchepsAutoTrim`).
+
+**What is pinned and what is exposed:**
+
+| Scheps control | In VoxPressor |
+|---|---|
+| Mix | **Parallel** knob |
+| Character | PRESENCE / THICK toggle |
+| Squash (Peak Reduction) | Pinned at its calibrated 40 (~7.6 dB peak GR on the wet copy), on the bench |
+| Wet trim, correlation, density, alignment | Measured, as in Scheps |
+| Output | 0 (VoxPressor's makeup does this) |
+
+⚠ **Measure it on what it hears.** Standalone, Scheps measures the file it is
+given. Here it must measure the **Body stage's output**, so its trim and
+alignment are solved after Body (§5). Measuring the raw input would over-drive
+the cell by however much leveling Body did.
+
+⚠ **0 must be a true bypass.** At Mix 0 Scheps is bit-exact against its
+delayed input *except* for its ceiling's knee (a known ~0.25 dB residual). So
+Parallel 0 skips the stage and runs a 50-sample delay instead.
+
+⚠ **Overlap with Density.** Both now add density: Parallel by dynamic upward
+compression with a presence tilt, Density by a static curve with odd harmonics.
+They are different mechanisms, but presets should not max both (§11).
+
+### 4.5 Meters
 
 - IN / OUT ladders (`LevelMeter variant="modula"`).
 - Three stacked GR bars: **PEAKS** (76, with the body-GR tick from §4.2),
@@ -222,10 +276,10 @@ forced to 0). If DENSE-only wins by ear it can be promoted.
 - The HF Softener's activity scope is *not* included — one scope per window is
   enough, and it is the busiest part of that panel.
 
-### 4.5 Advanced (dev bench, gated like the PHAT*SS bench)
+### 4.6 Advanced (dev bench, gated like the PHAT*SS bench)
 
 Peaks patch (ratio, attack, release, threshold floor), Body ballistics, detector
-corner/shelf depths per tap, Inflator Curve and Band Split, the Color switch,
+corner/shelf depths per tap, Parallel Squash, Inflator Curve and Band Split, the Color switch,
 chain-order A/B, `VOX_LEGACY_PATCH`. Nothing on the bench ships to presets.
 
 ---
@@ -238,26 +292,27 @@ All measured once per file / selection, in the worker, against the **running
 | Measurement | Source | Used by |
 |---|---|---|
 | Gated RMS → input align | `dsp/inputAlign.js` | Both compressor stages' drive offset; Peaks threshold floor |
-| Rumble corner, median F0 | `voiceProfile.js` | Detector HP; Presence placement |
-| Presence peak frequency | VoiceRx analysis (port of Stage 3a) | Presence bell centre |
+| Rumble corner, median F0 | `voiceProfile.js` | Detector HP |
 | Reference peak (99.9th pct) | `percentileOfChannels` | Peaks solve |
 | Peaks drive | bounded search over loudest blocks (§4.2) | 76 Input |
 | Body drive | sampled render of [1]–[2], bisected | 2A Peak Reduction |
-| Post-compression gated RMS | render of stages [1]–[2] on ≤ 400 blocks | De-ess `levelOffset` |
+| Parallel trim, correlation, density, alignment | `computeSchepsAutoTrim` on the Body output | Parallel stage |
+| Post-compression gated RMS | render of stages [1]–[3] on ≤ 400 blocks | De-ess `levelOffset` |
 | Makeup plan | `solveMakeupPlan` (iterated — the 2A's valve makes output non-affine) | Output AUTO |
 | Source peak | `peakOfChannels` | Ceiling; Density anchor |
 
 ⚠ **The solves are sequential.** Peaks first (on the input), then Body (on the
-Peaks output), then the de-ess offset and makeup. Moving Peaks invalidates
-everything after it; moving Body invalidates de-ess and makeup only. Cache by
+Peaks output), then Parallel's trim (on the Body output), then the de-ess
+offset and makeup. Moving a knob invalidates every solve after its stage;
+Parallel's Mix and character invalidate only de-ess and makeup. Cache by
 document + span + the knobs upstream of each solve.
 
 ---
 
 ## 6. Latency, apply, chunking
 
-- Latency: FET 50 + LA-2A 50 + Inflator 50 (all 4x oversampled) =
-  **150 samples, constant**, reported once and trimmed by the apply path. Dry
+- Latency: FET 50 + LA-2A 50 + Scheps 50 + Inflator 50 (all 4x oversampled) =
+  **200 samples, constant**, reported once and trimmed by the apply path. Dry
   path in Mix delayed by the same amount. (Dropping Warmth also dropped its
   3 ms guard.)
 - Preview (worklet) and apply (OfflineAudioContext) sample-identical, **except**
@@ -273,15 +328,15 @@ document + span + the knobs upstream of each solve.
 
 ## 7. Factory presets
 
-A preset stores the eight panel values only. *All reasoned, to be auditioned.*
+A preset stores the eight panel values and the Parallel character only. *All reasoned, to be auditioned.*
 
-| Preset | Peaks | Body | De-ess | Presence | Air | Density | Mix |
+| Preset | Peaks | Body | Parallel | De-ess | Air | Density | Mix |
 |---|---|---|---|---|---|---|---|
-| **Default** | 3 | 40 | 40 | +1.5 | 1.5 | 30 | 100 |
-| **Audiobook Natural** | 2 | 30 | 35 | +0.5 | 1 | 15 | 100 |
-| **Podcast Punch** | 5 | 50 | 50 | +3 | 2 | 50 | 100 |
-| **Voiceover Forward** | 6 | 60 | 55 | +4 | 3 | 60 | 100 |
-| **Gentle Glue** | 1 | 35 | 30 | 0 | 0 | 20 | 50 |
+| **Default** | 3 | 40 | 30 PRESENCE | 40 | 1.5 | 20 | 100 |
+| **Audiobook Natural** | 2 | 30 | 15 PRESENCE | 35 | 1 | 10 | 100 |
+| **Podcast Punch** | 5 | 50 | 40 THICK | 50 | 2 | 30 | 100 |
+| **Voiceover Forward** | 6 | 60 | 45 PRESENCE | 55 | 3 | 30 | 100 |
+| **Gentle Glue** | 1 | 35 | 35 THICK | 30 | 0 | 10 | 50 |
 
 ---
 
@@ -317,12 +372,12 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
    in the Plugin Chain (should be near-identical at matched settings — a
    useful test).
 4. **De-ess** — embed HF Softener, fed the post-compression level offset.
-5. **Tone + Density** — Presence, Air, anchored Inflator.
+5. **Parallel, Air, Density** — embedded Scheps measured on the Body output, Air, anchored Inflator.
 6. **Panel, presets, chunked apply, smoke.**
 
 ### Acceptance tests (minimum)
 
-- All knobs at their "off" positions (Peaks 0, Body 0, De-ess 0, Presence 0,
+- All knobs at their "off" positions (Peaks 0, Body 0, Parallel 0, De-ess 0,
   Air 0, Density 0, Mix 100, Output 0) → **pure delay**, bit-exact.
 - Peaks: GR at the reference peak within ±0.3 dB of the knob across −30…−6 dBFS
   input levels, while median voiced GR stays under 0.5 dB at Peaks ≤ 4 on
@@ -330,7 +385,9 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
 - Peaks: on a low-crest file the solve stops at the threshold floor and reports
   the shortfall rather than compressing the body.
 - Body's avg GR within ±0.5 dB of target across −30…−6 dBFS input levels.
-- Output never exceeds the source peak, at every Density (ceiling + anchored
+- Parallel at matched settings is sample-identical to standalone Scheps Parallel
+  fed the Body stage's output.
+- Output never exceeds the source peak, at every Parallel and Density (ceiling + anchored
   Inflator with Clip).
 - Preview ≡ apply (sample-identical), chunked ≡ one-thread (≤ −130 dBFS).
 - Detector: a plosive burst produces < 1 dB of extra BODY GR vs. the same word
@@ -342,6 +399,8 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
 
 - **Kept:** the voice detector (plosive and sibilance de-weighting), the
   76 → 2A core, the built-in de-esser.
+- **No Presence EQ** (owner, October 2026): replaced by a parallel LA-2A
+  stage, the embedded Scheps Parallel in its PRESENCE character.
 - **No breath / room expander** (owner, October 2026): too hard to tune for
   the value. Compression will lift breaths and room tone between phrases;
   that is left to Noise Reduction or the preset chain's `vocalExpander`.
@@ -356,12 +415,16 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
    the ceiling / Plosive Tamer?
 3. **Density with or instead of the LA-2A harmonics** — stacked (proposed),
    with "instead" on the bench?
-4. **Density's loudness** — accept that it makes the A/B louder (proposed), or
+4. **Parallel and Density together** — keep both (proposed; different
+   mechanisms), or drop the Inflator now that Parallel adds density? And with
+   Parallel on the panel, is the outer **Mix** still needed, or is it a second,
+   confusing dry/wet control?
+5. **Density's loudness** — accept that it makes the A/B louder (proposed), or
    level-match the A/B in the preview only?
-5. **Chain order** — pin 76 → 2A, or expose a 2A → 76 A/B on the bench?
-6. **Peak restore on apply** — LA Classic 76 restores the peak to the ceiling
+6. **Chain order** — pin 76 → 2A, or expose a 2A → 76 A/B on the bench?
+7. **Peak restore on apply** — LA Classic 76 restores the peak to the ceiling
    on apply (the one place preview ≠ apply). Inherit that, or keep VoxPressor
    sample-identical and level-matched for the A/B?
-7. **Tier** — free like the compressors, or Pro like Auto Leveler / Plugin Chain?
-8. **Name on the toolbar** — "VoxPressor" in Dynamics, or its own top-level
+8. **Tier** — free like the compressors, or Pro like Auto Leveler / Plugin Chain?
+9. **Name on the toolbar** — "VoxPressor" in Dynamics, or its own top-level
    "Voice" entry for Mode 1/2 users who never open Dynamics?
