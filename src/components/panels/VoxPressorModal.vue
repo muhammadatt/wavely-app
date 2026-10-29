@@ -80,7 +80,10 @@ const bodyNote = computed(() => {
 const measuredNote = computed(() => {
   const m = voxMeasured.value
   const corner = Number.isFinite(m.cornerHz) ? `voice corner ${Math.round(m.cornerHz)} Hz` : 'voice corner 80 Hz (default)'
-  const makeup = `makeup ${m.makeupDb >= 0 ? '+' : ''}${(m.makeupDb ?? 0).toFixed(1)} dB`
+  // Per-stage makeup, restores included: the 1176's lands on its Output, the
+  // LA-2A's is its Gain plus the restore after the chain.
+  const sign = v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
+  const makeup = `makeup 1176 ${sign(m.peaksMakeupDb ?? 0)} · LA-2A ${sign((m.bodyMakeupDb ?? 0) + (m.makeupDb ?? 0))} dB`
   return `${corner} · ${makeup}`
 })
 
@@ -184,7 +187,7 @@ async function applyAndClose() {
     <p class="vp-about">
       Stage 1 (dev): a 1176 trims the peaks, then an LA-2A levels the voice.
       Both listen through a voice detector that ignores rumble; the LA-2A also
-      ignores plosives and sibilance. Makeup puts the peak back where it was, so what they take off comes back as loudness.
+      ignores plosives and sibilance. Each makes up its own level, as in a hand-built chain, so what they take off comes back as loudness.
     </p>
   </FloatingWindow>
 </template>

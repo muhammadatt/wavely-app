@@ -10,7 +10,7 @@
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupPlan } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
-import { solveVoxPressor, measureVoxPressorRawPeak } from '../audio/voxPressorSolve.js'
+import { solveVoxPressor, measureVoxPressorExact } from '../audio/voxPressorSolve.js'
 import { computeSoftClipperAutoMakeupDb } from '../audio/softClipperProcessor.js'
 import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
 import { measureVoiceProfile } from '../audio/voiceProfile.js'
@@ -97,9 +97,9 @@ self.onmessage = function (e) {
         postReply({ type: 'error', message: err.message })
       }
       break
-    case 'voxPressorRawPeak':
+    case 'voxPressorExact':
       try {
-        postDone({ rawPeakDb: measureVoxPressorRawPeak(channelData, sampleRate, params) })
+        postDone({ solved: measureVoxPressorExact(channelData, sampleRate, params.solved, params.sourcePeakDb) })
       } catch (err) {
         postReply({ type: 'error', message: err.message })
       }

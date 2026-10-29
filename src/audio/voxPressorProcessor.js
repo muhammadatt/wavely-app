@@ -109,9 +109,26 @@ export const VOX_KERNEL_DEFAULTS = {
   bodyAlignDb: 0,
   /** The speaker's rumble corner, Hz — measured (voiceProfile.js). */
   cornerHz: DEFAULT_CORNER_HZ,
-  /** Makeup gain, dB — measured (`solveVoxMakeup`). */
+  /**
+   * PER-STAGE MAKEUP — each compressor makes up its own level, as it would on
+   * its own: the 1176's goes to its Output (the last multiply on its wet path),
+   * the LA-2A's to its Gain (before its valve). Each stage has its own soft
+   * ceiling at its input's peak, and its peak is then restored to that ceiling
+   * (the 1176's restore folded into its Output and ceiling, the LA-2A's in
+   * `makeupDb` below). All MEASURED (`solveVoxPressor`), never user settings.
+   */
+  peaksMakeupDb: 0,
+  peaksCeilingDb: null,
+  peaksCeilingKneeDb: null,
+  bodyMakeupDb: 0,
+  bodyCeilingDb: null,
+  bodyCeilingKneeDb: null,
+  /** The LA-2A stage's peak restore, dB — a gain after the whole chain. */
   makeupDb: 0,
-  /** Output ceiling, dBFS (the source's peak) and its knee — measured with the makeup. */
+  /**
+   * The final safety ceiling at the source's peak and its knee: catches what
+   * the oversampled render adds between samples over the base-rate solve.
+   */
   ceilingDb: null,
   ceilingKneeDb: null,
   /** Manual trim after the ceiling, dB. */
@@ -201,12 +218,19 @@ export class VoxPressorKernel {
       ...PEAKS_PATCH,
       ...(p.peaksBench ?? {}),
       inputAlignDb: finite(p.peaksAlignDb, 0, -60, 60),
+      // The patch's Output cancels the Input drive; the stage's makeup rides on it.
+      outputGainDb: PEAKS_PATCH.outputGainDb + finite(p.peaksMakeupDb, 0, -36, 36),
+      ceilingDb: Number.isFinite(p.peaksCeilingDb) ? p.peaksCeilingDb : null,
+      ceilingKneeDb: Number.isFinite(p.peaksCeilingKneeDb) ? p.peaksCeilingKneeDb : null,
       oversample: this.oversampleOn,
     })
     this.la2a.setParams({
       ...BODY_PATCH,
       ...(p.bodyBench ?? {}),
       inputAlignDb: finite(p.bodyAlignDb, 0, -60, 60),
+      gainDb: finite(p.bodyMakeupDb, 0, -24, 24),
+      ceilingDb: Number.isFinite(p.bodyCeilingDb) ? p.bodyCeilingDb : null,
+      ceilingKneeDb: Number.isFinite(p.bodyCeilingKneeDb) ? p.bodyCeilingKneeDb : null,
       oversample: this.oversampleOn,
     })
 

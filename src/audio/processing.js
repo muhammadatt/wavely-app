@@ -684,13 +684,16 @@ export function computeVoxPressorSolve(segments, start, end, targets, sampleRate
 }
 
 /**
- * VoxPressor's processed peak with no makeup over the WHOLE region, dBFS — the
- * exact input to its peak-restoring makeup when the region is longer than the
- * solve's analysis window. See `measureVoxPressorRawPeak`.
+ * VoxPressor's per-stage peak restores, measured EXACTLY over the whole region
+ * — for a region longer than the solve's analysis window. Resolves the solved
+ * params with the restores, ceilings and Body offset corrected. See
+ * `measureVoxPressorExact`.
  */
-export function computeVoxPressorRawPeak(segments, start, end, solved, sampleRate, channels) {
-  return measureWholeRegionInWorker('voxPressorRawPeak', segments, start, end, solved, sampleRate, channels)
-    .then(d => d.rawPeakDb)
+export function computeVoxPressorExact(segments, start, end, solved, sampleRate, channels) {
+  const sourcePeakDb = regionPeakDb(segments, start, end, sampleRate, channels)
+  return measureWholeRegionInWorker(
+    'voxPressorExact', segments, start, end, { solved, sourcePeakDb }, sampleRate, channels,
+  ).then(d => d.solved)
 }
 
 /**

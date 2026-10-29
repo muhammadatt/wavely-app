@@ -4,12 +4,10 @@ import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
-  applyVoxPressorRegion, computeVoxPressorSolve, computeVoxPressorRawPeak, computePeakCache,
+  applyVoxPressorRegion, computeVoxPressorSolve, computeVoxPressorExact, computePeakCache,
 } from '../audio/processing.js'
 import { analysedWholeRegion } from '../audio/analysisWindow.js'
-import { makeupForRawPeak } from '../audio/voxPressorSolve.js'
-import { ceilingKneeDbFor } from '../audio/dsp/makeupReference.js'
-import { toKernelParams } from '../audio/effects/voxPressorParams.js'
+import { toKernelParams, VOX_MEASURED_KEYS } from '../audio/effects/voxPressorParams.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { voxPressorEffect as soloEffect, VOX_DEFAULTS } from '../audio/effects/voxPressor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -17,8 +15,8 @@ import { snapshotLevels } from '../audio/effects/levelTap.js'
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const VOX_WINDOW_ID = 'vox-pressor'
 
-/** Measured keys, pushed to the live node in this order — ceiling first. */
-const MEASURED = ['ceilingDb', 'ceilingKneeDb', 'cornerHz', 'peaksAlignDb', 'bodyAlignDb', 'makeupDb']
+/** Measured keys, pushed to the live node in this order — ceilings first. */
+const MEASURED = VOX_MEASURED_KEYS
 
 const copies = pluginCopies((copy, life) => {
   const effect = effectForCopy(soloEffect, copy)
@@ -33,14 +31,7 @@ const copies = pluginCopies((copy, life) => {
    * Everything `solveVoxPressor` measured, plus the readouts. The kernel
    * values ride in `currentParams()` so preview and apply cannot disagree.
    */
-  const voxMeasured = ref({
-    cornerHz: VOX_DEFAULTS.cornerHz,
-    peaksAlignDb: VOX_DEFAULTS.peaksAlignDb,
-    bodyAlignDb: VOX_DEFAULTS.bodyAlignDb,
-    makeupDb: VOX_DEFAULTS.makeupDb,
-    ceilingDb: VOX_DEFAULTS.ceilingDb,
-    ceilingKneeDb: VOX_DEFAULTS.ceilingKneeDb,
-  })
+  const voxMeasured = ref(Object.fromEntries(MEASURED.map(k => [k, VOX_DEFAULTS[k]])))
   /** What the solve reached: { peaksDb, peaksBodyDb, peaksLimited, bodyDb } or null. */
   const voxReadout = ref(null)
   const voxBusy = ref(false)
@@ -264,23 +255,21 @@ const copies = pluginCopies((copy, life) => {
         await solve(segments, start, end)
       }
       /**
-       * ⚠ AN EXACT MAKEUP FOR A REGION LONGER THAN THE SOLVE'S WINDOW. The
-       * makeup restores the processed peak to the source's, and the window's
-       * peak is only a lower bound on the region's — so its makeup is too
-       * generous and would push the passage it never saw into the ceiling.
-       * Measured over the whole region, at the offsets just solved.
+       * ⚠ EXACT RESTORES FOR A REGION LONGER THAN THE SOLVE'S WINDOW. Each
+       * stage restores its peak to its ceiling, and the window's peak is only
+       * a lower bound on the region's — so its restores are too generous and
+       * would push the passage it never saw into the ceilings. Re-measured over
+       * the whole region at the offsets and makeups just solved.
        */
       if (!analysedWholeRegion(start, end)) {
-        const m = voxMeasured.value
-        const rawPeakDb = await computeVoxPressorRawPeak(
+        const exact = await computeVoxPressorExact(
           segments, start, end, toKernelParams(currentParams()),
           state.currentFile.sampleRate, state.currentFile.channels,
         )
-        const makeupDb = makeupForRawPeak(m.ceilingDb, rawPeakDb)
-        const ceilingKneeDb = ceilingKneeDbFor(rawPeakDb + makeupDb - m.ceilingDb)
-        voxMeasured.value = { ...m, makeupDb, ceilingKneeDb }
-        pushParam('ceilingKneeDb', ceilingKneeDb)
-        pushParam('makeupDb', makeupDb)
+        const next = { ...voxMeasured.value }
+        for (const k of MEASURED) if (k in exact) next[k] = exact[k]
+        voxMeasured.value = next
+        for (const k of MEASURED) pushParam(k, next[k])
       }
     }
 
@@ -333,10 +322,12 @@ const copies = pluginCopies((copy, life) => {
           if (!(voxPreview.value || isOpen(windowId))) return
           // The makeup goes with them: it was solved for those stages, and
           // left on it would lift the bypassed signal by several dB.
-          voxMeasured.value = { ...voxMeasured.value, peaksAlignDb: null, bodyAlignDb: null, makeupDb: 0 }
-          pushParam('peaksAlignDb', null)
-          pushParam('bodyAlignDb', null)
-          pushParam('makeupDb', 0)
+          const cleared = {
+            peaksAlignDb: null, bodyAlignDb: null,
+            peaksMakeupDb: 0, peaksRestoreDb: 0, bodyMakeupDb: 0, makeupDb: 0,
+          }
+          voxMeasured.value = { ...voxMeasured.value, ...cleared }
+          for (const [k, v] of Object.entries(cleared)) pushParam(k, v)
           voxReadout.value = null
           solveSeq++
           scheduleSolve()

@@ -31,10 +31,30 @@ export const VOX_DEFAULTS = {
   cornerHz: null,
   peaksAlignDb: null,
   bodyAlignDb: null,
+  // Per-stage makeup, ceilings and restores (see `solveStageMakeup`).
+  peaksMakeupDb: 0,
+  peaksCeilingDb: null,
+  peaksCeilingKneeDb: null,
+  peaksRestoreDb: 0,
+  bodyMakeupDb: 0,
+  bodyCeilingDb: null,
+  bodyCeilingKneeDb: null,
+  /** The LA-2A stage's restore, after the chain. */
   makeupDb: 0,
+  /** The final safety ceiling at the source peak. */
   ceilingDb: null,
   ceilingKneeDb: null,
 }
+
+/** The keys a solve measures: never a user setting, never in a preset. */
+export const VOX_MEASURED_KEYS = Object.freeze([
+  // Ceilings first: they reach the live node as separate messages, and a
+  // raised makeup must never run against an old ceiling (see useLA2A).
+  'ceilingDb', 'ceilingKneeDb', 'peaksCeilingDb', 'peaksCeilingKneeDb',
+  'bodyCeilingDb', 'bodyCeilingKneeDb',
+  'cornerHz', 'peaksAlignDb', 'bodyAlignDb',
+  'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb',
+])
 
 /** Map panel params to kernel params. */
 export function toKernelParams(p) {
@@ -59,7 +79,14 @@ export function toKernelParams(p) {
     ...(Number.isFinite(p.cornerHz) ? { cornerHz: p.cornerHz } : {}),
     ...(Number.isFinite(p.peaksAlignDb) ? { peaksAlignDb: p.peaksAlignDb } : {}),
     ...(Number.isFinite(p.bodyAlignDb) ? { bodyAlignDb: p.bodyAlignDb } : {}),
-    // The ceiling and its knee travel together, and null clears them.
+    peaksMakeupDb: Number.isFinite(p.peaksMakeupDb) ? p.peaksMakeupDb : 0,
+    peaksRestoreDb: Number.isFinite(p.peaksRestoreDb) ? p.peaksRestoreDb : 0,
+    bodyMakeupDb: Number.isFinite(p.bodyMakeupDb) ? p.bodyMakeupDb : 0,
+    // Each ceiling and its knee travel together, and null clears them.
+    peaksCeilingDb: Number.isFinite(p.peaksCeilingDb) ? p.peaksCeilingDb : null,
+    peaksCeilingKneeDb: Number.isFinite(p.peaksCeilingKneeDb) ? p.peaksCeilingKneeDb : null,
+    bodyCeilingDb: Number.isFinite(p.bodyCeilingDb) ? p.bodyCeilingDb : null,
+    bodyCeilingKneeDb: Number.isFinite(p.bodyCeilingKneeDb) ? p.bodyCeilingKneeDb : null,
     ceilingDb: Number.isFinite(p.ceilingDb) ? p.ceilingDb : null,
     ceilingKneeDb: Number.isFinite(p.ceilingKneeDb) ? p.ceilingKneeDb : null,
   }

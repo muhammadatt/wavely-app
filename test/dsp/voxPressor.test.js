@@ -19,7 +19,7 @@ import {
   voiceDetectorSections, PLOSIVE_SHELF_DB, SIBILANCE_SHELF_DB,
 } from '../../src/audio/dsp/voiceDetector.js'
 import {
-  solveVoxPressor, PEAKS_BODY_WARN_DB, measureVoxPressorRawPeak, makeupForRawPeak,
+  solveVoxPressor, PEAKS_BODY_WARN_DB, measureVoxPressorExact,
 } from '../../src/audio/voxPressorSolve.js'
 import { magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
 import { gatedRmsOfChannels } from '../../src/audio/dsp/inputAlign.js'
@@ -216,20 +216,20 @@ test('the solves are level-invariant: offsets track the file, results do not', (
   for (const [lo, hi] of [[a, b], [b, c]]) {
     assert.ok(Math.abs((lo.peaksAlignDb - hi.peaksAlignDb) - 10) < 0.2, 'peaks offset follows level')
     assert.ok(Math.abs((lo.bodyAlignDb - hi.bodyAlignDb) - 10) < 0.3, 'body offset follows level')
-    // ⚠ NOT EXACT WITH BODY ON, AND THAT IS THE LA-2A, NOT THE SOLVE. The
-    // makeup restores the PEAK, and LA Vintage 2A's output valve is driven by
-    // absolute level by design, so a hotter file shapes its loudest sample
-    // differently: 0.3-0.4 dB per 10 dB here. The Peaks stage alone is exact
-    // (next test). A level-matched makeup hid this; a peak reference sees it.
-    assert.ok(Math.abs(lo.makeupDb - hi.makeupDb) < 0.6,
-      `makeup ${lo.makeupDb.toFixed(2)} vs ${hi.makeupDb.toFixed(2)} dB across 10 dB of level`)
+    // ⚠ THE LA-2A STAGE'S MAKEUP IS NOT EXACTLY LEVEL-INVARIANT, AND THAT IS
+    // THE LA-2A: its output valve is driven by absolute level by design, so a
+    // hotter file shapes its loudest samples differently. The 1176 stage is
+    // exact (next test).
+    const total = q => q.bodyMakeupDb + q.makeupDb
+    assert.ok(Math.abs(total(lo) - total(hi)) < 0.6,
+      `LA-2A makeup ${total(lo).toFixed(2)} vs ${total(hi).toFixed(2)} dB across 10 dB of level`)
   }
 })
 
-test('with the LA-2A out, the peak-restoring makeup is exactly level-invariant', () => {
+test('the 1176 stage\'s makeup is exactly level-invariant', () => {
   const makeups = [-34, -24, -14].map(levelDb => solveVoxPressor(
     [narration(SR, { seconds: 12, levelDb })], SR, { peaksDb: 3, bodyDb: 0, cornerHz: 70 },
-  ).makeupDb)
+  ).peaksMakeupDb)
   assert.ok(Math.max(...makeups) - Math.min(...makeups) < 0.02, makeups.map(m => m.toFixed(3)).join(' / '))
 })
 
@@ -272,12 +272,14 @@ test('makeup restores the source peak, and the voice comes out louder', () => {
   }
 })
 
-test('the whole-region raw peak reproduces the solve\'s makeup exactly', () => {
-  // Apply re-measures the makeup this way when the region outgrew the solve's
-  // window; on a region the solve saw whole, the two must agree.
+test('the exact whole-region pass reproduces a whole-region solve', () => {
+  // Apply re-measures the per-stage restores this way when the region outgrew
+  // the solve's window; on a region the solve saw whole, the two must agree.
   const { x, r } = solved[1]
-  const rawPeakDb = measureVoxPressorRawPeak([x], SR, { ...r, cornerHz: 70 })
-  assert.ok(Math.abs(makeupForRawPeak(r.ceilingDb, rawPeakDb) - r.makeupDb) < 1e-9)
+  const exact = measureVoxPressorExact([x], SR, { ...r, cornerHz: 70 }, r.ceilingDb)
+  for (const k of ['peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb', 'bodyAlignDb', 'bodyCeilingDb', 'makeupDb']) {
+    assert.ok(Math.abs(exact[k] - r[k]) < 1e-6, `${k}: ${exact[k]} vs ${r[k]}`)
+  }
 })
 
 test('zero targets switch the stages off', () => {

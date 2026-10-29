@@ -15,42 +15,33 @@
  *   for the fixed floor this replaced.
  * - BODY (dB) — the LA-2A's average gain reduction over the voiced blocks of
  *   what the Peaks stage left.
- * - MAKEUP — PEAK RESTORE: the gain that puts the processed output's peak back
- *   on the source's (`rawPeakDb` → `makeupDb = sourcePeak − rawPeak`), with a
- *   soft ceiling at the source peak as the safety net for what the oversampled
- *   render adds between samples. The makeup is the last multiply before the
- *   ceiling, so the output is affine in it and ONE render answers it in closed
- *   form. Always on, no switch (owner's call).
+ * - MAKEUP — PER STAGE (`solveStageMakeup`), as the owner's hand-built
+ *   1176 → LA-2A chain does it: each stage makes up its own level with the
+ *   compressors' shared 99.9th-percentile reference, holds a soft ceiling at
+ *   its input's peak, and has its peak restored to that ceiling. A final
+ *   ceiling at the source peak catches what the oversampled render adds
+ *   between samples. Always on, no switch (owner's call).
  *
- * ⚠ WHY PEAK RESTORE. It is what the owner's hand-built chain does (1176 with
- * auto makeup, then LA-2A with auto makeup): trim the peaks, hand the trimmed
- * dB back, and everything under them comes up — so Peaks buys LOUDNESS, which
- * is the point of putting a peak trimmer first. Measured on a real narration
- * clip: Peaks 3 alone +3.2 dB louder at the same peak, Peaks 6 +4.6, Body 4
- * alone +2.2 (the opto lowers the voice nearly as much as the peaks).
+ * ⚠ WHY PER STAGE. One peak restore after both compressors (the previous
+ * build) could not match the chain: the LA-2A's slow opto lowers the sustained
+ * voice more than each syllable's onset, so the crest grows and a single
+ * restore hands back only what the peak-to-body gap shrank — +1.0 dB at Peaks
+ * 3 / Body 4 on the owner's "Messy and Bright" clip, where the chain made
+ * +3.3. Per stage it is +3.5, almost all from the 1176 stage, as the owner
+ * described the chain. The extra level is each stage's ceiling soft-limiting
+ * the onsets that stage let through: the same trade the chain makes.
  *
- * ⚠ TWO REFERENCES WERE TRIED FIRST. (1) The compressors' 99.9th percentile:
- * near-peak by design, so it hands back what the 1176 took on the samples it
- * took it from and the memoryless ceiling ends up doing the peak control as a
- * soft clipper (+7.0 dB of makeup at Peaks 3 / Body 4 on synthetic narration).
- * (2) Level-matched (gated RMS back on the input's), stage 1's: honest A/B,
- * but the plugin could never make anything louder — rejected by the owner.
- * An outlier-robust peak (the 3rd or 5th loudest 50 ms block) bought 1–2 dB
- * more on the same clip only by having the ceiling clip 1–2.5 dB, and was no
- * more monotone; not taken.
- *
- * ⚠ THE KNOWN COST OF A TRUE-PEAK REFERENCE: one onset that escapes the 1176
- * sets the makeup for the whole region. On the owner's clip loudness rises with
- * the knob everywhere except Body 4 / Peaks 10, where it fell 4.34 → 3.07 dB
- * against Peaks 8 (and a 0.09 dB dip at Peaks 1). Both sit in or near the
- * amber "compressing the voice" range. The LA Vintage 2A and LA Classic 76
- * ledger in CLAUDE.md records the same mechanism at much larger scale, which is
- * why those two do NOT use it; here the 1176 trims those onsets first.
- *
+ * ⚠ HISTORY. Level-matched makeup (gated RMS back on the input's) was stage
+ * 1's and was rejected for never making anything louder. A single true-peak
+ * restore came next and lost to the per-stage chain above; it was also pinned
+ * by any one peak the 1176 could not see — a bright "s" on "Messy and Bright"
+ * left the whole clip 3.6 dB quieter until the 1176's detector was made to
+ * hear sibilance (`peaksTap`).
+
  * ⚠ SEQUENTIAL, AND EACH STAGE IS MEASURED ON WHAT IT HEARS. Peaks on the
  * input; Body on the Peaks output (rendered once at the solved offset and then
  * fed to a kernel with Peaks bypassed, which at the base rate is a zero-length
- * delay, so it is the chain exactly); makeup on the whole chain.
+ * delay, so it is the chain exactly); each stage's makeup on its own output.
  *
  * ⚠ ALL RENDERS ARE BASE RATE (`oversample: false`), as every compressor's
  * makeup solve is: the detector and the ballistics run at the base rate in
@@ -62,7 +53,7 @@ import { VoiceDetector } from './dsp/voiceDetector.js'
 import { measureVoiceProfile } from './voiceProfile.js'
 import { gatedRmsOfChannels } from './dsp/inputAlign.js'
 import {
-  peakOfChannels, ceilingKneeDbFor, CEILING_KNEE_DB,
+  peakOfChannels, ceilingKneeDbFor, solveMakeupPlan,
 } from './dsp/makeupReference.js'
 
 /** Block length for the peak and voiced-level statistics, seconds. */
@@ -241,6 +232,8 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
   if (!(inPeak > 0)) {
     return {
       cornerHz, peaksOn: false, bodyOn: false, peaksAlignDb: 0, bodyAlignDb: 0,
+      peaksMakeupDb: 0, peaksCeilingDb: null, peaksCeilingKneeDb: null, peaksRestoreDb: 0,
+      bodyMakeupDb: 0, bodyCeilingDb: null, bodyCeilingKneeDb: null,
       makeupDb: 0, ceilingDb: null, ceilingKneeDb: null,
       peaksDb: 0, peaksBodyDb: 0, peaksLimited: false, bodyDb: 0,
     }
@@ -252,6 +245,10 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
   let peaksDb = 0
   let peaksBodyDb = 0
   let peaksLimited = false
+  let peaksMakeupDb = 0
+  let peaksCeilingDb = null
+  let peaksCeilingKneeDb = null
+  let peaksRestoreDb = 0
   let afterPeaks = channels
   const peaksOn = peaksTarget > 0
   if (peaksOn) {
@@ -297,22 +294,36 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
     // Only when the whole offset range cannot reach the target — material too
     // quiet or too short to measure, not a guard.
     peaksLimited = !r.reached && r.x >= hi - 1e-9
-    afterPeaks = last.out
+
+    // The 1176 stage's own makeup, ceiling and peak restore. The restore is
+    // folded into its Output and its ceiling together — bit-identical to
+    // scaling the stage's output, since the knee is homogeneous in dB.
+    const m = solveStageMakeup(channels, (chs, extra) => renderPeaks(chs, sampleRate, base, peaksAlignDb, extra), {
+      gain: 'peaksMakeupDb', ceiling: 'peaksCeilingDb', knee: 'peaksCeilingKneeDb',
+    })
+    peaksRestoreDb = m.restoreDb
+    peaksMakeupDb = m.gainDb + m.restoreDb
+    peaksCeilingDb = Number.isFinite(m.ceilingDb) ? m.ceilingDb + m.restoreDb : null
+    peaksCeilingKneeDb = m.kneeDb
+    afterPeaks = renderPeaks(channels, sampleRate, base, peaksAlignDb, {
+      peaksMakeupDb, peaksCeilingDb, peaksCeilingKneeDb,
+    })
   }
 
-  // ── BODY ── measured on what Peaks left.
+  // ── BODY ── measured on what the 1176 stage put out, makeup and all.
   let bodyAlignDb = 0
   let bodyDb = 0
-  let final = afterPeaks
+  let bodyMakeupDb = 0
+  let bodyCeilingDb = null
+  let bodyCeilingKneeDb = null
+  let bodyRestoreDb = 0
   const bodyOn = bodyTarget > 0
   if (bodyOn) {
     const midRef = referenceBlocks(afterPeaks, sampleRate)
     const W = Math.round(SOLVE_BLOCK_S * sampleRate)
     let last = null
     const measure = (align) => {
-      const r = processVoxPressorBuffer(afterPeaks, sampleRate, {
-        ...base, peaksOn: false, bodyOn: true, bodyAlignDb: align,
-      }, { meter: true })
+      const r = renderBody(afterPeaks, sampleRate, base, align, {}, { meter: true })
       // Average cell reduction over the voiced blocks, from the cell's own
       // meter (one value per 128-sample kernel block).
       const per = W / 128
@@ -333,50 +344,157 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
     if (!last || last.align !== r.x) measure(r.x)
     bodyAlignDb = r.x
     bodyDb = last.value
-    final = last.out
+
+    // The LA-2A stage's own makeup (its Gain, before the valve — so the plan
+    // iterates renders), ceiling at its input's peak, and peak restore, which
+    // lands as the gain after the chain (`makeupDb`).
+    const m = solveStageMakeup(afterPeaks, (chs, extra) => renderBody(chs, sampleRate, base, bodyAlignDb, extra).channelData, {
+      gain: 'bodyMakeupDb', ceiling: 'bodyCeilingDb', knee: 'bodyCeilingKneeDb',
+    })
+    bodyMakeupDb = m.gainDb
+    bodyCeilingDb = m.ceilingDb
+    bodyCeilingKneeDb = m.kneeDb
+    bodyRestoreDb = m.restoreDb
   }
 
-  // ── MAKEUP + CEILING ── peak restore, closed form: the makeup is the last
-  // multiply, so the output peak is the raw peak plus the makeup exactly.
-  const ceilingDb = db(inPeak)
-  const rawPeakDb = db(peakOfChannels(final))
-  const makeupDb = makeupForRawPeak(ceilingDb, rawPeakDb)
-  // Zero by construction on the base-rate render; the margin in
-  // `ceilingKneeDbFor` is for what the oversampled render adds between samples.
-  // A window that is not the whole region gets the wide knee: its raw peak is a
-  // lower bound, so its makeup can be generous (apply re-measures exactly).
-  const ceilingKneeDb = p.wholeRegion ? ceilingKneeDbFor(rawPeakDb + makeupDb - ceilingDb) : CEILING_KNEE_DB
-
+  // ── FINAL SAFETY CEILING ── at the source peak. Both stages already land
+  // their peak on it at the base rate; this catches what the oversampled render
+  // adds between samples, through the smallest knee (`ceilingKneeDbFor(0)`).
   return {
     cornerHz,
     peaksOn, bodyOn,
     peaksAlignDb, bodyAlignDb,
-    makeupDb, ceilingDb, ceilingKneeDb,
+    peaksMakeupDb, peaksCeilingDb, peaksCeilingKneeDb, peaksRestoreDb,
+    bodyMakeupDb, bodyCeilingDb, bodyCeilingKneeDb,
+    makeupDb: bodyRestoreDb,
+    ceilingDb: db(inPeak),
+    ceilingKneeDb: ceilingKneeDbFor(0),
     peaksDb, peaksBodyDb, peaksLimited,
     bodyDb,
   }
 }
 
-/** Peak-restoring makeup: the gain that puts `rawPeakDb` back on `ceilingDb`. */
-export function makeupForRawPeak(ceilingDb, rawPeakDb) {
-  if (!Number.isFinite(ceilingDb) || !Number.isFinite(rawPeakDb)) return 0
-  return Math.max(-24, Math.min(24, ceilingDb - rawPeakDb))
+/**
+ * One stage's own makeup, as LA Vintage 2A and LA Classic 76 make up on their
+ * own (`dsp/makeupReference.js`, shared, not copied): the 99.9th-percentile
+ * reference via `solveMakeupPlan`, a soft ceiling at the stage's INPUT peak
+ * with the knee the solve sizes, and then the stage's peak restored to that
+ * ceiling (LA Classic 76's apply-time restore, applied to both stages here).
+ *
+ * ⚠ WHY PER STAGE, AND WHY THE CEILING DOES WORK HERE. The owner's hand-built
+ * 1176 → LA-2A chain makes up at each plugin, and that is where its loudness
+ * comes from. A single peak restore after both compressors cannot match it:
+ * the opto's slow attack lowers the sustained voice more than each syllable's
+ * onset, so the chain's crest grows and one restore at the end hands back
+ * only what the peak-to-body gap shrank. On the owner's "Messy and Bright"
+ * clip that was +1.0 dB at Peaks 3 / Body 4 against the chain's +3.3; per
+ * stage it is +3.5. The extra level is bought by each stage's ceiling
+ * soft-limiting the onsets that stage let through — the same trade the
+ * owner's chain makes. Owner's call.
+ *
+ * @param {(chs: Float32Array[], extra: object) => Float32Array[]} render
+ * @param {{ gain: string, ceiling: string, knee: string }} keys  kernel param names
+ * @returns {{ gainDb, ceilingDb, kneeDb, restoreDb, out }} `out` is the stage
+ *   rendered with its makeup and ceiling but BEFORE the restore
+ */
+export function solveStageMakeup(input, render, keys) {
+  const plan = solveMakeupPlan({
+    channelData: input,
+    render: (chs, extra) => render(chs, { ...extra, [keys.ceiling]: null }),
+    gainKey: keys.gain,
+    reference: 'percentile',
+    minDb: -24,
+    maxDb: 24,
+  })
+  if (!Number.isFinite(plan.ceilingDb)) {
+    return { gainDb: 0, ceilingDb: null, kneeDb: null, restoreDb: 0, out: input }
+  }
+  const out = render(input, {
+    [keys.gain]: plan.makeupDb, [keys.ceiling]: plan.ceilingDb, [keys.knee]: plan.ceilingKneeDb,
+  })
+  return {
+    gainDb: plan.makeupDb,
+    ceilingDb: plan.ceilingDb,
+    kneeDb: plan.ceilingKneeDb,
+    restoreDb: restoreToCeilingDb(plan.ceilingDb, db(peakOfChannels(out))),
+    out,
+  }
+}
+
+/** The gain that puts a rendered peak back on its ceiling. */
+export function restoreToCeilingDb(ceilingDb, peakDb) {
+  if (!Number.isFinite(ceilingDb) || !Number.isFinite(peakDb)) return 0
+  return Math.max(-24, Math.min(24, ceilingDb - peakDb))
+}
+
+/** Render the Peaks stage alone (base rate) — the solve's and the exact pass's. */
+function renderPeaks(channels, sampleRate, base, alignDb, extra = {}) {
+  return processVoxPressorBuffer(channels, sampleRate, {
+    ...base, peaksOn: true, bodyOn: false, peaksAlignDb: alignDb, ...extra,
+  }).channelData
+}
+
+/** Render the Body stage alone (base rate). */
+function renderBody(channels, sampleRate, base, alignDb, extra = {}, opts) {
+  return processVoxPressorBuffer(channels, sampleRate, {
+    ...base, peaksOn: false, bodyOn: true, bodyAlignDb: alignDb, ...extra,
+  }, opts)
 }
 
 /**
- * The processed region's peak with no makeup, dBFS — for an EXACT makeup over a
- * region longer than the solve's analysis window.
+ * EXACT per-stage restores over a WHOLE region, for one longer than the
+ * solve's analysis window. Returns the solved params with the restores, the
+ * ceilings and the Body offset corrected.
  *
- * ⚠ THE SOLVE'S WINDOW CANNOT ANSWER THIS FOR A LONG REGION. A window's peak is
- * a lower bound on the region's, so a makeup derived from it is too generous,
- * and the loud passage it never saw would be pushed into the ceiling (the
- * LA Classic 76 peak-restore lesson in CLAUDE.md). Base rate, like the solve.
+ * ⚠ A WINDOW'S PEAK IS ONLY A LOWER BOUND ON THE REGION'S, so a restore
+ * derived from it is too generous and pushes the passage it never saw into
+ * the ceiling (the LA Classic 76 peak-restore lesson in CLAUDE.md). The
+ * makeups and offsets stay the window's, as every compressor's do; the two
+ * restores are re-measured here, and the Body offset follows the 1176
+ * stage's level change (level and drive add in dB in the LA-2A's detector).
  *
- * @param {object} solved  the solve's offsets and stage switches
+ * @param {object} solved        the solve's result (kernel params)
+ * @param {number} sourcePeakDb  the whole region's peak, dBFS
  */
-export function measureVoxPressorRawPeak(channels, sampleRate, solved) {
-  const out = processVoxPressorBuffer(channels, sampleRate, {
-    ...solved, makeupDb: 0, ceilingDb: null, outputDb: 0, listen: 'off', oversample: false,
-  }).channelData
-  return db(peakOfChannels(out))
+export function measureVoxPressorExact(channels, sampleRate, solved, sourcePeakDb) {
+  const base = {
+    ...solved, oversample: false, listen: 'off', outputDb: 0, makeupDb: 0, ceilingDb: null,
+  }
+  let stage1 = channels
+  let peaksMakeupDb = 0
+  let peaksCeilingDb = null
+  let peaksRestoreDb = 0
+  let shiftDb = 0
+  if (solved.peaksOn) {
+    const gainDb = solved.peaksMakeupDb - solved.peaksRestoreDb
+    const madeUp = renderPeaks(channels, sampleRate, base, solved.peaksAlignDb, {
+      peaksMakeupDb: gainDb, peaksCeilingDb: sourcePeakDb, peaksCeilingKneeDb: solved.peaksCeilingKneeDb,
+    })
+    peaksRestoreDb = restoreToCeilingDb(sourcePeakDb, db(peakOfChannels(madeUp)))
+    peaksMakeupDb = gainDb + peaksRestoreDb
+    peaksCeilingDb = sourcePeakDb + peaksRestoreDb
+    shiftDb = peaksRestoreDb - solved.peaksRestoreDb
+    stage1 = renderPeaks(channels, sampleRate, base, solved.peaksAlignDb, {
+      peaksMakeupDb, peaksCeilingDb, peaksCeilingKneeDb: solved.peaksCeilingKneeDb,
+    })
+  }
+  let bodyAlignDb = solved.bodyAlignDb
+  let bodyCeilingDb = null
+  let makeupDb = 0
+  if (solved.bodyOn) {
+    bodyAlignDb = solved.bodyAlignDb - shiftDb
+    bodyCeilingDb = db(peakOfChannels(stage1))
+    const out = renderBody(stage1, sampleRate, base, bodyAlignDb, {
+      bodyMakeupDb: solved.bodyMakeupDb, bodyCeilingDb, bodyCeilingKneeDb: solved.bodyCeilingKneeDb,
+    }).channelData
+    makeupDb = restoreToCeilingDb(bodyCeilingDb, db(peakOfChannels(out)))
+  }
+  return {
+    ...solved,
+    peaksMakeupDb, peaksCeilingDb, peaksRestoreDb,
+    bodyAlignDb, bodyCeilingDb,
+    makeupDb,
+    ceilingDb: sourcePeakDb,
+    ceilingKneeDb: ceilingKneeDbFor(0),
+  }
 }
