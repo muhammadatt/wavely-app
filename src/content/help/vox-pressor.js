@@ -18,7 +18,7 @@ export default {
     },
     {
       label: 'Listen',
-      text: 'Hear what each compressor listens to instead of the output: rumble and sibilance turned down, and for the LA-2A plosives too',
+      text: 'Hear what each compressor listens to instead of the output: rumble turned down for both, and for the LA-2A plosives and sibilance too',
     },
     {
       label: 'Output',

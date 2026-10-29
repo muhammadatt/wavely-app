@@ -13,7 +13,7 @@ import { narration } from '../helpers/narration.js'
 import { LA2AKernel } from '../../src/audio/la2aProcessor.js'
 import { FET1176Kernel } from '../../src/audio/fet1176Processor.js'
 import {
-  processVoxPressorBuffer, VOX_KERNEL_DEFAULTS,
+  processVoxPressorBuffer, VOX_KERNEL_DEFAULTS, peaksTap, BODY_TAP,
 } from '../../src/audio/voxPressorProcessor.js'
 import {
   voiceDetectorSections, PLOSIVE_SHELF_DB, SIBILANCE_SHELF_DB,
@@ -103,9 +103,9 @@ test('stereo: an identical pair renders identically on both sides', () => {
   assert.deepEqual(channelData[1], channelData[0])
 })
 
-test('detector shape: the Body tap ducks plosives and sibilance, the Peaks tap only sibilance', () => {
-  const body = voiceDetectorSections(SR, { cornerHz: 70, plosive: true })
-  const peaks = voiceDetectorSections(SR, { cornerHz: 70, plosive: false })
+test('detector shape: the Body tap ducks plosives and sibilance, the Peaks tap neither', () => {
+  const body = voiceDetectorSections(SR, { cornerHz: 70, ...BODY_TAP })
+  const peaks = voiceDetectorSections(SR, { cornerHz: 70, ...peaksTap(VOX_KERNEL_DEFAULTS.peaksSibilance) })
   const f = [40, 100, 1000, 12000]
   const b = magnitudeResponseDb(body, f, SR)
   const p = magnitudeResponseDb(peaks, f, SR)
@@ -116,8 +116,9 @@ test('detector shape: the Body tap ducks plosives and sibilance, the Peaks tap o
   assert.ok(p[1] > -3, 'the Peaks tap keeps a plosive audible to the 1176')
   // Vowels: untouched on both.
   assert.ok(Math.abs(b[2]) < 1 && Math.abs(p[2]) < 1)
-  // Sibilance: the full shelf on both.
-  assert.ok(Math.abs(b[3] - SIBILANCE_SHELF_DB) < 1 && Math.abs(p[3] - SIBILANCE_SHELF_DB) < 1)
+  // Sibilance: the full shelf on Body; the 1176 hears it, so it can trim it.
+  assert.ok(Math.abs(b[3] - SIBILANCE_SHELF_DB) < 1)
+  assert.ok(Math.abs(p[3]) < 1, `12 kHz on the Peaks tap: ${p[3].toFixed(2)} dB`)
   assert.ok(PLOSIVE_SHELF_DB < 0)
 })
 
@@ -299,4 +300,31 @@ test('a stage with no measured offset is bypassed, not run uncalibrated', async 
   const measured = toKernelParams({ ...VOX_DEFAULTS, peaksAlignDb: -10, bodyAlignDb: 6 })
   assert.equal(measured.peaksOn, true)
   assert.equal(measured.bodyOn, true)
+})
+
+test('Peaks trims a sibilant spike instead of letting it set the makeup', () => {
+  // The owner's "Messy and Bright" failure, synthetic: a voice with one bright
+  // "s" spike well above every voiced peak. With the 1176 deaf to sibilance the
+  // spike passed untouched and the peak-restoring makeup was pinned to it.
+  const x = narration(SR, { seconds: 12, levelDb: -24, sibilants: false }).slice()
+  let s = 3
+  const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296
+  let vPeak = 0
+  for (const v of x) vPeak = Math.max(vPeak, Math.abs(v))
+  const at = Math.round(6.05 * SR)
+  let prev = 0
+  for (let i = 0; i < Math.round(0.08 * SR); i++) {
+    const w = rnd() * 2 - 1
+    x[at + i] += 2.2 * vPeak * Math.sin(Math.PI * i / (0.08 * SR)) * (w - prev)
+    prev = w
+  }
+  const gain = (sib) => {
+    const r = solveVoxPressor([x], SR, { peaksDb: 3, bodyDb: 0, cornerHz: 70, peaksSibilance: sib })
+    const out = processVoxPressorBuffer([x], SR, { ...r, peaksSibilance: sib, oversample: false }).channelData
+    return db(gatedRmsOfChannels(out, SR)) - db(gatedRmsOfChannels([x], SR))
+  }
+  const deaf = gain(true)
+  const hearing = gain(false)
+  assert.ok(hearing > deaf + 1, `hearing sibilance ${hearing.toFixed(2)} dB vs deaf ${deaf.toFixed(2)} dB`)
+  assert.ok(hearing > 1, `Peaks 3 should make the voice louder: ${hearing.toFixed(2)} dB`)
 })

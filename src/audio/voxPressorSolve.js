@@ -57,7 +57,7 @@
  * both modes, so the gain trajectory is the same; only the inter-sample detail
  * of the audio differs, which a block peak or a percentile barely sees.
  */
-import { processVoxPressorBuffer, VoxPressorKernel } from './voxPressorProcessor.js'
+import { processVoxPressorBuffer, VoxPressorKernel, peaksTap } from './voxPressorProcessor.js'
 import { VoiceDetector } from './dsp/voiceDetector.js'
 import { measureVoiceProfile } from './voiceProfile.js'
 import { gatedRmsOfChannels } from './dsp/inputAlign.js'
@@ -233,6 +233,8 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
     ? (measureVoiceProfile(channels, sampleRate)?.cornerHz ?? null)
     : p.cornerHz
   const base = { ...bench, oversample: false, makeupDb: 0, ceilingDb: null, outputDb: 0 }
+  // Bench A/B of the Peaks detector's sibilance shelf; absent = the kernel default.
+  if (typeof p.peaksSibilance === 'boolean') base.peaksSibilance = p.peaksSibilance
   if (cornerHz) base.cornerHz = cornerHz
 
   const inPeak = peakOfChannels(channels)
@@ -258,7 +260,7 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
     const probe = new VoxPressorKernel(sampleRate)
     probe.setParams(base)
     const fet = probe.fet
-    const det = new VoiceDetector(sampleRate, { plosive: false })
+    const det = new VoiceDetector(sampleRate, peaksTap(probe.params.peaksSibilance))
     det.setCornerHz(cornerHz)
     const detSig = det.process(channels, channels[0].length).slice()
     const hi = ALIGN_RANGE_DB

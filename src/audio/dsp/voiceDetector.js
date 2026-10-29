@@ -45,14 +45,14 @@ const SHELF_Q = Math.SQRT1_2
  * The detector's biquad sections for a tap, in order. Exported so the panel can
  * draw the response with the exact coefficients the kernel runs.
  */
-export function voiceDetectorSections(sampleRate, { cornerHz = DEFAULT_CORNER_HZ, plosive = true } = {}) {
+export function voiceDetectorSections(sampleRate, { cornerHz = DEFAULT_CORNER_HZ, plosive = true, sibilance = true } = {}) {
   const corner = Number.isFinite(cornerHz)
     ? Math.min(CORNER_MAX_HZ, Math.max(CORNER_MIN_HZ, cornerHz))
     : DEFAULT_CORNER_HZ
   const sections = [highpass(sampleRate, corner, Math.SQRT1_2)]
   if (plosive) sections.push(lowShelf(sampleRate, PLOSIVE_SHELF_HZ, SHELF_Q, PLOSIVE_SHELF_DB))
   // The shelf frequency is clamped below Nyquist for low sample rates.
-  sections.push(highShelf(sampleRate, Math.min(SIBILANCE_SHELF_HZ, sampleRate * 0.4), SHELF_Q, SIBILANCE_SHELF_DB))
+  if (sibilance) sections.push(highShelf(sampleRate, Math.min(SIBILANCE_SHELF_HZ, sampleRate * 0.4), SHELF_Q, SIBILANCE_SHELF_DB))
   return sections
 }
 
@@ -64,12 +64,13 @@ export function voiceDetectorSections(sampleRate, { cornerHz = DEFAULT_CORNER_HZ
  * transient into the detector at the moment it does.
  */
 export class VoiceDetector {
-  constructor(sampleRate, { plosive = true } = {}) {
+  constructor(sampleRate, { plosive = true, sibilance = true } = {}) {
     this.sampleRate = sampleRate
     this.plosive = plosive
+    this.sibilance = sibilance
     this.cornerHz = DEFAULT_CORNER_HZ
-    this.cascade = new BiquadCascade(plosive ? 3 : 2, 1)
-    this.cascade.setSections(voiceDetectorSections(sampleRate, { cornerHz: this.cornerHz, plosive }))
+    this.cascade = new BiquadCascade(1 + (plosive ? 1 : 0) + (sibilance ? 1 : 0), 1)
+    this.cascade.setSections(voiceDetectorSections(sampleRate, { cornerHz: this.cornerHz, plosive, sibilance }))
     this.mono = new Float32Array(0)
     this.out = new Float32Array(0)
   }
@@ -78,7 +79,7 @@ export class VoiceDetector {
     const next = Number.isFinite(hz) ? hz : DEFAULT_CORNER_HZ
     if (next === this.cornerHz) return
     this.cornerHz = next
-    this.cascade.setSections(voiceDetectorSections(this.sampleRate, { cornerHz: next, plosive: this.plosive }))
+    this.cascade.setSections(voiceDetectorSections(this.sampleRate, { cornerHz: next, plosive: this.plosive, sibilance: this.sibilance }))
   }
 
   reset() {

@@ -124,9 +124,38 @@ export const VOX_KERNEL_DEFAULTS = {
   /** Bench overrides onto the pinned patches. Not panel params, not preset keys. */
   peaksBench: null,
   bodyBench: null,
+  /**
+   * Whether the PEAKS detector turns sibilance down. false SHIPS — see
+   * `peaksTap`. A bench A/B, not a panel param.
+   */
+  peaksSibilance: false,
   /** Measurement mode: false runs both kernels at the base rate, latency 0. */
   oversample: true,
 }
+
+/**
+ * What each compressor's detector turns down (dsp/voiceDetector.js).
+ *
+ * BODY hears neither plosives nor sibilance: an opto release is long, and an
+ * "s" or a "p" in its detector ducks the rest of the phrase.
+ *
+ * ⚠ PEAKS HEARS BOTH, AND SIBILANCE WAS ADDED BACK AFTER IT SHIPPED SHELVED.
+ * The makeup restores the processed peak to the source's, so EVERY peak the
+ * 1176 cannot see sets the loudness of the whole region. With the −9 dB
+ * sibilance shelf on its detector, one bright "s" on the owner's "Messy and
+ * Bright" clip (−5.2 dBFS above 5 kHz, −41 below 300 Hz) went through the 1176
+ * untouched, sat 4.4 dB above every other output peak, and pinned the makeup:
+ * the clip came out 3.6 dB QUIETER than it went in, where the owner's
+ * hand-built 1176 → LA-2A chain made it 3.3 dB louder. A peak catcher that
+ * cannot see a class of peaks is not one. The "a compressor and a de-esser
+ * both cutting an s lisps it" argument for the shelf belongs to a fast
+ * leveler; here the cut is a peak trim of a few ms, and there is no de-esser
+ * in the chain yet.
+ */
+export function peaksTap(sibilance) {
+  return { plosive: false, sibilance: !!sibilance }
+}
+export const BODY_TAP = Object.freeze({ plosive: true, sibilance: true })
 
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
@@ -141,8 +170,8 @@ export class VoxPressorKernel {
     this.sampleRate = sampleRate
     this.fet = new FET1176Kernel(sampleRate)
     this.la2a = new LA2AKernel(sampleRate)
-    this.peaksDetector = new VoiceDetector(sampleRate, { plosive: false })
-    this.bodyDetector = new VoiceDetector(sampleRate, { plosive: true })
+    this.peaksDetector = new VoiceDetector(sampleRate, peaksTap(VOX_KERNEL_DEFAULTS.peaksSibilance))
+    this.bodyDetector = new VoiceDetector(sampleRate, BODY_TAP)
 
     // Per-channel scratch and bypass delay lines, grown on demand.
     this.midScratch = []
@@ -181,6 +210,9 @@ export class VoxPressorKernel {
       oversample: this.oversampleOn,
     })
 
+    if (this.peaksDetector.sibilance !== !!p.peaksSibilance) {
+      this.peaksDetector = new VoiceDetector(this.sampleRate, peaksTap(p.peaksSibilance))
+    }
     this.peaksDetector.setCornerHz(p.cornerHz)
     this.bodyDetector.setCornerHz(p.cornerHz)
 

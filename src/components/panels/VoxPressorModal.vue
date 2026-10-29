@@ -36,7 +36,7 @@ const METER_H = 214
 
 const LISTEN_OPTIONS = [
   { value: 'off', label: 'OUTPUT', title: 'Hear the processed voice' },
-  { value: 'peaks', label: 'PEAKS SC', title: 'Hear what the 1176 listens to: rumble and sibilance turned down, plosives kept' },
+  { value: 'peaks', label: 'PEAKS SC', title: 'Hear what the 1176 listens to: rumble turned down, plosives and sibilance kept so it can trim them' },
   { value: 'body', label: 'BODY SC', title: 'Hear what the LA-2A listens to: rumble, plosives and sibilance turned down, after the 1176' },
 ]
 
@@ -183,8 +183,8 @@ async function applyAndClose() {
 
     <p class="vp-about">
       Stage 1 (dev): a 1176 trims the peaks, then an LA-2A levels the voice.
-      Both listen through a voice detector that ignores rumble and sibilance;
-      the LA-2A also ignores plosives. Makeup puts the peak back where it was, so what they take off comes back as loudness.
+      Both listen through a voice detector that ignores rumble; the LA-2A also
+      ignores plosives and sibilance. Makeup puts the peak back where it was, so what they take off comes back as loudness.
     </p>
   </FloatingWindow>
 </template>

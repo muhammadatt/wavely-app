@@ -101,7 +101,7 @@ has already taken (stage 1, `dsp/voiceDetector.js`).
 | Tap | HP | Plosive shelf | Sibilance shelf | Why |
 |---|---|---|---|---|
 | BODY (2A) | ✓ | ✓ | ✓ | An opto release is hundreds of ms to seconds: a plosive in its detector ducks the rest of the phrase |
-| PEAKS (76) | ✓ | **✗** | ✓ | A plosive is often the loudest peak in a narration take. The FET's release is tens of ms, so catching one costs a few ms of gain, and *not* catching it leaves it to the ceiling. Peaks the FET can't see are peaks the Peaks knob can't trim |
+| PEAKS (76) | ✓ | **✗** | **✗** | A plosive or a bright "s" is often the loudest peak in a take, and the makeup restores the processed peak, so every peak the 1176 cannot see sets the whole region's loudness. Shipped with the sibilance shelf first: on the owner's "Messy and Bright" clip one "s" (−5.2 dBFS above 5 kHz) went through untouched and the clip came out 3.6 dB QUIETER; hearing sibilance, Peaks 3 makes it 3.8 dB louder. The FET lets go in tens of ms, so catching either costs a few ms of gain |
 
 **Wiring (built).** Both kernels take an optional fourth `process()` argument,
 `sidechain`: a mono detector signal that replaces their own mono tap. Absent,
