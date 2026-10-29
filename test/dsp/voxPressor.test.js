@@ -18,7 +18,9 @@ import {
 import {
   voiceDetectorSections, PLOSIVE_SHELF_DB, SIBILANCE_SHELF_DB,
 } from '../../src/audio/dsp/voiceDetector.js'
-import { solveVoxPressor, PEAKS_BODY_WARN_DB } from '../../src/audio/voxPressorSolve.js'
+import {
+  solveVoxPressor, PEAKS_BODY_WARN_DB, measureVoxPressorRawPeak, makeupForRawPeak,
+} from '../../src/audio/voxPressorSolve.js'
 import { magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
 import { gatedRmsOfChannels } from '../../src/audio/dsp/inputAlign.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../../src/audio/dsp/oversample.js'
@@ -213,8 +215,21 @@ test('the solves are level-invariant: offsets track the file, results do not', (
   for (const [lo, hi] of [[a, b], [b, c]]) {
     assert.ok(Math.abs((lo.peaksAlignDb - hi.peaksAlignDb) - 10) < 0.2, 'peaks offset follows level')
     assert.ok(Math.abs((lo.bodyAlignDb - hi.bodyAlignDb) - 10) < 0.3, 'body offset follows level')
-    assert.ok(Math.abs(lo.makeupDb - hi.makeupDb) < 0.15, 'makeup does not depend on level')
+    // ⚠ NOT EXACT WITH BODY ON, AND THAT IS THE LA-2A, NOT THE SOLVE. The
+    // makeup restores the PEAK, and LA Vintage 2A's output valve is driven by
+    // absolute level by design, so a hotter file shapes its loudest sample
+    // differently: 0.3-0.4 dB per 10 dB here. The Peaks stage alone is exact
+    // (next test). A level-matched makeup hid this; a peak reference sees it.
+    assert.ok(Math.abs(lo.makeupDb - hi.makeupDb) < 0.6,
+      `makeup ${lo.makeupDb.toFixed(2)} vs ${hi.makeupDb.toFixed(2)} dB across 10 dB of level`)
   }
+})
+
+test('with the LA-2A out, the peak-restoring makeup is exactly level-invariant', () => {
+  const makeups = [-34, -24, -14].map(levelDb => solveVoxPressor(
+    [narration(SR, { seconds: 12, levelDb })], SR, { peaksDb: 3, bodyDb: 0, cornerHz: 70 },
+  ).makeupDb)
+  assert.ok(Math.max(...makeups) - Math.min(...makeups) < 0.02, makeups.map(m => m.toFixed(3)).join(' / '))
 })
 
 test('at Peaks 3 the 1176 leaves the body alone', () => {
@@ -239,18 +254,29 @@ test('Peaks is never capped: a large target is reached and its cost reported', (
     `voice touched ${reached[2].peaksBodyDb.toFixed(2)} dB at Peaks 10`)
 })
 
-test('makeup is level-matched and the ceiling holds the source peak', () => {
+test('makeup restores the source peak, and the voice comes out louder', () => {
   for (const { levelDb, x, r } of solved) {
     const params = { ...VOX_KERNEL_DEFAULTS, ...r, cornerHz: 70 }
-    // Base rate for the level: latency-free and what the solve measured.
+    // Base rate: what the solve measured. The peak lands back on the source's,
+    // a hair under it where the ceiling's 0.5 dB margin bends the top sample.
     const base = processVoxPressorBuffer([x], SR, { ...params, oversample: false }).channelData
-    const inDb = db(gatedRmsOfChannels([x], SR))
-    const outDb = db(gatedRmsOfChannels(base, SR))
-    assert.ok(Math.abs(outDb - inDb) < 0.3, `${levelDb}: gated level ${inDb.toFixed(2)} → ${outDb.toFixed(2)}`)
-    // The rendered (oversampled) path for the guarantee.
+    const dPeak = db(peak(base[0])) - db(peak(x))
+    assert.ok(dPeak <= 0 && dPeak > -0.3, `${levelDb}: peak moved ${dPeak.toFixed(3)} dB`)
+    // What Peaks 3 / Body 4 took off the peaks comes back as level.
+    const gain = db(gatedRmsOfChannels(base, SR)) - db(gatedRmsOfChannels([x], SR))
+    assert.ok(gain > 1, `${levelDb}: only ${gain.toFixed(2)} dB louder`)
+    // The rendered (oversampled) path never exceeds the source peak.
     const out = processVoxPressorBuffer([x], SR, params).channelData[0]
     assert.ok(peak(out) <= peak(x), `${levelDb}: peak ${db(peak(x)).toFixed(3)} → ${db(peak(out)).toFixed(3)}`)
   }
+})
+
+test('the whole-region raw peak reproduces the solve\'s makeup exactly', () => {
+  // Apply re-measures the makeup this way when the region outgrew the solve's
+  // window; on a region the solve saw whole, the two must agree.
+  const { x, r } = solved[1]
+  const rawPeakDb = measureVoxPressorRawPeak([x], SR, { ...r, cornerHz: 70 })
+  assert.ok(Math.abs(makeupForRawPeak(r.ceilingDb, rawPeakDb) - r.makeupDb) < 1e-9)
 })
 
 test('zero targets switch the stages off', () => {

@@ -22,18 +22,18 @@ export default {
     },
     {
       label: 'Output',
-      text: 'Trim after everything. The output is already level-matched to the input',
+      text: 'Trim after everything. Makeup is automatic: the output peak goes back to where the source peak was',
     },
   ],
 
   steps: [
     'Select the passage and leave Peaks and Body where they open',
     'Raise Peaks until the loudest syllables stop jumping out; if the note under it turns amber, the 1176 is reaching into the voice',
-    'Raise Body until the level stops wandering, then compare against bypass — both should be about equally loud',
+    'Raise Body until the level stops wandering. Expect it louder than bypass: what the compressors take off the peaks comes back as level',
   ],
 
   notes: [
-    'The output is matched to the input\'s level, so the peaks come out lower: that headroom is for Loudness Normalize to use',
+    'The output peak lands where the source peak was, so the voice comes out louder by roughly what Peaks took (about 3 dB at Peaks 3 on narration)',
     'Peaks always goes where you turn it. When it starts lowering the voice itself, not just the peaks, the note under it turns amber and says by how much',
     'Development stage: this window covers the compressor core only',
   ],

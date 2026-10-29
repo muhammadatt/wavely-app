@@ -2,7 +2,7 @@
 
 > Status: **DRAFT for owner review** (October 2026). **Stage 1 is built** (dev
 > only, registry id `vox-pressor`): the voice detector and the Peaks (1176) →
-> Body (LA-2A) core with level-matched makeup and the source-peak ceiling.
+> Body (LA-2A) core with peak-restoring makeup and the source-peak ceiling.
 > Parallel, De-ess, Air and Density are not built yet. Every number marked
 > *reasoned* is a starting point to be measured or auditioned, per this repo's
 > habit of saying which numbers are which.
@@ -49,7 +49,7 @@ in ─ INPUT ALIGN (drive offset, detector only)
    ├─ [3] PARALLEL — SchepsKernel, PRESENCE (or THICK): Pultec push → LA-2A → Pultec recovery, blended with its own delayed dry
    ├─ [4] DE-ESS  — HFSoftenerKernel (Duck + EQ, lisp guard)
    ├─ [5] AIR     — Air Boost curve, voiced-only
-   ├─ MAKEUP      — level-matched (gated RMS) + source-peak soft ceiling (dsp/makeupReference.js)
+   ├─ MAKEUP      — peak restore (output peak back on the source's) + source-peak soft ceiling
    ├─ [6] DENSITY — InflatorKernel, anchored so the ceiling sits at f(1) = 1, Clip on
    └─ MIX         — delay-compensated dry/wet (equal-power, as Scheps)
        └─ OUTPUT trim ─ out
@@ -317,7 +317,7 @@ All measured once per file / selection, in the worker, against the **running
 | Body offset | secant on LA-2A renders of the Peaks output; avg cell GR on voiced blocks | 2A `inputAlignDb` (Peak Reduction pinned at 50) |
 | Parallel trim, correlation, density, alignment | `computeSchepsAutoTrim` on the Body output | Parallel stage |
 | Post-compression gated RMS | render of stages [1]–[3] on ≤ 400 blocks | De-ess `levelOffset` |
-| Makeup | closed form: gated RMS in − gated RMS out (the makeup is the last multiply) | Output AUTO |
+| Makeup | closed form: source peak − processed peak (the makeup is the last multiply); re-measured over the whole region before apply when the region outgrew the solve's window | Output AUTO |
 | Source peak | `peakOfChannels` | Ceiling; Density anchor |
 
 ⚠ **The solves are sequential.** Peaks first (on the input), then Body (on the
@@ -420,14 +420,19 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
   76 → 2A core, the built-in de-esser.
 - **No Presence EQ** (owner, October 2026): replaced by a parallel LA-2A
   stage, the embedded Scheps Parallel in its PRESENCE character.
-- **Makeup is level-matched, not percentile-referenced** (stage 1, October
-  2026). The compressors' shared 99.9th-percentile reference is near-peak by
-  design, and the Peaks stage exists to move exactly those samples: referenced
-  to them, the makeup handed back what the 1176 took (+7.0 dB at Peaks 3 /
-  Body 4) and the soft ceiling did the peak control as a clipper. Matched on
-  the gated level instead, the voice comes out as loud as it went in and the
-  peaks come out lower; Loudness Normalize spends the headroom. *Owner to
-  confirm by ear.*
+- **Makeup is PEAK RESTORE, always on, no switch** (owner, October 2026): the
+  processed peak goes back on the source's, so what Peaks and Body take off
+  comes back as loudness — what the owner's hand-built 1176 → LA-2A chain does.
+  On a real narration clip: Peaks 3 alone +3.2 dB, Peaks 3 / Body 4 +2.3,
+  Peaks 5 / Body 4 +3.2, rendered peak 0.12 dB under the source. Stage 1's
+  level-matched makeup (same loudness in and out) was rejected for never making
+  anything louder; the compressors' 99.9th-percentile reference undoes the
+  Peaks stage; an outlier-robust peak bought 1–2 dB more only by making the
+  ceiling clip 1–2.5 dB. ⚠ Known cost of a true-peak reference: one onset the
+  1176 misses sets the makeup — on that clip loudness fell 4.34 → 3.07 dB from
+  Peaks 8 to 10 at Body 4. ⚠ With Body on, the makeup moves 0.3–0.4 dB per
+  10 dB of recording level: LA Vintage 2A's output valve is level-driven by
+  design and shapes the loudest sample. Peaks alone is exactly level-invariant.
 - **No breath / room expander** (owner, October 2026): too hard to tune for
   the value. Compression will lift breaths and room tone between phrases;
   that is left to Noise Reduction or the preset chain's `vocalExpander`.
@@ -439,8 +444,7 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
    Specifically: (a) does Peaks 3 take the loudest syllables down without
    audible clamping; (b) does the voice detector make the LA-2A ride better
    than a plain LA Vintage 2A on plosive-heavy takes (synthetic tests say the
-   difference is small, see §3); (c) is the level-matched makeup the right
-   default?
+   difference is small, see §3); (c) settled: peak-restore makeup.
 
 1. **Peaks as proposed?** One knob in dB off the loudest peaks, 76 patch pinned
    at 12:1 / attack 6 / release 6, uncapped with a voice-touched warning. Or keep
@@ -457,9 +461,9 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
 5. **Density's loudness** — accept that it makes the A/B louder (proposed), or
    level-match the A/B in the preview only?
 6. **Chain order** — pin 76 → 2A, or expose a 2A → 76 A/B on the bench?
-7. **Peak restore on apply** — LA Classic 76 restores the peak to the ceiling
-   on apply (the one place preview ≠ apply). Inherit that, or keep VoxPressor
-   sample-identical and level-matched for the A/B?
+7. ~~Peak restore on apply~~ — settled: VoxPressor restores the peak in preview
+   AND apply (§10). Preview and apply agree except where the region outgrew the
+   solve's 30 s window, where apply's exact makeup can be lower.
 8. **Tier** — free like the compressors, or Pro like Auto Leveler / Plugin Chain?
 9. **Name on the toolbar** — "VoxPressor" in Dynamics, or its own top-level
    "Voice" entry for Mode 1/2 users who never open Dynamics?

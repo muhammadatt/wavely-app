@@ -173,7 +173,7 @@ async function applyAndClose() {
               :min="VOX_OUTPUT_MIN_DB" :max="VOX_OUTPUT_MAX_DB" :step="0.1"
               :default-value="VOX_DEFAULTS.output" :format-value="formatOutput"
               aria-label="Output" :disabled="!voxPreview"
-              title="Output trim, after the level-matched makeup and the source-peak ceiling. Double-click to reset"
+              title="Output trim, after the peak-restoring makeup and the source-peak ceiling. Double-click to reset"
               @update:model-value="syncOutput"
             />
           </template>
@@ -184,7 +184,7 @@ async function applyAndClose() {
     <p class="vp-about">
       Stage 1 (dev): a 1176 trims the peaks, then an LA-2A levels the voice.
       Both listen through a voice detector that ignores rumble and sibilance;
-      the LA-2A also ignores plosives. Output is level-matched to the input.
+      the LA-2A also ignores plosives. Makeup puts the peak back where it was, so what they take off comes back as loudness.
     </p>
   </FloatingWindow>
 </template>

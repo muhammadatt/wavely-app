@@ -684,6 +684,16 @@ export function computeVoxPressorSolve(segments, start, end, targets, sampleRate
 }
 
 /**
+ * VoxPressor's processed peak with no makeup over the WHOLE region, dBFS — the
+ * exact input to its peak-restoring makeup when the region is longer than the
+ * solve's analysis window. See `measureVoxPressorRawPeak`.
+ */
+export function computeVoxPressorRawPeak(segments, start, end, solved, sampleRate, channels) {
+  return measureWholeRegionInWorker('voxPressorRawPeak', segments, start, end, solved, sampleRate, channels)
+    .then(d => d.rawPeakDb)
+}
+
+/**
  * Where a soft clipper ceiling preset lands for a region, in dBFS. Resolves
  * null if the region has no measurable content.
  *

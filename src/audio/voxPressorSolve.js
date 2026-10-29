@@ -15,22 +15,37 @@
  *   for the fixed floor this replaced.
  * - BODY (dB) — the LA-2A's average gain reduction over the voiced blocks of
  *   what the Peaks stage left.
- * - MAKEUP — the gain that puts the output's GATED LEVEL back on the input's
- *   (`gatedRmsOfChannels`, the input-alignment gate), paired with a soft
- *   ceiling at the source's own peak. The makeup is the last multiply before
- *   the ceiling, so the output is affine in it and ONE render answers it in
- *   closed form — the LA Classic 76 case, not the LA-2A one.
+ * - MAKEUP — PEAK RESTORE: the gain that puts the processed output's peak back
+ *   on the source's (`rawPeakDb` → `makeupDb = sourcePeak − rawPeak`), with a
+ *   soft ceiling at the source peak as the safety net for what the oversampled
+ *   render adds between samples. The makeup is the last multiply before the
+ *   ceiling, so the output is affine in it and ONE render answers it in closed
+ *   form. Always on, no switch (owner's call).
  *
- * ⚠ NOT THE COMPRESSORS' SHARED 99.9th-PERCENTILE REFERENCE, AND THAT IS
- * DELIBERATE. That statistic is near-peak by design — it is "the loudest thing
- * that is not a one-sample outlier" — and the Peaks stage exists to move
- * exactly those samples. Referenced to them, the makeup hands back what the
- * 1176 took (measured on synthetic narration: +7.0 dB of makeup at Peaks 3 /
- * Body 4, where the body had lost 4) and the memoryless ceiling ends up doing
- * the peak control, as a soft clipper. Level-matched instead, the voice comes
- * out as loud as it went in, the peaks come out lower by what Peaks and Body
- * took, and the A/B compares dynamics rather than loudness. The headroom is the
- * product; Loudness Normalize or the mastering chain spends it.
+ * ⚠ WHY PEAK RESTORE. It is what the owner's hand-built chain does (1176 with
+ * auto makeup, then LA-2A with auto makeup): trim the peaks, hand the trimmed
+ * dB back, and everything under them comes up — so Peaks buys LOUDNESS, which
+ * is the point of putting a peak trimmer first. Measured on a real narration
+ * clip: Peaks 3 alone +3.2 dB louder at the same peak, Peaks 6 +4.6, Body 4
+ * alone +2.2 (the opto lowers the voice nearly as much as the peaks).
+ *
+ * ⚠ TWO REFERENCES WERE TRIED FIRST. (1) The compressors' 99.9th percentile:
+ * near-peak by design, so it hands back what the 1176 took on the samples it
+ * took it from and the memoryless ceiling ends up doing the peak control as a
+ * soft clipper (+7.0 dB of makeup at Peaks 3 / Body 4 on synthetic narration).
+ * (2) Level-matched (gated RMS back on the input's), stage 1's: honest A/B,
+ * but the plugin could never make anything louder — rejected by the owner.
+ * An outlier-robust peak (the 3rd or 5th loudest 50 ms block) bought 1–2 dB
+ * more on the same clip only by having the ceiling clip 1–2.5 dB, and was no
+ * more monotone; not taken.
+ *
+ * ⚠ THE KNOWN COST OF A TRUE-PEAK REFERENCE: one onset that escapes the 1176
+ * sets the makeup for the whole region. On the owner's clip loudness rises with
+ * the knob everywhere except Body 4 / Peaks 10, where it fell 4.34 → 3.07 dB
+ * against Peaks 8 (and a 0.09 dB dip at Peaks 1). Both sit in or near the
+ * amber "compressing the voice" range. The LA Vintage 2A and LA Classic 76
+ * ledger in CLAUDE.md records the same mechanism at much larger scale, which is
+ * why those two do NOT use it; here the 1176 trims those onsets first.
  *
  * ⚠ SEQUENTIAL, AND EACH STAGE IS MEASURED ON WHAT IT HEARS. Peaks on the
  * input; Body on the Peaks output (rendered once at the solved offset and then
@@ -319,14 +334,16 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
     final = last.out
   }
 
-  // ── MAKEUP + CEILING ── closed form: the makeup is the last multiply.
-  const refIn = gatedRmsOfChannels(channels, sampleRate)
-  const refOut = gatedRmsOfChannels(final, sampleRate)
-  const makeupDb = refIn > 0 && refOut > 0
-    ? Math.max(-24, Math.min(24, db(refIn) - db(refOut))) : 0
+  // ── MAKEUP + CEILING ── peak restore, closed form: the makeup is the last
+  // multiply, so the output peak is the raw peak plus the makeup exactly.
   const ceilingDb = db(inPeak)
-  const overshootDb = db(peakOfChannels(final)) + makeupDb - ceilingDb
-  const ceilingKneeDb = p.wholeRegion ? ceilingKneeDbFor(overshootDb) : CEILING_KNEE_DB
+  const rawPeakDb = db(peakOfChannels(final))
+  const makeupDb = makeupForRawPeak(ceilingDb, rawPeakDb)
+  // Zero by construction on the base-rate render; the margin in
+  // `ceilingKneeDbFor` is for what the oversampled render adds between samples.
+  // A window that is not the whole region gets the wide knee: its raw peak is a
+  // lower bound, so its makeup can be generous (apply re-measures exactly).
+  const ceilingKneeDb = p.wholeRegion ? ceilingKneeDbFor(rawPeakDb + makeupDb - ceilingDb) : CEILING_KNEE_DB
 
   return {
     cornerHz,
@@ -336,4 +353,28 @@ export function solveVoxPressor(channels, sampleRate, p = {}) {
     peaksDb, peaksBodyDb, peaksLimited,
     bodyDb,
   }
+}
+
+/** Peak-restoring makeup: the gain that puts `rawPeakDb` back on `ceilingDb`. */
+export function makeupForRawPeak(ceilingDb, rawPeakDb) {
+  if (!Number.isFinite(ceilingDb) || !Number.isFinite(rawPeakDb)) return 0
+  return Math.max(-24, Math.min(24, ceilingDb - rawPeakDb))
+}
+
+/**
+ * The processed region's peak with no makeup, dBFS — for an EXACT makeup over a
+ * region longer than the solve's analysis window.
+ *
+ * ⚠ THE SOLVE'S WINDOW CANNOT ANSWER THIS FOR A LONG REGION. A window's peak is
+ * a lower bound on the region's, so a makeup derived from it is too generous,
+ * and the loud passage it never saw would be pushed into the ceiling (the
+ * LA Classic 76 peak-restore lesson in CLAUDE.md). Base rate, like the solve.
+ *
+ * @param {object} solved  the solve's offsets and stage switches
+ */
+export function measureVoxPressorRawPeak(channels, sampleRate, solved) {
+  const out = processVoxPressorBuffer(channels, sampleRate, {
+    ...solved, makeupDb: 0, ceilingDb: null, outputDb: 0, listen: 'off', oversample: false,
+  }).channelData
+  return db(peakOfChannels(out))
 }

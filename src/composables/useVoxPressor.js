@@ -4,8 +4,12 @@ import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
-  applyVoxPressorRegion, computeVoxPressorSolve, computePeakCache,
+  applyVoxPressorRegion, computeVoxPressorSolve, computeVoxPressorRawPeak, computePeakCache,
 } from '../audio/processing.js'
+import { analysedWholeRegion } from '../audio/analysisWindow.js'
+import { makeupForRawPeak } from '../audio/voxPressorSolve.js'
+import { ceilingKneeDbFor } from '../audio/dsp/makeupReference.js'
+import { toKernelParams } from '../audio/effects/voxPressorParams.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { voxPressorEffect as soloEffect, VOX_DEFAULTS } from '../audio/effects/voxPressor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -258,6 +262,25 @@ const copies = pluginCopies((copy, life) => {
     async function prepareApply(segments, start, end) {
       if (solvedFor !== solveKey(segments, start, end) || segments !== state.segments) {
         await solve(segments, start, end)
+      }
+      /**
+       * ⚠ AN EXACT MAKEUP FOR A REGION LONGER THAN THE SOLVE'S WINDOW. The
+       * makeup restores the processed peak to the source's, and the window's
+       * peak is only a lower bound on the region's — so its makeup is too
+       * generous and would push the passage it never saw into the ceiling.
+       * Measured over the whole region, at the offsets just solved.
+       */
+      if (!analysedWholeRegion(start, end)) {
+        const m = voxMeasured.value
+        const rawPeakDb = await computeVoxPressorRawPeak(
+          segments, start, end, toKernelParams(currentParams()),
+          state.currentFile.sampleRate, state.currentFile.channels,
+        )
+        const makeupDb = makeupForRawPeak(m.ceilingDb, rawPeakDb)
+        const ceilingKneeDb = ceilingKneeDbFor(rawPeakDb + makeupDb - m.ceilingDb)
+        voxMeasured.value = { ...m, makeupDb, ceilingKneeDb }
+        pushParam('ceilingKneeDb', ceilingKneeDb)
+        pushParam('makeupDb', makeupDb)
       }
     }
 
