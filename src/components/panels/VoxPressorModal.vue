@@ -10,16 +10,16 @@ import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import {
   VOX_DEFAULTS, VOX_OUTPUT_MIN_DB, VOX_OUTPUT_MAX_DB, PEAKS_MAX_DB, BODY_MAX_DB,
-  PEAKS_BODY_WARN_DB,
+  PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS,
 } from '../../audio/effects/voxPressorParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  voxPeaks, voxBody, voxOutput, voxListen,
+  voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
-  togglePreview, syncPeaks, syncBody, syncOutput, syncListen,
+  togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead,
   apply, teardown, closeModal,
 } = useVoxPressor()
 
@@ -39,6 +39,15 @@ const LISTEN_OPTIONS = [
   { value: 'peaks', label: 'PEAKS SC', title: 'Hear what the 1176 listens to: rumble turned down, plosives and sibilance kept so it can trim them' },
   { value: 'body', label: 'BODY SC', title: 'Hear what the LA-2A listens to: rumble, plosives and sibilance turned down, after the 1176' },
 ]
+
+// BENCH: LA Vintage 2A's own Lookahead on the Body stage. Off ships.
+const LOOKAHEAD_OPTIONS = BODY_LOOKAHEAD_STEPS_MS.map(ms => ({
+  value: ms,
+  label: ms === 0 ? 'OFF' : `${ms} ms`,
+  title: ms === 0
+    ? 'No lookahead: the LA-2A as the hardware is'
+    : `Delay the audio ${ms} ms so the opto's gain meets each onset early (adds ${ms} ms of latency; pre-ducks consonants at the top)`,
+}))
 
 function formatDb(v) {
   return v > 0 ? `${v.toFixed(1)} dB` : 'OFF'
@@ -165,6 +174,14 @@ async function applyAndClose() {
             @update:model-value="syncListen"
           />
         </div>
+        <div class="vp-listen vp-bench">
+          <span class="m-caption">Bench · Body lookahead</span>
+          <ModulaSegmented
+            :model-value="voxBodyLookahead" :options="LOOKAHEAD_OPTIONS"
+            aria-label="Body lookahead" :disabled="!voxPreview"
+            @update:model-value="syncBodyLookahead"
+          />
+        </div>
         <span class="m-note vp-measured">{{ measuredNote }}</span>
       </div>
 
@@ -187,7 +204,8 @@ async function applyAndClose() {
     <p class="vp-about">
       Stage 1 (dev): a 1176 trims the peaks, then an LA-2A levels the voice.
       Both listen through a voice detector that ignores rumble; the LA-2A also
-      ignores plosives and sibilance. Each makes up its own level, as in a hand-built chain, so what they take off comes back as loudness.
+      ignores plosives and sibilance. Each makes up its own level, as in a hand-built chain, so what they take off comes back as loudness;
+      a lookahead limiter after each holds the source's peak with a gain, never a clipper.
     </p>
   </FloatingWindow>
 </template>
@@ -234,6 +252,7 @@ async function applyAndClose() {
   gap: 10px;
 }
 .vp-measured { text-align: center; }
+.vp-bench { padding-top: 8px; border-top: 1px dashed rgba(255, 255, 255, .08); }
 .vp-warn { color: #f0b429; }
 .vp-about {
   margin: 12px 8px 0;

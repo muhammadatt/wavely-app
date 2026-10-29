@@ -13,8 +13,9 @@ import { narration } from '../helpers/narration.js'
 import { LA2AKernel } from '../../src/audio/la2aProcessor.js'
 import { FET1176Kernel } from '../../src/audio/fet1176Processor.js'
 import {
-  processVoxPressorBuffer, VOX_KERNEL_DEFAULTS, peaksTap, BODY_TAP,
+  processVoxPressorBuffer, VOX_KERNEL_DEFAULTS, peaksTap, BODY_TAP, voxLatencySamples,
 } from '../../src/audio/voxPressorProcessor.js'
+import { LinkedPeakLimiter } from '../../src/audio/dsp/peakLimiter.js'
 import {
   voiceDetectorSections, PLOSIVE_SHELF_DB, SIBILANCE_SHELF_DB,
 } from '../../src/audio/dsp/voiceDetector.js'
@@ -23,7 +24,6 @@ import {
 } from '../../src/audio/voxPressorSolve.js'
 import { magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
 import { gatedRmsOfChannels } from '../../src/audio/dsp/inputAlign.js'
-import { OVERSAMPLE_LATENCY_SAMPLES } from '../../src/audio/dsp/oversample.js'
 
 const SR = 44100
 const db = v => 20 * Math.log10(v)
@@ -82,7 +82,7 @@ test('both stages off is a pure delay of the constant latency, bit for bit', () 
   const { channelData, latencySamples } = processVoxPressorBuffer([speech], SR, {
     peaksOn: false, bodyOn: false,
   })
-  assert.equal(latencySamples, 2 * OVERSAMPLE_LATENCY_SAMPLES)
+  assert.equal(latencySamples, voxLatencySamples({}, SR))
   const y = channelData[0]
   for (let i = latencySamples; i < y.length; i++) {
     if (y[i] !== speech[i - latencySamples]) assert.fail(`sample ${i} differs`)
@@ -95,6 +95,58 @@ test('the latency does not move when a stage is switched', () => {
   assert.equal(lat({ peaksOn: false }), all)
   assert.equal(lat({ bodyOn: false }), all)
   assert.equal(lat({ peaksOn: false, bodyOn: false }), all)
+})
+
+test('voxLatencySamples matches the kernel, Body lookahead included', () => {
+  for (const lookaheadMs of [0, 5, 20]) {
+    for (const oversample of [true, false]) {
+      const p = { bodyBench: { lookaheadMs }, oversample }
+      const { latencySamples } = processVoxPressorBuffer([speech.subarray(0, 256)], SR, p)
+      assert.equal(voxLatencySamples(p, SR), latencySamples, `${lookaheadMs} ms, oversample ${oversample}`)
+      // And it does not move when the Body stage is switched off.
+      const off = processVoxPressorBuffer([speech.subarray(0, 256)], SR, { ...p, bodyOn: false })
+      assert.equal(off.latencySamples, latencySamples)
+    }
+  }
+})
+
+test('the stage limiter holds its ceiling with a GAIN, never reshaping a sample', () => {
+  // A voice with transient spikes far over the ceiling: every output sample
+  // must be the delayed input times one gain in (0, 1], the gain may move only
+  // as fast as the smoother allows, and nothing may cross the ceiling.
+  const x = narration(SR, { seconds: 4, levelDb: -20 }).slice()
+  for (let k = 1; k < 8; k++) x[k * 20000] = k % 2 ? 0.95 : -0.95
+  const T = 0.25 // exact in float32, so the bound is the stored one
+  const lim = new LinkedPeakLimiter(SR)
+  lim.setThreshold(T)
+  const io = [x.slice()]
+  lim.process(io, x.length)
+  const y = io[0]
+  const L = lim.latencySamples
+  // A clipper also scales each sample by something in (0, 1]; what only a gain
+  // envelope does is move SLOWLY: two cascaded boxcars of length L/2 + 1 on
+  // values in [0, 1] change by at most 1 / (L/2 + 1) a sample.
+  const maxStep = 1 / (lim.L + 1) + 1e-5
+  let caught = 0
+  let prev = null
+  for (let i = L; i < x.length; i++) {
+    assert.ok(Math.abs(y[i]) <= T, `sample ${i} over the ceiling: ${y[i]}`)
+    const xi = x[i - L]
+    if (Math.abs(xi) < 1e-3) { prev = null; continue }
+    const g = y[i] / xi
+    assert.ok(g > 0 && g <= 1 + 1e-6, `sample ${i}: gain ${g}`)
+    if (prev !== null) assert.ok(Math.abs(g - prev) <= maxStep, `sample ${i}: gain stepped ${g - prev}`)
+    if (g < 0.999) caught++
+    prev = g
+  }
+  assert.ok(caught > 0)
+  // With no ceiling it is a pure delay, bit for bit.
+  const idle = new LinkedPeakLimiter(SR)
+  const io2 = [x.slice()]
+  idle.process(io2, x.length)
+  for (let i = L; i < x.length; i++) {
+    if (io2[0][i] !== x[i - L]) assert.fail(`idle sample ${i} differs`)
+  }
 })
 
 test('stereo: an identical pair renders identically on both sides', () => {
@@ -276,7 +328,7 @@ test('the exact whole-region pass reproduces a whole-region solve', () => {
   // Apply re-measures the per-stage restores this way when the region outgrew
   // the solve's window; on a region the solve saw whole, the two must agree.
   const { x, r } = solved[1]
-  const exact = measureVoxPressorExact([x], SR, { ...r, cornerHz: 70 }, r.ceilingDb)
+  const exact = measureVoxPressorExact([x], SR, { ...r, cornerHz: 70 }, r.peaksCeilingDb)
   for (const k of ['peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb', 'bodyAlignDb', 'bodyCeilingDb', 'makeupDb']) {
     assert.ok(Math.abs(exact[k] - r[k]) < 1e-6, `${k}: ${exact[k]} vs ${r[k]}`)
   }

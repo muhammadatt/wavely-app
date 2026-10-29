@@ -7,7 +7,7 @@ import {
   applyVoxPressorRegion, computeVoxPressorSolve, computeVoxPressorExact, computePeakCache,
 } from '../audio/processing.js'
 import { analysedWholeRegion } from '../audio/analysisWindow.js'
-import { toKernelParams, VOX_MEASURED_KEYS } from '../audio/effects/voxPressorParams.js'
+import { toKernelParams, VOX_MEASURED_KEYS, bodyLookaheadOf } from '../audio/effects/voxPressorParams.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { voxPressorEffect as soloEffect, VOX_DEFAULTS } from '../audio/effects/voxPressor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -26,6 +26,8 @@ const copies = pluginCopies((copy, life) => {
   const voxBody = ref(VOX_DEFAULTS.body)
   const voxOutput = ref(VOX_DEFAULTS.output)
   const voxListen = ref(VOX_DEFAULTS.listen)
+  /** BENCH: the LA-2A's lookahead, ms. Solved with, so it re-solves. */
+  const voxBodyLookahead = ref(VOX_DEFAULTS.bodyLookaheadMs)
 
   /**
    * Everything `solveVoxPressor` measured, plus the readouts. The kernel
@@ -62,6 +64,7 @@ const copies = pluginCopies((copy, life) => {
       body: voxBody.value,
       output: voxOutput.value,
       listen: voxListen.value,
+      bodyLookaheadMs: voxBodyLookahead.value,
       ...voxMeasured.value,
     }
   }
@@ -143,7 +146,7 @@ const copies = pluginCopies((copy, life) => {
     function solveKey(segments, start, end) {
       const own = segments === state.segments
       const doc = own ? `${appState.activeDocumentId}:${state.revision}` : `${appState.activeDocumentId}:chain`
-      return `${doc}|${start}|${end}|${voxPeaks.value}|${voxBody.value}`
+      return `${doc}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}`
     }
 
     /**
@@ -160,6 +163,9 @@ const copies = pluginCopies((copy, life) => {
         const r = await computeVoxPressorSolve(segments, start, end, {
           peaksDb: voxPeaks.value,
           bodyDb: voxBody.value,
+          // ⚠ The lookahead belongs in the measurement (see useLA2A): it moves
+          // what the opto does to every onset, so the offset and makeup with it.
+          bodyBench: { lookaheadMs: bodyLookaheadOf(currentParams()) },
           ...(cornerFor === regionKey ? { cornerHz: voxMeasured.value.cornerHz } : {}),
           ...(Number.isFinite(voxMeasured.value.bodyAlignDb) ? { bodyGuess: voxMeasured.value.bodyAlignDb } : {}),
         }, state.currentFile.sampleRate, state.currentFile.channels)
@@ -233,6 +239,12 @@ const copies = pluginCopies((copy, life) => {
     function syncBody(v) {
       voxBody.value = v
       pushParam('body', v)
+      scheduleSolve()
+    }
+
+    function syncBodyLookahead(v) {
+      voxBodyLookahead.value = v
+      pushParam('bodyLookaheadMs', v)
       scheduleSolve()
     }
 
@@ -360,11 +372,11 @@ const copies = pluginCopies((copy, life) => {
     }
 
     return {
-      voxPeaks, voxBody, voxOutput, voxListen,
+      voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,
-      togglePreview, syncPeaks, syncBody, syncOutput, syncListen,
+      togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead,
       refreshSolve, apply, teardown, openModal, closeModal,
     }
   }

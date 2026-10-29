@@ -4,13 +4,15 @@
  *
  *   in ─┬─ VOICE DETECTOR (no plosive shelf) ─┐ sidechain
  *       │                                     ▼
- *       ├──────────────────────────── [PEAKS] FET1176Kernel, pinned peak-catcher patch
+ *       ├──────────────────────────── [PEAKS] FET1176Kernel (makeup on its Output)
  *       │                                     │
- *       │      ┌─ VOICE DETECTOR (full) ◄─────┤ sidechain, read from the PEAKS output
+ *       │                              LIMITER (source peak, lookahead gain)
+ *       │                                     │
+ *       │      ┌─ VOICE DETECTOR (full) ◄─────┤ sidechain, read from the PEAKS stage's output
  *       │      ▼                              │
- *       │   [BODY] LA2AKernel ◄───────────────┘
+ *       │   [BODY] LA2AKernel (makeup on its Gain) ◄──┘
  *       │      │
- *       │   MAKEUP (measured) → CEILING (source peak, soft) → OUTPUT trim ─ out
+ *       │   RESTORE → LIMITER (source peak, lookahead gain) → OUTPUT trim ─ out
  *
  * HOLDS THE KERNELS, NOT COPIES, as Scheps holds the LA-2A: every fitted
  * constant, ballistic law and saturation curve in either compressor reaches
@@ -39,12 +41,11 @@
  */
 
 import { FET1176Kernel, inputDriveDbForKnob } from './fet1176Processor.js'
-import { LA2AKernel } from './la2aProcessor.js'
+import { LA2AKernel, la2aLatencySamples } from './la2aProcessor.js'
 import { VoiceDetector, DEFAULT_CORNER_HZ } from './dsp/voiceDetector.js'
 import { DelayLine, OVERSAMPLE_LATENCY_SAMPLES } from './dsp/oversample.js'
-import {
-  softCeiling, float32AtOrBelow, CEILING_KNEE_DB,
-} from './dsp/makeupReference.js'
+import { float32AtOrBelow } from './dsp/makeupReference.js'
+import { LinkedPeakLimiter, peakLimiterLatencySamples } from './dsp/peakLimiter.js'
 
 const LN10_OVER_20 = Math.LN10 / 20
 
@@ -111,27 +112,19 @@ export const VOX_KERNEL_DEFAULTS = {
   cornerHz: DEFAULT_CORNER_HZ,
   /**
    * PER-STAGE MAKEUP — each compressor makes up its own level, as it would on
-   * its own: the 1176's goes to its Output (the last multiply on its wet path),
-   * the LA-2A's to its Gain (before its valve). Each stage has its own soft
-   * ceiling at its input's peak, and its peak is then restored to that ceiling
-   * (the 1176's restore folded into its Output and ceiling, the LA-2A's in
-   * `makeupDb` below). All MEASURED (`solveVoxPressor`), never user settings.
+   * its own: the 1176's goes to its Output (the last multiply on its wet path,
+   * its peak restore folded in), the LA-2A's to its Gain (before its valve),
+   * with its restore in `makeupDb` after it. Each stage then runs into a
+   * LOOKAHEAD LIMITER at the source's peak (`dsp/peakLimiter.js`). All
+   * MEASURED (`solveVoxPressor`), never user settings.
    */
   peaksMakeupDb: 0,
   peaksCeilingDb: null,
-  peaksCeilingKneeDb: null,
   bodyMakeupDb: 0,
   bodyCeilingDb: null,
-  bodyCeilingKneeDb: null,
-  /** The LA-2A stage's peak restore, dB — a gain after the whole chain. */
+  /** The LA-2A stage's peak restore, dB — a gain after the LA-2A, before its limiter. */
   makeupDb: 0,
-  /**
-   * The final safety ceiling at the source's peak and its knee: catches what
-   * the oversampled render adds between samples over the base-rate solve.
-   */
-  ceilingDb: null,
-  ceilingKneeDb: null,
-  /** Manual trim after the ceiling, dB. */
+  /** Manual trim after the last limiter, dB. */
   outputDb: 0,
   /**
    * 'off' | 'peaks' | 'body' — play what that compressor's detector hears
@@ -194,6 +187,8 @@ export class VoxPressorKernel {
     this.midScratch = []
     this.peaksBypass = []
     this.bodyBypass = []
+    this.peaksLimiter = new LinkedPeakLimiter(sampleRate)
+    this.bodyLimiter = new LinkedPeakLimiter(sampleRate)
 
     this.makeupLinSmoothed = null
     this.outputLinSmoothed = null
@@ -220,8 +215,7 @@ export class VoxPressorKernel {
       inputAlignDb: finite(p.peaksAlignDb, 0, -60, 60),
       // The patch's Output cancels the Input drive; the stage's makeup rides on it.
       outputGainDb: PEAKS_PATCH.outputGainDb + finite(p.peaksMakeupDb, 0, -36, 36),
-      ceilingDb: Number.isFinite(p.peaksCeilingDb) ? p.peaksCeilingDb : null,
-      ceilingKneeDb: Number.isFinite(p.peaksCeilingKneeDb) ? p.peaksCeilingKneeDb : null,
+      ceilingDb: null,
       oversample: this.oversampleOn,
     })
     this.la2a.setParams({
@@ -229,10 +223,21 @@ export class VoxPressorKernel {
       ...(p.bodyBench ?? {}),
       inputAlignDb: finite(p.bodyAlignDb, 0, -60, 60),
       gainDb: finite(p.bodyMakeupDb, 0, -24, 24),
-      ceilingDb: Number.isFinite(p.bodyCeilingDb) ? p.bodyCeilingDb : null,
-      ceilingKneeDb: Number.isFinite(p.bodyCeilingKneeDb) ? p.bodyCeilingKneeDb : null,
+      ceilingDb: null,
       oversample: this.oversampleOn,
     })
+    // The Body stage's latency includes the LA-2A's lookahead (a bench
+    // option), so its bypass line follows the kernel rather than a constant.
+    this.bodyLatency = this.la2a.latencySamples
+    /**
+     * ⚠ LIMITERS, NOT SOFT CEILINGS. Both kernels' own `softCeiling` stays off:
+     * a tanh knee bends the onsets the makeup lifts over the stage's input peak
+     * — 0.15 % of the samples of a real clip, up to 3.3 dB deep — and a tanh
+     * on a loud transient distorts (owner's verdict). A lookahead gain takes
+     * the same onsets down without reshaping them. See `dsp/peakLimiter.js`.
+     */
+    this.peaksLimiter.setThreshold(this._ceilingLin(p.peaksCeilingDb))
+    this.bodyLimiter.setThreshold(this._ceilingLin(p.bodyCeilingDb))
 
     if (this.peaksDetector.sibilance !== !!p.peaksSibilance) {
       this.peaksDetector = new VoiceDetector(this.sampleRate, peaksTap(p.peaksSibilance))
@@ -242,19 +247,18 @@ export class VoxPressorKernel {
 
     this.makeupLin = Math.exp(finite(p.makeupDb, 0, -24, 24) * LN10_OVER_20)
     this.outputLin = Math.exp(finite(p.outputDb, 0, -24, 24) * LN10_OVER_20)
-    this.ceilingLin = Number.isFinite(p.ceilingDb)
-      ? float32AtOrBelow(Math.exp(p.ceilingDb * LN10_OVER_20)) : 0
-    const kneeDb = Number.isFinite(p.ceilingKneeDb)
-      ? clamp(p.ceilingKneeDb, 0, CEILING_KNEE_DB) : CEILING_KNEE_DB
-    this.ceilingKneeLin = this.ceilingLin > 0
-      ? this.ceilingLin * Math.exp(-kneeDb * LN10_OVER_20) : 0
 
     this.listen = p.listen === 'peaks' || p.listen === 'body' ? p.listen : 'off'
   }
 
-  /** Constant: both stages' latency whether they are on or off. */
+  _ceilingLin(ceilingDb) {
+    return Number.isFinite(ceilingDb) ? float32AtOrBelow(Math.exp(ceilingDb * LN10_OVER_20)) : 0
+  }
+
+  /** Constant whether a stage is on or off: both stages and both limiters. */
   get latencySamples() {
-    return 2 * this.stageLatency
+    return this.stageLatency + this.bodyLatency
+      + this.peaksLimiter.latencySamples + this.bodyLimiter.latencySamples
   }
 
   /**
@@ -283,6 +287,8 @@ export class VoxPressorKernel {
     this.bodyDetector.reset()
     for (const d of this.peaksBypass) d.reset()
     for (const d of this.bodyBypass) d.reset()
+    this.peaksLimiter.reset()
+    this.bodyLimiter.reset()
     this.makeupLinSmoothed = null
     this.outputLinSmoothed = null
     this.setParams({})
@@ -292,14 +298,16 @@ export class VoxPressorKernel {
     while (this.midScratch.length < nCh) {
       this.midScratch.push(new Float32Array(0))
       this.peaksBypass.push(new DelayLine(this.stageLatency))
-      this.bodyBypass.push(new DelayLine(this.stageLatency))
+      this.bodyBypass.push(new DelayLine(this.bodyLatency))
     }
     for (let ch = 0; ch < nCh; ch++) {
       if (this.midScratch[ch].length < n) this.midScratch[ch] = new Float32Array(n)
       // A measurement-mode kernel and a rendering one want different lengths.
       if (this.peaksBypass[ch].length !== this.stageLatency) {
         this.peaksBypass[ch] = new DelayLine(this.stageLatency)
-        this.bodyBypass[ch] = new DelayLine(this.stageLatency)
+      }
+      if (this.bodyBypass[ch].length !== this.bodyLatency) {
+        this.bodyBypass[ch] = new DelayLine(this.bodyLatency)
       }
     }
   }
@@ -335,6 +343,7 @@ export class VoxPressorKernel {
     }
 
     if (this.peaksOn && this.fet.grDb > this.peaksGrHold) this.peaksGrHold = this.fet.grDb
+    this.peaksLimiter.process(mid, n)
 
     // ── BODY ── (its detector hears what PEAKS left)
     const bodySc = this.bodyDetector.process(mid, n)
@@ -358,34 +367,29 @@ export class VoxPressorKernel {
       return
     }
 
-    // ── MAKEUP → CEILING → OUTPUT ── smoothed per sample, once per block.
+    // ── RESTORE → LIMITER → OUTPUT ── gains smoothed per sample.
     if (this.makeupLinSmoothed === null) this.makeupLinSmoothed = this.makeupLin
     if (this.outputLinSmoothed === null) this.outputLinSmoothed = this.outputLin
-    const identity = this.makeupLin === 1 && this.outputLin === 1
-      && this.makeupLinSmoothed === 1 && this.outputLinSmoothed === 1
-      && this.ceilingLin === 0
-    if (identity) return
+    this.makeupLinSmoothed = this._ramp(outputChannels, n, this.makeupLinSmoothed, this.makeupLin)
+    this.bodyLimiter.process(outputChannels, n)
+    this.outputLinSmoothed = this._ramp(outputChannels, n, this.outputLinSmoothed, this.outputLin)
+  }
 
+  /** Scale `io` by a gain gliding from `from` to `to`; returns where it got. */
+  _ramp(io, n, from, to) {
+    if (from === 1 && to === 1) return 1
     const c = this.gainSmoothCoef
-    let m = this.makeupLinSmoothed
-    let o = this.outputLinSmoothed
-    const mStart = m
-    const oStart = o
-    for (let ch = 0; ch < nOut; ch++) {
-      const out = outputChannels[ch]
-      m = mStart
-      o = oStart
+    let g = from
+    for (let ch = 0; ch < io.length; ch++) {
+      const out = io[ch]
+      g = from
       for (let i = 0; i < n; i++) {
-        m += (this.makeupLin - m) * c
-        o += (this.outputLin - o) * c
-        let y = out[i] * m
-        if (this.ceilingLin > 0) y = softCeiling(y, this.ceilingLin, this.ceilingKneeLin)
-        out[i] = y * o
+        g += (to - g) * c
+        out[i] *= g
       }
     }
-    // Snap once within float noise, so a settled gain is exact.
-    this.makeupLinSmoothed = Math.abs(m - this.makeupLin) < 1e-9 ? this.makeupLin : m
-    this.outputLinSmoothed = Math.abs(o - this.outputLin) < 1e-9 ? this.outputLin : o
+    // Snap within float noise, so a settled gain is exact.
+    return Math.abs(g - to) < 1e-9 ? to : g
   }
 }
 
@@ -394,9 +398,20 @@ export class VoxPressorKernel {
  * this; the app renders through the worklet (preview) and an
  * OfflineAudioContext running the same worklet (apply).
  */
-export function processVoxPressorBuffer(channelData, sampleRate, params = {}, { meter = false } = {}) {
+export function processVoxPressorBuffer(channelData, sampleRate, params = {}, { meter = false, compensate = false } = {}) {
   const kernel = new VoxPressorKernel(sampleRate)
   kernel.setParams(params)
+  // `compensate`: render `latency` samples long and drop the head, so the
+  // output lines up with the input sample for sample (what the solves compare).
+  const lat = compensate ? kernel.latencySamples : 0
+  const len = channelData[0].length
+  if (lat > 0) {
+    channelData = channelData.map((c) => {
+      const q = new Float32Array(len + lat)
+      q.set(c, 0)
+      return q
+    })
+  }
   const n = channelData[0].length
   const output = channelData.map(() => new Float32Array(n))
   const BLOCK = 128
@@ -415,7 +430,23 @@ export function processVoxPressorBuffer(channelData, sampleRate, params = {}, { 
       bodyGr[b] = m.bodyGrDb
     }
   }
-  return { channelData: output, latencySamples: kernel.latencySamples, peaksGr, bodyGr }
+  return {
+    channelData: lat > 0 ? output.map(c => c.subarray(lat, lat + len)) : output,
+    latencySamples: lat > 0 ? 0 : kernel.latencySamples,
+    peaksGr,
+    bodyGr,
+  }
+}
+
+/**
+ * The kernel's latency for these KERNEL params at this rate, without building
+ * one — what the apply path renders long by and trims. Mirrors the
+ * `latencySamples` getter; pinned against a real kernel by its test.
+ */
+export function voxLatencySamples(params, sampleRate) {
+  const os = params?.oversample === false ? 0 : OVERSAMPLE_LATENCY_SAMPLES
+  const body = la2aLatencySamples({ ...(params?.bodyBench ?? {}), oversample: params?.oversample }, sampleRate)
+  return os + body + 2 * peakLimiterLatencySamples(sampleRate)
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────

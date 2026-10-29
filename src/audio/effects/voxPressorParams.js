@@ -4,11 +4,21 @@
  * schepsParams.js, for the same reason: `voxPressor.js` imports the
  * `?worker&url` loader, which only Vite resolves).
  */
-import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { PEAKS_MAX_DB, BODY_MAX_DB, PEAKS_BODY_WARN_DB } from '../voxPressorSolve.js'
+import { voxLatencySamples } from '../voxPressorProcessor.js'
+import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
 
-/** Two oversampled kernels in series, constant whether a stage is on or off. */
-export const VOX_LATENCY_SAMPLES = 2 * OVERSAMPLE_LATENCY_SAMPLES
+/**
+ * Two oversampled kernels and two limiters in series, constant whether a stage
+ * is on or off — at 44.1 kHz with the Body lookahead off, for the effect's
+ * nominal figure. The apply path asks `voxLatencySamples` for the real one: the
+ * limiters' lookahead is in ms, and so is the bench's Body lookahead.
+ */
+export const VOX_LATENCY_SAMPLES = voxLatencySamples({}, 44100)
+export { voxLatencySamples }
+
+/** The bench's Body lookahead steps, ms (LA Vintage 2A's own control). */
+export const BODY_LOOKAHEAD_STEPS_MS = Object.freeze([0, 5, 10, LOOKAHEAD_MAX_MS])
 
 export const VOX_OUTPUT_MIN_DB = -12
 export const VOX_OUTPUT_MAX_DB = 12
@@ -27,31 +37,30 @@ export const VOX_DEFAULTS = {
   output: 0,
   /** 'off' | 'peaks' | 'body' — monitor a detector. Never saved. */
   listen: 'off',
+  /**
+   * BENCH: the LA-2A's lookahead, ms (LA Vintage 2A's Lookahead control,
+   * `LOOKAHEAD_MAX_MS`). 0 ships — an LA-2A has none. It moves the latency.
+   */
+  bodyLookaheadMs: 0,
   // ── MEASURED ──
   cornerHz: null,
   peaksAlignDb: null,
   bodyAlignDb: null,
-  // Per-stage makeup, ceilings and restores (see `solveStageMakeup`).
+  // Per-stage makeup, limiter ceilings and restores (see `solveStageMakeup`).
   peaksMakeupDb: 0,
   peaksCeilingDb: null,
-  peaksCeilingKneeDb: null,
   peaksRestoreDb: 0,
   bodyMakeupDb: 0,
   bodyCeilingDb: null,
-  bodyCeilingKneeDb: null,
-  /** The LA-2A stage's restore, after the chain. */
+  /** The LA-2A stage's restore, before its limiter. */
   makeupDb: 0,
-  /** The final safety ceiling at the source peak. */
-  ceilingDb: null,
-  ceilingKneeDb: null,
 }
 
 /** The keys a solve measures: never a user setting, never in a preset. */
 export const VOX_MEASURED_KEYS = Object.freeze([
   // Ceilings first: they reach the live node as separate messages, and a
   // raised makeup must never run against an old ceiling (see useLA2A).
-  'ceilingDb', 'ceilingKneeDb', 'peaksCeilingDb', 'peaksCeilingKneeDb',
-  'bodyCeilingDb', 'bodyCeilingKneeDb',
+  'peaksCeilingDb', 'bodyCeilingDb',
   'cornerHz', 'peaksAlignDb', 'bodyAlignDb',
   'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb',
 ])
@@ -74,6 +83,7 @@ export function toKernelParams(p) {
     outputDb: Number.isFinite(p.output) ? p.output : 0,
     listen: p.listen ?? 'off',
     makeupDb: Number.isFinite(p.makeupDb) ? p.makeupDb : 0,
+    bodyBench: { lookaheadMs: bodyLookaheadOf(p) },
     // Measured values cross only when real, so an unmeasured panel leaves the
     // kernel on its own defaults rather than on a NaN.
     ...(Number.isFinite(p.cornerHz) ? { cornerHz: p.cornerHz } : {}),
@@ -82,12 +92,14 @@ export function toKernelParams(p) {
     peaksMakeupDb: Number.isFinite(p.peaksMakeupDb) ? p.peaksMakeupDb : 0,
     peaksRestoreDb: Number.isFinite(p.peaksRestoreDb) ? p.peaksRestoreDb : 0,
     bodyMakeupDb: Number.isFinite(p.bodyMakeupDb) ? p.bodyMakeupDb : 0,
-    // Each ceiling and its knee travel together, and null clears them.
+    // null clears a limiter's ceiling (a pure delay).
     peaksCeilingDb: Number.isFinite(p.peaksCeilingDb) ? p.peaksCeilingDb : null,
-    peaksCeilingKneeDb: Number.isFinite(p.peaksCeilingKneeDb) ? p.peaksCeilingKneeDb : null,
     bodyCeilingDb: Number.isFinite(p.bodyCeilingDb) ? p.bodyCeilingDb : null,
-    bodyCeilingKneeDb: Number.isFinite(p.bodyCeilingKneeDb) ? p.bodyCeilingKneeDb : null,
-    ceilingDb: Number.isFinite(p.ceilingDb) ? p.ceilingDb : null,
-    ceilingKneeDb: Number.isFinite(p.ceilingKneeDb) ? p.ceilingKneeDb : null,
   }
+}
+
+/** The Body lookahead in effect, ms (0 when unset or out of range). */
+export function bodyLookaheadOf(p) {
+  const v = Number(p?.bodyLookaheadMs)
+  return Number.isFinite(v) ? Math.max(0, Math.min(LOOKAHEAD_MAX_MS, v)) : 0
 }

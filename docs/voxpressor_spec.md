@@ -49,7 +49,7 @@ in ─ INPUT ALIGN (drive offset, detector only)
    ├─ [3] PARALLEL — SchepsKernel, PRESENCE (or THICK): Pultec push → LA-2A → Pultec recovery, blended with its own delayed dry
    ├─ [4] DE-ESS  — HFSoftenerKernel (Duck + EQ, lisp guard)
    ├─ [5] AIR     — Air Boost curve, voiced-only
-   ├─ MAKEUP      — per stage (each compressor's own: percentile ref + ceiling + peak restore) + final source-peak ceiling
+   ├─ MAKEUP      — per stage (each compressor's own: percentile ref + peak restore), each stage into a lookahead limiter at the source peak
    ├─ [6] DENSITY — InflatorKernel, anchored so the ceiling sits at f(1) = 1, Clip on
    └─ MIX         — delay-compensated dry/wet (equal-power, as Scheps)
        └─ OUTPUT trim ─ out
@@ -317,7 +317,7 @@ All measured once per file / selection, in the worker, against the **running
 | Body offset | secant on LA-2A renders of the Peaks output; avg cell GR on voiced blocks | 2A `inputAlignDb` (Peak Reduction pinned at 50) |
 | Parallel trim, correlation, density, alignment | `computeSchepsAutoTrim` on the Body output | Parallel stage |
 | Post-compression gated RMS | render of stages [1]–[3] on ≤ 400 blocks | De-ess `levelOffset` |
-| Makeup, per stage | `solveStageMakeup`: `solveMakeupPlan` (percentile) per stage, ceiling at the stage's input peak, restore to it; both restores re-measured over the whole region before apply when the region outgrew the window | 1176 Output; LA-2A Gain + the restore after the chain |
+| Makeup, per stage | `solveStageMakeup`: `solveMakeupPlan` (percentile) per stage, a lookahead limiter at the source peak, restore to it; both restores re-measured over the whole region before apply when the region outgrew the window | 1176 Output; LA-2A Gain + the restore after the chain |
 | Source peak | `peakOfChannels` | Ceiling; Density anchor |
 
 ⚠ **The solves are sequential.** Peaks first (on the input), then Body (on the
@@ -422,8 +422,8 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
   stage, the embedded Scheps Parallel in its PRESENCE character.
 - **Makeup is PER STAGE, always on, no switch** (owner, October 2026): each
   compressor makes up its own level the way it would on its own — the
-  compressors' 99.9th-percentile reference (`solveMakeupPlan`), a soft ceiling
-  at the stage's input peak, then the stage's peak restored to that ceiling —
+  compressors' 99.9th-percentile reference (`solveMakeupPlan`), then the
+  stage's peak restored to the source's, held by a lookahead limiter —
   1176 first, then the LA-2A on the 1176's output. This is the owner's
   hand-built 1176 → LA-2A chain. On "Messy and Bright" it lands +3.4 to
   +3.8 dB louder at the source peak (the chain: +3.3), almost all from the 1176
@@ -435,8 +435,22 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
     +2.5 on the earlier clip. ⚠ Synthetic narration does NOT show this
     difference (the two designs land within 0.2 dB there), so it is pinned by
     the owner's clips, not by a unit test.
-  - *The trade:* the extra level comes from each stage's ceiling soft-limiting
-    the onsets that stage let through, as the chain's do.
+  - *The trade:* the percentile makeup lifts a few onsets 3–4.7 dB over the
+    source peak and the extra level depends on taking them back down. The
+    chain's plugins (and the first build of this) bend them with a tanh soft
+    ceiling — a waveshaper on loud transients, never voiced.
+- **Limiters, not soft ceilings** (owner, October 2026): each stage runs into
+  a linked lookahead limiter at the source peak (`dsp/peakLimiter.js`: 2 ms
+  half-width, 50 ms upward-only release, 4 ms of latency; reasoned). The
+  colour stays the LA-2A's. On "Messy and Bright" at Peaks 3 / Body 4: +3.41 dB
+  (tanh: +3.53), peak exactly the source's, gain dipping > 0.5 dB on ~1.7 % of
+  samples and > 0.1 dB on ~5 %. To audition: pumping around hard consonants.
+- **Body lookahead is on the bench** (October 2026): LA Vintage 2A's own
+  Lookahead, 0 / 5 / 10 / 20 ms, off ships, solved with. "Messy and Bright":
+  +0.6 dB at 10 ms, +0.8 at 20 (Peaks 3 / Body 4) — and the limiters catch
+  MORE with it, not less: taming the onsets lowers the percentile reference,
+  so the makeup rises by about as much. Costs its ms of latency and pre-ducks
+  consonants at 20.
   - ⚠ The LA-2A stage's makeup moves ~0.3–0.4 dB per 10 dB of recording level
     (its output valve is level-driven by design); the 1176 stage's is exact.
   - ⚠ Regions past the solve's 30 s window re-measure both restores over the
