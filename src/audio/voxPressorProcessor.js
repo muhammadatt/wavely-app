@@ -215,6 +215,47 @@ export function parallelFetParams(p) {
   }
 }
 
+/**
+ * BENCH A/B: the Parallel stage's compressor (`parallelComp`). '1176' ships;
+ * 'la2a' is the owner's original proposal, a bare LA Vintage 2A, kept on the
+ * bench to audition against it. EVERYTHING ELSE IS SHARED so the A/B is about
+ * the compressor alone: the same `ParallelDetector` (sibilance +15 dB), the
+ * same alignment, the same LA-2A mix law (the kernel's own straight blend
+ * against its delayed dry, wet makeup — here its Gain, before the valve —
+ * solved on the blend at the 99.9th percentile), the same peak restore and
+ * limiter. Both cost the oversampler's 50 samples, so switching never moves
+ * the audio.
+ *
+ * Peak Reduction 60 (`PARALLEL_LA2A_PR`). ⚠ UNLIKE THE 1176'S INPUT 40 THIS IS
+ * NOT A DENSITY PEAK, BECAUSE THERE IS NONE: on the de-esser's output at the
+ * defaults (Parallel 30 %), PR 40–80 moved the level −0.17 to +0.13 dB on the
+ * owner's two clips against the 1176's +0.98 / +1.00 — the copy is of a voice
+ * Body's LA-2A has already leveled. 60 is where it peaked on the raw clips.
+ * The A/B is therefore ~1 dB apart in level; match it by ear with Output.
+ */
+export const PARALLEL_COMPS = Object.freeze(['1176', 'la2a'])
+export const PARALLEL_LA2A_PR = 60
+export const PARALLEL_LA2A_PATCH = Object.freeze({
+  mode: 'compress',
+  lookaheadMs: 0,
+  ceilingDb: null,
+})
+
+/** The parallel LA-2A's params from VoxPressor KERNEL params (`gainDb` = the measured wet makeup). */
+export function parallelLa2aParams(p) {
+  return {
+    ...PARALLEL_LA2A_PATCH,
+    peakReduction: finite(p.parallelLa2aPr, PARALLEL_LA2A_PR, 0, 100),
+    inputAlignDb: finite(p.parallelAlignDb, 0, -60, 60),
+    mix: finite(p.parallelMix, 0, 0, 1),
+    gainDb: finite(p.parallelMakeupDb, 0, -24, 24),
+  }
+}
+
+export function parallelCompOf(p) {
+  return p?.parallelComp === 'la2a' ? 'la2a' : '1176'
+}
+
 /** Makeup and output smoothing, as the kernels' own Gain / Output (8 ms). */
 const GAIN_SMOOTH_MS = 8
 
@@ -270,6 +311,8 @@ export const VOX_KERNEL_DEFAULTS = {
   parallelMix: 0.3,
   parallelAlignDb: 0,
   parallelMakeupDb: 0,
+  /** BENCH: '1176' (ships) | 'la2a' — see `PARALLEL_COMPS`. */
+  parallelComp: '1176',
   /**
    * DENSITY — the Cambridge Inflator at Effect `density` (0–1), Curve 0, Clip
    * on, ANCHORED at the source peak (`sourcePeakDb`): the signal is scaled so
@@ -345,6 +388,7 @@ export class VoxPressorKernel {
     this.deEsser = new HFSoftenerKernel(sampleRate)
     this.deEsserPrimed = false
     this.parallelFet = new FET1176Kernel(sampleRate)
+    this.parallelLa2a = new LA2AKernel(sampleRate)
     this.parallelDetector = new ParallelDetector(sampleRate)
     this.parallelBypass = []
     this.parallelLimiter = new LinkedPeakLimiter(sampleRate)
@@ -428,7 +472,10 @@ export class VoxPressorKernel {
 
     // ── PARALLEL ──
     this.parallelOn = !!p.parallelOn && finite(p.parallelMix, 0, 0, 1) > 0
+    this.parallelComp = parallelCompOf(p)
     this.parallelFet.setParams({ ...parallelFetParams(p), oversample: this.oversampleOn })
+    this.parallelLa2a.setParams({ ...parallelLa2aParams(p), oversample: this.oversampleOn })
+    // Equal by construction (each is its oversampler's), so the A/B never moves the audio.
     this.parallelLatency = this.parallelFet.latencySamples
     // Holds the source peak after the blend: the parallel stage adds level.
     this.parallelLimiter.setThreshold(this._ceilingLin(p.sourcePeakDb))
@@ -518,6 +565,7 @@ export class VoxPressorKernel {
     this.deEsser = new HFSoftenerKernel(this.sampleRate)
     this.deEsserPrimed = false
     this.parallelFet = new FET1176Kernel(this.sampleRate)
+    this.parallelLa2a = new LA2AKernel(this.sampleRate)
     this.parallelDetector.reset()
     for (const d of this.parallelBypass) d.reset()
     for (const d of this.densityBypass) d.reset()
@@ -634,9 +682,10 @@ export class VoxPressorKernel {
     // detector hears sibilance shelved UP (`ParallelDetector`).
     if (this.parallelOn) {
       const sc = this.parallelDetector.process(outputChannels, n)
-      this.parallelFet.process(outputChannels, mid, n, sc)
+      const comp = this.parallelComp === 'la2a' ? this.parallelLa2a : this.parallelFet
+      comp.process(outputChannels, mid, n, sc)
       for (let ch = 0; ch < nOut; ch++) outputChannels[ch].set(mid[ch])
-      const gr = this.parallelFet.grDb
+      const gr = comp.grDb
       if (gr > this.parallelGrHold) this.parallelGrHold = gr
     } else {
       for (let ch = 0; ch < nOut; ch++) {

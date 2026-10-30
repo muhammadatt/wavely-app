@@ -69,7 +69,9 @@
  */
 import {
   processVoxPressorBuffer, VoxPressorKernel, parallelFetParams, PARALLEL_INPUT_KNOB,
+  parallelLa2aParams, parallelCompOf,
 } from './voxPressorProcessor.js'
+import { LA2AKernel } from './la2aProcessor.js'
 import { measureVoiceProfile } from './voiceProfile.js'
 import { gatedRmsOfChannels } from './dsp/inputAlign.js'
 import {
@@ -310,9 +312,11 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   // and this 1176 listens through `ParallelDetector`.
   if (p.parallelMix > 0) {
     out.parallelAlignDb = alignDbForRms(gatedRmsOfChannels(afterDeEss, sampleRate))
-    const fetParams = parallelFetParams({ ...p, voiceF0Hz, parallelAlignDb: out.parallelAlignDb })
-    const { g, wet } = parallelWetGain(afterDeEss, sampleRate, fetParams)
-    out.parallelMakeupDb = g > 0 ? 20 * Math.log10(g) : -inputDriveDbForKnob(PARALLEL_INPUT_KNOB)
+    const at = { ...p, voiceF0Hz, parallelAlignDb: out.parallelAlignDb }
+    const solved = parallelCompOf(p) === 'la2a'
+      ? parallelLa2aSolve(afterDeEss, sampleRate, at)
+      : parallelFetSolve(afterDeEss, sampleRate, at)
+    out.parallelMakeupDb = solved.makeupDb
     /**
      * PER-STAGE PEAK RESTORE, as Peaks' and Body's: the blend's peak back on
      * the source's, as a gain after the blend and before the parallel limiter.
@@ -321,10 +325,8 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
      * blend 0.3–0.6 dB under the source peak on the owner's two clips.
      * Measured on the window, as Body's; past it the limiter holds the peak.
      */
-    if (wet) {
-      const blend = blendInto(afterDeEss.map(c => new Float32Array(c.length)), afterDeEss, wet, fetParams.mix,
-        Math.exp(out.parallelMakeupDb * (Math.LN10 / 20)))
-      out.parallelRestoreDb = restoreToCeilingDb(ceilingDb, db(peakOfChannels(limitChannels(blend, ceilingDb, sampleRate))))
+    if (solved.blend) {
+      out.parallelRestoreDb = restoreToCeilingDb(ceilingDb, db(peakOfChannels(limitChannels(solved.blend, ceilingDb, sampleRate))))
     }
   }
   return out
@@ -359,6 +361,58 @@ function parallelWetGain(channels, sampleRate, fetParams) {
   const scratch = channels.map(() => new Float32Array(len))
   const g = percentileBlendGain(channels, w, fetParams.mix, inRef, -48, 48, scratch)
   return g > 0 ? { g, wet: w } : { g: 0, wet: null }
+}
+
+/** The parallel 1176's makeup and its blend at that makeup (null when unsolvable). */
+function parallelFetSolve(channels, sampleRate, p) {
+  const fetParams = parallelFetParams(p)
+  const { g, wet } = parallelWetGain(channels, sampleRate, fetParams)
+  if (!wet) return { makeupDb: -inputDriveDbForKnob(PARALLEL_INPUT_KNOB), blend: null }
+  const blend = blendInto(channels.map(c => new Float32Array(c.length)), channels, wet, fetParams.mix, g)
+  return { makeupDb: 20 * Math.log10(g), blend }
+}
+
+/**
+ * The parallel LA-2A's makeup (its Gain, before the valve) and its blend.
+ * ⚠ ITERATED, NOT CLOSED FORM: the valve sits after the Gain, so the output is
+ * not affine in the makeup — `solveMakeupPlan`'s blended path, as LA Vintage
+ * 2A's own Mix solve. Base rate, the Body stage's measurement convention; the
+ * final blend is one more render at the solved makeup, through the kernel's
+ * own dry path.
+ */
+function parallelLa2aSolve(channels, sampleRate, p) {
+  const base = { ...parallelLa2aParams(p), oversample: false }
+  const det = new ParallelDetector(sampleRate)
+  const sc = parallelDetectorSignal(det, channels)
+  const render = (chs, extra) => renderLa2a(chs, sampleRate, { ...base, ...extra }, sc)
+  const plan = solveMakeupPlan({
+    channelData: channels, render, gainKey: 'gainDb', mixKey: 'mix', mix: base.mix,
+    reference: 'percentile', minDb: -24, maxDb: 24,
+  })
+  if (plan.ceilingDb === null) return { makeupDb: 0, blend: null }
+  return { makeupDb: plan.makeupDb, blend: render(channels, { gainDb: plan.makeupDb }) }
+}
+
+function parallelDetectorSignal(det, channels) {
+  const len = channels[0].length
+  const sc = new Float32Array(len)
+  for (let o = 0; o < len; o += 128) {
+    const n = Math.min(128, len - o)
+    sc.set(det.process(channels.map(c => c.subarray(o, o + n)), n), o)
+  }
+  return sc
+}
+
+function renderLa2a(channels, sampleRate, params, sc) {
+  const k = new LA2AKernel(sampleRate)
+  k.setParams(params)
+  const len = channels[0].length
+  const out = channels.map(() => new Float32Array(len))
+  for (let o = 0; o < len; o += 128) {
+    const n = Math.min(128, len - o)
+    k.process(channels.map(c => c.subarray(o, o + n)), out.map(c => c.subarray(o, o + n)), n, sc.subarray(o, o + n))
+  }
+  return out
 }
 
 function scaleChannels(chs, gainDb) {

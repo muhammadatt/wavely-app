@@ -325,6 +325,20 @@ Measured, owner's clips (30 s, change vs the source; Peaks 3 / Body 57 / De-ess
 loudness, energy above 5 kHz +0.63 → +0.49 → +0.46; Greenberg +4.81 → +5.81 →
 +6.50, above 5 kHz +5.21 → +6.01 → +6.59. Peak on the source's throughout.
 
+**BENCH A/B — 1176 vs LA-2A** (`parallelComp`, owner, October 2026: "I let
+you talk me out of using the LA-2A on the parallel stage twice now"). The
+owner's original proposal stays selectable: a bare LA Vintage 2A at Peak
+Reduction 60, with EVERYTHING ELSE SHARED — the `ParallelDetector`, alignment,
+the LA-2A mix law (its own straight blend; the makeup on its Gain, iterated
+because the valve follows it), the peak restore, the limiter, and the latency,
+so switching never moves the audio. 1176 ships until the audition decides.
+Measured in the chain (de-esser output, Parallel 30 %, change in level / above
+5 kHz vs Parallel off): LA-2A PR 40–80 Messy −0.17 to 0.00 / −0.28 to −0.33 dB,
+Greenberg −0.13 to +0.13 / +0.14 to +0.35; 1176 Messy +0.98 / −0.14, Greenberg
++1.00 / +0.80. The LA-2A copy is of a voice Body's LA-2A has already leveled,
+so it adds tone, not level. ⚠ THE A/B IS ~1 dB APART IN LEVEL, which biases an
+ear toward the 1176: trim Output to match. The Parallel GR meter reads either.
+
 ⚠ **Overlap with Density.** Both add density: Parallel by dynamic upward
 compression, Density by a static curve with odd harmonics. Different
 mechanisms, but presets should not max both (§11).

@@ -18,11 +18,11 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
-  voxDeEss, voxParallel, voxDensity, voxDeEssGr, voxParallelGr,
+  voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
-  syncDeEss, syncParallel, syncDensity,
+  syncDeEss, syncParallel, syncParallelComp, syncDensity,
   apply, teardown, closeModal,
 } = useVoxPressor()
 
@@ -56,6 +56,12 @@ const SPEED_OPTIONS = [
   { value: 'gentle', label: 'GENTLE', title: 'Slow attack and release: the cleanest, catches the least' },
   { value: 'normal', label: 'NORMAL', title: 'Medium attack and release' },
   { value: 'fast', label: 'FAST', title: 'Fast attack and release: grabs every onset; can ripple on low voices' },
+]
+
+// BENCH: the Parallel stage's compressor. 1176 ships; the LA-2A is the A/B.
+const PARALLEL_COMP_OPTIONS = [
+  { value: '1176', label: '1176', title: 'A fast 4:1 1176 copy (New York compression)' },
+  { value: 'la2a', label: 'LA-2A', title: 'An LA-2A copy, Peak Reduction 60 — same detector, mix law, restore and limiter' },
 ]
 
 // BENCH: LA Vintage 2A's own Lookahead on the Body stage. Off ships.
@@ -268,6 +274,14 @@ async function applyAndClose() {
             :model-value="voxBodyLookahead" :options="LOOKAHEAD_OPTIONS"
             aria-label="Body lookahead" :disabled="!voxPreview"
             @update:model-value="syncBodyLookahead"
+          />
+        </div>
+        <div class="vp-listen vp-bench">
+          <span class="m-caption">Bench · Parallel comp</span>
+          <ModulaSegmented
+            :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS"
+            aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
+            @update:model-value="syncParallelComp"
           />
         </div>
         <span class="m-note vp-measured">{{ measuredNote }}</span>

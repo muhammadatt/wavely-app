@@ -106,6 +106,11 @@ export const VOX_DEFAULTS = {
    * `LOOKAHEAD_MAX_MS`). 0 ships — an LA-2A has none. It moves the latency.
    */
   bodyLookaheadMs: 0,
+  /**
+   * BENCH: the Parallel stage's compressor, '1176' (ships) | 'la2a' — an A/B
+   * with everything else shared (`PARALLEL_COMPS`). Re-measures.
+   */
+  parallelComp: '1176',
   // ── MEASURED ──
   /**
    * The file's alignment, dB (`alignDbForRms` on the WHOLE file's gated RMS,
@@ -215,6 +220,7 @@ function stageParams(p) {
     }),
     parallelMix: mix,
     parallelOn: mix > 0 && Number.isFinite(p.parallelAlignDb) && Number.isFinite(p.parallelMakeupDb),
+    parallelComp: p.parallelComp === 'la2a' ? 'la2a' : '1176',
     parallelAlignDb: Number.isFinite(p.parallelAlignDb) ? p.parallelAlignDb : 0,
     parallelMakeupDb: Number.isFinite(p.parallelMakeupDb) ? p.parallelMakeupDb : 0,
     parallelRestoreDb: Number.isFinite(p.parallelRestoreDb) ? p.parallelRestoreDb : 0,

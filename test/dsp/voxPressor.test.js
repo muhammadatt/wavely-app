@@ -13,7 +13,7 @@ import { narration } from '../helpers/narration.js'
 import { LA2AKernel } from '../../src/audio/la2aProcessor.js'
 import { FET1176Kernel } from '../../src/audio/fet1176Processor.js'
 import {
-  processVoxPressorBuffer, VOX_KERNEL_DEFAULTS, peaksTap, BODY_TAP, voxLatencySamples, PEAKS_INPUT_KNOB,
+  processVoxPressorBuffer, VOX_KERNEL_DEFAULTS, peaksTap, BODY_TAP, voxLatencySamples, PEAKS_INPUT_KNOB, VoxPressorKernel,
   peaksTiming, PEAKS_SPEEDS,
 } from '../../src/audio/voxPressorProcessor.js'
 import { LinkedPeakLimiter } from '../../src/audio/dsp/peakLimiter.js'
@@ -594,4 +594,21 @@ test('the Peaks / Body renders ignore a stale source peak', () => {
 test('an unmeasurable corner is sent as null, so a merging kernel resets to its default', () => {
   assert.equal(toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, cornerHz: null }).cornerHz, null)
   assert.equal(toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, cornerHz: 95 }).cornerHz, 95)
+})
+
+test('BENCH: the parallel LA-2A swaps in with the same latency, measures, and holds the peak', () => {
+  const x = narration(SR, { seconds: 12, levelDb: -24 })
+  const sourcePeakDb = db(peak(x))
+  for (const comp of ['1176', 'la2a']) {
+    const kp = toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, parallelComp: comp, parallelAlignDb: 0, parallelMakeupDb: 0 })
+    assert.equal(kp.parallelComp, comp)
+    assert.equal(voxLatencySamples(kp, SR), new VoxPressorKernel(SR).latencySamples, comp)
+    const k = new VoxPressorKernel(SR)
+    k.setParams(kp)
+    assert.equal(k.latencySamples, new VoxPressorKernel(SR).latencySamples, `${comp}: switching moved the audio`)
+  }
+  const { r, params } = measure(x, { parallel: 60, parallelComp: 'la2a' })
+  assert.ok(Number.isFinite(r.parallelMakeupDb) && Number.isFinite(r.parallelRestoreDb), 'LA-2A parallel measured')
+  const out = processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData
+  assert.ok(db(peak(out[0])) - sourcePeakDb <= 1e-5, `LA-2A parallel: peak ${(db(peak(out[0])) - sourcePeakDb).toFixed(4)} dB over`)
 })
