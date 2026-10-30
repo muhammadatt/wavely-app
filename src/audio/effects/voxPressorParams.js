@@ -130,8 +130,10 @@ export const VOX_DEFAULTS = {
    */
   parallelAlignDb: null,
   parallelMakeupDb: null,
-  /** The blend's peak restore, after the Parallel stage and before its limiter. */
+  /** The 1176 blend's peak restore (LA Classic 76's), after the stage. */
   parallelRestoreDb: 0,
+  /** The Parallel compressor's ceiling knee, sized by the solve (`ceilingKneeDbFor`). */
+  parallelCeilingKneeDb: null,
   // Per-stage makeup, limiter ceilings and restores (see `measureVoxPressor`).
   peaksMakeupDb: 0,
   peaksCeilingDb: null,
@@ -149,7 +151,7 @@ export const VOX_MEASURED_KEYS = Object.freeze([
   'peaksCeilingDb', 'bodyCeilingDb',
   'cornerHz', 'voiceF0Hz', 'sourcePeakDb',
   'deEssLevelOffsetDb', 'parallelAlignDb',
-  'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb', 'parallelMakeupDb', 'parallelRestoreDb',
+  'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb', 'parallelMakeupDb', 'parallelRestoreDb', 'parallelCeilingKneeDb',
 ])
 
 /** Map panel params to kernel params. */
@@ -224,6 +226,7 @@ function stageParams(p) {
     parallelAlignDb: Number.isFinite(p.parallelAlignDb) ? p.parallelAlignDb : 0,
     parallelMakeupDb: Number.isFinite(p.parallelMakeupDb) ? p.parallelMakeupDb : 0,
     parallelRestoreDb: Number.isFinite(p.parallelRestoreDb) ? p.parallelRestoreDb : 0,
+    parallelCeilingKneeDb: Number.isFinite(p.parallelCeilingKneeDb) ? p.parallelCeilingKneeDb : null,
     density: knob(p.density) / 100,
     sourcePeakDb: Number.isFinite(p.sourcePeakDb) ? p.sourcePeakDb : null,
   }

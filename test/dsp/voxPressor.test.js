@@ -612,3 +612,31 @@ test('BENCH: the parallel LA-2A swaps in with the same latency, measures, and ho
   const out = processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData
   assert.ok(db(peak(out[0])) - sourcePeakDb <= 1e-5, `LA-2A parallel: peak ${(db(peak(out[0])) - sourcePeakDb).toFixed(4)} dB over`)
 })
+
+test('the Parallel LA-2A renders as an LA Vintage 2A slot after VoxPressor (owner: keep them consistent)', async () => {
+  const { computeAutoMakeupPlan } = await import('../../src/audio/la2aProcessor.js')
+  const { toKernelParams: la2aKp, LA2A_DEFAULTS } = await import('../../src/audio/effects/la2aParams.js')
+  const x = narration(SR, { seconds: 12, levelDb: -24 })
+  const align = inputAlignDbFor([x], SR)
+  const render = (panel) => {
+    const { params } = measure(x, { density: 0, ...panel })
+    return processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData[0]
+  }
+  const core = render({ parallel: 0 })
+  // The slot as its preview runs: PR 50 / Mix 50, aligned on the unprocessed
+  // file, its percentile makeup and sized ceiling at the source peak.
+  const base = la2aKp({ ...LA2A_DEFAULTS, peakReduction: 50, mix: 0.5, inputAlignDb: align })
+  const plan = computeAutoMakeupPlan([core], SR, base, { reference: 'percentile' })
+  const k = new LA2AKernel(SR)
+  k.setParams({ ...base, gainDb: plan.makeupDb, ceilingDb: db(peak(x)), ceilingKneeDb: plan.ceilingKneeDb })
+  const slot = runKernel(k, Float32Array.from({ length: core.length + k.latencySamples }, (_, i) => core[i] ?? 0))
+    .subarray(k.latencySamples)
+  const vox = render({ parallel: 50, parallelComp: 'la2a' })
+  let e = 0
+  let d = 0
+  for (let i = 0; i < core.length; i++) { e += slot[i] ** 2; d += (slot[i] - vox[i]) ** 2 }
+  const diffDb = 10 * Math.log10(d / e)
+  // −75 to −81 dB on the owner's clips; the lookahead limiter this replaced
+  // put them −32.5 dB apart.
+  assert.ok(diffDb < -55, `VoxPressor's LA-2A vs the slot: ${diffDb.toFixed(1)} dB re signal`)
+})

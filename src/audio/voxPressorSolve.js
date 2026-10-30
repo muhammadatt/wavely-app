@@ -76,6 +76,7 @@ import { measureVoiceProfile } from './voiceProfile.js'
 import { gatedRmsOfChannels } from './dsp/inputAlign.js'
 import {
   peakOfChannels, solveMakeupPlan, percentileOfChannels, MAKEUP_PERCENTILE, percentileBlendGain, blendInto,
+  ceilingKneeDbFor, softCeiling, float32AtOrBelow,
 } from './dsp/makeupReference.js'
 import { limitChannels } from './dsp/peakLimiter.js'
 import { processHFSoftenerBuffer, levelOffsetDbFor } from './deEsserProcessor.js'
@@ -200,7 +201,7 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   const none = {
     cornerHz, voiceF0Hz, peaksRippleDb: null, sourcePeakDb: null,
     deEssLevelOffsetDb: null,
-    parallelAlignDb: null, parallelMakeupDb: null, parallelRestoreDb: 0,
+    parallelAlignDb: null, parallelMakeupDb: null, parallelRestoreDb: 0, parallelCeilingKneeDb: null,
     peaksMakeupDb: 0, peaksCeilingDb: null, peaksRestoreDb: 0,
     bodyMakeupDb: 0, bodyCeilingDb: null, makeupDb: 0,
     peaksDb: 0, peaksBodyDb: 0, bodyDb: 0,
@@ -323,15 +324,34 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
       : parallelFetSolve(afterDeEss, sampleRate, at)
     out.parallelMakeupDb = solved.makeupDb
     /**
-     * PER-STAGE PEAK RESTORE, as Peaks' and Body's: the blend's peak back on
-     * the source's, as a gain after the blend and before the parallel limiter.
-     * ⚠ NEEDED BECAUSE OF THE SIBILANCE EMPHASIS: the copy now catches the "s"
-     * peaks that set the region's peak, and the percentile makeup left the
-     * blend 0.3–0.6 dB under the source peak on the owner's two clips.
-     * Measured on the window, as Body's; past it the limiter holds the peak.
+     * ⚠ THE PEAK IS HELD BY THE COMPRESSOR'S OWN SIZED SOFT CEILING, NOT A
+     * LIMITER — each option exactly as its standalone plugin holds it (owner,
+     * October 2026, "keep the two versions consistent"): the ceiling at the
+     * source peak, its knee sized by the solve (`ceilingKneeDbFor`) from how far
+     * the un-ceilinged blend overshoots. The LA-2A's blend overshot by ~3 dB on
+     * "Messy and Bright"; the knee bent 0.06 % of its samples by more than
+     * 0.1 dB, where the lookahead limiter it replaced dipped 5.1 % — it turned
+     * whole onsets down for its 50 ms release, which the owner heard as less
+     * warm and full than an LA Vintage 2A slot (renders −32.5 dB apart; the
+     * compressors themselves null to −∞).
+     *
+     * The 1176 also keeps LA Classic 76's PEAK RESTORE (its apply's
+     * `restorePeakToCeiling`): the sibilance emphasis lets the copy catch the
+     * "s" peaks that set the region's peak, which left the blend 0.3–0.6 dB
+     * under the source peak. The LA-2A has none, as LA Vintage 2A has none.
+     * Measured on the window, as Body's; past it the limiter after the stage,
+     * a backstop that is otherwise idle, holds the peak.
      */
     if (solved.blend) {
-      out.parallelRestoreDb = restoreToCeilingDb(ceilingDb, db(peakOfChannels(limitChannels(solved.blend, ceilingDb, sampleRate))))
+      const overDb = db(peakOfChannels(solved.blend)) - ceilingDb
+      out.parallelCeilingKneeDb = ceilingKneeDbFor(overDb)
+      if (parallelCompOf(p) !== 'la2a') {
+        const lin = float32AtOrBelow(Math.exp(ceilingDb * (Math.LN10 / 20)))
+        const knee = lin * Math.exp(-out.parallelCeilingKneeDb * (Math.LN10 / 20))
+        let pk = 0
+        for (const c of solved.blend) for (const v of c) { const a = Math.abs(softCeiling(v, lin, knee)); if (a > pk) pk = a }
+        out.parallelRestoreDb = restoreToCeilingDb(ceilingDb, db(pk))
+      }
     }
   }
   return out
@@ -350,7 +370,8 @@ function parallelWetGain(channels, sampleRate, fetParams) {
   const inRef = percentileOfChannels(channels, MAKEUP_PERCENTILE)
   if (!(inRef > 0)) return { g: 0, wet: null }
   const fet = new FET1176Kernel(sampleRate)
-  fet.setParams({ ...fetParams, mix: 1, outputGainDb: 0, oversample: true })
+  // No ceiling: the solve measures below it, as every makeup solve does.
+  fet.setParams({ ...fetParams, mix: 1, outputGainDb: 0, oversample: true, ceilingDb: null })
   const det = new ParallelDetector(sampleRate)
   const lat = fet.latencySamples
   const len = channels[0].length
@@ -386,7 +407,8 @@ function parallelFetSolve(channels, sampleRate, p) {
  * own dry path.
  */
 function parallelLa2aSolve(channels, sampleRate, p) {
-  const base = { ...parallelLa2aParams(p), oversample: false }
+  // No ceiling: the solve (and the blend the knee is sized from) measures below it.
+  const base = { ...parallelLa2aParams(p), oversample: false, ceilingDb: null }
   // Its own detector, as the kernel runs it (no sidechain).
   const render = (chs, extra) => renderLa2a(chs, sampleRate, { ...base, ...extra })
   const plan = solveMakeupPlan({

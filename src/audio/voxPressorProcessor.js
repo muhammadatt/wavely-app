@@ -196,7 +196,6 @@ export const PARALLEL_PATCH = Object.freeze({
   scHpfHz: 0,
   inputDrive: PARALLEL_INPUT_KNOB,
   attack: PARALLEL_ATTACK,
-  ceilingDb: null,
 })
 
 /**
@@ -212,6 +211,7 @@ export function parallelFetParams(p) {
     inputAlignDb: finite(p.parallelAlignDb, 0, -60, 60),
     mix: finite(p.parallelMix, 0, 0, 1),
     outputGainDb: finite(p.parallelMakeupDb, 0, -48, 48),
+    ...parallelCeiling(p),
   }
 }
 
@@ -251,7 +251,6 @@ export const PARALLEL_LA2A_PR = 50
 export const PARALLEL_LA2A_PATCH = Object.freeze({
   mode: 'compress',
   lookaheadMs: 0,
-  ceilingDb: null,
 })
 
 /** The parallel LA-2A's params from VoxPressor KERNEL params (`gainDb` = the measured wet makeup). */
@@ -262,7 +261,19 @@ export function parallelLa2aParams(p) {
     inputAlignDb: finite(p.parallelAlignDb, 0, -60, 60),
     mix: finite(p.parallelMix, 0, 0, 1),
     gainDb: finite(p.parallelMakeupDb, 0, -24, 24),
+    ...parallelCeiling(p),
   }
+}
+
+/**
+ * The Parallel stage's peak hold: the compressor's own SIZED SOFT CEILING at
+ * the source peak, as LA Vintage 2A and LA Classic 76 hold theirs — see
+ * `measureVoxPressor`. No ceiling until the source peak is known.
+ */
+function parallelCeiling(p) {
+  return Number.isFinite(p.sourcePeakDb)
+    ? { ceilingDb: p.sourcePeakDb, ceilingKneeDb: Number.isFinite(p.parallelCeilingKneeDb) ? p.parallelCeilingKneeDb : null }
+    : { ceilingDb: null, ceilingKneeDb: null }
 }
 
 export function parallelCompOf(p) {
@@ -708,7 +719,9 @@ export class VoxPressorKernel {
         for (let i = 0; i < n; i++) io[i] = line.push(io[i])
       }
     }
-    // Restore → limiter, as the Body stage's (off, the restore is exactly 1).
+    // Restore (the 1176's, as LA Classic 76's apply) → the limiter, a BACKSTOP
+    // that is idle while the compressor's own ceiling holds the peak (off, the
+    // restore is exactly 1).
     if (this.parallelRestoreSmoothed === null) this.parallelRestoreSmoothed = this.parallelRestoreLin
     this.parallelRestoreSmoothed = this._ramp(outputChannels, n, this.parallelRestoreSmoothed, this.parallelRestoreLin)
     this.parallelLimiter.process(outputChannels, n)

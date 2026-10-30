@@ -359,9 +359,24 @@ differences are the whole gap (Mix 50, change vs Parallel off; level / above
   would have driven the cell ~1 dB softer (avg GR 2.6 / 2.7) than what the
   owner previewed. VoxPressor's stage uses the source in both.
 
-Matched, the stage renders the slot's preview within 0.03–0.08 dB of level and
-0.01–0.03 dB above 5 kHz at Mix 50 and 75, the difference 30–34 dB under the
-output. What the LA-2A adds is top end and density, not level (−0.2 to 0 dB at
+⚠⚠ **AND THE PEAK IS HELD AS THE SLOT HOLDS IT** (owner, October 2026: "keep
+the two versions consistent"). With the three above matched, the owner still
+heard the slot as warmer, fuller and less distorted on an export pair. The
+compressors nulled to −∞; the whole remaining difference (−32.5 dB) was the
+PEAK HOLD. The blend overshoots the source peak by ~3 dB (onsets the LA-2A's
+10 ms attack lets through, lifted by the percentile makeup): the slot's sized
+tanh ceiling bent 0.06 % of samples by more than 0.1 dB, the lookahead limiter
+here dipped 5.1 % — whole onsets, for its 50 ms release. The Parallel stage
+now holds its peak with the COMPRESSOR'S OWN SIZED SOFT CEILING at the source
+peak (`parallelCeilingKneeDb`, sized by `ceilingKneeDbFor` from the
+un-ceilinged blend's overshoot), for both options, as each standalone plugin
+does; the 1176 also keeps LA Classic 76's peak restore. The limiter after the
+stage stays as an idle backstop. Matched, the LA-2A renders the slot's preview
+within 0.001–0.002 dB, the difference 75–81 dB under the output (pinned by a
+test at −55). ⚠ This reverses the limiters-not-soft-ceilings rule FOR THIS
+STAGE ONLY: there the ceiling would have caught up to 3.3 dB of the makeup's
+overshoot with a fixed knee; here the solve sizes the knee to the overshoot.
+Peaks, Body and Density keep their limiters. What the LA-2A adds is top end and density, not level (−0.2 to 0 dB at
 Mix 50 against the 1176's ~+1), so the A/B is ~1 dB apart: match it with Output.
 
 ⚠ **Overlap with Density.** Both add density: Parallel by dynamic upward

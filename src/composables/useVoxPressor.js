@@ -306,9 +306,10 @@ const copies = pluginCopies((copy, life) => {
     function syncParallelComp(v) {
       voxParallelComp.value = v
       pushParam('parallelComp', v)
-      voxMeasured.value = { ...voxMeasured.value, parallelMakeupDb: null, parallelRestoreDb: 0 }
+      voxMeasured.value = { ...voxMeasured.value, parallelMakeupDb: null, parallelRestoreDb: 0, parallelCeilingKneeDb: null }
       pushParam('parallelMakeupDb', null)
       pushParam('parallelRestoreDb', 0)
+      pushParam('parallelCeilingKneeDb', null)
       scheduleSolve()
     }
 
@@ -436,7 +437,7 @@ const copies = pluginCopies((copy, life) => {
         watch(() => `${appState.activeDocumentId}:${state.revision}`, () => {
           const cleared = {
             peaksCeilingDb: null, bodyCeilingDb: null, sourcePeakDb: null,
-            deEssLevelOffsetDb: null, parallelAlignDb: null, parallelMakeupDb: null, parallelRestoreDb: 0,
+            deEssLevelOffsetDb: null, parallelAlignDb: null, parallelMakeupDb: null, parallelRestoreDb: 0, parallelCeilingKneeDb: null,
             peaksMakeupDb: 0, peaksRestoreDb: 0, bodyMakeupDb: 0, makeupDb: 0,
           }
           voxMeasured.value = { ...voxMeasured.value, ...cleared }
