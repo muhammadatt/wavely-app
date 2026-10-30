@@ -2,7 +2,7 @@ import { computed, ref, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { useEntitlements } from './useEntitlements.js'
-import { registerChainPlugin } from './usePluginChain.js'
+import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { analyzeSibilance } from '../api/analyze.js'
 import { applyDeEsserRegion, computePeakCache } from '../audio/processing.js'
@@ -387,6 +387,7 @@ const copies = pluginCopies((copy, life) => {
       id: clipGainDeEsserEffect.id,
       windowId,
       label: 'Clip-Gain De-Esser',
+      settingsKey: () => settingsKeyOf({ ...params.value, tuning: tuning.value }),
       dispose: life.dispose,
       isActive: () => preview.value,
       setActive: (on) => { if (preview.value !== on) togglePreview() },

@@ -6,6 +6,9 @@ import { getEffectChain, getEffectChainIfExists, onEffectChainCreated } from '..
 import { replaceRegionWithBuffer } from '../audio/operations.js'
 import { computePeakCache } from '../audio/processing.js'
 import { useEntitlements } from './useEntitlements.js'
+import { settingsKeyOf } from './chainSettingsKey.js'
+
+export { settingsKeyOf }
 
 /**
  * The plugin chain — a formal rack over the live EffectChain.
@@ -175,6 +178,199 @@ export function registerChainPlugin(def) {
   plugins.set(def.id, def)
   const chain = getEffectChainIfExists()
   if (chain) sync(chain)
+}
+
+// ── CALIBRATION ─────────────────────────────────────────────────────────────
+/**
+ * ⚠ A SLOT'S PREVIEW MUST MEASURE WHAT THE SLOT WILL HEAR. Apply has always
+ * measured each slot on the running result of the slots before it (see
+ * `render` above), which is what makes a chain Apply equal to applying the
+ * plugins one at a time. Preview measured the UNPROCESSED file, so a slot after
+ * anything that moves level heard one thing in preview and rendered another:
+ * an LA Vintage 2A slot after a plugin whose makeups lift the voice by
+ * 2.4–4.8 dB was aligned 2.8 dB low on the owner's clip — 3.6 dB of average
+ * reduction in preview against 2.6 on Apply.
+ *
+ * CALIBRATION IS THE APPLY LOOP WITHOUT THE COMMIT: every live slot but the
+ * last renders the preview region (the selection, or the whole file) through
+ * its own `render`, exactly as Apply runs it, and each slot keeps the segments
+ * it was handed. A slot's preview measurements then read those
+ * (`chainMeasureInput`), so preview and Apply agree by construction.
+ *
+ * ⚠ IT COSTS AN APPLY OF THE UPSTREAM CHAIN, which on a long file with no
+ * selection is minutes — so it is on demand (the chain window's CALIBRATE) or,
+ * for those who want it, AUTO: re-run, debounced, whenever something upstream
+ * of a calibrated slot changes. Owner's call, October 2026.
+ *
+ * WHAT "UPSTREAM CHANGED" MEANS: the document revision, the preview region,
+ * which slots are live and in what order, and each upstream slot's
+ * `settingsKey()` — its USER settings, never its measured ones. ⚠ That
+ * exclusion is what keeps AUTO from looping: calibrating re-measures every
+ * slot's makeup, ceiling and alignment, and if those counted as changes each
+ * calibration would trigger the next.
+ */
+const CALIBRATION_MODE_KEY = 'wavely:chain-calibration'
+const CALIBRATION_DEBOUNCE_MS = 700
+
+function loadCalibrationMode() {
+  try { return localStorage.getItem(CALIBRATION_MODE_KEY) === 'auto' ? 'auto' : 'manual' } catch { return 'manual' }
+}
+
+const calibrationMode = ref(loadCalibrationMode())
+const calibrationRunning = ref(false)
+const calibrationProgress = ref(0)
+const calibrationError = ref('')
+/** Bumped when a calibration lands: the slots' preview measurements re-run on it. */
+const calibrationRevision = ref(0)
+/** id → { segments, fingerprint } — the input each slot was handed. Not reactive: read through the revision. */
+let calibrationInputs = new Map()
+let calibrationSeq = 0
+const liveSlotList = computed(() => slots.value.filter(s => s.active))
+
+/** The region preview measures and calibration renders: the selection, or the whole file. */
+function previewRegion(editor) {
+  const { state, totalDuration } = editor
+  if (state.selection) return { start: state.selection.start, end: state.selection.end }
+  const end = totalDuration.value
+  return end > 0 ? { start: 0, end } : null
+}
+
+/**
+ * What `id` hears, as keys: `base` the document revision and the region (what
+ * its stored input is spliced into), `full` that plus which slots are live
+ * upstream and their user settings. Null when it is not a live slot or nothing
+ * live is upstream of it (it hears the file, which needs no calibration).
+ */
+function upstreamFingerprint(id, editor) {
+  if (bypassed.value) return null
+  const live = liveSlotList.value
+  const at = live.findIndex(s => s.id === id)
+  if (at <= 0) return null
+  const region = previewRegion(editor)
+  if (!region || !editor.state.currentFile) return null
+  const base = `${editor.appState.activeDocumentId}:${editor.state.revision}|${region.start}|${region.end}`
+  const parts = [base]
+  for (let i = 0; i < at; i++) {
+    const def = plugins.get(live[i].id)
+    parts.push(`${live[i].id}=${def?.settingsKey ? def.settingsKey() : '?'}`)
+  }
+  return { base, full: parts.join('|') }
+}
+
+/**
+ * The segments a chain slot's PREVIEW measurements should read, or null to use
+ * the document's own (a solo copy, the first live slot, a bypassed chain, or a
+ * slot never calibrated for this document revision and region).
+ *
+ * ⚠ A SLOT WHOSE UPSTREAM SETTINGS MOVED SINCE ITS CALIBRATION KEEPS ITS LAST
+ * CALIBRATED INPUT (the chain window shows it STALE). In MANUAL mode that is
+ * the point: what the upstream chain produced a knob-turn ago is far closer to
+ * what the slot will hear than the unprocessed file it fell back to before.
+ * A different revision or region is another matter — the stored segments are
+ * spliced over a span that no longer applies — so those fall back to the file.
+ * Reactive on the calibration revision.
+ */
+export function chainMeasureInput(id) {
+  void calibrationRevision.value
+  const editor = useEditorState()
+  const fp = upstreamFingerprint(id, editor)
+  if (fp === null) return null
+  const hit = calibrationInputs.get(id)
+  return hit && hit.base === fp.base ? hit.segments : null
+}
+
+/** 'none' (hears the file) | 'calibrated' | 'stale', for a slot. Reactive. */
+export function chainCalibrationState(id) {
+  void calibrationRevision.value
+  const editor = useEditorState()
+  const fp = upstreamFingerprint(id, editor)
+  if (fp === null) return 'none'
+  const hit = calibrationInputs.get(id)
+  return hit && hit.full === fp.full ? 'calibrated' : 'stale'
+}
+
+/** The calibration revision, for the slots to re-measure on (reactive). */
+export const chainCalibrationRevision = computed(() => calibrationRevision.value)
+
+async function runCalibration() {
+  if (applying.value) return false
+  const editor = useEditorState()
+  const { state, appState } = editor
+  const live = liveSlotList.value
+  if (bypassed.value || live.length < 2 || !state.currentFile) return false
+  const region = previewRegion(editor)
+  if (!region) return false
+  const seq = ++calibrationSeq
+  const docKey = `${appState.activeDocumentId}:${state.revision}`
+  const fingerprints = live.map(s => upstreamFingerprint(s.id, editor))
+  const defs = live.map(s => plugins.get(s.id))
+  calibrationRunning.value = true
+  calibrationProgress.value = 0
+  calibrationError.value = ''
+  const inputs = new Map()
+  try {
+    let segments = state.segments
+    for (let i = 0; i < defs.length; i++) {
+      if (i > 0) inputs.set(live[i].id, { segments, ...fingerprints[i] })
+      if (i === defs.length - 1) break // the last slot only needs its input
+      const def = defs[i]
+      const why = !def ? `${live[i].label} can’t render in the chain` : def.unavailable?.()
+      if (why) throw new Error(`${live[i].label}: ${why}`)
+      const buffer = await def.render(segments, region.start, region.end)
+      // Superseded (a newer calibration started) or the audio moved under it.
+      if (seq !== calibrationSeq) return false
+      if (`${appState.activeDocumentId}:${state.revision}` !== docKey) return false
+      segments = replaceRegionWithBuffer(segments, region.start, region.end, buffer, `chain-calibrate-${i}`)
+      calibrationProgress.value = (i + 1) / (defs.length - 1)
+    }
+    calibrationInputs = inputs
+    calibrationRevision.value++
+    return true
+  } catch (err) {
+    if (seq === calibrationSeq) {
+      console.error('Chain calibration failed:', err)
+      calibrationError.value = err?.message ?? 'Calibration failed'
+    }
+    return false
+  } finally {
+    if (seq === calibrationSeq) calibrationRunning.value = false
+  }
+}
+
+/** Whether any live slot is measuring audio it will not hear (reactive). */
+const calibrationNeeded = computed(() => liveSlotList.value.some(s => chainCalibrationState(s.id) === 'stale'))
+
+// AUTO: re-calibrate, debounced, when a slot goes stale. Watched for the app's
+// lifetime, as the chain itself is.
+let calibrationTimer = null
+effectScope(true).run(() => {
+  // ⚠ `calibrationRunning` IS A SOURCE: a change made DURING a calibration
+  // leaves `needed` true before and after it, so without this the run's end
+  // would not re-trigger and AUTO would sit stale.
+  watch([calibrationNeeded, calibrationMode, applying, calibrationRunning], ([needed, mode, busy, running]) => {
+    clearTimeout(calibrationTimer)
+    if (!needed || mode !== 'auto' || busy || running) return
+    calibrationTimer = setTimeout(() => { if (calibrationNeeded.value) runCalibration() }, CALIBRATION_DEBOUNCE_MS)
+  })
+})
+
+/** The chain window's calibration controls. */
+export function useChainCalibration() {
+  return {
+    mode: computed(() => calibrationMode.value),
+    setMode(mode) {
+      calibrationMode.value = mode === 'auto' ? 'auto' : 'manual'
+      try { localStorage.setItem(CALIBRATION_MODE_KEY, calibrationMode.value) } catch { /* private window */ }
+    },
+    running: computed(() => calibrationRunning.value),
+    progress: computed(() => calibrationProgress.value),
+    error: computed(() => calibrationError.value),
+    needed: calibrationNeeded,
+    /** Whether anything in the chain needs calibrating at all (two or more live slots). */
+    applicable: computed(() => !bypassed.value && liveSlotList.value.length >= 2),
+    calibrate: runCalibration,
+    stateOf: chainCalibrationState,
+  }
 }
 
 /** Whether the plugin edited in `windowId` has a slot in the chain (live or bypassed). */
