@@ -67,15 +67,18 @@
  * both modes, so the gain trajectory is the same; only the inter-sample detail
  * of the audio differs, which a block peak or a percentile barely sees.
  */
-import { processVoxPressorBuffer, VoxPressorKernel } from './voxPressorProcessor.js'
+import {
+  processVoxPressorBuffer, VoxPressorKernel, parallelFetParams, PARALLEL_INPUT_KNOB,
+} from './voxPressorProcessor.js'
 import { measureVoiceProfile } from './voiceProfile.js'
 import { gatedRmsOfChannels } from './dsp/inputAlign.js'
 import {
-  peakOfChannels, solveMakeupPlan, percentileOfChannels, MAKEUP_PERCENTILE,
+  peakOfChannels, solveMakeupPlan, percentileOfChannels, MAKEUP_PERCENTILE, percentileBlendGain, blendInto,
 } from './dsp/makeupReference.js'
 import { limitChannels } from './dsp/peakLimiter.js'
 import { processHFSoftenerBuffer, levelOffsetDbFor } from './deEsserProcessor.js'
-import { computeSchepsAutoTrim } from './schepsProcessor.js'
+import { FET1176Kernel, inputDriveDbForKnob } from './fet1176Processor.js'
+import { ParallelDetector } from './dsp/voiceDetector.js'
 import { alignDbForRms } from './dsp/inputAlign.js'
 
 /** Block length for the peak and voiced-level statistics, seconds. */
@@ -195,7 +198,7 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   const none = {
     cornerHz, voiceF0Hz, peaksRippleDb: null, sourcePeakDb: null,
     deEssLevelOffsetDb: null,
-    schepsAlignDb: null, schepsTrimDb: 0, schepsCorrelation: 0, schepsDensityDb: 0,
+    parallelAlignDb: null, parallelMakeupDb: null, parallelRestoreDb: 0,
     peaksMakeupDb: 0, peaksCeilingDb: null, peaksRestoreDb: 0,
     bodyMakeupDb: 0, bodyCeilingDb: null, makeupDb: 0,
     peaksDb: 0, peaksBodyDb: 0, bodyDb: 0,
@@ -299,20 +302,63 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
     }).channelData
   }
 
-  // ── PARALLEL ── Scheps' trim, correlation, density and alignment, measured on
-  // the de-esser's output (spec §4.4: measure it on what it hears).
+  // ── PARALLEL ── the parallel 1176's alignment and wet makeup, measured on
+  // the de-esser's output (spec §4.4: measure it on what it hears). The makeup
+  // is solved ON THE BLEND at the current Mix (the LA-2A mix law), so the Mix
+  // knob re-measures; one oversampled render of the wet path answers it.
+  // ⚠ Not `computeFET1176AutoMakeupPlan`: that renders without the sidechain,
+  // and this 1176 listens through `ParallelDetector`.
   if (p.parallelMix > 0) {
-    out.schepsAlignDb = alignDbForRms(gatedRmsOfChannels(afterDeEss, sampleRate))
-    const t = computeSchepsAutoTrim(afterDeEss, sampleRate, {
-      character: p.parallelCharacter === 'thick' ? 'thick' : 'presence',
-      squash: Number.isFinite(p.parallelSquash) ? p.parallelSquash : 40,
-      inputAlignDb: out.schepsAlignDb,
-    })
-    out.schepsTrimDb = t.trimDb
-    out.schepsCorrelation = t.correlation
-    out.schepsDensityDb = t.densityDb
+    out.parallelAlignDb = alignDbForRms(gatedRmsOfChannels(afterDeEss, sampleRate))
+    const fetParams = parallelFetParams({ ...p, voiceF0Hz, parallelAlignDb: out.parallelAlignDb })
+    const { g, wet } = parallelWetGain(afterDeEss, sampleRate, fetParams)
+    out.parallelMakeupDb = g > 0 ? 20 * Math.log10(g) : -inputDriveDbForKnob(PARALLEL_INPUT_KNOB)
+    /**
+     * PER-STAGE PEAK RESTORE, as Peaks' and Body's: the blend's peak back on
+     * the source's, as a gain after the blend and before the parallel limiter.
+     * ⚠ NEEDED BECAUSE OF THE SIBILANCE EMPHASIS: the copy now catches the "s"
+     * peaks that set the region's peak, and the percentile makeup left the
+     * blend 0.3–0.6 dB under the source peak on the owner's two clips.
+     * Measured on the window, as Body's; past it the limiter holds the peak.
+     */
+    if (wet) {
+      const blend = blendInto(afterDeEss.map(c => new Float32Array(c.length)), afterDeEss, wet, fetParams.mix,
+        Math.exp(out.parallelMakeupDb * (Math.LN10 / 20)))
+      out.parallelRestoreDb = restoreToCeilingDb(ceilingDb, db(peakOfChannels(limitChannels(blend, ceilingDb, sampleRate))))
+    }
   }
   return out
+}
+
+/**
+ * The parallel 1176's wet gain (linear, on its Output) that puts the BLEND's
+ * 99.9th percentile on the input's — the LA-2A mix law, `percentileBlendGain`.
+ * The wet path is rendered as the kernel plays it: oversampled, its detector
+ * fed by `ParallelDetector`, at unity Output and Mix 1; the input is padded by
+ * the latency and the delay dropped, so dry and wet pair sample for sample.
+ * Returns `{ g, wet }`: g 0 (and no wet) when there is nothing to solve (a
+ * zero percentile).
+ */
+function parallelWetGain(channels, sampleRate, fetParams) {
+  const inRef = percentileOfChannels(channels, MAKEUP_PERCENTILE)
+  if (!(inRef > 0)) return { g: 0, wet: null }
+  const fet = new FET1176Kernel(sampleRate)
+  fet.setParams({ ...fetParams, mix: 1, outputGainDb: 0, oversample: true })
+  const det = new ParallelDetector(sampleRate)
+  const lat = fet.latencySamples
+  const len = channels[0].length
+  const total = len + lat
+  const padded = channels.map((c) => { const q = new Float32Array(total); q.set(c); return q })
+  const wet = channels.map(() => new Float32Array(total))
+  for (let o = 0; o < total; o += 128) {
+    const n = Math.min(128, total - o)
+    const ins = padded.map(c => c.subarray(o, o + n))
+    fet.process(ins, wet.map(c => c.subarray(o, o + n)), n, det.process(ins, n))
+  }
+  const w = wet.map(c => c.subarray(lat, lat + len))
+  const scratch = channels.map(() => new Float32Array(len))
+  const g = percentileBlendGain(channels, w, fetParams.mix, inRef, -48, 48, scratch)
+  return g > 0 ? { g, wet: w } : { g: 0, wet: null }
 }
 
 function scaleChannels(chs, gainDb) {

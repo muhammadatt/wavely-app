@@ -26,7 +26,7 @@ export default {
     },
     {
       label: 'Parallel',
-      text: 'Scheps Parallel\'s Mix: a Pultec-coloured, squashed LA-2A copy blended under the voice for density. PRESENCE leans it toward the top, THICK toward the low end. It holds level rather than adding it. 0 takes the stage out',
+      text: 'Parallel compression: a fast 4:1 1176 copy blended under the voice. The loudest peaks stay where they were and the quieter parts come up, so the voice gets denser and louder. Its release follows the voice\'s pitch, so it does not ripple a low voice. 0 takes the stage out',
     },
     {
       label: 'Density',

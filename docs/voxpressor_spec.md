@@ -49,8 +49,9 @@ in ─ INPUT ALIGN (drive offset, detector only)
    ├─ [2] BODY    — LA2AKernel (opto, rides the phrase)       ◄── detector (full)
    │     makeup + restore → LIMITER (source peak)
    ├─ [3] DE-ESS  — HFSoftenerKernel (Duck + EQ, lisp guard), level from the Body output   (built)
-   ├─ [4] PARALLEL — SchepsKernel, PRESENCE (or THICK), measured on the de-esser's output  (built)
-   │     → LIMITER (source peak; Scheps' own soft ceiling off)
+   ├─ [4] PARALLEL — FET1176Kernel at its own Mix (New York: fast 4:1 copy under the dry),
+   │     detector hears sibilance +15 dB; makeup on the blend; measured on the de-esser's output  (built)
+   │     restore → LIMITER (source peak)
    ├─ [5] DENSITY — InflatorKernel, anchored at the source peak, Clip on                   (built)
    │     → LIMITER (source peak: the downsampler's inter-sample ringing, §4.3)
    ├─ [6] AIR     — Air Boost curve, voiced-only                                         (not built)
@@ -70,10 +71,10 @@ in ─ INPUT ALIGN (drive offset, detector only)
   ride any harder.
 - **De-ess after compression, BEFORE the parallel stage (owner's order,
   October 2026).** Compression raises sibilance relative to the body, so the
-  de-esser follows the serial pair. Ahead of Parallel it hands Scheps' 8 kHz
-  Pultec push less sibilance to spend its cell's reduction on (the draft had
-  it after Parallel, arguing the push would bring the "s" back; the push is on
-  the squashed copy only, blended under the voice). Its thresholds follow the
+  de-esser follows the serial pair. ⚠ A parallel compressor lifts whatever
+  its detector leaves alone, sibilance included, so the parallel 1176's
+  detector hears sibilance shelved up (§4.4) — without that the blend gave
+  back most of what the de-esser took. Its thresholds follow the
   level it HEARS: `deEssLevelOffsetDb` is measured on the Body stage's output,
   made up, and until it lands the source's level stands in.
 - **Air after the de-esser.** Air pushed into a compressor gets compressed
@@ -139,7 +140,7 @@ BODY SC** and compare against a plain LA Vintage 2A.
 | **Speed** | AUTO / GENTLE / NORMAL / FAST | AUTO | The 76's attack / release (§10): AUTO sets the release from the voice's pitch. Readout: gain ripple, amber past −22 dB |
 | **Body** | 0–100 | 57 | The 2A's **Peak Reduction**, aligned the same way and net of the Peaks stage's makeup. Readout: avg leveling on voiced material. 0 = stage out |
 | **De-ess** | 0–100 | 40 | HF Softener **Amount** (Split pinned at its default 33; Guard 100) |
-| **Parallel** | 0–100 % (+ PRESENCE / THICK toggle) | 30, PRESENCE | Scheps Parallel's **Mix** (§4.4). The squashed, Pultec-coloured LA-2A copy blended under the voice. 0 = stage out, a pure delay |
+| **Parallel** | 0–100 % | 30 | The parallel 1176's **Mix** (§4.4): a fast 4:1 copy blended under the voice, peaks held, the rest raised. 0 = stage out, a pure delay |
 | **Air** | 0–6 dB | 1.5 | Air Boost curve (`dsp/airBandCurve.js`), VOICED mode only (vowels), the HF Softener's existing Air path |
 | **Density** | 0–100 % | 30 | Cambridge Inflator **Effect** (§4.3). Lifts the body up to +3.5 dB under a fixed peak, with odd harmonics on the loudest syllables |
 | **Mix** | 0–100 % | 100 | Parallel blend against delay-compensated dry |
@@ -273,54 +274,60 @@ duplicated the LA-2A's even harmonics.
 DENSE only (the 2A's shapers off, via a clean patch) / TUBE only (Density
 forced to 0). If DENSE-only wins by ear it can be promoted.
 
-### 4.4 Parallel — Scheps Parallel, embedded
+### 4.4 Parallel — New York compression with the 1176
 
-**Embed `SchepsKernel` rather than a second bare LA-2A.** It already *is* a
-parallel LA-2A built for presence and density on voice, and everything a bare
-parallel copy would need is solved there:
+⚠ **THIS WAS SCHEPS PARALLEL, AND IT COULD NOT ADD LOUDNESS** (owner, October
+2026: "we typically want to use parallel processing to make quiet parts
+louder"). The draft embedded `SchepsKernel` on the argument that its mix law
+"gently raises loudness"; on the owner's clips it added 0.2–0.4 dB. The mix
+law was not the cause: Scheps' trim is already referenced to the 99.9th
+percentile, and the LA-2A's mix law (a straight blend with the wet makeup
+solved on it) measured within a few tenths of Scheps' at Mix 0.3 and BELOW it
+from 0.5 up. The cause is the OPTO: a cell with a multi-second release turns the
+whole voice down nearly evenly, so its copy is barely denser than the dry
+(0.75 / 1.9 dB, "Messy and Bright" / David Greenberg), and squashing it harder
+stops helping past Squash ~60. A fast compressor reduces the crest factor,
+which is what parallel compression lifts. Same law, same reference, raw clips,
+Mix 0.3: bare LA-2A +0.41 / +1.11 dB; 1176 4:1 attack 6 +0.91 / +1.70.
 
-- **Pre-EQ that aims the cell.** The Pultec push cuts ~4.7 dB of lows before the
-  LA-2A and lifts 8 kHz, with R37 pinned fully counter-clockwise, so the cell
-  rides the presence band instead of ducking on chest and plosives. The recovery
-  EQ after it is a real, measured curve, not an exact inverse, and that residue
-  is the sound.
-- **Two characters, both measured:** **PRESENCE** (8 kHz push, 20 kHz recovery;
-  `docs/scheps_vocal_chain_presence_spec.md`) and **THICK** (net +4 dB at 30 Hz;
-  `docs/scheps_vocal_chain_thick_spec.md`). PRESENCE ships as the default, since
-  that is what this stage is for; THICK is a toggle beside the knob.
-- **Its own delay-compensated dry path** inside the kernel, so the blend doesn't
-  comb-filter.
-- **A mix law that keeps level while adding density:** equal power, corrected
-  for the measured dry/wet correlation, and passing through the compression's
-  yield (`densityDb`) so turning Parallel up *gently raises loudness* instead of
-  being level-flat. That is the density being asked for.
-- **Auto wet trim, input alignment**, measured (`computeSchepsAutoTrim`) on the
-  de-esser's output. ⚠ Its own output ceiling is Scheps' tanh `softCeiling`,
-  which VoxPressor turns OFF (the limiters-not-soft-ceilings decision, §10): a
-  lookahead limiter at the source peak follows the stage instead.
+**The stage:** a second `FET1176Kernel` (`PARALLEL_PATCH` in
+`voxPressorProcessor.js`) at the Parallel knob's Mix, through the 1176's own
+delay-compensated dry path:
 
-**What is pinned and what is exposed:**
+- **Ratio 4, attack 6, fetDrive 0, Input 40** on the file-relative alignment
+  (measured on what it hears). Density PEAKS around Input 40 — drive harder and
+  the copy delivers LESS (In 50 / 60 / 70 at Mix 0.5: +1.11 / +0.78 / +0.45 on
+  Messy), because the onsets the attack lets through set the percentile the
+  makeup holds.
+- **Release voice-adaptive**, the Peaks stage's AUTO rule, never a fixed fast
+  release (it ripples a low voice, §10). It costs nothing here: within 0.04 dB
+  of release 5 on both clips.
+- **The LA-2A mix law:** `dry·(1−mix) + wet·mix·g`, g (the wet's Output) solved
+  so the BLEND's 99.9th percentile lands on the stage input's — peaks held,
+  everything under them raised. The makeup is therefore a function of Mix, and
+  the knob re-measures.
+- ⚠ **ITS DETECTOR HEARS SIBILANCE +15 dB** (`ParallelDetector`, a 4 kHz high
+  shelf, nothing else). In a parallel copy whatever the detector leaves alone
+  comes UP by the copy's ~9.5 dB of makeup, and sibilance sits under the voiced
+  peaks: with a plain detector, energy above 5 kHz rose 2.6 dB at Mix 0.3 on
+  Messy against 0.76 dB of level, undoing the de-esser. By the same argument it
+  has no corner high-pass and no plosive shelf. +15 is reasoned from the two
+  clips (+12 left Greenberg's top end above the level, +18 took Messy's
+  under); it costs ~0.1 dB.
+- **Peak restore → limiter**, as Peaks' and Body's (per-stage makeup): the
+  emphasis lets the copy catch the "s" peaks that set the region's peak, which
+  left the blend 0.3–0.6 dB under the source peak. Measured on the window; past
+  it the limiter holds the peak.
+- **0 is a true bypass** (a delay line of the 1176's latency).
 
-| Scheps control | In VoxPressor |
-|---|---|
-| Mix | **Parallel** knob |
-| Character | PRESENCE / THICK toggle |
-| Squash (Peak Reduction) | Pinned at its calibrated 40 (~7.6 dB peak GR on the wet copy), on the bench |
-| Wet trim, correlation, density, alignment | Measured, as in Scheps |
-| Output | 0 (VoxPressor's makeup does this) |
+Measured, owner's clips (30 s, change vs the source; Peaks 3 / Body 57 / De-ess
+40, Density 0): Parallel 0 → 30 → 50 %: Messy +2.38 → +3.36 → +4.00 dB of
+loudness, energy above 5 kHz +0.63 → +0.49 → +0.46; Greenberg +4.81 → +5.81 →
++6.50, above 5 kHz +5.21 → +6.01 → +6.59. Peak on the source's throughout.
 
-⚠ **Measure it on what it hears.** Standalone, Scheps measures the file it is
-given. Here it must measure the **Body stage's output**, so its trim and
-alignment are solved after Body (§5). Measuring the raw input would over-drive
-the cell by however much leveling Body did.
-
-⚠ **0 must be a true bypass.** At Mix 0 Scheps is bit-exact against its
-delayed input *except* for its ceiling's knee (a known ~0.25 dB residual). So
-Parallel 0 skips the stage and runs a 50-sample delay instead.
-
-⚠ **Overlap with Density.** Both now add density: Parallel by dynamic upward
-compression with a presence tilt, Density by a static curve with odd harmonics.
-They are different mechanisms, but presets should not max both (§11).
+⚠ **Overlap with Density.** Both add density: Parallel by dynamic upward
+compression, Density by a static curve with odd harmonics. Different
+mechanisms, but presets should not max both (§11).
 
 ### 4.5 Meters
 
@@ -349,7 +356,7 @@ All measured once per file / selection, in the worker, against the **running
 | Gated RMS → voiced-block gate | `dsp/inputAlign.js` | Body readout; Peaks voice-touched readout |
 | Rumble corner, median F0 | `voiceProfile.js` | Detector HP |
 | Loudest blocks (by peak), voiced blocks (gated RMS − 10 dB) | `referenceBlocks` | Peaks / Body readouts |
-| Parallel trim, correlation, density, alignment | `computeSchepsAutoTrim` on the Body output | Parallel stage |
+| Parallel alignment, wet makeup (on the blend, at the Mix), peak restore | the parallel 1176's wet path rendered on the de-esser's output + `percentileBlendGain` | Parallel stage |
 | Post-compression gated RMS | render of stages [1]–[3] on ≤ 400 blocks | De-ess `levelOffset` |
 | Makeup, per stage | `measureVoxPressor`: percentile makeup per stage (the 1176's in closed form, the LA-2A's by `solveMakeupPlan`, warm-started), a lookahead limiter at the source peak, restore to it; both restores re-measured over the whole region before apply when the region outgrew the window | 1176 Output; LA-2A Gain + the restore after the chain |
 | Source peak | `peakOfChannels` | Ceiling; Density anchor |
@@ -364,7 +371,7 @@ document + span + the knobs upstream of each solve.
 
 ## 6. Latency, apply, chunking
 
-- Latency: FET 50 + LA-2A 50 + Scheps 50 + Inflator 50 (all 4x oversampled) =
+- Latency: FET 50 + LA-2A 50 + FET 50 (Parallel) + Inflator 50 (all 4x oversampled) =
   **200 samples, constant**, reported once and trimmed by the apply path. Dry
   path in Mix delayed by the same amount. (Dropping Warmth also dropped its
   3 ms guard.)
@@ -381,7 +388,7 @@ document + span + the knobs upstream of each solve.
 
 ## 7. Factory presets
 
-A preset stores the eight panel values and the Parallel character only. *All reasoned, to be auditioned.*
+A preset stores the panel values only. *All reasoned, to be auditioned; the presets are not built, and the Parallel column predates the 1176 stage (§4.4), which has no character toggle.*
 
 | Preset | Peaks | Body | Parallel | De-ess | Air | Density | Mix |
 |---|---|---|---|---|---|---|---|
@@ -425,7 +432,7 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
    in the Plugin Chain (should be near-identical at matched settings — a
    useful test).
 4. **De-ess** — embed HF Softener, fed the post-compression level offset.
-5. **Parallel, Air, Density** — embedded Scheps measured on the Body output, Air, anchored Inflator.
+5. **Parallel, Air, Density** — a parallel 1176 measured on the de-esser's output (was embedded Scheps, §4.4), Air, anchored Inflator.
 6. **Panel, presets, chunked apply, smoke.**
 
 ### Acceptance tests (minimum)
@@ -438,8 +445,9 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
 - Peaks: never capped — 4 / 7 / 10 dB are each reached to ±0.1 dB, and the
   voice-touched figure grows with the knob and passes the warning by 10.
 - Body's avg GR within ±0.5 dB of target across −30…−6 dBFS input levels.
-- Parallel at matched settings is sample-identical to standalone Scheps Parallel
-  fed the Body stage's output.
+- Parallel holds the source peak (restore + limiter), raises the level, and
+  does not undo the de-esser: the top end rises under the level, not with it
+  (`test/dsp/voxPressor.test.js`).
 - Output never exceeds the source peak, at every Parallel and Density (ceiling + anchored
   Inflator with Clip).
 - Preview ≡ apply (sample-identical), chunked ≡ one-thread (≤ −130 dBFS).
@@ -453,7 +461,8 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
 - **Kept:** the voice detector (plosive and sibilance de-weighting), the
   76 → 2A core, the built-in de-esser.
 - **No Presence EQ** (owner, October 2026): replaced by a parallel LA-2A
-  stage, the embedded Scheps Parallel in its PRESENCE character.
+  stage, the embedded Scheps Parallel in its PRESENCE character — itself since
+  replaced by a parallel 1176 (§4.4).
 - **Makeup is PER STAGE, always on, no switch** (owner, October 2026): each
   compressor makes up its own level the way it would on its own — the
   compressors' 99.9th-percentile reference (`solveMakeupPlan`), then the
@@ -516,6 +525,14 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
   Peak at or under the source throughout. The measurement grew to ~1.8–2.1 s
   per 30 s window (the de-esser's render and Scheps' trim solve). Parallel is
   bypassed until its measurement lands; Density until the source peak is known.
+- **Parallel is a 1176, not Scheps** (owner, October 2026, after Scheps'
+  stage added only 0.2–0.4 dB — see §4.4 for why and the measurements).
+  PRESENCE / THICK went with it. New York compression with the LA-2A mix law
+  (makeup solved on the blend at the 99.9th percentile), its detector hearing
+  sibilance +15 dB, a peak restore. All defaults now: Messy and Bright +4.28
+  dB of loudness / +1.63 above 5 kHz (was +3.57 / +1.33), David Greenberg
+  +6.82 / +7.14 (was +6.34 / +6.35). Measurement ~2.5 s per 30 s window once
+  warm; the parallel solve is ~0.35 s of it.
 - **No breath / room expander** (owner, October 2026): too hard to tune for
   the value. Compression will lift breaths and room tone between phrases;
   that is left to Noise Reduction or the preset chain's `vocalExpander`.

@@ -114,3 +114,62 @@ export class VoiceDetector {
     return this.out.subarray(0, n)
   }
 }
+
+/**
+ * The PARALLEL 1176's detector: the mono tap with sibilance EMPHASISED, the
+ * opposite of the voice detector's shelf, and nothing else.
+ *
+ * ⚠ IN A PARALLEL COPY, WHATEVER THE DETECTOR IGNORES COMES UP. The copy's
+ * makeup (~+9.5 dB) lifts everything its compressor left alone; sibilance sits
+ * under the voiced peaks, so a plain detector left it alone and the blend gave
+ * back the de-esser's work — energy above 5 kHz +2.6 dB at Mix 0.3 against
+ * +0.76 dB of level ("Messy and Bright"). Shelved up in the detector, an "s"
+ * is caught like a vowel and stays put. By the same argument there is no
+ * corner high-pass and no plosive shelf here: either would lift what it hides.
+ *
+ * +15 dB above 4 kHz is REASONED from two clips (an x + k·HP4k² emphasis: +12
+ * left Greenberg's top end +1.28 dB at +0.66 of level, +18 took Messy's
+ * −0.96); it costs ~0.1 dB of the stage's loudness.
+ */
+export const PARALLEL_SIBILANCE_HZ = 4000
+export const PARALLEL_SIBILANCE_DB = 15
+
+export function parallelDetectorSections(sampleRate) {
+  return [highShelf(sampleRate, Math.min(PARALLEL_SIBILANCE_HZ, sampleRate * 0.4), SHELF_Q, PARALLEL_SIBILANCE_DB)]
+}
+
+export class ParallelDetector {
+  constructor(sampleRate) {
+    const sections = parallelDetectorSections(sampleRate)
+    this.cascade = new BiquadCascade(sections.length, 1)
+    this.cascade.setSections(sections)
+    this.mono = new Float32Array(0)
+    this.out = new Float32Array(0)
+  }
+
+  reset() {
+    this.cascade.reset()
+  }
+
+  /** As `VoiceDetector.process`: a mono detector signal for this block (scratch). */
+  process(channels, n) {
+    if (this.mono.length < n) {
+      this.mono = new Float32Array(n)
+      this.out = new Float32Array(n)
+    }
+    const nIn = channels.length
+    const mono = this.mono
+    if (nIn === 1) {
+      mono.set(channels[0].subarray(0, n))
+    } else {
+      const scale = 1 / nIn
+      for (let i = 0; i < n; i++) {
+        let x = channels[0][i]
+        for (let ch = 1; ch < nIn; ch++) x += channels[ch][i]
+        mono[i] = x * scale
+      }
+    }
+    this.cascade.process(mono, this.out, n, 0)
+    return this.out.subarray(0, n)
+  }
+}

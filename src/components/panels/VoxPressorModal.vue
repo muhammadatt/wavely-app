@@ -18,11 +18,11 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
-  voxDeEss, voxParallel, voxCharacter, voxDensity, voxDeEssGr, voxParallelGr,
+  voxDeEss, voxParallel, voxDensity, voxDeEssGr, voxParallelGr,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
-  syncDeEss, syncParallel, syncCharacter, syncDensity,
+  syncDeEss, syncParallel, syncDensity,
   apply, teardown, closeModal,
 } = useVoxPressor()
 
@@ -38,11 +38,6 @@ const PEAKS_COLOR = '#ff7a59'
 const DEESS_COLOR = '#7fd1c7'
 const PARALLEL_COLOR = '#b9a2ff'
 const DENSITY_COLOR = '#f2d16b'
-
-const CHARACTER_OPTIONS = [
-  { value: 'presence', label: 'PRESENCE', title: 'Scheps\' Presence curves: the squashed copy leans toward 8 kHz' },
-  { value: 'thick', label: 'THICK', title: 'Scheps\' Thick curves: the squashed copy adds weight down low' },
-]
 
 function formatPercent(v) {
   return v > 0 ? `${Math.round(v)} %` : 'OFF'
@@ -235,13 +230,8 @@ async function applyAndClose() {
               :model-value="voxParallel" :min="0" :max="100" :step="1"
               :default-value="VOX_DEFAULTS.parallel"
               label="Parallel" :color="PARALLEL_COLOR" :format-value="formatPercent" :disabled="!voxPreview"
-              title="Scheps Parallel's Mix: a Pultec-coloured, squashed LA-2A copy blended under the voice for density. 0 takes the stage out. Double-click to reset"
+              title="Parallel compression: a fast 4:1 1176 copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncParallel"
-            />
-            <ModulaSegmented
-              :model-value="voxCharacter" :options="CHARACTER_OPTIONS"
-              aria-label="Parallel character" :disabled="!voxPreview || voxParallel <= 0"
-              @update:model-value="syncCharacter"
             />
           </div>
           <div class="vp-col vp-col-sm">
@@ -300,7 +290,7 @@ async function applyAndClose() {
     </div>
 
     <p class="vp-about">
-      Dev: a 1176 trims the peaks, an LA-2A levels the voice, then a de-esser, a Scheps-style parallel layer and an anchored Inflator.
+      Dev: a 1176 trims the peaks, an LA-2A levels the voice, then a de-esser, a parallel 1176 and an anchored Inflator.
       The compressors listen through a voice detector that ignores rumble; the LA-2A also
       ignores plosives and sibilance. Each makes up its own level, as in a hand-built chain, so what they take off comes back as loudness;
       a lookahead limiter after each holds the source's peak with a gain, never a clipper.

@@ -16,7 +16,8 @@
  *       │      │
  *       │   [DE-ESS] HFSoftenerKernel (Duck + EQ, lisp guard; level from the Body output)
  *       │      │
- *       │   [PARALLEL] SchepsKernel (Pultec → LA-2A → Pultec, blended with its dry)
+ *       │   [PARALLEL] FET1176Kernel at its own Mix (a fast 4:1 copy blended under
+ *       │      its delayed dry; wet makeup solved on the blend — the LA-2A mix law)
  *       │      │
  *       │   LIMITER (source peak) → [DENSITY] InflatorKernel, anchored at the
  *       │      source peak, Clip on → LIMITER (source peak) → OUTPUT trim ─ out
@@ -50,9 +51,8 @@
 import { FET1176Kernel, inputDriveDbForKnob, releaseSecondsForDial } from './fet1176Processor.js'
 import { LA2AKernel, la2aLatencySamples } from './la2aProcessor.js'
 import { HFSoftenerKernel } from './deEsserProcessor.js'
-import { SchepsKernel } from './schepsProcessor.js'
 import { InflatorKernel, INFLATOR_LATENCY_SAMPLES } from './inflatorProcessor.js'
-import { VoiceDetector, DEFAULT_CORNER_HZ } from './dsp/voiceDetector.js'
+import { VoiceDetector, ParallelDetector, DEFAULT_CORNER_HZ } from './dsp/voiceDetector.js'
 import { DelayLine, OVERSAMPLE_LATENCY_SAMPLES } from './dsp/oversample.js'
 import { float32AtOrBelow } from './dsp/makeupReference.js'
 import { LinkedPeakLimiter, peakLimiterLatencySamples } from './dsp/peakLimiter.js'
@@ -152,6 +152,69 @@ export function peaksTiming(speed, voiceF0Hz) {
   return { attack: PEAKS_AUTO_ATTACK, release }
 }
 
+/**
+ * PARALLEL — New York compression with the 1176: a fast 4:1 copy blended
+ * under the voice at the Parallel knob's Mix, through the 1176's own dry path
+ * (`mix`, delay-compensated). The wet makeup (`parallelMakeupDb`, on its
+ * Output) is solved ON THE BLEND so the blend's 99.9th percentile lands on the
+ * stage input's (`computeFET1176AutoMakeupPlan`, percentile reference) — the
+ * LA-2A mix law: peaks held, everything under them raised by what the copy
+ * compressed.
+ *
+ * ⚠ IT REPLACED SCHEPS PARALLEL, WHICH COULD NOT ADD LOUDNESS HERE. Not its mix
+ * law — both laws land within a few tenths at Mix 0.3 — but its OPTO: a cell
+ * with a multi-second release turns the whole voice down nearly evenly, so the
+ * copy came out only 0.75 / 1.9 dB denser than the dry ("Messy and Bright" /
+ * David Greenberg) and stopped growing past Squash 60. On the de-esser's
+ * output at the defaults, Mix 0.3 / 0.5, the gated level gained:
+ *   Scheps (as shipped)            +0.2–0.4 dB
+ *   1176 4:1, attack 6, In 40      +0.76 / +1.21 dB (Messy), +0.71 / +1.15 (Greenberg)
+ *
+ * ⚠ ALL REASONED FROM THOSE TWO CLIPS, TO AUDITION:
+ * - Input 40 (`PARALLEL_INPUT_KNOB`, on the file-relative alignment): density
+ *   PEAKS there. Drive harder and the copy delivers LESS (In 50 / 60 / 70 at
+ *   Mix 0.5: +1.11 / +0.78 / +0.45 on Messy) — the onsets the attack lets
+ *   through set the 99.9th percentile the makeup holds.
+ * - attack 6 (fast) — attack 4 gave ~0.2 dB less.
+ * - release VOICE-ADAPTIVE, the Peaks stage's AUTO rule (`peaksTiming`), never
+ *   a fixed fast release: that ripples a low voice (see SPEED below). It costs
+ *   nothing here — auto against release 5 differs by ≤ 0.04 dB on both clips.
+ *   Wet-path ripple (the Peaks readout's measure, on the copy alone) −18 to
+ *   −20 dBc at In 40; the blend carries it at the Mix.
+ * - fetDrive 0, as Peaks: a clean copy. Ratio 4 sits at the moving
+ *   threshold's anchor.
+ * - ITS DETECTOR HEARS SIBILANCE +15 dB (`ParallelDetector`): a plain one
+ *   left the "s" uncompressed in the copy, and the makeup lifted it — the
+ *   blend undid the de-esser (above 5 kHz +2.6 dB at Mix 0.3, "Messy").
+ *   Figures above are for the plain detector; the emphasis costs ~0.1 dB.
+ */
+export const PARALLEL_INPUT_KNOB = 40
+export const PARALLEL_ATTACK = 6
+export const PARALLEL_PATCH = Object.freeze({
+  ratio: '4',
+  fetDrive: 0,
+  scHpfHz: 0,
+  inputDrive: PARALLEL_INPUT_KNOB,
+  attack: PARALLEL_ATTACK,
+  ceilingDb: null,
+})
+
+/**
+ * The parallel 1176's params from VoxPressor KERNEL params — shared by the
+ * kernel and the measurement, so the makeup is solved on exactly the render
+ * that plays. `outputGainDb` is the measured wet makeup (absolute: it includes
+ * cancelling the Input's drive).
+ */
+export function parallelFetParams(p) {
+  return {
+    ...PARALLEL_PATCH,
+    release: peaksTiming('auto', p.voiceF0Hz).release,
+    inputAlignDb: finite(p.parallelAlignDb, 0, -60, 60),
+    mix: finite(p.parallelMix, 0, 0, 1),
+    outputGainDb: finite(p.parallelMakeupDb, 0, -48, 48),
+  }
+}
+
 /** Makeup and output smoothing, as the kernels' own Gain / Output (8 ms). */
 const GAIN_SMOOTH_MS = 8
 
@@ -198,19 +261,15 @@ export const VOX_KERNEL_DEFAULTS = {
   deEssOn: false,
   deEss: null,
   /**
-   * PARALLEL — Scheps Parallel's kernel at `parallelMix` (0–1), its trim,
-   * correlation, density and alignment MEASURED on the de-esser's output
-   * (`measureVoxPressor`). Its own soft ceiling stays off; the limiter after it
-   * holds the source peak. Off is a delay line of its latency.
+   * PARALLEL — the parallel 1176 (`PARALLEL_PATCH`) at `parallelMix` (0–1),
+   * its alignment and wet makeup MEASURED on the de-esser's output
+   * (`measureVoxPressor`). The limiter after it holds the source peak. Off is
+   * a delay line of its latency.
    */
   parallelOn: false,
   parallelMix: 0.3,
-  parallelCharacter: 'presence',
-  parallelSquash: 40,
-  schepsAlignDb: 0,
-  schepsTrimDb: 0,
-  schepsCorrelation: 0,
-  schepsDensityDb: 0,
+  parallelAlignDb: 0,
+  parallelMakeupDb: 0,
   /**
    * DENSITY — the Cambridge Inflator at Effect `density` (0–1), Curve 0, Clip
    * on, ANCHORED at the source peak (`sourcePeakDb`): the signal is scaled so
@@ -285,7 +344,8 @@ export class VoxPressorKernel {
     this.bodyLimiter = new LinkedPeakLimiter(sampleRate)
     this.deEsser = new HFSoftenerKernel(sampleRate)
     this.deEsserPrimed = false
-    this.scheps = new SchepsKernel(sampleRate)
+    this.parallelFet = new FET1176Kernel(sampleRate)
+    this.parallelDetector = new ParallelDetector(sampleRate)
     this.parallelBypass = []
     this.parallelLimiter = new LinkedPeakLimiter(sampleRate)
     this.inflator = new InflatorKernel(sampleRate)
@@ -295,6 +355,7 @@ export class VoxPressorKernel {
     this.parallelGrHold = 0
 
     this.makeupLinSmoothed = null
+    this.parallelRestoreSmoothed = null
     this.outputLinSmoothed = null
     this.peaksGrHold = 0
     this.bodyGrHold = 0
@@ -367,19 +428,8 @@ export class VoxPressorKernel {
 
     // ── PARALLEL ──
     this.parallelOn = !!p.parallelOn && finite(p.parallelMix, 0, 0, 1) > 0
-    this.scheps.setParams({
-      character: p.parallelCharacter === 'thick' ? 'thick' : 'presence',
-      squash: finite(p.parallelSquash, 40, 0, 100),
-      mix: finite(p.parallelMix, 0, 0, 1),
-      inputAlignDb: finite(p.schepsAlignDb, 0, -60, 60),
-      wetTrimDb: finite(p.schepsTrimDb, 0, -24, 24),
-      correlation: finite(p.schepsCorrelation, 0, -1, 1),
-      densityDb: finite(p.schepsDensityDb, 0, -24, 24),
-      outputDb: 0,
-      ceilingDb: null,
-      oversample: this.oversampleOn,
-    })
-    this.parallelLatency = this.scheps.latencySamples
+    this.parallelFet.setParams({ ...parallelFetParams(p), oversample: this.oversampleOn })
+    this.parallelLatency = this.parallelFet.latencySamples
     // Holds the source peak after the blend: the parallel stage adds level.
     this.parallelLimiter.setThreshold(this._ceilingLin(p.sourcePeakDb))
 
@@ -410,6 +460,9 @@ export class VoxPressorKernel {
     this.bodyDetector.setCornerHz(p.cornerHz)
 
     this.makeupLin = Math.exp(finite(p.makeupDb, 0, -24, 24) * LN10_OVER_20)
+    // The Parallel stage's peak restore: only while it runs (off, a delay line).
+    this.parallelRestoreLin = this.parallelOn
+      ? Math.exp(finite(p.parallelRestoreDb, 0, -24, 24) * LN10_OVER_20) : 1
     this.outputLin = Math.exp(finite(p.outputDb, 0, -24, 24) * LN10_OVER_20)
 
     this.listen = p.listen === 'peaks' || p.listen === 'body' ? p.listen : 'off'
@@ -464,13 +517,15 @@ export class VoxPressorKernel {
     this.bodyLimiter.reset()
     this.deEsser = new HFSoftenerKernel(this.sampleRate)
     this.deEsserPrimed = false
-    this.scheps = new SchepsKernel(this.sampleRate)
+    this.parallelFet = new FET1176Kernel(this.sampleRate)
+    this.parallelDetector.reset()
     for (const d of this.parallelBypass) d.reset()
     for (const d of this.densityBypass) d.reset()
     this.parallelLimiter.reset()
     this.outputLimiter.reset()
     this.inflator = new InflatorKernel(this.sampleRate)
     this.makeupLinSmoothed = null
+    this.parallelRestoreSmoothed = null
     this.outputLinSmoothed = null
     this.setParams({})
   }
@@ -575,10 +630,13 @@ export class VoxPressorKernel {
       if (cut > this.deEssGrHold) this.deEssGrHold = cut
     }
 
-    // ── PARALLEL ── (Scheps reads its dry before writing: in place is safe)
+    // ── PARALLEL ── (into mid: the 1176's dry line reads its input). Its
+    // detector hears sibilance shelved UP (`ParallelDetector`).
     if (this.parallelOn) {
-      this.scheps.process(outputChannels, outputChannels, n)
-      const gr = this.scheps.la2a.grDb
+      const sc = this.parallelDetector.process(outputChannels, n)
+      this.parallelFet.process(outputChannels, mid, n, sc)
+      for (let ch = 0; ch < nOut; ch++) outputChannels[ch].set(mid[ch])
+      const gr = this.parallelFet.grDb
       if (gr > this.parallelGrHold) this.parallelGrHold = gr
     } else {
       for (let ch = 0; ch < nOut; ch++) {
@@ -587,6 +645,9 @@ export class VoxPressorKernel {
         for (let i = 0; i < n; i++) io[i] = line.push(io[i])
       }
     }
+    // Restore → limiter, as the Body stage's (off, the restore is exactly 1).
+    if (this.parallelRestoreSmoothed === null) this.parallelRestoreSmoothed = this.parallelRestoreLin
+    this.parallelRestoreSmoothed = this._ramp(outputChannels, n, this.parallelRestoreSmoothed, this.parallelRestoreLin)
     this.parallelLimiter.process(outputChannels, n)
 
     // ── DENSITY ── anchored: the source peak sits at full scale on the curve.
@@ -684,7 +745,7 @@ export function processVoxPressorBuffer(channelData, sampleRate, params = {}, { 
 export function voxLatencySamples(params, sampleRate) {
   const os = params?.oversample === false ? 0 : OVERSAMPLE_LATENCY_SAMPLES
   const body = la2aLatencySamples({ ...(params?.bodyBench ?? {}), oversample: params?.oversample }, sampleRate)
-  // Parallel holds an LA-2A with no lookahead; Density is always oversampled.
+  // Parallel is a 1176 (its oversampler's latency); Density is always oversampled.
   return os + body + os + 4 * peakLimiterLatencySamples(sampleRate) + INFLATOR_LATENCY_SAMPLES
 }
 

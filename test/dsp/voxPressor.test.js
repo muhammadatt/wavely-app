@@ -456,12 +456,16 @@ function hfEnergyDb(chs, hz = 5000) {
 test('the measurement solves the stages after Body on what each hears', () => {
   const { r } = measure(atDefaults[1].x)
   assert.ok(Number.isFinite(r.deEssLevelOffsetDb), 'de-ess level offset')
-  assert.ok(Number.isFinite(r.schepsAlignDb), 'Scheps alignment')
-  assert.ok(r.schepsTrimDb !== 0 && r.schepsCorrelation > 0, `trim ${r.schepsTrimDb}, ρ ${r.schepsCorrelation}`)
+  assert.ok(Number.isFinite(r.parallelAlignDb), 'parallel alignment')
+  assert.ok(Number.isFinite(r.parallelMakeupDb), 'parallel makeup')
   assert.ok(Number.isFinite(r.sourcePeakDb))
-  // Parallel 0 measures nothing for Scheps.
+  // The makeup is solved on the blend, so it moves with the Mix.
+  const heavier = measure(atDefaults[1].x, { parallel: 80 }).r
+  assert.notEqual(heavier.parallelMakeupDb, r.parallelMakeupDb)
+  // Parallel 0 measures nothing for it.
   const off = measure(atDefaults[1].x, { parallel: 0 }).r
-  assert.equal(off.schepsAlignDb, null)
+  assert.equal(off.parallelAlignDb, null)
+  assert.equal(off.parallelMakeupDb, null)
 })
 
 test('each later stage does its job and none of them raises the source peak', () => {
@@ -476,14 +480,22 @@ test('each later stage does its job and none of them raises the source peak', ()
   const deEssed = render({ deEss: 80 })
   assert.ok(hfEnergyDb(deEssed) < hfEnergyDb(dry) - 0.5,
     `>5 kHz ${hfEnergyDb(dry).toFixed(2)} → ${hfEnergyDb(deEssed).toFixed(2)} dB`)
-  // ⚠ PARALLEL HOLDS LEVEL BY DESIGN (Scheps' mix law: equal power, corrected
-  // for the measured correlation, passing only the measured density yield) —
-  // on this synthetic narration the yield is slightly negative and the
-  // limiter after it takes ~0.1 dB, so it is level-FLAT here, not louder.
-  // DENSITY is the stage that adds level under the same peak.
+  // Parallel raises what sits under the peaks: the fast copy's makeup is held
+  // to the blend's 99.9th percentile (the LA-2A mix law), so the level rises.
+  // ⚠ Scheps Parallel, which this replaced, was level-FLAT here (|Δ| < 1 dB,
+  // slightly negative): its opto copy was barely denser than the dry.
   const par = render({ parallel: 60 })
   const parGain = db(gatedRmsOfChannels(par, SR)) - db(gatedRmsOfChannels(dry, SR))
-  assert.ok(Math.abs(parGain) < 1, `Parallel moved the level ${parGain.toFixed(2)} dB`)
+  assert.ok(parGain > 0.3, `Parallel: only ${parGain.toFixed(2)} dB louder`)
+  // ⚠ AND IT MUST NOT UNDO THE DE-ESSER: its detector hears sibilance shelved
+  // up, so the "s" is compressed in the copy like a vowel instead of lifted by
+  // the copy's makeup. On this narration the top end then rises well under the
+  // level (−1.57 dB at +2.66); with a plain detector it rose WITH it (+2.98 at
+  // +3.01) — on the owner's "Messy and Bright" it rose past it.
+  const hfGain = hfEnergyDb(par) - hfEnergyDb(dry)
+  assert.ok(hfGain < parGain - 1.5, `Parallel: >5 kHz +${hfGain.toFixed(2)} dB at +${parGain.toFixed(2)} of level`)
+  // Its peak restore puts the blend's peak back on the source's.
+  assert.ok(db(peak(par[0])) - db(sourcePeak) > -0.1, `Parallel peak ${(db(peak(par[0])) - db(sourcePeak)).toFixed(2)} dB`)
   const den = render({ density: 60 })
   const denGain = db(gatedRmsOfChannels(den, SR)) - db(gatedRmsOfChannels(dry, SR))
   assert.ok(denGain > 0.3, `Density: only ${denGain.toFixed(2)} dB louder`)
@@ -518,7 +530,11 @@ test('Parallel waits for its measurement; Density waits for its anchor', () => {
   assert.equal(unmeasured.parallelOn, false)
   assert.equal(unmeasured.deEssOn, true)
   assert.equal(unmeasured.sourcePeakDb, null)
-  const measured = toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, schepsAlignDb: 2, sourcePeakDb: -3 })
+  const halfMeasured = toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, parallelAlignDb: 2 })
+  assert.equal(halfMeasured.parallelOn, false)
+  const measured = toKernelParams({
+    ...VOX_DEFAULTS, alignDb: 0, parallelAlignDb: 2, parallelMakeupDb: -6, sourcePeakDb: -3,
+  })
   assert.equal(measured.parallelOn, true)
   assert.equal(measured.sourcePeakDb, -3)
 })
@@ -540,7 +556,9 @@ test('Peaks trims a sibilant spike instead of letting it set the makeup', () => 
     prev = w
   }
   const gain = (sib) => {
-    const { params } = measure(x, { body: 0 }, { peaksSibilance: sib })
+    // The Peaks stage alone: the parallel 1176 hears sibilance on purpose and
+    // restores its own peak, which would hide the difference measured here.
+    const { params } = measure(x, { body: 0, deEss: 0, parallel: 0, density: 0 }, { peaksSibilance: sib })
     const out = processVoxPressorBuffer([x], SR, { ...params, oversample: false }).channelData
     return db(gatedRmsOfChannels(out, SR)) - db(gatedRmsOfChannels([x], SR))
   }

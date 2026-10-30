@@ -90,10 +90,11 @@ export const VOX_DEFAULTS = {
    * the De-Esser's own default. After Body, before Parallel (owner's order).
    */
   deEss: 40,
-  /** PARALLEL, 0–100 % (0 = stage out): Scheps Parallel's Mix. */
+  /**
+   * PARALLEL, 0–100 % (0 = stage out): the Mix of a fast 4:1 1176 copy
+   * blended under the voice (New York compression; `PARALLEL_PATCH`).
+   */
   parallel: 30,
-  /** Scheps' character: 'presence' (default) | 'thick'. */
-  character: 'presence',
   /** DENSITY, 0–100 % (0 = stage out): the Cambridge Inflator's Effect, anchored. */
   density: 30,
   /** Manual trim after the ceiling, dB. */
@@ -118,11 +119,14 @@ export const VOX_DEFAULTS = {
   sourcePeakDb: null,
   /** The de-esser's level offset, from the Body stage's output (`levelOffsetDbFor`). */
   deEssLevelOffsetDb: null,
-  /** Scheps' alignment, wet trim, correlation and density — measured on the de-esser's output. */
-  schepsAlignDb: null,
-  schepsTrimDb: 0,
-  schepsCorrelation: 0,
-  schepsDensityDb: 0,
+  /**
+   * The parallel 1176's alignment and wet makeup — measured on the de-esser's
+   * output; the makeup at the current Mix (it is solved on the blend).
+   */
+  parallelAlignDb: null,
+  parallelMakeupDb: null,
+  /** The blend's peak restore, after the Parallel stage and before its limiter. */
+  parallelRestoreDb: 0,
   // Per-stage makeup, limiter ceilings and restores (see `measureVoxPressor`).
   peaksMakeupDb: 0,
   peaksCeilingDb: null,
@@ -139,8 +143,8 @@ export const VOX_MEASURED_KEYS = Object.freeze([
   // raised makeup must never run against an old ceiling (see useLA2A).
   'peaksCeilingDb', 'bodyCeilingDb',
   'cornerHz', 'voiceF0Hz', 'sourcePeakDb',
-  'deEssLevelOffsetDb', 'schepsAlignDb', 'schepsTrimDb', 'schepsCorrelation', 'schepsDensityDb',
-  'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb',
+  'deEssLevelOffsetDb', 'parallelAlignDb',
+  'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb', 'parallelMakeupDb', 'parallelRestoreDb',
 ])
 
 /** Map panel params to kernel params. */
@@ -191,9 +195,9 @@ export const DE_ESS_SPLIT = 33
  *
  * ⚠ DE-ESS RUNS AS SOON AS THE FILE IS ALIGNED: until its level is measured
  * on the Body output, the offset is the SOURCE's, which is ~the makeups low.
- * ⚠ PARALLEL WAITS FOR ITS MEASUREMENT (Scheps' alignment, trim, correlation
- * and density are all properties of what it hears): bypassed, a delay line,
- * until they land. Density waits for the source peak it is anchored to.
+ * ⚠ PARALLEL WAITS FOR ITS MEASUREMENT (the 1176's alignment and its wet
+ * makeup are properties of what it hears, and the makeup of the Mix): bypassed,
+ * a delay line, until they land. Density waits for the source peak it is anchored to.
  */
 function stageParams(p) {
   const aligned = Number.isFinite(p.alignDb)
@@ -210,12 +214,10 @@ function stageParams(p) {
       ...HF_SOFTENER_DEFAULTS, duck, amount, levelOffset, air: 0, soften: 0, resoAmount: 0,
     }),
     parallelMix: mix,
-    parallelOn: mix > 0 && Number.isFinite(p.schepsAlignDb),
-    parallelCharacter: p.character === 'thick' ? 'thick' : 'presence',
-    schepsAlignDb: Number.isFinite(p.schepsAlignDb) ? p.schepsAlignDb : 0,
-    schepsTrimDb: Number.isFinite(p.schepsTrimDb) ? p.schepsTrimDb : 0,
-    schepsCorrelation: Number.isFinite(p.schepsCorrelation) ? p.schepsCorrelation : 0,
-    schepsDensityDb: Number.isFinite(p.schepsDensityDb) ? p.schepsDensityDb : 0,
+    parallelOn: mix > 0 && Number.isFinite(p.parallelAlignDb) && Number.isFinite(p.parallelMakeupDb),
+    parallelAlignDb: Number.isFinite(p.parallelAlignDb) ? p.parallelAlignDb : 0,
+    parallelMakeupDb: Number.isFinite(p.parallelMakeupDb) ? p.parallelMakeupDb : 0,
+    parallelRestoreDb: Number.isFinite(p.parallelRestoreDb) ? p.parallelRestoreDb : 0,
     density: knob(p.density) / 100,
     sourcePeakDb: Number.isFinite(p.sourcePeakDb) ? p.sourcePeakDb : null,
   }

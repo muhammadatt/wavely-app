@@ -36,7 +36,6 @@ const copies = pluginCopies((copy, life) => {
   /** The stages after Body. Each is measured with: they move what comes after them. */
   const voxDeEss = ref(VOX_DEFAULTS.deEss)
   const voxParallel = ref(VOX_DEFAULTS.parallel)
-  const voxCharacter = ref(VOX_DEFAULTS.character)
   const voxDensity = ref(VOX_DEFAULTS.density)
   /** BENCH: the LA-2A's lookahead, ms. Measured with, so it re-measures. */
   const voxBodyLookahead = ref(VOX_DEFAULTS.bodyLookaheadMs)
@@ -89,7 +88,6 @@ const copies = pluginCopies((copy, life) => {
       speed: voxSpeed.value,
       deEss: voxDeEss.value,
       parallel: voxParallel.value,
-      character: voxCharacter.value,
       density: voxDensity.value,
       bodyLookaheadMs: voxBodyLookahead.value,
       alignDb: voxAlignDb.value,
@@ -199,7 +197,7 @@ const copies = pluginCopies((copy, life) => {
 
     /** The key a measurement belongs to: the timeline, the region and every setting it reads. */
     function solveKey(segments, start, end) {
-      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxDeEss.value}|${voxParallel.value}|${voxCharacter.value}`
+      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxDeEss.value}|${voxParallel.value}`
     }
 
     /**
@@ -297,12 +295,6 @@ const copies = pluginCopies((copy, life) => {
     function syncParallel(v) {
       voxParallel.value = v
       pushParam('parallel', v)
-      scheduleSolve()
-    }
-
-    function syncCharacter(v) {
-      voxCharacter.value = v
-      pushParam('character', v)
       scheduleSolve()
     }
 
@@ -430,7 +422,7 @@ const copies = pluginCopies((copy, life) => {
         watch(() => `${appState.activeDocumentId}:${state.revision}`, () => {
           const cleared = {
             peaksCeilingDb: null, bodyCeilingDb: null, sourcePeakDb: null,
-            deEssLevelOffsetDb: null, schepsAlignDb: null,
+            deEssLevelOffsetDb: null, parallelAlignDb: null, parallelMakeupDb: null, parallelRestoreDb: 0,
             peaksMakeupDb: 0, peaksRestoreDb: 0, bodyMakeupDb: 0, makeupDb: 0,
           }
           voxMeasured.value = { ...voxMeasured.value, ...cleared }
@@ -470,12 +462,12 @@ const copies = pluginCopies((copy, life) => {
 
     return {
       voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
-      voxDeEss, voxParallel, voxCharacter, voxDensity, voxDeEssGr, voxParallelGr,
+      voxDeEss, voxParallel, voxDensity, voxDeEssGr, voxParallelGr,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,
       togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
-      syncDeEss, syncParallel, syncCharacter, syncDensity,
+      syncDeEss, syncParallel, syncDensity,
       refreshSolve, apply, teardown, openModal, closeModal,
     }
   }
