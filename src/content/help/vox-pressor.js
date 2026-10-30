@@ -21,6 +21,18 @@ export default {
       text: 'The LA-2A\'s Peak Reduction, aligned the same way. The note under it says how many dB of average leveling it does on the voice. 0 takes the stage out',
     },
     {
+      label: 'De-ess',
+      text: 'The De-Esser after the compressors: takes down the sibilance they brought up. It listens at the level the compressors hand it, not the source\'s. 0 takes the stage out',
+    },
+    {
+      label: 'Parallel',
+      text: 'Scheps Parallel\'s Mix: a Pultec-coloured, squashed LA-2A copy blended under the voice for density. PRESENCE leans it toward the top, THICK toward the low end. It holds level rather than adding it. 0 takes the stage out',
+    },
+    {
+      label: 'Density',
+      text: 'The Cambridge Inflator, anchored at the source\'s peak: lifts the body of the voice under the same peak, with odd harmonics on the loudest syllables. This is the knob that adds loudness. 0 takes the stage out',
+    },
+    {
       label: 'Listen',
       text: 'Hear what each compressor listens to instead of the output: rumble turned down for both, and for the LA-2A plosives and sibilance too',
     },
@@ -39,6 +51,7 @@ export default {
   notes: [
     'The output peak lands where the source peak was, so the voice comes out louder by roughly what Peaks took (about 3 dB at the default on narration)',
     'Peaks always goes where you turn it. When it starts lowering the voice itself, not just the peaks, the note under it turns amber and says by how much',
-    'Development stage: this window covers the compressor core only',
+    'The output never goes over the source\'s peak: a lookahead limiter after each stage that can add level holds it with a gain',
+    'Development stage: Air is not built yet',
   ],
 }

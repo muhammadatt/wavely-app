@@ -27,7 +27,7 @@ import {
 import { magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
 import { gatedRmsOfChannels, inputAlignDbFor } from '../../src/audio/dsp/inputAlign.js'
 import {
-  toKernelParams, VOX_DEFAULTS, peaksDriveDb, PEAKS_DRIVE_PER_STEP_DB,
+  toKernelParams, VOX_DEFAULTS, peaksDriveDb, PEAKS_DRIVE_PER_STEP_DB, VOX_MEASURED_KEYS,
 } from '../../src/audio/effects/voxPressorParams.js'
 
 const SR = 44100
@@ -259,11 +259,14 @@ test('listen plays a detector instead of the output', () => {
  * alignment), then the measurement, with both limiters at the source peak.
  */
 function measure(x, panel = {}, extra = {}) {
-  const kp = toKernelParams({
-    ...VOX_DEFAULTS, alignDb: inputAlignDbFor([x], SR), cornerHz: 70, ...panel,
-  })
+  const state = { ...VOX_DEFAULTS, alignDb: inputAlignDbFor([x], SR), cornerHz: 70, ...panel }
+  const kp = toKernelParams(state)
   const r = measureVoxPressor([x], SR, { ...kp, ...extra })
-  return { kp, r, params: { ...kp, ...extra, ...r } }
+  // As the app does: the measured values go back into the panel state and the
+  // kernel params are derived again (stages that wait for a measurement start).
+  const measured = {}
+  for (const k of VOX_MEASURED_KEYS) if (k in r) measured[k] = r[k]
+  return { kp, r, params: { ...toKernelParams({ ...state, ...measured }), ...extra, ...r } }
 }
 
 const LEVELS = [-34, -24, -14]
@@ -344,13 +347,15 @@ test('makeup restores the source peak, and the voice comes out louder', () => {
     // Base rate: what was measured. The limiters hold the peak on the source's.
     const base = processVoxPressorBuffer([x], SR, { ...p, oversample: false }, { compensate: true }).channelData
     const dPeak = db(peak(base[0])) - db(peak(x))
-    assert.ok(dPeak <= 1e-6 && dPeak > -0.3, `${levelDb}: peak moved ${dPeak.toFixed(3)} dB`)
+    // ≤ 1e-5 dB: Density's anchor divides and multiplies back in float32.
+    assert.ok(dPeak <= 1e-5 && dPeak > -0.3, `${levelDb}: peak moved ${dPeak.toExponential(2)} dB`)
     // What the compressors took off the peaks comes back as level.
     const gain = db(gatedRmsOfChannels(base, SR)) - db(gatedRmsOfChannels([x], SR))
     assert.ok(gain > 1, `${levelDb}: only ${gain.toFixed(2)} dB louder`)
     // The rendered (oversampled) path never exceeds the source peak.
     const out = processVoxPressorBuffer([x], SR, p).channelData[0]
-    assert.ok(peak(out) <= peak(x), `${levelDb}: peak ${db(peak(x)).toFixed(3)} → ${db(peak(out)).toFixed(3)}`)
+    assert.ok(db(peak(out)) - db(peak(x)) <= 1e-5,
+      `${levelDb}: peak ${db(peak(x)).toFixed(4)} → ${db(peak(out)).toFixed(4)}`)
   }
 })
 
@@ -422,6 +427,100 @@ test('the measurement reports the voice\'s F0 and a gain ripple that falls with 
   assert.ok(Number.isFinite(fast.peaksRippleDb) && Number.isFinite(gentle.peaksRippleDb))
   assert.ok(gentle.peaksRippleDb < fast.peaksRippleDb - 1,
     `ripple ${gentle.peaksRippleDb.toFixed(1)} (gentle) vs ${fast.peaksRippleDb.toFixed(1)} (fast)`)
+})
+
+// ── De-ess, Parallel, Density ───────────────────────────────────────────────
+
+function hfEnergyDb(chs, hz = 5000) {
+  // Two-pole high-passed energy, a plain sibilance proxy.
+  let e = 0
+  for (const x of chs) {
+    const c = Math.exp(-2 * Math.PI * hz / SR)
+    let y1 = 0
+    let x1 = 0
+    let z1 = 0
+    let w1 = 0
+    for (let i = 0; i < x.length; i++) {
+      const y = c * (y1 + x[i] - x1)
+      x1 = x[i]
+      y1 = y
+      const z = c * (z1 + y - w1)
+      w1 = y
+      z1 = z
+      e += z * z
+    }
+  }
+  return 10 * Math.log10(e)
+}
+
+test('the measurement solves the stages after Body on what each hears', () => {
+  const { r } = measure(atDefaults[1].x)
+  assert.ok(Number.isFinite(r.deEssLevelOffsetDb), 'de-ess level offset')
+  assert.ok(Number.isFinite(r.schepsAlignDb), 'Scheps alignment')
+  assert.ok(r.schepsTrimDb !== 0 && r.schepsCorrelation > 0, `trim ${r.schepsTrimDb}, ρ ${r.schepsCorrelation}`)
+  assert.ok(Number.isFinite(r.sourcePeakDb))
+  // Parallel 0 measures nothing for Scheps.
+  const off = measure(atDefaults[1].x, { parallel: 0 }).r
+  assert.equal(off.schepsAlignDb, null)
+})
+
+test('each later stage does its job and none of them raises the source peak', () => {
+  const x = narration(SR, { seconds: 12, levelDb: -24 })
+  const sourcePeak = peak(x)
+  const render = (panel) => {
+    const { params } = measure(x, { peaks: 3, body: 57, deEss: 0, parallel: 0, density: 0, ...panel })
+    return processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData
+  }
+  const dry = render({})
+  // De-ess takes the top end down.
+  const deEssed = render({ deEss: 80 })
+  assert.ok(hfEnergyDb(deEssed) < hfEnergyDb(dry) - 0.5,
+    `>5 kHz ${hfEnergyDb(dry).toFixed(2)} → ${hfEnergyDb(deEssed).toFixed(2)} dB`)
+  // ⚠ PARALLEL HOLDS LEVEL BY DESIGN (Scheps' mix law: equal power, corrected
+  // for the measured correlation, passing only the measured density yield) —
+  // on this synthetic narration the yield is slightly negative and the
+  // limiter after it takes ~0.1 dB, so it is level-FLAT here, not louder.
+  // DENSITY is the stage that adds level under the same peak.
+  const par = render({ parallel: 60 })
+  const parGain = db(gatedRmsOfChannels(par, SR)) - db(gatedRmsOfChannels(dry, SR))
+  assert.ok(Math.abs(parGain) < 1, `Parallel moved the level ${parGain.toFixed(2)} dB`)
+  const den = render({ density: 60 })
+  const denGain = db(gatedRmsOfChannels(den, SR)) - db(gatedRmsOfChannels(dry, SR))
+  assert.ok(denGain > 0.3, `Density: only ${denGain.toFixed(2)} dB louder`)
+  for (const [name, out] of [['parallel', par], ['density', den], ['all', render({ deEss: 40, parallel: 60, density: 60 })]]) {
+    assert.ok(db(peak(out[0])) - db(sourcePeak) <= 1e-5,
+      `${name}: peak ${db(peak(out[0])).toFixed(4)} over ${db(sourcePeak).toFixed(4)}`)
+  }
+})
+
+test('Density holds the source peak even where samples hide inter-sample peaks', () => {
+  // Broadband noise: its samples hide inter-sample peaks over the sample peak.
+  // Anchored at the SAMPLE peak, the Inflator's oversampled curve meets them
+  // over full scale, clips them there, and its downsampler rings back over —
+  // 1.71 dB without the last limiter (0.43 on synthetic narration with
+  // sibilants, 0.18 on the owner's "Messy and Bright"). That is its job.
+  const n = SR
+  const x = new Float32Array(n)
+  let seed = 1
+  for (let i = 0; i < n; i++) x[i] = ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296 - 0.5) * 0.6
+  const srcPeakDb = db(peak(x))
+  const out = processVoxPressorBuffer([x], SR, {
+    peaksOn: false, bodyOn: false, density: 1, sourcePeakDb: srcPeakDb,
+  }, { compensate: true }).channelData[0]
+  assert.ok(db(peak(out)) - srcPeakDb <= 1e-5, `peak ${(db(peak(out)) - srcPeakDb).toFixed(3)} dB over the source`)
+  // And without the anchor nothing runs: a pure delay.
+  const off = processVoxPressorBuffer([x], SR, { peaksOn: false, bodyOn: false, density: 1 }, { compensate: true }).channelData[0]
+  for (let i = 0; i < n; i++) if (off[i] !== x[i]) assert.fail(`sample ${i} differs`)
+})
+
+test('Parallel waits for its measurement; Density waits for its anchor', () => {
+  const unmeasured = toKernelParams({ ...VOX_DEFAULTS, alignDb: 0 })
+  assert.equal(unmeasured.parallelOn, false)
+  assert.equal(unmeasured.deEssOn, true)
+  assert.equal(unmeasured.sourcePeakDb, null)
+  const measured = toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, schepsAlignDb: 2, sourcePeakDb: -3 })
+  assert.equal(measured.parallelOn, true)
+  assert.equal(measured.sourcePeakDb, -3)
 })
 
 test('Peaks trims a sibilant spike instead of letting it set the makeup', () => {

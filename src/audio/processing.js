@@ -680,6 +680,8 @@ export function computeVoxPressorMeasure(segments, start, end, kernelParams, sam
       ...d,
       peaksCeilingDb: kernelParams.peaksOn ? ceilingDb : null,
       bodyCeilingDb: kernelParams.bodyOn ? ceilingDb : null,
+      // The last limiter's ceiling and Density's anchor: the whole region's peak.
+      sourcePeakDb: ceilingDb,
     }
   })
 }

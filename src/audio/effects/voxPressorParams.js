@@ -9,6 +9,11 @@ import {
   voxLatencySamples, PEAKS_INPUT_KNOB, PEAKS_SPEED_IDS, peaksTiming,
 } from '../voxPressorProcessor.js'
 import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
+import {
+  HF_SOFTENER_DEFAULTS, splitAmount, toKernelParams as deEsserKernelParams,
+} from '../deEsserParams.js'
+import { levelOffsetDbFor } from '../deEsserProcessor.js'
+import { ALIGN_TARGET_DBFS } from '../dsp/inputAlign.js'
 
 /**
  * Two oversampled kernels and two limiters in series, constant whether a stage
@@ -79,6 +84,18 @@ export const VOX_DEFAULTS = {
    * the two clips agree to 0.4 dB at every setting).
    */
   body: 57,
+  /**
+   * DE-ESS, 0–100 (0 = stage out): the HF Softener's Amount, its Split pinned
+   * at the panel's default (`DE_ESS_SPLIT`), Guard 100 — every other control
+   * the De-Esser's own default. After Body, before Parallel (owner's order).
+   */
+  deEss: 40,
+  /** PARALLEL, 0–100 % (0 = stage out): Scheps Parallel's Mix. */
+  parallel: 30,
+  /** Scheps' character: 'presence' (default) | 'thick'. */
+  character: 'presence',
+  /** DENSITY, 0–100 % (0 = stage out): the Cambridge Inflator's Effect, anchored. */
+  density: 30,
   /** Manual trim after the ceiling, dB. */
   output: 0,
   /** 'off' | 'peaks' | 'body' — monitor a detector. Never saved. */
@@ -97,6 +114,15 @@ export const VOX_DEFAULTS = {
   cornerHz: null,
   /** The voice's median F0, Hz — SPEED AUTO's release follows it. */
   voiceF0Hz: null,
+  /** The source peak, dBFS: the last limiter's ceiling and Density's anchor. */
+  sourcePeakDb: null,
+  /** The de-esser's level offset, from the Body stage's output (`levelOffsetDbFor`). */
+  deEssLevelOffsetDb: null,
+  /** Scheps' alignment, wet trim, correlation and density — measured on the de-esser's output. */
+  schepsAlignDb: null,
+  schepsTrimDb: 0,
+  schepsCorrelation: 0,
+  schepsDensityDb: 0,
   // Per-stage makeup, limiter ceilings and restores (see `measureVoxPressor`).
   peaksMakeupDb: 0,
   peaksCeilingDb: null,
@@ -112,7 +138,8 @@ export const VOX_MEASURED_KEYS = Object.freeze([
   // Ceilings first: they reach the live node as separate messages, and a
   // raised makeup must never run against an old ceiling (see useLA2A).
   'peaksCeilingDb', 'bodyCeilingDb',
-  'cornerHz', 'voiceF0Hz',
+  'cornerHz', 'voiceF0Hz', 'sourcePeakDb',
+  'deEssLevelOffsetDb', 'schepsAlignDb', 'schepsTrimDb', 'schepsCorrelation', 'schepsDensityDb',
   'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb',
 ])
 
@@ -130,6 +157,7 @@ export function toKernelParams(p) {
     peaksOn: p.peaks > 0 && Number.isFinite(p.alignDb),
     bodyOn: p.body > 0 && Number.isFinite(p.alignDb),
     peaksInput: PEAKS_INPUT_KNOB,
+    ...stageParams(p),
     peaksSpeed: PEAKS_SPEED_IDS.includes(p.speed) ? p.speed : 'auto',
     voiceF0Hz: Number.isFinite(p.voiceF0Hz) ? p.voiceF0Hz : null,
     bodyPeakReduction: knob(p.body),
@@ -150,6 +178,44 @@ export function toKernelParams(p) {
     // null clears a limiter's ceiling (a pure delay).
     peaksCeilingDb: Number.isFinite(p.peaksCeilingDb) ? p.peaksCeilingDb : null,
     bodyCeilingDb: Number.isFinite(p.bodyCeilingDb) ? p.bodyCeilingDb : null,
+  }
+}
+
+/** The De-Esser's Split, pinned: its own panel default (Amount 60 / Split 33). */
+export const DE_ESS_SPLIT = 33
+
+/**
+ * The stages after Body — De-ess, Parallel, Density — as kernel params.
+ *
+ * ⚠ DE-ESS RUNS AS SOON AS THE FILE IS ALIGNED: until its level is measured
+ * on the Body output, the offset is the SOURCE's, which is ~the makeups low.
+ * ⚠ PARALLEL WAITS FOR ITS MEASUREMENT (Scheps' alignment, trim, correlation
+ * and density are all properties of what it hears): bypassed, a delay line,
+ * until they land. Density waits for the source peak it is anchored to.
+ */
+function stageParams(p) {
+  const aligned = Number.isFinite(p.alignDb)
+  const deEss = knob(p.deEss)
+  const { duck, amount } = splitAmount(deEss, DE_ESS_SPLIT)
+  const sourceGatedDb = aligned ? ALIGN_TARGET_DBFS - p.alignDb : null
+  const levelOffset = Number.isFinite(p.deEssLevelOffsetDb)
+    ? p.deEssLevelOffsetDb
+    : (Number.isFinite(sourceGatedDb) ? levelOffsetDbFor(sourceGatedDb) : 0)
+  const mix = knob(p.parallel) / 100
+  return {
+    deEssOn: deEss > 0 && aligned,
+    deEss: deEsserKernelParams({
+      ...HF_SOFTENER_DEFAULTS, duck, amount, levelOffset, air: 0, soften: 0, resoAmount: 0,
+    }),
+    parallelMix: mix,
+    parallelOn: mix > 0 && Number.isFinite(p.schepsAlignDb),
+    parallelCharacter: p.character === 'thick' ? 'thick' : 'presence',
+    schepsAlignDb: Number.isFinite(p.schepsAlignDb) ? p.schepsAlignDb : 0,
+    schepsTrimDb: Number.isFinite(p.schepsTrimDb) ? p.schepsTrimDb : 0,
+    schepsCorrelation: Number.isFinite(p.schepsCorrelation) ? p.schepsCorrelation : 0,
+    schepsDensityDb: Number.isFinite(p.schepsDensityDb) ? p.schepsDensityDb : 0,
+    density: knob(p.density) / 100,
+    sourcePeakDb: Number.isFinite(p.sourcePeakDb) ? p.sourcePeakDb : null,
   }
 }
 

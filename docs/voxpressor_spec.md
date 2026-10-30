@@ -1,9 +1,9 @@
 # VoxPressor — Vocal Dynamics & Enhancement Plugin Spec
 
-> Status: **DRAFT for owner review** (October 2026). **Stage 1 is built** (dev
-> only, registry id `vox-pressor`): the voice detector and the Peaks (1176) →
-> Body (LA-2A) core with peak-restoring makeup and the source-peak ceiling.
-> Parallel, De-ess, Air and Density are not built yet. Every number marked
+> Status: **DRAFT for owner review** (October 2026). **Built** (dev only,
+> registry id `vox-pressor`): the voice detector, the Peaks (1176) → Body
+> (LA-2A) core with per-stage makeup, and — stage 2 — De-ess → Parallel →
+> Density. Air is not built yet. Every number marked
 > *reasoned* is a starting point to be measured or auditioned, per this repo's
 > habit of saying which numbers are which.
 
@@ -45,13 +45,16 @@ in ─ INPUT ALIGN (drive offset, detector only)
    │   HP @ voice corner · plosive shelf · sibilance shelf        │
    │                                                              ▼
    ├─ [1] PEAKS   — FET1176Kernel, pinned peak-catcher patch  ◄── detector (no plosive shelf, §3)
+   │     makeup (closed form) → LIMITER (source peak)
    ├─ [2] BODY    — LA2AKernel (opto, rides the phrase)       ◄── detector (full)
-   ├─ [3] PARALLEL — SchepsKernel, PRESENCE (or THICK): Pultec push → LA-2A → Pultec recovery, blended with its own delayed dry
-   ├─ [4] DE-ESS  — HFSoftenerKernel (Duck + EQ, lisp guard)
-   ├─ [5] AIR     — Air Boost curve, voiced-only
-   ├─ MAKEUP      — per stage (each compressor's own: percentile ref + peak restore), each stage into a lookahead limiter at the source peak
-   ├─ [6] DENSITY — InflatorKernel, anchored so the ceiling sits at f(1) = 1, Clip on
-   └─ MIX         — delay-compensated dry/wet (equal-power, as Scheps)
+   │     makeup + restore → LIMITER (source peak)
+   ├─ [3] DE-ESS  — HFSoftenerKernel (Duck + EQ, lisp guard), level from the Body output   (built)
+   ├─ [4] PARALLEL — SchepsKernel, PRESENCE (or THICK), measured on the de-esser's output  (built)
+   │     → LIMITER (source peak; Scheps' own soft ceiling off)
+   ├─ [5] DENSITY — InflatorKernel, anchored at the source peak, Clip on                   (built)
+   │     → LIMITER (source peak: the downsampler's inter-sample ringing, §4.3)
+   ├─ [6] AIR     — Air Boost curve, voiced-only                                         (not built)
+   └─ MIX         — delay-compensated dry/wet (not built)
        └─ OUTPUT trim ─ out
 ```
 
@@ -65,12 +68,14 @@ in ─ INPUT ALIGN (drive offset, detector only)
   dynamics, the way it is run on a console: the squashed copy is blended under
   a voice that is already level, so it adds density without making the level
   ride any harder.
-- **De-ess after compression *and* the parallel stage.** Compression raises
-  sibilance relative to the body, and the parallel stage's pre-EQ is an 8 kHz
-  push into a cell that then spends its reduction on sibilance (Scheps'
-  own module notes this). A de-esser before either is undone. The HF Softener's thresholds already
-  follow the file's gated RMS (`levelOffset`), so it needs to hear the
-  *post-compression* level — the kernel is fed a re-measured offset (§5).
+- **De-ess after compression, BEFORE the parallel stage (owner's order,
+  October 2026).** Compression raises sibilance relative to the body, so the
+  de-esser follows the serial pair. Ahead of Parallel it hands Scheps' 8 kHz
+  Pultec push less sibilance to spend its cell's reduction on (the draft had
+  it after Parallel, arguing the push would bring the "s" back; the push is on
+  the squashed copy only, blended under the voice). Its thresholds follow the
+  level it HEARS: `deEssLevelOffsetDb` is measured on the Body stage's output,
+  made up, and until it lands the source's level stands in.
 - **Air after the de-esser.** Air pushed into a compressor gets compressed
   back out, and Air before the de-esser just hands it more to cut.
 - **Density after makeup and the ceiling.** The Inflator's curve is defined
@@ -238,7 +243,12 @@ peak maps to s = 1), and an exact inverse gain after it. Then:
 
 - The peak can't rise: the curve is monotone on [0, 1] with f(1) = 1, and
   **Clip is pinned on**, so the fold-back above full scale is unreachable.
-  The ceiling guarantee survives Density at every setting, with no guard stage.
+  ⚠ **But the anchor alone does NOT hold the peak, and this said it did.**
+  Samples at the anchor reconstruct to inter-sample peaks over full scale in
+  the Inflator's oversampled curve; its Clip catches them there and its
+  downsampler rings back over: +0.18 dB on "Messy and Bright" at Density 30,
+  +0.43 on synthetic narration with sibilants, +1.71 on white noise. A last
+  lookahead limiter at the source peak takes it with a gain (built).
 - **Density** = Inflator **Effect** (0–1). Curve pinned at 0; Band Split off
   *(both on the bench)*.
 - **It adds loudness at the same peak.** That is the point of it, but it means
@@ -284,8 +294,10 @@ parallel copy would need is solved there:
   for the measured dry/wet correlation, and passing through the compression's
   yield (`densityDb`) so turning Parallel up *gently raises loudness* instead of
   being level-flat. That is the density being asked for.
-- **Auto wet trim, input alignment, and a ceiling at its own output** (the
-  source peak), all measured (`computeSchepsAutoTrim`).
+- **Auto wet trim, input alignment**, measured (`computeSchepsAutoTrim`) on the
+  de-esser's output. ⚠ Its own output ceiling is Scheps' tanh `softCeiling`,
+  which VoxPressor turns OFF (the limiters-not-soft-ceilings decision, §10): a
+  lookahead limiter at the source peak follows the stage instead.
 
 **What is pinned and what is exposed:**
 
@@ -493,6 +505,17 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
   works; see `PEAKS_RIPPLE_WARN_DB`. ⚠ A slower speed holds the voice down
   longer after each peak. To audition: a low male narrator (≤ 110 Hz) —
   neither real clip is one.
+- **Stage 2: De-ess → Parallel → Density, in that order** (owner, October
+  2026: de-ess before the parallel stage). Defaults De-ess 40 (the HF
+  Softener's Amount, Split pinned at its panel default 33, Guard 100),
+  Parallel 30 % PRESENCE, Density 30 %. Measured on the owner's clips (30 s,
+  loudness / energy above 5 kHz vs the source; core = Peaks 3 / Body 57 / AUTO):
+  Messy and Bright core +2.44 / +4.84 dB, + De-ess +2.30 / +0.77, + Parallel
+  +2.61 / +0.21, + Density +3.57 / +1.33; David Greenberg core +4.98 / +7.05,
+  + De-ess +4.93 / +5.28, + Parallel +5.34 / +5.26, + Density +6.34 / +6.35.
+  Peak at or under the source throughout. The measurement grew to ~1.8–2.1 s
+  per 30 s window (the de-esser's render and Scheps' trim solve). Parallel is
+  bypassed until its measurement lands; Density until the source peak is known.
 - **No breath / room expander** (owner, October 2026): too hard to tune for
   the value. Compression will lift breaths and room tone between phrases;
   that is left to Noise Reduction or the preset chain's `vocalExpander`.

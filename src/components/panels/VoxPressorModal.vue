@@ -18,9 +18,11 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
+  voxDeEss, voxParallel, voxCharacter, voxDensity, voxDeEssGr, voxParallelGr,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
+  syncDeEss, syncParallel, syncCharacter, syncDensity,
   apply, teardown, closeModal,
 } = useVoxPressor()
 
@@ -33,6 +35,18 @@ onMounted(() => {
 
 const ACCENT = '#e8a33d'
 const PEAKS_COLOR = '#ff7a59'
+const DEESS_COLOR = '#7fd1c7'
+const PARALLEL_COLOR = '#b9a2ff'
+const DENSITY_COLOR = '#f2d16b'
+
+const CHARACTER_OPTIONS = [
+  { value: 'presence', label: 'PRESENCE', title: 'Scheps\' Presence curves: the squashed copy leans toward 8 kHz' },
+  { value: 'thick', label: 'THICK', title: 'Scheps\' Thick curves: the squashed copy adds weight down low' },
+]
+
+function formatPercent(v) {
+  return v > 0 ? `${Math.round(v)} %` : 'OFF'
+}
 const METER_H = 214
 
 const LISTEN_OPTIONS = [
@@ -148,7 +162,7 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="vox-pressor"
     :z="z"
-    :width="700"
+    :width="900"
     :accent="ACCENT"
     design="modula"
     brand-lead="VOXPRESSOR"
@@ -170,13 +184,17 @@ async function applyAndClose() {
       </div>
 
       <div class="vp-panel">
-        <GainReductionBar :reduction-db="voxPeaksGr" :accent="PEAKS_COLOR" title="PEAKS · 1176" :full-scale-db="12" />
-        <GainReductionBar :reduction-db="voxBodyGr" :accent="ACCENT" title="BODY · LA-2A" :full-scale-db="12" />
+        <div class="vp-bars">
+          <GainReductionBar :reduction-db="voxPeaksGr" :accent="PEAKS_COLOR" title="PEAKS · 1176" :full-scale-db="12" />
+          <GainReductionBar :reduction-db="voxDeEssGr" :accent="DEESS_COLOR" title="DE-ESS" :full-scale-db="12" />
+          <GainReductionBar :reduction-db="voxBodyGr" :accent="ACCENT" title="BODY · LA-2A" :full-scale-db="12" />
+          <GainReductionBar :reduction-db="voxParallelGr" :accent="PARALLEL_COLOR" title="PARALLEL (WET)" :full-scale-db="12" />
+        </div>
 
         <div class="vp-controls">
           <div class="vp-col">
             <ModulaKnob
-              variant="ticks" :size="130" show-value editable
+              variant="ticks" :size="108" show-value editable
               :model-value="voxPeaks" :min="0" :max="PEAKS_MAX" :step="0.5"
               :default-value="VOX_DEFAULTS.peaks"
               label="Peaks" :color="PEAKS_COLOR" :format-value="formatPeaks" :disabled="!voxPreview"
@@ -189,7 +207,7 @@ async function applyAndClose() {
           </div>
           <div class="vp-col">
             <ModulaKnob
-              variant="ticks" :size="130" show-value editable
+              variant="ticks" :size="108" show-value editable
               :model-value="voxBody" :min="0" :max="100" :step="1"
               :default-value="VOX_DEFAULTS.body"
               label="Body · LA-2A Peak Red." :color="ACCENT" :format-value="formatKnob" :disabled="!voxPreview"
@@ -197,6 +215,44 @@ async function applyAndClose() {
               @update:model-value="syncBody"
             />
             <span class="m-note" :class="{ 'vp-stale': stale }">{{ bodyNote }}</span>
+          </div>
+        </div>
+
+        <div class="vp-controls vp-row2">
+          <div class="vp-col vp-col-sm">
+            <ModulaKnob
+              variant="ticks" :size="80" show-value editable
+              :model-value="voxDeEss" :min="0" :max="100" :step="1"
+              :default-value="VOX_DEFAULTS.deEss"
+              label="De-ess" :color="DEESS_COLOR" :format-value="formatKnob" :disabled="!voxPreview"
+              title="The HF Softener's Amount, after the compressors: takes down the sibilance they brought up. 0 takes the stage out. Double-click to reset"
+              @update:model-value="syncDeEss"
+            />
+          </div>
+          <div class="vp-col vp-col-sm">
+            <ModulaKnob
+              variant="ticks" :size="80" show-value editable
+              :model-value="voxParallel" :min="0" :max="100" :step="1"
+              :default-value="VOX_DEFAULTS.parallel"
+              label="Parallel" :color="PARALLEL_COLOR" :format-value="formatPercent" :disabled="!voxPreview"
+              title="Scheps Parallel's Mix: a Pultec-coloured, squashed LA-2A copy blended under the voice for density. 0 takes the stage out. Double-click to reset"
+              @update:model-value="syncParallel"
+            />
+            <ModulaSegmented
+              :model-value="voxCharacter" :options="CHARACTER_OPTIONS"
+              aria-label="Parallel character" :disabled="!voxPreview || voxParallel <= 0"
+              @update:model-value="syncCharacter"
+            />
+          </div>
+          <div class="vp-col vp-col-sm">
+            <ModulaKnob
+              variant="ticks" :size="80" show-value editable
+              :model-value="voxDensity" :min="0" :max="100" :step="1"
+              :default-value="VOX_DEFAULTS.density"
+              label="Density" :color="DENSITY_COLOR" :format-value="formatPercent" :disabled="!voxPreview"
+              title="The Cambridge Inflator's Effect, anchored at the source peak: lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
+              @update:model-value="syncDensity"
+            />
           </div>
         </div>
 
@@ -244,8 +300,8 @@ async function applyAndClose() {
     </div>
 
     <p class="vp-about">
-      Stage 1 (dev): a 1176 trims the peaks, then an LA-2A levels the voice.
-      Both listen through a voice detector that ignores rumble; the LA-2A also
+      Dev: a 1176 trims the peaks, an LA-2A levels the voice, then a de-esser, a Scheps-style parallel layer and an anchored Inflator.
+      The compressors listen through a voice detector that ignores rumble; the LA-2A also
       ignores plosives and sibilance. Each makes up its own level, as in a hand-built chain, so what they take off comes back as loudness;
       a lookahead limiter after each holds the source's peak with a gain, never a clipper.
     </p>
@@ -284,9 +340,16 @@ async function applyAndClose() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  min-height: 206px;
+  gap: 4px;
+  min-height: 176px;
 }
+.vp-bars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 14px;
+}
+.vp-row2 { padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, .06); }
+.vp-col-sm { min-height: 0; }
 .vp-listen {
   display: flex;
   align-items: center;

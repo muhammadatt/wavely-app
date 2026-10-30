@@ -26,6 +26,8 @@ export function createVoxPressor(audioContext) {
   let destroyed = false
   let peaksGrDb = 0
   let bodyGrDb = 0
+  let deEssGrDb = 0
+  let parallelGrDb = 0
 
   input.connect(preOutput)
   preOutput.connect(output)
@@ -44,6 +46,8 @@ export function createVoxPressor(audioContext) {
         if (e.data?.type === 'gr') {
           peaksGrDb = Math.max(peaksGrDb, e.data.peaksGrDb)
           bodyGrDb = e.data.bodyGrDb
+          deEssGrDb = Math.max(deEssGrDb, e.data.deEssGrDb ?? 0)
+          parallelGrDb = e.data.parallelGrDb ?? 0
         }
       }
       input.disconnect(preOutput)
@@ -81,8 +85,9 @@ export function createVoxPressor(audioContext) {
      * most the 1176 did since the last read, then reset (see onmessage).
      */
     getReductions() {
-      const r = { peaks: -peaksGrDb, body: -bodyGrDb }
+      const r = { peaks: -peaksGrDb, body: -bodyGrDb, deEss: -deEssGrDb, parallel: -parallelGrDb }
       peaksGrDb = 0
+      deEssGrDb = 0
       return r
     },
 

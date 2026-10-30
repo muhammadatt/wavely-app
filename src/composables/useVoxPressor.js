@@ -30,6 +30,11 @@ const copies = pluginCopies((copy, life) => {
   const voxListen = ref(VOX_DEFAULTS.listen)
   /** The 1176's SPEED. Measured with (AUTO and the fixed speeds catch differently). */
   const voxSpeed = ref(VOX_DEFAULTS.speed)
+  /** The stages after Body. Each is measured with: they move what comes after them. */
+  const voxDeEss = ref(VOX_DEFAULTS.deEss)
+  const voxParallel = ref(VOX_DEFAULTS.parallel)
+  const voxCharacter = ref(VOX_DEFAULTS.character)
+  const voxDensity = ref(VOX_DEFAULTS.density)
   /** BENCH: the LA-2A's lookahead, ms. Measured with, so it re-measures. */
   const voxBodyLookahead = ref(VOX_DEFAULTS.bodyLookaheadMs)
   /** The file's alignment (whole file, gated RMS), and which timeline it is for. */
@@ -48,6 +53,8 @@ const copies = pluginCopies((copy, life) => {
   const voxPreview = ref(false)
   const voxPeaksGr = ref(0)
   const voxBodyGr = ref(0)
+  const voxDeEssGr = ref(0)
+  const voxParallelGr = ref(0)
   const voxInputLevels = ref([])
   const voxOutputLevels = ref([])
   let meterId = null
@@ -77,6 +84,10 @@ const copies = pluginCopies((copy, life) => {
       output: voxOutput.value,
       listen: voxListen.value,
       speed: voxSpeed.value,
+      deEss: voxDeEss.value,
+      parallel: voxParallel.value,
+      character: voxCharacter.value,
+      density: voxDensity.value,
       bodyLookaheadMs: voxBodyLookahead.value,
       alignDb: voxAlignDb.value,
       ...voxMeasured.value,
@@ -111,6 +122,8 @@ const copies = pluginCopies((copy, life) => {
           const r = nodes.getReductions()
           voxPeaksGr.value = r.peaks
           voxBodyGr.value = r.body
+          voxDeEssGr.value = r.deEss
+          voxParallelGr.value = r.parallel
           const chCount = state.currentFile?.channels ?? 1
           voxInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
           voxOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
@@ -127,6 +140,8 @@ const copies = pluginCopies((copy, life) => {
       }
       voxPeaksGr.value = 0
       voxBodyGr.value = 0
+      voxDeEssGr.value = 0
+      voxParallelGr.value = 0
       voxInputLevels.value = []
       voxOutputLevels.value = []
     }
@@ -181,7 +196,7 @@ const copies = pluginCopies((copy, life) => {
 
     /** The key a measurement belongs to: the timeline, the region and every setting it reads. */
     function solveKey(segments, start, end) {
-      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}`
+      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxDeEss.value}|${voxParallel.value}|${voxCharacter.value}`
     }
 
     /**
@@ -268,6 +283,31 @@ const copies = pluginCopies((copy, life) => {
       voxBody.value = v
       pushParam('body', v)
       scheduleSolve()
+    }
+
+    function syncDeEss(v) {
+      voxDeEss.value = v
+      pushParam('deEss', v)
+      scheduleSolve()
+    }
+
+    function syncParallel(v) {
+      voxParallel.value = v
+      pushParam('parallel', v)
+      scheduleSolve()
+    }
+
+    function syncCharacter(v) {
+      voxCharacter.value = v
+      pushParam('character', v)
+      scheduleSolve()
+    }
+
+    // Density is measured with nothing: its anchor is the source peak, so it
+    // never re-measures.
+    function syncDensity(v) {
+      voxDensity.value = v
+      pushParam('density', v)
     }
 
     function syncSpeed(v) {
@@ -369,7 +409,8 @@ const copies = pluginCopies((copy, life) => {
         watch(() => `${appState.activeDocumentId}:${state.revision}`, () => {
           if (!(voxPreview.value || isOpen(windowId))) return
           const cleared = {
-            peaksCeilingDb: null, bodyCeilingDb: null,
+            peaksCeilingDb: null, bodyCeilingDb: null, sourcePeakDb: null,
+            deEssLevelOffsetDb: null, schepsAlignDb: null,
             peaksMakeupDb: 0, peaksRestoreDb: 0, bodyMakeupDb: 0, makeupDb: 0,
           }
           voxMeasured.value = { ...voxMeasured.value, ...cleared }
@@ -408,10 +449,12 @@ const copies = pluginCopies((copy, life) => {
 
     return {
       voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
+      voxDeEss, voxParallel, voxCharacter, voxDensity, voxDeEssGr, voxParallelGr,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,
       togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
+      syncDeEss, syncParallel, syncCharacter, syncDensity,
       refreshSolve, apply, teardown, openModal, closeModal,
     }
   }

@@ -74,6 +74,9 @@ import {
   peakOfChannels, solveMakeupPlan, percentileOfChannels, MAKEUP_PERCENTILE,
 } from './dsp/makeupReference.js'
 import { limitChannels } from './dsp/peakLimiter.js'
+import { processHFSoftenerBuffer, levelOffsetDbFor } from './deEsserProcessor.js'
+import { computeSchepsAutoTrim } from './schepsProcessor.js'
+import { alignDbForRms } from './dsp/inputAlign.js'
 
 /** Block length for the peak and voiced-level statistics, seconds. */
 export const SOLVE_BLOCK_S = 0.1
@@ -180,12 +183,17 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
     ...p, oversample: false, listen: 'off', outputDb: 0, makeupDb: 0,
     peaksMakeupDb: 0, peaksCeilingDb: null, bodyMakeupDb: 0, bodyCeilingDb: null,
     voiceF0Hz,
+    // The stages after Body are measured offline on their own inputs below;
+    // the Peaks / Body renders must not include them.
+    deEssOn: false, parallelOn: false, density: 0,
   }
   if (cornerHz) base.cornerHz = cornerHz
   else delete base.cornerHz
 
   const none = {
-    cornerHz, voiceF0Hz, peaksRippleDb: null,
+    cornerHz, voiceF0Hz, peaksRippleDb: null, sourcePeakDb: null,
+    deEssLevelOffsetDb: null,
+    schepsAlignDb: null, schepsTrimDb: 0, schepsCorrelation: 0, schepsDensityDb: 0,
     peaksMakeupDb: 0, peaksCeilingDb: null, peaksRestoreDb: 0,
     bodyMakeupDb: 0, bodyCeilingDb: null, makeupDb: 0,
     peaksDb: 0, peaksBodyDb: 0, bodyDb: 0,
@@ -194,7 +202,7 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   if (!(inPeak > 0)) return none
   // Both stages' limiters hold the SOURCE's peak.
   const ceilingDb = db(inPeak)
-  const out = { ...none }
+  const out = { ...none, sourcePeakDb: ceilingDb }
 
   // ── PEAKS ──
   let afterPeaks = channels
@@ -216,6 +224,7 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   }
 
   // ── BODY ── on what the 1176 stage put out, makeup and all.
+  let afterBody = afterPeaks
   if (p.bodyOn) {
     // In the chain the kernel takes the Body offset net of the Peaks makeup;
     // rendered alone (Peaks bypassed) it has to be passed that way.
@@ -256,6 +265,9 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
     out.bodyMakeupDb = last ? last.makeupDb : 0
     out.bodyCeilingDb = ceilingDb
     out.makeupDb = last ? restoreToCeilingDb(ceilingDb, db(peakOfChannels(limitChannels(last.out, ceilingDb, sampleRate)))) : 0
+    if (last) {
+      afterBody = limitChannels(scaleChannels(last.out, out.makeupDb), ceilingDb, sampleRate)
+    }
     const r = first
     // Average cell reduction over the voiced blocks, from the cell's own meter
     // (one value per 128-sample kernel block).
@@ -269,7 +281,41 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
     }
     out.bodyDb = r && count > 0 ? sum / count : 0
   }
+
+  // ── DE-ESS ── its thresholds follow the level it HEARS: the Body stage's
+  // output, made up, not the source (the HF Softener's `levelOffset` contract).
+  out.deEssLevelOffsetDb = levelOffsetDbFor(db(gatedRmsOfChannels(afterBody, sampleRate)))
+  let afterDeEss = afterBody
+  if (p.deEss && p.deEssOn) {
+    afterDeEss = processHFSoftenerBuffer(afterBody, sampleRate, {
+      ...p.deEss, levelOffsetDb: out.deEssLevelOffsetDb,
+    }).channelData
+  }
+
+  // ── PARALLEL ── Scheps' trim, correlation, density and alignment, measured on
+  // the de-esser's output (spec §4.4: measure it on what it hears).
+  if (p.parallelMix > 0) {
+    out.schepsAlignDb = alignDbForRms(gatedRmsOfChannels(afterDeEss, sampleRate))
+    const t = computeSchepsAutoTrim(afterDeEss, sampleRate, {
+      character: p.parallelCharacter === 'thick' ? 'thick' : 'presence',
+      squash: Number.isFinite(p.parallelSquash) ? p.parallelSquash : 40,
+      inputAlignDb: out.schepsAlignDb,
+    })
+    out.schepsTrimDb = t.trimDb
+    out.schepsCorrelation = t.correlation
+    out.schepsDensityDb = t.densityDb
+  }
   return out
+}
+
+function scaleChannels(chs, gainDb) {
+  if (!gainDb) return chs
+  const k = 10 ** (gainDb / 20)
+  return chs.map((c) => {
+    const q = new Float32Array(c.length)
+    for (let i = 0; i < c.length; i++) q[i] = c[i] * k
+    return q
+  })
 }
 
 /**
@@ -419,7 +465,10 @@ function renderBody(channels, sampleRate, base, alignDb, extra = {}, opts = {}) 
  * @param {number} sourcePeakDb  the whole region's peak, dBFS
  */
 export function measureVoxPressorExact(channels, sampleRate, solved, sourcePeakDb) {
-  const base = { ...solved, oversample: false, listen: 'off', outputDb: 0, makeupDb: 0 }
+  const base = {
+    ...solved, oversample: false, listen: 'off', outputDb: 0, makeupDb: 0,
+    deEssOn: false, parallelOn: false, density: 0,
+  }
   let stage1 = channels
   let peaksMakeupDb = 0
   let peaksCeilingDb = null
@@ -449,5 +498,6 @@ export function measureVoxPressorExact(channels, sampleRate, solved, sourcePeakD
     peaksMakeupDb, peaksCeilingDb, peaksRestoreDb,
     bodyCeilingDb,
     makeupDb,
+    sourcePeakDb,
   }
 }

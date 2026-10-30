@@ -12,7 +12,14 @@
  *       │      ▼                              │
  *       │   [BODY] LA2AKernel (makeup on its Gain) ◄──┘
  *       │      │
- *       │   RESTORE → LIMITER (source peak, lookahead gain) → OUTPUT trim ─ out
+ *       │   RESTORE → LIMITER (source peak, lookahead gain)
+ *       │      │
+ *       │   [DE-ESS] HFSoftenerKernel (Duck + EQ, lisp guard; level from the Body output)
+ *       │      │
+ *       │   [PARALLEL] SchepsKernel (Pultec → LA-2A → Pultec, blended with its dry)
+ *       │      │
+ *       │   LIMITER (source peak) → [DENSITY] InflatorKernel, anchored at the
+ *       │      source peak, Clip on → LIMITER (source peak) → OUTPUT trim ─ out
  *
  * HOLDS THE KERNELS, NOT COPIES, as Scheps holds the LA-2A: every fitted
  * constant, ballistic law and saturation curve in either compressor reaches
@@ -42,6 +49,9 @@
 
 import { FET1176Kernel, inputDriveDbForKnob, releaseSecondsForDial } from './fet1176Processor.js'
 import { LA2AKernel, la2aLatencySamples } from './la2aProcessor.js'
+import { HFSoftenerKernel } from './deEsserProcessor.js'
+import { SchepsKernel } from './schepsProcessor.js'
+import { InflatorKernel, INFLATOR_LATENCY_SAMPLES } from './inflatorProcessor.js'
 import { VoiceDetector, DEFAULT_CORNER_HZ } from './dsp/voiceDetector.js'
 import { DelayLine, OVERSAMPLE_LATENCY_SAMPLES } from './dsp/oversample.js'
 import { float32AtOrBelow } from './dsp/makeupReference.js'
@@ -181,6 +191,36 @@ export const VOX_KERNEL_DEFAULTS = {
   /** Manual trim after the last limiter, dB. */
   outputDb: 0,
   /**
+   * DE-ESS — the HF Softener's kernel, its params whole (`deEss`, from the
+   * De-Esser's own `toKernelParams`, so the panel mapping is not copied).
+   * Off is a straight copy: the softener has no latency.
+   */
+  deEssOn: false,
+  deEss: null,
+  /**
+   * PARALLEL — Scheps Parallel's kernel at `parallelMix` (0–1), its trim,
+   * correlation, density and alignment MEASURED on the de-esser's output
+   * (`measureVoxPressor`). Its own soft ceiling stays off; the limiter after it
+   * holds the source peak. Off is a delay line of its latency.
+   */
+  parallelOn: false,
+  parallelMix: 0.3,
+  parallelCharacter: 'presence',
+  parallelSquash: 40,
+  schepsAlignDb: 0,
+  schepsTrimDb: 0,
+  schepsCorrelation: 0,
+  schepsDensityDb: 0,
+  /**
+   * DENSITY — the Cambridge Inflator at Effect `density` (0–1), Curve 0, Clip
+   * on, ANCHORED at the source peak (`sourcePeakDb`): the signal is scaled so
+   * that peak sits at full scale, and back after. The curve is monotone with
+   * f(1) = 1 and the limiter before it holds the source peak, so Density never
+   * raises the peak. Unanchored (no `sourcePeakDb`) it does not run.
+   */
+  density: 0,
+  sourcePeakDb: null,
+  /**
    * 'off' | 'peaks' | 'body' — play what that compressor's detector hears
    * instead of the output (the HF Softener's MONITOR contract). Never a preset.
    */
@@ -243,6 +283,16 @@ export class VoxPressorKernel {
     this.bodyBypass = []
     this.peaksLimiter = new LinkedPeakLimiter(sampleRate)
     this.bodyLimiter = new LinkedPeakLimiter(sampleRate)
+    this.deEsser = new HFSoftenerKernel(sampleRate)
+    this.deEsserPrimed = false
+    this.scheps = new SchepsKernel(sampleRate)
+    this.parallelBypass = []
+    this.parallelLimiter = new LinkedPeakLimiter(sampleRate)
+    this.inflator = new InflatorKernel(sampleRate)
+    this.densityBypass = []
+    this.outputLimiter = new LinkedPeakLimiter(sampleRate)
+    this.deEssGrHold = 0
+    this.parallelGrHold = 0
 
     this.makeupLinSmoothed = null
     this.outputLinSmoothed = null
@@ -306,6 +356,53 @@ export class VoxPressorKernel {
     this.peaksLimiter.setThreshold(this._ceilingLin(p.peaksCeilingDb))
     this.bodyLimiter.setThreshold(this._ceilingLin(p.bodyCeilingDb))
 
+    // ── DE-ESS ──
+    this.deEssOn = !!p.deEssOn && !!p.deEss
+    if (p.deEss) {
+      // The first params are IMMEDIATE: the kernel's own constructor defaults
+      // would otherwise glide into these (PHAT*SS's lesson).
+      this.deEsser.setParams(p.deEss, !this.deEsserPrimed)
+      this.deEsserPrimed = true
+    }
+
+    // ── PARALLEL ──
+    this.parallelOn = !!p.parallelOn && finite(p.parallelMix, 0, 0, 1) > 0
+    this.scheps.setParams({
+      character: p.parallelCharacter === 'thick' ? 'thick' : 'presence',
+      squash: finite(p.parallelSquash, 40, 0, 100),
+      mix: finite(p.parallelMix, 0, 0, 1),
+      inputAlignDb: finite(p.schepsAlignDb, 0, -60, 60),
+      wetTrimDb: finite(p.schepsTrimDb, 0, -24, 24),
+      correlation: finite(p.schepsCorrelation, 0, -1, 1),
+      densityDb: finite(p.schepsDensityDb, 0, -24, 24),
+      outputDb: 0,
+      ceilingDb: null,
+      oversample: this.oversampleOn,
+    })
+    this.parallelLatency = this.scheps.latencySamples
+    // Holds the source peak after the blend: the parallel stage adds level.
+    this.parallelLimiter.setThreshold(this._ceilingLin(p.sourcePeakDb))
+
+    // ── DENSITY ──
+    const anchorLin = this._ceilingLin(p.sourcePeakDb)
+    const density = finite(p.density, 0, 0, 1)
+    this.densityOn = density > 0 && anchorLin > 0
+    this.densityAnchor = anchorLin
+    /**
+     * ⚠ THE ANCHOR DOES NOT HOLD THE PEAK BY ITSELF, AND THE SPEC SAID IT DID.
+     * Samples at the anchor reconstruct to inter-sample peaks over full scale
+     * in the Inflator's oversampled curve; its Clip catches them THERE, and the
+     * downsampler rings back over: +0.18 dB on "Messy and Bright" at Density 30.
+     * The last limiter takes that fraction of a dB with a gain.
+     */
+    this.outputLimiter.setThreshold(this.densityOn ? anchorLin : 0)
+    this.inflator.setParams({
+      // Clip only while it runs: anchored, nothing reaches it above full scale;
+      // off, the stage must be a pure delay even for a file that peaks over 0 dBFS.
+      effect: this.densityOn ? density : 0, curve: 0, clip: this.densityOn, bandSplit: false,
+      inputDb: 0, outputDb: 0,
+    })
+
     if (this.peaksDetector.sibilance !== !!p.peaksSibilance) {
       this.peaksDetector = new VoiceDetector(this.sampleRate, peaksTap(p.peaksSibilance))
     }
@@ -322,10 +419,12 @@ export class VoxPressorKernel {
     return Number.isFinite(ceilingDb) ? float32AtOrBelow(Math.exp(ceilingDb * LN10_OVER_20)) : 0
   }
 
-  /** Constant whether a stage is on or off: both stages and both limiters. */
+  /** Constant whether a stage is on or off: every stage and every limiter. */
   get latencySamples() {
     return this.stageLatency + this.bodyLatency
       + this.peaksLimiter.latencySamples + this.bodyLimiter.latencySamples
+      + this.parallelLatency + this.parallelLimiter.latencySamples
+      + INFLATOR_LATENCY_SAMPLES + this.outputLimiter.latencySamples
   }
 
   /**
@@ -341,9 +440,16 @@ export class VoxPressorKernel {
    * exactly what it did before.
    */
   getMetering() {
-    const m = { peaksGrDb: this.peaksGrHold, bodyGrDb: this.bodyGrHold }
+    const m = {
+      peaksGrDb: this.peaksGrHold,
+      bodyGrDb: this.bodyGrHold,
+      deEssGrDb: this.deEssGrHold,
+      parallelGrDb: this.parallelGrHold,
+    }
     this.peaksGrHold = 0
     this.bodyGrHold = 0
+    this.deEssGrHold = 0
+    this.parallelGrHold = 0
     return m
   }
 
@@ -356,6 +462,14 @@ export class VoxPressorKernel {
     for (const d of this.bodyBypass) d.reset()
     this.peaksLimiter.reset()
     this.bodyLimiter.reset()
+    this.deEsser = new HFSoftenerKernel(this.sampleRate)
+    this.deEsserPrimed = false
+    this.scheps = new SchepsKernel(this.sampleRate)
+    for (const d of this.parallelBypass) d.reset()
+    for (const d of this.densityBypass) d.reset()
+    this.parallelLimiter.reset()
+    this.outputLimiter.reset()
+    this.inflator = new InflatorKernel(this.sampleRate)
     this.makeupLinSmoothed = null
     this.outputLinSmoothed = null
     this.setParams({})
@@ -366,6 +480,8 @@ export class VoxPressorKernel {
       this.midScratch.push(new Float32Array(0))
       this.peaksBypass.push(new DelayLine(this.stageLatency))
       this.bodyBypass.push(new DelayLine(this.bodyLatency))
+      this.parallelBypass.push(new DelayLine(this.parallelLatency))
+      this.densityBypass.push(new DelayLine(INFLATOR_LATENCY_SAMPLES))
     }
     for (let ch = 0; ch < nCh; ch++) {
       if (this.midScratch[ch].length < n) this.midScratch[ch] = new Float32Array(n)
@@ -375,6 +491,9 @@ export class VoxPressorKernel {
       }
       if (this.bodyBypass[ch].length !== this.bodyLatency) {
         this.bodyBypass[ch] = new DelayLine(this.bodyLatency)
+      }
+      if (this.parallelBypass[ch].length !== this.parallelLatency) {
+        this.parallelBypass[ch] = new DelayLine(this.parallelLatency)
       }
     }
   }
@@ -443,6 +562,54 @@ export class VoxPressorKernel {
     if (this.outputLinSmoothed === null) this.outputLinSmoothed = this.outputLin
     this.makeupLinSmoothed = this._ramp(outputChannels, n, this.makeupLinSmoothed, this.makeupLin)
     this.bodyLimiter.process(outputChannels, n)
+
+    // ── DE-ESS ── (mid is free again: the Body stage has read it)
+    if (this.deEssOn) {
+      this.deEsser.process(outputChannels, mid, n)
+      for (let ch = 0; ch < nOut; ch++) outputChannels[ch].set(mid[ch])
+      // Both cutting stages: the Duck (broadband) does most of it at the pinned
+      // Split, and `reductionDb` alone is only the EQ's — the first build's
+      // meter sat at 0 while the stage took 4 dB off the top end.
+      const m = this.deEsser.takeMeter()
+      const cut = m ? m.reductionDb + m.broadbandDb : 0
+      if (cut > this.deEssGrHold) this.deEssGrHold = cut
+    }
+
+    // ── PARALLEL ── (Scheps reads its dry before writing: in place is safe)
+    if (this.parallelOn) {
+      this.scheps.process(outputChannels, outputChannels, n)
+      const gr = this.scheps.la2a.grDb
+      if (gr > this.parallelGrHold) this.parallelGrHold = gr
+    } else {
+      for (let ch = 0; ch < nOut; ch++) {
+        const line = this.parallelBypass[ch]
+        const io = outputChannels[ch]
+        for (let i = 0; i < n; i++) io[i] = line.push(io[i])
+      }
+    }
+    this.parallelLimiter.process(outputChannels, n)
+
+    // ── DENSITY ── anchored: the source peak sits at full scale on the curve.
+    // ⚠ OFF IS A DELAY LINE, NOT THE INFLATOR AT EFFECT 0: the Inflator guards
+    // its curve at ±2 even then, which clipped a file peaking over +6 dBFS.
+    if (this.densityOn) {
+      const a = this.densityAnchor
+      for (let ch = 0; ch < nOut; ch++) { const io = outputChannels[ch]; for (let i = 0; i < n; i++) io[i] /= a }
+      this.inflator.process(outputChannels, mid, n)
+      for (let ch = 0; ch < nOut; ch++) {
+        const io = outputChannels[ch]
+        const src = mid[ch]
+        for (let i = 0; i < n; i++) io[i] = src[i] * a
+      }
+    } else {
+      for (let ch = 0; ch < nOut; ch++) {
+        const line = this.densityBypass[ch]
+        const io = outputChannels[ch]
+        for (let i = 0; i < n; i++) io[i] = line.push(io[i])
+      }
+    }
+    this.outputLimiter.process(outputChannels, n)
+
     this.outputLinSmoothed = this._ramp(outputChannels, n, this.outputLinSmoothed, this.outputLin)
   }
 
@@ -517,7 +684,8 @@ export function processVoxPressorBuffer(channelData, sampleRate, params = {}, { 
 export function voxLatencySamples(params, sampleRate) {
   const os = params?.oversample === false ? 0 : OVERSAMPLE_LATENCY_SAMPLES
   const body = la2aLatencySamples({ ...(params?.bodyBench ?? {}), oversample: params?.oversample }, sampleRate)
-  return os + body + 2 * peakLimiterLatencySamples(sampleRate)
+  // Parallel holds an LA-2A with no lookahead; Density is always oversampled.
+  return os + body + os + 4 * peakLimiterLatencySamples(sampleRate) + INFLATOR_LATENCY_SAMPLES
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────
