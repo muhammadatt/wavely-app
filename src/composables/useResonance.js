@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin } from './usePluginChain.js'
+import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { applyResonanceRegion, computePeakCache, computeVoiceProfile } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
@@ -558,6 +558,7 @@ const copies = pluginCopies((copy, life) => {
       id: resonanceEffect.id,
       windowId,
       label: 'Reso Soothe',
+      settingsKey: () => settingsKeyOf(currentParams()),
       dispose: life.dispose,
       isActive: () => resPreview.value,
       setActive: (on) => { if (resPreview.value !== on) togglePreview() },
