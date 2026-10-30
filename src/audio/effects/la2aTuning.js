@@ -29,7 +29,7 @@
 import {
   TUBE_DRIVE_LIN, TUBE_BIAS, CELL_MOD_MAX, CELL_MOD_TAU_DB, CELL_MOD_SHAPE,
   CELL_CURVE_DRIVE_MAX, VALVE_CURVE_DRIVE, EMPHASIS_DEFAULT, EMPHASIS_CORNER_HZ,
-  LA2A_KERNEL_DEFAULTS,
+  SIBILANCE_GUARD_DEFAULT, LA2A_KERNEL_DEFAULTS,
 } from '../la2aProcessor.js'
 
 /**
@@ -117,6 +117,12 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
    * as the escape hatch it was added to be.
    */
   emphasisCornerHz: EMPHASIS_CORNER_HZ,
+  /**
+   * Cell-drive duck on top-end-dominated input, 0-100 (0 = off, the previous
+   * kernel bit for bit). Keeps the emphasis' warmth on vowels while loud
+   * sibilants pass the cell nearly clean. See SIBILANCE_GUARD_DEFAULT.
+   */
+  sibilanceGuard: SIBILANCE_GUARD_DEFAULT,
 })
 
 /**

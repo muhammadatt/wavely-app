@@ -88,7 +88,7 @@ import {
 } from './dsp/makeupReference.js'
 import { makeVocalSatCurve, VOCAL_SAT_CURVE_LEAN_POSITIVE } from './dsp/vocalSatCurve.js'
 import { makeQuarticSatCurve } from './dsp/quarticSatCurve.js'
-import { highShelf, BiquadCascade } from './dsp/biquad.js'
+import { highShelf, highpass, BiquadCascade } from './dsp/biquad.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
 export { MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor }
@@ -1427,6 +1427,8 @@ export const LA2A_TUBESAT_PATCH = Object.freeze({
    * it could. 1800 is what this voicing was cut at.
    */
   emphasisCornerHz: 1800,
+  /** Not in that voicing — the guard came later. See SIBILANCE_GUARD_DEFAULT. */
+  sibilanceGuard: 0,
 })
 
 /**
@@ -1537,6 +1539,56 @@ export const EMPHASIS_CORNER_MAX_HZ = 8000
 
 /** Below this the pair is skipped outright rather than run flat. */
 export const EMPHASIS_EPSILON = 1e-4
+
+/**
+ * SIBILANCE GUARD — the cell shaper's drive, ducked while the input is mostly
+ * top end. 0-100 as depth; 100 ships; 0 is the previous kernel BIT FOR BIT
+ * (the detector does not even run).
+ *
+ * WHY. Loud sibilants distorted audibly with Harmonics on, and the culprit is
+ * the emphasis pair meeting the cell, both at once:
+ *
+ *   1. The +10.2 dB shelf at 2300 Hz gives a sibilant its FULL boost — its
+ *      energy is all above the corner — so the "s" is the most driven thing in
+ *      the file without being the loudest.
+ *   2. The cell's drive follows gain reduction (`d ∝ 1 − e^(−GR/τ)`), and a
+ *      loud "s" is what makes the gain reduction, so the curve switches on at
+ *      the instant the shelf is pushing the "s" into it.
+ *   3. The quartic is EVEN, and past |u| = 1 its continuations have unequal
+ *      slopes (1.13 / 0.87) — a rectifier on noise. What it makes of a
+ *      sibilant is envelope grit and difference tones, most of it BELOW 1 kHz,
+ *      where the de-emphasis (a shelf above 2300) does not reach and the "s"
+ *      itself has nothing to mask it.
+ *
+ * ⚠ LOWERING EMPHASIS FIXES IT AND WAS REJECTED BY EAR: it took the warmth
+ * with it — the pair is part of what the cell does to vowels, not only to
+ * sibilants. Hence this, which leaves the emphasis on everything that is not
+ * top-end-dominated.
+ *
+ * HOW. A 2nd-order 4 kHz high-pass on the mono side-chain input; the fraction
+ * of energy above it (4 ms mean square, both bands) through a smoothstep from
+ * RATIO_LO to RATIO_HI sets how far the cell's drive is pulled down (1 ms down,
+ * 30 ms back up). A ratio is level-independent, so a quiet "s" and a loud one
+ * read the same; it is the gain reduction that decides whether the cell is
+ * doing anything to duck. The cell curve with a lower drive is closer to the
+ * identity and nothing else — the linear path, the emphasis pair, the detector
+ * and the gain reduction are untouched, so compression is bit-identical and
+ * only the distortion on sibilants moves.
+ *
+ * MEASURED on synthetic vowels (/a/, /i/) + 4-10 kHz sibilant bursts, PR 70,
+ * auto makeup, Harmonics' added energy under 1 kHz re the segment: sibilants
+ * peaking −11 / −5 / −1 dBFS go −24.6 / −19.3 / −17.8 → −50.6 / −42.6 / −38.4
+ * dB; vowels −30.4 → −30.9. ⚠ THE CONSTANTS ARE REASONED, NOT AUDITIONED, and
+ * the material is synthetic. The valve stage is NOT guarded: it is idle-level
+ * colour (~5 % of the distortion) and does not follow gain reduction.
+ */
+export const SIBILANCE_GUARD_DEFAULT = 100
+export const SIB_GUARD_HZ = 4000
+export const SIB_GUARD_RATIO_LO = 0.25
+export const SIB_GUARD_RATIO_HI = 0.6
+const SIB_GUARD_ENV_MS = 4
+const SIB_GUARD_ATTACK_MS = 1
+const SIB_GUARD_RELEASE_MS = 30
 
 const COMPRESS_KNEE_DB = 5
 const LIMIT_KNEE_DB = 6
@@ -1692,6 +1744,8 @@ export const LA2A_KERNEL_DEFAULTS = {
    * inert on `tanh` and on the gain modulation; see EMPHASIS_DEFAULT.
    */
   emphasis: EMPHASIS_DEFAULT,
+  /** Cell-drive duck on sibilance, 0-100; 0 = off. See SIBILANCE_GUARD_DEFAULT. */
+  sibilanceGuard: SIBILANCE_GUARD_DEFAULT,
 }
 
 /**
@@ -1806,6 +1860,14 @@ export class LA2AKernel {
     // fast phase to the phosphorescent one (0 = just released, 1 = deep tail).
     this.gr = 0
     this.relPhase = 0
+    // Sibilance guard: detector high-pass (DF1), the two mean squares, the
+    // smoothed drive scale. See SIBILANCE_GUARD_DEFAULT.
+    this.sibHp = highpass(sampleRate, SIB_GUARD_HZ)
+    this.sibEnvCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_ENV_MS / 1000)))
+    this.sibAtkCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_ATTACK_MS / 1000)))
+    this.sibRelCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_RELEASE_MS / 1000)))
+    this.sibDepth = 0
+    this.resetSibState()
 
     // Per-channel DC blocker state (grown on demand)
     this.dcX = []
@@ -2054,8 +2116,16 @@ export class LA2AKernel {
     return 20 * Math.log10(g)
   }
 
+  resetSibState() {
+    this.sibX1 = 0; this.sibX2 = 0; this.sibY1 = 0; this.sibY2 = 0
+    this.sibEh = 0
+    this.sibEa = 0
+    this.sibGain = 1
+  }
+
   /** Clear every feedback path in the cell and the tube stage. */
   resetState() {
+    this.resetSibState()
     this.hpfLp = 0
     this.shelfLp = 0
     this.env = 0
@@ -2368,6 +2438,16 @@ export class LA2AKernel {
       && this.cellCurveMode !== CELL_CURVE_GAINMOD
       && this.cellCurveDriveMax > 0
     /**
+     * Sibilance guard depth, 0-1. Only meaningful while the cell shaper runs;
+     * re-entering from off starts from a clean detector (unity scale) rather
+     * than from whatever it last held. See SIBILANCE_GUARD_DEFAULT.
+     */
+    const sibWas = this.sibDepth > 0
+    this.sibDepth = this.cellShaperActive
+      ? clamp(Number.isFinite(p.sibilanceGuard) ? p.sibilanceGuard : 0, 0, 100) / 100
+      : 0
+    if (!sibWas && this.sibDepth > 0) this.resetSibState()
+    /**
      * ⚠ THE SHAPER'S THREE SEAM VALUES ONLY ADVANCE WHILE IT IS RUNNING, so
      * they go stale the moment it is switched off. Switching back on then
      * started the first block's ramps from gains and a drive belonging to
@@ -2490,6 +2570,9 @@ export class LA2AKernel {
     }
 
     let { hpfLp, shelfLp, env, gr, relPhase, rectLp } = this
+    const sibDepth = this.sibDepth
+    const sh = this.sibHp
+    let { sibX1: sX1, sibX2: sX2, sibY1: sY1, sibY2: sY2, sibEh: sEh, sibEa: sEa, sibGain: sGain } = this
 
     // Seeded on the first block; advanced once per sample HERE rather than
     // per channel, because this envelope loop is already the shared one.
@@ -2505,6 +2588,18 @@ export class LA2AKernel {
       // Sidechain frequency mapping: 80 Hz HPF, then the R37 emphasis filter.
       hpfLp += (x - hpfLp) * this.hpfLpCoef
       const hp = x - hpfLp
+
+      if (sibDepth > 0) {
+        const h = sh.b0 * x + sh.b1 * sX1 + sh.b2 * sX2 - sh.a1 * sY1 - sh.a2 * sY2
+        sX2 = sX1; sX1 = x; sY2 = sY1; sY1 = h
+        sEh += (h * h - sEh) * this.sibEnvCoef
+        sEa += (x * x - sEa) * this.sibEnvCoef
+        const t = sEa > 1e-12
+          ? clamp((sEh / sEa - SIB_GUARD_RATIO_LO) / (SIB_GUARD_RATIO_HI - SIB_GUARD_RATIO_LO), 0, 1)
+          : 0
+        const target = 1 - sibDepth * t * t * (3 - 2 * t)
+        sGain += (target - sGain) * (target < sGain ? this.sibAtkCoef : this.sibRelCoef)
+      }
       // Split at the corner and attenuate only the low half. Run
       // unconditionally rather than skipped at r37 100: it is algebraically
       // the identity there (lowGain 1 sums the two halves back to hp), and
@@ -2648,6 +2743,7 @@ export class LA2AKernel {
         const comp = preG > 0 ? Math.min(1 / preG, this.cellCompMax) : 1
         const d = this.cellCurveDriveMax * comp
           * (1 - Math.exp(-grNow / this.cellModTauDb))
+          * (sibDepth > 0 ? sGain : 1)
         cellDriveRaw[i] = d
         if (this.oversampleOn) {
           cellPreG[i] = this.preGainDelay.push(preG)
@@ -2664,6 +2760,10 @@ export class LA2AKernel {
 
     this.rectLp = rectLp
     this.hpfLp = hpfLp
+    if (sibDepth > 0) {
+      this.sibX1 = sX1; this.sibX2 = sX2; this.sibY1 = sY1; this.sibY2 = sY2
+      this.sibEh = sEh; this.sibEa = sEa; this.sibGain = sGain
+    }
     this.shelfLp = shelfLp
     this.env = env
     this.gr = gr
