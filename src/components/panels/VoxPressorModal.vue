@@ -61,7 +61,7 @@ const SPEED_OPTIONS = [
 // BENCH: the Parallel stage's compressor. 1176 ships; the LA-2A is the A/B.
 const PARALLEL_COMP_OPTIONS = [
   { value: '1176', label: '1176', title: 'A fast 4:1 1176 copy (New York compression)' },
-  { value: 'la2a', label: 'LA-2A', title: 'An LA-2A copy, Peak Reduction 60 — same detector, mix law, restore and limiter' },
+  { value: 'la2a', label: 'LA-2A', title: 'An LA-2A copy voiced as an LA Vintage 2A slot: Peak Reduction 50, its own detector, aligned on the file — the same mix law, restore and limiter' },
 ]
 
 // BENCH: LA Vintage 2A's own Lookahead on the Body stage. Off ships.

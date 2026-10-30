@@ -326,18 +326,43 @@ loudness, energy above 5 kHz +0.63 → +0.49 → +0.46; Greenberg +4.81 → +5.8
 +6.50, above 5 kHz +5.21 → +6.01 → +6.59. Peak on the source's throughout.
 
 **BENCH A/B — 1176 vs LA-2A** (`parallelComp`, owner, October 2026: "I let
-you talk me out of using the LA-2A on the parallel stage twice now"). The
-owner's original proposal stays selectable: a bare LA Vintage 2A at Peak
-Reduction 60, with EVERYTHING ELSE SHARED — the `ParallelDetector`, alignment,
-the LA-2A mix law (its own straight blend; the makeup on its Gain, iterated
-because the valve follows it), the peak restore, the limiter, and the latency,
-so switching never moves the audio. 1176 ships until the audition decides.
-Measured in the chain (de-esser output, Parallel 30 %, change in level / above
-5 kHz vs Parallel off): LA-2A PR 40–80 Messy −0.17 to 0.00 / −0.28 to −0.33 dB,
-Greenberg −0.13 to +0.13 / +0.14 to +0.35; 1176 Messy +0.98 / −0.14, Greenberg
-+1.00 / +0.80. The LA-2A copy is of a voice Body's LA-2A has already leveled,
-so it adds tone, not level. ⚠ THE A/B IS ~1 dB APART IN LEVEL, which biases an
-ear toward the 1176: trim Output to match. The Parallel GR meter reads either.
+you talk me out of using the LA-2A on the parallel stage twice now"). Both
+share the LA-2A mix law, the peak restore, the limiter and the latency, so
+switching never moves the audio. 1176 ships until the audition decides.
+
+⚠⚠ **THE LA-2A IS VOICED AS AN LA VINTAGE 2A CHAIN SLOT, NOT AS THE 1176.**
+The first build gave it the 1176's sibilance-weighted detector, Peak
+Reduction 60 and alignment on the de-esser's output. The owner compared it
+(Mix 50–75, Density 0) against a plain LA Vintage 2A slot after VoxPressor at
+PR 50 / Mix 50: "the latter sounds much better". On the owner's clips the three
+differences are the whole gap (Mix 50, change vs Parallel off; level / above
+5 kHz / average wet GR):
+
+| | Messy and Bright | David Greenberg |
+|---|---|---|
+| Chain slot (preview) | −0.19 / +1.09 / 3.6 dB | −0.03 / +1.53 / 4.9 dB |
+| VoxPressor LA-2A, first build | −0.15 / −0.54 / 5.2 | +0.02 / +0.49 / 5.6 |
+| + Peak Reduction 50 | −0.07 / −0.53 / 3.0 | +0.11 / +0.42 / 3.0 |
+| + its own detector | −0.19 / +0.80 / 2.6 | +0.06 / +0.98 / 2.7 |
+| + aligned on the source | −0.23 / +1.07 / 3.6 | −0.06 / +1.51 / 4.9 |
+
+- **The detector.** The sibilance emphasis is right for the 1176, whose fast
+  release lets go after an "s". An opto's release is seconds long, so every
+  "s" held the copy down through the vowels after it (peak GR 12.5 dB against
+  the slot's 8.0) and the copy came out DULL. The LA-2A now listens through its
+  own detector (mono, its 80 Hz side-chain HPF, R37).
+- **Peak Reduction 50**, the slot's.
+- **Aligned on the source** (the file's `alignDb`), which is what the slot's
+  PREVIEW does — it measures the unprocessed file. ⚠ A chain slot's APPLY
+  aligns on its running input instead (the chain's rule, CLAUDE.md), which for
+  a slot after VoxPressor is the core's made-up output, 2.4–4.8 dB hotter: it
+  would have driven the cell ~1 dB softer (avg GR 2.6 / 2.7) than what the
+  owner previewed. VoxPressor's stage uses the source in both.
+
+Matched, the stage renders the slot's preview within 0.03–0.08 dB of level and
+0.01–0.03 dB above 5 kHz at Mix 50 and 75, the difference 30–34 dB under the
+output. What the LA-2A adds is top end and density, not level (−0.2 to 0 dB at
+Mix 50 against the 1176's ~+1), so the A/B is ~1 dB apart: match it with Output.
 
 ⚠ **Overlap with Density.** Both add density: Parallel by dynamic upward
 compression, Density by a static curve with odd harmonics. Different

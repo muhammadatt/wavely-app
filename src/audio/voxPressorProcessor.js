@@ -217,24 +217,37 @@ export function parallelFetParams(p) {
 
 /**
  * BENCH A/B: the Parallel stage's compressor (`parallelComp`). '1176' ships;
- * 'la2a' is the owner's original proposal, a bare LA Vintage 2A, kept on the
- * bench to audition against it. EVERYTHING ELSE IS SHARED so the A/B is about
- * the compressor alone: the same `ParallelDetector` (sibilance +15 dB), the
- * same alignment, the same LA-2A mix law (the kernel's own straight blend
- * against its delayed dry, wet makeup — here its Gain, before the valve —
- * solved on the blend at the 99.9th percentile), the same peak restore and
- * limiter. Both cost the oversampler's 50 samples, so switching never moves
- * the audio.
+ * 'la2a' is the owner's original proposal, a bare LA Vintage 2A. Both share the
+ * LA-2A mix law (the kernel's own straight blend against its delayed dry, wet
+ * makeup solved on the blend at the 99.9th percentile — for the LA-2A its
+ * Gain, before the valve), the peak restore and the limiter, and both cost the
+ * oversampler's 50 samples, so switching never moves the audio.
  *
- * Peak Reduction 60 (`PARALLEL_LA2A_PR`). ⚠ UNLIKE THE 1176'S INPUT 40 THIS IS
- * NOT A DENSITY PEAK, BECAUSE THERE IS NONE: on the de-esser's output at the
- * defaults (Parallel 30 %), PR 40–80 moved the level −0.17 to +0.13 dB on the
- * owner's two clips against the 1176's +0.98 / +1.00 — the copy is of a voice
- * Body's LA-2A has already leveled. 60 is where it peaked on the raw clips.
- * The A/B is therefore ~1 dB apart in level; match it by ear with Output.
+ * ⚠⚠ THE LA-2A IS VOICED AS LA VINTAGE 2A IN THE PLUGIN CHAIN, NOT AS THE 1176
+ * STAGE. The first build gave it everything the 1176 has — the sibilance-
+ * weighted `ParallelDetector`, Peak Reduction 60, alignment on the de-esser's
+ * output — and the owner compared it, at Mix 50–75, against a plain LA Vintage
+ * 2A slot after VoxPressor (PR 50, Mix 50): "the latter sounds much better".
+ * Measured on the owner's clips, all three differences matter and together are
+ * the whole gap (recorded in the spec §4.4):
+ * - THE DETECTOR. The emphasis is right for the 1176, whose fast release lets
+ *   go after an "s"; an opto's release is seconds long, so every "s" held the
+ *   copy down through the vowels after it (peak GR 12.5 dB against 8.0), and
+ *   the copy came out DULL (above 5 kHz −0.54 dB vs +1.09 for the slot). The
+ *   LA-2A takes its own detector — mono, its 80 Hz side-chain HPF and R37.
+ * - PEAK REDUCTION 50, the slot's (60 averaged 5.2 dB of reduction vs 3.6).
+ * - ALIGNMENT ON THE SOURCE, as the slot's preview does (it measures the
+ *   unprocessed file), i.e. the file's own `alignDb`, NOT the de-esser's
+ *   output: the core's makeups make that 2.4–4.8 dB hotter, so aligning on it
+ *   drove the cell 1 dB softer on average than what the owner heard.
+ * With all three the stage renders the slot's preview to within 0.03–0.08 dB
+ * of level and 0.01–0.03 dB above 5 kHz at Mix 50 and 75 on both clips, the
+ * difference signal 30–34 dB under the output (the restore + limiter in place
+ * of the slot's tanh ceiling is most of it). It does NOT add level — −0.2 to
+ * 0 dB at Mix 50, against the 1176's ~+1 — it adds top end and density.
  */
 export const PARALLEL_COMPS = Object.freeze(['1176', 'la2a'])
-export const PARALLEL_LA2A_PR = 60
+export const PARALLEL_LA2A_PR = 50
 export const PARALLEL_LA2A_PATCH = Object.freeze({
   mode: 'compress',
   lookaheadMs: 0,
@@ -681,9 +694,10 @@ export class VoxPressorKernel {
     // ── PARALLEL ── (into mid: the 1176's dry line reads its input). Its
     // detector hears sibilance shelved UP (`ParallelDetector`).
     if (this.parallelOn) {
-      const sc = this.parallelDetector.process(outputChannels, n)
-      const comp = this.parallelComp === 'la2a' ? this.parallelLa2a : this.parallelFet
-      comp.process(outputChannels, mid, n, sc)
+      // The LA-2A listens through its own detector (see `PARALLEL_COMPS`).
+      const la2a = this.parallelComp === 'la2a'
+      const comp = la2a ? this.parallelLa2a : this.parallelFet
+      comp.process(outputChannels, mid, n, la2a ? undefined : this.parallelDetector.process(outputChannels, n))
       for (let ch = 0; ch < nOut; ch++) outputChannels[ch].set(mid[ch])
       const gr = comp.grDb
       if (gr > this.parallelGrHold) this.parallelGrHold = gr

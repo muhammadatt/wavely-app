@@ -311,7 +311,12 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   // ⚠ Not `computeFET1176AutoMakeupPlan`: that renders without the sidechain,
   // and this 1176 listens through `ParallelDetector`.
   if (p.parallelMix > 0) {
-    out.parallelAlignDb = alignDbForRms(gatedRmsOfChannels(afterDeEss, sampleRate))
+    // The LA-2A aligns on the SOURCE (the file's `alignDb`, which reaches the
+    // kernel as `bodyAlignDb`), as an LA Vintage 2A slot's preview does — see
+    // `PARALLEL_COMPS`. The 1176 aligns on what it hears.
+    out.parallelAlignDb = parallelCompOf(p) === 'la2a' && Number.isFinite(p.bodyAlignDb)
+      ? p.bodyAlignDb
+      : alignDbForRms(gatedRmsOfChannels(afterDeEss, sampleRate))
     const at = { ...p, voiceF0Hz, parallelAlignDb: out.parallelAlignDb }
     const solved = parallelCompOf(p) === 'la2a'
       ? parallelLa2aSolve(afterDeEss, sampleRate, at)
@@ -382,9 +387,8 @@ function parallelFetSolve(channels, sampleRate, p) {
  */
 function parallelLa2aSolve(channels, sampleRate, p) {
   const base = { ...parallelLa2aParams(p), oversample: false }
-  const det = new ParallelDetector(sampleRate)
-  const sc = parallelDetectorSignal(det, channels)
-  const render = (chs, extra) => renderLa2a(chs, sampleRate, { ...base, ...extra }, sc)
+  // Its own detector, as the kernel runs it (no sidechain).
+  const render = (chs, extra) => renderLa2a(chs, sampleRate, { ...base, ...extra })
   const plan = solveMakeupPlan({
     channelData: channels, render, gainKey: 'gainDb', mixKey: 'mix', mix: base.mix,
     reference: 'percentile', minDb: -24, maxDb: 24,
@@ -393,24 +397,14 @@ function parallelLa2aSolve(channels, sampleRate, p) {
   return { makeupDb: plan.makeupDb, blend: render(channels, { gainDb: plan.makeupDb }) }
 }
 
-function parallelDetectorSignal(det, channels) {
-  const len = channels[0].length
-  const sc = new Float32Array(len)
-  for (let o = 0; o < len; o += 128) {
-    const n = Math.min(128, len - o)
-    sc.set(det.process(channels.map(c => c.subarray(o, o + n)), n), o)
-  }
-  return sc
-}
-
-function renderLa2a(channels, sampleRate, params, sc) {
+function renderLa2a(channels, sampleRate, params) {
   const k = new LA2AKernel(sampleRate)
   k.setParams(params)
   const len = channels[0].length
   const out = channels.map(() => new Float32Array(len))
   for (let o = 0; o < len; o += 128) {
     const n = Math.min(128, len - o)
-    k.process(channels.map(c => c.subarray(o, o + n)), out.map(c => c.subarray(o, o + n)), n, sc.subarray(o, o + n))
+    k.process(channels.map(c => c.subarray(o, o + n)), out.map(c => c.subarray(o, o + n)), n)
   }
   return out
 }
