@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { applySaturationBenchRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
@@ -287,8 +287,6 @@ const copies = pluginCopies((copy, life) => {
       id: saturationBenchEffect.id,
       windowId,
       label: 'Saturation Workbench',
-      // The reference peaks and level offset are measured, not set.
-      settingsKey: () => settingsKeyOf(currentParams(), ['refPeaks', 'levelOffset']),
       dispose: life.dispose,
       isActive: () => sbPreview.value,
       setActive: (on) => { if (sbPreview.value !== on) togglePreview() },

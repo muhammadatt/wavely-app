@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { applyManualEqRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -311,7 +311,6 @@ export function createEqInstance({
       id: effect.id,
       windowId,
       label,
-      settingsKey: () => settingsKeyOf({ bands: bands.value, inputTrim: inputTrim.value, outputTrim: outputTrim.value }),
       dispose: life?.dispose,
       isActive: () => eqPreview.value,
       setActive: (on) => { if (eqPreview.value !== on) togglePreview() },

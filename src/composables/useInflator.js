@@ -5,7 +5,7 @@ import { applyInflatorRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { inflatorEffect as soloInflatorEffect, INFLATOR_DEFAULTS } from '../audio/effects/inflator.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
-import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -189,7 +189,6 @@ const copies = pluginCopies((copy, life) => {
       id: inflatorEffect.id,
       windowId,
       label: 'Cambridge Inflator',
-      settingsKey: () => settingsKeyOf(currentParams()),
       dispose: life.dispose,
       isActive: () => inPreview.value,
       setActive: (on) => { if (inPreview.value !== on) togglePreview() },

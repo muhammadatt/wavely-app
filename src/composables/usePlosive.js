@@ -1,7 +1,7 @@
 import { reactive, ref, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { applyPlosiveRegion, computePeakCache } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
@@ -251,7 +251,6 @@ const copies = pluginCopies((copy, life) => {
       id: plosiveEffect.id,
       windowId,
       label: 'Plosive Tamer',
-      settingsKey: () => settingsKeyOf({ ...plParams }, [...MEASURED]),
       dispose: life.dispose,
       isActive: () => plPreview.value,
       setActive: (on) => { if (plPreview.value !== on) togglePreview() },

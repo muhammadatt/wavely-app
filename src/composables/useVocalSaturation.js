@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { applyVocalSatRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
@@ -199,7 +199,6 @@ const copies = pluginCopies((copy, life) => {
       id: vocalSatEffect.id,
       windowId,
       label: 'Tube Saturation',
-      settingsKey: () => settingsKeyOf(currentParams()),
       dispose: life.dispose,
       isActive: () => vsPreview.value,
       setActive: (on) => { if (vsPreview.value !== on) togglePreview() },

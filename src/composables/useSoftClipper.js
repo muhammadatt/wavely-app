@@ -2,7 +2,7 @@ import { computed, ref, watch } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin, settingsKeyOf, chainMeasureInput, chainCalibrationRevision } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
   applySoftClipperRegion, computePeakCache, computeSoftClipperCeiling,
@@ -373,15 +373,6 @@ const copies = pluginCopies((copy, life) => {
      * trim is the kernel's final multiply, so the answer is exact rather than
      * approached. See computeSoftClipperAutoMakeupDb.
      */
-    /**
-     * What the PREVIEW measures: the segments this copy hears — its calibrated
-     * input when it is a chain slot downstream of live slots, else the file.
-     * See `chainMeasureInput`. Apply passes its own segments explicitly.
-     */
-    function previewSegments() {
-      return chainMeasureInput(softClipperEffect.id) ?? state.segments
-    }
-
     async function refreshAutoMakeup() {
       if (!autoMakeup.value || !clipperPreview.value) return
       if (!state.selection || !state.currentFile) return
@@ -391,7 +382,7 @@ const copies = pluginCopies((copy, life) => {
       autoMakeupBusy.value = true
       try {
         const makeupDb = await computeSoftClipperAutoMakeup(
-          previewSegments(), start, end,
+          state.segments, start, end,
           measurementParams(),
           state.currentFile.sampleRate, state.currentFile.channels,
         )
@@ -459,7 +450,7 @@ const copies = pluginCopies((copy, life) => {
       ceilingBusy.value = true
       try {
         const measured = await computeSoftClipperCeiling(
-          previewSegments(), start, end, preset.percentile,
+          state.segments, start, end, preset.percentile,
           state.currentFile.sampleRate, state.currentFile.channels,
         )
         if (seq !== ceilingSeq) return // a newer measurement is already in flight
@@ -493,7 +484,7 @@ const copies = pluginCopies((copy, life) => {
       try {
         const measured = await Promise.all(CEILING_PRESETS.map(preset =>
           computeSoftClipperCeiling(
-            previewSegments(), start, end, preset.percentile,
+            state.segments, start, end, preset.percentile,
             state.currentFile.sampleRate, state.currentFile.channels,
           )))
         if (seq !== choicesSeq) return
@@ -734,10 +725,6 @@ const copies = pluginCopies((copy, life) => {
         watch(() => state.selection, () => {
           if (clipperPreview.value || isOpen(windowId)) scheduleCeilingPreset()
         }, { deep: true })
-        // A chain calibration landed: re-measure on the input it handed us.
-        watch(chainCalibrationRevision, () => {
-          if (clipperPreview.value || isOpen(windowId)) scheduleCeilingPreset()
-        })
       })
     }
 
@@ -745,8 +732,6 @@ const copies = pluginCopies((copy, life) => {
       id: softClipperEffect.id,
       windowId,
       label: 'Soft Clipper',
-      // The output trim is measured while AUTO makeup owns it.
-      settingsKey: () => settingsKeyOf({ ...currentParams(), autoMakeup: autoMakeup.value }, autoMakeup.value ? ['outputTrimDb'] : []),
       dispose: life.dispose,
       isActive: () => clipperPreview.value,
       setActive: (on) => { if (clipperPreview.value !== on) togglePreview() },

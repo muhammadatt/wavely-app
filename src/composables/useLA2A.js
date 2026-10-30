@@ -4,7 +4,7 @@ import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin, settingsKeyOf, chainMeasureInput, chainCalibrationRevision } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { applyLA2ARegion, computeLA2AAutoMakeup, computePeakCache } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
@@ -377,16 +377,7 @@ const copies = pluginCopies((copy, life) => {
       return state.currentFile ? `${appState.activeDocumentId}:${state.revision}` : null
     }
 
-    /**
-     * What the PREVIEW measures: the segments this copy hears — its calibrated
-     * input when it is a chain slot downstream of live slots, else the file.
-     * See `chainMeasureInput`. Apply passes its own segments explicitly.
-     */
-    function previewSegments() {
-      return chainMeasureInput(la2aEffect.id) ?? state.segments
-    }
-
-    function refreshInputAlign(segments = previewSegments()) {
+    function refreshInputAlign(segments = state.segments) {
       if (!state.currentFile) return
       // `segments` is the document's timeline, or — during a chain apply — the
       // chain's running result, which is no revision of the document: always
@@ -459,7 +450,7 @@ const copies = pluginCopies((copy, life) => {
      * number so a fast knob drag can't have an older measurement land after
      * a newer one.
      */
-    async function refreshAutoMakeup(segments = previewSegments()) {
+    async function refreshAutoMakeup(segments = state.segments) {
       /**
        * ⚠ ALIGNMENT IS BROUGHT UP TO DATE BEFORE THE AUTO GUARD, NOT AFTER IT.
        * It sat below and that was a second staleness hole with nothing to do with
@@ -705,10 +696,6 @@ const copies = pluginCopies((copy, life) => {
         watch(() => state.selection, () => {
           if (la2aPreview.value || isOpen(windowId)) refreshAutoMakeup()
         }, { deep: true })
-        // A chain calibration landed: re-measure on the input it handed us.
-        watch(chainCalibrationRevision, () => {
-          if (la2aPreview.value || isOpen(windowId)) refreshAutoMakeup()
-        })
       })
     }
 
@@ -716,11 +703,6 @@ const copies = pluginCopies((copy, life) => {
       id: la2aEffect.id,
       windowId,
       label: 'LA Vintage 2A',
-      // User settings only: alignment and Gain while AUTO owns them, and the ceiling, are measured.
-      settingsKey: () => settingsKeyOf(
-        { ...currentParams(), inputAuto: la2aInputAuto.value, autoMakeup: la2aAutoMakeup.value },
-        ['ceilingDb', 'ceilingKneeDb', ...(la2aInputAuto.value ? ['inputAlignDb'] : []), ...(la2aAutoMakeup.value ? ['gain'] : [])],
-      ),
       dispose: life.dispose,
       isActive: () => la2aPreview.value,
       setActive: (on) => { if (la2aPreview.value !== on) togglePreview() },

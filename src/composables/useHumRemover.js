@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
   analyzeHumRegion,
@@ -274,7 +274,6 @@ const copies = pluginCopies((copy, life) => {
       id: humNotchEffect.id,
       windowId,
       label: 'Hum Remover',
-      settingsKey: () => settingsKeyOf(currentParams()),
       dispose: life.dispose,
       isActive: () => humPreview.value,
       setActive: (on) => { if (humPreview.value !== on) togglePreview() },

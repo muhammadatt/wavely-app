@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { applyHFSoftenerRegion, computePeakCache, measureHFSoftenerAutoAir } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
@@ -512,8 +512,6 @@ const copies = pluginCopies((copy, life) => {
       id: hfSoftenerEffect.id,
       windowId,
       label: 'HF Softener',
-      // User settings only: the level offset is measured, and Air too while AUTO owns it.
-      settingsKey: () => settingsKeyOf(currentParams(), hfComp.value ? ['levelOffset', 'air'] : ['levelOffset']),
       dispose: life.dispose,
       isActive: () => hfPreview.value,
       setActive: (on) => { if (hfPreview.value !== on) togglePreview() },

@@ -2,7 +2,7 @@ import { ref, watch } from 'vue'
 import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin, settingsKeyOf, chainMeasureInput, chainCalibrationRevision } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { applySchepsRegion, computeSchepsTrim, computePeakCache } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
@@ -255,16 +255,7 @@ const copies = pluginCopies((copy, life) => {
      * ⚠ AND BEFORE THE TRIM SOLVE, which consumes it — the trim renders the wet
      * path, so a stale offset means levelling the wrong compressor.
      */
-    /**
-     * What the PREVIEW measures: the segments this copy hears — its calibrated
-     * input when it is a chain slot downstream of live slots, else the file.
-     * See `chainMeasureInput`. Apply passes its own segments explicitly.
-     */
-    function previewSegments() {
-      return chainMeasureInput(schepsEffect.id) ?? state.segments
-    }
-
-    function refreshInputAlign(segments = previewSegments()) {
+    function refreshInputAlign(segments = state.segments) {
       if (!state.currentFile) return
       // `segments` is the document's timeline, or — during a chain apply — the
       // chain's running result, which is no revision of the document: always
@@ -295,8 +286,7 @@ const copies = pluginCopies((copy, life) => {
        * offset in both cases. It is cheap and idempotent: keyed on the timeline,
        * so repeat calls cost a string compare.
        */
-      const segments = previewSegments()
-      refreshInputAlign(segments)
+      refreshInputAlign()
       if (!schepsAutoTrim.value || !state.selection || !state.currentFile) return
 
       const { start, end } = state.selection
@@ -306,7 +296,7 @@ const copies = pluginCopies((copy, life) => {
         const {
           trimDb, correlation, densityDb, ceilingDb, ceilingKneeDb,
         } = await computeSchepsTrim(
-          segments, start, end,
+          state.segments, start, end,
           measurementParams(),
           state.currentFile.sampleRate, state.currentFile.channels,
         )
@@ -494,10 +484,6 @@ const copies = pluginCopies((copy, life) => {
         watch(() => state.selection, () => {
           if (schepsPreview.value || isOpen(windowId)) refreshAutoTrim()
         }, { deep: true })
-        // A chain calibration landed: re-measure on the input it handed us.
-        watch(chainCalibrationRevision, () => {
-          if (schepsPreview.value || isOpen(windowId)) refreshAutoTrim()
-        })
       })
     }
 
@@ -505,11 +491,6 @@ const copies = pluginCopies((copy, life) => {
       id: schepsEffect.id,
       windowId,
       label: 'Scheps Parallel',
-      // User settings only: the trim (while AUTO), correlation, density, ceiling and alignment are measured.
-      settingsKey: () => settingsKeyOf(
-        { ...currentParams(), autoTrim: schepsAutoTrim.value },
-        ['correlation', 'densityDb', 'ceilingDb', 'ceilingKneeDb', 'inputAlignDb', ...(schepsAutoTrim.value ? ['wetTrimDb'] : [])],
-      ),
       dispose: life.dispose,
       isActive: () => schepsPreview.value,
       setActive: (on) => { if (schepsPreview.value !== on) togglePreview() },

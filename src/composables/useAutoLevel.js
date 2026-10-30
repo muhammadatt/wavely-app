@@ -2,7 +2,7 @@ import { computed, ref, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { useEntitlements } from './useEntitlements.js'
-import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { analyzeVoiceActivity } from '../api/analyze.js'
 import { applyAutoLevelRegion, computePeakCache, renderRegionToBuffer } from '../audio/processing.js'
@@ -410,7 +410,6 @@ const copies = pluginCopies((copy, life) => {
       id: autoLevelerEffect.id,
       windowId,
       label: 'Auto Leveler',
-      settingsKey: () => settingsKeyOf({ ...params.value }),
       dispose: life.dispose,
       isActive: () => preview.value,
       setActive: (on) => { if (preview.value !== on) togglePreview() },

@@ -1,7 +1,7 @@
 import { reactive, ref, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
   applyPhatassRegion, cancelPhatassOutputMakeup, cancelPhatassTapeMakeup, computePeakCache,
@@ -615,7 +615,6 @@ const copies = pluginCopies((copy, life) => {
       id: phatassEffect.id,
       windowId,
       label: 'PHAT*SS',
-      settingsKey: () => settingsKeyOf({ ...phParams }, [...MEASURED]),
       dispose: life.dispose,
       isActive: () => phPreview.value,
       setActive: (on) => { if (phPreview.value !== on) togglePreview() },
