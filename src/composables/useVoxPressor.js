@@ -1,7 +1,7 @@
 import { ref, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin } from './usePluginChain.js'
+import { registerChainPlugin, settingsKeyOf, chainMeasureInput, chainCalibrationRevision } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
   applyVoxPressorRegion, computeVoxPressorMeasure, computeVoxPressorExact, computePeakCache,
@@ -257,13 +257,23 @@ const copies = pluginCopies((copy, life) => {
       return end > 0 ? { start: 0, end } : null
     }
 
+    /**
+     * What the PREVIEW measures: the segments this copy hears — its calibrated
+     * input when it is a chain slot downstream of live slots, else the file.
+     * See `chainMeasureInput`. Apply passes its own segments explicitly.
+     */
+    function previewSegments() {
+      return chainMeasureInput(effect.id) ?? state.segments
+    }
+
     function refreshSolve() {
       if (!state.currentFile) return null
-      ensureAlignment(state.segments)
+      const segments = previewSegments()
+      ensureAlignment(segments)
       const region = previewRegion()
       if (!region) return null
       const { start, end } = region
-      inFlight = solve(state.segments, start, end).catch((err) => {
+      inFlight = solve(segments, start, end).catch((err) => {
         console.error('VoxPressor measurement failed:', err)
         return null
       })
@@ -425,6 +435,10 @@ const copies = pluginCopies((copy, life) => {
         watch(() => state.selection, () => {
           if (voxPreview.value || isOpen(windowId)) scheduleSolve()
         }, { deep: true })
+        // A chain calibration landed: re-measure on the input it handed us.
+        watch(chainCalibrationRevision, () => {
+          if (voxPreview.value || isOpen(windowId)) scheduleSolve()
+        })
         // A different file, or an edit to this one: the measurements describe
         // audio that is no longer there. Re-align at once (cheap), and drop the
         // makeups and ceilings — another file's makeup would lift this one by
@@ -456,6 +470,8 @@ const copies = pluginCopies((copy, life) => {
       id: effect.id,
       windowId,
       label: 'VoxPressor',
+      // The knobs only: alignment and everything `measureVoxPressor` measures are excluded.
+      settingsKey: () => settingsKeyOf(currentParams(), ['alignDb', ...MEASURED]),
       dispose: life.dispose,
       isActive: () => voxPreview.value,
       setActive: (on) => { if (voxPreview.value !== on) togglePreview() },
