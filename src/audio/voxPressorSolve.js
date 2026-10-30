@@ -184,8 +184,10 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
     peaksMakeupDb: 0, peaksCeilingDb: null, bodyMakeupDb: 0, bodyCeilingDb: null,
     voiceF0Hz,
     // The stages after Body are measured offline on their own inputs below;
-    // the Peaks / Body renders must not include them.
-    deEssOn: false, parallelOn: false, density: 0,
+    // the Peaks / Body renders must not include them. ⚠ That includes the
+    // parallel limiter, which holds `sourcePeakDb` whether Parallel is on or
+    // not: left set, a previous region's peak limited these renders.
+    deEssOn: false, parallelOn: false, density: 0, sourcePeakDb: null,
   }
   if (cornerHz) base.cornerHz = cornerHz
   else delete base.cornerHz
@@ -262,12 +264,17 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
       minDb: -24,
       maxDb: 24,
     })
-    out.bodyMakeupDb = last ? last.makeupDb : 0
-    out.bodyCeilingDb = ceilingDb
-    out.makeupDb = last ? restoreToCeilingDb(ceilingDb, db(peakOfChannels(limitChannels(last.out, ceilingDb, sampleRate)))) : 0
-    if (last) {
-      afterBody = limitChannels(scaleChannels(last.out, out.makeupDb), ceilingDb, sampleRate)
+    // A region whose 99.9th percentile is zero (a lone click in silence) has
+    // no makeup to solve and the plan renders nothing: render it at unity, so
+    // the meter, the restore and the stages after it still see Body's output.
+    if (!last) {
+      first = renderBody(afterPeaks, sampleRate, base, bodyAlignDb, { bodyMakeupDb: 0 }, { meter: true })
+      last = { out: first.channelData, makeupDb: 0 }
     }
+    out.bodyMakeupDb = last.makeupDb
+    out.bodyCeilingDb = ceilingDb
+    out.makeupDb = restoreToCeilingDb(ceilingDb, db(peakOfChannels(limitChannels(last.out, ceilingDb, sampleRate))))
+    afterBody = limitChannels(scaleChannels(last.out, out.makeupDb), ceilingDb, sampleRate)
     const r = first
     // Average cell reduction over the voiced blocks, from the cell's own meter
     // (one value per 128-sample kernel block).
@@ -279,7 +286,7 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
       const to = Math.min(r.bodyGr.length, Math.floor((k + 1) * per))
       for (let j = from; j < to; j++) { sum += r.bodyGr[j]; count++ }
     }
-    out.bodyDb = r && count > 0 ? sum / count : 0
+    out.bodyDb = count > 0 ? sum / count : 0
   }
 
   // ── DE-ESS ── its thresholds follow the level it HEARS: the Body stage's
@@ -467,7 +474,9 @@ function renderBody(channels, sampleRate, base, alignDb, extra = {}, opts = {}) 
 export function measureVoxPressorExact(channels, sampleRate, solved, sourcePeakDb) {
   const base = {
     ...solved, oversample: false, listen: 'off', outputDb: 0, makeupDb: 0,
-    deEssOn: false, parallelOn: false, density: 0,
+    // No parallel limiter either: it would hold the WINDOW's peak, which is
+    // what this pass exists to replace.
+    deEssOn: false, parallelOn: false, density: 0, sourcePeakDb: null,
   }
   let stage1 = channels
   let peaksMakeupDb = 0

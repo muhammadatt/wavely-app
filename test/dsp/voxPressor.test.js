@@ -549,3 +549,31 @@ test('Peaks trims a sibilant spike instead of letting it set the makeup', () => 
   assert.ok(hearing > deaf + 1, `hearing sibilance ${hearing.toFixed(2)} dB vs deaf ${deaf.toFixed(2)} dB`)
   assert.ok(hearing > 1, `the default Peaks should make the voice louder: ${hearing.toFixed(2)} dB`)
 })
+
+test('a lone click in silence still measures (its 99.9th percentile is zero)', () => {
+  // The LA-2A's makeup plan renders nothing when the input's percentile is
+  // zero; the measurement used to read the meter of a render that never ran.
+  const x = new Float32Array(SR * 4)
+  for (let i = 0; i < 40; i++) x[2 * SR + i] = 0.5 * Math.sin(Math.PI * i / 40)
+  const { r } = measure(x, { peaks: 0 })
+  assert.equal(r.bodyMakeupDb, 0)
+  assert.ok(Number.isFinite(r.bodyDb))
+  assert.ok(Number.isFinite(r.makeupDb))
+})
+
+test('the Peaks / Body renders ignore a stale source peak', () => {
+  // The parallel limiter holds `sourcePeakDb` whether Parallel is on or not,
+  // so a previous region's (lower) peak used to limit the makeup renders.
+  const x = speech.slice()
+  const kp = toKernelParams({ ...VOX_DEFAULTS, alignDb: inputAlignDbFor([x], SR), cornerHz: 70 })
+  const fresh = measureVoxPressor([x], SR, kp)
+  const stale = measureVoxPressor([x], SR, { ...kp, sourcePeakDb: db(peak(x)) - 12 })
+  for (const k of ['peaksMakeupDb', 'bodyMakeupDb', 'makeupDb', 'peaksDb', 'bodyDb']) {
+    assert.equal(stale[k], fresh[k], k)
+  }
+})
+
+test('an unmeasurable corner is sent as null, so a merging kernel resets to its default', () => {
+  assert.equal(toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, cornerHz: null }).cornerHz, null)
+  assert.equal(toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, cornerHz: 95 }).cornerHz, 95)
+})

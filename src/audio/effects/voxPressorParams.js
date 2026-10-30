@@ -166,8 +166,10 @@ export function toKernelParams(p) {
     makeupDb: Number.isFinite(p.makeupDb) ? p.makeupDb : 0,
     bodyBench: { lookaheadMs: bodyLookaheadOf(p) },
     // Measured values cross only when real, so an unmeasured panel leaves the
-    // kernel on its own defaults rather than on a NaN.
-    ...(Number.isFinite(p.cornerHz) ? { cornerHz: p.cornerHz } : {}),
+    // kernel on its own defaults rather than on a NaN. The corner is sent as
+    // null rather than left out: the live kernel MERGES params, so an absent
+    // corner kept the previous region's while a fresh Apply kernel used 80 Hz.
+    cornerHz: Number.isFinite(p.cornerHz) ? p.cornerHz : null,
     ...(Number.isFinite(p.alignDb) ? {
       peaksAlignDb: p.alignDb + peaksDriveDb(Math.max(0, Math.min(PEAKS_MAX, Number(p.peaks) || 0))),
       bodyAlignDb: p.alignDb,

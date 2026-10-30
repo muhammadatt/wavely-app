@@ -667,8 +667,8 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
  * from `regionPeakDb` — the window's peak would hold a louder passage the
  * window never saw down to it.
  *
- * @param {object} kernelParams  `toKernelParams` of the panel (cornerHz
- *   included when already measured)
+ * @param {object} kernelParams  `toKernelParams` of the panel (delete
+ *   `cornerHz` to have the voice profile measured here)
  */
 export function computeVoxPressorMeasure(segments, start, end, kernelParams, sampleRate, channels) {
   return measureInWorker(

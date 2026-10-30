@@ -20,6 +20,9 @@ export const VOX_WINDOW_ID = 'vox-pressor'
 /** Measured keys, pushed to the live node in this order — ceilings first. */
 const MEASURED = VOX_MEASURED_KEYS
 
+/** Superseded measurements an Apply retries before it gives up. */
+const APPLY_SOLVE_ATTEMPTS = 3
+
 const copies = pluginCopies((copy, life) => {
   const effect = effectForCopy(soloEffect, copy)
   const windowId = idForCopy(VOX_WINDOW_ID, copy)
@@ -223,7 +226,7 @@ const copies = pluginCopies((copy, life) => {
         const r = await computeVoxPressorMeasure(
           segments, start, end, kp, state.currentFile.sampleRate, state.currentFile.channels,
         )
-        if (seq !== solveSeq) return false
+        if (seq !== solveSeq) return null
         cornerFor = regionKey
         const next = {}
         for (const k of MEASURED) next[k] = r[k] ?? null
@@ -233,7 +236,7 @@ const copies = pluginCopies((copy, life) => {
           peaksDb: r.peaksDb, peaksBodyDb: r.peaksBodyDb, bodyDb: r.bodyDb, peaksRippleDb: r.peaksRippleDb,
         }
         solvedFor = key
-        return true
+        return next
       } finally {
         if (seq === solveSeq) voxBusy.value = false
       }
@@ -262,7 +265,7 @@ const copies = pluginCopies((copy, life) => {
       const { start, end } = region
       inFlight = solve(state.segments, start, end).catch((err) => {
         console.error('VoxPressor measurement failed:', err)
-        return false
+        return null
       })
       return inFlight
     }
@@ -333,14 +336,26 @@ const copies = pluginCopies((copy, life) => {
     }
 
     /**
-     * Make sure the measured values belong to `segments` and the current
-     * knobs before rendering: re-measure unless the last measurement is exactly this.
+     * The params to render `segments` with: measured for exactly them and the
+     * current knobs — re-measured unless the last measurement is exactly this.
+     *
+     * ⚠ A PREVIEW MEASUREMENT CAN SUPERSEDE THIS ONE (a throttled pass fires
+     * mid-apply and bumps `solveSeq`), and it measures the DOCUMENT's region,
+     * not a chain's running segments. So a superseded solve is retried, never
+     * rendered past, and the render takes the params returned here rather than
+     * whatever the panel's state holds by the time it starts.
      */
     async function prepareApply(segments, start, end) {
       ensureAlignment(segments)
-      if (solvedFor !== solveKey(segments, start, end) || segments !== state.segments) {
-        await solve(segments, start, end)
+      let measured = solvedFor === solveKey(segments, start, end) && segments === state.segments
+        ? { ...voxMeasured.value } : null
+      for (let attempt = 0; !measured; attempt++) {
+        if (attempt === APPLY_SOLVE_ATTEMPTS) throw new Error('VoxPressor measurement kept being superseded')
+        const r = await solve(segments, start, end)
+        // A copy: the exact pass below must not write into the panel's state.
+        measured = r && { ...r }
       }
+      const params = () => ({ ...currentParams(), ...measured })
       /**
        * ⚠ EXACT RESTORES FOR A REGION LONGER THAN THE SOLVE'S WINDOW. Each
        * stage restores its peak to its ceiling, and the window's peak is only
@@ -350,19 +365,21 @@ const copies = pluginCopies((copy, life) => {
        */
       if (!analysedWholeRegion(start, end)) {
         const exact = await computeVoxPressorExact(
-          segments, start, end, toKernelParams(currentParams()),
+          segments, start, end, toKernelParams(params()),
           state.currentFile.sampleRate, state.currentFile.channels,
         )
-        const next = { ...voxMeasured.value }
-        for (const k of MEASURED) if (k in exact) next[k] = exact[k]
-        voxMeasured.value = next
-        for (const k of MEASURED) pushParam(k, next[k])
+        for (const k of MEASURED) if (k in exact) measured[k] = exact[k]
+        if (segments === state.segments) {
+          voxMeasured.value = { ...voxMeasured.value, ...measured }
+          for (const k of MEASURED) pushParam(k, measured[k])
+        }
       }
+      return params()
     }
 
-    function renderRegion(segments, start, end) {
+    function renderRegion(segments, start, end, params) {
       return applyVoxPressorRegion(
-        segments, start, end, currentParams(),
+        segments, start, end, params,
         state.currentFile.sampleRate, state.currentFile.channels,
       )
     }
@@ -374,9 +391,9 @@ const copies = pluginCopies((copy, life) => {
       const wasPreviewing = voxPreview.value
       startProcessing('Applying VoxPressor...', pin.docId)
       try {
-        await prepareApply(state.segments, start, end)
+        const params = await prepareApply(state.segments, start, end)
         if (wasPreviewing) togglePreview()
-        const buffer = await renderRegion(state.segments, start, end)
+        const buffer = await renderRegion(state.segments, start, end, params)
         pin.check()
         const bufferId = replaceRegion(start, end, buffer, 'VoxPressor', pin.docId)
         setPeakCache(bufferId, await computePeakCache(buffer, 256))
@@ -406,8 +423,11 @@ const copies = pluginCopies((copy, life) => {
         // makeups and ceilings — another file's makeup would lift this one by
         // several dB, and its ceiling would limit at the wrong peak — until the
         // new measurement lands.
+        // ⚠ The invalidation runs even while the panel is shut and bypassed:
+        // otherwise reopening it on another file played that file through the
+        // previous one's makeups until the measurement landed. Only the
+        // re-measuring waits for the panel.
         watch(() => `${appState.activeDocumentId}:${state.revision}`, () => {
-          if (!(voxPreview.value || isOpen(windowId))) return
           const cleared = {
             peaksCeilingDb: null, bodyCeilingDb: null, sourcePeakDb: null,
             deEssLevelOffsetDb: null, schepsAlignDb: null,
@@ -417,6 +437,8 @@ const copies = pluginCopies((copy, life) => {
           for (const [k, v] of Object.entries(cleared)) pushParam(k, v)
           voxReadout.value = null
           solveSeq++
+          voxBusy.value = false
+          if (!(voxPreview.value || isOpen(windowId))) return
           if (state.currentFile) ensureAlignment(state.segments)
           scheduleSolve()
         })
@@ -432,8 +454,7 @@ const copies = pluginCopies((copy, life) => {
       setActive: (on) => { if (voxPreview.value !== on) togglePreview() },
       // Measured against the chain's running segments, never the document's.
       render: async (segments, start, end) => {
-        await prepareApply(segments, start, end)
-        return renderRegion(segments, start, end)
+        return renderRegion(segments, start, end, await prepareApply(segments, start, end))
       },
       resume: () => startMeters(initChain()),
       suspend: teardown,
