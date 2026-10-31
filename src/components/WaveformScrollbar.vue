@@ -78,16 +78,17 @@ let dragStartLeftPx = 0
 // thumb's current position, but a track click passes the position it just
 // jumped to: the view update carrying that jump has not arrived yet, so reading
 // thumbLeftPx here would anchor the drag to the pre-jump position and the thumb
-// would snap back on the first mouse move.
-function onThumbMouseDown(e, startLeftPx = thumbLeftPx.value) {
+// would snap back on the first pointer move.
+function onThumbPointerDown(e, startLeftPx = thumbLeftPx.value) {
   if (e.button !== 0 || !scrollable.value) return
   e.preventDefault()
   e.stopPropagation()
   isDragging.value = true
   dragStartX = e.clientX
   dragStartLeftPx = startLeftPx
-  window.addEventListener('mousemove', onDragMove)
-  window.addEventListener('mouseup', onDragUp)
+  window.addEventListener('pointermove', onDragMove)
+  window.addEventListener('pointerup', onDragUp)
+  window.addEventListener('pointercancel', onDragUp)
 }
 
 function onDragMove(e) {
@@ -97,14 +98,15 @@ function onDragMove(e) {
 
 function onDragUp() {
   isDragging.value = false
-  window.removeEventListener('mousemove', onDragMove)
-  window.removeEventListener('mouseup', onDragUp)
+  window.removeEventListener('pointermove', onDragMove)
+  window.removeEventListener('pointerup', onDragUp)
+  window.removeEventListener('pointercancel', onDragUp)
 }
 
 // Clicking the track centres the window on the click rather than paging toward
 // it: at these zoom levels a page step can take several clicks to cross a long
 // file, and the position clicked is where the user wants to be.
-function onTrackMouseDown(e) {
+function onTrackPointerDown(e) {
   if (e.button !== 0 || !scrollable.value || !track.value) return
   const rect = track.value.getBoundingClientRect()
   const targetPx = Math.max(0, Math.min(
@@ -113,7 +115,7 @@ function onTrackMouseDown(e) {
   ))
   emitScroll(pxToScroll(targetPx))
   // Continue as a drag from where it landed, so click-then-drag is one gesture.
-  onThumbMouseDown(e, targetPx)
+  onThumbPointerDown(e, targetPx)
 }
 
 function handleViewUpdate(e) {
@@ -139,18 +141,19 @@ onMounted(() => {
 onUnmounted(() => {
   resizeObserver?.disconnect()
   window.removeEventListener('wavely:view-update', handleViewUpdate)
-  window.removeEventListener('mousemove', onDragMove)
-  window.removeEventListener('mouseup', onDragUp)
+  window.removeEventListener('pointermove', onDragMove)
+  window.removeEventListener('pointerup', onDragUp)
+  window.removeEventListener('pointercancel', onDragUp)
 })
 </script>
 
 <template>
   <div
     ref="track"
-    class="relative h-[11px] shrink-0 select-none border-t border-[rgba(255,255,255,.05)]"
+    class="wf-track relative h-[11px] shrink-0 select-none border-t border-[rgba(255,255,255,.05)]"
     :class="scrollable ? 'cursor-pointer' : ''"
     style="background:rgba(255,255,255,.02)"
-    @mousedown="onTrackMouseDown"
+    @pointerdown="onTrackPointerDown"
   >
     <div
       v-if="scrollable"
@@ -158,12 +161,17 @@ onUnmounted(() => {
       :class="{ 'wf-thumb-active': isDragging }"
       :style="{ left: `${thumbLeftPx}px`, width: `${thumbWidthPx}px` }"
       :title="`Drag to scroll — showing ${Math.round((visibleDuration / totalDuration) * 100)}% of the file`"
-      @mousedown="onThumbMouseDown"
+      @pointerdown="onThumbPointerDown"
     ></div>
   </div>
 </template>
 
 <style scoped>
+.wf-track { touch-action: none; }
+/* An 11 px bar is too thin to land a finger on. */
+@media (pointer: coarse) {
+  .wf-track { height: 22px; }
+}
 .wf-thumb {
   background: rgba(126, 240, 255, 0.28);
   transition: background-color 0.15s ease;

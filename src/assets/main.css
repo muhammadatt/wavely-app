@@ -63,6 +63,14 @@
   --z-toast: 800;
 }
 
+/* An editor, not a document: a phone's pull-to-refresh would reload the page
+   and lose unsaved work, and a horizontal overscroll can navigate back. Every
+   drag in the app is its own, so the page itself never needs to overscroll. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
 body {
   font-family: var(--font-ui);
   background: #0e1116;

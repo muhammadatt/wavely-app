@@ -5,6 +5,10 @@ import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useCanvasRecovery } from '../composables/useCanvasRecovery.js'
 import { hitSelectionEdge, selectionDragAnchor } from '../audio/selectionDrag.js'
+import {
+  TOUCH_EDGE_GRAB_PX, TOUCH_DRAG_THRESHOLD_PX, LONG_PRESS_MS,
+  pinchSpan, pinchMidX, pinchView, scrollForAnchor,
+} from '../audio/touchGestures.js'
 
 const {
   state, appState, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDuration,
@@ -180,7 +184,35 @@ function pxToTime(px) {
 // selected, so changing that out from under the click would be hostile.
 function handleContextMenu(e) {
   e.preventDefault()
+  // A touch long press opens the menu through its own timer (iOS never fires
+  // contextmenu at all); Android's native one would open it a second time.
+  if (lastPointerType === 'touch') return
   openContextMenu(e.clientX, e.clientY)
+}
+
+// ── Pointer routing ─────────────────────────────────────────────────────────
+// One set of pointer handlers for mouse, pen and touch. Mouse and pen take the
+// desktop path unchanged; a finger takes the touch path below. The pointer is
+// captured on down, so moves and the release keep arriving here when the drag
+// runs off the canvas — the job the window-level mouse listeners used to do.
+let lastPointerType = 'mouse'
+
+function handlePointerDown(e) {
+  lastPointerType = e.pointerType
+  try { canvas.value.setPointerCapture(e.pointerId) } catch { /* pointer already gone */ }
+  if (e.pointerType === 'touch') { touchDown(e); return }
+  handleMouseDown(e)
+}
+
+function handlePointerMove(e) {
+  if (e.pointerType === 'touch') { touchMove(e); return }
+  if (isSelecting.value) handleMouseMove(e)
+  else handleHover(e)
+}
+
+function handlePointerUp(e) {
+  if (e.pointerType === 'touch') { touchUp(e, e.type === 'pointercancel'); return }
+  if (isSelecting.value) handleMouseUp()
 }
 
 function handleMouseDown(e) {
@@ -216,9 +248,6 @@ function handleMouseDown(e) {
     setPlayhead(time)
     setSelection(time, time) // Clear / start fresh
   }
-
-  window.addEventListener('mousemove', handleMouseMove)
-  window.addEventListener('mouseup', handleMouseUp)
 }
 
 function handleMouseMove(e) {
@@ -243,8 +272,149 @@ function handleMouseMove(e) {
 function handleMouseUp() {
   isSelecting.value = false
   draggingEdge.value = null
-  window.removeEventListener('mousemove', handleMouseMove)
-  window.removeEventListener('mouseup', handleMouseUp)
+}
+
+// ── Touch ───────────────────────────────────────────────────────────────────
+// One finger: tap seeks (and clears the selection), drag selects — or adjusts
+// an edge it started on — and a long press opens the edit menu. Two fingers:
+// pinch zooms about their midpoint, and moving them together pans.
+//
+// Nothing commits on touch DOWN, unlike the mouse: seeking and clearing there
+// would throw the selection away whenever a second finger arrived to pinch, or
+// a long press meant to open the menu that acts on it. See touchGestures.js.
+const touches = new Map() // pointerId → { x, y }, x relative to the canvas
+// null | { kind: 'pending', id, x0, time, edge }
+//      | { kind: 'select', id }
+//      | { kind: 'pinch', startSpanPx, startPps, anchorTime }
+//      | { kind: 'done' } — swallow the rest until every finger is up
+let touchGesture = null
+let longPressTimer = null
+
+function clearLongPress() {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null }
+}
+
+function touchPoint(e) {
+  const rect = canvas.value.getBoundingClientRect()
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+}
+
+function touchDown(e) {
+  touches.set(e.pointerId, touchPoint(e))
+
+  if (touches.size === 1) {
+    const { x } = touches.get(e.pointerId)
+    touchGesture = {
+      kind: 'pending',
+      id: e.pointerId,
+      x0: x,
+      time: Math.max(0, Math.min(pxToTime(x), totalDuration.value)),
+      edge: hitSelectionEdge({
+        selection: state.selection,
+        xPx: x,
+        scrollLeft: scrollLeft.value,
+        pixelsPerSecond: pixelsPerSecond.value,
+        grabPx: TOUCH_EDGE_GRAB_PX,
+      }),
+    }
+    const { clientX, clientY } = e
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null
+      if (touchGesture?.kind !== 'pending') return
+      touchGesture = { kind: 'done' }
+      navigator.vibrate?.(10)
+      openContextMenu(clientX, clientY)
+    }, LONG_PRESS_MS)
+    return
+  }
+
+  if (touches.size === 2) {
+    // A second finger turns whatever the first was doing into a pinch. A drag
+    // already under way keeps the selection it made; a pending touch had not
+    // committed anything, so there is nothing to undo.
+    clearLongPress()
+    isSelecting.value = false
+    draggingEdge.value = null
+    const [a, b] = [...touches.values()]
+    const mid = pinchMidX(a, b)
+    touchGesture = {
+      kind: 'pinch',
+      startSpanPx: pinchSpan(a, b),
+      startPps: pixelsPerSecond.value,
+      anchorTime: pxToTime(mid),
+    }
+  }
+  // A third finger is ignored: the pinch keeps reading its first two.
+}
+
+function touchMove(e) {
+  if (!touches.has(e.pointerId)) return
+  const p = touchPoint(e)
+  touches.set(e.pointerId, p)
+  const g = touchGesture
+  if (!g) return
+
+  if (g.kind === 'pinch') {
+    const [a, b] = [...touches.values()]
+    const midPx = pinchMidX(a, b)
+    const view = pinchView({ ...g, spanPx: pinchSpan(a, b), midPx })
+    setZoom(view.pixelsPerSecond)
+    // Re-solved against the zoom setZoom actually granted, so the anchor stays
+    // under the fingers even when the pinch runs into a zoom bound.
+    scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value,
+      scrollForAnchor(g.anchorTime, midPx, pixelsPerSecond.value)))
+    drawAll()
+    return
+  }
+
+  if (g.kind === 'pending' && e.pointerId === g.id) {
+    if (Math.abs(p.x - g.x0) < TOUCH_DRAG_THRESHOLD_PX) return
+    // Read as a drag: commit the way the mouse path does on down.
+    clearLongPress()
+    if (g.edge) {
+      selectionAnchor.value = selectionDragAnchor(state.selection, g.edge)
+    } else {
+      selectionAnchor.value = g.time
+      setPlayhead(g.time)
+    }
+    draggingEdge.value = g.edge
+    isSelecting.value = true
+    touchGesture = { kind: 'select', id: g.id }
+  }
+
+  if (touchGesture.kind === 'select' && e.pointerId === touchGesture.id) {
+    const time = Math.max(0, Math.min(pxToTime(p.x), totalDuration.value))
+    setSelection(selectionAnchor.value, time)
+    drawOverlay()
+  }
+}
+
+function touchUp(e, cancelled) {
+  if (!touches.delete(e.pointerId)) return
+  const g = touchGesture
+
+  // A tap: seek and clear, which is what a mouse click does on down. A
+  // cancelled touch (the browser took it) commits nothing.
+  if (g?.kind === 'pending' && e.pointerId === g.id) {
+    clearLongPress()
+    if (!cancelled) {
+      setPlayhead(g.time)
+      setSelection(g.time, g.time)
+    }
+    touchGesture = { kind: 'done' }
+  } else if (g?.kind === 'select' && e.pointerId === g.id) {
+    touchGesture = { kind: 'done' }
+  } else if (g?.kind === 'pinch' && touches.size < 2) {
+    // Lifting one finger of a pinch must not turn the other into a selection.
+    touchGesture = { kind: 'done' }
+  }
+
+  if (touches.size === 0) {
+    clearLongPress()
+    touchGesture = null
+    isSelecting.value = false
+    draggingEdge.value = null
+  }
 }
 
 // Hover only — the drag itself is tracked on the window, so this fires between
@@ -499,6 +669,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearLongPress()
   resizeObserver?.disconnect()
   window.removeEventListener('wavely:zoom-in', handleZoomIn)
   window.removeEventListener('wavely:zoom-out', handleZoomOut)
@@ -521,10 +692,12 @@ onUnmounted(() => {
            fall through to the main canvas. -->
       <canvas
         ref="canvas"
-        class="absolute inset-0 w-full h-full"
-        @mousedown="handleMouseDown"
-        @mousemove="handleHover"
-        @mouseleave="handleHoverLeave"
+        class="waveform-canvas absolute inset-0 w-full h-full"
+        @pointerdown="handlePointerDown"
+        @pointermove="handlePointerMove"
+        @pointerup="handlePointerUp"
+        @pointercancel="handlePointerUp"
+        @pointerleave="handleHoverLeave"
         @wheel="handleWheel"
         @contextmenu="handleContextMenu"
       ></canvas>
@@ -535,3 +708,16 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Every touch gesture here is the app's own: without touch-action the browser
+   claims a one-finger drag as a page scroll and a pinch as a page zoom, and
+   cancels the pointer. The callout and user-select stop iOS from showing its
+   long-press magnifier or callout over the canvas. */
+.waveform-canvas {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+</style>
