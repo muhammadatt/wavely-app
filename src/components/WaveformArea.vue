@@ -289,6 +289,33 @@ const touches = new Map() // pointerId → { x, y }, x relative to the canvas
 //      | { kind: 'done' } — swallow the rest until every finger is up
 let touchGesture = null
 let longPressTimer = null
+// Set when a long press opened the menu, until the finger lifts.
+let longPressFired = false
+let swallowTimer = null
+
+// Lifting the finger after a long press still produces a compatibility
+// mousedown and click, aimed at whatever is under the finger NOW — and the
+// menu just opened there (on a short screen it flips up over the finger).
+// Measured: lifting ran the item underneath, Split. So the first mousedown and
+// click within a short window after that lift are swallowed before they reach
+// anything.
+const SWALLOW_MS = 400
+function swallowGhostClick(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.type === 'click') stopSwallowing()
+}
+function startSwallowing() {
+  stopSwallowing()
+  window.addEventListener('mousedown', swallowGhostClick, true)
+  window.addEventListener('click', swallowGhostClick, true)
+  swallowTimer = setTimeout(stopSwallowing, SWALLOW_MS)
+}
+function stopSwallowing() {
+  window.removeEventListener('mousedown', swallowGhostClick, true)
+  window.removeEventListener('click', swallowGhostClick, true)
+  if (swallowTimer) { clearTimeout(swallowTimer); swallowTimer = null }
+}
 
 function clearLongPress() {
   if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null }
@@ -322,6 +349,7 @@ function touchDown(e) {
       longPressTimer = null
       if (touchGesture?.kind !== 'pending') return
       touchGesture = { kind: 'done' }
+      longPressFired = true
       navigator.vibrate?.(10)
       openContextMenu(clientX, clientY)
     }, LONG_PRESS_MS)
@@ -411,6 +439,7 @@ function touchUp(e, cancelled) {
 
   if (touches.size === 0) {
     clearLongPress()
+    if (longPressFired) { longPressFired = false; startSwallowing() }
     touchGesture = null
     isSelecting.value = false
     draggingEdge.value = null
@@ -670,6 +699,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearLongPress()
+  stopSwallowing()
   resizeObserver?.disconnect()
   window.removeEventListener('wavely:zoom-in', handleZoomIn)
   window.removeEventListener('wavely:zoom-out', handleZoomOut)
@@ -682,7 +712,7 @@ onUnmounted(() => {
 <template>
   <div
     ref="container"
-    class="flex-1 relative overflow-hidden min-h-[120px]"
+    class="flex-1 relative overflow-hidden min-h-[120px] compact:min-h-[72px]"
     :class="cursorClass"
   >
     <div class="absolute inset-0">

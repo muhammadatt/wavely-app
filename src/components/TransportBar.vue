@@ -176,14 +176,14 @@ watch(() => state.segments, () => {
 </script>
 
 <template>
-  <div class="h-[76px] flex items-center px-6 gap-5 shrink-0 border-t border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0d1013)">
+  <div class="h-[76px] compact:h-[52px] flex items-center px-6 compact:px-3 gap-5 compact:gap-2 shrink-0 border-t border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0d1013)">
     <!-- Time display -->
-    <div class="font-['JetBrains_Mono'] text-[26px] font-bold tabular-nums min-w-[110px] tracking-tight text-[#eaf6f8]">
-      {{ formatTime(state.playhead).main }}<span class="text-[rgba(255,255,255,.4)]">{{ formatTime(state.playhead).seconds }}</span><span class="text-[rgba(255,255,255,.3)] text-[15px] font-semibold">{{ formatTime(state.playhead).ms }}</span>
+    <div class="font-['JetBrains_Mono'] text-[26px] compact:text-[18px] font-bold tabular-nums min-w-[110px] compact:min-w-[78px] tracking-tight text-[#eaf6f8]">
+      {{ formatTime(state.playhead).main }}<span class="text-[rgba(255,255,255,.4)]">{{ formatTime(state.playhead).seconds }}</span><span class="text-[rgba(255,255,255,.3)] text-[15px] compact:text-[11px] font-semibold">{{ formatTime(state.playhead).ms }}</span>
     </div>
 
     <!-- Transport controls -->
-    <div class="flex items-center gap-3 flex-1 justify-center">
+    <div class="flex items-center gap-3 compact:gap-[6px] flex-1 justify-center">
       <!-- Skip to start -->
       <BaseButton
         size="sm" color="ghost" circle
@@ -209,6 +209,7 @@ watch(() => state.segments, () => {
       <!-- Play/Pause — plays the selection when there is one, so the label says so -->
       <BaseButton
         size="lg" circle
+        class="play-btn"
         :disabled="!hasFile"
         @click="togglePlay"
         :title="playTitle"
@@ -245,8 +246,10 @@ watch(() => state.segments, () => {
     </div>
 
     <!-- Zoom controls -->
-    <div class="flex items-center gap-[11px] min-w-[140px] justify-end">
-      <span class="font-['Inter'] text-[10px] font-semibold text-[rgba(255,255,255,.4)]">Zoom</span>
+    <!-- Hidden outright on a phone held upright (max-sm): there is no width
+         for it beside the transport, and pinch zooms the waveform. -->
+    <div class="flex items-center gap-[11px] min-w-[140px] compact:min-w-0 max-sm:hidden justify-end">
+      <span class="compact:hidden font-['Inter'] text-[10px] font-semibold text-[rgba(255,255,255,.4)]">Zoom</span>
       <input
         type="range"
         min="0"
@@ -259,7 +262,7 @@ watch(() => state.segments, () => {
         @blur="isDraggingZoom = false"
         :disabled="!hasFile"
         aria-label="Zoom"
-        class="zoom-slider w-20 h-[5px] rounded-full appearance-none cursor-pointer"
+        class="zoom-slider compact:hidden w-20 h-[5px] rounded-full appearance-none cursor-pointer"
         :style="{ background: `linear-gradient(to right, #35d3e6 ${zoomLevel}%, rgba(255,255,255,.1) ${zoomLevel}%)` }"
       />
       <div class="flex items-center gap-1 shrink-0">
@@ -291,6 +294,14 @@ watch(() => state.segments, () => {
 </template>
 
 <style scoped>
+/* Compact: the 58 px play button is most of a 52 px bar. Important because
+   BaseButton sets its diameter inline. */
+@media (max-height: 520px), (max-width: 640px) {
+  .play-btn {
+    width: 44px !important;
+    height: 44px !important;
+  }
+}
 .zoom-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;

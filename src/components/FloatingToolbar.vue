@@ -31,11 +31,11 @@ const tools = CATEGORIES
 </script>
 
 <template>
-  <div class="h-[65px] flex items-center gap-3 px-5 shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
+  <div class="h-[65px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] px-5 compact:px-2 shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
     <!-- Search is the escape hatch from the category hierarchy: as the number
          of operations grows, this is how you reach one without knowing which
          category it lives in. -->
-    <div class="flex-1 min-w-0 flex items-center">
+    <div class="flex-1 compact:flex-none min-w-0 flex items-center">
       <button
         class="palette-trigger flex items-center gap-2 pl-[10px] pr-2 py-[7px] rounded-[10px] cursor-pointer max-w-[210px]"
         :disabled="!hasFile"
@@ -43,8 +43,8 @@ const tools = CATEGORIES
         @click="openCommandPalette"
       >
         <Icon name="search" :size="13" />
-        <span class="text-[11.5px] font-semibold truncate">Search…</span>
-        <kbd class="ml-auto shrink-0 font-mono text-[9.5px] font-bold px-[5px] py-[2px] rounded-[5px] tracking-[.04em]">Ctrl K</kbd>
+        <span class="text-[11.5px] font-semibold truncate compact:hidden">Search…</span>
+        <kbd class="compact:hidden ml-auto shrink-0 font-mono text-[9.5px] font-bold px-[5px] py-[2px] rounded-[5px] tracking-[.04em]">Ctrl K</kbd>
       </button>
     </div>
     <!-- min-w-0 + scroll: the tool group gives up centring before it collides
@@ -70,7 +70,7 @@ const tools = CATEGORIES
          rather than drifting right. It also holds the chain's button: the
          chain plays with every plugin window closed, so it needs a door that
          is always on screen. -->
-    <div class="flex-1 min-w-0 flex items-center justify-end">
+    <div class="flex-1 compact:flex-none min-w-0 flex items-center justify-end">
       <button
         type="button"
         class="tool-btn chain-btn"
@@ -80,7 +80,7 @@ const tools = CATEGORIES
         @click="openWindow('plugin-chain')"
       >
         <Icon name="chain" :size="15" class="tool-btn__icon" />
-        Chain
+        <span class="chain-label">Chain</span>
         <span
           v-if="slots.length"
           class="chain-count"
@@ -220,5 +220,30 @@ const tools = CATEGORIES
 .chain-count.is-live {
   background: rgba(232, 163, 61, .2);
   color: #e8a33d;
+}
+
+/* Compact (the `compact:` variant in main.css): smaller chips so the six
+   categories fit a phone's width, and the Chain button down to its icon and a
+   dot — ACTIVE / BYPASSED in words costs more width than the row has. */
+@media (max-height: 520px), (max-width: 640px) {
+  .tool-btn {
+    padding: 7px 10px;
+    gap: 5px;
+    font-size: 12px;
+  }
+  .chain-btn .chain-label {
+    display: none;
+  }
+  .chain-count {
+    font-size: 0;
+    width: 7px;
+    height: 7px;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, .3);
+  }
+  .chain-count.is-live {
+    background: #e8a33d;
+  }
 }
 </style>

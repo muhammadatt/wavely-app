@@ -311,7 +311,7 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="relative flex flex-col h-screen overflow-hidden font-['Inter']"
+    class="relative flex flex-col h-screen h-[100dvh] overflow-hidden font-['Inter']"
     style="background:linear-gradient(160deg,#181c22,#0c0f13 62%)"
     @dragenter="onDragEnter"
     @dragover="onDragOver"
@@ -326,11 +326,11 @@ onUnmounted(() => {
         <FloatingToolbar />
 
         <FileTabs />  
-        <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px]">
+        <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px] compact:p-[6px] compact:pl-2 compact:gap-[6px]">
           <!-- Overview is indented by the dBFS gutter so its time axis shares an
                x-origin with the main waveform below it. -->
    
-          <div class="flex shrink-0" v-if="hasFile">
+          <div class="flex shrink-0 compact:hidden" v-if="hasFile">
             <div class="w-7 shrink-0"></div>
             <WaveformOverview class="flex-1" />
           </div>

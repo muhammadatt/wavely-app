@@ -62,18 +62,18 @@ const fileMeta = computed(() => {
 
 <template>
   <div
-    class="h-[56px] flex items-center px-5 gap-[13px] shrink-0 z-10 border-b border-[rgba(255,255,255,.06)]"
+    class="h-[56px] compact:h-[44px] flex items-center px-5 compact:px-2 gap-[13px] compact:gap-2 shrink-0 z-10 border-b border-[rgba(255,255,255,.06)]"
     style="background:linear-gradient(rgb(20, 25, 34), rgb(14, 17, 22));"
   >
     <!-- Logo -->
     <div class="flex items-center shrink-0">
-      <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[26px] w-auto select-none" draggable="false" />
+      <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[26px] compact:h-[20px] w-auto select-none" draggable="false" />
     </div>
 
-    <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)]"></div>
+    <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] compact:hidden"></div>
 
     <!-- Active file properties -->
-    <div class="flex-1 flex items-center gap-[8px] overflow-hidden" v-if="fileMeta">
+    <div class="flex-1 flex items-center gap-[8px] overflow-hidden compact:invisible" v-if="fileMeta">
       <span
         class="font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[6px] py-[3px] rounded-[5px] whitespace-nowrap shrink-0"
         style="color:#7fe9f6;background:rgba(53,211,230,.14);border:1px solid rgba(53,211,230,.3)"
@@ -87,7 +87,7 @@ const fileMeta = computed(() => {
     <div v-else class="flex-1"></div>
 
     <!-- Actions -->
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 compact:gap-1">
       <!-- History. Icon-only: the arrows are unambiguous and the labels were
            costing width this row doesn't have once the tab strip fills up. -->
       <BaseButton
@@ -97,7 +97,7 @@ const fileMeta = computed(() => {
         title="Undo (Ctrl+Z)"
         aria-label="Undo"
       >
-        <Icon name="undo" :size="15" /> Undo
+        <Icon name="undo" :size="15" /> <span class="compact:hidden">Undo</span>
       </BaseButton>
       <BaseButton
         size="md" color="ghost" :pill="false"
@@ -106,10 +106,10 @@ const fileMeta = computed(() => {
         title="Redo (Ctrl+Shift+Z)"
         aria-label="Redo"
       >
-        <Icon name="redo" :size="15" /> Redo
+        <Icon name="redo" :size="15" /> <span class="compact:hidden">Redo</span>
       </BaseButton>
 
-      <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-1"></div>
+      <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-1 compact:mx-0"></div>
 
       <!-- Save + Save As. The caret's menu is a single item today; it exists
            because a Save that silently retargets is worse than one extra
@@ -122,7 +122,7 @@ const fileMeta = computed(() => {
           :title="isDirty ? 'Save — unsaved edits (Ctrl+S)' : 'Save (Ctrl+S)'"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
-          {{ isSaving ? 'Saving…' : 'Save' }}
+          <span class="compact:hidden">{{ isSaving ? 'Saving…' : 'Save' }}</span>
           <span
             v-if="isDirty && !isSaving"
             class="w-[6px] h-[6px] rounded-full shrink-0"
@@ -161,7 +161,7 @@ const fileMeta = computed(() => {
         :title="documentCount > 1 ? 'Export files (Ctrl+E)' : 'Export as WAV (Ctrl+E)'"
       >
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>
-        Export
+        <span class="compact:hidden">Export</span>
       </BaseButton>
 
       <AccountMenu />

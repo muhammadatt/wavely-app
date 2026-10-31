@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* `compact:` — a phone, or any window too short for the desktop chrome. Height
+ * is the binding constraint: a landscape phone is ~360–430 px tall, and the
+ * desktop rows above and below the waveform add up to ~340 px of it. Width
+ * catches a phone held upright. Components with scoped CSS use the same query
+ * by hand; keep the two in step. */
+@custom-variant compact {
+  @media (max-height: 520px), (max-width: 640px) {
+    @slot;
+  }
+}
+
 /* The design tokens the app actually uses.
  *
  * These replace an earlier light/pastel Nunito palette that no component ever
@@ -75,12 +86,16 @@ body {
   font-family: var(--font-ui);
   background: #0e1116;
   color: var(--color-text);
+  /* dvh: on a phone 100vh is the height with the browser's toolbars HIDDEN,
+     so anything sized to it runs under them while they show. */
   min-height: 100vh;
+  min-height: 100dvh;
   font-size: 14px;
 }
 
 #app {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }

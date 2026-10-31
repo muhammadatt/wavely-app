@@ -138,7 +138,7 @@ const statusOf = documentStatus
 <template>
   <div
     v-if="documents.length > 0"
-    class="h-[36px] flex items-stretch shrink-0 px-2 gap-[3px]"
+    class="h-[36px] compact:h-[30px] flex items-stretch shrink-0 px-2 gap-[3px]"
     style="background:linear-gradient(180deg,#12161b,#0f1318)"
   >
 
