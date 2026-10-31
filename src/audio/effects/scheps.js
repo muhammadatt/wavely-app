@@ -14,7 +14,7 @@
 import { ensureSchepsWorklet } from '../schepsWorkletLoader.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
-import { onLA2ATuningChange } from './la2aTuning.js'
+import { onLA2ATuningChange, withNestedTuningDefaults } from './la2aTuning.js'
 
 /**
  * ⚠ THE PARAMS AND THE LATENCY LIVE IN `schepsParams.js` so they can be reached
@@ -96,7 +96,7 @@ export function createScheps(audioContext) {
    */
   const unsubscribeTuning = onLA2ATuningChange(() => {
     worklet?.port.postMessage({
-        type: 'params', params: withMeasuredClears(toKernelParams(params)),
+        type: 'params', params: withMeasuredClears(withNestedTuningDefaults(toKernelParams(params))),
       })
   })
 
@@ -108,7 +108,7 @@ export function createScheps(audioContext) {
       if (name in params) {
         params[name] = value
         worklet?.port.postMessage({
-        type: 'params', params: withMeasuredClears(toKernelParams(params)),
+        type: 'params', params: withMeasuredClears(withNestedTuningDefaults(toKernelParams(params))),
       })
       }
     },
@@ -140,7 +140,7 @@ export function createScheps(audioContext) {
      */
     refreshKernelParams() {
       worklet?.port.postMessage({
-        type: 'params', params: withMeasuredClears(toKernelParams(params)),
+        type: 'params', params: withMeasuredClears(withNestedTuningDefaults(toKernelParams(params))),
       })
     },
 
