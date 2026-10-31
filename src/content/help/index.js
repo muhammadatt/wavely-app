@@ -78,6 +78,7 @@ import spectrumAnalyzer from './spectrum-analyzer.js'
 import inflator from './inflator.js'
 import vocalSaturation from './vocal-saturation.js'
 import voicerx from './voicerx.js'
+import voxPressor from './vox-pressor.js'
 
 export const HELP = {
   'air-band': airBand,
@@ -103,6 +104,7 @@ export const HELP = {
   'inflator': inflator,
   'vocal-saturation': vocalSaturation,
   voicerx,
+  'vox-pressor': voxPressor,
 }
 
 /**

@@ -853,5 +853,11 @@ if (typeof registerProcessor === 'function') {
     }
   }
 
-  registerProcessor('scheps-processor', SchepsWorkletProcessor)
+  // Guarded: VoxPressor's worklet holds this kernel, so the module can load
+  // twice into one AudioContext; only the duplicate registration is swallowed.
+  try {
+    registerProcessor('scheps-processor', SchepsWorkletProcessor)
+  } catch (err) {
+    if (err?.name !== 'NotSupportedError') throw err
+  }
 }

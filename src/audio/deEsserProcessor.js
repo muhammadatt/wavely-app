@@ -1278,5 +1278,11 @@ if (typeof registerProcessor === 'function') {
     }
   }
 
-  registerProcessor('hf-softener-processor', HFSoftenerWorkletProcessor)
+  // Guarded: VoxPressor's worklet holds this kernel, so the module can load
+  // twice into one AudioContext; only the duplicate registration is swallowed.
+  try {
+    registerProcessor('hf-softener-processor', HFSoftenerWorkletProcessor)
+  } catch (err) {
+    if (err?.name !== 'NotSupportedError') throw err
+  }
 }
