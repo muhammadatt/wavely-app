@@ -2121,6 +2121,7 @@ export class LA2AKernel {
     this.sibEh = 0
     this.sibEa = 0
     this.sibGain = 1
+    this.sibLaLine?.buffer.fill(1)
   }
 
   /** Clear every feedback path in the cell and the tube stage. */
@@ -2572,6 +2573,21 @@ export class LA2AKernel {
     let { hpfLp, shelfLp, env, gr, relPhase, rectLp } = this
     const sibDepth = this.sibDepth
     const sh = this.sibHp
+    /**
+     * ⚠ THE SCALE IS DELAYED BY THE LOOKAHEAD, THE COMPRESSION IS NOT. The guard
+     * reads the side-chain input, but the sample its scale multiplies is the
+     * AUDIO, which lookahead holds back; undelayed, it ducked the vowel before a
+     * sibilant and let go before the sibilant's tail. Primed at 1 so a fresh
+     * line does not mute the cell for its first `lookaheadSamples`.
+     */
+    let sibLa = null
+    if (sibDepth > 0 && this.lookaheadSamples > 0) {
+      if (!this.sibLaLine || this.sibLaLine.length !== this.lookaheadSamples) {
+        this.sibLaLine = new DelayLine(this.lookaheadSamples)
+        this.sibLaLine.buffer.fill(1)
+      }
+      sibLa = this.sibLaLine
+    }
     let { sibX1: sX1, sibX2: sX2, sibY1: sY1, sibY2: sY2, sibEh: sEh, sibEa: sEa, sibGain: sGain } = this
 
     // Seeded on the first block; advanced once per sample HERE rather than
@@ -2743,7 +2759,7 @@ export class LA2AKernel {
         const comp = preG > 0 ? Math.min(1 / preG, this.cellCompMax) : 1
         const d = this.cellCurveDriveMax * comp
           * (1 - Math.exp(-grNow / this.cellModTauDb))
-          * (sibDepth > 0 ? sGain : 1)
+          * (sibDepth > 0 ? (sibLa ? sibLa.push(sGain) : sGain) : 1)
         cellDriveRaw[i] = d
         if (this.oversampleOn) {
           cellPreG[i] = this.preGainDelay.push(preG)

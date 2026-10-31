@@ -22,6 +22,7 @@ import {
   toKernelParams, la2aPatchLatencySamples,
 } from './la2aParams.js'
 import { withMeasuredClears } from './measuredKeys.js'
+import { withTuningDefaults } from './la2aTuning.js'
 
 // Re-exported so callers that already reach for these through the effect keep
 // working; the definitions live in la2aParams.js, which Node can import.
@@ -101,7 +102,7 @@ export function createLA2ACompressor(audioContext) {
       if (name in params) {
         params[name] = value
         worklet?.port.postMessage({
-        type: 'params', params: withMeasuredClears(toKernelParams(params)),
+        type: 'params', params: withMeasuredClears(withTuningDefaults(toKernelParams(params))),
       })
       }
     },
@@ -118,7 +119,7 @@ export function createLA2ACompressor(audioContext) {
      */
     refreshKernelParams() {
       worklet?.port.postMessage({
-        type: 'params', params: withMeasuredClears(toKernelParams(params)),
+        type: 'params', params: withMeasuredClears(withTuningDefaults(toKernelParams(params))),
       })
     },
 

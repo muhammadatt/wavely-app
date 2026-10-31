@@ -96,3 +96,29 @@ test('inert with Harmonics off', () => {
   const b = render(x, { analog: false, sibilanceGuard: 100 }).channelData[0]
   for (let i = 0; i < x.length; i++) assert.equal(b[i], a[i])
 })
+
+test('with lookahead, the guard waits for the delayed sibilant (PR #186 review)', () => {
+  // A compressing vowel, then a loud sibilant from t0. With Lookahead the audio
+  // runs `lookaheadSamples` behind the side-chain, so an undelayed guard dipped
+  // the cell on the vowel's last 20 ms. Delayed, every sample before the
+  // sibilant reaches the audio path is untouched.
+  const t0 = Math.round(0.8 * SR)
+  const v = vowel(0.8)
+  const s = loudSibilant()
+  const x = new Float32Array(t0 + Math.round(0.3 * SR))
+  x.set(v.subarray(0, t0), 0)
+  x.set(s.subarray(0, x.length - t0), t0)
+  const p = { lookaheadMs: 20 }
+  const off = render(x, { ...p, sibilanceGuard: 0 })
+  const on = render(x, { ...p, sibilanceGuard: 100 })
+  const lat = on.latencySamples
+  for (let i = 0; i < t0 - 64; i++) {
+    assert.equal(on.channelData[0][i + lat], off.channelData[0][i + lat], `input-time sample ${i}`)
+  }
+  // ...and it still does its job on the sibilant itself.
+  const clean = render(x, { ...p, analog: false }).channelData[0]
+  const from = t0 + lat + Math.round(0.05 * SR)
+  const dOff = residualDb(off.channelData[0], clean, clean, from)
+  const dOn = residualDb(on.channelData[0], clean, clean, from)
+  assert.ok(dOff - dOn > 12, `guard bought only ${(dOff - dOn).toFixed(1)} dB with lookahead`)
+})
