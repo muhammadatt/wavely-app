@@ -760,7 +760,7 @@ function onPointerUp(e) {
   >
     <canvas
       ref="canvasEl"
-      class="block w-full h-full"
+      class="block w-full h-full touch-none"
       :style="{ cursor: isIdle && !isFixed ? 'pointer' : 'ns-resize' }"
       :aria-label="title"
       role="img"

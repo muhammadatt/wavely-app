@@ -3125,6 +3125,7 @@ const markSummary = ref({ avgDb: 0 })
         role="group"
         :aria-label="plotSummary"
         :style="{
+          touchAction: 'none',
           height: `${height}px`,
           borderRadius: '12px',
           cursor: dragging ? 'grabbing'
@@ -3166,7 +3167,7 @@ const markSummary = ref({ avgDb: 0 })
       <div
         v-if="$slots.dock"
         ref="dockEl"
-        class="absolute left-0 right-0 bottom-[20px] flex"
+        class="absolute left-0 right-0 bottom-[20px] flex touch-none"
         :class="dockDragging ? 'justify-start' : 'justify-center'"
         :style="dockDragging || dockX !== null
           ? { justifyContent: 'flex-start', paddingLeft: `${dockLeft}px` }

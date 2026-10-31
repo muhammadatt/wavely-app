@@ -1043,7 +1043,7 @@ function onPlotDown(e) {
   >
     <canvas
       ref="canvasEl"
-      class="block w-full"
+      class="block w-full touch-none"
       :class="design === 'modula' ? 'eqp-well' : 'rounded-[3px]'"
       :style="{ height: `${height}px`, background: design === 'modula' ? undefined : 'rgba(0,0,0,.28)' }"
       @pointerdown="onPlotDown"
@@ -1110,7 +1110,7 @@ function onPlotDown(e) {
     >
       <button
         type="button"
-        class="absolute inset-0 flex items-center justify-center"
+        class="absolute inset-0 flex items-center justify-center touch-none"
         style="cursor:grab"
         :aria-label="`Band at ${Math.round(band.frequencyHz)} hertz, ${band.gainDb.toFixed(1)} decibels`"
         @pointerdown="onHandleDown($event, band)"
