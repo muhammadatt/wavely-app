@@ -29,7 +29,7 @@
 import {
   TUBE_DRIVE_LIN, TUBE_BIAS, CELL_MOD_MAX, CELL_MOD_TAU_DB, CELL_MOD_SHAPE,
   CELL_CURVE_DRIVE_MAX, VALVE_CURVE_DRIVE, EMPHASIS_DEFAULT, EMPHASIS_CORNER_HZ,
-  LA2A_KERNEL_DEFAULTS,
+  SIBILANCE_GUARD_DEFAULT, LA2A_KERNEL_DEFAULTS,
 } from '../la2aProcessor.js'
 
 /**
@@ -117,6 +117,12 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
    * as the escape hatch it was added to be.
    */
   emphasisCornerHz: EMPHASIS_CORNER_HZ,
+  /**
+   * Cell-drive duck on top-end-dominated input, 0-100 (0 = off, the previous
+   * kernel bit for bit). Keeps the emphasis' warmth on vowels while loud
+   * sibilants pass the cell nearly clean. See SIBILANCE_GUARD_DEFAULT.
+   */
+  sibilanceGuard: SIBILANCE_GUARD_DEFAULT,
 })
 
 /**
@@ -155,6 +161,30 @@ export function la2aTuningOverrides() {
     if (tuning[k] !== LA2A_TUNING_DEFAULTS[k]) out[k] = tuning[k]
   }
   return out
+}
+
+/**
+ * Every tuning key, explicitly, for a message to a LIVE kernel.
+ *
+ * ⚠ SAME BUG CLASS AS `withMeasuredClears` (measuredKeys.js), SAME FIX ON THE
+ * SAME PATH. `la2aTuningOverrides()` omits a key at its default, and the
+ * kernel's `setParams` MERGES — so moving a bench control back to its default
+ * (or pressing Reset) sent nothing for it and left the running preview on the
+ * old value while Apply, on a fresh kernel, rendered the new one. Found on Sib
+ * guard 100 → 0 → 100 (PR #186 review); every key had it. Only the runtime path
+ * spreads these: `toKernelParams` keeps its key-for-key shape, which
+ * `la2aTuning.test.js` pins. Overrides already in `kernelParams` win.
+ */
+export function withTuningDefaults(kernelParams) {
+  return { ...LA2A_TUNING_DEFAULTS, ...kernelParams }
+}
+
+/** The same for Scheps, whose kernel takes the tuning nested under `la2aTuning`. */
+export function withNestedTuningDefaults(kernelParams) {
+  return {
+    ...kernelParams,
+    la2aTuning: { ...LA2A_TUNING_DEFAULTS, ...(kernelParams.la2aTuning ?? {}) },
+  }
 }
 
 /** Merge a partial update. Unknown keys are ignored rather than stored. */

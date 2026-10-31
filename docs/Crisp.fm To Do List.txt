@@ -1,0 +1,117 @@
+Crisp.fm To Do List
+
+
+Audio Editor 
+
+- If selection removed while playing, then play through
+- Audio "Delete" key press does not work while plugin window is open?
+
+Plugin window
+
+- Add ability to save chains with all plugin settings
+- Close/disable effect sidebar upon open or Move into dedicated sidebar
+- Move add button to bottom or Add plugins via dedicated search bar at bottom? 
+- Search list - Organize items into categories and show category headers
+- Active button UI/color
+
+
+AutoLeveler
+
+- Default to "On"
+- Disable knobs when bypassed
+- Default deadband to 1.0 db?
+
+
+Sibilance Editor (dev) -
+
+- analyze (backend) -> apply
+- 30s is ok
+- Listen only preview doesnt really allow you to see how it works
+
+Noise Reduction - 
+
+- process (backend)
+- not realtime stackable
+- 30s is ok
+- Listen only preview doesnt really allow you to see how it works
+
+
+File chooser UI is wonky - double click to rename doesn't actual work -- fights the primary click action. No clear "Save as" action. Modal close button close file. Closing modal is not obvious (click outside, no close X)
+
+Consider replacing with clear per-file button (Go to, Save, Save as, Close)
+
+
+UI tweaks
+
+- Tweak file tabs
+- Shrink UI for cut/copy/paste/select
+- Tweak effect preview/apply/bypass buttons and placement
+- (bug) Audio is unselected after apply an effect
+- Add spinner arrows to device field
+
+Edit functions:
+
+ - Split Tools, ability to move clips
+ - Remove silence
+ - Regions and Markers 
+ - Clip Automation (maybe)
+ - Loudness Normalize (LUFS)
+ 
+New Effects:
+
+- Noise Reduction 1 (Df3) and 2 (RNNoise)
+- VoxChain: Clip -> DeEss (Soften) -> 1176 into LA2A (Punch) -> Scheps (Glue) -> Saturation (Warmth) -> Air
+- VoxPressor
+
+Effect panels:
+
+- Make all effect panels expandable.
+- Figure out how to make effects degrade gracefully on mobile (plan/explore only - no code changes)
+
+Effect tweaks:
+
+ResoTame 
+- Clean up UI (delta/preserve buttons)
+- Show nodes where delta is engaged
+
+Delta inspector - Before we implemented the old "zones" focus model we have full range slider that allowed the user to define a start/end range for the resonance suppressor. I would like to re-implement this UI feature adapted to 
+
+Clicking a node to open the node focus panel only works if node is not already "active" (opening a panel, close, click again does not work)
+We should change the node color or provide some other visual indicator when a node is in "delta" mode
+
+	
+
+VoiceRx
+
+- VoiceRx darkens when selection changes
+- Analysis stays same (shared state) when switching between audio files via tabs
+- consider swaping the cepstral envelope for a peak-envelope experiment behind a flag and scoring agasint corpora using run npm run scorecard plus npm run scorecard:real
+
+Soft Clipper 
+
+UI - Limit mode and Clip mode do not result in same final level - they are equal in terms of start, not end -- this is confusing for the user and also the display tracks the limit outcome not the clip outcome - it makes for intuitive sense for the user to designate where they want to end up, not where to start
+
+Consider replacing tanh waveshaper with a tube sat type saturator 
+
+
+
+User Accounts
+Payments/Tokens
+
+Feature gating 
+15 second preview/purchase flow
+
+
+Marker/Regions
+
+Splitting files into regions/markers/items intelligently and exporting them as files
+Split by silences/markers (with leading/trailing silence, fades)
+Adding markers automatically
+Creating/exporting labels (regions) 
+Rudimentary “gap” marker & “Split by markers”
+“Smart split”/"Auto-split" 
+"Snap to zero" (toggle)
+
+
+
+

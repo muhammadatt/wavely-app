@@ -432,6 +432,10 @@ onMounted(() => {
   // meters stopped; reopening the window brings them back.
   chainWindowMounted(windowId)
 
+  // A plugin that can preview or apply opens on the whole file when nothing is
+  // selected, so Preview works at once. An existing selection is left alone.
+  if (hasFooter.value && !hasSelection.value) selectAll()
+
   // A window that was resized before is reopened at the size it was left, the
   // same courtesy the position gets. Restored before the position fallback
   // below, which reads it for the first-open case.
@@ -882,8 +886,7 @@ function requestClose() {
         title="Select the whole file"
         @click="selectAll()"
       >
-        <span v-if="modula" class="win-selectall-box-m"></span>
-        <Icon v-else name="selectAll" :size="13" :stroke-width="2" />
+        <Icon name="selectAll" :size="13" :stroke-width="2" />
         <span>Select all</span>
       </button>
 
@@ -930,8 +933,7 @@ function requestClose() {
           :title="applyTitle"
           @click="onApplyClick"
         >
-          <span v-if="modula" style="font:700 12px/1 'Inter',system-ui,sans-serif">✓</span>
-          <Icon v-else :name="applyIcon" :size="15" :stroke-width="2.5" />
+          <Icon :name="applyIcon" :size="15" :stroke-width="2.5" />
           <span class="win-btn-label">{{ inChain ? 'Applies with the chain' : applyLabel }}</span>
           <span class="win-btn-label-short">{{ inChain ? 'In chain' : applyLabelShort }}</span>
           <span v-if="applyLocked && !inChain" class="win-apply-pro">PRO</span>
@@ -1546,7 +1548,6 @@ function requestClose() {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 [data-design='modula'] .win-selectall:hover { color: var(--m-ink); box-shadow: inset 0 0 0 1px rgba(232, 163, 61, 0.7); }
-.win-selectall-box-m { width: 10px; height: 10px; box-sizing: border-box; border-radius: 2px; border: 1.5px dashed currentColor; }
 [data-design='modula'] .win-sel { color: var(--m-ink-4); }
 [data-design='modula'] .win-preview {
   min-width: 0;
@@ -1563,7 +1564,7 @@ function requestClose() {
 [data-design='modula'] .win-preview:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); }
 [data-design='modula'] .win-preview--on { background: transparent; }
 .win-play-m { width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--m-ink); }
-.win-play-m.is-on { border-left-color: var(--m-accent); }
+.win-play-m.is-on { width: 9px; height: 9px; border: 0; border-radius: 1px; background: var(--m-accent); }
 [data-design='modula'] .win-apply {
   height: 32px;
   padding: 0 14px;
