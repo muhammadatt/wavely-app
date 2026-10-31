@@ -37,6 +37,9 @@ const copies = pluginCopies((copy, life) => {
   const voxDeEss = ref(VOX_DEFAULTS.deEss)
   const voxParallel = ref(VOX_DEFAULTS.parallel)
   const voxParallelComp = ref(VOX_DEFAULTS.parallelComp)
+  /** BENCH: the Parallel copy's de-esser (0–100) and the 1176's detector emphasis. Measured with. */
+  const voxParallelDeEss = ref(VOX_DEFAULTS.parallelDeEss)
+  const voxParallelSibEmph = ref(VOX_DEFAULTS.parallelSibEmph)
   const voxDensity = ref(VOX_DEFAULTS.density)
   /** BENCH: the LA-2A's lookahead, ms. Measured with, so it re-measures. */
   const voxBodyLookahead = ref(VOX_DEFAULTS.bodyLookaheadMs)
@@ -90,6 +93,8 @@ const copies = pluginCopies((copy, life) => {
       deEss: voxDeEss.value,
       parallel: voxParallel.value,
       parallelComp: voxParallelComp.value,
+      parallelDeEss: voxParallelDeEss.value,
+      parallelSibEmph: voxParallelSibEmph.value,
       density: voxDensity.value,
       bodyLookaheadMs: voxBodyLookahead.value,
       alignDb: voxAlignDb.value,
@@ -199,7 +204,7 @@ const copies = pluginCopies((copy, life) => {
 
     /** The key a measurement belongs to: the timeline, the region and every setting it reads. */
     function solveKey(segments, start, end) {
-      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxDeEss.value}|${voxParallel.value}|${voxParallelComp.value}`
+      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxDeEss.value}|${voxParallel.value}|${voxParallelComp.value}|${voxParallelDeEss.value}|${voxParallelSibEmph.value}`
     }
 
     /**
@@ -310,6 +315,20 @@ const copies = pluginCopies((copy, life) => {
       pushParam('parallelMakeupDb', null)
       pushParam('parallelRestoreDb', 0)
       pushParam('parallelCeilingKneeDb', null)
+      scheduleSolve()
+    }
+
+    // BENCH: both move the copy the makeup is solved on. The old makeup plays
+    // until the measurement lands (a de-esser changes it by tenths of a dB).
+    function syncParallelDeEss(v) {
+      voxParallelDeEss.value = v
+      pushParam('parallelDeEss', v)
+      scheduleSolve()
+    }
+
+    function syncParallelSibEmph(v) {
+      voxParallelSibEmph.value = v
+      pushParam('parallelSibEmph', v)
       scheduleSolve()
     }
 
@@ -478,11 +497,13 @@ const copies = pluginCopies((copy, life) => {
     return {
       voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
       voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
+      voxParallelDeEss, voxParallelSibEmph,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,
       togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
       syncDeEss, syncParallel, syncParallelComp, syncDensity,
+      syncParallelDeEss, syncParallelSibEmph,
       refreshSolve, apply, teardown, openModal, closeModal,
     }
   }

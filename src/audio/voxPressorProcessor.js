@@ -54,7 +54,8 @@ import { HFSoftenerKernel } from './deEsserProcessor.js'
 import { InflatorKernel, INFLATOR_LATENCY_SAMPLES } from './inflatorProcessor.js'
 import { VoiceDetector, ParallelDetector, DEFAULT_CORNER_HZ } from './dsp/voiceDetector.js'
 import { DelayLine, OVERSAMPLE_LATENCY_SAMPLES } from './dsp/oversample.js'
-import { float32AtOrBelow } from './dsp/makeupReference.js'
+import { float32AtOrBelow, softCeiling, CEILING_KNEE_DB } from './dsp/makeupReference.js'
+import { ParallelDeEsser, PARALLEL_DEESS_MAX_DB } from './dsp/parallelDeEsser.js'
 import { LinkedPeakLimiter, peakLimiterLatencySamples } from './dsp/peakLimiter.js'
 
 const LN10_OVER_20 = Math.LN10 / 20
@@ -270,6 +271,20 @@ export function parallelLa2aParams(p) {
  * the source peak, as LA Vintage 2A and LA Classic 76 hold theirs — see
  * `measureVoxPressor`. No ceiling until the source peak is known.
  */
+/**
+ * The Parallel de-esser's full-depth cut, dB, from its 0–100 amount
+ * (`dsp/parallelDeEsser.js`). 0 = off, and then the stage renders exactly as
+ * it did without it: the compressor blends its own dry, bit for bit.
+ */
+export function parallelDeEssDepthDb(p) {
+  return finite(p?.parallelDeEss, 0, 0, 100) / 100 * PARALLEL_DEESS_MAX_DB
+}
+
+/** Whether the parallel 1176's detector takes `ParallelDetector`'s sibilance emphasis. */
+export function parallelSibEmphOf(p) {
+  return p?.parallelSibEmph !== false
+}
+
 function parallelCeiling(p) {
   return Number.isFinite(p.sourcePeakDb)
     ? { ceilingDb: p.sourcePeakDb, ceilingKneeDb: Number.isFinite(p.parallelCeilingKneeDb) ? p.parallelCeilingKneeDb : null }
@@ -337,6 +352,13 @@ export const VOX_KERNEL_DEFAULTS = {
   parallelMakeupDb: 0,
   /** BENCH: '1176' (ships) | 'la2a' — see `PARALLEL_COMPS`. */
   parallelComp: '1176',
+  /** BENCH: the copy's own de-esser, 0–100 — see `parallelDeEssDepthDb`. */
+  parallelDeEss: 0,
+  /**
+   * BENCH: whether the parallel 1176's detector hears sibilance +15 dB
+   * (`ParallelDetector`). true ships; the LA-2A never does.
+   */
+  parallelSibEmph: true,
   /**
    * DENSITY — the Cambridge Inflator at Effect `density` (0–1), Curve 0, Clip
    * on, ANCHORED at the source peak (`sourcePeakDb`): the signal is scaled so
@@ -414,6 +436,7 @@ export class VoxPressorKernel {
     this.parallelFet = new FET1176Kernel(sampleRate)
     this.parallelLa2a = new LA2AKernel(sampleRate)
     this.parallelDetector = new ParallelDetector(sampleRate)
+    this.parallelDeEsser = new ParallelDeEsser(sampleRate)
     this.parallelBypass = []
     this.parallelLimiter = new LinkedPeakLimiter(sampleRate)
     this.inflator = new InflatorKernel(sampleRate)
@@ -421,6 +444,7 @@ export class VoxPressorKernel {
     this.outputLimiter = new LinkedPeakLimiter(sampleRate)
     this.deEssGrHold = 0
     this.parallelGrHold = 0
+    this.parallelDeEssHold = 0
 
     this.makeupLinSmoothed = null
     this.parallelRestoreSmoothed = null
@@ -497,8 +521,28 @@ export class VoxPressorKernel {
     // ── PARALLEL ──
     this.parallelOn = !!p.parallelOn && finite(p.parallelMix, 0, 0, 1) > 0
     this.parallelComp = parallelCompOf(p)
-    this.parallelFet.setParams({ ...parallelFetParams(p), oversample: this.oversampleOn })
-    this.parallelLa2a.setParams({ ...parallelLa2aParams(p), oversample: this.oversampleOn })
+    this.parallelSibEmph = parallelSibEmphOf(p)
+    /**
+     * ⚠ WITH ITS DE-ESSER ON, THE COMPRESSOR RENDERS THE COPY ALONE (Mix 1, no
+     * ceiling) and the blend and the sized ceiling run HERE, on the same
+     * arithmetic as the kernels' own (`dry·(1−mix) + wet·mix`, `softCeiling`),
+     * so the de-esser sits between the copy's makeup and the blend. The dry
+     * side is the bypass delay line, which is the kernels' dry delay.
+     */
+    const deEssDb = this.parallelOn ? parallelDeEssDepthDb(p) : 0
+    this.parallelDeEsser.setDepthDb(deEssDb)
+    this.parallelSplit = deEssDb > 0
+    const split = this.parallelSplit ? { mix: 1, ceilingDb: null } : {}
+    this.parallelFet.setParams({ ...parallelFetParams(p), oversample: this.oversampleOn, ...split })
+    this.parallelLa2a.setParams({ ...parallelLa2aParams(p), oversample: this.oversampleOn, ...split })
+    const pMix = finite(p.parallelMix, 0, 0, 1)
+    this.parallelWetMix = pMix
+    this.parallelDryMix = 1 - pMix
+    const pc = parallelCeiling(p)
+    this.parallelCeilingLin = this._ceilingLin(pc.ceilingDb)
+    const kneeDb = Number.isFinite(pc.ceilingKneeDb)
+      ? clamp(pc.ceilingKneeDb, 0, CEILING_KNEE_DB) : CEILING_KNEE_DB
+    this.parallelKneeLin = this.parallelCeilingLin * Math.exp(-kneeDb * LN10_OVER_20)
     // Equal by construction (each is its oversampler's), so the A/B never moves the audio.
     this.parallelLatency = this.parallelFet.latencySamples
     // Holds the source peak after the blend: the parallel stage adds level.
@@ -569,11 +613,13 @@ export class VoxPressorKernel {
       bodyGrDb: this.bodyGrHold,
       deEssGrDb: this.deEssGrHold,
       parallelGrDb: this.parallelGrHold,
+      parallelDeEssDb: this.parallelDeEssHold,
     }
     this.peaksGrHold = 0
     this.bodyGrHold = 0
     this.deEssGrHold = 0
     this.parallelGrHold = 0
+    this.parallelDeEssHold = 0
     return m
   }
 
@@ -591,6 +637,7 @@ export class VoxPressorKernel {
     this.parallelFet = new FET1176Kernel(this.sampleRate)
     this.parallelLa2a = new LA2AKernel(this.sampleRate)
     this.parallelDetector.reset()
+    this.parallelDeEsser.reset()
     for (const d of this.parallelBypass) d.reset()
     for (const d of this.densityBypass) d.reset()
     this.parallelLimiter.reset()
@@ -708,8 +755,29 @@ export class VoxPressorKernel {
       // The LA-2A listens through its own detector (see `PARALLEL_COMPS`).
       const la2a = this.parallelComp === 'la2a'
       const comp = la2a ? this.parallelLa2a : this.parallelFet
-      comp.process(outputChannels, mid, n, la2a ? undefined : this.parallelDetector.process(outputChannels, n))
-      for (let ch = 0; ch < nOut; ch++) outputChannels[ch].set(mid[ch])
+      const sc = la2a || !this.parallelSibEmph ? undefined : this.parallelDetector.process(outputChannels, n)
+      comp.process(outputChannels, mid, n, sc)
+      if (this.parallelSplit) {
+        // The copy alone in `mid`: de-ess it, then blend against the dry here.
+        this.parallelDeEsser.process(mid, n)
+        const dm = this.parallelDryMix
+        const wm = this.parallelWetMix
+        const c = this.parallelCeilingLin
+        const k = this.parallelKneeLin
+        for (let ch = 0; ch < nOut; ch++) {
+          const line = this.parallelBypass[ch]
+          const io = outputChannels[ch]
+          const w = mid[ch]
+          for (let i = 0; i < n; i++) {
+            const mixed = line.push(io[i]) * dm + w[i] * wm
+            io[i] = c > 0 ? softCeiling(mixed, c, k) : mixed
+          }
+        }
+        const cut = this.parallelDeEsser.takeCutDb()
+        if (cut > this.parallelDeEssHold) this.parallelDeEssHold = cut
+      } else {
+        for (let ch = 0; ch < nOut; ch++) outputChannels[ch].set(mid[ch])
+      }
       const gr = comp.grDb
       if (gr > this.parallelGrHold) this.parallelGrHold = gr
     } else {

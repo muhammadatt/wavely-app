@@ -69,7 +69,7 @@
  */
 import {
   processVoxPressorBuffer, VoxPressorKernel, parallelFetParams, PARALLEL_INPUT_KNOB,
-  parallelLa2aParams, parallelCompOf,
+  parallelLa2aParams, parallelCompOf, parallelDeEssDepthDb, parallelSibEmphOf,
 } from './voxPressorProcessor.js'
 import { LA2AKernel } from './la2aProcessor.js'
 import { measureVoiceProfile } from './voiceProfile.js'
@@ -82,6 +82,7 @@ import { limitChannels } from './dsp/peakLimiter.js'
 import { processHFSoftenerBuffer, levelOffsetDbFor } from './deEsserProcessor.js'
 import { FET1176Kernel, inputDriveDbForKnob } from './fet1176Processor.js'
 import { ParallelDetector } from './dsp/voiceDetector.js'
+import { ParallelDeEsser } from './dsp/parallelDeEsser.js'
 import { alignDbForRms } from './dsp/inputAlign.js'
 
 /** Block length for the peak and voiced-level statistics, seconds. */
@@ -366,13 +367,13 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
  * Returns `{ g, wet }`: g 0 (and no wet) when there is nothing to solve (a
  * zero percentile).
  */
-function parallelWetGain(channels, sampleRate, fetParams) {
+function parallelWetGain(channels, sampleRate, fetParams, p) {
   const inRef = percentileOfChannels(channels, MAKEUP_PERCENTILE)
   if (!(inRef > 0)) return { g: 0, wet: null }
   const fet = new FET1176Kernel(sampleRate)
   // No ceiling: the solve measures below it, as every makeup solve does.
   fet.setParams({ ...fetParams, mix: 1, outputGainDb: 0, oversample: true, ceilingDb: null })
-  const det = new ParallelDetector(sampleRate)
+  const det = parallelSibEmphOf(p) ? new ParallelDetector(sampleRate) : null
   const lat = fet.latencySamples
   const len = channels[0].length
   const total = len + lat
@@ -381,8 +382,11 @@ function parallelWetGain(channels, sampleRate, fetParams) {
   for (let o = 0; o < total; o += 128) {
     const n = Math.min(128, total - o)
     const ins = padded.map(c => c.subarray(o, o + n))
-    fet.process(ins, wet.map(c => c.subarray(o, o + n)), n, det.process(ins, n))
+    fet.process(ins, wet.map(c => c.subarray(o, o + n)), n, det ? det.process(ins, n) : undefined)
   }
+  // The copy's de-esser, at unity Output: it is homogeneous (a ratio
+  // detector), so the makeup the blend solve finds commutes with it.
+  deEssChannels(wet, sampleRate, parallelDeEssDepthDb(p))
   const w = wet.map(c => c.subarray(lat, lat + len))
   const scratch = channels.map(() => new Float32Array(len))
   const g = percentileBlendGain(channels, w, fetParams.mix, inRef, -48, 48, scratch)
@@ -392,7 +396,7 @@ function parallelWetGain(channels, sampleRate, fetParams) {
 /** The parallel 1176's makeup and its blend at that makeup (null when unsolvable). */
 function parallelFetSolve(channels, sampleRate, p) {
   const fetParams = parallelFetParams(p)
-  const { g, wet } = parallelWetGain(channels, sampleRate, fetParams)
+  const { g, wet } = parallelWetGain(channels, sampleRate, fetParams, p)
   if (!wet) return { makeupDb: -inputDriveDbForKnob(PARALLEL_INPUT_KNOB), blend: null }
   const blend = blendInto(channels.map(c => new Float32Array(c.length)), channels, wet, fetParams.mix, g)
   return { makeupDb: 20 * Math.log10(g), blend }
@@ -410,13 +414,38 @@ function parallelLa2aSolve(channels, sampleRate, p) {
   // No ceiling: the solve (and the blend the knee is sized from) measures below it.
   const base = { ...parallelLa2aParams(p), oversample: false, ceilingDb: null }
   // Its own detector, as the kernel runs it (no sidechain).
-  const render = (chs, extra) => renderLa2a(chs, sampleRate, { ...base, ...extra })
+  const deEssDb = parallelDeEssDepthDb(p)
+  /**
+   * With the copy's de-esser on, every render is the COPY (Mix 1) de-essed, as
+   * the kernel plays it; the solver asks for Mix 1 renders below Mix 1 anyway,
+   * and at Mix 1 the copy is the output. The final blend is then summed here,
+   * as the kernel sums it.
+   */
+  const render = deEssDb > 0
+    ? (chs, extra) => deEssChannels(renderLa2a(chs, sampleRate, { ...base, ...extra, mix: 1 }), sampleRate, deEssDb)
+    : (chs, extra) => renderLa2a(chs, sampleRate, { ...base, ...extra })
   const plan = solveMakeupPlan({
     channelData: channels, render, gainKey: 'gainDb', mixKey: 'mix', mix: base.mix,
     reference: 'percentile', minDb: -24, maxDb: 24,
   })
   if (plan.ceilingDb === null) return { makeupDb: 0, blend: null }
-  return { makeupDb: plan.makeupDb, blend: render(channels, { gainDb: plan.makeupDb }) }
+  const blend = deEssDb > 0
+    ? blendInto(channels.map(c => new Float32Array(c.length)), channels, render(channels, { gainDb: plan.makeupDb }), base.mix, 1)
+    : render(channels, { gainDb: plan.makeupDb })
+  return { makeupDb: plan.makeupDb, blend }
+}
+
+/** The Parallel copy's de-esser over whole channels, in place (`dsp/parallelDeEsser.js`). */
+function deEssChannels(channels, sampleRate, depthDb) {
+  if (!(depthDb > 0)) return channels
+  const d = new ParallelDeEsser(sampleRate)
+  d.setDepthDb(depthDb)
+  const len = channels[0].length
+  for (let o = 0; o < len; o += 128) {
+    const n = Math.min(128, len - o)
+    d.process(channels.map(c => c.subarray(o, o + n)), n)
+  }
+  return channels
 }
 
 function renderLa2a(channels, sampleRate, params) {

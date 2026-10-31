@@ -111,6 +111,14 @@ export const VOX_DEFAULTS = {
    * with everything else shared (`PARALLEL_COMPS`). Re-measures.
    */
   parallelComp: '1176',
+  /**
+   * BENCH: the Parallel copy's own de-esser, 0–100 (`dsp/parallelDeEsser.js`:
+   * LA Vintage 2A's sibilance-guard detector driving a top-band cut on the
+   * copy, before the blend). Re-measures.
+   */
+  parallelDeEss: 0,
+  /** BENCH: the parallel 1176's +15 dB sibilance detector (`ParallelDetector`). Re-measures. */
+  parallelSibEmph: true,
   // ── MEASURED ──
   /**
    * The file's alignment, dB (`alignDbForRms` on the WHOLE file's gated RMS,
@@ -223,6 +231,8 @@ function stageParams(p) {
     parallelMix: mix,
     parallelOn: mix > 0 && Number.isFinite(p.parallelAlignDb) && Number.isFinite(p.parallelMakeupDb),
     parallelComp: p.parallelComp === 'la2a' ? 'la2a' : '1176',
+    parallelDeEss: knob(p.parallelDeEss),
+    parallelSibEmph: p.parallelSibEmph !== false,
     parallelAlignDb: Number.isFinite(p.parallelAlignDb) ? p.parallelAlignDb : 0,
     parallelMakeupDb: Number.isFinite(p.parallelMakeupDb) ? p.parallelMakeupDb : 0,
     parallelRestoreDb: Number.isFinite(p.parallelRestoreDb) ? p.parallelRestoreDb : 0,

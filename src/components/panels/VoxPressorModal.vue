@@ -19,10 +19,12 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
+  voxParallelDeEss, voxParallelSibEmph,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
   syncDeEss, syncParallel, syncParallelComp, syncDensity,
+  syncParallelDeEss, syncParallelSibEmph,
   apply, teardown, closeModal,
 } = useVoxPressor()
 
@@ -59,6 +61,15 @@ const SPEED_OPTIONS = [
 ]
 
 // BENCH: the Parallel stage's compressor. 1176 ships; the LA-2A is the A/B.
+const PARALLEL_DEESS_OPTIONS = [0, 25, 50, 75, 100].map(v => ({
+  value: v, label: v === 0 ? 'OFF' : String(v),
+  title: v === 0 ? 'No de-esser on the copy' : `De-ess the parallel copy before the blend (${v})`,
+}))
+const SIB_EMPH_OPTIONS = [
+  { value: true, label: 'ON', title: "The parallel 1176's detector hears sibilance +15 dB, so it ducks the copy on an \"s\"" },
+  { value: false, label: 'OFF', title: 'The parallel 1176 hears the voice flat' },
+]
+
 const PARALLEL_COMP_OPTIONS = [
   { value: '1176', label: '1176', title: 'A fast 4:1 1176 copy (New York compression)' },
   { value: 'la2a', label: 'LA-2A', title: 'An LA-2A copy voiced as an LA Vintage 2A slot: Peak Reduction 50, its own detector, aligned on the file — the same mix law, restore and limiter' },
@@ -282,6 +293,22 @@ async function applyAndClose() {
             :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS"
             aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
             @update:model-value="syncParallelComp"
+          />
+        </div>
+        <div class="vp-listen vp-bench">
+          <span class="m-caption">Bench · Parallel de-ess</span>
+          <ModulaSegmented
+            :model-value="voxParallelDeEss" :options="PARALLEL_DEESS_OPTIONS"
+            aria-label="Parallel de-ess" :disabled="!voxPreview || voxParallel <= 0"
+            @update:model-value="syncParallelDeEss"
+          />
+        </div>
+        <div v-if="voxParallelComp === '1176'" class="vp-listen vp-bench">
+          <span class="m-caption">Bench · 1176 sib detector</span>
+          <ModulaSegmented
+            :model-value="voxParallelSibEmph" :options="SIB_EMPH_OPTIONS"
+            aria-label="Parallel 1176 sibilance detector" :disabled="!voxPreview || voxParallel <= 0"
+            @update:model-value="syncParallelSibEmph"
           />
         </div>
         <span class="m-note vp-measured">{{ measuredNote }}</span>

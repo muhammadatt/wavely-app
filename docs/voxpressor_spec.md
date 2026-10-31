@@ -379,6 +379,43 @@ overshoot with a fixed knee; here the solve sizes the knee to the overshoot.
 Peaks, Body and Density keep their limiters. What the LA-2A adds is top end and density, not level (−0.2 to 0 dB at
 Mix 50 against the 1176's ~+1), so the A/B is ~1 dB apart: match it with Output.
 
+**BENCH: THE COPY'S OWN DE-ESSER** (`parallelDeEss` 0–100, OFF ships;
+`dsp/parallelDeEsser.js`) — the mixer's heavy de-ess on the parallel bus.
+LA Vintage 2A's sibilance-guard DETECTOR (the share of energy above 4 kHz,
+0.25 → 0.6, 1 ms / 30 ms; the guard itself lowers the cell's drive, not the
+level, so only its detector is reused) drives a top-band cut on the COPY,
+after its makeup and before the blend: `g·x + (1−g)·LP2(x)` at 4 kHz, up to
+24 dB at 100. A ratio reads a quiet "s" as it reads a loud one, which is the
+point: parallel lifts the quiet ones, which a level-threshold de-esser lets
+through. It is homogeneous, so the 1176's closed-form makeup still holds. With
+it on, the compressor renders the copy alone and VoxPressor sums the blend and
+the sized ceiling itself on the kernels' arithmetic (exact to float32 rounding,
+tested); OFF is the old path, bit for bit. No latency. A second bench switch,
+`parallelSibEmph`, turns the 1176's +15 dB detector emphasis off.
+
+Measured on the owner's two clips (dB vs Parallel off; vowel frames / "s"
+frames' energy above 5 kHz):
+
+| Mix 30 | Messy vowels | Messy "s" | Greenberg vowels | Greenberg "s" |
+|---|---|---|---|---|
+| 1176 (ships) | +0.95 | −0.49 | +1.03 | +0.50 |
+| 1176 + de-ess 50 | +0.96 | −2.39 | +1.03 | −2.06 |
+| 1176, emphasis off | +0.84 | +2.59 | +0.84 | +3.05 |
+| 1176, emphasis off + de-ess 50 | +0.87 | −1.70 | +0.85 | −1.51 |
+| LA-2A | −0.11 | +0.62 | +0.12 | +1.20 |
+| LA-2A + de-ess 50 | −0.11 | −2.34 | +0.13 | −2.17 |
+
+At Mix 60 the same pattern doubles (LA-2A "s" +1.10 / +2.04 at −0.32 / +0.07
+of vowels; with de-ess 50, −5.52 / −4.88). Readings: the vowels never move
+(the de-esser costs no density); the shipping 1176 ALREADY keeps "s" under the
+voice through its detector emphasis, and that emphasis is worth keeping — off,
+the copy is compressed less overall and the vowels lose 0.1–0.4 dB; the
+LA-2A, which cannot take the emphasis, lifts "s" 0.7–2 dB over the voice and
+is where the de-esser is needed. Every amount ≥ 25 takes the "s" UNDER where
+it sat with Parallel off — the copy is then de-essed past neutral, the bus
+treatment, not a correction. ⚠ Not auditioned; the amount and the 4 kHz split
+are reasoned.
+
 ⚠ **Overlap with Density.** Both add density: Parallel by dynamic upward
 compression, Density by a static curve with odd harmonics. Different
 mechanisms, but presets should not max both (§11).

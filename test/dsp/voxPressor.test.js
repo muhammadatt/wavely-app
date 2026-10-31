@@ -640,3 +640,23 @@ test('the Parallel LA-2A renders as an LA Vintage 2A slot after VoxPressor (owne
   // put them −32.5 dB apart.
   assert.ok(diffDb < -55, `VoxPressor's LA-2A vs the slot: ${diffDb.toFixed(1)} dB re signal`)
 })
+
+test('BENCH: the Parallel de-esser takes the copy\'s top end down, leaves the level, holds the peak', () => {
+  const x = narration(SR, { seconds: 12, levelDb: -24 })
+  const sourcePeakDb = db(peak(x))
+  for (const parallelComp of ['1176', 'la2a']) {
+    const render = (panel) => {
+      const { r, params } = measure(x, { peaks: 3, body: 57, deEss: 0, parallel: 60, density: 0, parallelComp, ...panel })
+      assert.ok(Number.isFinite(r.parallelMakeupDb), `${parallelComp}: measured`)
+      return processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData
+    }
+    const plain = render({})
+    const deEssed = render({ parallelDeEss: 50 })
+    const hf = hfEnergyDb(deEssed) - hfEnergyDb(plain)
+    const level = db(gatedRmsOfChannels(deEssed, SR)) - db(gatedRmsOfChannels(plain, SR))
+    assert.ok(hf < -1, `${parallelComp}: >5 kHz only ${hf.toFixed(2)} dB`)
+    assert.ok(Math.abs(level) < 0.3, `${parallelComp}: level moved ${level.toFixed(2)} dB`)
+    assert.ok(db(peak(deEssed[0])) - sourcePeakDb <= 1e-5,
+      `${parallelComp}: peak ${(db(peak(deEssed[0])) - sourcePeakDb).toFixed(4)} dB over`)
+  }
+})
