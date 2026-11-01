@@ -451,6 +451,103 @@ try {
     ].join('')
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Files panel'.padEnd(16)} ${why}${fresh.join(' | ')}`)
   }
+
+  /**
+   * A PHONE, held sideways, driven by touch. The desktop pass above never
+   * touches the screen, and every touch path in the editor is wiring a unit
+   * test cannot see: pointer capture on the waveform, the long-press timer,
+   * the ghost click it must swallow, and FloatingWindow turning into a sheet.
+   * Measured before these existed: a drag on the waveform selected nothing,
+   * and lifting a long press ran the menu item under the finger (Split).
+   */
+  {
+    const before = errors.length
+    const phone = await browser.newContext({
+      viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2,
+    })
+    const pp = await phone.newPage()
+    await pp.addInitScript(() => { window.showOpenFilePicker = undefined })
+    pp.on('pageerror', e => errors.push(`PAGEERROR (phone) ${e.message}`))
+    const why = []
+    try {
+      await pp.goto(URL_, { waitUntil: 'networkidle' })
+      const chooserP = pp.waitForEvent('filechooser')
+      await pp.getByText('Choose audio files').click()
+      await (await chooserP).setFiles(wav)
+      await pp.waitForTimeout(3000)
+
+      const cdp = await phone.newCDPSession(pp)
+      const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', {
+        type, touchPoints: pts.map(([x, y], id) => ({ x, y, id })),
+      })
+      const box = await pp.locator('canvas.waveform-canvas').boundingBox()
+      const y = box.y + box.height / 2
+      const at = f => box.x + box.width * f
+      const onCanvas = await pp.evaluate(([x, yy]) =>
+        document.elementFromPoint(x, yy)?.classList.contains('waveform-canvas'), [at(0.5), y])
+      if (!onCanvas) why.push('something covers the waveform on a phone; ')
+
+      // One-finger drag selects.
+      await touch('touchStart', [[at(0.2), y]])
+      for (let f = 0.25; f <= 0.5; f += 0.05) { await touch('touchMove', [[at(f), y]]); await pp.waitForTimeout(16) }
+      await touch('touchEnd', [])
+      await pp.waitForTimeout(200)
+      const selected = await pp.locator('.selection-bar').innerText()
+      if (!/\d:\d\d\.\d\d[\s\S]*→[\s\S]*\d:\d\d\.\d\d/.test(selected)) why.push('a touch drag did not select; ')
+
+      // Two-finger pinch zooms in: the scrollbar thumb appears once the whole
+      // file no longer fits, and the selection survives the second finger.
+      await touch('touchStart', [[at(0.45), y], [at(0.55), y]])
+      for (let k = 1; k <= 10; k++) {
+        await touch('touchMove', [[at(0.45 - k * 0.02), y], [at(0.55 + k * 0.02), y]])
+        await pp.waitForTimeout(16)
+      }
+      await touch('touchEnd', [])
+      await pp.waitForTimeout(200)
+      if (!(await pp.locator('.wf-thumb').count())) why.push('a pinch did not zoom; ')
+      if ((await pp.locator('.selection-bar').innerText()) !== selected) why.push('a pinch changed the selection; ')
+
+      // Long press opens the menu, and lifting must not run what is under the finger.
+      // Checked as "did a click reach the menu at all", not "is the menu still
+      // open": the item under the finger may be disabled, and a click on that
+      // closes nothing — which let this pass with the guard removed. Counted on
+      // `document`, beneath the window-level listener that swallows it.
+      const menu = pp.locator('[role=menu][aria-label="Waveform actions"]')
+      await pp.evaluate(() => {
+        window.__menuClicks = 0
+        document.addEventListener('click', e => { if (e.target.closest?.('[role=menu]')) window.__menuClicks++ }, true)
+      })
+      await touch('touchStart', [[at(0.5), y]])
+      await pp.waitForTimeout(700)
+      const opened = await menu.count()
+      await touch('touchEnd', [])
+      await pp.waitForTimeout(300)
+      const menuClicks = await pp.evaluate(() => window.__menuClicks)
+      if (!opened) why.push('long press did not open the menu; ')
+      else if (menuClicks || !(await menu.count())) why.push('lifting a long press clicked the menu item under the finger; ')
+      await pp.keyboard.press('Escape')
+
+      // A plugin opens as a full-screen sheet with Apply on screen.
+      await pp.keyboard.press('Control+k'); await pp.waitForTimeout(250)
+      await pp.keyboard.type('PHAT*SS'); await pp.waitForTimeout(400)
+      await pp.keyboard.press('Enter'); await pp.waitForTimeout(900)
+      const sheet = await pp.evaluate(() => {
+        const f = document.querySelector('.win-frame')
+        const a = f?.querySelector('.win-apply')?.getBoundingClientRect()
+        return { isSheet: !!f?.classList.contains('is-sheet'), applyOnScreen: !!a && a.bottom <= innerHeight && a.right <= innerWidth }
+      })
+      if (!sheet.isSheet) why.push('plugin did not open as a sheet; ')
+      if (!sheet.applyOnScreen) why.push('Apply is off screen in the sheet; ')
+    } catch (e) {
+      why.push(`threw: ${e.message.split('\n')[0]}; `)
+    } finally {
+      await phone.close()
+    }
+    const fresh = errors.slice(before)
+    const ok = why.length === 0 && fresh.length === 0
+    if (!ok) failures++
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Phone (touch)'.padEnd(16)} ${why.join('')}${fresh.join(' | ')}`)
+  }
 } finally {
   await browser.close()
   server?.kill()

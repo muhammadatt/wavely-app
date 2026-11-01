@@ -16,6 +16,7 @@ import TransportBar from './TransportBar.vue'
 import ContextPanel from './ContextPanel.vue'
 import EmptyState from './EmptyState.vue'
 import ProcessingOverlay from './ProcessingOverlay.vue'
+import RotateHint from './RotateHint.vue'
 
 const {
   state, appState, performCut, performCopy, performPaste,
@@ -319,8 +320,9 @@ onUnmounted(() => {
     @drop="onDrop"
   >
     <TopBar />
+    <RotateHint v-if="hasFile" />
 
-    <div class="flex flex-1 overflow-hidden">
+    <div class="relative flex flex-1 overflow-hidden">
       <!-- Workspace -->
       <div class="flex flex-col flex-1 overflow-hidden">
         <FloatingToolbar />
@@ -404,5 +406,12 @@ onUnmounted(() => {
 .ctx-panel-leave-to {
   transform: translateX(100%);
   opacity: 0;
+}
+/* The bottom sheet (see ContextPanel) rises rather than slides in. */
+@media (max-width: 639.98px) {
+  .ctx-panel-enter-from,
+  .ctx-panel-leave-to {
+    transform: translateY(100%);
+  }
 }
 </style>
