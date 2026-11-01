@@ -179,6 +179,124 @@ export function referenceBlocks(channels, sampleRate) {
  *   measured (null = unmeasurable; absent = measure it here)
  */
 export function measureVoxPressor(channels, sampleRate, p = {}) {
+  /**
+   * ⚠ EVERYTHING BEFORE PARALLEL IS CACHED, keyed on the region's samples and
+   * the params those stages read (`upstreamKey`), so a Parallel move — Mix, its
+   * compressor, its de-esser — re-solves only the Parallel stage. 30 s of
+   * "Messy and Bright": LA-2A 2.8 s cold → 0.8–1.1 s (its makeup still
+   * iterates renders), 1176 2.0 s → 0.4–0.6 s. One entry: a single panel
+   * measures one region at a time; the answer is identical to a cold one.
+   */
+  const key = upstreamKey(channels, sampleRate, p)
+  let up = upstreamCache?.key === key ? upstreamCache.value : null
+  if (!up) {
+    up = measureUpstream(channels, sampleRate, p)
+    upstreamCache = { key, value: up }
+  }
+  const out = { ...up.out }
+  if (up.silent) return out
+  const { afterDeEss, voiceF0Hz, ceilingDb } = up
+
+  // ── PARALLEL ── the parallel 1176's alignment and wet makeup, measured on
+  // the de-esser's output (spec §4.4: measure it on what it hears). The makeup
+  // is solved ON THE BLEND at the current Mix (the LA-2A mix law), so the Mix
+  // knob re-measures; one oversampled render of the wet path answers it.
+  // ⚠ Not `computeFET1176AutoMakeupPlan`: that renders without the sidechain,
+  // and this 1176 listens through `ParallelDetector`.
+  if (p.parallelMix > 0) {
+    // The LA-2A aligns on the SOURCE (the file's `alignDb`, which reaches the
+    // kernel as `bodyAlignDb`), as an LA Vintage 2A slot's preview does — see
+    // `PARALLEL_COMPS`. The 1176 aligns on what it hears.
+    out.parallelAlignDb = parallelCompOf(p) === 'la2a' && Number.isFinite(p.bodyAlignDb)
+      ? p.bodyAlignDb
+      : alignDbForRms(gatedRmsOfChannels(afterDeEss, sampleRate))
+    const at = { ...p, voiceF0Hz, parallelAlignDb: out.parallelAlignDb }
+    const solved = parallelCompOf(p) === 'la2a'
+      ? parallelLa2aSolve(afterDeEss, sampleRate, at)
+      : parallelFetSolve(afterDeEss, sampleRate, at)
+    out.parallelMakeupDb = solved.makeupDb
+    /**
+     * ⚠ THE PEAK IS HELD BY THE COMPRESSOR'S OWN SIZED SOFT CEILING, NOT A
+     * LIMITER — each option exactly as its standalone plugin holds it (owner,
+     * October 2026, "keep the two versions consistent"): the ceiling at the
+     * source peak, its knee sized by the solve (`ceilingKneeDbFor`) from how far
+     * the un-ceilinged blend overshoots. The LA-2A's blend overshot by ~3 dB on
+     * "Messy and Bright"; the knee bent 0.06 % of its samples by more than
+     * 0.1 dB, where the lookahead limiter it replaced dipped 5.1 % — it turned
+     * whole onsets down for its 50 ms release, which the owner heard as less
+     * warm and full than an LA Vintage 2A slot (renders −32.5 dB apart; the
+     * compressors themselves null to −∞).
+     *
+     * The 1176 also keeps LA Classic 76's PEAK RESTORE (its apply's
+     * `restorePeakToCeiling`): the sibilance emphasis lets the copy catch the
+     * "s" peaks that set the region's peak, which left the blend 0.3–0.6 dB
+     * under the source peak. The LA-2A has none, as LA Vintage 2A has none.
+     * Measured on the window, as Body's; past it the limiter after the stage,
+     * a backstop that is otherwise idle, holds the peak.
+     */
+    if (solved.blend) {
+      const overDb = db(peakOfChannels(solved.blend)) - ceilingDb
+      out.parallelCeilingKneeDb = ceilingKneeDbFor(overDb)
+      if (parallelCompOf(p) !== 'la2a') {
+        const lin = float32AtOrBelow(Math.exp(ceilingDb * (Math.LN10 / 20)))
+        const knee = lin * Math.exp(-out.parallelCeilingKneeDb * (Math.LN10 / 20))
+        let pk = 0
+        for (const c of solved.blend) for (const v of c) { const a = Math.abs(softCeiling(v, lin, knee)); if (a > pk) pk = a }
+        out.parallelRestoreDb = restoreToCeilingDb(ceilingDb, db(pk))
+      }
+    }
+  }
+  return out
+}
+
+/** The one cached upstream measurement (see `measureVoxPressor`). */
+let upstreamCache = null
+
+/** Forget it — for tests that time or compare cold measurements. */
+export function clearVoxPressorMeasureCache() {
+  upstreamCache = null
+}
+
+/**
+ * Params the Parallel stage alone reads, or that the upstream solve overrides
+ * or only starts from: none of them can change Peaks, Body or De-ess.
+ * `bodyMakeupGuess` only warm-starts a solve that converges inside 0.05 dB
+ * either way; the measured makeups and restores are replaced by `base`.
+ */
+const NOT_UPSTREAM = new Set([
+  'density', 'outputDb', 'listen', 'bodyMakeupGuess', 'sourcePeakDb', 'makeupDb',
+  'peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb', 'bodyMakeupDb', 'bodyCeilingDb',
+  'deEssLevelOffsetDb',
+])
+
+function upstreamKey(channels, sampleRate, p) {
+  const params = {}
+  for (const k of Object.keys(p).sort()) {
+    if (k.startsWith('parallel') || NOT_UPSTREAM.has(k)) continue
+    // The de-esser's level offset is measured here and overrides the panel's.
+    params[k] = k === 'deEss' && p.deEss ? { ...p.deEss, levelOffsetDb: undefined } : p[k]
+  }
+  return `${sampleRate}|${channels.length}|${channels[0]?.length ?? 0}|${channelsHash(channels)}|${JSON.stringify(params)}`
+}
+
+/** FNV-1a over every sample's bits: ~1.3 M samples per 30 s mono, a few ms. */
+function channelsHash(channels) {
+  let h = 0x811c9dc5
+  for (const c of channels) {
+    const u = new Uint32Array(c.buffer, c.byteOffset, c.length)
+    for (let i = 0; i < u.length; i++) {
+      h ^= u[i]
+      h = Math.imul(h, 0x01000193)
+    }
+  }
+  return (h >>> 0).toString(16)
+}
+
+/**
+ * Peaks → Body → De-ess: their readouts, makeups, restores and the de-esser's
+ * output, everything the Parallel stage reads. Never mutated by the caller.
+ */
+function measureUpstream(channels, sampleRate, p) {
   // The corner and the median F0 are properties of the file, not of the
   // knobs: callers that measure repeatedly measure them once and pass them in.
   // ⚠ The F0 is read BEFORE anything renders: SPEED AUTO takes the 1176's
@@ -208,7 +326,7 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
     peaksDb: 0, peaksBodyDb: 0, bodyDb: 0,
   }
   const inPeak = peakOfChannels(channels)
-  if (!(inPeak > 0)) return none
+  if (!(inPeak > 0)) return { out: none, silent: true }
   // Both stages' limiters hold the SOURCE's peak.
   const ceilingDb = db(inPeak)
   const out = { ...none, sourcePeakDb: ceilingDb }
@@ -306,56 +424,7 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
     }).channelData
   }
 
-  // ── PARALLEL ── the parallel 1176's alignment and wet makeup, measured on
-  // the de-esser's output (spec §4.4: measure it on what it hears). The makeup
-  // is solved ON THE BLEND at the current Mix (the LA-2A mix law), so the Mix
-  // knob re-measures; one oversampled render of the wet path answers it.
-  // ⚠ Not `computeFET1176AutoMakeupPlan`: that renders without the sidechain,
-  // and this 1176 listens through `ParallelDetector`.
-  if (p.parallelMix > 0) {
-    // The LA-2A aligns on the SOURCE (the file's `alignDb`, which reaches the
-    // kernel as `bodyAlignDb`), as an LA Vintage 2A slot's preview does — see
-    // `PARALLEL_COMPS`. The 1176 aligns on what it hears.
-    out.parallelAlignDb = parallelCompOf(p) === 'la2a' && Number.isFinite(p.bodyAlignDb)
-      ? p.bodyAlignDb
-      : alignDbForRms(gatedRmsOfChannels(afterDeEss, sampleRate))
-    const at = { ...p, voiceF0Hz, parallelAlignDb: out.parallelAlignDb }
-    const solved = parallelCompOf(p) === 'la2a'
-      ? parallelLa2aSolve(afterDeEss, sampleRate, at)
-      : parallelFetSolve(afterDeEss, sampleRate, at)
-    out.parallelMakeupDb = solved.makeupDb
-    /**
-     * ⚠ THE PEAK IS HELD BY THE COMPRESSOR'S OWN SIZED SOFT CEILING, NOT A
-     * LIMITER — each option exactly as its standalone plugin holds it (owner,
-     * October 2026, "keep the two versions consistent"): the ceiling at the
-     * source peak, its knee sized by the solve (`ceilingKneeDbFor`) from how far
-     * the un-ceilinged blend overshoots. The LA-2A's blend overshot by ~3 dB on
-     * "Messy and Bright"; the knee bent 0.06 % of its samples by more than
-     * 0.1 dB, where the lookahead limiter it replaced dipped 5.1 % — it turned
-     * whole onsets down for its 50 ms release, which the owner heard as less
-     * warm and full than an LA Vintage 2A slot (renders −32.5 dB apart; the
-     * compressors themselves null to −∞).
-     *
-     * The 1176 also keeps LA Classic 76's PEAK RESTORE (its apply's
-     * `restorePeakToCeiling`): the sibilance emphasis lets the copy catch the
-     * "s" peaks that set the region's peak, which left the blend 0.3–0.6 dB
-     * under the source peak. The LA-2A has none, as LA Vintage 2A has none.
-     * Measured on the window, as Body's; past it the limiter after the stage,
-     * a backstop that is otherwise idle, holds the peak.
-     */
-    if (solved.blend) {
-      const overDb = db(peakOfChannels(solved.blend)) - ceilingDb
-      out.parallelCeilingKneeDb = ceilingKneeDbFor(overDb)
-      if (parallelCompOf(p) !== 'la2a') {
-        const lin = float32AtOrBelow(Math.exp(ceilingDb * (Math.LN10 / 20)))
-        const knee = lin * Math.exp(-out.parallelCeilingKneeDb * (Math.LN10 / 20))
-        let pk = 0
-        for (const c of solved.blend) for (const v of c) { const a = Math.abs(softCeiling(v, lin, knee)); if (a > pk) pk = a }
-        out.parallelRestoreDb = restoreToCeilingDb(ceilingDb, db(pk))
-      }
-    }
-  }
-  return out
+  return { out, afterDeEss, voiceF0Hz, ceilingDb, silent: false }
 }
 
 /**

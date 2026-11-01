@@ -667,3 +667,38 @@ test('BENCH: the Parallel de-esser takes the copy\'s top end down, leaves the le
       `${parallelComp}: peak ${(db(peak(deEssed[0])) - sourcePeakDb).toFixed(4)} dB over`)
   }
 })
+
+test('a Parallel move re-solves only Parallel: cached upstream, same answer as cold', async () => {
+  const { clearVoxPressorMeasureCache } = await import('../../src/audio/voxPressorSolve.js')
+  const x = narration(SR, { seconds: 12, levelDb: -24 })
+  const cold = (panel) => {
+    clearVoxPressorMeasureCache()
+    return measure(x, panel).r
+  }
+  const a = cold({ parallel: 30 })
+  const coldB = cold({ parallel: 70 })
+  // Warm: measure at 30, then move only Parallel.
+  clearVoxPressorMeasureCache()
+  measure(x, { parallel: 30 })
+  const t0 = Date.now()
+  const warmB = measure(x, { parallel: 70 }).r
+  const warmMs = Date.now() - t0
+  assert.deepEqual(warmB, coldB)
+  assert.notEqual(warmB.parallelMakeupDb, a.parallelMakeupDb)
+  // The compressor and its de-esser are Parallel-only too.
+  for (const panel of [{ parallelComp: '1176' }, { parallelDeEss: 60 }, { parallelDeEssMode: 'shelf' }]) {
+    const w = measure(x, { parallel: 70, ...panel }).r
+    assert.deepEqual(w, cold({ parallel: 70, ...panel }), JSON.stringify(panel))
+  }
+  // An upstream knob is NOT cached past: a different Body re-measures everything.
+  measure(x, { parallel: 70 })
+  const body = measure(x, { parallel: 70, body: 70 }).r
+  assert.deepEqual(body, cold({ parallel: 70, body: 70 }))
+  assert.notEqual(body.bodyMakeupDb, coldB.bodyMakeupDb)
+  // And so does different audio of the same length.
+  const y = narration(SR, { seconds: 12, levelDb: -18 })
+  measure(x, { parallel: 70 })
+  const other = measureVoxPressor([y], SR, { ...measure(y, { parallel: 70 }).kp }).sourcePeakDb
+  assert.notEqual(other, coldB.sourcePeakDb)
+  assert.ok(warmMs < 2000, `warm Parallel move took ${warmMs} ms`)
+})
