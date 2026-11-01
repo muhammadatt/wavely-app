@@ -398,7 +398,7 @@ frames' energy above 5 kHz):
 
 | Mix 30 | Messy vowels | Messy "s" | Greenberg vowels | Greenberg "s" |
 |---|---|---|---|---|
-| 1176 (ships) | +0.95 | −0.49 | +1.03 | +0.50 |
+| 1176 (shipped then) | +0.95 | −0.49 | +1.03 | +0.50 |
 | 1176 + de-ess 50 | +0.96 | −2.39 | +1.03 | −2.06 |
 | 1176, emphasis off | +0.84 | +2.59 | +0.84 | +3.05 |
 | 1176, emphasis off + de-ess 50 | +0.87 | −1.70 | +0.85 | −1.51 |
@@ -451,6 +451,14 @@ mechanisms, but presets should not max both (§11).
 Peaks patch (ratio, attack, release, Input = knee width), Body ballistics, detector
 corner/shelf depths per tap, Parallel Squash, Inflator Curve and Band Split, the Color switch,
 chain-order A/B, `VOX_LEGACY_PATCH`. Nothing on the bench ships to presets.
+
+**Bench defaults (owner, November 2026):** Parallel comp **LA-2A**, Parallel
+de-ess **25** (FULL), Body lookahead **5 ms** — panel defaults (`VOX_DEFAULTS`);
+the kernel's own defaults stay neutral (1176, de-ess 0, no lookahead) so its
+bit-identity tests keep their meaning. ⚠ At 5 ms of lookahead VoxPressor's
+Parallel LA-2A and an LA Vintage 2A slot solve their makeups 0.04 dB apart on
+synthetic narration (each solver stops inside 0.05 dB), −52.6 dB of
+difference against −75 to −81 at 0 ms; the slot-match test pins 0 ms.
 
 ---
 
@@ -598,7 +606,7 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
   (tanh: +3.53), peak exactly the source's, gain dipping > 0.5 dB on ~1.7 % of
   samples and > 0.1 dB on ~5 %. To audition: pumping around hard consonants.
 - **Body lookahead is on the bench** (October 2026): LA Vintage 2A's own
-  Lookahead, 0 / 5 / 10 / 20 ms, off ships, solved with. "Messy and Bright":
+  Lookahead, 0 / 5 / 10 / 20 ms, 5 ships (owner, November 2026), solved with. "Messy and Bright":
   +0.6 dB at 10 ms, +0.8 at 20 (Peaks 3 / Body 4) — and the limiters catch
   MORE with it, not less: taming the onsets lowers the percentile reference,
   so the makeup rises by about as much. Costs its ms of latency and pre-ducks

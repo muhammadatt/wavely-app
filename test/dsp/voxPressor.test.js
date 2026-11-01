@@ -472,7 +472,8 @@ test('each later stage does its job and none of them raises the source peak', ()
   const x = narration(SR, { seconds: 12, levelDb: -24 })
   const sourcePeak = peak(x)
   const render = (panel) => {
-    const { params } = measure(x, { peaks: 3, body: 57, deEss: 0, parallel: 0, density: 0, ...panel })
+    // The Parallel figures below are the 1176's, with no de-esser on the copy.
+    const { params } = measure(x, { peaks: 3, body: 57, deEss: 0, parallel: 0, density: 0, parallelComp: '1176', parallelDeEss: 0, ...panel })
     return processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData
   }
   const dry = render({})
@@ -599,14 +600,16 @@ test('an unmeasurable corner is sent as null, so a merging kernel resets to its 
 test('BENCH: the parallel LA-2A swaps in with the same latency, measures, and holds the peak', () => {
   const x = narration(SR, { seconds: 12, levelDb: -24 })
   const sourcePeakDb = db(peak(x))
+  const lat = {}
   for (const comp of ['1176', 'la2a']) {
     const kp = toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, parallelComp: comp, parallelAlignDb: 0, parallelMakeupDb: 0 })
     assert.equal(kp.parallelComp, comp)
-    assert.equal(voxLatencySamples(kp, SR), new VoxPressorKernel(SR).latencySamples, comp)
     const k = new VoxPressorKernel(SR)
     k.setParams(kp)
-    assert.equal(k.latencySamples, new VoxPressorKernel(SR).latencySamples, `${comp}: switching moved the audio`)
+    assert.equal(voxLatencySamples(kp, SR), k.latencySamples, comp)
+    lat[comp] = k.latencySamples
   }
+  assert.equal(lat['1176'], lat.la2a, 'switching moved the audio')
   const { r, params } = measure(x, { parallel: 60, parallelComp: 'la2a' })
   assert.ok(Number.isFinite(r.parallelMakeupDb) && Number.isFinite(r.parallelRestoreDb), 'LA-2A parallel measured')
   const out = processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData
@@ -618,8 +621,11 @@ test('the Parallel LA-2A renders as an LA Vintage 2A slot after VoxPressor (owne
   const { toKernelParams: la2aKp, LA2A_DEFAULTS } = await import('../../src/audio/effects/la2aParams.js')
   const x = narration(SR, { seconds: 12, levelDb: -24 })
   const align = inputAlignDbFor([x], SR)
+  // Body lookahead 0: at the shipping 5 ms the two makeups (two solvers, each
+  // stopping inside 0.05 dB) land 0.04 dB apart on this narration, which reads
+  // −52.6 dB here; the test is about the Parallel stage, not solver tolerance.
   const render = (panel) => {
-    const { params } = measure(x, { density: 0, ...panel })
+    const { params } = measure(x, { density: 0, bodyLookaheadMs: 0, ...panel })
     return processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData[0]
   }
   const core = render({ parallel: 0 })
@@ -631,7 +637,8 @@ test('the Parallel LA-2A renders as an LA Vintage 2A slot after VoxPressor (owne
   k.setParams({ ...base, gainDb: plan.makeupDb, ceilingDb: db(peak(x)), ceilingKneeDb: plan.ceilingKneeDb })
   const slot = runKernel(k, Float32Array.from({ length: core.length + k.latencySamples }, (_, i) => core[i] ?? 0))
     .subarray(k.latencySamples)
-  const vox = render({ parallel: 50, parallelComp: 'la2a' })
+  // The slot has no de-esser of its own, so the copy's is off here.
+  const vox = render({ parallel: 50, parallelComp: 'la2a', parallelDeEss: 0 })
   let e = 0
   let d = 0
   for (let i = 0; i < core.length; i++) { e += slot[i] ** 2; d += (slot[i] - vox[i]) ** 2 }
@@ -650,7 +657,7 @@ test('BENCH: the Parallel de-esser takes the copy\'s top end down, leaves the le
       assert.ok(Number.isFinite(r.parallelMakeupDb), `${parallelComp}: measured`)
       return processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData
     }
-    const plain = render({})
+    const plain = render({ parallelDeEss: 0 })
     const deEssed = render({ parallelDeEss: 50 })
     const hf = hfEnergyDb(deEssed) - hfEnergyDb(plain)
     const level = db(gatedRmsOfChannels(deEssed, SR)) - db(gatedRmsOfChannels(plain, SR))

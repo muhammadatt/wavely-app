@@ -103,20 +103,22 @@ export const VOX_DEFAULTS = {
   listen: 'off',
   /**
    * BENCH: the LA-2A's lookahead, ms (LA Vintage 2A's Lookahead control,
-   * `LOOKAHEAD_MAX_MS`). 0 ships — an LA-2A has none. It moves the latency.
+   * `LOOKAHEAD_MAX_MS`). 5 ships (owner's A/B, November 2026; a hardware
+   * LA-2A has none). It moves the latency.
    */
-  bodyLookaheadMs: 0,
+  bodyLookaheadMs: 5,
   /**
-   * BENCH: the Parallel stage's compressor, '1176' (ships) | 'la2a' — an A/B
-   * with everything else shared (`PARALLEL_COMPS`). Re-measures.
+   * BENCH: the Parallel stage's compressor, 'la2a' (ships: owner's A/B,
+   * November 2026) | '1176' — everything else shared (`PARALLEL_COMPS`).
+   * Re-measures.
    */
-  parallelComp: '1176',
+  parallelComp: 'la2a',
   /**
    * BENCH: the Parallel copy's own de-esser, 0–100 (`dsp/parallelDeEsser.js`:
    * LA Vintage 2A's sibilance-guard detector driving a top-band cut on the
-   * copy, before the blend). Re-measures.
+   * copy, before the blend). 25 ships (owner, November 2026). Re-measures.
    */
-  parallelDeEss: 0,
+  parallelDeEss: 25,
   /**
    * BENCH: what it cuts — 'broadband' (the whole copy, ships: owner's A/B),
    * 'shelf' (above 4 kHz) or 'shelf-low' (above 2.5 kHz). Re-measures.
