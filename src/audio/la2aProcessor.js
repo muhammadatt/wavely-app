@@ -1584,6 +1584,15 @@ export const EMPHASIS_EPSILON = 1e-4
  */
 export const SIBILANCE_GUARD_DEFAULT = 100
 export const SIB_GUARD_HZ = 4000
+/**
+ * BENCH range for the guard's detector corner (`sibilanceGuardHz`). An "sh" is
+ * darker than an "s": on the owner's "Actual grownup" the "sh" puts only 0.25
+ * of its energy above 4 kHz (the guard barely starts) against 0.55 above
+ * 2.5 kHz, where vowels on four clips stay at or under 0.19 — under the 0.25 at
+ * which the guard begins. At 2 kHz vowels reach 0.31.
+ */
+export const SIB_GUARD_HZ_MIN = 1500
+export const SIB_GUARD_HZ_MAX = 8000
 export const SIB_GUARD_RATIO_LO = 0.25
 export const SIB_GUARD_RATIO_HI = 0.6
 const SIB_GUARD_ENV_MS = 4
@@ -1746,6 +1755,8 @@ export const LA2A_KERNEL_DEFAULTS = {
   emphasis: EMPHASIS_DEFAULT,
   /** Cell-drive duck on sibilance, 0-100; 0 = off. See SIBILANCE_GUARD_DEFAULT. */
   sibilanceGuard: SIBILANCE_GUARD_DEFAULT,
+  /** BENCH: the guard detector's high-pass corner, Hz. See SIB_GUARD_HZ_MIN. */
+  sibilanceGuardHz: SIB_GUARD_HZ,
 }
 
 /**
@@ -1862,6 +1873,7 @@ export class LA2AKernel {
     this.relPhase = 0
     // Sibilance guard: detector high-pass (DF1), the two mean squares, the
     // smoothed drive scale. See SIBILANCE_GUARD_DEFAULT.
+    this.sibHz = SIB_GUARD_HZ
     this.sibHp = highpass(sampleRate, SIB_GUARD_HZ)
     this.sibEnvCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_ENV_MS / 1000)))
     this.sibAtkCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_ATTACK_MS / 1000)))
@@ -2447,6 +2459,12 @@ export class LA2AKernel {
     this.sibDepth = this.cellShaperActive
       ? clamp(Number.isFinite(p.sibilanceGuard) ? p.sibilanceGuard : 0, 0, 100) / 100
       : 0
+    const sibHz = Number.isFinite(p.sibilanceGuardHz)
+      ? clamp(p.sibilanceGuardHz, SIB_GUARD_HZ_MIN, SIB_GUARD_HZ_MAX) : SIB_GUARD_HZ
+    if (sibHz !== this.sibHz) {
+      this.sibHz = sibHz
+      this.sibHp = highpass(this.sampleRate, Math.min(sibHz, this.sampleRate * 0.45))
+    }
     if (!sibWas && this.sibDepth > 0) this.resetSibState()
     /**
      * ⚠ THE SHAPER'S THREE SEAM VALUES ONLY ADVANCE WHILE IT IS RUNNING, so

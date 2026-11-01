@@ -107,6 +107,10 @@ const CONTROLS = [
     hint: 'CELL stage only. Pulls the cell shaper’s drive down while the input is mostly above 4 kHz (energy ratio 0.25 → 0.6, 1 ms down / 30 ms back), so loud sibilants stop distorting without lowering Emphasis — which fixes the same thing but takes the warmth with it. Ships at 100; 0 is the previous kernel bit for bit. Compression is unchanged at every setting. Reasoned on synthetic voice, not auditioned: loud-sibilant distortion under 1 kHz −18 → −38 dB at PR 70, vowels unchanged.',
   },
   {
+    key: 'sibilanceGuardHz', label: 'Sib guard Hz', min: 1500, max: 8000, step: 50, digits: 0, unit: ' Hz',
+    hint: 'Corner of the guard detector’s high-pass: it reads the share of energy above this. Ships at 4000. An “sh” is darker than an “s”: on “Actual grownup” its share is 0.25 above 4 kHz (the guard barely starts) and 0.55 above 2.5 kHz, while vowels on four clips stay ≤ 0.19 there (the guard starts at 0.25). Measured at PR 70, the “sh” goes −27.8 → −33.1 dB of added energy under 1 kHz at 3000 or 2500, which is the VALVE’s own share — the guard does not reach the valve. Vowels lose under 0.15 dB of harmonics. At 2000 vowels read 0.31 and start to trigger it.',
+  },
+  {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
     hint: 'VALVE stage only — the valves are ~5% of the distortion, so this is a small constant floor under the cell. Same quantity as Cell sat, at the other stage, and the two read in comparable units once auto makeup is engaged. Ships at 0.5, chosen by ear.',
   },
