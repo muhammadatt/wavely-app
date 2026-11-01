@@ -31,13 +31,13 @@ const tools = CATEGORIES
 </script>
 
 <template>
-  <div class="h-[65px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] px-5 compact:px-2 shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
+  <div class="h-[65px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] max-sm:gap-1 px-5 compact:px-2 max-sm:px-[6px] shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
     <!-- Search is the escape hatch from the category hierarchy: as the number
          of operations grows, this is how you reach one without knowing which
          category it lives in. -->
     <div class="flex-1 compact:flex-none min-w-0 flex items-center">
       <button
-        class="palette-trigger flex items-center gap-2 pl-[10px] pr-2 py-[7px] rounded-[10px] cursor-pointer max-w-[210px]"
+        class="palette-trigger flex items-center gap-2 pl-[10px] pr-2 max-sm:px-[8px] py-[7px] rounded-[10px] cursor-pointer max-w-[210px]"
         :disabled="!hasFile"
         title="Search operations (Ctrl+K)"
         @click="openCommandPalette"
@@ -62,7 +62,7 @@ const tools = CATEGORIES
         @click="setActiveTool(tool.id)"
       >
         <Icon :name="tool.icon" :size="15" class="tool-btn__icon" />
-        {{ tool.label }}
+        <span class="tool-btn__label">{{ tool.label }}</span>
       </button>
     </div>
     <!-- Undo/Redo moved to the TopBar, next to Export. This spacer stays: it
@@ -220,6 +220,42 @@ const tools = CATEGORIES
 .chain-count.is-live {
   background: rgba(232, 163, 61, .2);
   color: #e8a33d;
+}
+
+/* Phone held upright: a TAB BAR. The segmented control stays one row of
+   chips, but each chip stacks its icon over a small label and takes an equal
+   share of the width, so every category is on screen at once. As chips side
+   by side they needed ~550 px and the row hid Tone, Fix and Master behind a
+   sideways scroll nothing hinted at. A label that still does not fit is
+   ellipsised, and the tray scrolls as a last resort. */
+@media (max-width: 639.98px) {
+  .tool-group {
+    flex: 1 1 auto;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 11px;
+  }
+  .tool-group .tool-btn {
+    /* auto, not 0: equal shares cut "Dynamics" at 360 px while "Fix" had
+       room to spare. Content first, then the spare width shared out. */
+    flex: 1 1 auto;
+    min-width: 34px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 5px 2px 4px;
+    border-radius: 8px;
+    font-size: 10px;
+    letter-spacing: -0.01em;
+  }
+  .chain-btn {
+    padding: 7px 6px;
+  }
+  .tool-group .tool-btn__label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 /* Compact (the `compact:` variant in main.css): smaller chips so the six

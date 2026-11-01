@@ -67,13 +67,13 @@ const fileMeta = computed(() => {
   >
     <!-- Logo -->
     <div class="flex items-center shrink-0">
-      <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[26px] compact:h-[20px] w-auto select-none" draggable="false" />
+      <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[26px] compact:h-[20px] max-sm:h-[17px] w-auto select-none" draggable="false" />
     </div>
 
     <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] compact:hidden"></div>
 
     <!-- Active file properties -->
-    <div class="flex-1 flex items-center gap-[8px] overflow-hidden compact:invisible" v-if="fileMeta">
+    <div class="flex-1 min-w-0 flex items-center gap-[8px] overflow-hidden compact:invisible" v-if="fileMeta">
       <span
         class="font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[6px] py-[3px] rounded-[5px] whitespace-nowrap shrink-0"
         style="color:#7fe9f6;background:rgba(53,211,230,.14);border:1px solid rgba(53,211,230,.3)"
@@ -91,7 +91,7 @@ const fileMeta = computed(() => {
       <!-- History. Icon-only: the arrows are unambiguous and the labels were
            costing width this row doesn't have once the tab strip fills up. -->
       <BaseButton
-        size="md" color="ghost" :pill="false"
+        size="md" color="ghost" :pill="false" class="max-sm:px-[9px]"
         :disabled="!canUndo"
         @click="undo"
         title="Undo (Ctrl+Z)"
@@ -100,7 +100,7 @@ const fileMeta = computed(() => {
         <Icon name="undo" :size="15" /> <span class="compact:hidden">Undo</span>
       </BaseButton>
       <BaseButton
-        size="md" color="ghost" :pill="false"
+        size="md" color="ghost" :pill="false" class="max-sm:px-[9px]"
         :disabled="!canRedo"
         @click="redo"
         title="Redo (Ctrl+Shift+Z)"
@@ -109,14 +109,14 @@ const fileMeta = computed(() => {
         <Icon name="redo" :size="15" /> <span class="compact:hidden">Redo</span>
       </BaseButton>
 
-      <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-1 compact:mx-0"></div>
+      <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-1 compact:mx-0 max-sm:hidden"></div>
 
       <!-- Save + Save As. The caret's menu is a single item today; it exists
            because a Save that silently retargets is worse than one extra
            click, and "save a copy somewhere else" has to be reachable. -->
       <div class="flex items-center" data-save-menu>
         <BaseButton
-          size="md" color="ghost" :pill="false"
+          size="md" color="ghost" :pill="false" class="max-sm:px-[9px]"
           :disabled="!hasFile || isSaving"
           @click="saveDocument()"
           :title="isDirty ? 'Save — unsaved edits (Ctrl+S)' : 'Save (Ctrl+S)'"
@@ -132,7 +132,7 @@ const fileMeta = computed(() => {
         </BaseButton>
         <div class="relative">
           <button
-            class="h-[30px] w-[18px] flex items-center justify-center rounded-[7px] transition-colors hover:bg-[rgba(255,255,255,.09)] disabled:opacity-40"
+            class="h-[30px] w-[18px] max-sm:w-[16px] flex items-center justify-center rounded-[7px] transition-colors hover:bg-[rgba(255,255,255,.09)] disabled:opacity-40"
             style="color:rgba(255,255,255,.55)"
             :disabled="!hasFile || isSaving"
             title="Save As… (Ctrl+Shift+S)"
@@ -155,7 +155,7 @@ const fileMeta = computed(() => {
       </div>
 
       <BaseButton
-        size="md" :pill="false"
+        size="md" :pill="false" class="max-sm:px-[10px]"
         :disabled="!hasFile"
         @click="appState.exportDialogOpen = true"
         :title="documentCount > 1 ? 'Export files (Ctrl+E)' : 'Export as WAV (Ctrl+E)'"

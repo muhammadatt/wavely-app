@@ -123,6 +123,8 @@ export const ICONS = {
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
   close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  // Head and shoulders: the account button's stand-in for "Sign in" on a phone.
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>',
   window: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/>',
   // Three strokes, like every other glyph here: ring, hook, dot. The dot is a
   // zero-length line so the round cap draws it — a filled circle would be the
