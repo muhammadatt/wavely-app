@@ -354,8 +354,8 @@ export const VOX_KERNEL_DEFAULTS = {
   parallelComp: '1176',
   /** BENCH: the copy's own de-esser, 0–100 — see `parallelDeEssDepthDb`. */
   parallelDeEss: 0,
-  /** BENCH: what it cuts, 'shelf' (ships) | 'shelf-low' | 'broadband' (`PARALLEL_DEESS_MODES`). */
-  parallelDeEssMode: 'shelf',
+  /** BENCH: what it cuts, 'broadband' (ships) | 'shelf' | 'shelf-low' (`PARALLEL_DEESS_MODES`). */
+  parallelDeEssMode: 'broadband',
   /**
    * BENCH: whether the parallel 1176's detector hears sibilance +15 dB
    * (`ParallelDetector`). true ships; the LA-2A never does.

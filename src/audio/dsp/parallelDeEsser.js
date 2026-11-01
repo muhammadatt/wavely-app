@@ -42,18 +42,20 @@ export const PARALLEL_DEESS_RELEASE_MS = 30
 export const PARALLEL_DEESS_SPLIT_HZ = 4000
 /**
  * BENCH: what the cut takes (`setMode`).
- * - 'shelf' (ships): the band above `PARALLEL_DEESS_SPLIT_HZ`.
+ * - 'shelf': the band above `PARALLEL_DEESS_SPLIT_HZ`.
  * - 'shelf-low': the same split at `PARALLEL_DEESS_LOW_SPLIT_HZ`, so a flat
  *   "f" — much of it 1.5–4 kHz — is cut evenly instead of darkened (at 4 kHz
  *   the copy still lifted its lower part while cutting its top: a 3–4 dB tilt
  *   at Mix 30 on the owner's "Fix slide four", 5–8 dB at Mix 60).
- * - 'broadband': the whole copy, `g·x` — while a fricative lasts the copy all
- *   but leaves and the dry carries it untouched, nothing reshaped; the parallel
- *   1176's sibilance detector does the same for loud "s" sounds.
+ * - 'broadband' (SHIPS, owner's A/B, November 2026): the whole copy, `g·x` —
+ *   while a fricative lasts the copy all but leaves and the dry carries it
+ *   untouched, nothing reshaped; the parallel 1176's sibilance detector does
+ *   the same for loud "s" sounds.
  * The detector is the same in all three, so is the depth.
  */
 export const PARALLEL_DEESS_MODES = Object.freeze(['shelf', 'shelf-low', 'broadband'])
 export const PARALLEL_DEESS_LOW_SPLIT_HZ = 2500
+export const PARALLEL_DEESS_DEFAULT_MODE = 'broadband'
 /** The cut at full scale of the 0–100 amount, dB. */
 export const PARALLEL_DEESS_MAX_DB = 24
 
@@ -79,6 +81,7 @@ export class ParallelDeEsser {
     /** The deepest cut since `takeCutDb`, dB (positive), for a meter. */
     this.cutHold = 0
     this.reset()
+    this.setMode(PARALLEL_DEESS_DEFAULT_MODE)
   }
 
   reset() {
@@ -94,9 +97,9 @@ export class ParallelDeEsser {
     this.depthDb = Number.isFinite(depthDb) ? Math.max(0, depthDb) : 0
   }
 
-  /** 'shelf' | 'shelf-low' | 'broadband' — see `PARALLEL_DEESS_MODES`. Unknown = 'shelf'. */
+  /** 'shelf' | 'shelf-low' | 'broadband' — see `PARALLEL_DEESS_MODES`. Unknown = the shipping mode. */
   setMode(mode) {
-    const m = PARALLEL_DEESS_MODES.includes(mode) ? mode : 'shelf'
+    const m = PARALLEL_DEESS_MODES.includes(mode) ? mode : PARALLEL_DEESS_DEFAULT_MODE
     if (m === this.mode) return
     this.mode = m
     const hz = m === 'shelf-low' ? PARALLEL_DEESS_LOW_SPLIT_HZ : PARALLEL_DEESS_SPLIT_HZ

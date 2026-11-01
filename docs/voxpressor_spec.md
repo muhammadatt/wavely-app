@@ -416,8 +416,8 @@ it sat with Parallel off — the copy is then de-essed past neutral, the bus
 treatment, not a correction. ⚠ Not auditioned; the amount and the 4 kHz split
 are reasoned.
 
-**Flat fricatives, and the cut's shape (`parallelDeEssMode`, bench: 4K ships /
-2.5K / FULL).** The detector cannot tell an "f" from an "s" (an "f" is flat
+**Flat fricatives, and the cut's shape (`parallelDeEssMode`, bench: FULL ships —
+the owner's A/B, November 2026 — / 4K / 2.5K).** The detector cannot tell an "f" from an "s" (an "f" is flat
 but nearly empty below 1.5 kHz, so its share above 4 kHz still reads 0.5–0.8)
 and engages fully on both. On "Fix slide four" that matters more than the
 two longer clips showed: the parallel 1176's +15 dB detector catches the loud
@@ -431,7 +431,8 @@ Mix 30 (5–8 at 60). Measured at de-ess 50, "f" frames, Mix 30, 1176
 +0.4…+1.5 / −1.3…−1.9; FULL −0.7…−1.0 / −0.7…−1.2 — only FULL cuts the "f"
 evenly. On "Messy" and "Greenberg" the three modes are within 0.04 dB on
 vowels for the 1176 (the LA-2A's FULL +0.1–0.2), with FULL taking 0.2–0.5 dB
-less off the "s" top. ⚠ Not auditioned — the owner's A/B decides.
+less off the "s" top. The owner A/B'd the three and chose FULL ("sounds
+better"); the de-ess AMOUNT still ships at 0.
 
 ⚠ **Overlap with Density.** Both add density: Parallel by dynamic upward
 compression, Density by a static curve with odd harmonics. Different

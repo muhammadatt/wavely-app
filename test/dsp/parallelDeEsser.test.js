@@ -118,8 +118,12 @@ test('the kernel\'s own blend path reproduces the compressor\'s blend where noth
     assert.ok(exact < -120, `${parallelComp}: blend path ${exact.toFixed(1)} dB re peak`)
     // And at a real depth the detector leaves a vowel alone once past the
     // start-from-silence step (see above).
-    const idle = worstDb(render({ parallelDeEss: 50 }), SR / 4)
-    assert.ok(idle < -100, `${parallelComp}: ${idle.toFixed(1)} dB re peak`)
+    // From 0.5 s: FULL ducks the whole copy, so the start-up dip's 30 ms
+    // release tail reaches every band (−91 dB still at 0.25 s), not just the top.
+    for (const parallelDeEssMode of ['broadband', 'shelf']) {
+      const idle = worstDb(render({ parallelDeEss: 50, parallelDeEssMode }), SR / 2)
+      assert.ok(idle < -100, `${parallelComp} ${parallelDeEssMode}: ${idle.toFixed(1)} dB re peak`)
+    }
   }
 })
 
@@ -145,6 +149,6 @@ test('BENCH modes: 2.5K reaches a flat fricative\'s middle, FULL is a pure gain'
   const b = Float32Array.from(f.map(v => -0.5 * v))
   d.process([a, b], 1024)
   for (let i = 0; i < 1024; i++) assert.ok(Math.abs(b[i] - (-0.5 * a[i])) < 1e-9)
-  // Unknown modes read as the shipping shelf.
-  assert.deepEqual(run(f, 18, 128, 'nope'), shelf)
+  // Unknown modes read as the shipping mode, FULL.
+  assert.deepEqual(run(f, 18, 128, 'nope'), full)
 })

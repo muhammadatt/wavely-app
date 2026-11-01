@@ -66,9 +66,9 @@ const PARALLEL_DEESS_OPTIONS = [0, 25, 50, 75, 100].map(v => ({
   title: v === 0 ? 'No de-esser on the copy' : `De-ess the parallel copy before the blend (${v})`,
 }))
 const PARALLEL_DEESS_MODE_OPTIONS = [
-  { value: 'shelf', label: '4K', title: 'Cut the copy above 4 kHz' },
-  { value: 'shelf-low', label: '2.5K', title: 'Cut the copy above 2.5 kHz, so a flat "f" is cut evenly' },
   { value: 'broadband', label: 'FULL', title: 'Turn the whole copy down: the dry carries the fricative untouched' },
+  { value: 'shelf', label: '4K', title: 'Cut the copy above 4 kHz' },
+  { value: 'shelf-low', label: '2.5K', title: 'Cut the copy above 2.5 kHz' },
 ]
 const SIB_EMPH_OPTIONS = [
   { value: true, label: 'ON', title: "The parallel 1176's detector hears sibilance +15 dB, so it ducks the copy on an \"s\"" },
