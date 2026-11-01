@@ -127,6 +127,8 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
   sibilanceGuardHz: SIB_GUARD_HZ,
   /** The guard's valve half, 0-100 — see VALVE_GUARD_DEFAULT. */
   valveGuard: VALVE_GUARD_DEFAULT,
+  /** Shape only below this, Hz; 0 = off (ships) — see SHAPER_SPLIT_HZ_MIN. */
+  shaperSplitHz: 0,
 })
 
 /**

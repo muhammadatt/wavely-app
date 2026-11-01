@@ -115,6 +115,10 @@ const CONTROLS = [
     hint: 'The sibilance guard’s VALVE half: on a fricative the output valve fades toward its linear term by the cell guard’s own scale (same detector, timing and corner — needs Sib guard on). The valve is driven by level alone, so before this nothing turned it down on an “s” or “sh”, and its even quartic turned the noise into rumble under 1 kHz: on “Actual grownup” at PR 50 that was all of the “sh”’s grit. Ships at 100; 0 is the previous kernel bit for bit; a vowel takes the unguarded branch exactly.',
   },
   {
+    key: 'shaperSplitHz', label: 'Shaper split', min: 0, max: 8000, step: 250, digits: 0, unit: ' Hz',
+    hint: 'AUDITION (0 = off, ships). Splits the signal at this frequency into two halves that sum back exactly, and sends only the LOW half through the cell and valve curves; the high half takes the same compression gain, unshaped. An even curve multiplies the signal by itself, so hiss fed to it makes difference tones from DC up — the grit under an “s” or “sh” — and above the split nothing can, whether the guards detect it or not. Vowel warmth (harmonics of what sits below the split) stays; the emphasis no longer drives content above it. Try 3000 / 4000 / 5000. Cell-curve path only.',
+  },
+  {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
     hint: 'VALVE stage only — the valves are ~5% of the distortion, so this is a small constant floor under the cell. Same quantity as Cell sat, at the other stage, and the two read in comparable units once auto makeup is engaged. Ships at 0.5, chosen by ear.',
   },

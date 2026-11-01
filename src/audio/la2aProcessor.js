@@ -88,7 +88,7 @@ import {
 } from './dsp/makeupReference.js'
 import { makeVocalSatCurve, VOCAL_SAT_CURVE_LEAN_POSITIVE } from './dsp/vocalSatCurve.js'
 import { makeQuarticSatCurve } from './dsp/quarticSatCurve.js'
-import { highShelf, highpass, BiquadCascade } from './dsp/biquad.js'
+import { highShelf, highpass, lowpass, BiquadCascade } from './dsp/biquad.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
 export { MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor }
@@ -1599,6 +1599,19 @@ export const SIBILANCE_GUARD_DEFAULT = 100
  * (it reads its scale) and does nothing at 0.
  */
 export const VALVE_GUARD_DEFAULT = 100
+/**
+ * BENCH (November 2026, owner's audition): SHAPER SPLIT, Hz (0 = off, ships).
+ * The (pre-emphasised) signal is split complementarily, `low = LP2(x)`,
+ * `high = x − low`, and only `low` goes through the cell and the valve; `high`
+ * takes the same gain, linear. An even curve multiplies the signal by itself,
+ * so hiss fed to it makes difference tones from DC up — the grit under an "s"
+ * that the de-emphasis cannot reach; above the split nothing can make them,
+ * detected or not. Vowel warmth (harmonics of what is below the split) stays.
+ * Linear, the two halves sum back exactly. Only on the cell-curve path (the
+ * shipping quartic); with `cellCurve: 'gainmod'` it does nothing.
+ */
+export const SHAPER_SPLIT_HZ_MIN = 1000
+export const SHAPER_SPLIT_HZ_MAX = 12000
 export const SIB_GUARD_HZ = 4000
 /**
  * BENCH range for the guard's detector corner (`sibilanceGuardHz`). An "sh" is
@@ -1775,6 +1788,8 @@ export const LA2A_KERNEL_DEFAULTS = {
   sibilanceGuardHz: SIB_GUARD_HZ,
   /** Valve-drive fade on sibilance, 0-100; 0 = off. See VALVE_GUARD_DEFAULT. */
   valveGuard: VALVE_GUARD_DEFAULT,
+  /** BENCH: shape only below this, Hz; 0 = off. See SHAPER_SPLIT_HZ_MIN. */
+  shaperSplitHz: 0,
 }
 
 /**
@@ -2042,6 +2057,12 @@ export class LA2AKernel {
     this.valveMixScratch = new Float32Array(128)
     this.valveMixDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     this.seamValve = 1
+    /** Shaper split (see SHAPER_SPLIT_HZ_MIN): coefficients and per-channel DF2T state. */
+    this.splitHz = 0
+    this.splitOs = null
+    this.splitBase = null
+    this.splitOsZ = []
+    this.splitBaseZ = []
 
     /**
      * LIVE AUTO-MAKEUP TRACKER — running extrema, O(1) per sample.
@@ -2173,6 +2194,8 @@ export class LA2AKernel {
     this.seamDrive = 0
     this.seamValve = 1
     this.valveMixDelay.reset()
+    for (const z of this.splitOsZ) z.fill(0)
+    for (const z of this.splitBaseZ) z.fill(0)
     this.dcX = this.dcX.map(() => 0)
     this.dcY = this.dcY.map(() => 0)
     for (const f of this.preEmph) f?.reset()
@@ -2490,6 +2513,15 @@ export class LA2AKernel {
       this.sibHp = highpass(this.sampleRate, Math.min(sibHz, this.sampleRate * 0.45))
     }
     if (!sibWas && this.sibDepth > 0) this.resetSibState()
+    const splitHz = Number.isFinite(p.shaperSplitHz) && p.shaperSplitHz > 0
+      ? clamp(p.shaperSplitHz, SHAPER_SPLIT_HZ_MIN, SHAPER_SPLIT_HZ_MAX) : 0
+    if (splitHz !== this.splitHz) {
+      this.splitHz = splitHz
+      this.splitOs = splitHz ? lowpass(this.sampleRate * OVERSAMPLE_FACTOR, splitHz) : null
+      this.splitBase = splitHz ? lowpass(this.sampleRate, Math.min(splitHz, this.sampleRate * 0.45)) : null
+      for (const z of this.splitOsZ) z.fill(0)
+      for (const z of this.splitBaseZ) z.fill(0)
+    }
     // The valve half reads the cell guard's scale, so it needs it running.
     this.valveGuard = this.sibDepth > 0 && this.applyTube
       ? clamp(Number.isFinite(p.valveGuard) ? p.valveGuard : 0, 0, 100) / 100
@@ -3083,6 +3115,14 @@ export class LA2AKernel {
         let mCur = seamMakeup
         let dCur = seamDrive
         let vCur = seamValve
+        const sp = this.splitOs
+        let sz = null
+        if (sp) {
+          while (this.splitOsZ.length <= ch) this.splitOsZ.push(new Float64Array(2))
+          sz = this.splitOsZ[ch]
+        }
+        let z1 = sz ? sz[0] : 0
+        let z2 = sz ? sz[1] : 0
         for (let i = 0; i < n; i++) {
           const pNext = cellPreG[i]
           const mNext = cellMakeup[i]
@@ -3094,9 +3134,21 @@ export class LA2AKernel {
           const vStep = (vNext - vCur) * invL
           for (let j = 0; j < L; j++) {
             const k = i * L + j
-            let w = hi[k] * (pCur + pStep * j)
+            const pg = pCur + pStep * j
+            const mg = mCur + mStep * j
+            let x = hi[k]
+            let high = 0
+            if (sp) {
+              // Complementary split: only the low half meets the curves.
+              const lo = sp.b0 * x + z1
+              z1 = sp.b1 * x - sp.a1 * lo + z2
+              z2 = sp.b2 * x - sp.a2 * lo
+              high = x - lo
+              x = lo
+            }
+            let w = x * pg
             w = this.cellSatCurve.transferAt(w, dCur + dStep * j)
-            w *= mCur + mStep * j
+            w *= mg
             if (this.applyTube) {
               // The valve guard fades toward the linear term; at 1 (any vowel)
               // this is the shipping branch exactly.
@@ -3104,6 +3156,7 @@ export class LA2AKernel {
               const s = this.shapeTube(w)
               w = v >= 1 ? s : w + v * (s - w)
             }
+            if (sp) w += high * pg * mg
             hi[k] = w
           }
           pCur = pNext
@@ -3111,6 +3164,7 @@ export class LA2AKernel {
           dCur = dNext
           vCur = vNext
         }
+        if (sz) { sz[0] = z1; sz[1] = z2 }
         this.seamPreG = pCur
         this.seamMakeup = mCur
         this.seamDrive = dCur
@@ -3223,11 +3277,28 @@ export class LA2AKernel {
     let dcY = this.dcY[ch]
     // The wet side is built first so the de-emphasis has a buffer to filter;
     // `out` doubles as that buffer, then the dry is summed into it.
+    const sp = this.cellShaperActive ? this.splitBase : null
+    let sz = null
+    if (sp) {
+      while (this.splitBaseZ.length <= ch) this.splitBaseZ.push(new Float64Array(2))
+      sz = this.splitBaseZ[ch]
+    }
+    let z1 = sz ? sz[0] : 0
+    let z2 = sz ? sz[1] : 0
     for (let i = 0; i < n; i++) {
       let w
+      let high = 0
       if (this.cellShaperActive) {
+        let x = driven[i]
+        if (sp) {
+          const lo = sp.b0 * x + z1
+          z1 = sp.b1 * x - sp.a1 * lo + z2
+          z2 = sp.b2 * x - sp.a2 * lo
+          high = (x - lo) * cellPreG[i] * cellMakeup[i]
+          x = lo
+        }
         // Same order as the oversampled path: attenuate, shape, then make up.
-        w = this.cellSatCurve.transferAt(driven[i] * cellPreG[i], cellDrive[i])
+        w = this.cellSatCurve.transferAt(x * cellPreG[i], cellDrive[i])
           * cellMakeup[i]
       } else {
         w = driven[i] * gain[i]
@@ -3236,11 +3307,13 @@ export class LA2AKernel {
         let shaped = this.shapeTube(w)
         // The valve guard, as in the oversampled path.
         if (valveMix && valveMix[i] < 1) shaped = w + valveMix[i] * (shaped - w)
+        shaped += high
+        high = 0
         dcY = shaped - dcX + this.dcR * dcY
         dcX = shaped
         w = dcY
       }
-      out[i] = w
+      out[i] = w + high
     }
     if (this.emphasisActive) this.deEmph[ch].process(out, out, n, 0)
     for (let i = 0; i < n; i++) {

@@ -192,3 +192,26 @@ test('the guard listens to the audio, not to a caller\'s sidechain', async () =>
   assert.ok(run(dull) < 0.1, `guard scale with a dull sidechain ${run(dull)}`)
   assert.equal(run(dull), run(null))
 })
+
+test('BENCH shaper split: off is the shipping kernel, the halves sum back exactly, and an "s" above it is not shaped', async () => {
+  const { LA2A_KERNEL_DEFAULTS: D } = await import('../../src/audio/la2aProcessor.js')
+  assert.equal(D.shaperSplitHz, 0)
+  assert.equal(LA2A_TUNING_DEFAULTS.shaperSplitHz, 0)
+  const v = vowel()
+  assert.deepEqual(render(v, { shaperSplitHz: 0 }).channelData[0], render(v, {}).channelData[0])
+  // Linear (valve off, cell drive ~0): the split changes nothing but rounding.
+  const lin = { tube: false, cellCurveDriveMax: 1e-9, sibilanceGuard: 0, valveGuard: 0 }
+  const a = render(v, lin).channelData[0]
+  const b = render(v, { ...lin, shaperSplitHz: 3000 }).channelData[0]
+  let worst = 0
+  let pk = 0
+  for (let i = 0; i < a.length; i++) { worst = Math.max(worst, Math.abs(a[i] - b[i])); pk = Math.max(pk, Math.abs(a[i])) }
+  assert.ok(20 * Math.log10(worst / pk) < -100, `split not transparent: ${(20 * Math.log10(worst / pk)).toFixed(1)} dB`)
+  // A loud 4-10 kHz "s", guards off: below a 3 kHz split it barely meets the curves.
+  const s = loudSibilant()
+  const clean = render(s, { analog: false }).channelData[0]
+  const off = { sibilanceGuard: 0, valveGuard: 0 }
+  const whole = residualDb(render(s, off).channelData[0], clean, clean, SR / 4)
+  const split = residualDb(render(s, { ...off, shaperSplitHz: 3000 }).channelData[0], clean, clean, SR / 4)
+  assert.ok(split < whole - 10, `"s" distortion ${whole.toFixed(1)} → ${split.toFixed(1)} dB`)
+})
