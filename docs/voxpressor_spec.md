@@ -416,6 +416,23 @@ it sat with Parallel off — the copy is then de-essed past neutral, the bus
 treatment, not a correction. ⚠ Not auditioned; the amount and the 4 kHz split
 are reasoned.
 
+**Flat fricatives, and the cut's shape (`parallelDeEssMode`, bench: 4K ships /
+2.5K / FULL).** The detector cannot tell an "f" from an "s" (an "f" is flat
+but nearly empty below 1.5 kHz, so its share above 4 kHz still reads 0.5–0.8)
+and engages fully on both. On "Fix slide four" that matters more than the
+two longer clips showed: the parallel 1176's +15 dB detector catches the loud
+"s" but not the "f", which sits 15–20 dB lower, so WITHOUT the de-esser the
+copy lifts every "f" past the voice (+1.5 to +2.7 dB at Mix 30 against
+vowels' +0.9; +2.8 to +4.7 at Mix 60); the LA-2A by 1–1.6 dB over the voice.
+The 4K shelf brings the "f" to about the voice's level but cuts only its top,
+so the copy still lifts its 1.5–4 kHz part: a darker "f", 3–4 dB of tilt at
+Mix 30 (5–8 at 60). Measured at de-ess 50, "f" frames, Mix 30, 1176
+(< 4 kHz / > 4 kHz vs Parallel off): 4K +0.4…+1.9 / −1.6…−2.0; 2.5K
++0.4…+1.5 / −1.3…−1.9; FULL −0.7…−1.0 / −0.7…−1.2 — only FULL cuts the "f"
+evenly. On "Messy" and "Greenberg" the three modes are within 0.04 dB on
+vowels for the 1176 (the LA-2A's FULL +0.1–0.2), with FULL taking 0.2–0.5 dB
+less off the "s" top. ⚠ Not auditioned — the owner's A/B decides.
+
 ⚠ **Overlap with Density.** Both add density: Parallel by dynamic upward
 compression, Density by a static curve with odd harmonics. Different
 mechanisms, but presets should not max both (§11).

@@ -386,7 +386,7 @@ function parallelWetGain(channels, sampleRate, fetParams, p) {
   }
   // The copy's de-esser, at unity Output: it is homogeneous (a ratio
   // detector), so the makeup the blend solve finds commutes with it.
-  deEssChannels(wet, sampleRate, parallelDeEssDepthDb(p))
+  deEssChannels(wet, sampleRate, parallelDeEssDepthDb(p), p.parallelDeEssMode)
   const w = wet.map(c => c.subarray(lat, lat + len))
   const scratch = channels.map(() => new Float32Array(len))
   const g = percentileBlendGain(channels, w, fetParams.mix, inRef, -48, 48, scratch)
@@ -422,7 +422,7 @@ function parallelLa2aSolve(channels, sampleRate, p) {
    * as the kernel sums it.
    */
   const render = deEssDb > 0
-    ? (chs, extra) => deEssChannels(renderLa2a(chs, sampleRate, { ...base, ...extra, mix: 1 }), sampleRate, deEssDb)
+    ? (chs, extra) => deEssChannels(renderLa2a(chs, sampleRate, { ...base, ...extra, mix: 1 }), sampleRate, deEssDb, p.parallelDeEssMode)
     : (chs, extra) => renderLa2a(chs, sampleRate, { ...base, ...extra })
   const plan = solveMakeupPlan({
     channelData: channels, render, gainKey: 'gainDb', mixKey: 'mix', mix: base.mix,
@@ -436,10 +436,11 @@ function parallelLa2aSolve(channels, sampleRate, p) {
 }
 
 /** The Parallel copy's de-esser over whole channels, in place (`dsp/parallelDeEsser.js`). */
-function deEssChannels(channels, sampleRate, depthDb) {
+function deEssChannels(channels, sampleRate, depthDb, mode) {
   if (!(depthDb > 0)) return channels
   const d = new ParallelDeEsser(sampleRate)
   d.setDepthDb(depthDb)
+  d.setMode(mode)
   const len = channels[0].length
   for (let o = 0; o < len; o += 128) {
     const n = Math.min(128, len - o)

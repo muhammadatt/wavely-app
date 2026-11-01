@@ -40,6 +40,7 @@ const copies = pluginCopies((copy, life) => {
   /** BENCH: the Parallel copy's de-esser (0–100) and the 1176's detector emphasis. Measured with. */
   const voxParallelDeEss = ref(VOX_DEFAULTS.parallelDeEss)
   const voxParallelSibEmph = ref(VOX_DEFAULTS.parallelSibEmph)
+  const voxParallelDeEssMode = ref(VOX_DEFAULTS.parallelDeEssMode)
   const voxDensity = ref(VOX_DEFAULTS.density)
   /** BENCH: the LA-2A's lookahead, ms. Measured with, so it re-measures. */
   const voxBodyLookahead = ref(VOX_DEFAULTS.bodyLookaheadMs)
@@ -95,6 +96,7 @@ const copies = pluginCopies((copy, life) => {
       parallelComp: voxParallelComp.value,
       parallelDeEss: voxParallelDeEss.value,
       parallelSibEmph: voxParallelSibEmph.value,
+      parallelDeEssMode: voxParallelDeEssMode.value,
       density: voxDensity.value,
       bodyLookaheadMs: voxBodyLookahead.value,
       alignDb: voxAlignDb.value,
@@ -204,7 +206,7 @@ const copies = pluginCopies((copy, life) => {
 
     /** The key a measurement belongs to: the timeline, the region and every setting it reads. */
     function solveKey(segments, start, end) {
-      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxDeEss.value}|${voxParallel.value}|${voxParallelComp.value}|${voxParallelDeEss.value}|${voxParallelSibEmph.value}`
+      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxDeEss.value}|${voxParallel.value}|${voxParallelComp.value}|${voxParallelDeEss.value}|${voxParallelSibEmph.value}|${voxParallelDeEssMode.value}`
     }
 
     /**
@@ -323,6 +325,12 @@ const copies = pluginCopies((copy, life) => {
     function syncParallelDeEss(v) {
       voxParallelDeEss.value = v
       pushParam('parallelDeEss', v)
+      scheduleSolve()
+    }
+
+    function syncParallelDeEssMode(v) {
+      voxParallelDeEssMode.value = v
+      pushParam('parallelDeEssMode', v)
       scheduleSolve()
     }
 
@@ -497,13 +505,13 @@ const copies = pluginCopies((copy, life) => {
     return {
       voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
       voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
-      voxParallelDeEss, voxParallelSibEmph,
+      voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,
       togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
       syncDeEss, syncParallel, syncParallelComp, syncDensity,
-      syncParallelDeEss, syncParallelSibEmph,
+      syncParallelDeEss, syncParallelSibEmph, syncParallelDeEssMode,
       refreshSolve, apply, teardown, openModal, closeModal,
     }
   }

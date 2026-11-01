@@ -40,6 +40,20 @@ export const PARALLEL_DEESS_ATTACK_MS = 1
 export const PARALLEL_DEESS_RELEASE_MS = 30
 /** Where the cut starts: the split's low-pass corner. */
 export const PARALLEL_DEESS_SPLIT_HZ = 4000
+/**
+ * BENCH: what the cut takes (`setMode`).
+ * - 'shelf' (ships): the band above `PARALLEL_DEESS_SPLIT_HZ`.
+ * - 'shelf-low': the same split at `PARALLEL_DEESS_LOW_SPLIT_HZ`, so a flat
+ *   "f" — much of it 1.5–4 kHz — is cut evenly instead of darkened (at 4 kHz
+ *   the copy still lifted its lower part while cutting its top: a 3–4 dB tilt
+ *   at Mix 30 on the owner's "Fix slide four", 5–8 dB at Mix 60).
+ * - 'broadband': the whole copy, `g·x` — while a fricative lasts the copy all
+ *   but leaves and the dry carries it untouched, nothing reshaped; the parallel
+ *   1176's sibilance detector does the same for loud "s" sounds.
+ * The detector is the same in all three, so is the depth.
+ */
+export const PARALLEL_DEESS_MODES = Object.freeze(['shelf', 'shelf-low', 'broadband'])
+export const PARALLEL_DEESS_LOW_SPLIT_HZ = 2500
 /** The cut at full scale of the 0–100 amount, dB. */
 export const PARALLEL_DEESS_MAX_DB = 24
 
@@ -52,6 +66,8 @@ export class ParallelDeEsser {
     this.sampleRate = sampleRate
     const nyq = sampleRate * 0.45
     this.detHp = highpass(sampleRate, Math.min(PARALLEL_DEESS_DETECT_HZ, nyq))
+    this.nyq = nyq
+    this.mode = 'shelf'
     this.splitLp = lowpass(sampleRate, Math.min(PARALLEL_DEESS_SPLIT_HZ, nyq))
     this.envCoef = 1 - Math.exp(-1 / (sampleRate * (PARALLEL_DEESS_ENV_MS / 1000)))
     this.atkCoef = 1 - Math.exp(-1 / (sampleRate * (PARALLEL_DEESS_ATTACK_MS / 1000)))
@@ -76,6 +92,16 @@ export class ParallelDeEsser {
   /** Full-depth cut, dB (≥ 0). 0 makes `process` a no-op. */
   setDepthDb(depthDb) {
     this.depthDb = Number.isFinite(depthDb) ? Math.max(0, depthDb) : 0
+  }
+
+  /** 'shelf' | 'shelf-low' | 'broadband' — see `PARALLEL_DEESS_MODES`. Unknown = 'shelf'. */
+  setMode(mode) {
+    const m = PARALLEL_DEESS_MODES.includes(mode) ? mode : 'shelf'
+    if (m === this.mode) return
+    this.mode = m
+    const hz = m === 'shelf-low' ? PARALLEL_DEESS_LOW_SPLIT_HZ : PARALLEL_DEESS_SPLIT_HZ
+    this.splitLp = lowpass(this.sampleRate, Math.min(hz, this.nyq))
+    for (const c of this.lps) { c.setSections([this.splitLp]); c.reset() }
   }
 
   get active() {
@@ -125,11 +151,18 @@ export class ParallelDeEsser {
     Object.assign(this, { x1, x2, y1, y2, eHigh, eAll, gain })
 
     const g = this.gainBuf
-    const lp = this.mono
-    for (let ch = 0; ch < nCh; ch++) {
-      const io = channels[ch]
-      this.lps[ch].process(io, lp, n, 0)
-      for (let i = 0; i < n; i++) io[i] = g[i] * io[i] + (1 - g[i]) * lp[i]
+    if (this.mode === 'broadband') {
+      for (let ch = 0; ch < nCh; ch++) {
+        const io = channels[ch]
+        for (let i = 0; i < n; i++) io[i] *= g[i]
+      }
+    } else {
+      const lp = this.mono
+      for (let ch = 0; ch < nCh; ch++) {
+        const io = channels[ch]
+        this.lps[ch].process(io, lp, n, 0)
+        for (let i = 0; i < n; i++) io[i] = g[i] * io[i] + (1 - g[i]) * lp[i]
+      }
     }
     const cut = -20 * Math.log10(minGain)
     if (cut > this.cutHold) this.cutHold = cut

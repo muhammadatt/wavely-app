@@ -10,9 +10,10 @@ import { VoxPressorKernel, VOX_KERNEL_DEFAULTS } from '../../src/audio/voxPresso
 const SR = 44100
 const db = v => 20 * Math.log10(v)
 
-function run(x, depthDb, block = 128) {
+function run(x, depthDb, block = 128, mode = 'shelf') {
   const d = new ParallelDeEsser(SR)
   d.setDepthDb(depthDb)
+  d.setMode(mode)
   const y = Float32Array.from(x)
   for (let o = 0; o < y.length; o += block) {
     const n = Math.min(block, y.length - o)
@@ -120,4 +121,30 @@ test('the kernel\'s own blend path reproduces the compressor\'s blend where noth
     const idle = worstDb(render({ parallelDeEss: 50 }), SR / 4)
     assert.ok(idle < -100, `${parallelComp}: ${idle.toFixed(1)} dB re peak`)
   }
+})
+
+test('BENCH modes: 2.5K reaches a flat fricative\'s middle, FULL is a pure gain', () => {
+  // A flat "f": white noise, 0.5 s.
+  const n = SR / 2
+  const f = noise(n, 7).map(v => 0.05 * v)
+  const shelf = run(f, 18, 128, 'shelf')
+  const low = run(f, 18, 128, 'shelf-low')
+  const full = run(f, 18, 128, 'broadband')
+  const from = SR / 10
+  // All three are caught by the same detector; the lower split takes more.
+  const cut = y => db(rms(y, from) / rms(f, from))
+  assert.ok(cut(low) < cut(shelf) - 1, `2.5K ${cut(low).toFixed(2)} vs 4K ${cut(shelf).toFixed(2)} dB`)
+  // FULL takes the whole signal down by the depth, every band alike.
+  assert.ok(Math.abs(cut(full) + 18) < 0.5, `FULL ${cut(full).toFixed(2)} dB`)
+  // ...as a gain: the output is the input times one number per sample, so
+  // the ratio holds across a stereo pair carrying different signals.
+  const d = new ParallelDeEsser(SR)
+  d.setDepthDb(12)
+  d.setMode('broadband')
+  const a = Float32Array.from(f)
+  const b = Float32Array.from(f.map(v => -0.5 * v))
+  d.process([a, b], 1024)
+  for (let i = 0; i < 1024; i++) assert.ok(Math.abs(b[i] - (-0.5 * a[i])) < 1e-9)
+  // Unknown modes read as the shipping shelf.
+  assert.deepEqual(run(f, 18, 128, 'nope'), shelf)
 })

@@ -354,6 +354,8 @@ export const VOX_KERNEL_DEFAULTS = {
   parallelComp: '1176',
   /** BENCH: the copy's own de-esser, 0–100 — see `parallelDeEssDepthDb`. */
   parallelDeEss: 0,
+  /** BENCH: what it cuts, 'shelf' (ships) | 'shelf-low' | 'broadband' (`PARALLEL_DEESS_MODES`). */
+  parallelDeEssMode: 'shelf',
   /**
    * BENCH: whether the parallel 1176's detector hears sibilance +15 dB
    * (`ParallelDetector`). true ships; the LA-2A never does.
@@ -531,6 +533,7 @@ export class VoxPressorKernel {
      */
     const deEssDb = this.parallelOn ? parallelDeEssDepthDb(p) : 0
     this.parallelDeEsser.setDepthDb(deEssDb)
+    this.parallelDeEsser.setMode(p.parallelDeEssMode)
     this.parallelSplit = deEssDb > 0
     const split = this.parallelSplit ? { mix: 1, ceilingDb: null } : {}
     this.parallelFet.setParams({ ...parallelFetParams(p), oversample: this.oversampleOn, ...split })

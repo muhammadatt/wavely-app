@@ -19,12 +19,12 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
-  voxParallelDeEss, voxParallelSibEmph,
+  voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
   syncDeEss, syncParallel, syncParallelComp, syncDensity,
-  syncParallelDeEss, syncParallelSibEmph,
+  syncParallelDeEss, syncParallelSibEmph, syncParallelDeEssMode,
   apply, teardown, closeModal,
 } = useVoxPressor()
 
@@ -65,6 +65,11 @@ const PARALLEL_DEESS_OPTIONS = [0, 25, 50, 75, 100].map(v => ({
   value: v, label: v === 0 ? 'OFF' : String(v),
   title: v === 0 ? 'No de-esser on the copy' : `De-ess the parallel copy before the blend (${v})`,
 }))
+const PARALLEL_DEESS_MODE_OPTIONS = [
+  { value: 'shelf', label: '4K', title: 'Cut the copy above 4 kHz' },
+  { value: 'shelf-low', label: '2.5K', title: 'Cut the copy above 2.5 kHz, so a flat "f" is cut evenly' },
+  { value: 'broadband', label: 'FULL', title: 'Turn the whole copy down: the dry carries the fricative untouched' },
+]
 const SIB_EMPH_OPTIONS = [
   { value: true, label: 'ON', title: "The parallel 1176's detector hears sibilance +15 dB, so it ducks the copy on an \"s\"" },
   { value: false, label: 'OFF', title: 'The parallel 1176 hears the voice flat' },
@@ -301,6 +306,14 @@ async function applyAndClose() {
             :model-value="voxParallelDeEss" :options="PARALLEL_DEESS_OPTIONS"
             aria-label="Parallel de-ess" :disabled="!voxPreview || voxParallel <= 0"
             @update:model-value="syncParallelDeEss"
+          />
+        </div>
+        <div class="vp-listen vp-bench">
+          <span class="m-caption">Bench · Parallel de-ess cut</span>
+          <ModulaSegmented
+            :model-value="voxParallelDeEssMode" :options="PARALLEL_DEESS_MODE_OPTIONS"
+            aria-label="Parallel de-ess cut" :disabled="!voxPreview || voxParallel <= 0 || voxParallelDeEss <= 0"
+            @update:model-value="syncParallelDeEssMode"
           />
         </div>
         <div v-if="voxParallelComp === '1176'" class="vp-listen vp-bench">
