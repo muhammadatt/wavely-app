@@ -111,6 +111,10 @@ const CONTROLS = [
     hint: 'Corner of the guard detector’s high-pass: it reads the share of energy above this. Ships at 4000. An “sh” is darker than an “s”: on “Actual grownup” its share is 0.25 above 4 kHz (the guard barely starts) and 0.55 above 2.5 kHz, while vowels on four clips stay ≤ 0.19 there (the guard starts at 0.25). Measured at PR 70, the “sh” goes −27.8 → −33.1 dB of added energy under 1 kHz at 3000 or 2500, which is the VALVE’s own share — the guard does not reach the valve. Vowels lose under 0.15 dB of harmonics. At 2000 vowels read 0.31 and start to trigger it.',
   },
   {
+    key: 'valveGuard', label: 'Valve guard', min: 0, max: 100, step: 1, digits: 0,
+    hint: 'The sibilance guard’s VALVE half: on a fricative the output valve fades toward its linear term by the cell guard’s own scale (same detector, timing and corner — needs Sib guard on). The valve is driven by level alone, so before this nothing turned it down on an “s” or “sh”, and its even quartic turned the noise into rumble under 1 kHz: on “Actual grownup” at PR 50 that was all of the “sh”’s grit. Ships at 100; 0 is the previous kernel bit for bit; a vowel takes the unguarded branch exactly.',
+  },
+  {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
     hint: 'VALVE stage only — the valves are ~5% of the distortion, so this is a small constant floor under the cell. Same quantity as Cell sat, at the other stage, and the two read in comparable units once auto makeup is engaged. Ships at 0.5, chosen by ear.',
   },

@@ -1429,6 +1429,8 @@ export const LA2A_TUBESAT_PATCH = Object.freeze({
   emphasisCornerHz: 1800,
   /** Not in that voicing — the guard came later. See SIBILANCE_GUARD_DEFAULT. */
   sibilanceGuard: 0,
+  /** Nor its valve half. See VALVE_GUARD_DEFAULT. */
+  valveGuard: 0,
 })
 
 /**
@@ -1583,6 +1585,20 @@ export const EMPHASIS_EPSILON = 1e-4
  * colour (~5 % of the distortion) and does not follow gain reduction.
  */
 export const SIBILANCE_GUARD_DEFAULT = 100
+/**
+ * VALVE GUARD, 0-100 (November 2026): the same guard on the OUTPUT VALVE. The
+ * cell guard took the cell's grit off an "s", but the valve is driven by level
+ * alone and its even quartic does to fricative noise what the cell's did —
+ * rumble under 1 kHz. On the owner's "Actual grownup" at PR 50 that was ALL of
+ * the "sh"'s grit (−35.3 dB re the "sh" under 1 kHz; the cell −60).
+ *
+ * It rides the cell guard's own scale — one detector, one timing, one corner
+ * (`sibilanceGuardHz`) — and fades the valve toward its linear term,
+ * `w + v·(f(w) − w)` with `v = 1 − valveGuard·(1 − scale)`, so a vowel (scale
+ * exactly 1) takes the shipping branch bit for bit. It needs the cell guard on
+ * (it reads its scale) and does nothing at 0.
+ */
+export const VALVE_GUARD_DEFAULT = 100
 export const SIB_GUARD_HZ = 4000
 /**
  * BENCH range for the guard's detector corner (`sibilanceGuardHz`). An "sh" is
@@ -1757,6 +1773,8 @@ export const LA2A_KERNEL_DEFAULTS = {
   sibilanceGuard: SIBILANCE_GUARD_DEFAULT,
   /** BENCH: the guard detector's high-pass corner, Hz. See SIB_GUARD_HZ_MIN. */
   sibilanceGuardHz: SIB_GUARD_HZ,
+  /** Valve-drive fade on sibilance, 0-100; 0 = off. See VALVE_GUARD_DEFAULT. */
+  valveGuard: VALVE_GUARD_DEFAULT,
 }
 
 /**
@@ -2020,6 +2038,10 @@ export class LA2AKernel {
     this.preGainDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     this.makeupDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     this.cellDriveDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
+    /** The valve guard's weight per sample (1 = the valve whole), on the cell drive's timebase. */
+    this.valveMixScratch = new Float32Array(128)
+    this.valveMixDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
+    this.seamValve = 1
 
     /**
      * LIVE AUTO-MAKEUP TRACKER — running extrema, O(1) per sample.
@@ -2149,6 +2171,8 @@ export class LA2AKernel {
     this.seamPreG = 1
     this.seamMakeup = 1
     this.seamDrive = 0
+    this.seamValve = 1
+    this.valveMixDelay.reset()
     this.dcX = this.dcX.map(() => 0)
     this.dcY = this.dcY.map(() => 0)
     for (const f of this.preEmph) f?.reset()
@@ -2466,6 +2490,10 @@ export class LA2AKernel {
       this.sibHp = highpass(this.sampleRate, Math.min(sibHz, this.sampleRate * 0.45))
     }
     if (!sibWas && this.sibDepth > 0) this.resetSibState()
+    // The valve half reads the cell guard's scale, so it needs it running.
+    this.valveGuard = this.sibDepth > 0 && this.applyTube
+      ? clamp(Number.isFinite(p.valveGuard) ? p.valveGuard : 0, 0, 100) / 100
+      : 0
     /**
      * ⚠ THE SHAPER'S THREE SEAM VALUES ONLY ADVANCE WHILE IT IS RUNNING, so
      * they go stale the moment it is switched off. Switching back on then
@@ -2482,9 +2510,11 @@ export class LA2AKernel {
       this.seamPreG = 1
       this.seamMakeup = 1
       this.seamDrive = 0
+      this.seamValve = 1
       this.preGainDelay.reset()
       this.makeupDelay.reset()
       this.cellDriveDelay.reset()
+      this.valveMixDelay.reset()
     }
     /**
      * A one-pole on the RECTIFIER, ahead of `rect / env`. 0 is off and is what
@@ -2574,6 +2604,7 @@ export class LA2AKernel {
       this.cellMakeupScratch = new Float32Array(n)
       this.cellDriveScratch = new Float32Array(n)
       this.cellDriveRawScratch = new Float32Array(n)
+      this.valveMixScratch = new Float32Array(n)
     }
     if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
     const gain = this.gainScratch
@@ -2582,6 +2613,8 @@ export class LA2AKernel {
     const cellMakeup = this.cellMakeupScratch
     const cellDrive = this.cellDriveScratch
     const cellDriveRaw = this.cellDriveRawScratch
+    const valveMix = this.valveMixScratch
+    const valveGuard = this.valveGuard
     const chScale = 1 / nIn
 
     // The tracker's target: the loudest input sample heard so far.
@@ -2635,10 +2668,23 @@ export class LA2AKernel {
       const hp = x - hpfLp
 
       if (sibDepth > 0) {
-        const h = sh.b0 * x + sh.b1 * sX1 + sh.b2 * sX2 - sh.a1 * sY1 - sh.a2 * sY2
-        sX2 = sX1; sX1 = x; sY2 = sY1; sY1 = h
+        /**
+         * ⚠ THE GUARD HEARS THE AUDIO, NOT THE CALLER'S SIDECHAIN. It protects
+         * the shapers, which see the audio; a detector signal is shaped to
+         * steer the COMPRESSION (VoxPressor's Body tap shelves sibilance down
+         * 9 dB), so read through it the guard missed "s" sounds the shapers
+         * still got. Without a sidechain `x` IS the mono audio.
+         */
+        let a = x
+        if (sidechain) {
+          a = inputChannels[0][i]
+          for (let ch = 1; ch < nIn; ch++) a += inputChannels[ch][i]
+          a *= chScale
+        }
+        const h = sh.b0 * a + sh.b1 * sX1 + sh.b2 * sX2 - sh.a1 * sY1 - sh.a2 * sY2
+        sX2 = sX1; sX1 = a; sY2 = sY1; sY1 = h
         sEh += (h * h - sEh) * this.sibEnvCoef
-        sEa += (x * x - sEa) * this.sibEnvCoef
+        sEa += (a * a - sEa) * this.sibEnvCoef
         const t = sEa > 1e-12
           ? clamp((sEh / sEa - SIB_GUARD_RATIO_LO) / (SIB_GUARD_RATIO_HI - SIB_GUARD_RATIO_LO), 0, 1)
           : 0
@@ -2786,10 +2832,15 @@ export class LA2AKernel {
       if (this.cellShaperActive) {
         // Attenuation-compensated, bounded — see CELL_CURVE_DRIVE_MAX.
         const comp = preG > 0 ? Math.min(1 / preG, this.cellCompMax) : 1
+        const sg = sibDepth > 0 ? (sibLa ? sibLa.push(sGain) : sGain) : 1
         const d = this.cellCurveDriveMax * comp
           * (1 - Math.exp(-grNow / this.cellModTauDb))
-          * (sibDepth > 0 ? (sibLa ? sibLa.push(sGain) : sGain) : 1)
+          * sg
         cellDriveRaw[i] = d
+        if (valveGuard > 0) {
+          const vm = 1 - valveGuard * (1 - sg)
+          valveMix[i] = this.oversampleOn ? this.valveMixDelay.push(vm) : vm
+        }
         if (this.oversampleOn) {
           cellPreG[i] = this.preGainDelay.push(preG)
           cellMakeup[i] = this.makeupDelay.push(makeupLinSmoothed)
@@ -2939,6 +2990,7 @@ export class LA2AKernel {
     const seamPreG = this.seamPreG
     const seamMakeup = this.seamMakeup
     const seamDrive = this.seamDrive
+    const seamValve = this.seamValve
     const wet = this.wetScratch
 
     for (let ch = 0; ch < nOut; ch++) {
@@ -2995,6 +3047,7 @@ export class LA2AKernel {
       if (!this.oversampleOn) {
         this._processChannelBaseRate(
           driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive,
+          valveGuard > 0 ? valveMix : null,
         )
         continue
       }
@@ -3029,28 +3082,39 @@ export class LA2AKernel {
         let pCur = seamPreG
         let mCur = seamMakeup
         let dCur = seamDrive
+        let vCur = seamValve
         for (let i = 0; i < n; i++) {
           const pNext = cellPreG[i]
           const mNext = cellMakeup[i]
           const dNext = cellDrive[i]
+          const vNext = valveGuard > 0 ? valveMix[i] : 1
           const pStep = (pNext - pCur) * invL
           const mStep = (mNext - mCur) * invL
           const dStep = (dNext - dCur) * invL
+          const vStep = (vNext - vCur) * invL
           for (let j = 0; j < L; j++) {
             const k = i * L + j
             let w = hi[k] * (pCur + pStep * j)
             w = this.cellSatCurve.transferAt(w, dCur + dStep * j)
             w *= mCur + mStep * j
-            if (this.applyTube) w = this.shapeTube(w)
+            if (this.applyTube) {
+              // The valve guard fades toward the linear term; at 1 (any vowel)
+              // this is the shipping branch exactly.
+              const v = vCur + vStep * j
+              const s = this.shapeTube(w)
+              w = v >= 1 ? s : w + v * (s - w)
+            }
             hi[k] = w
           }
           pCur = pNext
           mCur = mNext
           dCur = dNext
+          vCur = vNext
         }
         this.seamPreG = pCur
         this.seamMakeup = mCur
         this.seamDrive = dCur
+        this.seamValve = vCur
       } else {
         for (let i = 0; i < n; i++) {
           const gNext = gain[i]
@@ -3154,7 +3218,7 @@ export class LA2AKernel {
    * @param {Float32Array} driven  pre-emphasised audio, or `input` when off
    * @param {Float32Array} input   the untouched input, for the dry side of mix
    */
-  _processChannelBaseRate(driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive) {
+  _processChannelBaseRate(driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive, valveMix = null) {
     let dcX = this.dcX[ch]
     let dcY = this.dcY[ch]
     // The wet side is built first so the de-emphasis has a buffer to filter;
@@ -3169,7 +3233,9 @@ export class LA2AKernel {
         w = driven[i] * gain[i]
       }
       if (this.applyTube) {
-        const shaped = this.shapeTube(w)
+        let shaped = this.shapeTube(w)
+        // The valve guard, as in the oversampled path.
+        if (valveMix && valveMix[i] < 1) shaped = w + valveMix[i] * (shaped - w)
         dcY = shaped - dcX + this.dcR * dcY
         dcX = shaped
         w = dcY

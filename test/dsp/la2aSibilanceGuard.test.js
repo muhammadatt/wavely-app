@@ -156,3 +156,39 @@ test('BENCH corner: the default is the 4 kHz kernel bit for bit, and a lower cor
   for (let i = 0; i < v4.length; i++) d = Math.max(d, Math.abs(v4[i] - v25[i]))
   assert.ok(d < 1e-6, `vowel moved ${d}`)
 })
+
+test('valve guard: a loud "s" through the valve comes out clean, a vowel is bit-identical, 0 is the previous kernel', async () => {
+  const { VALVE_GUARD_DEFAULT, LA2A_TUBESAT_PATCH } = await import('../../src/audio/la2aProcessor.js')
+  assert.equal(LA2A_KERNEL_DEFAULTS.valveGuard, VALVE_GUARD_DEFAULT)
+  assert.equal(LA2A_TUNING_DEFAULTS.valveGuard, VALVE_GUARD_DEFAULT)
+  assert.equal(LA2A_TUBESAT_PATCH.valveGuard, 0)
+  const s = loudSibilant()
+  const clean = render(s, { analog: false }).channelData[0]
+  const from = SR / 4
+  const cellOnly = residualDb(render(s, { valveGuard: 0 }).channelData[0], clean, clean, from)
+  const both = residualDb(render(s, { valveGuard: 100 }).channelData[0], clean, clean, from)
+  assert.ok(both < cellOnly - 10, `valve guard: ${cellOnly.toFixed(1)} → ${both.toFixed(1)} dB`)
+  const v = vowel()
+  assert.deepEqual(render(v, { valveGuard: 100 }).channelData[0], render(v, { valveGuard: 0 }).channelData[0])
+})
+
+test('the guard listens to the audio, not to a caller\'s sidechain', async () => {
+  const { LA2AKernel } = await import('../../src/audio/la2aProcessor.js')
+  const s = loudSibilant()
+  const run = (sc) => {
+    const k = new LA2AKernel(SR)
+    k.setParams({ peakReduction: 70, gainDb: 6 })
+    const y = new Float32Array(s.length)
+    for (let o = 0; o < s.length; o += 128) {
+      k.process([s.subarray(o, o + 128)], [y.subarray(o, o + 128)], 128, sc ? sc.subarray(o, o + 128) : undefined)
+    }
+    return k.sibGain
+  }
+  // A sidechain with the top end taken away (as VoxPressor's Body tap does)
+  // still leaves the guard reading the audio's "s".
+  const dull = new Float32Array(s.length)
+  let l = 0
+  for (let i = 0; i < s.length; i++) { l += (s[i] - l) * 0.02; dull[i] = l }
+  assert.ok(run(dull) < 0.1, `guard scale with a dull sidechain ${run(dull)}`)
+  assert.equal(run(dull), run(null))
+})
