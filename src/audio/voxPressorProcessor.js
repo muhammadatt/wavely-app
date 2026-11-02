@@ -205,11 +205,25 @@ export const PARALLEL_PATCH = Object.freeze({
  * that plays. `outputGainDb` is the measured wet makeup (absolute: it includes
  * cancelling the Input's drive).
  */
+/**
+ * BENCH: extra drive into the parallel copy's detector, dB (`parallelDriveDb`,
+ * 0 ships). An offset on its alignment — the same drive offset the file's
+ * alignment is, so it means the same thing on both compressors and is
+ * invisible to everything but the detector — not an input gain. The wet
+ * makeup is re-solved with it, so the blend's level follows. Added because the
+ * two copies' gain reduction is voiced independently (Messy and Bright, 30 s,
+ * typical / max: 1176 9.1 / 18.4 dB, LA-2A 6.0 / 7.6).
+ */
+export const PARALLEL_DRIVE_MAX_DB = 12
+export function parallelDriveDb(p) {
+  return finite(p?.parallelDriveDb, 0, -PARALLEL_DRIVE_MAX_DB, PARALLEL_DRIVE_MAX_DB)
+}
+
 export function parallelFetParams(p) {
   return {
     ...PARALLEL_PATCH,
     release: peaksTiming('auto', p.voiceF0Hz).release,
-    inputAlignDb: finite(p.parallelAlignDb, 0, -60, 60),
+    inputAlignDb: finite(p.parallelAlignDb, 0, -60, 60) + parallelDriveDb(p),
     mix: finite(p.parallelMix, 0, 0, 1),
     outputGainDb: finite(p.parallelMakeupDb, 0, -48, 48),
     ...parallelCeiling(p),
@@ -259,7 +273,7 @@ export function parallelLa2aParams(p) {
   return {
     ...PARALLEL_LA2A_PATCH,
     peakReduction: finite(p.parallelLa2aPr, PARALLEL_LA2A_PR, 0, 100),
-    inputAlignDb: finite(p.parallelAlignDb, 0, -60, 60),
+    inputAlignDb: finite(p.parallelAlignDb, 0, -60, 60) + parallelDriveDb(p),
     mix: finite(p.parallelMix, 0, 0, 1),
     gainDb: finite(p.parallelMakeupDb, 0, -24, 24),
     ...parallelCeiling(p),

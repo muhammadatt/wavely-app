@@ -151,6 +151,8 @@ export const VOX_DEFAULTS = {
    * BENCH: what it cuts — 'broadband' (the whole copy, ships: owner's A/B),
    * 'shelf' (above 4 kHz) or 'shelf-low' (above 2.5 kHz). Re-measures.
    */
+  /** BENCH: extra drive into the parallel copy's detector, dB (`parallelDriveDb`). Re-measures. */
+  parallelDriveDb: 0,
   parallelDeEssMode: 'broadband',
   /** BENCH: the parallel 1176's +15 dB sibilance detector (`ParallelDetector`). Re-measures. */
   parallelSibEmph: true,
@@ -268,6 +270,7 @@ function stageParams(p) {
     parallelComp: p.parallelComp === 'la2a' ? 'la2a' : '1176',
     parallelDeEss: knob(p.parallelDeEss),
     parallelDeEssMode: p.parallelDeEssMode ?? 'broadband',
+    parallelDriveDb: Number.isFinite(p.parallelDriveDb) ? p.parallelDriveDb : 0,
     parallelSibEmph: p.parallelSibEmph !== false,
     parallelAlignDb: Number.isFinite(p.parallelAlignDb) ? p.parallelAlignDb : 0,
     parallelMakeupDb: Number.isFinite(p.parallelMakeupDb) ? p.parallelMakeupDb : 0,

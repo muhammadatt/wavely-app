@@ -780,3 +780,19 @@ test('two passes: measureUntil body returns Peaks/Body exactly as the full pass,
   assert.equal(full.partial, undefined)
   for (const k of VOX_MEASURED_KEYS) assert.deepEqual(full[k], cold[k], k)
 })
+
+test('Parallel drive: a pure drive offset on the copy\'s detector, for both compressors', async () => {
+  const { processVoxPressorBuffer } = await import('../../src/audio/voxPressorProcessor.js')
+  const x = narration(SR, { seconds: 4, levelDb: -22 })
+  for (const comp of ['la2a', '1176']) {
+    const base = toKernelParams({
+      ...VOX_DEFAULTS, alignDb: 0, parallelComp: comp, parallel: 50, peaks: 0, body: 0, deEss: 0, density: 0,
+      parallelAlignDb: 2, parallelMakeupDb: 3, parallelDeEss: 0,
+    })
+    const r = p => processVoxPressorBuffer([x], SR, { ...base, ...p }).channelData[0]
+    const driven = r({ parallelDriveDb: 6 })
+    assert.deepEqual(driven, r({ parallelAlignDb: 8 }), comp)
+    assert.notDeepEqual(driven, r({}), comp)
+    assert.deepEqual(r({ parallelDriveDb: 0 }), r({}), comp)
+  }
+})

@@ -23,6 +23,7 @@ const {
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
   voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale, voxDownstreamPending,
+  voxParallelDrive, syncParallelDrive,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
@@ -71,6 +72,11 @@ const SPEED_OPTIONS = [
 const PARALLEL_DEESS_OPTIONS = [0, 25, 50, 75, 100].map(v => ({
   value: v, label: v === 0 ? 'OFF' : String(v),
   title: v === 0 ? 'No de-esser on the copy' : `De-ess the parallel copy before the blend (${v})`,
+}))
+// BENCH: extra drive into the parallel copy's detector, dB (0 ships).
+const PARALLEL_DRIVE_OPTIONS = [-6, -3, 0, 3, 6, 9, 12].map(v => ({
+  value: v, label: v === 0 ? '0' : `${v > 0 ? '+' : ''}${v}`,
+  title: v === 0 ? 'The copy as voiced' : `Drive the parallel copy ${v > 0 ? 'harder' : 'softer'} by ${Math.abs(v)} dB (its makeup is re-measured)`,
 }))
 const PARALLEL_DEESS_MODE_OPTIONS = [
   { value: 'broadband', label: 'FULL', title: 'Turn the whole copy down: the dry carries the fricative untouched' },
@@ -365,6 +371,14 @@ async function applyAndClose() {
               />
             </div>
             <div class="vp-listen vp-bench">
+              <span class="m-caption">Parallel drive dB</span>
+              <ModulaSegmented
+                :model-value="voxParallelDrive" :options="PARALLEL_DRIVE_OPTIONS"
+                aria-label="Parallel drive" :disabled="!voxPreview || voxParallel <= 0"
+                @update:model-value="syncParallelDrive"
+              />
+            </div>
+            <div class="vp-listen vp-bench">
               <span class="m-caption">Parallel de-ess</span>
               <ModulaSegmented
                 :model-value="voxParallelDeEss" :options="PARALLEL_DEESS_OPTIONS"
@@ -410,10 +424,11 @@ async function applyAndClose() {
     </div>
 
     <p class="vp-about">
-      Dev: a 1176 trims the peaks, an LA-2A levels the voice, then a de-esser, a parallel 1176 and an anchored Inflator.
-      The compressors listen through a voice detector that ignores rumble; the LA-2A also
-      ignores plosives and sibilance. Each makes up its own level, as in a hand-built chain, so what they take off comes back as loudness;
-      a lookahead limiter after each holds the source's peak with a gain, never a clipper.
+      Dev: a 1176 trims the peaks, an LA-2A levels the voice, then a de-esser, a parallel compressor (an LA-2A unless the bench picks the 1176)
+      and an anchored Inflator. The 1176 and the LA-2A listen through a voice detector that ignores rumble; the LA-2A also ignores plosives
+      and sibilance. Each compressor makes up its own level, as in a hand-built chain, so what it takes off comes back as loudness.
+      After the 1176, the LA-2A and the Inflator a lookahead limiter holds the source's peak with a gain; the parallel blend is held at
+      the source's peak by its compressor's own soft ceiling, which bends the few peaks that reach it.
     </p>
   </FloatingWindow>
 </template>
