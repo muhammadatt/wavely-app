@@ -85,11 +85,17 @@ export const VOX_DEFAULTS = {
    */
   body: 57,
   /**
-   * DE-ESS, 0–100 (0 = stage out): the HF Softener's Amount, its Split pinned
-   * at the panel's default (`DE_ESS_SPLIT`), Guard 100 — every other control
+   * DE-ESS, 0–100 (0 = stage out): the HF Softener's Amount, shared by
+   * `deEssSplit` between its Duck and EQ, Guard 100 — every other control
    * the De-Esser's own default. After Body, before Parallel (owner's order).
    */
   deEss: 40,
+  /**
+   * The De-ess Amount's SPLIT, 0–100: the De-Esser panel's WIDE BAND ↔ SPLIT
+   * BAND view (`splitAmount`) — 0 all to the broadband Duck, 100 all to the
+   * top-band EQ. 33 is the De-Esser's own default (`DE_ESS_SPLIT`).
+   */
+  deEssSplit: 33,
   /**
    * PARALLEL, 0–100 % (0 = stage out): the Mix of a fast 4:1 1176 copy
    * blended under the voice (New York compression; `PARALLEL_PATCH`).
@@ -209,7 +215,7 @@ export function toKernelParams(p) {
   }
 }
 
-/** The De-Esser's Split, pinned: its own panel default (Amount 60 / Split 33). */
+/** The De-Esser's own default Split (Amount 60 / Split 33): `deEssSplit`'s default. */
 export const DE_ESS_SPLIT = 33
 
 /**
@@ -224,7 +230,7 @@ export const DE_ESS_SPLIT = 33
 function stageParams(p) {
   const aligned = Number.isFinite(p.alignDb)
   const deEss = knob(p.deEss)
-  const { duck, amount } = splitAmount(deEss, DE_ESS_SPLIT)
+  const { duck, amount } = splitAmount(deEss, Number.isFinite(p.deEssSplit) ? p.deEssSplit : DE_ESS_SPLIT)
   const sourceGatedDb = aligned ? ALIGN_TARGET_DBFS - p.alignDb : null
   const levelOffset = Number.isFinite(p.deEssLevelOffsetDb)
     ? p.deEssLevelOffsetDb

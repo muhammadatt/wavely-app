@@ -139,7 +139,7 @@ BODY SC** and compare against a plain LA Vintage 2A.
 | **Peaks** | 0–10 | 3 | The 76's detector drive on a linear scale (Input pinned at 26), aligned to the file's gated RMS (§4.2): ≈ N dB off the loudest peaks of typical narration. Readout: dB off the loudest peaks, voice touched. 0 = stage out, a pure delay |
 | **Speed** | AUTO / GENTLE / NORMAL / FAST | AUTO | The 76's attack / release (§10): AUTO sets the release from the voice's pitch. Readout: gain ripple, amber past −22 dB |
 | **Body** | 0–100 | 57 | The 2A's **Peak Reduction**, aligned the same way and net of the Peaks stage's makeup. Readout: avg leveling on voiced material. 0 = stage out |
-| **De-ess** | 0–100 | 40 | HF Softener **Amount** (Split pinned at its default 33; Guard 100) |
+| **De-ess** | 0–100 | 40 | HF Softener **Amount** (shared by a WIDE ↔ SPLIT slider, `deEssSplit`, default 33; Guard 100) |
 | **Parallel** | 0–100 % | 30 | The parallel 1176's **Mix** (§4.4): a fast 4:1 copy blended under the voice, peaks held, the rest raised. 0 = stage out, a pure delay |
 | **Air** | 0–6 dB | 1.5 | Air Boost curve (`dsp/airBandCurve.js`), VOICED mode only (vowels), the HF Softener's existing Air path |
 | **Density** | 0–100 % | 30 | Cambridge Inflator **Effect** (§4.3). Lifts the body up to +3.5 dB under a fixed peak, with odd harmonics on the loudest syllables |
@@ -633,7 +633,7 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
   neither real clip is one.
 - **Stage 2: De-ess → Parallel → Density, in that order** (owner, October
   2026: de-ess before the parallel stage). Defaults De-ess 40 (the HF
-  Softener's Amount, Split pinned at its panel default 33, Guard 100),
+  Softener's Amount, Split on a slider under the knob, default 33, Guard 100),
   Parallel 30 % PRESENCE, Density 30 %. Measured on the owner's clips (30 s,
   loudness / energy above 5 kHz vs the source; core = Peaks 3 / Body 57 / AUTO):
   Messy and Bright core +2.44 / +4.84 dB, + De-ess +2.30 / +0.77, + Parallel

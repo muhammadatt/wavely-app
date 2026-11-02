@@ -6,6 +6,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { releaseSecondsForDial } from '../../audio/fet1176Processor.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
+import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -19,12 +20,12 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
-  voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode,
+  voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
   syncDeEss, syncParallel, syncParallelComp, syncDensity,
-  syncParallelDeEss, syncParallelSibEmph, syncParallelDeEssMode,
+  syncParallelDeEss, syncParallelSibEmph, syncParallelDeEssMode, syncDeEssSplit,
   apply, teardown, closeModal,
 } = useVoxPressor()
 
@@ -92,6 +93,8 @@ const LOOKAHEAD_OPTIONS = BODY_LOOKAHEAD_STEPS_MS.map(ms => ({
 function formatPeaks(v) {
   return v > 0 ? v.toFixed(1) : 'OFF'
 }
+
+const formatSplit = v => (v <= 0 ? 'ALL WIDE' : v >= 100 ? 'ALL SPLIT' : `${100 - Math.round(v)} / ${Math.round(v)}`)
 
 function formatKnob(v) {
   return v > 0 ? String(Math.round(v)) : 'OFF'
@@ -244,6 +247,15 @@ async function applyAndClose() {
               label="De-ess" :color="DEESS_COLOR" :format-value="formatKnob" :disabled="!voxPreview"
               title="The HF Softener's Amount, after the compressors: takes down the sibilance they brought up. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncDeEss"
+            />
+            <ModulaFillSlider
+              orientation="horizontal" :length="120"
+              :model-value="voxDeEssSplit" :min="0" :max="100" :step="1" :default-value="VOX_DEFAULTS.deEssSplit"
+              label="" :ends="['WIDE', 'SPLIT']" flat :format-value="formatSplit"
+              :color="DEESS_COLOR" :disabled="!voxPreview || voxDeEss <= 0"
+              aria-label="De-ess split between wide band and split band"
+              title="Where the De-ess Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
+              @update:model-value="syncDeEssSplit"
             />
           </div>
           <div class="vp-col vp-col-sm">
