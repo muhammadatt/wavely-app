@@ -101,11 +101,13 @@ export const VOX_DEFAULTS = {
    */
   speed: 'auto',
   /**
-   * The LA-2A's Peak Reduction, 0–100 (0 = Body stage out). 57 is 3.4–3.8 dB
-   * of average leveling on both clips (≈ 2.3 dB per 10 points from 40 up;
-   * the two clips agree to 0.4 dB at every setting).
+   * BODY, 0–10 (0 = stage out): the LA-2A's Peak Reduction over its usable
+   * span, the Parallel Drive's scale (`bodyPrFor`: PR 38 + 4 a step, so
+   * 4.75 = PR 57, 10 = PR 78). PR 57 is 3.4–3.8 dB of average leveling on both
+   * clips (≈ 2.3 dB per 10 points from 40 up; the two clips agree to 0.4 dB at
+   * every setting).
    */
-  body: 57,
+  body: 4.75,
   /**
    * DE-ESS, 0–100 (0 = stage out): the HF Softener's Amount, shared by
    * `deEssSplit` between its Duck and EQ, Guard 100 — every other control
@@ -221,7 +223,7 @@ export function toKernelParams(p) {
     ...stageParams(p),
     peaksSpeed: PEAKS_SPEED_IDS.includes(p.speed) ? p.speed : 'auto',
     voiceF0Hz: Number.isFinite(p.voiceF0Hz) ? p.voiceF0Hz : null,
-    bodyPeakReduction: knob(p.body),
+    bodyPeakReduction: bodyPrFor(p.body),
     outputDb: Number.isFinite(p.output) ? p.output : 0,
     listen: p.listen ?? 'off',
     makeupDb: Number.isFinite(p.makeupDb) ? p.makeupDb : 0,
@@ -312,6 +314,21 @@ function stageParams(p) {
     density: knob(p.density) / 100,
     sourcePeakDb: Number.isFinite(p.sourcePeakDb) ? p.sourcePeakDb : null,
   }
+}
+
+/**
+ * The Body knob (0–10) as the LA-2A's Peak Reduction: PR 38 + 4 a step, so
+ * 0 / 4.75 / 10 = PR 38 / 57 / 78 — the same scale as the Parallel Drive on
+ * its LA-2A (owner, November 2026: centre the knob on the usable span; under
+ * PR ~38 the stage barely touches narration, ~0.5 dB of leveling at 40).
+ * 0 itself takes the stage out (`bodyOn`), as every other knob's 0 does.
+ */
+export const BODY_MAX = 10
+export const BODY_PR_ZERO = 38
+export const BODY_PR_PER_STEP = 4
+export function bodyPrFor(body) {
+  const k = Number.isFinite(Number(body)) ? Math.max(0, Math.min(BODY_MAX, Number(body))) : 0
+  return BODY_PR_ZERO + BODY_PR_PER_STEP * k
 }
 
 function knob(v) {

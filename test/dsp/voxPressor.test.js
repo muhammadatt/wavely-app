@@ -389,7 +389,7 @@ test('a stage is bypassed until the file is aligned, not run uncalibrated', () =
   assert.equal(aligned.peaksOn, true)
   assert.equal(aligned.bodyOn, true)
   assert.equal(aligned.peaksInput, PEAKS_INPUT_KNOB)
-  assert.equal(aligned.bodyPeakReduction, VOX_DEFAULTS.body)
+  assert.equal(aligned.bodyPeakReduction, 57)
 })
 
 test('the Peaks scale is linear in detector drive, Peaks 0 its first catch', () => {
@@ -473,7 +473,7 @@ test('each later stage does its job and none of them raises the source peak', ()
   const sourcePeak = peak(x)
   const render = (panel) => {
     // The Parallel figures below are the 1176's, with no de-esser on the copy.
-    const { params } = measure(x, { peaks: 3, body: 57, deEss: 0, parallel: 0, density: 0, parallelComp: '1176', parallelDeEss: 0, ...panel })
+    const { params } = measure(x, { peaks: 3, body: 4.75, deEss: 0, parallel: 0, density: 0, parallelComp: '1176', parallelDeEss: 0, ...panel })
     return processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData
   }
   const dry = render({})
@@ -654,7 +654,7 @@ test('BENCH: the Parallel de-esser takes the copy\'s top end down, leaves the le
   const sourcePeakDb = db(peak(x))
   for (const parallelComp of ['1176', 'la2a']) {
     const render = (panel) => {
-      const { r, params } = measure(x, { peaks: 3, body: 57, deEss: 0, parallel: 60, density: 0, parallelComp, ...panel })
+      const { r, params } = measure(x, { peaks: 3, body: 4.75, deEss: 0, parallel: 60, density: 0, parallelComp, ...panel })
       assert.ok(Number.isFinite(r.parallelMakeupDb), `${parallelComp}: measured`)
       return processVoxPressorBuffer([x], SR, params, { compensate: true }).channelData
     }
@@ -693,8 +693,8 @@ test('a Parallel move re-solves only Parallel: cached upstream, same answer as c
   }
   // An upstream knob is NOT cached past: a different Body re-measures everything.
   measure(x, { parallel: 70 })
-  const body = measure(x, { parallel: 70, body: 70 }).r
-  assert.deepEqual(body, cold({ parallel: 70, body: 70 }))
+  const body = measure(x, { parallel: 70, body: 8 }).r
+  assert.deepEqual(body, cold({ parallel: 70, body: 8 }))
   assert.notEqual(body.bodyMakeupDb, coldB.bodyMakeupDb)
   // And so does different audio of the same length.
   const y = narration(SR, { seconds: 12, levelDb: -18 })
@@ -768,7 +768,7 @@ test('two passes: measureUntil body returns Peaks/Body exactly as the full pass,
   const S = await import('../../src/audio/voxPressorSolve.js')
   const x = narration(SR, { seconds: 8, levelDb: -22 })
   const alignDb = inputAlignDbFor([x], SR)
-  const kp = toKernelParams({ ...VOX_DEFAULTS, alignDb, body: 63 })
+  const kp = toKernelParams({ ...VOX_DEFAULTS, alignDb, body: 6.25 })
   S.clearVoxPressorMeasureCache()
   const part = S.measureVoxPressor([x], SR, { ...kp, measureUntil: 'body' })
   assert.equal(part.partial, true)

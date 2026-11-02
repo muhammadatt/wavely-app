@@ -13,20 +13,20 @@ import FloatingWindow from './FloatingWindow.vue'
 import { isVoxPressorBenchVisible } from '../../audio/effects/voxPressorBench.js'
 import {
   VOX_DEFAULTS, VOX_OUTPUT_MIN_DB, VOX_OUTPUT_MAX_DB,
-  PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, PEAKS_RIPPLE_WARN_DB, peaksTiming,
+  PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX, bodyPrFor, PEAKS_RIPPLE_WARN_DB, peaksTiming,
 } from '../../audio/effects/voxPressorParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
+  voxPeaks, voxBody, voxOutput, voxBodyLookahead, voxSpeed,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
   voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale, voxDownstreamPending,
   voxParallelDrive, syncParallelDrive,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
-  togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
+  togglePreview, syncPeaks, syncBody, syncOutput, syncBodyLookahead, syncSpeed,
   syncDeEss, syncParallel, syncParallelComp, syncDensity,
   syncParallelDeEss, syncParallelSibEmph, syncParallelDeEssMode, syncDeEssSplit,
   apply, teardown, closeModal,
@@ -54,11 +54,6 @@ function formatPercent(v) {
 }
 const METER_H = 214
 
-const LISTEN_OPTIONS = [
-  { value: 'off', label: 'OUTPUT', title: 'Hear the processed voice' },
-  { value: 'peaks', label: 'PEAKS SC', title: 'Hear what the 1176 listens to: rumble turned down, plosives and sibilance kept so it can trim them' },
-  { value: 'body', label: 'BODY SC', title: 'Hear what the LA-2A listens to: rumble, plosives and sibilance turned down, after the 1176' },
-]
 
 // The 1176's SPEED (`PEAKS_SPEEDS`): AUTO follows the voice's pitch.
 const SPEED_OPTIONS = [
@@ -99,6 +94,11 @@ const LOOKAHEAD_OPTIONS = BODY_LOOKAHEAD_STEPS_MS.map(ms => ({
 
 function formatPeaks(v) {
   return v > 0 ? v.toFixed(1) : 'OFF'
+}
+
+function formatBody(v) {
+  if (v <= 0) return 'OFF'
+  return Number.isInteger(v * 2) ? v.toFixed(1) : v.toFixed(2)
 }
 
 function formatDrive(v) {
@@ -176,7 +176,7 @@ const bodyNote = computed(() => {
   if (voxBody.value <= 0) return 'stage out'
   const r = voxReadout.value
   if (!r) return voxBusy.value ? 'measuring…' : '—'
-  return `${r.bodyDb.toFixed(1)} dB avg leveling`
+  return `PR ${Math.round(bodyPrFor(voxBody.value))} · ${r.bodyDb.toFixed(1)} dB avg leveling`
 })
 // The numbers on screen describe the knobs they were measured at; while a
 // newer measurement is in flight they are dimmed rather than blanked.
@@ -274,10 +274,10 @@ async function applyAndClose() {
           <div class="vp-col">
             <ModulaKnob
               variant="ticks" :size="108" show-value editable
-              :model-value="voxBody" :min="0" :max="100" :step="1"
+              :model-value="voxBody" :min="0" :max="BODY_MAX" :step="0.25"
               :default-value="VOX_DEFAULTS.body"
-              label="Body · LA-2A Peak Red." :color="ACCENT" :format-value="formatKnob" :disabled="!voxPreview"
-              title="The LA-2A's Peak Reduction, aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
+              label="Body · LA-2A" :color="ACCENT" :format-value="formatBody" :disabled="!voxPreview"
+              title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 1 = PR 42, 4.75 = PR 57, 10 = PR 78 (4 points a step), aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncBody"
             />
             <span class="m-note" :class="{ 'vp-stale': stale }"><i v-if="stale" class="vp-pulse" aria-hidden="true"></i>{{ bodyNote }}</span>
@@ -351,14 +351,6 @@ async function applyAndClose() {
             :model-value="voxSpeed" :options="SPEED_OPTIONS"
             aria-label="Peaks speed" :disabled="!voxPreview || voxPeaks <= 0"
             @update:model-value="syncSpeed"
-          />
-        </div>
-        <div class="vp-listen">
-          <span class="m-caption">Listen</span>
-          <ModulaSegmented
-            :model-value="voxListen" :options="LISTEN_OPTIONS"
-            aria-label="Listen" :disabled="!voxPreview"
-            @update:model-value="syncListen"
           />
         </div>
         <div v-if="showBench" class="vp-bench-wrap">
