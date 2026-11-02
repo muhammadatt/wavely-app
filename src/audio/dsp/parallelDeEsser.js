@@ -10,7 +10,8 @@
  *
  * THE DETECTOR IS LA VINTAGE 2A'S SIBILANCE GUARD's (`la2aProcessor.js`), its
  * constants COPIED, not imported (this module stays free of the kernel), and
- * pinned equal by a test: the share of the signal's energy above 4 kHz
+ * pinned by a test — except the corner, which the guard moved to 2.5 kHz for a
+ * dark "sh" while this stays at the 4 kHz it was auditioned at: the share of the signal's energy above 4 kHz
  * (mean squares over 4 ms), mapped 0.25 → 0.6 through a smoothstep, 1 ms
  * attack / 30 ms release. ⚠ A RATIO, NOT A LEVEL, and that is the point: it
  * reads a quiet "s" exactly as a loud one, so the sibilants parallel lifts are

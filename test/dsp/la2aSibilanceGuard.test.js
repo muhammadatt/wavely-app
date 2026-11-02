@@ -123,7 +123,7 @@ test('with lookahead, the guard waits for the delayed sibilant (PR #186 review)'
   assert.ok(dOff - dOn > 12, `guard bought only ${(dOff - dOn).toFixed(1)} dB with lookahead`)
 })
 
-test('BENCH corner: the default is the 4 kHz kernel bit for bit, and a lower corner reaches a darker "sh"', async () => {
+test('BENCH corner: the default is the 2.5 kHz kernel bit for bit, and it reaches a darker "sh"', async () => {
   const { SIB_GUARD_HZ } = await import('../../src/audio/la2aProcessor.js')
   assert.equal(LA2A_KERNEL_DEFAULTS.sibilanceGuardHz, SIB_GUARD_HZ)
   assert.equal(LA2A_TUNING_DEFAULTS.sibilanceGuardHz, SIB_GUARD_HZ)
@@ -145,13 +145,14 @@ test('BENCH corner: the default is the 4 kHz kernel bit for bit, and a lower cor
   assert.deepEqual(render(x, { sibilanceGuardHz: SIB_GUARD_HZ }).channelData[0], asDefault)
   const clean = render(x, { analog: false }).channelData[0]
   const from = Math.round(SR * 1.6)
-  const at4k = residualDb(asDefault, clean, clean, from)
-  const at25 = residualDb(render(x, { sibilanceGuardHz: 2500 }).channelData[0], clean, clean, from)
+  const at4kRender = render(x, { sibilanceGuardHz: 4000 }).channelData[0]
+  const at4k = residualDb(at4kRender, clean, clean, from)
+  const at25 = residualDb(asDefault, clean, clean, from)
   assert.ok(at25 < at4k - 1, `"sh": 4 kHz ${at4k.toFixed(1)} vs 2.5 kHz ${at25.toFixed(1)} dB`)
   // The vowel before it is untouched by the lower corner.
   const vowelEnd = Math.round(SR * 1.4)
-  const v4 = asDefault.subarray(SR / 10, vowelEnd)
-  const v25 = render(x, { sibilanceGuardHz: 2500 }).channelData[0].subarray(SR / 10, vowelEnd)
+  const v4 = at4kRender.subarray(SR / 10, vowelEnd)
+  const v25 = asDefault.subarray(SR / 10, vowelEnd)
   let d = 0
   for (let i = 0; i < v4.length; i++) d = Math.max(d, Math.abs(v4[i] - v25[i]))
   assert.ok(d < 1e-6, `vowel moved ${d}`)

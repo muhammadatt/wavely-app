@@ -1612,7 +1612,11 @@ export const VALVE_GUARD_DEFAULT = 100
  */
 export const SHAPER_SPLIT_HZ_MIN = 250
 export const SHAPER_SPLIT_HZ_MAX = 12000
-export const SIB_GUARD_HZ = 4000
+/**
+ * The guard's detector corner. SHIPS AT 2500 (owner, November 2026; was 4000):
+ * an "sh" is darker than an "s" and 4 kHz barely heard it.
+ */
+export const SIB_GUARD_HZ = 2500
 /**
  * BENCH range for the guard's detector corner (`sibilanceGuardHz`). An "sh" is
  * darker than an "s": on the owner's "Actual grownup" the "sh" puts only 0.25
