@@ -13,7 +13,7 @@ import FloatingWindow from './FloatingWindow.vue'
 import { isVoxPressorBenchVisible } from '../../audio/effects/voxPressorBench.js'
 import {
   VOX_DEFAULTS, VOX_OUTPUT_MIN_DB, VOX_OUTPUT_MAX_DB,
-  PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PEAKS_RIPPLE_WARN_DB, peaksTiming,
+  PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, PEAKS_RIPPLE_WARN_DB, peaksTiming,
 } from '../../audio/effects/voxPressorParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -73,11 +73,6 @@ const PARALLEL_DEESS_OPTIONS = [0, 25, 50, 75, 100].map(v => ({
   value: v, label: v === 0 ? 'OFF' : String(v),
   title: v === 0 ? 'No de-esser on the copy' : `De-ess the parallel copy before the blend (${v})`,
 }))
-// BENCH: extra drive into the parallel copy's detector, dB (0 ships).
-const PARALLEL_DRIVE_OPTIONS = [-6, -3, 0, 3, 6, 9, 12].map(v => ({
-  value: v, label: v === 0 ? '0' : `${v > 0 ? '+' : ''}${v}`,
-  title: v === 0 ? 'The copy as voiced' : `Drive the parallel copy ${v > 0 ? 'harder' : 'softer'} by ${Math.abs(v)} dB (its makeup is re-measured)`,
-}))
 const PARALLEL_DEESS_MODE_OPTIONS = [
   { value: 'broadband', label: 'FULL', title: 'Turn the whole copy down: the dry carries the fricative untouched' },
   { value: 'shelf', label: '4K', title: 'Cut the copy above 4 kHz' },
@@ -89,8 +84,8 @@ const SIB_EMPH_OPTIONS = [
 ]
 
 const PARALLEL_COMP_OPTIONS = [
+  { value: 'la2a', label: 'LA-2A', title: 'A slow, smooth opto copy (an LA Vintage 2A): thickens the body without grabbing the onsets' },
   { value: '1176', label: '1176', title: 'A fast 4:1 1176 copy (New York compression)' },
-  { value: 'la2a', label: 'LA-2A', title: 'An LA-2A copy voiced as an LA Vintage 2A slot: Peak Reduction 50, its own detector, aligned on the file — the same mix law, restore and limiter' },
 ]
 
 // BENCH: LA Vintage 2A's own Lookahead on the Body stage. Off ships.
@@ -104,6 +99,10 @@ const LOOKAHEAD_OPTIONS = BODY_LOOKAHEAD_STEPS_MS.map(ms => ({
 
 function formatPeaks(v) {
   return v > 0 ? v.toFixed(1) : 'OFF'
+}
+
+function formatDrive(v) {
+  return v.toFixed(1)
 }
 
 const formatSplit = v => (v <= 0 ? 'ALL WIDE' : v >= 100 ? 'ALL SPLIT' : `${100 - Math.round(v)} / ${Math.round(v)}`)
@@ -306,13 +305,28 @@ async function applyAndClose() {
             />
           </div>
           <div class="vp-col vp-col-sm">
-            <ModulaKnob
-              variant="ticks" :size="80" show-value editable
-              :model-value="voxParallel" :min="0" :max="100" :step="1"
-              :default-value="VOX_DEFAULTS.parallel"
-              label="Parallel" :color="PARALLEL_COLOR" :format-value="formatPercent" :disabled="!voxPreview"
-              title="Parallel compression: a fast 4:1 1176 copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
-              @update:model-value="syncParallel"
+            <div class="vp-pair">
+              <ModulaKnob
+                variant="ticks" :size="80" show-value editable
+                :model-value="voxParallel" :min="0" :max="100" :step="1"
+                :default-value="VOX_DEFAULTS.parallel"
+                label="Parallel" :color="PARALLEL_COLOR" :format-value="formatPercent" :disabled="!voxPreview"
+                title="Parallel compression: a heavily compressed copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
+                @update:model-value="syncParallel"
+              />
+              <ModulaKnob
+                variant="small" :size="52" show-value editable
+                :model-value="voxParallelDrive" :min="0" :max="PARALLEL_DRIVE_MAX" :step="0.5"
+                :default-value="VOX_DEFAULTS.parallelDrive"
+                label="Drive" :color="PARALLEL_COLOR" :format-value="formatDrive" :disabled="!voxPreview || voxParallel <= 0"
+                title="How hard the parallel copy is compressed. On the LA-2A it is Peak Reduction: 0 = PR 38, 4.5 = PR 56, 10 = PR 78; the 1176 is set so the same position compresses about as hard. The copy's makeup is re-measured. Double-click to reset"
+                @update:model-value="syncParallelDrive"
+              />
+            </div>
+            <ModulaSegmented
+              :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS"
+              aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
+              @update:model-value="syncParallelComp"
             />
             <!-- De-ess and Parallel re-solve after Body: their makeups land last. -->
             <span class="m-note vp-pending" :class="{ 'is-on': voxBusy && voxPreview }" aria-live="polite">
@@ -360,22 +374,6 @@ async function applyAndClose() {
                 :model-value="voxBodyLookahead" :options="LOOKAHEAD_OPTIONS"
                 aria-label="Body lookahead" :disabled="!voxPreview"
                 @update:model-value="syncBodyLookahead"
-              />
-            </div>
-            <div class="vp-listen vp-bench">
-              <span class="m-caption">Parallel comp</span>
-              <ModulaSegmented
-                :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS"
-                aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
-                @update:model-value="syncParallelComp"
-              />
-            </div>
-            <div class="vp-listen vp-bench">
-              <span class="m-caption">Parallel drive dB</span>
-              <ModulaSegmented
-                :model-value="voxParallelDrive" :options="PARALLEL_DRIVE_OPTIONS"
-                aria-label="Parallel drive" :disabled="!voxPreview || voxParallel <= 0"
-                @update:model-value="syncParallelDrive"
               />
             </div>
             <div class="vp-listen vp-bench">
@@ -468,6 +466,7 @@ async function applyAndClose() {
 }
 .vp-row2 { padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, .06); }
 .vp-col-sm { min-height: 0; }
+.vp-pair { display: flex; align-items: flex-end; gap: 10px; }
 .vp-listen {
   display: flex;
   align-items: center;

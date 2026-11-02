@@ -63,7 +63,7 @@ const copies = pluginCopies((copy, life) => {
   const voxParallelDeEss = ref(VOX_DEFAULTS.parallelDeEss)
   const voxParallelSibEmph = ref(VOX_DEFAULTS.parallelSibEmph)
   const voxParallelDeEssMode = ref(VOX_DEFAULTS.parallelDeEssMode)
-  const voxParallelDrive = ref(VOX_DEFAULTS.parallelDriveDb)
+  const voxParallelDrive = ref(VOX_DEFAULTS.parallelDrive)
   const voxDensity = ref(VOX_DEFAULTS.density)
   /** BENCH: the LA-2A's lookahead, ms. Measured with, so it re-measures. */
   const voxBodyLookahead = ref(VOX_DEFAULTS.bodyLookaheadMs)
@@ -138,7 +138,7 @@ const copies = pluginCopies((copy, life) => {
       parallelDeEss: voxParallelDeEss.value,
       parallelSibEmph: voxParallelSibEmph.value,
       parallelDeEssMode: voxParallelDeEssMode.value,
-      parallelDriveDb: voxParallelDrive.value,
+      parallelDrive: voxParallelDrive.value,
       density: voxDensity.value,
       bodyLookaheadMs: voxBodyLookahead.value,
       alignDb: voxAlignDb.value,
@@ -440,7 +440,7 @@ const copies = pluginCopies((copy, life) => {
 
     function syncParallelDrive(v) {
       voxParallelDrive.value = v
-      pushParam('parallelDriveDb', v)
+      pushParam('parallelDrive', v)
       scheduleSolve()
     }
 

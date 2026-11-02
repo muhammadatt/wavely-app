@@ -214,7 +214,7 @@ export const PARALLEL_PATCH = Object.freeze({
  * two copies' gain reduction is voiced independently (Messy and Bright, 30 s,
  * typical / max: 1176 9.1 / 18.4 dB, LA-2A 6.0 / 7.6).
  */
-export const PARALLEL_DRIVE_MAX_DB = 12
+export const PARALLEL_DRIVE_MAX_DB = 18
 export function parallelDriveDb(p) {
   return finite(p?.parallelDriveDb, 0, -PARALLEL_DRIVE_MAX_DB, PARALLEL_DRIVE_MAX_DB)
 }

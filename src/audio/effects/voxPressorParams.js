@@ -151,8 +151,13 @@ export const VOX_DEFAULTS = {
    * BENCH: what it cuts — 'broadband' (the whole copy, ships: owner's A/B),
    * 'shelf' (above 4 kHz) or 'shelf-low' (above 2.5 kHz). Re-measures.
    */
-  /** BENCH: extra drive into the parallel copy's detector, dB (`parallelDriveDb`). Re-measures. */
-  parallelDriveDb: 0,
+  /**
+   * PARALLEL DRIVE, 0–10 (4.5 ships): how hard the copy is compressed. A drive
+   * into its detector (`parallelDriveDbFor`), so on the LA-2A it is Peak
+   * Reduction by another name — 0 = PR 38, 4.5 = PR 56, 10 = PR 78 — and the
+   * 1176 is offset so the same position compresses about as hard. Re-measures.
+   */
+  parallelDrive: 4.5,
   parallelDeEssMode: 'broadband',
   /** BENCH: the parallel 1176's +15 dB sibilance detector (`ParallelDetector`). Re-measures. */
   parallelSibEmph: true,
@@ -239,6 +244,34 @@ export function toKernelParams(p) {
   }
 }
 
+/**
+ * The Parallel DRIVE knob (0–10) as dB of drive into the copy's detector, on
+ * top of its alignment: `zero + 2·knob`. On the LA-2A ~0.5 dB is one Peak
+ * Reduction point, so a step is 4 points and 0 / 4.5 / 10 = PR 38 / 56 / 78
+ * (owner, November 2026: 0 at PR 38 rather than a negative drive; default
+ * +3 dB = PR 56, +6 was hot on the test material). The 1176's zero is set so
+ * the same position compresses about as hard (the user may pick either).
+ *
+ * Fitted on typical gain reduction (median of 300 ms maxima, 30 s of each
+ * clip, Messy and Bright / David Greenberg): LA-2A 6.0 / 7.8 dB at 0 dB of
+ * drive, 0.67 dB per dB → ~8.0 / ~9.8 at +3; the 1176 reads 9.1 / 9.1 at
+ * 0 dB and +0.8 per dB, so its default sits at −1 (~8.3). ⚠ IT MATCHES
+ * COMPRESSION, NOT LEVEL: each copy's makeup is solved to the same
+ * 99.9th-percentile reference, and at Mix 30 the LA-2A blend adds ~0 dB of
+ * gated RMS where the 1176's adds +0.7 / +1.1 — whatever the drive (drive
+ * moves either by under 0.1 dB).
+ */
+export const PARALLEL_DRIVE_MAX = 10
+export const PARALLEL_DRIVE_DEFAULT = 4.5
+export const PARALLEL_DRIVE_DB_PER_STEP = 2
+export const PARALLEL_DRIVE_ZERO_DB = Object.freeze({ la2a: -6, 1176: -10 })
+export function parallelDriveDbFor(comp, drive) {
+  const k = Number.isFinite(drive) ? Math.max(0, Math.min(PARALLEL_DRIVE_MAX, drive)) : PARALLEL_DRIVE_DEFAULT
+  // Read as `toKernelParams` reads `parallelComp`: anything but 'la2a' is the 1176.
+  const zero = PARALLEL_DRIVE_ZERO_DB[comp === 'la2a' ? 'la2a' : '1176']
+  return zero + PARALLEL_DRIVE_DB_PER_STEP * k
+}
+
 /** The De-Esser's own default Split (Amount 60 / Split 33): `deEssSplit`'s default. */
 export const DE_ESS_SPLIT = 33
 
@@ -270,7 +303,7 @@ function stageParams(p) {
     parallelComp: p.parallelComp === 'la2a' ? 'la2a' : '1176',
     parallelDeEss: knob(p.parallelDeEss),
     parallelDeEssMode: p.parallelDeEssMode ?? 'broadband',
-    parallelDriveDb: Number.isFinite(p.parallelDriveDb) ? p.parallelDriveDb : 0,
+    parallelDriveDb: parallelDriveDbFor(p.parallelComp, p.parallelDrive),
     parallelSibEmph: p.parallelSibEmph !== false,
     parallelAlignDb: Number.isFinite(p.parallelAlignDb) ? p.parallelAlignDb : 0,
     parallelMakeupDb: Number.isFinite(p.parallelMakeupDb) ? p.parallelMakeupDb : 0,
