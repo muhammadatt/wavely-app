@@ -319,7 +319,7 @@ async function applyAndClose() {
                 :model-value="voxParallelDrive" :min="0" :max="PARALLEL_DRIVE_MAX" :step="0.5"
                 :default-value="VOX_DEFAULTS.parallelDrive"
                 label="Drive" :color="PARALLEL_COLOR" :format-value="formatDrive" :disabled="!voxPreview || voxParallel <= 0"
-                title="How hard the parallel copy is compressed. On the LA-2A it is Peak Reduction: 0 = PR 38, 4.5 = PR 56, 10 = PR 78; the 1176 is set so the same position compresses about as hard. The copy's makeup is re-measured. Double-click to reset"
+                title="How hard the parallel copy is compressed. On the LA-2A it is Peak Reduction: 0 = PR 38, 3 = PR 50, 10 = PR 78; the 1176 is set so the same position compresses about as hard. The copy's makeup is re-measured. Double-click to reset"
                 @update:model-value="syncParallelDrive"
               />
             </div>

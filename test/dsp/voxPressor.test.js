@@ -810,7 +810,7 @@ test('Parallel Drive knob: 2 dB a step, LA-2A 0 / 4.5 / 10 = PR 38 / 56 / 78, th
     assert.ok(Math.abs(scDriveDbFor(50) + la(k) - scDriveDbFor(pr)) < 0.15, `drive ${k} vs PR ${pr}`)
   }
   assert.equal(P.parallelDriveDbFor('1176', 4.5), -1)
-  assert.equal(VOX_DEFAULTS.parallelDrive, 4.5)
-  assert.equal(toKernelParams({ ...VOX_DEFAULTS }).parallelDriveDb, 3)
-  assert.equal(toKernelParams({ ...VOX_DEFAULTS, parallelComp: '1176' }).parallelDriveDb, -1)
+  assert.equal(VOX_DEFAULTS.parallelDrive, 3)
+  assert.equal(toKernelParams({ ...VOX_DEFAULTS }).parallelDriveDb, 0)
+  assert.equal(toKernelParams({ ...VOX_DEFAULTS, parallelComp: '1176' }).parallelDriveDb, -4)
 })

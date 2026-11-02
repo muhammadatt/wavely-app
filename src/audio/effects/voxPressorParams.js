@@ -124,9 +124,9 @@ export const VOX_DEFAULTS = {
    * PARALLEL, 0–100 % (0 = stage out): the Mix of a fast 4:1 1176 copy
    * blended under the voice (New York compression; `PARALLEL_PATCH`).
    */
-  parallel: 30,
-  /** DENSITY, 0–100 % (0 = stage out): the Cambridge Inflator's Effect, anchored. */
-  density: 30,
+  parallel: 35,
+  /** DENSITY, 0–100 % (0 = stage out, which ships — owner, November 2026): the Cambridge Inflator's Effect, anchored. */
+  density: 0,
   /** Manual trim after the ceiling, dB. */
   output: 0,
   /** 'off' | 'peaks' | 'body' — monitor a detector. Never saved. */
@@ -154,12 +154,12 @@ export const VOX_DEFAULTS = {
    * 'shelf' (above 4 kHz) or 'shelf-low' (above 2.5 kHz). Re-measures.
    */
   /**
-   * PARALLEL DRIVE, 0–10 (4.5 ships): how hard the copy is compressed. A drive
+   * PARALLEL DRIVE, 0–10 (3 ships): how hard the copy is compressed. A drive
    * into its detector (`parallelDriveDbFor`), so on the LA-2A it is Peak
-   * Reduction by another name — 0 = PR 38, 4.5 = PR 56, 10 = PR 78 — and the
+   * Reduction by another name — 0 = PR 38, 3 = PR 50, 10 = PR 78 — and the
    * 1176 is offset so the same position compresses about as hard. Re-measures.
    */
-  parallelDrive: 4.5,
+  parallelDrive: 3,
   parallelDeEssMode: 'broadband',
   /** BENCH: the parallel 1176's +15 dB sibilance detector (`ParallelDetector`). Re-measures. */
   parallelSibEmph: true,
@@ -249,9 +249,10 @@ export function toKernelParams(p) {
 /**
  * The Parallel DRIVE knob (0–10) as dB of drive into the copy's detector, on
  * top of its alignment: `zero + 2·knob`. On the LA-2A ~0.5 dB is one Peak
- * Reduction point, so a step is 4 points and 0 / 4.5 / 10 = PR 38 / 56 / 78
+ * Reduction point, so a step is 4 points and 0 / 3 / 10 = PR 38 / 50 / 78
  * (owner, November 2026: 0 at PR 38 rather than a negative drive; default
- * +3 dB = PR 56, +6 was hot on the test material). The 1176's zero is set so
+ * 3 = 0 dB = PR 50, the LA Vintage 2A slot's own voicing — +6 was hot, +3
+ * auditioned before settling). The 1176's zero is set so
  * the same position compresses about as hard (the user may pick either).
  *
  * Fitted on typical gain reduction (median of 300 ms maxima, 30 s of each
@@ -264,7 +265,7 @@ export function toKernelParams(p) {
  * moves either by under 0.1 dB).
  */
 export const PARALLEL_DRIVE_MAX = 10
-export const PARALLEL_DRIVE_DEFAULT = 4.5
+export const PARALLEL_DRIVE_DEFAULT = 3
 export const PARALLEL_DRIVE_DB_PER_STEP = 2
 export const PARALLEL_DRIVE_ZERO_DB = Object.freeze({ la2a: -6, 1176: -10 })
 export function parallelDriveDbFor(comp, drive) {
