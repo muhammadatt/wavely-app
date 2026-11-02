@@ -762,3 +762,21 @@ test('Peaks guide: knob mapping inverts the drive law and clamps to the travel',
   assert.equal(P.peaksGuideKnobs(null), null)
   assert.equal(P.peaksGuideKnobs({ gapDb: 3, targetDriveDb: P.peaksDriveDb(-2), warnDriveDb: P.peaksDriveDb(14) }).target, 0)
 })
+
+test('two passes: measureUntil body returns Peaks/Body exactly as the full pass, which then matches a cold one', async () => {
+  const S = await import('../../src/audio/voxPressorSolve.js')
+  const x = narration(SR, { seconds: 8, levelDb: -22 })
+  const alignDb = inputAlignDbFor([x], SR)
+  const kp = toKernelParams({ ...VOX_DEFAULTS, alignDb, body: 63 })
+  S.clearVoxPressorMeasureCache()
+  const part = S.measureVoxPressor([x], SR, { ...kp, measureUntil: 'body' })
+  assert.equal(part.partial, true)
+  const full = S.measureVoxPressor([x], SR, kp)
+  S.clearVoxPressorMeasureCache()
+  const cold = S.measureVoxPressor([x], SR, kp)
+  for (const k of ['peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb', 'peaksDb', 'peaksBodyDb', 'bodyDb']) {
+    assert.equal(part[k], cold[k], k)
+  }
+  assert.equal(full.partial, undefined)
+  for (const k of VOX_MEASURED_KEYS) assert.deepEqual(full[k], cold[k], k)
+})

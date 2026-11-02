@@ -21,6 +21,14 @@ export const VOX_WINDOW_ID = 'vox-pressor'
 
 /** Measured keys, pushed to the live node in this order — ceilings first. */
 const MEASURED = VOX_MEASURED_KEYS
+/**
+ * What the panel's first pass (`measureUntil: 'body'`) measures: Peaks and
+ * Body only. Ceilings first, as for every push (see VOX_MEASURED_KEYS).
+ */
+const BODY_PASS_KEYS = [
+  'peaksCeilingDb', 'bodyCeilingDb', 'cornerHz', 'voiceF0Hz', 'sourcePeakDb',
+  'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb',
+]
 
 /** Superseded measurements an Apply retries before it gives up. */
 const APPLY_SOLVE_ATTEMPTS = 3
@@ -85,6 +93,8 @@ const copies = pluginCopies((copy, life) => {
     if (!voxBusy.value || !r) return false
     return voxPendingUpKey.value !== r.upKey || upstreamKnobs() !== r.upKnobs
   })
+  /** A measurement is running that the Peaks / Body readouts are already past: De-ess and Parallel's. */
+  const voxDownstreamPending = computed(() => voxBusy.value && !voxUpstreamStale.value)
 
   const voxPreview = ref(false)
   const voxPeaksGr = ref(0)
@@ -267,6 +277,35 @@ const copies = pluginCopies((copy, life) => {
         // ⚠ Never an apply's: AUTO would move the knob mid-apply, on a chain's
         // running segments, after the params were measured.
         if (guide) kp.peaksGuideRangeDb = peaksGuideRangeDb()
+        /**
+         * TWO PASSES after a Peaks / Body / Speed / De-ess move on a region
+         * already measured: Peaks and Body first (~0.9 s on 30 s of
+         * narration), so their makeups and readouts land while De-ess and
+         * Parallel — which follow Body's output — are re-solved (another
+         * ~1.6 s). A single pass left the Body knob sounding dead for 2.5 s:
+         * the compression moved at once and its makeup trailed it.
+         * ⚠ Not on a new region: there the first pass measures the voice's
+         * corner and F0, which the second would have to be handed and would
+         * then key differently, measuring Body twice.
+         */
+        if (guide && cornerFor === regionKey && voxReadout.value?.upKey !== upKey) {
+          const r1 = await computeVoxPressorMeasure(
+            segments, start, end, { ...kp, measureUntil: 'body' }, state.currentFile.sampleRate, state.currentFile.channels,
+          )
+          if (seq !== solveSeq) return null
+          const part = { ...voxMeasured.value }
+          for (const k of BODY_PASS_KEYS) part[k] = r1[k] ?? null
+          voxMeasured.value = part
+          for (const k of BODY_PASS_KEYS) pushParam(k, part[k])
+          voxReadout.value = {
+            peaksDb: r1.peaksDb, peaksBodyDb: r1.peaksBodyDb, bodyDb: r1.bodyDb, peaksRippleDb: r1.peaksRippleDb,
+            upKey, upKnobs,
+          }
+          if (Number.isFinite(r1.bodyMakeupDb)) kp.bodyMakeupGuess = r1.bodyMakeupDb
+          // Moved again while it ran (a drag): the throttle re-runs at once
+          // with the new knobs, so a second pass for these would only delay it.
+          if (upstreamKnobs() !== upKnobs) return null
+        }
         const r = await computeVoxPressorMeasure(
           segments, start, end, kp, state.currentFile.sampleRate, state.currentFile.channels,
         )
@@ -575,7 +614,7 @@ const copies = pluginCopies((copy, life) => {
       voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
       voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
       voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
-      voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale,
+      voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale, voxDownstreamPending,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,

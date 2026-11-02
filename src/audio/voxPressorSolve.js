@@ -309,9 +309,25 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
    */
   const hash = channelsHash(channels)
   const key = upstreamKey(channels, sampleRate, p, hash)
+  /**
+   * `measureUntil: 'body'` — the panel's FIRST PASS after a Peaks / Body /
+   * Speed move: Peaks and Body only (~0.9 s of the ~2.5 s on 30 s of
+   * narration), so their makeups and readouts land before De-ess and Parallel
+   * are re-solved; the full pass that follows reuses them (`bodyCache`). The
+   * result carries `partial: true` and no De-ess / Parallel values.
+   */
+  const untilBody = p.measureUntil === 'body'
   let up = upstreamCache?.key === key ? upstreamCache.value : null
+  if (!up && untilBody) {
+    const bKey = bodyKey(channels, sampleRate, p, hash)
+    up = bodyCache?.key === bKey ? bodyCache.value : null
+    if (!up) {
+      up = measureThroughBody(channels, sampleRate, p)
+      bodyCache = { key: bKey, value: up }
+    }
+  }
   if (!up) {
-    up = measureUpstream(channels, sampleRate, p)
+    up = measureUpstream(channels, sampleRate, p, hash)
     upstreamCache = { key, value: up }
   }
   const out = { ...up.out }
@@ -325,6 +341,10 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
       guideCache = { key: gKey, value: guide }
     }
     out.peaksGuide = guide
+  }
+  if (untilBody) {
+    out.partial = true
+    return out
   }
   const { afterDeEss, voiceF0Hz, ceilingDb } = up
 
@@ -382,6 +402,8 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
 
 /** The one cached upstream measurement (see `measureVoxPressor`). */
 let upstreamCache = null
+/** The one cached Peaks → Body measurement (`measureThroughBody`). */
+let bodyCache = null
 
 /** The one cached Peaks guide (see `solvePeaksGuide`). */
 let guideCache = null
@@ -389,6 +411,7 @@ let guideCache = null
 /** Forget them — for tests that time or compare cold measurements. */
 export function clearVoxPressorMeasureCache() {
   upstreamCache = null
+  bodyCache = null
   guideCache = null
 }
 
@@ -414,17 +437,23 @@ function guideKey(channels, sampleRate, p, up, hash) {
 const NOT_UPSTREAM = new Set([
   'density', 'outputDb', 'listen', 'bodyMakeupGuess', 'sourcePeakDb', 'makeupDb',
   'peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb', 'bodyMakeupDb', 'bodyCeilingDb',
-  'deEssLevelOffsetDb', 'peaksGuideRangeDb',
+  'deEssLevelOffsetDb', 'peaksGuideRangeDb', 'measureUntil',
 ])
 
-function upstreamKey(channels, sampleRate, p, hash = channelsHash(channels)) {
+function upstreamKey(channels, sampleRate, p, hash = channelsHash(channels), skip = null) {
   const params = {}
   for (const k of Object.keys(p).sort()) {
-    if (k.startsWith('parallel') || NOT_UPSTREAM.has(k)) continue
+    if (k.startsWith('parallel') || NOT_UPSTREAM.has(k) || skip?.has(k)) continue
     // The de-esser's level offset is measured here and overrides the panel's.
     params[k] = k === 'deEss' && p.deEss ? { ...p.deEss, levelOffsetDb: undefined } : p[k]
   }
   return `${sampleRate}|${channels.length}|${channels[0]?.length ?? 0}|${hash}|${JSON.stringify(params)}`
+}
+
+/** The De-ess params: everything else the upstream key reads, Peaks and Body read. */
+const DE_ESS_KEYS = new Set(['deEss', 'deEssOn', 'measureUntil'])
+function bodyKey(channels, sampleRate, p, hash) {
+  return upstreamKey(channels, sampleRate, p, hash, DE_ESS_KEYS)
 }
 
 /** FNV-1a over every sample's bits: ~1.3 M samples per 30 s mono, a few ms. */
@@ -444,7 +473,34 @@ function channelsHash(channels) {
  * Peaks → Body → De-ess: their readouts, makeups, restores and the de-esser's
  * output, everything the Parallel stage reads. Never mutated by the caller.
  */
-function measureUpstream(channels, sampleRate, p) {
+function measureUpstream(channels, sampleRate, p, hash) {
+  // The Peaks → Body half has its own cache, so the panel's first pass (`measureUntil: 'body'`)
+  // is not paid for again by the full pass right after it.
+  const bKey = bodyKey(channels, sampleRate, p, hash)
+  let st = bodyCache?.key === bKey ? bodyCache.value : null
+  if (!st) {
+    st = measureThroughBody(channels, sampleRate, p)
+    bodyCache = { key: bKey, value: st }
+  }
+  if (st.silent) return st
+  const out = { ...st.out }
+  const { afterBody } = st
+
+  // ── DE-ESS ── its thresholds follow the level it HEARS: the Body stage's
+  // output, made up, not the source (the HF Softener's `levelOffset` contract).
+  out.deEssLevelOffsetDb = levelOffsetDbFor(db(gatedRmsOfChannels(afterBody, sampleRate)))
+  let afterDeEss = afterBody
+  if (p.deEss && p.deEssOn) {
+    afterDeEss = processHFSoftenerBuffer(afterBody, sampleRate, {
+      ...p.deEss, levelOffsetDb: out.deEssLevelOffsetDb,
+    }).channelData
+  }
+
+  return { ...st, out, afterDeEss }
+}
+
+/** Peaks → Body: their readouts, makeups, restores and Body's output. Never mutated by the caller. */
+function measureThroughBody(channels, sampleRate, p) {
   // The corner and the median F0 are properties of the file, not of the
   // knobs: callers that measure repeatedly measure them once and pass them in.
   // ⚠ The F0 is read BEFORE anything renders: SPEED AUTO takes the 1176's
@@ -568,17 +624,7 @@ function measureUpstream(channels, sampleRate, p) {
     out.bodyDb = count > 0 ? sum / count : 0
   }
 
-  // ── DE-ESS ── its thresholds follow the level it HEARS: the Body stage's
-  // output, made up, not the source (the HF Softener's `levelOffset` contract).
-  out.deEssLevelOffsetDb = levelOffsetDbFor(db(gatedRmsOfChannels(afterBody, sampleRate)))
-  let afterDeEss = afterBody
-  if (p.deEss && p.deEssOn) {
-    afterDeEss = processHFSoftenerBuffer(afterBody, sampleRate, {
-      ...p.deEss, levelOffsetDb: out.deEssLevelOffsetDb,
-    }).channelData
-  }
-
-  return { out, afterDeEss, voiceF0Hz, ceilingDb, silent: false, peaksBase: base, peaksSample }
+  return { out, afterBody, voiceF0Hz, ceilingDb, silent: false, peaksBase: base, peaksSample }
 }
 
 /**

@@ -22,7 +22,7 @@ const {
   voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
-  voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale,
+  voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale, voxDownstreamPending,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
@@ -262,7 +262,7 @@ async function applyAndClose() {
               ><span class="vp-auto-dot"></span>AUTO</button>
               <span class="m-note" :class="{ 'vp-stale': stale }">{{ guideNote }}</span>
             </div>
-            <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ peaksNote }}</span>
+            <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }"><i v-if="stale" class="vp-pulse" aria-hidden="true"></i>{{ peaksNote }}</span>
             <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ bodyTouchNote }}</span>
             <span class="m-note" :class="{ 'vp-warn': rippleWarn, 'vp-stale': stale }">{{ rippleNote }}</span>
           </div>
@@ -275,7 +275,7 @@ async function applyAndClose() {
               title="The LA-2A's Peak Reduction, aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncBody"
             />
-            <span class="m-note" :class="{ 'vp-stale': stale }">{{ bodyNote }}</span>
+            <span class="m-note" :class="{ 'vp-stale': stale }"><i v-if="stale" class="vp-pulse" aria-hidden="true"></i>{{ bodyNote }}</span>
           </div>
         </div>
 
@@ -308,6 +308,10 @@ async function applyAndClose() {
               title="Parallel compression: a fast 4:1 1176 copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncParallel"
             />
+            <!-- De-ess and Parallel re-solve after Body: their makeups land last. -->
+            <span class="m-note vp-pending" :class="{ 'is-on': voxBusy && voxPreview }" aria-live="polite">
+              <i class="vp-pulse" aria-hidden="true"></i>{{ voxDownstreamPending ? 'updating makeup' : 'measuring' }}
+            </span>
           </div>
           <div class="vp-col vp-col-sm">
             <ModulaKnob
@@ -474,7 +478,16 @@ async function applyAndClose() {
 .vp-bench-toggle:hover { color: var(--m-ink-2, #c3c9cf); }
 .vp-bench-body { align-self: stretch; display: flex; flex-direction: column; }
 .vp-warn { color: #f0b429; }
-.vp-stale { opacity: .55; }
+.vp-stale { opacity: .7; }
+/* A measurement in flight: a pulsing dot ahead of the numbers it will replace. */
+.vp-pulse {
+  display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
+  background: #e8a33d; box-shadow: 0 0 6px #e8a33d; vertical-align: 1px;
+  animation: vp-pulse 0.9s ease-in-out infinite;
+}
+@keyframes vp-pulse { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
+.vp-pending { visibility: hidden; }
+.vp-pending.is-on { visibility: visible; }
 .vp-guide { display: flex; align-items: center; gap: 8px; margin: 2px 0 2px; }
 .vp-auto {
   display: inline-flex; align-items: center; gap: 6px; flex: none;
