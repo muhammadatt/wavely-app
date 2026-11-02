@@ -228,6 +228,37 @@ shown:
 (narration ~2–3 dB, podcast punch ~5–6). A fixed crest target would be wrong
 on half the voices.
 
+**The Peaks guide (November 2026).** Cranking Peaks sounds better to a naive
+ear because the stage's makeup makes it louder; past the point where the
+loudest peaks meet the voice it only compresses the voice, which is the
+later stages' job. So the panel measures that point per file and shows it:
+
+- **Gap** = median peak of the loudest blocks − median *peak* of the voiced
+  blocks (100 ms blocks, the readout's own sets). Peak against peak: against
+  RMS every syllable's own crest would count as excess.
+- **Target** = the knob that takes the gap off the peaks; **warn** = the knob
+  where "voice touched" reaches 0.5 dB. Both searched on Peaks-stage renders
+  (bracketed secant, ≤ 8, typically 3–6), cached per region and 1176 setting,
+  so a knob move costs nothing.
+- **Panel:** the Peaks ring is green to the target, amber to the warn knob,
+  red after (`ModulaKnob` `zones`); a note says "peaks stand X dB over the
+  voice · K levels them"; **AUTO** sets the knob to the target and follows the
+  region until the knob is turned (off by default; Peaks 3 ships).
+- Only the panel's preview measurement asks for it; an apply never does, so
+  AUTO cannot move the knob between measuring and rendering.
+
+| Clip (30 s window) | Gap | Target knob | Warn knob |
+|---|---|---|---|
+| Messy and Bright | 3.8 dB | 3.7 | 3.9 |
+| David Greenberg | 5.4 dB | 4.9 | 5.1 |
+| Actual Grownup (3 s) | 5.7 dB | 5.0 | 4.1 |
+| Fix slide four (4 s) | 2.1 dB | 3.2 | 3.3 |
+
+The two edges agree to about a knob step on every clip — two independent
+readings of "where the stage stops trimming peaks and starts compressing the
+voice". A guide, never a cap (see above). ⚠ On a few seconds the loudest set
+is only 5 blocks and the gap is noisy. Not auditioned.
+
 ### 4.3 Density — the Cambridge Inflator, anchored to the ceiling
 
 **What it does on voice, honestly.** The Inflator's curve is pinned to full

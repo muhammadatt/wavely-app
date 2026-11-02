@@ -55,6 +55,28 @@ export function peaksDriveDb(x) {
   return PEAKS_ZERO_DRIVE_DB + PEAKS_DRIVE_PER_STEP_DB * x
 }
 
+/** The inverse: the Peaks knob position for a drive (dB re the alignment). Unclamped. */
+export function peaksKnobForDriveDb(d) {
+  return (d - PEAKS_ZERO_DRIVE_DB) / PEAKS_DRIVE_PER_STEP_DB
+}
+
+/** The drive span the Peaks knob covers: where `measureVoxPressor` searches the guide. */
+export function peaksGuideRangeDb() {
+  return [peaksDriveDb(0), peaksDriveDb(PEAKS_MAX)]
+}
+
+/**
+ * The Peaks guide in knob units, from `measureVoxPressor`'s `peaksGuide`:
+ * { gapDb, target, warn } — the knob that takes the gap off the loudest peaks
+ * and the knob where "voice touched" passes `PEAKS_BODY_WARN_DB`; PEAKS_MAX
+ * when not reached on the knob's travel. null when there is no guide.
+ */
+export function peaksGuideKnobs(guide) {
+  if (!guide || !Number.isFinite(guide.gapDb)) return null
+  const k = d => (Number.isFinite(d) ? Math.max(0, Math.min(PEAKS_MAX, peaksKnobForDriveDb(d))) : PEAKS_MAX)
+  return { gapDb: guide.gapDb, target: k(guide.targetDriveDb), warn: k(guide.warnDriveDb) }
+}
+
 /** The bench's Body lookahead steps, ms (LA Vintage 2A's own control). */
 export const BODY_LOOKAHEAD_STEPS_MS = Object.freeze([0, 5, 10, LOOKAHEAD_MAX_MS])
 

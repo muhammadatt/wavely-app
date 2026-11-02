@@ -720,3 +720,45 @@ test('De-ess Split: shares the Amount between the Duck and the EQ, 33 = the De-E
   const legacy = toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, deEss: 60, deEssSplit: undefined }).deEss
   assert.deepEqual(legacy, at(33))
 })
+
+test('Peaks guide: the target knob takes the gap off the peaks, the warn knob touches the voice 0.5 dB, cached per region', async () => {
+  const S = await import('../../src/audio/voxPressorSolve.js')
+  const P = await import('../../src/audio/effects/voxPressorParams.js')
+  const x = narration(SR, { seconds: 12, levelDb: -22 })
+  const alignDb = inputAlignDbFor([x], SR)
+  const kpAt = peaks => toKernelParams({ ...VOX_DEFAULTS, peaks, body: 0, deEss: 0, parallel: 0, density: 0, alignDb })
+  S.clearVoxPressorMeasureCache()
+  const withGuide = { ...kpAt(3), peaksGuideRangeDb: P.peaksGuideRangeDb() }
+  const r = S.measureVoxPressor([x], SR, withGuide)
+  const g = P.peaksGuideKnobs(r.peaksGuide)
+  assert.ok(g && g.gapDb > 1, `gap ${g?.gapDb}`)
+  assert.ok(r.peaksGuide.renders <= S.PEAKS_GUIDE_MAX_RENDERS)
+  assert.ok(g.target > 0 && g.target < P.PEAKS_MAX, `target ${g.target}`)
+  // The knobs do what the guide says.
+  const atTarget = S.measureVoxPressor([x], SR, kpAt(g.target))
+  assert.ok(Math.abs(atTarget.peaksDb - g.gapDb) < 0.2, `at target: ${atTarget.peaksDb} vs gap ${g.gapDb}`)
+  if (g.warn < P.PEAKS_MAX) {
+    const atWarn = S.measureVoxPressor([x], SR, kpAt(g.warn))
+    assert.ok(Math.abs(atWarn.peaksBodyDb - S.PEAKS_BODY_WARN_DB) < 0.1, `at warn: voice ${atWarn.peaksBodyDb}`)
+  }
+  // The guide does not move with the knob (cached: no renders), nor change the rest.
+  const again = S.measureVoxPressor([x], SR, { ...kpAt(7), peaksGuideRangeDb: P.peaksGuideRangeDb() })
+  assert.deepEqual(again.peaksGuide, r.peaksGuide)
+  const plain = S.measureVoxPressor([x], SR, kpAt(3))
+  assert.equal(plain.peaksGuide, undefined)
+  for (const k of VOX_MEASURED_KEYS) assert.deepEqual(plain[k], r[k], k)
+  // A cold search from another knob lands within a tenth of a step.
+  S.clearVoxPressorMeasureCache()
+  const cold = P.peaksGuideKnobs(S.measureVoxPressor([x], SR, { ...kpAt(9), peaksGuideRangeDb: P.peaksGuideRangeDb() }).peaksGuide)
+  assert.ok(Math.abs(cold.target - g.target) < 0.15, `${cold.target} vs ${g.target}`)
+})
+
+test('Peaks guide: knob mapping inverts the drive law and clamps to the travel', async () => {
+  const P = await import('../../src/audio/effects/voxPressorParams.js')
+  for (const k of [0, 2.5, 10]) assert.ok(Math.abs(P.peaksKnobForDriveDb(P.peaksDriveDb(k)) - k) < 1e-12)
+  const g = P.peaksGuideKnobs({ gapDb: 4, targetDriveDb: P.peaksDriveDb(3), warnDriveDb: null })
+  assert.ok(Math.abs(g.target - 3) < 1e-12)
+  assert.equal(g.warn, P.PEAKS_MAX)
+  assert.equal(P.peaksGuideKnobs(null), null)
+  assert.equal(P.peaksGuideKnobs({ gapDb: 3, targetDriveDb: P.peaksDriveDb(-2), warnDriveDb: P.peaksDriveDb(14) }).target, 0)
+})

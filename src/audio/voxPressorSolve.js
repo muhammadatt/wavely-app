@@ -168,6 +168,126 @@ export function referenceBlocks(channels, sampleRate) {
 }
 
 /**
+ * THE PEAKS GUIDE — where the Peaks knob does its job on THIS file.
+ *
+ * The 1176 stage is there to bring the loudest peaks down to the voice, not
+ * to compress the voice: past that it reads as obviously compressed and takes
+ * the work the gentler stages after it should share. Its makeup makes every
+ * extra dB of it LOUDER, so "more" sounds "better" to a naive ear — the guide
+ * puts the job's size on the knob instead.
+ *
+ * - GAP (`peaksGapDb`): how far the loudest peaks stand over a typical
+ *   syllable's — the median peak of the loudest 100 ms blocks (the readout's
+ *   own `referenceBlocks`) minus the median PEAK of the voiced blocks. Peak
+ *   against peak: against the voice's RMS it would count every syllable's own
+ *   crest as excess.
+ * - TARGET: the drive at which the stage takes the gap off the loudest peaks.
+ * - WARN: the drive at which it starts lowering the voice itself
+ *   (`PEAKS_BODY_WARN_DB` of "voice touched"), the readout's own warning.
+ *
+ * Measured on four clips (30 s windows, November 2026) the two edges agree to
+ * about one knob step: Messy and Bright gap 3.8 dB → Peaks ≈ 3.7 (warn 4),
+ * David Greenberg 5.5 → 4.9 (5), Actual Grownup 5.7 → 5.0 (4.1), Fix slide
+ * four 2.1 → 2.3 (3.2). The gap varies 2–6 dB between voices, so no single
+ * knob position is right for all of them.
+ *
+ * ⚠ A GUIDE, NEVER A CAP (the 8 dB floor that once capped this knob was wrong
+ * by several dB on a real clip). ⚠ On a few seconds the loudest set is 5
+ * blocks and the gap is noisy.
+ *
+ * Both drives are in dB RELATIVE TO THE FILE'S ALIGNMENT (the knob's own
+ * `peaksDriveDb`, which lives with the panel params), solved inside
+ * `rangeDb`; null = not reached even at the top of the range. Searched by
+ * bracketed secant on Peaks-stage renders (base rate, ~0.3 s per 30 s), at
+ * most `PEAKS_GUIDE_MAX_RENDERS`, sharing every render between both edges, and
+ * cached on the region and the 1176's settings — so it costs once per region,
+ * not per knob move.
+ */
+export const PEAKS_GUIDE_MAX_RENDERS = 8
+const PEAKS_GUIDE_TOL_DB = 0.1
+const PEAKS_GUIDE_WARN_TOL_DB = 0.05
+
+/** How far the loudest blocks' peaks stand over the voiced blocks' peaks, dB (≥ 0), or null. */
+export function peaksGapDb(channels, sampleRate) {
+  const { peak } = blockStats(channels, sampleRate)
+  const ref = referenceBlocks(channels, sampleRate)
+  if (ref.loudestIdx.length === 0 || ref.voicedIdx.length === 0) return null
+  const loud = median(ref.loudestIdx.map(k => db(peak[k])))
+  const voice = median(ref.voicedIdx.filter(k => peak[k] > 0).map(k => db(peak[k])))
+  return Number.isFinite(loud - voice) ? Math.max(0, loud - voice) : null
+}
+
+/**
+ * The drive in [lo, hi] at which `f` (increasing in drive) reaches `goal`,
+ * from the points `at` has rendered and as few more as it takes. Returns lo
+ * when even lo is past it, null when hi falls short.
+ */
+function findDrive(at, points, f, goal, tol, lo, hi, budget) {
+  for (;;) {
+    let a = null
+    let b = null
+    let best = null
+    for (const q of points) {
+      const v = f(q) - goal
+      if (!best || Math.abs(v) < Math.abs(best.v)) best = { d: q.driveDb, v }
+      if (v < 0 && (!a || q.driveDb > a.d)) a = { d: q.driveDb, v }
+      if (v >= 0 && (!b || q.driveDb < b.d)) b = { d: q.driveDb, v }
+    }
+    if (best && Math.abs(best.v) <= tol) return best.d
+    if (b && b.d <= lo + 1e-9) return lo
+    if (a && a.d >= hi - 1e-9) return null
+    let d
+    if (a && b) {
+      // Regula falsi, kept strictly inside the bracket.
+      d = a.d + (b.d - a.d) * (-a.v) / (b.v - a.v)
+      const m = 0.1 * (b.d - a.d)
+      d = Math.min(b.d - m, Math.max(a.d + m, d))
+      if (b.d - a.d < 0.05) return d
+    } else if (a) {
+      // All short: step up along the slope of the two highest points (at
+      // least 0.3 dB per dB, so a flat stretch still moves), or to the top.
+      const up = points.filter(q => q.driveDb <= a.d).sort((x, y) => y.driveDb - x.driveDb)
+      const slope = up.length > 1 ? (f(up[0]) - f(up[1])) / (up[0].driveDb - up[1].driveDb) : 0
+      d = Math.min(hi, a.d + (-a.v) / Math.max(0.3, slope))
+    } else if (b) {
+      d = lo
+    } else {
+      d = 0.5 * (lo + hi)
+    }
+    if (budget() <= 0) {
+      if (a && b) return a.d + (b.d - a.d) * (-a.v) / (b.v - a.v)
+      return a ? null : lo
+    }
+    at(d)
+  }
+}
+
+/** See the PEAKS GUIDE note above. `seed` is a render the upstream measurement already made. */
+function solvePeaksGuide(channels, sampleRate, base, alignDb, rangeDb, seed) {
+  const gapDb = peaksGapDb(channels, sampleRate)
+  const [lo, hi] = rangeDb
+  if (gapDb === null || !(hi > lo)) return { gapDb, targetDriveDb: null, warnDriveDb: null, renders: 0 }
+  const ref = referenceBlocks(channels, sampleRate)
+  const points = []
+  let renders = 0
+  const at = d => {
+    renders++
+    const raw = renderPeaks(channels, sampleRate, base, { peaksAlignDb: alignDb + d })
+    const r = peaksAndBodyDb(channels, raw, sampleRate, ref.loudestIdx, ref.voicedIdx)
+    points.push({ driveDb: d, peaksDb: r.peaksDb, bodyDb: r.bodyDb })
+  }
+  if (seed && seed.driveDb >= lo && seed.driveDb <= hi) points.push(seed)
+  const budget = () => PEAKS_GUIDE_MAX_RENDERS - renders
+  // The readout moves ~0.9 dB per dB of drive once the stage catches: a
+  // first guess from the seed lands most searches in two or three renders.
+  if (points.length === 0) at(Math.min(hi, Math.max(lo, 0)))
+  const targetDriveDb = gapDb <= 0 ? lo
+    : findDrive(at, points, q => q.peaksDb, gapDb, PEAKS_GUIDE_TOL_DB, lo, hi, budget)
+  const warnDriveDb = findDrive(at, points, q => q.bodyDb, PEAKS_BODY_WARN_DB, PEAKS_GUIDE_WARN_TOL_DB, lo, hi, budget)
+  return { gapDb, targetDriveDb, warnDriveDb, renders }
+}
+
+/**
  * Measure VoxPressor for one region at the current knobs: the readouts and
  * every stage's makeup, ceiling and restore.
  *
@@ -187,7 +307,8 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
    * iterates renders), 1176 2.0 s → 0.4–0.6 s. One entry: a single panel
    * measures one region at a time; the answer is identical to a cold one.
    */
-  const key = upstreamKey(channels, sampleRate, p)
+  const hash = channelsHash(channels)
+  const key = upstreamKey(channels, sampleRate, p, hash)
   let up = upstreamCache?.key === key ? upstreamCache.value : null
   if (!up) {
     up = measureUpstream(channels, sampleRate, p)
@@ -195,6 +316,16 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   }
   const out = { ...up.out }
   if (up.silent) return out
+  // The Peaks knob's guide: asked for by the panel only (never by apply).
+  if (Array.isArray(p.peaksGuideRangeDb) && Number.isFinite(p.bodyAlignDb)) {
+    const gKey = guideKey(channels, sampleRate, p, up, hash)
+    let guide = guideCache?.key === gKey ? guideCache.value : null
+    if (!guide) {
+      guide = solvePeaksGuide(channels, sampleRate, up.peaksBase, p.bodyAlignDb, p.peaksGuideRangeDb, up.peaksSample)
+      guideCache = { key: gKey, value: guide }
+    }
+    out.peaksGuide = guide
+  }
   const { afterDeEss, voiceF0Hz, ceilingDb } = up
 
   // ── PARALLEL ── the parallel 1176's alignment and wet makeup, measured on
@@ -252,9 +383,26 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
 /** The one cached upstream measurement (see `measureVoxPressor`). */
 let upstreamCache = null
 
-/** Forget it — for tests that time or compare cold measurements. */
+/** The one cached Peaks guide (see `solvePeaksGuide`). */
+let guideCache = null
+
+/** Forget them — for tests that time or compare cold measurements. */
 export function clearVoxPressorMeasureCache() {
   upstreamCache = null
+  guideCache = null
+}
+
+/**
+ * What the Peaks stage's render reads apart from its drive: the region, the
+ * file's alignment, the voice's corner and F0 (as measured upstream) and the
+ * 1176's own settings. The Peaks knob is NOT in it — the guide is the same at
+ * every knob position, which is what lets it be cached.
+ */
+const GUIDE_SKIP = new Set(['peaksAlignDb', 'peaksOn', 'peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb'])
+function guideKey(channels, sampleRate, p, up, hash) {
+  const params = { align: p.bodyAlignDb, range: p.peaksGuideRangeDb, corner: up.out.cornerHz, f0: up.out.voiceF0Hz }
+  for (const k of Object.keys(p).sort()) if (k.startsWith('peaks') && !GUIDE_SKIP.has(k) && k !== 'peaksGuideRangeDb') params[k] = p[k]
+  return `${sampleRate}|${channels.length}|${channels[0]?.length ?? 0}|${hash}|${JSON.stringify(params)}`
 }
 
 /**
@@ -266,17 +414,17 @@ export function clearVoxPressorMeasureCache() {
 const NOT_UPSTREAM = new Set([
   'density', 'outputDb', 'listen', 'bodyMakeupGuess', 'sourcePeakDb', 'makeupDb',
   'peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb', 'bodyMakeupDb', 'bodyCeilingDb',
-  'deEssLevelOffsetDb',
+  'deEssLevelOffsetDb', 'peaksGuideRangeDb',
 ])
 
-function upstreamKey(channels, sampleRate, p) {
+function upstreamKey(channels, sampleRate, p, hash = channelsHash(channels)) {
   const params = {}
   for (const k of Object.keys(p).sort()) {
     if (k.startsWith('parallel') || NOT_UPSTREAM.has(k)) continue
     // The de-esser's level offset is measured here and overrides the panel's.
     params[k] = k === 'deEss' && p.deEss ? { ...p.deEss, levelOffsetDb: undefined } : p[k]
   }
-  return `${sampleRate}|${channels.length}|${channels[0]?.length ?? 0}|${channelsHash(channels)}|${JSON.stringify(params)}`
+  return `${sampleRate}|${channels.length}|${channels[0]?.length ?? 0}|${hash}|${JSON.stringify(params)}`
 }
 
 /** FNV-1a over every sample's bits: ~1.3 M samples per 30 s mono, a few ms. */
@@ -316,6 +464,7 @@ function measureUpstream(channels, sampleRate, p) {
   }
   if (cornerHz) base.cornerHz = cornerHz
   else delete base.cornerHz
+  delete base.peaksGuideRangeDb
 
   const none = {
     cornerHz, voiceF0Hz, peaksRippleDb: null, sourcePeakDb: null,
@@ -326,13 +475,14 @@ function measureUpstream(channels, sampleRate, p) {
     peaksDb: 0, peaksBodyDb: 0, bodyDb: 0,
   }
   const inPeak = peakOfChannels(channels)
-  if (!(inPeak > 0)) return { out: none, silent: true }
+  if (!(inPeak > 0)) return { out: none, silent: true, peaksBase: base, peaksSample: null }
   // Both stages' limiters hold the SOURCE's peak.
   const ceilingDb = db(inPeak)
   const out = { ...none, sourcePeakDb: ceilingDb }
 
   // ── PEAKS ──
   let afterPeaks = channels
+  let peaksSample = null
   if (p.peaksOn) {
     const ref = referenceBlocks(channels, sampleRate)
     // ONE render of the 1176 stage, at unity: the readouts, the makeup and the
@@ -341,6 +491,10 @@ function measureUpstream(channels, sampleRate, p) {
     const r = peaksAndBodyDb(channels, raw, sampleRate, ref.loudestIdx, ref.voicedIdx)
     out.peaksDb = r.peaksDb
     out.peaksBodyDb = r.bodyDb
+    // The guide's first point, free: this render at this knob's drive.
+    if (Number.isFinite(p.peaksAlignDb) && Number.isFinite(p.bodyAlignDb)) {
+      peaksSample = { driveDb: p.peaksAlignDb - p.bodyAlignDb, peaksDb: r.peaksDb, bodyDb: r.bodyDb }
+    }
     out.peaksRippleDb = peaksRippleDb(channels, sampleRate, base)
     const gainDb = percentileMakeupDb(channels, raw)
     const st = peaksStage(raw, gainDb, ceilingDb, sampleRate)
@@ -424,7 +578,7 @@ function measureUpstream(channels, sampleRate, p) {
     }).channelData
   }
 
-  return { out, afterDeEss, voiceF0Hz, ceilingDb, silent: false }
+  return { out, afterDeEss, voiceF0Hz, ceilingDb, silent: false, peaksBase: base, peaksSample }
 }
 
 /**

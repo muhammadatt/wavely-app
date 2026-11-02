@@ -21,6 +21,7 @@ const {
   voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
+  voxPeaksGuide, voxPeaksAuto, togglePeaksAuto,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
@@ -125,6 +126,29 @@ const bodyTouchNote = computed(() => {
   return r.peaksBodyDb > PEAKS_BODY_WARN_DB ? `${touched} · compressing the voice` : touched
 })
 
+// THE PEAKS GUIDE (`measureVoxPressor`'s `peaksGuide`): green up to the knob
+// that brings the loudest peaks down to the voice, amber until the stage
+// starts compressing the voice itself, red past it. A guide, never a cap.
+const GUIDE_OK = '#6fd08c'
+const GUIDE_EDGE = '#e8a33d'
+const GUIDE_OVER = '#ff5a5a'
+const peaksZones = computed(() => {
+  const g = voxPeaksGuide.value
+  if (!g) return null
+  const red = Math.max(g.target, g.warn)
+  return [
+    { from: 0, to: g.target, color: GUIDE_OK },
+    { from: g.target, to: red, color: GUIDE_EDGE },
+    { from: red, to: PEAKS_MAX, color: GUIDE_OVER },
+  ]
+})
+const guideNote = computed(() => {
+  const g = voxPeaksGuide.value
+  if (!g) return ''
+  if (g.gapDb < 0.5) return 'peaks already sit with the voice'
+  return `peaks stand ${g.gapDb.toFixed(1)} dB over the voice · ${g.target.toFixed(1)} levels them`
+})
+
 // Gain ripple: the 1176 moving its gain within the voice's own cycles. A
 // warning, never a limit, like the voice-touched note.
 const rippleWarn = computed(() => {
@@ -218,9 +242,19 @@ async function applyAndClose() {
               :model-value="voxPeaks" :min="0" :max="PEAKS_MAX" :step="0.5"
               :default-value="VOX_DEFAULTS.peaks"
               label="Peaks" :color="PEAKS_COLOR" :format-value="formatPeaks" :disabled="!voxPreview"
-              title="How hard the 1176 catches the loudest peaks: about that many dB off them on typical narration (the note below says what it took on this file). 0 takes the stage out. Double-click to reset"
+              :zones="peaksZones"
+              title="How hard the 1176 catches the loudest peaks: about that many dB off them on typical narration (the note below says what it took on this file). The ring is green up to where this file's loudest peaks come down to the voice, amber after, red where the stage starts compressing the voice itself — the later stages are there for that. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncPeaks"
             />
+            <div class="vp-guide">
+              <button
+                type="button" class="vp-auto" :class="{ 'is-on': voxPeaksAuto }" :disabled="!voxPreview"
+                role="switch" :aria-checked="voxPeaksAuto" :style="{ '--vp-auto': GUIDE_OK }"
+                title="Set Peaks for this file: just enough to bring its loudest peaks down to the voice, and follow the selection. Turn the knob to take over; AUTO drops and keeps the value"
+                @click="togglePeaksAuto"
+              ><span class="vp-auto-dot"></span>AUTO</button>
+              <span class="m-note" :class="{ 'vp-stale': stale }">{{ guideNote }}</span>
+            </div>
             <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ peaksNote }}</span>
             <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ bodyTouchNote }}</span>
             <span class="m-note" :class="{ 'vp-warn': rippleWarn, 'vp-stale': stale }">{{ rippleNote }}</span>
@@ -416,6 +450,19 @@ async function applyAndClose() {
 .vp-bench { padding-top: 8px; border-top: 1px dashed rgba(255, 255, 255, .08); }
 .vp-warn { color: #f0b429; }
 .vp-stale { opacity: .55; }
+.vp-guide { display: flex; align-items: center; gap: 8px; margin: 2px 0 2px; }
+.vp-auto {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  padding: 4px 9px; border: 0; border-radius: 6px; cursor: pointer;
+  background: linear-gradient(180deg, #34383e, #25282d);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .1), 0 0 0 1px rgba(0, 0, 0, .5);
+  font: 600 10px/1 var(--m-font-mono); letter-spacing: .08em; color: var(--m-ink-3, #8a929a);
+}
+.vp-auto:hover:not(:disabled) { color: var(--m-ink-2, #c3c9cf); }
+.vp-auto:disabled { opacity: .4; cursor: default; }
+.vp-auto-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 0, 0, .5); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
+.vp-auto.is-on { color: var(--vp-auto); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .6), 0 0 0 1px color-mix(in oklab, var(--vp-auto) 45%, #000); }
+.vp-auto.is-on .vp-auto-dot { background: var(--vp-auto); box-shadow: 0 0 6px var(--vp-auto); }
 .vp-about {
   margin: 12px 8px 0;
   text-align: center;

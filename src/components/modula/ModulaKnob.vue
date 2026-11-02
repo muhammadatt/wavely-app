@@ -59,6 +59,13 @@ const props = defineProps({
   editable: { type: Boolean, default: false },
   /** Parse a typed entry (default: the leading number in it). */
   parseValue: { type: Function, default: null },
+  /**
+   * Colour bands round the tick ring (ticks variant): [{ from, to, color }] in
+   * the knob's own units. A tick inside a band takes its colour — lit, as the
+   * value reaches it, dim ahead of it — so the ring shows where the travel is
+   * meant to stop. Outside every band a tick is as without zones.
+   */
+  zones: { type: Array, default: null },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -148,11 +155,23 @@ const leds = computed(() => {
 
 // ── Tick ring (ticks) ───────────────────────────────────────────────────────
 const tickBox = computed(() => outer.value)
+function zoneAt(v) {
+  if (!props.zones) return null
+  for (const z of props.zones) if (z && v >= z.from - 1e-9 && v <= z.to + 1e-9 && z.to > z.from) return z.color
+  return null
+}
 const ticks = computed(() => {
   const n = props.segments ?? 21
   return Array.from({ length: n }, (_, i) => {
     const f = i / (n - 1)
-    return { deg: 45 + 270 * f, long: i % 5 === 0, on: lit(f) }
+    const zone = zoneAt(props.min + f * (props.max - props.min))
+    const on = lit(f)
+    const c = zone ?? props.color
+    return {
+      deg: 45 + 270 * f, long: i % 5 === 0, on,
+      bg: on ? c : (zone ? `color-mix(in srgb, ${zone} 38%, transparent)` : 'rgba(255,255,255,.13)'),
+      glow: on ? `0 0 4px ${c}` : 'none',
+    }
   })
 })
 
@@ -220,7 +239,7 @@ const aria = computed(() => ({
         v-for="(t, i) in ticks" :key="i" class="m-tick"
         :style="{ height: `${tickBox / 2 - 8}px`, transform: `rotate(${t.deg}deg)` }"
       >
-        <div :style="{ height: `${t.long ? 10 : 6}px`, background: t.on ? color : 'rgba(255,255,255,.13)', boxShadow: t.on ? `0 0 4px ${color}` : 'none' }"></div>
+        <div :style="{ height: `${t.long ? 10 : 6}px`, background: t.bg, boxShadow: t.glow }"></div>
       </div>
       <div class="m-cap m-cap--ticks m-focusable" :style="{ width: `${body}px`, height: `${body}px` }" v-bind="aria" v-on="handlers">
         <div class="m-cap-inner m-cap-inner--step" :style="{ inset: `${Math.round(body * 0.108)}px` }"></div>

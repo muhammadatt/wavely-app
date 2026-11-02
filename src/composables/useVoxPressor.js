@@ -9,7 +9,9 @@ import {
 import { analysedWholeRegion, regionAlignDb } from '../audio/analysisWindow.js'
 import { getSegmentDuration } from '../audio/operations.js'
 import { createMeasureThrottle } from './measureThrottle.js'
-import { toKernelParams, VOX_MEASURED_KEYS } from '../audio/effects/voxPressorParams.js'
+import {
+  toKernelParams, VOX_MEASURED_KEYS, peaksGuideRangeDb, peaksGuideKnobs,
+} from '../audio/effects/voxPressorParams.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { voxPressorEffect as soloEffect, VOX_DEFAULTS } from '../audio/effects/voxPressor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -34,6 +36,17 @@ const copies = pluginCopies((copy, life) => {
   /** The 1176's SPEED. Measured with (AUTO and the fixed speeds catch differently). */
   const voxSpeed = ref(VOX_DEFAULTS.speed)
   /** The stages after Body. Each is measured with: they move what comes after them. */
+  /**
+   * The Peaks GUIDE in knob units ({ gapDb, target, warn }, `peaksGuideKnobs`):
+   * where the 1176 stage has brought the loudest peaks down to the voice, and
+   * where it starts compressing the voice. Measured once per region.
+   */
+  const voxPeaksGuide = ref(null)
+  /**
+   * AUTO: the guide's target owns the Peaks knob until the knob is turned (the
+   * contract of LA Vintage 2A's Input). Off by default: Peaks 3 ships.
+   */
+  const voxPeaksAuto = ref(false)
   const voxDeEss = ref(VOX_DEFAULTS.deEss)
   const voxDeEssSplit = ref(VOX_DEFAULTS.deEssSplit)
   const voxParallel = ref(VOX_DEFAULTS.parallel)
@@ -216,7 +229,7 @@ const copies = pluginCopies((copy, life) => {
      * result. Superseded calls are discarded by sequence number, so a knob drag
      * cannot have an older measurement land after a newer one.
      */
-    async function solve(segments, start, end) {
+    async function solve(segments, start, end, { guide = false } = {}) {
       ensureAlignment(segments)
       const seq = ++solveSeq
       const key = solveKey(segments, start, end)
@@ -232,6 +245,10 @@ const copies = pluginCopies((copy, life) => {
         // The LA-2A stage's makeup solve starts from the last answer, so a
         // knob move usually converges in one render.
         if (Number.isFinite(voxMeasured.value.bodyMakeupDb)) kp.bodyMakeupGuess = voxMeasured.value.bodyMakeupDb
+        // The panel's measurement carries the Peaks guide (cached per region).
+        // ⚠ Never an apply's: AUTO would move the knob mid-apply, on a chain's
+        // running segments, after the params were measured.
+        if (guide) kp.peaksGuideRangeDb = peaksGuideRangeDb()
         const r = await computeVoxPressorMeasure(
           segments, start, end, kp, state.currentFile.sampleRate, state.currentFile.channels,
         )
@@ -245,6 +262,10 @@ const copies = pluginCopies((copy, life) => {
           peaksDb: r.peaksDb, peaksBodyDb: r.peaksBodyDb, bodyDb: r.bodyDb, peaksRippleDb: r.peaksRippleDb,
         }
         solvedFor = key
+        if (guide) {
+          voxPeaksGuide.value = peaksGuideKnobs(r.peaksGuide)
+          followGuide()
+        }
         return next
       } finally {
         if (seq === solveSeq) voxBusy.value = false
@@ -272,7 +293,7 @@ const copies = pluginCopies((copy, life) => {
       const region = previewRegion()
       if (!region) return null
       const { start, end } = region
-      inFlight = solve(state.segments, start, end).catch((err) => {
+      inFlight = solve(state.segments, start, end, { guide: true }).catch((err) => {
         console.error('VoxPressor measurement failed:', err)
         return null
       })
@@ -285,10 +306,31 @@ const copies = pluginCopies((copy, life) => {
       solveThrottle.schedule()
     }
 
-    function syncPeaks(v) {
+    function setPeaks(v) {
       voxPeaks.value = v
       pushParam('peaks', v)
       scheduleSolve()
+    }
+
+    /** The knob, turned by hand: it takes the knob back from AUTO. */
+    function syncPeaks(v) {
+      voxPeaksAuto.value = false
+      setPeaks(v)
+    }
+
+    /** Under AUTO, put the knob on the guide's target (to 0.1) when it moved. */
+    function followGuide() {
+      const g = voxPeaksGuide.value
+      if (!voxPeaksAuto.value || !g) return
+      const v = Math.round(g.target * 10) / 10
+      if (Math.abs(v - voxPeaks.value) > 0.05) setPeaks(v)
+    }
+
+    function togglePeaksAuto() {
+      voxPeaksAuto.value = !voxPeaksAuto.value
+      if (!voxPeaksAuto.value) return
+      if (voxPeaksGuide.value) followGuide()
+      else scheduleSolve()
     }
 
     function syncBody(v) {
@@ -514,6 +556,7 @@ const copies = pluginCopies((copy, life) => {
       voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
       voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
       voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
+      voxPeaksGuide, voxPeaksAuto, togglePeaksAuto,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,
