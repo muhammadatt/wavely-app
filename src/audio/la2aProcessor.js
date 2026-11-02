@@ -1610,7 +1610,7 @@ export const VALVE_GUARD_DEFAULT = 100
  * Linear, the two halves sum back exactly. Only on the cell-curve path (the
  * shipping quartic); with `cellCurve: 'gainmod'` it does nothing.
  */
-export const SHAPER_SPLIT_HZ_MIN = 1000
+export const SHAPER_SPLIT_HZ_MIN = 250
 export const SHAPER_SPLIT_HZ_MAX = 12000
 export const SIB_GUARD_HZ = 4000
 /**
