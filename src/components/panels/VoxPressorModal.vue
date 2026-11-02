@@ -423,13 +423,6 @@ async function applyAndClose() {
       </div>
     </div>
 
-    <p class="vp-about">
-      Dev: a 1176 trims the peaks, an LA-2A levels the voice, then a de-esser, a parallel compressor (an LA-2A unless the bench picks the 1176)
-      and an anchored Inflator. The 1176 and the LA-2A listen through a voice detector that ignores rumble; the LA-2A also ignores plosives
-      and sibilance. Each compressor makes up its own level, as in a hand-built chain, so what it takes off comes back as loudness.
-      After the 1176, the LA-2A and the Inflator a lookahead limiter holds the source's peak with a gain; the parallel blend is held at
-      the source's peak by its compressor's own soft ceiling, which bends the few peaks that reach it.
-    </p>
   </FloatingWindow>
 </template>
 
@@ -516,10 +509,4 @@ async function applyAndClose() {
 .vp-auto-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 0, 0, .5); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
 .vp-auto.is-on { color: var(--vp-auto); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .6), 0 0 0 1px color-mix(in oklab, var(--vp-auto) 45%, #000); }
 .vp-auto.is-on .vp-auto-dot { background: var(--vp-auto); box-shadow: 0 0 6px var(--vp-auto); }
-.vp-about {
-  margin: 12px 8px 0;
-  text-align: center;
-  font: 500 10px/1.5 var(--m-font-ui);
-  color: var(--m-ink-4);
-}
 </style>
