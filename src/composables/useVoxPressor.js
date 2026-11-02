@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
@@ -70,6 +70,21 @@ const copies = pluginCopies((copy, life) => {
   /** The readouts: { peaksDb, peaksBodyDb, bodyDb } at the knobs measured, or null. */
   const voxReadout = ref(null)
   const voxBusy = ref(false)
+  /**
+   * What the Peaks / Body / De-ess readouts depend on: the region and the
+   * knobs before Parallel. A Parallel, Density or Output move re-solves only
+   * Parallel (`measureVoxPressor`'s cache), so it must not dim them — the
+   * first panel dimmed every readout on any measurement, which read as Peaks
+   * being re-measured when Parallel moved.
+   */
+  const upstreamKnobs = () => `${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxDeEss.value}|${voxDeEssSplit.value}`
+  /** The region + upstream knobs the measurement in flight was asked for. */
+  const voxPendingUpKey = ref(null)
+  const voxUpstreamStale = computed(() => {
+    const r = voxReadout.value
+    if (!voxBusy.value || !r) return false
+    return voxPendingUpKey.value !== r.upKey || upstreamKnobs() !== r.upKnobs
+  })
 
   const voxPreview = ref(false)
   const voxPeaksGr = ref(0)
@@ -234,6 +249,9 @@ const copies = pluginCopies((copy, life) => {
       const seq = ++solveSeq
       const key = solveKey(segments, start, end)
       const regionKey = key.split('|').slice(0, 3).join('|')
+      const upKnobs = upstreamKnobs()
+      const upKey = `${regionKey}|${upKnobs}`
+      voxPendingUpKey.value = upKey
       voxBusy.value = true
       try {
         const kp = toKernelParams(currentParams())
@@ -260,6 +278,7 @@ const copies = pluginCopies((copy, life) => {
         for (const k of MEASURED) pushParam(k, next[k])
         voxReadout.value = {
           peaksDb: r.peaksDb, peaksBodyDb: r.peaksBodyDb, bodyDb: r.bodyDb, peaksRippleDb: r.peaksRippleDb,
+          upKey, upKnobs,
         }
         solvedFor = key
         if (guide) {
@@ -556,7 +575,7 @@ const copies = pluginCopies((copy, life) => {
       voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
       voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
       voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
-      voxPeaksGuide, voxPeaksAuto, togglePeaksAuto,
+      voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,

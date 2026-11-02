@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useVoxPressor } from '../../composables/useVoxPressor.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
@@ -10,6 +10,7 @@ import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { isVoxPressorBenchVisible } from '../../audio/effects/voxPressorBench.js'
 import {
   VOX_DEFAULTS, VOX_OUTPUT_MIN_DB, VOX_OUTPUT_MAX_DB,
   PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PEAKS_RIPPLE_WARN_DB, peaksTiming,
@@ -21,7 +22,7 @@ const {
   voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
-  voxPeaksGuide, voxPeaksAuto, togglePeaksAuto,
+  voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncOutput, syncListen, syncBodyLookahead, syncSpeed,
@@ -31,6 +32,10 @@ const {
 } = useVoxPressor()
 
 const { state } = useEditorState()
+
+// The bench: dev builds (or the localStorage flag) only, and shut by default.
+const showBench = isVoxPressorBenchVisible()
+const benchOpen = ref(false)
 
 onMounted(() => {
   // The chain's copy keeps its ON/BYPASS (see SchepsModal).
@@ -170,7 +175,9 @@ const bodyNote = computed(() => {
 })
 // The numbers on screen describe the knobs they were measured at; while a
 // newer measurement is in flight they are dimmed rather than blanked.
-const stale = computed(() => voxBusy.value && !!voxReadout.value)
+// Only when the measurement in flight can change them: a Parallel move
+// re-solves Parallel alone and leaves these exactly as they are.
+const stale = computed(() => voxUpstreamStale.value)
 
 const measuredNote = computed(() => {
   const m = voxMeasured.value
@@ -330,47 +337,56 @@ async function applyAndClose() {
             @update:model-value="syncListen"
           />
         </div>
-        <div class="vp-listen vp-bench">
-          <span class="m-caption">Bench · Body lookahead</span>
-          <ModulaSegmented
-            :model-value="voxBodyLookahead" :options="LOOKAHEAD_OPTIONS"
-            aria-label="Body lookahead" :disabled="!voxPreview"
-            @update:model-value="syncBodyLookahead"
-          />
+        <div v-if="showBench" class="vp-bench-wrap">
+          <button
+            type="button" class="vp-bench-toggle" :aria-expanded="benchOpen"
+            title="Dev-only A/B settings and the measured values. Not on the shipping faceplate"
+            @click="benchOpen = !benchOpen"
+          >BENCH {{ benchOpen ? '▴' : '▾' }}</button>
+          <div v-if="benchOpen" class="vp-bench-body">
+            <div class="vp-listen vp-bench">
+              <span class="m-caption">Body lookahead</span>
+              <ModulaSegmented
+                :model-value="voxBodyLookahead" :options="LOOKAHEAD_OPTIONS"
+                aria-label="Body lookahead" :disabled="!voxPreview"
+                @update:model-value="syncBodyLookahead"
+              />
+            </div>
+            <div class="vp-listen vp-bench">
+              <span class="m-caption">Parallel comp</span>
+              <ModulaSegmented
+                :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS"
+                aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
+                @update:model-value="syncParallelComp"
+              />
+            </div>
+            <div class="vp-listen vp-bench">
+              <span class="m-caption">Parallel de-ess</span>
+              <ModulaSegmented
+                :model-value="voxParallelDeEss" :options="PARALLEL_DEESS_OPTIONS"
+                aria-label="Parallel de-ess" :disabled="!voxPreview || voxParallel <= 0"
+                @update:model-value="syncParallelDeEss"
+              />
+            </div>
+            <div class="vp-listen vp-bench">
+              <span class="m-caption">Parallel de-ess cut</span>
+              <ModulaSegmented
+                :model-value="voxParallelDeEssMode" :options="PARALLEL_DEESS_MODE_OPTIONS"
+                aria-label="Parallel de-ess cut" :disabled="!voxPreview || voxParallel <= 0 || voxParallelDeEss <= 0"
+                @update:model-value="syncParallelDeEssMode"
+              />
+            </div>
+            <div v-if="voxParallelComp === '1176'" class="vp-listen vp-bench">
+              <span class="m-caption">1176 sib detector</span>
+              <ModulaSegmented
+                :model-value="voxParallelSibEmph" :options="SIB_EMPH_OPTIONS"
+                aria-label="Parallel 1176 sibilance detector" :disabled="!voxPreview || voxParallel <= 0"
+                @update:model-value="syncParallelSibEmph"
+              />
+            </div>
+            <span class="m-note vp-measured">{{ measuredNote }}</span>
+          </div>
         </div>
-        <div class="vp-listen vp-bench">
-          <span class="m-caption">Bench · Parallel comp</span>
-          <ModulaSegmented
-            :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS"
-            aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
-            @update:model-value="syncParallelComp"
-          />
-        </div>
-        <div class="vp-listen vp-bench">
-          <span class="m-caption">Bench · Parallel de-ess</span>
-          <ModulaSegmented
-            :model-value="voxParallelDeEss" :options="PARALLEL_DEESS_OPTIONS"
-            aria-label="Parallel de-ess" :disabled="!voxPreview || voxParallel <= 0"
-            @update:model-value="syncParallelDeEss"
-          />
-        </div>
-        <div class="vp-listen vp-bench">
-          <span class="m-caption">Bench · Parallel de-ess cut</span>
-          <ModulaSegmented
-            :model-value="voxParallelDeEssMode" :options="PARALLEL_DEESS_MODE_OPTIONS"
-            aria-label="Parallel de-ess cut" :disabled="!voxPreview || voxParallel <= 0 || voxParallelDeEss <= 0"
-            @update:model-value="syncParallelDeEssMode"
-          />
-        </div>
-        <div v-if="voxParallelComp === '1176'" class="vp-listen vp-bench">
-          <span class="m-caption">Bench · 1176 sib detector</span>
-          <ModulaSegmented
-            :model-value="voxParallelSibEmph" :options="SIB_EMPH_OPTIONS"
-            aria-label="Parallel 1176 sibilance detector" :disabled="!voxPreview || voxParallel <= 0"
-            @update:model-value="syncParallelSibEmph"
-          />
-        </div>
-        <span class="m-note vp-measured">{{ measuredNote }}</span>
       </div>
 
       <div class="vp-meter">
@@ -448,6 +464,15 @@ async function applyAndClose() {
 }
 .vp-measured { text-align: center; }
 .vp-bench { padding-top: 8px; border-top: 1px dashed rgba(255, 255, 255, .08); }
+.vp-bench-wrap { margin-top: 10px; border-top: 1px dashed rgba(255, 255, 255, .1); padding-top: 8px; display: flex; flex-direction: column; align-items: center; }
+.vp-bench-toggle {
+  border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer;
+  background: linear-gradient(180deg, #34383e, #25282d);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .1), 0 0 0 1px rgba(0, 0, 0, .5);
+  font: 600 10px/1 var(--m-font-mono); letter-spacing: .1em; color: var(--m-ink-3, #8a929a);
+}
+.vp-bench-toggle:hover { color: var(--m-ink-2, #c3c9cf); }
+.vp-bench-body { align-self: stretch; display: flex; flex-direction: column; }
 .vp-warn { color: #f0b429; }
 .vp-stale { opacity: .55; }
 .vp-guide { display: flex; align-items: center; gap: 8px; margin: 2px 0 2px; }
