@@ -381,7 +381,7 @@ Mix 50 against the 1176's ~+1), so the A/B is ~1 dB apart: match it with Output.
 
 **BENCH: THE COPY'S OWN DE-ESSER** (`parallelDeEss` 0–100, OFF ships;
 `dsp/parallelDeEsser.js`) — the mixer's heavy de-ess on the parallel bus.
-LA Vintage 2A's sibilance-guard DETECTOR (the share of energy above 4 kHz,
+LA Vintage 2A's sibilance-guard DETECTOR (the share of energy above 2.5 kHz — 4 kHz until November 2026 —,
 0.25 → 0.6, 1 ms / 30 ms; the guard itself lowers the cell's drive, not the
 level, so only its detector is reused) drives a top-band cut on the COPY,
 after its makeup and before the blend: `g·x + (1−g)·LP2(x)` at 4 kHz, up to

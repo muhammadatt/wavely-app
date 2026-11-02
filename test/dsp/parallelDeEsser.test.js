@@ -39,10 +39,7 @@ function noise(n, seed = 1) {
 }
 
 test('its detector is LA Vintage 2A\'s sibilance guard\'s (copied constants, pinned)', () => {
-  // The guard's corner moved to 2.5 kHz for a dark "sh"; the copy's de-esser
-  // was auditioned at 4 kHz and stays there.
-  assert.equal(PARALLEL_DEESS_DETECT_HZ, 4000)
-  assert.equal(SIB_GUARD_HZ, 2500)
+  assert.equal(PARALLEL_DEESS_DETECT_HZ, SIB_GUARD_HZ)
   assert.equal(PARALLEL_DEESS_RATIO_LO, SIB_GUARD_RATIO_LO)
   assert.equal(PARALLEL_DEESS_RATIO_HI, SIB_GUARD_RATIO_HI)
 })

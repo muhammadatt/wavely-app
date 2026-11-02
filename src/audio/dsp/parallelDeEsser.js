@@ -10,8 +10,8 @@
  *
  * THE DETECTOR IS LA VINTAGE 2A'S SIBILANCE GUARD's (`la2aProcessor.js`), its
  * constants COPIED, not imported (this module stays free of the kernel), and
- * pinned by a test — except the corner, which the guard moved to 2.5 kHz for a
- * dark "sh" while this stays at the 4 kHz it was auditioned at: the share of the signal's energy above 4 kHz
+ * pinned equal by a test: the share of the signal's energy above 2.5 kHz (4 kHz
+ * until November 2026, when both moved down for a dark "sh")
  * (mean squares over 4 ms), mapped 0.25 → 0.6 through a smoothstep, 1 ms
  * attack / 30 ms release. ⚠ A RATIO, NOT A LEVEL, and that is the point: it
  * reads a quiet "s" exactly as a loud one, so the sibilants parallel lifts are
@@ -33,7 +33,7 @@
  */
 import { BiquadCascade, highpass, lowpass } from './biquad.js'
 
-export const PARALLEL_DEESS_DETECT_HZ = 4000
+export const PARALLEL_DEESS_DETECT_HZ = 2500
 export const PARALLEL_DEESS_RATIO_LO = 0.25
 export const PARALLEL_DEESS_RATIO_HI = 0.6
 export const PARALLEL_DEESS_ENV_MS = 4
