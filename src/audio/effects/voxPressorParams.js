@@ -6,7 +6,7 @@
  */
 import { PEAKS_BODY_WARN_DB, PEAKS_RIPPLE_WARN_DB } from '../voxPressorSolve.js'
 import {
-  voxLatencySamples, PEAKS_INPUT_KNOB, PEAKS_SPEED_IDS, peaksTiming,
+  voxLatencySamples, PEAKS_INPUT_KNOB, PEAKS_SPEED_IDS, peaksTiming, PEAKS_MODE_IDS,
 } from '../voxPressorProcessor.js'
 import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
 import {
@@ -82,7 +82,24 @@ export const BODY_LOOKAHEAD_STEPS_MS = Object.freeze([0, 5, 10, LOOKAHEAD_MAX_MS
 
 export const VOX_OUTPUT_MIN_DB = -12
 export const VOX_OUTPUT_MAX_DB = 12
-export { PEAKS_BODY_WARN_DB, PEAKS_RIPPLE_WARN_DB, PEAKS_SPEED_IDS, peaksTiming }
+export { PEAKS_BODY_WARN_DB, PEAKS_RIPPLE_WARN_DB, PEAKS_SPEED_IDS, PEAKS_MODE_IDS, peaksTiming }
+
+/**
+ * CHARACTER: 'warm' (ships) | 'clean' — the LA-2As' tube colour on or off
+ * (kernel `analog`). Gain reduction is identical either way.
+ */
+export const CHARACTER_IDS = Object.freeze(['warm', 'clean'])
+
+/**
+ * OUTPUT CEILING: where the output peak lands, dBFS. 'source' (ships) holds
+ * the source's own peak, as every stage does; −1 is the streaming norm
+ * (OUTPUT_PROFILES' podcast / broadcast ceiling), −3 ACX's.
+ */
+export const OUTPUT_CEILINGS = Object.freeze({ source: null, '-1': -1, '-3': -3 })
+export const OUTPUT_CEILING_IDS = Object.freeze(Object.keys(OUTPUT_CEILINGS))
+export function outputCeilingDbOf(id) {
+  return OUTPUT_CEILINGS[id] ?? null
+}
 
 /**
  * The panel's state. `peaks`, `body` and `output` are the user's; everything
@@ -100,6 +117,12 @@ export const VOX_DEFAULTS = {
    * 'normal' | 'fast' — see `PEAKS_SPEEDS`.
    */
   speed: 'auto',
+  /** PEAKS CHARACTER: 'hard' (12:1, ships) | 'soft' (4:1) — see `PEAKS_MODES`. */
+  peaksMode: 'hard',
+  /** CHARACTER: 'warm' (ships) | 'clean' — see `CHARACTER_IDS`. */
+  character: 'warm',
+  /** OUTPUT CEILING: 'source' (ships) | '-1' | '-3' — see `OUTPUT_CEILINGS`. */
+  ceiling: 'source',
   /**
    * BODY, 0–10 (0 = stage out): the LA-2A's Peak Reduction over its usable
    * span, the Parallel Drive's scale (`bodyPrFor`: PR 38 + 4 a step, so
@@ -222,6 +245,9 @@ export function toKernelParams(p) {
     peaksInput: PEAKS_INPUT_KNOB,
     ...stageParams(p),
     peaksSpeed: PEAKS_SPEED_IDS.includes(p.speed) ? p.speed : 'auto',
+    peaksMode: PEAKS_MODE_IDS.includes(p.peaksMode) ? p.peaksMode : 'hard',
+    analog: p.character !== 'clean',
+    outputCeilingDb: outputCeilingDbOf(p.ceiling),
     voiceF0Hz: Number.isFinite(p.voiceF0Hz) ? p.voiceF0Hz : null,
     bodyPeakReduction: bodyPrFor(p.body),
     outputDb: Number.isFinite(p.output) ? p.output : 0,

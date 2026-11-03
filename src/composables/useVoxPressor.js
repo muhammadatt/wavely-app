@@ -43,6 +43,12 @@ const copies = pluginCopies((copy, life) => {
   const voxListen = ref(VOX_DEFAULTS.listen)
   /** The 1176's SPEED. Measured with (AUTO and the fixed speeds catch differently). */
   const voxSpeed = ref(VOX_DEFAULTS.speed)
+  /** PEAKS CHARACTER (HARD 12:1 / SOFT 4:1). Measured with. */
+  const voxPeaksMode = ref(VOX_DEFAULTS.peaksMode)
+  /** CHARACTER (WARM / CLEAN): every LA-2A's tube colour. Measured with (the makeups move). */
+  const voxCharacter = ref(VOX_DEFAULTS.character)
+  /** OUTPUT CEILING ('source' / '-1' / '-3'). Measured with nothing: a gain on the source peak. */
+  const voxCeiling = ref(VOX_DEFAULTS.ceiling)
   /** The stages after Body. Each is measured with: they move what comes after them. */
   /**
    * The Peaks GUIDE in knob units ({ gapDb, target, warn }, `peaksGuideKnobs`):
@@ -86,7 +92,7 @@ const copies = pluginCopies((copy, life) => {
    * first panel dimmed every readout on any measurement, which read as Peaks
    * being re-measured when Parallel moved.
    */
-  const upstreamKnobs = () => `${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxDeEss.value}|${voxDeEssSplit.value}`
+  const upstreamKnobs = () => `${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxPeaksMode.value}|${voxCharacter.value}|${voxDeEss.value}|${voxDeEssSplit.value}`
   /** The region + upstream knobs the measurement in flight was asked for. */
   const voxPendingUpKey = ref(null)
   const voxUpstreamStale = computed(() => {
@@ -131,6 +137,9 @@ const copies = pluginCopies((copy, life) => {
       output: voxOutput.value,
       listen: voxListen.value,
       speed: voxSpeed.value,
+      peaksMode: voxPeaksMode.value,
+      character: voxCharacter.value,
+      ceiling: voxCeiling.value,
       deEss: voxDeEss.value,
       deEssSplit: voxDeEssSplit.value,
       parallel: voxParallel.value,
@@ -248,7 +257,7 @@ const copies = pluginCopies((copy, life) => {
 
     /** The key a measurement belongs to: the timeline, the region and every setting it reads. */
     function solveKey(segments, start, end) {
-      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxDeEss.value}|${voxDeEssSplit.value}|${voxParallel.value}|${voxParallelComp.value}|${voxParallelDeEss.value}|${voxParallelSibEmph.value}|${voxParallelDeEssMode.value}|${voxParallelDrive.value}`
+      return `${timelineKey(segments)}|${start}|${end}|${voxPeaks.value}|${voxBody.value}|${voxBodyLookahead.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxPeaksMode.value}|${voxCharacter.value}|${voxDeEss.value}|${voxDeEssSplit.value}|${voxParallel.value}|${voxParallelComp.value}|${voxParallelDeEss.value}|${voxParallelSibEmph.value}|${voxParallelDeEssMode.value}|${voxParallelDrive.value}`
     }
 
     /**
@@ -469,6 +478,24 @@ const copies = pluginCopies((copy, life) => {
       scheduleSolve()
     }
 
+    function syncPeaksMode(v) {
+      voxPeaksMode.value = v
+      pushParam('peaksMode', v)
+      scheduleSolve()
+    }
+
+    function syncCharacter(v) {
+      voxCharacter.value = v
+      pushParam('character', v)
+      scheduleSolve()
+    }
+
+    // A gain on the measured source peak: nothing to re-measure.
+    function syncCeiling(v) {
+      voxCeiling.value = v
+      pushParam('ceiling', v)
+    }
+
     function syncBodyLookahead(v) {
       voxBodyLookahead.value = v
       pushParam('bodyLookaheadMs', v)
@@ -620,6 +647,7 @@ const copies = pluginCopies((copy, life) => {
 
     return {
       voxPeaks, voxBody, voxOutput, voxListen, voxBodyLookahead, voxSpeed,
+      voxPeaksMode, voxCharacter, voxCeiling, syncPeaksMode, syncCharacter, syncCeiling,
       voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
       voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
       voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxParallelDrive, syncParallelDrive, voxUpstreamStale, voxDownstreamPending,

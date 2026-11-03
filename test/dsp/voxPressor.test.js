@@ -14,7 +14,7 @@ import { LA2AKernel } from '../../src/audio/la2aProcessor.js'
 import { FET1176Kernel } from '../../src/audio/fet1176Processor.js'
 import {
   processVoxPressorBuffer, VOX_KERNEL_DEFAULTS, peaksTap, BODY_TAP, voxLatencySamples, PEAKS_INPUT_KNOB, VoxPressorKernel,
-  peaksTiming, PEAKS_SPEEDS,
+  peaksTiming, PEAKS_SPEEDS, peaksModeDriveDb,
 } from '../../src/audio/voxPressorProcessor.js'
 import { LinkedPeakLimiter } from '../../src/audio/dsp/peakLimiter.js'
 import { releaseSecondsForDial } from '../../src/audio/fet1176Processor.js'
@@ -813,4 +813,67 @@ test('Parallel Drive knob: 2 dB a step, LA-2A 0 / 4.5 / 10 = PR 38 / 56 / 78, th
   assert.equal(VOX_DEFAULTS.parallelDrive, 3)
   assert.equal(toKernelParams({ ...VOX_DEFAULTS }).parallelDriveDb, 0)
   assert.equal(toKernelParams({ ...VOX_DEFAULTS, parallelComp: '1176' }).parallelDriveDb, -4)
+})
+
+test('Output ceiling: the output peak lands on it; SOURCE is bit-identical to no ceiling', () => {
+  const x = narration(SR, { seconds: 12, levelDb: -24 })
+  const panel = { peaks: 3, body: 4.75, deEss: 40, parallel: 35, density: 30 }
+  const { params } = measure(x, panel)
+  const render = extra => processVoxPressorBuffer([x], SR, { ...params, ...extra }, { compensate: true }).channelData[0]
+  const base = render({})
+  const viaPanel = toKernelParams({ ...VOX_DEFAULTS, ceiling: 'source' })
+  assert.equal(viaPanel.outputCeilingDb, null)
+  assert.deepEqual(render({ outputCeilingDb: null }), base)
+  for (const ceiling of ['-1', '-3']) {
+    const c = toKernelParams({ ...VOX_DEFAULTS, ceiling }).outputCeilingDb
+    assert.equal(c, Number(ceiling))
+    const out = render({ outputCeilingDb: c })
+    const pk = db(peak(out))
+    assert.ok(pk <= c + 1e-5, `${ceiling}: peak ${pk.toFixed(4)} over the ceiling`)
+    // ⚠ AT OR JUST UNDER: the gain scales the SOURCE peak onto the ceiling,
+    // and the Parallel stage's soft ceiling leaves the output 0.09–0.16 dB
+    // under the source peak (a knee never reaches its ceiling), so that much
+    // carries through. Never over.
+    assert.ok(pk > c - 0.25, `${ceiling}: peak ${pk.toFixed(3)} short of ${c}`)
+    // A gain, not a reshaping: the body moves by ceiling − source peak.
+    const shift = db(gatedRmsOfChannels([out], SR)) - db(gatedRmsOfChannels([base], SR))
+    const want = c - params.sourcePeakDb
+    assert.ok(Math.abs(shift - want) < 0.05, `${ceiling}: level ${shift.toFixed(3)} dB, want ${want.toFixed(3)}`)
+  }
+  // Unmeasured (no source peak), it does nothing.
+  const raw = processVoxPressorBuffer([x], SR, { ...params, sourcePeakDb: null }, { compensate: true }).channelData[0]
+  assert.deepEqual(processVoxPressorBuffer([x], SR, { ...params, sourcePeakDb: null, outputCeilingDb: -3 }, { compensate: true }).channelData[0], raw)
+})
+
+test('Character CLEAN: the LA-2As lose their colour, their gain reduction is unchanged', () => {
+  const x = narration(SR, { seconds: 12, levelDb: -24 })
+  assert.equal(toKernelParams({ ...VOX_DEFAULTS }).analog, true)
+  assert.equal(toKernelParams({ ...VOX_DEFAULTS, character: 'clean' }).analog, false)
+  const warm = measure(x, { peaks: 0, body: 6, deEss: 0, parallel: 0 })
+  const clean = measure(x, { peaks: 0, body: 6, deEss: 0, parallel: 0, character: 'clean' })
+  // The leveling is the same compressor: only the makeup around the valve moves.
+  assert.ok(Math.abs(warm.r.bodyDb - clean.r.bodyDb) < 0.15, `leveling ${warm.r.bodyDb.toFixed(2)} vs ${clean.r.bodyDb.toFixed(2)}`)
+  const render = p => processVoxPressorBuffer([x], SR, p, { compensate: true }).channelData[0]
+  const a = render(warm.params)
+  const b = render(clean.params)
+  assert.notDeepEqual(a, b)
+  // The Parallel LA-2A takes the switch too.
+  const k = new VoxPressorKernel(SR)
+  k.setParams({ parallelComp: 'la2a', analog: false })
+  assert.equal(k.parallelLa2a.analog, false)
+  assert.equal(k.la2a.analog, false)
+})
+
+test('Peaks SOFT: 4:1 starts catching where HARD does, takes less off and stays below it', () => {
+  const x = narration(SR, { seconds: 12, levelDb: -24 })
+  assert.equal(toKernelParams({ ...VOX_DEFAULTS }).peaksMode, 'hard')
+  assert.equal(peaksModeDriveDb('hard'), 0)
+  assert.ok(Math.abs(peaksModeDriveDb('soft') + 1.712 * Math.log2(3)) < 1e-9)
+  const at = (peaks, peaksMode) => measure(x, { peaks, body: 0, deEss: 0, parallel: 0, peaksMode }).r
+  for (const peaks of [3, 6]) {
+    const hard = at(peaks, 'hard')
+    const soft = at(peaks, 'soft')
+    assert.ok(soft.peaksDb > 0.5, `Peaks ${peaks} SOFT: only ${soft.peaksDb.toFixed(2)} dB`)
+    assert.ok(soft.peaksDb < hard.peaksDb, `Peaks ${peaks}: soft ${soft.peaksDb.toFixed(2)} vs hard ${hard.peaksDb.toFixed(2)}`)
+  }
 })

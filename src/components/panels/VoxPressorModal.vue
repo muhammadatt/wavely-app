@@ -20,6 +20,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   voxPeaks, voxBody, voxOutput, voxBodyLookahead, voxSpeed,
+  voxPeaksMode, voxCharacter, voxCeiling, syncPeaksMode, syncCharacter, syncCeiling,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
   voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale, voxDownstreamPending,
@@ -63,7 +64,25 @@ const SPEED_OPTIONS = [
   { value: 'fast', label: 'FAST', title: 'Fast attack and release: grabs every onset; can ripple on low voices' },
 ]
 
-// BENCH: the Parallel stage's compressor. 1176 ships; the LA-2A is the A/B.
+// PEAKS CHARACTER: the 1176's ratio button (`PEAKS_MODES`).
+const PEAKS_MODE_OPTIONS = [
+  { value: 'hard', label: 'HARD', title: '12:1: a limiter. The loudest peaks are held down hard; the rest is left alone' },
+  { value: 'soft', label: 'SOFT', title: '4:1: a gentler peak compressor for a dynamic performance. Starts at the same place, takes less off each step' },
+]
+
+// CHARACTER: the LA-2As' tube colour (Body, and the Parallel copy when it is the LA-2A).
+const CHARACTER_OPTIONS = [
+  { value: 'warm', label: 'WARM', title: "The LA-2A's tube cell and output valve: a little even-harmonic warmth" },
+  { value: 'clean', label: 'CLEAN', title: 'The same leveling as a pure gain: no tube colour. Also cleans the Parallel copy when it is the LA-2A' },
+]
+
+// OUTPUT CEILING: where the output peak lands.
+const CEILING_OPTIONS = [
+  { value: 'source', label: 'SOURCE', title: "The output peak stays at the source's own peak" },
+  { value: '-1', label: '−1 dB', title: 'The output peak lands at −1 dBFS (podcast / streaming)' },
+  { value: '-3', label: '−3 dB', title: 'The output peak lands at −3 dBFS (ACX)' },
+]
+
 const PARALLEL_DEESS_OPTIONS = [0, 25, 50, 75, 100].map(v => ({
   value: v, label: v === 0 ? 'OFF' : String(v),
   title: v === 0 ? 'No de-esser on the copy' : `De-ess the parallel copy before the blend (${v})`,
@@ -281,6 +300,11 @@ async function applyAndClose() {
               @update:model-value="syncBody"
             />
             <span class="m-note" :class="{ 'vp-stale': stale }"><i v-if="stale" class="vp-pulse" aria-hidden="true"></i>{{ bodyNote }}</span>
+            <ModulaSegmented
+              :model-value="voxCharacter" :options="CHARACTER_OPTIONS"
+              aria-label="Character" :disabled="!voxPreview"
+              @update:model-value="syncCharacter"
+            />
           </div>
         </div>
 
@@ -346,11 +370,25 @@ async function applyAndClose() {
         </div>
 
         <div class="vp-listen">
+          <span class="m-caption">Peaks</span>
+          <ModulaSegmented
+            :model-value="voxPeaksMode" :options="PEAKS_MODE_OPTIONS"
+            aria-label="Peaks character" :disabled="!voxPreview || voxPeaks <= 0"
+            @update:model-value="syncPeaksMode"
+          />
           <span class="m-caption">Speed</span>
           <ModulaSegmented
             :model-value="voxSpeed" :options="SPEED_OPTIONS"
             aria-label="Peaks speed" :disabled="!voxPreview || voxPeaks <= 0"
             @update:model-value="syncSpeed"
+          />
+        </div>
+        <div class="vp-listen">
+          <span class="m-caption">Ceiling</span>
+          <ModulaSegmented
+            :model-value="voxCeiling" :options="CEILING_OPTIONS"
+            aria-label="Output ceiling" :disabled="!voxPreview"
+            @update:model-value="syncCeiling"
           />
         </div>
         <div v-if="showBench" class="vp-bench-wrap">
@@ -405,7 +443,7 @@ async function applyAndClose() {
               :min="VOX_OUTPUT_MIN_DB" :max="VOX_OUTPUT_MAX_DB" :step="0.1"
               :default-value="VOX_DEFAULTS.output" :format-value="formatOutput"
               aria-label="Output" :disabled="!voxPreview"
-              title="Output trim, after the peak-restoring makeup and the source-peak ceiling. Double-click to reset"
+              title="Output trim, after the ceiling: anything but 0 moves the peak off it. Double-click to reset"
               @update:model-value="syncOutput"
             />
           </template>

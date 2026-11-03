@@ -48,7 +48,9 @@
  * bundles the kernels it imports — see voxPressorWorkletLoader.js.
  */
 
-import { FET1176Kernel, inputDriveDbForKnob, releaseSecondsForDial } from './fet1176Processor.js'
+import {
+  FET1176Kernel, inputDriveDbForKnob, releaseSecondsForDial, ratioThresholdOffsetDb,
+} from './fet1176Processor.js'
 import { LA2AKernel, la2aLatencySamples } from './la2aProcessor.js'
 import { HFSoftenerKernel } from './deEsserProcessor.js'
 import { InflatorKernel, INFLATOR_LATENCY_SAMPLES } from './inflatorProcessor.js'
@@ -92,6 +94,29 @@ export const PEAKS_PATCH = Object.freeze({
  * Everything else is the shipping LA Vintage 2A — including its quartic cell
  * and valve, which are this plugin's colour.
  */
+/**
+ * PEAKS CHARACTER — the 1176's ratio button: HARD (12:1, a limiter, ships) or
+ * SOFT (4:1, a peak compressor for a dynamic performance).
+ *
+ * ⚠ THE BUTTON MOVES THE THRESHOLD (`ratioThreshold: 'moving'`, LA Classic
+ * 76's shipping law): 4:1 sits `ratioThresholdOffsetDb` 2.71 dB under 12:1, so
+ * at the same drive SOFT would catch peaks 2.71 dB earlier and Peaks 0 would
+ * no longer be "where the loudest peaks are first caught". The drive is offset
+ * by the difference (`peaksModeDriveDb`), so both start catching at the same
+ * knob position and SOFT then takes less off per step. In the kernel, not the
+ * panel mapping, so the Peaks guide's search (which sets `peaksAlignDb`
+ * directly) is in the same knob units for either.
+ */
+export const PEAKS_MODES = Object.freeze({ hard: '12', soft: '4' })
+export const PEAKS_MODE_IDS = Object.freeze(['hard', 'soft'])
+export function peaksRatioOf(mode) {
+  return PEAKS_MODES[mode] ?? PEAKS_MODES.hard
+}
+/** The detector drive offset that keeps a mode's threshold on HARD's, dB. */
+export function peaksModeDriveDb(mode) {
+  return ratioThresholdOffsetDb(peaksRatioOf(mode)) - ratioThresholdOffsetDb(PEAKS_MODES.hard)
+}
+
 export const BODY_PATCH = Object.freeze({
   mode: 'compress',
   gainDb: 0,
@@ -276,6 +301,8 @@ export function parallelLa2aParams(p) {
     inputAlignDb: finite(p.parallelAlignDb, 0, -60, 60) + parallelDriveDb(p),
     mix: finite(p.parallelMix, 0, 0, 1),
     gainDb: finite(p.parallelMakeupDb, 0, -24, 24),
+    // The plugin's CHARACTER reaches the copy too: CLEAN means no tube colour anywhere.
+    analog: p.analog !== false,
     ...parallelCeiling(p),
   }
 }
@@ -318,6 +345,16 @@ export const VOX_KERNEL_DEFAULTS = {
   bodyOn: true,
   /** The knobs: the 1176's Input and the LA-2A's Peak Reduction (0–100). */
   peaksInput: PEAKS_INPUT_KNOB,
+  /** PEAKS CHARACTER, 'hard' (12:1, ships) | 'soft' (4:1) — see `PEAKS_MODES`. */
+  peaksMode: 'hard',
+  /**
+   * CHARACTER of every LA-2A in the plugin (Body, and the Parallel copy when
+   * it is the LA-2A): true = WARM, its quartic cell and valve (ships); false =
+   * CLEAN, LA Vintage 2A's `analog: false` — gain reduction bit-identical,
+   * delivered as a pure gain, no tube colour. The 1176s are clean already
+   * (`fetDrive` 0).
+   */
+  analog: true,
   /** SPEED ('auto' | 'gentle' | 'normal' | 'fast') and the voice's F0 it reads. */
   peaksSpeed: 'auto',
   voiceF0Hz: null,
@@ -347,6 +384,15 @@ export const VOX_KERNEL_DEFAULTS = {
   makeupDb: 0,
   /** Manual trim after the last limiter, dB. */
   outputDb: 0,
+  /**
+   * OUTPUT CEILING, dBFS, or null = SOURCE (ships: every limiter holds the
+   * source's own peak and the output peak lands there). Set, the output is
+   * scaled by `outputCeilingDb − sourcePeakDb` before the last limiter, which
+   * then holds the ceiling: the output peak lands ON it — a peak normalize
+   * folded into the plugin, for ACX (−3) or streaming (−1) delivery. Needs
+   * `sourcePeakDb`; without it (the measurements) it does nothing.
+   */
+  outputCeilingDb: null,
   /**
    * DE-ESS — the HF Softener's kernel, its params whole (`deEss`, from the
    * De-Esser's own `toKernelParams`, so the panel mapping is not copied).
@@ -465,6 +511,7 @@ export class VoxPressorKernel {
     this.makeupLinSmoothed = null
     this.parallelRestoreSmoothed = null
     this.outputLinSmoothed = null
+    this.ceilingGainSmoothed = null
     this.peaksGrHold = 0
     this.bodyGrHold = 0
     this.gainSmoothCoef = 1 - Math.exp(-1 / (sampleRate * (GAIN_SMOOTH_MS / 1000)))
@@ -486,10 +533,11 @@ export class VoxPressorKernel {
     const peaksMakeupDb = finite(p.peaksMakeupDb, 0, -36, 36)
     this.fet.setParams({
       ...PEAKS_PATCH,
+      ratio: peaksRatioOf(p.peaksMode),
       ...peaksTiming(p.peaksSpeed, p.voiceF0Hz),
       inputDrive: peaksInput,
       ...(p.peaksBench ?? {}),
-      inputAlignDb: finite(p.peaksAlignDb, 0, -60, 60),
+      inputAlignDb: finite(p.peaksAlignDb, 0, -60, 60) + peaksModeDriveDb(p.peaksMode),
       // Output cancels the Input's drive; the stage's makeup rides on it.
       outputGainDb: -inputDriveDbForKnob(peaksInput) + peaksMakeupDb,
       ceilingDb: null,
@@ -498,6 +546,7 @@ export class VoxPressorKernel {
     this.la2a.setParams({
       ...BODY_PATCH,
       peakReduction: finite(p.bodyPeakReduction, 50, 0, 100),
+      analog: p.analog !== false,
       ...(p.bodyBench ?? {}),
       /**
        * ⚠ NET OF THE PEAKS STAGE'S MAKEUP. The LA-2A hears the 1176 stage's
@@ -577,7 +626,16 @@ export class VoxPressorKernel {
      * downsampler rings back over: +0.18 dB on "Messy and Bright" at Density 30.
      * The last limiter takes that fraction of a dB with a gain.
      */
-    this.outputLimiter.setThreshold(this.densityOn ? anchorLin : 0)
+    /**
+     * OUTPUT CEILING: a gain of ceiling − source peak ahead of the last
+     * limiter, which holds the ceiling. Every stage before it holds the source
+     * peak, so the gain lands the output peak on the ceiling; the limiter
+     * catches what float rounding and the Inflator's ringing leave over.
+     */
+    const ceilingLin = anchorLin > 0 ? this._ceilingLin(p.outputCeilingDb) : 0
+    this.ceilingGainLin = ceilingLin > 0
+      ? Math.exp((p.outputCeilingDb - p.sourcePeakDb) * LN10_OVER_20) : 1
+    this.outputLimiter.setThreshold(ceilingLin > 0 ? ceilingLin : (this.densityOn ? anchorLin : 0))
     this.inflator.setParams({
       // Clip only while it runs: anchored, nothing reaches it above full scale;
       // off, the stage must be a pure delay even for a file that peaks over 0 dBFS.
@@ -663,6 +721,7 @@ export class VoxPressorKernel {
     this.makeupLinSmoothed = null
     this.parallelRestoreSmoothed = null
     this.outputLinSmoothed = null
+    this.ceilingGainSmoothed = null
     this.setParams({})
   }
 
@@ -830,6 +889,8 @@ export class VoxPressorKernel {
         for (let i = 0; i < n; i++) io[i] = line.push(io[i])
       }
     }
+    if (this.ceilingGainSmoothed === null) this.ceilingGainSmoothed = this.ceilingGainLin
+    this.ceilingGainSmoothed = this._ramp(outputChannels, n, this.ceilingGainSmoothed, this.ceilingGainLin)
     this.outputLimiter.process(outputChannels, n)
 
     this.outputLinSmoothed = this._ramp(outputChannels, n, this.outputLinSmoothed, this.outputLin)

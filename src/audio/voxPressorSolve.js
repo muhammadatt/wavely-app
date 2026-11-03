@@ -437,7 +437,7 @@ function guideKey(channels, sampleRate, p, up, hash) {
 const NOT_UPSTREAM = new Set([
   'density', 'outputDb', 'listen', 'bodyMakeupGuess', 'sourcePeakDb', 'makeupDb',
   'peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb', 'bodyMakeupDb', 'bodyCeilingDb',
-  'deEssLevelOffsetDb', 'peaksGuideRangeDb', 'measureUntil',
+  'deEssLevelOffsetDb', 'peaksGuideRangeDb', 'measureUntil', 'outputCeilingDb',
 ])
 
 function upstreamKey(channels, sampleRate, p, hash = channelsHash(channels), skip = null) {
