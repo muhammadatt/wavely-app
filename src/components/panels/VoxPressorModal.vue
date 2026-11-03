@@ -261,22 +261,36 @@ async function applyAndClose() {
       <div class="vp-panel">
         <div class="vp-bars">
           <GainReductionBar :reduction-db="voxPeaksGr" :accent="PEAKS_COLOR" title="PEAKS · 1176" :full-scale-db="12" />
-          <GainReductionBar :reduction-db="voxDeEssGr" :accent="DEESS_COLOR" title="DE-ESS" :full-scale-db="12" />
           <GainReductionBar :reduction-db="voxBodyGr" :accent="ACCENT" title="BODY · LA-2A" :full-scale-db="12" />
+          <GainReductionBar :reduction-db="voxDeEssGr" :accent="DEESS_COLOR" title="DE-ESS" :full-scale-db="12" />
           <GainReductionBar :reduction-db="voxParallelGr" :accent="PARALLEL_COLOR" title="PARALLEL (WET)" :full-scale-db="12" />
         </div>
 
-        <div class="vp-controls">
-          <div class="vp-col">
+        <!-- The controls, grouped by stage: each group holds everything that sets it. -->
+        <div class="vp-row">
+          <section class="vp-group" aria-label="Peaks">
+            <span class="m-caption vp-cap">Peaks · 1176</span>
             <ModulaKnob
-              variant="ticks" :size="108" show-value editable
+              variant="ticks" :size="96" show-value editable
               :model-value="voxPeaks" :min="0" :max="PEAKS_MAX" :step="0.5"
               :default-value="VOX_DEFAULTS.peaks"
-              label="Peaks" :color="PEAKS_COLOR" :format-value="formatPeaks" :disabled="!voxPreview"
+              label="Amount" aria-label="Peaks" :color="PEAKS_COLOR" :format-value="formatPeaks" :disabled="!voxPreview"
               :zones="peaksZones"
               title="How hard the 1176 catches the loudest peaks: about that many dB off them on typical narration (the note below says what it took on this file). The ring is green up to where this file's loudest peaks come down to the voice, amber after, red where the stage starts compressing the voice itself — the later stages are there for that. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncPeaks"
             />
+            <div class="vp-switches">
+              <ModulaSegmented
+                :model-value="voxPeaksMode" :options="PEAKS_MODE_OPTIONS"
+                aria-label="Peaks character" :disabled="!voxPreview || voxPeaks <= 0"
+                @update:model-value="syncPeaksMode"
+              />
+              <ModulaSegmented
+                :model-value="voxSpeed" :options="SPEED_OPTIONS"
+                aria-label="Peaks speed" :disabled="!voxPreview || voxPeaks <= 0"
+                @update:model-value="syncSpeed"
+              />
+            </div>
             <div class="vp-guide">
               <button
                 type="button" class="vp-auto" :class="{ 'is-on': voxPeaksAuto }" :disabled="!voxPreview"
@@ -289,32 +303,34 @@ async function applyAndClose() {
             <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }"><i v-if="stale" class="vp-pulse" aria-hidden="true"></i>{{ peaksNote }}</span>
             <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ bodyTouchNote }}</span>
             <span class="m-note" :class="{ 'vp-warn': rippleWarn, 'vp-stale': stale }">{{ rippleNote }}</span>
-          </div>
-          <div class="vp-col">
+          </section>
+          <section class="vp-group" aria-label="Body">
+            <span class="m-caption vp-cap">Body · LA-2A</span>
             <ModulaKnob
-              variant="ticks" :size="108" show-value editable
+              variant="ticks" :size="96" show-value editable
               :model-value="voxBody" :min="0" :max="BODY_MAX" :step="0.25"
               :default-value="VOX_DEFAULTS.body"
-              label="Body · LA-2A" :color="ACCENT" :format-value="formatBody" :disabled="!voxPreview"
+              label="Amount" aria-label="Body" :color="ACCENT" :format-value="formatBody" :disabled="!voxPreview"
               title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 1 = PR 42, 4.75 = PR 57, 10 = PR 78 (4 points a step), aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncBody"
             />
-            <span class="m-note" :class="{ 'vp-stale': stale }"><i v-if="stale" class="vp-pulse" aria-hidden="true"></i>{{ bodyNote }}</span>
             <ModulaSegmented
               :model-value="voxCharacter" :options="CHARACTER_OPTIONS"
               aria-label="Character" :disabled="!voxPreview"
               @update:model-value="syncCharacter"
             />
-          </div>
+            <span class="m-note" :class="{ 'vp-stale': stale }"><i v-if="stale" class="vp-pulse" aria-hidden="true"></i>{{ bodyNote }}</span>
+          </section>
         </div>
 
-        <div class="vp-controls vp-row2">
-          <div class="vp-col vp-col-sm">
+        <div class="vp-row">
+          <section class="vp-group" aria-label="De-ess">
+            <span class="m-caption vp-cap">De-ess</span>
             <ModulaKnob
               variant="ticks" :size="80" show-value editable
               :model-value="voxDeEss" :min="0" :max="100" :step="1"
               :default-value="VOX_DEFAULTS.deEss"
-              label="De-ess" :color="DEESS_COLOR" :format-value="formatKnob" :disabled="!voxPreview"
+              label="Amount" aria-label="De-ess" :color="DEESS_COLOR" :format-value="formatKnob" :disabled="!voxPreview"
               title="The HF Softener's Amount, after the compressors: takes down the sibilance they brought up. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncDeEss"
             />
@@ -327,14 +343,15 @@ async function applyAndClose() {
               title="Where the De-ess Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
               @update:model-value="syncDeEssSplit"
             />
-          </div>
-          <div class="vp-col vp-col-sm">
+          </section>
+          <section class="vp-group" aria-label="Parallel">
+            <span class="m-caption vp-cap">Parallel</span>
             <div class="vp-pair">
               <ModulaKnob
                 variant="ticks" :size="80" show-value editable
                 :model-value="voxParallel" :min="0" :max="100" :step="1"
                 :default-value="VOX_DEFAULTS.parallel"
-                label="Parallel" :color="PARALLEL_COLOR" :format-value="formatPercent" :disabled="!voxPreview"
+                label="Mix" aria-label="Parallel mix" :color="PARALLEL_COLOR" :format-value="formatPercent" :disabled="!voxPreview"
                 title="Parallel compression: a heavily compressed copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
                 @update:model-value="syncParallel"
               />
@@ -342,7 +359,7 @@ async function applyAndClose() {
                 variant="small" :size="52" show-value editable
                 :model-value="voxParallelDrive" :min="0" :max="PARALLEL_DRIVE_MAX" :step="0.5"
                 :default-value="VOX_DEFAULTS.parallelDrive"
-                label="Drive" :color="PARALLEL_COLOR" :format-value="formatDrive" :disabled="!voxPreview || voxParallel <= 0"
+                label="Drive" aria-label="Parallel drive" :color="PARALLEL_COLOR" :format-value="formatDrive" :disabled="!voxPreview || voxParallel <= 0"
                 title="How hard the parallel copy is compressed. On the LA-2A it is Peak Reduction: 0 = PR 38, 3 = PR 50, 10 = PR 78; the 1176 is set so the same position compresses about as hard. The copy's makeup is re-measured. Double-click to reset"
                 @update:model-value="syncParallelDrive"
               />
@@ -356,8 +373,9 @@ async function applyAndClose() {
             <span class="m-note vp-pending" :class="{ 'is-on': voxBusy && voxPreview }" aria-live="polite">
               <i class="vp-pulse" aria-hidden="true"></i>{{ voxDownstreamPending ? 'updating makeup' : 'measuring' }}
             </span>
-          </div>
-          <div class="vp-col vp-col-sm">
+          </section>
+          <section class="vp-group" aria-label="Output">
+            <span class="m-caption vp-cap">Output</span>
             <ModulaKnob
               variant="ticks" :size="80" show-value editable
               :model-value="voxDensity" :min="0" :max="100" :step="1"
@@ -366,30 +384,13 @@ async function applyAndClose() {
               title="The Cambridge Inflator's Effect, anchored at the source peak: lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
               @update:model-value="syncDensity"
             />
-          </div>
-        </div>
-
-        <div class="vp-listen">
-          <span class="m-caption">Peaks</span>
-          <ModulaSegmented
-            :model-value="voxPeaksMode" :options="PEAKS_MODE_OPTIONS"
-            aria-label="Peaks character" :disabled="!voxPreview || voxPeaks <= 0"
-            @update:model-value="syncPeaksMode"
-          />
-          <span class="m-caption">Speed</span>
-          <ModulaSegmented
-            :model-value="voxSpeed" :options="SPEED_OPTIONS"
-            aria-label="Peaks speed" :disabled="!voxPreview || voxPeaks <= 0"
-            @update:model-value="syncSpeed"
-          />
-        </div>
-        <div class="vp-listen">
-          <span class="m-caption">Ceiling</span>
-          <ModulaSegmented
-            :model-value="voxCeiling" :options="CEILING_OPTIONS"
-            aria-label="Output ceiling" :disabled="!voxPreview"
-            @update:model-value="syncCeiling"
-          />
+            <span class="m-caption vp-subcap">Ceiling</span>
+            <ModulaSegmented
+              :model-value="voxCeiling" :options="CEILING_OPTIONS"
+              aria-label="Output ceiling" :disabled="!voxPreview"
+              @update:model-value="syncCeiling"
+            />
+          </section>
         </div>
         <div v-if="showBench" class="vp-bench-wrap">
           <button
@@ -470,32 +471,38 @@ async function applyAndClose() {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px 14px 16px;
+  gap: 10px;
+  padding: 12px 12px 12px;
   border-radius: 16px;
   background: var(--m-panel);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
 }
-.vp-controls {
+.vp-row {
   display: flex;
-  justify-content: space-around;
-  gap: 8px;
-  padding-top: 4px;
+  gap: 10px;
+  align-items: stretch;
 }
-.vp-col {
+/* A stage: its caption, then every control that sets it. */
+.vp-group {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  min-height: 176px;
+  gap: 5px;
+  padding: 6px 10px 8px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, .16);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35), 0 0 0 1px rgba(255, 255, 255, .04);
 }
+.vp-cap { align-self: stretch; text-align: center; padding-bottom: 4px; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.vp-subcap { align-self: stretch; text-align: center; margin-top: 4px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .06); }
+.vp-switches { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .vp-bars {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px 14px;
 }
-.vp-row2 { padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, .06); }
-.vp-col-sm { min-height: 0; }
 .vp-pair { display: flex; align-items: flex-end; gap: 10px; }
 .vp-listen {
   display: flex;
