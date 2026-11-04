@@ -100,6 +100,18 @@ const copies = pluginCopies((copy, life) => {
     if (!voxBusy.value || !r) return false
     return voxPendingUpKey.value !== r.upKey || upstreamKnobs() !== r.upKnobs
   })
+  /**
+   * The PEAKS readout alone: only what the 1176 stage reads (its knob, mode,
+   * speed and the file's alignment) can change it — a Body or De-ess move
+   * measures after it and leaves it exactly as it is.
+   */
+  const peaksKnobs = () => `${voxPeaks.value}|${voxAlignDb.value}|${voxSpeed.value}|${voxPeaksMode.value}`
+  const voxPendingPeaksKey = ref(null)
+  const voxPeaksStale = computed(() => {
+    const r = voxReadout.value
+    if (!voxBusy.value || !r) return false
+    return voxPendingPeaksKey.value !== r.peaksKey || peaksKnobs() !== r.peaksKnobs
+  })
   /** A measurement is running that the Peaks / Body readouts are already past: De-ess and Parallel's. */
   const voxDownstreamPending = computed(() => voxBusy.value && !voxUpstreamStale.value)
 
@@ -273,6 +285,9 @@ const copies = pluginCopies((copy, life) => {
       const upKnobs = upstreamKnobs()
       const upKey = `${regionKey}|${upKnobs}`
       voxPendingUpKey.value = upKey
+      const pKnobs = peaksKnobs()
+      const peaksKey = `${regionKey}|${pKnobs}`
+      voxPendingPeaksKey.value = peaksKey
       voxBusy.value = true
       try {
         const kp = toKernelParams(currentParams())
@@ -310,7 +325,7 @@ const copies = pluginCopies((copy, life) => {
           for (const k of BODY_PASS_KEYS) pushParam(k, part[k])
           voxReadout.value = {
             peaksDb: r1.peaksDb, peaksBodyDb: r1.peaksBodyDb, bodyDb: r1.bodyDb, peaksRippleDb: r1.peaksRippleDb,
-            upKey, upKnobs,
+            upKey, upKnobs, peaksKey, peaksKnobs: pKnobs,
           }
           if (Number.isFinite(r1.bodyMakeupDb)) kp.bodyMakeupGuess = r1.bodyMakeupDb
           // Moved again while it ran (a drag): the throttle re-runs at once
@@ -328,7 +343,7 @@ const copies = pluginCopies((copy, life) => {
         for (const k of MEASURED) pushParam(k, next[k])
         voxReadout.value = {
           peaksDb: r.peaksDb, peaksBodyDb: r.peaksBodyDb, bodyDb: r.bodyDb, peaksRippleDb: r.peaksRippleDb,
-          upKey, upKnobs,
+          upKey, upKnobs, peaksKey, peaksKnobs: pKnobs,
         }
         solvedFor = key
         if (guide) {
@@ -650,7 +665,7 @@ const copies = pluginCopies((copy, life) => {
       voxPeaksMode, voxCharacter, voxCeiling, syncPeaksMode, syncCharacter, syncCeiling,
       voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
       voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
-      voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxParallelDrive, syncParallelDrive, voxUpstreamStale, voxDownstreamPending,
+      voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxParallelDrive, syncParallelDrive, voxUpstreamStale, voxPeaksStale, voxDownstreamPending,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,
