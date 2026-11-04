@@ -17,7 +17,7 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import { isVoxPressorBenchVisible } from '../../audio/effects/voxPressorBench.js'
 import {
   VOX_DEFAULTS,
-  PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX, bodyPrFor, PEAKS_RIPPLE_WARN_DB, peaksTiming,
+  PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX, PEAKS_RIPPLE_WARN_DB, peaksTiming,
   BODY_GUIDE_EDGE_DB, BODY_GUIDE_WARN_DB,
 } from '../../audio/effects/voxPressorParams.js'
 
@@ -274,7 +274,7 @@ const bodyNote = computed(() => {
   if (voxBody.value <= 0) return 'stage out'
   const r = voxReadout.value
   if (!r) return voxBusy.value ? 'measuring…' : '—'
-  return `PR ${Math.round(bodyPrFor(voxBody.value))} · −${r.bodyDb.toFixed(1)} dB avg`
+  return `−${r.bodyDb.toFixed(1)} avg`
 })
 // The numbers on screen describe the knobs they were measured at; while a
 // newer measurement is in flight they are dimmed rather than blanked.
@@ -286,8 +286,11 @@ const stale = computed(() => voxUpstreamStale.value)
  * PER-STAGE READOUTS, under each stage's knob (owner, November 2026): the
  * stage's GAIN REDUCTION first — the needle's number, held so it can be read
  * (peak for 1 s, then 6 dB/s, text refreshed 5× a second; raw, it changes
- * every frame) — then its measured figures, then "remeasuring…" while a
- * measurement that can change them runs.
+ * every frame) — then, ON THE SAME LINE and in the same type, its measured
+ * figures; under it "remeasuring…" while a measurement that can change them
+ * runs. All in dB, which the needle's face already says, so no unit is
+ * printed: the Peaks line has to fit its column. ⚠ NEVER A KNOB'S OWN VALUE (owner, November 2026: no PR, mix or
+ * compressor name) — the knob already shows it.
  *
  * MINIMAL, as Body's and Parallel's: Peaks is what it took off the peaks and
  * what it cost the voice; the ripple only appears when it warns, and the guide
@@ -312,19 +315,17 @@ const grTimer = setInterval(() => {
   }
 }, GR_TICK_MS)
 onBeforeUnmount(() => clearInterval(grTimer))
-const grText = k => (state.isPlaying && voxPreview.value ? `GR −${grShown[k].toFixed(1)} dB` : 'GR —')
+const grText = k => (state.isPlaying && voxPreview.value ? `GR −${grShown[k].toFixed(1)}` : 'GR —')
 
 const peaksLine = computed(() => {
   if (voxPeaks.value <= 0) return 'stage out'
   const r = voxReadout.value
   if (!r) return voxBusy.value ? 'measuring…' : '—'
-  return `−${r.peaksDb.toFixed(1)} dB peaks · −${r.peaksBodyDb.toFixed(1)} dB body`
+  return `−${r.peaksDb.toFixed(1)} peaks · −${r.peaksBodyDb.toFixed(1)} body`
 })
-const parallelLine = computed(() => {
-  if (voxParallel.value <= 0) return 'stage out'
-  const comp = voxParallelComp.value === 'la2a' ? 'LA-2A' : '1176'
-  return `mix ${formatPercent(voxParallel.value)} · ${comp} copy`
-})
+// Parallel has no measured figure of its own beyond its GR: the knobs above
+// it already say its mix and compressor, and the readouts never repeat a knob.
+const parallelLine = computed(() => (voxParallel.value <= 0 ? 'stage out' : ''))
 // Peaks and Body read the measurement upstream of Parallel; Parallel is
 // re-solved by every measurement, so any one in flight makes it stale.
 const parallelStale = computed(() => voxBusy.value && voxPreview.value)
@@ -425,8 +426,9 @@ async function applyAndClose() {
             @update:model-value="onPeaks"
           />
           <div class="vp-readout" :class="{ 'is-stale': readouts.peaks.stale }" aria-live="polite">
-            <span class="vp-gr">{{ readouts.peaks.gr }}</span>
-            <span class="vp-status-line" :class="{ 'is-warn': readouts.peaks.warn, 'is-over': readouts.peaks.over }">{{ readouts.peaks.line }}</span>
+            <span class="vp-status-line">
+              <span class="vp-gr">{{ readouts.peaks.gr }}</span><template v-if="readouts.peaks.line"><span aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.peaks.warn, 'is-over': readouts.peaks.over }">{{ readouts.peaks.line }}</span></template>
+            </span>
             <span v-if="readouts.peaks.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
             <span v-else-if="readouts.peaks.note" class="vp-status-line is-warn">{{ readouts.peaks.note }}</span>
             <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
@@ -472,8 +474,9 @@ async function applyAndClose() {
             @update:model-value="onBody"
           />
           <div class="vp-readout" :class="{ 'is-stale': readouts.body.stale }" aria-live="polite">
-            <span class="vp-gr">{{ readouts.body.gr }}</span>
-            <span class="vp-status-line" :class="{ 'is-warn': readouts.body.warn, 'is-over': readouts.body.over }">{{ readouts.body.line }}</span>
+            <span class="vp-status-line">
+              <span class="vp-gr">{{ readouts.body.gr }}</span><template v-if="readouts.body.line"><span aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.body.warn, 'is-over': readouts.body.over }">{{ readouts.body.line }}</span></template>
+            </span>
             <span v-if="readouts.body.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
             <span v-else-if="readouts.body.note" class="vp-status-line is-warn">{{ readouts.body.note }}</span>
             <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
@@ -520,8 +523,9 @@ async function applyAndClose() {
             </div>
           </div>
           <div class="vp-readout" :class="{ 'is-stale': readouts.parallel.stale }" aria-live="polite">
-            <span class="vp-gr">{{ readouts.parallel.gr }}</span>
-            <span class="vp-status-line" :class="{ 'is-warn': readouts.parallel.warn, 'is-over': readouts.parallel.over }">{{ readouts.parallel.line }}</span>
+            <span class="vp-status-line">
+              <span class="vp-gr">{{ readouts.parallel.gr }}</span><template v-if="readouts.parallel.line"><span aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.parallel.warn, 'is-over': readouts.parallel.over }">{{ readouts.parallel.line }}</span></template>
+            </span>
             <span v-if="readouts.parallel.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
             <span v-else-if="readouts.parallel.note" class="vp-status-line is-warn">{{ readouts.parallel.note }}</span>
             <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
@@ -661,7 +665,7 @@ async function applyAndClose() {
   --vp-cap: #555b64;
   --vp-note: #3a3f47;
 }
-.vp-top { display: grid; grid-template-columns: 170px minmax(0, 1fr) 170px; align-items: start; gap: 14px; }
+.vp-top { display: grid; grid-template-columns: 196px minmax(0, 1fr) 196px; align-items: start; gap: 14px; }
 .vp-bottom { display: grid; grid-template-columns: 188px minmax(0, 1fr) 228px; gap: 14px; align-items: start; }
 .vp-middle { display: grid; grid-template-columns: 146px 146px; justify-content: center; gap: 12px; align-items: start; }
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
@@ -709,14 +713,14 @@ async function applyAndClose() {
 
 /* The selected stage's readout under the METER drum. */
 .vp-readout { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.vp-readout.is-stale .vp-status-line:not(.vp-remeasure), .vp-readout.is-stale .vp-gr { opacity: .7; }
-.vp-gr { font: 600 11px/1.1 var(--m-font-mono); color: var(--vp-title); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vp-readout.is-stale .vp-status-line:not(.vp-remeasure) { opacity: .7; }
+.vp-gr { font-variant-numeric: tabular-nums; }
 .vp-remeasure { color: var(--vp-cap); }
 .vp-status-line { font: 500 9px/1.1 var(--m-font-mono); color: var(--vp-note); white-space: nowrap; }
-.vp-status-line.is-warn { color: #f0b429; }
-.vp.is-light .vp-status-line.is-warn { color: #b0640f; }
-.vp-status-line.is-over { color: #ff6a5a; }
-.vp.is-light .vp-status-line.is-over { color: #c0341f; }
+.vp-status-line .is-warn, .vp-status-line.is-warn { color: #f0b429; }
+.vp.is-light .vp-status-line .is-warn, .vp.is-light .vp-status-line.is-warn { color: #b0640f; }
+.vp-status-line .is-over { color: #ff6a5a; }
+.vp.is-light .vp-status-line .is-over { color: #c0341f; }
 .vp-pulse {
   display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
   background: #e8a33d; box-shadow: 0 0 6px #e8a33d; vertical-align: 0;
