@@ -540,7 +540,9 @@ function ariaText(bar) {
 
     <div v-else-if="modulaH && (showReadout || label)" class="flex flex-row items-center gap-[8px]">
       <span v-if="showReadout" class="lm-well" :style="{ color: clipped ? '#ff9d90' : undefined }">{{ readout }}</span>
-      <span v-if="label" style="font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd">{{ label }}</span>
+      <!-- A fixed width, so an IN and an OUT row stacked together keep their
+           ladders in line: the caption trails, and IN is narrower than OUT. -->
+      <span v-if="label" style="font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd;min-width:26px">{{ label }}</span>
     </div>
 
     <div

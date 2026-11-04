@@ -118,8 +118,8 @@ const formatCeiling = i => CEILING_OPTIONS[Math.round(i)]?.label ?? ''
 const onSpeedIndex = i => onSpeed(SPEED_OPTIONS[Math.round(i)].value)
 const onCeilingIndex = i => syncCeiling(CEILING_OPTIONS[Math.round(i)].value)
 
-/** The IN / OUT ladders' length, px (the Output column is 196 wide). */
-const IO_METER_LEN = 112
+/** The IN / OUT ladders' length, px: a row is ladder + readout + caption, ~207 px, in a 228 px column's well. */
+const IO_METER_LEN = 104
 
 function formatPercent(v) {
   return v > 0 ? `${Math.round(v)} %` : 'OFF'
@@ -465,7 +465,7 @@ async function applyAndClose() {
             <div class="vp-ctl">
               <span class="vp-cap">Band</span>
               <ModulaFillSlider
-                class="vp-band" orientation="horizontal" :length="150"
+                class="vp-band" orientation="horizontal" :length="146"
                 :model-value="voxDeEssSplit" :min="0" :max="100" :step="1" :default-value="VOX_DEFAULTS.deEssSplit"
                 label="" :ends="['WIDE', 'SPLIT']" flat :format-value="formatSplit"
                 :color="ACCENT" :disabled="!voxPreview || voxDeEss <= 0"
@@ -575,8 +575,8 @@ async function applyAndClose() {
   --vp-note: #3a3f47;
 }
 .vp-top { display: grid; grid-template-columns: 170px minmax(0, 1fr) 170px; align-items: start; gap: 14px; }
-.vp-bottom { display: grid; grid-template-columns: 196px minmax(0, 1fr) 196px; gap: 14px; align-items: start; }
-.vp-middle { display: grid; grid-template-columns: 150px 150px; justify-content: center; gap: 12px; align-items: start; }
+.vp-bottom { display: grid; grid-template-columns: 188px minmax(0, 1fr) 228px; gap: 14px; align-items: start; }
+.vp-middle { display: grid; grid-template-columns: 146px 146px; justify-content: center; gap: 12px; align-items: start; }
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
 .vp-centre { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 6px; min-width: 0; }
 .vp-title-row { height: 12px; display: flex; align-items: center; justify-content: center; }
@@ -587,11 +587,13 @@ async function applyAndClose() {
 .vp-ctl-gap { margin-top: 8px; }
 .vp-knob-row { height: 84px; display: flex; align-items: center; justify-content: center; gap: 18px; }
 .vp-out-head { flex-direction: column; gap: 7px; }
-.vp-io { align-self: stretch; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-/* The ladders' IN / OUT captions are inline steel-grey, which washes out on the cream panel. */
-.vp.is-light .vp-io :deep(span[style*="aeb6bd"]),
-.vp.is-light .vp-io :deep(span[style*="174, 182, 189"]) { color: var(--vp-cap) !important; }
-.vp-band { width: 150px; }
+.vp-io {
+  align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 9px 10px; border-radius: 9px; background: #1a1c20;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .8), 0 1px 0 rgba(255, 255, 255, .05);
+}
+.vp.is-light .vp-io { box-shadow: inset 0 2px 5px rgba(0, 0, 0, .8), 0 1px 0 rgba(255, 255, 255, .6); }
+.vp-band { width: 146px; }
 /* The band slider's channel: dark on steel, a pressed cream groove on the light panel. */
 .vp.is-light .vp-band :deep(.m-fs-hchan) {
   background: linear-gradient(180deg, #b9b3a8, #cfc9bf);
