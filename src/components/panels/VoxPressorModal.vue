@@ -127,9 +127,12 @@ function formatPercent(v) {
 
 // The 1176's SPEED (`PEAKS_SPEEDS`): AUTO follows the voice's pitch.
 const SPEED_OPTIONS = [
-  { value: 'gentle', label: 'GENTLE', title: 'Slow attack and release: the cleanest, catches the least' },
-  { value: 'normal', label: 'NORMAL', title: 'Medium attack and release' },
-  { value: 'fast', label: 'FAST', title: 'Fast attack and release: grabs every onset; can ripple on low voices' },
+  // Labels one step faster than the ids (owner, November 2026): every 1176
+  // attack is fast, so the slowest setting reads NORMAL. Ids, params and the
+  // kernel's PEAKS_SPEEDS keep gentle / normal / fast.
+  { value: 'gentle', label: 'NORMAL', title: 'The slowest attack and release here (still fast for a compressor): the cleanest, catches the least' },
+  { value: 'normal', label: 'FAST', title: 'Faster attack and release' },
+  { value: 'fast', label: 'FASTER', title: 'The fastest attack and release: grabs every onset; can ripple on low voices' },
   { value: 'auto', label: 'AUTO', title: 'Release follows the voice: slow enough for its pitch that the gain does not ripple on each cycle' },
 ]
 
@@ -147,7 +150,7 @@ const CHARACTER_OPTIONS = [
 
 // OUTPUT CEILING: where the output peak lands.
 const CEILING_OPTIONS = [
-  { value: 'source', label: 'SRC', title: "The output peak stays at the source's own peak" },
+  { value: 'source', label: 'ORIG', title: "The output peak stays at the original's own peak" },
   { value: '-1', label: '−1 dB', title: 'The output peak lands at −1 dBFS (podcast / streaming)' },
   { value: '-3', label: '−3 dB', title: 'The output peak lands at −3 dBFS (ACX)' },
 ]
@@ -235,7 +238,7 @@ const rippleNote = computed(() => {
   const r = voxReadout.value
   if (!r || voxPeaks.value <= 0 || !Number.isFinite(r.peaksRippleDb)) return ''
   const v = `ripple ${r.peaksRippleDb.toFixed(0)} dB`
-  return rippleWarn.value ? `${v} · distorting${voxSpeed.value === 'gentle' ? '' : ', try GENTLE'}` : v
+  return rippleWarn.value ? `${v} · distorting${voxSpeed.value === 'gentle' ? '' : ', try NORMAL'}` : v
 })
 
 const bodyNote = computed(() => {
