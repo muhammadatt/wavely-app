@@ -78,9 +78,9 @@ const knobColor = computed(() => (light.value ? '#bf782a' : ACCENT))
  * you are reading.
  */
 const METER_OPTIONS = [
-  { value: 'peaks', label: 'PEAKS', title: "The 1176's gain reduction" },
+  { value: 'peaks', label: 'PEAK', title: "The 1176's gain reduction" },
   { value: 'body', label: 'BODY', title: "The LA-2A's gain reduction" },
-  { value: 'parallel', label: 'PARALLEL', title: "The parallel copy's gain reduction (the wet side)" },
+  { value: 'parallel', label: 'DENSITY', title: "The parallel copy's gain reduction" },
 ]
 const meter = ref('peaks')
 // The effect reports reduction as NEGATIVE dB (DynamicsCompressorNode's
@@ -498,27 +498,60 @@ async function applyAndClose() {
         </section>
       </div>
 
-      <!-- ── BOTTOM (layout B): Parallel | De-ess · Detail | Output ─────── -->
+      <!-- ── BOTTOM (layout B): De-ess · Detail | Parallel | Output ─────── -->
       <div class="vp-bottom">
-        <section class="vp-col" aria-label="Parallel" @pointerdown="meter = 'parallel'" @focusin="meter = 'parallel'">
+        <div class="vp-middle">
+          <section class="vp-col" aria-label="De-ess">
+            <div class="vp-title-row"><span class="vp-title">De-ess</span></div>
+            <div class="vp-knob-row">
+              <ModulaKnob
+                variant="led" :size="70"
+                :model-value="voxDeEss" :min="0" :max="100" :step="1"
+                :default-value="VOX_DEFAULTS.deEss"
+                aria-label="De-ess" :color="knobColor" :format-value="formatKnob" :disabled="!voxPreview"
+                title="The HF Softener's Amount, after the compressors: takes down the sibilance they brought up. 0 takes the stage out. Double-click to reset"
+                @update:model-value="syncDeEss"
+              />
+            </div>
+            <div class="vp-ctl">
+              <span class="vp-cap">Band</span>
+              <ModulaFillSlider
+                class="vp-band" orientation="horizontal" :length="104"
+                :model-value="voxDeEssSplit" :min="0" :max="100" :step="1" :default-value="VOX_DEFAULTS.deEssSplit"
+                label="" :ends="['WIDE', 'SPLIT']" flat :format-value="formatSplit"
+                :color="ACCENT" :disabled="!voxPreview || voxDeEss <= 0"
+                aria-label="De-ess split between wide band and split band"
+                title="Where the De-ess Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
+                @update:model-value="syncDeEssSplit"
+              />
+            </div>
+          </section>
+          <section class="vp-col" aria-label="Detail">
+            <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
+            <div class="vp-knob-row">
+              <ModulaKnob
+                variant="led" :size="70"
+                :model-value="voxDensity" :min="0" :max="100" :step="1"
+                :default-value="VOX_DEFAULTS.density"
+                aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
+                title="Density: the Cambridge Inflator's Effect, anchored at the source peak — lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
+                @update:model-value="syncDensity"
+              />
+            </div>
+          </section>
+        </div>
+
+        <section class="vp-col" aria-label="Density" @pointerdown="meter = 'parallel'" @focusin="meter = 'parallel'">
           <div class="vp-title-row">
             <button
               type="button" class="vp-title" :class="{ 'is-lit': meter === 'parallel' }" :aria-pressed="String(meter === 'parallel')"
               title="Show this stage on the GR meter" @click="meter = 'parallel'"
-            >Parallel</button>
+            >Density</button>
           </div>
           <div class="vp-knob-row">
-            <ModulaKnob
-              variant="led" :size="84"
-              :model-value="voxParallel" :min="0" :max="100" :step="1"
-              :default-value="VOX_DEFAULTS.parallel"
-              aria-label="Parallel mix" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
-              title="Parallel compression: a heavily compressed copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
-              @update:model-value="onParallel"
-            />
-            <div class="vp-ctl">
+              <div class="vp-ctl">
               <ModulaKnob
-                variant="plain" :size="44"
+                variant="ring" :size="65"
                 :model-value="voxParallelDrive" :min="0" :max="PARALLEL_DRIVE_MAX" :step="0.5"
                 :default-value="VOX_DEFAULTS.parallelDrive"
                 aria-label="Parallel drive" :color="knobColor" :format-value="formatDrive" :disabled="!voxPreview || voxParallel <= 0"
@@ -527,6 +560,19 @@ async function applyAndClose() {
               />
               <span class="vp-cap">Drive</span>
             </div>
+
+            <div class="vp-ctl">
+            <ModulaKnob
+              variant="led" :size="70"
+              :model-value="voxParallel" :min="0" :max="100" :step="1"
+              :default-value="VOX_DEFAULTS.parallel"
+              aria-label="Parallel mix" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
+              title="Parallel compression: a heavily compressed copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
+              @update:model-value="onParallel"
+            />
+              <span class="vp-cap">Mix</span>
+            </div>
+
           </div>
           <div class="vp-readout" :class="{ 'is-stale': readouts.parallel.stale }" aria-live="polite">
             <span class="vp-status-line">
@@ -545,47 +591,6 @@ async function applyAndClose() {
             />
           </div>
         </section>
-
-        <div class="vp-middle">
-          <section class="vp-col" aria-label="De-ess">
-            <div class="vp-title-row"><span class="vp-title">De-ess</span></div>
-            <div class="vp-knob-row">
-              <ModulaKnob
-                variant="led" :size="84"
-                :model-value="voxDeEss" :min="0" :max="100" :step="1"
-                :default-value="VOX_DEFAULTS.deEss"
-                aria-label="De-ess" :color="knobColor" :format-value="formatKnob" :disabled="!voxPreview"
-                title="The HF Softener's Amount, after the compressors: takes down the sibilance they brought up. 0 takes the stage out. Double-click to reset"
-                @update:model-value="syncDeEss"
-              />
-            </div>
-            <div class="vp-ctl">
-              <span class="vp-cap">Band</span>
-              <ModulaFillSlider
-                class="vp-band" orientation="horizontal" :length="146"
-                :model-value="voxDeEssSplit" :min="0" :max="100" :step="1" :default-value="VOX_DEFAULTS.deEssSplit"
-                label="" :ends="['WIDE', 'SPLIT']" flat :format-value="formatSplit"
-                :color="ACCENT" :disabled="!voxPreview || voxDeEss <= 0"
-                aria-label="De-ess split between wide band and split band"
-                title="Where the De-ess Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
-                @update:model-value="syncDeEssSplit"
-              />
-            </div>
-          </section>
-          <section class="vp-col" aria-label="Detail">
-            <div class="vp-title-row"><span class="vp-title">Detail</span></div>
-            <div class="vp-knob-row">
-              <ModulaKnob
-                variant="led" :size="84"
-                :model-value="voxDensity" :min="0" :max="100" :step="1"
-                :default-value="VOX_DEFAULTS.density"
-                aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
-                title="Density: the Cambridge Inflator's Effect, anchored at the source peak — lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
-                @update:model-value="syncDensity"
-              />
-            </div>
-          </section>
-        </div>
 
         <section class="vp-col" aria-label="Output">
           <div class="vp-title-row"></div>
@@ -672,8 +677,8 @@ async function applyAndClose() {
   --vp-note: #3a3f47;
 }
 .vp-top { display: grid; grid-template-columns: 196px minmax(0, 1fr) 196px; align-items: start; gap: 14px; }
-.vp-bottom { display: grid; grid-template-columns: 188px minmax(0, 1fr) 228px; gap: 14px; align-items: start; }
-.vp-middle { display: grid; grid-template-columns: 146px 146px; justify-content: center; gap: 12px; align-items: start; }
+.vp-bottom { display: grid; grid-template-columns: 228px minmax(0, 1fr) 228px; gap: 14px; align-items: start; }
+.vp-middle { display: grid; grid-template-columns: 104px 104px; justify-content: center; gap: 10px; align-items: start; }
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
 .vp-centre { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 6px; min-width: 0; }
 .vp-title-row { height: 12px; display: flex; align-items: center; justify-content: center; }
