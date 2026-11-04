@@ -127,13 +127,13 @@ function formatPercent(v) {
 
 // The 1176's SPEED (`PEAKS_SPEEDS`): AUTO follows the voice's pitch.
 const SPEED_OPTIONS = [
+  { value: 'auto', label: 'AUTO', title: 'Release follows the voice: slow enough for its pitch that the gain does not ripple on each cycle' },
   // Labels one step faster than the ids (owner, November 2026): every 1176
   // attack is fast, so the slowest setting reads NORMAL. Ids, params and the
   // kernel's PEAKS_SPEEDS keep gentle / normal / fast.
   { value: 'gentle', label: 'NORMAL', title: 'The slowest attack and release here (still fast for a compressor): the cleanest, catches the least' },
   { value: 'normal', label: 'FAST', title: 'Faster attack and release' },
   { value: 'fast', label: 'FASTER', title: 'The fastest attack and release: grabs every onset; can ripple on low voices' },
-  { value: 'auto', label: 'AUTO', title: 'Release follows the voice: slow enough for its pitch that the gain does not ripple on each cycle' },
 ]
 
 // PEAKS KNEE: the 1176's ratio button (`PEAKS_MODES`), drawn as its curve.
