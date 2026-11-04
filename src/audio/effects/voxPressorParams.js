@@ -159,10 +159,10 @@ export const VOX_DEFAULTS = {
   listen: 'off',
   /**
    * BENCH: the LA-2A's lookahead, ms (LA Vintage 2A's Lookahead control,
-   * `LOOKAHEAD_MAX_MS`). 5 ships (owner's A/B, November 2026; a hardware
-   * LA-2A has none). It moves the latency.
+   * `LOOKAHEAD_MAX_MS`). 10 ships (owner, November 2026; 5 before; a
+   * hardware LA-2A has none). It moves the latency.
    */
-  bodyLookaheadMs: 5,
+  bodyLookaheadMs: 10,
   /**
    * BENCH: the Parallel stage's compressor, 'la2a' (ships: owner's A/B,
    * November 2026) | '1176' — everything else shared (`PARALLEL_COMPS`).

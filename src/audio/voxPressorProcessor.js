@@ -201,10 +201,12 @@ export function peaksTiming(speed, voiceF0Hz) {
  *   PEAKS there. Drive harder and the copy delivers LESS (In 50 / 60 / 70 at
  *   Mix 0.5: +1.11 / +0.78 / +0.45 on Messy) — the onsets the attack lets
  *   through set the 99.9th percentile the makeup holds.
- * - attack 6 (fast) — attack 4 gave ~0.2 dB less.
- * - release VOICE-ADAPTIVE, the Peaks stage's AUTO rule (`peaksTiming`), never
- *   a fixed fast release: that ripples a low voice (see SPEED below). It costs
- *   nothing here — auto against release 5 differs by ≤ 0.04 dB on both clips.
+ * - TIMING FOLLOWS THE PEAKS STAGE'S ATTACK / RELEASE (`peaksTiming` on
+ *   `peaksSpeed`; owner, November 2026): one setter for both 1176s. It was
+ *   pinned first — attack 6 (attack 4 gave ~0.2 dB less density) and the AUTO
+ *   release whatever Peaks was set to — so AUTO now runs the copy at attack 4.
+ *   AUTO's release is voice-adaptive, never a fixed fast one: that ripples a
+ *   low voice (see SPEED below); against release 5 it differed by ≤ 0.04 dB.
  *   Wet-path ripple (the Peaks readout's measure, on the copy alone) −18 to
  *   −20 dBc at In 40; the blend carries it at the Mix.
  * - fetDrive 0, as Peaks: a clean copy. Ratio 4 sits at the moving
@@ -215,13 +217,11 @@ export function peaksTiming(speed, voiceF0Hz) {
  *   Figures above are for the plain detector; the emphasis costs ~0.1 dB.
  */
 export const PARALLEL_INPUT_KNOB = 40
-export const PARALLEL_ATTACK = 6
 export const PARALLEL_PATCH = Object.freeze({
   ratio: '4',
   fetDrive: 0,
   scHpfHz: 0,
   inputDrive: PARALLEL_INPUT_KNOB,
-  attack: PARALLEL_ATTACK,
 })
 
 /**
@@ -247,7 +247,8 @@ export function parallelDriveDb(p) {
 export function parallelFetParams(p) {
   return {
     ...PARALLEL_PATCH,
-    release: peaksTiming('auto', p.voiceF0Hz).release,
+    // The Peaks stage's attack / release: one setter for both 1176s.
+    ...peaksTiming(p.peaksSpeed, p.voiceF0Hz),
     inputAlignDb: finite(p.parallelAlignDb, 0, -60, 60) + parallelDriveDb(p),
     mix: finite(p.parallelMix, 0, 0, 1),
     outputGainDb: finite(p.parallelMakeupDb, 0, -48, 48),

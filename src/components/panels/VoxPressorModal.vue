@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useVoxPressor } from '../../composables/useVoxPressor.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
@@ -268,11 +268,10 @@ const rippleNote = computed(() => {
 /** A reduction, dB ≥ 0, as the readouts print it: −x.x, and 0.0 rather than "−0.0". */
 const cut = v => (Math.abs(v) < 0.05 ? '0.0' : `−${Math.abs(v).toFixed(1)}`)
 
-const bodyNote = computed(() => {
+const bodyLine = computed(() => {
   if (voxBody.value <= 0) return 'stage out'
   const r = voxReadout.value
-  if (!r) return voxBusy.value ? 'measuring…' : '—'
-  return `${cut(r.bodyDb)} avg`
+  return r ? `${cut(r.bodyDb)} leveling` : ''
 })
 // The numbers on screen describe the knobs they were measured at; while a
 // newer measurement is in flight they are dimmed rather than blanked.
@@ -281,47 +280,21 @@ const bodyNote = computed(() => {
 const stale = computed(() => voxUpstreamStale.value)
 
 /**
- * PER-STAGE READOUTS, under each stage's knob (owner, November 2026): the
- * stage's GAIN REDUCTION first — the needle's number, held so it can be read
- * (peak for 1 s, then 6 dB/s, text refreshed 5× a second; raw, it changes
- * every frame) — then, ON THE SAME LINE and in the same type, its measured
- * figures; under it "remeasuring…" while a measurement that can change them
- * runs. All in dB, which the needle's face already says, so no unit is
- * printed: the Peaks line has to fit its column. ⚠ NEVER A KNOB'S OWN VALUE (owner, November 2026: no PR, mix or
- * compressor name) — the knob already shows it.
- *
- * MINIMAL, as Body's and Parallel's: Peaks is what it took off the peaks and
- * what it cost the voice; the ripple only appears when it warns, and the guide
- * is on the knob's ring.
+ * THE READOUT UNDER THE METER DRUM, for the stage the needle reads (owner,
+ * November 2026). Line 1: what the stage did, measured — never the GR (the
+ * needle above it shows that) and never a knob's own value (the knob shows
+ * it). All dB, which the meter's face already says, so no unit. Line 2: the
+ * measurement in flight ("measuring…" before the first figures, "remeasuring…"
+ * after, the figures dimmed meanwhile), else the stage's warning, else blank
+ * so the panel never jumps.
+ *   Peaks     −x peaks · −y voice   (what it took off the loudest peaks; what it cost the voice)
+ *   Body      −x leveling           (the LA-2A's average reduction on the voice)
+ *   Parallel  +x makeup             (the copy's measured wet gain)
  */
-const GR_HOLD_MS = 1000
-const GR_FALL_DB_PER_S = 6
-const GR_TICK_MS = 200
-const grShown = reactive({ peaks: 0, body: 0, parallel: 0 })
-const grMax = { peaks: 0, body: 0, parallel: 0 }
-const grAt = { peaks: 0, body: 0, parallel: 0 }
-watch(voxPeaksGr, v => { grMax.peaks = Math.max(grMax.peaks, Math.abs(v)) })
-watch(voxBodyGr, v => { grMax.body = Math.max(grMax.body, Math.abs(v)) })
-watch(voxParallelGr, v => { grMax.parallel = Math.max(grMax.parallel, Math.abs(v)) })
-const grTimer = setInterval(() => {
-  const now = performance.now()
-  for (const k of Object.keys(grShown)) {
-    const m = grMax[k]
-    grMax[k] = 0
-    if (m >= grShown[k]) { grShown[k] = m; grAt[k] = now; continue }
-    if (now - grAt[k] > GR_HOLD_MS) grShown[k] = Math.max(m, grShown[k] - GR_FALL_DB_PER_S * GR_TICK_MS / 1000)
-  }
-}, GR_TICK_MS)
-onBeforeUnmount(() => clearInterval(grTimer))
-// Stopped, the GR is left off the line rather than printed as "GR —" (it read as
-// "GR — · …", two dashes in a row): the measured figures stand alone.
-const grText = k => (state.isPlaying && voxPreview.value ? `GR ${cut(grShown[k])}` : '')
-
 const peaksLine = computed(() => {
   if (voxPeaks.value <= 0) return 'stage out'
   const r = voxReadout.value
-  if (!r) return voxBusy.value ? 'measuring…' : '—'
-  return `${cut(r.peaksDb)} peaks · ${cut(r.peaksBodyDb)} body`
+  return r ? `${cut(r.peaksDb)} peaks · ${cut(r.peaksBodyDb)} voice` : ''
 })
 // Parallel: the copy's measured MAKEUP (its wet gain, solved on the blend —
 // mostly Drive's; Mix moves it a few tenths). Its mix and compressor are on
@@ -329,25 +302,35 @@ const peaksLine = computed(() => {
 const parallelLine = computed(() => {
   if (voxParallel.value <= 0) return 'stage out'
   const m = voxMeasured.value.parallelMakeupDb
-  if (!Number.isFinite(m)) return voxBusy.value ? 'measuring…' : '—'
+  if (!Number.isFinite(m)) return ''
   return `${m >= 0 ? '+' : '−'}${Math.abs(m).toFixed(1)} makeup`
 })
 // Peaks and Body read the measurement upstream of Parallel; Parallel is
 // re-solved by every measurement, so any one in flight makes it stale.
 const parallelStale = computed(() => voxBusy.value && voxPreview.value)
+// The Attack / release setter times BOTH 1176s — the Peaks stage and the
+// parallel copy when it is the 1176 — so it is live while either is in.
+const speedInUse = computed(() => voxPeaks.value > 0 || (voxParallel.value > 0 && voxParallelComp.value === '1176'))
 const readouts = computed(() => ({
   peaks: {
-    gr: grText('peaks'), line: peaksLine.value, stale: voxPeaksStale.value,
+    line: peaksLine.value, stale: voxPeaksStale.value,
     warn: peaksTouch.value, over: peaksWarn.value,
-    // The ripple takes the third line when it warns and nothing is remeasuring.
+    // The ripple takes the second line when it warns and nothing is measuring.
     note: rippleWarn.value ? rippleNote.value : '',
   },
-  body: { gr: grText('body'), line: bodyNote.value, stale: stale.value, warn: bodyEdge.value, over: bodyOver.value },
-  parallel: { gr: grText('parallel'), line: parallelLine.value, stale: parallelStale.value },
+  body: { line: bodyLine.value, stale: stale.value, warn: bodyEdge.value, over: bodyOver.value },
+  parallel: { line: parallelLine.value, stale: parallelStale.value },
 }))
 
 /** The readout under the drum: the stage the needle reads. */
-const readout = computed(() => readouts.value[meter.value] ?? readouts.value.peaks)
+const readout = computed(() => {
+  const r = readouts.value[meter.value] ?? readouts.value.peaks
+  // A stage that is out has nothing being measured; one with no figures yet
+  // says "measuring…", one with figures "remeasuring…".
+  const out = r.line === 'stage out'
+  const busy = !out && (r.stale || (!r.line && voxBusy.value))
+  return { ...r, line: r.line || (busy ? '' : '—'), status: busy ? (r.line ? 'remeasuring…' : 'measuring…') : '' }
+})
 
 const measuredNote = computed(() => {
   const m = voxMeasured.value
@@ -437,7 +420,7 @@ async function applyAndClose() {
           <FoldedLcd
             class="vp-fold vp-ctl-gap" name="Attack / release" label-position="above" stacked
             :model-value="speedIndex" :min="0" :max="SPEED_OPTIONS.length - 1" :step="1"
-            :format="formatSpeed" :disabled="!voxPreview || voxPeaks <= 0"
+            :format="formatSpeed" :disabled="!voxPreview || !speedInUse"
             @update:model-value="onSpeedIndex"
           />
           <div class="vp-ctl">
@@ -461,9 +444,9 @@ async function applyAndClose() {
                figures on the same line, then "remeasuring…" or its warning. -->
           <div class="vp-readout" :class="{ 'is-stale': readout.stale }" aria-live="polite">
             <span class="vp-status-line">
-              <span v-if="readout.gr" class="vp-gr">{{ readout.gr }}</span><template v-if="readout.line"><span v-if="readout.gr" aria-hidden="true"> · </span><span :class="{ 'is-warn': readout.warn, 'is-over': readout.over }">{{ readout.line }}</span></template>
+              <span v-if="readout.line" :class="{ 'is-warn': readout.warn, 'is-over': readout.over }">{{ readout.line }}</span><template v-else>&nbsp;</template>
             </span>
-            <span v-if="readout.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
+            <span v-if="readout.status" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>{{ readout.status }}</span>
             <span v-else-if="readout.note" class="vp-status-line is-warn">{{ readout.note }}</span>
             <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
           </div>
@@ -755,7 +738,7 @@ async function applyAndClose() {
 /* The selected stage's readout under the METER drum. */
 .vp-readout { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .vp-readout.is-stale .vp-status-line:not(.vp-remeasure) { opacity: .7; }
-.vp-gr { font-variant-numeric: tabular-nums; }
+.vp-status-line { font-variant-numeric: tabular-nums; }
 .vp-remeasure { color: var(--vp-cap); }
 .vp-status-line { font: 500 9px/1.1 var(--m-font-mono); color: var(--vp-note); white-space: nowrap; }
 .vp-status-line .is-warn, .vp-status-line.is-warn { color: #f0b429; }
