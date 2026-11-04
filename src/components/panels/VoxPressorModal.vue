@@ -492,7 +492,11 @@ async function applyAndClose() {
             <span v-else-if="readouts.body.note" class="vp-status-line is-warn">{{ readouts.body.note }}</span>
             <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
           </div>
-          <div class="vp-ctl vp-ctl-gap">
+          <!-- Stands in for Peaks' Attack / Release fold, so WARM / CLEAN sits level
+               with the Knee keys and both columns end on one line (the two
+               do not fit side by side: ~253 px in a 196 px column). -->
+          <div class="vp-ctl-gap vp-fold-spacer" aria-hidden="true"></div>
+          <div class="vp-ctl">
             <span class="vp-cap" aria-hidden="true">&nbsp;</span>
             <VoxSlideSwitch
               :model-value="voxCharacter" :options="CHARACTER_OPTIONS" :color="ACCENT" :surface="surface"
@@ -694,6 +698,8 @@ async function applyAndClose() {
 .vp-cap { font: 500 9px/1 var(--m-font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--vp-cap); white-space: nowrap; }
 .vp-ctl { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 7px; }
 .vp-ctl-gap { margin-top: 8px; }
+/* The closed Attack / Release fold's height (FoldedLcd, 40 px). */
+.vp-fold-spacer { height: 40px; flex: none; }
 .vp-knob-row { height: 84px; display: flex; align-items: center; justify-content: center; gap: 18px; }
 /* Two captioned knobs of different sizes side by side (Drive / Mix): captions on one baseline. */
 .vp-knob-row:has(> .vp-ctl + .vp-ctl) { align-items: flex-end; }
