@@ -13,10 +13,10 @@ import VoxNeedleMeter from './voxpressor/VoxNeedleMeter.vue'
 import FoldedLcd from '../hardware/FoldedLcd.vue'
 import VoxKneeKeys from './voxpressor/VoxKneeKeys.vue'
 import VoxSlideSwitch from './voxpressor/VoxSlideSwitch.vue'
-import VoxIoMeters from './voxpressor/VoxIoMeters.vue'
+import LevelMeter from '../meters/LevelMeter.vue'
 import { isVoxPressorBenchVisible } from '../../audio/effects/voxPressorBench.js'
 import {
-  VOX_DEFAULTS, outputCeilingDbOf,
+  VOX_DEFAULTS,
   PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX, bodyPrFor, PEAKS_RIPPLE_WARN_DB, peaksTiming,
 } from '../../audio/effects/voxPressorParams.js'
 
@@ -27,7 +27,7 @@ const {
   voxPeaksMode, voxCharacter, voxCeiling, syncPeaksMode, syncCharacter, syncCeiling,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
-  voxPeaksGuide, voxUpstreamStale, voxDownstreamPending,
+  voxPeaksGuide, voxUpstreamStale,
   voxParallelDrive, syncParallelDrive,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
@@ -118,13 +118,8 @@ const formatCeiling = i => CEILING_OPTIONS[Math.round(i)]?.label ?? ''
 const onSpeedIndex = i => onSpeed(SPEED_OPTIONS[Math.round(i)].value)
 const onCeilingIndex = i => syncCeiling(CEILING_OPTIONS[Math.round(i)].value)
 
-/** Where the output peak lands, dBFS: the ceiling, or the source's own peak. */
-const ceilingMarkDb = computed(() => {
-  const c = outputCeilingDbOf(voxCeiling.value)
-  if (Number.isFinite(c)) return c
-  const s = voxMeasured.value.sourcePeakDb
-  return Number.isFinite(s) ? s : null
-})
+/** The IN / OUT ladders' length, px (the Output column is 196 wide). */
+const IO_METER_LEN = 112
 
 function formatPercent(v) {
   return v > 0 ? `${Math.round(v)} %` : 'OFF'
@@ -277,7 +272,7 @@ const statusLines = computed(() => {
   const line = voxParallel.value > 0
     ? `mix ${formatPercent(voxParallel.value)} · drive ${formatDrive(voxParallelDrive.value)} · ${comp} copy`
     : 'stage out'
-  return [{ text: line }, { text: voxBusy.value && voxPreview.value ? (voxDownstreamPending.value ? 'updating makeup…' : 'measuring…') : '' }]
+  return [{ text: line }]
 })
 // Dimmed, with a pulse, while a measurement that can change them is running.
 const statusStale = computed(() => (meter.value === 'parallel' ? voxBusy.value && voxPreview.value : stale.value))
@@ -385,8 +380,12 @@ async function applyAndClose() {
             <ModulaDrumCounter v-model="meter" class="vp-drum" :options="METER_OPTIONS" aria-label="What the needle reads" />
           </div>
           <div class="vp-status" :class="{ 'is-stale': statusStale }" aria-live="polite">
-            <span v-for="(l, i) in statusLines" :key="i" class="vp-status-line" :class="{ 'is-warn': l.warn }">
-              <i v-if="i === 0 && statusStale" class="vp-pulse" aria-hidden="true"></i>{{ l.text || '\u00a0' }}
+            <span v-for="(l, i) in statusLines" :key="i" class="vp-status-line" :class="{ 'is-warn': l.warn }">{{ l.text || '\u00a0' }}</span>
+            <!-- Under the readout, not in front of it: the numbers stay where
+                 they are, dimmed, and this line says new ones are coming. Its
+                 space is always kept, so the panel never jumps. -->
+            <span class="vp-status-line vp-remeasure" :class="{ 'is-on': statusStale }">
+              <i class="vp-pulse" aria-hidden="true"></i>remeasuring…
             </span>
           </div>
         </div>
@@ -498,7 +497,12 @@ async function applyAndClose() {
               @update:model-value="onCeilingIndex"
             />
           </div>
-          <VoxIoMeters class="vp-io" :in-levels="voxInputLevels" :out-levels="voxOutputLevels" :ceiling-db="ceilingMarkDb" />
+          <!-- The app's own IN / OUT ladders, horizontal (the Soft Clipper's pair):
+               its ballistics, peak hold and clip lamp. -->
+          <div class="vp-io">
+            <LevelMeter variant="modula" label="IN" orientation="horizontal" :levels="voxInputLevels" :height="IO_METER_LEN" :show-scale="false" />
+            <LevelMeter variant="modula" label="OUT" orientation="horizontal" :levels="voxOutputLevels" :height="IO_METER_LEN" :show-scale="false" />
+          </div>
         </section>
       </div>
 
@@ -580,7 +584,10 @@ async function applyAndClose() {
 .vp-ctl-gap { margin-top: 8px; }
 .vp-knob-row { height: 84px; display: flex; align-items: center; justify-content: center; gap: 18px; }
 .vp-out-head { flex-direction: column; gap: 7px; }
-.vp-io { align-self: stretch; }
+.vp-io { align-self: stretch; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+/* The ladders' IN / OUT captions are inline steel-grey, which washes out on the cream panel. */
+.vp.is-light .vp-io :deep(span[style*="aeb6bd"]),
+.vp.is-light .vp-io :deep(span[style*="174, 182, 189"]) { color: var(--vp-cap) !important; }
 .vp-band { width: 150px; }
 /* The band slider's channel: dark on steel, a pressed cream groove on the light panel. */
 .vp.is-light .vp-band :deep(.m-fs-hchan) {
@@ -608,7 +615,9 @@ async function applyAndClose() {
 
 /* The selected stage's readout under the METER drum. */
 .vp-status { display: flex; flex-direction: column; align-items: center; gap: 5px; min-height: 26px; transition: opacity .15s ease; }
-.vp-status.is-stale { opacity: .7; }
+.vp-status.is-stale .vp-status-line:not(.vp-remeasure) { opacity: .7; }
+.vp-remeasure { visibility: hidden; color: var(--vp-cap); }
+.vp-remeasure.is-on { visibility: visible; }
 .vp-status-line { font: 500 9px/1.1 var(--m-font-mono); color: var(--vp-note); white-space: nowrap; }
 .vp-status-line.is-warn { color: #f0b429; }
 .vp.is-light .vp-status-line.is-warn { color: #b0640f; }
