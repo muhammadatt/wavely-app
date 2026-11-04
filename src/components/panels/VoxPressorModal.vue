@@ -561,8 +561,11 @@ async function applyAndClose() {
           </div>
         </section>
 
-        <!-- LO DETAIL: its own column in the bottom row (owner, November 2026: under
-             Body it read as part of the Body stage). -->
+        <!-- The right column: LO DETAIL on the Body leveler's centre line (a 170 px box
+             at the right edge, as Body's column is), then OUTPUT LEVEL under it. It is
+             in the bottom row, not under Body, so it does not read as part of the Body
+             stage (owner, November 2026). -->
+        <div class="vp-right">
         <section class="vp-col vp-detail" aria-label="Detail">
           <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
           <div class="vp-knob-row">
@@ -596,6 +599,7 @@ async function applyAndClose() {
             <LevelMeter variant="modula" slim label="OUT" label-side="start" orientation="horizontal" :levels="voxOutputLevels" :height="IO_METER_LEN" :show-scale="false" />
           </div>
         </section>
+        </div>
       </div>
 
         <div v-if="showBench" class="vp-bench-wrap">
@@ -665,7 +669,14 @@ async function applyAndClose() {
 }
 .vp-top { display: grid; grid-template-columns: 170px minmax(0, 1fr) 170px; align-items: start; gap: 14px; }
 /* De-ess's column is the top row's 170 px, so it sits straight under Peak reduction. */
-.vp-bottom { display: grid; grid-template-columns: 170px minmax(0, 1fr) 104px 228px; gap: 14px; align-items: start; }
+/* SYMMETRIC like the top row, so Density (the middle column) stays centred under the
+   meter; the right stack spans the last two columns (58 + 14 + 170 ≥ the IO well's 228). */
+.vp-bottom { display: grid; grid-template-columns: 170px 58px minmax(0, 1fr) 58px 170px; gap: 14px; align-items: start; }
+.vp-bottom > .vp-middle { grid-column: 1; }
+.vp-bottom > [aria-label="Density"] { grid-column: 3; }
+.vp-right { grid-column: 4 / 6; align-self: stretch; display: flex; flex-direction: column; gap: 14px; }
+/* 170 px at the right edge: the top row's Body column, so the two knobs share a centre. */
+.vp-detail { align-self: flex-end; width: 170px; }
 .vp-middle { display: grid; grid-template-columns: 146px; justify-content: center; gap: 10px; align-items: start; }
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
 .vp-centre { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 6px; min-width: 0; }
@@ -681,7 +692,7 @@ async function applyAndClose() {
 /* Two captioned knobs of different sizes side by side (Drive / Mix): captions on one baseline. */
 .vp-knob-row:has(> .vp-ctl + .vp-ctl) { align-items: flex-end; }
 /* The closed fold is taller than a title; centred on the 12 px row it reads on the titles' line. */
-.vp-out-col { align-self: stretch; justify-content: flex-end; }
+.vp-out-col { flex: 1; justify-content: flex-end; }
 .vp-out-title { display: flex; justify-content: center; }
 .vp-io {
   align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 9px;
