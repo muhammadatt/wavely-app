@@ -43,6 +43,12 @@ const props = defineProps({
    * from above).
    */
   labelPosition: { type: String, default: 'below' },
+  /**
+   * Closed on TWO rows instead of one line: the name where the open control's
+   * caption sits and the value in a well where its LCD sits, so opening only
+   * adds the arrows and the ✕ (VoxPressor, with labelPosition 'above').
+   */
+  stacked: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue', 'update:auto'])
 
@@ -84,7 +90,24 @@ function onKeyDown(e) {
 <template>
   <div class="pg" @keydown="onKeyDown">
     <button
-      v-if="!open"
+      v-if="!open && stacked"
+      ref="readout"
+      type="button"
+      class="pg-readout pg-open pg-open--above pg-stacked"
+      :class="{ 'is-manual': manual }"
+      :title="title"
+      :aria-expanded="false"
+      @click="expand"
+    >
+      <span class="pg-gutter" aria-hidden="true"></span>
+      <span class="pg-lcd">
+        <span class="pg-name pg-title pg-title--lcd pg-title--above">{{ name }}</span>
+        <span class="pg-stack-row"><span class="pg-value">{{ valueText }}</span><span class="pg-stack-spin" aria-hidden="true"></span></span>
+      </span>
+      <span class="pg-auto" aria-hidden="true"></span>
+    </button>
+    <button
+      v-else-if="!open"
       ref="readout"
       type="button"
       class="pg-readout"
@@ -161,4 +184,17 @@ function onKeyDown(e) {
   color: var(--hw-ink, #f2f0ec); text-shadow: var(--hw-ink-shadow, 0 1px 0 rgba(0,0,0,.9)); white-space: nowrap;
 }
 .pg-title--lcd { letter-spacing: .18em; transform: translateX(-8px); }
+
+/* Stacked closed: the open layout's skeleton, the value well on the LCD's box
+   (LcdSpinner: a 50 x 26 display, then 3 + 13 px of arrows). */
+.pg-stacked { padding: 0; background: none; border-radius: 0; }
+.pg-stacked:hover { background: none; }
+.pg-stack-row { display: flex; align-items: flex-start; gap: 3px; }
+.pg-stack-spin { width: 13px; flex: none; }
+.pg-stacked .pg-value {
+  width: 50px; height: 26px; box-sizing: border-box; flex: none;
+  display: flex; align-items: center; justify-content: center; border-radius: 2px;
+}
+.pg-stacked:focus-visible { box-shadow: none; }
+.pg-stacked:focus-visible .pg-value { box-shadow: 0 0 0 1.5px rgba(255,164,53,.55); }
 </style>
