@@ -25,7 +25,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   voxPeaks, voxBody, voxBodyLookahead, voxSpeed,
-  voxPeaksMode, voxCharacter, voxCeiling, syncPeaksMode, syncCharacter, syncCeiling,
+  voxPeaksMode, voxCeiling, syncPeaksMode, syncCeiling,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
   voxPeaksGuide, voxBodyGuide, voxUpstreamStale, voxPeaksStale,
@@ -102,7 +102,6 @@ const onPeaks = follow('peaks', v => syncPeaks(v / KNOB_SCALE))
 const onPeaksMode = follow('peaks', v => syncPeaksMode(v))
 const onSpeed = follow('peaks', v => syncSpeed(v))
 const onBody = follow('body', v => syncBody(v / KNOB_SCALE))
-const onCharacter = follow('body', v => syncCharacter(v))
 const onParallel = follow('parallel', v => syncParallel(v))
 const onDrive = follow('parallel', v => syncParallelDrive(v))
 const onParallelComp = follow('parallel', v => syncParallelComp(v))
@@ -144,11 +143,8 @@ const PEAKS_MODE_OPTIONS = [
   { value: 'soft', label: 'Soft knee', d: 'M3 15 L8 10 C11 7 14 5.2 21 4', title: 'SOFT, 4:1: a gentler peak compressor for a dynamic performance. Starts at the same place, takes less off each step' },
 ]
 
-// CHARACTER: the LA-2As' tube colour (Body, and the Parallel copy when it is the LA-2A).
-const CHARACTER_OPTIONS = [
-  { value: 'warm', label: 'WARM', title: "The LA-2A's tube cell and output valve: a little even-harmonic warmth" },
-  { value: 'clean', label: 'CLEAN', title: 'The same leveling as a pure gain: no tube colour. Also cleans the Parallel copy when it is the LA-2A' },
-]
+// CHARACTER (WARM / CLEAN) is OFF the panel (owner, November 2026): it ships WARM
+// and the param stays in the composable and the kernel.
 
 // OUTPUT CEILING: where the output peak lands.
 const CEILING_OPTIONS = [
@@ -474,6 +470,10 @@ async function applyAndClose() {
           </div>
         </div>
 
+        <!-- Body, and under it LO DETAIL (owner, November 2026: moved up from the
+             bottom row into the space the WARM / CLEAN switch left; it is not part
+             of the Body stage, so it sits outside its section and never moves the meter). -->
+        <div class="vp-right">
         <section class="vp-col" aria-label="Body" @pointerdown="meter = 'body'" @focusin="meter = 'body'">
           <div class="vp-title-row">
             <button
@@ -490,18 +490,24 @@ async function applyAndClose() {
             title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 10 = PR 42, 48 = PR 57, 100 = PR 78, aligned to this file's level and to what the 1176 stage hands it. The ring is green while it levels this voice gently, amber past about 4 dB of average leveling, red past 6. 0 takes the stage out. Double-click to reset"
             @update:model-value="onBody"
           />
-          <div class="vp-ctl vp-ctl-gap">
-            <span class="vp-cap" aria-hidden="true">&nbsp;</span>
-            <VoxSlideSwitch
-              :model-value="voxCharacter" :options="CHARACTER_OPTIONS" :color="ACCENT" :surface="surface"
-              aria-label="Character" :disabled="!voxPreview"
-              @update:model-value="onCharacter"
+        </section>
+        <section class="vp-col vp-detail" aria-label="Detail">
+          <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
+          <div class="vp-knob-row">
+            <ModulaKnob
+              variant="led" :size="70"
+              :model-value="voxDensity" :min="0" :max="100" :step="1"
+              :default-value="VOX_DEFAULTS.density"
+              aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
+              title="Density: the Cambridge Inflator's Effect, anchored at the source peak — lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
+              @update:model-value="syncDensity"
             />
           </div>
         </section>
+        </div>
       </div>
 
-      <!-- ── BOTTOM (layout B): De-ess · Detail | Parallel | Output ─────── -->
+      <!-- ── BOTTOM (layout B): De-ess | Parallel | Output ─────── -->
       <div class="vp-bottom">
         <div class="vp-middle">
           <section class="vp-col" aria-label="De-ess">
@@ -526,19 +532,6 @@ async function applyAndClose() {
                 aria-label="De-ess split between wide band and split band"
                 title="Where the De-ess Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
                 @update:model-value="syncDeEssSplit"
-              />
-            </div>
-          </section>
-          <section class="vp-col" aria-label="Detail">
-            <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
-            <div class="vp-knob-row">
-              <ModulaKnob
-                variant="led" :size="70"
-                :model-value="voxDensity" :min="0" :max="100" :step="1"
-                :default-value="VOX_DEFAULTS.density"
-                aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
-                title="Density: the Cambridge Inflator's Effect, anchored at the source peak — lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
-                @update:model-value="syncDensity"
               />
             </div>
           </section>
@@ -674,7 +667,8 @@ async function applyAndClose() {
 }
 .vp-top { display: grid; grid-template-columns: 170px minmax(0, 1fr) 170px; align-items: start; gap: 14px; }
 .vp-bottom { display: grid; grid-template-columns: 228px minmax(0, 1fr) 228px; gap: 14px; align-items: start; }
-.vp-middle { display: grid; grid-template-columns: 104px 104px; justify-content: center; gap: 10px; align-items: start; }
+.vp-middle { display: grid; grid-template-columns: 146px; justify-content: center; gap: 10px; align-items: start; }
+.vp-right { display: flex; flex-direction: column; align-items: center; gap: 18px; min-width: 0; }
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
 .vp-centre { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 6px; min-width: 0; }
 .vp-title-row { height: 12px; display: flex; align-items: center; justify-content: center; }
