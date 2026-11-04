@@ -6,7 +6,6 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { releaseSecondsForDial } from '../../audio/fet1176Processor.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
-import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
 import ModulaDrumCounter from '../modula/ModulaDrumCounter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import VoxNeedleMeter from './voxpressor/VoxNeedleMeter.vue'
@@ -496,7 +495,7 @@ async function applyAndClose() {
             <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
             <div class="vp-knob-row">
               <ModulaKnob
-                variant="led" :size="70"
+                variant="ring" :size="72"
                 :model-value="voxDensity" :min="0" :max="100" :step="1"
                 :default-value="VOX_DEFAULTS.density"
                 aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
@@ -514,27 +513,35 @@ async function applyAndClose() {
         <div class="vp-middle">
           <section class="vp-col" aria-label="De-ess">
             <div class="vp-title-row"><span class="vp-title">De-ess</span></div>
+            <!-- Amount + Band as a pair of knobs (the redesign, November 2026: the band
+                 slider became a knob, so De-ess sits on the knob row like Density). -->
             <div class="vp-knob-row">
-              <ModulaKnob
-                variant="led" :size="70"
-                :model-value="voxDeEss" :min="0" :max="100" :step="1"
-                :default-value="VOX_DEFAULTS.deEss"
-                aria-label="De-ess" :color="knobColor" :format-value="formatKnob" :disabled="!voxPreview"
-                title="The HF Softener's Amount, after the compressors: takes down the sibilance they brought up. 0 takes the stage out. Double-click to reset"
-                @update:model-value="syncDeEss"
-              />
-            </div>
-            <div class="vp-ctl">
-              <span class="vp-cap">Band</span>
-              <ModulaFillSlider
-                class="vp-band" orientation="horizontal" :length="104"
-                :model-value="voxDeEssSplit" :min="0" :max="100" :step="1" :default-value="VOX_DEFAULTS.deEssSplit"
-                label="" :ends="['WIDE', 'SPLIT']" flat :format-value="formatSplit"
-                :color="ACCENT" :disabled="!voxPreview || voxDeEss <= 0"
-                aria-label="De-ess split between wide band and split band"
-                title="Where the De-ess Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
-                @update:model-value="syncDeEssSplit"
-              />
+              <div class="vp-ctl">
+                <ModulaKnob
+                  variant="ring" :size="72"
+                  :model-value="voxDeEss" :min="0" :max="100" :step="1"
+                  :default-value="VOX_DEFAULTS.deEss"
+                  aria-label="De-ess" :color="knobColor" :format-value="formatKnob" :disabled="!voxPreview"
+                  title="The HF Softener's Amount, after the compressors: takes down the sibilance they brought up. 0 takes the stage out. Double-click to reset"
+                  @update:model-value="syncDeEss"
+                />
+                <span class="vp-cap">Amount</span>
+              </div>
+              <div class="vp-ctl">
+                <div class="vp-ends">
+                  <ModulaKnob
+                    variant="led" :size="72" :segments="11"
+                    :model-value="voxDeEssSplit" :min="0" :max="100" :step="1" :default-value="VOX_DEFAULTS.deEssSplit"
+                    aria-label="De-ess split between wide band and split band" :color="knobColor" :format-value="formatSplit"
+                    :disabled="!voxPreview || voxDeEss <= 0"
+                    title="Where the De-ess Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
+                    @update:model-value="syncDeEssSplit"
+                  />
+                  <span class="vp-end vp-end--lo" aria-hidden="true">Wide</span>
+                  <span class="vp-end vp-end--hi" aria-hidden="true">Split</span>
+                </div>
+                <span class="vp-cap">Band</span>
+              </div>
             </div>
           </section>
         </div>
@@ -549,7 +556,7 @@ async function applyAndClose() {
           <div class="vp-knob-row">
               <div class="vp-ctl">
               <ModulaKnob
-                variant="ring" :size="65"
+                variant="ring" :size="72"
                 :model-value="voxParallelDrive" :min="0" :max="PARALLEL_DRIVE_MAX" :step="0.5"
                 :default-value="VOX_DEFAULTS.parallelDrive"
                 aria-label="Parallel drive" :color="knobColor" :format-value="formatDrive" :disabled="!voxPreview || voxParallel <= 0"
@@ -560,14 +567,18 @@ async function applyAndClose() {
             </div>
 
             <div class="vp-ctl">
+            <div class="vp-ends vp-ends--num">
             <ModulaKnob
-              variant="led" :size="70"
+              variant="led" :size="72" :segments="11"
               :model-value="voxParallel" :min="0" :max="100" :step="1"
               :default-value="VOX_DEFAULTS.parallel"
               aria-label="Parallel mix" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
               title="Parallel compression: a heavily compressed copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
               @update:model-value="onParallel"
             />
+              <span class="vp-end vp-end--lo" aria-hidden="true">0</span>
+              <span class="vp-end vp-end--hi" aria-hidden="true">100</span>
+            </div>
               <span class="vp-cap">Mix</span>
             </div>
 
@@ -680,7 +691,20 @@ async function applyAndClose() {
 /* 170 px at the right edge: the top row's Body column, so the two knobs share a centre. */
 .vp-body-col { align-self: stretch; display: flex; flex-direction: column; justify-content: space-between; gap: 14px; }
 .vp-detail { gap: 8px; }
-.vp-rule { width: 120px; margin: 0 0 4px; border: none; border-top: 1px dashed rgba(127, 127, 127, .3); }
+/* An engraved line, as the redesign draws it (a groove and its highlight). */
+.vp-rule { width: 140px; height: 1px; margin: 0 0 4px; border: none; background: rgba(0, 0, 0, .3); box-shadow: 0 1px 0 rgba(255, 255, 255, .05); }
+.vp.is-light .vp-rule { background: rgba(0, 0, 0, .16); box-shadow: 0 1px 0 rgba(255, 255, 255, .6); }
+/* End labels at a knob's bottom corners (WIDE / SPLIT, 0 / 100). */
+.vp-ends { position: relative; }
+.vp-end { position: absolute; bottom: -1px; font: 500 8px/1 var(--m-font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--vp-cap); pointer-events: none; }
+.vp-end--lo { left: -6px; }
+.vp-end--hi { right: -6px; }
+.vp-ends--num .vp-end--lo { left: -4px; }
+.vp-ends--num .vp-end--hi { right: -4px; }
+/* The ring knob's cap fills more of its ring here, as in the redesign (14 % inset, the kit's 17). */
+.vp :deep(.m-ring-cap) { inset: 14%; }
+/* The light panel: unlit LEDs and the ring's track are a pale engraving, not the dark kit's. */
+.vp.is-light { --m-led-off: #b3ada2; }
 .vp-detail .vp-knob-row { height: auto; }
 .vp-middle { display: grid; grid-template-columns: 146px; justify-content: center; gap: 10px; align-items: start; }
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
@@ -704,16 +728,11 @@ async function applyAndClose() {
   padding: 9px 10px; border-radius: 9px; background: #1a1c20;
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, .8), 0 1px 0 rgba(255, 255, 255, .05);
 }
-.vp.is-light .vp-io { box-shadow: inset 0 2px 5px rgba(0, 0, 0, .8), 0 1px 0 rgba(255, 255, 255, .6); }
-.vp-band { width: 146px; }
-/* The band slider's channel: dark on steel, a pressed cream groove on the light panel. */
-.vp.is-light .vp-band :deep(.m-fs-hchan) {
-  background: linear-gradient(180deg, #b9b3a8, #cfc9bf);
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .35), inset 0 0 0 1px rgba(0, 0, 0, .12), 0 1px 0 rgba(255, 255, 255, .6);
+/* On the light panel the well is set INTO the plate: a deeper gradient, a warm rim and a highlight. */
+.vp.is-light .vp-io {
+  background: linear-gradient(180deg, #121417, #1c1f24);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .85), 0 0 0 1px rgba(60, 45, 30, .18), 0 1px 0 1px rgba(255, 255, 255, .6);
 }
-/* The slider's end labels read as captions, like every other caption on the plate. */
-.vp-band :deep(.m-fs-ends) { font: 500 9px/1 var(--m-font-mono); letter-spacing: .14em; color: var(--vp-cap); }
-
 /* The METER drum at the design's size: room for PARALLEL in the window, the
    neighbours squeezed either side, raised dark caps on the arrows (both
    surfaces: they are parts, not paint). */
