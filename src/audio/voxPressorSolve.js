@@ -108,6 +108,14 @@ export const VOICED_GATE_DB = 10
  * warn, don't cap. 0.5 is reasoned.
  */
 export const PEAKS_BODY_WARN_DB = 0.5
+/**
+ * Where the voice counts as TOUCHED at all, dB — the guide's amber edge (owner,
+ * November 2026: "we typically want to avoid any gain reduction to the body at
+ * all"; amber from the first touch, red past `PEAKS_BODY_WARN_DB`). 0.05 is
+ * where the readout, printed to 0.1 dB, stops reading 0.0 — so the ring turns
+ * amber exactly when the line first shows the voice touched.
+ */
+export const PEAKS_BODY_TOUCH_DB = 0.05
 function db(v) {
   return v > 0 ? 20 * Math.log10(v) : -Infinity
 }
@@ -182,8 +190,10 @@ export function referenceBlocks(channels, sampleRate) {
  *   against peak: against the voice's RMS it would count every syllable's own
  *   crest as excess.
  * - TARGET: the drive at which the stage takes the gap off the loudest peaks.
- * - WARN: the drive at which it starts lowering the voice itself
- *   (`PEAKS_BODY_WARN_DB` of "voice touched"), the readout's own warning.
+ * - TOUCH: the drive at which it first lowers the voice itself
+ *   (`PEAKS_BODY_TOUCH_DB` of "voice touched") — the ring's amber edge.
+ * - WARN: the drive at which it lowers the voice `PEAKS_BODY_WARN_DB` — red.
+ *   (TARGET is no longer drawn on the ring; AUTO, off the panel, still uses it.)
  *
  * Measured on four clips (30 s windows, November 2026) the two edges agree to
  * about one knob step: Messy and Bright gap 3.8 dB → Peaks ≈ 3.7 (warn 4),
@@ -203,9 +213,10 @@ export function referenceBlocks(channels, sampleRate) {
  * cached on the region and the 1176's settings — so it costs once per region,
  * not per knob move.
  */
-export const PEAKS_GUIDE_MAX_RENDERS = 8
+export const PEAKS_GUIDE_MAX_RENDERS = 10
 const PEAKS_GUIDE_TOL_DB = 0.1
 const PEAKS_GUIDE_WARN_TOL_DB = 0.05
+const PEAKS_GUIDE_TOUCH_TOL_DB = 0.02
 
 /** How far the loudest blocks' peaks stand over the voiced blocks' peaks, dB (≥ 0), or null. */
 export function peaksGapDb(channels, sampleRate) {
@@ -266,7 +277,7 @@ function findDrive(at, points, f, goal, tol, lo, hi, budget) {
 function solvePeaksGuide(channels, sampleRate, base, alignDb, rangeDb, seed) {
   const gapDb = peaksGapDb(channels, sampleRate)
   const [lo, hi] = rangeDb
-  if (gapDb === null || !(hi > lo)) return { gapDb, targetDriveDb: null, warnDriveDb: null, renders: 0 }
+  if (gapDb === null || !(hi > lo)) return { gapDb, targetDriveDb: null, touchDriveDb: null, warnDriveDb: null, renders: 0 }
   const ref = referenceBlocks(channels, sampleRate)
   const points = []
   let renders = 0
@@ -281,10 +292,12 @@ function solvePeaksGuide(channels, sampleRate, base, alignDb, rangeDb, seed) {
   // The readout moves ~0.9 dB per dB of drive once the stage catches: a
   // first guess from the seed lands most searches in two or three renders.
   if (points.length === 0) at(Math.min(hi, Math.max(lo, 0)))
+  // The ring's two edges first (they get the render budget), the target last.
+  const touchDriveDb = findDrive(at, points, q => q.bodyDb, PEAKS_BODY_TOUCH_DB, PEAKS_GUIDE_TOUCH_TOL_DB, lo, hi, budget)
+  const warnDriveDb = findDrive(at, points, q => q.bodyDb, PEAKS_BODY_WARN_DB, PEAKS_GUIDE_WARN_TOL_DB, lo, hi, budget)
   const targetDriveDb = gapDb <= 0 ? lo
     : findDrive(at, points, q => q.peaksDb, gapDb, PEAKS_GUIDE_TOL_DB, lo, hi, budget)
-  const warnDriveDb = findDrive(at, points, q => q.bodyDb, PEAKS_BODY_WARN_DB, PEAKS_GUIDE_WARN_TOL_DB, lo, hi, budget)
-  return { gapDb, targetDriveDb, warnDriveDb, renders }
+  return { gapDb, targetDriveDb, touchDriveDb, warnDriveDb, renders }
 }
 
 /**

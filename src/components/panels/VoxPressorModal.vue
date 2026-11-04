@@ -17,7 +17,7 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import { isVoxPressorBenchVisible } from '../../audio/effects/voxPressorBench.js'
 import {
   VOX_DEFAULTS,
-  PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX, bodyPrFor, PEAKS_RIPPLE_WARN_DB, peaksTiming,
+  PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX, bodyPrFor, PEAKS_RIPPLE_WARN_DB, peaksTiming,
 } from '../../audio/effects/voxPressorParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -91,7 +91,8 @@ const follow = (stage, fn) => (v) => { meter.value = stage; fn(v) }
  * THE PANEL'S 0–100 SCALE (owner, November 2026: match the other compressors).
  * Peaks and Body are stored 0–10 (`peaksDriveDb`, `bodyPrFor` read them so);
  * the knobs show and step them ×10, so Peaks 30 is the old 3 — about 3 dB off
- * the loudest peaks of typical narration — and Body 47.5 is PR 57.
+ * the loudest peaks of typical narration — and Body 48 is PR 57.2. Both show
+ * and step WHOLE numbers, as the other compressors' knobs do.
  */
 const KNOB_SCALE = 10
 const peaksShown = computed(() => voxPeaks.value * KNOB_SCALE)
@@ -188,8 +189,7 @@ function formatPeaks(v) {
 }
 
 function formatBody(v) {
-  if (v <= 0) return 'OFF'
-  return Number.isInteger(v) ? String(v) : v.toFixed(1)
+  return v > 0 ? String(Math.round(v)) : 'OFF'
 }
 
 function formatDrive(v) {
@@ -210,20 +210,26 @@ const peaksWarn = computed(() => {
   const r = voxReadout.value
   return !!r && voxPeaks.value > 0 && r.peaksBodyDb > PEAKS_BODY_WARN_DB
 })
+// Amber from the first touch, as the ring: any reduction of the voice.
+const peaksTouch = computed(() => {
+  const r = voxReadout.value
+  return !!r && voxPeaks.value > 0 && r.peaksBodyDb >= PEAKS_BODY_TOUCH_DB
+})
 
-// THE PEAKS GUIDE (`measureVoxPressor`'s `peaksGuide`): green up to the knob
-// that brings the loudest peaks down to the voice, amber until the stage
-// starts compressing the voice itself, red past it. A guide, never a cap.
+// THE PEAKS GUIDE (`measureVoxPressor`'s `peaksGuide`): green while the stage
+// leaves the voice alone, amber from the first touch (PEAKS_BODY_TOUCH_DB),
+// red past PEAKS_BODY_WARN_DB (owner, November 2026: the Peaks stage should
+// not reduce the body at all). A guide, never a cap.
 const GUIDE_OK = '#6fd08c'
 const GUIDE_EDGE = '#e8a33d'
 const GUIDE_OVER = '#ff5a5a'
 const peaksZones = computed(() => {
   const g = voxPeaksGuide.value
   if (!g) return null
-  const red = Math.max(g.target, g.warn)
+  const red = Math.max(g.touch, g.warn)
   return [
-    { from: 0, to: g.target * KNOB_SCALE, color: GUIDE_OK },
-    { from: g.target * KNOB_SCALE, to: red * KNOB_SCALE, color: GUIDE_EDGE },
+    { from: 0, to: g.touch * KNOB_SCALE, color: GUIDE_OK },
+    { from: g.touch * KNOB_SCALE, to: red * KNOB_SCALE, color: GUIDE_EDGE },
     { from: red * KNOB_SCALE, to: PEAKS_MAX * KNOB_SCALE, color: GUIDE_OVER },
   ]
 })
@@ -268,7 +274,7 @@ const peaksLine = computed(() => {
 })
 const statusLines = computed(() => {
   if (meter.value === 'peaks') {
-    return [{ text: peaksLine.value, warn: peaksWarn.value || rippleWarn.value }]
+    return [{ text: peaksLine.value, warn: peaksTouch.value || rippleWarn.value, over: peaksWarn.value }]
   }
   if (meter.value === 'body') return [{ text: bodyNote.value }]
   const comp = voxParallelComp.value === 'la2a' ? 'LA-2A' : '1176'
@@ -383,7 +389,7 @@ async function applyAndClose() {
             <ModulaDrumCounter v-model="meter" class="vp-drum" :options="METER_OPTIONS" aria-label="What the needle reads" />
           </div>
           <div class="vp-status" :class="{ 'is-stale': statusStale }" aria-live="polite">
-            <span v-for="(l, i) in statusLines" :key="i" class="vp-status-line" :class="{ 'is-warn': l.warn }">{{ l.text || '\u00a0' }}</span>
+            <span v-for="(l, i) in statusLines" :key="i" class="vp-status-line" :class="{ 'is-warn': l.warn, 'is-over': l.over }">{{ l.text || '\u00a0' }}</span>
             <!-- Under the readout, not in front of it: the numbers stay where
                  they are, dimmed, and this line says new ones are coming. Its
                  space is always kept, so the panel never jumps. -->
@@ -397,10 +403,10 @@ async function applyAndClose() {
           <div class="vp-title-row"><span class="vp-title" :class="{ 'is-lit': meter === 'body' }">Body leveler</span></div>
           <ModulaKnob
             variant="ticks" :size="104"
-            :model-value="bodyShown" :min="0" :max="BODY_MAX * KNOB_SCALE" :step="0.5"
+            :model-value="bodyShown" :min="0" :max="BODY_MAX * KNOB_SCALE" :step="1"
             :default-value="VOX_DEFAULTS.body * KNOB_SCALE"
             aria-label="Body" :color="ACCENT" :format-value="formatBody" :disabled="!voxPreview"
-            title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 10 = PR 42, 47.5 = PR 57, 100 = PR 78, aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
+            title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 10 = PR 42, 48 = PR 57, 100 = PR 78, aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
             @update:model-value="onBody"
           />
           <div class="vp-ctl vp-ctl-gap">
@@ -626,6 +632,8 @@ async function applyAndClose() {
 .vp-status-line { font: 500 9px/1.1 var(--m-font-mono); color: var(--vp-note); white-space: nowrap; }
 .vp-status-line.is-warn { color: #f0b429; }
 .vp.is-light .vp-status-line.is-warn { color: #b0640f; }
+.vp-status-line.is-over { color: #ff6a5a; }
+.vp.is-light .vp-status-line.is-over { color: #c0341f; }
 .vp-pulse {
   display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
   background: #e8a33d; box-shadow: 0 0 6px #e8a33d; vertical-align: 0;

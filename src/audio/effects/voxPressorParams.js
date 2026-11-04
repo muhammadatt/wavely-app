@@ -4,7 +4,7 @@
  * schepsParams.js, for the same reason: `voxPressor.js` imports the
  * `?worker&url` loader, which only Vite resolves).
  */
-import { PEAKS_BODY_WARN_DB, PEAKS_RIPPLE_WARN_DB } from '../voxPressorSolve.js'
+import { PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, PEAKS_RIPPLE_WARN_DB } from '../voxPressorSolve.js'
 import {
   voxLatencySamples, PEAKS_INPUT_KNOB, PEAKS_SPEED_IDS, peaksTiming, PEAKS_MODE_IDS,
 } from '../voxPressorProcessor.js'
@@ -74,7 +74,7 @@ export function peaksGuideRangeDb() {
 export function peaksGuideKnobs(guide) {
   if (!guide || !Number.isFinite(guide.gapDb)) return null
   const k = d => (Number.isFinite(d) ? Math.max(0, Math.min(PEAKS_MAX, peaksKnobForDriveDb(d))) : PEAKS_MAX)
-  return { gapDb: guide.gapDb, target: k(guide.targetDriveDb), warn: k(guide.warnDriveDb) }
+  return { gapDb: guide.gapDb, target: k(guide.targetDriveDb), touch: k(guide.touchDriveDb), warn: k(guide.warnDriveDb) }
 }
 
 /** The bench's Body lookahead steps, ms (LA Vintage 2A's own control). */
@@ -82,7 +82,7 @@ export const BODY_LOOKAHEAD_STEPS_MS = Object.freeze([0, 5, 10, LOOKAHEAD_MAX_MS
 
 export const VOX_OUTPUT_MIN_DB = -12
 export const VOX_OUTPUT_MAX_DB = 12
-export { PEAKS_BODY_WARN_DB, PEAKS_RIPPLE_WARN_DB, PEAKS_SPEED_IDS, PEAKS_MODE_IDS, peaksTiming }
+export { PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, PEAKS_RIPPLE_WARN_DB, PEAKS_SPEED_IDS, PEAKS_MODE_IDS, peaksTiming }
 
 /**
  * CHARACTER: 'warm' (ships) | 'clean' — the LA-2As' tube colour on or off
@@ -126,11 +126,13 @@ export const VOX_DEFAULTS = {
   /**
    * BODY, 0–10 (0 = stage out): the LA-2A's Peak Reduction over its usable
    * span, the Parallel Drive's scale (`bodyPrFor`: PR 38 + 4 a step, so
-   * 4.75 = PR 57, 10 = PR 78). PR 57 is 3.4–3.8 dB of average leveling on both
+   * 4.8 = PR 57.2, 10 = PR 78). The panel shows it ×10 in WHOLE numbers
+   * (owner, November 2026), so it ships at 4.8 — the panel's 48 — rather than
+   * the 4.75 / PR 57 it was voiced at (0.2 PR apart). PR 57 is 3.4–3.8 dB of average leveling on both
    * clips (≈ 2.3 dB per 10 points from 40 up; the two clips agree to 0.4 dB at
    * every setting).
    */
-  body: 4.75,
+  body: 4.8,
   /**
    * DE-ESS, 0–100 (0 = stage out): the HF Softener's Amount, shared by
    * `deEssSplit` between its Duck and EQ, Guard 100 — every other control

@@ -1568,7 +1568,9 @@ function requestClose() {
   font: 600 12px var(--m-font-ui);
   box-shadow: var(--m-shadow-raised);
 }
-[data-design='modula'] .win-preview:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); }
+/* The ink too: the classic hover's near-white otherwise wins on specificity,
+   which on the light surface turned the label white. Same colour on steel. */
+[data-design='modula'] .win-preview:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); color: var(--m-ink); }
 [data-design='modula'] .win-preview--on { background: transparent; }
 .win-play-m { width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--m-ink); }
 .win-play-m.is-on { width: 9px; height: 9px; border: 0; border-radius: 1px; background: var(--m-accent); }

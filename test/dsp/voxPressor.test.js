@@ -389,7 +389,7 @@ test('a stage is bypassed until the file is aligned, not run uncalibrated', () =
   assert.equal(aligned.peaksOn, true)
   assert.equal(aligned.bodyOn, true)
   assert.equal(aligned.peaksInput, PEAKS_INPUT_KNOB)
-  assert.equal(aligned.bodyPeakReduction, 57)
+  assert.ok(Math.abs(aligned.bodyPeakReduction - 57.2) < 1e-9, `PR ${aligned.bodyPeakReduction}`)
 })
 
 test('the Peaks scale is linear in detector drive, Peaks 0 its first catch', () => {
@@ -722,7 +722,7 @@ test('De-ess Split: shares the Amount between the Duck and the EQ, 33 = the De-E
   assert.deepEqual(legacy, at(33))
 })
 
-test('Peaks guide: the target knob takes the gap off the peaks, the warn knob touches the voice 0.5 dB, cached per region', async () => {
+test('Peaks guide: target takes the gap off the peaks, touch first lowers the voice (0.05 dB), warn 0.5 dB, cached per region', async () => {
   const S = await import('../../src/audio/voxPressorSolve.js')
   const P = await import('../../src/audio/effects/voxPressorParams.js')
   const x = narration(SR, { seconds: 12, levelDb: -22 })
@@ -738,6 +738,12 @@ test('Peaks guide: the target knob takes the gap off the peaks, the warn knob to
   // The knobs do what the guide says.
   const atTarget = S.measureVoxPressor([x], SR, kpAt(g.target))
   assert.ok(Math.abs(atTarget.peaksDb - g.gapDb) < 0.2, `at target: ${atTarget.peaksDb} vs gap ${g.gapDb}`)
+  // The amber edge: the first touch of the voice.
+  assert.ok(g.touch <= g.warn, `touch ${g.touch} after warn ${g.warn}`)
+  if (g.touch > 0 && g.touch < P.PEAKS_MAX) {
+    const atTouch = S.measureVoxPressor([x], SR, kpAt(g.touch))
+    assert.ok(Math.abs(atTouch.peaksBodyDb - S.PEAKS_BODY_TOUCH_DB) < 0.04, `at touch: voice ${atTouch.peaksBodyDb}`)
+  }
   if (g.warn < P.PEAKS_MAX) {
     const atWarn = S.measureVoxPressor([x], SR, kpAt(g.warn))
     assert.ok(Math.abs(atWarn.peaksBodyDb - S.PEAKS_BODY_WARN_DB) < 0.1, `at warn: voice ${atWarn.peaksBodyDb}`)
