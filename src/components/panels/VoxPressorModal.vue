@@ -10,7 +10,7 @@ import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
 import ModulaDrumCounter from '../modula/ModulaDrumCounter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import VoxNeedleMeter from './voxpressor/VoxNeedleMeter.vue'
-import VoxLcdStepper from './voxpressor/VoxLcdStepper.vue'
+import FoldedLcd from '../hardware/FoldedLcd.vue'
 import VoxKneeKeys from './voxpressor/VoxKneeKeys.vue'
 import VoxSlideSwitch from './voxpressor/VoxSlideSwitch.vue'
 import VoxIoMeters from './voxpressor/VoxIoMeters.vue'
@@ -27,7 +27,7 @@ const {
   voxPeaksMode, voxCharacter, voxCeiling, syncPeaksMode, syncCharacter, syncCeiling,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
-  voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale, voxDownstreamPending,
+  voxPeaksGuide, voxUpstreamStale, voxDownstreamPending,
   voxParallelDrive, syncParallelDrive,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
@@ -82,7 +82,9 @@ const METER_OPTIONS = [
   { value: 'parallel', label: 'PARALLEL', title: "The parallel copy's gain reduction (the wet side)" },
 ]
 const meter = ref('peaks')
-const meterDb = computed(() => ({ peaks: voxPeaksGr.value, body: voxBodyGr.value, parallel: voxParallelGr.value }[meter.value] ?? 0))
+// The effect reports reduction as NEGATIVE dB (DynamicsCompressorNode's
+// convention, which the GR bars read with Math.abs); the needle wants it positive.
+const meterDb = computed(() => Math.abs({ peaks: voxPeaksGr.value, body: voxBodyGr.value, parallel: voxParallelGr.value }[meter.value] ?? 0))
 const meterLabel = computed(() => METER_OPTIONS.find(o => o.value === meter.value)?.label ?? '')
 const follow = (stage, fn) => (v) => { meter.value = stage; fn(v) }
 const onPeaks = follow('peaks', v => syncPeaks(v))
@@ -93,6 +95,19 @@ const onCharacter = follow('body', v => syncCharacter(v))
 const onParallel = follow('parallel', v => syncParallel(v))
 const onDrive = follow('parallel', v => syncParallelDrive(v))
 const onParallelComp = follow('parallel', v => syncParallelComp(v))
+
+/**
+ * The two folded LCDs (FoldedLcd, LA Vintage 2A's Lookahead hideaway): one
+ * engraved line until clicked open. They step a number, so they step the
+ * option's INDEX and print its label.
+ */
+const optionIndex = (opts, v) => Math.max(0, opts.findIndex(o => o.value === v))
+const speedIndex = computed(() => optionIndex(SPEED_OPTIONS, voxSpeed.value))
+const ceilingIndex = computed(() => optionIndex(CEILING_OPTIONS, voxCeiling.value))
+const formatSpeed = i => SPEED_OPTIONS[Math.round(i)]?.label ?? ''
+const formatCeiling = i => CEILING_OPTIONS[Math.round(i)]?.label ?? ''
+const onSpeedIndex = i => onSpeed(SPEED_OPTIONS[Math.round(i)].value)
+const onCeilingIndex = i => syncCeiling(CEILING_OPTIONS[Math.round(i)].value)
 
 /** Where the output peak lands, dBFS: the ceiling, or the source's own peak. */
 const ceilingMarkDb = computed(() => {
@@ -345,14 +360,12 @@ async function applyAndClose() {
             title="How hard the 1176 catches the loudest peaks: about that many dB off them on typical narration (the line under the meter says what it took on this file). The ring is green up to where this file's loudest peaks come down to the voice, amber after, red where the stage starts compressing the voice itself — the later stages are there for that. 0 takes the stage out. Double-click to reset"
             @update:model-value="onPeaks"
           />
-          <div class="vp-ctl vp-ctl-gap">
-            <span class="vp-cap">Attack / release</span>
-            <VoxLcdStepper
-              :model-value="voxSpeed" :options="SPEED_OPTIONS" :surface="surface"
-              aria-label="Peaks timing" :disabled="!voxPreview || voxPeaks <= 0"
-              @update:model-value="onSpeed"
-            />
-          </div>
+          <FoldedLcd
+            class="vp-fold vp-ctl-gap" name="Attack / release"
+            :model-value="speedIndex" :min="0" :max="SPEED_OPTIONS.length - 1" :step="1"
+            :format="formatSpeed" :disabled="!voxPreview || voxPeaks <= 0"
+            @update:model-value="onSpeedIndex"
+          />
           <div class="vp-ctl">
             <span class="vp-cap">Knee</span>
             <VoxKneeKeys
@@ -361,12 +374,6 @@ async function applyAndClose() {
               @update:model-value="onPeaksMode"
             />
           </div>
-          <button
-            type="button" class="vp-auto" :class="{ 'is-on': voxPeaksAuto }" :disabled="!voxPreview"
-            role="switch" :aria-checked="voxPeaksAuto" :style="{ '--vp-auto': GUIDE_OK }"
-            title="Set Peaks for this file: just enough to bring its loudest peaks down to the voice, and follow the selection. Turn the knob to take over; AUTO drops and keeps the value"
-            @click="meter = 'peaks'; togglePeaksAuto()"
-          ><span class="vp-auto-dot"></span>AUTO</button>
         </section>
 
         <div class="vp-centre">
@@ -482,11 +489,11 @@ async function applyAndClose() {
         <section class="vp-col" aria-label="Output">
           <div class="vp-title-row"></div>
           <div class="vp-knob-row vp-out-head">
-            <span class="vp-cap">Output level</span>
-            <VoxLcdStepper
-              :model-value="voxCeiling" :options="CEILING_OPTIONS" :surface="surface"
-              aria-label="Output ceiling" :disabled="!voxPreview"
-              @update:model-value="syncCeiling"
+            <FoldedLcd
+              class="vp-fold" name="Output level"
+              :model-value="ceilingIndex" :min="0" :max="CEILING_OPTIONS.length - 1" :step="1"
+              :format="formatCeiling" :disabled="!voxPreview"
+              @update:model-value="onCeilingIndex"
             />
           </div>
           <VoxIoMeters class="vp-io" :in-levels="voxInputLevels" :out-levels="voxOutputLevels" :ceiling-db="ceilingMarkDb" />
@@ -610,20 +617,10 @@ async function applyAndClose() {
 }
 @keyframes vp-pulse { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
 
-/* AUTO: the Peaks guide owns the knob until it is turned. */
-.vp-auto {
-  display: inline-flex; align-items: center; gap: 6px; flex: none;
-  padding: 4px 9px; border: 0; border-radius: 6px; cursor: pointer;
-  background: linear-gradient(180deg, #34383e, #25282d);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .1), 0 0 0 1px rgba(0, 0, 0, .5);
-  font: 600 9px/1 var(--m-font-mono); letter-spacing: .1em; color: #8a929a;
-}
-.vp-auto:hover:not(:disabled) { color: #c3c9cf; }
-.vp-auto:disabled { opacity: .4; cursor: default; }
-.vp-auto-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 0, 0, .5); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
-.vp-auto.is-on { color: var(--vp-auto); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .6), 0 0 0 1px color-mix(in oklab, var(--vp-auto) 45%, #000); }
-.vp-auto.is-on .vp-auto-dot { background: var(--vp-auto); box-shadow: 0 0 6px var(--vp-auto); }
-.vp.is-light .vp-auto { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 1px 1px rgba(40, 30, 20, .35), 0 4px 8px -4px rgba(40, 30, 20, .45); }
+
+/* The folded LCDs take the panel's inks (FoldedLcd reads the --hw-* tokens). */
+.vp-fold { --hw-dim: var(--vp-cap); --hw-dim-hover: var(--vp-note); --hw-ink: var(--vp-note); }
+.vp.is-light .vp-fold { --hw-ink-shadow: none; --hw-hover-bg: rgba(0, 0, 0, .06); --hw-manual: #b0640f; }
 
 /* The surface toggle in the header. */
 .vp-surface {
