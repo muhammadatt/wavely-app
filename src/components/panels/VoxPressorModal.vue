@@ -492,11 +492,7 @@ async function applyAndClose() {
             <span v-else-if="readouts.body.note" class="vp-status-line is-warn">{{ readouts.body.note }}</span>
             <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
           </div>
-          <!-- Stands in for Peaks' Attack / Release fold, so WARM / CLEAN sits level
-               with the Knee keys and both columns end on one line (the two
-               do not fit side by side: ~253 px in a 196 px column). -->
-          <div class="vp-ctl-gap vp-fold-spacer" aria-hidden="true"></div>
-          <div class="vp-ctl">
+          <div class="vp-ctl vp-ctl-gap">
             <span class="vp-cap" aria-hidden="true">&nbsp;</span>
             <VoxSlideSwitch
               :model-value="voxCharacter" :options="CHARACTER_OPTIONS" :color="ACCENT" :surface="surface"
@@ -600,10 +596,11 @@ async function applyAndClose() {
           </div>
         </section>
 
-        <section class="vp-col" aria-label="Output">
-          <!-- OUTPUT LEVEL sits on the titles' line, like the other sections'
-               names; the meters below it fill the knob row. -->
-          <div class="vp-title-row vp-out-title">
+        <!-- OUTPUT: the ceiling setter over the IN / OUT meters, together at the
+             BOTTOM of the column (owner, November 2026: at the top, with no title
+             of their own, they read as detached from the row). -->
+        <section class="vp-col vp-out-col" aria-label="Output">
+          <div class="vp-out-title">
             <FoldedLcd
               class="vp-fold" name="Output level" label-position="above"
               :model-value="ceilingIndex" :min="0" :max="CEILING_OPTIONS.length - 1" :step="1"
@@ -612,11 +609,11 @@ async function applyAndClose() {
             />
           </div>
           <!-- The app's own IN / OUT ladders, horizontal (the Soft Clipper's pair):
-               its ballistics, peak hold and clip lamp, centred on the knob row. -->
-          <div class="vp-knob-row vp-out-meters"><div class="vp-io">
+               its ballistics, peak hold and clip lamp. -->
+          <div class="vp-io">
             <LevelMeter variant="modula" slim label="IN" label-side="start" orientation="horizontal" :levels="voxInputLevels" :height="IO_METER_LEN" :show-scale="false" />
             <LevelMeter variant="modula" slim label="OUT" label-side="start" orientation="horizontal" :levels="voxOutputLevels" :height="IO_METER_LEN" :show-scale="false" />
-          </div></div>
+          </div>
         </section>
       </div>
 
@@ -698,15 +695,12 @@ async function applyAndClose() {
 .vp-cap { font: 500 9px/1 var(--m-font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--vp-cap); white-space: nowrap; }
 .vp-ctl { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 7px; }
 .vp-ctl-gap { margin-top: 8px; }
-/* The closed Attack / Release fold's height (FoldedLcd, 40 px). */
-.vp-fold-spacer { height: 40px; flex: none; }
 .vp-knob-row { height: 84px; display: flex; align-items: center; justify-content: center; gap: 18px; }
 /* Two captioned knobs of different sizes side by side (Drive / Mix): captions on one baseline. */
 .vp-knob-row:has(> .vp-ctl + .vp-ctl) { align-items: flex-end; }
 /* The closed fold is taller than a title; centred on the 12 px row it reads on the titles' line. */
-.vp-out-title { overflow: visible; }
-.vp-out-meters { align-self: stretch; }
-.vp-out-meters .vp-io { flex: 1; align-self: center; }
+.vp-out-col { align-self: stretch; justify-content: flex-end; }
+.vp-out-title { display: flex; justify-content: center; }
 /* Straight under its readout, which already reserves a line for "remeasuring…". */
 .vp-comp-switch { margin-top: -6px; }
 .vp-io {
