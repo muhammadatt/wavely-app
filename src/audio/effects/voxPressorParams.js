@@ -118,8 +118,8 @@ export const VOX_DEFAULTS = {
    * 'normal' | 'fast' — see `PEAKS_SPEEDS`.
    */
   speed: 'auto',
-  /** PEAKS CHARACTER: 'hard' (12:1, ships) | 'soft' (4:1) — see `PEAKS_MODES`. */
-  peaksMode: 'hard',
+  /** PEAKS CHARACTER: 'hard' (12:1) | 'soft' (4:1, ships — owner, November 2026) — see `PEAKS_MODES`. */
+  peaksMode: 'soft',
   /** CHARACTER: 'warm' (ships) | 'clean' — see `CHARACTER_IDS`. */
   character: 'warm',
   /** OUTPUT CEILING: 'source' (ships) | '-1' | '-3' — see `OUTPUT_CEILINGS`. */
@@ -248,7 +248,7 @@ export function toKernelParams(p) {
     peaksInput: PEAKS_INPUT_KNOB,
     ...stageParams(p),
     peaksSpeed: PEAKS_SPEED_IDS.includes(p.speed) ? p.speed : 'auto',
-    peaksMode: PEAKS_MODE_IDS.includes(p.peaksMode) ? p.peaksMode : 'hard',
+    peaksMode: PEAKS_MODE_IDS.includes(p.peaksMode) ? p.peaksMode : VOX_DEFAULTS.peaksMode,
     analog: p.character !== 'clean',
     outputCeilingDb: outputCeilingDbOf(p.ceiling),
     voiceF0Hz: Number.isFinite(p.voiceF0Hz) ? p.voiceF0Hz : null,

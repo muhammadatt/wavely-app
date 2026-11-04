@@ -303,10 +303,12 @@ test('a light Peaks takes the peaks and barely touches the voice, at every speed
   // narration is far peakier and gives up ~6 dB at 3.
   // ⚠ A SLOWER SPEED TOUCHES THE VOICE MORE — its release holds the gain down
   // after each peak — which is the price GENTLE pays for its lower ripple.
+  // HARD (12:1): the limiter case. SOFT ships since November 2026 and takes
+  // less off per step by design (its own test below).
   for (const { levelDb, x } of atDefaults) {
     const touched = {}
     for (const speed of ['fast', 'normal', 'gentle']) {
-      const { r } = measure(x, { peaks: 0.5, body: 0, speed })
+      const { r } = measure(x, { peaks: 0.5, body: 0, speed, peaksMode: 'hard' })
       assert.ok(r.peaksDb > 2, `${levelDb} ${speed}: only ${r.peaksDb.toFixed(2)} dB off the peaks`)
       assert.ok(r.peaksBodyDb < 1, `${levelDb} ${speed}: body touched ${r.peaksBodyDb.toFixed(2)} dB`)
       touched[speed] = r.peaksBodyDb
@@ -346,7 +348,12 @@ test('makeup restores the source peak, and the voice comes out louder', () => {
     const p = { ...params, peaksCeilingDb: db(peak(x)), bodyCeilingDb: db(peak(x)) }
     // Base rate: what was measured. The limiters hold the peak on the source's.
     const base = processVoxPressorBuffer([x], SR, { ...p, oversample: false }, { compensate: true }).channelData
-    const dPeak = db(peak(base[0])) - db(peak(x))
+    // ⚠ THE RESTORES ARE CHECKED BEFORE THE DE-ESSER: with SOFT shipping, the
+    // loudest sample after Body can be an "s" on this peaky synthetic voice,
+    // and the de-esser rightly takes up to ~0.8 dB off it (Peaks + Body alone
+    // land on the source peak to 1e-5 dB at every level).
+    const restored = processVoxPressorBuffer([x], SR, { ...p, oversample: false, deEssOn: false, parallelOn: false, density: 0 }, { compensate: true }).channelData
+    const dPeak = db(peak(restored[0])) - db(peak(x))
     // ≤ 1e-5 dB: Density's anchor divides and multiplies back in float32.
     assert.ok(dPeak <= 1e-5 && dPeak > -0.3, `${levelDb}: peak moved ${dPeak.toExponential(2)} dB`)
     // What the compressors took off the peaks comes back as level.
@@ -908,7 +915,7 @@ test('Character CLEAN: the LA-2As lose their colour, their gain reduction is unc
 
 test('Peaks SOFT: 4:1 starts catching where HARD does, takes less off and stays below it', () => {
   const x = narration(SR, { seconds: 12, levelDb: -24 })
-  assert.equal(toKernelParams({ ...VOX_DEFAULTS }).peaksMode, 'hard')
+  assert.equal(toKernelParams({ ...VOX_DEFAULTS }).peaksMode, 'soft')
   assert.equal(peaksModeDriveDb('hard'), 0)
   assert.ok(Math.abs(peaksModeDriveDb('soft') + 1.712 * Math.log2(3)) < 1e-9)
   const at = (peaks, peaksMode) => measure(x, { peaks, body: 0, deEss: 0, parallel: 0, peaksMode }).r
