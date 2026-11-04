@@ -503,8 +503,8 @@ async function applyAndClose() {
           <!-- The app's own IN / OUT ladders, horizontal (the Soft Clipper's pair):
                its ballistics, peak hold and clip lamp. -->
           <div class="vp-io">
-            <LevelMeter variant="modula" label="IN" orientation="horizontal" :levels="voxInputLevels" :height="IO_METER_LEN" :show-scale="false" />
-            <LevelMeter variant="modula" label="OUT" orientation="horizontal" :levels="voxOutputLevels" :height="IO_METER_LEN" :show-scale="false" />
+            <LevelMeter variant="modula" label="IN" label-side="start" orientation="horizontal" :levels="voxInputLevels" :height="IO_METER_LEN" :show-scale="false" />
+            <LevelMeter variant="modula" label="OUT" label-side="start" orientation="horizontal" :levels="voxOutputLevels" :height="IO_METER_LEN" :show-scale="false" />
           </div>
         </section>
       </div>

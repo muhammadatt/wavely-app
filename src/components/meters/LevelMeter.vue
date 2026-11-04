@@ -59,6 +59,12 @@ const props = defineProps({
   variant: { type: String, default: 'classic' },
   /** 'right' | 'left' — which side of the ladder the scale is engraved on. */
   scaleSide: { type: String, default: 'right' },
+  /**
+   * Horizontal Modula only: where the caption sits — 'end' (after the readout,
+   * the default) or 'start' (in FRONT of the ladder, VoxPressor's IN / OUT
+   * well). Fixed width either way, so stacked rows keep their ladders in line.
+   */
+  labelSide: { type: String, default: 'end' },
 })
 
 // Ladder geometry. A segment and the gap under it are one pitch, so the
@@ -398,6 +404,11 @@ function ariaText(bar) {
     :class="isHorizontal ? 'flex-row items-center' : 'flex-col items-start'"
     :style="{ gap: modula ? '8px' : '7px', ...modulaRoot }"
   >
+    <span
+      v-if="modulaH && label && labelSide === 'start'"
+      style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0;min-width:26px"
+    >{{ label }}</span>
+
     <!-- Modula: the readout in a well, above the ladder. -->
     <div v-if="modula && showReadout" class="flex justify-center" :style="modulaColumn">
       <span class="lm-well" :style="{ color: clipped ? '#ff9d90' : undefined }">{{ readout }}</span>
@@ -538,11 +549,11 @@ function ariaText(bar) {
       </div>
     </template>
 
-    <div v-else-if="modulaH && (showReadout || label)" class="flex flex-row items-center gap-[8px]">
+    <div v-else-if="modulaH && (showReadout || (label && labelSide !== 'start'))" class="flex flex-row items-center gap-[8px]">
       <span v-if="showReadout" class="lm-well" :style="{ color: clipped ? '#ff9d90' : undefined }">{{ readout }}</span>
       <!-- A fixed width, so an IN and an OUT row stacked together keep their
            ladders in line: the caption trails, and IN is narrower than OUT. -->
-      <span v-if="label" style="font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd;min-width:26px">{{ label }}</span>
+      <span v-if="label && labelSide !== 'start'" style="font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd;min-width:26px">{{ label }}</span>
     </div>
 
     <div
