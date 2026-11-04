@@ -323,9 +323,15 @@ const peaksLine = computed(() => {
   if (!r) return voxBusy.value ? 'measuring…' : '—'
   return `−${r.peaksDb.toFixed(1)} peaks · −${r.peaksBodyDb.toFixed(1)} body`
 })
-// Parallel has no measured figure of its own beyond its GR: the knobs above
-// it already say its mix and compressor, and the readouts never repeat a knob.
-const parallelLine = computed(() => (voxParallel.value <= 0 ? 'stage out' : ''))
+// Parallel: the copy's measured MAKEUP (its wet gain, solved on the blend —
+// mostly Drive's; Mix moves it a few tenths). Its mix and compressor are on
+// the knobs above it, and the readouts never repeat a knob.
+const parallelLine = computed(() => {
+  if (voxParallel.value <= 0) return 'stage out'
+  const m = voxMeasured.value.parallelMakeupDb
+  if (!Number.isFinite(m)) return voxBusy.value ? 'measuring…' : '—'
+  return `${m >= 0 ? '+' : '−'}${Math.abs(m).toFixed(1)} makeup`
+})
 // Peaks and Body read the measurement upstream of Parallel; Parallel is
 // re-solved by every measurement, so any one in flight makes it stale.
 const parallelStale = computed(() => voxBusy.value && voxPreview.value)
