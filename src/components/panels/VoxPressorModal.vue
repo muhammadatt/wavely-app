@@ -351,6 +351,9 @@ const readouts = computed(() => ({
   parallel: { gr: grText('parallel'), line: parallelLine.value, stale: parallelStale.value },
 }))
 
+/** The readout under the drum: the stage the needle reads. */
+const readout = computed(() => readouts.value[meter.value] ?? readouts.value.peaks)
+
 const measuredNote = computed(() => {
   const m = voxMeasured.value
   const corner = Number.isFinite(m.cornerHz) ? `voice corner ${Math.round(m.cornerHz)} Hz` : 'voice corner 80 Hz (default)'
@@ -436,14 +439,6 @@ async function applyAndClose() {
             title="How hard the 1176 catches the loudest peaks: every 10 is about 1 dB off them on typical narration (the line under the meter says what it took on this file). The ring is green up to where this file's loudest peaks come down to the voice, amber after, red where the stage starts compressing the voice itself — the later stages are there for that. 0 takes the stage out. Double-click to reset"
             @update:model-value="onPeaks"
           />
-          <div class="vp-readout" :class="{ 'is-stale': readouts.peaks.stale }" aria-live="polite">
-            <span class="vp-status-line">
-              <span v-if="readouts.peaks.gr" class="vp-gr">{{ readouts.peaks.gr }}</span><template v-if="readouts.peaks.line"><span v-if="readouts.peaks.gr" aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.peaks.warn, 'is-over': readouts.peaks.over }">{{ readouts.peaks.line }}</span></template>
-            </span>
-            <span v-if="readouts.peaks.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
-            <span v-else-if="readouts.peaks.note" class="vp-status-line is-warn">{{ readouts.peaks.note }}</span>
-            <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
-          </div>
           <FoldedLcd
             class="vp-fold vp-ctl-gap" name="Attack / release" label-position="above"
             :model-value="speedIndex" :min="0" :max="SPEED_OPTIONS.length - 1" :step="1"
@@ -466,6 +461,17 @@ async function applyAndClose() {
             <span class="vp-cap">Meter</span>
             <ModulaDrumCounter v-model="meter" class="vp-drum" :options="METER_OPTIONS" aria-label="What the needle reads" />
           </div>
+          <!-- THE SELECTED STAGE'S READOUT, under the drum (owner, November 2026:
+               one under each knob crowded them): its GR, then its measured
+               figures on the same line, then "remeasuring…" or its warning. -->
+          <div class="vp-readout" :class="{ 'is-stale': readout.stale }" aria-live="polite">
+            <span class="vp-status-line">
+              <span v-if="readout.gr" class="vp-gr">{{ readout.gr }}</span><template v-if="readout.line"><span v-if="readout.gr" aria-hidden="true"> · </span><span :class="{ 'is-warn': readout.warn, 'is-over': readout.over }">{{ readout.line }}</span></template>
+            </span>
+            <span v-if="readout.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
+            <span v-else-if="readout.note" class="vp-status-line is-warn">{{ readout.note }}</span>
+            <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
+          </div>
         </div>
 
         <section class="vp-col" aria-label="Body" @pointerdown="meter = 'body'" @focusin="meter = 'body'">
@@ -484,14 +490,6 @@ async function applyAndClose() {
             title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 10 = PR 42, 48 = PR 57, 100 = PR 78, aligned to this file's level and to what the 1176 stage hands it. The ring is green while it levels this voice gently, amber past about 4 dB of average leveling, red past 6. 0 takes the stage out. Double-click to reset"
             @update:model-value="onBody"
           />
-          <div class="vp-readout" :class="{ 'is-stale': readouts.body.stale }" aria-live="polite">
-            <span class="vp-status-line">
-              <span v-if="readouts.body.gr" class="vp-gr">{{ readouts.body.gr }}</span><template v-if="readouts.body.line"><span v-if="readouts.body.gr" aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.body.warn, 'is-over': readouts.body.over }">{{ readouts.body.line }}</span></template>
-            </span>
-            <span v-if="readouts.body.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
-            <span v-else-if="readouts.body.note" class="vp-status-line is-warn">{{ readouts.body.note }}</span>
-            <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
-          </div>
           <div class="vp-ctl vp-ctl-gap">
             <span class="vp-cap" aria-hidden="true">&nbsp;</span>
             <VoxSlideSwitch
@@ -579,15 +577,7 @@ async function applyAndClose() {
             </div>
 
           </div>
-          <div class="vp-readout" :class="{ 'is-stale': readouts.parallel.stale }" aria-live="polite">
-            <span class="vp-status-line">
-              <span v-if="readouts.parallel.gr" class="vp-gr">{{ readouts.parallel.gr }}</span><template v-if="readouts.parallel.line"><span v-if="readouts.parallel.gr" aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.parallel.warn, 'is-over': readouts.parallel.over }">{{ readouts.parallel.line }}</span></template>
-            </span>
-            <span v-if="readouts.parallel.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
-            <span v-else-if="readouts.parallel.note" class="vp-status-line is-warn">{{ readouts.parallel.note }}</span>
-            <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
-          </div>
-          <div class="vp-ctl vp-comp-switch">
+          <div class="vp-ctl">
             <VoxSlideSwitch
               :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS" :color="ACCENT" :surface="surface"
               aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
@@ -682,7 +672,7 @@ async function applyAndClose() {
   --vp-cap: #555b64;
   --vp-note: #3a3f47;
 }
-.vp-top { display: grid; grid-template-columns: 196px minmax(0, 1fr) 196px; align-items: start; gap: 14px; }
+.vp-top { display: grid; grid-template-columns: 170px minmax(0, 1fr) 170px; align-items: start; gap: 14px; }
 .vp-bottom { display: grid; grid-template-columns: 228px minmax(0, 1fr) 228px; gap: 14px; align-items: start; }
 .vp-middle { display: grid; grid-template-columns: 104px 104px; justify-content: center; gap: 10px; align-items: start; }
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
@@ -701,8 +691,6 @@ async function applyAndClose() {
 /* The closed fold is taller than a title; centred on the 12 px row it reads on the titles' line. */
 .vp-out-col { align-self: stretch; justify-content: flex-end; }
 .vp-out-title { display: flex; justify-content: center; }
-/* Straight under its readout, which already reserves a line for "remeasuring…". */
-.vp-comp-switch { margin-top: -6px; }
 .vp-io {
   align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 9px;
   padding: 9px 10px; border-radius: 9px; background: #1a1c20;
