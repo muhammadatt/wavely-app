@@ -118,8 +118,8 @@ const formatCeiling = i => CEILING_OPTIONS[Math.round(i)]?.label ?? ''
 const onSpeedIndex = i => onSpeed(SPEED_OPTIONS[Math.round(i)].value)
 const onCeilingIndex = i => syncCeiling(CEILING_OPTIONS[Math.round(i)].value)
 
-/** The IN / OUT ladders' length, px: a row is ladder + readout + caption, ~207 px, in a 228 px column's well. */
-const IO_METER_LEN = 128
+/** The IN / OUT ladders' length, px: a row is ladder + readout + caption, ~175 px, in the design's 196 px well. */
+const IO_METER_LEN = 100
 
 function formatPercent(v) {
   return v > 0 ? `${Math.round(v)} %` : 'OFF'
@@ -683,7 +683,7 @@ async function applyAndClose() {
 .vp-top { display: grid; grid-template-columns: 170px minmax(0, 1fr) 170px; align-items: start; gap: 14px; }
 /* De-ess's column is the top row's 170 px, so it sits straight under Peak reduction. */
 /* SYMMETRIC like the top row, so Density (the middle column) stays centred under the
-   meter; the right stack spans the last two columns (58 + 14 + 170 ≥ the IO well's 228). */
+   meter; the right stack spans the last two columns (58 + 14 + 170, the IO well 196 of it). */
 .vp-bottom { display: grid; grid-template-columns: 170px 58px minmax(0, 1fr) 58px 170px; gap: 14px; align-items: start; }
 .vp-bottom > .vp-middle { grid-column: 1; }
 .vp-bottom > [aria-label="Density"] { grid-column: 3; }
@@ -721,11 +721,13 @@ async function applyAndClose() {
 /* Two captioned knobs of different sizes side by side (Drive / Mix): captions on one baseline. */
 .vp-knob-row:has(> .vp-ctl + .vp-ctl) { align-items: flex-end; }
 /* The closed fold is taller than a title; centred on the 12 px row it reads on the titles' line. */
-.vp-out-col { flex: 1; justify-content: flex-end; }
-.vp-out-title { display: flex; justify-content: center; }
+/* The IN / OUT well at the design's 196 px, flush with the Body column's right edge, the
+   Output label centred over it. */
+.vp-out-col { flex: 1; justify-content: flex-end; align-items: flex-end; }
+.vp-out-title { width: 196px; display: flex; justify-content: center; }
 .vp-io {
-  align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 9px;
-  padding: 9px 10px; border-radius: 9px; background: #1a1c20;
+  width: 196px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 9px;
+  padding: 9px 8px; border-radius: 9px; background: #1a1c20;
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, .8), 0 1px 0 rgba(255, 255, 255, .05);
 }
 /* On the light panel the well is set INTO the plate: a deeper gradient, a warm rim and a highlight. */
