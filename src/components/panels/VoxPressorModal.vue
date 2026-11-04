@@ -385,8 +385,13 @@ async function applyAndClose() {
     <div class="vp" :class="{ 'is-light': light }">
       <!-- ── TOP: Peaks and Body flank the needle meter ─────────────────── -->
       <div class="vp-top">
-        <section class="vp-col" aria-label="Peaks">
-          <div class="vp-title-row"><span class="vp-title" :class="{ 'is-lit': meter === 'peaks' }">Peak reduction</span></div>
+        <section class="vp-col" aria-label="Peaks" @pointerdown="meter = 'peaks'" @focusin="meter = 'peaks'">
+          <div class="vp-title-row">
+            <button
+              type="button" class="vp-title" :class="{ 'is-lit': meter === 'peaks' }" :aria-pressed="String(meter === 'peaks')"
+              title="Show this stage on the GR meter" @click="meter = 'peaks'"
+            >Peak reduction</button>
+          </div>
           <ModulaKnob
             variant="ticks" :size="104"
             :model-value="peaksShown" :min="0" :max="PEAKS_MAX * KNOB_SCALE" :step="1"
@@ -427,8 +432,13 @@ async function applyAndClose() {
           </div>
         </div>
 
-        <section class="vp-col" aria-label="Body">
-          <div class="vp-title-row"><span class="vp-title" :class="{ 'is-lit': meter === 'body' }">Body leveler</span></div>
+        <section class="vp-col" aria-label="Body" @pointerdown="meter = 'body'" @focusin="meter = 'body'">
+          <div class="vp-title-row">
+            <button
+              type="button" class="vp-title" :class="{ 'is-lit': meter === 'body' }" :aria-pressed="String(meter === 'body')"
+              title="Show this stage on the GR meter" @click="meter = 'body'"
+            >Body leveler</button>
+          </div>
           <ModulaKnob
             variant="ticks" :size="104"
             :model-value="bodyShown" :min="0" :max="BODY_MAX * KNOB_SCALE" :step="1"
@@ -457,8 +467,13 @@ async function applyAndClose() {
 
       <!-- ── BOTTOM (layout B): Parallel | De-ess · Detail | Output ─────── -->
       <div class="vp-bottom">
-        <section class="vp-col" aria-label="Parallel">
-          <div class="vp-title-row"><span class="vp-title" :class="{ 'is-lit': meter === 'parallel' }">Parallel</span></div>
+        <section class="vp-col" aria-label="Parallel" @pointerdown="meter = 'parallel'" @focusin="meter = 'parallel'">
+          <div class="vp-title-row">
+            <button
+              type="button" class="vp-title" :class="{ 'is-lit': meter === 'parallel' }" :aria-pressed="String(meter === 'parallel')"
+              title="Show this stage on the GR meter" @click="meter = 'parallel'"
+            >Parallel</button>
+          </div>
           <div class="vp-knob-row">
             <ModulaKnob
               variant="led" :size="84"
@@ -628,7 +643,9 @@ async function applyAndClose() {
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
 .vp-centre { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 6px; min-width: 0; }
 .vp-title-row { height: 12px; display: flex; align-items: center; justify-content: center; }
-.vp-title { font: 600 10px/1 var(--m-font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--vp-title); transition: color .2s ease; }
+.vp-title { border: none; background: none; padding: 1px 4px; border-radius: 3px; cursor: pointer; font: 600 10px/1 var(--m-font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--vp-title); transition: color .2s ease; }
+.vp-title:hover { color: var(--vp-title-lit); }
+.vp-title:focus-visible { outline: 1px solid var(--vp-title-lit); outline-offset: 1px; }
 .vp-title.is-lit { color: var(--vp-title-lit); }
 .vp-cap { font: 500 9px/1 var(--m-font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--vp-cap); white-space: nowrap; }
 .vp-ctl { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 7px; }
