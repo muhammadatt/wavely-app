@@ -622,6 +622,19 @@ async function applyAndClose() {
 
 /* The folded LCDs take the panel's inks (FoldedLcd reads the --hw-* tokens). */
 .vp-fold { --hw-dim: var(--vp-cap); --hw-dim-hover: var(--vp-note); --hw-ink: var(--vp-note); }
+/* Closed, the name and the value must not read as one phrase: the name is a
+   quiet caption, the value an amber LCD readout in its own small well. */
+.vp-fold :deep(.pg-readout) { display: inline-flex; align-items: center; gap: 7px; }
+.vp-fold :deep(.pg-name) { font: 500 9px/1 var(--m-font-mono); letter-spacing: .14em; color: var(--vp-cap); }
+.vp-fold :deep(.pg-value) {
+  padding: 3px 6px; border-radius: 3px; background: #0b0c0e;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .9), 0 1px 0 rgba(255, 255, 255, .06);
+  font: 600 9px/1 var(--m-font-mono); letter-spacing: .06em; color: #e0a65c;
+  text-shadow: 0 0 4px rgba(255, 140, 40, .3);
+}
+.vp.is-light .vp-fold :deep(.pg-value) { box-shadow: inset 0 1px 3px rgba(0, 0, 0, .9), 0 1px 0 rgba(255, 255, 255, .6); }
+.vp-fold :deep(.pg-readout:hover .pg-name) { color: var(--vp-note); }
+
 /* Open, the name is a caption like every other control's: above, in the panel's mono. */
 .vp-fold :deep(.pg-title--above) {
   font: 500 9px/1 var(--m-font-mono); letter-spacing: .14em; text-transform: uppercase;

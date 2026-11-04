@@ -52,7 +52,9 @@ const closeBtn = ref(null)
 
 const hasAuto = computed(() => props.auto !== null)
 const manual = computed(() => props.auto === false)
-const text = computed(() => `${props.name.toUpperCase()} ${props.format(props.modelValue)}${manual.value ? ' · MANUAL' : ''}`)
+// Name and value are separate spans so a faceplate can set them apart; LA
+// Vintage 2A styles neither and reads the one engraved line as before.
+const valueText = computed(() => `${props.format(props.modelValue)}${manual.value ? ' · MANUAL' : ''}`)
 const title = computed(() => {
   if (!hasAuto.value) return `${props.name}. Click to adjust.`
   return props.auto
@@ -90,7 +92,7 @@ function onKeyDown(e) {
       :title="title"
       :aria-expanded="false"
       @click="expand"
-    >{{ text }}</button>
+    ><span class="pg-name">{{ name.toUpperCase() }}</span> <span class="pg-value">{{ valueText }}</span></button>
 
     <div v-else class="pg-open" :class="{ 'pg-open--above': labelPosition === 'above' }" role="group" :aria-label="name">
       <div class="pg-gutter">
