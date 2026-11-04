@@ -127,19 +127,19 @@ function formatPercent(v) {
 
 // The 1176's SPEED (`PEAKS_SPEEDS`): AUTO follows the voice's pitch.
 const SPEED_OPTIONS = [
-  { value: 'auto', label: 'AUTO', title: 'Release follows the voice: slow enough for its pitch that the gain does not ripple on each cycle' },
+  { value: 'auto', label: 'AUTO', title: "Release follows the voice's pitch" },
   // Labels one step faster than the ids (owner, November 2026): every 1176
   // attack is fast, so the slowest setting reads NORMAL. Ids, params and the
   // kernel's PEAKS_SPEEDS keep gentle / normal / fast.
-  { value: 'gentle', label: 'NORMAL', title: 'The slowest attack and release here (still fast for a compressor): the cleanest, catches the least' },
+  { value: 'gentle', label: 'NORMAL', title: 'Slowest attack and release' },
   { value: 'normal', label: 'FAST', title: 'Faster attack and release' },
-  { value: 'fast', label: 'FASTER', title: 'The fastest attack and release: grabs every onset; can ripple on low voices' },
+  { value: 'fast', label: 'FASTER', title: 'Fastest attack and release' },
 ]
 
 // PEAKS KNEE: the 1176's ratio button (`PEAKS_MODES`), drawn as its curve.
 const PEAKS_MODE_OPTIONS = [
-  { value: 'hard', label: 'Hard knee', d: 'M3 15 L12 6 L21 4', title: 'HARD, 12:1: a limiter. The loudest peaks are held down hard; the rest is left alone' },
-  { value: 'soft', label: 'Soft knee', d: 'M3 15 L8 10 C11 7 14 5.2 21 4', title: 'SOFT, 4:1: a gentler peak compressor for a dynamic performance. Starts at the same place, takes less off each step' },
+  { value: 'hard', label: 'Hard knee', d: 'M3 15 L12 6 L21 4', title: 'Hard knee, 12:1' },
+  { value: 'soft', label: 'Soft knee', d: 'M3 15 L8 10 C11 7 14 5.2 21 4', title: 'Soft knee, 4:1' },
 ]
 
 // CHARACTER (WARM / CLEAN) is OFF the panel (owner, November 2026): it ships WARM
@@ -147,28 +147,28 @@ const PEAKS_MODE_OPTIONS = [
 
 // OUTPUT CEILING: where the output peak lands.
 const CEILING_OPTIONS = [
-  { value: 'source', label: 'ORIG', title: "The output peak stays at the original's own peak" },
-  { value: '-1', label: '−1 dB', title: 'The output peak lands at −1 dBFS (podcast / streaming)' },
-  { value: '-3', label: '−3 dB', title: 'The output peak lands at −3 dBFS (ACX)' },
+  { value: 'source', label: 'ORIG', title: "Output peak at the original's" },
+  { value: '-1', label: '−1 dB', title: 'Output peak at −1 dBFS' },
+  { value: '-3', label: '−3 dB', title: 'Output peak at −3 dBFS' },
 ]
 
 const PARALLEL_DEESS_OPTIONS = [0, 25, 50, 75, 100].map(v => ({
   value: v, label: v === 0 ? 'OFF' : String(v),
-  title: v === 0 ? 'No de-esser on the copy' : `De-ess the parallel copy before the blend (${v})`,
+  title: v === 0 ? 'No copy de-esser' : `De-ess the copy (${v})`,
 }))
 const PARALLEL_DEESS_MODE_OPTIONS = [
-  { value: 'broadband', label: 'FULL', title: 'Turn the whole copy down: the dry carries the fricative untouched' },
+  { value: 'broadband', label: 'FULL', title: 'Duck the whole copy' },
   { value: 'shelf', label: '4K', title: 'Cut the copy above 4 kHz' },
   { value: 'shelf-low', label: '2.5K', title: 'Cut the copy above 2.5 kHz' },
 ]
 const SIB_EMPH_OPTIONS = [
-  { value: true, label: 'ON', title: "The parallel 1176's detector hears sibilance +15 dB, so it ducks the copy on an \"s\"" },
-  { value: false, label: 'OFF', title: 'The parallel 1176 hears the voice flat' },
+  { value: true, label: 'ON', title: 'Detector hears sibilance +15 dB' },
+  { value: false, label: 'OFF', title: 'Flat detector' },
 ]
 
 const PARALLEL_COMP_OPTIONS = [
-  { value: 'la2a', label: 'LA-2A', title: 'A slow, smooth opto copy (an LA Vintage 2A): thickens the body without grabbing the onsets' },
-  { value: '1176', label: '1176', title: 'A fast 4:1 1176 copy (New York compression)' },
+  { value: 'la2a', label: 'LA-2A', title: 'Slow opto copy' },
+  { value: '1176', label: '1176', title: 'Fast 4:1 FET copy' },
 ]
 
 // BENCH: LA Vintage 2A's own Lookahead on the Body stage. Off ships.
@@ -176,8 +176,8 @@ const LOOKAHEAD_OPTIONS = BODY_LOOKAHEAD_STEPS_MS.map(ms => ({
   value: ms,
   label: ms === 0 ? 'OFF' : `${ms} ms`,
   title: ms === 0
-    ? 'No lookahead: the LA-2A as the hardware is'
-    : `Delay the audio ${ms} ms so the opto's gain meets each onset early (adds ${ms} ms of latency; pre-ducks consonants at the top)`,
+    ? 'No lookahead'
+    : `${ms} ms lookahead`,
 }))
 
 function formatPeaks(v) {
@@ -406,7 +406,7 @@ async function applyAndClose() {
           <div class="vp-title-row">
             <button
               type="button" class="vp-title" :class="{ 'is-lit': meter === 'peaks' }" :aria-pressed="String(meter === 'peaks')"
-              title="Show this stage on the GR meter" @click="meter = 'peaks'"
+              title="Show on the meter" @click="meter = 'peaks'"
             >Peak reduction</button>
           </div>
           <ModulaKnob
@@ -415,7 +415,7 @@ async function applyAndClose() {
             :default-value="VOX_DEFAULTS.peaks * KNOB_SCALE"
             aria-label="Peaks" :color="PEAKS_COLOR" :format-value="formatPeaks" :disabled="!voxPreview"
             :zones="peaksZones"
-            title="How hard the 1176 catches the loudest peaks: every 10 is about 1 dB off them on typical narration (the line under the meter says what it took on this file). The ring is green up to where this file's loudest peaks come down to the voice, amber after, red where the stage starts compressing the voice itself — the later stages are there for that. 0 takes the stage out. Double-click to reset"
+            title="How hard the 1176 catches the loudest peaks"
             @update:model-value="onPeaks"
           />
           <FoldedLcd
@@ -459,7 +459,7 @@ async function applyAndClose() {
           <div class="vp-title-row">
             <button
               type="button" class="vp-title" :class="{ 'is-lit': meter === 'body' }" :aria-pressed="String(meter === 'body')"
-              title="Show this stage on the GR meter" @click="meter = 'body'"
+              title="Show on the meter" @click="meter = 'body'"
             >Body leveler</button>
           </div>
           <ModulaKnob
@@ -468,7 +468,7 @@ async function applyAndClose() {
             :default-value="VOX_DEFAULTS.body * KNOB_SCALE"
             aria-label="Body" :color="ACCENT" :format-value="formatBody" :disabled="!voxPreview"
             :zones="bodyZones"
-            title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 10 = PR 42, 48 = PR 57, 100 = PR 78, aligned to this file's level and to what the 1176 stage hands it. The ring is green while it levels this voice gently, amber past about 4 dB of average leveling, red past 6. 0 takes the stage out. Double-click to reset"
+            title="How hard the LA-2A levels the voice"
             @update:model-value="onBody"
           />
         </section>
@@ -484,7 +484,7 @@ async function applyAndClose() {
                 :model-value="voxDensity" :min="0" :max="100" :step="1"
                 :default-value="VOX_DEFAULTS.density"
                 aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
-                title="Density: the Cambridge Inflator's Effect, anchored at the source peak — lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
+                title="Low-end density"
                 @update:model-value="syncDensity"
               />
             </div>
@@ -507,7 +507,7 @@ async function applyAndClose() {
                   :model-value="voxDeEss" :min="0" :max="100" :step="1"
                   :default-value="VOX_DEFAULTS.deEss"
                   aria-label="De-ess" :color="knobColor" :format-value="formatKnob" :disabled="!voxPreview"
-                  title="The HF Softener's Amount, after the compressors: takes down the sibilance they brought up. 0 takes the stage out. Double-click to reset"
+                  title="De-ess amount"
                   @update:model-value="syncDeEss"
                 />
                 <span class="vp-cap">Amount</span>
@@ -519,7 +519,7 @@ async function applyAndClose() {
                     :model-value="voxDeEssSplit" :min="0" :max="100" :step="1" :default-value="VOX_DEFAULTS.deEssSplit"
                     aria-label="De-ess split between wide band and split band" :color="knobColor" :format-value="formatSplit"
                     :disabled="!voxPreview || voxDeEss <= 0"
-                    title="Where the De-ess Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
+                    title="Wide band ↔ split band"
                     @update:model-value="syncDeEssSplit"
                   />
                   <span class="vp-end vp-end--lo" aria-hidden="true">Wide</span>
@@ -535,7 +535,7 @@ async function applyAndClose() {
           <div class="vp-title-row">
             <button
               type="button" class="vp-title" :class="{ 'is-lit': meter === 'parallel' }" :aria-pressed="String(meter === 'parallel')"
-              title="Show this stage on the GR meter" @click="meter = 'parallel'"
+              title="Show on the meter" @click="meter = 'parallel'"
             >Density</button>
           </div>
           <div class="vp-knob-row">
@@ -545,7 +545,7 @@ async function applyAndClose() {
                 :model-value="voxParallelDrive" :min="0" :max="PARALLEL_DRIVE_MAX" :step="0.5"
                 :default-value="VOX_DEFAULTS.parallelDrive"
                 aria-label="Parallel drive" :color="knobColor" :format-value="formatDrive" :disabled="!voxPreview || voxParallel <= 0"
-                title="How hard the parallel copy is compressed. On the LA-2A it is Peak Reduction: 0 = PR 38, 3 = PR 50, 10 = PR 78; the 1176 is set so the same position compresses about as hard. The copy's makeup is re-measured. Double-click to reset"
+                title="How hard the parallel copy is compressed"
                 @update:model-value="onDrive"
               />
               <span class="vp-cap">Drive</span>
@@ -558,7 +558,7 @@ async function applyAndClose() {
               :model-value="voxParallel" :min="0" :max="100" :step="1"
               :default-value="VOX_DEFAULTS.parallel"
               aria-label="Parallel mix" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
-              title="Parallel compression: a heavily compressed copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
+              title="Parallel copy blended under the voice"
               @update:model-value="onParallel"
             />
               <span class="vp-end vp-end--lo" aria-hidden="true">0</span>
@@ -603,7 +603,7 @@ async function applyAndClose() {
         <div v-if="showBench" class="vp-bench-wrap">
           <button
             type="button" class="vp-bench-toggle" :aria-expanded="benchOpen"
-            title="Dev-only A/B settings and the measured values. Not on the shipping faceplate"
+            title="Dev-only settings"
             @click="benchOpen = !benchOpen"
           >BENCH {{ benchOpen ? '▴' : '▾' }}</button>
           <div v-if="benchOpen" class="vp-bench-body">
