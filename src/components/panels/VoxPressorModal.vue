@@ -121,7 +121,7 @@ const onSpeedIndex = i => onSpeed(SPEED_OPTIONS[Math.round(i)].value)
 const onCeilingIndex = i => syncCeiling(CEILING_OPTIONS[Math.round(i)].value)
 
 /** The IN / OUT ladders' length, px: a row is ladder + readout + caption, ~207 px, in a 228 px column's well. */
-const IO_METER_LEN = 104
+const IO_METER_LEN = 128
 
 function formatPercent(v) {
   return v > 0 ? `${Math.round(v)} %` : 'OFF'
@@ -600,8 +600,8 @@ async function applyAndClose() {
           <!-- The app's own IN / OUT ladders, horizontal (the Soft Clipper's pair):
                its ballistics, peak hold and clip lamp. -->
           <div class="vp-io">
-            <LevelMeter variant="modula" label="IN" label-side="start" orientation="horizontal" :levels="voxInputLevels" :height="IO_METER_LEN" :show-scale="false" />
-            <LevelMeter variant="modula" label="OUT" label-side="start" orientation="horizontal" :levels="voxOutputLevels" :height="IO_METER_LEN" :show-scale="false" />
+            <LevelMeter variant="modula" slim label="IN" label-side="start" orientation="horizontal" :levels="voxInputLevels" :height="IO_METER_LEN" :show-scale="false" />
+            <LevelMeter variant="modula" slim label="OUT" label-side="start" orientation="horizontal" :levels="voxOutputLevels" :height="IO_METER_LEN" :show-scale="false" />
           </div>
         </section>
       </div>
@@ -687,7 +687,7 @@ async function applyAndClose() {
 .vp-knob-row { height: 84px; display: flex; align-items: center; justify-content: center; gap: 18px; }
 .vp-out-head { flex-direction: column; gap: 7px; }
 .vp-io {
-  align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 9px;
   padding: 9px 10px; border-radius: 9px; background: #1a1c20;
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, .8), 0 1px 0 rgba(255, 255, 255, .05);
 }
