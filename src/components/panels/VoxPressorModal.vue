@@ -470,6 +470,7 @@ async function applyAndClose() {
           </div>
         </div>
 
+        <div class="vp-body-col">
         <section class="vp-col" aria-label="Body" @pointerdown="meter = 'body'" @focusin="meter = 'body'">
           <div class="vp-title-row">
             <button
@@ -487,9 +488,28 @@ async function applyAndClose() {
             @update:model-value="onBody"
           />
         </section>
+          <!-- LO DETAIL in the space under Body (owner, November 2026: reclaims the
+               height), kept its OWN section — a rule and its own title, and pushed
+               down level with the Knee keys — so it does not read as part of Body. -->
+          <section class="vp-col vp-detail" aria-label="Detail">
+            <hr class="vp-rule" aria-hidden="true">
+            <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
+            <div class="vp-knob-row">
+              <ModulaKnob
+                variant="led" :size="70"
+                :model-value="voxDensity" :min="0" :max="100" :step="1"
+                :default-value="VOX_DEFAULTS.density"
+                aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
+                title="Density: the Cambridge Inflator's Effect, anchored at the source peak — lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
+                @update:model-value="syncDensity"
+              />
+            </div>
+          </section>
+
+        </div>
       </div>
 
-      <!-- ── BOTTOM (layout B): De-ess | Parallel | Lo Detail | Output ─────── -->
+      <!-- ── BOTTOM (layout B): De-ess | Parallel | Output ─────── -->
       <div class="vp-bottom">
         <div class="vp-middle">
           <section class="vp-col" aria-label="De-ess">
@@ -561,25 +581,7 @@ async function applyAndClose() {
           </div>
         </section>
 
-        <!-- The right column: LO DETAIL on the Body leveler's centre line (a 170 px box
-             at the right edge, as Body's column is), then OUTPUT LEVEL under it. It is
-             in the bottom row, not under Body, so it does not read as part of the Body
-             stage (owner, November 2026). -->
         <div class="vp-right">
-        <section class="vp-col vp-detail" aria-label="Detail">
-          <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
-          <div class="vp-knob-row">
-            <ModulaKnob
-              variant="led" :size="70"
-              :model-value="voxDensity" :min="0" :max="100" :step="1"
-              :default-value="VOX_DEFAULTS.density"
-              aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
-              title="Density: the Cambridge Inflator's Effect, anchored at the source peak — lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
-              @update:model-value="syncDensity"
-            />
-          </div>
-        </section>
-
         <!-- OUTPUT: the ceiling setter over the IN / OUT meters, together at the
              BOTTOM of the column (owner, November 2026: at the top, with no title
              of their own, they read as detached from the row). -->
@@ -676,7 +678,10 @@ async function applyAndClose() {
 .vp-bottom > [aria-label="Density"] { grid-column: 3; }
 .vp-right { grid-column: 4 / 6; align-self: stretch; display: flex; flex-direction: column; gap: 14px; }
 /* 170 px at the right edge: the top row's Body column, so the two knobs share a centre. */
-.vp-detail { align-self: flex-end; width: 170px; }
+.vp-body-col { align-self: stretch; display: flex; flex-direction: column; justify-content: space-between; gap: 14px; }
+.vp-detail { gap: 8px; }
+.vp-rule { width: 120px; margin: 0 0 4px; border: none; border-top: 1px dashed rgba(127, 127, 127, .3); }
+.vp-detail .vp-knob-row { height: auto; }
 .vp-middle { display: grid; grid-template-columns: 146px; justify-content: center; gap: 10px; align-items: start; }
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
 .vp-centre { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 6px; min-width: 0; }
