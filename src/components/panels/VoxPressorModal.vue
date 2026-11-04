@@ -87,10 +87,19 @@ const meter = ref('peaks')
 const meterDb = computed(() => Math.abs({ peaks: voxPeaksGr.value, body: voxBodyGr.value, parallel: voxParallelGr.value }[meter.value] ?? 0))
 const meterLabel = computed(() => METER_OPTIONS.find(o => o.value === meter.value)?.label ?? '')
 const follow = (stage, fn) => (v) => { meter.value = stage; fn(v) }
-const onPeaks = follow('peaks', v => syncPeaks(v))
+/**
+ * THE PANEL'S 0–100 SCALE (owner, November 2026: match the other compressors).
+ * Peaks and Body are stored 0–10 (`peaksDriveDb`, `bodyPrFor` read them so);
+ * the knobs show and step them ×10, so Peaks 30 is the old 3 — about 3 dB off
+ * the loudest peaks of typical narration — and Body 47.5 is PR 57.
+ */
+const KNOB_SCALE = 10
+const peaksShown = computed(() => voxPeaks.value * KNOB_SCALE)
+const bodyShown = computed(() => voxBody.value * KNOB_SCALE)
+const onPeaks = follow('peaks', v => syncPeaks(v / KNOB_SCALE))
 const onPeaksMode = follow('peaks', v => syncPeaksMode(v))
 const onSpeed = follow('peaks', v => syncSpeed(v))
-const onBody = follow('body', v => syncBody(v))
+const onBody = follow('body', v => syncBody(v / KNOB_SCALE))
 const onCharacter = follow('body', v => syncCharacter(v))
 const onParallel = follow('parallel', v => syncParallel(v))
 const onDrive = follow('parallel', v => syncParallelDrive(v))
@@ -177,12 +186,12 @@ const LOOKAHEAD_OPTIONS = BODY_LOOKAHEAD_STEPS_MS.map(ms => ({
 }))
 
 function formatPeaks(v) {
-  return v > 0 ? v.toFixed(1) : 'OFF'
+  return v > 0 ? String(Math.round(v)) : 'OFF'
 }
 
 function formatBody(v) {
   if (v <= 0) return 'OFF'
-  return Number.isInteger(v * 2) ? v.toFixed(1) : v.toFixed(2)
+  return Number.isInteger(v) ? String(v) : v.toFixed(1)
 }
 
 function formatDrive(v) {
@@ -197,23 +206,11 @@ function formatKnob(v) {
 
 // The readouts are MEASURED at the knobs (`measureVoxPressor`): the knobs act
 // at once, the numbers follow when the measurement lands.
-const peaksNote = computed(() => {
-  if (voxPeaks.value <= 0) return 'stage out'
-  const r = voxReadout.value
-  if (!r) return voxBusy.value ? 'measuring…' : '—'
-  return `−${r.peaksDb.toFixed(1)} dB on peaks`
-})
 // A warning, never a cap: the knob always goes where it is turned, and this
 // says when that has started lowering the voice itself (PEAKS_BODY_WARN_DB).
 const peaksWarn = computed(() => {
   const r = voxReadout.value
   return !!r && voxPeaks.value > 0 && r.peaksBodyDb > PEAKS_BODY_WARN_DB
-})
-const bodyTouchNote = computed(() => {
-  const r = voxReadout.value
-  if (!r || voxPeaks.value <= 0) return ''
-  const touched = `voice touched ${r.peaksBodyDb.toFixed(1)} dB`
-  return r.peaksBodyDb > PEAKS_BODY_WARN_DB ? `${touched} · compressing the voice` : touched
 })
 
 // THE PEAKS GUIDE (`measureVoxPressor`'s `peaksGuide`): green up to the knob
@@ -227,16 +224,10 @@ const peaksZones = computed(() => {
   if (!g) return null
   const red = Math.max(g.target, g.warn)
   return [
-    { from: 0, to: g.target, color: GUIDE_OK },
-    { from: g.target, to: red, color: GUIDE_EDGE },
-    { from: red, to: PEAKS_MAX, color: GUIDE_OVER },
+    { from: 0, to: g.target * KNOB_SCALE, color: GUIDE_OK },
+    { from: g.target * KNOB_SCALE, to: red * KNOB_SCALE, color: GUIDE_EDGE },
+    { from: red * KNOB_SCALE, to: PEAKS_MAX * KNOB_SCALE, color: GUIDE_OVER },
   ]
-})
-const guideNote = computed(() => {
-  const g = voxPeaksGuide.value
-  if (!g) return ''
-  if (g.gapDb < 0.5) return 'peaks already sit with the voice'
-  return `peaks stand ${g.gapDb.toFixed(1)} dB over the voice · ${g.target.toFixed(1)} levels them`
 })
 
 // Gain ripple: the 1176 moving its gain within the voice's own cycles. A
@@ -265,10 +256,21 @@ const bodyNote = computed(() => {
 const stale = computed(() => voxUpstreamStale.value)
 
 // The line under the METER drum: the selected stage's measured readout.
-const peaksLine = computed(() => [peaksNote.value, bodyTouchNote.value, rippleNote.value].filter(Boolean).join(' · '))
+/**
+ * MINIMAL, as Body's and Parallel's (owner, November 2026): what it took off
+ * the peaks and what it cost the voice. The ripple only appears when it warns;
+ * the guide is on the knob's ring.
+ */
+const peaksLine = computed(() => {
+  if (voxPeaks.value <= 0) return 'stage out'
+  const r = voxReadout.value
+  if (!r) return voxBusy.value ? 'measuring…' : '—'
+  const line = `−${r.peaksDb.toFixed(1)} dB peaks · −${r.peaksBodyDb.toFixed(1)} dB body`
+  return rippleWarn.value ? `${line} · ${rippleNote.value}` : line
+})
 const statusLines = computed(() => {
   if (meter.value === 'peaks') {
-    return [{ text: peaksLine.value, warn: peaksWarn.value || rippleWarn.value }, { text: guideNote.value }]
+    return [{ text: peaksLine.value, warn: peaksWarn.value || rippleWarn.value }]
   }
   if (meter.value === 'body') return [{ text: bodyNote.value }]
   const comp = voxParallelComp.value === 'la2a' ? 'LA-2A' : '1176'
@@ -353,11 +355,11 @@ async function applyAndClose() {
           <div class="vp-title-row"><span class="vp-title" :class="{ 'is-lit': meter === 'peaks' }">Peak reduction</span></div>
           <ModulaKnob
             variant="ticks" :size="104"
-            :model-value="voxPeaks" :min="0" :max="PEAKS_MAX" :step="0.5"
-            :default-value="VOX_DEFAULTS.peaks"
+            :model-value="peaksShown" :min="0" :max="PEAKS_MAX * KNOB_SCALE" :step="1"
+            :default-value="VOX_DEFAULTS.peaks * KNOB_SCALE"
             aria-label="Peaks" :color="PEAKS_COLOR" :format-value="formatPeaks" :disabled="!voxPreview"
             :zones="peaksZones"
-            title="How hard the 1176 catches the loudest peaks: about that many dB off them on typical narration (the line under the meter says what it took on this file). The ring is green up to where this file's loudest peaks come down to the voice, amber after, red where the stage starts compressing the voice itself — the later stages are there for that. 0 takes the stage out. Double-click to reset"
+            title="How hard the 1176 catches the loudest peaks: every 10 is about 1 dB off them on typical narration (the line under the meter says what it took on this file). The ring is green up to where this file's loudest peaks come down to the voice, amber after, red where the stage starts compressing the voice itself — the later stages are there for that. 0 takes the stage out. Double-click to reset"
             @update:model-value="onPeaks"
           />
           <FoldedLcd
@@ -393,10 +395,10 @@ async function applyAndClose() {
           <div class="vp-title-row"><span class="vp-title" :class="{ 'is-lit': meter === 'body' }">Body leveler</span></div>
           <ModulaKnob
             variant="ticks" :size="104"
-            :model-value="voxBody" :min="0" :max="BODY_MAX" :step="0.25"
-            :default-value="VOX_DEFAULTS.body"
+            :model-value="bodyShown" :min="0" :max="BODY_MAX * KNOB_SCALE" :step="0.5"
+            :default-value="VOX_DEFAULTS.body * KNOB_SCALE"
             aria-label="Body" :color="ACCENT" :format-value="formatBody" :disabled="!voxPreview"
-            title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 1 = PR 42, 4.75 = PR 57, 10 = PR 78 (4 points a step), aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
+            title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 10 = PR 42, 47.5 = PR 57, 100 = PR 78, aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
             @update:model-value="onBody"
           />
           <div class="vp-ctl vp-ctl-gap">
