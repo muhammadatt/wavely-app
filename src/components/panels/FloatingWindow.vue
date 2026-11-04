@@ -199,6 +199,12 @@ const props = defineProps({
    */
   design: { type: String, default: 'classic' },
   /**
+   * Modula only: 'dark' (the steel chassis) | 'light' (a painted cream panel,
+   * VoxPressor's 2b). Light repaints the chassis, header and footer; the face
+   * draws its own controls for the surface it is told it sits on.
+   */
+  surface: { type: String, default: 'dark' },
+  /**
    * A `usePluginPresets` instance. Under Modula it puts the preset browser in
    * the header's centre column (classic windows slot PresetMenu themselves).
    */
@@ -631,6 +637,7 @@ function requestClose() {
     :aria-busy="frozen || undefined"
     :data-chrome="chrome"
     :data-design="design"
+    :data-surface="design === 'modula' && surface === 'light' ? 'light' : undefined"
     role="dialog"
     :aria-label="label"
     tabindex="-1"
@@ -1575,6 +1582,33 @@ function requestClose() {
   background: linear-gradient(180deg, #f2f4f7, #d9dde3);
   box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(0, 0, 0, 0.55), 0 6px 12px -6px rgba(0, 0, 0, 0.9);
 }
+
+/* MODULA, LIGHT SURFACE: a painted cream panel (VoxPressor 2b). The inks and
+   the raised shadows turn warm-dark; Apply stays the light primary. */
+.win-frame[data-design='modula'][data-surface='light'] {
+  background: linear-gradient(180deg, #e6e2da, #cdc8be);
+  color: #1d2026;
+}
+[data-surface='light'] .win-header,
+[data-surface='light'] .win-footer {
+  --m-ink: #1d2026;
+  --m-ink-2: #3a3f47;
+  --m-ink-3: #41464e;
+  --m-ink-4: #555b64;
+  --m-shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 1px rgba(40, 30, 20, 0.28), 0 5px 9px -4px rgba(40, 30, 20, 0.35);
+}
+[data-surface='light'] .win-header { border-bottom-color: rgba(60, 50, 40, 0.22); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45); }
+[data-surface='light'] .win-footer { border-top-color: rgba(60, 50, 40, 0.22); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45); }
+[data-surface='light'] .win-brand-m { color: #1d2026; }
+/* The selection readout carries an inline dark-surface colour. */
+[data-surface='light'] .win-sel { color: #555b64 !important; }
+[data-surface='light'] .win-icon-btn { color: #3a3f47; box-shadow: var(--m-shadow-raised); }
+[data-surface='light'] .win-icon-btn:hover,
+[data-surface='light'] .win-icon-btn--on { background: rgba(0, 0, 0, 0.05); color: #1d2026; }
+[data-surface='light'] .win-rule--tall { background: rgba(60, 50, 40, 0.3); box-shadow: 1px 0 0 rgba(255, 255, 255, 0.5); }
+[data-surface='light'] .win-preview:hover:not(:disabled) { background: rgba(0, 0, 0, 0.05); }
+[data-surface='light'] .win-selectall { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18); }
+[data-surface='light'] .win-apply { box-shadow: inset 0 1px 0 #ffffff, 0 1px 1px rgba(40, 30, 20, 0.3), 0 5px 9px -4px rgba(40, 30, 20, 0.35); }
 
 @keyframes pluginBounceIn {
   0% { opacity: 0; transform: scale(0.94) translateY(8px); }

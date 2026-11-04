@@ -7,27 +7,31 @@ import { releaseSecondsForDial } from '../../audio/fet1176Processor.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
-import LevelMeter from '../meters/LevelMeter.vue'
-import GainReductionBar from '../meters/GainReductionBar.vue'
+import ModulaDrumCounter from '../modula/ModulaDrumCounter.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import VoxNeedleMeter from './voxpressor/VoxNeedleMeter.vue'
+import VoxLcdStepper from './voxpressor/VoxLcdStepper.vue'
+import VoxKneeKeys from './voxpressor/VoxKneeKeys.vue'
+import VoxSlideSwitch from './voxpressor/VoxSlideSwitch.vue'
+import VoxIoMeters from './voxpressor/VoxIoMeters.vue'
 import { isVoxPressorBenchVisible } from '../../audio/effects/voxPressorBench.js'
 import {
-  VOX_DEFAULTS, VOX_OUTPUT_MIN_DB, VOX_OUTPUT_MAX_DB,
+  VOX_DEFAULTS, outputCeilingDbOf,
   PEAKS_BODY_WARN_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX, bodyPrFor, PEAKS_RIPPLE_WARN_DB, peaksTiming,
 } from '../../audio/effects/voxPressorParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  voxPeaks, voxBody, voxOutput, voxBodyLookahead, voxSpeed,
+  voxPeaks, voxBody, voxBodyLookahead, voxSpeed,
   voxPeaksMode, voxCharacter, voxCeiling, syncPeaksMode, syncCharacter, syncCeiling,
-  voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
+  voxDeEss, voxParallel, voxParallelComp, voxDensity, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
   voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxUpstreamStale, voxDownstreamPending,
   voxParallelDrive, syncParallelDrive,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
-  togglePreview, syncPeaks, syncBody, syncOutput, syncBodyLookahead, syncSpeed,
+  togglePreview, syncPeaks, syncBody, syncBodyLookahead, syncSpeed,
   syncDeEss, syncParallel, syncParallelComp, syncDensity,
   syncParallelDeEss, syncParallelSibEmph, syncParallelDeEssMode, syncDeEssSplit,
   apply, teardown, closeModal,
@@ -45,29 +49,75 @@ onMounted(() => {
 })
 
 const ACCENT = '#e8a33d'
-const PEAKS_COLOR = '#ff7a59'
-const DEESS_COLOR = '#7fd1c7'
-const PARALLEL_COLOR = '#b9a2ff'
-const DENSITY_COLOR = '#f2d16b'
+const PEAKS_COLOR = '#ff7a5c'
+
+/**
+ * SURFACE — the faceplate's paint: 'dark' (2a, Modula steel, ships) or
+ * 'light' (2b, a cream panel). The knobs, the meter bezel and the LCDs stay
+ * dark on both, so they read as physical parts. A per-viewer convenience,
+ * kept in this browser only.
+ */
+const SURFACE_KEY = 'wavely:voxpressor-surface'
+function readSurface() {
+  try { return localStorage.getItem(SURFACE_KEY) === 'light' ? 'light' : 'dark' } catch { return 'dark' }
+}
+const surface = ref(readSurface())
+const light = computed(() => surface.value === 'light')
+function toggleSurface() {
+  surface.value = light.value ? 'dark' : 'light'
+  try { localStorage.setItem(SURFACE_KEY, surface.value) } catch { /* storage blocked: this visit only */ }
+}
+// The bottom row's knobs: amber on steel, a deeper amber on cream.
+const knobColor = computed(() => (light.value ? '#bf782a' : ACCENT))
+
+/**
+ * THE NEEDLE reads one stage at a time (PEAKS / BODY / PARALLEL, the METER
+ * drum), and the line under the drum is that stage's measured readout. Turning
+ * a stage's control moves the meter to it, so what you are adjusting is what
+ * you are reading.
+ */
+const METER_OPTIONS = [
+  { value: 'peaks', label: 'PEAKS', title: "The 1176's gain reduction" },
+  { value: 'body', label: 'BODY', title: "The LA-2A's gain reduction" },
+  { value: 'parallel', label: 'PARALLEL', title: "The parallel copy's gain reduction (the wet side)" },
+]
+const meter = ref('peaks')
+const meterDb = computed(() => ({ peaks: voxPeaksGr.value, body: voxBodyGr.value, parallel: voxParallelGr.value }[meter.value] ?? 0))
+const meterLabel = computed(() => METER_OPTIONS.find(o => o.value === meter.value)?.label ?? '')
+const follow = (stage, fn) => (v) => { meter.value = stage; fn(v) }
+const onPeaks = follow('peaks', v => syncPeaks(v))
+const onPeaksMode = follow('peaks', v => syncPeaksMode(v))
+const onSpeed = follow('peaks', v => syncSpeed(v))
+const onBody = follow('body', v => syncBody(v))
+const onCharacter = follow('body', v => syncCharacter(v))
+const onParallel = follow('parallel', v => syncParallel(v))
+const onDrive = follow('parallel', v => syncParallelDrive(v))
+const onParallelComp = follow('parallel', v => syncParallelComp(v))
+
+/** Where the output peak lands, dBFS: the ceiling, or the source's own peak. */
+const ceilingMarkDb = computed(() => {
+  const c = outputCeilingDbOf(voxCeiling.value)
+  if (Number.isFinite(c)) return c
+  const s = voxMeasured.value.sourcePeakDb
+  return Number.isFinite(s) ? s : null
+})
 
 function formatPercent(v) {
   return v > 0 ? `${Math.round(v)} %` : 'OFF'
 }
-const METER_H = 214
-
 
 // The 1176's SPEED (`PEAKS_SPEEDS`): AUTO follows the voice's pitch.
 const SPEED_OPTIONS = [
-  { value: 'auto', label: 'AUTO', title: 'Release follows the voice: slow enough for its pitch that the gain does not ripple on each cycle' },
   { value: 'gentle', label: 'GENTLE', title: 'Slow attack and release: the cleanest, catches the least' },
   { value: 'normal', label: 'NORMAL', title: 'Medium attack and release' },
   { value: 'fast', label: 'FAST', title: 'Fast attack and release: grabs every onset; can ripple on low voices' },
+  { value: 'auto', label: 'AUTO', title: 'Release follows the voice: slow enough for its pitch that the gain does not ripple on each cycle' },
 ]
 
-// PEAKS CHARACTER: the 1176's ratio button (`PEAKS_MODES`).
+// PEAKS KNEE: the 1176's ratio button (`PEAKS_MODES`), drawn as its curve.
 const PEAKS_MODE_OPTIONS = [
-  { value: 'hard', label: 'HARD', title: '12:1: a limiter. The loudest peaks are held down hard; the rest is left alone' },
-  { value: 'soft', label: 'SOFT', title: '4:1: a gentler peak compressor for a dynamic performance. Starts at the same place, takes less off each step' },
+  { value: 'hard', label: 'Hard knee', d: 'M3 15 L12 6 L21 4', title: 'HARD, 12:1: a limiter. The loudest peaks are held down hard; the rest is left alone' },
+  { value: 'soft', label: 'Soft knee', d: 'M3 15 L8 10 C11 7 14 5.2 21 4', title: 'SOFT, 4:1: a gentler peak compressor for a dynamic performance. Starts at the same place, takes less off each step' },
 ]
 
 // CHARACTER: the LA-2As' tube colour (Body, and the Parallel copy when it is the LA-2A).
@@ -78,7 +128,7 @@ const CHARACTER_OPTIONS = [
 
 // OUTPUT CEILING: where the output peak lands.
 const CEILING_OPTIONS = [
-  { value: 'source', label: 'SOURCE', title: "The output peak stays at the source's own peak" },
+  { value: 'source', label: 'SRC', title: "The output peak stays at the source's own peak" },
   { value: '-1', label: '−1 dB', title: 'The output peak lands at −1 dBFS (podcast / streaming)' },
   { value: '-3', label: '−3 dB', title: 'The output peak lands at −3 dBFS (ACX)' },
 ]
@@ -128,10 +178,6 @@ const formatSplit = v => (v <= 0 ? 'ALL WIDE' : v >= 100 ? 'ALL SPLIT' : `${100 
 
 function formatKnob(v) {
   return v > 0 ? String(Math.round(v)) : 'OFF'
-}
-
-function formatOutput(v) {
-  return `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
 }
 
 // The readouts are MEASURED at the knobs (`measureVoxPressor`): the knobs act
@@ -203,6 +249,22 @@ const bodyNote = computed(() => {
 // re-solves Parallel alone and leaves these exactly as they are.
 const stale = computed(() => voxUpstreamStale.value)
 
+// The line under the METER drum: the selected stage's measured readout.
+const peaksLine = computed(() => [peaksNote.value, bodyTouchNote.value, rippleNote.value].filter(Boolean).join(' · '))
+const statusLines = computed(() => {
+  if (meter.value === 'peaks') {
+    return [{ text: peaksLine.value, warn: peaksWarn.value || rippleWarn.value }, { text: guideNote.value }]
+  }
+  if (meter.value === 'body') return [{ text: bodyNote.value }]
+  const comp = voxParallelComp.value === 'la2a' ? 'LA-2A' : '1176'
+  const line = voxParallel.value > 0
+    ? `mix ${formatPercent(voxParallel.value)} · drive ${formatDrive(voxParallelDrive.value)} · ${comp} copy`
+    : 'stage out'
+  return [{ text: line }, { text: voxBusy.value && voxPreview.value ? (voxDownstreamPending.value ? 'updating makeup…' : 'measuring…') : '' }]
+})
+// Dimmed, with a pulse, while a measurement that can change them is running.
+const statusStale = computed(() => (meter.value === 'parallel' ? voxBusy.value && voxPreview.value : stale.value))
+
 const measuredNote = computed(() => {
   const m = voxMeasured.value
   const corner = Number.isFinite(m.cornerHz) ? `voice corner ${Math.round(m.cornerHz)} Hz` : 'voice corner 80 Hz (default)'
@@ -237,9 +299,10 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="vox-pressor"
     :z="z"
-    :width="900"
+    :width="800"
     :accent="ACCENT"
     design="modula"
+    :surface="surface"
     brand-lead="VOXPRESSOR"
     :engaged="voxPreview"
     show-preview
@@ -253,145 +316,183 @@ async function applyAndClose() {
     @apply="applyAndClose"
     @close="close"
   >
-    <div class="vp-grid">
-      <div class="vp-meter">
-        <LevelMeter variant="modula" scale-side="left" :levels="voxInputLevels" label="IN" :height="METER_H" />
+    <template #header-center>
+      <button
+        type="button" class="vp-surface" :aria-pressed="String(light)"
+        :title="light ? 'Dark faceplate' : 'Light faceplate'" :aria-label="light ? 'Switch to the dark faceplate' : 'Switch to the light faceplate'"
+        @pointerdown.stop @click="toggleSurface"
+      >
+        <svg v-if="light" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+        </svg>
+      </button>
+    </template>
+
+    <div class="vp" :class="{ 'is-light': light }">
+      <!-- ── TOP: Peaks and Body flank the needle meter ─────────────────── -->
+      <div class="vp-top">
+        <section class="vp-col" aria-label="Peaks">
+          <div class="vp-title-row"><span class="vp-title" :class="{ 'is-lit': meter === 'peaks' }">Peak reduction</span></div>
+          <ModulaKnob
+            variant="ticks" :size="104"
+            :model-value="voxPeaks" :min="0" :max="PEAKS_MAX" :step="0.5"
+            :default-value="VOX_DEFAULTS.peaks"
+            aria-label="Peaks" :color="PEAKS_COLOR" :format-value="formatPeaks" :disabled="!voxPreview"
+            :zones="peaksZones"
+            title="How hard the 1176 catches the loudest peaks: about that many dB off them on typical narration (the line under the meter says what it took on this file). The ring is green up to where this file's loudest peaks come down to the voice, amber after, red where the stage starts compressing the voice itself — the later stages are there for that. 0 takes the stage out. Double-click to reset"
+            @update:model-value="onPeaks"
+          />
+          <div class="vp-ctl vp-ctl-gap">
+            <span class="vp-cap">Attack / release</span>
+            <VoxLcdStepper
+              :model-value="voxSpeed" :options="SPEED_OPTIONS" :surface="surface"
+              aria-label="Peaks timing" :disabled="!voxPreview || voxPeaks <= 0"
+              @update:model-value="onSpeed"
+            />
+          </div>
+          <div class="vp-ctl">
+            <span class="vp-cap">Knee</span>
+            <VoxKneeKeys
+              :model-value="voxPeaksMode" :options="PEAKS_MODE_OPTIONS" :color="ACCENT" :surface="surface"
+              aria-label="Peaks knee" :disabled="!voxPreview || voxPeaks <= 0"
+              @update:model-value="onPeaksMode"
+            />
+          </div>
+          <button
+            type="button" class="vp-auto" :class="{ 'is-on': voxPeaksAuto }" :disabled="!voxPreview"
+            role="switch" :aria-checked="voxPeaksAuto" :style="{ '--vp-auto': GUIDE_OK }"
+            title="Set Peaks for this file: just enough to bring its loudest peaks down to the voice, and follow the selection. Turn the knob to take over; AUTO drops and keeps the value"
+            @click="meter = 'peaks'; togglePeaksAuto()"
+          ><span class="vp-auto-dot"></span>AUTO</button>
+        </section>
+
+        <div class="vp-centre">
+          <VoxNeedleMeter :db="meterDb" :label="meterLabel" :scale="0.82" />
+          <div class="vp-ctl">
+            <span class="vp-cap">Meter</span>
+            <ModulaDrumCounter v-model="meter" class="vp-drum" :options="METER_OPTIONS" aria-label="What the needle reads" />
+          </div>
+          <div class="vp-status" :class="{ 'is-stale': statusStale }" aria-live="polite">
+            <span v-for="(l, i) in statusLines" :key="i" class="vp-status-line" :class="{ 'is-warn': l.warn }">
+              <i v-if="i === 0 && statusStale" class="vp-pulse" aria-hidden="true"></i>{{ l.text || '\u00a0' }}
+            </span>
+          </div>
+        </div>
+
+        <section class="vp-col" aria-label="Body">
+          <div class="vp-title-row"><span class="vp-title" :class="{ 'is-lit': meter === 'body' }">Body leveler</span></div>
+          <ModulaKnob
+            variant="ticks" :size="104"
+            :model-value="voxBody" :min="0" :max="BODY_MAX" :step="0.25"
+            :default-value="VOX_DEFAULTS.body"
+            aria-label="Body" :color="ACCENT" :format-value="formatBody" :disabled="!voxPreview"
+            title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 1 = PR 42, 4.75 = PR 57, 10 = PR 78 (4 points a step), aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
+            @update:model-value="onBody"
+          />
+          <div class="vp-ctl vp-ctl-gap">
+            <span class="vp-cap" aria-hidden="true">&nbsp;</span>
+            <VoxSlideSwitch
+              :model-value="voxCharacter" :options="CHARACTER_OPTIONS" :color="ACCENT" :surface="surface"
+              aria-label="Character" :disabled="!voxPreview"
+              @update:model-value="onCharacter"
+            />
+          </div>
+        </section>
       </div>
 
-      <div class="vp-panel">
-        <div class="vp-bars">
-          <GainReductionBar :reduction-db="voxPeaksGr" :accent="PEAKS_COLOR" title="PEAKS · 1176" :full-scale-db="12" />
-          <GainReductionBar :reduction-db="voxBodyGr" :accent="ACCENT" title="BODY · LA-2A" :full-scale-db="12" />
-          <GainReductionBar :reduction-db="voxDeEssGr" :accent="DEESS_COLOR" title="DE-ESS" :full-scale-db="12" />
-          <GainReductionBar :reduction-db="voxParallelGr" :accent="PARALLEL_COLOR" title="PARALLEL (WET)" :full-scale-db="12" />
-        </div>
-
-        <!-- The controls, grouped by stage: each group holds everything that sets it. -->
-        <div class="vp-row">
-          <section class="vp-group" aria-label="Peaks">
-            <span class="m-caption vp-cap">Peaks · 1176</span>
+      <!-- ── BOTTOM (layout B): Parallel | De-ess · Detail | Output ─────── -->
+      <div class="vp-bottom">
+        <section class="vp-col" aria-label="Parallel">
+          <div class="vp-title-row"><span class="vp-title" :class="{ 'is-lit': meter === 'parallel' }">Parallel</span></div>
+          <div class="vp-knob-row">
             <ModulaKnob
-              variant="ticks" :size="96" show-value editable
-              :model-value="voxPeaks" :min="0" :max="PEAKS_MAX" :step="0.5"
-              :default-value="VOX_DEFAULTS.peaks"
-              label="Amount" aria-label="Peaks" :color="PEAKS_COLOR" :format-value="formatPeaks" :disabled="!voxPreview"
-              :zones="peaksZones"
-              title="How hard the 1176 catches the loudest peaks: about that many dB off them on typical narration (the note below says what it took on this file). The ring is green up to where this file's loudest peaks come down to the voice, amber after, red where the stage starts compressing the voice itself — the later stages are there for that. 0 takes the stage out. Double-click to reset"
-              @update:model-value="syncPeaks"
+              variant="led" :size="84"
+              :model-value="voxParallel" :min="0" :max="100" :step="1"
+              :default-value="VOX_DEFAULTS.parallel"
+              aria-label="Parallel mix" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
+              title="Parallel compression: a heavily compressed copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
+              @update:model-value="onParallel"
             />
-            <div class="vp-switches">
-              <ModulaSegmented
-                :model-value="voxPeaksMode" :options="PEAKS_MODE_OPTIONS"
-                aria-label="Peaks character" :disabled="!voxPreview || voxPeaks <= 0"
-                @update:model-value="syncPeaksMode"
-              />
-              <ModulaSegmented
-                :model-value="voxSpeed" :options="SPEED_OPTIONS"
-                aria-label="Peaks speed" :disabled="!voxPreview || voxPeaks <= 0"
-                @update:model-value="syncSpeed"
-              />
-            </div>
-            <div class="vp-guide">
-              <button
-                type="button" class="vp-auto" :class="{ 'is-on': voxPeaksAuto }" :disabled="!voxPreview"
-                role="switch" :aria-checked="voxPeaksAuto" :style="{ '--vp-auto': GUIDE_OK }"
-                title="Set Peaks for this file: just enough to bring its loudest peaks down to the voice, and follow the selection. Turn the knob to take over; AUTO drops and keeps the value"
-                @click="togglePeaksAuto"
-              ><span class="vp-auto-dot"></span>AUTO</button>
-              <span class="m-note" :class="{ 'vp-stale': stale }">{{ guideNote }}</span>
-            </div>
-            <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }"><i v-if="stale" class="vp-pulse" aria-hidden="true"></i>{{ peaksNote }}</span>
-            <span class="m-note" :class="{ 'vp-warn': peaksWarn, 'vp-stale': stale }">{{ bodyTouchNote }}</span>
-            <span class="m-note" :class="{ 'vp-warn': rippleWarn, 'vp-stale': stale }">{{ rippleNote }}</span>
-          </section>
-          <section class="vp-group" aria-label="Body">
-            <span class="m-caption vp-cap">Body · LA-2A</span>
-            <ModulaKnob
-              variant="ticks" :size="96" show-value editable
-              :model-value="voxBody" :min="0" :max="BODY_MAX" :step="0.25"
-              :default-value="VOX_DEFAULTS.body"
-              label="Amount" aria-label="Body" :color="ACCENT" :format-value="formatBody" :disabled="!voxPreview"
-              title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 1 = PR 42, 4.75 = PR 57, 10 = PR 78 (4 points a step), aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
-              @update:model-value="syncBody"
-            />
-            <ModulaSegmented
-              :model-value="voxCharacter" :options="CHARACTER_OPTIONS"
-              aria-label="Character" :disabled="!voxPreview"
-              @update:model-value="syncCharacter"
-            />
-            <span class="m-note" :class="{ 'vp-stale': stale }"><i v-if="stale" class="vp-pulse" aria-hidden="true"></i>{{ bodyNote }}</span>
-          </section>
-        </div>
-
-        <div class="vp-row">
-          <section class="vp-group" aria-label="De-ess">
-            <span class="m-caption vp-cap">De-ess</span>
-            <ModulaKnob
-              variant="ticks" :size="80" show-value editable
-              :model-value="voxDeEss" :min="0" :max="100" :step="1"
-              :default-value="VOX_DEFAULTS.deEss"
-              label="Amount" aria-label="De-ess" :color="DEESS_COLOR" :format-value="formatKnob" :disabled="!voxPreview"
-              title="The HF Softener's Amount, after the compressors: takes down the sibilance they brought up. 0 takes the stage out. Double-click to reset"
-              @update:model-value="syncDeEss"
-            />
-            <ModulaFillSlider
-              orientation="horizontal" :length="120"
-              :model-value="voxDeEssSplit" :min="0" :max="100" :step="1" :default-value="VOX_DEFAULTS.deEssSplit"
-              label="" :ends="['WIDE', 'SPLIT']" flat :format-value="formatSplit"
-              :color="DEESS_COLOR" :disabled="!voxPreview || voxDeEss <= 0"
-              aria-label="De-ess split between wide band and split band"
-              title="Where the De-ess Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
-              @update:model-value="syncDeEssSplit"
-            />
-          </section>
-          <section class="vp-group" aria-label="Parallel">
-            <span class="m-caption vp-cap">Parallel</span>
-            <div class="vp-pair">
+            <div class="vp-ctl">
               <ModulaKnob
-                variant="ticks" :size="80" show-value editable
-                :model-value="voxParallel" :min="0" :max="100" :step="1"
-                :default-value="VOX_DEFAULTS.parallel"
-                label="Mix" aria-label="Parallel mix" :color="PARALLEL_COLOR" :format-value="formatPercent" :disabled="!voxPreview"
-                title="Parallel compression: a heavily compressed copy blended under the voice. The peaks stay put and the quieter parts come up. 0 takes the stage out. Double-click to reset"
-                @update:model-value="syncParallel"
-              />
-              <ModulaKnob
-                variant="small" :size="52" show-value editable
+                variant="plain" :size="44"
                 :model-value="voxParallelDrive" :min="0" :max="PARALLEL_DRIVE_MAX" :step="0.5"
                 :default-value="VOX_DEFAULTS.parallelDrive"
-                label="Drive" aria-label="Parallel drive" :color="PARALLEL_COLOR" :format-value="formatDrive" :disabled="!voxPreview || voxParallel <= 0"
+                aria-label="Parallel drive" :color="knobColor" :format-value="formatDrive" :disabled="!voxPreview || voxParallel <= 0"
                 title="How hard the parallel copy is compressed. On the LA-2A it is Peak Reduction: 0 = PR 38, 3 = PR 50, 10 = PR 78; the 1176 is set so the same position compresses about as hard. The copy's makeup is re-measured. Double-click to reset"
-                @update:model-value="syncParallelDrive"
+                @update:model-value="onDrive"
+              />
+              <span class="vp-cap">Drive</span>
+            </div>
+          </div>
+          <div class="vp-ctl">
+            <span class="vp-cap" aria-hidden="true">&nbsp;</span>
+            <VoxSlideSwitch
+              :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS" :color="ACCENT" :surface="surface"
+              aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
+              @update:model-value="onParallelComp"
+            />
+          </div>
+        </section>
+
+        <div class="vp-middle">
+          <section class="vp-col" aria-label="De-ess">
+            <div class="vp-title-row"><span class="vp-title">De-ess</span></div>
+            <div class="vp-knob-row">
+              <ModulaKnob
+                variant="led" :size="84"
+                :model-value="voxDeEss" :min="0" :max="100" :step="1"
+                :default-value="VOX_DEFAULTS.deEss"
+                aria-label="De-ess" :color="knobColor" :format-value="formatKnob" :disabled="!voxPreview"
+                title="The HF Softener's Amount, after the compressors: takes down the sibilance they brought up. 0 takes the stage out. Double-click to reset"
+                @update:model-value="syncDeEss"
               />
             </div>
-            <ModulaSegmented
-              :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS"
-              aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
-              @update:model-value="syncParallelComp"
-            />
-            <!-- De-ess and Parallel re-solve after Body: their makeups land last. -->
-            <span class="m-note vp-pending" :class="{ 'is-on': voxBusy && voxPreview }" aria-live="polite">
-              <i class="vp-pulse" aria-hidden="true"></i>{{ voxDownstreamPending ? 'updating makeup' : 'measuring' }}
-            </span>
+            <div class="vp-ctl">
+              <span class="vp-cap">Band</span>
+              <ModulaFillSlider
+                class="vp-band" orientation="horizontal" :length="150"
+                :model-value="voxDeEssSplit" :min="0" :max="100" :step="1" :default-value="VOX_DEFAULTS.deEssSplit"
+                label="" :ends="['WIDE', 'SPLIT']" flat :format-value="formatSplit"
+                :color="ACCENT" :disabled="!voxPreview || voxDeEss <= 0"
+                aria-label="De-ess split between wide band and split band"
+                title="Where the De-ess Amount goes. Left: all to the wide band Duck, which turns the whole S down and keeps its tone. Right: all to the split band EQ, which cuts only the top end. Double-click to reset"
+                @update:model-value="syncDeEssSplit"
+              />
+            </div>
           </section>
-          <section class="vp-group" aria-label="Output">
-            <span class="m-caption vp-cap">Output</span>
-            <ModulaKnob
-              variant="ticks" :size="80" show-value editable
-              :model-value="voxDensity" :min="0" :max="100" :step="1"
-              :default-value="VOX_DEFAULTS.density"
-              label="Density" :color="DENSITY_COLOR" :format-value="formatPercent" :disabled="!voxPreview"
-              title="The Cambridge Inflator's Effect, anchored at the source peak: lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
-              @update:model-value="syncDensity"
-            />
-            <span class="m-caption vp-subcap">Ceiling</span>
-            <ModulaSegmented
-              :model-value="voxCeiling" :options="CEILING_OPTIONS"
+          <section class="vp-col" aria-label="Detail">
+            <div class="vp-title-row"><span class="vp-title">Detail</span></div>
+            <div class="vp-knob-row">
+              <ModulaKnob
+                variant="led" :size="84"
+                :model-value="voxDensity" :min="0" :max="100" :step="1"
+                :default-value="VOX_DEFAULTS.density"
+                aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
+                title="Density: the Cambridge Inflator's Effect, anchored at the source peak — lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
+                @update:model-value="syncDensity"
+              />
+            </div>
+          </section>
+        </div>
+
+        <section class="vp-col" aria-label="Output">
+          <div class="vp-title-row"></div>
+          <div class="vp-knob-row vp-out-head">
+            <span class="vp-cap">Output level</span>
+            <VoxLcdStepper
+              :model-value="voxCeiling" :options="CEILING_OPTIONS" :surface="surface"
               aria-label="Output ceiling" :disabled="!voxPreview"
               @update:model-value="syncCeiling"
             />
-          </section>
-        </div>
+          </div>
+          <VoxIoMeters class="vp-io" :in-levels="voxInputLevels" :out-levels="voxOutputLevels" :ceiling-db="ceilingMarkDb" />
+        </section>
+      </div>
+
         <div v-if="showBench" class="vp-bench-wrap">
           <button
             type="button" class="vp-bench-toggle" :aria-expanded="benchOpen"
@@ -434,115 +535,117 @@ async function applyAndClose() {
             <span class="m-note vp-measured">{{ measuredNote }}</span>
           </div>
         </div>
-      </div>
-
-      <div class="vp-meter">
-        <LevelMeter variant="modula" scale-side="right" :levels="voxOutputLevels" label="OUT" :height="METER_H">
-          <template #below>
-            <ModulaKnob
-              variant="trim" :model-value="voxOutput" show-value
-              :min="VOX_OUTPUT_MIN_DB" :max="VOX_OUTPUT_MAX_DB" :step="0.1"
-              :default-value="VOX_DEFAULTS.output" :format-value="formatOutput"
-              aria-label="Output" :disabled="!voxPreview"
-              title="Output trim, after the ceiling: anything but 0 moves the peak off it. Double-click to reset"
-              @update:model-value="syncOutput"
-            />
-          </template>
-        </LevelMeter>
-      </div>
     </div>
-
   </FloatingWindow>
 </template>
 
 <style scoped>
-.vp-grid {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: start;
-}
-.vp-meter {
-  display: flex;
-  justify-content: center;
-  padding: 12px 4px;
-}
-.vp-panel {
-  min-width: 0;
+/* ── Surface: the cream panel (2b) repaints only the type and the trays;
+   knobs, the meter bezel and the LCDs stay dark on both. ── */
+.vp {
+  --vp-title: #b6bdc4;
+  --vp-title-lit: #ff8a6e;
+  --vp-cap: #a0a8b0;
+  --vp-note: #c9d0d6;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 12px 12px;
-  border-radius: 16px;
-  background: var(--m-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+  gap: 22px;
+  padding: 10px 12px 12px;
 }
-.vp-row {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
+.vp.is-light {
+  --vp-title: #41464e;
+  --vp-title-lit: #b23a1f;
+  --vp-cap: #555b64;
+  --vp-note: #3a3f47;
 }
-/* A stage: its caption, then every control that sets it. */
-.vp-group {
-  flex: 1 1 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 10px 8px;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, .16);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35), 0 0 0 1px rgba(255, 255, 255, .04);
+.vp-top { display: grid; grid-template-columns: 170px minmax(0, 1fr) 170px; align-items: start; gap: 14px; }
+.vp-bottom { display: grid; grid-template-columns: 196px minmax(0, 1fr) 196px; gap: 14px; align-items: start; }
+.vp-middle { display: grid; grid-template-columns: 150px 150px; justify-content: center; gap: 12px; align-items: start; }
+.vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
+.vp-centre { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 6px; min-width: 0; }
+.vp-title-row { height: 12px; display: flex; align-items: center; justify-content: center; }
+.vp-title { font: 600 10px/1 var(--m-font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--vp-title); transition: color .2s ease; }
+.vp-title.is-lit { color: var(--vp-title-lit); }
+.vp-cap { font: 500 9px/1 var(--m-font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--vp-cap); white-space: nowrap; }
+.vp-ctl { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 7px; }
+.vp-ctl-gap { margin-top: 8px; }
+.vp-knob-row { height: 84px; display: flex; align-items: center; justify-content: center; gap: 18px; }
+.vp-out-head { flex-direction: column; gap: 7px; }
+.vp-io { align-self: stretch; }
+.vp-band { width: 150px; }
+/* The band slider's channel: dark on steel, a pressed cream groove on the light panel. */
+.vp.is-light .vp-band :deep(.m-fs-hchan) {
+  background: linear-gradient(180deg, #b9b3a8, #cfc9bf);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .35), inset 0 0 0 1px rgba(0, 0, 0, .12), 0 1px 0 rgba(255, 255, 255, .6);
 }
-.vp-cap { align-self: stretch; text-align: center; padding-bottom: 4px; border-bottom: 1px solid rgba(255, 255, 255, .06); }
-.vp-subcap { align-self: stretch; text-align: center; margin-top: 4px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .06); }
-.vp-switches { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-.vp-bars {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 14px;
+.vp-band :deep(.m-fs-ends) { font: 600 9px/1 var(--m-font-mono); letter-spacing: .08em; color: var(--vp-note); }
+
+/* The METER drum at the design's size: room for PARALLEL in the window, the
+   neighbours squeezed either side, raised dark caps on the arrows (both
+   surfaces: they are parts, not paint). */
+.vp-drum :deep(.m-drum-window) { padding: 0 8px; }
+.vp-drum :deep(.m-drum-side) { width: 44px; font-size: 9px; overflow: hidden; white-space: nowrap; }
+.vp-drum :deep(.m-drum-cur) { width: 74px; }
+.vp-drum :deep(.m-drum-val) { font-size: 13px; }
+.vp-drum :deep(.m-drum-arrow) {
+  background: linear-gradient(160deg, #4d596a 0%, #323b48 52%, #222931 100%);
+  box-shadow: 0 6px 12px -6px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255, 255, 255, .1), 0 0 0 1px rgba(0, 0, 0, .65);
 }
-.vp-pair { display: flex; align-items: flex-end; gap: 10px; }
-.vp-listen {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-.vp-measured { text-align: center; }
-.vp-bench { padding-top: 8px; border-top: 1px dashed rgba(255, 255, 255, .08); }
-.vp-bench-wrap { margin-top: 10px; border-top: 1px dashed rgba(255, 255, 255, .1); padding-top: 8px; display: flex; flex-direction: column; align-items: center; }
-.vp-bench-toggle {
-  border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer;
-  background: linear-gradient(180deg, #34383e, #25282d);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .1), 0 0 0 1px rgba(0, 0, 0, .5);
-  font: 600 10px/1 var(--m-font-mono); letter-spacing: .1em; color: var(--m-ink-3, #8a929a);
-}
-.vp-bench-toggle:hover { color: var(--m-ink-2, #c3c9cf); }
-.vp-bench-body { align-self: stretch; display: flex; flex-direction: column; }
-.vp-warn { color: #f0b429; }
-.vp-stale { opacity: .7; }
-/* A measurement in flight: a pulsing dot ahead of the numbers it will replace. */
+.vp-drum :deep(.m-drum-arrow:not(:disabled):hover) { background: linear-gradient(160deg, #56637a 0%, #384253 52%, #262d36 100%); }
+.vp-drum :deep(.m-drum-tri--left) { border-right-color: #eaf6f8; }
+.vp-drum :deep(.m-drum-tri--right) { border-left-color: #eaf6f8; }
+.vp.is-light .vp-drum :deep(.m-drum-arrow) { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), 0 1px 1px rgba(40, 30, 20, .35), 0 5px 9px -4px rgba(40, 30, 20, .4); }
+.vp.is-light .vp-drum :deep(.m-drum-window) { box-shadow: inset 0 2px 8px rgba(0, 0, 0, .9), 0 0 0 1px rgba(0, 0, 0, .6), 0 1px 0 1px rgba(255, 255, 255, .55); }
+
+/* The selected stage's readout under the METER drum. */
+.vp-status { display: flex; flex-direction: column; align-items: center; gap: 5px; min-height: 26px; transition: opacity .15s ease; }
+.vp-status.is-stale { opacity: .7; }
+.vp-status-line { font: 500 9px/1.1 var(--m-font-mono); color: var(--vp-note); white-space: nowrap; }
+.vp-status-line.is-warn { color: #f0b429; }
+.vp.is-light .vp-status-line.is-warn { color: #b0640f; }
 .vp-pulse {
   display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
-  background: #e8a33d; box-shadow: 0 0 6px #e8a33d; vertical-align: 1px;
+  background: #e8a33d; box-shadow: 0 0 6px #e8a33d; vertical-align: 0;
   animation: vp-pulse 0.9s ease-in-out infinite;
 }
 @keyframes vp-pulse { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
-.vp-pending { visibility: hidden; }
-.vp-pending.is-on { visibility: visible; }
-.vp-guide { display: flex; align-items: center; gap: 8px; margin: 2px 0 2px; }
+
+/* AUTO: the Peaks guide owns the knob until it is turned. */
 .vp-auto {
   display: inline-flex; align-items: center; gap: 6px; flex: none;
   padding: 4px 9px; border: 0; border-radius: 6px; cursor: pointer;
   background: linear-gradient(180deg, #34383e, #25282d);
   box-shadow: 0 2px 4px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .1), 0 0 0 1px rgba(0, 0, 0, .5);
-  font: 600 10px/1 var(--m-font-mono); letter-spacing: .08em; color: var(--m-ink-3, #8a929a);
+  font: 600 9px/1 var(--m-font-mono); letter-spacing: .1em; color: #8a929a;
 }
-.vp-auto:hover:not(:disabled) { color: var(--m-ink-2, #c3c9cf); }
+.vp-auto:hover:not(:disabled) { color: #c3c9cf; }
 .vp-auto:disabled { opacity: .4; cursor: default; }
 .vp-auto-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(0, 0, 0, .5); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
 .vp-auto.is-on { color: var(--vp-auto); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .6), 0 0 0 1px color-mix(in oklab, var(--vp-auto) 45%, #000); }
 .vp-auto.is-on .vp-auto-dot { background: var(--vp-auto); box-shadow: 0 0 6px var(--vp-auto); }
+.vp.is-light .vp-auto { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 1px 1px rgba(40, 30, 20, .35), 0 4px 8px -4px rgba(40, 30, 20, .45); }
+
+/* The surface toggle in the header. */
+.vp-surface {
+  width: 30px; height: 30px; border: none; border-radius: 50%; cursor: pointer; flex: none;
+  display: grid; place-items: center; background: transparent; color: var(--m-ink-2);
+  box-shadow: var(--m-shadow-raised);
+}
+.vp-surface:hover { color: var(--m-ink); }
+.vp-surface:focus-visible { outline: 2px solid #7fe9f6; outline-offset: 2px; }
+
+/* ── Bench (dev only) ── */
+.vp-listen { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.vp-listen .m-caption { color: var(--vp-cap); }
+.vp-measured { text-align: center; color: var(--vp-note); }
+.vp-bench { padding-top: 8px; border-top: 1px dashed rgba(127, 127, 127, .25); }
+.vp-bench-wrap { margin-top: -6px; border-top: 1px dashed rgba(127, 127, 127, .3); padding-top: 8px; display: flex; flex-direction: column; align-items: center; }
+.vp-bench-toggle {
+  border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer;
+  background: linear-gradient(180deg, #34383e, #25282d);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .1), 0 0 0 1px rgba(0, 0, 0, .5);
+  font: 600 10px/1 var(--m-font-mono); letter-spacing: .1em; color: #8a929a;
+}
+.vp-bench-toggle:hover { color: #c3c9cf; }
+.vp-bench-body { align-self: stretch; display: flex; flex-direction: column; gap: 6px; }
 </style>
