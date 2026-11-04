@@ -270,11 +270,14 @@ const rippleNote = computed(() => {
   return rippleWarn.value ? `${v} · distorting${voxSpeed.value === 'gentle' ? '' : ', try NORMAL'}` : v
 })
 
+/** A reduction, dB ≥ 0, as the readouts print it: −x.x, and 0.0 rather than "−0.0". */
+const cut = v => (Math.abs(v) < 0.05 ? '0.0' : `−${Math.abs(v).toFixed(1)}`)
+
 const bodyNote = computed(() => {
   if (voxBody.value <= 0) return 'stage out'
   const r = voxReadout.value
   if (!r) return voxBusy.value ? 'measuring…' : '—'
-  return `−${r.bodyDb.toFixed(1)} avg`
+  return `${cut(r.bodyDb)} avg`
 })
 // The numbers on screen describe the knobs they were measured at; while a
 // newer measurement is in flight they are dimmed rather than blanked.
@@ -315,13 +318,15 @@ const grTimer = setInterval(() => {
   }
 }, GR_TICK_MS)
 onBeforeUnmount(() => clearInterval(grTimer))
-const grText = k => (state.isPlaying && voxPreview.value ? `GR −${grShown[k].toFixed(1)}` : 'GR —')
+// Stopped, the GR is left off the line rather than printed as "GR —" (it read as
+// "GR — · …", two dashes in a row): the measured figures stand alone.
+const grText = k => (state.isPlaying && voxPreview.value ? `GR ${cut(grShown[k])}` : '')
 
 const peaksLine = computed(() => {
   if (voxPeaks.value <= 0) return 'stage out'
   const r = voxReadout.value
   if (!r) return voxBusy.value ? 'measuring…' : '—'
-  return `−${r.peaksDb.toFixed(1)} peaks · −${r.peaksBodyDb.toFixed(1)} body`
+  return `${cut(r.peaksDb)} peaks · ${cut(r.peaksBodyDb)} body`
 })
 // Parallel: the copy's measured MAKEUP (its wet gain, solved on the blend —
 // mostly Drive's; Mix moves it a few tenths). Its mix and compressor are on
@@ -433,7 +438,7 @@ async function applyAndClose() {
           />
           <div class="vp-readout" :class="{ 'is-stale': readouts.peaks.stale }" aria-live="polite">
             <span class="vp-status-line">
-              <span class="vp-gr">{{ readouts.peaks.gr }}</span><template v-if="readouts.peaks.line"><span aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.peaks.warn, 'is-over': readouts.peaks.over }">{{ readouts.peaks.line }}</span></template>
+              <span v-if="readouts.peaks.gr" class="vp-gr">{{ readouts.peaks.gr }}</span><template v-if="readouts.peaks.line"><span v-if="readouts.peaks.gr" aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.peaks.warn, 'is-over': readouts.peaks.over }">{{ readouts.peaks.line }}</span></template>
             </span>
             <span v-if="readouts.peaks.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
             <span v-else-if="readouts.peaks.note" class="vp-status-line is-warn">{{ readouts.peaks.note }}</span>
@@ -481,7 +486,7 @@ async function applyAndClose() {
           />
           <div class="vp-readout" :class="{ 'is-stale': readouts.body.stale }" aria-live="polite">
             <span class="vp-status-line">
-              <span class="vp-gr">{{ readouts.body.gr }}</span><template v-if="readouts.body.line"><span aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.body.warn, 'is-over': readouts.body.over }">{{ readouts.body.line }}</span></template>
+              <span v-if="readouts.body.gr" class="vp-gr">{{ readouts.body.gr }}</span><template v-if="readouts.body.line"><span v-if="readouts.body.gr" aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.body.warn, 'is-over': readouts.body.over }">{{ readouts.body.line }}</span></template>
             </span>
             <span v-if="readouts.body.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
             <span v-else-if="readouts.body.note" class="vp-status-line is-warn">{{ readouts.body.note }}</span>
@@ -576,7 +581,7 @@ async function applyAndClose() {
           </div>
           <div class="vp-readout" :class="{ 'is-stale': readouts.parallel.stale }" aria-live="polite">
             <span class="vp-status-line">
-              <span class="vp-gr">{{ readouts.parallel.gr }}</span><template v-if="readouts.parallel.line"><span aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.parallel.warn, 'is-over': readouts.parallel.over }">{{ readouts.parallel.line }}</span></template>
+              <span v-if="readouts.parallel.gr" class="vp-gr">{{ readouts.parallel.gr }}</span><template v-if="readouts.parallel.line"><span v-if="readouts.parallel.gr" aria-hidden="true"> · </span><span :class="{ 'is-warn': readouts.parallel.warn, 'is-over': readouts.parallel.over }">{{ readouts.parallel.line }}</span></template>
             </span>
             <span v-if="readouts.parallel.stale" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>remeasuring…</span>
             <span v-else-if="readouts.parallel.note" class="vp-status-line is-warn">{{ readouts.parallel.note }}</span>
@@ -690,6 +695,8 @@ async function applyAndClose() {
 .vp-ctl { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 7px; }
 .vp-ctl-gap { margin-top: 8px; }
 .vp-knob-row { height: 84px; display: flex; align-items: center; justify-content: center; gap: 18px; }
+/* Two captioned knobs of different sizes side by side (Drive / Mix): captions on one baseline. */
+.vp-knob-row:has(> .vp-ctl + .vp-ctl) { align-items: flex-end; }
 .vp-out-head { flex-direction: column; gap: 7px; }
 .vp-io {
   align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 9px;
@@ -703,7 +710,8 @@ async function applyAndClose() {
   background: linear-gradient(180deg, #b9b3a8, #cfc9bf);
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, .35), inset 0 0 0 1px rgba(0, 0, 0, .12), 0 1px 0 rgba(255, 255, 255, .6);
 }
-.vp-band :deep(.m-fs-ends) { font: 600 9px/1 var(--m-font-mono); letter-spacing: .08em; color: var(--vp-note); }
+/* The slider's end labels read as captions, like every other caption on the plate. */
+.vp-band :deep(.m-fs-ends) { font: 500 9px/1 var(--m-font-mono); letter-spacing: .14em; color: var(--vp-cap); }
 
 /* The METER drum at the design's size: room for PARALLEL in the window, the
    neighbours squeezed either side, raised dark caps on the arrows (both
