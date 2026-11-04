@@ -37,6 +37,12 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   name: { type: String, required: true },
   format: { type: Function, default: formatSignedDb },
+  /**
+   * Where the open control's name sits: 'below' the LCD (LA Vintage 2A's
+   * faceplate) or 'above' it (VoxPressor, where every control is captioned
+   * from above).
+   */
+  labelPosition: { type: String, default: 'below' },
 })
 const emit = defineEmits(['update:modelValue', 'update:auto'])
 
@@ -86,7 +92,7 @@ function onKeyDown(e) {
       @click="expand"
     >{{ text }}</button>
 
-    <div v-else class="pg-open" role="group" :aria-label="name">
+    <div v-else class="pg-open" :class="{ 'pg-open--above': labelPosition === 'above' }" role="group" :aria-label="name">
       <div class="pg-gutter">
         <button ref="closeBtn" type="button" class="pg-close" :aria-label="`Hide ${name}`" title="Hide" @click="collapse">
           <svg width="8" height="8" viewBox="0 0 10 10" aria-hidden="true">
@@ -95,6 +101,7 @@ function onKeyDown(e) {
         </button>
       </div>
       <div class="pg-lcd">
+        <div v-if="labelPosition === 'above'" class="pg-title pg-title--lcd pg-title--above">{{ name }}</div>
         <LcdSpinner
           :model-value="modelValue"
           @update:model-value="v => emit('update:modelValue', v)"
@@ -104,7 +111,7 @@ function onKeyDown(e) {
           :label="name"
           :format="format"
         />
-        <div class="pg-title pg-title--lcd">{{ name }}</div>
+        <div v-if="labelPosition !== 'above'" class="pg-title pg-title--lcd">{{ name }}</div>
       </div>
       <div class="pg-auto">
         <LampButton
@@ -143,6 +150,8 @@ function onKeyDown(e) {
 }
 .pg-close:hover { background: var(--hw-hover-bg, rgba(255,255,255,.08)); color: var(--hw-ink, #f2f0ec); }
 .pg-close:focus-visible { box-shadow: 0 0 0 1.5px rgba(255,164,53,.6); }
+/* Name above: the ✕ drops to the LCD's line (label 9 + gap 5 under the top). */
+.pg-open--above .pg-gutter { padding-top: 20px; }
 .pg-lcd { width: 96px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .pg-auto { width: 33px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .pg-title {

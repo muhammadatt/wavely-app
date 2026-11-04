@@ -363,7 +363,7 @@ async function applyAndClose() {
             @update:model-value="onPeaks"
           />
           <FoldedLcd
-            class="vp-fold vp-ctl-gap" name="Attack / release"
+            class="vp-fold vp-ctl-gap" name="Attack / release" label-position="above"
             :model-value="speedIndex" :min="0" :max="SPEED_OPTIONS.length - 1" :step="1"
             :format="formatSpeed" :disabled="!voxPreview || voxPeaks <= 0"
             @update:model-value="onSpeedIndex"
@@ -492,7 +492,7 @@ async function applyAndClose() {
           <div class="vp-title-row"></div>
           <div class="vp-knob-row vp-out-head">
             <FoldedLcd
-              class="vp-fold" name="Output level"
+              class="vp-fold" name="Output level" label-position="above"
               :model-value="ceilingIndex" :min="0" :max="CEILING_OPTIONS.length - 1" :step="1"
               :format="formatCeiling" :disabled="!voxPreview"
               @update:model-value="onCeilingIndex"
@@ -622,6 +622,11 @@ async function applyAndClose() {
 
 /* The folded LCDs take the panel's inks (FoldedLcd reads the --hw-* tokens). */
 .vp-fold { --hw-dim: var(--vp-cap); --hw-dim-hover: var(--vp-note); --hw-ink: var(--vp-note); }
+/* Open, the name is a caption like every other control's: above, in the panel's mono. */
+.vp-fold :deep(.pg-title--above) {
+  font: 500 9px/1 var(--m-font-mono); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--vp-cap); text-shadow: none;
+}
 .vp.is-light .vp-fold { --hw-ink-shadow: none; --hw-hover-bg: rgba(0, 0, 0, .06); --hw-manual: #b0640f; }
 
 /* The surface toggle in the header. */
