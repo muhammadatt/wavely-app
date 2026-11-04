@@ -587,8 +587,7 @@ async function applyAndClose() {
             <span v-else-if="readouts.parallel.note" class="vp-status-line is-warn">{{ readouts.parallel.note }}</span>
             <span v-else class="vp-status-line" aria-hidden="true">&nbsp;</span>
           </div>
-          <div class="vp-ctl">
-            <span class="vp-cap" aria-hidden="true">&nbsp;</span>
+          <div class="vp-ctl vp-comp-switch">
             <VoxSlideSwitch
               :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS" :color="ACCENT" :surface="surface"
               aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
@@ -598,8 +597,9 @@ async function applyAndClose() {
         </section>
 
         <section class="vp-col" aria-label="Output">
-          <div class="vp-title-row"></div>
-          <div class="vp-knob-row vp-out-head">
+          <!-- OUTPUT LEVEL sits on the titles' line, like the other sections'
+               names; the meters below it fill the knob row. -->
+          <div class="vp-title-row vp-out-title">
             <FoldedLcd
               class="vp-fold" name="Output level" label-position="above"
               :model-value="ceilingIndex" :min="0" :max="CEILING_OPTIONS.length - 1" :step="1"
@@ -608,11 +608,11 @@ async function applyAndClose() {
             />
           </div>
           <!-- The app's own IN / OUT ladders, horizontal (the Soft Clipper's pair):
-               its ballistics, peak hold and clip lamp. -->
-          <div class="vp-io">
+               its ballistics, peak hold and clip lamp, centred on the knob row. -->
+          <div class="vp-knob-row vp-out-meters"><div class="vp-io">
             <LevelMeter variant="modula" slim label="IN" label-side="start" orientation="horizontal" :levels="voxInputLevels" :height="IO_METER_LEN" :show-scale="false" />
             <LevelMeter variant="modula" slim label="OUT" label-side="start" orientation="horizontal" :levels="voxOutputLevels" :height="IO_METER_LEN" :show-scale="false" />
-          </div>
+          </div></div>
         </section>
       </div>
 
@@ -697,7 +697,12 @@ async function applyAndClose() {
 .vp-knob-row { height: 84px; display: flex; align-items: center; justify-content: center; gap: 18px; }
 /* Two captioned knobs of different sizes side by side (Drive / Mix): captions on one baseline. */
 .vp-knob-row:has(> .vp-ctl + .vp-ctl) { align-items: flex-end; }
-.vp-out-head { flex-direction: column; gap: 7px; }
+/* The closed fold is taller than a title; centred on the 12 px row it reads on the titles' line. */
+.vp-out-title { overflow: visible; }
+.vp-out-meters { align-self: stretch; }
+.vp-out-meters .vp-io { flex: 1; align-self: center; }
+/* Straight under its readout, which already reserves a line for "remeasuring…". */
+.vp-comp-switch { margin-top: -6px; }
 .vp-io {
   align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 9px;
   padding: 9px 10px; border-radius: 9px; background: #1a1c20;
