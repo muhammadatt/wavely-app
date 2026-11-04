@@ -102,7 +102,7 @@ function onKeyDown(e) {
       <span class="pg-gutter" aria-hidden="true"></span>
       <span class="pg-lcd">
         <span class="pg-name pg-title pg-title--lcd pg-title--above">{{ name }}</span>
-        <span class="pg-stack-row"><span class="pg-value">{{ valueText }}</span><span class="pg-stack-spin" aria-hidden="true"></span></span>
+        <span class="pg-stack-row"><span class="pg-stack-slot"><span class="pg-value">{{ valueText }}</span></span><span class="pg-stack-spin" aria-hidden="true"></span></span>
       </span>
       <span class="pg-auto" aria-hidden="true"></span>
     </button>
@@ -185,16 +185,14 @@ function onKeyDown(e) {
 }
 .pg-title--lcd { letter-spacing: .18em; transform: translateX(-8px); }
 
-/* Stacked closed: the open layout's skeleton, the value well on the LCD's box
-   (LcdSpinner: a 50 x 26 display, then 3 + 13 px of arrows). */
+/* Stacked closed: the open layout's skeleton, the value centred on the LCD's box
+   (LcdSpinner: a 50 x 26 display, then 3 + 13 px of arrows) in its own small
+   readout, the one the one-line version uses. */
 .pg-stacked { padding: 0; background: none; border-radius: 0; }
 .pg-stacked:hover { background: none; }
 .pg-stack-row { display: flex; align-items: flex-start; gap: 3px; }
 .pg-stack-spin { width: 13px; flex: none; }
-.pg-stacked .pg-value {
-  width: 50px; height: 26px; box-sizing: border-box; flex: none;
-  display: flex; align-items: center; justify-content: center; border-radius: 2px;
-}
+.pg-stack-slot { width: 50px; height: 26px; flex: none; display: flex; align-items: center; justify-content: center; }
 .pg-stacked:focus-visible { box-shadow: none; }
 .pg-stacked:focus-visible .pg-value { box-shadow: 0 0 0 1.5px rgba(255,164,53,.55); }
 </style>
