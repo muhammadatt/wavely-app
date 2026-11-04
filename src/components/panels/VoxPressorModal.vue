@@ -470,10 +470,6 @@ async function applyAndClose() {
           </div>
         </div>
 
-        <!-- Body, and under it LO DETAIL (owner, November 2026: moved up from the
-             bottom row into the space the WARM / CLEAN switch left; it is not part
-             of the Body stage, so it sits outside its section and never moves the meter). -->
-        <div class="vp-right">
         <section class="vp-col" aria-label="Body" @pointerdown="meter = 'body'" @focusin="meter = 'body'">
           <div class="vp-title-row">
             <button
@@ -491,23 +487,9 @@ async function applyAndClose() {
             @update:model-value="onBody"
           />
         </section>
-        <section class="vp-col vp-detail" aria-label="Detail">
-          <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
-          <div class="vp-knob-row">
-            <ModulaKnob
-              variant="led" :size="70"
-              :model-value="voxDensity" :min="0" :max="100" :step="1"
-              :default-value="VOX_DEFAULTS.density"
-              aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
-              title="Density: the Cambridge Inflator's Effect, anchored at the source peak — lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
-              @update:model-value="syncDensity"
-            />
-          </div>
-        </section>
-        </div>
       </div>
 
-      <!-- ── BOTTOM (layout B): De-ess | Parallel | Output ─────── -->
+      <!-- ── BOTTOM (layout B): De-ess | Parallel | Lo Detail | Output ─────── -->
       <div class="vp-bottom">
         <div class="vp-middle">
           <section class="vp-col" aria-label="De-ess">
@@ -575,6 +557,22 @@ async function applyAndClose() {
               :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS" :color="ACCENT" :surface="surface"
               aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
               @update:model-value="onParallelComp"
+            />
+          </div>
+        </section>
+
+        <!-- LO DETAIL: its own column in the bottom row (owner, November 2026: under
+             Body it read as part of the Body stage). -->
+        <section class="vp-col vp-detail" aria-label="Detail">
+          <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
+          <div class="vp-knob-row">
+            <ModulaKnob
+              variant="led" :size="70"
+              :model-value="voxDensity" :min="0" :max="100" :step="1"
+              :default-value="VOX_DEFAULTS.density"
+              aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
+              title="Density: the Cambridge Inflator's Effect, anchored at the source peak — lifts the body under a fixed peak with odd harmonics. 0 takes the stage out. Double-click to reset"
+              @update:model-value="syncDensity"
             />
           </div>
         </section>
@@ -666,9 +664,9 @@ async function applyAndClose() {
   --vp-note: #3a3f47;
 }
 .vp-top { display: grid; grid-template-columns: 170px minmax(0, 1fr) 170px; align-items: start; gap: 14px; }
-.vp-bottom { display: grid; grid-template-columns: 228px minmax(0, 1fr) 228px; gap: 14px; align-items: start; }
+/* De-ess's column is the top row's 170 px, so it sits straight under Peak reduction. */
+.vp-bottom { display: grid; grid-template-columns: 170px minmax(0, 1fr) 104px 228px; gap: 14px; align-items: start; }
 .vp-middle { display: grid; grid-template-columns: 146px; justify-content: center; gap: 10px; align-items: start; }
-.vp-right { display: flex; flex-direction: column; align-items: center; gap: 18px; min-width: 0; }
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
 .vp-centre { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 6px; min-width: 0; }
 .vp-title-row { height: 12px; display: flex; align-items: center; justify-content: center; }
