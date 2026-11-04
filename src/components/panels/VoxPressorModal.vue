@@ -271,7 +271,7 @@ const cut = v => (Math.abs(v) < 0.05 ? '0.0' : `−${Math.abs(v).toFixed(1)}`)
 const bodyLine = computed(() => {
   if (voxBody.value <= 0) return 'stage out'
   const r = voxReadout.value
-  return r ? `${cut(r.bodyDb)} leveling` : ''
+  return r ? [{ k: 'avg leveling', v: `${cut(r.bodyDb)} dB` }] : ''
 })
 // The numbers on screen describe the knobs they were measured at; while a
 // newer measurement is in flight they are dimmed rather than blanked.
@@ -283,18 +283,19 @@ const stale = computed(() => voxUpstreamStale.value)
  * THE READOUT UNDER THE METER DRUM, for the stage the needle reads (owner,
  * November 2026). Line 1: what the stage did, measured — never the GR (the
  * needle above it shows that) and never a knob's own value (the knob shows
- * it). All dB, which the meter's face already says, so no unit. Line 2: the
- * measurement in flight ("measuring…" before the first figures, "remeasuring…"
- * after, the figures dimmed meanwhile), else the stage's warning, else blank
- * so the panel never jumps.
- *   Peaks     −x peaks · −y voice   (what it took off the loudest peaks; what it cost the voice)
- *   Body      −x leveling           (the LA-2A's average reduction on the voice)
- *   Parallel  +x makeup             (the copy's measured wet gain)
+ * it). Detached from the knobs, each figure NAMES WHAT IT MEASURES and carries
+ * its unit (owner, November 2026): property–value pairs, the property dimmed.
+ * Line 2: the measurement in flight ("measuring…" before the first figures,
+ * "remeasuring…" after, the figures dimmed meanwhile), else the stage's
+ * warning, else blank so the panel never jumps.
+ *   Peaks     loudest peaks −x dB · voice −y dB   (taken off the loudest peaks; what it cost the voice)
+ *   Body      avg leveling −x dB                  (the LA-2A's average reduction on the voice)
+ *   Parallel  parallel makeup +x dB               (the copy's measured wet gain)
  */
 const peaksLine = computed(() => {
   if (voxPeaks.value <= 0) return 'stage out'
   const r = voxReadout.value
-  return r ? `${cut(r.peaksDb)} peaks · ${cut(r.peaksBodyDb)} voice` : ''
+  return r ? [{ k: 'loudest peaks', v: `${cut(r.peaksDb)} dB` }, { k: 'voice', v: `${cut(r.peaksBodyDb)} dB` }] : ''
 })
 // Parallel: the copy's measured MAKEUP (its wet gain, solved on the blend —
 // mostly Drive's; Mix moves it a few tenths). Its mix and compressor are on
@@ -303,7 +304,7 @@ const parallelLine = computed(() => {
   if (voxParallel.value <= 0) return 'stage out'
   const m = voxMeasured.value.parallelMakeupDb
   if (!Number.isFinite(m)) return ''
-  return `${m >= 0 ? '+' : '−'}${Math.abs(m).toFixed(1)} makeup`
+  return [{ k: 'parallel makeup', v: `${m >= 0 ? '+' : '−'}${Math.abs(m).toFixed(1)} dB` }]
 })
 // Peaks and Body read the measurement upstream of Parallel; Parallel is
 // re-solved by every measurement, so any one in flight makes it stale.
@@ -440,11 +441,12 @@ async function applyAndClose() {
             <ModulaDrumCounter v-model="meter" class="vp-drum" :options="METER_OPTIONS" aria-label="What the needle reads" />
           </div>
           <!-- THE SELECTED STAGE'S READOUT, under the drum (owner, November 2026:
-               one under each knob crowded them): its GR, then its measured
-               figures on the same line, then "remeasuring…" or its warning. -->
+               one under each knob crowded them): its measured figures, each
+               named, then "measuring…" / "remeasuring…" or its warning. -->
           <div class="vp-readout" :class="{ 'is-stale': readout.stale }" aria-live="polite">
             <span class="vp-status-line">
-              <span v-if="readout.line" :class="{ 'is-warn': readout.warn, 'is-over': readout.over }">{{ readout.line }}</span><template v-else>&nbsp;</template>
+              <span v-if="Array.isArray(readout.line)" :class="{ 'is-warn': readout.warn, 'is-over': readout.over }"><template v-for="(f, i) in readout.line" :key="f.k"><span v-if="i" class="vp-ro-sep" aria-hidden="true"> · </span><span class="vp-ro-k">{{ f.k }}</span> {{ f.v }}</template></span>
+              <span v-else-if="readout.line">{{ readout.line }}</span><template v-else>&nbsp;</template>
             </span>
             <span v-if="readout.status" class="vp-status-line vp-remeasure"><i class="vp-pulse" aria-hidden="true"></i>{{ readout.status }}</span>
             <span v-else-if="readout.note" class="vp-status-line is-warn">{{ readout.note }}</span>
@@ -478,7 +480,7 @@ async function applyAndClose() {
             <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
             <div class="vp-knob-row">
               <ModulaKnob
-                variant="ring" :size="72"
+                variant="halo" :size="72"
                 :model-value="voxDensity" :min="0" :max="100" :step="1"
                 :default-value="VOX_DEFAULTS.density"
                 aria-label="Detail (density)" :color="knobColor" :format-value="formatPercent" :disabled="!voxPreview"
@@ -739,6 +741,8 @@ async function applyAndClose() {
 .vp-readout { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .vp-readout.is-stale .vp-status-line:not(.vp-remeasure) { opacity: .7; }
 .vp-status-line { font-variant-numeric: tabular-nums; }
+/* A figure's name, dimmer than its value (the line keeps its warn colour on the values). */
+.vp-ro-k, .vp-ro-sep { color: var(--vp-cap); }
 .vp-remeasure { color: var(--vp-cap); }
 .vp-status-line { font: 500 9px/1.1 var(--m-font-mono); color: var(--vp-note); white-space: nowrap; }
 .vp-status-line .is-warn, .vp-status-line.is-warn { color: #f0b429; }
