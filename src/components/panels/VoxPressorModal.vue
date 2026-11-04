@@ -501,7 +501,7 @@ async function applyAndClose() {
             <div class="vp-knob-row">
               <div class="vp-ctl">
                 <ModulaKnob
-                  variant="ring" :size="72"
+                  variant="halo" :size="72"
                   :model-value="voxDeEss" :min="0" :max="100" :step="1"
                   :default-value="VOX_DEFAULTS.deEss"
                   aria-label="De-ess" :color="knobColor" :format-value="formatKnob" :disabled="!voxPreview"
@@ -539,7 +539,7 @@ async function applyAndClose() {
           <div class="vp-knob-row">
               <div class="vp-ctl">
               <ModulaKnob
-                variant="ring" :size="72"
+                variant="halo" :size="72"
                 :model-value="voxParallelDrive" :min="0" :max="PARALLEL_DRIVE_MAX" :step="0.5"
                 :default-value="VOX_DEFAULTS.parallelDrive"
                 aria-label="Parallel drive" :color="knobColor" :format-value="formatDrive" :disabled="!voxPreview || voxParallel <= 0"
@@ -687,7 +687,7 @@ async function applyAndClose() {
 /* The ring knob's cap fills more of its ring here, as in the redesign (14 % inset, the kit's 17). */
 .vp :deep(.m-ring-cap) { inset: 14%; }
 /* The light panel: unlit LEDs and the ring's track are a pale engraving, not the dark kit's. */
-.vp.is-light { --m-led-off: #b3ada2; }
+.vp.is-light { --m-led-off: #b3ada2; --m-halo-track: #b3ada2; }
 .vp-detail .vp-knob-row { height: auto; }
 .vp-middle { display: grid; grid-template-columns: 146px; justify-content: center; gap: 10px; align-items: start; }
 .vp-col { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }

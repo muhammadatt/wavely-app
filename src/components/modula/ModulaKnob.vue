@@ -4,6 +4,11 @@
  *
  *   led    LARGE, an LED dot ring outside the cap, an accent pointer bar
  *          (the kit's GAIN, PHAT*SS's DRIVE)
+ *   halo   the led knob with a CONTINUOUS RING in place of the LED dots — the
+ *          same cap, pointer bar and footprint, a value arc glowing on a
+ *          track. The medium ring knob: sits beside an led knob of the same
+ *          size as its pair (VoxPressor's De-ess Amount and Density Drive);
+ *          fills BIPOLAR from its zero like the ring
  *   ticks  LARGE in a sunken well, a tick ring with every fifth tick long, an
  *          accent dot on a stepped cap (the kit's DRIVE, PHAT*SS's WARMTH)
  *   small  62 px, accent pointer bar (ATTACK / RELEASE / TONE / MIX)
@@ -35,7 +40,7 @@ import ModulaValueTip from './ModulaValueTip.vue'
 
 const props = defineProps({
   ...DRAG_PROPS,
-  variant: { type: String, default: 'small', validator: v => ['led', 'ticks', 'small', 'arc', 'ring', 'plain', 'trim'].includes(v) },
+  variant: { type: String, default: 'small', validator: v => ['led', 'halo', 'ticks', 'small', 'arc', 'ring', 'plain', 'trim'].includes(v) },
   /** Diameter of the knob body, px. Defaults per variant. */
   size: { type: Number, default: null },
   label: { type: String, default: '' },
@@ -70,14 +75,14 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 /** Outer size, ring included. */
-const DEFAULT_SIZE = { led: 156, ticks: 156, small: 62, arc: 108, ring: 48, plain: 30, trim: 30 }
+const DEFAULT_SIZE = { led: 156, halo: 156, ticks: 156, small: 62, arc: 108, ring: 48, plain: 30, trim: 30 }
 /** The cap diameter the shadows and pointer widths were written for. */
-const DESIGN_CAP = { led: 112, ticks: 102, small: 62, arc: 108, ring: 48, plain: 32, trim: 30 }
-const DEFAULT_TRAVEL = { led: 200, ticks: 200, small: 140, arc: 150, ring: 150, plain: 150, trim: 160 }
+const DESIGN_CAP = { led: 112, halo: 112, ticks: 102, small: 62, arc: 108, ring: 48, plain: 32, trim: 30 }
+const DEFAULT_TRAVEL = { led: 200, halo: 200, ticks: 200, small: 140, arc: 150, ring: 150, plain: 150, trim: 160 }
 const outer = computed(() => props.size ?? DEFAULT_SIZE[props.variant])
 /** The cap, which is what the knob's own geometry is measured on. */
 const body = computed(() => {
-  if (props.variant === 'led') return outer.value * DESIGN_CAP.led / DEFAULT_SIZE.led
+  if (props.variant === 'led' || props.variant === 'halo') return outer.value * DESIGN_CAP.led / DEFAULT_SIZE.led
   if (props.variant === 'ticks') return outer.value - 54
   return outer.value
 })
@@ -131,7 +136,7 @@ const valueLine = computed(() => {
   return props.showValue ? text.value : null
 })
 const valueClass = computed(() => ({
-  small: 'm-note m-val-small', arc: 'm-note m-val-arc', ring: 'm-note m-val-arc', plain: 'm-note m-val-arc', trim: 'm-note', led: 'm-big-value', ticks: 'm-big-value',
+  small: 'm-note m-val-small', arc: 'm-note m-val-arc', ring: 'm-note m-val-arc', plain: 'm-note m-val-arc', trim: 'm-note', led: 'm-big-value', halo: 'm-big-value', ticks: 'm-big-value',
 }[props.variant]))
 const valueEditable = computed(() => props.editable && !props.readonly && !((props.variant === 'arc' || ringLike.value) && props.note))
 
@@ -151,6 +156,25 @@ const leds = computed(() => {
     const a = (-135 + 270 * f) * Math.PI / 180
     return { l: c + r * Math.sin(a), t: c - r * Math.cos(a), on: lit(f) }
   })
+})
+
+// ── Halo (halo): the led knob's geometry, one arc where its dots sit ─────────
+// r is the LED dots' radius; the stroke is a little under a dot's diameter.
+// The track is a dark groove (`--m-halo-track`) so the full ring reads on the
+// steel chassis, where the led knob's off-dot colour all but vanishes.
+const halo = computed(() => {
+  const c = ledBox.value / 2
+  const r = c - 9 * scaleK.value
+  const len = 2 * Math.PI * r
+  const arcLen = len * 0.75
+  const lo = Math.min(pct.value, origin.value)
+  const hi = Math.max(pct.value, origin.value)
+  return {
+    c, r, w: Math.max(2, 4.2 * scaleK.value),
+    track: `${arcLen.toFixed(2)} ${len.toFixed(2)}`,
+    dash: `${((hi - lo) * arcLen).toFixed(2)} ${len.toFixed(2)}`,
+    offset: (-lo * arcLen).toFixed(2), empty: hi - lo < 0.002,
+  }
 })
 
 // ── Tick ring (ticks) ───────────────────────────────────────────────────────
@@ -224,6 +248,27 @@ const aria = computed(() => ({
         v-for="(l, i) in leds" :key="i" class="m-led"
         :style="{ left: `${l.l}px`, top: `${l.t}px`, width: `${ledDot}px`, height: `${ledDot}px`, margin: `${-ledDot / 2}px 0 0 ${-ledDot / 2}px`, background: l.on ? color : 'var(--m-led-off)', boxShadow: l.on ? `0 0 ${ledDot}px ${color}` : 'inset 0 1px 1px rgba(0,0,0,.6)' }"
       ></div>
+      <div class="m-cap m-cap--led m-focusable" :style="{ width: `${body}px`, height: `${body}px` }" v-bind="aria" v-on="handlers">
+        <div class="m-cap-inner" :style="{ inset: `${Math.round(body * 0.116)}px` }"></div>
+        <div class="m-rot" :style="{ transform: `rotate(${deg}deg)` }">
+          <div class="m-bar" :style="{ top: `${Math.round(body * 0.152)}px`, height: `${Math.round(body * 0.232)}px`, width: `${Math.max(2, 4 * scaleK).toFixed(1)}px`, marginLeft: `${(-Math.max(2, 4 * scaleK) / 2).toFixed(2)}px`, background: color, boxShadow: `0 0 ${ledDot}px ${color}` }"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Halo: the led knob with a continuous ring for its dots ──────────── -->
+    <div v-else-if="variant === 'halo'" class="m-ring" :style="{ width: `${ledBox}px`, height: `${ledBox}px` }">
+      <ModulaValueTip :text="text" :show="tipOn" />
+      <svg class="m-halo-svg" :width="ledBox" :height="ledBox" :viewBox="`0 0 ${ledBox} ${ledBox}`" aria-hidden="true">
+        <circle
+          :cx="halo.c" :cy="halo.c" :r="halo.r" fill="none" :transform="`rotate(135 ${halo.c} ${halo.c})`"
+          :style="{ stroke: 'var(--m-halo-track, #191d23)', strokeWidth: halo.w, strokeLinecap: 'round', strokeDasharray: halo.track }"
+        />
+        <circle
+          :cx="halo.c" :cy="halo.c" :r="halo.r" fill="none" :transform="`rotate(135 ${halo.c} ${halo.c})`"
+          :style="{ stroke: color, strokeWidth: halo.w, strokeLinecap: 'round', strokeDasharray: halo.dash, strokeDashoffset: halo.offset, opacity: halo.empty ? 0 : 1, filter: `drop-shadow(0 0 ${ledDot * 0.7}px ${color})` }"
+        />
+      </svg>
       <div class="m-cap m-cap--led m-focusable" :style="{ width: `${body}px`, height: `${body}px` }" v-bind="aria" v-on="handlers">
         <div class="m-cap-inner" :style="{ inset: `${Math.round(body * 0.116)}px` }"></div>
         <div class="m-rot" :style="{ transform: `rotate(${deg}deg)` }">
@@ -352,7 +397,7 @@ const aria = computed(() => ({
   user-select: none;
   transition: opacity 0.15s ease;
 }
-.m-knob--led, .m-knob--ticks { gap: 12px; }
+.m-knob--led, .m-knob--halo, .m-knob--ticks { gap: 12px; }
 .m-knob--arc, .m-knob--ring, .m-knob--plain { gap: 7px; }
 .m-knob--trim { gap: 5px; }
 .m-knob.is-disabled { opacity: 0.4; }
@@ -368,6 +413,7 @@ const aria = computed(() => ({
   background: radial-gradient(circle at 50% 40%, #232a33, #1b2027);
   box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.7), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
 }
+.m-halo-svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 .m-led {
   position: absolute;
   width: 6px;
