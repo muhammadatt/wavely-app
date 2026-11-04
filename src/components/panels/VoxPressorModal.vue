@@ -18,6 +18,7 @@ import { isVoxPressorBenchVisible } from '../../audio/effects/voxPressorBench.js
 import {
   VOX_DEFAULTS,
   PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX, bodyPrFor, PEAKS_RIPPLE_WARN_DB, peaksTiming,
+  BODY_GUIDE_EDGE_DB, BODY_GUIDE_WARN_DB,
 } from '../../audio/effects/voxPressorParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -27,7 +28,7 @@ const {
   voxPeaksMode, voxCharacter, voxCeiling, syncPeaksMode, syncCharacter, syncCeiling,
   voxDeEss, voxParallel, voxParallelComp, voxDensity, voxParallelGr,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
-  voxPeaksGuide, voxUpstreamStale, voxPeaksStale,
+  voxPeaksGuide, voxBodyGuide, voxUpstreamStale, voxPeaksStale,
   voxParallelDrive, syncParallelDrive,
   voxMeasured, voxReadout, voxBusy,
   voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
@@ -234,6 +235,28 @@ const peaksZones = computed(() => {
   ]
 })
 
+// THE BODY GUIDE (`measureVoxPressor`'s `bodyGuide`): green while the LA-2A
+// levels this voice gently, amber past BODY_GUIDE_EDGE_DB of average leveling,
+// red past BODY_GUIDE_WARN_DB. Reasoned; a guide, never a cap.
+const bodyZones = computed(() => {
+  const g = voxBodyGuide.value
+  if (!g) return null
+  const red = Math.max(g.edge, g.warn)
+  return [
+    { from: 0, to: g.edge * KNOB_SCALE, color: GUIDE_OK },
+    { from: g.edge * KNOB_SCALE, to: red * KNOB_SCALE, color: GUIDE_EDGE },
+    { from: red * KNOB_SCALE, to: BODY_MAX * KNOB_SCALE, color: GUIDE_OVER },
+  ]
+})
+const bodyEdge = computed(() => {
+  const r = voxReadout.value
+  return !!r && voxBody.value > 0 && r.bodyDb >= BODY_GUIDE_EDGE_DB
+})
+const bodyOver = computed(() => {
+  const r = voxReadout.value
+  return !!r && voxBody.value > 0 && r.bodyDb >= BODY_GUIDE_WARN_DB
+})
+
 // Gain ripple: the 1176 moving its gain within the voice's own cycles. A
 // warning, never a limit, like the voice-touched note.
 const rippleWarn = computed(() => {
@@ -312,7 +335,7 @@ const readouts = computed(() => ({
     // The ripple takes the third line when it warns and nothing is remeasuring.
     note: rippleWarn.value ? rippleNote.value : '',
   },
-  body: { gr: grText('body'), line: bodyNote.value, stale: stale.value },
+  body: { gr: grText('body'), line: bodyNote.value, stale: stale.value, warn: bodyEdge.value, over: bodyOver.value },
   parallel: { gr: grText('parallel'), line: parallelLine.value, stale: parallelStale.value },
 }))
 
@@ -444,7 +467,8 @@ async function applyAndClose() {
             :model-value="bodyShown" :min="0" :max="BODY_MAX * KNOB_SCALE" :step="1"
             :default-value="VOX_DEFAULTS.body * KNOB_SCALE"
             aria-label="Body" :color="ACCENT" :format-value="formatBody" :disabled="!voxPreview"
-            title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 10 = PR 42, 48 = PR 57, 100 = PR 78, aligned to this file's level and to what the 1176 stage hands it. 0 takes the stage out. Double-click to reset"
+            :zones="bodyZones"
+            title="How hard the LA-2A levels the voice: its Peak Reduction over the useful span, 10 = PR 42, 48 = PR 57, 100 = PR 78, aligned to this file's level and to what the 1176 stage hands it. The ring is green while it levels this voice gently, amber past about 4 dB of average leveling, red past 6. 0 takes the stage out. Double-click to reset"
             @update:model-value="onBody"
           />
           <div class="vp-readout" :class="{ 'is-stale': readouts.body.stale }" aria-live="polite">

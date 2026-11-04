@@ -231,6 +231,17 @@ shown:
 (narration ~2–3 dB, podcast punch ~5–6). A fixed crest target would be wrong
 on half the voices.
 
+**The Body guide (November 2026).** The Body knob's ring is green / amber / red
+by how hard the LA-2A levels this voice: amber past `BODY_GUIDE_EDGE_DB` (4 dB)
+and red past `BODY_GUIDE_WARN_DB` (6 dB) of average cell reduction on the voiced
+blocks of the Peaks output — the number the Body readout prints. Both are
+*reasoned* (~3–6 dB is the usual LA-2A leveling on a voice; this is an average,
+so the peaks take more): the shipping Body sits green on the calibration clips
+above, PR 60 turns amber and PR 70 red. Searched in PR on meter-only renders
+(the cell's reduction does not depend on its makeup), seeded by the readout's
+render, at most `BODY_GUIDE_MAX_RENDERS` (6; 3–4 in practice), in the panel's
+full pass only and cached on everything Body hears except its own knob.
+
 **The Peaks guide (November 2026).** Cranking Peaks sounds better to a naive
 ear because the stage's makeup makes it louder; past the point where the
 loudest peaks meet the voice it only compresses the voice, which is the

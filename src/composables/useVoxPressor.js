@@ -10,7 +10,7 @@ import { analysedWholeRegion, regionAlignDb } from '../audio/analysisWindow.js'
 import { getSegmentDuration } from '../audio/operations.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import {
-  toKernelParams, VOX_MEASURED_KEYS, peaksGuideRangeDb, peaksGuideKnobs,
+  toKernelParams, VOX_MEASURED_KEYS, peaksGuideRangeDb, peaksGuideKnobs, bodyGuidePrRange, bodyGuideKnobs,
 } from '../audio/effects/voxPressorParams.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { voxPressorEffect as soloEffect, VOX_DEFAULTS } from '../audio/effects/voxPressor.js'
@@ -56,6 +56,12 @@ const copies = pluginCopies((copy, life) => {
    * where it starts compressing the voice. Measured once per region.
    */
   const voxPeaksGuide = ref(null)
+  /**
+   * The Body GUIDE in knob units ({ edge, warn }, `bodyGuideKnobs`): where the
+   * LA-2A's average leveling turns amber and red on this voice. Re-solved when
+   * what Body hears changes (Peaks, the region), never by the Body knob.
+   */
+  const voxBodyGuide = ref(null)
   /**
    * AUTO: the guide's target owns the Peaks knob until the knob is turned (the
    * contract of LA Vintage 2A's Input). Off by default: Peaks 3 ships.
@@ -302,7 +308,10 @@ const copies = pluginCopies((copy, life) => {
         // The panel's measurement carries the Peaks guide (cached per region).
         // ⚠ Never an apply's: AUTO would move the knob mid-apply, on a chain's
         // running segments, after the params were measured.
-        if (guide) kp.peaksGuideRangeDb = peaksGuideRangeDb()
+        if (guide) {
+          kp.peaksGuideRangeDb = peaksGuideRangeDb()
+          kp.bodyGuidePrRange = bodyGuidePrRange()
+        }
         /**
          * TWO PASSES after a Peaks / Body / Speed / De-ess move on a region
          * already measured: Peaks and Body first (~0.9 s on 30 s of
@@ -348,6 +357,7 @@ const copies = pluginCopies((copy, life) => {
         solvedFor = key
         if (guide) {
           voxPeaksGuide.value = peaksGuideKnobs(r.peaksGuide)
+          voxBodyGuide.value = bodyGuideKnobs(r.bodyGuide)
           followGuide()
         }
         return next
@@ -665,7 +675,7 @@ const copies = pluginCopies((copy, life) => {
       voxPeaksMode, voxCharacter, voxCeiling, syncPeaksMode, syncCharacter, syncCeiling,
       voxDeEss, voxParallel, voxParallelComp, voxDensity, voxDeEssGr, voxParallelGr,
       voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
-      voxPeaksGuide, voxPeaksAuto, togglePeaksAuto, voxParallelDrive, syncParallelDrive, voxUpstreamStale, voxPeaksStale, voxDownstreamPending,
+      voxPeaksGuide, voxBodyGuide, voxPeaksAuto, togglePeaksAuto, voxParallelDrive, syncParallelDrive, voxUpstreamStale, voxPeaksStale, voxDownstreamPending,
       voxMeasured, voxReadout, voxBusy,
       voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
       hasSelection,

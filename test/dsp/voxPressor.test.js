@@ -770,6 +770,42 @@ test('Peaks guide: knob mapping inverts the drive law and clamps to the travel',
   assert.equal(P.peaksGuideKnobs({ gapDb: 3, targetDriveDb: P.peaksDriveDb(-2), warnDriveDb: P.peaksDriveDb(14) }).target, 0)
 })
 
+test('Body guide: amber where the LA-2A averages BODY_GUIDE_EDGE_DB, red at BODY_GUIDE_WARN_DB; the Body knob never re-solves it', async () => {
+  const S = await import('../../src/audio/voxPressorSolve.js')
+  const P = await import('../../src/audio/effects/voxPressorParams.js')
+  const x = narration(SR, { seconds: 12, levelDb: -22 })
+  const alignDb = inputAlignDbFor([x], SR)
+  const kpAt = body => toKernelParams({ ...VOX_DEFAULTS, peaks: 3, body, deEss: 0, parallel: 0, density: 0, alignDb })
+  S.clearVoxPressorMeasureCache()
+  const r = S.measureVoxPressor([x], SR, { ...kpAt(4.8), bodyGuidePrRange: P.bodyGuidePrRange() })
+  assert.ok(r.bodyGuide.renders <= S.BODY_GUIDE_MAX_RENDERS, `renders ${r.bodyGuide.renders}`)
+  const g = P.bodyGuideKnobs(r.bodyGuide)
+  assert.ok(g.edge > 0 && g.edge <= g.warn, `edge ${g.edge} warn ${g.warn}`)
+  // The knobs read back what the guide says.
+  if (g.edge < P.BODY_MAX) {
+    const at = S.measureVoxPressor([x], SR, kpAt(g.edge))
+    assert.ok(Math.abs(at.bodyDb - S.BODY_GUIDE_EDGE_DB) < 0.15, `at edge: ${at.bodyDb}`)
+  }
+  if (g.warn < P.BODY_MAX) {
+    const at = S.measureVoxPressor([x], SR, kpAt(g.warn))
+    assert.ok(Math.abs(at.bodyDb - S.BODY_GUIDE_WARN_DB) < 0.15, `at warn: ${at.bodyDb}`)
+  }
+  // Cached across Body moves; absent unless asked; the rest unchanged by it.
+  const again = S.measureVoxPressor([x], SR, { ...kpAt(8), bodyGuidePrRange: P.bodyGuidePrRange() })
+  assert.deepEqual(again.bodyGuide, r.bodyGuide)
+  const plain = S.measureVoxPressor([x], SR, kpAt(4.8))
+  assert.equal(plain.bodyGuide, undefined)
+  for (const k of VOX_MEASURED_KEYS) assert.deepEqual(plain[k], r[k], k)
+  // A Peaks move changes what Body hears: re-solved (Peaks 8 leaves Body less to do).
+  const hot = S.measureVoxPressor([x], SR, { ...toKernelParams({ ...VOX_DEFAULTS, peaks: 8, body: 4.8, deEss: 0, parallel: 0, density: 0, alignDb }), bodyGuidePrRange: P.bodyGuidePrRange() })
+  assert.ok(hot.bodyGuide.renders > 0)
+  // Mapping: PR to knob, clamped; not reached = the top.
+  const m = P.bodyGuideKnobs({ edgePr: P.bodyPrFor(2.5), warnPr: null })
+  assert.ok(Math.abs(m.edge - 2.5) < 1e-12)
+  assert.equal(m.warn, P.BODY_MAX)
+  assert.equal(P.bodyGuideKnobs(null), null)
+})
+
 test('two passes: measureUntil body returns Peaks/Body exactly as the full pass, which then matches a cold one', async () => {
   const S = await import('../../src/audio/voxPressorSolve.js')
   const x = narration(SR, { seconds: 8, levelDb: -22 })

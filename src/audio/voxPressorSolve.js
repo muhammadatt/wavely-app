@@ -301,6 +301,63 @@ function solvePeaksGuide(channels, sampleRate, base, alignDb, rangeDb, seed) {
 }
 
 /**
+ * THE BODY GUIDE (November 2026): the Body knob's ring, green / amber / red by
+ * how hard the LA-2A levels THIS voice — its average cell reduction on the
+ * voiced blocks, the number under the knob. Amber past `BODY_GUIDE_EDGE_DB`,
+ * red past `BODY_GUIDE_WARN_DB`.
+ *
+ * ⚠ Both REASONED, not auditioned: ~3–6 dB is the usual LA-2A leveling on a
+ * voice, and this figure is an average over the voiced blocks, so the peaks
+ * take more. 4 keeps the shipping Body (PR 57) green on the owner's two clips
+ * (3.8 / 3.4 dB, spec §calibration), PR 60 turns amber (4.7 / 4.3) and PR 70
+ * red (7.5 / 7.1).
+ *
+ * Searched in Peak Reduction over the knob's span on meter-only LA-2A renders
+ * of the Peaks output (its reduction does not depend on its makeup), at most
+ * `BODY_GUIDE_MAX_RENDERS`, seeded by the readout's own render. It reads the
+ * Peaks output, so a Peaks move re-solves it; the Body knob never does.
+ */
+export const BODY_GUIDE_EDGE_DB = 4
+export const BODY_GUIDE_WARN_DB = 6
+export const BODY_GUIDE_MAX_RENDERS = 6
+const BODY_GUIDE_TOL_DB = 0.1
+
+/** Average cell reduction (dB) over the voiced blocks, from a Body render's meter. */
+function bodyAvgGrDb(rr, voicedIdx, sampleRate) {
+  const per = Math.round(SOLVE_BLOCK_S * sampleRate) / 128
+  let sum = 0
+  let count = 0
+  for (const k of voicedIdx) {
+    const from = Math.floor(k * per)
+    const to = Math.min(rr.bodyGr.length, Math.floor((k + 1) * per))
+    for (let j = from; j < to; j++) { sum += rr.bodyGr[j]; count++ }
+  }
+  return count > 0 ? sum / count : 0
+}
+
+/** See the BODY GUIDE note above. `prRange` is [PR at knob 0, PR at the top]; null edges = not reached. */
+function solveBodyGuide(sampleRate, up, prRange) {
+  const { afterPeaks, bodyAlignDb, peaksBase } = up
+  const [lo, hi] = prRange
+  if (!afterPeaks || !Number.isFinite(bodyAlignDb) || !(hi > lo)) return { edgePr: null, warnPr: null, renders: 0 }
+  const ref = referenceBlocks(afterPeaks, sampleRate)
+  if (ref.voicedIdx.length === 0) return { edgePr: null, warnPr: null, renders: 0 }
+  const points = []
+  let renders = 0
+  const at = pr => {
+    renders++
+    const rr = renderBody(afterPeaks, sampleRate, peaksBase, bodyAlignDb, { bodyPeakReduction: pr, bodyMakeupDb: 0 }, { meter: true })
+    points.push({ driveDb: pr, grDb: bodyAvgGrDb(rr, ref.voicedIdx, sampleRate) })
+  }
+  if (up.bodySample && up.bodySample.driveDb >= lo && up.bodySample.driveDb <= hi) points.push(up.bodySample)
+  else at(0.5 * (lo + hi))
+  const budget = () => BODY_GUIDE_MAX_RENDERS - renders
+  const edgePr = findDrive(at, points, q => q.grDb, BODY_GUIDE_EDGE_DB, BODY_GUIDE_TOL_DB, lo, hi, budget)
+  const warnPr = findDrive(at, points, q => q.grDb, BODY_GUIDE_WARN_DB, BODY_GUIDE_TOL_DB, lo, hi, budget)
+  return { edgePr, warnPr, renders }
+}
+
+/**
  * Measure VoxPressor for one region at the current knobs: the readouts and
  * every stage's makeup, ceiling and restore.
  *
@@ -358,6 +415,17 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   if (untilBody) {
     out.partial = true
     return out
+  }
+  // The Body knob's guide: panel only, full pass only (the first pass is for
+  // the makeups), cached on everything Body hears except its own knob.
+  if (Array.isArray(p.bodyGuidePrRange) && Number.isFinite(p.bodyAlignDb)) {
+    const bgKey = bodyGuideKey(channels, sampleRate, p, up, hash)
+    let bg = bodyGuideCache?.key === bgKey ? bodyGuideCache.value : null
+    if (!bg) {
+      bg = solveBodyGuide(sampleRate, up, p.bodyGuidePrRange)
+      bodyGuideCache = { key: bgKey, value: bg }
+    }
+    out.bodyGuide = bg
   }
   const { afterDeEss, voiceF0Hz, ceilingDb } = up
 
@@ -420,12 +488,21 @@ let bodyCache = null
 
 /** The one cached Peaks guide (see `solvePeaksGuide`). */
 let guideCache = null
+/** The one cached Body guide (see `solveBodyGuide`). */
+let bodyGuideCache = null
+
+/** What Body hears apart from its own knob: the Peaks → Body key without Body's knob and makeup. */
+const BODY_GUIDE_SKIP = new Set([...['deEss', 'deEssOn', 'measureUntil'], 'bodyPeakReduction', 'bodyOn', 'bodyGuidePrRange'])
+function bodyGuideKey(channels, sampleRate, p, up, hash) {
+  return `${upstreamKey(channels, sampleRate, p, hash, BODY_GUIDE_SKIP)}|${up.out.cornerHz}|${up.out.voiceF0Hz}|${JSON.stringify(p.bodyGuidePrRange)}`
+}
 
 /** Forget them — for tests that time or compare cold measurements. */
 export function clearVoxPressorMeasureCache() {
   upstreamCache = null
   bodyCache = null
   guideCache = null
+  bodyGuideCache = null
 }
 
 /**
@@ -450,7 +527,7 @@ function guideKey(channels, sampleRate, p, up, hash) {
 const NOT_UPSTREAM = new Set([
   'density', 'outputDb', 'listen', 'bodyMakeupGuess', 'sourcePeakDb', 'makeupDb',
   'peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb', 'bodyMakeupDb', 'bodyCeilingDb',
-  'deEssLevelOffsetDb', 'peaksGuideRangeDb', 'measureUntil', 'outputCeilingDb',
+  'deEssLevelOffsetDb', 'peaksGuideRangeDb', 'measureUntil', 'outputCeilingDb', 'bodyGuidePrRange',
 ])
 
 function upstreamKey(channels, sampleRate, p, hash = channelsHash(channels), skip = null) {
@@ -534,6 +611,7 @@ function measureThroughBody(channels, sampleRate, p) {
   if (cornerHz) base.cornerHz = cornerHz
   else delete base.cornerHz
   delete base.peaksGuideRangeDb
+  delete base.bodyGuidePrRange
 
   const none = {
     cornerHz, voiceF0Hz, peaksRippleDb: null, sourcePeakDb: null,
@@ -544,7 +622,7 @@ function measureThroughBody(channels, sampleRate, p) {
     peaksDb: 0, peaksBodyDb: 0, bodyDb: 0,
   }
   const inPeak = peakOfChannels(channels)
-  if (!(inPeak > 0)) return { out: none, silent: true, peaksBase: base, peaksSample: null }
+  if (!(inPeak > 0)) return { out: none, silent: true, peaksBase: base, peaksSample: null, afterPeaks: null, bodyAlignDb: null, bodySample: null }
   // Both stages' limiters hold the SOURCE's peak.
   const ceilingDb = db(inPeak)
   const out = { ...none, sourcePeakDb: ceilingDb }
@@ -575,12 +653,12 @@ function measureThroughBody(channels, sampleRate, p) {
 
   // ── BODY ── on what the 1176 stage put out, makeup and all.
   let afterBody = afterPeaks
+  // In the chain the kernel takes the Body offset net of the Peaks makeup;
+  // rendered alone (Peaks bypassed) it has to be passed that way.
+  const bodyAlignDb = bodyAlignFor(p, out.peaksMakeupDb)
+  let bodySample = null
   if (p.bodyOn) {
-    // In the chain the kernel takes the Body offset net of the Peaks makeup;
-    // rendered alone (Peaks bypassed) it has to be passed that way.
-    const bodyAlignDb = bodyAlignFor(p, out.peaksMakeupDb)
     const midRef = referenceBlocks(afterPeaks, sampleRate)
-    const W = Math.round(SOLVE_BLOCK_S * sampleRate)
     /**
      * The LA-2A stage's own makeup (its Gain, before the valve — so the plan
      * iterates renders), limiter at the source peak, and peak restore, which
@@ -623,21 +701,14 @@ function measureThroughBody(channels, sampleRate, p) {
     out.bodyCeilingDb = ceilingDb
     out.makeupDb = restoreToCeilingDb(ceilingDb, db(peakOfChannels(limitChannels(last.out, ceilingDb, sampleRate))))
     afterBody = limitChannels(scaleChannels(last.out, out.makeupDb), ceilingDb, sampleRate)
-    const r = first
     // Average cell reduction over the voiced blocks, from the cell's own meter
     // (one value per 128-sample kernel block).
-    const per = W / 128
-    let sum = 0
-    let count = 0
-    for (const k of midRef.voicedIdx) {
-      const from = Math.floor(k * per)
-      const to = Math.min(r.bodyGr.length, Math.floor((k + 1) * per))
-      for (let j = from; j < to; j++) { sum += r.bodyGr[j]; count++ }
-    }
-    out.bodyDb = count > 0 ? sum / count : 0
+    out.bodyDb = bodyAvgGrDb(first, midRef.voicedIdx, sampleRate)
+    // The Body guide's first point, free: this render at this knob's PR.
+    if (Number.isFinite(p.bodyPeakReduction)) bodySample = { driveDb: p.bodyPeakReduction, grDb: out.bodyDb }
   }
 
-  return { out, afterBody, voiceF0Hz, ceilingDb, silent: false, peaksBase: base, peaksSample }
+  return { out, afterBody, voiceF0Hz, ceilingDb, silent: false, peaksBase: base, peaksSample, afterPeaks, bodyAlignDb, bodySample }
 }
 
 /**

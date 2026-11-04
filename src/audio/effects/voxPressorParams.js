@@ -4,7 +4,7 @@
  * schepsParams.js, for the same reason: `voxPressor.js` imports the
  * `?worker&url` loader, which only Vite resolves).
  */
-import { PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, PEAKS_RIPPLE_WARN_DB } from '../voxPressorSolve.js'
+import { PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, PEAKS_RIPPLE_WARN_DB, BODY_GUIDE_EDGE_DB, BODY_GUIDE_WARN_DB } from '../voxPressorSolve.js'
 import {
   voxLatencySamples, PEAKS_INPUT_KNOB, PEAKS_SPEED_IDS, peaksTiming, PEAKS_MODE_IDS,
 } from '../voxPressorProcessor.js'
@@ -82,6 +82,7 @@ export const BODY_LOOKAHEAD_STEPS_MS = Object.freeze([0, 5, 10, LOOKAHEAD_MAX_MS
 
 export const VOX_OUTPUT_MIN_DB = -12
 export const VOX_OUTPUT_MAX_DB = 12
+export { BODY_GUIDE_EDGE_DB, BODY_GUIDE_WARN_DB }
 export { PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, PEAKS_RIPPLE_WARN_DB, PEAKS_SPEED_IDS, PEAKS_MODE_IDS, peaksTiming }
 
 /**
@@ -358,6 +359,23 @@ export const BODY_PR_PER_STEP = 4
 export function bodyPrFor(body) {
   const k = Number.isFinite(Number(body)) ? Math.max(0, Math.min(BODY_MAX, Number(body))) : 0
   return BODY_PR_ZERO + BODY_PR_PER_STEP * k
+}
+
+/** The PR span the Body knob covers: where `measureVoxPressor` searches the Body guide. */
+export function bodyGuidePrRange() {
+  return [bodyPrFor(0), bodyPrFor(BODY_MAX)]
+}
+
+/**
+ * The Body guide in knob units, from `measureVoxPressor`'s `bodyGuide`:
+ * { edge, warn } — where the LA-2A's average leveling passes
+ * `BODY_GUIDE_EDGE_DB` (amber) and `BODY_GUIDE_WARN_DB` (red); BODY_MAX when
+ * not reached on the knob's travel. null when there is no guide.
+ */
+export function bodyGuideKnobs(guide) {
+  if (!guide) return null
+  const k = pr => (Number.isFinite(pr) ? Math.max(0, Math.min(BODY_MAX, (pr - BODY_PR_ZERO) / BODY_PR_PER_STEP)) : BODY_MAX)
+  return { edge: k(guide.edgePr), warn: k(guide.warnPr) }
 }
 
 function knob(v) {
