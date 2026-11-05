@@ -11,6 +11,7 @@ import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import { isSheetViewport, sheetGeometry, SHEET_MAX_WIDTH as SHEET_NARROW_PX } from '../../ui/windowSheet.js'
 import Icon from '../ui/Icon.vue'
 import { useEntitlements } from '../../composables/useEntitlements.js'
+import { isOffline } from '../../auth/plans.js'
 import HelpOverlay from './HelpOverlay.vue'
 import ModulaPresetBrowser from '../modula/ModulaPresetBrowser.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
@@ -144,7 +145,8 @@ const props = defineProps({
    * A plan feature (src/auth/plans.js) Apply needs. Without it the button stays
    * PRESSABLE and carries a PRO tag: pressing it opens the upgrade prompt
    * rather than emitting `apply`. Preview is never gated — hearing the result
-   * first is the point.
+   * first is the point. An OFFLINE feature (plans.js `offline`) has no preview:
+   * its Apply is the whole plugin, and the tooltip does not promise one.
    */
   applyFeature: { type: String, default: null },
   /**
@@ -335,7 +337,8 @@ const applyTitle = computed(() => {
   if (busy.value) return 'This file is still being processed — wait for it to finish'
   if (props.applyDisabled) return props.applyDisabledHint
   if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
-  if (applyLocked.value) return `${entitlements.hint(props.applyFeature)} — preview is free`
+  // An offline process has no preview to offer, so it does not promise one.
+  if (applyLocked.value) return entitlements.hint(props.applyFeature) + (isOffline(props.applyFeature) ? '' : ' — preview is free')
   return ''
 })
 

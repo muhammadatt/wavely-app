@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { reactive, computed } from 'vue'
 
 import { createEntitlements } from '../../src/auth/entitlements.js'
-import { FEATURES, FREE_PREVIEW_SECONDS } from '../../src/auth/plans.js'
+import { FEATURES, FREE_PREVIEW_SECONDS, isOffline, allowsPreview } from '../../src/auth/plans.js'
 import { readFileSync } from 'node:fs'
 
 function fakeAuth(status = 'signedOut', plan = null) {
@@ -38,8 +38,9 @@ test('signed out: saving asks for an account, Pro features ask for an upgrade', 
   assert.deepEqual(auth.calls, [['dialog', 'signUp'], ['upgrade', 'pluginChainApply']])
   assert.match(e.hint('savePresets'), /^Sign in/)
   assert.match(e.hint('autoLevel'), /Pro feature/)
-  assert.equal(e.previewLimit('noiseReduction'), FREE_PREVIEW_SECONDS)
-  // Analysis plugins have no server preview to limit: only their Apply is Pro.
+  assert.equal(e.previewLimit('spotEffects'), FREE_PREVIEW_SECONDS)
+  // Offline processes are Pro outright: nothing to preview, nothing to send.
+  assert.equal(e.previewLimit('noiseReduction'), 0)
   assert.equal(e.previewLimit('autoLevel'), 0)
 })
 
@@ -48,12 +49,21 @@ test('free plan saves presets but not Pro features; Pro has everything; it track
   const e = createEntitlements(auth)
   assert.equal(e.can('savePresets'), true)
   assert.equal(e.can('pluginChainApply'), false)
-  assert.equal(e.previewLimit('noiseReduction'), FREE_PREVIEW_SECONDS)
+  assert.equal(e.can('noiseReduction'), false)
+  assert.equal(e.previewLimit('spotEffects'), FREE_PREVIEW_SECONDS)
 
   auth.state.plan = 'pro'
   assert.equal(e.can('pluginChainApply'), true)
   assert.equal(e.previewLimit('noiseReduction'), Infinity)
   assert.equal(e.hint('autoLevel'), '')
+})
+
+test('Auto Leveler and Noise Reduction are offline processes, gated whole', () => {
+  assert.equal(isOffline('autoLevel'), true)
+  assert.equal(isOffline('noiseReduction'), true)
+  assert.equal(allowsPreview('noiseReduction'), false)
+  // The real-time plugins keep their free preview.
+  assert.equal(isOffline('pluginChainApply'), false)
 })
 
 test('analysis needs an account, not a plan', () => {
@@ -85,6 +95,9 @@ test('every registry `feature` and apply-feature names a real feature', () => {
     'src/ui/registry.js',
     'src/components/panels/windows/PluginChainWindow.vue',
     'src/components/panels/AutoLevelModal.vue',
+    'src/components/panels/NoiseReductionModal.vue',
+    'src/composables/useAutoLevel.js',
+    'src/composables/useNoiseReduction.js',
     'src/components/panels/SibilanceEditorModal.vue',
   ].map(p => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')).join('\n')
   const named = [

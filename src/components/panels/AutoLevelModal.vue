@@ -2,52 +2,40 @@
 /**
  * Auto Leveler.
  *
- * Three-speed, and the panel says so: Analyse runs voice-activity detection on
- * the server once, the clip analysis that follows is local, and every control
- * below re-solves from it in milliseconds. Nothing here can trigger a round
- * trip except the Analyse button.
+ * An OFFLINE process (see useAutoLevel.js): set the controls, press Level,
+ * listen in the editor, Undo if it is wrong. One button runs speech detection
+ * on the server, the phrase analysis and gain solve here, and commits the
+ * result. Pro only — the footer button carries the PRO tag and opens the
+ * upgrade prompt for anyone else.
  *
  * The controls are deliberately the preset's own parameter names rather than a
  * simplified "amount" knob. This plugin exists for the user who is going to
  * check the result against ACX, and a leveler whose caps and deadband are
  * hidden cannot be reasoned about against a compliance report.
  *
- * Modula layout: the gain bar and the analysis sit in the centre well between
- * the IN and OUT ladders, the four live controls under them, and the target
- * mode with its two knobs in a second row.
+ * Modula layout: what Level will do (and what the last run did) in the top
+ * well, the four limits under it, and the target mode with its two knobs in a
+ * second row.
  */
-import { computed, onMounted } from 'vue'
-import { useAutoLevel } from '../../composables/useAutoLevel.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
+import { computed } from 'vue'
+import { useAutoLevel, skipReasonText } from '../../composables/useAutoLevel.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { AUTOLEVEL_DEFAULTS } from '../../audio/dsp/autoLevel.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaButton from '../modula/ModulaButton.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
-import LevelMeter from '../meters/LevelMeter.vue'
-import GainRideBar from '../meters/GainRideBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import { useEntitlements } from '../../composables/useEntitlements.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  params, preview, analyzing, prepared, solved,
-  gainDb, inputLevels, outputLevels,
-  hasAnalysis, hasSelection, isStale, curveValid, analyzedRegion, skipReason,
-  togglePreview, syncParam, resetParams, analyze, apply, teardown, closeModal,
+  params, processing, lastResult, hasSelection,
+  syncParam, resetParams, apply, closeModal,
 } = useAutoLevel()
 
 const { state } = useEditorState()
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!preview.value && currentPluginCopy() === 'solo') togglePreview()
-})
-
 const ACCENT = '#e8a33d'
-const METER_H = 190
 const D = AUTOLEVEL_DEFAULTS
 
 const fmtDb = v => `${v.toFixed(2)} dB`
@@ -60,28 +48,27 @@ const TARGET_OPTIONS = [
   { value: 'running_median', label: 'ROLLING', title: 'Follows a moving median, so a deliberate change in delivery survives' },
 ]
 
-function fmtTime(sec) {
+function duration(sec) {
+  if (sec < 60) return `${sec.toFixed(1)} s`
   const m = Math.floor(sec / 60)
-  const s = (sec - m * 60).toFixed(1).padStart(4, '0')
-  return `${m}:${s}`
+  return `${m} min ${String(Math.round(sec - m * 60)).padStart(2, '0')} s`
 }
 
-const measurements = computed(() => solved.value?.measurements ?? null)
-
 const statusLine = computed(() => {
-  if (analyzing.value) return 'Detecting speech…'
-  if (!prepared.value) return 'Analyse the selection to find its phrases.'
-  if (isStale.value) {
-    const r = analyzedRegion.value
-    return r
-      ? `Selection is outside the analysed ${fmtTime(r.start)}–${fmtTime(r.end)} — analyse again.`
-      : 'Audio changed since analysis — analyse again.'
-  }
-  if (skipReason.value) return skipReason.value
+  if (processing.value) return 'Detecting speech and levelling…'
+  if (!hasSelection.value) return 'Select the audio to level, or Select all.'
+  const { start, end } = state.selection
+  return `Level finds the phrases in the ${duration(end - start)} selection and evens them out. ` +
+    'Listen in the editor afterwards — Undo puts the original back.'
+})
 
-  const m = measurements.value
-  if (!m) return 'Analysed.'
-  return `${m.clip_count_after_merge} phrases levelled — ` +
+/** What the last run did — a past action, labelled as one. */
+const lastLine = computed(() => {
+  const r = lastResult.value
+  if (!r) return null
+  if (r.reason) return `Last run: ${skipReasonText(r.reason)}`
+  const m = r.measurements
+  return `Last run: ${m.clip_count_after_merge} phrases levelled — ` +
     `spread ${m.input_clip_lufs_std_db.toFixed(1)} → ` +
     `${m.output_clip_lufs_std_db.toFixed(1)} dB, ` +
     `${m.gain_max_down_db.toFixed(1)} to +${m.gain_max_up_db.toFixed(1)} dB applied.`
@@ -92,108 +79,49 @@ const statusLine = computed(() => {
  * can do, so it says so rather than leaving Max Boost looking broken.
  */
 const capNote = computed(() => {
-  const m = measurements.value
+  const m = lastResult.value?.measurements
   if (!m?.noise_floor_cap_active) return null
   return m.max_up_effective_db <= 0.01
-    ? `Room tone is too close to the ${params.value.noise_floor_target_dbfs} dBFS ` +
-      `target to lift anything — cuts only.`
-    : `Boost capped at ${m.max_up_effective_db.toFixed(1)} dB to keep room tone ` +
-      `under ${params.value.noise_floor_target_dbfs} dBFS.`
+    ? 'Room tone was too close to the floor target to lift anything — only cuts were made.'
+    : `Boost was capped at ${m.max_up_effective_db.toFixed(1)} dB to keep room tone under the floor target.`
 })
-
-const applyHint = computed(() => {
-  if (!preview.value) return 'Turn the leveler on to apply it'
-  if (!hasAnalysis.value) return 'Analyse the selection first'
-  if (isStale.value) return 'Selection moved outside the analysed region — analyse again'
-  return skipReason.value ?? 'Nothing to level'
-})
-
-/** The live controls work only on a fresh analysis with the leveler on. */
-const controlsOff = computed(() => !preview.value || !hasAnalysis.value)
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
 
 async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
+  if (await apply()) closeModal()
 }
-
-// The analysis needs an account (a free one), not a plan: say so before the
-// click rather than after it. Empty when signed in or accounts are off.
-const entitlements = useEntitlements()
-const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign in (free) to analyse. Applying needs Pro.' : ''))
 </script>
 
 <template>
   <FloatingWindow
     window-id="auto-leveler"
     :z="z"
-    :width="700"
+    :width="660"
     :accent="ACCENT"
     design="modula"
     brand-lead="AUTO LEVELER"
-    :engaged="preview"
-    show-preview
-    previewable
-    :previewing="state.isPlaying"
+    :show-engage="false"
     show-apply
+    apply-label="Level selection"
+    apply-label-short="Level"
     apply-feature="autoLevel"
-    :apply-disabled="!preview || !curveValid"
-    :apply-disabled-hint="applyHint"
-    @toggle-engaged="togglePreview"
-    @toggle-preview="togglePlayback"
+    :apply-disabled="processing"
+    apply-disabled-hint="Auto Leveler is running"
     @apply="applyAndClose"
-    @close="close"
   >
-    <div class="al-grid">
-      <div class="al-meter">
-        <LevelMeter variant="modula" scale-side="left" :levels="inputLevels" label="IN" :height="METER_H" />
-      </div>
-
-      <div class="al-display">
-        <!-- Signed, because the boosts are the point. 12 dB half-scale matches
-             the default caps: a bar whose ends are unreachable wastes its width. -->
-        <GainRideBar :gain-db="gainDb" :accent="ACCENT" :full-scale-db="12" />
-
-        <!-- Analyse: the frozen half -->
-        <div class="al-analyse">
-          <div class="al-analyse-text">
-            <span class="m-caption">Speech detection</span>
-            <p class="al-hint">
-              Runs once on the server. Phrase segmentation and every control
-              below are computed here from the result.
-            </p>
-            <p v-if="signInNote" class="al-hint al-signin">{{ signInNote }}</p>
-          </div>
-          <ModulaButton
-            variant="accent" :disabled="analyzing || !hasSelection"
-            @click="analyze"
-          >{{ analyzing ? 'Analysing…' : 'Analyse' }}</ModulaButton>
-        </div>
-
-        <p class="al-status" :class="{ 'is-warn': isStale || skipReason }">{{ statusLine }}</p>
-        <p v-if="capNote" class="al-status is-warn">{{ capNote }}</p>
-      </div>
-
-      <div class="al-meter">
-        <LevelMeter variant="modula" scale-side="right" :levels="outputLevels" label="OUT" :height="METER_H" />
-      </div>
+    <div class="al-display">
+      <span class="m-caption">Phrase levelling</span>
+      <p class="al-status">{{ statusLine }}</p>
+      <p v-if="lastLine" class="al-status al-last">{{ lastLine }}</p>
+      <p v-if="capNote" class="al-status is-warn">{{ capNote }}</p>
     </div>
 
-    <!-- Targeting: the live half -->
+    <!-- Limits: how far any phrase may move -->
     <div class="al-knobs">
       <ModulaKnob
         variant="small" :size="52" show-value editable
         :model-value="params.deadband_db" :min="0" :max="6" :step="0.05"
         :default-value="D.deadband_db" label="Deadband" :color="ACCENT" :format-value="fmtDb"
-        :disabled="controlsOff"
+        :disabled="processing"
         title="How far a phrase may sit from the target before it is touched at all. Double-click to reset"
         @update:model-value="v => syncParam('deadband_db', v)"
       />
@@ -201,7 +129,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign
         variant="small" :size="52" show-value editable
         :model-value="params.knee_db" :min="0.1" :max="6" :step="0.1"
         :default-value="D.knee_db" label="Knee" :color="ACCENT" :format-value="fmtDb1"
-        :disabled="controlsOff"
+        :disabled="processing"
         title="How gently the correction fades in past the deadband. Double-click to reset"
         @update:model-value="v => syncParam('knee_db', v)"
       />
@@ -209,7 +137,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign
         variant="small" :size="52" show-value editable
         :model-value="params.max_up_db" :min="0" :max="18" :step="0.5"
         :default-value="D.max_up_db" label="Max Boost" :color="ACCENT" :format-value="fmtDb1"
-        :disabled="controlsOff"
+        :disabled="processing"
         title="The most any phrase is lifted. Double-click to reset"
         @update:model-value="v => syncParam('max_up_db', v)"
       />
@@ -217,7 +145,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign
         variant="small" :size="52" show-value editable
         :model-value="params.max_down_db" :min="0" :max="18" :step="0.5"
         :default-value="D.max_down_db" label="Max Cut" :color="ACCENT" :format-value="fmtDb1"
-        :disabled="controlsOff"
+        :disabled="processing"
         title="The most any phrase is turned down. Double-click to reset"
         @update:model-value="v => syncParam('max_down_db', v)"
       />
@@ -231,20 +159,20 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign
           level throughout; <b>rolling</b> follows a moving median, so a
           deliberate change in delivery survives.
         </p>
-        <ModulaButton variant="ghost" size="sm" @click="resetParams">Reset</ModulaButton>
+        <ModulaButton variant="ghost" size="sm" :disabled="processing" @click="resetParams">Reset</ModulaButton>
       </div>
 
       <div class="al-target-controls">
         <ModulaSegmented
           :model-value="params.target_mode" :options="TARGET_OPTIONS"
-          aria-label="Target" :disabled="controlsOff"
+          aria-label="Target" :disabled="processing"
           @update:model-value="v => syncParam('target_mode', v)"
         />
         <ModulaKnob
           variant="small" :size="44" show-value editable
           :model-value="params.target_window_s" :min="10" :max="120" :step="5"
           :default-value="D.target_window_s" label="Window" :color="ACCENT" :format-value="fmtSecs"
-          :disabled="controlsOff || params.target_mode !== 'running_median'"
+          :disabled="processing || params.target_mode !== 'running_median'"
           title="How much recent speech the rolling median looks at. Double-click to reset"
           @update:model-value="v => syncParam('target_window_s', v)"
         />
@@ -252,7 +180,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign
           variant="small" :size="44" show-value editable
           :model-value="params.noise_floor_target_dbfs" :min="-80" :max="-40" :step="1"
           :default-value="D.noise_floor_target_dbfs" label="Floor" :color="ACCENT" :format-value="fmtFloor"
-          :disabled="controlsOff"
+          :disabled="processing"
           title="The room-tone level boosts are not allowed to push past. Double-click to reset"
           @update:model-value="v => syncParam('noise_floor_target_dbfs', v)"
         />
@@ -262,38 +190,16 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign
 </template>
 
 <style scoped>
-.al-grid {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: start;
-}
-.al-meter {
-  display: flex;
-  justify-content: center;
-  padding: 12px 4px;
-}
 .al-display {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   padding: 14px;
   border-radius: 16px;
   background: var(--m-panel);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
 }
-.al-analyse {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(0, 0, 0, .35);
-  box-shadow: 0 -1px 0 rgba(255, 255, 255, .04);
-}
-.al-analyse-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.al-hint.al-signin { color: #ffb27a; }
 .al-hint {
   margin: 0;
   font: 500 10px/1.5 var(--m-font-ui);
@@ -306,6 +212,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign
   color: var(--m-ink-3);
 }
 .al-status.is-warn { color: #ffb27a; }
+.al-status.al-last { color: var(--m-ink-2, #d6dbe0); }
 .al-knobs,
 .al-target {
   margin-top: 12px;

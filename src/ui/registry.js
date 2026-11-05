@@ -316,8 +316,8 @@ const ALL_OPERATIONS = [
     ],
     requires: 'selection',
     feature: 'autoLevel',
-    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
-    chain: true,
+    // An offline process (Level, then Undo if it is wrong) with no live node,
+    // so it cannot take a Plugin Chain slot.
     surface: 'window',
     component: AutoLevelModal,
   },
@@ -510,8 +510,8 @@ const ALL_OPERATIONS = [
   // ---- Fix (windows) ----
   {
     // First under Fix: noise is the most common thing a user opens it for.
-    // Server-side (DeepFilterNet3 / RNNoise), so no live preview and no chain
-    // slot — the window auditions a processed copy instead.
+    // Server-side (DeepFilterNet3 / RNNoise), so an offline process: no live
+    // preview and no chain slot — Process the selection, Undo if it is wrong.
     id: 'noise-reduction',
     label: 'Noise Reduction',
     desc: 'Remove background noise, hiss and room tone',
