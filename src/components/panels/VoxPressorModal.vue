@@ -376,6 +376,7 @@ async function applyAndClose() {
     previewable
     :previewing="state.isPlaying"
     show-apply
+    apply-feature="voxPressor"
     :apply-disabled="!voxPreview"
     apply-disabled-hint="Turn VoxPressor on to apply it"
     @toggle-engaged="togglePreview"
@@ -436,7 +437,6 @@ async function applyAndClose() {
         <div class="vp-centre">
           <VoxNeedleMeter :db="meterDb" :label="meterLabel" :scale="0.82" />
           <div class="vp-ctl">
-            <span class="vp-cap">Meter</span>
             <ModulaDrumCounter v-model="meter" class="vp-drum" :options="METER_OPTIONS" aria-label="What the needle reads" />
           </div>
           <!-- THE SELECTED STAGE'S READOUT, under the drum (owner, November 2026:

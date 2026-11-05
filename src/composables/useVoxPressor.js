@@ -2,6 +2,7 @@ import { computed, ref, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
+import { useEntitlements } from './useEntitlements.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
   applyVoxPressorRegion, computeVoxPressorMeasure, computeVoxPressorExact, computePeakCache,
@@ -596,6 +597,7 @@ const copies = pluginCopies((copy, life) => {
 
     async function apply() {
       if (!state.selection) return
+      if (!useEntitlements().request('voxPressor')) return
       const { start, end } = state.selection
       const pin = pinActiveDocument('VoxPressor')
       const wasPreviewing = voxPreview.value

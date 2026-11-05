@@ -58,6 +58,7 @@ export const FEATURES = {
   audioAnalysis: { requires: 'free', label: 'Audio analysis', server: true },
   autoLevel: { requires: 'pro', label: 'Auto Leveler' },
   sibilanceEditor: { requires: 'pro', label: 'Sibilance Editor' },
+  voxPressor: { requires: 'pro', label: 'VoxPressor' },
 
   // Server RENDERING: Pro, with a short preview for everyone else.
   noiseReduction: { requires: 'pro', label: 'Noise Reduction', server: true, preview: true },

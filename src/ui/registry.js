@@ -365,7 +365,6 @@ const ALL_OPERATIONS = [
   },
   {
     id: 'vox-pressor',
-    release: 'dev',
     label: 'VoxPressor',
     desc: 'Vocal dynamics: 1176 peaks into LA-2A body',
     category: 'dynamics',
@@ -375,6 +374,7 @@ const ALL_OPERATIONS = [
       'leveler', 'narration', 'podcast', 'dynamics',
     ],
     requires: 'selection',
+    feature: 'voxPressor',
     // Runs live in the playback chain, so it can take a slot — see chainPlugins().
     chain: true,
     surface: 'window',
