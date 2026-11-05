@@ -21,12 +21,15 @@ export default {
     { label: 'Edit', text: 'Opens the plugin’s window to change its settings' },
     { label: '×', text: 'Takes the plugin out of the chain. Its settings go with it: adding it again starts from its defaults' },
     { label: 'Clear', text: 'Takes every plugin out of the chain' },
+    { label: 'Calibrate', text: 'Plays the chain through, offline, over the selection (or the whole file with nothing selected), so each plugin measures what the plugins above it actually hand it — its makeup, its input level, its ceiling — exactly as Apply will. Shown when two or more plugins are on. On a long file with nothing selected it takes about as long as applying the chain' },
+    { label: 'MANUAL / AUTO', text: 'MANUAL calibrates when you press Calibrate. AUTO calibrates by itself, a moment after anything above a plugin changes — handy on a short selection, slow on a whole long file. Your choice is remembered' },
+    { label: 'STALE', text: 'Shown on a plugin that is measuring audio it will not hear: something above it changed since the last calibration. Until you calibrate it keeps the last calibration’s measurements (or, after an edit or a new selection, the unprocessed file’s)' },
     { label: 'Apply', text: 'Renders every live slot over the selection in chain order and commits the result as one undo step, then bypasses the whole chain so the processing is not heard twice. Each plugin keeps its own ON / BYPASS, so turning the chain back on is one switch. Apply is off while the chain is bypassed, since it would write processing you cannot hear. It is the only Apply for a plugin in the chain — their own windows say In chain instead' },
   ],
 
   notes: [
     'Each plugin renders what the slot before it produced, exactly as if you had applied them one at a time in that order',
-    'Measured values such as auto makeup are re-measured on what actually reaches each plugin, so a plugin late in the chain can land a little differently from the preview, which measures the unprocessed file',
+    'Measured values such as auto makeup are taken on what actually reaches each plugin — on Apply always, and in the preview once the chain is calibrated. Until then a plugin after another one that changes level (a compressor after another compressor that adds makeup, say) measures the unprocessed file and can sound different on Apply; it is marked STALE. For now the compressors (LA Vintage 2A, LA Classic 76, Scheps Parallel) and the Soft Clipper follow calibration in the preview; the other plugins still measure the unprocessed file there',
     'Opening an effect from the toolbar or the search does not add it to the chain: it opens on its own, closing this window and the chain’s effect windows, and the chain is bypassed, even while that effect is bypassed — so it previews, and compares against, exactly what its own Apply writes. The chain stays bypassed after you close the effect, and the toolbar’s Chain button reads BYPASSED, until you turn it back on here',
     'This window and the effects in the chain can all be open together. The Spectrum Analyzer can stay open beside anything',
     'Peak and Loudness Normalize measure and set level in one step, so they cannot run in the chain and are not in the list',

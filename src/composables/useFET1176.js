@@ -2,7 +2,7 @@ import { ref, watch } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin } from './usePluginChain.js'
+import { registerChainPlugin, settingsKeyOf, chainMeasureInput, chainCalibrationRevision } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { fet1176TuningState } from '../audio/effects/fet1176Tuning.js'
 import { applyFET1176Region, computeFET1176AutoMakeup, computePeakCache } from '../audio/processing.js'
@@ -283,7 +283,16 @@ const copies = pluginCopies((copy, life) => {
      * DOCUMENT, not the revision, so editing a file the user trimmed by hand
      * leaves their setting alone.
      */
-    function refreshInputAlign(segments = state.segments) {
+    /**
+     * What the PREVIEW measures: the segments this copy hears — its calibrated
+     * input when it is a chain slot downstream of live slots, else the file.
+     * See `chainMeasureInput`. Apply passes its own segments explicitly.
+     */
+    function previewSegments() {
+      return chainMeasureInput(fet1176Effect.id) ?? state.segments
+    }
+
+    function refreshInputAlign(segments = previewSegments()) {
       if (!state.currentFile) return
       // `segments` is the document's timeline, or — during a chain apply — the
       // chain's running result, which is no revision of the document: always
@@ -372,7 +381,7 @@ const copies = pluginCopies((copy, life) => {
      * number so a fast knob drag can't have an older measurement land after
      * a newer one.
      */
-    async function refreshAutoMakeup(segments = state.segments) {
+    async function refreshAutoMakeup(segments = previewSegments()) {
       if (!fetAutoMakeup.value || !state.currentFile) return
 
       /**
@@ -629,6 +638,10 @@ const copies = pluginCopies((copy, life) => {
           // the old region, so they are cleared before the measurement re-runs.
           if (fetPreview.value || isOpen(windowId)) { resetLiveMakeup(); refreshAutoMakeup() }
         }, { deep: true })
+        // A chain calibration landed: re-measure on the input it handed us.
+        watch(chainCalibrationRevision, () => {
+          if (fetPreview.value || isOpen(windowId)) { refreshInputAlign(); resetLiveMakeup(); refreshAutoMakeup() }
+        }, { deep: true })
       })
     }
 
@@ -636,6 +649,11 @@ const copies = pluginCopies((copy, life) => {
       id: fet1176Effect.id,
       windowId,
       label: 'LA Classic 76',
+      // User settings only: alignment and Output while AUTO owns them, and the ceiling, are measured.
+      settingsKey: () => settingsKeyOf(
+        { ...currentParams(), inputAuto: fetInputAuto.value, autoMakeup: fetAutoMakeup.value },
+        ['ceilingDb', 'ceilingKneeDb', ...(fetInputAuto.value ? ['inputAlignDb'] : []), ...(fetAutoMakeup.value ? ['output'] : [])],
+      ),
       dispose: life.dispose,
       isActive: () => fetPreview.value,
       setActive: (on) => { if (fetPreview.value !== on) togglePreview() },

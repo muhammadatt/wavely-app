@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin } from './usePluginChain.js'
+import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { applyAirBandRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
@@ -159,6 +159,7 @@ const copies = pluginCopies((copy, life) => {
       id: airBandEffect.id,
       windowId,
       label: 'AirBoost',
+      settingsKey: () => settingsKeyOf(currentParams()),
       dispose: life.dispose,
       isActive: () => airBandPreview.value,
       setActive: (on) => { if (airBandPreview.value !== on) togglePreview() },

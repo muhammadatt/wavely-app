@@ -1,7 +1,7 @@
 import { reactive, ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin } from './usePluginChain.js'
+import { registerChainPlugin, settingsKeyOf } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
   applyHFLimiterRegion, computePeakCache,
@@ -208,6 +208,7 @@ const copies = pluginCopies((copy, life) => {
       id: hfLimiterEffect.id,
       windowId,
       label: 'HF Limiter',
+      settingsKey: () => settingsKeyOf({ ...hflParams }, [...MEASURED]),
       dispose: life.dispose,
       isActive: () => hflPreview.value,
       setActive: (on) => { if (hflPreview.value !== on) togglePreview() },

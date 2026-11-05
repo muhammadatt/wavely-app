@@ -18,14 +18,21 @@
  *
  * The rack is a view: the slots live in the EffectChain (see
  * usePluginChain.js), so a plugin's window and this one can never disagree.
+ *
+ * CALIBRATION (with two or more live slots): each slot's PREVIEW measures what
+ * the slots above it hand it, as Apply does — but getting that means rendering
+ * them, an Apply's worth of work, so it runs on CALIBRATE or, in AUTO, by
+ * itself whenever something upstream changes. A slot measuring audio it will
+ * not hear is marked STALE. See `useChainCalibration`.
  */
 import { computed, ref } from 'vue'
 import { useEditorState } from '../../../composables/useEditorState.js'
-import { usePluginChain } from '../../../composables/usePluginChain.js'
+import { usePluginChain, useChainCalibration } from '../../../composables/usePluginChain.js'
 import { baseId } from '../../../composables/pluginCopies.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import PluginPicker from '../../PluginPicker.vue'
 import ModulaLedPill from '../../modula/ModulaLedPill.vue'
+import ModulaSegmented from '../../modula/ModulaSegmented.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -36,6 +43,23 @@ const {
 } = usePluginChain()
 
 const ACCENT = '#e8a33d'
+
+// ── Calibration ─────────────────────────────────────────────────────────────
+const calibration = useChainCalibration()
+const CALIBRATION_MODES = [
+  { value: 'manual', label: 'MANUAL', title: 'Calibrate when you press the button — for long files' },
+  { value: 'auto', label: 'AUTO', title: 'Re-calibrate by itself whenever something upstream changes' },
+]
+const calibrationNote = computed(() => {
+  if (calibration.running.value) return `Calibrating… ${Math.round(calibration.progress.value * 100)} %`
+  if (calibration.error.value) return calibration.error.value
+  if (calibration.needed.value) {
+    return calibration.mode.value === 'auto'
+      ? 'Something upstream changed — re-calibrating'
+      : 'Out of date: later plugins are measuring audio they won’t hear. Calibrate before you judge or apply'
+  }
+  return 'Calibrated: every plugin measures what the ones above it hand it'
+})
 
 // Selection is FloatingWindow's to explain; everything else is ours.
 const blocker = computed(() => (state.selection ? applyBlocker() : ''))
@@ -89,7 +113,7 @@ function onDragEnd() {
   <FloatingWindow
     window-id="plugin-chain"
     :z="z"
-    :width="440"
+    :width="480"
     :accent="ACCENT"
     design="modula"
     brand-lead="PLUGIN CHAIN"
@@ -147,6 +171,11 @@ function onDragEnd() {
             @update:model-value="setSlotActive(slot.id, $event)"
           />
           <span class="pc-name">{{ slot.label }}</span>
+          <span
+            v-if="slot.active && calibration.stateOf(slot.id) === 'stale'"
+            class="pc-stale"
+            title="Measuring audio it won't hear: something above it changed since the last calibration"
+          >STALE</span>
           <span class="pc-actions">
             <button
               type="button" class="pc-icon-btn" :disabled="i === 0"
@@ -176,6 +205,21 @@ function onDragEnd() {
         No plugins yet. Use + Add plugin — each one joins the end of the chain
         and keeps playing when its window closes
       </p>
+
+      <div v-if="calibration.applicable.value" class="pc-calibrate" :class="{ 'is-needed': calibration.needed.value }">
+        <button
+          type="button" class="pc-text-btn pc-calibrate-btn"
+          :disabled="calibration.running.value"
+          title="Render the chain over the preview region so each plugin measures what it will hear (the selection, or the whole file)"
+          @click="calibration.calibrate()"
+        >{{ calibration.running.value ? 'Calibrating…' : 'Calibrate' }}</button>
+        <ModulaSegmented
+          :model-value="calibration.mode.value" :options="CALIBRATION_MODES"
+          aria-label="Calibration mode"
+          @update:model-value="calibration.setMode"
+        />
+        <span class="pc-calibrate-note" role="status">{{ calibrationNote }}</span>
+      </div>
 
       <p v-if="slots.length" class="pc-note">
         <template v-if="bypassed">Chain bypassed — you are hearing the file as it is</template>
@@ -308,4 +352,29 @@ function onDragEnd() {
   padding: 18px 8px;
   text-align: center;
 }
+.pc-stale {
+  padding: 2px 6px;
+  border-radius: 6px;
+  font: 700 8.5px/1 var(--m-font-mono);
+  letter-spacing: .12em;
+  color: #1a1206;
+  background: var(--m-accent);
+}
+.pc-calibrate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--m-well);
+  box-shadow: var(--m-shadow-well);
+}
+.pc-calibrate.is-needed .pc-calibrate-btn { color: var(--m-accent); }
+.pc-calibrate-note {
+  flex: 1 1 100%;
+  font: 500 10.5px/1.4 var(--m-font-ui);
+  color: var(--m-ink-4);
+}
+.pc-calibrate.is-needed .pc-calibrate-note { color: var(--m-ink-2); }
 </style>
