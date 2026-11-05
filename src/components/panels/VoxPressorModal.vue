@@ -49,7 +49,6 @@ onMounted(() => {
 })
 
 const ACCENT = '#e8a33d'
-const PEAKS_COLOR = '#ff7a5c'
 
 /**
  * SURFACE — the faceplate's paint: 'dark' (2a, Modula steel, ships) or
@@ -413,7 +412,7 @@ async function applyAndClose() {
             variant="ticks" :size="104"
             :model-value="peaksShown" :min="0" :max="PEAKS_MAX * KNOB_SCALE" :step="1"
             :default-value="VOX_DEFAULTS.peaks * KNOB_SCALE"
-            aria-label="Peaks" :color="PEAKS_COLOR" :format-value="formatPeaks" :disabled="!voxPreview"
+            aria-label="Peaks" :color="knobColor" :format-value="formatPeaks" :disabled="!voxPreview"
             :zones="peaksZones"
             title="How hard the 1176 catches the loudest peaks"
             @update:model-value="onPeaks"
@@ -466,7 +465,7 @@ async function applyAndClose() {
             variant="ticks" :size="104"
             :model-value="bodyShown" :min="0" :max="BODY_MAX * KNOB_SCALE" :step="1"
             :default-value="VOX_DEFAULTS.body * KNOB_SCALE"
-            aria-label="Body" :color="ACCENT" :format-value="formatBody" :disabled="!voxPreview"
+            aria-label="Body" :color="knobColor" :format-value="formatBody" :disabled="!voxPreview"
             :zones="bodyZones"
             title="How hard the LA-2A levels the voice"
             @update:model-value="onBody"
