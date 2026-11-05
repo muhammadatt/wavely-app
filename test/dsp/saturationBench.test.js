@@ -1,5 +1,5 @@
 /**
- * Saturation Bench — the layered waveshaper moved out of the HF Softener.
+ * Saturation Bench — the layered waveshaper moved out of the De-Esser.
  *
  * Synthetic voice with realistic upper formants (energy above 3 kHz at −19.9
  * dB of the vowel): a low-passed test voice makes every exciter look inert.

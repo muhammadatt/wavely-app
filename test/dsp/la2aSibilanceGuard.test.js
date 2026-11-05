@@ -122,3 +122,97 @@ test('with lookahead, the guard waits for the delayed sibilant (PR #186 review)'
   const dOn = residualDb(on.channelData[0], clean, clean, from)
   assert.ok(dOff - dOn > 12, `guard bought only ${(dOff - dOn).toFixed(1)} dB with lookahead`)
 })
+
+test('BENCH corner: the default is the 2.5 kHz kernel bit for bit, and it reaches a darker "sh"', async () => {
+  const { SIB_GUARD_HZ } = await import('../../src/audio/la2aProcessor.js')
+  assert.equal(LA2A_KERNEL_DEFAULTS.sibilanceGuardHz, SIB_GUARD_HZ)
+  assert.equal(LA2A_TUNING_DEFAULTS.sibilanceGuardHz, SIB_GUARD_HZ)
+  // An "sh": noise band-passed ~2-5 kHz, loud, after a vowel.
+  const n = SR
+  const x = new Float32Array(Math.round(SR * 1.5) + n)
+  x.set(vowel())
+  const lo = Math.exp(-2 * Math.PI * 2000 / SR)
+  const hi = Math.exp(-2 * Math.PI * 5000 / SR)
+  let a = 0; let b = 0; let c = 0
+  for (let i = 0; i < n; i++) {
+    const w = rnd()
+    a = (1 - lo) * w + lo * a // low-pass at 2 kHz
+    b = (1 - hi) * w + hi * b // low-pass at 5 kHz
+    c = (1 - hi) * (b - a) + hi * c
+    x[Math.round(SR * 1.5) + i] = 2.2 * c
+  }
+  const asDefault = render(x, {}).channelData[0]
+  assert.deepEqual(render(x, { sibilanceGuardHz: SIB_GUARD_HZ }).channelData[0], asDefault)
+  const clean = render(x, { analog: false }).channelData[0]
+  const from = Math.round(SR * 1.6)
+  const at4kRender = render(x, { sibilanceGuardHz: 4000 }).channelData[0]
+  const at4k = residualDb(at4kRender, clean, clean, from)
+  const at25 = residualDb(asDefault, clean, clean, from)
+  assert.ok(at25 < at4k - 1, `"sh": 4 kHz ${at4k.toFixed(1)} vs 2.5 kHz ${at25.toFixed(1)} dB`)
+  // The vowel before it is untouched by the lower corner.
+  const vowelEnd = Math.round(SR * 1.4)
+  const v4 = at4kRender.subarray(SR / 10, vowelEnd)
+  const v25 = asDefault.subarray(SR / 10, vowelEnd)
+  let d = 0
+  for (let i = 0; i < v4.length; i++) d = Math.max(d, Math.abs(v4[i] - v25[i]))
+  assert.ok(d < 1e-6, `vowel moved ${d}`)
+})
+
+test('valve guard: a loud "s" through the valve comes out clean, a vowel is bit-identical, 0 is the previous kernel', async () => {
+  const { VALVE_GUARD_DEFAULT, LA2A_TUBESAT_PATCH } = await import('../../src/audio/la2aProcessor.js')
+  assert.equal(LA2A_KERNEL_DEFAULTS.valveGuard, VALVE_GUARD_DEFAULT)
+  assert.equal(LA2A_TUNING_DEFAULTS.valveGuard, VALVE_GUARD_DEFAULT)
+  assert.equal(LA2A_TUBESAT_PATCH.valveGuard, 0)
+  const s = loudSibilant()
+  const clean = render(s, { analog: false }).channelData[0]
+  const from = SR / 4
+  const cellOnly = residualDb(render(s, { valveGuard: 0 }).channelData[0], clean, clean, from)
+  const both = residualDb(render(s, { valveGuard: 100 }).channelData[0], clean, clean, from)
+  assert.ok(both < cellOnly - 10, `valve guard: ${cellOnly.toFixed(1)} → ${both.toFixed(1)} dB`)
+  const v = vowel()
+  assert.deepEqual(render(v, { valveGuard: 100 }).channelData[0], render(v, { valveGuard: 0 }).channelData[0])
+})
+
+test('the guard listens to the audio, not to a caller\'s sidechain', async () => {
+  const { LA2AKernel } = await import('../../src/audio/la2aProcessor.js')
+  const s = loudSibilant()
+  const run = (sc) => {
+    const k = new LA2AKernel(SR)
+    k.setParams({ peakReduction: 70, gainDb: 6 })
+    const y = new Float32Array(s.length)
+    for (let o = 0; o < s.length; o += 128) {
+      k.process([s.subarray(o, o + 128)], [y.subarray(o, o + 128)], 128, sc ? sc.subarray(o, o + 128) : undefined)
+    }
+    return k.sibGain
+  }
+  // A sidechain with the top end taken away (as VoxPressor's Body tap does)
+  // still leaves the guard reading the audio's "s".
+  const dull = new Float32Array(s.length)
+  let l = 0
+  for (let i = 0; i < s.length; i++) { l += (s[i] - l) * 0.02; dull[i] = l }
+  assert.ok(run(dull) < 0.1, `guard scale with a dull sidechain ${run(dull)}`)
+  assert.equal(run(dull), run(null))
+})
+
+test('BENCH shaper split: off is the shipping kernel, the halves sum back exactly, and an "s" above it is not shaped', async () => {
+  const { LA2A_KERNEL_DEFAULTS: D } = await import('../../src/audio/la2aProcessor.js')
+  assert.equal(D.shaperSplitHz, 0)
+  assert.equal(LA2A_TUNING_DEFAULTS.shaperSplitHz, 0)
+  const v = vowel()
+  assert.deepEqual(render(v, { shaperSplitHz: 0 }).channelData[0], render(v, {}).channelData[0])
+  // Linear (valve off, cell drive ~0): the split changes nothing but rounding.
+  const lin = { tube: false, cellCurveDriveMax: 1e-9, sibilanceGuard: 0, valveGuard: 0 }
+  const a = render(v, lin).channelData[0]
+  const b = render(v, { ...lin, shaperSplitHz: 3000 }).channelData[0]
+  let worst = 0
+  let pk = 0
+  for (let i = 0; i < a.length; i++) { worst = Math.max(worst, Math.abs(a[i] - b[i])); pk = Math.max(pk, Math.abs(a[i])) }
+  assert.ok(20 * Math.log10(worst / pk) < -100, `split not transparent: ${(20 * Math.log10(worst / pk)).toFixed(1)} dB`)
+  // A loud 4-10 kHz "s", guards off: below a 3 kHz split it barely meets the curves.
+  const s = loudSibilant()
+  const clean = render(s, { analog: false }).channelData[0]
+  const off = { sibilanceGuard: 0, valveGuard: 0 }
+  const whole = residualDb(render(s, off).channelData[0], clean, clean, SR / 4)
+  const split = residualDb(render(s, { ...off, shaperSplitHz: 3000 }).channelData[0], clean, clean, SR / 4)
+  assert.ok(split < whole - 10, `"s" distortion ${whole.toFixed(1)} → ${split.toFixed(1)} dB`)
+})

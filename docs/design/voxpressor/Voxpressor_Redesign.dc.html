@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+html{background:#0b0e12}
+body{margin:0;width:max-content;min-width:100%;background:#0b0e12;color:#eaf6f8;font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#7fe9f6;text-decoration:none}a:hover{color:#eaf6f8;text-decoration:underline}
+button{font-family:inherit}
+</style>
+</helmet>
+
+<section data-screen-label="Turn 2" style="padding:64px 72px 24px;display:flex;flex-direction:column;gap:40px">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+    <div style="font:700 11px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#a0a8b0">TURN 2 · ANALOG LAYOUT</div>
+    <div style="font:700 28px/1.15 'Inter';letter-spacing:-.01em;color:#eaf6f8">Switchable GR meter at the centre, controls arranged around it</div>
+    <div style="font:400 14px/1.5 'Inter';color:#a0a8b0;text-wrap:pretty">Step the METER drum (PEAKS / BODY / PARALLEL) to switch what the needle reads. Knobs drag vertically; the tape-counter drums step with the arrows, a click on a neighbour, or ←/→.</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:72px;align-items:flex-start">
+    <div id="2a" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#14100e">2a</span>
+        <span style="font:600 15px/1 'Inter';color:#eaf6f8">Analog faceplate · Modula steel</span>
+      </div>
+      <div style="font:400 13px/1.5 'Inter';color:#a0a8b0;max-width:860px;text-wrap:pretty">Peaks and Body flank the needle meter, which switches between Peaks, Body and Parallel via the drum counter below it. The stage the needle is reading lights its title in its colour. De-ess, Parallel, Density and Output (ceiling) sit along the bottom on one baseline. Output pairs compact vertical IN/OUT meters with the ceiling selector — the amber mark on OUT is the ceiling; no trim, the ceiling sets the level.</div>
+      <div data-screen-label="2a Analog dark" style="width:800px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1), inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6);overflow:hidden;display:flex;flex-direction:column">
+        <div style="height:58px;box-sizing:border-box;padding:2px 18px 0;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font:800 13px/1 'Inter';letter-spacing:.14em;color:#fbf1e3">VOXPRESSOR</span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;font:700 12px/1 'Inter';box-shadow:0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65);cursor:pointer">?</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 'Inter';letter-spacing:.14em;color:#eaf6f8">ON</span></button>
+            <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;font:400 17px/1 'Inter';box-shadow:0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65);cursor:pointer">×</button>
+          </div>
+        </div>
+        <div style="padding:24px 26px 26px;display:flex">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:22px">
+            <div style="display:grid;grid-template-columns:170px minmax(0,1fr) 170px;align-items:start;gap:14px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:{{ td.peaks }};transition:color .2s ease">PEAK REDUCTION</span></div>
+                <dc-import name="VoxKnob" value="{{ k.peaks }}" color="#ff7a5c" on-change="{{ set.peaks }}" style="width:104px;height:104px" hint-size="104px,104px"></dc-import>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;margin-top:8px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">TIMING</span><dc-import name="VoxLcd" surface="dark" options="GENTLE,NORMAL,FAST,AUTO" hint-size="80px,26px"></dc-import></div>
+                <div style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">KNEE</span><dc-import name="VoxKnee" surface="dark" color="#e8a33d" hint-size="80px,30px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding-top:6px">
+                <div style="width:315px;height:143px;flex:none"><div style="width:384px;height:174px;transform:scale(.82);transform-origin:0 0"><dc-import name="VoxVU" db="{{ vu.db }}" label="{{ vu.label }}" style="width:384px;height:174px" hint-size="384px,174px"></dc-import></div></div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">METER</span>
+                  <dc-import name="VoxDrum" surface="dark" options="PEAKS,BODY,PARALLEL" value="{{ k.meter }}" color="#e8a33d" on-change="{{ setMeter }}" hint-size="244px,40px"></dc-import>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:{{ td.body }};transition:color .2s ease">BODY LEVELER</span></div>
+                <dc-import name="VoxKnob" value="{{ k.body }}" color="#e8a33d" on-change="{{ set.body }}" style="width:104px;height:104px" hint-size="104px,104px"></dc-import>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;margin-top:8px"><span style="font:500 9px/1 'JetBrains Mono',monospace;visibility:hidden">&nbsp;</span><dc-import name="VoxSelect" variant="slide" surface="dark" options="WARM,CLEAN" color="#e8a33d" hint-size="160px,30px"></dc-import></div>
+              </div>
+            </div>
+            <sc-if value="{{ lay.cur }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;grid-template-columns:1fr 1.35fr 1fr 1fr;gap:10px;align-items:start;margin-top:23px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DE-ESS</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.deess }}" color="#e8a33d" on-change="{{ set.deess }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import></div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">BAND</span><dc-import name="VoxRange" surface="dark" lo="WIDE" hi="SPLIT" color="#e8a33d" style="width:150px" hint-size="150px,42px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:{{ td.parallel }};transition:color .2s ease">PARALLEL</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center;gap:18px">
+                  <dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.mix }}" color="#e8a33d" on-change="{{ set.mix }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                    <dc-import name="VoxKnob" variant="plain" value="{{ k.drive }}" color="#e8a33d" on-change="{{ set.drive }}" style="width:44px;height:44px" hint-size="44px,44px"></dc-import>
+                    <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">DRIVE</span>
+                  </div>
+                </div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;visibility:hidden">&nbsp;</span><dc-import name="VoxSelect" variant="slide" surface="dark" options="LA-2A,1176" color="#e8a33d" hint-size="160px,30px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DETAIL</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.density }}" color="#e8a33d" on-change="{{ set.density }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px"></div>
+                <div style="height:84px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;text-align:center">OUTPUT</span><dc-import name="VoxLcd" surface="dark" options="SRC,−1 dB,−3 dB" value="{{ k.ceil }}" on-change="{{ setCeil }}" hint-size="80px,26px"></dc-import></div>
+                <div style="align-self:stretch">
+                  <div style="display:flex;flex-direction:column;gap:9px;padding:9px 10px;border-radius:9px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)">
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">IN</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 58%,#2a313b 58% 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">-18.4</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">OUT</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 {{ outFill }},#2a313b {{ outFill }} 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                        <div style="position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;left:{{ ceilPos }};background:#e8a33d;box-shadow:0 0 5px #e8a33d;transition:left .16s ease-out"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ outRead }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            </sc-if>
+            <sc-if value="{{ lay.a }}" hint-placeholder-val="{{ true }}">
+            <div style="display:grid;grid-template-columns:170px minmax(0,1fr) 170px;gap:14px;align-items:start;margin-top:23px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DE-ESS</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.deess }}" color="#e8a33d" on-change="{{ set.deess }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import></div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">BAND</span><dc-import name="VoxRange" surface="dark" lo="WIDE" hi="SPLIT" color="#e8a33d" style="width:150px" hint-size="150px,42px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:{{ td.parallel }};transition:color .2s ease">PARALLEL</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center;gap:18px">
+                  <dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.mix }}" color="#e8a33d" on-change="{{ set.mix }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                    <dc-import name="VoxKnob" variant="plain" value="{{ k.drive }}" color="#e8a33d" on-change="{{ set.drive }}" style="width:44px;height:44px" hint-size="44px,44px"></dc-import>
+                    <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">DRIVE</span>
+                  </div>
+                </div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;visibility:hidden">&nbsp;</span><dc-import name="VoxSelect" variant="slide" surface="dark" options="LA-2A,1176" color="#e8a33d" hint-size="160px,30px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:start">
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                    <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DETAIL</span></div>
+                    <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.density }}" color="#e8a33d" on-change="{{ set.density }}" style="width:72px;height:72px" hint-size="72px,72px"></dc-import></div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                    <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">OUTPUT</span></div>
+                    <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxLcd" surface="dark" options="SRC,−1 dB,−3 dB" value="{{ k.ceil }}" on-change="{{ setCeil }}" hint-size="80px,26px"></dc-import></div>
+                  </div>
+                </div>
+                <div style="height:44px;display:flex;flex-direction:column;justify-content:flex-start">
+                  <div style="display:flex;flex-direction:column;gap:9px;padding:9px 10px;border-radius:9px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)">
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">IN</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 58%,#2a313b 58% 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">-18.4</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">OUT</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 {{ outFill }},#2a313b {{ outFill }} 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                        <div style="position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;left:{{ ceilPos }};background:#e8a33d;box-shadow:0 0 5px #e8a33d;transition:left .16s ease-out"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ outRead }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            </sc-if>
+            <sc-if value="{{ lay.b }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;grid-template-columns:196px minmax(0,1fr) 196px;gap:14px;align-items:start;margin-top:23px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:{{ td.parallel }};transition:color .2s ease">PARALLEL</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center;gap:18px">
+                  <dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.mix }}" color="#e8a33d" on-change="{{ set.mix }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                    <dc-import name="VoxKnob" variant="plain" value="{{ k.drive }}" color="#e8a33d" on-change="{{ set.drive }}" style="width:44px;height:44px" hint-size="44px,44px"></dc-import>
+                    <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">DRIVE</span>
+                  </div>
+                </div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;visibility:hidden">&nbsp;</span><dc-import name="VoxSelect" variant="slide" surface="dark" options="LA-2A,1176" color="#e8a33d" hint-size="160px,30px"></dc-import></div>
+              </div>
+              <div style="display:grid;grid-template-columns:150px 150px;justify-content:center;gap:12px;align-items:start">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DE-ESS</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.deess }}" color="#e8a33d" on-change="{{ set.deess }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import></div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">BAND</span><dc-import name="VoxRange" surface="dark" lo="WIDE" hi="SPLIT" color="#e8a33d" style="width:150px" hint-size="150px,42px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DETAIL</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.density }}" color="#e8a33d" on-change="{{ set.density }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import></div>
+              </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px"></div>
+                <div style="height:84px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;text-align:center">OUTPUT</span><dc-import name="VoxLcd" surface="dark" options="SRC,−1 dB,−3 dB" value="{{ k.ceil }}" on-change="{{ setCeil }}" hint-size="80px,26px"></dc-import></div>
+                <div style="align-self:stretch">
+                  <div style="display:flex;flex-direction:column;gap:9px;padding:9px 10px;border-radius:9px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)">
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">IN</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 58%,#2a313b 58% 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">-18.4</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">OUT</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 {{ outFill }},#2a313b {{ outFill }} 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                        <div style="position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;left:{{ ceilPos }};background:#e8a33d;box-shadow:0 0 5px #e8a33d;transition:left .16s ease-out"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ outRead }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            </sc-if>
+          </div>
+        </div>
+        <div style="height:60px;box-sizing:border-box;padding:0 16px;display:flex;align-items:center;gap:20px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;white-space:nowrap">0:00.00 → 0:46.18 · 0:46.18 SELECTED</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#eaf6f8;font:600 12px 'Inter';cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #eaf6f8"></span>Preview</button>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px 'Inter';cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff, 0 0 0 1px rgba(0,0,0,.55), 0 6px 12px -6px rgba(0,0,0,.9)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Apply to selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="2b" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#14100e">2b</span>
+        <span style="font:600 15px/1 'Inter';color:#eaf6f8">Analog faceplate · light panel</span>
+      </div>
+      <div style="font:400 13px/1.5 'Inter';color:#a0a8b0;max-width:860px;text-wrap:pretty">Same layout on a light painted panel. Knobs, meter bezel and key bank stay dark so they read as physical parts mounted on the plate.</div>
+      <div data-screen-label="2b Analog light" style="width:800px;border-radius:22px;background:linear-gradient(180deg,#e6e2da,#cdc8be);box-shadow:0 60px 90px -50px rgba(0,0,0,1), inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6);overflow:hidden;display:flex;flex-direction:column">
+        <div style="height:58px;box-sizing:border-box;padding:2px 18px 0;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font:800 13px/1 'Inter';letter-spacing:.14em;color:#1d2026">VOXPRESSOR</span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#3a3f47;font:700 12px/1 'Inter';box-shadow:inset 0 1px 0 rgba(255,255,255,.7), 0 1px 1px rgba(40,30,20,.28), 0 5px 9px -4px rgba(40,30,20,.35);cursor:pointer">?</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.7), 0 1px 1px rgba(40,30,20,.28), 0 5px 9px -4px rgba(40,30,20,.35)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 'Inter';letter-spacing:.14em;color:#1d2026">ON</span></button>
+            <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#3a3f47;font:400 17px/1 'Inter';box-shadow:inset 0 1px 0 rgba(255,255,255,.7), 0 1px 1px rgba(40,30,20,.28), 0 5px 9px -4px rgba(40,30,20,.35);cursor:pointer">×</button>
+          </div>
+        </div>
+        <div style="padding:24px 26px 26px;display:flex">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:22px">
+            <div style="display:grid;grid-template-columns:170px minmax(0,1fr) 170px;align-items:start;gap:14px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:{{ tl.peaks }};transition:color .2s ease">PEAK REDUCTION</span></div>
+                <dc-import name="VoxKnob" value="{{ k.peaks }}" color="#ff7a5c" on-change="{{ set.peaks }}" style="width:104px;height:104px" hint-size="104px,104px"></dc-import>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;margin-top:8px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64">ATTACK / RELEASE</span><dc-import name="VoxLcd" surface="light" options="GENTLE,NORMAL,FAST,AUTO" hint-size="80px,26px"></dc-import></div>
+                <div style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64">KNEE</span><dc-import name="VoxKnee" surface="light" color="#e8a33d" hint-size="80px,30px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding-top:6px">
+                <div style="width:315px;height:143px;flex:none"><div style="width:384px;height:174px;transform:scale(.82);transform-origin:0 0"><dc-import name="VoxVU" db="{{ vu.db }}" label="{{ vu.label }}" style="width:384px;height:174px" hint-size="384px,174px"></dc-import></div></div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64">METER</span>
+                  <dc-import name="VoxDrum" surface="light" options="PEAKS,BODY,PARALLEL" value="{{ k.meter }}" color="#e8a33d" on-change="{{ setMeter }}" hint-size="244px,40px"></dc-import>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:{{ tl.body }};transition:color .2s ease">BODY LEVELER</span></div>
+                <dc-import name="VoxKnob" value="{{ k.body }}" color="#e8a33d" on-change="{{ set.body }}" style="width:104px;height:104px" hint-size="104px,104px"></dc-import>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;margin-top:8px"><span style="font:500 9px/1 'JetBrains Mono',monospace;visibility:hidden">&nbsp;</span><dc-import name="VoxSelect" variant="slide" surface="light" options="WARM,CLEAN" color="#e8a33d" hint-size="160px,30px"></dc-import></div>
+              </div>
+            </div>
+            <sc-if value="{{ lay.cur }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;grid-template-columns:1fr 1.35fr 1fr 1fr;gap:10px;align-items:start;margin-top:23px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#41464e">DE-ESS</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.deess }}" color="#bf782a" on-change="{{ set.deess }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import></div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64">BAND</span><dc-import name="VoxRange" surface="light" lo="WIDE" hi="SPLIT" color="#e8a33d" style="width:150px" hint-size="150px,42px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:{{ tl.parallel }};transition:color .2s ease">PARALLEL</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center;gap:18px">
+                  <dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.mix }}" color="#bf782a" on-change="{{ set.mix }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                    <dc-import name="VoxKnob" variant="plain" value="{{ k.drive }}" color="#bf782a" on-change="{{ set.drive }}" style="width:44px;height:44px" hint-size="44px,44px"></dc-import>
+                    <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64">DRIVE</span>
+                  </div>
+                </div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;visibility:hidden">&nbsp;</span><dc-import name="VoxSelect" variant="slide" surface="light" options="LA-2A,1176" color="#e8a33d" hint-size="160px,30px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#41464e">DETAIL</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.density }}" color="#bf782a" on-change="{{ set.density }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px"></div>
+                <div style="height:84px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64;text-align:center">OUTPUT</span><dc-import name="VoxLcd" surface="light" options="SRC,−1 dB,−3 dB" value="{{ k.ceil }}" on-change="{{ setCeil }}" hint-size="80px,26px"></dc-import></div>
+                <div style="align-self:stretch">
+                  <div style="display:flex;flex-direction:column;gap:9px;padding:9px 10px;border-radius:9px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)">
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">IN</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 58%,#2a313b 58% 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">-18.4</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">OUT</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 {{ outFill }},#2a313b {{ outFill }} 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                        <div style="position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;left:{{ ceilPos }};background:#e8a33d;box-shadow:0 0 5px #e8a33d;transition:left .16s ease-out"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ outRead }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            </sc-if>
+            <sc-if value="{{ lay.a }}" hint-placeholder-val="{{ true }}">
+            <div style="display:grid;grid-template-columns:170px minmax(0,1fr) 170px;gap:14px;align-items:start;margin-top:23px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#41464e">DE-ESS</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.deess }}" color="#bf782a" on-change="{{ set.deess }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import></div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64">BAND</span><dc-import name="VoxRange" surface="light" lo="WIDE" hi="SPLIT" color="#e8a33d" style="width:150px" hint-size="150px,42px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:{{ tl.parallel }};transition:color .2s ease">PARALLEL</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center;gap:18px">
+                  <dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.mix }}" color="#bf782a" on-change="{{ set.mix }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                    <dc-import name="VoxKnob" variant="plain" value="{{ k.drive }}" color="#bf782a" on-change="{{ set.drive }}" style="width:44px;height:44px" hint-size="44px,44px"></dc-import>
+                    <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64">DRIVE</span>
+                  </div>
+                </div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;visibility:hidden">&nbsp;</span><dc-import name="VoxSelect" variant="slide" surface="light" options="LA-2A,1176" color="#e8a33d" hint-size="160px,30px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:start">
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                    <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#41464e">DETAIL</span></div>
+                    <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.density }}" color="#bf782a" on-change="{{ set.density }}" style="width:72px;height:72px" hint-size="72px,72px"></dc-import></div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                    <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#41464e">OUTPUT</span></div>
+                    <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxLcd" surface="light" options="SRC,−1 dB,−3 dB" value="{{ k.ceil }}" on-change="{{ setCeil }}" hint-size="80px,26px"></dc-import></div>
+                  </div>
+                </div>
+                <div style="height:44px;display:flex;flex-direction:column;justify-content:flex-start">
+                  <div style="display:flex;flex-direction:column;gap:9px;padding:9px 10px;border-radius:9px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)">
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">IN</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 58%,#2a313b 58% 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">-18.4</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">OUT</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 {{ outFill }},#2a313b {{ outFill }} 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                        <div style="position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;left:{{ ceilPos }};background:#e8a33d;box-shadow:0 0 5px #e8a33d;transition:left .16s ease-out"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ outRead }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            </sc-if>
+            <sc-if value="{{ lay.b }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;grid-template-columns:196px minmax(0,1fr) 196px;gap:14px;align-items:start;margin-top:23px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:{{ tl.parallel }};transition:color .2s ease">PARALLEL</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center;gap:18px">
+                  <dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.mix }}" color="#bf782a" on-change="{{ set.mix }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                    <dc-import name="VoxKnob" variant="plain" value="{{ k.drive }}" color="#bf782a" on-change="{{ set.drive }}" style="width:44px;height:44px" hint-size="44px,44px"></dc-import>
+                    <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64">DRIVE</span>
+                  </div>
+                </div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;visibility:hidden">&nbsp;</span><dc-import name="VoxSelect" variant="slide" surface="light" options="LA-2A,1176" color="#e8a33d" hint-size="160px,30px"></dc-import></div>
+              </div>
+              <div style="display:grid;grid-template-columns:150px 150px;justify-content:center;gap:12px;align-items:start">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#41464e">DE-ESS</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.deess }}" color="#bf782a" on-change="{{ set.deess }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import></div>
+                <div style="height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64">BAND</span><dc-import name="VoxRange" surface="light" lo="WIDE" hi="SPLIT" color="#e8a33d" style="width:150px" hint-size="150px,42px"></dc-import></div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px;display:flex;align-items:center;justify-content:center"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#41464e">DETAIL</span></div>
+                <div style="height:84px;display:flex;align-items:center;justify-content:center"><dc-import name="VoxKnob" variant="{{ bottomKnob }}" value="{{ k.density }}" color="#bf782a" on-change="{{ set.density }}" style="width:84px;height:84px" hint-size="84px,84px"></dc-import></div>
+              </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="height:12px"></div>
+                <div style="height:84px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64;text-align:center">OUTPUT LEVEL</span><dc-import name="VoxLcd" surface="light" options="SRC,−1 dB,−3 dB" value="{{ k.ceil }}" on-change="{{ setCeil }}" hint-size="80px,26px"></dc-import></div>
+                <div style="align-self:stretch">
+                  <div style="display:flex;flex-direction:column;gap:9px;padding:9px 10px;border-radius:9px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)">
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">IN</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 58%,#2a313b 58% 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">-18.4</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:22px minmax(0,1fr) 30px;align-items:center;gap:6px">
+                      <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">OUT</span>
+                      <div style="position:relative;height:7px">
+                        <div style="position:absolute;inset:0;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 3px,#1a1c20 3px 5px),linear-gradient(90deg,#8fd48a 0 {{ outFill }},#2a313b {{ outFill }} 75%,#3d3a28 75% 88%,#3d2328 88%)"></div>
+                        <div style="position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;left:{{ ceilPos }};background:#e8a33d;box-shadow:0 0 5px #e8a33d;transition:left .16s ease-out"></div>
+                      </div>
+                      <span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ outRead }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            </sc-if>
+          </div>
+        </div>
+        <div style="height:60px;box-sizing:border-box;padding:0 16px;display:flex;align-items:center;gap:20px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#555b64;white-space:nowrap">0:00.00 → 0:46.18 · 0:46.18 SELECTED</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#1d2026;font:600 12px 'Inter';cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.7), 0 1px 1px rgba(40,30,20,.28), 0 5px 9px -4px rgba(40,30,20,.35)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #1d2026"></span>Preview</button>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px 'Inter';cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff, 0 1px 1px rgba(40,30,20,.3), 0 5px 9px -4px rgba(40,30,20,.35)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Apply to selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section data-screen-label="Turn 1" style="padding:64px 72px 96px;display:flex;flex-direction:column;gap:40px">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+    <div style="font:700 11px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#a0a8b0">TURN 1 · VOXPRESSOR</div>
+    <div style="font:700 28px/1.15 'Inter';letter-spacing:-.01em;color:#eaf6f8">Current build, then three redesign directions</div>
+    <div style="font:400 14px/1.5 'Inter';color:#a0a8b0;text-wrap:pretty">All built from the Modula kit (chassis, tick/ring knobs, segmented wells, slotted GR bars). Knobs drag vertically; double-click resets. Values are shared across every board.</div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:72px;align-items:flex-start">
+
+    <!-- CURRENT -->
+    <div id="current" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#3a4452;color:#eaf6f8">NOW</span>
+        <span style="font:600 15px/1 'Inter';color:#eaf6f8">Current faceplate</span>
+      </div>
+      <div style="font:400 13px/1.5 'Inter';color:#a0a8b0;max-width:860px;text-wrap:pretty">Recreated as a baseline. Four GR meters sit apart from the stages they report on, stages read in no particular order, and three different rows of switches compete in the Peaks card.</div>
+
+      <div data-screen-label="Current" style="width:860px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1), inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6);overflow:hidden;display:flex;flex-direction:column">
+        <div style="height:58px;box-sizing:border-box;padding:2px 18px 0;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font:800 13px/1 'Inter';letter-spacing:.14em;color:#fbf1e3">VOXPRESSOR</span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;font:700 12px/1 'Inter';box-shadow:0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65);cursor:pointer">?</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 'Inter';letter-spacing:.14em;color:#eaf6f8">ON</span></button>
+            <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;font:400 17px/1 'Inter';box-shadow:0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65);cursor:pointer">×</button>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;padding:8px 14px 13px">
+          <div style="position:relative;width:67px;flex:none">
+            <div style="position:absolute;left:23px;top:11px;width:39px;height:18px;border-radius:4px;background:#0e0f11;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;font:700 9px/1 'JetBrains Mono',monospace;color:#eaf6f8">-∞</div>
+            <div style="position:absolute;left:30px;top:38px;width:24px;height:224px;box-sizing:border-box;border-radius:5px;background:#0b0e13;box-shadow:0 0 0 1px #1c222c;padding:5px 4px">
+              <div style="width:100%;height:100%;background:repeating-linear-gradient(180deg,transparent 0 3px,#0b0e13 3px 5px),linear-gradient(180deg,#3d2328 0 22%,#2a313b 22%)"></div>
+            </div>
+            <div style="position:absolute;right:41px;top:38px;height:224px;width:30px;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6;text-align:right">
+              <span style="position:absolute;right:0;top:11px">0</span><span style="position:absolute;right:0;top:44px">-6</span><span style="position:absolute;right:0;top:77px">-12</span><span style="position:absolute;right:0;top:110px">-18</span><span style="position:absolute;right:0;top:144px">-24</span><span style="position:absolute;right:0;top:168px">-36</span>
+            </div>
+            <div style="position:absolute;left:30px;width:24px;top:274px;text-align:center;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">IN</div>
+          </div>
+
+          <div style="flex:1;min-width:0;border-radius:14px;background:linear-gradient(180deg,#2d3540,#262d37);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), inset 0 2px 6px rgba(0,0,0,.3);padding:12px;display:flex;flex-direction:column">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 13px">
+              <sc-for list="{{ meters }}" as="m" hint-placeholder-count="4">
+                <div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                    <span style="display:flex;align-items:baseline;gap:9px"><span style="font:700 12px 'JetBrains Mono',monospace;color:{{ m.read }}">0.0 dB</span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">AVG —</span></span>
+                    <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">{{ m.title }}</span>
+                  </div>
+                  <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                    <div style="position:relative;height:18px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                      <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                    </div>
+                  </div>
+                  <div style="position:relative;height:10px;margin:5px 3px 0;font:600 8px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)">
+                    <sc-for list="{{ marks }}" as="mk" hint-placeholder-count="6"><span style="position:absolute;top:0;left:{{ mk.left }};transform:{{ mk.tx }}">{{ mk.l }}</span></sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px">
+              <div style="position:relative;height:279px;border-radius:10px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4)">
+                <div style="position:absolute;top:6px;left:0;right:0;text-align:center;font:600 10px/10px 'Inter';letter-spacing:.14em;color:#b6bdc4">PEAKS · 1176</div>
+                <div style="position:absolute;top:19px;left:9px;right:9px;height:1px;background:rgba(255,255,255,.07)"></div>
+                <div style="position:absolute;top:25px;left:0;right:0;display:flex;justify-content:center"><dc-import name="VoxKnob" value="{{ k.peaks }}" color="#8fd48a" dot="#ff6a4d" hot-from="{{ 0.5 }}" on-change="{{ set.peaks }}" style="width:92px;height:92px" hint-size="92px,92px"></dc-import></div>
+                <div style="position:absolute;top:127px;left:0;right:0;text-align:center;font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.peaks }}</div>
+                <div style="position:absolute;top:160px;left:0;right:0;text-align:center;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">AMOUNT</div>
+                <div style="position:absolute;top:175px;left:0;right:0;display:flex;justify-content:center"><dc-import name="VoxSeg" options="HARD,SOFT" hint-size="104px,24px"></dc-import></div>
+                <div style="position:absolute;top:205px;left:0;right:0;display:flex;justify-content:center"><dc-import name="VoxSeg" options="AUTO,GENTLE,NORMAL,FAST" hint-size="230px,24px"></dc-import></div>
+                <div style="position:absolute;top:232px;left:0;right:0;text-align:center;font:500 9px/13.5px 'JetBrains Mono',monospace;color:#c9d0d6">-2.9 dB on peaks<br>voice touched 0.1 dB<br>ripple -29 dB</div>
+              </div>
+              <div style="position:relative;height:279px;border-radius:10px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4)">
+                <div style="position:absolute;top:6px;left:0;right:0;text-align:center;font:600 10px/10px 'Inter';letter-spacing:.14em;color:#b6bdc4">BODY · LA-2A</div>
+                <div style="position:absolute;top:19px;left:9px;right:9px;height:1px;background:rgba(255,255,255,.07)"></div>
+                <div style="position:absolute;top:25px;left:0;right:0;display:flex;justify-content:center"><dc-import name="VoxKnob" value="{{ k.body }}" color="#e8a33d" on-change="{{ set.body }}" style="width:92px;height:92px" hint-size="92px,92px"></dc-import></div>
+                <div style="position:absolute;top:127px;left:0;right:0;text-align:center;font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.body }}</div>
+                <div style="position:absolute;top:160px;left:0;right:0;text-align:center;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">AMOUNT</div>
+                <div style="position:absolute;top:175px;left:0;right:0;display:flex;justify-content:center"><dc-import name="VoxSeg" options="WARM,CLEAN" hint-size="114px,24px"></dc-import></div>
+                <div style="position:absolute;top:205px;left:0;right:0;text-align:center;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">PR 57 · 4.0 dB avg leveling</div>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-top:9px">
+              <div style="position:relative;height:220px;border-radius:10px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4)">
+                <div style="position:absolute;top:6px;left:0;right:0;text-align:center;font:600 10px/10px 'Inter';letter-spacing:.14em;color:#b6bdc4">DE-ESS</div>
+                <div style="position:absolute;top:19px;left:9px;right:9px;height:1px;background:rgba(255,255,255,.07)"></div>
+                <div style="position:absolute;top:24px;left:0;right:0;display:flex;justify-content:center"><dc-import name="VoxKnob" value="{{ k.deess }}" color="#5fd6c0" on-change="{{ set.deess }}" style="width:76px;height:76px" hint-size="76px,76px"></dc-import></div>
+                <div style="position:absolute;top:111px;left:0;right:0;text-align:center;font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.deess }}</div>
+                <div style="position:absolute;top:144px;left:0;right:0;text-align:center;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">AMOUNT</div>
+                <div style="position:absolute;top:170px;left:48px;width:115px;height:10px;border-radius:5px;background:#0e0f11;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)"><div style="width:35%;height:100%;border-radius:5px;background:linear-gradient(90deg,#b9efe4,#5fd6c0)"></div></div>
+                <div style="position:absolute;top:162px;left:69px;width:26px;height:26px;border-radius:50%;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 8px 12px -6px rgba(0,0,0,.95), inset 0 1px 1px rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.7)"></div>
+                <div style="position:absolute;top:202px;left:48px;width:115px;display:flex;justify-content:space-between;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6"><span>WIDE</span><span>SPLIT</span></div>
+              </div>
+              <div style="position:relative;height:220px;border-radius:10px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4)">
+                <div style="position:absolute;top:6px;left:0;right:0;text-align:center;font:600 10px/10px 'Inter';letter-spacing:.14em;color:#b6bdc4">PARALLEL</div>
+                <div style="position:absolute;top:19px;left:9px;right:9px;height:1px;background:rgba(255,255,255,.07)"></div>
+                <div style="position:absolute;top:24px;left:37px"><dc-import name="VoxKnob" value="{{ k.mix }}" color="#a98bff" on-change="{{ set.mix }}" style="width:76px;height:76px" hint-size="76px,76px"></dc-import></div>
+                <div style="position:absolute;top:65px;left:122px"><dc-import name="VoxKnob" variant="plain" value="{{ k.drive }}" color="#a98bff" on-change="{{ set.drive }}" style="width:52px;height:52px" hint-size="52px,52px"></dc-import></div>
+                <div style="position:absolute;top:111px;left:25px;width:100px;text-align:center;font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.mix }} %</div>
+                <div style="position:absolute;top:144px;left:25px;width:100px;text-align:center;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">MIX</div>
+                <div style="position:absolute;top:124px;left:118px;width:60px;text-align:center;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DRIVE</div>
+                <div style="position:absolute;top:144px;left:118px;width:60px;text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ v.drive }}</div>
+                <div style="position:absolute;top:160px;left:0;right:0;display:flex;justify-content:center"><dc-import name="VoxSeg" options="LA-2A,1176" hint-size="100px,24px"></dc-import></div>
+              </div>
+              <div style="position:relative;height:220px;border-radius:10px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4)">
+                <div style="position:absolute;top:6px;left:0;right:0;text-align:center;font:600 10px/10px 'Inter';letter-spacing:.14em;color:#b6bdc4">OUTPUT</div>
+                <div style="position:absolute;top:19px;left:9px;right:9px;height:1px;background:rgba(255,255,255,.07)"></div>
+                <div style="position:absolute;top:24px;left:0;right:0;display:flex;justify-content:center"><dc-import name="VoxKnob" value="{{ k.density }}" color="#f2c84b" on-change="{{ set.density }}" style="width:76px;height:76px" hint-size="76px,76px"></dc-import></div>
+                <div style="position:absolute;top:111px;left:0;right:0;text-align:center;font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.density }}</div>
+                <div style="position:absolute;top:144px;left:0;right:0;text-align:center;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DENSITY</div>
+                <div style="position:absolute;top:163px;left:9px;right:9px;height:1px;background:rgba(255,255,255,.07)"></div>
+                <div style="position:absolute;top:170px;left:0;right:0;text-align:center;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">CEILING</div>
+                <div style="position:absolute;top:184px;left:0;right:0;display:flex;justify-content:center"><dc-import name="VoxSeg" options="SOURCE,−1 dB,−3 dB" hint-size="168px,24px"></dc-import></div>
+              </div>
+            </div>
+
+            <div style="margin-top:19px;border-top:1px dashed rgba(255,255,255,.1);padding-top:8px;display:flex;justify-content:center">
+              <button style="height:18px;padding:0 10px;border:none;border-radius:6px;background:transparent;color:#c9d0d6;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9);cursor:pointer">BENCH ▾</button>
+            </div>
+          </div>
+
+          <div style="position:relative;width:67px;flex:none">
+            <div style="position:absolute;left:5px;top:11px;width:39px;height:18px;border-radius:4px;background:#0e0f11;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;font:700 9px/1 'JetBrains Mono',monospace;color:#eaf6f8">-∞</div>
+            <div style="position:absolute;left:13px;top:38px;width:24px;height:224px;box-sizing:border-box;border-radius:5px;background:#0b0e13;box-shadow:0 0 0 1px #1c222c;padding:5px 4px">
+              <div style="width:100%;height:100%;background:repeating-linear-gradient(180deg,transparent 0 3px,#0b0e13 3px 5px),linear-gradient(180deg,#3d2328 0 22%,#2a313b 22%)"></div>
+            </div>
+            <div style="position:absolute;left:44px;top:38px;height:224px;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">
+              <span style="position:absolute;left:0;top:11px">0</span><span style="position:absolute;left:0;top:44px">-6</span><span style="position:absolute;left:0;top:77px">-12</span><span style="position:absolute;left:0;top:110px">-18</span><span style="position:absolute;left:0;top:144px">-24</span><span style="position:absolute;left:0;top:168px">-36</span>
+            </div>
+            <div style="position:absolute;left:5px;width:40px;top:274px;text-align:center;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">OUT</div>
+            <div style="position:absolute;left:23.5px;top:289px;width:3px;height:3px;border-radius:50%;background:#a0a8b0"></div>
+            <div style="position:absolute;left:10px;top:296px;width:30px;height:30px;border-radius:50%;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 8px 14px -8px rgba(0,0,0,.95), inset 0 1px 1px rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65)"><div style="position:absolute;left:14px;top:4px;width:2px;height:8px;border-radius:1px;background:#eaf6f8"></div></div>
+            <div style="position:absolute;left:0;width:50px;top:336px;text-align:center;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">0.0 dB</div>
+          </div>
+        </div>
+
+        <div style="height:60px;box-sizing:border-box;padding:0 16px;display:flex;align-items:center;gap:20px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;white-space:nowrap">0:00.00 → 0:46.18 · 0:46.18 SELECTED</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#eaf6f8;font:600 12px 'Inter';cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #eaf6f8"></span>Preview</button>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px 'Inter';cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff, 0 0 0 1px rgba(0,0,0,.55), 0 6px 12px -6px rgba(0,0,0,.9)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Apply to selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1a SIGNAL PATH -->
+    <div id="1a" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#14100e">1a</span>
+        <span style="font:600 15px/1 'Inter';color:#eaf6f8">Signal path</span>
+      </div>
+      <div style="font:400 13px/1.5 'Inter';color:#a0a8b0;max-width:860px;text-wrap:pretty">Stages become channel strips in processing order, IN → OUT. Each strip owns its GR reading, so the separate meter block goes away and the eye follows the signal left to right. Controls: slide switches for A/B modes, latching keys for timing and ceiling, a console fader for parallel mix. Adds a per-stage bypass lamp.</div>
+
+      <div data-screen-label="1a Signal path" style="width:1250px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1), inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6);overflow:hidden;display:flex;flex-direction:column">
+        <div style="height:58px;box-sizing:border-box;padding:2px 18px 0;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font:800 13px/1 'Inter';letter-spacing:.14em;color:#fbf1e3">VOXPRESSOR</span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;font:700 12px/1 'Inter';box-shadow:0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65);cursor:pointer">?</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 'Inter';letter-spacing:.14em;color:#eaf6f8">ON</span></button>
+            <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;font:400 17px/1 'Inter';box-shadow:0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65);cursor:pointer">×</button>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:stretch;gap:8px;padding:14px">
+          <div style="width:52px;flex:none;display:flex;flex-direction:column;align-items:center;gap:10px;padding-top:4px">
+            <span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">IN</span>
+            <div style="width:39px;height:18px;border-radius:4px;background:#0e0f11;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;font:700 9px/1 'JetBrains Mono',monospace;color:#eaf6f8">-18.4</div>
+            <div style="flex:1;width:24px;box-sizing:border-box;border-radius:5px;background:#0b0e13;box-shadow:0 0 0 1px #1c222c;padding:5px 4px;display:flex;flex-direction:column">
+              <div style="flex:1;background:repeating-linear-gradient(180deg,transparent 0 3px,#0b0e13 3px 5px),linear-gradient(180deg,#3d2328 0 22%,#2a313b 22% 46%,#8fd48a 46%)"></div>
+            </div>
+          </div>
+
+          <div style="flex:none;width:170px;border-radius:12px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4);box-sizing:border-box;padding:10px 12px 14px;display:flex;flex-direction:column;align-items:center;gap:12px">
+            <div style="align-self:stretch;display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.07)"><span style="font:600 9px/1 'JetBrains Mono',monospace;color:#a0a8b0">01</span><span style="flex:1;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DE-ESS</span><span style="width:6px;height:6px;border-radius:50%;background:#8fd48a;box-shadow:0 0 5px #8fd48a"></span></div>
+            <div style="align-self:stretch;display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;align-items:baseline;justify-content:space-between"><span style="font:700 16px/1 'JetBrains Mono',monospace;color:#8fe0cf">-1.8<span style="font-size:9px;color:rgba(255,255,255,.4);margin-left:4px">dB</span></span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">AVG 1.2</span></div>
+              <div style="padding:2px;border-radius:6px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)"><div style="position:relative;height:6px;border-radius:3px;background:rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;top:0;bottom:0;width:22%;border-radius:3px;background:linear-gradient(90deg,#c9f2ea,#5fd6c0);box-shadow:0 0 8px rgba(95,214,192,.6)"></div><div style="position:absolute;inset:0;background:repeating-linear-gradient(90deg,#0000 0 5px,rgba(10,8,6,.85) 5px 6px)"></div></div></div>
+            </div>
+            <dc-import name="VoxKnob" value="{{ k.deess }}" color="#5fd6c0" on-change="{{ set.deess }}" style="width:92px;height:92px;margin-top:4px" hint-size="92px,92px"></dc-import>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px"><span style="font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.deess }}</span><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">AMOUNT</span></div>
+            <div style="align-self:stretch;display:flex;flex-direction:column;gap:7px;margin-top:6px">
+              <div style="position:relative;height:26px"><div style="position:absolute;top:8px;left:0;right:0;height:10px;border-radius:5px;background:#0e0f11;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)"><div style="width:35%;height:100%;border-radius:5px;background:linear-gradient(90deg,#b9efe4,#5fd6c0)"></div></div><div style="position:absolute;top:0;left:calc(35% - 13px);width:26px;height:26px;border-radius:50%;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 8px 12px -6px rgba(0,0,0,.95), inset 0 1px 1px rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.7)"></div></div>
+              <div style="display:flex;justify-content:space-between;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6"><span>WIDE</span><span>SPLIT</span></div>
+            </div>
+          </div>
+
+          <div style="flex:none;width:12px;display:flex;align-items:center;justify-content:center;font:400 18px/1 'Inter';color:rgba(255,255,255,.22)">›</div>
+
+          <div style="flex:none;width:250px;border-radius:12px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4);box-sizing:border-box;padding:10px 12px 14px;display:flex;flex-direction:column;align-items:center;gap:12px">
+            <div style="align-self:stretch;display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.07)"><span style="font:600 9px/1 'JetBrains Mono',monospace;color:#a0a8b0">02</span><span style="flex:1;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">PEAKS · 1176</span><span style="width:6px;height:6px;border-radius:50%;background:#8fd48a;box-shadow:0 0 5px #8fd48a"></span></div>
+            <div style="align-self:stretch;display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;align-items:baseline;justify-content:space-between"><span style="font:700 16px/1 'JetBrains Mono',monospace;color:#f4a08a">-2.9<span style="font-size:9px;color:rgba(255,255,255,.4);margin-left:4px">dB</span></span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">AVG 2.1</span></div>
+              <div style="padding:2px;border-radius:6px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)"><div style="position:relative;height:6px;border-radius:3px;background:rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;top:0;bottom:0;width:36%;border-radius:3px;background:linear-gradient(90deg,#ffd3c4,#ff7a5c);box-shadow:0 0 8px rgba(255,122,92,.6)"></div><div style="position:absolute;inset:0;background:repeating-linear-gradient(90deg,#0000 0 5px,rgba(10,8,6,.85) 5px 6px)"></div></div></div>
+            </div>
+            <dc-import name="VoxKnob" value="{{ k.peaks }}" color="#8fd48a" dot="#ff6a4d" hot-from="{{ 0.5 }}" on-change="{{ set.peaks }}" style="width:92px;height:92px;margin-top:4px" hint-size="92px,92px"></dc-import>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px"><span style="font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.peaks }}</span><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">AMOUNT</span></div>
+            <div style="align-self:stretch;display:flex;flex-direction:column;gap:6px;margin-top:6px">
+              <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">KNEE</span>
+              <dc-import name="VoxSelect" variant="slide" options="HARD,SOFT" color="#ff7a5c" hint-size="100%,30px"></dc-import>
+              <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;margin-top:4px">TIMING</span>
+              <dc-import name="VoxSelect" variant="latch" options="AUTO,GENTLE,NORMAL,FAST" color="#ff7a5c" hint-size="100%,66px"></dc-import>
+            </div>
+            <div style="margin-top:auto;text-align:center;font:500 9px/14px 'JetBrains Mono',monospace;color:#c9d0d6">voice touched 0.1 dB · ripple -29 dB</div>
+          </div>
+
+          <div style="flex:none;width:12px;display:flex;align-items:center;justify-content:center;font:400 18px/1 'Inter';color:rgba(255,255,255,.22)">›</div>
+
+          <div style="flex:none;width:180px;border-radius:12px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4);box-sizing:border-box;padding:10px 12px 14px;display:flex;flex-direction:column;align-items:center;gap:12px">
+            <div style="align-self:stretch;display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.07)"><span style="font:600 9px/1 'JetBrains Mono',monospace;color:#a0a8b0">03</span><span style="flex:1;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">BODY · LA-2A</span><span style="width:6px;height:6px;border-radius:50%;background:#8fd48a;box-shadow:0 0 5px #8fd48a"></span></div>
+            <div style="align-self:stretch;display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;align-items:baseline;justify-content:space-between"><span style="font:700 16px/1 'JetBrains Mono',monospace;color:#f0b860">-4.0<span style="font-size:9px;color:rgba(255,255,255,.4);margin-left:4px">dB</span></span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">AVG 4.0</span></div>
+              <div style="padding:2px;border-radius:6px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)"><div style="position:relative;height:6px;border-radius:3px;background:rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;top:0;bottom:0;width:48%;border-radius:3px;background:linear-gradient(90deg,#f7dcae,#e8a33d);box-shadow:0 0 8px rgba(232,163,61,.6)"></div><div style="position:absolute;inset:0;background:repeating-linear-gradient(90deg,#0000 0 5px,rgba(10,8,6,.85) 5px 6px)"></div></div></div>
+            </div>
+            <dc-import name="VoxKnob" value="{{ k.body }}" color="#e8a33d" on-change="{{ set.body }}" style="width:92px;height:92px;margin-top:4px" hint-size="92px,92px"></dc-import>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px"><span style="font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.body }}</span><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">AMOUNT</span></div>
+            <div style="align-self:stretch;display:flex;flex-direction:column;gap:6px;margin-top:6px">
+              <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">CHARACTER</span>
+              <dc-import name="VoxSelect" variant="slide" options="WARM,CLEAN" color="#e8a33d" hint-size="100%,30px"></dc-import>
+            </div>
+            <div style="margin-top:auto;text-align:center;font:500 9px/14px 'JetBrains Mono',monospace;color:#c9d0d6">PR 57 · 4.0 dB avg leveling</div>
+          </div>
+
+          <div style="flex:none;width:12px;display:flex;align-items:center;justify-content:center;font:400 18px/1 'Inter';color:rgba(255,255,255,.22)">›</div>
+
+          <div style="flex:none;width:180px;border-radius:12px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4);box-sizing:border-box;padding:10px 12px 14px;display:flex;flex-direction:column;align-items:center;gap:12px">
+            <div style="align-self:stretch;display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.07)"><span style="font:600 9px/1 'JetBrains Mono',monospace;color:#a0a8b0">04</span><span style="flex:1;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">PARALLEL</span><span style="width:6px;height:6px;border-radius:50%;background:#8fd48a;box-shadow:0 0 5px #8fd48a"></span></div>
+            <div style="align-self:stretch;display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;align-items:baseline;justify-content:space-between"><span style="font:700 16px/1 'JetBrains Mono',monospace;color:#c3b0ff">-6.2<span style="font-size:9px;color:rgba(255,255,255,.4);margin-left:4px">dB</span></span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">WET</span></div>
+              <div style="padding:2px;border-radius:6px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)"><div style="position:relative;height:6px;border-radius:3px;background:rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;top:0;bottom:0;width:58%;border-radius:3px;background:linear-gradient(90deg,#e0d6ff,#a98bff);box-shadow:0 0 8px rgba(169,139,255,.6)"></div><div style="position:absolute;inset:0;background:repeating-linear-gradient(90deg,#0000 0 5px,rgba(10,8,6,.85) 5px 6px)"></div></div></div>
+            </div>
+            <div style="align-self:stretch;display:flex;align-items:flex-start;justify-content:center;gap:20px;margin-top:4px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px"><dc-import name="VoxFader" value="{{ k.mix }}" color="#a98bff" on-change="{{ set.mix }}" style="width:44px;height:176px" hint-size="44px,176px"></dc-import><span style="font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8;margin-top:4px">{{ v.mix }} %</span><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">MIX</span></div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:10px"><dc-import name="VoxKnob" variant="plain" value="{{ k.drive }}" color="#a98bff" on-change="{{ set.drive }}" style="width:44px;height:44px" hint-size="44px,44px"></dc-import><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4;margin-top:4px">DRIVE</span><span style="font:500 11px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ v.drive }}</span></div>
+            </div>
+            <div style="align-self:stretch;display:flex;flex-direction:column;gap:6px;margin-top:auto"><span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">WET ENGINE</span><dc-import name="VoxSelect" variant="slide" options="LA-2A,1176" color="#a98bff" hint-size="100%,30px"></dc-import></div>
+          </div>
+
+          <div style="flex:none;width:12px;display:flex;align-items:center;justify-content:center;font:400 18px/1 'Inter';color:rgba(255,255,255,.22)">›</div>
+
+          <div style="flex:none;width:180px;border-radius:12px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4);box-sizing:border-box;padding:10px 12px 14px;display:flex;flex-direction:column;align-items:center;gap:12px">
+            <div style="align-self:stretch;display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.07)"><span style="font:600 9px/1 'JetBrains Mono',monospace;color:#a0a8b0">05</span><span style="flex:1;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">OUTPUT</span><span style="width:6px;height:6px;border-radius:50%;background:#8fd48a;box-shadow:0 0 5px #8fd48a"></span></div>
+            <div style="align-self:stretch;display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;align-items:baseline;justify-content:space-between"><span style="font:700 16px/1 'JetBrains Mono',monospace;color:#f6dc8f">-0.4<span style="font-size:9px;color:rgba(255,255,255,.4);margin-left:4px">dB</span></span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">CEIL</span></div>
+              <div style="padding:2px;border-radius:6px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)"><div style="position:relative;height:6px;border-radius:3px;background:rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;top:0;bottom:0;width:8%;border-radius:3px;background:linear-gradient(90deg,#fbecc0,#f2c84b);box-shadow:0 0 8px rgba(242,200,75,.6)"></div><div style="position:absolute;inset:0;background:repeating-linear-gradient(90deg,#0000 0 5px,rgba(10,8,6,.85) 5px 6px)"></div></div></div>
+            </div>
+            <dc-import name="VoxKnob" value="{{ k.density }}" color="#f2c84b" on-change="{{ set.density }}" style="width:92px;height:92px;margin-top:4px" hint-size="92px,92px"></dc-import>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px"><span style="font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.density }}</span><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DENSITY</span></div>
+            <div style="align-self:stretch;display:flex;flex-direction:column;gap:6px;margin-top:6px">
+              <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">CEILING</span>
+              <dc-import name="VoxSelect" variant="latch" options="SOURCE,−1 dB,−3 dB" color="#f2c84b" hint-size="100%,66px"></dc-import>
+            </div>
+          </div>
+
+          <div style="width:52px;flex:none;display:flex;flex-direction:column;align-items:center;gap:10px;padding-top:4px">
+            <span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">OUT</span>
+            <div style="width:39px;height:18px;border-radius:4px;background:#0e0f11;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;font:700 9px/1 'JetBrains Mono',monospace;color:#eaf6f8">-14.1</div>
+            <div style="flex:1;width:24px;box-sizing:border-box;border-radius:5px;background:#0b0e13;box-shadow:0 0 0 1px #1c222c;padding:5px 4px;display:flex;flex-direction:column">
+              <div style="flex:1;background:repeating-linear-gradient(180deg,transparent 0 3px,#0b0e13 3px 5px),linear-gradient(180deg,#3d2328 0 22%,#2a313b 22% 36%,#8fd48a 36%)"></div>
+            </div>
+            <div style="position:relative;width:30px;height:30px;border-radius:50%;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 8px 14px -8px rgba(0,0,0,.95), inset 0 1px 1px rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65)"><div style="position:absolute;left:14px;top:4px;width:2px;height:8px;border-radius:1px;background:#eaf6f8"></div></div>
+            <span style="font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">0.0 dB</span>
+          </div>
+        </div>
+
+        <div style="height:60px;box-sizing:border-box;padding:0 16px;display:flex;align-items:center;gap:20px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;white-space:nowrap">0:00.00 → 0:46.18 · 0:46.18 SELECTED</span>
+          <button style="height:24px;padding:0 10px;border:none;border-radius:7px;background:transparent;color:#c9d0d6;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);cursor:pointer">BENCH ▾</button>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#eaf6f8;font:600 12px 'Inter';cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #eaf6f8"></span>Preview</button>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px 'Inter';cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff, 0 0 0 1px rgba(0,0,0,.55), 0 6px 12px -6px rgba(0,0,0,.9)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Apply to selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1b FOCUS -->
+    <div id="1b" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#14100e">1b</span>
+        <span style="font:600 15px/1 'Inter';color:#eaf6f8">Overview rail + focused stage</span>
+      </div>
+      <div style="font:400 13px/1.5 'Inter';color:#a0a8b0;max-width:860px;text-wrap:pretty">The rail keeps every stage's amount and GR visible at a glance; only one stage's detail is open at a time, with room for a GR history trace and plain-language readouts. Controls: LED pills for modes, a detent selector for timing, a stepped bar for ceiling. Click a stage in the rail.</div>
+
+      <div data-screen-label="1b Focus" style="width:860px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1), inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6);overflow:hidden;display:flex;flex-direction:column">
+        <div style="height:58px;box-sizing:border-box;padding:2px 18px 0;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font:800 13px/1 'Inter';letter-spacing:.14em;color:#fbf1e3">VOXPRESSOR</span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;font:700 12px/1 'Inter';box-shadow:0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65);cursor:pointer">?</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 'Inter';letter-spacing:.14em;color:#eaf6f8">ON</span></button>
+            <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;font:400 17px/1 'Inter';box-shadow:0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65);cursor:pointer">×</button>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:232px minmax(0,1fr);gap:12px;padding:14px;min-height:452px">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <sc-for list="{{ stages }}" as="s" hint-placeholder-count="5">
+              <sc-if value="{{ s.sel }}" hint-placeholder-val="{{ false }}">
+                <button onClick="{{ s.pick }}" style="display:flex;flex-direction:column;gap:8px;padding:11px 12px;border:none;border-radius:10px;text-align:left;cursor:pointer;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)">
+                  <div style="display:flex;align-items:center;gap:8px"><span style="width:6px;height:6px;border-radius:50%;background:{{ s.color }};box-shadow:0 0 6px {{ s.color }}"></span><span style="flex:1;font:600 10px/1 'Inter';letter-spacing:.14em;color:#eaf6f8">{{ s.name }}</span><span style="font:500 12px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ s.val }}</span></div>
+                  <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;padding:2px;border-radius:5px;background:#0a0806"><div style="position:relative;height:4px;border-radius:2px;background:rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;top:0;bottom:0;width:{{ s.fill }};border-radius:2px;background:{{ s.color }};box-shadow:0 0 6px {{ s.color }}"></div></div></div><span style="width:44px;text-align:right;font:600 9px/1 'JetBrains Mono',monospace;color:{{ s.read }}">{{ s.gr }}</span></div>
+                </button>
+              </sc-if>
+              <sc-if value="{{ s.unsel }}" hint-placeholder-val="{{ true }}">
+                <button onClick="{{ s.pick }}" style="display:flex;flex-direction:column;gap:8px;padding:11px 12px;border:none;border-radius:10px;text-align:left;cursor:pointer;background:rgba(255,255,255,.02);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)" style-hover="background:rgba(255,255,255,.05)">
+                  <div style="display:flex;align-items:center;gap:8px"><span style="width:6px;height:6px;border-radius:50%;background:{{ s.color }};opacity:.7"></span><span style="flex:1;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">{{ s.name }}</span><span style="font:500 12px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ s.val }}</span></div>
+                  <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;padding:2px;border-radius:5px;background:#0a0806"><div style="position:relative;height:4px;border-radius:2px;background:rgba(0,0,0,.5);overflow:hidden"><div style="position:absolute;left:0;top:0;bottom:0;width:{{ s.fill }};border-radius:2px;background:{{ s.color }};opacity:.75"></div></div></div><span style="width:44px;text-align:right;font:600 9px/1 'JetBrains Mono',monospace;color:#a0a8b0">{{ s.gr }}</span></div>
+                </button>
+              </sc-if>
+            </sc-for>
+            <div style="margin-top:auto;display:flex;flex-direction:column;gap:9px;padding:12px;border-radius:10px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)">
+              <div style="display:grid;grid-template-columns:28px 1fr 40px;align-items:center;gap:8px"><span style="font:600 9px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">IN</span><div style="height:6px;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 4px,#1a1c20 4px 6px),linear-gradient(90deg,#8fd48a 0 54%,#2a313b 54% 80%,#3d2328 80%)"></div><span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">-18.4</span></div>
+              <div style="display:grid;grid-template-columns:28px 1fr 40px;align-items:center;gap:8px"><span style="font:600 9px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">OUT</span><div style="height:6px;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 4px,#1a1c20 4px 6px),linear-gradient(90deg,#8fd48a 0 64%,#2a313b 64% 80%,#3d2328 80%)"></div><span style="text-align:right;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">-14.1</span></div>
+            </div>
+          </div>
+
+          <div style="border-radius:12px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4);padding:16px 18px;display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><span style="font:700 12px/1 'Inter';letter-spacing:.14em;color:#eaf6f8">{{ fs.name }}</span><span style="font:400 12px/1.4 'Inter';color:#a0a8b0">{{ fs.desc }}</span></div>
+            <div style="position:relative;height:120px;border-radius:10px;background:repeating-linear-gradient(135deg,rgba(255,255,255,.035) 0 6px,transparent 6px 12px),#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center"><span style="font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0">GR HISTORY TRACE · LAST 4 s</span></div>
+
+            <sc-if value="{{ focus.peaks }}" hint-placeholder-val="{{ true }}">
+              <div style="display:grid;grid-template-columns:150px minmax(0,1fr);gap:20px;align-items:start">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:10px"><dc-import name="VoxKnob" value="{{ k.peaks }}" color="#8fd48a" dot="#ff6a4d" hot-from="{{ 0.5 }}" on-change="{{ set.peaks }}" style="width:128px;height:128px" hint-size="128px,128px"></dc-import><span style="font:500 24px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.peaks }}</span><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">AMOUNT</span></div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">KNEE</span><dc-import name="VoxSelect" variant="pills" options="HARD,SOFT" color="#ff7a5c" hint-size="100%,30px"></dc-import>
+                  <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;margin-top:6px">TIMING</span><dc-import name="VoxDetent" options="AUTO,GENTLE,NORMAL,FAST" color="#ff7a5c" hint-size="100%,72px"></dc-import>
+                  <div style="margin-top:10px;display:grid;grid-template-columns:1fr auto;gap:7px 12px;font:500 10px/1 'JetBrains Mono',monospace"><span style="color:#a0a8b0">On peaks</span><span style="color:#f4a08a">-2.9 dB</span><span style="color:#a0a8b0">Voice touched</span><span style="color:#eaf6f8">0.1 dB</span><span style="color:#a0a8b0">Ripple</span><span style="color:#eaf6f8">-29 dB</span></div>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ focus.body }}" hint-placeholder-val="{{ false }}">
+              <div style="display:grid;grid-template-columns:150px minmax(0,1fr);gap:20px;align-items:start">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:10px"><dc-import name="VoxKnob" value="{{ k.body }}" color="#e8a33d" on-change="{{ set.body }}" style="width:128px;height:128px" hint-size="128px,128px"></dc-import><span style="font:500 24px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.body }}</span><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">AMOUNT</span></div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">CHARACTER</span><dc-import name="VoxSelect" variant="pills" options="WARM,CLEAN" color="#e8a33d" hint-size="100%,30px"></dc-import>
+                  <div style="margin-top:10px;display:grid;grid-template-columns:1fr auto;gap:7px 12px;font:500 10px/1 'JetBrains Mono',monospace"><span style="color:#a0a8b0">Peak reduction</span><span style="color:#eaf6f8">PR 57</span><span style="color:#a0a8b0">Avg leveling</span><span style="color:#f0b860">4.0 dB</span></div>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ focus.deess }}" hint-placeholder-val="{{ false }}">
+              <div style="display:grid;grid-template-columns:150px minmax(0,1fr);gap:20px;align-items:start">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:10px"><dc-import name="VoxKnob" value="{{ k.deess }}" color="#5fd6c0" on-change="{{ set.deess }}" style="width:128px;height:128px" hint-size="128px,128px"></dc-import><span style="font:500 24px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.deess }}</span><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">AMOUNT</span></div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">BAND</span>
+                  <div style="position:relative;height:26px"><div style="position:absolute;top:8px;left:0;right:0;height:10px;border-radius:5px;background:#0e0f11;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)"><div style="width:35%;height:100%;border-radius:5px;background:linear-gradient(90deg,#b9efe4,#5fd6c0)"></div></div><div style="position:absolute;top:0;left:calc(35% - 13px);width:26px;height:26px;border-radius:50%;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 8px 12px -6px rgba(0,0,0,.95), inset 0 1px 1px rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.7)"></div></div>
+                  <div style="display:flex;justify-content:space-between;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6"><span>WIDE</span><span>SPLIT</span></div>
+                  <div style="margin-top:10px;display:grid;grid-template-columns:1fr auto;gap:7px 12px;font:500 10px/1 'JetBrains Mono',monospace"><span style="color:#a0a8b0">Sibilance cut</span><span style="color:#8fe0cf">-1.8 dB</span></div>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ focus.parallel }}" hint-placeholder-val="{{ false }}">
+              <div style="display:grid;grid-template-columns:150px minmax(0,1fr);gap:20px;align-items:start">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:10px"><dc-import name="VoxKnob" value="{{ k.mix }}" color="#a98bff" on-change="{{ set.mix }}" style="width:128px;height:128px" hint-size="128px,128px"></dc-import><span style="font:500 24px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.mix }} %</span><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">MIX</span></div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <div style="display:flex;align-items:center;gap:12px"><dc-import name="VoxKnob" variant="plain" value="{{ k.drive }}" color="#a98bff" on-change="{{ set.drive }}" style="width:44px;height:44px" hint-size="44px,44px"></dc-import><div style="display:flex;flex-direction:column;gap:5px"><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DRIVE</span><span style="font:500 11px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ v.drive }}</span></div></div>
+                  <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;margin-top:6px">WET ENGINE</span><dc-import name="VoxSelect" variant="pills" options="LA-2A,1176" color="#a98bff" hint-size="100%,30px"></dc-import>
+                  <div style="margin-top:10px;display:grid;grid-template-columns:1fr auto;gap:7px 12px;font:500 10px/1 'JetBrains Mono',monospace"><span style="color:#a0a8b0">Wet GR</span><span style="color:#c3b0ff">-6.2 dB</span></div>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ focus.output }}" hint-placeholder-val="{{ false }}">
+              <div style="display:grid;grid-template-columns:150px minmax(0,1fr);gap:20px;align-items:start">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:10px"><dc-import name="VoxKnob" value="{{ k.density }}" color="#f2c84b" on-change="{{ set.density }}" style="width:128px;height:128px" hint-size="128px,128px"></dc-import><span style="font:500 24px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ v.density }}</span><span style="font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">DENSITY</span></div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">CEILING</span><dc-import name="VoxSelect" variant="steps" options="SOURCE,−1 dB,−3 dB" color="#f2c84b" hint-size="100%,42px"></dc-import>
+                  <div style="margin-top:10px;display:grid;grid-template-columns:1fr auto;gap:7px 12px;font:500 10px/1 'JetBrains Mono',monospace"><span style="color:#a0a8b0">Ceiling hits</span><span style="color:#f6dc8f">-0.4 dB</span><span style="color:#a0a8b0">Output</span><span style="color:#eaf6f8">0.0 dB</span></div>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+
+        <div style="height:60px;box-sizing:border-box;padding:0 16px;display:flex;align-items:center;gap:20px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;white-space:nowrap">0:00.00 → 0:46.18 · 0:46.18 SELECTED</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#eaf6f8;font:600 12px 'Inter';cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #eaf6f8"></span>Preview</button>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px 'Inter';cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff, 0 0 0 1px rgba(0,0,0,.55), 0 6px 12px -6px rgba(0,0,0,.9)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Apply to selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1c COMPACT -->
+    <div id="1c" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#14100e">1c</span>
+        <span style="font:600 15px/1 'Inter';color:#eaf6f8">Compact console</span>
+      </div>
+      <div style="font:400 13px/1.5 'Inter';color:#a0a8b0;max-width:860px;text-wrap:pretty">Same width, about half the height. GR wraps each knob as a thin coral outer arc (meter-in-knob), IN/OUT become slim bars, and the three status notes collapse into one readout line. Modes are the kit's lamp chips, sized for dense rows.</div>
+
+      <div data-screen-label="1c Compact" style="width:860px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1), inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6);overflow:hidden;display:flex;flex-direction:column">
+        <div style="height:58px;box-sizing:border-box;padding:2px 18px 0;display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font:800 13px/1 'Inter';letter-spacing:.14em;color:#fbf1e3">VOXPRESSOR</span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;font:700 12px/1 'Inter';box-shadow:0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65);cursor:pointer">?</button>
+          </div>
+          <div style="flex:1;max-width:360px;display:grid;grid-template-columns:auto 1fr auto 1fr;align-items:center;gap:8px 10px">
+            <span style="font:600 9px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">IN</span><div style="height:6px;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 4px,#262d37 4px 6px),linear-gradient(90deg,#8fd48a 0 54%,#1a1c20 54% 80%,#3d2328 80%);box-shadow:0 0 0 2px #0e0f11"></div>
+            <span style="font:600 9px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">OUT</span><div style="height:6px;border-radius:2px;background:repeating-linear-gradient(90deg,transparent 0 4px,#262d37 4px 6px),linear-gradient(90deg,#8fd48a 0 64%,#1a1c20 64% 80%,#3d2328 80%);box-shadow:0 0 0 2px #0e0f11"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 'Inter';letter-spacing:.14em;color:#eaf6f8">ON</span></button>
+            <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;font:400 17px/1 'Inter';box-shadow:0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65);cursor:pointer">×</button>
+          </div>
+        </div>
+
+        <div style="padding:14px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px">
+            <sc-for list="{{ compact }}" as="c" hint-placeholder-count="5">
+              <div style="border-radius:12px;background:linear-gradient(180deg,#353e4b,#2c343f);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.4);padding:10px 10px 12px;display:flex;flex-direction:column;align-items:center;gap:10px">
+                <div style="align-self:stretch;text-align:center;font:600 10px/1 'Inter';letter-spacing:.14em;color:#b6bdc4;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.07)">{{ c.name }}</div>
+                <dc-import name="VoxKnob" variant="ring" value="{{ c.k }}" color="{{ c.color }}" gr="{{ c.grv }}" on-change="{{ c.set }}" style="width:96px;height:96px;margin-top:4px" hint-size="96px,96px"></dc-import>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:7px"><span style="font:500 20px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ c.val }}</span><span style="font:600 9px/1 'Inter';letter-spacing:.14em;color:#b6bdc4">{{ c.cap }}</span></div>
+                <span style="font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#ff8a6e">{{ c.gr }}</span>
+                <dc-import name="VoxSelect" variant="chips" options="{{ c.opts }}" color="{{ c.color }}" style="width:100%" hint-size="100%,22px"></dc-import>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:10px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8), 0 1px 0 rgba(255,255,255,.05)">
+            <span style="flex:1;min-width:0;font:500 9px/1.4 'JetBrains Mono',monospace;letter-spacing:.06em;color:#c9d0d6">TIMING AUTO · VOICE TOUCHED 0.1 dB · RIPPLE -29 dB · PR 57 · 4.0 dB AVG LEVELING · DRIVE {{ v.drive }}</span>
+            <button style="height:20px;padding:0 9px;border:none;border-radius:6px;background:transparent;color:#c9d0d6;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);cursor:pointer">BENCH ▾</button>
+          </div>
+        </div>
+
+        <div style="height:60px;box-sizing:border-box;padding:0 16px;display:flex;align-items:center;gap:20px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;white-space:nowrap">0:00.00 → 0:46.18 · 0:46.18 SELECTED</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#eaf6f8;font:600 12px 'Inter';cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #eaf6f8"></span>Preview</button>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px 'Inter';cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff, 0 0 0 1px rgba(0,0,0,.55), 0 6px 12px -6px rgba(0,0,0,.9)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Apply to selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;bottomLayout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;B&quot;,&quot;A&quot;,&quot;current&quot;],&quot;default&quot;:&quot;B&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Turn 2&quot;},&quot;bottomKnob&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;arc&quot;,&quot;led&quot;,&quot;small&quot;,&quot;ticks&quot;,&quot;ring&quot;],&quot;default&quot;:&quot;led&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Turn 2&quot;}}">
+class Component extends DCLogic {
+  state = { peaks: 0.3, body: 0.475, deess: 0.4, mix: 0.35, drive: 0.3, density: 0, focus: 'peaks', meter: 0, ceil: 0 };
+  renderVals() {
+    const s = this.state;
+    const mk = (key) => (x) => this.setState({ [key]: x });
+    const set = { peaks: mk('peaks'), body: mk('body'), deess: mk('deess'), mix: mk('mix'), drive: mk('drive'), density: mk('density') };
+    const v = {
+      peaks: (s.peaks * 10).toFixed(1), body: (s.body * 10).toFixed(2), deess: String(Math.round(s.deess * 100)),
+      mix: String(Math.round(s.mix * 100)), drive: (s.drive * 10).toFixed(1), density: s.density < 0.02 ? 'OFF' : String(Math.round(s.density * 100)),
+    };
+    const meters = [
+      { title: 'PEAKS · 1176', read: '#f4a08a' }, { title: 'BODY · LA-2A', read: '#f0b860' },
+      { title: 'DE-ESS', read: '#8fe0cf' }, { title: 'PARALLEL (WET)', read: '#c3b0ff' },
+    ];
+    const marks = [['0', 0], ['-1', 10], ['-3', 31], ['-5', 49], ['-10', 88], ['-12', 100]].map(([l, p]) => ({ l, left: p + '%', tx: p === 0 ? 'none' : p === 100 ? 'translateX(-100%)' : 'translateX(-50%)' }));
+    const defs = [
+      { id: 'deess', name: 'DE-ESS', val: v.deess, gr: '-1.8 dB', fill: '22%', color: '#5fd6c0', read: '#8fe0cf', desc: 'Tames sibilance before the compressors hear it.' },
+      { id: 'peaks', name: 'PEAKS · 1176', val: v.peaks, gr: '-2.9 dB', fill: '36%', color: '#ff7a5c', read: '#f4a08a', desc: 'Fast FET stage — catches transients only.' },
+      { id: 'body', name: 'BODY · LA-2A', val: v.body, gr: '-4.0 dB', fill: '48%', color: '#e8a33d', read: '#f0b860', desc: 'Slow opto leveling for an even voice.' },
+      { id: 'parallel', name: 'PARALLEL', val: v.mix + ' %', gr: '-6.2 dB', fill: '58%', color: '#a98bff', read: '#c3b0ff', desc: 'Blends a crushed copy back in for density.' },
+      { id: 'output', name: 'OUTPUT', val: v.density, gr: '-0.4 dB', fill: '8%', color: '#f2c84b', read: '#f6dc8f', desc: 'Final density and ceiling.' },
+    ];
+    const stages = defs.map((d) => ({ ...d, sel: s.focus === d.id, unsel: s.focus !== d.id, pick: () => this.setState({ focus: d.id }) }));
+    const fs = defs.find((d) => d.id === s.focus);
+    const focus = Object.fromEntries(defs.map((d) => [d.id, s.focus === d.id]));
+    const compact = [
+      { name: 'DE-ESS', k: s.deess, set: set.deess, color: '#5fd6c0', grv: 0.18, val: v.deess, cap: 'AMOUNT', gr: 'GR -1.8', opts: 'WIDE,SPLIT' },
+      { name: 'PEAKS · 1176', k: s.peaks, set: set.peaks, color: '#ff7a5c', grv: 0.3, val: v.peaks, cap: 'AMOUNT', gr: 'GR -2.9', opts: 'HARD,SOFT' },
+      { name: 'BODY · LA-2A', k: s.body, set: set.body, color: '#e8a33d', grv: 0.4, val: v.body, cap: 'AMOUNT', gr: 'GR -4.0', opts: 'WARM,CLEAN' },
+      { name: 'PARALLEL', k: s.mix, set: set.mix, color: '#a98bff', grv: 0.52, val: v.mix + '%', cap: 'MIX', gr: 'WET -6.2', opts: 'LA-2A,1176' },
+      { name: 'OUTPUT', k: s.density, set: set.density, color: '#f2c84b', grv: 0.06, val: v.density, cap: 'DENSITY', gr: 'CEIL -0.4', opts: 'SRC,−1,−3' },
+    ];
+    const grs = [0.6 + s.peaks * 8.5, 0.8 + s.body * 7.5, 1.5 + s.mix * 7 + s.drive * 4];
+    const on = (i, c) => s.meter === i ? { bg: c, glow: '0 0 6px ' + c } : { bg: 'rgba(0,0,0,.35)', glow: 'inset 0 1px 1px rgba(0,0,0,.6)' };
+    const vu = { db: grs[s.meter], label: ['PEAKS', 'BODY', 'PARALLEL'][s.meter] };
+    const ttl = (i, c, off) => s.meter === i ? c : off;
+    const td = { peaks: ttl(0, '#ff8a6e', '#b6bdc4'), body: ttl(1, '#ff8a6e', '#b6bdc4'), parallel: ttl(2, '#ff8a6e', '#b6bdc4') };
+    const tl = { peaks: ttl(0, '#b23a1f', '#41464e'), body: ttl(1, '#b23a1f', '#41464e'), parallel: ttl(2, '#b23a1f', '#41464e') };
+    const lamp = { peaks: on(0, '#ff7a5c'), body: on(1, '#e8a33d'), parallel: on(2, '#a98bff') };
+    const ceilDb = [-0.3, -1, -3][s.ceil];
+    const pos = (db) => Math.max(0, Math.min(100, (1 + db / 24) * 100));
+    const outDb = Math.min(-14.1 + s.density * 6, ceilDb);
+    const extra = { ceilPos: pos(ceilDb).toFixed(1) + '%', outFill: Math.min(pos(-14.1 + 6 + s.density * 10), pos(ceilDb)).toFixed(1) + '%', outRead: outDb.toFixed(1), setCeil: (i) => this.setState({ ceil: i }) };
+    const rawBl = this.props.bottomLayout ?? 'B';
+    const bl = ['A', 'B', 'current'].includes(rawBl) ? rawBl : 'B';
+    return { lay: { cur: bl === 'current', a: bl === 'A', b: bl === 'B' }, ...extra, td, tl, bottomKnob: this.props.bottomKnob ?? 'led', k: s, set, v, meters, marks, stages, fs, focus, compact, vu, lamp, setMeter: (i) => this.setState({ meter: i }) };
+  }
+}
+</script>
+</body>
+</html>

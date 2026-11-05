@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="position:relative;width:100%;height:100%;user-select:none;touch-action:none">
+  <sc-if value="{{ isTicks }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 50% 40%, #232a33, #1b2027);box-shadow:inset 0 3px 8px rgba(0,0,0,.7), inset 0 -1px 0 rgba(255,255,255,.04)"></div>
+    <sc-for list="{{ ticks }}" as="t" hint-placeholder-count="21">
+      <div style="position:absolute;left:50%;top:50%;width:2px;margin-left:-1px;height:calc(50% - 7px);transform-origin:50% 0;transform:{{ t.rot }}">
+        <div style="position:absolute;bottom:0;left:0;width:2px;border-radius:1px;height:{{ t.h }};background:{{ t.bg }};box-shadow:{{ t.glow }}"></div>
+      </div>
+    </sc-for>
+    <div onPointerDown="{{ down }}" onDoubleClick="{{ reset }}" style="position:absolute;inset:27%;border-radius:50%;cursor:ns-resize;background:linear-gradient(160deg,#505c6e 0%,#353e4b 52%,#242b34 100%);box-shadow:0 10px 16px -8px rgba(0,0,0,.95), inset 0 2px 2px rgba(255,255,255,.1), inset 0 -6px 10px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.7), 0 0 0 4px #232a33, 0 0 0 5px rgba(0,0,0,.6)">
+      <div style="position:absolute;inset:11%;border-radius:50%;background:linear-gradient(160deg,#3e4959,#28313c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07), 0 1px 2px rgba(0,0,0,.6)"></div>
+      <div style="position:absolute;inset:0;pointer-events:none;transform:{{ rot }}">
+        <div style="position:absolute;left:50%;top:14%;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:{{ dot }};box-shadow:0 0 6px {{ dot }}"></div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isRing }}" hint-placeholder-val="{{ false }}">
+    <svg viewBox="0 0 100 100" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible">
+      <circle cx="50" cy="50" r="40" fill="none" transform="rotate(135 50 50)" stroke="#2a313b" stroke-width="4" stroke-linecap="round" stroke-dasharray="188.5 251.3"></circle>
+      <circle cx="50" cy="50" r="40" fill="none" transform="rotate(135 50 50)" stroke="{{ color }}" stroke-width="4" stroke-linecap="round" stroke-dasharray="{{ ringDash }}" style="filter:drop-shadow(0 0 3px {{ color }})"></circle>
+      <sc-if value="{{ hasGr }}" hint-placeholder-val="{{ false }}">
+        <circle cx="50" cy="50" r="48.5" fill="none" transform="rotate(135 50 50)" stroke="rgba(0,0,0,.45)" stroke-width="2.5" stroke-dasharray="228.6 304.7"></circle>
+        <circle cx="50" cy="50" r="48.5" fill="none" transform="rotate(135 50 50)" stroke="#ff8a6e" stroke-width="2.5" stroke-dasharray="{{ grDash }}" opacity="0.9"></circle>
+      </sc-if>
+    </svg>
+    <div onPointerDown="{{ down }}" onDoubleClick="{{ reset }}" style="position:absolute;inset:19%;border-radius:50%;cursor:ns-resize;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 8px 12px -6px rgba(0,0,0,.95), inset 0 1px 1px rgba(255,255,255,.1), inset 0 -4px 7px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.7)">
+      <div style="position:absolute;inset:0;pointer-events:none;transform:{{ rot }}">
+        <div style="position:absolute;left:50%;top:8%;width:3px;height:30%;transform:translateX(-50%);border-radius:2px;background:{{ color }};box-shadow:0 0 5px {{ color }}"></div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isArc }}" hint-placeholder-val="{{ false }}">
+    <div onPointerDown="{{ down }}" onDoubleClick="{{ reset }}" style="position:absolute;inset:0;cursor:ns-resize;touch-action:none">
+      <svg viewBox="0 0 100 100" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible">
+        <circle cx="50" cy="50" r="42" fill="none" transform="rotate(135 50 50)" stroke="#3a3d43" stroke-width="3" stroke-linecap="round" stroke-dasharray="197.9 263.9"></circle>
+        <circle cx="50" cy="50" r="42" fill="none" transform="rotate(135 50 50)" stroke="{{ color }}" stroke-width="3" stroke-linecap="round" stroke-dasharray="{{ arcDash }}" style="filter:drop-shadow(0 0 1px {{ color }})"></circle>
+        <sc-for list="{{ arcTicks }}" as="t" hint-placeholder-count="13">
+          <line x1="{{ t.x1 }}" y1="{{ t.y1 }}" x2="{{ t.x2 }}" y2="{{ t.y2 }}" stroke="{{ t.c }}" stroke-width="1.6" stroke-linecap="round"></line>
+        </sc-for>
+      </svg>
+      <div style="position:absolute;left:16%;top:16%;width:68%;height:68%;border-radius:50%;background:radial-gradient(circle at 50% 38%, #404b5b 74%, #66758b 89%, #7a8aa1 94%, #394353 100%);box-shadow:inset 0 1.5px 1px rgba(255,255,255,.18), inset 0 -3px 6px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.7), 0 5px 9px rgba(0,0,0,.4)">
+        <div style="position:absolute;inset:9%;border-radius:50%;overflow:hidden;background:linear-gradient(160deg,#5b687c,#414d5f);box-shadow:0 0 0 1.5px #37414f, inset 0 1px 0 rgba(255,255,255,.12)"></div>
+        <div style="position:absolute;inset:0;pointer-events:none;transform:{{ rot }}">
+          <div style="position:absolute;top:16%;left:50%;transform:translateX(-50%);width:10%;height:10%;border-radius:50%;background:{{ color }};box-shadow:0 0 2px {{ color }}"></div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isLed }}" hint-placeholder-val="{{ false }}">
+    <sc-for list="{{ leds }}" as="l" hint-placeholder-count="21">
+      <div style="position:absolute;left:{{ l.l }};top:{{ l.t }};width:{{ l.s }};height:{{ l.s }};transform:translate(-50%,-50%);border-radius:50%;background:{{ l.bg }};box-shadow:{{ l.sh }}"></div>
+    </sc-for>
+    <div onPointerDown="{{ down }}" onDoubleClick="{{ reset }}" style="position:absolute;inset:14%;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 9px 15px -7px rgba(0,0,0,.95), inset 0 1px 1px rgba(255,255,255,.1), inset 0 -4px 7px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.7)">
+      <div style="position:absolute;inset:11.6%;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+      <div style="position:absolute;inset:0;pointer-events:none;transform:{{ rot }}">
+        <div style="position:absolute;left:50%;top:15.2%;width:3px;height:23.2%;margin-left:-1.5px;border-radius:2px;background:{{ color }};box-shadow:0 0 5px {{ color }}"></div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isSmall }}" hint-placeholder-val="{{ false }}">
+    <div onPointerDown="{{ down }}" onDoubleClick="{{ reset }}" style="position:absolute;inset:0;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 12px 20px -10px rgba(0,0,0,.95), inset 0 1.5px 1.5px rgba(255,255,255,.1), inset 0 -5px 9px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.7)">
+      <div style="position:absolute;inset:11.6%;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+      <div style="position:absolute;inset:0;pointer-events:none;transform:{{ rot }}">
+        <div style="position:absolute;left:50%;top:13%;width:3px;height:24%;margin-left:-1.5px;border-radius:2px;background:{{ color }};box-shadow:0 0 6px {{ color }}"></div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isPlain }}" hint-placeholder-val="{{ false }}">
+    <div onPointerDown="{{ down }}" onDoubleClick="{{ reset }}" style="position:absolute;inset:0;border-radius:50%;cursor:ns-resize;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 12px 20px -10px rgba(0,0,0,.95), inset 0 1.5px 1.5px rgba(255,255,255,.1), inset 0 -5px 9px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.7)">
+      <div style="position:absolute;inset:0;pointer-events:none;transform:{{ rot }}">
+        <div style="position:absolute;left:50%;top:13%;width:3px;height:24%;transform:translateX(-50%);border-radius:2px;background:{{ color }};box-shadow:0 0 6px {{ color }}"></div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:120,&quot;height&quot;:120},&quot;value&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:0.01,&quot;default&quot;:0.5,&quot;tsType&quot;:&quot;number&quot;},&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;ticks&quot;,&quot;ring&quot;,&quot;plain&quot;],&quot;default&quot;:&quot;ticks&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;color&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#e8a33d&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;dot&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#e8a33d&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;segments&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:21,&quot;tsType&quot;:&quot;number&quot;},&quot;hotFrom&quot;:{&quot;editor&quot;:&quot;float&quot;,&quot;default&quot;:2,&quot;tsType&quot;:&quot;number&quot;},&quot;gr&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:0.01,&quot;default&quot;:0,&quot;tsType&quot;:&quot;number&quot;},&quot;onChange&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(v:number)=&gt;void&quot;}}">
+class Component extends DCLogic {
+  state = { v: null };
+  val() { return this.state.v ?? this.props.value ?? 0.5; }
+  renderVals() {
+    const p = this.props, v = this.val();
+    const variant = p.variant ?? 'ticks';
+    const color = p.color ?? '#e8a33d';
+    const n = p.segments ?? 21, hotFrom = p.hotFrom ?? 2;
+    const ticks = Array.from({ length: n }, (_, i) => {
+      const f = i / (n - 1), on = f <= v + 0.001 && (v > 0.001 || i === 0);
+      const hot = !on && f >= hotFrom;
+      const bg = on ? color : hot ? 'rgba(255,90,78,.55)' : 'rgba(255,255,255,.13)';
+      return { rot: `rotate(${45 + 270 * f}deg)`, h: i % 5 === 0 ? '9px' : '5px', bg, glow: on ? `0 0 4px ${color}` : 'none' };
+    });
+    const gr = p.gr ?? 0;
+    return {
+      isTicks: variant === 'ticks', isRing: variant === 'ring', isPlain: variant === 'plain',
+      isArc: variant === 'arc', isLed: variant === 'led', isSmall: variant === 'small',
+      arcDash: `${(v * 197.92).toFixed(1)} 263.9`,
+      arcTicks: Array.from({ length: 13 }, (_, i) => {
+        const t = i / 12, a = ((135 + t * 270) * Math.PI) / 180;
+        return { x1: (50 + 48 * Math.cos(a)).toFixed(2), y1: (50 + 48 * Math.sin(a)).toFixed(2), x2: (50 + 44 * Math.cos(a)).toFixed(2), y2: (50 + 44 * Math.sin(a)).toFixed(2), c: t <= v + 0.001 ? color : '#3a3d43' };
+      }),
+      leds: Array.from({ length: 21 }, (_, i) => {
+        const f = i / 20, a = ((-135 + 270 * f) * Math.PI) / 180, on = f <= v + 0.001, r = 44;
+        return { l: (50 + r * Math.sin(a)).toFixed(2) + '%', t: (50 - r * Math.cos(a)).toFixed(2) + '%', s: '4px', bg: on ? color : '#3a3d43', sh: on ? `0 0 4px ${color}` : 'inset 0 1px 1px rgba(0,0,0,.6)' };
+      }),
+      ticks, color, dot: p.dot ?? color,
+      rot: `rotate(${-135 + 270 * v}deg)`,
+      ringDash: `${(v * 188.5).toFixed(1)} 251.3`,
+      hasGr: gr > 0, grDash: `${(gr * 228.6).toFixed(1)} 304.7`,
+      down: (e) => {
+        e.preventDefault();
+        const y0 = e.clientY, v0 = this.val();
+        const mv = (ev) => {
+          const nv = Math.max(0, Math.min(1, v0 + (y0 - ev.clientY) / 180));
+          this.setState({ v: nv }); this.props.onChange?.(nv);
+        };
+        const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+        window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+      },
+      reset: () => { const nv = this.props.value ?? 0.5; this.setState({ v: nv }); this.props.onChange?.(nv); },
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -46,7 +46,7 @@ export const MAX_CHUNK_WORKERS = 8
  * ⚠ HOW LONG A KERNEL'S STATE TAKES TO SETTLE DEPENDS ON THE MATERIAL, so a
  * run-in tuned per plugin on one test signal is tuned to that signal. The
  * first cut used each plugin's pre-roll (2 s) and measured ≤ −140 dB on
- * syllable bursts; then speech with digital-silence gaps left the HF Softener
+ * syllable bursts; then speech with digital-silence gaps left the De-Esser
  * −95 dBFS off 33 ms after a seam (its trackers settle slowly through silence),
  * and phrased speech left Scheps −115 dBFS off AT the seam (the opto cell's slow
  * release). Neither was a click — a gain mismatch of ~0.0005 dB, gone within
@@ -90,7 +90,7 @@ export function planChunks(numSamples, preRoll, latency, sampleRate, count, { ru
     const from = k === 0 ? 0 : Math.max(0, Math.floor((preRoll + start - pre) / grid) * grid)
     // ⚠ AND IT ENDS ON A WHOLE BLOCK. A chunk's last block would otherwise be
     // short where the continuous render's is full, and a kernel that resolves
-    // anything per block (the HF Softener does) renders it differently: −101 dB
+    // anything per block (the De-Esser does) renders it differently: −101 dB
     // re the peak over the last second of every chunk, whatever the run-in.
     // `from` is on the grid, so rounding `to` up to a block keeps the blocks
     // the continuous render's; the last chunk ends where that render does.

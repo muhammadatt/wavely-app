@@ -9,6 +9,7 @@ import LA2AModal from '../components/panels/LA2AModal.vue'
 import FET1176Modal from '../components/panels/FET1176Modal.vue'
 import SoftClipperModal from '../components/panels/SoftClipperModal.vue'
 import SchepsModal from '../components/panels/SchepsModal.vue'
+import VoxPressorModal from '../components/panels/VoxPressorModal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
 import SaturationBenchModal from '../components/panels/SaturationBenchModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
@@ -363,6 +364,23 @@ const ALL_OPERATIONS = [
     component: FET1176Modal,
   },
   {
+    id: 'vox-pressor',
+    label: 'VoxPressor',
+    desc: 'Vocal dynamics: 1176 peaks into LA-2A body',
+    category: 'dynamics',
+    icon: 'dynamics',
+    keywords: [
+      'voxpressor', 'vocal', 'voice', 'compressor', '1176', 'la-2a', 'peaks', 'body',
+      'leveler', 'narration', 'podcast', 'dynamics',
+    ],
+    requires: 'selection',
+    feature: 'voxPressor',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
+    surface: 'window',
+    component: VoxPressorModal,
+  },
+  {
     // Filed under Dynamics rather than Tone: the two Pultec stages are there to
     // steer the compressor's sidechain, and what the user is reaching for is a
     // parallel compression sound. The EQ is the mechanism, not the offer.
@@ -510,7 +528,7 @@ const ALL_OPERATIONS = [
     // The real-time de-esser: dips the top end only while a consonant spikes.
     // The Sibilance Editor above is the event-based version: it analyses the
     // selection and rides clip gain on each event.
-    id: 'hf-softener',
+    id: 'de-esser',
     label: 'De-Esser',
     desc: 'Soften harsh S sounds, keep the air',
     category: 'clean',

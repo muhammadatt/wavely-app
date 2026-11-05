@@ -1,4 +1,5 @@
 <script setup>
+import { localPoint, layoutScaleX } from '../../ui/pointerLocal.js'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import {
   zoneBounds,
@@ -1977,7 +1978,8 @@ const dockLeft = computed(() => {
 function onDockDown(e) {
   const grip = e.target.closest?.('[data-dock-grip]')
   if (!grip || e.button !== 0) return
-  dockGrab = { x: e.clientX, from: dockLeft.value }
+  // A drag delta in layout pixels too: the card is positioned in them.
+  dockGrab = { x: e.clientX, from: dockLeft.value, scale: layoutScaleX(e.currentTarget) }
   dockDragging.value = true
   e.currentTarget.setPointerCapture?.(e.pointerId)
   e.preventDefault()
@@ -1985,7 +1987,7 @@ function onDockDown(e) {
 
 function onDockMove(e) {
   if (!dockGrab) return
-  dockX.value = dockGrab.from + (e.clientX - dockGrab.x)
+  dockX.value = dockGrab.from + (e.clientX - dockGrab.x) * dockGrab.scale
   e.preventDefault()
 }
 
@@ -2621,10 +2623,9 @@ let nextZoneId = 1
 
 function onDown(e) {
   if (e.button !== 0) return
-  const rect = canvasEl.value?.getBoundingClientRect()
-  if (!rect) return
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
+  if (!canvasEl.value) return
+  // Layout pixels: the faceplate is scaled on a phone (see ui/pointerLocal.js).
+  const { x, y } = localPoint(e, canvasEl.value)
   canvasEl.value?.focus({ preventScroll: true })
 
   // A DOT IS CHECKED FIRST, AND IT TAKES THE CLICK. A dot can land anywhere,
@@ -2734,11 +2735,9 @@ function onUp(e) {
 }
 
 function onDblClick(e) {
-  const rect = canvasEl.value?.getBoundingClientRect()
-  if (!rect) return
-  const x = e.clientX - rect.left
+  if (!canvasEl.value) return
+  const { x, y } = localPoint(e, canvasEl.value)
   if (focusMode.value) {
-    const y = e.clientY - rect.top
     const hit = focusNodeAt(x, y)
     if (hit >= 0) {
       commitFocus(removeNode(props.focusNodes, hit))
@@ -2923,10 +2922,9 @@ function updateCursorText(frame) {
 }
 
 function onMove(e) {
-  const rect = canvasEl.value?.getBoundingClientRect()
-  if (!rect) return
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
+  if (!canvasEl.value) return
+  // Layout pixels: the faceplate is scaled on a phone (see ui/pointerLocal.js).
+  const { x, y } = localPoint(e, canvasEl.value)
   cursorX.value = x
   // A drag is not a dwell: the pointer can sit still mid-drag and the reader is
   // busy moving something, not asking about it.
@@ -2977,9 +2975,9 @@ function onLeave() {
 function onWheel(e) {
   // Zone model, or nowhere near a node: the page keeps its scroll.
   if (!focusMode.value) return
-  const rect = canvasEl.value?.getBoundingClientRect()
-  if (!rect) return
-  const i = focusNodeAt(e.clientX - rect.left, e.clientY - rect.top)
+  if (!canvasEl.value) return
+  const { x, y } = localPoint(e, canvasEl.value)
+  const i = focusNodeAt(x, y)
   if (i < 0) return
   commitFocus(scaleNodeSpan(props.focusNodes, i, e.deltaY < 0 ? 1 : -1))
   e.preventDefault()
@@ -3125,6 +3123,7 @@ const markSummary = ref({ avgDb: 0 })
         role="group"
         :aria-label="plotSummary"
         :style="{
+          touchAction: 'none',
           height: `${height}px`,
           borderRadius: '12px',
           cursor: dragging ? 'grabbing'
@@ -3166,7 +3165,7 @@ const markSummary = ref({ avgDb: 0 })
       <div
         v-if="$slots.dock"
         ref="dockEl"
-        class="absolute left-0 right-0 bottom-[20px] flex"
+        class="absolute left-0 right-0 bottom-[20px] flex touch-none"
         :class="dockDragging ? 'justify-start' : 'justify-center'"
         :style="dockDragging || dockX !== null
           ? { justifyContent: 'flex-start', paddingLeft: `${dockLeft}px` }

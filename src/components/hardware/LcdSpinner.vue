@@ -9,6 +9,11 @@ import { onBeforeUnmount } from 'vue'
  * `dim` greys the digits (the value is being driven by something else, e.g.
  * an AUTO measurement) without disabling the steppers: pressing one takes
  * over, the same contract a knob under AUTO has.
+ *
+ * For a LIST of options (the value an index) `wrap` cycles past either end
+ * instead of stopping there, and `reverse` makes DOWN (and the wheel down)
+ * step forward through the list — the direction a reader expects of a list,
+ * where up at the first option otherwise does nothing.
  */
 const props = defineProps({
   modelValue: { type: Number, required: true },
@@ -19,11 +24,23 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   label: { type: String, default: '' },
   format: { type: Function, default: (v) => v.toFixed(1) },
+  /** Step past either end to the other instead of stopping. */
+  wrap: { type: Boolean, default: false },
+  /** Down steps forward (+step), up back. */
+  reverse: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue'])
 
-function nudge(dir) {
-  const next = Math.max(props.min, Math.min(props.max, props.modelValue + dir * props.step))
+function nudge(arrow) {
+  const dir = props.reverse ? -arrow : arrow
+  let next
+  if (props.wrap) {
+    const n = Math.round((props.max - props.min) / props.step) + 1
+    const i = Math.round((props.modelValue - props.min) / props.step)
+    next = props.min + (((i + dir) % n) + n) % n * props.step
+  } else {
+    next = Math.max(props.min, Math.min(props.max, props.modelValue + dir * props.step))
+  }
   const q = Number((Math.round(next / props.step) * props.step).toFixed(6))
   if (q !== props.modelValue || props.dim) emit('update:modelValue', q)
 }

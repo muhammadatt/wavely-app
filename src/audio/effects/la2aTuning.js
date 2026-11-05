@@ -29,7 +29,7 @@
 import {
   TUBE_DRIVE_LIN, TUBE_BIAS, CELL_MOD_MAX, CELL_MOD_TAU_DB, CELL_MOD_SHAPE,
   CELL_CURVE_DRIVE_MAX, VALVE_CURVE_DRIVE, EMPHASIS_DEFAULT, EMPHASIS_CORNER_HZ,
-  SIBILANCE_GUARD_DEFAULT, LA2A_KERNEL_DEFAULTS,
+  SIBILANCE_GUARD_DEFAULT, SIB_GUARD_HZ, VALVE_GUARD_DEFAULT, LA2A_KERNEL_DEFAULTS,
 } from '../la2aProcessor.js'
 
 /**
@@ -123,6 +123,12 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
    * sibilants pass the cell nearly clean. See SIBILANCE_GUARD_DEFAULT.
    */
   sibilanceGuard: SIBILANCE_GUARD_DEFAULT,
+  /** The guard detector's corner, Hz — see SIB_GUARD_HZ_MIN. */
+  sibilanceGuardHz: SIB_GUARD_HZ,
+  /** The guard's valve half, 0-100 — see VALVE_GUARD_DEFAULT. */
+  valveGuard: VALVE_GUARD_DEFAULT,
+  /** Shape only below this, Hz; 0 = off (ships) — see SHAPER_SPLIT_HZ_MIN. */
+  shaperSplitHz: 0,
 })
 
 /**

@@ -33,12 +33,12 @@ import {
   AIR_BAND_DEFAULTS,
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
-import { ensureHFSoftenerWorklet } from './deEsserWorkletLoader.js'
-import { HF_SOFTENER_PREROLL_S } from './deEsserProcessor.js'
+import { ensureDeEsserWorklet } from './deEsserWorkletLoader.js'
+import { DE_ESSER_PREROLL_S } from './deEsserProcessor.js'
 import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from './deEsserResoStage.js'
 import {
-  HF_SOFTENER_DEFAULTS,
-  toKernelParams as toHFSoftenerKernelParams,
+  DE_ESSER_DEFAULTS,
+  toKernelParams as toDeEsserKernelParams,
   resoOn, resoKernelParams, softenOn, softenStageKernelParams,
 } from './effects/deEsser.js'
 import { softenLatencySamples } from './deEsserSoftenStage.js'
@@ -68,6 +68,8 @@ import {
 } from './chunkedApply.js'
 import { RESONANCE_FRAME_SIZE, resonanceHopSamples } from './resonanceParams.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
+import { ensureVoxPressorWorklet } from './voxPressorWorkletLoader.js'
+import { voxLatencySamples, toKernelParams as toVoxKernelParams, VOX_DEFAULTS } from './effects/voxPressorParams.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
   SCHEPS_DEFAULTS,
@@ -655,6 +657,49 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
 }
 
 /**
+ * Measure VoxPressor for a region at its current knobs: the readouts and each
+ * stage's makeup. Resolves `measureVoxPressor`'s result (see voxPressorSolve.js)
+ * with the limiters' ceiling re-measured over the WHOLE region.
+ *
+ * ⚠ THE SAME TWO-SPAN CONTRACT AS `computeLA2AAutoMakeup`: the measurement
+ * renders both kernels several times, so it runs on the worker's capped window; the
+ * ceiling is the guarantee and is a claim about the whole source, so it comes
+ * from `regionPeakDb` — the window's peak would hold a louder passage the
+ * window never saw down to it.
+ *
+ * @param {object} kernelParams  `toKernelParams` of the panel (delete
+ *   `cornerHz` to have the voice profile measured here)
+ */
+export function computeVoxPressorMeasure(segments, start, end, kernelParams, sampleRate, channels) {
+  return measureInWorker(
+    'voxPressorMeasure', segments, start, end, kernelParams, sampleRate, channels,
+  ).then(({ type, ...d }) => {
+    const peakDb = regionPeakDb(segments, start, end, sampleRate, channels)
+    const ceilingDb = Number.isFinite(peakDb) ? peakDb : null
+    return {
+      ...d,
+      peaksCeilingDb: kernelParams.peaksOn ? ceilingDb : null,
+      bodyCeilingDb: kernelParams.bodyOn ? ceilingDb : null,
+      // The last limiter's ceiling and Density's anchor: the whole region's peak.
+      sourcePeakDb: ceilingDb,
+    }
+  })
+}
+
+/**
+ * VoxPressor's per-stage peak restores, measured EXACTLY over the whole region
+ * — for a region longer than the solve's analysis window. Resolves the solved
+ * params with the restores, ceilings and Body offset corrected. See
+ * `measureVoxPressorExact`.
+ */
+export function computeVoxPressorExact(segments, start, end, solved, sampleRate, channels) {
+  const sourcePeakDb = regionPeakDb(segments, start, end, sampleRate, channels)
+  return measureWholeRegionInWorker(
+    'voxPressorExact', segments, start, end, { solved, sourcePeakDb }, sampleRate, channels,
+  ).then(d => d.solved)
+}
+
+/**
  * Where a soft clipper ceiling preset lands for a region, in dBFS. Resolves
  * null if the region has no measurable content.
  *
@@ -729,7 +774,7 @@ async function applyWorkletRegion(
   const numSamples = Math.ceil(duration * sampleRate)
   // Pre- and post-stages are worklets chained AHEAD of / AFTER the main one,
   // each with its own latency; the whole chain's delay is what the render has
-  // to trim. Only the HF Softener's Reso post-stage uses this today — every
+  // to trim. Only the De-Esser's Reso post-stage uses this today — every
   // other caller passes none and renders exactly as before.
   const stages = [...preStages, ...postStages]
   const latency = chainLatency(latencySamples, stages)
@@ -764,7 +809,7 @@ async function applyWorkletRegion(
   // state and the same bug; turning it on for all of them at once would change
   // the output of five shipped plugins in one commit. Four ask for it, each
   // after its own measurement: Tube Saturation (4 s), OptoSmooth (2 s),
-  // Scheps (2 s) and the HF Softener (2 s, for its lisp guard’s 500 ms hold) — see the
+  // Scheps (2 s) and the De-Esser (2 s, for its lisp guard’s 500 ms hold) — see the
   // note beside each call site for what its number buys. The rest keep today's behaviour until each is measured on its own.
   //
   // Two of those measurements say pre-roll is not the answer, and they are the
@@ -1010,14 +1055,14 @@ export function applySoftClipperRegion(segments, start, end, params, sampleRate,
 }
 
 /**
- * The HF Softener's automatic Air for a region: the chain's top-end loss and
+ * The De-Esser's automatic Air for a region: the chain's top-end loss and
  * the Air it asks for, over the usual capped analysis window. Resolves
  * `{ lossDb, airDb }`.
  */
-export function measureHFSoftenerAutoAir(segments, start, end, params, sampleRate, channels) {
-  const merged = { ...HF_SOFTENER_DEFAULTS, ...params }
+export function measureDeEsserAutoAir(segments, start, end, params, sampleRate, channels) {
+  const merged = { ...DE_ESSER_DEFAULTS, ...params }
   return measureInWorker('deEsserAutoAir', segments, start, end, {
-    kernelParams: toHFSoftenerKernelParams(merged),
+    kernelParams: toDeEsserKernelParams(merged),
     resoParams: resoOn(merged) ? resoKernelParams(merged) : null,
     resoFrameSize: HF_RESO_FRAME_SIZE,
   }, sampleRate, channels)
@@ -1162,22 +1207,22 @@ export function applySaturationBenchRegion(segments, start, end, params, sampleR
 }
 
 /**
- * Apply the HF Softener to a region. Zero latency; the pre-roll lets the
+ * Apply the De-Esser to a region. Zero latency; the pre-roll lets the
  * envelopes settle on real context so the region starts where a playing
- * preview would be — see HF_SOFTENER_PREROLL_S.
+ * preview would be — see DE_ESSER_PREROLL_S.
  */
-export function applyHFSoftenerRegion(segments, start, end, params, sampleRate, channels) {
-  const merged = { ...HF_SOFTENER_DEFAULTS, ...params }
+export function applyDeEsserPluginRegion(segments, start, end, params, sampleRate, channels) {
+  const merged = { ...DE_ESSER_DEFAULTS, ...params }
   return applyRegion(segments, start, end, sampleRate, channels, {
-    ensureWorklet: ensureHFSoftenerWorklet,
-    processorName: 'hf-softener-processor',
-    kernelParams: toHFSoftenerKernelParams(merged),
-    preRollSamples: Math.round(HF_SOFTENER_PREROLL_S * sampleRate),
+    ensureWorklet: ensureDeEsserWorklet,
+    processorName: 'de-esser-processor',
+    kernelParams: toDeEsserKernelParams(merged),
+    preRollSamples: Math.round(DE_ESSER_PREROLL_S * sampleRate),
     // The softener is zero-latency, so Reso's STFT is anchored where the render
     // starts and its hop (128 at a 512 frame) is the grid; Soften has no grid
     // of its own. Each post-stage names its kernel for the chunk render.
     chunk: {
-      renderer: 'hfSoftener',
+      renderer: 'deEsser',
       grid: resoOn(merged) ? resonanceHopSamples(HF_RESO_FRAME_SIZE) : undefined,
     },
     // The Reso knob above 0: a band-limited ResoTame AFTER the softener — see
@@ -1265,6 +1310,23 @@ export function applySchepsRegion(segments, start, end, params, sampleRate, chan
     // SCHEPS_PREROLL_S. Also bit-exact at this length.
     preRollSamples: Math.round(SCHEPS_PREROLL_S * sampleRate),
     chunk: { renderer: 'scheps' },
+  })
+}
+
+/**
+ * Apply VoxPressor to a region. One-thread render for now: the plugin is not
+ * opted into chunked apply until its seams are measured (chunkedApply.js).
+ */
+export function applyVoxPressorRegion(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toVoxKernelParams({ ...VOX_DEFAULTS, ...params, listen: 'off' })
+  return applyRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureVoxPressorWorklet,
+    processorName: 'vox-pressor-processor',
+    kernelParams,
+    latencySamples: voxLatencySamples(kernelParams, sampleRate),
+    // Both kernels converge by 2 s (LA2A_PREROLL_S, FET1176_PREROLL_S); the
+    // 1176's makeup tracker latches but VoxPressor never reads it.
+    preRollSamples: Math.round(Math.max(LA2A_PREROLL_S, FET1176_PREROLL_S) * sampleRate),
   })
 }
 

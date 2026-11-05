@@ -1,7 +1,7 @@
 /**
  * Run with:  npm test
  *
- * HF Softener — the Soften post-stage (deEsserSoftenStage.js): an onset
+ * De-Esser — the Soften post-stage (deEsserSoftenStage.js): an onset
  * softener on the band above 500 Hz, moved here from PHAT*SS and run on the
  * HF Limiter's kernel with its shelf out.
  *
@@ -19,7 +19,7 @@ import {
   softenLaw, softenKernelParams, softenLatencySamples,
   SOFTEN_MAX, SOFTEN_FREQ_HZ, SOFTEN_GATE_BELOW_DB, SOFTEN_NOMINAL_DBFS,
 } from '../../src/audio/deEsserSoftenStage.js'
-import { HF_SOFTENER_DEFAULTS, softenOn, softenStageKernelParams } from '../../src/audio/deEsserParams.js'
+import { DE_ESSER_DEFAULTS, softenOn, softenStageKernelParams } from '../../src/audio/deEsserParams.js'
 import { shelfLatencySamples } from '../../src/audio/dsp/hfLimit.js'
 
 const SR = 44100
@@ -94,17 +94,17 @@ test('the stage is the HF Limiter\'s kernel with the shelf out and the Transient
   assert.equal(k.transientGateDb, SOFTEN_NOMINAL_DBFS + 3 - SOFTEN_GATE_BELOW_DB)
   assert.equal(k.outputGainDb, 0)
   assert.equal(softenLatencySamples(SR), shelfLatencySamples(SR))
-  // Through the HF Softener's params: the knob and the file's level offset.
-  assert.deepEqual(softenStageKernelParams({ ...HF_SOFTENER_DEFAULTS, soften: 4, levelOffset: -6 }), softenKernelParams(4, -6))
+  // Through the De-Esser's params: the knob and the file's level offset.
+  assert.deepEqual(softenStageKernelParams({ ...DE_ESSER_DEFAULTS, soften: 4, levelOffset: -6 }), softenKernelParams(4, -6))
 })
 
-test('HF Softener: Soften ships off and is in the chain only above 0', () => {
-  assert.equal(HF_SOFTENER_DEFAULTS.soften, 0)
-  assert.equal(softenOn(HF_SOFTENER_DEFAULTS), false)
+test('De-Esser: Soften ships off and is in the chain only above 0', () => {
+  assert.equal(DE_ESSER_DEFAULTS.soften, 0)
+  assert.equal(softenOn(DE_ESSER_DEFAULTS), false)
   assert.equal(softenOn({ soften: 0.1 }), true)
   assert.equal(softenOn({ soften: 0 }), false)
   // Reso left the panel when Soften took its slot, and stays off.
-  assert.equal(HF_SOFTENER_DEFAULTS.resoAmount, 0)
+  assert.equal(DE_ESSER_DEFAULTS.resoAmount, 0)
 })
 
 test('at 0 the stage is a pure delay of its latency', () => {

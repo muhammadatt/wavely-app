@@ -317,5 +317,11 @@ if (typeof registerProcessor === 'function') {
     }
   }
 
-  registerProcessor('inflator-processor', InflatorWorkletProcessor)
+  // Guarded: VoxPressor's worklet holds this kernel, so the module can load
+  // twice into one AudioContext; only the duplicate registration is swallowed.
+  try {
+    registerProcessor('inflator-processor', InflatorWorkletProcessor)
+  } catch (err) {
+    if (err?.name !== 'NotSupportedError') throw err
+  }
 }

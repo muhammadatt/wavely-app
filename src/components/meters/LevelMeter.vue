@@ -59,15 +59,32 @@ const props = defineProps({
   variant: { type: String, default: 'classic' },
   /** 'right' | 'left' — which side of the ladder the scale is engraved on. */
   scaleSide: { type: String, default: 'right' },
+  /**
+   * Horizontal Modula only: where the caption sits — 'end' (after the readout,
+   * the default) or 'start' (in FRONT of the ladder, VoxPressor's IN / OUT
+   * well). Fixed width either way, so stacked rows keep their ladders in line.
+   */
+  labelSide: { type: String, default: 'end' },
+  /**
+   * Horizontal Modula only, opt-in (VoxPressor's OUTPUT well, after its
+   * redesign reference): a SLIM bar — no housing, 3 px rungs on a 5 px pitch,
+   * 7 px thick, unlit rungs a dim tint of their zone, no glow — and the
+   * readout as plain right-aligned figures instead of an inset well. The
+   * ballistics, the hold and the clip lamp are the same meter's.
+   */
+  slim: { type: Boolean, default: false },
 })
 
 // Ladder geometry. A segment and the gap under it are one pitch, so the
 // segment count follows from the height the caller asked for rather than the
 // other way round — panels keep setting a pixel height and the ladder fills
 // as much of it as whole segments allow.
-const SEG_H = 4
-const SEG_GAP = 3
-const PITCH = SEG_H + SEG_GAP
+const slimBar = computed(() => props.slim && props.variant === 'modula' && props.orientation === 'horizontal')
+const SEG_H_STD = 4
+const SEG_GAP_STD = 3
+const SEG_H_SLIM = 3
+const SEG_GAP_SLIM = 2
+const LADDER_W_SLIM = 7
 const CH_GAP = 2
 const MIN_ROWS = 8
 
@@ -76,11 +93,15 @@ const MIN_ROWS = 8
 // block follow made a mono meter half the width of a stereo one — so the same
 // panel changed shape with the file, and the housing, the lamp, the readout
 // and the caption all moved with it.
-const LADDER_W = 14
+const LADDER_W_STD = 14
+const SEG_H = computed(() => (slimBar.value ? SEG_H_SLIM : SEG_H_STD))
+const SEG_GAP = computed(() => (slimBar.value ? SEG_GAP_SLIM : SEG_GAP_STD))
+const PITCH = computed(() => SEG_H.value + SEG_GAP.value)
+const LADDER_W = computed(() => (slimBar.value ? LADDER_W_SLIM : LADDER_W_STD))
 
 const rows = computed(() =>
-  Math.max(MIN_ROWS, Math.floor((props.height + SEG_GAP) / PITCH)))
-const ladderHeight = computed(() => rows.value * PITCH - SEG_GAP)
+  Math.max(MIN_ROWS, Math.floor((props.height + SEG_GAP.value) / PITCH.value)))
+const ladderHeight = computed(() => rows.value * PITCH.value - SEG_GAP.value)
 
 // Marks worth engraving, in dBFS. Only some carry a numeral — the rest are
 // bare ticks, so the scale stays readable on the shortest panel that uses it.
@@ -257,7 +278,7 @@ const segMeta = computed(() => {
   const greenPct = dbToPct(CYAN_DB)
   return Array.from({ length: rows.value }, (_, i) => {
     // i counts from the bottom; the column is drawn top-down and reversed.
-    const centerPct = ((i * PITCH + SEG_H / 2) / h) * 100
+    const centerPct = ((i * PITCH.value + SEG_H.value / 2) / h) * 100
     const color = centerPct >= redPct ? HOT
       : centerPct >= amberPct ? WARM
         : centerPct >= greenPct ? MID
@@ -284,8 +305,9 @@ const ladders = computed(() => {
       const on = seg.centerPct <= levelPct
       return {
         color: seg.color,
-        opacity: on ? 1 : 0.1,
-        glow: on,
+        // Slim: unlit rungs stay a readable tint of their zone, and nothing glows.
+        opacity: on ? 1 : slimBar.value ? 0.2 : 0.1,
+        glow: on && !slimBar.value,
       }
     })
     // ⚠ ORDERED FOR THE DIRECTION IT IS DRAWN IN. `segMeta` runs quietest
@@ -330,12 +352,12 @@ const readout = computed(() =>
 // measures the same either way. Fractional widths are fine — the browser
 // subpixel-positions them and the ladder still lands on whole pixels overall.
 const segWidth = computed(() =>
-  (LADDER_W - (channelCount.value - 1) * CH_GAP) / channelCount.value)
+  (LADDER_W.value - (channelCount.value - 1) * CH_GAP) / channelCount.value)
 
 // The lamp belongs to the ladders, not to the whole component — the scale
 // gutter and the caption are both wider, and stretching to them left it
 // floating unaligned above the thing it reports on.
-const ladderBlockWidth = computed(() => LADDER_W)
+const ladderBlockWidth = computed(() => LADDER_W.value)
 
 // Outer width of the housing: the ladders, its padding, its border. The
 // readout and the caption are centred on this rather than on the component,
@@ -378,8 +400,8 @@ function segStyle(seg) {
   // The segment is a rung: thin along the ladder, wide across it. Which screen
   // axis those are is the only thing orientation changes here.
   return {
-    width: (isHorizontal.value ? SEG_H : segWidth.value) + 'px',
-    height: (isHorizontal.value ? segWidth.value : SEG_H) + 'px',
+    width: (isHorizontal.value ? SEG_H.value : segWidth.value) + 'px',
+    height: (isHorizontal.value ? segWidth.value : SEG_H.value) + 'px',
     borderRadius: '1px',
     background: seg.color,
     opacity: seg.opacity,
@@ -398,6 +420,11 @@ function ariaText(bar) {
     :class="isHorizontal ? 'flex-row items-center' : 'flex-col items-start'"
     :style="{ gap: modula ? '8px' : '7px', ...modulaRoot }"
   >
+    <span
+      v-if="modulaH && label && labelSide === 'start'"
+      :style="`font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0;min-width:${slimBar ? 22 : 26}px`"
+    >{{ label }}</span>
+
     <!-- Modula: the readout in a well, above the ladder. -->
     <div v-if="modula && showReadout" class="flex justify-center" :style="modulaColumn">
       <span class="lm-well" :style="{ color: clipped ? '#ff9d90' : undefined }">{{ readout }}</span>
@@ -413,7 +440,7 @@ function ariaText(bar) {
       <div
         class="flex items-center"
         :class="isHorizontal ? 'flex-row-reverse' : 'flex-col'"
-        style="padding:5px;border-radius:5px;background:#0b0e13;border:1px solid #1c222c"
+        :style="slimBar ? null : 'padding:5px;border-radius:5px;background:#0b0e13;border:1px solid #1c222c'"
       >
         <!-- Clip lamp. Latches, and clears on click the way a console does:
              the readout decays within a second or two, so without the latch a
@@ -433,7 +460,7 @@ function ariaText(bar) {
         >
           <div :style="{
             height: isHorizontal ? '100%' : '5px',
-            width: isHorizontal ? '5px' : 'auto',
+            width: isHorizontal ? (slimBar ? '3px' : '5px') : 'auto',
             borderRadius: '1.5px',
             background: clipped ? HOT : '#262c37',
             boxShadow: clipped ? `0 0 10px ${HOT}, 0 0 3px ${HOT}` : 'none',
@@ -538,9 +565,11 @@ function ariaText(bar) {
       </div>
     </template>
 
-    <div v-else-if="modulaH && (showReadout || label)" class="flex flex-row items-center gap-[8px]">
-      <span v-if="showReadout" class="lm-well" :style="{ color: clipped ? '#ff9d90' : undefined }">{{ readout }}</span>
-      <span v-if="label" style="font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd">{{ label }}</span>
+    <div v-else-if="modulaH && (showReadout || (label && labelSide !== 'start'))" class="flex flex-row items-center gap-[8px]">
+      <span v-if="showReadout" :class="slimBar ? 'lm-plain' : 'lm-well'" :style="{ color: clipped ? '#ff9d90' : undefined }">{{ readout }}</span>
+      <!-- A fixed width, so an IN and an OUT row stacked together keep their
+           ladders in line: the caption trails, and IN is narrower than OUT. -->
+      <span v-if="label && labelSide !== 'start'" style="font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd;min-width:26px">{{ label }}</span>
     </div>
 
     <div
@@ -581,5 +610,15 @@ function ariaText(bar) {
   color: #eaf6f8;
   background: #1a1c20;
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, .8), 0 1px 0 rgba(255, 255, 255, .05);
+}
+/* Slim: the reading as plain figures, right-aligned in a fixed width (the reference's 30 px column). */
+.lm-plain {
+  flex: none;
+  width: 32px;
+  text-align: right;
+  white-space: nowrap;
+  font: 500 9px/1 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  color: #c9d0d6;
 }
 </style>

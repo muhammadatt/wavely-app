@@ -1,4 +1,5 @@
 <script setup>
+import { localPoint, layoutScaleX } from '../../ui/pointerLocal.js'
 import { computed, ref } from 'vue'
 import { clamp01 } from './hardwareDial.js'
 
@@ -71,8 +72,10 @@ let lastX = 0
 let dragPct = 0
 
 function pctAt(clientX) {
-  const r = root.value.getBoundingClientRect()
-  return clamp01((clientX - r.left - PAD) / travel.value)
+  // Layout pixels: PAD and the travel are, and a phone sheet scales the
+  // faceplate (see ui/pointerLocal.js).
+  const { x } = localPoint({ clientX, clientY: 0 }, root.value)
+  return clamp01((x - PAD) / travel.value)
 }
 
 function onPointerDown(e) {
@@ -88,7 +91,7 @@ function onPointerDown(e) {
 }
 function onPointerMove(e) {
   if (!dragging.value) return
-  const dx = e.clientX - lastX
+  const dx = (e.clientX - lastX) * layoutScaleX(root.value)
   lastX = e.clientX
   dragPct = clamp01(dragPct + dx / (travel.value * (e.shiftKey ? FINE : 1)))
   set(props.min + dragPct * span.value)

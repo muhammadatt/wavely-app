@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;flex-direction:column;align-items:center;gap:6px;user-select:none">
+  <sc-if value="{{ isV }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:center;gap:12px">
+    <div tabIndex="0" role="spinbutton" onKeyDown="{{ key }}" style="position:relative;display:flex;flex-direction:column;align-items:center;justify-content:space-between;width:86px;height:118px;box-sizing:border-box;padding:2px 0;border-radius:10px;overflow:hidden;outline:none;background:linear-gradient(180deg,#0b0c0e,#1d1f23 50%,#0b0c0e);box-shadow:inset 0 2px 8px rgba(0,0,0,.9), 0 0 0 1px rgba(0,0,0,.6), 0 1px 0 1px rgba(255,255,255,.05)">
+      <button onClick="{{ prev }}" style="width:100%;height:30px;padding:0;border:none;background:transparent;cursor:pointer;text-align:center;white-space:nowrap;transform:scaleY(.7);font:600 13px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.18)" style-hover="color:rgba(255,255,255,.38)">{{ prevLabel }}</button>
+      <div style="position:relative;display:grid;place-items:center;width:100%;height:40px;overflow:hidden;border-top:1px solid rgba(232,163,61,.35);border-bottom:1px solid rgba(232,163,61,.35)">
+        <span style="white-space:nowrap;font:700 {{ vSize }}/1 'JetBrains Mono',monospace;transition:transform .16s ease-out;transform:{{ rollV }};color:{{ ink }};text-shadow:0 0 10px {{ glow }}">{{ cur }}</span>
+      </div>
+      <button onClick="{{ next }}" style="width:100%;height:30px;padding:0;border:none;background:transparent;cursor:pointer;text-align:center;white-space:nowrap;transform:scaleY(.7);font:600 13px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.18)" style-hover="color:rgba(255,255,255,.38)">{{ nextLabel }}</button>
+      <div style="position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.07),transparent 30%,transparent 70%,rgba(255,255,255,.03))"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+      <button onClick="{{ prev }}" disabled="{{ atStart }}" style="display:grid;place-items:center;width:30px;height:30px;padding:0;border:none;border-radius:50%;cursor:pointer;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);opacity:{{ prevOp }};box-shadow:{{ btnSh }}" style-hover="filter:brightness(1.15)"><span style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:6px solid {{ arrowInk }}"></span></button>
+      <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:{{ capInk }}">{{ label }}</span>
+      <button onClick="{{ next }}" disabled="{{ atEnd }}" style="display:grid;place-items:center;width:30px;height:30px;padding:0;border:none;border-radius:50%;cursor:pointer;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);opacity:{{ nextOp }};box-shadow:{{ btnSh }}" style-hover="filter:brightness(1.15)"><span style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid {{ arrowInk }}"></span></button>
+    </div>
+  </div>
+  </sc-if>
+  <sc-if value="{{ isSm }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:center;gap:5px">
+    <button onClick="{{ prev }}" disabled="{{ atStart }}" style="display:grid;place-items:center;width:18px;height:18px;padding:0;border:none;border-radius:50%;cursor:pointer;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);opacity:{{ prevOp }};box-shadow:{{ btnShSm }}" style-hover="filter:brightness(1.15)"><span style="width:0;height:0;border-top:3px solid transparent;border-bottom:3px solid transparent;border-right:4px solid {{ arrowInk }}"></span></button>
+    <div tabIndex="0" role="spinbutton" onKeyDown="{{ key }}" style="position:relative;display:grid;place-items:center;width:70px;height:26px;border-radius:13px;overflow:hidden;outline:none;background:linear-gradient(180deg,#0b0c0e,#1d1f23 50%,#0b0c0e);box-shadow:inset 0 2px 6px rgba(0,0,0,.9), 0 0 0 1px rgba(0,0,0,.6), 0 1px 0 1px rgba(255,255,255,.05)">
+      <div style="position:relative;display:grid;place-items:center;width:54px;height:18px;overflow:hidden;border-left:1px solid rgba(232,163,61,.35);border-right:1px solid rgba(232,163,61,.35)">
+        <span style="white-space:nowrap;font:700 10px/1 'JetBrains Mono',monospace;transition:transform .16s ease-out;transform:{{ roll }};color:{{ ink }};text-shadow:0 0 6px {{ glow }}">{{ cur }}</span>
+      </div>
+      <div style="position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(0,0,0,.45),transparent 22%,transparent 78%,rgba(0,0,0,.45)),linear-gradient(180deg,rgba(255,255,255,.06),transparent 40%)"></div>
+    </div>
+    <button onClick="{{ next }}" disabled="{{ atEnd }}" style="display:grid;place-items:center;width:18px;height:18px;padding:0;border:none;border-radius:50%;cursor:pointer;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);opacity:{{ nextOp }};box-shadow:{{ btnShSm }}" style-hover="filter:brightness(1.15)"><span style="width:0;height:0;border-top:3px solid transparent;border-bottom:3px solid transparent;border-left:4px solid {{ arrowInk }}"></span></button>
+  </div>
+  </sc-if>
+  <sc-if value="{{ isH }}" hint-placeholder-val="{{ true }}">
+  <div style="display:flex;align-items:center;gap:6px">
+    <button onClick="{{ prev }}" disabled="{{ atStart }}" style="display:grid;place-items:center;width:22px;height:22px;padding:0;border:none;border-radius:50%;cursor:pointer;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);opacity:{{ prevOp }};box-shadow:{{ btnSh }}" style-hover="filter:brightness(1.15)"><span style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:5px solid {{ arrowInk }}"></span></button>
+    <div tabIndex="0" role="spinbutton" onKeyDown="{{ key }}" style="position:relative;display:flex;align-items:center;gap:4px;height:40px;box-sizing:border-box;padding:0 8px;border-radius:20px;overflow:hidden;outline:none;background:linear-gradient(180deg,#0b0c0e,#1d1f23 50%,#0b0c0e);box-shadow:inset 0 2px 8px rgba(0,0,0,.9), 0 0 0 1px rgba(0,0,0,.6), 0 1px 0 1px rgba(255,255,255,.05)">
+      <button onClick="{{ prev }}" style="width:44px;padding:0;border:none;background:transparent;cursor:pointer;text-align:center;white-space:nowrap;overflow:hidden;transform:scaleX(.75);font:600 9px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.2)" style-hover="color:rgba(255,255,255,.38)">{{ prevLabel }}</button>
+      <div style="position:relative;display:grid;place-items:center;width:74px;height:27px;overflow:hidden;border-left:1px solid rgba(232,163,61,.35);border-right:1px solid rgba(232,163,61,.35)">
+        <span style="white-space:nowrap;font:700 13px/1 'JetBrains Mono',monospace;transition:transform .16s ease-out;transform:{{ roll }};color:{{ ink }};text-shadow:0 0 8px {{ glow }}">{{ cur }}</span>
+      </div>
+      <button onClick="{{ next }}" style="width:44px;padding:0;border:none;background:transparent;cursor:pointer;text-align:center;white-space:nowrap;overflow:hidden;transform:scaleX(.75);font:600 9px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.2)" style-hover="color:rgba(255,255,255,.38)">{{ nextLabel }}</button>
+      <div style="position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(0,0,0,.55),transparent 28%,transparent 72%,rgba(0,0,0,.55)),linear-gradient(180deg,rgba(255,255,255,.06),transparent 40%)"></div>
+    </div>
+    <button onClick="{{ next }}" disabled="{{ atEnd }}" style="display:grid;place-items:center;width:22px;height:22px;padding:0;border:none;border-radius:50%;cursor:pointer;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);opacity:{{ nextOp }};box-shadow:{{ btnSh }}" style-hover="filter:brightness(1.15)"><span style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid {{ arrowInk }}"></span></button>
+  </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:220,&quot;height&quot;:60},&quot;options&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;AUTO,GENTLE,NORMAL,FAST&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;value&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:0,&quot;tsType&quot;:&quot;number&quot;},&quot;color&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#e8a33d&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;orientation&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;horizontal&quot;,&quot;vertical&quot;],&quot;default&quot;:&quot;horizontal&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;label&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;surface&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;onChange&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(i:number)=&gt;void&quot;}}">
+class Component extends DCLogic {
+  state = { i: null, nudge: 0 };
+  renderVals() {
+    const p = this.props, opts = (p.options ?? 'A,B,C').split(','), n = opts.length;
+    const a = p.color ?? '#e8a33d';
+    const cur = this.state.i ?? p.value ?? 0;
+    const go = (d) => {
+      const j = Math.max(0, Math.min(n - 1, cur + d));
+      if (j === cur) return;
+      this.setState({ i: j, nudge: d > 0 ? 40 : -40 });
+      requestAnimationFrame(() => requestAnimationFrame(() => this.setState({ nudge: 0 })));
+      p.onChange?.(j);
+    };
+    return {
+      cur: opts[cur], prevLabel: opts[cur - 1] ?? '', nextLabel: opts[cur + 1] ?? '',
+      ink: `color-mix(in srgb, ${a} 65%, #ffffff)`, glow: `color-mix(in srgb, ${a} 55%, transparent)`,
+      roll: this.state.nudge ? `translateX(${this.state.nudge}%)` : 'none',
+      rollV: this.state.nudge ? `translateY(${this.state.nudge * 2}%)` : 'none',
+      isV: p.orientation === 'vertical', isH: p.orientation !== 'vertical' && p.size !== 'sm', isSm: p.orientation !== 'vertical' && p.size === 'sm',
+      label: p.label ?? '', capInk: p.surface === 'light' ? '#555b64' : '#a0a8b0',
+      vSize: opts[cur].length > 4 ? '17px' : opts[cur].length > 2 ? '22px' : '28px',
+      arrowInk: '#f4f7f8',
+      btnSh: p.surface === 'light' ? 'inset 0 1px 0 rgba(255,255,255,.2), 0 1px 1px rgba(40,30,20,.35), 0 6px 10px -4px rgba(40,30,20,.4)' : '0 6px 12px -6px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65)',
+      btnShSm: p.surface === 'light' ? 'inset 0 1px 0 rgba(255,255,255,.2), 0 1px 1px rgba(40,30,20,.35), 0 4px 6px -3px rgba(40,30,20,.4)' : '0 4px 8px -4px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65)',
+      atStart: cur === 0, atEnd: cur === n - 1, prevOp: cur === 0 ? 0.3 : 1, nextOp: cur === n - 1 ? 0.3 : 1,
+      prev: () => go(-1), next: () => go(1),
+      key: (e) => { if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); go(1); } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); go(-1); } },
+    };
+  }
+}
+</script>
+</body>
+</html>

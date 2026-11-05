@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="user-select:none">
+  <sc-if value="{{ isLatch }}" hint-placeholder-val="{{ false }}">
+    <div role="radiogroup" style="display:flex;gap:4px;padding:6px 6px 10px;border-radius:10px;background:#1a1c20;box-shadow:inset 0 2px 6px rgba(0,0,0,.85)">
+      <sc-for list="{{ items }}" as="it" hint-placeholder-count="3">
+        <button role="radio" onClick="{{ it.pick }}" style="flex:1 1 0;min-width:0;box-sizing:border-box;height:50px;display:flex;flex-direction:column;align-items:center;gap:15px;padding:9px 0 0;border:none;border-radius:5px;cursor:pointer;transition:transform .08s, box-shadow .08s;transform:{{ it.tf }};background:{{ it.keyBg }};box-shadow:{{ it.keySh }}">
+          <span style="width:22px;height:4px;border-radius:2px;background:{{ it.lamp }};box-shadow:{{ it.lampGlow }}"></span>
+          <span style="font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.04em;white-space:nowrap;color:{{ it.ink }}">{{ it.label }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isLatchSm }}" hint-placeholder-val="{{ false }}">
+    <div role="radiogroup" style="display:flex;gap:3px;padding:4px 4px 6px;border-radius:8px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.85)">
+      <sc-for list="{{ items }}" as="it" hint-placeholder-count="3">
+        <button role="radio" onClick="{{ it.pick }}" style="flex:1 1 0;min-width:0;box-sizing:border-box;height:30px;display:flex;flex-direction:column;align-items:center;gap:7px;padding:6px 6px 0;border:none;border-radius:4px;cursor:pointer;transition:transform .08s, box-shadow .08s;transform:{{ it.tfSm }};background:{{ it.keyBg }};box-shadow:{{ it.keyShSm }}">
+          <span style="width:14px;height:3px;border-radius:2px;background:{{ it.lamp }};box-shadow:{{ it.lampGlow }}"></span>
+          <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;color:{{ it.ink }}">{{ it.label }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isSlide }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;align-items:center;justify-content:center;gap:10px">
+      <button onClick="{{ pick0 }}" style="border:none;background:none;padding:2px;cursor:pointer;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;white-space:nowrap;color:{{ ink0 }};text-shadow:{{ glow0 }}">{{ label0 }}</button>
+      <button role="switch" onClick="{{ toggle }}" style="position:relative;flex:none;width:64px;height:30px;border:none;border-radius:16px;cursor:pointer;background:{{ trackBg }};box-shadow:{{ trackSh }}">
+        <span style="position:absolute;top:3px;left:{{ puckL }};width:24px;height:24px;border-radius:50%;transition:left .18s cubic-bezier(.4,1.4,.5,1);background:linear-gradient(160deg,#56627a,#2b323d);box-shadow:{{ puckSh }}"></span>
+      </button>
+      <button onClick="{{ pick1 }}" style="border:none;background:none;padding:2px;cursor:pointer;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;white-space:nowrap;color:{{ ink1 }};text-shadow:{{ glow1 }}">{{ label1 }}</button>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isPills }}" hint-placeholder-val="{{ false }}">
+    <div role="radiogroup" style="display:flex;flex-wrap:wrap;gap:8px">
+      <sc-for list="{{ items }}" as="it" hint-placeholder-count="2">
+        <button role="radio" onClick="{{ it.pick }}" style="display:inline-flex;align-items:center;gap:8px;height:30px;box-sizing:border-box;padding:0 13px;border:none;border-radius:999px;cursor:pointer;background:transparent;box-shadow:{{ it.ring }}" style-hover="filter:brightness(1.08)">
+          <span style="width:7px;height:7px;border-radius:50%;background:{{ it.lamp }};box-shadow:{{ it.lampGlow }}"></span>
+          <span style="font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;white-space:nowrap;color:{{ it.pillInk }}">{{ it.label }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isChips }}" hint-placeholder-val="{{ true }}">
+    <div role="radiogroup" style="display:flex;justify-content:center;flex-wrap:wrap;gap:6px">
+      <sc-for list="{{ items }}" as="it" hint-placeholder-count="2">
+        <button role="radio" onClick="{{ it.pick }}" style="display:inline-flex;align-items:center;gap:5px;height:22px;box-sizing:border-box;padding:0 7px;border:none;border-radius:999px;cursor:pointer;background:transparent;box-shadow:{{ it.chipRing }}" style-hover="filter:brightness(1.1)">
+          <span style="width:6px;height:6px;border-radius:50%;background:{{ it.lamp }};box-shadow:{{ it.lampGlow }}"></span>
+          <span style="font:700 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.1em;white-space:nowrap;color:{{ it.pillInk }}">{{ it.label }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isSteps }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;flex-direction:column;gap:7px">
+      <div role="slider" style="display:flex;gap:6px">
+        <sc-for list="{{ items }}" as="it" hint-placeholder-count="3">
+          <div onClick="{{ it.pick }}" style="flex:1;height:26px;border-radius:7px;cursor:pointer;background:{{ it.stepBg }};box-shadow:{{ it.stepSh }}"></div>
+        </sc-for>
+      </div>
+      <div style="display:flex;gap:6px">
+        <sc-for list="{{ items }}" as="it" hint-placeholder-count="3">
+          <span style="flex:1;text-align:center;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;color:{{ it.stepInk }}">{{ it.label }}</span>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:240,&quot;height&quot;:80},&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;latch&quot;,&quot;slide&quot;,&quot;pills&quot;,&quot;chips&quot;,&quot;steps&quot;],&quot;default&quot;:&quot;chips&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;options&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;HARD,SOFT&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;value&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:0,&quot;tsType&quot;:&quot;number&quot;},&quot;color&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#e8a33d&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;onChange&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(i:number)=&gt;void&quot;}}">
+class Component extends DCLogic {
+  state = { i: null };
+  renderVals() {
+    const p = this.props, variant = p.variant ?? 'chips';
+    const opts = (p.options ?? 'A,B').split(',');
+    const a = p.color ?? '#e8a33d';
+    const cur = this.state.i ?? p.value ?? 0;
+    const set = (i) => { this.setState({ i }); p.onChange?.(i); };
+    const glow = `0 0 6px color-mix(in srgb, ${a} 60%, transparent)`;
+    const light = p.surface === 'light';
+    const lglow = `0 0 6px color-mix(in srgb, ${a} 55%, transparent), 0 1px 0 rgba(255,255,255,.5)`;
+    const onInk = light ? '#bf782a' : a, offInk = light ? 'rgba(0,0,0,.3)' : 'rgba(255,255,255,.35)';
+    const items = opts.map((label, i) => {
+      const on = i === cur, lit = i <= cur;
+      return {
+        label, pick: () => set(i),
+        tf: on ? 'translateY(4px)' : 'none',
+        tfSm: on ? 'translateY(2px)' : 'none',
+        keyShSm: on ? 'inset 0 2px 4px rgba(0,0,0,.75), 0 0 0 1px rgba(0,0,0,.7)' : 'inset 0 1px 0 rgba(255,255,255,.14), 0 2px 0 #1d2229, 0 5px 8px -3px rgba(0,0,0,.9), 0 0 0 1px rgba(0,0,0,.65)',
+        keyBg: on ? 'linear-gradient(180deg,#283039,#343d4a)' : 'linear-gradient(180deg,#4d586a,#343d4a)',
+        keySh: on ? 'inset 0 2px 5px rgba(0,0,0,.75), 0 0 0 1px rgba(0,0,0,.7)' : 'inset 0 1px 0 rgba(255,255,255,.14), 0 4px 0 #1d2229, 0 8px 12px -4px rgba(0,0,0,.9), 0 0 0 1px rgba(0,0,0,.65)',
+        lamp: on ? a : '#3a3d43', lampGlow: on ? `0 0 6px ${a}` : 'inset 0 1px 1px rgba(0,0,0,.7)',
+        ink: on ? '#eaf6f8' : '#b6bdc4',
+        pillInk: on ? '#eaf6f8' : 'rgba(255,255,255,.5)',
+        ring: on ? `inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px color-mix(in srgb, ${a} 55%, #000000), 0 6px 12px -6px rgba(0,0,0,.9)` : 'inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)',
+        chipRing: on ? `inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px color-mix(in srgb, ${a} 50%, #000000), 0 4px 8px -4px rgba(0,0,0,.9)` : 'inset 0 1px 0 rgba(255,255,255,.07), 0 0 0 1px rgba(0,0,0,.6), 0 4px 8px -4px rgba(0,0,0,.9)',
+        stepBg: lit ? `linear-gradient(180deg, color-mix(in srgb, ${a} 70%, #ffffff), ${a})` : 'linear-gradient(180deg,#3a4350,#282f39)',
+        stepSh: lit ? `0 0 6px ${a}, inset 0 1px 0 rgba(255,255,255,.3)` : 'inset 0 1px 0 rgba(255,255,255,.07), 0 4px 8px -4px rgba(0,0,0,.8)',
+        stepInk: on ? a : 'rgba(255,255,255,.4)',
+      };
+    });
+    return {
+      isLatch: variant === 'latch', isLatchSm: variant === 'latch-sm', isSlide: variant === 'slide', isPills: variant === 'pills', isChips: variant === 'chips', isSteps: variant === 'steps',
+      items,
+      label0: opts[0], label1: opts[1] ?? '',
+      ink0: cur === 0 ? onInk : offInk, ink1: cur === 1 ? onInk : offInk,
+      glow0: cur === 0 && !light ? glow : 'none', glow1: cur === 1 && !light ? glow : 'none',
+      puckL: cur === 1 ? '37px' : '3px',
+      puckSh: light ? 'inset 0 1px 0 rgba(255,255,255,.2), 0 1px 1px rgba(40,30,20,.35), 0 6px 10px -4px rgba(40,30,20,.4)' : '0 8px 14px -5px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.18), 0 0 0 1px rgba(0,0,0,.6)',
+      trackBg: light && p.track !== 'dark' ? 'linear-gradient(180deg,#b9b3a8,#cfc9bf)' : 'linear-gradient(180deg,#15171a,#23262b)',
+      trackSh: light && p.track !== 'dark' ? 'inset 0 2px 5px rgba(0,0,0,.35), inset 0 0 0 1px rgba(0,0,0,.12), 0 1px 0 rgba(255,255,255,.6)' : 'inset 0 2px 6px rgba(0,0,0,.85), 0 1px 0 rgba(255,255,255,.05)',
+      pick0: () => set(0), pick1: () => set(1), toggle: () => set(cur === 1 ? 0 : 1),
+    };
+  }
+}
+</script>
+</body>
+</html>

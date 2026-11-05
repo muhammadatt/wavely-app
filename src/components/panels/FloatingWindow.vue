@@ -8,6 +8,7 @@ import {
 import { currentPluginCopy, idForCopy, chainCopyNumber, isChainCopyId } from '../../composables/pluginCopies.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
+import { isSheetViewport, sheetGeometry, SHEET_MAX_WIDTH as SHEET_NARROW_PX } from '../../ui/windowSheet.js'
 import Icon from '../ui/Icon.vue'
 import { useEntitlements } from '../../composables/useEntitlements.js'
 import HelpOverlay from './HelpOverlay.vue'
@@ -199,6 +200,12 @@ const props = defineProps({
    */
   design: { type: String, default: 'classic' },
   /**
+   * Modula only: 'dark' (the steel chassis) | 'light' (a painted cream panel,
+   * VoxPressor's 2b). Light repaints the chassis, header and footer; the face
+   * draws its own controls for the surface it is told it sits on.
+   */
+  surface: { type: String, default: 'dark' },
+  /**
    * A `usePluginPresets` instance. Under Modula it puts the preset browser in
    * the header's centre column (classic windows slot PresetMenu themselves).
    */
@@ -369,7 +376,49 @@ const MIN_BODY_PX = 160
 const HEADER_PX = 56
 const FOOTER_PX = 68
 
-const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
+/**
+ * The LAYOUT viewport — what 100vw / 100dvh, `position: fixed` and the
+ * `compact:` media query measure — not window.innerWidth / innerHeight, which
+ * on a mobile browser are the VISUAL viewport and grow whenever the page is
+ * zoomed out (anything overflowing sideways is enough). Read through them, a
+ * 393 px phone could pass for a large screen: the window then stayed a
+ * floating desktop window sized for that height, with Preview and Apply below
+ * the bottom of the real screen (reproduced with innerHeight reading 900 on a
+ * 390 px tall phone: EQ's Apply at y = 853).
+ */
+function layoutViewport() {
+  const de = typeof document === 'undefined' ? null : document.documentElement
+  return {
+    w: de?.clientWidth || (typeof window === 'undefined' ? 1280 : window.innerWidth),
+    h: de?.clientHeight || (typeof window === 'undefined' ? 800 : window.innerHeight),
+  }
+}
+const viewportH = ref(layoutViewport().h)
+const viewportW = ref(layoutViewport().w)
+
+/**
+ * Phone mode — see `ui/windowSheet.js`. On a small viewport the window is a
+ * full-screen sheet, zoomed so the faceplate fits the width, with no drag and
+ * no resize. Its position and size are left untouched underneath, so a window
+ * opened on a phone and then met with a desktop viewport (a rotated tablet, a
+ * widened browser) floats again where it was.
+ *
+ * Sized against the faceplate's floor (`minWidth`, defaulting to its width) —
+ * the narrowest it is laid out to work at.
+ */
+const sheet = computed(() => isSheetViewport({
+  viewportW: viewportW.value, viewportH: viewportH.value, designW: minWidthPx.value,
+}))
+/**
+ * A sheet on a phone held upright. Its header gets two rows (see the CSS at
+ * the end): one row of name, ON and close could not fit at 360–393 px — a long
+ * name like SATURATION WORKBENCH pushed ON and close off the screen, and on
+ * the de-essers ON slid under DELTA and the preset arrows.
+ */
+const narrowSheet = computed(() => sheet.value && viewportW.value < SHEET_NARROW_PX)
+const sheetBox = computed(() => sheetGeometry({
+  viewportW: viewportW.value, viewportH: viewportH.value, designW: minWidthPx.value,
+}))
 
 /**
  * How tall the scrolling body may be.
@@ -383,10 +432,17 @@ const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
  * reason Apply moved down there is that it must never be the thing below the
  * fold, and that only holds if the body's ceiling accounts for it.
  */
-const bodyMaxHeight = computed(() => Math.max(
-  MIN_BODY_PX,
-  viewportH.value - pos.value.y - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0) - VIEWPORT_MARGIN,
-))
+// A sheet has no ceiling here: its height is CSS's (see the template) — the
+// frame is 100dvh, header and footer are fixed and the body takes the rest.
+// A JS-computed ceiling can disagree with 100dvh (a mobile browser's toolbars
+// moving), and then the body overflows and pushes the footer, and Apply with
+// it, off the bottom of the screen; flex layout cannot.
+const bodyMaxHeight = computed(() => sheet.value
+  ? null
+  : Math.max(
+    MIN_BODY_PX,
+    viewportH.value - pos.value.y - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0) - VIEWPORT_MARGIN,
+  ))
 
 const frameEl = ref(null)
 const bodyEl = ref(null)
@@ -507,7 +563,9 @@ onBeforeUnmount(() => {
  * the body's height honest, since it is measured from the top edge down.
  */
 function onViewportResize() {
-  viewportH.value = window.innerHeight
+  const { w, h } = layoutViewport()
+  viewportH.value = h
+  viewportW.value = w
   clampToViewport()
 }
 
@@ -519,6 +577,8 @@ function clampToViewport() {
 }
 
 function onDragStart(e) {
+  // A sheet is pinned to the screen; the header is just a header.
+  if (sheet.value) return
   dragging.value = true
   dragOffsetX = e.clientX - pos.value.x
   dragOffsetY = e.clientY - pos.value.y
@@ -626,16 +686,19 @@ function requestClose() {
   <div
     ref="frameEl"
     class="win-frame fixed rounded-[18px] overflow-hidden flex flex-col"
-    :class="{ 'is-frozen': frozen }"
+    :class="{ 'is-frozen': frozen, 'is-sheet': sheet }"
     :inert="frozen"
     :aria-busy="frozen || undefined"
     :data-chrome="chrome"
     :data-design="design"
+    :data-surface="design === 'modula' && surface === 'light' ? 'light' : undefined"
     role="dialog"
     :aria-label="label"
     tabindex="-1"
     :style="{
-      left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px',
+      ...(sheet
+        ? { left: 0, top: 0, width: '100vw', height: '100dvh' }
+        : { left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px' }),
       zIndex: z,
       // One value, read by the chassis, the faceplate and Apply. Passing the
       // hue as a custom property rather than composing each gradient in JS is
@@ -661,7 +724,7 @@ function requestClose() {
     -->
     <div
       class="win-header grid items-center touch-none h-14 shrink-0 pl-5 pr-[14px]"
-      :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
+      :class="[sheet ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab', { 'is-narrow': narrowSheet }]"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
@@ -820,11 +883,21 @@ function requestClose() {
       against the content itself — inside the scroller it would sit at the
       bottom of the scrolled content, which is the one place it is not needed.
     -->
-    <div class="win-face relative min-h-0 flex flex-col" :style="background ? { background } : null">
+    <div
+      class="win-face relative min-h-0 flex flex-col"
+      :class="{ 'flex-1': sheet }"
+      :style="[
+        background ? { background } : null,
+        // Only the faceplate is zoomed: the header and footer are flexible and
+        // stay full size, so close, ON and Apply keep finger-sized targets.
+        sheet ? { width: sheetBox.width + 'px', zoom: sheetBox.zoom } : null,
+      ]"
+    >
       <div
         ref="bodyEl"
         class="win-body min-h-0 overflow-y-auto"
-        :style="{ maxHeight: `${bodyMaxHeight}px` }"
+        :class="{ 'overflow-x-auto flex-1': sheet }"
+        :style="bodyMaxHeight == null ? null : { maxHeight: `${bodyMaxHeight}px` }"
         @scroll="updateOverflow"
       >
         <slot />
@@ -954,7 +1027,7 @@ function requestClose() {
       the thing it exists to do.
     -->
     <button
-      v-if="resizable"
+      v-if="resizable && !sheet"
       type="button"
       class="win-resize absolute flex items-end justify-end cursor-nwse-resize"
       style="width:22px;height:22px;right:3px;bottom:3px;touch-action:none"
@@ -1561,7 +1634,9 @@ function requestClose() {
   font: 600 12px var(--m-font-ui);
   box-shadow: var(--m-shadow-raised);
 }
-[data-design='modula'] .win-preview:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); }
+/* The ink too: the classic hover's near-white otherwise wins on specificity,
+   which on the light surface turned the label white. Same colour on steel. */
+[data-design='modula'] .win-preview:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); color: var(--m-ink); }
 [data-design='modula'] .win-preview--on { background: transparent; }
 .win-play-m { width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--m-ink); }
 .win-play-m.is-on { width: 9px; height: 9px; border: 0; border-radius: 1px; background: var(--m-accent); }
@@ -1576,9 +1651,92 @@ function requestClose() {
   box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(0, 0, 0, 0.55), 0 6px 12px -6px rgba(0, 0, 0, 0.9);
 }
 
+/* MODULA, LIGHT SURFACE: a painted cream panel (VoxPressor 2b). The inks and
+   the raised shadows turn warm-dark; Apply stays the light primary. */
+.win-frame[data-design='modula'][data-surface='light'] {
+  background: linear-gradient(180deg, #e6e2da, #cdc8be);
+  color: #1d2026;
+}
+[data-surface='light'] .win-header,
+[data-surface='light'] .win-footer {
+  --m-ink: #1d2026;
+  --m-ink-2: #3a3f47;
+  --m-ink-3: #41464e;
+  --m-ink-4: #555b64;
+  --m-shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 1px rgba(40, 30, 20, 0.28), 0 5px 9px -4px rgba(40, 30, 20, 0.35);
+}
+[data-surface='light'] .win-header { border-bottom-color: rgba(60, 50, 40, 0.22); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45); }
+[data-surface='light'] .win-footer { border-top-color: rgba(60, 50, 40, 0.22); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45); }
+[data-surface='light'] .win-brand-m { color: #1d2026; }
+/* The selection readout carries an inline dark-surface colour. */
+[data-surface='light'] .win-sel { color: #555b64 !important; }
+[data-surface='light'] .win-icon-btn { color: #3a3f47; box-shadow: var(--m-shadow-raised); }
+[data-surface='light'] .win-icon-btn:hover,
+[data-surface='light'] .win-icon-btn--on { background: rgba(0, 0, 0, 0.05); color: #1d2026; }
+[data-surface='light'] .win-rule--tall { background: rgba(60, 50, 40, 0.3); box-shadow: 1px 0 0 rgba(255, 255, 255, 0.5); }
+[data-surface='light'] .win-preview:hover:not(:disabled) { background: rgba(0, 0, 0, 0.05); }
+[data-surface='light'] .win-selectall { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18); }
+[data-surface='light'] .win-apply { box-shadow: inset 0 1px 0 #ffffff, 0 1px 1px rgba(40, 30, 20, 0.3), 0 5px 9px -4px rgba(40, 30, 20, 0.35); }
+
 @keyframes pluginBounceIn {
   0% { opacity: 0; transform: scale(0.94) translateY(8px); }
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 .win-frame.is-frozen { filter: saturate(.6) brightness(.85); transition: filter .15s; }
+
+/* Phone sheet (see ui/windowSheet.js): the whole screen, so no rounded
+   corners and no drop shadow to read as a floating window. Last and
+   important, to outrank the radius utility and the chassis variants. */
+.win-frame.is-sheet {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Narrow sheet header — a phone held upright (see narrowSheet). Two rows:
+   identity on the left and ON + close on the right of the first, so those two
+   are always on screen; the monitoring / preset / chain group (and any
+   plugin's own header-center controls) on a second row of its own, centred,
+   scrolling sideways only as a last resort. Overrides both the classic grid
+   and Modula's flex row. */
+.win-header.is-narrow {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 48px auto;
+  height: auto !important;
+  gap: 0 8px;
+  padding: 0 10px 0 14px !important;
+}
+.win-header.is-narrow > div:nth-of-type(1) {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+.win-header.is-narrow > div:nth-of-type(1) > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.win-header.is-narrow > div:nth-of-type(1) > button {
+  flex: none;
+}
+.win-header.is-narrow > div:nth-of-type(2) {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-content: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+}
+.win-header.is-narrow > div:nth-of-type(2):empty {
+  display: none;
+}
+.win-header.is-narrow > div:nth-of-type(3) {
+  grid-column: 2;
+  grid-row: 1;
+}
+.win-header.is-narrow .win-presets-m {
+  flex: 0 1 200px;
+  min-width: 150px;
+}
 </style>

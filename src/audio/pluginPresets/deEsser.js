@@ -1,5 +1,5 @@
 /**
- * HF Softener presets.
+ * De-Esser presets.
  *
  * The panel's controls and nothing else: Duck and EQ (the panel's Amount and
  * Split are a view over this pair; Shape is pinned to shelf), Guard,
@@ -16,15 +16,15 @@
  */
 
 import { definePluginPresets } from './store.js'
-import { HF_SOFTENER_DEFAULTS } from '../deEsserParams.js'
+import { DE_ESSER_DEFAULTS } from '../deEsserParams.js'
 import {
   AIR_MAKEUP_MAX_DB, BAND_HZ_MIN, BAND_HZ_MAX, DETECT_HZ_MIN, DETECT_HZ_MAX, DETECT_HI_MIN, DETECT_HI_MAX,
 } from '../deEsserProcessor.js'
 import { SOFTEN_MAX } from '../deEsserSoftenStage.js'
 
-export const HF_SOFTENER_PRESET_PLUGIN = 'hf-softener'
+export const DE_ESSER_PRESET_PLUGIN = 'hf-softener'
 
-export const HF_SOFTENER_PARAM_KEYS = [
+export const DE_ESSER_PARAM_KEYS = [
   'duck', 'amount', 'guard', 'band', 'detect', 'detectHigh', 'air', 'comp', 'soften',
 ]
 
@@ -35,7 +35,7 @@ function clamp(v, lo, hi, fallback) {
 }
 
 function normalize(p) {
-  const d = HF_SOFTENER_DEFAULTS
+  const d = DE_ESSER_DEFAULTS
   return {
     duck: clamp(p.duck, 0, 100, d.duck),
     amount: clamp(p.amount, 0, 100, d.amount),
@@ -49,22 +49,22 @@ function normalize(p) {
   }
 }
 
-export const HF_SOFTENER_PRESETS = [
+export const DE_ESSER_PRESETS = [
   {
     id: 'factory:default',
     name: 'Default',
     description: 'The panel as it opens: Duck 40 / EQ 20 on the shelf shape, Guard 50, listening from 4 kHz and cutting from 4.5.',
-    params: Object.fromEntries(HF_SOFTENER_PARAM_KEYS.map(k => [k, HF_SOFTENER_DEFAULTS[k]])),
+    params: Object.fromEntries(DE_ESSER_PARAM_KEYS.map(k => [k, DE_ESSER_DEFAULTS[k]])),
   },
 ]
 
-export function registerHfSoftenerPresets() {
+export function registerDeEsserPresets() {
   return definePluginPresets({
-    pluginId: HF_SOFTENER_PRESET_PLUGIN,
-    paramKeys: HF_SOFTENER_PARAM_KEYS,
-    factory: HF_SOFTENER_PRESETS,
+    pluginId: DE_ESSER_PRESET_PLUGIN,
+    paramKeys: DE_ESSER_PARAM_KEYS,
+    factory: DE_ESSER_PRESETS,
     normalize,
   })
 }
 
-registerHfSoftenerPresets()
+registerDeEsserPresets()

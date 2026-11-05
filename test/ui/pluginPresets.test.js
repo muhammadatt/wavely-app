@@ -664,29 +664,29 @@ test('Air Boost presets: the panel defaults light Default, and stored values are
   assert.equal(pickParams(AIR_BOOST_PRESET_PLUGIN, { air: 3, output: -40 }).output, -12)
 })
 
-test('HF Softener presets: the panel defaults light Default; the pinned and measured values stay out', async () => {
-  const { HF_SOFTENER_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+test('De-Esser presets: the panel defaults light Default; the pinned and measured values stay out', async () => {
+  const { DE_ESSER_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
   registerPluginPresets()
-  const { HF_SOFTENER_DEFAULTS } = await import('../../src/audio/deEsserParams.js')
-  assert.equal(matchPreset(HF_SOFTENER_PRESET_PLUGIN, { ...HF_SOFTENER_DEFAULTS }), 'factory:default')
-  const picked = pickParams(HF_SOFTENER_PRESET_PLUGIN, { ...HF_SOFTENER_DEFAULTS, airMode: 'static', compAir: 3 })
+  const { DE_ESSER_DEFAULTS } = await import('../../src/audio/deEsserParams.js')
+  assert.equal(matchPreset(DE_ESSER_PRESET_PLUGIN, { ...DE_ESSER_DEFAULTS }), 'factory:default')
+  const picked = pickParams(DE_ESSER_PRESET_PLUGIN, { ...DE_ESSER_DEFAULTS, airMode: 'static', compAir: 3 })
   for (const k of ['airMode', 'compAir', 'levelOffset', 'resoAmount', 'context', 'rotator', 'release']) {
     assert.equal(k in picked, false, k)
   }
-  const p = pickParams(HF_SOFTENER_PRESET_PLUGIN, { band: 9000, detect: 100, shape: 'band' })
+  const p = pickParams(DE_ESSER_PRESET_PLUGIN, { band: 9000, detect: 100, shape: 'band' })
   assert.equal(p.band, 6000)
   assert.equal(p.detect, 3000)
   // Shape is pinned to shelf: a preset can neither carry nor set it.
   assert.equal('shape' in p, false)
-  assert.equal(HF_SOFTENER_DEFAULTS.shape, 'shelf')
+  assert.equal(DE_ESSER_DEFAULTS.shape, 'shelf')
 })
 
-test('HF Softener presets: a stored Plosives (moved to the Plosive Tamer) is dropped', async () => {
-  const { HF_SOFTENER_PRESET_PLUGIN, registerPluginPresets, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+test('De-Esser presets: a stored Plosives (moved to the Plosive Tamer) is dropped', async () => {
+  const { DE_ESSER_PRESET_PLUGIN, registerPluginPresets, pickParams } = await import('../../src/audio/pluginPresets/index.js')
   registerPluginPresets()
-  const { HF_SOFTENER_DEFAULTS } = await import('../../src/audio/deEsserParams.js')
-  assert.equal('plosives' in pickParams(HF_SOFTENER_PRESET_PLUGIN, { ...HF_SOFTENER_DEFAULTS, plosives: true }), false)
-  assert.equal('plosives' in HF_SOFTENER_DEFAULTS, false)
+  const { DE_ESSER_DEFAULTS } = await import('../../src/audio/deEsserParams.js')
+  assert.equal('plosives' in pickParams(DE_ESSER_PRESET_PLUGIN, { ...DE_ESSER_DEFAULTS, plosives: true }), false)
+  assert.equal('plosives' in DE_ESSER_DEFAULTS, false)
 })
 
 test('Plosive Tamer presets: the panel defaults light Default; the voice level stays out; values clamp', async () => {

@@ -1,6 +1,6 @@
 <script setup>
 /**
- * The HF Softener's frequency strip: the input's spectrum and the DETECTOR's
+ * The De-Esser's frequency strip: the input's spectrum and the DETECTOR's
  * band - what it listens to - as a shaded range with a LOW and a HIGH handle,
  * plus a LIVE / MONITOR toggle: MONITOR plays only that band.
  *

@@ -7,6 +7,7 @@
  * `bars` is `[{ o, p }]`: `o` the original envelope, `p` the processed one,
  * both 0–1. Where `p < o` the difference is drawn as the removed rim.
  */
+import { localPoint } from '../../ui/pointerLocal.js'
 import { computed, ref } from 'vue'
 
 const props = defineProps({
@@ -23,13 +24,15 @@ const emit = defineEmits(['update:position'])
 
 const cut = computed(() => (props.position == null ? -1 : props.position * props.bars.length))
 const scrubbing = ref(false)
-let rect = null
+let el = null
 function at(e) {
-  if (!rect) return
-  emit('update:position', Math.max(0, Math.min(0.9999, (e.clientX - rect.left - 10) / (rect.width - 20))))
+  if (!el) return
+  // Layout pixels, the units the 10 px inset is in (see ui/pointerLocal.js).
+  const { x } = localPoint(e, el)
+  emit('update:position', Math.max(0, Math.min(0.9999, (x - 10) / (el.offsetWidth - 20))))
 }
 function down(e) {
-  rect = e.currentTarget.getBoundingClientRect()
+  el = e.currentTarget
   scrubbing.value = true
   e.currentTarget.setPointerCapture?.(e.pointerId)
   at(e)

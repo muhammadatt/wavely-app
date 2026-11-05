@@ -53,7 +53,7 @@ export class HFLimiterKernel {
       shape: p.shape,
       tailMs: p.tailMs,
       transientDb: p.transientDb,
-      // HF Softener's Soften rides this kernel as a post-stage and gives the
+      // De-Esser's Soften rides this kernel as a post-stage and gives the
       // transient detector its own band, slope and gate. The HF Limiter itself
       // sets none of them, and unset they are the stage's defaults, bit for bit.
       transientCornerHz: p.transientCornerHz,

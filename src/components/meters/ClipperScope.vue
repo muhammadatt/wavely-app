@@ -1,4 +1,5 @@
 <script setup>
+import { localPoint } from '../../ui/pointerLocal.js'
 import { computed, ref } from 'vue'
 import { useMeterFrame } from './ballistics.js'
 import { crossingRuns } from './clipperRuns.js'
@@ -714,10 +715,9 @@ function onPointerDown(e) {
   // an arbitrary gate. Adaptive has nothing to offer here: its threshold is a
   // measurement plus an offset, and there is no measurement yet.
   if (isIdle.value) {
-    const rect = canvasEl.value?.getBoundingClientRect()
-    if (!rect) return
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    if (!canvasEl.value) return
+    // Layout pixels, the units idleHit is drawn in (see ui/pointerLocal.js).
+    const { x, y } = localPoint(e, canvasEl.value)
     if (
       x >= idleHit.x && x <= idleHit.x + idleHit.w &&
       y >= idleHit.y && y <= idleHit.y + idleHit.h
@@ -760,7 +760,7 @@ function onPointerUp(e) {
   >
     <canvas
       ref="canvasEl"
-      class="block w-full h-full"
+      class="block w-full h-full touch-none"
       :style="{ cursor: isIdle && !isFixed ? 'pointer' : 'ns-resize' }"
       :aria-label="title"
       role="img"
