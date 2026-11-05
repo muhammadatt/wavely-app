@@ -538,6 +538,29 @@ try {
       })
       if (!sheet.isSheet) why.push('plugin did not open as a sheet; ')
       if (!sheet.applyOnScreen) why.push('Apply is off screen in the sheet; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
+
+      // ⚠ A ZOOMED-OUT PAGE. On a mobile browser innerWidth / innerHeight are
+      // the VISUAL viewport and grow when the page zooms out (anything
+      // overflowing sideways does it): an iPhone 16 read 701 x 1518. Sized from
+      // them, EQ stayed a floating desktop window with Apply off the screen.
+      // The sheet has to follow the layout viewport, so the visual one is made
+      // to lie here and EQ (narrow enough to float on a wide screen) must
+      // still open as a sheet.
+      await pp.evaluate(() => {
+        Object.defineProperty(window, 'innerWidth', { get: () => 1400, configurable: true })
+        Object.defineProperty(window, 'innerHeight', { get: () => 900, configurable: true })
+      })
+      await pp.keyboard.press('Control+k'); await pp.waitForTimeout(250)
+      await pp.keyboard.type('EQ'); await pp.waitForTimeout(400)
+      await pp.keyboard.press('Enter'); await pp.waitForTimeout(900)
+      const zoomed = await pp.evaluate(() => {
+        const f = document.querySelector('.win-frame')
+        const a = f?.querySelector('.win-apply')?.getBoundingClientRect()
+        const de = document.documentElement
+        return { isSheet: !!f?.classList.contains('is-sheet'), applyOnScreen: !!a && a.bottom <= de.clientHeight && a.right <= de.clientWidth }
+      })
+      if (!zoomed.isSheet || !zoomed.applyOnScreen) why.push('with the page zoomed out a plugin floated with Apply off screen; ')
     } catch (e) {
       why.push(`threw: ${e.message.split('\n')[0]}; `)
     } finally {

@@ -370,8 +370,25 @@ const MIN_BODY_PX = 160
 const HEADER_PX = 56
 const FOOTER_PX = 68
 
-const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
-const viewportW = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+/**
+ * The LAYOUT viewport — what 100vw / 100dvh, `position: fixed` and the
+ * `compact:` media query measure — not window.innerWidth / innerHeight, which
+ * on a mobile browser are the VISUAL viewport and grow whenever the page is
+ * zoomed out (anything overflowing sideways is enough). Read through them, a
+ * 393 px phone could pass for a large screen: the window then stayed a
+ * floating desktop window sized for that height, with Preview and Apply below
+ * the bottom of the real screen (reproduced with innerHeight reading 900 on a
+ * 390 px tall phone: EQ's Apply at y = 853).
+ */
+function layoutViewport() {
+  const de = typeof document === 'undefined' ? null : document.documentElement
+  return {
+    w: de?.clientWidth || (typeof window === 'undefined' ? 1280 : window.innerWidth),
+    h: de?.clientHeight || (typeof window === 'undefined' ? 800 : window.innerHeight),
+  }
+}
+const viewportH = ref(layoutViewport().h)
+const viewportW = ref(layoutViewport().w)
 
 /**
  * Phone mode — see `ui/windowSheet.js`. On a small viewport the window is a
@@ -402,11 +419,13 @@ const sheetBox = computed(() => sheetGeometry({
  * reason Apply moved down there is that it must never be the thing below the
  * fold, and that only holds if the body's ceiling accounts for it.
  */
+// A sheet has no ceiling here: its height is CSS's (see the template) — the
+// frame is 100dvh, header and footer are fixed and the body takes the rest.
+// A JS-computed ceiling can disagree with 100dvh (a mobile browser's toolbars
+// moving), and then the body overflows and pushes the footer, and Apply with
+// it, off the bottom of the screen; flex layout cannot.
 const bodyMaxHeight = computed(() => sheet.value
-  // A sheet is the whole screen: no top offset, no margin, no floor — a floor
-  // would push the footer, and Apply with it, off the bottom. Divided by the
-  // zoom because the body is measured inside the zoomed faceplate.
-  ? (viewportH.value - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0)) / sheetBox.value.zoom
+  ? null
   : Math.max(
     MIN_BODY_PX,
     viewportH.value - pos.value.y - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0) - VIEWPORT_MARGIN,
@@ -531,8 +550,9 @@ onBeforeUnmount(() => {
  * the body's height honest, since it is measured from the top edge down.
  */
 function onViewportResize() {
-  viewportH.value = window.innerHeight
-  viewportW.value = window.innerWidth
+  const { w, h } = layoutViewport()
+  viewportH.value = h
+  viewportW.value = w
   clampToViewport()
 }
 
@@ -862,8 +882,8 @@ function requestClose() {
       <div
         ref="bodyEl"
         class="win-body min-h-0 overflow-y-auto"
-        :class="{ 'overflow-x-auto': sheet }"
-        :style="{ maxHeight: `${bodyMaxHeight}px` }"
+        :class="{ 'overflow-x-auto flex-1': sheet }"
+        :style="bodyMaxHeight == null ? null : { maxHeight: `${bodyMaxHeight}px` }"
         @scroll="updateOverflow"
       >
         <slot />
