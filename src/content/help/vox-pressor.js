@@ -1,57 +1,61 @@
 export default {
-  summary: 'A 1176 trims the voice peaks, then an LA-2A levels the voice — both listening through a voice detector',
+  summary: 'A vocal dynamics chain in one panel: a 1176 trims the peaks, an LA-2A levels the voice, a de-esser cleans up, a parallel copy adds density',
 
   whenToUse: [
     'Narration or dialogue that jumps between quiet and loud',
     'A take whose loudest syllables and plosives stick out',
-    'You want the classic 1176-into-LA-2A vocal chain without staging two compressors by hand',
+    'You want the classic 1176-into-LA-2A vocal chain without staging the compressors by hand',
   ],
 
   controls: [
     {
-      label: 'Peaks',
-      text: 'How hard the 1176 catches the loudest peaks, 0–10: about that many dB off them on typical narration, at any recording level. A peakier voice gives up more; the note under it says what it took on this file. 0 takes the stage out',
+      label: 'Peak reduction',
+      text: 'How hard the 1176 catches the loudest peaks, 0–100: every 10 is about 1 dB off them on typical narration, at any recording level. The ring is green while the stage leaves the voice alone, amber once it starts touching it and red when it is compressing the voice itself. 0 takes the stage out',
     },
     {
-      label: 'Speed',
-      text: 'How fast the 1176 grabs and lets go. AUTO (the default) lets go slowly enough for this voice\'s pitch that the gain does not ripple on every cycle — a low voice gets a slower release. GENTLE is the cleanest and catches the least; FAST grabs every onset and can distort low voices. The ripple note under Peaks turns amber when it is distorting',
+      label: 'Attack / release',
+      text: 'How fast the 1176 grabs and lets go: AUTO (the default) lets go slowly enough for this voice\'s pitch that the gain does not ripple; NORMAL, FAST and FASTER are fixed timings, faster catching more and risking ripple on low voices. The down arrow steps through them. It also times the parallel copy when Density uses the 1176',
     },
     {
-      label: 'Body',
-      text: 'The LA-2A\'s Peak Reduction, aligned the same way. The note under it says how many dB of average leveling it does on the voice. 0 takes the stage out',
+      label: 'Knee',
+      text: 'SOFT (4:1, the default) is a gentle peak compressor; HARD (12:1) is a limiter that holds the loudest peaks down hard',
+    },
+    {
+      label: 'Body leveler',
+      text: 'How hard the LA-2A levels the voice, 0–100. Its ring turns amber past about 4 dB of average leveling and red past 6. 0 takes the stage out',
     },
     {
       label: 'De-ess',
-      text: 'The De-Esser after the compressors: takes down the sibilance they brought up. It listens at the level the compressors hand it, not the source\'s. 0 takes the stage out',
-    },
-    {
-      label: 'Parallel',
-      text: 'Parallel compression: a fast 4:1 1176 copy blended under the voice. The loudest peaks stay where they were and the quieter parts come up, so the voice gets denser and louder. Its release follows the voice\'s pitch, so it does not ripple a low voice. 0 takes the stage out',
+      text: 'Amount takes down the sibilance the compressors brought up. Band moves it between a wide-band turn-down of the whole "s" (keeps its tone) and a split-band cut of the top end only. 0 takes the stage out',
     },
     {
       label: 'Density',
-      text: 'The Cambridge Inflator, anchored at the source\'s peak: lifts the body of the voice under the same peak, with odd harmonics on the loudest syllables. This is the knob that adds loudness. 0 takes the stage out',
+      text: 'Parallel compression: a compressed copy blended under the voice, so the loudest peaks stay put and the quieter parts come up. Mix sets how much of the copy is blended in (0 takes it out), Drive how hard the copy is compressed, and the switch picks a smooth LA-2A copy (the default) or a fast 1176 copy',
     },
     {
-      label: 'Listen',
-      text: 'Hear what each compressor listens to instead of the output: rumble turned down for both, and for the LA-2A plosives and sibilance too',
+      label: 'Lo Detail',
+      text: 'The Cambridge Inflator, anchored at the source\'s peak: lifts the body of the voice under the same peak, with odd harmonics on the loudest syllables. Off by default',
     },
     {
-      label: 'Output',
-      text: 'Trim after everything. Makeup is automatic: the output peak goes back to where the source peak was',
+      label: 'Output level',
+      text: 'Where the output peak lands: ORIG (the source\'s own peak), −1 dBFS (podcast / streaming) or −3 dBFS (ACX). Makeup is automatic, so there is no output trim',
+    },
+    {
+      label: 'Meter',
+      text: 'The needle shows one stage\'s gain reduction at a time: pick PEAK, BODY or DENSITY on the drum, or click a stage\'s title or area. The line under it says what that stage did on this file: how much it took off the loudest peaks and the voice, the average leveling, or the parallel copy\'s makeup',
     },
   ],
 
   steps: [
-    'Select the passage and leave Peaks and Body where they open',
-    'Raise Peaks until the loudest syllables stop jumping out. If the note under it turns amber, the 1176 is reaching into the voice',
-    'Raise Body until the level stops wandering. Expect it louder than bypass: what the compressors take off the peaks comes back as level',
+    'Select the passage and leave the knobs where they open',
+    'Raise Peak reduction until the loudest syllables stop jumping out, keeping the knob in the green',
+    'Raise Body leveler until the level stops wandering. Expect it louder than bypass: what the compressors take off the peaks comes back as level',
+    'Add Density to taste, and pick the Output level your delivery needs',
   ],
 
   notes: [
-    'The output peak lands where the source peak was, so the voice comes out louder by roughly what Peaks took (about 3 dB at the default on narration)',
-    'Peaks always goes where you turn it. When it starts lowering the voice itself, not just the peaks, the note under it turns amber and says by how much',
-    'The output never goes over the source\'s peak: a lookahead limiter after each stage that can add level holds it with a gain',
+    'The output never goes over the chosen ceiling: each stage makes up its own level and a lookahead limiter holds the peak',
+    'The readings under the meter are measured on the selection (up to 30 s while you adjust). "Remeasuring…" shows while a change is being measured',
     'Development stage: Air is not built yet',
   ],
 }

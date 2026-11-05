@@ -1,4 +1,5 @@
 <script setup>
+import { nextTick, ref } from 'vue'
 /**
  * VOXPRESSOR KNEE KEYS — two square keys drawn with their transfer curves,
  * HARD and SOFT (docs/design/voxpressor, "VoxKnee"). The lit key is pressed in
@@ -24,18 +25,32 @@ const emit = defineEmits(['update:modelValue'])
 function pick(v) {
   if (!props.disabled && v !== props.modelValue) emit('update:modelValue', v)
 }
-function onKey(e) {
+const keys = ref([])
+/**
+ * Arrow keys move the selection AND the focus together, as a radio group
+ * should: the newly checked key takes focus (it is now the one with tabindex
+ * 0), so Space re-selects it rather than the old key, and a screen reader
+ * follows the selection.
+ */
+async function onKey(e) {
+  if (props.disabled) return
   const i = props.options.findIndex(o => o.value === props.modelValue)
   const n = props.options.length
-  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); pick(props.options[(i + 1) % n].value) }
-  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); pick(props.options[(i - 1 + n) % n].value) }
+  let next = -1
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % n
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + n) % n
+  if (next < 0) return
+  e.preventDefault()
+  pick(props.options[next].value)
+  await nextTick()
+  keys.value[next]?.focus()
 }
 </script>
 
 <template>
   <div class="vk" :class="{ 'is-light': surface === 'light', 'is-disabled': disabled }" role="radiogroup" :aria-label="ariaLabel || undefined" @keydown="onKey">
     <button
-      v-for="o in options" :key="o.value" type="button" role="radio"
+      v-for="o in options" :key="o.value" ref="keys" type="button" role="radio"
       class="vk-key m-focusable" :class="{ 'is-on': o.value === modelValue }"
       :aria-checked="String(o.value === modelValue)" :tabindex="o.value === modelValue ? 0 : -1"
       :title="o.title" :aria-label="o.label || o.title" :disabled="disabled" @click="pick(o.value)"
