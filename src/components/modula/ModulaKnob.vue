@@ -67,7 +67,8 @@ const props = defineProps({
   /**
    * Colour bands round the tick ring (ticks variant): [{ from, to, color }] in
    * the knob's own units. A tick inside a band takes its colour — lit, as the
-   * value reaches it, dim ahead of it — so the ring shows where the travel is
+   * value reaches it, dimmed ahead of it (60 % of the zone colour: at 38 % amber and red read as
+   * one muddy brown on the dark well; owner, November 2026) — so the ring shows where the travel is
    * meant to stop. Outside every band a tick is as without zones.
    */
   zones: { type: Array, default: null },
@@ -193,7 +194,7 @@ const ticks = computed(() => {
     const c = zone ?? props.color
     return {
       deg: 45 + 270 * f, long: i % 5 === 0, on,
-      bg: on ? c : (zone ? `color-mix(in srgb, ${zone} 38%, transparent)` : 'rgba(255,255,255,.13)'),
+      bg: on ? c : (zone ? `color-mix(in srgb, ${zone} 60%, transparent)` : 'rgba(255,255,255,.13)'),
       glow: on ? `0 0 4px ${c}` : 'none',
     }
   })
