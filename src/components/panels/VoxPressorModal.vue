@@ -700,6 +700,8 @@ async function applyAndClose() {
 .vp-title:focus-visible { outline: 1px solid var(--vp-title-lit); outline-offset: 1px; }
 .vp-title.is-lit { color: var(--vp-title-lit); }
 .vp-cap { font: 500 9px/1 var(--m-font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--vp-cap); white-space: nowrap; }
+/* Letter-spacing trails the last letter too; take it back so centred captions are centred. */
+.vp-cap, .vp-fold :deep(.pg-name), .vp-fold :deep(.pg-title--above) { margin-right: -.14em; }
 .vp-ctl { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 7px; }
 .vp-ctl-gap { margin-top: 8px; }
 .vp-knob-row { height: 84px; display: flex; align-items: center; justify-content: center; gap: 18px; }

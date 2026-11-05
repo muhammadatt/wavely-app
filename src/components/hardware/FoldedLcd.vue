@@ -117,7 +117,7 @@ function onKeyDown(e) {
       @click="expand"
     ><span class="pg-name">{{ name.toUpperCase() }}</span> <span class="pg-value">{{ valueText }}</span></button>
 
-    <div v-else class="pg-open" :class="{ 'pg-open--above': labelPosition === 'above' }" role="group" :aria-label="name">
+    <div v-else class="pg-open" :class="{ 'pg-open--above': labelPosition === 'above', 'pg-open--stacked': stacked }" role="group" :aria-label="name">
       <div class="pg-gutter">
         <button ref="closeBtn" type="button" class="pg-close" :aria-label="`Hide ${name}`" title="Hide" @click="collapse">
           <svg width="8" height="8" viewBox="0 0 10 10" aria-hidden="true">
@@ -189,6 +189,11 @@ function onKeyDown(e) {
    (LcdSpinner: a 50 x 26 display, then 3 + 13 px of arrows) in its own small
    readout, the one the one-line version uses. */
 .pg-stacked { padding: 0; background: none; border-radius: 0; }
+/* The LCD sits 8 px left of its column's centre (its arrows hang off its right
+   side), and the name follows it. Stacked, both states shift right by that 8 px
+   so the name and value are centred on the slot; the arrows and the ✕ hang off
+   either side. */
+.pg-stacked, .pg-open--stacked { transform: translateX(8px); }
 .pg-stacked:hover { background: none; }
 .pg-stack-row { display: flex; align-items: flex-start; gap: 3px; }
 .pg-stack-spin { width: 13px; flex: none; }
