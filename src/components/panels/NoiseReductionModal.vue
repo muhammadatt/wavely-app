@@ -59,8 +59,7 @@ const statusLine = computed(() => {
   if (processing.value) return 'Processing on the server…'
   if (!hasSelection.value) return 'Select the audio to clean up, or Select all.'
   const { start, end } = state.selection
-  return `Process cleans the ${duration(end - start)} selection on the server and replaces it. ` +
-    'Listen in the editor afterwards — Undo puts the original back.'
+  return `Process cleans the ${duration(end - start)} selection on the server and replaces it; listen to the result in the editor afterwards.`
 })
 
 function formatLimit(v) {
@@ -85,6 +84,7 @@ async function applyAndClose() {
     design="modula"
     brand-lead="NOISE REDUCTION"
     :show-engage="false"
+    offline
     show-apply
     apply-label="Process selection"
     apply-label-short="Process"

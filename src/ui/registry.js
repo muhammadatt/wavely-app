@@ -120,6 +120,14 @@ const ALL_CATEGORIES = [
  *   feature   optional plan feature (src/auth/plans.js) the operation's Apply
  *             needs. The row stays open to everyone — preview is free — and
  *             shows a PRO tag while the user's plan lacks it
+ *   offline   true for an OFFLINE process: no live preview, one button that
+ *             processes the selection, Undo to revert. Most of the app is
+ *             real-time, so the few that are not say so wherever they appear —
+ *             an OFFLINE tag on their row in every list and palette, and a
+ *             distinct window (FloatingWindow `offline`) — rather than being
+ *             moved to a menu of their own, which would pull them out of the
+ *             category they belong to. Pairs with the plan feature's own
+ *             `offline` flag (test/ui/offlineOperations.test.js).
  *   action    required for 'immediate'. Receives the editor state object rather
  *             than calling useEditorState() here — this module is imported by
  *             the state's own consumers, and reaching back into it would make
@@ -317,7 +325,8 @@ const ALL_OPERATIONS = [
     requires: 'selection',
     feature: 'autoLevel',
     // An offline process (Level, then Undo if it is wrong) with no live node,
-    // so it cannot take a Plugin Chain slot.
+    // so it cannot take a Plugin Chain slot. See OFFLINE below.
+    offline: true,
     surface: 'window',
     component: AutoLevelModal,
   },
@@ -521,6 +530,7 @@ const ALL_OPERATIONS = [
     keywords: ['denoise', 'noise', 'hiss', 'background', 'room tone', 'deepfilternet', 'df3', 'rnnoise', 'clean'],
     requires: 'selection',
     feature: 'noiseReduction',
+    offline: true,
     surface: 'window',
     component: NoiseReductionModal,
   },

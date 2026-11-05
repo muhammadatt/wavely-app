@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { groupedOperations, searchOperations } from '../../ui/registry.js'
 import Icon from './Icon.vue'
 import PlanBadge from './PlanBadge.vue'
+import OfflineBadge from './OfflineBadge.vue'
 
 /**
  * The searchable, grouped list of operations in a category.
@@ -76,7 +77,13 @@ function select(op) {
         </div>
         <div class="flex-1 min-w-0">
           <div class="text-[13px] font-bold text-text truncate">{{ op.label }}</div>
-          <div class="text-[11px] font-medium mt-[1px] text-text-muted truncate">{{ op.desc }}</div>
+          <!-- The OFFLINE tag leads the description rather than sitting beside
+               the PRO tag: in a 300 px rail, two tags there cut the name to
+               "Noise Re…". -->
+          <div class="flex items-center gap-[6px] mt-[2px] min-w-0">
+            <OfflineBadge :show="!!op.offline" />
+            <div class="text-[11px] font-medium text-text-muted truncate">{{ op.desc }}</div>
+          </div>
         </div>
         <PlanBadge :feature="op.feature" />
         <!-- A chevron promises "this opens something", so the verbs that just

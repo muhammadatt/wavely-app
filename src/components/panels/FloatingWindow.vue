@@ -160,6 +160,16 @@ const props = defineProps({
   // live in the playback chain. A disabled control with a tooltip teaches that
   // real-time tuning exists; omitting it teaches nothing.
   showPreview: { type: Boolean, default: false },
+  /**
+   * An OFFLINE process (registry `offline`): nothing here runs in real time.
+   * The header carries an OFFLINE chip beside the name, and the footer puts a
+   * plain statement of the contract — not real-time, Undo reverts — where a
+   * real-time plugin has its Preview, with an hourglass on the action button.
+   * Most of the app's windows ARE real-time, so the few that are not have to
+   * say so at a glance rather than reading as broken real-time ones (no ON
+   * lamp, no Preview). Pass show-engage false and no Preview alongside it.
+   */
+  offline: { type: Boolean, default: false },
   previewable: { type: Boolean, default: true },
   previewing: { type: Boolean, default: false },
   previewHint: {
@@ -756,6 +766,14 @@ function requestClose() {
         <span v-else style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
           {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.85)">{{ brandTail }}</span></template>
         </span>
+        <span
+          v-if="offline"
+          class="win-offline"
+          title="Offline process — not real-time. Nothing is heard until you process the selection; Undo reverts it"
+        >
+          <Icon name="offline" :size="11" :stroke-width="2.25" />
+          OFFLINE
+        </span>
         <!-- The short rule, not `--tall`: it is dividing a 13 px word from an
              icon, where the tall one divides two 30 px chips. -->
         <span v-if="help && !modula" class="win-rule"></span>
@@ -967,6 +985,7 @@ function requestClose() {
       </button>
 
       <div class="win-actions flex items-center gap-2">
+        <span v-if="offline" class="win-offline-note">Not real-time · Undo reverts</span>
         <!--
           The title sits on the WRAPPER, not on the button.
 
@@ -1009,7 +1028,7 @@ function requestClose() {
           :title="applyTitle"
           @click="onApplyClick"
         >
-          <Icon :name="applyIcon" :size="15" :stroke-width="2.5" />
+          <Icon :name="offline ? 'offline' : applyIcon" :size="15" :stroke-width="2.5" />
           <span class="win-btn-label">{{ inChain ? 'Applies with the chain' : applyLabel }}</span>
           <span class="win-btn-label-short">{{ inChain ? 'In chain' : applyLabelShort }}</span>
           <span v-if="applyLocked && !inChain" class="win-apply-pro">PRO</span>
@@ -1499,6 +1518,10 @@ function requestClose() {
   .win-apply .win-btn-label-short {
     display: inline;
   }
+  /* The header chip still says it; the footer needs the room for Apply. */
+  .win-offline-note {
+    display: none;
+  }
 }
 
 /* ── MODULA ─────────────────────────────────────────────────────────────────
@@ -1545,6 +1568,28 @@ function requestClose() {
   font: 800 13px/1 var(--m-font-ui);
   letter-spacing: 0.14em;
   color: color-mix(in srgb, var(--face, #e8a33d) 20%, #fff);
+}
+/* OFFLINE chip and footer note: a cool outline, never filled, so it reads as
+   what kind of plugin this is rather than as a control or a plan tag. */
+.win-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font: 700 9px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.12em;
+  color: #9fc4e8;
+  box-shadow: inset 0 0 0 1px rgba(159, 196, 232, 0.45);
+  white-space: nowrap;
+  cursor: default;
+}
+.win-offline-note {
+  margin-right: 6px;
+  font: 500 11px var(--m-font-ui, 'Inter', system-ui, sans-serif);
+  color: rgba(159, 196, 232, 0.8);
+  white-space: nowrap;
 }
 /* Help and close: round, raised, no fill. */
 [data-design='modula'] .win-icon-btn {

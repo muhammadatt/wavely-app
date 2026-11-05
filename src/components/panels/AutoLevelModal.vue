@@ -58,8 +58,7 @@ const statusLine = computed(() => {
   if (processing.value) return 'Detecting speech and levelling…'
   if (!hasSelection.value) return 'Select the audio to level, or Select all.'
   const { start, end } = state.selection
-  return `Level finds the phrases in the ${duration(end - start)} selection and evens them out. ` +
-    'Listen in the editor afterwards — Undo puts the original back.'
+  return `Level finds the phrases in the ${duration(end - start)} selection and evens them out; listen to the result in the editor afterwards.`
 })
 
 /** What the last run did — a past action, labelled as one. */
@@ -100,6 +99,7 @@ async function applyAndClose() {
     design="modula"
     brand-lead="AUTO LEVELER"
     :show-engage="false"
+    offline
     show-apply
     apply-label="Level selection"
     apply-label-short="Level"
