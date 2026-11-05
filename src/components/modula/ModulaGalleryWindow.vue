@@ -126,6 +126,12 @@ onUnmounted(() => clearInterval(timer))
           <ModulaKnob v-model="v.thr" variant="ring" :size="42" :min="-48" :max="0" :step="0.1" show-value :format-value="x => x.toFixed(1)" label="Threshold" />
           <ModulaKnob v-model="v.thr" variant="plain" :size="32" :min="-48" :max="0" :step="0.1" show-value :format-value="x => x.toFixed(1)" label="Plain" />
         </div>
+        <h3 style="margin-top:22px">Knobs · halo (the led knob with a full ring) beside an led</h3>
+        <div class="row">
+          <ModulaKnob v-model="v.drive" variant="halo" :size="72" :min="0" :max="100" :step="1" :default-value="42" :format-value="x => `${x}%`" label="Halo" />
+          <ModulaKnob v-model="v.drive" variant="led" :size="72" :segments="11" :min="0" :max="100" :step="1" :default-value="42" :format-value="x => `${x}%`" label="LED" />
+          <ModulaKnob v-model="v.pan" variant="halo" :size="72" bipolar :min="-100" :max="100" :step="1" :default-value="0" color="var(--m-second)" label="Bipolar" />
+        </div>
       </section>
 
       <section class="card">

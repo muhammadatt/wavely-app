@@ -10,6 +10,7 @@
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupPlan } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
+import { measureVoxPressor, measureVoxPressorExact } from '../audio/voxPressorSolve.js'
 import { computeSoftClipperAutoMakeupDb } from '../audio/softClipperProcessor.js'
 import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
 import { measureVoiceProfile } from '../audio/voiceProfile.js'
@@ -88,6 +89,20 @@ self.onmessage = function (e) {
       break
     case 'schepsAutoTrim':
       schepsAutoTrim(channelData, sampleRate, params)
+      break
+    case 'voxPressorMeasure':
+      try {
+        postDone(measureVoxPressor(channelData, sampleRate, params))
+      } catch (err) {
+        postReply({ type: 'error', message: err.message })
+      }
+      break
+    case 'voxPressorExact':
+      try {
+        postDone({ solved: measureVoxPressorExact(channelData, sampleRate, params.solved, params.sourcePeakDb) })
+      } catch (err) {
+        postReply({ type: 'error', message: err.message })
+      }
       break
     case 'softClipperCeiling':
       softClipperCeiling(channelData, sampleRate, params)

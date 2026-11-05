@@ -9,6 +9,7 @@ import LA2AModal from '../components/panels/LA2AModal.vue'
 import FET1176Modal from '../components/panels/FET1176Modal.vue'
 import SoftClipperModal from '../components/panels/SoftClipperModal.vue'
 import SchepsModal from '../components/panels/SchepsModal.vue'
+import VoxPressorModal from '../components/panels/VoxPressorModal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
 import SaturationBenchModal from '../components/panels/SaturationBenchModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
@@ -361,6 +362,23 @@ const ALL_OPERATIONS = [
     chain: true,
     surface: 'window',
     component: FET1176Modal,
+  },
+  {
+    id: 'vox-pressor',
+    release: 'dev',
+    label: 'VoxPressor',
+    desc: 'Vocal dynamics: 1176 peaks into LA-2A body',
+    category: 'dynamics',
+    icon: 'dynamics',
+    keywords: [
+      'voxpressor', 'vocal', 'voice', 'compressor', '1176', 'la-2a', 'peaks', 'body',
+      'leveler', 'narration', 'podcast', 'dynamics',
+    ],
+    requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
+    surface: 'window',
+    component: VoxPressorModal,
   },
   {
     // Filed under Dynamics rather than Tone: the two Pultec stages are there to

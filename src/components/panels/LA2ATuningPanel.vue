@@ -103,6 +103,22 @@ const CONTROLS = [
     hint: 'Corner of the pre/de-emphasis shelf pair. Ships at 2300, up from 1800. ⚠ 1800 WAS REASONED, NOT FITTED — Tube Sat’s own note says “low enough to cover the consonant and attack region, high enough to leave the fundamental and the FIRST formant out”, and on speech that is not a high enough bar: a voice’s SECOND formant runs to ~2000-2400 Hz, so 1800 already sits inside the vowel body the pair was meant to stay out of. ⚠ THE SECOND AXIS ON EMPHASIS, and it exists because the depth knob has only one. Measured on a multitone, Emphasis 100 adds 1.2–1.6 dB of distortion at peak levels and TRIPLES the share above 5 kHz while doing nothing at −12 dBFS — auditioned, the same mechanism reads as both “fuller/fatter” and “grinds at the peaks”, so no depth setting buys one without the other. RAISING it reduces the distortion emphasis adds, lowering it increases it — a high shelf with a lower corner boosts MORE of the spectrum, not less. Added nonlinear energy in 3–5 kHz on narration runs 0.54 / 0.34 / 0.20 / 0.06 / 0.02 dB at corners 1200 / 1500 / 1800 / 2400 / 3200. ⚠ IT IS ~75% REDUNDANT WITH THE DEPTH KNOB: Emphasis 100 at 2500 nulls against Emphasis 65 at 1800 to −40.3 dB re. output, where the whole emphasis effect is −28.4 dB, and the band distribution barely moves at all (3–5k to 200–1k ratio 1.02–1.09 across every setting tested). A second way to set how much boost reaches the curve, not a way to change where the distortion lands. ⚠ Inert when Emphasis is 0.',
   },
   {
+    key: 'sibilanceGuard', label: 'Sib guard', min: 0, max: 100, step: 1, digits: 0,
+    hint: 'CELL stage only. Pulls the cell shaper’s drive down while the input is mostly above 4 kHz (energy ratio 0.25 → 0.6, 1 ms down / 30 ms back), so loud sibilants stop distorting without lowering Emphasis — which fixes the same thing but takes the warmth with it. Ships at 100; 0 is the previous kernel bit for bit. Compression is unchanged at every setting. Reasoned on synthetic voice, not auditioned: loud-sibilant distortion under 1 kHz −18 → −38 dB at PR 70, vowels unchanged.',
+  },
+  {
+    key: 'sibilanceGuardHz', label: 'Sib guard Hz', min: 1500, max: 8000, step: 50, digits: 0, unit: ' Hz',
+    hint: 'Corner of the guard detector’s high-pass: it reads the share of energy above this. Ships at 4000. An “sh” is darker than an “s”: on “Actual grownup” its share is 0.25 above 4 kHz (the guard barely starts) and 0.55 above 2.5 kHz, while vowels on four clips stay ≤ 0.19 there (the guard starts at 0.25). Measured at PR 70, the “sh” goes −27.8 → −33.1 dB of added energy under 1 kHz at 3000 or 2500, which is the VALVE’s own share — the guard does not reach the valve. Vowels lose under 0.15 dB of harmonics. At 2000 vowels read 0.31 and start to trigger it.',
+  },
+  {
+    key: 'valveGuard', label: 'Valve guard', min: 0, max: 100, step: 1, digits: 0,
+    hint: 'The sibilance guard’s VALVE half: on a fricative the output valve fades toward its linear term by the cell guard’s own scale (same detector, timing and corner — needs Sib guard on). The valve is driven by level alone, so before this nothing turned it down on an “s” or “sh”, and its even quartic turned the noise into rumble under 1 kHz: on “Actual grownup” at PR 50 that was all of the “sh”’s grit. Ships at 100; 0 is the previous kernel bit for bit; a vowel takes the unguarded branch exactly.',
+  },
+  {
+    key: 'shaperSplitHz', label: 'Shaper split', min: 0, max: 8000, step: 250, digits: 0, unit: ' Hz',
+    hint: 'AUDITION (0 = off, ships). Splits the signal at this frequency into two halves that sum back exactly, and sends only the LOW half through the cell and valve curves; the high half takes the same compression gain, unshaped. An even curve multiplies the signal by itself, so hiss fed to it makes difference tones from DC up — the grit under an “s” or “sh” — and above the split nothing can, whether the guards detect it or not. Vowel warmth (harmonics of what sits below the split) stays; the emphasis no longer drives content above it. Try 3000 / 4000 / 5000. Cell-curve path only.',
+  },
+  {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
     hint: 'VALVE stage only — the valves are ~5% of the distortion, so this is a small constant floor under the cell. Same quantity as Cell sat, at the other stage, and the two read in comparable units once auto makeup is engaged. Ships at 0.5, chosen by ear.',
   },

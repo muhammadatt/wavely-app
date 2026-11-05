@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="position:relative;width:100%;height:100%;box-sizing:border-box;padding:12px;border-radius:90px;background:linear-gradient(180deg,#121417,#262a31);box-shadow:0 18px 30px -14px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.12), inset 0 -2px 4px rgba(0,0,0,.6), 0 0 0 1px rgba(0,0,0,.7)">
+  <div style="position:relative;width:360px;height:150px;border-radius:76px;overflow:hidden;background:radial-gradient(ellipse 70% 90% at 50% 35%,#fdf4da 0%,#f0dfb0 60%,#d9c288 100%);box-shadow:inset 0 4px 12px rgba(0,0,0,.55), inset 0 0 0 1px rgba(0,0,0,.5)">
+    <svg viewBox="0 0 360 150" width="360" height="150" style="position:absolute;inset:0">
+      <path d="{{ redArc }}" fill="none" stroke="#c4402b" stroke-width="4"></path>
+      <path d="{{ arc }}" fill="none" stroke="#2a2420" stroke-width="1.2"></path>
+      <sc-for list="{{ ticks }}" as="t" hint-placeholder-count="12">
+        <line x1="{{ t.x1 }}" y1="{{ t.y1 }}" x2="{{ t.x2 }}" y2="{{ t.y2 }}" stroke="{{ t.c }}" stroke-width="{{ t.w }}"></line>
+      </sc-for>
+    </svg>
+    <sc-for list="{{ labels }}" as="l" hint-placeholder-count="8">
+      <span style="position:absolute;left:{{ l.x }}px;top:{{ l.y }}px;transform:translate(-50%,-50%);font:600 11px/1 'JetBrains Mono',monospace;color:{{ l.c }}">{{ l.t }}</span>
+    </sc-for>
+    <div style="position:absolute;left:0;right:0;top:86px;display:flex;flex-direction:column;align-items:center;gap:4px">
+      <span style="font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:rgba(42,36,32,.6)">dB GR</span>
+    </div>
+    <div style="position:absolute;left:179px;top:30px;width:2px;height:156px;transform-origin:50% 100%;transition:transform .14s ease-out;transform:{{ needle }}">
+      <div style="position:absolute;inset:0;border-radius:1px;background:linear-gradient(180deg,#c4402b 0 22px,#1d1a16 22px)"></div>
+    </div>
+    <div style="position:absolute;left:144px;top:124px;width:72px;height:40px;border-radius:36px 36px 0 0;background:linear-gradient(180deg,#2d3138,#15171a);box-shadow:inset 0 1px 0 rgba(255,255,255,.12), 0 -2px 6px rgba(0,0,0,.35)"></div>
+    <div style="position:absolute;inset:0;border-radius:76px;pointer-events:none;background:linear-gradient(170deg,rgba(255,255,255,.35) 0%,rgba(255,255,255,0) 38%)"></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:384,&quot;height&quot;:174},&quot;db&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0,&quot;max&quot;:20,&quot;step&quot;:0.1,&quot;default&quot;:3,&quot;tsType&quot;:&quot;number&quot;},&quot;label&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;PEAKS&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { j: 0 };
+  componentDidMount() { this.t = setInterval(() => this.setState({ j: (Math.random() - 0.5) * 0.5 }), 110); }
+  componentWillUnmount() { clearInterval(this.t); }
+  renderVals() {
+    const P = [[0, 42], [1, 30], [2, 20], [3, 11], [5, -3], [7, -15], [10, -28], [15, -40], [20, -48]];
+    const ang = (db) => {
+      db = Math.max(0, Math.min(20, db));
+      for (let i = 1; i < P.length; i++) if (db <= P[i][0]) { const [d0, a0] = P[i - 1], [d1, a1] = P[i]; return a0 + ((db - d0) / (d1 - d0)) * (a1 - a0); }
+      return -48;
+    };
+    const cx = 180, cy = 186;
+    const pt = (a, r) => [cx + r * Math.sin((a * Math.PI) / 180), cy - r * Math.cos((a * Math.PI) / 180)];
+    const arcPath = (a0, a1, r) => { const [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r); return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
+    const major = [0, 1, 2, 3, 5, 7, 10, 20], minor = [0.5, 1.5, 2.5, 4, 6, 8.5, 12.5, 15, 17.5];
+    const tick = (db, len, w) => { const a = ang(db), [x1, y1] = pt(a, 126), [x2, y2] = pt(a, 126 + len); return { x1: x1.toFixed(1), y1: y1.toFixed(1), x2: x2.toFixed(1), y2: y2.toFixed(1), w, c: db >= 10 ? '#c4402b' : '#2a2420' }; };
+    const db = (this.props.db ?? 3) + (this.props.db > 0.2 ? this.state.j : 0);
+    return {
+      arc: arcPath(ang(20), ang(0), 126), redArc: arcPath(ang(20), ang(10), 129),
+      ticks: [...major.map((d) => tick(d, 10, 1.6)), ...minor.map((d) => tick(d, 5, 1))],
+      labels: major.map((d) => { const [x, y] = pt(ang(d), 148); return { t: String(d), x: x.toFixed(1), y: y.toFixed(1), c: d >= 10 ? '#b33a26' : '#2a2420' }; }),
+      label: this.props.label ?? 'PEAKS',
+      needle: `rotate(${ang(db).toFixed(2)}deg)`,
+    };
+  }
+}
+</script>
+</body>
+</html>

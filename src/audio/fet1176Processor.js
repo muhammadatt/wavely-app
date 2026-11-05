@@ -1592,8 +1592,18 @@ export class FET1176Kernel {
    * @param {Float32Array[]} inputChannels  - per-channel input (any count)
    * @param {Float32Array[]} outputChannels - per-channel output to fill
    * @param {number} n                      - samples in this block
+   * @param {Float32Array} [sidechain]      - optional external detector signal,
+   *   mono, in the input's units (BEFORE the input attenuator, which is applied
+   *   to it here as it is to the mono tap). Replaces the mono mix of the input
+   *   as what the detector hears; `scHpfHz` still runs on it and the audio path
+   *   is untouched. Absent, the kernel is bit-identical to what it was before
+   *   this argument existed.
+   *
+   *   The feedback detector is unaffected by where the level comes from: the
+   *   loop is solved in dB on the detector's level (`_solveFeedback`), so a
+   *   filtered detector signal closes the same loop around the same cell.
    */
-  process(inputChannels, outputChannels, n) {
+  process(inputChannels, outputChannels, n, sidechain) {
     const nIn = inputChannels.length
     const nOut = outputChannels.length
     if (nIn === 0 || n === 0) {
@@ -1673,10 +1683,16 @@ export class FET1176Kernel {
     let { hpfLp1, hpfLp2, grMain, grTail } = this
 
     for (let i = 0; i < n; i++) {
-      // Mono sidechain tap, taken after the input attenuator
-      let x = inputChannels[0][i]
-      for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
-      x *= chScale * this.inputLin
+      // Mono sidechain tap (or the caller's detector signal), taken after the
+      // input attenuator
+      let x
+      if (sidechain) {
+        x = sidechain[i] * this.inputLin
+      } else {
+        x = inputChannels[0][i]
+        for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
+        x *= chScale * this.inputLin
+      }
 
       let sc = x
       if (this.scHpfOn) {
@@ -2302,5 +2318,12 @@ if (typeof registerProcessor === 'function') {
     }
   }
 
-  registerProcessor('fet1176-processor', FET1176WorkletProcessor)
+  // Guarded for the reason la2aProcessor.js gives: VoxPressor's worklet bundles
+  // this module too, and loading both into one AudioContext would otherwise
+  // throw on the duplicate name and abort the second module.
+  try {
+    registerProcessor('fet1176-processor', FET1176WorkletProcessor)
+  } catch (err) {
+    if (err?.name !== 'NotSupportedError') throw err
+  }
 }

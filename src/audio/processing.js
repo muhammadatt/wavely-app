@@ -68,6 +68,8 @@ import {
 } from './chunkedApply.js'
 import { RESONANCE_FRAME_SIZE, resonanceHopSamples } from './resonanceParams.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
+import { ensureVoxPressorWorklet } from './voxPressorWorkletLoader.js'
+import { voxLatencySamples, toKernelParams as toVoxKernelParams, VOX_DEFAULTS } from './effects/voxPressorParams.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
   SCHEPS_DEFAULTS,
@@ -652,6 +654,49 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
           : null,
       }
     })
+}
+
+/**
+ * Measure VoxPressor for a region at its current knobs: the readouts and each
+ * stage's makeup. Resolves `measureVoxPressor`'s result (see voxPressorSolve.js)
+ * with the limiters' ceiling re-measured over the WHOLE region.
+ *
+ * ⚠ THE SAME TWO-SPAN CONTRACT AS `computeLA2AAutoMakeup`: the measurement
+ * renders both kernels several times, so it runs on the worker's capped window; the
+ * ceiling is the guarantee and is a claim about the whole source, so it comes
+ * from `regionPeakDb` — the window's peak would hold a louder passage the
+ * window never saw down to it.
+ *
+ * @param {object} kernelParams  `toKernelParams` of the panel (delete
+ *   `cornerHz` to have the voice profile measured here)
+ */
+export function computeVoxPressorMeasure(segments, start, end, kernelParams, sampleRate, channels) {
+  return measureInWorker(
+    'voxPressorMeasure', segments, start, end, kernelParams, sampleRate, channels,
+  ).then(({ type, ...d }) => {
+    const peakDb = regionPeakDb(segments, start, end, sampleRate, channels)
+    const ceilingDb = Number.isFinite(peakDb) ? peakDb : null
+    return {
+      ...d,
+      peaksCeilingDb: kernelParams.peaksOn ? ceilingDb : null,
+      bodyCeilingDb: kernelParams.bodyOn ? ceilingDb : null,
+      // The last limiter's ceiling and Density's anchor: the whole region's peak.
+      sourcePeakDb: ceilingDb,
+    }
+  })
+}
+
+/**
+ * VoxPressor's per-stage peak restores, measured EXACTLY over the whole region
+ * — for a region longer than the solve's analysis window. Resolves the solved
+ * params with the restores, ceilings and Body offset corrected. See
+ * `measureVoxPressorExact`.
+ */
+export function computeVoxPressorExact(segments, start, end, solved, sampleRate, channels) {
+  const sourcePeakDb = regionPeakDb(segments, start, end, sampleRate, channels)
+  return measureWholeRegionInWorker(
+    'voxPressorExact', segments, start, end, { solved, sourcePeakDb }, sampleRate, channels,
+  ).then(d => d.solved)
 }
 
 /**
@@ -1265,6 +1310,23 @@ export function applySchepsRegion(segments, start, end, params, sampleRate, chan
     // SCHEPS_PREROLL_S. Also bit-exact at this length.
     preRollSamples: Math.round(SCHEPS_PREROLL_S * sampleRate),
     chunk: { renderer: 'scheps' },
+  })
+}
+
+/**
+ * Apply VoxPressor to a region. One-thread render for now: the plugin is not
+ * opted into chunked apply until its seams are measured (chunkedApply.js).
+ */
+export function applyVoxPressorRegion(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toVoxKernelParams({ ...VOX_DEFAULTS, ...params, listen: 'off' })
+  return applyRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureVoxPressorWorklet,
+    processorName: 'vox-pressor-processor',
+    kernelParams,
+    latencySamples: voxLatencySamples(kernelParams, sampleRate),
+    // Both kernels converge by 2 s (LA2A_PREROLL_S, FET1176_PREROLL_S); the
+    // 1176's makeup tracker latches but VoxPressor never reads it.
+    preRollSamples: Math.round(Math.max(LA2A_PREROLL_S, FET1176_PREROLL_S) * sampleRate),
   })
 }
 

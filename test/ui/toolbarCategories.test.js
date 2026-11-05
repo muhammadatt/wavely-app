@@ -37,7 +37,7 @@ test('every operation sits in its menu, in order', () => {
       'Arrange: trim', 'Arrange: split', 'Arrange: silence',
     ],
     level: ['normalize', 'loudness', 'fade', 'volume'],
-    dynamics: ['auto-leveler', 'soft-clipper', 'opto-smooth', 'fet-punch', 'scheps-parallel', 'inflator'],
+    dynamics: ['auto-leveler', 'soft-clipper', 'opto-smooth', 'fet-punch', 'vox-pressor', 'scheps-parallel', 'inflator'],
     tone: ['manual-eq', 'voicerx', 'air-band', 'phatass', 'vocal-saturation', 'saturation-bench'],
     clean: [
       'Noise: noise-reduction',
