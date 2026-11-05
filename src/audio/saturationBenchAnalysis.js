@@ -14,7 +14,7 @@
  *             + SAT_REF_CREST_DB
  *
  * With the band open this is the gated RMS + 12 dB, which on a file at the
- * nominal −20 dBFS is −8 dBFS: the HF Softener shaper's full-band calibration
+ * nominal −20 dBFS is −8 dBFS: the De-Esser shaper's full-band calibration
  * point exactly.
  *
  * GATING: 2048-sample blocks, the same rule as the compressors' level

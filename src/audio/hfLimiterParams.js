@@ -23,7 +23,7 @@ export const HF_LIMITER_DEFAULTS = {
   output: 0, // dB trim
   // The whole file's gated RMS, dBFS. Measured by the composable, never a
   // user setting — it is what makes a Threshold mean the same thing on a
-  // quiet narration and a hot one (the HF Softener's `levelOffset` contract).
+  // quiet narration and a hot one (the De-Esser's `levelOffset` contract).
   voiceLevelDb: ALIGN_TARGET_DBFS,
 }
 

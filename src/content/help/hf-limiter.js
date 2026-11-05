@@ -31,7 +31,7 @@ export default {
     'With Transient off, below the threshold the audio passes through untouched, bit for bit; Transient can still turn a sudden onset down below it',
     'TIGHT is a linear-phase split, so its cut never rings or smears the voice; WARM is a gentle one-pole split, which shifts phase slightly where it cuts',
     'The curve shows the cut being applied right now, with the deepest Range allows dashed behind it',
-    'For sibilance on its own, HF Softener knows more about voices; this is the general-purpose ceiling',
+    'For sibilance on its own, De-Esser knows more about voices; this is the general-purpose ceiling',
     'For low-end warmth with a gentle tape top end, use PHAT*SS',
     'An S that starts very abruptly after silence can catch a little Transient in its first millisecond; if an S sounds blunted, lower Transient',
     'For a Fatso Warmth sound, start from WARM, Freq 2.3 kHz, Threshold −1 dB, Range 16 dB, Release 30 ms, Tail off and Output +0.7 dB',

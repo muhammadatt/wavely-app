@@ -14,7 +14,7 @@
  *       │      │
  *       │   RESTORE → LIMITER (source peak, lookahead gain)
  *       │      │
- *       │   [DE-ESS] HFSoftenerKernel (Duck + EQ, lisp guard; level from the Body output)
+ *       │   [DE-ESS] DeEsserKernel (Duck + EQ, lisp guard; level from the Body output)
  *       │      │
  *       │   [PARALLEL] FET1176Kernel at its own Mix (a fast 4:1 copy blended under
  *       │      its delayed dry; wet makeup solved on the blend — the LA-2A mix law)
@@ -52,7 +52,7 @@ import {
   FET1176Kernel, inputDriveDbForKnob, releaseSecondsForDial, ratioThresholdOffsetDb,
 } from './fet1176Processor.js'
 import { LA2AKernel, la2aLatencySamples } from './la2aProcessor.js'
-import { HFSoftenerKernel } from './deEsserProcessor.js'
+import { DeEsserKernel } from './deEsserProcessor.js'
 import { InflatorKernel, INFLATOR_LATENCY_SAMPLES } from './inflatorProcessor.js'
 import { VoiceDetector, ParallelDetector, DEFAULT_CORNER_HZ } from './dsp/voiceDetector.js'
 import { DelayLine, OVERSAMPLE_LATENCY_SAMPLES } from './dsp/oversample.js'
@@ -395,7 +395,7 @@ export const VOX_KERNEL_DEFAULTS = {
    */
   outputCeilingDb: null,
   /**
-   * DE-ESS — the HF Softener's kernel, its params whole (`deEss`, from the
+   * DE-ESS — the De-Esser's kernel, its params whole (`deEss`, from the
    * De-Esser's own `toKernelParams`, so the panel mapping is not copied).
    * Off is a straight copy: the softener has no latency.
    */
@@ -433,7 +433,7 @@ export const VOX_KERNEL_DEFAULTS = {
   sourcePeakDb: null,
   /**
    * 'off' | 'peaks' | 'body' — play what that compressor's detector hears
-   * instead of the output (the HF Softener's MONITOR contract). Never a preset.
+   * instead of the output (the De-Esser's MONITOR contract). Never a preset.
    */
   listen: 'off',
   /** Bench overrides onto the pinned patches. Not panel params, not preset keys. */
@@ -494,7 +494,7 @@ export class VoxPressorKernel {
     this.bodyBypass = []
     this.peaksLimiter = new LinkedPeakLimiter(sampleRate)
     this.bodyLimiter = new LinkedPeakLimiter(sampleRate)
-    this.deEsser = new HFSoftenerKernel(sampleRate)
+    this.deEsser = new DeEsserKernel(sampleRate)
     this.deEsserPrimed = false
     this.parallelFet = new FET1176Kernel(sampleRate)
     this.parallelLa2a = new LA2AKernel(sampleRate)
@@ -708,7 +708,7 @@ export class VoxPressorKernel {
     for (const d of this.bodyBypass) d.reset()
     this.peaksLimiter.reset()
     this.bodyLimiter.reset()
-    this.deEsser = new HFSoftenerKernel(this.sampleRate)
+    this.deEsser = new DeEsserKernel(this.sampleRate)
     this.deEsserPrimed = false
     this.parallelFet = new FET1176Kernel(this.sampleRate)
     this.parallelLa2a = new LA2AKernel(this.sampleRate)

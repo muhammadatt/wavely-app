@@ -1,5 +1,5 @@
 /**
- * Waveshaper curves for the HF Softener's input stage, for auditioning.
+ * Waveshaper curves for the De-Esser's input stage, for auditioning.
  *
  * Every curve is normalised to f(0) = 0 and f'(0) = 1, and the kernel runs it
  * as f(g·x)/g, so a quiet signal passes at unity whatever the curve or drive:

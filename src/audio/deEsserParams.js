@@ -1,12 +1,12 @@
 /**
- * HF Softener's UI params: defaults and the mappings to kernel params, for the
+ * De-Esser's UI params: defaults and the mappings to kernel params, for the
  * softener and for its Reso stage. Split out of effects/deEsser.js so
  * node can import it — the wrapper pulls Vite `?worker&url` specifiers.
  */
 
 import { hfResoKernelParams } from './deEsserResoStage.js'
 import { softenKernelParams } from './deEsserSoftenStage.js'
-import { HF_SOFTENER_TUNING } from './deEsserProcessor.js'
+import { DE_ESSER_TUNING } from './deEsserProcessor.js'
 
 /**
  * Guard (0–100 %) → the lisp guard's floor, dB relative to the held voice.
@@ -26,10 +26,10 @@ export function guardToFloorDb(guard) {
 /** The Guard amount, honouring the retired boolean (`lispGuard: false` = 0). */
 export function guardOf(params) {
   if (params.lispGuard === false) return 0
-  return params.guard ?? HF_SOFTENER_DEFAULTS.guard
+  return params.guard ?? DE_ESSER_DEFAULTS.guard
 }
 
-export const HF_SOFTENER_DEFAULTS = {
+export const DE_ESSER_DEFAULTS = {
   // The two cutting stages, in chain order. Duck turns the whole "s" down with
   // its shape intact; EQ then cuts the top of what the duck left — its
   // detector hears the ducked signal. Each is a macro over threshold, ratio and
@@ -111,10 +111,10 @@ export function toKernelParams(params) {
     shape: params.shape,
     lispGuard: guardOf(params) > 0,
     lispGuardFloorDb: guardToFloorDb(guardOf(params)),
-    bandHz: params.band ?? HF_SOFTENER_DEFAULTS.band,
+    bandHz: params.band ?? DE_ESSER_DEFAULTS.band,
     levelOffsetDb: params.levelOffset,
     detectHz: params.detect,
-    detectHiHz: params.detectHigh ?? HF_SOFTENER_DEFAULTS.detectHigh,
+    detectHiHz: params.detectHigh ?? DE_ESSER_DEFAULTS.detectHigh,
     airDb: params.air ?? 0,
     airMode: params.airMode,
     duck: (params.duck ?? 0) / 100,
@@ -131,7 +131,7 @@ export function resoKernelParams(params) {
   const g = guardOf(params)
   return hfResoKernelParams(params.resoAmount / 100, {
     lispGuard: g > 0,
-    guardShiftDb: guardToFloorDb(g) - HF_SOFTENER_TUNING.lispGuardFloorDb,
+    guardShiftDb: guardToFloorDb(g) - DE_ESSER_TUNING.lispGuardFloorDb,
   })
 }
 

@@ -79,7 +79,7 @@ import {
   ceilingKneeDbFor, softCeiling, float32AtOrBelow,
 } from './dsp/makeupReference.js'
 import { limitChannels } from './dsp/peakLimiter.js'
-import { processHFSoftenerBuffer, levelOffsetDbFor } from './deEsserProcessor.js'
+import { processDeEsserBuffer, levelOffsetDbFor } from './deEsserProcessor.js'
 import { FET1176Kernel, inputDriveDbForKnob } from './fet1176Processor.js'
 import { ParallelDetector } from './dsp/voiceDetector.js'
 import { ParallelDeEsser } from './dsp/parallelDeEsser.js'
@@ -610,11 +610,11 @@ function measureUpstream(channels, sampleRate, p, hash) {
   const { afterBody } = st
 
   // ── DE-ESS ── its thresholds follow the level it HEARS: the Body stage's
-  // output, made up, not the source (the HF Softener's `levelOffset` contract).
+  // output, made up, not the source (the De-Esser's `levelOffset` contract).
   out.deEssLevelOffsetDb = levelOffsetDbFor(db(gatedRmsOfChannels(afterBody, sampleRate)))
   let afterDeEss = afterBody
   if (p.deEss && p.deEssOn) {
-    afterDeEss = processHFSoftenerBuffer(afterBody, sampleRate, {
+    afterDeEss = processDeEsserBuffer(afterBody, sampleRate, {
       ...p.deEss, levelOffsetDb: out.deEssLevelOffsetDb,
     }).channelData
   }

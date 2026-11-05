@@ -4,7 +4,7 @@ import { useMeterFrame } from './ballistics.js'
 import { kindRuns, shadeColumns } from '../../audio/deEsserScope.js'
 
 /**
- * HF Softener's activity scope: the waveform, with every stretch the
+ * De-Esser's activity scope: the waveform, with every stretch the
  * Softener worked on SHADED full height — the way most de-essers mark the
  * regions they treat.
  *

@@ -78,7 +78,7 @@ export const ICONS = {
   hum: '<path d="M2 12c1.5-4 3-4 4.5 0s3 4 4.5 0"/><path d="M13 12c1.5-4 3-4 4.5 0s3 4 4.5 0" opacity=".35"/><path d="M12 4v16" stroke-dasharray="2 2"/>',
   // De-esser: a sibilant burst with a bracket clamping its top — the ceiling
   // being placed on the peak, which is exactly what the control does.
-  // HF softener: a flat line whose top end dips on a shelf, with the undipped
+  // De-Esser: a flat line whose top end dips on a shelf, with the undipped
   // line ghosted above it — the shelf giving way, not a notch or a clamp.
   softener: '<path d="M2 9h10c3 0 5 6 10 6"/><path d="M12 9h10" stroke-dasharray="2.5 2.5" opacity=".45"/>',
   // HF limiter: a line that rises into the top end and is flattened against a

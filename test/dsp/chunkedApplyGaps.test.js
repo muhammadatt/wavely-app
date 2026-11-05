@@ -3,7 +3,7 @@
  *
  * Parallel apply on the gaps material (chunkStitch.js): every chunked plugin
  * stitched against its continuous render, and the case that made the run-in
- * long — the HF Softener's trackers settle slowly through the silent gaps: at
+ * long — the De-Esser's trackers settle slowly through the silent gaps: at
  * 2 s of run-in a seam read −95 dBFS, 33 ms in.
  */
 
@@ -19,9 +19,9 @@ for (const [name, build] of PLUGINS) {
   })
 }
 
-test('⚠ a 2 s run-in is NOT enough here: HF Softener, defaults', () => {
+test('⚠ a 2 s run-in is NOT enough here: De-Esser, defaults', () => {
   const mat = MATERIALS.gaps()
-  const [, build] = PLUGINS.find(([name]) => name === 'HF Softener, defaults')
+  const [, build] = PLUGINS.find(([name]) => name === 'De-Esser, defaults')
   const got = seamDbfs(mat, build(mat.xs), { runInS: 2 })
   assert.ok(got > -120, `at 2 s of run-in the seam residue should still show; got ${got.toFixed(1)} dBFS`)
 })

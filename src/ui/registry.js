@@ -528,7 +528,7 @@ const ALL_OPERATIONS = [
     // The real-time de-esser: dips the top end only while a consonant spikes.
     // The Sibilance Editor above is the event-based version: it analyses the
     // selection and rides clip gain on each event.
-    id: 'hf-softener',
+    id: 'de-esser',
     label: 'De-Esser',
     desc: 'Soften harsh S sounds, keep the air',
     category: 'clean',

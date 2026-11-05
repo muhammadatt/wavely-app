@@ -1,5 +1,5 @@
 /**
- * Dynamic HF Softener — worklet kernel.
+ * Dynamic De-Esser — worklet kernel.
  *
  * Softens sibilance and harshness on close-miked voice without taking average
  * brightness with it. The problem it targets is EPISODIC, not spectral: a
@@ -21,8 +21,8 @@
  *             ever RAISES it — letting it drop in quiet passages would engage
  *             on breath, which is the one thing this processor must not do.
  *
- * Specification: "Dynamic HF Softener — Plugin Specification" (Claude doc,
- * 2026-09-25). Every constant in HF_SOFTENER_TUNING is quoted from it.
+ * Specification: "Dynamic De-Esser — Plugin Specification" (Claude doc,
+ * 2026-09-25). Every constant in DE_ESSER_TUNING is quoted from it.
  *
  * Below threshold the shelf sits at exactly 0 dB, and an RBJ shelf at 0 dB has
  * identical numerator and denominator, so the processor is BIT-transparent
@@ -30,7 +30,7 @@
  * air", and `test/dsp/deEsser.test.js` pins it.
  *
  * This file is BOTH a normal ES module and an AudioWorklet module (registers
- * 'hf-softener-processor'). It imports from ./dsp/, which is why its loader
+ * 'de-esser-processor'). It imports from ./dsp/, which is why its loader
  * pulls it through `?worker&url` — see deEsserWorkletLoader.js.
  *
  * Portability (a Python port is anticipated): time constants live in ms and
@@ -47,7 +47,7 @@ import { airBandSections, AIR_BANDS } from './dsp/airBandCurve.js'
 import { riseCoeff } from './dsp/envelope.js'
 
 /** Internal constants, fixed at build time. Quoted from the spec's table. */
-export const HF_SOFTENER_TUNING = {
+export const DE_ESSER_TUNING = {
   // Module A
   apFreqsHz: [3200, 5600, 9000],
   apQs: [0.7, 0.8, 0.7],
@@ -196,7 +196,7 @@ export const HF_SOFTENER_TUNING = {
 }
 
 /** User-facing parameters. The four controls, minus Listen (a monitor tap). */
-export const HF_SOFTENER_KERNEL_DEFAULTS = {
+export const DE_ESSER_KERNEL_DEFAULTS = {
   // The EQ stage — the dynamic band cut — 0–1. Its detector reads the signal
   // AFTER the Duck stage, so it takes only what the duck left hot.
   amount: 0.4,
@@ -257,7 +257,7 @@ export const BAND_HZ_MAX = 6000
  * (44.1 kHz) to 10 (96 kHz); 6 kHz already cost 16 kHz 2–5 dB. Moved with the
  * corner the band reaches full depth at every corner and rate.
  */
-export function bandTuningFor(bandHz, tuning = HF_SOFTENER_TUNING) {
+export function bandTuningFor(bandHz, tuning = DE_ESSER_TUNING) {
   if (bandHz === tuning.shelfFreqHz) return tuning
   const lift = bandHz > tuning.shelfFreqHz ? bandHz / tuning.shelfFreqHz : 1
   return { ...tuning, shelfFreqHz: bandHz, returnFreqHz: tuning.returnFreqHz * lift }
@@ -281,7 +281,7 @@ const detectCompCache = new Map()
  * top end sits LOWER than the reference, so it loses more than is put back:
  * that difference is the whole point of the control. 0 at 4 kHz, exactly.
  */
-export function detectCompDb(sampleRate, detectHz, tuning = HF_SOFTENER_TUNING, detectHiHz = DETECT_HI_MAX) {
+export function detectCompDb(sampleRate, detectHz, tuning = DE_ESSER_TUNING, detectHiHz = DETECT_HI_MAX) {
   const key = `${sampleRate}:${detectHz}:${detectHiHz}`
   if (detectCompCache.has(key)) return detectCompCache.get(key)
   const grid = []
@@ -365,19 +365,19 @@ const BUTTER4_Q = [0.5412, 1.3066]
  * How much of the lisp guard a fricative gets, 0–1, from its tilt (5–10 kHz
  * over 2–4 kHz, dB): 1 for a peaked /s/, 0 for a flat /f/ — see `tiltRelaxDb`.
  */
-export function lispGuardTiltWeight(tiltDb, tuning = HF_SOFTENER_TUNING) {
+export function lispGuardTiltWeight(tiltDb, tuning = DE_ESSER_TUNING) {
   const { tiltFlatDb: lo, tiltPeakedDb: hi } = tuning
   return tiltDb <= lo ? 0 : tiltDb >= hi ? 1 : (tiltDb - lo) / (hi - lo)
 }
 
 /** Amount (0–1) → T_base in dBFS. 0 → 0 dBFS (off), then −28 → −44. */
-export function amountToThresholdDb(amount, tuning = HF_SOFTENER_TUNING) {
+export function amountToThresholdDb(amount, tuning = DE_ESSER_TUNING) {
   const a = clamp(amount, 0, 1)
   return a === 0 ? 0 : lerp(tuning.thresholdAtZeroDb, tuning.thresholdAtFullDb, a)
 }
 
 /** Amount (0–1) → D_max in dB, 0 → 24. */
-export function amountToMaxDepthDb(amount, tuning = HF_SOFTENER_TUNING) {
+export function amountToMaxDepthDb(amount, tuning = DE_ESSER_TUNING) {
   return clamp(amount, 0, 1) * tuning.maxDepthAtFullDb
 }
 
@@ -385,13 +385,13 @@ export function amountToMaxDepthDb(amount, tuning = HF_SOFTENER_TUNING) {
  * The file's gated RMS (dBFS) → the offset every detector level shifts by,
  * clamped. Louder file, higher thresholds.
  */
-export function levelOffsetDbFor(gatedRmsDbfs, tuning = HF_SOFTENER_TUNING) {
+export function levelOffsetDbFor(gatedRmsDbfs, tuning = DE_ESSER_TUNING) {
   if (!Number.isFinite(gatedRmsDbfs)) return 0
   return clamp(gatedRmsDbfs - tuning.nominalLevelDbfs, -tuning.maxLevelOffsetDb, tuning.maxLevelOffsetDb)
 }
 
 /** The true compression ratio at an Amount: 1:1 → 6:1, linear. */
-export function amountToCompressionRatio(amount, tuning = HF_SOFTENER_TUNING) {
+export function amountToCompressionRatio(amount, tuning = DE_ESSER_TUNING) {
   return lerp(tuning.compRatioAtZero, tuning.compRatioAtFull, clamp(amount, 0, 1))
 }
 
@@ -399,7 +399,7 @@ export function amountToCompressionRatio(amount, tuning = HF_SOFTENER_TUNING) {
  * The gain computer's slope — dB of cut per dB over threshold — at an Amount.
  * 0 at 1:1. The gain computer takes its reciprocal (the spec's divisor).
  */
-export function amountToSlope(amount, tuning = HF_SOFTENER_TUNING) {
+export function amountToSlope(amount, tuning = DE_ESSER_TUNING) {
   return 1 - 1 / amountToCompressionRatio(amount, tuning)
 }
 
@@ -408,17 +408,17 @@ export function amountToSlope(amount, tuning = HF_SOFTENER_TUNING) {
  * true ratio 1:1 → 4:1 and a max depth 0 → 12 dB, each linear.
  */
 /** Duck (0–1) → T_base in dBFS; the EQ's line. */
-export function duckToThresholdDb(duck, tuning = HF_SOFTENER_TUNING) {
+export function duckToThresholdDb(duck, tuning = DE_ESSER_TUNING) {
   return amountToThresholdDb(duck, tuning)
 }
 
 /** Duck (0–1) → max depth, 0 → 12 dB. */
-export function duckToMaxDepthDb(duck, tuning = HF_SOFTENER_TUNING) {
+export function duckToMaxDepthDb(duck, tuning = DE_ESSER_TUNING) {
   return clamp(duck, 0, 1) * tuning.duckMaxDepthAtFullDb
 }
 
 /** Duck (0–1) → gain-computer slope; true ratio 1:1 → 4:1. */
-export function duckToSlope(duck, tuning = HF_SOFTENER_TUNING) {
+export function duckToSlope(duck, tuning = DE_ESSER_TUNING) {
   return 1 - 1 / lerp(1, tuning.duckRatioAtFull, clamp(duck, 0, 1))
 }
 
@@ -460,12 +460,12 @@ export function adaptiveThresholdDb(baseDb, lmDb, kappa, lRefDb, maxShiftDb) {
 }
 
 /** Module A's sections at a sample rate. */
-export function rotatorSections(sampleRate, tuning = HF_SOFTENER_TUNING) {
+export function rotatorSections(sampleRate, tuning = DE_ESSER_TUNING) {
   return tuning.apFreqsHz.map((f, i) => allpass(sampleRate, f, tuning.apQs[i]))
 }
 
 /** The audio-path shelf at a gain. */
-export function shelfSection(sampleRate, gainDb, tuning = HF_SOFTENER_TUNING) {
+export function shelfSection(sampleRate, gainDb, tuning = DE_ESSER_TUNING) {
   return highShelf(sampleRate, tuning.shelfFreqHz, tuning.shelfQ, gainDb, 'q')
 }
 
@@ -486,7 +486,7 @@ const compTables = new Map()
  * `depthDb`. Solved by bisection once per sample rate at six depths, then
  * interpolated — a few ms at construction, nothing per sample.
  */
-export function bandDepthComp(sampleRate, depthDb, tuning = HF_SOFTENER_TUNING) {
+export function bandDepthComp(sampleRate, depthDb, tuning = DE_ESSER_TUNING) {
   const key = `${sampleRate}:${tuning.shelfFreqHz}:${tuning.shelfQ}:${tuning.returnFreqHz}:${tuning.returnQ}`
   let table = compTables.get(key)
   if (!table) {
@@ -531,7 +531,7 @@ export const AUDIO_SECTIONS = 4
  * −12 dB pair's shape: 16 kHz −0.6 dB at 44.1 kHz. At 3–6 dB the two agree
  * with the single pair to 0.1 dB. At 0 dB every section is an exact identity.
  */
-export function softenerSections(sampleRate, gainDb, shape = 'band', tuning = HF_SOFTENER_TUNING) {
+export function softenerSections(sampleRate, gainDb, shape = 'band', tuning = DE_ESSER_TUNING) {
   if (shape !== 'band') return [shelfSection(sampleRate, gainDb, tuning), IDENTITY, IDENTITY, IDENTITY]
   const half = gainDb / 2
   const pair = bandPair(sampleRate, half * bandDepthComp(sampleRate, half, tuning), tuning)
@@ -542,7 +542,7 @@ export function softenerSections(sampleRate, gainDb, shape = 'band', tuning = HF
  * Worst-case rotator group delay above 3 kHz, in ms. The spec's hard budget
  * is 2 ms — past it percussive content acquires a metallic ring.
  */
-export function rotatorMaxGroupDelayMs(sampleRate, tuning = HF_SOFTENER_TUNING) {
+export function rotatorMaxGroupDelayMs(sampleRate, tuning = DE_ESSER_TUNING) {
   const sections = rotatorSections(sampleRate, tuning)
   const top = Math.min(20000, 0.45 * sampleRate)
   let worst = 0
@@ -639,14 +639,14 @@ class Ramp {
 
 // ── Kernel ──────────────────────────────────────────────────────────────────
 
-export class HFSoftenerKernel {
-  constructor(sampleRate, tuning = HF_SOFTENER_TUNING) {
+export class DeEsserKernel {
+  constructor(sampleRate, tuning = DE_ESSER_TUNING) {
     this.sampleRate = sampleRate
     this.tuning = tuning
 
     const gd = rotatorMaxGroupDelayMs(sampleRate, tuning)
     if (gd >= tuning.maxGroupDelayMs) {
-      throw new Error(`HF softener: rotator group delay ${gd.toFixed(3)} ms exceeds ${tuning.maxGroupDelayMs} ms`)
+      throw new Error(`De-Esser: rotator group delay ${gd.toFixed(3)} ms exceeds ${tuning.maxGroupDelayMs} ms`)
     }
 
     this.rotatorCoeffs = rotatorSections(sampleRate, tuning)
@@ -667,7 +667,7 @@ export class HFSoftenerKernel {
 
     // Stereo is linked: one detector reading drives one shelf gain on every
     // channel, so the image does not wander on a sibilant panned off-centre.
-    this.hfEnv = new Follower(sampleRate, tuning.attackMs, HF_SOFTENER_KERNEL_DEFAULTS.releaseMs)
+    this.hfEnv = new Follower(sampleRate, tuning.attackMs, DE_ESSER_KERNEL_DEFAULTS.releaseMs)
     this.relSlow = this.hfEnv.release
     this.relVowel = riseCoeff(tuning.vowelReleaseMs, sampleRate)
     this.voiceEnv = new Follower(sampleRate, tuning.voicedAttackMs, tuning.voicedDecayMs)
@@ -677,7 +677,7 @@ export class HFSoftenerKernel {
     this.tiltHf = new Follower(sampleRate, tuning.tiltAttackMs, tuning.tiltReleaseMs)
     // Voice-led cue (voiceLed* in the tuning) and the Duck's own detector.
     this.hfFast = new Follower(sampleRate, 1, 5)
-    this.hfDuck = new Follower(sampleRate, tuning.attackMs, HF_SOFTENER_KERNEL_DEFAULTS.releaseMs)
+    this.hfDuck = new Follower(sampleRate, tuning.attackMs, DE_ESSER_KERNEL_DEFAULTS.releaseMs)
     this.relDuckVowel = tuning.duckVowelReleaseMs == null ? null : riseCoeff(tuning.duckVowelReleaseMs, sampleRate)
     // Activity scope, one point per process() call (see readScope): the input
     // peak, the peak after Duck and EQ (before Air), how many dB the lisp guard
@@ -747,7 +747,7 @@ export class HFSoftenerKernel {
     this.meterMaxBroadband = 0
     this.lastThresholdLiftDb = 0
 
-    this.params = { ...HF_SOFTENER_KERNEL_DEFAULTS }
+    this.params = { ...DE_ESSER_KERNEL_DEFAULTS }
     this.setParams({}, true)
   }
 
@@ -758,8 +758,8 @@ export class HFSoftenerKernel {
    */
   setParams(partial, immediate = false) {
     const p = { ...this.params, ...partial }
-    if (!ROTATOR_MODES.includes(p.rotator)) p.rotator = HF_SOFTENER_KERNEL_DEFAULTS.rotator
-    if (!SHAPES.includes(p.shape)) p.shape = HF_SOFTENER_KERNEL_DEFAULTS.shape
+    if (!ROTATOR_MODES.includes(p.rotator)) p.rotator = DE_ESSER_KERNEL_DEFAULTS.rotator
+    if (!SHAPES.includes(p.shape)) p.shape = DE_ESSER_KERNEL_DEFAULTS.shape
     this.params = p
     // Release and shape need no ramp: a release change alters a rate, not a
     // level, and a shape change lands through the per-chunk coefficient
@@ -1179,8 +1179,8 @@ export class HFSoftenerKernel {
  * `recordGain` returns the per-sample shelf gain in dB alongside the audio,
  * which is what the gain-reduction histogram check reads.
  */
-export function processHFSoftenerBuffer(channelData, sampleRate, params = {}, { recordGain = false, listen = 'off', tuning } = {}) {
-  const kernel = new HFSoftenerKernel(sampleRate, tuning)
+export function processDeEsserBuffer(channelData, sampleRate, params = {}, { recordGain = false, listen = 'off', tuning } = {}) {
+  const kernel = new DeEsserKernel(sampleRate, tuning)
   kernel.setParams(params, true)
   kernel.setListen(listen)
 
@@ -1206,7 +1206,7 @@ export function processHFSoftenerBuffer(channelData, sampleRate, params = {}, { 
  * time constants, so an applied region starts on the state a playing preview
  * would have had.
  */
-export const HF_SOFTENER_PREROLL_S = 2.0
+export const DE_ESSER_PREROLL_S = 2.0
 
 /**
  * Activity-scope points: [input peak, output peak (after Duck and EQ, before
@@ -1221,10 +1221,10 @@ export const SCOPE_BATCH_MAX = 64
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────
 
 if (typeof registerProcessor === 'function') {
-  class HFSoftenerWorkletProcessor extends AudioWorkletProcessor {
+  class DeEsserWorkletProcessor extends AudioWorkletProcessor {
     constructor(options) {
       super()
-      this.kernel = new HFSoftenerKernel(sampleRate)
+      this.kernel = new DeEsserKernel(sampleRate)
       // Activity-scope points, one per process() call, sent with the meter
       // message. Sized for the meter period at any rate (30 Hz → ≤ 50 quanta of
       // 128 at 192 kHz); a host with smaller quanta folds the extra points into
@@ -1281,7 +1281,7 @@ if (typeof registerProcessor === 'function') {
   // Guarded: VoxPressor's worklet holds this kernel, so the module can load
   // twice into one AudioContext; only the duplicate registration is swallowed.
   try {
-    registerProcessor('hf-softener-processor', HFSoftenerWorkletProcessor)
+    registerProcessor('de-esser-processor', DeEsserWorkletProcessor)
   } catch (err) {
     if (err?.name !== 'NotSupportedError') throw err
   }

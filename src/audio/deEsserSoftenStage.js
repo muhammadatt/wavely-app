@@ -1,5 +1,5 @@
 /**
- * The HF Softener's optional SOFTEN stage: an onset softener on the band above
+ * The De-Esser's optional SOFTEN stage: an onset softener on the band above
  * 500 Hz, last in the chain (Duck → EQ → Air → [Reso] → Soften), in the chain
  * whenever its knob is above 0. When the band rises SUDDENLY — a click, a lip
  * smack, a hard T or K, the snap of an onset — it is turned down for a few
