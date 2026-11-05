@@ -8,7 +8,7 @@ import {
 import { currentPluginCopy, idForCopy, chainCopyNumber, isChainCopyId } from '../../composables/pluginCopies.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
-import { isSheetViewport, sheetGeometry } from '../../ui/windowSheet.js'
+import { isSheetViewport, sheetGeometry, SHEET_MAX_WIDTH as SHEET_NARROW_PX } from '../../ui/windowSheet.js'
 import Icon from '../ui/Icon.vue'
 import { useEntitlements } from '../../composables/useEntitlements.js'
 import HelpOverlay from './HelpOverlay.vue'
@@ -403,6 +403,13 @@ const viewportW = ref(layoutViewport().w)
 const sheet = computed(() => isSheetViewport({
   viewportW: viewportW.value, viewportH: viewportH.value, designW: minWidthPx.value,
 }))
+/**
+ * A sheet on a phone held upright. Its header gets two rows (see the CSS at
+ * the end): one row of name, ON and close could not fit at 360–393 px — a long
+ * name like SATURATION WORKBENCH pushed ON and close off the screen, and on
+ * the de-essers ON slid under DELTA and the preset arrows.
+ */
+const narrowSheet = computed(() => sheet.value && viewportW.value < SHEET_NARROW_PX)
 const sheetBox = computed(() => sheetGeometry({
   viewportW: viewportW.value, viewportH: viewportH.value, designW: minWidthPx.value,
 }))
@@ -710,7 +717,7 @@ function requestClose() {
     -->
     <div
       class="win-header grid items-center touch-none h-14 shrink-0 pl-5 pr-[14px]"
-      :class="sheet ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab'"
+      :class="[sheet ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab', { 'is-narrow': narrowSheet }]"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
@@ -1647,5 +1654,53 @@ function requestClose() {
 .win-frame.is-sheet {
   border-radius: 0 !important;
   box-shadow: none !important;
+}
+
+/* Narrow sheet header — a phone held upright (see narrowSheet). Two rows:
+   identity on the left and ON + close on the right of the first, so those two
+   are always on screen; the monitoring / preset / chain group (and any
+   plugin's own header-center controls) on a second row of its own, centred,
+   scrolling sideways only as a last resort. Overrides both the classic grid
+   and Modula's flex row. */
+.win-header.is-narrow {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 48px auto;
+  height: auto !important;
+  gap: 0 8px;
+  padding: 0 10px 0 14px !important;
+}
+.win-header.is-narrow > div:nth-of-type(1) {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+.win-header.is-narrow > div:nth-of-type(1) > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.win-header.is-narrow > div:nth-of-type(1) > button {
+  flex: none;
+}
+.win-header.is-narrow > div:nth-of-type(2) {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-content: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+}
+.win-header.is-narrow > div:nth-of-type(2):empty {
+  display: none;
+}
+.win-header.is-narrow > div:nth-of-type(3) {
+  grid-column: 2;
+  grid-row: 1;
+}
+.win-header.is-narrow .win-presets-m {
+  flex: 0 1 200px;
+  min-width: 150px;
 }
 </style>

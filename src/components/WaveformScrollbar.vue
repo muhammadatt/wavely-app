@@ -73,6 +73,11 @@ function pxToScroll(px) {
 // ── Thumb drag ───────────────────────────────────────────────────────────────
 let dragStartX = 0
 let dragStartLeftPx = 0
+// The pointer that started the drag. The listeners are on the window, so
+// without this a second finger jumped the scroll position and lifting it ended
+// the first finger's drag; now every other pointer is ignored until this one
+// lifts.
+let dragPointerId = null
 
 // `startLeftPx` is where the thumb is being dragged *from*. It defaults to the
 // thumb's current position, but a track click passes the position it just
@@ -80,9 +85,10 @@ let dragStartLeftPx = 0
 // thumbLeftPx here would anchor the drag to the pre-jump position and the thumb
 // would snap back on the first pointer move.
 function onThumbPointerDown(e, startLeftPx = thumbLeftPx.value) {
-  if (e.button !== 0 || !scrollable.value) return
+  if (e.button !== 0 || !scrollable.value || dragPointerId !== null) return
   e.preventDefault()
   e.stopPropagation()
+  dragPointerId = e.pointerId
   isDragging.value = true
   dragStartX = e.clientX
   dragStartLeftPx = startLeftPx
@@ -92,11 +98,13 @@ function onThumbPointerDown(e, startLeftPx = thumbLeftPx.value) {
 }
 
 function onDragMove(e) {
-  if (!isDragging.value) return
+  if (!isDragging.value || e.pointerId !== dragPointerId) return
   emitScroll(pxToScroll(dragStartLeftPx + (e.clientX - dragStartX)))
 }
 
-function onDragUp() {
+function onDragUp(e) {
+  if (e && e.pointerId !== dragPointerId) return
+  dragPointerId = null
   isDragging.value = false
   window.removeEventListener('pointermove', onDragMove)
   window.removeEventListener('pointerup', onDragUp)
@@ -107,7 +115,7 @@ function onDragUp() {
 // it: at these zoom levels a page step can take several clicks to cross a long
 // file, and the position clicked is where the user wants to be.
 function onTrackPointerDown(e) {
-  if (e.button !== 0 || !scrollable.value || !track.value) return
+  if (e.button !== 0 || !scrollable.value || !track.value || dragPointerId !== null) return
   const rect = track.value.getBoundingClientRect()
   const targetPx = Math.max(0, Math.min(
     freeTrackPx.value,

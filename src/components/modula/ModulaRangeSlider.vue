@@ -17,6 +17,7 @@
  *
  * The span rule is a ratio (`hi / lo`), so it assumes a log-like axis.
  */
+import { localPoint } from '../../ui/pointerLocal.js'
 import { computed, ref } from 'vue'
 import { clamp01, valueToPct, pctToValue } from '../knobs/knobGeometry.js'
 
@@ -78,8 +79,9 @@ function setCap(which, pct) {
 
 /** Pointer x as a 0–1 position along the cap travel. */
 function pctAt(e) {
-  const r = slot.value.getBoundingClientRect()
-  return (e.clientX - r.left - CAP / 2) / Math.max(1, r.width - CAP)
+  // Layout pixels, the units CAP is in (see ui/pointerLocal.js).
+  const { x } = localPoint(e, slot.value)
+  return (x - CAP / 2) / Math.max(1, slot.value.offsetWidth - CAP)
 }
 
 function onDown(e) {

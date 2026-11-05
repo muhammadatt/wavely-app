@@ -1,4 +1,5 @@
 <script setup>
+import { localPoint } from '../../../ui/pointerLocal.js'
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { eqResponseDb } from '../../../audio/eqProcessor.js'
 import { getRole, bandwidthOctaves, ROLES_IN_ORDER, isBandActive } from '../../../audio/eqBands.js'
@@ -956,11 +957,12 @@ function onHandleDown(e, band) {
 
 function onHandleMove(e) {
   if (!drag) return
-  const rect = canvasEl.value.getBoundingClientRect()
+  // Layout pixels: the faceplate is scaled on a phone (see ui/pointerLocal.js).
+  const p = localPoint(e, canvasEl.value)
   emit('move-band', {
     id: drag.id,
-    frequencyHz: hzFor(e.clientX - rect.left),
-    gainDb: dbFor(e.clientY - rect.top),
+    frequencyHz: hzFor(p.x),
+    gainDb: dbFor(p.y),
   })
 }
 
@@ -996,11 +998,10 @@ function onHandleWheel(e, band) {
  */
 function onPlotMove(e) {
   if (!props.cursorReadout || !canvasEl.value) return
-  const rect = canvasEl.value.getBoundingClientRect()
   // Rounded at the source, not at display time, so the ref only changes when
   // the number on screen would — which keeps this from forcing a canvas
   // repaint on every pixel of pointer travel.
-  cursorHz.value = Math.round(hzFor(e.clientX - rect.left))
+  cursorHz.value = Math.round(hzFor(localPoint(e, canvasEl.value).x))
 }
 
 function onPlotDown(e) {
@@ -1009,7 +1010,7 @@ function onPlotDown(e) {
   // places a free band at the point, VoiceRx resolves the frequency to a role
   // and places that role's band. Both want the gesture, so this component only
   // reports it.
-  const rect = canvasEl.value.getBoundingClientRect()
+  const p = localPoint(e, canvasEl.value)
 
   // The press carries straight into dragging the band it just made, so the
   // whole gesture is one movement: put it here, pull it to there. The owner
@@ -1022,8 +1023,8 @@ function onPlotDown(e) {
   // now under the pointer, which is all the drag needs.
   let placed = null
   emit('create-band', {
-    frequencyHz: hzFor(e.clientX - rect.left),
-    gainDb: dbFor(e.clientY - rect.top),
+    frequencyHz: hzFor(p.x),
+    gainDb: dbFor(p.y),
     adopt: (id) => { placed = id ?? null },
   })
   if (placed === null) return

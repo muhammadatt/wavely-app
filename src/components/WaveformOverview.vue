@@ -77,19 +77,16 @@ let dragStartX = 0
 let dragStartScrollLeft = 0
 let dragStartVisibleDuration = 0
 
-function onWindowPointerDown(e) {
-  e.stopPropagation()
-  dragMode = 'pan'
-  dragStartX = e.clientX
-  dragStartScrollLeft = scrollLeft.value
-  window.addEventListener('pointermove', onDragMove)
-  window.addEventListener('pointerup', onDragUp)
-  window.addEventListener('pointercancel', onDragUp)
-}
+// The pointer that started the drag. The listeners are on the window, so
+// without this a second finger moved the view and lifting it ended the first
+// finger's drag; now every other pointer is ignored until this one lifts.
+let dragPointerId = null
 
-function onLeftHandlePointerDown(e) {
+function startDrag(e, mode) {
   e.stopPropagation()
-  dragMode = 'left'
+  if (dragPointerId !== null) return
+  dragPointerId = e.pointerId
+  dragMode = mode
   dragStartX = e.clientX
   dragStartScrollLeft = scrollLeft.value
   dragStartVisibleDuration = visibleDuration.value
@@ -98,18 +95,12 @@ function onLeftHandlePointerDown(e) {
   window.addEventListener('pointercancel', onDragUp)
 }
 
-function onRightHandlePointerDown(e) {
-  e.stopPropagation()
-  dragMode = 'right'
-  dragStartX = e.clientX
-  dragStartScrollLeft = scrollLeft.value
-  dragStartVisibleDuration = visibleDuration.value
-  window.addEventListener('pointermove', onDragMove)
-  window.addEventListener('pointerup', onDragUp)
-  window.addEventListener('pointercancel', onDragUp)
-}
+const onWindowPointerDown = e => startDrag(e, 'pan')
+const onLeftHandlePointerDown = e => startDrag(e, 'left')
+const onRightHandlePointerDown = e => startDrag(e, 'right')
 
 function onDragMove(e) {
+  if (e.pointerId !== dragPointerId) return
   if (!dragMode || !stripWidth.value || !totalDuration.value || !viewportWidthPx) return
   const deltaSec = pxToSec(e.clientX - dragStartX)
   const minVisible = minVisibleDuration()
@@ -132,7 +123,9 @@ function onDragMove(e) {
   }
 }
 
-function onDragUp() {
+function onDragUp(e) {
+  if (e && e.pointerId !== dragPointerId) return
+  dragPointerId = null
   dragMode = null
   window.removeEventListener('pointermove', onDragMove)
   window.removeEventListener('pointerup', onDragUp)
@@ -142,7 +135,7 @@ function onDragUp() {
 // Click on the dimmed area outside the window → jump the window there,
 // centered on the click, keeping the current zoom level.
 function onStripPointerDown(e) {
-  if (!stripWidth.value || !totalDuration.value) return
+  if (dragPointerId !== null || !stripWidth.value || !totalDuration.value) return
   const rect = strip.value.getBoundingClientRect()
   const clickTime = pxToSec(e.clientX - rect.left)
   const maxStart = Math.max(0, totalDuration.value - visibleDuration.value)
