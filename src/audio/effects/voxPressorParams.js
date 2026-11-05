@@ -10,7 +10,7 @@ import {
 } from '../voxPressorProcessor.js'
 import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
 import {
-  HF_SOFTENER_DEFAULTS, splitAmount, toKernelParams as deEsserKernelParams,
+  DE_ESSER_DEFAULTS, splitAmount, toKernelParams as deEsserKernelParams,
 } from '../deEsserParams.js'
 import { levelOffsetDbFor } from '../deEsserProcessor.js'
 import { ALIGN_TARGET_DBFS } from '../dsp/inputAlign.js'
@@ -135,7 +135,7 @@ export const VOX_DEFAULTS = {
    */
   body: 4.8,
   /**
-   * DE-ESS, 0–100 (0 = stage out): the HF Softener's Amount, shared by
+   * DE-ESS, 0–100 (0 = stage out): the De-Esser's Amount, shared by
    * `deEssSplit` between its Duck and EQ, Guard 100 — every other control
    * the De-Esser's own default. After Body, before Parallel (owner's order).
    */
@@ -328,7 +328,7 @@ function stageParams(p) {
   return {
     deEssOn: deEss > 0 && aligned,
     deEss: deEsserKernelParams({
-      ...HF_SOFTENER_DEFAULTS, duck, amount, levelOffset, air: 0, soften: 0, resoAmount: 0,
+      ...DE_ESSER_DEFAULTS, duck, amount, levelOffset, air: 0, soften: 0, resoAmount: 0,
     }),
     parallelMix: mix,
     parallelOn: mix > 0 && Number.isFinite(p.parallelAlignDb) && Number.isFinite(p.parallelMakeupDb),

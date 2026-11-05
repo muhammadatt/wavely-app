@@ -2,11 +2,11 @@
  * High-frequency limiting — the two stages behind the HF Limiter plugin.
  *
  * Kept apart from the worklet so the stages can be embedded elsewhere later
- * (the HF Softener's chain, or after a harmonic-generating saturator in the
+ * (the De-Esser's chain, or after a harmonic-generating saturator in the
  * EL Fatso mould) without taking the plugin's wrapper with them. The stage is
  * block-based, owns its per-channel state, and is BIT-TRANSPARENT BELOW
  * THRESHOLD: it writes `dry + correction`, and the correction is exactly zero
- * until something crosses the line. That is the property the HF Softener was
+ * until something crosses the line. That is the property the De-Esser was
  * built around, and it is what lets a limiter sit on a whole file without
  * touching the parts that did not need it.
  *
@@ -314,7 +314,7 @@ export class ShelfLimiterStage {
       ? transientGateLin
       : thresholdLin * Math.pow(10, -TRANSIENT_GATE_BELOW_DB / 20)
     this.tSlope = transientSlope > 0 ? transientSlope : TRANSIENT_SLOPE
-    // A SEPARATE TRANSIENT BAND (the HF Softener's Soften): the transient detector listens to,
+    // A SEPARATE TRANSIENT BAND (the De-Esser's Soften): the transient detector listens to,
     // and cuts, its own one-pole split at `transientCornerHz`, cascaded after
     // the shelf. null keeps the HF Limiter's shared band, bit for bit.
     this.tSplit = Number.isFinite(transientCornerHz) && transientCornerHz > 0

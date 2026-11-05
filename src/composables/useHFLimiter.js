@@ -93,7 +93,7 @@ const copies = pluginCopies((copy, life) => {
      * Threshold setting means the same thing on a quiet recording and a hot one.
      *
      * ⚠ THE WHOLE FILE, NEVER THE SELECTION, and the same gated-RMS statistic —
-     * the rule OptoSmooth's input alignment and the HF Softener's level offset
+     * the rule OptoSmooth's input alignment and the De-Esser's level offset
      * already follow, so all three read one number for one file. Measured per
      * selection, a phrase and the paragraph around it would get different
      * thresholds and the same edit applied twice would disagree with itself.

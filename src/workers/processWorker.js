@@ -157,7 +157,7 @@ function phatassWarmthReadout(channelData, sampleRate, params) {
 }
 
 /**
- * The HF Softener's automatic Air: the chain's top-end loss over the analysis
+ * The De-Esser's automatic Air: the chain's top-end loss over the analysis
  * window (softener plus the Reso pre-stage when it is in), and the Air amount
  * it asks for — see deEsserAutoAir.js.
  */

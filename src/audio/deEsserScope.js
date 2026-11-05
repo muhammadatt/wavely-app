@@ -1,5 +1,5 @@
 /**
- * HF Softener activity scope — the data side, kept free of Vue and the audio
+ * De-Esser activity scope — the data side, kept free of Vue and the audio
  * graph so it can be tested in node.
  *
  * The kernel reports one point per process() call (SCOPE_STRIDE floats: input

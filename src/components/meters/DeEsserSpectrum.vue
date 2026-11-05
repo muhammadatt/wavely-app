@@ -4,7 +4,7 @@ import { useMeterFrame } from './ballistics.js'
 import { applyTilt, createLogMapper } from '../../audio/dsp/spectrumDisplay.js'
 
 /**
- * The input's spectrum, drawn BEHIND the HF Softener's response curve on the
+ * The input's spectrum, drawn BEHIND the De-Esser's response curve on the
  * same log-frequency axis, so the Detect and Band corners the panel marks over
  * it can be read against the voice: a low "s" sitting under the band says pull
  * Band down; vowel energy crossing the Detect line says raise Detect.

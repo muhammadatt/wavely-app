@@ -60,7 +60,7 @@ import autoLeveler from './auto-leveler.js'
 import sibilanceEditor from './clip-gain-deesser.js'
 import fetPunch from './fet-punch.js'
 import hfLimiter from './hf-limiter.js'
-import deEsser from './hf-softener.js'
+import deEsser from './de-esser.js'
 import humRemover from './hum-remover.js'
 import loudness from './loudness.js'
 import manualEq from './manual-eq.js'
@@ -86,7 +86,7 @@ export const HELP = {
   'clip-gain-deesser': sibilanceEditor,
   'fet-punch': fetPunch,
   'hf-limiter': hfLimiter,
-  'hf-softener': deEsser,
+  'de-esser': deEsser,
   'hum-remover': humRemover,
   loudness,
   'manual-eq': manualEq,

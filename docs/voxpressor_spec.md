@@ -18,7 +18,7 @@ the one dynamics tool a narrator reaches for:
 | Problem on voice | What the analog plugins do today | What VoxPressor does |
 |---|---|---|
 | Plosives / chest thump trip the detector and duck the whole word | LA-2A: R37 tilt only. 1176: optional one-pole `scHpfHz`, off by default | Voice-shaped detector: high-pass at the speaker's own rumble corner, plosives and sibilance turned down |
-| "s" sounds get louder after compression (body is pulled down, sibilance isn't) | Separate HF Softener, user must know to add it *after* | De-ess is built in, placed after the compressor, linked to it |
+| "s" sounds get louder after compression (body is pulled down, sibilance isn't) | Separate De-Esser, user must know to add it *after* | De-ess is built in, placed after the compressor, linked to it |
 | Two serial compressors (76 → 2A) is the standard vocal chain, but it takes two windows and nine 1176/LA-2A controls to stage | Chain them manually in the Plugin Chain | Two knobs that say what they do: **Peaks** (dB off the loudest peaks, the 76) and **Body** (average leveling, the 2A) |
 | "Enhance" (presence, air, density) is four more plugins | Scheps Parallel, Air Boost, Cambridge Inflator, Saturation Workbench | Three knobs: **Parallel** (Scheps' Pultec → LA-2A trick), **Air**, **Density** |
 
@@ -48,7 +48,7 @@ in ─ INPUT ALIGN (drive offset, detector only)
    │     makeup (closed form) → LIMITER (source peak)
    ├─ [2] BODY    — LA2AKernel (opto, rides the phrase)       ◄── detector (full)
    │     makeup + restore → LIMITER (source peak)
-   ├─ [3] DE-ESS  — HFSoftenerKernel (Duck + EQ, lisp guard), level from the Body output   (built)
+   ├─ [3] DE-ESS  — DeEsserKernel (Duck + EQ, lisp guard), level from the Body output   (built)
    ├─ [4] PARALLEL — FET1176Kernel at its own Mix (New York: fast 4:1 copy under the dry),
    │     detector hears sibilance +15 dB; makeup on the blend; measured on the de-esser's output  (built)
    │     restore → LIMITER (source peak)
@@ -142,9 +142,9 @@ BODY SC** and compare against a plain LA Vintage 2A.
 | **Body** | 0–10 | 4.75 | The 2A's **Peak Reduction** over its usable span (PR 38 + 4 a step), aligned the same way and net of the Peaks stage's makeup. Readout: avg leveling on voiced material. 0 = stage out |
 | **Character WARM / CLEAN** | switch | WARM | Every LA-2A's tube colour (`analog`, LA Vintage 2A's Analog switch): Body, and the Parallel copy when it is the LA-2A. CLEAN delivers the same gain envelope as a pure gain — leveling bit-identical, the makeup moves ~0.1 dB with the valve |
 | **Ceiling** | SOURCE / −1 / −3 dBFS | SOURCE | Where the output peak lands (`outputCeilingDb`): SOURCE holds the source's own peak, as every stage does; a ceiling scales the output by ceiling − source peak ahead of the last limiter, which holds the ceiling. At or ⚠ 0.09–0.16 dB under it (the Parallel stage's soft ceiling leaves the output that far under the source peak), never over. A gain on a measured peak: it never re-measures. The Output trim comes after it |
-| **De-ess** | 0–100 | 40 | HF Softener **Amount** (shared by a WIDE ↔ SPLIT slider, `deEssSplit`, default 33; Guard 100) |
+| **De-ess** | 0–100 | 40 | De-Esser **Amount** (shared by a WIDE ↔ SPLIT slider, `deEssSplit`, default 33; Guard 100) |
 | **Parallel** | 0–100 % | 30 | The parallel 1176's **Mix** (§4.4): a fast 4:1 copy blended under the voice, peaks held, the rest raised. 0 = stage out, a pure delay |
-| **Air** | 0–6 dB | 1.5 | Air Boost curve (`dsp/airBandCurve.js`), VOICED mode only (vowels), the HF Softener's existing Air path |
+| **Air** | 0–6 dB | 1.5 | Air Boost curve (`dsp/airBandCurve.js`), VOICED mode only (vowels), the De-Esser's existing Air path |
 | **Density** | 0–100 % | 30 | Cambridge Inflator **Effect** (§4.3). Lifts the body up to +3.5 dB under a fixed peak, with odd harmonics on the loudest syllables |
 | **Mix** | 0–100 % | 100 | Parallel blend against delay-compensated dry |
 | **Output** | ±12 dB | AUTO | Owned by auto makeup until touched (the LA Vintage 2A Gain-knob contract) |
@@ -153,7 +153,7 @@ There is no Character knob any more: what it used to blend (opto vs. FET) is
 now two knobs with separate jobs.
 
 Header: preset browser, ON/BYPASS lamp, **DELTA** pill (plays what VoxPressor
-removed + added), **Listen: SC** (plays the voice detector — the HF Softener's
+removed + added), **Listen: SC** (plays the voice detector — the De-Esser's
 MONITOR contract).
 
 ### 4.2 Peaks — the 1176 as an automatic peak trimmer
@@ -488,7 +488,7 @@ mechanisms, but presets should not max both (§11).
 - IN / OUT ladders (`LevelMeter variant="modula"`).
 - Three stacked GR bars: **PEAKS** (76, with the body-GR tick from §4.2),
   **BODY** (2A), **DE-ESS**.
-- The HF Softener's activity scope is *not* included — one scope per window is
+- The De-Esser's activity scope is *not* included — one scope per window is
   enough, and it is the busiest part of that panel.
 
 ### 4.6 Advanced (dev bench, gated like the PHAT*SS bench)
@@ -593,7 +593,7 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
 3. **Body + makeup + Mix.** Audition against the 76 → 2A chain built by hand
    in the Plugin Chain (should be near-identical at matched settings — a
    useful test).
-4. **De-ess** — embed HF Softener, fed the post-compression level offset.
+4. **De-ess** — embed De-Esser, fed the post-compression level offset.
 5. **Parallel, Air, Density** — a parallel 1176 measured on the de-esser's output (was embedded Scheps, §4.4), Air, anchored Inflator.
 6. **Panel, presets, chunked apply, smoke.**
 
@@ -677,8 +677,7 @@ Registry: Dynamics category, `release: 'dev'` until auditioned (plus the
   longer after each peak. To audition: a low male narrator (≤ 110 Hz) —
   neither real clip is one.
 - **Stage 2: De-ess → Parallel → Density, in that order** (owner, October
-  2026: de-ess before the parallel stage). Defaults De-ess 40 (the HF
-  Softener's Amount, Split on a slider under the knob, default 33, Guard 100),
+  2026: de-ess before the parallel stage). Defaults De-ess 40 (the De-Esser's Amount, Split on a slider under the knob, default 33, Guard 100),
   Parallel 30 % PRESENCE, Density 30 %. Measured on the owner's clips (30 s,
   loudness / energy above 5 kHz vs the source; core = Peaks 3 / Body 57 / AUTO):
   Messy and Bright core +2.44 / +4.84 dB, + De-ess +2.30 / +0.77, + Parallel

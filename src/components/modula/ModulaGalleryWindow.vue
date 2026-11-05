@@ -277,7 +277,7 @@ onUnmounted(() => clearInterval(timer))
   min-width: 0;
   padding: 22px;
   border-radius: 16px;
-  /* The same group surface the shipping panels use (HF Softener, Inflator), so
+  /* The same group surface the shipping panels use (De-Esser, Inflator), so
      the kit shows each control against the background it actually sits on. */
   background: var(--m-panel);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);

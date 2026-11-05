@@ -27,12 +27,12 @@ import {
 import { SATURATION_BENCH_DEFAULTS, toKernelParams as toSatBenchKernelParams } from '../../src/audio/saturationBenchParams.js'
 import { SAT_BENCH_LATENCY_SAMPLES, SAT_BENCH_PREROLL_S } from '../../src/audio/saturationBenchProcessor.js'
 import {
-  HF_SOFTENER_DEFAULTS, toKernelParams as toHFSoftenerKernelParams,
+  DE_ESSER_DEFAULTS, toKernelParams as toDeEsserKernelParams,
   resoKernelParams, softenStageKernelParams,
 } from '../../src/audio/deEsserParams.js'
 import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from '../../src/audio/deEsserResoStage.js'
 import { softenLatencySamples } from '../../src/audio/deEsserSoftenStage.js'
-import { HF_SOFTENER_PREROLL_S } from '../../src/audio/deEsserProcessor.js'
+import { DE_ESSER_PREROLL_S } from '../../src/audio/deEsserProcessor.js'
 
 export const SR = 44100
 
@@ -84,7 +84,7 @@ export const MATERIALS = Object.fromEntries(Object.entries({
 
   /**
    * Speech-like phrases with DIGITAL SILENCE between them, and sibilant noise
-   * bursts. The HF Softener's trackers settle slowly through the gaps: at 2 s of
+   * bursts. The De-Esser's trackers settle slowly through the gaps: at 2 s of
    * run-in a seam read −95 dBFS, 33 ms in.
    */
   gaps() {
@@ -142,10 +142,10 @@ function peakDb(xs) {
   return db(pk)
 }
 
-function hfSoftener(extra) {
+function deEsser(extra) {
   return () => {
-    const merged = { ...HF_SOFTENER_DEFAULTS, ...extra }
-    const stages = [{ renderer: 'hfSoftener', kernelParams: toHFSoftenerKernelParams(merged) }]
+    const merged = { ...DE_ESSER_DEFAULTS, ...extra }
+    const stages = [{ renderer: 'deEsser', kernelParams: toDeEsserKernelParams(merged) }]
     let latency = 0
     if (merged.resoAmount > 0) {
       stages.push({ renderer: 'resonance', kernelParams: resoKernelParams(merged), options: { frameSize: HF_RESO_FRAME_SIZE } })
@@ -155,7 +155,7 @@ function hfSoftener(extra) {
       stages.push({ renderer: 'hfLimiter', kernelParams: softenStageKernelParams(merged) })
       latency += softenLatencySamples(SR)
     }
-    return { stages, latency, preRollS: HF_SOFTENER_PREROLL_S, grid: merged.resoAmount > 0 ? resonanceHopSamples(HF_RESO_FRAME_SIZE) : undefined }
+    return { stages, latency, preRollS: DE_ESSER_PREROLL_S, grid: merged.resoAmount > 0 ? resonanceHopSamples(HF_RESO_FRAME_SIZE) : undefined }
   }
 }
 
@@ -196,9 +196,9 @@ export const PLUGINS = [
       latency: la2aPatchLatencySamples(merged, SR), preRollS: LA2A_PREROLL_S,
     }
   }],
-  ['HF Softener, defaults', hfSoftener({})],
-  ['HF Softener, Soften 6', hfSoftener({ soften: 6 })],
-  ['HF Softener, Reso and Soften', hfSoftener({ soften: 6, resoAmount: 50 })],
+  ['De-Esser, defaults', deEsser({})],
+  ['De-Esser, Soften 6', deEsser({ soften: 6 })],
+  ['De-Esser, Reso and Soften', deEsser({ soften: 6, resoAmount: 50 })],
   ['LA Classic 76 at Input 70', () => ({
     stages: [{ renderer: 'fet1176', kernelParams: toFETKernelParams({ ...FET1176_DEFAULTS, input: 70 }) }],
     latency: FET1176_LATENCY_SAMPLES, preRollS: FET1176_PREROLL_S,

@@ -1,7 +1,7 @@
 /**
  * The Maag-style Air Band curve: five overlapping bells plus a wide high shelf,
  * all scaling from one gain. Shared by Air Boost (airBandProcessor.js) and the
- * HF Softener's Air makeup, so both are the same curve by construction.
+ * De-Esser's Air makeup, so both are the same curve by construction.
  *
  * Pure coefficients and no worklet registration, so any worklet kernel can
  * import it: airBandProcessor.js registers 'air-band-processor', and importing

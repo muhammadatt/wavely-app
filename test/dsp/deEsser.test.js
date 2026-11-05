@@ -1,7 +1,7 @@
 /**
  * Run with:  npm test
  *
- * Dynamic HF Softener. Most of these are the spec's own "objective checks" —
+ * Dynamic De-Esser. Most of these are the spec's own "objective checks" —
  * the failure modes that are hard to hear on a single pass — run against
  * deterministic synthetic voice so they stay in the unit suite.
  */
@@ -10,12 +10,12 @@ import assert from 'node:assert/strict'
 import {
   Biquad,
   Follower,
-  HF_SOFTENER_TUNING as T,
-  HF_SOFTENER_TUNING,
+  DE_ESSER_TUNING as T,
+  DE_ESSER_TUNING,
   lispGuardTiltWeight,
-  HFSoftenerKernel,
-  HF_SOFTENER_KERNEL_DEFAULTS,
-  HF_SOFTENER_PREROLL_S,
+  DeEsserKernel,
+  DE_ESSER_KERNEL_DEFAULTS,
+  DE_ESSER_PREROLL_S,
   ROTATOR_DETECTOR_TRIM_DB,
   adaptiveThresholdDb,
   amountToMaxDepthDb,
@@ -28,7 +28,7 @@ import {
   levelOffsetDbFor,
   amountToSlope,
   amountToCompressionRatio,
-  processHFSoftenerBuffer,
+  processDeEsserBuffer,
   rotatorMaxGroupDelayMs,
   rotatorSections,
   shelfSection,
@@ -49,7 +49,7 @@ import { bandpass, highpass, lowpass, magnitudeResponseDb, peaking } from '../..
 import { processResonanceBuffer, ResonanceKernel } from '../../src/audio/resonanceProcessor.js'
 import { measureTopLossDb, autoAirDb, AIR_AUTO_FRACTION } from '../../src/audio/deEsserAutoAir.js'
 import { createScopeRing, columnKind, kindRuns, shadeColumns, SHADE_FALL_DB } from '../../src/audio/deEsserScope.js'
-import { HF_SOFTENER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams, guardToFloorDb, splitAmount, amountSplitOf, GUARD_FLOOR_LOOSE_DB, GUARD_FLOOR_STRICT_DB } from '../../src/audio/deEsserParams.js'
+import { DE_ESSER_DEFAULTS, toKernelParams as toSoftenerKernelParams, resoOn, resoKernelParams, guardToFloorDb, splitAmount, amountSplitOf, GUARD_FLOOR_LOOSE_DB, GUARD_FLOOR_STRICT_DB } from '../../src/audio/deEsserParams.js'
 import { RESONANCE_DEFAULTS, toKernelParams as toResonanceKernelParams } from '../../src/audio/resonanceParams.js'
 import {
   HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES, HF_RESO_ZONES, hfResoKernelParams, hfResoZones,
@@ -178,7 +178,7 @@ test('rotator: group delay stays under the 2 ms budget above 3 kHz', () => {
 
 test('rotator: kernel refuses a cascade over the group-delay budget', () => {
   const slow = { ...T, apFreqsHz: [3200, 3300, 3400], apQs: [8, 8, 8] }
-  assert.throws(() => new HFSoftenerKernel(SR, slow), /group delay/)
+  assert.throws(() => new DeEsserKernel(SR, slow), /group delay/)
 })
 
 test('rotator: detector trim level-matches the follower on pink noise', () => {
@@ -190,7 +190,7 @@ test('rotator: detector trim level-matches the follower on pink noise', () => {
     const meanDb = rot => {
       const rs = rotatorSections(sr).map(c => new Biquad(c))
       const hp = new Biquad(highpass(sr, T.detHpFreqHz, T.detHpQ))
-      const f = new Follower(sr, T.attackMs, HF_SOFTENER_KERNEL_DEFAULTS.releaseMs)
+      const f = new Follower(sr, T.attackMs, DE_ESSER_KERNEL_DEFAULTS.releaseMs)
       let sum = 0
       let cnt = 0
       for (let i = 0; i < x.length; i++) {
@@ -290,21 +290,21 @@ test('bit-transparent below threshold', () => {
   // The shelf at 0 dB has identical numerator and denominator, so quiet
   // material comes back sample-for-sample, not merely close.
   const x = pink(SR * 2, 9).map(v => v * 0.01)
-  const { channelData } = processHFSoftenerBuffer([x], SR, {})
+  const { channelData } = processDeEsserBuffer([x], SR, {})
   for (let i = 0; i < x.length; i++) assert.equal(channelData[0][i], x[i], `sample ${i}`)
 })
 
 test('zero latency', () => {
   const x = new Float32Array(1024)
   x[100] = 0.001
-  const { channelData } = processHFSoftenerBuffer([x], SR, {})
+  const { channelData } = processDeEsserBuffer([x], SR, {})
   assert.equal(channelData[0][100], x[100])
   assert.equal(channelData[0][99], 0)
 })
 
 test('breath and room tone get 0 dB of reduction; sibilants do not', () => {
   const { x, labels } = makeSpeech(SR)
-  const { gainDb } = processHFSoftenerBuffer([x], SR, {}, { recordGain: true })
+  const { gainDb } = processDeEsserBuffer([x], SR, {}, { recordGain: true })
   let breathMin = 0
   let sibMin = 0
   for (let i = 0; i < x.length; i++) {
@@ -317,7 +317,7 @@ test('breath and room tone get 0 dB of reduction; sibilants do not', () => {
 
 test('gain-reduction histogram: mode at 0 dB, a tail and not a second peak', () => {
   const { x } = makeSpeech(SR)
-  const { gainDb } = processHFSoftenerBuffer([x], SR, {}, { recordGain: true })
+  const { gainDb } = processDeEsserBuffer([x], SR, {}, { recordGain: true })
   const bins = new Array(13).fill(0) // 0.5 dB bins, 0 to -6
   for (const g of gainDb) bins[Math.min(12, Math.floor(-g / 0.5))]++
   const mode = bins.indexOf(Math.max(...bins))
@@ -348,8 +348,8 @@ test('context: an isolated sibilant is cut harder than one inside a phrase', () 
     }
     return m
   }
-  const fixed = processHFSoftenerBuffer([x], SR, { context: 0, lispGuard: false }, { recordGain: true }).gainDb
-  const ctx = processHFSoftenerBuffer([x], SR, { context: 0.5, lispGuard: false }, { recordGain: true }).gainDb
+  const fixed = processDeEsserBuffer([x], SR, { context: 0, lispGuard: false }, { recordGain: true }).gainDb
+  const ctx = processDeEsserBuffer([x], SR, { context: 0.5, lispGuard: false }, { recordGain: true }).gainDb
   const inPhraseFixed = worst(fixed, 0.35, 0.45)
   const inPhraseCtx = worst(ctx, 0.35, 0.45)
   const isolatedCtx = worst(ctx, 0.7, 0.8)
@@ -370,7 +370,7 @@ test('sample-rate invariance: same stimulus at 44.1 / 48 / 96 kHz, same gain cur
       const burst = t > 0.2 && t < 0.24 ? 0.2 : 0
       x[i] = 0.1 * Math.sin(2 * Math.PI * 300 * t) + burst * Math.sin(2 * Math.PI * 6500 * t)
     }
-    return processHFSoftenerBuffer([x], sr, { amount: 0.6, lispGuard: false }, { recordGain: true }).gainDb
+    return processDeEsserBuffer([x], sr, { amount: 0.6, lispGuard: false }, { recordGain: true }).gainDb
   }
   const ref = curve(48000)
   for (const sr of [44100, 96000]) {
@@ -387,8 +387,8 @@ test('sample-rate invariance: same stimulus at 44.1 / 48 / 96 kHz, same gain cur
 
 test('delta monitor is exactly what the processor removed', () => {
   const { x } = makeSpeech(SR, { seconds: 2 })
-  const wet = processHFSoftenerBuffer([x], SR, {}).channelData[0]
-  const delta = processHFSoftenerBuffer([x], SR, {}, { listen: 'delta' }).channelData[0]
+  const wet = processDeEsserBuffer([x], SR, {}).channelData[0]
+  const delta = processDeEsserBuffer([x], SR, {}, { listen: 'delta' }).channelData[0]
   let worst = 0
   for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(wet[i] + delta[i] - x[i]))
   assert.ok(worst < 1e-6, `wet + delta misses the input by ${worst}`)
@@ -396,7 +396,7 @@ test('delta monitor is exactly what the processor removed', () => {
 
 test('in-path rotation changes phase only while the shelf is idle', () => {
   const x = pink(SR, 4).map(v => v * 0.01)
-  const out = processHFSoftenerBuffer([x], SR, { rotator: 'inpath' }).channelData[0]
+  const out = processDeEsserBuffer([x], SR, { rotator: 'inpath' }).channelData[0]
   const rs = rotatorSections(SR).map(c => new Biquad(c))
   let worst = 0
   for (let i = 0; i < x.length; i++) {
@@ -409,8 +409,8 @@ test('in-path rotation changes phase only while the shelf is idle', () => {
 
 test('stereo is linked: identical channels give the mono result on both', () => {
   const { x } = makeSpeech(SR, { seconds: 2 })
-  const mono = processHFSoftenerBuffer([x], SR, {}).channelData[0]
-  const [l, r] = processHFSoftenerBuffer([x, x], SR, {}).channelData
+  const mono = processDeEsserBuffer([x], SR, {}).channelData[0]
+  const [l, r] = processDeEsserBuffer([x, x], SR, {}).channelData
   for (let i = 0; i < x.length; i++) {
     assert.equal(l[i], mono[i])
     assert.equal(r[i], mono[i])
@@ -419,17 +419,17 @@ test('stereo is linked: identical channels give the mono result on both', () => 
 
 test('pre-roll converges an applied region onto the playing preview', () => {
   const { x } = makeSpeech(SR, { seconds: 4 })
-  const full = processHFSoftenerBuffer([x], SR, {}).channelData[0]
-  const pre = Math.round(HF_SOFTENER_PREROLL_S * SR)
+  const full = processDeEsserBuffer([x], SR, {}).channelData[0]
+  const pre = Math.round(DE_ESSER_PREROLL_S * SR)
   const start = Math.round(2.3 * SR) // mid-vowel, envelopes live
-  const cut = processHFSoftenerBuffer([x.subarray(start - pre)], SR, {}).channelData[0]
+  const cut = processDeEsserBuffer([x.subarray(start - pre)], SR, {}).channelData[0]
   let worst = 0
   for (let i = 0; i < SR; i++) worst = Math.max(worst, Math.abs(cut[pre + i] - full[start + i]))
   assert.ok(20 * Math.log10(worst + 1e-30) < -90, `region differs by ${(20 * Math.log10(worst)).toFixed(1)} dBFS`)
 })
 
 test('macro changes ramp rather than step', () => {
-  const k = new HFSoftenerKernel(SR)
+  const k = new DeEsserKernel(SR)
   k.setParams({ amount: 1 })
   // Half-way through the 20 ms ramp the threshold is between the two ends.
   const n = Math.round(0.01 * SR)
@@ -467,7 +467,7 @@ function consonantRun(sr) {
 /** Largest recovery (dB) of the shelf inside the run's unvoiced gaps. */
 function gapBounceDb(params) {
   const { y, bursts } = consonantRun(SR)
-  const g = processHFSoftenerBuffer([y], SR, params, { recordGain: true }).gainDb
+  const g = processDeEsserBuffer([y], SR, params, { recordGain: true }).gainDb
   let worst = 0
   for (let c = 1; c < 3; c++) {
     for (let j = 0; j < 2; j++) {
@@ -498,8 +498,8 @@ test('vowel release: the vowel after an "s" keeps its top end', () => {
   // 60 ms at the default, -3.59 at Amount 80 %.
   const { x } = makeSpeech(SR)
   for (const amount of [0.4, 0.8]) {
-    const off = processHFSoftenerBuffer([x], SR, { amount, vowelRelease: false, lispGuard: false }, { recordGain: true }).gainDb
-    const on = processHFSoftenerBuffer([x], SR, { amount, vowelRelease: true, lispGuard: false }, { recordGain: true }).gainDb
+    const off = processDeEsserBuffer([x], SR, { amount, vowelRelease: false, lispGuard: false }, { recordGain: true }).gainDb
+    const on = processDeEsserBuffer([x], SR, { amount, vowelRelease: true, lispGuard: false }, { recordGain: true }).gainDb
     const carryOff = meanGain(off, 0.39, 0.45)
     const carryOn = meanGain(on, 0.39, 0.45)
     // At the shipped 40 % / 40 ms: -1.93 → -0.77 dB. At least halved.
@@ -554,7 +554,7 @@ test('both shapes are exact identities at 0 dB', () => {
       assert.ok(Math.abs(c.b1 - c.a1) < 1e-15 && Math.abs(c.b2 - c.a2) < 1e-15)
     }
     const x = pink(SR, 5).map(v => v * 0.01)
-    const { channelData } = processHFSoftenerBuffer([x], SR, { shape })
+    const { channelData } = processDeEsserBuffer([x], SR, { shape })
     for (let i = 0; i < x.length; i++) assert.equal(channelData[0][i], x[i], `${shape} sample ${i}`)
   }
 })
@@ -565,18 +565,18 @@ test('level alignment: a hotter file with its measured offset gets the same gain
   // Every detector level moves dB-for-dB with the offset and the detector is
   // linear, so the curve is invariant — not approximately, to rounding.
   const { x } = makeSpeech(SR, { seconds: 3 })
-  const ref = processHFSoftenerBuffer([x], SR, { levelOffsetDb: 0 }, { recordGain: true }).gainDb
+  const ref = processDeEsserBuffer([x], SR, { levelOffsetDb: 0 }, { recordGain: true }).gainDb
   for (const db of [-12, 9]) {
     const k = Math.pow(10, db / 20)
     const y = x.map(v => v * k)
-    const g = processHFSoftenerBuffer([y], SR, { levelOffsetDb: db }, { recordGain: true }).gainDb
+    const g = processDeEsserBuffer([y], SR, { levelOffsetDb: db }, { recordGain: true }).gainDb
     let worst = 0
     for (let i = 0; i < g.length; i++) worst = Math.max(worst, Math.abs(g[i] - ref[i]))
     assert.ok(worst < 1e-3, `${db} dB: gain curve moved by ${worst.toFixed(5)} dB`)
     // And without the offset it would not have been: the premise of the fix.
     // Guard off: the guard is voice-relative, so it is level-invariant by
     // itself and would hide what the alignment is for.
-    const raw = processHFSoftenerBuffer([y], SR, { lispGuard: false }, { recordGain: true }).gainDb
+    const raw = processDeEsserBuffer([y], SR, { lispGuard: false }, { recordGain: true }).gainDb
     let drift = 0
     for (let i = 0; i < g.length; i++) drift = Math.max(drift, Math.abs(raw[i] - ref[i]))
     assert.ok(drift > 1, `${db} dB: an unaligned file only moved ${drift.toFixed(2)} dB`)
@@ -594,7 +594,7 @@ test('level alignment: offset is gated RMS minus nominal, clamped', () => {
 
 test('level alignment: Amount 0 % never engages, even on a very quiet file', () => {
   const { x } = makeSpeech(SR, { seconds: 2 })
-  const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: 0, levelOffsetDb: -24 }, { recordGain: true })
+  const { gainDb } = processDeEsserBuffer([x], SR, { amount: 0, levelOffsetDb: -24 }, { recordGain: true })
   for (const g of gainDb) assert.equal(Math.abs(g), 0)
 })
 
@@ -613,7 +613,7 @@ test('amount: the cut grows in even steps across the dial', () => {
   const deepest = a => {
     // The MAP's evenness, so guard off — the guard deliberately flattens the
     // top of the knob on well-behaved sibilants (see the lisp-guard tests).
-    const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: a, lispGuard: false }, { recordGain: true })
+    const { gainDb } = processDeEsserBuffer([x], SR, { amount: a, lispGuard: false }, { recordGain: true })
     let m = 0, breath = 0
     for (let i = 0; i < gainDb.length; i++) {
       m = Math.min(m, gainDb[i])
@@ -636,7 +636,7 @@ test('amount: the cut grows in even steps across the dial', () => {
 // ── Lisp guard ──────────────────────────────────────────────────────────────
 
 test('lisp guard: the tilt weight is 0 for a flat fricative, 1 for a peaked one, linear between', () => {
-  const T = HF_SOFTENER_TUNING
+  const T = DE_ESSER_TUNING
   assert.equal(lispGuardTiltWeight(T.tiltFlatDb - 5), 0)
   assert.equal(lispGuardTiltWeight(T.tiltFlatDb), 0)
   assert.equal(lispGuardTiltWeight(T.tiltPeakedDb), 1)
@@ -651,7 +651,7 @@ test('lisp guard: a flat /f/ after a vowel is cut, a peaked /s/ keeps its guard'
   // 100). Tilt-scaled, the /f/ gets its unguarded cut back and the /s/ keeps
   // most of its protection.
   const cut = (x, amount, guard, tuning, lo, hi) => {
-    const { gainDb } = processHFSoftenerBuffer([x], SR, { amount, lispGuard: guard }, { recordGain: true, tuning })
+    const { gainDb } = processDeEsserBuffer([x], SR, { amount, lispGuard: guard }, { recordGain: true, tuning })
     let m = 0
     for (let i = SR; i < x.length; i++) {
       const t = (i % SR) / SR
@@ -659,7 +659,7 @@ test('lisp guard: a flat /f/ after a vowel is cut, a peaked /s/ keeps its guard'
     }
     return m
   }
-  const untilted = { ...HF_SOFTENER_TUNING, tiltRelaxDb: 0 }
+  const untilted = { ...DE_ESSER_TUNING, tiltRelaxDb: 0 }
   const f = makeSpeech(SR, { seconds: 3, peakedS: true, inPhraseF: true }).x
   // Measured: unguarded -6.7, untilted 0.0, tilt-scaled -6.7 (Amount 100).
   assert.ok(cut(f, 1, true, untilted, 0.35, 0.39) > -0.5, 'the untilted guard should block the /f/ — the failure this fixes')
@@ -681,7 +681,7 @@ test('lisp guard: a normal "s" stops getting deeper, a hot one is still chased',
   // normal "s", which is exactly the lisp it exists to stop.
   const { x } = makeSpeech(SR, { seconds: 3, peakedS: true })
   const deepest = (a, guard, y = x) => {
-    const { gainDb } = processHFSoftenerBuffer([y], SR, { amount: a, lispGuard: guard }, { recordGain: true })
+    const { gainDb } = processDeEsserBuffer([y], SR, { amount: a, lispGuard: guard }, { recordGain: true })
     let m = 0
     for (const v of gainDb) m = Math.min(m, v)
     return m
@@ -707,7 +707,7 @@ test('lisp guard: the cut lets go as the next vowel starts', () => {
   // and the cap drops to zero — carryover removed by construction.
   const { x } = makeSpeech(SR)
   const post = guard => {
-    const { gainDb } = processHFSoftenerBuffer([x], SR, { amount: 1, lispGuard: guard }, { recordGain: true })
+    const { gainDb } = processDeEsserBuffer([x], SR, { amount: 1, lispGuard: guard }, { recordGain: true })
     return meanGain(gainDb, 0.39, 0.45)
   }
   const off = post(false)
@@ -856,7 +856,7 @@ test('reso macro: as it takes the sibilance, the softener backs off', () => {
   const sr = 44100
   const { x, labels } = makeRichSpeech(sr)
   const softGrOnS = (y) => {
-    const { gainDb } = processHFSoftenerBuffer([y], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.4, lispGuard: false }, { recordGain: true })
+    const { gainDb } = processDeEsserBuffer([y], sr, { ...DE_ESSER_KERNEL_DEFAULTS, amount: 0.4, lispGuard: false }, { recordGain: true })
     let s = 0, n = 0
     for (let i = sr; i < y.length; i++) if (labels[i] === 2) { s += gainDb[i]; n++ }
     return s / n
@@ -873,7 +873,7 @@ test('air makeup: STATIC is Air Boost’s curve, sample for sample, when the cut
   const sr = 44100
   const x = pink(sr, 5)
   // Amount 0 never engages, so the only thing left in the path is the air.
-  const soft = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0, airDb: 3, airMode: 'static' }).channelData[0]
+  const soft = processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, amount: 0, airDb: 3, airMode: 'static' }).channelData[0]
   const air = processAirBandBuffer([x], sr, { gainDb: 3 }).channelData[0]
   let worst = 0
   for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(soft[i] - air[i]))
@@ -883,13 +883,13 @@ test('air makeup: STATIC is Air Boost’s curve, sample for sample, when the cut
 test('air makeup: stays out of delta and out of preair', () => {
   const sr = 44100
   const { x } = makeSpeech(sr, { seconds: 2 })
-  const run = (airDb, listen) => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, airDb }, { listen }).channelData[0]
+  const run = (airDb, listen) => processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, airDb }, { listen }).channelData[0]
   assert.deepEqual(run(4, 'delta'), run(0, 'delta'))
   assert.deepEqual(run(4, 'preair'), run(0, 'off'))
 })
 
 test('air makeup: clamped to the knob plus compensation', () => {
-  const k = new HFSoftenerKernel(44100)
+  const k = new DeEsserKernel(44100)
   k.setParams({ airDb: 99 }, true)
   // The kernel holds the knob PLUS the most HF COMP can add.
   assert.equal(k.airDb, AIR_TOTAL_MAX_DB)
@@ -915,7 +915,7 @@ const splitBandDb = (y, x, sr, lo, hi, mask) => {
 
 // Run the kernel over a whole buffer and report each stage's deepest cut.
 const stageMax = (x, sr, params) => {
-  const k = new HFSoftenerKernel(sr)
+  const k = new DeEsserKernel(sr)
   k.setParams(params, true)
   const out = new Float32Array(x.length)
   for (let o = 0; o < x.length; o += 128) {
@@ -930,7 +930,7 @@ test('duck: the Duck alone keeps the "s" tone — the same cut in every band', (
   const { x: sp, labels } = makeSpeech(sr, { seconds: 3 })
   const x = sp.map((v, i) => (labels[i] === 2 ? v * 2 : 0))
   const mid = i => labels[i] === 2 && labels[i - 350] === 2 && labels[i + 350] === 2
-  const run = p => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, lispGuard: false, ...p }).channelData[0]
+  const run = p => processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, lispGuard: false, ...p }).channelData[0]
   const tilt = (y) => splitBandDb(y, x, sr, 5000, 9000, mid) - splitBandDb(y, x, sr, 1000, 3000, mid)
   const eq = run({ amount: 0.7, duck: 0 }), duck = run({ amount: 0, duck: 1 })
   assert.ok(tilt(eq) < -5, `the EQ tilts the "s": ${tilt(eq).toFixed(2)} dB`)
@@ -953,7 +953,7 @@ test('duck: the EQ hears the ducked "s", so it backs off as the Duck comes up', 
   const sr = 44100
   const { x: sp, labels } = makeSpeech(sr, { seconds: 3 })
   const x = sp.map((v, i) => (labels[i] === 2 ? v * 2 : v))
-  const base = { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, lispGuard: false }
+  const base = { ...DE_ESSER_KERNEL_DEFAULTS, amount: 0.7, lispGuard: false }
   const alone = stageMax(x, sr, { ...base, duck: 0 })
   const after = stageMax(x, sr, { ...base, duck: 0.7 })
   assert.ok(after.duck > 2, `the Duck took ${after.duck.toFixed(2)} dB`)
@@ -966,7 +966,7 @@ test('duck: the lisp guard caps the TOTAL of both stages', () => {
   const sr = 44100
   const { x } = makeSpeech(sr, { seconds: 3, peakedS: true })
   const deepest = (guard) => {
-    const { gainDb } = processHFSoftenerBuffer([x], sr, { amount: 1, duck: 1, lispGuard: guard }, { recordGain: true })
+    const { gainDb } = processDeEsserBuffer([x], sr, { amount: 1, duck: 1, lispGuard: guard }, { recordGain: true })
     let m = 0
     for (const v of gainDb) m = Math.min(m, v)
     return m
@@ -981,7 +981,7 @@ test('duck: vowels away from any "s" are untouched at every setting', () => {
   const { x, labels } = makeSpeech(sr, { seconds: 3 })
   const far = i => labels[i] === 1 && (i % sr) / sr < 0.3
   for (const duck of [0, 0.5, 1]) {
-    const y = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, duck }).channelData[0]
+    const y = processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, amount: 0.7, duck }).channelData[0]
     let worst = 0
     for (let i = sr; i < x.length; i++) if (far(i)) worst = Math.max(worst, Math.abs(y[i] - x[i]))
     assert.ok(worst < 1e-6, `duck ${duck}: ${worst}`)
@@ -991,9 +991,9 @@ test('duck: vowels away from any "s" are untouched at every setting', () => {
 test('duck: delta is exactly what the Duck and the EQ removed together', () => {
   const sr = 44100
   const { x } = makeSpeech(sr, { seconds: 2 })
-  const p = { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.7, duck: 0.5 }
-  const y = processHFSoftenerBuffer([x], sr, p).channelData[0]
-  const d = processHFSoftenerBuffer([x], sr, p, { listen: 'delta' }).channelData[0]
+  const p = { ...DE_ESSER_KERNEL_DEFAULTS, amount: 0.7, duck: 0.5 }
+  const y = processDeEsserBuffer([x], sr, p).channelData[0]
+  const d = processDeEsserBuffer([x], sr, p, { listen: 'delta' }).channelData[0]
   let worst = 0
   for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(x[i] - y[i] - d[i]))
   assert.ok(worst < 1e-6, `worst ${worst}`)
@@ -1030,8 +1030,8 @@ function makeOnset(sr, { gapMs = 40, sMs = 0, rampMs = 1, hfLevel = 0.25, onsetM
 
 // The Duck's own gain, per sample, at Duck 40 / EQ 20.
 const duckGain = (x, sr, tuning) => {
-  const k = new HFSoftenerKernel(sr, { ...HF_SOFTENER_TUNING, ...tuning })
-  k.setParams({ ...HF_SOFTENER_KERNEL_DEFAULTS, duck: 0.4, amount: 0.2 }, true)
+  const k = new DeEsserKernel(sr, { ...DE_ESSER_TUNING, ...tuning })
+  k.setParams({ ...DE_ESSER_KERNEL_DEFAULTS, duck: 0.4, amount: 0.2 }, true)
   const out = new Float32Array(1)
   const g = new Float32Array(x.length)
   for (let i = 0; i < x.length; i++) {
@@ -1126,7 +1126,7 @@ test('voiced air: lifts vowels about as much as STATIC, but not the "s" and not 
   // A quiet floor so the gaps have something to lift.
   const floor = pink(voice.length, 11)
   const x = voice.map((v, i) => v + floor[i] * 0.002)
-  const run = p => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, ...p }).channelData[0]
+  const run = p => processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, ...p }).channelData[0]
   const y0 = run({ airDb: 0 })
   const ys = run({ airDb: 4, airMode: 'static' })
   const yv = run({ airDb: 4, airMode: 'voiced' })
@@ -1154,9 +1154,9 @@ test('voiced air: lifts vowels about as much as STATIC, but not the "s" and not 
 test('voiced air: 0 dB is bit-transparent in either mode, and the default is VOICED', () => {
   const sr = 44100
   const { x } = makeSpeech(sr, { seconds: 2 })
-  const run = p => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, ...p }).channelData[0]
+  const run = p => processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, ...p }).channelData[0]
   assert.deepEqual(run({ airDb: 0, airMode: 'voiced' }), run({ airDb: 0, airMode: 'static' }))
-  assert.equal(HF_SOFTENER_KERNEL_DEFAULTS.airMode, 'voiced')
+  assert.equal(DE_ESSER_KERNEL_DEFAULTS.airMode, 'voiced')
 })
 
 // ── Detect ──────────────────────────────────────────────────────────────────
@@ -1164,10 +1164,10 @@ test('voiced air: 0 dB is bit-transparent in either mode, and the default is VOI
 test('detect: 4 kHz is the spec, bit-identical, and the compensation rises with the corner', () => {
   const sr = 44100
   const { x } = makeSpeech(sr, { seconds: 2 })
-  const a = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS }).channelData[0]
-  const b = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, detectHz: 4000 }).channelData[0]
+  const a = processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS }).channelData[0]
+  const b = processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, detectHz: 4000 }).channelData[0]
   assert.deepEqual(a, b)
-  assert.equal(HF_SOFTENER_KERNEL_DEFAULTS.detectHz, 4000)
+  assert.equal(DE_ESSER_KERNEL_DEFAULTS.detectHz, 4000)
   assert.equal(detectCompDb(sr, 4000), 0)
   let last = detectCompDb(sr, DETECT_HZ_MIN)
   for (const hz of [4000, 5000, 6000, 7000, DETECT_HZ_MAX]) {
@@ -1187,20 +1187,20 @@ test('amount + split: the Amount is shared between Duck and EQ, and the default 
     assert.ok(Math.abs(duck + amount - t) <= 0.01, `${t}/${s}`)
   }
   // The shipped Duck 40 / EQ 20 is Amount 60, Split 33 — and comes back out of it.
-  const back = amountSplitOf(HF_SOFTENER_DEFAULTS.duck, HF_SOFTENER_DEFAULTS.amount)
+  const back = amountSplitOf(DE_ESSER_DEFAULTS.duck, DE_ESSER_DEFAULTS.amount)
   assert.deepEqual(back, { total: 60, split: 33 })
   assert.deepEqual(amountSplitOf(0, 0), { total: 0, split: null })
   assert.equal(amountSplitOf(80, 60).total, 100) // an old pair past 100 caps, never wraps
-  assert.equal(HF_SOFTENER_DEFAULTS.shape, 'shelf')
+  assert.equal(DE_ESSER_DEFAULTS.shape, 'shelf')
 })
 
 test('detect high: the top of its range is OFF, bit-identical, and a lower corner is compensated', () => {
   const sr = 44100
   const { x } = makeSpeech(sr, { seconds: 2 })
-  const a = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS }).channelData[0]
-  const b = processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, detectHiHz: DETECT_HI_MAX }).channelData[0]
+  const a = processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS }).channelData[0]
+  const b = processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, detectHiHz: DETECT_HI_MAX }).channelData[0]
   assert.deepEqual(a, b)
-  assert.equal(HF_SOFTENER_KERNEL_DEFAULTS.detectHiHz, DETECT_HI_MAX)
+  assert.equal(DE_ESSER_KERNEL_DEFAULTS.detectHiHz, DETECT_HI_MAX)
   assert.equal(detectCompDb(sr, 4000, undefined, DETECT_HI_MAX), 0)
   let last = 0
   for (const hz of [12000, 9000, 7000, 5500]) {
@@ -1215,7 +1215,7 @@ test('audition: the detector band is what plays, and HIGH takes the top off it',
   const n = sr
   const tone = hz => Float32Array.from({ length: n }, (_, i) => 0.3 * Math.sin((2 * Math.PI * hz * i) / sr))
   const rmsOf = a => { let e = 0; for (let i = n >> 1; i < n; i++) e += a[i] * a[i]; return Math.sqrt(e / (n >> 1)) }
-  const heard = (hz, p) => rmsOf(processHFSoftenerBuffer([tone(hz)], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, ...p }, { listen: 'sidechain' }).channelData[0])
+  const heard = (hz, p) => rmsOf(processDeEsserBuffer([tone(hz)], sr, { ...DE_ESSER_KERNEL_DEFAULTS, ...p }, { listen: 'sidechain' }).channelData[0])
   // High-pass only: 6 kHz passes, 1 kHz does not.
   assert.ok(heard(6000, {}) > 10 * heard(1000, {}))
   // With the low-pass at 7 kHz, 12 kHz drops to under half of 6 kHz.
@@ -1227,7 +1227,7 @@ test('audition: the detector band is what plays, and HIGH takes the top off it',
 test('detect high: never closer to the low corner than DETECT_MIN_RATIO', () => {
   const sr = 44100
   const { x } = makeSpeech(sr, { seconds: 1 })
-  const at = p => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, ...p }).channelData[0]
+  const at = p => processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, ...p }).channelData[0]
   assert.deepEqual(at({ detectHz: 6000, detectHiHz: DETECT_HI_MIN }), at({ detectHz: 6000, detectHiHz: 7500 }))
 })
 
@@ -1240,7 +1240,7 @@ test('detect: a raised corner keeps bright vowels out of the detector and the "s
   const x = base.map((v, i) => { const y = lift.tick(v); return labels[i] === 1 ? y : v })
   // Guard off: with it on, both the vowels and the "s" are capped by the voice
   // level and the detector's contribution is hidden behind the cap.
-  const run = hz => processHFSoftenerBuffer([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.6, lispGuard: false, detectHz: hz }, { recordGain: true }).gainDb
+  const run = hz => processDeEsserBuffer([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, amount: 0.6, lispGuard: false, detectHz: hz }, { recordGain: true }).gainDb
   const stats = g => {
     let vowelCut = 0, nv = 0, sCut = 0, ns = 0
     for (let i = sr; i < x.length; i++) {
@@ -1266,32 +1266,32 @@ test('auto air: half the measured top-end loss, 0 with no cut, capped at the kno
   assert.equal(autoAirDb(-40), AIR_MAKEUP_MAX_DB)
   const sr = 44100
   const { x } = makeRichSpeech(sr)
-  const loss = a => measureTopLossDb([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: a })
+  const loss = a => measureTopLossDb([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, amount: a })
   const l0 = loss(0), l4 = loss(0.4), l8 = loss(0.8)
   assert.ok(Math.abs(l0) < 0.01, `no cut, no loss: ${l0}`)
   assert.ok(l4 < -0.3 && l8 < l4, `loss grows with Amount: ${l4.toFixed(2)}, ${l8.toFixed(2)}`)
   // Air never enters the measurement, whatever the params carry.
-  assert.equal(measureTopLossDb([x], sr, { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0.4, airDb: 6 }), l4)
+  assert.equal(measureTopLossDb([x], sr, { ...DE_ESSER_KERNEL_DEFAULTS, amount: 0.4, airDb: 6 }), l4)
 })
 
 // ── Panel wiring: Reso by its knob, HF COMP additive ────────────────────────
 
 test('params: Reso is in exactly when its knob is above 0, and off by default', () => {
-  assert.equal(HF_SOFTENER_DEFAULTS.resoAmount, 0)
-  assert.equal(resoOn(HF_SOFTENER_DEFAULTS), false)
-  assert.equal(resoOn({ ...HF_SOFTENER_DEFAULTS, resoAmount: 1 }), true)
-  assert.ok(!('reso' in HF_SOFTENER_DEFAULTS), 'no separate RESO switch')
+  assert.equal(DE_ESSER_DEFAULTS.resoAmount, 0)
+  assert.equal(resoOn(DE_ESSER_DEFAULTS), false)
+  assert.equal(resoOn({ ...DE_ESSER_DEFAULTS, resoAmount: 1 }), true)
+  assert.ok(!('reso' in DE_ESSER_DEFAULTS), 'no separate RESO switch')
 })
 
 test('params: the Air knob is the one value in effect, whether AUTO wrote it or the user did', () => {
-  const at = p => toSoftenerKernelParams({ ...HF_SOFTENER_DEFAULTS, ...p }).airDb
+  const at = p => toSoftenerKernelParams({ ...DE_ESSER_DEFAULTS, ...p }).airDb
   // No separate compensation is added on top: a knob at 0 means no Air.
   assert.equal(at({ air: 2, comp: true }), 2)
   assert.equal(at({ air: 2, comp: false }), 2)
   assert.equal(at({ air: 0, comp: true }), 0)
   assert.equal(at({ air: 0, comp: false, compAir: 1.5 }), 0)
-  assert.equal(HF_SOFTENER_DEFAULTS.comp, true)
-  assert.ok(!('compAir' in HF_SOFTENER_DEFAULTS))
+  assert.equal(DE_ESSER_DEFAULTS.comp, true)
+  assert.ok(!('compAir' in DE_ESSER_DEFAULTS))
 })
 
 // ── Lisp guard over the Reso pre-stage ──────────────────────────────────────
@@ -1299,8 +1299,8 @@ test('params: the Air knob is the one value in effect, whether AUTO wrote it or 
 test('reso lisp guard: follows the Lisp Guard switch, and Reso Soothe itself never sets it', () => {
   // Guard 50 is the old switch's ON (−16 dB); the panel's default has since
   // moved (to 100), so pin it rather than read the default.
-  const on = resoKernelParams({ ...HF_SOFTENER_DEFAULTS, guard: 50, resoAmount: 50, lispGuard: true })
-  const off = resoKernelParams({ ...HF_SOFTENER_DEFAULTS, guard: 50, resoAmount: 50, lispGuard: false })
+  const on = resoKernelParams({ ...DE_ESSER_DEFAULTS, guard: 50, resoAmount: 50, lispGuard: true })
+  const off = resoKernelParams({ ...DE_ESSER_DEFAULTS, guard: 50, resoAmount: 50, lispGuard: false })
   assert.equal(on.lispGuardFloorDb, HF_RESO_LISP_GUARD_FLOOR_DB)
   // Explicit null, not an absent key — the kernel merges params, so an absent
   // key would leave the guard on. See the params-merge test.
@@ -1355,7 +1355,7 @@ test('reso lisp guard: after the cut, Reso takes little from a treated "s"; tilt
   const sr = 44100
   const { x, labels } = makeRichSpeech(sr)
   const sib = i => labels[i] === 2
-  const soft = processHFSoftenerBuffer([x], sr, toSoftenerKernelParams({ ...HF_SOFTENER_DEFAULTS, levelOffset: 0 })).channelData[0]
+  const soft = processDeEsserBuffer([x], sr, toSoftenerKernelParams({ ...DE_ESSER_DEFAULTS, levelOffset: 0 })).channelData[0]
   const extra = opts => 10 * Math.log10(hfEnergy(resoRun(soft, sr, 1, opts), sr, sib, 5000, 9000) / hfEnergy(soft, sr, sib, 5000, 9000))
   const guarded = extra({}), free = extra({ lispGuard: false })
   assert.ok(guarded > -2.5 && guarded > free + 2, `Reso 100 after the cut: "s" ${guarded.toFixed(2)} guarded, ${free.toFixed(2)} without`)
@@ -1379,15 +1379,15 @@ test('reso lisp guard: switching it OFF reaches the kernel (params merge)', () =
 // ── Advanced: Guard, Band ─────────────────────────────────────────
 
 test('guard: 0 is off, 50 is the −16 the switch shipped as, 100 the strict end; Reso follows 4 dB above', () => {
-  const k = g => toSoftenerKernelParams({ ...HF_SOFTENER_DEFAULTS, guard: g })
+  const k = g => toSoftenerKernelParams({ ...DE_ESSER_DEFAULTS, guard: g })
   assert.equal(k(0).lispGuard, false)
   assert.equal(k(50).lispGuard, true)
   assert.equal(k(50).lispGuardFloorDb, T.lispGuardFloorDb)
   assert.equal(guardToFloorDb(100), GUARD_FLOOR_STRICT_DB)
   assert.ok(Math.abs(guardToFloorDb(0) - GUARD_FLOOR_LOOSE_DB) < 1e-12)
   // The retired boolean still reads as off.
-  assert.equal(toSoftenerKernelParams({ ...HF_SOFTENER_DEFAULTS, lispGuard: false }).lispGuard, false)
-  const r = g => resoKernelParams({ ...HF_SOFTENER_DEFAULTS, resoAmount: 50, guard: g }).lispGuardFloorDb
+  assert.equal(toSoftenerKernelParams({ ...DE_ESSER_DEFAULTS, lispGuard: false }).lispGuard, false)
+  const r = g => resoKernelParams({ ...DE_ESSER_DEFAULTS, resoAmount: 50, guard: g }).lispGuardFloorDb
   assert.equal(r(50), HF_RESO_LISP_GUARD_FLOOR_DB)
   assert.equal(r(100) - r(50), guardToFloorDb(100) - guardToFloorDb(50))
   assert.equal(r(0), null)
@@ -1395,7 +1395,7 @@ test('guard: 0 is off, 50 is the −16 the switch shipped as, 100 the strict end
 
 test('guard: 50 % is bit-identical to the old switch, and stricter settings cut a normal "s" less', () => {
   const { x } = makeSpeech(SR, { seconds: 3, peakedS: true })
-  const run = p => processHFSoftenerBuffer([x], SR, { amount: 1, ...p }, { recordGain: true }).gainDb
+  const run = p => processDeEsserBuffer([x], SR, { amount: 1, ...p }, { recordGain: true }).gainDb
   const old = run({ lispGuard: true })
   // 50 %, not the default: the default moved to 100 (owner's call), 50 is still the old ON.
   const now = run({ lispGuard: true, lispGuardFloorDb: guardToFloorDb(50) })
@@ -1413,8 +1413,8 @@ test('band: 4.5 kHz is the old band exactly; the return follows only above it', 
   assert.equal(bandTuningFor(BAND_HZ_MIN).returnFreqHz, T.returnFreqHz)
   assert.ok(Math.abs(bandTuningFor(BAND_HZ_MAX).returnFreqHz / T.returnFreqHz - BAND_HZ_MAX / T.shelfFreqHz) < 1e-12)
   const { x } = makeSpeech(SR, { seconds: 2 })
-  const a = processHFSoftenerBuffer([x], SR, { amount: 0.6 }).channelData[0]
-  const b = processHFSoftenerBuffer([x], SR, { amount: 0.6, bandHz: 4500 }).channelData[0]
+  const a = processDeEsserBuffer([x], SR, { amount: 0.6 }).channelData[0]
+  const b = processDeEsserBuffer([x], SR, { amount: 0.6, bandHz: 4500 }).channelData[0]
   for (let i = 0; i < a.length; i++) assert.equal(b[i], a[i])
 })
 
@@ -1499,8 +1499,8 @@ test('scope shading: a flickering cut reads as one region, starting where it sta
 test('scope: the kernel reports the cut on the "s" and nothing on the vowel', () => {
   const { x, labels } = makeSpeech(SR, { seconds: 3, peakedS: true })
   const run = (params) => {
-    const k = new HFSoftenerKernel(SR)
-    k.setParams({ ...HF_SOFTENER_KERNEL_DEFAULTS, duck: 0.7, amount: 0.5, ...params }, true)
+    const k = new DeEsserKernel(SR)
+    k.setParams({ ...DE_ESSER_KERNEL_DEFAULTS, duck: 0.7, amount: 0.5, ...params }, true)
     const out = new Float32Array(128)
     const pts = []
     for (let o = 0; o + 128 <= x.length; o += 128) {
@@ -1529,7 +1529,7 @@ test('HF COMP: the Reso stage is rendered its latency long, so a short selection
   // voice, a 50 ms selection read 10.7 dB off, 300 ms 0.8 dB. A Reso that cuts
   // nothing must now leave the measurement where the softener alone put it.
   const { x } = makeSpeech(SR, { seconds: 1 })
-  const k = { ...HF_SOFTENER_KERNEL_DEFAULTS, amount: 0 }
+  const k = { ...DE_ESSER_KERNEL_DEFAULTS, amount: 0 }
   for (const secs of [0.05, 0.3]) {
     const seg = x.subarray(0, Math.round(secs * SR))
     const alone = measureTopLossDb([seg], SR, k)

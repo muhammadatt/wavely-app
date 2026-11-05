@@ -712,12 +712,12 @@ test('a Parallel move re-solves only Parallel: cached upstream, same answer as c
 })
 
 test('De-ess Split: shares the Amount between the Duck and the EQ, 33 = the De-Esser\'s default', async () => {
-  const { toKernelParams: deEsserKernel, HF_SOFTENER_DEFAULTS, splitAmount } = await import('../../src/audio/deEsserParams.js')
+  const { toKernelParams: deEsserKernel, DE_ESSER_DEFAULTS, splitAmount } = await import('../../src/audio/deEsserParams.js')
   assert.equal(VOX_DEFAULTS.deEssSplit, 33)
   const at = split => toKernelParams({ ...VOX_DEFAULTS, alignDb: 0, deEss: 60, deEssSplit: split }).deEss
   for (const s of [0, 33, 100]) {
     const { duck, amount } = splitAmount(60, s)
-    const w = deEsserKernel({ ...HF_SOFTENER_DEFAULTS, duck, amount })
+    const w = deEsserKernel({ ...DE_ESSER_DEFAULTS, duck, amount })
     const got = at(s)
     assert.equal(got.duck, w.duck, `duck at split ${s}`)
     assert.equal(got.amount, w.amount, `EQ amount at split ${s}`)
