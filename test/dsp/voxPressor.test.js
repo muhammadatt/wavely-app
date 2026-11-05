@@ -926,3 +926,37 @@ test('Peaks SOFT: 4:1 starts catching where HARD does, takes less off and stays 
     assert.ok(soft.peaksDb < hard.peaksDb, `Peaks ${peaks}: soft ${soft.peaksDb.toFixed(2)} vs hard ${hard.peaksDb.toFixed(2)}`)
   }
 })
+
+test('Parallel solve: cached on its inputs, warm start lands on the cold answer, no guess is bit-identical', async () => {
+  const S = await import('../../src/audio/voxPressorSolve.js')
+  const x = narration(SR, { seconds: 12, levelDb: -22 })
+  const alignDb = inputAlignDbFor([x], SR)
+  const kpAt = (extra = {}) => toKernelParams({ ...VOX_DEFAULTS, parallel: 35, alignDb, ...extra })
+  const PAR = ['parallelAlignDb', 'parallelMakeupDb', 'parallelCeilingKneeDb', 'parallelRestoreDb']
+  S.clearVoxPressorMeasureCache()
+  const cold = S.measureVoxPressor([x], SR, kpAt())
+  // Lo Detail and the output ceiling sit after the Parallel stage: a move of
+  // either hands back the cached solve, identical to measuring cold.
+  const t = performance.now()
+  const dense = S.measureVoxPressor([x], SR, kpAt({ density: 40, ceiling: '-1' }))
+  const ms = performance.now() - t
+  for (const k of PAR) assert.deepEqual(dense[k], cold[k], k)
+  assert.ok(ms < 200, `cached re-measure took ${ms.toFixed(0)} ms`)
+  S.clearVoxPressorMeasureCache()
+  const denseCold = S.measureVoxPressor([x], SR, kpAt({ density: 40, ceiling: '-1' }))
+  for (const k of PAR) assert.deepEqual(dense[k], denseCold[k], `cold ${k}`)
+  // The measured values fed back (and the bypass they lift) are not part of the key.
+  const fed = S.measureVoxPressor([x], SR, toKernelParams({ ...VOX_DEFAULTS, parallel: 35, alignDb, ...Object.fromEntries(PAR.map(k => [k, cold[k]])) }))
+  for (const k of PAR) assert.deepEqual(fed[k], cold[k], `fed ${k}`)
+  // A Mix move re-solves; from the last answer it lands within the solve's tolerance.
+  S.clearVoxPressorMeasureCache()
+  const mixCold = S.measureVoxPressor([x], SR, kpAt({ parallel: 45 }))
+  S.clearVoxPressorMeasureCache()
+  const mixWarm = S.measureVoxPressor([x], SR, { ...kpAt({ parallel: 45 }), parallelMakeupGuess: cold.parallelMakeupDb })
+  assert.ok(Math.abs(mixWarm.parallelMakeupDb - mixCold.parallelMakeupDb) < 0.05,
+    `warm ${mixWarm.parallelMakeupDb} vs cold ${mixCold.parallelMakeupDb}`)
+  // No guess, no change: the default start is the old one exactly.
+  S.clearVoxPressorMeasureCache()
+  const none = S.measureVoxPressor([x], SR, { ...kpAt({ parallel: 45 }), parallelMakeupGuess: undefined })
+  for (const k of PAR) assert.deepEqual(none[k], mixCold[k], `no guess ${k}`)
+})

@@ -82,6 +82,21 @@ test('an empty or fully skipped region reports zero rather than throwing', () =>
   assert.equal(percentileOfChannels([new Float32Array(10)], 0.001, 10), 0)
 })
 
+test('it reads subarrays, plain arrays, signed zeros and denormals exactly', () => {
+  // The quantile is bucketed on float32 bit patterns read through a view, so
+  // a subarray that starts mid-buffer is the case that would read wrong bits.
+  const base = Float32Array.from({ length: 9000 }, () => Math.random() * 2 - 1)
+  const sub = base.subarray(1234, 8000)
+  for (const q of [0.001, 0.25, 0.9]) {
+    assert.ok(Object.is(percentileOfChannels([sub], q), byFullSort([sub], q)), `subarray q=${q}`)
+  }
+  const plain = Array.from({ length: 3000 }, () => Math.fround(Math.random() * 2 - 1))
+  assert.ok(Object.is(percentileOfChannels([plain], 0.001), byFullSort([Float32Array.from(plain)], 0.001)))
+  const tiny = Float32Array.from({ length: 2000 }, (_, i) => (i % 3 ? 1e-40 : -2e-39) * (i % 7))
+  assert.ok(Object.is(percentileOfChannels([tiny], 0.01), byFullSort([tiny], 0.01)))
+  assert.equal(percentileOfChannels([Float32Array.from({ length: 50 }, () => -0)], 0.5), 0)
+})
+
 test('it does not modify the caller’s buffers', () => {
   const x = Float32Array.from({ length: 200 }, () => Math.random() * 2 - 1)
   const before = Float32Array.from(x)

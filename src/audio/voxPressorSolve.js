@@ -435,7 +435,10 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   // knob re-measures; one oversampled render of the wet path answers it.
   // ⚠ Not `computeFET1176AutoMakeupPlan`: that renders without the sidechain,
   // and this 1176 listens through `ParallelDetector`.
-  if (p.parallelMix > 0) {
+  const pKey = p.parallelMix > 0 ? parallelKey(key, p) : null
+  if (pKey && parallelCache?.key === pKey) {
+    Object.assign(out, parallelCache.value)
+  } else if (p.parallelMix > 0) {
     // The LA-2A aligns on the SOURCE (the file's `alignDb`, which reaches the
     // kernel as `bodyAlignDb`), as an LA Vintage 2A slot's preview does — see
     // `PARALLEL_COMPS`. The 1176 aligns on what it hears.
@@ -477,12 +480,41 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
         out.parallelRestoreDb = restoreToCeilingDb(ceilingDb, db(pk))
       }
     }
+    parallelCache = {
+      key: pKey,
+      value: Object.fromEntries(PARALLEL_OUT.filter(k => k in out).map(k => [k, out[k]])),
+    }
   }
   return out
 }
 
+/** What the Parallel stage measures, and so what its cache hands back. */
+const PARALLEL_OUT = ['parallelAlignDb', 'parallelMakeupDb', 'parallelCeilingKneeDb', 'parallelRestoreDb']
+
+/**
+ * THE PARALLEL SOLVE IS CACHED (November 2026): it was ~55 % of a measurement
+ * and re-ran on every one — a Lo Detail or Output level move, or a re-measure
+ * with nothing changed, cost ~1 s for an answer that could not have moved.
+ * Keyed on the upstream key (the window and everything Peaks → Body → De-ess
+ * read, so the de-esser's output it measures on is pinned, as is `peaksSpeed`,
+ * which the 1176 copy's timing follows) plus every Parallel SETTING. The
+ * stage's own measured values, the bypass derived from them and the warm-start
+ * guess are left out: they are fed back on the next call, and keying on them
+ * would miss every time.
+ */
+// `parallelOn` too: the kernel's bypass, which flips on when these values first
+// land — derived from them, read by no solve.
+const PARALLEL_NOT_KEY = new Set([...PARALLEL_OUT, 'parallelMakeupGuess', 'parallelOn'])
+function parallelKey(upKey, p) {
+  const params = {}
+  for (const k of Object.keys(p).sort()) if (k.startsWith('parallel') && !PARALLEL_NOT_KEY.has(k)) params[k] = p[k]
+  return `${upKey}|${JSON.stringify(params)}`
+}
+
 /** The one cached upstream measurement (see `measureVoxPressor`). */
 let upstreamCache = null
+/** The one cached Parallel solve (see `parallelKey`). */
+let parallelCache = null
 /** The one cached Peaks → Body measurement (`measureThroughBody`). */
 let bodyCache = null
 
@@ -500,6 +532,7 @@ function bodyGuideKey(channels, sampleRate, p, up, hash) {
 /** Forget them — for tests that time or compare cold measurements. */
 export function clearVoxPressorMeasureCache() {
   upstreamCache = null
+  parallelCache = null
   bodyCache = null
   guideCache = null
   bodyGuideCache = null
@@ -780,6 +813,9 @@ function parallelLa2aSolve(channels, sampleRate, p) {
   const plan = solveMakeupPlan({
     channelData: channels, render, gainKey: 'gainDb', mixKey: 'mix', mix: base.mix,
     reference: 'percentile', minDb: -24, maxDb: 24,
+    // The panel's last answer for this compressor (`parallelMakeupGuess`): a
+    // knob move then usually converges in one wet render instead of up to four.
+    initialDb: p.parallelMakeupGuess,
   })
   if (plan.ceilingDb === null) return { makeupDb: 0, blend: null }
   const blend = deEssDb > 0

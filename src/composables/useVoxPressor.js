@@ -133,6 +133,8 @@ const copies = pluginCopies((copy, life) => {
   // The corner is a property of the material, not of the knobs: measured with
   // the first measurement on a region and handed back to every later one.
   let cornerFor = null
+  /** The Parallel compressor the last measured `parallelMakeupDb` belongs to (its warm start). */
+  let parallelGuessComp = null
   /** Which (timeline, selection, knobs) the measured values belong to. */
   let solvedFor = null
   let inFlight = null
@@ -305,6 +307,11 @@ const copies = pluginCopies((copy, life) => {
         // The LA-2A stage's makeup solve starts from the last answer, so a
         // knob move usually converges in one render.
         if (Number.isFinite(voxMeasured.value.bodyMakeupDb)) kp.bodyMakeupGuess = voxMeasured.value.bodyMakeupDb
+        // So does the Parallel LA-2A's blend solve — but only from a makeup
+        // measured with the same compressor: the 1176's is on another scale.
+        if (parallelGuessComp === kp.parallelComp && Number.isFinite(voxMeasured.value.parallelMakeupDb)) {
+          kp.parallelMakeupGuess = voxMeasured.value.parallelMakeupDb
+        }
         // The panel's measurement carries the Peaks guide (cached per region).
         // ⚠ Never an apply's: AUTO would move the knob mid-apply, on a chain's
         // running segments, after the params were measured.
@@ -346,6 +353,7 @@ const copies = pluginCopies((copy, life) => {
         )
         if (seq !== solveSeq) return null
         cornerFor = regionKey
+        parallelGuessComp = kp.parallelComp
         const next = {}
         for (const k of MEASURED) next[k] = r[k] ?? null
         voxMeasured.value = next
