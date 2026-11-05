@@ -8,6 +8,7 @@ import {
 import { currentPluginCopy, idForCopy, chainCopyNumber, isChainCopyId } from '../../composables/pluginCopies.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
+import { isSheetViewport, sheetGeometry, SHEET_MAX_WIDTH as SHEET_NARROW_PX } from '../../ui/windowSheet.js'
 import Icon from '../ui/Icon.vue'
 import { useEntitlements } from '../../composables/useEntitlements.js'
 import HelpOverlay from './HelpOverlay.vue'
@@ -375,7 +376,49 @@ const MIN_BODY_PX = 160
 const HEADER_PX = 56
 const FOOTER_PX = 68
 
-const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
+/**
+ * The LAYOUT viewport — what 100vw / 100dvh, `position: fixed` and the
+ * `compact:` media query measure — not window.innerWidth / innerHeight, which
+ * on a mobile browser are the VISUAL viewport and grow whenever the page is
+ * zoomed out (anything overflowing sideways is enough). Read through them, a
+ * 393 px phone could pass for a large screen: the window then stayed a
+ * floating desktop window sized for that height, with Preview and Apply below
+ * the bottom of the real screen (reproduced with innerHeight reading 900 on a
+ * 390 px tall phone: EQ's Apply at y = 853).
+ */
+function layoutViewport() {
+  const de = typeof document === 'undefined' ? null : document.documentElement
+  return {
+    w: de?.clientWidth || (typeof window === 'undefined' ? 1280 : window.innerWidth),
+    h: de?.clientHeight || (typeof window === 'undefined' ? 800 : window.innerHeight),
+  }
+}
+const viewportH = ref(layoutViewport().h)
+const viewportW = ref(layoutViewport().w)
+
+/**
+ * Phone mode — see `ui/windowSheet.js`. On a small viewport the window is a
+ * full-screen sheet, zoomed so the faceplate fits the width, with no drag and
+ * no resize. Its position and size are left untouched underneath, so a window
+ * opened on a phone and then met with a desktop viewport (a rotated tablet, a
+ * widened browser) floats again where it was.
+ *
+ * Sized against the faceplate's floor (`minWidth`, defaulting to its width) —
+ * the narrowest it is laid out to work at.
+ */
+const sheet = computed(() => isSheetViewport({
+  viewportW: viewportW.value, viewportH: viewportH.value, designW: minWidthPx.value,
+}))
+/**
+ * A sheet on a phone held upright. Its header gets two rows (see the CSS at
+ * the end): one row of name, ON and close could not fit at 360–393 px — a long
+ * name like SATURATION WORKBENCH pushed ON and close off the screen, and on
+ * the de-essers ON slid under DELTA and the preset arrows.
+ */
+const narrowSheet = computed(() => sheet.value && viewportW.value < SHEET_NARROW_PX)
+const sheetBox = computed(() => sheetGeometry({
+  viewportW: viewportW.value, viewportH: viewportH.value, designW: minWidthPx.value,
+}))
 
 /**
  * How tall the scrolling body may be.
@@ -389,10 +432,17 @@ const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
  * reason Apply moved down there is that it must never be the thing below the
  * fold, and that only holds if the body's ceiling accounts for it.
  */
-const bodyMaxHeight = computed(() => Math.max(
-  MIN_BODY_PX,
-  viewportH.value - pos.value.y - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0) - VIEWPORT_MARGIN,
-))
+// A sheet has no ceiling here: its height is CSS's (see the template) — the
+// frame is 100dvh, header and footer are fixed and the body takes the rest.
+// A JS-computed ceiling can disagree with 100dvh (a mobile browser's toolbars
+// moving), and then the body overflows and pushes the footer, and Apply with
+// it, off the bottom of the screen; flex layout cannot.
+const bodyMaxHeight = computed(() => sheet.value
+  ? null
+  : Math.max(
+    MIN_BODY_PX,
+    viewportH.value - pos.value.y - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0) - VIEWPORT_MARGIN,
+  ))
 
 const frameEl = ref(null)
 const bodyEl = ref(null)
@@ -513,7 +563,9 @@ onBeforeUnmount(() => {
  * the body's height honest, since it is measured from the top edge down.
  */
 function onViewportResize() {
-  viewportH.value = window.innerHeight
+  const { w, h } = layoutViewport()
+  viewportH.value = h
+  viewportW.value = w
   clampToViewport()
 }
 
@@ -525,6 +577,8 @@ function clampToViewport() {
 }
 
 function onDragStart(e) {
+  // A sheet is pinned to the screen; the header is just a header.
+  if (sheet.value) return
   dragging.value = true
   dragOffsetX = e.clientX - pos.value.x
   dragOffsetY = e.clientY - pos.value.y
@@ -632,7 +686,7 @@ function requestClose() {
   <div
     ref="frameEl"
     class="win-frame fixed rounded-[18px] overflow-hidden flex flex-col"
-    :class="{ 'is-frozen': frozen }"
+    :class="{ 'is-frozen': frozen, 'is-sheet': sheet }"
     :inert="frozen"
     :aria-busy="frozen || undefined"
     :data-chrome="chrome"
@@ -642,7 +696,9 @@ function requestClose() {
     :aria-label="label"
     tabindex="-1"
     :style="{
-      left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px',
+      ...(sheet
+        ? { left: 0, top: 0, width: '100vw', height: '100dvh' }
+        : { left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px' }),
       zIndex: z,
       // One value, read by the chassis, the faceplate and Apply. Passing the
       // hue as a custom property rather than composing each gradient in JS is
@@ -668,7 +724,7 @@ function requestClose() {
     -->
     <div
       class="win-header grid items-center touch-none h-14 shrink-0 pl-5 pr-[14px]"
-      :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
+      :class="[sheet ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab', { 'is-narrow': narrowSheet }]"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
@@ -827,11 +883,21 @@ function requestClose() {
       against the content itself — inside the scroller it would sit at the
       bottom of the scrolled content, which is the one place it is not needed.
     -->
-    <div class="win-face relative min-h-0 flex flex-col" :style="background ? { background } : null">
+    <div
+      class="win-face relative min-h-0 flex flex-col"
+      :class="{ 'flex-1': sheet }"
+      :style="[
+        background ? { background } : null,
+        // Only the faceplate is zoomed: the header and footer are flexible and
+        // stay full size, so close, ON and Apply keep finger-sized targets.
+        sheet ? { width: sheetBox.width + 'px', zoom: sheetBox.zoom } : null,
+      ]"
+    >
       <div
         ref="bodyEl"
         class="win-body min-h-0 overflow-y-auto"
-        :style="{ maxHeight: `${bodyMaxHeight}px` }"
+        :class="{ 'overflow-x-auto flex-1': sheet }"
+        :style="bodyMaxHeight == null ? null : { maxHeight: `${bodyMaxHeight}px` }"
         @scroll="updateOverflow"
       >
         <slot />
@@ -961,7 +1027,7 @@ function requestClose() {
       the thing it exists to do.
     -->
     <button
-      v-if="resizable"
+      v-if="resizable && !sheet"
       type="button"
       class="win-resize absolute flex items-end justify-end cursor-nwse-resize"
       style="width:22px;height:22px;right:3px;bottom:3px;touch-action:none"
@@ -1617,4 +1683,60 @@ function requestClose() {
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 .win-frame.is-frozen { filter: saturate(.6) brightness(.85); transition: filter .15s; }
+
+/* Phone sheet (see ui/windowSheet.js): the whole screen, so no rounded
+   corners and no drop shadow to read as a floating window. Last and
+   important, to outrank the radius utility and the chassis variants. */
+.win-frame.is-sheet {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Narrow sheet header — a phone held upright (see narrowSheet). Two rows:
+   identity on the left and ON + close on the right of the first, so those two
+   are always on screen; the monitoring / preset / chain group (and any
+   plugin's own header-center controls) on a second row of its own, centred,
+   scrolling sideways only as a last resort. Overrides both the classic grid
+   and Modula's flex row. */
+.win-header.is-narrow {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 48px auto;
+  height: auto !important;
+  gap: 0 8px;
+  padding: 0 10px 0 14px !important;
+}
+.win-header.is-narrow > div:nth-of-type(1) {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+.win-header.is-narrow > div:nth-of-type(1) > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.win-header.is-narrow > div:nth-of-type(1) > button {
+  flex: none;
+}
+.win-header.is-narrow > div:nth-of-type(2) {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-content: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+}
+.win-header.is-narrow > div:nth-of-type(2):empty {
+  display: none;
+}
+.win-header.is-narrow > div:nth-of-type(3) {
+  grid-column: 2;
+  grid-row: 1;
+}
+.win-header.is-narrow .win-presets-m {
+  flex: 0 1 200px;
+  min-width: 150px;
+}
 </style>

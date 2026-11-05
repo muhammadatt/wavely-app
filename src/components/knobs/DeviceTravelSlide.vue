@@ -152,6 +152,7 @@ async function onKeyDown(e) {
     <div role="radiogroup" :aria-label="label || caption" @keydown="onKeyDown">
       <div
         ref="trackEl"
+        class="touch-none"
         :style="track"
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"

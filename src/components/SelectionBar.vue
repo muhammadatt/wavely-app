@@ -71,9 +71,9 @@ function handleTrim() {
        the readouts and actions together exceed the bar, and the trailing
        actions were being cut off with no way to reach them. -->
   <div
-    class="selection-bar h-9 flex items-center px-[14px] gap-[10px] font-['Inter'] shrink-0 overflow-x-auto border-t border-[rgba(255,255,255,.08)]"
+    class="selection-bar h-9 pointer-coarse:h-11 flex items-center px-[14px] compact:px-2 gap-[10px] compact:gap-[6px] font-['Inter'] shrink-0 overflow-x-auto border-t border-[rgba(255,255,255,.08)]"
     style="background:rgba(5,7,9,.85);backdrop-filter:blur(4px)">
-    <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase shrink-0"
+    <span class="compact:hidden text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase shrink-0"
       >Selection</span
     >
     <span
@@ -88,23 +88,25 @@ function handleTrim() {
       >{{ formatTime(state.selection?.end) }}</span
     >
 
-    <div class="w-px h-3.5 shrink-0 bg-[rgba(255,255,255,.1)]"></div>
+    <div class="compact:hidden w-px h-3.5 shrink-0 bg-[rgba(255,255,255,.1)]"></div>
 
-    <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase shrink-0"
+    <span class="compact:hidden text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase shrink-0"
       >Duration</span
     >
     <span
-      class="font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums shrink-0"
+      class="compact:hidden font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums shrink-0"
       :class="hasSelection ? 'text-[rgba(255,255,255,.7)]' : 'text-[rgba(255,255,255,.28)]'"
       >{{ selectionDuration }}</span
     >
 
     <span
       v-if="!hasSelection"
-      class="text-[10.5px] font-medium text-[rgba(255,255,255,.3)] whitespace-nowrap shrink-0"
+      class="compact:hidden text-[10.5px] font-medium text-[rgba(255,255,255,.3)] whitespace-nowrap shrink-0"
       >Drag on the waveform to select</span
     >
 
+    <!-- On a phone held upright the six actions fit only as icons; the labels
+         stay for screen readers and the titles for anyone who hovers. -->
     <div class="flex items-center gap-[6px] ml-auto shrink-0 pl-2">
       <!-- Select All — the only action here that needs no precondition -->
       <BaseButton
@@ -119,7 +121,7 @@ function handleTrim() {
           <rect x="3" y="3" width="18" height="18" rx="2" />
           <path d="M9 12l2 2 4-4" />
         </svg>
-        Select All
+        <span class="max-sm:sr-only">Select All</span>
       </BaseButton>
       <BaseButton
         size="xs" color="ghost" :pill="false"
@@ -134,7 +136,7 @@ function handleTrim() {
           <rect x="9" y="9" width="13" height="13" rx="2" />
           <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
         </svg>
-        Copy
+        <span class="max-sm:sr-only">Copy</span>
       </BaseButton>
       <BaseButton
         size="xs" color="ghost" :pill="false"
@@ -149,7 +151,7 @@ function handleTrim() {
           <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" />
           <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
         </svg>
-        Paste
+        <span class="max-sm:sr-only">Paste</span>
       </BaseButton>
       <BaseButton
         size="xs" color="ghost" :pill="false"
@@ -165,7 +167,7 @@ function handleTrim() {
           <line x1="8" y1="12" x2="21" y2="12" />
           <line x1="8" y1="18" x2="21" y2="18" />
         </svg>
-        Silence
+        <span class="max-sm:sr-only">Silence</span>
       </BaseButton>
       <BaseButton
         size="xs" color="ghost" :pill="false"
@@ -183,7 +185,7 @@ function handleTrim() {
           <line x1="14.47" y1="14.48" x2="20" y2="20" />
           <line x1="8.12" y1="8.12" x2="12" y2="12" />
         </svg>
-        Cut
+        <span class="max-sm:sr-only">Cut</span>
       </BaseButton>
       <BaseButton
         size="xs" color="ghost" :pill="false"
@@ -200,7 +202,7 @@ function handleTrim() {
           <path d="M8 3v18" />
           <path d="M16 3v18" />
         </svg>
-        Trim
+        <span class="max-sm:sr-only">Trim</span>
       </BaseButton>
     </div>
   </div>

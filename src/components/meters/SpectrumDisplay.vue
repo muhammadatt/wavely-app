@@ -1,4 +1,5 @@
 <script setup>
+import { localPoint } from '../../ui/pointerLocal.js'
 import { ref, watch } from 'vue'
 import { useMeterFrame } from './ballistics.js'
 import {
@@ -330,9 +331,10 @@ function drawCursor(ctx, plotW, plotH, xFor, yFor, minHz, octaves) {
 function onMove(e) {
   const canvas = canvasEl.value
   if (!canvas) return
-  const rect = canvas.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const plotW = rect.width - SCALE_W
+  // Layout pixels, like the drawing that reads cursor.x (a phone sheet scales
+  // the faceplate, see ui/pointerLocal.js).
+  const { x } = localPoint(e, canvas)
+  const plotW = canvas.offsetWidth - SCALE_W
   cursor.value = x >= 0 && x <= plotW ? { x } : null
 }
 </script>
