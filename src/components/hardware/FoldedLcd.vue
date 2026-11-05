@@ -49,6 +49,11 @@ const props = defineProps({
    * adds the arrows and the ✕ (VoxPressor, with labelPosition 'above').
    */
   stacked: { type: Boolean, default: false },
+  /**
+   * A list of options rather than a number: down steps forward through it and
+   * either end wraps to the other (LcdSpinner's `reverse` + `wrap`).
+   */
+  cycle: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue', 'update:auto'])
 
@@ -135,6 +140,8 @@ function onKeyDown(e) {
           :disabled="disabled"
           :label="name"
           :format="format"
+          :wrap="cycle"
+          :reverse="cycle"
         />
         <div v-if="labelPosition !== 'above'" class="pg-title pg-title--lcd">{{ name }}</div>
       </div>

@@ -419,7 +419,7 @@ async function applyAndClose() {
             @update:model-value="onPeaks"
           />
           <FoldedLcd
-            class="vp-fold vp-ctl-gap" name="Attack / release" label-position="above" stacked
+            class="vp-fold vp-ctl-gap" name="Attack / release" label-position="above" stacked cycle
             :model-value="speedIndex" :min="0" :max="SPEED_OPTIONS.length - 1" :step="1"
             :format="formatSpeed" :disabled="!voxPreview || !speedInUse"
             @update:model-value="onSpeedIndex"
@@ -584,7 +584,7 @@ async function applyAndClose() {
         <section class="vp-col vp-out-col" aria-label="Output">
           <div class="vp-out-title">
             <FoldedLcd
-              class="vp-fold" name="Output level" label-position="above" stacked
+              class="vp-fold" name="Output level" label-position="above" stacked cycle
               :model-value="ceilingIndex" :min="0" :max="CEILING_OPTIONS.length - 1" :step="1"
               :format="formatCeiling" :disabled="!voxPreview"
               @update:model-value="onCeilingIndex"
