@@ -69,8 +69,8 @@ const MODES = [
 
 const MODE_ABOUT = {
   df3: 'Transparent removal of hiss, fans, air conditioning and more. The right first choice.',
-  rnnoise: 'Cleans lip smacks, mic bumps and room noise. Great for audiobooks and narration.',
-  both: `${CLEAN} takes out the broadband noise floor, then ${DEEP} removes what it leaves — the ACX audiobook order.`,
+  rnnoise: 'Cleans lip smacks, mic bumps and room noise. Best for audiobooks and narration.',
+  both: `${CLEAN} emoves broadband hiss, then ${DEEP} removes lip smack and room noise.`,
 }
 
 /** The mastering chain's light / standard / heavy tiers, and uncapped. */
@@ -194,7 +194,7 @@ async function applyAndClose() {
               ><span class="of-toggle-puck" :style="{ left: params.protectConsonants ? '23px' : '3px' }"></span></button>
             </span>
           </div>
-          <span class="of-about">Guard soft vocal onsets that deep clean can sometimes remove.</span>
+          <span class="of-about">Protect soft vocal onsets that deep clean can sometimes cut.</span>
         </div>
       </section>
     </div>
@@ -203,11 +203,11 @@ async function applyAndClose() {
     <section class="of-card of-wide" :class="{ 'is-off': !anyOn }">
       <div class="of-wide-text">
         <span class="of-card-name">MIX</span>
-        <span class="of-about">Below 100% blends the original back in to hide artefacts.</span>
+        <span class="of-about">Below 100% blends the original back in to mask potential noise reduction artifacts.</span>
       </div>
       <div class="of-wide-controls">
         <ModulaKnob
-          variant="ring" :size="56"
+          variant="halo" :size="56"
           :model-value="params.mix" :min="0" :max="1" :step="0.01"
           :default-value="D.mix" :color="ACCENT"
           :disabled="processing || !anyOn"
