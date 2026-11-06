@@ -2,7 +2,7 @@
 /**
  * Auto Leveler.
  *
- * An OFFLINE process (see useAutoLevel.js): set the controls, press Level,
+ * An OFFLINE process (see useAutoLevel.js): set the controls, press Apply,
  * listen in the editor, Undo if it is wrong. One button runs speech detection
  * on the server, the phrase analysis and gain solve here, and commits the
  * result. Pro only — the footer button carries the PRO tag and opens the
@@ -13,7 +13,7 @@
  * check the result against ACX, and a leveler whose caps and deadband are
  * hidden cannot be reasoned about against a compliance report.
  *
- * Modula layout: what Level will do (and what the last run did) in the top
+ * Modula layout: what Apply will do (and what the last run did) in the top
  * well, the four limits under it, and the target mode with its two knobs in a
  * second row.
  */

@@ -1,6 +1,6 @@
 /**
  * Offline processes are marked as such everywhere they appear (registry
- * `offline` → the OFFLINE tag in lists and the palette, FloatingWindow's
+ * `offline` → the RENDER tag in lists and the palette, FloatingWindow's
  * `offline` mode), and the registry and the plan table agree on which they are.
  */
 import { test } from 'node:test'

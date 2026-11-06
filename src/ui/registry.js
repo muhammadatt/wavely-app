@@ -123,7 +123,7 @@ const ALL_CATEGORIES = [
  *   offline   true for an OFFLINE process: no live preview, one button that
  *             processes the selection, Undo to revert. Most of the app is
  *             real-time, so the few that are not say so wherever they appear —
- *             an OFFLINE tag on their row in every list and palette, and a
+ *             a RENDER tag on their row in every list and palette, and a
  *             distinct window (FloatingWindow `offline`) — rather than being
  *             moved to a menu of their own, which would pull them out of the
  *             category they belong to. Pairs with the plan feature's own

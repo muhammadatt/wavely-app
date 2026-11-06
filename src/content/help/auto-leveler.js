@@ -9,7 +9,7 @@ export default {
   ],
 
   controls: [
-    { label: 'Level', text: 'Finds the phrases in the selection, evens them out and replaces the selection in one undoable step' },
+    { label: 'Apply to selection', text: 'Finds the phrases in the selection, evens them out and replaces the selection in one undoable step' },
     { label: 'Deadband dB', text: 'How far a phrase may sit from the target before anything moves it — inside this band it is left untouched' },
     { label: 'Knee dB', text: 'How gradually the correction opens up past the deadband, so two similar phrases do not get different treatment' },
     { label: 'Max Boost dB', text: 'The most any phrase will be lifted' },
@@ -20,7 +20,7 @@ export default {
   ],
 
   steps: [
-    'Select at least 10 seconds containing at least 5 seconds of speech — usually the whole chapter — and press Level',
+    'Select at least 10 seconds containing at least 5 seconds of speech — usually the whole chapter — and press Apply to selection',
     'Listen in the editor. Undo puts the original back',
     'If phrases you can hear as uneven were left alone, undo, lower the deadband and level again',
     'Use ROLLING if the take deliberately changes level and WHOLE SELECTION should not flatten it',

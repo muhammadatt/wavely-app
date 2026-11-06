@@ -162,9 +162,9 @@ const props = defineProps({
   showPreview: { type: Boolean, default: false },
   /**
    * An OFFLINE process (registry `offline`): nothing here runs in real time.
-   * The header carries an OFFLINE chip beside the name, and the footer puts a
-   * plain statement of the contract — not real-time, Undo reverts — where a
-   * real-time plugin has its Preview, with an hourglass on the action button.
+   * The header carries a RENDER chip beside the name, the footer puts a plain
+   * statement of the contract ("No preview") where a real-time plugin has its
+   * Preview, and the action button carries the same clock icon as the chip.
    * Most of the app's windows ARE real-time, so the few that are not have to
    * say so at a glance rather than reading as broken real-time ones (no ON
    * lamp, no Preview). Pass show-engage false and no Preview alongside it.
@@ -769,7 +769,7 @@ function requestClose() {
         <span
           v-if="offline"
           class="win-offline"
-          title="Offline process — not real-time. Nothing is heard until you process the selection; Undo reverts it"
+          title="Renders the selection — not real-time. Nothing is heard until it is applied; Undo reverts it"
         >
           <Icon name="offline" :size="11" :stroke-width="2.25" />
           RENDER
@@ -1569,8 +1569,8 @@ function requestClose() {
   letter-spacing: 0.14em;
   color: color-mix(in srgb, var(--face, #e8a33d) 20%, #fff);
 }
-/* OFFLINE chip and footer note: a cool outline, never filled, so it reads as
-   what kind of plugin this is rather than as a control or a plan tag. */
+/* RENDER chip and footer note: what kind of plugin this is (an offline
+   process), not a control. Filled orange, matching the rail's RENDER tag. */
 .win-offline {
   display: inline-flex;
   align-items: center;

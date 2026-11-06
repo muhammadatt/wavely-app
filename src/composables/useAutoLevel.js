@@ -11,7 +11,7 @@ import {
 export const AUTOLEVEL_WINDOW_ID = 'auto-leveler'
 
 /**
- * Auto Leveler — an OFFLINE process: set the controls, press Level, listen in
+ * Auto Leveler — an OFFLINE process: set the controls, press Apply, listen in
  * the editor, Undo if it is wrong.
  *
  * It used to be a real-time plugin (Analyse → a live gain curve in the
@@ -36,7 +36,7 @@ export const AUTOLEVEL_WINDOW_ID = 'auto-leveler'
 const params = ref({ ...AUTOLEVEL_DEFAULTS })
 const processing = ref(false)
 /**
- * What the last Level did, for the panel: { measurements } when it levelled,
+ * What the last Apply did, for the panel: { measurements } when it levelled,
  * { reason } when it declined. Cleared by nothing — it describes a past action
  * and says so ("Last run").
  */
@@ -83,7 +83,7 @@ export function useAutoLevel() {
     if (!entitlements.request('autoLevel')) return false
     const { start, end } = state.selection
     const { sampleRate, channels } = state.currentFile
-    // Pinned to the document Level was pressed on: tabs stay usable while it
+    // Pinned to the document Apply was pressed on: tabs stay usable while it
     // runs, and `state` follows the active one (pinActiveDocument).
     const pin = pinActiveDocument('Auto Leveler')
     // ⚠ CAPTURED BEFORE THE REQUEST, CHECKED AFTER IT: the round trip is

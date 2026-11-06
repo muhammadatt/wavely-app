@@ -77,7 +77,7 @@ function select(op) {
         </div>
         <div class="flex-1 min-w-0">
           <div class="text-[13px] font-bold text-text truncate">{{ op.label }}</div>
-          <!-- The OFFLINE tag leads the description rather than sitting beside
+          <!-- The RENDER tag leads the description rather than sitting beside
                the PRO tag: in a 300 px rail, two tags there cut the name to
                "Noise Re…". -->
           <div class="flex items-center gap-[6px] mt-[2px] min-w-0">
