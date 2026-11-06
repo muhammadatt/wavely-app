@@ -17,6 +17,8 @@ export default {
     { label: 'WHOLE SELECTION / ROLLING', text: 'Whether every phrase aims at one level for the whole selection, or at a median that follows the recording' },
     { label: 'Window s', text: 'How far back the rolling median looks — only used in ROLLING mode' },
     { label: 'Floor dBFS', text: 'Where room tone is allowed to end up, which caps how far a quiet phrase can be lifted' },
+    { label: 'Settings', text: 'Every value box can be dragged up or down, typed into, or double-clicked to go back to its default' },
+    { label: 'Last run', text: 'What the last Apply did: how many phrases it levelled, how far apart they were before and after, and the largest cut and boost. It says so when the leveler declined or when room tone capped the boost' },
   ],
 
   steps: [

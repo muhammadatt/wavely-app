@@ -127,32 +127,32 @@ async function applyAndClose() {
     @apply="applyAndClose"
   >
     <!-- Mode tiles -->
-    <div class="nr-tiles" role="radiogroup" aria-label="Noise reduction mode">
+    <div class="of-tiles" role="radiogroup" aria-label="Noise reduction mode">
       <button
         v-for="m in MODES" :key="m.value"
-        type="button" class="nr-tile m-focusable" role="radio"
+        type="button" class="of-tile m-focusable" role="radio"
         :class="{ 'is-on': params.engine === m.value }"
         :aria-checked="String(params.engine === m.value)"
         :disabled="processing"
         @click="setEngine(m.value)"
       >
-        <span class="nr-tile-label">{{ m.label }}</span>
-        <span class="nr-tile-sub">{{ m.sub }}</span>
+        <span class="of-tile-label">{{ m.label }}</span>
+        <span class="of-tile-sub">{{ m.sub }}</span>
       </button>
     </div>
-    <p class="nr-mode-about">{{ MODE_ABOUT[params.engine] ?? '' }}</p>
+    <p class="of-mode-about">{{ MODE_ABOUT[params.engine] ?? '' }}</p>
 
     <!-- Pass cards -->
-    <div class="nr-passes">
-      <section class="nr-card nr-pass">
-        <header class="nr-pass-head">
-          <span class="nr-pass-name">{{ CLEAN }}</span>
-          <span class="nr-pass-state" :class="{ 'is-on': cleanOn }">{{ cleanOn ? 'ACTIVE' : 'OFF' }}</span>
+    <div class="of-cards">
+      <section class="of-card of-col">
+        <header class="of-card-head">
+          <span class="of-card-name">{{ CLEAN }}</span>
+          <span class="of-card-state" :class="{ 'is-on': cleanOn }">{{ cleanOn ? 'ACTIVE' : 'OFF' }}</span>
         </header>
-        <div class="nr-rule"></div>
-        <div class="nr-pass-body" :class="{ 'is-off': !cleanOn }">
-          <div class="nr-row">
-            <span class="nr-setting">MAX REDUCTION</span>
+        <div class="of-rule"></div>
+        <div class="of-card-body" :class="{ 'is-off': !cleanOn }">
+          <div class="of-row">
+            <span class="of-setting">MAX REDUCTION</span>
             <ModulaField
               :model-value="params.df3LimitDb" :min="NR_DF3_LIMIT_MIN_DB" :max="NR_DF3_LIMIT_MAX_DB" :step="1"
               :width="52" :default-value="D.df3LimitDb" :format-value="formatLimit" :parse="parseLimit"
@@ -160,10 +160,10 @@ async function applyAndClose() {
               @update:model-value="setDf3Limit"
             />
           </div>
-          <div class="nr-tiers" role="radiogroup" aria-label="Max reduction tier">
+          <div class="of-tiers" role="radiogroup" aria-label="Max reduction tier">
             <button
               v-for="t in TIERS" :key="t.label"
-              type="button" class="nr-tier m-focusable" role="radio"
+              type="button" class="of-tier m-focusable" role="radio"
               :class="{ 'is-on': Math.round(params.df3LimitDb) === t.value }"
               :aria-checked="String(Math.round(params.df3LimitDb) === t.value)"
               :disabled="!cleanOn || processing"
@@ -174,38 +174,38 @@ async function applyAndClose() {
         </div>
       </section>
 
-      <section class="nr-card nr-pass">
-        <header class="nr-pass-head">
-          <span class="nr-pass-name">{{ DEEP }}</span>
-          <span class="nr-pass-state" :class="{ 'is-on': deepOn }">{{ deepOn ? 'ACTIVE' : 'OFF' }}</span>
+      <section class="of-card of-col">
+        <header class="of-card-head">
+          <span class="of-card-name">{{ DEEP }}</span>
+          <span class="of-card-state" :class="{ 'is-on': deepOn }">{{ deepOn ? 'ACTIVE' : 'OFF' }}</span>
         </header>
-        <div class="nr-rule"></div>
-        <div class="nr-pass-body" :class="{ 'is-off': !deepOn }">
-          <div class="nr-row">
-            <span class="nr-setting">VOICE GUARD</span>
-            <span class="nr-toggle-wrap">
-              <span class="nr-toggle-word" :class="{ 'is-on': params.protectConsonants && deepOn }">{{ params.protectConsonants ? 'ON' : 'OFF' }}</span>
+        <div class="of-rule"></div>
+        <div class="of-card-body" :class="{ 'is-off': !deepOn }">
+          <div class="of-row">
+            <span class="of-setting">VOICE GUARD</span>
+            <span class="of-toggle-wrap">
+              <span class="of-toggle-word" :class="{ 'is-on': params.protectConsonants && deepOn }">{{ params.protectConsonants ? 'ON' : 'OFF' }}</span>
               <button
-                type="button" class="nr-toggle m-focusable" role="switch"
+                type="button" class="of-toggle m-focusable" role="switch"
                 :class="{ 'is-on': params.protectConsonants && deepOn }"
                 :aria-checked="String(params.protectConsonants)" aria-label="Voice guard"
                 :disabled="!deepOn || processing"
                 @click="toggleGuard"
-              ><span class="nr-toggle-puck" :style="{ left: params.protectConsonants ? '23px' : '3px' }"></span></button>
+              ><span class="of-toggle-puck" :style="{ left: params.protectConsonants ? '23px' : '3px' }"></span></button>
             </span>
           </div>
-          <span class="nr-about">Guard soft vocal onsets that deep clean can sometimes remove.</span>
+          <span class="of-about">Guard soft vocal onsets that deep clean can sometimes remove.</span>
         </div>
       </section>
     </div>
 
     <!-- Mix -->
-    <section class="nr-card nr-mix" :class="{ 'is-off': !anyOn }">
-      <div class="nr-mix-text">
-        <span class="nr-pass-name">MIX</span>
-        <span class="nr-about">Below 100% blends the original back in to hide artefacts.</span>
+    <section class="of-card of-wide" :class="{ 'is-off': !anyOn }">
+      <div class="of-wide-text">
+        <span class="of-card-name">MIX</span>
+        <span class="of-about">Below 100% blends the original back in to hide artefacts.</span>
       </div>
-      <div class="nr-mix-controls">
+      <div class="of-wide-controls">
         <ModulaKnob
           variant="ring" :size="56"
           :model-value="params.mix" :min="0" :max="1" :step="0.01"
@@ -224,209 +224,15 @@ async function applyAndClose() {
     </section>
 
     <template #offline-note>
-      <span v-if="processing" class="nr-running">
-        <span class="nr-running-lamp"></span>
-        <span class="nr-running-text">{{ state.processingStage || 'Starting…' }}</span>
+      <span v-if="processing" class="of-running">
+        <span class="of-running-lamp"></span>
+        <span class="of-running-text">{{ state.processingStage || 'Starting…' }}</span>
         <ModulaButton variant="ghost" size="sm" @click="cancel">Cancel</ModulaButton>
       </span>
-      <span v-else class="nr-note">No preview - Renders on the server.</span>
+      <span v-else class="of-note">No preview - Renders on the server.</span>
     </template>
   </FloatingWindow>
 </template>
 
-<style scoped>
-/* ── Mode tiles: three raised keys in a dark well ── */
-.nr-tiles {
-  display: flex;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #1a1c20, #22252a);
-  box-shadow: inset 0 2px 8px rgba(0, 0, 0, .8);
-}
-.nr-tile {
-  flex: 1;
-  min-width: 0;
-  height: 54px;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  background: linear-gradient(180deg, #2c3036, #23262b);
-  box-shadow: inset 0 2px 6px rgba(0, 0, 0, .6);
-}
-.nr-tile.is-on {
-  background: linear-gradient(180deg, #3c4149, #2a2e34);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 8px 16px -8px rgba(0, 0, 0, .9), 0 0 0 1px rgba(0, 0, 0, .6);
-}
-.nr-tile:disabled { cursor: default; }
-.nr-tile-label {
-  font: 700 11px/1 var(--m-font-ui);
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, .5);
-}
-.nr-tile-sub { font: 500 10px/1 var(--m-font-ui); color: rgba(255, 255, 255, .38); }
-.nr-tile.is-on .nr-tile-label { color: #3fd0de; }
-.nr-tile.is-on .nr-tile-sub { color: #c9d0d6; }
-.nr-mode-about {
-  margin: 10px 6px 0;
-  min-height: 30px;
-  font: 500 10px/1.5 var(--m-font-ui);
-  color: #b6bdc4;
-  text-wrap: pretty;
-}
-
-/* ── Cards ── */
-.nr-card {
-  border-radius: 16px;
-  background: linear-gradient(180deg, #3c4655, #2c343f);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
-}
-.nr-passes {
-  margin-top: 6px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-.nr-pass {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-}
-.nr-pass-head { display: flex; justify-content: space-between; align-items: center; }
-.nr-pass-name {
-  font: 600 10px/1 var(--m-font-ui);
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: #eaf6f8;
-}
-.nr-pass-state {
-  font: 700 8px/1 'JetBrains Mono', monospace;
-  letter-spacing: .12em;
-  color: #a0a8b0;
-}
-.nr-pass-state.is-on { color: #e8a33d; }
-.nr-rule { height: 1px; background: rgba(0, 0, 0, .35); box-shadow: 0 1px 0 rgba(255, 255, 255, .04); }
-.nr-pass-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  transition: opacity .15s ease;
-}
-.nr-pass-body.is-off, .nr-mix.is-off { opacity: .4; }
-.nr-row { display: flex; justify-content: space-between; align-items: center; min-height: 23px; }
-.nr-setting {
-  font: 600 9px/1 var(--m-font-ui);
-  letter-spacing: .14em;
-  color: #aeb6bd;
-}
-.nr-about { font: 500 10px/1.5 var(--m-font-ui); color: #b6bdc4; }
-
-/* Max reduction tiers: a flat segmented strip in a well */
-.nr-tiers {
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #1a1c20, #22252a);
-  box-shadow: inset 0 2px 6px rgba(0, 0, 0, .8);
-}
-.nr-tier {
-  flex: 1;
-  border: none;
-  cursor: pointer;
-  padding: 6px 0;
-  border-radius: 6px;
-  font: 700 9px/1.2 var(--m-font-ui);
-  letter-spacing: .12em;
-  white-space: nowrap;
-  color: rgba(255, 255, 255, .5);
-  background: transparent;
-}
-.nr-tier.is-on {
-  color: #e8a33d;
-  background: linear-gradient(180deg, #3c4149, #2a2e34);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 6px 12px -6px rgba(0, 0, 0, .9), 0 0 0 1px rgba(0, 0, 0, .6);
-}
-.nr-tier:disabled { cursor: default; }
-
-/* Voice guard: a small switch with its state word beside it */
-.nr-toggle-wrap { display: flex; align-items: center; gap: 8px; }
-.nr-toggle-word {
-  font: 700 9px/1 var(--m-font-ui);
-  letter-spacing: .14em;
-  color: rgba(255, 255, 255, .5);
-}
-.nr-toggle-word.is-on { color: #eaf6f8; }
-.nr-toggle {
-  position: relative;
-  flex: none;
-  width: 44px;
-  height: 24px;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  background: linear-gradient(180deg, #15171a, #23262b);
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .85), 0 1px 0 rgba(255, 255, 255, .05);
-}
-.nr-toggle.is-on { background: linear-gradient(180deg, #5a4220, #3b2c17); }
-.nr-toggle:disabled { cursor: default; }
-.nr-toggle-puck {
-  position: absolute;
-  top: 3px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  transition: left .18s cubic-bezier(.4, 1.4, .5, 1);
-  background: linear-gradient(160deg, #50555e, #2b2e34);
-  box-shadow: 0 4px 8px -3px rgba(0, 0, 0, .95), inset 0 1px 0 rgba(255, 255, 255, .18), 0 0 0 1px rgba(0, 0, 0, .6);
-}
-
-/* ── Mix ── */
-.nr-mix {
-  margin-top: 10px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: center;
-  padding: 14px;
-  transition: opacity .15s ease;
-}
-.nr-mix-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.nr-mix-controls { display: flex; align-items: center; gap: 14px; }
-
-/* ── Footer note (FloatingWindow's own note style; its CSS is scoped, so a
-   slotted note restates it) ── */
-.nr-note {
-  margin-right: 6px;
-  font: 500 11px var(--m-font-ui, 'Inter', system-ui, sans-serif);
-  color: rgba(159, 196, 232, .8);
-  white-space: nowrap;
-}
-.nr-running {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-right: 6px;
-}
-.nr-running-text {
-  font: 500 11px var(--m-font-ui);
-  color: rgba(159, 196, 232, .9);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.nr-running-lamp {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #e78040;
-  animation: nr-pulse 1.2s ease-in-out infinite;
-}
-@keyframes nr-pulse { 50% { opacity: .3; } }
-</style>
+<!-- The 4b face is shared with the Auto Leveler. -->
+<style scoped src="./offlineFace.css"></style>
