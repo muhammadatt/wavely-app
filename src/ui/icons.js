@@ -119,6 +119,8 @@ export const ICONS = {
 
   // UI
   check: '<polyline points="20 6 9 17 4 12"/>',
+  // Offline processes: rendered once, not heard live.
+  offline: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',

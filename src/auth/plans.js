@@ -40,11 +40,14 @@ export const PLAN_LABELS = { free: 'Free', pro: 'Pro' }
 export const FREE_PREVIEW_SECONDS = 30
 
 /**
- * id -> { requires, label, server?, preview? }
+ * id -> { requires, label, server?, preview?, offline? }
  *
  *   requires  lowest plan that may use it ('free' = any account)
  *   server    enforced by the API, not just hidden in the UI
  *   preview   non-entitled users may run it on ≤ FREE_PREVIEW_SECONDS of audio
+ *   offline   an OFFLINE process (settings → process → undo), not a real-time
+ *             plugin: there is nothing to preview, so the whole plugin is the
+ *             feature, not just its Apply — and no "preview is free" promise
  */
 export const FEATURES = {
   // Anything stored against the user needs somewhere to store it.
@@ -56,12 +59,18 @@ export const FEATURES = {
   // Server ANALYSIS, browser DSP: the analysis needs any account (any length,
   // up to the analyze route's cap) — a sign-in, never a payment; Apply needs Pro.
   audioAnalysis: { requires: 'free', label: 'Audio analysis', server: true },
-  autoLevel: { requires: 'pro', label: 'Auto Leveler' },
   sibilanceEditor: { requires: 'pro', label: 'Sibilance Editor' },
   voxPressor: { requires: 'pro', label: 'VoxPressor' },
 
+  // OFFLINE processes: set up, process the selection, undo if it is wrong.
+  // Their changes are not something a free preview demonstrates (a 30 s
+  // denoise audition, a phrase-level gain ride heard in real time), so they
+  // are Pro outright. Auto Leveler's analysis still goes through the
+  // `audioAnalysis` route; the browser asks for `autoLevel` before it calls it.
+  autoLevel: { requires: 'pro', label: 'Auto Leveler', offline: true },
+  noiseReduction: { requires: 'pro', label: 'Noise Reduction', server: true, offline: true },
+
   // Server RENDERING: Pro, with a short preview for everyone else.
-  noiseReduction: { requires: 'pro', label: 'Noise Reduction', server: true, preview: true },
   spotEffects: { requires: 'pro', label: 'Server spot effects', server: true, preview: true },
 }
 
@@ -88,6 +97,12 @@ export function hasFeature(plan, featureId) {
 export function allowsPreview(featureId) {
   requiredPlan(featureId)
   return FEATURES[featureId].preview === true
+}
+
+/** Is it an offline process, gated whole rather than at Apply? */
+export function isOffline(featureId) {
+  requiredPlan(featureId)
+  return FEATURES[featureId].offline === true
 }
 
 /**

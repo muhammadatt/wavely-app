@@ -1,111 +1,116 @@
 <script setup>
 /**
- * Noise Reduction.
+ * Noise Reduction — layout 4b of the redesign study
+ * (docs/design/noise-reduction/Noise_Reduction_Redesign.dc.html).
  *
- * DeepFilterNet3 and/or RNNoise on the selection, run on the server. There is
- * no real-time preview — the models do not run in the browser — so the centre
- * well is the plugin's own audition: Preview processes up to 30 s from the
- * playhead, then Listen switches Original / Denoised and turns Mix live against
- * the held result. Apply processes the whole selection with the same settings
- * (see useNoiseReduction.js). The footer has no Preview of its own: the one in
- * the well is the preview, and two buttons of that name would be one too many.
+ * Two cleaning passes run on the server: CLEAN (DeepFilterNet3 — transparent,
+ * the general first choice) and DEEP CLEAN (RNNoise — takes away more: lip
+ * smacks, clicks, bumps, and some of the voice with them). BOTH runs Clean
+ * then Deep Clean, the ACX Audiobook preset's order. The panel never names the
+ * models (NR_PASS_LABELS in src/audio/noiseReductionParams.js).
  *
- * Modula layout: the engine choice and the audition row in the centre well,
- * the engine settings and Mix in a panel below.
+ *   MODE TILES   Clean / Deep Clean / Both — one choice, so there is no
+ *                "everything off" state to explain. The line under the tiles
+ *                says what the chosen mode is for.
+ *   PASS CARDS   one per pass, its state (ACTIVE / OFF) in the corner and its
+ *                setting dimmed while the mode leaves it out. Clean: Max
+ *                reduction as a drag readout with LIGHT / STD / HEAVY / MAX
+ *                tiers (the mastering chain's 6 / 12 / 18 dB, MAX uncapped).
+ *                Deep Clean: VOICE GUARD (`protectConsonants`).
+ *   MIX          its own card under both — it blends whatever the passes made
+ *                — as a ring knob whose arc shows how much cleaned audio is
+ *                kept, with the value beside it.
+ *
+ * No status line (the design drops it): the footer says what Process does,
+ * and while a run is going the footer's note becomes its stage, elapsed time
+ * and Cancel (FloatingWindow's `offline-note` slot). The processing overlay
+ * on the waveform shows the same stage.
+ *
+ * An OFFLINE process: set it up, Process, listen in the editor, Undo if it is
+ * wrong (useNoiseReduction.js). Pro only — the footer's Process carries the
+ * PRO tag for anyone else.
  */
-import { computed, onUnmounted } from 'vue'
+import { computed } from 'vue'
 import { useNoiseReduction } from '../../composables/useNoiseReduction.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   NOISE_REDUCTION_DEFAULTS,
   NR_DF3_LIMIT_MIN_DB,
   NR_DF3_LIMIT_MAX_DB,
-  NR_PREVIEW_SECONDS,
-  previewWindow,
+  NR_PASS_LABELS,
   usesDf3,
   usesRnnoise,
 } from '../../audio/noiseReductionParams.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaButton from '../modula/ModulaButton.vue'
-import ModulaSegmented from '../modula/ModulaSegmented.vue'
-import ModulaSwitch from '../modula/ModulaSwitch.vue'
+import ModulaField from '../modula/ModulaField.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { radioArrowKey, radioTabStop } from '../../ui/radioKeys.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  params, processing, listening, listenTo, hasResult, resultCoversSelection, isStale,
-  hasSelection, result,
-  setEngine, setDf3Limit, setProtectConsonants, setMix, setListenTo,
-  preview, toggleAudition, apply, teardown, closeModal,
+  params, processing,
+  setEngine, setDf3Limit, setProtectConsonants, setMix,
+  apply, cancel, closeModal,
 } = useNoiseReduction()
 
 const { state } = useEditorState()
 
-onUnmounted(teardown)
-
 const ACCENT = '#e8a33d'
 const D = NOISE_REDUCTION_DEFAULTS
+const CLEAN = NR_PASS_LABELS.df3
+const DEEP = NR_PASS_LABELS.rnnoise
 
-const ENGINE_OPTIONS = [
-  { value: 'df3', label: 'DF3', title: 'DeepFilterNet3 — the strongest model, for broadband noise, hiss and room tone' },
-  { value: 'rnnoise', label: 'RNNoise', title: 'RNNoise — a lighter model, for steady background noise' },
-  { value: 'both', label: 'Both', title: 'DeepFilterNet3, then RNNoise on what it leaves — the ACX Audiobook preset’s order' },
+const MODES = [
+  { value: 'df3', label: CLEAN, sub: 'Hiss, fans, AC' },
+  { value: 'rnnoise', label: DEEP, sub: 'Mouth noise, bumps' },
+  { value: 'both', label: 'Both', sub: 'Clean, then Deep' },
 ]
 
-const LISTEN_OPTIONS = [
-  { value: 'original', label: 'Original' },
-  { value: 'denoised', label: 'Denoised' },
-]
-
-const df3On = computed(() => usesDf3(params.engine))
-const rnnoiseOn = computed(() => usesRnnoise(params.engine))
-
-function clock(t) {
-  const m = Math.floor(t / 60)
-  const s = (t - m * 60).toFixed(1).padStart(4, '0')
-  return `${m}:${s}`
+const MODE_ABOUT = {
+  df3: 'Transparent removal of hiss, fans, air conditioning and more. The right first choice.',
+  rnnoise: 'Cleans lip smacks, mic bumps and room noise. Best for audiobooks and narration.',
+  both: `${CLEAN} emoves broadband hiss, then ${DEEP} removes lip smack and room noise.`,
 }
 
-/** What Preview would process now — shown before it is pressed. */
-const nextWindow = computed(() => (state.selection ? previewWindow(state.selection, state.playhead) : null))
+/** The mastering chain's light / standard / heavy tiers, and uncapped. */
+const TIERS = [
+  { label: 'LIGHT', value: 6 },
+  { label: 'STD', value: 12 },
+  { label: 'HEAVY', value: 18 },
+  { label: 'MAX', value: NR_DF3_LIMIT_MAX_DB },
+]
 
-const previewTitle = computed(() => {
-  const w = nextWindow.value
-  if (!w) return 'Select the audio to clean up first'
-  return `Process ${clock(w.start)}–${clock(w.end)} on the server and play it. ` +
-    `Up to ${NR_PREVIEW_SECONDS} s from the playhead, or the whole selection when it is shorter`
-})
-
-const statusLine = computed(() => {
-  if (processing.value) return 'Processing on the server…'
-  if (!hasSelection.value) return 'Select the audio to clean up.'
-  if (isStale.value) return 'The audio or a setting changed since the preview — preview again to listen.'
-  if (!hasResult.value) {
-    const w = nextWindow.value
-    return `Preview processes ${clock(w.start)}–${clock(w.end)} so you can hear it before applying. ` +
-      'Move the playhead to preview a different passage.'
-  }
-  const r = result.value
-  const span = `${clock(r.start)}–${clock(r.end)}`
-  if (resultCoversSelection.value) {
-    return `Previewing the whole selection (${span}). Mix and Original / Denoised are live; Apply writes what you hear.`
-  }
-  return `Previewing ${span}. Mix and Original / Denoised are live; Apply processes the whole selection with these settings.`
-})
+const cleanOn = computed(() => usesDf3(params.engine))
+const deepOn = computed(() => usesRnnoise(params.engine))
+const anyOn = computed(() => cleanOn.value || deepOn.value)
 
 function formatLimit(v) {
   return v >= NR_DF3_LIMIT_MAX_DB ? 'MAX' : `${Math.round(v)} dB`
 }
 
-function formatMix(v) {
-  return `${Math.round(v * 100)}%`
+function parseLimit(t) {
+  return /max/i.test(t) ? NR_DF3_LIMIT_MAX_DB : parseFloat(t)
+}
+
+function pickTier(v) {
+  if (cleanOn.value && !processing.value) setDf3Limit(v)
+}
+
+function toggleGuard() {
+  if (deepOn.value && !processing.value) setProtectConsonants(!params.protectConsonants)
+}
+
+const modeStop = computed(() => radioTabStop(MODES, m => m.value === params.engine))
+const tierStop = computed(() => radioTabStop(TIERS, t => t.value === Math.round(params.df3LimitDb)))
+
+function pickMode(m) {
+  if (!processing.value) setEngine(m.value)
 }
 
 async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
+  if (await apply()) closeModal()
 }
 </script>
 
@@ -118,134 +123,124 @@ async function applyAndClose() {
     design="modula"
     brand-lead="NOISE REDUCTION"
     :show-engage="false"
+    offline
     show-apply
+    apply-label="Process selection"
+    apply-label-short="Process"
     apply-feature="noiseReduction"
-    :apply-disabled="processing"
+    :apply-disabled="processing || !anyOn"
     apply-disabled-hint="Noise reduction is running"
     @apply="applyAndClose"
-    @close="teardown"
   >
-    <div class="nr-display">
-      <div class="nr-top">
-        <div class="nr-field">
-          <span class="m-caption">Engine</span>
-          <ModulaSegmented
-            :model-value="params.engine" :options="ENGINE_OPTIONS"
-            aria-label="Noise reduction engine" :disabled="processing"
-            @update:model-value="setEngine"
-          />
+    <!-- Mode tiles -->
+    <div class="of-tiles" role="radiogroup" aria-label="Noise reduction mode">
+      <button
+        v-for="(m, i) in MODES" :key="m.value"
+        type="button" class="of-tile m-focusable" role="radio"
+        :class="{ 'is-on': params.engine === m.value }"
+        :aria-checked="String(params.engine === m.value)"
+        :tabindex="i === modeStop ? 0 : -1"
+        :disabled="processing"
+        @click="pickMode(m)" @keydown="radioArrowKey($event, i, MODES, pickMode)"
+      >
+        <span class="of-tile-label">{{ m.label }}</span>
+        <span class="of-tile-sub">{{ m.sub }}</span>
+      </button>
+    </div>
+    <p class="of-mode-about">{{ MODE_ABOUT[params.engine] ?? '' }}</p>
+
+    <!-- Pass cards -->
+    <div class="of-cards">
+      <section class="of-card of-col">
+        <header class="of-card-head">
+          <span class="of-card-name">{{ CLEAN }}</span>
+          <span class="of-card-state" :class="{ 'is-on': cleanOn }">{{ cleanOn ? 'ACTIVE' : 'OFF' }}</span>
+        </header>
+        <div class="of-rule"></div>
+        <div class="of-card-body" :class="{ 'is-off': !cleanOn }">
+          <div class="of-row">
+            <span class="of-setting">MAX REDUCTION</span>
+            <ModulaField
+              :model-value="params.df3LimitDb" :min="NR_DF3_LIMIT_MIN_DB" :max="NR_DF3_LIMIT_MAX_DB" :step="1"
+              :width="52" :default-value="D.df3LimitDb" :format-value="formatLimit" :parse="parseLimit"
+              :disabled="!cleanOn || processing" aria-label="Max reduction"
+              @update:model-value="setDf3Limit"
+            />
+          </div>
+          <div class="of-tiers" role="radiogroup" aria-label="Max reduction tier">
+            <button
+              v-for="(t, i) in TIERS" :key="t.label"
+              type="button" class="of-tier m-focusable" role="radio"
+              :class="{ 'is-on': Math.round(params.df3LimitDb) === t.value }"
+              :aria-checked="String(Math.round(params.df3LimitDb) === t.value)"
+              :tabindex="i === tierStop ? 0 : -1"
+              :disabled="!cleanOn || processing"
+              :title="t.value >= NR_DF3_LIMIT_MAX_DB ? 'Uncapped' : `At most ${t.value} dB of reduction`"
+              @click="pickTier(t.value)" @keydown="radioArrowKey($event, i, TIERS, o => pickTier(o.value))"
+            >{{ t.label }}</button>
+          </div>
         </div>
-        <ModulaButton
-          variant="accent" :disabled="processing || !hasSelection"
-          :title="previewTitle"
-          @click="preview"
-        >{{ processing ? 'Processing…' : 'Preview' }}</ModulaButton>
-      </div>
+      </section>
 
-      <div class="nr-audition">
-        <ModulaButton
-          :model-value="listening" :disabled="!listening && (!hasResult || processing)"
-          :title="listening ? 'Stop listening' : hasResult ? 'Play the previewed passage from its start' : 'Preview first'"
-          @click="toggleAudition"
-        >{{ listening ? '■ Stop' : '▶ Listen' }}</ModulaButton>
-        <ModulaSegmented
-          :model-value="listenTo" :options="LISTEN_OPTIONS"
-          aria-label="Hear the original or the denoised audio" :disabled="!hasResult"
-          @update:model-value="setListenTo"
-        />
-      </div>
-
-      <p class="nr-status" :class="{ 'is-warn': isStale }">{{ statusLine }}</p>
+      <section class="of-card of-col">
+        <header class="of-card-head">
+          <span class="of-card-name">{{ DEEP }}</span>
+          <span class="of-card-state" :class="{ 'is-on': deepOn }">{{ deepOn ? 'ACTIVE' : 'OFF' }}</span>
+        </header>
+        <div class="of-rule"></div>
+        <div class="of-card-body" :class="{ 'is-off': !deepOn }">
+          <div class="of-row">
+            <span class="of-setting">VOICE GUARD</span>
+            <span class="of-toggle-wrap">
+              <span class="of-toggle-word" :class="{ 'is-on': params.protectConsonants && deepOn }">{{ params.protectConsonants ? 'ON' : 'OFF' }}</span>
+              <button
+                type="button" class="of-toggle m-focusable" role="switch"
+                :class="{ 'is-on': params.protectConsonants && deepOn }"
+                :aria-checked="String(params.protectConsonants)" aria-label="Voice guard"
+                :disabled="!deepOn || processing"
+                @click="toggleGuard"
+              ><span class="of-toggle-puck" :style="{ left: params.protectConsonants ? '23px' : '3px' }"></span></button>
+            </span>
+          </div>
+          <span class="of-about">Protect soft vocal onsets that deep clean can sometimes cut.</span>
+        </div>
+      </section>
     </div>
 
-    <div class="nr-controls">
-      <div class="nr-group" :class="{ 'is-off': !df3On }">
-        <span class="m-caption">DeepFilterNet3</span>
-        <ModulaKnob
-          variant="small" :size="56" show-value
-          :model-value="params.df3LimitDb" :min="NR_DF3_LIMIT_MIN_DB" :max="NR_DF3_LIMIT_MAX_DB" :step="1"
-          :default-value="D.df3LimitDb" label="Max reduction" :color="ACCENT" :format-value="formatLimit"
-          :disabled="!df3On || processing"
-          title="The most DF3 may take out of any frequency at any moment. Lower keeps more of the voice's edges (S, F, breath); MAX is uncapped. Double-click to reset"
-          @update:model-value="setDf3Limit"
-        />
+    <!-- Mix -->
+    <section class="of-card of-wide" :class="{ 'is-off': !anyOn }">
+      <div class="of-wide-text">
+        <span class="of-card-name">MIX</span>
+        <span class="of-about">Below 100% blends the original back in to mask potential noise reduction artifacts.</span>
       </div>
-
-      <div class="nr-group" :class="{ 'is-off': !rnnoiseOn }">
-        <span class="m-caption">RNNoise</span>
-        <!-- Captioned underneath rather than through the switch's own label,
-             which sits beside the track and does not fit a third of the panel. -->
-        <div
-          class="nr-switch"
-          title="Keep the original audio where speech is detected but RNNoise would suppress it — its usual casualty is the start of an S or F"
-        >
-          <ModulaSwitch
-            :model-value="params.protectConsonants" :color="ACCENT"
-            aria-label="Protect consonants"
-            :disabled="!rnnoiseOn || processing"
-            @update:model-value="setProtectConsonants"
-          />
-          <span class="m-caption nr-switch-label">Protect consonants</span>
-        </div>
-      </div>
-
-      <div class="nr-group">
-        <span class="m-caption">Output</span>
+      <div class="of-wide-controls">
         <ModulaKnob
-          variant="small" :size="56" show-value editable
-          :parse-value="t => parseFloat(t) / 100"
+          variant="halo" :size="56"
           :model-value="params.mix" :min="0" :max="1" :step="0.01"
-          :default-value="D.mix" label="Mix" :color="ACCENT" :format-value="formatMix"
-          title="How much of the denoised audio to use. Below 100% blends the original back in, which hides model artefacts at the cost of some noise. Live — no need to process again. Double-click to reset"
+          :default-value="D.mix" :color="ACCENT" aria-label="Mix"
+          :disabled="processing || !anyOn"
+          title="How much of the cleaned audio to keep. Drag up or down; double-click to reset"
           @update:model-value="setMix"
         />
+        <ModulaField
+          :model-value="Math.round(params.mix * 100)" :min="0" :max="100" :step="1"
+          :width="52" :default-value="Math.round(D.mix * 100)" :format-value="v => `${Math.round(v)}%`"
+          :disabled="processing || !anyOn" aria-label="Mix"
+          @update:model-value="v => setMix(v / 100)"
+        />
       </div>
-    </div>
+    </section>
+
+    <template #offline-note>
+      <span v-if="processing" class="of-running">
+        <span class="of-running-lamp"></span>
+        <span class="of-running-text">{{ state.processingStage || 'Starting…' }}</span>
+        <ModulaButton variant="ghost" size="sm" @click="cancel">Cancel</ModulaButton>
+      </span>
+      <span v-else class="of-note">No preview - Renders on the server.</span>
+    </template>
   </FloatingWindow>
 </template>
 
-<style scoped>
-.nr-display {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 14px;
-  border-radius: 16px;
-  background: var(--m-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
-}
-.nr-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
-.nr-field { display: flex; flex-direction: column; gap: 8px; }
-.nr-audition {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #0b0e13;
-  box-shadow: inset 0 2px 10px rgba(0, 0, 0, .85), 0 0 0 1px #1c222c, 0 1px 0 rgba(255, 255, 255, .05);
-}
-.nr-status { margin: 0; font: 500 10px/1.5 var(--m-font-ui); color: var(--m-ink-3); }
-.nr-status.is-warn { color: #ffb27a; }
-.nr-controls {
-  margin-top: 12px;
-  padding: 14px 16px 12px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  border-radius: 16px;
-  background: var(--m-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
-}
-.nr-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  transition: opacity .15s ease;
-}
-.nr-group.is-off { opacity: .45; }
-.nr-switch { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.nr-switch-label { color: #aeb6bd; }
-</style>
+<!-- The 4b face is shared with the Auto Leveler. -->
+<style scoped src="./offlineFace.css"></style>

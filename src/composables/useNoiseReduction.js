@@ -1,15 +1,17 @@
-import { computed, reactive, ref, watch } from 'vue'
+import { reactive, ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useEntitlements } from './useEntitlements.js'
 import { useWindows } from './useWindows.js'
-import { computePeakCache } from '../audio/processing.js'
+import { computePeakCache, renderRegionToBuffer } from '../audio/processing.js'
 import { denoiseRegion } from '../api/noiseReduction.js'
 import {
   NOISE_REDUCTION_DEFAULTS,
   NR_ENGINE_LABELS,
   blendDryWet,
-  previewWindow,
+  engineFor,
   serverParamsKey,
+  usesDf3,
+  usesRnnoise,
 } from '../audio/noiseReductionParams.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -19,84 +21,83 @@ export const NOISE_REDUCTION_WINDOW_ID = 'noise-reduction'
  * Noise Reduction — DeepFilterNet3 and/or RNNoise on the selection, run on the
  * server (see src/audio/noiseReductionParams.js for what each setting means).
  *
- * THERE IS NO LIVE PREVIEW, so the plugin has an audition of its own instead.
- * Preview sends up to NR_PREVIEW_SECONDS — the selection if it fits, else that
- * much from the playhead (previewWindow) — and holds what comes back next to
- * what was sent; Listen plays the pair straight to the output, with Original /
- * Denoised switching between them and Mix blending them, both live, because
- * both are gains on audio already in hand. Apply processes the whole selection
- * and commits the same blend — or, when the preview already covers the whole
- * selection, commits the previewed audio itself, sample for sample.
+ * AN OFFLINE PROCESS, NOT A REAL-TIME PLUGIN. The models do not run in the
+ * browser, so there is nothing to hear while a knob moves. The flow is the one
+ * every desktop editor uses for a denoiser: choose the settings, Process the
+ * selection, listen, and Undo if it is wrong. An earlier version auditioned a
+ * ≤ 30 s server-processed excerpt inside the window (Preview → Listen →
+ * Original / Denoised → Apply), and it read as a second, clunkier transport
+ * rather than a preview — removed.
+ *
+ * Pro only (`noiseReduction` in src/auth/plans.js, `offline: true`): the
+ * server refuses a non-Pro upload of any length.
+ *
+ * While it runs, the processing overlay names the stage (upload, server,
+ * download) with the time spent so far — the server reports no fraction, so
+ * the bar moves by stage rather than pretending to measure the model — and the
+ * window offers Cancel. The last result is held (see `held`) so a retry that
+ * only changes Mix needs no second round trip.
  *
  * ONE COPY, NOT pluginCopies(). The plugin cannot take a Plugin Chain slot: a
  * slot needs a node in the live chain, and a model that runs on the server has
  * none. So there is only ever the solo window to back.
- *
- * The preview is the same on every plan — short for Pro too, so a setting is a
- * 30 s round trip rather than a chapter — and the server's free-preview limit
- * is what lets a free user run it. Apply needs Pro (`applyFeature` on the
- * window); the server refuses a longer upload from anyone else.
  */
 
 const params = reactive({ ...NOISE_REDUCTION_DEFAULTS })
-
-/**
- * The last processed region: { docId, revision, start, end, paramsKey,
- * sampleRate, dry, wet }. Held until the audio or a server setting moves.
- */
-const result = ref(null)
 const processing = ref(false)
 
-const listening = ref(false)
-/** 'denoised' | 'original' — which side Listen plays. */
-const listenTo = ref('denoised')
-
-let audition = null // { sources, dryGain, wetGain }
 let processSeq = 0
-/**
- * Bumped by teardown. A Preview answered after its window closed must not
- * start playing: there would be nothing on screen to stop it with.
- */
-let auditionToken = 0
+/** The run in flight: { seq, docId, timer }, or null. */
+let run = null
 
+/**
+ * The last server result, held so the usual retry — Undo, change Mix, Process
+ * again — commits at once instead of re-running the model. Undo restores the
+ * timeline's revision, so `revision` matching means the audio under
+ * [start, end) is exactly what was sent; `paramsKey` covers every setting the
+ * server read (Mix is not one). Only the denoised side is held — the dry side
+ * is re-rendered from the timeline — and only for selections up to
+ * HOLD_MAX_SECONDS, since a chapter's worth of float audio is hundreds of MB.
+ */
+let held = null // { docId, revision, start, end, paramsKey, sampleRate, wet }
+const HOLD_MAX_SECONDS = 10 * 60
 const SAME_TIME_EPS = 1e-6
+
+const STAGE_TEXT = {
+  upload: 'Uploading the selection',
+  denoise: 'Denoising on the server',
+  download: 'Downloading the result',
+  apply: 'Replacing the selection',
+}
+const STAGE_PROGRESS = { upload: 0.05, denoise: 0.15, download: 0.9, apply: 0.97 }
+
+function clock(sec) {
+  const m = Math.floor(sec / 60)
+  return `${m}:${String(Math.floor(sec - m * 60)).padStart(2, '0')}`
+}
 
 export function useNoiseReduction() {
   const {
-    state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache,
-    startProcessing, endProcessing, pinActiveDocument, showToast,
+    state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
+    startProcessing, endProcessing, updateProcessingStage, updateProcessingProgress,
+    pinActiveDocument, showToast,
   } = useEditorState()
   const entitlements = useEntitlements()
   const { openWindow, closeWindow } = useWindows()
 
-  /**
-   * True while `result` describes the audio and settings in front of the user.
-   * The revision identifies the timeline (see useAutoLevel's sourceKey for why
-   * buffer ids are not enough); the params key is everything the server read.
-   */
-  function resultMatchesSource(r = result.value) {
-    return !!r
-      && r.docId === appState.activeDocumentId
-      && r.revision === state.revision
-      && r.paramsKey === serverParamsKey(params)
-  }
-
-  const hasResult = computed(() => resultMatchesSource())
-
-  /** The result covers exactly the current selection, so Apply can commit it. */
-  const resultCoversSelection = computed(() => {
-    const r = result.value
-    const sel = state.selection
-    return hasResult.value && !!sel
-      && Math.abs(r.start - sel.start) < SAME_TIME_EPS
-      && Math.abs(r.end - sel.end) < SAME_TIME_EPS
-  })
-
-  /** A result exists but no longer describes the audio or the settings. */
-  const isStale = computed(() => result.value !== null && !hasResult.value)
-
   function setEngine(engine) {
     params.engine = engine
+  }
+
+  /**
+   * Turn one pass on or off. With both off `engine` is null: the settings are
+   * kept and Process is disabled until one comes back on. Turning a pass back
+   * on from that state brings back only that pass.
+   */
+  function setPass(pass, on) {
+    const deep = pass === 'df3' ? on : usesDf3(params.engine)
+    const light = pass === 'rnnoise' ? on : usesRnnoise(params.engine)
+    params.engine = engineFor(deep, light)
   }
 
   function setDf3Limit(v) {
@@ -107,210 +108,135 @@ export function useNoiseReduction() {
     params.protectConsonants = on
   }
 
-  /** Mix is a browser-side blend: retunes the audition, never re-processes. */
   function setMix(v) {
     params.mix = v
-    updateAuditionGains()
-  }
-
-  function setListenTo(which) {
-    listenTo.value = which
-    updateAuditionGains()
   }
 
   function resetParams() {
     Object.assign(params, NOISE_REDUCTION_DEFAULTS)
-    updateAuditionGains()
   }
 
-  // ── Server round trip ─────────────────────────────────────────────────────
+  /** The held result, when it describes this audio, span and settings. */
+  function heldFor(docId, start, end) {
+    const h = held
+    return h && h.docId === docId && h.revision === state.revision
+      && Math.abs(h.start - start) < SAME_TIME_EPS && Math.abs(h.end - end) < SAME_TIME_EPS
+      && h.paramsKey === serverParamsKey(params)
+      ? h : null
+  }
+
+  /** Show a stage on the processing overlay, with the time spent so far. */
+  function showStage(r, stage, serverText = null) {
+    if (!run || run !== r) return
+    r.stage = stage
+    r.serverText = serverText
+    updateProcessingProgress(STAGE_PROGRESS[stage], r.docId)
+    renderStage(r)
+  }
+
+  function renderStage(r) {
+    const elapsed = clock((Date.now() - r.startedAt) / 1000)
+    const text = r.serverText ? `${STAGE_TEXT[r.stage]} — ${r.serverText}` : STAGE_TEXT[r.stage]
+    updateProcessingStage(`${text} · ${elapsed}`, r.docId)
+  }
+
+  function finishRun(r) {
+    clearInterval(r.timer)
+    if (run !== r) return
+    run = null
+    processing.value = false
+    endProcessing(r.docId)
+  }
 
   /**
-   * Process [start, end), store the result and return it — or null when it
-   * was superseded, cancelled or failed (with the toast already shown).
+   * Denoise the selection on the server and commit it as one undo step.
+   * Resolves true when something was committed.
    */
-  async function processRegion(start, end, label) {
+  async function apply() {
+    if (!state.selection || !state.currentFile || processing.value || !params.engine) return false
+    if (!entitlements.request('noiseReduction')) return false
+    const { start, end } = state.selection
     const { sampleRate, channels } = state.currentFile
     const pin = pinActiveDocument('Noise Reduction')
     const revision = state.revision
-    const paramsKey = serverParamsKey(params)
-    const seq = ++processSeq
-    const engineLabel = NR_ENGINE_LABELS[params.engine]
+    const settings = { ...params }
+    const paramsKey = serverParamsKey(settings)
+    const engineLabel = NR_ENGINE_LABELS[settings.engine]
+    const reuse = heldFor(pin.docId, start, end)
 
-    stopAudition()
+    const r = { seq: ++processSeq, docId: pin.docId, startedAt: Date.now(), stage: 'upload', serverText: null, timer: null }
+    run = r
     processing.value = true
-    startProcessing(`${label} (${engineLabel})...`, pin.docId)
+    startProcessing(`Reducing noise (${engineLabel})`, pin.docId)
+    r.timer = setInterval(() => renderStage(r), 1000)
+    const cancelled = () => run !== r
     try {
-      const out = await denoiseRegion({
-        segments: state.segments, start, end, sampleRate, channels,
-        params: { ...params },
-        isCancelled: () => seq !== processSeq,
-      })
-      if (!out || seq !== processSeq) return null
+      let wet
+      if (reuse) {
+        wet = reuse.wet
+      } else {
+        const out = await denoiseRegion({
+          segments: state.segments, start, end, sampleRate, channels,
+          params: settings,
+          isCancelled: cancelled,
+          onStage: (stage, text) => showStage(r, stage, text),
+        })
+        if (!out || cancelled()) return false
+        wet = out.wet
+      }
       pin.check()
       if (state.revision !== revision) {
         showToast('Audio changed during noise reduction — try again')
-        return null
+        return false
       }
-      result.value = {
-        docId: pin.docId, revision, start, end, paramsKey, sampleRate,
-        dry: out.dry, wet: out.wet,
+      held = end - start <= HOLD_MAX_SECONDS
+        ? { docId: pin.docId, revision, start, end, paramsKey, sampleRate, wet }
+        : null
+
+      showStage(r, 'apply')
+      const dry = renderRegionToBuffer(state.segments, start, end, sampleRate, channels)
+      const blended = blendDryWet(dry, wet, settings.mix)
+      const buffer = getAudioContext().createBuffer(blended.length, blended[0].length, sampleRate)
+      blended.forEach((d, ch) => buffer.copyToChannel(d, ch))
+      // The peak cache is the last await, so it runs BEFORE the commit and
+      // everything is re-checked after it: a Cancel, a tab switch or an edit
+      // landing while it computes must commit nothing (and say nothing).
+      const cache = await computePeakCache(buffer, 256)
+      if (cancelled()) return false
+      pin.check()
+      if (state.revision !== revision) {
+        showToast('Audio changed during noise reduction — try again')
+        return false
       }
-      return result.value
+      const bufferId = replaceRegion(start, end, buffer, 'noise reduction', pin.docId)
+      setPeakCache(bufferId, cache)
+      const mixNote = settings.mix < 1 ? ` at ${Math.round(settings.mix * 100)}% mix` : ''
+      showToast(`Noise reduced with ${engineLabel}${mixNote} — undo to compare`)
+      return true
     } catch (err) {
+      if (cancelled()) return false
       console.error('Noise reduction failed:', err)
       if (err instanceof DocumentSwitchedError) showToast(err.message)
       else if (!entitlements.handleServerRefusal(err)) showToast(err.message || 'Noise reduction failed')
-      return null
+      return false
     } finally {
-      if (seq === processSeq) processing.value = false
-      endProcessing(pin.docId)
+      finishRun(r)
     }
   }
 
   /**
-   * Process the preview window (see previewWindow) and start listening to it.
-   * The selection is left alone, so Apply still names the region the user
-   * chose.
+   * Stop waiting for the run in flight. The server job is left to finish and
+   * expire on its own (it holds nothing of the user's beyond the upload);
+   * nothing is committed.
    */
-  async function preview() {
-    if (!state.selection || !state.currentFile || processing.value) return
-    const { start, end } = previewWindow(state.selection, state.playhead)
-    const token = auditionToken
-    const r = await processRegion(start, end, 'Previewing noise reduction')
-    // The result is kept either way; only the auto-play waits on the window.
-    if (r && token === auditionToken) startAudition()
-  }
-
-  // ── Audition ──────────────────────────────────────────────────────────────
-
-  function auditionGains() {
-    if (listenTo.value === 'original') return { dry: 1, wet: 0 }
-    return { dry: 1 - params.mix, wet: params.mix }
-  }
-
-  function updateAuditionGains() {
-    if (!audition) return
-    const ctx = getAudioContext()
-    const g = auditionGains()
-    // A short ramp so switching sides mid-word is a crossfade, not a click.
-    audition.dryGain.gain.setTargetAtTime(g.dry, ctx.currentTime, 0.008)
-    audition.wetGain.gain.setTargetAtTime(g.wet, ctx.currentTime, 0.008)
-  }
-
-  function startAudition() {
-    const r = result.value
-    if (!hasResult.value || !r) return
-    stopAudition()
-    // One output at a time: the transport and the audition would talk over
-    // each other otherwise.
-    if (state.isPlaying) window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-
-    const ctx = getAudioContext()
-    const make = (channelData) => {
-      const buf = ctx.createBuffer(channelData.length, channelData[0].length, r.sampleRate)
-      channelData.forEach((d, ch) => buf.copyToChannel(d, ch))
-      return buf
-    }
-    const g = auditionGains()
-    const dryGain = ctx.createGain()
-    const wetGain = ctx.createGain()
-    dryGain.gain.value = g.dry
-    wetGain.gain.value = g.wet
-    dryGain.connect(ctx.destination)
-    wetGain.connect(ctx.destination)
-
-    const drySrc = ctx.createBufferSource()
-    const wetSrc = ctx.createBufferSource()
-    drySrc.buffer = make(r.dry)
-    wetSrc.buffer = make(r.wet)
-    drySrc.connect(dryGain)
-    wetSrc.connect(wetGain)
-    // Both on the same clock tick, so the blend is the sum Apply will write.
-    const at = ctx.currentTime + 0.03
-    drySrc.start(at)
-    wetSrc.start(at)
-    const session = { sources: [drySrc, wetSrc], dryGain, wetGain, unwatch: null }
-    wetSrc.onended = () => {
-      if (audition === session) stopAudition()
-    }
-    audition = session
-    listening.value = true
-    // The audition plays held audio, so it must end when that audio stops
-    // describing the timeline or the settings (an edit, a tab switch, a new
-    // Engine / Max reduction / Protect consonants), and when the main
-    // transport starts — the audition does not set `isPlaying`, so Play would
-    // otherwise talk over it. Lives exactly as long as the session.
-    session.unwatch = watch(
-      [() => hasResult.value, () => state.isPlaying],
-      ([current, playing]) => {
-        if (audition === session && (!current || playing)) stopAudition()
-      },
-    )
-  }
-
-  function stopAudition() {
-    if (audition) {
-      for (const s of audition.sources) {
-        s.onended = null
-        try { s.stop() } catch { /* never started */ }
-        s.disconnect()
-      }
-      audition.dryGain.disconnect()
-      audition.wetGain.disconnect()
-      audition.unwatch?.()
-      audition = null
-    }
-    listening.value = false
-  }
-
-  function toggleAudition() {
-    if (listening.value) stopAudition()
-    else startAudition()
-  }
-
-  // ── Apply ─────────────────────────────────────────────────────────────────
-
-  /**
-   * Commit the blend over the selection: the held result when it covers it
-   * with the current settings, else a fresh round trip first.
-   */
-  async function apply() {
-    if (!state.selection || !state.currentFile || processing.value) return
-    if (!entitlements.request('noiseReduction')) return
-    stopAudition()
-    const { start, end } = state.selection
-
-    const r = resultCoversSelection.value
-      ? result.value
-      : await processRegion(start, end, 'Reducing noise')
+  function cancel() {
+    const r = run
     if (!r) return
-
-    const pin = pinActiveDocument('Noise Reduction')
-    startProcessing('Applying noise reduction...', pin.docId)
-    try {
-      pin.check()
-      const channels = blendDryWet(r.dry, r.wet, params.mix)
-      const buffer = getAudioContext().createBuffer(channels.length, channels[0].length, r.sampleRate)
-      channels.forEach((d, ch) => buffer.copyToChannel(d, ch))
-      const bufferId = replaceRegion(start, end, buffer, 'noise reduction', pin.docId)
-      const cache = await computePeakCache(buffer, 256)
-      setPeakCache(bufferId, cache)
-      const mixNote = params.mix < 1 ? ` at ${Math.round(params.mix * 100)}% mix` : ''
-      showToast(`Noise reduced with ${NR_ENGINE_LABELS[params.engine]}${mixNote}`)
-      // The audio just changed, so the result no longer describes it.
-      result.value = null
-    } catch (err) {
-      console.error('Noise reduction apply failed:', err)
-      showToast(err instanceof DocumentSwitchedError ? err.message : 'Noise reduction failed')
-    } finally {
-      endProcessing(pin.docId)
-    }
-  }
-
-  function teardown() {
-    auditionToken++
-    stopAudition()
+    run = null
+    clearInterval(r.timer)
+    processing.value = false
+    endProcessing(r.docId)
+    showToast('Noise reduction cancelled')
   }
 
   function openModal() {
@@ -324,24 +250,15 @@ export function useNoiseReduction() {
   return {
     params,
     processing,
-    listening,
-    listenTo,
-    hasResult,
-    resultCoversSelection,
-    isStale,
     hasSelection,
-    result,
     setEngine,
+    setPass,
     setDf3Limit,
     setProtectConsonants,
     setMix,
-    setListenTo,
     resetParams,
-    preview,
-    toggleAudition,
-    stopAudition,
     apply,
-    teardown,
+    cancel,
     openModal,
     closeModal,
   }

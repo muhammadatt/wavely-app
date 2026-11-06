@@ -30,13 +30,19 @@ const MAX_WAIT_MS = 30 * 60 * 1000
  * @param {object}   options.params       plugin params (Mix is not sent)
  * @param {Function} [options.isCancelled] polled between requests; true stops
  *                                        waiting (the server job runs out)
+ * @param {Function} [options.onStage]   called with a short stage name as the
+ *                                        request moves: 'upload', 'denoise'
+ *                                        (with the server's progress text, if
+ *                                        any), 'download'
  * @returns {Promise<{ dry: Float32Array[], wet: Float32Array[], report: object|null } | null>}
  *   `dry` is what was sent, `wet` the server's result fitted to the same length
  *   and channel count; null when cancelled
  */
 export async function denoiseRegion({
   segments, start, end, sampleRate, channels, params, isCancelled = () => false,
+  onStage = () => {},
 }) {
+  onStage('upload')
   const dry = renderRegionToBuffer(segments, start, end, sampleRate, channels)
   const formData = new FormData()
   formData.append('file', floatChannelsToWavBlob(dry, sampleRate, channels), 'selection.wav')
@@ -49,6 +55,8 @@ export async function denoiseRegion({
   })
   if (!submit.ok) throw await serverError(submit, 'Noise reduction failed')
   const { jobId } = await submit.json()
+  if (isCancelled()) return null
+  onStage('denoise', null)
 
   let job = null
   const deadline = Date.now() + MAX_WAIT_MS
@@ -58,12 +66,14 @@ export async function denoiseRegion({
     const poll = await fetch(`${API_BASE}/api/jobs/${jobId}`)
     if (!poll.ok) throw await serverError(poll, 'Noise reduction status check failed')
     job = await poll.json()
+    onStage('denoise', job.progress ?? null)
     if (job.status === 'done') break
     if (job.status === 'error') throw new Error(job.error || 'Noise reduction failed on the server')
   }
   if (job?.status !== 'done') throw new Error('Noise reduction timed out — try a shorter selection')
   if (isCancelled()) return null
 
+  onStage('download')
   const download = await fetch(`${API_BASE}/api/jobs/${jobId}/download`)
   if (!download.ok) throw await serverError(download, 'Noise reduction download failed')
   const decoded = decodeWav(await download.arrayBuffer())
