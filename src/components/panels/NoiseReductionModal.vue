@@ -53,8 +53,8 @@ const deepOn = computed(() => usesDf3(params.engine))
 const lightOn = computed(() => usesRnnoise(params.engine))
 const anyOn = computed(() => deepOn.value || lightOn.value)
 
-const DEEP_ABOUT = 'Removes hiss, fans, air conditioning and room tone. The right first choice.'
-const LIGHT_ABOUT = 'A gentler pass for steady background noise. After Deep Clean, it takes what is left.'
+const DEEP_ABOUT = 'Transparent removal of hiss, fans, air conditioning and more. The right first choice.'
+const LIGHT_ABOUT = 'Cleans lip smacks, mic bumps and room noise. Great for audiobooks and narration.'
 
 function duration(sec) {
   if (sec < 60) return `${sec.toFixed(1)} s`
