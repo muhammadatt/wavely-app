@@ -7,6 +7,7 @@ import {
   parseServerParams,
   blendDryWet,
   serverParamsKey,
+  engineFor,
 } from '../../src/audio/noiseReductionParams.js'
 import { decodeWav } from '../../src/audio/wavDecode.js'
 import { FEATURES } from '../../src/auth/plans.js'
@@ -30,6 +31,13 @@ test('a setting the chosen engine does not read is not sent', () => {
   assert.deepEqual(toServerParams({ engine: 'both', df3LimitDb: 6, protectConsonants: false }), {
     engine: 'both', df3AttenLimDb: 6, protectConsonants: false,
   })
+})
+
+test('the two pass switches map onto the server engine, and both off is nothing to send', () => {
+  assert.equal(engineFor(true, false), 'df3')
+  assert.equal(engineFor(false, true), 'rnnoise')
+  assert.equal(engineFor(true, true), 'both')
+  assert.equal(engineFor(false, false), null)
 })
 
 test('the held-result key moves with what the server reads and nothing else', () => {

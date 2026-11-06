@@ -8,7 +8,10 @@ import {
   NOISE_REDUCTION_DEFAULTS,
   NR_ENGINE_LABELS,
   blendDryWet,
+  engineFor,
   serverParamsKey,
+  usesDf3,
+  usesRnnoise,
 } from '../audio/noiseReductionParams.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -86,6 +89,17 @@ export function useNoiseReduction() {
     params.engine = engine
   }
 
+  /**
+   * Turn one pass on or off. With both off `engine` is null: the settings are
+   * kept and Process is disabled until one comes back on. Turning a pass back
+   * on from that state brings back only that pass.
+   */
+  function setPass(pass, on) {
+    const deep = pass === 'df3' ? on : usesDf3(params.engine)
+    const light = pass === 'rnnoise' ? on : usesRnnoise(params.engine)
+    params.engine = engineFor(deep, light)
+  }
+
   function setDf3Limit(v) {
     params.df3LimitDb = v
   }
@@ -139,7 +153,7 @@ export function useNoiseReduction() {
    * Resolves true when something was committed.
    */
   async function apply() {
-    if (!state.selection || !state.currentFile || processing.value) return false
+    if (!state.selection || !state.currentFile || processing.value || !params.engine) return false
     if (!entitlements.request('noiseReduction')) return false
     const { start, end } = state.selection
     const { sampleRate, channels } = state.currentFile
@@ -229,6 +243,7 @@ export function useNoiseReduction() {
     processing,
     hasSelection,
     setEngine,
+    setPass,
     setDf3Limit,
     setProtectConsonants,
     setMix,

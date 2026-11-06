@@ -22,10 +22,31 @@
  */
 export const NR_ENGINES = ['df3', 'rnnoise', 'both']
 
+/**
+ * What the user sees. The panel never names the models: a narrator choosing
+ * between "DeepFilterNet3" and "RNNoise" is choosing between two words, so the
+ * two passes are named for what they do. DEEP CLEAN is DeepFilterNet3, LIGHT
+ * CLEAN is RNNoise; the panel turns each on or off and `engineFor` maps the
+ * pair onto the engine the server takes. Both on runs them in the ACX order.
+ */
+export const NR_PASS_LABELS = { df3: 'Deep Clean', rnnoise: 'Light Clean' }
+
 export const NR_ENGINE_LABELS = {
-  df3: 'DeepFilterNet3',
-  rnnoise: 'RNNoise',
-  both: 'DF3 + RNNoise',
+  df3: NR_PASS_LABELS.df3,
+  rnnoise: NR_PASS_LABELS.rnnoise,
+  both: `${NR_PASS_LABELS.df3} + ${NR_PASS_LABELS.rnnoise}`,
+}
+
+/**
+ * The engine for a pair of pass switches: 'df3' | 'rnnoise' | 'both', or null
+ * with both off — a browser-only state with nothing to send, which the panel
+ * shows as Process disabled. Never reaches `toServerParams`.
+ */
+export function engineFor(deepOn, lightOn) {
+  if (deepOn && lightOn) return 'both'
+  if (deepOn) return 'df3'
+  if (lightOn) return 'rnnoise'
+  return null
 }
 
 /**
