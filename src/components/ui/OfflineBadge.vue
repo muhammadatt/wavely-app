@@ -13,16 +13,16 @@ defineProps({ show: { type: Boolean, default: false } })
   <span
     v-if="show"
     class="offline-badge shrink-0 inline-flex items-center gap-[3px] font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[5px] py-[2px] rounded-[4px]"
-    title="Offline process — not real-time. Settings are heard only after you process the selection; Undo reverts it"
+    title="Offline process — not real-time. Press apply to hear the results."
   >
     <Icon name="offline" :size="9" :stroke-width="2.5" />
-    OFFLINE
+    RENDER
   </span>
 </template>
 
 <style scoped>
 .offline-badge {
-  color: #9fc4e8;
-  box-shadow: inset 0 0 0 1px rgba(159, 196, 232, 0.45);
+  color: #5e2b02;
+  background: #e78040
 }
 </style>

@@ -772,7 +772,7 @@ function requestClose() {
           title="Offline process — not real-time. Nothing is heard until you process the selection; Undo reverts it"
         >
           <Icon name="offline" :size="11" :stroke-width="2.25" />
-          OFFLINE
+          RENDER
         </span>
         <!-- The short rule, not `--tall`: it is dividing a 13 px word from an
              icon, where the tall one divides two 30 px chips. -->
@@ -985,7 +985,7 @@ function requestClose() {
       </button>
 
       <div class="win-actions flex items-center gap-2">
-        <span v-if="offline" class="win-offline-note">Not real-time · Undo reverts</span>
+        <span v-if="offline" class="win-offline-note">No preview - Renders on the server.</span>
         <!--
           The title sits on the WRAPPER, not on the button.
 
@@ -1580,8 +1580,8 @@ function requestClose() {
   border-radius: 5px;
   font: 700 9px/1 'JetBrains Mono', monospace;
   letter-spacing: 0.12em;
-  color: #9fc4e8;
-  box-shadow: inset 0 0 0 1px rgba(159, 196, 232, 0.45);
+  color: #5e2b02;
+  background: #e78040;
   white-space: nowrap;
   cursor: default;
 }

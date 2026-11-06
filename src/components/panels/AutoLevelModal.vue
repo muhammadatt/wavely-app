@@ -101,8 +101,6 @@ async function applyAndClose() {
     :show-engage="false"
     offline
     show-apply
-    apply-label="Level selection"
-    apply-label-short="Level"
     apply-feature="autoLevel"
     :apply-disabled="processing"
     apply-disabled-hint="Auto Leveler is running"
