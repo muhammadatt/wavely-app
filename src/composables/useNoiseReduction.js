@@ -198,8 +198,17 @@ export function useNoiseReduction() {
       const blended = blendDryWet(dry, wet, settings.mix)
       const buffer = getAudioContext().createBuffer(blended.length, blended[0].length, sampleRate)
       blended.forEach((d, ch) => buffer.copyToChannel(d, ch))
-      const bufferId = replaceRegion(start, end, buffer, 'noise reduction', pin.docId)
+      // The peak cache is the last await, so it runs BEFORE the commit and
+      // everything is re-checked after it: a Cancel, a tab switch or an edit
+      // landing while it computes must commit nothing (and say nothing).
       const cache = await computePeakCache(buffer, 256)
+      if (cancelled()) return false
+      pin.check()
+      if (state.revision !== revision) {
+        showToast('Audio changed during noise reduction — try again')
+        return false
+      }
+      const bufferId = replaceRegion(start, end, buffer, 'noise reduction', pin.docId)
       setPeakCache(bufferId, cache)
       const mixNote = settings.mix < 1 ? ` at ${Math.round(settings.mix * 100)}% mix` : ''
       showToast(`Noise reduced with ${engineLabel}${mixNote} — undo to compare`)

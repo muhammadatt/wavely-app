@@ -31,6 +31,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { AUTOLEVEL_DEFAULTS } from '../../audio/dsp/autoLevel.js'
 import ModulaField from '../modula/ModulaField.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { radioArrowKey, radioTabStop } from '../../ui/radioKeys.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -72,8 +73,20 @@ const resultSpread = computed(() => {
 })
 const resultGain = computed(() => {
   const m = measurements.value
-  return m ? `−${m.gain_max_down_db.toFixed(1)} / +${m.gain_max_up_db.toFixed(1)} dB` : '—'
+  if (!m) return '—'
+  // gain_max_down_db is the solve's signed MINIMUM gain (−3.2 for a 3.2 dB
+  // cut, 0 when nothing was cut), so the cut is its magnitude; neither side
+  // prints a sign it does not have.
+  const cut = Math.max(0, -m.gain_max_down_db)
+  const boost = Math.max(0, m.gain_max_up_db)
+  return `−${cut.toFixed(1)} / +${boost.toFixed(1)} dB`
 })
+
+const modeStop = computed(() => radioTabStop(MODES, m => m.value === params.value.target_mode))
+
+function pickMode(m) {
+  if (!processing.value) syncParam('target_mode', m.value)
+}
 
 /**
  * The headroom cap is the one thing that silently changes what the controls
@@ -111,12 +124,13 @@ async function applyAndClose() {
     <!-- Target mode tiles -->
     <div class="of-tiles" role="radiogroup" aria-label="Level towards">
       <button
-        v-for="m in MODES" :key="m.value"
+        v-for="(m, i) in MODES" :key="m.value"
         type="button" class="of-tile m-focusable" role="radio"
         :class="{ 'is-on': params.target_mode === m.value }"
         :aria-checked="String(params.target_mode === m.value)"
+        :tabindex="i === modeStop ? 0 : -1"
         :disabled="processing"
-        @click="syncParam('target_mode', m.value)"
+        @click="pickMode(m)" @keydown="radioArrowKey($event, i, MODES, pickMode)"
       >
         <span class="of-tile-label">{{ m.label }}</span>
         <span class="of-tile-sub">{{ m.sub }}</span>

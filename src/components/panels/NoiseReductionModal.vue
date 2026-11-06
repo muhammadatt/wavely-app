@@ -45,6 +45,7 @@ import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaButton from '../modula/ModulaButton.vue'
 import ModulaField from '../modula/ModulaField.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { radioArrowKey, radioTabStop } from '../../ui/radioKeys.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -101,7 +102,12 @@ function toggleGuard() {
   if (deepOn.value && !processing.value) setProtectConsonants(!params.protectConsonants)
 }
 
-const mixText = computed(() => `${Math.round(params.mix * 100)}%`)
+const modeStop = computed(() => radioTabStop(MODES, m => m.value === params.engine))
+const tierStop = computed(() => radioTabStop(TIERS, t => t.value === Math.round(params.df3LimitDb)))
+
+function pickMode(m) {
+  if (!processing.value) setEngine(m.value)
+}
 
 async function applyAndClose() {
   if (await apply()) closeModal()
@@ -129,12 +135,13 @@ async function applyAndClose() {
     <!-- Mode tiles -->
     <div class="of-tiles" role="radiogroup" aria-label="Noise reduction mode">
       <button
-        v-for="m in MODES" :key="m.value"
+        v-for="(m, i) in MODES" :key="m.value"
         type="button" class="of-tile m-focusable" role="radio"
         :class="{ 'is-on': params.engine === m.value }"
         :aria-checked="String(params.engine === m.value)"
+        :tabindex="i === modeStop ? 0 : -1"
         :disabled="processing"
-        @click="setEngine(m.value)"
+        @click="pickMode(m)" @keydown="radioArrowKey($event, i, MODES, pickMode)"
       >
         <span class="of-tile-label">{{ m.label }}</span>
         <span class="of-tile-sub">{{ m.sub }}</span>
@@ -162,13 +169,14 @@ async function applyAndClose() {
           </div>
           <div class="of-tiers" role="radiogroup" aria-label="Max reduction tier">
             <button
-              v-for="t in TIERS" :key="t.label"
+              v-for="(t, i) in TIERS" :key="t.label"
               type="button" class="of-tier m-focusable" role="radio"
               :class="{ 'is-on': Math.round(params.df3LimitDb) === t.value }"
               :aria-checked="String(Math.round(params.df3LimitDb) === t.value)"
+              :tabindex="i === tierStop ? 0 : -1"
               :disabled="!cleanOn || processing"
               :title="t.value >= NR_DF3_LIMIT_MAX_DB ? 'Uncapped' : `At most ${t.value} dB of reduction`"
-              @click="pickTier(t.value)"
+              @click="pickTier(t.value)" @keydown="radioArrowKey($event, i, TIERS, o => pickTier(o.value))"
             >{{ t.label }}</button>
           </div>
         </div>
@@ -209,7 +217,7 @@ async function applyAndClose() {
         <ModulaKnob
           variant="halo" :size="56"
           :model-value="params.mix" :min="0" :max="1" :step="0.01"
-          :default-value="D.mix" :color="ACCENT"
+          :default-value="D.mix" :color="ACCENT" aria-label="Mix"
           :disabled="processing || !anyOn"
           title="How much of the cleaned audio to keep. Drag up or down; double-click to reset"
           @update:model-value="setMix"
