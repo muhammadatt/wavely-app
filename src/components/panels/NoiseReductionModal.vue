@@ -15,10 +15,11 @@
  * footer's Process carries the PRO tag for anyone else.
  *
  * Modula layout: the two passes as a pair of cards (switch, what it is for,
- * its one setting — dimmed while off, since the switch says why); under them
- * a full-width OUTPUT strip with Mix, which applies to whatever the passes
- * produce and so must not sit in the row as if it were a third pass; then the
- * status well, which becomes the run's progress and Cancel while it works.
+ * its one setting — dimmed while off, since the switch says why). Under them,
+ * straight on the chassis with no card of their own, the OUTPUT row with Mix
+ * — it applies to whatever the passes produce, so it must not read as a third
+ * pass — and, behind an engraved rule, the status line, which becomes the
+ * run's progress and Cancel while it works.
  */
 import { computed } from 'vue'
 import { useNoiseReduction } from '../../composables/useNoiseReduction.js'
@@ -149,7 +150,7 @@ async function applyAndClose() {
       </section>
     </div>
 
-    <section class="nr-card nr-output" :class="{ 'is-off': !anyOn }">
+    <section class="nr-output" :class="{ 'is-off': !anyOn }">
       <span class="m-caption nr-pass-name">Output</span>
       <ModulaKnob
         variant="small" :size="40" show-value editable
@@ -163,7 +164,7 @@ async function applyAndClose() {
       <p class="nr-about nr-output-about">How much of the cleaned audio to keep. Below 100% blends the original back in to hide artefacts.</p>
     </section>
 
-    <div class="nr-card nr-display">
+    <div class="nr-display">
       <div v-if="processing" class="nr-running">
         <span class="nr-running-lamp"></span>
         <span class="nr-running-text">{{ state.processingStage || 'Starting…' }}</span>
@@ -221,16 +222,19 @@ async function applyAndClose() {
 .nr-pass.is-off .nr-about,
 .nr-output.is-off .nr-output-about { opacity: .4; }
 .nr-output {
-  margin-top: 10px;
-  padding: 10px 16px;
+  margin-top: 14px;
+  padding: 0 14px;
   display: flex;
   align-items: center;
   gap: 18px;
 }
 .nr-output-about { flex: 1; min-width: 0; }
 .nr-display {
-  margin-top: 10px;
-  padding: 10px 14px;
+  margin-top: 12px;
+  padding: 8px 14px 0;
+  /* The same engraved rule the chassis uses between header and face. */
+  border-top: 1px solid rgba(0, 0, 0, .35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
 }
 /* Same height as the running row, so Cancel appearing never moves the window. */
 .nr-status {
