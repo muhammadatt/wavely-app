@@ -985,7 +985,11 @@ function requestClose() {
       </button>
 
       <div class="win-actions flex items-center gap-2">
-        <span v-if="offline" class="win-offline-note">No preview - Renders on the server.</span>
+        <!-- A panel may replace the note while it works (Noise Reduction puts
+             its progress and Cancel here). -->
+        <slot name="offline-note">
+          <span v-if="offline" class="win-offline-note">No preview - Renders on the server.</span>
+        </slot>
         <!--
           The title sits on the WRAPPER, not on the button.
 
