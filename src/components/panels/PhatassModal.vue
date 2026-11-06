@@ -24,9 +24,9 @@ import { computed, onMounted } from 'vue'
 import { usePhatass } from '../../composables/usePhatass.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
+import { phatassSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { PHATASS_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
-import { PHATASS_PARAM_KEYS } from '../../audio/pluginPresets/phatass.js'
 import {
   PHATASS_DEFAULTS, WARMTH_MAX, TAPE_MAX_DB, OUTPUT_MIN_DB, OUTPUT_MAX_DB, INPUT_MIN_DB, INPUT_MAX_DB,
   CHARACTERS, TAPE_PANEL_CURVES,
@@ -44,17 +44,15 @@ import FloatingWindow from './FloatingWindow.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = usePhatass()
 const {
   phParams, phPreview, phInputLevels, phOutputLevels, phSatNeedle, phOutputMakeup,
   togglePreview, syncParam, applyParams, apply, teardown, closeModal,
-} = usePhatass()
+} = pluginApi
 
 const { state } = useEditorState()
 
-const presets = usePluginPresets(PHATASS_PRESET_PLUGIN, {
-  read: () => Object.fromEntries(PHATASS_PARAM_KEYS.map(k => [k, phParams[k]])),
-  write: p => applyParams(p),
-})
+const presets = usePluginPresets(PHATASS_PRESET_PLUGIN, phatassSettings(pluginApi))
 
 onMounted(() => {
   // The chain's copy keeps its ON/BYPASS: opening its editor from the chain

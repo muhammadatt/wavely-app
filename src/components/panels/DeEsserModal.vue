@@ -40,6 +40,7 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import { createPeakHold, useMeterFrame } from '../meters/ballistics.js'
 import DeEsserScope from '../meters/DeEsserScope.vue'
 import DeEsserBandStrip from './DeEsserBandStrip.vue'
+import { deEsserSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { DE_ESSER_PRESET_PLUGIN } from '../../audio/pluginPresets/deEsser.js'
 import { HF_SCOPE_SECONDS } from '../../audio/deEsserScope.js'
@@ -48,6 +49,7 @@ import FloatingWindow from './FloatingWindow.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = useDeEsser()
 const {
   hfAmount, hfSplit, hfTotal, hfGuard, hfBand, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfAirLossDb, hfComp, hfDetect, hfDetectHigh, hfAudition, hfDuck, hfBroadband, hfDelta, hfPreview,
   hfLevelOffset, refreshLevel,
@@ -55,22 +57,11 @@ const {
   togglePreview, syncSoften, syncAir, syncComp, syncDetect, syncDetectHigh, scheduleAutoAir, syncTotal, syncSplit, syncGuard, applyParams, toggleDelta, toggleAudition,
   hfReso, hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
   apply, teardown, closeModal,
-} = useDeEsser()
+} = pluginApi
 
 const { state, appState } = useEditorState()
 
-const presets = usePluginPresets(DE_ESSER_PRESET_PLUGIN, {
-  read: () => ({
-    duck: hfDuck.value, amount: hfAmount.value, guard: hfGuard.value,
-    band: hfBand.value, detect: hfDetect.value, detectHigh: hfDetectHigh.value,
-    // Under AUTO the knob holds a MEASUREMENT of this selection, which is the
-    // file's, not the patch's: store the default, so a preset never carries it
-    // and AUTO never makes one read as modified. applyParams ignores it anyway.
-    air: hfComp.value ? D.air : hfAir.value,
-    comp: hfComp.value, soften: hfSoften.value,
-  }),
-  write: p => applyParams(p),
-})
+const presets = usePluginPresets(DE_ESSER_PRESET_PLUGIN, deEsserSettings(pluginApi))
 const D = DE_ESSER_DEFAULTS
 
 onMounted(() => {

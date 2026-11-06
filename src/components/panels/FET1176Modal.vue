@@ -19,11 +19,13 @@ import FET1176TuningPanel from './FET1176TuningPanel.vue'
 import { isFET1176TuningVisible } from '../../audio/effects/fet1176Tuning.js'
 import { INPUT_TRIM_MAX_DB } from '../../audio/dsp/inputAlign.js'
 import PresetMenu from './PresetMenu.vue'
+import { fet1176Settings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { FET_PUNCH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = useFET1176()
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetAnalog, fetScHpf, fetMix,
   fetAutoMakeup, fetPreview, fetReduction,
@@ -31,54 +33,16 @@ const {
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
   syncDrive, syncAnalog, syncScHpf, syncMix, toggleAutoMakeup, 
   apply, teardown, closeModal, refreshKernelTuning,
-} = useFET1176()
+} = pluginApi
 
 /** Bench only: gated off in production builds. See fet1176Tuning.js. */
 const showTuningBench = isFET1176TuningVisible()
 
 /**
- * Presets. Same two functions and the same ordering constraint as OptoSmooth:
- * Output goes last and through the AUTO decision, because `syncOutput` is a
- * take-over that drops AUTO and accepts the value.
+ * Presets. Read and write live in pluginSettings.js (shared with saved plugin
+ * chains): Output goes last and through the AUTO decision, as on OptoSmooth.
  */
-const presets = usePluginPresets(FET_PUNCH_PRESET_PLUGIN, {
-  read: () => ({
-    inputDrive: fetInput.value,
-    output: fetOutput.value,
-    attack: fetAttack.value,
-    release: fetRelease.value,
-    ratio: fetRatio.value,
-    fetDrive: fetDrive.value,
-    analog: fetAnalog.value,
-    scHpf: fetScHpf.value,
-    mix: fetMix.value,
-    autoMakeup: fetAutoMakeup.value,
-  }),
-  /**
-   * ⚠ `fetDrive` HAS NO CONTROL ON THE FACE BUT PRESETS STILL CARRY IT. Each
-   * factory preset was voiced with its own amount (0.2-0.6) against a default
-   * of 1, so dropping it on load would re-voice every one of them. It rides
-   * along invisibly: a preset sets it, a saved preset keeps what is in effect.
-   */
-  write: (p) => {
-    syncInput(p.inputDrive)
-    syncAttack(p.attack)
-    syncRelease(p.release)
-    syncRatio(p.ratio)
-    syncDrive(p.fetDrive)
-    // Absent in presets saved before the lamp existed, which were auditioned
-    // with the FET stage in — so absent means ON.
-    syncAnalog(p.analog !== false)
-    syncScHpf(p.scHpf)
-    syncMix(p.mix)
-    if (p.autoMakeup) {
-      if (!fetAutoMakeup.value) toggleAutoMakeup()
-    } else {
-      if (fetAutoMakeup.value) toggleAutoMakeup()
-      syncOutput(p.output)
-    }
-  },
-})
+const presets = usePluginPresets(FET_PUNCH_PRESET_PLUGIN, fet1176Settings(pluginApi))
 
 const { state } = useEditorState()
 

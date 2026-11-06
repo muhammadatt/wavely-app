@@ -29,8 +29,9 @@ import {
   HF_LIMITER_DEFAULTS,
 } from '../../audio/hfLimiterParams.js'
 import {
-  HF_LIMITER_PRESET_PLUGIN, HF_LIMITER_PARAM_KEYS, HF_LIMITER_OUTPUT_MIN_DB, HF_LIMITER_OUTPUT_MAX_DB,
+  HF_LIMITER_PRESET_PLUGIN, HF_LIMITER_OUTPUT_MIN_DB, HF_LIMITER_OUTPUT_MAX_DB,
 } from '../../audio/pluginPresets/hfLimiter.js'
+import { hfLimiterSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
@@ -40,16 +41,14 @@ import FloatingWindow from './FloatingWindow.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = useHFLimiter()
 const {
   hflParams, hflPreview, hflDelta, hflReduction, hflTransient,
   hflInputLevels, hflOutputLevels,
   togglePreview, syncParam, applyParams, toggleDelta, apply, teardown, closeModal,
-} = useHFLimiter()
+} = pluginApi
 
-const presets = usePluginPresets(HF_LIMITER_PRESET_PLUGIN, {
-  read: () => Object.fromEntries(HF_LIMITER_PARAM_KEYS.map(k => [k, hflParams[k]])),
-  write: p => applyParams(p),
-})
+const presets = usePluginPresets(HF_LIMITER_PRESET_PLUGIN, hfLimiterSettings(pluginApi))
 
 const D = HF_LIMITER_DEFAULTS
 

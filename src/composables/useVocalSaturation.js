@@ -268,7 +268,7 @@ const copies = pluginCopies((copy, life) => {
   return useVocalSaturation
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useVocalSaturation() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useVocalSaturation(copy) {
+  return copies(copy)()
 }

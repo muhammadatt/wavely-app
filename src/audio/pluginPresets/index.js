@@ -18,6 +18,7 @@ import './airBoost.js'
 import './deEsser.js'
 import './plosive.js'
 import './saturationBench.js'
+import './pluginChain.js'
 
 import { registerOptoSmoothPresets } from './optoSmooth.js'
 import { registerFetPunchPresets } from './fetPunch.js'
@@ -31,6 +32,7 @@ import { registerAirBoostPresets } from './airBoost.js'
 import { registerDeEsserPresets } from './deEsser.js'
 import { registerPlosivePresets } from './plosive.js'
 import { registerSaturationBenchPresets } from './saturationBench.js'
+import { registerPluginChainPresets } from './pluginChain.js'
 
 export { OPTO_SMOOTH_PRESET_PLUGIN, registerOptoSmoothPresets } from './optoSmooth.js'
 export { FET_PUNCH_PRESET_PLUGIN, registerFetPunchPresets } from './fetPunch.js'
@@ -46,6 +48,9 @@ export { AIR_BOOST_PRESET_PLUGIN, registerAirBoostPresets } from './airBoost.js'
 export { DE_ESSER_PRESET_PLUGIN, registerDeEsserPresets } from './deEsser.js'
 export { PLOSIVE_PRESET_PLUGIN, registerPlosivePresets } from './plosive.js'
 export { SATURATION_BENCH_PRESET_PLUGIN, registerSaturationBenchPresets } from './saturationBench.js'
+export {
+  PLUGIN_CHAIN_PRESET_PLUGIN, PLUGIN_CHAIN_MAX_SLOTS, registerPluginChainPresets,
+} from './pluginChain.js'
 export * from './store.js'
 
 /**
@@ -67,4 +72,5 @@ export function registerPluginPresets() {
   registerDeEsserPresets()
   registerPlosivePresets()
   registerSaturationBenchPresets()
+  registerPluginChainPresets()
 }

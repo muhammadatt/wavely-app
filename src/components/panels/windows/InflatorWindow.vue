@@ -15,6 +15,7 @@ import { computed, onMounted } from 'vue'
 import { useInflator } from '../../../composables/useInflator.js'
 import { currentPluginCopy } from '../../../composables/pluginCopies.js'
 import { useEditorState } from '../../../composables/useEditorState.js'
+import { inflatorSettings } from '../../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../../composables/usePluginPresets.js'
 import { INFLATOR_PRESET_PLUGIN } from '../../../audio/pluginPresets/index.js'
 import {
@@ -30,20 +31,18 @@ import ModulaMiniLadder from '../../modula/ModulaMiniLadder.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = useInflator()
 const {
   inInputDb, inEffect, inCurve, inOutputDb, inClip, inBandSplit,
   inPreview, inInputLevels, inOutputLevels, inLiftDb,
   togglePreview, currentParams, applyParams,
   syncInputDb, syncEffect, syncCurve, syncOutputDb, syncClip, syncBandSplit,
   apply, teardown, closeModal,
-} = useInflator()
+} = pluginApi
 
 const { state } = useEditorState()
 
-const presets = usePluginPresets(INFLATOR_PRESET_PLUGIN, {
-  read: () => currentParams(),
-  write: p => applyParams(p),
-})
+const presets = usePluginPresets(INFLATOR_PRESET_PLUGIN, inflatorSettings(pluginApi))
 
 // Default to engaged when the panel opens, matching the other plugin windows.
 onMounted(() => {

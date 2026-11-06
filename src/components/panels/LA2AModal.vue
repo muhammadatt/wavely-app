@@ -5,6 +5,7 @@ import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { LOOKAHEAD_MAX_MS, LA2A_DEFAULTS } from '../../audio/effects/la2aCompressor.js'
 import { SC_EMPH_MAX_DB, LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../../audio/la2aProcessor.js'
 import { INPUT_TRIM_MAX_DB } from '../../audio/dsp/inputAlign.js'
+import { la2aSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { OPTO_SMOOTH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 import PresetMenu from './PresetMenu.vue'
@@ -21,6 +22,7 @@ import { isLA2ATuningVisible } from '../../audio/effects/la2aTuning.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = useLA2A()
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aR37, la2aLookahead,
   la2aAutoMakeup, toggleAutoMakeup: toggleAuto,
@@ -31,7 +33,7 @@ const {
   refreshKernelTuning,
   la2aInputAuto, la2aInputDb, syncInput, resetInputAuto,
   apply, teardown, closeModal,
-} = useLA2A()
+} = pluginApi
 
 /**
  * Read once, not reactively: the gate is a build flag plus a localStorage key,
@@ -156,50 +158,10 @@ async function applyAndClose() {
 }
 
 /**
- * Presets. This replaced a mock dropdown that displayed four names and changed
- * nothing — the placeholder that made this plugin the one asking for a real
- * preset architecture.
- *
- * Reading the params is just the knobs. Writing them has one ordering
- * constraint worth stating: the Gain knob goes LAST and goes through the AUTO
- * decision, because `syncGain` is a take-over — it drops AUTO and accepts the
- * value. Setting the gain before deciding the AUTO state would therefore leave
- * AUTO off whatever the preset asked for.
+ * Presets. Read and write live in pluginSettings.js (shared with saved plugin
+ * chains), including why the Gain knob goes last, through the AUTO decision.
  */
-const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
-  read: () => ({
-    mode: la2aMode.value,
-    peakReduction: la2aPeakReduction.value,
-    gain: la2aGain.value,
-    r37: la2aR37.value,
-    lookahead: la2aLookahead.value,
-    analog: la2aAnalog.value,
-    mix: la2aMix.value,
-    autoMakeup: la2aAutoMakeup.value,
-  }),
-  write: (p) => {
-    syncMode(p.mode)
-    syncPeakReduction(p.peakReduction)
-    syncR37(p.r37)
-    // Absent in every preset saved before the control existed, and 0 is both
-    // the default and what those patches were auditioned with.
-    syncLookahead(p.lookahead ?? 0)
-    // Absent in every preset saved before the control existed, and those were
-    // auditioned WITH the nonlinearity — so an absent key means ON, never OFF.
-    syncAnalog(p.analog !== false)
-    // Absent in every preset saved before the control existed; those were
-    // auditioned fully wet.
-    syncMix(p.mix ?? 1)
-    if (p.autoMakeup) {
-      // Already on: the syncs above have each scheduled a re-measure, so the
-      // knob lands on the new settings without a second toggle.
-      if (!la2aAutoMakeup.value) toggleAuto()
-    } else {
-      if (la2aAutoMakeup.value) toggleAuto()
-      syncGain(p.gain)
-    }
-  },
-})
+const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginApi))
 </script>
 
 <template>
