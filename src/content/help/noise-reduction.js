@@ -8,18 +8,18 @@ export default {
   ],
 
   controls: [
-    { label: 'Engine', text: 'DF3 is the strongest model and the right first choice. RNNoise is lighter. Both runs DF3, then RNNoise on what it leaves, as the ACX Audiobook preset does' },
-    { label: 'Max reduction', text: 'The most DF3 may take out at any frequency and moment. Lower keeps more of the edges of S, F and breath sounds; MAX is uncapped' },
+    { label: 'Engine', text: 'DeepFilterNet3 is the strongest model and the right first choice. RNNoise is lighter. Both runs DeepFilterNet3, then RNNoise on what it leaves, as the ACX Audiobook preset does. Only the settings the chosen engine uses are shown' },
+    { label: 'Max reduction', text: 'The most DeepFilterNet3 may take out at any frequency and moment. Lower keeps more of the edges of S, F and breath sounds; MAX is uncapped' },
     { label: 'Protect consonants', text: 'Keeps the original audio where speech is detected but RNNoise would suppress it, which is usually the start of an S or F' },
     { label: 'Mix', text: 'How much of the denoised audio to use. Below 100% blends the original back in to hide artefacts, at the cost of some noise' },
-    { label: 'Process', text: 'Cleans the whole selection on the server and replaces it in one undoable step' },
+    { label: 'Process selection', text: 'Cleans the whole selection on the server and replaces it in one undoable step. While it runs the window shows how far it has got, with a Cancel button' },
   ],
 
   steps: [
     'Select the noisy passage, or the whole file',
     'Choose the engine and settings, then press Process',
     'Listen to the result in the editor. Undo puts the original back',
-    'If the voice sounds watery or the S sounds are dulled, undo, lower Max reduction or Mix, and process again',
+    'If the voice sounds watery or the S sounds are dulled, undo, lower Max reduction or Mix, and process again. If only Mix changed, the second run is instant — the server result is reused',
   ],
 
   notes: [

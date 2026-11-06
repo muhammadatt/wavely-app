@@ -76,6 +76,16 @@ export function toServerParams(params) {
 }
 
 /**
+ * Everything the server reads, as one string: two settings with the same key
+ * send the same request (Mix, or DF3's cap while the engine is RNNoise alone,
+ * never reach it), so a held result can be reused for either.
+ */
+export function serverParamsKey(params) {
+  const s = toServerParams(params)
+  return `${s.engine}|${s.df3AttenLimDb ?? 'uncapped'}|${s.protectConsonants ? 1 : 0}`
+}
+
+/**
  * Validate a request body on the server. Throws with a message fit for a 400
  * rather than letting a bad value reach a Python argv.
  */

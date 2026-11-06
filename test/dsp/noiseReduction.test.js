@@ -6,6 +6,7 @@ import {
   toServerParams,
   parseServerParams,
   blendDryWet,
+  serverParamsKey,
 } from '../../src/audio/noiseReductionParams.js'
 import { decodeWav } from '../../src/audio/wavDecode.js'
 import { FEATURES } from '../../src/auth/plans.js'
@@ -29,6 +30,14 @@ test('a setting the chosen engine does not read is not sent', () => {
   assert.deepEqual(toServerParams({ engine: 'both', df3LimitDb: 6, protectConsonants: false }), {
     engine: 'both', df3AttenLimDb: 6, protectConsonants: false,
   })
+})
+
+test('the held-result key moves with what the server reads and nothing else', () => {
+  const base = { ...NOISE_REDUCTION_DEFAULTS, engine: 'rnnoise' }
+  // Mix and an unused DF3 cap reuse a result.
+  assert.equal(serverParamsKey(base), serverParamsKey({ ...base, mix: 0.3, df3LimitDb: 9 }))
+  assert.notEqual(serverParamsKey(base), serverParamsKey({ ...base, protectConsonants: false }))
+  assert.notEqual(serverParamsKey(base), serverParamsKey({ ...base, engine: 'both' }))
 })
 
 test('the server validates what the browser sends and refuses the rest', () => {
