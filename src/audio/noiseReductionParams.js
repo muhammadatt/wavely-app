@@ -25,11 +25,21 @@ export const NR_ENGINES = ['df3', 'rnnoise', 'both']
 /**
  * What the user sees. The panel never names the models: a narrator choosing
  * between "DeepFilterNet3" and "RNNoise" is choosing between two words, so the
- * two passes are named for what they do. DEEP CLEAN is DeepFilterNet3, LIGHT
- * CLEAN is RNNoise; the panel turns each on or off and `engineFor` maps the
- * pair onto the engine the server takes. Both on runs them in the ACX order.
+ * two passes are named for what they do. The panel turns each on or off and
+ * `engineFor` maps the pair onto the engine the server takes; both on runs
+ * them in the ACX order, CLEAN first.
+ *
+ *   CLEAN       DeepFilterNet3 — the TRANSPARENT pass: broadband noise out,
+ *               the voice left alone. The right first and general choice.
+ *   DEEP CLEAN  RNNoise — takes away MORE, including what DF3 leaves behind:
+ *               lip smacks, mouth noise, throat clicks, mic bumps. Not for
+ *               every recording, since it costs more of the voice.
+ *
+ * ⚠ The first naming had them the other way round (Deep = DF3, Light =
+ * RNNoise) on the reasoning that DF3 is the stronger model. On voice it is
+ * the gentler one: RNNoise removes more, so "deep" belongs to it.
  */
-export const NR_PASS_LABELS = { df3: 'Deep Clean', rnnoise: 'Light Clean' }
+export const NR_PASS_LABELS = { df3: 'Clean', rnnoise: 'Deep Clean' }
 
 export const NR_ENGINE_LABELS = {
   df3: NR_PASS_LABELS.df3,
