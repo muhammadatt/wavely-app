@@ -2,7 +2,7 @@
 /**
  * PLUGIN CHAIN — the rack every engaged plugin plays through.
  *
- * + ADD PLUGIN, the empty slot under the last row, opens a picker (the Search
+ * + ADD EFFECT, the empty slot under the last row, opens a picker (the Search
  * Operations palette, narrowed to the plugins that can run in the chain and
  * grouped by category); picking one appends it and opens it to tune. It sits
  * where the new slot will land, at the end of the signal flow, rather than in
@@ -49,7 +49,7 @@ const chainPresets = useChainPresets()
 const blocker = computed(() => (state.selection ? applyBlocker() : ''))
 const applyLabel = computed(() => {
   const n = liveSlots.value.length
-  return n > 1 ? `Apply ${n} plugins to selection` : 'Apply chain to selection'
+  return n > 1 ? `Apply ${n} effects to selection` : 'Apply chain to selection'
 })
 
 // ── Add picker ──────────────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ function onDragEnd() {
     :width="560"
     :accent="ACCENT"
     design="modula"
-    brand-lead="PLUGIN CHAIN"
+    brand-lead="EFFECT CHAIN"
     :presets="chainPresets"
     :presets-disabled="chainApplying"
     presets-disabled-hint="The chain is being applied"
@@ -178,22 +178,22 @@ function onDragEnd() {
       </ol>
 
       <p v-if="!slots.length" class="pc-empty">
-        Stack plugins and hear them together, then apply the whole chain to the
-        selection in one step. Each plugin joins the end of the chain and keeps
+        Stack effects and hear them together, then apply the whole chain to the
+        selection in one step. Each effect joins the end of the chain and keeps
         playing when its window closes
       </p>
 
-      <!-- The next slot: where an added plugin lands, so the button sits there. -->
+      <!-- The next slot: where an added effect lands, so the button sits there. -->
       <button
         type="button" class="pc-add-slot"
         :class="{ 'is-empty': !slots.length }"
         aria-haspopup="dialog"
-        aria-label="Add plugin"
-        title="Add a plugin to the end of the chain"
+        aria-label="Add effect"
+        title="Add an effect to the end of the chain"
         @click="pickerOpen = true"
       >
         <span class="pc-add-plus" aria-hidden="true">+</span>
-        <span>{{ slots.length ? 'Add plugin' : 'Add your first plugin' }}</span>
+        <span>{{ slots.length ? 'Add effect' : 'Add your first effect' }}</span>
       </button>
 
       <p v-if="slots.length" class="pc-note">

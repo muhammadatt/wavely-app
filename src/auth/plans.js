@@ -54,7 +54,7 @@ export const FEATURES = {
   savePresets: { requires: 'free', label: 'Saving presets' },
 
   // Real-time plugins: full preview for everyone, Apply needs Pro.
-  pluginChainApply: { requires: 'pro', label: 'The Plugin Chain' },
+  pluginChainApply: { requires: 'pro', label: 'The Effect Chain' },
 
   // Server ANALYSIS, browser DSP: the analysis needs any account (any length,
   // up to the analyze route's cap) — a sign-in, never a payment; Apply needs Pro.

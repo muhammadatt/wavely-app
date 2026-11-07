@@ -100,7 +100,7 @@ export const ICONS = {
   // smooth and centred.
   spectrum: '<path d="M3 20V9M6.5 20v-5M10 20V4M13.5 20v-8M17 20V7M20.5 20v-4"/><path d="M2 22h20" opacity=".35"/>',
   // Plugin chain: three units in series joined by the signal line.
-  chain: '<rect x="2" y="8" width="5" height="8" rx="1.5"/><rect x="9.5" y="8" width="5" height="8" rx="1.5"/><rect x="17" y="8" width="5" height="8" rx="1.5"/><path d="M7 12h2.5M14.5 12H17"/>',
+  chain: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
 
   // Presets — keyed by preset id so PresetsPanel can look them up directly
   acx_audiobook: '<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>',

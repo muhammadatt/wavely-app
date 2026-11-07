@@ -18,11 +18,11 @@ const { slots, liveSlots, bypassed, suspended } = usePluginChain()
 const chainActive = computed(() => liveSlots.value.length > 0 && !bypassed.value && !suspended.value)
 const chainTitle = computed(() => {
   const n = slots.value.length
-  if (!n) return 'Plugin chain — empty'
-  if (chainActive.value) return `Plugin chain — active, ${liveSlots.value.length} of ${n} plugin(s) on`
-  if (suspended.value) return 'Plugin chain — bypassed while a plugin outside it is open, so that plugin previews exactly what its Apply writes. Turn it back on in the chain window'
-  if (bypassed.value) return 'Plugin chain — bypassed. Turn it on in the chain window'
-  return 'Plugin chain — bypassed: every plugin in it is switched off'
+  if (!n) return 'Effect chain — empty'
+  if (chainActive.value) return `Effect chain — active, ${liveSlots.value.length} of ${n} plugin(s) on`
+  if (suspended.value) return 'Effect chain — bypassed while a plugin outside it is open, so that plugin previews exactly what its Apply writes. Turn it back on in the chain window'
+  if (bypassed.value) return 'Effect chain — bypassed. Turn it on in the chain window'
+  return 'Effect chain — bypassed: every plugin in it is switched off'
 })
 
 // Until the chain has been opened once, an empty chain says NEW: it is the
@@ -105,7 +105,7 @@ const tools = CATEGORIES
       @click="openChain"
     >
       <Icon name="chain" :size="15" class="tool-btn__icon" />
-      <span class="chain-label">Plugin Chain</span>
+      <span class="chain-label">Chain</span>
       <span
         v-if="chainBadge"
         class="chain-count"
@@ -244,9 +244,11 @@ const tools = CATEGORIES
   white-space: nowrap;
   padding: 9px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(232, 163, 61, .45);
-  background: linear-gradient(180deg, rgba(232, 163, 61, .14), rgba(232, 163, 61, .06));
-  color: #f1c27a;
+  /* The Export button's fill (BaseButton's primary), open or closed: the chain
+     is a place to go, not a mode, so its state lives in the badge. */
+  border: 1px solid transparent;
+  background: #86e8ff;
+  color: #08161a;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
   font-weight: 700;
@@ -255,17 +257,10 @@ const tools = CATEGORIES
   transition: background-color .15s ease, border-color .15s ease, color .15s ease;
 }
 .chain-btn:hover:not(:disabled) {
-  border-color: #e8a33d;
-  background: linear-gradient(180deg, rgba(232, 163, 61, .22), rgba(232, 163, 61, .1));
-  color: #ffd79a;
-}
-.chain-btn.is-active {
-  background: linear-gradient(180deg, #f2b65a, #e8a33d);
-  border-color: transparent;
-  color: #1d1305;
+  background: #9beeff;
 }
 .chain-btn:focus-visible {
-  outline: 2px solid #e8a33d;
+  outline: 2px solid #7fe9f6;
   outline-offset: 2px;
 }
 .chain-btn:disabled {
@@ -279,20 +274,15 @@ const tools = CATEGORIES
   font-weight: 700;
   padding: 2px 5px;
   border-radius: 5px;
-  background: rgba(255, 255, 255, .08);
-  color: var(--color-text-softer);
+  /* Dark tints of the button's own ink: they sit on #86e8ff and stay visible
+     there. Bypassed is the quiet one; live and NEW are solid. */
+  background: rgba(8, 22, 26, .14);
+  color: rgba(8, 22, 26, .7);
 }
-.chain-count.is-live {
-  background: rgba(232, 163, 61, .2);
-  color: #e8a33d;
-}
+.chain-count.is-live,
 .chain-count.is-new {
-  background: #e8a33d;
-  color: #1d1305;
-}
-.chain-btn.is-active .chain-count {
-  background: rgba(0, 0, 0, .18);
-  color: #1d1305;
+  background: #08161a;
+  color: #86e8ff;
 }
 
 /* Phone held upright: a TAB BAR. The segmented control stays one row of
@@ -353,10 +343,10 @@ const tools = CATEGORIES
     height: 7px;
     padding: 0;
     border-radius: 50%;
-    background: rgba(255, 255, 255, .3);
+    background: rgba(8, 22, 26, .3);
   }
   .chain-count.is-live {
-    background: #e8a33d;
+    background: #08161a;
   }
 }
 </style>

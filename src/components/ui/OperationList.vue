@@ -124,7 +124,7 @@ function select(op) {
       </div>
       <div class="flex-1 min-w-0">
         <div class="text-[13px] font-bold text-text">Use several at once?</div>
-        <div class="text-[11px] font-medium text-text-muted">Stack them in the Plugin Chain and apply in one pass</div>
+        <div class="text-[11px] font-medium text-text-muted">Stack them in the Effect Chain and apply in one pass</div>
       </div>
       <Icon name="chevronRight" :size="16" :stroke-width="2.5" class="chain-door-chevron" />
     </button>

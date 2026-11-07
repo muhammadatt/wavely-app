@@ -439,7 +439,8 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
 /* Engraved under the knob, clear of its bottom numerals. */
 .v2a-title {
   position: relative; margin-top: 6px;
-  font-size: 15px; font-weight: 500; line-height: 1; letter-spacing: .24em; text-transform: uppercase;
+  /* Letter-spacing trails the last glyph; the matching indent centres the ink. */
+  font-size: 15px; font-weight: 500; line-height: 1; letter-spacing: .24em; padding-left: .24em; text-transform: uppercase;
   white-space: nowrap; color: #2f3134; text-shadow: 0 1px 0 rgba(255,255,255,.6);
 }
 .v2a-auto {

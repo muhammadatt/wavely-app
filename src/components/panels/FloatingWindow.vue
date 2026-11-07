@@ -343,7 +343,7 @@ function onApplyClick() {
 }
 
 const applyTitle = computed(() => {
-  if (inChain.value) return 'This plugin is in the Plugin Chain — apply it from the chain'
+  if (inChain.value) return 'This plugin is in the Effect Chain — apply it from the chain'
   if (busy.value) return 'This file is still being processed — wait for it to finish'
   if (props.applyDisabled) return props.applyDisabledHint
   if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
@@ -837,7 +837,7 @@ function requestClose() {
           type="button"
           class="win-chain-pill is-member"
           :class="{ 'is-bypassed': inChain.chainBypassed }"
-          :title="inChain.chainBypassed ? 'The Plugin Chain is bypassed — open it to turn it on' : 'Open the Plugin Chain'"
+          :title="inChain.chainBypassed ? 'The Effect Chain is bypassed — open it to turn it on' : 'Open the Effect Chain'"
           @pointerdown.stop
           @click="openWindow('plugin-chain')"
         >IN CHAIN · {{ inChain.position }}{{ inChain.chainBypassed ? ' · BYPASSED' : '' }}</button>

@@ -34,7 +34,7 @@ export default {
     'Lifting a quiet phrase lifts its room tone with it, so Floor dBFS can cap the boost below Max Boost',
     'Where two neighbouring phrases would end up more than 6 dB apart, both are left at their average instead — a step that large is usually the analysis being wrong about where a phrase ended',
     'Under 10 seconds of selection, under 5 seconds of speech, or only one phrase found, and it declines rather than guessing',
-    'Auto Leveler is an offline process, so it has no real-time preview and cannot take a Plugin Chain slot',
+    'Auto Leveler is an offline process, so it has no real-time preview and cannot take a Effect Chain slot',
     'Auto Leveler is a Pro feature',
   ],
 }
