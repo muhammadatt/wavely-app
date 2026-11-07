@@ -68,8 +68,9 @@ export function createEntitlements(auth) {
   }
 
   /**
-   * Handle an API error: true if it was a plan refusal (and the prompt is
-   * open). A feature any account unlocks asks for a sign-in, not an upgrade.
+   * Handle an API error: true if it was a plan or sign-in refusal (and the
+   * upgrade prompt or the sign-in dialog is open). A feature any account
+   * unlocks asks for a sign-in, not an upgrade.
    */
   function handleServerRefusal(err) {
     if (err?.signIn) {

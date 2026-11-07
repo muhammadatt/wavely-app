@@ -153,9 +153,11 @@ The ladder is: signed out → `free` (any account) → `pro`.
 |---|---|---|---|
 | `savePresets` | account | Saving plugin presets | UI and database (RLS) |
 | `pluginChainApply` | Pro | Plugin Chain **Apply**. Preview is free | UI only |
-| `autoLevel` | Pro | Auto Leveler analysis and Apply. Free account: 30 s preview; signed out: nothing | **Server** (`/api/analyze/vad`) |
-| `sibilanceEditor` | Pro | Sibilance Editor analysis and Apply. Free account: 30 s preview; signed out: nothing | **Server** (`/api/analyze/sibilance`) |
-| `spotEffects` | Pro | `/api/spot/*` (no callers today). Free account: 30 s preview; signed out: nothing | **Server** |
+| `audioAnalysis` | account | `/api/analyze/*` — Auto Leveler and Sibilance Editor analysis, any length up to 2 h | **Server** (401 when signed out, before the upload) |
+| `autoLevel` | Pro | Auto Leveler, whole (an offline process: no preview) | UI only |
+| `sibilanceEditor` | Pro | Sibilance Editor **Apply** | UI only |
+| `noiseReduction` | Pro | Noise Reduction, whole (an offline process: no preview); runs as a job in the processing queue | **Server** (`/api/spot/noise_reduction`) |
+| `spotEffects` | Pro | Any other `/api/spot/*` operation (no callers today). Free account: 30 s preview; signed out: nothing | **Server** |
 | `mastering` | account | Preset mastering chain (`/api/process`). Signed out: the 30 s preview only | **Server** (`/api/process`) |
 
 - **Adding a gate:** add an entry to `FEATURES`, then use it in the UI.
@@ -169,13 +171,28 @@ The ladder is: signed out → `free` (any account) → `pro`.
 
 ### Free previews of server features
 
-Server features accept non-entitled requests on up to `FREE_PREVIEW_SECONDS`
-(30) of audio, so the result can be heard before paying. Who gets the preview
-is the feature's `preview` field: `'account'` (any signed-in user — Auto
-Leveler, Sibilance Editor, spot effects) or `'anyone'` (signed out too — only
+Server features that **render audio** accept non-entitled requests on up to
+`FREE_PREVIEW_SECONDS` (30) of audio, so the result can be heard before
+paying. Who gets the preview is the feature's `preview` field: `'account'`
+(any signed-in user — spot effects) or `'anyone'` (signed out too — only
 `mastering`, the first-run experience). Server time spent on an anonymous
 visitor can only be limited per IP, so a new server feature should default to
-`'account'`.
+`'account'`. Offline processes (`offline: true`: Auto Leveler, Noise
+Reduction) have no preview at all.
+
+Server **analysis** (`/api/analyze/*`: Auto Leveler's speech map, the
+Sibilance Editor's events) needs an account (`audioAnalysis`, any plan) and no
+preview limit. It returns measurements, the DSP runs in the browser, and a
+30 s analysis made both plugins useless on the chapters they are for. Only
+their Apply is Pro.
+
+- Signed out (or a bad token), for anything not open to signed-out visitors:
+  **401** `{ code: 'sign_in_required', feature, requires }`, before the
+  upload is read. The app asks for an account before uploading, and a 401
+  opens the sign-in dialog rather than the upgrade prompt.
+- Every analysis request is capped at `ANALYSIS_MAX_SECONDS` (2 hours, any
+  plan; **413** `{ code: 'too_long' }` past it), behind the route's rate limit
+  and concurrency slots.
 
 - **Server side:** `server/lib/entitlements.js` reads the uploaded file's
   duration with ffprobe and does not trust the client.
@@ -185,14 +202,11 @@ visitor can only be limited per IP, so a new server feature should default to
   - A longer upload without Pro gets **402** with `{ code: 'upgrade_required', feature, requires, previewSeconds }`.
   - If the duration can't be read, the request is refused.
   - Plans are cached per user for 60 s.
-- **App side:** a signed-out user who presses Analyse gets the sign-in dialog
-  (`requestPreview`) and the caption says a free account previews 30 s. A
-  signed-in non-Pro user's selection is narrowed to its first 30 s before
-  anything is uploaded, and a caption says so. Apply stays Pro. A 402 opens the
-  upgrade prompt — or the sign-in dialog when the feature only needs an account
-  (`requires: 'free'`); a 401 `sign_in_required` opens the sign-in dialog. Mastering cannot narrow a
-  whole file, so a signed-out user with more than 30 s is asked to sign in
-  before the upload.
+- **App side:** analysis asks a signed-out user to sign in before anything
+  is uploaded. Noise Reduction and Auto Leveler ask for Pro up front. Mastering
+  cannot narrow a whole file, so a signed-out user with more than 30 s is asked
+  to sign in before the upload. A 402 opens the upgrade prompt; a 401
+  `sign_in_required` opens the sign-in dialog.
 
 ### Investigating and blocking an account
 
@@ -200,7 +214,7 @@ Every request to `/api/process`, `/api/spot` and `/api/analyze` — served or
 refused — writes one JSON line to the server's stdout (`server/lib/requestLog.js`):
 
 ```
-{"evt":"api","t":"2026-10-26T18:02:11.204Z","route":"/api/analyze/vad","user":"<uuid>","ip":"203.0.113.9","status":200,"code":null,"feature":"autoLevel","mode":"preview","bytes":2817212,"audio_s":29.8,"ms":812}
+{"evt":"api","t":"2026-10-26T18:02:11.204Z","route":"/api/analyze/vad","user":"<uuid>","ip":"203.0.113.9","status":200,"code":null,"feature":"audioAnalysis","mode":"full","bytes":2817212,"audio_s":1843.2,"ms":812}
 ```
 
 `code` is the refusal code (`rate_limited`, `sign_in_required`,

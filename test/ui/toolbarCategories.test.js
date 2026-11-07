@@ -37,10 +37,11 @@ test('every operation sits in its menu, in order', () => {
       'Arrange: trim', 'Arrange: split', 'Arrange: silence',
     ],
     level: ['normalize', 'loudness', 'fade', 'volume'],
-    dynamics: ['auto-leveler', 'soft-clipper', 'opto-smooth', 'fet-punch', 'scheps-parallel', 'inflator'],
+    dynamics: ['auto-leveler', 'soft-clipper', 'opto-smooth', 'fet-punch', 'vox-pressor', 'scheps-parallel', 'inflator'],
     tone: ['manual-eq', 'voicerx', 'air-band', 'phatass', 'vocal-saturation', 'saturation-bench'],
     clean: [
-      'Harshness: hf-softener', 'Harshness: clip-gain-deesser', 'Harshness: hf-limiter',
+      'Noise: noise-reduction',
+      'Harshness: de-esser', 'Harshness: clip-gain-deesser', 'Harshness: hf-limiter',
       'Harshness: resonance-suppressor',
       'Pops & Hum: plosive', 'Pops & Hum: hum-remover',
       'Analysis: spectrum-analyzer', 'Analysis: modula-kit',

@@ -35,19 +35,19 @@ function upload(base, { token, preset = 'not_a_preset' } = {}) {
 }
 
 // (That a refused upload is deleted is the gate's own test, in entitlements.test.js.)
-test('signed out and longer than the preview: 402 asking for a free account', async () => {
+test('signed out and longer than the preview: 401, asking for a (free) account', async () => {
   const gate = createEntitlementGate({ verify, planFor, probeDuration: async () => 300 })
   await withServer(createProcessRoute({ gate, verify }), async (base) => {
     const res = await upload(base)
-    assert.equal(res.status, 402)
+    assert.equal(res.status, 401)
     const body = await res.json()
-    assert.equal(body.code, 'upgrade_required')
+    assert.equal(body.code, 'sign_in_required')
     assert.equal(body.feature, 'mastering')
     assert.equal(body.requires, 'free')
-    assert.match(body.error, /needs a free account/)
+    assert.match(body.error, /any free account will do/)
 
     // An invalid token is signed out, not an error.
-    assert.equal((await upload(base, { token: 'expired' })).status, 402)
+    assert.equal((await upload(base, { token: 'expired' })).status, 401)
   })
 })
 

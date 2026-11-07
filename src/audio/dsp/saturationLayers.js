@@ -27,7 +27,7 @@
  * switching curves compares character rather than strength.
  *
  * ⚠ ON A HIGH BAND, 0 dB IS BARELY AUDIBLE, and that is the calibration being
- * honest rather than wrong: the HF Softener's exciter, where this was built,
+ * honest rather than wrong: the De-Esser's exciter, where this was built,
  * measured 1 % THD at the band's real peak as "excites nothing" (Tanh at 100 %
  * added +0.6 dB above 5 kHz) and had to sit ~16 dB hotter to brighten vowels
  * about as much as Air +2 dB. An exciter wants +12 to +24 dB here — and on a
@@ -49,7 +49,7 @@
  * content that was already high.
  *
  * VOICED: the layer's contribution follows a voicing weight — low/mid energy
- * against the 4 kHz peak envelope, the HF Softener's vowel-release detector —
+ * against the 4 kHz peak envelope, the De-Esser's vowel-release detector —
  * so sibilants and gaps are never shaped. The detector reads the plugin's
  * INPUT once; each layer reads it delayed by its own position in the chain.
  *
@@ -176,7 +176,7 @@ export const SAT_BENCH_KERNEL_DEFAULTS = {
   layers: Array.from({ length: SAT_BENCH_MAX_LAYERS }, () => ({ ...SAT_LAYER_DEFAULTS })),
 }
 
-/** The voicing detector, as the HF Softener tunes it. */
+/** The voicing detector, as the De-Esser tunes it. */
 export const SAT_VOICING_TUNING = {
   lmLowHz: 200,
   lmHighHz: 3000,
@@ -308,7 +308,7 @@ class Ramp {
 }
 
 /**
- * Voicing weight per sample, 0–1, from the plugin's input. The HF Softener's
+ * Voicing weight per sample, 0–1, from the plugin's input. The De-Esser's
  * detector without its rotator: low/mid energy (200 Hz–3 kHz) followed at
  * 3/5 ms against a 4 kHz peak envelope that releases fast while voiced, soft
  * crossover over ±3 dB.

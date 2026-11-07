@@ -49,9 +49,9 @@ test('analyze and spot: signed out is 401 before the upload, even for a preview-
 
 test('a free account still gets the plan check after the upload, and a refusal frees its slot', async () => {
   const limit = holdSlot(createJobQueue({ concurrency: 1, maxQueued: 0, maxPerClient: 1 }))
-  await withServer(createAnalyzeRoute({ gate, limit }), async (base) => {
+  await withServer(createSpotRoute({ gate, limit }), async (base) => {
     for (let i = 0; i < 3; i++) {
-      const res = await post(`${base}/api/analyze/vad`, 'tok-free')
+      const res = await post(`${base}/api/spot/vocal_saturation`, 'tok-free')
       assert.equal(res.status, 402, `attempt ${i + 1}: refused by plan, not by a leaked slot`)
       assert.equal((await res.json()).code, 'upgrade_required')
     }
@@ -127,10 +127,10 @@ test('a finished resumable upload stands in for the multipart file, for its owne
 
   const app = express.Router()
   app.use(express.json())
-  app.use(createAnalyzeRoute({ gate, takeUpload }))
+  app.use(createSpotRoute({ gate, takeUpload }))
   try {
     await withServer(app, async (base) => {
-      const post = (token, uploadId) => fetch(`${base}/api/analyze/vad`, {
+      const post = (token, uploadId) => fetch(`${base}/api/spot/vocal_saturation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ uploadId }),
@@ -151,4 +151,19 @@ test('a finished resumable upload stands in for the multipart file, for its owne
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('an async spot operation (noise reduction) is admitted by the processing job queue, before the upload — not by a spot slot', async () => {
+  const jobs = createJobQueue({ concurrency: 1, maxQueued: 0, maxPerClient: 1 })
+  jobs.submit('user:tok-pro', () => new Promise(() => {}))   // this account's one job, running
+  const slots = createJobQueue({ ...readRequestLimitConfig(), concurrency: 1, maxPerClient: 1 })
+  await withServer(createSpotRoute({ gate, limit: holdSlot(slots), jobs }), async (base) => {
+    const mine = await neverEndingUpload(`${base}/api/spot/noise_reduction`, 'tok-pro')
+    assert.equal(mine.status, 429)
+    assert.equal(mine.body.code, 'too_many_jobs')
+    assert.equal(slots.stats().running, 0, 'no spot slot was taken')
+
+    const other = await neverEndingUpload(`${base}/api/spot/noise_reduction`, 'tok-free')
+    assert.equal(other.status, 503, 'the one job slot is busy and the line holds nobody')
+  })
 })

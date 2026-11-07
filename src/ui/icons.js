@@ -27,6 +27,18 @@ export const ICONS = {
   clean: '<path d="M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z"/>',
   master: '<path d="M3.5 18a9 9 0 1117 0"/><path d="M12 18l4.5-5"/><circle cx="12" cy="18" r="1.3"/>',
 
+  // The toolbar's category icons, design 1a "Studio objects" (owner, November
+  // 2026; docs/design/toolbar-icons/): each is the tool itself. Separate keys
+  // from the operation icons they replaced on the toolbar (copy, loudness,
+  // dynamics, eq, clean, master), which operations still use. The Chain
+  // button keeps `chain`.
+  catEdit: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>',
+  catLevel: '<path d="M12 3v8M12 17v4"/><rect x="8" y="11" width="8" height="6" rx="1.5"/>',
+  catDynamics: '<path d="M12 3v6M9 6l3 3 3-3M12 21v-6M9 18l3-3 3 3M4 12h16"/>',
+  catTone: '<path d="M3 18h3c3 0 3-12 6-12s3 12 6 12h3"/>',
+  catFix: '<path d="M4 20 15 9M17 3v4M15 5h4M20 11v3M18.5 12.5h3"/>',
+  catMaster: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/>',
+
   // Edit operations
   // Trim: crop marks. Was a byte-identical copy of the `edit` pencil, so the
   // category and its first row drew the same glyph.
@@ -39,7 +51,7 @@ export const ICONS = {
   cut: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>',
   paste: '<path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>',
-  selectAll: '<path d="M3 8V5a2 2 0 012-2h3M16 3h3a2 2 0 012 2v3M21 16v3a2 2 0 01-2 2h-3M8 21H5a2 2 0 01-2-2v-3"/><rect x="8" y="8" width="8" height="8" rx="1"/>',
+  selectAll: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>',
 
   // Effects
   normalize: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
@@ -74,10 +86,11 @@ export const ICONS = {
   resonance: '<path d="M2 18c3 0 3.5-3 5-3s2 3 4 3"/><path d="M11 18c1-6 2-12 4-12s3 6 4 12"/><path d="M19 18c1 0 1.5-2 3-2"/><path d="M15 3v6" stroke-dasharray="2 2" opacity=".5"/>',
   // Hum: a steady sine with a notch taken out of its middle — the mains tone
   // and the cut being placed on it.
+  noise: '<path d="M12 2a3 3 0 013 3v7a3 3 0 01-6 0V5a3 3 0 013-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 23h8"/>',
   hum: '<path d="M2 12c1.5-4 3-4 4.5 0s3 4 4.5 0"/><path d="M13 12c1.5-4 3-4 4.5 0s3 4 4.5 0" opacity=".35"/><path d="M12 4v16" stroke-dasharray="2 2"/>',
   // De-esser: a sibilant burst with a bracket clamping its top — the ceiling
   // being placed on the peak, which is exactly what the control does.
-  // HF softener: a flat line whose top end dips on a shelf, with the undipped
+  // De-Esser: a flat line whose top end dips on a shelf, with the undipped
   // line ghosted above it — the shelf giving way, not a notch or a clamp.
   softener: '<path d="M2 9h10c3 0 5 6 10 6"/><path d="M12 9h10" stroke-dasharray="2.5 2.5" opacity=".45"/>',
   // HF limiter: a line that rises into the top end and is flattened against a
@@ -99,7 +112,7 @@ export const ICONS = {
   // smooth and centred.
   spectrum: '<path d="M3 20V9M6.5 20v-5M10 20V4M13.5 20v-8M17 20V7M20.5 20v-4"/><path d="M2 22h20" opacity=".35"/>',
   // Plugin chain: three units in series joined by the signal line.
-  chain: '<rect x="2" y="8" width="5" height="8" rx="1.5"/><rect x="9.5" y="8" width="5" height="8" rx="1.5"/><rect x="17" y="8" width="5" height="8" rx="1.5"/><path d="M7 12h2.5M14.5 12H17"/>',
+  chain: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
 
   // Presets — keyed by preset id so PresetsPanel can look them up directly
   acx_audiobook: '<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>',
@@ -118,10 +131,14 @@ export const ICONS = {
 
   // UI
   check: '<polyline points="20 6 9 17 4 12"/>',
+  // Offline processes: rendered once, not heard live.
+  offline: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
   close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  // Head and shoulders: the account button's stand-in for "Sign in" on a phone.
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>',
   window: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/>',
   // Three strokes, like every other glyph here: ring, hook, dot. The dot is a
   // zero-length line so the round cap draws it — a filled circle would be the

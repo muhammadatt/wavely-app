@@ -1,6 +1,6 @@
 <script setup>
 /**
- * HF Softener — Modula, laid out after the SSL DeEss.
+ * De-Esser — Modula, laid out after the SSL DeEss.
  *
  * The chain runs Duck → EQ → Air → [Reso] → Soften. Duck turns the whole "s"
  * down with its shape intact; EQ cuts the top of what the duck left (its
@@ -32,7 +32,7 @@ import {
   AIR_MAKEUP_MAX_DB,
   DETECT_HZ_MIN, DETECT_HZ_MAX, DETECT_HI_MIN, DETECT_HI_MAX, DETECT_MIN_RATIO,
 } from '../../audio/deEsserProcessor.js'
-import { guardToFloorDb, amountSplitOf, HF_SOFTENER_DEFAULTS } from '../../audio/deEsserParams.js'
+import { guardToFloorDb, amountSplitOf, DE_ESSER_DEFAULTS } from '../../audio/deEsserParams.js'
 import { softenLaw, SOFTEN_MAX } from '../../audio/deEsserSoftenStage.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
@@ -40,14 +40,16 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import { createPeakHold, useMeterFrame } from '../meters/ballistics.js'
 import DeEsserScope from '../meters/DeEsserScope.vue'
 import DeEsserBandStrip from './DeEsserBandStrip.vue'
+import { deEsserSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
-import { HF_SOFTENER_PRESET_PLUGIN } from '../../audio/pluginPresets/deEsser.js'
+import { DE_ESSER_PRESET_PLUGIN } from '../../audio/pluginPresets/deEsser.js'
 import { HF_SCOPE_SECONDS } from '../../audio/deEsserScope.js'
 import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import FloatingWindow from './FloatingWindow.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = useDeEsser()
 const {
   hfAmount, hfSplit, hfTotal, hfGuard, hfBand, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfAirLossDb, hfComp, hfDetect, hfDetectHigh, hfAudition, hfDuck, hfBroadband, hfDelta, hfPreview,
   hfLevelOffset, refreshLevel,
@@ -55,23 +57,12 @@ const {
   togglePreview, syncSoften, syncAir, syncComp, syncDetect, syncDetectHigh, scheduleAutoAir, syncTotal, syncSplit, syncGuard, applyParams, toggleDelta, toggleAudition,
   hfReso, hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
   apply, teardown, closeModal,
-} = useDeEsser()
+} = pluginApi
 
 const { state, appState } = useEditorState()
 
-const presets = usePluginPresets(HF_SOFTENER_PRESET_PLUGIN, {
-  read: () => ({
-    duck: hfDuck.value, amount: hfAmount.value, guard: hfGuard.value,
-    band: hfBand.value, detect: hfDetect.value, detectHigh: hfDetectHigh.value,
-    // Under AUTO the knob holds a MEASUREMENT of this selection, which is the
-    // file's, not the patch's: store the default, so a preset never carries it
-    // and AUTO never makes one read as modified. applyParams ignores it anyway.
-    air: hfComp.value ? D.air : hfAir.value,
-    comp: hfComp.value, soften: hfSoften.value,
-  }),
-  write: p => applyParams(p),
-})
-const D = HF_SOFTENER_DEFAULTS
+const presets = usePluginPresets(DE_ESSER_PRESET_PLUGIN, deEsserSettings(pluginApi))
+const D = DE_ESSER_DEFAULTS
 
 onMounted(() => {
   // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
@@ -225,7 +216,7 @@ async function applyAndClose() {
 
 <template>
   <FloatingWindow
-    window-id="hf-softener"
+    window-id="de-esser"
     :z="z"
     :width="820"
     :accent="ACCENT"

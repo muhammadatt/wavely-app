@@ -8,8 +8,10 @@ import {
 import { currentPluginCopy, idForCopy, chainCopyNumber, isChainCopyId } from '../../composables/pluginCopies.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
+import { isSheetViewport, sheetGeometry, SHEET_MAX_WIDTH as SHEET_NARROW_PX } from '../../ui/windowSheet.js'
 import Icon from '../ui/Icon.vue'
 import { useEntitlements } from '../../composables/useEntitlements.js'
+import { isOffline } from '../../auth/plans.js'
 import HelpOverlay from './HelpOverlay.vue'
 import ModulaPresetBrowser from '../modula/ModulaPresetBrowser.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
@@ -143,7 +145,8 @@ const props = defineProps({
    * A plan feature (src/auth/plans.js) Apply needs. Without it the button stays
    * PRESSABLE and carries a PRO tag: pressing it opens the upgrade prompt
    * rather than emitting `apply`. Preview is never gated — hearing the result
-   * first is the point.
+   * first is the point. An OFFLINE feature (plans.js `offline`) has no preview:
+   * its Apply is the whole plugin, and the tooltip does not promise one.
    */
   applyFeature: { type: String, default: null },
   /**
@@ -157,6 +160,16 @@ const props = defineProps({
   // live in the playback chain. A disabled control with a tooltip teaches that
   // real-time tuning exists; omitting it teaches nothing.
   showPreview: { type: Boolean, default: false },
+  /**
+   * An OFFLINE process (registry `offline`): nothing here runs in real time.
+   * The header carries a RENDER chip beside the name, the footer puts a plain
+   * statement of the contract ("No preview") where a real-time plugin has its
+   * Preview, and the action button carries the same clock icon as the chip.
+   * Most of the app's windows ARE real-time, so the few that are not have to
+   * say so at a glance rather than reading as broken real-time ones (no ON
+   * lamp, no Preview). Pass show-engage false and no Preview alongside it.
+   */
+  offline: { type: Boolean, default: false },
   previewable: { type: Boolean, default: true },
   previewing: { type: Boolean, default: false },
   previewHint: {
@@ -198,6 +211,12 @@ const props = defineProps({
    * the same in both.
    */
   design: { type: String, default: 'classic' },
+  /**
+   * Modula only: 'dark' (the steel chassis) | 'light' (a painted cream panel,
+   * VoxPressor's 2b). Light repaints the chassis, header and footer; the face
+   * draws its own controls for the surface it is told it sits on.
+   */
+  surface: { type: String, default: 'dark' },
   /**
    * A `usePluginPresets` instance. Under Modula it puts the preset browser in
    * the header's centre column (classic windows slot PresetMenu themselves).
@@ -324,11 +343,12 @@ function onApplyClick() {
 }
 
 const applyTitle = computed(() => {
-  if (inChain.value) return 'This plugin is in the Plugin Chain — apply it from the chain'
+  if (inChain.value) return 'This plugin is in the Effect Chain — apply it from the chain'
   if (busy.value) return 'This file is still being processed — wait for it to finish'
   if (props.applyDisabled) return props.applyDisabledHint
   if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
-  if (applyLocked.value) return `${entitlements.hint(props.applyFeature)} — preview is free`
+  // An offline process has no preview to offer, so it does not promise one.
+  if (applyLocked.value) return entitlements.hint(props.applyFeature) + (isOffline(props.applyFeature) ? '' : ' — preview is free')
   return ''
 })
 
@@ -369,7 +389,49 @@ const MIN_BODY_PX = 160
 const HEADER_PX = 56
 const FOOTER_PX = 68
 
-const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
+/**
+ * The LAYOUT viewport — what 100vw / 100dvh, `position: fixed` and the
+ * `compact:` media query measure — not window.innerWidth / innerHeight, which
+ * on a mobile browser are the VISUAL viewport and grow whenever the page is
+ * zoomed out (anything overflowing sideways is enough). Read through them, a
+ * 393 px phone could pass for a large screen: the window then stayed a
+ * floating desktop window sized for that height, with Preview and Apply below
+ * the bottom of the real screen (reproduced with innerHeight reading 900 on a
+ * 390 px tall phone: EQ's Apply at y = 853).
+ */
+function layoutViewport() {
+  const de = typeof document === 'undefined' ? null : document.documentElement
+  return {
+    w: de?.clientWidth || (typeof window === 'undefined' ? 1280 : window.innerWidth),
+    h: de?.clientHeight || (typeof window === 'undefined' ? 800 : window.innerHeight),
+  }
+}
+const viewportH = ref(layoutViewport().h)
+const viewportW = ref(layoutViewport().w)
+
+/**
+ * Phone mode — see `ui/windowSheet.js`. On a small viewport the window is a
+ * full-screen sheet, zoomed so the faceplate fits the width, with no drag and
+ * no resize. Its position and size are left untouched underneath, so a window
+ * opened on a phone and then met with a desktop viewport (a rotated tablet, a
+ * widened browser) floats again where it was.
+ *
+ * Sized against the faceplate's floor (`minWidth`, defaulting to its width) —
+ * the narrowest it is laid out to work at.
+ */
+const sheet = computed(() => isSheetViewport({
+  viewportW: viewportW.value, viewportH: viewportH.value, designW: minWidthPx.value,
+}))
+/**
+ * A sheet on a phone held upright. Its header gets two rows (see the CSS at
+ * the end): one row of name, ON and close could not fit at 360–393 px — a long
+ * name like SATURATION WORKBENCH pushed ON and close off the screen, and on
+ * the de-essers ON slid under DELTA and the preset arrows.
+ */
+const narrowSheet = computed(() => sheet.value && viewportW.value < SHEET_NARROW_PX)
+const sheetBox = computed(() => sheetGeometry({
+  viewportW: viewportW.value, viewportH: viewportH.value, designW: minWidthPx.value,
+}))
 
 /**
  * How tall the scrolling body may be.
@@ -383,10 +445,17 @@ const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
  * reason Apply moved down there is that it must never be the thing below the
  * fold, and that only holds if the body's ceiling accounts for it.
  */
-const bodyMaxHeight = computed(() => Math.max(
-  MIN_BODY_PX,
-  viewportH.value - pos.value.y - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0) - VIEWPORT_MARGIN,
-))
+// A sheet has no ceiling here: its height is CSS's (see the template) — the
+// frame is 100dvh, header and footer are fixed and the body takes the rest.
+// A JS-computed ceiling can disagree with 100dvh (a mobile browser's toolbars
+// moving), and then the body overflows and pushes the footer, and Apply with
+// it, off the bottom of the screen; flex layout cannot.
+const bodyMaxHeight = computed(() => sheet.value
+  ? null
+  : Math.max(
+    MIN_BODY_PX,
+    viewportH.value - pos.value.y - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0) - VIEWPORT_MARGIN,
+  ))
 
 const frameEl = ref(null)
 const bodyEl = ref(null)
@@ -431,6 +500,10 @@ onMounted(() => {
   // A plugin keeps playing in the chain while its window is closed, with its
   // meters stopped; reopening the window brings them back.
   chainWindowMounted(windowId)
+
+  // A plugin that can preview or apply opens on the whole file when nothing is
+  // selected, so Preview works at once. An existing selection is left alone.
+  if (hasFooter.value && !hasSelection.value) selectAll()
 
   // A window that was resized before is reopened at the size it was left, the
   // same courtesy the position gets. Restored before the position fallback
@@ -503,7 +576,9 @@ onBeforeUnmount(() => {
  * the body's height honest, since it is measured from the top edge down.
  */
 function onViewportResize() {
-  viewportH.value = window.innerHeight
+  const { w, h } = layoutViewport()
+  viewportH.value = h
+  viewportW.value = w
   clampToViewport()
 }
 
@@ -515,6 +590,8 @@ function clampToViewport() {
 }
 
 function onDragStart(e) {
+  // A sheet is pinned to the screen; the header is just a header.
+  if (sheet.value) return
   dragging.value = true
   dragOffsetX = e.clientX - pos.value.x
   dragOffsetY = e.clientY - pos.value.y
@@ -622,16 +699,19 @@ function requestClose() {
   <div
     ref="frameEl"
     class="win-frame fixed rounded-[18px] overflow-hidden flex flex-col"
-    :class="{ 'is-frozen': frozen }"
+    :class="{ 'is-frozen': frozen, 'is-sheet': sheet }"
     :inert="frozen"
     :aria-busy="frozen || undefined"
     :data-chrome="chrome"
     :data-design="design"
+    :data-surface="design === 'modula' && surface === 'light' ? 'light' : undefined"
     role="dialog"
     :aria-label="label"
     tabindex="-1"
     :style="{
-      left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px',
+      ...(sheet
+        ? { left: 0, top: 0, width: '100vw', height: '100dvh' }
+        : { left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px' }),
       zIndex: z,
       // One value, read by the chassis, the faceplate and Apply. Passing the
       // hue as a custom property rather than composing each gradient in JS is
@@ -657,7 +737,7 @@ function requestClose() {
     -->
     <div
       class="win-header grid items-center touch-none h-14 shrink-0 pl-5 pr-[14px]"
-      :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
+      :class="[sheet ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab', { 'is-narrow': narrowSheet }]"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
@@ -685,6 +765,14 @@ function requestClose() {
         <span v-if="modula" class="win-brand-m">{{ brandLead }}{{ brandTail }}</span>
         <span v-else style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
           {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.85)">{{ brandTail }}</span></template>
+        </span>
+        <span
+          v-if="offline"
+          class="win-offline"
+          title="Renders the selection — not real-time. Nothing is heard until it is applied; Undo reverts it"
+        >
+          <Icon name="offline" :size="11" :stroke-width="2.25" />
+          RENDER
         </span>
         <!-- The short rule, not `--tall`: it is dividing a 13 px word from an
              icon, where the tall one divides two 30 px chips. -->
@@ -749,7 +837,7 @@ function requestClose() {
           type="button"
           class="win-chain-pill is-member"
           :class="{ 'is-bypassed': inChain.chainBypassed }"
-          :title="inChain.chainBypassed ? 'The Plugin Chain is bypassed — open it to turn it on' : 'Open the Plugin Chain'"
+          :title="inChain.chainBypassed ? 'The Effect Chain is bypassed — open it to turn it on' : 'Open the Effect Chain'"
           @pointerdown.stop
           @click="openWindow('plugin-chain')"
         >IN CHAIN · {{ inChain.position }}{{ inChain.chainBypassed ? ' · BYPASSED' : '' }}</button>
@@ -816,11 +904,21 @@ function requestClose() {
       against the content itself — inside the scroller it would sit at the
       bottom of the scrolled content, which is the one place it is not needed.
     -->
-    <div class="win-face relative min-h-0 flex flex-col" :style="background ? { background } : null">
+    <div
+      class="win-face relative min-h-0 flex flex-col"
+      :class="{ 'flex-1': sheet }"
+      :style="[
+        background ? { background } : null,
+        // Only the faceplate is zoomed: the header and footer are flexible and
+        // stay full size, so close, ON and Apply keep finger-sized targets.
+        sheet ? { width: sheetBox.width + 'px', zoom: sheetBox.zoom } : null,
+      ]"
+    >
       <div
         ref="bodyEl"
         class="win-body min-h-0 overflow-y-auto"
-        :style="{ maxHeight: `${bodyMaxHeight}px` }"
+        :class="{ 'overflow-x-auto flex-1': sheet }"
+        :style="bodyMaxHeight == null ? null : { maxHeight: `${bodyMaxHeight}px` }"
         @scroll="updateOverflow"
       >
         <slot />
@@ -882,12 +980,16 @@ function requestClose() {
         title="Select the whole file"
         @click="selectAll()"
       >
-        <span v-if="modula" class="win-selectall-box-m"></span>
-        <Icon v-else name="selectAll" :size="13" :stroke-width="2" />
+        <Icon name="selectAll" :size="13" :stroke-width="2" />
         <span>Select all</span>
       </button>
 
       <div class="win-actions flex items-center gap-2">
+        <!-- A panel may replace the note while it works (Noise Reduction puts
+             its progress and Cancel here). -->
+        <slot name="offline-note">
+          <span v-if="offline" class="win-offline-note">No preview - Renders on the server.</span>
+        </slot>
         <!--
           The title sits on the WRAPPER, not on the button.
 
@@ -930,8 +1032,7 @@ function requestClose() {
           :title="applyTitle"
           @click="onApplyClick"
         >
-          <span v-if="modula" style="font:700 12px/1 'Inter',system-ui,sans-serif">✓</span>
-          <Icon v-else :name="applyIcon" :size="15" :stroke-width="2.5" />
+          <Icon :name="offline ? 'offline' : applyIcon" :size="15" :stroke-width="2.5" />
           <span class="win-btn-label">{{ inChain ? 'Applies with the chain' : applyLabel }}</span>
           <span class="win-btn-label-short">{{ inChain ? 'In chain' : applyLabelShort }}</span>
           <span v-if="applyLocked && !inChain" class="win-apply-pro">PRO</span>
@@ -952,7 +1053,7 @@ function requestClose() {
       the thing it exists to do.
     -->
     <button
-      v-if="resizable"
+      v-if="resizable && !sheet"
       type="button"
       class="win-resize absolute flex items-end justify-end cursor-nwse-resize"
       style="width:22px;height:22px;right:3px;bottom:3px;touch-action:none"
@@ -1421,6 +1522,10 @@ function requestClose() {
   .win-apply .win-btn-label-short {
     display: inline;
   }
+  /* The header chip still says it; the footer needs the room for Apply. */
+  .win-offline-note {
+    display: none;
+  }
 }
 
 /* ── MODULA ─────────────────────────────────────────────────────────────────
@@ -1467,6 +1572,28 @@ function requestClose() {
   font: 800 13px/1 var(--m-font-ui);
   letter-spacing: 0.14em;
   color: color-mix(in srgb, var(--face, #e8a33d) 20%, #fff);
+}
+/* RENDER chip and footer note: what kind of plugin this is (an offline
+   process), not a control. Filled orange, matching the rail's RENDER tag. */
+.win-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font: 700 9px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.12em;
+  color: #5e2b02;
+  background: #e78040;
+  white-space: nowrap;
+  cursor: default;
+}
+.win-offline-note {
+  margin-right: 6px;
+  font: 500 11px var(--m-font-ui, 'Inter', system-ui, sans-serif);
+  color: rgba(159, 196, 232, 0.8);
+  white-space: nowrap;
 }
 /* Help and close: round, raised, no fill. */
 [data-design='modula'] .win-icon-btn {
@@ -1546,7 +1673,6 @@ function requestClose() {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 [data-design='modula'] .win-selectall:hover { color: var(--m-ink); box-shadow: inset 0 0 0 1px rgba(232, 163, 61, 0.7); }
-.win-selectall-box-m { width: 10px; height: 10px; box-sizing: border-box; border-radius: 2px; border: 1.5px dashed currentColor; }
 [data-design='modula'] .win-sel { color: var(--m-ink-4); }
 [data-design='modula'] .win-preview {
   min-width: 0;
@@ -1560,10 +1686,12 @@ function requestClose() {
   font: 600 12px var(--m-font-ui);
   box-shadow: var(--m-shadow-raised);
 }
-[data-design='modula'] .win-preview:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); }
+/* The ink too: the classic hover's near-white otherwise wins on specificity,
+   which on the light surface turned the label white. Same colour on steel. */
+[data-design='modula'] .win-preview:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); color: var(--m-ink); }
 [data-design='modula'] .win-preview--on { background: transparent; }
 .win-play-m { width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--m-ink); }
-.win-play-m.is-on { border-left-color: var(--m-accent); }
+.win-play-m.is-on { width: 9px; height: 9px; border: 0; border-radius: 1px; background: var(--m-accent); }
 [data-design='modula'] .win-apply {
   height: 32px;
   padding: 0 14px;
@@ -1575,9 +1703,92 @@ function requestClose() {
   box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(0, 0, 0, 0.55), 0 6px 12px -6px rgba(0, 0, 0, 0.9);
 }
 
+/* MODULA, LIGHT SURFACE: a painted cream panel (VoxPressor 2b). The inks and
+   the raised shadows turn warm-dark; Apply stays the light primary. */
+.win-frame[data-design='modula'][data-surface='light'] {
+  background: linear-gradient(180deg, #e6e2da, #cdc8be);
+  color: #1d2026;
+}
+[data-surface='light'] .win-header,
+[data-surface='light'] .win-footer {
+  --m-ink: #1d2026;
+  --m-ink-2: #3a3f47;
+  --m-ink-3: #41464e;
+  --m-ink-4: #555b64;
+  --m-shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 1px rgba(40, 30, 20, 0.28), 0 5px 9px -4px rgba(40, 30, 20, 0.35);
+}
+[data-surface='light'] .win-header { border-bottom-color: rgba(60, 50, 40, 0.22); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45); }
+[data-surface='light'] .win-footer { border-top-color: rgba(60, 50, 40, 0.22); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45); }
+[data-surface='light'] .win-brand-m { color: #1d2026; }
+/* The selection readout carries an inline dark-surface colour. */
+[data-surface='light'] .win-sel { color: #555b64 !important; }
+[data-surface='light'] .win-icon-btn { color: #3a3f47; box-shadow: var(--m-shadow-raised); }
+[data-surface='light'] .win-icon-btn:hover,
+[data-surface='light'] .win-icon-btn--on { background: rgba(0, 0, 0, 0.05); color: #1d2026; }
+[data-surface='light'] .win-rule--tall { background: rgba(60, 50, 40, 0.3); box-shadow: 1px 0 0 rgba(255, 255, 255, 0.5); }
+[data-surface='light'] .win-preview:hover:not(:disabled) { background: rgba(0, 0, 0, 0.05); }
+[data-surface='light'] .win-selectall { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18); }
+[data-surface='light'] .win-apply { box-shadow: inset 0 1px 0 #ffffff, 0 1px 1px rgba(40, 30, 20, 0.3), 0 5px 9px -4px rgba(40, 30, 20, 0.35); }
+
 @keyframes pluginBounceIn {
   0% { opacity: 0; transform: scale(0.94) translateY(8px); }
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 .win-frame.is-frozen { filter: saturate(.6) brightness(.85); transition: filter .15s; }
+
+/* Phone sheet (see ui/windowSheet.js): the whole screen, so no rounded
+   corners and no drop shadow to read as a floating window. Last and
+   important, to outrank the radius utility and the chassis variants. */
+.win-frame.is-sheet {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Narrow sheet header — a phone held upright (see narrowSheet). Two rows:
+   identity on the left and ON + close on the right of the first, so those two
+   are always on screen; the monitoring / preset / chain group (and any
+   plugin's own header-center controls) on a second row of its own, centred,
+   scrolling sideways only as a last resort. Overrides both the classic grid
+   and Modula's flex row. */
+.win-header.is-narrow {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 48px auto;
+  height: auto !important;
+  gap: 0 8px;
+  padding: 0 10px 0 14px !important;
+}
+.win-header.is-narrow > div:nth-of-type(1) {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+.win-header.is-narrow > div:nth-of-type(1) > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.win-header.is-narrow > div:nth-of-type(1) > button {
+  flex: none;
+}
+.win-header.is-narrow > div:nth-of-type(2) {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-content: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+}
+.win-header.is-narrow > div:nth-of-type(2):empty {
+  display: none;
+}
+.win-header.is-narrow > div:nth-of-type(3) {
+  grid-column: 2;
+  grid-row: 1;
+}
+.win-header.is-narrow .win-presets-m {
+  flex: 0 1 200px;
+  min-width: 150px;
+}
 </style>

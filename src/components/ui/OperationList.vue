@@ -1,8 +1,11 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { groupedOperations, searchOperations } from '../../ui/registry.js'
+import { groupedOperations, searchOperations, operationsIn } from '../../ui/registry.js'
+import { useWindows, CHAIN_WINDOW_ID } from '../../composables/useWindows.js'
+import { useEditorState } from '../../composables/useEditorState.js'
 import Icon from './Icon.vue'
 import PlanBadge from './PlanBadge.vue'
+import OfflineBadge from './OfflineBadge.vue'
 
 /**
  * The searchable, grouped list of operations in a category.
@@ -32,6 +35,18 @@ const groups = computed(() => {
   const hits = searchOperations(query.value, { categoryId: props.categoryId })
   return hits.length ? [{ group: '', operations: hits }] : []
 })
+
+// A category holding plugins that can take a chain slot ends with a door to the
+// Plugin Chain: the rail is where a new user goes looking for effects, and the
+// chain is how to run several of them at once. Opening it closes the rail
+// (usePluginChain.js), so the two lists are never on screen together.
+const offersChain = computed(() => operationsIn(props.categoryId).some(op => op.chain))
+const { openWindow } = useWindows()
+const { closeRail } = useEditorState()
+function openChain() {
+  closeRail()
+  openWindow(CHAIN_WINDOW_ID)
+}
 
 function select(op) {
   if (props.isDisabled(op)) return
@@ -76,7 +91,13 @@ function select(op) {
         </div>
         <div class="flex-1 min-w-0">
           <div class="text-[13px] font-bold text-text truncate">{{ op.label }}</div>
-          <div class="text-[11px] font-medium mt-[1px] text-text-muted truncate">{{ op.desc }}</div>
+          <!-- The RENDER tag leads the description rather than sitting beside
+               the PRO tag: in a 300 px rail, two tags there cut the name to
+               "Noise Re…". -->
+          <div class="flex items-center gap-[6px] mt-[2px] min-w-0">
+            <OfflineBadge :show="!!op.offline" />
+            <div class="text-[11px] font-medium text-text-muted truncate">{{ op.desc }}</div>
+          </div>
         </div>
         <PlanBadge :feature="op.feature" />
         <!-- A chevron promises "this opens something", so the verbs that just
@@ -91,6 +112,22 @@ function select(op) {
     <div v-if="!groups.length" class="px-1 py-6 text-center text-[11.5px] font-medium text-text-faint">
       No operations match “{{ query }}”
     </div>
+
+    <button
+      v-if="offersChain && !query.trim()"
+      type="button"
+      class="chain-door w-full flex items-center gap-[10px] px-[13px] py-3 mt-[6px] rounded-[12px] cursor-pointer text-left select-none"
+      @click="openChain"
+    >
+      <div class="chain-door-icon w-[34px] h-[34px] rounded-[10px] flex items-center justify-center shrink-0">
+        <Icon name="chain" :size="16" />
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="text-[13px] font-bold text-text">Use several at once?</div>
+        <div class="text-[11px] font-medium text-text-muted">Stack them in the Effect Chain and apply in one pass</div>
+      </div>
+      <Icon name="chevronRight" :size="16" :stroke-width="2.5" class="chain-door-chevron" />
+    </button>
   </div>
 </template>
 
@@ -133,7 +170,28 @@ function select(op) {
   background: transparent;
   border-color: var(--color-border-2);
 }
-.op-row--disabled:hover .op-icon {
+.op-row--disabled:hover .chain-door {
+  border: 1px dashed rgba(232, 163, 61, 0.45);
+  background: rgba(232, 163, 61, 0.05);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.chain-door:hover {
+  border-color: #e8a33d;
+  background: rgba(232, 163, 61, 0.1);
+}
+.chain-door:focus-visible {
+  outline: 2px solid #e8a33d;
+  outline-offset: 2px;
+}
+.chain-door-icon {
+  background: rgba(232, 163, 61, 0.16);
+  color: #e8a33d;
+}
+.chain-door-chevron {
+  color: #e8a33d;
+}
+
+.op-icon {
   background: var(--color-surface-1);
   color: var(--color-text-dim);
 }

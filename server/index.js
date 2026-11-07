@@ -207,8 +207,11 @@ app.get('/api/health', (_req, res) => {
 // queue caps how many preset chains run at once and how many one caller may
 // have in flight (MAX_CONCURRENT_JOBS / MAX_QUEUED_JOBS / MAX_JOBS_PER_CLIENT).
 const jobQueueConfig = readJobQueueConfig()
+// One queue for every long background job: mastering, and the spot operations
+// that answer 202 (Noise Reduction on a chapter).
+const processingJobs = createJobQueue(jobQueueConfig)
 console.log(`Job queue: ${jobQueueConfig.concurrency} running, ${jobQueueConfig.maxQueued} queued, ${jobQueueConfig.maxPerClient} per client`)
-app.use('/api', createProcessRoute({ gate, verify: verifyAccessToken, queue: createJobQueue(jobQueueConfig), usage, takeUpload }))
+app.use('/api', createProcessRoute({ gate, verify: verifyAccessToken, queue: processingJobs, usage, takeUpload }))
 
 // Job status + download endpoints (polled by client after submission)
 app.use('/api', jobsRoute)
@@ -219,10 +222,12 @@ const requestLimitConfig = readRequestLimitConfig()
 console.log(`Spot/analyze limit: ${requestLimitConfig.concurrency} running, ${requestLimitConfig.maxPerClient} per client`)
 const limit = holdSlot(createJobQueue(requestLimitConfig))
 
-// Spot effect endpoint (synchronous — returns processed WAV directly)
-app.use('/api', createSpotRoute({ gate, limit, takeUpload }))
+// Spot effect endpoint (synchronous — returns processed WAV directly — except
+// an async operation, which answers 202 and runs as a job in processingJobs)
+app.use('/api', createSpotRoute({ gate, limit, takeUpload, jobs: processingJobs }))
 
 // Analysis endpoints (synchronous — return measurements as JSON)
+// Needs an account, not a plan: measurements only, capped per request.
 app.use('/api', createAnalyzeRoute({ gate, limit, takeUpload }))
 
 // Signed-in user's account and plan

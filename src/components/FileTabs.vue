@@ -138,7 +138,7 @@ const statusOf = documentStatus
 <template>
   <div
     v-if="documents.length > 0"
-    class="h-[36px] flex items-stretch shrink-0 px-2 gap-[3px]"
+    class="h-[36px] compact:h-[30px] flex items-stretch shrink-0 px-2 gap-[3px]"
     style="background:linear-gradient(180deg,#12161b,#0f1318)"
   >
 
@@ -205,7 +205,7 @@ const statusOf = documentStatus
 
         <!-- Close — revealed on hover or when active, so idle tabs stay quiet -->
         <button
-          class="w-[15px] h-[15px] rounded-[4px] shrink-0 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-[rgba(255,255,255,.12)]"
+          class="w-[15px] h-[15px] pointer-coarse:w-[26px] pointer-coarse:h-[26px] rounded-[4px] shrink-0 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100 hover:bg-[rgba(255,255,255,.12)]"
           :class="{ 'opacity-60': doc.id === appState.activeDocumentId }"
           :aria-label="`Close ${doc.name}`"
           @click.stop="handleClose(doc)"

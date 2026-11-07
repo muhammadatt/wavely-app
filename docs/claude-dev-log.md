@@ -7516,3 +7516,20 @@ CPU, 70 s of mono at 20:1, attack 4:
 | base rate (measurement) | 163 ms (+18 %) | 136 ms | 146 ms |
 
 Feedback is at feed-forward's cost in both paths, within timing noise.
+
+## LA Vintage 2A — sibilance guard on the cell shaper (October 2026)
+
+**Report.** Harmonics on adds warmth that works on vocals almost everywhere, but loud sibilants / HF spikes distort audibly. The owner suspected the pre/de-emphasis.
+
+**Diagnosis (measured, synthetic vowels + 4–10 kHz sibilant bursts at four levels, shipping defaults, percentile auto makeup).** Metric: Harmonics on minus off, energy re the segment, in <1 k / 1–3.5 k / >3.5 k.
+
+- It is the CELL stage: valve off barely moves the sibilant rows; cell off removes most of it.
+- It is level-THRESHOLDED: quiet sibilants are clean (−53 dB), loud ones jump to −19 dB at PR 50. The cell's drive is `5·comp·(1 − e^(−GR/τ))` — it only works while compressing — and a loud "s" is what makes the gain reduction.
+- Emphasis 85 (+10.2 dB shelf at 2300 Hz) gives a sibilant its FULL boost, so it is driven harder than any vowel.
+- The products land mostly BELOW 1 kHz: the quartic is even, and past |u| = 1 its continuations have unequal slopes (1.13 / 0.87), a rectifier on noise. Envelope grit and difference tones sit under the de-emphasis corner, which only cuts above 2.3 kHz, and the "s" has nothing down there to mask them.
+
+PR 70, <1 kHz band, sibilants peaking −11 / −5 / −1 dBFS: shipping −24.6 / −19.3 / −17.8; Emphasis 0 −53.8 / −37.4 / −32.7, vowels unchanged in that synthetic test (−30.4 → −30.3).
+
+**Emphasis 0 was auditioned by the owner and rejected**: it fixes the distortion but takes appreciable warmth with it — on real voice the pair is part of what the cell does to vowels. So the fix is keyed on the material instead.
+
+**Fix: `sibilanceGuard`** (0–100, ships 100). A 2nd-order 4 kHz high-pass on the mono side-chain input; the HF fraction of energy (4 ms mean squares) through a smoothstep 0.25 → 0.6 scales the cell's drive down (1 ms down, 30 ms back). Ratio, so level-independent. Linear path, emphasis, detector and gain reduction untouched. PR 70, same rows: −49.8 / −41.2 / −37.1; vowels −30.4 → −30.9. On /a/, /i/ and an exaggerated bright /i/ (+20 dB formants at 2.8–4.5 kHz) the scale holds at 1.000 (min 0.998). 0 is bit-identical to the previous kernel (max diff 0 at PR 70, base rate, limit 90), and `LA2A_TUBESAT_PATCH` carries 0. Pinned by `test/dsp/la2aSibilanceGuard.test.js`. ⚠ A hard step onset is broadband and briefly reads as top end; real speech onsets do not. ⚠ The valve stage is not guarded. ⚠ Constants reasoned, not auditioned.

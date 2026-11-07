@@ -1,5 +1,5 @@
 /**
- * HF Softener: the automatic Air amount.
+ * De-Esser: the automatic Air amount.
  *
  * Removing sibilance makes a file sound duller even though no vowel changed —
  * on real narration the cut takes ≤ 0.16 dB off vowel top end but 2–7 dB off
@@ -23,7 +23,7 @@
  * Node-importable: no worklet registration reaches here through these imports.
  */
 
-import { processHFSoftenerBuffer, AIR_MAKEUP_MAX_DB } from './deEsserProcessor.js'
+import { processDeEsserBuffer, AIR_MAKEUP_MAX_DB } from './deEsserProcessor.js'
 import { processResonanceBuffer } from './resonanceProcessor.js'
 import { BiquadCascade, highpass } from './dsp/biquad.js'
 
@@ -54,7 +54,7 @@ function topEnergy(channels, sampleRate) {
  */
 export function measureTopLossDb(channelData, sampleRate, kernelParams, resoParams = null, resoFrameSize = 512) {
   // The chain's order: the softener (Air forced 0), then Reso when it is in.
-  let y = processHFSoftenerBuffer(channelData, sampleRate, { ...kernelParams, airDb: 0 }).channelData
+  let y = processDeEsserBuffer(channelData, sampleRate, { ...kernelParams, airDb: 0 }).channelData
   if (resoParams) {
     // ⚠ RENDERED LATENCY SAMPLES LONG, then trimmed back — as the apply path
     // does. Rendered at the input's length and shifted, the last `latency`

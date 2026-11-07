@@ -652,9 +652,9 @@ const copies = pluginCopies((copy, life) => {
   return useVoiceRx
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useVoiceRx() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useVoiceRx(copy) {
+  return copies(copy)()
 }
 
 export function openVoiceRxWindow() {

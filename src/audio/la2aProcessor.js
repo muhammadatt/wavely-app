@@ -88,7 +88,7 @@ import {
 } from './dsp/makeupReference.js'
 import { makeVocalSatCurve, VOCAL_SAT_CURVE_LEAN_POSITIVE } from './dsp/vocalSatCurve.js'
 import { makeQuarticSatCurve } from './dsp/quarticSatCurve.js'
-import { highShelf, BiquadCascade } from './dsp/biquad.js'
+import { highShelf, highpass, lowpass, BiquadCascade } from './dsp/biquad.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
 export { MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor }
@@ -1427,6 +1427,10 @@ export const LA2A_TUBESAT_PATCH = Object.freeze({
    * it could. 1800 is what this voicing was cut at.
    */
   emphasisCornerHz: 1800,
+  /** Not in that voicing — the guard came later. See SIBILANCE_GUARD_DEFAULT. */
+  sibilanceGuard: 0,
+  /** Nor its valve half. See VALVE_GUARD_DEFAULT. */
+  valveGuard: 0,
 })
 
 /**
@@ -1537,6 +1541,96 @@ export const EMPHASIS_CORNER_MAX_HZ = 8000
 
 /** Below this the pair is skipped outright rather than run flat. */
 export const EMPHASIS_EPSILON = 1e-4
+
+/**
+ * SIBILANCE GUARD — the cell shaper's drive, ducked while the input is mostly
+ * top end. 0-100 as depth; 100 ships; 0 is the previous kernel BIT FOR BIT
+ * (the detector does not even run).
+ *
+ * WHY. Loud sibilants distorted audibly with Harmonics on, and the culprit is
+ * the emphasis pair meeting the cell, both at once:
+ *
+ *   1. The +10.2 dB shelf at 2300 Hz gives a sibilant its FULL boost — its
+ *      energy is all above the corner — so the "s" is the most driven thing in
+ *      the file without being the loudest.
+ *   2. The cell's drive follows gain reduction (`d ∝ 1 − e^(−GR/τ)`), and a
+ *      loud "s" is what makes the gain reduction, so the curve switches on at
+ *      the instant the shelf is pushing the "s" into it.
+ *   3. The quartic is EVEN, and past |u| = 1 its continuations have unequal
+ *      slopes (1.13 / 0.87) — a rectifier on noise. What it makes of a
+ *      sibilant is envelope grit and difference tones, most of it BELOW 1 kHz,
+ *      where the de-emphasis (a shelf above 2300) does not reach and the "s"
+ *      itself has nothing to mask it.
+ *
+ * ⚠ LOWERING EMPHASIS FIXES IT AND WAS REJECTED BY EAR: it took the warmth
+ * with it — the pair is part of what the cell does to vowels, not only to
+ * sibilants. Hence this, which leaves the emphasis on everything that is not
+ * top-end-dominated.
+ *
+ * HOW. A 2nd-order 4 kHz high-pass on the mono side-chain input; the fraction
+ * of energy above it (4 ms mean square, both bands) through a smoothstep from
+ * RATIO_LO to RATIO_HI sets how far the cell's drive is pulled down (1 ms down,
+ * 30 ms back up). A ratio is level-independent, so a quiet "s" and a loud one
+ * read the same; it is the gain reduction that decides whether the cell is
+ * doing anything to duck. The cell curve with a lower drive is closer to the
+ * identity and nothing else — the linear path, the emphasis pair, the detector
+ * and the gain reduction are untouched, so compression is bit-identical and
+ * only the distortion on sibilants moves.
+ *
+ * MEASURED on synthetic vowels (/a/, /i/) + 4-10 kHz sibilant bursts, PR 70,
+ * auto makeup, Harmonics' added energy under 1 kHz re the segment: sibilants
+ * peaking −11 / −5 / −1 dBFS go −24.6 / −19.3 / −17.8 → −50.6 / −42.6 / −38.4
+ * dB; vowels −30.4 → −30.9. ⚠ THE CONSTANTS ARE REASONED, NOT AUDITIONED, and
+ * the material is synthetic. The valve stage is NOT guarded: it is idle-level
+ * colour (~5 % of the distortion) and does not follow gain reduction.
+ */
+export const SIBILANCE_GUARD_DEFAULT = 100
+/**
+ * VALVE GUARD, 0-100 (November 2026): the same guard on the OUTPUT VALVE. The
+ * cell guard took the cell's grit off an "s", but the valve is driven by level
+ * alone and its even quartic does to fricative noise what the cell's did —
+ * rumble under 1 kHz. On the owner's "Actual grownup" at PR 50 that was ALL of
+ * the "sh"'s grit (−35.3 dB re the "sh" under 1 kHz; the cell −60).
+ *
+ * It rides the cell guard's own scale — one detector, one timing, one corner
+ * (`sibilanceGuardHz`) — and fades the valve toward its linear term,
+ * `w + v·(f(w) − w)` with `v = 1 − valveGuard·(1 − scale)`, so a vowel (scale
+ * exactly 1) takes the shipping branch bit for bit. It needs the cell guard on
+ * (it reads its scale) and does nothing at 0.
+ */
+export const VALVE_GUARD_DEFAULT = 100
+/**
+ * BENCH (November 2026, owner's audition): SHAPER SPLIT, Hz (0 = off, ships).
+ * The (pre-emphasised) signal is split complementarily, `low = LP2(x)`,
+ * `high = x − low`, and only `low` goes through the cell and the valve; `high`
+ * takes the same gain, linear. An even curve multiplies the signal by itself,
+ * so hiss fed to it makes difference tones from DC up — the grit under an "s"
+ * that the de-emphasis cannot reach; above the split nothing can make them,
+ * detected or not. Vowel warmth (harmonics of what is below the split) stays.
+ * Linear, the two halves sum back exactly. Only on the cell-curve path (the
+ * shipping quartic); with `cellCurve: 'gainmod'` it does nothing.
+ */
+export const SHAPER_SPLIT_HZ_MIN = 250
+export const SHAPER_SPLIT_HZ_MAX = 12000
+/**
+ * The guard's detector corner. SHIPS AT 2500 (owner, November 2026; was 4000):
+ * an "sh" is darker than an "s" and 4 kHz barely heard it.
+ */
+export const SIB_GUARD_HZ = 2500
+/**
+ * BENCH range for the guard's detector corner (`sibilanceGuardHz`). An "sh" is
+ * darker than an "s": on the owner's "Actual grownup" the "sh" puts only 0.25
+ * of its energy above 4 kHz (the guard barely starts) against 0.55 above
+ * 2.5 kHz, where vowels on four clips stay at or under 0.19 — under the 0.25 at
+ * which the guard begins. At 2 kHz vowels reach 0.31.
+ */
+export const SIB_GUARD_HZ_MIN = 1500
+export const SIB_GUARD_HZ_MAX = 8000
+export const SIB_GUARD_RATIO_LO = 0.25
+export const SIB_GUARD_RATIO_HI = 0.6
+const SIB_GUARD_ENV_MS = 4
+const SIB_GUARD_ATTACK_MS = 1
+const SIB_GUARD_RELEASE_MS = 30
 
 const COMPRESS_KNEE_DB = 5
 const LIMIT_KNEE_DB = 6
@@ -1692,6 +1786,14 @@ export const LA2A_KERNEL_DEFAULTS = {
    * inert on `tanh` and on the gain modulation; see EMPHASIS_DEFAULT.
    */
   emphasis: EMPHASIS_DEFAULT,
+  /** Cell-drive duck on sibilance, 0-100; 0 = off. See SIBILANCE_GUARD_DEFAULT. */
+  sibilanceGuard: SIBILANCE_GUARD_DEFAULT,
+  /** BENCH: the guard detector's high-pass corner, Hz. See SIB_GUARD_HZ_MIN. */
+  sibilanceGuardHz: SIB_GUARD_HZ,
+  /** Valve-drive fade on sibilance, 0-100; 0 = off. See VALVE_GUARD_DEFAULT. */
+  valveGuard: VALVE_GUARD_DEFAULT,
+  /** BENCH: shape only below this, Hz; 0 = off. See SHAPER_SPLIT_HZ_MIN. */
+  shaperSplitHz: 0,
 }
 
 /**
@@ -1806,6 +1908,15 @@ export class LA2AKernel {
     // fast phase to the phosphorescent one (0 = just released, 1 = deep tail).
     this.gr = 0
     this.relPhase = 0
+    // Sibilance guard: detector high-pass (DF1), the two mean squares, the
+    // smoothed drive scale. See SIBILANCE_GUARD_DEFAULT.
+    this.sibHz = SIB_GUARD_HZ
+    this.sibHp = highpass(sampleRate, SIB_GUARD_HZ)
+    this.sibEnvCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_ENV_MS / 1000)))
+    this.sibAtkCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_ATTACK_MS / 1000)))
+    this.sibRelCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_RELEASE_MS / 1000)))
+    this.sibDepth = 0
+    this.resetSibState()
 
     // Per-channel DC blocker state (grown on demand)
     this.dcX = []
@@ -1946,6 +2057,16 @@ export class LA2AKernel {
     this.preGainDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     this.makeupDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     this.cellDriveDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
+    /** The valve guard's weight per sample (1 = the valve whole), on the cell drive's timebase. */
+    this.valveMixScratch = new Float32Array(128)
+    this.valveMixDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
+    this.seamValve = 1
+    /** Shaper split (see SHAPER_SPLIT_HZ_MIN): coefficients and per-channel DF2T state. */
+    this.splitHz = 0
+    this.splitOs = null
+    this.splitBase = null
+    this.splitOsZ = []
+    this.splitBaseZ = []
 
     /**
      * LIVE AUTO-MAKEUP TRACKER — running extrema, O(1) per sample.
@@ -2054,8 +2175,17 @@ export class LA2AKernel {
     return 20 * Math.log10(g)
   }
 
+  resetSibState() {
+    this.sibX1 = 0; this.sibX2 = 0; this.sibY1 = 0; this.sibY2 = 0
+    this.sibEh = 0
+    this.sibEa = 0
+    this.sibGain = 1
+    this.sibLaLine?.buffer.fill(1)
+  }
+
   /** Clear every feedback path in the cell and the tube stage. */
   resetState() {
+    this.resetSibState()
     this.hpfLp = 0
     this.shelfLp = 0
     this.env = 0
@@ -2066,6 +2196,10 @@ export class LA2AKernel {
     this.seamPreG = 1
     this.seamMakeup = 1
     this.seamDrive = 0
+    this.seamValve = 1
+    this.valveMixDelay.reset()
+    for (const z of this.splitOsZ) z.fill(0)
+    for (const z of this.splitBaseZ) z.fill(0)
     this.dcX = this.dcX.map(() => 0)
     this.dcY = this.dcY.map(() => 0)
     for (const f of this.preEmph) f?.reset()
@@ -2368,6 +2502,35 @@ export class LA2AKernel {
       && this.cellCurveMode !== CELL_CURVE_GAINMOD
       && this.cellCurveDriveMax > 0
     /**
+     * Sibilance guard depth, 0-1. Only meaningful while the cell shaper runs;
+     * re-entering from off starts from a clean detector (unity scale) rather
+     * than from whatever it last held. See SIBILANCE_GUARD_DEFAULT.
+     */
+    const sibWas = this.sibDepth > 0
+    this.sibDepth = this.cellShaperActive
+      ? clamp(Number.isFinite(p.sibilanceGuard) ? p.sibilanceGuard : 0, 0, 100) / 100
+      : 0
+    const sibHz = Number.isFinite(p.sibilanceGuardHz)
+      ? clamp(p.sibilanceGuardHz, SIB_GUARD_HZ_MIN, SIB_GUARD_HZ_MAX) : SIB_GUARD_HZ
+    if (sibHz !== this.sibHz) {
+      this.sibHz = sibHz
+      this.sibHp = highpass(this.sampleRate, Math.min(sibHz, this.sampleRate * 0.45))
+    }
+    if (!sibWas && this.sibDepth > 0) this.resetSibState()
+    const splitHz = Number.isFinite(p.shaperSplitHz) && p.shaperSplitHz > 0
+      ? clamp(p.shaperSplitHz, SHAPER_SPLIT_HZ_MIN, SHAPER_SPLIT_HZ_MAX) : 0
+    if (splitHz !== this.splitHz) {
+      this.splitHz = splitHz
+      this.splitOs = splitHz ? lowpass(this.sampleRate * OVERSAMPLE_FACTOR, splitHz) : null
+      this.splitBase = splitHz ? lowpass(this.sampleRate, Math.min(splitHz, this.sampleRate * 0.45)) : null
+      for (const z of this.splitOsZ) z.fill(0)
+      for (const z of this.splitBaseZ) z.fill(0)
+    }
+    // The valve half reads the cell guard's scale, so it needs it running.
+    this.valveGuard = this.sibDepth > 0 && this.applyTube
+      ? clamp(Number.isFinite(p.valveGuard) ? p.valveGuard : 0, 0, 100) / 100
+      : 0
+    /**
      * ⚠ THE SHAPER'S THREE SEAM VALUES ONLY ADVANCE WHILE IT IS RUNNING, so
      * they go stale the moment it is switched off. Switching back on then
      * started the first block's ramps from gains and a drive belonging to
@@ -2383,9 +2546,11 @@ export class LA2AKernel {
       this.seamPreG = 1
       this.seamMakeup = 1
       this.seamDrive = 0
+      this.seamValve = 1
       this.preGainDelay.reset()
       this.makeupDelay.reset()
       this.cellDriveDelay.reset()
+      this.valveMixDelay.reset()
     }
     /**
      * A one-pole on the RECTIFIER, ahead of `rect / env`. 0 is off and is what
@@ -2443,8 +2608,14 @@ export class LA2AKernel {
    * @param {Float32Array[]} inputChannels  - per-channel input (any count)
    * @param {Float32Array[]} outputChannels - per-channel output to fill
    * @param {number} n                      - samples in this block
+   * @param {Float32Array} [sidechain]      - optional external detector signal,
+   *   mono, in the input's units. Replaces the mono mix of the input as what the
+   *   detector hears; the kernel's own HPF and R37 emphasis still run on it, and
+   *   the audio path is untouched. Absent, the kernel is bit-identical to what
+   *   it was before this argument existed. VoxPressor feeds its voice detector
+   *   through here (dsp/voiceDetector.js).
    */
-  process(inputChannels, outputChannels, n) {
+  process(inputChannels, outputChannels, n, sidechain) {
     // A non-finite value anywhere in the cell's state is unrecoverable on its
     // own: env, gr and relPhase all feed back into themselves, so one NaN makes
     // every future block NaN and the effect goes silent for good.
@@ -2469,6 +2640,7 @@ export class LA2AKernel {
       this.cellMakeupScratch = new Float32Array(n)
       this.cellDriveScratch = new Float32Array(n)
       this.cellDriveRawScratch = new Float32Array(n)
+      this.valveMixScratch = new Float32Array(n)
     }
     if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
     const gain = this.gainScratch
@@ -2477,6 +2649,8 @@ export class LA2AKernel {
     const cellMakeup = this.cellMakeupScratch
     const cellDrive = this.cellDriveScratch
     const cellDriveRaw = this.cellDriveRawScratch
+    const valveMix = this.valveMixScratch
+    const valveGuard = this.valveGuard
     const chScale = 1 / nIn
 
     // The tracker's target: the loudest input sample heard so far.
@@ -2490,6 +2664,24 @@ export class LA2AKernel {
     }
 
     let { hpfLp, shelfLp, env, gr, relPhase, rectLp } = this
+    const sibDepth = this.sibDepth
+    const sh = this.sibHp
+    /**
+     * ⚠ THE SCALE IS DELAYED BY THE LOOKAHEAD, THE COMPRESSION IS NOT. The guard
+     * reads the side-chain input, but the sample its scale multiplies is the
+     * AUDIO, which lookahead holds back; undelayed, it ducked the vowel before a
+     * sibilant and let go before the sibilant's tail. Primed at 1 so a fresh
+     * line does not mute the cell for its first `lookaheadSamples`.
+     */
+    let sibLa = null
+    if (sibDepth > 0 && this.lookaheadSamples > 0) {
+      if (!this.sibLaLine || this.sibLaLine.length !== this.lookaheadSamples) {
+        this.sibLaLine = new DelayLine(this.lookaheadSamples)
+        this.sibLaLine.buffer.fill(1)
+      }
+      sibLa = this.sibLaLine
+    }
+    let { sibX1: sX1, sibX2: sX2, sibY1: sY1, sibY2: sY2, sibEh: sEh, sibEa: sEa, sibGain: sGain } = this
 
     // Seeded on the first block; advanced once per sample HERE rather than
     // per channel, because this envelope loop is already the shared one.
@@ -2497,14 +2689,44 @@ export class LA2AKernel {
     let makeupLinSmoothed = this.makeupLinSmoothed
 
     for (let i = 0; i < n; i++) {
-      // Mono sidechain tap
-      let x = inputChannels[0][i]
-      for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
-      x *= chScale
+      // Mono sidechain tap, or the caller's detector signal
+      let x
+      if (sidechain) {
+        x = sidechain[i]
+      } else {
+        x = inputChannels[0][i]
+        for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
+        x *= chScale
+      }
 
       // Sidechain frequency mapping: 80 Hz HPF, then the R37 emphasis filter.
       hpfLp += (x - hpfLp) * this.hpfLpCoef
       const hp = x - hpfLp
+
+      if (sibDepth > 0) {
+        /**
+         * ⚠ THE GUARD HEARS THE AUDIO, NOT THE CALLER'S SIDECHAIN. It protects
+         * the shapers, which see the audio; a detector signal is shaped to
+         * steer the COMPRESSION (VoxPressor's Body tap shelves sibilance down
+         * 9 dB), so read through it the guard missed "s" sounds the shapers
+         * still got. Without a sidechain `x` IS the mono audio.
+         */
+        let a = x
+        if (sidechain) {
+          a = inputChannels[0][i]
+          for (let ch = 1; ch < nIn; ch++) a += inputChannels[ch][i]
+          a *= chScale
+        }
+        const h = sh.b0 * a + sh.b1 * sX1 + sh.b2 * sX2 - sh.a1 * sY1 - sh.a2 * sY2
+        sX2 = sX1; sX1 = a; sY2 = sY1; sY1 = h
+        sEh += (h * h - sEh) * this.sibEnvCoef
+        sEa += (a * a - sEa) * this.sibEnvCoef
+        const t = sEa > 1e-12
+          ? clamp((sEh / sEa - SIB_GUARD_RATIO_LO) / (SIB_GUARD_RATIO_HI - SIB_GUARD_RATIO_LO), 0, 1)
+          : 0
+        const target = 1 - sibDepth * t * t * (3 - 2 * t)
+        sGain += (target - sGain) * (target < sGain ? this.sibAtkCoef : this.sibRelCoef)
+      }
       // Split at the corner and attenuate only the low half. Run
       // unconditionally rather than skipped at r37 100: it is algebraically
       // the identity there (lowGain 1 sums the two halves back to hp), and
@@ -2646,9 +2868,15 @@ export class LA2AKernel {
       if (this.cellShaperActive) {
         // Attenuation-compensated, bounded — see CELL_CURVE_DRIVE_MAX.
         const comp = preG > 0 ? Math.min(1 / preG, this.cellCompMax) : 1
+        const sg = sibDepth > 0 ? (sibLa ? sibLa.push(sGain) : sGain) : 1
         const d = this.cellCurveDriveMax * comp
           * (1 - Math.exp(-grNow / this.cellModTauDb))
+          * sg
         cellDriveRaw[i] = d
+        if (valveGuard > 0) {
+          const vm = 1 - valveGuard * (1 - sg)
+          valveMix[i] = this.oversampleOn ? this.valveMixDelay.push(vm) : vm
+        }
         if (this.oversampleOn) {
           cellPreG[i] = this.preGainDelay.push(preG)
           cellMakeup[i] = this.makeupDelay.push(makeupLinSmoothed)
@@ -2664,6 +2892,10 @@ export class LA2AKernel {
 
     this.rectLp = rectLp
     this.hpfLp = hpfLp
+    if (sibDepth > 0) {
+      this.sibX1 = sX1; this.sibX2 = sX2; this.sibY1 = sY1; this.sibY2 = sY2
+      this.sibEh = sEh; this.sibEa = sEa; this.sibGain = sGain
+    }
     this.shelfLp = shelfLp
     this.env = env
     this.gr = gr
@@ -2794,6 +3026,7 @@ export class LA2AKernel {
     const seamPreG = this.seamPreG
     const seamMakeup = this.seamMakeup
     const seamDrive = this.seamDrive
+    const seamValve = this.seamValve
     const wet = this.wetScratch
 
     for (let ch = 0; ch < nOut; ch++) {
@@ -2850,6 +3083,7 @@ export class LA2AKernel {
       if (!this.oversampleOn) {
         this._processChannelBaseRate(
           driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive,
+          valveGuard > 0 ? valveMix : null,
         )
         continue
       }
@@ -2884,28 +3118,61 @@ export class LA2AKernel {
         let pCur = seamPreG
         let mCur = seamMakeup
         let dCur = seamDrive
+        let vCur = seamValve
+        const sp = this.splitOs
+        let sz = null
+        if (sp) {
+          while (this.splitOsZ.length <= ch) this.splitOsZ.push(new Float64Array(2))
+          sz = this.splitOsZ[ch]
+        }
+        let z1 = sz ? sz[0] : 0
+        let z2 = sz ? sz[1] : 0
         for (let i = 0; i < n; i++) {
           const pNext = cellPreG[i]
           const mNext = cellMakeup[i]
           const dNext = cellDrive[i]
+          const vNext = valveGuard > 0 ? valveMix[i] : 1
           const pStep = (pNext - pCur) * invL
           const mStep = (mNext - mCur) * invL
           const dStep = (dNext - dCur) * invL
+          const vStep = (vNext - vCur) * invL
           for (let j = 0; j < L; j++) {
             const k = i * L + j
-            let w = hi[k] * (pCur + pStep * j)
+            const pg = pCur + pStep * j
+            const mg = mCur + mStep * j
+            let x = hi[k]
+            let high = 0
+            if (sp) {
+              // Complementary split: only the low half meets the curves.
+              const lo = sp.b0 * x + z1
+              z1 = sp.b1 * x - sp.a1 * lo + z2
+              z2 = sp.b2 * x - sp.a2 * lo
+              high = x - lo
+              x = lo
+            }
+            let w = x * pg
             w = this.cellSatCurve.transferAt(w, dCur + dStep * j)
-            w *= mCur + mStep * j
-            if (this.applyTube) w = this.shapeTube(w)
+            w *= mg
+            if (this.applyTube) {
+              // The valve guard fades toward the linear term; at 1 (any vowel)
+              // this is the shipping branch exactly.
+              const v = vCur + vStep * j
+              const s = this.shapeTube(w)
+              w = v >= 1 ? s : w + v * (s - w)
+            }
+            if (sp) w += high * pg * mg
             hi[k] = w
           }
           pCur = pNext
           mCur = mNext
           dCur = dNext
+          vCur = vNext
         }
+        if (sz) { sz[0] = z1; sz[1] = z2 }
         this.seamPreG = pCur
         this.seamMakeup = mCur
         this.seamDrive = dCur
+        this.seamValve = vCur
       } else {
         for (let i = 0; i < n; i++) {
           const gNext = gain[i]
@@ -3009,27 +3276,48 @@ export class LA2AKernel {
    * @param {Float32Array} driven  pre-emphasised audio, or `input` when off
    * @param {Float32Array} input   the untouched input, for the dry side of mix
    */
-  _processChannelBaseRate(driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive) {
+  _processChannelBaseRate(driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive, valveMix = null) {
     let dcX = this.dcX[ch]
     let dcY = this.dcY[ch]
     // The wet side is built first so the de-emphasis has a buffer to filter;
     // `out` doubles as that buffer, then the dry is summed into it.
+    const sp = this.cellShaperActive ? this.splitBase : null
+    let sz = null
+    if (sp) {
+      while (this.splitBaseZ.length <= ch) this.splitBaseZ.push(new Float64Array(2))
+      sz = this.splitBaseZ[ch]
+    }
+    let z1 = sz ? sz[0] : 0
+    let z2 = sz ? sz[1] : 0
     for (let i = 0; i < n; i++) {
       let w
+      let high = 0
       if (this.cellShaperActive) {
+        let x = driven[i]
+        if (sp) {
+          const lo = sp.b0 * x + z1
+          z1 = sp.b1 * x - sp.a1 * lo + z2
+          z2 = sp.b2 * x - sp.a2 * lo
+          high = (x - lo) * cellPreG[i] * cellMakeup[i]
+          x = lo
+        }
         // Same order as the oversampled path: attenuate, shape, then make up.
-        w = this.cellSatCurve.transferAt(driven[i] * cellPreG[i], cellDrive[i])
+        w = this.cellSatCurve.transferAt(x * cellPreG[i], cellDrive[i])
           * cellMakeup[i]
       } else {
         w = driven[i] * gain[i]
       }
       if (this.applyTube) {
-        const shaped = this.shapeTube(w)
+        let shaped = this.shapeTube(w)
+        // The valve guard, as in the oversampled path.
+        if (valveMix && valveMix[i] < 1) shaped = w + valveMix[i] * (shaped - w)
+        shaped += high
+        high = 0
         dcY = shaped - dcX + this.dcR * dcY
         dcX = shaped
         w = dcY
       }
-      out[i] = w
+      out[i] = w + high
     }
     if (this.emphasisActive) this.deEmph[ch].process(out, out, n, 0)
     for (let i = 0; i < n; i++) {

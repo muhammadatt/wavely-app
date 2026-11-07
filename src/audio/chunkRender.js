@@ -3,8 +3,7 @@
  * worker; node-importable for the tests.
  *
  * A chunk renders through a CHAIN of stages, mirroring applyWorkletRegion's
- * worklet graph: the plugin's own kernel, then any post-stages (the HF
- * Softener's Reso and Soften). Each stage gets the previous one's whole output
+ * worklet graph: the plugin's own kernel, then any post-stages (the De-Esser's Reso and Soften). Each stage gets the previous one's whole output
  * stream, as the next worklet node does, so the chain's latency is the sum.
  */
 
@@ -13,7 +12,7 @@ import { processSchepsBuffer } from './schepsProcessor.js'
 import { processFET1176Buffer } from './fet1176Processor.js'
 import { processResonanceBuffer } from './resonanceProcessor.js'
 import { processSaturationBenchBuffer } from './dsp/saturationLayers.js'
-import { processHFSoftenerBuffer } from './deEsserProcessor.js'
+import { processDeEsserBuffer } from './deEsserProcessor.js'
 import { processHFLimiterBuffer } from './hfLimiterProcessor.js'
 import { processPhatassBuffer } from './phatassProcessor.js'
 
@@ -33,7 +32,7 @@ export const CHUNK_RENDERERS = {
   fet1176: (ch, sr, p) => processFET1176Buffer(ch, sr, p),
   resonance: (ch, sr, p, o) => processResonanceBuffer(ch, sr, p, { frameSize: o?.frameSize }),
   saturationBench: (ch, sr, p) => processSaturationBenchBuffer(ch, sr, p),
-  hfSoftener: (ch, sr, p) => processHFSoftenerBuffer(ch, sr, p),
+  deEsser: (ch, sr, p) => processDeEsserBuffer(ch, sr, p),
   hfLimiter: (ch, sr, p) => processHFLimiterBuffer(ch, sr, p),
   phatass: (ch, sr, p) => processPhatassBuffer(ch, sr, p),
 }

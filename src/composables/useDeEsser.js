@@ -3,59 +3,59 @@ import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
-import { applyHFSoftenerRegion, computePeakCache, measureHFSoftenerAutoAir } from '../audio/processing.js'
+import { applyDeEsserPluginRegion, computePeakCache, measureDeEsserAutoAir } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { levelOffsetDbFor } from '../audio/deEsserProcessor.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
-import { hfSoftenerEffect as soloHfSoftenerEffect, HF_SOFTENER_DEFAULTS } from '../audio/effects/deEsser.js'
+import { deEsserEffect as soloDeEsserEffect, DE_ESSER_DEFAULTS } from '../audio/effects/deEsser.js'
 import { splitAmount, amountSplitOf } from '../audio/deEsserParams.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
-export const HF_SOFTENER_WINDOW_ID = 'hf-softener'
+export const DE_ESSER_WINDOW_ID = 'de-esser'
 
 /**
  * One copy of the plugin — the solo copy or the chain's (pluginCopies.js). Each
  * has its own state, its own node in the EffectChain and its own window.
  */
 const copies = pluginCopies((copy, life) => {
-  const hfSoftenerEffect = effectForCopy(soloHfSoftenerEffect, copy)
-  const windowId = idForCopy(HF_SOFTENER_WINDOW_ID, copy)
+  const deEsserEffect = effectForCopy(soloDeEsserEffect, copy)
+  const windowId = idForCopy(DE_ESSER_WINDOW_ID, copy)
 
   // Reactive state shared by every caller of this copy.
-  const hfAmount = ref(HF_SOFTENER_DEFAULTS.amount)
+  const hfAmount = ref(DE_ESSER_DEFAULTS.amount)
   // Lisp guard strength, 0–100 % (0 = off), and the Band corner.
-  const hfGuard = ref(HF_SOFTENER_DEFAULTS.guard)
-  const hfBand = ref(HF_SOFTENER_DEFAULTS.band)
+  const hfGuard = ref(DE_ESSER_DEFAULTS.guard)
+  const hfBand = ref(DE_ESSER_DEFAULTS.band)
   // The band-limited ResoTame ahead of the softener — an A/B of the pairing,
   // with fixed settings (see deEsserResoStage.js).
-  const hfResoAmount = ref(HF_SOFTENER_DEFAULTS.resoAmount)
+  const hfResoAmount = ref(DE_ESSER_DEFAULTS.resoAmount)
   // Soften: the onset softener at the end of the chain (deEsserSoftenStage.js),
   // on the panel in the slot Reso's knob had.
-  const hfSoften = ref(HF_SOFTENER_DEFAULTS.soften)
+  const hfSoften = ref(DE_ESSER_DEFAULTS.soften)
   // Air makeup: Air Boost's curve after the cut — ONE value, the knob's. While AUTO
   // (`hfComp`) is on the measurement writes it (a fraction of the top end the
   // chain removes, deEsserAutoAir.js); touching the knob takes over.
-  const hfAir = ref(HF_SOFTENER_DEFAULTS.air)
-  const hfComp = ref(HF_SOFTENER_DEFAULTS.comp)
+  const hfAir = ref(DE_ESSER_DEFAULTS.air)
+  const hfComp = ref(DE_ESSER_DEFAULTS.comp)
   const hfAirLossDb = ref(null)
   let autoAirTimer = null
   let autoAirSeq = 0
   // The detector's high-pass corner, Hz: raise it when bright vowels trip the cut.
-  const hfDetect = ref(HF_SOFTENER_DEFAULTS.detect)
-  const hfDetectHigh = ref(HF_SOFTENER_DEFAULTS.detectHigh)
+  const hfDetect = ref(DE_ESSER_DEFAULTS.detect)
+  const hfDetectHigh = ref(DE_ESSER_DEFAULTS.detectHigh)
   // VOICED: the lift follows the voicing, so it brightens vowels without
   // handing the cut back to the sibilants. STATIC: Air Boost's behaviour.
-  const hfAirMode = ref(HF_SOFTENER_DEFAULTS.airMode)
+  const hfAirMode = ref(DE_ESSER_DEFAULTS.airMode)
   // How the reduction is taken: 0 all as the band cut, 100 all as a broadband duck.
-  const hfDuck = ref(HF_SOFTENER_DEFAULTS.duck)
+  const hfDuck = ref(DE_ESSER_DEFAULTS.duck)
   // AMOUNT and SPLIT are a view over Duck (wide band) and EQ (split band), not a
   // third control: duck = amount x (1 - split), eq = amount x split, so the two
   // stages always share the Amount. Duck and EQ stay the state and what presets
   // store; the Split is remembered here because it cannot be read back from a
   // pair that is 0 / 0.
-  const hfSplit = ref(amountSplitOf(HF_SOFTENER_DEFAULTS.duck, HF_SOFTENER_DEFAULTS.amount).split)
+  const hfSplit = ref(amountSplitOf(DE_ESSER_DEFAULTS.duck, DE_ESSER_DEFAULTS.amount).split)
   const hfTotal = computed(() => amountSplitOf(hfDuck.value, hfAmount.value).total)
   const hfBroadband = ref(0)
   // The file's gated RMS and the offset it puts on every detector level. A
@@ -88,11 +88,11 @@ const copies = pluginCopies((copy, life) => {
       // on the detector only, a 40 ms release, and the fast release as each
       // vowel starts. The kernel keeps all four switchable for the bench and the
       // tests.
-      context: HF_SOFTENER_DEFAULTS.context,
-      rotator: HF_SOFTENER_DEFAULTS.rotator,
-      release: HF_SOFTENER_DEFAULTS.release,
-      vowelRelease: HF_SOFTENER_DEFAULTS.vowelRelease,
-      shape: HF_SOFTENER_DEFAULTS.shape, // pinned
+      context: DE_ESSER_DEFAULTS.context,
+      rotator: DE_ESSER_DEFAULTS.rotator,
+      release: DE_ESSER_DEFAULTS.release,
+      vowelRelease: DE_ESSER_DEFAULTS.vowelRelease,
+      shape: DE_ESSER_DEFAULTS.shape, // pinned
       guard: hfGuard.value,
       band: hfBand.value,
       resoAmount: hfResoAmount.value,
@@ -128,14 +128,14 @@ const copies = pluginCopies((copy, life) => {
     function initChain() {
       const ctx = getAudioContext()
       const chain = getEffectChain(ctx)
-      if (!chain.effects.find(e => e.id === hfSoftenerEffect.id)) {
-        chain.addEffect(hfSoftenerEffect)
+      if (!chain.effects.find(e => e.id === deEsserEffect.id)) {
+        chain.addEffect(deEsserEffect)
       }
       return chain
     }
 
     function nodesOf(chain) {
-      return chain.effects.find(e => e.id === hfSoftenerEffect.id)?.nodes
+      return chain.effects.find(e => e.id === deEsserEffect.id)?.nodes
     }
 
     function startMeters(chain) {
@@ -202,7 +202,7 @@ const copies = pluginCopies((copy, life) => {
 
     function pushAllParams(chain) {
       for (const [name, value] of Object.entries(currentParams())) {
-        chain.updateParam(hfSoftenerEffect.id, name, value)
+        chain.updateParam(deEsserEffect.id, name, value)
       }
     }
 
@@ -252,7 +252,7 @@ const copies = pluginCopies((copy, life) => {
       if (!(end > start)) return
       const seq = ++autoAirSeq
       try {
-        const { lossDb, airDb } = await measureHFSoftenerAutoAir(
+        const { lossDb, airDb } = await measureDeEsserAutoAir(
           segments, start, end, currentParams(),
           state.currentFile.sampleRate, state.currentFile.channels,
         )
@@ -262,7 +262,7 @@ const copies = pluginCopies((copy, life) => {
         hfAir.value = airDb
         pushParam('air', airDb)
       } catch (err) {
-        console.error('HF Softener auto Air failed:', err)
+        console.error('De-Esser auto Air failed:', err)
       }
     }
 
@@ -287,7 +287,7 @@ const copies = pluginCopies((copy, life) => {
     function togglePreview() {
       const chain = initChain()
       hfPreview.value = !hfPreview.value
-      chain.setEnabled(hfSoftenerEffect.id, hfPreview.value)
+      chain.setEnabled(deEsserEffect.id, hfPreview.value)
 
       if (hfPreview.value) {
         refreshLevel()
@@ -306,7 +306,7 @@ const copies = pluginCopies((copy, life) => {
     function pushParam(name, value) {
       if (!hfPreview.value) return
       const chain = getEffectChain(getAudioContext())
-      chain.updateParam(hfSoftenerEffect.id, name, value)
+      chain.updateParam(deEsserEffect.id, name, value)
     }
 
     function syncAmount(v) {
@@ -446,7 +446,7 @@ const copies = pluginCopies((copy, life) => {
 
     /** Render [start, end) of `segments` with the current settings, uncommitted. */
     function renderRegion(segments, start, end) {
-      return applyHFSoftenerRegion(
+      return applyDeEsserPluginRegion(
         segments, start, end,
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
@@ -464,17 +464,17 @@ const copies = pluginCopies((copy, life) => {
       if (wasPreviewing) togglePreview()
       await prepareApply()
 
-      startProcessing('Applying HF Softener...', pin.docId)
+      startProcessing('Applying De-Esser...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
         pin.check()
-        const bufferId = replaceRegion(start, end, buffer, 'HF Softener', pin.docId)
+        const bufferId = replaceRegion(start, end, buffer, 'De-Esser', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
-        showToast('HF Softener applied')
+        showToast('De-Esser applied')
       } catch (err) {
-        console.error('HF Softener failed:', err)
-        showToast(err instanceof DocumentSwitchedError ? err.message : 'HF Softener failed')
+        console.error('De-Esser failed:', err)
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'De-Esser failed')
       } finally {
         endProcessing(pin.docId)
       }
@@ -509,9 +509,9 @@ const copies = pluginCopies((copy, life) => {
     }
 
     registerChainPlugin({
-      id: hfSoftenerEffect.id,
+      id: deEsserEffect.id,
       windowId,
-      label: 'HF Softener',
+      label: 'De-Esser',
       dispose: life.dispose,
       isActive: () => hfPreview.value,
       setActive: (on) => { if (hfPreview.value !== on) togglePreview() },
@@ -594,7 +594,7 @@ const copies = pluginCopies((copy, life) => {
   return useDeEsser
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useDeEsser() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useDeEsser(copy) {
+  return copies(copy)()
 }

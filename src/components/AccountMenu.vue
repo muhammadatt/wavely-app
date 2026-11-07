@@ -4,6 +4,7 @@ import { useAuth } from '../composables/useAuth.js'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useBilling } from '../composables/useBilling.js'
 import BaseButton from './ui/BaseButton.vue'
+import Icon from './ui/Icon.vue'
 
 /**
  * Top-bar account control. Renders nothing at all when accounts are off, so a
@@ -62,22 +63,27 @@ async function signOut() {
 
 <template>
   <template v-if="state.status !== 'disabled'">
-    <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-1"></div>
+    <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-1 max-sm:hidden"></div>
 
     <!-- Reserve the slot while Supabase reports in, so the row doesn't jump. -->
     <div v-if="state.status === 'loading'" class="w-[30px] h-[30px]" aria-hidden="true"></div>
 
+    <!-- On a phone held upright the words do not fit beside Save and Export
+         (they ran off the screen at 390 px); the person icon stands in. -->
     <BaseButton
       v-else-if="state.status === 'signedOut'"
-      size="md" color="ghost" :pill="false"
+      size="md" color="ghost" :pill="false" class="max-sm:px-[9px]"
+      aria-label="Sign in"
+      title="Sign in"
       @click="auth.openDialog('signIn')"
     >
-      Sign in
+      <Icon name="user" :size="15" class="sm:hidden" />
+      <span class="max-sm:hidden">Sign in</span>
     </BaseButton>
 
     <div v-else class="relative" data-account-menu>
       <button
-        class="h-[30px] flex items-center gap-[7px] pl-[3px] pr-[8px] rounded-full transition-colors hover:bg-[rgba(255,255,255,.08)]"
+        class="h-[30px] flex items-center gap-[7px] pl-[3px] pr-[8px] max-sm:pr-[3px] rounded-full transition-colors hover:bg-[rgba(255,255,255,.08)]"
         :title="user?.email"
         aria-label="Account"
         :aria-expanded="open"
@@ -88,7 +94,7 @@ async function signOut() {
           style="background:linear-gradient(135deg,#7ef0ff,#25b6d0);color:#08161a"
         >{{ initial }}</span>
         <span
-          class="font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[6px] py-[3px] rounded-[5px]"
+          class="max-sm:hidden font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[6px] py-[3px] rounded-[5px]"
           :style="isPaid
             ? 'color:#08161a;background:#e0b84a'
             : 'color:rgba(255,255,255,.6);background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1)'"

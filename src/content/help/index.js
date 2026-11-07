@@ -60,10 +60,11 @@ import autoLeveler from './auto-leveler.js'
 import sibilanceEditor from './clip-gain-deesser.js'
 import fetPunch from './fet-punch.js'
 import hfLimiter from './hf-limiter.js'
-import deEsser from './hf-softener.js'
+import deEsser from './de-esser.js'
 import humRemover from './hum-remover.js'
 import loudness from './loudness.js'
 import manualEq from './manual-eq.js'
+import noiseReduction from './noise-reduction.js'
 import normalize from './normalize.js'
 import optoSmooth from './opto-smooth.js'
 import phatass from './phatass.js'
@@ -77,6 +78,7 @@ import spectrumAnalyzer from './spectrum-analyzer.js'
 import inflator from './inflator.js'
 import vocalSaturation from './vocal-saturation.js'
 import voicerx from './voicerx.js'
+import voxPressor from './vox-pressor.js'
 
 export const HELP = {
   'air-band': airBand,
@@ -84,10 +86,11 @@ export const HELP = {
   'clip-gain-deesser': sibilanceEditor,
   'fet-punch': fetPunch,
   'hf-limiter': hfLimiter,
-  'hf-softener': deEsser,
+  'de-esser': deEsser,
   'hum-remover': humRemover,
   loudness,
   'manual-eq': manualEq,
+  'noise-reduction': noiseReduction,
   normalize,
   'opto-smooth': optoSmooth,
   phatass,
@@ -101,6 +104,7 @@ export const HELP = {
   'inflator': inflator,
   'vocal-saturation': vocalSaturation,
   voicerx,
+  'vox-pressor': voxPressor,
 }
 
 /**

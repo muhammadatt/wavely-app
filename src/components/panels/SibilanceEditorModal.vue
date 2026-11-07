@@ -1,5 +1,4 @@
 <script setup>
-import { FREE_PREVIEW_SECONDS } from '../../auth/plans.js'
 /**
  * Sibilance Editor (the clip-gain de-esser).
  *
@@ -134,9 +133,10 @@ async function applyAndClose() {
   closeModal()
 }
 
-// Longest stretch the server will analyse for this user (Infinity with Pro).
+// The analysis needs an account (a free one), not a plan: say so before the
+// click rather than after it. Empty when signed in or accounts are off.
 const entitlements = useEntitlements()
-const previewLimit = computed(() => entitlements.previewLimit('sibilanceEditor'))
+const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign in (free) to analyse. Applying needs Pro.' : ''))
 </script>
 
 <template>
@@ -193,12 +193,7 @@ const previewLimit = computed(() => entitlements.previewLimit('sibilanceEditor')
               Runs once on the server. The controls below re-shape the result
               without re-detecting.
             </p>
-            <p v-if="previewLimit === 0" class="se-warn">
-              Sign in to analyse — a free account previews the first {{ FREE_PREVIEW_SECONDS }} s.
-            </p>
-            <p v-else-if="previewLimit !== Infinity" class="se-warn">
-              Free preview: analyses the first {{ previewLimit }} s. Pro analyses the whole selection.
-            </p>
+            <p v-if="signInNote" class="se-hint se-signin">{{ signInNote }}</p>
           </div>
           <ModulaButton
             variant="accent" :disabled="analyzing || !hasSelection"
@@ -340,15 +335,11 @@ const previewLimit = computed(() => entitlements.previewLimit('sibilanceEditor')
   box-shadow: 0 -1px 0 rgba(255, 255, 255, .04);
 }
 .se-analyse-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.se-hint.se-signin { color: #ffb27a; }
 .se-hint {
   margin: 0;
   font: 500 10px/1.5 var(--m-font-ui);
   color: var(--m-ink-4);
-}
-.se-warn {
-  margin: 0;
-  font: 600 10px/1.45 var(--m-font-ui);
-  color: var(--m-accent);
 }
 .se-status {
   margin: 0;

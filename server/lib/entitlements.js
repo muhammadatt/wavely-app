@@ -76,13 +76,14 @@ function bearerToken(req) {
  * `req.file`). `featureOf(req)` names the feature, or null to let the route
  * deal with the request (an unknown kind, say). On refusal the upload is
  * deleted here, since the route's own cleanup never runs, and the response is
- * 402 with a body the client can act on:
- *   { error, code: 'upgrade_required', feature, requires, previewSeconds }
+ * a body the client can act on:
+ *   402 { error, code: 'upgrade_required', feature, requires, previewSeconds }
+ *   401 { error, code: 'sign_in_required', feature, requires }  — signed out,
+ *       for a feature any account unlocks, or with no preview open to them
  *
  * `gate.signIn(featureOf)` runs BEFORE multer: when a signed-out caller could
  * not use the feature at all — not even its preview — it answers 401 without
- * reading the body, so an anonymous flood never reaches the disk:
- *   { error, code: 'sign_in_required', feature }
+ * reading the body, so an anonymous flood never reaches the disk.
  * It leaves `req.user` set (null when signed out) for the gate to reuse.
  *
  * Both refuse a BLOCKED account (`isBlocked`, lib/usage.js) with 403:
@@ -113,11 +114,16 @@ export function createEntitlementGate({ verify, planFor, isBlocked = null, probe
   }
 
   function refuseSignIn(res, featureId) {
+    const requires = requiredPlan(featureId)
+    const label = FEATURES[featureId].label
     res.set?.('WWW-Authenticate', 'Bearer')
     return res.status(401).json({
-      error: `Sign in to use ${FEATURES[featureId].label}.`,
+      error: requires === 'free'
+        ? `Sign in to use ${label.toLowerCase()} — any free account will do.`
+        : `Sign in to use ${label}.`,
       code: 'sign_in_required',
       feature: featureId,
+      requires,
     })
   }
 
@@ -188,7 +194,11 @@ export function createEntitlementGate({ verify, planFor, isBlocked = null, probe
 
       if (req.file?.path) await unlink(req.file.path).catch(() => {})
       const requires = requiredPlan(featureId)
-      const needs = requires === 'free' ? 'a free account' : `a ${requires === 'pro' ? 'Pro' : requires} plan`
+      // Any account unlocks it, so the caller is signed out: the answer is a
+      // sign-in, not a plan. 401 rather than 402, so the client opens the
+      // sign-in dialog instead of the upgrade prompt.
+      if (requires === 'free') return refuseSignIn(res, featureId)
+      const needs = `a ${requires === 'pro' ? 'Pro' : requires} plan`
       res.status(402).json({
         error: preview
           ? `${FEATURES[featureId].label} on more than ${FREE_PREVIEW_SECONDS} seconds of audio needs ${needs}.`

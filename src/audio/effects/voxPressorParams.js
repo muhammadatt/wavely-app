@@ -1,0 +1,390 @@
+/**
+ * VoxPressor panel params, defaults and latency — with NO worklet loader
+ * behind them, so `node --test` can reach the mapping (the same split as
+ * schepsParams.js, for the same reason: `voxPressor.js` imports the
+ * `?worker&url` loader, which only Vite resolves).
+ */
+import { PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, PEAKS_RIPPLE_WARN_DB, BODY_GUIDE_EDGE_DB, BODY_GUIDE_WARN_DB } from '../voxPressorSolve.js'
+import {
+  voxLatencySamples, PEAKS_INPUT_KNOB, PEAKS_SPEED_IDS, peaksTiming, PEAKS_MODE_IDS,
+} from '../voxPressorProcessor.js'
+import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
+import {
+  DE_ESSER_DEFAULTS, splitAmount, toKernelParams as deEsserKernelParams,
+} from '../deEsserParams.js'
+import { levelOffsetDbFor } from '../deEsserProcessor.js'
+import { ALIGN_TARGET_DBFS } from '../dsp/inputAlign.js'
+
+/**
+ * Two oversampled kernels and two limiters in series, constant whether a stage
+ * is on or off — at 44.1 kHz with the Body lookahead off, for the effect's
+ * nominal figure. The apply path asks `voxLatencySamples` for the real one: the
+ * limiters' lookahead is in ms, and so is the bench's Body lookahead.
+ */
+export const VOX_LATENCY_SAMPLES = voxLatencySamples({}, 44100)
+export { voxLatencySamples }
+
+/**
+ * THE PEAKS SCALE: 0–10, linear in the 1176's detector drive, calibrated so
+ * Peaks N takes about N dB off the loudest peaks of typical narration.
+ *
+ * Measured with the Input pinned at 26 and the drive stepped (owner's two
+ * clips, 30 s each): once peaks are caught, each dB of drive takes 0.88–0.90 dB
+ * off them, linearly to 10 dB and beyond, on both clips and on synthetic
+ * narration — at 12:1 the stage is a limiter. Both clips start being caught
+ * ~3.9 dB under Input 26's drive (−3.5 / −4.3) at attack 6, and a step is
+ * 1 / 0.885 = 1.13 dB of drive. ⚠ RE-ZEROED TO −3.3 FOR ATTACK 4 (SPEED
+ * AUTO / NORMAL), which catches ~0.5 dB less per setting: measured at Peaks 3
+ * on AUTO before the shift, 2.1 / 2.8 dB.
+ *
+ * ⚠ A CALIBRATED SCALE, NOT A TARGET. A peakier voice reads more: synthetic
+ * narration (crest 20 dB) takes ~6.4 dB at Peaks 3. The panel's readout is
+ * the measured figure for the file. (Solving every voice onto the scale was
+ * the retired target solve — see voxPressorSolve.js.)
+ *
+ * Why not the 1176's own Input: over this range it moves drive almost evenly
+ * (~0.5 dB a point, 15–40), but that is a quarter of its travel, the numbers
+ * mean nothing on their own, and the knee would move with it.
+ */
+export const PEAKS_MAX = 10
+export const PEAKS_ZERO_DRIVE_DB = -3.3
+export const PEAKS_DRIVE_PER_STEP_DB = 1.13
+
+/** The detector drive Peaks `x` adds over the file's alignment, dB. */
+export function peaksDriveDb(x) {
+  return PEAKS_ZERO_DRIVE_DB + PEAKS_DRIVE_PER_STEP_DB * x
+}
+
+/** The inverse: the Peaks knob position for a drive (dB re the alignment). Unclamped. */
+export function peaksKnobForDriveDb(d) {
+  return (d - PEAKS_ZERO_DRIVE_DB) / PEAKS_DRIVE_PER_STEP_DB
+}
+
+/** The drive span the Peaks knob covers: where `measureVoxPressor` searches the guide. */
+export function peaksGuideRangeDb() {
+  return [peaksDriveDb(0), peaksDriveDb(PEAKS_MAX)]
+}
+
+/**
+ * The Peaks guide in knob units, from `measureVoxPressor`'s `peaksGuide`:
+ * { gapDb, target, warn } — the knob that takes the gap off the loudest peaks
+ * and the knob where "voice touched" passes `PEAKS_BODY_WARN_DB`; PEAKS_MAX
+ * when not reached on the knob's travel. null when there is no guide.
+ */
+export function peaksGuideKnobs(guide) {
+  if (!guide || !Number.isFinite(guide.gapDb)) return null
+  const k = d => (Number.isFinite(d) ? Math.max(0, Math.min(PEAKS_MAX, peaksKnobForDriveDb(d))) : PEAKS_MAX)
+  return { gapDb: guide.gapDb, target: k(guide.targetDriveDb), touch: k(guide.touchDriveDb), warn: k(guide.warnDriveDb) }
+}
+
+/** The bench's Body lookahead steps, ms (LA Vintage 2A's own control). */
+export const BODY_LOOKAHEAD_STEPS_MS = Object.freeze([0, 5, 10, LOOKAHEAD_MAX_MS])
+
+export const VOX_OUTPUT_MIN_DB = -12
+export const VOX_OUTPUT_MAX_DB = 12
+export { BODY_GUIDE_EDGE_DB, BODY_GUIDE_WARN_DB }
+export { PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, PEAKS_RIPPLE_WARN_DB, PEAKS_SPEED_IDS, PEAKS_MODE_IDS, peaksTiming }
+
+/**
+ * CHARACTER: 'warm' (ships) | 'clean' — the LA-2As' tube colour on or off
+ * (kernel `analog`). Gain reduction is identical either way.
+ */
+export const CHARACTER_IDS = Object.freeze(['warm', 'clean'])
+
+/**
+ * OUTPUT CEILING: where the output peak lands, dBFS. 'source' (ships) holds
+ * the source's own peak, as every stage does; −1 is the streaming norm
+ * (OUTPUT_PROFILES' podcast / broadcast ceiling), −3 ACX's.
+ */
+export const OUTPUT_CEILINGS = Object.freeze({ source: null, '-1': -1, '-3': -3 })
+export const OUTPUT_CEILING_IDS = Object.freeze(Object.keys(OUTPUT_CEILINGS))
+export function outputCeilingDbOf(id) {
+  return OUTPUT_CEILINGS[id] ?? null
+}
+
+/**
+ * The panel's state. `peaks`, `body` and `output` are the user's; everything
+ * under MEASURED is measured (`alignDb` from the whole file's gated RMS, the
+ * rest by `measureVoxPressor`) and never enters a preset.
+ */
+export const VOX_DEFAULTS = {
+  /**
+   * Peaks, 0–10 (0 = stage out): about N dB off the loudest peaks of
+   * typical narration (`peaksDriveDb`).
+   */
+  peaks: 3,
+  /**
+   * The 1176's SPEED: 'auto' (release from the voice's F0) | 'gentle' |
+   * 'normal' | 'fast' — see `PEAKS_SPEEDS`.
+   */
+  speed: 'auto',
+  /** PEAKS CHARACTER: 'hard' (12:1) | 'soft' (4:1, ships — owner, November 2026) — see `PEAKS_MODES`. */
+  peaksMode: 'soft',
+  /** CHARACTER: 'warm' (ships) | 'clean' — see `CHARACTER_IDS`. */
+  character: 'warm',
+  /** OUTPUT CEILING: 'source' (ships) | '-1' | '-3' — see `OUTPUT_CEILINGS`. */
+  ceiling: 'source',
+  /**
+   * BODY, 0–10 (0 = stage out): the LA-2A's Peak Reduction over its usable
+   * span, the Parallel Drive's scale (`bodyPrFor`: PR 38 + 4 a step, so
+   * 4.8 = PR 57.2, 10 = PR 78). The panel shows it ×10 in WHOLE numbers
+   * (owner, November 2026), so it ships at 4.8 — the panel's 48 — rather than
+   * the 4.75 / PR 57 it was voiced at (0.2 PR apart). PR 57 is 3.4–3.8 dB of average leveling on both
+   * clips (≈ 2.3 dB per 10 points from 40 up; the two clips agree to 0.4 dB at
+   * every setting).
+   */
+  body: 4.8,
+  /**
+   * DE-ESS, 0–100 (0 = stage out): the De-Esser's Amount, shared by
+   * `deEssSplit` between its Duck and EQ, Guard 100 — every other control
+   * the De-Esser's own default. After Body, before Parallel (owner's order).
+   */
+  deEss: 40,
+  /**
+   * The De-ess Amount's SPLIT, 0–100: the De-Esser panel's WIDE BAND ↔ SPLIT
+   * BAND view (`splitAmount`) — 0 all to the broadband Duck, 100 all to the
+   * top-band EQ. 33 is the De-Esser's own default (`DE_ESS_SPLIT`).
+   */
+  deEssSplit: 33,
+  /**
+   * PARALLEL, 0–100 % (0 = stage out): the Mix of a fast 4:1 1176 copy
+   * blended under the voice (New York compression; `PARALLEL_PATCH`).
+   */
+  parallel: 35,
+  /** DENSITY, 0–100 % (0 = stage out, which ships — owner, November 2026): the Cambridge Inflator's Effect, anchored. */
+  density: 0,
+  /** Manual trim after the ceiling, dB. */
+  output: 0,
+  /** 'off' | 'peaks' | 'body' — monitor a detector. Never saved. */
+  listen: 'off',
+  /**
+   * BENCH: the LA-2A's lookahead, ms (LA Vintage 2A's Lookahead control,
+   * `LOOKAHEAD_MAX_MS`). 10 ships (owner, November 2026; 5 before; a
+   * hardware LA-2A has none). It moves the latency.
+   */
+  bodyLookaheadMs: 10,
+  /**
+   * BENCH: the Parallel stage's compressor, 'la2a' (ships: owner's A/B,
+   * November 2026) | '1176' — everything else shared (`PARALLEL_COMPS`).
+   * Re-measures.
+   */
+  parallelComp: 'la2a',
+  /**
+   * BENCH: the Parallel copy's own de-esser, 0–100 (`dsp/parallelDeEsser.js`:
+   * LA Vintage 2A's sibilance-guard detector driving a top-band cut on the
+   * copy, before the blend). 25 ships (owner, November 2026). Re-measures.
+   */
+  parallelDeEss: 25,
+  /**
+   * BENCH: what it cuts — 'broadband' (the whole copy, ships: owner's A/B),
+   * 'shelf' (above 4 kHz) or 'shelf-low' (above 2.5 kHz). Re-measures.
+   */
+  /**
+   * PARALLEL DRIVE, 0–10 (3 ships): how hard the copy is compressed. A drive
+   * into its detector (`parallelDriveDbFor`), so on the LA-2A it is Peak
+   * Reduction by another name — 0 = PR 38, 3 = PR 50, 10 = PR 78 — and the
+   * 1176 is offset so the same position compresses about as hard. Re-measures.
+   */
+  parallelDrive: 3,
+  parallelDeEssMode: 'broadband',
+  /** BENCH: the parallel 1176's +15 dB sibilance detector (`ParallelDetector`). Re-measures. */
+  parallelSibEmph: true,
+  // ── MEASURED ──
+  /**
+   * The file's alignment, dB (`alignDbForRms` on the WHOLE file's gated RMS,
+   * LA Vintage 2A's and LA Classic 76's): both detectors' offset.
+   */
+  alignDb: null,
+  cornerHz: null,
+  /** The voice's median F0, Hz — SPEED AUTO's release follows it. */
+  voiceF0Hz: null,
+  /** The source peak, dBFS: the last limiter's ceiling and Density's anchor. */
+  sourcePeakDb: null,
+  /** The de-esser's level offset, from the Body stage's output (`levelOffsetDbFor`). */
+  deEssLevelOffsetDb: null,
+  /**
+   * The parallel 1176's alignment and wet makeup — measured on the de-esser's
+   * output; the makeup at the current Mix (it is solved on the blend).
+   */
+  parallelAlignDb: null,
+  parallelMakeupDb: null,
+  /** The 1176 blend's peak restore (LA Classic 76's), after the stage. */
+  parallelRestoreDb: 0,
+  /** The Parallel compressor's ceiling knee, sized by the solve (`ceilingKneeDbFor`). */
+  parallelCeilingKneeDb: null,
+  // Per-stage makeup, limiter ceilings and restores (see `measureVoxPressor`).
+  peaksMakeupDb: 0,
+  peaksCeilingDb: null,
+  peaksRestoreDb: 0,
+  bodyMakeupDb: 0,
+  bodyCeilingDb: null,
+  /** The LA-2A stage's restore, before its limiter. */
+  makeupDb: 0,
+}
+
+/** The keys `measureVoxPressor` measures: never a user setting, never in a preset. */
+export const VOX_MEASURED_KEYS = Object.freeze([
+  // Ceilings first: they reach the live node as separate messages, and a
+  // raised makeup must never run against an old ceiling (see useLA2A).
+  'peaksCeilingDb', 'bodyCeilingDb',
+  'cornerHz', 'voiceF0Hz', 'sourcePeakDb',
+  'deEssLevelOffsetDb', 'parallelAlignDb',
+  'peaksMakeupDb', 'peaksRestoreDb', 'bodyMakeupDb', 'makeupDb', 'parallelMakeupDb', 'parallelRestoreDb', 'parallelCeilingKneeDb',
+])
+
+/** Map panel params to kernel params. */
+export function toKernelParams(p) {
+  return {
+    /**
+     * ⚠ A STAGE RUNS ONLY ONCE THE FILE'S ALIGNMENT IS MEASURED. Unaligned,
+     * the offset is 0, which puts both thresholds wherever the file's level
+     * happens to sit: the first build read ~5 dB of 1176 reduction with
+     * excursions to 18 on a −22 dBFS voice at every knob position. Bypassed (a
+     * delay line, so the latency does not move) until it lands — which is one
+     * synchronous pass over the file, so in practice at once.
+     */
+    peaksOn: p.peaks > 0 && Number.isFinite(p.alignDb),
+    bodyOn: p.body > 0 && Number.isFinite(p.alignDb),
+    peaksInput: PEAKS_INPUT_KNOB,
+    ...stageParams(p),
+    peaksSpeed: PEAKS_SPEED_IDS.includes(p.speed) ? p.speed : 'auto',
+    peaksMode: PEAKS_MODE_IDS.includes(p.peaksMode) ? p.peaksMode : VOX_DEFAULTS.peaksMode,
+    analog: p.character !== 'clean',
+    outputCeilingDb: outputCeilingDbOf(p.ceiling),
+    voiceF0Hz: Number.isFinite(p.voiceF0Hz) ? p.voiceF0Hz : null,
+    bodyPeakReduction: bodyPrFor(p.body),
+    outputDb: Number.isFinite(p.output) ? p.output : 0,
+    listen: p.listen ?? 'off',
+    makeupDb: Number.isFinite(p.makeupDb) ? p.makeupDb : 0,
+    bodyBench: { lookaheadMs: bodyLookaheadOf(p) },
+    // Measured values cross only when real, so an unmeasured panel leaves the
+    // kernel on its own defaults rather than on a NaN. The corner is sent as
+    // null rather than left out: the live kernel MERGES params, so an absent
+    // corner kept the previous region's while a fresh Apply kernel used 80 Hz.
+    cornerHz: Number.isFinite(p.cornerHz) ? p.cornerHz : null,
+    ...(Number.isFinite(p.alignDb) ? {
+      peaksAlignDb: p.alignDb + peaksDriveDb(Math.max(0, Math.min(PEAKS_MAX, Number(p.peaks) || 0))),
+      bodyAlignDb: p.alignDb,
+    } : {}),
+    peaksMakeupDb: Number.isFinite(p.peaksMakeupDb) ? p.peaksMakeupDb : 0,
+    peaksRestoreDb: Number.isFinite(p.peaksRestoreDb) ? p.peaksRestoreDb : 0,
+    bodyMakeupDb: Number.isFinite(p.bodyMakeupDb) ? p.bodyMakeupDb : 0,
+    // null clears a limiter's ceiling (a pure delay).
+    peaksCeilingDb: Number.isFinite(p.peaksCeilingDb) ? p.peaksCeilingDb : null,
+    bodyCeilingDb: Number.isFinite(p.bodyCeilingDb) ? p.bodyCeilingDb : null,
+  }
+}
+
+/**
+ * The Parallel DRIVE knob (0–10) as dB of drive into the copy's detector, on
+ * top of its alignment: `zero + 2·knob`. On the LA-2A ~0.5 dB is one Peak
+ * Reduction point, so a step is 4 points and 0 / 3 / 10 = PR 38 / 50 / 78
+ * (owner, November 2026: 0 at PR 38 rather than a negative drive; default
+ * 3 = 0 dB = PR 50, the LA Vintage 2A slot's own voicing — +6 was hot, +3
+ * auditioned before settling). The 1176's zero is set so
+ * the same position compresses about as hard (the user may pick either).
+ *
+ * Fitted on typical gain reduction (median of 300 ms maxima, 30 s of each
+ * clip, Messy and Bright / David Greenberg): LA-2A 6.0 / 7.8 dB at 0 dB of
+ * drive, 0.67 dB per dB → ~8.0 / ~9.8 at +3; the 1176 reads 9.1 / 9.1 at
+ * 0 dB and +0.8 per dB, so its default sits at −1 (~8.3). ⚠ IT MATCHES
+ * COMPRESSION, NOT LEVEL: each copy's makeup is solved to the same
+ * 99.9th-percentile reference, and at Mix 30 the LA-2A blend adds ~0 dB of
+ * gated RMS where the 1176's adds +0.7 / +1.1 — whatever the drive (drive
+ * moves either by under 0.1 dB).
+ */
+export const PARALLEL_DRIVE_MAX = 10
+export const PARALLEL_DRIVE_DEFAULT = 3
+export const PARALLEL_DRIVE_DB_PER_STEP = 2
+export const PARALLEL_DRIVE_ZERO_DB = Object.freeze({ la2a: -6, 1176: -10 })
+export function parallelDriveDbFor(comp, drive) {
+  const k = Number.isFinite(drive) ? Math.max(0, Math.min(PARALLEL_DRIVE_MAX, drive)) : PARALLEL_DRIVE_DEFAULT
+  // Read as `toKernelParams` reads `parallelComp`: anything but 'la2a' is the 1176.
+  const zero = PARALLEL_DRIVE_ZERO_DB[comp === 'la2a' ? 'la2a' : '1176']
+  return zero + PARALLEL_DRIVE_DB_PER_STEP * k
+}
+
+/** The De-Esser's own default Split (Amount 60 / Split 33): `deEssSplit`'s default. */
+export const DE_ESS_SPLIT = 33
+
+/**
+ * The stages after Body — De-ess, Parallel, Density — as kernel params.
+ *
+ * ⚠ DE-ESS RUNS AS SOON AS THE FILE IS ALIGNED: until its level is measured
+ * on the Body output, the offset is the SOURCE's, which is ~the makeups low.
+ * ⚠ PARALLEL WAITS FOR ITS MEASUREMENT (the 1176's alignment and its wet
+ * makeup are properties of what it hears, and the makeup of the Mix): bypassed,
+ * a delay line, until they land. Density waits for the source peak it is anchored to.
+ */
+function stageParams(p) {
+  const aligned = Number.isFinite(p.alignDb)
+  const deEss = knob(p.deEss)
+  const { duck, amount } = splitAmount(deEss, Number.isFinite(p.deEssSplit) ? p.deEssSplit : DE_ESS_SPLIT)
+  const sourceGatedDb = aligned ? ALIGN_TARGET_DBFS - p.alignDb : null
+  const levelOffset = Number.isFinite(p.deEssLevelOffsetDb)
+    ? p.deEssLevelOffsetDb
+    : (Number.isFinite(sourceGatedDb) ? levelOffsetDbFor(sourceGatedDb) : 0)
+  const mix = knob(p.parallel) / 100
+  return {
+    deEssOn: deEss > 0 && aligned,
+    deEss: deEsserKernelParams({
+      ...DE_ESSER_DEFAULTS, duck, amount, levelOffset, air: 0, soften: 0, resoAmount: 0,
+    }),
+    parallelMix: mix,
+    parallelOn: mix > 0 && Number.isFinite(p.parallelAlignDb) && Number.isFinite(p.parallelMakeupDb),
+    parallelComp: p.parallelComp === 'la2a' ? 'la2a' : '1176',
+    parallelDeEss: knob(p.parallelDeEss),
+    parallelDeEssMode: p.parallelDeEssMode ?? 'broadband',
+    parallelDriveDb: parallelDriveDbFor(p.parallelComp, p.parallelDrive),
+    parallelSibEmph: p.parallelSibEmph !== false,
+    parallelAlignDb: Number.isFinite(p.parallelAlignDb) ? p.parallelAlignDb : 0,
+    parallelMakeupDb: Number.isFinite(p.parallelMakeupDb) ? p.parallelMakeupDb : 0,
+    parallelRestoreDb: Number.isFinite(p.parallelRestoreDb) ? p.parallelRestoreDb : 0,
+    parallelCeilingKneeDb: Number.isFinite(p.parallelCeilingKneeDb) ? p.parallelCeilingKneeDb : null,
+    density: knob(p.density) / 100,
+    sourcePeakDb: Number.isFinite(p.sourcePeakDb) ? p.sourcePeakDb : null,
+  }
+}
+
+/**
+ * The Body knob (0–10) as the LA-2A's Peak Reduction: PR 38 + 4 a step, so
+ * 0 / 4.75 / 10 = PR 38 / 57 / 78 — the same scale as the Parallel Drive on
+ * its LA-2A (owner, November 2026: centre the knob on the usable span; under
+ * PR ~38 the stage barely touches narration, ~0.5 dB of leveling at 40).
+ * 0 itself takes the stage out (`bodyOn`), as every other knob's 0 does.
+ */
+export const BODY_MAX = 10
+export const BODY_PR_ZERO = 38
+export const BODY_PR_PER_STEP = 4
+export function bodyPrFor(body) {
+  const k = Number.isFinite(Number(body)) ? Math.max(0, Math.min(BODY_MAX, Number(body))) : 0
+  return BODY_PR_ZERO + BODY_PR_PER_STEP * k
+}
+
+/** The PR span the Body knob covers: where `measureVoxPressor` searches the Body guide. */
+export function bodyGuidePrRange() {
+  return [bodyPrFor(0), bodyPrFor(BODY_MAX)]
+}
+
+/**
+ * The Body guide in knob units, from `measureVoxPressor`'s `bodyGuide`:
+ * { edge, warn } — where the LA-2A's average leveling passes
+ * `BODY_GUIDE_EDGE_DB` (amber) and `BODY_GUIDE_WARN_DB` (red); BODY_MAX when
+ * not reached on the knob's travel. null when there is no guide.
+ */
+export function bodyGuideKnobs(guide) {
+  if (!guide) return null
+  const k = pr => (Number.isFinite(pr) ? Math.max(0, Math.min(BODY_MAX, (pr - BODY_PR_ZERO) / BODY_PR_PER_STEP)) : BODY_MAX)
+  return { edge: k(guide.edgePr), warn: k(guide.warnPr) }
+}
+
+function knob(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0
+}
+
+/** The Body lookahead in effect, ms (0 when unset or out of range). */
+export function bodyLookaheadOf(p) {
+  const v = Number(p?.bodyLookaheadMs)
+  return Number.isFinite(v) ? Math.max(0, Math.min(LOOKAHEAD_MAX_MS, v)) : 0
+}

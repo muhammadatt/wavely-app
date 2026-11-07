@@ -62,7 +62,7 @@ const freeNote = computed(() => {
     return unlocks.length ? `${planLabel.value} unlocks: ${unlocks.join(', ')}.` : ''
   }
   if (feature.value.preview) {
-    return `You can try it free on up to ${FREE_PREVIEW_SECONDS} seconds of audio — select a shorter passage to preview.`
+    return `Preview is free on up to ${FREE_PREVIEW_SECONDS} seconds of audio. Applying it to the whole selection needs ${planLabel.value}.`
   }
   if (state.upgradeFor === 'pluginChainApply') {
     return 'Upgrade now to apply this chain to your audio.'

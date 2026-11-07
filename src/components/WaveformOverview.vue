@@ -77,36 +77,30 @@ let dragStartX = 0
 let dragStartScrollLeft = 0
 let dragStartVisibleDuration = 0
 
-function onWindowMouseDown(e) {
-  e.stopPropagation()
-  dragMode = 'pan'
-  dragStartX = e.clientX
-  dragStartScrollLeft = scrollLeft.value
-  window.addEventListener('mousemove', onDragMove)
-  window.addEventListener('mouseup', onDragUp)
-}
+// The pointer that started the drag. The listeners are on the window, so
+// without this a second finger moved the view and lifting it ended the first
+// finger's drag; now every other pointer is ignored until this one lifts.
+let dragPointerId = null
 
-function onLeftHandleMouseDown(e) {
+function startDrag(e, mode) {
   e.stopPropagation()
-  dragMode = 'left'
+  if (dragPointerId !== null) return
+  dragPointerId = e.pointerId
+  dragMode = mode
   dragStartX = e.clientX
   dragStartScrollLeft = scrollLeft.value
   dragStartVisibleDuration = visibleDuration.value
-  window.addEventListener('mousemove', onDragMove)
-  window.addEventListener('mouseup', onDragUp)
+  window.addEventListener('pointermove', onDragMove)
+  window.addEventListener('pointerup', onDragUp)
+  window.addEventListener('pointercancel', onDragUp)
 }
 
-function onRightHandleMouseDown(e) {
-  e.stopPropagation()
-  dragMode = 'right'
-  dragStartX = e.clientX
-  dragStartScrollLeft = scrollLeft.value
-  dragStartVisibleDuration = visibleDuration.value
-  window.addEventListener('mousemove', onDragMove)
-  window.addEventListener('mouseup', onDragUp)
-}
+const onWindowPointerDown = e => startDrag(e, 'pan')
+const onLeftHandlePointerDown = e => startDrag(e, 'left')
+const onRightHandlePointerDown = e => startDrag(e, 'right')
 
 function onDragMove(e) {
+  if (e.pointerId !== dragPointerId) return
   if (!dragMode || !stripWidth.value || !totalDuration.value || !viewportWidthPx) return
   const deltaSec = pxToSec(e.clientX - dragStartX)
   const minVisible = minVisibleDuration()
@@ -129,16 +123,19 @@ function onDragMove(e) {
   }
 }
 
-function onDragUp() {
+function onDragUp(e) {
+  if (e && e.pointerId !== dragPointerId) return
+  dragPointerId = null
   dragMode = null
-  window.removeEventListener('mousemove', onDragMove)
-  window.removeEventListener('mouseup', onDragUp)
+  window.removeEventListener('pointermove', onDragMove)
+  window.removeEventListener('pointerup', onDragUp)
+  window.removeEventListener('pointercancel', onDragUp)
 }
 
 // Click on the dimmed area outside the window → jump the window there,
 // centered on the click, keeping the current zoom level.
-function onStripMouseDown(e) {
-  if (!stripWidth.value || !totalDuration.value) return
+function onStripPointerDown(e) {
+  if (dragPointerId !== null || !stripWidth.value || !totalDuration.value) return
   const rect = strip.value.getBoundingClientRect()
   const clickTime = pxToSec(e.clientX - rect.left)
   const maxStart = Math.max(0, totalDuration.value - visibleDuration.value)
@@ -173,17 +170,18 @@ onMounted(() => {
 onUnmounted(() => {
   resizeObserver?.disconnect()
   window.removeEventListener('wavely:view-update', handleViewUpdate)
-  window.removeEventListener('mousemove', onDragMove)
-  window.removeEventListener('mouseup', onDragUp)
+  window.removeEventListener('pointermove', onDragMove)
+  window.removeEventListener('pointerup', onDragUp)
+  window.removeEventListener('pointercancel', onDragUp)
 })
 </script>
 
 <template>
   <div
     ref="strip"
-    class="relative h-[52px] shrink-0 rounded-[10px] cursor-pointer select-none"
+    class="ov-strip relative h-[52px] shrink-0 rounded-[10px] cursor-pointer select-none"
     style="background:#080a0d;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)"
-    @mousedown="onStripMouseDown"
+    @pointerdown="onStripPointerDown"
   >
     <!-- The canvas carries its own radius instead of the strip clipping to it:
          the resize handles straddle the window edge, and at either extreme of
@@ -201,19 +199,19 @@ onUnmounted(() => {
       class="zoom-window absolute top-0 bottom-0 box-border cursor-grab active:cursor-grabbing"
       :style="{ left: windowLeftPct + '%', width: windowWidthPct + '%' }"
       title="Drag to scroll the waveform"
-      @mousedown="onWindowMouseDown"
+      @pointerdown="onWindowPointerDown"
     >
       <div
-        class="ov-handle absolute -left-[7px] top-0 bottom-0 w-[14px] flex items-center justify-center cursor-ew-resize"
+        class="ov-handle ov-handle--left absolute top-0 bottom-0 w-[14px] flex items-center justify-center cursor-ew-resize"
         title="Drag to zoom"
-        @mousedown="onLeftHandleMouseDown"
+        @pointerdown="onLeftHandlePointerDown"
       >
         <span class="ov-grip"></span>
       </div>
       <div
-        class="ov-handle absolute -right-[7px] top-0 bottom-0 w-[14px] flex items-center justify-center cursor-ew-resize"
+        class="ov-handle ov-handle--right absolute top-0 bottom-0 w-[14px] flex items-center justify-center cursor-ew-resize"
         title="Drag to zoom"
-        @mousedown="onRightHandleMouseDown"
+        @pointerdown="onRightHandlePointerDown"
       >
         <span class="ov-grip"></span>
       </div>
@@ -225,6 +223,18 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* The strip's drags are the app's own; without this a finger on it scrolls or
+   zooms the page and the browser cancels the pointer mid-drag. */
+.ov-strip { touch-action: none; }
+.ov-handle--left { left: -7px; }
+.ov-handle--right { right: -7px; }
+/* A 14 px handle is a mouse target. For a finger, widen the hit area (not the
+   grip drawn inside it) and keep it centred on the window's edge. */
+@media (pointer: coarse) {
+  .ov-handle { width: 32px; }
+  .ov-handle--left { left: -16px; }
+  .ov-handle--right { right: -16px; }
+}
 .zoom-window {
   border: 1.5px solid rgba(126, 240, 255, 0.5);
   background: rgba(53, 211, 230, 0.07);

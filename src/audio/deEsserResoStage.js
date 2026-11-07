@@ -1,5 +1,5 @@
 /**
- * The HF Softener's optional ResoTame stage: a band-limited, short-frame
+ * The De-Esser's optional ResoTame stage: a band-limited, short-frame
  * resonance suppressor that runs AFTER the softener's cut (Duck → EQ → Air →
  * Reso), in the chain whenever its knob is above 0.
  *

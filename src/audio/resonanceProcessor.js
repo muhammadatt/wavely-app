@@ -295,7 +295,7 @@ const PEAK_REF_FLOOR_FACTOR = 8
 // plateaus and then rolls off steeply bends like a resonance at the edge —
 // one narrator lost 6.8 dB at 8–12 kHz of vowel to it. A single frame cannot
 // tell that edge from a faint ring at the same level; the frame's voicing can
-// tell it from an "s". See the HF Softener's Reso stage, the one caller.
+// tell it from an "s". See the De-Esser's Reso stage, the one caller.
 const VOICED_LM_LO_HZ = 200
 const VOICED_LM_HI_HZ = 3000
 const VOICED_HF_LO_HZ = 4500
@@ -303,18 +303,17 @@ const VOICED_HF_HI_HZ = 12000
 const VOICED_LEAD_DB = 6
 // Tilt-scaled lisp guard (`lispGuardTiltDb` [flat, peaked] + `lispGuardTiltRelaxDb`,
 // off by default). The level guard's floor relaxes by up to the relax depth as
-// the frame's 5–10 kHz-over-2–4 kHz tilt falls from peaked to flat — the HF
-// Softener's own rule — so a flat /f/ is not held to a floor set for /s/.
+// the frame's 5–10 kHz-over-2–4 kHz tilt falls from peaked to flat — the De-Esser's own rule — so a flat /f/ is not held to a floor set for /s/.
 // ⚠ A FIXED 6 dB DEPTH CAP SHIPPED BEFORE THIS and was dropped when Reso moved
 // AFTER the softener's cut: there the voice-relative guard reads an "s" the
 // softener has already turned down, so it leaves Reso little on all but the
 // hottest — relative, where a fixed cap took the same 6 dB from every "s".
-// Tilt bands are the HF Softener's lisp-guard tilt.
+// Tilt bands are the De-Esser's lisp-guard tilt.
 const TILT_MID_LO_HZ = 2000
 const TILT_MID_HI_HZ = 4000
 const TILT_HF_LO_HZ = 5000
 const TILT_HF_HI_HZ = 10000
-// Lisp guard's held voice level, per frame: the HF Softener's 15 ms attack and
+// Lisp guard's held voice level, per frame: the De-Esser's 15 ms attack and
 // 500 ms hold, so the two guards judge an "s" against the same vowel.
 const GUARD_VOICE_ATTACK_MS = 15
 const GUARD_VOICE_HOLD_MS = 500
@@ -741,9 +740,9 @@ export class ResonanceKernel {
 
     this.softKnee = p.mode !== 'hard'
     this.refMode = p.refMode === 'peak' ? 'peak' : 'cepstral'
-    // Off (0) for ResoTame itself; the HF Softener's Reso stage sets it.
+    // Off (0) for ResoTame itself; the De-Esser's Reso stage sets it.
     this.voicedFloorDb = Math.max(0, Number(p.voicedSelectivityFloorDb) || 0)
-    // Lisp guard (off for ResoTame itself — the HF Softener's Reso stage sets
+    // Lisp guard (off for ResoTame itself — the De-Esser's Reso stage sets
     // it): no frame's cut may take the 4.5–12 kHz band below the HELD voice
     // level + this floor. See GUARD_* below.
     this.guardFloorDb = Number.isFinite(p.lispGuardFloorDb) ? p.lispGuardFloorDb : null

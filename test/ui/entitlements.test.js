@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { reactive, computed } from 'vue'
 
 import { createEntitlements } from '../../src/auth/entitlements.js'
-import { FEATURES, FREE_PREVIEW_SECONDS } from '../../src/auth/plans.js'
+import { FEATURES, FREE_PREVIEW_SECONDS, isOffline, allowsPreview } from '../../src/auth/plans.js'
 import { readFileSync } from 'node:fs'
 
 function fakeAuth(status = 'signedOut', plan = null) {
@@ -39,35 +39,40 @@ test('signed out: saving asks for an account, Pro features ask for an upgrade', 
   assert.match(e.hint('savePresets'), /^Sign in/)
   assert.match(e.hint('autoLevel'), /Pro feature/)
   // Server previews need an account — except mastering's.
-  assert.equal(e.previewLimit('autoLevel'), 0)
+  assert.equal(e.previewLimit('spotEffects'), 0)
   assert.equal(e.previewLimit('mastering'), FREE_PREVIEW_SECONDS)
+  // Offline processes are Pro outright: nothing to preview, nothing to send.
+  assert.equal(e.previewLimit('noiseReduction'), 0)
+  assert.equal(e.previewLimit('autoLevel'), 0)
 })
 
 test('requestPreview: signed out asks for a sign-in; a free account previews; Pro is unlimited', () => {
   const auth = fakeAuth('signedOut')
   const e = createEntitlements(auth)
-  for (const id of ['autoLevel', 'sibilanceEditor', 'spotEffects']) {
+  for (const id of ['spotEffects', 'noiseReduction']) {
     assert.equal(e.requestPreview(id), false, id)
   }
-  assert.deepEqual(auth.calls, [['dialog', 'signUp'], ['dialog', 'signUp'], ['dialog', 'signUp']])
+  assert.deepEqual(auth.calls, [['dialog', 'signUp'], ['dialog', 'signUp']])
   assert.equal(e.requestPreview('mastering'), true)
 
   auth.state.status = 'signedIn'
   auth.state.plan = 'free'
-  assert.equal(e.requestPreview('autoLevel'), true)
-  assert.equal(e.previewLimit('autoLevel'), FREE_PREVIEW_SECONDS)
+  assert.equal(e.requestPreview('spotEffects'), true)
+  assert.equal(e.previewLimit('spotEffects'), FREE_PREVIEW_SECONDS)
+  assert.equal(e.requestPreview('noiseReduction'), false, 'no preview: an upgrade, not a sign-in')
+  assert.deepEqual(auth.calls.at(-1), ['upgrade', 'noiseReduction'])
   auth.state.plan = 'pro'
-  assert.equal(e.previewLimit('autoLevel'), Infinity)
+  assert.equal(e.previewLimit('spotEffects'), Infinity)
   assert.equal(auth.calls.length, 3, 'no further prompts')
 
   const off = createEntitlements(fakeAuth('disabled'))
-  assert.equal(off.requestPreview('autoLevel'), true)
+  assert.equal(off.requestPreview('spotEffects'), true)
 })
 
 test('a server 401 sign_in_required opens the sign-in dialog', () => {
   const auth = fakeAuth('signedOut')
   const e = createEntitlements(auth)
-  const err = Object.assign(new Error('Sign in'), { signIn: { code: 'sign_in_required', feature: 'autoLevel' } })
+  const err = Object.assign(new Error('Sign in'), { signIn: { code: 'sign_in_required', feature: 'audioAnalysis' } })
   assert.equal(e.handleServerRefusal(err), true)
   assert.deepEqual(auth.calls, [['dialog', 'signUp']])
 })
@@ -77,12 +82,36 @@ test('free plan saves presets but not Pro features; Pro has everything; it track
   const e = createEntitlements(auth)
   assert.equal(e.can('savePresets'), true)
   assert.equal(e.can('pluginChainApply'), false)
-  assert.equal(e.previewLimit('sibilanceEditor'), FREE_PREVIEW_SECONDS)
+  assert.equal(e.can('noiseReduction'), false)
+  assert.equal(e.previewLimit('spotEffects'), FREE_PREVIEW_SECONDS)
 
   auth.state.plan = 'pro'
   assert.equal(e.can('pluginChainApply'), true)
-  assert.equal(e.previewLimit('sibilanceEditor'), Infinity)
+  assert.equal(e.previewLimit('noiseReduction'), Infinity)
   assert.equal(e.hint('autoLevel'), '')
+})
+
+test('Auto Leveler and Noise Reduction are offline processes, gated whole', () => {
+  assert.equal(isOffline('autoLevel'), true)
+  assert.equal(isOffline('noiseReduction'), true)
+  assert.equal(allowsPreview('noiseReduction'), false)
+  // The real-time plugins keep their free preview.
+  assert.equal(isOffline('pluginChainApply'), false)
+})
+
+test('analysis needs an account, not a plan', () => {
+  const out = createEntitlements(fakeAuth('signedOut'))
+  assert.equal(out.blocker('audioAnalysis'), 'signIn')
+  const free = createEntitlements(fakeAuth('signedIn', 'free'))
+  assert.equal(free.can('audioAnalysis'), true)
+})
+
+test('a server 401 sign_in_required opens the sign-in dialog, not the upgrade prompt', () => {
+  const auth = fakeAuth('signedOut')
+  const e = createEntitlements(auth)
+  const err = Object.assign(new Error('sign in'), { signIn: { feature: 'audioAnalysis' } })
+  assert.equal(e.handleServerRefusal(err), true)
+  assert.deepEqual(auth.calls, [['dialog', 'signUp']])
 })
 
 test('a server 402 opens the upgrade prompt; other errors are left to the caller', () => {
@@ -111,6 +140,9 @@ test('every registry `feature` and apply-feature names a real feature', () => {
     'src/ui/registry.js',
     'src/components/panels/windows/PluginChainWindow.vue',
     'src/components/panels/AutoLevelModal.vue',
+    'src/components/panels/NoiseReductionModal.vue',
+    'src/composables/useAutoLevel.js',
+    'src/composables/useNoiseReduction.js',
     'src/components/panels/SibilanceEditorModal.vue',
   ].map(p => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')).join('\n')
   const named = [

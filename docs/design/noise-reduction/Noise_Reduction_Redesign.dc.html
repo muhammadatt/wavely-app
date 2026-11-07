@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap">
+<style>
+html,body{margin:0;background:#0e1116;color:#eaf6f8;font-family:'Inter',system-ui,sans-serif;}
+a{color:#7fe9f6;} a:hover{color:#eaf6f8;}
+button{font-family:inherit;}
+</style>
+</helmet>
+
+<section data-screen-label="Turn 4 — Mix control" style="padding:56px 64px 24px;display:flex;flex-direction:column;gap:28px;border-bottom:1px solid rgba(255,255,255,.06)">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+    <span style="font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">TURN 4 · MIX CONTROL</span>
+    <span style="font:700 22px/1.3 'Inter',sans-serif;color:#eaf6f8">3a with Mix as a knob or a fader</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:56px;align-items:flex-start">
+    <!-- 4a -->
+    <div id="4a" style="display:flex;flex-direction:column;gap:14px;width:560px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#1b1408">4a</span>
+        <span style="font:700 15px/1.2 'Inter',sans-serif;color:#eaf6f8">Mix as a small knob</span>
+      </div>
+      <p style="margin:0;font:500 12px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">The same small knob as Max reduction in the current panel, with a value box beside it. It matches the rest of the plugin family and takes the least space.</p>
+      <div style="width:560px;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;height:58px;padding:2px 18px 0;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="white-space:nowrap;font:800 13px/1 'Inter',sans-serif;letter-spacing:.14em;color:#fbedd8">NOISE REDUCTION</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#5e2b02;background:#e78040"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>RENDER</span>
+            <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 12px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">?</button>
+          </div>
+          <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:400 17px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">×</button>
+        </div>
+        <div style="padding:14px">
+          <div style="display:flex;gap:8px;padding:8px;border-radius:14px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 8px rgba(0,0,0,.8)">
+            <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="3">
+              <button onClick="{{ t.pick }}" style="flex:1;min-width:0;height:54px;border:none;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:{{ t.bg }};box-shadow:{{ t.sh }}">
+                <span style="font:700 11px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ t.color }}">{{ t.label }}</span>
+                <span style="font:500 10px/1 'Inter',sans-serif;color:{{ t.subColor }}">{{ t.sub }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <p style="margin:10px 6px 0;min-height:30px;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">{{ modeAbout }}</p>
+          <div style="margin-top:6px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <section style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">CLEAN</span>
+                <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:{{ cleanStateColor }}">{{ cleanState }}</span>
+              </div>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;opacity:{{ cleanDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">MAX REDUCTION</span>
+                  <div onPointerDown="{{ dragLimit }}" onDoubleClick="{{ resetLimit }}" style="width:52px;box-sizing:border-box;padding:5px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8;cursor:ns-resize;touch-action:none">{{ limitText }}</div>
+                </div>
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="4">
+                    <button onClick="{{ t.pick }}" style="flex:1;border:none;cursor:pointer;padding:6px 0;border-radius:6px;font:700 9px/1.2 'Inter',sans-serif;letter-spacing:.12em;white-space:nowrap;color:{{ t.color }};background:{{ t.bg }};box-shadow:{{ t.sh }}">{{ t.label }}</button>
+                  </sc-for>
+                </div>
+              </div>
+            </section>
+            <section style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">DEEP CLEAN</span>
+                <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:{{ deepStateColor }}">{{ deepState }}</span>
+              </div>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;opacity:{{ deepDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:center;min-height:23px">
+                  <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">PROTECT CONSONANTS</span>
+                  <button onClick="{{ toggleProtectDeep }}" style="position:relative;flex:none;width:44px;height:24px;border:none;border-radius:12px;cursor:pointer;background:{{ protectTrack }};box-shadow:inset 0 2px 5px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05)"><span style="position:absolute;top:3px;width:18px;height:18px;border-radius:50%;left:{{ protectPuckSm }};transition:left .18s cubic-bezier(.4,1.4,.5,1);background:linear-gradient(160deg,#50555e,#2b2e34);box-shadow:0 4px 8px -3px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></span></button>
+                </div>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Keeps the start of an S or F.</span>
+              </div>
+            </section>
+          </div>
+          <div style="margin-top:10px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5);display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:16px;align-items:center;padding:14px;opacity:{{ outDim }}">
+            <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+              <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">MIX</span>
+              <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Below 100% blends the original back in to hide artefacts.</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:14px">
+              <div onPointerDown="{{ dragMix }}" onDoubleClick="{{ resetMix }}" title="Drag up/down · double-click to reset" style="position:relative;width:48px;height:48px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 9.3px 15.5px -7.7px rgba(0,0,0,.95),inset 0 1.2px 1.2px rgba(255,255,255,.1),inset 0 -3.9px 7px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                <div style="position:absolute;inset:0;pointer-events:none;transform:{{ mixRot }}"><div style="position:absolute;left:50%;top:6px;height:12px;width:2.3px;margin-left:-1.15px;border-radius:2px;background:#e8a33d;box-shadow:0 0 4.6px #e8a33d"></div></div>
+              </div>
+              <div style="width:52px;box-sizing:border-box;padding:6px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ mixText }}</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding:8px 14px 0;border-top:1px solid rgba(0,0,0,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+            <sc-if value="{{ running }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:10px;min-height:28px"><span style="width:7px;height:7px;border-radius:50%;background:#e78040"></span><span style="flex:1;font:500 10px/1.5 'Inter',sans-serif;color:#c9d0d6">Cleaning… 42%</span><button style="height:28px;padding:0 12px;border:none;border-radius:999px;font:700 11px/1 'Inter',sans-serif;color:#c9d0d6;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);cursor:pointer">Cancel</button></div></sc-if>
+            <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}"><p style="margin:0;min-height:28px;display:flex;align-items:center;font:500 10px/1.5 'Inter',sans-serif;color:{{ statusColor }}">{{ status }}</p></sc-if>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;height:60px;padding:0 16px;box-sizing:border-box;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}"><button onClick="{{ selectAll }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#b6bdc4;font:600 12px 'Inter',sans-serif;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path></svg>Select all</button></sc-if>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span style="margin-right:6px;font:500 11px 'Inter',sans-serif;color:rgba(159,196,232,.8);white-space:nowrap">No preview - Renders on the server.</span>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;color:#1b1d21;font:600 12px 'Inter',sans-serif;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9);opacity:{{ applyOpacity }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Process selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4b -->
+    <div id="4b" style="display:flex;flex-direction:column;gap:14px;width:560px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#1b1408">4b</span>
+        <span style="font:700 15px/1.2 'Inter',sans-serif;color:#eaf6f8">Mix as a ring knob</span>
+      </div>
+      <p style="margin:0;font:500 12px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">The ring knob's arc shows how much of the cleaned audio you keep at a glance. The Turn up to keep more of the cleaned audio. The status line under the panel is removed as well.</p>
+      <div style="width:560px;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;height:58px;padding:2px 18px 0;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="white-space:nowrap;font:800 13px/1 'Inter',sans-serif;letter-spacing:.14em;color:#fbedd8">NOISE REDUCTION</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#5e2b02;background:#e78040"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>RENDER</span>
+            <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 12px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">?</button>
+          </div>
+          <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:400 17px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">×</button>
+        </div>
+        <div style="padding:14px">
+          <div style="display:flex;gap:8px;padding:8px;border-radius:14px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 8px rgba(0,0,0,.8)">
+            <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="3">
+              <button onClick="{{ t.pick }}" style="flex:1;min-width:0;height:54px;border:none;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:{{ t.bg }};box-shadow:{{ t.sh }}">
+                <span style="font:700 11px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ t.color }}">{{ t.label }}</span>
+                <span style="font:500 10px/1 'Inter',sans-serif;color:{{ t.subColor }}">{{ t.sub }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <p style="margin:10px 6px 0;min-height:30px;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">{{ modeAbout }}</p>
+          <div style="margin-top:6px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <section style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">CLEAN</span>
+                <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:{{ cleanStateColor }}">{{ cleanState }}</span>
+              </div>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;opacity:{{ cleanDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">MAX REDUCTION</span>
+                  <div onPointerDown="{{ dragLimit }}" onDoubleClick="{{ resetLimit }}" style="width:52px;box-sizing:border-box;padding:5px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8;cursor:ns-resize;touch-action:none">{{ limitText }}</div>
+                </div>
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="4">
+                    <button onClick="{{ t.pick }}" style="flex:1;border:none;cursor:pointer;padding:6px 0;border-radius:6px;font:700 9px/1.2 'Inter',sans-serif;letter-spacing:.12em;white-space:nowrap;color:{{ t.color }};background:{{ t.bg }};box-shadow:{{ t.sh }}">{{ t.label }}</button>
+                  </sc-for>
+                </div>
+              </div>
+            </section>
+            <section style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">DEEP CLEAN</span>
+                <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:{{ deepStateColor }}">{{ deepState }}</span>
+              </div>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;opacity:{{ deepDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:center;min-height:23px">
+                  <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">VOICE GUARD</span>
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:700 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ protectTextColor }}">{{ protectWord }}</span><button onClick="{{ toggleProtectDeep }}" style="position:relative;flex:none;width:44px;height:24px;border:none;border-radius:12px;cursor:pointer;background:{{ protectTrack }};box-shadow:inset 0 2px 5px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05)"><span style="position:absolute;top:3px;width:18px;height:18px;border-radius:50%;left:{{ protectPuckSm }};transition:left .18s cubic-bezier(.4,1.4,.5,1);background:linear-gradient(160deg,#50555e,#2b2e34);box-shadow:0 4px 8px -3px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></span></button></div>
+                </div>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Guard soft vocal onsets that deep clean can sometimes remove.</span>
+              </div>
+            </section>
+          </div>
+          <div style="margin-top:10px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5);display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:16px;align-items:center;padding:14px;opacity:{{ outDim }}">
+            <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+              <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">MIX</span>
+              <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Below 100% blends the original back in to hide artefacts.</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:14px">
+              <div onPointerDown="{{ dragMix }}" onDoubleClick="{{ resetMix }}" title="Drag up/down · double-click to reset" style="position:relative;width:56px;height:56px;cursor:ns-resize;touch-action:none">
+                <svg viewBox="0 0 100 100" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible"><circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:#2a313b;stroke-width:3.5;stroke-linecap:round;stroke-dasharray:207.3 276.5"></circle><circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:#e8a33d;stroke-width:3.5;stroke-linecap:round;filter:drop-shadow(0 0 4px #e8a33d);stroke-dasharray:{{ mixRingDash }}"></circle></svg>
+                <div style="position:absolute;inset:17%;border-radius:50%;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7px 11.7px -7px rgba(0,0,0,.95),inset 0 1.2px 1.2px rgba(255,255,255,.1),inset 0 -3.5px 5.8px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                  <div style="position:absolute;inset:0;pointer-events:none;transform:{{ mixRot }}"><div style="position:absolute;left:50%;top:8%;width:3px;height:30%;transform:translateX(-50%);border-radius:2px;background:#e8a33d;box-shadow:0 0 5px #e8a33d"></div></div>
+                </div>
+              </div>
+              <div style="width:52px;box-sizing:border-box;padding:6px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ mixText }}</div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;height:60px;padding:0 16px;box-sizing:border-box;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}"><button onClick="{{ selectAll }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#b6bdc4;font:600 12px 'Inter',sans-serif;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path></svg>Select all</button></sc-if>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span style="margin-right:6px;font:500 11px 'Inter',sans-serif;color:rgba(159,196,232,.8);white-space:nowrap">No preview - Renders on the server.</span>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;color:#1b1d21;font:600 12px 'Inter',sans-serif;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9);opacity:{{ applyOpacity }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Process selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4c -->
+    <div id="4c" style="display:flex;flex-direction:column;gap:14px;width:560px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#1b1408">4c</span>
+        <span style="font:700 15px/1.2 'Inter',sans-serif;color:#eaf6f8">Mix as a console fader</span>
+      </div>
+      <p style="margin:0;font:500 12px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">The kit's horizontal fader (the Inflator's MIX strip). The long throw makes small blend changes easy, and it reads left to right as dry → cleaned.</p>
+      <div style="width:560px;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;height:58px;padding:2px 18px 0;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="white-space:nowrap;font:800 13px/1 'Inter',sans-serif;letter-spacing:.14em;color:#fbedd8">NOISE REDUCTION</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#5e2b02;background:#e78040"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>RENDER</span>
+            <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 12px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">?</button>
+          </div>
+          <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:400 17px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">×</button>
+        </div>
+        <div style="padding:14px">
+          <div style="display:flex;gap:8px;padding:8px;border-radius:14px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 8px rgba(0,0,0,.8)">
+            <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="3">
+              <button onClick="{{ t.pick }}" style="flex:1;min-width:0;height:54px;border:none;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:{{ t.bg }};box-shadow:{{ t.sh }}">
+                <span style="font:700 11px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ t.color }}">{{ t.label }}</span>
+                <span style="font:500 10px/1 'Inter',sans-serif;color:{{ t.subColor }}">{{ t.sub }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <p style="margin:10px 6px 0;min-height:30px;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">{{ modeAbout }}</p>
+          <div style="margin-top:6px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <section style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">CLEAN</span>
+                <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:{{ cleanStateColor }}">{{ cleanState }}</span>
+              </div>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;opacity:{{ cleanDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">MAX REDUCTION</span>
+                  <div onPointerDown="{{ dragLimit }}" onDoubleClick="{{ resetLimit }}" style="width:52px;box-sizing:border-box;padding:5px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8;cursor:ns-resize;touch-action:none">{{ limitText }}</div>
+                </div>
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="4">
+                    <button onClick="{{ t.pick }}" style="flex:1;border:none;cursor:pointer;padding:6px 0;border-radius:6px;font:700 9px/1.2 'Inter',sans-serif;letter-spacing:.12em;white-space:nowrap;color:{{ t.color }};background:{{ t.bg }};box-shadow:{{ t.sh }}">{{ t.label }}</button>
+                  </sc-for>
+                </div>
+              </div>
+            </section>
+            <section style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">DEEP CLEAN</span>
+                <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:{{ deepStateColor }}">{{ deepState }}</span>
+              </div>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;opacity:{{ deepDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:center;min-height:23px">
+                  <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">PROTECT CONSONANTS</span>
+                  <button onClick="{{ toggleProtectDeep }}" style="position:relative;flex:none;width:44px;height:24px;border:none;border-radius:12px;cursor:pointer;background:{{ protectTrack }};box-shadow:inset 0 2px 5px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05)"><span style="position:absolute;top:3px;width:18px;height:18px;border-radius:50%;left:{{ protectPuckSm }};transition:left .18s cubic-bezier(.4,1.4,.5,1);background:linear-gradient(160deg,#50555e,#2b2e34);box-shadow:0 4px 8px -3px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></span></button>
+                </div>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Keeps the start of an S or F.</span>
+              </div>
+            </section>
+          </div>
+          <div style="margin-top:10px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5);display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:16px;align-items:center;padding:14px;opacity:{{ outDim }}">
+            <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+              <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">MIX</span>
+              <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Below 100% blends the original back in to hide artefacts.</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px">
+              <div onPointerDown="{{ dragMixFader }}" onDoubleClick="{{ resetMix }}" title="Drag · double-click to reset" style="position:relative;flex:none;width:180px;height:44px;border-radius:10px;cursor:ew-resize;touch-action:none;background:linear-gradient(180deg,#26292e,#1f2125);box-shadow:inset 0 2px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04),0 1px 0 rgba(255,255,255,.04)">
+                <div style="position:absolute;top:20px;left:24px;right:24px;height:4px;border-radius:2px;background:#0e0f11;box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06)"></div>
+                <div style="position:absolute;left:0;top:8px;width:56px;height:28px;border-radius:6px;transform:{{ mixFaderX }};background:linear-gradient(90deg,#5a5f68 0%,#3d4148 20%,#2a2d33 50%,#3d4148 80%,#23262b 100%);box-shadow:0 10px 16px -8px rgba(0,0,0,.95),0 4px 6px rgba(0,0,0,.5),inset 1px 0 0 rgba(255,255,255,.22),inset -1px 0 0 rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.65)">
+                  <div style="position:absolute;top:6px;bottom:6px;left:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:6px;bottom:6px;right:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:3px;bottom:3px;left:calc(50% - 1px);width:2px;border-radius:1px;background:#8e9297"></div>
+                </div>
+              </div>
+              <div style="width:52px;box-sizing:border-box;padding:6px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ mixText }}</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding:8px 14px 0;border-top:1px solid rgba(0,0,0,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+            <sc-if value="{{ running }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:10px;min-height:28px"><span style="width:7px;height:7px;border-radius:50%;background:#e78040"></span><span style="flex:1;font:500 10px/1.5 'Inter',sans-serif;color:#c9d0d6">Cleaning… 42%</span><button style="height:28px;padding:0 12px;border:none;border-radius:999px;font:700 11px/1 'Inter',sans-serif;color:#c9d0d6;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);cursor:pointer">Cancel</button></div></sc-if>
+            <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}"><p style="margin:0;min-height:28px;display:flex;align-items:center;font:500 10px/1.5 'Inter',sans-serif;color:{{ statusColor }}">{{ status }}</p></sc-if>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;height:60px;padding:0 16px;box-sizing:border-box;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}"><button onClick="{{ selectAll }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#b6bdc4;font:600 12px 'Inter',sans-serif;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path></svg>Select all</button></sc-if>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span style="margin-right:6px;font:500 11px 'Inter',sans-serif;color:rgba(159,196,232,.8);white-space:nowrap">No preview - Renders on the server.</span>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;color:#1b1d21;font:600 12px 'Inter',sans-serif;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9);opacity:{{ applyOpacity }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Process selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section data-screen-label="Turn 3 — Merged" style="padding:56px 64px 24px;display:flex;flex-direction:column;gap:28px;border-bottom:1px solid rgba(255,255,255,.06)">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+    <span style="font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">TURN 3 · MERGED</span>
+    <span style="font:700 22px/1.3 'Inter',sans-serif;color:#eaf6f8">2a's selector and caption over 2b's two columns</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:56px;align-items:flex-start">
+    <!-- 3a -->
+    <div id="3a" style="display:flex;flex-direction:column;gap:14px;width:560px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#1b1408">3a</span>
+        <span style="font:700 15px/1.2 'Inter',sans-serif;color:#eaf6f8">Mode + caption, then a card per pass</span>
+      </div>
+      <p style="margin:0;font:500 12px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">The 2a selector with its caption underneath, then the 2b pass cards. The caption already describes the chosen mode, so the cards drop their own descriptions and keep just the status and the setting.</p>
+      <div style="width:560px;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;height:58px;padding:2px 18px 0;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="white-space:nowrap;font:800 13px/1 'Inter',sans-serif;letter-spacing:.14em;color:#fbedd8">NOISE REDUCTION</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#5e2b02;background:#e78040"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>RENDER</span>
+            <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 12px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">?</button>
+          </div>
+          <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:400 17px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">×</button>
+        </div>
+        <div style="padding:14px">
+          <div style="display:flex;gap:8px;padding:8px;border-radius:14px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 8px rgba(0,0,0,.8)">
+            <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="3">
+              <button onClick="{{ t.pick }}" style="flex:1;min-width:0;height:54px;border:none;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:{{ t.bg }};box-shadow:{{ t.sh }}">
+                <span style="font:700 11px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ t.color }}">{{ t.label }}</span>
+                <span style="font:500 10px/1 'Inter',sans-serif;color:{{ t.subColor }}">{{ t.sub }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <p style="margin:10px 6px 0;min-height:30px;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">{{ modeAbout }}</p>
+          <div style="margin-top:6px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <section style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">CLEAN</span>
+                <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:{{ cleanStateColor }}">{{ cleanState }}</span>
+              </div>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;opacity:{{ cleanDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">MAX REDUCTION</span>
+                  <div onPointerDown="{{ dragLimit }}" onDoubleClick="{{ resetLimit }}" style="width:52px;box-sizing:border-box;padding:5px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8;cursor:ns-resize;touch-action:none">{{ limitText }}</div>
+                </div>
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="4">
+                    <button onClick="{{ t.pick }}" style="flex:1;border:none;cursor:pointer;padding:6px 0;border-radius:6px;font:700 9px/1.2 'Inter',sans-serif;letter-spacing:.12em;white-space:nowrap;color:{{ t.color }};background:{{ t.bg }};box-shadow:{{ t.sh }}">{{ t.label }}</button>
+                  </sc-for>
+                </div>
+              </div>
+            </section>
+            <section style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">DEEP CLEAN</span>
+                <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:{{ deepStateColor }}">{{ deepState }}</span>
+              </div>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;opacity:{{ deepDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:center;min-height:23px">
+                  <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">PROTECT CONSONANTS</span>
+                  <button onClick="{{ toggleProtectDeep }}" style="position:relative;flex:none;width:44px;height:24px;border:none;border-radius:12px;cursor:pointer;background:{{ protectTrack }};box-shadow:inset 0 2px 5px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05)"><span style="position:absolute;top:3px;width:18px;height:18px;border-radius:50%;left:{{ protectPuckSm }};transition:left .18s cubic-bezier(.4,1.4,.5,1);background:linear-gradient(160deg,#50555e,#2b2e34);box-shadow:0 4px 8px -3px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></span></button>
+                </div>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Keeps the start of an S or F.</span>
+              </div>
+            </section>
+          </div>
+          <div style="margin-top:10px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5);display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:16px;align-items:center;padding:14px;opacity:{{ outDim }}">
+            <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+              <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">MIX</span>
+              <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Below 100% blends the original back in to hide artefacts.</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div onPointerDown="{{ dragMixX }}" onDoubleClick="{{ resetMix }}" style="position:relative;flex:1;height:26px;display:grid;align-items:center;cursor:ew-resize;touch-action:none">
+                <div style="position:absolute;left:0;right:0;height:8px;border-radius:6px;background:linear-gradient(180deg,#15171a,#212429);box-shadow:inset 0 2px 6px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.04)"></div>
+                <div style="position:absolute;left:0;height:8px;border-radius:6px;width:{{ mixFillW }};background:linear-gradient(90deg,color-mix(in oklab,#e8a33d 52%,#1b1d21),#e8a33d)"></div>
+                <div style="position:absolute;width:20px;height:20px;border-radius:50%;left:{{ mixKnobLeftSm }};background:linear-gradient(160deg,#4c515a,#2a2d33);box-shadow:0 6px 10px -4px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></div>
+              </div>
+              <div style="width:52px;box-sizing:border-box;padding:6px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ mixText }}</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding:8px 14px 0;border-top:1px solid rgba(0,0,0,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+            <sc-if value="{{ running }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:10px;min-height:28px"><span style="width:7px;height:7px;border-radius:50%;background:#e78040"></span><span style="flex:1;font:500 10px/1.5 'Inter',sans-serif;color:#c9d0d6">Cleaning… 42%</span><button style="height:28px;padding:0 12px;border:none;border-radius:999px;font:700 11px/1 'Inter',sans-serif;color:#c9d0d6;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);cursor:pointer">Cancel</button></div></sc-if>
+            <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}"><p style="margin:0;min-height:28px;display:flex;align-items:center;font:500 10px/1.5 'Inter',sans-serif;color:{{ statusColor }}">{{ status }}</p></sc-if>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;height:60px;padding:0 16px;box-sizing:border-box;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}"><button onClick="{{ selectAll }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#b6bdc4;font:600 12px 'Inter',sans-serif;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path></svg>Select all</button></sc-if>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span style="margin-right:6px;font:500 11px 'Inter',sans-serif;color:rgba(159,196,232,.8);white-space:nowrap">No preview - Renders on the server.</span>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;color:#1b1d21;font:600 12px 'Inter',sans-serif;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9);opacity:{{ applyOpacity }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Process selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section data-screen-label="Turn 2 — Combined" style="padding:56px 64px 24px;display:flex;flex-direction:column;gap:28px;border-bottom:1px solid rgba(255,255,255,.06)">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+    <span style="font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">TURN 2 · COMBINED</span>
+    <span style="font:700 22px/1.3 'Inter',sans-serif;color:#eaf6f8">Mode tiles from 1a, reduction presets from 1c, the calm grid of 1b</span>
+    <span style="font:500 13px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">Every control sits in a fixed right-hand column so the edges line up. The slide switch is cut down to 44 × 24.</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:56px;align-items:flex-start">
+
+    <!-- 2a -->
+    <div id="2a" style="display:flex;flex-direction:column;gap:14px;width:560px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#1b1408">2a</span>
+        <span style="font:700 15px/1.2 'Inter',sans-serif;color:#eaf6f8">Mode, then one settings list</span>
+      </div>
+      <p style="margin:0;font:500 12px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">One card with three aligned rows. Each row carries a small tag naming the pass it belongs to, and rows that don't apply to the chosen mode dim.</p>
+      <div style="width:560px;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;height:58px;padding:2px 18px 0;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="white-space:nowrap;font:800 13px/1 'Inter',sans-serif;letter-spacing:.14em;color:#fbedd8">NOISE REDUCTION</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#5e2b02;background:#e78040"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>RENDER</span>
+            <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 12px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">?</button>
+          </div>
+          <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:400 17px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">×</button>
+        </div>
+        <div style="padding:14px">
+          <div style="display:flex;gap:8px;padding:8px;border-radius:14px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 8px rgba(0,0,0,.8)">
+            <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="3">
+              <button onClick="{{ t.pick }}" style="flex:1;min-width:0;height:54px;border:none;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:{{ t.bg }};box-shadow:{{ t.sh }}">
+                <span style="font:700 11px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ t.color }}">{{ t.label }}</span>
+                <span style="font:500 10px/1 'Inter',sans-serif;color:{{ t.subColor }}">{{ t.sub }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <p style="margin:10px 6px 0;min-height:30px;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">{{ modeAbout }}</p>
+          <div style="margin-top:8px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5);padding:0 18px">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:16px;align-items:center;padding:14px 0;opacity:{{ cleanDim }}">
+              <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                <div style="display:flex;align-items:center;gap:8px"><span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">MAX REDUCTION</span><span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#a0a8b0;padding:3px 5px;border-radius:4px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)">CLEAN</span></div>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Lower keeps more S, F and breath.</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="4">
+                    <button onClick="{{ t.pick }}" style="border:none;cursor:pointer;padding:5px 8px;border-radius:6px;font:700 9px/1.2 'Inter',sans-serif;letter-spacing:.12em;white-space:nowrap;color:{{ t.color }};background:{{ t.bg }};box-shadow:{{ t.sh }}">{{ t.label }}</button>
+                  </sc-for>
+                </div>
+                <div onPointerDown="{{ dragLimit }}" onDoubleClick="{{ resetLimit }}" title="Drag or double-click to reset" style="width:52px;box-sizing:border-box;padding:6px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8;cursor:ns-resize;touch-action:none">{{ limitText }}</div>
+              </div>
+            </div>
+            <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:16px;align-items:center;padding:14px 0;opacity:{{ deepDim }}">
+              <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                <div style="display:flex;align-items:center;gap:8px"><span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">PROTECT CONSONANTS</span><span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#a0a8b0;padding:3px 5px;border-radius:4px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)">DEEP</span></div>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Keeps the start of an S or F that Deep Clean would remove.</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px">
+                <span style="font:700 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ protectTextColor }}">{{ protectWord }}</span>
+                <button onClick="{{ toggleProtectDeep }}" style="position:relative;width:44px;height:24px;border:none;border-radius:12px;cursor:pointer;background:{{ protectTrack }};box-shadow:inset 0 2px 5px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05)"><span style="position:absolute;top:3px;width:18px;height:18px;border-radius:50%;left:{{ protectPuckSm }};transition:left .18s cubic-bezier(.4,1.4,.5,1);background:linear-gradient(160deg,#50555e,#2b2e34);box-shadow:0 4px 8px -3px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></span></button>
+              </div>
+            </div>
+            <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:16px;align-items:center;padding:14px 0;opacity:{{ outDim }}">
+              <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">MIX</span>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Below 100% blends the original back in to hide artefacts.</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <div onPointerDown="{{ dragMixX }}" onDoubleClick="{{ resetMix }}" style="position:relative;flex:1;height:26px;display:grid;align-items:center;cursor:ew-resize;touch-action:none">
+                  <div style="position:absolute;left:0;right:0;height:8px;border-radius:6px;background:linear-gradient(180deg,#15171a,#212429);box-shadow:inset 0 2px 6px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.04)"></div>
+                  <div style="position:absolute;left:0;height:8px;border-radius:6px;width:{{ mixFillW }};background:linear-gradient(90deg,color-mix(in oklab,#e8a33d 52%,#1b1d21),#e8a33d)"></div>
+                  <div style="position:absolute;width:20px;height:20px;border-radius:50%;left:{{ mixKnobLeftSm }};background:linear-gradient(160deg,#4c515a,#2a2d33);box-shadow:0 6px 10px -4px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></div>
+                </div>
+                <div style="width:52px;box-sizing:border-box;padding:6px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ mixText }}</div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding:8px 14px 0;border-top:1px solid rgba(0,0,0,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+            <sc-if value="{{ running }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:10px;min-height:28px"><span style="width:7px;height:7px;border-radius:50%;background:#e78040"></span><span style="flex:1;font:500 10px/1.5 'Inter',sans-serif;color:#c9d0d6">Cleaning… 42%</span><button style="height:28px;padding:0 12px;border:none;border-radius:999px;font:700 11px/1 'Inter',sans-serif;color:#c9d0d6;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);cursor:pointer">Cancel</button></div></sc-if>
+            <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}"><p style="margin:0;min-height:28px;display:flex;align-items:center;font:500 10px/1.5 'Inter',sans-serif;color:{{ statusColor }}">{{ status }}</p></sc-if>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;height:60px;padding:0 16px;box-sizing:border-box;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}"><button onClick="{{ selectAll }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#b6bdc4;font:600 12px 'Inter',sans-serif;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path></svg>Select all</button></sc-if>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span style="margin-right:6px;font:500 11px 'Inter',sans-serif;color:rgba(159,196,232,.8);white-space:nowrap">No preview - Renders on the server.</span>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;color:#1b1d21;font:600 12px 'Inter',sans-serif;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9);opacity:{{ applyOpacity }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Process selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2b -->
+    <div id="2b" style="display:flex;flex-direction:column;gap:14px;width:560px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#1b1408">2b</span>
+        <span style="font:700 15px/1.2 'Inter',sans-serif;color:#eaf6f8">Mode, then a card per pass</span>
+      </div>
+      <p style="margin:0;font:500 12px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">Like 1b, each pass gets its own column, sitting under the mode tiles. Each card says whether its pass runs in the chosen mode, and the descriptions stay in. Mix spans the full width underneath, since it acts on the result of both passes.</p>
+      <div style="width:560px;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;height:58px;padding:2px 18px 0;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="white-space:nowrap;font:800 13px/1 'Inter',sans-serif;letter-spacing:.14em;color:#fbedd8">NOISE REDUCTION</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#5e2b02;background:#e78040"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>RENDER</span>
+            <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 12px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">?</button>
+          </div>
+          <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:400 17px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">×</button>
+        </div>
+        <div style="padding:14px">
+          <div style="display:flex;gap:8px;padding:8px;border-radius:14px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 8px rgba(0,0,0,.8)">
+            <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="3">
+              <button onClick="{{ t.pick }}" style="flex:1;min-width:0;height:54px;border:none;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:{{ t.bg }};box-shadow:{{ t.sh }}">
+                <span style="font:700 11px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ t.color }}">{{ t.label }}</span>
+                <span style="font:500 10px/1 'Inter',sans-serif;color:{{ t.subColor }}">{{ t.sub }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="margin-top:10px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <section style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">CLEAN</span>
+                <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:{{ cleanStateColor }}">{{ cleanState }}</span>
+              </div>
+              <p style="margin:0;min-height:30px;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;opacity:{{ cleanDim }}">Transparent removal of hiss, fans, air conditioning and more.</p>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;opacity:{{ cleanDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">MAX REDUCTION</span>
+                  <div onPointerDown="{{ dragLimit }}" onDoubleClick="{{ resetLimit }}" style="width:52px;box-sizing:border-box;padding:5px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8;cursor:ns-resize;touch-action:none">{{ limitText }}</div>
+                </div>
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="4">
+                    <button onClick="{{ t.pick }}" style="flex:1;border:none;cursor:pointer;padding:6px 0;border-radius:6px;font:700 9px/1.2 'Inter',sans-serif;letter-spacing:.12em;white-space:nowrap;color:{{ t.color }};background:{{ t.bg }};box-shadow:{{ t.sh }}">{{ t.label }}</button>
+                  </sc-for>
+                </div>
+              </div>
+            </section>
+            <section style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">DEEP CLEAN</span>
+                <span style="font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:{{ deepStateColor }}">{{ deepState }}</span>
+              </div>
+              <p style="margin:0;min-height:30px;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;opacity:{{ deepDim }}">Cleans lip smacks, mic bumps and room noise.</p>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:8px;opacity:{{ deepDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:center;min-height:23px">
+                  <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">PROTECT CONSONANTS</span>
+                  <button onClick="{{ toggleProtectDeep }}" style="position:relative;flex:none;width:44px;height:24px;border:none;border-radius:12px;cursor:pointer;background:{{ protectTrack }};box-shadow:inset 0 2px 5px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05)"><span style="position:absolute;top:3px;width:18px;height:18px;border-radius:50%;left:{{ protectPuckSm }};transition:left .18s cubic-bezier(.4,1.4,.5,1);background:linear-gradient(160deg,#50555e,#2b2e34);box-shadow:0 4px 8px -3px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></span></button>
+                </div>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Keeps the start of an S or F.</span>
+              </div>
+            </section>
+          </div>
+          <div style="margin-top:10px;display:grid;grid-template-columns:auto minmax(0,1fr) 52px;gap:14px;align-items:center;padding:4px 14px;opacity:{{ outDim }}">
+            <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">MIX</span>
+            <div onPointerDown="{{ dragMixX }}" onDoubleClick="{{ resetMix }}" style="position:relative;height:26px;display:grid;align-items:center;cursor:ew-resize;touch-action:none">
+              <div style="position:absolute;left:0;right:0;height:8px;border-radius:6px;background:linear-gradient(180deg,#15171a,#212429);box-shadow:inset 0 2px 6px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="position:absolute;left:0;height:8px;border-radius:6px;width:{{ mixFillW }};background:linear-gradient(90deg,color-mix(in oklab,#e8a33d 52%,#1b1d21),#e8a33d)"></div>
+              <div style="position:absolute;width:20px;height:20px;border-radius:50%;left:{{ mixKnobLeftSm }};background:linear-gradient(160deg,#4c515a,#2a2d33);box-shadow:0 6px 10px -4px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></div>
+            </div>
+            <div style="box-sizing:border-box;padding:6px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ mixText }}</div>
+          </div>
+          <div style="margin-top:8px;padding:8px 14px 0;border-top:1px solid rgba(0,0,0,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+            <sc-if value="{{ running }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:10px;min-height:28px"><span style="width:7px;height:7px;border-radius:50%;background:#e78040"></span><span style="flex:1;font:500 10px/1.5 'Inter',sans-serif;color:#c9d0d6">Cleaning… 42%</span><button style="height:28px;padding:0 12px;border:none;border-radius:999px;font:700 11px/1 'Inter',sans-serif;color:#c9d0d6;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);cursor:pointer">Cancel</button></div></sc-if>
+            <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}"><p style="margin:0;min-height:28px;display:flex;align-items:center;font:500 10px/1.5 'Inter',sans-serif;color:{{ statusColor }}">{{ status }}</p></sc-if>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;height:60px;padding:0 16px;box-sizing:border-box;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}"><button onClick="{{ selectAll }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#b6bdc4;font:600 12px 'Inter',sans-serif;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path></svg>Select all</button></sc-if>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span style="margin-right:6px;font:500 11px 'Inter',sans-serif;color:rgba(159,196,232,.8);white-space:nowrap">No preview - Renders on the server.</span>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;color:#1b1d21;font:600 12px 'Inter',sans-serif;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9);opacity:{{ applyOpacity }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Process selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section data-screen-label="Turn 1 — Redesigns" style="padding:56px 64px 24px;display:flex;flex-direction:column;gap:28px">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+    <span style="font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">TURN 1 · REDESIGN DIRECTIONS · MODULA KIT</span>
+    <span style="font:700 22px/1.3 'Inter',sans-serif;color:#eaf6f8">Noise Reduction — three ways to re-stack the same four settings</span>
+    <span style="font:500 13px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">All options share one live state — toggle or drag in any of them and the others follow. Knobs drag vertically, sliders horizontally, double-click resets. The current panel is recreated below for comparison.</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:56px;align-items:flex-start">
+
+    <!-- 1a -->
+    <div id="1a" style="display:flex;flex-direction:column;gap:14px;width:560px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#1b1408">1a</span>
+        <span style="font:700 15px/1.2 'Inter',sans-serif;color:#eaf6f8">Mode first, one hero knob</span>
+      </div>
+      <p style="margin:0;font:500 12px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">Two ON/OFF switches become one segmented tile choice, so “both off” can't happen. Max reduction gets the big LED knob as the main control. Mix and Protect consonants move to a quieter side column.</p>
+      <div style="width:560px;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;height:58px;padding:2px 18px 0;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="white-space:nowrap;font:800 13px/1 'Inter',sans-serif;letter-spacing:.14em;color:#fbedd8">NOISE REDUCTION</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#5e2b02;background:#e78040"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>RENDER</span>
+            <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 12px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">?</button>
+          </div>
+          <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:400 17px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">×</button>
+        </div>
+        <div style="padding:14px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;padding:2px 4px 10px">
+            <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">MODE</span>
+            <span style="font:500 9px/1 'JetBrains Mono',monospace;color:#a0a8b0;letter-spacing:.08em">GENTLE → THOROUGH</span>
+          </div>
+          <div style="display:flex;gap:10px;padding:10px;border-radius:16px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 8px rgba(0,0,0,.8)">
+            <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="3">
+              <button onClick="{{ t.pick }}" style="flex:1;min-width:0;height:64px;border:none;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;background:{{ t.bg }};box-shadow:{{ t.sh }}">
+                <span style="font:700 11px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ t.color }}">{{ t.label }}</span>
+                <span style="font:500 10px/1 'Inter',sans-serif;color:{{ t.subColor }}">{{ t.sub }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <p style="margin:10px 4px 0;min-height:30px;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">{{ modeAbout }}</p>
+          <div style="margin-top:8px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5);display:grid;grid-template-columns:auto minmax(0,1fr);gap:28px;align-items:center;padding:18px 22px 18px 18px">
+            <div title="{{ limitTitle }}" style="display:flex;flex-direction:column;align-items:center;gap:12px;opacity:{{ cleanDim }};transition:opacity .15s ease">
+              <div style="position:relative;display:grid;place-items:center;width:140px;height:140px">
+                <sc-for list="{{ leds }}" as="l" hint-placeholder-count="21">
+                  <div style="position:absolute;width:5.4px;height:5.4px;margin:-2.7px 0 0 -2.7px;border-radius:50%;left:{{ l.l }};top:{{ l.t }};background:{{ l.bg }};box-shadow:{{ l.sh }}"></div>
+                </sc-for>
+                <div onPointerDown="{{ dragLimit }}" onDoubleClick="{{ resetLimit }}" style="position:relative;width:100px;height:100px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 14.4px 23.3px -10.8px rgba(0,0,0,.95),inset 0 1.8px 1.8px rgba(255,255,255,.1),inset 0 -6.3px 10.8px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                  <div style="position:absolute;inset:12px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                  <div style="position:absolute;inset:0;pointer-events:none;transform:{{ limitRot }}">
+                    <div style="position:absolute;left:50%;top:15px;height:23px;width:3.6px;margin-left:-1.8px;border-radius:2px;background:#e8a33d;box-shadow:0 0 5.4px #e8a33d"></div>
+                  </div>
+                </div>
+              </div>
+              <div style="font:500 22px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ limitText }}</div>
+              <div style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#b6bdc4">MAX REDUCTION</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:22px;min-width:0">
+              <div style="display:flex;flex-direction:column;gap:12px;opacity:{{ outDim }}">
+                <div style="display:flex;justify-content:space-between;align-items:baseline">
+                  <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">MIX</span>
+                  <span style="font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ mixText }}</span>
+                </div>
+                <div onPointerDown="{{ dragMixX }}" onDoubleClick="{{ resetMix }}" style="position:relative;height:34px;display:grid;align-items:center;cursor:ew-resize;touch-action:none">
+                  <div style="position:absolute;left:0;right:0;height:10px;border-radius:6px;background:linear-gradient(180deg,#15171a,#212429);box-shadow:inset 0 2px 6px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.04)"></div>
+                  <div style="position:absolute;left:0;height:10px;border-radius:6px;width:{{ mixFillW }};background:linear-gradient(90deg,color-mix(in oklab,#e8a33d 52%,#1b1d21),#e8a33d)"></div>
+                  <div style="position:absolute;width:26px;height:26px;border-radius:50%;left:{{ mixKnobLeft }};background:linear-gradient(160deg,#4c515a,#2a2d33);box-shadow:0 8px 14px -5px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font:500 10px/1 'JetBrains Mono',monospace;color:#a0a8b0"><span>ORIGINAL</span><span>CLEANED</span></div>
+              </div>
+              <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+              <div style="display:flex;flex-direction:column;gap:10px;opacity:{{ deepDim }}">
+                <div style="display:flex;align-items:center;gap:14px">
+                  <span style="width:9px;height:9px;border-radius:50%;flex:none;background:{{ protectLampBg }};box-shadow:{{ protectLampSh }}"></span>
+                  <button onClick="{{ toggleProtectDeep }}" style="position:relative;flex:none;width:88px;height:40px;border:none;border-radius:22px;cursor:pointer;background:linear-gradient(180deg,#15171a,#23262b);box-shadow:inset 0 2px 6px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05)">
+                    <span style="position:absolute;top:3px;width:34px;height:34px;border-radius:50%;left:{{ protectPuck }};transition:left .18s cubic-bezier(.4,1.4,.5,1);background:linear-gradient(160deg,#50555e,#2b2e34);box-shadow:0 8px 14px -5px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></span>
+                  </button>
+                  <span style="font:600 10px/1.4 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">PROTECT CONSONANTS</span>
+                </div>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Deep Clean only — keeps the start of an S or F.</span>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding:8px 14px 0;border-top:1px solid rgba(0,0,0,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+            <sc-if value="{{ running }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:10px;min-height:28px"><span style="width:7px;height:7px;border-radius:50%;background:#e78040"></span><span style="flex:1;font:500 10px/1.5 'Inter',sans-serif;color:#c9d0d6">Cleaning… 42%</span><button style="height:28px;padding:0 12px;border:none;border-radius:999px;font:700 11px/1 'Inter',sans-serif;color:#c9d0d6;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);cursor:pointer">Cancel</button></div></sc-if>
+            <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}"><p style="margin:0;min-height:28px;display:flex;align-items:center;font:500 10px/1.5 'Inter',sans-serif;color:{{ statusColor }}">{{ status }}</p></sc-if>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;height:60px;padding:0 16px;box-sizing:border-box;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}"><button onClick="{{ selectAll }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#b6bdc4;font:600 12px 'Inter',sans-serif;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path></svg>Select all</button></sc-if>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span style="margin-right:6px;font:500 11px 'Inter',sans-serif;color:rgba(159,196,232,.8);white-space:nowrap">No preview - Renders on the server.</span>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;color:#1b1d21;font:600 12px 'Inter',sans-serif;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9);opacity:{{ applyOpacity }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Process selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1b -->
+    <div id="1b" style="display:flex;flex-direction:column;gap:14px;width:560px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#1b1408">1b</span>
+        <span style="font:700 15px/1.2 'Inter',sans-serif;color:#eaf6f8">Signal-flow strip</span>
+      </div>
+      <p style="margin:0;font:500 12px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">Clean → Deep Clean → Output as one rack strip, read left to right in processing order. Output becomes a peer stage at the end of the flow, so it's no longer a loose row under the cards. Ring knobs keep it compact, and the long descriptions shrink to short noise tags.</p>
+      <div style="width:560px;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;height:58px;padding:2px 18px 0;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="white-space:nowrap;font:800 13px/1 'Inter',sans-serif;letter-spacing:.14em;color:#fbedd8">NOISE REDUCTION</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#5e2b02;background:#e78040"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>RENDER</span>
+            <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 12px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">?</button>
+          </div>
+          <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:400 17px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">×</button>
+        </div>
+        <div style="padding:14px">
+          <div style="border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5);display:grid;grid-template-columns:minmax(0,1fr) 1px minmax(0,1fr) 1px minmax(0,1fr);padding:16px 0 18px">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 10px">
+              <span style="font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">01</span>
+              <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">CLEAN</span>
+              <button onClick="{{ toggleClean }}" style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:{{ cleanLampBg }};box-shadow:{{ cleanLampSh }}"></span><span style="font:700 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ cleanTextColor }}">{{ cleanWord }}</span></button>
+              <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;text-align:center;min-height:30px;opacity:{{ cleanDim }}">Hiss · fans · AC</span>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:7px;min-height:100px;justify-content:center;opacity:{{ cleanDim }}">
+                <div onPointerDown="{{ dragLimit }}" onDoubleClick="{{ resetLimit }}" style="position:relative;width:64px;height:64px;cursor:ns-resize;touch-action:none">
+                  <svg viewBox="0 0 100 100" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible"><circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:#2a313b;stroke-width:3.5;stroke-linecap:round;stroke-dasharray:207.3 276.5"></circle><circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:#e8a33d;stroke-width:3.5;stroke-linecap:round;filter:drop-shadow(0 0 4px #e8a33d);stroke-dasharray:{{ limitRingDash }}"></circle></svg>
+                  <div style="position:absolute;inset:17%;border-radius:50%;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 8px 13.3px -8px rgba(0,0,0,.95),inset 0 1.3px 1.3px rgba(255,255,255,.1),inset 0 -4px 6.7px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                    <div style="position:absolute;inset:0;pointer-events:none;transform:{{ limitRot }}"><div style="position:absolute;left:50%;top:8%;width:3px;height:30%;transform:translateX(-50%);border-radius:2px;background:#e8a33d;box-shadow:0 0 5px #e8a33d"></div></div>
+                  </div>
+                </div>
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#b6bdc4">MAX REDUCTION</span>
+                <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">{{ limitText }}</span>
+              </div>
+            </div>
+            <div style="background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 10px">
+              <span style="font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">02</span>
+              <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">DEEP CLEAN</span>
+              <button onClick="{{ toggleDeep }}" style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:{{ deepLampBg }};box-shadow:{{ deepLampSh }}"></span><span style="font:700 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ deepTextColor }}">{{ deepWord }}</span></button>
+              <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;text-align:center;min-height:30px;opacity:{{ deepDim }}">Lip smacks · bumps · room</span>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:10px;min-height:100px;justify-content:center;opacity:{{ deepDim }}">
+                <button onClick="{{ toggleProtectDeep }}" style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:{{ protectLampBg }};box-shadow:{{ protectLampSh }}"></span><span style="font:700 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ protectTextColor }}">PROTECT S/F</span></button>
+                <span style="font:500 9px/1.4 'JetBrains Mono',monospace;color:#a0a8b0;text-align:center">keeps consonant onsets</span>
+              </div>
+            </div>
+            <div style="background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 10px">
+              <span style="font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">OUT</span>
+              <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">OUTPUT</span>
+              <div style="height:30px;display:flex;align-items:center;font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">DRY / WET</div>
+              <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;text-align:center;min-height:30px;opacity:{{ outDim }}">Blend back to hide artefacts</span>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:7px;min-height:100px;justify-content:center;opacity:{{ outDim }}">
+                <div onPointerDown="{{ dragMix }}" onDoubleClick="{{ resetMix }}" style="position:relative;width:64px;height:64px;cursor:ns-resize;touch-action:none">
+                  <svg viewBox="0 0 100 100" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible"><circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:#2a313b;stroke-width:3.5;stroke-linecap:round;stroke-dasharray:207.3 276.5"></circle><circle cx="50" cy="50" r="44" fill="none" transform="rotate(135 50 50)" style="stroke:#e8a33d;stroke-width:3.5;stroke-linecap:round;filter:drop-shadow(0 0 4px #e8a33d);stroke-dasharray:{{ mixRingDash }}"></circle></svg>
+                  <div style="position:absolute;inset:17%;border-radius:50%;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 8px 13.3px -8px rgba(0,0,0,.95),inset 0 1.3px 1.3px rgba(255,255,255,.1),inset 0 -4px 6.7px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                    <div style="position:absolute;inset:0;pointer-events:none;transform:{{ mixRot }}"><div style="position:absolute;left:50%;top:8%;width:3px;height:30%;transform:translateX(-50%);border-radius:2px;background:#e8a33d;box-shadow:0 0 5px #e8a33d"></div></div>
+                  </div>
+                </div>
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#b6bdc4">MIX</span>
+                <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0">{{ mixText }}</span>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding:8px 14px 0;border-top:1px solid rgba(0,0,0,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+            <sc-if value="{{ running }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:10px;min-height:28px"><span style="width:7px;height:7px;border-radius:50%;background:#e78040"></span><span style="flex:1;font:500 10px/1.5 'Inter',sans-serif;color:#c9d0d6">Cleaning… 42%</span><button style="height:28px;padding:0 12px;border:none;border-radius:999px;font:700 11px/1 'Inter',sans-serif;color:#c9d0d6;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);cursor:pointer">Cancel</button></div></sc-if>
+            <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}"><p style="margin:0;min-height:28px;display:flex;align-items:center;font:500 10px/1.5 'Inter',sans-serif;color:{{ statusColor }}">{{ status }}</p></sc-if>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;height:60px;padding:0 16px;box-sizing:border-box;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}"><button onClick="{{ selectAll }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#b6bdc4;font:600 12px 'Inter',sans-serif;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path></svg>Select all</button></sc-if>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span style="margin-right:6px;font:500 11px 'Inter',sans-serif;color:rgba(159,196,232,.8);white-space:nowrap">No preview - Renders on the server.</span>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;color:#1b1d21;font:600 12px 'Inter',sans-serif;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9);opacity:{{ applyOpacity }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Process selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1c -->
+    <div id="1c" style="display:flex;flex-direction:column;gap:14px;width:560px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:#e8a33d;color:#1b1408">1c</span>
+        <span style="font:700 15px/1.2 'Inter',sans-serif;color:#eaf6f8">Settings list, no knobs</span>
+      </div>
+      <p style="margin:0;font:500 12px/1.6 'Inter',sans-serif;color:#b6bdc4;text-wrap:pretty">Each pass is a labelled row with a slide switch, and its own setting nests under it. Max reduction becomes tier presets (the chain's Light/Standard/Heavy) plus a drag-or-type field. Mix becomes a fill slider. Every row reads left-to-right as a sentence.</p>
+      <div style="width:560px;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;height:58px;padding:2px 18px 0;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="white-space:nowrap;font:800 13px/1 'Inter',sans-serif;letter-spacing:.14em;color:#fbedd8">NOISE REDUCTION</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#5e2b02;background:#e78040"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>RENDER</span>
+            <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 12px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">?</button>
+          </div>
+          <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:400 17px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">×</button>
+        </div>
+        <div style="padding:14px">
+          <div style="border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5);padding:2px 18px">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:center;padding:14px 0">
+              <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">CLEAN</span>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Transparent removal of hiss, fans, air conditioning and more. The right first choice.</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px">
+                <span style="width:9px;height:9px;border-radius:50%;background:{{ cleanLampBg }};box-shadow:{{ cleanLampSh }}"></span>
+                <button onClick="{{ toggleClean }}" style="position:relative;width:88px;height:40px;border:none;border-radius:22px;cursor:pointer;background:linear-gradient(180deg,#15171a,#23262b);box-shadow:inset 0 2px 6px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05)"><span style="position:absolute;top:3px;width:34px;height:34px;border-radius:50%;left:{{ cleanPuck }};transition:left .18s cubic-bezier(.4,1.4,.5,1);background:linear-gradient(160deg,#50555e,#2b2e34);box-shadow:0 8px 14px -5px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></span></button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;padding:0 0 16px 14px;margin-left:2px;border-left:1px solid rgba(0,0,0,.35);opacity:{{ cleanDim }}">
+              <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">MAX REDUCTION</span>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Lower keeps more S, F and breath.</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="4">
+                    <button onClick="{{ t.pick }}" style="border:none;cursor:pointer;padding:5px 9px;border-radius:6px;font:700 9px/1.2 'Inter',sans-serif;letter-spacing:.14em;white-space:nowrap;color:{{ t.color }};background:{{ t.bg }};box-shadow:{{ t.sh }}">{{ t.label }}</button>
+                  </sc-for>
+                </div>
+                <div onPointerDown="{{ dragLimit }}" onDoubleClick="{{ resetLimit }}" style="width:56px;box-sizing:border-box;padding:5px 2px;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05);text-align:center;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8;cursor:ns-resize;touch-action:none">{{ limitText }}</div>
+              </div>
+            </div>
+            <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:center;padding:14px 0">
+              <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">DEEP CLEAN</span>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Cleans lip smacks, mic bumps and room noise. Great for audiobooks and narration.</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px">
+                <span style="width:9px;height:9px;border-radius:50%;background:{{ deepLampBg }};box-shadow:{{ deepLampSh }}"></span>
+                <button onClick="{{ toggleDeep }}" style="position:relative;width:88px;height:40px;border:none;border-radius:22px;cursor:pointer;background:linear-gradient(180deg,#15171a,#23262b);box-shadow:inset 0 2px 6px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05)"><span style="position:absolute;top:3px;width:34px;height:34px;border-radius:50%;left:{{ deepPuck }};transition:left .18s cubic-bezier(.4,1.4,.5,1);background:linear-gradient(160deg,#50555e,#2b2e34);box-shadow:0 8px 14px -5px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></span></button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;padding:0 0 16px 14px;margin-left:2px;border-left:1px solid rgba(0,0,0,.35);opacity:{{ deepDim }}">
+              <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                <span style="font:600 9px/1 'Inter',sans-serif;letter-spacing:.14em;color:#aeb6bd">PROTECT CONSONANTS</span>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Keeps the start of an S or F that Deep Clean would remove.</span>
+              </div>
+              <button onClick="{{ toggleProtectDeep }}" style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:{{ protectLampBg }};box-shadow:{{ protectLampSh }}"></span><span style="font:700 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ protectTextColor }}">{{ protectWord }}</span></button>
+            </div>
+            <div style="height:1px;background:rgba(0,0,0,.35);box-shadow:0 1px 0 rgba(255,255,255,.04)"></div>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:18px;align-items:center;padding:14px 0 16px;opacity:{{ outDim }}">
+              <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8">OUTPUT MIX</span>
+                <span style="font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4">Below 100% blends the original back in to hide artefacts.</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <div style="display:flex;justify-content:flex-end"><span style="font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8">{{ mixText }}</span></div>
+                <div onPointerDown="{{ dragMixX }}" onDoubleClick="{{ resetMix }}" style="position:relative;height:30px;display:grid;align-items:center;cursor:ew-resize;touch-action:none">
+                  <div style="position:absolute;left:0;right:0;height:10px;border-radius:6px;background:linear-gradient(180deg,#15171a,#212429);box-shadow:inset 0 2px 6px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.04)"></div>
+                  <div style="position:absolute;left:0;height:10px;border-radius:6px;width:{{ mixFillW }};background:linear-gradient(90deg,color-mix(in oklab,#e8a33d 52%,#1b1d21),#e8a33d)"></div>
+                  <div style="position:absolute;width:26px;height:26px;border-radius:50%;left:{{ mixKnobLeft }};background:linear-gradient(160deg,#4c515a,#2a2d33);box-shadow:0 8px 14px -5px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(0,0,0,.6)"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font:500 10px/1 'JetBrains Mono',monospace;color:#a0a8b0"><span>DRY</span><span>CLEANED</span></div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding:8px 14px 0;border-top:1px solid rgba(0,0,0,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+            <sc-if value="{{ running }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:10px;min-height:28px"><span style="width:7px;height:7px;border-radius:50%;background:#e78040"></span><span style="flex:1;font:500 10px/1.5 'Inter',sans-serif;color:#c9d0d6">Cleaning… 42%</span><button style="height:28px;padding:0 12px;border:none;border-radius:999px;font:700 11px/1 'Inter',sans-serif;color:#c9d0d6;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);cursor:pointer">Cancel</button></div></sc-if>
+            <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}"><p style="margin:0;min-height:28px;display:flex;align-items:center;font:500 10px/1.5 'Inter',sans-serif;color:{{ statusColor }}">{{ status }}</p></sc-if>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;height:60px;padding:0 16px;box-sizing:border-box;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}"><button onClick="{{ selectAll }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#b6bdc4;font:600 12px 'Inter',sans-serif;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path></svg>Select all</button></sc-if>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span style="margin-right:6px;font:500 11px 'Inter',sans-serif;color:rgba(159,196,232,.8);white-space:nowrap">No preview - Renders on the server.</span>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;color:#1b1d21;font:600 12px 'Inter',sans-serif;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9);opacity:{{ applyOpacity }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Process selection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section data-screen-label="Current — recreated" style="padding:40px 64px 72px;display:flex;flex-direction:column;gap:20px;border-top:1px solid rgba(255,255,255,.06)">
+  <div id="current" style="display:flex;flex-direction:column;gap:14px;width:560px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:6px;background:rgba(255,255,255,.1);color:#c9d0d6">NOW</span>
+      <span style="font:700 15px/1.2 'Inter',sans-serif;color:#eaf6f8">Current panel (NoiseReductionModal.vue)</span>
+    </div>
+    <div style="width:560px;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;height:58px;padding:2px 18px 0;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="white-space:nowrap;font:800 13px/1 'Inter',sans-serif;letter-spacing:.14em;color:#fbedd8">NOISE REDUCTION</span>
+          <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#5e2b02;background:#e78040"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>RENDER</span>
+          <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:700 12px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">?</button>
+        </div>
+        <button style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:#c9d0d6;cursor:pointer;display:flex;align-items:center;justify-content:center;font:400 17px/1 'Inter',sans-serif;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">×</button>
+      </div>
+      <div style="padding:14px">
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+          <section style="display:flex;flex-direction:column;gap:8px;padding:12px 14px 14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+            <header style="display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:30px">
+              <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8;white-space:nowrap">CLEAN</span>
+              <button onClick="{{ toggleClean }}" style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:{{ cleanLampBg }};box-shadow:{{ cleanLampSh }}"></span><span style="font:700 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ cleanTextColor }}">{{ cleanWord }}</span></button>
+            </header>
+            <p style="margin:0;min-height:30px;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;opacity:{{ cleanDim }}">Transparent removal of hiss, fans, air conditioning and more. The right first choice.</p>
+            <div style="display:flex;justify-content:center;align-items:center;margin-top:auto;min-height:92px;opacity:{{ cleanDim }}">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+                <div onPointerDown="{{ dragLimit }}" onDoubleClick="{{ resetLimit }}" style="position:relative;width:48px;height:48px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 9.3px 15.5px -7.7px rgba(0,0,0,.95),inset 0 1.2px 1.2px rgba(255,255,255,.1),inset 0 -3.9px 7px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                  <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                  <div style="position:absolute;inset:0;pointer-events:none;transform:{{ limitRot }}"><div style="position:absolute;left:50%;top:6px;height:12px;width:2.3px;margin-left:-1.15px;border-radius:2px;background:#e8a33d;box-shadow:0 0 4.6px #e8a33d"></div></div>
+                </div>
+                <div style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#b6bdc4">MAX REDUCTION</div>
+                <div style="font:500 11px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ limitText }}</div>
+              </div>
+            </div>
+          </section>
+          <section style="display:flex;flex-direction:column;gap:8px;padding:12px 14px 14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+            <header style="display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:30px">
+              <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8;white-space:nowrap">DEEP CLEAN</span>
+              <button onClick="{{ toggleDeep }}" style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:{{ deepLampBg }};box-shadow:{{ deepLampSh }}"></span><span style="font:700 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:{{ deepTextColor }}">{{ deepWord }}</span></button>
+            </header>
+            <p style="margin:0;min-height:30px;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;opacity:{{ deepDim }}">Cleans lip smacks, mic bumps and room noise. Great for audiobooks and narration.</p>
+            <div style="display:flex;justify-content:center;align-items:center;margin-top:auto;min-height:92px;opacity:{{ deepDim }}">
+              <button onClick="{{ toggleProtectDeep }}" style="display:inline-flex;align-items:center;gap:9px;padding:9px 16px;border:none;border-radius:999px;background:transparent;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:{{ protectLampBg }};box-shadow:{{ protectLampSh }}"></span><span style="font:700 10px/1 'Inter',sans-serif;letter-spacing:.14em;white-space:nowrap;color:{{ protectTextColor }}">Protect consonants</span></button>
+            </div>
+          </section>
+        </div>
+        <section style="margin-top:14px;padding:0 14px;display:flex;align-items:center;gap:18px">
+          <span style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#eaf6f8;white-space:nowrap">OUTPUT</span>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:10px;opacity:{{ outDim }}">
+            <div onPointerDown="{{ dragMix }}" onDoubleClick="{{ resetMix }}" style="position:relative;width:40px;height:40px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.7px 12.9px -6.5px rgba(0,0,0,.95),inset 0 1px 1px rgba(255,255,255,.1),inset 0 -3.2px 5.8px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+              <div style="position:absolute;inset:5px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+              <div style="position:absolute;inset:0;pointer-events:none;transform:{{ mixRot }}"><div style="position:absolute;left:50%;top:5px;height:10px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3.9px #e8a33d"></div></div>
+            </div>
+            <div style="font:600 10px/1 'Inter',sans-serif;letter-spacing:.14em;color:#b6bdc4">MIX</div>
+            <div style="font:500 11px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ mixText }}</div>
+          </div>
+          <p style="flex:1;min-width:0;margin:0;font:500 10px/1.5 'Inter',sans-serif;color:#b6bdc4;opacity:{{ outDim }}">How much of the cleaned audio to keep. Below 100% blends the original back in to hide artefacts.</p>
+        </section>
+        <div style="margin-top:12px;padding:8px 14px 0;border-top:1px solid rgba(0,0,0,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <sc-if value="{{ running }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:10px;min-height:28px"><span style="width:7px;height:7px;border-radius:50%;background:#e78040"></span><span style="flex:1;font:500 10px/1.5 'Inter',sans-serif;color:#c9d0d6">Cleaning… 42%</span><button style="height:28px;padding:0 12px;border:none;border-radius:999px;font:700 11px/1 'Inter',sans-serif;color:#c9d0d6;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);cursor:pointer">Cancel</button></div></sc-if>
+          <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}"><p style="margin:0;min-height:28px;display:flex;align-items:center;font:500 10px/1.5 'Inter',sans-serif;color:{{ statusColor }}">{{ status }}</p></sc-if>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:20px;height:60px;padding:0 16px;box-sizing:border-box;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+        <sc-if value="{{ noSel }}" hint-placeholder-val="{{ false }}"><button onClick="{{ selectAll }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#b6bdc4;font:600 12px 'Inter',sans-serif;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path></svg>Select all</button></sc-if>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+          <span style="margin-right:6px;font:500 11px 'Inter',sans-serif;color:rgba(159,196,232,.8);white-space:nowrap">No preview - Renders on the server.</span>
+          <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;cursor:pointer;white-space:nowrap;color:#1b1d21;font:600 12px 'Inter',sans-serif;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9);opacity:{{ applyOpacity }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Process selection</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;hasSelection&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;running&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { engine: 'df3', limit: 18, protect: true, mix: 1, sel: null };
+
+  drag(key, min, max, travel, axis, step, enabled) {
+    return (e) => {
+      if (!enabled) return;
+      e.preventDefault();
+      const sx = e.clientX, sy = e.clientY, v0 = this.state[key];
+      const mv = (ev) => {
+        const d = axis === 'y' ? sy - ev.clientY : ev.clientX - sx;
+        let v = v0 + (d / travel) * (max - min);
+        v = Math.min(max, Math.max(min, Math.round(v / step) * step));
+        this.setState({ [key]: +v.toFixed(2) });
+      };
+      const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+      window.addEventListener('pointermove', mv);
+      window.addEventListener('pointerup', up);
+    };
+  }
+
+  renderVals() {
+    const s = this.state, A = '#e8a33d', CY = '#3fd0de';
+    const cleanOn = s.engine === 'df3' || s.engine === 'both';
+    const deepOn = s.engine === 'rnnoise' || s.engine === 'both';
+    const anyOn = cleanOn || deepOn;
+    const engineFor = (c, d) => (c && d ? 'both' : c ? 'df3' : d ? 'rnnoise' : null);
+    const hasSel = s.sel ?? (this.props.hasSelection ?? true);
+    const running = !!(this.props.running ?? false);
+    const lamp = (on, c = A) => on ? { bg: c, sh: `0 0 6px ${c}` } : { bg: '#3a3d43', sh: 'inset 0 1px 1px rgba(0,0,0,.7)' };
+    const cl = lamp(cleanOn), dl = lamp(deepOn), pl = lamp(s.protect && deepOn);
+    const pctL = (s.limit - 3) / 45, pctM = s.mix;
+    const limitText = s.limit >= 48 ? 'MAX' : `${Math.round(s.limit)} dB`;
+    const mixText = `${Math.round(s.mix * 100)}%`;
+    const rot = (p) => `rotate(${(-135 + 270 * p).toFixed(1)}deg)`;
+    const ringDash = (p) => `${(p * 207.35).toFixed(1)} 276.5`;
+
+    const n = 21, c = 70, r = 70 - 9 * 0.897;
+    const leds = Array.from({ length: n }, (_, i) => {
+      const f = i / (n - 1), a = (-135 + 270 * f) * Math.PI / 180, on = f <= pctL + 0.001;
+      return { l: `${(c + r * Math.sin(a)).toFixed(1)}px`, t: `${(c - r * Math.cos(a)).toFixed(1)}px`,
+        bg: on ? A : '#2a313b', sh: on ? `0 0 5.4px ${A}` : 'inset 0 1px 1px rgba(0,0,0,.6)' };
+    });
+
+    const tileOn = { bg: 'linear-gradient(180deg,#3c4149,#2a2e34)', sh: 'inset 0 1px 0 rgba(255,255,255,.14), 0 8px 16px -8px rgba(0,0,0,.9), 0 0 0 1px rgba(0,0,0,.6)' };
+    const tileOff = { bg: 'linear-gradient(180deg,#2c3036,#23262b)', sh: 'inset 0 2px 6px rgba(0,0,0,.6)' };
+    const tiles = [
+      { v: 'df3', label: 'CLEAN', sub: 'Hiss, fans, AC' },
+      { v: 'rnnoise', label: 'DEEP CLEAN', sub: 'Mouth noise, bumps' },
+      { v: 'both', label: 'BOTH', sub: 'Clean, then Deep' },
+    ].map(t => {
+      const on = s.engine === t.v;
+      return { ...t, ...(on ? tileOn : tileOff), color: on ? CY : 'rgba(255,255,255,.5)', subColor: on ? '#c9d0d6' : 'rgba(255,255,255,.38)', pick: () => this.setState({ engine: t.v }) };
+    });
+    const modeAbout = {
+      df3: 'Transparent removal of hiss, fans, air conditioning and more. The right first choice.',
+      rnnoise: 'Cleans lip smacks, mic bumps and room noise. Great for audiobooks and narration.',
+      both: 'Clean takes out the broadband floor, then Deep Clean removes what it leaves — the ACX audiobook order.',
+    }[s.engine] || 'Pick a mode.';
+
+    const segOn = { bg: 'linear-gradient(180deg,#3c4149,#2a2e34)', sh: 'inset 0 1px 0 rgba(255,255,255,.14), 0 6px 12px -6px rgba(0,0,0,.9), 0 0 0 1px rgba(0,0,0,.6)' };
+    const tiers = [['LIGHT', 6], ['STD', 12], ['HEAVY', 18], ['MAX', 48]].map(([label, v]) => {
+      const on = Math.round(s.limit) === v;
+      return { label, ...(on ? segOn : { bg: 'transparent', sh: 'none' }), color: on ? A : 'rgba(255,255,255,.5)', pick: () => cleanOn && this.setState({ limit: v }) };
+    });
+
+    let status, statusColor = '#b6bdc4';
+    if (!anyOn) { status = 'Turn on Clean, Deep Clean or both.'; statusColor = '#ffb27a'; }
+    else if (!hasSel) status = 'Select the audio to clean up, or Select all.';
+    else status = 'Cleans the 6.0 s selection and replaces it. Undo puts it back.';
+
+    return {
+      tiles, tiers, leds, modeAbout,
+      cleanLampBg: cl.bg, cleanLampSh: cl.sh, deepLampBg: dl.bg, deepLampSh: dl.sh, protectLampBg: pl.bg, protectLampSh: pl.sh,
+      cleanWord: cleanOn ? 'ON' : 'OFF', deepWord: deepOn ? 'ON' : 'OFF', protectWord: s.protect ? 'ON' : 'OFF',
+      cleanTextColor: cleanOn ? '#eaf6f8' : 'rgba(255,255,255,.5)', deepTextColor: deepOn ? '#eaf6f8' : 'rgba(255,255,255,.5)',
+      protectTextColor: s.protect && deepOn ? '#eaf6f8' : 'rgba(255,255,255,.5)',
+      cleanDim: cleanOn ? 1 : 0.4, deepDim: deepOn ? 1 : 0.4, outDim: anyOn ? 1 : 0.4,
+      protectPuckSm: s.protect ? '23px' : '3px', protectTrack: s.protect && deepOn ? 'linear-gradient(180deg,#5a4220,#3b2c17)' : 'linear-gradient(180deg,#15171a,#23262b)',
+      cleanState: cleanOn ? 'ACTIVE' : 'OFF', deepState: deepOn ? 'ACTIVE' : 'OFF',
+      cleanStateColor: cleanOn ? A : '#a0a8b0', deepStateColor: deepOn ? A : '#a0a8b0',
+      cleanPuck: cleanOn ? '51px' : '3px', deepPuck: deepOn ? '51px' : '3px', protectPuck: s.protect ? '51px' : '3px',
+      limitText, mixText, limitRot: rot(pctL), mixRot: rot(pctM),
+      limitRingDash: ringDash(pctL), mixRingDash: ringDash(pctM),
+      mixFillW: `${(pctM * 100).toFixed(1)}%`, mixKnobLeft: `calc(${pctM} * (100% - 26px))`, mixKnobLeftSm: `calc(${pctM} * (100% - 20px))`, mixFaderX: `translate3d(${(43 + pctM * 94 - 28).toFixed(1)}px,0,0)`,
+      dragMixFader: this.drag('mix', 0, 1, 94, 'x', 0.01, anyOn),
+      limitTitle: cleanOn ? 'Drag · double-click to reset' : 'Max reduction applies to Clean',
+      toggleClean: () => this.setState({ engine: engineFor(!cleanOn, deepOn) }),
+      toggleDeep: () => this.setState({ engine: engineFor(cleanOn, !deepOn) }),
+      toggleProtectDeep: () => deepOn && this.setState({ protect: !s.protect }),
+      dragLimit: this.drag('limit', 3, 48, 150, 'y', 1, cleanOn),
+      dragMix: this.drag('mix', 0, 1, 150, 'y', 0.01, anyOn),
+      dragMixX: this.drag('mix', 0, 1, 200, 'x', 0.01, anyOn),
+      resetLimit: () => cleanOn && this.setState({ limit: 18 }),
+      resetMix: () => anyOn && this.setState({ mix: 1 }),
+      selectAll: () => this.setState({ sel: true }),
+      status, statusColor, running, idle: !running, noSel: !hasSel,
+      applyOpacity: (!anyOn || running || !hasSel) ? 0.4 : 1,
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -37,6 +37,23 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   name: { type: String, required: true },
   format: { type: Function, default: formatSignedDb },
+  /**
+   * Where the open control's name sits: 'below' the LCD (LA Vintage 2A's
+   * faceplate) or 'above' it (VoxPressor, where every control is captioned
+   * from above).
+   */
+  labelPosition: { type: String, default: 'below' },
+  /**
+   * Closed on TWO rows instead of one line: the name where the open control's
+   * caption sits and the value in a well where its LCD sits, so opening only
+   * adds the arrows and the ✕ (VoxPressor, with labelPosition 'above').
+   */
+  stacked: { type: Boolean, default: false },
+  /**
+   * A list of options rather than a number: down steps forward through it and
+   * either end wraps to the other (LcdSpinner's `reverse` + `wrap`).
+   */
+  cycle: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue', 'update:auto'])
 
@@ -46,7 +63,9 @@ const closeBtn = ref(null)
 
 const hasAuto = computed(() => props.auto !== null)
 const manual = computed(() => props.auto === false)
-const text = computed(() => `${props.name.toUpperCase()} ${props.format(props.modelValue)}${manual.value ? ' · MANUAL' : ''}`)
+// Name and value are separate spans so a faceplate can set them apart; LA
+// Vintage 2A styles neither and reads the one engraved line as before.
+const valueText = computed(() => `${props.format(props.modelValue)}${manual.value ? ' · MANUAL' : ''}`)
 const title = computed(() => {
   if (!hasAuto.value) return `${props.name}. Click to adjust.`
   return props.auto
@@ -76,7 +95,24 @@ function onKeyDown(e) {
 <template>
   <div class="pg" @keydown="onKeyDown">
     <button
-      v-if="!open"
+      v-if="!open && stacked"
+      ref="readout"
+      type="button"
+      class="pg-readout pg-open pg-open--above pg-stacked"
+      :class="{ 'is-manual': manual }"
+      :title="title"
+      :aria-expanded="false"
+      @click="expand"
+    >
+      <span class="pg-gutter" aria-hidden="true"></span>
+      <span class="pg-lcd">
+        <span class="pg-name pg-title pg-title--lcd pg-title--above">{{ name }}</span>
+        <span class="pg-stack-row"><span class="pg-stack-slot"><span class="pg-value">{{ valueText }}</span></span><span class="pg-stack-spin" aria-hidden="true"></span></span>
+      </span>
+      <span class="pg-auto" aria-hidden="true"></span>
+    </button>
+    <button
+      v-else-if="!open"
       ref="readout"
       type="button"
       class="pg-readout"
@@ -84,9 +120,9 @@ function onKeyDown(e) {
       :title="title"
       :aria-expanded="false"
       @click="expand"
-    >{{ text }}</button>
+    ><span class="pg-name">{{ name.toUpperCase() }}</span> <span class="pg-value">{{ valueText }}</span></button>
 
-    <div v-else class="pg-open" role="group" :aria-label="name">
+    <div v-else class="pg-open" :class="{ 'pg-open--above': labelPosition === 'above', 'pg-open--stacked': stacked }" role="group" :aria-label="name">
       <div class="pg-gutter">
         <button ref="closeBtn" type="button" class="pg-close" :aria-label="`Hide ${name}`" title="Hide" @click="collapse">
           <svg width="8" height="8" viewBox="0 0 10 10" aria-hidden="true">
@@ -95,6 +131,7 @@ function onKeyDown(e) {
         </button>
       </div>
       <div class="pg-lcd">
+        <div v-if="labelPosition === 'above'" class="pg-title pg-title--lcd pg-title--above">{{ name }}</div>
         <LcdSpinner
           :model-value="modelValue"
           @update:model-value="v => emit('update:modelValue', v)"
@@ -103,8 +140,10 @@ function onKeyDown(e) {
           :disabled="disabled"
           :label="name"
           :format="format"
+          :wrap="cycle"
+          :reverse="cycle"
         />
-        <div class="pg-title pg-title--lcd">{{ name }}</div>
+        <div v-if="labelPosition !== 'above'" class="pg-title pg-title--lcd">{{ name }}</div>
       </div>
       <div class="pg-auto">
         <LampButton
@@ -143,6 +182,8 @@ function onKeyDown(e) {
 }
 .pg-close:hover { background: var(--hw-hover-bg, rgba(255,255,255,.08)); color: var(--hw-ink, #f2f0ec); }
 .pg-close:focus-visible { box-shadow: 0 0 0 1.5px rgba(255,164,53,.6); }
+/* Name above: the ✕ drops to the LCD's line (label 9 + gap 5 under the top). */
+.pg-open--above .pg-gutter { padding-top: 20px; }
 .pg-lcd { width: 96px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .pg-auto { width: 33px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .pg-title {
@@ -150,4 +191,20 @@ function onKeyDown(e) {
   color: var(--hw-ink, #f2f0ec); text-shadow: var(--hw-ink-shadow, 0 1px 0 rgba(0,0,0,.9)); white-space: nowrap;
 }
 .pg-title--lcd { letter-spacing: .18em; transform: translateX(-8px); }
+
+/* Stacked closed: the open layout's skeleton, the value centred on the LCD's box
+   (LcdSpinner: a 50 x 26 display, then 3 + 13 px of arrows) in its own small
+   readout, the one the one-line version uses. */
+.pg-stacked { padding: 0; background: none; border-radius: 0; }
+/* The LCD sits 8 px left of its column's centre (its arrows hang off its right
+   side), and the name follows it. Stacked, both states shift right by that 8 px
+   so the name and value are centred on the slot; the arrows and the ✕ hang off
+   either side. */
+.pg-stacked, .pg-open--stacked { transform: translateX(8px); }
+.pg-stacked:hover { background: none; }
+.pg-stack-row { display: flex; align-items: flex-start; gap: 3px; }
+.pg-stack-spin { width: 13px; flex: none; }
+.pg-stack-slot { width: 50px; height: 26px; flex: none; display: flex; align-items: center; justify-content: center; }
+.pg-stacked:focus-visible { box-shadow: none; }
+.pg-stacked:focus-visible .pg-value { box-shadow: 0 0 0 1.5px rgba(255,164,53,.55); }
 </style>

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import { searchOperations, chainPlugins } from '../ui/registry.js'
+import { searchOperations, chainPlugins, CATEGORIES } from '../ui/registry.js'
 import Icon from './ui/Icon.vue'
 
 /**
@@ -11,6 +11,12 @@ import Icon from './ui/Icon.vue'
  * so adding to the chain is a gesture the user already knows. A plugin already
  * in the chain is marked with how many slots it has, and can be added again —
  * each slot is a copy of its own (composables/pluginCopies.js).
+ *
+ * Grouped under the toolbar's category headers (Dynamics, Tone, Fix), in the
+ * toolbar's order, so the list reads like the menus the user already knows
+ * rather than one long run. While searching the groups stay, each holding its
+ * matches in rank order, the group with the best match first; ↑/↓ walk the
+ * visible rows straight through.
  */
 const props = defineProps({
   /** Window ids of the plugins already in the chain, once per slot. */
@@ -28,7 +34,25 @@ const slotCounts = computed(() => {
   for (const id of props.inChain) counts.set(id, (counts.get(id) ?? 0) + 1)
   return counts
 })
-const results = computed(() => searchOperations(query.value, { pool: chainPlugins() }))
+const ranked = computed(() => searchOperations(query.value, { pool: chainPlugins() }))
+
+// Ranked matches bucketed by category, categories in toolbar order.
+const groups = computed(() => {
+  const byCategory = new Map(CATEGORIES.map(c => [c.id, { id: c.id, label: c.label, operations: [] }]))
+  const other = { id: 'other', label: 'Other', operations: [] }
+  for (const op of ranked.value) (byCategory.get(op.category) ?? other).operations.push(op)
+  const list = [...byCategory.values(), other].filter(g => g.operations.length)
+  // Searching, the group holding the best match goes first, so the row Enter
+  // picks (the first one drawn) is still the best match.
+  if (query.value.trim()) {
+    const rank = op => ranked.value.indexOf(op)
+    list.sort((x, y) => rank(x.operations[0]) - rank(y.operations[0]))
+  }
+  return list
+})
+// The rows in the order they are drawn — what the cursor walks.
+const results = computed(() => groups.value.flatMap(g => g.operations))
+const indexOf = op => results.value.indexOf(op)
 const inChainCount = op => slotCounts.value.get(op.id) ?? 0
 
 // Re-searching invalidates whatever the cursor was pointing at.
@@ -99,28 +123,31 @@ function onEscape(e) {
       </div>
 
       <div ref="listEl" class="max-h-[46vh] overflow-y-auto p-2">
-        <button
-          v-for="(op, i) in results"
-          :key="op.id"
-          type="button"
-          class="picker-row w-full flex items-center gap-[11px] px-3 py-[10px] rounded-[10px] border-none cursor-pointer text-left"
-          :data-active="i === cursor"
-          :class="i === cursor ? 'is-active' : ''"
-          @click="pick(op)"
-          @mousemove="cursor = i"
-        >
-          <div class="picker-icon w-[30px] h-[30px] rounded-lg flex items-center justify-center shrink-0">
-            <Icon :name="op.icon" :size="15" />
-          </div>
-          <div class="flex-1 min-w-0">
-            <div class="text-[12.5px] font-bold text-text truncate">{{ op.label }}</div>
-            <div class="text-[10.5px] font-medium text-text-muted truncate">{{ op.desc }}</div>
-          </div>
-          <span
-            class="shrink-0 text-[9.5px] font-extrabold uppercase tracking-[.1em]"
-            :class="inChainCount(op) ? 'picker-member' : 'text-text-faint'"
-          >{{ inChainCount(op) > 1 ? `In chain ×${inChainCount(op)}` : inChainCount(op) ? 'In chain' : op.group }}</span>
-        </button>
+        <section v-for="g in groups" :key="g.id" :aria-label="g.label">
+          <div class="picker-group px-3 pt-[10px] pb-[6px] font-mono text-[9.5px] font-bold uppercase tracking-[.16em]">{{ g.label }}</div>
+          <button
+            v-for="op in g.operations"
+            :key="op.id"
+            type="button"
+            class="picker-row w-full flex items-center gap-[11px] px-3 py-[10px] rounded-[10px] border-none cursor-pointer text-left"
+            :data-active="indexOf(op) === cursor"
+            :class="indexOf(op) === cursor ? 'is-active' : ''"
+            @click="pick(op)"
+            @mousemove="cursor = indexOf(op)"
+          >
+            <div class="picker-icon w-[30px] h-[30px] rounded-lg flex items-center justify-center shrink-0">
+              <Icon :name="op.icon" :size="15" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[12.5px] font-bold text-text truncate">{{ op.label }}</div>
+              <div class="text-[10.5px] font-medium text-text-muted truncate">{{ op.desc }}</div>
+            </div>
+            <span
+              class="shrink-0 text-[9.5px] font-extrabold uppercase tracking-[.1em]"
+              :class="inChainCount(op) ? 'picker-member' : 'text-text-faint'"
+            >{{ inChainCount(op) > 1 ? `In chain ×${inChainCount(op)}` : inChainCount(op) ? 'In chain' : op.group }}</span>
+          </button>
+        </section>
 
         <div v-if="!results.length" class="px-3 py-8 text-center text-[12px] font-medium text-text-faint">
           No plugin matches “{{ query }}”
@@ -163,6 +190,14 @@ function onEscape(e) {
 .picker-row.is-active .picker-icon {
   background: color-mix(in srgb, var(--color-accent) 20%, transparent);
   color: var(--color-accent-bright);
+}
+
+.picker-group {
+  color: var(--color-text-faint);
+}
+section + section .picker-group {
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .picker-member {

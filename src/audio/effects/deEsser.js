@@ -1,5 +1,5 @@
 /**
- * HF Softener — real-time effect chain wrapper.
+ * De-Esser — real-time effect chain wrapper.
  *
  * The DSP lives in ../deEsserProcessor.js (dynamic 4.5 kHz shelf, HF
  * detector with an optional phase rotator, adaptive threshold from low/mid
@@ -11,24 +11,24 @@
  * audio through unprocessed, then splices the worklet node in.
  */
 
-import { ensureHFSoftenerWorklet } from '../deEsserWorkletLoader.js'
+import { ensureDeEsserWorklet } from '../deEsserWorkletLoader.js'
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { ensureHFLimiterWorklet } from '../hfLimiterWorkletLoader.js'
 import { softenLatencySamples } from '../deEsserSoftenStage.js'
 import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from '../deEsserResoStage.js'
 import { createLevelTap, createSpectrumTap } from './levelTap.js'
 import { createScopeRing } from '../deEsserScope.js'
-import { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams, softenOn, softenStageKernelParams } from '../deEsserParams.js'
+import { DE_ESSER_DEFAULTS, toKernelParams, resoOn, resoKernelParams, softenOn, softenStageKernelParams } from '../deEsserParams.js'
 
-export { HF_SOFTENER_DEFAULTS, toKernelParams, resoOn, resoKernelParams, softenOn, softenStageKernelParams } from '../deEsserParams.js'
+export { DE_ESSER_DEFAULTS, toKernelParams, resoOn, resoKernelParams, softenOn, softenStageKernelParams } from '../deEsserParams.js'
 
-export function createHFSoftener(audioContext) {
+export function createDeEsser(audioContext) {
   const input = audioContext.createGain()
   // preOutput is a stable internal hand-off — see the note in airBand.js.
   const preOutput = audioContext.createGain()
   const output = audioContext.createGain()
 
-  let params = { ...HF_SOFTENER_DEFAULTS }
+  let params = { ...DE_ESSER_DEFAULTS }
   let worklet = null
   let destroyed = false
   let reductionDb = 0
@@ -119,7 +119,7 @@ export function createHFSoftener(audioContext) {
         rewire()
       })
       .catch((err) => {
-        console.error('HF Softener ResoTame pre-stage failed to load, running without it:', err)
+        console.error('De-Esser ResoTame pre-stage failed to load, running without it:', err)
       })
   }
 
@@ -137,17 +137,17 @@ export function createHFSoftener(audioContext) {
         rewire()
       })
       .catch((err) => {
-        console.error('HF Softener Soften stage failed to load, running without it:', err)
+        console.error('De-Esser Soften stage failed to load, running without it:', err)
       })
   }
 
   preOutput.connect(output)
   rewire() // bypassed until the worklet loads
 
-  ensureHFSoftenerWorklet(audioContext)
+  ensureDeEsserWorklet(audioContext)
     .then(() => {
       if (destroyed) return
-      worklet = new AudioWorkletNode(audioContext, 'hf-softener-processor', {
+      worklet = new AudioWorkletNode(audioContext, 'de-esser-processor', {
         processorOptions: { params: toKernelParams(params) },
       })
       worklet.port.onmessage = (e) => {
@@ -163,7 +163,7 @@ export function createHFSoftener(audioContext) {
       rewire()
     })
     .catch((err) => {
-      console.error('HF Softener worklet failed to load, running bypassed:', err)
+      console.error('De-Esser worklet failed to load, running bypassed:', err)
     })
 
   const inputTap = createLevelTap(audioContext, inputMonitor)
@@ -293,10 +293,10 @@ export function createHFSoftener(audioContext) {
   }
 }
 
-export const hfSoftenerEffect = {
-  id: 'hf-softener',
+export const deEsserEffect = {
+  id: 'de-esser',
   name: 'De-Esser',
   createNodes(audioContext) {
-    return createHFSoftener(audioContext)
+    return createDeEsser(audioContext)
   },
 }

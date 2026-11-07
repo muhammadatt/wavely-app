@@ -300,7 +300,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
                    the rename is visible rather than something you have to know
                    about. -->
               <button
-                class="w-[18px] h-[18px] rounded-[5px] shrink-0 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-[rgba(255,255,255,.12)]"
+                class="w-[18px] h-[18px] pointer-coarse:w-[30px] pointer-coarse:h-[30px] rounded-[5px] shrink-0 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100 hover:bg-[rgba(255,255,255,.12)]"
                 style="color:rgba(255,255,255,.6)"
                 :aria-label="`Rename ${doc.name}`"
                 title="Rename"
@@ -325,7 +325,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
                on touch. Every one is an icon with a title and an aria-label —
                the label names the file, so the accessible name distinguishes
                this row's Save from the next row's. -->
-          <div class="flex items-center gap-[3px] shrink-0 opacity-70 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <div class="flex items-center gap-[3px] shrink-0 opacity-70 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
             <button
               class="w-[24px] h-[24px] rounded-[6px] flex items-center justify-center transition-colors hover:bg-[rgba(255,255,255,.12)] focus-visible:bg-[rgba(255,255,255,.12)]"
               style="color:rgba(255,255,255,.72)"

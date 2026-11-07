@@ -26,7 +26,8 @@ import {
   BURST_DEPTH_MAX_DB, BURST_FREQ_MIN_HZ, BURST_FREQ_MAX_HZ, BURST_LENGTH_MIN_MS, BURST_LENGTH_MAX_MS,
   OUTPUT_MIN_DB, OUTPUT_MAX_DB,
 } from '../../audio/plosiveParams.js'
-import { PLOSIVE_PRESET_PLUGIN, PLOSIVE_PARAM_KEYS } from '../../audio/pluginPresets/plosive.js'
+import { PLOSIVE_PRESET_PLUGIN } from '../../audio/pluginPresets/plosive.js'
+import { plosiveSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { HF_SCOPE_SECONDS } from '../../audio/deEsserScope.js'
 import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
@@ -39,17 +40,15 @@ import FloatingWindow from './FloatingWindow.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = usePlosive()
 const {
   plParams, plPreview, plDelta, plPopCut, plBurstCut, plPops, plBursts,
   plInputLevels, plOutputLevels,
   togglePreview, syncParam, applyParams, toggleDelta, getScope, holdScope, clearScope, resetCounts,
   apply, teardown, closeModal,
-} = usePlosive()
+} = pluginApi
 
-const presets = usePluginPresets(PLOSIVE_PRESET_PLUGIN, {
-  read: () => Object.fromEntries(PLOSIVE_PARAM_KEYS.map(k => [k, plParams[k]])),
-  write: p => applyParams(p),
-})
+const presets = usePluginPresets(PLOSIVE_PRESET_PLUGIN, plosiveSettings(pluginApi))
 
 const D = PLOSIVE_DEFAULTS
 const { state } = useEditorState()

@@ -18,6 +18,7 @@ import './airBoost.js'
 import './deEsser.js'
 import './plosive.js'
 import './saturationBench.js'
+import './pluginChain.js'
 
 import { registerOptoSmoothPresets } from './optoSmooth.js'
 import { registerFetPunchPresets } from './fetPunch.js'
@@ -28,9 +29,10 @@ import { registerParametricEqPresets } from './parametricEq.js'
 import { registerSchepsPresets } from './scheps.js'
 import { registerHfLimiterPresets } from './hfLimiter.js'
 import { registerAirBoostPresets } from './airBoost.js'
-import { registerHfSoftenerPresets } from './deEsser.js'
+import { registerDeEsserPresets } from './deEsser.js'
 import { registerPlosivePresets } from './plosive.js'
 import { registerSaturationBenchPresets } from './saturationBench.js'
+import { registerPluginChainPresets } from './pluginChain.js'
 
 export { OPTO_SMOOTH_PRESET_PLUGIN, registerOptoSmoothPresets } from './optoSmooth.js'
 export { FET_PUNCH_PRESET_PLUGIN, registerFetPunchPresets } from './fetPunch.js'
@@ -43,9 +45,12 @@ export { PARAMETRIC_EQ_PRESET_PLUGIN, registerParametricEqPresets } from './para
 export { SCHEPS_PRESET_PLUGIN, registerSchepsPresets } from './scheps.js'
 export { HF_LIMITER_PRESET_PLUGIN, registerHfLimiterPresets } from './hfLimiter.js'
 export { AIR_BOOST_PRESET_PLUGIN, registerAirBoostPresets } from './airBoost.js'
-export { HF_SOFTENER_PRESET_PLUGIN, registerHfSoftenerPresets } from './deEsser.js'
+export { DE_ESSER_PRESET_PLUGIN, registerDeEsserPresets } from './deEsser.js'
 export { PLOSIVE_PRESET_PLUGIN, registerPlosivePresets } from './plosive.js'
 export { SATURATION_BENCH_PRESET_PLUGIN, registerSaturationBenchPresets } from './saturationBench.js'
+export {
+  PLUGIN_CHAIN_PRESET_PLUGIN, PLUGIN_CHAIN_MAX_SLOTS, registerPluginChainPresets,
+} from './pluginChain.js'
 export * from './store.js'
 
 /**
@@ -64,7 +69,8 @@ export function registerPluginPresets() {
   registerSchepsPresets()
   registerHfLimiterPresets()
   registerAirBoostPresets()
-  registerHfSoftenerPresets()
+  registerDeEsserPresets()
   registerPlosivePresets()
   registerSaturationBenchPresets()
+  registerPluginChainPresets()
 }

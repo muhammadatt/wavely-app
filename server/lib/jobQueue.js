@@ -69,7 +69,7 @@ export function readRequestLimitConfig() {
 }
 
 const DEFAULT_MESSAGES = {
-  tooMany: n => `You already have ${n} mastering job${n === 1 ? '' : 's'} in progress — wait for one to finish.`,
+  tooMany: n => `You already have ${n} processing job${n === 1 ? '' : 's'} in progress — wait for one to finish.`,
   busy: 'The server is busy — please try again in a few minutes.',
 }
 

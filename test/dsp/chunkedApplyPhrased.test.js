@@ -22,6 +22,20 @@ for (const [name, build] of PLUGINS) {
 test('⚠ a 2 s run-in is NOT enough here: Scheps Parallel', () => {
   const mat = MATERIALS.phrased()
   const [, build] = PLUGINS.find(([name]) => name === 'Scheps Parallel')
-  const got = seamDbfs(mat, build(mat.xs), { runInS: 2 })
+  /**
+   * ⚠ PINNED TO THE KERNEL WITHOUT THE SIBILANCE GUARD, the one this residue was
+   * measured on: with the guard the 2 s seam settles to −128.9 dBFS (−113.9
+   * without), which says the guard is easier to stitch, not that 2 s is enough.
+   * The canary is about how long a kernel takes to settle on this material.
+   */
+  const b = build(mat.xs)
+  const unguarded = {
+    ...b,
+    stages: b.stages.map(s => ({
+      ...s,
+      kernelParams: { ...s.kernelParams, la2aTuning: { ...(s.kernelParams.la2aTuning ?? {}), sibilanceGuard: 0 } },
+    })),
+  }
+  const got = seamDbfs(mat, unguarded, { runInS: 2 })
   assert.ok(got > -120, `at 2 s of run-in the seam residue should still show; got ${got.toFixed(1)} dBFS`)
 })

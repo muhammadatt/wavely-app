@@ -189,7 +189,7 @@ function statusOf(doc) {
                    the rename is visible rather than something you have to know
                    about. -->
               <button
-                class="w-[18px] h-[18px] rounded-[5px] shrink-0 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-[rgba(255,255,255,.12)]"
+                class="w-[18px] h-[18px] pointer-coarse:w-[30px] pointer-coarse:h-[30px] rounded-[5px] shrink-0 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100 hover:bg-[rgba(255,255,255,.12)]"
                 style="color:rgba(255,255,255,.6)"
                 :disabled="isExporting"
                 :aria-label="`Rename ${doc.name}`"

@@ -39,7 +39,9 @@ test('every surface reads the gated list, not the full one', () => {
 })
 
 test('the placeholder Noise Reduction and Remove Silence panels are gone', () => {
-  assert.doesNotMatch(registry, /noise-reduction|remove-silence|NoiseReductionWindow|RemoveSilenceWindow/)
+  // The id 'noise-reduction' is reused by the real (server-backed) plugin,
+  // NoiseReductionModal; the placeholder window without DSP must not return.
+  assert.doesNotMatch(registry, /remove-silence|NoiseReductionWindow|RemoveSilenceWindow/)
   for (const f of [
     'src/components/panels/windows/NoiseReductionWindow.vue',
     'src/components/panels/windows/RemoveSilenceWindow.vue',
