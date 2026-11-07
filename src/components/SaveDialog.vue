@@ -288,7 +288,7 @@ const size = computed(() => {
 // no length field at all.
 const tooBig = computed(() => format.value === 'wav' && size.value.bytes > WAV_SIZE_LIMIT)
 
-// ── Matches the original ───────────────────────────────────────────────────
+// ── Same as the original ───────────────────────────────────────────────────
 // A quiet dot on each value the original already has. Only what the header
 // could tell us: a lossy original has no bit depth to match, and a depth or
 // bitrate is only compared within its own family.
@@ -453,7 +453,7 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
           <div v-if="overwrites" class="flex items-center justify-between gap-3" aria-live="polite">
             <div id="sd-conflict" class="sd-conflict-text">
               <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] shrink-0 fill-none stroke-current" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>
-              <span class="min-w-0">{{ plan === 'replace' ? 'This is the original’s name' : 'A file with this name is already here' }}</span>
+              <span class="min-w-0">{{ plan === 'replace' ? 'This is the original filename' : 'A file with this name already exists' }}</span>
             </div>
             <div class="sd-toggle" role="radiogroup" aria-label="What to do with the existing file">
               <button
@@ -514,7 +514,7 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
             >
               <span class="flex items-center justify-between">
                 <span class="sd-card-name">{{ c.label }}</span>
-                <span v-if="matchesFormat(c.id)" class="sd-dot" title="Matches the original"><span class="sr-only">(original)</span></span>
+                <span v-if="matchesFormat(c.id)" class="sd-dot" title="Same as the original"><span class="sr-only">(original)</span></span>
               </span>
               <span class="sd-card-sub">{{ c.kind }} · {{ c.size }}</span>
             </button>
@@ -529,7 +529,7 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
               <select v-model.number="bitrate" aria-label="Bitrate" :disabled="isSaving">
                 <option v-for="b in MP3_BITRATES" :key="b" :value="b">{{ b }} kbps CBR{{ b === 192 ? ' (ACX)' : '' }}</option>
               </select>
-              <span v-if="matchesBitrate" class="sd-dot sd-select-dot" title="Matches the original"></span>
+              <span v-if="matchesBitrate" class="sd-dot sd-select-dot" title="Same as the original"></span>
             </div>
             <div v-else class="sd-toggle sd-toggle--wide" role="radiogroup" aria-label="Bit depth">
               <button
@@ -543,7 +543,7 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
                 @click="bitDepth = d.id"
               >
                 {{ d.label.replace(' PCM', '') }}
-                <span v-if="matchesDepth(d.id)" class="sd-dot" title="Matches the original"><span class="sr-only">(original)</span></span>
+                <span v-if="matchesDepth(d.id)" class="sd-dot" title="Same as the original"><span class="sr-only">(original)</span></span>
               </button>
             </div>
           </div>
@@ -553,13 +553,13 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
               <select v-model.number="sampleRate" aria-label="Sample rate" :disabled="isSaving">
                 <option v-for="r in rateOptions" :key="r" :value="r">{{ formatRate(r) }}</option>
               </select>
-              <span v-if="matchesRate" class="sd-dot sd-select-dot" title="Matches the original"></span>
+              <span v-if="matchesRate" class="sd-dot sd-select-dot" title="Same as the original"></span>
             </div>
           </div>
         </div>
 
         <div v-if="showMatchLegend || notices.length" class="flex flex-col gap-[6px] -mt-[6px]">
-          <div v-if="showMatchLegend" class="sd-legend"><span class="sd-dot"></span>Matches the original</div>
+          <div v-if="showMatchLegend" class="sd-legend"><span class="sd-dot"></span>Same as the original</div>
           <ul v-if="notices.length" class="flex flex-col gap-[5px]" aria-live="polite">
             <li v-for="n in notices" :key="n.text" class="sd-note" :class="n.kind">
               <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] shrink-0 mt-[1px] fill-none stroke-current" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>
