@@ -594,7 +594,7 @@ const copies = pluginCopies((copy, life) => {
   return useDeEsser
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useDeEsser() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useDeEsser(copy) {
+  return copies(copy)()
 }

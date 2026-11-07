@@ -1,6 +1,6 @@
 import { ref, computed, effectScope, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
-import { useWindows, isSoloPluginWindow } from './useWindows.js'
+import { useWindows, isSoloPluginWindow, isChainGroupWindow } from './useWindows.js'
 import { idForCopy, baseId, chainCopy, chainCopyNumber, copyOfId, isChainCopyId } from './pluginCopies.js'
 import { getEffectChain, getEffectChainIfExists, onEffectChainCreated } from '../audio/effectChain.js'
 import { replaceRegionWithBuffer } from '../audio/operations.js'
@@ -162,6 +162,19 @@ effectScope(true).run(() => {
     chain.setSoloOpen(open)
     if (open && !chain.bypassed && chain.members().length) chain.setBypassed(true)
   })
+
+  // Bringing the chain up closes the rail, however it came up (the toolbar,
+  // the palette, a plugin's IN CHAIN pill, or raising a chain that was already
+  // open behind it). With a category list open beside it, clicking a plugin
+  // there reads as "add this to the chain" — but it opens the plugin's SOLO
+  // copy, which closes the chain (useWindows.js). Plugins join the chain only
+  // through its own + Add plugin, and with the rail out of the way that is the
+  // only list on screen. Keyed on the topmost window, so a chain already in
+  // front is not re-raised and the rail can still be opened beside it.
+  const { closeRail } = useEditorState()
+  watch(() => windows[windows.length - 1] ?? null, (top) => {
+    if (top && isChainGroupWindow(top)) closeRail()
+  })
 })
 
 onEffectChainCreated((chain) => {
@@ -225,16 +238,31 @@ export function usePluginChain() {
     startProcessing, updateProcessingStage, updateProcessingProgress, endProcessing, showToast,
     pinActiveDocument,
   } = editor
-  const { openWindow, closeWindow } = useWindows()
+  const { openWindow, closeWindow, isOpen } = useWindows()
 
   const chain = () => getEffectChain(editor.getAudioContext())
   const liveSlots = computed(() => slots.value.filter(s => s.active))
 
+  /**
+   * Switching a plugin on starts its panel's meter loop (its preview toggle
+   * does), and only its window closing stops it — so a slot switched on with
+   * no window open (a saved chain loading, or its lamp in the rack) would
+   * sample its analysers every frame for nothing. Put it in the state a slot
+   * is in after its window closes: meters stopped, audio and the background
+   * measurements that follow the selection still running. Its window mounting
+   * resumes the meters (chainWindowMounted).
+   */
+  function quietIfWindowless(def) {
+    if (def && !isOpen(def.windowId)) def.suspend?.()
+  }
+
   function setSlotActive(id, on) {
     if (applying.value) return
     const def = plugins.get(id)
-    if (def) def.setActive(on)
-    else chain().setEnabled(id, on)
+    if (def) {
+      def.setActive(on)
+      if (on) quietIfWindowless(def)
+    } else chain().setEnabled(id, on)
     // Engaging a slot is asking to hear it: lift the master bypass too.
     if (on && chain().bypassed) chain().setBypassed(false)
   }
@@ -246,11 +274,15 @@ export function usePluginChain() {
    * straight after the slot `after`.
    *
    * `prepare(copy)` runs first, to set the new copy up before it joins (VoiceRx
-   * handing its bands to an EQ); it builds the copy, so the slot is added at
-   * once rather than when its window mounts.
+   * handing its bands to an EQ, a saved chain writing a slot's settings); it
+   * builds the copy, so the slot is added at once rather than when its window
+   * mounts. `open: false` adds it without opening its window — only with a
+   * `prepare` that builds the copy, since an unbuilt copy joins on mount.
+   *
+   * Returns the new slot's id, or null if nothing was added.
    */
-  function add(pluginId, { after = null, prepare = null } = {}) {
-    if (applying.value) return
+  function add(pluginId, { after = null, prepare = null, open = true } = {}) {
+    if (applying.value) return null
     const taken = new Set([...slots.value.map(s => s.windowId), ...pendingAdds])
     let n = 1
     while (taken.has(idForCopy(pluginId, chainCopy(n)))) n++
@@ -259,12 +291,16 @@ export function usePluginChain() {
     const def = defForWindow(windowId)
     if (def) {
       addDef(def)
+      if (!open) quietIfWindowless(def)
       const at = after === null ? -1 : slots.value.findIndex(s => s.id === after)
       if (at !== -1) chain().moveEffect(def.id, at + 1)
-    } else {
+    } else if (open) {
       pendingAdds.add(windowId)
+    } else {
+      return null
     }
-    openWindow(windowId)
+    if (open) openWindow(windowId)
+    return def?.id ?? windowId
   }
 
   function remove(id) {

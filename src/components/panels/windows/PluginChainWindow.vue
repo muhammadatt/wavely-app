@@ -2,9 +2,11 @@
 /**
  * PLUGIN CHAIN — the rack every engaged plugin plays through.
  *
- * + ADD PLUGIN opens a picker (the Search Operations palette, narrowed to the
- * plugins that can run in the chain); picking one appends it and opens it to
- * tune. That picker is the ONLY way into the chain — opening a plugin from the
+ * + ADD EFFECT, the empty slot under the last row, opens a picker (the Search
+ * Operations palette, narrowed to the plugins that can run in the chain and
+ * grouped by category); picking one appends it and opens it to tune. It sits
+ * where the new slot will land, at the end of the signal flow, rather than in
+ * the header above the list. That picker is the ONLY way into the chain — opening a plugin from the
  * rail opens its own SOLO copy, with its own settings and Apply, and closes this
  * window (useWindows.js); a slot is the plugin's separate CHAIN copy.
  * Plugins in the chain may all be open beside this window, and none of them
@@ -14,14 +16,17 @@
  * plugin's own ON/BYPASS, EDIT reopens its faceplate, the arrows (or a drag)
  * move it, × takes it out of the chain. The header's ON/BYPASS takes the whole
  * chain out of circuit at once; Apply renders every live slot over the
- * selection in order and commits the result as one undo step.
+ * selection in order and commits the result as one undo step. The header's
+ * preset browser saves and loads whole chains — every slot with its settings
+ * (useChainPresets.js).
  *
  * The rack is a view: the slots live in the EffectChain (see
  * usePluginChain.js), so a plugin's window and this one can never disagree.
  */
 import { computed, ref } from 'vue'
 import { useEditorState } from '../../../composables/useEditorState.js'
-import { usePluginChain } from '../../../composables/usePluginChain.js'
+import { usePluginChain, chainApplying } from '../../../composables/usePluginChain.js'
+import { useChainPresets } from '../../../composables/useChainPresets.js'
 import { baseId } from '../../../composables/pluginCopies.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import PluginPicker from '../../PluginPicker.vue'
@@ -37,11 +42,14 @@ const {
 
 const ACCENT = '#e8a33d'
 
+// Saved chains: the same preset browser every plugin has, over the whole rack.
+const chainPresets = useChainPresets()
+
 // Selection is FloatingWindow's to explain; everything else is ours.
 const blocker = computed(() => (state.selection ? applyBlocker() : ''))
 const applyLabel = computed(() => {
   const n = liveSlots.value.length
-  return n > 1 ? `Apply ${n} plugins to selection` : 'Apply chain to selection'
+  return n > 1 ? `Apply ${n} effects to selection` : 'Apply chain to selection'
 })
 
 // ── Add picker ──────────────────────────────────────────────────────────────
@@ -89,10 +97,13 @@ function onDragEnd() {
   <FloatingWindow
     window-id="plugin-chain"
     :z="z"
-    :width="440"
+    :width="560"
     :accent="ACCENT"
     design="modula"
-    brand-lead="PLUGIN CHAIN"
+    brand-lead="EFFECT CHAIN"
+    :presets="chainPresets"
+    :presets-disabled="chainApplying"
+    presets-disabled-hint="The chain is being applied"
     :engaged="!bypassed"
     show-preview
     previewable
@@ -117,12 +128,6 @@ function onDragEnd() {
             title="Take every plugin out of the chain"
             @click="clear()"
           >Clear</button>
-          <button
-            type="button" class="pc-text-btn pc-add-btn"
-            aria-haspopup="dialog"
-            title="Add a plugin to the end of the chain"
-            @click="pickerOpen = true"
-          >+ Add plugin</button>
         </span>
       </div>
 
@@ -172,10 +177,24 @@ function onDragEnd() {
         </li>
       </ol>
 
-      <p v-else class="pc-empty">
-        No plugins yet. Use + Add plugin — each one joins the end of the chain
-        and keeps playing when its window closes
+      <p v-if="!slots.length" class="pc-empty">
+        Stack effects and hear them together, then apply the whole chain to the
+        selection in one step. Each effect joins the end of the chain and keeps
+        playing when its window closes
       </p>
+
+      <!-- The next slot: where an added effect lands, so the button sits there. -->
+      <button
+        type="button" class="pc-add-slot"
+        :class="{ 'is-empty': !slots.length }"
+        aria-haspopup="dialog"
+        aria-label="Add effect"
+        title="Add an effect to the end of the chain"
+        @click="pickerOpen = true"
+      >
+        <span class="pc-add-plus" aria-hidden="true">+</span>
+        <span>{{ slots.length ? 'Add effect' : 'Add your first effect' }}</span>
+      </button>
 
       <p v-if="slots.length" class="pc-note">
         <template v-if="bypassed">Chain bypassed — you are hearing the file as it is</template>
@@ -220,7 +239,34 @@ function onDragEnd() {
   align-items: center;
   gap: 6px;
 }
-.pc-add-btn { color: var(--m-accent); }
+.pc-add-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 38px;
+  border: 1px dashed color-mix(in srgb, var(--m-accent) 45%, transparent);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--m-accent);
+  font: 700 10px/1 var(--m-font-mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease;
+}
+.pc-add-slot:hover {
+  background: color-mix(in srgb, var(--m-accent) 10%, transparent);
+  border-color: var(--m-accent);
+}
+.pc-add-slot:focus-visible {
+  outline: 2px solid var(--m-accent);
+  outline-offset: 2px;
+}
+.pc-add-slot.is-empty { height: 46px; }
+.pc-add-plus {
+  font: 600 16px/1 var(--m-font-ui);
+}
 .pc-caption {
   font: 700 9px/1 var(--m-font-mono);
   letter-spacing: .16em;

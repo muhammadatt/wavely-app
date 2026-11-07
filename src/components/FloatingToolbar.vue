@@ -1,12 +1,12 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useWindows } from '../composables/useWindows.js'
 import { usePluginChain } from '../composables/usePluginChain.js'
 import { CATEGORIES } from '../ui/registry.js'
 import Icon from './ui/Icon.vue'
 
-const { state, setActiveTool, hasFile, openCommandPalette } = useEditorState()
+const { state, setActiveTool, hasFile, openCommandPalette, closeRail } = useEditorState()
 const { openWindow, isOpen } = useWindows()
 const { slots, liveSlots, bypassed, suspended } = usePluginChain()
 
@@ -18,12 +18,38 @@ const { slots, liveSlots, bypassed, suspended } = usePluginChain()
 const chainActive = computed(() => liveSlots.value.length > 0 && !bypassed.value && !suspended.value)
 const chainTitle = computed(() => {
   const n = slots.value.length
-  if (!n) return 'Plugin chain — empty'
-  if (chainActive.value) return `Plugin chain — active, ${liveSlots.value.length} of ${n} plugin(s) on`
-  if (suspended.value) return 'Plugin chain — bypassed while a plugin outside it is open, so that plugin previews exactly what its Apply writes. Turn it back on in the chain window'
-  if (bypassed.value) return 'Plugin chain — bypassed. Turn it on in the chain window'
-  return 'Plugin chain — bypassed: every plugin in it is switched off'
+  if (!n) return 'Effect chain — empty'
+  if (chainActive.value) return `Effect chain — active, ${liveSlots.value.length} of ${n} plugin(s) on`
+  if (suspended.value) return 'Effect chain — bypassed while a plugin outside it is open, so that plugin previews exactly what its Apply writes. Turn it back on in the chain window'
+  if (bypassed.value) return 'Effect chain — bypassed. Turn it on in the chain window'
+  return 'Effect chain — bypassed: every plugin in it is switched off'
 })
+
+// Until the chain has been opened once, an empty chain says NEW: it is the
+// feature most worth finding and the one a new user is least likely to look
+// for. Kept per browser; storage can be missing or throw, and then the badge
+// simply shows for the session.
+const SEEN_KEY = 'wavely:plugin-chain-seen'
+function readSeen() {
+  try { return localStorage.getItem(SEEN_KEY) === '1' } catch { return false }
+}
+const chainSeen = ref(readSeen())
+watch(() => isOpen('plugin-chain'), (open) => {
+  if (!open || chainSeen.value) return
+  chainSeen.value = true
+  try { localStorage.setItem(SEEN_KEY, '1') } catch { /* session only */ }
+})
+const chainBadge = computed(() => {
+  if (slots.value.length) return chainActive.value ? 'ACTIVE' : 'BYPASSED'
+  return chainSeen.value ? '' : 'NEW'
+})
+
+// The rail closes as the chain comes up (usePluginChain.js); closed here too,
+// for the click that finds the chain already in front and changes nothing.
+function openChain() {
+  closeRail()
+  openWindow('plugin-chain')
+}
 
 // The category list lives in the registry, so the toolbar and the rail can no
 // longer disagree about which tools exist.
@@ -65,29 +91,31 @@ const tools = CATEGORIES
         <span class="tool-btn__label">{{ tool.label }}</span>
       </button>
     </div>
+    <!-- The chain sits WITH the categories, not off at the far edge: it is the
+         product's headline feature, and beside the menus a new user scans it
+         reads as one of the places to go. Its own colour (the chain's amber)
+         keeps it from reading as a fifth category. It needs a door that is
+         always on screen anyway — the chain plays with every window closed. -->
+    <button
+      type="button"
+      class="chain-btn"
+      :class="{ 'is-active': isOpen('plugin-chain') }"
+      :disabled="!hasFile"
+      :title="chainTitle"
+      @click="openChain"
+    >
+      <Icon name="chain" :size="15" class="tool-btn__icon" />
+      <span class="chain-label">Chain</span>
+      <span
+        v-if="chainBadge"
+        class="chain-count"
+        :class="{ 'is-live': chainActive, 'is-new': chainBadge === 'NEW' }"
+      >{{ chainBadge }}</span>
+    </button>
     <!-- Undo/Redo moved to the TopBar, next to Export. This spacer stays: it
          balances the search button on the left so the tool group sits centred
-         rather than drifting right. It also holds the chain's button: the
-         chain plays with every plugin window closed, so it needs a door that
-         is always on screen. -->
-    <div class="flex-1 compact:flex-none min-w-0 flex items-center justify-end">
-      <button
-        type="button"
-        class="tool-btn chain-btn"
-        :class="{ 'is-active': isOpen('plugin-chain') }"
-        :disabled="!hasFile"
-        :title="chainTitle"
-        @click="openWindow('plugin-chain')"
-      >
-        <Icon name="chain" :size="15" class="tool-btn__icon" />
-        <span class="chain-label">Chain</span>
-        <span
-          v-if="slots.length"
-          class="chain-count"
-          :class="{ 'is-live': chainActive }"
-        >{{ chainActive ? 'ACTIVE' : 'BYPASSED' }}</span>
-      </button>
-    </div>
+         rather than drifting right. -->
+    <div class="flex-1 compact:flex-none min-w-0"></div>
   </div>
 </template>
 
@@ -208,18 +236,53 @@ const tools = CATEGORIES
   display: none;
 }
 
+.chain-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 9px 14px;
+  border-radius: 12px;
+  /* The Export button's fill (BaseButton's primary), open or closed: the chain
+     is a place to go, not a mode, so its state lives in the badge. */
+  border: 1px solid transparent;
+  background: #86e8ff;
+  color: #08161a;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+.chain-btn:hover:not(:disabled) {
+  background: #9beeff;
+}
+.chain-btn:focus-visible {
+  outline: 2px solid #7fe9f6;
+  outline-offset: 2px;
+}
+.chain-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .chain-count {
   font-family: 'JetBrains Mono', monospace;
   font-size: 9.5px;
   font-weight: 700;
   padding: 2px 5px;
   border-radius: 5px;
-  background: rgba(255, 255, 255, .08);
-  color: var(--color-text-softer);
+  /* Dark tints of the button's own ink: they sit on #86e8ff and stay visible
+     there. Bypassed is the quiet one; live and NEW are solid. */
+  background: rgba(8, 22, 26, .14);
+  color: rgba(8, 22, 26, .7);
 }
-.chain-count.is-live {
-  background: rgba(232, 163, 61, .2);
-  color: #e8a33d;
+.chain-count.is-live,
+.chain-count.is-new {
+  background: #08161a;
+  color: #86e8ff;
 }
 
 /* Phone held upright: a TAB BAR. The segmented control stays one row of
@@ -267,6 +330,10 @@ const tools = CATEGORIES
     gap: 5px;
     font-size: 12px;
   }
+  .chain-btn {
+    padding: 7px 10px;
+    gap: 5px;
+  }
   .chain-btn .chain-label {
     display: none;
   }
@@ -276,10 +343,10 @@ const tools = CATEGORIES
     height: 7px;
     padding: 0;
     border-radius: 50%;
-    background: rgba(255, 255, 255, .3);
+    background: rgba(8, 22, 26, .3);
   }
   .chain-count.is-live {
-    background: #e8a33d;
+    background: #08161a;
   }
 }
 </style>

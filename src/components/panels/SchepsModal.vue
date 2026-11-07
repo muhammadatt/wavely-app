@@ -11,6 +11,7 @@ import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { schepsSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import {
   SCHEPS_PRESET_PLUGIN, SCHEPS_OUTPUT_MIN_DB, SCHEPS_OUTPUT_MAX_DB,
@@ -19,24 +20,16 @@ import { SCHEPS_DEFAULTS } from '../../audio/effects/schepsParams.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = useScheps()
 const {
   schepsCharacter, schepsSquash, schepsMix, schepsOutput,
   schepsAutoTrim, schepsAutoTrimBusy, schepsWetTrimDb,
   schepsPreview, schepsReduction, schepsInputLevels, schepsOutputLevels,
   togglePreview, syncCharacter, syncSquash, syncMix, syncOutput,
   toggleAutoTrim, applyParams, apply, teardown, closeModal,
-} = useScheps()
+} = pluginApi
 
-const presets = usePluginPresets(SCHEPS_PRESET_PLUGIN, {
-  read: () => ({
-    character: schepsCharacter.value,
-    squash: schepsSquash.value,
-    mix: schepsMix.value,
-    output: schepsOutput.value,
-    autoTrim: schepsAutoTrim.value,
-  }),
-  write: p => applyParams(p),
-})
+const presets = usePluginPresets(SCHEPS_PRESET_PLUGIN, schepsSettings(pluginApi))
 
 const { state } = useEditorState()
 

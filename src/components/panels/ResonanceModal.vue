@@ -33,11 +33,13 @@ import ResonanceZoneControls from './ResonanceZoneControls.vue'
 import ResonanceZoneCount from './ResonanceZoneCount.vue'
 import ResonanceFocusControls from './ResonanceFocusControls.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { resonanceSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
-import { RESO_TAME_PRESET_PLUGIN, RESO_TAME_STOCK_ZONES } from '../../audio/pluginPresets/index.js'
+import { RESO_TAME_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = useResonance()
 const {
   resAttack, resRelease,
   resMix, resTrim, resZones, resSelectedZone, resDeltaZone, resRefMode,
@@ -49,7 +51,7 @@ const {
   syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta, clearZoneDelta,
   resMode, syncMode,
   apply, teardown, closeModal,
-} = useResonance()
+} = pluginApi
 
 /**
  * Running the focus targeting model — see src/audio/resonanceTargeting.js.
@@ -62,67 +64,11 @@ const {
 const focusMode = resTargeting === 'focus'
 
 /**
- * Presets.
- *
- * ⚠ THE PANEL RUNS ONE TARGETING MODEL AND SO DOES A PRESET. The kernel
- * dispatches on `focus`: a non-null patch TAKES OVER from the zone set. So
- * pushing both halves would mean a zone preset silently switching a
- * focus-model session, or a focus preset arriving in a session whose controls
- * are showing zones. `read` and `write` therefore touch only the live model's
- * half, and the preset MODULE registers only that model's table — the two
- * agree because both ask `resolveTargeting()`, once, at module load.
- *
- * The inert half still travels in the params, because a preset states every
- * one of its plugin's keys rather than inheriting a default that may move. It
- * is simply not pushed.
- *
- * What a preset must never carry, and why this write clears it rather than
- * setting it: the monitoring modes. DELTA, the per-zone delta and the focus
- * SOLO are UI state. Two of the three are expressible as ordinary parameters —
- * a zone delta is every other zone at depth zero, and `focus.solo` is a plain
- * field on the patch — so nothing about either would LOOK wrong if it leaked
- * into what Apply renders. `applyResonanceRegion` spreads its param object
- * straight into the kernel, so that leak is a one-node pass written to the
- * timeline. The store's whitelist keeps them out of the preset; clearing them
- * here keeps a stale isolation from surviving a patch that no longer has the
- * zone or node it was pointing at.
+ * Presets. Read and write live in pluginSettings.js (shared with saved plugin
+ * chains): only the live targeting model's half is touched, and the monitoring
+ * modes are cleared rather than written.
  */
-const presets = usePluginPresets(RESO_TAME_PRESET_PLUGIN, {
-  read: () => ({
-    attack: resAttack.value,
-    release: resRelease.value,
-    mode: resMode.value,
-    mix: resMix.value,
-    trim: resTrim.value,
-    // The half the panel is not running is reported as the preset's own inert
-    // value, so a preset matches itself rather than reading as MODIFIED
-    // against a zone set nobody can see or edit in this session.
-    zones: focusMode ? RESO_TAME_STOCK_ZONES : resZones.value,
-    focus: focusMode ? resFocus.value : null,
-  }),
-  write: (p) => {
-    if (focusMode) {
-      if (resSoloNode.value >= 0) toggleFocusSolo(resSoloNode.value)
-      // Never null in this collection: the focus model's `normalize` repairs a
-      // null patch to the stock global, because null is the instruction to read
-      // the zone set — i.e. to switch models — rather than a missing value.
-      syncFocus(p.focus)
-      // The node strip edits one node by index, and a preset can carry fewer
-      // nodes than the patch it replaces — leaving the selection past the end
-      // would point the controls at nothing.
-      if (resSelectedNode.value >= (p.focus?.nodes?.length ?? 0)) resSelectedNode.value = -1
-    } else {
-      clearZoneDelta()
-      syncZones(p.zones)
-      if (resSelectedZone.value >= p.zones.length) resSelectedZone.value = 0
-    }
-    syncAttack(p.attack)
-    syncRelease(p.release)
-    syncMode(p.mode)
-    syncMix(p.mix)
-    syncTrim(p.trim)
-  },
-})
+const presets = usePluginPresets(RESO_TAME_PRESET_PLUGIN, resonanceSettings(pluginApi))
 
 const { state } = useEditorState()
 

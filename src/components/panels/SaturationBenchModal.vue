@@ -27,6 +27,7 @@ import ModulaReadout from '../modula/ModulaReadout.vue'
 import SaturationEmphasisPlot from './SaturationEmphasisPlot.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { saturationBenchSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { SATURATION_BENCH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 import { SHAPER_CURVES } from '../../audio/dsp/shaperCurves.js'
@@ -38,19 +39,17 @@ import {
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = useSaturationBench()
 const {
   sbLayers, sbInputDb, sbOutputDb, syncTrim, sbSolo, setSolo, sbPreview, sbDelta, sbInputLevels, sbOutputLevels,
   togglePreview, toggleDelta, applyParams, syncLayer, syncLayerFields, addLayer, removeLayer, resetLayers,
   apply, teardown, closeModal,
-} = useSaturationBench()
+} = pluginApi
 
 const { state } = useEditorState()
 
 // A preset is the whole stack and the trims; SOLO and everything measured stay out.
-const presets = usePluginPresets(SATURATION_BENCH_PRESET_PLUGIN, {
-  read: () => ({ layers: sbLayers.value, inputDb: sbInputDb.value, outputDb: sbOutputDb.value }),
-  write: p => applyParams(p),
-})
+const presets = usePluginPresets(SATURATION_BENCH_PRESET_PLUGIN, saturationBenchSettings(pluginApi))
 
 onMounted(() => {
   // The chain's copy keeps its ON/BYPASS: opening its editor from the chain

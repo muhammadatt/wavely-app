@@ -123,7 +123,7 @@ export function qualityLossWarning(settings, sourceFormat) {
     const detail = parts.length ? ` (${parts.join(', ')})` : ''
     if (!src) return parts.length ? `Lower than the original${detail}.` : null
     if (src.lossy) return parts.length ? `Lower than the original${detail}.` : null
-    return `MP3 is lossy — keep a WAV or FLAC of the master${detail}.`
+    return `MP3 is lossy — consider keeping a WAV or FLAC of the master${detail}.`
   }
 
   if (!src || src.lossy) return null
@@ -252,4 +252,24 @@ export function savePlan({ supportsInPlace, chosenHandle = null, anchorHandle = 
   if (anchorHandle?.name && anchorHandle.name === toSaveFileName(fileName, format)) return 'replace'
   if (folderTarget) return 'folder'
   return 'pick'
+}
+
+/**
+ * "Keep both": the first free name in "Take (2)", "Take (3)"…, by `taken`
+ * (which may be async). Only a trailing "(N)" counts as a copy number, so
+ * "Take (2)" taken gives "Take (3)" — but "Ch 04" gives "Ch 04 (2)", never
+ * "Ch 5": a narrator's chapter number is part of the name. Only ever returns
+ * a name `taken` said is free: after `limit` taken names it THROWS rather than
+ * hand back one it never checked, which "Keep both" would then overwrite.
+ */
+export async function nextFreeBaseName(base, taken, limit = 99) {
+  const trimmed = String(base).trim()
+  const m = trimmed.match(/^(.*\S)\s*\((\d+)\)$/)
+  const stem = m ? m[1] : trimmed
+  let n = m ? Number(m[2]) + 1 : 2
+  for (let i = 0; i < limit; i++, n++) {
+    const candidate = `${stem} (${n})`
+    if (!await taken(candidate)) return candidate
+  }
+  throw new Error(`No free name after ${limit} tries`)
 }

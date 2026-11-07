@@ -8,6 +8,7 @@ import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { airBandSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { AIR_BOOST_PRESET_PLUGIN } from '../../audio/pluginPresets/airBoost.js'
 import {
@@ -16,15 +17,13 @@ import {
 
 defineProps({ z: { type: Number, default: 500 } })
 
+const pluginApi = useAirBand()
 const {
   airBandAir, airBandOutput, airBandPreview, airBandInputLevels, airBandOutputLevels,
   togglePreview, syncAir, syncOutput, applyParams, apply, teardown, closeModal,
-} = useAirBand()
+} = pluginApi
 
-const presets = usePluginPresets(AIR_BOOST_PRESET_PLUGIN, {
-  read: () => ({ air: airBandAir.value, output: airBandOutput.value }),
-  write: p => applyParams(p),
-})
+const presets = usePluginPresets(AIR_BOOST_PRESET_PLUGIN, airBandSettings(pluginApi))
 
 const { state } = useEditorState()
 

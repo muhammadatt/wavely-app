@@ -182,10 +182,10 @@ try {
       await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
     }
     const frames = () => page.locator('.win-frame').count()
-    const chainWin = page.locator('.win-frame').filter({ hasText: 'PLUGIN CHAIN' })
+    const chainWin = page.locator('.win-frame').filter({ hasText: 'EFFECT CHAIN' })
     const rowNames = () => chainWin.locator('.pc-name').allInnerTexts()
     const addFromPicker = async (label) => {
-      await chainWin.getByRole('button', { name: '+ Add plugin' }).dispatchEvent('click'); await page.waitForTimeout(300)
+      await chainWin.getByRole('button', { name: 'Add effect', exact: true }).dispatchEvent('click'); await page.waitForTimeout(300)
       await page.keyboard.type(label); await page.waitForTimeout(250)
       await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
     }
@@ -194,7 +194,7 @@ try {
     await openOp('Inflator')
     await openOp('Air Boost')
     const soloWindows = await frames()
-    await openOp('Plugin Chain')
+    await openOp('Effect Chain')
     const chainReplaced = (await frames()) === 1 && (await chainWin.count()) === 1
     // Every panel opened above — none of them joined the chain.
     const kept = (await rowNames()).length
@@ -218,7 +218,7 @@ try {
     const masterOn = async () => {
       await chainWin.locator('.win-pill-m').first().dispatchEvent('click'); await page.waitForTimeout(300)
     }
-    await openOp('Plugin Chain')
+    await openOp('Effect Chain')
     await masterOn()
     const resumedBadge = await chainBadge()
     const pauseOk = liveBefore === 'ACTIVE' && pausedBadge === 'BYPASSED' && closedBadge === 'BYPASSED'
@@ -233,7 +233,7 @@ try {
       && !(await page.locator('.win-frame .win-apply').isDisabled())
       && (await chainBadge()) === 'BYPASSED'
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
-    await openOp('Plugin Chain')
+    await openOp('Effect Chain')
     const slotKept = (await rowNames()).join(',') === 'Cambridge Inflator,AirBoost' && (await chainBadge()) === 'BYPASSED'
     await masterOn()
 
@@ -268,7 +268,7 @@ try {
     // A plugin outside the chain takes the whole chain group off the screen.
     await openOp('LA Vintage 2A')
     const soloAfterGroup = await frames()
-    await openOp('Plugin Chain')
+    await openOp('Effect Chain')
     await chainWin.getByRole('button', { name: 'Clear' }).dispatchEvent('click'); await page.waitForTimeout(300)
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
 

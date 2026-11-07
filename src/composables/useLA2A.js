@@ -769,7 +769,7 @@ const copies = pluginCopies((copy, life) => {
   return useLA2A
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useLA2A() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useLA2A(copy) {
+  return copies(copy)()
 }

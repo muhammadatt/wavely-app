@@ -664,7 +664,7 @@ const copies = pluginCopies((copy, life) => {
   return usePhatass
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function usePhatass() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function usePhatass(copy) {
+  return copies(copy)()
 }
