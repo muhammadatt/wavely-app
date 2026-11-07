@@ -205,8 +205,11 @@ const unlimited = (_req, _res, next) => next()
  *                                the default lets every request through
  * @param {Function} [deps.limit] concurrency middleware (holdSlot in
  *                                lib/jobQueue.js); runs before the upload
+ * @param {Function} [deps.takeUpload] useUpload (lib/uploads.js): a finished
+ *                                resumable upload named by `uploadId` becomes
+ *                                `req.file`; runs after multer
  */
-export function createAnalyzeRoute({ gate = openGate, limit = unlimited } = {}) {
+export function createAnalyzeRoute({ gate = openGate, limit = unlimited, takeUpload = unlimited } = {}) {
   const router = Router()
   const featureOf = req => KINDS[req.params.kind]?.feature ?? null
 
@@ -218,7 +221,7 @@ export function createAnalyzeRoute({ gate = openGate, limit = unlimited } = {}) 
   }
 
   // Sign-in and the concurrency slot are checked BEFORE multer reads the body.
-  router.post('/analyze/:kind', known, gate.signIn(featureOf), limit, upload.single('file'), gate(featureOf), async (req, res) => {
+  router.post('/analyze/:kind', known, gate.signIn(featureOf), limit, upload.single('file'), takeUpload, gate(featureOf), async (req, res) => {
     const slot = res.locals.slot
     const releaseSlot = slot?.claim()
     const uploadedPath = req.file?.path

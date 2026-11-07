@@ -14,6 +14,8 @@ import { readBillingConfig, createBilling } from './lib/billing.js'
 import { createJobQueue, readJobQueueConfig, readRequestLimitConfig, holdSlot } from './lib/jobQueue.js'
 import { createUsageRecorder, createBlockResolver, readUsageRetentionDays } from './lib/usage.js'
 import { requestLog } from './lib/requestLog.js'
+import { createUploadStore, createUploadRoutes, readUploadConfig, useUpload } from './lib/uploads.js'
+import path from 'path'
 import { createBillingRoutes, createBillingWebhook } from './routes/billing.js'
 
 const app = express()
@@ -55,6 +57,9 @@ function isAllowedOrigin(origin) {
 }
 
 app.use(cors({
+  // A tus client reads where its upload lives (Location) and how far it got
+  // (Upload-Offset); the browser hides any response header not listed here.
+  exposedHeaders: ['Location', 'Upload-Offset', 'Upload-Length', 'Upload-Expires', 'Tus-Resumable', 'Tus-Version', 'Tus-Max-Size', 'Tus-Extension', 'Retry-After'],
   origin(origin, callback) {
     // Allow requests with no origin (server-to-server, curl, etc.) or "null" origin (file://) in dev
     if (!origin || origin === 'null') return callback(null, true)
@@ -162,6 +167,19 @@ const accountLimiter = rateLimit({
 })
 app.use('/api/me', accountLimiter)
 
+// Resumable uploads arrive in ≤ 20 MB PATCHes: an hour of stereo is ~65 of
+// them, so the budget is per-request generous. The store's own limits (size,
+// uploads in flight, bytes per caller, disk) do the real work.
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many upload requests, please try again later', code: 'rate_limited' },
+  validate: { xForwardedForHeader: false },
+})
+app.use('/api/uploads', uploadLimiter)
+
 // Billing calls share the account budget. (The webhook is mounted earlier and
 // answers before this runs, so a Stripe retry burst is never rate-limited.)
 app.use('/api/billing', accountLimiter)
@@ -170,6 +188,15 @@ app.use('/api/billing', accountLimiter)
 // both the verifier and the database; with either missing it lets everything
 // through, as before accounts existed.
 const gate = createEntitlementGate({ verify: verifyAccessToken, planFor, isBlocked })
+
+// Resumable uploads (lib/uploads.js): large files arrive in chunks that each
+// fit under Cloudflare's 100 MB request cap; a processing request then names
+// the finished upload. Taken files land beside multer's.
+const UPLOADS_DIR = path.resolve(import.meta.dirname, 'uploads')
+const uploadStore = createUploadStore({ dir: path.join(UPLOADS_DIR, 'tus'), ...readUploadConfig() })
+uploadStore.startSweeping()
+const takeUpload = useUpload(uploadStore, UPLOADS_DIR)
+app.use('/api', createUploadRoutes({ store: uploadStore, verify: verifyAccessToken, isBlocked }))
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -181,7 +208,7 @@ app.get('/api/health', (_req, res) => {
 // have in flight (MAX_CONCURRENT_JOBS / MAX_QUEUED_JOBS / MAX_JOBS_PER_CLIENT).
 const jobQueueConfig = readJobQueueConfig()
 console.log(`Job queue: ${jobQueueConfig.concurrency} running, ${jobQueueConfig.maxQueued} queued, ${jobQueueConfig.maxPerClient} per client`)
-app.use('/api', createProcessRoute({ gate, verify: verifyAccessToken, queue: createJobQueue(jobQueueConfig), usage }))
+app.use('/api', createProcessRoute({ gate, verify: verifyAccessToken, queue: createJobQueue(jobQueueConfig), usage, takeUpload }))
 
 // Job status + download endpoints (polled by client after submission)
 app.use('/api', jobsRoute)
@@ -193,10 +220,10 @@ console.log(`Spot/analyze limit: ${requestLimitConfig.concurrency} running, ${re
 const limit = holdSlot(createJobQueue(requestLimitConfig))
 
 // Spot effect endpoint (synchronous — returns processed WAV directly)
-app.use('/api', createSpotRoute({ gate, limit }))
+app.use('/api', createSpotRoute({ gate, limit, takeUpload }))
 
 // Analysis endpoints (synchronous — return measurements as JSON)
-app.use('/api', createAnalyzeRoute({ gate, limit }))
+app.use('/api', createAnalyzeRoute({ gate, limit, takeUpload }))
 
 // Signed-in user's account and plan
 app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))

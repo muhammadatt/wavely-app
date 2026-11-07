@@ -46,10 +46,13 @@ const SUPPORTED_EXTENSIONS = new Set([
  * @param {Function} [deps.verify]  access-token verifier, so the job limit can
  *                                  count per account; null counts per IP
  * @param {object}   [deps.queue]   job queue (lib/jobQueue.js)
+ * @param {Function} [deps.takeUpload] useUpload (lib/uploads.js): a finished
+ *                                  resumable upload named by `uploadId` becomes
+ *                                  `req.file`; runs after multer
  * @param {object}   [deps.usage]   usage recorder (lib/usage.js); the row is
  *                                  written when the JOB ends, not the request
  */
-export function createProcessRoute({ gate = openGate, verify = null, queue = createJobQueue(), usage = null } = {}) {
+export function createProcessRoute({ gate = openGate, verify = null, queue = createJobQueue(), usage = null, takeUpload = (_req, _res, next) => next() } = {}) {
   const router = Router()
 
   // Refuse at the limit before multer reads the body.
@@ -62,7 +65,7 @@ export function createProcessRoute({ gate = openGate, verify = null, queue = cre
   // gate.signIn lets signed-out callers through (mastering's preview is open
   // to them) but refuses a blocked account before the upload.
   const mastering = () => 'mastering'
-  router.post('/process', optionalAuth(verify), gate.signIn(mastering), admit, upload.single('file'), gate(mastering), async (req, res) => {
+  router.post('/process', optionalAuth(verify), gate.signIn(mastering), admit, upload.single('file'), takeUpload, gate(mastering), async (req, res) => {
     const uploadedPath = req.file?.path
     let jobAccepted = false
 

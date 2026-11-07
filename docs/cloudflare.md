@@ -45,26 +45,32 @@ ideally from an env var so a non-Cloudflare deployment keeps 1). This is safe
 read. Verify after deploying: one `{"evt":"api",…}` log line should show your
 own public IP, not a Cloudflare one.
 
-### 0.3 Upload size: the 100 MB cap is a product limit, not just a security one
+### 0.3 Upload size: why audio goes up in chunks
 
 Cloudflare caps request bodies at **100 MB on Free and Pro**, 200 MB on
 Business and 500 MB on Enterprise (more by arrangement), answering **413**
-before the request reaches the server. What the app uploads:
+before the request reaches the server. An hour of narration is far over that
+in any format the app could send:
 
-| Request | Format sent | Audio that fits in 100 MB |
+| 60 min, 44.1 kHz | Mono | Stereo |
 |---|---|---|
-| Mastering (`/api/process`) | 32-bit float WAV of the whole timeline (`floatChannelsToWavBlob`) | ~9.4 min mono, ~4.7 min stereo |
-| Auto Leveler VAD (`/api/analyze/vad`) | 16 kHz 16-bit mono WAV (`renderVadWavBlob`, ~110 MB/hour) | ~54 min |
-| Sibilance / spot effects | float WAV of the selection | ~9 min mono |
+| 32-bit float WAV (what the client renders) | ~635 MB | ~1.27 GB |
+| 24-bit FLAC (speech, ~55 %) | ~260 MB | ~520 MB |
 
-**An audiobook chapter cannot be mastered through Cloudflare Free or Pro today.**
-The clean fix is in the app: upload a lossless compressed file instead of float
-WAV. The client already has a FLAC encoder (`src/audio/flacEncode.js`) and the
-server decodes anything through FFmpeg (`.flac` is already an accepted
-upload). 24-bit FLAC of speech is roughly 2–3× smaller than float WAV, which
-still leaves a long chapter over the cap. Compression alone may not be enough,
-so pair it with chunked or resumable uploads if chapters run long. A Business plan only doubles the limit, and making the record
-DNS-only throws away everything on this page.
+So no audio travels in one request any more. Every upload, mastering and
+analysis alike, is a **resumable upload** (tus protocol: `server/lib/uploads.js`,
+client `src/api/upload.js`). It is sent as **20 MB PATCHes** to `/api/uploads`,
+and the processing request then names it: `{ "uploadId": "…" }` as JSON. A
+dropped connection costs one chunk, not the file: the client asks the server's
+offset (`HEAD`) and carries on. The server's own limits, all checked when the
+upload is created and before a byte is stored, are in `docs/user-accounts.md`
+(`UPLOAD_*`).
+
+Making the record DNS-only to dodge the cap would expose the origin's IP and
+undo §0.1 for every hostname on the box, so don't. Uploading FLAC instead of
+float WAV would cut transfer time 2–3×. It is not done yet: float audio above
+0 dBFS would clip on the way into a fixed-point format, so it needs a peak
+check first.
 
 ### 0.4 The 100-second proxy timeout
 
@@ -92,22 +98,31 @@ Set **Action: Block** on each unless noted.
 ```
 
 **2. Only the methods the API uses.** The routes are GET, POST and CORS
-preflight `OPTIONS`; nothing uses PUT, PATCH or DELETE.
-
-```
-(http.host eq "api.example.com" and not http.request.method in {"GET" "POST" "OPTIONS"})
-```
-
-**3. Uploads must look like uploads.** Processing POSTs are always
-`multipart/form-data`.
+preflight `OPTIONS`. Resumable uploads (`/api/uploads…`) also use `HEAD`,
+`PATCH` and `DELETE`. Nothing uses PUT.
 
 ```
 (http.host eq "api.example.com"
- and http.request.method eq "POST"
- and (starts_with(http.request.uri.path, "/api/process")
-      or starts_with(http.request.uri.path, "/api/spot/")
-      or starts_with(http.request.uri.path, "/api/analyze/"))
- and not any(http.request.headers["content-type"][*] contains "multipart/form-data"))
+ and not http.request.method in {"GET" "POST" "OPTIONS"}
+ and not (starts_with(http.request.uri.path, "/api/uploads")
+          and http.request.method in {"HEAD" "PATCH" "DELETE"}))
+```
+
+**3. Requests must have the shape the app sends.** Processing POSTs are JSON
+naming an upload. Multipart is still accepted from client builds older than
+resumable uploads; drop it from this rule once those are gone. Upload chunks are
+`application/offset+octet-stream`.
+
+```
+(http.host eq "api.example.com"
+ and ((http.request.method eq "POST"
+       and (starts_with(http.request.uri.path, "/api/process")
+            or starts_with(http.request.uri.path, "/api/spot/")
+            or starts_with(http.request.uri.path, "/api/analyze/"))
+       and not any(http.request.headers["content-type"][*] contains "application/json")
+       and not any(http.request.headers["content-type"][*] contains "multipart/form-data"))
+   or (http.request.method eq "PATCH"
+       and not any(http.request.headers["content-type"][*] eq "application/offset+octet-stream"))))
 ```
 
 **4. Spot effects and analyses carry a sign-in token.** The server refuses a
@@ -158,7 +173,9 @@ Free allows a single rule, counting by IP, with a fixed 10-second period and a
 
 Ten processing POSTs in ten seconds is far beyond what the app sends. A Plugin
 Chain Apply makes one analysis request per slot, one after another. Job
-polling (`GET /api/jobs/…`, every 3 s) is a GET and is deliberately left out.
+polling (`GET /api/jobs/…`, every 3 s) is a GET and is deliberately left out,
+and so are upload chunks (`PATCH /api/uploads/…`): a fast connection sends a
+20 MB chunk every second or two, and the server has its own upload limits.
 
 ### Pro and above: two rules, longer periods
 

@@ -83,6 +83,10 @@ Every existing feature works signed out, with or without accounts configured.
 | `MAX_CONCURRENT_JOBS` / `MAX_QUEUED_JOBS` / `MAX_JOBS_PER_CLIENT` | mastering job queue (defaults 2 / 10 / 2) |
 | `MAX_CONCURRENT_ANALYSES` / `MAX_ANALYSES_PER_CLIENT` | shared limit on `/api/spot` and `/api/analyze` (defaults 4 / 2). Full is refused (503 / 429) before the upload, never queued |
 | `SUBPROCESS_TIMEOUT_MS` / `PROBE_TIMEOUT_MS` | kill limits for pipeline processes (defaults 60 min / 2 min) |
+| `UPLOAD_MAX_BYTES` / `UPLOAD_MAX_SIGNED_OUT_BYTES` | largest resumable upload, for an account / signed out (defaults 1.5 GB — an hour of stereo float WAV — / 32 MB, past a 30 s preview) |
+| `UPLOAD_MAX_ACTIVE_PER_CLIENT` / `UPLOAD_MAX_BYTES_PER_CLIENT` | uploads one caller may have unfinished or untaken, and their total bytes (defaults 3 / 3 GB) |
+| `UPLOAD_MAX_TOTAL_BYTES` | all uploads together — the disk guard, 503 beyond it (default 20 GB) |
+| `UPLOAD_TTL_MS` | an upload idle this long (no chunk, not taken) is deleted (default 60 min) |
 | `USAGE_RETENTION_DAYS` | days of `usage_events` rows to keep; the server deletes older ones daily (default 90, `0` keeps all) |
 | `CORS_ORIGIN_PATTERNS` | comma-separated regexes for origins you can't list, i.e. Vercel preview URLs, e.g. `^https://wavely-app(-[a-z0-9-]+)?\.vercel\.app$`. Anchor with `^…$`: the check is `pattern.test(origin)`, so an unanchored pattern matches anywhere in the string. |
 

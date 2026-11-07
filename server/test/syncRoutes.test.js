@@ -108,3 +108,47 @@ test('an unknown kind or operation is 400 before sign-in, the slot and the uploa
   })
   assert.equal(queue.stats().running, 0, 'no slot was taken')
 })
+
+test('a finished resumable upload stands in for the multipart file, for its owner only', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { createUploadStore, useUpload } = await import('../lib/uploads.js')
+  const root = await mkdtemp(join(tmpdir(), 'wavely-sync-up-'))
+  const store = createUploadStore({ dir: join(root, 'tus'), log: () => {} })
+  const takeUpload = useUpload(store, join(root, 'taken'))
+
+  async function finishedUpload(client) {
+    const u = await store.create({ client, signedOut: false, length: 4, metadata: { filename: 'sel.wav' } })
+    const { Readable } = await import('node:stream')
+    await store.append(u, 0, Readable.from([Buffer.from('RIFF')]))
+    return u.id
+  }
+
+  const app = express.Router()
+  app.use(express.json())
+  app.use(createAnalyzeRoute({ gate, takeUpload }))
+  try {
+    await withServer(app, async (base) => {
+      const post = (token, uploadId) => fetch(`${base}/api/analyze/vad`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ uploadId }),
+      })
+      // The plan gate sees the taken file: a free account's long clip is a 402.
+      const mine = await finishedUpload('user:tok-free')
+      const res = await post('tok-free', mine)
+      assert.equal(res.status, 402)
+      assert.equal((await res.json()).code, 'upgrade_required')
+
+      // Another account naming it gets nothing, and it is still there for its owner.
+      const theirs = await finishedUpload('user:tok-free')
+      const stolen = await post('tok-pro', theirs)
+      assert.equal(stolen.status, 404)
+      assert.equal((await stolen.json()).code, 'upload_not_found')
+      assert.ok(store.get(theirs, 'user:tok-free'))
+    })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

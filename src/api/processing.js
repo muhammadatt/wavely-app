@@ -14,7 +14,7 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
-import { authHeaders, serverError } from './serverError.js'
+import { uploadAudio, postWithUpload } from './uploadAudio.js'
 import { pollJob } from './pollJob.js'
 
 
@@ -29,31 +29,37 @@ import { pollJob } from './pollJob.js'
  * @param {string}   options.presetId        - Preset ID
  * @param {string}   options.outputProfileId - Output profile ID
  * @param {Function} [options.onProgress]    - Called with progress string on each poll
+ * @param {Function} [options.onUploadProgress] - (fraction 0–1) while the audio uploads
+ * @param {Function} [options.onUploaded]    - Called once the upload has finished
  * @returns {Promise<{ report: object, audioBlob: Blob, peaks: object[] }>}
  */
 export async function processAudioOnServer({
   segments, sampleRate, channels, fileName, presetId, outputProfileId,
   separationModel, resembleMode, voiceFixerMode,
-  onProgress,
+  onProgress, onUploadProgress, onUploaded,
 }) {
   // ── 1. Render timeline to WAV blob ─────────────────────────────────────────
   const wavBlob = await renderTimelineToWavBlob(segments, sampleRate, channels)
 
-  // ── 2. Submit job ──────────────────────────────────────────────────────────
-  const formData = new FormData()
-  formData.append('file', wavBlob, fileName || 'audio.wav')
-  formData.append('preset', presetId)
-  formData.append('output_profile', outputProfileId)
-  if (separationModel)        formData.append('separation_model',  separationModel)
-  if (resembleMode)           formData.append('resemble_mode',      resembleMode)
-  if (voiceFixerMode != null) formData.append('voicefixer_mode',    String(voiceFixerMode))
-
-  // The token makes the job count against the account rather than the IP, and
-  // lifts the signed-out preview limit (a 402 otherwise — see `mastering`).
-  const submitRes = await fetch(`${API_BASE}/api/process`, {
-    method: 'POST', body: formData, headers: await authHeaders(),
+  // ── 2. Upload, then submit the job ─────────────────────────────────────────
+  // A chapter is hundreds of MB of float WAV: it goes up in resumable chunks
+  // (uploadAudio), and the job request names the upload. The token makes both
+  // count against the account rather than the IP, and lifts the signed-out
+  // preview limit (a 402 otherwise — see `mastering`).
+  const uploadId = await uploadAudio(wavBlob, {
+    filename: fileName || 'audio.wav',
+    onProgress: (sent, total) => onUploadProgress?.(total ? sent / total : 1),
   })
-  if (!submitRes.ok) throw await serverError(submitRes, 'Submit failed')
+  onUploaded?.()
+
+  const submitRes = await postWithUpload('/api/process', {
+    uploadId,
+    preset: presetId,
+    output_profile: outputProfileId,
+    ...(separationModel ? { separation_model: separationModel } : {}),
+    ...(resembleMode ? { resemble_mode: resembleMode } : {}),
+    ...(voiceFixerMode != null ? { voicefixer_mode: String(voiceFixerMode) } : {}),
+  }, 'Submit failed')
   const { jobId } = await submitRes.json()
 
   // ── 3. Poll for completion ─────────────────────────────────────────────────

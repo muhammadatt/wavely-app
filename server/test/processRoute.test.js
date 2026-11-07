@@ -95,3 +95,34 @@ test('a waiting job reports its place in line; a running one reports null', asyn
     assert.equal((await (await fetch(`${base}/api/jobs/${id}`)).json()).queuePosition, null)
   })
 })
+
+test('mastering takes a resumable upload by id; the job request itself is tiny JSON', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { Readable } = await import('node:stream')
+  const { createUploadStore, useUpload } = await import('../lib/uploads.js')
+  const root = await mkdtemp(join(tmpdir(), 'wavely-proc-up-'))
+  const store = createUploadStore({ dir: join(root, 'tus'), log: () => {} })
+  const u = await store.create({ client: 'user:tok-pro', signedOut: false, length: 4, metadata: { filename: 'Chapter 1.wav' } })
+  await store.append(u, 0, Readable.from([Buffer.from('RIFF')]))
+
+  const router = express.Router()
+  router.use(express.json())
+  router.use(createProcessRoute({ verify, takeUpload: useUpload(store, join(root, 'taken')) }))
+  try {
+    await withServer(router, async (base) => {
+      const res = await fetch(`${base}/api/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok-pro' },
+        body: JSON.stringify({ uploadId: u.id, preset: 'not_a_preset', output_profile: 'podcast' }),
+      })
+      // It reached validation with the file in hand (no "No audio file provided").
+      assert.equal(res.status, 400)
+      assert.match((await res.json()).error, /Invalid preset/)
+      assert.equal(store.get(u.id, 'user:tok-pro'), null, 'taken')
+    })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

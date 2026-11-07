@@ -167,17 +167,28 @@ async function handleProcess() {
 
   startProcessing(heading, docId)
 
-  // Fire the first stage immediately (synchronously) so it's visible right away
-  updateProcessingStage(stages[0].message, docId)
-  updateProcessingProgress(stages[0].progress, docId)
+  // The audio uploads first — minutes for a long chapter — so the bar shows the
+  // upload, and the friendly stages start only once the server has the file.
+  const UPLOAD_SHARE = 0.1
+  updateProcessingStage('Uploading your audio…', docId)
+  updateProcessingProgress(0, docId)
+  const onUploadProgress = fraction => {
+    updateProcessingStage(`Uploading your audio… ${Math.round(fraction * 100)}%`, docId)
+    updateProcessingProgress(fraction * UPLOAD_SHARE, docId)
+  }
 
-  // Queue the remaining stages
-  const stageTimers = stages.slice(1).map(({ message, progress, delay }) =>
-    setTimeout(() => {
-      updateProcessingStage(message, docId)
-      updateProcessingProgress(progress, docId)
-    }, delay)
-  )
+  let stageTimers = []
+  const onUploaded = () => {
+    // Fire the first stage at once so it's visible right away, queue the rest
+    updateProcessingStage(stages[0].message, docId)
+    updateProcessingProgress(Math.max(stages[0].progress, UPLOAD_SHARE), docId)
+    stageTimers = stages.slice(1).map(({ message, progress, delay }) =>
+      setTimeout(() => {
+        updateProcessingStage(message, docId)
+        updateProcessingProgress(Math.max(progress, UPLOAD_SHARE), docId)
+      }, delay)
+    )
+  }
 
   try {
     const { report, audioBlob, peaks } = await processAudioOnServer({
@@ -188,6 +199,8 @@ async function handleProcess() {
       presetId: doc.selectedPreset,
       outputProfileId: doc.selectedOutputProfile,
       separationModel: preset === 'noise_eraser' ? selectedModels.value.noise_eraser : undefined,
+      onUploadProgress,
+      onUploaded,
     })
 
     // The user can close a document while its job is in flight. Bail rather

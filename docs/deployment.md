@@ -242,9 +242,11 @@ the host lets anyone forge their IP and reset every per-IP rate limit.
   Cloudflare address, the rate limits are effectively shared across users.
   The fix, and the edge rules to put in front of the API, are in
   `docs/cloudflare.md`.
-- **Upload size.** Cloudflare's free/pro plans cap request bodies at 100 MB —
-  about 9 minutes of the float WAV mastering uploads (`docs/cloudflare.md` §0.3).
-  Traefik adds no limit of its own.
+- **Upload size.** Cloudflare's free/pro plans cap request bodies at 100 MB, so
+  audio goes up as resumable uploads in 20 MB chunks (`docs/cloudflare.md`
+  §0.3). Taken uploads and in-flight chunks live under `server/uploads/`
+  inside the container; size the disk for `UPLOAD_MAX_TOTAL_BYTES` (20 GB by
+  default) plus the jobs' working files.
 - **Request log.** Every `/api/process`, `/api/spot` and `/api/analyze`
   request writes one `{"evt":"api",…}` JSON line to stdout (account, IP,
   status, refusal code). Coolify's log view is not long-term storage; ship
