@@ -27,6 +27,18 @@ export const ICONS = {
   clean: '<path d="M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z"/>',
   master: '<path d="M3.5 18a9 9 0 1117 0"/><path d="M12 18l4.5-5"/><circle cx="12" cy="18" r="1.3"/>',
 
+  // The toolbar's category icons, design 1a "Studio objects" (owner, November
+  // 2026; docs/design/toolbar-icons/): each is the tool itself. Separate keys
+  // from the operation icons they replaced on the toolbar (copy, loudness,
+  // dynamics, eq, clean, master), which operations still use. The Chain
+  // button keeps `chain`.
+  catEdit: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>',
+  catLevel: '<path d="M12 3v8M12 17v4"/><rect x="8" y="11" width="8" height="6" rx="1.5"/>',
+  catDynamics: '<path d="M12 3v6M9 6l3 3 3-3M12 21v-6M9 18l3-3 3 3M4 12h16"/>',
+  catTone: '<path d="M3 18h3c3 0 3-12 6-12s3 12 6 12h3"/>',
+  catFix: '<path d="M4 20 15 9M17 3v4M15 5h4M20 11v3M18.5 12.5h3"/>',
+  catMaster: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/>',
+
   // Edit operations
   // Trim: crop marks. Was a byte-identical copy of the `edit` pencil, so the
   // category and its first row drew the same glyph.
