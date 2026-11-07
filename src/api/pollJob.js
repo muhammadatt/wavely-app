@@ -1,5 +1,6 @@
 /**
- * Polling for an accepted mastering job (POST /api/process → 202 { jobId }).
+ * Polling for an accepted server job (POST /api/process, or an async spot
+ * operation such as Noise Reduction → 202 { jobId }).
  * Its own module, free of browser-only imports, so it runs under node --test.
  */
 
@@ -22,13 +23,13 @@ function sleep(ms) {
  * (`queuePosition` set, `MAX_QUEUE_POLLS`).
  */
 export async function pollJob({
-  fetchStatus, onProgress, wait = sleep,
+  fetchStatus, onProgress, wait = sleep, interval = POLL_INTERVAL_MS,
   maxPolls = MAX_POLL_ATTEMPTS, maxQueuePolls = MAX_QUEUE_POLLS,
 }) {
   let processingPolls = 0
   let queuePolls = 0
   while (processingPolls < maxPolls && queuePolls < maxQueuePolls) {
-    await wait(POLL_INTERVAL_MS)
+    await wait(interval)
     const job = await fetchStatus()
     if (job.status === 'done') return job
     if (job.status === 'error') throw new Error(job.error || 'Processing failed on server')

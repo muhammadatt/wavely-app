@@ -125,3 +125,57 @@ test('giving up after the retry budget, and an abort stops at once', async () =>
     await s.close()
   }
 })
+
+test('a failed or cancelled upload is deleted, so it does not hold the caller’s quota', async () => {
+  const failing = (req, res, next) => (req.method === 'PATCH' ? res.status(503).json({ error: 'down', code: 'server_busy' }) : next())
+  const s = await serve({ maxActivePerClient: 1 }, failing)
+  try {
+    for (let i = 0; i < 3; i++) {
+      await assert.rejects(
+        uploadBlob(randomBlob(1000), { endpoint: `${s.base}/api/uploads`, headers: auth, retryDelays: [0], wait: noWait }),
+        err => err.status === 503,   // never 429: the failed one before it was given back
+      )
+      assert.equal(s.store.stats().count, 0)
+    }
+  } finally {
+    await s.close()
+  }
+
+  // Cancelled mid-upload: the first chunk lands, then the signal fires.
+  const s2 = await serve()
+  try {
+    const controller = new AbortController()
+    await assert.rejects(
+      uploadBlob(randomBlob(200_000), {
+        endpoint: `${s2.base}/api/uploads`, headers: auth, chunkSize: 64 * 1024, signal: controller.signal,
+        onProgress: sent => { if (sent > 0) controller.abort() },
+      }),
+      err => err.name === 'AbortError',
+    )
+    assert.equal(s2.store.stats().count, 0)
+  } finally {
+    await s2.close()
+  }
+})
+
+test('a 204 that does not move the offset counts as a failure, not progress', async () => {
+  let patches = 0
+  // Acknowledge every PATCH without storing anything, at the same offset.
+  const stuck = (req, res, next) => {
+    if (req.method !== 'PATCH') return next()
+    patches++
+    req.resume()
+    req.on('end', () => res.set('Upload-Offset', req.get('Upload-Offset')).status(204).end())
+  }
+  const s = await serve({}, stuck)
+  try {
+    await assert.rejects(
+      uploadBlob(randomBlob(1000), { endpoint: `${s.base}/api/uploads`, headers: auth, retryDelays: [0, 0], wait: noWait }),
+      /stopped accepting data/,
+    )
+    assert.equal(patches, 3)
+    assert.equal(s.store.stats().count, 0)
+  } finally {
+    await s.close()
+  }
+})

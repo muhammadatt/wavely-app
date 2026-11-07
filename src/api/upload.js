@@ -105,43 +105,102 @@ export async function uploadBlob(blob, {
   const id = url.split('/').pop()
 
   // ── Send ────────────────────────────────────────────────────────────────────
-  let offset = 0
-  let failures = 0
-  onProgress?.(0, total)
-  while (offset < total) {
-    let res = null
-    try {
-      res = await request(url, {
-        method: 'PATCH',
-        headers: { 'Upload-Offset': String(offset), 'Content-Type': 'application/offset+octet-stream' },
-        body: blob.slice(offset, Math.min(offset + chunkSize, total)),
-      })
-    } catch (err) {
-      if (err?.name === 'AbortError' || signal?.aborted) throw err
-      res = null   // network failure: retry below
-    }
-
-    if (res?.status === 204) {
-      offset = Number(res.headers.get('Upload-Offset'))
-      failures = 0
-      onProgress?.(offset, total)
-      continue
-    }
-    if (res && !RETRYABLE.has(res.status)) throw await refusal(res, 'Upload failed')
-    if (failures >= retryDelays.length) {
-      throw res ? await refusal(res, 'Upload failed') : new Error('Upload failed: the connection kept dropping')
-    }
-
-    await wait(retryDelays[failures++], signal)
-    // Ask where the server got to; part of the failed chunk may have landed.
-    try {
-      const probe = await request(url, { method: 'HEAD' })
-      if (probe.status === 404) throw Object.assign(new Error('The upload expired — please try again'), { status: 404 })
-      if (probe.ok) offset = Number(probe.headers.get('Upload-Offset'))
-    } catch (err) {
-      if (err?.status === 404 || err?.name === 'AbortError' || signal?.aborted) throw err
-      // Still offline: the next PATCH attempt fails and counts another try.
-    }
+  // Any failure or cancel from here on DELETEs the upload: an abandoned one
+  // would hold one of the caller's in-flight slots and its declared size
+  // against their quota until it expires (an hour), so a few failed attempts
+  // could lock them out of uploading at all.
+  try {
+    await send(url)
+  } catch (err) {
+    await discardUpload(url, { headers, fetch: fetchImpl, wait })
+    throw err
   }
   return id
+
+  async function send(url) {
+    let offset = 0
+    let failures = 0
+    onProgress?.(0, total)
+    while (offset < total) {
+      let res = null
+      let stalled = false
+      try {
+        res = await request(url, {
+          method: 'PATCH',
+          headers: { 'Upload-Offset': String(offset), 'Content-Type': 'application/offset+octet-stream' },
+          body: blob.slice(offset, Math.min(offset + chunkSize, total)),
+        })
+      } catch (err) {
+        if (err?.name === 'AbortError' || signal?.aborted) throw err
+        res = null   // network failure: retry below
+      }
+
+      if (res?.status === 204) {
+        const next = Number(res.headers.get('Upload-Offset'))
+        // Only progress resets the retry budget. A 204 that did not move the
+        // offset (or reports one past the end) is a failed chunk, not a
+        // success, or the same chunk could be resent forever.
+        if (Number.isFinite(next) && next > offset && next <= total) {
+          offset = next
+          failures = 0
+          onProgress?.(offset, total)
+          continue
+        }
+        res = null
+        stalled = true
+      }
+      if (res && !RETRYABLE.has(res.status)) throw await refusal(res, 'Upload failed')
+      if (failures >= retryDelays.length) {
+        if (res) throw await refusal(res, 'Upload failed')
+        throw new Error(stalled
+          ? 'Upload failed: the server stopped accepting data'
+          : 'Upload failed: the connection kept dropping')
+      }
+
+      await wait(retryDelays[failures++], signal)
+      // Ask where the server got to; part of the failed chunk may have landed.
+      try {
+        const probe = await request(url, { method: 'HEAD' })
+        if (probe.status === 404) throw Object.assign(new Error('The upload expired — please try again'), { status: 404 })
+        if (probe.ok) {
+          const at = Number(probe.headers.get('Upload-Offset'))
+          if (Number.isFinite(at) && at >= 0 && at <= total) offset = at
+        }
+      } catch (err) {
+        if (err?.status === 404 || err?.name === 'AbortError' || signal?.aborted) throw err
+        // Still offline: the next PATCH attempt fails and counts another try.
+      }
+    }
+  }
+}
+
+/**
+ * Delete an upload that will not be used, best effort: never throws, and runs
+ * without the caller's (possibly aborted) signal. A 423 means a PATCH the
+ * client gave up on is still landing; it is retried briefly. Whatever this
+ * cannot delete, the server's idle expiry does.
+ *
+ * @param {string} url  the upload's URL
+ * @param {object} [opts]
+ * @param {Function} [opts.headers]  async () => extra headers (auth)
+ * @param {Function} [opts.fetch]
+ * @param {Function} [opts.wait]     (ms) => Promise
+ * @param {number[]} [opts.busyDelays]
+ */
+export async function discardUpload(url, {
+  headers = async () => ({}), fetch: fetchImpl = globalThis.fetch, wait = sleep,
+  busyDelays = [500, 1000, 2000],
+} = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetchImpl(url, {
+        method: 'DELETE',
+        headers: { 'Tus-Resumable': TUS_VERSION, ...(await headers()) },
+      })
+      if (res.status !== 423 || attempt >= busyDelays.length) return
+    } catch {
+      return
+    }
+    try { await wait(busyDelays[attempt]) } catch { return }
+  }
 }

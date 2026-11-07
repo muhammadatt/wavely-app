@@ -259,8 +259,10 @@ export function createAnalyzeRoute({
       const kind = kinds[req.params.kind]
 
       // An unreadable duration is let through: the analysis decodes the file
-      // itself and fails on its own if ffmpeg cannot.
-      const durationS = await probeDuration(uploadedPath)
+      // itself and fails on its own if ffmpeg cannot. The plan gate has
+      // usually probed already (`req.audioSeconds`, null included); FFprobe
+      // runs again only when it has not, as with accounts off.
+      const durationS = req.audioSeconds !== undefined ? req.audioSeconds : await probeDuration(uploadedPath)
       if (durationS != null && durationS > maxSeconds) {
         return res.status(413).json({
           error: `Analysis is limited to ${Math.round(maxSeconds / 60)} minutes of audio per request — select a shorter passage.`,
