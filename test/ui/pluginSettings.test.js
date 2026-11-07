@@ -28,7 +28,7 @@ export async function load(url, context, next) {
 }`
 register('data:text/javascript,' + encodeURIComponent(HOOKS))
 
-const { PLUGIN_SETTINGS, pluginSettingsIO, writePluginSettings } =
+const { PLUGIN_SETTINGS, pluginSettingsIO, writePluginSettings, chainSettingsOf } =
   await import('../../src/composables/pluginSettings.js')
 const { listPresets, presetParams, PLUGIN_CHAIN_PRESET_PLUGIN, PLUGIN_CHAIN_MAX_SLOTS, pickParams } =
   await import('../../src/audio/pluginPresets/index.js')
@@ -96,4 +96,21 @@ test('a saved chain keeps its slots and drops what is not one', () => {
   })
   const many = { slots: Array.from({ length: 50 }, () => ({ plugin: 'air-band' })) }
   assert.equal(pick(many).slots.length, PLUGIN_CHAIN_MAX_SLOTS)
+})
+
+test('a saved chain keeps the EQ’s trims, which its presets leave out', () => {
+  const read = pluginSettingsIO('manual-eq', 'chain-5').read()
+  const saved = chainSettingsOf('manual-eq', { ...read, input: 3.5, output: -2, stray: 1 })
+  assert.deepEqual(Object.keys(saved).sort(), ['bands', 'input', 'output'])
+  assert.ok(writePluginSettings('manual-eq', 'chain-6', roundTrip(saved)))
+  const back = pluginSettingsIO('manual-eq', 'chain-6').read()
+  assert.equal(back.input, 3.5)
+  assert.equal(back.output, -2)
+  // Clamped to the panel's ±12 dB, and an EQ preset (no trims) leaves them alone.
+  assert.ok(writePluginSettings('manual-eq', 'chain-6', { ...saved, input: 40 }))
+  assert.equal(pluginSettingsIO('manual-eq', 'chain-6').read().input, 12)
+  pluginSettingsIO('manual-eq', 'chain-6').write({ bands: saved.bands })
+  assert.equal(pluginSettingsIO('manual-eq', 'chain-6').read().output, -2)
+  // The preset collection itself still stores only the band set.
+  assert.deepEqual(Object.keys(pickParams(PLUGIN_SETTINGS['manual-eq'].presetPlugin, saved)), ['bands'])
 })

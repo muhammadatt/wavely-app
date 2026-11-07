@@ -3,9 +3,9 @@ import { usePluginChain } from './usePluginChain.js'
 import { usePluginPresets } from './usePluginPresets.js'
 import { useEditorState } from './useEditorState.js'
 import { baseId, copyOfId } from './pluginCopies.js'
-import { PLUGIN_SETTINGS, pluginSettingsIO, writePluginSettings } from './pluginSettings.js'
+import { PLUGIN_SETTINGS, pluginSettingsIO, writePluginSettings, chainSettingsOf } from './pluginSettings.js'
 import { chainPlugins, getOperation } from '../ui/registry.js'
-import { PLUGIN_CHAIN_PRESET_PLUGIN, pickParams } from '../audio/pluginPresets/index.js'
+import { PLUGIN_CHAIN_PRESET_PLUGIN } from '../audio/pluginPresets/index.js'
 
 /**
  * Saved Plugin Chains — the chain window's preset menu.
@@ -50,9 +50,7 @@ export function captureChain(slots) {
     slots: slots.map((s) => {
       const plugin = baseId(s.windowId ?? s.id)
       const io = readers.get(s.id)
-      const presetPlugin = PLUGIN_SETTINGS[plugin]?.presetPlugin
-      let settings = io ? JSON.parse(JSON.stringify(io.read() ?? null)) : null
-      if (settings && presetPlugin) settings = pickParams(presetPlugin, settings)
+      const settings = io ? chainSettingsOf(plugin, JSON.parse(JSON.stringify(io.read() ?? null))) : null
       return { plugin, active: s.active, settings }
     }),
   }

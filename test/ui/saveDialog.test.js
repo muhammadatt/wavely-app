@@ -317,4 +317,7 @@ test('“Keep both” numbers the copy; only a trailing (N) counts on', async ()
   assert.equal(await nextFreeBaseName('Take (2)', taken([])), 'Take (3)')
   // A chapter number is part of the name, not a copy number.
   assert.equal(await nextFreeBaseName('Ch 04', taken([])), 'Ch 04 (2)')
+  // Every candidate taken: refuse, never return an unchecked (taken) name.
+  await assert.rejects(nextFreeBaseName('Take', async () => true, 3), /No free name/)
+  assert.equal(await nextFreeBaseName('Take', taken(['Take (2)', 'Take (3)']), 3), 'Take (4)')
 })

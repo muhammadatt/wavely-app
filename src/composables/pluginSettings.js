@@ -3,13 +3,16 @@
  * composable — so a copy's settings can be captured and restored with its
  * window closed. A saved Plugin Chain (useChainPresets.js) is a list of these.
  *
- * Each entry is `{ use, io, presetPlugin? }`:
+ * Each entry is `{ use, io, presetPlugin?, chainKeys? }`:
  *   use(copy)    the composable of that copy ('solo' or 'chain-<n>'), built if needed
  *   io(api)      `{ read, write }` over it — `read()` a plain object, `write(p)` puts
  *                one into effect through the plugin's own sync functions
  *   presetPlugin the plugin's preset collection, if it has one. Its whitelist and
  *                `normalize` then guard what a saved chain restores, exactly as
  *                they guard a preset.
+ *   chainKeys    settings a saved CHAIN keeps beyond the preset whitelist — user
+ *                settings the plugin's presets leave out on purpose (the EQ's
+ *                trims). `write` must tolerate them being absent.
  *
  * ⚠ ONE COPY OF EACH READ/WRITE. The twelve plugins with preset menus used to
  * define these in their panels; the panels now take them from here, so the
@@ -208,9 +211,27 @@ export function phatassSettings(api) {
   }
 }
 
-/** The EQ's band set, stored low to high. */
+/** The EQ's trims' range, dB — the panel's knobs (EqModal.vue). */
+const EQ_TRIM_MAX_DB = 12
+const clampTrim = v => Math.max(-EQ_TRIM_MAX_DB, Math.min(EQ_TRIM_MAX_DB, v))
+
+/**
+ * The EQ's band set, stored low to high — and its IN / OUT trims.
+ *
+ * The trims are NOT part of an EQ preset (a preset is a band set, and the
+ * collection's whitelist drops them), but they are user settings that change
+ * what the slot plays, so a saved chain carries them (`chainKeys` below). A
+ * preset load arrives without them and leaves the trims where they are.
+ */
 export function eqSettings(api) {
-  return { read: () => api.presetParams(), write: p => api.applyPreset(p) }
+  return {
+    read: () => ({ ...api.presetParams(), input: api.inputTrim.value, output: api.outputTrim.value }),
+    write: (p) => {
+      api.applyPreset(p)
+      if (Number.isFinite(p.input)) api.setInputTrim(clampTrim(p.input))
+      if (Number.isFinite(p.output)) api.setOutputTrim(clampTrim(p.output))
+    },
+  }
 }
 
 export function schepsSettings(api) {
@@ -276,7 +297,7 @@ export const PLUGIN_SETTINGS = {
   'resonance-suppressor': { use: useResonance, io: resonanceSettings, presetPlugin: RESO_TAME_PRESET_PLUGIN },
   'inflator': { use: useInflator, io: inflatorSettings, presetPlugin: INFLATOR_PRESET_PLUGIN },
   'phatass': { use: usePhatass, io: phatassSettings, presetPlugin: PHATASS_PRESET_PLUGIN },
-  'manual-eq': { use: useManualEq, io: eqSettings, presetPlugin: PARAMETRIC_EQ_PRESET_PLUGIN },
+  'manual-eq': { use: useManualEq, io: eqSettings, presetPlugin: PARAMETRIC_EQ_PRESET_PLUGIN, chainKeys: ['input', 'output'] },
   'scheps-parallel': { use: useScheps, io: schepsSettings, presetPlugin: SCHEPS_PRESET_PLUGIN },
   'hf-limiter': { use: useHFLimiter, io: hfLimiterSettings, presetPlugin: HF_LIMITER_PRESET_PLUGIN },
   'air-band': { use: useAirBand, io: airBandSettings, presetPlugin: AIR_BOOST_PRESET_PLUGIN },
@@ -300,15 +321,30 @@ export function pluginSettingsIO(pluginId, copy) {
 }
 
 /**
+ * What a saved chain stores for a plugin, from its raw settings: the preset
+ * whitelist (and `normalize`) when it has a collection, plus its `chainKeys`;
+ * a plain copy otherwise. Used both to save and to load, so the two agree.
+ */
+export function chainSettingsOf(pluginId, settings) {
+  const entry = PLUGIN_SETTINGS[pluginId]
+  if (!entry || !settings || typeof settings !== 'object') return null
+  if (!entry.presetPlugin) return plain(settings)
+  const params = pickParams(entry.presetPlugin, settings)
+  if (!params) return null
+  for (const key of entry.chainKeys ?? []) {
+    if (Object.prototype.hasOwnProperty.call(settings, key)) params[key] = plain(settings[key])
+  }
+  return params
+}
+
+/**
  * Put saved settings into `copy` of a plugin. Settings saved by an older build
  * pass through the plugin's preset whitelist and `normalize` first, when it has
  * one, so a key the plugin has since dropped or a value out of range cannot
  * reach the kernel. Returns false when there was nothing to write.
  */
 export function writePluginSettings(pluginId, copy, settings) {
-  const entry = PLUGIN_SETTINGS[pluginId]
-  if (!entry || !settings || typeof settings !== 'object') return false
-  const params = entry.presetPlugin ? pickParams(entry.presetPlugin, settings) : plain(settings)
+  const params = chainSettingsOf(pluginId, settings)
   if (!params) return false
   pluginSettingsIO(pluginId, copy).write(params)
   return true

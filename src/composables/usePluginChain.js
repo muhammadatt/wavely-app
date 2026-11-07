@@ -238,16 +238,31 @@ export function usePluginChain() {
     startProcessing, updateProcessingStage, updateProcessingProgress, endProcessing, showToast,
     pinActiveDocument,
   } = editor
-  const { openWindow, closeWindow } = useWindows()
+  const { openWindow, closeWindow, isOpen } = useWindows()
 
   const chain = () => getEffectChain(editor.getAudioContext())
   const liveSlots = computed(() => slots.value.filter(s => s.active))
 
+  /**
+   * Switching a plugin on starts its panel's meter loop (its preview toggle
+   * does), and only its window closing stops it — so a slot switched on with
+   * no window open (a saved chain loading, or its lamp in the rack) would
+   * sample its analysers every frame for nothing. Put it in the state a slot
+   * is in after its window closes: meters stopped, audio and the background
+   * measurements that follow the selection still running. Its window mounting
+   * resumes the meters (chainWindowMounted).
+   */
+  function quietIfWindowless(def) {
+    if (def && !isOpen(def.windowId)) def.suspend?.()
+  }
+
   function setSlotActive(id, on) {
     if (applying.value) return
     const def = plugins.get(id)
-    if (def) def.setActive(on)
-    else chain().setEnabled(id, on)
+    if (def) {
+      def.setActive(on)
+      if (on) quietIfWindowless(def)
+    } else chain().setEnabled(id, on)
     // Engaging a slot is asking to hear it: lift the master bypass too.
     if (on && chain().bypassed) chain().setBypassed(false)
   }
@@ -276,6 +291,7 @@ export function usePluginChain() {
     const def = defForWindow(windowId)
     if (def) {
       addDef(def)
+      if (!open) quietIfWindowless(def)
       const at = after === null ? -1 : slots.value.findIndex(s => s.id === after)
       if (at !== -1) chain().moveEffect(def.id, at + 1)
     } else if (open) {
