@@ -22,7 +22,7 @@ async function withApp(setup, fn) {
 const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 
 /** What the gate and multer would have left on the request. */
-function asServed(req, { user = { id: 'u1' }, feature = 'autoLevel', mode = 'preview' } = {}) {
+function asServed(req, { user = { id: 'u1' }, feature = 'spotEffects', mode = 'preview' } = {}) {
   req.user = user
   req.feature = feature
   req.entitlement = { plan: 'free', mode }
@@ -47,7 +47,7 @@ test('a served request: one JSON line with who, what and how much, and a usage r
     assert.equal(line.ip, '127.0.0.1')
     assert.equal(line.status, 200)
     assert.equal(line.code, null)
-    assert.equal(line.feature, 'autoLevel')
+    assert.equal(line.feature, 'spotEffects')
     assert.equal(line.mode, 'preview')
     assert.equal(line.bytes, 4096)
     assert.equal(line.audio_s, 28.4)
@@ -56,7 +56,7 @@ test('a served request: one JSON line with who, what and how much, and a usage r
 
     assert.equal(recorded.length, 1)
     assert.deepEqual({ ...recorded[0], durationMs: 0 }, {
-      userId: 'u1', ip: '127.0.0.1', feature: 'autoLevel', mode: 'preview',
+      userId: 'u1', ip: '127.0.0.1', feature: 'spotEffects', mode: 'preview',
       audioSeconds: 28.44, uploadBytes: 4096, outcome: 'ok', durationMs: 0,
     })
   })
@@ -93,7 +93,7 @@ test('failed work records an error row; a request that never reached the work re
     })
     // A queue refusal after the gate set the feature: logged, but no work, no row.
     app.post('/api/analyze/y', (req, res) => {
-      req.feature = 'autoLevel'
+      req.feature = 'spotEffects'
       res.status(503).json({ error: 'busy', code: 'server_busy' })
     })
     // Mastering's 202 never tracks work here; the job records its own row.
@@ -107,7 +107,7 @@ test('failed work records an error row; a request that never reached the work re
     await fetch(`${base}/api/process`, { method: 'POST' })
     await settle()
     assert.deepEqual(lines.map(l => [l.status, l.code]), [[500, null], [503, 'server_busy'], [202, null]])
-    assert.deepEqual(recorded.map(r => [r.feature, r.outcome]), [['autoLevel', 'error']])
+    assert.deepEqual(recorded.map(r => [r.feature, r.outcome]), [['spotEffects', 'error']])
   })
 })
 

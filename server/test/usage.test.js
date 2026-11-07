@@ -45,13 +45,13 @@ test('record writes one normalised usage row', async () => {
   const admin = fakeAdmin()
   const usage = createUsageRecorder(admin)
   await usage.record({
-    userId: 'u1', ip: '203.0.113.9', feature: 'autoLevel', mode: 'preview',
+    userId: 'u1', ip: '203.0.113.9', feature: 'spotEffects', mode: 'preview',
     audioSeconds: 28.44, uploadBytes: 12345.6, outcome: 'ok', durationMs: 812.4,
   })
   assert.deepEqual(admin.calls.inserts, [{
     table: 'usage_events',
     row: {
-      user_id: 'u1', ip: '203.0.113.9', feature: 'autoLevel', mode: 'preview',
+      user_id: 'u1', ip: '203.0.113.9', feature: 'spotEffects', mode: 'preview',
       audio_seconds: 28.44, upload_bytes: 12346, outcome: 'ok', duration_ms: 812,
     },
   }])

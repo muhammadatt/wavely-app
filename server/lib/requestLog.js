@@ -8,7 +8,7 @@
  * on stdout, one object per line, for whatever collects the process's output:
  *
  *   {"evt":"api","t":"…","route":"/api/analyze/vad","user":"<uuid>"|null,
- *    "ip":"…","status":200,"code":null,"feature":"autoLevel","mode":"preview",
+ *    "ip":"…","status":200,"code":null,"feature":"spotEffects","mode":"preview",
  *    "bytes":123456,"audio_s":28.4,"ms":812}
  *
  * `code` is the refusal code from the response body (`sign_in_required`,
