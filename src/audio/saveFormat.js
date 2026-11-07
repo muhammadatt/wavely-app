@@ -253,3 +253,20 @@ export function savePlan({ supportsInPlace, chosenHandle = null, anchorHandle = 
   if (folderTarget) return 'folder'
   return 'pick'
 }
+
+/**
+ * "Keep both": the first free name in "Take (2)", "Take (3)"…, by `taken`
+ * (which may be async). Only a trailing "(N)" counts as a copy number, so
+ * "Take (2)" taken gives "Take (3)" — but "Ch 04" gives "Ch 04 (2)", never
+ * "Ch 5": a narrator's chapter number is part of the name. Gives up after
+ * `limit` tries and returns the last candidate.
+ */
+export async function nextFreeBaseName(base, taken, limit = 99) {
+  const trimmed = String(base).trim()
+  const m = trimmed.match(/^(.*\S)\s*\((\d+)\)$/)
+  const stem = m ? m[1] : trimmed
+  let n = m ? Number(m[2]) + 1 : 2
+  let candidate = `${stem} (${n})`
+  for (let i = 0; i < limit && await taken(candidate); i++) candidate = `${stem} (${++n})`
+  return candidate
+}

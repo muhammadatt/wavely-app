@@ -6,7 +6,7 @@ import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import { fet1176TuningState } from '../audio/effects/fet1176Tuning.js'
 import { applyFET1176Region, computeFET1176AutoMakeup, computePeakCache } from '../audio/processing.js'
-import { getEffectChain } from '../audio/effectChain.js'
+import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { fet1176Effect as soloFet1176Effect, FET1176_DEFAULTS } from '../audio/effects/fet1176Compressor.js'
 import { fetDriveFor } from '../audio/effects/fet1176Params.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -537,7 +537,9 @@ const copies = pluginCopies((copy, life) => {
      * whoever is looking at it.
      */
     function resetLiveMakeup() {
-      getEffectChain(getAudioContext()).effects
+      // No chain yet means no tracker to reset — and a copy being set up with
+      // its window closed (a saved chain loading) must not build one.
+      getEffectChainIfExists()?.effects
         .find(e => e.id === fet1176Effect.id)?.nodes?.resetMakeupTracker?.()
     }
 
@@ -704,7 +706,7 @@ const copies = pluginCopies((copy, life) => {
   return useFET1176
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useFET1176() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useFET1176(copy) {
+  return copies(copy)()
 }

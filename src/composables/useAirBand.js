@@ -196,7 +196,7 @@ const copies = pluginCopies((copy, life) => {
   return useAirBand
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useAirBand() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useAirBand(copy) {
+  return copies(copy)()
 }

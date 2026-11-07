@@ -11,7 +11,7 @@ import {
   BIT_DEPTHS, FORMATS, FORMAT_IDS, MP3_BITRATES, sampleRateOptions,
   defaultSaveSettings, normalizeSettings, formatAvailable, qualityLossWarning,
   formatRate, estimateSaveBytes, savePlan, toSaveFileName, formatFolderPath,
-  splitAudioName, formatForExtension, extensionFor,
+  splitAudioName, formatForExtension, extensionFor, nextFreeBaseName,
 } from '../audio/saveFormat.js'
 import BaseButton from './ui/BaseButton.vue'
 
@@ -20,6 +20,13 @@ import BaseButton from './ui/BaseButton.vue'
  * bitrate, and sample rate, before anything is written. Opens on the first
  * Save of a document and on every Save As; later Saves reuse what was
  * confirmed here (useFileSave).
+ *
+ * Laid out as design 1a, "Refined classic" (docs/design/save-dialog/): a name
+ * that would overwrite is resolved RIGHT UNDER THE NAME (Replace / Keep both)
+ * rather than in a warning under the format controls, far from its cause;
+ * formats are cards that carry their own estimated size; and every value that
+ * matches the original carries a quiet green dot, so what a Save changes is
+ * visible without reading the header.
  *
  * ⚠ A WEB PAGE IS NEVER TOLD AN ABSOLUTE PATH. With a WORKING FOLDER set
  * (useWorkingFolder) the location is shown relative to it — "Ch Audiobook ›
@@ -218,6 +225,36 @@ const planText = computed(() => {
   }
 })
 
+/**
+ * "Keep both": rename to the first free "Name (2)", "Name (3)"… so the
+ * existing file stays. In the working folder the folder itself is asked; for
+ * the original's own name the only file known to be there is the original —
+ * the new name then goes through the system dialog, which warns on its own
+ * if that one exists too.
+ */
+const resolvingConflict = ref(false)
+async function keepBoth() {
+  if (isSaving.value || resolvingConflict.value) return
+  commitName()
+  resolvingConflict.value = true
+  try {
+    const ext = extension.value
+    let taken
+    if (plan.value === 'folder') {
+      const dir = await wf.directoryAt(folderTarget.value.segments)
+      taken = async b => !!await wf.existingFile(dir, toSaveFileName(b + ext, format.value))
+    } else {
+      taken = async b => toSaveFileName(b + ext, format.value) === anchor?.name
+    }
+    baseName.value = await nextFreeBaseName(baseName.value, taken)
+  } catch (err) {
+    console.error('Keep both failed:', err)
+    showToast("Couldn't find a free name — type a new one")
+  } finally {
+    resolvingConflict.value = false
+  }
+}
+
 // "Save to <folder> instead", offered for an original outside the folder.
 const canSwitchToFolder = computed(() => !!folderName.value && !!anchor && !anchorInFolder.value && !chosenHandle.value)
 
@@ -229,7 +266,7 @@ const saveLabel = computed(() => {
 
 const sourceText = computed(() => {
   if (!source) return null
-  const parts = [source.container.toUpperCase()]
+  const parts = ['Original', source.container.toUpperCase()]
   if (source.bitDepth) parts.push(source.float ? '32-bit float' : `${source.bitDepth}-bit`)
   if (source.container === 'mp3') parts.push(source.bitrate ? `${source.bitrate} kbps` : 'VBR')
   if (source.sampleRate) parts.push(formatRate(source.sampleRate))
@@ -251,13 +288,43 @@ const size = computed(() => {
 // no length field at all.
 const tooBig = computed(() => format.value === 'wav' && size.value.bytes > WAV_SIZE_LIMIT)
 
+// ── Matches the original ───────────────────────────────────────────────────
+// A quiet dot on each value the original already has. Only what the header
+// could tell us: a lossy original has no bit depth to match, and a depth or
+// bitrate is only compared within its own family.
+const originalDepth = computed(() => {
+  if (!source || source.lossy || !source.bitDepth) return null
+  if (source.float || source.bitDepth > 24) return '32f'
+  return source.bitDepth > 16 ? '24' : '16'
+})
+const matchesFormat = id => source?.container === id
+const matchesDepth = id => originalDepth.value === id
+const matchesRate = computed(() => !!source?.sampleRate && source.sampleRate === sampleRate.value)
+const matchesBitrate = computed(() => source?.container === 'mp3' && source.bitrate === bitrate.value)
+const showMatchLegend = computed(() => !!source)
+
+// Each format card's caption: what kind of file and how big it would be,
+// with the depth / rate the switch would actually write (setFormat's rules).
+const formatCards = computed(() => {
+  const d = doc.value ? getTimelineDuration(doc.value.segments) : 0
+  return FORMAT_IDS.map((id) => {
+    const est = estimateSaveBytes(d, channels, normalizeSettings({ ...settings.value, format: id }, channels))
+    return {
+      id,
+      label: FORMATS[id].label,
+      kind: FORMATS[id].lossy ? 'Compressed' : 'Lossless',
+      size: `${est.approx ? '≈ ' : ''}${formatSize(est.bytes)}`,
+      available: formatAvailable(id, channels),
+    }
+  })
+})
+
 /**
- * Every warning, in one place and one style, under the format controls: the
- * overwrite (from the location), quality loss, and the WAV size ceiling.
+ * Warnings that belong to the format controls: quality loss and the WAV size
+ * ceiling. An overwrite is resolved under the name field, where it starts.
  */
 const notices = computed(() => {
   const list = []
-  if (overwrites.value) list.push({ kind: 'warn', text: planText.value })
   if (warning.value) list.push({ kind: 'warn', text: warning.value.replace(/\.$/, '') })
   if (tooBig.value) {
     list.push({
@@ -267,8 +334,6 @@ const notices = computed(() => {
   }
   return list
 })
-
-const sizeText = computed(() => `${size.value.approx ? '≈ ' : ''}${formatSize(size.value.bytes)}`)
 
 const STAGE_LABELS = { render: 'Rendering', resample: 'Converting rate', encode: 'Encoding', write: 'Writing' }
 const progressText = computed(() => {
@@ -342,20 +407,18 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
     @keydown="onKeydown"
   >
     <div
-      class="w-full max-w-[460px] flex flex-col rounded-[18px] overflow-hidden font-['Inter'] dialog-surface"
+      class="w-full max-w-[500px] flex flex-col rounded-[18px] overflow-hidden font-['Inter'] dialog-surface"
       style="animation:bounceIn .28s cubic-bezier(.34,1.4,.64,1) both"
       role="dialog"
       aria-modal="true"
       aria-labelledby="save-dialog-title"
     >
-      <!-- Header -->
-      <div class="relative pl-5 pr-12 pt-[18px] pb-[14px] border-b border-[rgba(255,255,255,.07)]">
+      <!-- Header: the original's spec, the reference every green dot points at -->
+      <div class="relative pl-[22px] pr-12 pt-5 pb-4 border-b border-[rgba(255,255,255,.06)]">
         <div id="save-dialog-title" class="text-[15px] font-bold text-[#eaf6f8]">Save</div>
-        <div v-if="sourceText" class="mt-[3px] text-[11.5px] text-[rgba(255,255,255,.42)]">
-          Original: <span class="font-['JetBrains_Mono'] font-semibold">{{ sourceText }}</span>
-        </div>
+        <div v-if="sourceText" class="mt-[5px] sd-mono text-[11px] text-[rgba(255,255,255,.5)]">{{ sourceText }}</div>
         <button
-          class="absolute top-[14px] right-[14px] w-[28px] h-[28px] rounded-[8px] flex items-center justify-center transition-colors hover:bg-[rgba(255,255,255,.1)] disabled:opacity-40 disabled:hover:bg-transparent"
+          class="absolute top-[16px] right-[16px] w-[28px] h-[28px] rounded-[8px] flex items-center justify-center transition-colors hover:bg-[rgba(255,255,255,.1)] disabled:opacity-40 disabled:hover:bg-transparent"
           style="color:rgba(255,255,255,.6)"
           aria-label="Close"
           title="Close"
@@ -366,11 +429,12 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
         </button>
       </div>
 
-      <div class="px-5 pt-4 pb-5 flex flex-col gap-[16px]">
-        <!-- Name: edited without its extension, which follows the format -->
-        <div class="flex flex-col gap-[6px]">
+      <div class="px-[22px] pt-5 pb-[22px] flex flex-col gap-5">
+        <!-- Name, edited without its extension (the format supplies it). A
+             name that would overwrite is settled right here. -->
+        <div class="flex flex-col gap-2">
           <label for="sd-name" class="sd-label">File name</label>
-          <div class="sd-field sd-name flex items-center gap-[2px]" :class="{ disabled: isSaving }">
+          <div class="sd-field sd-name flex items-center gap-[2px]" :class="{ disabled: isSaving, conflict: overwrites }">
             <input
               id="sd-name"
               ref="nameInput"
@@ -379,92 +443,124 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
               spellcheck="false"
               autocomplete="off"
               :disabled="isSaving"
+              :aria-describedby="overwrites ? 'sd-conflict' : undefined"
               @input="nameEdited = true"
               @blur="commitName"
               @keydown.enter.prevent="save"
             />
             <span class="sd-ext" aria-label="Extension">{{ extension }}</span>
           </div>
-        </div>
-
-        <!-- Location, and what saving there will do -->
-        <div class="flex flex-col gap-[6px]">
-          <span class="sd-label">Location</span>
-          <div class="flex items-center gap-2">
-            <div class="flex-1 min-w-0 flex items-center gap-[8px] text-[12.5px] font-semibold text-[#eaf6f8]" :title="locationText">
-              <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] text-[rgba(255,255,255,.4)] shrink-0 fill-none stroke-current" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-              <span class="truncate">{{ locationText }}</span>
+          <div v-if="overwrites" class="flex items-center justify-between gap-3" aria-live="polite">
+            <div id="sd-conflict" class="sd-conflict-text">
+              <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] shrink-0 fill-none stroke-current" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>
+              <span class="min-w-0">{{ plan === 'replace' ? 'This is the original’s name' : 'A file with this name is already here' }}</span>
             </div>
-            <BaseButton
-              v-if="supportsInPlace"
-              size="sm" color="ghost" :pill="false"
-              :disabled="isSaving"
-              title="Choose a location in the system dialog"
-              @click="browse"
-            >Browse…</BaseButton>
-          </div>
-          <!-- What saving here does. An overwrite is a warning and joins the
-               others under the format controls; this line keeps the rest. -->
-          <div v-if="!overwrites || canSwitchToFolder" class="sd-outcome">
-            <span v-if="!overwrites" class="min-w-0">{{ planText }}</span>
-            <button
-              v-if="canSwitchToFolder"
-              class="sd-link ml-auto shrink-0"
-              :disabled="isSaving"
-              @click="useFolderRoot = !useFolderRoot"
-            >{{ useFolderRoot ? 'Use the original’s folder' : `Save to ${folderName} instead` }}</button>
+            <div class="sd-toggle" role="radiogroup" aria-label="What to do with the existing file">
+              <button
+                type="button" role="radio" aria-checked="true" class="on"
+                :disabled="isSaving"
+                title="Write over the existing file"
+              >Replace</button>
+              <button
+                type="button" role="radio" aria-checked="false"
+                :disabled="isSaving || resolvingConflict"
+                title="Save under a new name and leave the existing file alone"
+                @click="keepBoth"
+              >Keep both</button>
+            </div>
           </div>
         </div>
 
-        <!-- Format -->
-        <div class="flex flex-col gap-[8px]">
-          <div class="flex items-baseline justify-between">
-            <span class="sd-label">Format</span>
-            <span class="sd-size" title="Estimated file size">{{ sizeText }}</span>
+        <!-- Location, and what saving there does -->
+        <div class="flex items-center gap-[10px]">
+          <svg viewBox="0 0 24 24" class="w-[16px] h-[16px] shrink-0 text-[rgba(255,255,255,.6)] fill-none stroke-current" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+          <div class="flex-1 min-w-0 flex flex-col gap-[3px]">
+            <span class="text-[12.5px] font-semibold text-[#eaf6f8] truncate" :title="locationText">{{ locationText }}</span>
+            <span v-if="!overwrites || canSwitchToFolder" class="sd-outcome">
+              <span v-if="!overwrites" class="truncate" :title="planText">{{ planText }}</span>
+              <button
+                v-if="canSwitchToFolder"
+                class="sd-link shrink-0"
+                :class="{ 'ml-auto': !overwrites }"
+                :disabled="isSaving"
+                @click="useFolderRoot = !useFolderRoot"
+              >{{ useFolderRoot ? 'Use the original’s folder' : `Save to ${folderName} instead` }}</button>
+            </span>
           </div>
-          <div class="sd-seg" role="radiogroup" aria-label="Format">
+          <BaseButton
+            v-if="supportsInPlace"
+            size="sm" color="ghost" :pill="false"
+            :disabled="isSaving"
+            title="Choose a location in the system dialog"
+            @click="browse"
+          >Browse…</BaseButton>
+        </div>
+
+        <!-- Format: cards that carry what each would weigh -->
+        <div class="flex flex-col gap-2">
+          <span class="sd-label">Format</span>
+          <div class="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Format">
             <button
-              v-for="id in FORMAT_IDS"
-              :key="id"
-              :class="{ on: format === id }"
+              v-for="c in formatCards"
+              :key="c.id"
+              type="button"
+              class="sd-card"
+              :class="{ on: format === c.id }"
               role="radio"
-              :aria-checked="format === id"
-              :disabled="isSaving || !formatAvailable(id, channels)"
-              :title="formatAvailable(id, channels) ? '' : 'MP3 carries mono or stereo only'"
-              @click="setFormat(id)"
-            >{{ FORMATS[id].label }}</button>
-          </div>
-
-          <div class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-[6px] items-end mt-[4px]">
-            <span class="sd-label">{{ format === 'mp3' ? 'Bitrate' : 'Bit depth' }}</span>
-            <span class="sd-label">Sample rate</span>
-
-            <select
-              v-if="format === 'mp3'"
-              v-model.number="bitrate"
-              class="sd-field pr-2"
-              aria-label="Bitrate"
-              :disabled="isSaving"
+              :aria-checked="format === c.id"
+              :disabled="isSaving || !c.available"
+              :title="c.available ? `${c.label} — estimated ${c.size}` : 'MP3 carries mono or stereo only'"
+              @click="setFormat(c.id)"
             >
-              <option v-for="b in MP3_BITRATES" :key="b" :value="b">{{ b }} kbps CBR{{ b === 192 ? ' (ACX)' : '' }}</option>
-            </select>
-            <div v-else class="sd-seg" role="radiogroup" aria-label="Bit depth">
+              <span class="flex items-center justify-between">
+                <span class="sd-card-name">{{ c.label }}</span>
+                <span v-if="matchesFormat(c.id)" class="sd-dot" title="Matches the original"><span class="sr-only">(original)</span></span>
+              </span>
+              <span class="sd-card-sub">{{ c.kind }} · {{ c.size }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Depth (or bitrate) and rate -->
+        <div class="grid grid-cols-[minmax(0,1fr)_128px] gap-3">
+          <div class="flex flex-col gap-2 min-w-0">
+            <span class="sd-label">{{ format === 'mp3' ? 'Bitrate' : 'Bit depth' }}</span>
+            <div v-if="format === 'mp3'" class="sd-select">
+              <select v-model.number="bitrate" aria-label="Bitrate" :disabled="isSaving">
+                <option v-for="b in MP3_BITRATES" :key="b" :value="b">{{ b }} kbps CBR{{ b === 192 ? ' (ACX)' : '' }}</option>
+              </select>
+              <span v-if="matchesBitrate" class="sd-dot sd-select-dot" title="Matches the original"></span>
+            </div>
+            <div v-else class="sd-toggle sd-toggle--wide" role="radiogroup" aria-label="Bit depth">
               <button
                 v-for="d in depthOptions"
                 :key="d.id"
+                type="button"
                 :class="{ on: bitDepth === d.id }"
                 role="radio"
                 :aria-checked="bitDepth === d.id"
                 :disabled="isSaving"
                 @click="bitDepth = d.id"
-              >{{ d.label.replace(' PCM', '') }}</button>
+              >
+                {{ d.label.replace(' PCM', '') }}
+                <span v-if="matchesDepth(d.id)" class="sd-dot" title="Matches the original"><span class="sr-only">(original)</span></span>
+              </button>
             </div>
-            <select v-model.number="sampleRate" class="sd-field pr-2" aria-label="Sample rate" :disabled="isSaving">
-              <option v-for="r in rateOptions" :key="r" :value="r">{{ formatRate(r) }}</option>
-            </select>
           </div>
+          <div class="flex flex-col gap-2">
+            <span class="sd-label">Sample rate</span>
+            <div class="sd-select">
+              <select v-model.number="sampleRate" aria-label="Sample rate" :disabled="isSaving">
+                <option v-for="r in rateOptions" :key="r" :value="r">{{ formatRate(r) }}</option>
+              </select>
+              <span v-if="matchesRate" class="sd-dot sd-select-dot" title="Matches the original"></span>
+            </div>
+          </div>
+        </div>
 
-          <ul v-if="notices.length" class="flex flex-col gap-[5px] mt-[2px]" aria-live="polite">
+        <div v-if="showMatchLegend || notices.length" class="flex flex-col gap-[6px] -mt-[6px]">
+          <div v-if="showMatchLegend" class="sd-legend"><span class="sd-dot"></span>Matches the original</div>
+          <ul v-if="notices.length" class="flex flex-col gap-[5px]" aria-live="polite">
             <li v-for="n in notices" :key="n.text" class="sd-note" :class="n.kind">
               <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] shrink-0 mt-[1px] fill-none stroke-current" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>
               <span class="min-w-0">{{ n.text }}</span>
@@ -474,10 +570,10 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
       </div>
 
       <!-- Footer: the working folder (an app setting) on the left, actions right -->
-      <div class="px-5 py-[12px] border-t border-[rgba(255,255,255,.07)] flex items-center gap-2">
+      <div class="px-[22px] py-[14px] border-t border-[rgba(255,255,255,.06)] flex items-center gap-2">
         <div v-if="folderSupported" class="flex-1 min-w-0 flex items-center gap-[7px] text-[11px] text-[rgba(255,255,255,.45)]">
-          <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] shrink-0 fill-none stroke-current" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
           <template v-if="folderName">
+            <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] shrink-0 fill-none stroke-current" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
             <span class="truncate" :title="`Working folder: ${folderName}`">
               <span class="sr-only">Working folder: </span><span class="font-semibold text-[rgba(255,255,255,.7)]">{{ folderName }}</span>
             </span>
@@ -494,7 +590,7 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
           </template>
           <button
             v-else
-            class="sd-link truncate"
+            class="sd-link truncate text-[12px]"
             :disabled="isSaving"
             title="Show where files go, and save into the folder without the system dialog"
             @click="pickFolder"
@@ -509,50 +605,161 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
 </template>
 
 <style scoped>
+.sd-mono { font-family: 'JetBrains Mono', monospace; font-weight: 500; }
 .sd-label {
   font-size: 10.5px;
   font-weight: 700;
-  letter-spacing: .04em;
+  letter-spacing: .11em;
   text-transform: uppercase;
-  color: rgba(255,255,255,.4);
+  color: rgba(255,255,255,.42);
 }
 .sd-field {
   background: rgba(255,255,255,.04);
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.1);
-  padding: 7px 10px;
-  font-size: 12.5px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.1);
+  padding: 10px 13px;
+  font-size: 13px;
   font-weight: 600;
   color: #eaf6f8;
   outline: none;
+  transition: border-color .15s;
 }
-.sd-field:focus,
-.sd-name:focus-within {
-  box-shadow: inset 0 0 0 1px #35d3e6;
-}
-.sd-name.disabled {
-  opacity: .6;
-}
+.sd-name:focus-within { border-color: #35d3e6; }
+.sd-name.conflict,
+.sd-name.conflict:focus-within { border-color: rgba(224,184,74,.55); }
+.sd-name.disabled { opacity: .6; }
 .sd-ext {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11.5px;
-  color: rgba(255,255,255,.4);
+  font-size: 12px;
+  color: rgba(255,255,255,.42);
   user-select: none;
+}
+.sd-conflict-text {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #e0b84a;
+}
+
+/* A small segmented choice: Replace / Keep both, and the bit depths. */
+.sd-toggle {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.09);
+}
+.sd-toggle button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,.65);
+  transition: background-color .15s, color .15s;
+}
+.sd-toggle button:hover:not(:disabled):not(.on) { background: rgba(255,255,255,.06); color: #eaf6f8; }
+.sd-toggle button.on { background: rgba(224,184,74,.14); color: #e0b84a; cursor: default; }
+.sd-toggle--wide {
+  gap: 3px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.03);
+  border-color: rgba(255,255,255,.07);
+}
+.sd-toggle--wide button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 0;
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: rgba(255,255,255,.75);
+}
+.sd-toggle--wide button.on {
+  background: linear-gradient(180deg, #7ef0ff, #5ce3f8);
+  color: #08161a;
+}
+.sd-toggle--wide button.on .sd-dot { background: #08161a; opacity: .5; }
+
+.sd-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.07);
+  text-align: left;
+  transition: background-color .15s, border-color .15s;
+}
+.sd-card:hover:not(:disabled):not(.on) { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14); }
+.sd-card.on { background: rgba(53,211,230,.10); border-color: rgba(53,211,230,.5); }
+.sd-card:disabled:not(.on) { opacity: .4; cursor: not-allowed; }
+.sd-card-name { font-size: 13px; font-weight: 700; color: rgba(255,255,255,.85); }
+.sd-card.on .sd-card-name { color: #7fe9f6; }
+.sd-card-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: rgba(255,255,255,.42);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sd-card.on .sd-card-sub { color: rgba(255,255,255,.55); }
+
+/* A native select (for its keyboard and phone pickers) in the field's skin,
+   with room on the left of the chevron for the "matches" dot. */
+.sd-select { position: relative; }
+.sd-select select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 8px 30px 8px 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.04) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,.6)' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 10px center / 12px;
+  border: 1px solid rgba(255,255,255,.09);
+  font: 600 12px 'JetBrains Mono', monospace;
+  color: #eaf6f8;
+  outline: none;
+  cursor: pointer;
+}
+.sd-select select:focus-visible { border-color: #35d3e6; }
+.sd-select select:disabled { opacity: .6; cursor: default; }
+.sd-select option { background: #14181d; font-family: 'Inter', sans-serif; }
+.sd-select-dot { position: absolute; right: 28px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+
+.sd-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 9px;
+  background: #5fd39a;
+}
+.sd-card .sd-dot { width: 6px; height: 6px; }
+.sd-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(255,255,255,.42);
 }
 .sd-outcome {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 18px;
+  gap: 8px;
+  min-width: 0;
   font-size: 11px;
   line-height: 1.35;
-  color: rgba(255,255,255,.5);
-}
-.sd-size {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: rgba(255,255,255,.4);
+  color: rgba(255,255,255,.45);
 }
 .sd-note {
   display: flex;
@@ -573,62 +780,15 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
   justify-content: center;
   color: rgba(255,255,255,.5);
 }
-.sd-icon:hover:not(:disabled) {
-  background: rgba(255,255,255,.1);
-  color: rgba(255,255,255,.8);
-}
+.sd-icon:hover:not(:disabled) { background: rgba(255,255,255,.1); color: rgba(255,255,255,.8); }
+.sd-link { color: #7fe9f6; font-weight: 600; }
+.sd-link:hover:not(:disabled) { text-decoration: underline; }
+.sd-link:disabled { opacity: .4; }
 .sd-link:focus-visible,
 .sd-icon:focus-visible,
-.sd-seg button:focus-visible {
+.sd-card:focus-visible,
+.sd-toggle button:focus-visible {
   outline: 2px solid #35d3e6;
   outline-offset: 1px;
-  border-radius: 4px;
-}
-.sd-seg button:focus-visible {
-  outline-offset: -2px;
-}
-.sd-link {
-  color: #35d3e6;
-  font-weight: 600;
-}
-.sd-link:hover:not(:disabled) {
-  text-decoration: underline;
-}
-.sd-link:disabled {
-  opacity: .4;
-}
-.sd-seg {
-  display: flex;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.1);
-}
-.sd-seg button {
-  flex: 1;
-  padding: 7px 0;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: rgba(255,255,255,.6);
-  transition: background-color .15s, color .15s;
-}
-/* A divider between items, drawn as an inset shadow so it takes no width.
-   None on either side of the selected item: its fill is the edge there. */
-.sd-seg button + button {
-  box-shadow: inset 1px 0 0 rgba(255,255,255,.1);
-}
-.sd-seg button.on,
-.sd-seg button.on + button {
-  box-shadow: none;
-}
-.sd-seg button.on {
-  background: #35d3e6;
-  color: #08161a;
-}
-.sd-seg button:disabled:not(.on) {
-  color: rgba(255,255,255,.25);
-  cursor: not-allowed;
-}
-select.sd-field option {
-  background: #14181d;
 }
 </style>

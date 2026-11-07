@@ -476,7 +476,7 @@ async function applyAndClose() {
                down level with the Knee keys — so it does not read as part of Body. -->
           <section class="vp-col vp-detail" aria-label="Detail">
             <hr class="vp-rule" aria-hidden="true">
-            <div class="vp-title-row"><span class="vp-title">Lo Detail</span></div>
+            <div class="vp-title-row"><span class="vp-title">Enhance Detail</span></div>
             <div class="vp-knob-row">
               <ModulaKnob
                 variant="halo" :size="72"
@@ -655,7 +655,7 @@ async function applyAndClose() {
   --vp-note: #c9d0d6;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 2px;
   padding: 10px 12px 12px;
 }
 .vp.is-light {
@@ -674,7 +674,7 @@ async function applyAndClose() {
 .vp-right { grid-column: 4 / 6; align-self: stretch; display: flex; flex-direction: column; gap: 14px; }
 /* 170 px at the right edge: the top row's Body column, so the two knobs share a centre. */
 .vp-body-col { align-self: stretch; display: flex; flex-direction: column; justify-content: space-between; gap: 14px; }
-.vp-detail { gap: 8px; }
+.vp-detail { gap: 8px; margin-top: 20px}
 /* An engraved line, as the redesign draws it (a groove and its highlight). */
 .vp-rule { width: 140px; height: 1px; margin: 0 0 4px; border: none; background: rgba(0, 0, 0, .3); box-shadow: 0 1px 0 rgba(255, 255, 255, .05); }
 .vp.is-light .vp-rule { background: rgba(0, 0, 0, .16); box-shadow: 0 1px 0 rgba(255, 255, 255, .6); }
@@ -794,7 +794,7 @@ async function applyAndClose() {
 .vp-listen .m-caption { color: var(--vp-cap); }
 .vp-measured { text-align: center; color: var(--vp-note); }
 .vp-bench { padding-top: 8px; border-top: 1px dashed rgba(127, 127, 127, .25); }
-.vp-bench-wrap { margin-top: -6px; border-top: 1px dashed rgba(127, 127, 127, .3); padding-top: 8px; display: flex; flex-direction: column; align-items: center; }
+.vp-bench-wrap { margin-top: 14px; border-top: 1px dashed rgba(127, 127, 127, .3); padding-top: 8px; display: flex; flex-direction: column; align-items: center; }
 .vp-bench-toggle {
   border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer;
   background: linear-gradient(180deg, #34383e, #25282d);

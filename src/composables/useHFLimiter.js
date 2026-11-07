@@ -250,7 +250,7 @@ const copies = pluginCopies((copy, life) => {
   return useHFLimiter
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useHFLimiter() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useHFLimiter(copy) {
+  return copies(copy)()
 }

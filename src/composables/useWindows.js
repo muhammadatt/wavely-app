@@ -42,6 +42,9 @@ const isPluginWindow = id => !ALONGSIDE_WINDOW_IDS.has(id)
 
 const inChainGroup = id => id === CHAIN_WINDOW_ID || isChainCopyId(id)
 
+/** The chain window or one of its slots' windows. */
+export const isChainGroupWindow = inChainGroup
+
 /** A plugin window that is not the chain's: while one is open the chain is suspended. */
 export const isSoloPluginWindow = id => isPluginWindow(id) && !inChainGroup(id)
 

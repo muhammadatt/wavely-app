@@ -667,11 +667,11 @@ const ALL_OPERATIONS = [
   // on screen, so it takes no row in a category list; the palette still finds it.
   {
     id: 'plugin-chain',
-    label: 'Plugin Chain',
-    desc: 'Order, bypass and apply every active plugin at once',
+    label: 'Effect Chain',
+    desc: 'Order, bypass and apply every active effect at once',
     category: null,
     icon: 'chain',
-    keywords: ['chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],
+    keywords: ['effect chain', 'plugin chain', 'chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],
     requires: 'selection',
     feature: 'pluginChainApply',
     surface: 'window',

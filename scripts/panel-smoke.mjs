@@ -185,7 +185,7 @@ try {
     const chainWin = page.locator('.win-frame').filter({ hasText: 'PLUGIN CHAIN' })
     const rowNames = () => chainWin.locator('.pc-name').allInnerTexts()
     const addFromPicker = async (label) => {
-      await chainWin.getByRole('button', { name: '+ Add plugin' }).dispatchEvent('click'); await page.waitForTimeout(300)
+      await chainWin.getByRole('button', { name: 'Add plugin', exact: true }).dispatchEvent('click'); await page.waitForTimeout(300)
       await page.keyboard.type(label); await page.waitForTimeout(250)
       await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
     }

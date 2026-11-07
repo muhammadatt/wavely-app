@@ -109,9 +109,9 @@ const copies = pluginCopies((copy, life) => {
   return useManualEq
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useManualEq() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useManualEq(copy) {
+  return copies(copy)()
 }
 
 /**

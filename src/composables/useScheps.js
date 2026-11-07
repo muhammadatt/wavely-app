@@ -545,7 +545,7 @@ const copies = pluginCopies((copy, life) => {
   return useScheps
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useScheps() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useScheps(copy) {
+  return copies(copy)()
 }

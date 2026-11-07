@@ -25,7 +25,7 @@ export default {
   ],
 
   notes: [
-    'Noise reduction is an offline process: it runs on the server, so there is no real-time preview and it cannot take a Plugin Chain slot',
+    'Noise reduction is an offline process: it runs on the server, so there is no real-time preview and it cannot take a Effect Chain slot',
     'Run it before compression or loudness normalisation, since both bring the noise floor up',
     'The level is left as the model returned it. It is not re-normalised the way the mastering presets do',
     'Noise Reduction is a Pro feature',
