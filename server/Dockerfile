@@ -1,9 +1,9 @@
 # Instant Polish API server: Express plus the Python/PyTorch pipeline.
 #
-# Build from the REPOSITORY ROOT. The server imports two shared modules from
-# src/ (src/audio/presets.js and src/auth/plans.js) and reads the referenceEQ
+# Build from the REPOSITORY ROOT. The server imports shared modules from
+# src/ (presets.js, plans.js, noiseReductionParams.js) and reads the referenceEQ
 # stage's curves from data/reference_curves/, so the build context has to
-# contain all three:
+# contain them (test/dockerImage.test.js checks the list):
 #
 #   docker build -f server/Dockerfile -t wavely-server .
 #   docker run -p 127.0.0.1:3001:3001 --env-file server/.env -v wavely-models:/models wavely-server
@@ -66,6 +66,7 @@ WORKDIR /app
 COPY --from=node-deps /app/server/node_modules server/node_modules
 COPY src/audio/presets.js src/audio/presets.js
 COPY src/auth/plans.js    src/auth/plans.js
+COPY src/audio/noiseReductionParams.js src/audio/noiseReductionParams.js
 COPY data/reference_curves data/reference_curves
 COPY server server
 
