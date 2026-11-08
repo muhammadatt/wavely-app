@@ -20,7 +20,16 @@ const gate = createEntitlementGate({
   probeDuration: async () => 3600,
 })
 
+// In production the gate and the route share one probe, and the route reuses
+// the gate's reading; the tests wire them the same way.
+const gateWith = probeDuration => createEntitlementGate({
+  verify: async (token) => { if (!PLANS[token]) throw new Error('bad token'); return { id: token } },
+  planFor: async (id) => PLANS[id],
+  probeDuration,
+})
+
 async function serve(deps) {
+  if (deps.gate === gate && deps.probeDuration) deps = { ...deps, gate: gateWith(deps.probeDuration) }
   const app = express()
   app.use('/api', createAnalyzeRoute(deps))
   const server = await new Promise(r => { const s = app.listen(0, () => r(s)) })
@@ -89,5 +98,14 @@ test('the cap is two hours, and an unreadable duration is left to the analysis',
   const s = await serve({ gate, kinds, probeDuration: async () => null })
   try {
     assert.equal((await upload(s.base, 'vad', 'tok-free')).status, 200)
+  } finally { s.close() }
+})
+
+test('a signed-in analysis probes the upload once: the route reuses the gate\'s reading', async () => {
+  let probes = 0
+  const s = await serve({ gate, kinds, probeDuration: async () => { probes++; return 60 } })
+  try {
+    assert.equal((await upload(s.base, 'vad', 'tok-free')).status, 200)
+    assert.equal(probes, 1)
   } finally { s.close() }
 })

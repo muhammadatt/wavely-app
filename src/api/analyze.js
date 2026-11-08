@@ -14,9 +14,7 @@
 import {
   renderRegionToBuffer, floatChannelsToWavBlob, renderVadWavBlob,
 } from '../audio/processing.js'
-import { authHeaders, serverError } from './serverError.js'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+import { uploadAudio, postWithUpload } from './uploadAudio.js'
 
 /**
  * Rescale event sample offsets from the analysis rate to the project's.
@@ -56,17 +54,10 @@ export async function analyzeSibilance({
   const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
   const wavBlob = floatChannelsToWavBlob(channelData, sampleRate, channels)
 
-  const formData = new FormData()
-  formData.append('file', wavBlob, 'selection.wav')
-  formData.append('params', JSON.stringify(params))
-
-  const res = await fetch(`${API_BASE}/api/analyze/sibilance`, {
-    method: 'POST',
-    headers: await authHeaders(),
-    body: formData,
-  })
-
-  if (!res.ok) throw await serverError(res, 'Analysis failed')
+  const uploadId = await uploadAudio(wavBlob, { filename: 'selection.wav' })
+  const res = await postWithUpload('/api/analyze/sibilance', {
+    uploadId, params: JSON.stringify(params),
+  }, 'Analysis failed')
 
   const result = await res.json()
   return {
@@ -106,17 +97,9 @@ export async function analyzeVoiceActivity({ segments, start, end, sampleRate, c
   // See renderVadWavBlob for what that costs and what it does not.
   const wavBlob = await renderVadWavBlob(channelData, sampleRate)
 
-  const formData = new FormData()
-  formData.append('file', wavBlob, 'selection.wav')
-  formData.append('params', JSON.stringify({}))
-
-  const res = await fetch(`${API_BASE}/api/analyze/vad`, {
-    method: 'POST',
-    headers: await authHeaders(),
-    body: formData,
-  })
-
-  if (!res.ok) throw await serverError(res, 'Analysis failed')
-
+  const uploadId = await uploadAudio(wavBlob, { filename: 'selection.wav' })
+  const res = await postWithUpload('/api/analyze/vad', {
+    uploadId, params: JSON.stringify({}),
+  }, 'Analysis failed')
   return res.json()
 }

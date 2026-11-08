@@ -11,12 +11,22 @@
 import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
 import { decodeWav } from '../audio/wavDecode.js'
 import { toServerParams } from '../audio/noiseReductionParams.js'
-import { authHeaders, serverError } from './serverError.js'
+import { serverError } from './serverError.js'
+import { uploadAudio, postWithUpload, discardAudioUpload } from './uploadAudio.js'
+import { pollJob } from './pollJob.js'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 const POLL_INTERVAL_MS = 1000
-const MAX_WAIT_MS = 30 * 60 * 1000
+// Polls spent processing (30 min) and, separately, polls spent waiting in the
+// shared job queue behind mastering jobs (`queuePosition` set, 60 min) — the
+// line must not use up the processing budget, or the client would give up on
+// a job the server then runs.
+const MAX_PROCESSING_POLLS = 30 * 60
+const MAX_QUEUE_POLLS = 60 * 60
+const CANCEL_CHECK_MS = 250
+
+const CANCELLED = Symbol('cancelled')
 
 /**
  * Denoise [start, end) of `segments` on the server.
@@ -31,9 +41,10 @@ const MAX_WAIT_MS = 30 * 60 * 1000
  * @param {Function} [options.isCancelled] polled between requests; true stops
  *                                        waiting (the server job runs out)
  * @param {Function} [options.onStage]   called with a short stage name as the
- *                                        request moves: 'upload', 'denoise'
- *                                        (with the server's progress text, if
- *                                        any), 'download'
+ *                                        request moves: 'upload' (with a
+ *                                        percentage), 'denoise' (with the
+ *                                        server's progress text, if any),
+ *                                        'download'
  * @returns {Promise<{ dry: Float32Array[], wet: Float32Array[], report: object|null } | null>}
  *   `dry` is what was sent, `wet` the server's result fitted to the same length
  *   and channel count; null when cancelled
@@ -44,33 +55,61 @@ export async function denoiseRegion({
 }) {
   onStage('upload')
   const dry = renderRegionToBuffer(segments, start, end, sampleRate, channels)
-  const formData = new FormData()
-  formData.append('file', floatChannelsToWavBlob(dry, sampleRate, channels), 'selection.wav')
-  formData.append('params', JSON.stringify(toServerParams(params)))
 
-  const submit = await fetch(`${API_BASE}/api/spot/noise_reduction`, {
-    method: 'POST',
-    headers: await authHeaders(),
-    body: formData,
-  })
-  if (!submit.ok) throw await serverError(submit, 'Noise reduction failed')
+  // Cancel is a poll, so watch it and abort the upload: otherwise the rest of
+  // a chapter keeps going up after the user gave up on it.
+  const abort = new AbortController()
+  const watch = setInterval(() => { if (isCancelled()) abort.abort() }, CANCEL_CHECK_MS)
+
+  let uploadId
+  try {
+    // A chapter is hundreds of MB of float WAV: it goes up as a resumable
+    // upload in chunks under Cloudflare's 100 MB request cap, then the job
+    // request names it (src/api/uploadAudio.js). A cancelled upload deletes
+    // itself.
+    uploadId = await uploadAudio(floatChannelsToWavBlob(dry, sampleRate, channels), {
+      filename: 'selection.wav',
+      signal: abort.signal,
+      onProgress: (sent, total) => onStage('upload', `${Math.round((total ? sent / total : 1) * 100)}%`),
+    })
+  } catch (err) {
+    if (abort.signal.aborted || isCancelled()) return null
+    throw err
+  } finally {
+    clearInterval(watch)
+  }
+  if (isCancelled()) {
+    // Finished, but nobody will use it: give back the caller's upload quota.
+    await discardAudioUpload(uploadId)
+    return null
+  }
+
+  const submit = await postWithUpload('/api/spot/noise_reduction', {
+    uploadId, params: JSON.stringify(toServerParams(params)),
+  }, 'Noise reduction failed')
   const { jobId } = await submit.json()
   if (isCancelled()) return null
   onStage('denoise', null)
 
-  let job = null
-  const deadline = Date.now() + MAX_WAIT_MS
-  while (Date.now() < deadline) {
-    await sleep(POLL_INTERVAL_MS)
-    if (isCancelled()) return null
-    const poll = await fetch(`${API_BASE}/api/jobs/${jobId}`)
-    if (!poll.ok) throw await serverError(poll, 'Noise reduction status check failed')
-    job = await poll.json()
-    onStage('denoise', job.progress ?? null)
-    if (job.status === 'done') break
-    if (job.status === 'error') throw new Error(job.error || 'Noise reduction failed on the server')
+  let job
+  try {
+    job = await pollJob({
+      interval: POLL_INTERVAL_MS,
+      maxPolls: MAX_PROCESSING_POLLS,
+      maxQueuePolls: MAX_QUEUE_POLLS,
+      onProgress: progress => onStage('denoise', progress),
+      fetchStatus: async () => {
+        if (isCancelled()) throw CANCELLED
+        const poll = await fetch(`${API_BASE}/api/jobs/${jobId}`)
+        if (!poll.ok) throw await serverError(poll, 'Noise reduction status check failed')
+        return poll.json()
+      },
+    })
+  } catch (err) {
+    if (err === CANCELLED) return null
+    if (/timed out/.test(err?.message)) throw new Error('Noise reduction timed out — try a shorter selection')
+    throw err
   }
-  if (job?.status !== 'done') throw new Error('Noise reduction timed out — try a shorter selection')
   if (isCancelled()) return null
 
   onStage('download')
@@ -96,8 +135,4 @@ export function fitToDry(wet, dry) {
     out.set(w.length > d.length ? w.subarray(0, d.length) : w)
     return out
   })
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }
