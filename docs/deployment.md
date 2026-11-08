@@ -11,7 +11,7 @@ app, a staging app and optional per-PR previews.
 | File | Purpose |
 |---|---|
 | `server/Dockerfile` | Node 22 + Python 3.11 venv (CPU PyTorch 2.0.1, DeepFilterNet3, Demucs, Silero, …). |
-| `.dockerignore` (repo root) | Whitelist: `server/`, the two shared modules the server imports from `src/` (`src/audio/presets.js`, `src/auth/plans.js`) and `data/reference_curves/` (the `referenceEQ` stage's curves). |
+| `.dockerignore` (repo root) | Whitelist: `server/`, the shared modules the server imports from `src/` (`presets.js`, `plans.js`, `noiseReductionParams.js`; `server/test/dockerImage.test.js` fails if one is missing) and `data/reference_curves/` (the `referenceEQ` stage's curves). |
 
 **Build from the repository root**, not `server/`, because of the `src/` and `data/` dependencies:
 
