@@ -5,6 +5,7 @@
 !server/
 !src/audio/presets.js
 !src/auth/plans.js
+!src/audio/noiseReductionParams.js
 !data/reference_curves/
 
 server/node_modules
