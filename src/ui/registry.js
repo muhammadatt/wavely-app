@@ -60,7 +60,7 @@ const ALL_CATEGORIES = [
   {
     id: 'edit',
     label: 'Edit',
-    icon: 'copy',
+    icon: 'catEdit',
     desc: 'Cut, arrange and shape the content',
     panel: null,
   },
@@ -69,35 +69,35 @@ const ALL_CATEGORIES = [
   {
     id: 'level',
     label: 'Level',
-    icon: 'loudness',
+    icon: 'catLevel',
     desc: 'Hit a peak or loudness target, set volume and fades',
     panel: null,
   },
   {
     id: 'dynamics',
     label: 'Dynamics',
-    icon: 'dynamics',
+    icon: 'catDynamics',
     desc: 'Even out phrases, compress, limit and add density',
     panel: null,
   },
   {
     id: 'tone',
     label: 'Tone',
-    icon: 'eq',
+    icon: 'catTone',
     desc: 'EQ, air and saturation',
     panel: null,
   },
   {
     id: 'clean',
     label: 'Fix',
-    icon: 'clean',
+    icon: 'catFix',
     desc: 'Tame sibilance, harshness, resonances and hum',
     panel: null,
   },
   {
     id: 'master',
     label: 'Master',
-    icon: 'master',
+    icon: 'catMaster',
     desc: 'One-click mastering chains',
     panel: PresetsPanel,
     // Dev-only for now: gated by the same switch as the operations'
@@ -120,6 +120,14 @@ const ALL_CATEGORIES = [
  *   feature   optional plan feature (src/auth/plans.js) the operation's Apply
  *             needs. The row stays open to everyone — preview is free — and
  *             shows a PRO tag while the user's plan lacks it
+ *   offline   true for an OFFLINE process: no live preview, one button that
+ *             processes the selection, Undo to revert. Most of the app is
+ *             real-time, so the few that are not say so wherever they appear —
+ *             a RENDER tag on their row in every list and palette, and a
+ *             distinct window (FloatingWindow `offline`) — rather than being
+ *             moved to a menu of their own, which would pull them out of the
+ *             category they belong to. Pairs with the plan feature's own
+ *             `offline` flag (test/ui/offlineOperations.test.js).
  *   action    required for 'immediate'. Receives the editor state object rather
  *             than calling useEditorState() here — this module is imported by
  *             the state's own consumers, and reaching back into it would make
@@ -316,8 +324,9 @@ const ALL_OPERATIONS = [
     ],
     requires: 'selection',
     feature: 'autoLevel',
-    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
-    chain: true,
+    // An offline process (Level, then Undo if it is wrong) with no live node,
+    // so it cannot take a Plugin Chain slot. See OFFLINE below.
+    offline: true,
     surface: 'window',
     component: AutoLevelModal,
   },
@@ -510,8 +519,8 @@ const ALL_OPERATIONS = [
   // ---- Fix (windows) ----
   {
     // First under Fix: noise is the most common thing a user opens it for.
-    // Server-side (DeepFilterNet3 / RNNoise), so no live preview and no chain
-    // slot — the window auditions a processed copy instead.
+    // Server-side (DeepFilterNet3 / RNNoise), so an offline process: no live
+    // preview and no chain slot — Process the selection, Undo if it is wrong.
     id: 'noise-reduction',
     label: 'Noise Reduction',
     desc: 'Remove background noise, hiss and room tone',
@@ -521,6 +530,7 @@ const ALL_OPERATIONS = [
     keywords: ['denoise', 'noise', 'hiss', 'background', 'room tone', 'deepfilternet', 'df3', 'rnnoise', 'clean'],
     requires: 'selection',
     feature: 'noiseReduction',
+    offline: true,
     surface: 'window',
     component: NoiseReductionModal,
   },
@@ -657,11 +667,11 @@ const ALL_OPERATIONS = [
   // on screen, so it takes no row in a category list; the palette still finds it.
   {
     id: 'plugin-chain',
-    label: 'Plugin Chain',
-    desc: 'Order, bypass and apply every active plugin at once',
+    label: 'Effect Chain',
+    desc: 'Order, bypass and apply every active effect at once',
     category: null,
     icon: 'chain',
-    keywords: ['chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],
+    keywords: ['effect chain', 'plugin chain', 'chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],
     requires: 'selection',
     feature: 'pluginChainApply',
     surface: 'window',

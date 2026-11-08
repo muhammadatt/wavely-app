@@ -236,7 +236,7 @@ const copies = pluginCopies((copy, life) => {
   return useInflator
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useInflator() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useInflator(copy) {
+  return copies(copy)()
 }

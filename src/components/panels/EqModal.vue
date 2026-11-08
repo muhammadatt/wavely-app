@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useManualEq } from '../../composables/useManualEq.js'
 import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
+import { eqSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { PARAMETRIC_EQ_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 import LevelMeter from '../meters/LevelMeter.vue'
@@ -31,10 +32,7 @@ const TRIM_MIN_DB = -12
 const TRIM_MAX_DB = 12
 const fmtTrim = v => `${v > 0.05 ? '+' : ''}${(Math.abs(v) < 0.05 ? 0 : v).toFixed(1)} dB`
 
-const presets = usePluginPresets(PARAMETRIC_EQ_PRESET_PLUGIN, {
-  read: () => eq.presetParams(),
-  write: p => eq.applyPreset(p),
-})
+const presets = usePluginPresets(PARAMETRIC_EQ_PRESET_PLUGIN, eqSettings(eq))
 
 /**
  * Taller than the 200 px other faceplates use, by what removing the instruction

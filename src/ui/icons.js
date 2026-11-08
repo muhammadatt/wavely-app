@@ -27,6 +27,18 @@ export const ICONS = {
   clean: '<path d="M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z"/>',
   master: '<path d="M3.5 18a9 9 0 1117 0"/><path d="M12 18l4.5-5"/><circle cx="12" cy="18" r="1.3"/>',
 
+  // The toolbar's category icons, design 1a "Studio objects" (owner, November
+  // 2026; docs/design/toolbar-icons/): each is the tool itself. Separate keys
+  // from the operation icons they replaced on the toolbar (copy, loudness,
+  // dynamics, eq, clean, master), which operations still use. The Chain
+  // button keeps `chain`.
+  catEdit: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>',
+  catLevel: '<path d="M12 3v8M12 17v4"/><rect x="8" y="11" width="8" height="6" rx="1.5"/>',
+  catDynamics: '<path d="M12 3v6M9 6l3 3 3-3M12 21v-6M9 18l3-3 3 3M4 12h16"/>',
+  catTone: '<path d="M3 18h3c3 0 3-12 6-12s3 12 6 12h3"/>',
+  catFix: '<path d="M4 20 15 9M17 3v4M15 5h4M20 11v3M18.5 12.5h3"/>',
+  catMaster: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/>',
+
   // Edit operations
   // Trim: crop marks. Was a byte-identical copy of the `edit` pencil, so the
   // category and its first row drew the same glyph.
@@ -100,7 +112,7 @@ export const ICONS = {
   // smooth and centred.
   spectrum: '<path d="M3 20V9M6.5 20v-5M10 20V4M13.5 20v-8M17 20V7M20.5 20v-4"/><path d="M2 22h20" opacity=".35"/>',
   // Plugin chain: three units in series joined by the signal line.
-  chain: '<rect x="2" y="8" width="5" height="8" rx="1.5"/><rect x="9.5" y="8" width="5" height="8" rx="1.5"/><rect x="17" y="8" width="5" height="8" rx="1.5"/><path d="M7 12h2.5M14.5 12H17"/>',
+  chain: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
 
   // Presets — keyed by preset id so PresetsPanel can look them up directly
   acx_audiobook: '<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>',
@@ -119,6 +131,8 @@ export const ICONS = {
 
   // UI
   check: '<polyline points="20 6 9 17 4 12"/>',
+  // Offline processes: rendered once, not heard live.
+  offline: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',

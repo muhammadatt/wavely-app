@@ -15,9 +15,7 @@
  */
 
 import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
-import { authHeaders, serverError } from './serverError.js'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+import { uploadAudio, postWithUpload } from './uploadAudio.js'
 
 /**
  * Run a spot effect on a region of the timeline.
@@ -38,18 +36,10 @@ export async function runSpotEffect({
   const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
   const wavBlob = floatChannelsToWavBlob(channelData, sampleRate, channels)
 
-  const formData = new FormData()
-  formData.append('file', wavBlob, 'selection.wav')
-  formData.append('params', JSON.stringify(params))
-
-  const res = await fetch(`${API_BASE}/api/spot/${operation}`, {
-    method: 'POST',
-    headers: await authHeaders(),
-    body: formData,
-  })
-
-  if (!res.ok) throw await serverError(res, 'Spot effect failed')
-
+  const uploadId = await uploadAudio(wavBlob, { filename: 'selection.wav' })
+  const res = await postWithUpload(`/api/spot/${operation}`, {
+    uploadId, params: JSON.stringify(params),
+  }, 'Spot effect failed')
   return await res.blob()
 }
 

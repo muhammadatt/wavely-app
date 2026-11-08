@@ -5,13 +5,12 @@ import {
   NR_DF3_LIMIT_MAX_DB,
   toServerParams,
   parseServerParams,
-  serverParamsKey,
   blendDryWet,
-  previewWindow,
-  NR_PREVIEW_SECONDS,
+  serverParamsKey,
+  engineFor,
 } from '../../src/audio/noiseReductionParams.js'
 import { decodeWav } from '../../src/audio/wavDecode.js'
-import { FEATURES, FREE_PREVIEW_SECONDS } from '../../src/auth/plans.js'
+import { FEATURES } from '../../src/auth/plans.js'
 
 test('the defaults send DF3 at the chain’s heavy tier and keep Mix in the browser', () => {
   assert.deepEqual(toServerParams(NOISE_REDUCTION_DEFAULTS), {
@@ -34,9 +33,16 @@ test('a setting the chosen engine does not read is not sent', () => {
   })
 })
 
-test('the result key moves with what the server reads and nothing else', () => {
+test('the two pass switches map onto the server engine, and both off is nothing to send', () => {
+  assert.equal(engineFor(true, false), 'df3')
+  assert.equal(engineFor(false, true), 'rnnoise')
+  assert.equal(engineFor(true, true), 'both')
+  assert.equal(engineFor(false, false), null)
+})
+
+test('the held-result key moves with what the server reads and nothing else', () => {
   const base = { ...NOISE_REDUCTION_DEFAULTS, engine: 'rnnoise' }
-  // Mix and an unused DF3 cap share a result.
+  // Mix and an unused DF3 cap reuse a result.
   assert.equal(serverParamsKey(base), serverParamsKey({ ...base, mix: 0.3, df3LimitDb: 9 }))
   assert.notEqual(serverParamsKey(base), serverParamsKey({ ...base, protectConsonants: false }))
   assert.notEqual(serverParamsKey(base), serverParamsKey({ ...base, engine: 'both' }))
@@ -62,30 +68,10 @@ test('Mix is a linear dry/wet blend, bit-exact at its ends', () => {
   assert.deepEqual(Array.from(blendDryWet(dry, [new Float32Array([0])], 0.5)[0]), [0.5, 0.25, -0.125])
 })
 
-test('noise reduction is a server feature with a free preview', () => {
+test('noise reduction is a Pro-only offline server feature, with no free preview', () => {
   assert.deepEqual(FEATURES.noiseReduction, {
-    requires: 'pro', label: 'Noise Reduction', server: true, preview: true,
+    requires: 'pro', label: 'Noise Reduction', server: true, offline: true,
   })
-})
-
-test('the preview is the free limit, so every plan gets the same one', () => {
-  assert.equal(NR_PREVIEW_SECONDS, FREE_PREVIEW_SECONDS)
-})
-
-test('Preview takes a short selection whole', () => {
-  assert.deepEqual(previewWindow({ start: 10, end: 25 }, 12), { start: 10, end: 25 })
-  assert.deepEqual(previewWindow({ start: 10, end: 40 }, 35), { start: 10, end: 40 })
-})
-
-test('on a long selection Preview starts at the playhead and stays inside', () => {
-  const sel = { start: 0, end: 600 }
-  assert.deepEqual(previewWindow(sel, 120, 30), { start: 120, end: 150 })
-  // Near the end it slides back so the window stays full length.
-  assert.deepEqual(previewWindow(sel, 590, 30), { start: 570, end: 600 })
-  // A playhead outside the selection (or none) falls back to its start.
-  assert.deepEqual(previewWindow({ start: 100, end: 700 }, 50, 30), { start: 100, end: 130 })
-  assert.deepEqual(previewWindow({ start: 100, end: 700 }, 700, 30), { start: 100, end: 130 })
-  assert.deepEqual(previewWindow({ start: 100, end: 700 }, null, 30), { start: 100, end: 130 })
 })
 
 // ── WAV decode ────────────────────────────────────────────────────────────────

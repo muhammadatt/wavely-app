@@ -6,17 +6,13 @@
  * The plugin is a spot front end on the mastering chain's own denoisers:
  * DeepFilterNet3 and RNNoise run on the server (`/api/spot/noise_reduction`,
  * server/pipeline/spotNoiseReduce.js), there is no browser implementation of
- * either, and so there is no live preview — the selection is processed once,
- * auditioned inside the window, and committed from that result.
+ * either, and so there is no live preview. It is an OFFLINE process: set it
+ * up, process the selection, undo if the result is wrong.
  *
  * WHAT IS A SERVER SETTING AND WHAT IS NOT. Engine, DF3's attenuation cap and
- * RNNoise's consonant guard change what the server computes, so changing any of
- * them invalidates a processed result. Mix does not: it is a dry/wet blend done
- * in the browser on the result already held, so it can be turned while
- * listening and costs no round trip.
+ * RNNoise's consonant guard change what the server computes. Mix does not: it
+ * is a dry/wet blend done in the browser on what comes back, before commit.
  */
-
-import { FREE_PREVIEW_SECONDS } from '../auth/plans.js'
 
 /**
  * The engines. `both` is the ACX Audiobook preset's order — DF3 first for the
@@ -27,17 +23,40 @@ import { FREE_PREVIEW_SECONDS } from '../auth/plans.js'
 export const NR_ENGINES = ['df3', 'rnnoise', 'both']
 
 /**
- * How much Preview processes, in seconds — the free preview limit, so the
- * preview is the same on every plan and the server's gate admits it for anyone.
- * Short on purpose for Pro too: a setting is judged on a passage, and waiting
- * on a whole chapter to hear one is the slow loop this replaces.
+ * What the user sees. The panel never names the models: a narrator choosing
+ * between "DeepFilterNet3" and "RNNoise" is choosing between two words, so the
+ * two passes are named for what they do. The panel turns each on or off and
+ * `engineFor` maps the pair onto the engine the server takes; both on runs
+ * them in the ACX order, CLEAN first.
+ *
+ *   CLEAN       DeepFilterNet3 — the TRANSPARENT pass: broadband noise out,
+ *               the voice left alone. The right first and general choice.
+ *   DEEP CLEAN  RNNoise — takes away MORE, including what DF3 leaves behind:
+ *               lip smacks, mouth noise, throat clicks, mic bumps. Not for
+ *               every recording, since it costs more of the voice.
+ *
+ * ⚠ The first naming had them the other way round (Deep = DF3, Light =
+ * RNNoise) on the reasoning that DF3 is the stronger model. On voice it is
+ * the gentler one: RNNoise removes more, so "deep" belongs to it.
  */
-export const NR_PREVIEW_SECONDS = FREE_PREVIEW_SECONDS
+export const NR_PASS_LABELS = { df3: 'Clean', rnnoise: 'Deep Clean' }
 
 export const NR_ENGINE_LABELS = {
-  df3: 'DeepFilterNet3',
-  rnnoise: 'RNNoise',
-  both: 'DF3 + RNNoise',
+  df3: NR_PASS_LABELS.df3,
+  rnnoise: NR_PASS_LABELS.rnnoise,
+  both: `${NR_PASS_LABELS.df3} + ${NR_PASS_LABELS.rnnoise}`,
+}
+
+/**
+ * The engine for a pair of pass switches: 'df3' | 'rnnoise' | 'both', or null
+ * with both off — a browser-only state with nothing to send, which the panel
+ * shows as Process disabled. Never reaches `toServerParams`.
+ */
+export function engineFor(deepOn, lightOn) {
+  if (deepOn && lightOn) return 'both'
+  if (deepOn) return 'df3'
+  if (lightOn) return 'rnnoise'
+  return null
 }
 
 /**
@@ -57,26 +76,7 @@ export const NOISE_REDUCTION_DEFAULTS = {
   // RNNoise does not — its causal VAD misreads fricative onsets as noise. On in
   // the ACX preset, and on here.
   protectConsonants: true,
-  mix: 1, // 0–1, wet share, applied in the browser
-}
-
-/**
- * The stretch Preview processes: the whole selection when it fits, else
- * `length` seconds starting at the playhead — where the user is listening —
- * or at the selection's start when the playhead is outside it. A window that
- * would run past the end is slid back so it stays full length.
- *
- * @param {{ start: number, end: number }} selection
- * @param {number|null} playhead  seconds
- * @param {number} [length]
- * @returns {{ start: number, end: number }}
- */
-export function previewWindow(selection, playhead, length = NR_PREVIEW_SECONDS) {
-  const { start, end } = selection
-  if (end - start <= length) return { start, end }
-  const inside = Number.isFinite(playhead) && playhead >= start && playhead < end
-  const from = Math.min(inside ? playhead : start, end - length)
-  return { start: from, end: from + length }
+  mix: 1, // 0–1, wet share, blended in the browser before commit
 }
 
 /** True when `engine` runs that model. */
@@ -107,6 +107,16 @@ export function toServerParams(params) {
 }
 
 /**
+ * Everything the server reads, as one string: two settings with the same key
+ * send the same request (Mix, or DF3's cap while the engine is RNNoise alone,
+ * never reach it), so a held result can be reused for either.
+ */
+export function serverParamsKey(params) {
+  const s = toServerParams(params)
+  return `${s.engine}|${s.df3AttenLimDb ?? 'uncapped'}|${s.protectConsonants ? 1 : 0}`
+}
+
+/**
  * Validate a request body on the server. Throws with a message fit for a 400
  * rather than letting a bad value reach a Python argv.
  */
@@ -127,16 +137,6 @@ export function parseServerParams(raw = {}) {
     df3AttenLimDb: usesDf3(engine) ? df3AttenLimDb : null,
     protectConsonants: usesRnnoise(engine) && raw.protectConsonants !== false,
   }
-}
-
-/**
- * The key a processed result is stored under: everything the server read.
- * Two settings that send the same request share a result (Mix, or DF3's cap
- * while the engine is RNNoise alone, never re-process).
- */
-export function serverParamsKey(params) {
-  const s = toServerParams(params)
-  return `${s.engine}|${s.df3AttenLimDb ?? 'uncapped'}|${s.protectConsonants ? 1 : 0}`
 }
 
 /**

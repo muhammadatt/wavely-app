@@ -11,6 +11,7 @@ import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import { isSheetViewport, sheetGeometry, SHEET_MAX_WIDTH as SHEET_NARROW_PX } from '../../ui/windowSheet.js'
 import Icon from '../ui/Icon.vue'
 import { useEntitlements } from '../../composables/useEntitlements.js'
+import { isOffline } from '../../auth/plans.js'
 import HelpOverlay from './HelpOverlay.vue'
 import ModulaPresetBrowser from '../modula/ModulaPresetBrowser.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
@@ -144,7 +145,8 @@ const props = defineProps({
    * A plan feature (src/auth/plans.js) Apply needs. Without it the button stays
    * PRESSABLE and carries a PRO tag: pressing it opens the upgrade prompt
    * rather than emitting `apply`. Preview is never gated — hearing the result
-   * first is the point.
+   * first is the point. An OFFLINE feature (plans.js `offline`) has no preview:
+   * its Apply is the whole plugin, and the tooltip does not promise one.
    */
   applyFeature: { type: String, default: null },
   /**
@@ -158,6 +160,16 @@ const props = defineProps({
   // live in the playback chain. A disabled control with a tooltip teaches that
   // real-time tuning exists; omitting it teaches nothing.
   showPreview: { type: Boolean, default: false },
+  /**
+   * An OFFLINE process (registry `offline`): nothing here runs in real time.
+   * The header carries a RENDER chip beside the name, the footer puts a plain
+   * statement of the contract ("No preview") where a real-time plugin has its
+   * Preview, and the action button carries the same clock icon as the chip.
+   * Most of the app's windows ARE real-time, so the few that are not have to
+   * say so at a glance rather than reading as broken real-time ones (no ON
+   * lamp, no Preview). Pass show-engage false and no Preview alongside it.
+   */
+  offline: { type: Boolean, default: false },
   previewable: { type: Boolean, default: true },
   previewing: { type: Boolean, default: false },
   previewHint: {
@@ -331,11 +343,12 @@ function onApplyClick() {
 }
 
 const applyTitle = computed(() => {
-  if (inChain.value) return 'This plugin is in the Plugin Chain — apply it from the chain'
+  if (inChain.value) return 'This plugin is in the Effect Chain — apply it from the chain'
   if (busy.value) return 'This file is still being processed — wait for it to finish'
   if (props.applyDisabled) return props.applyDisabledHint
   if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
-  if (applyLocked.value) return `${entitlements.hint(props.applyFeature)} — preview is free`
+  // An offline process has no preview to offer, so it does not promise one.
+  if (applyLocked.value) return entitlements.hint(props.applyFeature) + (isOffline(props.applyFeature) ? '' : ' — preview is free')
   return ''
 })
 
@@ -753,6 +766,14 @@ function requestClose() {
         <span v-else style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
           {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.85)">{{ brandTail }}</span></template>
         </span>
+        <span
+          v-if="offline"
+          class="win-offline"
+          title="Renders the selection — not real-time. Nothing is heard until it is applied; Undo reverts it"
+        >
+          <Icon name="offline" :size="11" :stroke-width="2.25" />
+          RENDER
+        </span>
         <!-- The short rule, not `--tall`: it is dividing a 13 px word from an
              icon, where the tall one divides two 30 px chips. -->
         <span v-if="help && !modula" class="win-rule"></span>
@@ -816,7 +837,7 @@ function requestClose() {
           type="button"
           class="win-chain-pill is-member"
           :class="{ 'is-bypassed': inChain.chainBypassed }"
-          :title="inChain.chainBypassed ? 'The Plugin Chain is bypassed — open it to turn it on' : 'Open the Plugin Chain'"
+          :title="inChain.chainBypassed ? 'The Effect Chain is bypassed — open it to turn it on' : 'Open the Effect Chain'"
           @pointerdown.stop
           @click="openWindow('plugin-chain')"
         >IN CHAIN · {{ inChain.position }}{{ inChain.chainBypassed ? ' · BYPASSED' : '' }}</button>
@@ -964,6 +985,11 @@ function requestClose() {
       </button>
 
       <div class="win-actions flex items-center gap-2">
+        <!-- A panel may replace the note while it works (Noise Reduction puts
+             its progress and Cancel here). -->
+        <slot name="offline-note">
+          <span v-if="offline" class="win-offline-note">No preview - Renders on the server.</span>
+        </slot>
         <!--
           The title sits on the WRAPPER, not on the button.
 
@@ -1006,7 +1032,7 @@ function requestClose() {
           :title="applyTitle"
           @click="onApplyClick"
         >
-          <Icon :name="applyIcon" :size="15" :stroke-width="2.5" />
+          <Icon :name="offline ? 'offline' : applyIcon" :size="15" :stroke-width="2.5" />
           <span class="win-btn-label">{{ inChain ? 'Applies with the chain' : applyLabel }}</span>
           <span class="win-btn-label-short">{{ inChain ? 'In chain' : applyLabelShort }}</span>
           <span v-if="applyLocked && !inChain" class="win-apply-pro">PRO</span>
@@ -1496,6 +1522,10 @@ function requestClose() {
   .win-apply .win-btn-label-short {
     display: inline;
   }
+  /* The header chip still says it; the footer needs the room for Apply. */
+  .win-offline-note {
+    display: none;
+  }
 }
 
 /* ── MODULA ─────────────────────────────────────────────────────────────────
@@ -1542,6 +1572,28 @@ function requestClose() {
   font: 800 13px/1 var(--m-font-ui);
   letter-spacing: 0.14em;
   color: color-mix(in srgb, var(--face, #e8a33d) 20%, #fff);
+}
+/* RENDER chip and footer note: what kind of plugin this is (an offline
+   process), not a control. Filled orange, matching the rail's RENDER tag. */
+.win-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font: 700 9px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.12em;
+  color: #5e2b02;
+  background: #e78040;
+  white-space: nowrap;
+  cursor: default;
+}
+.win-offline-note {
+  margin-right: 6px;
+  font: 500 11px var(--m-font-ui, 'Inter', system-ui, sans-serif);
+  color: rgba(159, 196, 232, 0.8);
+  white-space: nowrap;
 }
 /* Help and close: round, raised, no fill. */
 [data-design='modula'] .win-icon-btn {

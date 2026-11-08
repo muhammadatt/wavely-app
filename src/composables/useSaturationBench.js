@@ -339,7 +339,7 @@ const copies = pluginCopies((copy, life) => {
   return useSaturationBench
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useSaturationBench() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useSaturationBench(copy) {
+  return copies(copy)()
 }

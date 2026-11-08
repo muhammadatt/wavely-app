@@ -1,0 +1,224 @@
+/*
+ * The face of the OFFLINE plugins (Noise Reduction, Auto Leveler) — design 4b
+ * (docs/design/noise-reduction/Noise_Reduction_Redesign.dc.html): mode TILES
+ * in a dark well with a line on the chosen mode, a pair of CARDS whose
+ * settings are rows of a caption and a drag readout (dimmed while the mode
+ * leaves the card out), and a full-width WIDE card under them. No status
+ * line: a running job shows in the window footer.
+ *
+ * Imported scoped by each panel (`<style scoped src>`), so the classes stay
+ * local to it. Keep the two panels on one copy of this: two copies of a
+ * layout drift.
+ */
+/* ── Mode tiles: three raised keys in a dark well ── */
+.of-tiles {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #1a1c20, #22252a);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, .8);
+}
+.of-tile {
+  flex: 1;
+  min-width: 0;
+  height: 54px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: linear-gradient(180deg, #2c3036, #23262b);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, .6);
+}
+.of-tile.is-on {
+  background: linear-gradient(180deg, #3c4149, #2a2e34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 8px 16px -8px rgba(0, 0, 0, .9), 0 0 0 1px rgba(0, 0, 0, .6);
+}
+.of-tile:disabled { cursor: default; }
+.of-tile-label {
+  font: 700 11px/1 var(--m-font-ui);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, .5);
+}
+.of-tile-sub { font: 500 10px/1 var(--m-font-ui); color: rgba(255, 255, 255, .38); }
+.of-tile.is-on .of-tile-label { color: #3fd0de; }
+.of-tile.is-on .of-tile-sub { color: #c9d0d6; }
+.of-mode-about {
+  margin: 10px 6px 0;
+  min-height: 30px;
+  font: 500 10px/1.5 var(--m-font-ui);
+  color: #b6bdc4;
+  text-wrap: pretty;
+}
+
+/* ── Cards ── */
+.of-card {
+  border-radius: 16px;
+  background: linear-gradient(180deg, #3c4655, #2c343f);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.of-cards {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.of-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+.of-card-head { display: flex; justify-content: space-between; align-items: center; }
+.of-card-name {
+  font: 600 10px/1 var(--m-font-ui);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: #eaf6f8;
+}
+.of-card-state {
+  font: 700 8px/1 'JetBrains Mono', monospace;
+  letter-spacing: .12em;
+  color: #a0a8b0;
+}
+.of-card-state.is-on { color: #e8a33d; }
+.of-rule { height: 1px; background: rgba(0, 0, 0, .35); box-shadow: 0 1px 0 rgba(255, 255, 255, .04); }
+.of-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: opacity .15s ease;
+}
+.of-card-body.is-off, .of-wide.is-off { opacity: .4; }
+.of-row { display: flex; justify-content: space-between; align-items: center; min-height: 23px; }
+.of-setting {
+  font: 600 9px/1 var(--m-font-ui);
+  letter-spacing: .14em;
+  color: #aeb6bd;
+}
+.of-about { font: 500 10px/1.5 var(--m-font-ui); color: #b6bdc4; }
+
+/* Max reduction tiers: a flat segmented strip in a well */
+.of-tiers {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #1a1c20, #22252a);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, .8);
+}
+.of-tier {
+  flex: 1;
+  border: none;
+  cursor: pointer;
+  padding: 6px 0;
+  border-radius: 6px;
+  font: 700 9px/1.2 var(--m-font-ui);
+  letter-spacing: .12em;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, .5);
+  background: transparent;
+}
+.of-tier.is-on {
+  color: #e8a33d;
+  background: linear-gradient(180deg, #3c4149, #2a2e34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 6px 12px -6px rgba(0, 0, 0, .9), 0 0 0 1px rgba(0, 0, 0, .6);
+}
+.of-tier:disabled { cursor: default; }
+
+/* Voice guard: a small switch with its state word beside it */
+.of-toggle-wrap { display: flex; align-items: center; gap: 8px; }
+.of-toggle-word {
+  font: 700 9px/1 var(--m-font-ui);
+  letter-spacing: .14em;
+  color: rgba(255, 255, 255, .5);
+}
+.of-toggle-word.is-on { color: #eaf6f8; }
+.of-toggle {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 24px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  background: linear-gradient(180deg, #15171a, #23262b);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .85), 0 1px 0 rgba(255, 255, 255, .05);
+}
+.of-toggle.is-on { background: linear-gradient(180deg, #5a4220, #3b2c17); }
+.of-toggle:disabled { cursor: default; }
+.of-toggle-puck {
+  position: absolute;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  transition: left .18s cubic-bezier(.4, 1.4, .5, 1);
+  background: linear-gradient(160deg, #50555e, #2b2e34);
+  box-shadow: 0 4px 8px -3px rgba(0, 0, 0, .95), inset 0 1px 0 rgba(255, 255, 255, .18), 0 0 0 1px rgba(0, 0, 0, .6);
+}
+
+/* ── Mix ── */
+.of-wide {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px;
+  transition: opacity .15s ease;
+}
+.of-wide-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.of-wide-controls { display: flex; align-items: center; gap: 14px; }
+
+/* ── Footer note (FloatingWindow's own note style; its CSS is scoped, so a
+   slotted note restates it) ── */
+.of-note {
+  margin-right: 6px;
+  font: 500 11px var(--m-font-ui, 'Inter', system-ui, sans-serif);
+  color: rgba(159, 196, 232, .8);
+  white-space: nowrap;
+}
+.of-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 6px;
+}
+.of-running-text {
+  font: 500 11px var(--m-font-ui);
+  color: rgba(159, 196, 232, .9);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.of-running-lamp {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e78040;
+  animation: of-pulse 1.2s ease-in-out infinite;
+}
+@keyframes of-pulse { 50% { opacity: .3; } }
+
+/* A static readout in the same well as a ModulaField (a measured figure the
+   user cannot drag). */
+.of-readout {
+  min-width: 52px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: #1a1c20;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .8), 0 1px 0 rgba(255, 255, 255, .05);
+  text-align: center;
+  font: 500 11px/1 'JetBrains Mono', monospace;
+  color: #eaf6f8;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.of-readout.is-empty { color: rgba(255, 255, 255, .35); }
+.of-warn { color: #ffb27a; }

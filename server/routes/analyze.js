@@ -29,6 +29,7 @@ import { withAnalysisContext } from '../pipeline/index.js'
 import { applyClipGainDeEsser } from '../pipeline/clipGainDeEsser.js'
 import { FRAME_DURATION_S } from '../pipeline/frameAnalysis.js'
 import { openGate, probeDurationS } from '../lib/entitlements.js'
+import { trackWork } from '../lib/requestLog.js'
 
 const upload = multer({
   dest: path.resolve(import.meta.dirname, '..', 'uploads'),
@@ -196,6 +197,8 @@ const KINDS = {
   vad:       { label: 'Voice activity', run: runVadAnalysis },
 }
 
+const unlimited = (_req, _res, next) => next()
+
 /**
  * The longest audio one analysis request may carry, in seconds.
  *
@@ -204,9 +207,9 @@ const KINDS = {
  * (src/auth/plans.js). A 30 s free preview on the ANALYSIS made both plugins
  * useless on the chapters they are for, while saving almost no server time —
  * VAD is cheap. What is left is `audioAnalysis` (any account: signed-out
- * callers get 401 sign_in_required) and a safety cap on any one request, the
- * same for every plan, behind the route's rate limit. Two hours clears any audiobook chapter; the upload limit
- * above bites first on the Sibilance Editor's full-rate upload (~45 min mono).
+ * callers get 401 sign_in_required, before the upload is read) and a safety
+ * cap on any one request, the same for every plan, behind the route's rate
+ * limit and concurrency slots. Two hours clears any audiobook chapter.
  */
 export const ANALYSIS_MAX_SECONDS = 2 * 60 * 60
 
@@ -215,35 +218,51 @@ export const ANALYSIS_MAX_SECONDS = 2 * 60 * 60
  * @param {Function} [deps.gate]           entitlement gate factory
  *                                         (lib/entitlements.js); the default
  *                                         lets every request through
+ * @param {Function} [deps.limit]          concurrency middleware (holdSlot in
+ *                                         lib/jobQueue.js); runs before the upload
+ * @param {Function} [deps.takeUpload]     useUpload (lib/uploads.js): a finished
+ *                                         resumable upload named by `uploadId`
+ *                                         becomes `req.file`; runs after multer
  * @param {Function} [deps.probeDuration]  decoded duration in seconds, or null
  *                                         (lib/entitlements.js); injectable for tests
  * @param {number}   [deps.maxSeconds]     the per-request cap
  * @param {object}   [deps.kinds]          analysis runners; injectable for tests
  */
 export function createAnalyzeRoute({
-  gate = openGate, probeDuration = probeDurationS, maxSeconds = ANALYSIS_MAX_SECONDS, kinds = KINDS,
+  gate = openGate, limit = unlimited, takeUpload = unlimited,
+  probeDuration = probeDurationS, maxSeconds = ANALYSIS_MAX_SECONDS, kinds = KINDS,
 } = {}) {
   const router = Router()
+  const featureOf = req => (kinds[req.params.kind] ? 'audioAnalysis' : null)
 
-  router.post('/analyze/:kind', upload.single('file'), gate(req => (kinds[req.params.kind] ? 'audioAnalysis' : null)), async (req, res) => {
+  // An unknown analysis kind is refused first: it has no feature, so the sign-in
+  // check would wave it through to take a slot and an upload it can never use.
+  const known = (req, res, next) => {
+    if (kinds[req.params.kind]) return next()
+    res.status(400).json({ error: `Unknown analysis kind: ${req.params.kind}`, supported: Object.keys(kinds) })
+  }
+
+  // Sign-in and the concurrency slot are checked BEFORE multer reads the body.
+  router.post('/analyze/:kind', known, gate.signIn(featureOf), limit, upload.single('file'), takeUpload, gate(featureOf), async (req, res) => {
+    const slot = res.locals.slot
+    const releaseSlot = slot?.claim()
     const uploadedPath = req.file?.path
 
     try {
+      // The client left while the gate was checking; its slot is already free.
+      if (slot && !releaseSlot) return
+
       if (!req.file) {
         return res.status(400).json({ error: 'No audio file provided' })
       }
 
       const kind = kinds[req.params.kind]
-      if (!kind) {
-        return res.status(400).json({
-          error: `Unknown analysis kind: ${req.params.kind}`,
-          supported: Object.keys(kinds),
-        })
-      }
 
       // An unreadable duration is let through: the analysis decodes the file
-      // itself and fails on its own if ffmpeg cannot.
-      const durationS = await probeDuration(uploadedPath)
+      // itself and fails on its own if ffmpeg cannot. The plan gate has
+      // usually probed already (`req.audioSeconds`, null included); FFprobe
+      // runs again only when it has not, as with accounts off.
+      const durationS = req.audioSeconds !== undefined ? req.audioSeconds : await probeDuration(uploadedPath)
       if (durationS != null && durationS > maxSeconds) {
         return res.status(413).json({
           error: `Analysis is limited to ${Math.round(maxSeconds / 60)} minutes of audio per request — select a shorter passage.`,
@@ -262,7 +281,7 @@ export function createAnalyzeRoute({
       }
 
       const started = Date.now()
-      const result = await kind.run(uploadedPath, params)
+      const result = await trackWork(res, kind.run(uploadedPath, params))
       console.log(
         `[analyze/${req.params.kind}] ${Date.now() - started}ms — ` +
         (result.voicedRuns
@@ -275,6 +294,7 @@ export function createAnalyzeRoute({
       console.error(`[analyze/${req.params.kind}] failed:`, err)
       res.status(500).json({ error: err.message ?? 'Analysis failed' })
     } finally {
+      releaseSlot?.()
       if (uploadedPath) await unlink(uploadedPath).catch(() => {})
     }
   })

@@ -1,341 +1,256 @@
 <script setup>
 /**
- * Auto Leveler.
+ * Auto Leveler — the 4b face the Noise Reduction window uses
+ * (offlineFace.css), mapped onto the leveler's controls.
  *
- * Three-speed, and the panel says so: Analyse runs voice-activity detection on
- * the server once, the clip analysis that follows is local, and every control
- * below re-solves from it in milliseconds. Nothing here can trigger a round
- * trip except the Analyse button.
+ * An OFFLINE process (see useAutoLevel.js): set it up, press Apply, listen in
+ * the editor, Undo if it is wrong. One button runs speech detection on the
+ * server, the phrase analysis and gain solve here, and commits the result.
+ * Pro only — the footer button carries the PRO tag for anyone else.
  *
- * The controls are deliberately the preset's own parameter names rather than a
- * simplified "amount" knob. This plugin exists for the user who is going to
- * check the result against ACX, and a leveler whose caps and deadband are
- * hidden cannot be reasoned about against a compliance report.
+ *   MODE TILES  the TARGET each phrase is levelled towards: WHOLE SELECTION
+ *               (one level) or ROLLING (a moving median), with a line on the
+ *               chosen one.
+ *   CARDS       PHRASES — Deadband, Knee and the rolling Window (dimmed under
+ *               Whole selection) — and LIMITS — Max boost, Max cut and the
+ *               room-tone Floor. Every setting is a drag readout: drag, type,
+ *               or double-click to reset.
+ *   WIDE CARD   the LAST RUN: phrases levelled, spread before → after and the
+ *               gain range, measured on the render; the reason when the
+ *               leveler declined; the floor note when room tone capped the
+ *               boost.
  *
- * Modula layout: the gain bar and the analysis sit in the centre well between
- * the IN and OUT ladders, the four live controls under them, and the target
- * mode with its two knobs in a second row.
+ * The controls keep the preset's own parameter names rather than an "amount"
+ * macro: this plugin is for the user checking the result against ACX, and a
+ * leveler whose caps and deadband are hidden cannot be reasoned about against
+ * a compliance report.
  */
-import { computed, onMounted } from 'vue'
-import { useAutoLevel } from '../../composables/useAutoLevel.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
+import { computed } from 'vue'
+import { useAutoLevel, skipReasonText } from '../../composables/useAutoLevel.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { AUTOLEVEL_DEFAULTS } from '../../audio/dsp/autoLevel.js'
-import ModulaKnob from '../modula/ModulaKnob.vue'
-import ModulaButton from '../modula/ModulaButton.vue'
-import ModulaSegmented from '../modula/ModulaSegmented.vue'
-import LevelMeter from '../meters/LevelMeter.vue'
-import GainRideBar from '../meters/GainRideBar.vue'
+import ModulaField from '../modula/ModulaField.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import { useEntitlements } from '../../composables/useEntitlements.js'
+import { radioArrowKey, radioTabStop } from '../../ui/radioKeys.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  params, preview, analyzing, prepared, solved,
-  gainDb, inputLevels, outputLevels,
-  hasAnalysis, hasSelection, isStale, curveValid, analyzedRegion, skipReason,
-  togglePreview, syncParam, resetParams, analyze, apply, teardown, closeModal,
+  params, processing, lastResult,
+  syncParam, apply, closeModal,
 } = useAutoLevel()
 
 const { state } = useEditorState()
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!preview.value && currentPluginCopy() === 'solo') togglePreview()
-})
-
 const ACCENT = '#e8a33d'
-const METER_H = 190
 const D = AUTOLEVEL_DEFAULTS
 
-const fmtDb = v => `${v.toFixed(2)} dB`
-const fmtDb1 = v => `${v.toFixed(1)} dB`
-const fmtSecs = v => `${Math.round(v)} s`
-const fmtFloor = v => `${v.toFixed(0)} dBFS`
-
-const TARGET_OPTIONS = [
-  { value: 'global', label: 'WHOLE SELECTION', title: 'One level held throughout the selection' },
-  { value: 'running_median', label: 'ROLLING', title: 'Follows a moving median, so a deliberate change in delivery survives' },
+const MODES = [
+  { value: 'global', label: 'Whole selection', sub: 'One level throughout' },
+  { value: 'running_median', label: 'Rolling', sub: 'Follows the delivery' },
 ]
 
-function fmtTime(sec) {
-  const m = Math.floor(sec / 60)
-  const s = (sec - m * 60).toFixed(1).padStart(4, '0')
-  return `${m}:${s}`
+const MODE_ABOUT = {
+  global: 'Every phrase is levelled towards one level held across the whole selection.',
+  running_median: 'Phrases follow a moving median, so a deliberate change in delivery survives.',
 }
 
-const measurements = computed(() => solved.value?.measurements ?? null)
+const rolling = computed(() => params.value.target_mode === 'running_median')
 
-const statusLine = computed(() => {
-  if (analyzing.value) return 'Detecting speech…'
-  if (!prepared.value) return 'Analyse the selection to find its phrases.'
-  if (isStale.value) {
-    const r = analyzedRegion.value
-    return r
-      ? `Selection is outside the analysed ${fmtTime(r.start)}–${fmtTime(r.end)} — analyse again.`
-      : 'Audio changed since analysis — analyse again.'
-  }
-  if (skipReason.value) return skipReason.value
+const fmtDb2 = v => `${v.toFixed(2)} dB`
+const fmtDb1 = v => `${v.toFixed(1)} dB`
+const fmtSecs = v => `${Math.round(v)} s`
+const fmtFloor = v => `${Math.round(v)} dBFS`
+const parseNum = t => parseFloat(t)
 
+const measurements = computed(() => lastResult.value?.measurements ?? null)
+const declined = computed(() => (lastResult.value?.reason ? skipReasonText(lastResult.value.reason) : null))
+
+const resultPhrases = computed(() => (measurements.value ? String(measurements.value.clip_count_after_merge) : '—'))
+const resultSpread = computed(() => {
   const m = measurements.value
-  if (!m) return 'Analysed.'
-  return `${m.clip_count_after_merge} phrases levelled — ` +
-    `spread ${m.input_clip_lufs_std_db.toFixed(1)} → ` +
-    `${m.output_clip_lufs_std_db.toFixed(1)} dB, ` +
-    `${m.gain_max_down_db.toFixed(1)} to +${m.gain_max_up_db.toFixed(1)} dB applied.`
+  return m ? `${m.input_clip_lufs_std_db.toFixed(1)} → ${m.output_clip_lufs_std_db.toFixed(1)} dB` : '—'
 })
+const resultGain = computed(() => {
+  const m = measurements.value
+  if (!m) return '—'
+  // gain_max_down_db is the solve's signed MINIMUM gain (−3.2 for a 3.2 dB
+  // cut, 0 when nothing was cut), so the cut is its magnitude; neither side
+  // prints a sign it does not have.
+  const cut = Math.max(0, -m.gain_max_down_db)
+  const boost = Math.max(0, m.gain_max_up_db)
+  return `−${cut.toFixed(1)} / +${boost.toFixed(1)} dB`
+})
+
+const modeStop = computed(() => radioTabStop(MODES, m => m.value === params.value.target_mode))
+
+function pickMode(m) {
+  if (!processing.value) syncParam('target_mode', m.value)
+}
 
 /**
  * The headroom cap is the one thing that silently changes what the controls
- * can do, so it says so rather than leaving Max Boost looking broken.
+ * can do, so it says so rather than leaving Max boost looking broken.
  */
 const capNote = computed(() => {
   const m = measurements.value
   if (!m?.noise_floor_cap_active) return null
   return m.max_up_effective_db <= 0.01
-    ? `Room tone is too close to the ${params.value.noise_floor_target_dbfs} dBFS ` +
-      `target to lift anything — cuts only.`
-    : `Boost capped at ${m.max_up_effective_db.toFixed(1)} dB to keep room tone ` +
-      `under ${params.value.noise_floor_target_dbfs} dBFS.`
+    ? 'Room tone was too close to the floor to lift anything — only cuts were made.'
+    : `Boost was capped at ${m.max_up_effective_db.toFixed(1)} dB to keep room tone under the floor.`
 })
-
-const applyHint = computed(() => {
-  if (!preview.value) return 'Turn the leveler on to apply it'
-  if (!hasAnalysis.value) return 'Analyse the selection first'
-  if (isStale.value) return 'Selection moved outside the analysed region — analyse again'
-  return skipReason.value ?? 'Nothing to level'
-})
-
-/** The live controls work only on a fresh analysis with the leveler on. */
-const controlsOff = computed(() => !preview.value || !hasAnalysis.value)
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
 
 async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
+  if (await apply()) closeModal()
 }
-
-// The analysis needs an account (a free one), not a plan: say so before the
-// click rather than after it. Empty when signed in or accounts are off.
-const entitlements = useEntitlements()
-const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign in (free) to analyse. Applying needs Pro.' : ''))
 </script>
 
 <template>
   <FloatingWindow
     window-id="auto-leveler"
     :z="z"
-    :width="700"
+    :width="560"
     :accent="ACCENT"
     design="modula"
     brand-lead="AUTO LEVELER"
-    :engaged="preview"
-    show-preview
-    previewable
-    :previewing="state.isPlaying"
+    :show-engage="false"
+    offline
     show-apply
     apply-feature="autoLevel"
-    :apply-disabled="!preview || !curveValid"
-    :apply-disabled-hint="applyHint"
-    @toggle-engaged="togglePreview"
-    @toggle-preview="togglePlayback"
+    :apply-disabled="processing"
+    apply-disabled-hint="Auto Leveler is running"
     @apply="applyAndClose"
-    @close="close"
   >
-    <div class="al-grid">
-      <div class="al-meter">
-        <LevelMeter variant="modula" scale-side="left" :levels="inputLevels" label="IN" :height="METER_H" />
-      </div>
+    <!-- Target mode tiles -->
+    <div class="of-tiles" role="radiogroup" aria-label="Level towards">
+      <button
+        v-for="(m, i) in MODES" :key="m.value"
+        type="button" class="of-tile m-focusable" role="radio"
+        :class="{ 'is-on': params.target_mode === m.value }"
+        :aria-checked="String(params.target_mode === m.value)"
+        :tabindex="i === modeStop ? 0 : -1"
+        :disabled="processing"
+        @click="pickMode(m)" @keydown="radioArrowKey($event, i, MODES, pickMode)"
+      >
+        <span class="of-tile-label">{{ m.label }}</span>
+        <span class="of-tile-sub">{{ m.sub }}</span>
+      </button>
+    </div>
+    <p class="of-mode-about">{{ MODE_ABOUT[params.target_mode] ?? '' }}</p>
 
-      <div class="al-display">
-        <!-- Signed, because the boosts are the point. 12 dB half-scale matches
-             the default caps: a bar whose ends are unreachable wastes its width. -->
-        <GainRideBar :gain-db="gainDb" :accent="ACCENT" :full-scale-db="12" />
-
-        <!-- Analyse: the frozen half -->
-        <div class="al-analyse">
-          <div class="al-analyse-text">
-            <span class="m-caption">Speech detection</span>
-            <p class="al-hint">
-              Runs once on the server. Phrase segmentation and every control
-              below are computed here from the result.
-            </p>
-            <p v-if="signInNote" class="al-hint al-signin">{{ signInNote }}</p>
+    <div class="of-cards">
+      <section class="of-card of-col">
+        <header class="of-card-head">
+          <span class="of-card-name">Phrases</span>
+        </header>
+        <div class="of-rule"></div>
+        <div class="of-card-body">
+          <div class="of-row" title="How far a phrase may sit from the target before it is touched at all">
+            <span class="of-setting">DEADBAND</span>
+            <ModulaField
+              :model-value="params.deadband_db" :min="0" :max="6" :step="0.05"
+              :width="64" :default-value="D.deadband_db" :format-value="fmtDb2" :parse="parseNum"
+              :disabled="processing" aria-label="Deadband"
+              @update:model-value="v => syncParam('deadband_db', v)"
+            />
           </div>
-          <ModulaButton
-            variant="accent" :disabled="analyzing || !hasSelection"
-            @click="analyze"
-          >{{ analyzing ? 'Analysing…' : 'Analyse' }}</ModulaButton>
+          <div class="of-row" title="How gently the correction fades in past the deadband">
+            <span class="of-setting">KNEE</span>
+            <ModulaField
+              :model-value="params.knee_db" :min="0.1" :max="6" :step="0.1"
+              :width="64" :default-value="D.knee_db" :format-value="fmtDb1" :parse="parseNum"
+              :disabled="processing" aria-label="Knee"
+              @update:model-value="v => syncParam('knee_db', v)"
+            />
+          </div>
+          <div class="of-row" :class="{ 'is-dim': !rolling }" title="How much recent speech the rolling median looks at — Rolling only">
+            <span class="of-setting">WINDOW</span>
+            <ModulaField
+              :model-value="params.target_window_s" :min="10" :max="120" :step="5"
+              :width="64" :default-value="D.target_window_s" :format-value="fmtSecs" :parse="parseNum"
+              :disabled="processing || !rolling" aria-label="Rolling window"
+              @update:model-value="v => syncParam('target_window_s', v)"
+            />
+          </div>
         </div>
+      </section>
 
-        <p class="al-status" :class="{ 'is-warn': isStale || skipReason }">{{ statusLine }}</p>
-        <p v-if="capNote" class="al-status is-warn">{{ capNote }}</p>
-      </div>
-
-      <div class="al-meter">
-        <LevelMeter variant="modula" scale-side="right" :levels="outputLevels" label="OUT" :height="METER_H" />
-      </div>
+      <section class="of-card of-col">
+        <header class="of-card-head">
+          <span class="of-card-name">Limits</span>
+        </header>
+        <div class="of-rule"></div>
+        <div class="of-card-body">
+          <div class="of-row" title="The most any phrase is lifted">
+            <span class="of-setting">MAX BOOST</span>
+            <ModulaField
+              :model-value="params.max_up_db" :min="0" :max="18" :step="0.5"
+              :width="64" :default-value="D.max_up_db" :format-value="fmtDb1" :parse="parseNum"
+              :disabled="processing" aria-label="Max boost"
+              @update:model-value="v => syncParam('max_up_db', v)"
+            />
+          </div>
+          <div class="of-row" title="The most any phrase is turned down">
+            <span class="of-setting">MAX CUT</span>
+            <ModulaField
+              :model-value="params.max_down_db" :min="0" :max="18" :step="0.5"
+              :width="64" :default-value="D.max_down_db" :format-value="fmtDb1" :parse="parseNum"
+              :disabled="processing" aria-label="Max cut"
+              @update:model-value="v => syncParam('max_down_db', v)"
+            />
+          </div>
+          <div class="of-row" title="The room-tone level boosts are not allowed to push past">
+            <span class="of-setting">FLOOR</span>
+            <ModulaField
+              :model-value="params.noise_floor_target_dbfs" :min="-80" :max="-40" :step="1"
+              :width="64" :default-value="D.noise_floor_target_dbfs" :format-value="fmtFloor" :parse="parseNum"
+              :disabled="processing" aria-label="Room tone floor"
+              @update:model-value="v => syncParam('noise_floor_target_dbfs', v)"
+            />
+          </div>
+        </div>
+      </section>
     </div>
 
-    <!-- Targeting: the live half -->
-    <div class="al-knobs">
-      <ModulaKnob
-        variant="small" :size="52" show-value editable
-        :model-value="params.deadband_db" :min="0" :max="6" :step="0.05"
-        :default-value="D.deadband_db" label="Deadband" :color="ACCENT" :format-value="fmtDb"
-        :disabled="controlsOff"
-        title="How far a phrase may sit from the target before it is touched at all. Double-click to reset"
-        @update:model-value="v => syncParam('deadband_db', v)"
-      />
-      <ModulaKnob
-        variant="small" :size="52" show-value editable
-        :model-value="params.knee_db" :min="0.1" :max="6" :step="0.1"
-        :default-value="D.knee_db" label="Knee" :color="ACCENT" :format-value="fmtDb1"
-        :disabled="controlsOff"
-        title="How gently the correction fades in past the deadband. Double-click to reset"
-        @update:model-value="v => syncParam('knee_db', v)"
-      />
-      <ModulaKnob
-        variant="small" :size="52" show-value editable
-        :model-value="params.max_up_db" :min="0" :max="18" :step="0.5"
-        :default-value="D.max_up_db" label="Max Boost" :color="ACCENT" :format-value="fmtDb1"
-        :disabled="controlsOff"
-        title="The most any phrase is lifted. Double-click to reset"
-        @update:model-value="v => syncParam('max_up_db', v)"
-      />
-      <ModulaKnob
-        variant="small" :size="52" show-value editable
-        :model-value="params.max_down_db" :min="0" :max="18" :step="0.5"
-        :default-value="D.max_down_db" label="Max Cut" :color="ACCENT" :format-value="fmtDb1"
-        :disabled="controlsOff"
-        title="The most any phrase is turned down. Double-click to reset"
-        @update:model-value="v => syncParam('max_down_db', v)"
-      />
-    </div>
-
-    <!-- Target: what each phrase is levelled towards -->
-    <div class="al-target">
-      <div class="al-target-text">
-        <p class="al-hint">
-          What each phrase is levelled towards. <b>Whole selection</b> holds one
-          level throughout; <b>rolling</b> follows a moving median, so a
-          deliberate change in delivery survives.
-        </p>
-        <ModulaButton variant="ghost" size="sm" @click="resetParams">Reset</ModulaButton>
+    <!-- Last run -->
+    <section class="of-card of-wide al-result">
+      <div class="of-wide-text">
+        <span class="of-card-name">Last run</span>
+        <span v-if="declined" class="of-about of-warn">{{ declined }}</span>
+        <span v-else-if="capNote" class="of-about of-warn">{{ capNote }}</span>
+        <span v-else-if="measurements" class="of-about">Measured on the levelled audio. Undo puts the original back.</span>
+        <span v-else class="of-about">Nothing levelled yet in this session.</span>
       </div>
-
-      <div class="al-target-controls">
-        <ModulaSegmented
-          :model-value="params.target_mode" :options="TARGET_OPTIONS"
-          aria-label="Target" :disabled="controlsOff"
-          @update:model-value="v => syncParam('target_mode', v)"
-        />
-        <ModulaKnob
-          variant="small" :size="44" show-value editable
-          :model-value="params.target_window_s" :min="10" :max="120" :step="5"
-          :default-value="D.target_window_s" label="Window" :color="ACCENT" :format-value="fmtSecs"
-          :disabled="controlsOff || params.target_mode !== 'running_median'"
-          title="How much recent speech the rolling median looks at. Double-click to reset"
-          @update:model-value="v => syncParam('target_window_s', v)"
-        />
-        <ModulaKnob
-          variant="small" :size="44" show-value editable
-          :model-value="params.noise_floor_target_dbfs" :min="-80" :max="-40" :step="1"
-          :default-value="D.noise_floor_target_dbfs" label="Floor" :color="ACCENT" :format-value="fmtFloor"
-          :disabled="controlsOff"
-          title="The room-tone level boosts are not allowed to push past. Double-click to reset"
-          @update:model-value="v => syncParam('noise_floor_target_dbfs', v)"
-        />
+      <div class="al-result-figures">
+        <div class="al-figure">
+          <span class="of-setting">PHRASES</span>
+          <span class="of-readout" :class="{ 'is-empty': !measurements }">{{ resultPhrases }}</span>
+        </div>
+        <div class="al-figure">
+          <span class="of-setting">SPREAD</span>
+          <span class="of-readout" :class="{ 'is-empty': !measurements }">{{ resultSpread }}</span>
+        </div>
+        <div class="al-figure">
+          <span class="of-setting">GAIN</span>
+          <span class="of-readout" :class="{ 'is-empty': !measurements }">{{ resultGain }}</span>
+        </div>
       </div>
-    </div>
+    </section>
+
+    <template #offline-note>
+      <span v-if="processing" class="of-running">
+        <span class="of-running-lamp"></span>
+        <span class="of-running-text">{{ state.processingMessage || 'Levelling…' }}</span>
+      </span>
+      <span v-else class="of-note">No preview - Renders the selection.</span>
+    </template>
   </FloatingWindow>
 </template>
 
+<style scoped src="./offlineFace.css"></style>
 <style scoped>
-.al-grid {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: start;
-}
-.al-meter {
-  display: flex;
-  justify-content: center;
-  padding: 12px 4px;
-}
-.al-display {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 16px;
-  background: var(--m-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
-}
-.al-analyse {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(0, 0, 0, .35);
-  box-shadow: 0 -1px 0 rgba(255, 255, 255, .04);
-}
-.al-analyse-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.al-hint.al-signin { color: #ffb27a; }
-.al-hint {
-  margin: 0;
-  font: 500 10px/1.5 var(--m-font-ui);
-  color: var(--m-ink-4);
-}
-.al-hint b { font-weight: 700; color: var(--m-ink-3); }
-.al-status {
-  margin: 0;
-  font: 500 10px/1.5 var(--m-font-ui);
-  color: var(--m-ink-3);
-}
-.al-status.is-warn { color: #ffb27a; }
-.al-knobs,
-.al-target {
-  margin-top: 12px;
-  padding: 14px 12px 12px;
-  border-radius: 16px;
-  background: var(--m-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
-}
-.al-knobs {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-around;
-  gap: 8px;
-}
-.al-target {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-}
-.al-target-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  max-width: 250px;
-}
-.al-target-controls {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
+.of-row.is-dim { opacity: .4; transition: opacity .15s ease; }
+.al-result { grid-template-columns: minmax(0, 1fr) auto; }
+.al-result-figures { display: flex; gap: 10px; }
+.al-figure { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 </style>

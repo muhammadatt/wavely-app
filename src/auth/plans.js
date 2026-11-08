@@ -40,29 +40,49 @@ export const PLAN_LABELS = { free: 'Free', pro: 'Pro' }
 export const FREE_PREVIEW_SECONDS = 30
 
 /**
- * id -> { requires, label, server?, preview? }
+ * id -> { requires, label, server?, preview?, offline? }
  *
  *   requires  lowest plan that may use it ('free' = any account)
  *   server    enforced by the API, not just hidden in the UI
- *   preview   non-entitled users may run it on ≤ FREE_PREVIEW_SECONDS of audio
+ *   preview   who else may run it on ≤ FREE_PREVIEW_SECONDS of audio:
+ *               'account'  any signed-in user (signed out: sign in first)
+ *               'anyone'   signed out too
+ *   offline   an OFFLINE process (settings → process → undo), not a real-time
+ *             plugin: there is nothing to preview, so the whole plugin is the
+ *             feature, not just its Apply — and no "preview is free" promise
+ *
+ * Server time spent on a signed-out visitor is spent on someone who cannot be
+ * rate-limited by anything but their IP, so a preview needs an account unless
+ * the feature IS the first-run experience (mastering).
  */
 export const FEATURES = {
   // Anything stored against the user needs somewhere to store it.
   savePresets: { requires: 'free', label: 'Saving presets' },
 
   // Real-time plugins: full preview for everyone, Apply needs Pro.
-  pluginChainApply: { requires: 'pro', label: 'The Plugin Chain' },
+  pluginChainApply: { requires: 'pro', label: 'The Effect Chain' },
 
   // Server ANALYSIS, browser DSP: the analysis needs any account (any length,
   // up to the analyze route's cap) — a sign-in, never a payment; Apply needs Pro.
   audioAnalysis: { requires: 'free', label: 'Audio analysis', server: true },
-  autoLevel: { requires: 'pro', label: 'Auto Leveler' },
   sibilanceEditor: { requires: 'pro', label: 'Sibilance Editor' },
   voxPressor: { requires: 'pro', label: 'VoxPressor' },
 
-  // Server RENDERING: Pro, with a short preview for everyone else.
-  noiseReduction: { requires: 'pro', label: 'Noise Reduction', server: true, preview: true },
-  spotEffects: { requires: 'pro', label: 'Server spot effects', server: true, preview: true },
+  // OFFLINE processes: set up, process the selection, undo if it is wrong.
+  // Their changes are not something a free preview demonstrates (a 30 s
+  // denoise audition, a phrase-level gain ride heard in real time), so they
+  // are Pro outright. Auto Leveler's analysis still goes through the
+  // `audioAnalysis` route; the browser asks for `autoLevel` before it calls it.
+  autoLevel: { requires: 'pro', label: 'Auto Leveler', offline: true },
+  noiseReduction: { requires: 'pro', label: 'Noise Reduction', server: true, offline: true },
+
+  // Server RENDERING: Pro, with a short preview for any other account.
+  spotEffects: { requires: 'pro', label: 'Server spot effects', server: true, preview: 'account' },
+
+  // The preset mastering chain: any account, so the whole-file result stays
+  // free while the most expensive server work is tied to a sign-in. Signed-out
+  // visitors still get the preview on a short clip.
+  mastering: { requires: 'free', label: 'Mastering', server: true, preview: 'anyone' },
 }
 
 /** Rank of a plan: -1 signed out, 0 free, 1 pro… Unknown plans rank as signed out. */
@@ -84,10 +104,29 @@ export function hasFeature(plan, featureId) {
   return have >= 0 && have >= need
 }
 
-/** May a non-entitled user still run it on a short clip? */
-export function allowsPreview(featureId) {
+/** Does the feature have a short-clip preview at all (for someone)? */
+export function hasPreview(featureId) {
   requiredPlan(featureId)
-  return FEATURES[featureId].preview === true
+  return FEATURES[featureId].preview != null
+}
+
+/** Does its preview need a signed-in user? */
+export function previewNeedsAccount(featureId) {
+  requiredPlan(featureId)
+  return FEATURES[featureId].preview === 'account'
+}
+
+/** May a non-entitled user on `plan` (null = signed out) run it on a short clip? */
+export function allowsPreview(featureId, plan) {
+  requiredPlan(featureId)
+  const preview = FEATURES[featureId].preview
+  return preview === 'anyone' || (preview === 'account' && planRank(plan) >= 0)
+}
+
+/** Is it an offline process, gated whole rather than at Apply? */
+export function isOffline(featureId) {
+  requiredPlan(featureId)
+  return FEATURES[featureId].offline === true
 }
 
 /**

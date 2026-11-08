@@ -56,48 +56,115 @@ test('the shared table: ladder, inheritance, blockers', () => {
   assert.throws(() => requiredPlan('autolevel'), /Unknown feature/)
   for (const [id, f] of Object.entries(FEATURES)) {
     if (f.preview) assert.equal(f.server, true, `${id}: only server features have a preview`)
+    if (f.preview) assert.ok(['account', 'anyone'].includes(f.preview), `${id}: preview is 'account' or 'anyone'`)
   }
 })
 
-test('pro passes in full; free and signed-out get a preview on a short clip', async () => {
+test('pro passes in full; a free account gets a preview on a short clip; signed out gets 401', async () => {
   const short = async () => FREE_PREVIEW_SECONDS
   const gate = createEntitlementGate({ verify, planFor, probeDuration: short })
 
-  const pro = await run(gate, 'noiseReduction', req('tok-pro', await tempUpload()))
+  const pro = await run(gate, 'spotEffects', req('tok-pro', await tempUpload()))
   assert.equal(pro.passed, true)
   assert.deepEqual(pro.entitlement, { plan: 'pro', mode: 'full' })
 
-  for (const token of ['tok-free', null, 'tok-garbage']) {
-    const r = await run(gate, 'noiseReduction', req(token, await tempUpload()))
-    assert.equal(r.passed, true, String(token))
-    assert.equal(r.entitlement.mode, 'preview')
+  const free = await run(gate, 'spotEffects', req('tok-free', await tempUpload()))
+  assert.equal(free.passed, true)
+  assert.equal(free.entitlement.mode, 'preview')
+
+  for (const token of [null, 'tok-garbage']) {
+    const file = await tempUpload()
+    const r = await run(gate, 'spotEffects', req(token, file))
+    assert.equal(r.passed, false, String(token))
+    assert.equal(r.response.statusCode, 401)
+    assert.deepEqual(r.response.body, {
+      error: 'Sign in to use Server spot effects.', code: 'sign_in_required', feature: 'spotEffects', requires: 'pro',
+    })
+    assert.equal(await exists(file), false, 'the upload is deleted')
   }
+
+  // Mastering's preview stays open to signed-out visitors.
+  const mastering = await run(gate, 'mastering', req(null, await tempUpload()))
+  assert.equal(mastering.passed, true)
+  assert.deepEqual(mastering.entitlement, { plan: null, mode: 'preview' })
+})
+
+test('gate.signIn refuses a signed-out caller BEFORE the upload, only where nothing is open to them', async () => {
+  const gate = createEntitlementGate({ verify, planFor, probeDuration: async () => 10 })
+  const before = async (feature, token) => {
+    const r = req(token)
+    const response = res()
+    let passed = false
+    await gate.signIn(() => feature)(r, response, () => { passed = true })
+    return { passed, response, user: r.user }
+  }
+
+  for (const feature of ['audioAnalysis', 'spotEffects', 'noiseReduction']) {
+    for (const token of [null, 'tok-garbage']) {
+      const r = await before(feature, token)
+      assert.equal(r.passed, false, `${feature} ${token}`)
+      assert.equal(r.response.statusCode, 401)
+      assert.equal(r.response.body.code, 'sign_in_required')
+    }
+    const free = await before(feature, 'tok-free')
+    assert.equal(free.passed, true)
+    assert.deepEqual(free.user, { id: 'tok-free' }, 'the user is left for the gate to reuse')
+  }
+
+  assert.equal((await before('mastering', null)).passed, true, "mastering's preview is open to anyone")
+  assert.equal((await before(null, null)).passed, true, 'no feature: the route decides')
+
+  const off = createEntitlementGate({ verify: null, planFor: null })
+  const r = req(null)
+  let passed = false
+  await off.signIn(() => 'audioAnalysis')(r, res(), () => { passed = true })
+  assert.equal(passed, true, 'accounts off: no gating')
 })
 
 test('a long clip without Pro is refused with 402 and its upload deleted', async () => {
   const long = async () => FREE_PREVIEW_SECONDS + 5
   const gate = createEntitlementGate({ verify, planFor, probeDuration: long })
   const file = await tempUpload()
-  const r = await run(gate, 'noiseReduction', req('tok-free', file))
+  const r = await run(gate, 'spotEffects', req('tok-free', file))
   assert.equal(r.passed, false)
   assert.equal(r.response.statusCode, 402)
   assert.equal(r.response.body.code, 'upgrade_required')
-  assert.equal(r.response.body.feature, 'noiseReduction')
+  assert.equal(r.response.body.feature, 'spotEffects')
   assert.equal(r.response.body.requires, 'pro')
   assert.equal(r.response.body.previewSeconds, FREE_PREVIEW_SECONDS)
   assert.equal(await exists(file), false)
 
   // Pro is not limited by duration.
-  const pro = await run(gate, 'noiseReduction', req('tok-pro', await tempUpload()))
+  const pro = await run(gate, 'spotEffects', req('tok-pro', await tempUpload()))
   assert.equal(pro.passed, true)
 })
 
 test('an unreadable duration fails closed; a tiny overshoot is tolerated', async () => {
   const unknown = createEntitlementGate({ verify, planFor, probeDuration: async () => null })
-  assert.equal((await run(unknown, 'noiseReduction', req(null, await tempUpload()))).passed, false)
+  assert.equal((await run(unknown, 'spotEffects', req('tok-free', await tempUpload()))).passed, false)
 
   const padded = createEntitlementGate({ verify, planFor, probeDuration: async () => FREE_PREVIEW_SECONDS + 0.3 })
-  assert.equal((await run(padded, 'noiseReduction', req(null, await tempUpload()))).passed, true)
+  assert.equal((await run(padded, 'spotEffects', req('tok-free', await tempUpload()))).passed, true)
+})
+
+test('noise reduction is Pro outright: no preview, even on a short clip; signed out is asked to sign in', async () => {
+  const short = async () => 5
+  const gate = createEntitlementGate({ verify, planFor, probeDuration: short })
+  const file = await tempUpload()
+  const free = await run(gate, 'noiseReduction', req('tok-free', file))
+  assert.equal(free.passed, false)
+  assert.equal(free.response.statusCode, 402)
+  assert.equal(free.response.body.feature, 'noiseReduction')
+  assert.equal(free.response.body.previewSeconds, null)
+  assert.equal(await exists(file), false)
+
+  // Signed out there is nothing open to them at all: sign in first.
+  const out = await run(gate, 'noiseReduction', req(null, await tempUpload()))
+  assert.equal(out.response.statusCode, 401)
+  assert.equal(out.response.body.code, 'sign_in_required')
+
+  const pro = await run(gate, 'noiseReduction', req('tok-pro', await tempUpload()))
+  assert.deepEqual(pro.entitlement, { plan: 'pro', mode: 'full' })
 })
 
 test('accounts off, or a route with no feature, passes straight through', async () => {
@@ -117,7 +184,7 @@ test('a plan lookup failure degrades to free, which keeps the preview open', asy
     const gate = createEntitlementGate({
       verify, planFor: async () => { throw new Error('db down') }, probeDuration: async () => 10,
     })
-    const r = await run(gate, 'noiseReduction', req('tok-pro', await tempUpload()))
+    const r = await run(gate, 'spotEffects', req('tok-pro', await tempUpload()))
     assert.equal(r.passed, true)
     assert.deepEqual(r.entitlement, { plan: 'free', mode: 'preview' })
   } finally {
@@ -161,6 +228,45 @@ test('invalidate drops one user’s cached plan so an upgrade lands at once', as
   planFor.invalidate('u1')
   assert.equal(await planFor('u1'), 'pro')
   assert.equal(reads, 2)
+})
+
+test('a blocked account is refused with 403 before and after the upload, whatever its plan', async () => {
+  const isBlocked = async id => id === 'tok-pro'
+  const gate = createEntitlementGate({ verify, planFor, isBlocked, probeDuration: async () => 10 })
+
+  const file = await tempUpload()
+  const after = await run(gate, 'spotEffects', req('tok-pro', file))
+  assert.equal(after.passed, false)
+  assert.equal(after.response.statusCode, 403)
+  assert.equal(after.response.body.code, 'account_blocked')
+  assert.equal(await exists(file), false, 'the upload is deleted')
+
+  for (const feature of ['spotEffects', 'mastering']) {
+    const r = req('tok-pro')
+    const response = res()
+    let passed = false
+    await gate.signIn(() => feature)(r, response, () => { passed = true })
+    assert.equal(passed, false, feature)
+    assert.equal(response.statusCode, 403)
+  }
+
+  // Other accounts, and signed-out mastering previews, are untouched.
+  assert.equal((await run(gate, 'spotEffects', req('tok-free', await tempUpload()))).passed, true)
+  assert.equal((await run(gate, 'mastering', req(null, await tempUpload()))).passed, true)
+})
+
+test('the gate leaves the feature and the decoded duration for the request log, probing once', async () => {
+  let probes = 0
+  const gate = createEntitlementGate({ verify, planFor, probeDuration: async () => { probes++; return 12.5 } })
+  const pro = req('tok-pro', await tempUpload())
+  await run(gate, 'spotEffects', pro)
+  assert.equal(pro.feature, 'spotEffects')
+  assert.equal(pro.audioSeconds, 12.5, 'measured for a full-plan request too')
+
+  const free = req('tok-free', await tempUpload())
+  await run(gate, 'spotEffects', free)
+  assert.equal(free.audioSeconds, 12.5)
+  assert.equal(probes, 2, 'one probe per request, shared with the preview check')
 })
 
 test('a feature any account unlocks: signed in passes, signed out gets 401 sign_in_required', async () => {

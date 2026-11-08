@@ -699,7 +699,7 @@ const copies = pluginCopies((copy, life) => {
   return useVoxPressor
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useVoxPressor() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useVoxPressor(copy) {
+  return copies(copy)()
 }

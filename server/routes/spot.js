@@ -25,7 +25,9 @@ import { runVocalSaturation } from '../pipeline/enhancement.js'
 import { runSpotNoiseReduction } from '../pipeline/spotNoiseReduce.js'
 import { parseServerParams as parseNoiseReductionParams } from '../../src/audio/noiseReductionParams.js'
 import { openGate } from '../lib/entitlements.js'
-import { createJob, completeJob, failJob } from '../lib/jobStore.js'
+import { trackWork } from '../lib/requestLog.js'
+import { createJob, completeJob, failJob, setJobProgress, setJobQueuePosition } from '../lib/jobStore.js'
+import { clientOf, sendRefusal } from '../lib/jobQueue.js'
 
 const upload = multer({
   dest: path.resolve(import.meta.dirname, '..', 'uploads'),
@@ -73,32 +75,65 @@ const OPERATIONS = {
   },
 }
 
+const unlimited = (_req, _res, next) => next()
+
 /**
  * @param {object}   [deps]
  * @param {Function} [deps.gate]  entitlement gate factory (lib/entitlements.js);
  *                                the default lets every request through
+ * @param {Function} [deps.limit] concurrency middleware (holdSlot in
+ *                                lib/jobQueue.js); runs before the upload
+ * @param {Function} [deps.takeUpload] useUpload (lib/uploads.js): a finished
+ *                                resumable upload named by `uploadId` becomes
+ *                                `req.file`; runs after multer
+ * @param {object}   [deps.jobs]  the processing job queue (lib/jobQueue.js,
+ *                                shared with mastering). An `async` operation
+ *                                runs through it instead of taking a `limit`
+ *                                slot: a slot is released when the handler
+ *                                returns its 202, which would leave a
+ *                                chapter-long DF3 job outside every limit.
  */
-export function createSpotRoute({ gate = openGate } = {}) {
+export function createSpotRoute({ gate = openGate, limit = unlimited, takeUpload = unlimited, jobs = null } = {}) {
   const router = Router()
-
-  router.post('/spot/:operation', upload.single('file'), gate(req => {
+  const featureOf = req => {
     const op = OPERATIONS[req.params.operation]
     return op ? (op.feature ?? 'spotEffects') : null
-  }), async (req, res) => {
+  }
+
+  // An unknown spot operation is refused first: it has no feature, so the sign-in
+  // check would wave it through to take a slot and an upload it can never use.
+  const known = (req, res, next) => {
+    if (OPERATIONS[req.params.operation]) return next()
+    res.status(400).json({ error: `Unknown spot operation: ${req.params.operation}`, supported: Object.keys(OPERATIONS) })
+  }
+
+  // A synchronous operation holds a slot for its life; an async one is admitted
+  // to the job queue instead (checked again when it is submitted).
+  const admit = (req, res, next) => {
+    if (!OPERATIONS[req.params.operation].async) return limit(req, res, next)
+    const refused = jobs?.refusal(clientOf(req))
+    if (refused) return sendRefusal(res, refused)
+    next()
+  }
+
+  // Sign-in and admission are checked BEFORE multer reads the body.
+  router.post('/spot/:operation', known, gate.signIn(featureOf), admit, upload.single('file'), takeUpload, gate(featureOf), async (req, res) => {
+    const slot = res.locals.slot
+    const releaseSlot = slot?.claim()
     const uploadedPath = req.file?.path
     let outputPath = null
     // Set once a background job owns the upload and the output.
     let handedOff = false
 
     try {
+      // The client left while the gate was checking; its slot is already free.
+      if (slot && !releaseSlot) return
+
       if (!req.file) {
         return res.status(400).json({ error: 'No audio file provided' })
       }
 
       const op = OPERATIONS[req.params.operation]
-      if (!op) {
-        return res.status(400).json({ error: `Unknown spot operation: ${req.params.operation}` })
-      }
 
       let params = {}
       if (req.body.params) {
@@ -120,12 +155,31 @@ export function createSpotRoute({ gate = openGate } = {}) {
       const start = Date.now()
 
       if (op.async) {
+        // Nothing awaits between this check and submit(), so it cannot race.
+        const client = clientOf(req)
+        const refused = jobs?.refusal(client)
+        if (refused) return sendRefusal(res, refused)
+
         const jobId = createJob()
         handedOff = true
-        res.status(202).json({ jobId })
         const jobOutput = outputPath
-        Promise.resolve()
-          .then(() => op.run(uploadedPath, jobOutput, params))
+        const run = () => {
+          setJobQueuePosition(jobId, null)
+          setJobProgress(jobId, null)
+          return op.run(uploadedPath, jobOutput, params)
+        }
+        const work = jobs
+          ? jobs.submit(client, run, {
+            onPosition: n => {
+              setJobQueuePosition(jobId, n)
+              setJobProgress(jobId, n === 1 ? 'Waiting in line (next up)' : `Waiting in line (${n - 1} ahead of you)`)
+            },
+          })
+          : Promise.resolve().then(run)
+        // The usage row describes the job, written when it settles.
+        trackWork(res, work)
+        res.status(202).json({ jobId })
+        work
           .then(summary => {
             completeJob(jobId, { report: summary ?? null, peaks: null, outputPath: jobOutput })
             const elapsed = ((Date.now() - start) / 1000).toFixed(2)
@@ -140,7 +194,7 @@ export function createSpotRoute({ gate = openGate } = {}) {
         return
       }
 
-      await op.run(uploadedPath, outputPath, params)
+      await trackWork(res, op.run(uploadedPath, outputPath, params))
       const elapsed = ((Date.now() - start) / 1000).toFixed(2)
       console.log(`[spot] ${req.params.operation} ${elapsed}s (${req.file.size} bytes in)`)
 
@@ -159,6 +213,7 @@ export function createSpotRoute({ gate = openGate } = {}) {
         res.status(500).json({ error: err.message || 'Spot processing failed' })
       }
     } finally {
+      releaseSlot?.()
       if (uploadedPath && !handedOff) await unlink(uploadedPath).catch(() => {})
     }
   })

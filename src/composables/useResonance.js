@@ -619,7 +619,7 @@ const copies = pluginCopies((copy, life) => {
   return useResonance
 })
 
-/** The copy the calling window edits (the solo copy outside a plugin window). */
-export function useResonance() {
-  return copies()()
+/** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
+export function useResonance(copy) {
+  return copies(copy)()
 }

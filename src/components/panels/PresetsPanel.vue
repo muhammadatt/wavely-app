@@ -7,6 +7,7 @@ import {
   getDefaultOutputProfile,
 } from '../../audio/presets.js'
 import { processAudioOnServer } from '../../api/processing.js'
+import { useEntitlements } from '../../composables/useEntitlements.js'
 import { computePeakCache } from '../../audio/processing.js'
 import { getTimelineDuration } from '../../audio/operations.js'
 import ProcessingReportPanel from './ProcessingReportPanel.vue'
@@ -18,6 +19,7 @@ const {
   getAudioContext, replaceRegion, setPeakCache, getDocument,
   startProcessing, updateProcessingProgress, updateProcessingStage, endProcessing,
 } = useEditorState()
+const entitlements = useEntitlements()
 
 // Friendly stage sequence shown while the server processes the audio.
 // Each entry has a message (cute/friendly), progress (0-1), and delay in ms.
@@ -145,6 +147,14 @@ async function handleProcess() {
   const doc = getDocument(docId)
   if (!doc || !doc.currentFile || doc.isProcessing) return
 
+  // Signed out, the server masters at most the free preview. A whole file
+  // can't be narrowed the way a selection can, so ask for a sign-in before
+  // uploading something the server would only refuse.
+  if (getTimelineDuration(doc.segments) > entitlements.previewLimit('mastering')) {
+    entitlements.request('mastering')
+    return
+  }
+
   const preset = doc.selectedPreset
   let stages, heading
   if (preset === 'noise_eraser') {
@@ -157,17 +167,28 @@ async function handleProcess() {
 
   startProcessing(heading, docId)
 
-  // Fire the first stage immediately (synchronously) so it's visible right away
-  updateProcessingStage(stages[0].message, docId)
-  updateProcessingProgress(stages[0].progress, docId)
+  // The audio uploads first — minutes for a long chapter — so the bar shows the
+  // upload, and the friendly stages start only once the server has the file.
+  const UPLOAD_SHARE = 0.1
+  updateProcessingStage('Uploading your audio…', docId)
+  updateProcessingProgress(0, docId)
+  const onUploadProgress = fraction => {
+    updateProcessingStage(`Uploading your audio… ${Math.round(fraction * 100)}%`, docId)
+    updateProcessingProgress(fraction * UPLOAD_SHARE, docId)
+  }
 
-  // Queue the remaining stages
-  const stageTimers = stages.slice(1).map(({ message, progress, delay }) =>
-    setTimeout(() => {
-      updateProcessingStage(message, docId)
-      updateProcessingProgress(progress, docId)
-    }, delay)
-  )
+  let stageTimers = []
+  const onUploaded = () => {
+    // Fire the first stage at once so it's visible right away, queue the rest
+    updateProcessingStage(stages[0].message, docId)
+    updateProcessingProgress(Math.max(stages[0].progress, UPLOAD_SHARE), docId)
+    stageTimers = stages.slice(1).map(({ message, progress, delay }) =>
+      setTimeout(() => {
+        updateProcessingStage(message, docId)
+        updateProcessingProgress(Math.max(progress, UPLOAD_SHARE), docId)
+      }, delay)
+    )
+  }
 
   try {
     const { report, audioBlob, peaks } = await processAudioOnServer({
@@ -178,6 +199,8 @@ async function handleProcess() {
       presetId: doc.selectedPreset,
       outputProfileId: doc.selectedOutputProfile,
       separationModel: preset === 'noise_eraser' ? selectedModels.value.noise_eraser : undefined,
+      onUploadProgress,
+      onUploaded,
     })
 
     // The user can close a document while its job is in flight. Bail rather
@@ -222,6 +245,7 @@ async function handleProcess() {
     }
   } catch (err) {
     console.error('Server processing failed:', err)
+    if (entitlements.handleServerRefusal(err)) return
     const suffix = appState.documents.length > 1 ? ` — ${doc.name}` : ''
     showToast((err.message || 'Processing failed') + suffix)
   } finally {

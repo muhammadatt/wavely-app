@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
-import { processRoute } from './routes/process.js'
+import { createProcessRoute } from './routes/process.js'
 import { jobsRoute }   from './routes/jobs.js'
 import { createSpotRoute }    from './routes/spot.js'
 import { createAnalyzeRoute } from './routes/analyze.js'
@@ -11,10 +11,21 @@ import { getSupabaseAdmin } from './lib/supabaseAdmin.js'
 import { createEntitlementGate, createPlanResolver } from './lib/entitlements.js'
 import Stripe from 'stripe'
 import { readBillingConfig, createBilling } from './lib/billing.js'
+import { createJobQueue, readJobQueueConfig, readRequestLimitConfig, holdSlot } from './lib/jobQueue.js'
+import { createUsageRecorder, createBlockResolver, readUsageRetentionDays } from './lib/usage.js'
+import { requestLog } from './lib/requestLog.js'
+import { createUploadStore, createUploadRoutes, readUploadConfig, useUpload } from './lib/uploads.js'
+import path from 'path'
 import { createBillingRoutes, createBillingWebhook } from './routes/billing.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
+// Loopback only by default: the reverse proxy on this machine is the one way
+// in. Reachable directly, a client could set X-Forwarded-For to anything and
+// get a fresh rate limit on every request (see `trust proxy` below). Set
+// HOST=0.0.0.0 only where the proxy is on another host or in another container
+// — and then firewall the port to that proxy.
+const HOST = process.env.HOST || '127.0.0.1'
 
 // Trust the first proxy hop (Apache reverse proxy on the same machine).
 // Required for express-rate-limit to correctly identify client IPs via
@@ -46,6 +57,9 @@ function isAllowedOrigin(origin) {
 }
 
 app.use(cors({
+  // A tus client reads where its upload lives (Location) and how far it got
+  // (Upload-Offset); the browser hides any response header not listed here.
+  exposedHeaders: ['Location', 'Upload-Offset', 'Upload-Length', 'Upload-Expires', 'Tus-Resumable', 'Tus-Version', 'Tus-Max-Size', 'Tus-Extension', 'Retry-After'],
   origin(origin, callback) {
     // Allow requests with no origin (server-to-server, curl, etc.) or "null" origin (file://) in dev
     if (!origin || origin === 'null') return callback(null, true)
@@ -68,6 +82,13 @@ if (verifyAccessToken && !supabaseAdmin) {
 }
 
 const planFor = supabaseAdmin ? createPlanResolver(supabaseAdmin) : null
+
+// Usage history and account blocking (supabase/migrations/…_usage_and_blocking.sql).
+// Both need the service-role client; without it nothing is recorded and
+// nobody is blocked.
+const usage = createUsageRecorder(supabaseAdmin)
+const isBlocked = supabaseAdmin ? createBlockResolver(supabaseAdmin) : null
+usage.startPruning(readUsageRetentionDays())
 
 const billingConfig = readBillingConfig()
 const stripe = billingConfig.secretKey ? new Stripe(billingConfig.secretKey) : null
@@ -92,13 +113,18 @@ app.use('/api', createBillingWebhook({ stripe, billing, webhookSecret: billingCo
 
 app.use(express.json())
 
+// One JSON log line per server-processing request — served or refused — and
+// its usage row (lib/requestLog.js). Mounted BEFORE the rate limiters so a
+// 429 is logged like any other refusal.
+app.use(['/api/process', '/api/spot', '/api/analyze'], requestLog({ usage }))
+
 // Rate limit the processing endpoint to prevent abuse
 const processLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 30,                   // 30 requests per window per IP
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many processing requests, please try again later' },
+  message: { error: 'Too many processing requests, please try again later', code: 'rate_limited' },
   // Suppress X-Forwarded-For validation — Apache proxy handles IP forwarding
   // and trust proxy is already set above.
   validate: { xForwardedForHeader: false },
@@ -111,7 +137,7 @@ const spotLimiter = rateLimit({
   max: 120,                  // 120 requests per window per IP
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many spot-effect requests, please try again later' },
+  message: { error: 'Too many spot-effect requests, please try again later', code: 'rate_limited' },
   validate: { xForwardedForHeader: false },
 })
 app.use('/api/spot', spotLimiter)
@@ -124,7 +150,7 @@ const analyzeLimiter = rateLimit({
   max: 120,                  // 120 requests per window per IP
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many analysis requests, please try again later' },
+  message: { error: 'Too many analysis requests, please try again later', code: 'rate_limited' },
   validate: { xForwardedForHeader: false },
 })
 app.use('/api/analyze', analyzeLimiter)
@@ -141,6 +167,19 @@ const accountLimiter = rateLimit({
 })
 app.use('/api/me', accountLimiter)
 
+// Resumable uploads arrive in ≤ 20 MB PATCHes: an hour of stereo is ~65 of
+// them, so the budget is per-request generous. The store's own limits (size,
+// uploads in flight, bytes per caller, disk) do the real work.
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many upload requests, please try again later', code: 'rate_limited' },
+  validate: { xForwardedForHeader: false },
+})
+app.use('/api/uploads', uploadLimiter)
+
 // Billing calls share the account budget. (The webhook is mounted earlier and
 // answers before this runs, so a Stripe retry burst is never rate-limited.)
 app.use('/api/billing', accountLimiter)
@@ -148,25 +187,48 @@ app.use('/api/billing', accountLimiter)
 // Plan enforcement for server-processing features (src/auth/plans.js). Needs
 // both the verifier and the database; with either missing it lets everything
 // through, as before accounts existed.
-const gate = createEntitlementGate({ verify: verifyAccessToken, planFor })
+const gate = createEntitlementGate({ verify: verifyAccessToken, planFor, isBlocked })
+
+// Resumable uploads (lib/uploads.js): large files arrive in chunks that each
+// fit under Cloudflare's 100 MB request cap; a processing request then names
+// the finished upload. Taken files land beside multer's.
+const UPLOADS_DIR = path.resolve(import.meta.dirname, 'uploads')
+const uploadStore = createUploadStore({ dir: path.join(UPLOADS_DIR, 'tus'), ...readUploadConfig() })
+uploadStore.startSweeping()
+const takeUpload = useUpload(uploadStore, UPLOADS_DIR)
+app.use('/api', createUploadRoutes({ store: uploadStore, verify: verifyAccessToken, isBlocked }))
 
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.0.1' })
 })
 
-// Processing endpoint (submit job — returns 202 + jobId immediately)
-app.use('/api', processRoute)
+// Processing endpoint (submit job — returns 202 + jobId immediately). The
+// queue caps how many preset chains run at once and how many one caller may
+// have in flight (MAX_CONCURRENT_JOBS / MAX_QUEUED_JOBS / MAX_JOBS_PER_CLIENT).
+const jobQueueConfig = readJobQueueConfig()
+// One queue for every long background job: mastering, and the spot operations
+// that answer 202 (Noise Reduction on a chapter).
+const processingJobs = createJobQueue(jobQueueConfig)
+console.log(`Job queue: ${jobQueueConfig.concurrency} running, ${jobQueueConfig.maxQueued} queued, ${jobQueueConfig.maxPerClient} per client`)
+app.use('/api', createProcessRoute({ gate, verify: verifyAccessToken, queue: processingJobs, usage, takeUpload }))
 
 // Job status + download endpoints (polled by client after submission)
 app.use('/api', jobsRoute)
 
-// Spot effect endpoint (synchronous — returns processed WAV directly)
-app.use('/api', createSpotRoute({ gate }))
+// Spot effects and analyses share one concurrency limit: both are synchronous
+// and both land on the Python worker pool. Full means refused, never queued.
+const requestLimitConfig = readRequestLimitConfig()
+console.log(`Spot/analyze limit: ${requestLimitConfig.concurrency} running, ${requestLimitConfig.maxPerClient} per client`)
+const limit = holdSlot(createJobQueue(requestLimitConfig))
+
+// Spot effect endpoint (synchronous — returns processed WAV directly — except
+// an async operation, which answers 202 and runs as a job in processingJobs)
+app.use('/api', createSpotRoute({ gate, limit, takeUpload, jobs: processingJobs }))
 
 // Analysis endpoints (synchronous — return measurements as JSON)
 // Needs an account, not a plan: measurements only, capped per request.
-app.use('/api', createAnalyzeRoute({ gate }))
+app.use('/api', createAnalyzeRoute({ gate, limit, takeUpload }))
 
 // Signed-in user's account and plan
 app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))
@@ -174,8 +236,8 @@ app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))
 // Checkout, the customer portal and prices (Stripe)
 app.use('/api', createBillingRoutes({ verify: verifyAccessToken, billing, isAllowedOrigin }))
 
-const server = app.listen(PORT, () => {
-  console.log(`Wavely server listening on port ${PORT}`)
+const server = app.listen(PORT, HOST, () => {
+  console.log(`Wavely server listening on ${HOST}:${PORT}`)
 })
 
 // ── Proxy-safe timeout configuration ─────────────────────────────────────────

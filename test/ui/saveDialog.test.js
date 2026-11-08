@@ -12,7 +12,7 @@ import { parseSourceFormat } from '../../src/audio/sourceFormat.js'
 import {
   defaultSaveSettings, estimateSaveBytes, formatAvailable, normalizeSettings,
   qualityLossWarning, savePlan, sampleRateOptions, toSaveFileName, wavBytesFor, formatFolderPath,
-  splitAudioName, formatForExtension, extensionFor,
+  splitAudioName, formatForExtension, extensionFor, nextFreeBaseName,
 } from '../../src/audio/saveFormat.js'
 import { directoryPathIn } from '../../src/composables/useWorkingFolder.js'
 
@@ -308,4 +308,16 @@ test('an MP3 whose ID3 tag outgrows the header prefix still reports its own bitr
   assert.equal(fmt.sampleRate, 44100)
   // The fixed prefix alone could not see a frame.
   assert.equal(parseSourceFormat(await file.slice(0, SOURCE_HEADER_BYTES).arrayBuffer(), 'cover.mp3').bitrate ?? null, null)
+})
+
+test('“Keep both” numbers the copy; only a trailing (N) counts on', async () => {
+  const taken = names => async n => names.includes(n)
+  assert.equal(await nextFreeBaseName('Take', taken([])), 'Take (2)')
+  assert.equal(await nextFreeBaseName('Take', taken(['Take (2)', 'Take (3)'])), 'Take (4)')
+  assert.equal(await nextFreeBaseName('Take (2)', taken([])), 'Take (3)')
+  // A chapter number is part of the name, not a copy number.
+  assert.equal(await nextFreeBaseName('Ch 04', taken([])), 'Ch 04 (2)')
+  // Every candidate taken: refuse, never return an unchecked (taken) name.
+  await assert.rejects(nextFreeBaseName('Take', async () => true, 3), /No free name/)
+  assert.equal(await nextFreeBaseName('Take', taken(['Take (2)', 'Take (3)']), 3), 'Take (4)')
 })
