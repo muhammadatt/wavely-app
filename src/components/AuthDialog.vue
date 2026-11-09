@@ -278,13 +278,9 @@ function onKeydown(e) {
       aria-modal="true"
       :aria-label="sent ? sentCopy.title : copy.title"
     >
-      <!-- Header: the mark, the step (upgrade flow) and close. -->
+      <!-- Header: the logo, the step (upgrade flow) and close. -->
       <div class="px-6 pt-5 flex items-center gap-[10px]">
-        <span class="auth-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" class="w-[15px] h-[15px]" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
-            <path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4" />
-          </svg>
-        </span>
+        <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[22px] w-auto select-none" draggable="false" />
         <span v-if="upgradeFlow && !sent" class="auth-steps" aria-label="Step 1 of 2">
           <span class="auth-step is-on">1 Account</span>
           <span class="auth-step-line"></span>
@@ -491,21 +487,11 @@ function onKeydown(e) {
 </template>
 
 <style scoped>
-.auth-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #08161a;
-  background: linear-gradient(135deg, #7ef0ff, #25b6d0);
-  box-shadow: 0 4px 14px rgba(53, 211, 230, 0.28);
-}
 .auth-steps {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin-left: 6px;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.02em;
