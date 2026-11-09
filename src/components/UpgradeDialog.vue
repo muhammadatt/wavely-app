@@ -5,8 +5,7 @@ import { useBilling } from '../composables/useBilling.js'
 import { useModalFocus } from '../composables/useModalFocus.js'
 import { FEATURES, PLAN_LABELS } from '../auth/plans.js'
 import { formatPrice } from '../auth/billing.js'
-import { offerFraming, proBenefits } from '../auth/pitch.js'
-import { OPERATIONS } from '../ui/registry.js'
+import { offerFraming, PRO_BENEFITS } from '../auth/pitch.js'
 
 /**
  * "This needs Pro" — or, opened from the account menu with no feature,
@@ -48,10 +47,9 @@ const title = computed(() => (feature.value
 const lead = computed(() => {
   if (!feature.value) return 'Every tool, applied to your whole file.'
   if (featureId.value === 'pluginChainApply') return 'Your chain is set up — Pro renders it onto your audio in one step.'
-  return `${feature.value.label} and everything below, on whole files.`
+  return `${feature.value.label} and everything else in ${planLabel.value}.`
 })
 
-const benefits = computed(() => proBenefits(OPERATIONS, featureId.value).slice(0, 5))
 
 // ── Prices ────────────────────────────────────────────────────────────────
 
@@ -210,12 +208,16 @@ function onKeydown(e) {
 
         <!-- ── Offer ────────────────────────────────────────────────── -->
         <div v-else class="px-6 pt-5 pb-6">
-          <ul class="flex flex-col gap-[9px]" aria-label="What Pro includes">
-            <li v-for="b in benefits" :key="b.feature" class="flex items-start gap-[10px]">
-              <svg viewBox="0 0 24 24" class="up-tick" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+          <ul class="flex flex-col gap-[14px]" aria-label="What Pro includes">
+            <li v-for="b in PRO_BENEFITS" :key="b.id" class="flex items-center gap-[12px]">
+              <span class="up-prop-icon" :class="`up-prop-icon--${b.icon}`" aria-hidden="true">
+                <svg v-if="b.icon === 'star'" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l2.85 6.3 6.9.7-5.18 4.62 1.48 6.78L12 17.4l-6.05 3.5 1.48-6.78L2.25 9.5l6.9-.7z"/></svg>
+                <svg v-else-if="b.icon === 'chain'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                <svg v-else viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.3 3 4.5 6.7 4.5c2.2 0 3.6 1.2 4.3 2.4l1 1.5 1-1.5c.7-1.2 2.1-2.4 4.3-2.4 3.7 0 5.8 3.8 4.3 7.2C19.5 16.4 12 21 12 21z"/></svg>
+              </span>
               <span class="min-w-0">
-                <span class="block text-[12.5px] font-semibold text-[#eaf6f8] leading-[1.35]">{{ b.title }}</span>
-                <span v-if="b.desc" class="block text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.48)]">{{ b.desc }}</span>
+                <span class="block text-[13px] font-bold text-[#eaf6f8] leading-[1.35]">{{ b.title }}</span>
+                <span class="block text-[12px] leading-[1.4] text-[rgba(255,255,255,.55)]">{{ b.desc }}</span>
               </span>
             </li>
           </ul>
@@ -326,15 +328,34 @@ function onKeydown(e) {
   height: 1px;
   background: rgba(255, 246, 220, 0.25);
 }
-.up-tick {
+.up-prop-icon {
   flex: none;
-  width: 16px;
-  height: 16px;
-  margin-top: 1px;
-  padding: 3px;
-  border-radius: 999px;
-  color: #1a1408;
-  background: #e0b84a;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.up-prop-icon svg {
+  width: 17px;
+  height: 17px;
+}
+/* One hue per prop: Pro gold, the Chain button's amber-teal family, a warm heart. */
+.up-prop-icon--star {
+  color: #f1d27a;
+  background: rgba(224, 184, 74, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(224, 184, 74, 0.3);
+}
+.up-prop-icon--chain {
+  color: var(--color-accent-bright);
+  background: rgba(53, 211, 230, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(53, 211, 230, 0.28);
+}
+.up-prop-icon--heart {
+  color: #ff8fa3;
+  background: rgba(255, 110, 140, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(255, 110, 140, 0.3);
 }
 .up-offer {
   position: relative;

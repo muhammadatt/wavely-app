@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ACCOUNT_BENEFITS, authCopy, featureVerb, proBenefits, offerFraming } from '../../src/auth/pitch.js'
+import { ACCOUNT_BENEFITS, authCopy, featureVerb, PRO_BENEFITS, offerFraming } from '../../src/auth/pitch.js'
 import { FEATURES } from '../../src/auth/plans.js'
 
 test('every account benefit is true of a free account', () => {
@@ -26,16 +26,11 @@ test('the account dialog names the task that sent the user there', () => {
   assert.equal(featureVerb('pluginChainApply'), 'use the Effect Chain')
 })
 
-test('Pro benefits come from shipped Pro operations, the requested one first', () => {
-  const ops = [
-    { id: 'a', label: 'Auto Leveler', desc: 'x', feature: 'autoLevel' },
-    { id: 'n', label: 'Noise Reduction', desc: 'y', feature: 'noiseReduction' },
-    { id: 'p', label: 'Peak', feature: undefined },
-    { id: 's', label: 'Save', feature: 'savePresets' },
-  ]
-  const list = proBenefits(ops, 'noiseReduction')
-  assert.deepEqual(list.map(i => i.feature), ['noiseReduction', 'autoLevel'])
-  for (const i of list) assert.equal(FEATURES[i.feature].requires, 'pro')
+test('Pro value props name only Pro features, and each has its own icon', () => {
+  for (const b of PRO_BENEFITS) {
+    for (const id of b.features) assert.equal(FEATURES[id]?.requires, 'pro', id)
+  }
+  assert.deepEqual(PRO_BENEFITS.map(b => b.icon), ['star', 'chain', 'heart'])
 })
 
 test('yearly framing: per-month price and the saving, nothing claimed when it saves nothing', () => {

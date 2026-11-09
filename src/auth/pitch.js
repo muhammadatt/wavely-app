@@ -72,27 +72,19 @@ export function featureVerb(featureId) {
 }
 
 /**
- * The Pro plan's selling points, from the operations this build ships (a
- * dev-only plugin is not a selling point), the feature that opened the prompt
- * first. Each: { title, desc }.
+ * The Pro plan's selling points, as three value props rather than a list of
+ * plugins (owner, November 2026): a list of effect names read as a spec sheet,
+ * and three lines read at a glance. `icon` is the glyph the dialog draws for
+ * each: 'star', 'chain', 'heart'.
  *
- * @param {Array}       operations  the registry's OPERATIONS
- * @param {string|null} featureId   the feature that opened the prompt
+ * ⚠ The plugin names in the first line must be Pro features that ship; a test
+ * checks them against plans.js.
  */
-export function proBenefits(operations, featureId = null) {
-  const items = []
-  const seen = new Set()
-  for (const op of operations) {
-    const id = op.feature
-    if (!id || FEATURES[id]?.requires !== 'pro' || seen.has(id)) continue
-    seen.add(id)
-    items.push({ feature: id, title: op.label, desc: op.desc ?? '' })
-  }
-  // The feature the user reached for leads the list.
-  const lead = items.findIndex(i => i.feature === featureId)
-  if (lead > 0) items.unshift(...items.splice(lead, 1))
-  return items
-}
+export const PRO_BENEFITS = [
+  { id: 'effects', icon: 'star', title: 'Pro Effects', desc: 'VoxPressor, AI Noise Reduction, Auto Leveler & more', features: ['voxPressor', 'noiseReduction', 'autoLevel'] },
+  { id: 'chain', icon: 'chain', title: 'Effect Chain', desc: 'Stack and reorder multiple effects like a Pro', features: ['pluginChainApply'] },
+  { id: 'support', icon: 'heart', title: 'Big love', desc: 'Support our work and back future development', features: [] },
+]
 
 /**
  * Monthly vs. yearly, framed: the yearly price per month and what it saves
