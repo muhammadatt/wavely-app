@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import { ACCOUNT_BENEFITS, authCopy, featureVerb, PRO_BENEFITS, offerFraming } from '../../src/auth/pitch.js'
 import { FEATURES } from '../../src/auth/plans.js'
+import { passwordScore, passwordStrength, MIN_PASSWORD } from '../../src/auth/passwordStrength.js'
 
 test('every account benefit is true of a free account', () => {
   assert.equal(new Set(ACCOUNT_BENEFITS.map(b => b.id)).size, ACCOUNT_BENEFITS.length, 'ids are unique keys')
@@ -12,7 +13,7 @@ test('every account benefit is true of a free account', () => {
     assert.equal(FEATURES[b.feature].requires, 'free', b.feature)
   }
   // Not offered today, whatever plans.js says: mastering, spot-effect previews.
-  assert.doesNotMatch(ACCOUNT_BENEFITS.map(b => b.text).join(' '), /master|preview/i)
+  assert.doesNotMatch(ACCOUNT_BENEFITS.map(b => `${b.title} ${b.text}`).join(' '), /master|preview/i)
 })
 
 test('the account dialog names the task that sent the user there', () => {
@@ -42,4 +43,17 @@ test('yearly framing: per-month price and the saving, nothing claimed when it sa
   assert.equal(offerFraming([prices[0], { ...prices[1], amount: 10800 }]).savePercent, null)
   assert.equal(offerFraming([prices[1]]).savePercent, null)
   assert.equal(offerFraming([]).yearly, null)
+})
+
+test('password meter: length first, mixes add, and it never reads below weak once typed', () => {
+  assert.equal(passwordScore(''), 0)
+  assert.equal(passwordScore('abc'), 1)
+  assert.equal(passwordScore('abcdefgh'), 1)
+  assert.equal(passwordScore('abcdefghijkl'), 2)
+  assert.equal(passwordScore('Abcdefghijkl'), 3)
+  assert.equal(passwordScore('Abcdefghijk1'), 4)
+  assert.equal(passwordStrength('abc').hint, `${MIN_PASSWORD - 3} more characters`)
+  assert.equal(passwordStrength('abcdefg').hint, '1 more character')
+  assert.equal(passwordStrength('abcdefgh').weak, true)
+  assert.equal(passwordStrength('').hint, `At least ${MIN_PASSWORD} characters`)
 })
