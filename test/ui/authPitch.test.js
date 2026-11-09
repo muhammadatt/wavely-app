@@ -2,15 +2,17 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { ACCOUNT_BENEFITS, authCopy, featureVerb, proBenefits, offerFraming } from '../../src/auth/pitch.js'
-import { FEATURES, allowsPreview } from '../../src/auth/plans.js'
+import { FEATURES } from '../../src/auth/plans.js'
 
 test('every account benefit is true of a free account', () => {
+  assert.equal(new Set(ACCOUNT_BENEFITS.map(b => b.id)).size, ACCOUNT_BENEFITS.length, 'ids are unique keys')
   for (const b of ACCOUNT_BENEFITS) {
-    const f = FEATURES[b.feature]
-    assert.ok(f, b.feature)
-    // Either the feature is free-tier, or its preview opens to any account.
-    assert.ok(f.requires === 'free' || allowsPreview(b.feature, 'free'), b.feature)
+    if (!b.feature) continue
+    assert.ok(FEATURES[b.feature], b.feature)
+    assert.equal(FEATURES[b.feature].requires, 'free', b.feature)
   }
+  // Not offered today, whatever plans.js says: mastering, spot-effect previews.
+  assert.doesNotMatch(ACCOUNT_BENEFITS.map(b => b.text).join(' '), /master|preview/i)
 })
 
 test('the account dialog names the task that sent the user there', () => {
@@ -32,7 +34,7 @@ test('Pro benefits come from shipped Pro operations, the requested one first', (
     { id: 's', label: 'Save', feature: 'savePresets' },
   ]
   const list = proBenefits(ops, 'noiseReduction')
-  assert.deepEqual(list.map(i => i.feature), ['noiseReduction', 'autoLevel', 'spotEffects'])
+  assert.deepEqual(list.map(i => i.feature), ['noiseReduction', 'autoLevel'])
   for (const i of list) assert.equal(FEATURES[i.feature].requires, 'pro')
 })
 

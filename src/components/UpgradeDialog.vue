@@ -3,7 +3,7 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useAuth } from '../composables/useAuth.js'
 import { useBilling } from '../composables/useBilling.js'
 import { useModalFocus } from '../composables/useModalFocus.js'
-import { FEATURES, FREE_PREVIEW_SECONDS, PLAN_LABELS } from '../auth/plans.js'
+import { FEATURES, PLAN_LABELS } from '../auth/plans.js'
 import { formatPrice } from '../auth/billing.js'
 import { offerFraming, proBenefits } from '../auth/pitch.js'
 import { OPERATIONS } from '../ui/registry.js'
@@ -46,10 +46,7 @@ const title = computed(() => (feature.value
   : `Upgrade to ${planLabel.value}`))
 
 const lead = computed(() => {
-  if (!feature.value) return 'Every tool, on whole files, with no preview limits.'
-  if (feature.value.preview) {
-    return `You can preview it free on ${FREE_PREVIEW_SECONDS} seconds of audio. ${planLabel.value} applies it to the whole file.`
-  }
+  if (!feature.value) return 'Every tool, applied to your whole file.'
   if (featureId.value === 'pluginChainApply') return 'Your chain is set up — Pro renders it onto your audio in one step.'
   return `${feature.value.label} and everything below, on whole files.`
 })
@@ -278,7 +275,7 @@ function onKeydown(e) {
             </button>
             <template v-if="!isSignedIn && !billing.state.loading">
               <div class="mt-3 text-[12px] text-center text-[rgba(255,255,255,.45)]">
-                Meanwhile, <button class="up-link" @click="createAccount('signUp')">create a free account</button> to master whole files and save presets.
+                Meanwhile, <button class="up-link" @click="createAccount('signUp')">create a free account</button> to save your presets and get early access to new effects.
               </div>
             </template>
           </template>

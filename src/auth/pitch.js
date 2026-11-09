@@ -8,16 +8,21 @@
  * server then refuses is worse for conversion than no claim at all.
  */
 
-import { FEATURES, FREE_PREVIEW_SECONDS, PLAN_LABELS } from './plans.js'
+import { FEATURES, PLAN_LABELS } from './plans.js'
 
 /**
  * What a free account gives, in the order a first-time visitor cares about.
- * Each line names the feature id it rests on; a test checks they are free-tier.
+ * A line that rests on a feature names it (`feature`), and a test checks that
+ * feature is free-tier; a line with no feature is a promise about the account
+ * itself (`id`), not a gate in plans.js.
+ *
+ * ⚠ Deliberately NOT here while they are not offered: mastering (not launched)
+ * and short-clip previews of server spot effects (withdrawn), even though
+ * plans.js still describes both.
  */
 export const ACCOUNT_BENEFITS = [
-  { feature: 'mastering', text: 'Master whole files with every preset — free' },
-  { feature: 'savePresets', text: 'Save your presets and chains to your account' },
-  { feature: 'spotEffects', text: `Try Pro effects on ${FREE_PREVIEW_SECONDS}-second previews` },
+  { id: 'presets', feature: 'savePresets', text: 'Save custom presets and effect settings' },
+  { id: 'earlyAccess', text: 'Get early access to new effects' },
 ]
 
 /**
@@ -57,7 +62,7 @@ export function featureVerb(featureId) {
     case 'mastering': return 'master the whole file'
     case 'savePresets': return 'save your presets'
     case 'audioAnalysis': return 'analyse your audio'
-    case 'spotEffects': return 'preview this effect'
+    case 'spotEffects': return 'use this effect'
     default: {
       const label = FEATURES[featureId]?.label
       // Product names stay capitalised ("use Auto Leveler"); only an article drops.
@@ -82,13 +87,6 @@ export function proBenefits(operations, featureId = null) {
     if (!id || FEATURES[id]?.requires !== 'pro' || seen.has(id)) continue
     seen.add(id)
     items.push({ feature: id, title: op.label, desc: op.desc ?? '' })
-  }
-  if (FEATURES.spotEffects?.requires === 'pro') {
-    items.push({
-      feature: 'spotEffects',
-      title: 'Full-length server effects',
-      desc: `No ${FREE_PREVIEW_SECONDS}-second preview limit`,
-    })
   }
   // The feature the user reached for leads the list.
   const lead = items.findIndex(i => i.feature === featureId)

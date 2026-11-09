@@ -356,7 +356,7 @@ function onKeydown(e) {
         </div>
 
         <ul v-if="mode === 'signUp' && !upgradeFlow" class="mt-4 flex flex-col gap-[7px]" aria-label="What you get">
-          <li v-for="b in ACCOUNT_BENEFITS" :key="b.feature" class="flex items-start gap-[9px] text-[12.5px] leading-[1.4] text-[rgba(255,255,255,.78)]">
+          <li v-for="b in ACCOUNT_BENEFITS" :key="b.id" class="flex items-start gap-[9px] text-[12.5px] leading-[1.4] text-[rgba(255,255,255,.78)]">
             <svg viewBox="0 0 24 24" class="auth-tick" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
             {{ b.text }}
           </li>
