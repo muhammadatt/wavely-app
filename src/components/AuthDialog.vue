@@ -67,7 +67,7 @@ const headline = computed(() => (isAccountMode.value
   : 'Welcome back.'))
 /** The benefits ARE the pitch for a plain sign-up; every other account case says its own line. */
 const showSubtitle = computed(() => isAccountMode.value && !(mode.value === 'signUp' && !upgradeFlow.value))
-const showBenefits = computed(() => !upgradeFlow.value)
+const showBenefits = computed(() => mode.value === 'signUp' && !upgradeFlow.value)
 
 const showProviders = computed(() => isAccountMode.value && AUTH_PROVIDERS.length > 0)
 const needsEmail = computed(() => mode.value !== 'recovery')
@@ -388,7 +388,7 @@ function onKeydown(e) {
         <!-- ── Passwordless ──────────────────────────────────────── -->
         <form v-else-if="isAccountMode && view === 'link'" class="flex flex-col gap-[18px]" novalidate @submit.prevent="magicLink">
           <div class="flex flex-col gap-[6px]">
-            <div class="text-[19px] font-extrabold tracking-[-0.01em] text-[#eaf6f8]">No password needed</div>
+            <div class="text-[19px] font-extrabold tracking-[-0.01em] text-[#eaf6f8]">{{ mode === 'signUp' ? 'No password needed' : 'Sign in without a password' }}</div>
             <div class="text-[13px] leading-[1.5] text-[rgba(255,255,255,.5)]">
               Enter your email and we’ll send a link that {{ mode === 'signUp' ? 'creates your account and signs you in' : 'signs you in' }}.
             </div>
