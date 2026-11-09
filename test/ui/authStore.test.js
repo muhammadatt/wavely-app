@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createAuthStore, createAccountFetcher, friendlyError } from '../../src/auth/authStore.js'
+import { createAuthStore, createAccountFetcher, friendlyError, errorKind } from '../../src/auth/authStore.js'
 import { parseProviders, AUTH_ENABLED } from '../../src/auth/config.js'
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 5))
@@ -242,6 +242,77 @@ test('parseProviders keeps known providers, once, in order', () => {
 })
 
 test('friendlyError passes unknown messages through', () => {
-  assert.equal(friendlyError({ message: 'Rate limit exceeded' }), 'Rate limit exceeded')
+  assert.equal(friendlyError({ message: 'Signups not allowed for this instance' }), 'Signups not allowed for this instance')
   assert.equal(friendlyError(null), 'Something went wrong')
+})
+
+test('an upgrade started signed out resumes once the account exists — and only if it still needs Pro', async () => {
+  const client = fakeClient()
+  let plan = 'free'
+  const store = makeStore(client, async () => ({ plan }))
+  store.start()
+  client.emit('INITIAL_SESSION', null)
+
+  store.openUpgrade('autoLevel')
+  store.signUpThenUpgrade('signUp')
+  assert.equal(store.state.upgradeFor, null, 'the prompt gives way to the account dialog')
+  assert.equal(store.state.dialog, 'signUp')
+  assert.equal(store.state.pendingUpgrade, 'autoLevel')
+  assert.equal(store.state.dialogReason, 'autoLevel')
+
+  client.emit('SIGNED_IN', session('u1'))
+  assert.equal(store.state.dialog, null)
+  assert.equal(store.state.pendingUpgrade, null, 'consumed once')
+  await tick()
+  assert.equal(store.state.upgradeFor, 'autoLevel', 'back on the upgrade prompt once the plan is known')
+
+  // An existing Pro account signing in from the prompt is not offered Pro again.
+  store.closeUpgrade()
+  client.emit('SIGNED_OUT', null)
+  plan = 'pro'
+  store.openUpgrade()
+  store.signUpThenUpgrade('signIn')
+  assert.equal(store.state.pendingUpgrade, 'plan')
+  client.emit('SIGNED_IN', session('u2'))
+  await tick()
+  assert.equal(store.state.upgradeFor, null)
+})
+
+test('closing the dialog drops the intent — unless a link is out', async () => {
+  const client = fakeClient()
+  const store = makeStore(client)
+  store.start()
+  client.emit('INITIAL_SESSION', null)
+
+  store.openDialog('signUp', { thenUpgrade: 'plan' })
+  store.closeDialog()
+  assert.equal(store.state.pendingUpgrade, null)
+
+  store.openDialog('signUp', { thenUpgrade: 'plan' })
+  store.closeDialog({ keepIntent: true })
+  assert.equal(store.state.pendingUpgrade, 'plan')
+  // The confirmation link signs this tab in later.
+  client.emit('SIGNED_IN', session('u1'))
+  await tick()
+  assert.equal(store.state.upgradeFor, 'plan')
+})
+
+test('resendConfirmation re-sends the sign-up email with the redirect URL', async () => {
+  const client = fakeClient({ resend: async (...args) => { client.calls.push(args); return { data: {}, error: null } } })
+  const store = makeStore(client)
+  assert.equal((await store.resendConfirmation('a@b.co')).error, null)
+  assert.deepEqual(client.calls.at(-1)[0], { type: 'signup', email: 'a@b.co', options: { emailRedirectTo: 'https://app.example/' } })
+})
+
+test('errors carry their kind so the dialog can offer the way out', async () => {
+  const client = fakeClient({
+    signInWithPassword: async () => ({ data: null, error: { message: 'Email not confirmed', code: 'email_not_confirmed' } }),
+    signUp: async () => ({ data: null, error: { message: 'User already registered' } }),
+  })
+  const store = makeStore(client)
+  assert.equal((await store.signInWithPassword('a@b.co', 'x')).errorKind, 'unconfirmed')
+  assert.equal((await store.signUp('a@b.co', 'longenough')).errorKind, 'exists')
+  assert.equal(errorKind({ code: 'invalid_credentials' }), 'credentials')
+  assert.equal(errorKind({ message: 'boom' }), null)
+  assert.equal(friendlyError({ message: 'Email rate limit exceeded' }), 'Too many attempts — wait a minute, then try again.')
 })

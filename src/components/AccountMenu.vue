@@ -70,18 +70,38 @@ async function signOut() {
 
     <!-- On a phone held upright the words do not fit beside Save and Export
          (they ran off the screen at 390 px); the person icon stands in. -->
-    <BaseButton
-      v-else-if="state.status === 'signedOut'"
-      size="md" color="ghost" :pill="false" class="max-sm:px-[9px]"
-      aria-label="Sign in"
-      title="Sign in"
-      @click="auth.openDialog('signIn')"
-    >
-      <Icon name="user" :size="15" class="sm:hidden" />
-      <span class="max-sm:hidden">Sign in</span>
-    </BaseButton>
+    <template v-else-if="state.status === 'signedOut'">
+      <BaseButton
+        size="md" color="ghost" :pill="false" class="max-sm:px-[9px]"
+        aria-label="Sign in"
+        title="Sign in"
+        @click="auth.openDialog('signIn')"
+      >
+        <Icon name="user" :size="15" class="sm:hidden" />
+        <span class="max-sm:hidden">Sign in</span>
+      </BaseButton>
+      <!-- The sign-up door, not buried behind "Sign in": most visitors have no
+           account yet, and "free" is the word that gets the click. Off on a
+           compact viewport, where the row has no room; Sign in still opens
+           the dialog with Create account one tab away. -->
+      <BaseButton
+        size="md" :pill="false" class="ml-1 whitespace-nowrap max-sm:hidden compact:hidden"
+        title="Create a free account"
+        @click="auth.openDialog('signUp')"
+      >Sign up free</BaseButton>
+    </template>
 
-    <div v-else class="relative" data-account-menu>
+    <div v-else class="relative flex items-center gap-[6px]" data-account-menu>
+      <!-- Free accounts see the way up at all times, not only inside the menu. -->
+      <button
+        v-if="!isPaid && !state.accountError && state.account"
+        class="acct-upgrade inline-flex items-center max-sm:hidden"
+        title="See what Pro unlocks"
+        @click.stop="upgrade"
+      >
+        <svg viewBox="0 0 24 24" class="w-[10px] h-[10px]" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 20.9l1.6-7L2 9.2l7.1-.6z"/></svg>
+        Upgrade
+      </button>
       <button
         class="h-[30px] flex items-center gap-[7px] pl-[3px] pr-[8px] max-sm:pr-[3px] rounded-full transition-colors hover:bg-[rgba(255,255,255,.08)]"
         :title="user?.email"
@@ -123,10 +143,12 @@ async function signOut() {
         <div class="py-1">
           <button
             v-if="!isPaid"
-            class="w-full text-left px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
-            style="color:#e0b84a"
+            class="w-full text-left px-4 py-[8px] transition-colors hover:bg-[rgba(255,255,255,.08)]"
             @click="upgrade"
-          >Upgrade to Pro</button>
+          >
+            <span class="block text-[12px] font-semibold" style="color:#e0b84a">Upgrade to Pro</span>
+            <span class="block text-[11px] text-[rgba(255,255,255,.45)]">Every tool, whole files, no preview limits</span>
+          </button>
           <button
             v-if="state.account?.subscription"
             class="w-full text-left px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
@@ -143,3 +165,22 @@ async function signOut() {
     </div>
   </template>
 </template>
+
+<style scoped>
+.acct-upgrade {
+  height: 24px;
+  gap: 5px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #1a1408;
+  background: linear-gradient(180deg, #f4d983, #e0b84a);
+  box-shadow: 0 3px 10px rgba(224, 184, 74, 0.2);
+  white-space: nowrap;
+  transition: filter 0.15s;
+}
+.acct-upgrade:hover {
+  filter: brightness(1.08);
+}
+</style>

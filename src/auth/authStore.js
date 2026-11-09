@@ -21,6 +21,7 @@
  */
 
 import { reactive, computed } from 'vue'
+import { hasFeature, planRank } from './plans.js'
 
 /** Query parameters an auth redirect leaves on the URL. */
 const AUTH_REDIRECT_PARAMS = ['code', 'error', 'error_code', 'error_description']
@@ -67,6 +68,12 @@ export function createAuthStore({
     accountError: null,
     // null | 'signIn' | 'signUp' | 'reset' | 'recovery'
     dialog: null,
+    // The feature id that sent the user to the dialog (its copy names it), or null.
+    dialogReason: null,
+    // A feature id ('plan' for the plan itself) whose upgrade prompt should
+    // open once the user has an account — the signed-out "Upgrade" path is
+    // create account FIRST, and without this the intent died at the sign-up.
+    pendingUpgrade: null,
     // The feature id an upgrade prompt is open for ('plan' from the account menu), or null.
     upgradeFor: null,
   })
@@ -105,7 +112,10 @@ export function createAuthStore({
     state.status = session ? 'signedIn' : 'signedOut'
 
     if (event === 'PASSWORD_RECOVERY') state.dialog = 'recovery'
-    else if (session && (state.dialog === 'signIn' || state.dialog === 'signUp')) state.dialog = null
+    else if (session && (state.dialog === 'signIn' || state.dialog === 'signUp')) {
+      state.dialog = null
+      state.dialogReason = null
+    }
 
     const userId = session?.user?.id ?? null
     // Token refreshes fire this too; only a different user needs a new account.
@@ -114,9 +124,20 @@ export function createAuthStore({
         state.account = null
         state.accountError = null
       }
+      // Picked up here, not when the dialog closes: an email-confirmation or
+      // magic link signs this tab in from another one, long after the dialog.
+      const resume = userId && userId !== previousUserId ? state.pendingUpgrade : null
+      if (resume) state.pendingUpgrade = null
       // Supabase warns against awaiting inside its callback (it holds a lock);
       // the fetch only needs the token, so run it after the callback returns.
-      setTimeout(loadAccount, 0)
+      setTimeout(async () => {
+        await loadAccount()
+        // Only once the plan is KNOWN: an existing Pro user signing in from
+        // the upgrade prompt must not be offered what they already have.
+        if (resume && state.session?.user?.id === userId && !state.accountError && needsUpgrade(resume)) {
+          state.upgradeFor = resume
+        }
+      }, 0)
     }
 
     if (event === 'INITIAL_SESSION') cleanUrl()
@@ -136,12 +157,22 @@ export function createAuthStore({
   // ── Actions. Each resolves { error } (a message or null) for the dialog. ──
 
   async function run(fn) {
-    if (!client) return { error: 'Accounts are not available' }
+    if (!client) return { error: 'Accounts are not available', errorKind: null }
     try {
       const { data, error } = await fn()
-      return { data, error: error ? friendlyError(error) : null }
+      return { data, error: error ? friendlyError(error) : null, errorKind: error ? errorKind(error) : null }
     } catch (err) {
-      return { error: friendlyError(err) }
+      return { error: friendlyError(err), errorKind: errorKind(err) }
+    }
+  }
+
+  /** Is `featureId` ('plan' = Pro itself) still out of reach on the current plan? */
+  function needsUpgrade(featureId) {
+    if (featureId === 'plan') return planRank(plan.value) < planRank('pro')
+    try {
+      return !hasFeature(plan.value, featureId)
+    } catch {
+      return false // an unknown id never opens a prompt
     }
   }
 
@@ -181,6 +212,10 @@ export function createAuthStore({
     return result
   }
 
+  /** Send the sign-up confirmation email again. */
+  const resendConfirmation = (email) =>
+    run(() => client.auth.resend({ type: 'signup', email, options: { emailRedirectTo: redirectUrl() } }))
+
   const sendPasswordReset = (email) =>
     run(() => client.auth.resetPasswordForEmail(email, { redirectTo: redirectUrl() }))
 
@@ -209,17 +244,41 @@ export function createAuthStore({
     return data?.session?.access_token ?? null
   }
 
-  function openDialog(mode = 'signIn') {
-    if (client) state.dialog = mode
+  /**
+   * Open the account dialog.
+   *   reason     the feature id that needs the account, so the dialog can say
+   *              what it is for rather than a generic "sign in"
+   *   thenUpgrade  a feature id ('plan' for Pro itself) whose upgrade prompt
+   *              opens once signed in — unless the account turns out to have it
+   */
+  function openDialog(mode = 'signIn', { reason = null, thenUpgrade = null } = {}) {
+    if (!client) return
+    state.dialog = mode
+    state.dialogReason = reason ?? (thenUpgrade && thenUpgrade !== 'plan' ? thenUpgrade : null)
+    if (thenUpgrade) state.pendingUpgrade = thenUpgrade
   }
 
-  function closeDialog() {
+  /**
+   * Close the account dialog. `keepIntent` keeps a pending upgrade alive — the
+   * dialog passes it once a confirmation or sign-in link has been emailed, so
+   * the prompt still resumes when that link signs this tab in.
+   */
+  function closeDialog({ keepIntent = false } = {}) {
     state.dialog = null
+    state.dialogReason = null
+    if (!keepIntent) state.pendingUpgrade = null
   }
 
   /** Open the upgrade prompt, for a feature or (no argument) for the plan itself. */
   function openUpgrade(featureId = 'plan') {
     if (client) state.upgradeFor = featureId
+  }
+
+  /** From the upgrade prompt while signed out: an account first, then back to the prompt. */
+  function signUpThenUpgrade(mode = 'signUp') {
+    const featureId = state.upgradeFor ?? 'plan'
+    state.upgradeFor = null
+    openDialog(mode, { thenUpgrade: featureId })
   }
 
   function closeUpgrade() {
@@ -230,8 +289,8 @@ export function createAuthStore({
     state, user, isSignedIn, plan,
     start, loadAccount, getAccessToken,
     signInWithPassword, signUp, sendMagicLink, signInWithProvider,
-    sendPasswordReset, updatePassword, signOut,
-    openDialog, closeDialog, openUpgrade, closeUpgrade,
+    sendPasswordReset, updatePassword, signOut, resendConfirmation,
+    openDialog, closeDialog, openUpgrade, closeUpgrade, signUpThenUpgrade, needsUpgrade,
   }
 }
 
@@ -242,7 +301,24 @@ export function friendlyError(err) {
   if (/email not confirmed/i.test(message)) return 'Confirm your email first — check your inbox for the link.'
   if (/user already registered/i.test(message)) return 'An account with this email already exists. Sign in instead.'
   if (/failed to fetch|network/i.test(message)) return 'Could not reach the sign-in service. Check your connection.'
+  if (/rate limit|only request this after/i.test(message)) return 'Too many attempts — wait a minute, then try again.'
   return message
+}
+
+/**
+ * What kind of failure it is, for the dialog to offer the way out:
+ *   'exists'       sign-up with an email that has an account → "Sign in instead"
+ *   'unconfirmed'  sign-in before confirming → "Resend the link"
+ *   'credentials'  wrong email or password → "Email me a link instead"
+ * null for anything else. Supabase's error `code` first, its text as a fallback.
+ */
+export function errorKind(err) {
+  const code = err?.code ?? ''
+  const message = err?.message ?? ''
+  if (code === 'user_already_exists' || code === 'email_exists' || /user already registered/i.test(message)) return 'exists'
+  if (code === 'email_not_confirmed' || /email not confirmed/i.test(message)) return 'unconfirmed'
+  if (code === 'invalid_credentials' || /invalid login credentials/i.test(message)) return 'credentials'
+  return null
 }
 
 export const AUTH_POPUP_NAME = 'wavely-auth'
