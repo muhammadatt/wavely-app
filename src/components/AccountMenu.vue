@@ -78,7 +78,7 @@ async function signOut() {
         @click="auth.openDialog('signIn')"
       >
         <Icon name="user" :size="15" class="sm:hidden" />
-        <span class="max-sm:hidden">Sign in</span>
+        <span class="max-sm:hidden">Log in</span>
       </BaseButton>
       <!-- The sign-up door, not buried behind "Sign in": most visitors have no
            account yet, and "free" is the word that gets the click. Off on a
@@ -88,7 +88,7 @@ async function signOut() {
         size="md" :pill="false" class="ml-1 whitespace-nowrap max-sm:hidden compact:hidden"
         title="Create a free account"
         @click="auth.openDialog('signUp')"
-      >Sign up free</BaseButton>
+      >Sign up</BaseButton>
     </template>
 
     <div v-else class="relative flex items-center gap-[6px]" data-account-menu>

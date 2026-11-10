@@ -416,7 +416,7 @@ function onKeydown(e) {
         <!-- ── Passwordless ──────────────────────────────────────── -->
         <form v-else-if="isAccountMode && view === 'link'" class="flex flex-col gap-[18px]" novalidate @submit.prevent="magicLink">
           <div class="flex flex-col gap-[6px]">
-            <div class="text-[19px] font-extrabold tracking-[-0.01em] text-[#eaf6f8]">{{ mode === 'signUp' ? 'No password needed' : 'Sign in without a password' }}</div>
+            <div class="text-[19px] font-extrabold tracking-[-0.01em] text-[#eaf6f8]">{{ mode === 'signUp' ? 'Go password free' : 'Sign in without a password' }}</div>
             <div class="text-[13px] leading-[1.5] text-[rgba(255,255,255,.5)]">
               Enter your email and we’ll send a link that {{ mode === 'signUp' ? 'creates your account and signs you in' : 'signs you in' }}.
             </div>
@@ -823,7 +823,6 @@ function onKeydown(e) {
   font-size: 14px;
   color: #08161a;
   background: var(--color-accent);
-  box-shadow: 0 8px 24px rgba(53, 211, 230, 0.22);
 }
 .auth-btn--primary:not(:disabled):hover {
   background: var(--color-accent-bright);

@@ -21,8 +21,8 @@ import { FEATURES, PLAN_LABELS } from './plans.js'
  * plans.js still describes both.
  */
 export const ACCOUNT_BENEFITS = [
-  { id: 'presets', feature: 'savePresets', title: 'Presets that follow you', text: 'Save custom presets and effect settings' },
-  { id: 'earlyAccess', title: 'First in line for new effects', text: 'Get early access to new effects before they ship' },
+  { id: 'presets', feature: 'savePresets', title: 'Store presets and settings', text: 'Save custom presets and effect settings' },
+  { id: 'earlyAccess', title: 'Be first in line for new effects', text: 'Get early access to new effects before they ship' },
   { id: 'local', title: 'Audio stays local', text: 'Only your settings sync — your files stay local' },
 ]
 
