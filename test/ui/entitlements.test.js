@@ -9,10 +9,12 @@ import { readFileSync } from 'node:fs'
 function fakeAuth(status = 'signedOut', plan = null) {
   const state = reactive({ status, plan })
   const calls = []
+  const reasons = []
   return {
+    reasons,
     state,
     plan: computed(() => (state.status === 'signedIn' ? state.plan : null)),
-    openDialog: (m) => calls.push(['dialog', m]),
+    openDialog: (m, opts) => { calls.push(['dialog', m]); reasons.push(opts?.reason ?? null) },
     openUpgrade: (f) => calls.push(['upgrade', f]),
     calls,
   }
@@ -36,7 +38,7 @@ test('signed out: saving asks for an account, Pro features ask for an upgrade', 
   assert.equal(e.request('savePresets'), false)
   assert.equal(e.request('pluginChainApply'), false)
   assert.deepEqual(auth.calls, [['dialog', 'signUp'], ['upgrade', 'pluginChainApply']])
-  assert.match(e.hint('savePresets'), /^Sign in/)
+  assert.match(e.hint('savePresets'), /^Log in/)
   assert.match(e.hint('autoLevel'), /Pro feature/)
   // Server previews need an account — except mastering's.
   assert.equal(e.previewLimit('spotEffects'), 0)
@@ -152,4 +154,14 @@ test('every registry `feature` and apply-feature names a real feature', () => {
   ].map(m => m[1])
   assert.ok(named.length >= 6)
   for (const id of named) assert.ok(FEATURES[id], `unknown feature "${id}"`)
+})
+
+test('the sign-up dialog is told which feature sent the user', () => {
+  const auth = fakeAuth('signedOut')
+  const e = createEntitlements(auth)
+  e.request('savePresets')
+  e.requestPreview('spotEffects')
+  e.handleServerRefusal(Object.assign(new Error('x'), { signIn: { feature: 'mastering' } }))
+  e.handleServerRefusal(Object.assign(new Error('x'), { signIn: { feature: 'fromANewerServer' } }))
+  assert.deepEqual(auth.reasons, ['savePresets', 'spotEffects', 'mastering', null])
 })
