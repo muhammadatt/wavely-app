@@ -248,5 +248,35 @@ const statusOf = documentStatus
       </button>
     </div>
 
+    <!-- Active file properties, at the far end of the row the active tab sits
+         in (moved down from the top bar, where they floated a row away from
+         the file they describe). Outside the measured strip, so the tab
+         capacity maths makes room for them via the ResizeObserver. -->
+    <div
+      v-if="fileMeta"
+      class="flex items-center gap-[7px] shrink-0 pl-3 pr-2 max-sm:hidden"
+      :title="activeDoc ? activeDoc.name : ''"
+    >
+      <span
+        class="font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[6px] py-[2px] rounded-[5px] whitespace-nowrap"
+        style="color:#7fe9f6;background:rgba(53,211,230,.14);border:1px solid rgba(53,211,230,.3)"
+      >{{ fileMeta.format }}</span>
+      <span class="meta">{{ fileMeta.duration }}</span>
+      <span class="sep">·</span>
+      <span class="meta">{{ fileMeta.channels }}</span>
+      <span class="sep">·</span>
+      <span class="meta">{{ fileMeta.sampleRate }}</span>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, .4);
+  white-space: nowrap;
+}
+.sep { color: rgba(255, 255, 255, .15); }
+</style>

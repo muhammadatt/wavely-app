@@ -6,7 +6,7 @@ import Icon from './ui/Icon.vue'
 import AccountMenu from './AccountMenu.vue'
 
 const {
-  state, appState, hasFile, documentCount, undo, redo, canUndo, canRedo,
+  appState, hasFile, documentCount, undo, redo, canUndo, canRedo,
   activeDoc, documentHasUnsavedWork,
 } = useEditorState()
 const { saveDocument, saveDocumentAs, isSaving } = useFileSave()
@@ -37,24 +37,6 @@ function closeSaveMenu(e) {
 onMounted(() => window.addEventListener('click', closeSaveMenu))
 onUnmounted(() => window.removeEventListener('click', closeSaveMenu))
 
-function formatDuration(seconds) {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
-// The tab strip names the active file, so this row carries the properties a
-// tab has no room for instead of repeating the filename.
-const fileMeta = computed(() => {
-  const f = state.currentFile
-  if (!f) return null
-  return {
-    format: f.name.split('.').pop().toUpperCase(),
-    duration: formatDuration(f.duration),
-    channels: f.channels === 1 ? 'Mono' : f.channels === 2 ? 'Stereo' : `${f.channels} ch`,
-    sampleRate: `${(f.sampleRate / 1000).toFixed(1)} kHz`,
-  }
-})
 </script>
 
 <template>
@@ -67,21 +49,9 @@ const fileMeta = computed(() => {
       <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[26px] compact:h-[20px] max-sm:h-[17px] w-auto select-none" draggable="false" />
     </div>
 
-    <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] compact:hidden"></div>
-
-    <!-- Active file properties -->
-    <div class="flex-1 min-w-0 flex items-center gap-[8px] overflow-hidden compact:invisible" v-if="fileMeta">
-      <span
-        class="font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[6px] py-[3px] rounded-[5px] whitespace-nowrap shrink-0"
-        style="color:#7fe9f6;background:rgba(53,211,230,.14);border:1px solid rgba(53,211,230,.3)"
-      >{{ fileMeta.format }}</span>
-      <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.4)] whitespace-nowrap shrink-0">{{ fileMeta.duration }}</span>
-      <span class="text-[rgba(255,255,255,.15)] shrink-0">·</span>
-      <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.4)] whitespace-nowrap shrink-0">{{ fileMeta.channels }}</span>
-      <span class="text-[rgba(255,255,255,.15)] shrink-0">·</span>
-      <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.4)] whitespace-nowrap shrink-0">{{ fileMeta.sampleRate }}</span>
-    </div>
-    <div v-else class="flex-1"></div>
+    <!-- The active file's properties used to sit here; they moved to the tab
+         row, next to the tab they describe. -->
+    <div class="flex-1"></div>
 
     <!-- Actions -->
     <div class="flex items-center gap-2 compact:gap-1">
