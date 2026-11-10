@@ -42,12 +42,13 @@ const error = ref(null)
 const errorKind = ref(null)
 // 'pw' (email + password) | 'link' (email only, a sign-in link)
 const view = ref('pw')
-// Sign-up is PROGRESSIVE (owner, November 2026): the email alone with
-// "Continue" first, then the email and the password with "Create account".
-// One field is a smaller first commitment than two; sign-in keeps both at
-// once, since a returning user's password manager fills them together.
+// Sign-up and sign-in are PROGRESSIVE (owner, November 2026): the email
+// alone with "Continue" first, then the email and the password with
+// "Create account" / "Sign in". One field is a smaller first commitment than
+// two. Password managers handle the two-step shape (fill the username, then
+// the password); the email field says `username` on sign-in to help them.
 // 'email' | 'password'
-const signUpStep = ref('email')
+const step = ref('email')
 // After a link has been emailed the form gives way to this: { kind, addr }.
 const sent = ref(null)
 const resendIn = ref(0)
@@ -78,7 +79,7 @@ const showBenefits = computed(() => mode.value === 'signUp' && !upgradeFlow.valu
 const showProviders = computed(() => isAccountMode.value && AUTH_PROVIDERS.length > 0)
 const needsEmail = computed(() => mode.value !== 'recovery')
 const needsPassword = computed(() => isAccountMode.value || mode.value === 'recovery')
-const atEmailStep = computed(() => mode.value === 'signUp' && signUpStep.value === 'email')
+const atEmailStep = computed(() => isAccountMode.value && step.value === 'email')
 const askPassword = computed(() => needsPassword.value && !atEmailStep.value)
 const newPassword = computed(() => mode.value === 'signUp' || mode.value === 'recovery')
 const strength = computed(() => passwordStrength(password.value))
@@ -86,7 +87,9 @@ const strength = computed(() => passwordStrength(password.value))
 const submitLabel = computed(() => {
   if (busy.value) return mode.value === 'signUp' ? 'Creating account…' : 'Working…'
   switch (mode.value) {
-    case 'signIn': return upgradeFlow.value ? 'Sign in & continue' : 'Sign in'
+    case 'signIn':
+      if (atEmailStep.value) return 'Continue'
+      return upgradeFlow.value ? 'Sign in & continue' : 'Sign in'
     case 'signUp':
       if (atEmailStep.value) return 'Continue'
       return upgradeFlow.value ? 'Create account & continue' : 'Create account'
@@ -101,7 +104,7 @@ watch(mode, async (m, prev) => {
   if (m !== prev) {
     password.value = ''
     showPassword.value = false
-    signUpStep.value = 'email'
+    step.value = 'email'
     if (!isAccountMode.value) view.value = 'pw'
   }
   if (!m) return
@@ -152,8 +155,8 @@ async function submit() {
     return
   }
   if (atEmailStep.value) {
-    // Step 1 of the sign-up: the address is good, now ask for the password.
-    signUpStep.value = 'password'
+    // Step 1: the address is good, now ask for the password.
+    step.value = 'password'
     await nextTick()
     passwordInput.value?.focus()
     return
@@ -276,21 +279,24 @@ function useDifferentEmail() {
   sent.value = null
   clearError()
   if (wasLink) view.value = 'link'
-  else if (mode.value === 'signUp') {
-    signUpStep.value = 'email'
+  else if (isAccountMode.value) {
+    step.value = 'email'
     password.value = ''
   }
   nextTick(focusFirst)
 }
 
 /** From the "already registered" error: same email, password kept, sign in. */
-function signInInstead() {
+async function signInInstead() {
   const pw = password.value
   setMode('signIn')
-  nextTick(() => {
-    password.value = pw
-    passwordInput.value?.focus()
-  })
+  // The mode watcher resets to the email step on the switch; the email is
+  // already known here, so go straight on to the password.
+  await nextTick()
+  step.value = 'password'
+  password.value = pw
+  await nextTick()
+  passwordInput.value?.focus()
 }
 
 async function resendFromError() {
@@ -447,7 +453,7 @@ function onKeydown(e) {
               v-model="email"
               class="auth-input"
               type="email"
-              autocomplete="email"
+              :autocomplete="mode === 'signIn' ? 'username' : 'email'"
               inputmode="email"
               placeholder="you@example.com"
               :disabled="busy"
@@ -455,7 +461,7 @@ function onKeydown(e) {
             />
           </label>
 
-          <label v-if="askPassword" class="flex flex-col gap-[6px]" :class="{ 'auth-step-in': mode === 'signUp' }">
+          <label v-if="askPassword" class="flex flex-col gap-[6px]" :class="{ 'auth-step-in': isAccountMode }">
             <span class="auth-label flex items-center">
               {{ mode === 'recovery' ? 'NEW PASSWORD' : 'PASSWORD' }}
               <button
