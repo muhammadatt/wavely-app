@@ -262,9 +262,9 @@ test('an upgrade started signed out resumes once the account exists — and only
 
   client.emit('SIGNED_IN', session('u1'))
   assert.equal(store.state.dialog, null)
-  assert.equal(store.state.pendingUpgrade, null, 'consumed once')
   await tick()
   assert.equal(store.state.upgradeFor, 'autoLevel', 'back on the upgrade prompt once the plan is known')
+  assert.equal(store.state.pendingUpgrade, null, 'consumed once')
 
   // An existing Pro account signing in from the prompt is not offered Pro again.
   store.closeUpgrade()
@@ -315,4 +315,48 @@ test('errors carry their kind so the dialog can offer the way out', async () => 
   assert.equal(errorKind({ code: 'invalid_credentials' }), 'credentials')
   assert.equal(errorKind({ message: 'boom' }), null)
   assert.equal(friendlyError({ message: 'Email rate limit exceeded' }), 'Too many attempts — wait a minute, then try again.')
+})
+
+test('a failed first account load keeps the upgrade intent; the next successful load resumes it', async () => {
+  const client = fakeClient()
+  let fail = true
+  const store = makeStore(client, async () => { if (fail) throw new Error('Could not load account'); return { plan: 'free' } })
+  store.start()
+  client.emit('INITIAL_SESSION', null)
+  store.openUpgrade('autoLevel')
+  store.signUpThenUpgrade('signUp')
+
+  client.emit('SIGNED_IN', session('u1'))
+  await tick()
+  assert.equal(store.state.accountError, 'Could not load account')
+  assert.equal(store.state.upgradeFor, null, 'no prompt on an unknown plan')
+  assert.equal(store.state.pendingUpgrade, 'autoLevel', 'kept for the retry')
+
+  fail = false
+  await store.loadAccount()
+  assert.equal(store.state.upgradeFor, 'autoLevel')
+  assert.equal(store.state.pendingUpgrade, null)
+})
+
+test('the billing period picked before the account dialog survives to the resumed prompt', async () => {
+  const client = fakeClient()
+  const store = makeStore(client)
+  store.start()
+  client.emit('INITIAL_SESSION', null)
+  store.openUpgrade('plan')
+  store.signUpThenUpgrade('signUp', { interval: 'monthly' })
+  assert.equal(store.state.upgradeInterval, 'monthly')
+  client.emit('SIGNED_IN', session('u1'))
+  await tick()
+  assert.equal(store.state.upgradeFor, 'plan')
+  assert.equal(store.state.upgradeInterval, 'monthly', 'the dialog opens on it')
+  store.closeUpgrade()
+  assert.equal(store.state.upgradeInterval, null)
+
+  // Abandoning the account dialog drops it with the intent.
+  client.emit('SIGNED_OUT', null)
+  store.openUpgrade('plan')
+  store.signUpThenUpgrade('signUp', { interval: 'monthly' })
+  store.closeDialog()
+  assert.equal(store.state.upgradeInterval, null)
 })

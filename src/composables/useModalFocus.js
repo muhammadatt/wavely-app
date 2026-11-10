@@ -12,7 +12,12 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
  * listen on window). Keeping focus inside is what makes that sufficient: a
  * keydown can only start inside the dialog, so it never reaches the editor.
  *
- * Returns `trapTab(event)` for the dialog's own keydown handler.
+ * Returns `trapTab(event)` for the dialog's own keydown handler, and
+ * `refocus()` for a dialog that swaps views: a swap that removes the focused
+ * control drops focus to <body>, where the dialog's keydown handler no longer
+ * sees keys — Escape stops working and the editor's shortcuts run behind it.
+ * Call it after the new view has rendered; it does nothing while focus is
+ * still inside.
  */
 export function useModalFocus(rootRef) {
   let opener = null
@@ -21,13 +26,22 @@ export function useModalFocus(rootRef) {
     return [...(rootRef.value?.querySelectorAll(FOCUSABLE) ?? [])].filter(el => el.offsetParent !== null || el === document.activeElement)
   }
 
-  onMounted(async () => {
-    opener = document.activeElement
-    await nextTick()
+  function focusInside() {
     if (rootRef.value && !rootRef.value.contains(document.activeElement)) {
       ;(rootRef.value.querySelector('[data-autofocus]') ?? focusables()[0] ?? rootRef.value).focus()
     }
+  }
+
+  onMounted(async () => {
+    opener = document.activeElement
+    await nextTick()
+    focusInside()
   })
+
+  async function refocus() {
+    await nextTick()
+    focusInside()
+  }
 
   onBeforeUnmount(() => {
     if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus()
@@ -52,5 +66,5 @@ export function useModalFocus(rootRef) {
     }
   }
 
-  return { trapTab }
+  return { trapTab, refocus }
 }

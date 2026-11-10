@@ -61,7 +61,8 @@ const lead = computed(() => {
 
 // ── Prices ────────────────────────────────────────────────────────────────
 
-const interval = ref('yearly')
+// Resumed after the account dialog: the period picked before it, not the default.
+const interval = ref(state.upgradeInterval ?? 'yearly')
 const framing = computed(() => offerFraming(billing.state.prices))
 const offers = computed(() => {
   const f = framing.value
@@ -119,7 +120,7 @@ async function manageBilling() {
 }
 
 function createAccount(mode) {
-  auth.signUpThenUpgrade(mode)
+  auth.signUpThenUpgrade(mode, { interval: interval.value })
 }
 
 // The billing tab's return broadcasts an account change; the store reloads it.
@@ -141,7 +142,10 @@ function close() {
 
 // Focus moves in on open, Tab stays inside, and focus returns to the opener.
 const root = ref(null)
-const { trapTab } = useModalFocus(root)
+const { trapTab, refocus } = useModalFocus(root)
+// Every view swap removes the control that was focused (Get Pro, Change
+// plan, Reopen checkout…): pull focus back in, or it lands on <body>.
+watch(view, refocus)
 
 function onKeydown(e) {
   trapTab(e)

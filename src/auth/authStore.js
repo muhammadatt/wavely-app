@@ -74,6 +74,10 @@ export function createAuthStore({
     // open once the user has an account — the signed-out "Upgrade" path is
     // create account FIRST, and without this the intent died at the sign-up.
     pendingUpgrade: null,
+    // The billing period picked in the upgrade prompt before it gave way to
+    // the account dialog ('monthly' | 'yearly'), so the resumed prompt opens
+    // on it rather than on its default. null = the prompt's default.
+    upgradeInterval: null,
     // The feature id an upgrade prompt is open for ('plan' from the account menu), or null.
     upgradeFor: null,
   })
@@ -99,6 +103,7 @@ export function createAuthStore({
       if (request !== accountRequest) return // superseded by a sign-out or user switch
       state.account = account
       state.accountError = null
+      resumePendingUpgrade()
     } catch (err) {
       if (request !== accountRequest) return
       state.account = null
@@ -124,20 +129,10 @@ export function createAuthStore({
         state.account = null
         state.accountError = null
       }
-      // Picked up here, not when the dialog closes: an email-confirmation or
-      // magic link signs this tab in from another one, long after the dialog.
-      const resume = userId && userId !== previousUserId ? state.pendingUpgrade : null
-      if (resume) state.pendingUpgrade = null
       // Supabase warns against awaiting inside its callback (it holds a lock);
       // the fetch only needs the token, so run it after the callback returns.
-      setTimeout(async () => {
-        await loadAccount()
-        // Only once the plan is KNOWN: an existing Pro user signing in from
-        // the upgrade prompt must not be offered what they already have.
-        if (resume && state.session?.user?.id === userId && !state.accountError && needsUpgrade(resume)) {
-          state.upgradeFor = resume
-        }
-      }, 0)
+      // A pending upgrade resumes from that load's success (resumePendingUpgrade).
+      setTimeout(loadAccount, 0)
     }
 
     if (event === 'INITIAL_SESSION') cleanUrl()
@@ -164,6 +159,27 @@ export function createAuthStore({
     } catch (err) {
       return { error: friendlyError(err), errorKind: errorKind(err) }
     }
+  }
+
+  /**
+   * Reopen the upgrade prompt the user was on before the account dialog, now
+   * the account exists. Called from a SUCCESSFUL account load and nowhere
+   * else, for two reasons: the plan must be KNOWN (an existing Pro user
+   * logging in from the prompt must not be offered what they have), and a
+   * failed first load must not use the intent up — the next successful load
+   * (a retry, a focus refresh) resumes it. Picked up from the load, not when
+   * the dialog closes, because an email link logs this tab in long after.
+   *
+   * The intent is only ever set while signed out, and a signed-out load
+   * returns before fetching, so the first successful load after it is the
+   * new session's.
+   */
+  function resumePendingUpgrade() {
+    const resume = state.pendingUpgrade
+    if (!resume || state.status !== 'signedIn') return
+    state.pendingUpgrade = null
+    if (needsUpgrade(resume)) state.upgradeFor = resume
+    else state.upgradeInterval = null
   }
 
   /** Is `featureId` ('plan' = Pro itself) still out of reach on the current plan? */
@@ -266,7 +282,10 @@ export function createAuthStore({
   function closeDialog({ keepIntent = false } = {}) {
     state.dialog = null
     state.dialogReason = null
-    if (!keepIntent) state.pendingUpgrade = null
+    if (!keepIntent) {
+      state.pendingUpgrade = null
+      state.upgradeInterval = null
+    }
   }
 
   /** Open the upgrade prompt, for a feature or (no argument) for the plan itself. */
@@ -275,14 +294,16 @@ export function createAuthStore({
   }
 
   /** From the upgrade prompt while signed out: an account first, then back to the prompt. */
-  function signUpThenUpgrade(mode = 'signUp') {
+  function signUpThenUpgrade(mode = 'signUp', { interval = null } = {}) {
     const featureId = state.upgradeFor ?? 'plan'
     state.upgradeFor = null
+    state.upgradeInterval = interval
     openDialog(mode, { thenUpgrade: featureId })
   }
 
   function closeUpgrade() {
     state.upgradeFor = null
+    state.upgradeInterval = null
   }
 
   return {

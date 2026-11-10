@@ -314,7 +314,11 @@ async function resendFromError() {
 
 // Focus moves in on open, Tab stays inside, and focus returns to the opener.
 const root = ref(null)
-const { trapTab } = useModalFocus(root)
+const { trapTab, refocus } = useModalFocus(root)
+// The "Check your inbox" view replaces the form and the button that sent the
+// email; without this focus falls to <body> and Escape stops reaching us.
+// (The other view changes — mode, step, link — focus a field themselves.)
+watch(sent, refocus)
 
 function onKeydown(e) {
   trapTab(e)
