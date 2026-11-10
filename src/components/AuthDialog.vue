@@ -603,45 +603,37 @@ function onKeydown(e) {
   display: none;
 }
 .auth-tabs {
-  /* Underline tabs, not a segmented button (owner, November 2026): the
-     filled tab read as a second call to action beside the real one. The
-     choice stays upfront — first thing in the column, full width — but
-     only the primary button is filled. */
+  /* A slim SEGMENTED PILL (owner, November 2026). History: the 2c design's
+     teal-filled tab read as a second call to action — it looked like the
+     "Create free account" button — and underline tabs that replaced it were
+     too quiet to show where Sign in was. So it is filled again, but unlike
+     the CTA on every axis: a neutral fill rather than the accent, pill ends
+     rather than the button's 10 px corners, and 30 px tall against 44. */
   flex: 1;
-  display: flex;
-  gap: 22px;
-  align-self: stretch;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
 .auth-tab {
-  position: relative;
-  height: 38px;
-  padding: 0 2px;
-  font-size: 14px;
+  height: 28px;
+  border-radius: 999px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.45);
-  transition: color 0.15s;
+  color: rgba(255, 255, 255, 0.62);
+  transition: background 0.15s, color 0.15s;
 }
-.auth-tab:hover {
-  color: rgba(255, 255, 255, 0.8);
+.auth-tab:not(.is-on):hover {
+  color: #eaf6f8;
+  background: rgba(255, 255, 255, 0.05);
 }
 .auth-tab.is-on {
   font-weight: 700;
   color: #eaf6f8;
-}
-.auth-tab::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  border-radius: 2px;
-  background: transparent;
-  transition: background 0.15s;
-}
-.auth-tab.is-on::after {
-  background: var(--color-accent);
+  background: rgba(255, 255, 255, 0.13);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 .auth-close {
   flex: none;
