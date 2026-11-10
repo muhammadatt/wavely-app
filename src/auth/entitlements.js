@@ -30,7 +30,7 @@ export function createEntitlements(auth) {
     const b = blocker(featureId)
     if (!b) return ''
     const label = FEATURES[featureId].label
-    return b === 'signIn' ? `Sign in to use ${lowerFirst(label)}` : `${label} is a Pro feature`
+    return b === 'signIn' ? `Log in to use ${lowerFirst(label)}` : `${label} is a Pro feature`
   }
 
   /**
@@ -40,7 +40,7 @@ export function createEntitlements(auth) {
   function request(featureId) {
     const b = blocker(featureId)
     if (!b) return true
-    if (b === 'signIn') auth.openDialog('signUp')
+    if (b === 'signIn') auth.openDialog('signUp', { reason: featureId })
     else auth.openUpgrade(featureId)
     return false
   }
@@ -62,7 +62,7 @@ export function createEntitlements(auth) {
    */
   function requestPreview(featureId) {
     if (previewLimit(featureId) > 0) return true
-    if (auth.plan.value == null) auth.openDialog('signUp')
+    if (auth.plan.value == null) auth.openDialog('signUp', { reason: featureId })
     else auth.openUpgrade(featureId)
     return false
   }
@@ -74,16 +74,21 @@ export function createEntitlements(auth) {
    */
   function handleServerRefusal(err) {
     if (err?.signIn) {
-      auth.openDialog('signUp')
+      auth.openDialog('signUp', { reason: knownFeature(err.signIn.feature) })
       return true
     }
     if (!err?.upgrade) return false
-    if (err.upgrade.requires === 'free') auth.openDialog('signUp')
+    if (err.upgrade.requires === 'free') auth.openDialog('signUp', { reason: knownFeature(err.upgrade.feature) })
     else auth.openUpgrade(err.upgrade.feature)
     return true
   }
 
   return { gatingActive, can, blocker, hint, request, previewLimit, requestPreview, handleServerRefusal }
+}
+
+/** A server-sent feature id, or null if this build does not know it. */
+function knownFeature(id) {
+  return id && FEATURES[id] ? id : null
 }
 
 function lowerFirst(s) {

@@ -312,7 +312,7 @@ onBeforeUnmount(() => {
         class="w-full text-left px-3.5 py-2 border-none bg-transparent cursor-pointer"
         style="font:600 10.5px 'Inter';color:rgba(234,246,248,.7)"
         @click="startSave"
-      >{{ presets.saveAllowed.value ? 'Save current settings…' : 'Sign in to save presets…' }}</button>
+      >{{ presets.saveAllowed.value ? 'Save current settings…' : 'Log in to save presets…' }}</button>
 
       <div v-else class="px-3 py-2.5">
         <input

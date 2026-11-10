@@ -119,8 +119,8 @@ export function createEntitlementGate({ verify, planFor, isBlocked = null, probe
     res.set?.('WWW-Authenticate', 'Bearer')
     return res.status(401).json({
       error: requires === 'free'
-        ? `Sign in to use ${label.toLowerCase()} — any free account will do.`
-        : `Sign in to use ${label}.`,
+        ? `Log in to use ${label.toLowerCase()} — any free account will do.`
+        : `Log in to use ${label}.`,
       code: 'sign_in_required',
       feature: featureId,
       requires,

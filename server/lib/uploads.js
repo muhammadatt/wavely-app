@@ -146,7 +146,7 @@ export function createUploadStore({
     const limit = signedOut ? Math.min(maxSignedOutBytes, maxBytes) : maxBytes
     if (length > limit) {
       throw signedOut
-        ? new UploadRefusal(401, 'sign_in_required', 'Sign in to upload more than a short preview.')
+        ? new UploadRefusal(401, 'sign_in_required', 'Log in to upload more than a short preview.')
         : new UploadRefusal(413, 'upload_too_large', `Uploads are limited to ${Math.round(maxBytes / MB)} MB.`)
     }
     const { all, mine, count } = totals(client)

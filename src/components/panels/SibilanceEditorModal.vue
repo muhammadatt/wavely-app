@@ -136,7 +136,7 @@ async function applyAndClose() {
 // The analysis needs an account (a free one), not a plan: say so before the
 // click rather than after it. Empty when signed in or accounts are off.
 const entitlements = useEntitlements()
-const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Sign in (free) to analyse. Applying needs Pro.' : ''))
+const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log in (free) to analyse. Applying needs Pro.' : ''))
 </script>
 
 <template>

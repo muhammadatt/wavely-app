@@ -1,4 +1,5 @@
 <script setup>
+import { watch } from 'vue'
 import { useEditorState } from './composables/useEditorState.js'
 import EditorScreen from './components/EditorScreen.vue'
 import FilesPanel from './components/FilesPanel.vue'
@@ -25,6 +26,18 @@ const { appState, showToast } = useEditorState()
 // Started here rather than on first use so an auth redirect (email link,
 // password reset) is handled on load even before the top bar renders.
 const { state: authState } = useAuth()
+
+// A plan that turns Pro while this tab is open (Checkout finished in its own
+// tab) is welcomed here — unless the upgrade dialog is open, which shows its
+// own success view, or this load IS the Checkout return, which toasts below.
+// Keyed on the LOADED account: a Pro user's page load goes undefined → 'pro'
+// and is not an upgrade.
+const returningFromCheckout = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('checkout')
+watch(() => authState.account?.plan, (now, before) => {
+  if (now === 'pro' && before === 'free' && !authState.upgradeFor && !returningFromCheckout) {
+    showToast('Welcome to Pro — every tool is unlocked', 5000)
+  }
+})
 
 // Presets save to the account behind the menu; a write that fails is rolled
 // back by the store, and this is where the user hears about it.
