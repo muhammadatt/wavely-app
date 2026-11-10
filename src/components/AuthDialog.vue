@@ -344,7 +344,7 @@ function onKeydown(e) {
       <!-- ── The pitch ─────────────────────────────────────────────── -->
       <aside class="auth-pitch">
         <img src="/crisp-fm-logo.png" alt="crisp.fm" class="auth-logo" draggable="false" />
-        <div class="flex flex-col gap-[18px]">
+        <div class="auth-pitch-body">
           <span v-if="upgradeFlow" class="auth-steps" aria-label="Step 1 of 2">
             <span class="is-on">1 Account</span><span class="auth-step-line"></span><span>2 Pro plan</span>
           </span>
@@ -359,7 +359,8 @@ function onKeydown(e) {
             </li>
           </ul>
         </div>
-        <div class="auth-fine">FREE FOREVER · NO CARD NEEDED</div>
+        <!-- A sign-up promise: nothing to say to someone logging in. -->
+        <div v-if="mode === 'signUp'" class="auth-fine">FREE FOREVER · NO CARD NEEDED</div>
       </aside>
 
       <!-- ── The form ──────────────────────────────────────────────── -->
@@ -572,10 +573,19 @@ function onKeydown(e) {
   padding: 28px 26px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   gap: 24px;
   background: linear-gradient(180deg, rgba(53, 211, 230, 0.1), rgba(53, 211, 230, 0.02));
   border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+.auth-pitch-body {
+  /* Centred by auto margins, not by the column's space-between: with the
+     fine print absent (log in) space-between would have made this the LAST
+     item and dropped it to the bottom. Auto margins centre it between the
+     logo and the column's foot either way. */
+  margin-block: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 .auth-logo {
   height: 22px;
