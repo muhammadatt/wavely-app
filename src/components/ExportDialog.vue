@@ -114,9 +114,9 @@ function statusOf(doc) {
     >
       <!-- Header -->
       <div class="px-5 pt-[18px] pb-[14px] border-b border-[rgba(255,255,255,.07)]">
-        <div class="text-[15px] font-bold text-[#eaf6f8]">Export</div>
+        <div class="text-[15px] font-bold text-[#eaf6f8]">Export files</div>
         <div class="mt-[3px] text-[11.5px] text-[rgba(255,255,255,.42)]">
-          WAV 16-bit · choose which files to include · double-click a name to rename
+          Several files in one download · WAV 16-bit, zipped when more than one · double-click a name to rename
         </div>
       </div>
 
