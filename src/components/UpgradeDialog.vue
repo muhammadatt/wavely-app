@@ -300,15 +300,16 @@ function onKeydown(e) {
             <button class="up-btn up-btn--gold" disabled>{{ billing.state.loading ? 'Loading…' : 'Coming soon' }}</button>
           </template>
 
-          <div class="flex items-center gap-3">
-            <div class="flex-1 h-px bg-[rgba(255,255,255,.08)]"></div>
-            <span class="text-[10.5px] font-semibold tracking-[0.08em] text-[rgba(255,255,255,.35)]">OR</span>
-            <div class="flex-1 h-px bg-[rgba(255,255,255,.08)]"></div>
-          </div>
-          <div class="flex flex-col gap-[10px]">
-            <button v-if="!isSignedIn" class="up-btn up-btn--ghost" @click="createAccount('signIn')">I already have an account</button>
-            <button class="up-btn up-btn--ghost" @click="close">Not now</button>
-          </div>
+          <!-- An alternative path gets a button; dismissing gets only a link. -->
+          <template v-if="!isSignedIn">
+            <div class="flex items-center gap-3">
+              <div class="flex-1 h-px bg-[rgba(255,255,255,.08)]"></div>
+              <span class="text-[10.5px] font-semibold tracking-[0.08em] text-[rgba(255,255,255,.35)]">OR</span>
+              <div class="flex-1 h-px bg-[rgba(255,255,255,.08)]"></div>
+            </div>
+            <button class="up-btn up-btn--ghost" @click="createAccount('signIn')">I already have an account</button>
+          </template>
+          <button class="up-notnow" @click="close">Not now</button>
         </div>
       </div>
     </div>
@@ -559,6 +560,16 @@ function onKeydown(e) {
 }
 .up-btn--ghost:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+.up-notnow {
+  align-self: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+}
+.up-notnow:hover {
+  color: rgba(255, 255, 255, 0.8);
+  text-decoration: underline;
 }
 .up-link {
   font-size: 12px;
