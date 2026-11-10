@@ -423,7 +423,7 @@ try {
       const row = panelRow()
       await row.locator('canvas').first().click(); await page.waitForTimeout(250)
       const download = page.waitForEvent('download', { timeout: 15000 }).catch(() => null)
-      // Scoped to the panel: the top bar has an Export button too, and an
+      // Scoped to the panel: other surfaces may carry an Export label, and an
       // unscoped locator is a strict-mode violation rather than a miss.
       await page.getByRole('dialog', { name: 'Files' })
         .getByRole('button', { name: 'Export' }).click()

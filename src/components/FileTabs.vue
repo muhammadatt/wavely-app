@@ -248,26 +248,5 @@ const statusOf = documentStatus
       </button>
     </div>
 
-        <!-- Files entry point + active file properties, packed left so the tabs
-         start immediately after them. This region sits outside the measured
-         strip, so the tab capacity maths accounts for it for free via the
-         ResizeObserver.
-
-         Search, rename, bulk close and bulk export used to be reachable only
-         via the overflow chip — which does not exist below the overflow
-         threshold — or an unadvertised Ctrl+P. -->
-    <div class="flex items-center gap-[8px] shrink-0 pr-3">
-      <button
-        class="flex items-center gap-[5px] px-[9px] py-4 h-[25px] rounded-[7px] text-[12px] font-bold transition-colors hover:bg-[rgba(255,255,255,.09)]"
-        style="color:rgba(255,255,255,.55);box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)"
-        title="All files — search, rename, bulk export (Ctrl+P)"
-        @click="appState.filesPanelOpen = true"
-      >
-        <svg viewBox="0 0 24 24" class="w-[11px] h-[11px] fill-none stroke-current" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-        Files
-        <span class="font-['JetBrains_Mono'] text-[10px] font-semibold text-[rgba(255,255,255,.35)]">{{ documents.length }}</span>
-      </button>
-
-    </div>
   </div>
 </template>

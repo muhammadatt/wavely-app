@@ -83,7 +83,6 @@ function closeTopModal() {
   if (appState.commandPaletteOpen) { closeCommandPalette(); return true }
   if (closeTopWindow()) return true
   if (appState.saveDialog) { appState.saveDialog = null; return true }
-  if (appState.exportDialogOpen) { appState.exportDialogOpen = false; return true }
   if (appState.filesPanelOpen) { appState.filesPanelOpen = false; return true }
   return false
 }
@@ -94,7 +93,7 @@ function handleKeydown(e) {
   const key = e.key.toLowerCase()
   const inText = isTextField(e.target)
   const modalOpen = anyWindowOpen.value || appState.commandPaletteOpen ||
-    appState.contextMenu || appState.exportDialogOpen || appState.filesPanelOpen ||
+    appState.contextMenu || appState.filesPanelOpen ||
     appState.saveDialog
 
   // Escape — close the top modal, then the selection, then the rail.
@@ -139,7 +138,9 @@ function handleKeydown(e) {
   if ((e.ctrlKey || e.metaKey) && key === 'e') {
     if (!hasFile.value) return
     e.preventDefault()
-    appState.exportDialogOpen = true
+    // Export lives in the files panel: open it with this file ticked.
+    appState.filesPanelTickActive = true
+    appState.filesPanelOpen = true
     return
   }
 

@@ -16,9 +16,9 @@ const { saveDocument, saveDocumentAs, isSaving } = useFileSave()
 // the beforeunload handler use rather than a second idea of dirtiness.
 const isDirty = computed(() => !!activeDoc.value && documentHasUnsavedWork(activeDoc.value.id))
 
-// Save As and Export live behind a caret rather than as full buttons: this row
-// runs out of width on a narrow window, and both are rarer than Save by a wide
-// margin once a document has a destination.
+// Save As lives behind a caret rather than as a second full button: this row
+// runs out of width on a narrow window, and Save As is the rarer of the two by
+// a wide margin once a document has a destination.
 const saveMenuOpen = ref(false)
 
 function toggleSaveMenu() {
@@ -29,16 +29,6 @@ function runSaveAs() {
   saveMenuOpen.value = false
   saveDocumentAs()
 }
-
-function runExport() {
-  saveMenuOpen.value = false
-  appState.exportDialogOpen = true
-}
-
-// Says what Export is FOR, since next to Save As that is the whole question.
-const exportHint = computed(() => documentCount.value > 1
-  ? `Several of the ${documentCount.value} open files, as WAV`
-  : 'Several open files at once, as WAV')
 
 function closeSaveMenu(e) {
   if (!e.target.closest?.('[data-save-menu]')) saveMenuOpen.value = false
@@ -117,15 +107,27 @@ const fileMeta = computed(() => {
 
       <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-1 compact:mx-0 max-sm:hidden"></div>
 
+      <!-- Files: every open document — switch, rename, save, close, and
+           EXPORT. Export used to be its own filled button (and its own dialog,
+           a second list of the same files with the same checkboxes). Since
+           Save writes a file back in its own format, Export's one remaining
+           job is several files at once, and that is a files-panel job: tick,
+           then Export. Ctrl+E opens the panel with the active file ticked. -->
+      <button
+        class="tb-files"
+        :disabled="documentCount === 0"
+        title="Files — switch, rename, export several (Ctrl+P)"
+        aria-label="Files"
+        @click="appState.filesPanelOpen = true"
+      >
+        <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        <span class="compact:hidden">Files</span>
+        <span class="tb-count">{{ documentCount }}</span>
+      </button>
+
       <!-- Save is THE way edited audio goes back to the user, so it is the one
            primary-coloured action on this row: a split button, Save on the
-           left, everything else that writes files behind the caret.
-
-           Export used to sit here as its own filled button. Since Save writes
-           the file back in its own format, Export's one remaining job is
-           several files at once (one WAV, or a zip of many) — so it lives in
-           this menu, named for that job, and on the files panel, where files
-           are ticked. Ctrl+E still opens it. -->
+           left and Save As behind the caret. -->
       <div class="relative flex items-stretch" data-save-menu @keydown.esc="saveMenuOpen = false">
         <button
           class="tb-save tb-save-main"
@@ -144,7 +146,7 @@ const fileMeta = computed(() => {
         <button
           class="tb-save tb-save-caret"
           :disabled="!hasFile || isSaving"
-          title="Save As, Export…"
+          title="Save As… (Ctrl+Shift+S)"
           aria-label="More save options"
           aria-haspopup="menu"
           :aria-expanded="saveMenuOpen"
@@ -164,14 +166,6 @@ const fileMeta = computed(() => {
               <span class="tb-menu-sub">New name, format or location</span>
             </span>
             <kbd class="tb-kbd">Ctrl+Shift+S</kbd>
-          </button>
-          <div class="my-1 h-px bg-[rgba(255,255,255,.08)]"></div>
-          <button class="tb-menu-item" role="menuitem" @click="runExport">
-            <span class="flex-1 min-w-0">
-              <span class="tb-menu-title">Export files…</span>
-              <span class="tb-menu-sub">{{ exportHint }}</span>
-            </span>
-            <kbd class="tb-kbd">Ctrl+E</kbd>
           </button>
         </div>
       </div>
@@ -194,6 +188,31 @@ const fileMeta = computed(() => {
 }
 .tb-icon:hover:not(:disabled) { background: rgba(255, 255, 255, .08); color: var(--color-text); }
 .tb-icon:disabled { opacity: .3; cursor: default; }
+.tb-files {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--color-text-soft);
+  background: rgba(255, 255, 255, .04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .09);
+  transition: background-color .12s;
+}
+.tb-files:hover:not(:disabled) { background: rgba(255, 255, 255, .10); }
+.tb-files:disabled { opacity: .4; cursor: default; }
+.tb-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+@media (max-width: 639px) { .tb-files { padding: 0 9px; } }
+.tb-files:focus-visible,
 .tb-icon:focus-visible,
 .tb-save:focus-visible,
 .tb-menu-item:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
