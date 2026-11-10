@@ -61,6 +61,26 @@ Every existing feature works signed out, with or without accounts configured.
 5. **Authentication → Emails / SMTP**: the built-in mailer is heavily rate
    limited and meant for testing. Configure custom SMTP (Resend, Postmark, SES…)
    before real users sign up.
+6. **Authentication → Emails → Templates**: paste the branded templates from
+   `supabase/templates/` (dark crisp.fm card, cyan button, plain-link fallback).
+   They are generated from one layout by `node scripts/build-auth-emails.mjs`.
+   Edit the script, not the HTML. The logo loads from
+   `{{ .SiteURL }}/crisp-fm-logo.png`, so the *Site URL* must be the public app
+   origin. A localhost Site URL shows the alt text instead of the logo.
+
+   | Template | File | Subject |
+   |---|---|---|
+   | Confirm signup | `confirm-signup.html` | Confirm your crisp.fm account |
+   | Invite user | `invite.html` | You’re invited to crisp.fm |
+   | Magic link | `magic-link.html` | Your crisp.fm sign-in link |
+   | Change email address | `change-email.html` | Confirm your new email for crisp.fm |
+   | Reset password | `reset-password.html` | Reset your crisp.fm password |
+   | Reauthentication | `reauthentication.html` | Your crisp.fm verification code |
+   | Password changed (security notification) | `password-changed.html` | Your crisp.fm password was changed |
+   | Email changed (security notification) | `email-changed.html` | Your crisp.fm email was changed |
+
+   The two security notifications are off by default; turn them on under the
+   same page if wanted.
 
 ### 2. Frontend env (Vercel project settings, or `.env.local` for dev)
 
