@@ -359,7 +359,7 @@ function onKeydown(e) {
             </li>
           </ul>
         </div>
-        <div class="auth-fine">FREE FOREVER · NO CARD NEEDED</div>
+        <div v-if="mode === 'signUp'" class="auth-fine">FREE FOREVER · NO CARD NEEDED</div>
       </aside>
 
       <!-- ── The form ──────────────────────────────────────────────── -->
