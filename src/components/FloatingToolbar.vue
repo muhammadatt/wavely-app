@@ -6,6 +6,12 @@ import { usePluginChain } from '../composables/usePluginChain.js'
 import { CATEGORIES } from '../ui/registry.js'
 import Icon from './ui/Icon.vue'
 
+// `inline`: rendered inside the header (wide windows, see useHeaderTools.js)
+// rather than as its own row. Same controls; the row's chrome, the spacers that
+// centred it and the search field's words go, since the header centres it and
+// has no width to spare.
+const props = defineProps({ inline: { type: Boolean, default: false } })
+
 const { state, setActiveTool, hasFile, openCommandPalette, closeRail } = useEditorState()
 const { openWindow, isOpen } = useWindows()
 const { slots, liveSlots, bypassed, suspended } = usePluginChain()
@@ -57,20 +63,26 @@ const tools = CATEGORIES
 </script>
 
 <template>
-  <div class="h-[65px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] max-sm:gap-1 px-5 compact:px-2 max-sm:px-[6px] shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
+  <div
+    :class="props.inline
+      ? 'toolbar-inline flex items-center gap-[10px] min-w-0'
+      : 'h-[65px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] max-sm:gap-1 px-5 compact:px-2 max-sm:px-[6px] shrink-0 border-b border-[rgba(255,255,255,.06)] toolbar-row'"
+  >
     <!-- Search is the escape hatch from the category hierarchy: as the number
          of operations grows, this is how you reach one without knowing which
          category it lives in. -->
-    <div class="flex-1 compact:flex-none min-w-0 flex items-center">
+    <!-- Icon-only in both layouts. As a field with "Search… Ctrl K" it ran
+         under the category group on windows below ~1100 px; the shortcut
+         lives in the tooltip and the palette's own hint. -->
+    <div :class="props.inline ? 'shrink-0 flex items-center' : 'flex-1 compact:flex-none min-w-0 flex items-center'">
       <button
-        class="palette-trigger flex items-center gap-2 pl-[10px] pr-2 max-sm:px-[8px] py-[7px] rounded-[10px] cursor-pointer max-w-[210px]"
+        class="palette-trigger w-[34px] h-[34px] shrink-0 flex items-center justify-center rounded-[10px] cursor-pointer"
         :disabled="!hasFile"
         title="Search operations (Ctrl+K)"
+        aria-label="Search operations"
         @click="openCommandPalette"
       >
-        <Icon name="search" :size="13" />
-        <span class="text-[11.5px] font-semibold truncate compact:hidden">Search…</span>
-        <kbd class="compact:hidden ml-auto shrink-0 font-mono text-[9.5px] font-bold px-[5px] py-[2px] rounded-[5px] tracking-[.04em]">Ctrl K</kbd>
+        <Icon name="search" :size="14" />
       </button>
     </div>
     <!-- min-w-0 + scroll: the tool group gives up centring before it collides
@@ -115,7 +127,7 @@ const tools = CATEGORIES
     <!-- Undo/Redo moved to the TopBar, next to Export. This spacer stays: it
          balances the search button on the left so the tool group sits centred
          rather than drifting right. -->
-    <div class="flex-1 compact:flex-none min-w-0"></div>
+    <div v-if="!props.inline" class="flex-1 compact:flex-none min-w-0"></div>
   </div>
 </template>
 
@@ -347,6 +359,26 @@ const tools = CATEGORIES
   }
   .chain-count.is-live {
     background: #08161a;
+  }
+}
+.toolbar-row {
+  background: linear-gradient(180deg, #12161b, #0e1216);
+}
+/* In the header: a little tighter, so the whole row fits from 1100 px. Between
+   1100 and 1280 the Chain button drops its word first (its badge stays) —
+   the category labels go last, since they are what a new user navigates by. */
+.toolbar-inline .tool-btn {
+  padding: 8px 13px;
+}
+.toolbar-inline .chain-btn {
+  padding: 8px 12px;
+}
+@media (max-width: 1279.98px) {
+  .toolbar-inline .tool-btn {
+    padding: 8px 10px;
+  }
+  .toolbar-inline .chain-label {
+    display: none;
   }
 }
 </style>
