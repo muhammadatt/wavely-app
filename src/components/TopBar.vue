@@ -31,8 +31,10 @@ const headerTools = useHeaderTools()
     <FloatingToolbar v-if="headerTools" inline class="shrink min-w-0" />
 
     <div class="flex-1 basis-0 min-w-fit flex items-center justify-end gap-2 compact:gap-1">
-      <!-- History. Icon-only and borderless: the arrows are unambiguous. -->
-      <div class="flex items-center shrink-0">
+      <!-- History. One outlined group, the two halves split by a hairline:
+           icon-only, since the arrows are unambiguous, and joined so the pair
+           reads as one control rather than two loose glyphs. -->
+      <div class="tb-history flex items-stretch shrink-0" role="group" aria-label="History">
         <button
           class="tb-icon"
           :disabled="!canUndo"
@@ -55,17 +57,23 @@ const headerTools = useHeaderTools()
 </template>
 
 <style scoped>
-.tb-icon {
-  width: 34px;
+.tb-history {
   height: 34px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .03);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1);
+  overflow: hidden;
+}
+.tb-icon {
+  width: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  color: var(--color-text-softer);
+  color: var(--color-text-soft);
   transition: background-color .12s, color .12s;
 }
-.tb-icon:hover:not(:disabled) { background: rgba(255, 255, 255, .08); color: var(--color-text); }
-.tb-icon:disabled { opacity: .3; cursor: default; }
-.tb-icon:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.tb-icon + .tb-icon { box-shadow: inset 1px 0 0 rgba(255, 255, 255, .1); }
+.tb-icon:hover:not(:disabled) { background: rgba(255, 255, 255, .07); color: var(--color-text); }
+.tb-icon:disabled { color: rgba(255, 255, 255, .25); cursor: default; }
+.tb-icon:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 </style>
