@@ -66,7 +66,7 @@ async function signOut() {
     <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-1 max-sm:hidden"></div>
 
     <!-- Reserve the slot while Supabase reports in, so the row doesn't jump. -->
-    <div v-if="state.status === 'loading'" class="w-[30px] h-[30px]" aria-hidden="true"></div>
+    <div v-if="state.status === 'loading'" class="w-[34px] h-[34px]" aria-hidden="true"></div>
 
     <!-- On a phone held upright the words do not fit beside Save and Export
          (they ran off the screen at 390 px); the person icon stands in. -->
@@ -91,39 +91,33 @@ async function signOut() {
       >Sign up</BaseButton>
     </template>
 
-    <div v-else class="relative flex items-center gap-[6px]" data-account-menu>
-      <!-- Free accounts see the way up at all times, not only inside the menu. -->
+    <div v-else class="relative flex items-center gap-2" data-account-menu>
+      <!-- Free accounts see the way up at all times, not only inside the menu.
+           Outlined rather than filled: Save is the row's one filled button. -->
       <button
         v-if="!isPaid && !state.accountError && state.account"
         class="acct-upgrade inline-flex items-center max-sm:hidden"
         title="See what Pro unlocks"
         @click.stop="upgrade"
       >
-        <svg viewBox="0 0 24 24" class="w-[10px] h-[10px]" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 20.9l1.6-7L2 9.2l7.1-.6z"/></svg>
+        <svg viewBox="0 0 24 24" class="w-[12px] h-[12px]" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 20.9l1.6-7L2 9.2l7.1-.6z"/></svg>
         Upgrade
       </button>
+      <!-- Just the avatar: the plan badge beside it repeated what the Upgrade
+           pill (free) or the menu (any plan) already says. Pro shows as a gold
+           ring instead. -->
       <button
-        class="h-[30px] flex items-center gap-[7px] pl-[3px] pr-[8px] max-sm:pr-[3px] rounded-full transition-colors hover:bg-[rgba(255,255,255,.08)]"
-        :title="user?.email"
+        class="acct-avatar"
+        :class="{ 'acct-avatar-pro': isPaid }"
+        :title="isPaid ? `${user?.email} · ${planLabel}` : user?.email"
         aria-label="Account"
         :aria-expanded="open"
         @click.stop="open = !open"
-      >
-        <span
-          class="w-[24px] h-[24px] rounded-full flex items-center justify-center text-[11px] font-extrabold"
-          style="background:linear-gradient(135deg,#7ef0ff,#25b6d0);color:#08161a"
-        >{{ initial }}</span>
-        <span
-          class="max-sm:hidden font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[6px] py-[3px] rounded-[5px]"
-          :style="isPaid
-            ? 'color:#08161a;background:#e0b84a'
-            : 'color:rgba(255,255,255,.6);background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1)'"
-        >{{ planLabel.toUpperCase() }}</span>
-      </button>
+      >{{ initial }}</button>
 
       <div
         v-if="open"
-        class="absolute right-0 top-[36px] z-[400] w-[230px] rounded-[12px] overflow-hidden font-['Inter'] menu-surface"
+        class="absolute right-0 top-[42px] z-[400] w-[230px] rounded-[12px] overflow-hidden font-['Inter'] menu-surface"
       >
         <div class="px-4 pt-3 pb-[10px] border-b border-[rgba(255,255,255,.07)]">
           <div class="text-[12.5px] font-bold text-[#eaf6f8] truncate">{{ displayName }}</div>
@@ -168,19 +162,39 @@ async function signOut() {
 
 <style scoped>
 .acct-upgrade {
-  height: 24px;
-  gap: 5px;
-  padding: 0 10px;
+  height: 34px;
+  gap: 7px;
+  padding: 0 15px;
   border-radius: 999px;
-  font-size: 11px;
-  font-weight: 800;
-  color: #1a1408;
-  background: linear-gradient(180deg, #f4d983, #e0b84a);
-  box-shadow: 0 3px 10px rgba(224, 184, 74, 0.2);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: #e9c560;
+  background: rgba(224, 184, 74, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(224, 184, 74, 0.35);
   white-space: nowrap;
-  transition: filter 0.15s;
+  transition: background-color 0.15s, box-shadow 0.15s;
 }
 .acct-upgrade:hover {
-  filter: brightness(1.08);
+  background: rgba(224, 184, 74, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(224, 184, 74, 0.55);
 }
+.acct-avatar {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  color: #08161a;
+  background: linear-gradient(135deg, #7ef0ff, #25b6d0);
+  transition: filter 0.15s, box-shadow 0.15s;
+}
+.acct-avatar:hover { filter: brightness(1.08); }
+.acct-avatar-pro { box-shadow: 0 0 0 2px #0e1116, 0 0 0 3.5px #e0b84a; }
+.acct-upgrade:focus-visible,
+.acct-avatar:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 </style>
