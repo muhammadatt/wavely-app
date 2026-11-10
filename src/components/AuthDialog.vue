@@ -42,6 +42,12 @@ const error = ref(null)
 const errorKind = ref(null)
 // 'pw' (email + password) | 'link' (email only, a sign-in link)
 const view = ref('pw')
+// Sign-up is PROGRESSIVE (owner, November 2026): the email alone with
+// "Continue" first, then the email and the password with "Create account".
+// One field is a smaller first commitment than two; sign-in keeps both at
+// once, since a returning user's password manager fills them together.
+// 'email' | 'password'
+const signUpStep = ref('email')
 // After a link has been emailed the form gives way to this: { kind, addr }.
 const sent = ref(null)
 const resendIn = ref(0)
@@ -72,6 +78,8 @@ const showBenefits = computed(() => mode.value === 'signUp' && !upgradeFlow.valu
 const showProviders = computed(() => isAccountMode.value && AUTH_PROVIDERS.length > 0)
 const needsEmail = computed(() => mode.value !== 'recovery')
 const needsPassword = computed(() => isAccountMode.value || mode.value === 'recovery')
+const atEmailStep = computed(() => mode.value === 'signUp' && signUpStep.value === 'email')
+const askPassword = computed(() => needsPassword.value && !atEmailStep.value)
 const newPassword = computed(() => mode.value === 'signUp' || mode.value === 'recovery')
 const strength = computed(() => passwordStrength(password.value))
 
@@ -79,7 +87,9 @@ const submitLabel = computed(() => {
   if (busy.value) return mode.value === 'signUp' ? 'Creating account…' : 'Working…'
   switch (mode.value) {
     case 'signIn': return upgradeFlow.value ? 'Sign in & continue' : 'Sign in'
-    case 'signUp': return upgradeFlow.value ? 'Create account & continue' : 'Create free account'
+    case 'signUp':
+      if (atEmailStep.value) return 'Continue'
+      return upgradeFlow.value ? 'Create account & continue' : 'Create account'
     case 'reset': return 'Send reset link'
     default: return 'Set password'
   }
@@ -91,6 +101,7 @@ watch(mode, async (m, prev) => {
   if (m !== prev) {
     password.value = ''
     showPassword.value = false
+    signUpStep.value = 'email'
     if (!isAccountMode.value) view.value = 'pw'
   }
   if (!m) return
@@ -138,6 +149,13 @@ async function submit() {
   if (needsEmail.value && !validEmail(email.value)) {
     error.value = 'Enter a valid email address.'
     emailInput.value?.focus()
+    return
+  }
+  if (atEmailStep.value) {
+    // Step 1 of the sign-up: the address is good, now ask for the password.
+    signUpStep.value = 'password'
+    await nextTick()
+    passwordInput.value?.focus()
     return
   }
   if (newPassword.value && password.value.length < MIN_PASSWORD) {
@@ -258,6 +276,10 @@ function useDifferentEmail() {
   sent.value = null
   clearError()
   if (wasLink) view.value = 'link'
+  else if (mode.value === 'signUp') {
+    signUpStep.value = 'email'
+    password.value = ''
+  }
   nextTick(focusFirst)
 }
 
@@ -433,7 +455,7 @@ function onKeydown(e) {
             />
           </label>
 
-          <label v-if="needsPassword" class="flex flex-col gap-[6px]">
+          <label v-if="askPassword" class="flex flex-col gap-[6px]" :class="{ 'auth-step-in': mode === 'signUp' }">
             <span class="auth-label flex items-center">
               {{ mode === 'recovery' ? 'NEW PASSWORD' : 'PASSWORD' }}
               <button
@@ -687,6 +709,13 @@ function onKeydown(e) {
 .auth-reveal:hover {
   color: var(--color-text);
   background: rgba(255, 255, 255, 0.08);
+}
+.auth-step-in {
+  animation: auth-step-in 0.22s ease-out both;
+}
+@keyframes auth-step-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
 }
 .auth-meter {
   display: grid;
