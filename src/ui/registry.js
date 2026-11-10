@@ -569,7 +569,7 @@ const ALL_OPERATIONS = [
   },
   {
     id: 'hf-limiter',
-    label: 'HF Limiter',
+    label: 'Hi-Freq Limiter',
     desc: 'Put a ceiling on brightness, harshness and edges',
     category: 'clean',
     group: 'Harshness',

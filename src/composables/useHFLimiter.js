@@ -173,23 +173,23 @@ const copies = pluginCopies((copy, life) => {
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
-      const pin = pinActiveDocument('HF Limiter')
+      const pin = pinActiveDocument('Hi-Freq Limiter')
 
       const wasPreviewing = hflPreview.value
       if (wasPreviewing) togglePreview()
       await prepareApply()
 
-      startProcessing('Applying HF Limiter...', pin.docId)
+      startProcessing('Applying Hi-Freq Limiter...', pin.docId)
       try {
         const buffer = await renderRegion(state.segments, start, end)
         pin.check()
-        const bufferId = replaceRegion(start, end, buffer, 'HF Limiter', pin.docId)
+        const bufferId = replaceRegion(start, end, buffer, 'Hi-Freq Limiter', pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
-        showToast('HF Limiter applied')
+        showToast('Hi-Freq Limiter applied')
       } catch (err) {
-        console.error('HF Limiter failed:', err)
-        showToast(err instanceof DocumentSwitchedError ? err.message : 'HF Limiter failed')
+        console.error('Hi-Freq Limiter failed:', err)
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'Hi-Freq Limiter failed')
       } finally {
         endProcessing(pin.docId)
       }
@@ -207,7 +207,7 @@ const copies = pluginCopies((copy, life) => {
     registerChainPlugin({
       id: hfLimiterEffect.id,
       windowId,
-      label: 'HF Limiter',
+      label: 'Hi-Freq Limiter',
       dispose: life.dispose,
       isActive: () => hflPreview.value,
       setActive: (on) => { if (hflPreview.value !== on) togglePreview() },
