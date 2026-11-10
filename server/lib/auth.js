@@ -128,7 +128,7 @@ export function requireAuth(verify) {
     const token = bearerToken(req)
     if (!token) {
       res.set('WWW-Authenticate', 'Bearer')
-      return res.status(401).json({ error: 'Sign in required' })
+      return res.status(401).json({ error: 'Log in required' })
     }
     try {
       req.user = await verify(token)

@@ -38,19 +38,19 @@ export const ACCOUNT_BENEFITS = [
 export function authCopy(mode, reason = null, thenUpgrade = null) {
   const feature = reason ? FEATURES[reason] ?? null : null
   if (mode === 'reset') return { title: 'Reset your password', subtitle: 'We’ll email you a link to set a new one.' }
-  if (mode === 'recovery') return { title: 'Choose a new password', subtitle: 'You’re signed in from your reset link — set a password to finish.' }
+  if (mode === 'recovery') return { title: 'Choose a new password', subtitle: 'You’re logged in from your reset link — set a password to finish.' }
 
   if (thenUpgrade) {
     const plan = PLAN_LABELS.pro
     return mode === 'signIn'
-      ? { title: 'Sign in to upgrade', subtitle: `You’ll go straight on to ${plan} checkout.` }
+      ? { title: 'Log in to upgrade', subtitle: `You’ll go straight on to ${plan} checkout.` }
       : { title: `Step 1 of 2: create your account`, subtitle: `Free, takes a few seconds. You’ll choose your ${plan} plan next.` }
   }
 
   if (mode === 'signIn') {
     return feature
-      ? { title: 'Welcome back', subtitle: `Sign in to ${featureVerb(reason)}.` }
-      : { title: 'Welcome back', subtitle: 'Sign in to pick up your presets and plan.' }
+      ? { title: 'Welcome back', subtitle: `Log in to ${featureVerb(reason)}.` }
+      : { title: 'Welcome back', subtitle: 'Log in to pick up your presets and plan.' }
   }
   return feature
     ? { title: `Create a free account to ${featureVerb(reason)}`, subtitle: 'No credit card. Your audio stays right here in the editor.' }

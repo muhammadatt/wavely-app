@@ -78,7 +78,7 @@ test('pro passes in full; a free account gets a preview on a short clip; signed 
     assert.equal(r.passed, false, String(token))
     assert.equal(r.response.statusCode, 401)
     assert.deepEqual(r.response.body, {
-      error: 'Sign in to use Server spot effects.', code: 'sign_in_required', feature: 'spotEffects', requires: 'pro',
+      error: 'Log in to use Server spot effects.', code: 'sign_in_required', feature: 'spotEffects', requires: 'pro',
     })
     assert.equal(await exists(file), false, 'the upload is deleted')
   }

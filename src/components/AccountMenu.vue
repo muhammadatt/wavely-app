@@ -73,8 +73,8 @@ async function signOut() {
     <template v-else-if="state.status === 'signedOut'">
       <BaseButton
         size="md" color="ghost" :pill="false" class="max-sm:px-[9px]"
-        aria-label="Sign in"
-        title="Sign in"
+        aria-label="Log in"
+        title="Log in"
         @click="auth.openDialog('signIn')"
       >
         <Icon name="user" :size="15" class="sm:hidden" />

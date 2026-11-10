@@ -38,7 +38,7 @@ test('signed out: saving asks for an account, Pro features ask for an upgrade', 
   assert.equal(e.request('savePresets'), false)
   assert.equal(e.request('pluginChainApply'), false)
   assert.deepEqual(auth.calls, [['dialog', 'signUp'], ['upgrade', 'pluginChainApply']])
-  assert.match(e.hint('savePresets'), /^Sign in/)
+  assert.match(e.hint('savePresets'), /^Log in/)
   assert.match(e.hint('autoLevel'), /Pro feature/)
   // Server previews need an account — except mastering's.
   assert.equal(e.previewLimit('spotEffects'), 0)

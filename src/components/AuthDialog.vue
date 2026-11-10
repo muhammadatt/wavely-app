@@ -89,7 +89,7 @@ const submitLabel = computed(() => {
   switch (mode.value) {
     case 'signIn':
       if (atEmailStep.value) return 'Continue'
-      return upgradeFlow.value ? 'Sign in & continue' : 'Sign in'
+      return upgradeFlow.value ? 'Log in & continue' : 'Log in'
     case 'signUp':
       if (atEmailStep.value) return 'Continue'
       return upgradeFlow.value ? 'Create account & continue' : 'Create account'
@@ -249,8 +249,8 @@ const sentCopy = computed(() => {
   if (!s) return null
   const after = state.pendingUpgrade ? ', and takes you on to Pro' : ''
   return {
-    confirm: { title: `Check ${s.addr}`, body: `Click the link to confirm your account. Keep working — this tab signs in by itself${after}.` },
-    magic: { title: `Check ${s.addr}`, body: `Keep working — this tab signs in when you click the link${after}.` },
+    confirm: { title: `Check ${s.addr}`, body: `Click the link to confirm your account. Keep working — this tab logs in by itself${after}.` },
+    magic: { title: `Check ${s.addr}`, body: `Keep working — this tab logs in when you click the link${after}.` },
     reset: { title: `Check ${s.addr}`, body: 'If there’s an account for this address, a reset link is on its way.' },
   }[s.kind]
 })
@@ -378,7 +378,7 @@ function onKeydown(e) {
               type="button" role="tab" class="auth-tab"
               :class="{ 'is-on': mode === 'signIn' }" :aria-selected="String(mode === 'signIn')"
               @click="setMode('signIn')"
-            >Sign in</button>
+            >Log in</button>
           </div>
           <div v-else class="flex-1 text-[19px] font-extrabold tracking-[-0.01em] text-[#eaf6f8]">
             {{ sent ? 'Check your inbox' : copy.title }}
@@ -416,9 +416,9 @@ function onKeydown(e) {
         <!-- ── Passwordless ──────────────────────────────────────── -->
         <form v-else-if="isAccountMode && view === 'link'" class="flex flex-col gap-[18px]" novalidate @submit.prevent="magicLink">
           <div class="flex flex-col gap-[6px]">
-            <div class="text-[19px] font-extrabold tracking-[-0.01em] text-[#eaf6f8]">{{ mode === 'signUp' ? 'Go password free' : 'Sign in without a password' }}</div>
+            <div class="text-[19px] font-extrabold tracking-[-0.01em] text-[#eaf6f8]">{{ mode === 'signUp' ? 'Go password free' : 'Log in without a password' }}</div>
             <div class="text-[13px] leading-[1.5] text-[rgba(255,255,255,.5)]">
-              Enter your email and we’ll send a link that {{ mode === 'signUp' ? 'creates your account and signs you in' : 'signs you in' }}.
+              Enter your email and we’ll send a link that {{ mode === 'signUp' ? 'creates your account and logs you in' : 'logs you in' }}.
             </div>
           </div>
           <div class="auth-combo">
@@ -505,9 +505,9 @@ function onKeydown(e) {
           <!-- Every known failure offers its own way out. -->
           <div v-if="error" class="auth-error" role="alert">
             <span>{{ error }}</span>
-            <button v-if="errorKind === 'exists'" type="button" class="auth-link" @click="signInInstead">Sign in instead</button>
+            <button v-if="errorKind === 'exists'" type="button" class="auth-link" @click="signInInstead">Log in instead</button>
             <button v-else-if="errorKind === 'unconfirmed'" type="button" class="auth-link" :disabled="busy" @click="resendFromError">Resend the confirmation link</button>
-            <button v-else-if="errorKind === 'credentials'" type="button" class="auth-link" :disabled="busy" @click="magicLink">Email me a sign-in link instead</button>
+            <button v-else-if="errorKind === 'credentials'" type="button" class="auth-link" :disabled="busy" @click="magicLink">Email me a login link instead</button>
           </div>
 
           <button type="submit" class="auth-btn auth-btn--primary" :disabled="busy">
@@ -544,12 +544,12 @@ function onKeydown(e) {
                 </svg>
                 Continue with {{ PROVIDER_LABELS[p] }}
               </button>
-              <button type="button" class="auth-btn auth-btn--ghost" :disabled="busy" @click="setView('link')">Email me a sign-in link</button>
+              <button type="button" class="auth-btn auth-btn--ghost" :disabled="busy" @click="setView('link')">Email me a login link</button>
             </div>
           </template>
 
           <div v-if="mode === 'reset'" class="text-[12px] text-[rgba(255,255,255,.45)]">
-            Remembered it? <button type="button" class="auth-link" @click="setMode('signIn')">Back to sign in</button>
+            Remembered it? <button type="button" class="auth-link" @click="setMode('signIn')">Back to log in</button>
           </div>
         </form>
       </div>

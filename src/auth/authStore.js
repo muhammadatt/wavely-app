@@ -205,7 +205,7 @@ export function createAuthStore({
     const url = result.data?.url
     if (result.error || !url) {
       win?.close()
-      return result.error ? result : { error: 'Could not start sign-in' }
+      return result.error ? result : { error: 'Could not start logging in' }
     }
     if (win) win.location.href = url
     else if (typeof window !== 'undefined') window.location.assign(url)
@@ -299,8 +299,8 @@ export function friendlyError(err) {
   const message = err?.message ?? String(err ?? 'Something went wrong')
   if (/invalid login credentials/i.test(message)) return 'Email or password is incorrect.'
   if (/email not confirmed/i.test(message)) return 'Confirm your email first — check your inbox for the link.'
-  if (/user already registered/i.test(message)) return 'An account with this email already exists. Sign in instead.'
-  if (/failed to fetch|network/i.test(message)) return 'Could not reach the sign-in service. Check your connection.'
+  if (/user already registered/i.test(message)) return 'An account with this email already exists. Log in instead.'
+  if (/failed to fetch|network/i.test(message)) return 'Could not reach the login service. Check your connection.'
   if (/rate limit|only request this after/i.test(message)) return 'Too many attempts — wait a minute, then try again.'
   return message
 }

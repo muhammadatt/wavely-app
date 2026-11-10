@@ -482,7 +482,7 @@ export function saveUserPreset(pluginId, name, params) {
   const trimmed = String(name ?? '').trim()
   if (!trimmed) throw new Error('saveUserPreset: a preset needs a name')
   if (!backend.canSave) {
-    const err = new Error('Sign in to save presets.')
+    const err = new Error('Log in to save presets.')
     err.code = 'sign_in_required'
     throw err
   }
