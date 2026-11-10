@@ -19,7 +19,7 @@ test('every account benefit is true of a free account', () => {
 test('the account dialog names the task that sent the user there', () => {
   assert.match(authCopy('signUp', 'mastering').title, /master the whole file/)
   assert.match(authCopy('signIn', 'savePresets').subtitle, /save your presets/)
-  assert.equal(authCopy('signUp').title, 'Create your free account')
+  assert.equal(authCopy('signUp').title, 'Create your FREE account')
   assert.match(authCopy('signUp', 'autoLevel', 'autoLevel').title, /Step 1 of 2/)
   assert.match(authCopy('signIn', null, 'plan').subtitle, /checkout/)
   assert.equal(featureVerb('nonsense'), 'keep going')
