@@ -23,7 +23,7 @@ import { FEATURES, PLAN_LABELS } from './plans.js'
 export const ACCOUNT_BENEFITS = [
   { id: 'presets', feature: 'savePresets', title: 'Store presets and settings', text: 'Save custom presets and effect settings' },
   { id: 'earlyAccess', title: 'Be first in line for new effects', text: 'Get early access to new effects before they ship' },
-  { id: 'local', title: 'Audio stays local', text: 'Only your settings sync — your files stay local' },
+  /* { id: 'local', title: 'Audio stays local', text: 'Only your settings sync — your files stay local' }, */
 ]
 
 /**
@@ -50,11 +50,11 @@ export function authCopy(mode, reason = null, thenUpgrade = null) {
   if (mode === 'signIn') {
     return feature
       ? { title: 'Welcome back', subtitle: `Log in to ${featureVerb(reason)}.` }
-      : { title: 'Welcome back', subtitle: 'Log in to pick up your presets and plan.' }
+      : { title: 'Welcome back', subtitle: 'Log in to your account.' }
   }
   return feature
-    ? { title: `Create a free account to ${featureVerb(reason)}`, subtitle: 'No credit card. Your audio stays right here in the editor.' }
-    : { title: 'Create your free account', subtitle: 'No credit card. Your audio stays right here in the editor.' }
+    ? { title: `Create a FREE account to ${featureVerb(reason)}`, subtitle: 'No credit card. Your audio stays right here in the editor.' }
+    : { title: 'Create your FREE account', subtitle: 'No credit card. Your audio stays right here in the editor.' }
 }
 
 /** "master the whole file" — what the user was trying to do, as a verb phrase. */
