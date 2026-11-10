@@ -67,12 +67,14 @@ const offers = computed(() => {
   const f = framing.value
   const out = []
   if (f.yearly) {
+    // Quoted per month, the SaaS convention (owner, November 2026), so the two
+    // rows compare like for like; what is actually charged stays on the row.
     out.push({
       interval: 'yearly',
       label: 'Yearly',
-      price: formatPrice(f.yearly.amount, f.yearly.currency),
-      per: '/yr',
-      note: `${formatPrice(f.yearlyPerMonth, f.yearly.currency)}/mo, billed yearly`,
+      price: formatPrice(f.yearlyPerMonth, f.yearly.currency),
+      per: '/mo',
+      note: `${formatPrice(f.yearly.amount, f.yearly.currency)} billed yearly`,
       badge: f.savePercent ? `Save ${f.savePercent}%` : null,
     })
   }
