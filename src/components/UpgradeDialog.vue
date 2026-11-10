@@ -53,8 +53,8 @@ const title = computed(() => (feature.value
   : `Upgrade to ${planLabel.value}`))
 
 const lead = computed(() => {
-  if (!feature.value) return 'Every tool, applied to your whole file.'
-  if (featureId.value === 'pluginChainApply') return 'Your chain is set up — Pro renders it onto your audio in one step.'
+  if (!feature.value) return 'Get Pro tools and streamline your workflow.'
+  if (featureId.value === 'pluginChainApply') return 'Upgrade to Pro to render your whole effect chain.'
   return `${feature.value.label} and everything else in ${planLabel.value}.`
 })
 
@@ -337,7 +337,7 @@ function onKeydown(e) {
   flex-direction: column;
   justify-content: space-between;
   gap: 24px;
-  background: linear-gradient(180deg, rgba(224, 184, 74, 0.11), rgba(224, 184, 74, 0.02));
+  background: linear-gradient(180deg, rgba(53, 211, 230, 0.1), rgba(53, 211, 230, 0.02));
   border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 .up-logo {
