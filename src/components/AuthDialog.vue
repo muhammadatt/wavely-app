@@ -603,30 +603,45 @@ function onKeydown(e) {
   display: none;
 }
 .auth-tabs {
+  /* Underline tabs, not a segmented button (owner, November 2026): the
+     filled tab read as a second call to action beside the real one. The
+     choice stays upfront — first thing in the column, full width — but
+     only the primary button is filled. */
   flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  padding: 4px;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.25);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  display: flex;
+  gap: 22px;
+  align-self: stretch;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 .auth-tab {
-  height: 36px;
-  border-radius: 9px;
-  font-size: 13px;
+  position: relative;
+  height: 38px;
+  padding: 0 2px;
+  font-size: 14px;
   font-weight: 600;
-  color: #eaf6f8;
-  transition: background 0.15s, color 0.15s;
+  color: rgba(255, 255, 255, 0.45);
+  transition: color 0.15s;
 }
-.auth-tab:not(.is-on):hover {
-  background: rgba(255, 255, 255, 0.08);
+.auth-tab:hover {
+  color: rgba(255, 255, 255, 0.8);
 }
 .auth-tab.is-on {
   font-weight: 700;
-  color: #08161a;
+  color: #eaf6f8;
+}
+.auth-tab::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.auth-tab.is-on::after {
   background: var(--color-accent);
-  box-shadow: 0 2px 10px rgba(53, 211, 230, 0.25);
 }
 .auth-close {
   flex: none;
