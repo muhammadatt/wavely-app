@@ -160,7 +160,8 @@ const tools = CATEGORIES
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(255, 255, 255, .75);
+  /* 88 %: the lighter labels of design 1a (owner, November 2026). */
+  color: rgba(255, 255, 255, .88);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
   font-weight: 600;
@@ -171,7 +172,7 @@ const tools = CATEGORIES
 }
 
 .tool-btn__icon {
-  opacity: 0.8;
+  opacity: 1;
   transition: opacity 0.15s ease;
 }
 

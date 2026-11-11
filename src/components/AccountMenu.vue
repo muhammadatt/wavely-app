@@ -187,14 +187,17 @@ async function signOut() {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  font-weight: 800;
-  color: #08161a;
-  background: linear-gradient(135deg, #7ef0ff, #25b6d0);
-  transition: filter 0.15s, box-shadow 0.15s;
+  font-size: 13px;
+  font-weight: 700;
+  /* Neutral (design 1a): an 8 % white disc with a hairline, so Chain and Save
+     are the only cyan on the chrome and Upgrade the only gold. */
+  color: #eaf6f8;
+  background: rgba(255, 255, 255, .08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14);
+  transition: background-color 0.15s, box-shadow 0.15s;
 }
-.acct-avatar:hover { filter: brightness(1.08); }
-.acct-avatar-pro { box-shadow: 0 0 0 2px #0e1116, 0 0 0 3.5px #e0b84a; }
+.acct-avatar:hover { background: rgba(255, 255, 255, .13); }
+.acct-avatar-pro { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14), 0 0 0 2px var(--color-chrome), 0 0 0 3.5px #e0b84a; }
 .acct-upgrade:focus-visible,
 .acct-avatar:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 </style>
