@@ -210,22 +210,21 @@ const tools = CATEGORIES
 }
 
 .palette-trigger {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  color: rgba(255, 255, 255, 0.45);
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  background: var(--chrome-btn-bg);
+  box-shadow: var(--chrome-btn-ring);
+  color: var(--color-text-soft);
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 .palette-trigger:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(53, 211, 230, 0.4);
-  color: #7fe9f6;
+  background: var(--chrome-btn-hover);
+  color: var(--color-text);
 }
 .palette-trigger:disabled {
   opacity: 0.4;
   cursor: default;
 }
 .palette-trigger:focus-visible {
-  outline: 2px solid #7fe9f6;
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 .palette-trigger kbd {

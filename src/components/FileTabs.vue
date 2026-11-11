@@ -476,29 +476,31 @@ function commitRename() {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 0 10px;
-  border-radius: 10px;
+  padding: 0 12px;
+  border-radius: var(--chrome-btn-radius);
+  background: var(--chrome-btn-bg);
+  box-shadow: var(--chrome-btn-ring);
   font-size: 12.5px;
   font-weight: 600;
   color: var(--color-text-soft);
   transition: background-color .12s, color .12s;
 }
-.tb-files:hover:not(:disabled) { background: rgba(255, 255, 255, .07); color: var(--color-text); }
+.tb-files:hover:not(:disabled) { background: var(--chrome-btn-hover); color: var(--color-text); }
 .tb-files:disabled { opacity: .4; cursor: default; }
 @media (max-width: 639px) { .tb-files { padding: 0 7px; } }
 .tb-files:focus-visible,
 .tb-save:focus-visible,
 .tb-menu-item:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
-/* A pill split button. ONE outline on the group (the halves carry none), and
-   a short seam inset from the edges between them. Neutral while the file is
-   saved; the accent tint once it has unsaved edits (design 1a, owner,
-   November 2026: Save lights up when there is something to save). */
+/* A split button in the shared chrome style (main.css): ONE outline on the
+   group (the halves carry none) and a short seam inset between them. Neutral
+   while the file is saved; filled once it has unsaved edits (design 1a,
+   owner, November 2026: Save lights up when there is something to save). */
 .tb-save-group {
-  border-radius: 999px;
-  background: rgba(255, 255, 255, .03);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1);
-  color: rgba(255, 255, 255, .65);
+  border-radius: var(--chrome-btn-radius);
+  background: var(--chrome-btn-bg);
+  box-shadow: var(--chrome-btn-ring);
+  color: var(--color-text-soft);
   transition: background-color .15s, color .15s, box-shadow .15s;
 }
 /* Unsaved: a soft teal FILL with no outline (owner, November 2026: the cyan
@@ -519,23 +521,22 @@ function commitRename() {
   letter-spacing: .01em;
   transition: background-color .12s, opacity .12s;
 }
-.tb-save:hover:not(:disabled) { background: rgba(255, 255, 255, .06); }
+.tb-save:hover:not(:disabled) { background: var(--chrome-btn-hover); color: var(--color-text); }
 .tb-save:disabled { opacity: .4; cursor: default; }
 .tb-save-main {
   gap: 7px;
-  padding: 0 12px 0 16px;
-  border-radius: 999px 0 0 999px;
+  padding: 0 12px 0 13px;
+  border-radius: var(--chrome-btn-radius) 0 0 var(--chrome-btn-radius);
 }
 .tb-save-caret {
-  width: 30px;
-  padding-right: 3px;
+  width: 28px;
   justify-content: center;
-  border-radius: 0 999px 999px 0;
+  border-radius: 0 var(--chrome-btn-radius) var(--chrome-btn-radius) 0;
 }
 .tb-save-seam {
   width: 1px;
   margin: 8px 0;
-  background: rgba(255, 255, 255, .12);
+  background: var(--chrome-btn-seam);
 }
 .tb-save-group.is-dirty .tb-save-seam { background: rgba(214, 246, 253, .18); }
 @media (max-width: 639px) {

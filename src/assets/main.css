@@ -153,6 +153,21 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Chrome buttons ──────────────────────────────────────────────────────────
+   Search, Undo / Redo, Save and Files share ONE quiet style (owner, November
+   2026: they had four shapes and four hovers): a 10 px rounded rectangle —
+   the category chips' and Chain's shape — with a faint fill and a hairline,
+   brightening on hover with no coloured edge. Only the height follows the
+   row (header 34, category row 38, tab row 30). Upgrade and the avatar stay
+   pills: they are the account, not tools. */
+:root {
+  --chrome-btn-radius: 10px;
+  --chrome-btn-bg: rgba(255, 255, 255, 0.03);
+  --chrome-btn-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --chrome-btn-hover: rgba(255, 255, 255, 0.07);
+  --chrome-btn-seam: rgba(255, 255, 255, 0.1);
+}
+
 /* ── Dialogs and menus ────────────────────────────────────────────────────────
    Shared by the modal dialogs (Save, Export, Files, Sign in, Upgrade) and the
    top-bar menus. The panel used to fade #181c22 → #0d1013 over a #0e1116 page,

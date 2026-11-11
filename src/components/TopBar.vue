@@ -30,27 +30,28 @@ const fileMeta = computed(() => {
     class="h-[56px] compact:h-[44px] flex items-center px-5 compact:px-2 gap-[13px] compact:gap-2 shrink-0 z-10"
     style="background:var(--color-chrome)"
   >
-    <!-- flex-1 from a zero basis on both sides keeps the details centred on
-         the window; min-w-fit stops either end shrinking under its own
-         content, so on a tight window the details give way, never the
-         actions. -->
-    <div class="flex-1 basis-0 min-w-fit flex items-center">
+    <!-- The logo, then the active file's details beside it (owner, November
+         2026: centred, they floated; by the logo they read as the title
+         line). min-w-0 lets the details give way on a tight window, never
+         the actions. -->
+    <div class="flex-1 min-w-0 flex items-center">
       <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[26px] compact:h-[20px] max-sm:h-[17px] w-auto select-none shrink-0" draggable="false" />
+      <!-- Label / value pairs: the label names the property, so the format
+           needs no badge and the line reads as words rather than a code. -->
+      <template v-if="fileMeta">
+        <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-[18px] shrink-0 max-md:hidden"></div>
+        <div
+          class="min-w-0 flex items-center gap-[16px] overflow-hidden max-md:hidden"
+          :title="state.currentFile?.name || ''"
+        >
+          <span class="meta"><span class="meta-k">Format</span> {{ fileMeta.format }}</span>
+          <span class="meta tabular-nums"><span class="meta-k">Length</span> {{ fileMeta.duration }}</span>
+          <span class="meta"><span class="meta-k">{{ fileMeta.channels }}</span> {{ fileMeta.sampleRate }}</span>
+        </div>
+      </template>
     </div>
 
-    <!-- Label / value pairs: the label names the property, so the format
-         needs no badge and the line reads as words rather than a code. -->
-    <div
-      v-if="fileMeta"
-      class="min-w-0 flex items-center justify-center gap-[16px] overflow-hidden max-md:hidden"
-      :title="state.currentFile?.name || ''"
-    >
-      <span class="meta"><span class="meta-k">Format</span> {{ fileMeta.format }}</span>
-      <span class="meta tabular-nums"><span class="meta-k">Length</span> {{ fileMeta.duration }}</span>
-      <span class="meta"><span class="meta-k">{{ fileMeta.channels }}</span> {{ fileMeta.sampleRate }}</span>
-    </div>
-
-    <div class="flex-1 basis-0 min-w-fit flex items-center justify-end gap-2 compact:gap-1">
+    <div class="shrink-0 flex items-center justify-end gap-2 compact:gap-1">
       <!-- History. One outlined group, the two halves split by a hairline,
            each with its word (owner, November 2026: with the categories out
            of the header there is room to say it). Compact viewports keep the
@@ -80,9 +81,9 @@ const fileMeta = computed(() => {
 <style scoped>
 .tb-history {
   height: 34px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .03);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1);
+  border-radius: var(--chrome-btn-radius);
+  background: var(--chrome-btn-bg);
+  box-shadow: var(--chrome-btn-ring);
   overflow: hidden;
 }
 .tb-hist {
@@ -101,8 +102,8 @@ const fileMeta = computed(() => {
 @media (max-height: 520px), (max-width: 640px) {
   .tb-hist { padding: 0; }
 }
-.tb-hist + .tb-hist { box-shadow: inset 1px 0 0 rgba(255, 255, 255, .1); }
-.tb-hist:hover:not(:disabled) { background: rgba(255, 255, 255, .07); color: var(--color-text); }
+.tb-hist + .tb-hist { box-shadow: inset 1px 0 0 var(--chrome-btn-seam); }
+.tb-hist:hover:not(:disabled) { background: var(--chrome-btn-hover); color: var(--color-text); }
 .tb-hist:disabled { color: rgba(255, 255, 255, .25); cursor: default; }
 .tb-hist:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 
