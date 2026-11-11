@@ -119,17 +119,31 @@ const tabWidth = computed(() => {
 const tabLabel = (doc) => splitTabName(doc.name)
 
 // ── Keyboard (a real tablist) ────────────────────────────────────────────────
+// A press on a tab keeps focus where it is (so a click never leaves a tab
+// focused) — and drops it from a tab focused earlier by keyboard, or its keys
+// would act on the active file the click just picked. The rename input is
+// exempt: it needs the press to place the caret and select text.
+function onTabMouseDown(e) {
+  if (e.target?.tagName === 'INPUT') return
+  e.preventDefault()
+  const el = document.activeElement
+  if (el?.getAttribute?.('role') === 'tab') el.blur()
+}
+
 function focusTab(id) {
   nextTick(() => stripEl.value?.querySelector(`[data-tab-id="${id}"]`)?.focus())
 }
 
-// ⚠ A CLICK MUST NOT LEAVE FOCUS ON A TAB (the tab's @mousedown.prevent).
+// ⚠ A CLICK MUST NOT LEAVE FOCUS ON A TAB (`onTabMouseDown`).
 // The waveform canvas cannot take focus, so a focused tab kept it while the
 // user went on to select audio — and their Delete closed the FILE instead of
 // deleting the selection (caught by the screenshot run, which lost a tab that
 // way). These keys therefore act only on a tab reached with the keyboard.
 function onTabKey(e) {
   if (renamingId.value || e.target?.getAttribute?.('role') !== 'tab') return
+  // Unmodified keys only: Ctrl / Cmd + Alt + ← → is the editor's own "next
+  // file" shortcut (EditorScreen), which also reaches files in the overflow.
+  if (e.ctrlKey || e.metaKey || e.altKey) return
   const docs = visibleDocs.value
   const i = docs.findIndex(d => d.id === appState.activeDocumentId)
   if (i < 0) return
@@ -240,7 +254,7 @@ function commitRename() {
         :class="doc.id === appState.activeDocumentId ? 'tab-active' : 'tab-idle'"
         :style="{ width: `${tabWidth}px` }"
         :title="doc.name"
-        @mousedown.prevent
+        @mousedown="onTabMouseDown"
         @click="setActiveDocument(doc.id)"
         @dblclick.stop="startRename(doc)"
         @auxclick="handleAuxClick($event, doc)"

@@ -27,14 +27,20 @@ export function baseName(name) {
   return dot > 0 ? name.slice(0, dot) : name
 }
 
+// The longest name kept in one piece: what fits the text room of a tab at
+// TAB_MIN_WIDTH (110 − 45 = 65 px, ~9 characters at 12 px). Anything longer
+// splits, so a crowded tab still shows its last characters; when there is
+// room the two pieces render as the whole name anyway.
+export const TAB_NAME_WHOLE_MAX = TAB_NAME_TAIL + 3
+
 /**
  * Split a name for a middle cut: `head` ellipsises, `tail` is pinned. Names
- * short enough to fit any tab keep one piece.
+ * short enough to fit the narrowest tab keep one piece.
  * @returns {{ head: string, tail: string }}
  */
 export function splitTabName(name, tail = TAB_NAME_TAIL) {
   const base = baseName(name)
-  if (base.length <= tail + 8) return { head: base, tail: '' }
+  if (base.length <= TAB_NAME_WHOLE_MAX) return { head: base, tail: '' }
   return { head: base.slice(0, -tail), tail: base.slice(-tail) }
 }
 

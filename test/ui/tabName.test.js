@@ -19,6 +19,13 @@ test('short names stay whole; long names pin their last six characters', () => {
     { head: 'StuderA800_DrumMachine_', tail: 'wet_v2' })
 })
 
+test('a name too long for the narrowest tab splits, so its suffix survives crowding', () => {
+  // 14 characters: wider than a 110 px tab's text room, so it must not be
+  // kept whole (it was, and a crowded tab cut "_raw" off the end).
+  assert.deepEqual(splitTabName('Chapter_07_raw.flac'), { head: 'Chapter_', tail: '07_raw' })
+  assert.deepEqual(splitTabName('Take_0003.wav'), { head: 'Take_0003', tail: '' })
+})
+
 test('one shared width, clamped between the floor and the cap', () => {
   const w = (s) => s.length * 7
   assert.equal(sharedTabWidth(['a.wav'], w), TAB_MIN_WIDTH)
