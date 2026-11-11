@@ -17,8 +17,8 @@ const headerTools = useHeaderTools()
   <!-- The header: brand, the tools, history and the account. File actions
        (Files, Save) live on the tab row, beside the files they act on. -->
   <div
-    class="h-[56px] compact:h-[44px] flex items-center px-5 compact:px-2 gap-[13px] compact:gap-2 shrink-0 z-10 border-b border-[rgba(255,255,255,.06)]"
-    style="background:linear-gradient(rgb(20, 25, 34), rgb(14, 17, 22));"
+    class="h-[56px] compact:h-[44px] flex items-center px-5 compact:px-2 gap-[13px] compact:gap-2 shrink-0 z-10"
+    style="background:var(--color-chrome)"
   >
     <!-- Logo. flex-1 from a zero basis on both sides keeps the tools centred
          on the window; min-w-fit stops either end shrinking under its own

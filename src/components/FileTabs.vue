@@ -172,8 +172,7 @@ const statusOf = documentStatus
 <template>
   <div
     v-if="documents.length > 0"
-    class="h-[40px] compact:h-[34px] flex items-stretch shrink-0 px-2 gap-[3px]"
-    style="background:linear-gradient(180deg,#12161b,#0f1318)"
+    class="tab-row h-[40px] compact:h-[34px] flex items-stretch shrink-0 px-2 gap-[3px]"
   >
 
     <div ref="stripEl" class="flex-1 min-w-0 flex items-stretch gap-[3px]">
@@ -183,10 +182,10 @@ const statusOf = documentStatus
         class="group relative flex items-center gap-[6px] px-[9px] rounded-t-[8px] cursor-pointer select-none transition-colors shrink-0 overflow-hidden"
         :style="{
           width: `${tabWidth}px`,
-          background: doc.id === appState.activeDocumentId ? 'rgba(53,211,230,.10)' : 'rgba(255,255,255,.06)',
+          background: doc.id === appState.activeDocumentId ? 'var(--color-workspace)' : 'rgba(255,255,255,.045)',
           boxShadow: doc.id === appState.activeDocumentId
-            ? 'inset 0 -2px 0 0 #35d3e6'
-            : 'inset 0 0 0 1px rgba(255,255,255,.05)',
+            ? 'inset 0 2px 0 0 #35d3e6, inset 1px 0 0 rgba(255,255,255,.07), inset -1px 0 0 rgba(255,255,255,.07)'
+            : 'none',
         }"
         :title="doc.name"
         @click="setActiveDocument(doc.id)"
@@ -368,6 +367,15 @@ const statusOf = documentStatus
 </template>
 
 <style scoped>
+/* The last row of the chrome: the one hairline between the chrome and the
+   workspace is drawn here, as an inset shadow — the active tab's opaque fill
+   paints over it, so that tab opens into the waveform area below the way a
+   browser tab does, while the others sit on the line. The cyan marker moved
+   from the tab's bottom edge to its top for the same reason. */
+.tab-row {
+  background: var(--color-chrome);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .08);
+}
 .meta {
   font-size: 12px;
   font-weight: 600;

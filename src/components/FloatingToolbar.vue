@@ -66,7 +66,7 @@ const tools = CATEGORIES
   <div
     :class="props.inline
       ? 'toolbar-inline flex items-center gap-[10px] min-w-0'
-      : 'h-[65px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] max-sm:gap-1 px-5 compact:px-2 max-sm:px-[6px] shrink-0 border-b border-[rgba(255,255,255,.06)] toolbar-row'"
+      : 'h-[65px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] max-sm:gap-1 px-5 compact:px-2 max-sm:px-[6px] shrink-0 toolbar-row'"
   >
     <!-- Search is the escape hatch from the category hierarchy: as the number
          of operations grows, this is how you reach one without knowing which
@@ -361,8 +361,9 @@ const tools = CATEGORIES
     background: #08161a;
   }
 }
+/* Part of the one chrome surface (see --color-chrome): no line of its own. */
 .toolbar-row {
-  background: linear-gradient(180deg, #12161b, #0e1216);
+  background: var(--color-chrome);
 }
 /* In the header: a little tighter, so the whole row fits from 1100 px. Between
    1100 and 1280 the Chain button drops its word first (its badge stays) —

@@ -21,6 +21,13 @@
 @theme {
   /* Accent — the single interactive colour. `accent` fills, `accent-bright`
      is the text/stroke tint that sits on top of a translucent accent wash. */
+  /* The chrome above the waveform — header, the category row when it has one,
+     and the tab row — is ONE surface: one solid colour, no lines between its
+     rows, a single hairline where it meets the workspace. The active tab is
+     filled with the workspace's own colour so it opens into it. */
+  --color-chrome: #12161d;
+  --color-workspace: #171b21;
+
   --color-accent: #35d3e6;
   --color-accent-bright: #7fe9f6;
   --color-accent-solid: #86e8ff;
