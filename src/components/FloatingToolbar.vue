@@ -87,7 +87,7 @@ const tools = CATEGORIES
     </div>
     <!-- min-w-0 + scroll: the tool group gives up centring before it collides
          with the zoom controls on a narrow window. -->
-    <div class="tool-group flex items-center gap-[4px] p-[5px] rounded-[13px] min-w-0 overflow-x-auto">
+    <div class="tool-group flex items-center gap-[4px] p-[3px] rounded-[13px] min-w-0 overflow-x-auto">
       <button
         v-for="tool in tools"
         :key="tool.id"
@@ -151,11 +151,16 @@ const tools = CATEGORIES
   gap: 7px;
   flex-shrink: 0;
   white-space: nowrap;
-  padding: 10px 16px;
+  /* 34 px: every control in the header (search, Chain, Undo / Redo, Upgrade,
+     the avatar) shares this height, and the tray is these plus its 3 px
+     padding — 40 px, with room above and below in the 56 px header. Its
+     13 px radius is these chips' 10 + that padding, so the corners nest. */
+  height: 34px;
+  padding: 0 16px;
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--color-text-softer);
+  color: rgba(255, 255, 255, .75);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
   font-weight: 600;
@@ -264,13 +269,16 @@ const tools = CATEGORIES
   gap: 7px;
   flex-shrink: 0;
   white-space: nowrap;
-  padding: 9px 14px;
-  border-radius: 12px;
-  /* The Export button's fill (BaseButton's primary), open or closed: the chain
-     is a place to go, not a mode, so its state lives in the badge. */
-  border: 1px solid transparent;
-  background: #86e8ff;
-  color: #08161a;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
+  /* An accent TINT, not a fill (owner, November 2026): the headline feature
+     still stands out from the plain category chips beside it, without a
+     solid cyan block competing for the eye. Open or closed it looks the same:
+     the chain is a place to go, not a mode, so its state lives in the badge. */
+  border: 1px solid rgba(53, 211, 230, .32);
+  background: rgba(53, 211, 230, .12);
+  color: #7fe9f6;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
   font-weight: 700;
@@ -279,7 +287,8 @@ const tools = CATEGORIES
   transition: background-color .15s ease, border-color .15s ease, color .15s ease;
 }
 .chain-btn:hover:not(:disabled) {
-  background: #9beeff;
+  background: rgba(53, 211, 230, .2);
+  border-color: rgba(53, 211, 230, .5);
 }
 .chain-btn:focus-visible {
   outline: 2px solid #7fe9f6;
@@ -296,15 +305,14 @@ const tools = CATEGORIES
   font-weight: 700;
   padding: 2px 5px;
   border-radius: 5px;
-  /* Dark tints of the button's own ink: they sit on #86e8ff and stay visible
-     there. Bypassed is the quiet one; live and NEW are solid. */
-  background: rgba(8, 22, 26, .14);
-  color: rgba(8, 22, 26, .7);
+  /* Bypassed is the quiet one; live and NEW are solid in the button's ink. */
+  background: rgba(127, 233, 246, .14);
+  color: rgba(127, 233, 246, .8);
 }
 .chain-count.is-live,
 .chain-count.is-new {
-  background: #08161a;
-  color: #86e8ff;
+  background: #7fe9f6;
+  color: #08161a;
 }
 
 /* Phone held upright: a TAB BAR. The segmented control stays one row of
@@ -328,13 +336,16 @@ const tools = CATEGORIES
     flex-direction: column;
     justify-content: center;
     gap: 2px;
+    height: auto;
     padding: 5px 2px 4px;
     border-radius: 8px;
     font-size: 10px;
     letter-spacing: -0.01em;
   }
   .chain-btn {
-    padding: 7px 6px;
+    height: auto;
+    align-self: stretch;
+    padding: 0 6px;
   }
   .tool-group .tool-btn__label {
     max-width: 100%;
@@ -348,12 +359,12 @@ const tools = CATEGORIES
    dot — ACTIVE / BYPASSED in words costs more width than the row has. */
 @media (max-height: 520px), (max-width: 640px) {
   .tool-btn {
-    padding: 7px 10px;
+    padding: 0 10px;
     gap: 5px;
     font-size: 12px;
   }
   .chain-btn {
-    padding: 7px 10px;
+    padding: 0 10px;
     gap: 5px;
   }
   .chain-btn .chain-label {
@@ -365,10 +376,10 @@ const tools = CATEGORIES
     height: 7px;
     padding: 0;
     border-radius: 50%;
-    background: rgba(8, 22, 26, .3);
+    background: rgba(127, 233, 246, .35);
   }
   .chain-count.is-live {
-    background: #08161a;
+    background: #7fe9f6;
   }
 }
 /* Part of the one chrome surface (see --color-chrome): no line of its own. */
@@ -379,14 +390,14 @@ const tools = CATEGORIES
    1100 and 1280 the Chain button drops its word first (its badge stays) —
    the category labels go last, since they are what a new user navigates by. */
 .toolbar-inline .tool-btn {
-  padding: 8px 13px;
+  padding: 0 13px;
 }
 .toolbar-inline .chain-btn {
-  padding: 8px 12px;
+  padding: 0 12px;
 }
 @media (max-width: 1279.98px) {
   .toolbar-inline .tool-btn {
-    padding: 8px 10px;
+    padding: 0 10px;
   }
   .toolbar-inline .chain-label {
     display: none;

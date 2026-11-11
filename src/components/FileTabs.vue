@@ -172,7 +172,7 @@ const statusOf = documentStatus
 <template>
   <div
     v-if="documents.length > 0"
-    class="tab-row h-[40px] compact:h-[34px] flex items-stretch shrink-0 px-2 gap-[3px]"
+    class="tab-row h-[40px] compact:h-[34px] flex items-stretch shrink-0 px-5 compact:px-2 gap-[3px]"
   >
 
     <div ref="stripEl" class="flex-1 min-w-0 flex items-stretch gap-[3px]">
@@ -209,7 +209,7 @@ const statusOf = documentStatus
           v-if="renamingId === doc.id"
           :ref="focusRenameInput"
           v-model="renameDraft"
-          class="flex-1 min-w-0 bg-transparent outline-none text-[11.5px] font-semibold text-[#eaf6f8] border-b border-[#35d3e6]"
+          class="flex-1 min-w-0 bg-transparent outline-none text-[12.5px] font-semibold text-[#eaf6f8] border-b border-[#35d3e6]"
           @click.stop
           @keydown.enter.prevent.stop="commitRename"
           @keydown.esc.prevent.stop="renamingId = null"
@@ -217,7 +217,7 @@ const statusOf = documentStatus
         />
         <span
           v-else
-          class="flex-1 min-w-0 truncate text-[11.5px] font-semibold"
+          class="flex-1 min-w-0 truncate text-[12.5px] font-semibold"
           :style="{ color: doc.id === appState.activeDocumentId ? '#eaf6f8' : 'rgba(255,255,255,.48)' }"
         >{{ doc.name }}</span>
 
@@ -294,7 +294,7 @@ const statusOf = documentStatus
     <div v-if="fileMeta" class="w-px h-[18px] self-center bg-[rgba(255,255,255,.12)] mx-3 shrink-0 max-sm:hidden"></div>
 
     <!-- File actions, beside the files they act on. -->
-    <div class="flex items-center gap-[8px] shrink-0 pr-1">
+    <div class="flex items-center gap-[8px] shrink-0">
         <!-- Files: every open document — switch, rename, save, close, and
              EXPORT. Export used to be its own filled button (and its own dialog,
              a second list of the same files with the same checkboxes). Since
@@ -401,7 +401,7 @@ const statusOf = documentStatus
   align-items: center;
   gap: 7px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--color-text-soft);
@@ -414,25 +414,30 @@ const statusOf = documentStatus
 .tb-save:focus-visible,
 .tb-menu-item:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
-/* A pill split button. The seam is a short line inset from the edges, so the
-   two halves still read as one button. */
+/* A pill split button in the accent TINT, not a solid fill (owner, November
+   2026: no bright cyan block on the chrome — Chain got the same treatment).
+   The pill shape and the cyan still mark it as the row's action. The seam is
+   a short line inset from the edges, so the two halves read as one button. */
 .tb-save {
   height: 30px;
   display: flex;
   align-items: center;
-  background: var(--color-accent-solid);
-  color: #08161a;
+  background: rgba(53, 211, 230, .12);
+  color: #7fe9f6;
   font-weight: 700;
   font-size: 12.5px;
   letter-spacing: .01em;
   transition: background-color .12s, opacity .12s;
 }
-.tb-save:hover:not(:disabled) { background: #9beeff; }
+.tb-save:hover:not(:disabled) { background: rgba(53, 211, 230, .2); }
 .tb-save:disabled { opacity: .4; cursor: default; }
+/* Each half outlines only its outer sides, so the pair has one outline and
+   the seam stays the short inset line, not a doubled border. */
 .tb-save-main {
   gap: 7px;
   padding: 0 12px 0 16px;
   border-radius: 999px 0 0 999px;
+  box-shadow: inset 1px 0 0 rgba(53, 211, 230, .32), inset 0 1px 0 rgba(53, 211, 230, .32), inset 0 -1px 0 rgba(53, 211, 230, .32);
 }
 .tb-save-caret {
   position: relative;
@@ -440,6 +445,7 @@ const statusOf = documentStatus
   padding-right: 3px;
   justify-content: center;
   border-radius: 0 999px 999px 0;
+  box-shadow: inset -1px 0 0 rgba(53, 211, 230, .32), inset 0 1px 0 rgba(53, 211, 230, .32), inset 0 -1px 0 rgba(53, 211, 230, .32);
 }
 .tb-save-caret::before {
   content: '';
@@ -448,21 +454,19 @@ const statusOf = documentStatus
   top: 8px;
   bottom: 8px;
   width: 1px;
-  background: rgba(8, 22, 26, .3);
+  background: rgba(127, 233, 246, .3);
 }
 @media (max-width: 639px) {
   .tb-save-main { padding: 0 10px 0 13px; }
   .tb-save-caret { width: 26px; }
 }
-/* Amber, as on the tab — the app's one colour for "not on disk yet" — ringed
-   in the button's ink so it holds up on the cyan fill. */
+/* Amber, as on the tab — the app's one colour for "not on disk yet". */
 .tb-dirty {
   width: 7px;
   height: 7px;
   border-radius: 9999px;
   flex-shrink: 0;
   background: #e0b84a;
-  box-shadow: 0 0 0 1.5px #08161a;
 }
 
 .tb-menu-item {
