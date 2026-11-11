@@ -544,10 +544,12 @@ function commitRename() {
   color: rgba(255, 255, 255, .65);
   transition: background-color .15s, color .15s, box-shadow .15s;
 }
+/* Unsaved: a soft teal FILL with no outline (owner, November 2026: the cyan
+   outline read as neon against the rest of the palette). */
 .tb-save-group.is-dirty {
-  background: rgba(53, 211, 230, .12);
-  box-shadow: inset 0 0 0 1px rgba(53, 211, 230, .32);
-  color: #7fe9f6;
+  background: rgba(134, 232, 255, .15);
+  box-shadow: none;
+  color: #d6f6fd;
 }
 .tb-save {
   cursor: pointer;
@@ -578,7 +580,7 @@ function commitRename() {
   margin: 8px 0;
   background: rgba(255, 255, 255, .12);
 }
-.tb-save-group.is-dirty .tb-save-seam { background: rgba(127, 233, 246, .3); }
+.tb-save-group.is-dirty .tb-save-seam { background: rgba(214, 246, 253, .18); }
 @media (max-width: 639px) {
   .tb-save-main { padding: 0 10px 0 13px; }
   .tb-save-caret { width: 26px; }

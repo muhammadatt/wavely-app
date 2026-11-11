@@ -242,10 +242,10 @@ const tools = CATEGORIES
    outline, a top highlight and a soft shadow underneath. */
 .tool-group {
   scrollbar-width: none;
-  background: linear-gradient(180deg, #1d232c, #171c24);
+  /* The unsaved Save pill's soft teal fill, no outline (owner, November
+     2026): the tray stood out too little against the chrome. */
+  background: rgba(134, 232, 255, .15);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, .09),
-    inset 0 1px 0 rgba(255, 255, 255, .05),
     0 1px 2px rgba(0, 0, 0, .45),
     0 4px 12px rgba(0, 0, 0, .25);
 }
