@@ -547,7 +547,7 @@ function commitRename() {
 /* Unsaved: a soft teal FILL with no outline (owner, November 2026: the cyan
    outline read as neon against the rest of the palette). */
 .tb-save-group.is-dirty {
-  background: rgba(134, 232, 255, .15);
+  background: #1e2939;
   box-shadow: none;
   color: #d6f6fd;
 }
