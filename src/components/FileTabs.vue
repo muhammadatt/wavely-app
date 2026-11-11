@@ -61,7 +61,7 @@ const fileMeta = computed(() => {
     format: f.name.split('.').pop().toUpperCase(),
     duration: formatDuration(f.duration),
     channels: f.channels === 1 ? 'Mono' : f.channels === 2 ? 'Stereo' : `${f.channels} ch`,
-    sampleRate: `${(f.sampleRate / 1000).toFixed(1)} kHz`,
+    sampleRate: `${+(f.sampleRate / 1000).toFixed(1)} kHz`,
   }
 })
 
@@ -288,22 +288,19 @@ const statusOf = documentStatus
          capacity maths makes room for them via the ResizeObserver. -->
     <div
       v-if="fileMeta"
-      class="flex items-center gap-[7px] shrink-0 pl-3 pr-2 max-sm:hidden"
+      class="flex items-center gap-[14px] shrink-0 pl-3 max-sm:hidden"
       :title="activeDoc ? activeDoc.name : ''"
     >
-      <span
-        class="font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[6px] py-[2px] rounded-[5px] whitespace-nowrap"
-        style="color:#7fe9f6;background:rgba(53,211,230,.14);border:1px solid rgba(53,211,230,.3)"
-      >{{ fileMeta.format }}</span>
-      <span class="meta">{{ fileMeta.duration }}</span>
-      <span class="sep">·</span>
-      <span class="meta">{{ fileMeta.channels }}</span>
-      <span class="sep">·</span>
-      <span class="meta">{{ fileMeta.sampleRate }}</span>
+      <!-- Label / value pairs: the label names the property, so the format
+           needs no badge and the line reads as words rather than a code. -->
+      <span class="meta"><span class="meta-k">Format</span> {{ fileMeta.format }}</span>
+      <span class="meta"><span class="meta-k">Length</span> {{ fileMeta.duration }}</span>
+      <span class="meta"><span class="meta-k">{{ fileMeta.channels }}</span> {{ fileMeta.sampleRate }}</span>
     </div>
+    <div v-if="fileMeta" class="w-px h-[18px] self-center bg-[rgba(255,255,255,.12)] mx-3 shrink-0 max-sm:hidden"></div>
 
     <!-- File actions, beside the files they act on. -->
-    <div class="flex items-center gap-[6px] shrink-0 pr-1">
+    <div class="flex items-center gap-[8px] shrink-0 pr-1">
         <!-- Files: every open document — switch, rename, save, close, and
              EXPORT. Export used to be its own filled button (and its own dialog,
              a second list of the same files with the same checkboxes). Since
@@ -318,8 +315,7 @@ const statusOf = documentStatus
           @click="appState.filesPanelOpen = true"
         >
           <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-          <span class="compact:hidden">Files</span>
-          <span class="tb-count">{{ documents.length }}</span>
+          <span><span class="compact:hidden">Files </span>({{ documents.length }})</span>
         </button>
 
         <!-- Save is THE way edited audio goes back to the user, so it is the one
@@ -334,8 +330,7 @@ const statusOf = documentStatus
             :title="isDirty ? 'Save — unsaved edits (Ctrl+S)' : 'Save (Ctrl+S)'"
             @click="saveDocument()"
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
-            <span class="compact:hidden">{{ isSaving ? 'Saving…' : 'Save' }}</span>
+            <span>{{ isSaving ? 'Saving…' : 'Save' }}</span>
             <span
               v-if="isDirty && !isSaving"
               class="tb-dirty"
@@ -356,7 +351,7 @@ const statusOf = documentStatus
 
           <div
             v-if="saveMenuOpen"
-            class="absolute right-0 top-[34px] z-[400] w-[268px] rounded-[10px] overflow-hidden py-1 menu-surface"
+            class="absolute right-0 top-[36px] z-[400] w-[268px] rounded-[10px] overflow-hidden py-1 menu-surface"
             role="menu"
           >
             <button class="tb-menu-item" role="menuitem" @click="runSaveAs">
@@ -374,70 +369,77 @@ const statusOf = documentStatus
 
 <style scoped>
 .meta {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, .4);
+  color: var(--color-text-soft);
   white-space: nowrap;
 }
-.sep { color: rgba(255, 255, 255, .15); }
+.meta-k {
+  font-weight: 500;
+  color: rgba(255, 255, 255, .42);
+  margin-right: 2px;
+}
 
+/* Quiet: a text button, no fill or outline until hovered — Save beside it is
+   the one thing on the row that asks to be pressed. */
 .tb-files {
-  height: 28px;
+  height: 30px;
   display: flex;
   align-items: center;
   gap: 7px;
   padding: 0 10px;
   border-radius: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .02em;
-  color: var(--color-text-soft);
-  background: rgba(255, 255, 255, .04);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .09);
-  transition: background-color .12s;
-}
-.tb-files:hover:not(:disabled) { background: rgba(255, 255, 255, .10); }
-.tb-files:disabled { opacity: .4; cursor: default; }
-.tb-count {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10.5px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: var(--color-text-muted);
+  color: var(--color-text-soft);
+  transition: background-color .12s, color .12s;
 }
-@media (max-width: 639px) { .tb-files { padding: 0 9px; } }
+.tb-files:hover:not(:disabled) { background: rgba(255, 255, 255, .07); color: var(--color-text); }
+.tb-files:disabled { opacity: .4; cursor: default; }
+@media (max-width: 639px) { .tb-files { padding: 0 7px; } }
 .tb-files:focus-visible,
 .tb-save:focus-visible,
 .tb-menu-item:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
+/* A pill split button. The seam is a short line inset from the edges, so the
+   two halves still read as one button. */
 .tb-save {
-  height: 28px;
+  height: 30px;
   display: flex;
   align-items: center;
   background: var(--color-accent-solid);
   color: #08161a;
   font-weight: 700;
-  font-size: 12px;
-  letter-spacing: .02em;
+  font-size: 12.5px;
+  letter-spacing: .01em;
   transition: background-color .12s, opacity .12s;
 }
 .tb-save:hover:not(:disabled) { background: #9beeff; }
 .tb-save:disabled { opacity: .4; cursor: default; }
 .tb-save-main {
-  gap: 6px;
-  padding: 0 12px;
-  border-radius: 8px 0 0 8px;
+  gap: 7px;
+  padding: 0 12px 0 16px;
+  border-radius: 999px 0 0 999px;
 }
 .tb-save-caret {
-  width: 24px;
+  position: relative;
+  width: 30px;
+  padding-right: 3px;
   justify-content: center;
-  border-radius: 0 8px 8px 0;
-  /* The seam that makes it a split button rather than one wide button. */
-  box-shadow: inset 1px 0 0 rgba(8, 22, 26, .25);
+  border-radius: 0 999px 999px 0;
+}
+.tb-save-caret::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: rgba(8, 22, 26, .3);
 }
 @media (max-width: 639px) {
-  .tb-save-main { padding: 0 10px; }
-  .tb-save-caret { width: 22px; }
+  .tb-save-main { padding: 0 10px 0 13px; }
+  .tb-save-caret { width: 26px; }
 }
 /* Amber, as on the tab — the app's one colour for "not on disk yet" — ringed
    in the button's ink so it holds up on the cyan fill. */
