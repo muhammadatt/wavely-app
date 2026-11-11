@@ -17,7 +17,9 @@ export const TAB_MIN_WIDTH = 110
 export const TAB_MAX_WIDTH = 280
 // Left padding, gap, the 24 px close / dirty slot and right padding.
 export const TAB_CHROME_WIDTH = 11 + 6 + 24 + 4
-export const TAB_FONT = '600 12.5px Inter, system-ui, sans-serif'
+// Must match the tab label's CSS (12 px, owner, November 2026) or the shared
+// width is measured for the wrong text.
+export const TAB_FONT = '600 12px Inter, system-ui, sans-serif'
 
 /** The name without its extension (a leading dot is part of the name). */
 export function baseName(name) {

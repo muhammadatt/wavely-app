@@ -260,7 +260,7 @@ function commitRename() {
           v-if="renamingId === doc.id"
           :ref="focusRenameInput"
           v-model="renameDraft"
-          class="flex-1 min-w-0 bg-transparent outline-none text-[12.5px] font-semibold text-[#eaf6f8] border-b border-[#35d3e6]"
+          class="flex-1 min-w-0 bg-transparent outline-none text-[12px] font-semibold text-[#eaf6f8] border-b border-[#35d3e6]"
           @click.stop
           @keydown.stop
           @keydown.enter.prevent.stop="commitRename"
@@ -270,7 +270,7 @@ function commitRename() {
         <!-- No extension (Format says it) and a middle cut that keeps the
              last six characters, so takes that differ only at the end stay
              tellable apart. The full name is the tab's tooltip. -->
-        <span v-else class="tab-name flex-1 min-w-0 flex whitespace-nowrap text-[12.5px] font-semibold">
+        <span v-else class="tab-name flex-1 min-w-0 flex whitespace-nowrap text-[12px] font-semibold">
           <span class="min-w-0 overflow-hidden text-ellipsis">{{ tabLabel(doc).head }}</span><span class="shrink-0">{{ tabLabel(doc).tail }}</span>
         </span>
 
@@ -493,8 +493,11 @@ function commitRename() {
   .tab-active .tab-close.has-dirty { display: flex; }
 }
 
+/* 11.5 px: reference text, a step under the tab names (12) and the row's
+   buttons (12.5), so the row reads actions → files → details (owner,
+   November 2026). */
 .meta {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--color-text-soft);
   white-space: nowrap;
