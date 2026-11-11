@@ -209,10 +209,13 @@ const tools = CATEGORIES
   cursor: default;
 }
 
+/* The shared chrome-button shape and hover, but MUTED at rest (owner,
+   November 2026): Search is the quietest control on the row, its old 4 %
+   fill, 7 % hairline and 45 % text. */
 .palette-trigger {
-  background: var(--chrome-btn-bg);
-  box-shadow: var(--chrome-btn-ring);
-  color: var(--color-text-soft);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.45);
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 .palette-trigger:hover:not(:disabled) {

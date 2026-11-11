@@ -107,16 +107,17 @@ const fileMeta = computed(() => {
 .tb-hist:disabled { color: rgba(255, 255, 255, .25); cursor: default; }
 .tb-hist:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 
-/* 12 px reference text: a step under the header's buttons (12.5). */
+/* 12 px reference text, MUTED (owner, November 2026: the header's old 40 %
+   white): values at 45 %, their labels a step under. */
 .meta {
   font-size: 12px;
   font-weight: 600;
-  color: var(--color-text-soft);
+  color: rgba(255, 255, 255, .45);
   white-space: nowrap;
 }
 .meta-k {
   font-weight: 500;
-  color: rgba(255, 255, 255, .42);
+  color: rgba(255, 255, 255, .28);
   margin-right: 3px;
 }
 </style>
