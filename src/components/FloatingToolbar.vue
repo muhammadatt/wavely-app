@@ -87,7 +87,7 @@ const tools = CATEGORIES
     </div>
     <!-- min-w-0 + scroll: the tool group gives up centring before it collides
          with the zoom controls on a narrow window. -->
-    <div class="tool-group flex items-center gap-[4px] p-[5px] rounded-[13px] min-w-0 overflow-x-auto" style="background:linear-gradient(180deg, #1a2029, #12161d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+    <div class="tool-group flex items-center gap-[4px] p-[5px] rounded-[13px] min-w-0 overflow-x-auto">
       <button
         v-for="tool in tools"
         :key="tool.id"
@@ -241,8 +241,18 @@ const tools = CATEGORIES
   color: rgba(255, 255, 255, 0.4);
 }
 
+/* The tray. On the one chrome surface its old fill (fading to the chrome's
+   own colour) and 5 % outline all but vanished and the categories looked
+   lost (owner), so it is lifted: a fill a step above the chrome, a firmer
+   outline, a top highlight and a soft shadow underneath. */
 .tool-group {
   scrollbar-width: none;
+  background: linear-gradient(180deg, #1d232c, #171c24);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, .09),
+    inset 0 1px 0 rgba(255, 255, 255, .05),
+    0 1px 2px rgba(0, 0, 0, .45),
+    0 4px 12px rgba(0, 0, 0, .25);
 }
 .tool-group::-webkit-scrollbar {
   display: none;

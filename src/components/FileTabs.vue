@@ -253,8 +253,8 @@ const statusOf = documentStatus
       <!-- Overflow chip -->
       <button
         v-if="overflowCount > 0"
-        class="shrink-0 flex items-center gap-[3px] px-[9px] rounded-t-[8px] text-[11px] font-bold transition-colors hover:bg-[rgba(255,255,255,.06)]"
-        style="color:rgba(255,255,255,.55);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)"
+        class="shrink-0 flex items-center gap-[3px] px-[9px] rounded-t-[8px] text-[11px] font-bold transition-colors bg-[rgba(255,255,255,.04)] hover:bg-[rgba(255,255,255,.07)]"
+        style="color:rgba(255,255,255,.55)"
         :title="`${overflowCount} more file${overflowCount === 1 ? '' : 's'} — open the files panel`"
         @click="appState.filesPanelOpen = true"
       >
@@ -266,7 +266,7 @@ const statusOf = documentStatus
            the far right, so it reads as "one more tab" and stays within a
            short mouse trip of the tabs themselves. -->
       <button
-        class="w-[30px] shrink-0 flex items-center justify-center rounded-t-[8px] transition-colors hover:bg-[rgba(255,255,255,.06)] hover:text-[rgba(255,255,255,.8)] cursor-pointer"
+        class="w-[30px] shrink-0 flex items-center justify-center rounded-t-[8px] transition-colors bg-[rgba(255,255,255,.04)] hover:bg-[rgba(255,255,255,.07)] hover:text-[rgba(255,255,255,.8)] cursor-pointer"
         style="color:rgba(255,255,255,.5)"
         title="Add audio files (Ctrl+O)"
         aria-label="Add audio files"
@@ -370,17 +370,17 @@ const statusOf = documentStatus
   background: var(--color-chrome);
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .08);
 }
-/* The active tab is the ONLY filled tab, with the brightest name — no marker
-   line (a cyan underline, then a top edge, were both tried and dropped). The
-   others are unfilled until hovered: a tint at rest would be lighter than the
-   active fill, which sits only a shade above the chrome, and the eye would
-   pick the wrong tab. */
+/* The active tab opens into the workspace (its fill IS the workspace colour)
+   with the brightest name and a faint outline — no marker line (a cyan
+   underline, then a top edge, were both tried and dropped, owner). The others
+   keep a light tint so they still read as tabs, not floating text (owner:
+   unfilled they looked like loose labels); hover lifts it a step. */
 .tab-active {
   background: var(--color-workspace);
   box-shadow: inset 1px 0 0 rgba(255, 255, 255, .07), inset -1px 0 0 rgba(255, 255, 255, .07), inset 0 1px 0 rgba(255, 255, 255, .07);
 }
-.tab-idle { background: transparent; }
-.tab-idle:hover { background: rgba(255, 255, 255, .04); }
+.tab-idle { background: rgba(255, 255, 255, .04); }
+.tab-idle:hover { background: rgba(255, 255, 255, .07); }
 .meta {
   font-size: 12px;
   font-weight: 600;
