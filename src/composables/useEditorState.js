@@ -88,10 +88,12 @@ const appState = reactive({
   // state rather than a component ref because the menu renders at the app root,
   // above the rail and the floating windows.
   contextMenu: null,
-  exportDialogOpen: false,
   // { docId } while the Save dialog is open for that document, else null.
   saveDialog: null,
   filesPanelOpen: false,
+  // Set by Ctrl+E: the files panel opens with the active document already
+  // ticked, so exporting the file in front of you is one keystroke and a click.
+  filesPanelTickActive: false,
   toasts: [],
 })
 

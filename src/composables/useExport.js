@@ -11,13 +11,11 @@ import {
  * Export: render the chosen documents to WAV and hand them over, one file or a
  * zip of many.
  *
- * This lives in a composable because export is now reachable from two surfaces
- * — the export dialog and the files panel — and they have to behave
- * identically. The files panel used to hand its ticked set to the dialog and
- * open it, which made the user confirm a selection they had just made, in a
- * second list of the same files, with the same checkboxes already ticked. The
- * panel exports directly instead, and the dialog keeps its own place for the
- * case it is actually good at: arriving with nothing chosen and deciding there.
+ * The files panel is the only surface that exports (tick files, then Export;
+ * Ctrl+E opens it with the active file ticked). A separate export dialog
+ * existed and was removed once Save became the way a single edited file goes
+ * back to the user. This stays a composable so the rules below live apart from
+ * the panel's markup.
  *
  * ⚠ THE RULES ARE THE EXPORT, NOT DECORATION AROUND IT. Name collisions
  * disambiguate, a multi-file export zips, an oversized one is refused before it

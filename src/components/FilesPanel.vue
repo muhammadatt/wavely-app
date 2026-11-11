@@ -41,14 +41,14 @@ import BaseButton from './ui/BaseButton.vue'
  * which is why every one of them keeps a title and an aria-label naming the
  * file it acts on — "Save chapter01.wav", not "Save".
  *
- * The row click now ticks the file for export, matching the export dialog —
- * the two lists show the same files, a click means the same thing in both, and
- * the Export button here finishes the job rather than forwarding the ticks to
- * the dialog to be confirmed a second time.
+ * The row click ticks the file for export, and the Export button in the footer
+ * acts on the ticks. This panel is the ONLY export surface: a separate export
+ * dialog — a second list of the same files with the same checkboxes — was
+ * removed once Save took over returning a single edited file. Ctrl+E opens
+ * this panel with the active file ticked.
  * Switching documents moved to the labelled "Go to" button, so the only thing
- * that fights the row handler is the rename, and that is settled the way the
- * export dialog settles it: the name and every per-file button stop the click
- * before it reaches the row.
+ * that fights the row handler is the rename, and that is settled by stopping
+ * the click on the name and on every per-file button before it reaches the row.
  */
 
 const {
@@ -181,8 +181,33 @@ function commitRename() {
 }
 
 // ── Status ───────────────────────────────────────────────────────────────────
-// Same definition the tab strip renders as a dot.
-const statusLabel = documentStatus
+// Same definition the tab strip renders as a dot, plus the one state it leaves
+// out: a file nobody has mastered. That is worth saying here and nowhere else,
+// because this is where a narrator decides what to export for ACX — the
+// export dialog that used to say it is gone, and this panel is that screen now.
+function statusLabel(doc) {
+  return documentStatus(doc) ?? { label: 'Not mastered', color: 'rgba(255,255,255,.35)' }
+}
+
+// ── Select all ───────────────────────────────────────────────────────────────
+// Over what the search shows, so "find the chapters, tick them all" works.
+const allFilteredMarked = computed(() =>
+  filtered.value.length > 0 && filtered.value.every(d => marked.value.has(d.id))
+)
+
+function toggleAllFiltered() {
+  const next = new Set(marked.value)
+  if (allFilteredMarked.value) filtered.value.forEach(d => next.delete(d.id))
+  else filtered.value.forEach(d => next.add(d.id))
+  marked.value = next
+}
+
+// Ctrl+E opens the panel with the file in front of you already ticked, which is
+// what the export dialog used to open on.
+if (appState.filesPanelTickActive) {
+  appState.filesPanelTickActive = false
+  if (appState.activeDocumentId) marked.value = new Set([appState.activeDocumentId])
+}
 
 onMounted(() => nextTick(() => searchInput.value?.focus()))
 
@@ -226,8 +251,22 @@ watch(documents, docs => { if (docs.length === 0) close() })
         </button>
       </div>
 
-      <!-- Search -->
+      <!-- Search. The select-all box sits in the rows' checkbox column, so it
+           reads as ticking the list below it. -->
       <div class="flex items-center gap-[10px] px-4 py-[11px] border-b border-[rgba(255,255,255,.07)]">
+        <button
+          class="w-[16px] h-[16px] rounded-[5px] shrink-0 flex items-center justify-center transition-all"
+          :style="allFilteredMarked
+            ? 'background:#35d3e6;box-shadow:inset 0 0 0 1px #35d3e6'
+            : 'box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.18)'"
+          :disabled="filtered.length === 0"
+          :title="allFilteredMarked ? 'Deselect all' : 'Select all'"
+          aria-label="Select all files"
+          :aria-pressed="allFilteredMarked"
+          @click="toggleAllFiltered"
+        >
+          <svg v-if="allFilteredMarked" viewBox="0 0 24 24" class="w-[10px] h-[10px] fill-none stroke-current" style="color:#08161a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
         <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current shrink-0" style="color:rgba(255,255,255,.35)" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
         <input
           ref="searchInput"
@@ -312,10 +351,8 @@ watch(documents, docs => { if (docs.length === 0) close() })
 
             <div class="flex items-center gap-[6px] mt-[2px]">
               <span class="font-['JetBrains_Mono'] text-[10.5px] font-semibold text-[rgba(255,255,255,.35)]">{{ docDuration(doc) }}</span>
-              <template v-if="statusLabel(doc)">
-                <span class="text-[rgba(255,255,255,.15)] text-[10px]">·</span>
-                <span class="text-[10.5px] font-bold truncate" :style="{ color: statusLabel(doc).color }">{{ statusLabel(doc).label }}</span>
-              </template>
+              <span class="text-[rgba(255,255,255,.15)] text-[10px]">·</span>
+              <span class="text-[10.5px] font-bold truncate" :style="{ color: statusLabel(doc).color }">{{ statusLabel(doc).label }}</span>
             </div>
           </div>
 
@@ -384,8 +421,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
           {{ sizeLimit.message }}
         </div>
 
-        <!-- The same progress readout the export dialog shows, for the same
-             reason: the render is synchronous per file, so without it a
+        <!-- The render is synchronous per file, so without this readout a
              multi-file export is an unexplained pause. -->
         <div v-if="isExporting" class="mb-[9px] px-1">
           <div class="flex justify-between text-[11px] font-bold text-[rgba(255,255,255,.5)] mb-[6px]">
@@ -421,7 +457,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
             </BaseButton>
           </template>
           <span v-else class="text-[11px] font-semibold text-[rgba(255,255,255,.28)]">
-            Select files to export
+            Tick files to export as WAV
           </span>
         </div>
       </div>
