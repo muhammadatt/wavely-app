@@ -347,29 +347,14 @@ function commitRename() {
     </div>
     <div v-if="fileMeta" class="w-px h-[18px] self-center bg-[rgba(255,255,255,.12)] mx-3 shrink-0 max-sm:hidden"></div>
 
-    <!-- File actions, beside the files they act on. -->
+    <!-- File actions, beside the files they act on. Save comes FIRST, next
+         to the details of the file it saves; Files (about every open file,
+         not this one) closes the row at the margin (owner, November 2026). -->
     <div class="flex items-center gap-[8px] shrink-0">
-        <!-- Files: every open document — switch, rename, save, close, and
-             EXPORT. Export used to be its own filled button (and its own dialog,
-             a second list of the same files with the same checkboxes). Since
-             Save writes a file back in its own format, Export's one remaining
-             job is several files at once, and that is a files-panel job: tick,
-             then Export. Ctrl+E opens the panel with the active file ticked. -->
-        <button
-          class="tb-files"
-          :disabled="documents.length === 0"
-          title="Files — switch, rename, export several (Ctrl+P)"
-          aria-label="Files"
-          @click="appState.filesPanelOpen = true"
-        >
-          <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-          <span><span class="compact:hidden">Files </span>({{ documents.length }})</span>
-        </button>
-
         <!-- Save is THE way edited audio goes back to the user, so it is the one
              filled, primary-coloured button on screen: a split button, Save on
-             the left and Save As behind the caret. It sits at the end of the
-             tab row because it saves the active tab — and the tab's own amber
+             the left and Save As behind the caret. It sits beside the active
+             file's details because it saves the active tab — and the tab's own amber
              dot is the unsaved state it clears. -->
         <!-- Quiet until there is something to save (design 1a): a neutral
              outline when the file is on disk, the cyan tint and the amber dot
@@ -422,6 +407,23 @@ function commitRename() {
             </button>
           </div>
         </div>
+
+        <!-- Files: every open document — switch, rename, save, close, and
+             EXPORT. Export used to be its own filled button (and its own dialog,
+             a second list of the same files with the same checkboxes). Since
+             Save writes a file back in its own format, Export's one remaining
+             job is several files at once, and that is a files-panel job: tick,
+             then Export. Ctrl+E opens the panel with the active file ticked. -->
+        <button
+          class="tb-files"
+          :disabled="documents.length === 0"
+          title="Files — switch, rename, export several (Ctrl+P)"
+          aria-label="Files"
+          @click="appState.filesPanelOpen = true"
+        >
+          <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+          <span><span class="compact:hidden">Files </span>({{ documents.length }})</span>
+        </button>
     </div>
   </div>
 </template>
