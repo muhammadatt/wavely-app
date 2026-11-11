@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useWindows } from '../composables/useWindows.js'
 import { usePluginChain } from '../composables/usePluginChain.js'
@@ -31,23 +31,12 @@ const chainTitle = computed(() => {
   return 'Effect chain — bypassed: every plugin in it is switched off'
 })
 
-// Until the chain has been opened once, an empty chain says NEW: it is the
-// feature most worth finding and the one a new user is least likely to look
-// for. Kept per browser; storage can be missing or throw, and then the badge
-// simply shows for the session.
-const SEEN_KEY = 'wavely:plugin-chain-seen'
-function readSeen() {
-  try { return localStorage.getItem(SEEN_KEY) === '1' } catch { return false }
-}
-const chainSeen = ref(readSeen())
-watch(() => isOpen('plugin-chain'), (open) => {
-  if (!open || chainSeen.value) return
-  chainSeen.value = true
-  try { localStorage.setItem(SEEN_KEY, '1') } catch { /* session only */ }
-})
+// Only a chain with plugins in it has a badge: ACTIVE or BYPASSED. An empty
+// chain has none — a NEW badge for first-time visitors was dropped (owner,
+// November 2026); the button's solid fill is what makes it findable.
 const chainBadge = computed(() => {
-  if (slots.value.length) return chainActive.value ? 'ACTIVE' : 'BYPASSED'
-  return chainSeen.value ? '' : 'NEW'
+  if (!slots.value.length) return ''
+  return chainActive.value ? 'ACTIVE' : 'BYPASSED'
 })
 
 // The rail closes as the chain comes up (usePluginChain.js); closed here too,
@@ -121,7 +110,7 @@ const tools = CATEGORIES
       <span
         v-if="chainBadge"
         class="chain-count"
-        :class="{ 'is-live': chainActive, 'is-new': chainBadge === 'NEW' }"
+        :class="{ 'is-live': chainActive }"
       >{{ chainBadge }}</span>
     </button>
     <!-- Undo/Redo moved to the TopBar, next to Export. This spacer stays: it
@@ -273,13 +262,13 @@ const tools = CATEGORIES
   height: 34px;
   padding: 0 14px;
   border-radius: 10px;
-  /* An accent TINT, not a fill (owner, November 2026): the headline feature
-     still stands out from the plain category chips beside it, without a
-     solid cyan block competing for the eye. Open or closed it looks the same:
-     the chain is a place to go, not a mode, so its state lives in the badge. */
-  border: 1px solid rgba(53, 211, 230, .32);
-  background: rgba(53, 211, 230, .12);
-  color: #7fe9f6;
+  /* A solid teal FILL (owner, November 2026: the tint tried before it was
+     too easy to miss — the fill is now what makes the chain findable, with
+     the NEW badge gone). Open or closed it looks the same: the chain is a
+     place to go, not a mode, so its state lives in the badge. */
+  border: 1px solid transparent;
+  background: #86e8ff;
+  color: #08161a;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
   font-weight: 700;
@@ -288,8 +277,7 @@ const tools = CATEGORIES
   transition: background-color .15s ease, border-color .15s ease, color .15s ease;
 }
 .chain-btn:hover:not(:disabled) {
-  background: rgba(53, 211, 230, .2);
-  border-color: rgba(53, 211, 230, .5);
+  background: #9beeff;
 }
 .chain-btn:focus-visible {
   outline: 2px solid #7fe9f6;
@@ -306,14 +294,14 @@ const tools = CATEGORIES
   font-weight: 700;
   padding: 2px 5px;
   border-radius: 5px;
-  /* Bypassed is the quiet one; live and NEW are solid in the button's ink. */
-  background: rgba(127, 233, 246, .14);
-  color: rgba(127, 233, 246, .8);
+  /* Dark tints of the button's own ink, so they read on the teal fill.
+     Bypassed is the quiet one; live is solid. */
+  background: rgba(8, 22, 26, .14);
+  color: rgba(8, 22, 26, .7);
 }
-.chain-count.is-live,
-.chain-count.is-new {
-  background: #7fe9f6;
-  color: #08161a;
+.chain-count.is-live {
+  background: #08161a;
+  color: #86e8ff;
 }
 
 /* Phone held upright: a TAB BAR. The segmented control stays one row of
@@ -377,10 +365,10 @@ const tools = CATEGORIES
     height: 7px;
     padding: 0;
     border-radius: 50%;
-    background: rgba(127, 233, 246, .35);
+    background: rgba(8, 22, 26, .3);
   }
   .chain-count.is-live {
-    background: #7fe9f6;
+    background: #08161a;
   }
 }
 /* Part of the one chrome surface (see --color-chrome): no line of its own. */
