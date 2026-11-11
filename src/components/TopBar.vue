@@ -65,6 +65,7 @@ const headerTools = useHeaderTools()
   overflow: hidden;
 }
 .tb-icon {
+  cursor: pointer;
   width: 38px;
   display: flex;
   align-items: center;

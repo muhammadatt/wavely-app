@@ -307,7 +307,7 @@ function commitRename() {
       <!-- Overflow chip -->
       <button
         v-if="overflowCount > 0"
-        class="tab-idle shrink-0 flex items-center gap-[3px] px-[9px] rounded-t-[8px] text-[11px] font-bold transition-colors"
+        class="tab-idle shrink-0 flex items-center gap-[3px] px-[9px] rounded-t-[8px] text-[11px] font-bold transition-colors cursor-pointer"
         style="color:rgba(255,255,255,.55)"
         :title="`${overflowCount} more file${overflowCount === 1 ? '' : 's'} — open the files panel`"
         @click="appState.filesPanelOpen = true"
@@ -470,6 +470,7 @@ function commitRename() {
 }
 .tab:hover .tab-dirty { display: none; }
 .tab-close {
+  cursor: pointer;
   width: 24px;
   height: 24px;
   border-radius: 6px;
@@ -511,6 +512,7 @@ function commitRename() {
 /* Quiet: a text button, no fill or outline until hovered — Save beside it is
    the one thing on the row that asks to be pressed. */
 .tb-files {
+  cursor: pointer;
   height: 30px;
   display: flex;
   align-items: center;
@@ -546,6 +548,7 @@ function commitRename() {
   color: #7fe9f6;
 }
 .tb-save {
+  cursor: pointer;
   height: 30px;
   display: flex;
   align-items: center;
@@ -591,6 +594,7 @@ function commitRename() {
 .tb-dirty.is-on { opacity: 1; }
 
 .tb-menu-item {
+  cursor: pointer;
   width: 100%;
   display: flex;
   align-items: center;

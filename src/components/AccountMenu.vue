@@ -137,7 +137,7 @@ async function signOut() {
         <div class="py-1">
           <button
             v-if="!isPaid"
-            class="w-full text-left px-4 py-[8px] transition-colors hover:bg-[rgba(255,255,255,.08)]"
+            class="w-full text-left cursor-pointer px-4 py-[8px] transition-colors hover:bg-[rgba(255,255,255,.08)]"
             @click="upgrade"
           >
             <span class="block text-[12px] font-semibold" style="color:#e0b84a">Upgrade to Pro</span>
@@ -145,12 +145,12 @@ async function signOut() {
           </button>
           <button
             v-if="state.account?.subscription"
-            class="w-full text-left px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
+            class="w-full text-left cursor-pointer px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
             style="color:#eaf6f8"
             @click="manageBilling"
           >Manage billing</button>
           <button
-            class="w-full text-left px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
+            class="w-full text-left cursor-pointer px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
             style="color:#eaf6f8"
             @click="signOut"
           >Sign out</button>
@@ -162,6 +162,7 @@ async function signOut() {
 
 <style scoped>
 .acct-upgrade {
+  cursor: pointer;
   height: 34px;
   gap: 7px;
   padding: 0 15px;
@@ -180,6 +181,7 @@ async function signOut() {
   box-shadow: inset 0 0 0 1px rgba(224, 184, 74, 0.55);
 }
 .acct-avatar {
+  cursor: pointer;
   width: 34px;
   height: 34px;
   flex-shrink: 0;
