@@ -118,20 +118,25 @@ const node = computed(() => {
   }
 })
 
-/** Left / right sets FREQ (on the curve's own log axis), up / down sets RANGE. */
+/**
+ * Left / right moves FREQ (on the curve's own log axis), up / down moves RANGE,
+ * both RELATIVE to where the drag started: the node sits on the shelf's response
+ * AT Freq, not at the full Range, so mapping the pointer's absolute position
+ * would jump the setting on the first press (WARM, Range 12 → ~2.5).
+ */
 function onCurveDown(e) {
   if (!hflPreview.value || e.button > 0) return
   e.preventDefault()
   const rect = e.currentTarget.getBoundingClientRect()
+  const x0 = e.clientX, y0 = e.clientY
+  const freq0 = hflParams.freq, range0 = hflParams.range
   const set = ev => {
-    const fx = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width))
-    const fy = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height))
-    const freq = Math.round(Math.max(FREQ_MIN_HZ, Math.min(FREQ_MAX_HZ, F_MIN * Math.pow(F_MAX / F_MIN, fx))) / 10) * 10
-    const range = Math.round(fy * RANGE_MAX_DB * 2) / 2
+    const octaves = ((ev.clientX - x0) / rect.width) * Math.log2(F_MAX / F_MIN)
+    const freq = Math.round(clampTo(freq0 * Math.pow(2, octaves), FREQ_MIN_HZ, FREQ_MAX_HZ) / 10) * 10
+    const range = Math.round(clampTo(range0 + ((ev.clientY - y0) / rect.height) * RANGE_MAX_DB, 0, RANGE_MAX_DB) * 2) / 2
     if (freq !== hflParams.freq) syncParam('freq', freq)
     if (range !== hflParams.range) syncParam('range', range)
   }
-  set(e)
   const up = () => {
     window.removeEventListener('pointermove', set)
     window.removeEventListener('pointerup', up)
@@ -262,7 +267,7 @@ async function applyAndClose() {
           <div>
             <div
               class="hl-curve" :class="{ 'is-disabled': !hflPreview }"
-              title="Drag: left / right sets Freq, up / down sets Range"
+              title="Drag: left / right moves Freq, up / down moves Range"
               @pointerdown="onCurveDown"
             >
               <svg
@@ -309,7 +314,7 @@ async function applyAndClose() {
             />
             <span class="hl-cap">Freq</span>
             <HFLimiterLcd
-              :text="fmtFreq(hflParams.freq)" :parse="parseHz" aria-label="Freq" :disabled="!hflPreview"
+              :text="fmtFreq(hflParams.freq)" :edit-text="String(hflParams.freq)" :parse="parseHz" aria-label="Freq" :disabled="!hflPreview"
               @commit="typed('freq', FREQ_MIN_HZ, FREQ_MAX_HZ, 10)($event)"
             />
           </div>

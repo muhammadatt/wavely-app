@@ -9,6 +9,11 @@ import { nextTick, ref } from 'vue'
 
 const props = defineProps({
   text: { type: String, required: true },
+  /**
+   * What the editor opens with: the EXACT value, not the rounded display
+   * (Freq reads "10.1k Hz" at 10140 Hz). Defaults to the display text.
+   */
+  editText: { type: String, default: null },
   /** Parse a typed entry; default: the leading number in it. */
   parse: { type: Function, default: null },
   disabled: { type: Boolean, default: false },
@@ -18,11 +23,13 @@ const emit = defineEmits(['commit'])
 
 const editing = ref(false)
 const draft = ref('')
+let seeded = ''
 const inputEl = ref(null)
 
 async function begin() {
   if (props.disabled) return
-  draft.value = props.text.replace(/[^\d.+\-−k]/gi, '').replace('−', '-')
+  seeded = props.editText ?? props.text.replace(/[^\d.+\-−k]/gi, '').replace('−', '-')
+  draft.value = seeded
   editing.value = true
   await nextTick()
   inputEl.value?.focus()
@@ -32,6 +39,8 @@ async function begin() {
 function commit() {
   if (!editing.value) return
   editing.value = false
+  // Opened and left untouched: commit nothing, so a look never moves the value.
+  if (String(draft.value).trim() === seeded) return
   const raw = String(draft.value).replace('−', '-')
   const v = props.parse ? props.parse(raw) : parseFloat(raw)
   if (Number.isFinite(v)) emit('commit', v)
