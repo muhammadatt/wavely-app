@@ -25,8 +25,8 @@
      and the tab row — is ONE surface: one solid colour, no lines between its
      rows, a single hairline where it meets the workspace. The active tab is
      filled with the workspace's own colour so it opens into it. */
-  --color-chrome: #0d1015;   /* "Darker" in design 1a (was #12161d) */
-  --color-workspace: #171b21;
+  --color-chrome: #12161d;   /* "Darker" in design 1a (was #12161d) */
+  --color-workspace: #18252c;
 
   --color-accent: #35d3e6;
   --color-accent-bright: #7fe9f6;
@@ -166,6 +166,7 @@ body {
   --chrome-btn-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
   --chrome-btn-hover: rgba(255, 255, 255, 0.07);
   --chrome-btn-seam: rgba(255, 255, 255, 0.1);
+  --chrome-btn-text: rgba(255, 255, 255, 0.7);
 }
 
 /* ── Dialogs and menus ────────────────────────────────────────────────────────

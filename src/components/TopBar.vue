@@ -41,7 +41,7 @@ const fileMeta = computed(() => {
       <template v-if="fileMeta">
         <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-[18px] shrink-0 max-md:hidden"></div>
         <div
-          class="min-w-0 flex items-center gap-[16px] overflow-hidden max-md:hidden"
+          class="min-w-0 flex items-center gap-[16px] overflow-hidden max-md:hidden font-['JetBrains_Mono']"
           :title="state.currentFile?.name || ''"
         >
           <span class="meta"><span class="meta-k">Format</span> {{ fileMeta.format }}</span>
@@ -96,7 +96,7 @@ const fileMeta = computed(() => {
   gap: 6px;
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--color-text-soft);
+  color: var(--chrome-btn-text);
   transition: background-color .12s, color .12s;
 }
 @media (max-height: 520px), (max-width: 640px) {
@@ -107,17 +107,16 @@ const fileMeta = computed(() => {
 .tb-hist:disabled { color: rgba(255, 255, 255, .25); cursor: default; }
 .tb-hist:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 
-/* 12 px reference text, MUTED (owner, November 2026: the header's old 40 %
-   white): values at 45 %, their labels a step under. */
+
 .meta {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: rgba(255, 255, 255, .45);
   white-space: nowrap;
 }
 .meta-k {
   font-weight: 500;
-  color: rgba(255, 255, 255, .28);
+  color: rgba(255, 255, 255, .40);
   margin-right: 3px;
 }
 </style>

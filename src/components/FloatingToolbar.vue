@@ -146,8 +146,7 @@ const tools = CATEGORIES
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
-  /* 88 %: the lighter labels of design 1a (owner, November 2026). */
-  color: rgba(255, 255, 255, .88);
+  color: rgb(207 200 200);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
   font-weight: 600;
@@ -185,11 +184,11 @@ const tools = CATEGORIES
 .tool-btn.is-active {
   background: linear-gradient(180deg, #7ef0ff, #5ce3f8);
   border-color: transparent;
-  color: #08161a;
-  /*
+  color: #1e2939;
+  
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4),
               0 2px 12px rgba(53, 211, 230, 0.35);
-  */
+  
 }
 .tool-btn.is-active .tool-btn__icon {
   opacity: 1;
@@ -241,7 +240,7 @@ const tools = CATEGORIES
    outline, a top highlight and a soft shadow underneath. */
 .tool-group {
   scrollbar-width: none;
-  background: #1e2939;
+  background: linear-gradient(rgb(27 36 49), rgb(25 35 50));
   box-shadow: rgba(255, 255, 255, 0.05) 0px 0px 0px 1px inset;
 }
 .tool-group::-webkit-scrollbar {

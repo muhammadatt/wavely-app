@@ -417,11 +417,11 @@ function commitRename() {
    and a top edge were both tried and dropped, owner). */
 .tab-active {
   background: var(--color-workspace);
-  box-shadow: inset 1px 0 0 rgba(255, 255, 255, .09), inset -1px 0 0 rgba(255, 255, 255, .09), inset 0 1px 0 rgba(255, 255, 255, .09);
+  box-shadow: inset 1px 0 0 var(--chrome-btn-seam), inset -1px 0 0 var(--chrome-btn-seam), inset 0 1px 0 var(--chrome-btn-seam);
 }
 .tab-idle {
   background: rgba(255, 255, 255, .025);
-  box-shadow: inset 1px 0 0 rgba(255, 255, 255, .05), inset -1px 0 0 rgba(255, 255, 255, .05), inset 0 1px 0 rgba(255, 255, 255, .05);
+  box-shadow: inset 1px 0 0 var(--chrome-btn-seam), inset -1px 0 0 var(--chrome-btn-seam), inset 0 1px 0 var(--chrome-btn-seam);
 }
 .tab-idle:hover { background: rgba(255, 255, 255, .045); }
 .tab:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
@@ -430,7 +430,7 @@ function commitRename() {
 .tab-active .tab-name { color: var(--color-text); }
 .tab-plus {
   background: transparent;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05);
+  box-shadow: inset 0 0 0 1px var(--chrome-btn-seam);
 }
 .tab-plus:hover { background: rgba(255, 255, 255, .04); color: rgba(255, 255, 255, .8); }
 
@@ -482,7 +482,7 @@ function commitRename() {
   box-shadow: var(--chrome-btn-ring);
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--color-text-soft);
+  color: var(--chrome-btn-text);
   transition: background-color .12s, color .12s;
 }
 .tb-files:hover:not(:disabled) { background: var(--chrome-btn-hover); color: var(--color-text); }
@@ -500,7 +500,7 @@ function commitRename() {
   border-radius: var(--chrome-btn-radius);
   background: var(--chrome-btn-bg);
   box-shadow: var(--chrome-btn-ring);
-  color: var(--color-text-soft);
+  color: var(--chrome-btn-text);
   transition: background-color .15s, color .15s, box-shadow .15s;
 }
 /* Unsaved: a soft teal FILL with no outline (owner, November 2026: the cyan
