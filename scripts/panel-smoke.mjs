@@ -38,7 +38,7 @@ const URL_ = `http://localhost:${PORT}/`
 /** Command-palette search terms. These are the REGISTRY labels, not our names. */
 const PANELS = [
   'LA Vintage 2A', 'LA Classic 76', 'Soft Clipper', 'Scheps Parallel',
-  'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'HF Limiter', 'PHAT*SS', 'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
+  'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'Hi-Freq Limiter', 'PHAT*SS', 'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
   'Loudness Normalize', 'Auto Leveler', 'Plosive Tamer', 'Noise Reduction', 'VoxPressor',
 ]
 

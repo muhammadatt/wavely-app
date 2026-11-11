@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+html{background:#0e1116}body{margin:0;background:#0e1116;color:#eaf6f8;font-family:Inter,system-ui,sans-serif}
+a{color:#3fd0de}a:hover{color:#7fe9f6}
+button{font-family:inherit}
+</style>
+</helmet>
+
+<section id="turn-3" style="padding:56px 64px 24px;display:flex;flex-direction:column;gap:24px">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+    <span style="font:600 10px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#a0a8b0">TURN 3 · REFINING 2a</span>
+    <span style="font:600 20px/1.3 Inter,sans-serif;color:#eaf6f8">Threshold → Shape → Freq / Range, with the band controls next to the curve</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:56px;align-items:flex-start">
+    <div id="3a" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:5px;background:#3fd0de;color:#08161a">3a</span><span style="font:500 12px/1 Inter;color:#c9d0d6">Band knobs directly under the curve</span></div>
+      <div style="width:760px;border-radius:22px;overflow:hidden;display:flex;flex-direction:column;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <!-- header -->
+        <div style="display:flex;justify-content:space-between;align-items:center;height:58px;box-sizing:border-box;padding:2px 18px 0;gap:16px;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px;flex:none">
+            <span style="white-space:nowrap;font:800 13px/1 Inter,system-ui,sans-serif;letter-spacing:.14em;color:#faedd8">HF LIMITER</span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;font:700 12px/1 Inter,sans-serif;cursor:pointer">?</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            <button style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;background:transparent;border-radius:999px;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#3a3d43;box-shadow:inset 0 1px 1px rgba(0,0,0,.7)"></span><span style="font:700 10px/1 Inter,sans-serif;letter-spacing:.14em;color:rgba(255,255,255,.5)">DELTA</span></button>
+            <div style="width:200px;display:flex;align-items:center;gap:2px;height:30px;box-sizing:border-box;padding:0 4px;border-radius:8px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+              <button style="width:22px;height:22px;flex:none;display:grid;place-items:center;border:none;border-radius:5px;background:transparent;cursor:pointer;color:#b6bdc4;font:600 15px/1 Inter,sans-serif">‹</button>
+              <div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;height:22px"><span style="font:600 11px/1 Inter,sans-serif;letter-spacing:.04em;color:#eaf6f8">Default</span><span style="width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;border-top:4px solid #a6aeb6"></span></div>
+              <button style="width:22px;height:22px;flex:none;display:grid;place-items:center;border:none;border-radius:5px;background:transparent;cursor:pointer;color:#b6bdc4;font:600 15px/1 Inter,sans-serif">›</button>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:none">
+            <span style="width:96px;display:flex;justify-content:flex-end"><button style="display:flex;align-items:center;gap:8px;height:30px;box-sizing:border-box;padding:0 13px;border:none;border-radius:999px;cursor:pointer;background:transparent;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 Inter,sans-serif;letter-spacing:.14em;color:#eaf6f8">ON</span></button></span>
+            <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="font:400 17px/1 Inter,sans-serif;margin-top:-1px">×</span></button>
+          </div>
+        </div>
+
+        
+        <div style="padding:20px 22px 18px;display:flex;flex-direction:column;gap:16px">
+          <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:start">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+              <div style="height:12px;display:flex;align-items:center"><span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Threshold</span></div>
+              <div onPointerDown="{{ d.threshold }}" onDoubleClick="{{ r.threshold }}" style="position:relative;width:104px;height:104px;display:grid;place-items:center;border-radius:50%;cursor:ns-resize;touch-action:none;background:radial-gradient(circle at 50% 40%,#232a33,#1b2027);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                <sc-for list="{{ thrTicks }}" as="t" hint-placeholder-count="21">
+                  <div style="position:absolute;left:50%;top:50%;width:2px;margin-left:-1px;height:44px;transform-origin:50% 0;transform:{{ t.rot }}"><div style="position:absolute;bottom:0;left:0;width:2px;border-radius:1px;height:{{ t.h }};background:{{ t.bg }};box-shadow:{{ t.glow }}"></div></div>
+                </sc-for>
+                <div style="position:relative;width:50px;height:50px;border-radius:50%;background:linear-gradient(160deg,#505c6e 0%,#353e4b 52%,#242b34 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.1),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #232a33,0 0 0 7px rgba(0,0,0,.6)">
+                  <div style="position:absolute;inset:5px;border-radius:50%;background:linear-gradient(160deg,#3e4959,#28313c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                  <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.threshold.deg }})"><div style="position:absolute;left:50%;top:7px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#e8a33d;box-shadow:0 0 6px #e8a33d"></div></div>
+                </div>
+              </div>
+              <span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.threshold }}</span>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:10px;margin-top:14px">
+                <span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Shape</span>
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <button onClick="{{ setTight }}" style="border:none;cursor:pointer;padding:7px 16px;border-radius:6px;font:700 10px/1.2 Inter,sans-serif;letter-spacing:.14em;white-space:nowrap;background:{{ seg.tight.bg }};box-shadow:{{ seg.tight.sh }};color:{{ seg.tight.c }}">TIGHT</button>
+                  <button onClick="{{ setWarm }}" style="border:none;cursor:pointer;padding:7px 16px;border-radius:6px;font:700 10px/1.2 Inter,sans-serif;letter-spacing:.14em;white-space:nowrap;background:{{ seg.warm.bg }};box-shadow:{{ seg.warm.sh }};color:{{ seg.warm.c }}">WARM</button></div>
+              </div>
+            </div>
+            <div style="min-width:0;display:flex;flex-direction:column;gap:12px;padding-top:2px">
+              <div><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                  <span style="display:flex;align-items:baseline;gap:9px"><span style="font:700 12px 'JetBrains Mono',monospace;color:#f0c381;text-shadow:0 0 8px rgba(232,163,61,.55)">{{ grText }} dB</span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">AVG {{ grAvg }}</span></span>
+                  <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">HF REDUCTION</span>
+                </div>
+                <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                  <div style="position:relative;height:18px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                    <div style="position:absolute;top:0;bottom:0;left:0;width:{{ grPct }};border-radius:9px;background:linear-gradient(90deg,#f7dfbb,#e8a33d);box-shadow:0 0 16px rgba(232,163,61,.7)"></div>
+                    <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                  </div>
+                </div>
+                <div style="padding:0 3px"><div style="position:relative;margin-top:5px;height:10px;font:600 8px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)">
+                  <span style="position:absolute;top:0;left:0%">0</span><span style="position:absolute;top:0;left:7.4%;transform:translateX(-50%)">-1</span><span style="position:absolute;top:0;left:21%;transform:translateX(-50%)">-3</span><span style="position:absolute;top:0;left:33%;transform:translateX(-50%)">-5</span><span style="position:absolute;top:0;left:58%;transform:translateX(-50%)">-10</span><span style="position:absolute;top:0;left:89%;transform:translateX(-50%)">-20</span><span style="position:absolute;top:0;left:100%;transform:translateX(-100%)">-24</span>
+                </div></div></div>
+              <div>
+                <div onPointerDown="{{ gDrag }}" style="position:relative;cursor:crosshair;touch-action:none">
+                  <svg viewBox="0 0 420 132" preserveAspectRatio="none" style="display:block;width:100%;height:156px;border-radius:6px;background:#0b0e13;box-shadow:inset 0 2px 10px rgba(0,0,0,.85),0 0 0 1px #1c222c,0 1px 0 rgba(255,255,255,.05)">
+                  <line x1="78.9" y1="0" x2="78.9" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="157.8" y1="0" x2="157.8" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="262.2" y1="0" x2="262.2" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="341.1" y1="0" x2="341.1" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="0" y1="0.5" x2="420" y2="0.5" stroke="rgba(255,255,255,.16)" stroke-width="1"></line>
+                  <line x1="{{ freqX }}" y1="0" x2="{{ freqX }}" y2="132" stroke="#e8a33d" stroke-opacity=".4" stroke-width="1" stroke-dasharray="3 3"></line>
+                  <path d="{{ floorPath }}" stroke="rgba(255,255,255,.26)" stroke-width="1.2" fill="none" stroke-dasharray="4 3"></path>
+                  <path d="{{ liveFill }}" fill="#e8a33d" fill-opacity="0.14"></path>
+                  <path d="{{ livePath }}" stroke="#e8a33d" stroke-width="2" fill="none"></path>
+                </svg>
+                  <div style="position:absolute;left:{{ nodeLeft }};top:{{ nodeTop }};width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#e8a33d;box-shadow:0 0 8px #e8a33d,0 0 0 2px #0b0e13;pointer-events:none"></div>
+                </div>
+                <div style="position:relative;height:10px;margin-top:4px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#a0a8b0">
+                  <span style="position:absolute;top:0;left:18.8%;transform:translateX(-50%)">1k</span><span style="position:absolute;top:0;left:37.6%;transform:translateX(-50%)">2k</span><span style="position:absolute;top:0;left:62.4%;transform:translateX(-50%)">5k</span><span style="position:absolute;top:0;left:81.2%;transform:translateX(-50%)">10k</span><span style="position:absolute;top:0;left:100%;transform:translateX(-100%)">20k</span>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:center;gap:48px">
+                <div style="display:flex;align-items:center;gap:10px"><div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                    <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.freq.dash }};opacity:{{ k.freq.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                    <div onPointerDown="{{ d.freq }}" onDoubleClick="{{ r.freq }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                      <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                      <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.freq.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                    </div>
+                  </div><div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px"><span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Freq</span><span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.freq }}</span></div></div>
+                <div style="display:flex;align-items:center;gap:10px"><div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                    <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.range.dash }};opacity:{{ k.range.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                    <div onPointerDown="{{ d.range }}" onDoubleClick="{{ r.range }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                      <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                      <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.range.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                    </div>
+                  </div><div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px"><span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Range</span><span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.range }}</span></div></div>
+              </div>
+            </div>
+          </div>
+          <span style="height:1px;background:rgba(0,0,0,.3);box-shadow:0 1px 0 rgba(255,255,255,.05)"></span>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:18px">
+            <div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;display:grid;place-items:center"><div style="transform:scale(.72);flex:none"><div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                  <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.transient.dash }};opacity:{{ k.transient.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                  <div onPointerDown="{{ d.transient }}" onDoubleClick="{{ r.transient }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                    <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                    <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.transient.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                  </div>
+                </div>
+              </div></div><div style="display:flex;flex-direction:column;align-items:flex-start;gap:7px"><span style="display:flex;align-items:center;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#a0a8b0">Transient</span><span style="width:6px;height:6px;border-radius:50%;background:#e8a33d;opacity:{{ lamp.op }};box-shadow:{{ lamp.glow }}"></span></span><span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.transient }}</span></div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#a0a8b0">Release</span><div style="box-sizing:border-box;width:104px;display:flex;align-items:center;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+                <button onClick="{{ relDown }}" style="flex:none;width:18px;align-self:stretch;padding:0;border:none;background:transparent;cursor:pointer;font:700 13px/1 Inter,sans-serif;color:rgba(255,255,255,.5);border-radius:5px" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">‹</button>
+                <div onPointerDown="{{ d.release }}" onDoubleClick="{{ r.release }}" style="flex:1;min-width:0;padding:5px 2px;cursor:ns-resize;touch-action:none;text-align:center;font:500 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8">{{ v.release }}</div>
+                <button onClick="{{ relUp }}" style="flex:none;width:18px;align-self:stretch;padding:0;border:none;background:transparent;cursor:pointer;font:700 13px/1 Inter,sans-serif;color:rgba(255,255,255,.5);border-radius:5px" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">›</button>
+              </div></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#a0a8b0">Output</span><div style="box-sizing:border-box;width:88px;display:flex;align-items:center;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+                  <button onClick="{{ outDown }}" style="flex:none;width:18px;align-self:stretch;padding:0;border:none;background:transparent;cursor:pointer;font:700 13px/1 Inter,sans-serif;color:rgba(255,255,255,.5);border-radius:5px" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">‹</button>
+                  <div onPointerDown="{{ d.output }}" onDoubleClick="{{ r.output }}" style="flex:1;min-width:0;padding:5px 2px;cursor:ns-resize;touch-action:none;text-align:center;font:500 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8">{{ v.output }}</div>
+                  <button onClick="{{ outUp }}" style="flex:none;width:18px;align-self:stretch;padding:0;border:none;background:transparent;cursor:pointer;font:700 13px/1 Inter,sans-serif;color:rgba(255,255,255,.5);border-radius:5px" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">›</button>
+                </div></div>
+            <div style="width:196px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:9px;padding:9px 8px;border-radius:9px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0;min-width:22px">IN</span>
+                  <div style="display:flex;flex-direction:row-reverse;align-items:center">
+                    <div style="margin-left:6px;height:7px"><div style="height:100%;width:3px;border-radius:1.5px;background:#262c37"></div></div>
+                    <div style="display:flex;flex-direction:row;gap:2px;width:98px"><sc-for list="{{ inSlim }}" as="s" hint-placeholder-count="20"><div style="width:3px;height:7px;border-radius:1px;background:{{ s.color }};opacity:{{ s.op }}"></div></sc-for></div>
+                  </div>
+                  <span style="flex:none;width:32px;text-align:right;white-space:nowrap;font:500 9px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#c9d0d6">-11.2</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0;min-width:22px">OUT</span>
+                  <div style="display:flex;flex-direction:row-reverse;align-items:center">
+                    <div style="margin-left:6px;height:7px"><div style="height:100%;width:3px;border-radius:1.5px;background:#262c37"></div></div>
+                    <div style="display:flex;flex-direction:row;gap:2px;width:98px"><sc-for list="{{ outSlim }}" as="s" hint-placeholder-count="20"><div style="width:3px;height:7px;border-radius:1px;background:{{ s.color }};opacity:{{ s.op }}"></div></sc-for></div>
+                  </div>
+                  <span style="flex:none;width:32px;text-align:right;white-space:nowrap;font:500 9px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#c9d0d6">{{ outReadout }}</span>
+                </div>
+              </div>
+          </div>
+        </div>
+        <!-- footer -->
+        <div style="display:flex;align-items:center;gap:20px;height:60px;box-sizing:border-box;padding:0 16px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;font-variant-numeric:tabular-nums;white-space:nowrap">1:01.97 → 1:09.22 · 0:07.26 SELECTED</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#eaf6f8;font:600 12px Inter,sans-serif;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #eaf6f8"></span><span>Preview</span></button>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px Inter,sans-serif;cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Apply to selection</span></button>
+          </div>
+        </div>
+      </div>
+      <div style="max-width:760px;display:flex;flex-direction:column;gap:6px;font:400 12px/1.5 Inter,sans-serif;color:#b6bdc4"><span>• Priority reads top-left to bottom-right: Threshold, then Shape, then Freq and Range. Transient, Release, Output and metering sit in one quieter strip below.</span><span>• Freq and Range sit right under the curve they change. You can also drag the amber node on the curve: left/right sets Freq, up/down sets Range.</span><span>• Transient becomes a small knob, and Release and Output are fields. Anything that isn’t primary stays smaller.</span></div>
+    </div>
+    <div id="3b" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:5px;background:#3fd0de;color:#08161a">3b</span><span style="font:500 12px/1 Inter;color:#c9d0d6">Band knobs beside the curve, in their own column</span></div>
+      <div style="width:760px;border-radius:22px;overflow:hidden;display:flex;flex-direction:column;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <!-- header -->
+        <div style="display:flex;justify-content:space-between;align-items:center;height:58px;box-sizing:border-box;padding:2px 18px 0;gap:16px;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px;flex:none">
+            <span style="white-space:nowrap;font:800 13px/1 Inter,system-ui,sans-serif;letter-spacing:.14em;color:#faedd8">HF LIMITER</span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;font:700 12px/1 Inter,sans-serif;cursor:pointer">?</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            <button style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;background:transparent;border-radius:999px;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#3a3d43;box-shadow:inset 0 1px 1px rgba(0,0,0,.7)"></span><span style="font:700 10px/1 Inter,sans-serif;letter-spacing:.14em;color:rgba(255,255,255,.5)">DELTA</span></button>
+            <div style="width:200px;display:flex;align-items:center;gap:2px;height:30px;box-sizing:border-box;padding:0 4px;border-radius:8px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+              <button style="width:22px;height:22px;flex:none;display:grid;place-items:center;border:none;border-radius:5px;background:transparent;cursor:pointer;color:#b6bdc4;font:600 15px/1 Inter,sans-serif">‹</button>
+              <div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;height:22px"><span style="font:600 11px/1 Inter,sans-serif;letter-spacing:.04em;color:#eaf6f8">Default</span><span style="width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;border-top:4px solid #a6aeb6"></span></div>
+              <button style="width:22px;height:22px;flex:none;display:grid;place-items:center;border:none;border-radius:5px;background:transparent;cursor:pointer;color:#b6bdc4;font:600 15px/1 Inter,sans-serif">›</button>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:none">
+            <span style="width:96px;display:flex;justify-content:flex-end"><button style="display:flex;align-items:center;gap:8px;height:30px;box-sizing:border-box;padding:0 13px;border:none;border-radius:999px;cursor:pointer;background:transparent;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 Inter,sans-serif;letter-spacing:.14em;color:#eaf6f8">ON</span></button></span>
+            <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="font:400 17px/1 Inter,sans-serif;margin-top:-1px">×</span></button>
+          </div>
+        </div>
+
+        
+        <div style="padding:20px 22px 18px;display:flex;flex-direction:column;gap:16px">
+          <div style="display:grid;grid-template-columns:160px minmax(0,1fr) 92px;gap:22px;align-items:start">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px;align-self:end;padding-bottom:14px">
+              <div style="height:12px;display:flex;align-items:center"><span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Threshold</span></div>
+              <div onPointerDown="{{ d.threshold }}" onDoubleClick="{{ r.threshold }}" style="position:relative;width:104px;height:104px;display:grid;place-items:center;border-radius:50%;cursor:ns-resize;touch-action:none;background:radial-gradient(circle at 50% 40%,#232a33,#1b2027);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                <sc-for list="{{ thrTicks }}" as="t" hint-placeholder-count="21">
+                  <div style="position:absolute;left:50%;top:50%;width:2px;margin-left:-1px;height:44px;transform-origin:50% 0;transform:{{ t.rot }}"><div style="position:absolute;bottom:0;left:0;width:2px;border-radius:1px;height:{{ t.h }};background:{{ t.bg }};box-shadow:{{ t.glow }}"></div></div>
+                </sc-for>
+                <div style="position:relative;width:50px;height:50px;border-radius:50%;background:linear-gradient(160deg,#505c6e 0%,#353e4b 52%,#242b34 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.1),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #232a33,0 0 0 7px rgba(0,0,0,.6)">
+                  <div style="position:absolute;inset:5px;border-radius:50%;background:linear-gradient(160deg,#3e4959,#28313c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                  <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.threshold.deg }})"><div style="position:absolute;left:50%;top:7px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#e8a33d;box-shadow:0 0 6px #e8a33d"></div></div>
+                </div>
+              </div>
+              <span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.threshold }}</span>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:10px">
+                <span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Shape</span>
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <button onClick="{{ setTight }}" style="border:none;cursor:pointer;padding:5px 10px;border-radius:6px;font:700 9px/1.2 Inter,sans-serif;letter-spacing:.14em;white-space:nowrap;background:{{ seg.tight.bg }};box-shadow:{{ seg.tight.sh }};color:{{ seg.tight.c }}">TIGHT</button>
+                  <button onClick="{{ setWarm }}" style="border:none;cursor:pointer;padding:5px 10px;border-radius:6px;font:700 9px/1.2 Inter,sans-serif;letter-spacing:.14em;white-space:nowrap;background:{{ seg.warm.bg }};box-shadow:{{ seg.warm.sh }};color:{{ seg.warm.c }}">WARM</button></div>
+              </div>
+            </div>
+            <div style="min-width:0;display:flex;flex-direction:column;gap:12px;padding-top:2px">
+              <div><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                  <span style="display:flex;align-items:baseline;gap:9px"><span style="font:700 12px 'JetBrains Mono',monospace;color:#f0c381;text-shadow:0 0 8px rgba(232,163,61,.55)">{{ grText }} dB</span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">AVG {{ grAvg }}</span></span>
+                  <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">HF REDUCTION</span>
+                </div>
+                <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                  <div style="position:relative;height:18px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                    <div style="position:absolute;top:0;bottom:0;left:0;width:{{ grPct }};border-radius:9px;background:linear-gradient(90deg,#f7dfbb,#e8a33d);box-shadow:0 0 16px rgba(232,163,61,.7)"></div>
+                    <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                  </div>
+                </div>
+                <div style="padding:0 3px"><div style="position:relative;margin-top:5px;height:10px;font:600 8px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)">
+                  <span style="position:absolute;top:0;left:0%">0</span><span style="position:absolute;top:0;left:7.4%;transform:translateX(-50%)">-1</span><span style="position:absolute;top:0;left:21%;transform:translateX(-50%)">-3</span><span style="position:absolute;top:0;left:33%;transform:translateX(-50%)">-5</span><span style="position:absolute;top:0;left:58%;transform:translateX(-50%)">-10</span><span style="position:absolute;top:0;left:89%;transform:translateX(-50%)">-20</span><span style="position:absolute;top:0;left:100%;transform:translateX(-100%)">-24</span>
+                </div></div></div>
+              <div>
+                <div onPointerDown="{{ gDrag }}" style="position:relative;cursor:crosshair;touch-action:none">
+                  <svg viewBox="0 0 420 132" preserveAspectRatio="none" style="display:block;width:100%;height:200px;border-radius:6px;background:#0b0e13;box-shadow:inset 0 2px 10px rgba(0,0,0,.85),0 0 0 1px #1c222c,0 1px 0 rgba(255,255,255,.05)">
+                  <line x1="78.9" y1="0" x2="78.9" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="157.8" y1="0" x2="157.8" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="262.2" y1="0" x2="262.2" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="341.1" y1="0" x2="341.1" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="0" y1="0.5" x2="420" y2="0.5" stroke="rgba(255,255,255,.16)" stroke-width="1"></line>
+                  <line x1="{{ freqX }}" y1="0" x2="{{ freqX }}" y2="132" stroke="#e8a33d" stroke-opacity=".4" stroke-width="1" stroke-dasharray="3 3"></line>
+                  <path d="{{ floorPath }}" stroke="rgba(255,255,255,.26)" stroke-width="1.2" fill="none" stroke-dasharray="4 3"></path>
+                  <path d="{{ liveFill }}" fill="#e8a33d" fill-opacity="0.14"></path>
+                  <path d="{{ livePath }}" stroke="#e8a33d" stroke-width="2" fill="none"></path>
+                </svg>
+                  <div style="position:absolute;left:{{ nodeLeft }};top:{{ nodeTop }};width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#e8a33d;box-shadow:0 0 8px #e8a33d,0 0 0 2px #0b0e13;pointer-events:none"></div>
+                </div>
+                <div style="position:relative;height:10px;margin-top:4px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#a0a8b0">
+                  <span style="position:absolute;top:0;left:18.8%;transform:translateX(-50%)">1k</span><span style="position:absolute;top:0;left:37.6%;transform:translateX(-50%)">2k</span><span style="position:absolute;top:0;left:62.4%;transform:translateX(-50%)">5k</span><span style="position:absolute;top:0;left:81.2%;transform:translateX(-50%)">10k</span><span style="position:absolute;top:0;left:100%;transform:translateX(-100%)">20k</span>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:18px;align-self:end;padding-bottom:14px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:7px"><div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                    <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.freq.dash }};opacity:{{ k.freq.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                    <div onPointerDown="{{ d.freq }}" onDoubleClick="{{ r.freq }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                      <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                      <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.freq.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                    </div>
+                  </div><span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Freq</span><span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.freq }}</span></div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:7px"><div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                    <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.range.dash }};opacity:{{ k.range.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                    <div onPointerDown="{{ d.range }}" onDoubleClick="{{ r.range }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                      <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                      <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.range.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                    </div>
+                  </div><span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Range</span><span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.range }}</span></div>
+            </div>
+          </div>
+          <span style="height:1px;background:rgba(0,0,0,.3);box-shadow:0 1px 0 rgba(255,255,255,.05)"></span>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:18px">
+            <div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;display:grid;place-items:center"><div style="transform:scale(.72);flex:none"><div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                  <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.transient.dash }};opacity:{{ k.transient.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                  <div onPointerDown="{{ d.transient }}" onDoubleClick="{{ r.transient }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                    <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                    <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.transient.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                  </div>
+                </div>
+              </div></div><div style="display:flex;flex-direction:column;align-items:flex-start;gap:7px"><span style="display:flex;align-items:center;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#a0a8b0">Transient</span><span style="width:6px;height:6px;border-radius:50%;background:#e8a33d;opacity:{{ lamp.op }};box-shadow:{{ lamp.glow }}"></span></span><span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.transient }}</span></div></div>
+            <div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;display:grid;place-items:center"><div style="transform:scale(.72);flex:none"><div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                  <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.release.dash }};opacity:{{ k.release.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                  <div onPointerDown="{{ d.release }}" onDoubleClick="{{ r.release }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                    <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                    <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.release.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                  </div>
+                </div>
+              </div></div><div style="display:flex;flex-direction:column;align-items:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#a0a8b0">Release</span><span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.release }}</span></div></div>
+            <div style="display:flex;align-items:center;gap:10px"><div style="width:52px;height:52px;display:grid;place-items:center"><div style="transform:scale(.72);flex:none"><div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                  <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.output.dash }};opacity:{{ k.output.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                  <div onPointerDown="{{ d.output }}" onDoubleClick="{{ r.output }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                    <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                    <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.output.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                  </div>
+                </div>
+              </div></div><div style="display:flex;flex-direction:column;align-items:flex-start;gap:7px"><span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#a0a8b0">Output</span><span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.output }}</span></div></div>
+            <div style="width:196px;height:52px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:0 8px;border-radius:9px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0;min-width:22px">IN</span>
+                  <div style="display:flex;flex-direction:row-reverse;align-items:center">
+                    <div style="margin-left:6px;height:7px"><div style="height:100%;width:3px;border-radius:1.5px;background:#262c37"></div></div>
+                    <div style="display:flex;flex-direction:row;gap:2px;width:98px"><sc-for list="{{ inSlim }}" as="s" hint-placeholder-count="20"><div style="width:3px;height:7px;border-radius:1px;background:{{ s.color }};opacity:{{ s.op }}"></div></sc-for></div>
+                  </div>
+                  <span style="flex:none;width:32px;text-align:right;white-space:nowrap;font:500 9px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#c9d0d6">-11.2</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0;min-width:22px">OUT</span>
+                  <div style="display:flex;flex-direction:row-reverse;align-items:center">
+                    <div style="margin-left:6px;height:7px"><div style="height:100%;width:3px;border-radius:1.5px;background:#262c37"></div></div>
+                    <div style="display:flex;flex-direction:row;gap:2px;width:98px"><sc-for list="{{ outSlim }}" as="s" hint-placeholder-count="20"><div style="width:3px;height:7px;border-radius:1px;background:{{ s.color }};opacity:{{ s.op }}"></div></sc-for></div>
+                  </div>
+                  <span style="flex:none;width:32px;text-align:right;white-space:nowrap;font:500 9px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#c9d0d6">{{ outReadout }}</span>
+                </div>
+              </div>
+          </div>
+        </div>
+        <!-- footer -->
+        <div style="display:flex;align-items:center;gap:20px;height:60px;box-sizing:border-box;padding:0 16px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;font-variant-numeric:tabular-nums;white-space:nowrap">1:01.97 → 1:09.22 · 0:07.26 SELECTED</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#eaf6f8;font:600 12px Inter,sans-serif;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #eaf6f8"></span><span>Preview</span></button>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px Inter,sans-serif;cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Apply to selection</span></button>
+          </div>
+        </div>
+      </div>
+      <div style="max-width:760px;display:flex;flex-direction:column;gap:6px;font:400 12px/1.5 Inter,sans-serif;color:#b6bdc4"><span>• Same order as <a href="#3a">3a</a>, but Freq and Range stand next to the curve as a column, level with it. The curve gets taller.</span><span>• The drag node on the curve works here too.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="turn-2" style="padding:56px 64px 24px;display:flex;flex-direction:column;gap:24px">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+    <span style="font:600 10px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#a0a8b0">TURN 2 · REDESIGN</span>
+    <span style="font:600 20px/1.3 Inter,sans-serif;color:#eaf6f8">Tail removed, Release is a field, VoxPressor's flush faceplate</span>
+    <span style="font:400 13px/1.5 Inter,sans-serif;color:#b6bdc4;text-wrap:pretty">Knobs and fields are live: drag knobs up or down, drag the Release and Output fields, or use the ‹ › arrows. <a href="#2a">2a</a> follows VoxPressor's layout closely. <a href="#2b">2b</a> keeps the current layout and changes less.</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:56px;align-items:flex-start">
+
+    <!-- ═══════════════ 2a ═══════════════ -->
+    <div id="2a" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:5px;background:#3fd0de;color:#08161a">2a</span>
+        <span style="font:500 12px/1 Inter;color:#c9d0d6">VoxPressor layout: Threshold as the hero, the curve in the centre, IN/OUT in a well</span>
+      </div>
+      <div style="width:760px;border-radius:22px;overflow:hidden;display:flex;flex-direction:column;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <!-- header -->
+        <div style="display:flex;justify-content:space-between;align-items:center;height:58px;box-sizing:border-box;padding:2px 18px 0;gap:16px;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px;flex:none">
+            <span style="white-space:nowrap;font:800 13px/1 Inter,system-ui,sans-serif;letter-spacing:.14em;color:#faedd8">HF LIMITER</span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;font:700 12px/1 Inter,sans-serif;cursor:pointer">?</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            <button style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;background:transparent;border-radius:999px;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#3a3d43;box-shadow:inset 0 1px 1px rgba(0,0,0,.7)"></span><span style="font:700 10px/1 Inter,sans-serif;letter-spacing:.14em;color:rgba(255,255,255,.5)">DELTA</span></button>
+            <div style="width:200px;display:flex;align-items:center;gap:2px;height:30px;box-sizing:border-box;padding:0 4px;border-radius:8px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+              <button style="width:22px;height:22px;flex:none;display:grid;place-items:center;border:none;border-radius:5px;background:transparent;cursor:pointer;color:#b6bdc4;font:600 15px/1 Inter,sans-serif">‹</button>
+              <div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;height:22px"><span style="font:600 11px/1 Inter,sans-serif;letter-spacing:.04em;color:#eaf6f8">Default</span><span style="width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;border-top:4px solid #a6aeb6"></span></div>
+              <button style="width:22px;height:22px;flex:none;display:grid;place-items:center;border:none;border-radius:5px;background:transparent;cursor:pointer;color:#b6bdc4;font:600 15px/1 Inter,sans-serif">›</button>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:none">
+            <span style="width:96px;display:flex;justify-content:flex-end"><button style="display:flex;align-items:center;gap:8px;height:30px;box-sizing:border-box;padding:0 13px;border:none;border-radius:999px;cursor:pointer;background:transparent;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 Inter,sans-serif;letter-spacing:.14em;color:#eaf6f8">ON</span></button></span>
+            <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="font:400 17px/1 Inter,sans-serif;margin-top:-1px">×</span></button>
+          </div>
+        </div>
+
+        <!-- face -->
+        <div style="padding:20px 22px 18px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:grid;grid-template-columns:150px minmax(0,1fr) 140px;gap:22px;align-items:start">
+            <!-- Threshold -->
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+              <div style="height:12px;display:flex;align-items:center"><span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Threshold</span></div>
+              <div onPointerDown="{{ d.threshold }}" onDoubleClick="{{ r.threshold }}" style="position:relative;width:104px;height:104px;display:grid;place-items:center;border-radius:50%;cursor:ns-resize;touch-action:none;background:radial-gradient(circle at 50% 40%,#232a33,#1b2027);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                <sc-for list="{{ thrTicks }}" as="t" hint-placeholder-count="21">
+                  <div style="position:absolute;left:50%;top:50%;width:2px;margin-left:-1px;height:44px;transform-origin:50% 0;transform:{{ t.rot }}"><div style="position:absolute;bottom:0;left:0;width:2px;border-radius:1px;height:{{ t.h }};background:{{ t.bg }};box-shadow:{{ t.glow }}"></div></div>
+                </sc-for>
+                <div style="position:relative;width:50px;height:50px;border-radius:50%;background:linear-gradient(160deg,#505c6e 0%,#353e4b 52%,#242b34 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.1),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #232a33,0 0 0 7px rgba(0,0,0,.6)">
+                  <div style="position:absolute;inset:5px;border-radius:50%;background:linear-gradient(160deg,#3e4959,#28313c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                  <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.threshold.deg }})"><div style="position:absolute;left:50%;top:7px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#e8a33d;box-shadow:0 0 6px #e8a33d"></div></div>
+                </div>
+              </div>
+              <span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.threshold }}</span>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:7px;margin-top:8px">
+                <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#a0a8b0;margin-right:-.14em">Shape</span>
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <button onClick="{{ setTight }}" style="border:none;cursor:pointer;padding:5px 10px;border-radius:6px;font:700 9px/1.2 Inter,sans-serif;letter-spacing:.14em;white-space:nowrap;background:{{ seg.tight.bg }};box-shadow:{{ seg.tight.sh }};color:{{ seg.tight.c }}">TIGHT</button>
+                  <button onClick="{{ setWarm }}" style="border:none;cursor:pointer;padding:5px 10px;border-radius:6px;font:700 9px/1.2 Inter,sans-serif;letter-spacing:.14em;white-space:nowrap;background:{{ seg.warm.bg }};box-shadow:{{ seg.warm.sh }};color:{{ seg.warm.c }}">WARM</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Display -->
+            <div style="min-width:0;display:flex;flex-direction:column;gap:12px;padding-top:2px">
+              <div>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                  <span style="display:flex;align-items:baseline;gap:9px"><span style="font:700 12px 'JetBrains Mono',monospace;color:#f0c381;text-shadow:0 0 8px rgba(232,163,61,.55)">{{ grText }} dB</span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">AVG {{ grAvg }}</span></span>
+                  <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">HF REDUCTION</span>
+                </div>
+                <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                  <div style="position:relative;height:18px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                    <div style="position:absolute;top:0;bottom:0;left:0;width:{{ grPct }};border-radius:9px;background:linear-gradient(90deg,#f7dfbb,#e8a33d);box-shadow:0 0 16px rgba(232,163,61,.7)"></div>
+                    <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                  </div>
+                </div>
+                <div style="padding:0 3px"><div style="position:relative;margin-top:5px;height:10px;font:600 8px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)">
+                  <span style="position:absolute;top:0;left:0%">0</span><span style="position:absolute;top:0;left:7.4%;transform:translateX(-50%)">-1</span><span style="position:absolute;top:0;left:21%;transform:translateX(-50%)">-3</span><span style="position:absolute;top:0;left:33%;transform:translateX(-50%)">-5</span><span style="position:absolute;top:0;left:58%;transform:translateX(-50%)">-10</span><span style="position:absolute;top:0;left:89%;transform:translateX(-50%)">-20</span><span style="position:absolute;top:0;left:100%;transform:translateX(-100%)">-24</span>
+                </div></div>
+              </div>
+              <div>
+                <svg viewBox="0 0 420 132" preserveAspectRatio="none" style="display:block;width:100%;height:156px;border-radius:6px;background:#0b0e13;box-shadow:inset 0 2px 10px rgba(0,0,0,.85),0 0 0 1px #1c222c,0 1px 0 rgba(255,255,255,.05)">
+                  <line x1="78.9" y1="0" x2="78.9" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="157.8" y1="0" x2="157.8" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="262.2" y1="0" x2="262.2" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="341.1" y1="0" x2="341.1" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="0" y1="0.5" x2="420" y2="0.5" stroke="rgba(255,255,255,.16)" stroke-width="1"></line>
+                  <line x1="{{ freqX }}" y1="0" x2="{{ freqX }}" y2="132" stroke="#e8a33d" stroke-opacity=".4" stroke-width="1" stroke-dasharray="3 3"></line>
+                  <path d="{{ floorPath }}" stroke="rgba(255,255,255,.26)" stroke-width="1.2" fill="none" stroke-dasharray="4 3"></path>
+                  <path d="{{ liveFill }}" fill="#e8a33d" fill-opacity="0.14"></path>
+                  <path d="{{ livePath }}" stroke="#e8a33d" stroke-width="2" fill="none"></path>
+                </svg>
+                <div style="position:relative;height:10px;margin-top:4px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#a0a8b0">
+                  <span style="position:absolute;top:0;left:18.8%;transform:translateX(-50%)">1k</span><span style="position:absolute;top:0;left:37.6%;transform:translateX(-50%)">2k</span><span style="position:absolute;top:0;left:62.4%;transform:translateX(-50%)">5k</span><span style="position:absolute;top:0;left:81.2%;transform:translateX(-50%)">10k</span><span style="position:absolute;top:0;left:100%;transform:translateX(-100%)">20k</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Transient + Release -->
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+              <div style="height:12px;display:flex;align-items:center;gap:7px"><span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Transient</span><span style="width:6px;height:6px;border-radius:50%;background:#e8a33d;opacity:{{ lamp.op }};box-shadow:{{ lamp.glow }}"></span></div>
+              <div style="height:84px;display:flex;align-items:center;justify-content:center">
+                <div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                  <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.transient.dash }};opacity:{{ k.transient.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                  <div onPointerDown="{{ d.transient }}" onDoubleClick="{{ r.transient }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                    <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                    <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.transient.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                  </div>
+                </div>
+              </div>
+              <span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.transient }}</span>
+              <span style="width:120px;height:1px;margin:6px 0 2px;background:rgba(0,0,0,.3);box-shadow:0 1px 0 rgba(255,255,255,.05)"></span>
+              <div style="height:12px;display:flex;align-items:center"><span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Release</span></div>
+              <div style="box-sizing:border-box;width:104px;display:flex;align-items:center;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+                <button onClick="{{ relDown }}" style="flex:none;width:18px;align-self:stretch;padding:0;border:none;background:transparent;cursor:pointer;font:700 13px/1 Inter,sans-serif;color:rgba(255,255,255,.5);border-radius:5px" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">‹</button>
+                <div onPointerDown="{{ d.release }}" onDoubleClick="{{ r.release }}" style="flex:1;min-width:0;padding:5px 2px;cursor:ns-resize;touch-action:none;text-align:center;font:500 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8">{{ v.release }}</div>
+                <button onClick="{{ relUp }}" style="flex:none;width:18px;align-self:stretch;padding:0;border:none;background:transparent;cursor:pointer;font:700 13px/1 Inter,sans-serif;color:rgba(255,255,255,.5);border-radius:5px" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">›</button>
+              </div>
+            </div>
+          </div>
+
+          <span style="height:1px;background:rgba(0,0,0,.3);box-shadow:0 1px 0 rgba(255,255,255,.05)"></span>
+
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:22px">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px;width:360px">
+              <div style="height:12px;display:flex;align-items:center"><span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Band</span></div>
+              <div style="display:flex;align-items:flex-start;justify-content:center;gap:56px">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                  <div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                    <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.freq.dash }};opacity:{{ k.freq.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                    <div onPointerDown="{{ d.freq }}" onDoubleClick="{{ r.freq }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                      <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                      <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.freq.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                    </div>
+                  </div>
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#a0a8b0;margin-right:-.14em">Freq</span>
+                  <span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.freq }}</span>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                  <div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                    <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.range.dash }};opacity:{{ k.range.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                    <div onPointerDown="{{ d.range }}" onDoubleClick="{{ r.range }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                      <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                      <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.range.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                    </div>
+                  </div>
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#a0a8b0;margin-right:-.14em">Range</span>
+                  <span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.range }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Output + IN/OUT -->
+            <div style="display:flex;flex-direction:column;align-items:center;gap:10px;width:196px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#a0a8b0">Output</span>
+                <div style="box-sizing:border-box;width:88px;display:flex;align-items:center;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+                  <button onClick="{{ outDown }}" style="flex:none;width:18px;align-self:stretch;padding:0;border:none;background:transparent;cursor:pointer;font:700 13px/1 Inter,sans-serif;color:rgba(255,255,255,.5);border-radius:5px" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">‹</button>
+                  <div onPointerDown="{{ d.output }}" onDoubleClick="{{ r.output }}" style="flex:1;min-width:0;padding:5px 2px;cursor:ns-resize;touch-action:none;text-align:center;font:500 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8">{{ v.output }}</div>
+                  <button onClick="{{ outUp }}" style="flex:none;width:18px;align-self:stretch;padding:0;border:none;background:transparent;cursor:pointer;font:700 13px/1 Inter,sans-serif;color:rgba(255,255,255,.5);border-radius:5px" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">›</button>
+                </div>
+              </div>
+              <div style="width:196px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:9px;padding:9px 8px;border-radius:9px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0;min-width:22px">IN</span>
+                  <div style="display:flex;flex-direction:row-reverse;align-items:center">
+                    <div style="margin-left:6px;height:7px"><div style="height:100%;width:3px;border-radius:1.5px;background:#262c37"></div></div>
+                    <div style="display:flex;flex-direction:row;gap:2px;width:98px"><sc-for list="{{ inSlim }}" as="s" hint-placeholder-count="20"><div style="width:3px;height:7px;border-radius:1px;background:{{ s.color }};opacity:{{ s.op }}"></div></sc-for></div>
+                  </div>
+                  <span style="flex:none;width:32px;text-align:right;white-space:nowrap;font:500 9px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#c9d0d6">-11.2</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#a0a8b0;min-width:22px">OUT</span>
+                  <div style="display:flex;flex-direction:row-reverse;align-items:center">
+                    <div style="margin-left:6px;height:7px"><div style="height:100%;width:3px;border-radius:1.5px;background:#262c37"></div></div>
+                    <div style="display:flex;flex-direction:row;gap:2px;width:98px"><sc-for list="{{ outSlim }}" as="s" hint-placeholder-count="20"><div style="width:3px;height:7px;border-radius:1px;background:{{ s.color }};opacity:{{ s.op }}"></div></sc-for></div>
+                  </div>
+                  <span style="flex:none;width:32px;text-align:right;white-space:nowrap;font:500 9px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#c9d0d6">{{ outReadout }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- footer -->
+        <div style="display:flex;align-items:center;gap:20px;height:60px;box-sizing:border-box;padding:0 16px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;font-variant-numeric:tabular-nums;white-space:nowrap">1:01.97 → 1:09.22 · 0:07.26 SELECTED</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#eaf6f8;font:600 12px Inter,sans-serif;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #eaf6f8"></span><span>Preview</span></button>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px Inter,sans-serif;cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Apply to selection</span></button>
+          </div>
+        </div>
+      </div>
+      <div style="max-width:760px;display:flex;flex-direction:column;gap:6px;font:400 12px/1.5 Inter,sans-serif;color:#b6bdc4">
+        <span>• No panel trays. The controls sit directly on the chassis like VoxPressor's, grouped by titles and an engraved rule.</span>
+        <span>• Threshold is the main control, so it gets the large ticks knob. Freq, Range and Transient use halo knobs, and each value shows in an amber LCD.</span>
+        <span>• Release is a field under Transient, since both set timing. The vertical IN/OUT ladders become VoxPressor's slim pair, set in a well under Output.</span>
+      </div>
+    </div>
+
+    <!-- ═══════════════ 2b ═══════════════ -->
+    <div id="2b" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:5px;background:#3fd0de;color:#08161a">2b</span>
+        <span style="font:500 12px/1 Inter;color:#c9d0d6">Smaller change: today's layout with VoxPressor's knobs and readouts</span>
+      </div>
+      <div style="width:760px;border-radius:22px;overflow:hidden;display:flex;flex-direction:column;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <div style="display:flex;justify-content:space-between;align-items:center;height:58px;box-sizing:border-box;padding:2px 18px 0;gap:16px;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+          <div style="display:flex;align-items:center;gap:10px;flex:none">
+            <span style="white-space:nowrap;font:800 13px/1 Inter,system-ui,sans-serif;letter-spacing:.14em;color:#faedd8">HF LIMITER</span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;font:700 12px/1 Inter,sans-serif;cursor:pointer">?</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            <button style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;background:transparent;border-radius:999px;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#3a3d43;box-shadow:inset 0 1px 1px rgba(0,0,0,.7)"></span><span style="font:700 10px/1 Inter,sans-serif;letter-spacing:.14em;color:rgba(255,255,255,.5)">DELTA</span></button>
+            <div style="width:200px;display:flex;align-items:center;gap:2px;height:30px;box-sizing:border-box;padding:0 4px;border-radius:8px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+              <button style="width:22px;height:22px;flex:none;display:grid;place-items:center;border:none;border-radius:5px;background:transparent;cursor:pointer;color:#b6bdc4;font:600 15px/1 Inter,sans-serif">‹</button>
+              <div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;height:22px"><span style="font:600 11px/1 Inter,sans-serif;letter-spacing:.04em;color:#eaf6f8">Default</span><span style="width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;border-top:4px solid #a6aeb6"></span></div>
+              <button style="width:22px;height:22px;flex:none;display:grid;place-items:center;border:none;border-radius:5px;background:transparent;cursor:pointer;color:#b6bdc4;font:600 15px/1 Inter,sans-serif">›</button>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:none">
+            <span style="width:96px;display:flex;justify-content:flex-end"><button style="display:flex;align-items:center;gap:8px;height:30px;box-sizing:border-box;padding:0 13px;border:none;border-radius:999px;cursor:pointer;background:transparent;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 Inter,sans-serif;letter-spacing:.14em;color:#eaf6f8">ON</span></button></span>
+            <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+            <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="font:400 17px/1 Inter,sans-serif;margin-top:-1px">×</span></button>
+          </div>
+        </div>
+
+        <div style="padding:14px">
+          <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:start">
+            <!-- IN meter -->
+            <div style="display:flex;justify-content:center;padding:12px 4px">
+              <div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding-right:8px">
+                <div style="display:flex;justify-content:center;width:26px;margin-left:28px"><span style="flex:none;box-sizing:content-box;width:5ch;padding:4px;border-radius:5px;text-align:center;white-space:nowrap;font:500 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">-11.2</span></div>
+                <div style="display:flex;flex-direction:row-reverse;align-items:flex-end;gap:6px">
+                  <div style="display:flex;flex-direction:column;align-items:center;padding:5px;border-radius:5px;background:#0b0e13;border:1px solid #1c222c">
+                    <div style="width:14px;margin-bottom:6px"><div style="height:5px;border-radius:1.5px;background:#262c37"></div></div>
+                    <div style="display:flex;flex-direction:column;gap:3px;height:214px"><sc-for list="{{ inV }}" as="s" hint-placeholder-count="31"><div style="width:14px;height:4px;border-radius:1px;background:{{ s.color }};opacity:{{ s.op }};box-shadow:{{ s.glow }}"></div></sc-for></div>
+                  </div>
+                  <div style="position:relative;margin-bottom:5px;height:214px;width:22px;font:500 9px/1 'JetBrains Mono',monospace;color:#a0a8b0">
+                    <span style="position:absolute;right:0;bottom:calc(100% - 4.5px)">0</span><span style="position:absolute;right:0;bottom:calc(83.75% - 4.5px)">-6</span><span style="position:absolute;right:0;bottom:calc(67.5% - 4.5px)">-12</span><span style="position:absolute;right:0;bottom:calc(51.25% - 4.5px)">-18</span><span style="position:absolute;right:0;bottom:calc(35% - 4.5px)">-24</span><span style="position:absolute;right:0;bottom:calc(23.33% - 4.5px)">-36</span>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:center;width:26px;margin-left:28px"><span style="font:600 9px/1 Inter,sans-serif;letter-spacing:.14em;color:#aeb6bd">IN</span></div>
+              </div>
+            </div>
+
+            <!-- display panel -->
+            <div style="min-width:0;display:flex;flex-direction:column;gap:12px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+              <div>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                  <span style="display:flex;align-items:baseline;gap:9px"><span style="font:700 12px 'JetBrains Mono',monospace;color:#f0c381;text-shadow:0 0 8px rgba(232,163,61,.55)">{{ grText }} dB</span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">AVG {{ grAvg }}</span></span>
+                  <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">HF REDUCTION</span>
+                </div>
+                <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                  <div style="position:relative;height:18px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                    <div style="position:absolute;top:0;bottom:0;left:0;width:{{ grPct }};border-radius:9px;background:linear-gradient(90deg,#f7dfbb,#e8a33d);box-shadow:0 0 16px rgba(232,163,61,.7)"></div>
+                    <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                  </div>
+                </div>
+                <div style="padding:0 3px"><div style="position:relative;margin-top:5px;height:10px;font:600 8px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)">
+                  <span style="position:absolute;top:0;left:0%">0</span><span style="position:absolute;top:0;left:7.4%;transform:translateX(-50%)">-1</span><span style="position:absolute;top:0;left:21%;transform:translateX(-50%)">-3</span><span style="position:absolute;top:0;left:33%;transform:translateX(-50%)">-5</span><span style="position:absolute;top:0;left:58%;transform:translateX(-50%)">-10</span><span style="position:absolute;top:0;left:89%;transform:translateX(-50%)">-20</span><span style="position:absolute;top:0;left:100%;transform:translateX(-100%)">-24</span>
+                </div></div>
+              </div>
+              <div>
+                <svg viewBox="0 0 420 132" preserveAspectRatio="none" style="display:block;width:100%;height:132px;border-radius:6px;background:#0b0e13;box-shadow:inset 0 2px 10px rgba(0,0,0,.85),0 0 0 1px #1c222c,0 1px 0 rgba(255,255,255,.05)">
+                  <line x1="78.9" y1="0" x2="78.9" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="157.8" y1="0" x2="157.8" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="262.2" y1="0" x2="262.2" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="341.1" y1="0" x2="341.1" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                  <line x1="0" y1="0.5" x2="420" y2="0.5" stroke="rgba(255,255,255,.16)" stroke-width="1"></line>
+                  <line x1="{{ freqX }}" y1="0" x2="{{ freqX }}" y2="132" stroke="#e8a33d" stroke-opacity=".4" stroke-width="1" stroke-dasharray="3 3"></line>
+                  <path d="{{ floorPath }}" stroke="rgba(255,255,255,.26)" stroke-width="1.2" fill="none" stroke-dasharray="4 3"></path>
+                  <path d="{{ liveFill }}" fill="#e8a33d" fill-opacity="0.14"></path>
+                  <path d="{{ livePath }}" stroke="#e8a33d" stroke-width="2" fill="none"></path>
+                </svg>
+                <div style="position:relative;height:10px;margin-top:4px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#a0a8b0">
+                  <span style="position:absolute;top:0;left:18.8%;transform:translateX(-50%)">1k</span><span style="position:absolute;top:0;left:37.6%;transform:translateX(-50%)">2k</span><span style="position:absolute;top:0;left:62.4%;transform:translateX(-50%)">5k</span><span style="position:absolute;top:0;left:81.2%;transform:translateX(-50%)">10k</span><span style="position:absolute;top:0;left:100%;transform:translateX(-100%)">20k</span>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:center;gap:28px">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Shape</span>
+                  <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                    <button onClick="{{ setTight }}" style="border:none;cursor:pointer;padding:5px 10px;border-radius:6px;font:700 9px/1.2 Inter,sans-serif;letter-spacing:.14em;white-space:nowrap;background:{{ seg.tight.bg }};box-shadow:{{ seg.tight.sh }};color:{{ seg.tight.c }}">TIGHT</button>
+                    <button onClick="{{ setWarm }}" style="border:none;cursor:pointer;padding:5px 10px;border-radius:6px;font:700 9px/1.2 Inter,sans-serif;letter-spacing:.14em;white-space:nowrap;background:{{ seg.warm.bg }};box-shadow:{{ seg.warm.sh }};color:{{ seg.warm.c }}">WARM</button>
+                  </div>
+                </div>
+                <span style="width:1px;height:20px;background:rgba(0,0,0,.35);box-shadow:1px 0 0 rgba(255,255,255,.04)"></span>
+                <div style="display:flex;align-items:center;gap:12px">
+                  <span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Release</span>
+                  <div style="box-sizing:border-box;width:96px;display:flex;align-items:center;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+                    <button onClick="{{ relDown }}" style="flex:none;width:18px;align-self:stretch;padding:0;border:none;background:transparent;cursor:pointer;font:700 13px/1 Inter,sans-serif;color:rgba(255,255,255,.5);border-radius:5px" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">‹</button>
+                    <div onPointerDown="{{ d.release }}" onDoubleClick="{{ r.release }}" style="flex:1;min-width:0;padding:5px 2px;cursor:ns-resize;touch-action:none;text-align:center;font:500 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8">{{ v.release }}</div>
+                    <button onClick="{{ relUp }}" style="flex:none;width:18px;align-self:stretch;padding:0;border:none;background:transparent;cursor:pointer;font:700 13px/1 Inter,sans-serif;color:rgba(255,255,255,.5);border-radius:5px" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">›</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- OUT meter -->
+            <div style="display:flex;justify-content:center;padding:12px 4px">
+              <div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding-left:8px">
+                <div style="display:flex;justify-content:center;width:26px"><span style="flex:none;box-sizing:content-box;width:5ch;padding:4px;border-radius:5px;text-align:center;white-space:nowrap;font:500 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">{{ outReadout }}</span></div>
+                <div style="display:flex;align-items:flex-end;gap:6px">
+                  <div style="display:flex;flex-direction:column;align-items:center;padding:5px;border-radius:5px;background:#0b0e13;border:1px solid #1c222c">
+                    <div style="width:14px;margin-bottom:6px"><div style="height:5px;border-radius:1.5px;background:#262c37"></div></div>
+                    <div style="display:flex;flex-direction:column;gap:3px;height:214px"><sc-for list="{{ outV }}" as="s" hint-placeholder-count="31"><div style="width:14px;height:4px;border-radius:1px;background:{{ s.color }};opacity:{{ s.op }};box-shadow:{{ s.glow }}"></div></sc-for></div>
+                  </div>
+                  <div style="position:relative;margin-bottom:5px;height:214px;width:22px;font:500 9px/1 'JetBrains Mono',monospace;color:#a0a8b0">
+                    <span style="position:absolute;left:0;bottom:calc(100% - 4.5px)">0</span><span style="position:absolute;left:0;bottom:calc(83.75% - 4.5px)">-6</span><span style="position:absolute;left:0;bottom:calc(67.5% - 4.5px)">-12</span><span style="position:absolute;left:0;bottom:calc(51.25% - 4.5px)">-18</span><span style="position:absolute;left:0;bottom:calc(35% - 4.5px)">-24</span><span style="position:absolute;left:0;bottom:calc(23.33% - 4.5px)">-36</span>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:center;width:26px"><span style="font:600 9px/1 Inter,sans-serif;letter-spacing:.14em;color:#aeb6bd">OUT</span></div>
+                <div style="display:flex;justify-content:center;width:26px">
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+                    <div style="box-sizing:border-box;width:64px;display:flex;align-items:center;border-radius:5px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+                      <div onPointerDown="{{ d.output }}" onDoubleClick="{{ r.output }}" style="flex:1;min-width:0;padding:5px 2px;cursor:ns-resize;touch-action:none;text-align:center;font:500 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8">{{ v.output }}</div>
+                    </div>
+                    <span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Trim</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- knob row -->
+          <div style="margin-top:12px;display:flex;align-items:flex-start;justify-content:space-around;gap:8px;padding:16px 12px 14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+              <div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.freq.dash }};opacity:{{ k.freq.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                <div onPointerDown="{{ d.freq }}" onDoubleClick="{{ r.freq }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                  <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                  <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.freq.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                </div>
+              </div>
+              <span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Freq</span>
+              <span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.freq }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+              <div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.threshold.dash }};opacity:{{ k.threshold.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                <div onPointerDown="{{ d.threshold }}" onDoubleClick="{{ r.threshold }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                  <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                  <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.threshold.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                </div>
+              </div>
+              <span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Threshold</span>
+              <span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.threshold }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+              <div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.range.dash }};opacity:{{ k.range.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                <div onPointerDown="{{ d.range }}" onDoubleClick="{{ r.range }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                  <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                  <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.range.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                </div>
+              </div>
+              <span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Range</span>
+              <span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.range }}</span>
+            </div>
+            <span style="align-self:stretch;width:1px;background:rgba(0,0,0,.35);box-shadow:1px 0 0 rgba(255,255,255,.04)"></span>
+            <div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:8px">
+              <div style="position:relative;width:72px;height:72px;display:grid;place-items:center">
+                <svg width="72" height="72" viewBox="0 0 72 72" style="position:absolute;inset:0;overflow:visible;pointer-events:none"><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#191d23;stroke-width:2;stroke-linecap:round;stroke-dasharray:150.09 200.12"></circle><circle cx="36" cy="36" r="31.85" fill="none" transform="rotate(135 36 36)" style="stroke:#e8a33d;stroke-width:2;stroke-linecap:round;stroke-dasharray:{{ k.transient.dash }};opacity:{{ k.transient.op }};filter:drop-shadow(0 0 2.1px #e8a33d)"></circle></svg>
+                <div onPointerDown="{{ d.transient }}" onDoubleClick="{{ r.transient }}" style="position:relative;width:51.7px;height:51.7px;border-radius:50%;cursor:ns-resize;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7.4px 12px -5.5px rgba(0,0,0,.95),inset 0 .9px .9px rgba(255,255,255,.1),inset 0 -3.2px 5.5px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                  <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                  <div style="position:absolute;inset:0;pointer-events:none;transform:rotate({{ k.transient.deg }})"><div style="position:absolute;left:50%;top:8px;height:12px;width:2px;margin-left:-1px;border-radius:2px;background:#e8a33d;box-shadow:0 0 3px #e8a33d"></div></div>
+                </div>
+                <span style="position:absolute;top:0;right:-6px;width:7px;height:7px;border-radius:50%;background:#e8a33d;opacity:{{ lamp.op }};box-shadow:{{ lamp.glow }}"></span>
+              </div>
+              <span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4;margin-right:-.14em">Transient</span>
+              <span style="padding:3px 6px;border-radius:3px;background:#0b0c0e;box-shadow:inset 0 1px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06);font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e0a65c;text-shadow:0 0 4px rgba(255,140,40,.3);white-space:nowrap">{{ v.transient }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:20px;height:60px;box-sizing:border-box;padding:0 16px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+          <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;font-variant-numeric:tabular-nums;white-space:nowrap">1:01.97 → 1:09.22 · 0:07.26 SELECTED</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#eaf6f8;font:600 12px Inter,sans-serif;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #eaf6f8"></span><span>Preview</span></button>
+            <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px Inter,sans-serif;cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Apply to selection</span></button>
+          </div>
+        </div>
+      </div>
+      <div style="max-width:760px;display:flex;flex-direction:column;gap:6px;font:400 12px/1.5 Inter,sans-serif;color:#b6bdc4">
+        <span>• Everything stays where it is today. Four halo knobs replace the six small knobs, so the row has room to breathe.</span>
+        <span>• Release moves up next to Shape as a field. Output trim becomes a field under OUT.</span>
+        <span>• Each value shows in an amber LCD, as on VoxPressor, so readings stand out from the labels.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ TURN 1: current ═══════════════ -->
+<section id="turn-1" style="padding:40px 64px 80px;display:flex;flex-direction:column;gap:24px">
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <span style="font:600 10px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#a0a8b0">TURN 1 · CURRENT</span>
+    <span style="font:600 20px/1.3 Inter,sans-serif;color:#eaf6f8">HF Limiter today, rebuilt from HFLimiterModal.vue</span>
+  </div>
+  <div id="1a" style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font:700 11px/1 'JetBrains Mono',monospace;padding:5px 8px;border-radius:5px;background:#a0a8b0;color:#0e1116">1a</span>
+      <span style="font:500 12px/1 Inter;color:#c9d0d6">Current: defaults, at rest</span>
+    </div>
+    <div style="width:760px;border-radius:22px;overflow:hidden;display:flex;flex-direction:column;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+      <div style="display:flex;justify-content:space-between;align-items:center;height:58px;box-sizing:border-box;padding:2px 18px 0;gap:16px;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+        <div style="display:flex;align-items:center;gap:10px;flex:none">
+          <span style="white-space:nowrap;font:800 13px/1 Inter,system-ui,sans-serif;letter-spacing:.14em;color:#faedd8">HF LIMITER</span>
+          <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;font:700 12px/1 Inter,sans-serif;cursor:pointer">?</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;min-width:0">
+          <button style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;box-sizing:border-box;border:none;background:transparent;border-radius:999px;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#3a3d43;box-shadow:inset 0 1px 1px rgba(0,0,0,.7)"></span><span style="font:700 10px/1 Inter,sans-serif;letter-spacing:.14em;color:rgba(255,255,255,.5)">DELTA</span></button>
+          <div style="width:200px;display:flex;align-items:center;gap:2px;height:30px;box-sizing:border-box;padding:0 4px;border-radius:8px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+            <button style="width:22px;height:22px;flex:none;display:grid;place-items:center;border:none;border-radius:5px;background:transparent;cursor:pointer;color:#b6bdc4;font:600 15px/1 Inter,sans-serif">‹</button>
+            <div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;height:22px"><span style="font:600 11px/1 Inter,sans-serif;letter-spacing:.04em;color:#eaf6f8">Default</span><span style="width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;border-top:4px solid #a6aeb6"></span></div>
+            <button style="width:22px;height:22px;flex:none;display:grid;place-items:center;border:none;border-radius:5px;background:transparent;cursor:pointer;color:#b6bdc4;font:600 15px/1 Inter,sans-serif">›</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:none">
+          <span style="width:96px;display:flex;justify-content:flex-end"><button style="display:flex;align-items:center;gap:8px;height:30px;box-sizing:border-box;padding:0 13px;border:none;border-radius:999px;cursor:pointer;background:transparent;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:7px;height:7px;border-radius:50%;background:#8fd48a;box-shadow:0 0 6px #8fd48a"></span><span style="font:700 10px/1 Inter,sans-serif;letter-spacing:.14em;color:#eaf6f8">ON</span></button></span>
+          <span style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></span>
+          <button style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#c9d0d6;box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="font:400 17px/1 Inter,sans-serif;margin-top:-1px">×</span></button>
+        </div>
+      </div>
+
+      <div style="padding:14px">
+        <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:start">
+          <div style="display:flex;justify-content:center;padding:12px 4px">
+            <div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding-right:8px">
+              <div style="display:flex;justify-content:center;width:26px;margin-left:28px"><span style="flex:none;box-sizing:content-box;width:5ch;padding:4px;border-radius:5px;text-align:center;white-space:nowrap;font:500 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">-∞</span></div>
+              <div style="display:flex;flex-direction:row-reverse;align-items:flex-end;gap:6px">
+                <div style="display:flex;flex-direction:column;align-items:center;padding:5px;border-radius:5px;background:#0b0e13;border:1px solid #1c222c">
+                  <div style="width:14px;margin-bottom:6px"><div style="height:5px;border-radius:1.5px;background:#262c37"></div></div>
+                  <div style="display:flex;flex-direction:column;gap:3px;height:214px"><sc-for list="{{ idleV }}" as="s" hint-placeholder-count="31"><div style="width:14px;height:4px;border-radius:1px;background:{{ s.color }};opacity:{{ s.op }}"></div></sc-for></div>
+                </div>
+                <div style="position:relative;margin-bottom:5px;height:214px;width:22px;font:500 9px/1 'JetBrains Mono',monospace;color:#a0a8b0">
+                  <span style="position:absolute;right:0;bottom:calc(100% - 4.5px)">0</span><span style="position:absolute;right:0;bottom:calc(83.75% - 4.5px)">-6</span><span style="position:absolute;right:0;bottom:calc(67.5% - 4.5px)">-12</span><span style="position:absolute;right:0;bottom:calc(51.25% - 4.5px)">-18</span><span style="position:absolute;right:0;bottom:calc(35% - 4.5px)">-24</span><span style="position:absolute;right:0;bottom:calc(23.33% - 4.5px)">-36</span>
+                </div>
+              </div>
+              <div style="display:flex;justify-content:center;width:26px;margin-left:28px"><span style="font:600 9px/1 Inter,sans-serif;letter-spacing:.14em;color:#aeb6bd">IN</span></div>
+            </div>
+          </div>
+
+          <div style="min-width:0;display:flex;flex-direction:column;gap:12px;padding:14px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+            <div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <span style="display:flex;align-items:baseline;gap:9px"><span style="font:700 12px 'JetBrains Mono',monospace;color:#f0c381;text-shadow:0 0 8px rgba(232,163,61,.55)">0.0 dB</span><span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">AVG —</span></span>
+                <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">HF REDUCTION</span>
+              </div>
+              <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                <div style="position:relative;height:18px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                  <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                </div>
+              </div>
+              <div style="padding:0 3px"><div style="position:relative;margin-top:5px;height:10px;font:600 8px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)">
+                <span style="position:absolute;top:0;left:0%">0</span><span style="position:absolute;top:0;left:7.4%;transform:translateX(-50%)">-1</span><span style="position:absolute;top:0;left:21%;transform:translateX(-50%)">-3</span><span style="position:absolute;top:0;left:33%;transform:translateX(-50%)">-5</span><span style="position:absolute;top:0;left:58%;transform:translateX(-50%)">-10</span><span style="position:absolute;top:0;left:89%;transform:translateX(-50%)">-20</span><span style="position:absolute;top:0;left:100%;transform:translateX(-100%)">-24</span>
+              </div></div>
+            </div>
+            <div>
+              <svg viewBox="0 0 420 132" preserveAspectRatio="none" style="display:block;width:100%;height:132px;border-radius:6px;background:#0b0e13;box-shadow:inset 0 2px 10px rgba(0,0,0,.85),0 0 0 1px #1c222c,0 1px 0 rgba(255,255,255,.05)">
+                <line x1="78.9" y1="0" x2="78.9" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                <line x1="157.8" y1="0" x2="157.8" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                <line x1="262.2" y1="0" x2="262.2" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                <line x1="341.1" y1="0" x2="341.1" y2="132" stroke="rgba(255,255,255,.07)" stroke-width="1"></line>
+                <line x1="0" y1="0.5" x2="420" y2="0.5" stroke="rgba(255,255,255,.16)" stroke-width="1"></line>
+                <line x1="361.8" y1="0" x2="361.8" y2="132" stroke="#e8a33d" stroke-opacity=".4" stroke-width="1" stroke-dasharray="3 3"></line>
+                <path d="{{ curFloor }}" stroke="rgba(255,255,255,.26)" stroke-width="1.2" fill="none" stroke-dasharray="4 3"></path>
+                <path d="M0,0 L420,0" stroke="#e8a33d" stroke-width="2" fill="none"></path>
+              </svg>
+              <div style="position:relative;height:10px;margin-top:4px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#a0a8b0">
+                <span style="position:absolute;top:0;left:18.8%;transform:translateX(-50%)">1k</span><span style="position:absolute;top:0;left:37.6%;transform:translateX(-50%)">2k</span><span style="position:absolute;top:0;left:62.4%;transform:translateX(-50%)">5k</span><span style="position:absolute;top:0;left:81.2%;transform:translateX(-50%)">10k</span><span style="position:absolute;top:0;left:100%;transform:translateX(-100%)">20k</span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:12px">
+              <span style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Shape</span>
+              <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                <button style="border:none;background:transparent;cursor:pointer;padding:5px 10px;border-radius:6px;font:700 9px/1.2 Inter,sans-serif;letter-spacing:.14em;color:rgba(255,255,255,.5);white-space:nowrap">TIGHT</button>
+                <button style="border:none;cursor:pointer;padding:5px 10px;border-radius:6px;font:700 9px/1.2 Inter,sans-serif;letter-spacing:.14em;white-space:nowrap;color:#3fd0de;background:linear-gradient(180deg,#3c4149,#2a2e34);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 6px 12px -6px rgba(0,0,0,.9),0 0 0 1px rgba(0,0,0,.6)">WARM</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:center;padding:12px 4px">
+            <div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding-left:8px">
+              <div style="display:flex;justify-content:center;width:26px"><span style="flex:none;box-sizing:content-box;width:5ch;padding:4px;border-radius:5px;text-align:center;white-space:nowrap;font:500 11px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">-∞</span></div>
+              <div style="display:flex;align-items:flex-end;gap:6px">
+                <div style="display:flex;flex-direction:column;align-items:center;padding:5px;border-radius:5px;background:#0b0e13;border:1px solid #1c222c">
+                  <div style="width:14px;margin-bottom:6px"><div style="height:5px;border-radius:1.5px;background:#262c37"></div></div>
+                  <div style="display:flex;flex-direction:column;gap:3px;height:214px"><sc-for list="{{ idleV }}" as="s" hint-placeholder-count="31"><div style="width:14px;height:4px;border-radius:1px;background:{{ s.color }};opacity:{{ s.op }}"></div></sc-for></div>
+                </div>
+                <div style="position:relative;margin-bottom:5px;height:214px;width:22px;font:500 9px/1 'JetBrains Mono',monospace;color:#a0a8b0">
+                  <span style="position:absolute;left:0;bottom:calc(100% - 4.5px)">0</span><span style="position:absolute;left:0;bottom:calc(83.75% - 4.5px)">-6</span><span style="position:absolute;left:0;bottom:calc(67.5% - 4.5px)">-12</span><span style="position:absolute;left:0;bottom:calc(51.25% - 4.5px)">-18</span><span style="position:absolute;left:0;bottom:calc(35% - 4.5px)">-24</span><span style="position:absolute;left:0;bottom:calc(23.33% - 4.5px)">-36</span>
+                </div>
+              </div>
+              <div style="display:flex;justify-content:center;width:26px"><span style="font:600 9px/1 Inter,sans-serif;letter-spacing:.14em;color:#aeb6bd">OUT</span></div>
+              <div style="display:flex;justify-content:center;width:26px">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:5px">
+                  <div style="width:3px;height:3px;border-radius:50%;background:#a0a8b0"></div>
+                  <div style="position:relative;width:30px;height:30px;border-radius:50%;flex:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 8px 14px -8px rgba(0,0,0,.95),inset 0 1px 1px rgba(255,255,255,.1),0 0 0 1px rgba(0,0,0,.65)">
+                    <div style="position:absolute;inset:0"><div style="position:absolute;left:50%;top:4px;height:8px;width:2px;margin-left:-1px;border-radius:1px;background:#eaf6f8"></div></div>
+                  </div>
+                  <div style="font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6;white-space:nowrap">0.0 dB</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;display:flex;align-items:flex-start;justify-content:space-around;gap:8px;padding:14px 12px 12px;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.5)">
+          <sc-for list="{{ curKnobs }}" as="c" hint-placeholder-count="6">
+            <div style="display:flex;align-items:flex-start;gap:8px">
+              <sc-if value="{{ c.rule }}" hint-placeholder-val="{{ false }}"><span style="align-self:stretch;width:1px;margin-right:40px;margin-left:-48px;background:rgba(0,0,0,.35);box-shadow:1px 0 0 rgba(255,255,255,.04)"></span></sc-if>
+              <div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:10px">
+                <div style="position:relative;width:52px;height:52px;border-radius:50%;flex:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 10.1px 16.8px -8.4px rgba(0,0,0,.95),inset 0 1.26px 1.26px rgba(255,255,255,.1),inset 0 -4.2px 7.55px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                  <div style="position:absolute;inset:6px;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                  <div style="position:absolute;inset:0;transform:{{ c.rot }}"><div style="position:absolute;left:50%;top:7px;height:12px;width:2.5px;margin-left:-1.26px;border-radius:2px;background:#e8a33d;box-shadow:0 0 5px #e8a33d"></div></div>
+                </div>
+                <div style="font:600 10px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">{{ c.label }}</div>
+                <div style="font:500 11px/1 'JetBrains Mono',monospace;color:#c9d0d6;white-space:nowrap">{{ c.val }}</div>
+                <sc-if value="{{ c.lamp }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:0;right:-4px;width:7px;height:7px;border-radius:50%;background:#e8a33d;opacity:.12"></span></sc-if>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:20px;height:60px;box-sizing:border-box;padding:0 16px;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+        <span style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#a0a8b0;font-variant-numeric:tabular-nums;white-space:nowrap">1:01.97 → 1:09.22 · 0:07.26 SELECTED</span>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+          <button style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;color:#eaf6f8;font:600 12px Inter,sans-serif;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)"><span style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid #eaf6f8"></span><span>Preview</span></button>
+          <button style="display:flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:none;border-radius:9px;color:#1b1d21;font:600 12px Inter,sans-serif;cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Apply to selection</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;liveReduction&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:4.2,&quot;min&quot;:0,&quot;max&quot;:24,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;dB&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Simulated signal&quot;},&quot;shape&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;warm&quot;,&quot;tight&quot;],&quot;default&quot;:&quot;warm&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Simulated signal&quot;}}">
+const HOT='#FF5A4E',WARM='#E8A33D',MID='#6FD6C0',COOL='#7CE0A8';
+const pctDb=db=>{const p=db<=-24?((db+60)/36)*35:35+((db+24)/24)*65;return Math.max(0,Math.min(100,p));};
+function ladder(rows,segH,gap,lvl,slim,vertical){
+  const pitch=segH+gap,h=rows*pitch-gap,red=pctDb(-6),amb=pctDb(-18),grn=pctDb(-36),lv=pctDb(lvl);
+  const out=Array.from({length:rows},(_,i)=>{const c=((i*pitch+segH/2)/h)*100;const color=c>=red?HOT:c>=amb?WARM:c>=grn?MID:COOL;const on=c<=lv;return{color,op:on?1:(slim?0.2:0.1),glow:on&&!slim?'0 0 6px '+color:'none'};});
+  return vertical?out.reverse():out;
+}
+const W=420,H=132;
+const xFor=f=>Math.log2(f/500)/Math.log2(40)*W;
+const yFor=db=>(Math.max(-24,Math.min(0,db))/-24)*H;
+const FR=Array.from({length:140},(_,i)=>500*Math.pow(40,i/139));
+function shelf(f,fc,g,shape){const a=Math.pow(10,-g/20);const x=shape==='warm'?(f/fc)**2:(f/fc)**8;return 10*Math.log10((1+a*a*x)/(1+x));}
+const path=(fc,g,shape)=>FR.map((f,i)=>(i?'L':'M')+xFor(f).toFixed(1)+','+yFor(shelf(f,fc,g,shape)).toFixed(1)).join(' ');
+const GR_MARKS=[[0,0],[1,7.4],[3,21],[5,33],[10,58],[20,89],[24,100]];
+function grPct(db){for(let i=1;i<GR_MARKS.length;i++){const[a,pa]=GR_MARKS[i-1],[b,pb]=GR_MARKS[i];if(db<=b)return pa+(db-a)/(b-a)*(pb-pa);}return 100;}
+const P={freq:[2000,12000,10,true],threshold:[-30,12,0.5,false],range:[0,24,0.5,false],release:[5,300,1,true],transient:[0,12,0.5,false],output:[-12,12,0.1,false]};
+const DEF={freq:7500,threshold:-8,range:12,release:60,transient:3,output:0};
+const toPos=(k,v)=>{const[mn,mx,,lg]=P[k];return lg?Math.log(v/mn)/Math.log(mx/mn):(v-mn)/(mx-mn);};
+const fromPos=(k,t)=>{const[mn,mx,st,lg]=P[k];t=Math.max(0,Math.min(1,t));const v=lg?mn*Math.pow(mx/mn,t):mn+t*(mx-mn);return +(Math.round(v/st)*st).toFixed(2);};
+const fmtDb=v=>(v>0?'+':'')+v.toFixed(1)+' dB';
+const fmt={freq:v=>v>=10000?(v/1000).toFixed(1)+'k Hz':(v/1000).toFixed(2)+'k Hz',threshold:fmtDb,range:v=>v<=0?'OFF':'−'+v.toFixed(1)+' dB',release:v=>Math.round(v)+' ms',transient:v=>v<=0?'OFF':'−'+v.toFixed(1)+' dB',output:fmtDb};
+const SEG_ON={bg:'linear-gradient(180deg,#3c4149,#2a2e34)',sh:'inset 0 1px 0 rgba(255,255,255,.14),0 6px 12px -6px rgba(0,0,0,.9),0 0 0 1px rgba(0,0,0,.6)',c:'#3fd0de'};
+const SEG_OFF={bg:'transparent',sh:'none',c:'rgba(255,255,255,.5)'};
+const IDLE=ladder(31,4,3,-Infinity,false,true);
+const CUR_FLOOR=path(12000,12,'warm');
+const rot=p=>'rotate('+(-135+270*p).toFixed(1)+'deg)';
+const CUR_KNOBS=[
+  {label:'Freq',val:'12.0k Hz',rot:rot(1)},
+  {label:'Threshold',val:'-8.0 dB',rot:rot(22/42)},
+  {label:'Range',val:'−12.0 dB',rot:rot(.5)},
+  {label:'Release',val:'60 ms',rot:rot(Math.log(12)/Math.log(60))},
+  {label:'Tail',val:'OFF',rot:rot(0),rule:true},
+  {label:'Transient',val:'OFF',rot:rot(0),lamp:true},
+];
+
+class Component extends DCLogic {
+  state={p:{...DEF,shape:'warm'}};
+  set(k,v){this.setState(s=>({p:{...s.p,[k]:v}}));}
+  drag(k){return e=>{e.preventDefault();const y0=e.clientY,t0=toPos(k,this.state.p[k]);
+    const mv=ev=>this.set(k,fromPos(k,t0+(y0-ev.clientY)/150));
+    const up=()=>{window.removeEventListener('pointermove',mv);window.removeEventListener('pointerup',up);};
+    window.addEventListener('pointermove',mv);window.addEventListener('pointerup',up);};}
+  nudge(k,dir){const n=P[k][3]?(1/12)/Math.log2(P[k][1]/P[k][0]):P[k][2]*5/(P[k][1]-P[k][0]);this.set(k,fromPos(k,toPos(k,this.state.p[k])+dir*n));}
+  renderVals(){
+    const p=this.state.p, shape=this.props.shape??p.shape;
+    const red=Math.min(p.range,this.props.liveReduction??4.2);
+    const live=path(p.freq,red,shape);
+    const k={},v={},d={},r={};
+    for(const key of Object.keys(P)){const t=toPos(key,p[key]);k[key]={deg:(-135+270*t).toFixed(1)+'deg',dash:(t*150.09).toFixed(2)+' 200.12',op:t<0.002?0:1};v[key]=fmt[key](p[key]);d[key]=this.drag(key);r[key]=()=>this.set(key,DEF[key]);}
+    const tt=toPos('threshold',p.threshold);
+    const thrTicks=Array.from({length:21},(_,i)=>{const f=i/20,on=f<=tt+0.001;return{rot:'rotate('+(45+270*f)+'deg)',h:(i%5===0?10:6)+'px',bg:on?'#e8a33d':'rgba(255,255,255,.13)',glow:on?'0 0 4px #e8a33d':'none'};});
+    const lampOn=p.transient>0;
+    const outLvl=-14-red*0.4+p.output;
+    return {
+      k,v,d,r,thrTicks,
+      lamp:{op:lampOn?0.85:0.12,glow:lampOn?'0 0 5px #e8a33d':'none'},
+      seg:{tight:shape==='tight'?SEG_ON:SEG_OFF,warm:shape==='warm'?SEG_ON:SEG_OFF},
+      setTight:()=>this.set('shape','tight'),setWarm:()=>this.set('shape','warm'),
+      relDown:()=>this.nudge('release',-1),relUp:()=>this.nudge('release',1),
+      outDown:()=>this.nudge('output',-1),outUp:()=>this.nudge('output',1),
+      grText:red.toFixed(1),grAvg:(red*0.9).toFixed(1),grPct:grPct(red).toFixed(1)+'%',
+      freqX:xFor(p.freq).toFixed(1),floorPath:path(p.freq,p.range,shape),livePath:live,liveFill:live+' L420,0 L0,0 Z',
+      inSlim:ladder(20,3,2,-14,true,false),outSlim:ladder(20,3,2,outLvl,true,false),
+      inV:ladder(31,4,3,-14,false,true),outV:ladder(31,4,3,outLvl,false,true),
+      outReadout:(outLvl+2.8).toFixed(1),
+      nodeLeft:(xFor(p.freq)/W*100).toFixed(2)+'%',nodeTop:(yFor(shelf(p.freq,p.freq,p.range,shape))/H*100).toFixed(2)+'%',
+      gDrag:e=>{e.preventDefault();const rc=e.currentTarget.getBoundingClientRect();
+        const apply=ev=>{const fx=Math.max(0,Math.min(1,(ev.clientX-rc.left)/rc.width)),fy=Math.max(0,Math.min(1,(ev.clientY-rc.top)/rc.height));
+          const f=Math.max(2000,Math.min(12000,Math.round(500*Math.pow(40,fx)/10)*10));
+          this.setState(s=>({p:{...s.p,freq:f,range:Math.min(24,Math.round(fy*24*2*2)/2)}}));};
+        apply(e);const up=()=>{window.removeEventListener('pointermove',apply);window.removeEventListener('pointerup',up);};
+        window.addEventListener('pointermove',apply);window.addEventListener('pointerup',up);},
+      idleV:IDLE,curFloor:CUR_FLOOR,curKnobs:CUR_KNOBS,
+    };
+  }
+}
+</script>
+</body>
+</html>
