@@ -179,14 +179,9 @@ const statusOf = documentStatus
       <div
         v-for="doc in visibleDocs"
         :key="doc.id"
-        class="group relative flex items-center gap-[6px] px-[9px] rounded-t-[8px] cursor-pointer select-none transition-colors shrink-0 overflow-hidden"
-        :style="{
-          width: `${tabWidth}px`,
-          background: doc.id === appState.activeDocumentId ? 'var(--color-workspace)' : 'rgba(255,255,255,.045)',
-          boxShadow: doc.id === appState.activeDocumentId
-            ? 'inset 0 2px 0 0 #35d3e6, inset 1px 0 0 rgba(255,255,255,.07), inset -1px 0 0 rgba(255,255,255,.07)'
-            : 'none',
-        }"
+        class="tab group relative flex items-center gap-[6px] px-[9px] rounded-t-[8px] cursor-pointer select-none transition-colors shrink-0 overflow-hidden"
+        :class="doc.id === appState.activeDocumentId ? 'tab-active' : 'tab-idle'"
+        :style="{ width: `${tabWidth}px` }"
         :title="doc.name"
         @click="setActiveDocument(doc.id)"
         @dblclick.stop="startRename(doc)"
@@ -223,7 +218,7 @@ const statusOf = documentStatus
         <span
           v-else
           class="flex-1 min-w-0 truncate text-[11.5px] font-semibold"
-          :style="{ color: doc.id === appState.activeDocumentId ? '#eaf6f8' : 'rgba(255,255,255,.5)' }"
+          :style="{ color: doc.id === appState.activeDocumentId ? '#eaf6f8' : 'rgba(255,255,255,.48)' }"
         >{{ doc.name }}</span>
 
         <!-- Unsaved marker. Separate from the status dot on the left, which
@@ -271,7 +266,7 @@ const statusOf = documentStatus
            the far right, so it reads as "one more tab" and stays within a
            short mouse trip of the tabs themselves. -->
       <button
-        class="w-[30px] shrink-0 flex items-center justify-center rounded-t-[8px] transition-colors bg-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.15)] cursor-pointer"
+        class="w-[30px] shrink-0 flex items-center justify-center rounded-t-[8px] transition-colors hover:bg-[rgba(255,255,255,.06)] hover:text-[rgba(255,255,255,.8)] cursor-pointer"
         style="color:rgba(255,255,255,.5)"
         title="Add audio files (Ctrl+O)"
         aria-label="Add audio files"
@@ -370,12 +365,22 @@ const statusOf = documentStatus
 /* The last row of the chrome: the one hairline between the chrome and the
    workspace is drawn here, as an inset shadow — the active tab's opaque fill
    paints over it, so that tab opens into the waveform area below the way a
-   browser tab does, while the others sit on the line. The cyan marker moved
-   from the tab's bottom edge to its top for the same reason. */
+   browser tab does, while the others sit on the line. */
 .tab-row {
   background: var(--color-chrome);
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .08);
 }
+/* The active tab is the ONLY filled tab, with the brightest name — no marker
+   line (a cyan underline, then a top edge, were both tried and dropped). The
+   others are unfilled until hovered: a tint at rest would be lighter than the
+   active fill, which sits only a shade above the chrome, and the eye would
+   pick the wrong tab. */
+.tab-active {
+  background: var(--color-workspace);
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, .07), inset -1px 0 0 rgba(255, 255, 255, .07), inset 0 1px 0 rgba(255, 255, 255, .07);
+}
+.tab-idle { background: transparent; }
+.tab-idle:hover { background: rgba(255, 255, 255, .04); }
 .meta {
   font-size: 12px;
   font-weight: 600;
