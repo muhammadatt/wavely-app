@@ -6,12 +6,6 @@ import { usePluginChain } from '../composables/usePluginChain.js'
 import { CATEGORIES } from '../ui/registry.js'
 import Icon from './ui/Icon.vue'
 
-// `inline`: rendered inside the header (wide windows, see useHeaderTools.js)
-// rather than as its own row. Same controls; the row's chrome, the spacers that
-// centred it and the search field's words go, since the header centres it and
-// has no width to spare.
-const props = defineProps({ inline: { type: Boolean, default: false } })
-
 const { state, setActiveTool, hasFile, openCommandPalette, closeRail } = useEditorState()
 const { openWindow, isOpen } = useWindows()
 const { slots, liveSlots, bypassed, suspended } = usePluginChain()
@@ -52,31 +46,34 @@ const tools = CATEGORIES
 </script>
 
 <template>
-  <div
-    :class="props.inline
-      ? 'toolbar-inline flex items-center gap-[10px] min-w-0'
-      : 'h-[65px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] max-sm:gap-1 px-5 compact:px-2 max-sm:px-[6px] shrink-0 toolbar-row'"
-  >
+  <!-- Its own row between the header and the tabs at every width (owner,
+       November 2026: it sat inside the header from 1100 px for a while, and
+       the menu read as cramped there). -->
+  <div class="h-[64px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] max-sm:gap-1 px-5 compact:px-2 max-sm:px-[6px] shrink-0 toolbar-row">
     <!-- Search is the escape hatch from the category hierarchy: as the number
          of operations grows, this is how you reach one without knowing which
          category it lives in. -->
-    <!-- Icon-only in both layouts. As a field with "Search… Ctrl K" it ran
-         under the category group on windows below ~1100 px; the shortcut
-         lives in the tooltip and the palette's own hint. -->
-    <div :class="props.inline ? 'shrink-0 flex items-center' : 'flex-1 compact:flex-none min-w-0 flex items-center'">
+    <!-- A field again, with its words and shortcut (owner, November 2026).
+         Below 1180 px it folds to the icon, so it never runs under the
+         categories (it did at ~1100 px when it was last a field). -->
+    <div class="flex-1 compact:flex-none min-w-0 flex items-center">
       <button
-        class="palette-trigger w-[34px] h-[34px] shrink-0 flex items-center justify-center rounded-[10px] cursor-pointer"
+        class="palette-trigger h-[38px] shrink-0 flex items-center gap-2 px-[12px] rounded-[10px] cursor-pointer"
         :disabled="!hasFile"
         title="Search operations (Ctrl+K)"
         aria-label="Search operations"
         @click="openCommandPalette"
       >
         <Icon name="search" :size="14" />
+        <span class="search-words">
+          <span class="text-[12.5px] font-semibold">Search…</span>
+          <kbd class="font-mono text-[9.5px] font-bold px-[5px] py-[2px] rounded-[5px] tracking-[.04em]">Ctrl K</kbd>
+        </span>
       </button>
     </div>
     <!-- min-w-0 + scroll: the tool group gives up centring before it collides
          with the zoom controls on a narrow window. -->
-    <div class="tool-group flex items-center gap-[4px] p-[3px] rounded-[13px] min-w-0 overflow-x-auto">
+    <div class="tool-group flex items-center gap-[4px] p-[4px] rounded-[14px] min-w-0 overflow-x-auto">
       <button
         v-for="tool in tools"
         :key="tool.id"
@@ -116,7 +113,7 @@ const tools = CATEGORIES
     <!-- Undo/Redo moved to the TopBar, next to Export. This spacer stays: it
          balances the search button on the left so the tool group sits centred
          rather than drifting right. -->
-    <div v-if="!props.inline" class="flex-1 compact:flex-none min-w-0"></div>
+    <div class="flex-1 compact:flex-none min-w-0"></div>
   </div>
 </template>
 
@@ -140,12 +137,12 @@ const tools = CATEGORIES
   gap: 7px;
   flex-shrink: 0;
   white-space: nowrap;
-  /* 34 px: every control in the header (search, Chain, Undo / Redo, Upgrade,
-     the avatar) shares this height, and the tray is these plus its 3 px
-     padding — 40 px, with room above and below in the 56 px header. Its
-     13 px radius is these chips' 10 + that padding, so the corners nest. */
-  height: 34px;
-  padding: 0 16px;
+  /* 38 px in a 46 px tray (4 px padding; its 14 px radius is these chips'
+     10 + that padding, so the corners nest) — taller than the header's 34 px
+     controls since the menu has its own row (owner, November 2026). Search
+     and Chain beside it are 38 too. */
+  height: 38px;
+  padding: 0 17px;
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
@@ -255,8 +252,8 @@ const tools = CATEGORIES
   gap: 7px;
   flex-shrink: 0;
   white-space: nowrap;
-  height: 34px;
-  padding: 0 14px;
+  height: 38px;
+  padding: 0 16px;
   border-radius: 10px;
   /* A solid teal FILL (owner, November 2026: the tint tried before it was
      too easy to miss — the fill is now what makes the chain findable, with
@@ -327,7 +324,7 @@ const tools = CATEGORIES
     font-size: 10px;
     letter-spacing: -0.01em;
   }
-  .chain-btn {
+  .toolbar-row .chain-btn {
     height: auto;
     align-self: stretch;
     padding: 0 6px;
@@ -343,12 +340,15 @@ const tools = CATEGORIES
    categories fit a phone's width, and the Chain button down to its icon and a
    dot — ACTIVE / BYPASSED in words costs more width than the row has. */
 @media (max-height: 520px), (max-width: 640px) {
+  .toolbar-row .palette-trigger { width: 32px; height: 32px; }
   .tool-btn {
+    height: 32px;
     padding: 0 10px;
     gap: 5px;
     font-size: 12px;
   }
   .chain-btn {
+    height: 32px;
     padding: 0 10px;
     gap: 5px;
   }
@@ -371,21 +371,15 @@ const tools = CATEGORIES
 .toolbar-row {
   background: var(--color-chrome);
 }
-/* In the header: a little tighter, so the whole row fits from 1100 px. Between
-   1100 and 1280 the Chain button drops its word first (its badge stays) —
-   the category labels go last, since they are what a new user navigates by. */
-.toolbar-inline .tool-btn {
-  padding: 0 13px;
+/* The search field's words fold to its icon on narrower windows and on
+   compact ones, where the row has no width to spare. */
+.search-words {
+  display: flex;
+  align-items: center;
+  gap: 18px;
 }
-.toolbar-inline .chain-btn {
-  padding: 0 12px;
-}
-@media (max-width: 1279.98px) {
-  .toolbar-inline .tool-btn {
-    padding: 0 10px;
-  }
-  .toolbar-inline .chain-label {
-    display: none;
-  }
+@media (max-width: 1179.98px), (max-height: 520px) {
+  .search-words { display: none; }
+  .palette-trigger { width: 38px; padding: 0; justify-content: center; }
 }
 </style>

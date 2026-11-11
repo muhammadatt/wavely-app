@@ -3,7 +3,6 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
 import { useFileSave } from '../composables/useFileSave.js'
-import { formatDuration } from '../utils/format.js'
 import { splitTabName, sharedTabWidth, TAB_MIN_WIDTH, TAB_FONT } from '../ui/tabName.js'
 import { focusRenameInput } from '../utils/renameInput.js'
 
@@ -54,16 +53,6 @@ onUnmounted(() => window.removeEventListener('click', closeSaveMenu))
 
 // The tab names the active file, so this readout carries the properties a tab
 // has no room for instead of repeating the filename.
-const fileMeta = computed(() => {
-  const f = state.currentFile
-  if (!f) return null
-  return {
-    format: f.name.split('.').pop().toUpperCase(),
-    duration: formatDuration(f.duration),
-    channels: f.channels === 1 ? 'Mono' : f.channels === 2 ? 'Stereo' : `${f.channels} ch`,
-    sampleRate: `${+(f.sampleRate / 1000).toFixed(1)} kHz`,
-  }
-})
 
 const MIN_TAB_WIDTH = TAB_MIN_WIDTH
 const CONTROLS_WIDTH = 40   // the "+" button
@@ -330,26 +319,9 @@ function commitRename() {
       </button>
     </div>
 
-    <!-- Active file properties, at the far end of the row the active tab sits
-         in (moved down from the top bar, where they floated a row away from
-         the file they describe). Outside the measured strip, so the tab
-         capacity maths makes room for them via the ResizeObserver. -->
-    <div
-      v-if="fileMeta"
-      class="w-[260px] flex items-center justify-end gap-[14px] shrink-0 pl-3 max-sm:hidden"
-      :title="activeDoc ? activeDoc.name : ''"
-    >
-      <!-- Label / value pairs: the label names the property, so the format
-           needs no badge and the line reads as words rather than a code. -->
-      <span class="meta"><span class="meta-k">Format</span> {{ fileMeta.format }}</span>
-      <span class="meta tabular-nums"><span class="meta-k">Length</span> {{ fileMeta.duration }}</span>
-      <span class="meta"><span class="meta-k">{{ fileMeta.channels }}</span> {{ fileMeta.sampleRate }}</span>
-    </div>
-    <div v-if="fileMeta" class="w-px h-[18px] self-center bg-[rgba(255,255,255,.12)] mx-3 shrink-0 max-sm:hidden"></div>
-
-    <!-- File actions, beside the files they act on. Save comes FIRST, next
-         to the details of the file it saves; Files (about every open file,
-         not this one) closes the row at the margin (owner, November 2026). -->
+    <!-- File actions, beside the files they act on: Save (the active file)
+         first, Files (every open file) at the margin (owner, November 2026).
+         The active file's details moved up to the header. -->
     <div class="flex items-center gap-[8px] shrink-0">
         <!-- Save is THE way edited audio goes back to the user, so it is the one
              filled, primary-coloured button on screen: a split button, Save on
@@ -494,21 +466,6 @@ function commitRename() {
   .tab-close { opacity: 1; }
   .tab-active .tab-dirty { display: none; }
   .tab-active .tab-close.has-dirty { display: flex; }
-}
-
-/* 11.5 px: reference text, a step under the tab names (12) and the row's
-   buttons (12.5), so the row reads actions → files → details (owner,
-   November 2026). */
-.meta {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--color-text-soft);
-  white-space: nowrap;
-}
-.meta-k {
-  font-weight: 500;
-  color: rgba(255, 255, 255, .42);
-  margin-right: 2px;
 }
 
 /* Quiet: a text button, no fill or outline until hovered — Save beside it is

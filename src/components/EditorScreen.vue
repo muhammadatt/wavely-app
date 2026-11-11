@@ -4,7 +4,6 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
 import { useFileSave } from '../composables/useFileSave.js'
 import { useWindows } from '../composables/useWindows.js'
-import { useHeaderTools } from '../composables/useHeaderTools.js'
 import TopBar from './TopBar.vue'
 import FileTabs from './FileTabs.vue'
 import FloatingToolbar from './FloatingToolbar.vue'
@@ -27,7 +26,6 @@ const {
   documents, cycleDocument, setActiveDocument, closeDocument,
   documentHasUnsavedWork, anyUnsavedWork, activeDoc,
 } = useEditorState()
-const headerTools = useHeaderTools()
 const { importDataTransfer, promptForFiles } = useFileImport()
 const { saveDocument, saveDocumentAs } = useFileSave()
 const { closeTopWindow, anyWindowOpen } = useWindows()
@@ -328,9 +326,8 @@ onUnmounted(() => {
     <div class="relative flex flex-1 overflow-hidden">
       <!-- Workspace -->
       <div class="flex flex-col flex-1 overflow-hidden">
-        <!-- Its own row only where the header has no room for it
-             (useHeaderTools.js); from 1100 px it sits in the header. -->
-        <FloatingToolbar v-if="!headerTools" />
+        <!-- The categories' own row, between the header and the tabs. -->
+        <FloatingToolbar />
 
         <FileTabs />  
         <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px] compact:p-[6px] compact:pl-2 compact:gap-[6px]">
