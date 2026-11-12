@@ -1,9 +1,9 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
-import { formatDuration } from '../utils/format.js'
-import { documentStatus } from '../utils/documentStatus.js'
+import { useFileSave } from '../composables/useFileSave.js'
+import { splitTabName, sharedTabWidth, TAB_MIN_WIDTH, TAB_FONT } from '../ui/tabName.js'
 import { focusRenameInput } from '../utils/renameInput.js'
 
 /**
@@ -21,25 +21,40 @@ import { focusRenameInput } from '../utils/renameInput.js'
 
 const {
   state, appState, documents, activeDoc, setActiveDocument, closeDocument,
-  documentHasUnsavedWork, renameDocument,
+  documentHasUnsavedWork, renameDocument, hasFile,
 } = useEditorState()
 const { promptForFiles } = useFileImport()
+const { saveDocument, saveDocumentAs, isSaving } = useFileSave()
+
+// The dot on the Save button tracks the same predicate the close guard and the
+// beforeunload handler use rather than a second idea of dirtiness.
+const isDirty = computed(() => !!activeDoc.value && documentHasUnsavedWork(activeDoc.value.id))
+
+// Save As lives behind a caret rather than as a second full button: this row
+// gives its width to tabs, and Save As is the rarer of the two by a wide margin
+// once a document has a destination.
+const saveMenuOpen = ref(false)
+
+function toggleSaveMenu() {
+  saveMenuOpen.value = !saveMenuOpen.value
+}
+
+function runSaveAs() {
+  saveMenuOpen.value = false
+  saveDocumentAs()
+}
+
+function closeSaveMenu(e) {
+  if (!e.target.closest?.('[data-save-menu]')) saveMenuOpen.value = false
+}
+
+onMounted(() => window.addEventListener('click', closeSaveMenu))
+onUnmounted(() => window.removeEventListener('click', closeSaveMenu))
 
 // The tab names the active file, so this readout carries the properties a tab
 // has no room for instead of repeating the filename.
-const fileMeta = computed(() => {
-  const f = state.currentFile
-  if (!f) return null
-  return {
-    format: f.name.split('.').pop().toUpperCase(),
-    duration: formatDuration(f.duration),
-    channels: f.channels === 1 ? 'Mono' : f.channels === 2 ? 'Stereo' : `${f.channels} ch`,
-    sampleRate: `${(f.sampleRate / 1000).toFixed(1)} kHz`,
-  }
-})
 
-const MIN_TAB_WIDTH = 110
-const MAX_TAB_WIDTH = 190
+const MIN_TAB_WIDTH = TAB_MIN_WIDTH
 const CONTROLS_WIDTH = 40   // the "+" button
 const OVERFLOW_WIDTH = 62   // the "+N" chip
 
@@ -74,22 +89,101 @@ const visibleDocs = computed(() => {
   return head
 })
 
+// ── Tab width and label ──────────────────────────────────────────────────────
+// Every tab shares ONE width: the widest name's natural width (110–280 px),
+// shrinking evenly when crowded, so switching files never moves a tab. Text
+// is measured on a canvas in the tab's own font; `fontsReady` re-measures
+// once Inter has loaded (the fallback font measures narrower).
+let measureCtx = null
+function textWidth(text) {
+  if (typeof document === 'undefined') return text.length * 7
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d')
+  measureCtx.font = TAB_FONT
+  return measureCtx.measureText(text).width
+}
+const fontsReady = ref(0)
+onMounted(() => { document.fonts?.ready?.then(() => { fontsReady.value++ }) })
+
+const naturalTabWidth = computed(() => {
+  void fontsReady.value
+  return sharedTabWidth(documents.value.map(d => d.name), textWidth)
+})
+
 const tabWidth = computed(() => {
   const n = visibleDocs.value.length
-  if (!n || !stripWidth.value) return MAX_TAB_WIDTH
-  const free = stripWidth.value - CONTROLS_WIDTH - (overflowCount.value ? OVERFLOW_WIDTH : 0)
-  return Math.max(MIN_TAB_WIDTH, Math.min(MAX_TAB_WIDTH, Math.floor(free / n)))
+  if (!n || !stripWidth.value) return naturalTabWidth.value
+  const free = stripWidth.value - CONTROLS_WIDTH - (overflowCount.value ? OVERFLOW_WIDTH : 0) - 3 * n
+  return Math.max(MIN_TAB_WIDTH, Math.min(naturalTabWidth.value, Math.floor(free / n)))
 })
+
+const tabLabel = (doc) => splitTabName(doc.name)
+
+// ── Keyboard (a real tablist) ────────────────────────────────────────────────
+// A press on a tab keeps focus where it is (so a click never leaves a tab
+// focused) — and drops it from a tab focused earlier by keyboard, or its keys
+// would act on the active file the click just picked. The rename input is
+// exempt: it needs the press to place the caret and select text.
+function onTabMouseDown(e) {
+  if (e.target?.tagName === 'INPUT') return
+  e.preventDefault()
+  const el = document.activeElement
+  if (el?.getAttribute?.('role') === 'tab') el.blur()
+}
+
+function focusTab(id) {
+  nextTick(() => stripEl.value?.querySelector(`[data-tab-id="${id}"]`)?.focus())
+}
+
+// ⚠ A CLICK MUST NOT LEAVE FOCUS ON A TAB (`onTabMouseDown`).
+// The waveform canvas cannot take focus, so a focused tab kept it while the
+// user went on to select audio — and their Delete closed the FILE instead of
+// deleting the selection (caught by the screenshot run, which lost a tab that
+// way). These keys therefore act only on a tab reached with the keyboard.
+function onTabKey(e) {
+  if (renamingId.value || e.target?.getAttribute?.('role') !== 'tab') return
+  // Unmodified keys only: Ctrl / Cmd + Alt + ← → is the editor's own "next
+  // file" shortcut (EditorScreen), which also reaches files in the overflow.
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  const docs = visibleDocs.value
+  const i = docs.findIndex(d => d.id === appState.activeDocumentId)
+  if (i < 0) return
+  let j = null
+  if (e.key === 'ArrowRight') j = (i + 1) % docs.length
+  else if (e.key === 'ArrowLeft') j = (i - 1 + docs.length) % docs.length
+  else if (e.key === 'Home') j = 0
+  else if (e.key === 'End') j = docs.length - 1
+  else if (e.key === 'Delete') {
+    e.preventDefault(); e.stopPropagation()
+    handleClose(docs[i])
+    if (appState.activeDocumentId) focusTab(appState.activeDocumentId)
+    return
+  } else if (e.key === 'Enter' || e.key === 'F2') {
+    e.preventDefault(); e.stopPropagation()
+    startRename(docs[i])
+    return
+  }
+  if (j === null) return
+  e.preventDefault(); e.stopPropagation()
+  setActiveDocument(docs[j].id)
+  focusTab(docs[j].id)
+}
 
 function measure() {
   if (stripEl.value) stripWidth.value = stripEl.value.clientWidth
 }
 
+// ⚠ OBSERVE THE STRIP WHENEVER IT MOUNTS, not once in onMounted: the row is
+// `v-if`'d on there being documents, so on a fresh page the strip does not
+// exist at mount, nothing was ever observed, and stripWidth stayed 0 — which
+// reads as "unmeasured, show every tab at full width". Two files on a 390 px
+// phone ran their tabs under the Files and Save buttons.
 onMounted(() => {
-  measure()
   resizeObserver = new ResizeObserver(measure)
-  if (stripEl.value) resizeObserver.observe(stripEl.value)
 })
+watch(stripEl, (el, prev) => {
+  if (prev) resizeObserver?.unobserve(prev)
+  if (el) { resizeObserver?.observe(el); measure() }
+}, { flush: 'post' })
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
@@ -128,90 +222,81 @@ function commitRename() {
   renamingId.value = null
 }
 
-// ── Per-tab status ───────────────────────────────────────────────────────────
-// The dot is the whole point of a tab over a plain label: mastered/compliant
-// state is visible without opening each file. Definition is shared with the
-// files panel, which renders the same state as a text label.
-const statusOf = documentStatus
+// The mastered / ACX status dot is gone from the tab (design 1a): the amber
+// unsaved dot is a tab's one marker. Status still shows in the Files panel.
 </script>
 
 <template>
   <div
     v-if="documents.length > 0"
-    class="h-[36px] compact:h-[30px] flex items-stretch shrink-0 px-2 gap-[3px]"
-    style="background:linear-gradient(180deg,#12161b,#0f1318)"
+    class="tab-row h-[40px] compact:h-[34px] flex items-stretch shrink-0 px-5 compact:px-2 gap-[3px]"
   >
 
-    <div ref="stripEl" class="flex-1 min-w-0 flex items-stretch gap-[3px]">
+    <!-- Real tabs (design 1a, owner, November 2026): a tablist with a roving
+         tabindex — Tab reaches the active tab, ← → Home End move, Delete
+         closes. Keys are stopped here: the editor's own window handler reads
+         the arrows as the playhead and Delete as "delete the selection". -->
+    <div
+      ref="stripEl"
+      role="tablist"
+      aria-label="Open files"
+      class="flex-1 min-w-0 flex items-stretch gap-[3px]"
+      @keydown="onTabKey"
+    >
       <div
         v-for="doc in visibleDocs"
         :key="doc.id"
-        class="group relative flex items-center gap-[6px] px-[9px] rounded-t-[8px] cursor-pointer select-none transition-colors shrink-0 overflow-hidden"
-        :style="{
-          width: `${tabWidth}px`,
-          background: doc.id === appState.activeDocumentId ? 'rgba(53,211,230,.10)' : 'rgba(255,255,255,.06)',
-          boxShadow: doc.id === appState.activeDocumentId
-            ? 'inset 0 -2px 0 0 #35d3e6'
-            : 'inset 0 0 0 1px rgba(255,255,255,.05)',
-        }"
+        role="tab"
+        :data-tab-id="doc.id"
+        :tabindex="doc.id === appState.activeDocumentId ? 0 : -1"
+        :aria-selected="doc.id === appState.activeDocumentId ? 'true' : 'false'"
+        class="tab group relative flex items-center gap-[6px] pl-[11px] pr-[4px] rounded-t-[8px] cursor-pointer select-none transition-colors shrink-0 overflow-hidden outline-none"
+        :class="doc.id === appState.activeDocumentId ? 'tab-active' : 'tab-idle'"
+        :style="{ width: `${tabWidth}px` }"
         :title="doc.name"
+        @mousedown="onTabMouseDown"
         @click="setActiveDocument(doc.id)"
         @dblclick.stop="startRename(doc)"
         @auxclick="handleAuxClick($event, doc)"
       >
-        <!-- Status dot. The 'edited' state is deliberately excluded: the
-             unsaved marker to the right of the name already says it, and two
-             dots on one tab for one fact reads as two facts. -->
-        <template v-if="statusOf(doc) && statusOf(doc).kind !== 'edited'">
-          <div
-            v-if="statusOf(doc).kind === 'processing'"
-            class="w-[9px] h-[9px] rounded-full shrink-0"
-            style="border:1.5px solid rgba(255,255,255,.15);border-top-color:#35d3e6;animation:spin .7s linear infinite"
-            title="Processing"
-          ></div>
-          <div
-            v-else
-            class="w-[6px] h-[6px] rounded-full shrink-0"
-            :style="{ background: statusOf(doc).color }"
-            :title="statusOf(doc).title"
-          ></div>
-        </template>
-
         <input
           v-if="renamingId === doc.id"
           :ref="focusRenameInput"
           v-model="renameDraft"
-          class="flex-1 min-w-0 bg-transparent outline-none text-[11.5px] font-semibold text-[#eaf6f8] border-b border-[#35d3e6]"
+          class="flex-1 min-w-0 bg-transparent outline-none text-[12px] font-semibold text-[#eaf6f8] border-b border-[#35d3e6]"
           @click.stop
+          @keydown.stop
           @keydown.enter.prevent.stop="commitRename"
           @keydown.esc.prevent.stop="renamingId = null"
           @blur="commitRename"
         />
-        <span
-          v-else
-          class="flex-1 min-w-0 truncate text-[11.5px] font-semibold"
-          :style="{ color: doc.id === appState.activeDocumentId ? '#eaf6f8' : 'rgba(255,255,255,.5)' }"
-        >{{ doc.name }}</span>
+        <!-- No extension (Format says it) and a middle cut that keeps the
+             last six characters, so takes that differ only at the end stay
+             tellable apart. The full name is the tab's tooltip. -->
+        <span v-else class="tab-name flex-1 min-w-0 flex whitespace-nowrap text-[12px] font-semibold">
+          <span class="min-w-0 overflow-hidden text-ellipsis">{{ tabLabel(doc).head }}</span><span class="shrink-0">{{ tabLabel(doc).tail }}</span>
+        </span>
 
-        <!-- Unsaved marker. Separate from the status dot on the left, which
-             answers a different question (has this been mastered, did it
-             certify) and would otherwise have to mean two things at once. -->
-        <span
-          v-if="documentHasUnsavedWork(doc.id)"
-          class="w-[6px] h-[6px] rounded-full shrink-0 group-hover:hidden"
-          style="background:#e0b84a"
-          title="Unsaved edits"
-        ></span>
-
-        <!-- Close — revealed on hover or when active, so idle tabs stay quiet -->
-        <button
-          class="w-[15px] h-[15px] pointer-coarse:w-[26px] pointer-coarse:h-[26px] rounded-[4px] shrink-0 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100 hover:bg-[rgba(255,255,255,.12)]"
-          :class="{ 'opacity-60': doc.id === appState.activeDocumentId }"
-          :aria-label="`Close ${doc.name}`"
-          @click.stop="handleClose(doc)"
-        >
-          <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" style="color:rgba(255,255,255,.75)" stroke-width="3.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-        </button>
+        <!-- One 24 px slot at the end: the amber unsaved dot is the tab's only
+             marker and sits here, active or not, swapping to the close button
+             on hover. A tab with nothing unsaved shows the close button (faint
+             on the active tab, hidden on the others until hovered). -->
+        <span class="w-[24px] h-[24px] shrink-0 flex items-center justify-center">
+          <span
+            v-if="documentHasUnsavedWork(doc.id)"
+            class="tab-dirty"
+            title="Unsaved edits"
+          ></span>
+          <button
+            class="tab-close"
+            :class="{ 'has-dirty': documentHasUnsavedWork(doc.id) }"
+            tabindex="-1"
+            :aria-label="`Close ${doc.name}`"
+            @click.stop="handleClose(doc)"
+          >
+            <svg viewBox="0 0 24 24" class="w-[12px] h-[12px] fill-none stroke-current" stroke-width="3.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </span>
 
         <!-- Processing progress hairline along the tab's bottom edge -->
         <div
@@ -225,8 +310,8 @@ const statusOf = documentStatus
       <!-- Overflow chip -->
       <button
         v-if="overflowCount > 0"
-        class="shrink-0 flex items-center gap-[3px] px-[9px] rounded-t-[8px] text-[11px] font-bold transition-colors hover:bg-[rgba(255,255,255,.06)]"
-        style="color:rgba(255,255,255,.55);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)"
+        class="tab-idle shrink-0 flex items-center gap-[3px] px-[9px] rounded-t-[8px] text-[11px] font-bold transition-colors cursor-pointer"
+        style="color:rgba(255,255,255,.55)"
         :title="`${overflowCount} more file${overflowCount === 1 ? '' : 's'} — open the files panel`"
         @click="appState.filesPanelOpen = true"
       >
@@ -238,7 +323,7 @@ const statusOf = documentStatus
            the far right, so it reads as "one more tab" and stays within a
            short mouse trip of the tabs themselves. -->
       <button
-        class="w-[30px] shrink-0 flex items-center justify-center rounded-t-[8px] transition-colors bg-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.15)] cursor-pointer"
+        class="w-[30px] shrink-0 flex items-center justify-center rounded-t-[8px] tab-plus transition-colors cursor-pointer"
         style="color:rgba(255,255,255,.5)"
         title="Add audio files (Ctrl+O)"
         aria-label="Add audio files"
@@ -248,26 +333,255 @@ const statusOf = documentStatus
       </button>
     </div>
 
-        <!-- Files entry point + active file properties, packed left so the tabs
-         start immediately after them. This region sits outside the measured
-         strip, so the tab capacity maths accounts for it for free via the
-         ResizeObserver.
+    <!-- File actions, beside the files they act on: Save (the active file)
+         first, Files (every open file) at the margin (owner, November 2026).
+         The active file's details moved up to the header. -->
+    <div class="flex items-center gap-[8px] shrink-0">
+        <!-- Save is THE way edited audio goes back to the user, so it is the one
+             filled, primary-coloured button on screen: a split button, Save on
+             the left and Save As behind the caret. It sits beside the active
+             file's details because it saves the active tab — and the tab's own amber
+             dot is the unsaved state it clears. -->
+        <!-- Quiet until there is something to save (design 1a): a neutral
+             outline when the file is on disk, the cyan tint and the amber dot
+             once it has unsaved edits. The dot's slot is always reserved, so
+             the button never changes width and nothing on the row moves. -->
+        <div
+          class="tb-save-group relative flex items-stretch"
+          :class="{ 'is-dirty': isDirty }"
+          data-save-menu
+          @keydown.esc="saveMenuOpen = false"
+        >
+          <button
+            class="tb-save tb-save-main"
+            :disabled="!hasFile || isSaving"
+            :title="isDirty ? 'Save — unsaved edits (Ctrl+S)' : 'Saved — nothing new to write (Ctrl+S)'"
+            @click="saveDocument()"
+          >
+            <svg viewBox="0 0 24 24" class="w-[14px] h-[14px] fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+            <span>{{ isSaving ? 'Saving…' : 'Save' }}</span>
+            <span
+              class="tb-dirty"
+              :class="{ 'is-on': isDirty && !isSaving }"
+              :aria-label="isDirty ? 'Unsaved changes' : undefined"
+            ></span>
+          </button>
+          <span class="tb-save-seam" aria-hidden="true"></span>
+          <button
+            class="tb-save tb-save-caret"
+            :disabled="!hasFile || isSaving"
+            title="Save As… (Ctrl+Shift+S)"
+            aria-label="More save options"
+            aria-haspopup="menu"
+            :aria-expanded="saveMenuOpen"
+            @click.stop="toggleSaveMenu"
+          >
+            <svg viewBox="0 0 24 24" class="w-[11px] h-[11px] fill-none stroke-current" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
 
-         Search, rename, bulk close and bulk export used to be reachable only
-         via the overflow chip — which does not exist below the overflow
-         threshold — or an unadvertised Ctrl+P. -->
-    <div class="flex items-center gap-[8px] shrink-0 pr-3">
-      <button
-        class="flex items-center gap-[5px] px-[9px] py-4 h-[25px] rounded-[7px] text-[12px] font-bold transition-colors hover:bg-[rgba(255,255,255,.09)]"
-        style="color:rgba(255,255,255,.55);box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)"
-        title="All files — search, rename, bulk export (Ctrl+P)"
-        @click="appState.filesPanelOpen = true"
-      >
-        <svg viewBox="0 0 24 24" class="w-[11px] h-[11px] fill-none stroke-current" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-        Files
-        <span class="font-['JetBrains_Mono'] text-[10px] font-semibold text-[rgba(255,255,255,.35)]">{{ documents.length }}</span>
-      </button>
+          <div
+            v-if="saveMenuOpen"
+            class="absolute right-0 top-[36px] z-[400] w-[268px] rounded-[10px] overflow-hidden py-1 menu-surface"
+            role="menu"
+          >
+            <button class="tb-menu-item" role="menuitem" @click="runSaveAs">
+              <span class="flex-1 min-w-0">
+                <span class="tb-menu-title">Save As…</span>
+                <span class="tb-menu-sub">New name, format or location</span>
+              </span>
+              <kbd class="tb-kbd">Ctrl+Shift+S</kbd>
+            </button>
+          </div>
+        </div>
 
+        <!-- Files: every open document — switch, rename, save, close, and
+             EXPORT. Export used to be its own filled button (and its own dialog,
+             a second list of the same files with the same checkboxes). Since
+             Save writes a file back in its own format, Export's one remaining
+             job is several files at once, and that is a files-panel job: tick,
+             then Export. Ctrl+E opens the panel with the active file ticked. -->
+        <button
+          class="tb-files"
+          :disabled="documents.length === 0"
+          title="Files — switch, rename, export several (Ctrl+P)"
+          aria-label="Files"
+          @click="appState.filesPanelOpen = true"
+        >
+          <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+          <span><span class="compact:hidden">Files </span>({{ documents.length }})</span>
+        </button>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* The last row of the chrome: the one hairline between the chrome and the
+   workspace is drawn here, as an inset shadow — the active tab's opaque fill
+   paints over it, so that tab opens into the waveform area below the way a
+   browser tab does, while the others sit on the line. */
+.tab-row {
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .08);
+}
+/* Tab styling restored from the main branch: the active tab is a cyan wash
+   with a cyan underline and the brightest name; the others are a faint white
+   wash with a hairline ring. */
+.tab-active {
+  /* The main branch's tab styling: a cyan wash with a cyan underline. */
+  background: rgba(53, 211, 230, .12);
+  box-shadow: rgb(53, 211, 230) 0px -2px 0px 0px inset;
+
+}
+.tab-idle {
+  background: rgba(255, 255, 255, .06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05);
+}
+.tab:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.tab-name { color: rgba(255, 255, 255, .5); }
+.tab-active .tab-name { color: #eaf6f8; }
+.tab-plus {
+  background: rgba(255, 255, 255, .06);
+}
+.tab-plus:hover { background: rgba(255, 255, 255, .15); }
+
+/* The end slot: the unsaved dot, or the close button (24 px target; it was
+   15). The dot gives way to the close button on hover. */
+.tab-dirty {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: #e0b84a;
+}
+.tab:hover .tab-dirty { display: none; }
+.tab-close {
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, .75);
+  opacity: 0;
+  transition: opacity .12s, background-color .12s;
+}
+.tab-active .tab-close { opacity: .6; }
+.tab:hover .tab-close { opacity: 1; }
+.tab-close:hover { background: rgba(255, 255, 255, .12); }
+.tab-close.has-dirty { display: none; }
+.tab:hover .tab-close.has-dirty { display: flex; }
+/* Touch has no hover: the active tab always offers its close button (a tab
+   with unsaved edits still marks them on Save and in the Files panel). */
+@media (pointer: coarse) {
+  .tab-close { opacity: 1; }
+  .tab-active .tab-dirty { display: none; }
+  .tab-active .tab-close.has-dirty { display: flex; }
+}
+
+/* Quiet: a text button, no fill or outline until hovered — Save beside it is
+   the one thing on the row that asks to be pressed. */
+.tb-files {
+  cursor: pointer;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-radius: var(--chrome-btn-radius);
+  background: var(--chrome-btn-bg);
+  box-shadow: var(--chrome-btn-ring);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--chrome-btn-text);
+  transition: background-color .12s, color .12s;
+}
+.tb-files:hover:not(:disabled) { background: var(--chrome-btn-hover); color: var(--color-text); }
+.tb-files:disabled { opacity: .4; cursor: default; }
+@media (max-width: 639px) { .tb-files { padding: 0 7px; } }
+.tb-files:focus-visible,
+.tb-save:focus-visible,
+.tb-menu-item:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+/* A split button in the shared chrome style (main.css): ONE outline on the
+   group (the halves carry none) and a short seam inset between them. Neutral
+   while the file is saved; filled once it has unsaved edits (design 1a,
+   owner, November 2026: Save lights up when there is something to save). */
+.tb-save-group {
+  border-radius: var(--chrome-btn-radius);
+  background: var(--chrome-btn-bg);
+  box-shadow: var(--chrome-btn-ring);
+  color: var(--chrome-btn-text);
+  transition: background-color .15s, color .15s, box-shadow .15s;
+}
+/* Unsaved: a soft teal FILL with no outline (owner, November 2026: the cyan
+   outline read as neon against the rest of the palette). */
+.tb-save-group.is-dirty {
+  background: #1e2939;
+  box-shadow: none;
+  color: #d6f6fd;
+}
+.tb-save {
+  cursor: pointer;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  color: inherit;
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: .01em;
+  transition: background-color .12s, opacity .12s;
+}
+.tb-save:hover:not(:disabled) { background: var(--chrome-btn-hover); color: var(--color-text); }
+.tb-save:disabled { opacity: .4; cursor: default; }
+.tb-save-main {
+  gap: 7px;
+  padding: 0 12px 0 13px;
+  border-radius: var(--chrome-btn-radius) 0 0 var(--chrome-btn-radius);
+}
+.tb-save-caret {
+  width: 28px;
+  justify-content: center;
+  border-radius: 0 var(--chrome-btn-radius) var(--chrome-btn-radius) 0;
+}
+.tb-save-seam {
+  width: 1px;
+  margin: 8px 0;
+  background: var(--chrome-btn-seam);
+}
+.tb-save-group.is-dirty .tb-save-seam { background: rgba(214, 246, 253, .18); }
+@media (max-width: 639px) {
+  .tb-save-main { padding: 0 10px 0 13px; }
+  .tb-save-caret { width: 26px; }
+}
+/* Amber, as on the tab — the app's one colour for "not on disk yet". Its slot
+   is kept while hidden so the button never changes width. */
+.tb-dirty {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  background: #e0b84a;
+  opacity: 0;
+}
+.tb-dirty.is-on { opacity: 1; }
+
+.tb-menu-item {
+  cursor: pointer;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  text-align: left;
+  transition: background-color .12s;
+}
+.tb-menu-item:hover { background: rgba(255, 255, 255, .08); }
+.tb-menu-title { display: block; font-size: 12px; font-weight: 600; color: var(--color-text); }
+.tb-menu-sub { display: block; margin-top: 1px; font-size: 10.5px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-kbd {
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+</style>

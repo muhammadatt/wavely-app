@@ -38,7 +38,7 @@ const URL_ = `http://localhost:${PORT}/`
 /** Command-palette search terms. These are the REGISTRY labels, not our names. */
 const PANELS = [
   'LA Vintage 2A', 'LA Classic 76', 'Soft Clipper', 'Scheps Parallel',
-  'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'HF Limiter', 'PHAT*SS', 'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
+  'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'Hi-Freq Limiter', 'PHAT*SS', 'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
   'Loudness Normalize', 'Auto Leveler', 'Plosive Tamer', 'Noise Reduction', 'VoxPressor',
 ]
 
@@ -423,7 +423,7 @@ try {
       const row = panelRow()
       await row.locator('canvas').first().click(); await page.waitForTimeout(250)
       const download = page.waitForEvent('download', { timeout: 15000 }).catch(() => null)
-      // Scoped to the panel: the top bar has an Export button too, and an
+      // Scoped to the panel: other surfaces may carry an Export label, and an
       // unscoped locator is a strict-mode violation rather than a miss.
       await page.getByRole('dialog', { name: 'Files' })
         .getByRole('button', { name: 'Export' }).click()

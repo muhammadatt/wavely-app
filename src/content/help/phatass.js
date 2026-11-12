@@ -22,7 +22,7 @@ export default {
     'Warmth never raises the selection’s peak: a guard turns down only the added warmth, only for the few milliseconds where it would push past the selection’s own peak, and the voice itself is never touched',
     'Some added density and loudness is expected; the peak is what stays put',
     'The top-end stage is not a limiter: it reacts to how much bright energy there is, with no lookahead, so a single click or S gets through and only sustained brightness is softened',
-    'For a full set of top-end controls, or a hard ceiling, use HF Limiter',
+    'For a full set of top-end controls, or a hard ceiling, use Hi-Freq Limiter',
     'With Warmth and Tape at 0 the audio is untouched except for the Speed dial’s top-end sag, which at 30 IPS only reaches the brightest passages',
     'Soften, the onset softener that used to be here, is now in De-Esser',
   ],

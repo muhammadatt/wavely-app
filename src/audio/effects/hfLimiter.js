@@ -51,7 +51,7 @@ export function createHFLimiter(audioContext) {
       worklet.connect(preOutput)
     })
     .catch((err) => {
-      console.error('HF Limiter worklet failed to load, running bypassed:', err)
+      console.error('Hi-Freq Limiter worklet failed to load, running bypassed:', err)
     })
 
   const inputMonitor = audioContext.createGain()
@@ -115,7 +115,7 @@ export function createHFLimiter(audioContext) {
 
 export const hfLimiterEffect = {
   id: 'hf-limiter',
-  name: 'HF Limiter',
+  name: 'Hi-Freq Limiter',
   createNodes(audioContext) {
     return createHFLimiter(audioContext)
   },

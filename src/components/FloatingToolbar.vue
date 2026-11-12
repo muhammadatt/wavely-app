@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useWindows } from '../composables/useWindows.js'
 import { usePluginChain } from '../composables/usePluginChain.js'
@@ -25,23 +25,12 @@ const chainTitle = computed(() => {
   return 'Effect chain — bypassed: every plugin in it is switched off'
 })
 
-// Until the chain has been opened once, an empty chain says NEW: it is the
-// feature most worth finding and the one a new user is least likely to look
-// for. Kept per browser; storage can be missing or throw, and then the badge
-// simply shows for the session.
-const SEEN_KEY = 'wavely:plugin-chain-seen'
-function readSeen() {
-  try { return localStorage.getItem(SEEN_KEY) === '1' } catch { return false }
-}
-const chainSeen = ref(readSeen())
-watch(() => isOpen('plugin-chain'), (open) => {
-  if (!open || chainSeen.value) return
-  chainSeen.value = true
-  try { localStorage.setItem(SEEN_KEY, '1') } catch { /* session only */ }
-})
+// Only a chain with plugins in it has a badge: ACTIVE or BYPASSED. An empty
+// chain has none — a NEW badge for first-time visitors was dropped (owner,
+// November 2026); the button's solid fill is what makes it findable.
 const chainBadge = computed(() => {
-  if (slots.value.length) return chainActive.value ? 'ACTIVE' : 'BYPASSED'
-  return chainSeen.value ? '' : 'NEW'
+  if (!slots.value.length) return ''
+  return chainActive.value ? 'ACTIVE' : 'BYPASSED'
 })
 
 // The rail closes as the chain comes up (usePluginChain.js); closed here too,
@@ -57,25 +46,34 @@ const tools = CATEGORIES
 </script>
 
 <template>
-  <div class="h-[65px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] max-sm:gap-1 px-5 compact:px-2 max-sm:px-[6px] shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
+  <!-- Its own row between the header and the tabs at every width (owner,
+       November 2026: it sat inside the header from 1100 px for a while, and
+       the menu read as cramped there). -->
+  <div class="h-[64px] compact:h-[46px] flex items-center gap-3 compact:gap-[6px] max-sm:gap-1 px-5 compact:px-2 max-sm:px-[6px] shrink-0 toolbar-row">
     <!-- Search is the escape hatch from the category hierarchy: as the number
          of operations grows, this is how you reach one without knowing which
          category it lives in. -->
-    <div class="flex-1 compact:flex-none min-w-0 flex items-center">
+    <!-- A field again, with its words and shortcut (owner, November 2026).
+         Below 1180 px it folds to the icon, so it never runs under the
+         categories (it did at ~1100 px when it was last a field). -->
+    <div class="flex-1 compact:flex-none min-w-0 flex items-center self-center">
       <button
-        class="palette-trigger flex items-center gap-2 pl-[10px] pr-2 max-sm:px-[8px] py-[7px] rounded-[10px] cursor-pointer max-w-[210px]"
+        class="palette-trigger shrink-0 flex items-center gap-2 pl-[10px] pr-2 py-[7px] rounded-[10px] cursor-pointer"
         :disabled="!hasFile"
         title="Search operations (Ctrl+K)"
+        aria-label="Search operations"
         @click="openCommandPalette"
       >
         <Icon name="search" :size="13" />
-        <span class="text-[11.5px] font-semibold truncate compact:hidden">Search…</span>
-        <kbd class="compact:hidden ml-auto shrink-0 font-mono text-[9.5px] font-bold px-[5px] py-[2px] rounded-[5px] tracking-[.04em]">Ctrl K</kbd>
+        <span class="search-words">
+          <span class="text-[11.5px] font-semibold">Search…</span>
+          <kbd class="font-mono text-[9.5px] font-bold px-[5px] py-[2px] rounded-[5px] tracking-[.04em]">Ctrl K</kbd>
+        </span>
       </button>
     </div>
     <!-- min-w-0 + scroll: the tool group gives up centring before it collides
          with the zoom controls on a narrow window. -->
-    <div class="tool-group flex items-center gap-[4px] p-[5px] rounded-[13px] min-w-0 overflow-x-auto" style="background:linear-gradient(180deg, #1a2029, #12161d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+    <div class="tool-group self-start mt-[4px] flex items-center gap-[4px] p-[4px] rounded-[14px] min-w-0 overflow-x-auto">
       <button
         v-for="tool in tools"
         :key="tool.id"
@@ -98,7 +96,7 @@ const tools = CATEGORIES
          always on screen anyway — the chain plays with every window closed. -->
     <button
       type="button"
-      class="chain-btn"
+      class="chain-btn self-start mt-[8px]"
       :class="{ 'is-active': isOpen('plugin-chain') }"
       :disabled="!hasFile"
       :title="chainTitle"
@@ -109,7 +107,7 @@ const tools = CATEGORIES
       <span
         v-if="chainBadge"
         class="chain-count"
-        :class="{ 'is-live': chainActive, 'is-new': chainBadge === 'NEW' }"
+        :class="{ 'is-live': chainActive }"
       >{{ chainBadge }}</span>
     </button>
     <!-- Undo/Redo moved to the TopBar, next to Export. This spacer stays: it
@@ -139,11 +137,16 @@ const tools = CATEGORIES
   gap: 7px;
   flex-shrink: 0;
   white-space: nowrap;
-  padding: 10px 16px;
+  /* 38 px in a 46 px tray (4 px padding; its 14 px radius is these chips'
+     10 + that padding, so the corners nest) — taller than the header's 34 px
+     controls since the menu has its own row (owner, November 2026). Search
+     and Chain beside it are 38 too. */
+  height: 42px;
+  padding: 0 17px;
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--color-text-softer);
+  color: rgb(207 200 200);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
   font-weight: 600;
@@ -154,7 +157,7 @@ const tools = CATEGORIES
 }
 
 .tool-btn__icon {
-  opacity: 0.8;
+  opacity: 1;
   transition: opacity 0.15s ease;
 }
 
@@ -181,11 +184,11 @@ const tools = CATEGORIES
 .tool-btn.is-active {
   background: linear-gradient(180deg, #7ef0ff, #5ce3f8);
   border-color: transparent;
-  color: #08161a;
-  /*
+  color: #1e2939;
+  
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4),
               0 2px 12px rgba(53, 211, 230, 0.35);
-  */
+  
 }
 .tool-btn.is-active .tool-btn__icon {
   opacity: 1;
@@ -205,23 +208,25 @@ const tools = CATEGORIES
   cursor: default;
 }
 
+/* The shared chrome-button shape and hover, but MUTED at rest (owner,
+   November 2026): Search is the quietest control on the row, its old 4 %
+   fill, 7 % hairline and 45 % text. */
 .palette-trigger {
   background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
   color: rgba(255, 255, 255, 0.45);
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 .palette-trigger:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(53, 211, 230, 0.4);
-  color: #7fe9f6;
+  background: var(--chrome-btn-hover);
+  color: var(--color-text);
 }
 .palette-trigger:disabled {
   opacity: 0.4;
   cursor: default;
 }
 .palette-trigger:focus-visible {
-  outline: 2px solid #7fe9f6;
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 .palette-trigger kbd {
@@ -229,8 +234,18 @@ const tools = CATEGORIES
   color: rgba(255, 255, 255, 0.4);
 }
 
+/* The tray. On the one chrome surface its old fill (fading to the chrome's
+   own colour) and 5 % outline all but vanished and the categories looked
+   lost (owner), so it is lifted: a fill a step above the chrome, a firmer
+   outline, a top highlight and a soft shadow underneath. */
 .tool-group {
   scrollbar-width: none;
+  background: linear-gradient(rgb(26, 32, 41), rgb(18, 22, 29));
+  /* The 1 px ring, plus a slightly brighter bottom edge: the gradient fill is
+     lighter at the top, so the ring alone read as a top-only highlight. */
+  box-shadow: rgba(255, 255, 255, 0.05) 0px 0px 0px 1px inset,
+              inset 0 -1px 0 rgba(255, 255, 255, 0.10);
+
 }
 .tool-group::-webkit-scrollbar {
   display: none;
@@ -242,10 +257,13 @@ const tools = CATEGORIES
   gap: 7px;
   flex-shrink: 0;
   white-space: nowrap;
-  padding: 9px 14px;
-  border-radius: 12px;
-  /* The Export button's fill (BaseButton's primary), open or closed: the chain
-     is a place to go, not a mode, so its state lives in the badge. */
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 10px;
+  /* A solid teal FILL (owner, November 2026: the tint tried before it was
+     too easy to miss — the fill is now what makes the chain findable, with
+     the NEW badge gone). Open or closed it looks the same: the chain is a
+     place to go, not a mode, so its state lives in the badge. */
   border: 1px solid transparent;
   background: #86e8ff;
   color: #08161a;
@@ -274,13 +292,12 @@ const tools = CATEGORIES
   font-weight: 700;
   padding: 2px 5px;
   border-radius: 5px;
-  /* Dark tints of the button's own ink: they sit on #86e8ff and stay visible
-     there. Bypassed is the quiet one; live and NEW are solid. */
+  /* Dark tints of the button's own ink, so they read on the teal fill.
+     Bypassed is the quiet one; live is solid. */
   background: rgba(8, 22, 26, .14);
   color: rgba(8, 22, 26, .7);
 }
-.chain-count.is-live,
-.chain-count.is-new {
+.chain-count.is-live {
   background: #08161a;
   color: #86e8ff;
 }
@@ -306,13 +323,16 @@ const tools = CATEGORIES
     flex-direction: column;
     justify-content: center;
     gap: 2px;
+    height: auto;
     padding: 5px 2px 4px;
     border-radius: 8px;
     font-size: 10px;
     letter-spacing: -0.01em;
   }
-  .chain-btn {
-    padding: 7px 6px;
+  .toolbar-row .chain-btn {
+    height: auto;
+    align-self: stretch;
+    padding: 0 6px;
   }
   .tool-group .tool-btn__label {
     max-width: 100%;
@@ -325,13 +345,16 @@ const tools = CATEGORIES
    categories fit a phone's width, and the Chain button down to its icon and a
    dot — ACTIVE / BYPASSED in words costs more width than the row has. */
 @media (max-height: 520px), (max-width: 640px) {
+  .toolbar-row .palette-trigger { width: 32px; height: 32px; }
   .tool-btn {
-    padding: 7px 10px;
+    height: 32px;
+    padding: 0 10px;
     gap: 5px;
     font-size: 12px;
   }
   .chain-btn {
-    padding: 7px 10px;
+    height: 32px;
+    padding: 0 10px;
     gap: 5px;
   }
   .chain-btn .chain-label {
@@ -348,5 +371,20 @@ const tools = CATEGORIES
   .chain-count.is-live {
     background: #08161a;
   }
+}
+/* Part of the one chrome surface (see --color-chrome): no line of its own. */
+.toolbar-row {
+  
+}
+/* The search field's words fold to its icon on narrower windows and on
+   compact ones, where the row has no width to spare. */
+.search-words {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+@media (max-width: 1179.98px), (max-height: 520px) {
+  .search-words { display: none; }
+  .palette-trigger { width: 32px; padding: 0; justify-content: center; }
 }
 </style>

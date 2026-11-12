@@ -21,6 +21,17 @@
 @theme {
   /* Accent — the single interactive colour. `accent` fills, `accent-bright`
      is the text/stroke tint that sits on top of a translucent accent wash. */
+  /* The chrome above the waveform — header, the category row when it has one,
+     and the tab row — is ONE surface: one solid colour, no lines between its
+     rows, a single hairline where it meets the workspace. The active tab is
+     filled with the workspace's own colour so it opens into it. */
+  --color-chrome: #0e1216;   /* "Darker" in design 1a (was #12161d) */
+  --color-wk-top: rgba(53, 211, 230, .12); 
+  --color-wk-bottom: #151d25;
+  --color-workspace: linear-gradient(var(--color-wk-top), var(--color-wk-bottom)); 
+
+  /* solid, a step above the chrome so the active tab (same fill) reads against it */
+
   --color-accent: #35d3e6;
   --color-accent-bright: #7fe9f6;
   --color-accent-solid: #86e8ff;
@@ -144,6 +155,22 @@ body {
 @keyframes fadeStage {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Chrome buttons ──────────────────────────────────────────────────────────
+   Search, Undo / Redo, Save and Files share ONE quiet style (owner, November
+   2026: they had four shapes and four hovers): a 10 px rounded rectangle —
+   the category chips' and Chain's shape — with a faint fill and a hairline,
+   brightening on hover with no coloured edge. Only the height follows the
+   row (header 34, category row 38, tab row 30). Upgrade and the avatar stay
+   pills: they are the account, not tools. */
+:root {
+  --chrome-btn-radius: 10px;
+  --chrome-btn-bg: rgba(255, 255, 255, 0.03);
+  --chrome-btn-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --chrome-btn-hover: rgba(255, 255, 255, 0.07);
+  --chrome-btn-seam: rgba(255, 255, 255, 0.1);
+  --chrome-btn-text: rgba(255, 255, 255, 0.7);
 }
 
 /* ── Dialogs and menus ────────────────────────────────────────────────────────
