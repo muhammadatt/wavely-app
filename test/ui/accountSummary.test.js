@@ -51,3 +51,24 @@ test('the menu line matches the old wording', () => {
   assert.equal(subscriptionLine(sub({ status: 'past_due' })), 'Payment failed — update your card')
   assert.equal(subscriptionLine(sub({ currentPeriodEnd: null })), '')
 })
+
+import { signInMethods, providerLabel } from '../../src/auth/accountSummary.js'
+
+test('signInMethods lists identities, email first', () => {
+  const user = {
+    identities: [
+      { provider: 'google', identity_data: { email: 'a@gmail.com' }, created_at: END },
+      { provider: 'email', identity_data: { email: 'a@example.com' }, created_at: END },
+    ],
+  }
+  const list = signInMethods(user, 'en-GB')
+  assert.deepEqual(list.map(m => m.label), ['Email', 'Google'])
+  assert.equal(list[1].email, 'a@gmail.com')
+  assert.equal(list[1].since, date)
+})
+
+test('signInMethods falls back to app_metadata.providers', () => {
+  assert.deepEqual(signInMethods({ app_metadata: { providers: ['github'] } }).map(m => m.label), ['GitHub'])
+  assert.deepEqual(signInMethods(null), [])
+  assert.equal(providerLabel('discord'), 'Discord')
+})

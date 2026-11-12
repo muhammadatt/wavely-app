@@ -398,20 +398,13 @@ test('changePassword with no current password sets one outright (provider-only a
   assert.deepEqual(client.calls, [[{ password: 'new-secret-123' }]])
 })
 
-test('the account dialog opens only signed in and closes with the session', () => {
+test('sign out everywhere asks Supabase for the global scope', async () => {
   const client = fakeClient()
   const store = makeStore(client)
   store.start()
-  client.emit('INITIAL_SESSION', null)
-  store.openAccount()
-  assert.equal(store.state.accountOpen, false)
   client.emit('SIGNED_IN', session('u1'))
-  store.openAccount()
-  assert.equal(store.state.accountOpen, true)
-  client.emit('TOKEN_REFRESHED', session('u1', 'tok-2'))
-  assert.equal(store.state.accountOpen, true, 'a token refresh keeps it')
-  client.emit('SIGNED_OUT', null)
-  assert.equal(store.state.accountOpen, false)
+  assert.equal((await store.signOutEverywhere()).error, null)
+  assert.deepEqual(client.calls, [[{ scope: 'global' }]])
 })
 
 test('hasEmailIdentity reads the providers Supabase lists', () => {

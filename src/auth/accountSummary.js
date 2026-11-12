@@ -68,7 +68,7 @@ export function planSummary(plan, sub, locale) {
     return {
       label, paid, state: 'ending', canManage: true,
       status: date ? `Cancelled — ${label} stays on until ${date}.` : `Cancelled — ${label} stays on until the end of the period.`,
-      detail: `Changed your mind? Resume it in Manage subscription before then. After that you move to the free plan, and your files and presets stay.`,
+      detail: `Changed your mind? Resume it in Manage subscription before then. After that you move to the free plan; your saved presets stay.`,
     }
   }
   return {
@@ -78,4 +78,30 @@ export function planSummary(plan, sub, locale) {
       : (date ? `Renews ${date}.` : 'Active.'),
     detail: `${manage} If you cancel, ${label} stays on until the end of the period you’ve paid for.`,
   }
+}
+
+const PROVIDER_LABELS = { email: 'Email', google: 'Google', github: 'GitHub', apple: 'Apple', azure: 'Microsoft', facebook: 'Facebook', twitter: 'X' }
+
+/** "Google" for 'google'; an unknown provider id is capitalised. */
+export function providerLabel(id) {
+  const key = String(id ?? '')
+  return PROVIDER_LABELS[key] ?? (key ? key[0].toUpperCase() + key.slice(1) : '')
+}
+
+/**
+ * The ways a Supabase user can log in, for the Security section: one entry
+ * per identity ({ provider, label, email, since }), email first. Falls back
+ * to `app_metadata.providers` when the session carries no identities.
+ */
+export function signInMethods(user, locale) {
+  const identities = Array.isArray(user?.identities) ? user.identities : []
+  const list = identities.length
+    ? identities.map(i => ({
+        provider: i.provider,
+        label: providerLabel(i.provider),
+        email: i.identity_data?.email ?? i.email ?? '',
+        since: formatPeriodDate(i.created_at, locale),
+      }))
+    : (user?.app_metadata?.providers ?? []).map(p => ({ provider: p, label: providerLabel(p), email: '', since: '' }))
+  return list.sort((a, b) => (a.provider === 'email' ? -1 : b.provider === 'email' ? 1 : 0))
 }

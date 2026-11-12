@@ -3,6 +3,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useAuth } from '../composables/useAuth.js'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useBilling } from '../composables/useBilling.js'
+import { useAccountScreen } from '../composables/useAccountScreen.js'
 import BaseButton from './ui/BaseButton.vue'
 import Icon from './ui/Icon.vue'
 import { subscriptionLine as subscriptionLineFor } from '../auth/accountSummary.js'
@@ -32,6 +33,8 @@ onUnmounted(() => window.removeEventListener('click', onWindowClick))
 
 const { showToast } = useEditorState()
 const billing = useBilling()
+const accountScreen = useAccountScreen()
+const pastDue = computed(() => state.account?.subscription?.status === 'past_due')
 
 /** "Renews 21 Nov 2026" / "Ends 21 Nov 2026" / "Payment failed — update your card". */
 const subscriptionLine = computed(() => subscriptionLineFor(state.account?.subscription))
@@ -41,9 +44,9 @@ function upgrade() {
   auth.openUpgrade()
 }
 
-function openAccount() {
+function openAccount(section = 'overview') {
   open.value = false
-  auth.openAccount()
+  accountScreen.open(section)
 }
 
 async function manageBilling() {
@@ -102,6 +105,17 @@ async function signOut() {
         <svg viewBox="0 0 24 24" class="w-[12px] h-[12px]" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 20.9l1.6-7L2 9.2l7.1-.6z"/></svg>
         Upgrade
       </button>
+      <!-- A failed payment is shown where it can't be missed, not only in
+           the menu: Pro lapses if the card isn't fixed. -->
+      <button
+        v-if="pastDue"
+        class="acct-pastdue inline-flex items-center"
+        title="Your last payment failed — update your card to keep Pro"
+        @click.stop="openAccount('billing')"
+      >
+        <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17.5v.01"/></svg>
+        <span class="max-sm:hidden">Payment failed</span>
+      </button>
       <!-- Just the avatar: the plan badge beside it repeated what the Upgrade
            pill (free) or the menu (any plan) already says. Pro shows as a gold
            ring instead. -->
@@ -145,8 +159,8 @@ async function signOut() {
           <button
             class="w-full text-left cursor-pointer px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
             style="color:#eaf6f8"
-            @click="openAccount"
-          >Account &amp; billing</button>
+            @click="openAccount()"
+          >Account</button>
           <button
             v-if="state.account?.subscription"
             class="w-full text-left cursor-pointer px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
@@ -165,6 +179,21 @@ async function signOut() {
 </template>
 
 <style scoped>
+.acct-pastdue {
+  cursor: pointer;
+  height: 34px;
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-warn);
+  background: color-mix(in srgb, var(--color-warn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warn) 45%, transparent);
+}
+.acct-pastdue:hover {
+  background: color-mix(in srgb, var(--color-warn) 18%, transparent);
+}
 .acct-upgrade {
   cursor: pointer;
   height: 34px;

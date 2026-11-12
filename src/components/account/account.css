@@ -1,0 +1,262 @@
+/*
+ * The account dashboard's styles, shared by its sections. Global but
+ * `acc-` prefixed, and imported once by AccountScreen.vue. Built on the
+ * account dialog's tokens (AuthDialog.vue) and the upgrade dialog's Pro gold.
+ */
+
+.acc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.acc-card--pro {
+  background: rgba(224, 184, 74, 0.06);
+  border-color: rgba(224, 184, 74, 0.24);
+}
+.acc-card--warn {
+  border-color: color-mix(in srgb, var(--color-warn) 45%, transparent);
+}
+.acc-card-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #eaf6f8;
+}
+.acc-h1 {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #eaf6f8;
+}
+.acc-lead {
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.55);
+}
+.acc-body {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.6);
+}
+.acc-fine {
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.4);
+}
+.acc-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.42);
+}
+.acc-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.5);
+}
+.acc-warn-text {
+  color: var(--color-warn);
+  font-weight: 600;
+}
+.acc-avatar {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 800;
+  color: #eaf6f8;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.acc-avatar--pro {
+  box-shadow: 0 0 0 2px #e0b84a;
+}
+.acc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 3px 7px;
+  border-radius: 6px;
+  color: #1a1408;
+  background: linear-gradient(180deg, #f1d27a, #e0b84a);
+}
+.acc-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.acc-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.acc-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.acc-row:last-child {
+  padding-bottom: 0;
+}
+.acc-input {
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--color-text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.acc-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+.acc-input:focus {
+  border-color: rgba(53, 211, 230, 0.6);
+  box-shadow: 0 0 0 3px rgba(53, 211, 230, 0.15);
+}
+.acc-reveal {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.5);
+}
+.acc-reveal:hover {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.08);
+}
+.acc-meter {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-top: 2px;
+}
+.acc-meter > span {
+  height: 4px;
+  border-radius: 2px;
+  transition: background 0.2s;
+}
+.acc-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 28%, transparent);
+}
+.acc-ok {
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(53, 211, 230, 0.09);
+  border: 1px solid rgba(53, 211, 230, 0.25);
+}
+.acc-btn {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  white-space: nowrap;
+  transition: background 0.15s, opacity 0.15s, transform 0.1s, filter 0.15s;
+}
+.acc-btn:not(:disabled):active {
+  transform: translateY(1px);
+}
+.acc-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.acc-btn--primary {
+  color: #08161a;
+  background: var(--color-accent);
+}
+.acc-btn--primary:not(:disabled):hover {
+  background: var(--color-accent-bright);
+}
+.acc-btn--gold {
+  color: #1a1408;
+  background: linear-gradient(180deg, #f1d27a, #e0b84a);
+}
+.acc-btn--gold:not(:disabled):hover {
+  filter: brightness(1.06);
+}
+.acc-btn--ghost {
+  color: #eaf6f8;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.acc-btn--ghost:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.acc-btn--danger {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
+}
+.acc-btn--danger:not(:disabled):hover {
+  background: color-mix(in srgb, var(--color-danger) 16%, transparent);
+}
+.acc-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(8, 22, 26, 0.25);
+  border-top-color: #08161a;
+  animation: acc-spin 0.7s linear infinite;
+}
+@keyframes acc-spin {
+  to { transform: rotate(360deg); }
+}
+.acc-link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-accent-bright);
+}
+.acc-link--dim {
+  color: rgba(255, 255, 255, 0.5);
+}
+.acc-link:disabled {
+  color: rgba(255, 255, 255, 0.35);
+  cursor: default;
+}
+.acc-link:not(:disabled):hover {
+  text-decoration: underline;
+}

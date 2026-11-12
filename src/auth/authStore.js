@@ -80,8 +80,6 @@ export function createAuthStore({
     upgradeInterval: null,
     // The feature id an upgrade prompt is open for ('plan' from the account menu), or null.
     upgradeFor: null,
-    // The account dialog (profile, plan, password) is open.
-    accountOpen: false,
   })
 
   const user = computed(() => state.session?.user ?? null)
@@ -117,9 +115,6 @@ export function createAuthStore({
     const previousUserId = state.session?.user?.id ?? null
     state.session = session ?? null
     state.status = session ? 'signedIn' : 'signedOut'
-
-    // The account dialog is about a signed-in user; a sign-out takes it with it.
-    if (!session) state.accountOpen = false
 
     if (event === 'PASSWORD_RECOVERY') state.dialog = 'recovery'
     else if (session && (state.dialog === 'signIn' || state.dialog === 'signUp')) {
@@ -285,6 +280,16 @@ export function createAuthStore({
     return run(() => client.auth.signOut())
   }
 
+  /**
+   * Sign out on every device: revokes all of the user's refresh tokens, so
+   * other browsers drop off when their access token next expires (up to an
+   * hour — Supabase's access tokens are self-contained). Same failure rule
+   * as signOut: nothing is cleared here.
+   */
+  function signOutEverywhere() {
+    return run(() => client.auth.signOut({ scope: 'global' }))
+  }
+
   /** Current access token, for calls to our API. null when signed out. */
   async function getAccessToken() {
     if (!client) return null
@@ -338,14 +343,6 @@ export function createAuthStore({
     state.upgradeInterval = null
   }
 
-  /** The account dialog: signed in only. */
-  function openAccount() {
-    if (client && state.status === 'signedIn') state.accountOpen = true
-  }
-
-  function closeAccount() {
-    state.accountOpen = false
-  }
 
   return {
     state, user, isSignedIn, plan,
@@ -353,7 +350,7 @@ export function createAuthStore({
     signInWithPassword, signUp, sendMagicLink, signInWithProvider,
     sendPasswordReset, updatePassword, changePassword, signOut, resendConfirmation,
     openDialog, closeDialog, openUpgrade, closeUpgrade, signUpThenUpgrade, needsUpgrade,
-    openAccount, closeAccount,
+    signOutEverywhere,
   }
 }
 
