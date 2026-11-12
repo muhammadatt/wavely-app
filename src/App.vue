@@ -10,9 +10,11 @@ import WaveformContextMenu from './components/WaveformContextMenu.vue'
 import WindowLayer from './components/WindowLayer.vue'
 import AuthDialog from './components/AuthDialog.vue'
 import UpgradeDialog from './components/UpgradeDialog.vue'
+import AccountScreen from './components/account/AccountScreen.vue'
 import { onPresetError } from './audio/pluginPresets/store.js'
 import { useAuth } from './composables/useAuth.js'
 import { useBilling } from './composables/useBilling.js'
+import { useAccountScreen } from './composables/useAccountScreen.js'
 import { checkoutReturnMessage } from './auth/billing.js'
 
 // ProcessingOverlay is no longer mounted here — it now renders inside the
@@ -45,14 +47,24 @@ onPresetError(({ message }) => showToast(message, 5000))
 // Finish a return from Stripe Checkout or the billing portal (when it landed in
 // this tab rather than the one we opened), and follow plan changes made in
 // other tabs. A no-op with accounts off.
+// The account dashboard follows the address bar's `#/account/…`; a deep link
+// opens it on load (after a log-in if needed).
+const accountScreen = useAccountScreen()
+accountScreen.start()
+
 useBilling().start().then(result => {
+  // Back from the billing portal in THIS tab (the one we opened closes itself):
+  // land where it was opened from.
+  if (result?.kind === 'portal') accountScreen.open('billing')
   const message = checkoutReturnMessage(result)
   if (message) showToast(message.text, message.ms)
 })
 </script>
 
 <template>
-  <EditorScreen />
+  <!-- Kept mounted under the account dashboard (documents live in memory),
+       but inert: nothing behind it takes focus or clicks. -->
+  <EditorScreen :inert="accountScreen.state.open || undefined" />
   <FilesPanel v-if="appState.filesPanelOpen" />
   <SaveDialog v-if="appState.saveDialog" :key="appState.saveDialog.docId" />
   <WindowLayer />
@@ -64,6 +76,7 @@ useBilling().start().then(result => {
     v-if="appState.contextMenu"
     :key="`${appState.contextMenu.x},${appState.contextMenu.y}`"
   />
+  <AccountScreen v-if="accountScreen.state.open" />
   <UpgradeDialog v-if="authState.upgradeFor" />
   <AuthDialog v-if="authState.dialog" />
   <ToastNotification />

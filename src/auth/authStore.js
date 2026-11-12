@@ -239,6 +239,33 @@ export function createAuthStore({
     run(() => client.auth.updateUser({ password }))
 
   /**
+   * Change the password from the account dialog.
+   *
+   * With `currentPassword` the current one is CHECKED FIRST, by signing in
+   * with it: Supabase's updateUser takes a new password from any live
+   * session, so without the check anyone at an unlocked, signed-in browser
+   * could take the account. Signing in as the same user only refreshes the
+   * session (applySession skips the account reload for an unchanged id).
+   *
+   * Without it (`null`) the password is SET outright — for an account that
+   * only ever signed in through a provider and so has none to check.
+   */
+  async function changePassword(currentPassword, newPassword) {
+    if (!client) return { error: 'Accounts are not available', errorKind: null }
+    if (currentPassword != null) {
+      const email = user.value?.email
+      if (!email) return { error: 'Your account has no email address to check the password against.', errorKind: null }
+      const check = await run(() => client.auth.signInWithPassword({ email, password: currentPassword }))
+      if (check.error) {
+        return check.errorKind === 'credentials'
+          ? { error: 'Your current password is incorrect.', errorKind: 'currentPassword' }
+          : check
+      }
+    }
+    return run(() => client.auth.updateUser({ password: newPassword }))
+  }
+
+  /**
    * Sign out. On success supabase-js drops its session and emits SIGNED_OUT,
    * and `applySession` clears everything from there — one path for every way
    * a session ends.
@@ -250,7 +277,19 @@ export function createAuthStore({
    * The error is returned for the caller to show; state stays consistent.
    */
   function signOut() {
-    return run(() => client.auth.signOut())
+    // 'local' explicitly: supabase-js defaults to 'global', which would make
+    // every "Sign out" a sign-out of every device (signOutEverywhere's job).
+    return run(() => client.auth.signOut({ scope: 'local' }))
+  }
+
+  /**
+   * Sign out on every device: revokes all of the user's refresh tokens, so
+   * other browsers drop off when their access token next expires (up to an
+   * hour — Supabase's access tokens are self-contained). Same failure rule
+   * as signOut: nothing is cleared here.
+   */
+  function signOutEverywhere() {
+    return run(() => client.auth.signOut({ scope: 'global' }))
   }
 
   /** Current access token, for calls to our API. null when signed out. */
@@ -306,12 +345,14 @@ export function createAuthStore({
     state.upgradeInterval = null
   }
 
+
   return {
     state, user, isSignedIn, plan,
     start, loadAccount, getAccessToken,
     signInWithPassword, signUp, sendMagicLink, signInWithProvider,
-    sendPasswordReset, updatePassword, signOut, resendConfirmation,
+    sendPasswordReset, updatePassword, changePassword, signOut, resendConfirmation,
     openDialog, closeDialog, openUpgrade, closeUpgrade, signUpThenUpgrade, needsUpgrade,
+    signOutEverywhere,
   }
 }
 
@@ -340,6 +381,21 @@ export function errorKind(err) {
   if (code === 'email_not_confirmed' || /email not confirmed/i.test(message)) return 'unconfirmed'
   if (code === 'invalid_credentials' || /invalid login credentials/i.test(message)) return 'credentials'
   return null
+}
+
+/**
+ * Can this user prove their current password? Supabase lists the ways an
+ * account has signed in under `app_metadata.providers`; 'email' means an
+ * email identity, which is the only kind that can hold a password. An
+ * account with only provider identities (Google, say) has nothing to check,
+ * so the dialog SETS a password for it instead. An email account that only
+ * ever used magic links has no password either — it gets the reset-link way
+ * out instead, since nothing in the session says which kind it is.
+ */
+export function hasEmailIdentity(user) {
+  const providers = user?.app_metadata?.providers
+  if (Array.isArray(providers)) return providers.includes('email')
+  return user?.app_metadata?.provider ? user.app_metadata.provider === 'email' : true
 }
 
 export const AUTH_POPUP_NAME = 'wavely-auth'

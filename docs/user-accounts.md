@@ -336,7 +336,29 @@ Stripe ──webhook──▶ POST /api/billing/webhook ──▶ same sync (ren
   the server doesn't know is stored as `unknown` and grants nothing.
 - **No double billing.** Checkout is refused (409) while the user has an active
   subscription. Switching monthly ↔ yearly and cancelling happen in Stripe's
-  customer portal ("Manage billing" in the account menu).
+  customer portal ("Manage subscription" in the account menu and in the
+  account dialog).
+- **Account dashboard** (`src/components/account/`, account menu →
+  "Account"): a FULL-SCREEN LAYER over the editor, never a page instead of it
+  — documents live only in the tab's memory, so EditorScreen stays mounted
+  underneath (`inert`) and closing returns to exactly what was there. Its
+  address is a hash, `#/account`, `#/account/billing`, `#/account/security`
+  (`src/auth/accountRoute.js`, `accountScreen.js`): Back closes it, section
+  switches replace the entry rather than stacking, and a deep link opens it on
+  load (asking for a log-in first when signed out; a dismissed log-in drops
+  the link). Sections: **Overview** (profile, plan at a glance), **Plan &
+  billing** (plan state, Manage subscription → portal or Upgrade, what Pro
+  includes), **Security** (change / set password, ways to log in from the
+  session's identities, sign out here or everywhere — `signOut({ scope:
+  'global' })`, other devices drop off when their access token expires).
+  A password change checks the current one first by signing in with it
+  (`changePassword` in `src/auth/authStore.js`), since Supabase's
+  `updateUser` accepts a new password from any live session; provider-only
+  accounts SET one instead, and a reset link covers a forgotten or never-set
+  password. A `past_due` subscription shows a "Payment failed" pill in the
+  header that opens Plan & billing, and a portal return that lands in the
+  editor's own tab opens it too. Plan wording lives in
+  `src/auth/accountSummary.js`.
 - **Return URLs** are checked against the CORS allowlist, so Checkout can't be
   used as an open redirect.
 - **Plan changes apply immediately.** A sync clears the server's cached plan
