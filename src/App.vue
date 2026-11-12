@@ -10,6 +10,7 @@ import WaveformContextMenu from './components/WaveformContextMenu.vue'
 import WindowLayer from './components/WindowLayer.vue'
 import AuthDialog from './components/AuthDialog.vue'
 import UpgradeDialog from './components/UpgradeDialog.vue'
+import AccountDialog from './components/AccountDialog.vue'
 import { onPresetError } from './audio/pluginPresets/store.js'
 import { useAuth } from './composables/useAuth.js'
 import { useBilling } from './composables/useBilling.js'
@@ -64,6 +65,7 @@ useBilling().start().then(result => {
     v-if="appState.contextMenu"
     :key="`${appState.contextMenu.x},${appState.contextMenu.y}`"
   />
+  <AccountDialog v-if="authState.accountOpen" />
   <UpgradeDialog v-if="authState.upgradeFor" />
   <AuthDialog v-if="authState.dialog" />
   <ToastNotification />

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createAuthStore, createAccountFetcher, friendlyError, errorKind } from '../../src/auth/authStore.js'
+import { createAuthStore, createAccountFetcher, friendlyError, errorKind, hasEmailIdentity } from '../../src/auth/authStore.js'
 import { parseProviders, AUTH_ENABLED } from '../../src/auth/config.js'
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 5))
@@ -359,4 +359,65 @@ test('the billing period picked before the account dialog survives to the resume
   store.signUpThenUpgrade('signUp', { interval: 'monthly' })
   store.closeDialog()
   assert.equal(store.state.upgradeInterval, null)
+})
+
+test('changePassword checks the current password by signing in with it, then updates', async () => {
+  const client = fakeClient()
+  const store = makeStore(client)
+  store.start()
+  client.emit('SIGNED_IN', session('u1'))
+  const r = await store.changePassword('old-secret', 'new-secret-123')
+  assert.equal(r.error, null)
+  assert.deepEqual(client.calls, [
+    [{ email: 'u1@example.com', password: 'old-secret' }],
+    [{ password: 'new-secret-123' }],
+  ])
+})
+
+test('a wrong current password never reaches updateUser', async () => {
+  let updated = false
+  const client = fakeClient({
+    signInWithPassword: async () => ({ data: {}, error: { code: 'invalid_credentials', message: 'Invalid login credentials' } }),
+    updateUser: async () => { updated = true; return { data: {}, error: null } },
+  })
+  const store = makeStore(client)
+  store.start()
+  client.emit('SIGNED_IN', session('u1'))
+  const r = await store.changePassword('wrong', 'new-secret-123')
+  assert.equal(r.errorKind, 'currentPassword')
+  assert.match(r.error, /current password is incorrect/)
+  assert.equal(updated, false)
+})
+
+test('changePassword with no current password sets one outright (provider-only accounts)', async () => {
+  const client = fakeClient()
+  const store = makeStore(client)
+  store.start()
+  client.emit('SIGNED_IN', session('u1'))
+  assert.equal((await store.changePassword(null, 'new-secret-123')).error, null)
+  assert.deepEqual(client.calls, [[{ password: 'new-secret-123' }]])
+})
+
+test('the account dialog opens only signed in and closes with the session', () => {
+  const client = fakeClient()
+  const store = makeStore(client)
+  store.start()
+  client.emit('INITIAL_SESSION', null)
+  store.openAccount()
+  assert.equal(store.state.accountOpen, false)
+  client.emit('SIGNED_IN', session('u1'))
+  store.openAccount()
+  assert.equal(store.state.accountOpen, true)
+  client.emit('TOKEN_REFRESHED', session('u1', 'tok-2'))
+  assert.equal(store.state.accountOpen, true, 'a token refresh keeps it')
+  client.emit('SIGNED_OUT', null)
+  assert.equal(store.state.accountOpen, false)
+})
+
+test('hasEmailIdentity reads the providers Supabase lists', () => {
+  assert.equal(hasEmailIdentity({ app_metadata: { providers: ['email'] } }), true)
+  assert.equal(hasEmailIdentity({ app_metadata: { providers: ['google', 'email'] } }), true)
+  assert.equal(hasEmailIdentity({ app_metadata: { providers: ['google'] } }), false)
+  assert.equal(hasEmailIdentity({ app_metadata: { provider: 'github' } }), false)
+  assert.equal(hasEmailIdentity({}), true, 'unknown: ask for the current password')
 })

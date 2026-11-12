@@ -80,6 +80,8 @@ export function createAuthStore({
     upgradeInterval: null,
     // The feature id an upgrade prompt is open for ('plan' from the account menu), or null.
     upgradeFor: null,
+    // The account dialog (profile, plan, password) is open.
+    accountOpen: false,
   })
 
   const user = computed(() => state.session?.user ?? null)
@@ -115,6 +117,9 @@ export function createAuthStore({
     const previousUserId = state.session?.user?.id ?? null
     state.session = session ?? null
     state.status = session ? 'signedIn' : 'signedOut'
+
+    // The account dialog is about a signed-in user; a sign-out takes it with it.
+    if (!session) state.accountOpen = false
 
     if (event === 'PASSWORD_RECOVERY') state.dialog = 'recovery'
     else if (session && (state.dialog === 'signIn' || state.dialog === 'signUp')) {
@@ -239,6 +244,33 @@ export function createAuthStore({
     run(() => client.auth.updateUser({ password }))
 
   /**
+   * Change the password from the account dialog.
+   *
+   * With `currentPassword` the current one is CHECKED FIRST, by signing in
+   * with it: Supabase's updateUser takes a new password from any live
+   * session, so without the check anyone at an unlocked, signed-in browser
+   * could take the account. Signing in as the same user only refreshes the
+   * session (applySession skips the account reload for an unchanged id).
+   *
+   * Without it (`null`) the password is SET outright — for an account that
+   * only ever signed in through a provider and so has none to check.
+   */
+  async function changePassword(currentPassword, newPassword) {
+    if (!client) return { error: 'Accounts are not available', errorKind: null }
+    if (currentPassword != null) {
+      const email = user.value?.email
+      if (!email) return { error: 'Your account has no email address to check the password against.', errorKind: null }
+      const check = await run(() => client.auth.signInWithPassword({ email, password: currentPassword }))
+      if (check.error) {
+        return check.errorKind === 'credentials'
+          ? { error: 'Your current password is incorrect.', errorKind: 'currentPassword' }
+          : check
+      }
+    }
+    return run(() => client.auth.updateUser({ password: newPassword }))
+  }
+
+  /**
    * Sign out. On success supabase-js drops its session and emits SIGNED_OUT,
    * and `applySession` clears everything from there — one path for every way
    * a session ends.
@@ -306,12 +338,22 @@ export function createAuthStore({
     state.upgradeInterval = null
   }
 
+  /** The account dialog: signed in only. */
+  function openAccount() {
+    if (client && state.status === 'signedIn') state.accountOpen = true
+  }
+
+  function closeAccount() {
+    state.accountOpen = false
+  }
+
   return {
     state, user, isSignedIn, plan,
     start, loadAccount, getAccessToken,
     signInWithPassword, signUp, sendMagicLink, signInWithProvider,
-    sendPasswordReset, updatePassword, signOut, resendConfirmation,
+    sendPasswordReset, updatePassword, changePassword, signOut, resendConfirmation,
     openDialog, closeDialog, openUpgrade, closeUpgrade, signUpThenUpgrade, needsUpgrade,
+    openAccount, closeAccount,
   }
 }
 
@@ -340,6 +382,21 @@ export function errorKind(err) {
   if (code === 'email_not_confirmed' || /email not confirmed/i.test(message)) return 'unconfirmed'
   if (code === 'invalid_credentials' || /invalid login credentials/i.test(message)) return 'credentials'
   return null
+}
+
+/**
+ * Can this user prove their current password? Supabase lists the ways an
+ * account has signed in under `app_metadata.providers`; 'email' means an
+ * email identity, which is the only kind that can hold a password. An
+ * account with only provider identities (Google, say) has nothing to check,
+ * so the dialog SETS a password for it instead. An email account that only
+ * ever used magic links has no password either — it gets the reset-link way
+ * out instead, since nothing in the session says which kind it is.
+ */
+export function hasEmailIdentity(user) {
+  const providers = user?.app_metadata?.providers
+  if (Array.isArray(providers)) return providers.includes('email')
+  return user?.app_metadata?.provider ? user.app_metadata.provider === 'email' : true
 }
 
 export const AUTH_POPUP_NAME = 'wavely-auth'

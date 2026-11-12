@@ -5,6 +5,7 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { useBilling } from '../composables/useBilling.js'
 import BaseButton from './ui/BaseButton.vue'
 import Icon from './ui/Icon.vue'
+import { subscriptionLine as subscriptionLineFor } from '../auth/accountSummary.js'
 
 /**
  * Top-bar account control. Renders nothing at all when accounts are off, so a
@@ -33,18 +34,16 @@ const { showToast } = useEditorState()
 const billing = useBilling()
 
 /** "Renews 21 Nov 2026" / "Ends 21 Nov 2026" / "Payment failed — update your card". */
-const subscriptionLine = computed(() => {
-  const sub = state.account?.subscription
-  if (!sub) return ''
-  if (sub.status === 'past_due') return 'Payment failed — update your card'
-  if (!sub.currentPeriodEnd) return ''
-  const date = new Date(sub.currentPeriodEnd).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-  return `${sub.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${date}`
-})
+const subscriptionLine = computed(() => subscriptionLineFor(state.account?.subscription))
 
 function upgrade() {
   open.value = false
   auth.openUpgrade()
+}
+
+function openAccount() {
+  open.value = false
+  auth.openAccount()
 }
 
 async function manageBilling() {
@@ -144,11 +143,16 @@ async function signOut() {
             <span class="block text-[11px] text-[rgba(255,255,255,.45)]">Every tool, applied to your whole file</span>
           </button>
           <button
+            class="w-full text-left cursor-pointer px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
+            style="color:#eaf6f8"
+            @click="openAccount"
+          >Account &amp; billing</button>
+          <button
             v-if="state.account?.subscription"
             class="w-full text-left cursor-pointer px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
             style="color:#eaf6f8"
             @click="manageBilling"
-          >Manage billing</button>
+          >Manage subscription</button>
           <button
             class="w-full text-left cursor-pointer px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
             style="color:#eaf6f8"

@@ -336,7 +336,16 @@ Stripe ──webhook──▶ POST /api/billing/webhook ──▶ same sync (ren
   the server doesn't know is stored as `unknown` and grants nothing.
 - **No double billing.** Checkout is refused (409) while the user has an active
   subscription. Switching monthly ↔ yearly and cancelling happen in Stripe's
-  customer portal ("Manage billing" in the account menu).
+  customer portal ("Manage subscription" in the account menu and in the
+  account dialog).
+- **Account dialog** (`src/components/AccountDialog.vue`, account menu →
+  "Account & billing"): the user's email and join date, the plan with its
+  renewal / cancellation state and a Manage subscription (portal) or Upgrade
+  button, and Change password. A password change checks the current one
+  first by signing in with it (`changePassword` in `src/auth/authStore.js`),
+  since Supabase's `updateUser` accepts a new password from any live session;
+  provider-only accounts SET one instead, and a reset link covers a forgotten
+  or never-set password. Plan wording lives in `src/auth/accountSummary.js`.
 - **Return URLs** are checked against the CORS allowlist, so Checkout can't be
   used as an open redirect.
 - **Plan changes apply immediately.** A sync clears the server's cached plan
