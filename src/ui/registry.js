@@ -3,6 +3,7 @@ import SilencePanel from '../components/panels/SilencePanel.vue'
 import FadePanel from '../components/panels/FadePanel.vue'
 import VolumePanel from '../components/panels/VolumePanel.vue'
 import SplitPanel from '../components/panels/SplitPanel.vue'
+import MarkersPanel from '../components/panels/MarkersPanel.vue'
 import PresetsPanel from '../components/panels/PresetsPanel.vue'
 
 import LA2AModal from '../components/panels/LA2AModal.vue'
@@ -238,6 +239,18 @@ const ALL_OPERATIONS = [
     requires: 'file',
     surface: 'rail',
     component: SplitPanel,
+  },
+  {
+    id: 'markers',
+    label: 'Markers',
+    desc: 'Mark the boundaries in a file, then cut them all at once',
+    category: 'edit',
+    group: 'Arrange',
+    icon: 'markers',
+    keywords: ['marker', 'region', 'label', 'chapter', 'slice', 'gap', 'boundary', 'split'],
+    requires: 'file',
+    surface: 'rail',
+    component: MarkersPanel,
   },
   {
     id: 'silence',

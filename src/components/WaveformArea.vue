@@ -5,6 +5,7 @@ import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useCanvasRecovery } from '../composables/useCanvasRecovery.js'
 import { hitSelectionEdge, selectionDragAnchor } from '../audio/selectionDrag.js'
+import { hitMarker, inMarkerLane } from '../audio/markerDrag.js'
 import {
   TOUCH_EDGE_GRAB_PX, TOUCH_DRAG_THRESHOLD_PX, LONG_PRESS_MS,
   pinchSpan, pinchMidX, pinchView, scrollForAnchor,
@@ -12,7 +13,7 @@ import {
 
 const {
   state, appState, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDuration,
-  openContextMenu,
+  openContextMenu, spans, setMarkerTime,
 } = useEditorState()
 
 const canvas = ref(null)
@@ -42,6 +43,34 @@ const SELECTION_DRAG_THRESHOLD_PX = 4
 // the feature is to land on it by accident.
 const hoverEdge = ref(null)
 const draggingEdge = ref(null)
+
+// Marker interaction. Dragging a marker is tracked separately from the
+// selection drag rather than folded into it: the two gestures share no state
+// (no anchor, no threshold) and start in different parts of the canvas, and
+// the one thing the selection drag must not gain is another mode to be in.
+const hoverMarkerId = ref(null)
+const draggingMarkerId = ref(null)
+// Where a marker drag has got to, before it is committed on mouse-up. Held
+// locally so the drag repaints at pointer rate without pushing an undo entry
+// per frame — state.markers is written once, at the end.
+const draggingMarkerTime = ref(0)
+
+// The gap spans the overlay veils. Read through the composable's `spans` so
+// "what is a slice" stays defined in exactly one place.
+const gapSpans = computed(() => spans.value.filter(s => s.kind === 'gap'))
+
+// The marker set the overlay draws: the committed markers, except that a
+// marker being dragged is shown at the pointer rather than at its stored time.
+const displayMarkers = computed(() => {
+  if (!draggingMarkerId.value) return state.markers
+  // Re-sorted, because the renderer decides whether a name fits by measuring
+  // to markers[i + 1] and so assumes time order. Dragging a marker past its
+  // neighbour breaks that assumption for the one element the user is actually
+  // watching, which is the worst possible moment to mislay the label layout.
+  return state.markers
+    .map(m => (m.id === draggingMarkerId.value ? { ...m, time: draggingMarkerTime.value } : m))
+    .sort((a, b) => a.time - b.time)
+})
 const containerWidth = ref(0)
 // Whether the view is pinned to "whole file fits the viewport". Starts true so
 // a freshly opened file shows end to end rather than the first few seconds at
@@ -166,6 +195,11 @@ function drawOverlay() {
     pixelsPerSecond: pixelsPerSecond.value,
     selection: state.selection,
     playhead: state.playhead,
+    markers: displayMarkers.value,
+    gapSpans: gapSpans.value,
+    segments: state.segments,
+    activeMarkerId: draggingMarkerId.value,
+    hoverMarkerId: hoverMarkerId.value,
   })
 }
 
@@ -206,20 +240,46 @@ function handlePointerDown(e) {
 
 function handlePointerMove(e) {
   if (e.pointerType === 'touch') { touchMove(e); return }
-  if (isSelecting.value) handleMouseMove(e)
+  if (draggingMarkerId.value) handleMarkerMove(e)
+  else if (isSelecting.value) handleMouseMove(e)
   else handleHover(e)
 }
 
 function handlePointerUp(e) {
   if (e.pointerType === 'touch') { touchUp(e, e.type === 'pointercancel'); return }
-  if (isSelecting.value) handleMouseUp()
+  // A cancelled drag abandons the marker where it was rather than committing
+  // it wherever the pointer happened to die — a cancel is not a drop.
+  if (draggingMarkerId.value) handleMarkerUp(e.type === 'pointercancel')
+  else if (isSelecting.value) handleMouseUp()
 }
 
 function handleMouseDown(e) {
   if (e.button !== 0) return
   const rect = canvas.value.getBoundingClientRect()
   const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
   const time = pxToTime(x)
+
+  // The ruler gutter is the marker lane. Everything below it is the selection
+  // lane and behaves exactly as it did before markers existed — which is the
+  // point of splitting them by y rather than by what is under the pointer: a
+  // marker can never swallow a click meant to start a selection.
+  if (inMarkerLane(y, RULER_GUTTER_HEIGHT)) {
+    const id = hitMarker({
+      markers: state.markers,
+      xPx: x,
+      scrollLeft: scrollLeft.value,
+      pixelsPerSecond: pixelsPerSecond.value,
+    })
+    if (id) {
+      draggingMarkerId.value = id
+      draggingMarkerTime.value = state.markers.find(m => m.id === id).time
+      // No window listeners: handlePointerDown has already captured the
+      // pointer to this canvas, so the moves and the release arrive through
+      // handlePointerMove/Up even when the drag runs off the element.
+      return
+    }
+  }
 
   // Grabbing an existing edge adjusts the selection instead of replacing it.
   // The opposite edge becomes the anchor, so from here the drag is the same
@@ -267,6 +327,24 @@ function handleMouseMove(e) {
 
   setSelection(selectionAnchor.value, time)
   drawOverlay() // Peaks unchanged during selection drag — overlay only
+}
+
+function handleMarkerMove(e) {
+  if (!draggingMarkerId.value) return
+  const rect = canvas.value.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  draggingMarkerTime.value = Math.max(0, Math.min(pxToTime(x), totalDuration.value))
+  drawOverlay()
+}
+
+function handleMarkerUp(cancelled = false) {
+  const id = draggingMarkerId.value
+  draggingMarkerId.value = null
+  if (!id) return
+  // Committed once, at the end of the gesture — so the drag is one undo step
+  // and one snap, not one of each per frame.
+  if (!cancelled) setMarkerTime(id, draggingMarkerTime.value)
+  drawOverlay()
 }
 
 function handleMouseUp() {
@@ -451,11 +529,30 @@ function touchUp(e, cancelled) {
 // the pointer routinely runs off the grabbed edge faster than the selection
 // follows it.
 function handleHover(e) {
-  if (isSelecting.value) return
+  if (isSelecting.value || draggingMarkerId.value) return
   const rect = canvas.value.getBoundingClientRect()
-  hoverEdge.value = hitSelectionEdge({
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+
+  const wasHovering = hoverMarkerId.value
+  hoverMarkerId.value = inMarkerLane(y, RULER_GUTTER_HEIGHT)
+    ? hitMarker({
+        markers: state.markers,
+        xPx: x,
+        scrollLeft: scrollLeft.value,
+        pixelsPerSecond: pixelsPerSecond.value,
+      })
+    : null
+  // A marker lights up under the pointer, so the hover has to repaint — but
+  // only when it actually changed, or this redraws the overlay on every
+  // mousemove across the canvas.
+  if (wasHovering !== hoverMarkerId.value) drawOverlay()
+
+  // In the marker lane the selection's edges are not grabbable, so they must
+  // not offer their cursor either.
+  hoverEdge.value = hoverMarkerId.value ? null : hitSelectionEdge({
     selection: state.selection,
-    xPx: e.clientX - rect.left,
+    xPx: x,
     scrollLeft: scrollLeft.value,
     pixelsPerSecond: pixelsPerSecond.value,
   })
@@ -463,11 +560,16 @@ function handleHover(e) {
 
 function handleHoverLeave() {
   hoverEdge.value = null
+  if (hoverMarkerId.value) {
+    hoverMarkerId.value = null
+    drawOverlay()
+  }
 }
 
-const cursorClass = computed(() =>
-  (draggingEdge.value || hoverEdge.value) ? 'cursor-ew-resize' : 'cursor-crosshair'
-)
+const cursorClass = computed(() => {
+  if (draggingMarkerId.value || hoverMarkerId.value) return 'cursor-grab'
+  return (draggingEdge.value || hoverEdge.value) ? 'cursor-ew-resize' : 'cursor-crosshair'
+})
 
 function handleWheel(e) {
   e.preventDefault()
@@ -661,6 +763,11 @@ watch(
 // → overlay only; peaks are unchanged
 watch(() => state.selection, () => drawOverlay(), { deep: true })
 watch(() => state.playhead, () => drawOverlay())
+
+// Markers change from the panel, the M key, a label import and undo, none of
+// which go through this component. Deep, because renaming one or flipping it
+// to a gap replaces a field rather than the array.
+watch(() => state.markers, () => drawOverlay(), { deep: true })
 
 // Peak cache updated → full redraw. Not drawMain alone: it re-establishes the
 // zoom and scroll bounds, and a processed file that changed duration moves the

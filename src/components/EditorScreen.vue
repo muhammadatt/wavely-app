@@ -25,6 +25,7 @@ const {
   closeRail, openCommandPalette, closeCommandPalette, closeContextMenu,
   documents, cycleDocument, setActiveDocument, closeDocument,
   documentHasUnsavedWork, anyUnsavedWork, activeDoc,
+  dropMarker, showToast,
 } = useEditorState()
 const { importDataTransfer, promptForFiles } = useFileImport()
 const { saveDocument, saveDocumentAs } = useFileSave()
@@ -197,6 +198,18 @@ function handleKeydown(e) {
     e.preventDefault()
     if (e.target instanceof HTMLElement && e.target !== document.body) e.target.blur()
     window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
+    return
+  }
+
+  // M — drop a marker at the playhead. Unmodified, because it is the one
+  // marker action used often enough mid-listen to deserve a bare letter: the
+  // gesture is "hear the boundary, hit M, keep listening".
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && key === 'm') {
+    e.preventDefault()
+    // Precondition checked here, not inferred from a null return — see the
+    // same guard in MarkersPanel's add().
+    if (totalDuration.value <= 0) return
+    if (dropMarker() === null) showToast('There is already a marker here')
     return
   }
 

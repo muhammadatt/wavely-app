@@ -34,7 +34,7 @@ test('every operation sits in its menu, in order', () => {
   assert.deepEqual(layout(), {
     edit: [
       'Clipboard: cut', 'Clipboard: copy', 'Clipboard: paste', 'Clipboard: select-all',
-      'Arrange: trim', 'Arrange: split', 'Arrange: silence',
+      'Arrange: trim', 'Arrange: split', 'Arrange: markers', 'Arrange: silence',
     ],
     level: ['normalize', 'loudness', 'fade', 'volume'],
     dynamics: ['auto-leveler', 'soft-clipper', 'opto-smooth', 'fet-punch', 'vox-pressor', 'scheps-parallel', 'inflator'],

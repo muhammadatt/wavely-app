@@ -2,6 +2,7 @@ import { reactive, computed, ref } from 'vue'
 import { v4 as uuidv4 } from 'uuid'
 import {
   cloneSegments,
+  getSegmentDuration,
   getTimelineDuration,
   deleteRegion,
   trimToSelection,
@@ -13,6 +14,20 @@ import {
   insertSegments,
   replaceRegionWithBuffer,
 } from '../audio/operations.js'
+import {
+  addMarker as addMarkerTo,
+  createMarker,
+  removeMarker,
+  moveMarker,
+  renameMarker,
+  setMarkerKind,
+  markerSpans,
+  markersAfterDelete,
+  markersAfterTrimTo,
+  markersAfterInsert,
+  clampMarkers,
+} from '../audio/markers.js'
+import { snapToZeroCrossing } from '../audio/zeroCross.js'
 import { stopPlayback } from '../audio/playback.js'
 import { getDefaultOutputProfile, isOutputProfileLocked } from '../audio/presets.js'
 
@@ -37,15 +52,17 @@ const DOC_FIELDS = new Set([
   'currentFile', 'selectedPreset', 'selectedOutputProfile', 'processingReport',
   'isProcessing', 'processingMessage', 'processingStage', 'processingProgress',
   'undoCount', 'redoCount', 'status', 'name',
-  'revision', 'savedRevision',
+  'revision', 'savedRevision', 'markers',
 ])
 
 // Returned for document fields when no document is open. The empty segments
 // array is shared and never mutated — handing out a fresh [] on every read
 // would retrigger every watcher that depends on it.
 const EMPTY_SEGMENTS = Object.freeze([])
+const EMPTY_MARKERS = Object.freeze([])
 const DOC_FIELD_FALLBACKS = {
   segments: EMPTY_SEGMENTS,
+  markers: EMPTY_MARKERS,
   selection: null,
   playhead: 0,
   isPlaying: false,
@@ -95,6 +112,12 @@ const appState = reactive({
   // ticked, so exporting the file in front of you is one keystroke and a click.
   filesPanelTickActive: false,
   toasts: [],
+
+  // Marker placement lands on the nearest rising zero-crossing. On by default
+  // because a cut anywhere else is a step discontinuity, which is a click, and
+  // nobody wants the click — the toggle exists to be turned off when a marker
+  // has to sit at an exact measured time.
+  snapToZero: true,
 })
 
 // Buffer pool — Map<bufferId, AudioBuffer>. App-level and shared across
@@ -261,7 +284,12 @@ export function useEditorState() {
     const doc = activeDocument.value
     if (!doc) return
     const h = historyFor(doc.id)
-    h.undo.push({ segments: cloneSegments(doc.segments), label, revision: doc.revision })
+    h.undo.push({
+      segments: cloneSegments(doc.segments),
+      markers: [...doc.markers],
+      label,
+      revision: doc.revision,
+    })
     if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
     h.redo.length = 0
     doc.revision = ++revisionSeq
@@ -278,8 +306,14 @@ export function useEditorState() {
     // The label travels with the state it belongs to: the entry now going onto
     // the redo stack is the result of that same operation, so redoing it can
     // name it too.
-    h.redo.push({ segments: cloneSegments(doc.segments), label: entry.label, revision: doc.revision })
+    h.redo.push({
+      segments: cloneSegments(doc.segments),
+      markers: [...doc.markers],
+      label: entry.label,
+      revision: doc.revision,
+    })
     doc.segments = entry.segments
+    doc.markers = entry.markers ?? []
     doc.revision = entry.revision
     doc.selection = null
     doc.undoCount = h.undo.length
@@ -293,8 +327,14 @@ export function useEditorState() {
     const h = historyFor(doc.id)
     if (h.redo.length === 0) return
     const entry = h.redo.pop()
-    h.undo.push({ segments: cloneSegments(doc.segments), label: entry.label, revision: doc.revision })
+    h.undo.push({
+      segments: cloneSegments(doc.segments),
+      markers: [...doc.markers],
+      label: entry.label,
+      revision: doc.revision,
+    })
     doc.segments = entry.segments
+    doc.markers = entry.markers ?? []
     doc.revision = entry.revision
     doc.selection = null
     doc.undoCount = h.undo.length
@@ -346,6 +386,7 @@ export function useEditorState() {
       name,
       status: 'ready', // 'ready' | 'processing' | 'error'
       segments: [segment],
+      markers: [],
       selection: null,
       playhead: 0,
       isPlaying: false,
@@ -535,6 +576,7 @@ export function useEditorState() {
     pushUndo('trim to selection')
     const { start, end } = state.selection
     state.segments = trimToSelection(state.segments, start, end)
+    state.markers = markersAfterTrimTo(state.markers, start, end)
     state.selection = null
     state.playhead = 0
   }
@@ -542,6 +584,8 @@ export function useEditorState() {
   function performTrimBefore() {
     if (!state.selection) return
     pushUndo('trim before selection')
+    // Trimming the head is a delete of [0, t) as far as markers are concerned.
+    state.markers = markersAfterDelete(state.markers, 0, state.selection.start)
     state.segments = trimBefore(state.segments, state.selection.start)
     state.selection = null
     state.playhead = 0
@@ -550,6 +594,7 @@ export function useEditorState() {
   function performTrimAfter() {
     if (!state.selection) return
     pushUndo('trim after selection')
+    state.markers = markersAfterTrimTo(state.markers, 0, state.selection.end)
     state.segments = trimAfter(state.segments, state.selection.end)
     const dur = getTimelineDuration(state.segments)
     state.selection = null
@@ -592,6 +637,7 @@ export function useEditorState() {
     const inner = segmentsInRange(state.segments, start, end)
     appState.clipboard = inner.map(seg => ({ ...seg, outputStart: seg.outputStart - start }))
     state.segments = deleteRegion(state.segments, start, end)
+    state.markers = markersAfterDelete(state.markers, start, end)
     state.selection = null
     // Cutting the tail can leave the playhead past the end of the shortened
     // timeline — clamp it back onto the timeline.
@@ -621,7 +667,9 @@ export function useEditorState() {
         bufferPool.set(seg.sourceBufferId, seg.sourceBuffer)
       }
     }
+    const pasted = appState.clipboard.reduce((sum, seg) => sum + getSegmentDuration(seg), 0)
     state.segments = insertSegments(state.segments, position, appState.clipboard)
+    state.markers = markersAfterInsert(state.markers, position, pasted)
   }
 
   /**
@@ -635,7 +683,12 @@ export function useEditorState() {
     // Undo must land on the document being modified, which is not necessarily
     // the active one — a preset job can finish after the user switched tabs.
     const h = historyFor(doc.id)
-    h.undo.push({ segments: cloneSegments(doc.segments), label, revision: doc.revision })
+    h.undo.push({
+      segments: cloneSegments(doc.segments),
+      markers: [...doc.markers],
+      label,
+      revision: doc.revision,
+    })
     if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
     h.redo.length = 0
     doc.revision = ++revisionSeq
@@ -646,6 +699,178 @@ export function useEditorState() {
     addBuffer(bufferId, newBuffer, doc.id)
     doc.segments = replaceRegionWithBuffer(doc.segments, start, end, newBuffer, bufferId)
     return bufferId
+  }
+
+
+  // ── Markers ────────────────────────────────────────────────────────────────
+  // A marker is a point. Slices are the spans between adjacent markers, read
+  // through `markerSpans` — see src/audio/markers.js for why regions are not
+  // stored.
+
+  /** The slices the current marker set defines over the current timeline. */
+  const spans = computed(() => markerSpans(state.markers, totalDuration.value))
+
+  /**
+   * Resolve a requested marker time, honouring the snap toggle.
+   *
+   * Every path that places or moves a marker goes through here, so the toggle
+   * cannot be respected in one entry point and missed in another.
+   */
+  function placeMarkerTime(time) {
+    const clamped = Math.max(0, Math.min(time, totalDuration.value))
+    const snapped = appState.snapToZero ? snapToZeroCrossing(state.segments, clamped) : clamped
+
+    // ⚠ A MARKER LANDS ON A SAMPLE, because a cut can only happen between two
+    // samples — there is no way to split a file 0.4 of a sample in.
+    // snapToZeroCrossing interpolates between the two samples that straddle
+    // zero, which is right for the measurement and NOT representable as a
+    // boundary: left sub-sample, every cut rounded somewhere downstream, and a
+    // slice export came out 352801 samples against the source's 352800, each
+    // piece carrying up to three samples of trailing silence. Quantising here
+    // fixes the split, the slice export and the label file at once, because
+    // all three read the marker's time.
+    const sr = state.currentFile?.sampleRate
+    return sr > 0 ? Math.round(snapped * sr) / sr : snapped
+  }
+
+  function dropMarker(time = state.playhead, { name = '', kind = 'user' } = {}) {
+    if (!activeDocument.value || totalDuration.value <= 0) return null
+    const at = placeMarkerTime(time)
+    const marker = createMarker(at, { name, kind })
+    const next = addMarkerTo(state.markers, marker)
+    // addMarker collapses onto an existing marker within MARKER_EPSILON, so an
+    // unchanged length means there was already one here and this was a no-op.
+    if (next.length === state.markers.length) return null
+    pushUndo('add marker')
+    state.markers = next
+    return marker.id
+  }
+
+  /** Two markers, one on each edge of the selection. */
+  function markSelectionEdges() {
+    if (!state.selection || !activeDocument.value) return 0
+    const { start, end } = state.selection
+    let next = state.markers
+    for (const t of [start, end]) {
+      next = addMarkerTo(next, createMarker(placeMarkerTime(t)))
+    }
+    const added = next.length - state.markers.length
+    if (added === 0) return 0
+    pushUndo('mark selection edges')
+    state.markers = next
+    return added
+  }
+
+  function deleteMarker(id) {
+    if (!state.markers.some(m => m.id === id)) return
+    pushUndo('delete marker')
+    state.markers = removeMarker(state.markers, id)
+  }
+
+  function clearMarkers() {
+    if (state.markers.length === 0) return
+    pushUndo('clear markers')
+    state.markers = []
+  }
+
+  function setMarkerTime(id, time) {
+    if (!state.markers.some(m => m.id === id)) return
+    pushUndo('move marker')
+    state.markers = moveMarker(state.markers, id, placeMarkerTime(time))
+  }
+
+  function renameMarkerById(id, name) {
+    if (!state.markers.some(m => m.id === id)) return
+    pushUndo('rename marker')
+    state.markers = renameMarker(state.markers, id, name)
+  }
+
+  function toggleGapMarker(id) {
+    const marker = state.markers.find(m => m.id === id)
+    if (!marker) return
+    pushUndo(marker.kind === 'gap' ? 'unmark gap' : 'mark gap')
+    state.markers = setMarkerKind(state.markers, id, marker.kind === 'gap' ? 'user' : 'gap')
+  }
+
+  /**
+   * Replace the whole marker set — used by label import.
+   *
+   * One undo entry for the import, rather than one per marker.
+   *
+   * Returns the number of markers actually kept, which is NOT the number
+   * passed in: a label file exported from a longer recording carries markers
+   * past the end of this timeline and clampMarkers drops them. Reporting the
+   * input count told a user importing a 20-minute chapter list into a 5-second
+   * excerpt that 12 markers had arrived when 1 had.
+   */
+  function setMarkers(markers, label = 'import markers') {
+    if (!activeDocument.value) return 0
+    const kept = clampMarkers(markers, totalDuration.value)
+    pushUndo(label)
+    state.markers = kept
+    return kept.length
+  }
+
+  /**
+   * Cut the timeline at every marker.
+   *
+   * Splitting inserts boundaries without changing any duration, so the markers
+   * themselves are untouched — they stay put, now sitting on real segment
+   * edges, and can still be dragged or removed afterwards.
+   */
+  function performSplitAtMarkers() {
+    if (state.markers.length === 0) return 0
+    // Split a CLONE first, then count. A marker on 0 or on the end of the
+    // timeline is a no-op for splitAtPlayhead, so the marker count overstates
+    // the cuts — "Split at 2 markers" for one cut. Working on a clone also
+    // keeps recalcOutputStarts, which writes outputStart in place, off the
+    // live segments until there is something worth undoing.
+    const segs = state.markers.reduce(
+      (acc, m) => splitAtPlayhead(acc, m.time),
+      cloneSegments(state.segments),
+    )
+    const cuts = segs.length - state.segments.length
+    if (cuts === 0) return 0
+    pushUndo('split at markers')
+    state.segments = segs
+    return cuts
+  }
+
+  /**
+   * Delete every span opened by a gap marker.
+   *
+   * Last span first: deleting an earlier span shifts everything after it, and
+   * working backwards means the spans still to be deleted keep the times
+   * `markerSpans` just reported for them.
+   */
+  function performDropGaps() {
+    const gaps = spans.value.filter(s => s.kind === 'gap')
+    if (gaps.length === 0) return 0
+    pushUndo('drop gaps')
+    let segs = state.segments
+    let marks = state.markers
+    for (const span of [...gaps].reverse()) {
+      segs = deleteRegion(segs, span.start, span.end)
+      marks = markersAfterDelete(marks, span.start, span.end)
+    }
+    // ⚠ THE MARKER THAT OPENED A GAP SURVIVES ITS OWN DELETION, and it is
+    // still kind 'gap'. markersAfterDelete keeps everything at or before
+    // `start`, and the closing marker collapses onto it — correct, that is one
+    // boundary now — but left flagged it re-designates whatever NOW follows it
+    // as dead air. Measured before this line existed: a 10 s file with a 1 s
+    // gap went to 9 s, then the panel offered "Delete 1 gap" again and the
+    // second click took it to 2 s, eating seven seconds of real narration that
+    // the canvas had meanwhile been veiling as silence. The boundary is worth
+    // keeping; the flag is not.
+    for (const span of gaps) {
+      if (span.openerId) marks = setMarkerKind(marks, span.openerId, 'user')
+    }
+    state.segments = segs
+    state.markers = marks
+    state.selection = null
+    const dur = getTimelineDuration(segs)
+    if (state.playhead > dur) state.playhead = dur
+    return gaps.length
   }
 
   // ── Selection ──────────────────────────────────────────────────────────────
@@ -880,6 +1105,19 @@ export function useEditorState() {
     performCopy,
     performPaste,
     replaceRegion,
+
+    // Markers
+    spans,
+    dropMarker,
+    markSelectionEdges,
+    deleteMarker,
+    clearMarkers,
+    setMarkerTime,
+    renameMarkerById,
+    toggleGapMarker,
+    setMarkers,
+    performSplitAtMarkers,
+    performDropGaps,
 
     // Selection / Playhead
     setSelection,

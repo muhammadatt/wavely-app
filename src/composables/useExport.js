@@ -41,7 +41,7 @@ export function useExport() {
    *   it to decide whether to dismiss themselves, so a total failure leaves the
    *   surface standing with the selection intact.
    */
-  async function exportDocuments(docs) {
+  async function exportDocuments(docs, { zipName } = {}) {
     // The size refusal is repeated here rather than trusted to the caller: both
     // surfaces disable their button on it, and a render that gets past a
     // disabled button still produces a file the user cannot play.
@@ -82,8 +82,10 @@ export function useExport() {
         downloadBlob(new Blob([rendered[0].data], { type: 'audio/wav' }), rendered[0].name)
         showToast(`Exported ${rendered[0].name}`)
       } else {
+        // Slices name their archive after the file they came from; a plain
+        // multi-file export has no one file to name it after, so it is dated.
         const stamp = new Date().toISOString().slice(0, 10)
-        downloadBlob(createZip(rendered), `wavely-export-${stamp}.zip`)
+        downloadBlob(createZip(rendered), zipName ?? `wavely-export-${stamp}.zip`)
         showToast(`Exported ${rendered.length} files as a zip`)
       }
 
@@ -93,6 +95,7 @@ export function useExport() {
       return true
     } finally {
       isExporting.value = false
+      exportProgress.value = { done: 0, total: 0 }
     }
   }
 

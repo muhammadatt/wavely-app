@@ -35,11 +35,28 @@ import { join } from 'node:path'
 const PORT = Number(process.env.SMOKE_PORT ?? 5199)
 const URL_ = `http://localhost:${PORT}/`
 
-/** Command-palette search terms. These are the REGISTRY labels, not our names. */
+/**
+ * What to open, by its command-palette search term. These are the REGISTRY
+ * labels, not our names for the effects.
+ *
+ * `rail` names an operation that opens in the right-hand rail rather than as a
+ * floating window, and carries the registry id the rail tags itself with. Rail
+ * panels were outside this run until markers added a second one — they are
+ * exactly as able to throw at module scope as a window is, and nothing else in
+ * the suite renders a component at all.
+ */
 const PANELS = [
+  // Effect windows, checked via `.win-frame`.
   'LA Vintage 2A', 'LA Classic 76', 'Soft Clipper', 'Scheps Parallel',
-  'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'Hi-Freq Limiter', 'PHAT*SS', 'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
+  'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'Hi-Freq Limiter', 'PHAT*SS',
+  'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
   'Loudness Normalize', 'Auto Leveler', 'Plosive Tamer', 'Noise Reduction', 'VoxPressor',
+  // Rail panels, checked via the data-rail-panel hook ContextPanel tags the
+  // detail level with. They are here because a rail panel can throw at module
+  // scope exactly as a window can, and nothing else in the suite renders a
+  // component at all.
+  { name: 'Split', rail: 'split' },
+  { name: 'Markers', rail: 'markers' },
 ]
 
 function writeProbeWav(path) {
@@ -154,12 +171,17 @@ try {
   await page.getByText('Select All', { exact: false }).first().click()
   await page.waitForTimeout(600)
 
-  for (const name of PANELS) {
+  for (const entry of PANELS) {
+    // Entries are a bare name for a floating window, or { name, rail } for a
+    // rail panel — most are windows, so the common case stays a plain string.
+    const { name, rail } = typeof entry === 'string' ? { name: entry, rail: null } : entry
     const before = errors.length
     await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
     await page.keyboard.type(name); await page.waitForTimeout(450)
-    await page.keyboard.press('Enter'); await page.waitForTimeout(3000)
-    const opened = await page.evaluate(() => !!document.querySelector('.win-frame'))
+    await page.keyboard.press('Enter'); await page.waitForTimeout(rail ? 1200 : 3000)
+    const opened = rail
+      ? await page.evaluate(id => !!document.querySelector(`[data-rail-panel="${id}"]`), rail)
+      : await page.evaluate(() => !!document.querySelector('.win-frame'))
     const fresh = errors.slice(before)
     const ok = opened && fresh.length === 0
     if (!ok) failures++
