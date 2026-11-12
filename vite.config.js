@@ -1,6 +1,8 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
+import { fileURLToPath } from 'node:url'
+import { HELP_META, publishedHelpIds } from './src/content/help/index.js'
 
 /**
  * Developer-only modules, stubbed out of production builds.
@@ -41,6 +43,47 @@ function stripDevOnlyModules(enabled) {
   }
 }
 
+/**
+ * The standalone help pages (`help/index.html`, `src/help/`).
+ *
+ * One HTML entry serves every page; which effect it shows is read from the
+ * path. So that `/help/<id>/` works on any static host with no rewrite rule,
+ * the build writes a copy of the entry at `help/<id>/index.html` for every
+ * published page (the asset URLs in it are absolute, so a copy one level down
+ * loads the same bundle), with the effect's name in its <title>. The dev and
+ * preview servers rewrite the same paths to the entry.
+ */
+function helpPages(devPanels) {
+  const rewrite = (req, _res, next) => {
+    const path = (req.url || '').split('?')[0]
+    if (/^\/help(\/[^/.]*)?\/?$/.test(path)) req.url = '/help/index.html'
+    next()
+  }
+  return {
+    name: 'wavely:help-pages',
+    configureServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    // `post`: Vite's own HTML plugin emits the entry in this same hook.
+    generateBundle: { order: 'post', handler(_options, bundle) {
+      const entry = bundle['help/index.html']
+      if (!entry) return
+      const html = String(entry.source)
+      for (const id of publishedHelpIds(devPanels)) {
+        const title = HELP_META[id].title.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        this.emitFile({
+          type: 'asset',
+          fileName: `help/${id}/index.html`,
+          source: html.replace(/<title>[^<]*<\/title>/, `<title>${title} help — crisp.fm</title>`),
+        })
+      }
+    } },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // Read the env exactly as Vite will, including .env files. The '' prefix
   // loads every variable, not just VITE_-prefixed ones, so the value is seen
@@ -51,9 +94,18 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       stripDevOnlyModules(devPanels),
+      helpPages(devPanels),
       vue(),
       tailwindcss(),
     ],
+    build: {
+      rollupOptions: {
+        input: {
+          main: fileURLToPath(new URL('./index.html', import.meta.url)),
+          help: fileURLToPath(new URL('./help/index.html', import.meta.url)),
+        },
+      },
+    },
     server: {
       proxy: {
         '/api': {

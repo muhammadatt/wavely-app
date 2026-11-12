@@ -6,13 +6,12 @@ import {
   chainWindowMounted, chainWindowUnmounted, chainStatusFor, chainApplying,
 } from '../../composables/usePluginChain.js'
 import { currentPluginCopy, idForCopy, chainCopyNumber, isChainCopyId } from '../../composables/pluginCopies.js'
-import { helpFor } from '../../content/help/index.js'
+import { helpFor, helpUrl } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import { isSheetViewport, sheetGeometry, SHEET_MAX_WIDTH as SHEET_NARROW_PX } from '../../ui/windowSheet.js'
 import Icon from '../ui/Icon.vue'
 import { useEntitlements } from '../../composables/useEntitlements.js'
 import { isOffline } from '../../auth/plans.js'
-import HelpOverlay from './HelpOverlay.vue'
 import ModulaPresetBrowser from '../modula/ModulaPresetBrowser.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
 
@@ -261,12 +260,18 @@ const windowId = idForCopy(props.windowId, currentPluginCopy())
  * Help for THIS effect, looked up by the id the harness was already given.
  *
  * No plugin passes it and no plugin can pass the wrong one — `src/content/help`
- * is keyed by the same window id, so a faceplate showing another effect's
+ * is keyed by the same window id, so a faceplate linking another effect's
  * instructions is not expressible. Null where nothing is written yet, and the
- * button is then absent rather than opening an empty panel.
+ * button is then absent rather than opening an empty page.
+ *
+ * The `?` opens the effect's help page (`/help/<id>/`) in a NEW TAB. It used to
+ * lay an overlay over the faceplate, and the windows are small and all
+ * different sizes, so help read cramped and differently in every one. A tab
+ * leaves the editor, the window and playback exactly as they were. The chain
+ * copy links the solo id's page — it is the same effect.
  */
 const help = computed(() => helpFor(props.windowId))
-const helpOpen = ref(false)
+const helpHref = computed(() => helpUrl(props.windowId))
 
 /**
  * Which chassis this window wears — see `ui/harnessChrome.js`.
@@ -677,13 +682,6 @@ function raise() {
 function onEscape(e) {
   e.preventDefault()
   e.stopPropagation()
-  // A ladder, not a shortcut to the bottom: Escape puts the help away before it
-  // closes the window. Reading the instructions and then losing the whole panel
-  // on the key you reach for to dismiss them is the wrong outcome.
-  if (helpOpen.value) {
-    helpOpen.value = false
-    return
-  }
   requestClose()
 }
 
@@ -777,20 +775,19 @@ function requestClose() {
         <!-- The short rule, not `--tall`: it is dividing a 13 px word from an
              icon, where the tall one divides two 30 px chips. -->
         <span v-if="help && !modula" class="win-rule"></span>
-        <button
+        <a
           v-if="help"
-          type="button"
-          class="win-icon-btn flex items-center justify-center w-[30px] h-[30px] rounded-[10px] border-none cursor-pointer"
-          :class="{ 'win-icon-btn--on': helpOpen }"
-          :aria-label="helpOpen ? 'Close help' : 'How to use this effect'"
-          :aria-expanded="String(helpOpen)"
-          :title="helpOpen ? 'Close help' : 'How to use this effect'"
+          :href="helpHref"
+          target="_blank"
+          rel="noopener"
+          class="win-icon-btn flex items-center justify-center w-[30px] h-[30px] rounded-[10px] border-none cursor-pointer no-underline"
+          aria-label="How to use this effect (opens in a new tab)"
+          title="How to use this effect — opens in a new tab"
           @pointerdown.stop
-          @click="helpOpen = !helpOpen"
         >
           <span v-if="modula" style="font:700 12px/1 'Inter',system-ui,sans-serif">?</span>
           <Icon v-else name="help" :size="15" :stroke-width="2" />
-        </button>
+        </a>
       </div>
 
       <!--
@@ -937,15 +934,8 @@ function requestClose() {
 
         It no longer has to cover for Apply, which is pinned in the footer.
       -->
-      <HelpOverlay
-        v-if="help && helpOpen"
-        :help="help"
-        :title="label"
-        @close="helpOpen = false"
-      />
-
       <div
-        v-show="canScrollDown && !helpOpen"
+        v-show="canScrollDown"
         class="win-more absolute left-0 right-0 bottom-0 flex items-end justify-center pointer-events-none"
         aria-hidden="true"
       >
@@ -1105,8 +1095,6 @@ function requestClose() {
   --chrome-footer-bottom: color-mix(in srgb, var(--face, #f5a623) 5%, #1c1e20);
   --chrome-face-top: color-mix(in srgb, var(--face, #f5a623) 10%, #16191e);
   --chrome-face-bottom: color-mix(in srgb, var(--face, #f5a623) 4%, #0b0d10);
-  --chrome-help-top: color-mix(in srgb, var(--face, #f5a623) 7%, #171b21);
-  --chrome-help-bottom: color-mix(in srgb, var(--face, #f5a623) 4%, #101319);
   --chrome-hairline: rgba(255, 255, 255, 0.13);
   --chrome-drop: rgba(0, 0, 0, 0.5);
   --chrome-frame-shadow: 0 24px 60px rgba(0, 0, 0, 0.55),
@@ -1140,8 +1128,6 @@ function requestClose() {
   --chrome-footer-bottom: color-mix(in srgb, var(--face, #f5a623) 5%, #090a0c);
   --chrome-face-top: color-mix(in srgb, var(--face, #f5a623) 12%, #191c21);
   --chrome-face-bottom: color-mix(in srgb, var(--face, #f5a623) 5%, #0d0f12);
-  --chrome-help-top: color-mix(in srgb, var(--face, #f5a623) 9%, #181b20);
-  --chrome-help-bottom: color-mix(in srgb, var(--face, #f5a623) 5%, #0d1013);
   --chrome-hairline: rgba(255, 255, 255, 0.1);
   --chrome-drop: rgba(0, 0, 0, 0.7);
   /* The bevel is what keeps this reading as metal rather than as a hole. */
@@ -1280,12 +1266,6 @@ function requestClose() {
 }
 .win-icon-btn:hover {
   background: rgba(255, 255, 255, 0.13);
-  color: #f2fafc;
-}
-/* Held open, so the button reads as a toggle rather than as something that
-   fired once. Same white wash the monitoring chips use for their on state. */
-.win-icon-btn--on {
-  background: rgba(255, 255, 255, 0.14);
   color: #f2fafc;
 }
 .win-icon-btn:focus-visible {
@@ -1602,8 +1582,7 @@ function requestClose() {
   color: var(--m-ink-2);
   box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.65);
 }
-[data-design='modula'] .win-icon-btn:hover,
-[data-design='modula'] .win-icon-btn--on {
+[data-design='modula'] .win-icon-btn:hover {
   background: rgba(255, 255, 255, 0.06);
   color: var(--m-ink);
 }
@@ -1723,8 +1702,7 @@ function requestClose() {
 /* The selection readout carries an inline dark-surface colour. */
 [data-surface='light'] .win-sel { color: #555b64 !important; }
 [data-surface='light'] .win-icon-btn { color: #3a3f47; box-shadow: var(--m-shadow-raised); }
-[data-surface='light'] .win-icon-btn:hover,
-[data-surface='light'] .win-icon-btn--on { background: rgba(0, 0, 0, 0.05); color: #1d2026; }
+[data-surface='light'] .win-icon-btn:hover { background: rgba(0, 0, 0, 0.05); color: #1d2026; }
 [data-surface='light'] .win-rule--tall { background: rgba(60, 50, 40, 0.3); box-shadow: 1px 0 0 rgba(255, 255, 255, 0.5); }
 [data-surface='light'] .win-preview:hover:not(:disabled) { background: rgba(0, 0, 0, 0.05); }
 [data-surface='light'] .win-selectall { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18); }

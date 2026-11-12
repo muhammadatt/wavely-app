@@ -17,10 +17,9 @@ import { DEFAULT_CHROME, resolveHarnessChrome } from '../../src/ui/harnessChrome
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FRAME = join(HERE, '../../src/components/panels/FloatingWindow.vue')
-// The help panel is inside the frame, so it inherits the tokens and styles
-// itself from them rather than taking a prop — which also means a typo there
-// is exactly as silent as one in the frame.
-const READERS = [FRAME, join(HERE, '../../src/components/panels/HelpOverlay.vue')]
+// Every file that reads the frame's chassis tokens. (Help used to be an overlay
+// in here too; it is a page of its own now, `src/help/`.)
+const READERS = [FRAME]
 
 function withEnv({ search = '', stored = null, throws = false }, fn) {
   const had = 'window' in globalThis
@@ -126,21 +125,6 @@ test('every chassis token the panels read is one a chassis declares', () => {
     const undeclared = [...read].filter(t => !declared.has(t)).sort()
     assert.deepEqual(undeclared, [], `${file}: read but never declared: ${undeclared.join(', ')}`)
   }
-})
-
-test('the help panel takes its surface from the chassis, not from its own copy', () => {
-  // It shipped with the 5a gradient written out longhand, which meant the dark
-  // chassis drew a light-chassis help panel over a dark-chassis window — a
-  // seam only visible with the panel open, on one of the two variants.
-  const src = readFileSync(READERS[1], 'utf8')
-  assert.ok(
-    src.includes('var(--chrome-help-top)') && src.includes('var(--chrome-help-bottom)'),
-    'the help surface no longer reads the chassis tokens',
-  )
-  assert.ok(
-    !/color-mix\([^)]*var\(--face/.test(src),
-    'the help panel mixes its own surface out of --face instead of reading a token',
-  )
 })
 
 /** The body of the first CSS rule opening with `head`, braces balanced. */

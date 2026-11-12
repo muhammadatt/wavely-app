@@ -4,7 +4,10 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
-import { HELP, helpFor } from '../../src/content/help/index.js'
+import {
+  HELP, HELP_META, HELP_CATEGORIES, helpFor, helpUrl, publishedHelpIds,
+} from '../../src/content/help/index.js'
+import { helpIdFromPath } from '../../src/help/route.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '../..')
@@ -131,4 +134,64 @@ test('helpFor returns null rather than a stub for an unknown window', () => {
   // button that opens an empty panel, which is worse than no button.
   assert.equal(helpFor('no-such-window'), null)
   assert.ok(helpFor('soft-clipper'))
+})
+
+/**
+ * The help pages print a title and a category for each entry, and hide the
+ * dev-only ones from production. Those repeat the registry's `label`,
+ * `category` and `release` — the registry imports every faceplate, so the help
+ * page cannot read it — and are read back out of its source here so the two
+ * cannot drift.
+ */
+function registryOperations() {
+  const src = readFileSync(join(ROOT, 'src/ui/registry.js'), 'utf8')
+  const body = src.slice(src.indexOf('const ALL_OPERATIONS'))
+  const ops = {}
+  // Each operation starts at an `id:` line; its fields run to the next one.
+  const chunks = body.split(/\n\s{4}id: /).slice(1)
+  for (const chunk of chunks) {
+    const id = /^'([^']+)'/.exec(chunk)[1]
+    const label = /\n\s{4}label: '([^']+)'/.exec(chunk)?.[1]
+    const cat = /\n\s{4}category: (null|'([^']+)')/.exec(chunk)
+    const release = /\n\s{4}release: '([^']+)'/.exec(chunk)?.[1]
+    ops[id] = { label, category: cat?.[2] ?? null, release }
+  }
+  return ops
+}
+
+test('every help entry has page metadata, and only help entries do', () => {
+  assert.deepEqual(Object.keys(HELP_META).sort(), Object.keys(HELP).sort())
+})
+
+test('help page titles, categories and release gating match the registry', () => {
+  const ops = registryOperations()
+  const known = new Set(HELP_CATEGORIES.map(c => c.id))
+  for (const [id, meta] of Object.entries(HELP_META)) {
+    const op = ops[id]
+    assert.ok(op, `${id}: no registry operation with this id`)
+    assert.equal(meta.title, op.label, `${id}: help title differs from the registry label`)
+    assert.equal(meta.category, op.category, `${id}: help category differs from the registry`)
+    assert.equal(meta.release, op.release, `${id}: release gating differs from the registry`)
+    assert.ok(known.has(meta.category), `${id}: category ${meta.category} has no heading on the index`)
+  }
+})
+
+test('dev-only help pages are published only in dev builds', () => {
+  const prod = new Set(publishedHelpIds(false))
+  const dev = new Set(publishedHelpIds(true))
+  assert.equal(dev.size, Object.keys(HELP).length)
+  for (const [id, meta] of Object.entries(HELP_META)) {
+    assert.equal(prod.has(id), meta.release !== 'dev', `${id}: wrong production visibility`)
+  }
+})
+
+test('a help URL routes back to its own entry', () => {
+  for (const id of Object.keys(HELP)) {
+    assert.equal(helpIdFromPath(helpUrl(id)), id)
+    assert.equal(helpIdFromPath(helpUrl(id).replace(/\/$/, '')), id)
+  }
+  assert.equal(helpIdFromPath('/help/'), null)
+  assert.equal(helpIdFromPath('/help'), null)
+  assert.equal(helpIdFromPath('/help/index.html'), 'index.html')
+  assert.equal(helpIdFromPath('/'), null)
 })
