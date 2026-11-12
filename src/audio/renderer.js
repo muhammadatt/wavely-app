@@ -32,6 +32,19 @@ const MARKER_HAIRLINE_COLOR = 'rgba(255, 180, 84, 0.38)'
 // waveform is doing underneath — so it is light, not the dark ink it would be
 // if it were printed on the flag itself.
 const MARKER_LABEL_COLOR = 'rgba(255, 214, 160, 0.95)'
+// A segment boundary is neutral, and it is drawn from the BOTTOM: markers own
+// the top gutter, seams own the bottom edge. Two amber full-height lines at the
+// same x — which is exactly where a split-at-markers leaves them — would be
+// indistinguishable, and the two mean different things. A marker is a position
+// the user named; a seam is a cut in the material.
+// ⚠ IT HAS TO OUT-READ THE RULER'S GRIDLINES, which are already full-height
+// white at .05 every tick. A seam at .16 was only three times those and landed
+// as "another gridline" — screenshotted, it was indistinguishable from the
+// 0.5 s grid behind it, which is exactly the confusion drawing seams was
+// supposed to end. The line is brighter, and the filled wedge at the bottom is
+// what actually names it: a 1 px line can be a grid, a wedge cannot.
+const SEAM_COLOR = 'rgba(214, 232, 255, 0.34)'
+const SEAM_NOTCH_COLOR = 'rgba(214, 232, 255, 0.92)'
 const GAP_VEIL_COLOR = 'rgba(255, 180, 84, 0.10)'
 // Stereo is the case worth labelling; anything wider falls back to numbers.
 const LANE_LABELS = ['L', 'R']
@@ -309,6 +322,7 @@ export function renderOverlay(canvas, options) {
     playhead = 0,
     markers = [],
     gapSpans = [],
+    segments = [],
     activeMarkerId = null,
     hoverMarkerId = null,
   } = options
@@ -356,6 +370,10 @@ export function renderOverlay(canvas, options) {
     }
   }
 
+  // Seams go under the markers: where a split has happened the two land on the
+  // same x, and the marker is the one the user is aiming at.
+  drawSeams(ctx, segments, scrollLeft, pixelsPerSecond, logicalWidth, logicalHeight)
+
   // Markers sit between the selection and the playhead in draw order: over the
   // selection veil so a marked boundary stays visible inside a selection, and
   // under the playhead so the transport is never hidden by one.
@@ -391,6 +409,67 @@ export function renderOverlay(canvas, options) {
   }
 }
 
+
+
+/** The wedge at the foot of a seam: half-width and height, in pixels. */
+const SEAM_WEDGE_W = 4
+const SEAM_WEDGE_H = 7
+
+/**
+ * The seams between segments — where the timeline has actually been cut.
+ *
+ * ⚠ THESE WERE INVISIBLE, AND THAT MADE SPLIT LOOK LIKE A NO-OP. Splitting
+ * inserts a boundary and changes nothing else: the duration is the same and the
+ * render is bit-identical, so with nothing drawn there was no way to tell
+ * Split had run at all. Measured on a 4 s tone cut at 1/2/3 s: 1 segment → 4,
+ * duration 4 → 4, max sample difference 0.
+ *
+ * Only INTERNAL boundaries are drawn. The start of the first segment and the
+ * end of the last are the edges of the file, not cuts in it, and marking them
+ * would put a seam on every untouched file.
+ *
+ * The geometry is exported and the painting is not, for the same reason
+ * selectionDrag.js and markerDrag.js live apart from their components: which
+ * boundaries count is a decision a test can check without a canvas.
+ */
+export function seamPositions(segments, scrollLeft, pixelsPerSecond, width) {
+  if (!segments?.length || segments.length < 2 || !(pixelsPerSecond > 0)) return []
+  const out = []
+  // From 1: segment 0 opens at the start of the FILE, which is not a cut.
+  for (let i = 1; i < segments.length; i++) {
+    const x = (segments[i].outputStart - scrollLeft) * pixelsPerSecond
+    if (x < 0 || x > width) continue
+    out.push(x)
+  }
+  return out
+}
+
+function drawSeams(ctx, segments, scrollLeft, pixelsPerSecond, width, height) {
+  const xs = seamPositions(segments, scrollLeft, pixelsPerSecond, width)
+  if (xs.length === 0) return
+
+  ctx.save()
+  for (const x of xs) {
+    // A hairline up the full height says where the cut is; the brighter notch
+    // at the bottom is what makes it findable at a glance on a dense file.
+    ctx.strokeStyle = SEAM_COLOR
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(x, RULER_GUTTER_HEIGHT)
+    ctx.lineTo(x, height)
+    ctx.stroke()
+
+    // A wedge standing on the bottom edge, pointing up into the cut.
+    ctx.fillStyle = SEAM_NOTCH_COLOR
+    ctx.beginPath()
+    ctx.moveTo(x, height - SEAM_WEDGE_H)
+    ctx.lineTo(x + SEAM_WEDGE_W, height)
+    ctx.lineTo(x - SEAM_WEDGE_W, height)
+    ctx.closePath()
+    ctx.fill()
+  }
+  ctx.restore()
+}
 
 /** Flag width in the gutter, either side of the marker's own line. */
 const MARKER_FLAG_HALF_W = 5

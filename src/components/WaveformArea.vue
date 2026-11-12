@@ -197,6 +197,7 @@ function drawOverlay() {
     playhead: state.playhead,
     markers: displayMarkers.value,
     gapSpans: gapSpans.value,
+    segments: state.segments,
     activeMarkerId: draggingMarkerId.value,
     hoverMarkerId: hoverMarkerId.value,
   })
