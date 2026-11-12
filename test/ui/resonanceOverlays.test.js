@@ -1,5 +1,5 @@
 /**
- * ResoTame's overlay preference, which now crosses a component boundary.
+ * Reso Soothe's overlay preference, which now crosses a component boundary.
  *
  * The switches are in the panel header and the flags are read inside the plot's
  * drawing loop, so the state lives in neither — which makes the store the one

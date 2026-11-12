@@ -78,7 +78,7 @@ function runClosedLoop(kernel, x, knob) {
  *
  * The rendered file is unaffected: apply uses the offline solve.
  */
-test('OptoSmooth: converges on the offline solve with the loop closed', () => {
+test('LA Vintage 2A: converges on the offline solve with the loop closed', () => {
   const x = material()
   // Without the emphasis pair the closed form is exact and is held to it.
   for (const peakReduction of [55, 70, 85]) {
@@ -167,21 +167,30 @@ test('on ordinary material the closed form is well inside half a dB', () => {
   }
 })
 
-test('FET Punch: exact at Mix 1, where the dry share is zero', () => {
+test('LA Classic 76: exact at Mix 1, where the dry share is zero', () => {
   const x = material()
   for (const inputDrive of [40, 55, 75]) {
     const p = { inputDrive, attack: 4, release: 5, ratio: '4', fetDrive: 0.35, scHpfHz: 0, mix: 1 }
     const offline = computeFET1176AutoMakeupDb([x], SR, p)
     const k = new FET1176Kernel(SR); k.setParams(p)
     const { final } = runClosedLoop(k, x, 'outputGainDb')
+    /**
+     * ⚠ THIS TOLERANCE USED TO BE 0.6 dB AND WAS ACCOMMODATING A DEFECT BY
+     * 0.02 dB. The offline solve rendered at `oversample: false` — a different
+     * algorithm from the one apply ships — so it under-delivered: 0.58 dB on the
+     * old tanh, and 0.77 once the measured polynomial replaced it and stopped
+     * squashing the peak that hid the difference. The solve renders oversampled
+     * now, with the latency compensated, and the two agree to 0.00 dB. Anything
+     * approaching a tenth of a dB here means that has come undone.
+     */
     assert.ok(
-      Math.abs(final - offline) < 0.6,
+      Math.abs(final - offline) < 0.1,
       `drive ${inputDrive}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`,
     )
   }
 })
 
-test('FET Punch: reports nothing at parallel settings, where the bound is loose', () => {
+test('LA Classic 76: reports nothing at parallel settings, where the bound is loose', () => {
   // The live bound is (P - max|a|) / max|b|, and those maxima need not fall on
   // the same sample, so below Mix 1 it is safe but slack — measured 3.35 dB
   // under the truth at Mix 0.3. A preview several dB quieter than the render it
@@ -201,7 +210,7 @@ test('THE LOOP IS STABLE — the trajectory stays bounded and settles', () => {
   // stay inside the knob's own travel throughout, and stop moving by the end.
   const x = material()
   for (const [Kernel, params, knob, lo, hi] of [
-    [LA2AKernel, { peakReduction: 70 }, 'gainDb', -12, 24],
+    [LA2AKernel, { peakReduction: 70 }, 'gainDb', -24, 24],
     [FET1176Kernel, { inputDrive: 55, mix: 1 }, 'outputGainDb', -36, 36],
   ]) {
     const k = new Kernel(SR); k.setParams(params)

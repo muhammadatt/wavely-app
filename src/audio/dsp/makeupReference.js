@@ -238,21 +238,60 @@ export function softCeiling(x, ceiling, kneeStart) {
  * numerically invisible and a sustained one is not — which is exactly the
  * discrimination the makeup solve needs.
  *
- * Copies before sorting: the caller's buffers are the audio, and the offline
- * solve calls this on the input several times over.
+ * Never touches the caller's buffers (they are the audio, and the offline solve
+ * calls this on the input many times over).
+ *
+ * ⚠ EXACT, BY A HISTOGRAM THAT ONLY NARROWS THE SEARCH (November 2026). The old
+ * body copied every magnitude (1.3 M samples on the 30 s window) and
+ * quickselected the copy; VoxPressor's blend solve calls it dozens of times per
+ * measurement, and it was 3.3 s of a 17 s profile. Now one pass counts every
+ * sample into a bucket keyed on the TOP 16 BITS of its float32 magnitude (sign
+ * bit cleared: 8 exponent + 7 mantissa bits), and only the ONE bucket holding
+ * the wanted rank is copied and quickselected. For non-negative IEEE floats the
+ * bit pattern orders exactly as the value does, so every sample in a lower
+ * bucket sorts before every sample in a higher one, the rank inside the bucket
+ * is exact, and the answer is bit-identical to a full sort
+ * (`test/dsp/makeupReference.test.js`). No peak pass and no float arithmetic:
+ * measured 12.3 → ~3 ms a call on the 30 s window.
  */
 export function percentileOfChannels(channels, q, skip = 0) {
   let total = 0
   for (const ch of channels) total += Math.max(0, ch.length - skip)
   if (total <= 0) return 0
-  const all = new Float32Array(total)
-  let w = 0
-  for (const ch of channels) {
-    for (let i = skip; i < ch.length; i++) all[w++] = ch[i] < 0 ? -ch[i] : ch[i]
-  }
   // The q-from-the-top index, counting back from the end of an ascending order.
   const idx = Math.min(total - 1, Math.max(0, Math.round(total * (1 - q)) - 1))
-  return selectNth(all, idx)
+  const words = channels.map(asWords)
+  const hist = new Uint32Array(1 << PCT_KEY_BITS)
+  for (const u of words) {
+    for (let i = skip; i < u.length; i++) hist[(u[i] & 0x7fffffff) >>> PCT_KEY_SHIFT]++
+  }
+  // Walk down from the top: the wanted rank is near it for every quantile in use.
+  let above = 0
+  let bin = hist.length - 1
+  const fromTop = total - 1 - idx
+  for (; bin > 0; bin--) {
+    if (above + hist[bin] > fromTop) break
+    above += hist[bin]
+  }
+  const sub = new Float32Array(hist[bin])
+  const subWords = new Uint32Array(sub.buffer)
+  let w = 0
+  for (const u of words) {
+    for (let i = skip; i < u.length; i++) {
+      const m = u[i] & 0x7fffffff
+      if ((m >>> PCT_KEY_SHIFT) === bin) subWords[w++] = m
+    }
+  }
+  // Rank inside the bucket, ascending: the bucket's count less those above the rank.
+  return selectNth(sub, sub.length - 1 - (fromTop - above))
+}
+const PCT_KEY_SHIFT = 16
+const PCT_KEY_BITS = 32 - 1 - PCT_KEY_SHIFT // the sign bit is always cleared
+
+/** A channel's float32 bit patterns, without copying when it already is a Float32Array. */
+function asWords(ch) {
+  const f = ch instanceof Float32Array ? ch : Float32Array.from(ch)
+  return new Uint32Array(f.buffer, f.byteOffset, f.length)
 }
 
 /**
@@ -305,4 +344,420 @@ function selectNth(a, k) {
     else return a[k]
   }
   return a[lo]
+}
+
+/**
+ * Peak magnitude across every sample of every channel, in dB.
+ *
+ * The default makeup reference. Peak rather than RMS, and the distinction is
+ * the whole point of makeup gain: the compressor pulls the loud moments down,
+ * makeup hands back what it took, the peaks land where they started and
+ * everything underneath rises with them. That is a compressor made louder
+ * without being merely turned up — which is the comparison a listener is
+ * actually running when they A/B it.
+ *
+ * Matching RMS instead, as this did, returns only the average loss and
+ * therefore leaves the output exactly as loud as the input: a compressor that
+ * by construction cannot make anything louder.
+ *
+ * TRUE PEAK, not a high percentile, and that was measured. A percentile of
+ * short-block peaks looks more robust and is worse where it matters: on real
+ * speech a fast transient can survive compression almost intact while the p99
+ * comes down several dB, so percentile-referenced makeup over-compensates and
+ * pushes that survivor ABOVE the source — up to 5.5 dB above, measured. True
+ * peak cannot do that; the guarantee it buys is exact.
+ *
+ * The cost is the opposite failure: a single uncompressed click sets the
+ * reference and the makeup comes out small. That is the safe direction — never
+ * louder than the source — and the manual trim is there for it.
+ *
+ * ── THE PERCENTILE IS BACK, AND ONLY BECAUSE THE MISSING HALF ARRIVED ───────
+ *
+ * ⚠ NOTHING ABOVE IS WITHDRAWN. The percentile alone still fails exactly as
+ * described, and the failure reproduces on demand: referencing the 99.9th
+ * percentile at Peak Reduction 40 / 50 / 60 / 70 / 80 puts the OUTPUT PEAK at
+ * -3.15 / -0.92 / +1.54 / +2.59 / +3.01 dBFS against a source peaking at
+ * -2.80 — 5.81 dB above it at the top, against the 5.5 the note above
+ * measured. A percentile reference cannot keep the peak guarantee, full stop.
+ *
+ * WHAT CHANGED IS THAT THE GUARANTEE NO LONGER HAS TO COME FROM THE SOLVE.
+ * `ceilingDb` enforces it downstream, so the pair keeps the same promise the
+ * peak reference kept — output peak never exceeds input peak — while spending
+ * the headroom a lone transient was sitting on. That promise is now pinned by
+ * `test/dsp/la2aMakeupReference.test.js` rather than being a property of the
+ * arithmetic, which is the real cost of the change and is stated here so
+ * nobody has to rediscover it: it is enforced, not structural, and the two
+ * halves must ship together. `computeAutoMakeupPlan` is the only way to get
+ * either, and it returns both.
+ *
+ * WHY IT IS WORTH IT. The lone-transient failure the note above calls "the safe
+ * direction" is not free — it is the whole of the Peak Reduction 60 loudness
+ * collapse. On narration whose binding peak is one onset out of a 180 ms pause,
+ * peak-normalised to -1 dBFS at Peak Reduction 50: rms -17.39 -> -16.80 dB and
+ * peak-over-body 4.38 -> 3.78 dB, with delivered speech dynamic range unmoved
+ * at 9.11 -> 9.13. It recovers loudness that was being discarded rather than
+ * buying it by compressing harder — a hardware LA-2A capture of the same take
+ * sits at -16.38 and 3.35.
+ *
+ * ⚠ AND THE PERCENTILE IS NOW WHAT THE APP USES. It shipped off by default and
+ * behind a panel toggle, was auditioned, and the toggle came back out: there is
+ * no material on which the peak reference is the better answer, so there was
+ * nothing for a user to choose between. `useLA2A` fixes the reference and the
+ * panel has no control for it.
+ *
+ * ⚠ WHICH MEANS EVERY PATCH, PRESET AND PREVIOUSLY RENDERED FILE NOW SOUNDS
+ * DIFFERENT — several dB louder at the same settings, and louder the further up
+ * the knob. That is the intended change and it is not reversible from the UI.
+ * A file already rendered on disk is untouched; the same patch re-applied to it
+ * is not the same render.
+ *
+ * The peak reference remains the DEFAULT of this function and is what
+ * `npm run la2a:makeup` renders against for comparison. It is the reference
+ * anything measuring "makeup that cannot exceed the source by construction"
+ * should still use.
+ */
+export function peakOfChannels(channels, skip = 0) {
+  let peak = 0
+  for (const ch of channels) {
+    for (let i = skip; i < ch.length; i++) {
+      const v = ch[i] < 0 ? -ch[i] : ch[i]
+      if (v > peak) peak = v
+    }
+  }
+  return peak
+}
+
+/**
+ * THE PEAK RESTORE — the trim, in dB, that puts a rendered region's peak back
+ * ON the ceiling instead of somewhere under it.
+ *
+ * ⚠⚠ IT IS NOT THE PEAK REFERENCE COMING BACK, AND THAT OBJECTION WAS RAISED
+ * AND MEASURED DOWN. The reasoning against it was that restoring the peak after
+ * the solve is arithmetically the same as solving for the peak in the first
+ * place, so it would bring back the knob that ran backwards. That holds ONLY
+ * while the ceiling is idle. Once the ceiling is catching peaks it is a
+ * limiter, and the two paths separate — measured on a narrator's own 35 s take
+ * at Input 60, both ending at -1 dBFS: restored -16.94 dB rms against the peak
+ * reference's -19.21. Across the whole knob the restore holds -16.2 to -17.6
+ * where the peak reference slides -17.5 to -20.3. It is identical to the peak
+ * reference exactly where the ceiling does nothing (Input 20-30) and strictly
+ * better everywhere above.
+ *
+ * ⚠ SO THE MAKEUP REFERENCE IS UNCHANGED. The solve still matches the 99.9th
+ * percentile; this is a separate scalar applied to the finished render. The
+ * body-to-source relationship the percentile buys is what makes the restore
+ * safe to add, not something it replaces.
+ *
+ * ⚠ THE TRIM IS APPLIED BY SCALING THE RENDER, and that is equivalent to adding
+ * it to BOTH `outputGainDb` and `ceilingDb` — verified bit-identical to 1.2e-7
+ * (float32 rounding) over a nine-point Input sweep, because the ceiling's knee
+ * is defined in dB relative to its own threshold and is therefore homogeneous.
+ * Scaling the render is preferred anyway: it needs no second render and cannot
+ * be got wrong by a caller who updates one of the two numbers and not the other.
+ *
+ * ⚠⚠ AND IT MUST BE MEASURED OVER THE WHOLE RENDERED REGION, NOT THE SOLVE'S
+ * WINDOW. The makeup is solved on a capped, start-anchored window; a region's
+ * loudest moment routinely falls outside it, and `windowPeak <= wholePeak`
+ * always, so a window-derived trim is too GENEROUS. Applied with the ceiling
+ * raised to match, it would push the later passage past the source peak — the
+ * one guarantee the ceiling exists to provide, and a clip on anything already
+ * near 0 dBFS. Hence the apply path computes this on its own output, which is
+ * whole-region by construction.
+ *
+ * ⚠ THE PRICE, ACCEPTED DELIBERATELY: the live preview cannot know the region's
+ * rendered peak, so preview and apply can differ by this trim — up to ~1.9 dB at
+ * light settings, and under 0.1 dB from Input 40 up, where the ceiling is
+ * already holding the peak. Everywhere else in this codebase preview and apply
+ * are sample-identical; this is the one stage where they are not, and it was a
+ * deliberate call by the owner rather than an oversight.
+ *
+ * Returns 0 when there is no ceiling (the peak reference needs no restore — its
+ * guarantee is arithmetic) or when the region is silent.
+ *
+ * @param {Float32Array[]} channels the RENDERED region
+ * @param {number|null} ceilingDb the source region's peak, dBFS
+ */
+export function peakRestoreTrimDb(channels, ceilingDb) {
+  if (!Number.isFinite(ceilingDb)) return 0
+  const peak = peakOfChannels(channels)
+  if (!(peak > 0)) return 0
+  return ceilingDb - 20 * Math.log10(peak)
+}
+
+/**
+ * Scale a rendered region by `peakRestoreTrimDb`, in place, and return the trim.
+ *
+ * ⚠ A NEGATIVE TRIM IS APPLIED TOO, and that is the invariant rather than an
+ * edge case: if a render ever comes back ABOVE the ceiling this pulls it down,
+ * so "never louder than the source" holds by enforcement here as well as in the
+ * kernel. Clamping at zero would leave the one case that actually matters.
+ */
+export function restorePeakToCeiling(channels, ceilingDb) {
+  const trimDb = peakRestoreTrimDb(channels, ceilingDb)
+  if (!trimDb) return 0
+  const g = Math.pow(10, trimDb / 20)
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) ch[i] *= g
+  }
+  return trimDb
+}
+
+// ── The blend: makeup solved over dry·(1−mix) + wet·mix·g ───────────────────
+//
+// Shared by FET Punch and OptoSmooth. Given one render of the WET path, these
+// answer "what gain on the wet path makes the blended output hit its target"
+// with O(n) passes instead of renders. For FET Punch that is exact, because its
+// Output is the last multiply on the wet path. For OptoSmooth it is exact to
+// first order around the gain the wet path was rendered at — its Gain sits
+// before the output valve — so `solveMakeupPlan` re-renders and asks again.
+
+const LN10_OVER_20 = Math.LN10 / 20
+
+/**
+ * The blended output at wet gain `g` (linear), written into `scratch`, which
+ * the caller owns. `dry` and `wet` must be sample-aligned: any latency is the
+ * caller's to remove before this pairs `dry[i]` with `wet[i]`.
+ */
+export function blendInto(scratch, dry, wet, mix, g) {
+  const dryMix = 1 - mix
+  for (let ch = 0; ch < wet.length; ch++) {
+    const d = dry[ch]
+    const w = wet[ch]
+    const o = scratch[ch]
+    for (let i = 0; i < o.length; i++) o[i] = d[i] * dryMix + w[i] * mix * g
+  }
+  return scratch
+}
+
+/**
+ * The largest linear wet gain for which every blended sample stays within
+ * ±`limit` — the peak reference, solved in closed form. Each sample is
+ * `a + b·g`, so each bounds `g` from one side; the answer is the tightest bound.
+ *
+ * @returns the gain, or null when nothing on the wet path constrains it
+ */
+export function peakBlendGain(dry, wet, mix, limit) {
+  const dryMix = 1 - mix
+  let gMax = Infinity
+  for (let ch = 0; ch < wet.length; ch++) {
+    const d = dry[ch]
+    const w = wet[ch]
+    for (let i = 0; i < w.length; i++) {
+      const b = w[i] * mix
+      if (b === 0) continue
+      const a = d[i] * dryMix
+      // The binding end of this sample's interval is the one it moves toward.
+      const bound = (b > 0 ? limit - a : -limit - a) / b
+      if (bound < gMax) gMax = bound
+    }
+  }
+  return Number.isFinite(gMax) ? gMax : null
+}
+
+/**
+ * The linear wet gain that puts the blend's `MAKEUP_PERCENTILE` level on
+ * `targetRef`, searched over [minDb, maxDb].
+ *
+ * At mix 1 it is closed form: every sample is `b·g`, so the quantile scales
+ * with `g` exactly. Below mix 1 the dry sum breaks that, and it bisects —
+ * the quantile is monotone non-decreasing in `g` once the wet share
+ * dominates, and an answer pinned to an end of the bracket is the clamp doing
+ * its job, not a failed solve. Sixteen halvings of a 48 dB bracket land inside
+ * a thousandth of a dB.
+ *
+ * @param scratch  per-channel buffers the length of `wet`, reused across calls
+ * @returns the gain, or null when the wet path is silent at the reference
+ */
+export function percentileBlendGain(dry, wet, mix, targetRef, minDb, maxDb, scratch) {
+  if (mix >= 1) {
+    const wetRef = percentileOfChannels(wet, MAKEUP_PERCENTILE)
+    if (!(wetRef > 0)) return null
+    return targetRef / (wetRef * mix)
+  }
+  let loDb = minDb
+  let hiDb = maxDb
+  for (let i = 0; i < 16; i++) {
+    const midDb = 0.5 * (loDb + hiDb)
+    const ref = percentileOfChannels(blendInto(scratch, dry, wet, mix, Math.exp(midDb * LN10_OVER_20)), MAKEUP_PERCENTILE)
+    if (ref < targetRef) loDb = midDb
+    else hiDb = midDb
+  }
+  return Math.exp(0.5 * (loDb + hiDb) * LN10_OVER_20)
+}
+
+/**
+ * The makeup solve, and the ceiling that has to ship with it.
+ *
+ * ⚠ EXTRACTED FROM `la2aProcessor.js` SO FET PUNCH CAN USE IT, and the two
+ * halves still cannot be separated. A percentile reference does NOT guarantee
+ * "never louder than the source" — that is the point of it, since a peak
+ * reference lets one uncompressed onset pin the whole file — so the guarantee
+ * comes back as enforcement instead: a memoryless ceiling at the region's own
+ * peak, with a knee sized by how far the solve actually overshot it. Ask for
+ * `reference: 'percentile'` and you get a ceiling; ask for `'peak'` and there is
+ * nothing to catch and none is returned.
+ *
+ * The caller supplies its own renderer and its own latency, which is all that
+ * was ever LA-2A-specific about this.
+ *
+ * ⚠ BELOW MIX 1 THE LOOP CHANGES, AND IT HAS TO. The plain loop adds the
+ * whole dB error to the makeup each pass, which assumes a dB of makeup moves
+ * the output a dB. Summed with a dry path it moves it by the wet share only,
+ * so every pass under-corrects and four passes stall: measured on narration at
+ * Peak Reduction 70, the makeup landed 1.4 / 4.6 / 9.8 dB short at mix
+ * 0.5 / 0.3 / 0.1 (the level only 0.7 / 1.2 / 0.6 dB short — the dry path
+ * dominates — which is why a level check alone would not catch it). So below
+ * mix 1 each pass renders the WET path alone at the current makeup and solves
+ * the blend over that render (`percentileBlendGain` / `peakBlendGain`, FET
+ * Punch's solve), then re-renders to absorb whatever the renderer does after
+ * its gain stage. Measured: on target to 0.01 dB in two renders at every
+ * setting tried, PR 30-70 by mix 0.1-1, where the plain loop used four.
+ *
+ * At mix 1 the plain loop runs, unchanged: there the blend solve IS the plain
+ * correction, and leaving the code alone keeps every existing answer
+ * bit-identical.
+ *
+ * @param render   (channelData, extraParams) => channelData, at unity makeup
+ *                 plus whatever `extraParams` says
+ * @param latency  samples the renderer delays its output by, or 0
+ * @param mix      the renderer's wet/dry blend, 0-1; its dry path must be the
+ *                 input itself, aligned by `latency`
+ * @param mixKey   the renderer's param for it, set to 1 for the wet-only renders
+ * @param initialDb  the makeup the first render tries (at any mix). A caller
+ *                   re-solving after a small change passes its last answer
+ *                   and usually converges in ONE render; 0 is the default and
+ *                   leaves every existing answer bit-identical
+ * @param onRender (out, makeupDb) => void, called with each render at mix 1
+ *                 (latency trimmed) — so a caller can keep the last one instead
+ *                 of rendering the converged makeup again
+ */
+export function solveMakeupPlan({
+  channelData, render, latencySamples = 0, gainKey = 'gainDb',
+  reference = 'peak', maxIterations = 4, toleranceDb = 0.05,
+  minDb = -24, maxDb = 24, mix = 1, mixKey = 'mix',
+  initialDb = 0, onRender = null,
+}) {
+  if (reference !== 'peak' && reference !== 'percentile') {
+    throw new Error(`unknown makeup reference: ${reference}`)
+  }
+  const measureRef = reference === 'percentile'
+    ? (chs) => percentileOfChannels(chs, MAKEUP_PERCENTILE)
+    : peakOfChannels
+
+  const inputPeak = peakOfChannels(channelData)
+  const inputRef = measureRef(channelData)
+  if (!(inputPeak > 0) || !(inputRef > 0)) {
+    return { makeupDb: 0, ceilingDb: null, ceilingKneeDb: null }
+  }
+
+  /**
+   * ⚠ THE MEASURED SPAN MUST BE THE SPAN APPLY WRITES BACK. With lookahead the
+   * output lags its input, so the last `latency` samples never emerge and the
+   * first `latency` are the delay line filling with silence — measuring the
+   * render as-is compares a region's input peak against an output missing that
+   * region's tail, and on a short selection the tail is often where the peak is.
+   */
+  const len = channelData[0].length
+  const padded = latencySamples > 0
+    ? channelData.map((ch) => {
+      const q = new Float32Array(ch.length + latencySamples)
+      q.set(ch, 0)
+      return q
+    })
+    : channelData
+
+  const wetMix = Math.max(0, Math.min(1, Number.isFinite(mix) ? mix : 1))
+  if (wetMix <= 0) {
+    // All dry: the makeup reaches nothing, so there is nothing to solve.
+    return { makeupDb: 0, ceilingDb: null, ceilingKneeDb: null }
+  }
+  if (wetMix < 1) {
+    return solveBlendedMakeupPlan({
+      channelData, padded, len, render, latencySamples, gainKey, mixKey,
+      reference, maxIterations, toleranceDb, minDb, maxDb,
+      mix: wetMix, inputPeak, inputRef, initialDb,
+    })
+  }
+
+  let makeupDb = Number.isFinite(initialDb) ? Math.max(minDb, Math.min(maxDb, initialDb)) : 0
+  let lastOutPeak = 0
+  let lastMakeupDb = 0
+  for (let i = 0; i < maxIterations; i++) {
+    const rendered = render(padded, { [gainKey]: makeupDb })
+    const out = latencySamples > 0
+      ? rendered.map((ch) => ch.subarray(latencySamples, latencySamples + len))
+      : rendered
+    if (onRender) onRender(out, makeupDb)
+    lastOutPeak = peakOfChannels(out)
+    lastMakeupDb = makeupDb
+    const outRef = measureRef(out)
+    if (outRef <= 0) break
+    const correctionDb = 20 * Math.log10(inputRef / outRef)
+    makeupDb = Math.max(minDb, Math.min(maxDb, makeupDb + correctionDb))
+    if (Math.abs(correctionDb) < toleranceDb) break
+  }
+
+  if (reference !== 'percentile') {
+    // The peak reference needs no ceiling, so it needs no knee either.
+    return { makeupDb, ceilingDb: null, ceilingKneeDb: null }
+  }
+  const ceilingDb = 20 * Math.log10(inputPeak)
+  /**
+   * The loop renders at `makeupDb` and only THEN corrects it, so the last
+   * render is one step stale. Carried forward rather than re-rendered: the gain
+   * is ahead of the peak by that step, and the step is under `toleranceDb` on a
+   * converged solve.
+   */
+  const outPeakDb = lastOutPeak > 0
+    ? 20 * Math.log10(lastOutPeak) + (makeupDb - lastMakeupDb) : -Infinity
+  return { makeupDb, ceilingDb, ceilingKneeDb: ceilingKneeDbFor(outPeakDb - ceilingDb) }
+}
+
+/**
+ * `solveMakeupPlan` below mix 1: one wet-only render per pass, the blend solved
+ * over it, repeated until the wet path's own curvature has been absorbed. See
+ * the note on `solveMakeupPlan`.
+ */
+function solveBlendedMakeupPlan({
+  channelData, padded, len, render, latencySamples, gainKey, mixKey,
+  reference, maxIterations, toleranceDb, minDb, maxDb, mix, inputPeak, inputRef, initialDb = 0,
+}) {
+  const scratch = channelData.map(() => new Float32Array(len))
+  // A caller re-solving after a small change starts from its last answer: the
+  // first wet render then lands within the tolerance and the loop stops there.
+  // 0 (the default) leaves every existing answer bit-identical.
+  let makeupDb = Number.isFinite(initialDb) ? Math.max(minDb, Math.min(maxDb, initialDb)) : 0
+  let wet = null
+  let wetAtDb = 0
+  for (let i = 0; i < maxIterations; i++) {
+    const rendered = render(padded, { [gainKey]: makeupDb, [mixKey]: 1 })
+    wet = latencySamples > 0
+      ? rendered.map((ch) => ch.subarray(latencySamples, latencySamples + len))
+      : rendered
+    wetAtDb = makeupDb
+    // The extra wet gain, relative to the render, bounded so the answer stays
+    // inside [minDb, maxDb].
+    const g = reference === 'percentile'
+      ? percentileBlendGain(channelData, wet, mix, inputRef, minDb - makeupDb, maxDb - makeupDb, scratch)
+      : peakBlendGain(channelData, wet, mix, inputPeak)
+    if (g === null || !(g > 0)) break
+    const correctionDb = 20 * Math.log10(g)
+    makeupDb = Math.max(minDb, Math.min(maxDb, makeupDb + correctionDb))
+    if (Math.abs(correctionDb) < toleranceDb) break
+  }
+
+  if (reference !== 'percentile') {
+    return { makeupDb, ceilingDb: null, ceilingKneeDb: null }
+  }
+  const ceilingDb = 20 * Math.log10(inputPeak)
+  /**
+   * The overshoot the ceiling has to catch, read off the blend at the makeup
+   * that ships — the last wet render scaled by the final step, which is
+   * exactly what the solve itself assumed.
+   */
+  const outPeak = wet
+    ? peakOfChannels(blendInto(scratch, channelData, wet, mix, Math.exp((makeupDb - wetAtDb) * LN10_OVER_20)))
+    : 0
+  const outPeakDb = outPeak > 0 ? 20 * Math.log10(outPeak) : -Infinity
+  return { makeupDb, ceilingDb, ceilingKneeDb: ceilingKneeDbFor(outPeakDb - ceilingDb) }
 }

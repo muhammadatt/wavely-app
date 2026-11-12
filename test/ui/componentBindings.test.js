@@ -48,7 +48,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '../..')
 
 /**
- * The ResoTame surface, plus the preset menu. Widening this to every .vue is
+ * The Reso Soothe surface, plus the preset menu. Widening this to every .vue is
  * the obvious next step.
  *
  * PresetMenu is here because it is the one component outside this panel that
@@ -57,10 +57,9 @@ const ROOT = join(HERE, '../..')
  * to catch — silently at build, on render for the user.
  */
 const FILES = [
-  // The two export surfaces. Both destructure `useExport`, and that seam — a
+  // The export surface. It destructures `useExport`, and that seam — a
   // composable that stops exporting a name while its template keeps using it —
   // is the exact failure this file exists for.
-  'src/components/ExportDialog.vue',
   'src/components/FilesPanel.vue',
   'src/components/panels/PresetMenu.vue',
   'src/components/meters/ResonanceSpectrum.vue',
@@ -69,6 +68,26 @@ const FILES = [
   'src/components/panels/ResonanceModal.vue',
   'src/components/panels/ResonanceZoneControls.vue',
   'src/components/panels/ResonanceZoneCount.vue',
+  // The Modula kit and the panels converted to it. (FloatingWindow is not
+  // here: its frame's `:style` binding carries `//` comments, which this
+  // coarse reader takes for identifiers.)
+  'src/components/panels/PhatassModal.vue',
+  'src/components/panels/SchepsModal.vue',
+  'src/components/panels/HFLimiterModal.vue',
+  'src/components/panels/PlosiveModal.vue',
+  'src/components/panels/AirBandModal.vue',
+  'src/components/panels/DeEsserModal.vue',
+  'src/components/panels/DeEsserBandStrip.vue',
+  'src/components/panels/SoftClipperModal.vue',
+  'src/components/panels/windows/InflatorWindow.vue',
+  'src/components/panels/windows/SpectrumAnalyzerWindow.vue',
+  'src/components/panels/windows/NormalizeWindow.vue',
+  'src/components/panels/windows/LoudnessWindow.vue',
+  'src/components/meters/SpectrumDisplay.vue',
+  'src/components/meters/LevelMeter.vue',
+  ...readdirSync(join(ROOT, 'src/components/modula'))
+    .filter(f => f.endsWith('.vue'))
+    .map(f => `src/components/modula/${f}`),
 ]
 
 /**
@@ -203,7 +222,7 @@ for (const rel of FILES) {
   })
 }
 
-test('the file list covers every ResoTame component', () => {
+test('the file list covers every Reso Soothe component', () => {
   // ⚠ A LIST THAT SILENTLY STOPS COVERING THINGS IS WORSE THAN NO LIST. A new
   // component in these folders named Resonance* or Focus* is part of this panel
   // and belongs above.

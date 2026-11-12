@@ -1,0 +1,631 @@
+/**
+ * Saturation Bench — the layered waveshaper moved out of the De-Esser.
+ *
+ * Synthetic voice with realistic upper formants (energy above 3 kHz at −19.9
+ * dB of the vowel): a low-passed test voice makes every exciter look inert.
+ */
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  processSaturationBenchBuffer, SaturationBenchKernel, SAT_BENCH_LATENCY_SAMPLES, SAT_BENCH_MAX_LAYERS,
+  SAT_EMPH_CORNER_HZ, SAT_EMPH_DB, SAT_EMPH_Q, SAT_EMPH_TYPES, SAT_EMPH_QUICK, SAT_REF_CREST_DB,
+  emphasisSections, layerBand, layerBandSections, normalizeLayer, SAT_BAND_MIN_HZ,
+} from '../../src/audio/saturationBenchProcessor.js'
+import { measureBandSpectrum, bandRefPeakDb, voicingOffsetDb } from '../../src/audio/saturationBenchAnalysis.js'
+import {
+  toKernelParams, SATURATION_BENCH_DEFAULTS, SAT_BENCH_LAYER_PRESETS, layerCount, addLayer, removeLayer,
+} from '../../src/audio/saturationBenchParams.js'
+import { SHAPER_CURVES, SHAPER_REF_THD, sineThd, unitDriveU } from '../../src/audio/dsp/shaperCurves.js'
+import { JilesAtherton, hysteresisSineResponse, hysteresisSmallGain } from '../../src/audio/dsp/hysteresis.js'
+import { EMPHASIS_CORNER_HZ, EMPHASIS_MAX_DB, EMPHASIS_DEFAULT } from '../../src/audio/la2aProcessor.js'
+import { BiquadCascade, highpass, lowpass, peaking, magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
+
+const L = SAT_BENCH_LATENCY_SAMPLES
+
+/** Minimal per-sample biquad over the shared coefficient builders. */
+class Biquad {
+  constructor(c) { this.c = new BiquadCascade(1, 1); this.c.setSections([c]); this.b = new Float64Array(1); this.o = new Float64Array(1) }
+  tick(x) { this.b[0] = x; this.c.process(this.b, this.o, 1, 0); return this.o[0] }
+}
+
+function lcg(seed) {
+  let s = seed >>> 0
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0
+    return (s / 4294967296) * 2 - 1
+  }
+}
+
+function pink(n, seed = 1) {
+  const rnd = lcg(seed)
+  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0
+  const o = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const w = rnd()
+    b0 = 0.99886 * b0 + w * 0.0555179
+    b1 = 0.99332 * b1 + w * 0.0750759
+    b2 = 0.969 * b2 + w * 0.153852
+    b3 = 0.8665 * b3 + w * 0.3104856
+    b4 = 0.55 * b4 + w * 0.5329522
+    b5 = -0.7616 * b5 - w * 0.016898
+    o[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.05
+    b6 = w * 0.115926
+  }
+  return o
+}
+
+function makeRichSpeech(sr, { seconds = 3, seed = 3 } = {}) {
+  const rnd = lcg(seed)
+  const n = Math.round(sr * seconds)
+  const x = new Float32Array(n)
+  const labels = new Uint8Array(n)
+  const a = Math.exp(-2 * Math.PI * 500 / sr)
+  let lp = 0
+  const fs = [peaking(sr, 700, 3, 12), peaking(sr, 1200, 3, 10), peaking(sr, 2600, 4, 5), peaking(sr, 3500, 4, 3), lowpass(sr, 4000, 0.6)]
+    .map(c => new Biquad(c))
+  const sh = new Biquad(highpass(sr, 5000, 0.7))
+  const sl = new Biquad(lowpass(sr, 9000, 0.7))
+  let phase = 0
+  for (let i = 0; i < n; i++) {
+    const t = (i % sr) / sr
+    let v = 0
+    let lab = 0
+    const voiced = t < 0.35 || (t >= 0.39 && t < 0.6)
+    let pulse = 0
+    if (voiced) {
+      phase += 130 / sr
+      if (phase >= 1) phase -= 1
+      pulse = phase < 130 / sr ? 1 : 0
+    }
+    lp = (1 - a) * pulse + a * lp
+    let vv = lp
+    for (const f of fs) vv = f.tick(vv)
+    if (voiced) { v = vv * 7.249; lab = 1 }
+    const sib = sl.tick(sh.tick(rnd()))
+    if ((t >= 0.35 && t < 0.39) || (t >= 0.7 && t < 0.735)) {
+      const tt = t < 0.5 ? t - 0.35 : t - 0.7
+      v += sib * Math.pow(10, -22 / 20) * 2.2 * Math.min(1, tt / 0.003)
+      lab = 2
+    }
+    x[i] = v
+    labels[i] = lab
+  }
+  return { x, labels }
+}
+
+
+/** Energy of `y` in [lo, hi) Hz over samples where `mask(i)`, after the first second. */
+function bandEnergy(y, sr, mask, lo, hi) {
+  const f = []
+  if (lo) f.push(new Biquad(highpass(sr, lo, 0.7)), new Biquad(highpass(sr, lo, 0.7)))
+  if (hi) f.push(new Biquad(lowpass(sr, hi, 0.7)), new Biquad(lowpass(sr, hi, 0.7)))
+  let s = 0
+  for (let i = 0; i < y.length; i++) {
+    let v = y[i]
+    for (const q of f) v = q.tick(v)
+    if (i > sr && mask(i)) s += v * v
+  }
+  return s
+}
+
+/** Render with the latency removed, so output index i lines up with input i. */
+function render(x, sr, params, options) {
+  const y = processSaturationBenchBuffer([x], sr, params, options).channelData[0]
+  const o = new Float32Array(x.length)
+  o.set(y.subarray(L))
+  return o
+}
+
+const layers = (...ls) => ({ layers: ls.map(l => ({ on: true, ...l })) })
+
+test('curves: unity slope at zero, matched to the reference THD at their unit drive', () => {
+  for (const c of SHAPER_CURVES.filter(c => !c.stateful)) {
+    assert.equal(c.f(0), 0, c.id)
+    const slope = (c.f(1e-6) - c.f(-1e-6)) / 2e-6
+    assert.ok(Math.abs(slope - 1) < 1e-6, `${c.id} slope ${slope}`)
+    const thd = sineThd(c.f, unitDriveU(c.id))
+    assert.ok(Math.abs(thd - SHAPER_REF_THD) < 1e-4, `${c.id} THD ${thd}`)
+  }
+})
+
+// ── Hysteresis: the one stateful curve ───────────────────────────────────────
+
+test('hysteresis: unity at low level, matched to the reference THD at its unit drive', () => {
+  const scale = 1 / hysteresisSmallGain()
+  const quiet = hysteresisSineResponse(0.01, { scale })
+  assert.ok(Math.abs(quiet.gain - 1) < 1e-9, `small-signal gain ${quiet.gain}`)
+  assert.ok(Math.abs(quiet.lagDeg) < 0.1, `small-signal lag ${quiet.lagDeg}°`)
+  const thd = hysteresisSineResponse(unitDriveU('hysteresis'), { samples: 256, cycles: 3 }).thd
+  assert.ok(Math.abs(thd - SHAPER_REF_THD) < 1e-4, `THD ${thd}`)
+})
+
+test('hysteresis: never expands on a sine — compressive from the calibration point up, with a real loop', () => {
+  const scale = 1 / hysteresisSmallGain()
+  let prev = Infinity
+  for (const h of [0.1, 0.3, 1, 2, 4, 8]) {
+    const r = hysteresisSineResponse(h, { scale })
+    const g = 20 * Math.log10(r.gain)
+    assert.ok(g < 0.25, `h ${h}: +${g.toFixed(2)} dB`)
+    if (h >= 1) assert.ok(g < prev, `h ${h}: gain must fall with level (${g.toFixed(2)} after ${prev.toFixed(2)})`)
+    prev = g
+  }
+  // The memory is there: the fundamental lags, more as it is pushed.
+  const lag = hysteresisSineResponse(2, { scale }).lagDeg
+  assert.ok(lag > 0.8 && lag < 3, `lag at 2×: ${lag.toFixed(2)}°`)
+})
+
+test('hysteresis: a fast ripple biases the slow signal by under 0.5 dB (speech self-bias stays bounded)', () => {
+  // Small reversals pull J-A toward its anhysteretic curve; at the shipped
+  // voicing that lift must stay small, or a voice's own top end expands its bass.
+  const fs = 176400
+  const ja = new JilesAtherton({ scale: 1 / hysteresisSmallGain() })
+  let xy = 0, xx = 0
+  for (let i = 0; i < fs; i++) {
+    const lf = 0.3 * Math.sin((2 * Math.PI * 120 * i) / fs)
+    const y = ja.step(lf + 0.2 * Math.sin((2 * Math.PI * 3000 * i) / fs))
+    if (i > fs / 2) { xy += lf * y; xx += lf * lf }
+  }
+  const g = 20 * Math.log10(xy / xx)
+  assert.ok(g < 0.5, `self-bias +${g.toFixed(2)} dB`)
+})
+
+test('hysteresis: each channel has its own state, and a quiet signal passes at unity gain', () => {
+  const sr = 44100
+  const a = pink(sr, 3)
+  const b = pink(sr, 9)
+  const loud = a.map(v => v * 8)
+  const p = layers({ curve: 'hysteresis', mode: 'full', driveDb: 12 })
+  const st = processSaturationBenchBuffer([loud, b], sr, p).channelData
+  const solo = processSaturationBenchBuffer([b], sr, p).channelData[0]
+  for (let i = 0; i < b.length; i++) if (st[1][i] !== solo[i]) assert.fail(`right channel differs at ${i}: state is shared`)
+  // Quiet: the LEVEL passes at unity once the demagnetised start has settled.
+  // ⚠ Not the waveform: J-A's low-level residual barely falls with level on
+  // broadband material (see dsp/hysteresis.js), so only the gain is asserted.
+  const quiet = b.map(v => v * 1e-3)
+  const y = processSaturationBenchBuffer([quiet], sr, p).channelData[0]
+  let xy = 0, xx = 0
+  for (let i = L + sr / 4; i < quiet.length; i++) { xy += y[i] * quiet[i - L]; xx += quiet[i - L] ** 2 }
+  const g = 20 * Math.log10(xy / xx)
+  assert.ok(Math.abs(g) < 0.5, `quiet gain ${g.toFixed(2)} dB`)
+})
+
+test('latency is constant: every layer off is a pure delay of exactly SAT_BENCH_LATENCY_SAMPLES', () => {
+  const sr = 44100
+  const x = pink(sr, 4)
+  const y = processSaturationBenchBuffer([x], sr, { layers: [] }).channelData[0]
+  assert.equal(L, SAT_BENCH_MAX_LAYERS * 50)
+  let worst = 0
+  for (let i = 0; i < x.length - L; i++) worst = Math.max(worst, Math.abs(y[i + L] - x[i]))
+  assert.equal(worst, 0)
+})
+
+test('a layer sounds the same in any slot: the voicing weight is aligned per slot', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr)
+  const layer = { on: true, curve: 'tanh', driveDb: 14, emph: 'reverse', loHz: 3000, mode: 'voiced' }
+  const first = render(x, sr, { layers: [layer] })
+  const last = render(x, sr, { layers: [{ on: false }, { on: false }, { on: false }, layer] })
+  let worst = 0
+  for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(first[i] - last[i]))
+  assert.ok(worst < 1e-7, `slot 1 vs slot 4: ${worst}`)
+})
+
+test('drive follows the reference peak dB for dB: level-invariant', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr)
+  const a = 2 // +6.02 dB
+  const hot = x.map(v => v * a)
+  const p = { curve: 'tanh', driveDb: 6, emph: 'opto', mode: 'full', refPeakDb: -10 }
+  const y1 = render(x, sr, layers(p))
+  const y2 = render(hot, sr, layers({ ...p, refPeakDb: -10 + 20 * Math.log10(a) }))
+  let worst = 0
+  for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(y2[i] / a - y1[i]))
+  assert.ok(worst < 1e-5, `worst ${worst}`)
+})
+
+test('emphasis: the corner is LA Vintage 2A’s (copied not imported), the depth is deliberately twice its', () => {
+  assert.equal(SAT_EMPH_CORNER_HZ, EMPHASIS_CORNER_HZ)
+  // Set by hand on the bench: 24 × 0.85, against LA Vintage 2A's 12 × 0.85.
+  assert.equal(SAT_EMPH_DB, 24 * 0.85)
+  assert.equal(SAT_EMPH_DB, 2 * (EMPHASIS_MAX_DB * EMPHASIS_DEFAULT / 100))
+})
+
+test('emphasis: OPTO distorts the highs harder, REVERSE spares them (sine)', () => {
+  const sr = 44100
+  const n = sr * 2
+  const thdAt = (f0, emph) => {
+    const x = new Float32Array(n)
+    for (let i = 0; i < n; i++) x[i] = Math.pow(10, -8 / 20) * Math.sin(2 * Math.PI * f0 * i / sr)
+    const y = render(x, sr, layers({ curve: 'quartic', driveDb: 4.5, mode: 'full', emph, refPeakDb: -8 }))
+    const a = sr, b = n - 4096, N = b - a
+    const pw = (f) => {
+      let c = 0, s = 0
+      for (let i = a; i < b; i++) {
+        const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * (i - a) / N)
+        c += w * y[i] * Math.cos(2 * Math.PI * f * i / sr)
+        s += w * y[i] * Math.sin(2 * Math.PI * f * i / sr)
+      }
+      return c * c + s * s
+    }
+    let h = 0
+    for (let k = 2; k * f0 < 21000; k++) h += pw(k * f0)
+    return Math.sqrt(h / pw(f0))
+  }
+  const off = thdAt(5000, 'off'), opto = thdAt(5000, 'opto'), rev = thdAt(5000, 'reverse')
+  assert.ok(opto > off * 1.3, `5 kHz: opto ${opto} vs off ${off}`)
+  assert.ok(rev < off * 0.2, `5 kHz: reverse ${rev} vs off ${off}`)
+})
+
+test('emphasis: a legacy OPTO / REV / OFF layer migrates to the equivalent filter, bit for bit', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr, { seconds: 2 })
+  const base = { curve: 'tanh', driveDb: 12, mode: 'full', refPeakDb: -10 }
+  for (const [emph, db] of [['opto', SAT_EMPH_DB], ['reverse', -SAT_EMPH_DB], ['off', 0]]) {
+    const n = normalizeLayer({ emph })
+    assert.deepEqual([n.emphType, n.emphHz, n.emphQ, n.emphDb], ['hishelf', SAT_EMPH_CORNER_HZ, SAT_EMPH_Q, db])
+    const a = render(x, sr, layers({ ...base, emph }))
+    const b = render(x, sr, layers({ ...base, emphType: 'hishelf', emphHz: SAT_EMPH_CORNER_HZ, emphQ: SAT_EMPH_Q, emphDb: db }))
+    assert.deepEqual(a, b, emph)
+  }
+  // An explicit gain wins over a stale legacy string.
+  assert.equal(normalizeLayer({ emph: 'opto', emphDb: -3 }).emphDb, -3)
+})
+
+test('emphasis: every shape\'s de-emphasis is the exact inverse of its pre-emphasis', () => {
+  const sr = 44100
+  const freqs = [60, 150, 400, 1000, 2300, 5000, 9000, 15000, 20000]
+  for (const type of SAT_EMPH_TYPES) {
+    for (const [hz, q, db] of [[2300, SAT_EMPH_Q, 20.4], [800, 2.5, -14], [6000, 0.4, 24], [250, 4, 9]]) {
+      const { pre, de } = emphasisSections(type, hz, q, db, sr)
+      const a = magnitudeResponseDb(pre, freqs, sr)
+      const b = magnitudeResponseDb(de, freqs, sr)
+      for (let i = 0; i < freqs.length; i++) {
+        assert.ok(Math.abs(a[i] + b[i]) < 1e-6, `${type} ${hz}/${q}/${db} @ ${freqs[i]}: ${a[i]} + ${b[i]}`)
+      }
+    }
+  }
+})
+
+test('emphasis: 0 dB is off whatever the shape, frequency and Q, and the three shapes aim differently', () => {
+  const sr = 44100
+  const n = sr * 2
+  const tone = f0 => {
+    const x = new Float32Array(n)
+    for (let i = 0; i < n; i++) x[i] = Math.pow(10, -8 / 20) * Math.sin(2 * Math.PI * f0 * i / sr)
+    return x
+  }
+  const base = { curve: 'tanh', driveDb: 0, mode: 'full', refPeakDb: -8 }
+  const x = tone(200)
+  const off = render(x, sr, layers({ ...base, emphDb: 0 }))
+  for (const type of SAT_EMPH_TYPES) {
+    assert.deepEqual(render(x, sr, layers({ ...base, emphType: type, emphHz: 1234, emphQ: 3, emphDb: 0 })), off, type)
+  }
+  // The energy a layer adds on a 200 Hz tone: a low shelf and a bell on it push the tone into the
+  // curve; a high shelf well above it does not.
+  const added = (type, hz, db) => {
+    const y = render(x, sr, layers({ ...base, emphType: type, emphHz: hz, emphQ: 1, emphDb: db }))
+    let e = 0
+    for (let i = sr; i < n; i++) e += (y[i] - x[i]) * (y[i] - x[i])
+    return e
+  }
+  const e0 = added('hishelf', 2300, 0)
+  assert.ok(added('loshelf', 1000, 18) > e0 * 3, 'low shelf')
+  assert.ok(added('bell', 200, 18) > e0 * 3, 'bell')
+  assert.ok(added('hishelf', 2300, 18) < e0 * 1.5, 'high shelf leaves a 200 Hz tone alone')
+})
+
+test('emphasis: the bypass is a 0 dB pair — bit-identical to Gain 0, and the gain it leaves alone comes back exactly', () => {
+  const sr = 44100
+  const n = sr * 2
+  const x = new Float32Array(n)
+  for (let i = 0; i < n; i++) x[i] = Math.pow(10, -8 / 20) * Math.sin(2 * Math.PI * 3000 * i / sr)
+  const base = { curve: 'tanh', driveDb: 6, mode: 'full', refPeakDb: -8, emphType: 'hishelf', emphHz: 2300, emphQ: 0.71 }
+  const on = render(x, sr, layers({ ...base, emphDb: 20.4 }))
+  const bypassed = render(x, sr, layers({ ...base, emphDb: 20.4, emphOn: false }))
+  const flat = render(x, sr, layers({ ...base, emphDb: 0 }))
+  assert.deepEqual(bypassed, flat, 'bypassed with Gain 20.4 renders as Gain 0')
+  assert.notDeepEqual(on, flat, 'the pair does something while it is on')
+  // `emphOn` absent is on: layers saved before the switch existed keep their sound.
+  assert.deepEqual(render(x, sr, layers({ ...base, emphDb: 20.4, emphOn: true })), on)
+  assert.equal(normalizeLayer({ emphDb: 20.4, emphOn: false }).emphDb, 20.4, 'the knob value survives the bypass')
+  assert.equal(normalizeLayer({ emphDb: 20.4 }).emphOn, true)
+})
+
+test('rows: the layers in use are contiguous from the top; add brings in the next slot, remove keeps the rest in order', () => {
+  const factory = SAT_BENCH_LAYER_PRESETS.map(l => ({ ...l }))
+  assert.equal(layerCount(factory), 2)
+  const three = addLayer(factory)
+  assert.deepEqual(three.map(l => l.on), [true, true, true, false])
+  assert.equal(three[2].curve, factory[2].curve, 'the new row is the slot as it stood')
+  assert.equal(layerCount(addLayer(three)), 4)
+  assert.equal(addLayer(addLayer(three)), null, 'nothing left to add')
+  // Removing the first row: the rest move up in order, and the removed layer waits just below them, off, with its settings.
+  const tuned = three.map((l, i) => (i === 0 ? { ...l, driveDb: 7.5 } : { ...l }))
+  const less = removeLayer(tuned, 0)
+  assert.deepEqual(less.map(l => l.on), [true, true, false, false])
+  assert.deepEqual(less.slice(0, 2).map(l => l.curve), [tuned[1].curve, tuned[2].curve])
+  assert.equal(less[2].curve, tuned[0].curve)
+  assert.equal(less[2].driveDb, 7.5, 'its settings are kept')
+  // Adding again brings back exactly that layer, at the bottom of the rows.
+  const back = addLayer(less)
+  assert.deepEqual(back.map(l => l.on), [true, true, true, false])
+  assert.equal(back[2].curve, tuned[0].curve)
+  assert.equal(back[2].driveDb, 7.5)
+  // The last row stays, and a row that is not in use cannot be removed.
+  assert.equal(removeLayer(factory.map((l, i) => ({ ...l, on: i === 0 })), 0), null)
+  assert.equal(removeLayer(factory, 3), null)
+  // The helpers never touch their input.
+  assert.deepEqual(factory.map(l => l.on), [true, true, false, false])
+})
+
+test('params: every bench layer is FULL whatever a stored state says, and the bypass reaches the kernel', () => {
+  for (const l of SAT_BENCH_LAYER_PRESETS) assert.equal(l.mode, 'full')
+  const k = toKernelParams({ layers: [{ ...SAT_BENCH_LAYER_PRESETS[1], mode: 'voiced', emphOn: false }] })
+  assert.equal(k.layers[0].mode, 'full')
+  assert.equal(k.layers[0].emphOn, false)
+  assert.equal(toKernelParams({ layers: [{ ...SAT_BENCH_LAYER_PRESETS[1] }] }).layers[0].emphOn, true)
+})
+
+test('emphasis: out-of-range values are clamped, and the quick buttons are the 2300 Hz pair', () => {
+  const n = normalizeLayer({ emphType: 'nope', emphHz: 1e9, emphQ: 0.001, emphDb: 99 })
+  assert.deepEqual([n.emphType, n.emphHz, n.emphQ, n.emphDb], ['hishelf', 16000, 0.3, 24])
+  assert.equal(SAT_EMPH_QUICK.opto.emphDb, -SAT_EMPH_QUICK.reverse.emphDb)
+  assert.deepEqual(Object.keys(SAT_EMPH_QUICK.off), ['emphDb'])
+})
+
+test('band: the Low knob opens at 1 Hz and its first step is gentle — no cliff off the bottom', () => {
+  assert.equal(SAT_BAND_MIN_HZ, 1)
+  assert.deepEqual(layerBand(1, 20000, 44100), { lo: null, hi: null })
+  assert.deepEqual(layerBand(2, 20000, 44100), { lo: 2, hi: null })
+  // The value is the real corner — no remap.
+  assert.deepEqual(layerBandSections(30, 20000, 44100)[0], highpass(44100, 30, Math.SQRT1_2))
+  const sr = 44100
+  const n = sr * 3
+  // A vowel-like stack with a syllable envelope: an even curve rectifies it and
+  // its added signal is mostly below 60 Hz, which the output-side filter takes.
+  const x = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const env = 0.5 + 0.5 * Math.sin(2 * Math.PI * 3 * i / sr)
+    let v = 0
+    for (let h = 1; h <= 12; h++) v += Math.sin(2 * Math.PI * 140 * h * i / sr) / h
+    x[i] = 0.18 * env * v
+  }
+  const layer = lo => ({
+    curve: 'quartic', driveDb: 0, loHz: lo, hiHz: 400, mode: 'full', refPeakDb: -12,
+    emphType: 'bell', emphHz: 350, emphQ: 0.5, emphDb: 24,
+  })
+  const addedRms = y => {
+    let e = 0
+    for (let i = sr; i < n - L; i++) e += (y[i] - x[i]) ** 2
+    return 10 * Math.log10(e / (n - L - sr))
+  }
+  const open = render(x, sr, layers(layer(1)))
+  // Open is no filter at all: identical to a layer that never set a Low edge.
+  const { loHz, ...noLow } = layer(1)
+  assert.deepEqual(render(x, sr, layers(noLow)), open)
+  const two = addedRms(render(x, sr, layers(layer(2))))
+  const twenty = addedRms(render(x, sr, layers(layer(20))))
+  assert.ok(Math.abs(two - addedRms(open)) < 1.5, `2 Hz: ${two} vs open ${addedRms(open)}`)
+  // What the first click used to be: a 20 Hz corner is a cliff on this material.
+  assert.ok(twenty < addedRms(open) - 4, `20 Hz: ${twenty} vs open ${addedRms(open)}`)
+})
+
+test('amount: scales only what the layer adds — 0 dB is bit-identical, +6 dB doubles the added signal', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr, { seconds: 2 })
+  const base = { curve: 'quartic', driveDb: 30, mode: 'full', refPeakDb: -10 }
+  const ref = render(x, sr, layers(base))
+  assert.deepEqual(render(x, sr, layers({ ...base, amountDb: 0 })), ref)
+  const up = render(x, sr, layers({ ...base, amountDb: 20 * Math.log10(2) }))
+  const down = render(x, sr, layers({ ...base, amountDb: -24 }))
+  let worstUp = 0, worstDown = 0, scale = 0
+  for (let i = sr; i < x.length - L; i++) {
+    const a = ref[i] - x[i]
+    worstUp = Math.max(worstUp, Math.abs((up[i] - x[i]) - 2 * a))
+    worstDown = Math.max(worstDown, Math.abs((down[i] - x[i]) - a * Math.pow(10, -24 / 20)))
+    scale = Math.max(scale, Math.abs(a))
+  }
+  assert.ok(scale > 1e-4, 'the layer must add something to scale')
+  assert.ok(worstUp < 1e-6, `+6 dB: ${worstUp}`)
+  assert.ok(worstDown < 1e-6, `-24 dB: ${worstDown}`)
+  assert.equal(normalizeLayer({ amountDb: 99 }).amountDb, 24)
+  assert.equal(normalizeLayer({}).amountDb, 0)
+})
+
+test('band: what a layer adds stays inside its band', () => {
+  const sr = 44100
+  const { x, labels } = makeRichSpeech(sr)
+  const vow = i => labels[i] === 1
+  // An even curve on a high band makes difference tones below it; the second
+  // band pass removes them.
+  const hf = render(x, sr, layers({ curve: 'asym', driveDb: 16, loHz: 3000, mode: 'full' }))
+  const dHf = hf.map((v, i) => v - x[i])
+  const below = 10 * Math.log10(bandEnergy(dHf, sr, vow, 0, 2000) / bandEnergy(dHf, sr, vow, 3000, 0))
+  assert.ok(below < -20, `HF layer, added below 2 kHz re above 3 kHz: ${below.toFixed(1)} dB`)
+  // An odd curve on a low band makes harmonics above it; the low-pass keeps them in.
+  const lf = render(x, sr, layers({ curve: 'tanh', driveDb: 12, hiHz: 500, mode: 'full' }))
+  const dLf = lf.map((v, i) => v - x[i])
+  const above = 10 * Math.log10(bandEnergy(dLf, sr, vow, 1500, 0) / bandEnergy(dLf, sr, vow, 0, 500))
+  assert.ok(above < -20, `LF layer, added above 1.5 kHz re below 500 Hz: ${above.toFixed(1)} dB`)
+})
+
+test('band: open edges are no filter at all, and the band never closes', () => {
+  assert.deepEqual(layerBand(1, 20000, 44100), { lo: null, hi: null })
+  assert.deepEqual(layerBand(3000, 20000, 44100), { lo: 3000, hi: null })
+  const tight = layerBand(1000, 1000, 44100)
+  assert.ok(tight.hi / tight.lo >= Math.pow(2, 1 / 3) - 1e-9, JSON.stringify(tight))
+})
+
+test('VOICED keeps an exciter out of sibilants and pauses; FULL excites the "s"', () => {
+  const sr = 44100
+  const { x: voice, labels } = makeRichSpeech(sr)
+  const floor = pink(voice.length, 11)
+  const x = voice.map((v, i) => v + floor[i] * 0.002)
+  // The 3 kHz-up band's measured reference on this voice (see the calibration
+  // test); the app measures it per file.
+  const p = { curve: 'tanh', driveDb: 27, emph: 'reverse', loHz: 3000, refPeakDb: -23 }
+  const y0 = x
+  const yv = render(x, sr, layers({ ...p, mode: 'voiced' }))
+  const yf = render(x, sr, layers({ ...p, mode: 'full' }))
+  const lift = (y, m) => 10 * Math.log10(bandEnergy(y, sr, m, 5000, 0) / bandEnergy(y0, sr, m, 5000, 0))
+  const vow = i => labels[i] === 1
+  const sib = i => labels[i] === 2
+  const t = i => (i % sr) / sr
+  const gap = i => labels[i] === 0 && ((t(i) > 0.62 && t(i) < 0.7) || t(i) > 0.755)
+  const vV = lift(yv, vow), sV = lift(yv, sib), sF = lift(yf, sib), gV = lift(yv, gap)
+  assert.ok(vV > 1, `vowels brightened: ${vV.toFixed(2)} dB`)
+  // FULL's margin over VOICED on the "s" was +0.9 dB at ±10.2 dB emphasis; REV at ±20.4 dB takes the
+  // sibilants out before the curve too, so at +27 it is ~+0.3.
+  assert.ok(sV < 0.3 && sF > sV + 0.2, `"s": voiced ${sV.toFixed(2)}, full ${sF.toFixed(2)} dB`)
+  assert.ok(Math.abs(gV) < 0.1, `pauses: ${gV.toFixed(3)} dB`)
+})
+
+test('calibration: a band’s reference peak is its gated level plus crest', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr, { seconds: 4 })
+  const seg = [{ outputStart: 0, sourceStart: 0, sourceEnd: x.length / sr, sourceBuffer: { numberOfChannels: 1, getChannelData: () => x } }]
+  const s = measureBandSpectrum(seg, 0, x.length / sr, sr, 1)
+  const full = bandRefPeakDb(s, 20, 20000)
+  assert.ok(Math.abs(full - (s.gatedRmsDb + SAT_REF_CREST_DB)) < 0.2, `full ${full} vs gated ${s.gatedRmsDb}`)
+  const hf = bandRefPeakDb(s, 3000, 20000)
+  const lo = bandRefPeakDb(s, 80, 500)
+  assert.ok(hf < full - 10 && lo < full, `3k+ ${hf.toFixed(1)}, 80–500 ${lo.toFixed(1)}, full ${full.toFixed(1)}`)
+  assert.ok(Math.abs(voicingOffsetDb(s) - (s.gatedRmsDb + 20)) < 1e-9)
+  // A silent region measures nothing, and the fallback is the nominal point.
+  const quiet = [{ ...seg[0], sourceBuffer: { numberOfChannels: 1, getChannelData: () => new Float32Array(x.length) } }]
+  assert.equal(measureBandSpectrum(quiet, 0, x.length / sr, sr, 1), null)
+  assert.equal(bandRefPeakDb(null, 3000, 20000), -8)
+})
+
+test('analysis: channels are measured apart, never summed', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr, { seconds: 4 })
+  const neg = x.map(v => -v)
+  const silent = new Float32Array(x.length)
+  const stereo = (l, r) => [{
+    outputStart: 0, sourceStart: 0, sourceEnd: x.length / sr,
+    sourceBuffer: { numberOfChannels: 2, getChannelData: ch => (ch === 0 ? l : r) },
+  }]
+  const mono = measureBandSpectrum([{ outputStart: 0, sourceStart: 0, sourceEnd: x.length / sr, sourceBuffer: { numberOfChannels: 1, getChannelData: () => x } }], 0, x.length / sr, sr, 1)
+  // Opposite phase on both sides: a mono sum would cancel to null.
+  const anti = measureBandSpectrum(stereo(x, neg), 0, x.length / sr, sr, 2)
+  assert.ok(anti, 'opposite-phase stereo must not cancel')
+  assert.ok(Math.abs(anti.gatedRmsDb - mono.gatedRmsDb) < 1e-6, `${anti.gatedRmsDb} vs ${mono.gatedRmsDb}`)
+  // Hard-panned: the shaper sees the full-level channel, so the reading is per channel's power
+  // averaged with silence — 3 dB under mono, not the 6 dB a (L + R) / 2 sum would give.
+  const panned = measureBandSpectrum(stereo(x, silent), 0, x.length / sr, sr, 2)
+  assert.ok(Math.abs(panned.gatedRmsDb - (mono.gatedRmsDb - 10 * Math.log10(2))) < 1e-6, `${panned.gatedRmsDb}`)
+})
+
+test('analysis: a long file is sampled, not scanned, and agrees with the full read', () => {
+  const sr = 44100
+  const { x } = makeRichSpeech(sr, { seconds: 8 })
+  const seg = [{ outputStart: 0, sourceStart: 0, sourceEnd: x.length / sr, sourceBuffer: { numberOfChannels: 1, getChannelData: () => x } }]
+  const full = measureBandSpectrum(seg, 0, x.length / sr, sr, 1)
+  const sampled = measureBandSpectrum(seg, 0, x.length / sr, sr, 1, { maxRmsBlocks: 32 })
+  assert.ok(Math.abs(full.gatedRmsDb - sampled.gatedRmsDb) < 1.5, `${full.gatedRmsDb} vs ${sampled.gatedRmsDb}`)
+})
+
+test('params: plain, four layers, the factory pair on by default', () => {
+  const k = toKernelParams(SATURATION_BENCH_DEFAULTS)
+  assert.deepEqual(JSON.parse(JSON.stringify(k)), k)
+  assert.equal(k.layers.length, SAT_BENCH_MAX_LAYERS)
+  assert.deepEqual(SAT_BENCH_LAYER_PRESETS.map(l => l.on), [true, true, false, false])
+  assert.equal(normalizeLayer({ curve: 'nope', emph: 'nope', mode: 'nope' }).curve, 'quartic')
+  const kern = new SaturationBenchKernel(44100)
+  kern.setParams(k, true)
+  assert.equal(kern.latencySamples, L)
+})
+
+// ── Base-rate slots (oversample: false) ──────────────────────────────────────
+
+const SR = 44100
+
+test('a base-rate slot has no latency, and the kernel latency is the sum of its slots', () => {
+  const k = new SaturationBenchKernel(SR, { slots: 3, oversample: [false, true, false] })
+  assert.equal(k.latencySamples, SAT_BENCH_LATENCY_SAMPLES / SAT_BENCH_MAX_LAYERS)
+  const x = new Float32Array(4096)
+  x[100] = 0.5
+  // All slots off: a pure delay of exactly the oversampled slot's latency.
+  const { channelData: [y], latencySamples } = processSaturationBenchBuffer([x], SR, { layers: [] }, { slots: 3, oversample: [false, true, false] })
+  assert.equal(latencySamples, k.latencySamples)
+  for (let i = 0; i < x.length; i++) assert.equal(y[i], i >= latencySamples ? x[i - latencySamples] : 0)
+  const one = processSaturationBenchBuffer([x], SR, { layers: [] }, { slots: 1, oversample: [false] })
+  assert.equal(one.latencySamples, 0)
+  for (let i = 0; i < x.length; i++) assert.equal(one.channelData[0][i], x[i])
+})
+
+test('a LOW-band layer at the base rate renders what 4x does; a full-band one does not', () => {
+  const x = makeRichSpeech(SR).x
+  const added = (layer, oversample) => {
+    const { channelData: [y], latencySamples: Ly } = processSaturationBenchBuffer([x], SR, { layers: [layer] }, { slots: 1, oversample: [oversample] })
+    const d = new Float64Array(x.length - 64)
+    for (let i = 0; i < d.length; i++) d[i] = y[i + Ly] - x[i]
+    return d
+  }
+  // Mismatch, dB re what the layer adds.
+  const mismatch = (layer) => {
+    const a = added(layer, true), b = added(layer, false)
+    let e = 0, s = 0
+    for (let i = 2000; i < a.length; i++) { e += (a[i] - b[i]) ** 2; s += a[i] ** 2 }
+    assert.ok(s > 0, 'the layer must add something')
+    return 10 * Math.log10(e / s)
+  }
+  const base = { on: true, mode: 'full', amountDb: 0, refPeakDb: -14 }
+  // PHAT*SS's two low layers, as voiced.
+  const lowQ = mismatch({ ...base, curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14 })
+  const lowC = mismatch({ ...base, curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10 })
+  const full = mismatch({ ...base, curve: 'tanh', driveDb: 24, loHz: 1, hiHz: 20000 })
+  assert.ok(lowQ < -60 && lowC < -60, `low layers at 1x: ${lowQ.toFixed(1)} / ${lowC.toFixed(1)} dB re added`)
+  assert.ok(full > -50, `a full-band layer at 1x must alias audibly, read ${full.toFixed(1)} dB`)
+})
+
+test('IN / OUT trims: a pure delay scales by the trim, and 0 / 0 is bit-identical', () => {
+  const sr = 44100
+  const x = pink(sr, 2)
+  const L = SAT_BENCH_MAX_LAYERS * 50
+  const base = processSaturationBenchBuffer([x], sr, { layers: [] }).channelData[0]
+  const zero = processSaturationBenchBuffer([x], sr, { layers: [], inputDb: 0, outputDb: 0 }).channelData[0]
+  assert.deepEqual(zero, base)
+  const y = processSaturationBenchBuffer([x], sr, { layers: [], inputDb: -6, outputDb: 6 }).channelData[0]
+  let worst = 0
+  for (let i = 0; i < x.length - L; i++) worst = Math.max(worst, Math.abs(y[i + L] - x[i]))
+  assert.ok(worst < 1e-6, `in −6 / out +6 is unity, off by ${worst}`)
+  const o = processSaturationBenchBuffer([x], sr, { layers: [], outputDb: -6 }).channelData[0]
+  const k = Math.pow(10, -6 / 20)
+  let w2 = 0
+  for (let i = 0; i < x.length - L; i++) w2 = Math.max(w2, Math.abs(o[i + L] - x[i] * k))
+  assert.ok(w2 < 1e-6, `output −6 dB scales by ${k}, off by ${w2}`)
+})
+
+test('a muted layer reaches the kernel as off; a row that is not in use stays off', async () => {
+  const { toKernelParams, SAT_BENCH_LAYER_PRESETS } = await import('../../src/audio/saturationBenchParams.js')
+  const layers = SAT_BENCH_LAYER_PRESETS.map(l => ({ ...l }))
+  layers[1].muted = true
+  const kp = toKernelParams({ layers })
+  assert.deepEqual(kp.layers.map(l => l.on), [true, false, false, false])
+})
+
+test('factory presets: normalise to themselves, keep rows in use contiguous, and stay inside the layer limits', async () => {
+  const { SATURATION_BENCH_PRESETS, SATURATION_BENCH_PRESET_PLUGIN } = await import('../../src/audio/pluginPresets/saturationBench.js')
+  const { pickParams } = await import('../../src/audio/pluginPresets/store.js')
+  const { toKernelParams } = await import('../../src/audio/saturationBenchParams.js')
+  assert.ok(SATURATION_BENCH_PRESETS.length >= 5)
+  for (const p of SATURATION_BENCH_PRESETS) {
+    const n = pickParams(SATURATION_BENCH_PRESET_PLUGIN, p.params)
+    assert.deepEqual(pickParams(SATURATION_BENCH_PRESET_PLUGIN, n), n, `${p.name} is stable under normalize`)
+    assert.equal(n.layers.length, SAT_BENCH_MAX_LAYERS, p.name)
+    const flags = n.layers.map(l => l.on)
+    assert.ok(flags[0], `${p.name}: the first layer is in use`)
+    assert.deepEqual(flags, [...flags].sort((a, b) => b - a), `${p.name}: rows in use are contiguous`)
+    for (const l of n.layers) {
+      assert.ok(l.hiHz > l.loHz, `${p.name}: band`)
+      assert.equal(l.mode, 'full')
+      assert.equal(l.refPeakDb, undefined, 'nothing measured is stored')
+    }
+    assert.equal(toKernelParams({ layers: n.layers }).layers.filter(l => l.on).length, flags.filter(Boolean).length)
+  }
+  // The opening state is exactly the panel's own defaults.
+  const def = SATURATION_BENCH_PRESETS.find(p => p.id === 'factory:default')
+  assert.equal(def.params.layers.filter(l => l.on).length, 2)
+})

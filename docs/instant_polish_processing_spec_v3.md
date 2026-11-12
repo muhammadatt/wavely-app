@@ -184,7 +184,7 @@ Each preset is defined by the parameter values it passes to each processing stag
 
 **Use case:** Everything else — meeting recordings, lecture captures, field recordings, dictation, demo submissions, informal audio. The user has a file that sounds bad and wants it to sound better. No platform-specific requirements.
 
-**Character:** Pragmatic. Uses ClearerVoice speech enhancement as the primary enhancement stage rather than standard EQ. Balanced, no strong tonal character. Moderate compression for consistency.
+**Character:** Pragmatic. Uses DF3 noise reduction and the standard corrective/reference EQ stages (the ClearerVoice enhancement stage was removed in October 2026). Balanced, no strong tonal character. Moderate compression for consistency.
 
 | Parameter | Value | Rationale |
 |---|---|---|
@@ -438,7 +438,7 @@ F0 estimation → sibilant band identification → fricative event detection →
 |---|---|---|
 | ACX Audiobook | 2 passes | Target crest factor 15 dB each pass |
 | Podcast Ready | 2 passes | More aggressive — targets 14 dB then 10 dB |
-| General Clean | 1 pass (conditional) | ClearerVoice stage runs first |
+| General Clean | 1 pass (conditional) | |
 | Noise Eraser | 3 passes | Runs on separated signal |
 
 ---
@@ -926,7 +926,6 @@ For `podcast` and `broadcast` output profiles, the report section is titled **"O
 | Noise reduction (RNNoise) | RNNoise (`pyrnnoise`) | BSD | Free |
 | Source separation | Demucs `htdemucs_ft` (`demucs` Python package) | MIT | Free |
 | Bandwidth extension | AP-BWE (`ap_bwe`) / LavaSR | MIT | Free |
-| Speech enhancement | ClearerVoice (`mossformer2_48k` / `frcrn_16k`) | MIT | Free |
 | Spectral analysis (EQ + de-esser) | Meyda.js (server-side) | MIT | Free |
 | Compression / dynamics | Custom DSP (JavaScript) | — | Free |
 | RMS / LUFS measurement | libebur128 via node-ebur128 | MIT | Free |

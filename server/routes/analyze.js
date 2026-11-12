@@ -12,6 +12,7 @@
  *
  * Currently supported kinds:
  *   - sibilance — sibilance event map for the clip-gain de-esser
+ *   - vad       — voiced/silence frame mask for the auto-leveler
  *
  * SAMPLE RATE. The pipeline decodes everything to 44.1 kHz (INTERNAL_SAMPLE_RATE
  * in lib/ffmpeg.js), so returned sample offsets are in the analysis rate, not
@@ -26,12 +27,19 @@ import path from 'path'
 import { unlink } from 'fs/promises'
 import { withAnalysisContext } from '../pipeline/index.js'
 import { applyClipGainDeEsser } from '../pipeline/clipGainDeEsser.js'
-
-const router = Router()
+import { FRAME_DURATION_S } from '../pipeline/frameAnalysis.js'
+import { openGate, probeDurationS } from '../lib/entitlements.js'
+import { trackWork } from '../lib/requestLog.js'
 
 const upload = multer({
   dest: path.resolve(import.meta.dirname, '..', 'uploads'),
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB — analysis clips are short
+  // 512 MB. The sibilance route works on short clips and never came near the
+  // old 100 MB, but the VAD route is called on whole chapters: the client sends
+  // mono 16 kHz 16-bit (110 MB/hour — see renderVadWavBlob), and this leaves
+  // room for a long one plus anything a future kind needs to send at full rate.
+  // Multer streams to disk rather than buffering, so the ceiling costs nothing
+  // until it is used.
+  limits: { fileSize: 512 * 1024 * 1024 },
 })
 
 /** Analysis rate — must track INTERNAL_SAMPLE_RATE in lib/ffmpeg.js. */
@@ -120,49 +128,176 @@ async function runSibilanceAnalysis(inputPath, params) {
   )
 }
 
-const KINDS = {
-  sibilance: { label: 'Sibilance', run: runSibilanceAnalysis },
+/**
+ * Voice-activity analysis for the realtime auto-leveler.
+ *
+ * The auto-leveler's whole DSP ports to the browser — K-weighting, clip
+ * segmentation, per-clip LUFS, drift shaping, crossfades — except for the one
+ * input it cannot compute there: Silero's voiced/silence labels. So this route
+ * returns that mask and nothing else, and the client does the rest.
+ *
+ * RUNS ARE THE WIRE FORMAT, NOT FRAMES. A frame is 25 ms, so an hour-long
+ * chapter is 144,000 of them; as objects that is tens of megabytes of JSON to
+ * carry one boolean each. Voiced runs are the same information at the size of
+ * the speech structure rather than the frame grid — a few hundred pairs for a
+ * chapter — and the client expands them back to a mask in a loop.
+ *
+ * FRAME INDICES, NOT SAMPLE OFFSETS. The pipeline decodes to 44.1 kHz, so
+ * sample offsets would need the same rescaling the sibilance route documents,
+ * with the same silent drift when a caller forgets. A frame index plus
+ * frameDurationS is rate-free: the client multiplies by its own rate and lands
+ * on its own grid exactly, because that is how frameBoundary defines the grid
+ * on this side too.
+ *
+ * Mono is forced through the preset's channelOutput — VAD is a single-channel
+ * decision, and an unmixed stereo input would reach it as interleaved noise.
+ */
+async function runVadAnalysis(inputPath) {
+  return withAnalysisContext(
+    {
+      inputPath,
+      stages: ['decode', 'monoMixdown', 'analyzeFramesRaw'],
+      preset: { channelOutput: 'mono' },
+    },
+    async (ctx) => {
+      const metrics = ctx.results.metrics ?? {}
+      const frames = metrics.frames ?? []
+
+      // Run-length encode the voiced frames: [startInclusive, endExclusive).
+      const voicedRuns = []
+      let runStart = -1
+      for (let f = 0; f < frames.length; f++) {
+        const voiced = !frames[f].isSilence
+        if (voiced && runStart < 0) runStart = f
+        else if (!voiced && runStart >= 0) {
+          voicedRuns.push([runStart, f])
+          runStart = -1
+        }
+      }
+      if (runStart >= 0) voicedRuns.push([runStart, frames.length])
+
+      return {
+        sampleRate:     ANALYSIS_SAMPLE_RATE,
+        frameDurationS: FRAME_DURATION_S,
+        numFrames:      frames.length,
+        voicedRuns,
+        // The noise floor arms the leveler's headroom cap: it may not lift a
+        // clip so far that the room tone comes up with it.
+        noiseFloorDbfs:       metrics.noiseFloorDbfs ?? null,
+        silenceThresholdDbfs: metrics.silenceThresholdDbfs ?? null,
+        voicedRmsDbfs:        metrics.voicedRmsDbfs ?? null,
+        durationS:            frames.length * FRAME_DURATION_S,
+      }
+    },
+  )
 }
 
-router.post('/analyze/:kind', upload.single('file'), async (req, res) => {
-  const uploadedPath = req.file?.path
+const KINDS = {
+  sibilance: { label: 'Sibilance', run: runSibilanceAnalysis },
+  vad:       { label: 'Voice activity', run: runVadAnalysis },
+}
 
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No audio file provided' })
-    }
+const unlimited = (_req, _res, next) => next()
 
-    const kind = KINDS[req.params.kind]
-    if (!kind) {
-      return res.status(400).json({
-        error: `Unknown analysis kind: ${req.params.kind}`,
-        supported: Object.keys(KINDS),
-      })
-    }
+/**
+ * The longest audio one analysis request may carry, in seconds.
+ *
+ * NO PLAN GATE HERE, ONLY AN ACCOUNT. These routes return measurements; the
+ * plugins that use them do their DSP in the browser and gate their own Apply
+ * (src/auth/plans.js). A 30 s free preview on the ANALYSIS made both plugins
+ * useless on the chapters they are for, while saving almost no server time —
+ * VAD is cheap. What is left is `audioAnalysis` (any account: signed-out
+ * callers get 401 sign_in_required, before the upload is read) and a safety
+ * cap on any one request, the same for every plan, behind the route's rate
+ * limit and concurrency slots. Two hours clears any audiobook chapter.
+ */
+export const ANALYSIS_MAX_SECONDS = 2 * 60 * 60
 
-    let params = {}
-    if (req.body?.params) {
-      try {
-        params = JSON.parse(req.body.params)
-      } catch {
-        return res.status(400).json({ error: 'params is not valid JSON' })
-      }
-    }
+/**
+ * @param {object}   [deps]
+ * @param {Function} [deps.gate]           entitlement gate factory
+ *                                         (lib/entitlements.js); the default
+ *                                         lets every request through
+ * @param {Function} [deps.limit]          concurrency middleware (holdSlot in
+ *                                         lib/jobQueue.js); runs before the upload
+ * @param {Function} [deps.takeUpload]     useUpload (lib/uploads.js): a finished
+ *                                         resumable upload named by `uploadId`
+ *                                         becomes `req.file`; runs after multer
+ * @param {Function} [deps.probeDuration]  decoded duration in seconds, or null
+ *                                         (lib/entitlements.js); injectable for tests
+ * @param {number}   [deps.maxSeconds]     the per-request cap
+ * @param {object}   [deps.kinds]          analysis runners; injectable for tests
+ */
+export function createAnalyzeRoute({
+  gate = openGate, limit = unlimited, takeUpload = unlimited,
+  probeDuration = probeDurationS, maxSeconds = ANALYSIS_MAX_SECONDS, kinds = KINDS,
+} = {}) {
+  const router = Router()
+  const featureOf = req => (kinds[req.params.kind] ? 'audioAnalysis' : null)
 
-    const started = Date.now()
-    const result = await kind.run(uploadedPath, params)
-    console.log(
-      `[analyze/${req.params.kind}] ${Date.now() - started}ms — ` +
-      `${result.detectedCount ?? 0} events`,
-    )
-
-    res.json(result)
-  } catch (err) {
-    console.error(`[analyze/${req.params.kind}] failed:`, err)
-    res.status(500).json({ error: err.message ?? 'Analysis failed' })
-  } finally {
-    if (uploadedPath) await unlink(uploadedPath).catch(() => {})
+  // An unknown analysis kind is refused first: it has no feature, so the sign-in
+  // check would wave it through to take a slot and an upload it can never use.
+  const known = (req, res, next) => {
+    if (kinds[req.params.kind]) return next()
+    res.status(400).json({ error: `Unknown analysis kind: ${req.params.kind}`, supported: Object.keys(kinds) })
   }
-})
 
-export { router as analyzeRoute }
+  // Sign-in and the concurrency slot are checked BEFORE multer reads the body.
+  router.post('/analyze/:kind', known, gate.signIn(featureOf), limit, upload.single('file'), takeUpload, gate(featureOf), async (req, res) => {
+    const slot = res.locals.slot
+    const releaseSlot = slot?.claim()
+    const uploadedPath = req.file?.path
+
+    try {
+      // The client left while the gate was checking; its slot is already free.
+      if (slot && !releaseSlot) return
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'No audio file provided' })
+      }
+
+      const kind = kinds[req.params.kind]
+
+      // An unreadable duration is let through: the analysis decodes the file
+      // itself and fails on its own if ffmpeg cannot. The plan gate has
+      // usually probed already (`req.audioSeconds`, null included); FFprobe
+      // runs again only when it has not, as with accounts off.
+      const durationS = req.audioSeconds !== undefined ? req.audioSeconds : await probeDuration(uploadedPath)
+      if (durationS != null && durationS > maxSeconds) {
+        return res.status(413).json({
+          error: `Analysis is limited to ${Math.round(maxSeconds / 60)} minutes of audio per request — select a shorter passage.`,
+          code: 'too_long',
+          maxSeconds,
+        })
+      }
+
+      let params = {}
+      if (req.body?.params) {
+        try {
+          params = JSON.parse(req.body.params)
+        } catch {
+          return res.status(400).json({ error: 'params is not valid JSON' })
+        }
+      }
+
+      const started = Date.now()
+      const result = await trackWork(res, kind.run(uploadedPath, params))
+      console.log(
+        `[analyze/${req.params.kind}] ${Date.now() - started}ms — ` +
+        (result.voicedRuns
+          ? `${result.voicedRuns.length} voiced runs / ${result.numFrames} frames`
+          : `${result.detectedCount ?? 0} events`),
+      )
+
+      res.json(result)
+    } catch (err) {
+      console.error(`[analyze/${req.params.kind}] failed:`, err)
+      res.status(500).json({ error: err.message ?? 'Analysis failed' })
+    } finally {
+      releaseSlot?.()
+      if (uploadedPath) await unlink(uploadedPath).catch(() => {})
+    }
+  })
+
+  return router
+}

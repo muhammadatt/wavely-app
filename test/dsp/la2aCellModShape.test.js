@@ -50,7 +50,7 @@ const render = params => processLA2ABuffer([stimulus()], SR, {
 
 /**
  * ⚠ RUNS ON `LA2A_LEGACY_PATCH`, WHICH IS NO LONGER THE KERNEL DEFAULT. These
- * assertions are about the Moore-derived T4 gain modulation; OptoSmooth now
+ * assertions are about the Moore-derived T4 gain modulation; LA Vintage 2A now
  * ships Tube Saturation's curve at the cell, so the mechanism under test has to
  * be asked for by name. Still selectable, still the only cell mechanism with
  * hardware behind it, and still what every earlier render used.

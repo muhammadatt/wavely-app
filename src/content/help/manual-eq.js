@@ -24,6 +24,6 @@ export default {
   notes: [
     'This runs after VoiceRx in the chain — corrective first, creative second',
     'VoiceRx can move its own corrections here, where they become ordinary bands you can edit; they are moved rather than copied, so nothing is applied twice',
-    'A fixed cut is the right answer for a constant resonance — reach for Reso Smooth when the resonance comes and goes',
+    'A fixed cut is the right answer for a constant resonance — reach for Reso Soothe when the resonance comes and goes',
   ],
 }

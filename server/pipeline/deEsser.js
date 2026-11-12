@@ -32,6 +32,7 @@ import os                         from 'os'
 import path                       from 'path'
 import { tempPath }               from '../lib/ffmpeg.js'
 import { PYTHON as SHARED_PYTHON } from './spawnPython.js'
+import { killAfter, timeoutError } from '../lib/subprocessTimeout.js'
 
 const DE_ESSER_PYTHON = process.env.DE_ESSER_PYTHON ?? SHARED_PYTHON
 const NUM_THREADS     = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
@@ -155,6 +156,7 @@ function runDeEsserScript(args) {
         TORCH_NUM_THREADS: NUM_THREADS,
       },
     })
+    const watch = killAfter(proc, 'DeEsser')
 
     let stdout = ''
     let stderr = ''
@@ -179,6 +181,7 @@ function runDeEsserScript(args) {
     })
 
     proc.on('close', (code, signal) => {
+      if (watch.timedOut) return reject(timeoutError('DeEsser'))
       if (stdoutBuffer.trim() && !stdoutBuffer.startsWith('JSON_RESULT:')) {
         console.log(`[DeEsser] ${stdoutBuffer.trim()}`)
       }

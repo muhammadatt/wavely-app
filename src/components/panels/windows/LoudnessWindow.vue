@@ -9,8 +9,9 @@ import {
 } from '../../../audio/loudnessTargets.js'
 import { PEAK_MODES, planNormalization } from '../../../audio/dsp/loudnessNormalize.js'
 import FloatingWindow from '../FloatingWindow.vue'
-import Knob from '../../knobs/Knob.vue'
-import DeviceChoiceRocker from '../../knobs/DeviceChoiceRocker.vue'
+import ModulaKnob from '../../modula/ModulaKnob.vue'
+import ModulaChip from '../../modula/ModulaChip.vue'
+import ModulaSegmented from '../../modula/ModulaSegmented.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -19,7 +20,7 @@ const {
   startProcessing, endProcessing, showToast, totalDuration, hasSelection,
 } = useEditorState()
 
-const ACCENT = '#d8e05b'
+const ACCENT = '#e8a33d'
 
 /**
  * The panel's own state, held here rather than in a composable.
@@ -205,6 +206,9 @@ const buttons = computed(() => TARGET_GROUPS.map(g => ({
 const db = v => (Number.isFinite(v) ? `${v > 0 ? '+' : ''}${v.toFixed(1)}` : '—')
 const plain = v => (Number.isFinite(v) ? v.toFixed(1) : '—')
 
+const PEAK_MODE_OPTIONS = PEAK_MODES.map(m => ({ value: m.id, label: m.label, title: m.caption }))
+const peakModeCaption = computed(() => PEAK_MODES.find(m => m.id === peakMode.value)?.caption ?? '')
+
 /** The unit a peak is stated in, which follows the target's meter. */
 const peakUnit = computed(() => (unit.value === 'RMS' ? 'dBFS' : 'dBTP'))
 
@@ -333,10 +337,10 @@ function toastFor(report, appliedUnit) {
   <FloatingWindow
     window-id="loudness"
     :z="z"
-    :width="520"
+    :width="560"
     :accent="ACCENT"
-    brand-lead="LOUDNESS"
-    brand-tail="NORM"
+    design="modula"
+    brand-lead="LOUDNESS NORMALIZE"
     :show-engage="false"
     show-preview
     :previewable="false"
@@ -348,59 +352,32 @@ function toastFor(report, appliedUnit) {
       : 'Nothing measurable in this region'"
     @apply="applyNormalize()"
   >
-    <div class="px-[24px] pt-[20px] pb-[22px] flex flex-col gap-[18px]">
+    <div class="ln-face">
 
       <!-- ── What the region measures ────────────────────────────────────
            First, and above the controls, because every decision below is made
            against it: a target is meaningless without the number it is being
            moved from. -->
-      <div
-        class="rounded-[10px] px-[14px] py-[11px]"
-        style="background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06)"
-      >
-        <div class="flex items-center justify-between">
-          <span style="font:600 8.5px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.38)">
-            {{ hasSelection ? 'SELECTION' : 'WHOLE FILE' }}
-          </span>
-          <span
-            v-if="measuredLine"
-            style="font:600 9px 'Inter',system-ui;color:rgba(255,255,255,.4)"
-          >{{ measuredLine }}</span>
+      <div class="ln-well">
+        <div class="ln-well-head">
+          <span class="m-caption">{{ hasSelection ? 'Selection' : 'Whole file' }}</span>
+          <span v-if="measuredLine" class="ln-status">{{ measuredLine }}</span>
         </div>
 
-        <div v-if="measurement && !measuring" class="mt-[9px] flex items-center gap-[22px]">
-          <div class="flex flex-col">
-            <span style="font:600 8px 'Inter',system-ui;letter-spacing:.12em;color:rgba(255,255,255,.35)">
-              {{ unit === 'RMS' ? 'RMS' : 'INTEGRATED' }}
-            </span>
-            <span
-              class="font-['JetBrains_Mono']"
-              style="font-size:17px;font-weight:700;font-variant-numeric:tabular-nums"
-              :style="{ color: ACCENT }"
-            >{{ plain(unit === 'RMS' ? measurement.rmsDb : measurement.lufs) }}
-              <span style="font-size:9px;opacity:.6">{{ unit === 'RMS' ? 'dBFS' : 'LUFS' }}</span>
+        <div v-if="measurement && !measuring" class="ln-reads">
+          <div class="ln-read">
+            <span class="ln-read-cap">{{ unit === 'RMS' ? 'RMS' : 'INTEGRATED' }}</span>
+            <span class="ln-read-val" :style="{ color: ACCENT }">
+              {{ plain(unit === 'RMS' ? measurement.rmsDb : measurement.lufs) }}<span class="ln-read-unit">{{ unit === 'RMS' ? 'dBFS' : 'LUFS' }}</span>
             </span>
           </div>
-
-          <div class="flex flex-col">
-            <span style="font:600 8px 'Inter',system-ui;letter-spacing:.12em;color:rgba(255,255,255,.35)">
-              {{ unit === 'RMS' ? 'SAMPLE PEAK' : 'TRUE PEAK' }}
-            </span>
-            <span
-              class="font-['JetBrains_Mono']"
-              style="font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;color:rgba(255,255,255,.82)"
-            >{{ plain(unit === 'RMS' ? measurement.samplePeakDb : measurement.truePeakDb) }}
-              <span style="font-size:9px;opacity:.6">{{ peakUnit }}</span>
+          <div class="ln-read">
+            <span class="ln-read-cap">{{ unit === 'RMS' ? 'SAMPLE PEAK' : 'TRUE PEAK' }}</span>
+            <span class="ln-read-val">
+              {{ plain(unit === 'RMS' ? measurement.samplePeakDb : measurement.truePeakDb) }}<span class="ln-read-unit">{{ peakUnit }}</span>
             </span>
           </div>
-
-          <div class="flex-1 min-w-0 text-right">
-            <span
-              v-if="outcome"
-              class="font-['JetBrains_Mono']"
-              style="font-size:10.5px;font-weight:600;color:rgba(255,255,255,.55)"
-            >{{ outcome }}</span>
-          </div>
+          <span v-if="outcome" class="ln-outcome">{{ outcome }}</span>
         </div>
 
         <!-- ⚠ A SHORT REGION IS NOT AN INTEGRATED MEASUREMENT and saying so is
@@ -408,97 +385,66 @@ function toastFor(report, appliedUnit) {
              are no BS.1770 blocks to gate, so the figure above is a single
              ungated window — fine for evening out a phrase, not a number to
              submit anything against. -->
-        <p
-          v-if="measurement?.short && unit !== 'RMS'"
-          class="mt-[8px]"
-          style="font:600 9px/1.5 'Inter',system-ui;color:#d8e05b"
-        >
+        <p v-if="measurement?.short && unit !== 'RMS'" class="ln-short">
           Under 0.4 s — this is a single ungated window, not an integrated reading
         </p>
       </div>
 
       <!-- ── Benchmarks ──────────────────────────────────────────────────
            Buttons describe values rather than selecting a mode: land on
-           Spotify's numbers by turning the knobs and its button lights, which
+           Spotify's numbers by turning the knobs and its lamp lights, which
            is the truth about what the panel is set to. -->
-      <div class="flex flex-col gap-[10px]">
-        <div v-for="g in buttons" :key="g.id" class="flex items-center gap-[10px]">
-          <span
-            style="font:600 8px 'Inter',system-ui;letter-spacing:.12em;color:rgba(255,255,255,.3);width:74px;flex-shrink:0"
-          >{{ g.label }}</span>
-          <div class="flex flex-wrap gap-[6px]">
-            <button
+      <div class="ln-benchmarks">
+        <div v-for="g in buttons" :key="g.id" class="ln-group">
+          <span class="ln-group-label">{{ g.label }}</span>
+          <div class="ln-chips">
+            <ModulaChip
               v-for="t in g.targets"
               :key="t.id"
-              type="button"
+              lamp
+              :model-value="t.active"
+              :label="t.label"
+              :color="ACCENT"
               :title="`${t.name} — ${t.targetDb} ${t.unit}, ${t.ceilingDb} ${t.unit === 'RMS' ? 'dBFS' : 'dBTP'}. ${t.note}`"
-              class="cursor-pointer"
               @click="selectTarget(t.id)"
-              :style="[
-                {
-                  padding: '7px 11px', borderRadius: '9px',
-                  transition: 'background-color .15s ease, border-color .15s ease',
-                },
-                t.active
-                  ? {
-                    background: `color-mix(in srgb, ${ACCENT} 20%, transparent)`,
-                    border: `1px solid color-mix(in srgb, ${ACCENT} 55%, transparent)`,
-                  }
-                  : { background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.08)' },
-              ]"
-            >
-              <span
-                style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.1em"
-                :style="{ color: t.active ? ACCENT : 'rgba(255,255,255,.72)' }"
-              >{{ t.label }}</span>
-            </button>
+            />
           </div>
         </div>
 
         <!-- Reserved height rather than a conditional: the line is blank
              whenever the knobs sit off every benchmark, and an element that
              came and went would jump the controls below it on every nudge. -->
-        <p
-          class="text-center"
-          style="font:600 9px 'Inter',system-ui;color:rgba(255,255,255,.4);min-height:12px"
-        >{{ noteTarget ? noteTarget.note : '' }}</p>
+        <p class="ln-note">{{ noteTarget ? noteTarget.note : '' }}</p>
       </div>
 
       <!-- ── The three controls ──────────────────────────────────────────── -->
-      <div class="flex items-start justify-center gap-[26px] pt-[4px]">
-        <div class="w-[112px]">
-          <Knob
-            v-model="targetDb"
-            :min="targetRange.min" :max="targetRange.max" :step="0.1"
-            label="Target" :accent="ACCENT" :format-value="plain" editable
+      <div class="ln-panel">
+        <div class="ln-knob">
+          <ModulaKnob
+            variant="led" :size="146" show-value editable
+            v-model="targetDb" :min="targetRange.min" :max="targetRange.max" :step="0.1"
+            :default-value="initial.targetDb"
+            label="Target" :color="ACCENT" :format-value="plain"
+            title="The loudness to move the region to. Double-click to reset; click the value to type one"
           />
-          <p class="mt-[4px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            {{ unit === 'RMS' ? 'dBFS RMS, ungated' : 'LUFS integrated' }}
-          </p>
+          <span class="m-note">{{ unit === 'RMS' ? 'dBFS RMS, ungated' : 'LUFS integrated' }}</span>
         </div>
 
-        <div class="w-[112px]">
-          <Knob
-            v-model="ceilingDb"
-            :min="-9" :max="0" :step="0.1"
-            label="Ceiling" :accent="ACCENT" :format-value="plain" editable
+        <div class="ln-knob">
+          <ModulaKnob
+            variant="ticks" :size="139" show-value editable
+            v-model="ceilingDb" :min="-9" :max="0" :step="0.1"
+            :default-value="initial.ceilingDb"
+            label="Ceiling" :color="ACCENT" :format-value="plain"
+            title="The highest the peaks may land. Double-click to reset; click the value to type one"
           />
-          <p class="mt-[4px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            {{ peakUnit }}
-          </p>
+          <span class="m-note">{{ peakUnit }}</span>
         </div>
 
-        <div class="flex flex-col items-center gap-[8px] pt-[10px]">
-          <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4);white-space:nowrap">
-            PEAK
-          </span>
-          <DeviceChoiceRocker
-            v-model="peakMode"
-            :options="PEAK_MODES.map(m => ({ value: m.id, label: m.label, title: m.caption }))"
-            :accent="ACCENT"
-            label="Peak control"
-            :caption="PEAK_MODES.find(m => m.id === peakMode)?.caption ?? ''"
-          />
+        <div class="ln-mode">
+          <span class="m-caption">Peak</span>
+          <ModulaSegmented v-model="peakMode" :options="PEAK_MODE_OPTIONS" aria-label="Peak control" />
+          <span class="ln-mode-cap">{{ peakModeCaption }}</span>
         </div>
       </div>
 
@@ -506,12 +452,141 @@ function toastFor(report, appliedUnit) {
            Measured on the rendered audio, not predicted from the gain. It is
            the only number in the panel that is a fact rather than a plan, and
            where limiting was involved the two genuinely differ. -->
-      <p
-        v-if="achieved"
-        class="text-center font-['JetBrains_Mono']"
-        style="font-size:10px;font-weight:600;font-variant-numeric:tabular-nums"
-        :style="{ color: achieved.warn ? '#ffb094' : 'rgba(255,255,255,.5)' }"
-      >{{ achieved.text }}</p>
+      <p v-if="achieved" class="ln-achieved" :class="{ 'is-warn': achieved.warn }">{{ achieved.text }}</p>
     </div>
   </FloatingWindow>
 </template>
+
+<style scoped>
+.ln-face {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Measurement well ── */
+.ln-well {
+  padding: 11px 14px 12px;
+  border-radius: 10px;
+  background: var(--m-well);
+  box-shadow: var(--m-shadow-well);
+}
+.ln-well-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ln-status {
+  font: 600 10px/1 var(--m-font-ui);
+  color: var(--m-ink-4);
+}
+.ln-reads {
+  margin-top: 10px;
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+}
+.ln-read {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ln-read-cap {
+  font: 600 8.5px/1 var(--m-font-ui);
+  letter-spacing: .12em;
+  color: var(--m-ink-4);
+}
+.ln-read-val {
+  font: 700 19px/1 var(--m-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--m-ink);
+}
+.ln-read-unit {
+  margin-left: 4px;
+  font-size: 9px;
+  opacity: .6;
+}
+.ln-outcome {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font: 600 10.5px/1.3 var(--m-font-mono);
+  color: var(--m-ink-3);
+}
+.ln-short {
+  margin: 9px 0 0;
+  font: 600 9.5px/1.5 var(--m-font-ui);
+  color: var(--m-accent);
+}
+
+/* ── Benchmarks ── */
+.ln-benchmarks {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.ln-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ln-group-label {
+  flex: none;
+  width: 92px;
+  font: 600 9px/1.2 var(--m-font-ui);
+  letter-spacing: .14em;
+  color: var(--m-ink-4);
+}
+.ln-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ln-note {
+  margin: 0;
+  min-height: 13px;
+  text-align: center;
+  font: 500 10px/1.3 var(--m-font-ui);
+  color: var(--m-ink-4);
+}
+
+/* ── Controls ── */
+.ln-panel {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 34px;
+  padding: 16px 18px 14px;
+  border-radius: 16px;
+  background: var(--m-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 0 0 1px rgba(0, 0, 0, .5);
+}
+.ln-knob {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.ln-mode {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+}
+.ln-mode-cap {
+  max-width: 130px;
+  text-align: center;
+  font: 500 9.5px/1.4 var(--m-font-ui);
+  color: var(--m-ink-4);
+}
+
+.ln-achieved {
+  margin: 0;
+  text-align: center;
+  font: 600 10px/1.3 var(--m-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--m-ink-3);
+}
+.ln-achieved.is-warn { color: #ffb094; }
+</style>

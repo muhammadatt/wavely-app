@@ -16,7 +16,7 @@ export default {
 
   notes: [
     'This is one multiplication applied to every sample, so nothing about the balance of the selection changes — only how loud all of it is',
-    'It cannot make a quiet passage sound closer to a loud one, because the gap between them moves with everything else — reach for Opto Comp for that',
+    'It cannot make a quiet passage sound closer to a loud one, because the gap between them moves with everything else — reach for LA Vintage 2A for that',
     'Mastering re-normalizes the whole file at the end, so a spot normalize is for evening out an edit rather than for hitting a delivery target',
   ],
 }

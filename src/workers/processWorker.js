@@ -4,16 +4,23 @@
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, loudnessNormalize, adjustVolume, la2aAutoMakeup,
  * fet1176AutoMakeup, softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling,
- * voiceProfile, measureLoudness
+ * voiceProfile, measureLoudness, deEsserAutoAir, phatassWarmthReadout, phatassTapeMakeup,
+ * phatassOutputMakeup, renderChunk
  */
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
-import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
+import { computeFET1176AutoMakeupPlan } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
+import { measureVoxPressor, measureVoxPressorExact } from '../audio/voxPressorSolve.js'
 import { computeSoftClipperAutoMakeupDb } from '../audio/softClipperProcessor.js'
 import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
 import { measureVoiceProfile } from '../audio/voiceProfile.js'
 import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
 import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
+import { measureTopLossDb, autoAirDb } from '../audio/deEsserAutoAir.js'
+import { measureWarmthReadout, measureWarmthBandsSampled } from '../audio/phatassWarmthReadout.js'
+import { renderChunk } from '../audio/chunkRender.js'
+import { measureTapeMakeup } from '../audio/phatassTapeMakeup.js'
+import { measureOutputMakeup } from '../audio/phatassOutputMakeup.js'
 
 /**
  * ⚠ EVERY REPLY MUST CARRY `__id` BACK. The worker is shared and long-lived
@@ -75,7 +82,7 @@ self.onmessage = function (e) {
       la2aAutoMakeup(channelData, sampleRate, params)
       break
     case 'fet1176AutoMakeup':
-      autoMakeup(computeFET1176AutoMakeupDb, channelData, sampleRate, params)
+      fet1176AutoMakeup(channelData, sampleRate, params)
       break
     case 'softClipperAutoMakeup':
       autoMakeup(computeSoftClipperAutoMakeupDb, channelData, sampleRate, params)
@@ -83,14 +90,84 @@ self.onmessage = function (e) {
     case 'schepsAutoTrim':
       schepsAutoTrim(channelData, sampleRate, params)
       break
+    case 'voxPressorMeasure':
+      try {
+        postDone(measureVoxPressor(channelData, sampleRate, params))
+      } catch (err) {
+        postReply({ type: 'error', message: err.message })
+      }
+      break
+    case 'voxPressorExact':
+      try {
+        postDone({ solved: measureVoxPressorExact(channelData, sampleRate, params.solved, params.sourcePeakDb) })
+      } catch (err) {
+        postReply({ type: 'error', message: err.message })
+      }
+      break
     case 'softClipperCeiling':
       softClipperCeiling(channelData, sampleRate, params)
       break
     case 'voiceProfile':
       voiceProfile(channelData, sampleRate)
       break
+    case 'deEsserAutoAir':
+      deEsserAutoAir(channelData, sampleRate, params)
+      break
+    case 'phatassWarmthReadout':
+      phatassWarmthReadout(channelData, sampleRate, params)
+      break
+    case 'renderChunk':
+      // One chunk of a parallel apply (chunkedApply.js); the audio is
+      // transferred back, not copied.
+      try {
+        const out = renderChunk(channelData, sampleRate, params)
+        postDoneTransfer({ channelData: out }, out.map(c => c.buffer))
+      } catch (err) {
+        postReply({ type: 'error', message: err.message })
+      }
+      break
+    case 'phatassTapeMakeup':
+      try {
+        postDone(measureTapeMakeup(channelData, sampleRate, params, { exact: e.data.exact !== false }))
+      } catch (err) {
+        postReply({ type: 'error', message: err.message })
+      }
+      break
+    case 'phatassOutputMakeup':
+      try {
+        postDone(measureOutputMakeup(channelData, sampleRate, params, { exact: e.data.exact !== false }))
+      } catch (err) {
+        postReply({ type: 'error', message: err.message })
+      }
+      break
     default:
       postReply({ type: 'error', message: `Unknown operation: ${type}` })
+  }
+}
+
+/** PHAT*SS's Warmth readout — see phatassWarmthReadout.js. */
+function phatassWarmthReadout(channelData, sampleRate, params) {
+  try {
+    const { layers, bands = true, peak = true, guard = null, blocks = null } = params ?? {}
+    if (blocks) postDone({ bandsDb: measureWarmthBandsSampled(blocks, sampleRate, layers, guard) })
+    else postDone(measureWarmthReadout(channelData, sampleRate, layers, { bands, peak, guard }))
+  } catch (err) {
+    postReply({ type: 'error', message: err.message })
+  }
+}
+
+/**
+ * The De-Esser's automatic Air: the chain's top-end loss over the analysis
+ * window (softener plus the Reso pre-stage when it is in), and the Air amount
+ * it asks for — see deEsserAutoAir.js.
+ */
+function deEsserAutoAir(channelData, sampleRate, params) {
+  try {
+    const { kernelParams, resoParams = null, resoFrameSize = 512 } = params ?? {}
+    const lossDb = measureTopLossDb(channelData, sampleRate, kernelParams, resoParams, resoFrameSize)
+    postDone({ lossDb, airDb: autoAirDb(lossDb) })
+  } catch (err) {
+    postReply({ type: 'error', message: err.message })
   }
 }
 
@@ -115,6 +192,34 @@ function la2aAutoMakeup(channelData, sampleRate, params) {
   const { reference = 'peak', ...kernelParams } = params ?? {}
   try {
     const plan = computeAutoMakeupPlan(channelData, sampleRate, kernelParams, { reference })
+    postDone({ makeupDb: plan.makeupDb, ceilingKneeDb: plan.ceilingKneeDb })
+  } catch (err) {
+    postReply({ type: 'error', message: err.message })
+  }
+}
+
+/**
+ * FET Punch's makeup, which now has a REFERENCE for the same reason
+ * OptoSmooth's does — see `la2aAutoMakeup` above, whose contract this mirrors
+ * exactly: `reference` rides in `params` and is pulled back out before the
+ * params reach the kernel, and only `makeupDb` and `ceilingKneeDb` come back
+ * because the ceiling itself is measured over the WHOLE region upstream.
+ */
+function fet1176AutoMakeup(channelData, sampleRate, params) {
+  /**
+   * ⚠ `makeupMinDb` / `makeupMaxDb` RIDE IN AND ARE PULLED BACK OUT, like
+   * `reference`. The plan's own defaults are +/-36 dB while the panel's Output
+   * knob stops at +24: a solve past the knob's travel got clamped by the panel
+   * afterwards, but `ceilingKneeDb` had already been sized for the gain that
+   * clamp discarded, so the makeup/knee pair stopped describing the render.
+   * Bounding the solve makes both answers come from the same gain.
+   */
+  const { reference = 'peak', makeupMinDb, makeupMaxDb, ...kernelParams } = params ?? {}
+  try {
+    const options = { reference }
+    if (Number.isFinite(makeupMinDb)) options.minDb = makeupMinDb
+    if (Number.isFinite(makeupMaxDb)) options.maxDb = makeupMaxDb
+    const plan = computeFET1176AutoMakeupPlan(channelData, sampleRate, kernelParams, options)
     postDone({ makeupDb: plan.makeupDb, ceilingKneeDb: plan.ceilingKneeDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })

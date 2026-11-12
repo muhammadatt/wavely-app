@@ -106,7 +106,7 @@ const fitLabel = computed(() => (props.busy ? 'FITTING' : 'VOICE FIT'))
  */
 const fitDisabledReason = computed(() => {
   if (props.busy) return 'Measuring pitch\u2026'
-  if (props.disabled) return 'Turn ResoTame on'
+  if (props.disabled) return 'Turn Reso Soothe on'
   if (!props.hasSelection) return 'Select audio to fit'
   return null
 })

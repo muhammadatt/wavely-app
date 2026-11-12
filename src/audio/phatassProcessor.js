@@ -1,0 +1,416 @@
+/**
+ * PHAT*SS — worklet kernel.
+ *
+ * Input → TAPE (CLEAN cubic or THICK hysteresis, with the speed's head bump
+ * after it) → makeup → Warmth → Guard → tape HF shelf (the Speed dial) → Mix
+ * → Output.
+ *
+ * INPUT is a drive (see PHATASS_DEFAULTS.inputDb). MIX blends against the
+ * input after Input, delayed by the plugin's whole latency so the blend is
+ * phase-aligned; at Mix 1 the dry path is computed but never reaches the
+ * output, so the render is bit-identical to a kernel with no Mix.
+ *
+ * TAPE comes FIRST (owner's call): Warmth then shapes the already-rounded
+ * signal, and TAPE's input is the untouched source, so its makeup depends on
+ * nothing else in the plugin and can be measured fast (phatassTapeMakeup.js).
+ * The makeup puts the voice's peak back on the selection's own, which is the
+ * guard's ceiling, so the "Warmth never raises the peak" guarantee holds
+ * through the reorder unchanged.
+ *
+ * WARMTH is up to four Saturation Bench layers (dsp/saturationLayers.js,
+ * voiced in phatassParams.WARMTH_LAYERS), a pure delay at 0. Its PEAK
+ * GUARD (dsp/warmthGuard.js) is pinned on: what Warmth adds is turned down
+ * wherever the sum would pass the selection's own peak, so Warmth adds density
+ * but never peak level. (The HF Limiter's lookahead shelf that once sat here,
+ * for FATSO and the bench's Tame, was removed in October 2026 — see
+ * phatassParams.) The TAPE HF SHELF (dsp/tapeHfShelf.js, zero latency) runs at the Speed
+ * dial's tape speed. TAPE is one more bench layer, full band, calibrated on the
+ * selection's peak so its knob reads in dB of peak reduction (phatassParams
+ * `tapeLayer`).
+ *
+ * Constant latency (see `phatassLatencySamples`), bit-transparent with Warmth
+ * and TAPE at 0 and the top end OFF (a bench setting). SOFTEN moved to the HF
+ * Softener.
+ *
+ * This file is BOTH a normal ES module and an AudioWorklet module (registers
+ * 'phatass-processor'); it imports from ./dsp/, so its loader goes through
+ * `?worker&url` like the others.
+ */
+
+import { TapeHfShelf } from './dsp/tapeHfShelf.js'
+import { SaturationBenchKernel } from './dsp/saturationLayers.js'
+import { WarmthPeakGuard } from './dsp/warmthGuard.js'
+import { DelayLine } from './dsp/oversample.js'
+import { BiquadCascade } from './dsp/biquad.js'
+import { toKernelParams, PHATASS_DEFAULTS, WARMTH_LAYERS, slotOversample, headBumpSections, TAPE_HEAD_BUMP_MAX_SECTIONS } from './phatassParams.js'
+
+export const PHATASS_KERNEL_DEFAULTS = toKernelParams(PHATASS_DEFAULTS)
+
+const LN10_OVER_20 = Math.LN10 / 20
+/** The worklet posts the saturation meter's sums every this many 128-sample quanta. */
+const METER_POST_QUANTA = 8
+const dbToLin = db => Math.exp(db * LN10_OVER_20)
+
+/** A runtime gain change glides this long (linear in amplitude); an immediate set snaps. */
+const GAIN_RAMP_MS = 20
+
+/** A gain applied in place that ramps to each new target instead of stepping. */
+class GainRamp {
+  constructor(sampleRate) {
+    this.rampSamples = Math.max(1, Math.round((GAIN_RAMP_MS / 1000) * sampleRate))
+    this.value = 1
+    this.target = 1
+    this.step = 0
+    this.left = 0
+  }
+
+  set(target, immediate) {
+    if (immediate) {
+      this.value = this.target = target
+      this.left = 0
+      return
+    }
+    if (target === this.target) return
+    this.target = target
+    this.left = this.rampSamples
+    this.step = (target - this.value) / this.rampSamples
+  }
+
+  process(chs, n) {
+    if (this.left === 0) {
+      const g = this.value
+      if (g === 1) return
+      for (const out of chs) for (let i = 0; i < n; i++) out[i] *= g
+      return
+    }
+    const start = this.value
+    const m = Math.min(n, this.left)
+    for (const out of chs) {
+      let g = start
+      for (let i = 0; i < n; i++) {
+        if (i < m) g += this.step
+        out[i] *= i < m ? g : this.target
+      }
+    }
+    this.left -= m
+    this.value = this.left === 0 ? this.target : start + this.step * m
+  }
+}
+
+/** A 0–1 blend that ramps like GainRamp: wet at 1, dry at 0. */
+class MixRamp {
+  constructor(sampleRate) {
+    this.rampSamples = Math.max(1, Math.round((GAIN_RAMP_MS / 1000) * sampleRate))
+    this.value = 1
+    this.target = 1
+    this.step = 0
+    this.left = 0
+  }
+
+  set(target, immediate) {
+    if (immediate) {
+      this.value = this.target = target
+      this.left = 0
+      return
+    }
+    if (target === this.target) return
+    this.target = target
+    this.left = this.rampSamples
+    this.step = (target - this.value) / this.rampSamples
+  }
+
+  /** wet ← dry + m·(wet − dry), in place on `wet`. */
+  process(wet, dry, n) {
+    if (this.left === 0) {
+      const m = this.value
+      if (m === 1) return
+      for (let ch = 0; ch < wet.length; ch++) {
+        const w = wet[ch]
+        const d = dry[ch]
+        for (let i = 0; i < n; i++) w[i] = d[i] + m * (w[i] - d[i])
+      }
+      return
+    }
+    const start = this.value
+    const k = Math.min(n, this.left)
+    for (let ch = 0; ch < wet.length; ch++) {
+      const w = wet[ch]
+      const d = dry[ch]
+      let m = start
+      for (let i = 0; i < n; i++) {
+        if (i < k) m += this.step
+        const mm = i < k ? m : this.target
+        w[i] = d[i] + mm * (w[i] - d[i])
+      }
+    }
+    this.left -= k
+    this.value = this.left === 0 ? this.target : start + this.step * k
+  }
+}
+
+export class PhatassKernel {
+  constructor(sampleRate) {
+    this.sampleRate = sampleRate
+    this.tape = new SaturationBenchKernel(sampleRate, { slots: 1 })
+    // TAPE's head bump (bench only): a low shelf AFTER the curve, kept in the
+    // output; the meter's clean reference runs through its own copy, so a
+    // linear lift never reads as saturation. Zero latency.
+    this.bump = new BiquadCascade(TAPE_HEAD_BUMP_MAX_SECTIONS, 2)
+    this.meterBump = new BiquadCascade(TAPE_HEAD_BUMP_MAX_SECTIONS, 2)
+    this.bumpKey = 0
+    this.bumpOn = false
+    this.tapeInit = false
+    this.warmth = new SaturationBenchKernel(sampleRate, { slots: WARMTH_LAYERS.length, oversample: slotOversample() })
+    this.warmthInit = false
+    // Lined up against the Warmth output, so its dry is Warmth's input (TAPE's
+    // output after makeup) delayed by that.
+    this.guard = new WarmthPeakGuard(sampleRate, this.warmth.latencySamples)
+    this.warmthIn = []
+    // The tape HF shelf (a tape-speed detent): zero latency, so the plugin's
+    // latency is the same whichever detent is up.
+    this.tapeHf = new TapeHfShelf(sampleRate)
+    this.latencySamples = this.tape.latencySamples + this.warmth.latencySamples
+      + this.guard.latencySamples
+    // TAPE's makeup and the output gain are measured off the audio thread and
+    // can move several dB at once: a runtime change glides over GAIN_RAMP_MS
+    // rather than stepping (a click); an immediate set snaps.
+    this.tapeMakeupGain = new GainRamp(sampleRate)
+    this.outputGain = new GainRamp(sampleRate)
+    this.inputGain = new GainRamp(sampleRate)
+    this.mix = new MixRamp(sampleRate)
+    // The dry path: the input after Input, held back by the whole latency.
+    this.dryIn = []
+    this.dryDelays = []
+    this.dryOut = []
+    this.params = { ...PHATASS_KERNEL_DEFAULTS }
+    this.setParams({}, true)
+    // SATURATION METER (off unless `enableMeter`, so offline renders skip it):
+    // the energy of what TAPE and Warmth ADD, read before the shelf, against the
+    // energy of the clean input as it would arrive there — scaled by the makeup
+    // and delayed by TAPE + Warmth + guard. The shelf and Output are gains, not
+    // saturation, so they stay out of both sums.
+    this.meterOn = false
+    this.meterLag = this.tape.latencySamples + this.warmth.latencySamples + this.guard.latencySamples
+    this.meterDelays = []
+    this.meterIn = []
+    this.meterAdded = 0
+    this.meterClean = 0
+    this.meterCount = 0
+  }
+
+  /** Start accumulating the saturation meter's energies (the worklet does). */
+  enableMeter() {
+    this.meterOn = true
+  }
+
+  /**
+   * The meter's energy sums since the last call, summed over channels:
+   * `added` is what TAPE and Warmth added, `clean` the makeup-scaled input,
+   * `count` the samples summed (frames × channels).
+   */
+  takeMeter() {
+    const r = { added: this.meterAdded, clean: this.meterClean, count: this.meterCount }
+    this.meterAdded = 0
+    this.meterClean = 0
+    this.meterCount = 0
+    return r
+  }
+
+  /**
+   * `immediate` jumps the Warmth layers' ramps to the new values. ⚠ THE FIRST
+   * REAL PARAMS MUST BE IMMEDIATE: the constructor has already set the
+   * defaults, so a ramped first set glides Warmth from them over the first
+   * 20 ms — a render from rest started +0.4 dB hot when this lived in the HF
+   * Limiter.
+   */
+  setParams(partial, immediate = false) {
+    const p = { ...this.params, ...partial }
+    this.params = p
+    if (p.warmthLayers) {
+      // Ramped like the bench's own knobs, except an immediate set.
+      this.warmth.setParams({ layers: p.warmthLayers }, immediate || !this.warmthInit)
+      this.warmthInit = true
+    }
+    if (p.warmthGuard) this.guard.setParams(p.warmthGuard)
+    if (p.tapeLayer) {
+      this.tape.setParams({ layers: [p.tapeLayer] }, immediate || !this.tapeInit)
+      this.tapeInit = true
+    }
+    this.tapeHf.setParams(p.tapeHf ?? null)
+    this.inputGain.set(dbToLin(Number.isFinite(p.inputGainDb) ? p.inputGainDb : 0), immediate)
+    this.mix.set(Number.isFinite(p.mix) ? Math.min(1, Math.max(0, p.mix)) : 1, immediate)
+    this.outputGain.set(dbToLin(p.outputGainDb + (Number.isFinite(p.outputMakeupDb) ? p.outputMakeupDb : 0)), immediate)
+    this.tapeMakeupGain.set(dbToLin(Number.isFinite(p.tapeMakeupDb) ? p.tapeMakeupDb : 0), immediate)
+    const bumpKey = p.headBump || 0
+    if (bumpKey !== this.bumpKey) {
+      // Coefficients only: the filter state carries over, so a change is a step in response, not a click from rest.
+      const secs = headBumpSections(this.sampleRate, bumpKey)
+      if (secs) {
+        const ident = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }
+        for (let i = 0; i < TAPE_HEAD_BUMP_MAX_SECTIONS; i++) {
+          this.bump.setSection(i, secs[i] || ident)
+          this.meterBump.setSection(i, secs[i] || ident)
+        }
+        if (!this.bumpOn) { this.bump.reset(); this.meterBump.reset() }
+      }
+      this.bumpOn = !!secs
+      this.bumpKey = bumpKey
+    }
+  }
+
+  applyBump(chs, n) {
+    this.bump.ensureChannels(chs.length)
+    for (let ch = 0; ch < chs.length; ch++) this.bump.process(chs[ch], chs[ch], n, ch)
+  }
+
+  /** TAPE's curve, the head bump (after it, where a playback head makes it), then the makeup gain — in place. */
+  tapeAndMakeup(chs, n) {
+    this.tape.process(chs, chs, n)
+    if (this.bumpOn) this.applyBump(chs, n)
+    this.tapeMakeupGain.process(chs, n)
+  }
+
+  /**
+   * @param {Float32Array[]} inputChannels
+   * @param {Float32Array[]} outputChannels
+   * @param {number} n
+   */
+  process(inputChannels, outputChannels, n) {
+    const nIn = inputChannels.length
+    const nOut = outputChannels.length
+    if (nIn === 0 || n === 0) {
+      for (let ch = 0; ch < nOut; ch++) outputChannels[ch].fill(0, 0, n)
+      return
+    }
+    for (let ch = 0; ch < nOut; ch++) {
+      outputChannels[ch].set(inputChannels[ch < nIn ? ch : nIn - 1].subarray(0, n))
+    }
+    this.inputGain.process(outputChannels, n)
+    // The input after Input: the saturation meter's clean reference and Mix's
+    // dry path both start here.
+    while (this.dryIn.length < nOut) this.dryIn.push(new Float32Array(n))
+    const dry = this.dryIn
+    for (let ch = 0; ch < nOut; ch++) {
+      if (dry[ch].length < n) dry[ch] = new Float32Array(n)
+      dry[ch].set(outputChannels[ch].subarray(0, n))
+    }
+    // In place: each stage reads a sample before it writes that output.
+    // TAPE → makeup → Warmth → guard (the order is pinned since October 2026).
+    const mk = this.tapeMakeupGain.value // at the block's start: the meter is an estimate
+    this.tapeAndMakeup(outputChannels, n)
+    // The guard needs Warmth's input as well as its output.
+    while (this.warmthIn.length < nOut) this.warmthIn.push(new Float32Array(n))
+    const wIn = this.warmthIn
+    for (let ch = 0; ch < nOut; ch++) {
+      if (wIn[ch].length < n) wIn[ch] = new Float32Array(n)
+      wIn[ch].set(outputChannels[ch].subarray(0, n))
+    }
+    this.warmth.process(outputChannels, outputChannels, n)
+    this.guard.process(wIn, outputChannels, n)
+    if (this.meterOn) {
+      // The clean reference: the input through the head bump (a linear lift is
+      // not saturation), delayed to meet the output, scaled by the makeup.
+      while (this.meterDelays.length < nOut) this.meterDelays.push(new DelayLine(this.meterLag))
+      let added = 0
+      let clean = 0
+      const bumped = this.bumpOn
+      if (bumped) this.meterBump.ensureChannels(nOut)
+      while (this.meterIn.length < nOut) this.meterIn.push(new Float32Array(n))
+      for (let ch = 0; ch < nOut; ch++) {
+        const d = this.meterDelays[ch]
+        let x = dry[ch]
+        if (bumped) {
+          if (this.meterIn[ch].length < n) this.meterIn[ch] = new Float32Array(n)
+          this.meterBump.process(x, this.meterIn[ch], n, ch)
+          x = this.meterIn[ch]
+        }
+        const y = outputChannels[ch]
+        for (let i = 0; i < n; i++) {
+          const c = mk * d.push(x[i])
+          const a = y[i] - c
+          added += a * a
+          clean += c * c
+        }
+      }
+      this.meterAdded += added
+      this.meterClean += clean
+      this.meterCount += n * nOut
+    }
+    this.tapeHf.process(outputChannels, n)
+    // Mix: the dry path is always fed, so a move off 1 blends against real
+    // history rather than the delay line's silence.
+    while (this.dryDelays.length < nOut) this.dryDelays.push(new DelayLine(this.latencySamples))
+    while (this.dryOut.length < nOut) this.dryOut.push(new Float32Array(n))
+    for (let ch = 0; ch < nOut; ch++) {
+      if (this.dryOut[ch].length < n) this.dryOut[ch] = new Float32Array(n)
+      const d = this.dryDelays[ch]
+      const x = dry[ch]
+      const y = this.dryOut[ch]
+      for (let i = 0; i < n; i++) y[i] = d.push(x[i])
+    }
+    this.mix.process(outputChannels, this.dryOut, n)
+    this.outputGain.process(outputChannels, n)
+  }
+}
+
+/**
+ * One-shot offline convenience: process a whole buffer through a fresh kernel.
+ * Used by tests and scripts; the app renders through an OfflineAudioContext
+ * running the worklet so preview and apply share one code path. The output is
+ * delayed by the kernel's latency, like the worklet's.
+ */
+export function processPhatassBuffer(channelData, sampleRate, kernelParams = {}) {
+  const kernel = new PhatassKernel(sampleRate)
+  kernel.setParams(kernelParams, true)
+  const n = channelData[0].length
+  const output = channelData.map(() => new Float32Array(n))
+  const BLOCK = 128
+  for (let off = 0; off < n; off += BLOCK) {
+    const len = Math.min(BLOCK, n - off)
+    kernel.process(
+      channelData.map(c => c.subarray(off, off + len)),
+      output.map(c => c.subarray(off, off + len)),
+      len,
+    )
+  }
+  return { channelData: output, latencySamples: kernel.latencySamples }
+}
+
+// ── AudioWorklet registration (worklet scope only) ──────────────────────────
+
+if (typeof registerProcessor === 'function') {
+  class PhatassWorkletProcessor extends AudioWorkletProcessor {
+    constructor(options) {
+      super()
+      this.kernel = new PhatassKernel(sampleRate)
+      if (options?.processorOptions?.params) {
+        this.kernel.setParams(options.processorOptions.params, true)
+      }
+      this.port.onmessage = (e) => {
+        if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
+      }
+      this.kernel.enableMeter()
+      this.quanta = 0
+    }
+
+    process(inputs, outputs) {
+      const input = inputs[0]
+      const output = outputs[0]
+      if (!output || output.length === 0) return true
+      const n = output[0].length
+      if (!input || input.length === 0) {
+        for (const ch of output) ch.fill(0)
+        return true
+      }
+      this.kernel.process(input, output, n)
+      // Saturation meter: energy sums every METER_POST_QUANTA (~23 ms at 44.1 kHz).
+      if (++this.quanta >= METER_POST_QUANTA) {
+        this.quanta = 0
+        this.port.postMessage({ type: 'sat', frames: METER_POST_QUANTA * n, ...this.kernel.takeMeter() })
+      }
+      return true
+    }
+  }
+
+  registerProcessor('phatass-processor', PhatassWorkletProcessor)
+}

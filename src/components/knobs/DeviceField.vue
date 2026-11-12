@@ -205,6 +205,7 @@ function onKeyDown(e) {
       :class="disabled ? 'cursor-default' : (editing ? 'cursor-text' : 'cursor-ns-resize')"
       @wheel="onWheel"
       :style="{
+        touchAction: 'none',
         padding: '5px 4px',
         background: 'rgba(0,0,0,.34)',
         boxShadow: editing

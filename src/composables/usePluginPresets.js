@@ -16,8 +16,9 @@
 import { computed, onUnmounted, ref } from 'vue'
 import {
   listPresets, presetParams, matchPreset, saveUserPreset, deleteUserPreset,
-  isFactoryPreset, onPresetsChanged,
+  isFactoryPreset, onPresetsChanged, canSaveUserPresets,
 } from '../audio/pluginPresets/index.js'
+import { useEntitlements } from './useEntitlements.js'
 
 export function usePluginPresets(pluginId, { read, write }) {
   /**
@@ -134,6 +135,24 @@ export function usePluginPresets(pluginId, { read, write }) {
     return select(selectedId.value)
   }
 
+  /**
+   * Can this user save presets at all? Saving needs an account once accounts
+   * exist; signed out, the menus offer "Sign in to save" instead of a name
+   * field. (With accounts off, presets save to this browser as they always have.)
+   */
+  const entitlements = useEntitlements()
+  const saveAllowed = computed(() => {
+    revision.value // the store emits when its backend switches
+    return entitlements.can('savePresets') && canSaveUserPresets()
+  })
+
+  /** Ask to save: true if saving is possible, else opens sign-up and returns false. */
+  function requestSave() {
+    if (saveAllowed.value) return true
+    entitlements.request('savePresets')
+    return false
+  }
+
   function canSaveAs(name) {
     const trimmed = String(name ?? '').trim()
     if (!trimmed) return false
@@ -154,6 +173,8 @@ export function usePluginPresets(pluginId, { read, write }) {
     remove,
     revert,
     canSaveAs,
+    saveAllowed,
+    requestSave,
     isFactory: (id) => isFactoryPreset(pluginId, id),
   }
 }

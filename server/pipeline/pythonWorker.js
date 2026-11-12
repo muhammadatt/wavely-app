@@ -79,6 +79,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 import { getThreadLimit } from './threadingContext.js'
+import { SUBPROCESS_TIMEOUT_MS, timeoutError, formatMs } from '../lib/subprocessTimeout.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname  = path.dirname(__filename)
@@ -225,7 +226,10 @@ class WorkerHandle {
       },
     })
 
+    // Every handler below ignores a process this handle has already let go of
+    // (see `abandon`): its late output and its exit belong to no request now.
     proc.stdout.on('data', chunk => {
+      if (this.proc !== proc) return
       this.stdoutBuffer += chunk.toString()
       let nl
       while ((nl = this.stdoutBuffer.indexOf('\n')) >= 0) {
@@ -243,6 +247,7 @@ class WorkerHandle {
     })
 
     proc.on('exit', (code, signal) => {
+      if (this.proc !== proc) return
       const err = new Error(`Python worker ${this.index} exited (code=${code}, signal=${signal})`)
       for (const p of this.pending.values()) p.reject(err)
       this.pending.clear()
@@ -253,6 +258,7 @@ class WorkerHandle {
     })
 
     proc.on('error', err => {
+      if (this.proc !== proc) return
       const wrapped = new Error(`Python worker ${this.index} spawn failed: ${err.message}`)
       for (const p of this.pending.values()) p.reject(wrapped)
       this.pending.clear()
@@ -297,11 +303,23 @@ class WorkerHandle {
    * doesn't restore afterwards — every dispatch that omits `threads` falls
    * back to the worker's env-default thread count by re-applying it.
    */
-  send(script, argv, label, threads) {
+  send(script, argv, label, threads, timeoutMs = SUBPROCESS_TIMEOUT_MS) {
     this.ensureStarted()
     const id = randomUUID()
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, label })
+      let timer = null
+      const settle = fn => value => { clearTimeout(timer); fn(value) }
+      this.pending.set(id, { resolve: settle(resolve), reject: settle(reject), label })
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          if (!this.pending.has(id)) return
+          this.pending.delete(id)
+          console.error(`[python#${this.index}] ${label} still running after ${formatMs(timeoutMs)} — killing the worker`)
+          this.abandon()
+          reject(timeoutError(label, timeoutMs))
+        }, timeoutMs)
+        timer.unref?.()
+      }
       const req = { id, script, args: argv }
       if (threads != null) req.threads = threads
       const payload = JSON.stringify(req) + '\n'
@@ -312,6 +330,22 @@ class WorkerHandle {
         }
       })
     })
+  }
+
+  /**
+   * Kill a wedged worker and forget it at once. The process is detached
+   * BEFORE it dies, so the next task the pool dispatches here spawns a fresh
+   * worker instead of being written to a dying one (and failed by its exit).
+   * The handle serves one request at a time, so nothing else is pending.
+   */
+  abandon() {
+    const proc = this.proc
+    if (!proc) return
+    this.proc         = null
+    this.stdoutBuffer = ''
+    for (const p of this.pending.values()) p.reject(new Error(`Python worker ${this.index} was stopped`))
+    this.pending.clear()
+    proc.kill('SIGKILL')
   }
 
   async shutdown() {
@@ -350,7 +384,7 @@ function findIdleWorker() {
  */
 function dispatchOnWorker(worker, task) {
   worker.busy = true
-  worker.send(task.script, task.argv, task.label, task.threads).then(
+  worker.send(task.script, task.argv, task.label, task.threads, task.timeoutMs).then(
     result => {
       worker.busy = false
       task.resolve(result)
@@ -389,12 +423,16 @@ function drainQueue() {
  * @param {string}   script — module name (no .py), matches a file in server/scripts/
  * @param {string[]} argv   — argv-style args (e.g. ['--input', '/tmp/x.wav'])
  * @param {string}   label  — label for log messages and errors
+ * @param {object}   [opts]
+ * @param {number}   [opts.timeoutMs] — kill the worker if the call runs longer
+ *                   (default SUBPROCESS_TIMEOUT_MS; time spent queued for a
+ *                   free worker does not count)
  * @returns {Promise<object>} — the dict returned by the script's run(argv)
  */
-export function runPython(script, argv = [], label = script) {
+export function runPython(script, argv = [], label = script, { timeoutMs } = {}) {
   return new Promise((resolve, reject) => {
     const threads = getThreadLimit() ?? SERIAL_THREADS
-    const task = { script, argv, label, threads, resolve, reject }
+    const task = { script, argv, label, threads, timeoutMs, resolve, reject }
     const worker = findIdleWorker()
     if (worker) {
       dispatchOnWorker(worker, task)

@@ -12,15 +12,19 @@
  * QUESTION: does anything in the kernel LATCH, or does all of its state decay?
  *
  *   decays only  -> a finite pre-roll reaches BIT-EXACT
- *     OptoSmooth   ballistics driven by the input
+ *     LA Vintage 2A   ballistics driven by the input
  *     Scheps       holds the LA-2A kernel, so it inherits that
  *
  *   latches      -> no pre-roll can ever be exact
- *     FET Punch    `trkInPeak` is a running maximum, never decays
+ *     LA Classic 76    `trkInPeak` is a running maximum, never decays
  *     Tube Sat     sticky skew sign, and a valley floor that only creeps up
  *
  *   neither      -> not a convergence problem at all
- *     ResoTame     an STFT frame-PHASE error; see its own test below
+ *     Reso Soothe     an STFT frame-PHASE error; see its own test below
+ *     Auto Leveler no kernel and no state: preview schedules the solved gain
+ *                  curve onto an AudioParam and apply expands the same segment
+ *                  list, so the two are equal by construction rather than by
+ *                  convergence. Pinned in autoLevelSegments.test.js
  *
  * This file pins the first group. The second group is asserted NOT to converge,
  * so that if someone gives one of them a bounded reference the test goes red
@@ -31,7 +35,7 @@ import assert from 'node:assert/strict'
 import { processLA2ABuffer } from '../../src/audio/la2aProcessor.js'
 import { processSchepsBuffer } from '../../src/audio/schepsProcessor.js'
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
-import { processFET1176Buffer } from '../../src/audio/fet1176Processor.js'
+import { FET1176_PREROLL_S, processFET1176Buffer } from '../../src/audio/fet1176Processor.js'
 import { processSoftClipperBuffer } from '../../src/audio/softClipperProcessor.js'
 import { LA2A_PREROLL_S } from '../../src/audio/la2aProcessor.js'
 import { SCHEPS_PREROLL_S } from '../../src/audio/schepsProcessor.js'
@@ -92,10 +96,10 @@ test('a cold apply really does differ — the premise of the whole pre-roll', ()
   // If this ever stops being true the pre-roll is dead weight and should come
   // out of applyWorkletRegion rather than being carried indefinitely.
   const cold = worstDiff(processLA2ABuffer, { peakReduction: 75, mode: 'limit' }, 0)
-  assert.ok(cold > 1e-3, `a cold OptoSmooth apply should differ; got ${cold.toExponential(2)}`)
+  assert.ok(cold > 1e-3, `a cold LA Vintage 2A apply should differ; got ${cold.toExponential(2)}`)
 })
 
-test('OptoSmooth is BIT-EXACT at its wired pre-roll', () => {
+test('LA Vintage 2A is BIT-EXACT at its wired pre-roll', () => {
   // Nothing here latches: every piece of state is driven by the input and its
   // influence decays, so after a few time constants the state is a function of
   // recent input alone.
@@ -105,7 +109,7 @@ test('OptoSmooth is BIT-EXACT at its wired pre-roll', () => {
     { peakReduction: 90, mode: 'limit' },
   ]) {
     const diff = worstDiff(processLA2ABuffer, params, Math.round(LA2A_PREROLL_S * SR))
-    assert.equal(diff, 0, `OptoSmooth ${JSON.stringify(params)} not exact: ${diff.toExponential(2)}`)
+    assert.equal(diff, 0, `LA Vintage 2A ${JSON.stringify(params)} not exact: ${diff.toExponential(2)}`)
   }
 })
 
@@ -114,7 +118,7 @@ test('Scheps is BIT-EXACT at its wired pre-roll, because it holds that kernel', 
   assert.equal(diff, 0, `Scheps not exact: ${diff.toExponential(2)}`)
 })
 
-test('⚠ ResoTame is grid-phase limited, which a pre-roll cannot fix', () => {
+test('⚠ Reso Soothe is grid-phase limited, which a pre-roll cannot fix', () => {
   // NOT A CONVERGENCE PROBLEM, WHICH IS WHY NO PRE-ROLL IS WIRED FOR IT. An
   // STFT reconstructs on a grid anchored at sample 0 of whatever it is handed,
   // so what decides agreement is the ABSOLUTE phase `(regionStart - preRoll) %
@@ -129,7 +133,7 @@ test('⚠ ResoTame is grid-phase limited, which a pre-roll cannot fix', () => {
   const settledOnGrid = hop * 861
   assert.equal(
     worstDiffAt(processResonanceBuffer, {}, hop * 173, settledOnGrid), 0,
-    'with the phase preserved, ResoTame should agree exactly',
+    'with the phase preserved, Reso Soothe should agree exactly',
   )
   // Seven samples off, and it does not — despite an identical amount of
   // lead-in. That is the proof it is phase and not convergence.
@@ -188,7 +192,7 @@ function historyStillShowsThrough(processFn, params, leadInSamples) {
 test('the wired pre-roll exceeds the kernels\' actual memory', () => {
   // WHAT MAKES THE PRE-ROLL CONSTANTS SOUND, and the guard if a time constant
   // is ever lengthened past them. Feeding two histories 33 dB apart and then an
-  // identical lead-in, OptoSmooth's output over the region is IDENTICAL — its
+  // identical lead-in, LA Vintage 2A's output over the region is IDENTICAL — its
   // state is fully determined by the last 2 s, which is exactly why 2 s of
   // pre-roll reproduces the preview bit for bit.
   //
@@ -196,12 +200,12 @@ test('the wired pre-roll exceeds the kernels\' actual memory', () => {
   // NOTHING FOR THESE TWO. A seed only sets where the state begins, and by the
   // end of a lead-in longer than the memory, where it began has been forgotten.
   // Seeding is a way to shrink a cold-start TRANSIENT, not a way to make two
-  // different starting points agree — FET Punch already seeds on its first
+  // different starting points agree — LA Classic 76 already seeds on its first
   // block and is the one stage that cannot converge at all.
   assert.equal(
     historyStillShowsThrough(processLA2ABuffer, { peakReduction: 75, mode: 'limit' }, SR * LA2A_PREROLL_S),
     0,
-    'OptoSmooth: history before the pre-roll window should not reach the output',
+    'LA Vintage 2A: history before the pre-roll window should not reach the output',
   )
   assert.ok(
     historyStillShowsThrough(processSchepsBuffer, {}, SR * SCHEPS_PREROLL_S) < 1e-6,
@@ -212,7 +216,7 @@ test('the wired pre-roll exceeds the kernels\' actual memory', () => {
 test('⚠ the soft clipper\'s adaptive mode is why it stays deprecated', () => {
   // Its memory far outruns any pre-roll anyone would wire: with a 2 s lead-in,
   // history from before that lead-in still reaches the output at ~0.9 — three
-  // orders of magnitude past OptoSmooth's exact zero. The tracker has ~20 dB to
+  // orders of magnitude past LA Vintage 2A's exact zero. The tracker has ~20 dB to
   // travel from SPEECH_INIT_HOLD_DB at a 3 s time constant.
   //
   // ⚠ AND THE SHIPPING MODE IS FINE. `fixed` has no tracker to be cold and is
@@ -229,21 +233,64 @@ test('⚠ the soft clipper\'s adaptive mode is why it stays deprecated', () => {
   assert.equal(fixed, 0, 'the shipping fixed mode should be history-independent')
 })
 
-test('⚠ FET Punch CANNOT be made exact, and this records why', () => {
-  // `trkInPeak` is a running maximum — "the loudest input sample heard so far"
-  // — so it carries the whole preview session and an offline render cannot
-  // match it. A pre-roll helps a lot (stock: -0.668 dB cold, -0.022 at 2 s) and
-  // never closes. No pre-roll is wired for it.
-  //
-  // If someone gives that tracker a bounded reference — a decaying peak, or a
-  // percentile over a window — this goes red, and FET Punch can then be wired
-  // like the other three.
-  const diff = worstDiff(processFET1176Buffer, { inputDrive: 70, attack: 1, release: 1 }, SR * 2)
-  assert.ok(
-    diff > 1e-4,
-    `FET Punch converged to ${diff.toExponential(2)} — if its makeup tracker `
-    + 'stopped latching, wire preRollSamples for it and delete this test',
-  )
+/**
+ * ⚠⚠ THIS TEST USED TO ASSERT FET PUNCH COULD NOT CONVERGE, AND ITS DIAGNOSIS
+ * WAS WRONG. It blamed `trkInPeak`, the makeup tracker's running maximum. But
+ * that tracker does not latch in the OFFLINE path at all — measured on a fixture
+ * whose loudest moment sits 8 s before the pre-roll window, at loud amplitudes
+ * up to 0.95, the two renders agree to exactly 0. What actually failed to
+ * converge was the release TAIL, whose constant is `releaseS * TAIL_MULT` =
+ * 4.4 s under the old law and so outlasted any lead-in. `TAIL_FRACTION` went to
+ * 0 when the release was fitted to FETish, which has no exposure limb, and the
+ * worst difference over a 2 s lead-in went from 1.64e-1 to 7.11e-15.
+ *
+ * `preRollSamples` is wired for LA Classic 76 now. What is pinned here is that it
+ * earns it.
+ */
+test('LA Classic 76 converges on a pre-roll, now that the tail is gone', () => {
+  const cold = worstDiff(processFET1176Buffer, { inputDrive: 70, attack: 1, release: 1 }, 0)
+  assert.ok(cold > 1e-2, `no lead-in should be visibly wrong; got ${cold.toExponential(2)}`)
+
+  const warm = worstDiff(processFET1176Buffer,
+    { inputDrive: 70, attack: 1, release: 1 }, Math.round(FET1176_PREROLL_S * SR))
+  assert.ok(warm < 1e-9, `slowest ballistics should converge; got ${warm.toExponential(2)}`)
+})
+
+/**
+ * ⚠⚠ ALL-BUTTONS IS BIT-EXACT NOW, AND IT WAS THE ONE THING STOPPING THE WHOLE
+ * PLUGIN CLAIMING EXACTNESS. This test used to assert the opposite — that the
+ * pre-roll CONVERGES but does not reach zero (5.46e-6 at 2 s, 1.04e-7 at 3 s) —
+ * because all-buttons was the only mode still carrying a release tail, held at
+ * 0.45 on the grounds that no all-buttons capture existed to zero it with.
+ *
+ * CLA-76's `bursts.wav` at ratio all supplied one, and it says there is no tail:
+ * the release lengthening across hold lengths is fully accounted for by the
+ * depth schedule, with 0.971x left over. With `ALL_TAIL_FRACTION` at 0 the only
+ * state with memory longer than the pre-roll is gone.
+ *
+ * ⚠ SO THE CAVEAT ON `FET1176_PREROLL_S` IS RETIRED, and if a tail ever comes
+ * back this fails rather than the claim quietly becoming false.
+ */
+test('all-buttons is bit-exact now that its tail is measured away', () => {
+  const params = { inputDrive: 90, attack: 7, release: 7, fetDrive: 1, ratio: 'all' }
+  const warm = worstDiff(processFET1176Buffer, params, Math.round(FET1176_PREROLL_S * SR))
+  assert.equal(warm, 0,
+    `all-buttons should now converge exactly; got ${warm.toExponential(2)} — ` +
+    'has a tail come back, or another stage grown memory longer than the pre-roll?')
+
+  /**
+   * Cold must still be visibly wrong, or the fixture is not exercising anything.
+   *
+   * ⚠ THE BAR MOVED FROM 1e-3 TO 1e-4 WHEN `ALL_ATTACK_LAG` WENT 2.5 -> 1, and
+   * that is the control weakening rather than the kernel improving. A cold
+   * start is wrong for as long as the state takes to catch up, so an attack two
+   * and a half times faster is wrong for less of the buffer: the same fixture
+   * went 2.40e-4 where it used to clear 1e-3. Still four orders above the warm
+   * case, so it does its job — but if this ever has to be lowered again, the
+   * fixture needs a longer-memory setting, not a smaller number.
+   */
+  const cold = worstDiff(processFET1176Buffer, params, 0)
+  assert.ok(cold > 1e-4, `no lead-in should be visibly wrong; got ${cold.toExponential(2)}`)
 })
 
 /**
@@ -262,7 +309,7 @@ test('the input-alignment offset introduces no state, so the pre-roll still conv
     const diff = worstDiff(
       processLA2ABuffer, { peakReduction: 60, inputAlignDb }, Math.round(LA2A_PREROLL_S * SR),
     )
-    assert.equal(diff, 0, `OptoSmooth align ${inputAlignDb} dB not exact: ${diff.toExponential(2)}`)
+    assert.equal(diff, 0, `LA Vintage 2A align ${inputAlignDb} dB not exact: ${diff.toExponential(2)}`)
   }
   const scheps = worstDiff(processSchepsBuffer, { inputAlignDb: -6 }, Math.round(SCHEPS_PREROLL_S * SR))
   assert.ok(scheps < 1e-7, `Scheps with alignment not exact: ${scheps.toExponential(2)}`)

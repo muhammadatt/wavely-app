@@ -60,6 +60,8 @@ const PASS_THROUGH = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }
 
 export const MANUAL_EQ_KERNEL_DEFAULTS = {
   bands: [],
+  /** Gain ahead of the filters, dB. 0 is bit-identical to no stage at all. */
+  inputGainDb: 0,
   outputGainDb: 0,
   /** Index into `bands` to monitor in isolation, or null. */
   soloIndex: null,
@@ -186,7 +188,14 @@ export class ManualEqKernel {
     this.cascade = new BiquadCascade(MAX_BANDS, 2)
     this.params = { ...MANUAL_EQ_KERNEL_DEFAULTS }
     this.activeCount = 0
+    // Input and output gains. A change ramps linearly across the next block
+    // rather than stepping, so a trim knob being dragged does not zipper.
+    this.inputLin = 1
+    this.inputTarget = 1
     this.outputLin = 1
+    this.outputTarget = 1
+    this.inScratch = new Float32Array(128)
+    this.gainsPrimed = false
 
     // Per-channel oversamplers, grown on demand. Even a bypassed EQ runs them:
     // latency has to stay constant whatever the band list says, or the apply
@@ -222,7 +231,14 @@ export class ManualEqKernel {
       this.cascade.setSection(i, i < sections.length ? sections[i] : PASS_THROUGH)
     }
 
-    this.outputLin = Math.exp((p.outputGainDb ?? 0) * LN10_OVER_20)
+    this.inputTarget = Math.exp((p.inputGainDb ?? 0) * LN10_OVER_20)
+    this.outputTarget = Math.exp((p.outputGainDb ?? 0) * LN10_OVER_20)
+    // The first params (the constructor's, then the worklet's own) land at
+    // once: a render must not glide in from the defaults.
+    if (!this.gainsPrimed) {
+      this.inputLin = this.inputTarget
+      this.outputLin = this.outputTarget
+    }
   }
 
   /**
@@ -247,15 +263,29 @@ export class ManualEqKernel {
     if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
 
     const L = EQ_OVERSAMPLE.factor
-    const outputLin = this.outputLin
     const wet = this.wetScratch
+    if (this.inScratch.length < n) this.inScratch = new Float32Array(n)
+    this.gainsPrimed = true
+    // This block ramps from the current gains to the targets.
+    const in0 = this.inputLin
+    const in1 = this.inputTarget
+    const out0 = this.outputLin
+    const out1 = this.outputTarget
+    const inStep = (in1 - in0) / n
+    const outStep = (out1 - out0) / n
 
     for (let ch = 0; ch < nOut; ch++) {
       // Channels beyond the input count reuse the last one, matching the
       // convention in la2aProcessor.js / airBandProcessor.js.
-      const input = inputChannels[ch < nIn ? ch : nIn - 1]
+      let input = inputChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
       const os = this.oversamplers[ch]
+
+      if (in0 !== 1 || in1 !== 1) {
+        const scaled = this.inScratch
+        for (let i = 0; i < n; i++) scaled[i] = input[i] * (in0 + inStep * (i + 1))
+        input = scaled
+      }
 
       // Always resample, even with no bands: see the constructor. The filters
       // still cost their taps, but the cascade below is skipped.
@@ -265,12 +295,14 @@ export class ManualEqKernel {
       }
       os.down(wet, n)
 
-      if (outputLin === 1) {
+      if (out0 === 1 && out1 === 1) {
         for (let i = 0; i < n; i++) out[i] = wet[i]
       } else {
-        for (let i = 0; i < n; i++) out[i] = wet[i] * outputLin
+        for (let i = 0; i < n; i++) out[i] = wet[i] * (out0 + outStep * (i + 1))
       }
     }
+    this.inputLin = in1
+    this.outputLin = out1
   }
 }
 

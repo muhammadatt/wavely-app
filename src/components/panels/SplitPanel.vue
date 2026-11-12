@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import ApplyAction from '../ui/ApplyAction.vue'
 
-const { state, hasSelection, performSplit, performSplitAtSelectionEdges, showToast } = useEditorState()
+const { hasSelection, performSplit, performSplitAtSelectionEdges, showToast } = useEditorState()
 
 const mode = ref('playhead') // 'playhead' | 'selection'
 
@@ -24,9 +24,8 @@ function apply() {
 </script>
 
 <template>
-  <!-- No header: as a rail operation, ContextPanel draws the title block and
-       the back chevron from the registry entry. -->
   <div class="font-['Inter']">
+    <!-- Header lives in ContextPanel, which renders it from the registry entry -->
     <div class="p-4 flex flex-col gap-2.5">
       <button
         class="text-left px-[14px] py-[13px] rounded-[12px] border cursor-pointer transition-all"

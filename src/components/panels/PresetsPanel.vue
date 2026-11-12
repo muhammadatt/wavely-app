@@ -7,6 +7,7 @@ import {
   getDefaultOutputProfile,
 } from '../../audio/presets.js'
 import { processAudioOnServer } from '../../api/processing.js'
+import { useEntitlements } from '../../composables/useEntitlements.js'
 import { computePeakCache } from '../../audio/processing.js'
 import { getTimelineDuration } from '../../audio/operations.js'
 import ProcessingReportPanel from './ProcessingReportPanel.vue'
@@ -18,6 +19,7 @@ const {
   getAudioContext, replaceRegion, setPeakCache, getDocument,
   startProcessing, updateProcessingProgress, updateProcessingStage, endProcessing,
 } = useEditorState()
+const entitlements = useEntitlements()
 
 // Friendly stage sequence shown while the server processes the audio.
 // Each entry has a message (cute/friendly), progress (0-1), and delay in ms.
@@ -51,23 +53,6 @@ const NE_PROCESSING_STAGES = [
   { message: 'Almost there — running final checks…',    progress: 0.97, delay: 155000 },
 ]
 
-// ClearerVoice Eraser is faster than Demucs-based Noise Eraser (~1–3 min CPU
-// vs ~5–10 min). Progress sequence reflects shorter expected wait.
-const CV_PROCESSING_STAGES = [
-  { message: 'Measuring your audio…',                        progress: 0.04, delay: 0      },
-  { message: 'RNNoise pre-pass — quieting the room…',        progress: 0.10, delay: 1500   },
-  { message: 'Removing tonal hum and interference…',         progress: 0.16, delay: 4000   },
-  { message: 'ClearerVoice enhancing your voice…',           progress: 0.28, delay: 7000   },
-  { message: 'AI enhancement in progress…',                  progress: 0.50, delay: 25000  },
-  { message: 'Still enhancing — almost through…',            progress: 0.64, delay: 55000  },
-  { message: 'Checking enhancement quality…',                progress: 0.72, delay: 75000  },
-  { message: 'Cleaning up any residual noise…',              progress: 0.78, delay: 85000  },
-  { message: 'Restoring high frequencies…',                  progress: 0.85, delay: 95000  },
-  { message: 'Tuning the final tone…',                       progress: 0.91, delay: 105000 },
-  { message: 'Matching your target loudness…',               progress: 0.95, delay: 115000 },
-  { message: 'Almost there — running final checks…',         progress: 0.97, delay: 125000 },
-]
-
 const presetList = getPresetList()
 const outputProfileList = getOutputProfileList()
 
@@ -83,9 +68,7 @@ const isSelectedPresetComingSoon = computed(() => COMING_SOON_PRESETS.has(state.
 /**
  * Presets that expose a model choice.
  *
- * Noise Eraser and ClearerVoice Eraser previously carried two near-identical
- * blocks of markup and two near-identical setters differing only in ids and
- * copy. The chosen model is written back onto the preset config because that
+ * The chosen model is written back onto the preset config because that
  * object is what processAudioOnServer serialises into the request body.
  */
 const MODEL_CHOICES = {
@@ -101,21 +84,6 @@ const MODEL_CHOICES = {
       {
         id: 'convtasnet', label: 'Fast', sub: 'Good results, quicker',
         note: 'ConvTasNet WHAM! — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.',
-      },
-    ],
-  },
-  clearervoice_eraser: {
-    title: 'Enhancement Model',
-    configKey: 'clearervoiceModel',
-    fallback: 'mossformer2_48k',
-    options: [
-      {
-        id: 'mossformer2_48k', label: 'Quality', sub: 'Full-band 48 kHz, slower',
-        note: 'MossFormer2_SE_48K — ~1–5 min per file. Handles broadband, tonal, and non-stationary noise.',
-      },
-      {
-        id: 'frcrn_16k', label: 'Fast', sub: '16 kHz, quicker',
-        note: 'FRCRN_SE_16K — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.',
       },
     ],
   },
@@ -148,7 +116,6 @@ function setModel(modelId) {
 // even when the measurements pass.
 const ACX_ARTIFACT_WARNINGS = {
   noise_eraser: 'ACX compliance is not recommended for Noise Eraser output. Separation artifacts may cause ACX human review rejection even if measurements pass.',
-  clearervoice_eraser: 'ACX compliance is not recommended for ClearerVoice Eraser output. Enhancement artifacts may cause ACX human review rejection even if measurements pass.',
 }
 
 const acxArtifactWarning = computed(() =>
@@ -180,14 +147,19 @@ async function handleProcess() {
   const doc = getDocument(docId)
   if (!doc || !doc.currentFile || doc.isProcessing) return
 
+  // Signed out, the server masters at most the free preview. A whole file
+  // can't be narrowed the way a selection can, so ask for a sign-in before
+  // uploading something the server would only refuse.
+  if (getTimelineDuration(doc.segments) > entitlements.previewLimit('mastering')) {
+    entitlements.request('mastering')
+    return
+  }
+
   const preset = doc.selectedPreset
   let stages, heading
   if (preset === 'noise_eraser') {
     stages  = NE_PROCESSING_STAGES
     heading = 'Separating your voice…'
-  } else if (preset === 'clearervoice_eraser') {
-    stages  = CV_PROCESSING_STAGES
-    heading = 'ClearerVoice enhancing…'
   } else {
     stages  = PROCESSING_STAGES
     heading = 'Making your audio shine'
@@ -195,17 +167,28 @@ async function handleProcess() {
 
   startProcessing(heading, docId)
 
-  // Fire the first stage immediately (synchronously) so it's visible right away
-  updateProcessingStage(stages[0].message, docId)
-  updateProcessingProgress(stages[0].progress, docId)
+  // The audio uploads first — minutes for a long chapter — so the bar shows the
+  // upload, and the friendly stages start only once the server has the file.
+  const UPLOAD_SHARE = 0.1
+  updateProcessingStage('Uploading your audio…', docId)
+  updateProcessingProgress(0, docId)
+  const onUploadProgress = fraction => {
+    updateProcessingStage(`Uploading your audio… ${Math.round(fraction * 100)}%`, docId)
+    updateProcessingProgress(fraction * UPLOAD_SHARE, docId)
+  }
 
-  // Queue the remaining stages
-  const stageTimers = stages.slice(1).map(({ message, progress, delay }) =>
-    setTimeout(() => {
-      updateProcessingStage(message, docId)
-      updateProcessingProgress(progress, docId)
-    }, delay)
-  )
+  let stageTimers = []
+  const onUploaded = () => {
+    // Fire the first stage at once so it's visible right away, queue the rest
+    updateProcessingStage(stages[0].message, docId)
+    updateProcessingProgress(Math.max(stages[0].progress, UPLOAD_SHARE), docId)
+    stageTimers = stages.slice(1).map(({ message, progress, delay }) =>
+      setTimeout(() => {
+        updateProcessingStage(message, docId)
+        updateProcessingProgress(Math.max(progress, UPLOAD_SHARE), docId)
+      }, delay)
+    )
+  }
 
   try {
     const { report, audioBlob, peaks } = await processAudioOnServer({
@@ -215,8 +198,9 @@ async function handleProcess() {
       fileName: doc.currentFile.name,
       presetId: doc.selectedPreset,
       outputProfileId: doc.selectedOutputProfile,
-      separationModel:    preset === 'noise_eraser'        ? selectedModels.value.noise_eraser        : undefined,
-      clearervoiceModel:  preset === 'clearervoice_eraser' ? selectedModels.value.clearervoice_eraser : undefined,
+      separationModel: preset === 'noise_eraser' ? selectedModels.value.noise_eraser : undefined,
+      onUploadProgress,
+      onUploaded,
     })
 
     // The user can close a document while its job is in flight. Bail rather
@@ -261,6 +245,7 @@ async function handleProcess() {
     }
   } catch (err) {
     console.error('Server processing failed:', err)
+    if (entitlements.handleServerRefusal(err)) return
     const suffix = appState.documents.length > 1 ? ` — ${doc.name}` : ''
     showToast((err.message || 'Processing failed') + suffix)
   } finally {

@@ -1,0 +1,76 @@
+1176 Comp Details
+
+Our param	Expected control	FETish	CLA-76
+inputDrive	Input — attenuator into a fixed threshold, feeding both the audio path and the detector		
+outputGainDb	Output — makeup, after the FET stage		
+attack	Attack dial 1–7, 7 = fastest		
+release	Release dial 1–7, 7 = fastest		
+ratio	Buttons 4 / 8 / 12 / 20		
+ratio: 'all'	All buttons in ("British mode")		
+fetDrive	(no control — driven by level alone)		
+scHpfHz	(not on the hardware; a modern extension)		
+—	Anything else the plugin has		
+⚠ THE DIALS ARE REVERSED ON THE HARDWARE AND EVERY EMULATION KEEPS THAT. 7 is the fastest position on both Attack and
+
+
+Waves CLA-76
+
+Input -inf - 0 (default 30)
+Output inf - 0 (default 18)
+Attack 1-7
+Release 1-7
+Ratio 4, 8, 12, 20, ALL
+
+Auto makeup button
+Analog 50/60hz/Off
+
+"Analog controls analog characteristics caused by noise floor and hum, based on the power supplies of the original units. Waves modeled both 50Hz power current and 60Hz power current. If you listen closely, you will hear that there is a difference in hum level between 50Hz and 60Hz"
+
+Rev: Bluey/blacky (tonal color variations)
+
+"The models have different gain stages, time constants, and harmonic distortion."
+
+Mix 0-100
+Trim -18db to + 18db
+
+
+Analog Obession FETish 
+
+Input -96db - 0db
+
+"INPUT: Extended 0 to 60dB input gain. Internally compensated input knob to drive circuit and get compression. With original gear, input will boost signal without compensation. With FETish, you don’t have to reduce volume while you boost input."
+
+Output 0db - +36db
+
+"OUTPUT: -30 to +30dB Make-Up Gain to compensate compressed signal"
+
+Attack 20us - 800us (continuous)
+Release 50ms - 1100ms
+Ratio 40:1 to 20:1 (continuous) 
+
+"RATIO: Selectable 4:1, 8:1, 12:1 and 20:1. Each has it’s own curve and range to start compress. While you use lowest ratio, you should get compression quickly when you boost input. With higher ratios, compression will start at higher input gains."
+
+"SLAM" button
+
+"SLAM: With this function, you will get ultra-fast and aggressive limiting option. You can use this function for every ratio."
+
+
+Sidechain
+
+INT/EXT switch
+
+HPF 20hz - 500hz
+MID F 500hz - 10kHz
+MID GAIN -6 - +6
+
+"MID F.(Frequency 500Hz to 10kHz) / MID G.(Gain -6dB to +6dB): With these two knobs, you can set mid frequency and set it to compress more or less. If you boost mid gain (broad band), you will get more compression on selected frequency. If you reduce mid gain, mids will be less compressed."
+
+
+HF -12db - 0db ("flat")
+
+"HF: HF knob will help you to compress high more. While FLAT position keeps highs natural, HF position will compress highs more."
+
+
+Mix 0-100%
+ 
+The CLA input/output do not show the negative number sign on the faceplate but the docs confirm that the default input is -30 and the default output is -18.  

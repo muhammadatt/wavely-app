@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
+import { registerChainPlugin } from './usePluginChain.js'
 import { applyManualEqRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -28,14 +29,15 @@ import {
  * nothing here knows what a role is.
  */
 export function createEqInstance({
-  effect, windowId, label, maxBands = MAX_BANDS, frequencyPolicy = 'forfeit',
+  effect, windowId, label, maxBands = MAX_BANDS, frequencyPolicy = 'forfeit', life = null,
 }) {
-  // Module-scope-per-instance: created once at import and shared by every
-  // caller of the owning composable, so a plugin's state survives its window
+  // Per instance: created once per copy of the owning plugin (pluginCopies.js)
+  // and shared by every caller of that copy, so its state survives its window
   // being closed and reopened.
   const bands = ref([])
   const eqPreview = ref(false)
   const outputTrim = ref(0)
+  const inputTrim = ref(0)
   const soloBandId = ref(null)
   /**
    * A region being auditioned that has no band — `{ type, frequencyHz, q }`.
@@ -55,7 +57,7 @@ export function createEqInstance({
   function use() {
     const {
       state, getAudioContext, replaceRegion, setPeakCache, hasSelection,
-      startProcessing, endProcessing, showToast,
+      startProcessing, endProcessing, pinActiveDocument, showToast,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -86,7 +88,18 @@ export function createEqInstance({
       chain.updateParam(effect.id, 'bands', bands.value)
       chain.updateParam(effect.id, 'soloIndex', soloIndex())
       chain.updateParam(effect.id, 'soloProbe', soloProbe.value)
+      chain.updateParam(effect.id, 'input', inputTrim.value)
       chain.updateParam(effect.id, 'output', outputTrim.value)
+    }
+
+    /** The input and output trims, dB. Panel settings, not part of a band set or a preset. */
+    function setInputTrim(db) {
+      inputTrim.value = db
+      if (eqPreview.value) getEffectChain(getAudioContext()).updateParam(effect.id, 'input', db)
+    }
+    function setOutputTrim(db) {
+      outputTrim.value = db
+      if (eqPreview.value) getEffectChain(getAudioContext()).updateParam(effect.id, 'output', db)
     }
 
     function startMeters(chain) {
@@ -249,47 +262,66 @@ export function createEqInstance({
 
     // ── Apply ───────────────────────────────────────────────────────────────
 
+    /** Render [start, end) of `segments` with the current bands, uncommitted. */
+    function renderRegion(segments, start, end) {
+      return applyManualEqRegion(
+        segments, start, end,
+        { bands: bands.value, input: inputTrim.value, output: outputTrim.value },
+        state.currentFile.sampleRate, state.currentFile.channels,
+      )
+    }
+
     async function apply() {
       if (!state.selection) return
       const { start, end } = state.selection
+      // Pinned to the document Apply was pressed on: tabs stay usable while it
+      // renders, and `state` follows the active one (pinActiveDocument).
+      const pin = pinActiveDocument(label)
 
       const wasPreviewing = eqPreview.value
       if (wasPreviewing) togglePreview()
       clearSolo()
 
-      startProcessing(`Applying ${label}...`)
+      startProcessing(`Applying ${label}...`, pin.docId)
       try {
-        const buffer = await applyManualEqRegion(
-          state.segments, start, end,
-          { bands: bands.value, output: outputTrim.value },
-          state.currentFile.sampleRate, state.currentFile.channels,
-        )
-        const bufferId = replaceRegion(start, end, buffer, label)
+        const buffer = await renderRegion(state.segments, start, end)
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, label, pin.docId)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast(`${label} applied`)
       } catch (err) {
         console.error(`${label} failed:`, err)
-        showToast(`${label} failed`)
+        showToast(err instanceof DocumentSwitchedError ? err.message : `${label} failed`)
       } finally {
-        endProcessing()
+        endProcessing(pin.docId)
       }
     }
 
+    // The window closing stops the meters and drops solo (a monitoring state)
+    // only: the EQ keeps its slot in the chain until it is removed there.
     function teardown() {
       stopMeters()
-      if (eqPreview.value) {
-        const chain = getEffectChain(getAudioContext())
-        chain.setEnabled(effect.id, false)
-        eqPreview.value = false
-      }
       soloBandId.value = null
       soloProbe.value = null
+      pushBands()
     }
+
+    registerChainPlugin({
+      id: effect.id,
+      windowId,
+      label,
+      dispose: life?.dispose,
+      isActive: () => eqPreview.value,
+      setActive: (on) => { if (eqPreview.value !== on) togglePreview() },
+      render: renderRegion,
+      resume: () => startMeters(initChain()),
+      suspend: teardown,
+    })
 
     return {
       // state
-      bands, eqPreview, outputTrim, soloBandId, soloProbe, inputLevels, outputLevels,
+      bands, eqPreview, inputTrim, outputTrim, setInputTrim, setOutputTrim, soloBandId, soloProbe, inputLevels, outputLevels,
       hasSelection, atBandLimit, maxBands,
       activeBands: computed(() => bands.value.filter(isBandActive)),
 

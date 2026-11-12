@@ -1,4 +1,5 @@
 <script setup>
+import { localPoint } from '../../ui/pointerLocal.js'
 import { ref, watch } from 'vue'
 import { useMeterFrame } from './ballistics.js'
 import {
@@ -46,6 +47,8 @@ const props = defineProps({
   height: { type: Number, default: 260 },
   /** Accessible name — a canvas is opaque to a screen reader without one. */
   title: { type: String, default: 'Spectrum analyzer' },
+  /** 'modula' sets the canvas in the kit's sunken well — housing only. */
+  design: { type: String, default: null },
 })
 
 const CEILING_DB = 0
@@ -328,9 +331,10 @@ function drawCursor(ctx, plotW, plotH, xFor, yFor, minHz, octaves) {
 function onMove(e) {
   const canvas = canvasEl.value
   if (!canvas) return
-  const rect = canvas.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const plotW = rect.width - SCALE_W
+  // Layout pixels, like the drawing that reads cursor.x (a phone sheet scales
+  // the faceplate, see ui/pointerLocal.js).
+  const { x } = localPoint(e, canvas)
+  const plotW = canvas.offsetWidth - SCALE_W
   cursor.value = x >= 0 && x <= plotW ? { x } : null
 }
 </script>
@@ -340,6 +344,7 @@ function onMove(e) {
     <canvas
       ref="canvasEl"
       class="block w-full"
+      :class="{ 'sd-well': design === 'modula' }"
       :style="{ height: height + 'px' }"
       role="img"
       :aria-label="title"
@@ -350,6 +355,7 @@ function onMove(e) {
          selectable text — a frequency you want to type into a filter. -->
     <div
       class="mt-[6px] flex items-baseline justify-between"
+      :class="{ 'sd-peak-m': design === 'modula' }"
       style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.12em;color:rgba(255,255,255,.34)"
     >
       <span>PEAK</span>
@@ -362,3 +368,15 @@ function onMove(e) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.sd-well {
+  border-radius: 6px;
+  background: #0b0e13;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, .85), 0 0 0 1px #1c222c, 0 1px 0 rgba(255, 255, 255, .05);
+}
+.sd-peak-m {
+  padding: 0 2px;
+  color: var(--m-ink-4) !important;
+}
+</style>

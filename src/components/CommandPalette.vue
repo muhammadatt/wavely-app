@@ -4,6 +4,8 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { useOperationDispatch } from '../composables/useOperationDispatch.js'
 import { searchOperations, getCategory } from '../ui/registry.js'
 import Icon from './ui/Icon.vue'
+import PlanBadge from './ui/PlanBadge.vue'
+import OfflineBadge from './ui/OfflineBadge.vue'
 
 /**
  * Ctrl+K search over every operation in the registry.
@@ -109,6 +111,8 @@ function categoryLabel(op) {
             <div class="text-[12.5px] font-bold text-text truncate">{{ op.label }}</div>
             <div class="text-[10.5px] font-medium text-text-muted truncate">{{ op.desc }}</div>
           </div>
+          <OfflineBadge :show="!!op.offline" />
+          <PlanBadge :feature="op.feature" />
           <span class="shrink-0 text-[9.5px] font-extrabold uppercase tracking-[.1em] text-text-faint">
             {{ categoryLabel(op) }}
           </span>

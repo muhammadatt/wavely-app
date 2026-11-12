@@ -1,0 +1,1281 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #1f2125; }
+  @keyframes reelspin { to { transform: rotate(-360deg); } }
+  a { color: #E8A33D; text-decoration: none; }
+  a:hover { color: #F5C56A; }
+</style>
+</helmet>
+<section style="box-sizing:border-box;padding:56px 64px 72px;background:#25282d;border-bottom:1px solid rgba(0,0,0,.5);font-family:'Inter',system-ui,sans-serif;color:#eaf6f8">
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:40px;max-width:760px">
+    <div style="font:800 13px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:color-mix(in srgb,#E8A33D 20%,#fff)">REEL FINISHES</div>
+    <div style="font:400 13px/1.55 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Six finishes for the 100 px reel, each shown on the Tape module background. Use “Try in 5a” to swap one into <a href="#5a">5a</a> below. They spin at whatever tape speed is selected.</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:32px">
+    <div id="6a" style="width:220px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#6a" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">6a</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Soft graphite</div></div>
+      <div style="height:190px;display:grid;place-items:center;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="width:100px;height:100px">{{ rv0.el }}</div>
+      </div>
+      <div style="min-height:54px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">The current 5a reel, for comparison.</div>
+      <div onClick="{{ rv0.pick }}" style="align-self:flex-start;display:flex;align-items:center;height:30px;box-sizing:border-box;padding:0 13px;border-radius:9px;cursor:pointer;font:600 12px 'Inter',system-ui,sans-serif;color:{{ rv0.btnFg }};box-shadow:{{ rv0.btnRing }}">{{ rv0.btn }}</div>
+    </div>
+    <div id="6b" style="width:220px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#6b" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">6b</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Satin steel</div></div>
+      <div style="height:190px;display:grid;place-items:center;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="width:100px;height:100px">{{ rv1.el }}</div>
+      </div>
+      <div style="min-height:54px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Two steps lighter and nearly flat. Reads as brushed metal against the blue-grey panel.</div>
+      <div onClick="{{ rv1.pick }}" style="align-self:flex-start;display:flex;align-items:center;height:30px;box-sizing:border-box;padding:0 13px;border-radius:9px;cursor:pointer;font:600 12px 'Inter',system-ui,sans-serif;color:{{ rv1.btnFg }};box-shadow:{{ rv1.btnRing }}">{{ rv1.btn }}</div>
+    </div>
+    <div id="6c" style="width:220px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#6c" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">6c</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Panel blue</div></div>
+      <div style="height:190px;display:grid;place-items:center;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="width:100px;height:100px">{{ rv2.el }}</div>
+      </div>
+      <div style="min-height:54px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Same blue-steel as the module faces, so the reel looks built into the panel, not sitting on it.</div>
+      <div onClick="{{ rv2.pick }}" style="align-self:flex-start;display:flex;align-items:center;height:30px;box-sizing:border-box;padding:0 13px;border-radius:9px;cursor:pointer;font:600 12px 'Inter',system-ui,sans-serif;color:{{ rv2.btnFg }};box-shadow:{{ rv2.btnRing }}">{{ rv2.btn }}</div>
+    </div>
+    <div id="6d" style="width:220px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#6d" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">6d</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Tape pack</div></div>
+      <div style="height:190px;display:grid;place-items:center;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="width:100px;height:100px">{{ rv3.el }}</div>
+      </div>
+      <div style="min-height:54px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Graphite flange with brown tape showing through the holes. A hint of real tape without adding colour elsewhere.</div>
+      <div onClick="{{ rv3.pick }}" style="align-self:flex-start;display:flex;align-items:center;height:30px;box-sizing:border-box;padding:0 13px;border-radius:9px;cursor:pointer;font:600 12px 'Inter',system-ui,sans-serif;color:{{ rv3.btnFg }};box-shadow:{{ rv3.btnRing }}">{{ rv3.btn }}</div>
+    </div>
+    <div id="6e" style="width:220px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#6e" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">6e</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Smoked clear</div></div>
+      <div style="height:190px;display:grid;place-items:center;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="width:100px;height:100px">{{ rv4.el }}</div>
+      </div>
+      <div style="min-height:54px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">A see-through grey flange over a full tape pack, like a vintage clear reel. The most character, and the most detail.</div>
+      <div onClick="{{ rv4.pick }}" style="align-self:flex-start;display:flex;align-items:center;height:30px;box-sizing:border-box;padding:0 13px;border-radius:9px;cursor:pointer;font:600 12px 'Inter',system-ui,sans-serif;color:{{ rv4.btnFg }};box-shadow:{{ rv4.btnRing }}">{{ rv4.btn }}</div>
+    </div>
+    <div id="6f" style="width:220px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#6f" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">6f</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Amber hub</div></div>
+      <div style="height:190px;display:grid;place-items:center;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="width:100px;height:100px">{{ rv5.el }}</div>
+      </div>
+      <div style="min-height:54px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Satin steel with an amber hub in place of the dot, so the reel takes the panel accent.</div>
+      <div onClick="{{ rv5.pick }}" style="align-self:flex-start;display:flex;align-items:center;height:30px;box-sizing:border-box;padding:0 13px;border-radius:9px;cursor:pointer;font:600 12px 'Inter',system-ui,sans-serif;color:{{ rv5.btnFg }};box-shadow:{{ rv5.btnRing }}">{{ rv5.btn }}</div>
+    </div>
+    <div id="6g" style="width:220px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#6g" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">6g</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Satin steel + amber hub</div></div>
+      <div style="height:190px;display:grid;place-items:center;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="width:100px;height:100px">{{ rv6.el }}</div>
+      </div>
+      <div style="min-height:54px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty"><a href="#6f">6f</a>'s amber hub with <a href="#6b">6b</a>'s lighter satin rim, inner ring and holes.</div>
+      <div onClick="{{ rv6.pick }}" style="align-self:flex-start;display:flex;align-items:center;height:30px;box-sizing:border-box;padding:0 13px;border-radius:9px;cursor:pointer;font:600 12px 'Inter',system-ui,sans-serif;color:{{ rv6.btnFg }};box-shadow:{{ rv6.btnRing }}">{{ rv6.btn }}</div>
+    </div>
+  </div>
+</section>
+<section style="box-sizing:border-box;padding:56px 64px 80px;background:radial-gradient(1400px 800px at 30% -10%, #33373e 0%, #272a2f 45%, #212327 100%);border-bottom:1px solid rgba(0,0,0,.5);font-family:'Inter',system-ui,sans-serif;color:#eaf6f8">
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:48px;max-width:760px">
+    <div style="font:800 13px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:color-mix(in srgb,#E8A33D 20%,#fff)">NARROWER 4B</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:72px 64px;align-items:flex-start">
+    <div id="5a" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="#5a" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">5a</a>
+        <div style="font:700 13px/1 'Inter',system-ui,sans-serif;color:#eaf6f8">Reel stack + level bay</div>
+      </div>
+      <div style="max-width:640px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">The Tape and Harmonics modules from <a href="#4b">4b</a>. The mix fader goes back to a horizontal slider along the bottom, and IN/OUT share one Levels box on the right, as in <a href="#4c">4c</a>. That makes it about 170 px narrower than 4b. The reel is 100 px, which fits in the height the Drive column already uses.</div>
+      <div style="width:820px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <dc-import name="PhatassHeader" hint-size="100%,58px"></dc-import>
+        <div style="padding:14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px">
+          <div style="min-width:0;display:flex;flex-direction:column;gap:10px">
+            <div style="padding:12px 14px 10px;border-radius:16px;background:#1a1c20;box-shadow:inset 0 2px 10px rgba(0,0,0,.8),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+                <div style="font:700 10px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#c9d0d6">SATURATION</div>
+                <div style="white-space:nowrap;font:700 20px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">45%</div>
+              </div>
+              <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                <div style="position:relative;height:24px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                  <div style="position:absolute;inset:0;border-radius:9px;clip-path:inset(0 55% 0 0 round 9px);background:linear-gradient(90deg,color-mix(in srgb,#E8A33D 35%,#ffffff),#E8A33D 75%,#FF5A4E);box-shadow:0 0 10px color-mix(in srgb,#E8A33D 60%,transparent)"></div>
+                  <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                  <div style="position:absolute;top:1px;bottom:1px;left:calc(52% - 1px);width:2px;border-radius:1px;background:rgba(255,255,255,.6)"></div>
+                </div>
+              </div>
+              <div style="position:relative;height:10px;margin:5px 3px 0;font:600 8px 'JetBrains Mono',monospace;color:#a0a8b0">
+                <sc-for list="{{ satMarks }}" as="mk" hint-placeholder-count="6"><div style="position:absolute;top:0;left:{{ mk.pct }}%;transform:{{ mk.shift }}">{{ mk.label }}</div></sc-for>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:10px">
+              <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+                <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Tape</div>
+                <div style="flex:1;display:flex;align-items:center;justify-content:space-evenly;gap:10px;padding:16px 8px 14px">
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                    <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+                      <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+                      <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                        <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                        <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                      </div>
+                    </div>
+                    <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Drive</div>
+                    <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                      <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                    </div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+                    <div style="width:100px;height:100px">{{ reelLg }}</div>
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+                      <div style="display:flex;align-items:center;gap:6px">
+                        <div onClick="{{ drumUp }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ upOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:5px solid #c9d0d6"></div></div>
+                        <div style="position:relative;display:flex;align-items:center;gap:4px;height:40px;padding:0 10px;border-radius:20px;overflow:hidden;background:linear-gradient(180deg,#0b0c0e,#1d1f23 50%,#0b0c0e);box-shadow:inset 0 2px 8px rgba(0,0,0,.9),0 0 0 1px rgba(0,0,0,.6),0 1px 0 1px rgba(255,255,255,.05)">
+                          <div style="width:26px;text-align:center;font:600 11px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.2);transform:scaleX(.75)">{{ drumPrev }}</div>
+                          <div style="width:36px;padding:6px 0;text-align:center;border-left:1px solid rgba(232,163,61,.35);border-right:1px solid rgba(232,163,61,.35);font:700 15px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">{{ spdLabel }}</div>
+                          <div style="width:26px;text-align:center;font:600 11px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.2);transform:scaleX(.75)">{{ drumNext }}</div>
+                          <div style="position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(0,0,0,.55),transparent 28%,transparent 72%,rgba(0,0,0,.55)),linear-gradient(180deg,rgba(255,255,255,.06),transparent 40%)"></div>
+                        </div>
+                        <div onClick="{{ drumDown }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ dnOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid #c9d0d6"></div></div>
+                      </div>
+                      <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+                <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Harmonics</div>
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px 8px 14px">
+                  <div style="position:relative;width:156px;height:156px;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 50% 40%, #24272c, #1d1f23);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                    <sc-for list="{{ wticks }}" as="tk" hint-placeholder-count="21"><div style="position:absolute;left:50%;top:50%;width:2px;height:70px;margin-left:-1px;transform-origin:50% 0;transform:rotate({{ tk.deg }}deg)"><div style="position:absolute;bottom:0;left:0;width:2px;height:{{ tk.h }}px;border-radius:1px;background:{{ tk.bg }};box-shadow:{{ tk.glow }}"></div></div></sc-for>
+                    <div style="position:relative;width:102px;height:102px;border-radius:50%;background:linear-gradient(160deg,#4a4e56 0%,#2f3239 52%,#1f2126 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #24272c,0 0 0 7px rgba(0,0,0,.6)">
+                      <div style="position:absolute;inset:11px;border-radius:50%;background:linear-gradient(160deg,#3d424a,#25282d);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                      <div style="position:absolute;inset:0;transform:rotate(-108deg)"><div style="position:absolute;left:50%;top:14px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                    </div>
+                  </div>
+                  <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Warmth</div>
+                  <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                    <sc-for list="{{ warmthOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;border-radius:16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Mix</div>
+              <div style="position:relative;flex:1;min-width:0;height:44px;border-radius:10px;background:linear-gradient(180deg,#26292e,#1f2125);box-shadow:inset 0 2px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04),0 1px 0 rgba(255,255,255,.04)">
+                <div style="position:absolute;top:20px;left:20px;right:20px;height:4px;border-radius:2px;background:#0e0f11;box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06)"></div>
+                <div style="position:absolute;top:8px;right:8px;width:56px;height:28px;border-radius:6px;background:linear-gradient(90deg,#5a5f68 0%,#3d4148 20%,#2a2d33 50%,#3d4148 80%,#23262b 100%);box-shadow:0 10px 16px -8px rgba(0,0,0,.95),0 4px 6px rgba(0,0,0,.5),inset 1px 0 0 rgba(255,255,255,.22),inset -1px 0 0 rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.65)">
+                  <div style="position:absolute;top:6px;bottom:6px;left:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:6px;bottom:6px;right:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:3px;bottom:3px;left:27px;width:2px;background-color:#8E9297"></div>
+                </div>
+              </div>
+              <div style="min-width:52px;box-sizing:border-box;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap;font:500 12px 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">100%</div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Levels</div>
+            <div style="flex:1;display:flex;align-items:flex-start;justify-content:center;gap:6px;padding:14px 12px 16px">
+              <dc-import name="ModulaLadder" side="left" label="IN" level="{{ inLv }}" height="288" rows="26" hint-size="70px,390px"></dc-import>
+              <dc-import name="ModulaLadder" side="right" label="OUT" level="{{ outLv }}" height="288" rows="26" hint-size="70px,390px"></dc-import>
+            </div>
+          </div>
+        </div>
+        <dc-import name="PhatassFooter" hint-size="100%,60px"></dc-import>
+      </div>
+    </div>
+    <div id="5b" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="#5b" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">5b</a>
+        <div style="font:700 13px/1 'Inter',system-ui,sans-serif;color:#eaf6f8">Reel stack + level bay, swapped</div>
+      </div>
+      <div style="max-width:640px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty"><a href="#5a">5a</a> with the reel and tape speed on the left of the Tape module and Drive on the right, next to Harmonics.</div>
+      <div style="width:820px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <dc-import name="PhatassHeader" hint-size="100%,58px"></dc-import>
+        <div style="padding:14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px">
+          <div style="min-width:0;display:flex;flex-direction:column;gap:10px">
+            <div style="padding:12px 14px 10px;border-radius:16px;background:#1a1c20;box-shadow:inset 0 2px 10px rgba(0,0,0,.8),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+                <div style="font:700 10px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#c9d0d6">SATURATION</div>
+                <div style="white-space:nowrap;font:700 20px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">45%</div>
+              </div>
+              <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                <div style="position:relative;height:24px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                  <div style="position:absolute;inset:0;border-radius:9px;clip-path:inset(0 55% 0 0 round 9px);background:linear-gradient(90deg,color-mix(in srgb,#E8A33D 35%,#ffffff),#E8A33D 75%,#FF5A4E);box-shadow:0 0 10px color-mix(in srgb,#E8A33D 60%,transparent)"></div>
+                  <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                  <div style="position:absolute;top:1px;bottom:1px;left:calc(52% - 1px);width:2px;border-radius:1px;background:rgba(255,255,255,.6)"></div>
+                </div>
+              </div>
+              <div style="position:relative;height:10px;margin:5px 3px 0;font:600 8px 'JetBrains Mono',monospace;color:#a0a8b0">
+                <sc-for list="{{ satMarks }}" as="mk" hint-placeholder-count="6"><div style="position:absolute;top:0;left:{{ mk.pct }}%;transform:{{ mk.shift }}">{{ mk.label }}</div></sc-for>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:10px">
+              <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+                <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Tape</div>
+                <div style="flex:1;display:flex;align-items:center;justify-content:space-evenly;gap:10px;padding:16px 8px 14px">
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+                    <div style="width:100px;height:100px">{{ reelLg }}</div>
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+                      <div style="display:flex;align-items:center;gap:6px">
+                        <div onClick="{{ drumUp }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ upOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:5px solid #c9d0d6"></div></div>
+                        <div style="position:relative;display:flex;align-items:center;gap:4px;height:40px;padding:0 10px;border-radius:20px;overflow:hidden;background:linear-gradient(180deg,#0b0c0e,#1d1f23 50%,#0b0c0e);box-shadow:inset 0 2px 8px rgba(0,0,0,.9),0 0 0 1px rgba(0,0,0,.6),0 1px 0 1px rgba(255,255,255,.05)">
+                          <div style="width:26px;text-align:center;font:600 11px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.2);transform:scaleX(.75)">{{ drumPrev }}</div>
+                          <div style="width:36px;padding:6px 0;text-align:center;border-left:1px solid rgba(232,163,61,.35);border-right:1px solid rgba(232,163,61,.35);font:700 15px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">{{ spdLabel }}</div>
+                          <div style="width:26px;text-align:center;font:600 11px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.2);transform:scaleX(.75)">{{ drumNext }}</div>
+                          <div style="position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(0,0,0,.55),transparent 28%,transparent 72%,rgba(0,0,0,.55)),linear-gradient(180deg,rgba(255,255,255,.06),transparent 40%)"></div>
+                        </div>
+                        <div onClick="{{ drumDown }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ dnOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid #c9d0d6"></div></div>
+                      </div>
+                      <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+                    </div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                    <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+                      <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+                      <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                        <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                        <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                      </div>
+                    </div>
+                    <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Drive</div>
+                    <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                      <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+                <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Harmonics</div>
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px 8px 14px">
+                  <div style="position:relative;width:156px;height:156px;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 50% 40%, #24272c, #1d1f23);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                    <sc-for list="{{ wticks }}" as="tk" hint-placeholder-count="21"><div style="position:absolute;left:50%;top:50%;width:2px;height:70px;margin-left:-1px;transform-origin:50% 0;transform:rotate({{ tk.deg }}deg)"><div style="position:absolute;bottom:0;left:0;width:2px;height:{{ tk.h }}px;border-radius:1px;background:{{ tk.bg }};box-shadow:{{ tk.glow }}"></div></div></sc-for>
+                    <div style="position:relative;width:102px;height:102px;border-radius:50%;background:linear-gradient(160deg,#4a4e56 0%,#2f3239 52%,#1f2126 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #24272c,0 0 0 7px rgba(0,0,0,.6)">
+                      <div style="position:absolute;inset:11px;border-radius:50%;background:linear-gradient(160deg,#3d424a,#25282d);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                      <div style="position:absolute;inset:0;transform:rotate(-108deg)"><div style="position:absolute;left:50%;top:14px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                    </div>
+                  </div>
+                  <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Warmth</div>
+                  <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                    <sc-for list="{{ warmthOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;border-radius:16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Mix</div>
+              <div style="position:relative;flex:1;min-width:0;height:44px;border-radius:10px;background:linear-gradient(180deg,#26292e,#1f2125);box-shadow:inset 0 2px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04),0 1px 0 rgba(255,255,255,.04)">
+                <div style="position:absolute;top:20px;left:20px;right:20px;height:4px;border-radius:2px;background:#0e0f11;box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06)"></div>
+                <div style="position:absolute;top:8px;right:8px;width:56px;height:28px;border-radius:6px;background:linear-gradient(90deg,#5a5f68 0%,#3d4148 20%,#2a2d33 50%,#3d4148 80%,#23262b 100%);box-shadow:0 10px 16px -8px rgba(0,0,0,.95),0 4px 6px rgba(0,0,0,.5),inset 1px 0 0 rgba(255,255,255,.22),inset -1px 0 0 rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.65)">
+                  <div style="position:absolute;top:6px;bottom:6px;left:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:6px;bottom:6px;right:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:3px;bottom:3px;left:27px;width:2px;background-color:#8E9297"></div>
+                </div>
+              </div>
+              <div style="min-width:52px;box-sizing:border-box;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap;font:500 12px 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">100%</div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Levels</div>
+            <div style="flex:1;display:flex;align-items:flex-start;justify-content:center;gap:6px;padding:14px 12px 16px">
+              <dc-import name="ModulaLadder" side="left" label="IN" level="{{ inLv }}" height="288" rows="26" hint-size="70px,390px"></dc-import>
+              <dc-import name="ModulaLadder" side="right" label="OUT" level="{{ outLv }}" height="288" rows="26" hint-size="70px,390px"></dc-import>
+            </div>
+          </div>
+        </div>
+        <dc-import name="PhatassFooter" hint-size="100%,60px"></dc-import>
+      </div>
+    </div>
+  </div>
+</section>
+<section style="box-sizing:border-box;padding:56px 64px 80px;background:radial-gradient(1400px 800px at 30% -10%, #30343b 0%, #25282d 45%, #1f2125 100%);border-bottom:1px solid rgba(0,0,0,.5);font-family:'Inter',system-ui,sans-serif;color:#eaf6f8">
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:48px;max-width:760px">
+    <div style="font:800 13px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:color-mix(in srgb,#E8A33D 20%,#fff)">SHORTLIST × SPEED CONTROL</div>
+    <div style="font:400 13px/1.55 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty"><a href="#1a">1a</a> and <a href="#1d">1d</a>, each tried with <a href="#3b">3b</a> and <a href="#3c">3c</a>. The speed controls are live and all set the same value.</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:72px 64px;align-items:flex-start">
+    <!-- 4a -->
+    <div id="4a" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="#4a" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">4a</a>
+        <div style="font:700 13px/1 'Inter',system-ui,sans-serif;color:#eaf6f8">Signal flow + cassette window</div>
+      </div>
+      <div style="max-width:640px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty"><a href="#1a">1a</a> with the <a href="#3b">3b</a> cassette window in place of the speed rotary. The reels sit between Drive and the mode switch, in line with the signal flow.</div>
+      <div style="width:990px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <dc-import name="PhatassHeader" hint-size="100%,58px"></dc-import>
+        <div style="padding:14px;display:grid;grid-template-columns:auto minmax(0,1.12fr) minmax(0,1fr) auto auto;grid-template-rows:auto 1fr;gap:10px">
+          <div style="grid-column:2 / 4;grid-row:1;min-width:0;padding:12px 14px 10px;border-radius:16px;background:#1a1c20;box-shadow:inset 0 2px 10px rgba(0,0,0,.8),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+              <div style="font:700 10px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#c9d0d6">SATURATION</div>
+              <div style="white-space:nowrap;font:700 20px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">45%</div>
+            </div>
+            <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+              <div style="position:relative;height:24px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                <div style="position:absolute;inset:0;border-radius:9px;clip-path:inset(0 55% 0 0 round 9px);background:linear-gradient(90deg,color-mix(in srgb,#E8A33D 35%,#ffffff),#E8A33D 75%,#FF5A4E);box-shadow:0 0 10px color-mix(in srgb,#E8A33D 60%,transparent)"></div>
+                <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                <div style="position:absolute;top:1px;bottom:1px;left:calc(52% - 1px);width:2px;border-radius:1px;background:rgba(255,255,255,.6)"></div>
+              </div>
+            </div>
+            <div style="position:relative;height:10px;margin:5px 3px 0;font:600 8px 'JetBrains Mono',monospace;color:#a0a8b0">
+              <sc-for list="{{ satMarks }}" as="mk" hint-placeholder-count="6"><div style="position:absolute;top:0;left:{{ mk.pct }}%;transform:{{ mk.shift }}">{{ mk.label }}</div></sc-for>
+            </div>
+          </div>
+
+          <div style="grid-column:1;grid-row:2;display:flex;justify-content:center;padding:2px 0">
+            <dc-import name="ModulaLadder" side="left" label="IN" level="{{ inLv }}" hint-size="70px,330px"></dc-import>
+          </div>
+
+          <div style="grid-column:2;grid-row:2;display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Tape</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 10px 14px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+                  <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+                  <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                    <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                    <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                  </div>
+                </div>
+                <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Drive</div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div onClick="{{ drumUp }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ upOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:5px solid #c9d0d6"></div></div>
+                <div style="display:flex;align-items:center;gap:6px;padding:6px;border-radius:24px;background:linear-gradient(180deg,#0b0c0e,#1d1f23 50%,#0b0c0e);box-shadow:inset 0 2px 8px rgba(0,0,0,.9),0 0 0 1px rgba(0,0,0,.6),0 1px 0 1px rgba(255,255,255,.05)">
+                  <div style="width:40px;height:40px">{{ reelL }}</div>
+                  <div style="width:30px;text-align:center;font:700 13px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">{{ spdLabel }}</div>
+                  <div style="width:40px;height:40px">{{ reelR }}</div>
+                </div>
+                <div onClick="{{ drumDown }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ dnOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid #c9d0d6"></div></div>
+              </div>
+              <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+            </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="grid-column:3;grid-row:2;display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Harmonics</div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px 10px 14px">
+              <div style="position:relative;width:156px;height:156px;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 50% 40%, #24272c, #1d1f23);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                <sc-for list="{{ wticks }}" as="tk" hint-placeholder-count="21"><div style="position:absolute;left:50%;top:50%;width:2px;height:70px;margin-left:-1px;transform-origin:50% 0;transform:rotate({{ tk.deg }}deg)"><div style="position:absolute;bottom:0;left:0;width:2px;height:{{ tk.h }}px;border-radius:1px;background:{{ tk.bg }};box-shadow:{{ tk.glow }}"></div></div></sc-for>
+                <div style="position:relative;width:102px;height:102px;border-radius:50%;background:linear-gradient(160deg,#4a4e56 0%,#2f3239 52%,#1f2126 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #24272c,0 0 0 7px rgba(0,0,0,.6)">
+                  <div style="position:absolute;inset:11px;border-radius:50%;background:linear-gradient(160deg,#3d424a,#25282d);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                  <div style="position:absolute;inset:0;transform:rotate(-108deg)"><div style="position:absolute;left:50%;top:14px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                </div>
+              </div>
+              <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Warmth</div>
+              <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                <sc-for list="{{ warmthOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="grid-column:4;grid-row:1 / 3;display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Mix</div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px 12px">
+              <div style="min-width:52px;box-sizing:border-box;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap;font:500 12px 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">100%</div>
+              <div style="position:relative;flex:1;min-height:240px;width:52px;border-radius:12px;background:linear-gradient(180deg,#26292e,#1f2125);box-shadow:inset 0 2px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04),0 1px 0 rgba(255,255,255,.04)">
+                <div style="position:absolute;left:24px;top:24px;bottom:24px;width:4px;border-radius:2px;background:#0e0f11;box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06)"></div>
+                <div style="position:absolute;left:11px;top:0;width:30px;height:64px;border-radius:6px;background:linear-gradient(180deg,#5a5f68 0%,#3d4148 20%,#2a2d33 50%,#3d4148 80%,#23262b 100%);box-shadow:0 16px 20px -8px rgba(0,0,0,.95),0 4px 6px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.22),inset 0 -1px 0 rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.65)">
+                  <div style="position:absolute;left:6px;right:6px;top:8px;height:16px;background:repeating-linear-gradient(180deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;left:6px;right:6px;bottom:8px;height:16px;background:repeating-linear-gradient(180deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;left:3px;right:3px;top:31px;height:2px;border-radius:1px;background-color:#8E9297"></div>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:3px;font:600 8px/1 'JetBrains Mono',monospace;color:#a0a8b0"><div>WET</div></div>
+            </div>
+          </div>
+
+          <div style="grid-column:5;grid-row:2;display:flex;justify-content:center;padding:2px 0">
+            <dc-import name="ModulaLadder" side="right" label="OUT" level="{{ outLv }}" hint-size="70px,330px"></dc-import>
+          </div>
+        </div>
+        <dc-import name="PhatassFooter" hint-size="100%,60px"></dc-import>
+      </div>
+    </div>
+
+    <!-- 4b -->
+    <div id="4b" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="#4b" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">4b</a>
+        <div style="font:700 13px/1 'Inter',system-ui,sans-serif;color:#eaf6f8">Signal flow + reel stack</div>
+      </div>
+      <div style="max-width:640px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty"><a href="#1a">1a</a> with the <a href="#2c">2c</a> drum counter in the <a href="#3b">3b</a> window shape, numbers only, under a 64 px reel; CLEAN/PHAT moves under Drive.</div>
+      <div style="width:990px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <dc-import name="PhatassHeader" hint-size="100%,58px"></dc-import>
+        <div style="padding:14px;display:grid;grid-template-columns:auto minmax(0,1.12fr) minmax(0,1fr) auto auto;grid-template-rows:auto 1fr;gap:10px">
+          <div style="grid-column:2 / 4;grid-row:1;min-width:0;padding:12px 14px 10px;border-radius:16px;background:#1a1c20;box-shadow:inset 0 2px 10px rgba(0,0,0,.8),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+              <div style="font:700 10px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#c9d0d6">SATURATION</div>
+              <div style="white-space:nowrap;font:700 20px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">45%</div>
+            </div>
+            <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+              <div style="position:relative;height:24px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                <div style="position:absolute;inset:0;border-radius:9px;clip-path:inset(0 55% 0 0 round 9px);background:linear-gradient(90deg,color-mix(in srgb,#E8A33D 35%,#ffffff),#E8A33D 75%,#FF5A4E);box-shadow:0 0 10px color-mix(in srgb,#E8A33D 60%,transparent)"></div>
+                <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                <div style="position:absolute;top:1px;bottom:1px;left:calc(52% - 1px);width:2px;border-radius:1px;background:rgba(255,255,255,.6)"></div>
+              </div>
+            </div>
+            <div style="position:relative;height:10px;margin:5px 3px 0;font:600 8px 'JetBrains Mono',monospace;color:#a0a8b0">
+              <sc-for list="{{ satMarks }}" as="mk" hint-placeholder-count="6"><div style="position:absolute;top:0;left:{{ mk.pct }}%;transform:{{ mk.shift }}">{{ mk.label }}</div></sc-for>
+            </div>
+          </div>
+
+          <div style="grid-column:1;grid-row:2;display:flex;justify-content:center;padding:2px 0">
+            <dc-import name="ModulaLadder" side="left" label="IN" level="{{ inLv }}" hint-size="70px,330px"></dc-import>
+          </div>
+
+          <div style="grid-column:2;grid-row:2;display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Tape</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 10px 14px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+                  <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+                  <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                    <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                    <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                  </div>
+                </div>
+                <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Drive</div>
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:14px">
+                <div style="width:64px;height:64px">{{ reelMed }}</div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div onClick="{{ drumUp }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ upOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:5px solid #c9d0d6"></div></div>
+                <div style="position:relative;display:flex;align-items:center;gap:4px;height:40px;padding:0 10px;border-radius:20px;overflow:hidden;background:linear-gradient(180deg,#0b0c0e,#1d1f23 50%,#0b0c0e);box-shadow:inset 0 2px 8px rgba(0,0,0,.9),0 0 0 1px rgba(0,0,0,.6),0 1px 0 1px rgba(255,255,255,.05)">
+                  <div style="width:26px;text-align:center;font:600 11px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.2);transform:scaleX(.75)">{{ drumPrev }}</div>
+                  <div style="width:36px;padding:6px 0;text-align:center;border-left:1px solid rgba(232,163,61,.35);border-right:1px solid rgba(232,163,61,.35);font:700 15px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">{{ spdLabel }}</div>
+                  <div style="width:26px;text-align:center;font:600 11px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.2);transform:scaleX(.75)">{{ drumNext }}</div>
+                  <div style="position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(0,0,0,.55),transparent 28%,transparent 72%,rgba(0,0,0,.55)),linear-gradient(180deg,rgba(255,255,255,.06),transparent 40%)"></div>
+                </div>
+                <div onClick="{{ drumDown }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ dnOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid #c9d0d6"></div></div>
+              </div>
+              <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+            </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="grid-column:3;grid-row:2;display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Harmonics</div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px 10px 14px">
+              <div style="position:relative;width:156px;height:156px;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 50% 40%, #24272c, #1d1f23);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                <sc-for list="{{ wticks }}" as="tk" hint-placeholder-count="21"><div style="position:absolute;left:50%;top:50%;width:2px;height:70px;margin-left:-1px;transform-origin:50% 0;transform:rotate({{ tk.deg }}deg)"><div style="position:absolute;bottom:0;left:0;width:2px;height:{{ tk.h }}px;border-radius:1px;background:{{ tk.bg }};box-shadow:{{ tk.glow }}"></div></div></sc-for>
+                <div style="position:relative;width:102px;height:102px;border-radius:50%;background:linear-gradient(160deg,#4a4e56 0%,#2f3239 52%,#1f2126 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #24272c,0 0 0 7px rgba(0,0,0,.6)">
+                  <div style="position:absolute;inset:11px;border-radius:50%;background:linear-gradient(160deg,#3d424a,#25282d);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                  <div style="position:absolute;inset:0;transform:rotate(-108deg)"><div style="position:absolute;left:50%;top:14px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                </div>
+              </div>
+              <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Warmth</div>
+              <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                <sc-for list="{{ warmthOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="grid-column:4;grid-row:1 / 3;display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Mix</div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px 12px">
+              <div style="min-width:52px;box-sizing:border-box;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap;font:500 12px 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">100%</div>
+              <div style="position:relative;flex:1;min-height:240px;width:52px;border-radius:12px;background:linear-gradient(180deg,#26292e,#1f2125);box-shadow:inset 0 2px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04),0 1px 0 rgba(255,255,255,.04)">
+                <div style="position:absolute;left:24px;top:24px;bottom:24px;width:4px;border-radius:2px;background:#0e0f11;box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06)"></div>
+                <div style="position:absolute;left:11px;top:0;width:30px;height:64px;border-radius:6px;background:linear-gradient(180deg,#5a5f68 0%,#3d4148 20%,#2a2d33 50%,#3d4148 80%,#23262b 100%);box-shadow:0 16px 20px -8px rgba(0,0,0,.95),0 4px 6px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.22),inset 0 -1px 0 rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.65)">
+                  <div style="position:absolute;left:6px;right:6px;top:8px;height:16px;background:repeating-linear-gradient(180deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;left:6px;right:6px;bottom:8px;height:16px;background:repeating-linear-gradient(180deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;left:3px;right:3px;top:31px;height:2px;border-radius:1px;background-color:#8E9297"></div>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:3px;font:600 8px/1 'JetBrains Mono',monospace;color:#a0a8b0"><div>WET</div></div>
+            </div>
+          </div>
+
+          <div style="grid-column:5;grid-row:2;display:flex;justify-content:center;padding:2px 0">
+            <dc-import name="ModulaLadder" side="right" label="OUT" level="{{ outLv }}" hint-size="70px,330px"></dc-import>
+          </div>
+        </div>
+        <dc-import name="PhatassFooter" hint-size="100%,60px"></dc-import>
+      </div>
+    </div>
+
+    <!-- 4c -->
+    <div id="4c" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="#4c" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">4c</a>
+        <div style="font:700 13px/1 'Inter',system-ui,sans-serif;color:#eaf6f8">Meter bay + cassette window</div>
+      </div>
+      <div style="max-width:640px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty"><a href="#1d">1d</a> with the <a href="#3b">3b</a> cassette window under the CLEAN/PHAT switch. The Tape row stays the same height.</div>
+      <div style="width:720px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <dc-import name="PhatassHeader" hint-size="100%,58px"></dc-import>
+        <div style="padding:14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px">
+          <div style="min-width:0;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Tape</div>
+              <div style="display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 12px 14px">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                  <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+                    <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+                    <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                      <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                      <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                    </div>
+                  </div>
+                  <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Drive</div>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:14px">
+                  <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                    <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                  </div>
+                  <div style="width:140px;height:1px;background:rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05)"></div>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div onClick="{{ drumUp }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ upOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:5px solid #c9d0d6"></div></div>
+                <div style="display:flex;align-items:center;gap:6px;padding:6px;border-radius:24px;background:linear-gradient(180deg,#0b0c0e,#1d1f23 50%,#0b0c0e);box-shadow:inset 0 2px 8px rgba(0,0,0,.9),0 0 0 1px rgba(0,0,0,.6),0 1px 0 1px rgba(255,255,255,.05)">
+                  <div style="width:40px;height:40px">{{ reelL }}</div>
+                  <div style="width:30px;text-align:center;font:700 13px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">{{ spdLabel }}</div>
+                  <div style="width:40px;height:40px">{{ reelR }}</div>
+                </div>
+                <div onClick="{{ drumDown }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ dnOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid #c9d0d6"></div></div>
+              </div>
+              <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+            </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Harmonics</div>
+              <div style="display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 12px 14px">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                  <div style="position:relative;width:156px;height:156px;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 50% 40%, #24272c, #1d1f23);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                    <sc-for list="{{ wticks }}" as="tk" hint-placeholder-count="21"><div style="position:absolute;left:50%;top:50%;width:2px;height:70px;margin-left:-1px;transform-origin:50% 0;transform:rotate({{ tk.deg }}deg)"><div style="position:absolute;bottom:0;left:0;width:2px;height:{{ tk.h }}px;border-radius:1px;background:{{ tk.bg }};box-shadow:{{ tk.glow }}"></div></div></sc-for>
+                    <div style="position:relative;width:102px;height:102px;border-radius:50%;background:linear-gradient(160deg,#4a4e56 0%,#2f3239 52%,#1f2126 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #24272c,0 0 0 7px rgba(0,0,0,.6)">
+                      <div style="position:absolute;inset:11px;border-radius:50%;background:linear-gradient(160deg,#3d424a,#25282d);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                      <div style="position:absolute;inset:0;transform:rotate(-108deg)"><div style="position:absolute;left:50%;top:14px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                    </div>
+                  </div>
+                  <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Warmth</div>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+                  <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                    <sc-for list="{{ warmthOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                  </div>
+                  <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">CHARACTER</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;border-radius:16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Mix</div>
+              <div style="position:relative;flex:1;min-width:0;height:44px;border-radius:10px;background:linear-gradient(180deg,#26292e,#1f2125);box-shadow:inset 0 2px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04),0 1px 0 rgba(255,255,255,.04)">
+                <div style="position:absolute;top:20px;left:20px;right:20px;height:4px;border-radius:2px;background:#0e0f11;box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06)"></div>
+                <div style="position:absolute;top:8px;right:8px;width:56px;height:28px;border-radius:6px;background:linear-gradient(90deg,#5a5f68 0%,#3d4148 20%,#2a2d33 50%,#3d4148 80%,#23262b 100%);box-shadow:0 10px 16px -8px rgba(0,0,0,.95),0 4px 6px rgba(0,0,0,.5),inset 1px 0 0 rgba(255,255,255,.22),inset -1px 0 0 rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.65)">
+                  <div style="position:absolute;top:6px;bottom:6px;left:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:6px;bottom:6px;right:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:3px;bottom:3px;left:27px;width:2px;background-color:#8E9297"></div>
+                </div>
+              </div>
+              <div style="min-width:52px;box-sizing:border-box;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap;font:500 12px 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">100%</div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Levels</div>
+            <div style="flex:1;display:flex;align-items:flex-start;justify-content:center;gap:10px;padding:14px 12px 16px">
+              <dc-import name="ModulaLadder" side="left" label="IN" level="{{ inLv }}" height="400" rows="36" hint-size="70px,500px"></dc-import>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+                <div style="width:5ch;padding:4px;border-radius:5px;text-align:center;white-space:nowrap;font:500 11px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">45%</div>
+                <div style="padding:3px;border-radius:10px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                  <div style="position:relative;width:18px;height:394px;border-radius:7px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                    <div style="position:absolute;inset:0;border-radius:7px;clip-path:inset(55% 0 0 0 round 7px);background:linear-gradient(0deg,color-mix(in srgb,#E8A33D 35%,#ffffff),#E8A33D 75%,#FF5A4E);box-shadow:0 0 10px color-mix(in srgb,#E8A33D 60%,transparent)"></div>
+                    <div style="position:absolute;inset:0;border-radius:7px;background:repeating-linear-gradient(180deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                    <div style="position:absolute;left:1px;right:1px;bottom:calc(52% - 1px);height:2px;border-radius:1px;background:rgba(255,255,255,.6)"></div>
+                  </div>
+                </div>
+                <div style="font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd">SAT</div>
+              </div>
+              <dc-import name="ModulaLadder" side="right" label="OUT" level="{{ outLv }}" height="400" rows="36" hint-size="70px,500px"></dc-import>
+            </div>
+          </div>
+        </div>
+        <dc-import name="PhatassFooter" hint-size="100%,60px"></dc-import>
+      </div>
+    </div>
+    <!-- 4d -->
+    <div id="4d" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="#4d" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">4d</a>
+        <div style="font:700 13px/1 'Inter',system-ui,sans-serif;color:#eaf6f8">Meter bay + header reel</div>
+      </div>
+      <div style="max-width:640px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty"><a href="#1d">1d</a> with the <a href="#3c">3c</a> treatment: a reel in the TAPE title bar and latching keys for the speed.</div>
+      <div style="width:720px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <dc-import name="PhatassHeader" hint-size="100%,58px"></dc-import>
+        <div style="padding:14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px">
+          <div style="min-width:0;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6"><div style="width:18px;height:18px;margin:-4px 0">{{ reelXs }}</div><div>Tape</div></div>
+              <div style="display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 12px 14px">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                  <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+                    <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+                    <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                      <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                      <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                    </div>
+                  </div>
+                  <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Drive</div>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:14px">
+                  <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                    <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                  </div>
+                  <div style="width:140px;height:1px;background:rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05)"></div>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+              <div style="display:flex;gap:3px;padding:4px 4px 8px;border-radius:8px;background:#1a1c20;box-shadow:inset 0 2px 6px rgba(0,0,0,.85)">
+                <sc-for list="{{ spdOpts }}" as="o" hint-placeholder-count="3">
+                  <div onClick="{{ o.click }}" style="width:40px;height:56px;box-sizing:border-box;padding:8px 0 0;display:flex;flex-direction:column;align-items:center;gap:14px;border-radius:4px;cursor:pointer;background:{{ o.keyBg }};box-shadow:{{ o.keyShadow }};transform:{{ o.keyY }};transition:transform .08s">
+                    <div style="width:16px;height:3px;border-radius:2px;background:{{ o.led }};box-shadow:{{ o.ledGlow }}"></div>
+                    <div style="font:700 12px/1 'JetBrains Mono',monospace;color:{{ o.keyFg }}">{{ o.label }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+            </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Harmonics</div>
+              <div style="display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 12px 14px">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                  <div style="position:relative;width:156px;height:156px;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 50% 40%, #24272c, #1d1f23);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                    <sc-for list="{{ wticks }}" as="tk" hint-placeholder-count="21"><div style="position:absolute;left:50%;top:50%;width:2px;height:70px;margin-left:-1px;transform-origin:50% 0;transform:rotate({{ tk.deg }}deg)"><div style="position:absolute;bottom:0;left:0;width:2px;height:{{ tk.h }}px;border-radius:1px;background:{{ tk.bg }};box-shadow:{{ tk.glow }}"></div></div></sc-for>
+                    <div style="position:relative;width:102px;height:102px;border-radius:50%;background:linear-gradient(160deg,#4a4e56 0%,#2f3239 52%,#1f2126 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #24272c,0 0 0 7px rgba(0,0,0,.6)">
+                      <div style="position:absolute;inset:11px;border-radius:50%;background:linear-gradient(160deg,#3d424a,#25282d);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                      <div style="position:absolute;inset:0;transform:rotate(-108deg)"><div style="position:absolute;left:50%;top:14px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                    </div>
+                  </div>
+                  <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Warmth</div>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+                  <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                    <sc-for list="{{ warmthOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                  </div>
+                  <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">CHARACTER</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;border-radius:16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Mix</div>
+              <div style="position:relative;flex:1;min-width:0;height:44px;border-radius:10px;background:linear-gradient(180deg,#26292e,#1f2125);box-shadow:inset 0 2px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04),0 1px 0 rgba(255,255,255,.04)">
+                <div style="position:absolute;top:20px;left:20px;right:20px;height:4px;border-radius:2px;background:#0e0f11;box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06)"></div>
+                <div style="position:absolute;top:8px;right:8px;width:56px;height:28px;border-radius:6px;background:linear-gradient(90deg,#5a5f68 0%,#3d4148 20%,#2a2d33 50%,#3d4148 80%,#23262b 100%);box-shadow:0 10px 16px -8px rgba(0,0,0,.95),0 4px 6px rgba(0,0,0,.5),inset 1px 0 0 rgba(255,255,255,.22),inset -1px 0 0 rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.65)">
+                  <div style="position:absolute;top:6px;bottom:6px;left:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:6px;bottom:6px;right:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:3px;bottom:3px;left:27px;width:2px;background-color:#8E9297"></div>
+                </div>
+              </div>
+              <div style="min-width:52px;box-sizing:border-box;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap;font:500 12px 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">100%</div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Levels</div>
+            <div style="flex:1;display:flex;align-items:flex-start;justify-content:center;gap:10px;padding:14px 12px 16px">
+              <dc-import name="ModulaLadder" side="left" label="IN" level="{{ inLv }}" height="400" rows="36" hint-size="70px,500px"></dc-import>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+                <div style="width:5ch;padding:4px;border-radius:5px;text-align:center;white-space:nowrap;font:500 11px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">45%</div>
+                <div style="padding:3px;border-radius:10px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                  <div style="position:relative;width:18px;height:394px;border-radius:7px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                    <div style="position:absolute;inset:0;border-radius:7px;clip-path:inset(55% 0 0 0 round 7px);background:linear-gradient(0deg,color-mix(in srgb,#E8A33D 35%,#ffffff),#E8A33D 75%,#FF5A4E);box-shadow:0 0 10px color-mix(in srgb,#E8A33D 60%,transparent)"></div>
+                    <div style="position:absolute;inset:0;border-radius:7px;background:repeating-linear-gradient(180deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                    <div style="position:absolute;left:1px;right:1px;bottom:calc(52% - 1px);height:2px;border-radius:1px;background:rgba(255,255,255,.6)"></div>
+                  </div>
+                </div>
+                <div style="font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd">SAT</div>
+              </div>
+              <dc-import name="ModulaLadder" side="right" label="OUT" level="{{ outLv }}" height="400" rows="36" hint-size="70px,500px"></dc-import>
+            </div>
+          </div>
+        </div>
+        <dc-import name="PhatassFooter" hint-size="100%,60px"></dc-import>
+      </div>
+    </div>
+
+  </div>
+</section>
+<section style="box-sizing:border-box;padding:56px 64px 72px;background:#2a2d33;border-bottom:1px solid rgba(0,0,0,.5);font-family:'Inter',system-ui,sans-serif;color:#eaf6f8">
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:40px;max-width:760px">
+    <div style="font:800 13px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:color-mix(in srgb,#E8A33D 20%,#fff)">FITTING THE REEL IN</div>
+    <div style="font:400 13px/1.55 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Three ways to fit the live reel (<a href="#2d">2d</a>) into the Tape module as it is in <a href="#1a">1a</a>, without making the module any bigger. Each one is paired with <a href="#2b">2b</a> or <a href="#2c">2c</a> for picking the speed.</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:48px 40px;align-items:flex-start">
+
+    <div id="3a" style="width:380px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#3a" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">3a</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Reel as the Drive cap</div></div>
+      <div style="font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">The face of the Drive knob is the spinning reel, so it takes up no extra space. The amber pointer stays still on top. Speed is set with small keys from <a href="#2b">2b</a>.</div>
+      <div style="border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="padding:10px 14px 9px;text-align:center;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;color:#c9d0d6">TAPE</div>
+        <div style="display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 10px 14px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+            <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+              <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+              <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                <div style="position:absolute;left:13px;top:13px;width:86px;height:86px">{{ reelCap }}</div>
+                <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:3px;width:4px;height:12px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+              </div>
+            </div>
+            <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">DRIVE</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+            <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+              <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+              <div style="display:flex;gap:3px;padding:4px 4px 8px;border-radius:8px;background:#1a1c20;box-shadow:inset 0 2px 6px rgba(0,0,0,.85)">
+                <sc-for list="{{ spdOpts }}" as="o" hint-placeholder-count="3">
+                  <div onClick="{{ o.click }}" style="width:36px;height:50px;box-sizing:border-box;padding:7px 0 0;display:flex;flex-direction:column;align-items:center;gap:12px;border-radius:4px;cursor:pointer;background:{{ o.keyBg }};box-shadow:{{ o.keyShadow }};transform:{{ o.keyY }};transition:transform .08s">
+                    <div style="width:14px;height:3px;border-radius:2px;background:{{ o.led }};box-shadow:{{ o.ledGlow }}"></div>
+                    <div style="font:700 11px/1 'JetBrains Mono',monospace;color:{{ o.keyFg }}">{{ o.label }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="3b" style="width:380px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#3b" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">3b</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Cassette window</div></div>
+      <div style="font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Two small reels sit in a dark window with the speed shown between them, as in <a href="#2c">2c</a>. Arrows on either side step the speed. It takes the old rotary switch's spot.</div>
+      <div style="border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="padding:10px 14px 9px;text-align:center;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;color:#c9d0d6">TAPE</div>
+        <div style="display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 10px 14px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+            <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+              <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+              <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+              </div>
+            </div>
+            <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">DRIVE</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+            <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+              <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div onClick="{{ drumUp }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ upOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:5px solid #c9d0d6"></div></div>
+                <div style="display:flex;align-items:center;gap:6px;padding:6px;border-radius:24px;background:linear-gradient(180deg,#0b0c0e,#1d1f23 50%,#0b0c0e);box-shadow:inset 0 2px 8px rgba(0,0,0,.9),0 0 0 1px rgba(0,0,0,.6),0 1px 0 1px rgba(255,255,255,.05)">
+                  <div style="width:40px;height:40px">{{ reelL }}</div>
+                  <div style="width:30px;text-align:center;font:700 13px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">{{ spdLabel }}</div>
+                  <div style="width:40px;height:40px">{{ reelR }}</div>
+                </div>
+                <div onClick="{{ drumDown }}" style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ dnOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid #c9d0d6"></div></div>
+              </div>
+              <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="3c" style="width:380px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#3c" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">3c</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Reel in the module header</div></div>
+      <div style="font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">An 18 px reel next to the TAPE title shows the speed as motion. The <a href="#2b">2b</a> keys replace the rotary switch at full width.</div>
+      <div style="border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 14px 5px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05)">
+          <div style="width:18px;height:18px">{{ reelXs }}</div>
+          <div style="font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;color:#c9d0d6">TAPE</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 10px 14px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+            <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+              <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+              <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+              </div>
+            </div>
+            <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">DRIVE</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+            <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+              <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+              <div style="display:flex;gap:3px;padding:4px 4px 8px;border-radius:8px;background:#1a1c20;box-shadow:inset 0 2px 6px rgba(0,0,0,.85)">
+                <sc-for list="{{ spdOpts }}" as="o" hint-placeholder-count="3">
+                  <div onClick="{{ o.click }}" style="width:40px;height:56px;box-sizing:border-box;padding:8px 0 0;display:flex;flex-direction:column;align-items:center;gap:14px;border-radius:4px;cursor:pointer;background:{{ o.keyBg }};box-shadow:{{ o.keyShadow }};transform:{{ o.keyY }};transition:transform .08s">
+                    <div style="width:16px;height:3px;border-radius:2px;background:{{ o.led }};box-shadow:{{ o.ledGlow }}"></div>
+                    <div style="font:700 12px/1 'JetBrains Mono',monospace;color:{{ o.keyFg }}">{{ o.label }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+<section style="box-sizing:border-box;padding:56px 64px 72px;background:#25282d;border-bottom:1px solid rgba(0,0,0,.5);font-family:'Inter',system-ui,sans-serif;color:#eaf6f8">
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:40px;max-width:760px">
+    <div style="font:800 13px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:color-mix(in srgb,#E8A33D 20%,#fff)">TAPE SPEED · NEW CONTROLS</div>
+    <div style="font:400 13px/1.55 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Three replacements for the small three-way rotary switch, none of them in the kit yet. All are live and share the same value — click any one.</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:48px 40px;align-items:flex-start">
+
+    <div id="2b" style="width:250px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#2b" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">2b</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Latching key bank</div></div>
+      <div style="font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Push-down keys that pop each other out, like tape-deck transport keys. The pressed key sits lower and its light comes on.</div>
+      <div style="border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="padding:10px 14px 9px;text-align:center;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;color:#c9d0d6">TAPE SPEED</div>
+        <div style="height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px">
+          <div style="display:flex;gap:4px;padding:6px 6px 10px;border-radius:10px;background:#1a1c20;box-shadow:inset 0 2px 6px rgba(0,0,0,.85)">
+            <sc-for list="{{ spdOpts }}" as="o" hint-placeholder-count="3">
+              <div onClick="{{ o.click }}" style="width:58px;height:82px;box-sizing:border-box;padding:9px 0 0;display:flex;flex-direction:column;align-items:center;gap:22px;border-radius:5px;cursor:pointer;background:{{ o.keyBg }};box-shadow:{{ o.keyShadow }};transform:{{ o.keyY }};transition:transform .08s">
+                <div style="width:22px;height:4px;border-radius:2px;background:{{ o.led }};box-shadow:{{ o.ledGlow }}"></div>
+                <div style="font:700 15px/1 'JetBrains Mono',monospace;color:{{ o.keyFg }}">{{ o.label }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">IPS</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="2c" style="width:250px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#2c" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">2c</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Drum counter</div></div>
+      <div style="font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">A number drum in a window, like a tape counter. The neighbouring speeds show above and below; use the arrows to step through them.</div>
+      <div style="border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="padding:10px 14px 9px;text-align:center;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;color:#c9d0d6">TAPE SPEED</div>
+        <div style="height:220px;display:flex;align-items:center;justify-content:center;gap:12px">
+          <div style="position:relative;width:86px;height:118px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#0b0c0e,#1d1f23 50%,#0b0c0e);box-shadow:inset 0 2px 8px rgba(0,0,0,.9),0 0 0 1px rgba(0,0,0,.6),0 1px 0 1px rgba(255,255,255,.05)">
+            <div style="position:absolute;left:0;right:0;top:6px;text-align:center;font:600 15px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.18);transform:scaleY(.7)">{{ drumPrev }}</div>
+            <div style="position:absolute;left:0;right:0;top:44px;text-align:center;font:700 28px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 10px color-mix(in srgb,#E8A33D 55%,transparent)">{{ spdLabel }}</div>
+            <div style="position:absolute;left:0;right:0;bottom:6px;text-align:center;font:600 15px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.18);transform:scaleY(.7)">{{ drumNext }}</div>
+            <div style="position:absolute;left:0;right:0;top:38px;height:40px;border-top:1px solid rgba(232,163,61,.35);border-bottom:1px solid rgba(232,163,61,.35)"></div>
+            <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.07),transparent 30%,transparent 70%,rgba(255,255,255,.03))"></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div onClick="{{ drumUp }}" style="width:30px;height:30px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ upOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:6px solid #c9d0d6"></div></div>
+            <div style="text-align:center;font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">IPS</div>
+            <div onClick="{{ drumDown }}" style="width:30px;height:30px;border-radius:50%;display:grid;place-items:center;cursor:pointer;opacity:{{ dnOp }};box-shadow:0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid #c9d0d6"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="2d" style="width:250px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px"><a href="#2d" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8)">2d</a><div style="font:700 13px/1 'Inter',system-ui,sans-serif">Live reel</div></div>
+      <div style="font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">The reel spins at a rate matching the chosen speed: 30 is twice as fast as 15, and 15 twice as fast as 7.5. Small buttons underneath set the speed.</div>
+      <div style="border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="padding:10px 14px 9px;text-align:center;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;color:#c9d0d6">TAPE SPEED</div>
+        <div style="height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px">
+          <div style="width:132px;height:132px">{{ reel }}</div>
+          <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+            <sc-for list="{{ spdOpts }}" as="o" hint-placeholder-count="3">
+              <div onClick="{{ o.click }}" style="display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:6px;cursor:pointer;font:700 9px 'JetBrains Mono',monospace;color:{{ o.fg }}">
+                <div style="width:5px;height:5px;border-radius:50%;background:{{ o.led }};box-shadow:{{ o.ledGlow }}"></div>{{ o.label }}
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+<section style="min-height:100vh;box-sizing:border-box;padding:56px 64px 96px;background:radial-gradient(1400px 800px at 30% -10%, #30343b 0%, #25282d 45%, #1f2125 100%);font-family:'Inter',system-ui,sans-serif;color:#eaf6f8">
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:48px;max-width:760px">
+    <div style="font:800 13px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:color-mix(in srgb,#E8A33D 20%,#fff)">PHATaSS · LAYOUT IDEAS</div>
+    <div style="font:400 13px/1.55 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Two shortlisted rearrangements of the same controls, built from Modula kit parts. Same parameters, same chrome. The shipping layout is recreated in <a href="PHATaSS Current.dc.html">PHATaSS Current</a>.</div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:72px 64px;align-items:flex-start">
+
+    <!-- 1a -->
+    <div id="1a" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="#1a" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">1a</a>
+        <div style="font:700 13px/1 'Inter',system-ui,sans-serif;color:#eaf6f8">Signal flow</div>
+      </div>
+      <div style="max-width:640px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Left to right in processing order: IN → TAPE → HARMONICS → MIX → OUT. Mix becomes a console fader beside the output, so the window gets wider and about 90 px shorter.</div>
+      <div style="width:900px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <dc-import name="PhatassHeader" hint-size="100%,58px"></dc-import>
+        <div style="padding:14px;display:grid;grid-template-columns:auto minmax(0,1.12fr) minmax(0,1fr) auto auto;grid-template-rows:auto 1fr;gap:10px">
+          <div style="grid-column:2 / 4;grid-row:1;min-width:0;padding:12px 14px 10px;border-radius:16px;background:#1a1c20;box-shadow:inset 0 2px 10px rgba(0,0,0,.8),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+              <div style="font:700 10px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#c9d0d6">SATURATION</div>
+              <div style="white-space:nowrap;font:700 20px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);text-shadow:0 0 8px color-mix(in srgb,#E8A33D 55%,transparent)">45%</div>
+            </div>
+            <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+              <div style="position:relative;height:24px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                <div style="position:absolute;inset:0;border-radius:9px;clip-path:inset(0 55% 0 0 round 9px);background:linear-gradient(90deg,color-mix(in srgb,#E8A33D 35%,#ffffff),#E8A33D 75%,#FF5A4E);box-shadow:0 0 10px color-mix(in srgb,#E8A33D 60%,transparent)"></div>
+                <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                <div style="position:absolute;top:1px;bottom:1px;left:calc(52% - 1px);width:2px;border-radius:1px;background:rgba(255,255,255,.6)"></div>
+              </div>
+            </div>
+            <div style="position:relative;height:10px;margin:5px 3px 0;font:600 8px 'JetBrains Mono',monospace;color:#a0a8b0">
+              <sc-for list="{{ satMarks }}" as="mk" hint-placeholder-count="6"><div style="position:absolute;top:0;left:{{ mk.pct }}%;transform:{{ mk.shift }}">{{ mk.label }}</div></sc-for>
+            </div>
+          </div>
+
+          <div style="grid-column:1;grid-row:2;display:flex;justify-content:center;padding:2px 0">
+            <dc-import name="ModulaLadder" side="left" label="IN" level="{{ inLv }}" hint-size="70px,330px"></dc-import>
+          </div>
+
+          <div style="grid-column:2;grid-row:2;display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Tape</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 10px 14px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+                  <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+                  <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                    <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                    <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                  </div>
+                </div>
+                <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Drive</div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+                <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                  <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+                  <div style="position:relative;width:96px;height:68px">
+                    <sc-for list="{{ speed }}" as="sl" hint-placeholder-count="3"><div style="position:absolute;transform:translate(-50%,-50%);left:{{ sl.x }}px;top:{{ sl.y }}px;white-space:nowrap;font:700 9px 'JetBrains Mono',monospace;color:{{ sl.fg }}">{{ sl.label }}</div></sc-for>
+                    <div style="position:absolute;left:28px;top:24px;width:40px;height:40px;border-radius:50%;background:linear-gradient(160deg,#3e4249 0%,#282b30 55%,#1d1f23 100%);box-shadow:0 8px 14px -8px rgba(0,0,0,.95),inset 0 1px 1px rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="position:absolute;inset:0;transform:rotate(50deg)"><div style="position:absolute;left:50%;top:4px;width:2px;height:10px;margin-left:-1px;border-radius:1px;background:#eaf6f8"></div></div></div>
+                  </div>
+                  <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="grid-column:3;grid-row:2;display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Harmonics</div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px 10px 14px">
+              <div style="position:relative;width:156px;height:156px;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 50% 40%, #24272c, #1d1f23);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                <sc-for list="{{ wticks }}" as="tk" hint-placeholder-count="21"><div style="position:absolute;left:50%;top:50%;width:2px;height:70px;margin-left:-1px;transform-origin:50% 0;transform:rotate({{ tk.deg }}deg)"><div style="position:absolute;bottom:0;left:0;width:2px;height:{{ tk.h }}px;border-radius:1px;background:{{ tk.bg }};box-shadow:{{ tk.glow }}"></div></div></sc-for>
+                <div style="position:relative;width:102px;height:102px;border-radius:50%;background:linear-gradient(160deg,#4a4e56 0%,#2f3239 52%,#1f2126 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #24272c,0 0 0 7px rgba(0,0,0,.6)">
+                  <div style="position:absolute;inset:11px;border-radius:50%;background:linear-gradient(160deg,#3d424a,#25282d);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                  <div style="position:absolute;inset:0;transform:rotate(-108deg)"><div style="position:absolute;left:50%;top:14px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                </div>
+              </div>
+              <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Warmth</div>
+              <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                <sc-for list="{{ warmthOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="grid-column:4;grid-row:1 / 3;display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Mix</div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px 12px">
+              <div style="min-width:52px;box-sizing:border-box;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap;font:500 12px 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">100%</div>
+              <div style="position:relative;flex:1;min-height:240px;width:52px;border-radius:12px;background:linear-gradient(180deg,#26292e,#1f2125);box-shadow:inset 0 2px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04),0 1px 0 rgba(255,255,255,.04)">
+                <div style="position:absolute;left:24px;top:24px;bottom:24px;width:4px;border-radius:2px;background:#0e0f11;box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06)"></div>
+                <div style="position:absolute;left:11px;top:0;width:30px;height:64px;border-radius:6px;background:linear-gradient(180deg,#5a5f68 0%,#3d4148 20%,#2a2d33 50%,#3d4148 80%,#23262b 100%);box-shadow:0 16px 20px -8px rgba(0,0,0,.95),0 4px 6px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.22),inset 0 -1px 0 rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.65)">
+                  <div style="position:absolute;left:6px;right:6px;top:8px;height:16px;background:repeating-linear-gradient(180deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;left:6px;right:6px;bottom:8px;height:16px;background:repeating-linear-gradient(180deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;left:3px;right:3px;top:31px;height:2px;border-radius:1px;background-color:#8E9297"></div>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:3px;font:600 8px/1 'JetBrains Mono',monospace;color:#a0a8b0"><div>WET</div></div>
+            </div>
+          </div>
+
+          <div style="grid-column:5;grid-row:2;display:flex;justify-content:center;padding:2px 0">
+            <dc-import name="ModulaLadder" side="right" label="OUT" level="{{ outLv }}" hint-size="70px,330px"></dc-import>
+          </div>
+        </div>
+        <dc-import name="PhatassFooter" hint-size="100%,60px"></dc-import>
+      </div>
+    </div>
+
+    <!-- 1d -->
+    <div id="1d" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="#1d" style="padding:5px 8px;border-radius:6px;background:#1a1c20;font:700 11px/1 'JetBrains Mono',monospace;color:#E8A33D;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">1d</a>
+        <div style="font:700 13px/1 'Inter',system-ui,sans-serif;color:#eaf6f8">Meter bay</div>
+      </div>
+      <div style="max-width:640px;font:400 12px/1.5 'Inter',system-ui,sans-serif;color:#a0a8b0;text-wrap:pretty">Controls on the left as two horizontal modules; every readout — IN, saturation, OUT — side by side in one bay on the right, so level and colour are judged at a glance.</div>
+      <div style="width:720px;border-radius:22px;background:linear-gradient(180deg,#3a4452,#262d37);box-shadow:0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6);color:#eaf6f8">
+        <dc-import name="PhatassHeader" hint-size="100%,58px"></dc-import>
+        <div style="padding:14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px">
+          <div style="min-width:0;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Tape</div>
+              <div style="display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 12px 14px">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                  <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+                    <sc-for list="{{ leds }}" as="led" hint-placeholder-count="21"><div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div></sc-for>
+                    <div style="position:relative;width:112px;height:112px;border-radius:50%;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                      <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                      <div style="position:absolute;inset:0;transform:rotate(-54deg)"><div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                    </div>
+                  </div>
+                  <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Drive</div>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:14px">
+                  <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                    <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                  </div>
+                  <div style="width:140px;height:1px;background:rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05)"></div>
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+                    <div style="position:relative;width:96px;height:68px">
+                      <sc-for list="{{ speed }}" as="sl" hint-placeholder-count="3"><div style="position:absolute;transform:translate(-50%,-50%);left:{{ sl.x }}px;top:{{ sl.y }}px;white-space:nowrap;font:700 9px 'JetBrains Mono',monospace;color:{{ sl.fg }}">{{ sl.label }}</div></sc-for>
+                      <div style="position:absolute;left:28px;top:24px;width:40px;height:40px;border-radius:50%;background:linear-gradient(160deg,#3e4249 0%,#282b30 55%,#1d1f23 100%);box-shadow:0 8px 14px -8px rgba(0,0,0,.95),inset 0 1px 1px rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="position:absolute;inset:0;transform:rotate(50deg)"><div style="position:absolute;left:50%;top:4px;width:2px;height:10px;margin-left:-1px;border-radius:1px;background:#eaf6f8"></div></div></div>
+                    </div>
+                    <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">TAPE SPEED (IPS)</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Harmonics</div>
+              <div style="display:flex;align-items:center;justify-content:space-evenly;gap:12px;padding:16px 12px 14px">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:12px">
+                  <div style="position:relative;width:156px;height:156px;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 50% 40%, #24272c, #1d1f23);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+                    <sc-for list="{{ wticks }}" as="tk" hint-placeholder-count="21"><div style="position:absolute;left:50%;top:50%;width:2px;height:70px;margin-left:-1px;transform-origin:50% 0;transform:rotate({{ tk.deg }}deg)"><div style="position:absolute;bottom:0;left:0;width:2px;height:{{ tk.h }}px;border-radius:1px;background:{{ tk.bg }};box-shadow:{{ tk.glow }}"></div></div></sc-for>
+                    <div style="position:relative;width:102px;height:102px;border-radius:50%;background:linear-gradient(160deg,#4a4e56 0%,#2f3239 52%,#1f2126 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #24272c,0 0 0 7px rgba(0,0,0,.6)">
+                      <div style="position:absolute;inset:11px;border-radius:50%;background:linear-gradient(160deg,#3d424a,#25282d);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                      <div style="position:absolute;inset:0;transform:rotate(-108deg)"><div style="position:absolute;left:50%;top:14px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#E8A33D;box-shadow:0 0 6px #E8A33D"></div></div>
+                    </div>
+                  </div>
+                  <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Warmth</div>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+                  <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+                    <sc-for list="{{ warmthOpts }}" as="o" hint-placeholder-count="2"><div style="padding:5px 10px;border-radius:6px;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div></sc-for>
+                  </div>
+                  <div style="font:600 8px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#b6bdc4">CHARACTER</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;border-radius:16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+              <div style="font:600 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">Mix</div>
+              <div style="position:relative;flex:1;min-width:0;height:44px;border-radius:10px;background:linear-gradient(180deg,#26292e,#1f2125);box-shadow:inset 0 2px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04),0 1px 0 rgba(255,255,255,.04)">
+                <div style="position:absolute;top:20px;left:20px;right:20px;height:4px;border-radius:2px;background:#0e0f11;box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06)"></div>
+                <div style="position:absolute;top:8px;right:8px;width:56px;height:28px;border-radius:6px;background:linear-gradient(90deg,#5a5f68 0%,#3d4148 20%,#2a2d33 50%,#3d4148 80%,#23262b 100%);box-shadow:0 10px 16px -8px rgba(0,0,0,.95),0 4px 6px rgba(0,0,0,.5),inset 1px 0 0 rgba(255,255,255,.22),inset -1px 0 0 rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.65)">
+                  <div style="position:absolute;top:6px;bottom:6px;left:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:6px;bottom:6px;right:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+                  <div style="position:absolute;top:3px;bottom:3px;left:27px;width:2px;background-color:#8E9297"></div>
+                </div>
+              </div>
+              <div style="min-width:52px;box-sizing:border-box;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap;font:500 12px 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">100%</div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;border-radius:16px;background:linear-gradient(180deg,#3c4655,#2c343f);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05);font:700 10px/1 'Inter',system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Levels</div>
+            <div style="flex:1;display:flex;align-items:flex-start;justify-content:center;gap:10px;padding:14px 12px 16px">
+              <dc-import name="ModulaLadder" side="left" label="IN" level="{{ inLv }}" height="400" rows="36" hint-size="70px,500px"></dc-import>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+                <div style="width:5ch;padding:4px;border-radius:5px;text-align:center;white-space:nowrap;font:500 11px/1 'JetBrains Mono',monospace;color:color-mix(in srgb,#E8A33D 65%,#ffffff);background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">45%</div>
+                <div style="padding:3px;border-radius:10px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+                  <div style="position:relative;width:18px;height:394px;border-radius:7px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+                    <div style="position:absolute;inset:0;border-radius:7px;clip-path:inset(55% 0 0 0 round 7px);background:linear-gradient(0deg,color-mix(in srgb,#E8A33D 35%,#ffffff),#E8A33D 75%,#FF5A4E);box-shadow:0 0 10px color-mix(in srgb,#E8A33D 60%,transparent)"></div>
+                    <div style="position:absolute;inset:0;border-radius:7px;background:repeating-linear-gradient(180deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+                    <div style="position:absolute;left:1px;right:1px;bottom:calc(52% - 1px);height:2px;border-radius:1px;background:rgba(255,255,255,.6)"></div>
+                  </div>
+                </div>
+                <div style="font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd">SAT</div>
+              </div>
+              <dc-import name="ModulaLadder" side="right" label="OUT" level="{{ outLv }}" height="400" rows="36" hint-size="70px,500px"></dc-import>
+            </div>
+          </div>
+        </div>
+        <dc-import name="PhatassFooter" hint-size="100%,60px"></dc-import>
+      </div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  seg(labels, cur) {
+    return labels.map((label, i) => {
+      const on = i === cur;
+      return {
+        label,
+        bg: on ? 'linear-gradient(180deg,#3c4149,#2a2e34)' : 'transparent',
+        fg: on ? '#3FD0DE' : 'rgba(255,255,255,.5)',
+        shadow: on ? 'inset 0 1px 0 rgba(255,255,255,.14), 0 6px 12px -6px rgba(0,0,0,.9), 0 0 0 1px rgba(0,0,0,.6)' : 'none'
+      };
+    });
+  }
+  state = { spd: 0 };
+  reel(s, size = 132, light = false) {
+    if (light) return this.reelLight(s, size);
+    const h = React.createElement, dur = [1.6, 3.2, 6.4][s], z = size, hs = z * .26, rr = z * .29, hub = z * .18;
+    const holes = [0, 1, 2].map(k => {
+      const a = k * 120 * Math.PI / 180;
+      return h('div', { key: k, style: { position: 'absolute', width: hs, height: hs, borderRadius: '50%', left: z / 2 + rr * Math.sin(a) - hs / 2, top: z / 2 - rr * Math.cos(a) - hs / 2, background: '#1a1c20', boxShadow: z > 40 ? 'inset 0 2px 5px rgba(0,0,0,.9), 0 1px 0 rgba(255,255,255,.06)' : 'inset 0 1px 2px rgba(0,0,0,.9)' } });
+    });
+    const dot = Math.max(2, z * .03);
+    return h('div', { style: { position: 'relative', width: z, height: z, borderRadius: '50%', background: 'linear-gradient(160deg,#4a4e56 0%,#2f3239 52%,#1f2126 100%)', boxShadow: z > 40 ? '0 16px 26px -12px rgba(0,0,0,.95), inset 0 2px 2px rgba(255,255,255,.10), 0 0 0 1px rgba(0,0,0,.7)' : 'inset 0 1px 0 rgba(255,255,255,.12), 0 0 0 1px rgba(0,0,0,.7)', animation: `reelspin ${dur}s linear infinite` } },
+      ...holes,
+      h('div', { key: 'hub', style: { position: 'absolute', left: (z - hub) / 2, top: (z - hub) / 2, width: hub, height: hub, borderRadius: '50%', background: 'linear-gradient(160deg,#5a5f68,#2a2d33)', boxShadow: '0 0 0 1px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.2)' } }),
+      h('div', { key: 'dot', style: { position: 'absolute', left: (z - dot) / 2, top: z * .05, width: dot, height: dot, borderRadius: '50%', background: '#E8A33D', boxShadow: '0 0 5px #E8A33D' } }));
+  }
+  reelLight(s, z) {
+    const h = React.createElement, dur = [1.6, 3.2, 6.4][s], hs = z * .26, rr = z * .29, hub = z * .2;
+    const holes = [0, 1, 2].map(k => {
+      const a = k * 120 * Math.PI / 180;
+      return h('div', { key: k, style: { position: 'absolute', width: hs, height: hs, borderRadius: '50%', left: z / 2 + rr * Math.sin(a) - hs / 2, top: z / 2 - rr * Math.cos(a) - hs / 2, background: '#2c3037', boxShadow: 'inset 0 1px 3px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.06)' } });
+    });
+    return h('div', { style: { position: 'relative', width: z, height: z, borderRadius: '50%', background: 'linear-gradient(160deg,#636973 0%,#4c5159 52%,#3c4047 100%)', boxShadow: '0 10px 16px -10px rgba(0,0,0,.6), inset 0 1px 1px rgba(255,255,255,.16), 0 0 0 1px rgba(0,0,0,.5)', animation: `reelspin ${dur}s linear infinite` } },
+      ...holes,
+      h('div', { key: 'hub', style: { position: 'absolute', left: (z - hub) / 2, top: (z - hub) / 2, width: hub, height: hub, borderRadius: '50%', background: 'linear-gradient(160deg,#7a8089,#4a4f57)', boxShadow: '0 0 0 1px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.25)' } }),
+      h('div', { key: 'dot', style: { position: 'absolute', left: (z - 4) / 2, top: z * .05, width: 4, height: 4, borderRadius: '50%', background: '#E8A33D', boxShadow: '0 0 5px #E8A33D' } }));
+  }
+  reelVar(s, z, v) {
+    const h = React.createElement, dur = [1.6, 3.2, 6.4][s], hs = z * .26, rr = z * .29, hub = z * .2;
+    const holes = [0, 1, 2].map(k => {
+      const a = k * 120 * Math.PI / 180;
+      return h('div', { key: k, style: { position: 'absolute', width: hs, height: hs, borderRadius: '50%', left: z / 2 + rr * Math.sin(a) - hs / 2, top: z / 2 - rr * Math.cos(a) - hs / 2, background: v.hole, boxShadow: v.holeSh } });
+    });
+    const kids = [...holes];
+    if (v.ring) kids.unshift(h('div', { key: 'ring', style: { position: 'absolute', inset: z * .07, borderRadius: '50%', boxShadow: v.ring } }));
+    kids.push(h('div', { key: 'hub', style: { position: 'absolute', left: (z - hub) / 2, top: (z - hub) / 2, width: hub, height: hub, borderRadius: '50%', background: v.hub, boxShadow: v.hubSh } }));
+    kids.push(h('div', { key: 'dot', style: { position: 'absolute', left: (z - 4) / 2, top: z * .05, width: 4, height: 4, borderRadius: '50%', background: v.dot ?? '#E8A33D', boxShadow: '0 0 5px ' + (v.dot ?? '#E8A33D') } }));
+    const face = h('div', { key: 'face', style: { position: 'absolute', inset: 0, borderRadius: '50%', background: v.face, boxShadow: v.faceSh, animation: `reelspin ${dur}s linear infinite` } }, ...kids);
+    const pack = v.pack ? h('div', { key: 'pack', style: { position: 'absolute', inset: z * .1, borderRadius: '50%', background: v.pack, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,.35)' } }) : null;
+    return h('div', { style: { position: 'relative', width: z, height: z } }, pack, face);
+  }
+  reelVariants() {
+    return [
+      { id: '6a', name: 'Soft graphite', note: 'The current 5a reel, for comparison.',
+        face: 'linear-gradient(160deg,#636973 0%,#4c5159 52%,#3c4047 100%)', faceSh: '0 10px 16px -10px rgba(0,0,0,.6), inset 0 1px 1px rgba(255,255,255,.16), 0 0 0 1px rgba(0,0,0,.5)',
+        hole: '#2c3037', holeSh: 'inset 0 1px 3px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.06)', hub: 'linear-gradient(160deg,#7a8089,#4a4f57)', hubSh: '0 0 0 1px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.25)' },
+      { id: '6b', name: 'Satin steel', note: 'Two steps lighter and nearly flat. Reads as brushed metal against the blue-grey panel.',
+        face: 'linear-gradient(160deg,#868d96 0%,#6c727b 55%,#5c626a 100%)', faceSh: '0 8px 14px -10px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.22), 0 0 0 1px rgba(0,0,0,.4)',
+        hole: '#3b4048', holeSh: 'inset 0 1px 2px rgba(0,0,0,.35)', hub: 'linear-gradient(160deg,#a3a9b1,#6f757e)', hubSh: '0 0 0 1px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.35)',
+        ring: 'inset 0 0 0 1px rgba(0,0,0,.12), 0 1px 0 rgba(255,255,255,.08)' },
+      { id: '6c', name: 'Panel blue', note: 'Same blue-steel as the module faces, so the reel looks built into the panel, not sitting on it.',
+        face: 'linear-gradient(160deg,#5a6879 0%,#465363 55%,#3a4553 100%)', faceSh: '0 8px 14px -10px rgba(0,0,0,.5), inset 0 1px 1px rgba(255,255,255,.18), 0 0 0 1px rgba(0,0,0,.45)',
+        hole: '#283039', holeSh: 'inset 0 1px 3px rgba(0,0,0,.4)', hub: 'linear-gradient(160deg,#7f8c9c,#4f5b6a)', hubSh: '0 0 0 1px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.25)' },
+      { id: '6d', name: 'Tape pack', note: 'Graphite flange with brown tape showing through the holes. A hint of real tape without adding colour elsewhere.',
+        face: 'linear-gradient(160deg,#6a7079 0%,#545961 55%,#454a51 100%)', faceSh: '0 8px 14px -10px rgba(0,0,0,.55), inset 0 1px 1px rgba(255,255,255,.18), 0 0 0 1px rgba(0,0,0,.45)',
+        hole: 'radial-gradient(circle at 50% 50%, #4a3326 0%, #3a281e 70%, #2e2018 100%)', holeSh: 'inset 0 1px 3px rgba(0,0,0,.45)', hub: 'linear-gradient(160deg,#8a9099,#565c64)', hubSh: '0 0 0 1px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.28)' },
+      { id: '6e', name: 'Smoked clear', note: 'A see-through grey flange over a full tape pack, like a vintage clear reel. The most character, and the most detail.',
+        face: 'radial-gradient(circle at 50% 50%, rgba(120,128,138,.18) 0%, rgba(120,128,138,.32) 100%)', faceSh: 'inset 0 1px 1px rgba(255,255,255,.22), inset 0 0 0 1px rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.45), 0 8px 14px -10px rgba(0,0,0,.5)',
+        pack: 'repeating-radial-gradient(circle at 50% 50%, #3f2c21 0 1.5px, #4a3427 1.5px 3px)',
+        hole: 'rgba(30,34,40,.75)', holeSh: 'inset 0 0 0 1px rgba(255,255,255,.1)', hub: 'linear-gradient(160deg,#9aa0a8,#5e646c)', hubSh: '0 0 0 1px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.3)' },
+      { id: '6f', name: 'Amber hub', note: 'Satin steel with an amber hub in place of the dot, so the reel takes the panel accent.',
+        face: 'linear-gradient(160deg,#7b828b 0%,#646a73 55%,#565c64 100%)', faceSh: '0 8px 14px -10px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.2), 0 0 0 1px rgba(0,0,0,.42)',
+        hole: '#363b43', holeSh: 'inset 0 1px 2px rgba(0,0,0,.4)', hub: 'radial-gradient(circle at 45% 40%, #f5c56a, #E8A33D 60%, #b37420)', hubSh: '0 0 0 1px rgba(0,0,0,.5), 0 0 8px rgba(232,163,61,.45)', dot: '#eaf6f8' },
+      { id: '6g', name: 'Satin steel + amber hub', note: '6f with the 6b rim.',
+        face: 'linear-gradient(160deg,#868d96 0%,#6c727b 55%,#5c626a 100%)', faceSh: '0 8px 14px -10px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.22), 0 0 0 1px rgba(0,0,0,.4)',
+        ring: 'inset 0 0 0 1px rgba(0,0,0,.12), 0 1px 0 rgba(255,255,255,.08)',
+        hole: '#3b4048', holeSh: 'inset 0 1px 2px rgba(0,0,0,.35)', hub: 'radial-gradient(circle at 45% 40%, #f5c56a, #E8A33D 60%, #b37420)', hubSh: '0 0 0 1px rgba(0,0,0,.5), 0 0 8px rgba(232,163,61,.45)', dot: '#eaf6f8' }
+    ];
+  }
+  reelBlock(s) {
+    const rv = this.state.rv ?? 0, key = s + '|' + rv;
+    if (this._rb && this._rb.key === key) return this._rb.val;
+    if (!this._variants) this._variants = this.reelVariants();
+    if (!this._picks) this._picks = this._variants.map((_, i) => () => this.setState({ rv: i }));
+    const V = this._variants;
+    const val = {
+      reelLg: this.reelVar(s, 100, V[rv]),
+      reelOpts: V.map((v, i) => {
+        const on = rv === i;
+        return { id: v.id, name: v.name, note: v.note, href: '#' + v.id, el: this.reelVar(s, 100, v), pick: this._picks[i],
+          btn: on ? 'In 5a' : 'Try in 5a', btnFg: on ? '#3FD0DE' : '#c9d0d6',
+          btnRing: on ? 'inset 0 0 0 1px rgba(63,208,222,.5)' : 'inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6)' };
+      })
+    };
+    val.reelOpts.forEach((o, i) => { val['rv' + i] = o; });
+    this._rb = { key, val };
+    return val;
+  }
+  speedVals() {
+    const s = this.state.spd, L = ['30', '15', '7.5'], A = '#E8A33D', C = '#3FD0DE';
+    const set = i => () => this.setState({ spd: i });
+    const spdOpts = L.map((label, i) => {
+      const on = i === s;
+      return {
+        label, click: set(i), fg: on ? C : 'rgba(255,255,255,.4)',
+        led: on ? A : '#2c3036', ledGlow: on ? '0 0 6px ' + A : 'inset 0 1px 1px rgba(0,0,0,.6)',
+        keyY: on ? 'translateY(4px)' : 'none',
+        keyBg: on ? 'linear-gradient(180deg,#2a2e34,#33373e)' : 'linear-gradient(180deg,#4a4f57,#33373e)',
+        keyShadow: on ? 'inset 0 2px 5px rgba(0,0,0,.75), 0 0 0 1px rgba(0,0,0,.7)' : 'inset 0 1px 0 rgba(255,255,255,.14), 0 4px 0 #1d1f23, 0 8px 12px -4px rgba(0,0,0,.9), 0 0 0 1px rgba(0,0,0,.65)',
+        keyFg: on ? '#eaf6f8' : '#b6bdc4', lblTop: 25 + i * 44
+      };
+    });
+    const lv = [{ st: 31, h: 44, tip: 20 }, { st: 75, h: 0, tip: 64 }, { st: 75, h: 44, tip: 108 }][s];
+    return {
+      spdOpts, spdLabel: L[s], lvStemTop: lv.st, lvStemH: lv.h, lvTip: lv.tip,
+      drumPrev: L[s - 1] ?? '', drumNext: L[s + 1] ?? '',
+      drumUp: () => this.setState({ spd: Math.max(0, s - 1) }), drumDown: () => this.setState({ spd: Math.min(2, s + 1) }),
+      upOp: s > 0 ? 1 : .3, dnOp: s < 2 ? 1 : .3, reel: this.reel(s), reelCap: this.reel(s, 86), reelL: this.reel(s, 40), reelR: this.reel(s, 40), reelXs: this.reel(s, 18), reelMed: this.reel(s, 64), ...this.reelBlock(s)
+    };
+  }
+  renderVals() {
+    const drive = .3, warmth = .1, A = '#E8A33D';
+    const ANG = [50, 0, -50];
+    return {
+      ...this.speedVals(),
+      inLv: .55, outLv: .66, driveV: drive, warmV: warmth, mixV: 1,
+      leds: Array.from({ length: 21 }, (_, i) => {
+        const f = i / 20, a = (-135 + 270 * f) * Math.PI / 180, on = f <= drive + .001;
+        return { l: (78 + 69 * Math.sin(a)).toFixed(1), t: (78 - 69 * Math.cos(a)).toFixed(1), bg: on ? A : '#2c3036', glow: on ? '0 0 6px ' + A : 'inset 0 1px 1px rgba(0,0,0,.6)' };
+      }),
+      wticks: Array.from({ length: 21 }, (_, i) => {
+        const f = i / 20, on = f <= warmth + .001;
+        return { deg: (45 + 270 * f).toFixed(1), h: i % 5 === 0 ? 10 : 6, bg: on ? A : 'rgba(255,255,255,.13)', glow: on ? '0 0 4px ' + A : 'none' };
+      }),
+      tapeOpts: this.seg(['CLEAN', 'PHAT'], 0),
+      warmthOpts: this.seg(['ROUND', 'TIGHT'], 0),
+      speed: ['30', '15', '7.5'].map((label, i) => {
+        const a = ANG[i] * Math.PI / 180;
+        return { label, x: (48 + 40 * Math.sin(a)).toFixed(1), y: (44 - 37 * Math.cos(a)).toFixed(1), fg: i === 0 ? '#3FD0DE' : 'rgba(255,255,255,.35)' };
+      }),
+      satMarks: [0, 20, 40, 60, 80, 100].map(p => ({ label: String(p), pct: p, shift: p === 0 ? 'none' : p === 100 ? 'translateX(-100%)' : 'translateX(-50%)' })),
+      vuTicks: [0, 20, 40, 60, 80, 100].map(p => {
+        const deg = -45 + .9 * p;
+        return { label: String(p), deg: deg.toFixed(1), inv: (-deg).toFixed(1), bg: p >= 80 ? '#ff5b2e' : '#8b8177' };
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>

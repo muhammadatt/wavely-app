@@ -56,41 +56,55 @@
  */
 
 import airBand from './air-band.js'
-import clipGainDeesser from './clip-gain-deesser.js'
+import autoLeveler from './auto-leveler.js'
+import sibilanceEditor from './clip-gain-deesser.js'
 import fetPunch from './fet-punch.js'
+import hfLimiter from './hf-limiter.js'
+import deEsser from './de-esser.js'
 import humRemover from './hum-remover.js'
 import loudness from './loudness.js'
 import manualEq from './manual-eq.js'
 import noiseReduction from './noise-reduction.js'
 import normalize from './normalize.js'
 import optoSmooth from './opto-smooth.js'
-import removeSilence from './remove-silence.js'
+import phatass from './phatass.js'
+import pluginChain from './plugin-chain.js'
+import plosive from './plosive.js'
 import resonanceSuppressor from './resonance-suppressor.js'
+import saturationBench from './saturation-bench.js'
 import schepsParallel from './scheps-parallel.js'
 import softClipper from './soft-clipper.js'
 import spectrumAnalyzer from './spectrum-analyzer.js'
 import inflator from './inflator.js'
 import vocalSaturation from './vocal-saturation.js'
 import voicerx from './voicerx.js'
+import voxPressor from './vox-pressor.js'
 
 export const HELP = {
   'air-band': airBand,
-  'clip-gain-deesser': clipGainDeesser,
+  'auto-leveler': autoLeveler,
+  'clip-gain-deesser': sibilanceEditor,
   'fet-punch': fetPunch,
+  'hf-limiter': hfLimiter,
+  'de-esser': deEsser,
   'hum-remover': humRemover,
   loudness,
   'manual-eq': manualEq,
   'noise-reduction': noiseReduction,
   normalize,
   'opto-smooth': optoSmooth,
-  'remove-silence': removeSilence,
+  phatass,
+  plosive,
   'resonance-suppressor': resonanceSuppressor,
+  'saturation-bench': saturationBench,
   'scheps-parallel': schepsParallel,
   'soft-clipper': softClipper,
   'spectrum-analyzer': spectrumAnalyzer,
+  'plugin-chain': pluginChain,
   'inflator': inflator,
   'vocal-saturation': vocalSaturation,
   voicerx,
+  'vox-pressor': voxPressor,
 }
 
 /**

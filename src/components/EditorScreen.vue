@@ -16,6 +16,7 @@ import TransportBar from './TransportBar.vue'
 import ContextPanel from './ContextPanel.vue'
 import EmptyState from './EmptyState.vue'
 import ProcessingOverlay from './ProcessingOverlay.vue'
+import RotateHint from './RotateHint.vue'
 
 const {
   state, appState, performCut, performCopy, performPaste,
@@ -26,7 +27,7 @@ const {
   documentHasUnsavedWork, anyUnsavedWork, activeDoc,
   dropMarker, showToast,
 } = useEditorState()
-const { importFiles, promptForFiles } = useFileImport()
+const { importDataTransfer, promptForFiles } = useFileImport()
 const { saveDocument, saveDocumentAs } = useFileSave()
 const { closeTopWindow, anyWindowOpen } = useWindows()
 
@@ -67,7 +68,7 @@ function onDrop(e) {
   e.preventDefault()
   dragDepth.value = 0
   isDragOver.value = false
-  importFiles(e.dataTransfer.files)
+  importDataTransfer(e.dataTransfer)
 }
 
 // A shortcut must never reach the timeline from inside a text field — the guard
@@ -82,7 +83,7 @@ function closeTopModal() {
   if (appState.contextMenu) { closeContextMenu(); return true }
   if (appState.commandPaletteOpen) { closeCommandPalette(); return true }
   if (closeTopWindow()) return true
-  if (appState.exportDialogOpen) { appState.exportDialogOpen = false; return true }
+  if (appState.saveDialog) { appState.saveDialog = null; return true }
   if (appState.filesPanelOpen) { appState.filesPanelOpen = false; return true }
   return false
 }
@@ -93,7 +94,8 @@ function handleKeydown(e) {
   const key = e.key.toLowerCase()
   const inText = isTextField(e.target)
   const modalOpen = anyWindowOpen.value || appState.commandPaletteOpen ||
-    appState.contextMenu || appState.exportDialogOpen || appState.filesPanelOpen
+    appState.contextMenu || appState.filesPanelOpen ||
+    appState.saveDialog
 
   // Escape — close the top modal, then the selection, then the rail.
   if (e.key === 'Escape') {
@@ -137,7 +139,9 @@ function handleKeydown(e) {
   if ((e.ctrlKey || e.metaKey) && key === 'e') {
     if (!hasFile.value) return
     e.preventDefault()
-    appState.exportDialogOpen = true
+    // Export lives in the files panel: open it with this file ticked.
+    appState.filesPanelTickActive = true
+    appState.filesPanelOpen = true
     return
   }
 
@@ -319,26 +323,27 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="relative flex flex-col h-screen overflow-hidden font-['Inter']"
-    style="background:linear-gradient(160deg,#181c22,#0c0f13 62%)"
+    class="relative flex flex-col h-screen h-[100dvh] overflow-hidden font-['Inter']"
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
     <TopBar />
+    <RotateHint v-if="hasFile" />
 
-    <div class="flex flex-1 overflow-hidden">
+    <div class="relative flex flex-1 overflow-hidden">
       <!-- Workspace -->
       <div class="flex flex-col flex-1 overflow-hidden">
+        <!-- The categories' own row, between the header and the tabs. -->
         <FloatingToolbar />
 
         <FileTabs />  
-        <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px]">
+        <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px] compact:p-[6px] compact:pl-2 compact:gap-[6px]" :style="{ background: hasFile ? 'var(--color-workspace)' : 'linear-gradient(var(--color-wk-top-empty), var(--color-wk-bottom))' }">
           <!-- Overview is indented by the dBFS gutter so its time axis shares an
                x-origin with the main waveform below it. -->
    
-          <div class="flex shrink-0" v-if="hasFile">
+          <div class="flex shrink-0 compact:hidden" v-if="hasFile">
             <div class="w-7 shrink-0"></div>
             <WaveformOverview class="flex-1" />
           </div>
@@ -412,5 +417,12 @@ onUnmounted(() => {
 .ctx-panel-leave-to {
   transform: translateX(100%);
   opacity: 0;
+}
+/* The bottom sheet (see ContextPanel) rises rather than slides in. */
+@media (max-width: 639.98px) {
+  .ctx-panel-enter-from,
+  .ctx-panel-leave-to {
+    transform: translateY(100%);
+  }
 }
 </style>

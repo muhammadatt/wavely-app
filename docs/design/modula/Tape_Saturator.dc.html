@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #1f2125; }
+  a { color: #E8A33D; text-decoration: none; }
+  a:hover { color: #F5C56A; }
+</style>
+</helmet>
+<div style="min-height:100vh;padding:24px 12px 32px;box-sizing:border-box;background:radial-gradient(1100px 650px at 50% -10%, #30343b 0%, #25282d 45%, #1f2125 100%);font-family:'Inter',system-ui,sans-serif;color:#eaf6f8;display:flex;justify-content:center;align-items:flex-start">
+
+  <div style="width:640px;flex:none;zoom:{{ fit }}; box-sizing: border-box; padding: 14px; border-radius: 22px; background: linear-gradient(180deg, #3B3F46, #2B2E34); box-shadow: 0 60px 90px -50px rgba(0,0,0,1),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6)">
+
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:2px 18px 12px;margin:0 -14px 14px;border-bottom:1px solid rgba(0,0,0,.32);box-shadow:0 1px 0 rgba(255,255,255,.04)">
+      <div style="min-width:0;display:flex;align-items:center;gap:10px">
+        <div style="min-width:0;display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+            <div style="font-size:13px;font-weight:800;letter-spacing:.14em;color:color-mix(in srgb,#E8A33D 20%,#fff);font-family:'Inter',system-ui,sans-serif">PHATaSS</div>
+          </div>
+        </div>
+        <div onClick="{{ help }}" title="Help" style="width: 30px; height: 30px; flex: none; border-radius: 50%; display: grid; place-items: center; cursor: pointer; color: #c9d0d6; box-shadow: 0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="font:700 12px/1 'Inter',system-ui,sans-serif">?</div></div>
+      </div>
+      <div style="position:relative;flex:0 1 220px;min-width:0">
+        <div style="display:flex;align-items:center;gap:2px;height:30px;box-sizing:border-box;padding:0 4px;border-radius:8px;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">
+          <div onClick="{{ preset.prev }}" title="Previous preset" style="width:22px;height:22px;flex:none;display:grid;place-items:center;border-radius:5px;cursor:pointer;color:#b6bdc4;font:600 15px/1 'Inter',system-ui,sans-serif" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">&#8249;</div>
+          <div onClick="{{ preset.toggle }}" style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;height:22px;border-radius:5px;cursor:pointer" style-hover="background:rgba(255,255,255,.04)">
+            <div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:600 11px/1 'Inter',system-ui,sans-serif;letter-spacing:.04em;color:#eaf6f8">{{ preset.name }}</div>
+            <div style="flex:none;width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;border-top:4px solid #a6aeb6"></div>
+          </div>
+          <div onClick="{{ preset.next }}" title="Next preset" style="width:22px;height:22px;flex:none;display:grid;place-items:center;border-radius:5px;cursor:pointer;color:#b6bdc4;font:600 15px/1 'Inter',system-ui,sans-serif" style-hover="color:#eaf6f8;background:rgba(255,255,255,.06)">&#8250;</div>
+        </div>
+        <sc-if value="{{ preset.open }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;left:0;right:0;top:34px;z-index:20;display:flex;flex-direction:column;gap:1px;padding:4px;border-radius:8px;background:#1a1c20;box-shadow:0 0 0 1px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.05),0 14px 28px -8px rgba(0,0,0,.9)">
+            <sc-for list="{{ preset.items }}" as="it" hint-placeholder-count="4">
+              <div onClick="{{ it.click }}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;border-radius:5px;cursor:pointer;background:{{ it.bg }}" style-hover="background:rgba(255,255,255,.07)">
+                <div style="white-space:nowrap;font:600 11px/1 'Inter',system-ui,sans-serif;letter-spacing:.04em;color:{{ it.fg }}">{{ it.label }}</div>
+                <div style="font:700 10px/1 'Inter',system-ui,sans-serif;color:#3FD0DE">{{ it.mark }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+      <div style="flex:none;display:flex;align-items:center;gap:8px">
+        <div style="width:96px;flex:none;display:flex;justify-content:flex-end">
+          <div onClick="{{ bypass.click }}" style="display: flex; align-items: center; gap: 8px; height: 30px; box-sizing: border-box; padding:0 13px; border-radius: 999px; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)">
+          <div style="width:7px;height:7px;border-radius:50%;background:{{ bypass.led }};box-shadow:{{ bypass.glow }}"></div>
+          <div style="font:700 10px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ bypass.fg }}">{{ bypass.label }}</div>
+        </div>
+        </div>
+        <div style="width:1px;height:22px;margin:0 3px;background:rgba(0,0,0,.45);box-shadow:1px 0 0 rgba(255,255,255,.06)"></div>
+        <div onClick="{{ close }}" title="Close" style="width: 30px; height: 30px; flex: none; border-radius: 50%; display: grid; place-items: center; cursor: pointer; color: #c9d0d6; box-shadow: 0 6px 12px -6px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)"><div style="font:400 17px/1 'Inter',system-ui,sans-serif;margin-top:-1px">×</div></div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto 1fr;gap:10px">
+
+      <div style="grid-column:2;grid-row:1;min-width:0;padding: 12px 14px 10px; border-radius:16px; background: linear-gradient(180deg, #0C0D0E, #18191A); box-shadow: inset 0 2px 10px rgba(0,0,0,.8),0 0 0 1px rgba(0,0,0,.5)">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px">
+          <div style="display:flex;align-items:baseline;gap:10px">
+            <div style="font:700 10px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#c9d0d6">SATURATION</div>
+            <div style="white-space:nowrap;font:700 20px/1 'JetBrains Mono',monospace;color:{{ sat.textColor }};text-shadow:0 0 8px {{ sat.textGlow }}">{{ sat.reading }}</div>
+          </div>
+          
+        </div>
+        <div style="padding:3px;border-radius:12px;background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+          <div style="position:relative;height:24px;border-radius:9px;background:rgba(0,0,0,.5);box-shadow:inset 0 1px 4px rgba(0,0,0,.8)">
+            <div style="position:absolute;inset:0;border-radius:9px;transition:clip-path .1s linear;clip-path:{{ sat.clip }};background:{{ sat.gradient }};box-shadow:0 0 10px {{ sat.glow }}"></div>
+            <div style="position:absolute;inset:0;border-radius:9px;background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
+            <sc-if value="{{ sat.showPeak }}" hint-placeholder-val="{{ true }}">
+              <div style="position:absolute;pointer-events:none;top:1px;bottom:1px;width:2px;border-radius:1px;background:rgba(255,255,255,.6);transition:left .1s linear;left:{{ sat.peakLeft }}"></div>
+            </sc-if>
+          </div>
+        </div>
+        <div style="position:relative;height:10px;margin:5px 3px 0;font:600 8px 'JetBrains Mono',monospace;color:#a0a8b0">
+          <sc-for list="{{ sat.marks }}" as="mk" hint-placeholder-count="6">
+            <div style="position:absolute;top:0;left:{{ mk.pct }}%;transform:{{ mk.shift }}">{{ mk.label }}</div>
+          </sc-for>
+        </div>
+      </div>
+
+
+      <div style="grid-row:2;grid-column:1;display:flex;flex-direction:column;align-items:center;gap:8px;padding:2px 0">
+        <div style="box-sizing:border-box;padding-left:23px">
+          <div style="width:5ch;padding:4px 4px;border-radius:5px;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">{{ lad.in.db }}</div>
+        </div>
+        <div style="flex:1;min-height:160px;display:flex;gap:5px">
+          <div style="position:relative;text-align:right;width:18px;margin:15px 0 5px;font:500 8px/1 'JetBrains Mono',monospace;color:#a0a8b0">
+            <sc-for list="{{ ladScale }}" as="ls" hint-placeholder-count="7">
+              <div style="position:absolute;right:0;transform:translateY(-50%);top:{{ ls.top }}%">{{ ls.label }}</div>
+            </sc-for>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:3px;padding:5px;border-radius:5px;background:#0b0e13;border:1px solid #1c222c">
+            <div onClick="{{ lad.in.reset }}" title="CLIP — click to reset" style="height:5px;border-radius:1.5px;margin-bottom:5px;cursor:pointer;background:{{ lad.in.clipBg }};box-shadow:{{ lad.in.clipGlow }}"></div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:3px">
+              <sc-for list="{{ lad.in.rows }}" as="r" hint-placeholder-count="30">
+                <div style="flex:1;min-height:3px;display:flex;gap:2px">
+                  <div style="width:7px;border-radius:1px;background:{{ r.c }};opacity:{{ r.lo }};box-shadow:{{ r.lg }}"></div>
+                  <div style="width:7px;border-radius:1px;background:{{ r.c }};opacity:{{ r.ro }};box-shadow:{{ r.rg }}"></div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        <div style="box-sizing:border-box;padding-left:23px;font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd">IN</div>
+        <div style="box-sizing:border-box;padding-left:23px;display:flex;flex-direction:column;align-items:center;gap:5px;margin-top:4px">
+          <div style="width:3px;height:3px;border-radius:50%;background:rgba(255,255,255,.35)"></div>
+          <div onPointerDown="{{ trim.in.down }}" onDoubleClick="{{ trim.in.reset }}" title="Double-click to reset" style="position:relative;width:30px;height:30px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#3e4249 0%,#282b30 55%,#1d1f23 100%);box-shadow:0 8px 14px -8px rgba(0,0,0,.95),inset 0 1px 1px rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)">
+            <div style="position:absolute;inset:0;transform:rotate({{ trim.in.deg }}deg)">
+              <div style="position:absolute;left:50%;top:4px;width:2px;height:8px;margin-left:-1px;border-radius:1px;background:#eaf6f8"></div>
+            </div>
+          </div>
+          <div style="white-space:nowrap;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ trim.in.text }}</div>
+        </div>
+      </div>
+
+      <div style="grid-row:2;grid-column:2;min-width:0;display:flex;flex-direction:column;gap:10px">
+
+        <div style="flex:1;display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,1fr);gap:10px">
+
+          <div style="display: flex; flex-direction: column; border-radius:16px; box-shadow: inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05)">
+              <div style="font-family:'Inter',system-ui,sans-serif;font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Tape</div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:14px 10px 10px">
+            <div style="position:relative;width:156px;height:156px;display:grid;place-items:center">
+              <div style="position:absolute;left:50%;top:-14px;z-index:3;pointer-events:none;padding:7px 11px;border-radius:6px;white-space:nowrap;font:500 15px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 0 0 1px rgba(0,0,0,.6),0 8px 16px -6px rgba(0,0,0,.9);transition:opacity 140ms ease,transform 140ms ease;opacity:{{ tip.drive.op }};transform:translate(-50%,{{ tip.drive.y }}px)">{{ tip.drive.text }}</div>
+              <sc-for list="{{ drive.leds }}" as="led" hint-placeholder-count="21">
+                <div style="position:absolute;width:6px;height:6px;border-radius:50%;margin:-3px 0 0 -3px;left:{{ led.l }}px;top:{{ led.t }}px;background:{{ led.bg }};box-shadow:{{ led.glow }}"></div>
+              </sc-for>
+              <div onPointerDown="{{ drive.down }}" onDoubleClick="{{ drive.reset }}" style="position:relative;width:112px;height:112px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#454a52 0%,#2c3036 52%,#1c1e22 100%);box-shadow:0 16px 26px -12px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -7px 12px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7)">
+                <div style="position:absolute;inset:13px;border-radius:50%;background:linear-gradient(160deg,#3b4047,#24272c);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></div>
+                <div style="position:absolute;inset:0;transform:rotate({{ drive.deg }}deg)">
+                  <div style="position:absolute;left:50%;top:17px;width:4px;height:26px;margin-left:-2px;border-radius:2px;background:{{ c.accent }};box-shadow:0 0 6px {{ c.accent }}"></div>
+                </div>
+              </div>
+            </div>
+            <div style="font-family:'Inter',system-ui,sans-serif;font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">DRIVE</div>
+            <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+              <sc-for list="{{ tapeOpts }}" as="o" hint-placeholder-count="2">
+                <div onClick="{{ o.click }}" style="padding:5px 10px;border-radius:6px;cursor:pointer;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};text-shadow:{{ o.textGlow }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div>
+              </sc-for>
+            </div>
+            </div>
+            <div style="height:1px;margin:0 14px;background:rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05)"></div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 10px 12px">
+              <div style="position:relative;width:96px;height:68px">
+                <sc-for list="{{ speed.labels }}" as="sl" hint-placeholder-count="3">
+                  <div onClick="{{ sl.click }}" style="position:absolute;transform:translate(-50%,-50%);left:{{ sl.x }}px;top:{{ sl.y }}px;cursor:pointer;white-space:nowrap;font:700 9px 'JetBrains Mono',monospace;color:{{ sl.fg }};text-shadow:{{ sl.glow }}">{{ sl.label }}</div>
+                </sc-for>
+                <div onPointerDown="{{ speed.down }}" style="position:absolute;left:28px;top:24px;width:40px;height:40px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#3e4249 0%,#282b30 55%,#1d1f23 100%);box-shadow:0 8px 14px -8px rgba(0,0,0,.95),inset 0 1px 1px rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)">
+                  <div style="position:absolute;inset:0;transition:transform .12s cubic-bezier(.3,1.5,.5,1);transform:rotate({{ speed.deg }}deg)">
+                    <div style="position:absolute;left:50%;top:4px;width:2px;height:10px;margin-left:-1px;border-radius:1px;background:#eaf6f8"></div>
+                  </div>
+                </div>
+              </div>
+              <div style="font-family: 'Inter',system-ui,sans-serif; font-size: 8px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #b6bdc4">TAPE SPEED (IPS)</div>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; border-radius:16px; box-shadow: inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+            <div style="display:flex;align-items:center;justify-content:center;padding:10px 14px 9px;border-bottom:1px solid rgba(0,0,0,.45);box-shadow:0 1px 0 rgba(255,255,255,.05)">
+              <div style="font-family:'Inter',system-ui,sans-serif;font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#c9d0d6">Harmonics</div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:14px 10px 10px">
+              <div style="position:relative;width:156px;height:156px;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 50% 40%, #24272c, #1d1f23);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04)">
+              <div style="position:absolute;left:50%;top:-14px;z-index:3;pointer-events:none;padding:7px 11px;border-radius:6px;white-space:nowrap;font:500 15px/1 'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 0 0 1px rgba(0,0,0,.6),0 8px 16px -6px rgba(0,0,0,.9);transition:opacity 140ms ease,transform 140ms ease;opacity:{{ tip.warmth.op }};transform:translate(-50%,{{ tip.warmth.y }}px)">{{ tip.warmth.text }}</div>
+                <sc-for list="{{ warmth.ticks }}" as="tk" hint-placeholder-count="21">
+                  <div style="position:absolute;left:50%;top:50%;width:2px;height:70px;margin-left:-1px;transform-origin:50% 0;transform:rotate({{ tk.deg }}deg)">
+                    <div style="position:absolute;bottom:0;left:0;width:2px;height:{{ tk.h }}px;border-radius:1px;background:{{ tk.bg }};box-shadow:{{ tk.glow }}"></div>
+                  </div>
+                </sc-for>
+                <div onPointerDown="{{ warmth.down }}" onDoubleClick="{{ warmth.reset }}" style="position:relative;width:102px;height:102px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#4a4e56 0%,#2f3239 52%,#1f2126 100%);box-shadow:0 20px 32px -14px rgba(0,0,0,.95),inset 0 2px 2px rgba(255,255,255,.10),inset 0 -8px 14px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.7),0 0 0 6px #24272c,0 0 0 7px rgba(0,0,0,.6)">
+                  <div style="position:absolute;inset:11px;border-radius:50%;background:linear-gradient(160deg,#3d424a,#25282d);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.6)"></div>
+                  <div style="position:absolute;inset:0;transform:rotate({{ warmth.deg }}deg)">
+                    <div style="position:absolute;left:50%;top:14px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:{{ c.accent }};box-shadow:0 0 6px {{ c.accent }}"></div>
+                  </div>
+                </div>
+              </div>
+              <div style="font-family:'Inter',system-ui,sans-serif;font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">WARMTH</div>
+              <div style="display:flex;gap:2px;padding:3px;border-radius:8px;background:linear-gradient(180deg,#1a1c20,#22252a);box-shadow:inset 0 2px 6px rgba(0,0,0,.8)">
+              <sc-for list="{{ warmthOpts }}" as="o" hint-placeholder-count="2">
+                <div onClick="{{ o.click }}" style="padding:5px 10px;border-radius:6px;cursor:pointer;font:700 9px 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:{{ o.fg }};text-shadow:{{ o.textGlow }};background:{{ o.bg }};box-shadow:{{ o.shadow }}">{{ o.label }}</div>
+              </sc-for>
+            </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-radius:16px; box-shadow: inset 0 1px 0 rgba(255,255,255,.05),0 0 0 1px rgba(0,0,0,.5)">
+          <div style="font-family:'Inter',system-ui,sans-serif;font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#b6bdc4">MIX</div>
+          <div onPointerDown="{{ mix.down }}" onDoubleClick="{{ mix.reset }}" style="position:relative;flex:1;min-width:0;height:44px;border-radius:10px;cursor:ew-resize;touch-action:none;background:linear-gradient(180deg,#26292e,#1f2125);box-shadow:inset 0 2px 8px rgba(0,0,0,.7),inset 0 -1px 0 rgba(255,255,255,.04),0 1px 0 rgba(255,255,255,.04)">
+            <div style="position:absolute;top:20px;left:20px;right:20px;height:4px;border-radius:2px;background:#0e0f11;box-shadow:inset 0 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.06)"></div>
+            <div style="position:absolute;top:8px;width:56px;height:28px;border-radius:6px;left:{{ mix.capLeft }};background:linear-gradient(90deg,#5a5f68 0%,#3d4148 20%,#2a2d33 50%,#3d4148 80%,#23262b 100%);box-shadow:0 10px 16px -8px rgba(0,0,0,.95),0 4px 6px rgba(0,0,0,.5),inset 1px 0 0 rgba(255,255,255,.22),inset -1px 0 0 rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.65)">
+              <div style="position:absolute;top:6px;bottom:6px;left:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+              <div style="position:absolute;top:6px;bottom:6px;right:7px;width:14px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 1px,rgba(255,255,255,.1) 1px 2px,transparent 2px 5px)"></div>
+              <div style="position: absolute; top: 3px; bottom: 3px; left: 27px; width: 2px; background-color: #8E9297"></div>
+            </div>
+          </div>
+          <div style="min-width:52px;box-sizing:border-box;padding:6px 8px;border-radius:6px;text-align:center;white-space:nowrap;font:500 12px 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">{{ mix.text }}</div>
+        </div>
+      </div>
+
+      <div style="grid-row:2;grid-column:3;display:flex;flex-direction:column;align-items:center;gap:8px;padding:2px 0">
+        <div style="box-sizing:border-box;padding-right:23px">
+          <div style="width:5ch;padding:4px 4px;border-radius:5px;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;font:500 11px/1 'JetBrains Mono',monospace;color:#eaf6f8;background:#1a1c20;box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.05)">{{ lad.out.db }}</div>
+        </div>
+        <div style="flex:1;min-height:160px;display:flex;gap:5px">
+          <div style="display:flex;flex-direction:column;gap:3px;padding:5px;border-radius:5px;background:#0b0e13;border:1px solid #1c222c">
+            <div onClick="{{ lad.out.reset }}" title="CLIP — click to reset" style="height:5px;border-radius:1.5px;margin-bottom:5px;cursor:pointer;background:{{ lad.out.clipBg }};box-shadow:{{ lad.out.clipGlow }}"></div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:3px">
+              <sc-for list="{{ lad.out.rows }}" as="r" hint-placeholder-count="30">
+                <div style="flex:1;min-height:3px;display:flex;gap:2px">
+                  <div style="width:7px;border-radius:1px;background:{{ r.c }};opacity:{{ r.lo }};box-shadow:{{ r.lg }}"></div>
+                  <div style="width:7px;border-radius:1px;background:{{ r.c }};opacity:{{ r.ro }};box-shadow:{{ r.rg }}"></div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="position:relative;width:18px;margin:15px 0 5px;font:500 8px/1 'JetBrains Mono',monospace;color:#a0a8b0">
+            <sc-for list="{{ ladScale }}" as="ls" hint-placeholder-count="7">
+              <div style="position:absolute;left:0;transform:translateY(-50%);top:{{ ls.top }}%">{{ ls.label }}</div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="box-sizing:border-box;padding-right:23px;font:600 9px/1 'Inter',system-ui,sans-serif;letter-spacing:.14em;color:#aeb6bd">OUT</div>
+        <div style="box-sizing:border-box;padding-right:23px;display:flex;flex-direction:column;align-items:center;gap:5px;margin-top:4px">
+          <div style="width:3px;height:3px;border-radius:50%;background:rgba(255,255,255,.35)"></div>
+          <div onPointerDown="{{ trim.out.down }}" onDoubleClick="{{ trim.out.reset }}" title="Double-click to reset" style="position:relative;width:30px;height:30px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#3e4249 0%,#282b30 55%,#1d1f23 100%);box-shadow:0 8px 14px -8px rgba(0,0,0,.95),inset 0 1px 1px rgba(255,255,255,.10),0 0 0 1px rgba(0,0,0,.65)">
+            <div style="position:absolute;inset:0;transform:rotate({{ trim.out.deg }}deg)">
+              <div style="position:absolute;left:50%;top:4px;width:2px;height:8px;margin-left:-1px;border-radius:1px;background:#eaf6f8"></div>
+            </div>
+          </div>
+          <div style="white-space:nowrap;font:500 9px/1 'JetBrains Mono',monospace;color:#c9d0d6">{{ trim.out.text }}</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:12px 16px 0;margin:14px -14px 0;border-top:1px solid rgba(0,0,0,.32);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)">
+      <div onClick="{{ selectAll.click }}" style="display:flex;align-items:center;gap:8px;height:32px;box-sizing:border-box;padding:0 12px;border-radius:9px;cursor:pointer;color:{{ selectAll.fg }};box-shadow:inset 0 0 0 1px {{ selectAll.ring }}">
+        <div style="width:10px;height:10px;border-radius:2px;border:1.5px dashed currentColor"></div>
+        <div style="font:600 12px 'Inter',system-ui,sans-serif">Select all</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div onClick="{{ preview.click }}" style="display: flex; align-items: center; gap: 8px; height: 32px; box-sizing: border-box; padding: 0 14px; border-radius: 9px; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(0,0,0,.6),0 6px 12px -6px rgba(0,0,0,.9)">
+          <div style="width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid {{ preview.icon }}"></div>
+          <div style="font:600 12px 'Inter',system-ui,sans-serif;color:#eaf6f8">{{ preview.label }}</div>
+        </div>
+        <div onClick="{{ apply.click }}" style="display:flex;align-items:center;gap:7px;height:32px;box-sizing:border-box;padding:0 14px;border-radius:9px;cursor:pointer;background:linear-gradient(180deg,#f2f4f7,#d9dde3);box-shadow:inset 0 1px 0 #ffffff,0 0 0 1px rgba(0,0,0,.55),0 6px 12px -6px rgba(0,0,0,.9)">
+          <div style="font:700 12px 'Inter',system-ui,sans-serif;color:#1b1d21">✓</div>
+          <div style="white-space:nowrap;font:600 12px 'Inter',system-ui,sans-serif;color:#1b1d21">{{ apply.label }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#E8A33D&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#E8A33D&quot;,&quot;#ff4d5e&quot;,&quot;#8ce06a&quot;,&quot;#c08cff&quot;],&quot;section&quot;:&quot;Theme&quot;},&quot;secondary&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#3FD0DE&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#3FD0DE&quot;,&quot;#9b8cff&quot;,&quot;#67e8c3&quot;,&quot;#ffd166&quot;],&quot;section&quot;:&quot;Theme&quot;},&quot;animate&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Behavior&quot;}}">
+const LAD = { cool: '#3FD0DE', mid: '#8FD48A', warm: '#E8A33D', hot: '#FF5A4E' };
+const ladInit = () => ({ lv: [.4, .4], pk: [.4, .4], clip: false });
+function ladStep(m, drive) {
+  const lv = m.lv.map((v, i) => v + (drive[i] - v) * (drive[i] > v ? .6 : .22));
+  const pk = m.pk.map((p, i) => Math.max(p - .02, lv[i]));
+  return { lv, pk, clip: m.clip || lv.some(v => v > .965) };
+}
+function ladView(m, reset, N) {
+  const lit = m.lv.map(v => Math.round(v * N)), pk = m.pk.map(v => Math.round(v * N) - 1);
+  const rows = Array.from({ length: N }, (_, j) => {
+    const fb = N - 1 - j, t = 1 - j / (N - 1);
+    const c = t > .93 ? LAD.hot : t > .78 ? LAD.warm : t > .5 ? LAD.mid : LAD.cool;
+    const side = i => { const on = fb < lit[i], isP = fb === pk[i]; return on || isP ? [on ? 1 : .8, '0 0 6px ' + c] : [.09, 'none']; };
+    const L = side(0), R = side(1);
+    return { c, lo: L[0], lg: L[1], ro: R[0], rg: R[1] };
+  });
+  const top = Math.max(m.lv[0], m.lv[1]);
+  return {
+    rows, reset,
+    db: top < .03 ? '-∞' : (-42 * (1 - top)).toFixed(1),
+    clipBg: m.clip ? LAD.hot : '#262c37',
+    clipGlow: m.clip ? '0 0 10px ' + LAD.hot + ', 0 0 3px ' + LAD.hot : 'none'
+  };
+}
+
+const DEF = { drive: .45, warmth: .35, in: .5, out: .5, mix: 1 };
+const SPEEDS = [['30', .82], ['15', 1], ['7.5', 1.22]];
+
+class Component extends DCLogic {
+  presetList = ['Default', 'Warm Bus', 'Drum Crush', 'Vocal Glow', 'Lo-Fi Cassette'];
+  state = {
+    v: { ...DEF }, tape: 1, wtype: 0, speed: 1, bypass: false,
+    sig: [.55, .5], lad: { in: ladInit(), out: ladInit() },
+    sat: { fill: 0, peak: 0 }
+  };
+
+  componentDidMount() {
+    this.onResize = () => {
+      const fit = Math.min(1, Math.max(.3, (window.innerWidth - 24) / 640));
+      if (Math.abs(fit - (this.state.fit || 1)) > .001) this.setState({ fit });
+    };
+    this.onResize();
+    window.addEventListener('resize', this.onResize);
+    if (this.props.animate === false) return;
+    this.timer = setInterval(() => {
+      this.setState(s => {
+        const bump = x => Math.max(.15, Math.min(.88, x + (Math.random() - .48) * .16));
+        const sig = [bump(s.sig[0]), bump(s.sig[1])];
+        const inDb = (s.v.in - .5) * 24;
+        const inSig = sig.map(x => Math.max(0, Math.min(1, x + inDb / 42)));
+        const avg = (inSig[0] + inSig[1]) / 2;
+        const target = s.bypass ? 0 : Math.min(1,
+          s.v.drive * (.55 + avg * .7) * (s.tape === 1 ? 1.15 : .82) * SPEEDS[s.speed][1] * (1 + s.v.warmth * .12));
+        const fill = s.sat.fill + (target - s.sat.fill) * .4;
+        const peak = Math.max(fill, s.sat.peak - .02);
+        const outDb = (s.v.out - .5) * 24;
+        const outLv = inSig.map(x => {
+          if (s.bypass) return x;
+          const wet = Math.min(.94, x + s.v.drive * .18 - Math.max(0, x - .6) * fill * .6);
+          return Math.max(0, Math.min(1, x + (wet - x) * s.v.mix + outDb / 42));
+        });
+        return { sig, sat: { fill, peak }, lad: { in: ladStep(s.lad.in, inSig), out: ladStep(s.lad.out, outLv) } };
+      });
+    }, 100);
+  }
+  componentWillUnmount() { window.removeEventListener('resize', this.onResize); clearInterval(this.timer); clearTimeout(this._apchrome); }
+
+  chromeVals(stateKey, bypassed) {
+    const st = this.state[stateKey] || {};
+    const set = patch => this.setState(s => ({ [stateKey]: { ...(s[stateKey] || {}), ...patch } }));
+    const on = !bypassed;
+    return {
+      help: () => set({ help: !st.help }),
+      preset: (() => {
+        const list = this.presetList || ['Default'];
+        const pi = Math.min(st.preset || 0, list.length - 1);
+        return {
+          name: list[pi], open: !!st.presetOpen,
+          toggle: () => set({ presetOpen: !st.presetOpen }),
+          prev: () => set({ preset: (pi + list.length - 1) % list.length, presetOpen: false }),
+          next: () => set({ preset: (pi + 1) % list.length, presetOpen: false }),
+          items: list.map((label, i) => ({
+            label, mark: i === pi ? '✓' : '',
+            fg: i === pi ? '#eaf6f8' : '#b6bdc4',
+            bg: i === pi ? 'rgba(255,255,255,.05)' : 'transparent',
+            click: () => set({ preset: i, presetOpen: false })
+          }))
+        };
+      })(),
+      close: () => {},
+      selectAll: {
+        click: () => set({ all: !st.all }),
+        fg: st.all ? '#eaf6f8' : '#b6bdc4',
+        ring: st.all ? 'rgba(232,163,61,.7)' : 'rgba(255,255,255,.14)'
+      },
+      preview: {
+        label: st.previewing ? 'Stop' : 'Preview',
+        icon: st.previewing ? '#E8A33D' : '#eaf6f8',
+        click: () => set({ previewing: !st.previewing })
+      },
+      apply: {
+        label: st.applied ? 'Applied' : 'Apply to selection',
+        click: () => { set({ applied: true }); clearTimeout(this['_ap' + stateKey]); this['_ap' + stateKey] = setTimeout(() => set({ applied: false }), 1500); }
+      },
+      onLed: on
+    };
+  }
+
+  drag(k, len) {
+    return e => {
+      e.preventDefault();
+      const start = e.clientY, base = this.state.v[k];
+      this.setState({ dragging: k });
+      const move = ev => {
+        const v = Math.max(0, Math.min(1, base + (start - ev.clientY) / len));
+        this.setState(s => ({ v: { ...s.v, [k]: v } }));
+      };
+      const up = () => {
+        this.setState({ dragging: null });
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    };
+  }
+  tipV(k, text) {
+    const on = this.state.dragging === k;
+    return { text, op: on ? 1 : 0, y: on ? -4 : 2 };
+  }
+  dragX(k) {
+    return e => {
+      e.preventDefault();
+      const el = e.currentTarget, w = Math.max(1, el.getBoundingClientRect().width - 72);
+      const start = e.clientX, base = this.state.v[k];
+      const move = ev => {
+        const v = Math.max(0, Math.min(1, base + (ev.clientX - start) / w));
+        this.setState(s => ({ v: { ...s.v, [k]: v } }));
+      };
+      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    };
+  }
+  reset(k) { return () => this.setState(s => ({ v: { ...s.v, [k]: DEF[k] } })); }
+  ladReset(k) { return () => this.setState(s => ({ lad: { ...s.lad, [k]: { ...s.lad[k], clip: false } } })); }
+
+  seg(labels, current, key, accent) {
+    return labels.map((label, i) => {
+      const on = current === i;
+      return {
+        label, click: () => this.setState({ [key]: i }),
+        bg: on ? 'linear-gradient(180deg,#3c4149,#2a2e34)' : 'transparent',
+        fg: on ? accent : 'rgba(255,255,255,.5)',
+        textGlow: 'none',
+        shadow: on ? 'inset 0 1px 0 rgba(255,255,255,.14), 0 6px 12px -6px rgba(0,0,0,.9), 0 0 0 1px rgba(0,0,0,.6)' : 'none'
+      };
+    });
+  }
+
+  speedView(second) {
+    const ANG = [50, 0, -50];
+    const idx = this.state.speed;
+    return {
+      deg: ANG[idx],
+      text: SPEEDS[idx][0] + ' IPS',
+      labels: SPEEDS.map(([label], i) => {
+        const a = ANG[i] * Math.PI / 180, on = i === idx;
+        return {
+          label, x: (48 + 40 * Math.sin(a)).toFixed(1), y: (44 - 37 * Math.cos(a)).toFixed(1),
+          fg: on ? second : 'rgba(255,255,255,.35)', glow: 'none',
+          click: () => this.setState({ speed: i })
+        };
+      }),
+      down: e => {
+        e.preventDefault();
+        const startY = e.clientY, base = idx;
+        const move = ev => {
+          const n = Math.max(0, Math.min(2, Math.round(base - (startY - ev.clientY) / 30)));
+          if (n !== this.state.speed) this.setState({ speed: n });
+        };
+        const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+      }
+    };
+  }
+
+  renderVals() {
+    const accent = this.props.accent ?? '#E8A33D';
+    const second = this.props.secondary ?? '#3FD0DE';
+    const c = { accent, second };
+    const v = this.state.v;
+
+    const drive = {
+      deg: (-135 + 270 * v.drive).toFixed(1),
+      down: this.drag('drive', 200), reset: this.reset('drive'),
+      leds: Array.from({ length: 21 }, (_, i) => {
+        const f = i / 20, a = (-135 + 270 * f) * Math.PI / 180, on = f <= v.drive + .001;
+        return {
+          l: (78 + 69 * Math.sin(a)).toFixed(1), t: (78 - 69 * Math.cos(a)).toFixed(1),
+          bg: on ? accent : '#2c3036',
+          glow: on ? '0 0 6px ' + accent : 'inset 0 1px 1px rgba(0,0,0,.6)'
+        };
+      })
+    };
+    const warmth = {
+      deg: (-135 + 270 * v.warmth).toFixed(1),
+      down: this.drag('warmth', 200), reset: this.reset('warmth'),
+      ticks: Array.from({ length: 21 }, (_, i) => {
+        const f = i / 20, on = f <= v.warmth + .001;
+        return { deg: (45 + 270 * f).toFixed(1), h: i % 5 === 0 ? 10 : 6, bg: on ? accent : 'rgba(255,255,255,.13)', glow: on ? '0 0 4px ' + accent : 'none' };
+      })
+    };
+    const mix = {
+      capLeft: 'calc(8px + (100% - 72px) * ' + v.mix.toFixed(4) + ')',
+      text: Math.round(v.mix * 100) + '%',
+      down: this.dragX('mix'),
+      reset: this.reset('mix')
+    };
+
+    const outDb = (v.out - .5) * 24;
+    const dbText = val => { const d = (val - .5) * 24; return (d > .05 ? '+' : d < -.05 ? '' : '+') + (Math.abs(d) < .05 ? 0 : d).toFixed(1) + ' dB'; };
+    const trim = {
+      in: { deg: (-135 + 270 * v.in).toFixed(1), text: dbText(v.in), down: this.drag('in', 160), reset: this.reset('in') },
+      out: { deg: (-135 + 270 * v.out).toFixed(1), text: dbText(v.out), down: this.drag('out', 160), reset: this.reset('out') }
+    };
+
+    const sf = this.state.sat.fill, hot = sf > .8;
+    const sat = {
+      clip: 'inset(0 ' + (100 - sf * 100).toFixed(1) + '% 0 0 round 9px)',
+      reading: this.state.bypass ? 'OFF' : Math.round(sf * 100) + '%',
+      textColor: hot ? '#FF8A7E' : 'color-mix(in srgb, ' + accent + ' 65%, #ffffff)',
+      textGlow: hot ? 'rgba(255,90,78,.5)' : 'color-mix(in srgb, ' + accent + ' 55%, transparent)',
+      gradient: 'linear-gradient(90deg,color-mix(in srgb, ' + accent + ' 35%, #ffffff),' + accent + ' 75%,' + LAD.hot + ')',
+      glow: 'color-mix(in srgb, ' + accent + ' 60%, transparent)',
+      showPeak: this.state.sat.peak > .01,
+      peakLeft: 'calc(' + (this.state.sat.peak * 100).toFixed(1) + '% - 1px)',
+      context: (this.state.tape ? 'PHAT' : 'CLEAN') + ' · ' + (this.state.wtype ? 'TIGHT' : 'ROUND') + ' · ' + SPEEDS[this.state.speed][0] + ' IPS',
+      marks: [0, 20, 40, 60, 80, 100].map(p => ({ label: String(p), pct: p, shift: p === 0 ? 'none' : p === 100 ? 'translateX(-100%)' : 'translateX(-50%)' }))
+    };
+
+    const bOn = !this.state.bypass;
+    return {
+      c, drive, warmth, mix, sat, trim, fit: this.state.fit || 1,
+      tip: { drive: this.tipV('drive', String(Math.round(v.drive * 100))), warmth: this.tipV('warmth', String(Math.round(v.warmth * 100))) },
+      tapeOpts: this.seg(['CLEAN', 'PHAT'], this.state.tape, 'tape', second),
+      warmthOpts: this.seg(['ROUND', 'TIGHT'], this.state.wtype, 'wtype', second),
+      speed: this.speedView(second),
+      lad: { in: ladView(this.state.lad.in, this.ladReset('in'), 30), out: ladView(this.state.lad.out, this.ladReset('out'), 30) },
+      ladScale: [['0', 0], ['-6', 14.3], ['-12', 28.6], ['-18', 42.9], ['-24', 57.1], ['-30', 71.4], ['-36', 85.7]].map(([label, top]) => ({ label, top })),
+      ...(({ onLed, ...rest }) => rest)(this.chromeVals('chrome', this.state.bypass)),
+      bypass: {
+        label: bOn ? 'ON' : 'BYPASS',
+        click: () => this.setState(s => ({ bypass: !s.bypass })),
+        led: bOn ? '#8FD48A' : '#3a3d43',
+        glow: bOn ? '0 0 6px #8FD48A' : 'inset 0 1px 1px rgba(0,0,0,.7)',
+        fg: bOn ? '#eaf6f8' : 'rgba(255,255,255,.5)',
+        shadow: 'inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.6), 0 6px 12px -6px rgba(0,0,0,.9)'
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

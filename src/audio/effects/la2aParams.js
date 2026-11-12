@@ -43,6 +43,20 @@ export const LA2A_DEFAULTS = {
    * measurements and for why the ceiling is 20 and not higher.
    */
   lookahead: 0,
+  /**
+   * Analog mode — the nonlinearity, on or off. True is the shipping character.
+   *
+   * ⚠ A PATCH KEY, NOT A BENCH ONE, which is what separates it from everything
+   * in `la2aTuning.js`. It is serialised into presets, saved patches and undo
+   * entries, so a user who turns it off and saves gets it back off.
+   */
+  analog: true,
+  /**
+   * Wet/dry blend, 0-1 — parallel compression without a second track. 1 is
+   * the hardware and what every patch saved before the control existed was
+   * auditioned at, so an absent key means 1.
+   */
+  mix: 1,
 }
 
 /**
@@ -62,8 +76,21 @@ export function toKernelParams(params) {
     mode: params.mode,
     peakReduction: params.peakReduction,
     gainDb: params.gain,
+    /**
+     * ⚠ DEFAULTS TO TRUE ON AN ABSENT KEY, and that is the only correct default:
+     * every patch saved before this control existed was auditioned WITH the
+     * nonlinearity, so anything else would silently change how a stored preset
+     * sounds. Same rule `lookahead` follows in the other direction.
+     */
+    analog: params.analog !== false,
     r37: params.r37,
     lookaheadMs: params.lookahead,
+    /**
+     * ⚠ SENT EVERY TIME, NOT ONLY WHEN IT DIFFERS FROM 1. The kernel merges
+     * partial params, so a key sent only below 1 could never say "back to 1":
+     * the live worklet would keep the old blend while apply rendered the new.
+     */
+    mix: Number.isFinite(params.mix) ? params.mix : 1,
     ...la2aTuningOverrides(),
     /**
      * ⚠ MEASURED, NOT DIALLED, WHICH IS WHY IT IS NOT IN `LA2A_DEFAULTS`. The

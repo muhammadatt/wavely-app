@@ -21,7 +21,7 @@
  * ⚠ IT ASSERTS "OPENED", NOT JUST "NO ERROR". A panel whose command-palette
  * entry has been renamed silently fails to open and then reports clean, which is
  * how the first run of this missed OptoSmooth entirely — its registry label is
- * "Opto Comp". A miss is a failure.
+ * "Opto Comp" (now "LA Vintage 2A"). A miss is a failure.
  *
  * The audio is generated here rather than read from data/corpus/, which is
  * gitignored: this checks that panels render, not what they sound like.
@@ -46,11 +46,15 @@ const URL_ = `http://localhost:${PORT}/`
  * the suite renders a component at all.
  */
 const PANELS = [
-  { name: 'Opto Comp' }, { name: 'FET Punch' }, { name: 'Soft Clipper' },
-  { name: 'Scheps Parallel' }, { name: 'Reso' }, { name: 'EQ' },
-  { name: 'Air Boost' }, { name: 'De-Esser' }, { name: 'Inflator' },
-  { name: 'Tube Sat' },
-  { name: 'Loudness Normalize' },
+  // Effect windows, checked via `.win-frame`.
+  'LA Vintage 2A', 'LA Classic 76', 'Soft Clipper', 'Scheps Parallel',
+  'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'Hi-Freq Limiter', 'PHAT*SS',
+  'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
+  'Loudness Normalize', 'Auto Leveler', 'Plosive Tamer', 'Noise Reduction', 'VoxPressor',
+  // Rail panels, checked via the data-rail-panel hook ContextPanel tags the
+  // detail level with. They are here because a rail panel can throw at module
+  // scope exactly as a window can, and nothing else in the suite renders a
+  // component at all.
   { name: 'Split', rail: 'split' },
   { name: 'Markers', rail: 'markers' },
 ]
@@ -101,6 +105,10 @@ const executablePath = process.env.SMOKE_CHROMIUM
   ?? (existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined)
 const browser = await chromium.launch(executablePath ? { executablePath } : {})
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+// Opening goes through showOpenFilePicker where the browser has it, and
+// Playwright raises no 'filechooser' for that picker. Hide it so the app falls
+// back to the <input type="file"> path, which Playwright can drive.
+await page.addInitScript(() => { window.showOpenFilePicker = undefined })
 const errors = []
 page.on('pageerror', e => errors.push(`PAGEERROR ${e.message}`))
 /**
@@ -163,7 +171,10 @@ try {
   await page.getByText('Select All', { exact: false }).first().click()
   await page.waitForTimeout(600)
 
-  for (const { name, rail } of PANELS) {
+  for (const entry of PANELS) {
+    // Entries are a bare name for a floating window, or { name, rail } for a
+    // rail panel — most are windows, so the common case stays a plain string.
+    const { name, rail } = typeof entry === 'string' ? { name: entry, rail: null } : entry
     const before = errors.length
     await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
     await page.keyboard.type(name); await page.waitForTimeout(450)
@@ -176,6 +187,136 @@ try {
     if (!ok) failures++
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name.padEnd(16)} ${opened ? '' : 'did not open (renamed in the registry?) '}${fresh.join(' | ')}`)
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+  }
+
+  /**
+   * The plugin chain, checked for what it DOES: opening plugins adds nothing
+   * to it; a plugin outside the chain opens alone and the chain counts as a
+   * plugin; a plugin IN the chain still opens alone as its solo copy; the Add picker is the way in and its plugins open beside the chain
+   * with no Apply of their own; the arrows reorder; Apply commits every live
+   * slot in order as one edit and bypasses them afterwards.
+   */
+  {
+    const before = errors.length
+    const openOp = async (name) => {
+      await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
+      await page.keyboard.type(name); await page.waitForTimeout(450)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
+    }
+    const frames = () => page.locator('.win-frame').count()
+    const chainWin = page.locator('.win-frame').filter({ hasText: 'EFFECT CHAIN' })
+    const rowNames = () => chainWin.locator('.pc-name').allInnerTexts()
+    const addFromPicker = async (label) => {
+      await chainWin.getByRole('button', { name: 'Add effect', exact: true }).dispatchEvent('click'); await page.waitForTimeout(300)
+      await page.keyboard.type(label); await page.waitForTimeout(250)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
+    }
+
+    // A plugin outside the chain opens alone, and the chain counts as a plugin.
+    await openOp('Inflator')
+    await openOp('Air Boost')
+    const soloWindows = await frames()
+    await openOp('Effect Chain')
+    const chainReplaced = (await frames()) === 1 && (await chainWin.count()) === 1
+    // Every panel opened above — none of them joined the chain.
+    const kept = (await rowNames()).length
+
+    // The picker is the way in; its plugins open beside the chain.
+    await addFromPicker('Inflator')
+    await addFromPicker('Air Boost')
+    const groupWindows = await frames()
+    const inflatorWin = page.locator('.win-frame').filter({ hasText: 'IN CHAIN · 1' })
+    const memberApplyOff = await inflatorWin.locator('.win-apply').isDisabled().catch(() => false)
+
+    // A plugin outside the chain bypasses it (it must preview what its own
+    // Apply writes), and the chain STAYS bypassed when it closes: only the
+    // user turns it back on, from the chain window's master switch.
+    const chainBadge = () => page.locator('.chain-count').innerText().catch(() => '')
+    const liveBefore = await chainBadge()
+    await openOp('LA Vintage 2A')
+    const pausedBadge = await chainBadge()
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+    const closedBadge = await chainBadge()
+    const masterOn = async () => {
+      await chainWin.locator('.win-pill-m').first().dispatchEvent('click'); await page.waitForTimeout(300)
+    }
+    await openOp('Effect Chain')
+    await masterOn()
+    const resumedBadge = await chainBadge()
+    const pauseOk = liveBefore === 'ACTIVE' && pausedBadge === 'BYPASSED' && closedBadge === 'BYPASSED'
+      && resumedBadge === 'ACTIVE'
+
+    // A plugin that is ALSO in the chain still opens on its own: its solo copy,
+    // alone, with a live Apply and no IN CHAIN badge — the chain suspended
+    // underneath and its slot untouched.
+    await openOp('Inflator')
+    const soloCopyAlone = (await frames()) === 1
+      && (await page.locator('.win-frame').filter({ hasText: 'IN CHAIN' }).count()) === 0
+      && !(await page.locator('.win-frame .win-apply').isDisabled())
+      && (await chainBadge()) === 'BYPASSED'
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+    await openOp('Effect Chain')
+    const slotKept = (await rowNames()).join(',') === 'Cambridge Inflator,AirBoost' && (await chainBadge()) === 'BYPASSED'
+    await masterOn()
+
+    const order1 = await rowNames()
+    await chainWin.getByRole('button', { name: 'Move Cambridge Inflator later' }).dispatchEvent('click')
+    await page.waitForTimeout(300)
+    const order2 = await rowNames()
+
+    await chainWin.locator('.win-apply').dispatchEvent('click')
+    const toast = await page.getByText('Chain applied — AirBoost → Cambridge Inflator').waitFor({ timeout: 20000 })
+      .then(() => true, () => false)
+    await page.waitForTimeout(500)
+    // The whole chain is bypassed; each slot keeps its own ON.
+    const pills = await chainWin.locator('.pc-row .m-pill-text').allInnerTexts()
+    const masterPill = await chainWin.locator('.win-pill-m').first().getAttribute('aria-pressed')
+    const bypassedAfter = pills.length === 2 && pills.every(t => t === 'ON') && masterPill === 'false'
+      && (await page.locator('.chain-count').innerText()) === 'BYPASSED'
+      && await chainWin.locator('.win-apply').isDisabled()
+
+    // A plugin can take more than one slot; the slots are numbered, and a
+    // removed one's number is the next to be handed out again.
+    await addFromPicker('Inflator')
+    const twice = (await rowNames()).join(',')
+    await chainWin.getByRole('button', { name: 'Remove Cambridge Inflator 1 from the chain' }).dispatchEvent('click')
+    await page.waitForTimeout(300)
+    const afterRemove = (await rowNames()).join(',')
+    await addFromPicker('Inflator')
+    const readded = (await rowNames()).join(',')
+    const repeatsOk = twice === 'AirBoost,Cambridge Inflator 1,Cambridge Inflator 2' && afterRemove === 'AirBoost,Cambridge Inflator'
+      && readded === 'AirBoost,Cambridge Inflator 2,Cambridge Inflator 1'
+
+    // A plugin outside the chain takes the whole chain group off the screen.
+    await openOp('LA Vintage 2A')
+    const soloAfterGroup = await frames()
+    await openOp('Effect Chain')
+    await chainWin.getByRole('button', { name: 'Clear' }).dispatchEvent('click'); await page.waitForTimeout(300)
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+
+    const fresh = errors.slice(before)
+    const ok = soloWindows === 1 && chainReplaced && kept === 0 && groupWindows === 3 && memberApplyOff
+      && order1.join(',') === 'Cambridge Inflator,AirBoost' && order2.join(',') === 'AirBoost,Cambridge Inflator'
+      && toast && bypassedAfter && soloAfterGroup === 1 && pauseOk && soloCopyAlone && slotKept && repeatsOk
+      && fresh.length === 0
+    if (!ok) failures++
+    const why = [
+      soloWindows === 1 ? '' : `${soloWindows} solo plugin windows open at once; `,
+      chainReplaced ? '' : 'opening the chain did not replace the open plugin; ',
+      kept === 0 ? '' : `opening panels put ${kept} plugin(s) in the chain; `,
+      groupWindows === 3 ? '' : `chain + 2 plugins should be 3 windows, got ${groupWindows}; `,
+      memberApplyOff ? '' : 'a plugin in the chain still has a live Apply; ',
+      order1.join(',') === 'Cambridge Inflator,AirBoost' ? '' : `picker did not append in order (${order1.join(',')}); `,
+      order2.join(',') === 'AirBoost,Cambridge Inflator' ? '' : `move did not reorder (${order2.join(',')}); `,
+      toast ? '' : 'Apply did not report the chain in order; ',
+      bypassedAfter ? '' : `apply should bypass the chain and keep the slots on (slots ${pills.join(',')}, chain ON=${masterPill}); `,
+      soloAfterGroup === 1 ? '' : `a solo plugin left ${soloAfterGroup} windows open; `,
+      pauseOk ? '' : `chain should bypass for a solo plugin, stay bypassed after it closes and come back on its switch (${liveBefore} → ${pausedBadge} → ${closedBadge} → ${resumedBadge}); `,
+      soloCopyAlone ? '' : 'a plugin in the chain did not open on its own with its own Apply; ',
+      slotKept ? '' : 'opening the solo copy disturbed the chain slot; ',
+      repeatsOk ? '' : `repeat slots misnumbered (${twice} / ${afterRemove} / ${readded}); `,
+    ].join('')
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Plugin chain'.padEnd(16)} ${why}${fresh.join(' | ')}`)
   }
 
   /**
@@ -304,7 +445,7 @@ try {
       const row = panelRow()
       await row.locator('canvas').first().click(); await page.waitForTimeout(250)
       const download = page.waitForEvent('download', { timeout: 15000 }).catch(() => null)
-      // Scoped to the panel: the top bar has an Export button too, and an
+      // Scoped to the panel: other surfaces may carry an Export label, and an
       // unscoped locator is a strict-mode violation rather than a miss.
       await page.getByRole('dialog', { name: 'Files' })
         .getByRole('button', { name: 'Export' }).click()
@@ -331,6 +472,126 @@ try {
       exportOk ? '' : 'Export from the files panel did not deliver a file; ',
     ].join('')
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Files panel'.padEnd(16)} ${why}${fresh.join(' | ')}`)
+  }
+
+  /**
+   * A PHONE, held sideways, driven by touch. The desktop pass above never
+   * touches the screen, and every touch path in the editor is wiring a unit
+   * test cannot see: pointer capture on the waveform, the long-press timer,
+   * the ghost click it must swallow, and FloatingWindow turning into a sheet.
+   * Measured before these existed: a drag on the waveform selected nothing,
+   * and lifting a long press ran the menu item under the finger (Split).
+   */
+  {
+    const before = errors.length
+    const phone = await browser.newContext({
+      viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2,
+    })
+    const pp = await phone.newPage()
+    await pp.addInitScript(() => { window.showOpenFilePicker = undefined })
+    pp.on('pageerror', e => errors.push(`PAGEERROR (phone) ${e.message}`))
+    const why = []
+    try {
+      await pp.goto(URL_, { waitUntil: 'networkidle' })
+      const chooserP = pp.waitForEvent('filechooser')
+      await pp.getByText('Choose audio files').click()
+      await (await chooserP).setFiles(wav)
+      await pp.waitForTimeout(3000)
+
+      const cdp = await phone.newCDPSession(pp)
+      const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', {
+        type, touchPoints: pts.map(([x, y], id) => ({ x, y, id })),
+      })
+      const box = await pp.locator('canvas.waveform-canvas').boundingBox()
+      const y = box.y + box.height / 2
+      const at = f => box.x + box.width * f
+      const onCanvas = await pp.evaluate(([x, yy]) =>
+        document.elementFromPoint(x, yy)?.classList.contains('waveform-canvas'), [at(0.5), y])
+      if (!onCanvas) why.push('something covers the waveform on a phone; ')
+
+      // One-finger drag selects.
+      await touch('touchStart', [[at(0.2), y]])
+      for (let f = 0.25; f <= 0.5; f += 0.05) { await touch('touchMove', [[at(f), y]]); await pp.waitForTimeout(16) }
+      await touch('touchEnd', [])
+      await pp.waitForTimeout(200)
+      const selected = await pp.locator('.selection-bar').innerText()
+      if (!/\d:\d\d\.\d\d[\s\S]*→[\s\S]*\d:\d\d\.\d\d/.test(selected)) why.push('a touch drag did not select; ')
+
+      // Two-finger pinch zooms in: the scrollbar thumb appears once the whole
+      // file no longer fits, and the selection survives the second finger.
+      await touch('touchStart', [[at(0.45), y], [at(0.55), y]])
+      for (let k = 1; k <= 10; k++) {
+        await touch('touchMove', [[at(0.45 - k * 0.02), y], [at(0.55 + k * 0.02), y]])
+        await pp.waitForTimeout(16)
+      }
+      await touch('touchEnd', [])
+      await pp.waitForTimeout(200)
+      if (!(await pp.locator('.wf-thumb').count())) why.push('a pinch did not zoom; ')
+      if ((await pp.locator('.selection-bar').innerText()) !== selected) why.push('a pinch changed the selection; ')
+
+      // Long press opens the menu, and lifting must not run what is under the finger.
+      // Checked as "did a click reach the menu at all", not "is the menu still
+      // open": the item under the finger may be disabled, and a click on that
+      // closes nothing — which let this pass with the guard removed. Counted on
+      // `document`, beneath the window-level listener that swallows it.
+      const menu = pp.locator('[role=menu][aria-label="Waveform actions"]')
+      await pp.evaluate(() => {
+        window.__menuClicks = 0
+        document.addEventListener('click', e => { if (e.target.closest?.('[role=menu]')) window.__menuClicks++ }, true)
+      })
+      await touch('touchStart', [[at(0.5), y]])
+      await pp.waitForTimeout(700)
+      const opened = await menu.count()
+      await touch('touchEnd', [])
+      await pp.waitForTimeout(300)
+      const menuClicks = await pp.evaluate(() => window.__menuClicks)
+      if (!opened) why.push('long press did not open the menu; ')
+      else if (menuClicks || !(await menu.count())) why.push('lifting a long press clicked the menu item under the finger; ')
+      await pp.keyboard.press('Escape')
+
+      // A plugin opens as a full-screen sheet with Apply on screen.
+      await pp.keyboard.press('Control+k'); await pp.waitForTimeout(250)
+      await pp.keyboard.type('PHAT*SS'); await pp.waitForTimeout(400)
+      await pp.keyboard.press('Enter'); await pp.waitForTimeout(900)
+      const sheet = await pp.evaluate(() => {
+        const f = document.querySelector('.win-frame')
+        const a = f?.querySelector('.win-apply')?.getBoundingClientRect()
+        return { isSheet: !!f?.classList.contains('is-sheet'), applyOnScreen: !!a && a.bottom <= innerHeight && a.right <= innerWidth }
+      })
+      if (!sheet.isSheet) why.push('plugin did not open as a sheet; ')
+      if (!sheet.applyOnScreen) why.push('Apply is off screen in the sheet; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
+
+      // ⚠ A ZOOMED-OUT PAGE. On a mobile browser innerWidth / innerHeight are
+      // the VISUAL viewport and grow when the page zooms out (anything
+      // overflowing sideways does it): an iPhone 16 read 701 x 1518. Sized from
+      // them, EQ stayed a floating desktop window with Apply off the screen.
+      // The sheet has to follow the layout viewport, so the visual one is made
+      // to lie here and EQ (narrow enough to float on a wide screen) must
+      // still open as a sheet.
+      await pp.evaluate(() => {
+        Object.defineProperty(window, 'innerWidth', { get: () => 1400, configurable: true })
+        Object.defineProperty(window, 'innerHeight', { get: () => 900, configurable: true })
+      })
+      await pp.keyboard.press('Control+k'); await pp.waitForTimeout(250)
+      await pp.keyboard.type('EQ'); await pp.waitForTimeout(400)
+      await pp.keyboard.press('Enter'); await pp.waitForTimeout(900)
+      const zoomed = await pp.evaluate(() => {
+        const f = document.querySelector('.win-frame')
+        const a = f?.querySelector('.win-apply')?.getBoundingClientRect()
+        const de = document.documentElement
+        return { isSheet: !!f?.classList.contains('is-sheet'), applyOnScreen: !!a && a.bottom <= de.clientHeight && a.right <= de.clientWidth }
+      })
+      if (!zoomed.isSheet || !zoomed.applyOnScreen) why.push('with the page zoomed out a plugin floated with Apply off screen; ')
+    } catch (e) {
+      why.push(`threw: ${e.message.split('\n')[0]}; `)
+    } finally {
+      await phone.close()
+    }
+    const fresh = errors.slice(before)
+    const ok = why.length === 0 && fresh.length === 0
+    if (!ok) failures++
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Phone (touch)'.padEnd(16)} ${why.join('')}${fresh.join(' | ')}`)
   }
 } finally {
   await browser.close()

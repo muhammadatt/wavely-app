@@ -83,10 +83,12 @@ import {
  */
 import {
   MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor,
-  softCeiling, float32AtOrBelow, percentileOfChannels,
+  softCeiling, float32AtOrBelow, percentileOfChannels, peakOfChannels,
+  solveMakeupPlan,
 } from './dsp/makeupReference.js'
 import { makeVocalSatCurve, VOCAL_SAT_CURVE_LEAN_POSITIVE } from './dsp/vocalSatCurve.js'
-import { highShelf, BiquadCascade } from './dsp/biquad.js'
+import { makeQuarticSatCurve } from './dsp/quarticSatCurve.js'
+import { highShelf, highpass, lowpass, BiquadCascade } from './dsp/biquad.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
 export { MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor }
@@ -391,7 +393,7 @@ const SC_HPF_HZ = 80
  * divergence in the reference, not as a constraint on the model.
  */
 const SC_EMPH_HZ = 5975
-const SC_EMPH_MAX_DB = 21.0
+export const SC_EMPH_MAX_DB = 21.0
 /**
  * Rectifier smoothing. The T4 model supplies the real ballistics; this is only
  * meant to take the edge off the rectified waveform.
@@ -1179,6 +1181,15 @@ export const TUBE_CURVE_TANH = 'tanh'
 export const TUBE_CURVE_VOCALSAT = 'vocalsat'
 export const CELL_CURVE_GAINMOD = 'gainmod'
 export const CELL_CURVE_VOCALSAT = 'vocalsat'
+/**
+ * The LA-2A output stage identified from LALA's harmonic columns — see
+ * `dsp/quarticSatCurve.js`. A bench option at BOTH stages, not a default:
+ * nothing about it has been auditioned, and the references that identify its
+ * shape were captured at Peak Reduction 0, where the cell is idle. They measure
+ * the valve and say nothing about what the cell should do.
+ */
+export const TUBE_CURVE_QUARTIC = 'quartic'
+export const CELL_CURVE_QUARTIC = 'quartic'
 
 /**
  * The cell shaper's drive at full compression.
@@ -1233,7 +1244,25 @@ export const CELL_CURVE_VOCALSAT = 'vocalsat'
  * these two stages has to run with the makeup the patch will actually use.
  * At makeup 0 the valve is starved and every comparison tilts toward the cell.
  */
-export const CELL_CURVE_DRIVE_MAX = 1.5
+/**
+ * ⚠⚠ 1.5 -> 5 WITH THE CURVE CHANGE, AND IT IS A DIFFERENT QUANTITY NOW. 1.5 was
+ * auditioned against Tube Saturation's curve; 5 was auditioned against the
+ * quartic, on the bench, on the owner's own material. Drive means something
+ * different in each — on the split soft clipper it sets how far into the knee the
+ * cell runs, on the quartic it scales `c4` as d³ — so the number does NOT carry
+ * across and a stored value from one is not a voicing in the other. Same hazard
+ * `fetDrive` carries between the FET kernel's `tanh` and `poly`.
+ *
+ * ⚠ AT 5 THE QUARTIC IS NOT THE QUIET OPTION. Measured at PR 60 against the Tube
+ * Sat curve it replaced: THD 1.19 % against 0.83 % at -12 dBFS peak, 4.66 %
+ * against 3.26 % at -6, 5.49 % against 5.63 % at -1. It delivers MORE total
+ * distortion through most of the range and more second harmonic with it, and 13-19
+ * dB LESS third. That combination is the whole reason it was chosen; see the dev
+ * log entry "OptoSmooth's curve, revisited".
+ *
+ * ⚠ THE PREVIOUS VOICING IS RECOVERABLE IN ONE OBJECT — `LA2A_TUBESAT_PATCH`.
+ */
+export const CELL_CURVE_DRIVE_MAX = 5
 
 /**
  * Ceiling on that compensation, dB.
@@ -1312,10 +1341,30 @@ export const VALVE_CURVE_DRIVE = 0.5
  * same passage 3-4 dB and pays for it broadband; this knob moves it 11 dB and
  * is nearly free everywhere else.
  *
- * ⚠ 50 IS AUDITIONED, NOT SOLVED. The measurement says anything at or below 50
- * is equally free; 50 is where it was listened to and kept.
+ * ⚠ 50 WAS AUDITIONED, NOT SOLVED. The measurement said anything at or below 50
+ * was equally free; 50 is where it was listened to and kept.
+ *
+ * ⚠⚠ AND ALL OF THE ABOVE IS ABOUT TUBE SATURATION'S CURVE, WHICH NO LONGER
+ * SHIPS. The 11 dB of worst-case distortion that forced 100 → 50 is a property of
+ * that curve being driven into its knee by the shelf. On the quartic the same
+ * sweep costs about a sixth of it — THD at a 5 kHz probe, Emphasis 0 → 100, moves
+ * +1.79 dB against Tube Sat's +10.95 — most likely because a +12 dB boost pushes
+ * the quartic past `|u| = 1` into its LINEAR continuation, which makes no new
+ * harmonics, where the same boost drives a split soft clipper deeper into its
+ * bend. The constraint that set 50 does not bind here.
+ *
+ * ⚠ 85 IS AUDITIONED TOO, AND PAIRED WITH A CORNER MOVE. Measured on narration
+ * with sibilance, added nonlinear energy over the Emphasis-0 render, in
+ * 200 Hz-1 kHz / 1-3 kHz / 3-5 kHz:
+ *
+ *   50 @ 1800  (what shipped)   0.028 / 0.133 / 0.330 dB
+ *   85 @ 2300  (ships now)      0.027 / 0.116 / 0.301 dB
+ *   100 @ 1800                  0.093 / 0.289 / 0.452 dB
+ *
+ * So the new pair carries more depth at slightly LESS distortion than the one it
+ * replaces, which is why it is a change of both numbers and not of one.
  */
-export const EMPHASIS_DEFAULT = 50
+export const EMPHASIS_DEFAULT = 85
 
 /**
  * THE PRE-IMPORT KERNEL, AS A PATCH — the fitted `tanh` valve, the Moore-
@@ -1336,6 +1385,52 @@ export const LA2A_LEGACY_PATCH = Object.freeze({
   tubeCurve: TUBE_CURVE_TANH,
   cellCurve: CELL_CURVE_GAINMOD,
   emphasis: 0,
+})
+
+/**
+ * THE VOICING THAT SHIPPED BEFORE THE QUARTIC — Tube Saturation's curve at both
+ * stages, at the drives it was auditioned at.
+ *
+ * ⚠ THIS IS NOT `LA2A_LEGACY_PATCH` AND THE TWO MUST NOT BE CONFLATED. That one
+ * goes back further, to the fitted `tanh` and the gain modulation, and is the
+ * baseline five test files measure against. This one is the IMMEDIATELY previous
+ * ship: every render made between the Tube Sat import and the quartic sounds like
+ * this and like neither of the other two.
+ *
+ * ⚠ IT CARRIES THE DRIVES, NOT JUST THE CURVE NAMES, AND THAT IS THE WHOLE POINT.
+ * `CELL_CURVE_DRIVE_MAX` moved 1.5 -> 5 with the curve, so selecting `vocalsat` on
+ * the bench without also restoring 1.5 gives Tube Saturation's curve at three
+ * times the drive it was voiced at — a configuration that has never shipped and
+ * was never auditioned. A patch that restores half a voicing is the bug
+ * `test/dsp/fet1176Curve.test.js` was written to catch on the other plugin.
+ *
+ * Same reasoning as `FET_LEGACY_PATCH`: a measurement replaced an ear decision
+ * (here, an ear decision replaced an ear decision with a better-pedigreed shape),
+ * and what it replaced stays reachable so the change can be differenced rather
+ * than argued about.
+ */
+export const LA2A_TUBESAT_PATCH = Object.freeze({
+  tubeCurve: TUBE_CURVE_VOCALSAT,
+  cellCurve: CELL_CURVE_VOCALSAT,
+  cellCurveDriveMax: 1.5,
+  vocalSatCurveDrive: VALVE_CURVE_DRIVE,
+  /**
+   * ⚠ A LITERAL FOR THE SAME REASON THE CORNER BELOW IS. `EMPHASIS_DEFAULT` moved
+   * 50 → 85 with the curve; a patch restoring the Tube Sat voicing must carry the
+   * 50 that voicing was cut at, not whatever the default happens to be later.
+   */
+  emphasis: 50,
+  /**
+   * ⚠ A LITERAL, NOT `EMPHASIS_CORNER_HZ`, FOR THE SAME REASON `cellCurveDriveMax`
+   * ABOVE IS. A patch whose job is "the previous voicing, exactly" must not track
+   * a constant that can move — and the corner became a bench control precisely so
+   * it could. 1800 is what this voicing was cut at.
+   */
+  emphasisCornerHz: 1800,
+  /** Not in that voicing — the guard came later. See SIBILANCE_GUARD_DEFAULT. */
+  sibilanceGuard: 0,
+  /** Nor its valve half. See VALVE_GUARD_DEFAULT. */
+  valveGuard: 0,
 })
 
 /**
@@ -1407,10 +1502,135 @@ export const LA2A_LEGACY_PATCH = Object.freeze({
 export const EMPHASIS_MAX_DB = 12
 
 /** Corner of the emphasis shelf, Hz. Inherited from Tube Saturation. */
-export const EMPHASIS_CORNER_HZ = 1800
+/**
+ * Corner of the emphasis shelf, Hz.
+ *
+ * ⚠ 1800 CAME FROM TUBE SATURATION AND WAS REASONED, NOT FITTED. Its own note
+ * (`vocalSatProcessor.js`) gives the whole derivation: "low enough to cover the
+ * consonant and attack region a voice puts its edge in, high enough to leave the
+ * fundamental and the first formant out of it — the pair must not turn into a
+ * bass control, because whatever it boosts into the curve is what the curve
+ * distorts most." No measurement picked the number; two constraints bracketed it
+ * and 1800 sits between them. It arrived here by being ported wholesale with the
+ * rest of the pair, never re-derived for this stage.
+ *
+ * ⚠⚠ 2300 SERVES THAT SAME REASONING BETTER FOR NARRATION, which is why this is
+ * a re-reading rather than a rejection. A voice's SECOND formant runs to about
+ * 2000-2400 Hz, so an 1800 Hz corner is already inside the vowel body it was
+ * supposed to stay out of — the original rule says leave the fundamental and the
+ * FIRST formant out, and on speech that is not a high enough bar. Raising it to
+ * 2300 puts the shelf above most of F2 and leaves it on the consonant and
+ * sibilance edge the pair exists to shape. Auditioned, and measured: added
+ * nonlinear energy in 3-5 kHz over the Emphasis-0 render runs 0.54 / 0.34 / 0.20 /
+ * 0.06 / 0.02 dB at corners 1200 / 1500 / 1800 / 2400 / 3200.
+ *
+ * ⚠ IT NO LONGER MATCHES `vocalSatProcessor.js`'s CONSTANT OF THE SAME NAME, AND
+ * THAT IS DELIBERATE. The two are separate declarations on purpose: importing
+ * across would pull a module that calls `registerProcessor` at module scope into
+ * this worklet bundle, which is the duplicate-registration bug documented at the
+ * top of `dsp/satCurves.js`. Do not "fix" the divergence by wiring them together.
+ */
+export const EMPHASIS_CORNER_HZ = 2300
+
+/**
+ * Bench travel for the corner. Wide enough to reach under the voice's first
+ * formant at one end and past the grind band at the other; not a patch range.
+ */
+export const EMPHASIS_CORNER_MIN_HZ = 200
+export const EMPHASIS_CORNER_MAX_HZ = 8000
 
 /** Below this the pair is skipped outright rather than run flat. */
 export const EMPHASIS_EPSILON = 1e-4
+
+/**
+ * SIBILANCE GUARD — the cell shaper's drive, ducked while the input is mostly
+ * top end. 0-100 as depth; 100 ships; 0 is the previous kernel BIT FOR BIT
+ * (the detector does not even run).
+ *
+ * WHY. Loud sibilants distorted audibly with Harmonics on, and the culprit is
+ * the emphasis pair meeting the cell, both at once:
+ *
+ *   1. The +10.2 dB shelf at 2300 Hz gives a sibilant its FULL boost — its
+ *      energy is all above the corner — so the "s" is the most driven thing in
+ *      the file without being the loudest.
+ *   2. The cell's drive follows gain reduction (`d ∝ 1 − e^(−GR/τ)`), and a
+ *      loud "s" is what makes the gain reduction, so the curve switches on at
+ *      the instant the shelf is pushing the "s" into it.
+ *   3. The quartic is EVEN, and past |u| = 1 its continuations have unequal
+ *      slopes (1.13 / 0.87) — a rectifier on noise. What it makes of a
+ *      sibilant is envelope grit and difference tones, most of it BELOW 1 kHz,
+ *      where the de-emphasis (a shelf above 2300) does not reach and the "s"
+ *      itself has nothing to mask it.
+ *
+ * ⚠ LOWERING EMPHASIS FIXES IT AND WAS REJECTED BY EAR: it took the warmth
+ * with it — the pair is part of what the cell does to vowels, not only to
+ * sibilants. Hence this, which leaves the emphasis on everything that is not
+ * top-end-dominated.
+ *
+ * HOW. A 2nd-order 4 kHz high-pass on the mono side-chain input; the fraction
+ * of energy above it (4 ms mean square, both bands) through a smoothstep from
+ * RATIO_LO to RATIO_HI sets how far the cell's drive is pulled down (1 ms down,
+ * 30 ms back up). A ratio is level-independent, so a quiet "s" and a loud one
+ * read the same; it is the gain reduction that decides whether the cell is
+ * doing anything to duck. The cell curve with a lower drive is closer to the
+ * identity and nothing else — the linear path, the emphasis pair, the detector
+ * and the gain reduction are untouched, so compression is bit-identical and
+ * only the distortion on sibilants moves.
+ *
+ * MEASURED on synthetic vowels (/a/, /i/) + 4-10 kHz sibilant bursts, PR 70,
+ * auto makeup, Harmonics' added energy under 1 kHz re the segment: sibilants
+ * peaking −11 / −5 / −1 dBFS go −24.6 / −19.3 / −17.8 → −50.6 / −42.6 / −38.4
+ * dB; vowels −30.4 → −30.9. ⚠ THE CONSTANTS ARE REASONED, NOT AUDITIONED, and
+ * the material is synthetic. The valve stage is NOT guarded: it is idle-level
+ * colour (~5 % of the distortion) and does not follow gain reduction.
+ */
+export const SIBILANCE_GUARD_DEFAULT = 100
+/**
+ * VALVE GUARD, 0-100 (November 2026): the same guard on the OUTPUT VALVE. The
+ * cell guard took the cell's grit off an "s", but the valve is driven by level
+ * alone and its even quartic does to fricative noise what the cell's did —
+ * rumble under 1 kHz. On the owner's "Actual grownup" at PR 50 that was ALL of
+ * the "sh"'s grit (−35.3 dB re the "sh" under 1 kHz; the cell −60).
+ *
+ * It rides the cell guard's own scale — one detector, one timing, one corner
+ * (`sibilanceGuardHz`) — and fades the valve toward its linear term,
+ * `w + v·(f(w) − w)` with `v = 1 − valveGuard·(1 − scale)`, so a vowel (scale
+ * exactly 1) takes the shipping branch bit for bit. It needs the cell guard on
+ * (it reads its scale) and does nothing at 0.
+ */
+export const VALVE_GUARD_DEFAULT = 100
+/**
+ * BENCH (November 2026, owner's audition): SHAPER SPLIT, Hz (0 = off, ships).
+ * The (pre-emphasised) signal is split complementarily, `low = LP2(x)`,
+ * `high = x − low`, and only `low` goes through the cell and the valve; `high`
+ * takes the same gain, linear. An even curve multiplies the signal by itself,
+ * so hiss fed to it makes difference tones from DC up — the grit under an "s"
+ * that the de-emphasis cannot reach; above the split nothing can make them,
+ * detected or not. Vowel warmth (harmonics of what is below the split) stays.
+ * Linear, the two halves sum back exactly. Only on the cell-curve path (the
+ * shipping quartic); with `cellCurve: 'gainmod'` it does nothing.
+ */
+export const SHAPER_SPLIT_HZ_MIN = 250
+export const SHAPER_SPLIT_HZ_MAX = 12000
+/**
+ * The guard's detector corner. SHIPS AT 2500 (owner, November 2026; was 4000):
+ * an "sh" is darker than an "s" and 4 kHz barely heard it.
+ */
+export const SIB_GUARD_HZ = 2500
+/**
+ * BENCH range for the guard's detector corner (`sibilanceGuardHz`). An "sh" is
+ * darker than an "s": on the owner's "Actual grownup" the "sh" puts only 0.25
+ * of its energy above 4 kHz (the guard barely starts) against 0.55 above
+ * 2.5 kHz, where vowels on four clips stay at or under 0.19 — under the 0.25 at
+ * which the guard begins. At 2 kHz vowels reach 0.31.
+ */
+export const SIB_GUARD_HZ_MIN = 1500
+export const SIB_GUARD_HZ_MAX = 8000
+export const SIB_GUARD_RATIO_LO = 0.25
+export const SIB_GUARD_RATIO_HI = 0.6
+const SIB_GUARD_ENV_MS = 4
+const SIB_GUARD_ATTACK_MS = 1
+const SIB_GUARD_RELEASE_MS = 30
 
 const COMPRESS_KNEE_DB = 5
 const LIMIT_KNEE_DB = 6
@@ -1525,8 +1745,30 @@ export const LA2A_KERNEL_DEFAULTS = {
    * preset chain runs its own compression stages server-side; these are the
    * client-side plugin's defaults. Nothing in `presets.js` changes.
    */
-  tubeCurve: TUBE_CURVE_VOCALSAT,
-  cellCurve: CELL_CURVE_VOCALSAT,
+  /**
+   * ⚠⚠ THE SHIPPING CURVE IS NOW THE QUARTIC AT BOTH STAGES, AND EVERY EARLIER
+   * RENDER SOUNDS DIFFERENT. Chosen by ear over three auditions — Tube Sat (what
+   * shipped), the quartic, and the fully measurement-backed GAIN MOD + quartic —
+   * and the three verdicts ranked in exact order of ODD-harmonic share: 23 %,
+   * 1 %, 99 % at -6 dBFS peak. Total distortion ordered the other way, so "it is
+   * cleaner" is not the explanation; the rejected configuration was the cleanest
+   * of the three by a factor of two.
+   *
+   * ⚠ THE SHAPE IS IDENTIFIED, THE PLACEMENT AT THE CELL IS NOT. Both reference
+   * sweeps behind the quartic were captured at Gain 0 / Peak Reduction 0 — cell
+   * idle — so they measure the OUTPUT STAGE. At the valve this is a reference
+   * curve in the stage the reference measured. At the cell it is an ear choice
+   * wearing a borrowed shape, in the same category as the Tube Sat curve it
+   * replaces. See `dsp/quarticSatCurve.js`.
+   *
+   * ⚠ AND IT DIVERGES FROM THE HARDWARE PAPER DELIBERATELY. Moore's six units are
+   * ODD-dominant under compression (H3-H2 +16 to +44 dB) and this is not (-22).
+   * The configuration that does reproduce that band was built, auditioned and
+   * rejected as "a lot of colour, not a neutral sound". `cellCurve: 'gainmod'`
+   * still selects it.
+   */
+  tubeCurve: TUBE_CURVE_QUARTIC,
+  cellCurve: CELL_CURVE_QUARTIC,
   /** Cell shaper drive at full compression. Auditioned — see the constant. */
   cellCurveDriveMax: CELL_CURVE_DRIVE_MAX,
   /** Valve stage drive. Auditioned, and NOT the derived reconstruction. */
@@ -1544,6 +1786,14 @@ export const LA2A_KERNEL_DEFAULTS = {
    * inert on `tanh` and on the gain modulation; see EMPHASIS_DEFAULT.
    */
   emphasis: EMPHASIS_DEFAULT,
+  /** Cell-drive duck on sibilance, 0-100; 0 = off. See SIBILANCE_GUARD_DEFAULT. */
+  sibilanceGuard: SIBILANCE_GUARD_DEFAULT,
+  /** BENCH: the guard detector's high-pass corner, Hz. See SIB_GUARD_HZ_MIN. */
+  sibilanceGuardHz: SIB_GUARD_HZ,
+  /** Valve-drive fade on sibilance, 0-100; 0 = off. See VALVE_GUARD_DEFAULT. */
+  valveGuard: VALVE_GUARD_DEFAULT,
+  /** BENCH: shape only below this, Hz; 0 = off. See SHAPER_SPLIT_HZ_MIN. */
+  shaperSplitHz: 0,
 }
 
 /**
@@ -1658,6 +1908,15 @@ export class LA2AKernel {
     // fast phase to the phosphorescent one (0 = just released, 1 = deep tail).
     this.gr = 0
     this.relPhase = 0
+    // Sibilance guard: detector high-pass (DF1), the two mean squares, the
+    // smoothed drive scale. See SIBILANCE_GUARD_DEFAULT.
+    this.sibHz = SIB_GUARD_HZ
+    this.sibHp = highpass(sampleRate, SIB_GUARD_HZ)
+    this.sibEnvCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_ENV_MS / 1000)))
+    this.sibAtkCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_ATTACK_MS / 1000)))
+    this.sibRelCoef = 1 - Math.exp(-1 / (sampleRate * (SIB_GUARD_RELEASE_MS / 1000)))
+    this.sibDepth = 0
+    this.resetSibState()
 
     // Per-channel DC blocker state (grown on demand)
     this.dcX = []
@@ -1798,6 +2057,16 @@ export class LA2AKernel {
     this.preGainDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     this.makeupDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     this.cellDriveDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
+    /** The valve guard's weight per sample (1 = the valve whole), on the cell drive's timebase. */
+    this.valveMixScratch = new Float32Array(128)
+    this.valveMixDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
+    this.seamValve = 1
+    /** Shaper split (see SHAPER_SPLIT_HZ_MIN): coefficients and per-channel DF2T state. */
+    this.splitHz = 0
+    this.splitOs = null
+    this.splitBase = null
+    this.splitOsZ = []
+    this.splitBaseZ = []
 
     /**
      * LIVE AUTO-MAKEUP TRACKER — running extrema, O(1) per sample.
@@ -1887,8 +2156,8 @@ export class LA2AKernel {
 
     let g = Infinity
     if (this.applyTube) {
-      const inv = this.tubeCurveMode === TUBE_CURVE_VOCALSAT
-        ? (y) => this.vsCurve.inverse(y)
+      const inv = this.tubeCurveMode !== TUBE_CURVE_TANH
+        ? (y) => this.tubeSatCurve.inverse(y)
         : (y) => {
           const a = y * this.tubeNorm + this.tanhBias
           // The shaper saturates below the target: no makeup reaches it.
@@ -1906,8 +2175,17 @@ export class LA2AKernel {
     return 20 * Math.log10(g)
   }
 
+  resetSibState() {
+    this.sibX1 = 0; this.sibX2 = 0; this.sibY1 = 0; this.sibY2 = 0
+    this.sibEh = 0
+    this.sibEa = 0
+    this.sibGain = 1
+    this.sibLaLine?.buffer.fill(1)
+  }
+
   /** Clear every feedback path in the cell and the tube stage. */
   resetState() {
+    this.resetSibState()
     this.hpfLp = 0
     this.shelfLp = 0
     this.env = 0
@@ -1918,6 +2196,10 @@ export class LA2AKernel {
     this.seamPreG = 1
     this.seamMakeup = 1
     this.seamDrive = 0
+    this.seamValve = 1
+    this.valveMixDelay.reset()
+    for (const z of this.splitOsZ) z.fill(0)
+    for (const z of this.splitBaseZ) z.fill(0)
     this.dcX = this.dcX.map(() => 0)
     this.dcY = this.dcY.map(() => 0)
     for (const f of this.preEmph) f?.reset()
@@ -1974,7 +2256,38 @@ export class LA2AKernel {
     // Tube stage. Drive can go sub-unity (slope is normalized back to 1
     // below): at the default amount a -6 dBFS peak lands around H3 ≈ -40 dBc
     // — tube warmth at nominal level, not overdrive. Max reaches ~-22 dBc.
-    this.applyTube = p.tube !== false
+    /**
+     * ANALOG MODE — the product-facing opt-out from every nonlinearity in this
+     * plugin, and the ONLY control here that is a patch key rather than a bench
+     * one.
+     *
+     * ⚠ IT GATES ALL THREE MECHANISMS, NOT ONE. The output valve, the cell
+     * shaper and the gain modulation are alternatives to each other, so switching
+     * off whichever happens to be selected is not the same as switching off
+     * "the distortion". Off means the wet path is `driven[i] * gain[i]` — a pure
+     * time-varying gain — whatever the curve selectors say.
+     *
+     * ⚠ IT IS NOT A BYPASS, AND THE DIFFERENCE IS THE WHOLE FEATURE. The
+     * detector, the taper, R37, the ballistics and the gain envelope are
+     * untouched, so gain reduction is bit-identical with it on or off. What
+     * changes is only whether that envelope is delivered through a curve. A user
+     * turning it off keeps the compressor they chose and loses the harmonics.
+     *
+     * ⚠⚠ THE EMPHASIS PAIR IS GATED TOO, AND THE FIRST VERSION OF THIS NOTE
+     * ARGUED IT DID NOT NEED TO BE. The argument was that pre-emphasis, a linear
+     * stage, and de-emphasis is an exact identity — measured at 6e-8 — so the
+     * pair would go inert by construction. That measurement was taken at Peak
+     * Reduction 0, where the cell's gain is CONSTANT. A gain that MOVES does not
+     * commute with a filter, so under compression the pair is not an identity:
+     * with the nonlinearity off and the cell working, Emphasis 100 still moved
+     * the render by 2.45e-4. A test caught it.
+     *
+     * So it is switched off explicitly. The pair exists only to shape what the
+     * nonlinearity sees; with no nonlinearity it is two shelves either side of a
+     * gain, which is a colour the user switched off asking for.
+     */
+    this.analog = p.analog !== false
+    this.applyTube = this.analog && p.tube !== false
     this.cellMod = Number.isFinite(p.cellMod) ? Math.max(0, p.cellMod) : 1
     /**
      * ⚠ THE FOUR CONSTANTS BELOW ARE OVERRIDABLE, AND THE OVERRIDES ARE A BENCH
@@ -2042,11 +2355,21 @@ export class LA2AKernel {
      * while `tanh`/`gainmod` were the defaults, and leaving it would have
      * meant a typo or a stale param message silently selecting the OLD model —
      * a fallback that lands anywhere but the shipping patch is not a fallback.
+     *
+     * ⚠⚠ REWRITTEN AGAIN WHEN THE QUARTIC SHIPPED, AND A TEST IS WHY IT WAS NOT
+     * MISSED. Changing `LA2A_KERNEL_DEFAULTS` is not enough: the fallback arm is
+     * a SEPARATE statement of what ships, and after the default moved to
+     * `quartic` this still landed a typo on `vocalsat` — the previous voicing,
+     * silently. Every named mode is now matched explicitly and the DEFAULT is
+     * the else-branch, so the next curve change breaks the list rather than the
+     * fallback. `la2aQuarticCurve.test.js` pins it.
      */
-    this.tubeCurveMode = p.tubeCurve === TUBE_CURVE_TANH
-      ? TUBE_CURVE_TANH : TUBE_CURVE_VOCALSAT
-    this.cellCurveMode = p.cellCurve === CELL_CURVE_GAINMOD
-      ? CELL_CURVE_GAINMOD : CELL_CURVE_VOCALSAT
+    this.tubeCurveMode = p.tubeCurve === TUBE_CURVE_TANH ? TUBE_CURVE_TANH
+      : p.tubeCurve === TUBE_CURVE_VOCALSAT ? TUBE_CURVE_VOCALSAT
+        : TUBE_CURVE_QUARTIC
+    this.cellCurveMode = p.cellCurve === CELL_CURVE_GAINMOD ? CELL_CURVE_GAINMOD
+      : p.cellCurve === CELL_CURVE_VOCALSAT ? CELL_CURVE_VOCALSAT
+        : CELL_CURVE_QUARTIC
     const curveOverrides = {}
     if (Number.isFinite(p.vocalSatCurveDrive) && p.vocalSatCurveDrive > 0) {
       curveOverrides.curveDrive = p.vocalSatCurveDrive
@@ -2054,7 +2377,33 @@ export class LA2AKernel {
     if (typeof p.vocalSatLeanPositive === 'boolean') {
       curveOverrides.leanPositive = p.vocalSatLeanPositive
     }
-    this.vsCurve = makeVocalSatCurve(curveOverrides)
+    /**
+     * ⚠ ONE CURVE OBJECT PER STAGE, WHERE THERE USED TO BE ONE FOR BOTH, and
+     * the old arrangement was not a shortcut — it worked because the cell only
+     * ever calls `transferAt` (its drive arrives per sample, overriding the
+     * object's own) and the valve only ever calls `transfer`/`inverse`. So a
+     * single object served two stages with two different drives.
+     *
+     * That stops being true the moment the two stages can hold DIFFERENT
+     * CURVES, which is the whole point of the quartic being selectable at
+     * either. Built separately, selected separately.
+     *
+     * ⚠ AT THE SHIPPING PATCH BOTH ARE `makeVocalSatCurve(curveOverrides)` WITH
+     * THE SAME OVERRIDES, so this is two identical pure-function objects where
+     * there was one, and the render is bit-identical. `test/dsp/la2aQuarticCurve.test.js`
+     * pins that rather than leaving it as a claim.
+     */
+    const buildSat = (mode, driveOverride) => (
+      mode === TUBE_CURVE_QUARTIC || mode === CELL_CURVE_QUARTIC
+        ? makeQuarticSatCurve({
+          drive: driveOverride,
+          leanPositive: typeof p.vocalSatLeanPositive === 'boolean'
+            ? p.vocalSatLeanPositive : undefined,
+        })
+        : makeVocalSatCurve(curveOverrides)
+    )
+    this.tubeSatCurve = buildSat(this.tubeCurveMode, curveOverrides.curveDrive)
+    this.cellSatCurve = buildSat(this.cellCurveMode, curveOverrides.curveDrive)
     this.cellCurveDriveMax = Number.isFinite(p.cellCurveDriveMax)
       && p.cellCurveDriveMax >= 0 ? p.cellCurveDriveMax : CELL_CURVE_DRIVE_MAX
     /**
@@ -2067,7 +2416,7 @@ export class LA2AKernel {
     this.emphasisDb = (Math.min(Math.max(p.emphasis ?? 0, 0), 100) / 100)
       * EMPHASIS_MAX_DB
     const emphWas = this.emphasisActive
-    this.emphasisActive = this.emphasisDb > EMPHASIS_EPSILON
+    this.emphasisActive = this.analog && this.emphasisDb > EMPHASIS_EPSILON
     /**
      * ⚠ THE PAIR'S FILTERS ARE CLEARED WHEN IT SWITCHES OFF, AND THEY WERE NOT.
      * Turning Emphasis to 0 stops feeding the three biquads but does not empty
@@ -2086,12 +2435,42 @@ export class LA2AKernel {
       for (const f of this.deEmph) f?.reset()
       for (const f of this.trkEmph) f?.reset()
     }
+    /**
+     * The shelf corner, exposed because the knob it belongs to cannot separate
+     * the two things it does.
+     *
+     * ⚠ WHY THIS IS A CONTROL AT ALL. Measured on a multitone, Emphasis 100 adds
+     * 1.2-1.6 dB of distortion at peak levels and TRIPLES the share sitting
+     * above 5 kHz, while doing nothing at -12 dBFS. Auditioned, that reads as
+     * "fuller and fatter" AND as "grinds more at the peaks" — one mechanism, two
+     * descriptions, so no position of the depth knob buys one without the other.
+     * ⚠⚠ THE CORNER IS A SECOND AXIS AND IT DOES NOT SEPARATE THEM EITHER — this
+     * control was added on the prediction that it would, and the prediction was
+     * wrong. A HIGH shelf with a LOWER corner boosts MORE of the spectrum, not
+     * less, so lowering it raises total distortion AND the high-frequency share
+     * together: at -6 dBFS peak, Emphasis 100 goes -23.70 dB / 2.2 % above 5 kHz
+     * at the stock 1800 Hz, and -21.97 dB / 3.7 % at 600. It is kept because it
+     * is a real axis that is now measured rather than guessed at, not because it
+     * buys the separation it was reached for.
+     *
+     * ⚠ IT IS A BENCH CONTROL AND NOT A PATCH KEY, like everything else in
+     * `la2aTuning.js` — see that file's header. Nothing serialises it.
+     *
+     * ⚠ CLAMPED WELL UNDER NYQUIST. `highShelf` is a bilinear-transform biquad,
+     * so a corner approaching Nyquist warps into nonsense rather than failing
+     * loudly, and the bench can write any number here live onto a running
+     * worklet.
+     */
+    const corner = Number.isFinite(p.emphasisCornerHz) && p.emphasisCornerHz > 0
+      ? clamp(p.emphasisCornerHz, EMPHASIS_CORNER_MIN_HZ,
+        Math.min(EMPHASIS_CORNER_MAX_HZ, this.sampleRate * 0.45))
+      : EMPHASIS_CORNER_HZ
     if (this.emphasisActive) {
       this.preSections = [highShelf(
-        this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, this.emphasisDb,
+        this.sampleRate, corner, Math.SQRT1_2, this.emphasisDb,
       )]
       this.deSections = [highShelf(
-        this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, -this.emphasisDb,
+        this.sampleRate, corner, Math.SQRT1_2, -this.emphasisDb,
       )]
       for (const f of this.preEmph) f?.setSections(this.preSections)
       for (const f of this.deEmph) f?.setSections(this.deSections)
@@ -2108,11 +2487,49 @@ export class LA2AKernel {
      * bypass it always was; this is the selector honouring "alternatives, not a
      * stack" in one place rather than at every call site.
      */
-    this.cellModActive = this.cellCurveMode === CELL_CURVE_GAINMOD
+    this.cellModActive = this.analog
+      && this.cellCurveMode === CELL_CURVE_GAINMOD
       && this.cellMod > 0
     const shaperWas = this.cellShaperActive
-    this.cellShaperActive = this.cellCurveMode === CELL_CURVE_VOCALSAT
+    /**
+     * ⚠ THE ANALOG GATE GOES THROUGH THIS EXPRESSION DELIBERATELY, so turning
+     * the mode off takes the same path as turning the shaper off any other way —
+     * including the seam reset below, which exists because the shaper's three
+     * carried values go stale the moment it stops running. A gate that bypassed
+     * at the call site instead would skip that reset and click on the way back.
+     */
+    this.cellShaperActive = this.analog
+      && this.cellCurveMode !== CELL_CURVE_GAINMOD
       && this.cellCurveDriveMax > 0
+    /**
+     * Sibilance guard depth, 0-1. Only meaningful while the cell shaper runs;
+     * re-entering from off starts from a clean detector (unity scale) rather
+     * than from whatever it last held. See SIBILANCE_GUARD_DEFAULT.
+     */
+    const sibWas = this.sibDepth > 0
+    this.sibDepth = this.cellShaperActive
+      ? clamp(Number.isFinite(p.sibilanceGuard) ? p.sibilanceGuard : 0, 0, 100) / 100
+      : 0
+    const sibHz = Number.isFinite(p.sibilanceGuardHz)
+      ? clamp(p.sibilanceGuardHz, SIB_GUARD_HZ_MIN, SIB_GUARD_HZ_MAX) : SIB_GUARD_HZ
+    if (sibHz !== this.sibHz) {
+      this.sibHz = sibHz
+      this.sibHp = highpass(this.sampleRate, Math.min(sibHz, this.sampleRate * 0.45))
+    }
+    if (!sibWas && this.sibDepth > 0) this.resetSibState()
+    const splitHz = Number.isFinite(p.shaperSplitHz) && p.shaperSplitHz > 0
+      ? clamp(p.shaperSplitHz, SHAPER_SPLIT_HZ_MIN, SHAPER_SPLIT_HZ_MAX) : 0
+    if (splitHz !== this.splitHz) {
+      this.splitHz = splitHz
+      this.splitOs = splitHz ? lowpass(this.sampleRate * OVERSAMPLE_FACTOR, splitHz) : null
+      this.splitBase = splitHz ? lowpass(this.sampleRate, Math.min(splitHz, this.sampleRate * 0.45)) : null
+      for (const z of this.splitOsZ) z.fill(0)
+      for (const z of this.splitBaseZ) z.fill(0)
+    }
+    // The valve half reads the cell guard's scale, so it needs it running.
+    this.valveGuard = this.sibDepth > 0 && this.applyTube
+      ? clamp(Number.isFinite(p.valveGuard) ? p.valveGuard : 0, 0, 100) / 100
+      : 0
     /**
      * ⚠ THE SHAPER'S THREE SEAM VALUES ONLY ADVANCE WHILE IT IS RUNNING, so
      * they go stale the moment it is switched off. Switching back on then
@@ -2129,9 +2546,11 @@ export class LA2AKernel {
       this.seamPreG = 1
       this.seamMakeup = 1
       this.seamDrive = 0
+      this.seamValve = 1
       this.preGainDelay.reset()
       this.makeupDelay.reset()
       this.cellDriveDelay.reset()
+      this.valveMixDelay.reset()
     }
     /**
      * A one-pole on the RECTIFIER, ahead of `rect / env`. 0 is off and is what
@@ -2189,8 +2608,14 @@ export class LA2AKernel {
    * @param {Float32Array[]} inputChannels  - per-channel input (any count)
    * @param {Float32Array[]} outputChannels - per-channel output to fill
    * @param {number} n                      - samples in this block
+   * @param {Float32Array} [sidechain]      - optional external detector signal,
+   *   mono, in the input's units. Replaces the mono mix of the input as what the
+   *   detector hears; the kernel's own HPF and R37 emphasis still run on it, and
+   *   the audio path is untouched. Absent, the kernel is bit-identical to what
+   *   it was before this argument existed. VoxPressor feeds its voice detector
+   *   through here (dsp/voiceDetector.js).
    */
-  process(inputChannels, outputChannels, n) {
+  process(inputChannels, outputChannels, n, sidechain) {
     // A non-finite value anywhere in the cell's state is unrecoverable on its
     // own: env, gr and relPhase all feed back into themselves, so one NaN makes
     // every future block NaN and the effect goes silent for good.
@@ -2215,6 +2640,7 @@ export class LA2AKernel {
       this.cellMakeupScratch = new Float32Array(n)
       this.cellDriveScratch = new Float32Array(n)
       this.cellDriveRawScratch = new Float32Array(n)
+      this.valveMixScratch = new Float32Array(n)
     }
     if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
     const gain = this.gainScratch
@@ -2223,6 +2649,8 @@ export class LA2AKernel {
     const cellMakeup = this.cellMakeupScratch
     const cellDrive = this.cellDriveScratch
     const cellDriveRaw = this.cellDriveRawScratch
+    const valveMix = this.valveMixScratch
+    const valveGuard = this.valveGuard
     const chScale = 1 / nIn
 
     // The tracker's target: the loudest input sample heard so far.
@@ -2236,6 +2664,24 @@ export class LA2AKernel {
     }
 
     let { hpfLp, shelfLp, env, gr, relPhase, rectLp } = this
+    const sibDepth = this.sibDepth
+    const sh = this.sibHp
+    /**
+     * ⚠ THE SCALE IS DELAYED BY THE LOOKAHEAD, THE COMPRESSION IS NOT. The guard
+     * reads the side-chain input, but the sample its scale multiplies is the
+     * AUDIO, which lookahead holds back; undelayed, it ducked the vowel before a
+     * sibilant and let go before the sibilant's tail. Primed at 1 so a fresh
+     * line does not mute the cell for its first `lookaheadSamples`.
+     */
+    let sibLa = null
+    if (sibDepth > 0 && this.lookaheadSamples > 0) {
+      if (!this.sibLaLine || this.sibLaLine.length !== this.lookaheadSamples) {
+        this.sibLaLine = new DelayLine(this.lookaheadSamples)
+        this.sibLaLine.buffer.fill(1)
+      }
+      sibLa = this.sibLaLine
+    }
+    let { sibX1: sX1, sibX2: sX2, sibY1: sY1, sibY2: sY2, sibEh: sEh, sibEa: sEa, sibGain: sGain } = this
 
     // Seeded on the first block; advanced once per sample HERE rather than
     // per channel, because this envelope loop is already the shared one.
@@ -2243,14 +2689,44 @@ export class LA2AKernel {
     let makeupLinSmoothed = this.makeupLinSmoothed
 
     for (let i = 0; i < n; i++) {
-      // Mono sidechain tap
-      let x = inputChannels[0][i]
-      for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
-      x *= chScale
+      // Mono sidechain tap, or the caller's detector signal
+      let x
+      if (sidechain) {
+        x = sidechain[i]
+      } else {
+        x = inputChannels[0][i]
+        for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
+        x *= chScale
+      }
 
       // Sidechain frequency mapping: 80 Hz HPF, then the R37 emphasis filter.
       hpfLp += (x - hpfLp) * this.hpfLpCoef
       const hp = x - hpfLp
+
+      if (sibDepth > 0) {
+        /**
+         * ⚠ THE GUARD HEARS THE AUDIO, NOT THE CALLER'S SIDECHAIN. It protects
+         * the shapers, which see the audio; a detector signal is shaped to
+         * steer the COMPRESSION (VoxPressor's Body tap shelves sibilance down
+         * 9 dB), so read through it the guard missed "s" sounds the shapers
+         * still got. Without a sidechain `x` IS the mono audio.
+         */
+        let a = x
+        if (sidechain) {
+          a = inputChannels[0][i]
+          for (let ch = 1; ch < nIn; ch++) a += inputChannels[ch][i]
+          a *= chScale
+        }
+        const h = sh.b0 * a + sh.b1 * sX1 + sh.b2 * sX2 - sh.a1 * sY1 - sh.a2 * sY2
+        sX2 = sX1; sX1 = a; sY2 = sY1; sY1 = h
+        sEh += (h * h - sEh) * this.sibEnvCoef
+        sEa += (a * a - sEa) * this.sibEnvCoef
+        const t = sEa > 1e-12
+          ? clamp((sEh / sEa - SIB_GUARD_RATIO_LO) / (SIB_GUARD_RATIO_HI - SIB_GUARD_RATIO_LO), 0, 1)
+          : 0
+        const target = 1 - sibDepth * t * t * (3 - 2 * t)
+        sGain += (target - sGain) * (target < sGain ? this.sibAtkCoef : this.sibRelCoef)
+      }
       // Split at the corner and attenuate only the low half. Run
       // unconditionally rather than skipped at r37 100: it is algebraically
       // the identity there (lowGain 1 sums the two halves back to hp), and
@@ -2392,9 +2868,15 @@ export class LA2AKernel {
       if (this.cellShaperActive) {
         // Attenuation-compensated, bounded — see CELL_CURVE_DRIVE_MAX.
         const comp = preG > 0 ? Math.min(1 / preG, this.cellCompMax) : 1
+        const sg = sibDepth > 0 ? (sibLa ? sibLa.push(sGain) : sGain) : 1
         const d = this.cellCurveDriveMax * comp
           * (1 - Math.exp(-grNow / this.cellModTauDb))
+          * sg
         cellDriveRaw[i] = d
+        if (valveGuard > 0) {
+          const vm = 1 - valveGuard * (1 - sg)
+          valveMix[i] = this.oversampleOn ? this.valveMixDelay.push(vm) : vm
+        }
         if (this.oversampleOn) {
           cellPreG[i] = this.preGainDelay.push(preG)
           cellMakeup[i] = this.makeupDelay.push(makeupLinSmoothed)
@@ -2410,6 +2892,10 @@ export class LA2AKernel {
 
     this.rectLp = rectLp
     this.hpfLp = hpfLp
+    if (sibDepth > 0) {
+      this.sibX1 = sX1; this.sibX2 = sX2; this.sibY1 = sY1; this.sibY2 = sY2
+      this.sibEh = sEh; this.sibEa = sEa; this.sibGain = sGain
+    }
     this.shelfLp = shelfLp
     this.env = env
     this.gr = gr
@@ -2540,6 +3026,7 @@ export class LA2AKernel {
     const seamPreG = this.seamPreG
     const seamMakeup = this.seamMakeup
     const seamDrive = this.seamDrive
+    const seamValve = this.seamValve
     const wet = this.wetScratch
 
     for (let ch = 0; ch < nOut; ch++) {
@@ -2583,7 +3070,7 @@ export class LA2AKernel {
       const trk = this.trkEmphScratch
       for (let i = 0; i < n; i++) {
         let v = driven[i] * preGain[i]
-        if (this.cellShaperActive) v = this.vsCurve.transferAt(v, cellDriveRaw[i])
+        if (this.cellShaperActive) v = this.cellSatCurve.transferAt(v, cellDriveRaw[i])
         trk[i] = v
       }
       if (this.emphasisActive) this.trkEmph[ch].process(trk, trk, n, 0)
@@ -2596,6 +3083,7 @@ export class LA2AKernel {
       if (!this.oversampleOn) {
         this._processChannelBaseRate(
           driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive,
+          valveGuard > 0 ? valveMix : null,
         )
         continue
       }
@@ -2630,28 +3118,61 @@ export class LA2AKernel {
         let pCur = seamPreG
         let mCur = seamMakeup
         let dCur = seamDrive
+        let vCur = seamValve
+        const sp = this.splitOs
+        let sz = null
+        if (sp) {
+          while (this.splitOsZ.length <= ch) this.splitOsZ.push(new Float64Array(2))
+          sz = this.splitOsZ[ch]
+        }
+        let z1 = sz ? sz[0] : 0
+        let z2 = sz ? sz[1] : 0
         for (let i = 0; i < n; i++) {
           const pNext = cellPreG[i]
           const mNext = cellMakeup[i]
           const dNext = cellDrive[i]
+          const vNext = valveGuard > 0 ? valveMix[i] : 1
           const pStep = (pNext - pCur) * invL
           const mStep = (mNext - mCur) * invL
           const dStep = (dNext - dCur) * invL
+          const vStep = (vNext - vCur) * invL
           for (let j = 0; j < L; j++) {
             const k = i * L + j
-            let w = hi[k] * (pCur + pStep * j)
-            w = this.vsCurve.transferAt(w, dCur + dStep * j)
-            w *= mCur + mStep * j
-            if (this.applyTube) w = this.shapeTube(w)
+            const pg = pCur + pStep * j
+            const mg = mCur + mStep * j
+            let x = hi[k]
+            let high = 0
+            if (sp) {
+              // Complementary split: only the low half meets the curves.
+              const lo = sp.b0 * x + z1
+              z1 = sp.b1 * x - sp.a1 * lo + z2
+              z2 = sp.b2 * x - sp.a2 * lo
+              high = x - lo
+              x = lo
+            }
+            let w = x * pg
+            w = this.cellSatCurve.transferAt(w, dCur + dStep * j)
+            w *= mg
+            if (this.applyTube) {
+              // The valve guard fades toward the linear term; at 1 (any vowel)
+              // this is the shipping branch exactly.
+              const v = vCur + vStep * j
+              const s = this.shapeTube(w)
+              w = v >= 1 ? s : w + v * (s - w)
+            }
+            if (sp) w += high * pg * mg
             hi[k] = w
           }
           pCur = pNext
           mCur = mNext
           dCur = dNext
+          vCur = vNext
         }
+        if (sz) { sz[0] = z1; sz[1] = z2 }
         this.seamPreG = pCur
         this.seamMakeup = mCur
         this.seamDrive = dCur
+        this.seamValve = vCur
       } else {
         for (let i = 0; i < n; i++) {
           const gNext = gain[i]
@@ -2660,8 +3181,8 @@ export class LA2AKernel {
             const k = i * L + j
             let w = hi[k] * (gCur + step * j)
             if (this.applyTube) {
-              w = this.tubeCurveMode === TUBE_CURVE_VOCALSAT
-                ? this.vsCurve.transfer(w)
+              w = this.tubeCurveMode !== TUBE_CURVE_TANH
+                ? this.tubeSatCurve.transfer(w)
                 : (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
             }
             hi[k] = w
@@ -2746,8 +3267,8 @@ export class LA2AKernel {
    * the arithmetic it had. Everywhere else the call is nowhere near hot.
    */
   shapeTube(w) {
-    return this.tubeCurveMode === TUBE_CURVE_VOCALSAT
-      ? this.vsCurve.transfer(w)
+    return this.tubeCurveMode !== TUBE_CURVE_TANH
+      ? this.tubeSatCurve.transfer(w)
       : (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
   }
 
@@ -2755,27 +3276,48 @@ export class LA2AKernel {
    * @param {Float32Array} driven  pre-emphasised audio, or `input` when off
    * @param {Float32Array} input   the untouched input, for the dry side of mix
    */
-  _processChannelBaseRate(driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive) {
+  _processChannelBaseRate(driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive, valveMix = null) {
     let dcX = this.dcX[ch]
     let dcY = this.dcY[ch]
     // The wet side is built first so the de-emphasis has a buffer to filter;
     // `out` doubles as that buffer, then the dry is summed into it.
+    const sp = this.cellShaperActive ? this.splitBase : null
+    let sz = null
+    if (sp) {
+      while (this.splitBaseZ.length <= ch) this.splitBaseZ.push(new Float64Array(2))
+      sz = this.splitBaseZ[ch]
+    }
+    let z1 = sz ? sz[0] : 0
+    let z2 = sz ? sz[1] : 0
     for (let i = 0; i < n; i++) {
       let w
+      let high = 0
       if (this.cellShaperActive) {
+        let x = driven[i]
+        if (sp) {
+          const lo = sp.b0 * x + z1
+          z1 = sp.b1 * x - sp.a1 * lo + z2
+          z2 = sp.b2 * x - sp.a2 * lo
+          high = (x - lo) * cellPreG[i] * cellMakeup[i]
+          x = lo
+        }
         // Same order as the oversampled path: attenuate, shape, then make up.
-        w = this.vsCurve.transferAt(driven[i] * cellPreG[i], cellDrive[i])
+        w = this.cellSatCurve.transferAt(x * cellPreG[i], cellDrive[i])
           * cellMakeup[i]
       } else {
         w = driven[i] * gain[i]
       }
       if (this.applyTube) {
-        const shaped = this.shapeTube(w)
+        let shaped = this.shapeTube(w)
+        // The valve guard, as in the oversampled path.
+        if (valveMix && valveMix[i] < 1) shaped = w + valveMix[i] * (shaped - w)
+        shaped += high
+        high = 0
         dcY = shaped - dcX + this.dcR * dcY
         dcX = shaped
         w = dcY
       }
-      out[i] = w
+      out[i] = w + high
     }
     if (this.emphasisActive) this.deEmph[ch].process(out, out, n, 0)
     for (let i = 0; i < n; i++) {
@@ -2863,86 +3405,6 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
  * Over a region of any real length the effect is tiny, but the auto-makeup that
  * depends on it is exactly the thing users judge bypass A/B by.
  */
-/**
- * Peak magnitude across every sample of every channel, in dB.
- *
- * The default makeup reference. Peak rather than RMS, and the distinction is
- * the whole point of makeup gain: the compressor pulls the loud moments down,
- * makeup hands back what it took, the peaks land where they started and
- * everything underneath rises with them. That is a compressor made louder
- * without being merely turned up — which is the comparison a listener is
- * actually running when they A/B it.
- *
- * Matching RMS instead, as this did, returns only the average loss and
- * therefore leaves the output exactly as loud as the input: a compressor that
- * by construction cannot make anything louder.
- *
- * TRUE PEAK, not a high percentile, and that was measured. A percentile of
- * short-block peaks looks more robust and is worse where it matters: on real
- * speech a fast transient can survive compression almost intact while the p99
- * comes down several dB, so percentile-referenced makeup over-compensates and
- * pushes that survivor ABOVE the source — up to 5.5 dB above, measured. True
- * peak cannot do that; the guarantee it buys is exact.
- *
- * The cost is the opposite failure: a single uncompressed click sets the
- * reference and the makeup comes out small. That is the safe direction — never
- * louder than the source — and the manual trim is there for it.
- *
- * ── THE PERCENTILE IS BACK, AND ONLY BECAUSE THE MISSING HALF ARRIVED ───────
- *
- * ⚠ NOTHING ABOVE IS WITHDRAWN. The percentile alone still fails exactly as
- * described, and the failure reproduces on demand: referencing the 99.9th
- * percentile at Peak Reduction 40 / 50 / 60 / 70 / 80 puts the OUTPUT PEAK at
- * -3.15 / -0.92 / +1.54 / +2.59 / +3.01 dBFS against a source peaking at
- * -2.80 — 5.81 dB above it at the top, against the 5.5 the note above
- * measured. A percentile reference cannot keep the peak guarantee, full stop.
- *
- * WHAT CHANGED IS THAT THE GUARANTEE NO LONGER HAS TO COME FROM THE SOLVE.
- * `ceilingDb` enforces it downstream, so the pair keeps the same promise the
- * peak reference kept — output peak never exceeds input peak — while spending
- * the headroom a lone transient was sitting on. That promise is now pinned by
- * `test/dsp/la2aMakeupReference.test.js` rather than being a property of the
- * arithmetic, which is the real cost of the change and is stated here so
- * nobody has to rediscover it: it is enforced, not structural, and the two
- * halves must ship together. `computeAutoMakeupPlan` is the only way to get
- * either, and it returns both.
- *
- * WHY IT IS WORTH IT. The lone-transient failure the note above calls "the safe
- * direction" is not free — it is the whole of the Peak Reduction 60 loudness
- * collapse. On narration whose binding peak is one onset out of a 180 ms pause,
- * peak-normalised to -1 dBFS at Peak Reduction 50: rms -17.39 -> -16.80 dB and
- * peak-over-body 4.38 -> 3.78 dB, with delivered speech dynamic range unmoved
- * at 9.11 -> 9.13. It recovers loudness that was being discarded rather than
- * buying it by compressing harder — a hardware LA-2A capture of the same take
- * sits at -16.38 and 3.35.
- *
- * ⚠ AND THE PERCENTILE IS NOW WHAT THE APP USES. It shipped off by default and
- * behind a panel toggle, was auditioned, and the toggle came back out: there is
- * no material on which the peak reference is the better answer, so there was
- * nothing for a user to choose between. `useLA2A` fixes the reference and the
- * panel has no control for it.
- *
- * ⚠ WHICH MEANS EVERY PATCH, PRESET AND PREVIOUSLY RENDERED FILE NOW SOUNDS
- * DIFFERENT — several dB louder at the same settings, and louder the further up
- * the knob. That is the intended change and it is not reversible from the UI.
- * A file already rendered on disk is untouched; the same patch re-applied to it
- * is not the same render.
- *
- * The peak reference remains the DEFAULT of this function and is what
- * `npm run la2a:makeup` renders against for comparison. It is the reference
- * anything measuring "makeup that cannot exceed the source by construction"
- * should still use.
- */
-function peakOfChannels(channels, skip = 0) {
-  let peak = 0
-  for (const ch of channels) {
-    for (let i = skip; i < ch.length; i++) {
-      const v = ch[i] < 0 ? -ch[i] : ch[i]
-      if (v > peak) peak = v
-    }
-  }
-  return peak
-}
 
 function rmsOfChannels(channels, skip = 0) {
   let sumSq = 0
@@ -3000,100 +3462,62 @@ export function computeAutoMakeupDb(channelData, sampleRate, params = {}, option
  * in any case: the ceiling engages on the top ten-thousandth of samples and the
  * reference is read at the top thousandth.
  */
+/**
+ * The Gain knob's travel, and the range the auto makeup is solved over — one
+ * pair, so the knob can always show the answer the solve gives.
+ *
+ * ⚠ IT WAS -12..+24 ON THE KNOB WHILE THE SOLVE RAN -24..+24, so a measured
+ * makeup below -12 was clamped on the way to the knob and the ceiling knee had
+ * been sized for gain the clamp threw away. Symmetric now, matching FET Punch's
+ * Output, with 0 dB straight up on the dial.
+ */
+export const LA2A_GAIN_MIN_DB = -24
+export const LA2A_GAIN_MAX_DB = 24
+
 export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, options = {}) {
   const { maxIterations = 4, toleranceDb = 0.05, reference = 'peak' } = options
-  if (reference !== 'peak' && reference !== 'percentile') {
-    throw new Error(`unknown makeup reference: ${reference}`)
-  }
 
   // Measured through the base-rate path: oversampling removes folded
   // harmonics, which carry almost no energy, and measuring through it was
   // about three times slower — which the Gain knob showed as lag behind a
   // drag. It does move the peak slightly more than it moves the RMS, so the
   // iteration below re-measures rather than trusting one pass.
+  //
+  // `ceilingDb: null` is the other half of that: ⚠ THE SOLVE MEASURES WITHOUT
+  // THE CEILING, DELIBERATELY. Including it would make the objective
+  // non-monotone in the makeup — past the ceiling, more gain stops moving the
+  // measured statistic — and the iteration could run away against a curve that
+  // has flattened. Measuring below it and enforcing above it keeps the solve on
+  // a monotone objective, and the two cannot disagree by much in any case: the
+  // ceiling engages on the top ten-thousandth of samples and the reference is
+  // read at the top thousandth.
   const measureParams = { ...params, oversample: false, ceilingDb: null }
 
-  const measureRef = reference === 'percentile'
-    ? (chs) => percentileOfChannels(chs, MAKEUP_PERCENTILE)
-    : peakOfChannels
-
-  const inputPeak = peakOfChannels(channelData)
-  const inputRef = measureRef(channelData)
-  if (!(inputPeak > 0) || !(inputRef > 0)) {
-    return { makeupDb: 0, ceilingDb: null, ceilingKneeDb: null }
-  }
-
-  /**
-   * ⚠ THE MEASURED SPAN MUST BE THE SPAN APPLY WRITES BACK, not the raw render.
-   *
-   * With lookahead the output lags its input, so the last `latency` samples of
-   * the region never emerge and the first `latency` are the delay line filling
-   * with silence. Measuring the render as-is therefore compares a region's
-   * input peak against an output missing that region's tail — and on a short
-   * selection the tail is where the peak often is. `applyWorkletRegion` already
-   * solves this the same way for the render it splices in: extend, then trim.
-   * This is that, so the solve and the apply see the same audio.
-   *
-   * Zero at lookahead 0, where it telescopes to the old behaviour exactly.
-   */
-  const latency = la2aLatencySamples(measureParams, sampleRate)
-  const padded = latency > 0
-    ? channelData.map((ch) => {
-      const p = new Float32Array(ch.length + latency)
-      p.set(ch, 0)
-      return p
-    })
-    : channelData
-
-  let makeupDb = 0
-  /**
-   * The un-ceilinged peak of the last render, and the makeup it was rendered
-   * at. The knee is sized from how far this sits over the ceiling, and these
-   * come free — the loop already renders without the ceiling, deliberately
-   * (see above), which is exactly the measurement the knee needs.
-   */
-  let lastOutPeak = 0
-  let lastMakeupDb = 0
-  for (let i = 0; i < maxIterations; i++) {
-    const { channelData: rendered } = processLA2ABuffer(padded, sampleRate, {
-      ...measureParams,
-      gainDb: makeupDb,
-    })
-    const out = latency > 0
-      ? rendered.map((ch) => ch.subarray(latency, latency + channelData[0].length))
-      : rendered
-    lastOutPeak = peakOfChannels(out)
-    lastMakeupDb = makeupDb
-    const outRef = measureRef(out)
-    if (outRef <= 0) break
-    const correctionDb = 20 * Math.log10(inputRef / outRef)
-    makeupDb = clamp(makeupDb + correctionDb, -24, 24)
-    if (Math.abs(correctionDb) < toleranceDb) break
-  }
-  if (reference !== 'percentile') {
-    // The peak reference needs no ceiling, so it needs no knee either.
-    return { makeupDb, ceilingDb: null, ceilingKneeDb: null }
-  }
-  const ceilingDb = 20 * Math.log10(inputPeak)
-  /**
-   * The loop renders at `makeupDb` and only THEN corrects it, so the last
-   * render is one step stale. Carried forward rather than re-rendered: the gain
-   * is ahead of the peak by that step, and the step is under `toleranceDb` on a
-   * converged solve. Only an unconverged one makes it large, and there the
-   * correction is what keeps the knee honest.
-   */
-  const outPeakDb = lastOutPeak > 0
-    ? 20 * Math.log10(lastOutPeak) + (makeupDb - lastMakeupDb) : -Infinity
-  return {
-    makeupDb,
-    // The guarantee, restated as a number the kernel can enforce: the source's
-    // own peak. `softCeiling` never lets the output exceed it — at or under,
-    // not strictly under; see the note there for why that distinction is the
-    // honest one and not a weaker claim.
-    ceilingDb,
-    // How soft that enforcement has to be, from how much there is to enforce.
-    ceilingKneeDb: ceilingKneeDbFor(outPeakDb - ceilingDb),
-  }
+  return solveMakeupPlan({
+    channelData,
+    // ⚠ THE MEASURED SPAN MUST BE THE SPAN APPLY WRITES BACK — the solver pads
+    // and trims by this, so it must be the latency of `measureParams` and not
+    // of `params`. `applyWorkletRegion` already solves it the same way for the
+    // render it splices in; this is that, so the solve and the apply see the
+    // same audio.
+    latencySamples: la2aLatencySamples(measureParams, sampleRate),
+    render: (chs, extra) => processLA2ABuffer(chs, sampleRate, {
+      ...measureParams, ...extra,
+    }).channelData,
+    gainKey: 'gainDb',
+    reference,
+    maxIterations,
+    toleranceDb,
+    minDb: LA2A_GAIN_MIN_DB,
+    maxDb: LA2A_GAIN_MAX_DB,
+    /**
+     * The kernel's own blend. Its dry path is the input through the same delay
+     * the wet path has, so after the solver trims `latencySamples` the dry
+     * samples ARE the input, which is what the blended solve pairs them with.
+     */
+    mix: Number.isFinite(params.mix) ? params.mix : LA2A_KERNEL_DEFAULTS.mix,
+    mixKey: 'mix',
+  })
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────

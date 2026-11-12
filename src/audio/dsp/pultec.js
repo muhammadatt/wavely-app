@@ -63,34 +63,35 @@ export function pultecNetSections(sampleRate, character) {
 // ── fitted sections (generated) ─────────────────────────────────────────────
 //
 // Regenerate with:  node scripts/fit-pultec-curves.mjs --write
-// Worst max |err| vs. the measured curves across 44100/48000/96000 Hz: 0.666 dB.
+// Worst max |err| vs. the measured curves across 44100/48000/96000 Hz: 0.281 dB.
 
 export const PULTEC_STAGES = {
   thick: {
     pre: [
-      { type: 'lowShelf', freqHz: 3921.7863, width: 1.80589, gainDb: -4.7471 },
-      { type: 'highShelf', freqHz: 12682.3844, width: 1.05974, gainDb: -2.9924 },
-      { type: 'peaking', freqHz: 10810.1574, width: 0.08927, gainDb: 6.4728 },
+      { type: 'lowShelf', freqHz: 2441.5503, width: 2.64525, gainDb: -4.6843 },
+      { type: 'peaking', freqHz: 9358.0206, width: 0.08000, gainDb: 3.1968 },
+      { type: 'peaking', freqHz: 7540.3876, width: 0.64377, gainDb: 3.8125 },
+      { type: 'peaking', freqHz: 20996.6501, width: 1.60762, gainDb: -1.8018 },
     ],
     post: [
-      { type: 'lowShelf', freqHz: 546.1806, width: 2.56309, gainDb: 8.9667 },
-      { type: 'highShelf', freqHz: 10470.3306, width: 2.86958, gainDb: -5.6734 },
-      { type: 'peaking', freqHz: 2316.7020, width: 0.77929, gainDb: -0.5314 },
-      { type: 'peaking', freqHz: 14599.0204, width: 0.19211, gainDb: -2.7178 },
+      { type: 'lowShelf', freqHz: 2830.6648, width: 5.39397, gainDb: 8.9693 },
+      { type: 'highShelf', freqHz: 3183.1599, width: 2.87804, gainDb: -6.8110 },
+      { type: 'peaking', freqHz: 3260.1691, width: 0.18634, gainDb: -3.5216 },
+      { type: 'peaking', freqHz: 21000.0000, width: 1.84286, gainDb: -0.7124 },
     ],
   },
   presence: {
     pre: [
-      { type: 'lowShelf', freqHz: 1339.0123, width: 2.78873, gainDb: -4.2304 },
-      { type: 'highShelf', freqHz: 4334.5142, width: 1.71543, gainDb: 1.6067 },
-      { type: 'peaking', freqHz: 4805.7734, width: 0.26493, gainDb: 2.2580 },
-      { type: 'peaking', freqHz: 21000.0000, width: 1.39524, gainDb: -1.0757 },
+      { type: 'lowShelf', freqHz: 1277.2913, width: 2.51105, gainDb: -4.2373 },
+      { type: 'highShelf', freqHz: 1552.4790, width: 3.97918, gainDb: 1.5740 },
+      { type: 'peaking', freqHz: 7322.4454, width: 0.43528, gainDb: 2.2298 },
+      { type: 'peaking', freqHz: 21000.0000, width: 1.44917, gainDb: -0.9976 },
     ],
     post: [
-      { type: 'lowShelf', freqHz: 1295.9232, width: 3.30783, gainDb: 6.5377 },
-      { type: 'highShelf', freqHz: 5103.3577, width: 3.39739, gainDb: -3.7401 },
-      { type: 'peaking', freqHz: 1208.6685, width: 0.41627, gainDb: -1.6866 },
-      { type: 'peaking', freqHz: 20866.0249, width: 1.80577, gainDb: -0.6597 },
+      { type: 'lowShelf', freqHz: 2226.4171, width: 4.51613, gainDb: 6.5381 },
+      { type: 'highShelf', freqHz: 13106.9514, width: 2.38455, gainDb: -2.0866 },
+      { type: 'peaking', freqHz: 2448.1859, width: 0.28261, gainDb: -2.9878 },
+      { type: 'peaking', freqHz: 16867.3780, width: 0.19667, gainDb: -0.9622 },
     ],
   },
 }

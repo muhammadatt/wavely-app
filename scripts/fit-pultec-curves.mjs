@@ -92,6 +92,47 @@ function seedFor(types, stage) {
   })
 }
 
+/**
+ * Seeds that start a longer cascade from a shorter one it extends.
+ *
+ * ⚠ WITHOUT THIS THE TOPOLOGY SEARCH SILENTLY PREFERRED A WORSE FIT, AND IT
+ * SHIPPED. A longer cascade can always reproduce a shorter one by leaving its
+ * extra sections at unity gain, so it can never genuinely fit worse — but from
+ * the generic cold seed, Nelder-Mead in 12-15 dimensions does not find that,
+ * and the measured scores said the impossible had happened:
+ *
+ *              3-section   4-section   5-section
+ *   thick/pre     0.2437      0.2830      0.2787     <- 4 and 5 "worse"
+ *   presence/pre  0.1933      0.0512      0.1651     <- 5 "worse" than 4
+ *
+ * `thick/pre` therefore shipped the three-section fit, 0.57 dB off the measured
+ * curve at 20 kHz and 0.45 dB short of the presence bump at 8 kHz — a visible
+ * chunk of this preset's character lost to an optimiser that gave up, not to a
+ * modelling decision. Warm-started, the same topologies reach 0.1683 and
+ * 0.1004 and the parsimony rule below adopts them on their merits.
+ *
+ * The extra sections are seeded at UNITY GAIN, which is what makes the warm
+ * start sound rather than merely helpful: the seed's response is exactly the
+ * incumbent's, so the longer fit begins at the shorter one's cost and the
+ * optimiser can only improve on it. Their frequencies come from `seedFor` so a
+ * section that wants to do something has somewhere sensible to start.
+ *
+ * Only strict extensions qualify — the incumbent's types must be a prefix of
+ * the candidate's — because a seed is positional and re-ordering the sections
+ * would hand the optimiser a response that is not the incumbent's at all.
+ */
+function warmSeeds(candidate, solved, stage) {
+  const filler = seedFor(candidate, stage)
+  return solved
+    .filter(s => s.types.length < candidate.length
+      && s.types.every((t, i) => t === candidate[i]))
+    .map(s => candidate.map((type, i) => (
+      i < s.types.length
+        ? [s.x[i * 3], s.x[i * 3 + 1], s.x[i * 3 + 2]]
+        : [filler[i][0], filler[i][1], 0]
+    )))
+}
+
 // ── curve data ──────────────────────────────────────────────────────────────
 
 function readCurves(character) {
@@ -266,22 +307,52 @@ for (const character of CHARACTERS) {
   for (const stage of STAGES) {
     const target = stage === 'pre' ? pre : post
 
-    let types = null
-    let x = null
-    let fx = Infinity
+    // Every candidate's best solution, kept so a longer cascade can start from
+    // a shorter one it extends (see warmSeeds) and so the pick below can weigh
+    // them all against each other.
+    const solved = []
     for (const candidate of TOPOLOGIES[stage]) {
       const rng = mulberry32(0x5c4e95 + character.length * 977 + candidate.length * 31 + stage.length)
-      const trial = fitStage(candidate, seedFor(candidate, stage), freqs, target, rng)
-      // Prefer the simpler cascade unless a longer one earns its section: a
-      // fourth biquad is a per-sample cost on every channel, and the curves are
-      // 1/24-octave smoothed measurements, not something worth chasing to the
-      // third decimal.
-      if (trial.fx < fx * 0.85) {
-        types = candidate
-        x = trial.x
-        fx = trial.fx
+      let trial = fitStage(candidate, seedFor(candidate, stage), freqs, target, rng)
+      for (const [i, seed] of warmSeeds(candidate, solved, stage).entries()) {
+        const warmRng = mulberry32(0x7a3f11 + character.length * 977 + candidate.length * 31
+          + stage.length + i * 101)
+        const warm = fitStage(candidate, seed, freqs, target, warmRng)
+        if (warm.fx < trial.fx) trial = warm
       }
+      solved.push({ types: candidate, x: trial.x, fx: trial.fx })
     }
+
+    /**
+     * The shortest cascade the best fit does not beat by the margin.
+     *
+     * ⚠ THE MARGIN IS A RATIO OF 0.85, NOT "WITHIN 15%", AND THE TWO ARE NOT THE
+     * SAME NUMBER. `bestFx / 0.85` admits a candidate up to 17.65% above the
+     * best. That is deliberate: the rule has always been "a longer cascade earns
+     * its section by beating the shorter one by 15%", i.e. `longer <= 0.85 *
+     * shorter`, and rearranging that for the shorter cascade gives `shorter <=
+     * best / 0.85`. Writing `bestFx * 1.15` would look like the same rule and
+     * quietly tighten it. Both pick identically on the current curves; the ratio
+     * is kept because it is the one the rule was written with.
+     *
+     * A biquad is a per-sample cost on every channel and these are 1/24-octave
+     * smoothed measurements, so a section has to earn its keep rather than buy
+     * the third decimal.
+     *
+     * ⚠ THIS USED TO COMPARE EACH CANDIDATE AGAINST THE RUNNING INCUMBENT, IN
+     * LIST ORDER, WHICH IS NOT THE SAME RULE AND QUIETLY BOUGHT A SECTION.
+     * `presence/pre` fit 0.0551 at four sections, then 0.0471 at four and 0.0442
+     * at five. Against the incumbent, 0.0471 failed (it had to beat 0.0551 by
+     * 15%) and 0.0442 passed — so the five-section cascade shipped over a
+     * four-section one 0.003 dB behind it, an improvement with no meaning at
+     * this smoothing. Judged against the BEST, both four-section fits are inside
+     * the margin and the shorter cascade wins on length. The pick is also no
+     * longer hostage to the order TOPOLOGIES happens to list its candidates in.
+     */
+    const bestFx = Math.min(...solved.map(s => s.fx))
+    const { types, x, fx } = solved
+      .filter(s => s.fx <= bestFx / 0.85)
+      .sort((a, b) => a.types.length - b.types.length || a.fx - b.fx)[0]
 
     const sections = types.map((type, i) => ({
       type,

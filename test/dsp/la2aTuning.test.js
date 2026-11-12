@@ -71,7 +71,7 @@ const dBc = (y, k) => 20 * Math.log10(Math.max(harmonic(y, k), 1e-30) / harmonic
 /**
  * ⚠ RUNS ON `LA2A_LEGACY_PATCH`, WHICH IS NO LONGER THE KERNEL DEFAULT. Every
  * assertion below validates the fitted `tanh` valve and the Moore-derived T4
- * gain modulation. OptoSmooth now ships Tube Saturation's curve at both stages,
+ * gain modulation. LA Vintage 2A now ships Tube Saturation's curve at both stages,
  * so these have to ask for the model they are about — they were written when it
  * was simply what a bare kernel did.
  *
@@ -84,13 +84,26 @@ test('an untouched bench emits no kernel params at all', () => {
   assert.ok(isLA2ATuningDefault())
   assert.deepEqual(la2aTuningOverrides(), {})
 
-  // The exact shape `toKernelParams` returned before the bench existed.
+  /**
+   * The exact shape `toKernelParams` returns. Pinned key-for-key on purpose:
+   * this is the guard on "an untouched bench emits nothing", and it works by
+   * noticing ANY change to the object, which is what caught an unconditional
+   * `ceilingDb: null` that was inert to the kernel but changed the shape.
+   *
+   * ⚠ `analog` IS A PATCH KEY AND BELONGS HERE UNCONDITIONALLY, unlike the
+   * ceiling and the input alignment, which are properties of the AUDIO and are
+   * spread in only when real. This one has a default and always travels, exactly
+   * as `mode` and `peakReduction` do — so its presence is the shape, not a
+   * violation of it. `mix` is the same kind of key, for the same reason.
+   */
   assert.deepEqual(toKernelParams(LA2A_DEFAULTS), {
     mode: 'compress',
     peakReduction: 50,
     gainDb: 0,
     r37: 100,
     lookaheadMs: 0,
+    analog: true,
+    mix: 1,
   })
 })
 

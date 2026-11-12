@@ -14,7 +14,7 @@ import Icon from './ui/Icon.vue'
  * shows is decided entirely by the registry — there is no per-category branch
  * here any more, and no v-if chain to keep in sync with the toolbar.
  *
- * Categories carrying a bespoke `panel` (Split, Presets) render it directly and
+ * Categories carrying a bespoke `panel` (Master) render it directly and
  * skip the list level; they aren't lists of operations.
  */
 const { state, closeRail, setRailOperation } = useEditorState()
@@ -25,8 +25,13 @@ const operation = computed(() => (state.railOperation ? getOperation(state.railO
 </script>
 
 <template>
+  <!-- On a phone held upright (max-sm) a 280 px column would leave the
+       waveform ~100 px, so the rail becomes a bottom sheet over the lower half
+       of the editor instead; the waveform above it stays visible and usable. -->
   <div
-    class="w-[280px] shrink-0 relative border-l border-border-1 overflow-y-auto"
+    class="ctx-panel w-[280px] shrink-0 relative border-l border-border-1 overflow-y-auto
+           max-sm:absolute max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-[60] max-sm:w-auto max-sm:max-h-[55%]
+           max-sm:border-l-0 max-sm:border-t max-sm:rounded-t-[16px]"
     style="background:linear-gradient(180deg,#141922,#0e1116)"
   >
     <button
@@ -74,6 +79,11 @@ const operation = computed(() => (state.railOperation ? getOperation(state.railO
 </template>
 
 <style scoped>
+@media (max-width: 639.98px) {
+  .ctx-panel {
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.55);
+  }
+}
 .panel-close {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.09);

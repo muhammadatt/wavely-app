@@ -43,7 +43,13 @@ import { computed, nextTick, ref } from 'vue'
 import { ROCKER_BODY, litCap, capInk } from './switchChrome.js'
 
 const props = defineProps({
-  modelValue: { type: [String, Number], required: true },
+  /**
+   * ⚠ BOOLEAN IS IN THE LIST BECAUSE A TWO-OPTION ROCKER IS THE NATURAL SHAPE FOR
+   * ONE, and OptoSmooth's ANALOG switch passes `true`/`false`. Without it Vue
+   * warns on every render of that panel — a prop-type warning the smoke gate does
+   * not promote, so nothing caught it locally. Caught by Copilot on PR #160.
+   */
+  modelValue: { type: [String, Number, Boolean], required: true },
   /** Exactly two: [{ value, label, title? }]. Extras are ignored. */
   options: { type: Array, required: true },
   accent: { type: String, default: '#f5a623' },

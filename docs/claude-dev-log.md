@@ -598,8 +598,14 @@ These apply only to the `acx_audiobook` preset:
   - **Two things moved downstream, both because the knob now reaches real depth.** Auto-makeup can ask for more than the **+24 dB Gain knob** has, at deep LIMIT settings — it clamps and undershoots, never overshoots, which is the guarantee that matters and is now its own test. And the base-rate measurement shortcut, whose premise is that oversampling barely moves the RMS, degrades where the saturator is finally driven hard: **0.03 dB at compress PR 90, 0.17 at limit PR 95, 0.26 at limit PR 100**. Pinned at measured bounds rather than under one loose tolerance, so it still fails on drift.
   - **Still one clip and one reference emulation.** Inverting through our own gain computer means these constants absorb any difference between its knee and ratio and the reference's — a behavioural match on average gain reduction, not a claim about the reference's literal side-chain gain. A second source is the thing to check before treating the shape as settled.
 - **Scheps Parallel** — Andrew Scheps' Pultec/LA-2A vocal trick as one plugin. Pultec push → OptoSmooth → Pultec recovery on a wet path, blended against the dry. **Four visible controls** (Character, Squash, Mix, Output) because the trick's defining settings are not choices: the LA-2A's R37 emphasis is pinned wide open (that *is* the trick — the side-chain filtered so the cell stops ducking on plosives and rides the presence band instead), mode is COMP, and its makeup stays at 0 so the tube stage isn't driven by gain that belongs after the post EQ.
-  - **The EQ curves are fitted from measurement, not derived.** `data/pultec_curves/*.csv` — 120 points per stage, two characters — fitted to 3–4 RBJ biquads per stage by `npm run fit:pultec`, jointly across 44.1/48/96 kHz so one set of constants survives every rate the app can run at. Three of the four stages land inside **0.15 dB**; `thick/pre` is **0.57 dB** at 20 kHz, where bilinear warping compresses the top octave into almost nothing. A fifth section was tried for it and rejected — it did not clear the 15% margin the fitter demands before spending a biquad. Pinned against the CSVs in `test/dsp/pultec.test.js`.
-  - **Pre and post are fitted independently, and that is the point.** A passive EQP-1A's boost and cut at the same nominal frequency are different shapes, so the recovery does not cancel the push. What survives is the character: Thick nets **+4 dB at 30 Hz and −4.6 dB at 20 kHz**, Presence nets a 4–10 kHz lift with the top octave scooped (its post cut is anchored at 20 kHz, per Scheps' own preference — which is why the preset that was called "Airy" is not airy and got renamed).
+  - **The EQ curves are fitted from measurement, not derived.** `data/pultec_curves/*.csv` — 120 points per stage, two characters — fitted to 4 RBJ biquads per stage by `npm run fit:pultec`, jointly across 44.1/48/96 kHz so one set of constants survives every rate the app can run at. All four stages now land inside **0.28 dB**, the worst being `thick/pre` at 20 kHz where bilinear warping compresses the top octave into almost nothing. Pinned against the CSVs in `test/dsp/pultec.test.js`.
+
+    ⚠ **THIS ENTRY PREVIOUSLY RECORDED 0.57 dB FOR `thick/pre` AND SAID A LONGER CASCADE HAD BEEN "TRIED AND REJECTED" ON THE 15% MARGIN. BOTH WERE WRONG, AND THE SECOND WAS THE REASON THE FIRST PERSISTED.** The longer cascades were never rejected on merit — they were never fitted. From the generic cold seed, Nelder-Mead in 12–15 dimensions returned 0.2830 (4 sections) and 0.2787 (5) against the 3-section 0.2437, which is arithmetically impossible: a longer cascade reproduces a shorter one exactly by leaving its extra sections at unity gain, so it cannot fit worse. The margin never came into play. Seeding each longer topology from the best shorter one it extends, with the extra sections at unity gain, takes `thick/pre` to **0.1019** at four sections — recovering 0.46 dB of the preset's own presence bump at 8 kHz (net +1.11 → +1.67 dB against a measured +1.60) and 0.28 dB of top octave (−5.15 → −4.87 against −4.65). ⚠ AND THE MARGIN ITSELF WAS COMPARING THE WRONG THING: it weighed each candidate against the running incumbent in list order rather than against the best available, which bought `presence/pre` a fifth section for 0.0471 → 0.0442, an improvement with no meaning at 1/24-octave smoothing. Judged against the best, the shortest cascade inside the margin wins and that stage stays at four sections. The measured GR at `squash: 40` moved 4.62 → 4.71 dB peak, so the operating point the default is calibrated to survives the refit.
+  - **Pre and post are fitted independently, and that is the point.** A passive EQP-1A's boost and cut at the same nominal frequency are different shapes, so the recovery does not cancel the push. What survives is the character: Thick nets **+4 dB at 30 Hz and −4.6 dB at 20 kHz**, Presence nets a 4–10 kHz lift (its post cut is anchored at 20 kHz, per Scheps' own preference — which is why the preset that was called "Airy" got renamed).
+
+    ⚠ **PRESENCE'S POST CUT IS NOW SCALED TO 61.3% OF THE SOURCE CURVE — `(3.88 − 1.5) / 3.88`, i.e. 1.5 dB less at 20 kHz — AND THAT IS AN EDITORIAL CHANGE, NOT A MEASUREMENT.** The top-octave scoop was audible and the curves it came from are assembled from anecdotal reports, not a metrological capture, so there was nothing to be faithful to. Net: peak +1.58 → **+2.21 dB**, zero crossing 13.3 → **16.9 kHz**, 20 kHz −2.53 → **−1.03 dB**; delivered at the default Mix 0.35, 20 kHz goes −0.91 → −0.43 and 14 kHz −0.32 → +0.16. ⚠ **IT RAISES THE PRESENCE BUMP TOO, WHICH WAS ACCEPTED RATHER THAN MISSED**: scaling the whole cut relaxes 4–10 kHz as well, so the bump's centre moves 5.9 → 6.6 kHz. A hinged variant that held the bump and relaxed only above 10 kHz was generated and rejected — one physical knob move beats a synthetic correction, and a slope discontinuity at 10 kHz is a worse thing to hand a biquad cascade. The scaling touches only the 39 CSV points where the post curve is a cut; the boost region and the entire pre column are untouched, so the side-chain the trick depends on is unchanged and GR at `squash: 40` holds at 4.37 dB peak. The adjusted curve fits slightly better than the original (0.0372 → 0.0356). Provenance is spelled out in `docs/scheps_vocal_chain_presence_spec.md` under "Deviation from the source curves" — **the post column must not be cited as evidence of what an EQP-1A does.**
+
+    ⚠ **THE COMMIT THAT LANDED THIS SAYS 74.2% IN ITS MESSAGE AND IN THE FIRST VERSION OF THESE NOTES. THAT FIGURE IS WRONG** — it is the factor for the 1.0 dB variant, carried over from the wrong row of the comparison table. The CSV, the fitted constants and every curve number quoted were and are correct: 61.3% is what was applied, and −3.883 → −2.383 dB at 20 kHz is the arithmetic that proves it.
   - **The wet path's makeup is the compressor's own Gain, not a multiply after the post EQ.** It was staged after eq2, which is the wrong place: on the hardware the Gain knob feeds the output amplifier and the second Pultec sits after it, so makeup drives the tube rather than bypassing it. Measured cost of the old staging was small — about **1 dB less harmonic content** (−45.6 vs −44.5 dBc on a 200 Hz tone), with levels moving by hundredths of a dB, because gain commutes exactly through a linear biquad cascade. **The reason it was worth fixing is structural rather than sonic**: the makeup now flows through the compressor's own machinery, so changes to how OptoSmooth computes makeup reach this plugin instead of having to be mirrored into it. It also means the trim measurement iterates, as `computeAutoMakeupDb` does — makeup ahead of a nonlinearity moves the operating point it was measured at.
   - **That the post EQ has no gain stage of its own is a modelling gap, not a reason the ordering does not matter.** A real EQP-1A is a passive network followed by a tube makeup amplifier; ours is pure biquads. Once that stage exists, feeding it 6 dB light would matter a great deal — which is why the ordering was fixed before rather than after.
   - **The blend lives inside the kernel, not in the audio graph.** The wet path lags by the compressor's oversampling latency; a two-node parallel split would put an undelayed dry signal against it and comb-filter the low end, where the two are nearly the same waveform. The dry side runs a delay line of exactly that latency, and the plugin reports it once for the offline apply path to trim. Verified: at Mix 0 the output is the input, sample for sample.
@@ -1326,6 +1332,3487 @@ SC_DRIVE_MAX_DB carried, where the single reference turned out to be the wrong
 unit entirely. `npm run la2a:align -- --dir <path>` re-scores it. **FET Punch
 has the same fixed-threshold topology and is not yet aligned.**
 
+### FET Punch — reference measurement tooling (stimulus stage)
+
+FET Punch has never been compared to anything. Every constant in
+`src/audio/fet1176Processor.js` — the input taper and its `-18 dBFS` threshold
+reference, the four ratio knees, both ballistics ranges, `TAIL_FRACTION` /
+`TAIL_MULT`, all seven all-buttons-in constants and `fetDrive` — reproduces a
+*described* behaviour. The module says so; this is the tooling that starts
+closing it, against Analog Obsession FETish and Waves CLA-76.
+
+- **THE LA-2A TOOLING WAS SPLIT RATHER THAN COPIED.** `scripts/lib/wav.js`
+  (the 32-bit float writer, which existed as two byte-identical copies and was
+  about to become three), `scripts/lib/demoMute.js` (the 20 s Waves demo-mute
+  grid and the scheduler that places events in the clean windows) and
+  `scripts/lib/probeStimulus.js` (zero-crossing steps, continuous-phase build).
+  `la2a-ballistics.mjs` and `la2a-tube-capture-tones.mjs` now import them, and
+  **all 23 existing stimulus files regenerate byte-identical** — the refactor is
+  verified against the artefacts, not against a reading of the diff.
+
+- **⚠ COHERENT DETECTION CANNOT MEASURE THIS UNIT AND THE LA-2A SUITE IS BUILT
+  ON IT.** The LA-2A recovers an envelope by demodulating at the probe and
+  low-passing at `min(500, f/2.5)`: two poles at 500 Hz rise in ~0.8 ms, fine
+  against a 1–10 ms attack. `ATTACK_FASTEST_S` here is **20 µs**, which would
+  need a ~19 kHz cutoff and therefore a probe above 47 kHz. There is no
+  audio-band probe that makes it work. Run anyway it would report every dial
+  from about 5 upward as the detector's own rise time, **and that number would
+  look like a measurement.**
+
+- **SO THE GAIN IS RECOVERED BY DIVISION INSTEAD** (`scripts/lib/gainTrace.js`).
+  We wrote the stimulus, so the dry signal is known exactly at every sample and
+  the applied gain is `wet[i]/dry[i]` — no filter in the path, so no rise time
+  of its own, and resolution is the capture's sample period. Verified against
+  our own kernel at **2.8e-17** max reconstruction error. The cost is the zero
+  crossings, where division is ill-conditioned: the blind window is
+  `asin(floor)/(pi·f)`, **31.9 µs at 1 kHz and 8.0 µs at 4 kHz** against a 20 µs
+  attack. **That is why the FET probe is 4 kHz where the LA-2A's is 1 kHz** — a
+  1 kHz probe cannot see this unit's fast end at all.
+
+- **⚗ THE SELF-TEST FOUND A 2.9× BIAS BEFORE ANY REFERENCE WAS TOUCHED, AND IT
+  WOULD HAVE BEEN INVISIBLE IN THE RESULT.** Measured t63 against the kernel's
+  own `attackSecondsForDial()`: declared 800 / 433 / 234 / 126 µs, measured
+  **2313 / 1188 / 688 / 438 µs**, ratio **2.89 / 2.75 / 2.94 / 3.46**. The cause
+  is structural and the references will have it too — the detector is a bare
+  full-wave rectifier, so its target is over threshold only near the waveform
+  peaks and under it at every crossing; the gain attacks in bursts and releases
+  between them, and the peak-to-peak envelope climbs slower than the
+  coefficient. **The factor is not a constant to divide out**: it moves with
+  Input, level and knee. ⚠ **So the fit is by MATCHED MEASUREMENT — run our
+  kernel at each dial, measure its t63 the identical way, match the reference's
+  number to ours — never by converting a t63 into a constant.** Fitting
+  `ATTACK_FASTEST_S` to a reference's raw t63 would have landed it ~3× too slow
+  and the number would have looked entirely reasonable.
+
+- **AND THE OVERSHOOT COLUMN IS THE BETTER STATISTIC ANYWAY.** How far the first
+  post-step peak sits above the settled reduction runs **3.55 / 3.42 / 3.20 /
+  2.83 / 2.27 / 1.52 / 0.78 dB** across dials 1–7 — monotone over the *whole*
+  range, including the three dials no audio-band probe can resolve as a time
+  constant, and it is the thing a listener is buying from this unit. Fit against
+  it; keep t63 as the cross-check.
+
+- **THE RELEASE TAIL IS VISIBLE AND SEPARABLE.** Measured/declared t63 sits at
+  **1.70** for dials 4–7 — the two-stage signature of `TAIL_FRACTION` 0.22 on a
+  network `TAIL_MULT` 4× slower. A ratio near 1.0 would mean the tail is
+  missing, which is what that column is really watching on a reference.
+  ⚠ **The first version of this test took its "open" reference from the end of
+  the recovery and was wrong at the slow dials**: at release 1 the tail runs
+  4.4 s, so 7 s after the step it still holds 20 % of its share, which put the
+  t63 target 4 % low and read as ratio 1.36 where the other six dials read 1.70.
+  The open reading now comes from the head of the file, before any event, which
+  is the only place the cell has no history at all.
+
+- **THE SATURATOR RIDES ON THE TRACE, AND THAT IS A MEASUREMENT, NOT AN ERROR.**
+  The capture is `fet(dry·inputLin·g)·outGain`, so the recovered trace carries
+  the output stage's instantaneous compression of the waveform as a ripple at
+  **2f** — **0.32 dB at `fetDrive` 0.35**, zero for a pure time-varying gain.
+  That is the static nonlinearity observed separately from the compression, the
+  same quantity `la2a-pair-compare.mjs` isolates as "peak rounding" and gets at
+  a harder way. What it means procedurally is that a ballistics fit must read
+  the peak series and never the raw trace.
+
+- **⚠ THE THD SWEEP'S AXIS IS GAIN REDUCTION, NOT INPUT LEVEL**, which is the
+  correction the LA-2A work arrived at expensively. THD against input level
+  cannot tell a gain-cell nonlinearity from an output-amp one; THD against dB of
+  GR can, and on the LA-2A the answer turned out to be the cell after two years
+  of a model that put it in the valves.
+
+- **⚠ BOTH REFERENCES ARE PLUGINS AND NEITHER IS EVIDENCE ABOUT HARDWARE.** The
+  precedent is in `docs/la2a_tube_capture_protocol.md`: LAEA was asked for an
+  output stage it does not model, and two captures that looked like one dataset
+  were a plugin and an analog unit that disagreed exactly where it mattered.
+  Fit one reference, hold the other out, **do not average them**, and label every
+  capture with its reference and settings.
+
+- **⚗ STEP 0 (CONTROL PARITY) IS DONE, AND IT MOVED FOUR THINGS.** Both
+  references read off their own panels and manuals. **(1) FETish's Input is
+  INTERNALLY COMPENSATED** — "you don't have to reduce volume while you boost
+  input" — so it is a **drive offset, not an input gain**, which is exactly the
+  distinction `dsp/inputAlign.js` already draws for OptoSmooth. Our Input (and
+  the hardware's) drives the detector *and* the audio path, and that interaction
+  is the unit's whole gain-staging feel. **FETish therefore cannot speak to our
+  Input's audio path at all**, only to the detector side, and ⚠ **the two
+  references will disagree on `stairs.wav` by construction** — expected, not a
+  bad capture. **(2) FETish HAS NO ALL-BUTTONS-IN.** Its "SLAM" is usable *with*
+  every ratio, so it is not the buttons ganged; all seven `ALL_*` constants can
+  only come from CLA-76, ⚠ **a single-reference fit with no hold-out**, which is
+  the weakest result this exercise will produce and must be labelled one.
+  **(3) FETish SAYS THE THRESHOLD MOVES WITH RATIO** — "with higher ratios,
+  compression will start at higher input gains" — where we hold `THRESHOLD_DBFS`
+  fixed at −18 and vary only `RATIO_KNEE_DB`. Plausible on real hardware (the
+  ratio buttons change the feedback network), directly measurable by the ratio
+  sweep, and ⚠ **a moving threshold misfits as a knee if you assume it is
+  fixed**. **(4) FETish'S BALLISTICS ARE CONTINUOUS WITH µs/ms READOUTS**, so the
+  knob goes straight to the time our dial produces and no interpolation is
+  assumed on either side — but ⚠ **its advertised 20–800 µs / 50–1100 ms are
+  IDENTICAL to our own endpoints because both quote the same datasheet.**
+  Agreement at the ends confirms nothing; what these captures can settle is the
+  taper between them, which `dialToSeconds` has never had checked.
+
+- **⚠ AND NEITHER PLUGIN'S PRINTED NUMBERS SURVIVED CONTACT.** FETish's Input
+  reads −96…0 dB where its manual says 0…60, and its Output reads 0…+36 where the
+  manual says −30…+30. CLA-76's Input and Output are documented "−inf…0" with
+  defaults of **30** and **18**, which are outside that range. Two plugins, three
+  mismatches. **Every printed dB, µs and ms is a knob position to be verified by
+  the capture, not a value to fit against** — the R37 precedent, where a knob
+  taken for an emphasis trimmer was a mix control, one level up.
+
+- **THE INPUT SWEEP IS NOW CHOSEN BY GAIN REDUCTION, NOT BY KNOB PERCENTAGE.**
+  The first matrix said "Input 20 / 40 / 60 / 80", which silently assumed our own
+  0–100 knob; neither reference has one, and CLA-76's readout is
+  self-contradictory. Positions are now picked to give ~2 / 6 / 12 / 18 dB of GR
+  on the −12 dBFS step, **with the readout logged** — which is also what the
+  collapse test needs, since the shift that collapses the four static curves is
+  the taper and the readouts are what it gets expressed in.
+
+- **CONTROLS THAT MUST BE NEUTRALISED, now concrete rather than generic.**
+  CLA-76: **Auto makeup OFF** (with it on, Output moves with Input and
+  `stairs.wav` measures compression and makeup summed into one curve, reading a
+  threshold that does not exist), **Analog OFF** (it adds hum and noise floor by
+  design, and lands in the recovered trace as gain that is not gain, worst at the
+  zero crossings where division is already ill-conditioned), Mix 100, Trim 0, and
+  ⚠ **Rev fixed** — Waves' own wording is that Bluey and Blacky differ in "gain
+  stages, **time constants**, and harmonic distortion", so they are two
+  ballistics, not two voicings. FETish: SLAM off, sidechain INT, HPF 20, MID GAIN
+  0, HF flat, Mix 100. ⚠ **FETish's sidechain HPF has no bypass** — 20 Hz is the
+  floor, costing ~0.17 dB at the 100 Hz probe, which is below what the detector
+  hold-out looks for but is noted rather than discovered later.
+
+- **⚗ STEP 0, ROUND TWO — THE CLA-76 READOUT IS RESOLVED AND IT BROKE TWO
+  BOUNCES.** Input and Output are both **attenuators, −inf…0 dB, defaults −30 and
+  −18**; the faceplate prints "30" and "18" and **hides the minus sign**. So zero
+  is maximum on both knobs and fully counter-clockwise is silence — which makes
+  "Input at minimum" (null-test bounce 1) a muted track rather than a disengaged
+  compressor, and "Output +10 dB" (bounce 2) unreachable, since unity IS the top
+  of the travel. Both restated: Input goes to the lowest position that still
+  passes signal with the GR meter at zero (**and that position is logged — it is
+  the bottom of the I1–I4 sweep**), and Output is raised 10 dB *from its default*
+  (−18 → −8). Same class as the LA-2A's R37 — a control read as one thing and
+  used as another — and it cost nothing only because the panel was read before
+  the bounces.
+
+- **BLACKY IS PRIMARY, AND THAT CHOICE CUTS AGAINST THE DISTORTION FIT.** Bluey
+  is Blue Stripe / Rev A-B, "brighter, dirtier, more aggressive with added
+  harmonic distortion and grit"; Blacky is Blackface / Rev D-E, "smoother,
+  cleaner, more neutral". Blacky is right for the ballistics and the static curve
+  — our four buttons plus British mode is classic 1176LN. ⚠ **But it means the
+  deliberately cleaner of the two models is our `fetDrive` reference**, and
+  Waves' own wording is that the Revs differ in "gain stages, time constants, and
+  harmonic distortion" — so the axis where the choice most plausibly changes the
+  answer is exactly the one `thd.wav` measures. **`thd.wav` is therefore captured
+  on BOTH Revs** (3 extra bounces). Ballistics on both would double the matrix
+  and is left as an open question.
+
+- **⚠ FETISH'S OVERSAMPLING IS A HIDDEN TOGGLE BEHIND THE LOGO AND DEFAULTS
+  OFF.** Nothing on the panel shows its state. It must be **ON** for the matrix:
+  our kernel runs the gain cell and FET stage at 4× because the un-oversampled
+  path measured **−47 dBc of folded product on a 9 kHz tone** at the default
+  `fetDrive` and **−80 dBc with the FET stage off entirely** — the residue of the
+  gain multiply alone, since the detector is unsmoothed and the cell tracks the
+  waveform. Capturing an aliasing reference against a non-aliasing model puts
+  folded products into the THD columns at frequencies that are not harmonics of
+  anything. ⚠ **A hidden toggle with no panel state is a provenance hazard of the
+  first order**: a matrix captured half each way reads as scatter and **no number
+  in it says which rows were which**, so it is logged per capture rather than per
+  reference. One extra bounce captures `thd.wav` both ways — the closest thing
+  available to an independent check on whether our own 4× is enough.
+
+- **THE NULL TEST GAINED A FIFTH BOUNCE AND IT IS THE MOST VALUABLE ONE.**
+  `thd.wav` at two Input positions with zero GR at both, FETish only: if the
+  output level is the same, the compensation is real and Finding 1 holds; if it
+  rises, the manual is wrong and FETish becomes a full reference for the Input
+  law after all. Either answer reshapes the matrix, for one bounce. Totals are
+  now **45 bounces for CLA-76 and 39 for FETish**.
+
+### FET Punch — the null-test reader (first fitter)
+
+`npm run fet:null` reads the Step 1 bounces and reports the verdicts;
+`npm run fet:null:selftest` proves it against synthetic captures whose answers
+are known. Shared capture-side library alongside it: `lib/probeCapture.js`
+(rate check, bypass check, mute detection, alignment, preflight) and
+`lib/harmonics.js` (exact-bin DFT, dBc, the stimulus-floor comparison).
+
+⚠ **THE VERDICTS ARE THE PRODUCT, NOT THE ARITHMETIC**, and the self-test found
+three wrong ones before any reference was captured. Each would have been acted
+on by spending or not spending thirty-five bounces.
+
+- **⚗ GAIN REDUCTION WAS COMPUTED ACROSS TWO CAPTURES INSTEAD OF WITHIN ONE, so
+  it carried the insertion gain.** The headline of the most important comparison
+  in the protocol — THD against dB of GR — reported **−22.63 dB of reduction on
+  a reference whose real reduction was 11.0 dB**. Fixed by measuring down from
+  each capture's OWN open gain (its quietest tone, below threshold at any Input
+  position the null test uses), so the Input position and any insertion trim
+  drop out.
+
+- **⚗⚗ A COMPRESSOR WITH NO SATURATOR WAS REPORTED AS A SATURATOR.** Our kernel
+  at `fetDrive: 0` — no waveshaper in the path by construction — still reads
+  **0.020 % THD at 10.9 dB of reduction**, and the reader called it "distortion
+  rises with compression, the nonlinearity lives with the gain cell". It is the
+  unsmoothed full-wave detector modulating the gain at 2f: a tone times a 2f
+  modulation puts sidebands at f and 3f, so **odd orders only**, H3 at −74.2 dBc
+  with H2 84 dB below it. ⚠ **The same signature LAEA showed with Peak Reduction
+  engaged** and the log already recorded. Fitting `fetDrive` to it would put a
+  saturator where a ripple is. `harmonicBalance` now separates them.
+
+- **⚠ AND THE EVEN/ODD TEST HAD TO BE DOMINANCE, NOT PRESENCE.** First cut asked
+  whether any even harmonic sat above the stimulus's own floor — but the
+  stimulus's H2 is near **−311 dBc**, so a capture's H2 at −158 qualifies while
+  carrying no energy worth the name, and the ripple case was still called a
+  saturator. The test is now a 10 dB margin between the strongest odd and the
+  strongest even: the ripple measures **84 dB**, a real asymmetric shaper
+  measures **3.7 dB the other way**.
+
+- **A TRANSPARENT CAPTURE WAS REPORTED AS A BYPASSED PLUGIN.** Bit-identity is
+  the right bypass test in general, but a reference with no output stage, at a
+  setting with no reduction and no makeup, genuinely returns its input — ours
+  does. Two synthetic captures were flagged bypassed while **null4 from the same
+  "plugin" showed 11.23 dB of reduction in the same run**. null4 is the
+  disambiguator, which is what it is in the matrix for, so it is now read first
+  and its verdict gates the others.
+
+- **⚗ ALIGNMENT WAS BIASED BY ITS OWN SMOOTHER, BY 332 SAMPLES.** The capture is
+  rectified and smoothed to get an envelope; the reference needs no smoothing
+  because `buildProbe` hands back the exact amplitude. Comparing smoothed to
+  unsmoothed asked the search to absorb the one-pole's group delay as capture
+  latency: on a capture with **no offset at all** it reported **332 samples,
+  3.5 ms at 96 kHz**, and injected offsets of 0 / 137 / 4096 came back as
+  332 / 469 / 4428 — right spacing, wrong origin. Harmless for a THD window
+  0.8 s inside a 3 s tone; **fatal for a ballistics fit, where 3.5 ms is longer
+  than every attack time this unit has.** Smoothing both sides drops it to ~12
+  samples. ⚠ **Still not enough for ballistics**: at a 4 kHz probe and 96 kHz
+  there are 24 samples per period, so ±12 sits exactly at period ambiguity. The
+  fix when it is needed is to refine against a **step edge** — broadband, placed
+  on a zero crossing — rather than the periodic tone. Not built; building it
+  against a real capture beats guessing.
+
+- **AND IT WAS 29× TOO SLOW, WHICH ONLY SHOWED UP AS A TEST TIMEOUT.** The lag
+  search ran every 8th lag across the whole range at a 128-sample stride —
+  240 M operations, **6 s per capture**, ~60 s for a null-test run and past the
+  suite's timeout. Multi-resolution (256/32/4/1 with matching strides) costs
+  about 3.6 M for the same answer: **6 s → 0.21 s**. The coarse step is safe
+  only because the envelope smoother is 5 ms; sharpen that and the step comes
+  down with it.
+
+- **THE TWO DISTORTION QUESTIONS ARE SEPARATE AND THE REPORT NOW ASKS BOTH.**
+  THD rising with **level at zero GR** is a static/output-stage saturator; THD
+  rising with **reduction** is a gain-cell one. Our own kernel shows the first
+  plainly — gain flat to 0.002 dB across all five tones while THD climbs
+  0.006 → 0.089 % over 24 dB — and a report saying only "linear" would have
+  hidden it completely.
+
+- **⚠ `lib/probeCapture.js` DOES NOT REPLACE THE COPIES IN
+  `la2a-ballistics.mjs`, deliberately.** Those are written against a
+  module-level 44.1 kHz constant; these take the rate as an argument. Merging
+  them would be an unverifiable refactor — `data/corpus/la2a-ballistics/captures/`
+  is gitignored and empty in a fresh clone, so there is no way to prove the
+  LA-2A fitting path still behaves. The stimulus side WAS merged, because its
+  output is checkable byte-for-byte and all 23 files were.
+
+### ⚗ FIRST REAL CAPTURES — Waves CLA-76 (Blacky), null test bounces 1-4
+
+Capture hygiene is exact: 96 kHz / 32-bit float / mono, durations matching the
+stimulus to the sample (26.60 s and 44.60 s), demo mutes landing at **20.02 and
+40.02 s** — dead on the scheduled grid, so the bounces started at sample 0.
+**Analog confirmed OFF**: 50 and 60 Hz sit at −388 dBFS (numerical zero) and the
+demo mute is true digital silence. Nothing to re-bounce.
+
+- **Insertion gain −9.65 dB, flat to 0.024 dB across 24 dB of level.** The
+  no-compression gain path is linear.
+
+- **OUTPUT IS A CLEAN MULTIPLY, AND IT SAYS MORE THAN THAT.** +10.34 dB for the
+  10 dB dialled, and **every harmonic unchanged in dBc to 0.1 dB**. A shaper fed
+  10 dB hotter would produce more; this one produces exactly as much. So the
+  distortion is generated **upstream of Output**, which is our topology —
+  waveshaper first, output gain after — confirmed rather than assumed.
+
+- **A STATIC, EVEN-ORDER-DOMINANT SATURATOR IS IN CIRCUIT.** THD 0.012 % at
+  −39.7 dBFS out rising to 0.186 % at −15.6, i.e. **0.99 dB of THD per dB of
+  level** — the square-law signature. H2 leads H3 by a constant 9.2 dB.
+
+- **⚗⚗ AND THERE IS NO GAIN-CELL DISTORTION AT ALL. THIS IS THE OPPOSITE OF THE
+  LA-2A AND MUST NOT BE CONFUSED WITH IT.** The static law fitted from null1,
+  where nothing is compressing, predicts **every** null3 tone to within
+  **0.9 %** — including the tones carrying 3.1 and 8.2 dB of gain reduction.
+  Distortion is a function of level at the shaper and nothing else. For
+  OptoSmooth the finding was the reverse (the cell, rising with reduction) and
+  it took two years and a published paper to correct; **that finding does not
+  transfer to this unit.**
+
+  Our own `fetDrive` shaper already sits after the gain cell and is driven by
+  level, so **the topology is validated and only the drive constant is left to
+  fit.**
+
+- **⚠⚠ THE READER'S FIRST VERDICT ON THIS WAS WRONG, IN EXACTLY THE WAY THE
+  PROTOCOL EXISTS TO PREVENT.** It reported "distortion rises with compression —
+  the nonlinearity lives with the gain cell". On `thd.wav` **the loudest tones
+  are also the most compressed**, so within one capture level and reduction are
+  confounded and cannot be separated. The comparison is now a RESIDUAL against
+  null1's static law **at matched output level**, which is the control it needed;
+  uncontrolled, it would have fitted `fetDrive` to a mechanism that is not there.
+  ⚠ The self-test had passed on this: our own kernel has *both* mechanisms, so a
+  confounded verdict looked right on synthetic data and only a real reference
+  with one mechanism exposed it.
+
+- **⚠ AND FITTING A LAW THROUGH FIVE ZEROS PRODUCED A RESIDUAL OF 2,895,331 %.**
+  Our kernel at `fetDrive: 0` has no static distortion to fit; the regression
+  divided by nothing. Guarded — below 0.005 % there is no law and the reader
+  says so.
+
+- **⚠ OPEN QUESTION: H3 SCALES LIKE H2, WHICH A MEMORYLESS POLYNOMIAL DOES NOT
+  DO.** In dBc, H2 rises 1.0 dB per dB of level (correct for a quadratic term)
+  and **H3 also rises 1.0** where a cubic term would give 2.0. H5 likewise. The
+  residual has a fixed harmonic shape whose amplitude grows as the square of
+  level. Recorded rather than explained — it is the static-curve fit's problem,
+  and it may mean our memoryless asymmetric `tanh` is the wrong shape rather
+  than the wrong constant.
+
+- **⚠ TWO LIMITATIONS IN THIS BATCH, BOTH CHEAP TO FIX NEXT TIME.** null3 reached
+  only **8.17 dB** of reduction and only **two of five tones** compressed by more
+  than 2 dB, so the GR axis is thin. And **three of five null3 rows sit above
+  null1's measured level range**, so the law is extrapolated by up to 5 dB there
+  — defensible on a law that fits its own five points to 0.3 % over 24 dB, but
+  it is extrapolation. The protocol now asks for null1 at the **highest** Input
+  that still reads zero GR, so the two captures' level ranges overlap.
+
+### ⚗⚗ FETish null test — AND THE TWO REFERENCES ARE NOT THE SAME MACHINE
+
+Captures clean (96 kHz / 32-bit float / mono, exact durations). Five bounces:
+null1-4 plus **two** null5 Input positions, giving four Input positions in all.
+
+- **⚗ FETISH'S INPUT IS FULLY COMPENSATED — CONFIRMED ACROSS FOUR POSITIONS.**
+  Open gain (the quietest tone, below threshold everywhere) reads **−0.000 dB at
+  all four**, while the loudest tone in those same captures goes 0 → 8.55 →
+  15.07 dB of reduction. The knob travelled its useful range and the
+  uncompressed level never moved. Finding 1 holds: FETish's Input is a **drive
+  offset**, not an input gain.
+
+- **⚗ AND CLA-76'S IS A REAL GAIN: +13.20 dB** of open-level change between its
+  null1 and null3. That is the hardware's behaviour and ours. ⚠ **The two
+  references are opposite on the control our whole gain-staging model is built
+  around.**
+
+- **⚠ THE COMPENSATION TEST DID NOT NEED BOUNCE 5 AT ALL.** null3 is null1 with
+  only the Input moved — which is exactly what bounce 5 asks for — so the
+  question was answerable from bounces 1-4. The reader now treats every
+  Input-only bounce as a position and reads them together; null5 variants
+  (`null5a_`, `null5b_`) add positions rather than being the sole route.
+
+- **⚗⚗ THE STATIC SHAPER SITS ON OPPOSITE SIDES OF THE GAIN CELL IN THE TWO
+  REFERENCES, AND ONLY ONE MATCHES US.** Tested by predicting ΔH2 (dBc) between
+  two Input positions under both hypotheses — before the cell, ΔH2 = k·Δopen for
+  every tone; after it, ΔH2 = k·(Δopen − GR), falling away as the tone
+  compresses:
+
+  | | rms error, BEFORE | rms error, AFTER |
+  |---|---|---|
+  | CLA-76 | 3.94 dB | **0.07 dB** |
+  | FETish | **0.00 dB** | 26.09 dB |
+  | our kernel | 5.82 dB | **0.03 dB** |
+
+  **CLA-76 is our topology; FETish is not.** FETish's H2 is *bit-identical*
+  across all four Input positions — the shaper sees the compensated input, and
+  the cell scales fundamental and harmonic together afterwards, so the ratio
+  survives 15 dB of reduction untouched.
+
+  ⚠ **THE FIRST VERSION OF THIS TEST GOT CLA-76 RIGHT BY LUCK.** It asked only
+  whether H2 changed at all. On a reference whose Input is a real gain, a shaper
+  on EITHER side sees a different level and H2 moves either way — change alone
+  cannot separate the hypotheses. It has to be the quantitative comparison.
+
+- **⚠ AND FETISH'S CURVE IS THE WRONG SHAPE, NOT JUST THE WRONG DRIVE.** H2
+  moves **3.00 dB per dB of level** where CLA-76 moves **0.99** and a memoryless
+  quadratic term gives 1.00. Its odd orders move 4.0. The leading nonlinear
+  terms are 4th/5th order — an almost perfectly flat curve that only bends at
+  the top — and **no value of `fetDrive` will reproduce it** with our asymmetric
+  `tanh`.
+
+- **WHAT FETISH ADDS UNDER COMPRESSION IS A PURE ODD-ORDER RIPPLE, FLAT WITH
+  DEPTH.** H3 goes from the floor to **−52.6 dBc** and then does not move:
+  −54.0 / −52.5 / −52.6 / −52.7 at 1.6 / 6.1 / 10.6 / 15.1 dB of reduction,
+  with H2 unchanged throughout. THD sits at **0.24 % at every depth**. That is
+  the detector's 2f modulation, not a saturator — the discriminator built for
+  exactly this case earned its place on the first real capture that showed it.
+
+- **⚠ THE READER PRINTED "187,576 % MORE DISTORTION THAN LEVEL ACCOUNTS FOR".**
+  Arithmetically true, useless to read, and it buried the finding. FETish's
+  static law predicts 0.0004 % where 0.2417 % was measured, because the fit had
+  been run through readings at the **float noise floor** (1.6e-5 % at the
+  quietest tone). Points below 5e-4 % are now excluded, three real points are
+  required, and a prediction under 5 % of the measurement reports an absolute
+  split instead of a ratio.
+
+- **⚠ AND THE OPEN-GAIN GUARD CRIED WOLF ON A GOOD CAPTURE.** It asked the two
+  quietest tones to share a gain — but in null3 the SECOND tone legitimately
+  compresses (1.63 dB) while the quietest does not. It is a slope test now: the
+  bottom step must be markedly shallower than the steps above it, which is what
+  "below the knee" actually looks like.
+
+**WHERE THIS LEAVES THE FIT.** For `fetDrive` and the static curve, **CLA-76 is
+the reference** — right topology, right curve shape, and a clean square-law to
+fit. FETish cannot speak to that stage at all. FETish remains the better
+reference for **ballistics** (continuous knobs reading in µs and ms). That
+splits the primary reference by constant rather than by plugin, which is
+defensible because they are measuring different things — but it must be recorded
+as a split, not presented as two references agreeing.
+
+### ⚗⚗ FETISH'S STATIC CURVE, FITTED — AND IT IS A DEGREE-5 POLYNOMIAL
+
+`npm run fet:curve` fits a reference's memoryless transfer curve from its null1
+capture (the bounce with no gain reduction anywhere in it, so the capture is the
+curve applied to a known tone and nothing else). `npm run fet:curve:selftest`
+proves it against curves we chose ourselves.
+
+**THE RESULT:**
+
+```
+f(x) = x − 0.0100·x⁴ + 0.0100·x⁵          (c1 = 0.99998)
+     = x − 0.01·x⁴·(1 − x)
+```
+
+Fitted jointly over all five tone levels. Verified by rendering the fitted curve
+through the same tones: **H2 matches to 0.1 dB at every level** (−136.0 / −118.0
+/ −100.0 / −82.0 / −64.0 measured and fitted alike), H4 within 0.5 dB, worst
+error over 17 usable readings **1.39 dB**. ⚠ **AND IT EXTRAPOLATES**: fitted
+without the −6 dBFS tone and asked to predict it, worst error **1.41 dB**. A
+level-dependent mechanism fits every level individually and fails that.
+
+- **THE ORDERS ARE READ FROM THE DATA, NOT ASSUMED.** A term of order n makes
+  harmonics rising (n−1) dB per dB of level, of its own parity, at or below n.
+  FETish measures H2 3.00, H3 4.04, H4 3.02, H5 4.09 — orders 4 and 5 — and
+  **H6 through H9 sit at the float noise floor**, which is what a degree-5
+  polynomial and nothing else looks like. The corroboration is exact:
+  H4/H2 measures **−12.04 dB** against a pure x⁴ term's **−12.04**.
+
+- **⚠ THE COEFFICIENTS ARE −0.01 AND +0.01 TO FOUR FIGURES.** Almost certainly
+  the plugin's own design constants rather than a fit artefact.
+
+**THREE TRAPS, EACH OF WHICH PRODUCED A PLAUSIBLE WRONG ANSWER:**
+
+- **⚗ FITTING AGAINST THE RAW STIMULUS.** A memoryless polynomial cannot express
+  a delay, and the capture has one (3 samples of measured lag, plus whatever
+  fractional shift the plugin's filtering adds). Residual **−14.1 dB** and a
+  linear term of **0.980** on a plugin that is unity to five decimals. Rebuilding
+  the input as a sine at the OUTPUT's fundamental phase absorbs any pure delay
+  and takes the residual to −70 dB.
+
+- **⚗⚗ NOT MEAN-CENTRING, WHICH HALVED THE FOURTH-ORDER TERM.** An x⁴ term
+  carries DC — 3A⁴/8 on a sine — and the capture does not. Uncentred least
+  squares trades real fourth-order amplitude away to avoid adding DC that is not
+  there: **c₄ came out 2.06× too small**. The tell was that fitted H2 and H4 were
+  low by **exactly 6.3 dB at every level** — the right shape at the wrong
+  amplitude, which is what a scale error looks like and a shape error does not.
+
+- **AN ILL-CONDITIONED MONOMIAL BASIS.** Fitting orders 1-7 gave c₄ = −0.070 and
+  c₆ = +0.136; orders 1-5 gave c₄ = −0.022. Unstable, because the high terms were
+  fitting noise. Choosing the basis from the harmonic slopes, and fitting every
+  level at once, removes it.
+
+### ⚠⚠ AND A CORRECTION: CLA-76'S CURVE IS NOT MEMORYLESS
+
+The earlier entry said CLA-76 was the reference for `fetDrive` — "right
+topology, right curve shape, clean square-law to fit". **The topology half
+stands; the curve half does not.**
+
+CLA-76's harmonics ALL rise together at ~1.0 dB per dB: H2 0.99, H3 0.99,
+H5 1.00, H7 0.99, H9 1.00. H2 at 1.0 is a clean quadratic term. **H3 at 1.0 is
+impossible** — a cubic term gives 2.0. Every harmonic rising together means the
+distortion residual has a fixed SHAPE whose amplitude grows as the square of
+level: a drive following an envelope, or hysteresis. **Not a curve.**
+
+⚠ **Our own shaper is memoryless too, so this is not a `fetDrive` value we are
+missing — it is a mechanism we do not have.** No static shaper of any shape
+reproduces CLA-76's distortion.
+
+- **⚠ THE FIRST VERSION OF THE FITTER HAD NO SUCH CHECK AND PRODUCED A
+  CONFIDENT-LOOKING NUMBER.** It silently dropped the four harmonics its basis
+  could not generate, fitted `x + c₂x²`, and reported a worst error of
+  **257 dB** — against harmonics the basis cannot produce at all. It now refuses
+  to fit when the slopes are inconsistent with any polynomial, and says why.
+
+**SO THE PREFERENCE FOR FETISH IS BETTER SUPPORTED THAN WHEN IT WAS MADE.**
+FETish's static curve is exactly fittable by a memoryless shaper — which is what
+we have — and CLA-76's is not.
+
+**⚠ ONE SHIPPING CAVEAT: THE POLYNOMIAL IS UNBOUNDED.** Deviation from linear is
+0.00 at x = 1 and 0.02 at x = −1, but it reaches +0.16 at x = 2 and **+7.70 at
+x = 4**. `inputDrive` can push the shaper's input well over unity, so landing
+this in the kernel needs a clamp or a blend back to linear above about |x| = 1.5.
+Our `tanh` is bounded by construction and this is the one property it has that
+the fitted curve does not.
+
+### ⚗ THE MEASURED CURVE IS IN THE KERNEL
+
+`fetCurve: 'poly'` (default) is the FETish curve; `fetPosition: 'preCell'`
+(default) puts it where FETish's measured. `FET_LEGACY_PATCH`
+(`{fetCurve:'tanh', fetPosition:'postCell'}`) reproduces the previous kernel and
+is pinned **bit-identical** against a render of the pre-change code.
+
+- **AGAINST THE CAPTURE, 0.91 dB WORST ERROR ON H2/H3 ACROSS 24 dB.** And the
+  contrast with what shipped before is the whole point: at −30 dBFS the old
+  `tanh` made **−61 dBc of H2 where FETish makes −136** — 75 dB more distortion
+  at a level where the unit is doing nothing. That is the "dirty when it isn't
+  working" behaviour the new curve removes.
+
+- **IT IS ALSO FASTER.** 20 s mono at 44.1 kHz, best of 5: poly/preCell **211 ms
+  (95x realtime)**, poly/postCell 196, legacy tanh 244, shaper bypassed 195. A
+  polynomial is cheaper than `Math.tanh`, so the voicing change bought throughput
+  against the dev-log baseline of 268 ms / 75x.
+
+- **ONE SHAPER ENTRY POINT FOR BOTH PATHS.** The oversampled and base-rate loops
+  each carried their own copy of the `tanh` expression; a third copy would have
+  made a curve change a three-place edit. `_shapeFet` is the only place a curve
+  is evaluated now, so the measurement path cannot drift from the render path.
+
+- **THE UNBOUNDED TAIL IS GUARDED.** Past |x| = 1 the polynomial continues
+  linearly at its own edge slope — C1-continuous, so no corner to alias.
+  Unguarded it returns **11.70 at x = 4**; guarded, 4.03. The `tanh` was bounded
+  by construction and this is the one property it had that the fit does not.
+
+### ⚗⚗ AND IT SURFACED A REAL DEFECT IN THE AUTO-MAKEUP, WHICH IS NOW FIXED
+
+`computeFET1176AutoMakeupDb` rendered its wet path at **`oversample: false`** — a
+cheaper and DIFFERENT algorithm from the one apply ships. So the makeup was
+solved against a render nobody hears, and apply came out under the target while
+the live preview, which runs in the real oversampled path, reported the higher
+figure.
+
+- **MEASURED ON THE narration FIXTURE: 0.58 dB ON THE OLD tanh, 0.77 ON THE NEW
+  CURVE.** ⚠ **The test tolerance was 0.6 dB — it had been accommodating the
+  defect by 0.02 dB.** The `tanh` squashed peaks hard enough to nearly hide it;
+  the measured polynomial is close to linear at these levels and passes the
+  difference straight through, which is what exposed it.
+
+- **⚠ THE LATENCY IS WHY IT WAS AVOIDED, and it is the part to get right.**
+  Oversampled, the kernel delays by `latencySamples`, and the solve pairs
+  `dry[i]` with `wet[i]` sample for sample — a 50-sample slip compares a
+  transient against the silence before it. The input is padded by that many
+  samples so the whole tail renders, and the delay is dropped off the front.
+
+- **LIVE AND OFFLINE NOW AGREE TO 0.00 dB** at Input 40 / 55 / 75, **on both
+  curves** — the legacy path was 0.58 dB out and is now exact too. Tolerance
+  tightened 0.6 → 0.1 dB, so it guards rather than accommodates.
+
+- **THE COST IS REAL AND IS THE USER'S CALL:** the solve renders oversampled now,
+  **327 ms for a 30 s selection against ~90 ms before**. The dev log's full
+  measurement path was 417 ms, so this moves the DSP half of it. Exactness was
+  chosen over speed because a preview that disagrees with apply is the failure
+  this whole tracker exists to avoid.
+
+### ⚗⚗ THE DIAL TABLE WAS BUILT AT A HARDCODED INPUT, AND THE STATISTICS ARE
+### DEPTH-DEPENDENT
+
+Asked how exactly the 12 dB target needs to be hit on a VU meter with no digital
+readout. It does not need to be hit at all — but answering that found the fitter
+comparing at the wrong depth.
+
+- **⚠⚠ OVERSHOOT MOVES MORE WITH DEPTH THAN IT DOES ACROSS THE WHOLE DIAL
+  RANGE.** Measured at attack dial 4: **1.93 dB at 2.3 dB of reduction to 8.02 dB
+  at 11.4** — a 6 dB spread, against 4.8 → 1.0 dB from dial 1 to dial 7 at a
+  fixed Input. `ourDialTable` was built at `inputDrive: 55` (≈4.9 dB) regardless
+  of the capture, so a reference taken at ~12 dB would have landed clean off the
+  top of the table and been reported as **"OUTSIDE OUR RANGE, slower than dial
+  1"** — a confident finding about `ATTACK_SLOWEST_S` caused entirely by a depth
+  mismatch. Release t63 is far less sensitive (406 → 358 ms, 12 %) but not
+  immune. The table is now built at the Input that drives our kernel to the
+  reduction the capture actually reached.
+
+- **⚠ AND THE DEPTH MATCH HAD TO USE THE SAME MEASUREMENT AS EVERYTHING ELSE.**
+  First cut bisected on the kernel's internal `grDb` from a plain tone; the
+  reference's comes from the analysed trace. They differ by hundredths of a dB —
+  one is an instantaneous envelope value, the other a peak-sampled average — and
+  that was enough to move the solved Input 0.8 knob units and **the reported
+  attack dial by a whole dial**. Bisecting on the analysed reduction instead, on
+  an 11 s single-burst plan rather than the 83 s stimulus, puts the known dials
+  back at 1.90 / 4.00 / 5.00 / 6.00.
+
+- **AND "OUTSIDE OUR RANGE" NOW HAS TO CLEAR A MARGIN OF ONE DIAL STEP.** A
+  target a hundredth of a dB past the endpoint was being reported as a finding
+  about the endpoint constant. Inside a dial step it is the endpoint plus noise,
+  and the depth match feeding the table is itself only good to a fraction of a
+  knob unit.
+
+### ⚗ OUTPUT LEVEL IS IRRELEVANT UNTIL IT CLIPS, AND THEN IT IS NOT
+
+Output is a clean multiply after the FET and the trace is recovered by division,
+so a constant output gain cancels: measured across 24 dB of Output, reduction
+6.229 dB, overshoot 4.714 dB and release t63 381.6 ms are identical **to three
+decimal places** at every position.
+
+⚠⚠ **48 SAMPLES OVER FULL SCALE TOOK OVERSHOOT FROM 4.714 dB TO 1.843.** The
+overshoot IS the peak that escapes compression, which is exactly the sample that
+clips first — so the one statistic the attack fit rests on is the one a clip
+destroys, from a clip nobody would hear. Reduction and release t63 were untouched
+at 6.229 dB and 381.6 ms, so nothing else in the report warns about it.
+
+### ⚠ THE DIAL SEARCH COULD NOT FAIL, AND A CONTINUOUS KNOB IS WHAT EXPOSED IT
+
+Asked whether a continuous attack/release control (like FETish's) would need a
+different fitter. It does not — but the question surfaced a real defect in the
+one that exists.
+
+**The METHOD is unchanged and still necessary.** Matched measurement exists to
+cancel the ~2.9x bias between a measured t63 and the constant behind it, and
+that bias is a property of the MEASUREMENT — a bare rectifier whose target is
+over threshold only near the waveform peaks — not of whether the control has
+detents. Both sides go through the same analysis either way.
+
+**What changes is the SEARCH, and it gets simpler rather than harder.**
+
+- **⚠⚠ AN ARGMIN OVER SEVEN DIALS CANNOT FAIL.** `bestDial` returned the nearest
+  and printed it with no residual and no range check, so a reference SLOWER than
+  our slowest came back as a confident "dial 1" and one faster than our fastest
+  as "dial 7" — either of which reads as a successful fit. ⚠ That outcome is
+  live: `ATTACK_SLOWEST_S` / `ATTACK_FASTEST_S` have no provenance but a
+  datasheet, and Waves' own wording is that Bluey and Blacky differ in **time
+  constants**, so a reference off the end of our range is one of the more useful
+  things these captures could say. It now names the endpoint constant and calls
+  it a finding rather than a dial.
+
+- **AND THE FRACTIONAL DIAL IS THE CONTINUOUS ANSWER, FOR FREE.**
+  `dialToSeconds` already takes a float and interpolates geometrically, so 3.4
+  is a real setting; a knob reading in microseconds is the same law with the
+  same endpoints, minus the detents. The fitter interpolates on the MEASURED
+  statistic (what both sides share, not on time) and prints the dial to two
+  decimals with its equivalent µs/ms. Verified against the synthetic captures:
+  2.00, 4.00, 5.01, 6.00 for known dials 2, 4, 5, 6.
+
+**⚠ AND IF THE KNOB EVER GOES CONTINUOUS, THE FIT BECOMES A RESIDUAL RATHER THAN
+A SEARCH — which is strictly stronger.** With both sides declaring a time in
+microseconds there is no mapping left to calibrate: set ours to the reference's
+234 µs and measure the difference. That tests the ballistics MODEL — one-pole
+attack, two-stage release, `TAIL_FRACTION` / `TAIL_MULT` — instead of
+calibrating a knob law, and unlike a search it can come back wrong.
+
+### The ballistics fitter, ready for the captures
+
+`npm run fet:ballistics` reads `*bursts*.wav` captures and reports attack t63,
+first-peak overshoot, release t63 per hold length, the tail test, and a
+matched-measurement dial search against our own kernel.
+`npm run fet:ballistics:selftest` proves it on synthetic captures at dials we
+chose, with an arbitrary lag injected.
+
+- **⚗ THE DEFERRED ALIGNMENT PIECE IS BUILT AND IT IS SAMPLE-EXACT.**
+  `refineLagAtEdge` was noted as needed and left unbuilt ("building it against a
+  real capture beats guessing"). It could be built against synthetic ones after
+  all: injected lags of 0 / 7 / −13 / 50 / 137 / −200 all recover with **zero
+  error**, including the −200 case where the envelope alignment was 16 samples
+  out. ⚠ Envelope alignment lands within ~12 samples, which is HALF A PERIOD at
+  the 4 kHz probe — a waveform correlation refined from there can lock onto the
+  wrong cycle. The step edge breaks the tie because it is a broadband amplitude
+  discontinuity: the one-period-away peaks correlate on the waveform but not on
+  the jump. The fitter reports the **margin** to the runner-up and refuses to
+  trust the attack numbers when it is thin.
+
+- **⚠⚠ THE SELF-TEST FOUND THE FITTER REPORTING "NO TAIL" ON OUR OWN KERNEL,
+  whose tail is 22 % of the reduction on a network 4x slower.** The held level
+  was read over a fixed 100 ms window before the burst ended — **longer than the
+  plan's shortest hold**, so on the 50 ms burst it reached back past the step and
+  averaged the OPEN gain into the held level. That put its release t63 at 606 ms
+  against 326-389 ms for the longer holds: an outlier pointing the wrong way,
+  which inverted the tail verdict. The window is bounded by the burst now, and
+  the sequence reads 312 / 326 / 371 / 389 ms — monotone with exposure, which is
+  what a tail looks like.
+
+- **AND A BURST THAT NEVER REACHED FULL REDUCTION IS EXCLUDED FROM THE TAIL
+  TEST**, with its measured depth named. Releasing from a shallower depth is a
+  different experiment; the question is how long recovery takes from the SAME
+  place.
+
+- **THE DIAL SEARCH IS MATCHED MEASUREMENT, NOT CONVERSION**, per the earlier
+  finding that measured t63 runs ~2.9x the constant behind it with a factor that
+  moves with Input, level and knee. Our kernel goes through the identical
+  analysis so the bias cancels. Verified: attack dials 2 and 5, release dials 4
+  and 6, all recovered exactly from captures that only declared them in a
+  filename.
+
+- **⚠ THE DIAL TABLES ARE THE ENTIRE COST OF A FIT RUN** — seven renders of the
+  83 s stimulus, oversampled, per sweep — and they were being rebuilt per
+  capture. Memoised on params and sweep: **88 s → 45 s**, and the full suite is
+  82 s wall on four cores because it runs alongside everything else.
+
+**The capture matrix is unchanged and ready.** `preInput` shipping does not touch
+it: the ballistics live in the detector and the cell, and the shaper's position
+is downstream of both.
+
+### ⚗ WHAT `preInput` AND `postCell` ACTUALLY DIFFER BY — three axes, not one
+
+Auditioned by ear: `preCell` worst, the other two both usable but different in a
+way a single sample does not settle. Measured, they differ on three axes and
+they TRADE OFF rather than being more and less of one thing.
+
+| | `preInput` | `postCell` | `preCell` |
+|---|---|---|---|
+| H2 swing across the Input knob | **0.0 dB** | 36.4 | 79.6 |
+| H2 slope vs SOURCE level, knob fixed | **3.01 dB/dB** | 1.83 | 3.00 |
+| drive while the cell clamps | **never moves** | follows the reduction | follows it |
+
+- **`preInput` IS CONSISTENT ACROSS THE KNOB AND STEEP ACROSS THE PERFORMANCE.**
+  The shaper sees the source, so the colour is a property of how loud somebody
+  actually spoke: 3 dB of H2 per dB of source level, and nothing the Input knob
+  does changes it.
+
+- **`postCell` IS THE REVERSE ON BOTH.** The shaper sees the compressed signal,
+  which is a flattened version of the performance — so the colour is much more
+  even across a take (1.83 dB/dB against 3.01) and it MOVES when the Input knob
+  does (36.4 dB across the travel).
+
+- **AND ONLY `postCell` BACKS OFF WHILE THE COMPRESSOR WORKS.** Measured exactly
+  (no analysis window) on a −26 → −4 dBFS step at ratio 8: `preInput`'s drive
+  holds at −4.0 dBFS throughout, while `postCell`'s falls −12.7 → −15.9 dBFS as
+  the cell clamps — about **10 dB of H2 decaying away over the attack**, and
+  ~36 dB below `preInput` once settled. The colour marks the front of a sound
+  and then gets out of the way.
+
+⚠ **AN EARLIER WINDOWED MEASUREMENT PUT THAT DECAY AT 52 dB AND THAT NUMBER IS
+WRONG.** The H2 windows were 40 cycles — 20 ms at the 2 kHz probe — so a window
+labelled "0.5 ms after the step" actually averaged the entire settling, and the
+early rows were dominated by the pre-clamp transient. Tracking the shaper's
+drive level directly needs no window and has sample resolution. **A time-labelled
+row is only as fast as the window behind it.**
+
+**SO THE CHOICE IS WHICH REFERENCE'S DISTORTION DYNAMICS TO HAVE.** `preInput`
+reproduces FETish's: its measured H2 slope against source level is **3.00**,
+which is what a compensated Input and a source-fed shaper give. `postCell` is
+CLA-76's POSITION (rms 0.07 dB for that hypothesis against 3.94) — though not
+its curve, which is not memoryless and which no static shaper reproduces.
+
+### The curve bench, wired to the panel
+
+`FET1176TuningPanel.vue` — two rockers (curve, position) plus a **Legacy kernel**
+button, gated off in production exactly as the OptoSmooth bench is
+(`localStorage['wavely:fet-bench'] = '1'`, or any dev build). Backed by
+`fet1176Tuning.js`, a plain store on the same contract as `la2aTuning.js`:
+module state, never serialised into a preset or an undo entry, and
+`fet1176TuningOverrides()` returns **only** keys that differ — so an untouched
+session produces kernel params byte-identical to those from before the panel
+existed.
+
+- **LEGACY IS ONE BUTTON, NOT TWO ROCKER POSITIONS.** "The plugin as it was
+  before the capture" is a PAIR of choices — the `tanh`, after the cell — and
+  either alone is a configuration that never shipped and was never voiced. The
+  button writes `FET_LEGACY_PATCH`, imported from the kernel rather than
+  restated, so the two cannot drift.
+
+- **THE OVERRIDES MERGE IN `toKernelParams` AND NOWHERE ELSE**, which is what
+  keeps the live worklet and the offline apply path sample-identical. Threading
+  the tuning through every caller and relying on none of them forgetting is the
+  alternative.
+
+- **A BENCH CHANGE RE-MEASURES THE MAKEUP.** Both the curve and its position
+  change the RENDER, and the auto-makeup is solved from the render; leaving the
+  makeup where it was would show the previous curve's gain against the new
+  one's peaks. On the `tanh`/MEASURED A/B that is several dB, and it would read
+  as the curves differing in LEVEL rather than in colour — which is exactly the
+  comparison the bench exists to make honestly.
+
+- **⚠ AND THE EFFECT WRAPPER HAD ITS OWN COPY OF `fetDrive`'S DEFAULT, WHICH
+  WENT STALE.** The kernel's moved to 1 with the measured curve;
+  `FET1176_DEFAULTS` in `fet1176Compressor.js` stayed at 0.35. Since
+  `toKernelParams` always sends `fetDrive`, the kernel's value never applied in
+  the app — **the panel would have shipped 35 % of the curve while every test
+  and script saw the whole of it.** The presets' `normalize` fallback carried
+  the same stale number. Both now track the kernel.
+
+### ⚠⚠ CORRECTION: THE "13 PRE-EXISTING TEST FAILURES" WERE A MISSING INSTALL
+
+Reported repeatedly through this branch's work as "13 failures, identical on a
+clean checkout". The clean-checkout comparison was real and the conclusion drawn
+from it — that they were not caused by the change in hand — was right. **The
+attribution was wrong.** `node_modules` was absent from the session container,
+so every suite needing a dependency failed to load.
+
+With dependencies installed: **1273 tests, 1273 pass, 0 fail.** The suite is 188
+tests larger than the 1085 that had been running, and the repo is green and has
+been throughout.
+
+⚠ **`npm run smoke` had been reported unavailable for the same reason** and now
+runs: all thirteen panels open clean, FET Punch included, with the bench panel
+mounted (the smoke runs a dev server, so the gate is open).
+
+### ⚗⚗ THE INPUT CONTRACT, RESOLVED WITHOUT ADOPTING THE COMPENSATION
+
+**The decision: keep our Input as a real gain and keep the makeup architecture.**
+That made `preCell` — FETish's own measured topology — the wrong default, and the
+number says so plainly. A −6 dBFS tone, Input swept 10 → 90, H2 in dBc:
+
+| position | swing across the knob |
+|---|---|
+| `preInput` (shipping) | **0.0 dB** — flat at −64.0, the reference's own figure |
+| `preCell` | **79.6 dB** |
+| `postCell` | 36.4 dB |
+| FETish | 0.0 dB |
+
+⚠ **FETish'S TOPOLOGY IS NOT FETish'S BEHAVIOUR ONCE IT IS BOLTED TO OUR INPUT
+KNOB, AND THAT IS THE WHOLE TRAP.** FETish's Input is internally compensated, so
+its audio path sits at source level whatever the knob does and its shaper sees a
+FIXED drive. Ours is a real gain. Putting the shaper in the same *place* hands it
+the knob's entire travel with nothing regulating it — which made `preCell` the
+**furthest of the three** from the reference it was taken from. `postCell` did
+better only by accident: the cell pulls down what reaches the shaper as the knob
+pushes it up, regulating about half.
+
+**`preInput` puts the shaper ahead of the input attenuator**, so it sees the
+source. That reproduces FETish's saturation behaviour exactly — 0.0 dB of swing,
+landing on −64.0 dBc, the reference's measured value — while leaving the Input
+knob a real gain and the makeup architecture completely untouched. **No
+compensation adopted.**
+
+⚠ It is not physical: the hardware's attenuator comes first. Neither is FETish's
+compensation. And it is the same reasoning `inputAlign.js` already shipped for
+OptoSmooth — make the character a property of the FILE, not of a knob position.
+The cost is the same one FETish carries: a quiet source gets no colour, because
+the colour is level-driven and always was.
+
+- **THE ALL-BUTTONS CLAMP IS GONE, AND IT WAS WRONG.** `polyAmount` was clamped
+  at 1 on the reasoning "never deeper than what was measured" — but the fitted
+  range is a range of **x**, which `POLY_XMAX` already guards, and scaling the
+  coefficients only makes the curve deeper, not wider. It stays monotonic at
+  1.6x depth (f' bottoms out at 1.016 across [−1, 1]). What the clamp actually
+  did was flatten the top of the knob in all-buttons mode from 0.625 up —
+  neutering the one mode whose point is that the FET is driven harder.
+
+- **`fetDrive` DEFAULTS TO 1 NOW, WHICH IS THE MEASURED CURVE.** Shipping 0.35
+  meant shipping 35 % of the curve we had just gone and measured: 9 dB less H2
+  than the reference at −6 dBFS. 0.35 was calibrated for the `tanh`, where the
+  knob also moved the asymmetry bias and the whole travel was far dirtier
+  (H2 −38 dBc at 0.35 against this curve's −73).
+
+### ⚠ WHAT THE INPUT CONTRACT USED TO COST US (superseded by `preInput` above)
+
+With the shaper before the cell and our Input still a REAL gain, the shaper is
+driven by the Input knob. On a −6 dBFS tone its H2 runs **−136 dBc at Input 0,
+−90 at 30, −67 at 50, −46 at 70** — so the Input that makes the curve audible is
+the same Input that compresses hard. **FETish's compensation decouples those two
+and ours does not.**
+
+- Two factory presets sit at inputDrive 70-75, which puts the shaper's input past
+  unity and into the linear continuation — so they distort **less** than the
+  reference, not more.
+- ⚠ **The null-reader self-test cannot build a probe for our own shipping
+  configuration because of this**: at an Input low enough for zero gain
+  reduction the shaper makes nothing measurable, and `thd.wav` has no zero-GR
+  operating point that reaches it. Recorded in the script rather than worked
+  around.
+
+**The five factory presets are deliberately NOT re-voiced.** `fetDrive` scaled a
+`tanh` drive and now scales a measured curve where 1 IS the reference; the stored
+numbers carry across arithmetically and not in voicing. Matching the old
+distortion amount would undo the change rather than preserve the preset, and
+re-voicing twice is worse than once — the same reasoning that held the LA-2A
+presets back through its taper re-fit.
+
+- **Still not built:** the ballistics fitter, and the Input-compensation decision. The recovery is proved against a
+  kernel whose constants are known before it is pointed at one whose constants
+  are not, and that ordering is the point. Also still open: `LA2A_LEGACY_PATCH`
+  has no FET counterpart, so a retune would change every existing FET Punch
+  render with no way back, and the five factory presets in
+  `src/audio/pluginPresets/fetPunch.js` are calibrated against today's kernel —
+  the Scheps inheritance bug (which shipped 4× the intended gain reduction) is
+  the precedent for what happens when that is not handled deliberately.
+
+### ⚗⚗ THE TRANSIENT LIMB IS SETTLED, AND IT UNCOVERED A THIRD LIMB NOBODY WAS CONTROLLING FOR
+
+`transients.wav`, four rates, both references at a matched depth with a validated
+control. **Neither reference keys its release on transient density.**
+
+| | depth dB | sustained | 2 Hz | 5 Hz | 25 Hz | 100 Hz | density spread |
+|---|---|---|---|---|---|---|---|
+| CLA-76 (dial 4) | 10.2–10.3 | 1149 | 1153 | 1150 | 1145 | 1143 | 0.9 % / 10 ms |
+| FETish (234 ms) | 18.5–19.0 | 96 | 96 | 96 | 96 | 94 | 2.4 % / 2 ms |
+
+Against our own tailed kernel at 10.1 % / 38 ms and 0.1 % with the tail off, on
+the identical contrast. So the test resolves it and both are flat.
+
+Combined with the burst results, that gives: **CLA-76 lengthens with exposure and
+not with density. FETish does neither.**
+
+**⚠ BUT FETish'S RELEASE IS NOT A FIXED TIME CONSTANT, AND THE PLANS WERE BUILT
+SO THAT NEITHER COULD SEE IT.** Both `bursts.wav` and `transients.wav` hold depth
+constant *within* a capture — deliberately, because depth confounds the
+comparison they each make. Across three FETish captures at essentially the same
+release knob (234–235 ms), depth was the thing that varied:
+
+| depth | release t63 |
+|---|---|
+| 4.93 dB | 23 ms |
+| 14.08 dB | 85 ms |
+| 19.04 dB | 96 ms |
+
+A pure exponential recovers 63 % of its reduction in τ **regardless of how deep
+that reduction was**, so a depth-invariant t63 is what a fixed release predicts
+and this is not it — it moves 4×. That is program dependence, keyed on the
+amount of gain reduction, which is arguably the most literal reading of the
+hardware description: *"during heavy, continuous compression the circuit
+automatically lengthens the release."* **Heavy is depth.**
+
+Our own kernel does not do this. Measured earlier over 2.3 → 11.4 dB, its release
+t63 moves 406 → 358 ms — 12 %, and in the *opposite* direction.
+
+⚠ THREE POINTS FROM THREE SEPARATE CAPTURES IS A SIGNAL, NOT A MEASUREMENT. The
+attack knob differed across them (126 / 38 / 120 µs) and so did the Input. It
+needs a controlled sweep before anything is fitted to it — which costs no new
+code, because `bursts.wav` at a fixed attack and release with Input swept is
+exactly that experiment, and the report already prints depth and release t63 per
+capture.
+
+⚠ ALSO NOTE FETish'S 0.55 dB DEPTH SPREAD ACROSS THE RATES, monotone with rate
+(19.04 at 2 Hz to 18.48 at 100 Hz — the 5 ms on-period at 100 Hz is marginal for
+a full re-attack). Given the depth sensitivity above, that spread is the likelier
+cause of the 2 ms density reading than density is. The flat verdict is cleaner
+than the number makes it look.
+
+**Consequence for the fit: `TAIL_FRACTION` / `TAIL_MULT` still must not be zeroed
+to match FETish.** The earlier reason was that the hardware behaviour is
+documented and FETish's omission is a modelling gap. The reason now is stronger —
+FETish is not a fixed-release compressor at all, so "match FETish" does not mean
+"remove program dependence", it means implement the limb FETish actually has,
+which is not the limb we implemented.
+
+### ⚗⚗⚗ CONFIRMED UNDER CONTROL: FETish'S RELEASE IS SCHEDULED ON DEPTH, AND OURS IS NOT
+
+Four `bursts.wav` captures, identical knobs (`a121_r234`), Input the only thing
+moving. The signal from the three scattered captures holds:
+
+| reduction | release t63 |
+|---|---|
+| 6.18 dB | 30 ms |
+| 13.96 dB | 70 ms |
+| 17.51 dB | 93 ms |
+| 21.86 dB | 139 ms |
+
+**The control that makes this a measurement rather than an artefact:** our own
+kernel over the same plan and the same analysis, release knob fixed at dial 4.
+
+| depth | ours, tail on | ours, TAIL_FRACTION 0 |
+|---|---|---|
+| 5.09 dB | 390 ms | 233 ms |
+| 9.04 dB | 368 ms | 233 ms |
+| 12.08 dB | 356 ms | 233 ms |
+| 14.30 dB | 350 ms | 233 ms |
+| 16.48 dB | 346 ms | 233 ms |
+
+A fixed exponential reads **233 ms at every depth, to the millisecond** — which is
+what the maths says it must, since recovering 63 % of a reduction takes one time
+constant however deep the reduction was. The analysis does not manufacture depth
+dependence. And with our tail on, t63 *falls* 11 % across the range: our program
+dependence runs the OPPOSITE way to FETish's, and 40× weaker.
+
+Shape, fitted to the four points:
+
+| law | R² |
+|---|---|
+| `t63 = 16.9 * exp(0.098 * D)` | **0.995** |
+| `t63 = 3.44 * D^1.17` | 0.969 |
+| `t63 = -17.2 + 6.74 * D` | 0.965 |
+
+Exponential, doubling about every 7 dB.
+
+⚠ **DO NOT FIT τ(D) BY REGRESSING THAT CURVE.** Those are *measured t63* values.
+Once the constant is scheduled on depth it changes DURING the recovery as the
+reduction decays, so the recovery is not a pure exponential and measured t63 is
+no longer the constant behind it. The law has to be fitted the way everything
+else here was — parameterise the kernel, run it through the identical analysis,
+and match the measurement. Regressing the table directly is the same class of
+error as dividing out the release "bias" that turned out to be our own tail.
+
+**Where this leaves the three limbs:**
+
+| | exposure (`bursts`) | density (`transients`) | depth |
+|---|---|---|---|
+| documented 1176 | lengthens | quick after transients | "heavy compression" lengthens |
+| CLA-76 | ✓ lengthens | ✗ flat | not yet measured |
+| FETish | ✗ flat | ✗ flat | ✓ **4.6× over 6→22 dB** |
+| our kernel | ✓ lengthens | ✓ but backwards | ✗ 11 %, backwards |
+
+So `TAIL_FRACTION` / `TAIL_MULT` are not merely unsupported by FETish — they
+implement a different limb from the one FETish has, in the wrong direction on the
+one limb both touch. Fitting to FETish means a release constant scheduled on
+reduction depth, which is a topology change, not a retune, and needs a legacy
+patch on the `FET_LEGACY_PATCH` precedent.
+
+⚠ **TWO OF THE FOUR CAPTURES CANNOT SUPPORT AN ATTACK COMPARISON.** At 17.51 and
+21.86 dB our Input knob clipped at 16.27, so both fell back to the same table and
+both reported dial 2.44 — the tool flagged it. Their *release* readings are sound
+(they come from the capture alone), the dial matches are not. Second confirmation
+that `IN_DRIVE_MIN_DB` / `IN_DRIVE_SPAN_DB` is short of the reference's range.
+
+⚠ Overshoot also saturates near 14 dB — 13.28 at 13.96 dB of depth, then 13.99 at
+both 17.51 and 21.86. Whatever the cause, overshoot stops discriminating above
+roughly 17 dB, so the attack fit should not be run at depths beyond that until it
+is understood.
+
+### Depth-scheduled release, behind a flag — and why the fit cannot be believed yet
+
+`releaseSchedule: 'depth'` on the FET kernel, default `'none'`, with a test that
+renders both and compares sample by sample: **off is bit-identical to every FET
+Punch render made before it existed.** The constant scales as
+`tau = tau_knob * exp(k * (D - 10 dB))`, read from a 0.25 dB lookup table rather
+than a `Math.exp` per sample, and indexed on the CURRENT reduction — so it
+shortens as the cell recovers, which is the physical choice and the reason
+measured t63 is no longer the constant behind it.
+
+`scripts/fet-release-depth.mjs` fits it by simulate-and-match: every candidate is
+rendered through the kernel and read by the same analysis that produced the
+reference numbers. Its self-test recovers `k = 0.1198` from a synthetic table
+rendered at 0.12, and confirms the schedule is inert when off.
+
+**Three things the fit got wrong before it got them right, all worth keeping:**
+
+⚠ **The release dial was pinned at 4 because the reference knob said 234 ms.** The
+residual came out at 207 ms and looked like the model failing. FETish's release
+knob reads ~2.75x longer than the constant it produces — measured twice, already
+logged — so its "234 ms" is not our dial 4. The schedule sets the SHAPE and the
+dial sets the LEVEL; fitting one against a label neither side shares cannot
+converge. With the dial free the same fit lands at 0.48 %.
+
+⚠ **The tail has to come off, and that is not a detail.** The two mechanisms
+fight: the tail lengthens recovery with exposure, which FETish measurably does
+not do, and at shallow depths it dominates the schedule outright — a synthetic
+table rendered at `k = 0.12` with the tail on comes back NON-MONOTONE
+(271 / 262 / 301 / 333 ms).
+
+⚠ **The residual is in percent, not milliseconds.** The reference spans 30 to
+139 ms, so an absolute residual is dominated by the deepest row and a fit can
+look good while being 3x wrong at the shallow end.
+
+**AND THE RESULT IS STILL NOT EVIDENCE.** Our Input runs out near 16.3 dB against
+a reference reaching 21.9, so two of the four rows cannot be driven to at all:
+
+| reference depth | reference t63 | ours | error |
+|---|---|---|---|
+| 6.18 dB | 30 ms | 29.8 | −0.6 % |
+| 13.96 dB | 70 ms | 70.2 | +0.3 % |
+| 17.51 dB | 93 ms | — | past our Input range |
+| 21.86 dB | 139 ms | — | past our Input range |
+
+`k = 0.1586 dB⁻¹` at release dial 6.13, rms 0.48 %. **Two reachable points against
+two free parameters is an interpolation, not a fit** — k and the dial can hit any
+two rows exactly, so that 0.48 % is arithmetic and says nothing about whether a
+depth schedule is the right model. The tool names this rather than printing a
+flattering number, and a test pins the underdetermination so that it failing is
+the signal the fit has become worth believing.
+
+The one number that does carry information: the same fit with the schedule off
+and **the dial free** — the honest null hypothesis, not the shipping dial — cannot
+get below **51 %**. A fixed release of any length cannot produce this shape. That
+is weak evidence for the schedule and strong evidence against a fixed constant.
+
+**Blocked on `IN_DRIVE_SPAN_DB`.** Widening our Input range is now the gate on the
+release fit, not a side finding — it is the third time it has come up.
+
+### ⚠⚠ CORRECTION: `IN_DRIVE_SPAN_DB` WAS NEVER THE BLOCKER ON THE RELEASE FIT
+
+The previous entry called widening the Input range "the gate" on the depth fit,
+and said so three times. It was wrong, and acting on it would have moved every
+shipping knob position, every factory preset and every existing render in order
+to unblock a **measurement**.
+
+The detector sees `level + inputDrive` summed in dB and nothing else, and the
+measurement path runs at `fetDrive: 0`, so the saturator — the one stage that
+could distinguish them — is bypassed. Raising the stimulus is therefore exactly
+equivalent to raising the knob, and the bench can drive as far past +16 dB as it
+likes. Verified rather than assumed:
+
+| | depth | release t63 |
+|---|---|---|
+| Input 100, stimulus 0 dB | 16.484 dB | 345.7 ms |
+| Input 80, stimulus +6.540 dB | 16.484 dB | 345.7 ms |
+
+6.540 dB is exactly the knob's own 80-to-100 span at `IN_TAPER` 0.8. Identical to
+every digit printed.
+
+⚠ ONE TRAP IN DOING IT THIS WAY: `traceGain` divides the capture by the reference
+envelope, so the envelope has to be scaled by the same factor. Leave it at the
+original amplitude and the drive itself reads as compressor gain.
+
+**With all four rows reachable, the fit is real:**
+
+| reference depth | reference t63 | ours | error |
+|---|---|---|---|
+| 6.18 dB | 30 ms | 31.3 | +4.4 % |
+| 13.96 dB | 70 ms | 65.3 | −6.7 % |
+| 17.51 dB | 93 ms | 92.4 | −0.6 % |
+| 21.86 dB | 139 ms | 142.9 | +2.8 % |
+
+`k = 0.1380 dB⁻¹` at release dial 6.28, tail off, **rms 4.25 % over four points
+against two free parameters** — against **53.59 %** for a fixed release with the
+dial free, which is the honest null. Twelve times better, and no longer an
+interpolation.
+
+⚠ THE RESIDUAL HAS STRUCTURE IN IT: +4.4 / −6.7 / −0.6 / +2.8. A pure exponential
+in depth is clearly the right family and is not exactly the law. Worth trying
+other forms before anything ships, and worth more than four rows.
+
+**The product question is still open and is genuinely separate.** FETish reaches
+21.9 dB where FET Punch tops out near 16.3. That is a real limit a user can hit,
+and whether to widen it is a shipping decision about the plugin — with every
+preset and render downstream of it — not something to change in service of a
+measurement.
+
+### The Input knob reaches the reference — added above a knee (SUPERSEDED, see below)
+
+FET Punch topped out near 16.3 dB of reduction on a −12 dBFS source where FETish
+reached 21.9. That is a limit a user can hit, so it is fixed as a product change
+rather than a bench one.
+
+⚠ **THE OBVIOUS FIX WAS THE WRONG ONE.** Raising `IN_DRIVE_SPAN_DB` from 40 to 47
+moves *every* knob position, and `inputDrive` is a value presets SAVE — so it
+would have silently re-voiced all five factory presets and every stored user
+patch. At span 47 the knob's midpoint runs **3.4 dB hotter** than the number
+beside it used to mean. The Scheps inheritance bug, which shipped 4× the intended
+gain reduction because a change landed on shared defaults, is the precedent.
+
+Instead the extra travel is added on top of the existing law, weighted by a
+smoothstep that is zero at knob 80 **with zero slope there**:
+
+```
+drive = IN_DRIVE_MIN_DB + IN_DRIVE_SPAN_DB * knob^IN_TAPER
+      + IN_DRIVE_EXTRA_DB * smoothstepFrom(knob, 80, 100)
+```
+
+| knob | 0 | 40 | 55 | 70 | 75 | 80 | 90 | 100 |
+|---|---|---|---|---|---|---|---|---|
+| before | −24.000 | −4.782 | 0.794 | 6.070 | 7.777 | 9.460 | 12.767 | 16.000 |
+| after | −24.000 | −4.782 | 0.794 | 6.070 | 7.777 | 9.460 | 16.267 | **24.000** |
+
+Below 80 it is bit-identical, which covers every factory preset (40 / 55 / 60 /
+70 / 75 — the hottest is 75). Reduction at −12 dBFS, ratio 4, now runs to
+**22.5 dB** against 16.3, clearing FETish's 21.86.
+
+⚠ THE ZERO SLOPE AT THE KNEE IS LOAD-BEARING and a linear ramp will not do — it
+joins the taper with a step change in slope, so the knob visibly accelerates at
+one position, which a hardware attenuator does not do. Measured across the join:
+0.335 → 0.385 dB per knob unit, continuous.
+
+⚠ 7 dB OF EXTRA DRIVE LANDED 0.13 dB SHORT of the reference (21.73 against
+21.86). Inside the scatter on source level, but shipping a top-of-travel that
+sits just under the thing it exists to reach is not a margin; it is 8 dB.
+
+⚠ **A USER PATCH SAVED ABOVE KNOB 80 WILL GET HOTTER.** There is no way to both
+extend the top and leave the top unchanged. The knee is placed to make the
+affected band as small as possible, and a test pins that no factory preset sits
+in it — so if someone adds one at 90 later, the guarantee fails loudly instead of
+silently.
+
+⚠ **THIS IS NOT A SUBSTITUTE FOR INPUT ALIGNMENT, AND PARTLY OVERLAPS IT.** The
+underlying complaint — a knob whose effect depends on how hot the file is — is
+what `dsp/inputAlign.js` already solves properly for OptoSmooth and Scheps by
+measuring gated RMS and offsetting the drive, and FET Punch is still unaligned.
+More travel is the brute-force version of that. If FET Punch is aligned later,
+some of these 8 dB become redundant and the knee should be revisited rather than
+left stacked on top of a correction that now does the same job.
+
+### FET Punch is input-aligned, and the Input knee is gone
+
+Two changes that belong together, both with the owner's agreement to re-voice the
+factory presets rather than preserve them.
+
+**1. The knee is replaced by one power law.** `IN_DRIVE_SPAN_DB` 40 → 48, so the
+knob runs −24 to **+24 dB** across its travel. The knee version bought preset
+compatibility at the cost of a knob whose RATE OF CHANGE was not monotonic —
+0.335 dB per unit below knob 80, bulging past 0.7 near 90, back to 0.384 at the
+top. A hardware attenuator does not do that, and it is felt rather than seen. One
+law has a slope that only ever falls (0.609 at knob 10 to 0.384 at 100), which is
+what `IN_TAPER` below 1 models in the first place.
+
+⚠ EVERY KNOB POSITION HAS MOVED — up to 8 dB at the top, ~4.6 dB at mid-travel.
+All five factory presets are now mis-voiced and are to be re-cut. A test records
+the size of the shift per preset so the debt is visible rather than forgotten.
+
+**2. Alignment, the thing that was actually overdue.** FET Punch has no threshold
+control either, so what a knob position DID was set by the file's level.
+Measured at Input 55, ratio 4:
+
+| source peak | unaligned | aligned |
+|---|---|---|
+| −6 dBFS | 13.30 dB | 8.80 dB |
+| −12 dBFS | 8.80 dB | 8.80 dB |
+| −18 dBFS | 4.31 dB | 8.80 dB |
+| −24 dBFS | 0.85 dB | 8.80 dB |
+| −30 dBFS | **0.00 dB** | 8.80 dB |
+
+The same failure `dsp/inputAlign.js` was built for on OptoSmooth, and the same
+fix: gated RMS of the whole file, `ALIGN_TARGET_DBFS`, an `Align` knob that AUTO
+owns until touched, `INPUT_TRIM_MAX_DB` by hand, keyed on `docId:revision` so a
+document switch re-measures and an edit does too.
+
+⚠ **BUT IT GOES ON THE DETECTOR, NOT ON `inputLin`, AND THAT DIFFERS FROM
+OPTOSMOOTH.** There the offset can ride `scDriveDb` because that is side-chain
+only. Here `inputLin` gains the AUDIO as well — the hardware's input attenuator
+feeds both — so folding the offset into it would raise the output level and drive
+the saturator harder: precisely the "input gain that has to undo itself
+downstream" that `inputAlign.js` argues against. Adding it to the detector's
+`levelDb` instead leaves `inputLin` at whatever the knob says, so the REDUCTION
+stops depending on the file's level while the output level still tracks the file,
+which is the user's gain staging and not ours to correct.
+
+⚠ IT HAS TO REACH THE MAKEUP SOLVE AND THE APPLY PATH, not just preview. Apply is
+reachable without ever previewing, and the solve renders the kernel — a makeup
+solved against a stale offset is solved for a compressor doing a different amount
+of work. `refreshInputAlign()` runs before both.
+
+⚠ IT IS SEEDED IN THE EFFECT WRAPPER. `setParam` gates on `name in params` and
+the offset is deliberately absent from `FET1176_DEFAULTS` (it describes the file,
+not the patch), so without the seed every push would be dropped silently and
+preview would run the raw behaviour while apply ran the aligned one — the same
+trap `ceilingDb` hit in `la2aCompressor.js`.
+
+**Where this leaves the earlier caveat.** The knee entry warned that extra travel
+is the brute-force version of alignment and that the two would overlap. They do,
+but they are not redundant: alignment moves the DETECTOR to nominal, which fixes
+the quiet-file case; the wider span is what lets the knob reach 22.5 dB of
+reduction on a nominal file, which is where FETish sat. Both were needed.
+
+### ⚗⚗⚗ THE DIAL LAWS, FITTED — our taper SHAPE is right and both endpoint pairs are wrong
+
+17 FETish bursts captures, the Input-range work having rescued the three that
+previously reported "OUR INPUT KNOB CANNOT REACH IT".
+
+**Release — solved, and cleanly.** The `a20us` sweep varies only the release
+knob, at a depth matched to 0.44 dB across all seven:
+
+| declared | measured t63 | ratio | depth |
+|---|---|---|---|
+| 50 ms | 18 | 0.3600 | 12.17 |
+| 86 ms | 31 | 0.3605 | 12.34 |
+| 139 ms | 51 | 0.3669 | 12.45 |
+| 235 ms | 86 | 0.3660 | 12.52 |
+| 393 ms | 145 | 0.3690 | 12.57 |
+| 657 ms | 242 | 0.3683 | 12.59 |
+| 1100 ms | 407 | 0.3700 | 12.61 |
+
+A **constant 0.366 across a 22× range of the knob.** The step ratios agree to
+three decimals (declared 1.7200 / 1.6906 / 1.6723 against measured 1.7222 /
+1.6863 / 1.6860), so FETish's taper is geometric with the same ladder ours uses:
+**our `dialToSeconds` interpolation is correct and only the endpoints are off.**
+
+Implied FETish range: **18.3 ms to 402 ms**, against our 50 ms to 1.1 s. Both
+endpoints 2.73× too slow.
+
+⚠ AND THE RESIDUAL DRIFT IS THE DEPTH SCHEDULE SHOWING THROUGH. The ratio creeps
+1.0000 → 1.0278 across the sweep; the depth creeps 12.17 → 12.61 dB, which at
+`k = 0.138` predicts 1.0626. Same direction, about half the size — an independent
+corroboration of the depth limb from a capture set that was not fitted to it.
+
+**Attack — same story, larger shift, one point excluded.** The `_r235ms` sweep:
+
+| declared | t63 µs | t63/declared | depth | overshoot |
+|---|---|---|---|---|
+| 20 µs | 188 | 9.40 | 12.52 | 5.29 |
+| 66 µs | 938 | 14.21 | 15.40 | 10.91 |
+| 126 µs | 1813 | 14.39 | 16.30 | 14.13 |
+| 235 µs | 3438 | 14.63 | 16.35 | 15.99 |
+| 433 µs | 6313 | 14.58 | 15.98 | 16.10 |
+| 800 µs | 11313 | 14.14 | 15.49 | 15.61 |
+
+Five of the six sit within 0.95 dB of each other in depth and give a ratio
+constant to 3 %. **The taper shape is right here too**; the endpoints are
+~5.1× too fast. Bias-free version, comparing measured-to-measured: our dial 1
+(800 µs) measures ~2200 µs through this analysis, FETish's 800 µs setting
+measures 11313 — **5.14×**. At dial 5 it is 5.0×. Implied FETish range is roughly
+**103 µs to 4.1 ms** against our 20–800 µs.
+
+⚠ **THE 20 µs POINT IS RESOLUTION-LIMITED AND MUST BE EXCLUDED.** 188 µs is 1.5
+half-periods of the 4 kHz probe, so anything faster than ~250 µs cannot be
+resolved at all. Its ratio of 9.40 is the measurement's floor, not FETish's
+behaviour, and depth correction moves it the wrong way. **Fitting the fast end of
+attack needs a faster probe** — 10 kHz would give a 50 µs half-period.
+
+⚠⚠ **CORRECTION: OVERSHOOT IS NOT THE SHARPER ATTACK ESTIMATOR, AND I SAID IT
+WAS.** When CLA-76's two estimators disagreed I called overshoot the one to
+trust. Here they disagree by 2× — overshoot's dial match says 2.2–2.75×, t63 says
+5.1× — and the reason is visible in the table: overshoot **saturates near 16 dB**,
+so the three slowest settings all read 15.6–16.1 and discriminate nothing. t63
+does not saturate. On this reference **t63 is the trustworthy attack estimator**,
+and the same explanation probably covers the CLA-76 disagreement.
+
+⚠ **FOLLOWING FETish ON ATTACK MEANS LEAVING THE DATASHEET BY 5×.** The hardware
+1176 is specified at 20–800 µs and our constants quote it. FETish's behaviour is
+5× slower than its own labels, which either means its knob is calibrated in some
+other quantity or it is simply not 1176-accurate there. Release is a 2.73× shift
+in the other direction, so the two are not one common cause. This is a product
+decision, not a measurement one.
+
+### The FETish release voicing SHIPS — schedule on, tail off, endpoints re-scaled
+
+`releaseSchedule: 'depth'` and `TAIL_FRACTION: 0` are now the defaults. What the
+reference measurably has is a release keyed on DEPTH and no exposure or density
+limb; that is what ships.
+
+⚠ **THE TWO FITS DID NOT COMPOSE, AND SHIPPING THEM AS FITTED WAS 45 % WRONG.**
+The endpoints (402 / 18.3 ms) were fitted with the schedule OFF. Turning the
+schedule on makes the constant shrink as the reduction decays *during* the
+recovery, so the same endpoints render every dial 45 % short. Anchoring
+`RELEASE_DEPTH_REF_DB` at the sweep's own depth does NOT fix it — I tried that
+first, reasoning the schedule would be a no-op there, and it is not: the anchor
+sets the constant at the *initial* depth while the whole trajectory runs faster.
+
+The schedule reads the STATE and not the clock, so scaling the base constant
+scales the entire trajectory's timebase exactly — measured uniformly at 0.5516
+across all seven dials. `1.8130x` puts the ladder back, giving
+`RELEASE_SLOWEST_S = 0.7288`, `RELEASE_FASTEST_S = 0.03318`. **What ships is the
+constant that makes the render match, not the one the measurement printed** —
+the same principle as refusing to regress t63 for `k`.
+
+Verified in the shipping configuration, tail off and schedule on, at 12.5 dB:
+
+| dial | ours | FETish | error |
+|---|---|---|---|
+| 7 | 18.2 | 18 | +1.0 % |
+| 6 | 30.6 | 31 | −1.4 % |
+| 5 | 51.3 | 51 | +0.6 % |
+| 4 | 86.2 | 86 | +0.2 % |
+| 3 | 144.3 | 145 | −0.5 % |
+| 2 | 241.7 | 242 | −0.1 % |
+| 1 | 404.6 | 407 | −0.6 % |
+
+The depth limb re-fits to `k = 0.1389` at release dial 4.82 — mid-travel now,
+where it was 6.28 before the endpoints moved.
+
+**Seven consequences, all fixed at the cause.**
+
+⚠ **THE TOOLING LOST ITS POSITIVE CONTROL AND ALMOST DID SO SILENTLY.** Both the
+tail test and the density test prove they can resolve program dependence by
+spreading on a kernel that has it and going flat on one that does not — and the
+kernel they used was ours. With `TAIL_FRACTION` at 0 they would have gone on
+reporting "absent" for every reference with nothing left to show they could ever
+report otherwise. `runKernel` now takes a tail override, the ballistics self-test
+writes a third capture rendered WITH a tail alongside two in the shipping
+configuration, and the density control builds its own.
+
+⚠ **`scripts/fet-null.mjs` KEPT ITS OWN COPY OF THE INPUT DRIVE LAW.** It undid
+the taper by re-declaring `IN_DRIVE_MIN_DB` / `IN_DRIVE_SPAN_DB` / `IN_TAPER`
+locally; when the span went 40 → 48 the copy stayed at 40, so its "compensated"
+reference carried a 5.3 dB real gain and flipped its own verdict about whether
+Input is a real gain. The kernel exports `inputDriveDbForKnob` now. Same failure
+mode as the Scheps defaults.
+
+⚠ **THE BASE-RATE MEASUREMENT PARITY DRIFTED WITH THE WIDER KNOB.** Base-rate
+aliases the saturator's harmonics where oversampled folds them out, so the gap
+tracks drive: 0.0133 dB at 7.9 dB, 0.0257 at 16.2, 0.0498 at 24.0 — doubling
+every ~8 dB. The extra 8 dB of travel doubled the worst case, from inside 0.05
+to 0.1031. Nothing depends on it (the makeup solve renders oversampled since the
+0.58 dB bug), so the top of travel carries its own stated bound rather than
+everything getting a looser one.
+
+⚠⚠ **AND FET PUNCH CAN NOW BE PRE-ROLLED, WHICH MEANS THE OLD DIAGNOSIS WAS
+WRONG.** `previewApplyConvergence.test.js` asserted FET Punch *cannot* be made
+exact and blamed `trkInPeak`, the makeup tracker's running maximum. Measured: the
+tracker does not latch in the offline path at all — a fixture whose loudest
+moment sits 8 s before the pre-roll window, at amplitudes to 0.95, converges to
+exactly 0. What never converged was the TAIL, constant `releaseS * TAIL_MULT` =
+4.4 s, longer than any lead-in. With it gone, a 2 s pre-roll takes the worst
+difference from 1.64e-1 to 7.11e-15, and `FET1176_PREROLL_S` is wired.
+
+⚠ It is convergent, NOT bit-exact, and all-buttons is why: it is the one mode
+that kept a tail, since `ALL_TAIL_FRACTION` has no captures behind it. 5.46e-6 at
+2 s, 1.04e-7 at 3 s — about −105 dBFS against 3.61e-2 cold. Claim convergence,
+not exactness.
+
+⚠ And the LIVE preview is a separate question this does not settle. `trkInPeak`
+still has unbounded memory, so what the user hears can still carry a loud moment
+from earlier in the session. The offline render now matches a *settled* preview;
+the preview itself is not thereby reproducible.
+
+⚠ `FET_LEGACY_PATCH` gains `releaseSchedule: 'none'` but **no longer reproduces
+old renders and must not be read as doing so.** Three of the changes are
+constants, not parameters: `IN_DRIVE_SPAN_DB`, the release endpoints and
+`TAIL_FRACTION`. Bit-exact reproduction of pre-fit renders was already gone
+before this patch was extended.
+
+### ⚗⚗⚗ FETish'S STATIC CURVE — 16 captures, and three findings our model cannot express
+
+`stairs.wav`, four ratio buttons × four Input positions, rms 0.002–0.004 dB per
+fit. Two of the three verdicts needed a control before they could be believed;
+one of them was a bug in the tool.
+
+**1. The threshold is FIXED across the ratio button.** −15.29 / −22.09 / −33.68 /
+−40.28 dB at I1–I4, identical to 0.00 dB across all four ratios at every
+position. FETish's manual says the threshold moves with ratio. It does not. Our
+model already holds it fixed, so nothing changes — but this was the question the
+ratio sweep was added for, and it is now answered rather than assumed.
+
+**2. The knee does NOT vary with the ratio button, and ours does.** FETish reads
+5.85 / 5.85 / 5.84 / 5.84 dB across ratios 12 / 20 / 4 / 8 at I1 — one knee for
+every button. `RATIO_KNEE_DB` is `{4: 10, 8: 8, 12: 6, 20: 3}`, a different knee
+per button, which has no support in this data.
+
+**3. ⚠ BUT THE KNEE WIDENS WITH DRIVE, 5.85 → 10.86 dB across I1–I4.** This is
+the finding our topology cannot express at all: `RATIO_KNEE_DB` is a constant per
+button, and here the knee is a function of the Input.
+
+⚠ **AND IT IS REAL, WHICH TOOK A CONTROL TO ESTABLISH.** The obvious suspicion is
+the instrument: the attack-lag bias grows with reduction depth, so a deeper
+capture might just *read* as a wider knee. Our own kernel's knee is nailed to
+10 dB by construction; run across the same four drive offsets and fitted the same
+way it reads **10.95 / 11.13 / 11.09 / 10.91 — a 0.22 dB spread.** The instrument
+does not manufacture knee growth, so FETish's 5.01 dB is FETish's. A test pins
+that control, because without it the verdict is an opinion.
+
+**4. ⚠⚠ AND THE COLLAPSE VERDICT HAD THE RATIO BUG IN IT — THE SAME ONE THE FIT
+WAS REPARAMETERISED TO AVOID.** It tested the spread of `fit.ratio` across the
+sweep. FETish's ratio-20 sweep spread 0.71 in ratio and was reported as the shape
+moving with Input; in SLOPE the same four captures spread **0.0018**, which is
+nothing. `1/(1-slope)` amplifies, so a threshold stated in ratio is meaningless at
+the top of the range. Fixed, and slope and knee are now reported as the separate
+claims they are: **the slope collapses** (drive and level add in dB above the
+knee, as we model) while **the knee does not**.
+
+**5. The slope is lower than ours at every button, bias-cancelled.** Reference
+minus ours, same button, same analysis: −0.0247 at ratio 4, −0.0375 at 8, −0.0311
+at 12, −0.0269 at 20. FETish compresses *less* than our implementation at the
+same marking, and consistently. Taking our own true slopes as the anchor, that
+puts FETish's real ratios near **3.6 / 6.1 / 8.8 / 13.2** against its nominal
+4 / 8 / 12 / 20 — lower than the button says, and increasingly so as the button
+climbs.
+
+⚠ That last conversion leans on the absolute bias being ~3 %, which is a
+self-test number and not a measurement of FETish. The −0.024 to −0.038 slope
+differences are the solid part; the implied ratios are the readable version of
+them, not an independent result.
+
+**Still unmeasured:** all-buttons, which FETish does not have. `ALL_KNEE_DB`,
+`ALL_THRESHOLD_DROP_DB` and the soft `ALL_RATIO_*` law have no captures behind
+them from either reference and CLA-76 is the only one that can supply them.
+
+### ⚗⚗ CLA-76'S STATIC CURVE — one strong finding, and two the instrument cannot support
+
+20 captures, five ratio buttons including all-buttons. Much noisier than FETish:
+rms 0.016–0.126 dB against 0.002–0.004, rising steeply at I4.
+
+**1. THE THRESHOLD MOVES WITH THE RATIO BUTTON, and this one is solid.** Relative
+to ratio 12, at every Input position:
+
+| ratio | all | 4 | 8 | 12 | 20 |
+|---|---|---|---|---|---|
+| I1 | −3.17 | −2.63 | −0.84 | 0 | +1.32 |
+| I2 | −3.23 | −2.63 | −0.90 | 0 | +1.26 |
+| I3 | −3.26 | −2.67 | −0.88 | 0 | +1.29 |
+| I4 | −3.29 | −2.76 | −0.95 | 0 | +1.35 |
+
+**Monotone in ratio and reproduced to ~0.1 dB across four independent Input
+positions.** A shift that survives four separate captures at four drives is not
+the fit wandering. Our model holds the threshold fixed; CLA-76's ratio buttons
+move it by 4.5 dB end to end.
+
+⚠ AND THIS IS THE CLAIM FETish'S MANUAL MAKES AND FETish DOES NOT HONOUR. FETish
+measured fixed to 0.00 dB. So the two references disagree about the topology, not
+just the numbers, and the hardware behaviour is a question neither settles alone.
+
+**2. ⚠⚠ THE SLOPE COMPARISON IS NOT BIAS-CANCELLED FOR CLA-76, AND THE TOOL SAID
+IT WAS.** The diff column's whole justification is that both sides carry the same
+attack lag. Measured on our own kernel at ratio 4, the fitted slope runs
+**0.7734 / 0.7636 / 0.7581 / 0.7582 across attack dials 1–4** — 0.015 of slope,
+nearly all of it between dials 1 and 2, because a slower attack lags further
+behind the per-peak target and reads the law steeper. FETish's slowest attack
+sits near ours, so the subtraction holds there. **CLA-76's dial 1 measures
+~5688 µs against our ~2200** — beyond our slowest — so its slope is inflated by
+an amount the subtraction does not remove.
+
+The sign of the large differences survives: CLA-76's ratio 4 reads **+0.0568**
+above ours where every other button reads negative, so its "4:1" really does
+compress harder than 4:1 (~5.9 by the raw fit). The magnitude is an upper bound,
+not a measurement.
+
+**3. ⚠ THE KNEE READINGS ARE NOT USABLE, AND TWELVE OF TWENTY WERE ON A BOUND.**
+Values came back at exactly 0.50 repeatedly, and at 0.13 and 0.17 where the
+polish had walked below the grid — printed as though they were readings. They are
+the search running out of room: the curve wants a corner sharper than this
+parameterisation can express. The knee is also erratic rather than trending
+(ratio 8: 3.60 / 0.50 / 3.94 / 0.50 across I1–I4), which is noise. The fit now
+flags a bounded parameter instead of reporting it.
+
+⚠ Contrast FETish, whose knee was orderly (5.85 → 10.86, monotone in drive) with
+rms an order of magnitude lower. The knee finding there stands; there is no
+comparable finding here.
+
+**4. The taper is clean.** 0 / 4.72 / 10.11 / 15.50 dB across I1–I4, consistent
+to 0.1 dB across all five ratio buttons. CLA-76 spans 15.5 dB where FETish spanned
+25.0 for the same I1–I4 GR targets, which is a property of where the positions
+landed rather than of the knobs.
+
+**5. Still not answered: the all-buttons law.** CLA-76's all-buttons slope reads
+0.9449 → 0.9163 across I1–I4 and its threshold sits 3.2 dB below ratio 12's. Our
+`ALL_THRESHOLD_DROP_DB` is 6 and `ALL_KNEE_DB` is 16, against a measured knee
+that is on the bound. The soft `ALL_RATIO_*` law has nothing behind it either.
+This is the one capture set only CLA-76 can supply, and it needs the attack
+confound resolved before it can be read.
+
+### The attack A/B, wired to the bench — and a third simulate-and-match lesson
+
+`attackRange` on the FET kernel, `'datasheet'` (ships) or `'fetish'`, exposed as
+a third rocker on the bench tuning panel beside the curve and position ones. It
+is a named PAIR, not two loose endpoints, on the `FET_LEGACY_PATCH` reasoning:
+"the FETish attack" is one decision and a moved endpoint without its partner is a
+configuration nobody measured.
+
+| dial | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| datasheet | 800 µs | 433 | 234 | 126 | 68 | 37 | 20 |
+| FETish | 7630 µs | 4079 | 2181 | 1166 | 623 | 333 | 170 |
+
+⚠⚠ **DIVIDING THE MEASURED t63 BY A FIXED FACTOR WAS 44 % WRONG, AND THIS IS THE
+THIRD TIME.** The first cut took the "measured t63 runs ~2.75x the constant"
+figure and applied it to FETish's readings, giving 4114 / 103 µs — which rendered
+every dial 44 % short of the reference. **That factor is not constant across the
+ladder:** measured on our own kernel it is 1.64 at dial 1 (800 µs → 1313) and
+2.76 at dial 5 (68 → 188), because a slower attack is resolved differently by a
+rectifier that only clears threshold near the waveform peaks.
+
+So each endpoint is solved by driving our kernel until it REPRODUCES the
+reference's measured t63 at the reference's own depth. After the release
+endpoints (1.8130x) and the depth-schedule slope, this is the third constant
+where the number the measurement printed was not the number to install.
+
+**Validated on a point that was not fitted.** The solve targets dial 1 (FETish's
+800 µs setting, 11313 µs of t63) and dial 5 (its 66 µs, 938 µs). Dial 3 — held
+out — reproduces its 3438 µs to **3.7 %**.
+
+⚠ **THE TWO LADDERS ARE NOT PARALLEL AND EXPECTING THEM TO BE WAS WRONG.** The
+datasheet spans 40x, this one 44.9x, so the ratio drifts 9.54 → 8.50 across the
+dial. That is a consequence of solving against measured t63, whose factor is
+itself dial-dependent — matching t63 at two points cannot preserve the span of
+the constants. FETish's own labels do span 40x (its 800 and 66 µs settings gave a
+t63 ratio of 12.06 against a label ratio of 12.12), which is what makes the taper
+SHAPE shared even though these endpoints are not.
+
+⚠ **THE FAST ENDPOINT IS STILL EXTRAPOLATED.** FETish's 20 µs capture read 188 µs
+of t63 — 1.5 half-periods of the 4 kHz probe, which is the measurement floor and
+not its behaviour. A 10 kHz probe would give a 50 µs half-period and settle it.
+
+**What the A/B is actually deciding.** The datasheet is what the hardware claims;
+FETish is what the reference does; release moved 2.73x in the OTHER direction so
+the two are not one common cause. No measurement settles it, which is exactly why
+it is a rocker on the bench and not a constant in a script.
+
+### ⚠ THE BENCH'S LEGACY BUTTON WAS DROPPING A KEY AND REPORTING SUCCESS
+
+Asked whether the attack A/B also switches the release, and checking rather than
+answering from the code's intent turned up a defect one commit old.
+
+`attackRange` touches only `attackSecondsForDial` — **both rocker positions run
+the FETish release**, endpoints and schedule alike, which is what the A/B wants:
+one variable moving. That part was right.
+
+But `FET_LEGACY_PATCH` had gained `releaseSchedule: 'none'` when the depth
+schedule shipped, and `setFET1176Tuning` only accepts keys present in
+`FET1176_TUNING_DEFAULTS`. So the bench's LEGACY control restored the curve and
+the shaper position, **silently left the depth schedule running**, and
+`isFET1176TuningLegacy()` returned `true` regardless — a button claiming to
+reproduce the pre-capture kernel while reproducing two thirds of it.
+
+`releaseSchedule` is a bench key now, with its own rocker (DEPTH / FIXED), and a
+test pins the coupling directly: every key in `FET_LEGACY_PATCH` must be one the
+bench can actually set, and applying LEGACY must emit all of them. Adding a key
+to the patch without adding it to the bench now fails loudly.
+
+⚠ NOTE WHAT THE RELEASE ROCKER DOES *NOT* DO. It switches the SCHEDULE only. The
+release endpoints (0.7288 / 0.03318 s) are fitted to FETish and ship either way —
+they are constants, not parameters, so there is no way to A/B them from here and
+the panel says so.
+
+### ⚗⚗ FETish'S ATTACK IS DEPTH-SCHEDULED TOO — and in the opposite direction
+
+Asked whether FETish's attack times are consistent across Input, which they are
+not, and the answer undercuts the ladder shipped to the bench one commit earlier.
+
+One attack setting, Input the only thing moving:
+
+| reduction | attack t63 |
+|---|---|
+| 6.18 dB | 5438 µs |
+| 13.96 dB | 2188 µs |
+| 17.51 dB | 1563 µs |
+| 21.86 dB | 1063 µs |
+
+**A factor of 5.12.** Fitted, `t63 = 10018 · exp(−0.1047 · D)` at R² 0.995.
+
+**The control**, which is what makes it a property of the reference rather than
+of the instrument: our own kernel, attack dial fixed, over the same span reads
+1563 → 1188 µs on the datasheet ladder and 12563 → 10563 on the FETish one —
+`exp(−0.0194 · D)`. So the measurement contributes about −0.02/dB and **the
+reference's own law is about −0.085 per dB.**
+
+⚠ **ITS RELEASE SCHEDULE FITTED AT +0.1389 PER dB. OPPOSITE SIGN, SIMILAR SIZE.**
+Both limbs are program-dependent on depth: FETish grabs faster and lets go slower
+the harder it is working. That is a coherent detector, and it is a second place
+where a single constant is the wrong shape.
+
+⚠⚠ **SO THE `attackRange: 'fetish'` LADDER IS A SINGLE-DEPTH SNAPSHOT.** Its
+endpoints were solved at ~15.9 dB, where they reproduce the reference exactly.
+Against the law above it is **2.82× too fast at 6 dB and 0.53× too slow at
+22 dB**. It is an honest A/B of the reference's attack at moderate reduction and
+nothing more; the panel and the constants now say so rather than leaving it to be
+found by ear. Expressing the rest needs an attack schedule of the kind
+`releaseSchedule` already provides.
+
+⚠ AND THIS IS WHY THE "SURPRISINGLY LONG" TIMES LOOK THE WAY THEY DO. 7.63 ms at
+dial 1 is the ~16 dB calibration. At 22 dB the same setting behaves about half
+that, and at 6 dB nearly three times it.
+
+### ⚗⚗⚗ THE ATTACK SCHEDULE — and the mechanism was the whole story, not the constant
+
+`attackSchedule: 'depth'`, off by default, mirroring `releaseSchedule`. Fitted
+with `scripts/fet-attack-depth.mjs`.
+
+⚠⚠ **THE FIRST VERSION INDEXED THE CONSTANT ON THE CURRENT REDUCTION, COPYING
+THE RELEASE SCHEDULE, AND PRODUCED THE OPPOSITE OF THE LAW.** At the START of
+every attack the reduction is 0, whatever depth it is heading for, so a constant
+indexed on the instantaneous value cannot express "a deeper settled reduction
+attacks faster" — the deep case merely spends longer climbing through the slow
+region. Measured over the first 20 ms, the deep-to-shallow energy ratio came out
+**3.24 with the schedule on against 2.54 off**: slower at depth, when the
+reference is faster.
+
+Indexing on `grTarget` — the depth the detector is heading for, known on the
+first sample — is the right quantity, and it took the fit from **14.23 % rms to
+1.15 %**, three of four points exact. Release keeps current-value indexing
+because there the trajectory STARTS at the depth in question.
+
+| model | rms against the four captures |
+|---|---|
+| datasheet ladder, no schedule (ships) | 87.69 % |
+| FETish ladder alone | 36.53 % |
+| schedule alone | 36.35 % |
+| **FETish ladder + schedule** | **1.15 %** |
+
+`k = −0.0926 dB⁻¹`, converging with the −0.085 estimated independently from the
+raw t63 data with the measurement's own contribution subtracted.
+
+⚠ **THE LADDER AND THE SCHEDULE ARE ONE MODEL AND WERE REFITTED TOGETHER.** The
+earlier `attackRange: 'fetish'` ladder was solved WITHOUT the schedule at a
+single depth; pairing that with the schedule gave 13.87 %. Two separately
+correct fits that do not compose — the third instance, after the release
+endpoints and the depth-schedule slope. `FETISH_ATTACK_*` is now the ladder the
+joint fit asked for, and a test pins that either half alone is at least 5× worse
+than the pair.
+
+⚠ A SIDE EFFECT WORTH NOTING: the two ladders are now **exactly parallel**
+(7.963× at every dial) where the old one drifted 9.54 → 8.50. Fitting against
+measured t63 at two points could not preserve the span, because the factor
+between a constant and its t63 is itself dial-dependent. With the schedule
+carrying the depth dependence, the endpoints no longer have to absorb it.
+
+**Two tooling defects found on the way.** The fitter ran `fit()` on import — no
+entry-point guard — so a scratch script that imported `curveFor` printed a full
+fit report first. And it had copied `-0.085` and `15.9` as literals instead of
+importing the kernel's constants, so the same table read 4.60 % from one caller
+and 1.15 % from another once the fitted slope replaced the estimate. Same failure
+`fet-null.mjs` had with the input drive law.
+
+**Both schedules still ship off.** The release one is on; this one is not, and
+the A/B is now a real reproduction rather than a single-depth snapshot.
+
+### ⚠ THE BENCH'S RELEASE "FIXED" IS A MISMATCHED HALF, AND ITS TOOLTIP DID NOT SAY SO
+
+Asked whether the shipping default is one of the combinations the attack pair
+warns against. It is not — but checking turned up one next to it.
+
+**The shipping default is consistent.** `datasheet` + attack `FIXED` is the
+COMPLETE datasheet attack model, not half of the FETish one: that ladder was
+never scaled for a schedule, so the two together are internally coherent. The two
+halves that must travel together are `fetish` + attack `DEPTH`.
+
+**And the release ships as its matched pair.** Measured against the reference at
+12.5 dB, the seven dials read 18 / 31 / 51 / 86 / 144 / 242 / 405 ms against
+18 / 31 / 51 / 86 / 145 / 242 / 407 — **0.8 % rms**.
+
+⚠ **BUT THE BENCH'S RELEASE `FIXED` IS EXACTLY THE FAILURE THE ATTACK PANEL
+WARNS ABOUT.** The release endpoints were scaled **1.813×** so they compose WITH
+the depth schedule, and they are constants rather than parameters, so the bench
+cannot switch them back. Selecting FIXED leaves every dial about 1.8× long:
+
+| | rms | dials 7→1, ms |
+|---|---|---|
+| shipping, release DEPTH | **0.8 %** | 18 / 31 / 51 / 86 / 144 / 242 / 405 |
+| bench, release FIXED | **79.8 %** | 33 / 55 / 92 / 155 / 259 / 433 / 725 |
+| reference | — | 18 / 31 / 51 / 86 / 145 / 242 / 407 |
+
+The tooltip described this neutrally — "the release ENDPOINTS do not change with
+this" — which is true and reads as reassurance. It now says the switch turns the
+release 80 % wrong and is for hearing what the schedule DOES, not for matching
+anything. A test pins the asymmetry, including why the attack's FIXED is fine
+where the release's is not.
+
+### ⚗⚗ THE FETish ATTACK LADDER FLATTENS THE KNOB, WHICH NO FIDELITY NUMBER SHOWED
+
+Owner's ears after the A/B: the depth schedule is clearly preferred, the slow
+FETish constants less so. Measured, that instinct is right for a reason none of
+the fit statistics surfaced.
+
+At 12 dB of reduction, how much transient escapes across the seven dials:
+
+| | overshoot span | t63 range |
+|---|---|---|
+| datasheet, no schedule (ships) | **9.7 dB** | 1438 → 63 µs |
+| datasheet + DEPTH schedule | **8.3 dB** | 2188 → 63 µs |
+| FETish ladder + DEPTH schedule | **1.5 dB** | 15813 → 438 µs |
+
+**The FETish ladder is accurate and barely playable.** Every position is slow
+enough that overshoot sits near its ceiling, so the knob stops discriminating —
+10.99 / 11.30 / 11.43 / 11.40 / 11.19 / 10.79 / 9.98 dB from dial 1 to 7. The
+whole ladder maps onto datasheet 1-3 and beyond.
+
+⚠ **NO FIT STATISTIC WOULD EVER HAVE SHOWN THIS.** The pair reproduces the
+reference to 1.15 % rms across depth, which is the best number in this whole
+retune — and it is the configuration in which the control does least. Fidelity
+was measured at four depths on ONE dial position; the dial's usable RANGE was
+never a quantity anything looked at.
+
+**So there are three coherent attack configurations, not two:**
+
+1. `datasheet` + `FIXED` — ships. The 1176's published span, complete.
+2. `datasheet` + `DEPTH` — **a voicing, not a reproduction.** 36 % off the
+   reference's absolute times, but it carries the depth behaviour on a ladder
+   that keeps 8.3 dB of the knob's 9.7 dB range.
+3. `fetish` + `DEPTH` — the reproduction, at 1.15 %, with a 1.5 dB knob.
+
+The panel says which is which now, rather than presenting 3 as simply the better
+one. Precedent: the Tube Saturation curve shipped on a listening decision against
+a measured alternative, and is documented as such.
+
+### ⚠⚠ THE ATTACK LADDER ONLY RELABELS THE KNOB — the "three models" were one
+
+Asked whether `datasheet` + DEPTH and `fetish` + DEPTH differ once equalised for
+attack speed. **They do not. At a matched constant they render bit-identically:
+0 of 288,000 samples differ on syllabic material.**
+
+Which follows from the structure, and I should have said so without measuring:
+the two ladders are the same geometric law scaled by 7.963 (they were made
+exactly parallel when the ladder was refitted with the schedule), and both use
+the same `k` and the same anchor. So a dial on one whose CONSTANT matches a dial
+on the other is the same compressor. FETish dial 7 is datasheet dial 3.62.
+
+⚠ **SO THERE IS NOTHING TO AUDITION BETWEEN THEM**, and presenting them as three
+configurations to compare by ear was wrong. The only real choices are whether the
+schedule is on, and what range the knob spans.
+
+⚠ **AND THE "36 % OFF THE REFERENCE" FIGURE FOR `datasheet` + DEPTH IS ABOUT THE
+DIAL, NOT THE MODEL.** Every rms in that comparison was measured with the dial
+pinned at 4. The fitted constant at dial 4 is 1007 us, which is slower than the
+datasheet ladder's slowest (800), so that ladder cannot reach it AT ANY POSITION
+— the 36 % is a statement about reach, not about behaviour.
+
+**What the choice actually is — which constants the knob can reach:**
+
+| | slowest | fastest |
+|---|---|---|
+| datasheet | 800 us | 20.0 us |
+| FETish | 6370 us | 159.3 us |
+
+They overlap from 800 down to 159 us — datasheet dials 1.00–3.62, FETish dials
+4.37–7.00. Outside that, **only datasheet reaches 159 → 20 us** and **only
+FETish reaches 6370 → 800 us**.
+
+So the owner's position resolves cleanly: liking the depth schedule and
+disliking the slow constants is not a preference between two models, it is a
+preference for where the knob's travel sits. The FETish ladder spends its whole
+range in territory where overshoot saturates (1.5 dB of spread across seven
+dials at 12 dB of reduction); the datasheet ladder spends it where the control
+discriminates (8.3 dB).
+
+### ⚗ CLA-76 CORROBORATES THE ATTACK FINDING INDEPENDENTLY
+
+Placed on our own ladder at its own depth, by t63 rather than overshoot (which
+saturates):
+
+| | nominal 20 µs setting | nominal 800 µs |
+|---|---|---|
+| CLA-76 (its bursts near 10 dB) | 688 µs → **our dial 2.3** | 5688 µs → past our dial 1 |
+| FETish (its sweep near 16 dB) | 938 µs at its 66 µs → **our dial 1.6** | 11313 µs → past our dial 1 |
+
+**Two independently built emulations both say their published "20 µs" behaves
+like our dial 2–3, and their "800 µs" is slower than our slowest.** So the slow
+reading is not a FETish quirk: our datasheet implementation is faster than either
+reference across the whole range.
+
+⚠ IT DOES NOT SAY THE HARDWARE IS SLOW. It says both emulations are, and two
+plugins modelling the same circuit can share an assumption. Neither settles the
+datasheet question.
+
+**And both have narrower ranges than ours:**
+
+| | attack span across the dial |
+|---|---|
+| ours (datasheet) | 25× |
+| FETish | 12.1× |
+| CLA-76 | 8.3× |
+
+CLA-76 is the narrowest of the three — the same flattening that made the FETish
+ladder unplayable, less extreme. Our dials 5–7 have no counterpart in either
+reference, so keeping them is a deliberate choice to offer more control range
+than the references do, and is arguably closer to the published 20 µs than either
+emulation gets.
+
+### `attackSchedule: 'depth'` SHIPS, on the datasheet ladder
+
+The A/B separated two things that had been presented as one. The **depth
+dependence** is what both references have and our fixed model did not, and it was
+preferred by ear. The **FETish ladder** is what did not ship: it leaves 1.5 dB of
+overshoot spread across seven dials at 12 dB of reduction where the datasheet
+ladder leaves 8.3, so the control stops discriminating.
+
+⚠ AND THE TWO LADDERS ARE THE SAME MODEL — matched constants render
+bit-identically — so nothing sonic was given up by choosing the datasheet one.
+What was given up is reach: only the FETish ladder gets to 800 µs–6.37 ms, which
+is exactly the territory where the knob stops doing anything.
+
+⚠⚠ **THE DEFAULT CHANGE BROKE SIX TESTS BY LEAKING INTO THE MEASUREMENT TOOLING,
+WHICH IS THE MORE USEFUL FINDING.** `runKernel` inherited kernel defaults, so a
+synthetic rendered at attack dial 2 came back as dial 4.01 — both sides had
+quietly acquired a depth dependence nobody asked the tool for. A measurement
+instrument that shifts when a product decision shifts cannot be compared against
+its own history. The ballistics measurement mode now pins both schedules
+explicitly, the way `oversample: false` already was.
+
+⚠ AND THE FIRST FIX OVER-CORRECTED. Pinning both to 'none' moved the goalposts a
+second time: three stairs tests went red because `releaseSchedule` had shipped as
+'depth' BEFORE the bursts and stairs numbers were recorded, so those captures
+were analysed against a kernel that had it. The pin is now `attack: 'none',
+release: 'depth'` — what the record was actually taken with — and says so.
+
+### FET Punch — the percentile makeup reference and its ceiling
+
+**The ask:** "Our OptoSmooth compressor has a soft ceiling that allows us to
+maximize our headroom by catching transient peaks. It also normalizes our input
+so that our gain reduction is consistent regardless of the level on the input
+file. Can we add these features to FETPunch (ideally via a shared composable or
+module, if possible)?"
+
+**Half of it was already there.** Input normalisation shipped earlier in this
+same session: `inputAlignDb` on the detector's `levelDb` (not on `inputLin`,
+which would gain the audio too), an `Align` knob that AUTO owns until touched,
+measured per file from gated RMS and never stored in a preset. So the work was
+the ceiling — and the ceiling does not travel alone.
+
+**FET PUNCH HAD THE SAME DEFECT OPTOSMOOTH'S CEILING WAS BUILT TO FIX, and a
+ceiling alone would have caught nothing.** FET Punch's makeup was
+peak-referenced with a HARD ARITHMETIC guarantee — a one-render affine solve
+returning the largest gain for which every sample satisfies
+`|a + b·g| <= inputPeak`. Nothing can exceed the source under that solve, so
+there is nothing to enforce. The guarantee is also the bug: one uncompressed
+onset sets the reference for the whole file. Measured on syllabic narration with
+a 1.5 ms plosive at the end of a pause — the fixture the OptoSmooth thread ended
+on, and the shape that matters, because inside speech the cell is already lit
+and compresses the tick along with everything else:
+
+| Input | delivered rms, peak-referenced | percentile + ceiling |
+|---|---|---|
+| 50 | −20.85 dB | −17.90 dB |
+| 60 | −21.75 | −17.87 |
+| 70 | −22.56 | −17.89 |
+| 80 | −23.32 | −17.95 |
+| 90 | −24.12 | −18.08 |
+| 100 | −24.37 | −18.28 |
+
+Source rms −19.18 dB, source peak −0.45 dBFS. **Every peak-referenced setting is
+quieter than the source, and the knob runs backwards over its whole travel** —
+3.5 dB lost by compressing harder. Percentile-referenced the body holds to under
+0.5 dB of spread, and the ceiling holds the output peak at or under −0.45 dBFS
+at every setting and at Mix 0.5 as well.
+
+So the answer to "can we add the ceiling" is: only as the pair. A percentile
+reference gives up "never louder than the source" **by construction** — that is
+what stops the plosive pinning the file — and the ceiling puts it back by
+enforcement. `computeFET1176AutoMakeupPlan` is the only thing that issues
+either, and it issues both.
+
+**What is shared, and what deliberately is not.** `dsp/makeupReference.js` now
+holds `peakOfChannels` (moved out of `la2aProcessor.js` with the whole of its
+argument, since two copies of a guarantee is two guarantees),
+`percentileOfChannels`, `MAKEUP_PERCENTILE`, `ceilingKneeDbFor`, `softCeiling`,
+`float32AtOrBelow` and `solveMakeupPlan` — the iterative solve extracted from
+`computeAutoMakeupPlan` and parameterised by a caller-supplied renderer and
+latency, which is all that was ever LA-2A-specific about it. OptoSmooth now goes
+through it and is **bit-identical**: the plan for six (fixture, Peak Reduction,
+reference) combinations matches to the last digit of the double.
+
+⚠ **THE SOLVE ITSELF IS NOT SHARED WITH FET PUNCH, AND MUST NOT BE.** OptoSmooth
+has to iterate renders because its output valve sits AFTER the makeup amp, so
+its output is not affine in the makeup. FET Punch's Output is the last multiply
+on the wet path and the detector reads the input, so `out[i] = a[i] + b[i]·g`
+exactly — one render answers both references. At Mix 1 the percentile answer is
+closed form (every sample scales with `g`, so the quantile does too); below Mix 1
+the dry sum breaks the proportionality and it bisects on `g` against the
+already-rendered wet path, sixteen halvings of the knob's own travel. **Porting
+the iteration would have been a regression**: the measured table from the
+original affine-solve work shows three passes at Mix 0.3 landing 6.1 dB short,
+and two factory presets ship below Mix 1. The knee is also better here than on
+OptoSmooth — the affine form gives the un-ceilinged output peak at the shipping
+makeup for one more O(n) pass, where OptoSmooth carries a stale render forward.
+
+**The live makeup write-back had to go, exactly as OptoSmooth's did.** The
+kernel's tracker is `(P − max|a|)/max|b|` over what has played — a running peak
+by construction, and no pair of running extrema can express a statistic over
+millions of samples. Left in, it would have driven the knob to the
+peak-referenced answer between measurements and the offline solve would have
+yanked it back: a 3–6 dB fight on this fixture, visible as the knob jumping on
+every re-measure and audible as the level doing the same. The tracker stays,
+because the bench still reads it. The cost is that Output now moves on the
+measurement's cadence (~170 ms) rather than the meter's (~21 ms) — which is the
+honest cadence, since it is when the answer changes.
+
+⚠ **THIS IS THE FOURTH RE-VOICING OF FET PUNCH THIS SESSION** (Input span,
+release endpoints, release schedule, attack schedule, and now the makeup
+reference) and every patch, preset and previously rendered file sounds
+different — louder at the same settings, and louder the further up the Input
+knob. The five factory presets in `pluginPresets/fetPunch.js` are still
+uncut; they were deferred until the fit was finished and this is one more
+reason they need re-cutting.
+
+**Two wiring hazards, both already load-bearing elsewhere.** First, the
+measured keys must be mapped UNCONDITIONALLY. `setParam` re-maps the whole panel
+object and posts it, and the kernel MERGES a partial — so an omitted key means
+"unchanged", not "null", and a cleared ceiling would stay armed on the live node
+against a gain the user now owns. That is the bug `withMeasuredClears` exists to
+dig OptoSmooth out of, and it was preview-only, which made it worse rather than
+better: a preview/apply divergence on the one control whose whole job is that the
+two agree. FET Punch's `toKernelParams` uses `?? null`, so the clear already
+reaches the kernel, and a test pins that rather than leaving it to a comment.
+Second, that test could not be written at all until `FET1176_DEFAULTS` and
+`toKernelParams` moved out of the effect wrapper into `effects/fet1176Params.js`
+— the wrapper pulls in a `?worker&url` import that only Vite resolves, so
+nothing that imports it is reachable from Node. Same split, for the same reason,
+as `la2aParams.js` and `softClipperParams.js`.
+
+`ceilingDb` and `ceilingKneeDb` are measured state, not knobs: absent from
+`FET1176_DEFAULTS`, dropped by the preset normaliser's key whitelist, and
+cleared when AUTO leaves — a preset carrying one would apply another file's peak
+to this one, which is exactly why `inputAlignDb` is kept out too.
+
+---
+
+### The knee becomes a law — `RATIO_KNEE_DB` retired
+
+The first half of installing FETish's static curve. The captures were taken and
+analysed a while back (see "FETish'S STATIC CURVE" above) and **never reached the
+kernel** — the gain computer was still carrying the hand-set originals while the
+ballistics around it had been refitted four times.
+
+**What was there:**
+
+```js
+// Tighter knees as the ratio climbs — 4:1 is a comparatively gentle curve,
+// 20:1 is nearly a corner.
+const RATIO_KNEE_DB = { 4: 10, 8: 8, 12: 6, 20: 3 }
+```
+
+⚠ **THOSE FOUR NUMBERS WERE INVENTED, AND THE RATIO SWEEP WAS ADDED TO THE
+CAPTURE MATRIX TO TEST EXACTLY THAT.** FETish reads **5.85 / 5.85 / 5.84 / 5.84
+dB across ratios 12 / 20 / 4 / 8** at one Input position — one knee for every
+button, to a hundredth of a dB. Deleted.
+
+**What replaced it** is `kneeDbForDrive(driveDb)`: one knee, moving with the
+Input knob, because that is the other thing the captures say (5.85 dB at I1 to
+10.86 at I4, monotone). A constant per button cannot express that at all, so this
+is the first topology change of the re-tune rather than a re-fit.
+
+#### ⚠ "Per dB of drive" is ambiguous by 24 %, and the interior points decide it
+
+The two recorded endpoints fix the knee growth at 5.01 dB. What they do **not**
+fix is what it is growth *per*:
+
+| | I1 | I2 | I3 | I4 | slope from 5.01 dB |
+|---|---|---|---|---|---|
+| FETish's own drive | 0 | 6.80 | 18.39 | 24.99 | **0.2005** /dB |
+| ours, at matched reduction | 0 | 5.24 | 12.52 | 20.07 | **0.2496** /dB |
+
+FETish spends 24.99 dB of its drive going from I1 to I4; our kernel reaches the
+same 2 → 18 dB of reduction in 20.07, because its slope is lower than ours at
+every button (Finding 5) and it therefore needs more drive for the same work.
+**And the two axes are not proportional in between**, so no single scale factor
+converts one to the other — the interior points are the only thing that settles
+it, and they were summarised but not kept.
+
+`KNEE_DRIVE_SLOPE` ships at **0.2005**, the conservative end, flagged in the
+source as a placeholder. The four-point simulate-and-match replaces it when the
+per-capture table is re-printed. ⚠ By MATCHING, not by dividing: a fitted knee
+reads about 1 dB wide (the control below), and this would be the fifth constant
+in this re-tune where the number the measurement printed is not the number to
+install.
+
+#### ⚠ The knee takes the KNOB's drive, not the detector's — or it undoes input alignment
+
+The obvious reading is that the knee should follow the drive the detector
+actually sees, `inputDriveDb + inputAlignDb` — the knee lives in the gain
+computer, which is detector side. That is wrong, and quietly so.
+
+Alignment exists so a knob position delivers the same reduction on a −18 dBFS
+file as on a −1 dBFS one; it does that by offsetting the detector's level so
+`over` comes out identical. Widen the knee with that same offset and the two
+files reach the same `over` **through different curves**, so the quiet one
+compresses softer — precisely the level dependence alignment was built to
+remove, reintroduced one level down.
+
+⚠ **THE CAPTURES CANNOT SETTLE THIS AND ARE NOT BEING ASKED TO.** They varied the
+Input knob against a fixed stimulus, so knob drive and detector level moved
+together and nothing separates them; FETish has no alignment, so the question
+never arose there. This is a design choice made where the data is silent, and a
+test asserts it **on the kernel rather than through the fitter** — the claim is
+exact, the instrument is not, and a +12 dB offset moves the fitted knee ~0.09 dB
+on its own.
+
+#### The control had to be rewritten, because the kernel stopped being the control
+
+⚠ **TWO TESTS FAILED, AND BOTH WERE RIGHT TO.** The collapse verdict — "FETish's
+knee widens and that is the reference, not the instrument" — is licensed by a
+control: our own kernel, knee fixed by construction, read through the same
+fitter, comes back flat (10.95 / 11.13 / 11.09 / 10.91, a 0.22 dB spread). That
+control was written against a kernel whose knee *was* fixed. Installing the
+finding removed the thing the control controlled for.
+
+The fix is not to relax the control but to pin the knee explicitly:
+`kneeAtRefDb` + `kneeDriveSlope: 0` are now kernel params, so the control sets
+the fixed knee it needs and the fitter's self-test sets four distinct ones (the
+old constants, now a property of the TEST and not of what ships). Those params
+are also what the four-point refit will search. They are deliberately not panel
+params and not preset keys: the law is a fit, not a taste control.
+
+⚠ **AND THE COLLAPSE IS NO LONGER EXACT, which is a consequence worth stating
+rather than discovering.** Above the knee drive and level still add in dB, so the
+curves still shift sideways; but the knee now changes width with drive, so they
+no longer lie on top of one another through the bend, and a joint fit of
+(threshold, slope, knee) lets that leak into the slope estimate. Bounded at 0.05
+of slope by a new test, against 0.01 with the law off.
+
+#### What it actually changes: less than it sounds
+
+⚠ **THE STEADY-TONE PROBE SAYS ALMOST NOTHING, AND THAT IS THE TRAP.** On the
+−12 dBFS tone the GR meter is set by, the change is ≤ 0.07 dB at every button and
+Input position — because at those drives the tone sits well above the knee, where
+the knee does not live. Swept across level, the worst case is **0.35 dB of gain
+reduction**, at ratio 20 / Input 70 / −30 dBFS: 15–30 dB below the tone. On five
+seconds of narration it is 0.04 dB of rms at Input 40 and under 0.01 above it.
+
+So the knee is **not** what will move the presets. The slope is — and that is the
+half still waiting on the table.
+
+---
+
+### The knee law, fitted — and Finding 5 withdrawn
+
+The per-capture table came back and the law is installed:
+`KNEE_AT_REF_DB 4.7344`, `KNEE_DRIVE_SLOPE 0.21738`, fitted by simulate-and-match
+in `scripts/fet-static-fit.mjs`. The readings are now kept in
+`data/fet1176/fetish_stairs_fits.json` so this cannot be lost a third time.
+
+**The interior points make the law linear**, which the two endpoints could not
+say: FETish's knee against its own drive is 5.85 / 7.21 / 9.53 / 10.86 at
++0.00 / 6.80 / 18.40 / 25.00 dB — segment slopes **0.2000 / 0.2000 / 0.2015**,
+straight to three-quarters of a percent over 25 dB. Held out, fitting I1 and I4
+alone predicts I2 and I3 to 0.257 dB rms.
+
+#### ⚠ Three things I said last round were wrong
+
+**1. The "24 % ambiguity" in the slope was mine, not the data's.** I framed the
+correspondence between the two kernels as matched *reduction*. Wrong question:
+the knee is a width on the INPUT-LEVEL axis, and `effThresholdDb` is absolute —
+dBFS against the same stimulus — so both kernels report where the bend sits in
+the same units. Anchored on that the drive axes coincide by construction.
+
+**2. ⚠⚠ FINDING 5 IS WITHDRAWN. "FETish compresses less than our implementation
+at the same marking" WAS OUR WRONG KNEE READING BACK.** The recorded finding put
+FETish's real ratios near 3.6 / 6.1 / 8.8 / 13.2 and it is an artefact. Against
+nominal, FETish's four buttons read:
+
+| button | nominal | FETish | dev |
+|---|---|---|---|
+| 4 | 0.7500 | 0.7489 | −0.15 % |
+| 8 | 0.8750 | 0.8672 | −0.89 % |
+| 12 | 0.9167 | 0.9157 | −0.10 % |
+| 20 | 0.9500 | 0.9489 | −0.11 % |
+
+**FETish's ratio buttons are accurate.** `RATIO_VALUES` needs no change, and
+installing the fitted 3.769 / 6.552 / 9.397 / 13.417 would have put our own
+measurement error into the product as a re-voicing.
+
+**3. And my first explanation of that was also wrong.** I said our +3 % excess
+was attack-lag bias and that no ballistics configuration reproduced FETish. It
+was mostly **the knee**. The instrument fits (threshold, slope, knee) jointly, so
+a wrong knee comes back as a wrong slope: at ratio 4 our fitted slope was 0.7734
+(+3.12 %) under the old fixed 10 dB knee and is **0.7495 (−0.07 %)** under the
+fitted law, against FETish's 0.7489. Installing the knee removed almost all of
+the slope gap without touching a ratio.
+
+#### What survives: a drive-dependent residual, ~2.4 %
+
+Our fitted slope is not flat where FETish's is. Ratio 4, by Input position:
+ours 0.7495 / 0.7681 / 0.7725 / 0.7708 against FETish's 0.7477 / 0.7488 /
+0.7495 / 0.7496. We match at I1 and drift ~2.4 % high by I2, then hold. That is
+the real residual and it is smaller and better-located than "+3 % everywhere".
+The ballistics-configuration table still stands as a separate caution — at
+Input 50, `datasheet`+`none` reads +2.45 %, `datasheet`+`depth` +9.27 %,
+`fetish`+`none` +8.69 %, `fetish`+`depth` +29.20 % — so the diff column's bias
+cancellation is still not something to lean on, it is simply not what produced
+Finding 5.
+
+#### The fit had to be run twice, and the first run was wrong
+
+⚠ **THE FIRST RUN SEARCHED THE KNEE AND THE FOUR RATIOS TOGETHER** by coordinate
+descent, returning `KNEE_AT_REF_DB 4.7148` alongside ratios 3.769 / 6.552 /
+9.397 / 13.417. Since the ratios are a diagnostic we are NOT installing, that
+calibrated the knee against a kernel that is not the one shipping — and our
+fitted knee moves 0.32 dB across the buttons, so a ratio the product never uses
+was dragging the knee with it. Re-run with ratios pinned at nominal: 4.7344 /
+0.21738. Small (0.02 dB of knee) but the principle is not: **fit against what
+ships.** It is also most of the fitter's runtime, so the nominal path is now the
+default.
+
+#### Known residual
+
+⚠ The full-fit rms of 0.384 dB is a STRUCTURAL MISMATCH rather than noise, and
+it has a direction: our fitted knee varies 0.32 dB across the ratio buttons
+where FETish's varies 0.01, so no single law can satisfy all sixteen readings.
+Worst at ratio 20 / I4, −0.84 dB. Closing it needs a knee that knows about the
+button — the opposite of what the captures say — so it is left.
+
+#### What it changes
+
+Still small, and still near threshold. Against the ORIGINAL per-button knees,
+swept across level, the worst gain-reduction change is **0.32 dB** (ratio 4,
+Input 40, −15 dBFS); on narration it is 0.048 dB of rms at Input 40 and 0.000
+by Input 85. The fitted law is slightly narrower than the provisional one at
+every position (e.g. 5.66 → 4.53 dB at knob 40, 8.27 → 7.36 at knob 70).
+
+**The static curve is now finished for the four normal buttons.** All-buttons
+remains unmeasured — `ALL_KNEE_DB`, `ALL_THRESHOLD_DROP_DB` and the soft
+`ALL_RATIO_*` law have nothing behind them, and only CLA-76 can supply it.
+
+---
+
+### ⚗⚗ The staircase protocol had the attack backwards
+
+Asked to fix two tooling gaps and add a finer staircase so the all-buttons law
+could be measured. The tooling gaps were real. **The finer staircase was the
+wrong fix, and finding out why overturned the capture protocol.**
+
+#### What the four CLA-76 all-buttons captures could and could not say
+
+They came back with knees of 0.13 / 2.98 / 0.50 / 0.17 dB, three at or under the
+search bound. The question was whether they were usable or needed re-bouncing.
+
+Usable, and worth having:
+- **`ALL_KNEE_DB = 16` is wrong.** Our own all-buttons kernel reads 16.0–16.8
+  through this fitter, so it recovers a wide knee correctly; CLA-76 reads at the
+  floor. A bound rather than a number, but a decisive one.
+- **`ALL_THRESHOLD_DROP_DB = 6` is too big**, and it survives the convention
+  problem. CLA-76's thresholds move with the button and ours do not, so "how far
+  below" depends what you compare against — all-buttons sits 0.54 dB below its
+  own ratio 4, 2.65 below the mean of the four, 3.24 below ratio 12, each
+  reproducible to ~0.1 dB across the four Input positions. Every convention says
+  6 is too big.
+- **Our soft ratio law has the wrong sign**: ours climbs with drive (0.9381 →
+  0.9560), CLA-76's falls (0.9449 → 0.9163). ⚠ Confounded — *every* CLA-76 button
+  falls with drive (−0.013 to −0.022), so most of it is reference-wide. All-buttons
+  falls most (−0.0286), leaving maybe −0.01 that is specific. Suggestive, not settled.
+
+#### ⚠⚠ The finer staircase does not lift the knee floor, and the attack does
+
+The hypothesis was that 3 dB steps cannot resolve a knee finer than ~4 dB. It is
+wrong. Driven through the fitter at a true knee of 0.3 / 0.6 / 1 / 2 dB, the
+coarse plan reads back **4.32 in all four cases** — and the 1 dB plan reads
+**5.18**, if anything worse. The limit is not the sampling.
+
+It is the **attack rounding the corner**. Sweeping the dial at a true knee of
+0.6 dB: 4.32 / 3.76 / 3.34 / 3.01 / 2.75 / 2.49 / 2.28 across dials 1–7.
+
+⚠ **WHICH MEANS "ATTACK SLOWEST, ALWAYS" — WHICH THE PROTOCOL HAS REQUIRED FOR
+EVERY CAPTURE TAKEN SO FAR — IS THE WORST SETTING FOR THIS MEASUREMENT.**
+
+| | attack dial 1 | attack dial 7 |
+|---|---|---|
+| true knee 4 / 8 / 16 dB reads | +2.15 / +1.43 / +0.44 | **+0.15 / +0.09 / +0.04** |
+| sharpest knee distinguishable | 4.32 dB | **2.28 dB** |
+| fitted slope (true 0.7500) | 0.7634 (+1.8 %) | **0.7512 (+0.16 %)** |
+| …and its drift with the knee under it | 0.7634 → 0.7762 | **flat** |
+| fit rms | 0.035 | **0.002** |
+
+The old reasoning — a bare rectifier with no smoothing means a fast attack
+tracks |sin| within the cycle and leaves no settled value to read — is about
+reading a trace **by eye**. `fet-stairs.mjs` takes a robust statistic instead.
+
+⚠ **THIS IS WHERE THE BIAS THAT HAS DRIVEN THE WHOLE STATIC FIT COMES FROM.**
+The few-percent slope inflation that made the absolute numbers untrustworthy,
+that motivated the diff column, and that forced the knee to be installed by
+simulate-and-match, is mostly the attack. At dial 7 it is 0.16 %.
+
+⚠ Measured on our kernel; expected but **unverified** on a reference. One bounce
+settles it: `stairs.wav` at ratio 4 / I3 at the fastest attack, compared against
+the dial-1 capture that already exists. If its fit rms drops the way ours does,
+re-bounce the matrix and analyse with `--attack 7`.
+
+#### ⚠ The gate bounce: the correction is OURS, not the reference's
+
+Predicted that a reference would read better at the fast attack too, and asked
+for one bounce to settle it before re-taking 20. **It does not transfer.**
+
+| | slope | knee | eff thr | rms |
+|---|---|---|---|---|
+| CLA-76 r4 I3 at dial 1 | 0.8271 | 5.15 | −24.13 | 0.037 |
+| CLA-76 r4 I3 at dial 7 | 0.8328 | 4.91 | −24.38 | 0.038 |
+| ours, same position (true 0.7500) | 0.7710 → **0.7513** | 7.74 → **5.63** | | |
+
+Ours moves 0.0197 of slope and 2.11 dB of knee. CLA-76 moves 0.0057 and 0.24.
+Its fit rms does not improve at all (0.037 → 0.038), so the ~0.037 is not attack
+rounding — it is structure in CLA-76's curve that a three-parameter law does not
+describe, and a re-take will not fix it.
+
+**The 20-capture re-bounce is therefore cancelled**, per the stopping rule the
+gate was set up with.
+
+⚠ **BUT THE INVARIANCE IS THE MORE USEFUL RESULT.** A reading that does not move
+when the attack is swept end to end was never attack-biased, so CLA-76's stairs
+numbers can be read at face value — which retires the "treat the magnitude as an
+upper bound" caveat that has hung over every CLA-76 slope since they were taken.
+Against our now-unbiased dial-7 instrument (0.7513 for a true 0.7500),
+**CLA-76's "4:1" really is about 6:1.** Note this is the opposite of FETish,
+whose four buttons measure nominal to within 0.9 %: the two references disagree
+about their own ratio markings, as they already did about the threshold.
+
+And the protocol rule survives with a different justification: capture at the
+fastest attack not because the reference reads better, but because both sides
+must share a setting for the diff to cancel and dial 7 is where OUR side is
+unbiased. Existing dial-1 captures stay usable, carrying our +1.8 %.
+
+#### The two tooling gaps
+
+**1. ⚠ `kneeAtBound` tested the wrong bound and therefore never fired where it
+mattered.** It checked the search's 0.1 dB floor. The real floor is the
+instrument's — 4.32 dB at dial 1 — so CLA-76's 0.13 / 0.50 / 0.17 readings were
+printed as measurements when our kernel cannot produce a reading that low for
+*any* true knee. There is now a measured `KNEE_FLOOR_DB` table per plan and
+attack dial, and a separate `kneeUnresolved` flag. Both are kept: `kneeAtBound`
+says the search ran out of grid, `kneeUnresolved` says the measurement cannot
+support the number whatever the search did.
+
+**2. ⚠ All-buttons was filtered out of the diff column** (`r.knobs.ratio !== 'all'`),
+so CLA-76's four all-buttons captures were never placed beside our own kernel —
+which is exactly where `ALL_KNEE_DB = 16` shows up as wrong. `ratio: 'all'` is a
+perfectly good kernel setting and there was never a reason to drop it.
+
+#### `stairs-fine.wav` ships anyway, for the job it can actually do
+
+97 s, thirty-four 1 dB steps from −36 to −3 dBFS. ⚠ **NOT for the knee** — the
+table above is in the header so nobody re-derives it. What it buys is **34 points
+inside the bend against 15**, over the span where every reference's effective
+threshold lands (CLA-76's all-buttons runs −14.52 dBFS at I1 to −30.13 at I4).
+That is what the all-buttons `ALL_RATIO_MIN` / `SPAN` / `HALF_DB` triple needs:
+its effective ratio varies *along* the curve, and one fitted slope per capture
+averages it away. Only all-buttons needs it; the four normal buttons are
+single-slope laws the coarse plan measures fine.
+
+Captures route by filename (`_stairsfine_`), because analysing a fine capture
+against the coarse plan misaligns every step and returns a curve that is not so
+much wrong as meaningless.
+
+---
+
+### The four presets, re-cut
+
+Deferred since the start of the re-tune ("leave the presets alone until we've
+completed the FET fit"). Done now for the four normal-ratio presets.
+
+⚠ **DOING NOTHING WAS ITSELF A RE-VOICING, AND A SILENT ONE.** Left on their
+stored dials, the presets had drifted by **+1.72 / +2.13 / −0.68 / +7.82 dB** of
+average gain reduction on narration. Five changes moved under them, none of them
+reachable from a patch: the Input span (40 → 48 dB), the release endpoints
+(1.1 / 0.05 s → 0.7288 / 0.03318, every dial 1.51× faster), the release depth
+schedule, the attack depth schedule, and the knee law.
+
+**The target was what each preset DID when it was cut**, not a new voicing —
+choosing new ones is a listening decision and not the fitter's to make. The
+as-cut kernel is recoverable exactly, because the constants that moved are all
+module-level: `git show 57e1877:src/audio/fet1176Processor.js` imports and runs
+as a second module beside the current one.
+
+| preset | Input | attack | release | avg GR as cut → now |
+|---|---|---|---|---|
+| vocal-punch | 55 → **46** | 4 → **5** | 5 → **3** | 4.21 → 4.15 dB |
+| consonant-control | 60 → **53** | 6 | 5 → **4** | 5.46 → 5.53 |
+| gentle-ride | 40 → **35** | 2 → **3** | 3 → **1** | 3.24 → 3.13 |
+| parallel-thickener | 75 → **47** | 7 | 7 | 6.54 → 6.50 |
+
+All four land within 0.10 dB of their as-cut behaviour. `output` is untouched
+and must stay so — it is canonicalised to 0 while AUTO is on and solved per
+file, so the percentile-makeup change needed no preset edit at all.
+
+#### ⚠ Three things the tool got wrong before it got them right
+
+**1. The dials were chosen at one depth and the residual printed at another.**
+Solve the Input, read the depth, pick the dials, stop — but rounding the Input
+moves the depth again, so the printed residual belonged to a patch that was not
+the one being installed. It read as a bad dial choice when it was two questions
+answered at two operating points.
+
+**2. ⚠⚠ THEN IT LIMIT-CYCLED, AND CHASING THE FIXED POINT DOES NOT END IT.**
+Moving a dial moves the depth, the depth picks the dial, and the dials are
+integers — so a preset whose ideal sits on a boundary flips between two
+positions forever. Two versions ended by taking whatever the last iteration
+happened to hold, which is an arbitrary tie-break dressed as a solve. Ended
+properly: take the small neighbourhood the loop was circling, **settle the Input
+separately for each candidate**, and keep the one whose ballistics land closest
+at its own operating point. Nine patches, each fully solved, winner
+self-consistent by construction.
+
+**3. The convergence flag then measured the wrong thing twice** — first
+loop-to-loop stability, which a limit cycle never has even when the answer is
+fine; then agreement between the joint optimum and the per-axis ideal, which
+legitimately differ when the dials trade through the depth. It is now printed as
+information rather than as a failure.
+
+#### One judgement, made explicitly
+
+⚠ **`gentle-ride`'s attack is dial 3 because of what the preset is FOR, not
+because the arithmetic said so.** The combined score preferred 4. At their own
+settled operating points the two straddle the old 0.433 ms almost symmetrically
+— dial 3 at +36 %, dial 4 at −28 % — and dial 3 is marginally closer in log
+terms **and** errs on the slow side. A preset whose whole description is "onsets
+pass" should miss slow. The straddle is now printed for every preset so this
+kind of call is visible rather than absorbed.
+
+#### Where the knob runs out
+
+⚠ Three of the eight dials sit at the END of their travel, where the old voicing
+is not reachable and the residual is a **floor, not a rounding**:
+`gentle-ride`'s release (dial 1, −26 %) and `parallel-thickener`'s attack and
+release (dial 7, +22 % and −21 %). The release endpoints moved 1.51× faster and
+the schedule moves them further, so the slowest release available is now
+meaningfully faster than it was.
+
+#### Not re-cut
+
+`factory:all-buttons-in` keeps its original dials, deliberately. Its law has no
+captures behind it from either reference, and CLA-76's four all-buttons stairs
+captures already say `ALL_KNEE_DB` and `ALL_THRESHOLD_DROP_DB` are both too big.
+Re-cutting against a law that is about to change would dress a guess as a fit
+twice over. It has drifted like the others and is left wrong on purpose.
+
+---
+
+### The all-buttons tooling — and the law that cannot be fitted
+
+Five captures were bounced and were too large to upload, so the analysis has to
+run locally. Building the tooling first turned up two gaps and one finding that
+changes what the captures can deliver.
+
+#### ⚠ The bursts comparison was hardcoded to ratio 4
+
+`fet-ballistics.mjs` matched our kernel against a reference capture at
+`ratio: '4'` regardless of what the capture was — including the single
+all-buttons bounce the matrix asks for, which is the **only** source for
+`ALL_TAIL_FRACTION` and `ALL_TAIL_MULT`. A matched measurement against the wrong
+gain computer is not matched at all. The ratio is now read off the filename.
+
+#### ⚠⚠ THE TOOL FITTED A NUMBER IT COULD NOT MEASURE, AND THE CAPTURES CAUGHT IT
+
+The four all-buttons fine captures came back and the fitter reported
+`allThresholdDropDb = 0.750` against a shipping 6 — a big, plausible-looking
+result, consistent with what the coarse matrix had hinted. **It was an
+artefact.**
+
+The kernel computes `over = level + drive - (THRESHOLD - drop)`, so **drive and
+drop enter as a sum.** Raise the drive 1 dB and lower the drop 1 dB and the
+curve is identical — measured at **3.65e-7 dB rms** across a 4 dB range of the
+pair, against **0.797 dB** for moving either alone. A capture at an unknown
+Input position constrains `drive + drop` and neither term.
+
+So the 0.750 was whatever made up the difference against `estimateDrive`'s
+guess — which is quantised to the staircase's 1 dB step and depends on the very
+law being fitted. The output even showed it: the estimated drives came back
+−5 / −1 / +4 / +10, suspiciously round, because they are step indices.
+
+⚠ **AND THE REPORT'S OWN VERDICT COLUMN SAID "NOT determined" FOR THE ROW IT WAS
+FITTING.** The rule compared each constant's sensitivity against three times the
+fit residual, and with the residual at 0.565 dB nothing could clear it. A tool
+printing a fitted value on a row it has just labelled undetermined is a tool to
+stop trusting; the fit is now removed rather than the label.
+
+**The drop is measurable, just not there.** It is defined against the normal
+buttons' threshold, so it needs all-buttons and a normal button at the SAME
+Input knob — which the coarse `stairs.wav` matrix already has:
+
+| Input | vs ratio 4 | vs mean of four | vs ratio 12 |
+|---|---|---|---|
+| I1 | 0.54 | 2.63 | 3.17 |
+| I2 | 0.61 | 2.67 | 3.24 |
+| I3 | 0.58 | 2.68 | 3.25 |
+| I4 | 0.53 | 2.70 | 3.29 |
+
+Reproducible to ~0.1 dB across four independent drives, and **our 6 dB is larger
+than every convention.** ⚠ The convention ambiguity is irreducible and is itself
+the finding: our model holds ONE threshold for all four normal buttons and
+CLA-76's moves with the button by 4.5 dB, so the three columns disagree by
+2.7 dB and none is more correct than the others.
+
+CLA-76's coarse fits are now persisted in `data/fet1176/cla76_stairs_fits.json`
+beside FETish's, for the same reason: the captures cannot be committed and the
+numbers were nearly lost once already.
+
+#### ⚠⚠ The all-buttons law is not identifiable from a staircase
+
+Built `fet-allbuttons-fit.mjs` to fit the five all-buttons constants to the
+1 dB staircase by simulate-and-match on the whole curve, since the coarse
+fitter's single slope averages away a ratio that varies ALONG the curve.
+
+**The self-test planted a known law and the fit did not get it back.** It
+reproduced the curve to 0.207 dB while returning a knee of 2.33 for a planted 6,
+a ratio floor of 2.56 for a planted 10, and a half-point pinned to its bound. A
+sensitivity probe says why — perturbing the planted law one constant at a time:
+
+| constant | probe | curve moves |
+|---|---|---|
+| `allThresholdDropDb` | ±1 dB | **0.78–0.80 dB** |
+| `allRatioMin` | ±4 | 0.07–0.20 |
+| `allRatioSpan` | ±6 | 0.06–0.17 |
+| `allKneeDb` | ±3 dB | 0.09–0.11 |
+| `allRatioHalfDb` | ±6 | 0.03–0.07 |
+
+**Only the threshold drop is determined.** The other four move the curve less
+than the residual the fit settles at, so a number for any of them would be a
+guess with a decimal point on it.
+
+⚠ **THIS IS NOT THE SEARCH** — a better optimiser finds the same flat valley
+faster. ⚠⚠ **BUT THE CLAIM THAT IT WAS THE STIMULUS IS WITHDRAWN.**
+
+### What would actually move the all-buttons ratio law — measured, not guessed
+
+Asked what stimulus would sweep overshoot independently of level. **There isn't
+one, because the premise was wrong**, and the measurements say so.
+
+**The staircase already sweeps overshoot.** At the four captured drives the fine
+plan covers **−17 to +31 dB** of overshoot, most of the law's useful domain.
+"Overshoot and level move together so a staircase cannot separate them" sounded
+right and is not: moving the Input knob moves the threshold under the same level
+ramp, which is exactly how that range gets covered.
+
+**Sensitivity is not the blocker either.** Against capture noise alone — CLA-76
+reads 0.02–0.13 dB — two of the four would be measurable:
+
+| design | ratioMin | ratioSpan | ratioHalf | knee |
+|---|---|---|---|---|
+| as captured (−5..10) | 0.398 | 0.281 | 0.111 | 0.162 |
+| wider drive (−5..25) | 0.395 | 0.459 | 0.137 | 0.192 |
+| widest (−5..40) | 0.349 | 0.531 | 0.146 | 0.233 |
+
+**The blocker is the residual.** The fit settles at **0.565 dB**, larger than
+every sensitivity above. That is model mismatch — our law does not describe
+CLA-76's all-buttons curve — and while it dominates, no parameter inside the law
+can separate from the error in the law's shape.
+
+⚠ **SO NO NEW BOUNCE FIXES IT.** Wider drive does buy real sensitivity on
+`allRatioSpan` (0.28 → 0.53) and is worth having later; it does nothing for
+`allRatioMin` or `allRatioHalfDb`, and nothing at all while the residual
+dominates.
+
+⚠ **AND DIFFERENCING MAKES IT WORSE**, which was the other idea and was also
+checked. Reading local slope instead of accumulated reduction drops every
+sensitivity by about 7× (`allRatioMin` 0.398 → 0.056): the integral accumulates
+the difference across the curve, the derivative throws it away and keeps the
+noise.
+
+**The next step needs no captures.** Extract slope against overshoot
+non-parametrically from the four already taken, and look at the shape the data
+wants instead of asking how well a MIN/SPAN/HALF form fits it. If that form is
+wrong, fitting it harder was never going to work.
+
+So the tool fits the threshold drop, prints the sensitivity table, and refuses
+to hand back the rest. The self-test now **asserts the non-identifiability**: if
+a future stimulus does determine those four, it fails, which is the right way to
+find that out.
+
+#### A 13x speedup that had to be proved identical
+
+`analyseBurst` re-traces the whole capture for every event — fine for the
+4-event burst plan it was written for, quadratic on a 34-step staircase. At
+6.5 s per curve, a fit that renders one curve per candidate ran for hours.
+`stairDepths` traces once: **501 ms against 6520**.
+
+⚠ It is a speed path, NOT a second analysis, and the distinction is the whole
+point — both the reference and our own kernel go through `stairCurve`, so a fork
+here silently puts the two sides on different instruments, which is the one
+thing every measurement in this re-tune depends on not happening. A test pins it
+`deepEqual` against `analyseCapture` on a real render, at ratio 4 and
+all-buttons.
+
+---
+
+### The all-buttons tail, measured away — and an attack verdict that was an artefact
+
+CLA-76's one `bursts.wav` bounce at ratio all (attack 4, release 4, Input I3).
+The only capture of all-buttons ballistics that exists, since FETish has no such
+mode.
+
+#### ⚠⚠ `ALL_TAIL_FRACTION` 0.45 → 0. There is no tail.
+
+The observable that argued for one is there: release t63 lengthens with hold
+length, **77 / 82 / 105 / 124 ms** across the 0.05 / 0.2 / 1 / 3 s holds. That is
+what a two-stage release looks like.
+
+But reduction also deepens over those holds — 9.70 / 10.02 / 11.91 / 13.34 dB —
+and `RELEASE_DEPTH_K` says a deeper release is slower. Against the shortest:
+
+| hold | 0.2 s | 1 s | 3 s |
+|---|---|---|---|
+| observed | 1.065 | 1.364 | 1.610 |
+| depth schedule alone | 1.045 | 1.359 | 1.658 |
+
+Agreement at **every** hold, and **0.971× left over for a tail** end to end. A
+45 % share on a 6× stage would have shown as a large extra lengthening on top of
+the depth term; it is not there.
+
+⚠ One capture, one reference, and it leans on `RELEASE_DEPTH_K`, which was
+fitted to FETish at ratio 4 — so using it to explain CLA-76 at all-buttons
+assumes the same law applies. The agreement IS the evidence for that, but it is
+not independent of it, and no second reference can check it.
+
+⚠ **THE TAIL TEST ITSELF NEVER RAN.** All three shorter holds were excluded for
+"still settling" — correctly, since release t63 cannot be compared across
+different depths. The finding came from reading the exclusion's own cause
+instead: what looked like unsettled holds is the program dependence, and the two
+are the same observable.
+
+#### A caveat retired
+
+⚠ All-buttons was the one mode still carrying a tail, which made FET Punch's
+pre-roll **convergent but not bit-exact** — 5.46e-6 after 2 s, decaying and
+never reaching zero, unlike OptoSmooth. With the fraction at 0 the last state
+with memory longer than the pre-roll is gone and the render is **exactly** zero.
+`previewApplyConvergence.test.js` now asserts equality rather than a bound, so a
+tail coming back fails loudly.
+
+#### ⚠⚠ And the attack verdict was an artefact of the wrong statistic
+
+The report said CLA-76's all-buttons attack was **"OUTSIDE OUR RANGE — slower
+than dial 1"**, flagged as a finding about `ALL_ATTACK_LAG`. It was not.
+
+The matcher used **overshoot**, which SATURATES at the slow end of the dial —
+exactly where a slow reference sits. Measured on our own all-buttons kernel at a
+matched 13.4 dB: dials 1 / 2 / 3 give overshoot 12.99 / 12.74 / 12.21 dB, **0.78
+dB across two dials**, while attack t63 gives 3696 / 2063 / 1066 µs, a factor of
+**3.5** over the same span.
+
+On t63, CLA-76's 1938 µs sits between our dial 2 and dial 3 — comfortably inside
+the range, near dial 2, and no finding at all. The dev log had already recorded
+that overshoot saturates and t63 is the trustworthy attack estimator; the tool
+had not been told. It now matches on t63 and prints overshoot as the secondary
+reading it is.
+
+**`ALL_ATTACK_LAG` is unchanged** — nothing here says it is wrong.
+
+#### What the release comparison does say
+
+At the same dial our all-buttons release was far slower than CLA-76's: its
+dial 4 behaved like our 6.43. Most of that was the tail, now gone. Worth
+re-reading the capture against the current kernel before drawing anything from
+it.
+
+---
+
+### The shape extractor — and why `allRatioMin` was never fittable
+
+Built `fet-allbuttons-shape.mjs`: reads the all-buttons slope law off the fine
+captures WITHOUT assuming the `MIN + SPAN*over/(over+HALF)` form. It asks the
+question the fitter cannot: what shape does the data want?
+
+**How it works.** The staircase gives reduction against level; its local slope is
+the compression slope there, and the slope law is a function of overshoot — so
+four captures are four windows onto one curve, each shifted by its own drive.
+Slope is read by least-squares regression over a 5 dB window rather than by
+differencing adjacent steps, which multiplies capture noise by the step size.
+
+⚠ The x-axis origin is unrecoverable (drive and drop are degenerate), so
+everything is reported against a shifted axis with the first capture pinned at
+zero. The offsets BETWEEN captures are real; their common origin is not.
+
+**Validated by planting a law**: offsets recovered as 0.00 / 5.00 / 10.00 / 15.00
+against a true 0 / 5 / 10 / 15, and a collapse residual of **0.0000** — four
+windows onto one function land exactly on one curve.
+
+#### ⚠⚠ And it explains the non-identifiability, which no amount of fitting did
+
+`allRatioMin` is the slope as overshoot goes to **zero**. With a 16 dB knee,
+everything below +8 dB of overshoot is bend. The guard that keeps the bend out of
+a slope reading therefore removes **the entire region that determines the ratio
+floor** — the captures can only ever see the saturated end of the law. On the
+planted-law self-test the recovered span is 0.9488–0.9526 against a family
+spanning 0.7501–0.9500: only the top.
+
+⚠ **SO THE KNEE AND THE RATIO LAW ARE ENTANGLED, NOT INDEPENDENT UNKNOWNS.**
+Assuming a wide knee hides the evidence about the floor. CLA-76's coarse captures
+already say its knee is far narrower than our 16 — and a narrower knee uncovers
+more of the law. Fit the knee first and the rest comes into view; fit them
+together on the assumption of a wide knee and the floor is unreachable by
+construction.
+
+#### Two self-test failures, both mine
+
+⚠ **The offset sign.** The test expected 0 / −5 / −10 / −15 and got
+0 / +5 / +10 / +15. More drive puts the same overshoot at a LOWER level, so
+mapping a higher-drive capture onto the first shifts its axis UP. The extractor
+had it right the whole time; the expectation was backwards.
+
+⚠ **The knee leaked into the window.** The guard checked only the point, not its
+regression window, so with a 5 dB window and a 16 dB knee a point just above the
+guard still had half its window inside the bend — reporting slope 0.272 for a
+family whose floor is 0.750. The whole window must clear the guard, and the guard
+has to be set for the knee in question: ours reaches 8 dB above threshold, so the
+law is only clean above roughly 7 dB of reduction.
+
+---
+
+### ⚗⚗⚗ The all-buttons law measured, and OUR MODEL HAS IT BACKWARDS
+
+The shape extractor run on CLA-76's four all-buttons fine captures.
+
+**First, the law is well defined.** Collapse residual **0.0041 of slope over 34
+overlapping points**, against a slope variation of 0.107. Four windows onto one
+curve land on one curve — so slope IS a function of overshoot alone, and the
+recovered drive offsets (−5.05 / 0 / +5.75 / +10.80 dB) are consistent with the
+Input positions. Nothing is refuted by the collapse; the law exists.
+
+**Then the shape, and it is the opposite of ours.**
+
+| shifted level | slope | implied ratio |
+|---|---|---|
+| −16.0 | 0.9150 | 11.76 |
+| −11.0 | 0.9492 | **19.69** ← peak |
+| −5.2 | 0.9416 | 17.11 |
+| −2.2 | 0.9262 | 13.56 |
+| +0.8 | 0.9011 | 10.11 |
+| +7.8 | 0.8418 | **6.32** |
+
+Above the peak the trend is **−0.756 of ratio per dB** of overshoot: the ratio
+**falls** from ~19.7 to ~6.3. Our law is `MIN + SPAN*over/(over+HALF)` with MIN 6
+and SPAN 14 — it **rises** 6 → 20. Our own kernel through the identical
+extractor reads 0.9473 → 0.9521, essentially flat at ratio ~20, because with a
+16 dB knee the law has already saturated everywhere it can be seen.
+
+⚠ **THE RANGE IS NOT WHAT REFUTES IT.** Measured 0.8418–0.9494 sits neatly inside
+our family's 0.8334–0.9500. It is the DIRECTION.
+
+⚠ **AND A SIGN FLIP DOES NOT RESCUE THE FAMILY**, which was checked rather than
+assumed. Fitted to the falling region with negative spans allowed, the best
+member reaches 1.595 rms of ratio — about 12 % of the measured range — and wants
+an asymptote of **−13.0**, which is not a ratio at all (below 1 is expansion).
+Held to a legal asymptote it is worse, 2.079.
+
+⚠ **MY SEARCH BOUNDS EXCLUDED THE CORRECT SIGN.** `allRatioSpan` was bounded
+`[0, 40]`, so the fitter could only ever return the least-bad *climbing* law.
+Fixed to `[-40, 40]` — the tool should not be wrong for two reasons at once,
+even though the family is refuted on shape either way.
+
+#### The literature agrees, and the owner found it
+
+Austin Moore, *All Buttons In: An investigation into the use of the 1176 FET
+compressor in popular music production* (Journal on the Art of Record
+Production, 2012) — supplied by the owner; the sandbox cannot reach the domain,
+so this works from the text they pasted.
+
+- ⚠ **Shanks (UA Webzine, 2003) likens the all-buttons compression curve to a
+  "plateau"**, with "lag time on initial transients". A plateau is a region of
+  very high ratio; a curve that resumes rising above it has a LOWER ratio there.
+  That is our measured shape — high near the knee, falling above it. **Inference
+  from a qualitative description, not a measured curve**, and labelled as one.
+- The UA manual puts all-buttons "somewhere between 12:1 and 20:1". Our
+  measurement matches near the knee (19.7) and goes **below** it at high
+  overshoot (6.3).
+- Moore's own drum test in all-buttons: "the occasional hit overshooting…
+  close to 0dBFS" at low RMS — what a falling ratio at high overshoot does.
+- ⚠ **NOT THE SAME CLAIM**: Shanks also says "the ratio will always increase a
+  bit after the transient", which is program dependence in TIME. Ours is in
+  LEVEL. Different axes, and they must not be merged.
+- ⚠ The paper measures HARDWARE; both our references are plugins.
+
+#### ⚠⚠ And it settles the threshold disagreement, against us
+
+The log has recorded FETish measuring a threshold FIXED across the ratio button
+(0.00 dB) while CLA-76's moves 4.5 dB, and called it a topology disagreement
+neither reference could settle. The paper quotes the UA manual directly: **"The
+1176 has been designed so that selecting higher ratios also raises the threshold
+level."** Moore reads the same off the Urei transfer-function diagram, and adds
+that the knee hardens with ratio too.
+
+So **CLA-76 matches the hardware documentation and FETish does not** — and our
+model, which holds the threshold fixed, is wrong with FETish. That is a real
+finding about all four normal buttons, not just all-buttons, and it is a
+topology change rather than a refit. **Not made here**; recorded so the next
+person does not re-derive the disagreement from scratch.
+
+⚠ Note this also means FETish's *manual* was right and its *implementation* was
+not — the log already recorded that FETish contradicts its own documentation on
+this point.
+
+---
+
+### The all-buttons ratio law, reversed and installed
+
+Owner's call: fix the direction, leave the threshold. Done.
+
+**The old law is gone.** `ALL_RATIO_MIN` / `SPAN` / `HALF_DB` climbed 6 → 20 with
+overshoot. The replacement is stated as an incremental slope falling with
+overshoot, floored:
+
+```js
+ALL_INCR_AT_KNEE     = 0.949     // measured, at the knee exit
+ALL_INCR_FALL_PER_DB = 0.0057    // measured
+ALL_INCR_FLOOR       = 1 - 1/6   // EXTRAPOLATED — the captures never reach it
+```
+
+**Why a line.** Candidate families fitted to the measured slope (which spans
+0.107): linear 0.0115 rms, exponential decay 0.0092, falling reciprocal in ratio
+0.0130. The exponential's edge is illusory — at τ 59.5 dB it IS the line over the
+6–25 dB the captures cover, and its floor sits where nothing was measured. The
+line is the simplest thing that fits and it makes its one extrapolation explicit.
+
+#### ⚠⚠ A factor of two the self-test caught
+
+**The extractor measures the INCREMENTAL slope `d(gr)/d(level)`; the kernel's
+`slope` is a SECANT** (`gr = slope * over`). For a law whose slope varies with
+level these differ by the product rule — with `gr = s(over)*over` the incremental
+is `s + over*s'`, so **a secant falling at k reads as an incremental falling at
+2k**. The first cut installed the measured 0.0057 as a secant, and the shape
+extractor's own self-test caught our kernel coming back falling twice as fast as
+the reference it had just been fitted to.
+
+Fixed by stating the law incrementally and making reduction its **integral**,
+which removes the factor rather than leaving it in a comment to trip over. A
+test pins the integral against the stated slope by numerical differentiation, and
+another pins continuity where the knee meets the law.
+
+#### Where it lands
+
+Our kernel through the same extractor, against CLA-76, both measured from their
+own peak:
+
+| dB above peak | ours | CLA-76 | diff |
+|---|---|---|---|
+| 0 | 0.9422 | 0.9492 | −0.007 |
+| 5.8 | 0.9084 | 0.9416 | −0.033 |
+| 8.8 | 0.8903 | 0.9262 | −0.036 |
+| 13.8 | 0.8605 | 0.8736 | −0.013 |
+| 18.8 | 0.8365 | 0.8418 | −0.005 |
+
+Span 0.8348–0.9422 against 0.8418–0.9492. **Endpoints match to 0.007; the middle
+sags by up to 0.036** — and that sag is the "plateau" Shanks describes: CLA-76
+holds near 0.94 for about 9 dB and then falls faster than a line. Against the
+old law's ~0.11 of error in the wrong direction, this is about a 3× improvement
+with the direction now right.
+
+⚠ **A PLATEAU-SHAPED LAW WOULD CLOSE THE REST** and is not attempted here: it
+adds a parameter to a fit that already cannot separate the knee from the law, on
+one reference with no second to check it.
+
+#### Still not touched
+
+`ALL_THRESHOLD_DROP_DB` (6, against a measured 0.54–3.24 depending on
+convention) and `ALL_KNEE_DB` (16, measured narrower) stay as they are, at the
+owner's direction. ⚠ Both are coupled to this fit — the law is anchored at the
+knee exit because the measurement's x-origin is unrecoverable — so **changing
+either means refitting the slope law**. `factory:all-buttons-in` stays un-recut.
+(Both were fitted, and the preset re-cut, in "The all-buttons law, pinned from
+the captures already taken" below — this paragraph records the state at the time.)
+
+---
+
+### The ratio-dependent threshold — auditioned, then shipped
+
+Wired to the bench panel as `Ratio thr` first, so the owner could hear it on the
+four numbered buttons before deciding. **`MOVING` now ships**, with the anchor
+left at 4:1; `FIXED` stays reachable on the rocker and in `FET_LEGACY_PATCH`.
+
+**The law, fitted to CLA-76's 16 coarse captures.** Threshold offsets against its
+own ratio 4, at each Input position:
+
+| | r4 | r8 | r12 | r20 |
+|---|---|---|---|---|
+| I1 | 0 | +1.79 | +2.63 | +3.95 |
+| I2 | 0 | +1.72 | +2.63 | +3.88 |
+| I3 | 0 | +1.79 | +2.67 | +3.96 |
+| I4 | 0 | +1.81 | +2.76 | +4.11 |
+| mean | 0 | **+1.778** | **+2.673** | **+3.975** |
+
+A line in log2(ratio) through the origin at 4:1 fits at **1.712 dB per octave**,
+worst residual **0.135 dB** over all sixteen. The threshold RISES with the
+button, so a higher ratio starts compressing later.
+
+⚠ **FETish IS NOT AMBIGUOUS HERE AND `FIXED` REPRODUCES IT EXACTLY** — its
+sixteen captures read −15.29 / −22.09 / −33.68 / −40.28 dBFS with **0.00 dB** of
+spread across the four buttons at every position. So this is not our invention
+against a reference; it is one reference against the other, with the hardware
+manual siding against FETish and against us.
+
+⚠ **THE ANCHOR AT 4:1 IS A CHOICE, NOT A MEASUREMENT.** The captures give only
+the offsets between buttons; the family's absolute placement is degenerate with
+the Input drive, exactly as for all-buttons. Anchoring at 4:1 leaves the
+most-used button untouched, so the A/B is about the other three rather than
+about everything at once.
+
+#### What there is to hear
+
+| preset | ratio | fixed | moving | change |
+|---|---|---|---|---|
+| vocal-punch | 4 | 4.15 | 4.15 | **0.00** |
+| consonant-control | 8 | 5.53 | 4.68 | **−0.84** |
+| gentle-ride | 4 | 3.13 | 3.13 | **0.00** |
+| parallel-thickener | 12 | 6.50 | 4.83 | **−1.67** |
+| all-buttons-in | all | 17.29 | 17.29 | **0.00** |
+
+So `consonant-control` and `parallel-thickener` are the two to listen to. On a
+fixed patch at Input 60 the ratio sweep moves −1.45 / −2.48 / −3.76 dB of average
+reduction at 8 / 12 / 20.
+
+⚠ **ALL-BUTTONS IS DELIBERATELY OUT OF SCOPE.** It carries its own
+`ALL_THRESHOLD_DROP_DB` from the base threshold, and folding it in would change a
+mode whose law is still being measured. A test pins that it does not move.
+
+#### What shipping it cost
+
+⚠ **IT RE-VOICED EVERY PATCH ON 8/12/20**, which is why the factory presets were
+re-cut a second time: `consonant-control` Input **53 → 57**, `parallel-thickener`
+**47 → 53**, each re-solved for the gain reduction its old patch delivered. The
+two ratio-4 presets and all-buttons are untouched, by construction of the anchor.
+
+The button is now closer to a character control than a level control: at Input 90
+the spread of average reduction across the four buttons falls from **7.68 dB**
+under `FIXED` to **3.37 dB** under `MOVING`. That is the point of the hardware
+behaviour — changing ratio changes how it grabs, not how much.
+
+⚠ **THE DEFAULT FLIP EXPOSED A REAL BUG, AND THE TEST FOR THE DEFAULT IS WHAT
+CAUGHT IT.** The kernel read the mode as `p.ratioThreshold === 'moving'`, and
+`setParams` merges `{ ...this.params, ...partial }` — so a patch that simply does
+not mention the key arrives as `undefined` and read back as `fixed`, silently
+reverting to the old behaviour for every caller that had not been updated. It now
+falls back through `== null` to `FET1176_KERNEL_DEFAULTS.ratioThreshold`. **A
+bench rocker whose off position was the default hid this for as long as it was
+the default** — the failure only becomes visible when the default moves.
+
+---
+
+### The all-buttons law, pinned from the captures already taken
+
+No new bounce — the owner called the all-buttons capture set closed, so this is
+what the existing readings can still be made to say. `npm run fet:allrefit`.
+
+**Four constants moved, and three of them were invented:**
+
+| | shipped | fitted |
+|---|---|---|
+| `ALL_KNEE_DB` | 16 | **1.52** |
+| `ALL_THRESHOLD_DROP_DB` | 6 | **0.969** |
+| `ALL_ATTACK_LAG` | 2.5 | **1.0** |
+| `ALL_INCR_AT_KNEE` / `FALL_PER_DB` / `FLOOR` | 0.949 / 0.0057 / 0.8333 | 0.9528 / 0.0055 / 0.8379 |
+
+#### The drop was blocked by a convention, not by arithmetic
+
+A threshold drop is measured against a numbered button. Our model used to hold
+one threshold for all four while CLA-76's moved 4.5 dB across them, so "below
+ratio 4" and "below the mean of four" were different answers — 0.54 / 2.65 /
+3.24 — with nothing to choose between them. **Shipping the moving threshold
+anchored at 4:1 settles it**: our family IS CLA-76's family, so ratio 4 is the
+reference by construction. That is a consequence of the previous change rather
+than a coincidence, and it is why this could not have been done first.
+
+Measured across buttons at one Input, where the drive is common and cancels:
+
+| Input | all | r4 | delta |
+|---|---|---|---|
+| I1 | −14.52 | −13.98 | −0.54 |
+| I2 | −19.30 | −18.69 | −0.61 |
+| I3 | −24.71 | −24.13 | −0.58 |
+| I4 | −30.13 | −29.60 | −0.53 |
+
+Mean **−0.565 dB, spread 0.032** over four positions.
+
+⚠ **THE CANCELLATION ASSUMES THE INPUT KNOB WAS NOT RE-DIALLED PER BUTTON**, and
+that is checkable rather than assumable: FETish's effective threshold reads
+identically across its four buttons at every position (0.00 dB of spread). Had
+the operator re-dialled for a target reduction, ratio 20 would have needed far
+less drive than ratio 4 and that spread could not be zero. Same operator, same
+session, same procedure for CLA-76.
+
+⚠ **0.969 IS INSTALLED, NOT THE MEASURED 0.565** — the instrument fits
+threshold, slope and knee jointly, so a threshold read under one knee is not a
+threshold under another. 0.969 is what makes our kernel read 0.565 back through
+the same fitter. Simulate-and-match, for the ninth time in this re-tune.
+
+#### The attack lag was reputation, and the obvious reading of it is wrong
+
+⚠⚠ **READING THE ALL-BUTTONS BURSTS CAPTURE ALONE GIVES THE OPPOSITE ANSWER WITH
+CONFIDENCE.** Its t63 of 1938 µs at a declared attack dial 4 places it near OUR
+dial 2, which looks like a late attack needing a bigger lag. It is not: CLA-76
+is slower than our ladder at *every* dial on the numbered buttons too (its
+nominal 20 µs reads like our dial 2.3, its 800 µs is slower than our dial 1).
+**The reference's ladder offset is confounded with the lag and is the larger of
+the two.**
+
+The cancellation is the measurement: `cla76_bursts_r4_I3_a4_r4.wav` is the same
+reference, the same Input and the **same attack dial** as the all-buttons
+capture, so the ladder offset divides out of their ratio. All-buttons comes back
+**faster**, 1938 µs against 2688 — ratio 0.721.
+
+⚠ **THE DEPTH SCHEDULE HAS TO BE ON FOR THAT RATIO TO MEAN ANYTHING**, and
+`runKernel` deliberately pins it off so the instrument cannot drift with product
+decisions. With it off our cross-button ratio is exactly 1.000 at every dial when
+the lag is 1, so the whole 13.34-vs-9.66 dB depth gap would have landed in the
+lag. Passed explicitly, a lag of **1.000** reproduces the reference's ratio to
+0.0001 and reproduces **both** its absolute figures at our dial 1.
+
+⚠ Probed at **dial 1, not the reference's dial 4**: t63 is quantised at 125 µs
+and our dial 4 t63 is 313 µs, so the ratio there moves in steps of ~0.4. The
+first run returned a residual of 0.121 on a target of 0.721 — one quantum,
+meaning nothing. The lag is a multiplier, so the ratio is dial-independent where
+the instrument can resolve it: 2.391 / 2.385 / 2.429 at dials 1/2/3 for a lag of
+2.5, and 1.800 at dial 4, which is the quantisation breaking rather than the
+model.
+
+⚠ One capture, one reference, and it is a plugin. This says CLA-76 applies no
+button-specific attack multiplier; the lore about a late all-buttons attack may
+well be about its distortion and its release.
+
+#### Two defects in the fit, both caught by guards rather than by inspection
+
+⚠⚠ **A FREE SHIFT THAT MAY DROP POINTS IS NOT A NUISANCE PARAMETER, IT IS A WAY
+TO CHEAT.** The shape cost minimises over a horizontal shift because both axes
+have arbitrary origins. Allowing shifts that slide the reference's falling tail
+off the end of our curve let a **flat** law score 0.0121 against 0.0304 scored
+honestly — a law with no fall at all looking two and a half times better than it
+is. Requiring full coverage fixes it, and the self-test now plants a flat curve
+and insists it scores badly.
+
+⚠⚠ **AND THE FIRST FIX PUT THE OPTIMUM ON THE COVERAGE BOUND** — 5.00 dB of a
+5.00 dB maximum, i.e. the search reporting the edge of its window rather than a
+minimum. Our side is now rendered at three drives the reference never used,
+which is legitimate because our law is a function of overshoot by construction:
+those renders add reach, not information. The shift moved to 6.75 dB and the
+residual fell 0.0315 → 0.0159.
+
+#### The two targets disagree, so nothing is held out any more
+
+The coarse matrix's slope column started as held-out validation. It cannot stay
+that way: fitted to the shape alone the law wants a fall of 0.00453 and predicts
+that column at 0.0133 of slope; giving the column a vote moves the fall to
+0.0055 and the column to 0.0081 for 0.0030 of shape. The split is structural —
+the fine captures weight the knee region, the coarse ones the top of the curve —
+so fitting one and checking the other reports whichever tension the split
+happened to produce. Both measure the same law, so both now vote, and **the
+price is that there is no held-out data left for the all-buttons law.**
+
+Worth noting the compromise lands at 0.0055, within a hair of the 0.0057 that
+was there before any of this.
+
+#### What is a bound rather than a measurement
+
+⚠ **THE KNEE IS BOUNDED FROM ABOVE ONLY.** The residual triples walking it up to
+20 dB and barely moves walking it down to 1 (0.0147 against 0.0124). The coarse
+column agrees on the direction and cannot close it either — CLA-76's all-buttons
+knee reads back 0.13 / 2.98 / 0.50 / 0.17 dB and **our kernel cannot read back
+below about 4.2 at any true knee**, because the attack rounds the corner. So
+every candidate under ~3 is equally consistent with everything we have. 1.52 is
+the fit's optimum installed as the best point inside a one-sided bound.
+
+⚠ A side effect worth knowing: at 1.52 dB the readback is 4.55 against an
+instrument floor of 4.32, so `kneeUnresolved` — a plain `fitted <= floor` test —
+stays FALSE for a knee that is plainly unresolvable. The flag is right about
+every reading at or under the floor and must not be read as "resolved".
+
+⚠ **THE SLOPE FLOOR IS THE SAME SHAPE OF ANSWER**, and for the same reason: the
+captures stop at 0.8418, roughly where the floor is, so nothing was measured past
+it. Installed at the fitted 0.8379 because the alternative is another invented
+number — which is exactly what the old `1 − 1/6` was.
+
+⚠ **`ALL_FET_BOOST` (1.6) REMAINS UNMEASURED AND THERE IS NO WAY TO REACH IT
+FROM WHAT EXISTS.** It is a distortion quantity and every capture in hand is
+level- or reduction-based. It needs a `thd.wav` bounce in all-buttons.
+
+#### `factory:all-buttons-in` is re-cut at last
+
+It was held on its original dials on purpose while its law was a guess. With the
+law fitted, it takes the same target as every other preset — what it DID when it
+was cut: **Input 70 → 55**, avg GR 9.77 → 9.63 dB. ⚠ Both ballistics dials sit at
+the end of their travel, so their residuals (−23 % attack, +56 % release) are a
+floor and not a rounding; `ALL_ATTACK_LAG` going 2.5 → 1 moved the old attack out
+of reach at dial 7.
+
+⚠ The readings themselves are now persisted in
+`data/fet1176/cla76_allbuttons_shape.json`, alongside the stairs fits. Those
+captures are licensed audio and are gone from the machine; the extracted curve
+existed only as terminal output, one context window from being lost.
+
+---
+
+### FET Punch's peak restore, and the objection to it that was wrong
+
+Reported as a regression: "after applying FET Punch I still have to normalize
+the output to bring it back up to the pre-compression peak. When I run FETPunch
+on the old version it comes back with peaks already at -1 dB."
+
+**It was not a regression, and the first two diagnoses were both mine and both
+wrong.**
+
+#### What it actually was
+
+Nothing. At the same final peak the two versions were within 0.04 dB — the old
+peak-referenced makeup simply folded the normalize into the solve, so the step
+was invisible. On the owner's own 35 s narration take at Input 30:
+
+| | makeup | peak | p99.9 | rms | rms at -1 dBFS |
+|---|---|---|---|---|---|
+| source | — | -1.00 | -6.28 | -21.68 | — |
+| peak reference (old) | +13.95 | -1.00 | — | -16.24 | **-16.24** |
+| percentile (ships) + manual normalize | +12.28 | -2.73 | -6.04 | -17.91 | **-16.17** |
+
+⚠ **THE REPRO FAILED TWICE BEFORE IT SUCCEEDED, AND THE SECOND FAILURE WAS THE
+INFORMATIVE ONE.** Synthetic fixtures showed no shortfall at all, because a
+sustained-tone fixture has its peak sitting on its own 99.9th percentile — match
+the percentile and the peak comes with it. Real narration has short transients
+that a percentile cannot see (peak 5.3 dB over p99.9 here). Then the first real
+repro still missed by 0.93 dB of rms at an exactly matching p99.9, which was
+**the input alignment**: the owner's panel read `align +3.5` and the repro ran
+with none. With `inputAlignDb: 3.52` — which our own module computes for that
+file, against the app's +3.5 — the repro matched the app's render to 0.01 dB on
+all three statistics and its makeup to 0.02 dB.
+
+#### The objection that was wrong
+
+Asked "can't we simply add a peak normalize step after the makeup solve?", the
+answer given was no: restoring the peak afterwards is arithmetically the same as
+solving for the peak, so it would bring back the knob that ran backwards.
+
+⚠⚠ **THAT IS TRUE ONLY WHILE THE CEILING IS IDLE.** The ceiling is a limiter.
+Once it is catching peaks, the two paths are different operations, and the
+sweep that had already been run said so:
+
+| Input | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 |
+|---|---|---|---|---|---|---|---|---|
+| restored, rms | -17.54 | -16.24 | -17.17 | -16.95 | **-16.94** | -17.09 | -17.30 | -17.61 |
+| peak-referenced | -17.54 | -16.24 | -17.46 | -18.05 | **-19.21** | -19.79 | -19.52 | -20.26 |
+
+Identical where the ceiling does nothing, up to **2.3 dB better** where it
+works, and flat across the knob instead of sliding 2.7 dB. The restore is
+strictly better than the reference it was accused of being.
+
+#### What shipped
+
+`peakRestoreTrimDb` / `restorePeakToCeiling` in `dsp/makeupReference.js`, called
+from `applyFET1176Region`, which now resolves `{ buffer, trimDb }` and reports
+the trim in the toast rather than adding gain silently.
+
+⚠ **SCALING THE FINISHED RENDER IS EXACTLY ADDING THE TRIM TO BOTH
+`outputGainDb` AND `ceilingDb`** — verified bit-identical to 1.2e-7 (float32
+rounding) over a nine-point sweep, because the ceiling's knee is defined in dB
+relative to its own threshold and is homogeneous. Scaling is preferred anyway:
+no second render, and no caller can update one number and forget the other.
+
+⚠⚠ **THE TRIM IS MEASURED ON THE WHOLE RENDERED REGION, NEVER THE SOLVE'S
+WINDOW, AND THAT IS THE WHOLE SAFETY ARGUMENT.** The makeup is solved on a
+capped start-anchored window; `windowPeak <= wholePeak` always, so a
+window-derived trim is too generous, and applied with the ceiling raised to
+match it would push a late loud passage PAST the source peak — the one guarantee
+the ceiling exists to provide, and a clip on anything near 0 dBFS. On the
+owner's file the two agree exactly, but only because its loudest moment happens
+to fall inside the first 30 s; that is luck, not a property.
+
+⚠ **PREVIEW AND APPLY CAN NOW DIFFER, BY UP TO ~1.9 dB AT LIGHT SETTINGS** (and
+under 0.1 dB from Input 40 up, where the ceiling already holds the peak). The
+preview cannot know the region's rendered peak. Everywhere else in this codebase
+preview and apply are sample-identical; this is the one stage where they are
+not, and it is an explicit decision by the owner, recorded here so it is not
+read later as an oversight.
+
+⚠ **IT UN-MATCHES THE A/B.** The percentile reference put the body at source
+level, so a before/after comparison was hearing compression rather than level.
+With the restore the body sits up to 1.9 dB above source at light settings, and
+louder wins every blind comparison. Flagged before building; accepted.
+
+⚠ **NO PRESET RE-CUT.** It is a pure output trim applied after the compression:
+gain reduction and character are untouched, and `output` is canonicalised to 0
+and solved per file, so nothing a preset stores moves.
+
+Verified end to end on the owner's file: Input 30 now lands at **-1.00 dBFS,
+rms -16.24**, against their manual FET-then-normalize at -1.00 / -16.18.
+
+---
+
+### OptoSmooth's curve, revisited — the quartic, and two of my own errors
+
+The shipping cell and valve curves are Tube Saturation's, chosen by ear, and
+CLAUDE.md is explicit that no measurement backs them. The owner's complaint came
+back inverted from the one they were brought in to answer: the harmonics are
+liked, the behaviour on loud peaks is not, and FET Punch's measured polynomial
+sounds cleaner by comparison. So: can a polynomial fitted to the LA-2A do better?
+
+- **⚠⚠ THE IDENTIFICATION WAS ALREADY IN THIS LOG AND I REDISCOVERED IT WITHOUT
+  NOTICING — see the entry above beginning "THE LALA HAS AN OUTPUT STAGE TOO".** It
+  had already recovered `x + a₃x³ + a₄x⁴` from 21 measured numbers, with
+  **a₄ = 3.281e−2** and **a₃ = 1.102e−3**. Working from the same log's harmonic
+  columns I re-derived **a₄ = 0.032812, a₃ = 1.1017e-3** — the same constants to four
+  figures — and wrote them up as a fresh finding. They are not.
+- **⚗ WHAT THE REDISCOVERY IS WORTH IS CORROBORATION, AND ONLY BECAUSE IT USED A
+  DIFFERENT SUBSET.** The original recovered `a₄` from H2 and from H4 independently
+  (3.281e−2 against 3.259e−2, 0.7 % apart), pinned H2:H4 at **12.00–12.10 dB** at
+  every level from −30 to −1 against `cos⁴`'s 12.041, and held all constants to four
+  figures across 30 dB. Mine fitted `a₄` to the **−18 dBFS H2 row alone** and then
+  predicted −40, −1 and +9.2 dBFS to **0.00 dB** and H4 at −18 to 0.06. Same answer
+  from a different direction — which is the only reason this bullet is worth keeping
+  rather than deleting.
+- **⚠ THE ORIGINAL IS THE STRONGER DERIVATION AND SHOULD BE CITED IN PREFERENCE.**
+  It also records what mine did not: LALA's fundamental gain is **−0.24 dB at every
+  level**, and its frequency sweep is flat to **0.3 dB** from 50 Hz to 5 kHz, which
+  is what puts the stage in the memoryless class at all.
+- **⚠ THE FET'S ORDERS ARE THE WRONG ONES TO PORT, WHICH WAS THE ORIGINAL
+  QUESTION.** FETish is orders 4 and 5 (H2 3.00, H3 4.04); LALA is 4 and 3. Copying
+  `POLY_C4`/`POLY_C5` across would put H3 at slope 4 where LALA measures 1.95 — the
+  mirror image of how the `tanh` failed. The FAMILY transfers; the coefficients do not.
+- **⚠ AND CHOOSING LALA IS A NARROWER CHOICE THAN "PICKING A SIDE".** The standing
+  position is that the two emulations disagree by 10–77 dB and any refit picks one.
+  That holds for MAGNITUDE. On SHAPE there is only one usable reference: **CLA-2A's
+  H2/H3 slopes of 0.77/0.66 are not reachable by any memoryless polynomial**, since a
+  genuine third-order term goes as level². CLA-2A abstains rather than disagreeing.
+
+**⚠⚠ THE FIRST BENCH REPORTED A DEPTH CEILING AND THERE IS NO SUCH THING. ONE BUG,
+THREE WRONG FINDINGS.** It printed a fold at drive 1.976, a monotonicity ceiling
+8 dB below the Moore anchor, and the conclusion that the shape could not carry the
+hardware's magnitude without borrowing the FET kernel's partner term. All three were
+artifacts of guarding the polynomial's domain in **x** when the drive convention
+evaluates it at **u = d·x**. Guarded in u the drive cancels out of the slope —
+`f(x) = g(d·x)/d` so `f'(x) = g'(d·x)` — the stage presents a minimum slope of
+**0.8721 at every drive from 0.25 to 40**, and the Moore median sits at drive 2.70
+with peak u = 0.34, well inside the measured domain. No cap, no invented knee, no
+partner term. `test/dsp/la2aQuarticCurve.test.js` now pins the property the mistake
+turned on: minimum slope must be the SAME NUMBER at every drive.
+
+⚠ The bounding behaviour that was asked for falls out of the correct guard rather
+than being added: past |u| = 1 the curve continues linearly at the edge slope, and
+raising drive moves that corner to |x| = 1/d — so the stage soft-clips harder as it
+is driven while still tracking gain reduction.
+
+**⚠⚠ AND A SECOND ERROR, IN THE PEAK-LEVEL SWEEP THAT WAS MEANT TO SETTLE IT.** A
+linear amplitude was passed into a helper expecting dBFS, so three rows labelled
+−12 / −6 / −3 dBFS were all pinned near full scale. **The tell was in the output and
+went unread: H2 moved 0.1 dB across a nominal 9 dB sweep**, which no level-dependent
+curve does. Every conclusion drawn from that table was withdrawn and re-measured.
+
+- **⚗⚗ THE PREFERENCE IS THE EVEN/ODD BALANCE, NOT THE AMOUNT — AND THE MATCHED TEST
+  IS WHAT SHOWS IT.** At the shipping drives the quartic is simply less (THD 0.70 %
+  against 3.26 % at −6 dBFS peak, PR 60), which on its own would explain "cleaner"
+  with no claim about shape. Raising Cell sat until TOTAL DISTORTION MATCHES, the
+  difference survives and localises:
+
+  | −6 dBFS peak, PR 60 | H2 | H3 | H3−H2 | THD |
+  |---|---|---|---|---|
+  | TubeSat (ships) | −30.9 | −36.1 | −5.2 | 3.26 % |
+  | Quartic, Cell sat 3.2 | −29.9 | **−48.7** | **−18.8** | 3.26 % |
+  | TubeSat (ships), −1 dBFS | −27.2 | −29.1 | −1.8 | 5.63 % |
+  | Quartic, Cell sat 5.7, −1 dBFS | −25.1 | **−48.1** | **−23.0** | 5.63 % |
+
+  At identical total distortion the quartic puts **12–19 dB less third harmonic**
+  into the peaks with H2 essentially matched. ⚠ It appears only at PEAK levels — at
+  −18 dBFS the relation inverts — which is exactly where the complaint lives.
+- **⚗⚗ THE OWNER'S CHOSEN SETTING TAKES MORE DISTORTION, NOT LESS, WHICH IS THE
+  STRONGER RESULT.** Auditioned live on the bench panel, the verdict was
+  Quartic/Quartic at **Cell sat ≈ 5** — "warmer than before but still smooth and not
+  edgy at the peaks". Measured against the shipping curve at PR 60:
+
+  | peak | curve | H2 | H3 | H3−H2 | THD |
+  |---|---|---|---|---|---|
+  | −12 | TubeSat | −44.1 | −45.4 | −1.3 | 0.83 % |
+  | −12 | Quartic 5.0 | −39.0 | −50.4 | −11.4 | **1.19 %** |
+  | −6 | TubeSat | −30.9 | −36.1 | −5.2 | 3.26 % |
+  | −6 | Quartic 5.0 | −26.7 | −48.8 | −22.1 | **4.66 %** |
+  | −1 | TubeSat | −27.2 | −29.1 | −1.8 | 5.63 % |
+  | −1 | Quartic 5.0 | −25.3 | −48.0 | −22.7 | 5.49 % |
+
+  **More total distortion and more second harmonic — the "warmer" — with 13–19 dB
+  less third.** The ear report and the measurement agree without either being told
+  about the other, and it rules out "it just does less" as the explanation.
+  ⚠ Crest is level with TubeSat throughout (11.68 vs 11.92 dB at −6); rms runs
+  **0.4–0.9 dB hot at peaks**, which biases a blind A/B slightly and is small against
+  a 13–19 dB harmonic difference, but is not zero and is not corrected for.
+- **⚠ THE HIGH-ORDER "GRIT" SHARE IS A RED HERRING ON THESE CURVES, and the first
+  pass at this comparison led with it.** The shipping cell curve's ladder runs past
+  H8 where a degree-4 polynomial stops dead at H4, which invites "the dense ladder is
+  the harshness" — but energetically that content is **0.11 %** of its distortion at
+  −6 dBFS. Worse, through the FULL kernel the ladders above H4 are identical across
+  all three configurations to 0.1–1 dB, so most of it is not the curve at all.
+  The axis that separates them is H3.
+- **⚗⚗⚗ THE ARCHITECTURE QUESTION IS SETTLED BY EAR, AGAINST THE PAPER — AND THE
+  THREE VERDICTS RANK IN EXACT ORDER OF ODD-HARMONIC SHARE.** Moore's six hardware
+  units are ODD-dominant under compression (H3−H2 **+16 to +44 dB**), attributed to
+  the T4 cell rather than the valves. **GAIN MOD at the cell + QUARTIC at the valve**
+  is the only configuration where every stage is measurement-backed, and it measures
+  H3−H2 **+18.8 dB**, inside the paper's band. Auditioned, the verdict was
+  "definitely worse — a lot of colour, not a neutral sound; could be useful in
+  certain applications but probably not wanted for general use."
+
+  Share of distortion energy that is ODD-order, PR 60, full kernel:
+
+  | peak | TubeSat/TubeSat | Quartic/Quartic 5.0 | GAIN MOD/Quartic |
+  |---|---|---|---|
+  | −12 dBFS | 43 % | **7 %** | **100 %** |
+  | −6 dBFS | 23 % | **1 %** | **99 %** |
+  | −1 dBFS | 39 % | **1 %** | **98 %** |
+
+  The three listening verdicts — preferred, previously shipped, rejected — order
+  themselves **1 % → 23 % → 99 %** odd content, monotonically, across three separate
+  auditions.
+- **⚠⚠ AND TOTAL DISTORTION ORDERS THE OTHER WAY, WHICH IS WHAT MAKES THIS A REAL
+  FINDING RATHER THAN A RESTATEMENT OF "CLEANER IS BETTER".** At −6 dBFS the THD of
+  the three runs **4.66 % (preferred) / 3.26 % (previous) / 1.94 % (rejected)**. The
+  REJECTED configuration is the cleanest one by total distortion, and by a factor of
+  two. Whatever the ear is tracking here, it is not how much.
+- **⚠ THE GAIN MODULATION'S LADDER IS WHY IT READS AS "COLOURED", and the shape is
+  distinctive rather than merely large.** At −6 dBFS it returns H3 **−37.7**, H5
+  **−39.1**, H7 **−43.2** with H2 at −56.5 and H4 at −63.5 — a slowly-decaying
+  odd-only comb where H5 sits within 1.4 dB of H3. That is the signature of a gain
+  being modulated at 2f rather than a waveform being bent: sidebands at f and 3f, and
+  their own sidebands above. It is a correct model of the mechanism the paper
+  measures; it is also unmistakable on voice.
+- **⚠ ONE LISTENER, SIGHTED, ONE PASSAGE, THREE CONFIGURATIONS.** The ordering is
+  clean and the measurements were taken after each verdict rather than before, but
+  this is not a blind panel and should not be written up as one.
+
+⚠⚠ **THE CURVE IS IDENTIFIED AT THE VALVE AND IS BEING USED AT THE CELL, AND
+NOTHING MEASURES THAT.** Both sweeps behind it were captured at **Gain 0 / PR 0** —
+cell idle — so they characterise the OUTPUT STAGE and say nothing about what the T4
+should do. LALA's own under-compression captures are ratio, taper, ballistics and
+side-chain; none of them read harmonics. So `Quartic` at the CELL is an ear choice
+wearing a borrowed shape, in exactly the category the Tube Sat cell curve is in, and
+the pedigree does not transfer across the stage boundary. The only cell-under-
+compression harmonic data in this repo remains LAEA's ~0.06 % odd at 24.9 dB GR
+(a different unit) and the Moore paper's six hardware units. ⚠ The VALVE selection is
+a different matter — there the reference measured exactly the stage it is being put in.
+
+**SHIPPED — QUARTIC AT BOTH STAGES, CELL DRIVE 5.** `LA2A_KERNEL_DEFAULTS` now
+selects `quartic` at the cell and the valve and `CELL_CURVE_DRIVE_MAX` moves 1.5 to
+5. The divergence that implies is deliberate and is stated wherever it ships: Moore's
+hardware is odd-dominant under compression and this is not. Same class of decision as
+the Tube Sat curve it replaces — an ear verdict overruling a measurement — with two
+differences worth having: the SHAPE is identified from a reference rather than
+invented, and the measurement-faithful alternative was built, heard and rejected
+rather than argued about.
+
+⚠ **THE DRIVE IS A DIFFERENT QUANTITY IN EACH CURVE, SO 1.5 -> 5 IS NOT A DEPTH
+INCREASE.** On the split soft clipper it sets how far into the knee the cell runs; on
+the quartic it scales `c4` as d³. A value from one is not a voicing in the other, the
+same hazard `fetDrive` carries between the FET kernel's `tanh` and `poly`.
+
+⚠ **`LA2A_TUBESAT_PATCH` RESTORES THE PREVIOUS VOICING BIT-IDENTICALLY** — verified
+against the pre-change kernel at PR 60, worst |diff| **exactly 0**. It carries the
+DRIVES and not just the curve names, which is the whole point: `CELL_CURVE_DRIVE_MAX`
+moved with the curve, so selecting `vocalsat` alone gives Tube Saturation's curve at
+three times the drive it was voiced at — a configuration that has never shipped and
+was never auditioned. That is the silent-partial-restore bug `fet1176Curve.test.js`
+documents on the other plugin, and the guard is now duplicated here.
+⚠ It is NOT `LA2A_LEGACY_PATCH`, which goes back further to `tanh` + `gainmod` and
+remains the baseline five test files measure against.
+
+- **⚗ NO PRESET RE-CUT, AND THE REASON IS STRUCTURAL RATHER THAN LUCKY.** The shaper
+  sits after the detector, so curve selection cannot move the gain envelope: measured
+  across PR 30/45/55/60/65/75, avg and max gain reduction are **bit-identical** for
+  the quartic, Tube Sat, the gain modulation and the legacy patch alike. And
+  `OPTO_SMOOTH_PARAM_KEYS` stores `mode / peakReduction / gain / r37 / lookahead /
+  autoMakeup` — no curve, no drives. So every factory preset delivers the reduction it
+  always did and only its character moved, which is the intended change. Pinned, so
+  that if it ever stops being true the presets get the `fet-recut-presets.mjs`
+  treatment instead of drifting silently.
+- **⚠⚠ CHANGING THE DEFAULT WAS NOT ENOUGH, AND A TEST CAUGHT WHAT WAS LEFT.** The
+  kernel's unknown-name fallback is a SEPARATE statement of what ships, and after the
+  default moved it still landed a typo or a stale stored param on `vocalsat` — the
+  previous voicing, silently, which is precisely the failure the fallback's own note
+  says it exists to prevent. Every named mode is now matched explicitly with the
+  DEFAULT as the else-branch, so the next curve change breaks the list rather than the
+  fallback.
+- **⚠ SCHEPS IS RE-VOICED WITH IT, BY INHERITANCE, AND THAT IS THE DOCUMENTED HAZARD.**
+  It passes no curve keys to the embedded kernel, so it takes the new defaults. Its
+  `squash` calibration is untouched — the detector is unaffected and gain reduction is
+  bit-identical — and its delivered level moved **≤0.09 dB** (squash 40: peak −3.576 →
+  −3.551; squash 60: −5.616 → −5.530). Small, but not zero, and not corrected for.
+- **⚠ EMPHASIS SHIPS AT 50 ON A CURVE IT WAS NOT TUNED FOR.** Its 50 was cut against
+  Tube Saturation's curve. Swept 0/50/100 on a steady tone it is inert on BOTH curves
+  (H2 within 0.1 dB), which is the one probe that cannot see it — its own note records
+  that its effect is a burst/onset quantity and that the −1.13 dB crest figure does not
+  transfer to speech. So it is carried over unexamined and is the obvious next thing to
+  re-audition.
+
+
+⚠ **THE PER-STAGE SPLIT WAS THE ONLY SHIPPING-PATH CHANGE.** One `vsCurve` object
+served both stages — workable only because the cell reads `transferAt` and the valve
+reads `transfer`/`inverse` — and two selectable curves forced them apart. Checked
+rather than claimed: rendered against the pre-change kernel at PR 0/25/50/75/100 ×
+gain 0/6, plus `LA2A_LEGACY_PATCH` and the gain modulation, worst |diff| is
+**exactly 0**.
+
+⚠ **THE TANH IS GONE FROM BOTH BENCH PANELS**, along with FET Punch's Legacy kernel
+button and OptoSmooth's Valve drive / Valve bias sliders — the latter two are
+constants OF the tanh and moved nothing once it was unselectable. The KERNEL MODES
+STAY: `LA2A_LEGACY_PATCH` is the baseline five test files measure against and
+`FET_LEGACY_PATCH` is pinned by `fet1176Curve.test.js`, and both tuning stores keep
+their keys so those tests are untouched.
+
+⚠ **THE MISSING-INSTALL TRAP RECURRED**, exactly as the correction above this entry
+records it: a fresh container reported **13 failures** on a clean checkout. Same
+cause, `node_modules` absent. Diagnosed from the error text this time rather than
+from a clean-checkout comparison — the failures all read `Cannot find package 'vue'`
+or `'uuid'`. With dependencies installed: **1391 tests, 1391 pass, 0 fail**, and
+`npm run smoke` opens all thirteen panels clean.
+
+---
+
+
+### Emphasis on the quartic — and three tone probes that pointed the wrong way
+
+Emphasis ships at 50, cut against Tube Saturation's curve, and was carried across
+to the quartic unexamined. The question was whether it even works the same way.
+
+- **⚠ THE FIRST PROBE WAS AT 150 Hz, BELOW THE 1800 Hz CORNER, AND READ "INERT ON
+  BOTH".** That is what a pre/de-emphasis pair does below its own corner, and it
+  says nothing about the band the control acts in. Recorded because the reading
+  was reported as an answer before anyone noticed which side of the corner it sat
+  on.
+- **⛗ SWEPT ACROSS FREQUENCY, THE MECHANISM IS THE SAME ON BOTH CURVES AND THE
+  MAGNITUDE IS NOT.** THD at PR 60, −6 dBFS tone, Emphasis 0 → 100:
+
+  | probe | quartic | tube sat |
+  |---|---|---|
+  | 200 Hz | −0.04 dB | −0.09 dB |
+  | 1 kHz | −5.33 dB | −4.44 dB |
+  | 2.5 kHz | −0.78 dB | **+7.52 dB** |
+  | 5 kHz | **+1.79 dB** | **+10.95 dB** |
+
+  Below the corner it suppresses — harmonics land where the de-emphasis cuts them,
+  which is "absorb rather than excite". Above it, the fundamental itself is driven
+  into the nonlinearity and it excites. ⛗ The tube-sat 5 kHz row reproduces the
+  ledger's own "~11 dB on bright sustained vowels" almost exactly, which is the
+  probe validating itself against a known number. The quartic pays about a sixth
+  of it, most likely because a +12 dB boost pushes it past `|u| = 1` into the
+  LINEAR continuation, which makes no new harmonics, where the same boost drives
+  Tube Sat's split soft clipper deeper into its knee.
+- **⚠⚠ AND THAT WHOLE TABLE IS THE WRONG INSTRUMENT FOR THE QUESTION ACTUALLY
+  ASKED.** On the strength of it the recommendation was to try Emphasis 100 on the
+  quartic, since the cost that had forced 100 → 50 looked largely gone. Auditioned:
+  **"fuller/softer/fatter at 100, but grinds a bit more at the peaks."** Both
+  halves of that contradict the single-tone measurement, which says 100 is cleaner
+  AND less warm at every level (H2 −25.8 → −30.7 dBc at 900 Hz, high-order share
+  falling too).
+- **⛗⛗ A MULTITONE REPRODUCES THE EAR EXACTLY, AND EXPLAINS WHY A TONE CANNOT.**
+  Twelve tones on prime bins, so no sum or difference of two inputs lands on a
+  third and every non-input bin is distortion. PR 60, quartic:
+
+  | peak | emph | distortion / signal | share above 5 kHz |
+  |---|---|---|---|
+  | −12 dBFS | 0 / 50 / 100 | −30.62 / −30.62 / −30.62 dB | 1.5 / 1.5 / 1.5 % |
+  | −6 dBFS | 0 / 50 / 100 | −25.27 / −24.98 / **−23.70** dB | 0.7 / 1.2 / **2.2 %** |
+  | −3 dBFS | 0 / 50 / 100 | −22.43 / −21.98 / **−20.74** dB | 1.3 / 2.1 / **2.8 %** |
+  | −1 dBFS | 0 / 50 / 100 | −20.71 / −20.43 / **−19.49** dB | 1.4 / 2.3 / **2.7 %** |
+
+  Emphasis 100 adds **1.2–1.6 dB** of distortion and **triples** the share above
+  5 kHz — and does nothing whatever at −12 dBFS. Level-dependent extra HF
+  distortion is "grinds at the peaks", stated as a number. A single tone has
+  nothing to intermodulate with, so the de-emphasis simply attenuates that tone's
+  own harmonics and the control looks benign.
+- **⚠ THE TWO DESCRIPTIONS ARE ONE MECHANISM, SO THE DEPTH KNOB CANNOT SEPARATE
+  THEM.** "Fatter" and "grinds" are both the same added IMD energy at high level.
+  No position of Emphasis buys one without the other, which makes the shipped 50 a
+  real compromise rather than an inherited number.
+- **⚠⚠ THE CORNER WAS EXPOSED ON THE BENCH TO BREAK THAT TIE, ON A PREDICTION THAT
+  WAS WRONG.** The reasoning was that lowering it would fatten the low-mids while
+  exciting less of the grind band. A HIGH shelf with a LOWER corner boosts MORE of
+  the spectrum, not less, so it raises both together: at −6 dBFS peak, Emphasis
+  100 measures **−23.70 dB / 2.2 %** at the stock 1800 Hz and **−21.97 dB / 3.7 %**
+  at 600. `emphasisCornerHz` ships as a bench control anyway — it is a real axis
+  and it is now measured rather than guessed at — but not as the escape hatch it
+  was reached for. ⚠ The sign of this bullet is right and its FRAMING was still
+  wrong: lowering the corner does make both worse, but the useful move is RAISING
+  it, which the entries below measure.
+- **⛗⛗ THE CORNER'S DIRECTION, SETTLED BY EAR AND CONFIRMED BY MEASUREMENT — AND IT
+  IS THE ONE I HAD BACKWARDS.** Auditioned on real narration, RAISING the corner
+  1800 → 2500 "virtually eliminates the high end distortion". The sweep agrees:
+  added nonlinear energy over the Emphasis-0 render, on synthetic narration with
+  sibilance, in 3–5 kHz, runs **0.54 / 0.34 / 0.20 / 0.06 / 0.02 dB** at corners
+  **1200 / 1500 / 1800 / 2400 / 3200**. Raising the corner boosts less of the
+  spectrum, so less reaches the curve, so less distortion is made. Lowering it does
+  the reverse, which is what the original prediction had inverted.
+- **⚠⚠ BUT THE CORNER IS ~75 % REDUNDANT WITH THE DEPTH KNOB, WHICH IS WORTH
+  KNOWING BEFORE ANYONE SHIPS IT.** Nulling "Emphasis E at 1800" against "Emphasis
+  100 at 2500" sample for sample, the best depth match is **E ≈ 65**, leaving a
+  residual of **−40.3 dB re. output** — against the whole emphasis effect
+  (0 vs 100 at 1800) measuring **−28.4 dB**. So a depth change reproduces about
+  three quarters of a corner move in amplitude and a quarter of it is genuinely
+  independent. The band distribution barely moves either: the 3–5 kHz to 200 Hz–1 kHz
+  energy ratio sits at **1.02–1.09** across every depth AND every corner tested.
+  ⚠ It is a real second axis, but a weak one — mostly a second way to set how much
+  boost reaches the nonlinearity, not a way to change where the distortion lands.
+- **⛗ AND THE SHIPPING DEFAULT IS ALREADY CLOSE TO THE AUDITIONED SETTING.** Emphasis
+  50 at 1800 — what ships — nulls against Emphasis 100 at 2500 to **−39.2 dB**, within
+  1.1 dB of the best match any depth achieves. Whether the preference survives a
+  blind A/B against the stock patch is therefore an open question and the cheapest
+  next test, since a difference that small may not be the corner at all.
+- **⛗ CELL SAT IS THE BETTER ROUTE TO DENSITY, MODESTLY AND MEASURABLY.** At
+  matched total distortion it puts less of it in the grind band: at −6 dBFS,
+  Emphasis 100 at cell 5 gives −23.70 dB / **2.2 %** while cell sat 9 at Emphasis 0
+  gives −23.99 dB / **1.8 %**; at −1 dBFS, −19.49 / **2.7 %** against cell 12's
+  −19.53 / **2.4 %**. Same density, roughly 10–20 % less of it above 5 kHz. ⚠ A
+  consistent direction rather than a dramatic win, and it does not separate the two
+  either — on this curve, added density at peaks brings HF intermodulation with it.
+
+⚠⚠ **THE PATTERN WORTH KEEPING FROM THIS ENTRY IS ABOUT THE INSTRUMENT, NOT THE
+KNOB.** Three single-tone probes in a row gave confident answers that the ear
+contradicted: inert (wrong side of the corner), then cleaner-and-thinner (no
+intermodulation), then a corner prediction with the shelf's own direction
+backwards. The ledger already warns that tone THD understates a memoryless shaper
+on programme by ~11 dB; what this adds is that on a control which REDISTRIBUTES
+spectrum, a single tone does not merely understate the effect, it can reverse its
+sign. Reach for the multitone first on anything touching spectral balance.
+
+**SHIPPED — EMPHASIS 85 ON A 2300 Hz CORNER**, up from 50 at 1800.
+
+- **⛗ WHERE 1800 CAME FROM, SINCE IT WAS NEVER RE-DERIVED FOR THIS STAGE.** It is
+  Tube Saturation's constant, ported wholesale with the rest of the pair, and its
+  own note gives the entire derivation: *"low enough to cover the consonant and
+  attack region a voice puts its edge in, high enough to leave the fundamental and
+  the first formant out of it — the pair must not turn into a bass control, because
+  whatever it boosts into the curve is what the curve distorts most."* **No
+  measurement picked it.** Two constraints bracketed a range and 1800 sits inside
+  it — unlike `EMPHASIS_MAX_DB`, whose note says plainly "12 dB because that is
+  what the measurement above used".
+- **⛗ 2300 SERVES THAT REASONING BETTER, so this is a re-reading rather than a
+  rejection.** The stated rule leaves out the fundamental and the FIRST formant. On
+  speech that is too low a bar: a voice's SECOND formant runs to roughly
+  2000-2400 Hz, so an 1800 Hz corner is already inside the vowel body the pair was
+  supposed to stay clear of. 2300 puts the shelf above most of F2 and leaves it on
+  the consonant and sibilance edge, which is what the original sentence was
+  reaching for.
+- **⚠ AND THE CONSTRAINT THAT SET 50 NO LONGER BINDS.** The ~11 dB of worst-case
+  distortion that forced 100 → 50 is a property of Tube Saturation's curve being
+  driven into its knee by the shelf. The quartic pays about a sixth of it — THD at
+  a 5 kHz probe, Emphasis 0 → 100, moves **+1.79 dB against Tube Sat's +10.95** —
+  most likely because a +12 dB boost pushes the quartic past `|u| = 1` into its
+  linear continuation, which makes no new harmonics.
+- **⛗ SO THE NEW PAIR COSTS LESS THAN THE OLD ONE WHILE CARRYING MORE DEPTH.** Added
+  nonlinear energy over the Emphasis-0 render, on narration with sibilance, in
+  200 Hz-1 kHz / 1-3 kHz / 3-5 kHz:
+
+  | setting | 200 Hz-1 kHz | 1-3 kHz | 3-5 kHz |
+  |---|---|---|---|
+  | 50 @ 1800 (what shipped) | 0.028 | 0.133 | 0.330 dB |
+  | **85 @ 2300 (ships now)** | **0.027** | **0.116** | **0.301 dB** |
+  | 100 @ 1800 | 0.093 | 0.289 | 0.452 dB |
+
+  That is why it is a change of BOTH numbers and not of one: 85 alone at 1800 would
+  cost more than the 50 it replaced, and the corner is what pays for it.
+- **⚠ `EMPHASIS_CORNER_HZ` NOW DIFFERS FROM `vocalSatProcessor.js`'s CONSTANT OF THE
+  SAME NAME, DELIBERATELY.** They are separate declarations because importing across
+  would pull a module that calls `registerProcessor` at module scope into this
+  worklet bundle — the duplicate-registration bug at the top of `dsp/satCurves.js`.
+  The divergence is not drift and must not be "fixed" by wiring them together.
+- **⚠ `LA2A_TUBESAT_PATCH` PINS 50 AND 1800 AS LITERALS**, for the third time in this
+  entry's worth of changes and for the same reason: a patch whose job is "the
+  previous voicing, exactly" must not track constants that have just moved.
+
+---
+
+---
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
@@ -1479,7 +4966,2570 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 | `docs/instant_polish_processing_spec_noise_eraser.md` | ✓ Present | Noise Eraser preset specification. Documents the separation-based processing stages and their parameters. Read alongside v3 spec. Note: the NE-1 through NE-7 stage numbering used in this doc is deprecated — NE is now a standard preset in the unified pipeline. |
 | `docs/scheps_vocal_chain_thick_spec.md` | ✓ Present | Scheps Parallel, "Thick" character: signal chain, reference knob positions and the measured target curves. Authoritative on what the curves *are*; the biquad fit that reproduces them is `scripts/fit-pultec-curves.mjs`. Companion data: `data/pultec_curves/scheps_thick_curve_data.csv`. |
 | `docs/scheps_vocal_chain_presence_spec.md` | ✓ Present | The complementary "Presence" character. Read alongside the Thick spec — the two share a signal chain and differ only in curve data. Note the post-EQ cut is anchored at 20 kHz deliberately; the Naming Note explains why the preset is not called "Airy". |
+| `docs/fet1176_capture_protocol.md` | ✓ Present | FET Punch (1176) reference capture protocol: control-parity check, the four-bounce null test, the 38-bounce capture matrix and what the tooling's self-test already settled. Companion to `scripts/fet-ballistics.mjs`. |
 | `docs/acx_production_workflow.md` | ✗ Not present | ACX narrator workflow reference. Context for why features exist and where Instant Polish fits in the production chain. |
 | `docs/instant_polish_gtm.md` | ✗ Not present | Go-to-market strategy. Positioning, pricing, launch plan, SEO content map. |
 
 **When in doubt about processing parameters, EQ values, noise reduction tiers, or output profile behavior: the processing spec v3 is authoritative. When in doubt about compliance reporting or advisory flags: the compliance model v2 is authoritative.**
+
+---
+
+### HF Softener — full entry (moved from CLAUDE.md, September 2026)
+
+> Moved verbatim from the root `CLAUDE.md` Implementation Status list, which now carries a short current-state summary. Later fixes: HF COMP's Reso render is now its latency long before trimming (a short selection read a false top-end loss), and the Reso stage's comment no longer says the guard does not bound it.
+
+- HF Softener — dynamic HF shelf per the "Dynamic HF Softener" spec (Modules A/B/C; v2 masking model and the input waveshaper deferred). **Monitoring** (`SoftenerScope.vue`, `SoftenerSpectrum.vue`, `hfSoftenerScope.js`): an ACTIVITY SCOPE on ClipperScope's layout (playhead centred, kernel history left, timeline lookahead right, dimmed) that draws the OUTPUT waveform with what was removed as an accent rim around it, plosive-window treatment in its own colour and a dashed line where the lisp guard stopped the cut; a REDUCTION readout splitting the total into DUCK · EQ · RESO (Reso's own `grDb`, which no meter showed before); the input's spectrum behind the curve with DETECT (dotted) and BAND (solid) marked; lamps on AIR MODE (the voicing weight in VOICED) and PLOSIVES. The kernel reports one scope point per process() call (`SCOPE_STRIDE` 4: input peak, peak after Duck and EQ before Air, dB the guard held back, burst weight), batched into the meter message. ⚠ **REDUCTION LANES HUNG FROM THE TOP EDGE WERE MOCKED UP FIRST AND REJECTED** as a second picture to relate back to the audio; painted on the waveform the rim sits on the "s" it came from, Pro-DS style. ⚠ The waveform is full band, so it is mostly a picture of the Duck: an EQ-heavy setting draws thinner rims than it sounds. ⚠ The guard line is an ESTIMATE — the held dB applied to the output peak, exact for the Duck and generous for the EQ. Panel: Duck, EQ, Detect, Air (makeup), Reso (the Reso stage's amount; 0 = out), Shape, HF COMP, AIR MODE, a header DELTA monitor (never sent to apply), and an **ADVANCED** row: **Guard** (the lisp guard's strength, 0 = off — it replaced the ON/OFF switch), **Band** (the EQ's corner) and **Plosives** (the T/K/P treatment). **Guard** maps 0–100 % onto a floor of −22 → −10 dB in a straight line, so 50 % is the −16 the switch shipped as (bit-identical) and Reso's floor moves with it, 4 dB above. Measured on the real clips: −20 and below cut the same as OFF at Duck 40 / EQ 20 (within 0.4 dB at 80 / 60), so the bottom of the knob joins OFF without a step; at −10 a strident "s" keeps −2 to −5.5 dB and its tilt turns positive. **Band** (3–6 kHz, default 4.5 = bit-identical) moves where the EQ CUTS — Detect moves where it LISTENS, and the two are deliberately independent: raising Detect for bright vowels says nothing about where a voice's "s" sits. At Duck 0 / EQ 60, 3 kHz takes David Greenberg's strident "s" −3.0 → −5.0 dB at 2.5–4.5 kHz and Messy and Bright's −5.6 → −8.4; vowels ≤ 0.2 dB at every corner, since the band only cuts during an "s". At the default EQ 20 the Duck does most of the work and Band moves ~1 dB. ⚠ **THE RETURN SHELF MOVES WITH THE CORNER ABOVE 4.5 kHz** (`bandTuningFor`): held at 11 kHz, a 7 kHz corner stopped a 24 dB cut at −20 and took 16 kHz down 4.5–10 dB, and 6 kHz already cost 16 kHz 2–5; moved in proportion the band reaches full depth at every corner and rate, and a high Band cuts higher air — only during an "s", which is what raising it asks for. Below 4.5 kHz the return stays and the band widens downward. **The chain is Duck → EQ → Air → Reso** — see Duck/EQ and Reso below. Context (50 %), Rotator (sidechain), Release (40 ms) and vowel release (on) were pinned after listening and are off the panel — Context made little audible difference; the kernel keeps them switchable, and the sidechain listen tap, for the bench and tests. ⚠ **Measured against the spec, two of its numbers do not hold**: the rotator's group delay is 0.29 ms worst case above 3 kHz, not ~0.7 ms, and it lowers detector crest factor on impulsive content (~2.4 dB on a glottal pulse train) but RAISES it ~1 dB on fricative noise, which an all-pass cannot make less peaky — so the 3–5 dB claim is unconfirmed and Module A's value is still the open question the spec flags. ⚠ The bypass trim is matched on the PEAK follower's reading (−0.5 dB), not RMS: an all-pass leaves RMS unchanged by construction. `test/dsp/hfSoftener.test.js` carries the spec's objective checks on synthetic voice; real-speech listening across the spec's five categories has not been done. **Three departures from the spec after listening**, each switchable for A/B: (1) ⚠ **the dulling was release CARRYOVER into the vowel after each "s"**, not vowels triggering the detector (vowels far from a sibilant measured 0.00 dB): the follower's release acts on the level, so recovery time scales with how hard the "s" was hit (65 ms at Amount 40 %, 116 at 80 %). **Vowel release** switches the follower to 10 ms while the low/mid band is voiced — post-"s" vowel −1.32 → −0.40 dB (−3.59 → −1.14 at 80 %) with gap chatter in an "s-t-s" run unchanged, since those gaps are unvoiced. ⚠ Two cheaper cures were measured and rejected: a shorter release fixes carryover but bounces 3.1–3.8 dB in consonant-run gaps, and moving the release onto the GAIN with a hold barely helps because it stacks on the detector's own decay. ⚠ The voicing flag decays in 5 ms, not 20: slower, it lingers from the vowel BEFORE an "s" and under-treats it by 0.5 dB. ⚠ It is a soft 6 dB crossover, not a switch — a hard threshold measured 0.35 dB apart at 96 kHz. (2) **Release** applies outside vowels; tuned as a control, now pinned at 40 ms. (3) **Band shape** (default): the 4.5 kHz shelf plus an opposite shelf at 11 kHz Q 0.8, gain ×1.2 so Amount's depth holds — 16 kHz is untouched at 44.1/48 kHz, never boosts > 0.15 dB; ~1 dB shallower at 96 kHz. **EQ (the `amount` param) is three straight lines** (`amountToThresholdDb` and friends): threshold −28 → −44 dBFS, TRUE ratio 1:1 → 6:1, max depth 0 → 24 dB; 0 % never engages; default 40 % (an owner choice: about twice the spec's 40 % cut, −6.1 vs −3.0 dB on synthetic voice). ⚠ The spec's `R` was a DIVISOR (reduction = over / R — its "3" is a true 1.5:1), and raising it cuts LESS, which a first "3:1 → 6:1" attempt did. ⚠ Two earlier maps were uneven in opposite directions — the spec's power-law threshold front-loaded the knob and a ratio linear in SLOPE back-loaded it (2, 3, then 6:1 in the last 20 %); measured per-10 % cuts ran −0.2 … −15.6 with each step bigger than the last. Linear in all three gives −1.5, −3.0 … −15.6, 1.55 dB per 10 %, breath ≤ 0.3 dB at 100 %. The band is built from TWO half-depth shelf/return pairs because one pair cannot dig past ~19 dB without cutting 16 kHz by 14 dB; responses add in dB, so two −12 dB pairs are a −24 dB band with 16 kHz at −0.6 dB. Previously 12 dB: threshold and depth rise together at a fixed 3:1, so the HF level that reaches full depth barely moved across the knob (−16 dBFS at 40 %, −17 at 100 %) and the top of the knob bought only 3 dB. The band's depth compensation is SOLVED per sample rate (`bandDepthComp`), not the ×1.2 constant it started as — the factor runs ×1.17–1.30 with depth at 44.1 kHz and to ×1.51 at 96 kHz, where the band also reaches higher (16 kHz −2.9 dB at 12 dB). **Detect** (3–8 kHz, default 4 kHz = the spec, bit-identical) moves the detector's high-pass corner, because bright vowels trip a 4 kHz detector: on David Greenberg's narration 4.9 % of vowel frames were dipped > 1 dB at Amount 40 (6.0 % at 70) against 0.3 % on Messy and Bright. ⚠ RAISING THE CORNER ALONE ALSO SHRINKS THE "s" CUT (−3.14 → −2.25 dB at 6 kHz), so the detector's gain is COMPENSATED (`detectCompDb`: what a reference "s" — noise, 5 kHz HP · 9 kHz LP — loses through the higher corner, +1.23 dB at 6 kHz): an ordinary "s" reads the same, vowel top end, which sits lower, drops out. Applied as detector gain, so threshold, lisp guard and voicing all move together. Compensated at 6 kHz: David's vowel triggering 4.9 → 0.1 %, his "s" −3.14 → −2.85, Messy and Bright's −5.37 → −5.17. **Thresholds are level-aligned**: T_base, L_ref and the voicing floor all shift dB-for-dB with the whole file's gated RMS (`regionAlignDb`, the same statistic and the same whole-file rule as OptoSmooth) against a nominal −20 dBFS, the spec's own L_ref. The detector is linear, so the gain curve is invariant to recording level to rounding; `levelOffset` is a file property, measured, never a user setting. **Lisp guard** (default on): a cut may never pull the HF detector below a held voice level (200 Hz–3 kHz, 15 ms attack / 500 ms hold) + `lispGuardFloorDb` (**−16**, was −18). ⚠ **SET AGAINST THE SERVER'S `clipGainDeEsser` CEILINGS**, measured in the server's own units (event peak over ±80 ms voiced RMS, its own scripts, two real clips): at −18 a guarded "s" stopped at −1.1 / +1.8 dB, 4–7 below the ACX ceiling (+6) and under every wet-branch ceiling (+3 to +4); −16 stops it at +0.2 / +2.9 and keeps ~60 % of Amount's travel above 40 %. Tighter flattens the knob (−13: +2.9 / +4.4, but 0.2 / 0.6 dB of travel from A40 to A100) — the server takes half the excess over a ceiling and this is a stop, so the floor is not meant to reach it. The figures below were measured at −18. **The floor is TILT-SCALED** (`lispGuardTiltWeight`, `tilt*` tuning): it relaxes by up to 20 dB with the fricative's own 5–10 kHz over 2–4 kHz tilt (4th-order bands, read on the input), full at +10 dB and above, fully relaxed at +3 and below, and voiced samples always keep the full floor. ⚠ A FLOOR SET FOR /s/ BLOCKS AN /f/ OUTRIGHT: a hot "F" in "Fix" after speech got 0.0 dB of cut at −16 (unguarded −2.5 / −10.9 at Amount 40 / 100); tilt-scaled it gets −2.5 / −6.0, and real non-strident events −3.6 → −7.0 (DG) / −2.8 → −5.0 (M&B) at Amount 100. ⚠ THE THRESHOLDS ARE A TRADE, NOT A CLASS BOUNDARY: David Greenberg's /s/ and both clips' /ʃ/ peak at 3–5 kHz and read +2 to +9, among the "F"s — 5/15 gave the "F" its whole cut back but took David's strident events −3.3 → −8.5 (the guard gone for him); 3/10 costs them −3.3 → −4.4 and M&B's −6.9 → −7.3. A /ʃ/ gets a partly relaxed guard; neither this cue nor the server's classifier (which called that "F" strident) can tell it from an /f/. ⚠⚠ **A FIXED 6 dB DEPTH CAP ON PEAKED FRICATIVES (and before it a threshold hold that made Reso inert on sibilance) SHIPPED AND WAS DROPPED** with the move after the cut — a raw cap took the same 6 dB from every "s", where the voice-relative floor takes only what is left above a normal one. ⚠⚠ **THE LISP GUARD SWITCH NEVER TURNED RESO'S GUARD OFF** until the Duck/EQ work: the kernel MERGES params, and the guard-off params omitted the keys, so the old floor stayed live — they are now explicit nulls, pinned by a test. ⚠ In detector units a normal "s" sits ~12 dB BELOW the voice level, so a floor at or above 0 blocks every cut — the first prototype did. It only ever shrinks a cut, so it cannot dull, and it removes most carryover by construction (the vowel's energy lifts the voice level past the "s"): post-"s" vowel at 100 % on hot sibilants −13.0 → −6.5 dB. ⚠ It deliberately FLATTENS THE TOP OF AMOUNT on well-behaved material — normal sibilants on the synthetic voice reach −4.7 dB and stop AT THE DEFAULT 40 % (−6.7 from ~50 % at −18; unguarded −5.8 at 40 %, −15.3 at 100 %), +12 dB-hot ones still reach −16.6. ⚠ At −18 the default was untouched on the peak; at −16 it is not — on real narration the default's "s" cut moved −3.3 → −2.6 / −5.6 → −5.4 dB. So the evenness of the Amount map holds with the guard off only. Pre-roll raised 1 → 2 s for the 500 ms hold. **Duck → EQ: two serial stages, two knobs** (they replaced Amount + Split; defaults Duck 40 / EQ 20). **Duck** turns the whole "s" down, shape and tone intact — the wideband de-esser, like the server's clip-gain de-esser — on its own macro (`duckTo*`: the EQ's threshold line, 1:1 → 4:1, 0 → 12 dB; 1 ms smoothing; 0 does not run). **EQ** is the band cut, and its detector HEARS THE DUCKED "s": it reads the input detector level plus the duck's gain in dB, so it takes only what the duck left and backs off as Duck comes up. ⚠ **SPLITTING ONE TARGET INTO TWO SERIAL GAINS WOULD HAVE CHANGED NOTHING** — a gain and a filter commute — which is why Amount + Split (one target, a share each, a constant total) was retired: with the EQ hearing the duck there is no constant total for Split to divide. ⚠ **THE EQ'S DETECTOR IS NOT A SECOND FOLLOWER ON THE DUCKED SIGNAL** — that was built first, and its 40 ms release lagged a deepening duck, so the EQ read the "s" as hotter than it was and the guard let the two stages reach −9.8 dB where it holds ~−5. The lisp guard caps each stage against the same held voice, the EQ's on the post-duck level, so it caps the TOTAL. EQ-only (Duck 0) is bit-identical to the old Amount/Split 0. **Plosive bursts (T, K, P releases) are caught and cut harder, with the lisp guard lifted** (`burst*` tuning): a closure — the whole band ≥ 15 dB under the held voice for 15–200 ms (a stop's silence, not a pause) — then within 10 ms the top-band detector rising ≥ 12 dB in 5 ms opens a 40 ms window (last 10 ms a fade) in which both stages' thresholds drop 6 dB and depths grow 6 dB. On the Hot Tees clip at Duck 40 / EQ 20 the five T's went −1.7…−6.1 → −5.3…−10.8 dB, S's unchanged; the guard had held "in To" at −7.4 at EQ 100 (−14.6 unguarded). ⚠ TIMING, NOT SPECTRUM: a T burst is peaked like an "s" (tilt +11), so the tilt cue cannot separate them. ⚠ THE WINDOW IS NOT CUT SHORT BY VOICING — the voicing weight reads a broadband burst as voiced, and a cutoff there closed it ~10 ms in, before the burst's peak (~15 ms after onset). ⚠ Fires ~0.6–0.8 /s on narration; k/t-into-s clusters give the "s" onset the treatment (real clips' S's +0.2–0.4 dB, shape no worse). ⚠ An "s" starting ABRUPTLY after 15–200 ms of silence is a false positive — the synthetic voice's isolated "s" is one, so tests of other features pass `burstsEnabled: false`; real "s" onsets (20–40 ms) are pinned as not caught. ⚠⚠ **THE WINDOW CLOSES WHERE THE VOICE LEADS** (`burstVoiceGate`, `voiceLed*`: the fast low/mid band over the fast top band, weight 0 at +4 dB and 1 at +10): most windows on real narration were VOWEL ONSETS after a pause or a voiced stop (voice band 16–33 dB over the top band; real T's −5 to +7, "s" cores under +3 at the 99th percentile), and the lowered threshold and lifted guard ducked those vowels 2–4 dB — the voice audible in Delta. Hot Tees' T's are unchanged to 0.1 dB. **The Duck also has its own vowel release** (`duckVowelReleaseMs` 3, on that same cue): the voicing weight's vowel release waits on the SLOW detector, so the Duck held −2.4 dB 10 ms into the vowel after an "s" — harmless on the EQ, whose tail is top band only, but on a broadband stage it is the vowel's own onset. Together they took the voice band out of the Duck's Delta by 2.7–7.2 dB on four real clips with the top band it removes moved ≤ 0.04 dB and the "s" cuts identical. Measured, default Duck 40 / EQ 20 against the old default (Amount 40): Messy and Bright's "s" −5.4 → −5.9 dB of 4.5–12 kHz with its 5–10 k / 2–4 k tilt changing −3.0 → −1.3; David's −2.8 → −3.0, tilt −1.4 → +0.3; the "s" in "fix slide" −6.9 → −7.5, tilt −5.6 → −2.9. Duck alone moves tilt ≤ 0.6 dB. Vowels away from any "s" are untouched; the vowel just after one dips ≤ 0.4 dB with Duck up. ⚠ The duck's smoothing is 1 ms, not the 3 first guessed: on a 150 Hz tone under ducked sibilants it only changes splatter above 4 kHz, while costing reduction. **Air** (0–6 dB, default 0) is an Air Boost lift AFTER the cut — the same curve by construction, shared from `dsp/airBandCurve.js` (moved out of `airBandProcessor.js`, which registers its own worklet and so cannot be imported into another), and in STATIC mode sample-identical to Air Boost with the cut idle. 0 does not run the stage. ⚠ **AN AUTO AIR AMOUNT WAS CONSIDERED AND NOT BUILT, BECAUSE THE CUT DOES NOT DULL THE VOWELS**: on two real narration clips the softener alone takes ≤ 0.16 dB off vowel top end (≤ 0.8 right after an "s"), so "restore what the cut took" sets Air ≈ 0. What drops is the FILE's top end, 2–7 dB above 5 kHz, because the "s" carries most of it — and matching that hands the cut back (David Greenberg's "s" −3.1 → ~−0.6). **HF COMP (default on) ADDS compensation to the Air knob — never replaces it; the knob is the user's alone — following the chain's measured top-end loss, as HALF of it** (`hfSoftenerAutoAir.js`, worker `hfSoftenerAutoAir`, over the selection's capped window, softener + Reso with Air forced 0, debounced on every control that moves the cut): 10·log10(E_out/E_in) above 5 kHz × 0.5, capped at 6 — David Greenberg +1.0 dB at Amount 40 / +1.3 at 70 / +2.6 with Reso 100, Messy and Bright +2.5 / +3.4 / +4.8. Half, not all: it answers the first impression of dullness, not a restoration of sibilance that is supposed to be gone — and in VOICED mode it lands on the vowels. ⚠ It was first built as an AUTO that OWNED the Air knob (OptoSmooth's contract) and was changed to an additive switch: kernel Air = knob + comp, clamped at `AIR_TOTAL_MAX_DB` (12). Apply re-measures first so it never renders a stale debounced value. **AIR MODE = VOICED** (default) addresses that trade instead: the lift is blended in by the vowel-release voicing weight (`out + w·(lifted − out)`, linear so a partial weight is a partial lift; 1 ms down, 5 ms up), so vowels keep 98 % of STATIC's lift while the "s" gets back 0.3 dB at Air 4 against STATIC's 2.9–3.1, and pauses 0.06 dB against 3.4–4.2 (room noise). ⚠ An "s" pressed between loud vowels still gets about half the lift on the synthetic voice — the voicing weight does not fully let go inside it; not retuned, since it also drives vowel release and SAT MODE. It is never in Delta: the kernel's delta is taken before it, and with HF RESO in the wrapper's delta reads the `preair` listen mode. **The input waveshaper (Drive, SAT CURVE, EMPH, SAT BAND, SAT MODE) was built here, auditioned, and MOVED OUT** to its own layered plugin, Saturation Bench (branch `claude/saturation-bench`): two combinations earned their keep — odd curve + REV + HF + VOICED as a vowel exciter, Quartic + OPTO + FULL + FULL for warmth — and both are saturation jobs, not sibilance ones. The softener is zero-latency again. **Reso** (knob 0 = out of the chain, no latency, bit-identical; default 0 — there is no separate on/off) inserts a band-limited ResoTame (frame 512, 5–12 kHz zone only, max cut 24, `hfSoftenerResoStage.js`) AFTER the softener — last in the chain — with **Reso** on the panel as an AMOUNT MACRO (0–100 %, default 20) over ResoTame's threshold, depth and max cut together — a knot table, `HF_RESO_KNOTS`. ⚠ **IT WAS ResoTame's THRESHOLD AND THAT WAS A SWITCH**: at depth 1 anything clearing the threshold is removed entirely (∞:1), so the knob decided WHETHER to cut, not how much. ⚠⚠ **AND IT RAN ON ResoTame's 200/500 ms BALLISTICS, WHICH MADE IT A SLOW EQ**: an "s" is 30–40 ms, so an isolated one reached −1.6 dB at 100 %, and the "s" cut it showed in speech was reduction BUILT ON THE VOWELS and carried in by the release — "s" cut and vowel cost were one quantity. On David Greenberg's narration (vowels plateau to 10 kHz, then roll off steeply — the peak reference reads that bend as a resonance) it cost 6.8 dB of vowel 8–12 kHz at 100 %. Now **15/25 ms** — the slow default exists to keep gain movement off low harmonics, and nothing that low reaches this zone; 80 → 25 ms release took the vowel just after an "s" from −3.8 / −3.4 to −2.0 / −1.2 dB at 100 %, cost the "s" ≤ 0.2 dB and REDUCED vowel gain flutter — so an "s" is cut by its own frames (isolated −4.3), and **voiced frames hold the macro's 0 % threshold** (`voicedSelectivityFloorDb` = 21, a ResoTame kernel param that is off for ResoTame itself: frame low/mid vs 4.5–12 kHz, crossfaded over 6 dB). On vowels the knob moves only depth and max cut — rings; the falling threshold reaches only unvoiced frames. The knots are the old law WARPED so the "s" comes down evenly on REAL narration (two clips averaged): at 100 % DG vowels −1.8 / "s" −5.7, Messy and Bright −0.1 / −7.1 at the 25 ms release (were −6.8 / −4.5 and −4.3 / −5.3), 0.5–0.8 dB of "s" per 10 %. ⚠⚠ **RESO NOW RUNS AFTER THE CUT, AND IT RAN FIRST BEFORE THAT**: a resonance suppressor removes PEAKS, and an /s/ whose peak is taken sounds flatter, not just quieter — the lisp. Turning the "s" down first (Duck) keeps its shape, and Reso's voice-relative guard then reads an "s" that is already near a normal level. Run first, Reso 40 took the "s" in "fix slide" −6.9 → −9.8 dB and flattened its peak 3.5 dB on top of the old default; run after Duck 40 / EQ 20, it takes −7.5 → −8.5, peak 1.1 flatter, and Reso 100 only −8.7. Messy and Bright's strident events −5.9 → −6.6 / −7.1 at Reso 40 / 100, David's −3.0 → −3.9 / −4.6; rings on vowels unchanged. ⚠ What the floor gives up is FAINT rings inside vowels (synthetic, 100 %: −15.1 → −7.7) — one frame cannot tell a ring at the level of the vowel's own top end from a spectrum bending there; strong rings are still taken in full. ⚠ Two reference shapes were tried first and rejected: a max-of-sides mean stops catching faint rings AND the "s", and a local linear fit costs David's vowels MORE at matched ring catch — the bias that cut his vowels is the same one that caught faint rings. **The Lisp Guard covers Reso too, as a NORMAL-"s" floor** (`lispGuardFloorDb` = `HF_RESO_LISP_GUARD_FLOOR_DB` −12, a ResoTame kernel param off for ResoTame itself, set by the softener's Lisp Guard switch): per frame, no cut may take the 4.5–12 kHz band below the HELD voice level (200 Hz–3 kHz, 15 ms / 500 ms — the softener's own) − 12 dB, so Reso takes only what Duck and EQ left above a normal "s". ⚠ −17.5 (the softener's LISP floor, carried over from when Reso ran first) let Reso 40 take a Duck 40 / EQ 20 "s" −7.6 → −11.3 and flatten its peak 3.3 dB; −12 gives −8.5 and 1.0; −10 leaves ~0.2–0.5 dB. The floor is TILT-SCALED like the softener's (`lispGuardTiltDb` / `lispGuardTiltRelaxDb` = [3, 10] / 20, pinned to the softener's by a test). ⚠ **ONLY ON UNVOICED FRAMES** (cap + voicing weight × 96 dB): on a vowel the rule forbids any cut — its top end sits far below its low/mid — which killed ring removal on vowels; voiced frames already hold the ring-only threshold and cannot lisp. ⚠ Like the softener's, it flattens the top of the Reso knob: Reso 100 alone takes DG's "s" −3.6 rather than −5.7. Apply chains it through `applyWorkletRegion`'s `postStages` (added for it) with its 512 samples in the latency trim; HF COMP's measurement renders the same order. Delta with it on is built in the wrapper (delayed input − output, from the softener's pre-air output) so it covers both stages. With it on, preview and apply are close rather than sample-identical — ResoTame's STFT frame phase, as in ResoTame itself. v2's masking model was considered for the dulling and not built: it changes WHICH frequencies are cut, not how long, and its 21 ms frames and 50 ms per-band release are slower than v1
+
+---
+
+## HF Limiter — EL7 Fatso Warmth analysis (September 2026)
+
+Two bounces supplied by the owner: `2_FATSO_EL7x_-_Input_2.wav` (raw) and
+`11_FATSO_EL7x_-_Input_2_Warmth_7.wav` (Warmth 7, the maximum). Both 96 kHz,
+32-bit float stereo, 8.35 s, sample-aligned, identical peak (−5.94 dBFS). The
+material is music (energy peaks at 50–100 Hz), not voice.
+
+**Capture defect.** At ~6.7 s the processed file jumps 13 samples EARLY
+(integer-lag cross-correlation: 0 before, −13 after) — the bounce dropped
+samples. Everything below uses 0–6.6 s. Before this was found the residual of
+every model sat at −12 dB and the analysis was chasing the glitch.
+
+**What Warmth does — a dynamic one-pole shelf.**
+- Static: +0.7 dB flat.
+- Dynamic: grouping frames by depth and fitting `|g + (1−g)·H(f)|` with one H
+  for all groups: H = one-pole LP at 2251 Hz fits to **0.34 dB rms**; a
+  2nd-order LP 0.56; a raised-cosine split 0.49 (and it wanted 4 octaves, the
+  grid's edge). Depths up to −10.8 dB.
+- Confirmed independently by timing: the effective delay between the files is
+  ~0.3 samples at rest and up to 4.7 samples while cutting, which is the
+  blend's low-frequency group delay `(1−g)/(2π·fc)` at g ≈ −9 dB.
+- A time-varying version of that model (2 ms gain track) takes the residual
+  from −15.9 dB (static gain only) to **−28.0 dB**.
+
+**Ballistics.** Attack under 2 ms. Release reads as two stages in dB (−14 → −6
+in ~25 ms, then to −1 over 100–150 ms) — ⚠ BUT IT IS ONE STAGE. Fitted against
+the 2 ms gain trajectory through our kernel, a single 36 ms release scores 1.16
+dB rms and the best two-stage point 1.17; free descent drives the charge time
+to 315 ms, where the slow stage never engages. A one-pole release in LINEAR gain
+is itself fast-then-slow in dB. The Tail control was built anyway (requested)
+and ships off.
+
+**Level law.** Behaves as a limiter: treble in at −27/−30/−33/−36 dBFS comes
+out at ~−41/−37/−36.5/−37 (2 ms RMS of the one-pole band). Stereo mostly
+unlinked (L/R gain correlation 0.79; with L 6 dB hotter, L −6.7 vs R −2.9 dB —
+only 8 frames); linking costs 0.05 dB of fit.
+
+**Harmonics: none measurable at this setting.** Residual at the bass notes'
+harmonics sits 28–31 dB under the source's own harmonic at every order H1–H7,
+following the source's spectrum (linear mismatch — LF phase ~1°), no order
+standing out. 26–44 kHz output is at or BELOW input at every cut depth, so the
+treble is not saturated into harmonics. During cuts a frame-wise 1/6-octave
+linear model leaves −18 dB at 4–16 kHz (quiet frames −34 to −40): the gain
+moving inside 10 ms, i.e. modulation, not a harmonic series. ⚠ A "0.28-sample
+latency offset" explanation of the HF residual was tried and WITHDRAWN: adding
+the delay made the fit worse (−28.0 → −27.6 dB).
+
+**Match on our kernel** (metric: per-10.7 ms frame, per-band out/in energy in
+0.5–1/1–2/2–4/4–8/8–16 kHz vs the Fatso's, dB rms; gain-only baseline 1.97):
+TIGHT best 0.83 (2.05 kHz, Range 6, Release 45) — it cannot reach below the
+corner or cut deep without over-cutting 3–5 kHz; WARM 0.69–0.75 (2.3–2.5 kHz,
+Range 16, Release 24–36, threshold −24 dBFS = knob −1 against this file's
+−22.9 dBFS gated RMS). Scripts were scratch and are not in the repo.
+
+---
+
+## HF Limiter — Transient: acceleration limiter retired, onset softener built (September 2026)
+
+**Owner report:** "When engaged it only adds loud, scratchy distortion, and is
+unusable for narration."
+
+**The retired design.** A Limen-style acceleration limiter: 4x oversample, take
+the velocity `v = x[n] − x[n−1]`, slew-limit it (`w` moves at most `A` per
+sample, `A` = a sine at Freq and the threshold), integrate the error with a
+leak, `e = (1 − k)·e + (w − v)`, output `x + e`, resampling only `e`.
+
+**Measured on synthetic narration** (glottal pulses through formants, "s" noise
+bursts, −20 dBFS gated RMS, shelf off): the change on an "s" was LOUDER than
+the "s" at every setting (+2.7 dB at Transient 1), the file peak ROSE (−2.6 →
+−0.2 dBFS), and at Transient 100 every vowel was distorted (−17.5 dB, ~13 %).
+Correction spectrum over the "s": +44 dB more energy than the "s" at
+200–1000 Hz, +20 dB at 1–2.5 kHz.
+
+**Root cause — a false claim in the design note.** It said the leak made the
+correction high-passed. A leaky integrator is `1/(s + k)`, a LOWPASS: the
+clamping error is integrated and piles up at and below the leak corner
+(~1.25 kHz), in the voice band. Second, noise-like top end — sibilance and
+breath, most of narration's HF — changes direction nearly every sample, so any
+threshold that touches it clamps nearly every sample and rewrites the waveform.
+Third, the stage's purpose (a backstop for transients too fast for a gain) was
+void: the shelf's 1 ms lookahead already catches every edge with no overshoot.
+The tests missed it because they used steady sines and a noise test that only
+checked the output stayed bounded, never that it stayed smaller than the input.
+Checked afterwards against the old kernel: with the shelf off it raised the
+peak 4.5–6.9 dB and the band under ~350 Hz 7–9 dB at Transient 1/50/100 — the
+new "never adds energy or raises the peak" test covers exactly that case.
+
+**The replacement — an onset softener on the shelf's own gain.** No filter of
+its own, no oversampling (a gain makes no harmonics to alias), no extra latency.
+- `f` = peak follower of the band (attack 0.1 ms, release 20 ms); `s` = slow
+  follower OF `f` (attack 10 ms, release 20 ms); rise = 20·log10(f/s).
+- ⚠ First cut had `s` follow the raw band: a vowel's top end pulses at the pitch
+  rate, `s` charged only during each pulse, and steady vowels read a CONSTANT
+  22 dB of rise. Following the peak-held `f`, steady vowels and steady "s" read
+  ~0 (99th percentile ≤ 1.8 dB).
+- cut = 0.5·(rise − 3 dB), capped by the knob (0–12 dB), gated 24 dB below the
+  threshold with a 6 dB fade, through its own lookahead min + triangle so it
+  leads the onset by up to 1 ms and lets go within ms.
+- Stacks multiplicatively with the shelf; Range caps only the shelf. Owner
+  decision: a few-ms dip cannot make an S lisp, so Range should not cap it.
+- A rise out of room tone is steep in dB for ANY sound (a natural "s" read
+  21 dB of max rise), so max rise cannot tell a click from an "s". What does is
+  energy removed over the sound — measured at Transient 12, shelf off: loud
+  click −11.6 dB, t-burst −3.6 (edge, not body), vowel −0.12, natural "s"
+  −0.09, abrupt "s" −0.18 (its first ms dips ~11 dB — the known false trigger).
+  With the shelf engaged a loud click goes −10.7 → −18.3 dB (peak −21 dB for
+  ~1 ms) and a natural "s" −6.51 → −6.72.
+- Latency 3 ms (was 3 ms + 50 samples). Worklet chunk 11.3 → 9.0 kB.
+
+---
+
+## EL7 Fatso — harmonic generation across Input and Warmth (October 2026)
+
+Owner supplied the true source (`1_SOUTHERN_SUNRISE.wav`) and a third render
+(`18_FATSO_EL7x_-_Input_6.wav`). ⚠ **CORRECTION TO THE WARMTH ENTRY ABOVE:**
+the file it called "raw" (`2_FATSO_EL7x_-_Input_2.wav`) is the Fatso at Input 2
+with Warmth off, not the source. Its Warmth findings stand — they isolate what
+Warmth adds on top of Input 2 — but "no harmonics" there meant "Warmth adds
+none", not "the Fatso adds none".
+
+**Capture timing.** No render is sample-locked to the source: all drift at
+11.5 ppm (Input 2: 1.4 → 10.5 samples over 8.2 s), i.e. a real-time capture
+against a different clock; Input 6 also drops ~12.7 samples at 1.6 s (Warmth 7's
+13 at 6.7 s is the same defect). Every comparison below removes a per-frame
+(85 ms) fractional delay first; Input 6 is analysed from 1.75 s.
+
+**Method.** Per frame, delay removed, then per bin a least-squares Hammerstein
+fit `Y = H1·X + H2·FFT(x²) + H3·FFT(x³)` pooled over ~300–390 frames (2 ch).
+The energy x² / x³ explain beyond the linear fit is even / odd distortion, in dB
+re output. Control: the same fit with x², x³ from mismatched frames (chance
+level). Compression test: `x·env²` (5 ms smoothed x²) — gain riding — against
+the instantaneous x³, which only waveshaping (harmonics) produces.
+
+| vs source | even (x²) | odd (x³) | chance | odd beyond `x·env²` |
+|---|---|---|---|---|
+| Input 2, 150 Hz–6 kHz | −55 to −63 (≈ chance; −57 vs −66 below 400 Hz) | −45 to −51 | −60 to −66 | −46 to −53 |
+| Input 6, 150 Hz–15 kHz | −39 to −49 | **−25 to −30** | −47 to −52 | **−25 to −32** |
+
+- **Input 2:** a faint, real odd-order trace (~0.3–0.5 %), ~10 dB over chance.
+- **Input 6:** odd-order saturation explains almost the whole non-linear
+  residual (≈3–5 %), even-order 14–18 dB below it. It is WAVESHAPING, not a
+  compressor: the instantaneous cubic out-explains gain riding in every band.
+  Odd share rises 4.4–7.6 dB for a 2.9 dB louder half (≈1.5–2.6 dB/dB; a cubic
+  predicts 2). Peak −5.70 → −8.25 dBFS at unchanged RMS. Below 150 Hz there is
+  also a level-dependent gain component.
+- **Warmth 7 over Input 2:** almost everything it adds is explained by `x·env²`
+  — the dynamic shelf. The cubic beyond that sits 1–5 dB over chance, within
+  what the shelf's fast gain movement can produce: no convincing harmonics.
+- ⚠ The steady-bass-note harmonic series does NOT move (≤ 0.7 dB at H2–H7)
+  even at Input 6 — the source's own harmonics (−6 to −25 dBc) swamp ~−28 dB of
+  added distortion. That instrument is insensitive on this material; the fit is
+  the sensitive one.
+
+**For a Fatso-style stage ahead of the HF Limiter:** the harmonics come from
+INPUT drive and are odd-dominant (third-order growth, even ~15 dB down) — a
+symmetric soft clipper, not the even-leaning quartic OptoSmooth uses. Warmth is
+the dynamic shelf alone. One music clip; the Fatso's compressor state at Input 6
+is unknown.
+
+---
+
+## HF Limiter — Drive: a Fatso-style odd-order saturator ahead of the shelf (October 2026)
+
+Built from the harmonic analysis above (Input 6: odd −25 to −30 dB re output,
+even 14–18 dB under, third-order growth). `dsp/oddSat.js`, first in the
+kernel's chain.
+
+- **Curve:** `f(u) = tanh(k±·u)/k±`, `k± = 1 ± SAT_ASYMMETRY` by the sign of u.
+  Symmetric tanh gives the odd series and a cubic onset; the asymmetry gives
+  the even series. ⚠ An added `x²` term was the obvious way to get even
+  harmonics and was not used: it pushes one half past the input at every
+  level. Each half here is `tanh(k·u)/k`, which never exceeds |u|, so the stage
+  cannot make a sample louder. Its DC goes through a 5 Hz blocker on the
+  correction.
+- **Asymmetry 0.045**, calibrated on a sine: even 15.0 / 15.5 / 16.6 dB under
+  odd where H3 is −43 / −31 / −24 dBc, and both grow at the same third-order
+  rate (0.1 → −8 to −12 dB; 0.035 → −17 to −21).
+- **Level:** pre-gain `SAT_REF_DB + Drive − voiceLevelDb` (−30 dB reference),
+  output ÷ pre-gain: unity small-signal gain, file-relative like Threshold.
+- **Oversampling:** 4x (`COMPRESSOR_OVERSAMPLE`), correction only; dry path a
+  50-sample delay. Drive 0 = that delay alone (bit-exact, constant latency).
+- **Calibration against the Fatso Input 6 render** (true source, shelf out,
+  per-bin linear fit over frames, residual dB re output, 150–400 / 400–1k /
+  1–2.5k / 2.5–6k / 6–15k Hz):
+  Fatso −28.5 / −29.9 / −27.6 / −24.3 / −23.7, peak −2.55 dB, RMS 0.0;
+  Drive 12 −34.1 / −35.3 / −32.9 / −30.0 / −29.8, peak −1.89;
+  **Drive 15 −28.6 / −29.8 / −27.5 / −24.6 / −24.5, peak −3.30, RMS −0.32**;
+  Drive 18 −23.4 / −24.7 / −22.3 / −19.5 / −19.5, peak −5.33.
+  ~2 dB of residual per dB of Drive — the third-order law. The RMS difference
+  (Fatso 0.0) is probably its output makeup.
+- ⚠ A test first read the third harmonic flat at −63 dBc for Drive 3–9: the
+  measurement's unwindowed, non-integer-cycle span leaked the fundamental there.
+  Hann-weighted, H3 grows 1.8–2.2 dB per dB as the curve says.
+
+## HF Limiter — Warmth and Odd/Even replace Drive (October 2026)
+
+The Fatso-style Drive (`dsp/oddSat.js`) is removed. In its place, the low-end warmth combination voiced on the Saturation Bench runs as two fixed layers on the bench's own kernel, moved to `dsp/saturationLayers.js` so a second worklet can run it without registering the bench processor twice in one AudioWorkletGlobalScope (which throws). Voicing: quartic drive 60, 1–400 Hz, bell 350 Hz Q 0.5 +24; then tanh drive 50, 1–300 Hz, bell 250 Hz Q 0.7 +24; both FULL. Warmth sets the layers' Amount at 3 dB a step with +6 at 10; Odd/Even is an equal-power crossfade, the quartic offset +17.4 dB so 50 is equal added rms (Southern Sunrise: quartic −42.58, tanh −25.19 dBFS added rms at Amount 0).
+
+Measured on Southern Sunrise, shelf out, output vs input per band (20–60 / 60–120 / 120–250 / 250–400 Hz; nothing above moves):
+
+| Setting | 20–60 | 60–120 | 120–250 | 250–400 | peak dBFS |
+|---|---|---|---|---|---|
+| Warmth 3, O/E 50 | −0.6 | −0.3 | +0.7 | −0.2 | −5.6 |
+| Warmth 5, O/E 50 | −0.9 | −0.4 | +1.5 | −0.4 | −5.8 |
+| Warmth 8, O/E 9 (the bench voicing) | −2.8 | +1.7 | +4.9 | −1.5 | −4.1 |
+| Warmth 8, O/E 50 | −1.2 | +0.3 | +4.0 | −0.9 | −3.3 |
+| Warmth 10, O/E 0 | +2.9 | +6.0 | +8.2 | −2.3 | −1.6 |
+| Warmth 10, O/E 50 | +4.2 | +3.5 | +7.5 | −1.3 | −1.0 |
+| Warmth 10, O/E 100 | +10.3 | +0.5 | +2.0 | +1.2 | +2.4 |
+
+⚠ It is not harmonics alone: at these drives the layers saturate even quiet low-band content, and what a layer "adds" includes the band's own reshaped level (a quiet 150 Hz tone moved +5.2 dB at Warmth 10). The first test written for this claimed quiet material passes at its own level and failed; it now asserts only that material above the bands is untouched. ⚠ The +6 dB top overshoots and clips at full Even.
+
+## HF Limiter — Odd and Even replace Warmth + Odd/Even (October 2026)
+
+Warmth (level) + Odd/Even (equal-power crossfade, 50 = equal loudness) assumed the useful balance spanned the whole knob. On narration it did not: the preferred setting was O/E 9, close to full Odd, because the quartic is the layer that boosts sub (Even 10 alone: +9.7 dB at 20–60 Hz). The pair is replaced by two independent 0–10 knobs, **Odd** (tanh) and **Even** (quartic), each setting its own layer's Amount by the old law (3 dB a step, +6 at 10, quartic offset +17.4 dB so equal numbers add equal rms on Southern Sunrise). There is no loudness guarantee between them any more; the readout is how the sum is judged.
+
+Equivalences, measured on Southern Sunrise (SUB / LOW / BODY / LO-MID dB, peak change, peak dBFS):
+
+| Setting | Bands | Peak Δ | Peak |
+|---|---|---|---|
+| Odd 2 / Even 2 (old W3, O/E 50) | −0.6 −0.3 +0.7 −0.2 | −0.4 | −6.1 |
+| Odd 8 / Even 2.3 (old W8, O/E 9) | −2.6 +1.8 +4.9 −1.5 | +1.6 | −4.1 |
+| Odd 8 / Even 0 | −2.7 +2.0 +4.8 −1.5 | +1.8 | −3.9 |
+| Odd 8 / Even 6 | −1.9 +1.6 +5.0 −1.5 | +2.1 | −3.6 |
+| Odd 10 / Even 0 | +3.0 +6.1 +8.1 −2.5 | +4.1 | −1.6 |
+| Odd 0 / Even 10 (old W10, O/E 100) | +9.7 +0.6 +2.1 +1.1 | +8.1 | +2.4 |
+| Odd 10 / Even 10 | +11.2 +6.9 +10.3 −1.3 | +9.6 | +3.9 |
+
+Saved settings carrying `warmth`/`oddEven` are not migrated (the keys are ignored and the layers start off): the HF Limiter has no factory or user presets yet.
+
+## HF Limiter — AUTO makeup for the Warmth stage (October 2026)
+
+A MAKEUP OFF/AUTO switch beside Odd/Even. AUTO applies `−loudnessDeltaDb`, the Warmth stage's change in K-weighted integrated loudness over the selection's analysis window (measured in the readout's bands pass, which already renders the stage), as a gain between the stage and the shelf — before the shelf so the file-relative Threshold sees a level-matched signal. The kernel glides it (one-pole, 20 ms) and jumps on an immediate set, so an offline render from rest starts at the makeup. Apply re-measures if the stored makeup belongs to another Odd/Even, region or revision. The readout's bands and peak include the makeup.
+
+Southern Sunrise (bands / peak change, then with AUTO):
+
+| Setting | Loudness | OFF bands, peak Δ | AUTO bands, peak Δ |
+|---|---|---|---|
+| Odd 8 / Even 2.3 | +1.5 LU | −2.6 +1.8 +4.9 −1.5, +1.6 | −4.1 +0.4 +3.4 −3.0, +0.1 |
+| Odd 10 / Even 0 | +4.0 LU | +3.0 +6.1 +8.1 −2.5, +4.1 | −1.0 +2.1 +4.1 −6.5, +0.1 |
+| Odd 0 / Even 10 | +0.9 LU | +9.7 +0.6 +2.1 +1.1, +8.1 | +8.8 −0.3 +1.2 +0.1, +7.1 |
+| Odd 10 / Even 10 | +5.4 LU | +11.2 +6.9 +10.3 −1.3, +9.6 | +5.8 +1.5 +4.9 −6.7, +4.2 |
+
+⚠ It matches loudness, not peak: K-weighting barely counts the sub Even adds, so AUTO leaves an Even-heavy setting's peak well up. Matching sample peak or unweighted rms instead would let the sub boost pull the whole voice down, which is the opposite of a level-matched A/B.
+
+## HF Limiter — PEAK makeup mode (October 2026)
+
+Pure Even read about −1 dB of peak change at modest settings with no makeup under AUTO. Measured on Southern Sunrise, it is not compression: the file's peak is negative-going (−5.70 dBFS against +8.48 dB lower on the positive side), and the quartic lifts both half-waves, so the negative peak falls as the positive one rises — Even 1/3/5: −0.47/−0.97/−1.62 dB on the negative side, +0.51/+0.99/+1.88 on the positive, loudness −0.02/−0.04/−0.05 LU, bands flat. Past ~Even 5 the positive side becomes the peak and the change turns upward. Loudness-matched makeup therefore correctly applies ~0.
+
+The switch is now OFF / LOUD / PEAK (`warmthMakeup`, a three-detent rotary; LOUD is the former AUTO). PEAK applies `inputPeakDb − peakDb` from the readout's whole-selection peak pass, so the output peak lands on the source's:
+
+| Setting | PEAK makeup | Loudness vs source | LOUD would apply |
+|---|---|---|---|
+| Even 1 | +0.47 dB | +0.45 LU | +0.02 |
+| Even 3 | +0.97 dB | +0.93 LU | +0.04 |
+| Even 5 | +0.90 dB | +0.85 LU | +0.05 |
+| Odd 8 / Even 2.3 | −1.58 dB | −0.13 LU | −1.46 |
+| Odd 10 | −4.12 dB | −0.10 LU | −4.02 |
+
+Every case lands the peak at 0.00 dB change. On Odd-led settings the two modes nearly agree; on Even-led ones PEAK turns the headroom into level. Apply waits for the peak pass in PEAK mode (`peakMeasuredFor`) and for the bands pass in LOUD mode (`loudMeasuredFor`).
+
+## HF Limiter — Warmth peak guard (October 2026)
+
+The Warmth layers sit on the low band, so what they add peaks with the bass peaks and the sum overshoots the source ("doubling up"). Asked whether an internal compressor was the principled fix: no — the overshoot is the added signal lining up in time with the source's peaks, not an excess of energy, so a compressor would thin the warmth over whole syllables and still guarantee nothing about the peak, and compressing the shaper's input only moves the drive, which at these drives barely moves what is added.
+
+Built instead: a lookahead limiter on the ADDED signal only (`dsp/warmthGuard.js`, GUARD switch). `a = y − x`; per sample the largest `gReq ∈ [0,1]` with `|x + g·a| ≤ C`, `C = max(selection peak, |x|)` (the `|x|` term keeps preview of louder material outside the selection, and apply's pre-roll, from zeroing the warmth). The gain is `lookaheadLimiter.js`'s centred running min + triangular smoother (L = 1.5 ms) followed by a 60 ms one-pole that only lags upward, so `g ≤ gReq` everywhere; since `|x + g·a|` is convex in g, every such g is safe. Linked across channels. Placed after the Warmth stage and before makeup, 2L of constant latency (a pure delay when off; tested bit-exact with no ceiling and with a ceiling nothing reaches). The readout renders it (same class on the aligned pair), so LOUD/PEAK makeup and the peak figure include it.
+
+Offline prototype first, then the kernel, on Southern Sunrise (ceiling = source peak, shelf out):
+
+| Setting | Off: peak / loud | Guard: peak / loud | Guard bands (SUB LOW BODY LO-MID) |
+|---|---|---|---|
+| Odd 8 / Even 2.3 | +1.58 / +1.46 | 0.00 / +1.44 | −2.67 +1.79 +4.81 −1.53 |
+| Odd 10 | +4.12 / +4.02 | 0.00 / +3.73 | +2.61 +5.81 +7.61 −2.34 |
+| Even 6 | +0.04 / −0.04 | 0.00 / −0.04 | unchanged |
+| Odd 10 / Even 10 | +9.56 / +5.40 | 0.00 / +4.02 | +7.98 +5.24 +8.66 −1.38 |
+
+The prototype ducked the added signal 3.4 % of the time at the bench voicing (−0.13 dB of its energy), 24 % at Odd 10 and 60 % at 10/10. PEAK makeup reaches the same peak at the bench voicing only by spending the whole +1.5 LU. Ballistics are reasoned, not auditioned. The Transient test's "cut lands within 2 ms of the click" now measures from where the shelf hears the click (behind Warmth and the guard).
+
+## HF Limiter — PEAK makeup removed (October 2026)
+
+With GUARD holding the peak at the source's by turning down only the added warmth, PEAK makeup had no job left: it held the same peak by cutting the whole selection (spending the warmth's entire loudness gain at the bench voicing), and on pure Even it turned the headroom the quartic frees into level. Removed; MAKEUP is back to a two-way OFF / LOUD rocker. LOUD stays because it answers a different question — level-matching the A/B — that GUARD does not: with GUARD on, Odd 8 / Even 2.3 is still +1.44 LU louder than the source, so an un-matched comparison favours the processed side on loudness alone. A saved `'peak'` reads as OFF (tested).
+
+## HF Limiter — Warmth + Odd/Even restored (October 2026)
+
+The independent Odd and Even knobs were reverted at the owner's request: Warmth (0–10, level) and Odd/Even (0–100, equal-power, 50 = equal added rms) are back, exactly the law they had (`warmthLayers(warmth, oddEven, refs)`). Everything built on top of the independent knobs carries over unchanged — the readout, LOUD makeup and the peak guard all read the two layers' kernel params, not the knobs. The guard re-measured on Southern Sunrise with reachable settings (peak change off → on, loudness with guard):
+
+| Setting | Off peak | Guard peak | Guard loudness | Guard bands (SUB LOW BODY LO-MID) |
+|---|---|---|---|---|
+| Warmth 8 / O/E 9 | +1.56 | 0.00 | +1.42 LU | −2.70 +1.74 +4.77 −1.51 |
+| Warmth 10 / O/E 0 | +4.12 | 0.00 | +3.73 | +2.61 +5.81 +7.61 −2.34 |
+| Warmth 10 / O/E 50 | +4.28 | 0.00 | +2.58 | +3.20 +3.13 +6.91 −1.41 |
+| Warmth 10 / O/E 100 | +8.06 | 0.00 | +0.58 | +7.40 +0.20 +1.73 +0.86 |
+
+Where the Odd/Even scale should run is still the owner's open question.
+
+## HF Limiter — Odd/Even narrowed to its useful range (October 2026)
+
+By ear the useful part of the Odd/Even knob was 0–20/25; past it the quartic mostly adds sub. The knob's 0–100 travel now spans that first quarter of the equal-power crossfade (`ODD_EVEN_SPAN` = 0.25, so new = old × 4): 0 is still pure tanh, 100 is where the old scale read 25 (tanh −0.7 dB, quartic −8.3 dB of crossfade gain before its +17.4 match), and full Even is no longer reachable. The bench voicing moves from 9 to 36; the default stays 50 (old 12.5). The readout shows the band levels barely move across the new travel on Southern Sunrise (Warmth 8):
+
+| O/E | SUB | LOW | BODY | LO-MID | Peak Δ | Loudness |
+|---|---|---|---|---|---|---|
+| 0 | −2.7 | +2.0 | +4.8 | −1.5 | +1.8 | +1.5 |
+| 36 | −2.7 | +1.8 | +4.8 | −1.5 | +1.6 | +1.4 |
+| 100 | −2.4 | +1.3 | +4.6 | −1.4 | +1.5 | +1.3 |
+
+So what the knob moves within this range is harmonic character (second against third), not band level.
+
+## HF Limiter — guard pinned on, makeup removed (October 2026)
+
+The owner's requirement, stated plainly: Warmth must never raise the selection's peak level (no clipping, no lost headroom); added RMS/density is acceptable. The guard alone guarantees exactly that, so it is now pinned on whenever Warmth is up (`warmthGuard.on = warmthActive(p)`, no user param) and the MAKEUP switch is gone, kernel gain and all (`warmthMakeup`, `warmthMakeupDb`, the readout's integrated-loudness measurement and apply's re-measure-before-render). Removing LOUD also closes the hole found just before: LOUD sat after the guard, so on a setting where Warmth measured slightly quieter (−0.05 LU toward Even on Southern Sunrise) it would have turned the level up and put the peak ~0.05 dB over the guard's ceiling.
+
+What remains true and is not guaranteed: the Output trim comes after the guard and can raise the peak by exactly its own setting (the readout includes it); and the ceiling is the SELECTION's peak, so material louder than it (preview outside the selection, apply's pre-roll) is only held at its own level, never pushed higher.
+
+## HF Limiter — Warmth knob made linear in amplitude (October 2026)
+
+By ear the Warmth knob came in slowly and then very fast near the top. Measured: the knob was 3 dB a step on the layers' Amount, i.e. even dB steps on the ADDED signal, and at the bottom that signal sits 20+ dB under the voice so it barely moves the sum. Southern Sunrise, Odd/Even 36, body 120–250 Hz by Warmth 1…10: +0.51 +0.71 +1.00 +1.39 +1.93 +2.65 +3.60 +4.82 +6.32 +8.13 dB — each step ~1.35× the last; loudness +0.03 → +3.89 LU the same way.
+
+Now `Amount = WARMTH_TOP_DB + 20·log10(Warmth/10)` (`warmthLevelDb`): the added amplitude is proportional to the knob, with the same +6 dB top. Body by Warmth 1…10: +1.12 +2.15 +3.11 +3.99 +4.81 +5.57 +6.27 +6.93 +7.55 +8.13 (steps 1.1 → 0.6, gently easing); loudness +0.10 → +3.89 LU in ~0.5 LU steps. The bench voicing (Amount 0) moves from Warmth 8 to 5; the owner asked not to keep the old Warmth 8.
+
+Merged with the owner's re-voicing (`50c5136`): layers quartic (drive 50, 1–250 Hz, bell 280 Q 0.5 +14) + CUBIC (drive 50, 1–220 Hz, bell 240 Q 0.5 +10), defaults WARM / 12 kHz / Warmth 5. Notes: (1) that default was chosen under the old 3 dB-a-step law, where Warmth 5 was Amount −9 dB; under the linear law Warmth 5 is Amount 0 (the old law's 8), and the old 5 is now ~1.8. (2) On Southern Sunrise at Amount 0 the new quartic adds −46.57 dBFS rms and the cubic −25.74: a 20.8 dB gap against `WARMTH_EVEN_MATCH_DB` 17.4, which was measured on the first pair. (3) The shelf tests read their base from the defaults and broke when Warmth defaulted on; they now pin TIGHT / 5 kHz / Warmth 0.
+
+## PHAT*SS — the Warmth circuit moves out of the HF Limiter (October 2026)
+
+The owner asked for the Warmth circuit to leave the HF Limiter and become a tape
+simulation plugin, **PHAT*SS** (Psycho Harmonic Analog Tape * Saturation
+Simulator): the current Warmth controls, plus a version of the HF Limiter's shelf
+with Release, Tail and Transient pinned and one or two macro knobs over Freq,
+Threshold and Range. In/out meters only — no GR meter, no EQ display.
+
+**What moved.** `WARMTH_*`, `ODD_EVEN_SPAN`, `warmthLayers`, `warmthActive` and the
+guard wiring went from `hfLimiterParams.js` / `hfLimiterProcessor.js` to
+`phatassParams.js` / `phatassProcessor.js` unchanged — the user's re-voiced layers,
+the linear Warmth law, the pinned guard, the readout. `hfLimiterWarmthReadout.js`
+became `phatassWarmthReadout.js` (worker op `phatassWarmthReadout`). The warmth and
+guard tests moved to `test/dsp/phatass.test.js` verbatim apart from the plugin they
+run through. The HF Limiter is the shelf alone again: latency back to 3 ms, no
+`immediate` flag on `setParams`, no guard meter.
+
+**The macro.** Two knobs, because Freq is a different question from how hard:
+- **Tame** 0–10: Threshold `2 − 2·Tame` dB re the voice level and Range `2.4·Tame`
+  dB, together — more Tame acts earlier AND may go deeper. 0 takes the shelf out.
+- **Tone** 0–10: corner `2000·6^(Tone/10)` Hz, 2–12 kHz on a log scale.
+
+Tame 5 / Tone 10 is exactly the HF Limiter's default shelf (−8 dB, Range 12,
+12 kHz); with Warmth 0 a PHAT*SS render matches the HF Limiter at those settings
+to < 1e-6 (tested). Pinned: WARM shape, 35 ms release, Tail off, Transient off —
+the setting that matched the Fatso Warmth 7 bounce. ⚠ The Tame slopes (2 dB and
+2.4 dB a step) are reasoned to land the default on the HF Limiter's, not auditioned.
+
+**Soften — not included.** Asked whether Tube Saturation's Soften belongs here.
+Its slew limiter (`dsp/tapeCharacter.js`) is documented to need a clean,
+broadband, oversampled signal just ahead of ONE broadband nonlinearity, with its
+allowance referenced to that nonlinearity's knee — after a nonlinearity or on a
+band-split signal it reverses sign and becomes a distortion generator. PHAT*SS's
+nonlinearities are two parallel layers on a band below ~250 Hz; there is no
+broadband curve for Soften to protect. What Soften audibly does is a broad HF
+shelf, and the tape shelf already does that job linearly, program-dependently and
+with a no-overshoot proof. And the HF Limiter's own history (the Limen-style
+acceleration limiter) is the measured case against waveform-domain limiting on
+narration. If a fixed tape HF loss is ever wanted, Tube Saturation's HF Loss shelf
+is the closer idea — but the dynamic shelf already covers it.
+
+## Saturation Bench — a hysteresis (tape magnetisation) curve (October 2026)
+
+Asked for while scoping PHAT*SS: what the owner wanted from Tube Saturation's
+Soften was a HYSTERESIS effect — transient softening and mild compression — not
+the HF rolloff Soften actually is (a slew limiter with one sample of memory). So
+a real loop was built: a Jiles-Atherton model (`dsp/hysteresis.js`, from the
+published equations — Jiles & Atherton 1986, Chowdhury DAFx 2019 — not from any
+plugin's code), offered on the Saturation Bench as the curve `hysteresis`, the
+kernel's first STATEFUL curve (one state per channel, stepped once per
+oversampled sample; the kernel otherwise unchanged).
+
+**Voicing, and why not the textbook one.** Normalised units (h = H/a, m = M/Ms),
+three shape constants c, K, A.
+- Chowdhury's tape values (c 0.17) EXPAND: the fundamental's gain rises +9.9 dB
+  before saturating — unbiased tape's S-curve. Rejected.
+- Sine sweep for the widest loop that never expands: c 0.6, K 5 (+0.03 dB max,
+  7° of lag at 4× calibration).
+- **Then speech biases itself.** Small fast reversals pull J-A toward the
+  anhysteretic curve (what AC bias does), steeper than the settled loop, so a
+  voice's own harmonics raise its bass: Southern Sunrise full band +6 at c 0.6,
+  20–250 Hz +1.50 dB, whole file +0.99 dB rms. A 120 Hz tone with a 3 kHz
+  ripple at a fifth of its level gains +0.54 dB. Shipped **c 0.8** (1.2° lag,
+  self-bias +0.34 / +0.12 dB at +6 / +12); a test bounds the ripple lift.
+- Output is normalised to the steady-state small-signal gain at the
+  fundamental, not f'(0) (demagnetised, the origin slope is only the reversible
+  part). Drive calibration (1 % THD at the band's reference peak) is measured in
+  steady state on its own sine.
+
+**The three bands** (`node scripts/hysteresis-bands.mjs <wav> [outDir] [drives] [c=…]`),
+Southern Sunrise, one layer, FULL, no emphasis, drive +12, c 0.8. Onset crest is the
+first 20 ms's peak against the 40–150 ms level, change vs dry, 16 onsets;
+compression is the quiet-quartile change minus the loud-quartile change (voiced
+50 ms frames); bands 20–250 / 250–1k / 1–4k / 4–10k / 10k+.
+
+| | peak | onset crest | compression | bands |
+|---|---|---|---|---|
+| low 1–250 Hz | +0.23 | −0.10 | −0.17 (expands) | +0.06 / 0 / 0 / 0 / 0 |
+| 20 Hz–4 kHz | +0.15 | −0.21 | +0.15 | +0.44 / −0.69 / +0.37 / −0.02 / 0 |
+| full band | −4.88 | −2.56 | +0.63 | +0.12 / −0.85 / −0.95 / −1.06 / −0.94 |
+| tanh, full band | −6.87 | −2.59 | +0.89 | −0.92 / −0.98 / −1.01 / −1.10 / −0.97 |
+| hysteresis c 0.6, full | −2.93 | −2.78 | +0.29 | +1.83 / −0.52 / −0.79 / −0.94 / −0.83 |
+
+- **Low band does nothing for transients**, as predicted: speech's onsets are not
+  there, and it slightly expands and raises the peak.
+- **20 Hz–4 kHz barely softens onsets** and tilts the mids (250–1k down, 1–4k up:
+  odd harmonics of the low/mid band land in 1–4 kHz and the 4 kHz edge keeps them).
+- **Full band is the only one that softens transients and compresses** — and it
+  does so like a tanh at the same calibration (onset crest −2.56 vs −2.59). The
+  softening is the SATURATION, not the memory. tanh runs ~30× realtime here,
+  hysteresis ~11×.
+- **What the loop does add: low-level residual that does not go away.** Residual
+  after the best gain, re the signal, full band +12: tanh −21.7 / −57.2 / −86.7 dB
+  at 0 / −20 / −40 dB of level; hysteresis c 0.8 −17.8 / −30.7 / −49.2. Soft
+  syllables carry ~3 % of residual against a tanh's 0.1 % — the grain of
+  unbiased tape. On white/pink noise it is level-independent (~−21 dB).
+
+Renders for audition (8 s, 32-bit float, latency trimmed): dry, the three bands,
+tanh full band, and c 0.6 full band. Nothing is wired into PHAT*SS yet.
+
+## PHAT*SS — Soften, a whole-signal onset softener (October 2026)
+
+After the hysteresis renders the owner decided against adding more distortion
+to PHAT*SS for transient softening, and asked for the HF Limiter's Transient
+mechanism on the whole signal instead, as a knob. Built as `dsp/onsetSoftener.js`,
+placed after the Warmth guard and before the tape shelf: a linked broadband
+gain, so it adds nothing and can only lower a peak.
+
+**Detector, re-derived for the whole signal.**
+- Band 80 Hz–4 kHz, so rumble and sibilance do not trigger it.
+- The fast follower's release is 40 ms, not 20: on the whole signal it rides the
+  voice's fundamental and 20 ms ripples (rise p90 / p99 / p99.9 on narration
+  1.12 / 3.62 / 8.26 dB at 20 ms; 0.67 / 3.27 / 7.32 at 40).
+- The slow follower's attack is 30 ms, not 10: a syllable rises over 10–30 ms
+  and a 10 ms follower keeps up with it. Full Soften on Southern Sunrise
+  (16 onsets; "steady" = 269 loud 10 ms frames within 1.5 dB of their neighbours):
+
+  | slow attack | onset crest | first 30 ms | steady | rms |
+  |---|---|---|---|---|
+  | 10 ms | −0.68 | −0.29 | −0.01 | −0.07 |
+  | 20 ms | −1.18 | −0.68 | −0.01 | −0.13 |
+  | **30 ms** | **−1.47** | **−0.97** | **−0.01** | **−0.18** |
+  | 50 ms | −1.73 | −1.35 | −0.03 | −0.25 |
+
+  An 80 ms release instead of 40 weakened every row by about a third.
+
+**The knob law had to change.** Copied from Transient — a fixed 0.5 dB per dB
+of rise above 3 dB, with the knob as a cap at 1.2 dB a step — most syllable
+onsets never reached even Soften 2's cap, and Soften 2 through 10 measured
+IDENTICAL (peak −2.17 dB everywhere). Now the knob is the share of each onset's
+rise removed: `cut = (soften/10)·(rise − 3)`, 18 dB safety cap. Measured at 30 ms:
+onset crest −0.22 / −0.42 / −0.53 / −0.62 / −0.68 at 2 / 4 / 6 / 8 / 10 under the
+old 10 ms attack — monotone — and −1.47 at 10 under the shipped 30 ms.
+
+Gated 18 dB under the voice level (fading in over 6 dB) so a cough in room tone
+never pumps; 1.5 ms lookahead (3 ms of constant latency); default 0, a pure
+delay, so the plugin's existing sound is unchanged until the knob is turned.
+⚠ Subtle by design and not auditioned when built: at 10 an onset comes down
+~1.5 dB against the rest of its syllable. If it is too little, the levers are the
+slow attack (longer shaves more and longer) and letting the knob go past 1.
+
+### Soften bench fields (October 2026)
+
+The owner found Soften very subtle and asked for its internals on the panel to
+audition. Added as a SOFTEN BENCH row of DeviceFields under the knobs, live in
+the worklet (`OnsetSoftener.setParams` now takes `floorDb` and `slowAttackMs`;
+`amount` may reach 3): **Floor** 0–6 dB (shipped 3), **Attack** 5–100 ms (30),
+**Scale** 0–3 (1) — Scale multiplies the knob, so it is what Soften 10 means; above
+1 an onset is cut by more than it rose and dips below its settled level. RESET
+returns all three. Measured on Southern Sunrise at Soften 10 (onset crest / first
+30 ms / steady / whole-file rms, dB):
+
+| attack | floor | scale | onset crest | first 30 ms | steady | rms |
+|---|---|---|---|---|---|---|
+| 30 | 3 | 1 (shipped) | −1.47 | −0.97 | −0.01 | −0.18 |
+| 30 | 1.5 | 1 | −2.14 | −1.59 | −0.07 | −0.34 |
+| 30 | 1 | 1 | −2.37 | −1.85 | −0.14 | −0.44 |
+| 50 | 3 | 1 | −1.73 | −1.35 | −0.03 | −0.25 |
+| 30 | 3 | 2 | −2.43 | −1.78 | −0.02 | −0.26 |
+| 50 | 1.5 | 2 | −4.40 | −3.83 | −0.26 | −0.72 |
+| 80 | 1 | 3 | −5.96 | −6.48 | −0.98 | −1.45 |
+
+Scale moves onsets without touching steady speech; Floor is the one that starts
+to move the steady parts (−0.14 dB at 1 dB). The fields are a bench, not a
+settled design — once the owner picks values they should be pinned back off the
+panel or kept as named, deliberate controls.
+
+### Soften judged against the syllable's own body (October 2026)
+
+The owner heard that a phrase start after silence was cut harder than other
+syllables, and it is intrinsic to measuring rise against the PAST: after a pause
+the slow follower has decayed to room tone, so the first syllable reads as a
+20–40 dB rise. Southern Sunrise at Soften 10, deepest cut per onset: the onset
+after the clip's quietest gap −7.8 dB against ~−2 for the rest; at floor 1.5 /
+scale 2 / attack 50 it hit the 18 dB cap against ~−5.
+
+Rebuilt so the reading is the SMALLER of two: the rise over the past (unchanged —
+it keeps syllable ENDS untouched, where the level ahead falls away and an
+overshoot-only reading would cut the tail of every word) and the overshoot over
+the syllable's own BODY — the mean of the fast follower 30–80 ms after the sample,
+read through 80 ms of lookahead. A start after silence is then judged like any
+other syllable, and a syllable that steps up with no overshoot is left alone.
+
+Body window and floor, at Soften 10 (onset crest / first 30 ms / steady, dB):
+
+| body | floor 3 | floor 1.5 | floor 0.5 |
+|---|---|---|---|
+| 10–40 ms | −0.00 / −0.04 / −0.00 | −0.07 / −0.31 / −0.03 | −0.23 / −0.68 / −0.16 |
+| 20–60 ms | −0.03 / −0.20 / −0.01 | −0.41 / −0.65 / −0.03 | −0.73 / −1.11 / −0.16 |
+| **30–80 ms** | −0.29 / −0.37 / −0.01 | **−0.71 / −0.87 / −0.04** | −1.09 / −1.38 / −0.17 |
+| 40–100 ms | −0.40 / −0.46 / −0.01 | −0.88 / −1.01 / −0.04 | −1.31 / −1.52 / −0.17 |
+
+10–40 ms overlaps the attack itself, so it reads almost no overshoot. Shipped
+30–80 ms and floor 1.5 (down from 3: an overshoot over the body is smaller than a
+rise over room tone). The after-pause onset now takes −3.9 dB, inside the
+−1.1…−5.2 of the others. Scale 2 / 3: crest −1.32 / −1.73, steady −0.07 / −0.10.
+Cost: 80 ms more constant latency (trimmed on apply; preview runs behind bypass).
+The Attack field keeps its meaning (the past follower) but now only limits the
+cut: shorter catches up sooner and cuts less.
+
+### Soften rebuilt as the shelf's Transient on its own band (October 2026)
+
+The owner auditioned the body-referenced broadband Soften and found it not worth
+its 83 ms of latency: the HF Limiter's Transient knob did the job about as well,
+with less tuning and no latency. Asked for that instead — deeper, with its own
+cutoff that moves independently of (or below) the main shelf.
+
+`dsp/onsetSoftener.js` is removed (recoverable at `4d5fac3`, measurements above).
+`ShelfLimiterStage` gains three optional params:
+- `transientCornerHz` — the Transient detector reads, and its cut acts on, its OWN
+  one-pole split at this corner (computed on the same centred sample as the shelf's
+  band, so no new latency). The cut is applied as a second dynamic shelf CASCADED
+  on the shelf's output, `y + (gt − 1)·(y − LP1(y))`, so the two gains multiply and
+  can never over-subtract (summing two cuts on overlapping bands can drive the top
+  end negative). null keeps the shared band — the HF Limiter is bit-identical
+  (its 20 tests pass unchanged).
+- `transientSlope` — dB of cut per dB of rise (HF Limiter's 0.5 by default).
+- `transientGateLin` — an absolute gate instead of "24 dB under the shelf
+  threshold", so PHAT*SS's gate does not move with Tame.
+
+PHAT*SS: **Soften** 0–10 sets the ceiling 2.4 dB a step (24 at 10) and the slope
+0.5 → 1 across the knob; **Soft Freq** 1–12 kHz (default 3 kHz) is its corner;
+gate 32 dB under the voice level (the HF Limiter's default works out to the same).
+On a 2 ms click over a 150 Hz voice: deepest cut 12 dB at Soften 5, 24 at 10; at
+Soften 10 / 3 kHz it removes more of the click than the HF Limiter's Transient 12 at
+the same corner; 1.5 kHz takes more of a broadband burst than 8 kHz; the steady
+voice and a held 6 kHz tone do not move. PHAT*SS latency is back to Warmth + guard
++ shelf. The SOFTEN BENCH fields are gone with the stage they tuned.
+
+Soften's ceiling raised to **36 dB at 10** (`SOFTEN_DB_PER_STEP` 2.4 → 3.6), owner's
+choice. The slope law (0.5 → 1 dB/dB) and the gate are unchanged, so the knob's
+lower travel cuts deeper too (Soften 5 now allows 18 dB).
+
+Soft Freq now reaches down to **500 Hz** (`SOFTEN_FREQ_MIN_HZ` 1000 → 500), owner's
+request; the readout prints Hz below 1 kHz. At Soften 10 on Southern Sunrise, steady
+speech moves −0.01 dB at 500 / 1000 / 3000 Hz alike (whole file −0.05 / −0.04 /
+−0.02 dB): the rise detector still ignores sustained sound with the corner down in
+the voice's body.
+
+### Soften folded into Tame (October 2026)
+
+The owner found Soften hard to use live: its effect depended on four knobs — its
+own Soften and Soft Freq plus the shelf's Tame and Tone. Now Soften is an ON/OFF
+toggle (a lamp pill with a caption naming the current depth, default OFF), its
+corner PINNED at 500 Hz, and its depth riding TAME (`softenLaw`): 3.6 dB of ceiling
+per Tame step (36 at 10) and a slope of 0.5 → 1 dB of cut per dB of rise across
+Tame's travel, so the top end and the attacks turn down together and Tame 0 takes
+both out (a pure delay, tested). The Soften and Soft Freq knobs are gone.
+
+### PHAT*SS — Tame's Range widened (2.4 → 3.6 dB a step)
+
+Owner: "increase the range of the Tame cut". `TAME_RANGE_PER_STEP_DB` 2.4 → 3.6, so
+Range runs 0 → 36 dB across Tame (18 at the default 5, was 12; 36 at 10, was 24) —
+the same top Soften already rides Tame to, so one knob reads "up to 36 dB" for both.
+Threshold is unchanged (`2 − 2·Tame`), so the shelf starts acting at the same
+place and only its floor goes deeper. Tame 5 / Tone 10 is no longer the HF
+Limiter's default shelf (Range 12); it is the HF Limiter at −8 dB / Range 18 /
+12 kHz, and the Warmth-0 equivalence test now compares against that. The kernel
+has no Range clamp (`floorLin = dbToLin(−rangeDb)`), so 36 needs no other change;
+the HF Limiter's own knob still stops at 24. Not auditioned.
+
+---
+
+## PHAT*SS — Tame/Tone against the EL7 Fatso's Warmth 2/5/6/7 (October 2026)
+
+Owner supplied four more bounces over `2_FATSO_EL7x_-_Input_2.wav` (Warmth off):
+Warmth 2, 5, 6 and the Warmth 7 already analysed above. Same clip (music,
+96 kHz float stereo, 8.35 s, gated RMS −23.0 dBFS). Question: which Tame/Tone
+reproduces each Warmth level?
+
+**Capture.** The same ~13-sample drop as before, now in three files: Warmth 2 at
+~0.9 s, Warmth 6 at ~3.4 s, Warmth 7 at ~6.7 s, plus ±1 sample of drift. Each
+85 ms block is realigned by integer cross-correlation and blocks next to a jump
+are dropped.
+
+**Metric** (the HF Limiter match's, extended down): per 10.7 ms frame, per band
+out/in energy (dB) in 100–500 / 0.5–1 / 1–2 / 2–4 / 4–8 / 8–16 kHz, ours minus
+the Fatso's, rms over frames and bands after solving the mean as Output. PHAT*SS
+at Warmth 0, Soften off (Warmth adds no harmonics — see above), voice level
+measured from the file as the app does. Gain-only baselines: 0.002 / 0.210 /
+0.556 / 1.357 dB.
+
+**What the Fatso's Warmth does here — strongly non-linear in the knob.**
+- **Warmth 2: nothing** — within 0.04 dB of Input 2 in every band, every frame.
+- Warmth 5: a cut over 1 dB on ~1 % of frames, at most ~3.6 dB.
+- Warmth 6: ~8 % of frames, worst 3–8 dB above 2 kHz.
+- Warmth 7: a third of frames, worst ~10 dB at 8–16 kHz.
+- Its one-pole corner, fitted per file with a free per-frame depth, is ~2 kHz at
+  Warmth 7 and ~1.5 kHz at Warmth 6 (Warmth 5 too weak to say): it does NOT move
+  up with the knob. What moves is the threshold.
+
+**Best Tame/Tone (0.25 grid, then refined):**
+
+| Fatso | Tame / Tone / Output | rms (baseline) |
+|---|---|---|
+| Warmth 2 | Tame 0 | 0.002 (0.002) |
+| Warmth 5 | 1 / 9 / +0.1 | 0.178 (0.210) |
+| Warmth 6 | 1 / 5 / +0.2 | 0.401 (0.556) |
+| Warmth 7 | 2 / 2.5 / +0.4 | 0.633 (1.357) |
+
+The valley runs along a Tame↔Tone diagonal (Warmth 7: Tame 1.75 / Tone 2 is
+0.633 too). ⚠ **TONE IS STANDING IN FOR THRESHOLD.** The fit pulls the corner up
+(10 / 4.9 / 3.1 kHz) though the Fatso's sits near 2 kHz, because Tame cannot put
+the threshold where the Fatso's is: a higher corner feeds the detector less of
+the spectrum, which acts like a higher threshold.
+
+**With the corner pinned at 2 kHz (= Tone 0) and Threshold / Range free**, all
+three fit better, with the threshold doing the work:
+
+| Fatso | Threshold re voice | Range | rms |
+|---|---|---|---|
+| Warmth 5 | +10 dB | any ≥ 3 (never reached) | 0.165 |
+| Warmth 6 | +4 dB | **3** (6 → 0.412, ≥ 9 → 0.438) | 0.345 |
+| Warmth 7 | 0 dB | ≥ 9 (3 → 0.826) | 0.574 |
+
+So ~6 / 4 dB of threshold per Warmth step at the top, and a Range that opens
+with it. Tame cannot reach these: its threshold tops out at +2 dB (and Tame 0
+has Range 0), and at a given threshold it gives more Range than the Fatso
+(Tame law: Range = 1.8·(2 − thr); the Fatso, from two points: ≈ 9 − 1.5·thr).
+Shifting Tame's threshold law to `12 − 2·Tame` (Range unchanged) reaches
+Warmth 5 at Tame 1 (0.165) and Warmth 7 at Tame 6 (0.579), but Warmth 6 only
+0.396, because the coupled Range is too deep there.
+
+**Ruled out:**
+- **A steeper-than-limiter law.** The per-frame depth against the 2 kHz band
+  level LOOKS steeper than ours (Warmth 7: −0.5 / −1.5 / −2.2 / −5.2 / −7.4 dB at
+  −33 … −27 dBFS, about 1.3 dB per dB, against our ~0.8). But a scratch kernel
+  with `req = (T/m)^k` scores worse at every k > 1 (Warmth 7: k 1.5 0.594,
+  k 2 0.612, k 3 0.651). The limiter law (k = 1) is right.
+- **Release.** 20 ms is marginally better than the pinned 35 (Warmth 7 0.565 vs
+  0.574, Warmth 6 0.328 vs 0.345); 50 ms and up is worse. Not worth unpinning.
+- **The macro's coupling as such.** A free four-parameter fit (corner,
+  threshold, Range, release) reaches about what the 2 kHz fit does. What
+  matters is where the threshold sits and how Range relates to it, not that two
+  parameters share one knob.
+
+**The floor no shelf setting removes** (~0.57 dB at Warmth 7): a static tilt, with
+lows +0.57 dB and highs −0.2 in the median frame, which a flat Output cannot
+copy. Also the Fatso cuts reaching down to 1 kHz on its deepest frames.
+
+⚠ **THE FATSO'S THRESHOLD IS ABSOLUTE and ours is relative to the file's level.**
+"+10 / +4 / 0 dB re voice" holds for this clip's −23.0 dBFS. A hotter take
+through a Fatso cuts more at the same Warmth, and PHAT*SS would not. One music
+clip, not voice. Nothing changed in the code. The scripts were scratch and are
+not in the repo.
+
+### PHAT*SS — FATSO mode (October 2026)
+
+Owner: "add it as a switchable Fatso mode". `fatso` (default false) in
+`PHATASS_DEFAULTS`; `tapeShelf(tame, tone, fatso)` returns the fitted law when on:
+corner pinned at `FATSO_CORNER_HZ` (2000, Tone ignored and greyed in the panel),
+threshold `12 − 2·Tame` dB re the voice, Range `max(3, 3·Tame − 9)` (0 at Tame 0,
+so Tame 0 is still a pure delay — tested). Built through the three fitted points,
+and checked end to end through the real Tame path against the bounces: Warmth 5 /
+6 / 7 are best at Tame 1 / 4 / 6, scoring 0.165 / 0.345 / 0.574 (identical to the
+free fit) with Output +0.06 / +0.23 / +0.59. The travel between and past those
+points is interpolation, and above Tame 6 it is extrapolation (Tame 10: −8 dB,
+Range 21). Soften still rides Tame and is not affected by the switch. Panel: a FATSO lamp pill beside
+Output, caption `2k · ≤N dB` (the current Range). Not auditioned.
+
+### PHAT*SS — VOICE curve, original Tame/Tone deprecated, DETECT 2K/4K (October 2026)
+
+Owner, after auditioning FATSO: it sounds "more taming than just duller", but the
+bottom of the knob is subtle and the top wants more depth. Then: deprecate the
+original curve, keep FATSO and the candidate, put the detector on a toggle.
+
+**Why FATSO's bottom is subtle on narration.** The detector compares each sample
+of the band above 2 kHz (`x − LP1`) against a threshold set from the WHOLE
+file's broadband gated RMS. On narration that band's 10 ms peaks sit far lower
+against the RMS than on the Fatso's music clip: median −7.4 / −8.5 dB (bright /
+dull narration, owner-supplied `Messy_and_Bright` and `art_test_clip_orig`)
+against +0.7, 99th percentile +7.4 / +6.9 against +10.4. FATSO's +10 / +8 / +6
+at Tame 1–3 are crossed in 0–2 % of windows. At the top, by Tame 8–10 the
+threshold is under nearly every peak, so depth is set by how far peaks rise over
+it and turning further mostly adds cuts that are already happening.
+
+**Measured, current FATSO** (energy change, sibilant frames 4–16 kHz / voiced
+frames 2–4 kHz; a frame is sibilant when 4–16 kHz outweighs 100–1000 Hz):
+bright Tame 1 −0.5 / 0, Tame 6 −4.4 / −0.7, Tame 10 −8.9 / −2.7; dull Tame 6
+−0.1 / −1.1, Tame 10 −2.3 / −3.1. On the dull clip the loudest treble is
+VOWELS at 2–4 kHz, so it trims those first and leaves the few sibilants alone.
+
+**VOICE curve** (`curve: 'voice'`, the default): threshold `6 − 2·Tame`, Range
+`max(3, 3·Tame − 3)`. Bright: Tame 1 −1.6 / −0.2, Tame 6 −7.9 / −2.2, Tame 10
+−10.6 / −3.9. Dull: Tame 6 −1.4 / −2.7, Tame 10 −5.6 / −3.9. It no longer matches
+the Fatso bounces (on music Tame 1 would act like Fatso Warmth 6); FATSO stays
+selectable for that.
+
+**Original Tame/Tone deprecated.** Off the panel with the Tone knob (both
+remaining curves pin the corner at 2 kHz, so Tone had nothing to do); still
+reachable as `curve: 'original'`, and still the curve the HF Limiter
+equivalence test runs on. An unknown curve falls back to VOICE, not to it.
+
+**DETECT 2K / 4K.** `ShelfLimiterStage` takes `detectCornerHz`: the detector
+reads its own one-pole split while the cut stays on the shelf's corner. The
+4 kHz band reads 2–5 dB under the 2 kHz one at p90–p99 of 10 ms peaks (bright
+3.8 / 1.9, dull 4.8 / 5.0, music 2.5 / 2.5), so 4K lowers the threshold by
+`DETECT_4K_COMP_DB` = 3 to keep the overall cut about equal and change WHAT
+triggers it. Measured (VOICE, sibilant / vowel): bright Tame 5 −6.7 / −1.6 →
+−7.5 / −1.4, dull Tame 5 −0.8 / −2.1 → −1.1 / −1.7, overall >2 kHz within
+0.3 dB. A modest shift, since the cut is still a 2 kHz shelf over the whole
+treble once triggered. ⚠ With a separate detector the shelf's no-overshoot
+proof no longer applies (it bounds the band being cut) — a tamer, not a
+ceiling. Applies to the 2 kHz curves only; `null` is bit-identical to before
+(the HF Limiter suite is unchanged). Not auditioned.
+
+### PHAT*SS — curves paired with detectors (October 2026)
+
+Owner, after auditioning: VOICE pairs well with 4K on narration, FATSO with 2K
+on music. `CURVE_DETECT = { voice: '4k', fatso: '2k' }`; the default detect is
+now 4K (VOICE's pair), and choosing a CURVE on the panel moves DETECT to its
+pair. DETECT stays on the panel and can be set against the pair afterwards —
+kept rather than folded into one four-way switch so the off-pair combinations
+remain auditionable.
+
+## PHAT*SS — TAPE: peak reduction from a Studer A800 match (October 2026)
+
+**Owner:** other tape emulations have "more of a compressive, peak reduction
+effect" than PHAT*SS. Supplied an acoustic guitar dry vs through a Studer A800
+emulation (`AllTape_AcousticGuitar_dry_v1.m4a`, `StuderA800_…_wet_v1.m4a`;
+48 kHz stereo AAC 256 kb/s — so the floor of every residual below is codec
+noise, ~−27 dB).
+
+**What the Studer does.**
+- Peak −0.86 → −2.24 dBFS, RMS +1.6 dB, crest 18.4 → 15.4 dB.
+- Delay 1.37 samples, constant through the clip: no wow/flutter.
+- Linear part (cross-spectral, coherence ≥ 0.95 from 80 Hz): head bump +3–5 dB
+  at 63–100 Hz, ~+1 dB mids, top end RISING +2 dB at 4 kHz to +7.7 at 16 kHz.
+  Through that EQ alone the dry would have peaked at +1.6 dBFS, so the
+  nonlinearity takes 3.8 dB off the top.
+- Per sample against the linear prediction: flat to ~9 dB under the peak, then
+  −1.1 / −2.2 / −5.3 dB at −6 / −3 / 0 dB. Per 10 ms window it barely moves
+  (−0.8 dB in the loudest). **A WAVESHAPER, NOT A COMPRESSOR**: inside the
+  loudest windows samples 14–20 dB under the peak keep the baseline gain
+  (+0.35 dB) while those within 3 dB lose 2.4. Nearly symmetric (negative half
+  0.2–0.4 dB more): odd, a trace of even.
+- Bench curves fitted to that gain curve (free drive): **cubic 0.09 dB rms**,
+  tanh 0.17, algebraic 0.19, atan 0.20, asym 0.35, quartic 0.84. Cubic and tanh
+  take the residual past the linear model from −20.9 to −27.4 / −27.2 dB, about
+  80 % of it explained; the rest is consistent with the codec.
+
+**Why this was not already there.** The hysteresis study found full-band
+saturation is the only thing that softens transients and compresses, and that
+the loop did it no better than tanh; the owner then chose gain-based softening
+(Soften) over more distortion. The Studer is the same mechanism.
+
+**Built: TAPE**, owner's choice of cubic and a peak-reduction knob.
+- One Saturation Bench layer (`curve: 'cubic'`, band open at both ends, Amount
+  0, FULL, no emphasis), its own one-slot `SaturationBenchKernel` between the
+  Warmth guard and the tape shelf. 4x oversampled, 50 samples, on or off.
+- The knob is dB of peak reduction, solved in closed form: for f(g·x)/g the
+  gain at the selection's peak P is f(u)/u at u = g·P, and the cubic inverts
+  (`tapePeakU`: u = √(3(1 − r)) up to 3.52 dB, 2/(3r) past it). Drive is set
+  against `refPeakDb` = `warmthCeilingDb` (already measured for the guard;
+  fallback voice level + 18 dB).
+- Measured (Warmth and Tame off; peak / rms / added re signal):
+  guitar 1 → −1.00 / −0.12 / −33.5, 2 → −2.00 / −0.23 / −27.9,
+  3.5 → −3.46 / −0.37 / −23.8, 6 → −5.84 / −0.65 / −18.9;
+  bright narration 1 → −0.77, 2 → −1.50, 3.5 → −2.56, 6 → −4.55 (added the same);
+  dull narration 1 → −0.97, 2 → −1.93, 3.5 → −3.36, 6 → −5.62.
+- ⚠ **A SIBILANT PEAK LOSES LESS THAN THE KNOB SAYS**: the bright clip's peak
+  is centred ~8.9 kHz, so the cubic's third harmonic lands above Nyquist and the
+  oversampler's filter removes it, giving part of the peak back. Accepted: it
+  costs the sibilance less distortion.
+- ⚠ Past 3.52 dB the top is on the cubic's flat — a hard clip — and its
+  band-limited ringing gives ~0.3 dB back at 6 (the test allows 0.5 there).
+- At low level flat to 18 kHz (≤ 0.01 dB); −0.19 dB at 20 kHz and −2.3 at
+  21 kHz, the 4x oversampler's band edge, shared with every bench layer. A
+  one-sample impulse reads 2.4 % low through it, so the latency test allows 3 %
+  with TAPE on.
+- The Studer's linear EQ (head bump, rising top) is NOT copied: the bump overlaps
+  Warmth and the rising top works against Tame. Not auditioned.
+
+### PHAT*SS — TAPE makeup, automatic and peak-restoring (October 2026)
+
+Owner asked for makeup on TAPE and chose, of three offered, AUTO PEAK-RESTORING
+(over a manual makeup knob, and over an RMS-matched trim for A/B): give back
+what TAPE took off the peak, so the peak returns to the source's and the
+reduction becomes level.
+
+- ⚠ **MEASURED, NOT THE KNOB.** A sibilant peak loses ~75 % of the knob (its
+  harmonics land above Nyquist and the oversampler filters them), so a makeup
+  of the knob's number would lift that peak past the source.
+  `measureTapeMakeup` (`phatassTapeMakeup.js`) renders the WHOLE selection
+  through Warmth, guard and TAPE (shelf, Soften, Output and any old makeup
+  out — they come after it and only lower the peak) and returns source peak −
+  rendered peak. It runs on its own worker that a newer call terminates (the
+  Warmth peak pass's pattern), is debounced 250 ms after TAPE, Warmth, Odd/Even
+  or the selection move, and is re-run before apply so a debounced or interim
+  value never renders.
+- The gain sits right after TAPE, before the shelf, so Tame judges the level
+  that will come out; the shelf only lowers peaks.
+- While a measurement is in flight the makeup is held at min(previous, knob):
+  turning TAPE down never gives back more than the knob now asks for.
+- Measured (Warmth and Tame off): peak lands back on the source to 0.00 dB on
+  all three clips. Makeup / gated-RMS change at TAPE 1 / 2 / 3.5 / 6: bright
+  narration +0.77/+0.62, +1.50/+1.24, +2.56/+2.15, +4.55/+3.83; dull narration
+  +0.97/+0.74, +1.93/+1.52, +3.36/+2.69, +5.62/+4.45; guitar +1.00/+0.88,
+  +2.00/+1.74, +3.46/+3.06, +5.84/+5.13. ~0.8 s to measure 46 s of audio
+  (node), so a whole chapter takes on the order of a minute; preview keeps the
+  interim value meanwhile.
+- Panel: a MAKEUP +x.x caption under the Tape knob ("…" while measuring).
+- ⚠ **Caught only by driving the real panel**: the first build posted the
+  panel's params to the worker as `{ ...phParams }`, which still carries Vue's
+  reactive proxy for `warmthRefPeaksDb`, and `postMessage` threw
+  `DataCloneError` — the makeup stayed +0.0 with TAPE at −4. The unit tests
+  call `measureTapeMakeup` directly and `npm run smoke` never turns TAPE up, so
+  neither could see it. Fixed with a plain JSON copy; in the browser the dull
+  clip at TAPE 4 (Warmth 5) now measures +3.8. The caption shows "…" from the
+  moment a measurement is scheduled, not the interim value.
+
+### PHAT*SS — Warmth takes up to four layers (October 2026)
+
+Owner: refactor so WARMTH_LAYERS can hold up to four, the extra ones fixed to
+start. Before this the kernel slot count, latency, calibration and readout
+already followed the list, but `warmthLayers` hard-coded the crossfade as two
+arrays (`gains = [sin, cos]`, `offsets = [17.4, 0]`), so a third layer read
+`undefined`, got a NaN Amount and came back silently OFF.
+
+- Each layer now carries a `blend` role: `even` / `odd` are the crossfade's
+  two sides (the even side still `WARMTH_EVEN_MATCH_DB` up), `fixed` (the
+  default when omitted) follows Warmth's level only, at its own
+  `levelOffsetDb`. The role keys are stripped before the layer reaches the
+  kernel.
+- `WARMTH_MAX_LAYERS` = the bench kernel's 4 slots; `checkWarmthLayers` runs at
+  module load and throws on more than four, none, or an unknown role.
+- **The shipping pair is bit-identical**: a test writes the old two-layer law
+  out by hand and compares `on` / `amountDb` / `refPeakDb` exactly over a grid
+  of Warmth, Odd/Even and calibrations.
+- Checked live with two fixed layers temporarily added (tanh −6 dB, asym
+  −12 dB): latency 414 → 514 samples and `phatassLatencySamples` agrees, the
+  guard still holds the peak on its ceiling, the readout renders all four, and
+  the whole PHAT*SS suite passes. Four voicing tests had assumed exactly two
+  layers (indexing `[1]`, `slots: 2`, deep-equal on `[false, true]`) and now
+  read the pair by role, so adding a fixed layer no longer breaks them.
+- Each added layer costs 50 samples of latency and runs its own 4x oversampler.
+  No layers were added; WARMTH_LAYERS shows a commented example.
+
+### PHAT*SS — `amountOffsetDb`, and Warmth is FULL only (October 2026)
+
+- The Warmth layer field `levelOffsetDb` is renamed **`amountOffsetDb`**: the
+  bench kernel already has a `levelOffsetDb` (its voicing detector's level
+  offset), and the two would be confused when copying a layer across. For a
+  fixed layer Amount = `warmthLevelDb(Warmth) + amountOffsetDb`, so a bench
+  Amount A goes in as `amountOffsetDb: A` — within 0.02 dB at Warmth 5, since
+  `warmthLevelDb(5)` = 6 + 20·log10 ½ = −0.0206 (the top is 6 dB, not 6.02;
+  an earlier reply said "exactly 0", which was wrong).
+- **No VOICED mode in PHAT*SS** (owner): its Warmth kernel never received the
+  file's level for the voicing detector, so VOICED layers would have gated on a
+  −20 dBFS assumption. Rather than wiring the level through, `warmthLayers`
+  forces `mode: 'full'` (the bench default is VOICED) and `checkWarmthLayers`
+  rejects a layer declaring 'voiced'. The shipped layers' explicit
+  `mode: 'full'` is dropped as redundant; renders are bit-identical.
+
+### PHAT*SS — Warmth's low layers at the base rate (October 2026)
+
+- Owner asked whether four Warmth layers plus TAPE (five 4x oversamplers)
+  could collapse into two shared ones, since layers 1–2 and 3–4 have similar
+  bands and emphasis. Not exactly: the layers run in SERIES (layer 2 shapes
+  layer 1's output) and each pair's filters differ, so sharing an upsampler
+  means a parallel topology with the filters moved to 4x — a sound change for
+  a modest saving.
+- The better question was which layers need oversampling at all. Each layer
+  band-passes what it ADDS again, so aliases only matter where they land in
+  its own band. 1x against 4x, mismatch re what the layer adds:
+  1–250 Hz quartic +50: −85.5 / −84.5 dB (bright / dull narration), −109.5
+  (music); 1–220 Hz cubic +50: −85.7 / −90.6 / −121.8; full-band quartic 0
+  (−10 dB shelf): −34.0 / — / −50.5; 3–20 kHz tanh +27: −17.5 / — / −26.8.
+- So the kernel takes a per-slot `oversample` flag, FIXED AT CONSTRUCTION so
+  latency never moves; a base-rate slot runs the curve on the base-rate
+  samples and has no latency. The voicing history reads each slot's lag as
+  the running sum of slot latencies. The Saturation Bench itself is
+  unchanged (all slots oversampled).
+- PHAT*SS marks the even/odd pair `oversample: false`; `checkWarmthLayers`
+  allows that only for `hiHz ≤ WARMTH_BASE_RATE_MAX_HZ` (500 — a reasoned
+  margin over the measured 250, not a measurement).
+- Cost: each oversampled layer is ~6 s per 10 min of audio offline. Full
+  render (Warmth 5, TAPE 3, 10 min): 39.2 → 29.5 s; latency 514 → 414
+  samples at 44.1 kHz. The user's two `emphDb: 0` duplicates (dead — the later
+  key won) were removed; renders unchanged.
+- Test "latency … constant": its impulse tolerance now covers Warmth's
+  full-band layers, which shave a one-sample impulse at the oversampler's band
+  edge the way TAPE does (this failed already on the four-layer commit).
+
+### PHAT*SS — TAPE moved ahead of Warmth; fast makeup (October 2026)
+
+- Owner: TAPE's peak reduction should come BEFORE Warmth, so Warmth works on
+  a smoother signal; and the makeup was too slow in preview on long files to
+  be useful. There was no strong reason for the old order (TAPE was appended
+  after the Warmth guard when it was built).
+- New chain: TAPE → makeup → Warmth → guard → tape shelf → Output. The guard
+  now reads Warmth's input from a copy of TAPE's output (it used to read the
+  plugin input). The guarantee is unchanged: makeup puts the voice peak back
+  on the selection's own peak, which is the guard's ceiling.
+- Why the makeup was slow: it rendered Warmth (four oversampled layers) +
+  guard + TAPE over the whole region on every knob move — 40.5 s per 10 min.
+  With TAPE first its input is the source, so the measurement is TAPE alone
+  (~6 s per 10 min, exact; apply uses this) and Warmth/Odd-Even no longer
+  trigger a re-measure.
+- Preview uses a fast bounded search (`measureTapeMakeup(..., { exact: false })`):
+  1024-sample blocks, bound = input peak over the block ±64 samples, sorted;
+  render loudest first with 512 samples of pre-roll; stop when bound ×
+  0.5 dB (ringing) × 0.1 dB (short-pre-roll error) ≤ best. A first version
+  without the second pass read 0.0006–0.008 dB high on narration and 0.037 dB
+  off on a synthetic take with 5 Hz syllable envelopes — TAPE's 5 Hz DC
+  blocker outlives a 512 pre-roll (128 read 0.027 off; 8192 closed it but cost
+  as much as the exact render). So blocks within 0.2 dB of the best re-render
+  with 8192 of pre-roll. Measured (10 min tiled narration, fast vs exact):
+  bright 0.32 / 0.50 / 1.4 s at TAPE 0.5 / 2 / 6, dull 1.2 / 2.3 / 3.6 s,
+  exact ~6 s; makeup equal to 0.0001 dB in every case.
+- Asked whether the Warmth guard could carry the peak guarantee instead of a
+  measured makeup: no — it only limits what Warmth ADDS and never the voice,
+  so a knob-sized makeup would let sibilant peaks (which lose ~75 % of the
+  knob) pass the source by up to ~4.5 dB at TAPE 6.
+- Side effects, not compensated: Warmth sees the body lifted by the makeup
+  (+1.2–1.7 dB at TAPE 2), so it runs that much hotter with TAPE up; the
+  Warmth readout still renders Warmth on the source (bands close, peak still
+  an upper bound). Neither was auditioned.
+
+### PHAT*SS — TAPE curve: CUBIC or TANH (October 2026)
+
+- Owner asked for tanh as a TAPE option after the curve comparison (Studer fit:
+  cubic 0.09 dB rms, tanh 0.17, algebraic 0.19, atan 0.20, asym 0.35,
+  quartic 0.84). Reasoning given for offering it: the cubic is a hard clip past
+  3.52 dB and tanh never goes flat, so the top of the knob "should" be gentler.
+- `tapeCurve` ('cubic' default | 'tanh'), a rocker beside CURVE/DETECT
+  (disabled while TAPE is 0). `tapePeakU(dB, curve)`: cubic closed form as
+  before; tanh(u)/u falls monotonically from 1, so it is bisected (60 steps,
+  tested to 1e-9 dB across the knob). The makeup is measured, so it needed no
+  change; switching the curve re-measures, holding min(previous, knob).
+- ⚠ THE PREDICTION DID NOT HOLD. 110 Hz sine at −4.4 dBFS (H3+H5 / H7–H41,
+  dBc), cubic vs tanh:
+  TAPE 1 −30.6 / −116.4 vs −30.9 / −89.3; 2 −24.3 / −110.2 vs −24.9 / −71.0;
+  3.5 −19.1 / −105.0 vs −20.1 / −56.2; 5 −15.7 / −45.8 vs −17.2 / −46.9;
+  6 −14.2 / −42.7 vs −15.7 / −42.1. Where the cubic clips the high orders are
+  EQUAL; below that tanh has 35–50 dB more of them (every odd order from the
+  start, where the cubic has the third alone). Low orders 0.3–1.5 dB lower on
+  tanh. Bright narration, added re signal: TAPE 2 −28.0 (cubic) / −26.6
+  (tanh), TAPE 6 −18.9 / −16.2 — tanh bends earlier and shapes more samples.
+- What tanh does better: peak accuracy (110 Hz: −5.93 vs −5.75 dB at TAPE 6,
+  −4.96 vs −4.83 at 5) and sibilant peaks lose closer to the knob (bright
+  narration makeup at TAPE 6: 4.84 vs 4.55 dB). Neither curve auditioned.
+
+### PHAT*SS — TAPE curve: ALGEBRAIC added (October 2026)
+
+- Owner asked for algebraic (u/√(1 + u²), Studer fit 0.19 dB rms) as a third
+  TAPE curve. Knob solve in closed form: 1/√(1 + u²) = r → u = √(1/r² − 1).
+- Three options no longer fit the two-position `DeviceChoiceRocker`, so the
+  TAPE control is now a `DeviceDetentRotary` (as the Saturation Bench picks its
+  curves), with its caption printed under it.
+- Measured (same instruments as the tanh entry), algebraic vs tanh: H3+H5
+  −30.9 / −25.1 / −20.4 / −17.5 / −16.1 dBc at TAPE 1 / 2 / 3.5 / 5 / 6 (0.0–0.4
+  under tanh); H7–H41 −84.8 / −66.9 / −52.8 / −44.0 / −39.7 (3–4.5 dB more than
+  tanh, and above the cubic even at 5–6); peak −1.00 / −1.99 / −3.48 / −4.96 /
+  −5.94 dB (as tanh). Bright narration: makeup 1.58 / 4.93 dB at TAPE 2 / 6,
+  added −26.3 / −15.5 dB re signal — the most of the three. Not auditioned.
+
+### PHAT*SS — SATURATION meter (October 2026)
+
+- Owner, after Waves BB Tubes / Soundtoys Decapitator screenshots: what should
+  drive a saturation meter's needle? Three readings offered (drive into the
+  curve, energy of what is added, peak reduction); owner chose the second.
+- Kernel (`PhatassKernel.enableMeter` / `takeMeter`, off for offline renders):
+  per block, added = (Warmth guard's output) − makeup × input delayed by TAPE +
+  Warmth + guard latency, clean = that delayed, makeup-scaled input; energy
+  sums and a sample count. The shelf and Output are gains, not saturation, and
+  are left out. The worklet posts the sums every 8 quanta (~23 ms).
+- UI (`dsp/saturationMeter.js`): two one-pole energy followers (150 ms),
+  reading = 10·log10(added / clean), resting below −60 dBFS of clean power; a
+  second-order needle spring (2.1 Hz, damping 0.8: 99 % of a step in ~0.3 s,
+  1–2 % overshoot) stepped per animation frame. The face is `ClassicVuMeter`
+  with `face: 'saturation'` (linear 0–100, red from the scale constant, needle
+  set directly so the VU damping does not slow it twice); the VU face for
+  OptoSmooth / FET Punch is unchanged.
+- Measured on two narration clips (whole-clip ratio; 23 ms posts p10/p50/p90):
+  TAPE 1 / 3 / 6 alone −33.5 / −24.9 / −18.9 dB bright, −29.8 / −21.2 / −15.3
+  dull (posts p50 −42 to −28); Warmth 2 / 5 / 10 alone −18.2 / −10.4 / −4.1
+  bright, −21.1 / −13.5 / −7.7 dull (posts up to +2.3); Warmth 5 + TAPE 3 reads
+  as Warmth 5 (−10.1 / −13.2). ⚠ WARMTH DOMINATES: at +50 dB of drive its low
+  layers reshape the whole low band, which counts as added energy. That is
+  honest, not a bug; the scale (−40 → 0, 0 dB → 100, red from −6) was chosen so
+  TAPE still moves the needle in the lower third and Warmth 5 sits near 70.
+- Browser check: dull narration at the defaults (Warmth 5) settles at ~65 in
+  ~0.5 s of playback. Scale, smoothing and spring are reasoned, not auditioned.
+
+### PHAT*SS — TAPE order selectable (October 2026)
+
+- Owner had moved TAPE first without A/B'ing it. Rendered first, at Warmth 5 /
+  Odd/Even 50 / TAPE 3 (cubic) / Tame 5, current (TAPE first) against the
+  pre-reorder processor (`fd48a70^`, same four Warmth layers, makeup measured
+  the old way through Warmth): makeup 2.22 / 2.21, 2.89 / 2.86, 3.00 / 2.97 dB
+  (bright narration / dull narration / guitar); loudness within 0.1 LU; old −
+  current −34.3 / −30.6 / −21.5 dB re the output. Narration's difference is
+  spread 500 Hz–16 kHz (−25 to −30 per band); the guitar's sits under 1 kHz
+  (−21.7 at 100–500 Hz) — TAPE shaving the peaks Warmth's low end creates.
+- Then made selectable to audition live: `tapeOrder` 'first' (default) |
+  'last'. One kernel, the TAPE + makeup step runs before or after Warmth and
+  its guard; latency is the same either way; the saturation meter's reference
+  is unchanged (it reads pre-shelf output against the delayed, makeup-scaled
+  input, valid for both). LAST renders bit-identically to the pre-reorder
+  processor (max |diff| 0 on 10 s of narration).
+- LAST's makeup cannot use the fast search (TAPE hears Warmth): both preview
+  and apply render the chain to the makeup over the whole region, and Warmth /
+  Odd/Even re-measure it. Switching the order re-measures, holding
+  min(previous, knob) meanwhile. Not auditioned.
+
+### PHAT*SS — TAPE curve and order moved to a bench (October 2026)
+
+- Owner: comfortable with FIRST as the default; TAPE order (FIRST/LAST) and
+  TAPE curve (CUBIC/TANH/ALGEBRAIC) move off the panel to a bench hidden from
+  users in production.
+- `PhatassBenchPanel.vue` (plain controls, like the FET Punch and OptoSmooth
+  benches, so it never reads as a feature), at the bottom of the panel behind
+  `isPhatassBenchVisible()` (`effects/phatassBench.js`): on under `vite dev`,
+  or on a deployed build with `localStorage['wavely:phatass-bench'] = '1'`.
+  The two stay ordinary PHAT*SS params, so preview and apply read them and the
+  makeup re-measures on a change; MODIFIED / ↺ / Reset as on the FET bench.
+- Production: the controls are gone, so the params sit at CUBIC / FIRST. The
+  TAPE knob's tooltip and the help drop the curve/order text.
+
+### PHAT*SS — Soften gets its own knob (October 2026)
+
+- Owner asked to disentangle Soften's depth from Tame. Soften had had its own
+  SOFTEN + SOFT FREQ knobs once and lost them because what it did depended on
+  four controls; folding its depth into Tame fixed that at the cost of coupling.
+  Now: one 0–10 knob, the frequency still pinned at 500 Hz and the gate still
+  relative to the voice level, so it depends on nothing else.
+- `softenLaw(amount)` is the old `softenLaw(on, tame)` with the amount in
+  Tame's place: 3.6 dB of ceiling per step (36 at 10), slope 0.5 → 1 across the
+  travel — Soften s renders exactly what Soften ON did at Tame s. `softenAmount`
+  reads a legacy boolean (`true` → the Tame value, `false` → 0). Default 0 = off,
+  as the toggle's default was OFF.
+- Panel: the lamp toggle became a Soften knob in Warmth's row, with an
+  "UP TO −N dB" caption; Tame's tooltip and help no longer mention Soften.
+- Checked (test): Soften works with Tame 0 — the shelf's Range caps only the
+  shelf, so the Transient cut runs with the shelf out; Soften 0 with Tame 0 is
+  still a pure delay; Tame no longer moves Soften's depth.
+
+### PHAT*SS — automatic output trim on the bench (October 2026)
+
+**Background.** A Studer A800 emulation's dry/wet pairs (acoustic guitar, drums) turned out to be level-matched by hand, not by a makeup formula:
+- RMS change was +1.63 / −0.41 dB and LUFS +1.66 / −0.63, so there was no RMS or loudness target.
+- The share of the peak loss given back was ~0.5 / ~0.7, so there was no fixed fraction.
+- Quiet-passage gain was flat across level, so there was no running AGC.
+- The two renders also carry different EQ and alignment, so the settings changed between them.
+
+At loudness-matched A/B with TAPE set to the Studer's crest change (guitar TAPE 3.4, drums 1.0), the peaks land within 0.25 dB of each other.
+
+**First attempt, reverted: an RMS mode on TAPE's own makeup.** It predicted the RMS loss from a histogram of sample levels binned on the float's bits, with no render, within 0.02 dB of the render. The owner caught that it level-matched only the pre-Warmth TAPE stage, so TAPE's internal makeup stays peak-restoring always.
+
+**Built: an automatic trim at the plugin's output.** It is a signed gain after the shelf, on top of Output. Modes are OFF (ships) / PEAK / RMS.
+
+| | Mode | Trim |
+|---|---|---|
+| Bright narration | PEAK | +1.5 to +1.7 dB (what the shelf took off a sibilant peak) |
+| Bright narration | RMS | −0.6 to −1.9 dB |
+| Drums ×3 | RMS | −2.6 / −4.1 dB |
+| Narration (24 s clip) | RMS | −1.8 / −3.5 dB |
+
+**Measurement** (`phatassOutputMakeup.js`): it renders the chain with Output and the trim at 0, because Warmth, the guard, the shelf and Soften have no render-free shortcut.
+- Whole region on apply (after TAPE's exact makeup) and in preview up to 30 s.
+- Longer selections in preview render 40 × 0.5 s blocks with 0.25 s run-in (~1.9 s).
+  - RMS takes one block per stratum at a golden-ratio offset. Evenly spaced blocks aliased against a patterned 30 s test track (0.36 dB off). A longer run-in (1–4 s) changed nothing, so the error was sampling.
+  - PEAK takes the loudest-input blocks. That is a lower bound, since the guard lets a quiet block rise to the selection peak, so the preview trim can only run hot.
+
+Against the whole render:
+
+| Material | RMS error | PEAK error |
+|---|---|---|
+| Narration 24 s | 0.00 dB | ≤ 0.02 dB |
+| Narration 46 s | 0.04–0.07 dB | ≤ 0.02 dB |
+| Drums ×3, 53 s | 0.08–0.11 dB | ≤ 0.02 dB |
+| 103 s mix of narration, guitar and drums | 0.17–0.18 dB | ≤ 0.02 dB |
+
+The composable re-measures on every knob except Output, and waits for TAPE's makeup, which it renders with.
+
+### PHAT*SS — TAPE low push on the bench (October 2026)
+
+Owner: "The Studer has a very different saturation effect on the kick drums than ours." The analysis used two dry/wet pairs from a Studer A800 emulation: the earlier drums, and a new drum machine.
+
+**Method.** For each pair I fitted the Studer's linear path on quiet frames (frames peaking ≥ 15 dB under the top), then compared every kick's < 120 Hz peak against that linear prediction.
+
+Fitted low lift:
+
+| Pair | 30 Hz | 50 Hz | Flat |
+|---|---|---|---|
+| Drums | +5.3 dB | +3.8 dB | +2.5 dB |
+| Drum machine | +8.7 dB | +4.9 dB | +4.2–4.5 dB |
+
+The settings changed between the renders again.
+
+**What the Studer does to the kicks.**
+
+| Pair | Kicks | Loud half | Softer half |
+|---|---|---|---|
+| Drums | 19 | −7.2 dB | −6.2 dB |
+| Drum machine | 12 | −7.3 dB | −4.7 dB |
+
+- The kick tail 80–250 ms on is unchanged: it recovers within the kick, so this is not a compressor with a release.
+- Against the dry signal, the drums' kick lows end 2.2–3.3 dB down despite the linear low lift.
+- Flat TAPE cannot reach this at any setting.
+
+**Built: `tapeLowPush` 0/6/12/18 dB.** A low shelf at 150 Hz, Q 0.7, before TAPE's curve with the exact inverse after (the Saturation Bench layer's emphasis pair), so the lows saturate first and the clean path stays flat (a quiet signal passes to < 1e-4).
+
+Kick low end against the Studer's targets (drum machine −7.3 / −4.7, drums −7.2 / −6.2):
+
+| Setting | Drum machine (loud / soft) | Drums (loud / soft) |
+|---|---|---|
+| Flat TAPE 1 | −0.6 / −0.2 | −0.4 / −0.3 |
+| Flat TAPE 6 | −3.2 / −1.2 | −2.7 / −1.9 |
+| TAPE 1 / +12 | −6.3 / −2.7 | −6.0 / −4.9 |
+| TAPE 2 / +12 | −8.7 / −4.7 | −8.3 / −7.2 |
+| TAPE 6 / +6 | −7.7 / −4.0 | −7.1 / −6.1 |
+
+Push and drive trade, so no single number is the Studer's. The corner moves it less: TAPE 1 / +12 on the drum machine's loud kicks reads −4.2 at 100 Hz, −6.3 at 150 and −6.7 at 250.
+
+**Knob meaning (owner chose option 1).** The knob stays the no-push drive. Re-solving it through the shelf would keep "dB off the peak" honest, but it would cut the drive whenever the peak is a kick, which is the effect we want. So a kick-led peak can lose more than the knob.
+
+**Bugs found on the way.**
+- **Makeup cap.** The makeup was clamped at `TAPE_MAX_DB` (6), and a bare kick at TAPE 3 / +6 needs 6.9, which left the peak 0.44 dB short. It is now `TAPE_MAKEUP_MAX_DB` = 24.
+- **Fast-search margin.** The fast search's short-pre-roll margin (0.1 dB) misread a bare kick at +18 by 0.4 dB, so it is 1 dB with a push.
+
+Fast against exact on narration, drums and guitar (TAPE 1/3/6 × push 6/12/18): every reading within 0.005 dB. On 10 min:
+
+| Material | Push 0 | Push 12 | Exact |
+|---|---|---|---|
+| Drums | 1.1 s | 3.9 s | ~7 s |
+| Narration | 0.5 s | 2.3 s | ~7 s |
+
+With a push the measured makeup is often below the knob on voice and guitar (e.g. narration TAPE 3 / +18 gives 1.41): the peak there is not the lows.
+
+### PHAT*SS — TAPE knob widened to 12 dB (October 2026)
+
+**Owner feedback.** TAPE 6 + push 6 sounded closest to the Studer on the drum machine, "but lacks the density and crest reduction of the Studer, particularly apparent on the snares."
+
+**Alignment fix first.** The broadband cross-correlation had aligned the pairs wrongly: −345 samples on the drum machine and −37 on the drums. Low frequencies dominate it, and the Studer's EQ shifts their phase. A high-frequency-weighted correlation (second difference) gives +2 samples on both, positive polarity.
+
+The kick numbers survive the fix: they are measured against the fitted linear path, whose H carries the offset. Re-checked at +2:
+
+| Pair | Studer kick lows, loud / soft |
+|---|---|
+| Drum machine | −7.13 / −4.54 |
+| Drums | −7.23 / −6.17 |
+
+**Snares.** 13 snare-led hits per pair, shape measured against the linear path so the figures are gain-free. Peak−body is the 2 ms peak against the 2–30 ms body; tail−body is the 30–150 ms tail against that body.
+
+| Setting | Snare peak−body | Snare tail−body | Kick lows (loud / soft) |
+|---|---|---|---|
+| **Drum machine: Studer** | **−6.30** | **+2.09** | **−7.1 / −4.5** |
+| TAPE 6 | −2.87 | +0.28 | — |
+| TAPE 6 + push 6 | −2.07 | +0.28 | — |
+| TAPE 6 + 6 dB drive, cubic | −6.51 | +1.01 | −7.8 / −4.2 |
+| TAPE 6 + 6 dB drive, tanh | −6.33 | +1.31 | −7.9 / −4.8 |
+| **Drums: Studer** | **−1.65** | **+1.51** | **−7.2 / −6.2** |
+| TAPE 6 + push 6 | −1.52 | +0.89 | −7.1 / −6.1 |
+| TAPE 6 + 6 dB drive | −4.57 | +2.14 | −7.21 / −6.15 |
+| TAPE 6 + 3 dB drive + push 3 | −2.57 | +1.45 | −7.14 / −6.09 |
+
+On the drum machine, crest goes 21.15 dry → 16.32 Studer → 14.21 with TAPE 6 + 6 dB drive.
+
+**What it means.** The drum-machine render was driven harder into the Studer than the drums render, and its density is mostly drive. The tail lift stays short of the Studer (+1.0–1.3 against +2.1) at a matched peak: a memoryless curve does not hold the tail up that much. A slower, compression-like part of tape is possible and unmeasured.
+
+**Built.** `TAPE_MAX_DB` 6 → 12, on the panel knob as well as the bench. 6 dB more drive past TAPE 6 is ≈ TAPE 12 on the cubic, where u at the peak is 2.66. From 6 to 12 the cubic's flat is driven harder.
+
+Peak loss and added distortion (re the signal):
+
+| Material | TAPE 6, cubic | TAPE 12, cubic | TAPE 12, tanh |
+|---|---|---|---|
+| Bright narration | −4.55 dB, added −22.0 | −10.08, added −14.7 | −10.21, added −15.4 |
+| Dull narration | −5.62, added −19.0 | −10.83, added −13.5 | −11.06, added −14.5 |
+| Guitar | −5.29, added −21.5 | −10.14, added −14.1 | −10.43, added −14.6 |
+| Drums | −5.41, added −17.7 | −9.94, added −12.3 | −10.19, added −13.1 |
+
+The fast makeup search equals the exact one (≤ 0.01 dB) up to 12. The makeup cap (24) already covers it. The knob's inversion tests sweep to `TAPE_MAX_DB`, so they now cover the full range.
+
+### PHAT*SS — TAPE head bump on the bench (October 2026)
+
+Owner: with TAPE 12 "the Studer kicks are considerably louder than the snares while ours are more level — is this the Studer's post-saturation EQ?"
+
+**Measurement.** Kick minus snare loudness: the energy of the first 100 ms of each hit, kick hits against snare hits. The "ours" rows are TAPE 6 plus 6 dB of drive, which is TAPE 12.
+
+| Kick − snare (dB) | Drum machine | Drums |
+|---|---|---|
+| Dry | 11.00 | 0.28 |
+| Studer | 11.64 | −1.86 |
+| Studer linear path alone | 13.31 | 0.99 |
+| Ours, TAPE 12 | 10.09 | −1.90 |
+| Ours, TAPE 12, Studer EQ after | 12.66 | −1.20 |
+| Ours, TAPE 12, Studer EQ before (peak re-matched) | 11.94 | −1.14 |
+
+So it is the Studer's low EQ, and it belongs AHEAD of the curve, where the clipper takes part of the lift back off the kick.
+
+**Fitting the shape.** A finer read of the linear paths (|H| re 1 kHz):
+
+| Pair | 15–40 Hz | 45 | 50 | 60 | 80 |
+|---|---|---|---|---|---|
+| Drum machine | +3.2 to +3.7 | +2.2 | +1.4 | +1.1 | +0.5 |
+| Drums | +4.1 at 15–20, falling to +1.4 at 40 | | +1.2 | +0.5 | −0.1 |
+
+That is a low shelf of ~+3.5–4 dB under ~40 Hz. The earlier "+4 to +9 dB at 30–50 Hz" figure included the Studer's flat gain and the coarse FFT, and is withdrawn.
+
+Shelf sweep ahead of TAPE 12 on the drum machine:
+
+| Shelf | +3 | +4.5 | +6 |
+|---|---|---|---|
+| 40 Hz | 10.89 | 11.29 | **11.67** |
+| 60 Hz | 11.22 | 11.69 | 12.11 |
+
+40 Hz follows the fitted shape, so 40 Hz it is.
+
+**Built: `tapeHeadBump` 0/3/6/9 dB**, a low shelf at 40 Hz, Q 0.7.
+- **Placement:** a `BiquadCascade` ahead of TAPE inside `tapeAndMakeup`, so it moves with TAPE in LAST order. It is active only while TAPE is up (`headBumpDb` is 0 with TAPE 0), so TAPE 0 stays a pure delay. Coefficient changes keep the filter state.
+- **Plugin path:** TAPE 12 with bump 0 / 3 / 6 / 9 reads 10.09 / 10.89 / 11.67 / 12.34.
+- **Makeup:** `measureTapeMakeup` shelves the region once up front and measures TAPE on that against the SOURCE's peak; fast equals exact (bare kick, +3/+6/+9). The peak lands on the source to 0.05 dB.
+- **Saturation meter:** its clean reference runs through its own copy of the shelf. A quiet tone pair under +9 reads below −40 dB.
+- **Not covered:** the drums render (dry 0.28, Studer −1.86, TAPE 12 alone −1.90, +6 −1.32) wants none. The two renders were made at different settings.
+
+### PHAT*SS — HYSTERESIS as a TAPE curve (October 2026)
+
+**Owner's report.** On drums, the Saturation Bench's hysteresis layer (full range, no pre-emphasis, drive 13) gives "more of the tape character the Studer shows — the thwap on the kick and the tighter peak attenuation without brickwall limiting".
+
+This followed a per-hit analysis of both Studer A800 drum pairs, measured against each one's linear path. Its findings:
+- **Per hit type,** within 16 dB of the loudest hit:
+
+  | Hit type | Pair | Studer peak | TAPE 12 cubic peak | Studer tail − attack | TAPE 12 cubic tail − attack |
+  |---|---|---|---|---|---|
+  | Kick-led | drum machine | −5.6 dB | −8.4 dB | +5.2 dB | +3.6 dB |
+  | Kick-led | drums | −4.9 dB | −8.4 dB | +4.5 dB | +4.2 dB |
+  | Snare/hat-led | drums | −2.3 dB | −5.0 dB | | |
+
+- **Gain trajectory on loud kicks:** the Studer's gain against its linear path is SMOOTH, −7 to −10 dB held for ~40 ms and recovering over 60–100 ms, like a fast compressor. Ours is spiky cycle by cycle (it cuts only where crests cross the curve), which is the "limiter look".
+- **Curve shape does not fix it:** the best memoryless fits are cubic / tanh / algebraic / atan at 1.19 / 1.13 / 1.16 / 1.23 dB per-hit rms on the drum machine and 0.90 / 0.84 / 0.80 / 0.78 on drums.
+- **Not built:** a fast low-weighted "tape compression" stage was proposed and set aside by the owner.
+
+**The hysteresis layer through the same tests** (bench, full band, no emphasis):
+- Drum machine, drive 13: per-hit error 1.40 dB. Kick −5.9 / tail − attack +2.3; snare −3.2 / +0.6.
+- Drums, drive 10: per-hit error **0.93** dB, the best of anything tried. Kick −4.3 / +1.9; snare −2.7 / +0.1.
+- It squashes kicks ~2× harder than snares with no low push.
+- Its gain is still cycle-wise, not smooth, so the Studer's sustain is not reproduced: tail − attack on kicks is about half.
+
+**Built: `tapeCurve: 'hysteresis'`.**
+- **Knob calibration:** `tapePeakU` bisects, in log u, the loop's steady-state peak out / peak in on a sine, with the layer's scale of 1 / small-signal gain. The loss rises monotonically: −0.41 / −1.64 / −4.46 / −8.57 / −13.42 / −18.98 / −24.84 dB at u 1 / 2 / 4 / 8 / 16 / 32 / 64, the same at N 256 and 1024 because the model is rate-independent. N 128, 24 iterations, memoised per knob value and loop shape; about 2 ms per new position.
+- **Real peaks** (makeup, exact):
+
+  | Material | TAPE 1 | TAPE 3 | TAPE 6 | TAPE 9 | TAPE 12 |
+  |---|---|---|---|---|---|
+  | Bright narration | 0.83 | 2.41 | 4.97 | 7.75 | 10.71 |
+  | Dull narration | 0.93 | 2.77 | 5.50 | 8.40 | 11.23 |
+  | Guitar | 0.79 | 2.51 | 5.32 | 8.39 | 10.95 |
+  | Drums | 0.29 | 1.83 | 4.61 | 7.49 | 10.09 |
+
+  The drums' light-setting shortfall is a hit's first cycle meeting the loop from rest. A steady 110 Hz sine lands within 0.3 dB up to TAPE 6 and −11.4 at 12, where the oversampler band-limits what the loop adds.
+- **Fast makeup search:** equals exact to ≤ 0.01 dB on all four files at TAPE 1–12, and to 0.001 dB on 10 min.
+- **Cost:** ~3.5× cubic. Per 10 min of drums or narration: fast 3.6–5 s (13.6–15 s with low push +12), exact ~21 s.
+- **Knob equivalents** (plugin path, against the Studer): TAPE 8 ≈ bench drive 13 (drum machine kick −5.7 / snare −3.1; drums −5.2 / −3.3). Drums' bench drive 10 is ≈ TAPE 6.5–7.
+
+### PHAT*SS — tape compression on the bench (October 2026)
+
+The owner sent short clips of the Studer A800 and PHAT*SS on the drums render and
+suspected the Studer clips the tops of the kicks. Measured, it is the other way
+round: per kick, gain against each output's own linear path across the kick's
+biggest half-cycle, binned by |linear| / that half-cycle's peak —
+
+| kick @ 0.04 s | 20–40 % | 60–80 % | 95–100 % | samples ≥ −0.25 dB (out / lin) |
+|---|---|---|---|---|
+| Studer | −3.3 | −5.6 | −6.4 | 12 / 10 |
+| owner's PHAT*SS clip | +0.4 | −3.8 | −5.8 | 83 / 5 |
+| hysteresis TAPE 8 | +0.3 | −2.7 | −4.3 | 63 / 3 |
+| cubic TAPE 12 | −0.5 | −4.9 | −7.4 | 65 / 3 |
+
+The Studer lowers the WHOLE cycle — even its quiet part — while material between
+the hits passes untouched, and the cycle stays pointed (the first 1–2 ms of the
+rise follow the dry kick, then the gain drops). Ours passes the bottom of the
+cycle and plateaus at the top: a clip. That is an envelope-timescale gain, which
+no curve can make, so the owner asked for the tape-compression prototype that
+was set aside after the per-hit study.
+
+**Stage** (`dsp/tapeComp.js`, `TapeCompressor`): feed-forward, linked, zero
+latency; detector = input through a high-shelf cut (lows drive it), PEAK or RMS
+(sqrt(2·ms), so a steady sine reads its peak in both); soft-knee dB gain computer;
+one full-band gain. Between the head bump and TAPE's curve, inside
+`tapeAndMakeup`, only while TAPE is up.
+
+**Fit** (scratch harness: per hit within 24 dB of the loudest, gain against the
+Studer's linear path at the peak, 0–10, 10–50 and 50–200 ms; ours rendered with
+makeup 0, so its quiet gain is 1; cost = rms over hits of the four, averaged):
+coordinate descent on threshold-as-COMP, ratio, knee, attack, release, detector,
+tilt depth, tilt corner and TAPE.
+
+- Drums free fit: 0.522 (ratio ~25, knee 8, 1 ms / 16.5 ms, RMS, tilt 5 dB at
+  237 Hz, TAPE 6). Drum machine free fit: 0.843, but its attack ran to the floor
+  (0.07 ms) and its release to 5 ms — waveform following.
+- With the drums timing pinned the drum machine lands 0.859, and ONE shape
+  (ratio 6, knee 7, tilt 4.5 dB at 160 Hz) fits both with only COMP and TAPE
+  free: drums 0.521, drum machine 0.865 (ratio 12: 0.523 / 0.872). Against TAPE
+  alone: cubic 12 1.55 / 1.15, hysteresis 8 1.38 / 1.57.
+- Timing is well determined (drums / drum machine): attack 0.3 → 0.61 / 0.94,
+  1 → 0.52 / 0.87, 3 → 0.72 / 0.90; release 8 → 0.59 / 0.88, 16.5 → 0.52 / 0.87,
+  35 → 0.69 / 0.94, 70 → 0.97 / 1.20; PEAK 1.09 / 1.07; tilt 0 → 0.82 / 1.11,
+  9 → 0.67 / 0.92.
+- COMP alone (TAPE 0): drums 0.71, drum machine 1.77 — TAPE is still needed.
+- Hysteresis after the compressor: drums 0.57 (TAPE 4.4), drum machine 0.93
+  (TAPE 9.25) — slightly worse than cubic.
+- Per class at the drums fit: kick peak −5.00 vs Studer −4.94, 0–10 ms −6.45 vs
+  −6.60, 10–50 −3.39 vs −3.37; snare −2.11 vs −2.34, −1.87 vs −1.76.
+
+**Calibration.** The number is the fundamental loss of a steady 55 Hz tone at
+the selection's peak. The static-curve formula (over = r / (1 − 1/ratio)) read
+COMP 3 as 4.8 dB on the tone: with a 1 ms attack an RMS detector rides the
+tone's own 110 Hz ripple and reads above its RMS. So `tapeCompThresholdDb`
+simulates the stage on the tone and bisects (scale-invariant, so one offset per
+knob value, memoised; ~40 ms the first time). The fitted settings come out at
+COMP 8.5 (drums) and 11 (drum machine) on that scale; the fit is sharp in COMP
+(drums at 6: 1.01, drum machine at 9: 0.98), so those two are steps of their own
+(`TAPE_COMPS` 0 / 3 / 6 / 8.5 / 11 / 14).
+
+**Wiring.** Makeup: the region runs through the bump and the compressor once, up
+front, and TAPE is measured on that — the continuous stream the kernel sees, so
+the fast search stays exact (tested fast = exact with the cubic and hysteresis,
+peak back on the source to 0.05 dB). Meter: the clean reference is multiplied by
+the compressor's per-sample gain, so the gain never reads as saturation (tested
+< −40 dB at COMP 14). The output trim needs nothing: it renders the chain with
+0.25 s of pre-roll, past the 16.5 ms release.
+
+**Within-cycle check on the clip** (COMP 8.5 / TAPE 6 against TAPE 6 alone):
+20–40 % bins −1.3 to −2.0 dB (TAPE alone −0.1 to −0.2, Studer −3.3 to −7.5);
+samples ≥ −0.25 dB of the top 14 / 7 / 7 (TAPE alone 19 / 27 / 51, Studer
+12 / 2 / 4). Closer in shape, still less of the whole-cycle drop than the Studer.
+
+⚠ Two renders of one emulation, both drums, made at different settings; nothing
+auditioned; nothing measured on voice, where a 1 ms / 16.5 ms gain riding a low vowel's
+ripple may read as distortion — untested.
+
+### PHAT*SS — Tape comp FAST mode (October 2026)
+
+The owner compared Studer / Tape comp / Tape comp + Soften clips on the drum
+machine and heard the opposite of the Studer: Tape comp keeps each hit's sharp
+attack and lifts it back with the makeup, where the Studer attenuates kick,
+snare and hat attacks and keeps more of the overall dynamics; Soften helped the
+snare.
+
+**Attack windows on the owner's clips** (gain vs each output's own linear path,
+window minus the 15–30 ms body, dB): snare Studer −5.4 / −7.2 / −7.5 / −4.5 at
+0–1 / 1–2 / 2–4 / 4–8 ms, Tape comp −2.9 / −3.8 / −3.6 / −2.3, + Soften −10.6 /
+−5.4 / −6.3 / −3.3; hats Studer −1.9 / −2.3 / −1.3, Tape comp ~−0.3, + Soften
+−6.5 / −5.9 / −3.8; kick Studer +0.2 / −3.1 / +1.2, Tape comp +3.0 / +1.4 / +1.7.
+Over the whole drum machine render's loud hits the Studer takes 5.6–6.7 dB off
+the first 2 ms of kicks and snares, Tape comp 3.9–4.7. The drums render does the
+opposite (attacks +1 to +4 above the body) — the two renders were made at
+different settings, the drum machine hotter. On the drum machine the attack loss
+is broadband (all bands for snares; 200 Hz–6 kHz on the kick's click), so it is
+not record pre-emphasis alone.
+
+**New score**: per hit within 12 dB of the loudest, peak plus gain from the
+hit's ONSET (first sample at 10 % of its peak) in 0–2 / 2–5 / 5–10 / 10–25 /
+25–50 / 50–200 ms. HF-band windows were tried and dropped (a kick's HF is mostly
+codec noise; it dominated the score). On this score the shipped SLOW fit is
+1.17 / 1.09 (drum machine / drums) and TAPE 12 alone 1.66 on the drum machine.
+
+**Variants** (coordinate descent; drum machine / drums):
+- SLOW + a fast PEAK stage ahead of TAPE: 0.97 / 1.01–1.03. The fast stage ran to
+  attack 0.01 ms, release ~2 ms. With 1 or 2 ms of lookahead: 1.006 / 1.03 and
+  1.005 / 1.01, release still 1.9–3.5 ms — lookahead buys nothing.
+- TAPE → SLOW (compressor after the curve, timing refitted 0.35 ms / 10 ms):
+  1.09 / 0.97.
+- FAST STAGE ALONE ahead of TAPE (the owner asked): 0.98 / 0.94, from two
+  starting points to the same voicing — attack 0.70–0.85 ms, release 1.8–2.5 ms,
+  ratio 7–12, knee 12, no tilt. Drum machine at stage 14.4 (slow scale) / TAPE
+  10.8; drums 11.3 / TAPE 1.1 — on the drums the stage does nearly everything.
+- All variants keep a ~2 dB peak error on the drum machine (kick peaks −7.6
+  against the Studer's −5.4, snare peaks −7.9 against −9.3).
+
+**What FAST is**: the release is shorter than a kick's half-cycle, so the gain
+moves inside every low cycle — at its voicing and a steady tone at the
+selection's peak: 55 Hz −5.0 → −12.7 dB per cycle, 200 Hz −9.2 → −11.7, 2 kHz a
+steady −10.6. A soft clipper with a short memory: the 0.85 ms attack passes each
+crest's rising edge, the gain lags on the way back up, and whatever rides on a
+crest goes down with it.
+
+**Distortion** (loud hits; per 5 ms frame the best single gain from the clean
+reference, the residual re the signal; AAC round trip of the dry alone −37 /
+−30, so the floor is well below): drum machine kicks / others Studer −13.7 /
+−13.1, FAST −15.6 / −17.2, SLOW −25.2 / −16.7; drums Studer −13.3 / −17.5, FAST
+−16.3 / −20.9, SLOW −17.5 / −25.1. The Studer is the most distorted of the three
+and FAST the closest on kicks — its distortion is part of the match, not a side
+effect. A/B sequences (dry → Studer → SLOW → FAST, loudness-matched): the owner
+preferred FAST.
+
+**Wiring**: `tapeCompMode` SLOW / FAST on the bench, `TAPE_COMP_FAST_VOICING`.
+The 55 Hz calibration is solved per voicing, and the fitted settings land on the
+existing steps (FAST: drum machine 11 / TAPE 11, 0.98; drums 8.5 / TAPE 0.5,
+0.96 against 0.94 at 7.8), so the two modes share `TAPE_COMPS`. The compressor
+resets its envelope when the detector changes (a PEAK envelope holds |x|, an RMS
+one x²). Makeup fast = exact through it with cubic and hysteresis; tests pin the
+calibration, the in-cycle harmonic (FAST's 3rd on 55 Hz > −30 dB and 6 dB over
+SLOW's) and a mid-stream mode switch.
+
+### PHAT*SS — head bump PRE / POST on the bench (October 2026)
+
+The owner asked whether our Jiles-Atherton hysteresis has a head bump of its own,
+on the premise that a real machine's head bump comes from saturation. It does
+not, on either count. A real head bump is a PLAYBACK-head effect: at long
+wavelengths the head's pole pieces and contact length pick up more or less flux,
+giving the bump and the ripples under it — linear and level-independent. The
+J-A equations carry no frequency, so the loop is flat: steady sines 20 Hz–4 kHz
+through the hysteresis TAPE layer read flat to 0.03 dB at −30 dB and within the
+same few tenths everywhere above 100 Hz at any drive. Driven hard there is a lift
+at the very bottom (TAPE 12 at the calibration peak: 20 Hz −8.1 dB, 40 Hz −9.6,
+1 kHz −10.4) — but CUBIC (−8.2 / −9.5 / −10.0) and TANH (−8.3 / −9.6 / −10.2) do
+the same, so it is the layer's 5 Hz DC blocker on what TAPE adds (near 20 Hz it
+shifts the correction out of phase with the dry, so less of the peak cancels),
+not the loop. It grows with drive and vanishes at normal level: not a head bump.
+
+So the bump stays a linear stage, and the bench now has its position:
+`tapeHeadBumpPos` PRE (ships — ahead of TAPE, driving the kick into the curve)
+or POST (after the curve and before the makeup, where a playback head puts it).
+
+**Against the Studer** (loud hits within 12 dB of the loudest: kick − snare
+level over each hit's first 100 ms, absolute; and the onset-window fit against
+the dry run through OUR bump, so it scores only the nonlinear part):
+
+| Drum machine (Studer k−s 12.39, dry 12.68) | k−s | fit |
+|---|---|---|
+| FAST 11 / TAPE 11, no bump | 9.76 | 0.979 |
+| + PRE +3 / +6 / +9 | 10.28 / 10.78 / 11.21 | 1.001 / 1.206 / 1.545 |
+| + POST +3 / +6 / +9 | 11.17 / 12.67 / 14.23 | 0.949 / 0.936 / 0.927 |
+| TAPE 12 alone, no bump | 11.19 | 1.658 |
+| + PRE +3 / +6 / +9 | 11.93 / 12.63 / 13.21 | 1.502 / 1.351 / 1.244 |
+| + POST +3 / +6 / +9 | 12.53 / 13.97 / 15.47 | 1.577 / 1.528 / 1.493 |
+
+With FAST, PRE drives the kick into the fast stage and the curve, which squash
+the lift (+6 dB of bump buys only +1 dB of kick) and worsen the fit; POST passes
+it at full size and leaves the fit alone, landing the balance at +6 (12.67).
+With TAPE 12 alone the earlier finding stands — PRE balances better and fits
+better. The drums render needs no bump in either position (Studer −0.59; FAST
+8.5 / TAPE 1, no bump −0.70; every bump moves it away).
+
+**Makeup**: POST is measured the exact way in preview too (TAPE over the whole
+region, then the shelf, then the peak — the shelf's memory outlasts the fast
+search's 512-sample pre-roll), and it can be a CUT: the lift can leave the peak
+above the source (tested: TAPE 1 / +9 POST on the kick track). `tapeMakeupDb`
+is clamped to ±24 dB in POST and ≥ 0 otherwise; the MAKEUP caption is signed.
+Switching position resets the shelf's state. Tests: the shelf still lands
++6 dB at 25 Hz POST, a loud 30 Hz tone keeps > 3 dB more of the lift POST than
+PRE, and the POST makeup puts the peak back on the source (preview = apply).
+
+### PHAT*SS — TAPE order and head bump pinned; Tape comp PRE / POST (October 2026)
+
+Owner's call: TAPE's place in the chain is pinned FIRST (the Tape order row and
+the LAST code path are removed: the processor's `tapeLast` branch, the makeup's
+whole-chain `chainPeak` measurement, the composable's Warmth-triggered makeup
+re-measure), and the head bump is pinned AFTER the curve (the Bump at row is
+removed). A new **Comp at** row puts Tape comp PRE (ahead of the curve, where both
+voicings were fitted) or POST (after the curve, before the bump) — POST is the
+default. The chain is now curve → [POST comp] → bump → makeup, with a PRE comp
+ahead of the curve.
+
+POST was the scratch "TAPE → FAST" experiment: on the drum machine's loud hits
+0.960 at FAST 11.6 / TAPE 10.5 against PRE's 0.979, a little dirtier (added
+distortion −14.0 / −14.5 dB re signal against −15.7 / −17.1, the Studer −13.7 /
+−13.1) and 0.5 dB more peak kept; the two orders differ by −21 dB re the signal.
+On the drums the fit runs TAPE to ~0 either way. SLOW was only ever fitted PRE.
+
+**Makeup**: signed everywhere now (the bump after the curve can leave the peak
+above the source). With a bump up or the comp POST it renders TAPE over the
+whole region, then the comp, then the shelf — preview included; PRE comp with no
+bump keeps the fast search (the region is compressed up front).
+
+**Meter bug caught by the new test**: the clean reference first applied the
+bump and then the comp's gain. A shelf with memory does not commute with a gain
+that moves inside a cycle, and with FAST PRE + a bump it read −24.6 dB of
+phantom "saturation" on a clean kick track. The reference now follows the chain
+order — the comp's gain on the input (PRE) or TAPE's latency later (POST), then
+the bump — and reads −79 (PRE) / −65 (POST) dB; the test asks for < −50.
+
+### PHAT*SS — Tape comp removed (October 2026)
+
+The owner, on hysteresis / push 6 / bump 3 / comp 8.5 SLOW PRE / output trim
+PEAK: no comp variation had a significant effect on drum attacks, and what the
+SLOW PRE comp did do — cut TAPE's distortion on kicks — was never the goal.
+Measured with those settings (hysteresis TAPE 8, Warmth and shelf off; loud hits
+within 12 dB of the loudest; energy in the first 2 ms / 2–5 ms from onset and
+the hit's peak, each re its own 15–30 ms body, so level and makeup drop out):
+
+| | DM 0–2 ms | DM 2–5 | DM peak | Drums 0–2 | Drums 2–5 | Drums peak |
+|---|---|---|---|---|---|---|
+| dry | 10.5 | 9.1 | 16.9 | −6.8 | −2.2 | 8.3 |
+| Studer | 4.0 | 6.5 | 11.7 | −8.6 | −6.5 | 6.6 |
+| TAPE only | 8.6 | 7.9 | 12.6 | −3.4 | 0.1 | 4.3 |
+| SLOW PRE 8.5 | 9.4 | 8.2 | 13.4 | −1.4 | 2.0 | 5.7 |
+| SLOW POST 8.5 | 8.6 | 7.9 | 12.6 | −3.2 | 0.2 | 4.4 |
+| FAST PRE 8.5 | 8.9 | 7.3 | 12.9 | −2.2 | 0.7 | 4.2 |
+| FAST POST 8.5 | 8.5 | 7.3 | 12.5 | −2.7 | 0.4 | 4.0 |
+| FAST POST 14 | 8.4 | 5.7 | 13.1 | −0.1 | 1.2 | 4.4 |
+
+A feed-forward compressor with no lookahead lets each hit's first millisecond
+through and then lowers the body, so attack-re-body goes UP, not down (SLOW
+PRE). SLOW POST is TAPE only to the decimal: its threshold was calibrated on
+the source's peak, but after the curve it saw TAPE's output before the makeup,
+several dB lower, so it barely engaged. Note also that hysteresis TAPE alone
+RAISES the drums' onset re body (−6.8 → −3.4: it squashes the sustained body
+harder than the quiet start of a hit) where the Studer lowers it (−8.6).
+
+Removed: `dsp/tapeComp.js`, `tapeComp` / `tapeCompMode` / `tapeCompPos` and
+their constants, the kernel stage and its meter alignment, the makeup's
+compressor paths and the bench rows (recoverable at `29815f3`). The chain is
+TAPE's curve → head bump → makeup → Warmth → guard → shelf → Output. A transient
+shaper (fast-vs-slow envelope with a few ms of lookahead) was proposed for the
+attacks and set aside: the owner expects it to suit drums but not other sources.
+
+### PHAT*SS — playback EQ study, A800 head-bump curves, low push trimmed (October 2026)
+
+**Where the Studer's "softer attacks" were looked for, and what came back.**
+After Tape comp was removed the owner asked whether a waveshaper could soften
+transients. Against hysteresis TAPE 8 (first 2 ms of each loud hit re its 15–30
+ms body; drum machine / drums; Studer 4.0 / −8.6, TAPE alone 8.8 / −5.2): a
+high-shelf pre-emphasis into the curve (tape record EQ) best 7.1 / −5.0 (+18 dB
+at 1.5 kHz); a soft slew-rate shaper ahead of TAPE (250 Hz–4 kHz equivalent)
+8.2–8.8 / −5.2, only dulling the top 1–4 dB. Neither family can tell a hit's
+onset from its body: on the drums the onset is QUIETER than the body.
+
+Most of the metric's gap turned out LINEAR: the dry tracks through the Studer's
+measured linear path alone read 6.4 / −12.7. That path, measured on quiet
+passages (1/12-octave complex response, coherence-weighted): +4.6 dB at 15–20
+Hz falling below ~12, +3.7 at 30–36 Hz, low-frequency group delay ~0.4 ms at
+175 Hz rising to 2.4 at 70, 4 at 32 and ~13 at 18 Hz, and the top rolling off
+−4 to −6 dB at 16 kHz, −14 to −16 at 19.5 kHz. Fitted (level and phase
+weighted separately) as a 7.1 Hz high-pass Q 2.6 · +3.5 dB bell at 22 Hz ·
+an all-pass at ~9 Hz · a 19 kHz lowpass, within ~1 dB / 8° from 13–250 Hz on
+both renders; it needs the all-pass, so it is not minimum phase. A plain
+minimum-phase fit chased the phase and gave up the magnitude.
+
+The owner supplied the A800 HARDWARE's published playback response (endino.com,
+30 ips): +1.5 dB near 45–50 Hz, −0.5 at 85, +0.4 at 140, −8 dB by 20 Hz. Fitted
+to 0.17 dB rms: high-pass 35.3 Hz Q 0.90 · +1.17 dB at 31.25 Hz Q 0.30 · −1.93 dB
+at 82.7 Hz Q 1.83. 15 ips: the same an octave down (owner).
+
+**By ear the metric was wrong.** The owner heard the emulation-fit EQ as the
+rangiest version and no softening at all; the +3 shelf as the tightest; the
+A800 curve as closest to the Studer's kick frequency. The 0–2 ms / body metric
+had rewarded the emulation fit because its low-frequency delay drains the
+first 2 ms into the body — smear, not softening. Not to be used for tightness
+again. What the curves really move is the kick's click-vs-sub balance (loud
+kicks, first 30 ms, 1–8 kHz re < 60 Hz): drum machine Studer −18.2, +3 shelf
+−18.2, A800 30 −17.8, 15 −17.6; drums Studer −17.1, shelf −19.6, A800 30 −18.0,
+15 −18.2 — "tight" was the shelf's extra sub, and the Studer sits on the
+click-forward side.
+
+The emulation's top-end roll-off (two lowpasses, 16 kHz Q 0.67 + 21.5 kHz Q
+0.41, 0.41 dB rms) was tried on the A800 curves as the last candidate for
+"softer transients": the Studer's onsets are BRIGHTER than ours (>8 kHz share of
+a loud hit's first 5 ms: drum machine Studer −29.2, ours −29.8 to −32.1; drums
+−25.8 against −27.9 to −32.2), so the roll-off moved us further away. Still
+untested as the source of the softer impression: the Studer's higher
+distortion on loud hits and its longer sustain after the attack.
+
+**Built**: Head bump gains `a800-30` / `a800-15` (fixed depth, after the curve,
+`TAPE_HEAD_BUMP_CURVES`, `headBumpSections` shared by the kernel and the makeup
+measurement; the kernel's bump cascade is sized to 3 sections and the meter's
+reference runs through its own copy). Low push trimmed to 0 / 3 / 6 (owner:
+12 and 18 too hot; a stored 12 or 18 clamps to 6). Tests pin the A800 curve at
+20 / 45 / 85 Hz / 1 kHz and 15 ips at 10 / 22.5 / 42.5 Hz, the makeup through
+it (preview = apply, peak on the source) and the meter.
+
+### PHAT*SS — HF detents replace the Tame knob (October 2026)
+
+Owner: keep the FATSO fit, but take Tame off the panel in favour of a detent
+with a few HF options; calibrate with a floor (preserve a dull take rather than
+normalise its brightness away). Clips: `Messy_and_Bright_-_Clip.wav` (bright,
+44.1 kHz, voice −20.74 dBFS) and `art_test_clip_orig.wav` (dull, 48 kHz,
+−16.39). Harness: `scripts/phatass-hf-detents.mjs` (the VOICE curve's metric —
+sibilant frames 4–16 kHz, voiced frames 2–4 kHz).
+
+**Why a detent cannot reuse the voice-level threshold as-is.** A knob is placed
+by ear per file; a detent is not. The treble's 10 ms peaks re the gated RMS:
+
+| re voice, dB | 2k p50 / p75 / p90 / p95 / p98 / p99 | 4k p50 / p75 / p90 / p95 / p98 / p99 |
+|---|---|---|
+| bright | −6.7 / −1.8 / 1.9 / 4.0 / 6.1 / 7.4 | −11.2 / −5.8 / −1.9 / 1.0 / 3.7 / 5.6 |
+| dull | −7.4 / −0.9 / 2.7 / 4.2 / 6.1 / 6.9 | −11.3 / −5.8 / −2.0 / −0.5 / 1.4 / 2.1 |
+
+The 2 kHz band barely separates the clips (the dull take's vowels are loud at
+2–4 kHz); the 4 kHz band separates them only at the top — the bright take's
+sibilance. So the detents listen at 4K and read the 4K distribution.
+
+**Law**: `threshold = voice + clamp(pct + offset, floor, cap)`. The floor is the
+owner's. The cap was found by the synthetic test: with every S equally loud the
+98th percentile sits on top of all of them and AIR cut −0.13 dB whether the S's
+were 0 or +18 dB over the bed — a percentile alone calibrates a uniformly harsh
+take's harshness away. A 2 dB window per detent, non-overlapping.
+
+**Installed** (sibilant / vowel, bright | dull):
+
+| detent | law | bright | dull |
+|---|---|---|---|
+| AIR | p98, [+2, +4], R6 | −2.04 / −0.05 (thr +3.7) | −0.00 / −0.07 (floor) |
+| SMOOTH | p95 − 1, [−2, 0], R15 | −4.01 / −0.20 (−0.05) | −0.09 / −0.44 (−1.5) |
+| DARK | p75, [−6, −4], R21 | −7.31 / −1.12 (−5.8) | −0.78 / −1.42 (−5.8) |
+| FATSO | Tame 6, 2K, voice-relative | −4.24 / −0.67 | −0.13 / −1.10 |
+
+For reference, VOICE 4K Tame 1 / 3 / 5 on the bright clip: −1.95 / −4.23 /
+−7.38 — so the three calibrated detents sit near those points. Candidates swept
+on the way: AIR p99 [3,∞] R6 −1.47; SMOOTH p95 [0,∞] R12 −3.48, p90 [−1,∞] R15
+−4.55 (but floor-bound on both clips); DARK p75 [−5,∞] R21 −6.86; 2K-detector
+variants cut the dull take's vowels more for less sibilance (p95 [2,∞] R12:
+−2.41 / −0.20 | −0.01 / −0.29).
+
+**Not built**: a soft-knee gain law (`tanh(u)/u` on the band level). The FATSO
+fit only tested laws steeper than the limiter, never softer; scoring a knee
+needs the Fatso bounces, which are not in the repo.
+
+**Wiring**: `hf` ('off' ships) and measured `trebleStats` in
+`PHATASS_DEFAULTS`; `hfDetentShelf`; `phatassTrebleStats.js` (≤ 240 × 0.5 s
+blocks with 30 ms lead-in for the one-pole, channels apart, windows under
+voice − 30 dB are pauses; 42–84 ms on the clips) measured with the voice level
+in `refreshLevel`, whole file. The panel's Tame knob and CURVE / DETECT
+rockers became one HF rocker; Tame (slider), its curve (with the detector
+pairing) and Detect moved to the bench, and moving the slider sets
+`hf: 'bench'`. `saturationBenchAnalysis.js` exports `indexSegments` /
+`readChannel` for the measurement. Existing Tame tests now pass `hf: 'bench'`.
+Not auditioned.
+
+### PHAT*SS — soft knee scored against the Fatso bounces, rejected (October 2026)
+
+The owner re-supplied the five EL7 bounces. `scripts/phatass-fatso-fit.mjs`
+rebuilds the scratch harness from the entry above (audio stays out of the
+repo; readings in `data/fatso/el7_warmth_fits.json`).
+
+**Validation.** One change from the description: block alignment must tolerate
+±2 samples between neighbours. With exact agreement Warmth 7 kept 27 of 98
+blocks — its lag wanders 0–2 from block to block, the Fatso's own phase moving
+with its gain (a one-pole's group delay follows g), while the real drop is ~13.
+With ±2: 95–98 blocks kept, and the shipping FATSO law scores 0.174 / 0.348 /
+0.570 at Warmth 5 / 6 / 7 against the dev log's 0.165 / 0.345 / 0.574;
+gain-only 0.002 / 0.240 / 0.596 / 1.398 against 0.002 / 0.210 / 0.556 / 1.357.
+
+**The fit.** `ShelfLimiterStage` took an opt-in `kneeDb` (quadratic knee
+centred on the threshold) and `law: 'tanh'` (band output T·tanh(m/T)); best
+threshold / Range per law, dB rms:
+
+| | limit | knee 3 | knee 6 | knee 9 | knee 12 | tanh |
+|---|---|---|---|---|---|---|
+| Warmth 5 | 0.168 | 0.162 | 0.159 | 0.157 | 0.155 | 0.175 |
+| Warmth 6 | 0.348 | 0.348 | 0.348 | 0.345 | 0.335 | 0.380 |
+| Warmth 7 | **0.563** | 0.564 | 0.569 | 0.587 | 0.607 | 0.703 |
+
+A knee gains ≤ 0.013 where the Fatso barely acts (Warmth 5 cuts > 1 dB on ~1 %
+of frames) and loses at Warmth 7, the FATSO detent's point. With steeper laws
+already worse, the limiter law is the fit from both sides. ⚠ A centred
+quadratic knee cuts (o − K/2)²/2K MORE than the hard law everywhere inside it —
+it starts early, it never cuts less; the first draft of the test asserted the
+opposite. The options stay in the stage for the record (bit-identical off,
+pinned by an HF Limiter test); no plugin passes them.
+
+### PHAT*SS — the tape HF shelf: 30 / 15 / 7.5 IPS replace AIR / SMOOTH / DARK (October 2026)
+
+Owner, on the two entries above: the soft-knee fit chased the wrong question
+(a limiter fits a limiter best; recreating the Fatso was never the goal), and
+AIR / SMOOTH / DARK were only a new calibration of the SAME lookahead limiter
+shelf — the level-dependent tape shelf itself had not been built. Decisions:
+replace AIR / SMOOTH / DARK with tape speeds, tie the shelf to TAPE, remove
+the knee code.
+
+**Removed.** `ShelfLimiterStage`'s `kneeDb` / `law` (back to `8279530`
+byte for byte), its test, the Fatso harness's `--grid`;
+`phatassTrebleStats.js` and the `trebleStats` param with its measurement (the
+energy detector below leaves dull takes alone by itself).
+
+**`dsp/tapeHfShelf.js`** — how it differs from the limiter shelf:
+- detector: mean square of the band above the speed's IEC emphasis corner
+  (17.5 / 35 / 70 µs), 3 ms attack / 80 ms release — energy, not peaks;
+- no lookahead: attacks pass bright, sustained brightness darkens (the one
+  measured clue — the Studer renders' onsets were BRIGHTER than ours — points
+  this way; the limiter shelf does the opposite);
+- law: 0.75 dB of cut per dB over through a 6 dB knee, capped at Range — no
+  ceiling;
+- response: the WARM split `g·x + (1−g)·LP1(fc)` with the corner sliding an
+  octave down per 6 dB of cut (coefficients every 8 samples), between
+  14 / 10 / 7 kHz and 6 / 4 / 2.5 kHz — the loss reaches further down as it
+  deepens ("sag");
+- zero latency, bit-transparent below threshold (tested), only ever turns down
+  (tested), linked.
+
+**TAPE drives it**: threshold `voice − 10 − 1·TAPE` dB.
+
+**Detector levels** (re voice, active frames, 3/80 ms): the emphasised band
+separates the clips by speed — at 9.09 kHz bright p98 −2.2 / max +6.2 against
+dull −11.1 / −8.7; at 2.27 kHz they nearly agree (p98 +1.9 / +0.8). So 30 ips
+leaves a dull take alone by construction and 7.5 ips does not.
+
+**Tuning** (15 ips, bright clip, sibilant body / onset / vowel; T0 | T6):
+thr −6, slope 0.5, coupling 0.5, R9: −1.43 / −0.13 / −0.02 | −2.04 (too subtle,
+TAPE barely mattered); −10, 0.75, 1, R12: −3.48 / −0.77 / −0.14 | −5.02 / −2.40
+(chosen); −12: −4.13 / −1.24; −14: −4.67 / −1.82 — the onset/body split
+narrows as the threshold drops, because the envelope stays up through a run.
+30 ips −10 / R9, 7.5 ips −10 / R15.
+
+**Installed** (bright | dull; sibilant body / onset / vowel):
+
+| | TAPE 0 bright | TAPE 6 bright | TAPE 0 dull | TAPE 6 dull |
+|---|---|---|---|---|
+| 30 ips | −1.83 / −0.16 / −0.01 | −2.85 / −0.87 / −0.07 | 0.00 | −0.16 / −0.02 / −0.04 |
+| 15 ips | −3.47 / −0.77 / −0.13 | −5.01 / −2.38 / −0.53 | −0.15 / −0.08 / −0.15 | −1.23 / −0.83 / −0.60 |
+| 7.5 ips | −5.04 / −1.71 / −0.77 | −7.41 / −4.21 / −1.87 | −1.02 / −1.12 / −1.06 | −3.23 / −3.06 / −2.19 |
+| FATSO | −4.52 / −1.31 / −0.67 | — | −0.13 / −0.16 / −1.10 | — |
+
+Every constant except the emphasis corners is reasoned. Not auditioned.
+
+### PHAT*SS — tape HF shelf rescaled: TAPE through its makeup, not twice (October 2026)
+
+Owner, on the owner's drums (`AllTape_Drums_dry_v1` / `StuderA800_Drums_wet_v1`,
+48 kHz AAC, 17.5 s): the drive-dependent direction is right, but with TAPE at
+8 the shelf was too strong at every setting but OFF.
+
+**Why.** Measured on the dry drums through PHAT*SS at TAPE 8 (makeup measured,
+6.65 dB), against the same chain with HF off, 8–16 kHz by frame level (re the
+−19.65 dBFS voice level): 30 ips −3.3 / −4.6 / −4.6 dB on quiet / mid / loud
+frames, 15 ips −5.8 / −7.0 / −7.2, 7.5 ips −7.5 / −9.3 / −10.0 — a STATIC EQ.
+The threshold dropped 8 dB for TAPE 8 AND TAPE's peak-restoring makeup put
++6.65 dB more into the shelf: the drive counted twice, and with an 80 ms
+release over constant cymbals the envelope never let go.
+
+**The Studer for scale** (aligned −33 samples; band gain per 21 ms frame
+against its own median on quiet frames, by frame level re voice): 2–16 kHz
+0.0 / 0.0 / −0.3 to −0.5 / −1.0 / −2.9 to −3.4 dB on frames under −10 / −10 to
+−4 / −4 to 0 / 0 to 4 / over 4 — but 60–250 Hz and 250 Hz–1 kHz lose −2.8 /
+−2.3 on the loudest too: mostly broadband (tape compression), HF-specific
+~0.5–1 dB on loud frames only. Its quiet-frame response is +2.6 to +3.1 dB flat
+(a level offset).
+
+**Fix.** The explicit TAPE threshold law is removed (`TAPE_HF_DB_PER_TAPE_DB`
+gone, `tapeHfShelfParams(hf, voice)`); the drive reaches the shelf through the
+makeup alone. Slope 0.75 → 0.5, release 80 → 40 ms, thresholds −10 → −4 / −6 /
+−6, Range 9 / 12 / 15 → 4 / 6 / 9. Swept on drums at TAPE 0 / 8 and both
+narration clips at TAPE 0 / 4 (15 ips, slope 0.5, 40 ms, Range 6): −4 gave
+drums T8 −0.3 / −0.6 / −0.4, bright −0.95; −6 −0.6 / −1.1 / −0.9, bright −1.3
+(chosen); 0 and +2 did nearly nothing. 7.5 ips at −8 doubled its TAPE 0 effect
+on drums (−0.9) — −6 kept.
+
+**Installed** (`scripts/phatass-hf-detents.mjs`, now with TAPE's makeup
+measured; sibilant body / onset, or energy above 2 kHz for drums):
+
+| | bright T0 | bright T4 | bright T8 | dull T8 | drums T8 (>2 kHz) |
+|---|---|---|---|---|---|
+| 30 ips | −0.36 / 0.00 | −0.58 / −0.02 | −0.81 / −0.08 | 0.00 | −0.02 |
+| 15 ips | −1.32 / −0.10 | −1.86 / −0.28 | −2.39 / −0.64 | −0.23 | −0.42 |
+| 7.5 ips | −2.03 / −0.28 | −2.82 / −0.63 | −3.83 / −1.26 | −0.68 | −1.01 |
+| FATSO | −4.52 / −1.31 | −5.68 / −2.77 | −6.62 / −4.50 | −2.05 | −3.81 |
+
+⚠ FATSO (the limiter shelf, fitted law, threshold re the source's voice
+level) hears the makeup too and rises with TAPE; left as fitted. Not auditioned.
+
+## PHAT*SS — landing prep: Speed detent, paired head bumps, CLEAN/THICK, CHARACTER; Soften moves to HF Softener (October 2026)
+
+Owner's list before landing the plugin:
+
+1. **The detent is the three tape speeds only** (30 / 15 / 7.5 IPS, 30 ships). OFF and FATSO
+   leave the panel and stay reachable on the bench ("Top end" row). Each speed now **brings its
+   head bump** (`tapeHeadBump: 'speed'`): A800 30 / 15 ips as fitted, and a new A800 7.5 ips
+   derived by octave scaling (every frequency halved from 15 ips: 8.825 Hz HP, +1.17 dB at
+   7.8125 Hz, −1.93 dB at 20.675 Hz). It is not measured. The bump still applies only while
+   TAPE > 0. The bench's head-bump row keeps the fixed shelves and adds SPEED.
+   ⚠ The A800 30 ips test now pins the owner's edited high-pass (acf0534, 20 Hz): +0.13 dB
+   at 20 Hz and −0.96 dB at 85 Hz.
+2. **TAPE curve toggle: CLEAN (cubic) / THICK (hysteresis).** These are placeholder names, and
+   the owner may rename them.
+3. **Soften moved to the HF Softener**, in the Reso knob's slot. Reso is off the panel and
+   kept in the code. The law is unchanged. It runs on the HF Limiter's worklet with the shelf
+   out (Range 0), so the HF Limiter kernel now forwards `transientCornerHz`,
+   `transientSlope` and `transientGateDb`; left unset, they keep the HF Limiter
+   bit-identical.
+   **Equivalence:**
+   - Checked against PHAT*SS's Soften at 828e9e3 (Tame 0, everything else off) on 10 s of
+     real narration, with latency aligned.
+   - The maximum difference is 0 at Soften 3, 7 and 10.
+   - Latency is 132 samples here, against PHAT*SS's 414.
+4. **Odd/Even became a CHARACTER toggle**: ROUND = 50, FIRM = 25.
+
+⚠ With 30 ips the default, PHAT*SS at Warmth 0 / TAPE 0 is no longer a pure delay: the
+shelf sags loud top end. The tests that assumed transparency run isolated (`hf: 'off'`,
+`tapeHeadBump: 0`).
+
+## PHAT*SS — output trim: why PEAK is too loud and RMS too quiet (October 2026)
+
+Owner: on drums at TAPE 10, PEAK sounds too loud, RMS too quiet, and the two sit far apart
+(meters: input −2 to −1.5, PEAK output −0.4 to 0, RMS trim −5.6). Rendered the owner's
+drum file (17.5 s, stereo, defaults: 30 ips, Warmth 0):
+
+| TAPE | TAPE makeup | out − in, integrated LUFS | PEAK trim | RMS trim | LUFS match |
+|---|---|---|---|---|---|
+| 4 | +2.39 | +1.53 | 0.00 | −1.83 | −1.53 |
+| 10 | +7.91 | +5.02 | 0.00 | −5.38 | −5.02 |
+
+- **PEAK trims nothing when only TAPE is in play.** TAPE's own makeup already puts the peak
+  back on the source's, so PEAK is TAPE plus the whole loudness it adds (+5 LU at TAPE 10).
+  PEAK only moves when Warmth or the shelves change the peak.
+- **RMS is not measuring the wrong thing.** Every loudness reference agrees with it at
+  TAPE 10:
+  - integrated LUFS: −5.02
+  - momentary (400 ms) 50/90/99th percentiles: −4.7 / −6.1 / −5.3
+  - short-term (3 s): −5.7 / −5.5 / −5.3
+  - Only 50 ms windows on the hits read deeper, at −7 to −8.
+- **The gap is perceptual.** A squashed hit at matched loudness sounds smaller, because its
+  attack lost far more than its body. Neither match is wrong; the owner's ear lands between
+  them.
+- **Added MID** to the bench's Output trim: halfway in dB between PEAK and RMS, an audition
+  (−2.7 dB here). If it lands, a fixed fraction is the next thing to tune.
+
+**Follow-up (October 2026): MID became BLEND.** The owner heard MID as closer, but did not
+want a rule tied to drum hits, since PHAT*SS serves voice, drums and full mixes. So the trim
+is now a fixed share in dB, `outputBlend` of the way from RMS to PEAK, 80 % by default
+(owner's pick). The bench offers 50 / 65 / 80 %.
+
+On the drums, the trim at each share:
+
+| Share toward PEAK | TAPE 10 | TAPE 4 |
+|---|---|---|
+| 50 % | −2.69 dB | −0.92 dB |
+| 65 % | −1.88 dB | −0.64 dB |
+| 80 % | −1.08 dB | −0.37 dB |
+
+Not auditioned past MID.
+
+**BLEND became KEEP (October 2026).** The owner asked whether BLEND still mixed PEAK and RMS
+(it did, with two renders per measurement). They wanted a plain percentage with no RMS pass.
+A share of the PEAK trim cannot work: TAPE's makeup already restores the peak, so the PEAK
+trim is ~0 whenever TAPE is doing the work.
+
+KEEP takes the share from TAPE's own makeup instead, which is already measured. It keeps
+`outputKeep` of that makeup in dB and trims the rest at the output, so nothing re-renders
+(`keepTrimDb`, worked out in `toKernelParams`). The trim sits at the output rather than
+scaling the makeup itself, so Warmth and the HF shelf see the same drive as before.
+
+The default is 85 %, chosen to match BLEND 80 on the drums:
+
+| Drums | BLEND 80 | KEEP 85 |
+|---|---|---|
+| TAPE 10 | −1.08 dB | −1.19 dB |
+| TAPE 4 | −0.37 dB | −0.36 dB |
+
+The bench offers KEEP at 80 / 85 / 90 %. Warmth's added loudness is not trimmed.
+
+## PHAT*SS — the hysteresis loop made cheaper (October 2026)
+
+The owner asked why THICK is so much slower than the cubic. The Jiles-Atherton step is the
+whole difference: an RK2 step per 4x-oversampled sample, two evaluations each, each with
+`tanh`, `sinh` and three divisions. On drums at TAPE 10, per 10 s of mono:
+
+| | Cubic | THICK |
+|---|---|---|
+| Render | ~300 ms | 580 ms |
+| Exact makeup | 192 ms | 518 ms |
+| The J-A step alone (of THICK's render) | — | ~285 ms |
+
+**Shipped: L and L′ by table.** A cubic Hermite table on |q| ≤ 32 at 1/32, with L′ and L″
+as the knot slopes. It stays under −180 dB from the closed forms, and the step runs ~1.5×
+faster. THICK now renders in 488 ms and the exact makeup takes 346 ms.
+
+**Bench: Loop step EXACT / FAST.** FAST is a variable-step Adams–Bashforth 2: one
+evaluation per step, reusing the last step's slope. Measured against a 16×-substepped
+solution:
+
+| Drive | 1 | 3 | 10 |
+|---|---|---|---|
+| FAST, unguarded | −70 dB | −59 dB | −49 dB |
+| RK2 (EXACT) | −94 dB | −87 dB | −73 dB |
+| Euler (rejected: barely under the curve's own distortion) | −50 dB | −38 dB | −29 dB |
+
+⚠ **Unguarded, it fails on big jumps.** On a noise burst without oversampling it read
+−10 dB of error. Two guards fix that:
+
+- Euler at a reversal, or after a step more than 4× the last.
+- Any step with |dh| > 0.05 takes RK2.
+
+| FAST_MAX_DH | FAST vs EXACT, drums at TAPE 10 | Synthetic burst test |
+|---|---|---|
+| 0.02 | −68 dB | passes |
+| 0.05 (chosen) | −57 dB | passes |
+| 0.1 | −52 dB | passes |
+| 0.3 | — | fails |
+
+Guarded FAST renders THICK in ~350–400 ms against EXACT's 488 (timings vary run to run). It
+is not auditioned.
+
+## PHAT*SS — performance pass (October 2026)
+
+Profiled on the owner's drums (17.5 s, stereo). Per 10 s of stereo before the pass: idle
+179 ms; Warmth 5 / TAPE 6 / 30 ips 1148 ms; THICK 1539 ms. The oversamplers' up/down
+filters took 44 % of the typical render. The owner picked #2, #4, then #3 from the review,
+and asked for the Tame limiter to be deprecated outright.
+
+### #4: idle stages
+
+**The limiter shelf is removed.** The HF Limiter's lookahead shelf only served the bench's
+Tame / CURVE / DETECT and FATSO once the Speed dial replaced Tame. It still ran its full
+detector on every render: about 20 % of the idle cost, plus 3 ms of latency.
+
+- Removed from the kernel, params, bench and modal; recoverable at e427de9.
+- A stored `hf: 'fatso' | 'bench'` falls back to the shipping speed.
+- `scripts/phatass-fatso-fit.mjs` went with it; its readings stay in
+  `data/fatso/el7_warmth_fits.json`.
+
+**The Warmth guard is a plain delay while Warmth is off.** It skips its min and smoother
+then. With Warmth off its added signal is 0, so the output is the same. The pipeline
+restarts in its all-1 state when Warmth comes back.
+
+| Setting (per 10 s stereo) | Before | After |
+|---|---|---|
+| Idle | 179 ms | 63 ms |
+| Warmth 5 / TAPE 6 / 30 ips | 1148 ms | 894 ms |
+| THICK | 1539 ms | 1204 ms |
+
+### #2: exact makeup in the background
+
+Once the fast makeup lands and the knobs have been still for 600 ms, the exact makeup is
+measured in the background. It is kept (last 16) against the document, revision, span and
+every TAPE setting that moves it.
+
+- Apply uses a matching value instead of rendering TAPE over the selection again.
+- Returning to an already-measured setting skips the fast search too.
+- Browser check on the drums: fast at 11.9 s, exact at 13.0 s, and no makeup render during
+  apply.
+
+### #3: Warmth readout
+
+**Bands are sampled across the whole selection.** They used to cover only the first 30 s.
+On a 175 s file mixing narration and drums, that window read up to 7.7 dB off the whole
+render (+10.3 at 60–120 Hz against +2.4). Selections up to 15 s now render whole. Longer
+ones render 12 blocks of 1 s, one per stratum at a golden-ratio offset, each with a 0.25 s
+run-in, with energies pooled. Results on the 175 s file:
+
+| Blocks | Worst error, Warmth 5 / 10 | Time |
+|---|---|---|
+| 12 × 1 s (chosen) | 0.41 / 0.58 dB | ~650 ms (the window took 1.3 s) |
+| 16–30 blocks | 0.28–0.57 dB | longer |
+
+A 0.5 s run-in and a faded-in run-in both read the same as the chosen one.
+
+⚠ A synthetic test with hard joins between sections read the 20–60 Hz band 3.5 dB off.
+The cut itself is sub content that the whole render sees and the blocks mostly miss. Test
+material needs smooth joins.
+
+**The whole-region peak pass is gone.** The guard is pinned on with the selection's peak as
+its ceiling, and its no-overshoot proof holds |out| ≤ that peak. Measured 0.000 dB of
+change at Warmth 5 and 10 on the 175 s file. So a long selection reports that bound
+instead of rendering it, which used to cost ~8 s of CPU per 3 min of mono, per knob turn.
+Short selections still measure it.
+
+### Parallel chunked apply (October 2026)
+
+PHAT*SS apply now splits regions of 30 s or more into chunks. They render on
+`hardwareConcurrency − 1` workers, at most 8, with chunks of at least 15 s each
+(`phatassChunks.js` plans, `phatassChunkRender.js` renders in the worker), using the same
+kernel as the preview. A chunk renders from 1 s of the real audio before it, and the
+outputs are laid end to end.
+
+⚠ **THE SEAMS FIRST FAILED, AND MORE RUN-IN DID NOT HELP.** On a 175 s narration + drums
+mix, chunked against continuous renders, the worst seam difference relative to the peak
+was:
+
+| Setting | 0.25 s run-in | 1 s | 2 s |
+|---|---|---|---|
+| Warmth 5 / TAPE 8, CLEAN, 30 ips | −37 dB | −34 | −34 |
+| Warmth 10 / TAPE 12, 7.5 ips | −28 dB | −28 | −27 |
+
+Isolated by stage, Warmth and TAPE were exact (−159 dB and bit-identical). The tape HF
+shelf was off for up to 7 s after a seam. Its corner is recomputed every `COEFF_STRIDE`
+samples counted from the start of each 128-sample block, so a chunk whose render starts off
+the continuous render's block grid updates its corner on different samples for the whole
+chunk.
+
+With every chunk start aligned to the grid and 1 s of run-in:
+
+| Setting | Worst seam difference |
+|---|---|
+| CLEAN | −141 / −147 dB (float noise) |
+| THICK | −87 dB (the loop's memory) |
+
+At 0.25 s of run-in, aligned, the worst was −61 to −67 dB. `test/dsp/phatassChunks.test.js`
+pins the plan's grid and coverage, and the stitched render: under −120 dB with CLEAN, under
+−70 dB with THICK.
+
+**Browser, 175 s stereo, Warmth 6.4 / TAPE 7.7, 4-core container:** apply took 25.7 s on
+one thread (`hardwareConcurrency` forced to 1) and 12.9 s with 3 workers. Any error falls
+back to the one-thread worklet render.
+
+### Oversampler: folded halfband taps (October 2026)
+
+`HalfbandStage` (dsp/oversample.js, shared by every oversampled plugin) now adds each
+symmetric pair of history samples before multiplying, so its odd-phase convolution does half
+the multiplies. Against the unfolded code, over a 4x round trip with a `tanh` at the high
+rate, timed per 10 s:
+
+| Profile | Max difference | Before | After | Saving |
+|---|---|---|---|---|
+| Compressor 4x | 8.9e-16 | 134 ms | 108 ms | 20 % |
+| Compressor 8x | 1.0e-15 | 236 ms | 178 ms | 25 % |
+| EQ | 1.1e-15 | 92 ms | 65 ms | 29 % |
+| Vocal sat | 1.1e-15 | 87 ms | 68 ms | 22 % |
+
+PHAT*SS on drums, best of 7, per 10 s of stereo:
+
+- Warmth 5 + TAPE 6: ~920 → ~850 ms (~7 %).
+- TAPE alone: ~280 → ~245 ms (~13 %).
+
+A first prototype that patched the stages from outside measured only 9 % on the round trip.
+A test pins the fold's precondition (every profile's odd-phase taps are symmetric) and the
+equivalence with the plain sum.
+
+### Warmth's oversampled layers at 2x (October 2026): measured, not changed
+
+The owner asked for the 2x measurement. Slots now take an oversampling profile as well as
+true/false (`layerProfile`; `true` is still the 4x compressor profile, so nothing changes).
+`COMPRESSOR_OVERSAMPLE_2X` is the 4x profile's stage-1 filter alone: 46 samples of latency,
+against 50 for 4x.
+
+Each layer was rendered alone at 1x / 2x / 4x and scored against 8x on what it adds:
+`scripts/phatass-warmth-oversample.mjs`, on two narration clips and dry drums. The error is
+the same at Warmth 5 and 10, because Warmth scales what a layer adds and not its drive. The
+error re the signal is shown at Warmth 10, the worst case.
+
+**Full-band quartic** (fixed layer, drive 0, high shelf −10 dB at 2.4 kHz):
+
+| Material | 1x | 2x | 4x | Worst re signal at 2x |
+|---|---|---|---|---|
+| Bright narration | −32.8 | −36.4 | −46.7 | −69.9 |
+| Narration B | −47.4 | −47.8 | −60.1 | −80.4 |
+| Drums | −35.1 | −49.9 | −59.1 | −72.3 |
+
+(dB re what the layer adds.) Note that 2x is barely better than 1x on narration here.
+
+**3 kHz+ tanh** (fixed layer, drive 27, Amount −6, high shelf −20 dB):
+
+| Material | 1x | 2x | 4x | Worst re signal at 2x |
+|---|---|---|---|---|
+| Bright narration | −17.5 | −37.7 | −60.8 | −60.9 |
+| Narration B | −24.3 | −54.6 | −66.8 | −89.8 |
+| Drums | −15.7 | −41.9 | −56.2 | −74.0 |
+
+**Cost per layer, per 10 s of mono:**
+
+| Rate | Time |
+|---|---|
+| 1x | 22–70 ms |
+| 2x | 76–130 ms |
+| 4x | 115–197 ms |
+| 8x | 193–304 ms |
+
+Moving both layers to 2x saves roughly 40 ms per layer per channel per 10 s, about 15–20 %
+of a Warmth 5 / TAPE 6 stereo render.
+
+Not adopted. On the bright clip at Warmth 10, 2x leaves aliasing at −61 dB re the signal,
+in the sibilance band where the oversampler exists to keep grit out. That is an ear call.
+
+### Parallel apply for six more plugins, and the HF Limiter's TIGHT fold (October 2026)
+
+The owner asked which other plugins should get PHAT*SS's two performance changes. The
+halfband fold was already everywhere it applies: it lives in the shared `HalfbandStage`, so
+every `Oversampler` user had it. The other symmetric FIR in the client is the HF Limiter's
+TIGHT split. Chunked apply was assessed per plugin, by cost and by whether chunks stitch.
+
+**Cost before chunking** (node, per 10 s of stereo, realistic settings): Tube Saturation
+988 ms, ResoTame 886, Saturation Bench (factory layers) 562, Scheps 351, OptoSmooth 312,
+HF Softener 291, Soft Clipper 255, FET Punch 232. Inflator, Manual EQ, HF Limiter, Air Band
+and Hum Notch are 3–181 ms and were left alone.
+
+**The planner and the worker render are shared now.** `phatassChunks.js` became
+`chunkedApply.js` with a per-plugin `runInS` and `grid`. `phatassChunkRender.js` became
+`chunkRender.js`, which renders a chain of stages so the HF Softener's Reso and Soften come
+along. The worker op is `renderChunk`. `applyRegion` in processing.js dispatches: chunked
+when the plugin passes `chunk` and the region makes ≥ 2 chunks, otherwise and on any error
+the worklet render. Pre-roll and latency come from the same helpers on both paths.
+
+⚠ **A chunk must end on a whole 128-sample block.** The HF Softener read −101.4 dB re peak
+over the LAST second of every chunk, flat from 2 s to 8 s of run-in. It resolves something
+per block, and a chunk's last block was short where the continuous render's was full. `to`
+is now rounded up to a block, capped at the render's own end. After that it reads −149.9 dB
+at 2 s and exact from 4 s. PHAT*SS was unaffected by the rounding: −142 / −148 dB with or
+without it.
+
+⚠ **ResoTame needs its hop grid AND a long run-in.** On the 128 grid alone a chunk reads
+−20 dB re peak for its whole length; that is the STFT frame phase. Within one apply the phase
+IS known (it is the render's own start), so cutting on the 512-sample hop fixes it. It also
+has real memory between chunks. Seams on the test material vs run-in:
+
+| Run-in | 1 s | 2 s | 3 s | 4 s | 6 s | 8 s |
+|---|---|---|---|---|---|---|
+| Seam, dB re peak | −37.8 | −66.5 | −91.5 | −119.2 | −140.6 | −146.6 |
+
+6 s ships. `resonanceHopSamples` moved to resonanceParams.js and the kernel reads its hop
+from it, so the grid and the kernel cannot disagree.
+
+**Stitched vs continuous, node, 48 s of stereo** (`test/dsp/chunkedApply.test.js`):
+
+| Plugin | Seam, dB re peak |
+|---|---|
+| Saturation Bench, Scheps, OptoSmooth, FET Punch | exact |
+| HF Softener (defaults / Soften 6 / + Reso) | −149.9 / −148.8 / −148.8 |
+| PHAT*SS CLEAN / THICK | −141.8 / −148.0 |
+| ResoTame | −140.6 |
+
+Run-ins: the compressors and the HF Softener use their pre-roll (2 s), Saturation Bench 1 s,
+ResoTame 6 s, PHAT*SS 1 s.
+
+**In Chromium, 67 s stereo region on 4 cores (3 workers), one thread → parallel:**
+
+| Plugin | One thread | Parallel | Max difference re peak |
+|---|---|---|---|
+| ResoTame | 7.1 s | 3.0 s | −150.7 dB |
+| Saturation Bench | 3.9 s | 1.8 s | exact |
+| Scheps | 2.5 s | 1.5 s | −111.9 dB |
+| OptoSmooth | 1.8 s | 1.4 s | −173.2 dB |
+| HF Softener (Soften 6, Reso 50) | 5.4 s | 3.3 s | −132.2 dB |
+| FET Punch | 1.7 s | 0.9 s | exact |
+| PHAT*SS | 6.6 s | 2.8 s | −153.5 dB |
+
+The browser differences are worklet against worker. The node renders of the same chunks are
+exact, so the browser residue is the two threads' arithmetic, not the seams. That is likely
+denormal flushing on the audio thread, but this was not confirmed.
+
+⚠ **Tube Saturation is not chunked.** Its skew sign and valley floor latch on history
+arbitrarily far back (VOCAL_SAT_PREROLL_S). Synthetic material stitched to −112 dB at 4 s of
+run-in, but a seam on real narration could lean the asymmetry the other way. It needs a
+real-material measurement or a serial state hand-over first. The Soft Clipper's shipping
+`fixed` mode stitches exactly but was left out as marginal; its `adaptive` mode reads −8 dB.
+
+**TIGHT fold** (`ShelfLimiterStage`): the split is zero-phase and `splitTaps` writes both
+halves from one value, so they are bit-identical. The loop now runs D + 1 multiplies instead
+of 2D + 1. Equal to the plain sum to < 1e-12 (tested). TIGHT stage, best of 7, 30 s stereo:
+406 → 339 ms (−17 %; WARM is 132, so the FIR itself is 274 → 207, −25 %). WARM, the default,
+and the Soften stage do not run the FIR.
+
+### Parallel apply: seams measured on more material; one 6 s run-in (October 2026)
+
+The owner asked what the "small differences" between the parallel and one-thread apply
+actually are, since a click at a seam would make the feature unusable. Measured properly,
+the entry above was wrong on two counts.
+
+**The worklet and the worker kernels render IDENTICALLY.** In Chromium, the worklet render
+against the same chain run continuously on the main thread differed by exactly 0 for all
+seven plugins. The −112 / −132 dB "thread residue" above, put down to denormal flushing on
+the audio thread, was seam residue on that material. The denormal explanation is withdrawn.
+
+**Run-ins tuned on one material were tuned to that material.** The per-plugin run-ins (the
+compressors' and HF Softener's 2 s pre-roll, Saturation Bench 1 s, PHAT*SS 1 s) all
+measured ≤ −140 dB on syllable bursts. Two new materials found residue:
+
+- **Speech with digital-silence gaps.** The HF Softener read −95.1 dBFS, 33 ms after a
+  seam, at 2 s of run-in. It is the base softener; Reso and Soften do not change it. Its
+  trackers settle slowly through silence. 4 s gives −156.5 dBFS; 8 s is exact.
+- **Phrased syllables, no gaps.** Scheps read −113.9 dBFS AT the seam sample, decaying to
+  nothing within 0.5 s. That is the opto cell's slow release. It is not a grid effect:
+  grids of 128 to 4096 samples give the same figure.
+
+Neither residue was a click. Each is a gain-state mismatch that follows the program audio:
+about 0.0005 dB on audio around −10 dBFS, fading over 30–500 ms. The largest jump at a
+seam sample was −113.5 dBFS, about 1/30 of a 16-bit LSB (−90.3 dBFS). Both are still seam
+residue, so they are fixed rather than argued away.
+
+**One run-in for every plugin: `CHUNK_RUN_IN_S` = 6 s.** The test signals now have three
+materials, each in its own file so they run in parallel. They share the `chunkStitch.js`
+harness and measure in ABSOLUTE dBFS. Stitched against continuous, worst over the region:
+
+| Plugin | bursts 2 s / 6 s | gaps 2 s / 6 s | phrased 2 s / 6 s |
+|---|---|---|---|
+| ResoTame | −65.7 / −144.5 | −90.5 / −144.5 | −77.8 / −156.5 |
+| HF Softener (defaults) | −156.5 / exact | −95.1 / exact | −168.6 / exact |
+| HF Softener (Reso + Soften) | −150.5 / exact | −95.1 / exact | −142.2 / exact |
+| Scheps | exact / exact | exact / exact | −113.9 / −168.6 |
+| OptoSmooth PR 70 | exact / exact | exact / exact | −180.6 / exact |
+| PHAT*SS CLEAN | −144.5 / −144.5 | −150.5 / −150.5 | −144.5 / −144.5 |
+| PHAT*SS THICK | −150.5 / exact | −150.5 / exact | −168.6 / −168.6 |
+| Saturation Bench, FET Punch | exact / exact | exact / exact | exact / exact |
+
+The floor is −130 dBFS. Three negative tests pin why the run-in is long: ResoTame on
+bursts, the HF Softener on gaps, and Scheps on phrased all fail the floor at 2 s.
+
+In Chromium on the gaps material, parallel against continuous: every plugin is exact
+except ResoTame (−144.5 dBFS), and no seam shows a step.
+
+The cost is ~7 % on a long region's ~86 s chunks. The whole test suite went from ~170 s
+to ~230 s on 4 cores for the two larger materials.
+
+⚠ The preview/apply PRE-ROLL at a region's start is a separate, older mechanism and is
+unchanged. The HF Softener's 2 s pre-roll has the same −95 dBFS residue there on gapped
+material: equally inaudible, and left alone.
+
+## Plugin Chain — a formal rack, and plugin copies (October 2026)
+
+**What it replaced.** Plugins ran in series in the order their windows were first opened.
+There was no way to reorder them, closing a window took its plugin out of the chain, and
+committing the chain meant pressing each window's Apply in turn, one undo step per plugin.
+
+**Slots outlive windows; the picker is the only way in.** Opening a plugin from the rail
+auditions it. Before the picker existed, "which plugins are in the chain" depended on
+which windows happened to be open. Peak Normalize, for example, opened and never joined.
+
+**Two window groups that never share the screen.** Having plugins in the chain and plugins
+outside it open side by side made it impossible to tell which Apply did what. The chain
+window counts as a plugin window.
+
+**Suspend on the WINDOW, not on the plugin's ON.** Suspending on the audition alone had
+two failures. Bypassing a solo plugin to A/B it brought the chain back underneath, so the
+"dry" side of the comparison was the chain. And Peak / Loudness Normalize (no live preview)
+played over the chain. A solo plugin must preview exactly what its own Apply writes: the
+source through it alone. Before this, preview was "chain + plugin" and Apply was "plugin on
+the original".
+
+**The master bypass is set on opening a solo plugin and NOT lifted on close** (owner's
+call). Coming back by itself put the chain under audio the solo plugin had just changed.
+
+**Apply bypasses the whole chain, not each slot.** Which slots were on is the user's setup.
+Clearing each one meant rebuilding it for the next selection.
+
+**Copies.** Each plugin existed once (module-level singleton state). A plugin in the chain
+therefore could not be opened and applied on its own: the Effects menu reached its slot,
+brought the chain window and had no Apply. Every chainable plugin now has a solo copy and
+one chain copy per slot. The copy approach was chosen over "shared settings, solo mode"
+(tweaking it solo would change the slot) and over "explain + remove from chain" (it
+couldn't be used both ways).
+
+**Disposal.** At first a removed slot's copy was kept and reused, so re-adding a plugin
+brought back the removed slot's settings, despite the docs claiming defaults. With any
+number of copies, a removed copy has to really end, or its timers and measurements keep
+running and its node keeps its place in the EffectChain.
+
+**Owned worker jobs.** PHAT*SS's TAPE makeup and output trim each ran as one pass for the
+whole app. A solo PHAT*SS and a chain PHAT*SS, or two in the chain, cancelled each other's
+measurement on every knob turn, and neither makeup settled.
+
+**Running-segment measurements, round two (review before the PR).** The first pass covered
+the plugins whose measurements are local (alignment, makeup, ceilings, file level, TAPE
+makeup). Four slots still read the unprocessed file:
+- Soft Clipper's region-following ceiling and AUTO makeup.
+- Auto Leveler's VAD clip curve.
+- The Clip-Gain De-Esser's detected events.
+- VoiceRx's band transfer, which sent a chain slot's bands to the SOLO EQ. That took them
+  out of the chain, and opening the solo EQ closed the chain's windows.
+
+All four now take the running segments. VoiceRx transfers to an EQ slot placed straight
+after it, so what is heard does not change. Hum Remover keeps its detected frequencies,
+since upstream processing does not move hum.
+
+## Plosive Tamer — the De-Esser's plosive detector as its own plugin (October 2026)
+
+The De-Esser carried a T/K/P burst treatment ("Plosives"): a closure, then a sharp
+top-band onset, opened a 40 ms window inside which both de-ess stages' thresholds
+dropped 6 dB, their depths grew 6 dB and the lisp guard was lifted. Its switch sat in the
+panel's `display:none` Soften group and defaulted off, so no shipping render used it. The
+owner asked for it to become a standalone plugin and to grow, and for the De-Esser copy
+to go.
+
+**Two stages.** A "plosive" on narration is two different defects:
+- POP, the P/B air blast on the capsule: a thump below ~150 Hz. Nothing in the app handled
+  it apart from the server's advisory flag (`riskAssessment.js`, 50–150 Hz spikes).
+- BURST, the T/K/P release: what the De-Esser's detector caught.
+
+**POP detection.** The first idea, the low band standing over the voice band, cuts a deep
+voice's held "oo" for its whole length: a low male vowel can put more energy under 120 Hz
+than over 240. What a pop has and a vowel lacks is a sudden JUMP in the low band. So a pop
+opens only when the low band rises `popRiseDb` within 20 ms and, within 15 ms of that rise,
+stands `popRatioDb` over the voice band. It then stays open while the excess holds (−3 dB
+hysteresis, at most 250 ms), cut by the excess and capped at Depth. A vowel onset after
+silence also jumps, but its voice band arrives with it, so the ratio test spares it.
+85/100/120 Hz synthetic voices pass bit-identical at Sensitivity 100.
+
+At Sensitivity 100 (a 5 dB jump) one thump was counted twice: its 45 Hz ripple closed the
+pop and reopened it. An 80 ms refractory period after a pop opens fixed that.
+
+**BURST.** The detector moved over constant for constant; Sensitivity 50 is its 12 dB. In
+the De-Esser the burst window rode the de-ess cut. Here it drives a dynamic low-pass of its
+own, `Depth · window`, above Freq. The voice-led gate that closes the window on a vowel
+onset is weaker here: on the ported test the De-Esser's broadband Duck went from −1.2 to
+under −0.5 dB, while this top-band cut goes from 5.9 to 3.4 dB, because the onset's noise
+sits in the band being cut.
+
+**Gain path.** Both required gains run through `LookaheadLimiter`'s centred min +
+triangular smoother (4 ms half-width, 8 ms of constant latency), then an upward-only
+release. The cut is therefore fully in place by the sample that needed it. Both cuts use the
+`g·x + (1−g)·filter(x)` form: exactly x at g = 1, so the plugin is bit-transparent wherever
+nothing is caught. The boxcars' rounding residue is snapped onto exactly 1.
+
+**What was removed from the De-Esser.** The burst tuning, state, detection and the
+threshold/depth/guard terms; `bursts` / `plosives` from the kernel, the params, the
+composable, the panel's hidden toggle and lamp, the presets (a stored `plosives` is
+dropped) and the help. The panel default was off, so every De-Esser render made with the
+app's params is unchanged. Kernel-level tests that ran with the kernel's own default
+(`bursts: true`) had turned bursts off through `NO_BURSTS`; that tuning is gone, and the
+suite passes unchanged without it.
+
+The activity scope keeps its four-slot ring because the Plosive Tamer draws on the same
+component; the De-Esser's plosive mark is now always 0. The scope gained a `legend` prop so
+each plugin labels its own marks.
+
+All thresholds and both Sensitivity lines are reasoned from synthetic material and have not
+been auditioned. The plugin ships dev-gated.
+
+## LA Classic 76 (FET Punch) — feedback detector prototype and ballistics refit (October 2026)
+
+`detector: 'feedforward' | 'feedback'` on the kernel and the bench (`Detector`, FWD / FBK).
+**Feed-forward still ships**; the default render is bit-identical to before the switch existed.
+
+**Topology.** The feedback detector reads the cell's output before the FET shaper, Output and
+Mix, at the base rate. ⚠ Tapping after the downsampler would put the oversampler's 50 samples
+inside the loop against a 20 µs attack. ⚠ Tapping after Output would break auto makeup's
+`out = a + b·g` closed form. ⚠ Leaving the shaper out keeps input alignment exact.
+
+**Static curve: unchanged, exactly.** The feedback law is the feed-forward one re-expressed on
+output overshoot: `o = x − G(x)` maps to `G(x)`. Each sample is solved in closed form, with no
+one-sample delay, from `x − (1 − c)·G(x) = over − (1 − c)·gr`: piecewise across the knee, the
+linear segment and all-buttons' quadratic/floor segments. A constant-|x| tone settles to
+1e-14 dB of feed-forward on every button, across the knee. ⚠ On a sine the two differ by
+≤ 0.15 dB, because the unsmoothed detector ripples inside the cycle and the loop evens it out.
+⚠ A `y[n−1]` loop would limit-cycle at attack 7 / 20:1 (coefficient ~0.7 × loop gain ~19).
+The implicit solve is stable there (tested).
+
+**Release: unchanged.** Every release probe drops to −50 dBFS, below threshold, where the loop
+asks for zero and is open. The FETish seven-dial ladder comes out within 0.49 % in both
+topologies, and the depth table at the fitted dial 4.82 reads 4.1 / 4.2 %. `RELEASE_*` carries
+over untouched. ⚠ On program material that releases while still above threshold, the feedback
+release IS faster (the same ~R× loop speed-up). No capture measures that.
+
+**Attack: refitted** (`npm run fet:fbrefit`, against `FETISH_ATTACK_TABLE`):
+
+| | ladder scale | k | rms |
+|---|---|---|---|
+| feed-forward (re-run, grid) | ×1.000 | −0.090 | 2.30 % |
+| **feedback** | **×4.000** | **−0.095** | **2.30 %** |
+| feedback, no depth schedule | ×3.99 | — | 36.5 % |
+
+- ⚠⚠ **The data cannot tell the topologies apart.** t63 is quantised to 6–12 % of the deep rows,
+  and both land on the same quanta.
+- ⚠ **The loop does not explain the depth dependence by itself**, so the schedule stays, at
+  nearly the same slope.
+- ⚠ **A golden search stalls on this staircase objective.** The first fitter returned 3.45 %
+  for feed-forward at its own shipping constants. It now uses a grid.
+- ⚠ **Scales either side of the optimum land on adjacent quanta.** 3.957 and 4.000 both scored
+  2.30 % on one run and 6.3 / 2.3 % on the next, after the drive solve moved. The optimum is a
+  plateau.
+
+**What feedback changes audibly: attack becomes ratio-dependent.** Settled −12 dBFS square,
+Input 70, feedback over feed-forward t63:
+
+| | 4:1 | 8:1 | 12:1 | 20:1 | all |
+|---|---|---|---|---|---|
+| dial 1 | 1.00 | 0.49 | 0.33 | 0.20 | 0.97 |
+| dial 4 | 1.17 | 0.50 | 0.33 | 0.17 | 1.25 |
+
+Feed-forward gives every numbered button the same time. Either reference only measured attack
+at 4:1, so ⚠ **nothing says whether the faster high ratios are right**. The cheapest
+discriminating capture is `bursts.wav` at 20:1 against 4:1, same Input and same attack dial.
+
+**All-buttons lag: 1.5 under feedback** (`FB_ALL_ATTACK_LAG`), against CLA-76's all/4:1 ratio
+of 0.721. ⚠⚠ Feedback brings the "late attack" back, for a structural reason. All-buttons
+leaves the knee near 20:1, so its loop is far faster than 4:1's: 0.488 at a lag of 1. This
+instrument reads feed-forward at 0.767 at lag 1 (0.95 to match), not the 0.721 recorded with
+the full bursts plan, so compare lags within one instrument only. Steps are 0.047, so 1.45–1.55
+are indistinguishable.
+
+**Not done.** No preset re-cut (feedback is a bench prototype). Nothing auditioned. CPU: two
+closed-form solves per sample on the mono base-rate detector, not benchmarked.
+
+### The topology test: CLA-76 20:1 against 4:1 (October 2026)
+
+Two CLA-76 `bursts.wav` bounces: `cla76_bursts_r4_I3_a1_r3.wav` and
+`cla76_bursts_r20_I3_a1_r3.wav`. Same Input (I3), attack dial 1 and release dial 3; only the
+ratio button moved. ⚠ They were bounced at **48 kHz**, so they are read with
+`npm run fet:ballistics -- --rate 48000` (`fet-ballistics.mjs --fit --rate 48000`). The 4 kHz
+probe survives that rate intact, but t63 is read in half-period steps (125 µs), ~9 % of the
+20:1 reading. Both bounces end 4–6 s short and carry CLA-76's demo mute grid (20 / 40 / 60 s).
+The tool schedules around both.
+
+| | settled GR | attack t63 per hold (0.05 / 0.2 / 1 / 3 s) |
+|---|---|---|
+| CLA-76 4:1 | 10.91 dB | 4688 / 5438 / 4938 / 4938 µs |
+| CLA-76 20:1 | 8.43 dB | 1438 at every hold |
+
+**20:1 over 4:1 = 0.291** (0.26–0.31 across holds). Our kernel, rendered the reference's way
+(`r20OverR4` in `fet-feedback-refit.mjs`: one Input, set where 4:1 settles at 10.91 dB, both
+buttons through it, the real burst plan at 48 kHz, read by `analyseCapture`):
+
+| | 20:1 / 4:1 |
+|---|---|
+| **CLA-76** | **0.291** |
+| feedback | **0.268** |
+| feed-forward | **1.244** |
+
+- ⚠⚠ **Feed-forward gets the sign wrong.** 20:1 settles shallower (the moving threshold), and
+  the attack depth schedule makes a shallower reduction attack *slower*.
+- **Feedback was calibrated at 4:1 only**, so 0.27 is an out-of-sample prediction, inside the
+  reference's own spread across holds.
+- **Release does not change the verdict.** With our release slowed to the reference's ~1.75 s
+  (it reads 1.44–1.95 s at its "dial 3"), the ratios are 1.244 / 0.256. Bursts sit 17 s apart,
+  ~9 time constants, so no reduction carries into the next burst.
+- `test/dsp/fetFeedbackDetector.test.js` pins both on a one-burst plan.
+
+**Side findings, not resolved:**
+
+1. **Depth at 20:1 is 1.6 dB off, in both topologies.** At the shared Input we settle at
+   10.04 dB (feed-forward) and 10.12 (feedback), against CLA-76's 8.43. The moving threshold
+   was fitted on stairs at attack dial 7. At dial 1, CLA-76 separates the buttons by 2.48 dB and
+   we separate them by 0.87. Its 4:1 depth also moves with the attack dial: 10.91 here at a1,
+   9.66 on the earlier a4 capture at the same I3. Settled depth on a sine depending on the
+   attack dial is something our unsmoothed-rectifier detector does differently. Its own
+   question; the topology question doesn't depend on it.
+2. **CLA-76's release at "dial 3" reads 1.4–1.95 s**, ~15× its dial-4 all-buttons readings
+   (77–124 ms) and far past our dial 1 (268–338 ms). Either the release knob was not where the
+   name says, or CLA-76's release dial is not ours. Worth confirming before using these files
+   for release.
+3. **These two DO stretch with exposure at constant depth**: 1774 → 1953 ms (4:1) and
+   1444 → 1749 ms (20:1) from the 0.05 s to the 3 s hold, where depth barely moves. The
+   depth schedule cannot explain that, unlike the all-buttons capture. It may be a tail at
+   this slow release setting. Release-limb finding only.
+
+### Feedback release: open by default, after the owner heard bass distort (October 2026)
+
+**Report:** the FBK detector distorted more than FWD on a bass track at the fastest release.
+Measured on the owner's dry bass DI (`AllTape_Bass_dry_v1`, 17.5 s), saturator off, both
+topologies matched to 6 dB average reduction. The metric is the gain-modulation product: the
+input times the gain minus its 20 ms-smoothed self.
+
+| release 7 | FWD | FBK (release in loop) | FBK − FWD |
+|---|---|---|---|
+| 4:1, attack 4 / 7 | −14.5 / −14.2 dB | −13.3 / −13.1 | +1.2 / +1.1 |
+| 20:1, attack 4 / 7 | −14.0 / −13.7 | −12.6 / −12.6 | +1.4 / +1.1 |
+
+At release 4 the gap is +0.5 dB.
+
+**Cause: the calibration was half-applied.** The attack ladder was slowed ×4 so 4:1 lands on
+the documented times. The release was left alone because every release capture drops below
+threshold, where the loop is open and FBK equals FWD. A bass cycle's falling half is still
+above threshold, though. There the loop sped the release up by ~R×, and the gain recovered
+inside each cycle. On a held 55 Hz tone at release 7 the per-cycle gain swing was 1.12 dB (FWD)
+against 1.93 dB (FBK) at 4:1, and 1.39 against 2.56 at 20:1. ⚠ This was the opposite of the
+prediction made when the prototype was proposed ("less waveform-tracking distortion at the fast
+dials"). That held for the attack limb and not for the release.
+
+**Fix: `fbRelease: 'open'`, now the default.** The loop still decides whether the cell is
+releasing, but the release runs toward the settled reduction on the documented dial constant,
+as feed-forward's does. Results:
+
+- Swing on the held tone is identical to FWD.
+- Bass modulation is ±0.0 to +0.3 dB from FWD.
+- The FETish attack table reads 2.85 % (2.30 with the loop release: one 125 µs step on one row).
+- CLA-76's 20:1/4:1 ratio reads 0.256 (0.268 with the loop release), against 0.291.
+
+`'loop'` stays selectable. ⚠ No capture on either reference measures in-loop release, so the
+loop release is neither confirmed nor ruled out. It is only further from the documented times
+the plugin is built on.
+
+### The feedback detector SHIPS (October 2026)
+
+Owner's call, after listening: `detector: 'feedback'` is the default, with
+`fbRelease: 'open'`. Feed-forward stays on the bench (FWD) and in `FET_LEGACY_PATCH`.
+
+**What the switch changes, on the owner's dry bass DI at Input 60.** The FWD−FBK difference
+signal against the output:
+
+| | null depth |
+|---|---|
+| 4:1, all attacks | −50 to −56 dB |
+| all-buttons | −36 to −54 dB |
+| any ratio at attack 7 | −44 to −56 dB |
+| 8:1 at attack 1–4 | −21 to −34 dB |
+| 20:1 at attack 1–4 | −16 to −29 dB |
+
+At 8:1 and 20:1 with slow-to-medium attack, peaks come out 1.2–2.1 dB lower on 8:1 and
+2.9–4.2 dB lower on 20:1. Elsewhere the switch is inaudible by construction: 4:1 is the attack
+calibration point, the release runs on the documented times and the static curve is exact.
+
+**Presets.** Re-solved on Input against the `AS_CUT_AVG_GR` targets with the shipping kernel.
+The dials did not move: they mean the documented times, which feedback keeps, and the faster
+attack at 8:1 / 12:1 is the point of the switch, not drift to undo.
+
+| preset | before | after |
+|---|---|---|
+| vocal-punch | 4.14 dB | unchanged (−0.07 from target) |
+| gentle-ride | 3.12 dB | unchanged (−0.12) |
+| parallel-thickener | 6.48 dB | unchanged (−0.06) |
+| consonant-control | Input 57 → 5.59 dB (+0.13) | **Input 56 → 5.37 dB (−0.09)** |
+| all-buttons-in | Input 55 → 9.62 dB vs its as-cut 9.77 (−0.15, at the tolerance) | **Input 56 → 9.85 dB (+0.08)** |
+
+⚠ `npm run fet:recut` could not run here: a shallow clone has no `57e1877`. The test's pinned
+as-cut figures carried the target instead, so the dial choice was not re-run. It reads only the
+documented constants, which did not change.
+
+**Instruments pinned to feed-forward.** `runKernel` in `fet-ballistics.mjs`, and `measureAt` in
+`fet-attack-depth.mjs` and `fet-release-depth.mjs`, now set `detector: 'feedforward'` ahead of
+the caller's params. That is the same reason `runKernel` already pins the schedules: every
+number in the record was taken on feed-forward, and an instrument that follows the product
+default cannot be compared against its own history. Pass `detector: 'feedback'` to measure the
+shipping kernel. `fet-feedback-refit.mjs` names both topologies explicitly.
+⚠ The static fits (knee law, moving threshold, all-buttons law) were made on feed-forward. On a
+constant |x| feedback settles identically to 1e-14 dB; on a sine it settles ≤ 0.15 dB apart
+(the unsmoothed detector's in-cycle ripple), so those fits carry over to within that.
+
+Full suite 1813/1813, including chunked-apply seams and preview/apply convergence, which now
+run on feedback.
+
+**Review follow-up (Copilot on muhammadatt/wavely-app#177).** The feedback branch test ran a
+second implicit solve per sample (`_solveFeedback(over, gr, 0) > gr`). It is the same test as
+`grTarget > gr`: F(x) = x − G(x) is strictly increasing, so G(over) > gr ⇔ the loop's ask > gr.
+Replaced, and the output did not change: 0 differing samples of 46.2 M across 60 settings on the
+owner's bass DI (5 ratios × attack 1/4/7 × release 1/7 × both `fbRelease`).
+
+CPU, 70 s of mono at 20:1, attack 4:
+
+| path | before | after | feed-forward |
+|---|---|---|---|
+| oversampled (preview / apply) | 552 ms | 499 ms | 531 ms |
+| base rate (measurement) | 163 ms (+18 %) | 136 ms | 146 ms |
+
+Feedback is at feed-forward's cost in both paths, within timing noise.
+
+## LA Vintage 2A — sibilance guard on the cell shaper (October 2026)
+
+**Report.** Harmonics on adds warmth that works on vocals almost everywhere, but loud sibilants / HF spikes distort audibly. The owner suspected the pre/de-emphasis.
+
+**Diagnosis (measured, synthetic vowels + 4–10 kHz sibilant bursts at four levels, shipping defaults, percentile auto makeup).** Metric: Harmonics on minus off, energy re the segment, in <1 k / 1–3.5 k / >3.5 k.
+
+- It is the CELL stage: valve off barely moves the sibilant rows; cell off removes most of it.
+- It is level-THRESHOLDED: quiet sibilants are clean (−53 dB), loud ones jump to −19 dB at PR 50. The cell's drive is `5·comp·(1 − e^(−GR/τ))` — it only works while compressing — and a loud "s" is what makes the gain reduction.
+- Emphasis 85 (+10.2 dB shelf at 2300 Hz) gives a sibilant its FULL boost, so it is driven harder than any vowel.
+- The products land mostly BELOW 1 kHz: the quartic is even, and past |u| = 1 its continuations have unequal slopes (1.13 / 0.87), a rectifier on noise. Envelope grit and difference tones sit under the de-emphasis corner, which only cuts above 2.3 kHz, and the "s" has nothing down there to mask them.
+
+PR 70, <1 kHz band, sibilants peaking −11 / −5 / −1 dBFS: shipping −24.6 / −19.3 / −17.8; Emphasis 0 −53.8 / −37.4 / −32.7, vowels unchanged in that synthetic test (−30.4 → −30.3).
+
+**Emphasis 0 was auditioned by the owner and rejected**: it fixes the distortion but takes appreciable warmth with it — on real voice the pair is part of what the cell does to vowels. So the fix is keyed on the material instead.
+
+**Fix: `sibilanceGuard`** (0–100, ships 100). A 2nd-order 4 kHz high-pass on the mono side-chain input; the HF fraction of energy (4 ms mean squares) through a smoothstep 0.25 → 0.6 scales the cell's drive down (1 ms down, 30 ms back). Ratio, so level-independent. Linear path, emphasis, detector and gain reduction untouched. PR 70, same rows: −49.8 / −41.2 / −37.1; vowels −30.4 → −30.9. On /a/, /i/ and an exaggerated bright /i/ (+20 dB formants at 2.8–4.5 kHz) the scale holds at 1.000 (min 0.998). 0 is bit-identical to the previous kernel (max diff 0 at PR 70, base rate, limit 90), and `LA2A_TUBESAT_PATCH` carries 0. Pinned by `test/dsp/la2aSibilanceGuard.test.js`. ⚠ A hard step onset is broadband and briefly reads as top end; real speech onsets do not. ⚠ The valve stage is not guarded. ⚠ Constants reasoned, not auditioned.

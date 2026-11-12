@@ -9,7 +9,7 @@
  * answers with any other word is not a warning or a wrong number — it is a
  * measurement that never lands, with the panel still claiming AUTO and the knob
  * sitting whereever it was. A handler posting `type: 'complete'` did exactly
- * that: OptoSmooth's auto makeup stopped working entirely, and the only symptom
+ * that: LA Vintage 2A's auto makeup stopped working entirely, and the only symptom
  * anyone could see was that two settings produced identical output.
  *
  * Nothing else covers this seam. The worker is not reachable from the app's
@@ -66,12 +66,17 @@ function tone(seconds = 0.5) {
 const MEASUREMENTS = [
   ['la2aAutoMakeup', { peakReduction: 60 }, 'makeupDb'],
   ['la2aAutoMakeup', { peakReduction: 60, reference: 'percentile' }, 'makeupDb'],
-  ['fet1176AutoMakeup', { input: 55 }, 'makeupDb'],
+  ['fet1176AutoMakeup', { inputDrive: 55 }, 'makeupDb'],
+  ['fet1176AutoMakeup', { inputDrive: 55, reference: 'percentile' }, 'makeupDb'],
   ['softClipperAutoMakeup', {}, 'makeupDb'],
   ['schepsAutoTrim', {}, 'trimDb'],
   ['softClipperCeiling', { percentile: 0.001 }, 'ceilingDb'],
   ['voiceProfile', {}, 'profile'],
   ['measureLoudness', {}, 'loudness'],
+  ['deEsserAutoAir', { kernelParams: { amount: 0.4 } }, 'airDb'],
+  ['phatassTapeMakeup', { tape: 4, warmthCeilingDb: -6 }, 'makeupDb'],
+  ['phatassOutputMakeup', { tape: 4, tapeMakeupDb: 2, outputMakeup: 'rms', warmthCeilingDb: -6 }, 'makeupDb'],
+  ['phatassOutputMakeup', { tape: 4, tapeMakeupDb: 2, outputMakeup: 'keep' }, 'makeupDb'],
   [
     'loudnessNormalize',
     { target: { targetDb: -16, unit: 'LUFS', ceilingDb: -1 }, peakMode: 'limit' },
@@ -80,9 +85,9 @@ const MEASUREMENTS = [
 ]
 
 for (const [type, params, key] of MEASUREMENTS) {
-  const label = type === 'la2aAutoMakeup' && params.reference
+  const label = params.reference
     ? `${type} (${params.reference})`
-    : type
+    : params.outputMakeup ? `${type} (${params.outputMakeup})` : type
   test(`${label} answers with type "done"`, () => {
     const reply = request(type, { channelData: tone(), params })
     assert.equal(reply.type, 'done',
@@ -105,7 +110,7 @@ test('the ceiling solvers carry the knee back with them, never the level alone',
     channelData: audio, params: { peakReduction: 70, reference: 'percentile' },
   })
   assert.equal(percentile.type, 'done')
-  assert.ok('ceilingKneeDb' in percentile, 'OptoSmooth must return a knee with its ceiling')
+  assert.ok('ceilingKneeDb' in percentile, 'LA Vintage 2A must return a knee with its ceiling')
   assert.ok(Number.isFinite(percentile.ceilingKneeDb))
 
   // The peak reference needs no ceiling, so the key is present and null rather
@@ -119,9 +124,36 @@ test('the ceiling solvers carry the knee back with them, never the level alone',
   const scheps = request('schepsAutoTrim', { channelData: audio, params: {} })
   assert.equal(scheps.type, 'done')
   assert.ok('ceilingKneeDb' in scheps, 'Scheps must return a knee with its ceiling')
+
+  // LA Classic 76 shares the mechanism and therefore the failure mode.
+  const fetBody = request('fet1176AutoMakeup', {
+    channelData: audio, params: { inputDrive: 70, reference: 'percentile' },
+  })
+  assert.equal(fetBody.type, 'done')
+  assert.ok('ceilingKneeDb' in fetBody, 'LA Classic 76 must return a knee with its ceiling')
+  assert.ok(Number.isFinite(fetBody.ceilingKneeDb))
+  const fetPeak = request('fet1176AutoMakeup', {
+    channelData: audio, params: { inputDrive: 70 },
+  })
+  assert.ok('ceilingKneeDb' in fetPeak)
+  assert.equal(fetPeak.ceilingKneeDb, null)
 })
 
-test('the two OptoSmooth references really do return different makeup', () => {
+test('the two LA Classic 76 references really do return different makeup', () => {
+  const audio = tone(1)
+  const byPeak = request('fet1176AutoMakeup', {
+    channelData: audio, params: { inputDrive: 70 },
+  })
+  const byBody = request('fet1176AutoMakeup', {
+    channelData: audio, params: { inputDrive: 70, reference: 'percentile' },
+  })
+  assert.equal(byPeak.type, 'done')
+  assert.equal(byBody.type, 'done')
+  assert.notEqual(byPeak.makeupDb, byBody.makeupDb,
+    'the reference is being dropped somewhere between the message and the solve')
+})
+
+test('the two LA Vintage 2A references really do return different makeup', () => {
   const audio = tone(1)
   const byPeak = request('la2aAutoMakeup', {
     channelData: audio, params: { peakReduction: 60 },
@@ -162,4 +194,45 @@ test('a handler that throws answers with an error, not silence', () => {
   const reply = request('la2aAutoMakeup', { channelData: undefined })
   assert.equal(reply.type, 'error')
   assert.ok(reply.message, 'an error reply must say something')
+})
+
+test('the PHAT*SS Warmth readout answers "done", whole and sampled', async () => {
+  const { toKernelParams } = await import('../../src/audio/phatassParams.js')
+  const { warmthLayers, warmthGuard } = toKernelParams({ warmth: 5, warmthCeilingDb: -6, warmthRefPeaksDb: [-14, -14, -14, -14] })
+  const whole = request('phatassWarmthReadout', { channelData: tone(1), params: { layers: warmthLayers, guard: warmthGuard, bands: true, peak: true } })
+  assert.equal(whole.type, 'done')
+  assert.equal(whole.__id, 7)
+  assert.ok(Array.isArray(whole.bandsDb) && Number.isFinite(whole.peakDb))
+  // The sampled path: blocks with their run-in, no top-level channelData.
+  const blocks = [0, 1].map(() => ({ channelData: tone(1.25), skip: Math.round(0.25 * SR) }))
+  const sampled = request('phatassWarmthReadout', { channelData: [], params: { layers: warmthLayers, guard: warmthGuard, blocks } })
+  assert.equal(sampled.type, 'done')
+  assert.equal(sampled.__id, 7)
+  assert.ok(Array.isArray(sampled.bandsDb))
+})
+
+test('an apply chunk hands its audio back with "done"', async () => {
+  // ⚠ The parallel apply resolves each chunk on `done` and stitches
+  // `channelData` — a reply under another type, or without the audio, fails
+  // the whole apply onto the one-thread fallback.
+  const { toKernelParams, phatassLatencySamples } = await import('../../src/audio/phatassParams.js')
+  const input = tone(1)
+  const skip = 4096, length = 8192
+  const latency = phatassLatencySamples(SR)
+  assert.ok(skip + length + latency <= input[0].length)
+  const stages = [{ renderer: 'phatass', kernelParams: toKernelParams({ tape: 3 }) }]
+  const reply = request('renderChunk', { channelData: input, params: { stages, latency, skip, length } })
+  assert.equal(reply.type, 'done')
+  assert.equal(reply.__id, 7, 'the transferring reply must echo the request id')
+  assert.equal(reply.channelData.length, 1)
+  assert.ok(reply.channelData[0] instanceof Float32Array)
+  assert.equal(reply.channelData[0].length, length)
+})
+
+test('an apply chunk for a kernel the worker cannot render answers with an error', () => {
+  const reply = request('renderChunk', {
+    channelData: tone(1), params: { stages: [{ renderer: 'vocalSat', kernelParams: {} }], latency: 0, skip: 0, length: 128 },
+  })
+  assert.equal(reply.type, 'error')
+  assert.match(reply.message, /no chunk renderer/)
 })

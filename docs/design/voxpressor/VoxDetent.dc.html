@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;justify-content:center;user-select:none">
+  <sc-if value="{{ isDot }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+    <div style="position:relative;width:54px;height:54px">
+      <sc-for list="{{ dotTicks }}" as="t" hint-placeholder-count="3">
+        <button type="button" onClick="{{ t.pick }}" title="{{ t.label }}" style="position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;padding:0;border:none;border-radius:999px;cursor:pointer;transform-origin:50% 50%;transition:background-color .15s ease;transform:{{ t.tf }};background:{{ t.bg }};box-shadow:{{ t.sh }}"></button>
+      </sc-for>
+      <button type="button" onClick="{{ advance }}" onPointerDown="{{ down }}" style="position:absolute;left:7px;top:7px;width:40px;height:40px;padding:0;border:none;border-radius:50%;cursor:pointer;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:{{ capSh }}">
+        <span style="position:absolute;inset:11.6%;border-radius:50%;background:linear-gradient(160deg,#3c4757,#27303b);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)"></span>
+        <span style="position:absolute;inset:0;pointer-events:none;transition:transform .15s ease;transform:{{ dotRot }}"><span style="position:absolute;left:50%;top:15%;width:3px;height:24%;margin-left:-1.5px;border-radius:2px;background:{{ color }};box-shadow:0 0 5px {{ color }}"></span></span>
+      </button>
+    </div>
+    <span style="font:700 11px/1 'JetBrains Mono',monospace;letter-spacing:.1em;font-variant-numeric:tabular-nums;white-space:nowrap;color:{{ readInk }}">{{ curLabel }}</span>
+  </div>
+  </sc-if>
+  <sc-if value="{{ isSm }}" hint-placeholder-val="{{ false }}">
+  <div style="position:relative;width:100px;height:62px">
+    <sc-for list="{{ labelsSm }}" as="l" hint-placeholder-count="3">
+      <button onClick="{{ l.pick }}" style="position:absolute;left:{{ l.x }};top:{{ l.y }};transform:translate(-100%,-50%);border:none;background:transparent;padding:2px;cursor:pointer;white-space:nowrap;font:700 8px/1 'JetBrains Mono',monospace;letter-spacing:.04em;transition:color .15s ease;color:{{ l.ink }};text-shadow:{{ l.glow }}">{{ l.label }}</button>
+    </sc-for>
+    <sc-for list="{{ dotsSm }}" as="t" hint-placeholder-count="3">
+      <span style="position:absolute;left:{{ t.x }};top:{{ t.y }};width:3px;height:3px;margin:-1.5px 0 0 -1.5px;border-radius:50%;background:{{ t.c }}"></span>
+    </sc-for>
+    <div onPointerDown="{{ down }}" style="position:absolute;left:56px;top:15px;width:32px;height:32px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 7px 12px -6px rgba(0,0,0,.95), inset 0 1px 1px rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65)">
+      <div style="position:absolute;inset:0;pointer-events:none;transition:transform .12s cubic-bezier(.3,1.5,.5,1);transform:{{ rotSm }}">
+        <div style="position:absolute;left:50%;top:3px;width:2px;height:8px;margin-left:-1px;border-radius:1px;background:#eaf6f8"></div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+  <sc-if value="{{ isLg }}" hint-placeholder-val="{{ true }}">
+  <div style="position:relative;width:136px;height:72px">
+    <sc-for list="{{ labels }}" as="l" hint-placeholder-count="3">
+      <button onClick="{{ l.pick }}" style="position:absolute;left:{{ l.x }};top:{{ l.y }};transform:translate(-50%,-50%);border:none;background:transparent;padding:2px;cursor:pointer;white-space:nowrap;font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.08em;transition:color .15s ease;color:{{ l.ink }};text-shadow:{{ l.glow }}">{{ l.label }}</button>
+    </sc-for>
+    <div onPointerDown="{{ down }}" style="position:absolute;left:48px;top:28px;width:40px;height:40px;border-radius:50%;cursor:grab;touch-action:none;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:0 8px 14px -8px rgba(0,0,0,.95), inset 0 1px 1px rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.65)">
+      <div style="position:absolute;inset:0;pointer-events:none;transition:transform .12s cubic-bezier(.3,1.5,.5,1);transform:{{ rot }}">
+        <div style="position:absolute;left:50%;top:4px;width:2px;height:10px;margin-left:-1px;border-radius:1px;background:#eaf6f8"></div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:160,&quot;height&quot;:90},&quot;options&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;AUTO,GENTLE,NORMAL,FAST&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;value&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:0,&quot;tsType&quot;:&quot;number&quot;},&quot;color&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#3fd0de&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;onChange&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(i:number)=&gt;void&quot;}}">
+class Component extends DCLogic {
+  state = { i: null };
+  renderVals() {
+    const opts = (this.props.options ?? 'A,B,C').split(',');
+    const n = opts.length, a = this.props.color ?? '#3fd0de';
+    const spread = n >= 4 ? 70 : 55, light = this.props.surface === 'light';
+    const cur = this.state.i ?? this.props.value ?? 0;
+    const angSm = (i) => (n < 2 ? -90 : -40 - (100 * i) / (n - 1));
+    const angle = (i) => (n < 2 ? 0 : -spread + (2 * spread * i) / (n - 1));
+    const setI = (i) => { const j = Math.max(0, Math.min(n - 1, i)); if (j !== this.cur()) { this.setState({ i: j }); this.props.onChange?.(j); } };
+    this.cur = () => this.state.i ?? this.props.value ?? 0;
+    return {
+      rot: `rotate(${angle(cur)}deg)`,
+      isDot: this.props.size === 'dot', curLabel: opts[cur], color: a,
+      dotRot: `rotate(${-135 + cur * (270 / Math.max(1, n - 1))}deg)`,
+      dotTicks: opts.map((label, i) => ({ label, pick: () => setI(i),
+        tf: `rotate(${-135 + i * (270 / Math.max(1, n - 1))}deg) translateY(-26px)`,
+        bg: i === cur ? a : (light ? 'rgba(0,0,0,.28)' : 'rgba(255,255,255,.22)'), sh: i === cur ? `0 0 5px ${a}` : 'none' })),
+      advance: () => setI(this.cur() >= n - 1 ? 0 : this.cur() + 1),
+      capSh: light ? 'inset 0 1px 1px rgba(255,255,255,.1), inset 0 -4px 7px rgba(0,0,0,.55), 0 1px 1px rgba(40,30,20,.35), 0 6px 10px -4px rgba(40,30,20,.45)' : '0 9px 15px -7px rgba(0,0,0,.95), inset 0 1px 1px rgba(255,255,255,.1), inset 0 -4px 7px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.7)',
+      readInk: light ? '#bf782a' : `color-mix(in srgb, ${a} 70%, #ffffff)`,
+      isSm: this.props.size === 'sm', rotSm: `rotate(${angSm(cur)}deg)`, isLg: this.props.size !== 'sm' && this.props.size !== 'dot',
+      labelsSm: opts.map((label, i) => {
+        const r = (angSm(i) * Math.PI) / 180, on = i === cur;
+        return { label, x: (72 + 25 * Math.sin(r)).toFixed(1) + 'px', y: (31 - 22 * Math.cos(r)).toFixed(1) + 'px',
+          ink: on ? (light ? '#bf782a' : a) : (light ? 'rgba(0,0,0,.3)' : 'rgba(255,255,255,.35)'),
+          glow: on && !light ? `0 0 6px color-mix(in srgb, ${a} 60%, transparent)` : 'none', pick: () => setI(i) };
+      }),
+      dotsSm: opts.map((_, i) => {
+        const r = (angSm(i) * Math.PI) / 180, on = i === cur;
+        return { x: (72 + 20 * Math.sin(r)).toFixed(1) + 'px', y: (31 - 20 * Math.cos(r)).toFixed(1) + 'px', c: on ? a : (light ? 'rgba(0,0,0,.3)' : 'rgba(255,255,255,.22)') };
+      }),
+      labels: opts.map((label, i) => {
+        const r = (angle(i) * Math.PI) / 180, on = i === cur;
+        return { label, x: (68 + 58 * Math.sin(r)).toFixed(1) + 'px', y: (46 - 38 * Math.cos(r)).toFixed(1) + 'px',
+          ink: on ? (light ? '#bf782a' : a) : (light ? 'rgba(0,0,0,.3)' : 'rgba(255,255,255,.35)'),
+          glow: on && !light ? `0 0 6px color-mix(in srgb, ${a} 60%, transparent)` : 'none', pick: () => setI(i) };
+      }),
+      down: (e) => {
+        e.preventDefault();
+        const y0 = e.clientY, i0 = this.cur();
+        const mv = (ev) => setI(Math.round(i0 + (y0 - ev.clientY) / 30));
+        const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+        window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+      },
+    };
+  }
+}
+</script>
+</body>
+</html>

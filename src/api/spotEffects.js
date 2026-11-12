@@ -7,16 +7,15 @@
  *
  * Currently unused by the client: vocal saturation was the only caller and now
  * runs in an AudioWorklet (src/audio/vocalSatProcessor.js), which removed the
- * upload round-trip. Kept because it is still the right shape for the spot
- * operations that genuinely have to run server-side — noise reduction being
- * the obvious one, since DeepFilterNet3 has no browser implementation here.
+ * upload round-trip. Kept for synchronous spot operations. Noise reduction
+ * does NOT use it: its route is job-based (`async` in server/routes/spot.js),
+ * and its client is src/api/noiseReduction.js.
  * The server's /api/spot/vocal_saturation route also remains, and the preset
  * chain's own Python vocalSaturation stage is untouched.
  */
 
 import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+import { uploadAudio, postWithUpload } from './uploadAudio.js'
 
 /**
  * Run a spot effect on a region of the timeline.
@@ -37,20 +36,10 @@ export async function runSpotEffect({
   const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
   const wavBlob = floatChannelsToWavBlob(channelData, sampleRate, channels)
 
-  const formData = new FormData()
-  formData.append('file', wavBlob, 'selection.wav')
-  formData.append('params', JSON.stringify(params))
-
-  const res = await fetch(`${API_BASE}/api/spot/${operation}`, {
-    method: 'POST',
-    body: formData,
-  })
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: `Spot effect failed: ${res.status}` }))
-    throw new Error(body.error || `Spot effect failed: ${res.status}`)
-  }
-
+  const uploadId = await uploadAudio(wavBlob, { filename: 'selection.wav' })
+  const res = await postWithUpload(`/api/spot/${operation}`, {
+    uploadId, params: JSON.stringify(params),
+  }, 'Spot effect failed')
   return await res.blob()
 }
 

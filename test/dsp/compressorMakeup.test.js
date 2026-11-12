@@ -66,10 +66,25 @@ function peakDb(channels, skip = 0) {
 
 const SIGNAL = material()
 
-test('FET Punch: the measurement path measures the same level as the audio path', () => {
-  // The tolerance is the whole argument for the shortcut. Oversampling removes
-  // folded harmonics, which carry almost no energy, so the RMS it changes is a
-  // rounding error next to the gain being set from it.
+/**
+ * ⚠ THIS NO LONGER GUARDS A SHORTCUT FET PUNCH TAKES. `computeFET1176AutoMakeupDb`
+ * used to solve at `oversample: false` while apply rendered oversampled, which
+ * was 0.58 dB out on the tanh curve; it renders oversampled now. What is left is
+ * a characterisation of how far the two paths drift, which is worth keeping
+ * because the drift is not constant.
+ *
+ * ⚠ AND IT GREW WHEN THE INPUT KNOB DID. The base-rate path aliases the
+ * saturator's harmonics where the oversampled path folds them out, so the gap
+ * tracks DRIVE — measured on a mild signal at ratio 'all', fetDrive 1:
+ * 0.0133 dB at 7.9 dB of drive, 0.0257 at 16.2, 0.0498 at 24.0, roughly doubling
+ * every 8 dB. `IN_DRIVE_SPAN_DB` going 40 -> 48 added 8 dB at the top of the
+ * knob and so doubled the worst case, which on this suite's material took it
+ * from just inside 0.05 to 0.1031. The top of travel therefore carries its own
+ * bound, stated rather than folded into a looser one for everything.
+ */
+const TOP_OF_TRAVEL_TOLERANCE_DB = 0.15
+
+test('LA Classic 76: the measurement path measures the same level as the audio path', () => {
   for (const params of [
     { inputDrive: 30, ratio: '4', attack: 1, release: 4, fetDrive: 0 },
     { inputDrive: 50, ratio: '4', attack: 4, release: 4, fetDrive: 0.35 },
@@ -82,15 +97,31 @@ test('FET Punch: the measurement path measures the same level as the audio path'
     // The oversampled output is delayed, so skip its ramp-up on both sides.
     const delta = rmsDb(over.channelData, OVERSAMPLE_LATENCY_SAMPLES)
       - rmsDb(base.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+    const limit = params.inputDrive >= 100 ? TOP_OF_TRAVEL_TOLERANCE_DB : 0.05
     assert.ok(
-      Math.abs(delta) < 0.05,
+      Math.abs(delta) < limit,
       `inputDrive ${params.inputDrive} ratio ${params.ratio}: `
-      + `oversampled RMS differs from base-rate by ${delta.toFixed(4)} dB`,
+      + `oversampled RMS differs from base-rate by ${delta.toFixed(4)} dB (limit ${limit})`,
     )
   }
 })
 
-test('OptoSmooth: the measurement path measures the same level as the audio path', () => {
+test('the base-rate gap grows with drive, which is why the top of travel has its own bound', () => {
+  // ⚠ The monotonicity is the claim. If this ever went flat, the bound above
+  // would be an arbitrary number rather than a consequence of the wider knob.
+  const at = (inputDrive) => {
+    const p = { inputDrive, ratio: 'all', attack: 4, release: 4, fetDrive: 1 }
+    const over = processFET1176Buffer([SIGNAL], SR, { ...p, oversample: true })
+    const base = processFET1176Buffer([SIGNAL], SR, { ...p, oversample: false })
+    return Math.abs(rmsDb(over.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+      - rmsDb(base.channelData, OVERSAMPLE_LATENCY_SAMPLES))
+  }
+  const low = at(60), mid = at(80), high = at(100)
+  assert.ok(low < mid && mid < high, `gap not monotonic in drive: ${low} / ${mid} / ${high}`)
+  assert.ok(high < TOP_OF_TRAVEL_TOLERANCE_DB)
+})
+
+test('LA Vintage 2A: the measurement path measures the same level as the audio path', () => {
   for (const params of [
     { mode: 'compress', peakReduction: 20, tubeDrive: 0 },
     { mode: 'compress', peakReduction: 50, tubeDrive: 0.3 },
@@ -232,8 +263,8 @@ test('a peak compressor earns loudness from makeup; a slow leveller may not', ()
   // The measured difference between the two, and the reason the same makeup
   // rule reads so differently on them.
   //
-  // FET Punch catches peaks, so restoring them lifts everything underneath and
-  // the average rises — the textbook picture. OptoSmooth on this material does
+  // LA Classic 76 catches peaks, so restoring them lifts everything underneath and
+  // the average rises — the textbook picture. LA Vintage 2A on this material does
   // the opposite: a 10 ms attack into a multi-second release lets syllable
   // onsets through nearly intact while pulling the sustained body down, so it
   // reduces the average MORE than the peaks and peak-referenced makeup comes
@@ -241,7 +272,7 @@ test('a peak compressor earns loudness from makeup; a slow leveller may not', ()
   //
   // That is a property of an opto leveller rather than a fault, and it is
   // pinned here because it decides what users should expect: reach for FET
-  // Punch to make something louder, for OptoSmooth to make it steadier. On
+  // Punch to make something louder, for LA Vintage 2A to make it steadier. On
   // slower material the Opto does earn density — measured at +1.6 dB on a real
   // narration clip at Peak Reduction 60.
   const fetParams = { inputDrive: 50, ratio: '4', attack: 4, release: 4, fetDrive: 0.35 }
@@ -249,7 +280,7 @@ test('a peak compressor earns loudness from makeup; a slow leveller may not', ()
   const fetOut = processFET1176Buffer([SIGNAL], SR, { ...fetParams, outputGainDb: fetMakeup })
   const fetGain = rmsDb(fetOut.channelData, OVERSAMPLE_LATENCY_SAMPLES)
     - rmsDb([SIGNAL], OVERSAMPLE_LATENCY_SAMPLES)
-  assert.ok(fetGain > 0.5, `FET Punch should earn density, got ${fetGain.toFixed(2)} dB`)
+  assert.ok(fetGain > 0.5, `LA Classic 76 should earn density, got ${fetGain.toFixed(2)} dB`)
 
   const optoParams = { mode: 'compress', peakReduction: 70, tubeDrive: 0.3 }
   const optoMakeup = computeAutoMakeupDb([SIGNAL], SR, optoParams)
@@ -266,7 +297,7 @@ test('latency is reported per path, so the apply trim can never be wrong', () =>
   // The apply path trims exactly latencySamples. Anything that renders audio
   // takes the oversampled path and must report its delay; the measurement path
   // has none to report, and nothing renders through it.
-  for (const [name, Kernel] of [['FET Punch', FET1176Kernel], ['OptoSmooth', LA2AKernel]]) {
+  for (const [name, Kernel] of [['LA Classic 76', FET1176Kernel], ['LA Vintage 2A', LA2AKernel]]) {
     const k = new Kernel(SR)
     k.setParams({})
     assert.equal(
@@ -359,7 +390,7 @@ test('a hard onset is grabbed on its first sample, not one sample late', () => {
   )
 })
 
-test('OptoSmooth tracks its base-rate path across an onset too', () => {
+test('LA Vintage 2A tracks its base-rate path across an onset too', () => {
   // Slow attack makes this far less sensitive, but the interpolation is shared.
   const n = 16384
   const onset = Math.round(n / 2)
@@ -384,7 +415,7 @@ test('OptoSmooth tracks its base-rate path across an onset too', () => {
   assert.ok(worst < 0.05, `departs from base-rate by ${worst.toFixed(4)} across the onset`)
 })
 
-// ── FET Punch: the exact one-render solve ───────────────────────────────────
+// ── LA Classic 76: the exact one-render solve ───────────────────────────────────
 //
 // The makeup used to be a fixed-point iteration capped at three passes. Output
 // gain scales the WET path only, so `makeup += correction` converges at a rate
@@ -400,7 +431,7 @@ function peakOf(channels) {
   return p
 }
 
-test('FET Punch makeup restores the input peak at EVERY mix, not just at 1', () => {
+test('LA Classic 76 makeup restores the input peak at EVERY mix, not just at 1', () => {
   const x = material(3, 0.7)
   for (const mix of [1, 0.7, 0.5, 0.4, 0.3]) {
     const p = { inputDrive: 55, attack: 4, release: 5, ratio: '4', fetDrive: 0.35, scHpfHz: 0, mix }

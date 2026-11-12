@@ -1,7 +1,12 @@
 import { getSegmentDuration } from './operations.js'
+import { applyGainSegments } from './dsp/autoLevel.js'
 import { analysisWindow, analysedWholeRegion, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_PREROLL_S } from './la2aProcessor.js'
+// ⚠ From the PROCESSOR, not the effect wrapper — the wrapper pulls the worklet
+// URL and does not re-export kernel constants. Same shape as LA2A_PREROLL_S.
+import { FET1176_PREROLL_S } from './fet1176Processor.js'
+import { restorePeakToCeiling } from './dsp/makeupReference.js'
 import {
   LA2A_DEFAULTS, la2aPatchLatencySamples, toKernelParams,
 } from './effects/la2aCompressor.js'
@@ -18,11 +23,53 @@ import {
   toKernelParams as toSoftClipperKernelParams,
 } from './effects/softClipper.js'
 import { ensureAirBandWorklet } from './airBandWorkletLoader.js'
+import { ensureSaturationBenchWorklet } from './saturationBenchWorkletLoader.js'
+import {
+  SATURATION_BENCH_DEFAULTS,
+  toKernelParams as toSaturationBenchKernelParams,
+} from './effects/saturationBench.js'
+import { SAT_BENCH_LATENCY_SAMPLES, SAT_BENCH_PREROLL_S } from './saturationBenchProcessor.js'
 import {
   AIR_BAND_DEFAULTS,
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
+import { ensureDeEsserWorklet } from './deEsserWorkletLoader.js'
+import { DE_ESSER_PREROLL_S } from './deEsserProcessor.js'
+import { HF_RESO_FRAME_SIZE, HF_RESO_LATENCY_SAMPLES } from './deEsserResoStage.js'
+import {
+  DE_ESSER_DEFAULTS,
+  toKernelParams as toDeEsserKernelParams,
+  resoOn, resoKernelParams, softenOn, softenStageKernelParams,
+} from './effects/deEsser.js'
+import { softenLatencySamples } from './deEsserSoftenStage.js'
+import { ensureHFLimiterWorklet } from './hfLimiterWorkletLoader.js'
+import {
+  HF_LIMITER_DEFAULTS,
+  HF_LIMITER_PREROLL_S,
+  hfLimiterLatencySamples,
+  toKernelParams as toHFLimiterKernelParams,
+} from './hfLimiterParams.js'
+import { ensurePlosiveWorklet } from './plosiveWorkletLoader.js'
+import {
+  PLOSIVE_DEFAULTS, PLOSIVE_PREROLL_S, plosiveLatencySamples,
+  toKernelParams as toPlosiveKernelParams,
+} from './plosiveParams.js'
+import { ensurePhatassWorklet } from './phatassWorkletLoader.js'
+import {
+  PHATASS_DEFAULTS,
+  PHATASS_PREROLL_S,
+  phatassLatencySamples,
+  toKernelParams as toPhatassKernelParams,
+} from './phatassParams.js'
+import { READOUT_WHOLE_MAX_S, readoutBlocks } from './phatassWarmthReadout.js'
+import {
+  chunkCount,
+  planChunks,
+} from './chunkedApply.js'
+import { RESONANCE_FRAME_SIZE, resonanceHopSamples } from './resonanceParams.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
+import { ensureVoxPressorWorklet } from './voxPressorWorkletLoader.js'
+import { voxLatencySamples, toKernelParams as toVoxKernelParams, VOX_DEFAULTS } from './effects/voxPressorParams.js'
 import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
   SCHEPS_DEFAULTS,
@@ -112,6 +159,102 @@ export function renderRegionToBuffer(segments, start, end, sampleRate, channels)
   }
 
   return channelData
+}
+
+/**
+ * Render a region down to the mono 16 kHz 16-bit WAV that voice-activity
+ * detection actually consumes.
+ *
+ * ⚠ THE FULL-RATE FLOAT UPLOAD DOES NOT FIT DOWN THE PIPE. `floatChannelsToWavBlob`
+ * writes 32-bit float, so half an hour of mono at 44.1 kHz is 318 MB and an hour
+ * is 635 MB — against an upload limit, a proxy timeout and a user's uplink. The
+ * Auto Leveler is FOR chapter-length selections, so that is the ordinary case
+ * rather than an edge one.
+ *
+ * Nothing is lost that the detector would have used: Silero v5 runs at 16 kHz
+ * mono, and the server resamples to exactly this before calling it
+ * (`decodeToFloat32Mono16k`). Sending it pre-resampled removes a conversion
+ * rather than adding one, and takes an hour-long chapter to 110 MB (measured, not estimated).
+ *
+ * ⚠ ONE MEASUREMENT DOES RIDE ALONG AND IS AFFECTED. The same route returns the
+ * noise floor, measured on what it receives — so it is measured without the
+ * content above 8 kHz. Room tone is broadband, so a floor read this way lands a
+ * fraction of a dB LOW, which makes the leveler's headroom cap marginally more
+ * permissive rather than more conservative. It is a safety rail whose target the
+ * user sets and can see, not a precision reading, so a sub-dB shift in it is
+ * accepted here deliberately; if that ever stops being true, measure the floor
+ * client-side off the full-rate render instead of narrowing this upload.
+ *
+ * @param {Float32Array[]} channelData
+ * @param {number} sampleRate  the project's rate
+ * @returns {Promise<Blob>}
+ */
+export async function renderVadWavBlob(channelData, sampleRate) {
+  const numSamples = channelData[0].length
+  const channels = channelData.length
+
+  // Mono first: VAD is a single-channel decision, and mixing before the
+  // resample is one pass over the data instead of one per channel.
+  const mono = new Float32Array(numSamples)
+  if (channels === 1) {
+    mono.set(channelData[0])
+  } else {
+    for (let i = 0; i < numSamples; i++) {
+      let sum = 0
+      for (let c = 0; c < channels; c++) sum += channelData[c][i]
+      mono[i] = sum / channels
+    }
+  }
+
+  const outLength = Math.max(1, Math.round((numSamples * VAD_SAMPLE_RATE) / sampleRate))
+  const ctx = new OfflineAudioContext(1, outLength, VAD_SAMPLE_RATE)
+  const buffer = ctx.createBuffer(1, numSamples, sampleRate)
+  buffer.copyToChannel(mono, 0)
+  const source = ctx.createBufferSource()
+  source.buffer = buffer
+  source.connect(ctx.destination)
+  source.start()
+  const rendered = await ctx.startRendering()
+
+  return pcm16WavBlob(rendered.getChannelData(0), VAD_SAMPLE_RATE)
+}
+
+/** Silero v5's native rate. Resampling past this would throw information away. */
+const VAD_SAMPLE_RATE = 16000
+
+/**
+ * Mono 16-bit PCM WAV.
+ *
+ * 16-bit rather than float because this is only ever read by a detector whose
+ * decisions live far above the -96 dBFS quantisation floor, and it halves the
+ * upload again.
+ */
+function pcm16WavBlob(samples, sampleRate) {
+  const n = samples.length
+  const dataSize = n * 2
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+
+  writeString(view, 0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeString(view, 8, 'WAVE')
+  writeString(view, 12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)            // PCM
+  view.setUint16(22, 1, true)            // mono
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
+  view.setUint16(32, 2, true)            // block align
+  view.setUint16(34, 16, true)           // bits per sample
+  writeString(view, 36, 'data')
+  view.setUint32(40, dataSize, true)
+
+  for (let i = 0; i < n; i++) {
+    const clamped = Math.max(-1, Math.min(1, samples[i]))
+    view.setInt16(44 + i * 2, Math.round(clamped * 32767), true)
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' })
 }
 
 /**
@@ -419,7 +562,7 @@ export function loudnessNormalizeRegion(
  * why each span is right for its job.
  *
  * `ceilingDb` is null under the peak reference, which needs no ceiling: its
- * guarantee is arithmetic. See `peakOfChannels` in la2aProcessor.js.
+ * guarantee is arithmetic. See `peakOfChannels` in dsp/makeupReference.js.
  */
 export function computeLA2AAutoMakeup(
   segments, start, end, kernelParams, sampleRate, channels, reference = 'peak',
@@ -446,10 +589,40 @@ export function computeLA2AAutoMakeup(
   })
 }
 
-/** Measure the FET Punch auto-makeup (Output) for a region — see above. */
-export function computeFET1176AutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
-  return measureInWorker('fet1176AutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
-    .then(d => d.makeupDb)
+/**
+ * Measure FET Punch's auto-makeup for a region. Resolves
+ * `{ makeupDb, ceilingDb, ceilingKneeDb }`.
+ *
+ * ⚠ THE SAME CONTRACT AS `computeLA2AAutoMakeup`, DELIBERATELY — read its note
+ * for all of it. The two halves are measured over different spans (makeup from
+ * the worker's capped window because solving it means running the kernel; the
+ * ceiling over the WHOLE region because "never louder than the source" is a
+ * claim about the source, not about its first thirty seconds), and the knee
+ * must not be dropped or the kernel silently falls back to the widest fixed
+ * width and every render loses peak headroom.
+ *
+ * `ceilingDb` is null under the peak reference, which needs no ceiling.
+ */
+export function computeFET1176AutoMakeup(
+  segments, start, end, kernelParams, sampleRate, channels, reference = 'peak',
+) {
+  return measureInWorker(
+    'fet1176AutoMakeup', segments, start, end, { ...kernelParams, reference }, sampleRate, channels,
+  ).then((d) => {
+    if (reference !== 'percentile') {
+      return { makeupDb: d.makeupDb, ceilingDb: null, ceilingKneeDb: null }
+    }
+    const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
+    return {
+      makeupDb: d.makeupDb,
+      ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+      // The measured width only when the solve saw everything the ceiling was
+      // measured over — see `analysedWholeRegion`.
+      ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+        ? d.ceilingKneeDb
+        : null,
+    }
+  })
 }
 
 /**
@@ -497,6 +670,49 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
 }
 
 /**
+ * Measure VoxPressor for a region at its current knobs: the readouts and each
+ * stage's makeup. Resolves `measureVoxPressor`'s result (see voxPressorSolve.js)
+ * with the limiters' ceiling re-measured over the WHOLE region.
+ *
+ * ⚠ THE SAME TWO-SPAN CONTRACT AS `computeLA2AAutoMakeup`: the measurement
+ * renders both kernels several times, so it runs on the worker's capped window; the
+ * ceiling is the guarantee and is a claim about the whole source, so it comes
+ * from `regionPeakDb` — the window's peak would hold a louder passage the
+ * window never saw down to it.
+ *
+ * @param {object} kernelParams  `toKernelParams` of the panel (delete
+ *   `cornerHz` to have the voice profile measured here)
+ */
+export function computeVoxPressorMeasure(segments, start, end, kernelParams, sampleRate, channels) {
+  return measureInWorker(
+    'voxPressorMeasure', segments, start, end, kernelParams, sampleRate, channels,
+  ).then(({ type, ...d }) => {
+    const peakDb = regionPeakDb(segments, start, end, sampleRate, channels)
+    const ceilingDb = Number.isFinite(peakDb) ? peakDb : null
+    return {
+      ...d,
+      peaksCeilingDb: kernelParams.peaksOn ? ceilingDb : null,
+      bodyCeilingDb: kernelParams.bodyOn ? ceilingDb : null,
+      // The last limiter's ceiling and Density's anchor: the whole region's peak.
+      sourcePeakDb: ceilingDb,
+    }
+  })
+}
+
+/**
+ * VoxPressor's per-stage peak restores, measured EXACTLY over the whole region
+ * — for a region longer than the solve's analysis window. Resolves the solved
+ * params with the restores, ceilings and Body offset corrected. See
+ * `measureVoxPressorExact`.
+ */
+export function computeVoxPressorExact(segments, start, end, solved, sampleRate, channels) {
+  const sourcePeakDb = regionPeakDb(segments, start, end, sampleRate, channels)
+  return measureWholeRegionInWorker(
+    'voxPressorExact', segments, start, end, { solved, sourcePeakDb }, sampleRate, channels,
+  ).then(d => d.solved)
+}
+
+/**
  * Where a soft clipper ceiling preset lands for a region, in dBFS. Resolves
  * null if the region has no measurable content.
  *
@@ -528,6 +744,22 @@ export function computeVoiceProfile(segments, start, end, sampleRate, channels) 
     .then(d => d.profile ?? null)
 }
 
+/** The whole worklet chain's delay: the plugin's own plus every stage's. */
+function chainLatency(latencySamples, stages) {
+  return Math.max(0, Math.round(
+    latencySamples + stages.reduce((sum, st) => sum + (st.latencySamples ?? 0), 0),
+  ))
+}
+
+/**
+ * The pre-roll a render actually gets: what the plugin asks for, clamped to the
+ * audio the timeline has before the region — see PRE-ROLL in applyWorkletRegion.
+ */
+function regionPreRoll(preRollSamples, start, sampleRate) {
+  const wanted = Math.max(0, Math.round(preRollSamples))
+  return Math.min(wanted, Math.max(0, Math.floor(start * sampleRate)))
+}
+
 /**
  * Render a region through an effect's worklet in an OfflineAudioContext.
  *
@@ -549,11 +781,16 @@ export function computeVoiceProfile(segments, start, end, sampleRate, channels) 
  */
 async function applyWorkletRegion(
   segments, start, end, sampleRate, channels,
-  { ensureWorklet, processorName, kernelParams, latencySamples = 0, preRollSamples = 0 },
+  { ensureWorklet, processorName, kernelParams, latencySamples = 0, preRollSamples = 0, preStages = [], postStages = [] },
 ) {
   const duration = end - start
   const numSamples = Math.ceil(duration * sampleRate)
-  const latency = Math.max(0, Math.round(latencySamples))
+  // Pre- and post-stages are worklets chained AHEAD of / AFTER the main one,
+  // each with its own latency; the whole chain's delay is what the render has
+  // to trim. Only the De-Esser's Reso post-stage uses this today — every
+  // other caller passes none and renders exactly as before.
+  const stages = [...preStages, ...postStages]
+  const latency = chainLatency(latencySamples, stages)
 
   // ── PRE-ROLL ─────────────────────────────────────────────────────────────
   //
@@ -583,10 +820,10 @@ async function applyWorkletRegion(
   //
   // ⚠ OPT-IN, ONE STAGE AT A TIME. Every caller of this function has envelope
   // state and the same bug; turning it on for all of them at once would change
-  // the output of five shipped plugins in one commit. Three ask for it, each
-  // after its own measurement: Tube Saturation (4 s), OptoSmooth (2 s) and
-  // Scheps (2 s) — see the note beside each call site for what its number
-  // buys. The rest keep today's behaviour until each is measured on its own.
+  // the output of five shipped plugins in one commit. Four ask for it, each
+  // after its own measurement: Tube Saturation (4 s), OptoSmooth (2 s),
+  // Scheps (2 s) and the De-Esser (2 s, for its lisp guard’s 500 ms hold) — see the
+  // note beside each call site for what its number buys. The rest keep today's behaviour until each is measured on its own.
   //
   // Two of those measurements say pre-roll is not the answer, and they are the
   // reason this is not a flag to switch on everywhere. FET Punch's makeup
@@ -594,8 +831,7 @@ async function applyWorkletRegion(
   // a bounded reference would. ResoTame's error is the STFT grid phase,
   // (regionStart - preRoll) % hop, which the apply path cannot know; a pre-roll
   // that happens to land hop-aligned looks exact and is not.
-  const wantedPreRoll = Math.max(0, Math.round(preRollSamples))
-  const preRoll = Math.min(wantedPreRoll, Math.max(0, Math.floor(start * sampleRate)))
+  const preRoll = regionPreRoll(preRollSamples, start, sampleRate)
   const renderSamples = preRoll + numSamples + latency
 
   // Pull `latency` extra samples of real audio from past the region where the
@@ -608,6 +844,7 @@ async function applyWorkletRegion(
 
   const offlineCtx = new OfflineAudioContext(channels, renderSamples, sampleRate)
   await ensureWorklet(offlineCtx)
+  for (const st of stages) await st.ensureWorklet(offlineCtx)
 
   const inputBuffer = offlineCtx.createBuffer(channels, renderSamples, sampleRate)
   for (let ch = 0; ch < channels; ch++) {
@@ -630,8 +867,26 @@ async function applyWorkletRegion(
     processorOptions: { params: kernelParams },
   })
 
-  source.connect(node)
-  node.connect(offlineCtx.destination)
+  const stageNode = st => new AudioWorkletNode(offlineCtx, st.processorName, {
+    channelCount: channels,
+    channelCountMode: 'explicit',
+    outputChannelCount: [channels],
+    processorOptions: { params: st.kernelParams, ...(st.processorOptions ?? {}) },
+  })
+  let upstream = source
+  for (const st of preStages) {
+    const pre = stageNode(st)
+    upstream.connect(pre)
+    upstream = pre
+  }
+  upstream.connect(node)
+  upstream = node
+  for (const st of postStages) {
+    const post = stageNode(st)
+    upstream.connect(post)
+    upstream = post
+  }
+  upstream.connect(offlineCtx.destination)
   source.start(0)
 
   const rendered = await offlineCtx.startRendering()
@@ -654,6 +909,87 @@ async function applyWorkletRegion(
 }
 
 /**
+ * Apply a region: in parallel chunks when the plugin opts in (`chunk`) and the
+ * region is long enough to split, otherwise — and on any error — through the
+ * one-thread worklet render.
+ *
+ * `chunk` is { renderer, grid }: the kernel's name in chunkRender.js and the
+ * grid each chunk's start must sit on (see chunkedApply.js). The run-in is
+ * CHUNK_RUN_IN_S for every plugin. Every post-stage must name a `renderer`
+ * too, or the region renders on one thread.
+ */
+async function applyRegion(segments, start, end, sampleRate, channels, opts) {
+  const { chunk, preStages = [], postStages = [] } = opts
+  const chunkable = chunk && preStages.length === 0 && postStages.every(st => st.renderer)
+  if (chunkable) {
+    const numSamples = Math.ceil((end - start) * sampleRate)
+    const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 1
+    const count = chunkCount(numSamples, sampleRate, cores)
+    if (count > 1) {
+      try {
+        return await applyChunkedRegion(segments, start, end, sampleRate, channels, opts, count)
+      } catch (err) {
+        // Never lose an apply to the fast path: fall back to the one-thread render.
+        console.error(`${opts.processorName}: parallel apply failed, rendering on one thread:`, err)
+      }
+    }
+  }
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, opts)
+}
+
+/**
+ * A region in parallel chunks (chunkedApply.js): the same input the one-thread
+ * render would see, with the same pre-roll and the same latency, cut on the
+ * plugin's grid, each chunk rendered with a run-in of the audio before it in a
+ * worker of its own, then laid end to end. What each plugin stitches to is
+ * pinned in test/dsp/chunkedApply.test.js.
+ */
+async function applyChunkedRegion(segments, start, end, sampleRate, channels, opts, count) {
+  const { kernelParams, latencySamples = 0, preRollSamples = 0, postStages = [], chunk } = opts
+  const numSamples = Math.ceil((end - start) * sampleRate)
+  const latency = chainLatency(latencySamples, postStages)
+  const preRoll = regionPreRoll(preRollSamples, start, sampleRate)
+  const stages = [
+    { renderer: chunk.renderer, kernelParams, options: opts.processorOptions },
+    ...postStages.map(st => ({ renderer: st.renderer, kernelParams: st.kernelParams, options: st.processorOptions })),
+  ]
+  const input = renderRegionToBuffer(segments, start - preRoll / sampleRate, end + latency / sampleRate, sampleRate, channels)
+  const plan = planChunks(numSamples, preRoll, latency, sampleRate, count, { grid: chunk.grid })
+  const workers = []
+  try {
+    const parts = await Promise.all(plan.map((c) => {
+      const data = input.map((src) => {
+        const x = new Float32Array(c.to - c.from)
+        x.set(src.subarray(c.from, Math.min(c.to, src.length)))
+        return x
+      })
+      return new Promise((resolve, reject) => {
+        const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+        workers.push(worker)
+        worker.onmessage = (e) => {
+          if (e.data?.type === 'done') resolve(e.data.channelData)
+          else reject(new Error(e.data?.message ?? 'chunk render failed'))
+        }
+        worker.onerror = reject
+        worker.postMessage(
+          { __id: 0, type: 'renderChunk', channelData: data, sampleRate, params: { stages, latency, skip: c.skip, length: c.length } },
+          data.map(d => d.buffer),
+        )
+      })
+    }))
+    const out = new AudioBuffer({ length: numSamples, numberOfChannels: channels, sampleRate })
+    for (let ch = 0; ch < channels; ch++) {
+      const y = new Float32Array(numSamples)
+      plan.forEach((c, k) => y.set(parts[k][ch], c.start))
+      out.copyToChannel(y, ch)
+    }
+    return out
+  } finally {
+    for (const w of workers) w.terminate()
+  }
+}
+
+/**
  * Apply OptoSmooth (LA-2A) compression to a region.
  *
  * ⚠ THE LATENCY IS PER-PATCH, NOT A CONSTANT — lookahead adds its own delay on
@@ -664,7 +1000,7 @@ async function applyWorkletRegion(
  */
 export function applyLA2ARegion(segments, start, end, params, sampleRate, channels) {
   const merged = { ...LA2A_DEFAULTS, ...params }
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+  return applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureLA2AWorklet,
     processorName: 'la2a-processor',
     kernelParams: toKernelParams(merged),
@@ -672,17 +1008,45 @@ export function applyLA2ARegion(segments, start, end, params, sampleRate, channe
     // Bit-exact against a settled preview at this length — see LA2A_PREROLL_S
     // for the measurements and for why nothing in this kernel latches.
     preRollSamples: Math.round(LA2A_PREROLL_S * sampleRate),
+    // Nothing latches, so a chunk's state is a function of its run-in alone.
+    chunk: { renderer: 'la2a' },
   })
 }
 
-/** Apply FET Punch (1176) compression to a region. */
-export function applyFET1176Region(segments, start, end, params, sampleRate, channels) {
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+/**
+ * Apply FET Punch (1176) compression to a region.
+ *
+ * Resolves `{ buffer, trimDb }` rather than a bare buffer: the peak restore is
+ * a per-region measurement the panel reports, so it has to come back out.
+ *
+ * ⚠ THE RESTORE IS MEASURED ON THIS RENDER, WHICH IS WHY IT LIVES HERE AND NOT
+ * IN THE SOLVE. The makeup is solved on a capped window; this buffer is the
+ * whole region. See `peakRestoreTrimDb` for why a window-derived trim would
+ * push a late loud passage past the source peak, and for the preview/apply
+ * divergence this deliberately accepts.
+ *
+ * ⚠ AFTER THE PRE-ROLL AND LATENCY ARE TRIMMED, necessarily — a peak sitting in
+ * the discarded head is not part of what lands on the timeline, and measuring
+ * before the trim would size the restore from audio the user never gets.
+ */
+export async function applyFET1176Region(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params })
+  const buffer = await applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureFET1176Worklet,
     processorName: 'fet1176-processor',
-    kernelParams: toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params }),
+    kernelParams,
     latencySamples: FET1176_LATENCY_SAMPLES,
+    // Convergent at this length once the tail came off — see FET1176_PREROLL_S.
+    preRollSamples: Math.round(FET1176_PREROLL_S * sampleRate),
+    // ⚠ The peak restore below must see the STITCHED region, never a chunk:
+    // a chunk's peak is not the region's, so it runs after this resolves.
+    chunk: { renderer: 'fet1176' },
   })
+  const channelData = []
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) channelData.push(buffer.getChannelData(ch))
+  // getChannelData hands back the buffer's own storage, so this scales in place.
+  const trimDb = restorePeakToCeiling(channelData, kernelParams.ceilingDb)
+  return { buffer, trimDb }
 }
 
 /**
@@ -703,6 +1067,133 @@ export function applySoftClipperRegion(segments, start, end, params, sampleRate,
   })
 }
 
+/**
+ * The De-Esser's automatic Air for a region: the chain's top-end loss and
+ * the Air it asks for, over the usual capped analysis window. Resolves
+ * `{ lossDb, airDb }`.
+ */
+export function measureDeEsserAutoAir(segments, start, end, params, sampleRate, channels) {
+  const merged = { ...DE_ESSER_DEFAULTS, ...params }
+  return measureInWorker('deEsserAutoAir', segments, start, end, {
+    kernelParams: toDeEsserKernelParams(merged),
+    resoParams: resoOn(merged) ? resoKernelParams(merged) : null,
+    resoFrameSize: HF_RESO_FRAME_SIZE,
+  }, sampleRate, channels)
+}
+
+/**
+ * PHAT*SS's Warmth readout for a region (see phatassWarmthReadout.js).
+ * Selections up to READOUT_WHOLE_MAX_S are rendered whole, bands and peak.
+ * Longer ones render READOUT_BLOCKS sampled blocks for the bands, and the peak
+ * is the guard's bound — the selection's own peak, scanned, not rendered —
+ * whenever the guard has a ceiling (null otherwise). Resolves
+ * `{ bandsDb, peakDb, inputPeakDb }`.
+ */
+export function measurePhatassWarmthBands(segments, start, end, params, sampleRate, channels) {
+  const { warmthLayers, warmthGuard } = toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params })
+  if (!(end - start > READOUT_WHOLE_MAX_S)) {
+    return measureWholeRegionInWorker('phatassWarmthReadout', segments, start, end, {
+      layers: warmthLayers, guard: warmthGuard, bands: true, peak: true,
+    }, sampleRate, channels).then(d => ({ bandsDb: d.bandsDb, peakDb: d.peakDb, inputPeakDb: d.inputPeakDb }))
+  }
+  const n = Math.floor((end - start) * sampleRate)
+  const blocks = readoutBlocks(n, sampleRate).map(([a, b, skip]) => ({
+    channelData: renderRegionToBuffer(segments, start + a / sampleRate, start + b / sampleRate, sampleRate, channels),
+    skip,
+  }))
+  const bounded = warmthGuard.on && Number.isFinite(warmthGuard.ceilingDb)
+  const inputPeakDb = bounded ? regionPeakDb(segments, start, end, sampleRate, channels) : null
+  return new Promise((resolve, reject) => {
+    const id = ++measureSeq
+    measurePending.set(id, { resolve, reject })
+    getMeasureWorker().postMessage(
+      {
+        __id: id, type: 'phatassWarmthReadout', channelData: [], sampleRate,
+        params: { layers: warmthLayers, guard: warmthGuard, blocks },
+      },
+      blocks.flatMap(b => b.channelData.map(c => c.buffer)),
+    )
+  }).then(d => ({ bandsDb: d.bandsDb, peakDb: inputPeakDb, inputPeakDb }))
+}
+
+/**
+ * A measurement that runs on a worker of its own, one pass per OWNER at a time:
+ * a newer call from the same owner terminates the older one — a knob turn must
+ * never queue behind a stale whole-chapter render — and a superseded call
+ * rejects with `err.cancelled = true`.
+ *
+ * ⚠ PER OWNER, NOT PER PROCESS. The owner is the plugin copy asking (its
+ * EffectChain id): with one pass for the whole app, two copies of PHAT*SS — the
+ * solo one and one in the chain, or two in the chain — cancelled each other's
+ * measurements on every knob turn and neither makeup ever settled.
+ */
+function ownedWorkerJob(type, resultKeys, failMessage) {
+  const jobs = new Map() // owner → { worker, reject }
+
+  function cancel(owner = 'default') {
+    const job = jobs.get(owner)
+    if (!job) return
+    jobs.delete(owner)
+    job.worker.terminate()
+    const err = new Error('superseded')
+    err.cancelled = true
+    job.reject(err)
+  }
+
+  function run(segments, start, end, params, sampleRate, channels, { exact = true, owner = 'default' } = {}) {
+    cancel(owner)
+    return new Promise((resolve, reject) => {
+      // Rendered before the worker exists: if it throws, nothing is left
+      // running or registered for this owner.
+      const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+      const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+      jobs.set(owner, { worker, reject })
+      const finish = () => {
+        worker.terminate()
+        if (jobs.get(owner)?.worker === worker) jobs.delete(owner)
+      }
+      worker.onmessage = (e) => {
+        finish()
+        if (e.data?.type === 'done') resolve(Object.fromEntries(resultKeys.map(k => [k, e.data[k]])))
+        else reject(new Error(e.data?.message ?? failMessage))
+      }
+      worker.onerror = (err) => {
+        finish()
+        reject(err)
+      }
+      worker.postMessage(
+        // A plain copy: the panel's params are reactive, and a proxied array
+        // (warmthRefPeaksDb) cannot be structured-cloned into a worker.
+        { __id: 0, type, channelData, sampleRate, params: JSON.parse(JSON.stringify(params)), exact },
+        channelData.map(c => c.buffer),
+      )
+    })
+  }
+
+  return { run, cancel }
+}
+
+/**
+ * TAPE's automatic makeup for a region: what TAPE takes off the WHOLE
+ * region's peak (see phatassTapeMakeup.js), on its own worker per owner (see
+ * ownedWorkerJob). `exact: false` is the fast bounded search for live preview;
+ * apply leaves it exact. Resolves `{ makeupDb, peakDb, inputPeakDb }`.
+ */
+const tapeMakeupJob = ownedWorkerJob('phatassTapeMakeup', ['makeupDb', 'peakDb', 'inputPeakDb'], 'tape makeup failed')
+export const measurePhatassTapeMakeup = tapeMakeupJob.run
+/** Terminate `owner`'s in-flight TAPE makeup pass, if any; it rejects with `err.cancelled`. */
+export const cancelPhatassTapeMakeup = tapeMakeupJob.cancel
+
+/**
+ * The bench's output trim for a region (see phatassOutputMakeup.js): a render
+ * of the whole chain, on its own worker per owner. `exact: false` is the capped
+ * preview measurement. Resolves `{ makeupDb, outPeakDb, inputPeakDb }`.
+ */
+const outputMakeupJob = ownedWorkerJob('phatassOutputMakeup', ['makeupDb', 'outPeakDb', 'inputPeakDb'], 'output makeup failed')
+export const measurePhatassOutputMakeup = outputMakeupJob.run
+/** Terminate `owner`'s in-flight output-trim pass, if any; it rejects with `err.cancelled`. */
+export const cancelPhatassOutputMakeup = outputMakeupJob.cancel
+
 /** Apply Air Band to a region. */
 export function applyAirBandRegion(segments, start, end, params, sampleRate, channels) {
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
@@ -712,9 +1203,118 @@ export function applyAirBandRegion(segments, start, end, params, sampleRate, cha
   })
 }
 
+/**
+ * Apply Saturation Bench to a region. Its latency is constant (every layer
+ * slot delays, on or off) and is trimmed; the pre-roll settles the voicing
+ * detector and the band filters.
+ */
+export function applySaturationBenchRegion(segments, start, end, params, sampleRate, channels) {
+  return applyRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureSaturationBenchWorklet,
+    processorName: 'saturation-bench-processor',
+    kernelParams: toSaturationBenchKernelParams({ ...SATURATION_BENCH_DEFAULTS, ...params }),
+    latencySamples: SAT_BENCH_LATENCY_SAMPLES,
+    preRollSamples: Math.round(SAT_BENCH_PREROLL_S * sampleRate),
+    chunk: { renderer: 'saturationBench' },
+  })
+}
+
+/**
+ * Apply the De-Esser to a region. Zero latency; the pre-roll lets the
+ * envelopes settle on real context so the region starts where a playing
+ * preview would be — see DE_ESSER_PREROLL_S.
+ */
+export function applyDeEsserPluginRegion(segments, start, end, params, sampleRate, channels) {
+  const merged = { ...DE_ESSER_DEFAULTS, ...params }
+  return applyRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureDeEsserWorklet,
+    processorName: 'de-esser-processor',
+    kernelParams: toDeEsserKernelParams(merged),
+    preRollSamples: Math.round(DE_ESSER_PREROLL_S * sampleRate),
+    // The softener is zero-latency, so Reso's STFT is anchored where the render
+    // starts and its hop (128 at a 512 frame) is the grid; Soften has no grid
+    // of its own. Each post-stage names its kernel for the chunk render.
+    chunk: {
+      renderer: 'deEsser',
+      grid: resoOn(merged) ? resonanceHopSamples(HF_RESO_FRAME_SIZE) : undefined,
+    },
+    // The Reso knob above 0: a band-limited ResoTame AFTER the softener — see
+    // deEsserResoStage.js. Its 512-sample latency is trimmed with the rest.
+    // ⚠ Like ResoTame itself, its STFT grid phase at the region start cannot
+    // match a running preview, so with RESO on apply is close to the preview
+    // rather than sample-identical.
+    postStages: [
+      ...(resoOn(merged) ? [{
+        ensureWorklet: ensureResonanceWorklet,
+        processorName: 'resonance-processor',
+        renderer: 'resonance',
+        kernelParams: resoKernelParams(merged),
+        processorOptions: { frameSize: HF_RESO_FRAME_SIZE },
+        latencySamples: HF_RESO_LATENCY_SAMPLES,
+      }] : []),
+      // The Soften knob above 0: the HF Limiter's kernel with the shelf out and
+      // its Transient on a 500 Hz band — see deEsserSoftenStage.js. Constant
+      // latency (the shelf's 3 ms), trimmed with the rest; no STFT, so it stays
+      // sample-identical to the preview.
+      ...(softenOn(merged) ? [{
+        ensureWorklet: ensureHFLimiterWorklet,
+        processorName: 'hf-limiter-processor',
+        renderer: 'hfLimiter',
+        kernelParams: softenStageKernelParams(merged),
+        latencySamples: softenLatencySamples(sampleRate),
+      }] : []),
+    ],
+  })
+}
+
+/**
+ * Apply the HF Limiter to a region. Constant latency per sample rate, and a
+ * pre-roll so the release starts where a playing preview's would be.
+ */
+export function applyHFLimiterRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureHFLimiterWorklet,
+    processorName: 'hf-limiter-processor',
+    kernelParams: toHFLimiterKernelParams({ ...HF_LIMITER_DEFAULTS, ...params }),
+    latencySamples: hfLimiterLatencySamples(sampleRate),
+    preRollSamples: Math.round(HF_LIMITER_PREROLL_S * sampleRate),
+  })
+}
+
+/**
+ * Apply the Plosive Tamer to a region. Constant latency (the lookahead), and a
+ * pre-roll so the held voice level the closure test reads starts where a
+ * playing preview's would be.
+ */
+export function applyPlosiveRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensurePlosiveWorklet,
+    processorName: 'plosive-processor',
+    kernelParams: toPlosiveKernelParams({ ...PLOSIVE_DEFAULTS, ...params }),
+    latencySamples: plosiveLatencySamples(sampleRate),
+    preRollSamples: Math.round(PLOSIVE_PREROLL_S * sampleRate),
+  })
+}
+
+/**
+ * Apply PHAT*SS to a region. Constant latency per sample rate (every stage is
+ * a delay of its own length when idle), and a pre-roll so the shelf's release
+ * starts where a playing preview's would be.
+ */
+export function applyPhatassRegion(segments, start, end, params, sampleRate, channels) {
+  return applyRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensurePhatassWorklet,
+    processorName: 'phatass-processor',
+    kernelParams: toPhatassKernelParams({ ...PHATASS_DEFAULTS, ...params }),
+    latencySamples: phatassLatencySamples(sampleRate),
+    preRollSamples: Math.round(PHATASS_PREROLL_S * sampleRate),
+    chunk: { renderer: 'phatass' },
+  })
+}
+
 /** Apply Scheps Parallel to a region. */
 export function applySchepsRegion(segments, start, end, params, sampleRate, channels) {
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+  return applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureSchepsWorklet,
     processorName: 'scheps-processor',
     kernelParams: toSchepsKernelParams({ ...SCHEPS_DEFAULTS, ...params }),
@@ -722,6 +1322,24 @@ export function applySchepsRegion(segments, start, end, params, sampleRate, chan
     // Inherits the LA-2A kernel, so it inherits its convergence — see
     // SCHEPS_PREROLL_S. Also bit-exact at this length.
     preRollSamples: Math.round(SCHEPS_PREROLL_S * sampleRate),
+    chunk: { renderer: 'scheps' },
+  })
+}
+
+/**
+ * Apply VoxPressor to a region. One-thread render for now: the plugin is not
+ * opted into chunked apply until its seams are measured (chunkedApply.js).
+ */
+export function applyVoxPressorRegion(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toVoxKernelParams({ ...VOX_DEFAULTS, ...params, listen: 'off' })
+  return applyRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureVoxPressorWorklet,
+    processorName: 'vox-pressor-processor',
+    kernelParams,
+    latencySamples: voxLatencySamples(kernelParams, sampleRate),
+    // Both kernels converge by 2 s (LA2A_PREROLL_S, FET1176_PREROLL_S); the
+    // 1176's makeup tracker latches but VoxPressor never reads it.
+    preRollSamples: Math.round(Math.max(LA2A_PREROLL_S, FET1176_PREROLL_S) * sampleRate),
   })
 }
 
@@ -776,6 +1394,33 @@ export function applyHumNotchRegion(segments, start, end, params, sampleRate, ch
     processorName: 'hum-notch-processor',
     kernelParams: toHumNotchKernelParams({ ...HUM_NOTCH_DEFAULTS, ...params }),
   })
+}
+
+/**
+ * Apply a solved auto-leveler curve to a region and return the new buffer.
+ *
+ * The curve is expressed over the ANALYSED region, which is usually larger than
+ * what is being written: analysing a chapter and applying one chapter is the
+ * common case, but narrowing to a paragraph afterwards is allowed and every
+ * clip inside it was already measured. `offsetSamples` is where this region
+ * starts within that one, so the gains stay attached to the audio they were
+ * computed from rather than sliding to the head of the selection.
+ */
+export function applyAutoLevelRegion(
+  segments, start, end, gainSegments, analysisStartSec, sampleRate, channels,
+) {
+  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+  const numSamples = channelData[0].length
+  const offsetSamples = Math.round((start - analysisStartSec) * sampleRate)
+
+  const levelled = applyGainSegments(channelData, gainSegments, numSamples, offsetSamples)
+
+  const ctx = new OfflineAudioContext(channels, numSamples, sampleRate)
+  const out = ctx.createBuffer(channels, numSamples, sampleRate)
+  for (let ch = 0; ch < channels; ch++) {
+    out.getChannelData(ch).set(levelled[ch])
+  }
+  return out
 }
 
 /**
@@ -881,7 +1526,7 @@ export function analyzeHumRegion(segments, start, end, sampleRate, channels, opt
  * long and trims. The two compressors do the same for their oversamplers.
  */
 export function applyResonanceRegion(segments, start, end, params, sampleRate, channels) {
-  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+  return applyRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureResonanceWorklet,
     processorName: 'resonance-processor',
     kernelParams: toResonanceKernelParams({ ...RESONANCE_DEFAULTS, ...params }),
@@ -889,6 +1534,12 @@ export function applyResonanceRegion(segments, start, end, params, sampleRate, c
     // ⚠ NO PRE-ROLL, DELIBERATELY — see the note on StftProcessor's use in
     // resonanceProcessor.js. This stage's disagreement is a frame-PHASE error,
     // not a convergence one, and a pre-roll cannot fix it.
+    //
+    // ⚠ BUT THE CHUNKS NEED THE HOP GRID. Within one apply the phase IS known —
+    // it is the render's own start — so a chunk cut on the hop grid relative to
+    // it agrees with the continuous render; cut on the 128 grid alone it read
+    // −20 dB re the peak for the whole chunk.
+    chunk: { renderer: 'resonance', grid: resonanceHopSamples(RESONANCE_FRAME_SIZE) },
   })
 }
 

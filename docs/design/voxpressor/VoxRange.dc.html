@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;flex-direction:column;gap:7px;width:100%;user-select:none">
+  <div ref="{{ track }}" onPointerDown="{{ down }}" onDoubleClick="{{ reset }}" role="slider" style="position:relative;height:26px;cursor:ew-resize;touch-action:none">
+    <div style="position:absolute;left:0;right:0;top:8px;height:10px;border-radius:6px;background:{{ trackBg }};box-shadow:{{ trackSh }}">
+      <div style="height:100%;border-radius:6px;width:{{ pct }};background:linear-gradient(90deg, color-mix(in srgb, {{ color }} 40%, #ffffff), {{ color }})"></div>
+    </div>
+    <div style="position:absolute;top:0;width:26px;height:26px;margin-left:-13px;left:{{ pct }};border-radius:50%;background:linear-gradient(160deg,#4d596a 0%,#323b48 52%,#222931 100%);box-shadow:{{ thumbSh }}"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:{{ ink }}"><span>{{ lo }}</span><span>{{ hi }}</span></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:180,&quot;height&quot;:50},&quot;value&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:0.01,&quot;default&quot;:0.35,&quot;tsType&quot;:&quot;number&quot;},&quot;lo&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;WIDE&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hi&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;SPLIT&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;color&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#5fd6c0&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;surface&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;onChange&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(v:number)=&gt;void&quot;}}">
+class Component extends DCLogic {
+  state = { v: null };
+  track = React.createRef();
+  val() { return this.state.v ?? this.props.value ?? 0.35; }
+  renderVals() {
+    const p = this.props, v = this.val();
+    const setFromX = (x) => { const r = this.track.current.getBoundingClientRect(); const nv = Math.max(0, Math.min(1, (x - r.left) / r.width)); this.setState({ v: nv }); p.onChange?.(nv); };
+    return {
+      track: this.track, pct: (v * 100).toFixed(1) + '%', color: p.color ?? '#5fd6c0',
+      trackBg: p.surface === 'light' ? 'linear-gradient(180deg,#b9b3a8,#cfc9bf)' : 'linear-gradient(180deg,#15171a,#212429)',
+      trackSh: p.surface === 'light' ? 'inset 0 2px 5px rgba(0,0,0,.35), inset 0 0 0 1px rgba(0,0,0,.12), 0 1px 0 rgba(255,255,255,.6)' : 'inset 0 2px 6px rgba(0,0,0,.85), 0 1px 0 rgba(255,255,255,.04)',
+      thumbSh: p.surface === 'light' ? 'inset 0 1px 0 rgba(255,255,255,.2), 0 1px 1px rgba(40,30,20,.35), 0 6px 10px -4px rgba(40,30,20,.4)' : '0 8px 14px -5px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.18), 0 0 0 1px rgba(0,0,0,.6)',
+      lo: p.lo ?? 'WIDE', hi: p.hi ?? 'SPLIT', ink: p.surface === 'light' ? '#3a3f47' : '#c9d0d6',
+      down: (e) => {
+        e.preventDefault(); setFromX(e.clientX);
+        const mv = (ev) => setFromX(ev.clientX);
+        const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+        window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+      },
+      reset: () => { const nv = p.value ?? 0.35; this.setState({ v: nv }); p.onChange?.(nv); },
+    };
+  }
+}
+</script>
+</body>
+</html>

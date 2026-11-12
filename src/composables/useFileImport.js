@@ -2,11 +2,21 @@ import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { decodeAudioFile, isSupportedFormat, SUPPORTED_FORMATS } from '../audio/loader.js'
 import { computePeakCache } from '../audio/processing.js'
+import { readSourceFormat } from '../audio/sourceFormat.js'
+import { isCancellation } from '../audio/fileSave.js'
+import { useWorkingFolder } from './useWorkingFolder.js'
 
 /**
  * Shared file import. Every entry point into the app — the empty state, the
  * tab strip's "+", the files panel, and workspace drag-drop — goes through
  * here so they all produce documents the same way.
+ *
+ * Where the browser has the File System Access API, files are opened through
+ * it rather than an <input type="file">, and drag-drop asks each item for its
+ * handle. The handle is what lets the Save dialog open in the original file's
+ * folder and, when the user keeps the name, write back over it. It carries
+ * READ access only: nothing is written to the original until the user confirms
+ * a Save that names it, and the browser then asks for write permission itself.
  */
 
 const BASE_SAMPLES_PER_PX = 256
@@ -21,15 +31,15 @@ export function useFileImport() {
 
   /**
    * Decode files and open each as a new document.
-   * @param {File[]|FileList} files
+   * @param {Iterable<File | { file: File, handle?: FileSystemFileHandle|null }>} files
    * @param {{ activateFirst?: boolean }} [options]
    * @returns {Promise<string[]>} ids of the documents created
    */
   async function importFiles(files, { activateFirst = true } = {}) {
-    const list = Array.from(files ?? [])
+    const list = Array.from(files ?? []).map(f => (f && f.file ? f : { file: f, handle: null }))
     if (list.length === 0) return []
 
-    const supported = list.filter(isSupportedFormat)
+    const supported = list.filter(e => isSupportedFormat(e.file))
     const rejected = list.length - supported.length
     if (rejected > 0) {
       showToast(
@@ -50,7 +60,7 @@ export function useFileImport() {
       // Sequential rather than parallel: decoding is memory-hungry (32-bit
       // float PCM is ~10 MB per minute per channel) and decoding a dropped
       // folder of chapters all at once is a reliable way to kill the tab.
-      for (const [i, file] of supported.entries()) {
+      for (const [i, { file, handle }] of supported.entries()) {
         let audioBuffer
         try {
           const ctx = getAudioContext()
@@ -62,10 +72,19 @@ export function useFileImport() {
           continue
         }
 
+        let sourceFormat = null
+        try {
+          sourceFormat = await readSourceFormat(file)
+        } catch (err) {
+          console.warn(`Couldn't read the header of ${file.name}:`, err)
+        }
+
         const { docId, bufferId } = createDocument(file.name, audioBuffer, {
           // Activate the first successful import so the user lands on
           // something; later files open behind it without stealing focus.
           activate: activateFirst && createdIds.length === 0,
+          sourceFormat,
+          sourceHandle: handle ?? null,
         })
         createdIds.push(docId)
 
@@ -95,8 +114,67 @@ export function useFileImport() {
     return createdIds
   }
 
+  /**
+   * Import a drop. Each item's handle has to be REQUESTED during the drop event
+   * itself — the DataTransfer is emptied once the handler returns — so every
+   * `getAsFileSystemHandle()` call is made synchronously here and awaited after.
+   */
+  async function importDataTransfer(dataTransfer) {
+    const items = Array.from(dataTransfer?.items ?? []).filter(item => item.kind === 'file')
+    if (items.length === 0) return importFiles(dataTransfer?.files)
+
+    const pending = items.map(item => ({
+      file: item.getAsFile(),
+      handle: typeof item.getAsFileSystemHandle === 'function'
+        ? item.getAsFileSystemHandle().catch(() => null)
+        : null,
+    }))
+    const entries = []
+    for (const p of pending) {
+      if (!p.file) continue
+      const handle = await p.handle
+      // A dropped folder yields a directory handle; only file handles can be
+      // written back to.
+      entries.push({ file: p.file, handle: handle?.kind === 'file' ? handle : null })
+    }
+    return importFiles(entries)
+  }
+
   /** Open the OS file picker and import whatever comes back. */
-  function promptForFiles({ multiple = true } = {}) {
+  async function promptForFiles({ multiple = true } = {}) {
+    if (typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function') {
+      let handles
+      try {
+        const startIn = useWorkingFolder().folder.value
+        handles = await window.showOpenFilePicker({
+          ...(startIn ? { startIn } : {}),
+          multiple,
+          types: [{
+            description: 'Audio',
+            accept: { 'audio/*': SUPPORTED_FORMATS.map(ext => `.${ext}`) },
+          }],
+        })
+      } catch (err) {
+        if (isCancellation(err)) return []
+        // A picker that refuses outright (a sandboxed iframe, a policy) should
+        // not leave the user with no way in: fall back to the plain input.
+        console.warn('Open picker failed, falling back to file input:', err)
+        return promptWithInput(multiple)
+      }
+      const entries = []
+      for (const handle of handles) {
+        try {
+          entries.push({ file: await handle.getFile(), handle })
+        } catch (err) {
+          console.error(`Couldn't read ${handle.name}:`, err)
+        }
+      }
+      return importFiles(entries)
+    }
+    return promptWithInput(multiple)
+  }
+
+  function promptWithInput(multiple) {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = 'audio/*'
@@ -110,5 +188,5 @@ export function useFileImport() {
     input.click()
   }
 
-  return { importFiles, promptForFiles, isImporting, importProgress }
+  return { importFiles, importDataTransfer, promptForFiles, isImporting, importProgress }
 }

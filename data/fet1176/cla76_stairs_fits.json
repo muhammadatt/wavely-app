@@ -1,0 +1,186 @@
+{
+  "_comment": [
+    "CLA-76's fitted static curve, 20 coarse stairs.wav captures at 96 kHz \u2014 the",
+    "OUTPUT of `npm run fet:stairs`, kept because the captures are licensed audio.",
+    "Companion to fetish_stairs_fits.json; same reasons, same caveats.",
+    "",
+    "\u26a0 THE KNEE COLUMN IS MOSTLY UNUSABLE AND IS KEPT ANYWAY. The instrument's own",
+    "knee floor at attack dial 1 is 4.32 dB, so every reading at or under it is the",
+    "fit leaving the parameterisation rather than a sharp knee measured. Values at",
+    "exactly 0.50 sat on an older search bound. Read `kneeUnresolved` semantics in",
+    "`fet-stairs.mjs`, not these numbers.",
+    "",
+    "\u26a0 THESE ARE ATTACK DIAL 1 (the old protocol). The gate bounce showed CLA-76 is",
+    "attack-invariant on this test \u2014 slope moved 0.0057 and knee 0.24 sweeping the",
+    "dial end to end \u2014 so they are not attack-biased, which is why they remain",
+    "usable. Our own side of any comparison is biased at dial 1 and is not.",
+    "",
+    "\u26a0 CLA-76's THRESHOLD MOVES WITH THE RATIO BUTTON, by 4.5 dB end to end, and",
+    "ours does not. That is a topology disagreement, not a number to average away."
+  ],
+  "reference": "CLA-76",
+  "sampleRate": 96000,
+  "attackDial": 1,
+  "captures": [
+    {
+      "ratio": "12",
+      "input": 1,
+      "slope": 0.9313,
+      "kneeDb": 0.5,
+      "effThresholdDb": -11.35,
+      "rms": 0.022
+    },
+    {
+      "ratio": "12",
+      "input": 2,
+      "slope": 0.937,
+      "kneeDb": 3.96,
+      "effThresholdDb": -16.06,
+      "rms": 0.019
+    },
+    {
+      "ratio": "12",
+      "input": 3,
+      "slope": 0.9302,
+      "kneeDb": 2.73,
+      "effThresholdDb": -21.46,
+      "rms": 0.025
+    },
+    {
+      "ratio": "12",
+      "input": 4,
+      "slope": 0.9167,
+      "kneeDb": 1.82,
+      "effThresholdDb": -26.84,
+      "rms": 0.071
+    },
+    {
+      "ratio": "20",
+      "input": 1,
+      "slope": 0.9579,
+      "kneeDb": 3.51,
+      "effThresholdDb": -10.03,
+      "rms": 0.022
+    },
+    {
+      "ratio": "20",
+      "input": 2,
+      "slope": 0.9559,
+      "kneeDb": 1.77,
+      "effThresholdDb": -14.81,
+      "rms": 0.019
+    },
+    {
+      "ratio": "20",
+      "input": 3,
+      "slope": 0.9532,
+      "kneeDb": 0.5,
+      "effThresholdDb": -20.17,
+      "rms": 0.025
+    },
+    {
+      "ratio": "20",
+      "input": 4,
+      "slope": 0.9445,
+      "kneeDb": 2.94,
+      "effThresholdDb": -25.49,
+      "rms": 0.049
+    },
+    {
+      "ratio": "4",
+      "input": 1,
+      "slope": 0.8303,
+      "kneeDb": 5.93,
+      "effThresholdDb": -13.98,
+      "rms": 0.018
+    },
+    {
+      "ratio": "4",
+      "input": 2,
+      "slope": 0.8364,
+      "kneeDb": 5.84,
+      "effThresholdDb": -18.69,
+      "rms": 0.022
+    },
+    {
+      "ratio": "4",
+      "input": 3,
+      "slope": 0.8271,
+      "kneeDb": 5.15,
+      "effThresholdDb": -24.13,
+      "rms": 0.037
+    },
+    {
+      "ratio": "4",
+      "input": 4,
+      "slope": 0.8085,
+      "kneeDb": 4.69,
+      "effThresholdDb": -29.6,
+      "rms": 0.12
+    },
+    {
+      "ratio": "8",
+      "input": 1,
+      "slope": 0.889,
+      "kneeDb": 3.6,
+      "effThresholdDb": -12.19,
+      "rms": 0.016
+    },
+    {
+      "ratio": "8",
+      "input": 2,
+      "slope": 0.8901,
+      "kneeDb": 0.5,
+      "effThresholdDb": -16.97,
+      "rms": 0.025
+    },
+    {
+      "ratio": "8",
+      "input": 3,
+      "slope": 0.8857,
+      "kneeDb": 3.94,
+      "effThresholdDb": -22.34,
+      "rms": 0.033
+    },
+    {
+      "ratio": "8",
+      "input": 4,
+      "slope": 0.868,
+      "kneeDb": 0.5,
+      "effThresholdDb": -27.79,
+      "rms": 0.095
+    },
+    {
+      "ratio": "all",
+      "input": 1,
+      "slope": 0.9449,
+      "kneeDb": 0.13,
+      "effThresholdDb": -14.52,
+      "rms": 0.016
+    },
+    {
+      "ratio": "all",
+      "input": 2,
+      "slope": 0.9427,
+      "kneeDb": 2.98,
+      "effThresholdDb": -19.3,
+      "rms": 0.017
+    },
+    {
+      "ratio": "all",
+      "input": 3,
+      "slope": 0.9329,
+      "kneeDb": 0.5,
+      "effThresholdDb": -24.71,
+      "rms": 0.049
+    },
+    {
+      "ratio": "all",
+      "input": 4,
+      "slope": 0.9163,
+      "kneeDb": 0.17,
+      "effThresholdDb": -30.13,
+      "rms": 0.126
+    }
+  ]
+}

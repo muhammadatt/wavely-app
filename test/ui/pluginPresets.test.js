@@ -66,7 +66,7 @@ function withStorage(fn) {
 function isolate() {
   resetPluginPresets()
   registerPluginPresets()
-  // ResoTame registers only the LIVE model's table under its own id, so the
+  // Reso Soothe registers only the LIVE model's table under its own id, so the
   // other model's collection has to be asked for by name.
   registerResoTamePresets(DEFAULT_TARGETING === 'zones' ? 'focus' : 'zones')
 }
@@ -332,12 +332,12 @@ test('paramsEqual is structural over nested arrays and objects', () => {
 const RESO_TAME_PRESETS = resoTamePresetsFor(DEFAULT_TARGETING)
 
 const COLLECTIONS = [
-  ['OptoSmooth', OPTO_SMOOTH_PRESET_PLUGIN, OPTO_SMOOTH_PRESETS, OPTO_SMOOTH_PARAM_KEYS],
-  ['FET Punch', FET_PUNCH_PRESET_PLUGIN, FET_PUNCH_PRESETS, FET_PUNCH_PARAM_KEYS],
-  ['ResoTame', RESO_TAME_PRESET_PLUGIN, RESO_TAME_PRESETS, RESO_TAME_PARAM_KEYS],
+  ['LA Vintage 2A', OPTO_SMOOTH_PRESET_PLUGIN, OPTO_SMOOTH_PRESETS, OPTO_SMOOTH_PARAM_KEYS],
+  ['LA Classic 76', FET_PUNCH_PRESET_PLUGIN, FET_PUNCH_PRESETS, FET_PUNCH_PARAM_KEYS],
+  ['Reso Soothe', RESO_TAME_PRESET_PLUGIN, RESO_TAME_PRESETS, RESO_TAME_PARAM_KEYS],
   // The other targeting model's table is authored content, not dead code: the
   // flag is what reaches it, and it has to hold up to the same rules.
-  ['ResoTame (zones)', resoTamePluginId('zones'), RESO_TAME_ZONE_PRESETS, RESO_TAME_PARAM_KEYS],
+  ['Reso Soothe (zones)', resoTamePluginId('zones'), RESO_TAME_ZONE_PRESETS, RESO_TAME_PARAM_KEYS],
 ]
 
 for (const [label, pluginId, presets, keys] of COLLECTIONS) {
@@ -406,7 +406,7 @@ test('the auto-owned makeup knob is not part of the comparison while AUTO is on'
   assert.equal(matchPreset(FET_PUNCH_PRESET_PLUGIN, fetAuto), FET_PUNCH_PRESETS[0].id)
 })
 
-test('ResoTame presets carry neither the reference mode nor any monitoring state', () => {
+test('Reso Soothe presets carry neither the reference mode nor any monitoring state', () => {
   isolate()
   // refMode is a build-level research override and the two references disagree
   // about what Selectivity measures by an order of magnitude. The monitoring
@@ -470,7 +470,7 @@ test('normalisation cannot switch the targeting model out from under a session',
   assert.equal(dropped.focus, null, 'a focus patch survived into a zone collection')
 })
 
-test('every ResoTame focus patch is one the panel could have produced', () => {
+test('every Reso Soothe focus patch is one the panel could have produced', () => {
   isolate()
   const R = RESONANCE_FOCUS_RANGES
   for (const p of RESO_TAME_FOCUS_PRESETS) {
@@ -511,7 +511,7 @@ test('a focus node that stands a band down carries a NEGATIVE amount', () => {
   assert.ok(stoodDown.biasDb < 0, 'Sibilance Tame does not stand the bottom down')
 })
 
-test('every ResoTame zone set is one the editor could have produced', () => {
+test('every Reso Soothe zone set is one the editor could have produced', () => {
   isolate()
   const R = RESONANCE_ZONE_RANGES
   for (const p of RESO_TAME_ZONE_PRESETS) {
@@ -536,7 +536,7 @@ test('every ResoTame zone set is one the editor could have produced', () => {
   }
 })
 
-test('ResoTame normalisation repairs a stored zone set rather than passing it on', () => {
+test('Reso Soothe normalisation repairs a stored zone set rather than passing it on', () => {
   isolate()
   // Unlike a knob value, a stored zone set never went through a control. Out of
   // order, out of range, and stopping short of the top are all reachable from
@@ -560,7 +560,7 @@ test('ResoTame normalisation repairs a stored zone set rather than passing it on
   }
 })
 
-test('ResoTame normalisation repairs a stored focus patch too', () => {
+test('Reso Soothe normalisation repairs a stored focus patch too', () => {
   isolate()
   const repaired = pickParams(resoTamePluginId('focus'), {
     ...RESO_TAME_FOCUS_PRESETS[0].params,
@@ -583,7 +583,7 @@ test('ResoTame normalisation repairs a stored focus patch too', () => {
   assert.equal(repaired.focus.nodes[0].biasDb, R.biasDb.max)
 })
 
-test('FET Punch normalisation keeps the dials on their detents and the ratio on a real position', () => {
+test('LA Classic 76 normalisation keeps the dials on their detents and the ratio on a real position', () => {
   isolate()
   const p = pickParams(FET_PUNCH_PRESET_PLUGIN, {
     inputDrive: 200, output: 0, attack: 4.5, release: 99, ratio: '3',
@@ -599,4 +599,105 @@ test('FET Punch normalisation keeps the dials on their detents and the ratio on 
   assert.equal(p.fetDrive, 1)
   assert.equal(p.scHpf, 0)
   assert.equal(p.mix, 1)
+})
+
+// ── Parametric EQ ────────────────────────────────────────────────────────────
+
+test('parametric EQ: a band set is the same preset in any order, and lights its factory preset', async () => {
+  const { PARAMETRIC_EQ_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { DEFAULT_GENERAL_BANDS } = await import('../../src/audio/eqBands.js')
+  const flat = DEFAULT_GENERAL_BANDS.map(b => ({ ...b, gainDb: 0, enabled: true, id: 'x' }))
+  assert.equal(matchPreset(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: flat }), 'factory:default')
+  assert.equal(matchPreset(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: [...flat].reverse() }), 'factory:default')
+  // Ids are not part of a preset; a moved band is a different one.
+  assert.equal(pickParams(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: flat }).bands[0].id, undefined)
+  assert.equal(matchPreset(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: flat.map((b, i) => (i === 1 ? { ...b, gainDb: 3 } : b)) }), null)
+})
+
+test('parametric EQ: stored bands are clamped and capped at the panel\'s eight', async () => {
+  const { PARAMETRIC_EQ_PRESET_PLUGIN, registerPluginPresets, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const many = Array.from({ length: 12 }, (_, i) => ({ type: 'peaking', frequencyHz: 100 * (i + 1), gainDb: 40, q: 99 }))
+  const { bands } = pickParams(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: many })
+  assert.equal(bands.length, 8)
+  assert.equal(bands[0].gainDb, 18)
+  assert.equal(bands[0].q, 10)
+  assert.equal(pickParams(PARAMETRIC_EQ_PRESET_PLUGIN, { bands: [{ type: 'bogus', frequencyHz: 5 }] }).bands[0].type, 'peaking')
+})
+
+// ── Scheps Parallel and HF Limiter ───────────────────────────────────────────
+
+test('Scheps presets: the panel defaults light Default, and no measured value is a param', async () => {
+  const { SCHEPS_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { SCHEPS_DEFAULTS } = await import('../../src/audio/effects/schepsParams.js')
+  const live = { ...SCHEPS_DEFAULTS, autoTrim: true }
+  assert.equal(matchPreset(SCHEPS_PRESET_PLUGIN, live), 'factory:default')
+  const picked = pickParams(SCHEPS_PRESET_PLUGIN, { ...live, wetTrimDb: 3, ceilingDb: -1, inputAlignDb: 6 })
+  for (const k of ['wetTrimDb', 'correlation', 'densityDb', 'ceilingDb', 'ceilingKneeDb', 'inputAlignDb']) {
+    assert.equal(k in picked, false, k)
+  }
+  assert.equal(pickParams(SCHEPS_PRESET_PLUGIN, { character: 'bogus', squash: 400, output: -99 }).character, SCHEPS_DEFAULTS.character)
+  assert.equal(pickParams(SCHEPS_PRESET_PLUGIN, { squash: 400 }).squash, 100)
+  assert.equal(pickParams(SCHEPS_PRESET_PLUGIN, { output: -99 }).output, -12)
+})
+
+test('HF Limiter presets: the panel defaults light Default; the voice level stays out', async () => {
+  const { HF_LIMITER_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { HF_LIMITER_DEFAULTS } = await import('../../src/audio/hfLimiterParams.js')
+  assert.equal(matchPreset(HF_LIMITER_PRESET_PLUGIN, { ...HF_LIMITER_DEFAULTS }), 'factory:default')
+  assert.equal('voiceLevelDb' in pickParams(HF_LIMITER_PRESET_PLUGIN, { ...HF_LIMITER_DEFAULTS }), false)
+  const p = pickParams(HF_LIMITER_PRESET_PLUGIN, { freq: 100, shape: 'bogus', range: -3 })
+  assert.equal(p.freq, 2000)
+  assert.equal(p.shape, HF_LIMITER_DEFAULTS.shape)
+  assert.equal(p.range, 0)
+})
+
+test('Air Boost presets: the panel defaults light Default, and stored values are clamped to the panel', async () => {
+  const { AIR_BOOST_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { AIR_BAND_DEFAULTS } = await import('../../src/audio/airBandParams.js')
+  assert.equal(matchPreset(AIR_BOOST_PRESET_PLUGIN, { ...AIR_BAND_DEFAULTS }), 'factory:default')
+  assert.equal(pickParams(AIR_BOOST_PRESET_PLUGIN, { air: 30, output: 0 }).air, 12)
+  assert.equal(pickParams(AIR_BOOST_PRESET_PLUGIN, { air: 3, output: -40 }).output, -12)
+})
+
+test('De-Esser presets: the panel defaults light Default; the pinned and measured values stay out', async () => {
+  const { DE_ESSER_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { DE_ESSER_DEFAULTS } = await import('../../src/audio/deEsserParams.js')
+  assert.equal(matchPreset(DE_ESSER_PRESET_PLUGIN, { ...DE_ESSER_DEFAULTS }), 'factory:default')
+  const picked = pickParams(DE_ESSER_PRESET_PLUGIN, { ...DE_ESSER_DEFAULTS, airMode: 'static', compAir: 3 })
+  for (const k of ['airMode', 'compAir', 'levelOffset', 'resoAmount', 'context', 'rotator', 'release']) {
+    assert.equal(k in picked, false, k)
+  }
+  const p = pickParams(DE_ESSER_PRESET_PLUGIN, { band: 9000, detect: 100, shape: 'band' })
+  assert.equal(p.band, 6000)
+  assert.equal(p.detect, 3000)
+  // Shape is pinned to shelf: a preset can neither carry nor set it.
+  assert.equal('shape' in p, false)
+  assert.equal(DE_ESSER_DEFAULTS.shape, 'shelf')
+})
+
+test('De-Esser presets: a stored Plosives (moved to the Plosive Tamer) is dropped', async () => {
+  const { DE_ESSER_PRESET_PLUGIN, registerPluginPresets, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { DE_ESSER_DEFAULTS } = await import('../../src/audio/deEsserParams.js')
+  assert.equal('plosives' in pickParams(DE_ESSER_PRESET_PLUGIN, { ...DE_ESSER_DEFAULTS, plosives: true }), false)
+  assert.equal('plosives' in DE_ESSER_DEFAULTS, false)
+})
+
+test('Plosive Tamer presets: the panel defaults light Default; the voice level stays out; values clamp', async () => {
+  const { PLOSIVE_PRESET_PLUGIN, registerPluginPresets, matchPreset, pickParams } = await import('../../src/audio/pluginPresets/index.js')
+  registerPluginPresets()
+  const { PLOSIVE_DEFAULTS } = await import('../../src/audio/plosiveParams.js')
+  assert.equal(matchPreset(PLOSIVE_PRESET_PLUGIN, { ...PLOSIVE_DEFAULTS }), 'factory:default')
+  assert.equal('voiceLevelDb' in pickParams(PLOSIVE_PRESET_PLUGIN, { ...PLOSIVE_DEFAULTS }), false)
+  const p = pickParams(PLOSIVE_PRESET_PLUGIN, { popFreq: 10, popDepth: 99, burstSensitivity: -5, burstLength: 1000 })
+  assert.equal(p.popFreq, 60)
+  assert.equal(p.popDepth, 24)
+  assert.equal(p.burstSensitivity, 0)
+  assert.equal(p.burstLength, 80)
 })

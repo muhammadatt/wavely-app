@@ -27,7 +27,7 @@
  */
 
 import { definePluginPresets } from './store.js'
-import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
+import { LOOKAHEAD_MAX_MS, LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../la2aProcessor.js'
 
 /**
  * ⚠ THIS MODULE DELIBERATELY IMPORTS NOTHING FROM `effects/la2aCompressor.js`.
@@ -41,8 +41,8 @@ import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
 
 export const OPTO_SMOOTH_PRESET_PLUGIN = 'opto-smooth'
 
-const GAIN_MIN_DB = -12
-const GAIN_MAX_DB = 24
+const GAIN_MIN_DB = LA2A_GAIN_MIN_DB
+const GAIN_MAX_DB = LA2A_GAIN_MAX_DB
 
 function clamp(v, lo, hi) {
   const n = Number(v)
@@ -75,6 +75,18 @@ function normalize(params) {
      * Every factory preset states it explicitly for the same reason.
      */
     lookahead: clamp(params.lookahead ?? 0, 0, LOOKAHEAD_MAX_MS),
+    /**
+     * ⚠ DEFAULTS TO TRUE FOR PRESETS SAVED BEFORE THE CONTROL EXISTED, which is
+     * the mirror of the `lookahead` rule above and correct for the same reason:
+     * those patches were auditioned WITH the nonlinearity, so `false` would
+     * change how every one of them sounds. Every factory preset states it.
+     */
+    analog: params.analog !== false,
+    /**
+     * ⚠ DEFAULTS TO 1 FOR PRESETS SAVED BEFORE THE CONTROL EXISTED — the
+     * hardware has no blend, and those patches were auditioned fully wet.
+     */
+    mix: clamp(params.mix ?? 1, 0, 1),
     autoMakeup,
   }
 }
@@ -82,7 +94,7 @@ function normalize(params) {
 // ⚠ A PARAM MISSING FROM THIS LIST IS SILENTLY DROPPED on save and never
 // restored — the preset simply forgets it.
 export const OPTO_SMOOTH_PARAM_KEYS = [
-  'mode', 'peakReduction', 'gain', 'r37', 'lookahead', 'autoMakeup',
+  'mode', 'peakReduction', 'gain', 'r37', 'lookahead', 'autoMakeup', 'analog', 'mix',
 ]
 
 export const OPTO_SMOOTH_PRESETS = [
@@ -96,6 +108,8 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 100,
       lookahead: 0,
+      analog: true,
+      mix: 1,
       autoMakeup: true,
     },
   },
@@ -111,6 +125,8 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 82,
       lookahead: 0,
+      analog: true,
+      mix: 1,
       autoMakeup: true,
     },
   },
@@ -128,6 +144,8 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 45,
       lookahead: 0,
+      analog: true,
+      mix: 1,
       autoMakeup: true,
     },
   },
@@ -151,6 +169,8 @@ export const OPTO_SMOOTH_PRESETS = [
       // already fairly even.
       r37: 100,
       lookahead: 0,
+      analog: true,
+      mix: 1,
       autoMakeup: true,
     },
   },
@@ -168,6 +188,8 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 100,
       lookahead: 0,
+      analog: true,
+      mix: 1,
       autoMakeup: true,
     },
   },

@@ -1,4 +1,5 @@
 <script setup>
+import { localPoint } from '../../../ui/pointerLocal.js'
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { eqResponseDb } from '../../../audio/eqProcessor.js'
 import { getRole, bandwidthOctaves, ROLES_IN_ORDER, isBandActive } from '../../../audio/eqBands.js'
@@ -94,6 +95,14 @@ const props = defineProps({
    * selection, and the axis label is the control that toggles it.
    */
   openRole: { type: String, default: null },
+
+  /**
+   * 'classic' | 'modula'. MODULA sets the canvas in the kit's dark well (the
+   * meters' housing: near-black, a 1 px edge, an inset shadow) and restyles
+   * the range stops as a segmented tray. Everything drawn ON the canvas is
+   * unchanged — the grid, the analyzer and the curves read the same in both.
+   */
+  design: { type: String, default: 'classic' },
 })
 
 const emit = defineEmits([
@@ -948,11 +957,12 @@ function onHandleDown(e, band) {
 
 function onHandleMove(e) {
   if (!drag) return
-  const rect = canvasEl.value.getBoundingClientRect()
+  // Layout pixels: the faceplate is scaled on a phone (see ui/pointerLocal.js).
+  const p = localPoint(e, canvasEl.value)
   emit('move-band', {
     id: drag.id,
-    frequencyHz: hzFor(e.clientX - rect.left),
-    gainDb: dbFor(e.clientY - rect.top),
+    frequencyHz: hzFor(p.x),
+    gainDb: dbFor(p.y),
   })
 }
 
@@ -988,11 +998,10 @@ function onHandleWheel(e, band) {
  */
 function onPlotMove(e) {
   if (!props.cursorReadout || !canvasEl.value) return
-  const rect = canvasEl.value.getBoundingClientRect()
   // Rounded at the source, not at display time, so the ref only changes when
   // the number on screen would — which keeps this from forcing a canvas
   // repaint on every pixel of pointer travel.
-  cursorHz.value = Math.round(hzFor(e.clientX - rect.left))
+  cursorHz.value = Math.round(hzFor(localPoint(e, canvasEl.value).x))
 }
 
 function onPlotDown(e) {
@@ -1001,7 +1010,7 @@ function onPlotDown(e) {
   // places a free band at the point, VoiceRx resolves the frequency to a role
   // and places that role's band. Both want the gesture, so this component only
   // reports it.
-  const rect = canvasEl.value.getBoundingClientRect()
+  const p = localPoint(e, canvasEl.value)
 
   // The press carries straight into dragging the band it just made, so the
   // whole gesture is one movement: put it here, pull it to there. The owner
@@ -1014,8 +1023,8 @@ function onPlotDown(e) {
   // now under the pointer, which is all the drag needs.
   let placed = null
   emit('create-band', {
-    frequencyHz: hzFor(e.clientX - rect.left),
-    gainDb: dbFor(e.clientY - rect.top),
+    frequencyHz: hzFor(p.x),
+    gainDb: dbFor(p.y),
     adopt: (id) => { placed = id ?? null },
   })
   if (placed === null) return
@@ -1035,8 +1044,9 @@ function onPlotDown(e) {
   >
     <canvas
       ref="canvasEl"
-      class="block w-full rounded-[3px]"
-      :style="{ height: `${height}px`, background: 'rgba(0,0,0,.28)' }"
+      class="block w-full touch-none"
+      :class="design === 'modula' ? 'eqp-well' : 'rounded-[3px]'"
+      :style="{ height: `${height}px`, background: design === 'modula' ? undefined : 'rgba(0,0,0,.28)' }"
       @pointerdown="onPlotDown"
       @pointermove="onHandleMove"
       @pointerup="onHandleUp"
@@ -1047,8 +1057,9 @@ function onPlotDown(e) {
          here: the canvas below treats a press as "create a band there". -->
     <div
       v-if="rangeControl"
-      class="absolute top-[6px] right-[6px] inline-flex rounded-[3px] overflow-hidden"
-      style="border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.45)"
+      class="absolute top-[6px] right-[6px] inline-flex overflow-hidden"
+      :class="design === 'modula' ? 'eqp-range' : 'rounded-[3px]'"
+      :style="design === 'modula' ? null : 'border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.45)'"
       @pointerdown.stop
     >
       <button
@@ -1056,7 +1067,8 @@ function onPlotDown(e) {
         :key="r"
         type="button"
         class="px-[6px] py-[3px] transition-colors"
-        :style="{
+        :class="design === 'modula' ? ['eqp-range-opt', { 'is-on': dbRange === r }] : ''"
+        :style="design === 'modula' ? null : {
           font: '600 8px/1 Inter',
           letterSpacing: '.06em',
           background: dbRange === r
@@ -1099,7 +1111,7 @@ function onPlotDown(e) {
     >
       <button
         type="button"
-        class="absolute inset-0 flex items-center justify-center"
+        class="absolute inset-0 flex items-center justify-center touch-none"
         style="cursor:grab"
         :aria-label="`Band at ${Math.round(band.frequencyHz)} hertz, ${band.gainDb.toFixed(1)} decibels`"
         @pointerdown="onHandleDown($event, band)"
@@ -1205,3 +1217,32 @@ function onPlotDown(e) {
   </div>
 </template>
 
+<style scoped>
+/* MODULA: the kit's dark well — the level meters' housing. */
+.eqp-well {
+  border-radius: 6px;
+  background: #0b0e13;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, .85), 0 0 0 1px #1c222c, 0 1px 0 rgba(255, 255, 255, .05);
+}
+.eqp-range {
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #1a1c20, #22252a);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, .8);
+}
+.eqp-range-opt {
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  font: 700 8.5px/1 'Inter', system-ui, sans-serif;
+  letter-spacing: .1em;
+  color: rgba(255, 255, 255, .5);
+}
+.eqp-range-opt.is-on {
+  color: #3fd0de;
+  background: linear-gradient(180deg, #3c4149, #2a2e34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 4px 8px -4px rgba(0, 0, 0, .9), 0 0 0 1px rgba(0, 0, 0, .6);
+}
+</style>

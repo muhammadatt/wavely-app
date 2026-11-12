@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/crisp-fm-design-system-2acdbab5-f20a-4311-90ec-ac92c4f83b32/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/crisp-fm-design-system-2acdbab5-f20a-4311-90ec-ac92c4f83b32/tokens/colors.css">
+<link rel="stylesheet" href="_ds/crisp-fm-design-system-2acdbab5-f20a-4311-90ec-ac92c4f83b32/tokens/typography.css">
+<link rel="stylesheet" href="_ds/crisp-fm-design-system-2acdbab5-f20a-4311-90ec-ac92c4f83b32/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/crisp-fm-design-system-2acdbab5-f20a-4311-90ec-ac92c4f83b32/tokens/radius.css">
+<link rel="stylesheet" href="_ds/crisp-fm-design-system-2acdbab5-f20a-4311-90ec-ac92c4f83b32/tokens/elevation.css">
+<link rel="stylesheet" href="_ds/crisp-fm-design-system-2acdbab5-f20a-4311-90ec-ac92c4f83b32/styles.css">
+<script src="_ds/crisp-fm-design-system-2acdbab5-f20a-4311-90ec-ac92c4f83b32/_ds_bundle.js"></script>
+<style>body{margin:0;background:#0a0c0f;font-family:'Inter',system-ui,sans-serif;color:#eaf6f8}a{color:#7fe9f6}a:hover{color:#9beeff}.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(255,255,255,.06)}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 8px}.dv-tid{font:600 10px 'JetBrains Mono',monospace;padding:3px 7px;background:#86e8ff;color:#08161a;border-radius:4px;text-decoration:none}.dv-tname{font:600 13px/1.2 'Inter',sans-serif;color:#eaf6f8}.dv-intro{font:400 12.5px/1.55 'Inter',sans-serif;color:rgba(255,255,255,.6);max-width:820px;margin:0 0 26px}.dv-opts{display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:10px}.dv-oid{font:600 10.5px 'JetBrains Mono',monospace;padding:3px 7px;background:rgba(255,255,255,.08);color:#eaf6f8;border-radius:5px;text-decoration:none}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:600 12px/1.3 'Inter',sans-serif;color:#eaf6f8}.dv-onote{font:400 11.5px/1.5 'Inter',sans-serif;color:rgba(255,255,255,.55);max-width:520px;margin:0}.dv-card{padding:36px;background:linear-gradient(160deg,#181c22,#0c0f13 62%);border-radius:12px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}.dv-opt:target .dv-oid{background:#86e8ff;color:#08161a}.dv-next{margin:26px 0 0;font:12px/1.5 'Inter',sans-serif;color:rgba(255,255,255,.5)}</style>
+</helmet>
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Save modal — four directions</span></div>
+<p class="dv-intro">What I'd fix in the current dialog: the overwrite warning sits under the bit-depth controls, far from the file name that causes it; the output spec is spread over three rows with no sense of what changed from the original; and 32-bit float stays on offer when MP3 is picked. Each direction below tackles those differently — mix and match.</p>
+<div class="dv-opts">
+
+<div class="dv-opt" id="1a">
+<div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Refined classic</div>
+<p class="dv-onote">Same structure, sharper. The name conflict is resolved right under the name field (Replace / Keep both). Formats become small cards that carry their size. Values matching the original get a quiet dot.</p>
+<div class="dv-card">
+<div style="width:500px;background:linear-gradient(155deg,#181c22,#0d1013);border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.09);overflow:hidden">
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 22px 16px;border-bottom:1px solid rgba(255,255,255,.06)">
+<div style="display:flex;flex-direction:column;gap:5px"><div style="font-size:15px;font-weight:700">Save</div><div style="font:500 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.5)">Original · WAV · 16-bit · 48 kHz · mono</div></div>
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+</div>
+<div style="display:flex;flex-direction:column;gap:20px;padding:20px 22px 22px">
+<div style="display:flex;flex-direction:column;gap:8px">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:rgba(255,255,255,.42)">File name</div>
+<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 13px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(224,184,74,.55)"><span style="font-size:13px;font-weight:600">David Greenberg Clip Normalized</span><span style="font:500 12px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)">.wav</span></div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+<div style="display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:500;color:#e0b84a"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l10 18H2z"></path><path d="M12 10v4M12 17.5v.01"></path></svg>A file with this name is already here</div>
+<div style="display:flex;padding:2px;gap:2px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09)"><div style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;background:rgba(224,184,74,.14);color:#e0b84a">Replace</div><div style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;color:rgba(255,255,255,.65)">Keep both</div></div>
+</div>
+</div>
+<div style="display:flex;align-items:center;gap:10px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>
+<div style="flex:1;display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;font-weight:600">Same folder as the original</span><span style="font:500 10.5px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)">~/Narration/Greenberg/Ch 04</span></div>
+<x-import component-from-global-scope="CrispFmDesignSystem_2acdba.Button" color="ghost" size="sm" pill="{{ false }}" hint-size="72px,32px">Browse…</x-import>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:rgba(255,255,255,.42)">Format</div>
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+<div style="display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:12px;background:rgba(53,211,230,.10);border:1px solid rgba(53,211,230,.5)"><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:700;color:#7fe9f6">WAV</span><span style="width:6px;height:6px;border-radius:9px;background:#5fd39a"></span></div><span style="font:500 10.5px 'JetBrains Mono',monospace;color:rgba(255,255,255,.55)">Lossless · 3.4 MB</span></div>
+<div style="display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)"><span style="font-size:13px;font-weight:700;color:rgba(255,255,255,.85)">FLAC</span><span style="font:500 10.5px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)">Lossless · 1.9 MB</span></div>
+<div style="display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)"><span style="font-size:13px;font-weight:700;color:rgba(255,255,255,.85)">MP3</span><span style="font:500 10.5px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)">Compressed · 0.6 MB</span></div>
+</div>
+</div>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 128px;gap:12px">
+<div style="display:flex;flex-direction:column;gap:8px">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:rgba(255,255,255,.42)">Bit depth</div>
+<div style="display:flex;padding:3px;gap:3px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
+<div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:7px 0;border-radius:8px;background:linear-gradient(180deg,#7ef0ff,#5ce3f8);color:#08161a;font-size:11.5px;font-weight:700">16-bit<span style="width:5px;height:5px;border-radius:9px;background:#08161a;opacity:.5"></span></div>
+<div style="flex:1;text-align:center;padding:7px 0;font-size:11.5px;font-weight:700;color:rgba(255,255,255,.75)">24-bit</div>
+<div style="flex:1;text-align:center;padding:7px 0;font-size:11.5px;font-weight:700;color:rgba(255,255,255,.75)">32-bit float</div>
+</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:rgba(255,255,255,.42)">Sample rate</div>
+<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;height:22px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09)"><span style="display:flex;align-items:center;gap:6px;font:600 12px 'JetBrains Mono',monospace">48 kHz<span style="width:5px;height:5px;border-radius:9px;background:#5fd39a"></span></span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
+</div>
+</div>
+<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.42)"><span style="width:5px;height:5px;border-radius:9px;background:#5fd39a"></span>Matches the original</div>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-top:1px solid rgba(255,255,255,.06)">
+<span style="font-size:12px;font-weight:600;color:#7fe9f6">Set working folder</span>
+<div style="display:flex;gap:8px"><x-import component-from-global-scope="CrispFmDesignSystem_2acdba.Button" color="ghost" pill="{{ false }}" hint-size="80px,38px">Cancel</x-import><x-import component-from-global-scope="CrispFmDesignSystem_2acdba.Button" pill="{{ false }}" hint-size="90px,38px">Replace</x-import></div>
+</div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="1b">
+<div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>One spec line, edits shown as a diff</div>
+<p class="dv-onote">Most saves keep the original spec, so the controls fold into a single mono line. Anything changed lights cyan with the before-value struck through. The conflict moves to the footer, beside the button it affects.</p>
+<div class="dv-card">
+<div style="width:500px;background:linear-gradient(155deg,#181c22,#0d1013);border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.09);overflow:hidden">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:20px 22px 0">
+<div style="font-size:15px;font-weight:700">Save</div>
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+</div>
+<div style="display:flex;flex-direction:column;gap:14px;padding:18px 22px 22px">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid #35d3e6;box-shadow:0 0 0 3px rgba(53,211,230,.10)"><span style="font-size:14px;font-weight:600">David Greenberg Clip Normalized</span><span style="font:500 12px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)">.wav</span></div>
+<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,.65)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>in <span style="font-weight:600;color:#eaf6f8">Ch 04</span>, same folder as the original<span style="margin-left:auto;font-weight:600;color:#7fe9f6">Change</span></div>
+<div style="display:flex;flex-direction:column;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
+<div style="display:flex;align-items:center;gap:12px;padding:12px 13px">
+<div style="flex:1;display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;font:600 12.5px 'JetBrains Mono',monospace;color:rgba(255,255,255,.85)">
+<span>WAV</span><span style="color:rgba(255,255,255,.3)">·</span>
+<span style="display:flex;gap:6px;align-items:baseline"><span style="text-decoration:line-through;color:rgba(255,255,255,.35);font-weight:500">16</span><span style="color:#7fe9f6;padding:1px 6px;border-radius:5px;background:rgba(53,211,230,.12)">24-bit</span></span><span style="color:rgba(255,255,255,.3)">·</span>
+<span>48 kHz</span><span style="color:rgba(255,255,255,.3)">·</span><span>mono</span>
+</div>
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(180deg)"><polyline points="6 9 12 15 18 9"></polyline></svg>
+</div>
+<div style="display:flex;flex-direction:column;gap:10px;padding:12px 13px 14px;border-top:1px solid rgba(255,255,255,.06)">
+<div style="display:grid;grid-template-columns:64px minmax(0,1fr);align-items:center;gap:10px">
+<span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">FORMAT</span>
+<div style="display:flex;gap:4px"><span style="padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(255,255,255,.10);color:#eaf6f8">WAV</span><span style="padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;color:rgba(255,255,255,.6)">FLAC</span><span style="padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;color:rgba(255,255,255,.6)">MP3</span></div>
+</div>
+<div style="display:grid;grid-template-columns:64px minmax(0,1fr);align-items:center;gap:10px">
+<span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">DEPTH</span>
+<div style="display:flex;gap:4px"><span style="padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;color:rgba(255,255,255,.6)">16-bit</span><span style="padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(53,211,230,.14);color:#7fe9f6;box-shadow:inset 0 0 0 1px rgba(53,211,230,.5)">24-bit</span><span style="padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;color:rgba(255,255,255,.6)">32-bit float</span></div>
+</div>
+<div style="display:grid;grid-template-columns:64px minmax(0,1fr);align-items:center;gap:10px">
+<span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">RATE</span>
+<div style="display:flex;gap:4px"><span style="padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;color:rgba(255,255,255,.6)">44.1</span><span style="padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(255,255,255,.10);color:#eaf6f8">48</span><span style="padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;color:rgba(255,255,255,.6)">96 kHz</span></div>
+</div>
+</div>
+</div>
+<div style="display:flex;justify-content:space-between;font:500 10.5px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)"><span>About 5.1 MB</span><span style="color:#7fe9f6">Reset to original</span></div>
+</div>
+<div style="display:flex;align-items:center;gap:10px;padding:14px 22px;border-top:1px solid rgba(255,255,255,.06);background:rgba(224,184,74,.05)">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e0b84a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M12 3l10 18H2z"></path><path d="M12 10v4M12 17.5v.01"></path></svg>
+<span style="flex:1;font-size:11.5px;line-height:1.35;color:#e0b84a">Replaces the existing file of the same name</span>
+<x-import component-from-global-scope="CrispFmDesignSystem_2acdba.Button" color="ghost" pill="{{ false }}" hint-size="96px,38px">Keep both</x-import>
+<x-import component-from-global-scope="CrispFmDesignSystem_2acdba.Button" pill="{{ false }}" hint-size="90px,38px">Replace</x-import>
+</div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="1c">
+<div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Choose by purpose</div>
+<p class="dv-onote">Narrators think "send to the client", not "MP3 at 192 kbps". Four purpose cards carry the spec as a caption; "Custom" opens the full controls. Fits the product's preset-first pattern.</p>
+<div class="dv-card">
+<div style="width:500px;background:linear-gradient(155deg,#181c22,#0d1013);border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.09);overflow:hidden">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:20px 22px 16px">
+<div style="font-size:15px;font-weight:700">Save</div>
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+</div>
+<div style="display:flex;flex-direction:column;gap:18px;padding:0 22px 22px">
+<div style="display:flex;flex-direction:column;gap:6px">
+<div style="display:flex;align-items:center;padding:11px 13px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)"><span style="flex:1;font-size:13px;font-weight:600">David Greenberg Clip Normalized<span style="font:500 12px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)">.mp3</span></span></div>
+<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.5)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>Ch 04 · same folder as the original<span style="margin-left:auto;font-weight:600;color:#7fe9f6">Change</span></div>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:rgba(255,255,255,.42)">What's it for</div>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+<div style="display:flex;gap:11px;padding:12px 13px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
+<div style="flex:none;width:32px;height:32px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+<div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;font-weight:700">Match the original</span><span style="font:500 10px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)">WAV · 16-bit · 48k · 3.4 MB</span></div>
+</div>
+<div style="display:flex;gap:11px;padding:12px 13px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
+<div style="flex:none;width:32px;height:32px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg></div>
+<div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;font-weight:700">Keep editing later</span><span style="font:500 10px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)">WAV · 32-bit float · 9.8 MB</span></div>
+</div>
+<div style="display:flex;gap:11px;padding:12px 13px;border-radius:12px;background:rgba(53,211,230,.10);border:1px solid rgba(53,211,230,.5)">
+<div style="flex:none;width:32px;height:32px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(53,211,230,.14);color:#7fe9f6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 010 14.14"></path><path d="M15.54 8.46a5 5 0 010 7.07"></path></svg></div>
+<div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;font-weight:700;color:#7fe9f6">Send or upload</span><span style="font:500 10px 'JetBrains Mono',monospace;color:rgba(255,255,255,.6)">MP3 · 192 kbps · 0.6 MB</span></div>
+</div>
+<div style="display:flex;gap:11px;padding:12px 13px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
+<div style="flex:none;width:32px;height:32px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"></path></svg></div>
+<div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;font-weight:700">Archive</span><span style="font:500 10px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)">FLAC · 24-bit · 2.6 MB</span></div>
+</div>
+</div>
+<div style="display:flex;align-items:center;gap:6px;padding:4px 2px 0;font-size:11.5px;font-weight:600;color:rgba(255,255,255,.6)">Custom format<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></div>
+</div>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-top:1px solid rgba(255,255,255,.06)">
+<span style="font:500 10.5px 'JetBrains Mono',monospace;color:rgba(255,255,255,.42)">New file · no conflicts</span>
+<div style="display:flex;gap:8px"><x-import component-from-global-scope="CrispFmDesignSystem_2acdba.Button" color="ghost" pill="{{ false }}" hint-size="80px,38px">Cancel</x-import><x-import component-from-global-scope="CrispFmDesignSystem_2acdba.Button" pill="{{ false }}" hint-size="80px,38px">Save</x-import></div>
+</div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="1d">
+<div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>Signal path faceplate</div>
+<p class="dv-onote">Leans into the hardware vocabulary: original and output side by side as an engraved readout, latching switch banks below. The overwrite choice becomes two equal destination cards, so replacing is never the silent default.</p>
+<div class="dv-card">
+<div style="width:500px;background:linear-gradient(155deg,#181c22,#0d1013);border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.09);overflow:hidden">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px">
+<div style="display:flex;align-items:center;gap:10px"><span style="font:700 10px 'JetBrains Mono',monospace;letter-spacing:.22em;color:#7fe9f6">SAVE</span><span style="font-size:13px;font-weight:600;color:rgba(255,255,255,.85)">David Greenberg Clip Normalized</span></div>
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+</div>
+<div style="margin:0 22px;display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);align-items:stretch;border-radius:12px;background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7);padding:14px 16px">
+<div style="display:flex;flex-direction:column;gap:7px">
+<span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">ORIGINAL</span>
+<div style="display:grid;grid-template-columns:48px 1fr;row-gap:5px;font:600 12px 'JetBrains Mono',monospace;color:rgba(255,255,255,.6)"><span style="color:rgba(255,255,255,.35);font-size:10px">FMT</span><span>WAV</span><span style="color:rgba(255,255,255,.35);font-size:10px">DEPTH</span><span>16-bit</span><span style="color:rgba(255,255,255,.35);font-size:10px">RATE</span><span>48.0 kHz</span><span style="color:rgba(255,255,255,.35);font-size:10px">SIZE</span><span>3.4 MB</span></div>
+</div>
+<div style="display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.35)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></div>
+<div style="display:flex;flex-direction:column;gap:7px">
+<span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#7fe9f6">OUTPUT</span>
+<div style="display:grid;grid-template-columns:48px 1fr;row-gap:5px;font:600 12px 'JetBrains Mono',monospace;color:rgba(255,255,255,.85)"><span style="color:rgba(255,255,255,.35);font-size:10px">FMT</span><span style="color:#7fe9f6">FLAC</span><span style="color:rgba(255,255,255,.35);font-size:10px">DEPTH</span><span style="color:#7fe9f6">24-bit</span><span style="color:rgba(255,255,255,.35);font-size:10px">RATE</span><span>48.0 kHz</span><span style="color:rgba(255,255,255,.35);font-size:10px">SIZE</span><span style="color:#7fe9f6">2.6 MB</span></div>
+</div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:18px 22px 4px">
+<div style="display:flex;flex-direction:column;gap:7px"><span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">FORMAT</span><div style="display:flex;flex-direction:column;gap:3px;padding:3px;border-radius:10px;background:linear-gradient(180deg,#1a2029,#12161d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)"><span style="padding:6px 9px;font:600 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.65)">WAV</span><span style="padding:6px 9px;border-radius:7px;font:700 11px 'JetBrains Mono',monospace;background:linear-gradient(180deg,#7ef0ff,#5ce3f8);color:#08161a">FLAC</span><span style="padding:6px 9px;font:600 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.65)">MP3</span></div></div>
+<div style="display:flex;flex-direction:column;gap:7px"><span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">DEPTH</span><div style="display:flex;flex-direction:column;gap:3px;padding:3px;border-radius:10px;background:linear-gradient(180deg,#1a2029,#12161d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)"><span style="padding:6px 9px;font:600 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.65)">16</span><span style="padding:6px 9px;border-radius:7px;font:700 11px 'JetBrains Mono',monospace;background:linear-gradient(180deg,#7ef0ff,#5ce3f8);color:#08161a">24</span><span style="padding:6px 9px;font:600 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)">32F</span></div></div>
+<div style="display:flex;flex-direction:column;gap:7px"><span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">RATE</span><div style="display:flex;flex-direction:column;gap:3px;padding:3px;border-radius:10px;background:linear-gradient(180deg,#1a2029,#12161d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)"><span style="padding:6px 9px;font:600 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.65)">44.1</span><span style="padding:6px 9px;border-radius:7px;font:700 11px 'JetBrains Mono',monospace;background:linear-gradient(180deg,#7ef0ff,#5ce3f8);color:#08161a">48</span><span style="padding:6px 9px;font:600 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.65)">96</span></div></div>
+</div>
+<div style="padding:4px 22px 0;font-size:10.5px;color:rgba(255,255,255,.42)">FLAC tops out at 24-bit</div>
+<div style="display:flex;flex-direction:column;gap:8px;padding:18px 22px 20px">
+<span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">DESTINATION · CH 04</span>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+<div style="display:flex;flex-direction:column;gap:4px;padding:11px 13px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)"><span style="font-size:12.5px;font-weight:700">Replace</span><span style="font-size:11px;line-height:1.35;color:#e0b84a">Overwrites the existing .flac</span></div>
+<div style="display:flex;flex-direction:column;gap:4px;padding:11px 13px;border-radius:12px;background:rgba(53,211,230,.10);border:1px solid rgba(53,211,230,.5)"><span style="font-size:12.5px;font-weight:700;color:#7fe9f6">Save as copy</span><span style="font:500 10.5px 'JetBrains Mono',monospace;color:rgba(255,255,255,.6)">…Normalized 2.flac</span></div>
+</div>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-top:1px solid rgba(255,255,255,.06)">
+<span style="font-size:12px;font-weight:600;color:#7fe9f6">Browse…</span>
+<div style="display:flex;gap:8px"><x-import component-from-global-scope="CrispFmDesignSystem_2acdba.Button" color="ghost" pill="{{ false }}" hint-size="80px,38px">Cancel</x-import><x-import component-from-global-scope="CrispFmDesignSystem_2acdba.Button" pill="{{ false }}" hint-size="110px,38px">Save copy</x-import></div>
+</div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next: "make <a class="dv-oid" href="#1b">1b</a> interactive" · "<a class="dv-oid" href="#1c">1c</a> purpose cards with <a class="dv-oid" href="#1d">1d</a> destination cards" · "show the MP3 state of <a class="dv-oid" href="#1a">1a</a>"</p>
+</section>
+</x-dc>
+</body>
+</html>

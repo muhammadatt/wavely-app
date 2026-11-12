@@ -1,11 +1,20 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { useWindows } from '../../composables/useWindows.js'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useWindows, CHAIN_WINDOW_ID } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
+import {
+  chainWindowMounted, chainWindowUnmounted, chainStatusFor, chainApplying,
+} from '../../composables/usePluginChain.js'
+import { currentPluginCopy, idForCopy, chainCopyNumber, isChainCopyId } from '../../composables/pluginCopies.js'
 import { helpFor } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
+import { isSheetViewport, sheetGeometry, SHEET_MAX_WIDTH as SHEET_NARROW_PX } from '../../ui/windowSheet.js'
 import Icon from '../ui/Icon.vue'
+import { useEntitlements } from '../../composables/useEntitlements.js'
+import { isOffline } from '../../auth/plans.js'
 import HelpOverlay from './HelpOverlay.vue'
+import ModulaPresetBrowser from '../modula/ModulaPresetBrowser.vue'
+import ModulaLedPill from '../modula/ModulaLedPill.vue'
 
 /**
  * The plugin harness — the chassis every effect window is mounted into.
@@ -133,6 +142,14 @@ const props = defineProps({
   applyDisabled: { type: Boolean, default: false },
   applyDisabledHint: { type: String, default: '' },
   /**
+   * A plan feature (src/auth/plans.js) Apply needs. Without it the button stays
+   * PRESSABLE and carries a PRO tag: pressing it opens the upgrade prompt
+   * rather than emitting `apply`. Preview is never gated — hearing the result
+   * first is the point. An OFFLINE feature (plans.js `offline`) has no preview:
+   * its Apply is the whole plugin, and the tooltip does not promise one.
+   */
+  applyFeature: { type: String, default: null },
+  /**
    * Whether Apply needs a selection. True for every effect that processes a
    * region, which is all of them today; false leaves Apply live on an empty
    * selection for anything that operates on the whole file.
@@ -143,6 +160,16 @@ const props = defineProps({
   // live in the playback chain. A disabled control with a tooltip teaches that
   // real-time tuning exists; omitting it teaches nothing.
   showPreview: { type: Boolean, default: false },
+  /**
+   * An OFFLINE process (registry `offline`): nothing here runs in real time.
+   * The header carries a RENDER chip beside the name, the footer puts a plain
+   * statement of the contract ("No preview") where a real-time plugin has its
+   * Preview, and the action button carries the same clock icon as the chip.
+   * Most of the app's windows ARE real-time, so the few that are not have to
+   * say so at a glance rather than reading as broken real-time ones (no ON
+   * lamp, no Preview). Pass show-engage false and no Preview alongside it.
+   */
+  offline: { type: Boolean, default: false },
   previewable: { type: Boolean, default: true },
   previewing: { type: Boolean, default: false },
   previewHint: {
@@ -172,6 +199,31 @@ const props = defineProps({
    * against a runaway drag it can enforce on the caller's behalf.
    */
   maxHeightDelta: { type: Number, default: 360 },
+
+  /**
+   * 'classic' | 'modula'. MODULA is the control-surface kit's chrome
+   * (docs/design/modula): one lifted chassis with the face set into it, the
+   * name in the plugin's hue over white, a round help and close, the preset
+   * browser in the centre, ON/BYPASS as a lamp pill in a fixed slot, and a
+   * footer of Select all · Preview · Apply. Opt-in per plugin, so the panels
+   * convert one at a time; everything else this component does — dragging,
+   * focus, help, the scroll ceiling, the footer's narrow-window steps — is
+   * the same in both.
+   */
+  design: { type: String, default: 'classic' },
+  /**
+   * Modula only: 'dark' (the steel chassis) | 'light' (a painted cream panel,
+   * VoxPressor's 2b). Light repaints the chassis, header and footer; the face
+   * draws its own controls for the surface it is told it sits on.
+   */
+  surface: { type: String, default: 'dark' },
+  /**
+   * A `usePluginPresets` instance. Under Modula it puts the preset browser in
+   * the header's centre column (classic windows slot PresetMenu themselves).
+   */
+  presets: { type: Object, default: null },
+  presetsDisabled: { type: Boolean, default: false },
+  presetsDisabledHint: { type: String, default: '' },
 })
 
 const emit = defineEmits([
@@ -190,7 +242,7 @@ const emit = defineEmits([
   'update:heightDelta',
 ])
 
-const { focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize } = useWindows()
+const { openWindow, focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize } = useWindows()
 // The harness reads the selection itself rather than taking it as a prop.
 // Every plugin was passing the same `hasSelection` through to the same row and
 // printing the same unmet message; one readout that is right by construction
@@ -198,6 +250,12 @@ const { focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize }
 const { state, hasSelection, selectAll } = useEditorState()
 
 const accent = computed(() => props.accent)
+const modula = computed(() => props.design === 'modula')
+
+// The window this harness IS: the plugin's id for its solo copy, `<id>@chain`
+// for the copy in the Plugin Chain (pluginCopies.js). Faceplates pass the solo
+// id either way; help is keyed by it.
+const windowId = idForCopy(props.windowId, currentPluginCopy())
 
 /**
  * Help for THIS effect, looked up by the id the harness was already given.
@@ -234,6 +292,19 @@ let resizeStartDelta = 0
 
 const minWidthPx = computed(() => props.minWidth ?? props.width)
 
+// A caller may change its natural width while open (the parametric EQ sizes
+// itself to its band count). Move by the same amount, so a manual widening is
+// kept as an offset rather than snapped away, then re-fit to the viewport.
+// Growing slides the window left as far as it needs to keep its right edge
+// on screen, so a band added near the edge never pushes the strip off it.
+watch(() => props.width, (next, prev) => {
+  const w = Math.max(minWidthPx.value, boxWidth.value + (next - prev))
+  const overflow = pos.value.x + w - (window.innerWidth - 20)
+  if (overflow > 0) pos.value.x = Math.max(16, pos.value.x - overflow)
+  boxWidth.value = clampWidth(w)
+  clampToViewport()
+})
+
 function clampWidth(w) {
   // Leaves the same margin clampToViewport does, so a fully-expanded window
   // still reads as a window rather than a panel welded to the screen edge.
@@ -258,10 +329,26 @@ const hasFooter = computed(() => props.showApply || props.showPreview)
 // A selection is what Apply acts on. Without one the footer offers to make one
 // rather than printing a notice about its absence — "select all" is a button,
 // "make a selection to apply" is a complaint.
-const applyBlocked = computed(() => props.applyDisabled || (props.requiresSelection && !hasSelection.value))
+// Nothing applies over a file that is already being processed: two renders of
+// the same selection would each commit, the later one overwriting the earlier
+// (a solo plugin opened while the chain was applying could do exactly that).
+const busy = computed(() => !!state.isProcessing)
+const applyBlocked = computed(() => !!inChain.value || busy.value || props.applyDisabled || (props.requiresSelection && !hasSelection.value))
+const entitlements = useEntitlements()
+const applyLocked = computed(() => !!props.applyFeature && !entitlements.can(props.applyFeature))
+
+function onApplyClick() {
+  if (props.applyFeature && !entitlements.request(props.applyFeature)) return
+  emit('apply')
+}
+
 const applyTitle = computed(() => {
+  if (inChain.value) return 'This plugin is in the Effect Chain — apply it from the chain'
+  if (busy.value) return 'This file is still being processed — wait for it to finish'
   if (props.applyDisabled) return props.applyDisabledHint
   if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
+  // An offline process has no preview to offer, so it does not promise one.
+  if (applyLocked.value) return entitlements.hint(props.applyFeature) + (isOffline(props.applyFeature) ? '' : ' — preview is free')
   return ''
 })
 
@@ -302,7 +389,49 @@ const MIN_BODY_PX = 160
 const HEADER_PX = 56
 const FOOTER_PX = 68
 
-const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
+/**
+ * The LAYOUT viewport — what 100vw / 100dvh, `position: fixed` and the
+ * `compact:` media query measure — not window.innerWidth / innerHeight, which
+ * on a mobile browser are the VISUAL viewport and grow whenever the page is
+ * zoomed out (anything overflowing sideways is enough). Read through them, a
+ * 393 px phone could pass for a large screen: the window then stayed a
+ * floating desktop window sized for that height, with Preview and Apply below
+ * the bottom of the real screen (reproduced with innerHeight reading 900 on a
+ * 390 px tall phone: EQ's Apply at y = 853).
+ */
+function layoutViewport() {
+  const de = typeof document === 'undefined' ? null : document.documentElement
+  return {
+    w: de?.clientWidth || (typeof window === 'undefined' ? 1280 : window.innerWidth),
+    h: de?.clientHeight || (typeof window === 'undefined' ? 800 : window.innerHeight),
+  }
+}
+const viewportH = ref(layoutViewport().h)
+const viewportW = ref(layoutViewport().w)
+
+/**
+ * Phone mode — see `ui/windowSheet.js`. On a small viewport the window is a
+ * full-screen sheet, zoomed so the faceplate fits the width, with no drag and
+ * no resize. Its position and size are left untouched underneath, so a window
+ * opened on a phone and then met with a desktop viewport (a rotated tablet, a
+ * widened browser) floats again where it was.
+ *
+ * Sized against the faceplate's floor (`minWidth`, defaulting to its width) —
+ * the narrowest it is laid out to work at.
+ */
+const sheet = computed(() => isSheetViewport({
+  viewportW: viewportW.value, viewportH: viewportH.value, designW: minWidthPx.value,
+}))
+/**
+ * A sheet on a phone held upright. Its header gets two rows (see the CSS at
+ * the end): one row of name, ON and close could not fit at 360–393 px — a long
+ * name like SATURATION WORKBENCH pushed ON and close off the screen, and on
+ * the de-essers ON slid under DELTA and the preset arrows.
+ */
+const narrowSheet = computed(() => sheet.value && viewportW.value < SHEET_NARROW_PX)
+const sheetBox = computed(() => sheetGeometry({
+  viewportW: viewportW.value, viewportH: viewportH.value, designW: minWidthPx.value,
+}))
 
 /**
  * How tall the scrolling body may be.
@@ -316,10 +445,17 @@ const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
  * reason Apply moved down there is that it must never be the thing below the
  * fold, and that only holds if the body's ceiling accounts for it.
  */
-const bodyMaxHeight = computed(() => Math.max(
-  MIN_BODY_PX,
-  viewportH.value - pos.value.y - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0) - VIEWPORT_MARGIN,
-))
+// A sheet has no ceiling here: its height is CSS's (see the template) — the
+// frame is 100dvh, header and footer are fixed and the body takes the rest.
+// A JS-computed ceiling can disagree with 100dvh (a mobile browser's toolbars
+// moving), and then the body overflows and pushes the footer, and Apply with
+// it, off the bottom of the screen; flex layout cannot.
+const bodyMaxHeight = computed(() => sheet.value
+  ? null
+  : Math.max(
+    MIN_BODY_PX,
+    viewportH.value - pos.value.y - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0) - VIEWPORT_MARGIN,
+  ))
 
 const frameEl = ref(null)
 const bodyEl = ref(null)
@@ -343,27 +479,60 @@ function updateOverflow() {
 // Whatever had focus when this opened, so closing can hand it back.
 let previouslyFocused = null
 
+// ── Chain membership ────────────────────────────────────────────────────────
+// A plugin with a slot in the Plugin Chain says so (IN CHAIN · n, which opens
+// the rack) and has NO APPLY of its own: the chain's Apply is the one that
+// writes it, in order with the rest. Joining happens only from the chain's
+// Add picker, so a plugin outside the chain shows nothing here.
+const inChain = computed(() => {
+  const status = chainStatusFor(windowId)
+  return status?.member ? status : null
+})
+
+// While the chain applies, the chain and its copies' windows take no input: a
+// knob turned or a slot removed mid-render would change what is being rendered.
+const frozen = computed(() => chainApplying.value && (windowId === CHAIN_WINDOW_ID || isChainCopyId(windowId)))
+
 // Accessible name, read off the brand mark.
 const label = computed(() => `${props.brandLead} ${props.brandTail}`.trim())
 
 onMounted(() => {
+  // A plugin keeps playing in the chain while its window is closed, with its
+  // meters stopped; reopening the window brings them back.
+  chainWindowMounted(windowId)
+
+  // A plugin that can preview or apply opens on the whole file when nothing is
+  // selected, so Preview works at once. An existing selection is left alone.
+  if (hasFooter.value && !hasSelection.value) selectAll()
+
   // A window that was resized before is reopened at the size it was left, the
   // same courtesy the position gets. Restored before the position fallback
   // below, which reads it for the first-open case.
-  const rememberedSize = getSize(props.windowId)
+  const rememberedSize = getSize(windowId)
   if (rememberedSize) {
-    boxWidth.value = clampWidth(rememberedSize.width ?? props.width)
+    // `extra` is how far a drag took the window past its natural width, so a
+    // window whose natural width moves (the EQ follows its band count)
+    // reopens at today's width plus the same widening, not at a stale total.
+    boxWidth.value = clampWidth(rememberedSize.extra != null
+      ? props.width + rememberedSize.extra
+      : rememberedSize.width ?? props.width)
     heightDelta.value = clampHeightDelta(rememberedSize.heightDelta ?? 0)
   }
   emit('update:heightDelta', heightDelta.value)
 
-  const remembered = getPosition(props.windowId)
+  const remembered = getPosition(windowId)
   if (remembered) {
     pos.value = { ...remembered }
   } else {
-    // First open: rest near the top-right so the waveform stays visible.
-    pos.value = { x: Math.max(16, window.innerWidth - boxWidth.value - 40), y: props.top }
+    // First open: rest near the top-right so the waveform stays visible. A
+    // second or third chain copy of the same plugin steps down and left, or it
+    // would open exactly on top of the first.
+    const step = 28 * Math.max(0, chainCopyNumber(currentPluginCopy()) - 1)
+    pos.value = { x: Math.max(16, window.innerWidth - boxWidth.value - 40 - step), y: props.top + step }
   }
+  // A window allowed to be narrower than its natural width (`minWidth`) opens
+  // no wider than the viewport has room for; the rest is a no-op.
+  boxWidth.value = clampWidth(boxWidth.value)
   clampToViewport()
 
   // These windows are non-modal by design — audio keeps playing and the
@@ -386,9 +555,11 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  // However the window closed — ×, Escape, or replaced by another plugin.
+  chainWindowUnmounted(windowId)
   window.removeEventListener('resize', onViewportResize)
   bodyRo?.disconnect()
-  savePosition(props.windowId, pos.value)
+  savePosition(windowId, pos.value)
   // Return focus only if it is still inside this window; if the user has since
   // clicked the waveform, yanking it back would be worse than leaving it.
   if (frameEl.value?.contains(document.activeElement)) {
@@ -405,7 +576,9 @@ onBeforeUnmount(() => {
  * the body's height honest, since it is measured from the top edge down.
  */
 function onViewportResize() {
-  viewportH.value = window.innerHeight
+  const { w, h } = layoutViewport()
+  viewportH.value = h
+  viewportW.value = w
   clampToViewport()
 }
 
@@ -417,6 +590,8 @@ function clampToViewport() {
 }
 
 function onDragStart(e) {
+  // A sheet is pinned to the screen; the header is just a header.
+  if (sheet.value) return
   dragging.value = true
   dragOffsetX = e.clientX - pos.value.x
   dragOffsetY = e.clientY - pos.value.y
@@ -435,7 +610,7 @@ function onDragEnd(e) {
   // On pointercancel the capture is already implicitly released
   try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
   clampToViewport()
-  savePosition(props.windowId, pos.value)
+  savePosition(windowId, pos.value)
 }
 
 /**
@@ -475,7 +650,11 @@ function onResizeEnd(e) {
   resizing.value = false
   try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
   clampToViewport()
-  saveSize(props.windowId, { width: boxWidth.value, heightDelta: heightDelta.value })
+  saveSize(windowId, {
+    width: boxWidth.value,
+    extra: boxWidth.value - props.width,
+    heightDelta: heightDelta.value,
+  })
 }
 
 /** Back to the size this opened at — the same gesture every knob here resets with. */
@@ -483,13 +662,13 @@ function resetSize() {
   boxWidth.value = props.width
   heightDelta.value = 0
   emit('update:heightDelta', 0)
-  saveSize(props.windowId, { width: boxWidth.value, heightDelta: 0 })
+  saveSize(windowId, { width: boxWidth.value, extra: 0, heightDelta: 0 })
 }
 
 // Touching or tabbing into the frame raises it. Without this, two open windows
 // keep whatever order they happened to mount in.
 function raise() {
-  focusWindow(props.windowId)
+  focusWindow(windowId)
 }
 
 // Escape closes the window focus is actually in, which is not necessarily the
@@ -512,7 +691,7 @@ function onEscape(e) {
 // still emitted for owners that need to tear down a preview chain first.
 function requestClose() {
   emit('close')
-  closeWindow(props.windowId)
+  closeWindow(windowId)
 }
 </script>
 
@@ -520,12 +699,19 @@ function requestClose() {
   <div
     ref="frameEl"
     class="win-frame fixed rounded-[18px] overflow-hidden flex flex-col"
+    :class="{ 'is-frozen': frozen, 'is-sheet': sheet }"
+    :inert="frozen"
+    :aria-busy="frozen || undefined"
     :data-chrome="chrome"
+    :data-design="design"
+    :data-surface="design === 'modula' && surface === 'light' ? 'light' : undefined"
     role="dialog"
     :aria-label="label"
     tabindex="-1"
     :style="{
-      left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px',
+      ...(sheet
+        ? { left: 0, top: 0, width: '100vw', height: '100dvh' }
+        : { left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px' }),
       zIndex: z,
       // One value, read by the chassis, the faceplate and Apply. Passing the
       // hue as a custom property rather than composing each gradient in JS is
@@ -551,7 +737,7 @@ function requestClose() {
     -->
     <div
       class="win-header grid items-center touch-none h-14 shrink-0 pl-5 pr-[14px]"
-      :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
+      :class="[sheet ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab', { 'is-narrow': narrowSheet }]"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
@@ -575,12 +761,22 @@ function requestClose() {
         the one button that disposes of the window.
       -->
       <div class="flex items-center gap-2.5">
-        <span style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
+        <!-- Modula: one word mark in the plugin's hue over white, no rule. -->
+        <span v-if="modula" class="win-brand-m">{{ brandLead }}{{ brandTail }}</span>
+        <span v-else style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
           {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.85)">{{ brandTail }}</span></template>
+        </span>
+        <span
+          v-if="offline"
+          class="win-offline"
+          title="Renders the selection — not real-time. Nothing is heard until it is applied; Undo reverts it"
+        >
+          <Icon name="offline" :size="11" :stroke-width="2.25" />
+          RENDER
         </span>
         <!-- The short rule, not `--tall`: it is dividing a 13 px word from an
              icon, where the tall one divides two 30 px chips. -->
-        <span v-if="help" class="win-rule"></span>
+        <span v-if="help && !modula" class="win-rule"></span>
         <button
           v-if="help"
           type="button"
@@ -592,7 +788,8 @@ function requestClose() {
           @pointerdown.stop
           @click="helpOpen = !helpOpen"
         >
-          <Icon name="help" :size="15" :stroke-width="2" />
+          <span v-if="modula" style="font:700 12px/1 'Inter',system-ui,sans-serif">?</span>
+          <Icon v-else name="help" :size="15" :stroke-width="2" />
         </button>
       </div>
 
@@ -604,8 +801,17 @@ function requestClose() {
         positions.
       -->
       <div class="flex items-center gap-2">
+        <!-- Modula: a lamp pill in the kit's second hue — DELTA is monitoring,
+             a mode rather than a value, the hue the kit gives modes. -->
+        <ModulaLedPill
+          v-if="showDelta && modula"
+          size="sm" label="DELTA" color="var(--m-second)"
+          :model-value="delta" :disabled="deltaDisabled" :title="deltaTitle"
+          @pointerdown.stop
+          @update:model-value="emit('toggle-delta')"
+        />
         <button
-          v-if="showDelta"
+          v-if="showDelta && !modula"
           type="button"
           class="win-chip"
           :class="{ 'win-chip--on': delta }"
@@ -617,12 +823,45 @@ function requestClose() {
         >
           <span class="win-chip-text">DELTA</span>
         </button>
+        <ModulaPresetBrowser
+          v-if="modula && presets"
+          class="win-presets-m"
+          :presets="presets"
+          :disabled="presetsDisabled"
+          :disabled-hint="presetsDisabledHint"
+        />
+        <!-- Says BYPASSED with the chain: the plugin's own lamp can read ON
+             while the chain around it is out of circuit and nothing is heard. -->
+        <button
+          v-if="inChain"
+          type="button"
+          class="win-chain-pill is-member"
+          :class="{ 'is-bypassed': inChain.chainBypassed }"
+          :title="inChain.chainBypassed ? 'The Effect Chain is bypassed — open it to turn it on' : 'Open the Effect Chain'"
+          @pointerdown.stop
+          @click="openWindow('plugin-chain')"
+        >IN CHAIN · {{ inChain.position }}{{ inChain.chainBypassed ? ' · BYPASSED' : '' }}</button>
         <slot name="header-center" />
       </div>
 
       <div class="flex items-center justify-end gap-2.5">
+        <!-- Modula: a fixed 96 px slot, so ON and BYPASS (different lengths)
+             never move the close button. -->
+        <span v-if="showEngage && modula" class="win-engage-slot-m">
+          <button
+            type="button"
+            class="win-pill-m"
+            :aria-pressed="String(engaged)"
+            title="Engage or bypass the effect"
+            @pointerdown.stop
+            @click="emit('toggle-engaged')"
+          >
+            <span class="win-pill-lamp-m" :class="{ 'is-on': engaged }"></span>
+            <span class="win-pill-text-m" :class="{ 'is-on': engaged }">{{ engaged ? 'ON' : 'BYPASS' }}</span>
+          </button>
+        </span>
         <button
-          v-if="showEngage"
+          v-if="showEngage && !modula"
           type="button"
           class="win-chip"
           :class="{ 'win-chip--on': engaged }"
@@ -647,7 +886,8 @@ function requestClose() {
           @pointerdown.stop
           @click="requestClose"
         >
-          <Icon name="close" :size="14" :stroke-width="2.5" />
+          <span v-if="modula" style="font:400 17px/1 'Inter',system-ui,sans-serif;margin-top:-1px">×</span>
+          <Icon v-else name="close" :size="14" :stroke-width="2.5" />
         </button>
       </div>
     </div>
@@ -664,11 +904,21 @@ function requestClose() {
       against the content itself — inside the scroller it would sit at the
       bottom of the scrolled content, which is the one place it is not needed.
     -->
-    <div class="win-face relative min-h-0 flex flex-col" :style="background ? { background } : null">
+    <div
+      class="win-face relative min-h-0 flex flex-col"
+      :class="{ 'flex-1': sheet }"
+      :style="[
+        background ? { background } : null,
+        // Only the faceplate is zoomed: the header and footer are flexible and
+        // stay full size, so close, ON and Apply keep finger-sized targets.
+        sheet ? { width: sheetBox.width + 'px', zoom: sheetBox.zoom } : null,
+      ]"
+    >
       <div
         ref="bodyEl"
         class="win-body min-h-0 overflow-y-auto"
-        :style="{ maxHeight: `${bodyMaxHeight}px` }"
+        :class="{ 'overflow-x-auto flex-1': sheet }"
+        :style="bodyMaxHeight == null ? null : { maxHeight: `${bodyMaxHeight}px` }"
         @scroll="updateOverflow"
       >
         <slot />
@@ -735,6 +985,11 @@ function requestClose() {
       </button>
 
       <div class="win-actions flex items-center gap-2">
+        <!-- A panel may replace the note while it works (Noise Reduction puts
+             its progress and Cancel here). -->
+        <slot name="offline-note">
+          <span v-if="offline" class="win-offline-note">No preview - Renders on the server.</span>
+        </slot>
         <!--
           The title sits on the WRAPPER, not on the button.
 
@@ -763,8 +1018,9 @@ function requestClose() {
             :aria-pressed="String(previewing)"
             @click="emit('toggle-preview')"
           >
-            <Icon :name="previewing ? 'stop' : 'play'" :size="13" />
-            <span class="win-btn-label">{{ previewing ? 'Stop preview' : 'Preview' }}</span>
+            <span v-if="modula" class="win-play-m" :class="{ 'is-on': previewing }"></span>
+            <Icon v-else :name="previewing ? 'stop' : 'play'" :size="13" />
+            <span class="win-btn-label">{{ previewing ? (modula ? 'Stop' : 'Stop preview') : 'Preview' }}</span>
           </button>
         </span>
 
@@ -774,11 +1030,12 @@ function requestClose() {
           class="win-apply"
           :disabled="applyBlocked"
           :title="applyTitle"
-          @click="emit('apply')"
+          @click="onApplyClick"
         >
-          <Icon :name="applyIcon" :size="15" :stroke-width="2.5" />
-          <span class="win-btn-label">{{ applyLabel }}</span>
-          <span class="win-btn-label-short">{{ applyLabelShort }}</span>
+          <Icon :name="offline ? 'offline' : applyIcon" :size="15" :stroke-width="2.5" />
+          <span class="win-btn-label">{{ inChain ? 'Applies with the chain' : applyLabel }}</span>
+          <span class="win-btn-label-short">{{ inChain ? 'In chain' : applyLabelShort }}</span>
+          <span v-if="applyLocked && !inChain" class="win-apply-pro">PRO</span>
         </button>
       </div>
     </div>
@@ -796,7 +1053,7 @@ function requestClose() {
       the thing it exists to do.
     -->
     <button
-      v-if="resizable"
+      v-if="resizable && !sheet"
       type="button"
       class="win-resize absolute flex items-end justify-end cursor-nwse-resize"
       style="width:22px;height:22px;right:3px;bottom:3px;touch-action:none"
@@ -937,6 +1194,27 @@ function requestClose() {
    One shape for both, because they are the same kind of control. Off is an
    outline, on is a raised white wash — a value step rather than a colour
    change, which is what keeps the hue out of the chrome. */
+.win-chain-pill {
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(255, 255, 255, .04);
+  color: rgba(234, 246, 248, .7);
+  font: 700 9.5px/1 'JetBrains Mono', monospace;
+  letter-spacing: .12em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.win-chain-pill:hover { background: rgba(255, 255, 255, .09); color: #eaf6f8; }
+.win-chain-pill.is-member {
+  border-color: rgba(232, 163, 61, .45);
+  color: #e8a33d;
+}
+.win-chain-pill.is-member.is-bypassed {
+  border-color: rgba(255, 255, 255, .14);
+  color: rgba(234, 246, 248, .55);
+}
 .win-chip {
   display: flex;
   align-items: center;
@@ -1128,6 +1406,15 @@ function requestClose() {
   opacity: 0.4;
   cursor: default;
 }
+/* The plan lock. Gold, the account menu's Pro colour, so the two read as one idea. */
+.win-apply-pro {
+  font: 700 8.5px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.1em;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: #e0b84a;
+  color: #14100e;
+}
 .win-apply:focus-visible {
   outline: 2px solid #7fe9f6;
   outline-offset: 2px;
@@ -1235,10 +1522,273 @@ function requestClose() {
   .win-apply .win-btn-label-short {
     display: inline;
   }
+  /* The header chip still says it; the footer needs the room for Apply. */
+  .win-offline-note {
+    display: none;
+  }
 }
+
+/* ── MODULA ─────────────────────────────────────────────────────────────────
+   The control-surface kit's chrome (docs/design/modula, "PLUGIN CHROME"). One
+   lifted chassis, no separate face plane: the face is the chassis, inset by
+   14 px, and the header and footer are separated from it by a dark rule over
+   a 4 % lit edge rather than by planes of their own. */
+.win-frame[data-design='modula'] {
+  border-radius: 22px;
+  background: var(--m-chassis);
+  box-shadow: 0 60px 90px -50px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.6);
+  color: var(--m-ink);
+}
+/* Space-between, as the kit draws it: the preset browser sits between the
+   name and the switches rather than on the window's axis. A centred column
+   needs twice the wider side's width, which a long name like CAMBRIDGE
+   INFLATOR turns into an overflow. */
+[data-design='modula'] .win-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 58px;
+  padding: 2px 18px 0;
+  gap: 16px;
+  background: transparent;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.32);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+[data-design='modula'] .win-face {
+  background: transparent;
+}
+[data-design='modula'] .win-body {
+  padding: 14px;
+}
+[data-design='modula'] .win-footer {
+  height: 60px;
+  padding: 0 16px;
+  background: transparent;
+  border-top: 1px solid rgba(0, 0, 0, 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.win-brand-m {
+  white-space: nowrap;
+  font: 800 13px/1 var(--m-font-ui);
+  letter-spacing: 0.14em;
+  color: color-mix(in srgb, var(--face, #e8a33d) 20%, #fff);
+}
+/* RENDER chip and footer note: what kind of plugin this is (an offline
+   process), not a control. Filled orange, matching the rail's RENDER tag. */
+.win-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font: 700 9px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.12em;
+  color: #5e2b02;
+  background: #e78040;
+  white-space: nowrap;
+  cursor: default;
+}
+.win-offline-note {
+  margin-right: 6px;
+  font: 500 11px var(--m-font-ui, 'Inter', system-ui, sans-serif);
+  color: rgba(159, 196, 232, 0.8);
+  white-space: nowrap;
+}
+/* Help and close: round, raised, no fill. */
+[data-design='modula'] .win-icon-btn {
+  border-radius: 50%;
+  background: transparent;
+  color: var(--m-ink-2);
+  box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.65);
+}
+[data-design='modula'] .win-icon-btn:hover,
+[data-design='modula'] .win-icon-btn--on {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--m-ink);
+}
+[data-design='modula'] .win-header > div {
+  min-width: 0;
+}
+[data-design='modula'] .win-header > div:first-child,
+[data-design='modula'] .win-header > div:last-child {
+  flex: none;
+}
+.win-presets-m {
+  width: 200px;
+  flex: 0 1 200px;
+}
+[data-design='modula'] .win-rule--tall {
+  height: 22px;
+  margin: 0 3px;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+.win-engage-slot-m {
+  width: 96px;
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+}
+.win-pill-m {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 13px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  background: transparent;
+  box-shadow: var(--m-shadow-raised);
+}
+.win-pill-m:hover { filter: brightness(1.08); }
+.win-pill-m:focus-visible { outline: 2px solid #7fe9f6; outline-offset: 2px; }
+.win-pill-lamp-m {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--m-lamp-off);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.7);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.win-pill-lamp-m.is-on { background: var(--m-ok); box-shadow: 0 0 6px var(--m-ok); }
+.win-pill-text-m {
+  font: 700 10px/1 var(--m-font-ui);
+  letter-spacing: 0.14em;
+  color: var(--m-ink-3);
+}
+.win-pill-text-m.is-on { color: var(--m-ink); }
+
+/* Footer: Select all is a dashed square in an outline; Preview is raised;
+   Apply is the light primary. All 32 px, radius 9. */
+[data-design='modula'] .win-selectall {
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--m-ink-3);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+[data-design='modula'] .win-selectall:hover { color: var(--m-ink); box-shadow: inset 0 0 0 1px rgba(232, 163, 61, 0.7); }
+[data-design='modula'] .win-sel { color: var(--m-ink-4); }
+[data-design='modula'] .win-preview {
+  min-width: 0;
+  height: 32px;
+  padding: 0 14px;
+  gap: 8px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--m-ink);
+  font: 600 12px var(--m-font-ui);
+  box-shadow: var(--m-shadow-raised);
+}
+/* The ink too: the classic hover's near-white otherwise wins on specificity,
+   which on the light surface turned the label white. Same colour on steel. */
+[data-design='modula'] .win-preview:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); color: var(--m-ink); }
+[data-design='modula'] .win-preview--on { background: transparent; }
+.win-play-m { width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid var(--m-ink); }
+.win-play-m.is-on { width: 9px; height: 9px; border: 0; border-radius: 1px; background: var(--m-accent); }
+[data-design='modula'] .win-apply {
+  height: 32px;
+  padding: 0 14px;
+  gap: 7px;
+  border-radius: 9px;
+  color: #1b1d21;
+  font: 600 12px var(--m-font-ui);
+  background: linear-gradient(180deg, #f2f4f7, #d9dde3);
+  box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(0, 0, 0, 0.55), 0 6px 12px -6px rgba(0, 0, 0, 0.9);
+}
+
+/* MODULA, LIGHT SURFACE: a painted cream panel (VoxPressor 2b). The inks and
+   the raised shadows turn warm-dark; Apply stays the light primary. */
+.win-frame[data-design='modula'][data-surface='light'] {
+  background: linear-gradient(180deg, #e6e2da, #cdc8be);
+  color: #1d2026;
+}
+[data-surface='light'] .win-header,
+[data-surface='light'] .win-footer {
+  --m-ink: #1d2026;
+  --m-ink-2: #3a3f47;
+  --m-ink-3: #41464e;
+  --m-ink-4: #555b64;
+  --m-shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 1px rgba(40, 30, 20, 0.28), 0 5px 9px -4px rgba(40, 30, 20, 0.35);
+}
+[data-surface='light'] .win-header { border-bottom-color: rgba(60, 50, 40, 0.22); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45); }
+[data-surface='light'] .win-footer { border-top-color: rgba(60, 50, 40, 0.22); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45); }
+[data-surface='light'] .win-brand-m { color: #1d2026; }
+/* The selection readout carries an inline dark-surface colour. */
+[data-surface='light'] .win-sel { color: #555b64 !important; }
+[data-surface='light'] .win-icon-btn { color: #3a3f47; box-shadow: var(--m-shadow-raised); }
+[data-surface='light'] .win-icon-btn:hover,
+[data-surface='light'] .win-icon-btn--on { background: rgba(0, 0, 0, 0.05); color: #1d2026; }
+[data-surface='light'] .win-rule--tall { background: rgba(60, 50, 40, 0.3); box-shadow: 1px 0 0 rgba(255, 255, 255, 0.5); }
+[data-surface='light'] .win-preview:hover:not(:disabled) { background: rgba(0, 0, 0, 0.05); }
+[data-surface='light'] .win-selectall { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18); }
+[data-surface='light'] .win-apply { box-shadow: inset 0 1px 0 #ffffff, 0 1px 1px rgba(40, 30, 20, 0.3), 0 5px 9px -4px rgba(40, 30, 20, 0.35); }
 
 @keyframes pluginBounceIn {
   0% { opacity: 0; transform: scale(0.94) translateY(8px); }
   100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.win-frame.is-frozen { filter: saturate(.6) brightness(.85); transition: filter .15s; }
+
+/* Phone sheet (see ui/windowSheet.js): the whole screen, so no rounded
+   corners and no drop shadow to read as a floating window. Last and
+   important, to outrank the radius utility and the chassis variants. */
+.win-frame.is-sheet {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Narrow sheet header — a phone held upright (see narrowSheet). Two rows:
+   identity on the left and ON + close on the right of the first, so those two
+   are always on screen; the monitoring / preset / chain group (and any
+   plugin's own header-center controls) on a second row of its own, centred,
+   scrolling sideways only as a last resort. Overrides both the classic grid
+   and Modula's flex row. */
+.win-header.is-narrow {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 48px auto;
+  height: auto !important;
+  gap: 0 8px;
+  padding: 0 10px 0 14px !important;
+}
+.win-header.is-narrow > div:nth-of-type(1) {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+.win-header.is-narrow > div:nth-of-type(1) > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.win-header.is-narrow > div:nth-of-type(1) > button {
+  flex: none;
+}
+.win-header.is-narrow > div:nth-of-type(2) {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-content: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+}
+.win-header.is-narrow > div:nth-of-type(2):empty {
+  display: none;
+}
+.win-header.is-narrow > div:nth-of-type(3) {
+  grid-column: 2;
+  grid-row: 1;
+}
+.win-header.is-narrow .win-presets-m {
+  flex: 0 1 200px;
+  min-width: 150px;
 }
 </style>

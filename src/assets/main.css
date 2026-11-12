@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* `compact:` — a phone, or any window too short for the desktop chrome. Height
+ * is the binding constraint: a landscape phone is ~360–430 px tall, and the
+ * desktop rows above and below the waveform add up to ~340 px of it. Width
+ * catches a phone held upright. Components with scoped CSS use the same query
+ * by hand; keep the two in step. */
+@custom-variant compact {
+  @media (max-height: 520px), (max-width: 640px) {
+    @slot;
+  }
+}
+
 /* The design tokens the app actually uses.
  *
  * These replace an earlier light/pastel Nunito palette that no component ever
@@ -10,6 +21,19 @@
 @theme {
   /* Accent — the single interactive colour. `accent` fills, `accent-bright`
      is the text/stroke tint that sits on top of a translucent accent wash. */
+  /* The chrome above the waveform — header, the category row when it has one,
+     and the tab row — is ONE surface: one solid colour, no lines between its
+     rows, a single hairline where it meets the workspace. The active tab is
+     filled with the workspace's own colour so it opens into it. */
+  --color-chrome: #0e1216;   /* "Darker" in design 1a (was #12161d) */
+  --color-wk-top: rgba(53, 211, 230, .09); 
+  --color-wk-bottom: #151d25;
+  /* The empty workspace (no file open) starts darker; set this to #151d25 for no gradient at all. */
+  --color-wk-top-empty: rgba(53, 211, 230, .03);
+  --color-workspace: linear-gradient(var(--color-wk-top), var(--color-wk-bottom)); 
+
+  /* solid, a step above the chrome so the active tab (same fill) reads against it */
+
   --color-accent: #35d3e6;
   --color-accent-bright: #7fe9f6;
   --color-accent-solid: #86e8ff;
@@ -63,16 +87,28 @@
   --z-toast: 800;
 }
 
+/* An editor, not a document: a phone's pull-to-refresh would reload the page
+   and lose unsaved work, and a horizontal overscroll can navigate back. Every
+   drag in the app is its own, so the page itself never needs to overscroll. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
 body {
   font-family: var(--font-ui);
   background: #0e1116;
   color: var(--color-text);
+  /* dvh: on a phone 100vh is the height with the browser's toolbars HIDDEN,
+     so anything sized to it runs under them while they show. */
   min-height: 100vh;
+  min-height: 100dvh;
   font-size: 14px;
 }
 
 #app {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -121,4 +157,50 @@ body {
 @keyframes fadeStage {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Chrome buttons ──────────────────────────────────────────────────────────
+   Search, Undo / Redo, Save and Files share ONE quiet style (owner, November
+   2026: they had four shapes and four hovers): a 10 px rounded rectangle —
+   the category chips' and Chain's shape — with a faint fill and a hairline,
+   brightening on hover with no coloured edge. Only the height follows the
+   row (header 34, category row 38, tab row 30). Upgrade and the avatar stay
+   pills: they are the account, not tools. */
+:root {
+  --chrome-btn-radius: 10px;
+  --chrome-btn-bg: rgba(255, 255, 255, 0.03);
+  --chrome-btn-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --chrome-btn-hover: rgba(255, 255, 255, 0.07);
+  --chrome-btn-seam: rgba(255, 255, 255, 0.1);
+  --chrome-btn-text: rgba(255, 255, 255, 0.7);
+}
+
+/* ── Dialogs and menus ────────────────────────────────────────────────────────
+   Shared by the modal dialogs (Save, Export, Files, Sign in, Upgrade) and the
+   top-bar menus. The panel used to fade #181c22 → #0d1013 over a #0e1116 page,
+   so a dialog read as a hole in the page rather than something on top of it.
+   Now the scrim sinks the page further, and the panel is a step LIGHTER than
+   the page with a lit top edge, a hairline border and a dark outer ring. */
+.dialog-scrim {
+  background: rgba(2, 4, 6, 0.78);
+  backdrop-filter: blur(6px);
+}
+
+.dialog-surface {
+  background: var(--color-gray-800);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 28px 70px rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* A menu has no scrim behind it, so it needs its edge more than a dialog. */
+.menu-surface {
+  background: linear-gradient(160deg, #2c343f, #222831);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 16px 40px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }

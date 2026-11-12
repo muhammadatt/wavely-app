@@ -1,13 +1,31 @@
 import express from 'express'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
-import { processRoute } from './routes/process.js'
+import { createProcessRoute } from './routes/process.js'
 import { jobsRoute }   from './routes/jobs.js'
-import { spotRoute }   from './routes/spot.js'
-import { analyzeRoute } from './routes/analyze.js'
+import { createSpotRoute }    from './routes/spot.js'
+import { createAnalyzeRoute } from './routes/analyze.js'
+import { meRoute } from './routes/me.js'
+import { readAuthConfig, createTokenVerifier } from './lib/auth.js'
+import { getSupabaseAdmin } from './lib/supabaseAdmin.js'
+import { createEntitlementGate, createPlanResolver } from './lib/entitlements.js'
+import Stripe from 'stripe'
+import { readBillingConfig, createBilling } from './lib/billing.js'
+import { createJobQueue, readJobQueueConfig, readRequestLimitConfig, holdSlot } from './lib/jobQueue.js'
+import { createUsageRecorder, createBlockResolver, readUsageRetentionDays } from './lib/usage.js'
+import { requestLog } from './lib/requestLog.js'
+import { createUploadStore, createUploadRoutes, readUploadConfig, useUpload } from './lib/uploads.js'
+import path from 'path'
+import { createBillingRoutes, createBillingWebhook } from './routes/billing.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
+// Loopback only by default: the reverse proxy on this machine is the one way
+// in. Reachable directly, a client could set X-Forwarded-For to anything and
+// get a fresh rate limit on every request (see `trust proxy` below). Set
+// HOST=0.0.0.0 only where the proxy is on another host or in another container
+// — and then firewall the port to that proxy.
+const HOST = process.env.HOST || '127.0.0.1'
 
 // Trust the first proxy hop (Apache reverse proxy on the same machine).
 // Required for express-rate-limit to correctly identify client IPs via
@@ -27,24 +45,78 @@ const allowedPatterns = process.env.CORS_ORIGIN_PATTERNS
   ? process.env.CORS_ORIGIN_PATTERNS.split(',').map(p => new RegExp(p.trim()))
   : []
 
+/**
+ * Is this a frontend origin we serve? Shared by CORS and by billing, which
+ * must only send the browser back (from Stripe Checkout / the portal) to one.
+ */
+function isAllowedOrigin(origin) {
+  if (allowedOrigins.includes(origin)) return true
+  if (allowedPatterns.some(pattern => pattern.test(origin))) return true
+  // Allow local development and testing domains, including LAN IPs
+  return /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin) || origin.endsWith('.test')
+}
+
 app.use(cors({
+  // A tus client reads where its upload lives (Location) and how far it got
+  // (Upload-Offset); the browser hides any response header not listed here.
+  exposedHeaders: ['Location', 'Upload-Offset', 'Upload-Length', 'Upload-Expires', 'Tus-Resumable', 'Tus-Version', 'Tus-Max-Size', 'Tus-Extension', 'Retry-After'],
   origin(origin, callback) {
     // Allow requests with no origin (server-to-server, curl, etc.) or "null" origin (file://) in dev
     if (!origin || origin === 'null') return callback(null, true)
-    if (allowedOrigins.includes(origin)) return callback(null, true)
-    if (allowedPatterns.some(pattern => pattern.test(origin))) return callback(null, true)
-
-    // Allow local development and testing domains, including LAN IPs
-    if (/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin) || origin.endsWith('.test')) {
-      return callback(null, true)
-    }
+    if (isAllowedOrigin(origin)) return callback(null, true)
 
     console.error(`CORS rejected origin: ${origin}`)
     callback(new Error('Not allowed by CORS'))
   },
 }))
 
+// ── Accounts and billing — configured before the body parsers ───────────────
+//
+// Accounts (Supabase) and billing (Stripe) are both optional: with their env
+// vars unset the server runs exactly as before. See docs/user-accounts.md.
+const authConfig = readAuthConfig()
+const verifyAccessToken = authConfig.supabaseUrl ? createTokenVerifier(authConfig) : null
+const supabaseAdmin = getSupabaseAdmin(authConfig)
+if (verifyAccessToken && !supabaseAdmin) {
+  console.warn('SUPABASE_URL is set but SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY is not — /api/me will answer 503')
+}
+
+const planFor = supabaseAdmin ? createPlanResolver(supabaseAdmin) : null
+
+// Usage history and account blocking (supabase/migrations/…_usage_and_blocking.sql).
+// Both need the service-role client; without it nothing is recorded and
+// nobody is blocked.
+const usage = createUsageRecorder(supabaseAdmin)
+const isBlocked = supabaseAdmin ? createBlockResolver(supabaseAdmin) : null
+usage.startPruning(readUsageRetentionDays())
+
+const billingConfig = readBillingConfig()
+const stripe = billingConfig.secretKey ? new Stripe(billingConfig.secretKey) : null
+const billing = stripe && supabaseAdmin && verifyAccessToken && billingConfig.prices.length
+  ? createBilling({
+      stripe,
+      admin: supabaseAdmin,
+      prices: billingConfig.prices,
+      // A plan change must reach the entitlement gate now, not after its cache expires.
+      onPlanChanged: (userId) => planFor?.invalidate(userId),
+    })
+  : null
+if (stripe && !billing) {
+  console.warn('STRIPE_SECRET_KEY is set but accounts or STRIPE_PRICE_* are not configured — billing is off')
+}
+if (billing && !billingConfig.webhookSecret) {
+  console.warn('STRIPE_WEBHOOK_SECRET is not set — subscriptions will only sync when a browser returns from Checkout')
+}
+
+// ⚠ Before express.json(): the webhook verifies Stripe's signature over the raw bytes.
+app.use('/api', createBillingWebhook({ stripe, billing, webhookSecret: billingConfig.webhookSecret }))
+
 app.use(express.json())
+
+// One JSON log line per server-processing request — served or refused — and
+// its usage row (lib/requestLog.js). Mounted BEFORE the rate limiters so a
+// 429 is logged like any other refusal.
+app.use(['/api/process', '/api/spot', '/api/analyze'], requestLog({ usage }))
 
 // Rate limit the processing endpoint to prevent abuse
 const processLimiter = rateLimit({
@@ -52,7 +124,7 @@ const processLimiter = rateLimit({
   max: 30,                   // 30 requests per window per IP
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many processing requests, please try again later' },
+  message: { error: 'Too many processing requests, please try again later', code: 'rate_limited' },
   // Suppress X-Forwarded-For validation — Apache proxy handles IP forwarding
   // and trust proxy is already set above.
   validate: { xForwardedForHeader: false },
@@ -65,7 +137,7 @@ const spotLimiter = rateLimit({
   max: 120,                  // 120 requests per window per IP
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many spot-effect requests, please try again later' },
+  message: { error: 'Too many spot-effect requests, please try again later', code: 'rate_limited' },
   validate: { xForwardedForHeader: false },
 })
 app.use('/api/spot', spotLimiter)
@@ -78,30 +150,94 @@ const analyzeLimiter = rateLimit({
   max: 120,                  // 120 requests per window per IP
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many analysis requests, please try again later' },
+  message: { error: 'Too many analysis requests, please try again later', code: 'rate_limited' },
   validate: { xForwardedForHeader: false },
 })
 app.use('/api/analyze', analyzeLimiter)
+
+// Account reads are cheap (one token check, two indexed selects) but run on
+// every page load and sign-in, so the budget is the widest of the lot.
+const accountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300,                  // 300 requests per window per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many account requests, please try again later' },
+  validate: { xForwardedForHeader: false },
+})
+app.use('/api/me', accountLimiter)
+
+// Resumable uploads arrive in ≤ 20 MB PATCHes: an hour of stereo is ~65 of
+// them, so the budget is per-request generous. The store's own limits (size,
+// uploads in flight, bytes per caller, disk) do the real work.
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many upload requests, please try again later', code: 'rate_limited' },
+  validate: { xForwardedForHeader: false },
+})
+app.use('/api/uploads', uploadLimiter)
+
+// Billing calls share the account budget. (The webhook is mounted earlier and
+// answers before this runs, so a Stripe retry burst is never rate-limited.)
+app.use('/api/billing', accountLimiter)
+
+// Plan enforcement for server-processing features (src/auth/plans.js). Needs
+// both the verifier and the database; with either missing it lets everything
+// through, as before accounts existed.
+const gate = createEntitlementGate({ verify: verifyAccessToken, planFor, isBlocked })
+
+// Resumable uploads (lib/uploads.js): large files arrive in chunks that each
+// fit under Cloudflare's 100 MB request cap; a processing request then names
+// the finished upload. Taken files land beside multer's.
+const UPLOADS_DIR = path.resolve(import.meta.dirname, 'uploads')
+const uploadStore = createUploadStore({ dir: path.join(UPLOADS_DIR, 'tus'), ...readUploadConfig() })
+uploadStore.startSweeping()
+const takeUpload = useUpload(uploadStore, UPLOADS_DIR)
+app.use('/api', createUploadRoutes({ store: uploadStore, verify: verifyAccessToken, isBlocked }))
 
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.0.1' })
 })
 
-// Processing endpoint (submit job — returns 202 + jobId immediately)
-app.use('/api', processRoute)
+// Processing endpoint (submit job — returns 202 + jobId immediately). The
+// queue caps how many preset chains run at once and how many one caller may
+// have in flight (MAX_CONCURRENT_JOBS / MAX_QUEUED_JOBS / MAX_JOBS_PER_CLIENT).
+const jobQueueConfig = readJobQueueConfig()
+// One queue for every long background job: mastering, and the spot operations
+// that answer 202 (Noise Reduction on a chapter).
+const processingJobs = createJobQueue(jobQueueConfig)
+console.log(`Job queue: ${jobQueueConfig.concurrency} running, ${jobQueueConfig.maxQueued} queued, ${jobQueueConfig.maxPerClient} per client`)
+app.use('/api', createProcessRoute({ gate, verify: verifyAccessToken, queue: processingJobs, usage, takeUpload }))
 
 // Job status + download endpoints (polled by client after submission)
 app.use('/api', jobsRoute)
 
-// Spot effect endpoint (synchronous — returns processed WAV directly)
-app.use('/api', spotRoute)
+// Spot effects and analyses share one concurrency limit: both are synchronous
+// and both land on the Python worker pool. Full means refused, never queued.
+const requestLimitConfig = readRequestLimitConfig()
+console.log(`Spot/analyze limit: ${requestLimitConfig.concurrency} running, ${requestLimitConfig.maxPerClient} per client`)
+const limit = holdSlot(createJobQueue(requestLimitConfig))
+
+// Spot effect endpoint (synchronous — returns processed WAV directly — except
+// an async operation, which answers 202 and runs as a job in processingJobs)
+app.use('/api', createSpotRoute({ gate, limit, takeUpload, jobs: processingJobs }))
 
 // Analysis endpoints (synchronous — return measurements as JSON)
-app.use('/api', analyzeRoute)
+// Needs an account, not a plan: measurements only, capped per request.
+app.use('/api', createAnalyzeRoute({ gate, limit, takeUpload }))
 
-const server = app.listen(PORT, () => {
-  console.log(`Wavely server listening on port ${PORT}`)
+// Signed-in user's account and plan
+app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))
+
+// Checkout, the customer portal and prices (Stripe)
+app.use('/api', createBillingRoutes({ verify: verifyAccessToken, billing, isAllowedOrigin }))
+
+const server = app.listen(PORT, HOST, () => {
+  console.log(`Wavely server listening on ${HOST}:${PORT}`)
 })
 
 // ── Proxy-safe timeout configuration ─────────────────────────────────────────
@@ -121,3 +257,8 @@ const server = app.listen(PORT, () => {
 // requests on a persistent connection, not the duration of an active upload.
 server.keepAliveTimeout = 75_000  // 75 s — safely above typical proxy keepalive
 server.headersTimeout   = 80_000  // must be strictly greater than keepAliveTimeout
+
+// In a container node runs as PID 1, where SIGTERM has no default handler —
+// without this, every redeploy waits out the platform's kill timeout. Jobs are
+// in memory either way, so there is nothing to drain.
+process.on('SIGTERM', () => process.exit(0))
