@@ -56,24 +56,24 @@ const tools = CATEGORIES
     <!-- A field again, with its words and shortcut (owner, November 2026).
          Below 1180 px it folds to the icon, so it never runs under the
          categories (it did at ~1100 px when it was last a field). -->
-    <div class="flex-1 compact:flex-none min-w-0 flex items-center">
+    <div class="flex-1 compact:flex-none min-w-0 flex items-center self-center">
       <button
-        class="palette-trigger h-[38px] shrink-0 flex items-center gap-2 px-[12px] rounded-[10px] cursor-pointer"
+        class="palette-trigger shrink-0 flex items-center gap-2 pl-[10px] pr-2 py-[7px] rounded-[10px] cursor-pointer"
         :disabled="!hasFile"
         title="Search operations (Ctrl+K)"
         aria-label="Search operations"
         @click="openCommandPalette"
       >
-        <Icon name="search" :size="14" />
+        <Icon name="search" :size="13" />
         <span class="search-words">
-          <span class="text-[12.5px] font-semibold">Search…</span>
+          <span class="text-[11.5px] font-semibold">Search…</span>
           <kbd class="font-mono text-[9.5px] font-bold px-[5px] py-[2px] rounded-[5px] tracking-[.04em]">Ctrl K</kbd>
         </span>
       </button>
     </div>
     <!-- min-w-0 + scroll: the tool group gives up centring before it collides
          with the zoom controls on a narrow window. -->
-    <div class="tool-group flex items-center gap-[4px] p-[4px] rounded-[14px] min-w-0 overflow-x-auto">
+    <div class="tool-group self-start mt-[4px] flex items-center gap-[4px] p-[4px] rounded-[14px] min-w-0 overflow-x-auto">
       <button
         v-for="tool in tools"
         :key="tool.id"
@@ -96,7 +96,7 @@ const tools = CATEGORIES
          always on screen anyway — the chain plays with every window closed. -->
     <button
       type="button"
-      class="chain-btn"
+      class="chain-btn self-start mt-[8px]"
       :class="{ 'is-active': isOpen('plugin-chain') }"
       :disabled="!hasFile"
       :title="chainTitle"
@@ -141,7 +141,7 @@ const tools = CATEGORIES
      10 + that padding, so the corners nest) — taller than the header's 34 px
      controls since the menu has its own row (owner, November 2026). Search
      and Chain beside it are 38 too. */
-  height: 38px;
+  height: 42px;
   padding: 0 17px;
   border-radius: 10px;
   border: 1px solid transparent;
@@ -240,8 +240,12 @@ const tools = CATEGORIES
    outline, a top highlight and a soft shadow underneath. */
 .tool-group {
   scrollbar-width: none;
-  background: linear-gradient(rgb(27 36 49), rgb(25 35 50));
-  box-shadow: rgba(255, 255, 255, 0.05) 0px 0px 0px 1px inset;
+  background: linear-gradient(rgb(26, 32, 41), rgb(18, 22, 29));
+  /* The 1 px ring, plus a slightly brighter bottom edge: the gradient fill is
+     lighter at the top, so the ring alone read as a top-only highlight. */
+  box-shadow: rgba(255, 255, 255, 0.05) 0px 0px 0px 1px inset,
+              inset 0 -1px 0 rgba(255, 255, 255, 0.10);
+
 }
 .tool-group::-webkit-scrollbar {
   display: none;
@@ -253,7 +257,7 @@ const tools = CATEGORIES
   gap: 7px;
   flex-shrink: 0;
   white-space: nowrap;
-  height: 38px;
+  height: 42px;
   padding: 0 16px;
   border-radius: 10px;
   /* A solid teal FILL (owner, November 2026: the tint tried before it was
@@ -370,7 +374,7 @@ const tools = CATEGORIES
 }
 /* Part of the one chrome surface (see --color-chrome): no line of its own. */
 .toolbar-row {
-  background: var(--color-chrome);
+  
 }
 /* The search field's words fold to its icon on narrower windows and on
    compact ones, where the row has no width to spare. */
@@ -381,6 +385,6 @@ const tools = CATEGORIES
 }
 @media (max-width: 1179.98px), (max-height: 520px) {
   .search-words { display: none; }
-  .palette-trigger { width: 38px; padding: 0; justify-content: center; }
+  .palette-trigger { width: 32px; padding: 0; justify-content: center; }
 }
 </style>
