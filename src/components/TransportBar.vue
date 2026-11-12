@@ -176,14 +176,18 @@ watch(() => state.segments, () => {
 </script>
 
 <template>
-  <div class="h-[76px] compact:h-[52px] flex items-center px-6 compact:px-3 gap-5 compact:gap-2 shrink-0 border-t border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0d1013)">
+  <!-- Three columns, 1fr / auto / 1fr: the side columns are always equal, so the
+       transport sits on the bar's true centre whatever the time readout and the
+       zoom block happen to measure (they used to be centred between two
+       different min-widths). -->
+  <div class="h-[76px] compact:h-[52px] grid grid-cols-[1fr_auto_1fr] items-center px-6 compact:px-3 gap-5 compact:gap-2 shrink-0 border-t border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0d1013)">
     <!-- Time display -->
     <div class="font-['JetBrains_Mono'] text-[26px] compact:text-[18px] font-bold tabular-nums min-w-[110px] compact:min-w-[78px] tracking-tight text-[#eaf6f8]">
       {{ formatTime(state.playhead).main }}<span class="text-[rgba(255,255,255,.4)]">{{ formatTime(state.playhead).seconds }}</span><span class="text-[rgba(255,255,255,.3)] text-[15px] compact:text-[11px] font-semibold">{{ formatTime(state.playhead).ms }}</span>
     </div>
 
     <!-- Transport controls -->
-    <div class="flex items-center gap-3 compact:gap-[6px] flex-1 justify-center">
+    <div class="flex items-center gap-3 compact:gap-[6px] justify-center">
       <!-- Skip to start -->
       <BaseButton
         size="sm" color="ghost" circle
@@ -248,7 +252,7 @@ watch(() => state.segments, () => {
     <!-- Zoom controls -->
     <!-- Hidden outright on a phone held upright (max-sm): there is no width
          for it beside the transport, and pinch zooms the waveform. -->
-    <div class="flex items-center gap-[11px] min-w-[140px] compact:min-w-0 max-sm:hidden justify-end">
+    <div class="flex items-center gap-[11px] compact:min-w-0 max-sm:hidden justify-end col-start-3">
       <span class="compact:hidden font-['Inter'] text-[10px] font-semibold text-[rgba(255,255,255,.4)]">Zoom</span>
       <input
         type="range"

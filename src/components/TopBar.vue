@@ -34,7 +34,7 @@ const fileMeta = computed(() => {
          line). min-w-0 lets the details give way on a tight window, never
          the actions. -->
     <div class="flex-1 min-w-0 flex items-center">
-      <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[26px] compact:h-[20px] max-sm:h-[17px] w-auto select-none shrink-0" draggable="false" />
+      <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[22px] compact:h-[20px] max-sm:h-[17px] w-auto select-none shrink-0" draggable="false" />
       <!-- Label / value pairs. The format value sits in the teal chip from main;
            the other values stay plain words. -->
       <template v-if="fileMeta">
