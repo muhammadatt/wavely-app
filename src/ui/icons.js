@@ -13,6 +13,9 @@ export const ICONS = {
   // Split: a dashed cut line with the halves moving apart. The old glyph was a
   // line with chevrons above and below, which read as "expand vertically".
   split: '<path d="M12 3v3M12 10.5v3M12 18v3"/><path d="M7.5 8.5L4 12l3.5 3.5"/><path d="M16.5 8.5L20 12l-3.5 3.5"/>',
+  // Slice export: a tray with an arrow coming out of it. Distinct from `split`
+  // (which cuts) and from `markers` (which places) — this one hands files over.
+  export: '<path d="M12 3v11"/><path d="M8.5 10.5L12 14l3.5-3.5"/><path d="M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3"/>',
   // Markers: two pennants on a baseline. A pennant rather than a pin because
   // that is the shape the waveform draws — it points into the span it opens,
   // and the rail row should be recognisably the same object.

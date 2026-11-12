@@ -345,6 +345,19 @@ test('dropping gaps when there are none does nothing', () => {
   assert.equal(editor.state.undoCount, depth)
 })
 
+test('a marker lands on a sample, because a cut can only happen at one', () => {
+  // snapToZeroCrossing interpolates between the two samples straddling zero,
+  // which is right as a measurement and not representable as a boundary. Left
+  // sub-sample it is rounded somewhere downstream by every consumer — the
+  // split, the slice export and the label file all read this number.
+  const editor = useEditorState()
+  const sr = 48000
+  freshDocument(editor, 'grid.wav')
+  editor.dropMarker(1.000_012_345)
+  const t = editor.state.markers[0].time
+  assert.equal(t * sr, Math.round(t * sr), `${t} is ${t * sr} samples, not a whole one`)
+})
+
 // ── Snapping ─────────────────────────────────────────────────────────────────
 
 test('with snap on, a dropped marker lands on a rising zero-crossing', () => {

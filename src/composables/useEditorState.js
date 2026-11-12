@@ -718,7 +718,19 @@ export function useEditorState() {
    */
   function placeMarkerTime(time) {
     const clamped = Math.max(0, Math.min(time, totalDuration.value))
-    return appState.snapToZero ? snapToZeroCrossing(state.segments, clamped) : clamped
+    const snapped = appState.snapToZero ? snapToZeroCrossing(state.segments, clamped) : clamped
+
+    // ⚠ A MARKER LANDS ON A SAMPLE, because a cut can only happen between two
+    // samples — there is no way to split a file 0.4 of a sample in.
+    // snapToZeroCrossing interpolates between the two samples that straddle
+    // zero, which is right for the measurement and NOT representable as a
+    // boundary: left sub-sample, every cut rounded somewhere downstream, and a
+    // slice export came out 352801 samples against the source's 352800, each
+    // piece carrying up to three samples of trailing silence. Quantising here
+    // fixes the split, the slice export and the label file at once, because
+    // all three read the marker's time.
+    const sr = state.currentFile?.sampleRate
+    return sr > 0 ? Math.round(snapped * sr) / sr : snapped
   }
 
   function dropMarker(time = state.playhead, { name = '', kind = 'user' } = {}) {

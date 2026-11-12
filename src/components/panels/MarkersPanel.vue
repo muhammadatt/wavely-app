@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import ApplyAction from '../ui/ApplyAction.vue'
 import Icon from '../ui/Icon.vue'
@@ -10,6 +10,8 @@ import {
   toLabelFileName,
 } from '../../audio/labels.js'
 import { downloadBlob } from '../../audio/download.js'
+import { sliceDocuments, exportableSpans, MAX_SLICES } from '../../audio/slicePlan.js'
+import { useExport } from '../../composables/useExport.js'
 
 /**
  * The markers rail panel.
@@ -40,7 +42,15 @@ const {
   showToast,
 } = useEditorState()
 
+const { exportDocuments, isExporting, exportProgress, exportSizeLimit } = useExport()
+
 const markers = computed(() => state.markers)
+
+// The spans that would become files: every slice except the gaps.
+const sliceCount = computed(() =>
+  exportableSpans(state.markers, totalDuration.value).length)
+
+const slicesTooMany = computed(() => sliceCount.value > MAX_SLICES)
 const gapCount = computed(() => spans.value.filter(s => s.kind === 'gap').length)
 
 // Which marker's name is being edited. Renaming commits on blur or Enter
@@ -48,10 +58,30 @@ const gapCount = computed(() => spans.value.filter(s => s.kind === 'gap').length
 // character typed.
 const editingId = ref(null)
 const draftName = ref('')
+const nameInput = ref(null)
+const setNameInput = el => { nameInput.value = el }
 
-function startRename(marker) {
+/**
+ * ⚠ THE FIELD HAS TO BE FOCUSED EXPLICITLY. `autofocus` is honoured on a page's
+ * initial parse, not on an element Vue inserts later, so the field opened
+ * unfocused and the first keystrokes went to the WINDOW — measured: typing
+ * "Intro" stored "o", and a second rename stored nothing at all. EditorScreen's
+ * handler ignores keys from a text field, so once focus lands this is safe, but
+ * before it lands those keys are editor shortcuts: a marker named "Chapter"
+ * would have dropped a marker on its own "m", and Space would have started
+ * playback mid-word.
+ *
+ * ⚠ AND IT NEEDS A FUNCTION REF, NOT A NAMED ONE. A plain `ref="nameInput"`
+ * inside a v-for collects into an ARRAY even when a v-if leaves exactly one
+ * element rendered, so `.focus()` threw. Only one field is open at a time, so
+ * the callback just keeps whichever element is live.
+ */
+async function startRename(marker) {
   editingId.value = marker.id
   draftName.value = marker.name
+  await nextTick()
+  nameInput.value?.focus()
+  nameInput.value?.select()
 }
 
 function commitRename() {
@@ -88,6 +118,35 @@ function dropGaps() {
 function clearAll() {
   clearMarkers()
   showToast('Markers cleared')
+}
+
+// ── Slice export ─────────────────────────────────────────────────────────────
+
+async function exportSlices() {
+  if (isExporting.value || sliceCount.value === 0) return
+  if (slicesTooMany.value) {
+    showToast(`That is ${sliceCount.value} slices — more than ${MAX_SLICES}`)
+    return
+  }
+
+  const docs = sliceDocuments({
+    segments: state.segments,
+    markers: state.markers,
+    totalDuration: totalDuration.value,
+    currentFile: state.currentFile,
+    name: state.currentFile?.name ?? 'untitled',
+  })
+  if (docs.length === 0) return
+
+  // The same refusal the files panel makes, for the same reason: a render that
+  // gets past it produces an archive the zip writer cannot address.
+  if (exportSizeLimit(docs)) {
+    showToast('Those slices are too large to export as one archive')
+    return
+  }
+
+  const base = String(state.currentFile?.name ?? 'untitled').replace(/\.[^.]+$/, '')
+  await exportDocuments(docs, { zipName: `${base} slices.zip` })
 }
 
 // ── Label files ──────────────────────────────────────────────────────────────
@@ -207,10 +266,10 @@ async function importLabels(event) {
 
           <input
             v-if="editingId === marker.id"
+            :ref="setNameInput"
             v-model="draftName"
             class="marker-name-input"
             placeholder="Name"
-            autofocus
             @blur="commitRename"
             @keydown.enter.prevent="commitRename"
             @keydown.esc.prevent="editingId = null"
@@ -246,6 +305,24 @@ async function importLabels(event) {
         icon="split"
         @apply="splitAll"
       />
+      <button
+        class="marker-action is-go"
+        :disabled="sliceCount === 0 || isExporting || slicesTooMany"
+        :title="slicesTooMany ? `More than ${MAX_SLICES} slices` : ''"
+        @click="exportSlices"
+      >
+        <Icon name="export" :size="13" :stroke-width="2" />
+        <span v-if="isExporting">
+          Rendering {{ Math.min(exportProgress.done + 1, exportProgress.total) }}
+          of {{ exportProgress.total }}…
+        </span>
+        <span v-else>Export {{ sliceCount }} slice{{ sliceCount === 1 ? '' : 's' }}</span>
+      </button>
+      <p class="text-[10.5px] leading-[1.45] text-[rgba(255,255,255,.38)] px-[2px]">
+        One WAV per slice, zipped.
+        <span v-if="gapCount">Gaps are left out.</span>
+      </p>
+
       <button
         v-if="gapCount"
         class="marker-action is-warn"
@@ -305,6 +382,10 @@ async function importLabels(event) {
 .marker-action:disabled {
   opacity: 0.4;
   cursor: default;
+}
+.marker-action.is-go:hover:not(:disabled) {
+  background: rgba(93, 240, 176, 0.1);
+  border-color: rgba(93, 240, 176, 0.45);
 }
 .marker-action.is-warn:hover {
   background: rgba(255, 138, 128, 0.1);
