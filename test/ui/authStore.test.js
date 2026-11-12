@@ -216,6 +216,7 @@ test('a successful sign-out clears everything through the SIGNED_OUT event', asy
   client.emit('SIGNED_IN', session())
   await tick()
   assert.equal((await store.signOut()).error, null)
+  assert.deepEqual(client.calls, [[{ scope: 'local' }]], 'this browser only — supabase-js defaults to global')
   client.emit('SIGNED_OUT', null)
   await tick()
   assert.equal(store.state.status, 'signedOut')

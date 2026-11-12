@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, nextTick } from 'vue'
 import { useAuth } from '../../composables/useAuth.js'
 import { signInMethods } from '../../auth/accountSummary.js'
 import AccountPasswordForm from './AccountPasswordForm.vue'
@@ -12,6 +12,23 @@ const methods = computed(() => signInMethods(user.value))
 const busy = ref(false)
 const error = ref(null)
 const confirmEverywhere = ref(false)
+const everywhereBtn = ref(null)
+const confirmBtn = ref(null)
+
+// Each swap removes the focused button; without moving focus it falls to
+// <body>, outside the dashboard's key handler, where Space / Delete would
+// reach the editor's shortcuts behind it.
+async function askEverywhere() {
+  confirmEverywhere.value = true
+  await nextTick()
+  confirmBtn.value?.focus()
+}
+
+async function cancelEverywhere() {
+  confirmEverywhere.value = false
+  await nextTick()
+  everywhereBtn.value?.focus()
+}
 
 async function signOut(everywhere) {
   error.value = null
@@ -67,16 +84,16 @@ async function signOut(everywhere) {
             Use it if you logged in somewhere you no longer use.
           </div>
         </div>
-        <button v-if="!confirmEverywhere" class="acc-btn acc-btn--danger" :disabled="busy" @click="confirmEverywhere = true">Sign out everywhere</button>
+        <button v-if="!confirmEverywhere" ref="everywhereBtn" class="acc-btn acc-btn--danger" :disabled="busy" @click="askEverywhere">Sign out everywhere</button>
       </div>
       <div v-if="confirmEverywhere" class="acc-error" role="alert">
         <span>Sign out on every device, including this one?</span>
         <span class="flex items-center gap-3 mt-1">
-          <button class="acc-btn acc-btn--danger" :disabled="busy" @click="signOut(true)">
+          <button ref="confirmBtn" class="acc-btn acc-btn--danger" :disabled="busy" @click="signOut(true)">
             <span v-if="busy" class="acc-spinner" aria-hidden="true"></span>
             Yes, sign out everywhere
           </button>
-          <button class="acc-link acc-link--dim" :disabled="busy" @click="confirmEverywhere = false">Cancel</button>
+          <button class="acc-link acc-link--dim" :disabled="busy" @click="cancelEverywhere">Cancel</button>
         </span>
       </div>
       <div v-if="error" class="acc-error" role="alert">{{ error }}</div>

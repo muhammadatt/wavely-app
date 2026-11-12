@@ -80,6 +80,9 @@ export function createAccountScreen({ auth, win = globalThis.window }) {
     if (section === null) {
       state.open = false
       pushed = false
+      // Left the link before the session settled: don't reopen it (or ask
+      // for a log-in) when it does.
+      pending = null
       return
     }
     if (!signedIn()) {

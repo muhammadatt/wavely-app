@@ -155,3 +155,25 @@ test('following a link to a section while the editor is open opens it', () => {
   assert.equal(screen.state.open, true)
   assert.equal(screen.state.section, 'billing')
 })
+
+test('backing out of a link before the session settles drops it', () => {
+  const win = fakeWindow()
+  const auth = fakeAuth('loading')
+  const screen = createAccountScreen({ auth, win })
+  screen.start()
+  win.navigate('https://app.example/#/account/billing')
+  win.history.back()
+  auth.state.status = 'signedIn'
+  assert.equal(screen.state.open, false, 'not reopened when the session lands')
+  assert.equal(win.location.href, 'https://app.example/')
+
+  // …and resolving signed out asks for nothing.
+  const auth2 = fakeAuth('loading')
+  const win2 = fakeWindow()
+  const screen2 = createAccountScreen({ auth: auth2, win: win2 })
+  screen2.start()
+  win2.navigate('https://app.example/#/account')
+  win2.history.back()
+  auth2.state.status = 'signedOut'
+  assert.equal(auth2.state.dialog, null)
+})

@@ -44,7 +44,8 @@
 .acc-fine {
   font-size: 11px;
   line-height: 1.45;
-  color: rgba(255, 255, 255, 0.4);
+  /* 0.58 keeps 11 px text above 4.5:1 on the cards (0.4 was ~3.7:1). */
+  color: rgba(255, 255, 255, 0.58);
 }
 .acc-label {
   font-family: 'JetBrains Mono', monospace;

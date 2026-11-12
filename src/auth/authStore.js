@@ -277,7 +277,9 @@ export function createAuthStore({
    * The error is returned for the caller to show; state stays consistent.
    */
   function signOut() {
-    return run(() => client.auth.signOut())
+    // 'local' explicitly: supabase-js defaults to 'global', which would make
+    // every "Sign out" a sign-out of every device (signOutEverywhere's job).
+    return run(() => client.auth.signOut({ scope: 'local' }))
   }
 
   /**

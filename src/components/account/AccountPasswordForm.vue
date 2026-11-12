@@ -113,7 +113,9 @@ async function sendReset() {
 function onKeydown(e) {
   if (e.key === 'Escape' && formOpen.value) {
     e.stopPropagation()
-    cancel()
+    // Mid-request the form stays: cancelling can't stop the request, and its
+    // completion would land on whatever form was open next.
+    if (!busy.value) cancel()
   }
 }
 </script>
@@ -177,7 +179,7 @@ function onKeydown(e) {
         </span>
         <span
           class="text-[11.5px]"
-          :style="{ color: strength.score === 0 ? 'rgba(255,255,255,.42)' : strength.weak ? '#ff8a80' : 'rgba(255,255,255,.65)' }"
+          :style="{ color: strength.score === 0 ? 'rgba(255,255,255,.6)' : strength.weak ? '#ff8a80' : 'rgba(255,255,255,.65)' }"
           aria-live="polite"
         >{{ strength.hint }}</span>
       </label>
