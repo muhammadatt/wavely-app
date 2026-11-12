@@ -28,7 +28,6 @@ const fileMeta = computed(() => {
        file actions (Save, Files) sit on the tab row, beside the files. -->
   <div
     class="h-[56px] compact:h-[44px] flex items-center px-5 compact:px-2 gap-[13px] compact:gap-2 shrink-0 z-10"
-    style="background:var(--color-chrome)"
   >
     <!-- The logo, then the active file's details beside it (owner, November
          2026: centred, they floated; by the logo they read as the title
@@ -36,15 +35,15 @@ const fileMeta = computed(() => {
          the actions. -->
     <div class="flex-1 min-w-0 flex items-center">
       <img src="/crisp-fm-logo.png" alt="crisp.fm" class="h-[26px] compact:h-[20px] max-sm:h-[17px] w-auto select-none shrink-0" draggable="false" />
-      <!-- Label / value pairs: the label names the property, so the format
-           needs no badge and the line reads as words rather than a code. -->
+      <!-- Label / value pairs. The format value sits in the teal chip from main;
+           the other values stay plain words. -->
       <template v-if="fileMeta">
         <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-[18px] shrink-0 max-md:hidden"></div>
         <div
           class="min-w-0 flex items-center gap-[16px] overflow-hidden max-md:hidden font-['JetBrains_Mono']"
           :title="state.currentFile?.name || ''"
         >
-          <span class="meta"><span class="meta-k">Format</span> {{ fileMeta.format }}</span>
+          <span class="meta"><span class="meta-k">Format</span><span class="meta-chip">{{ fileMeta.format }}</span></span>
           <span class="meta tabular-nums"><span class="meta-k">Length</span> {{ fileMeta.duration }}</span>
           <span class="meta"><span class="meta-k">{{ fileMeta.channels }}</span> {{ fileMeta.sampleRate }}</span>
         </div>
@@ -118,5 +117,21 @@ const fileMeta = computed(() => {
   font-weight: 500;
   color: rgba(255, 255, 255, .40);
   margin-right: 3px;
+}
+.meta-chip {
+  /* inline-block so its padding and border count toward the line box;
+     as a plain inline they overflowed it and the row's overflow-hidden
+     clipped the top and bottom of the border. */
+  display: inline-block;
+  line-height: 1.3;
+  vertical-align: middle;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: #7fe9f6;
+  background: rgba(53, 211, 230, .14);
+  border: 1px solid rgba(53, 211, 230, .3);
 }
 </style>

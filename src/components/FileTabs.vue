@@ -420,33 +420,28 @@ function commitRename() {
    paints over it, so that tab opens into the waveform area below the way a
    browser tab does, while the others sit on the line. */
 .tab-row {
-  background: var(--color-chrome);
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .08);
 }
-/* Design 1a (owner, November 2026). The active tab opens into the workspace
-   (its fill IS the workspace colour) with the brightest name and a faint
-   outline on three sides. The others are a faint wash with a fainter outline,
-   one step off the (darker) chrome, so they read as tabs and never as the
-   selected one; hover lifts the wash a step. No marker line (a cyan underline
-   and a top edge were both tried and dropped, owner). */
+/* Tab styling restored from the main branch: the active tab is a cyan wash
+   with a cyan underline and the brightest name; the others are a faint white
+   wash with a hairline ring. */
 .tab-active {
-  background: var(--color-workspace);
-  box-shadow: inset 1px 0 0 var(--chrome-btn-seam), inset -1px 0 0 var(--chrome-btn-seam), inset 0 1px 0 var(--chrome-btn-seam);
+  /* The main branch's tab styling: a cyan wash with a cyan underline. */
+  background: rgba(53, 211, 230, .12);
+  box-shadow: rgb(53, 211, 230) 0px -2px 0px 0px inset;
+
 }
 .tab-idle {
-  background: rgba(255, 255, 255, .025);
-  box-shadow: inset 1px 0 0 var(--chrome-btn-seam), inset -1px 0 0 var(--chrome-btn-seam), inset 0 1px 0 var(--chrome-btn-seam);
+  background: rgba(255, 255, 255, .06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05);
 }
-.tab-idle:hover { background: rgba(255, 255, 255, .045); }
 .tab:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 .tab-name { color: rgba(255, 255, 255, .5); }
-.tab-idle:hover .tab-name { color: rgba(255, 255, 255, .8); }
-.tab-active .tab-name { color: var(--color-text); }
+.tab-active .tab-name { color: #eaf6f8; }
 .tab-plus {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--chrome-btn-seam);
+  background: rgba(255, 255, 255, .06);
 }
-.tab-plus:hover { background: rgba(255, 255, 255, .04); color: rgba(255, 255, 255, .8); }
+.tab-plus:hover { background: rgba(255, 255, 255, .15); }
 
 /* The end slot: the unsaved dot, or the close button (24 px target; it was
    15). The dot gives way to the close button on hover. */

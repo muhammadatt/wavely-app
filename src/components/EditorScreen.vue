@@ -314,7 +314,6 @@ onUnmounted(() => {
 <template>
   <div
     class="relative flex flex-col h-screen h-[100dvh] overflow-hidden font-['Inter']"
-    style="background:linear-gradient(160deg,#181c22,#0c0f13 62%)"
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
