@@ -31,7 +31,7 @@ const TIME_DP = 6
  * @returns {string} one `start\tend\tname\n` row per span
  */
 export function formatAudacityLabels(markers, totalDuration) {
-  return markerSpans(markers, totalDuration)
+  const rows = markerSpans(markers, totalDuration)
     .map(span => {
       // Tabs and newlines would break the row apart on the way back in, and a
       // name is free text the user typed. Spaces are the least surprising
@@ -39,7 +39,11 @@ export function formatAudacityLabels(markers, totalDuration) {
       const name = span.name.replace(/[\t\r\n]+/g, ' ')
       return `${span.start.toFixed(TIME_DP)}\t${span.end.toFixed(TIME_DP)}\t${name}`
     })
-    .join('\n') + '\n'
+
+  // No spans means no file, not a file holding one newline — which would
+  // re-import as "0 markers, 0 skipped" and read as a successful import of
+  // nothing rather than as the empty export it is.
+  return rows.length ? rows.join('\n') + '\n' : ''
 }
 
 /**

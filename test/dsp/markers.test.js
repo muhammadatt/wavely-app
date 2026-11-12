@@ -128,6 +128,20 @@ test('a span takes the name and kind of the marker that opens it', () => {
   assert.deepEqual(spans.map(s => s.kind), ['user', 'gap', 'user'])
 })
 
+test('a marker at the very start opens the first span', () => {
+  // Its own slice is zero-length and dropped, but it still opens what follows.
+  // Filtering such markers out of the walk is what made a gap marker at 0 inert.
+  const spans = markerSpans([at(0, 'head', { name: 'One', kind: 'gap' }), at(4)], 10)
+  assert.deepEqual(spans.map(s => [s.start, s.end]), [[0, 4], [4, 10]])
+  assert.deepEqual(spans.map(s => s.kind), ['gap', 'user'])
+  assert.deepEqual(spans.map(s => s.name), ['One', ''])
+})
+
+test('every span names the marker that opened it', () => {
+  const spans = markerSpans([at(3, 'a'), at(7, 'b')], 10)
+  assert.deepEqual(spans.map(s => s.openerId), [null, 'a', 'b'])
+})
+
 test('markers on the very ends define no span', () => {
   // Legal positions — they can be dragged back inside — but a zero-length
   // slice would export as an empty file and split into an empty segment.

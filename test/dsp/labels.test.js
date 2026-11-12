@@ -47,6 +47,13 @@ test('the text ends with a newline, as a line-oriented file should', () => {
   assert.ok(formatAudacityLabels([], 5).endsWith('\n'))
 })
 
+test('nothing to export is an empty file, not a lone newline', () => {
+  // "\n" re-imports as 0 markers with 0 skipped, which reads as a successful
+  // import of nothing rather than as the empty export it actually is.
+  assert.equal(formatAudacityLabels([], 0), '')
+  assert.deepEqual(parseAudacityLabels(formatAudacityLabels([], 0)), { markers: [], skipped: 0 })
+})
+
 test('tabs and newlines in a name cannot break the row apart', () => {
   const nasty = createMarker(2, { name: 'Ch\t3\nsecond half' })
   const text = formatAudacityLabels([nasty], 5)

@@ -119,6 +119,17 @@ test('the relative gate drops a quiet passage out of the average', () => {
   assert.ok(Math.abs(mixed - only) < 0.3, `${only} vs ${mixed}`)
 })
 
+test('the true-peak meter tolerates a ragged channel array', () => {
+  // Both of its loops have to agree about this. The interpolation loop was
+  // guarded for an absent channel and the sample-peak loop above it was not,
+  // so a sparse array threw before reaching the code written to survive it.
+  const a = new Float32Array([0.5, -0.5, 0.5, -0.5])
+  assert.ok(Number.isFinite(measureTruePeakDb([a, null])))
+  assert.ok(Number.isFinite(measureTruePeakDb([a, undefined])))
+  // A shorter second channel must not read past its own end either.
+  assert.ok(Number.isFinite(measureTruePeakDb([a, new Float32Array(2)])))
+})
+
 test('silence has no loudness, and says so rather than returning a number', () => {
   const quiet = new Float32Array(SR)
   assert.equal(measureIntegratedLufs([quiet], SR), -Infinity)

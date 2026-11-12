@@ -63,6 +63,10 @@ function commitRename() {
 }
 
 function add() {
+  // The precondition is checked here rather than read off dropMarker's null,
+  // which means "nothing was added" and cannot say why: with no timeline it
+  // also returns null, and the duplicate message was shown for an empty editor.
+  if (totalDuration.value <= 0) return
   if (dropMarker() === null) showToast('There is already a marker here')
 }
 
@@ -111,11 +115,17 @@ async function importLabels(event) {
     showToast(skipped ? `No usable rows in that file (${skipped} skipped)` : 'That file has no labels')
     return
   }
-  setMarkers(imported)
+
+  // setMarkers clamps to this timeline, so what it kept is the only honest
+  // number to report — a label file from a longer recording loses its tail.
+  const kept = setMarkers(imported)
+  const past = imported.length - kept
+  const notes = []
+  if (skipped) notes.push(`skipped ${skipped} bad row${skipped === 1 ? '' : 's'}`)
+  if (past) notes.push(`${past} past the end of this file`)
   showToast(
-    skipped
-      ? `Imported ${imported.length} markers, skipped ${skipped} bad rows`
-      : `Imported ${imported.length} markers`
+    `Imported ${kept} marker${kept === 1 ? '' : 's'}` +
+    (notes.length ? ` — ${notes.join(', ')}` : '')
   )
 }
 </script>

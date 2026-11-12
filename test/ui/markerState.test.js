@@ -255,10 +255,85 @@ test('dropping gaps removes every gap span in one undoable step', () => {
   assert.equal(editor.totalDuration.value, 7, '1 s + 2 s of gap removed from 10 s')
   // Both gap spans collapse to a point, so the four markers become two.
   assert.deepEqual(times(editor), [2, 5])
+  // ⚠ THE ASSERTION THIS TEST WAS MISSING. Checking only the times let a
+  // data-loss bug through a green suite: the markers that opened the gaps
+  // survive the delete (correctly — the boundary is real) but stayed flagged
+  // 'gap', so they re-designated the audio that now followed them as dead air.
+  assert.deepEqual(
+    editor.state.markers.map(m => m.kind), ['user', 'user'],
+    'a gap marker must not still be a gap once its span is gone'
+  )
+  assert.equal(editor.spans.value.filter(s => s.kind === 'gap').length, 0)
 
   editor.undo()
   assert.equal(editor.totalDuration.value, 10)
   assert.deepEqual(times(editor), [2, 3, 6, 8])
+})
+
+test('dropping gaps twice does not eat the audio that followed them', () => {
+  // The whole failure, end to end: before the opener was demoted a 10 s file
+  // went to 9 s and then to 2 s on a second click, with the canvas veiling the
+  // seven seconds in between as silence the whole time.
+  const editor = useEditorState()
+  freshDocument(editor, 'runaway.wav')
+
+  const g = editor.dropMarker(2)
+  editor.dropMarker(3)
+  editor.toggleGapMarker(g)
+
+  assert.equal(editor.performDropGaps(), 1)
+  assert.equal(editor.totalDuration.value, 9)
+  assert.equal(editor.performDropGaps(), 0, 'there is no gap left to drop')
+  assert.equal(editor.totalDuration.value, 9, 'the rest of the file is still there')
+})
+
+test('a gap marker at the very start opens the first span', () => {
+  // markerSpans drops the zero-length slice such a marker would open, but the
+  // marker still opens what follows it. Filtering it out instead left the
+  // panel showing a gap chip while every span read 'user'.
+  const editor = useEditorState()
+  freshDocument(editor, 'gapzero.wav')
+
+  const g = editor.dropMarker(0)
+  editor.dropMarker(4)
+  editor.toggleGapMarker(g)
+
+  const spans = editor.spans.value
+  assert.deepEqual(spans.map(s => [s.start, s.end]), [[0, 4], [4, 10]])
+  assert.deepEqual(spans.map(s => s.kind), ['gap', 'user'])
+})
+
+test('splitting reports the cuts it made, not the markers it looked at', () => {
+  // A marker on 0 is a no-op for splitAtPlayhead, so the marker count
+  // overstated the work: "Split at 2 markers" for one cut.
+  const editor = useEditorState()
+  freshDocument(editor, 'count.wav')
+
+  editor.dropMarker(0)
+  editor.dropMarker(5)
+  assert.equal(editor.performSplitAtMarkers(), 1)
+  assert.equal(editor.state.segments.length, 2)
+})
+
+test('a split that cuts nothing costs no undo step', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'nocut.wav')
+
+  editor.dropMarker(0)
+  const depth = editor.state.undoCount
+  assert.equal(editor.performSplitAtMarkers(), 0)
+  assert.equal(editor.state.undoCount, depth)
+})
+
+test('setMarkers reports what it kept, not what it was handed', () => {
+  // A label file from a longer recording: everything past this timeline is
+  // clamped away, and the count the panel shows has to reflect that.
+  const editor = useEditorState()
+  freshDocument(editor, 'clamp.wav', 5)
+
+  const far = [2, 8, 15].map(t => ({ id: `m${t}`, time: t, name: '', kind: 'user' }))
+  assert.equal(editor.setMarkers(far), 1)
+  assert.deepEqual(times(editor), [2])
 })
 
 test('dropping gaps when there are none does nothing', () => {

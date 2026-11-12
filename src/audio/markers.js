@@ -102,19 +102,32 @@ export function setMarkerKind(markers, id, kind) {
  * The slices a marker set defines over a timeline of `totalDuration`.
  *
  * Boundaries are 0, every marker time inside the timeline, and totalDuration.
- * A span takes its name and kind from the marker that opens it; the head span
- * has no opening marker and so is always unnamed 'user'.
+ * A span takes its name and kind from the marker that opens it; a span with no
+ * opening marker is unnamed 'user'.
  *
- * Zero-length spans are dropped — a marker sitting on 0 or on the end of the
- * timeline is legal (it can be dragged off again) but defines nothing.
+ * ⚠ A ZERO-LENGTH SPAN IS DROPPED BUT ITS MARKER STILL OPENS WHAT FOLLOWS, and
+ * getting that backwards is what made a gap marker at time 0 inert. Filtering
+ * those markers out before the walk — which is what this did — means a marker
+ * sitting on 0 opens nothing, so its name and its 'gap' kind were visible in
+ * the panel and on the marker itself while every span read 'user': the
+ * marker's own state and everything derived from it disagreed, with nothing
+ * on screen to explain why. The marker is kept and carried forward as the
+ * opener instead; only the empty slice it would have opened is skipped.
  *
- * @returns {{ start: number, end: number, name: string, kind: string, index: number }[]}
+ * `openerId` is the id of that marker, or null for a span nothing opened. It
+ * is what lets a caller reach back to the marker a span belongs to — see
+ * performDropGaps, which has to demote the markers whose spans it just
+ * deleted.
+ *
+ * @returns {{ start: number, end: number, name: string, kind: string,
+ *             openerId: string|null, index: number }[]}
  */
 export function markerSpans(markers, totalDuration) {
   if (!(totalDuration > 0)) return []
 
+  // A marker at or past the end opens nothing — there is no audio after it.
   const inside = normalizeMarkers(markers).filter(
-    m => m.time > MARKER_EPSILON && m.time < totalDuration - MARKER_EPSILON
+    m => m.time >= 0 && m.time < totalDuration - MARKER_EPSILON
   )
 
   const spans = []
@@ -129,11 +142,13 @@ export function markerSpans(markers, totalDuration) {
         end,
         name: opener?.name ?? '',
         kind: opener?.kind ?? 'user',
+        openerId: opener?.id ?? null,
         index: spans.length,
       })
+      start = end
     }
-    start = end
-    opener = m
+    // Whether or not a slice was emitted, this marker opens what comes next.
+    if (m) opener = m
   }
 
   return spans

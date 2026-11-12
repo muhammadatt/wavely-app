@@ -784,11 +784,19 @@ export function useEditorState() {
    * Replace the whole marker set — used by label import.
    *
    * One undo entry for the import, rather than one per marker.
+   *
+   * Returns the number of markers actually kept, which is NOT the number
+   * passed in: a label file exported from a longer recording carries markers
+   * past the end of this timeline and clampMarkers drops them. Reporting the
+   * input count told a user importing a 20-minute chapter list into a 5-second
+   * excerpt that 12 markers had arrived when 1 had.
    */
   function setMarkers(markers, label = 'import markers') {
-    if (!activeDocument.value) return
+    if (!activeDocument.value) return 0
+    const kept = clampMarkers(markers, totalDuration.value)
     pushUndo(label)
-    state.markers = clampMarkers(markers, totalDuration.value)
+    state.markers = kept
+    return kept.length
   }
 
   /**
@@ -800,11 +808,20 @@ export function useEditorState() {
    */
   function performSplitAtMarkers() {
     if (state.markers.length === 0) return 0
+    // Split a CLONE first, then count. A marker on 0 or on the end of the
+    // timeline is a no-op for splitAtPlayhead, so the marker count overstates
+    // the cuts — "Split at 2 markers" for one cut. Working on a clone also
+    // keeps recalcOutputStarts, which writes outputStart in place, off the
+    // live segments until there is something worth undoing.
+    const segs = state.markers.reduce(
+      (acc, m) => splitAtPlayhead(acc, m.time),
+      cloneSegments(state.segments),
+    )
+    const cuts = segs.length - state.segments.length
+    if (cuts === 0) return 0
     pushUndo('split at markers')
-    let segs = state.segments
-    for (const m of state.markers) segs = splitAtPlayhead(segs, m.time)
     state.segments = segs
-    return state.markers.length
+    return cuts
   }
 
   /**
@@ -823,6 +840,18 @@ export function useEditorState() {
     for (const span of [...gaps].reverse()) {
       segs = deleteRegion(segs, span.start, span.end)
       marks = markersAfterDelete(marks, span.start, span.end)
+    }
+    // ⚠ THE MARKER THAT OPENED A GAP SURVIVES ITS OWN DELETION, and it is
+    // still kind 'gap'. markersAfterDelete keeps everything at or before
+    // `start`, and the closing marker collapses onto it — correct, that is one
+    // boundary now — but left flagged it re-designates whatever NOW follows it
+    // as dead air. Measured before this line existed: a 10 s file with a 1 s
+    // gap went to 9 s, then the panel offered "Delete 1 gap" again and the
+    // second click took it to 2 s, eating seven seconds of real narration that
+    // the canvas had meanwhile been veiling as silence. The boundary is worth
+    // keeping; the flag is not.
+    for (const span of gaps) {
+      if (span.openerId) marks = setMarkerKind(marks, span.openerId, 'user')
     }
     state.segments = segs
     state.markers = marks

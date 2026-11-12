@@ -63,9 +63,13 @@ const gapSpans = computed(() => spans.value.filter(s => s.kind === 'gap'))
 // marker being dragged is shown at the pointer rather than at its stored time.
 const displayMarkers = computed(() => {
   if (!draggingMarkerId.value) return state.markers
-  return state.markers.map(m =>
-    m.id === draggingMarkerId.value ? { ...m, time: draggingMarkerTime.value } : m
-  )
+  // Re-sorted, because the renderer decides whether a name fits by measuring
+  // to markers[i + 1] and so assumes time order. Dragging a marker past its
+  // neighbour breaks that assumption for the one element the user is actually
+  // watching, which is the worst possible moment to mislay the label layout.
+  return state.markers
+    .map(m => (m.id === draggingMarkerId.value ? { ...m, time: draggingMarkerTime.value } : m))
+    .sort((a, b) => a.time - b.time)
 })
 const containerWidth = ref(0)
 // Whether the view is pinned to "whole file fits the viewport". Starts true so

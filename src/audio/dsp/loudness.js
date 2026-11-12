@@ -320,7 +320,11 @@ export function measureTruePeakDb(channelData) {
 
   let samplePk = 0
   for (const ch of chans) {
-    for (let i = 0; i < ch.length; i++) {
+    // Guarded exactly as the interpolation loop below is. The two disagreeing
+    // about whether a channel can be absent meant a sparse array threw here
+    // before ever reaching the code written to tolerate it.
+    const chN = ch?.length ?? 0
+    for (let i = 0; i < chN; i++) {
       const a = ch[i] < 0 ? -ch[i] : ch[i]
       if (a > samplePk) samplePk = a
     }
