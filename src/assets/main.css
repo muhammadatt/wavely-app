@@ -26,8 +26,10 @@
      rows, a single hairline where it meets the workspace. The active tab is
      filled with the workspace's own colour so it opens into it. */
   --color-chrome: #0e1216;   /* "Darker" in design 1a (was #12161d) */
-  --color-wk-top: rgba(53, 211, 230, .12); 
+  --color-wk-top: rgba(53, 211, 230, .09); 
   --color-wk-bottom: #151d25;
+  /* The empty workspace (no file open) starts darker; set this to #151d25 for no gradient at all. */
+  --color-wk-top-empty: rgba(53, 211, 230, .03);
   --color-workspace: linear-gradient(var(--color-wk-top), var(--color-wk-bottom)); 
 
   /* solid, a step above the chrome so the active tab (same fill) reads against it */

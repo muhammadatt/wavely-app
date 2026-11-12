@@ -329,7 +329,7 @@ onUnmounted(() => {
         <FloatingToolbar />
 
         <FileTabs />  
-        <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px] compact:p-[6px] compact:pl-2 compact:gap-[6px]" style="background: var(--color-workspace)">
+        <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px] compact:p-[6px] compact:pl-2 compact:gap-[6px]" :style="{ background: hasFile ? 'var(--color-workspace)' : 'linear-gradient(var(--color-wk-top-empty), var(--color-wk-bottom))' }">
           <!-- Overview is indented by the dBFS gutter so its time axis shares an
                x-origin with the main waveform below it. -->
    
