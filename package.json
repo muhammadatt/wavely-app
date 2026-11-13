@@ -36,6 +36,7 @@
     "la2a:taper": "node scripts/la2a-ballistics.mjs --taper",
     "la2a:taper:selftest": "node scripts/la2a-ballistics.mjs --taper --selftest",
     "smoke": "node scripts/panel-smoke.mjs",
+    "help:shots": "node scripts/help-shots.mjs",
     "la2a:align": "node scripts/la2a-input-align.mjs",
     "fet:stimulus": "node scripts/fet-ballistics.mjs --stimulus",
     "fet:selftest": "node scripts/fet-ballistics.mjs --selftest",

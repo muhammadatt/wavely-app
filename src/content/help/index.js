@@ -41,19 +41,39 @@
  *                       be inferred from the faceplate, "when is this the right
  *                       tool" cannot.
  *
- *   controls  [{ label, text }]
- *                       Required. One entry per control on the faceplate, in
- *                       the order they appear on it. `label` must match what is
- *                       printed on the panel exactly — a help entry naming a
- *                       knob that is not there is worse than no entry.
+ *   controls  [control]  Required. One entry per control on the faceplate, in
+ *                       the order they appear on it (fields below). `label`
+ *                       must match what is printed on the panel exactly — a
+ *                       help entry naming a knob that is not there is worse
+ *                       than no entry. Controls that are not on the panel
+ *                       (bench rows, pinned parameters) are not documented.
  *
- *   steps     string[]  Optional. An ordered walkthrough, for effects where the
- *                       order genuinely matters (anything with an ANALYSE pass,
- *                       or a measurement that has to precede a setting).
+ *   quickStart string[]  Required, 2–6 entries. The fastest route from opening
+ *                       the window to a good result, in order — the manuals'
+ *                       "Quick Start" (Waves' CLA-2A and Parallel Particles
+ *                       guides are the model). Name the controls as printed
  *
  *   notes     string[]  Optional. What is easy to get wrong, and anything the
  *                       panel implies but does not say — a latency cost, a
- *                       control that only applies in one mode, a limit.
+ *                       control that only applies in one mode, a limit
+ *
+ * ── A CONTROL ENTRY ─────────────────────────────────────────────────────────
+ *
+ *   label     string    Required. Exactly as printed on the panel
+ *   text      string    Required. One sentence: what it controls
+ *   group     string    Optional. The panel section it sits in (DE-ESS, AIR…);
+ *                       consecutive controls with the same group share a
+ *                       heading on the page
+ *   details   string[]  Optional. Further paragraphs: how it behaves, what it
+ *                       interacts with, the technical detail behind it
+ *   range     string    Optional. Its travel, with units: `0 to 100`,
+ *                       `−24 to +24 dB in 0.1 dB steps`, `COMP, LIMIT`
+ *   default   string    Optional. What a fresh window opens at
+ *   shot      string    Optional. A `data-help` id carried by the control's
+ *                       element on the panel. `npm run help:shots` crops it
+ *                       into `public/help/shots/<id>/<shot>.png`; the page shows
+ *                       the crop beside the entry. The whole window is always
+ *                       shot as the Interface image
  *
  * ── VOICE ───────────────────────────────────────────────────────────────────
  * The product's rules apply here and are partly enforced by the test: second

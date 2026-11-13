@@ -80,9 +80,19 @@ test('every entry has the required shape', () => {
 
     assert.ok(Array.isArray(entry.controls), `${id}: controls must be an array`)
     assert.ok(entry.controls.length >= 1, `${id}: no controls documented`)
+    const CONTROL_KEYS = new Set(['label', 'text', 'group', 'details', 'range', 'default', 'shot'])
     for (const c of entry.controls) {
       assert.ok(c.label && typeof c.label === 'string', `${id}: a control has no label`)
       assert.ok(c.text && typeof c.text === 'string', `${id}: ${c.label} has no text`)
+      for (const k of ['group', 'range', 'default', 'shot']) {
+        if (c[k] !== undefined) assert.ok(typeof c[k] === 'string' && c[k], `${id}: ${c.label}.${k} must be a non-empty string`)
+      }
+      if (c.details !== undefined) {
+        assert.ok(Array.isArray(c.details) && c.details.length, `${id}: ${c.label}.details must be a non-empty array`)
+      }
+      if (c.shot !== undefined) assert.match(c.shot, /^[a-z0-9-]+$/, `${id}: ${c.label}.shot must be a kebab-case data-help id`)
+      const unknown = Object.keys(c).filter(k => !CONTROL_KEYS.has(k))
+      assert.deepEqual(unknown, [], `${id}: ${c.label} has unknown key(s) ${unknown.join(', ')}`)
     }
 
     const labels = entry.controls.map(c => c.label)
@@ -91,16 +101,17 @@ test('every entry has the required shape', () => {
       `${id}: two control entries share a label, so one of them is unreachable`,
     )
 
-    for (const key of ['steps', 'notes']) {
-      if (entry[key] === undefined) continue
-      assert.ok(Array.isArray(entry[key]), `${id}: ${key} must be an array`)
-      assert.ok(entry[key].length >= 1, `${id}: ${key} is present but empty`)
+    assert.ok(Array.isArray(entry.quickStart), `${id}: quickStart must be an array`)
+    assert.ok(entry.quickStart.length >= 2 && entry.quickStart.length <= 6, `${id}: quickStart wants 2–6 steps`)
+    if (entry.notes !== undefined) {
+      assert.ok(Array.isArray(entry.notes), `${id}: notes must be an array`)
+      assert.ok(entry.notes.length >= 1, `${id}: notes is present but empty`)
     }
 
     // Nothing outside the documented shape: an unknown key is either a typo for
-    // a real one (and silently renders nothing) or a section the panel cannot
+    // a real one (and silently renders nothing) or a section the page cannot
     // draw. Both are invisible without this.
-    const allowed = new Set(['summary', 'whenToUse', 'controls', 'steps', 'notes'])
+    const allowed = new Set(['summary', 'whenToUse', 'controls', 'quickStart', 'notes'])
     const unknown = Object.keys(entry).filter(k => !allowed.has(k))
     assert.deepEqual(unknown, [], `${id}: unknown key(s) ${unknown.join(', ')}`)
   }
@@ -115,11 +126,11 @@ test('the house voice holds: no terminal punctuation, no emoji', () => {
     const strings = [
       entry.summary,
       ...entry.whenToUse,
-      ...(entry.steps ?? []),
+      ...entry.quickStart,
       ...(entry.notes ?? []),
-      ...entry.controls.flatMap(c => [c.label, c.text]),
+      ...entry.controls.flatMap(c => [c.label, c.text, c.group, c.range, c.default, ...(c.details ?? [])]),
     ]
-    for (const s of strings) {
+    for (const s of strings.filter(x => x !== undefined)) {
       assert.ok(
         !/[.!?]$/.test(s.trim()),
         `${id}: string ends with terminal punctuation — "${s}"`,
@@ -194,4 +205,42 @@ test('a help URL routes back to its own entry', () => {
   assert.equal(helpIdFromPath('/help'), null)
   assert.equal(helpIdFromPath('/help/index.html'), 'index.html')
   assert.equal(helpIdFromPath('/'), null)
+})
+
+/**
+ * A control's `shot` names a `data-help` id the screenshot script crops. One
+ * no panel carries would silently lose its picture on the next run.
+ */
+test('every control shot is a data-help id some panel carries', () => {
+  const carried = new Set()
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, entry.name)
+      if (entry.isDirectory()) walk(p)
+      else if (entry.name.endsWith('.vue')) {
+        for (const m of readFileSync(p, 'utf8').matchAll(/data-help="([^"]+)"/g)) carried.add(m[1])
+      }
+    }
+  }
+  walk(join(ROOT, 'src/components'))
+  for (const [id, entry] of Object.entries(HELP)) {
+    for (const c of entry.controls) {
+      if (c.shot) assert.ok(carried.has(c.shot), `${id}: ${c.label} names shot "${c.shot}", which no panel carries as data-help`)
+    }
+  }
+})
+
+test('every screenshot manifest belongs to a help entry and names real shots', () => {
+  const dir = join(HELP_DIR, 'shots')
+  let files = []
+  try { files = readdirSync(dir).filter(f => f.endsWith('.json')) } catch { return }
+  for (const f of files) {
+    const id = f.replace(/\.json$/, '')
+    assert.ok(HELP[id], `shots/${f} has no help entry`)
+    const m = JSON.parse(readFileSync(join(dir, f), 'utf8'))
+    const shots = new Set(HELP[id].controls.map(c => c.shot).filter(Boolean))
+    for (const k of Object.keys(m.controls ?? {})) {
+      assert.ok(shots.has(k), `shots/${f}: crop "${k}" is no longer named by any control — re-run npm run help:shots -- ${id}`)
+    }
+  }
 })

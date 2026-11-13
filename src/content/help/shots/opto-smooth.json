@@ -1,0 +1,59 @@
+{
+  "panel": {
+    "src": "/help/shots/opto-smooth/panel.jpg",
+    "w": 868,
+    "h": 496
+  },
+  "controls": {
+    "peak-reduction": {
+      "src": "/help/shots/opto-smooth/peak-reduction.png",
+      "w": 188,
+      "h": 217
+    },
+    "meter": {
+      "src": "/help/shots/opto-smooth/meter.png",
+      "w": 361,
+      "h": 235
+    },
+    "harmonics": {
+      "src": "/help/shots/opto-smooth/harmonics.png",
+      "w": 166,
+      "h": 34
+    },
+    "gain": {
+      "src": "/help/shots/opto-smooth/gain.png",
+      "w": 190,
+      "h": 221
+    },
+    "auto-makeup": {
+      "src": "/help/shots/opto-smooth/auto-makeup.png",
+      "w": 65,
+      "h": 34
+    },
+    "pre-gain": {
+      "src": "/help/shots/opto-smooth/pre-gain.png",
+      "w": 97,
+      "h": 52
+    },
+    "lookahead": {
+      "src": "/help/shots/opto-smooth/lookahead.png",
+      "w": 89,
+      "h": 52
+    },
+    "mode": {
+      "src": "/help/shots/opto-smooth/mode.png",
+      "w": 76,
+      "h": 44
+    },
+    "hf-emph": {
+      "src": "/help/shots/opto-smooth/hf-emph.png",
+      "w": 92,
+      "h": 105
+    },
+    "mix": {
+      "src": "/help/shots/opto-smooth/mix.png",
+      "w": 108,
+      "h": 117
+    }
+  }
+}

@@ -22,11 +22,41 @@ import { helpIdFromPath } from './route.js'
 
 const published = new Set(publishedHelpIds(DEV_TUNING_PANELS))
 
+/**
+ * Screenshots, from `npm run help:shots`: `src/content/help/shots/<id>.json`
+ * says which images exist and their CSS size (the files are 2x). An effect
+ * with no manifest yet simply has no pictures.
+ */
+const SHOTS = Object.fromEntries(
+  Object.entries(import.meta.glob('../content/help/shots/*.json', { eager: true, import: 'default' }))
+    .map(([path, m]) => [path.replace(/^.*\/(.+)\.json$/, '$1'), m]),
+)
+
 const id = helpIdFromPath(window.location.pathname)
 const entry = id && published.has(id) ? HELP[id] : null
 const meta = entry ? HELP_META[id] : null
 const notFound = !!id && !entry
+const shots = entry ? SHOTS[id] ?? null : null
 
+/**
+ * The controls in panel order, bucketed under their `group` heading where they
+ * have one. Consecutive entries only: a group that recurs further down is a
+ * second section on the panel, not the first one continued.
+ */
+const controlGroups = []
+for (const c of entry?.controls ?? []) {
+  const last = controlGroups[controlGroups.length - 1]
+  if (last && last.group === (c.group ?? null)) last.controls.push(c)
+  else controlGroups.push({ group: c.group ?? null, controls: [c] })
+}
+
+/** A crop for a control, or null; CSS size capped so a wide strip fits. */
+function crop(c) {
+  const m = c.shot && shots?.controls?.[c.shot]
+  if (!m) return null
+  const scale = Math.min(1, 240 / m.w, 200 / m.h)
+  return { src: m.src, w: Math.round(m.w * scale), h: Math.round(m.h * scale) }
+}
 /** The sidebar and the index: published pages bucketed by category, in order. */
 const groups = HELP_CATEGORIES
   .map(c => ({
@@ -42,13 +72,10 @@ const categoryLabel = computed(() =>
 )
 
 /**
- * Order: what it is, when to reach for it, how to work it, what each control
- * does, then the caveats. Ordered lists only where the order carries meaning.
+ * Order: what it is, when to reach for it, the quick start, the interface and
+ * each control (the manuals' layout — Waves' CLA-2A guide is the model), then
+ * the caveats.
  */
-const leadSections = computed(() => entry ? [
-  { key: 'when', heading: 'When to use it', items: entry.whenToUse },
-  { key: 'steps', heading: 'How to use it', items: entry.steps, ordered: true },
-] : [])
 
 onMounted(() => {
   document.title = meta
@@ -97,26 +124,68 @@ onMounted(() => {
           <h1 class="hp-title">{{ meta.title }}</h1>
           <p class="hp-summary">{{ entry.summary }}</p>
 
-          <template v-for="s in leadSections" :key="s.key">
-            <section v-if="s.items && s.items.length" class="hp-section">
-              <h2 class="hp-heading">{{ s.heading }}</h2>
-              <ol v-if="s.ordered" class="hp-list hp-list--ordered">
-                <li v-for="(item, i) in s.items" :key="i">{{ item }}</li>
-              </ol>
-              <ul v-else class="hp-list">
-                <li v-for="(item, i) in s.items" :key="i">{{ item }}</li>
-              </ul>
-            </section>
-          </template>
+          <section class="hp-section">
+            <h2 class="hp-heading">When to use it</h2>
+            <ul class="hp-list">
+              <li v-for="(item, i) in entry.whenToUse" :key="i">{{ item }}</li>
+            </ul>
+          </section>
 
-          <section v-if="entry.controls && entry.controls.length" class="hp-section">
-            <h2 class="hp-heading">The controls</h2>
-            <dl class="hp-controls">
-              <div v-for="c in entry.controls" :key="c.label" class="hp-control">
-                <dt class="hp-control-label">{{ c.label }}</dt>
-                <dd class="hp-control-text">{{ c.text }}</dd>
+          <section class="hp-section">
+            <h2 class="hp-heading">Quick start</h2>
+            <ol class="hp-list hp-list--ordered">
+              <li v-for="(item, i) in entry.quickStart" :key="i">{{ item }}</li>
+            </ol>
+          </section>
+
+          <section class="hp-section">
+            <h2 class="hp-heading">Interface and controls</h2>
+            <figure v-if="shots?.panel" class="hp-panel">
+              <img
+                :src="shots.panel.src"
+                :width="shots.panel.w"
+                :height="shots.panel.h"
+                :alt="`The ${meta.title} window`"
+                loading="lazy"
+              />
+            </figure>
+
+            <template v-for="(g, gi) in controlGroups" :key="gi">
+              <h3 v-if="g.group" class="hp-group">{{ g.group }}</h3>
+              <div class="hp-controls">
+                <div
+                  v-for="c in g.controls"
+                  :key="c.label"
+                  class="hp-control"
+                  :class="{ 'hp-control--shot': crop(c) }"
+                >
+                  <div v-if="crop(c)" class="hp-crop">
+                    <img
+                      :src="crop(c).src"
+                      :width="crop(c).w"
+                      :height="crop(c).h"
+                      :alt="`${c.label} control`"
+                      loading="lazy"
+                    />
+                  </div>
+                  <div class="hp-control-body">
+                    <h4 class="hp-control-label">{{ c.label }}</h4>
+                    <p class="hp-control-text">{{ c.text }}</p>
+                    <p v-for="(d, di) in c.details ?? []" :key="di" class="hp-control-detail">{{ d }}</p>
+                    <dl v-if="c.range || c.default" class="hp-spec">
+                      <template v-if="c.range">
+                        <dt>Range</dt>
+                        <dd>{{ c.range }}</dd>
+                      </template>
+                      <template v-if="c.default">
+                        <dt>Default</dt>
+                        <dd>{{ c.default }}</dd>
+                      </template>
+                    </dl>
+                  </div>
+                </div>
               </div>
-            </dl>
+            </template>
           </section>
 
           <section v-if="entry.notes && entry.notes.length" class="hp-section">
@@ -310,7 +379,7 @@ a:focus-visible {
 /* ── Article ─────────────────────────────────────────────────────────────── */
 .hp-article,
 .hp-intro {
-  max-width: 720px;
+  max-width: 820px;
 }
 .hp-crumbs {
   display: flex;
@@ -363,28 +432,92 @@ a:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-/* Label over text, one row per control: the labels are short and the texts are
-   long, so a two-column table would spend its width on the narrow side. */
+/* The interface image: the whole window, at most its own 1x width. */
+.hp-panel {
+  margin: 0 0 28px;
+}
+.hp-panel img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px var(--hp-hairline), 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* A panel section (DE-ESS, AIR…), as printed. */
+.hp-group {
+  margin: 28px 0 0;
+  padding-bottom: 8px;
+  font: 700 12px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--hp-accent);
+  border-bottom: 1px solid var(--hp-hairline);
+}
+
+/* One row per control: its crop beside its entry, the manuals' layout. */
 .hp-controls {
   margin: 0;
-  border-top: 1px solid var(--hp-hairline);
 }
 .hp-control {
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
-  padding: 14px 0;
+  padding: 20px 0;
   border-bottom: 1px solid var(--hp-hairline);
 }
+.hp-control--shot {
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+.hp-crop {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.hp-crop img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--hp-hairline);
+}
 .hp-control-label {
-  padding-top: 3px;
-  font: 700 11.5px/1.4 'JetBrains Mono', monospace;
+  margin: 0;
+  font: 700 13px/1.4 'JetBrains Mono', monospace;
   letter-spacing: 0.06em;
   color: var(--hp-text);
 }
 .hp-control-text {
+  margin: 6px 0 0;
+  color: var(--hp-text);
+}
+.hp-control-detail {
+  margin: 8px 0 0;
+  color: var(--hp-soft);
+  font-size: 14px;
+}
+
+/* Range / Default, as a small spec table. */
+.hp-spec {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 14px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--hp-surface);
+  font: 400 13px/1.45 'Inter', system-ui, sans-serif;
+}
+.hp-spec dt {
+  font: 700 10px/1.9 'JetBrains Mono', monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--hp-muted);
+}
+.hp-spec dd {
   margin: 0;
   color: var(--hp-soft);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Index ───────────────────────────────────────────────────────────────── */
@@ -440,9 +573,12 @@ a:focus-visible {
   .hp-summary {
     font-size: 16px;
   }
-  .hp-control {
+  .hp-control--shot {
     grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
+    gap: 12px;
+  }
+  .hp-crop {
+    justify-content: flex-start;
   }
   .hp-cards {
     grid-template-columns: minmax(0, 1fr);

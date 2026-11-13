@@ -209,7 +209,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
 
         <!-- ── Top row: Peak Reduction · meter · Gain ─────────────────────── -->
         <div class="v2a-top">
-          <div class="v2a-col">
+          <div class="v2a-col" data-help="peak-reduction">
             <HardwareKnob
               class="v2a-ctl"
               variant="large"
@@ -227,9 +227,9 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
           </div>
 
           <div class="v2a-center">
-            <MachinedVuMeter :reduction-db="la2aReduction" :active="la2aPreview" />
+            <MachinedVuMeter data-help="meter" :reduction-db="la2aReduction" :active="la2aPreview" />
             <div class="v2a-nameplate">
-              <div class="v2a-nameplate-row">
+              <div class="v2a-nameplate-row" data-help="harmonics">
                 <LampButton
                   class="v2a-harmonics v2a-ctl"
                   :on="la2aAnalog"
@@ -246,7 +246,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
             </div>
           </div>
 
-          <div class="v2a-col">
+          <div class="v2a-col" data-help="gain">
             <!-- Stays draggable while Auto Makeup is lit: touching it takes
                  over and drops AUTO, so a gain the user sets actually sticks. -->
             <HardwareKnob
@@ -266,7 +266,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
               Gain
               <!-- Auto makeup drives the Gain knob to whatever restores the
                    input's level; touching Gain takes over and drops AUTO. -->
-              <div class="v2a-auto">
+              <div class="v2a-auto" data-help="auto-makeup">
                 <LampButton
                   class="v2a-ctl"
                   :on="la2aAutoMakeup"
@@ -288,6 +288,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
           <div class="v2a-left">
             <FoldedLcd
               class="v2a-ctl"
+              data-help="pre-gain"
               name="Pre-Gain"
               :model-value="la2aInputDb"
               @update:model-value="syncInput"
@@ -305,6 +306,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
                  LOOKAHEAD_MAX_MS in la2aProcessor.js. -->
             <FoldedLcd
               class="v2a-ctl"
+              data-help="lookahead"
               name="Lookahead"
               :model-value="la2aLookahead"
               @update:model-value="syncLookahead"
@@ -318,6 +320,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
             <!-- Compress / Limit — the hardware's rear-panel switch. -->
             <HardwareSlideSwitch
               class="v2a-ctl"
+              data-help="mode"
               :model-value="la2aMode"
               @update:model-value="syncMode"
               :options="MODE_OPTIONS"
@@ -325,7 +328,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
               :disabled="off"
               label="Mode"
             />
-            <div class="v2a-small-knob">
+            <div class="v2a-small-knob" data-help="hf-emph">
               <HardwareKnob
                 class="v2a-ctl v2a-knob-sm"
                 variant="bakelite-sm"
@@ -347,7 +350,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
             <!-- Blends the untouched input back in — parallel compression
                  without a second track. Auto Makeup solves through the blend,
                  so the Gain it sets is right at every Mix. -->
-            <div class="v2a-small-knob">
+            <div class="v2a-small-knob" data-help="mix">
               <HardwareKnob
                 class="v2a-ctl v2a-knob-md"
                 variant="bakelite-md"
@@ -374,7 +377,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
     </div>
 
     <!-- Bench only: gated off in production builds. See la2aTuning.js. -->
-    <div v-if="showTuningBench" class="v2a-bench">
+    <div v-if="showTuningBench" class="v2a-bench" data-bench>
       <LA2ATuningPanel
         :accent="ACCENT"
         :disabled="!la2aPreview"
