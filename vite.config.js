@@ -53,6 +53,7 @@ function stripDevOnlyModules(enabled) {
  * preview servers rewrite the same paths to the entry.
  */
 function helpPages(devPanels) {
+  let outDir = 'dist'
   const rewrite = (req, _res, next) => {
     const path = (req.url || '').split('?')[0]
     if (/^\/help(\/[^/.]*)?\/?$/.test(path)) req.url = '/help/index.html'
@@ -60,6 +61,20 @@ function helpPages(devPanels) {
   }
   return {
     name: 'wavely:help-pages',
+    configResolved(config) {
+      outDir = config.build.outDir
+    },
+    // `public/` is copied wholesale, so the screenshots of effects a production
+    // build hides would still be fetchable. Remove them, like their pages.
+    async closeBundle() {
+      if (devPanels) return
+      const { rm } = await import('node:fs/promises')
+      const { join, resolve } = await import('node:path')
+      const { HELP_META } = await import('./src/content/help/index.js')
+      for (const [id, meta] of Object.entries(HELP_META)) {
+        if (meta.release === 'dev') await rm(join(resolve(outDir), 'help/shots', id), { recursive: true, force: true })
+      }
+    },
     configureServer(server) {
       server.middlewares.use(rewrite)
     },

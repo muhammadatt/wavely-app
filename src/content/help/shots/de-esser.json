@@ -1,0 +1,69 @@
+{
+  "panel": {
+    "src": "/help/shots/de-esser/panel.jpg",
+    "w": 820,
+    "h": 769
+  },
+  "controls": {
+    "detect-low": {
+      "src": "/help/shots/de-esser/detect-low.png",
+      "w": 102,
+      "h": 209
+    },
+    "detect-high": {
+      "src": "/help/shots/de-esser/detect-high.png",
+      "w": 85,
+      "h": 209
+    },
+    "monitor": {
+      "src": "/help/shots/de-esser/monitor.png",
+      "w": 137,
+      "h": 35
+    },
+    "out-meter": {
+      "src": "/help/shots/de-esser/out-meter.png",
+      "w": 82,
+      "h": 223
+    },
+    "deess-lamp": {
+      "src": "/help/shots/de-esser/deess-lamp.png",
+      "w": 69,
+      "h": 22
+    },
+    "amount": {
+      "src": "/help/shots/de-esser/amount.png",
+      "w": 131,
+      "h": 161
+    },
+    "split": {
+      "src": "/help/shots/de-esser/split.png",
+      "w": 212,
+      "h": 68
+    },
+    "hf-restore": {
+      "src": "/help/shots/de-esser/hf-restore.png",
+      "w": 107,
+      "h": 159
+    },
+    "air-auto": {
+      "src": "/help/shots/de-esser/air-auto.png",
+      "w": 69,
+      "h": 30
+    },
+    "lisp-guard": {
+      "src": "/help/shots/de-esser/lisp-guard.png",
+      "w": 107,
+      "h": 159
+    },
+    "reduction": {
+      "src": "/help/shots/de-esser/reduction.png",
+      "w": 800,
+      "h": 31
+    },
+    "scope": {
+      "src": "/help/shots/de-esser/scope.png",
+      "w": 804,
+      "h": 142
+    }
+  }
+}

@@ -167,7 +167,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
     @close="close"
   >
     <div class="se-grid">
-      <div class="se-meter">
+      <div class="se-meter" data-help="in-meter">
         <LevelMeter variant="modula" scale-side="left" :levels="inputLevels" label="IN" :height="METER_H" />
       </div>
 
@@ -181,12 +181,13 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
              of each event and releases slowly, so the bar's own damping is off —
              two stages of smoothing would put the reading behind the audio. -->
         <GainReductionBar
+          data-help="reduction"
           :reduction-db="reductionDb" :accent="ACCENT"
           :full-scale-db="12" ballistics="none"
         />
 
         <!-- Analyse: the frozen half -->
-        <div class="se-analyse">
+        <div class="se-analyse" data-help="analyse">
           <div class="se-analyse-text">
             <span class="m-caption">Sibilance detection</span>
             <p class="se-hint">
@@ -201,10 +202,10 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
           >{{ analyzing ? 'Analysing…' : 'Analyse' }}</ModulaButton>
         </div>
 
-        <p class="se-status" :class="{ 'is-warn': isStale }">{{ statusLine }}</p>
+        <p data-help="status" class="se-status" :class="{ 'is-warn': isStale }">{{ statusLine }}</p>
       </div>
 
-      <div class="se-meter">
+      <div class="se-meter" data-help="out-meter">
         <LevelMeter variant="modula" scale-side="right" :levels="outputLevels" label="OUT" :height="METER_H" />
       </div>
     </div>
@@ -212,6 +213,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
     <!-- Attenuation: the live half -->
     <div class="se-knobs">
       <ModulaKnob
+        data-help="s-ceiling"
         variant="small" :size="52" show-value editable
         :model-value="params.stridentCeilingDb" :min="-12" :max="18" :step="0.5"
         :default-value="D.stridentCeilingDb" label="/s/ Ceiling" :color="ACCENT" :format-value="fmtDb"
@@ -220,6 +222,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
         @update:model-value="v => syncParam('stridentCeilingDb', v)"
       />
       <ModulaKnob
+        data-help="f-ceiling"
         variant="small" :size="52" show-value editable
         :model-value="params.nonStridentCeilingDb" :min="-18" :max="12" :step="0.5"
         :default-value="D.nonStridentCeilingDb" label="/f/ Ceiling" :color="ACCENT" :format-value="fmtDb"
@@ -228,6 +231,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
         @update:model-value="v => syncParam('nonStridentCeilingDb', v)"
       />
       <ModulaKnob
+        data-help="amount"
         variant="small" :size="52" show-value editable
         :model-value="params.reductionRatio" :min="0" :max="1" :step="0.01"
         :default-value="D.reductionRatio" label="Amount" :color="ACCENT" :format-value="fmtPct"
@@ -236,6 +240,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
         @update:model-value="v => syncParam('reductionRatio', v)"
       />
       <ModulaKnob
+        data-help="max-cut"
         variant="small" :size="52" show-value editable :parse-value="t => Math.abs(parseFloat(t))"
         :model-value="params.maxReductionDb" :min="0" :max="24" :step="0.5"
         :default-value="D.maxReductionDb" label="Max Cut" :color="ACCENT" :format-value="fmtCut"
@@ -253,6 +258,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
       </p>
       <div class="se-fades-knobs">
         <ModulaKnob
+          data-help="fric-in"
           variant="small" :size="44" show-value editable
           :model-value="params.fricativeInMs" :min="0.5" :max="20" :step="0.5"
           :default-value="D.fricativeInMs" label="Fric In" :color="ACCENT" :format-value="fmtMs"
@@ -261,6 +267,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
           @update:model-value="v => syncParam('fricativeInMs', v)"
         />
         <ModulaKnob
+          data-help="fric-out"
           variant="small" :size="44" show-value editable
           :model-value="params.fricativeOutMs" :min="0.5" :max="20" :step="0.5"
           :default-value="D.fricativeOutMs" label="Fric Out" :color="ACCENT" :format-value="fmtMs"
@@ -269,6 +276,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
           @update:model-value="v => syncParam('fricativeOutMs', v)"
         />
         <ModulaKnob
+          data-help="affr-in"
           variant="small" :size="44" show-value editable
           :model-value="params.affricateInMs" :min="0.5" :max="20" :step="0.5"
           :default-value="D.affricateInMs" label="Affr In" :color="ACCENT" :format-value="fmtMs"
@@ -277,6 +285,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
           @update:model-value="v => syncParam('affricateInMs', v)"
         />
         <ModulaKnob
+          data-help="affr-out"
           variant="small" :size="44" show-value editable
           :model-value="params.affricateOutMs" :min="0.5" :max="20" :step="0.5"
           :default-value="D.affricateOutMs" label="Affr Out" :color="ACCENT" :format-value="fmtMs"
@@ -291,6 +300,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
     <component
       :is="TuningPanel"
       v-if="TuningPanel"
+      data-bench
       :tuning="tuning"
       :accent="ACCENT"
       :dirty="tuningDirty"

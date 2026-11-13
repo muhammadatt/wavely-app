@@ -1,0 +1,74 @@
+{
+  "panel": {
+    "src": "/help/shots/clip-gain-deesser/panel.jpg",
+    "w": 700,
+    "h": 663
+  },
+  "controls": {
+    "in-meter": {
+      "src": "/help/shots/clip-gain-deesser/in-meter.png",
+      "w": 82,
+      "h": 275
+    },
+    "reduction": {
+      "src": "/help/shots/clip-gain-deesser/reduction.png",
+      "w": 496,
+      "h": 73
+    },
+    "analyse": {
+      "src": "/help/shots/clip-gain-deesser/analyse.png",
+      "w": 496,
+      "h": 71
+    },
+    "status": {
+      "src": "/help/shots/clip-gain-deesser/status.png",
+      "w": 496,
+      "h": 27
+    },
+    "out-meter": {
+      "src": "/help/shots/clip-gain-deesser/out-meter.png",
+      "w": 82,
+      "h": 275
+    },
+    "s-ceiling": {
+      "src": "/help/shots/clip-gain-deesser/s-ceiling.png",
+      "w": 84,
+      "h": 139
+    },
+    "f-ceiling": {
+      "src": "/help/shots/clip-gain-deesser/f-ceiling.png",
+      "w": 83,
+      "h": 139
+    },
+    "amount": {
+      "src": "/help/shots/clip-gain-deesser/amount.png",
+      "w": 66,
+      "h": 139
+    },
+    "max-cut": {
+      "src": "/help/shots/clip-gain-deesser/max-cut.png",
+      "w": 86,
+      "h": 139
+    },
+    "fric-in": {
+      "src": "/help/shots/clip-gain-deesser/fric-in.png",
+      "w": 71,
+      "h": 131
+    },
+    "fric-out": {
+      "src": "/help/shots/clip-gain-deesser/fric-out.png",
+      "w": 71,
+      "h": 131
+    },
+    "affr-in": {
+      "src": "/help/shots/clip-gain-deesser/affr-in.png",
+      "w": 72,
+      "h": 131
+    },
+    "affr-out": {
+      "src": "/help/shots/clip-gain-deesser/affr-out.png",
+      "w": 73,
+      "h": 131
+    }
+  }
+}
