@@ -355,7 +355,7 @@ async function applyAndClose() {
 
       <!-- The overlays: independent, because they answer different questions.
            Flat chips, lit when on — they change what is DRAWN, never the audio. -->
-      <span class="rt-overlays">
+      <span class="rt-overlays" data-help="overlays">
         <ModulaChip
           v-for="o in overlayButtons"
           :key="o.key"
@@ -372,6 +372,7 @@ async function applyAndClose() {
     <!-- The plot draws zone columns from what it is GIVEN, so in focus mode it
          is given none. -->
     <ResonanceSpectrum
+      data-help="display"
       :data-fn="resDisplayFn"
       :reduction-db="resReduction"
       :accent="ACCENT"
@@ -426,6 +427,7 @@ async function applyAndClose() {
         variant="small" :size="44" show-value editable
         :model-value="resAttack" :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5"
         :default-value="RESONANCE_DEFAULTS.attack"
+        data-help="attack"
         label="Attack" :color="SECOND" :format-value="ms" :disabled="!resPreview"
         title="How fast the detector closes on a resonance. Double-click to reset"
         @update:model-value="syncAttack"
@@ -434,6 +436,7 @@ async function applyAndClose() {
         variant="small" :size="44" show-value editable
         :model-value="resRelease" :min="RESONANCE_RELEASE_MIN_MS" :max="2000" :step="10"
         :default-value="RESONANCE_DEFAULTS.release"
+        data-help="release"
         label="Release" :color="SECOND" :format-value="ms" :disabled="!resPreview"
         title="How fast it lets go. Double-click to reset"
         @update:model-value="syncRelease"
@@ -471,6 +474,7 @@ async function applyAndClose() {
         variant="small" :size="44" show-value editable :parse-value="t => parseFloat(t) / 100"
         :model-value="resMix" :min="0" :max="1" :step="0.01"
         :default-value="RESONANCE_DEFAULTS.mix"
+        data-help="mix"
         label="Mix" :color="SECOND" :format-value="percent" :disabled="!resPreview"
         title="How much of the detector's work reaches the output. Double-click to reset"
         @update:model-value="syncMix"
@@ -478,7 +482,7 @@ async function applyAndClose() {
       <!-- ⚠ FIXED WIDTH: the printed value runs from "0.0 dB" to "-12.0 dB", and
            a column sized by its text moves everything beside it as the digits
            change. The width holds the widest reading. -->
-      <div class="rt-fixed">
+      <div class="rt-fixed" data-help="trim">
         <ModulaKnob
           variant="small" :size="44" show-value editable bipolar
           :model-value="resTrim" :min="-12" :max="12" :step="0.5"

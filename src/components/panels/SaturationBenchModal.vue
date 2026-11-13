@@ -208,7 +208,7 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="sb-grid">
-      <div class="sb-meter">
+      <div class="sb-meter" data-help="input">
         <LevelMeter variant="modula" scale-side="left" :levels="sbInputLevels" label="IN" :height="METER_H">
           <template #below>
             <ModulaKnob
@@ -224,7 +224,7 @@ async function applyAndClose() {
 
       <div class="sb-layers">
         <!-- Layer tabs: each summarises its layer; the selected one owns the face below. -->
-        <div class="sb-tabs" role="tablist" aria-label="Layers">
+        <div class="sb-tabs" data-help="layers" role="tablist" aria-label="Layers">
           <div
             v-for="(row, n) in rows" :key="row.k"
             class="sb-tab" :class="{ 'is-sel': row.k === sel?.k, 'is-muted': row.layer.muted, 'is-silenced': silenced(row.k) }"
@@ -257,14 +257,14 @@ async function applyAndClose() {
         <div v-if="sel" class="sb-face" :class="{ 'is-muted': sel.layer.muted, 'is-silenced': silenced(sel.k) }">
           <div class="sb-face-head">
             <ModulaChip
-              class="sb-on" :label="sel.layer.muted ? 'OFF' : 'ON'" lamp :color="ACCENT"
+              class="sb-on" data-help="layer-on" :label="sel.layer.muted ? 'OFF' : 'ON'" lamp :color="ACCENT"
               :model-value="!sel.layer.muted" :disabled="!sbPreview"
               :aria-label="`Layer ${selNum} on / off`"
               title="Layer on / off: off keeps the layer in the stack with its settings but takes it out of the sound, in preview and in Apply"
               @update:model-value="v => syncLayer(sel.k, 'muted', !v)"
             />
             <ModulaChip
-              class="sb-on" label="SOLO" lamp :color="ACCENT"
+              class="sb-on" data-help="solo" label="SOLO" lamp :color="ACCENT"
               :model-value="sbSolo === sel.k" :disabled="!sbPreview"
               :aria-label="`Solo layer ${selNum}`"
               title="Hear only this layer, on the unprocessed input. A listening aid: it never reaches Apply, and adding or removing a layer clears it"
@@ -275,7 +275,7 @@ async function applyAndClose() {
             <section class="sb-zone sb-zone-char">
               <span class="m-caption">Character</span>
               <div class="sb-char">
-                <div class="sb-curves" role="radiogroup" aria-label="Curve">
+                <div class="sb-curves" data-help="curve" role="radiogroup" aria-label="Curve">
                   <button
                     v-for="c in CURVES" :key="c.id" type="button" role="radio"
                     class="sb-curve-opt m-focusable" :class="{ 'is-on': sel.layer.curve === c.id }"
@@ -286,7 +286,7 @@ async function applyAndClose() {
                 <ModulaKnob
                   variant="led" :size="112" show-value editable
                   :model-value="sel.layer.driveDb" :min="SAT_DRIVE_MIN_DB" :max="SAT_DRIVE_MAX_DB" :step="0.5"
-                  :default-value="factory(sel.k, 'driveDb')" label="Drive" :color="ACCENT" :format-value="fmtDrive"
+                  :default-value="factory(sel.k, 'driveDb')" data-help="drive" label="Drive" :color="ACCENT" :format-value="fmtDrive"
                   :disabled="!sbPreview"
                   title="dB above the matched point: 0 dB puts every curve at 1 % distortion on this band's measured level, so switching curves compares character, not strength. A high band wants +12 to +20 dB to be heard. Double-click to reset"
                   @update:model-value="v => syncLayer(sel.k, 'driveDb', v)"
@@ -294,7 +294,7 @@ async function applyAndClose() {
                 <ModulaKnob
                   variant="ring" :size="56" show-value editable bipolar
                   :model-value="sel.layer.amountDb" :min="SAT_AMOUNT_MIN_DB" :max="SAT_AMOUNT_MAX_DB" :step="0.5"
-                  :default-value="factory(sel.k, 'amountDb')" label="Amount" :color="ACCENT" :format-value="fmtAmount"
+                  :default-value="factory(sel.k, 'amountDb')" data-help="amount" label="Amount" :color="ACCENT" :format-value="fmtAmount"
                   :disabled="!sbPreview"
                   title="Level of what this layer adds — the clean signal is never touched. Drive sets how hard the curve bends; Amount sets how loud its result is. Use it when Drive has run out: the Quartic stops growing past about +15 dB of drive. Double-click to reset"
                   @update:model-value="v => syncLayer(sel.k, 'amountDb', v)"
@@ -309,7 +309,7 @@ async function applyAndClose() {
                   <ModulaKnob
                     variant="plain" :size="40" show-value editable :quantize="quantizeHz" :taper="LOW_TAPER"
                     :model-value="sel.layer.loHz" :min="SAT_BAND_MIN_HZ" :max="SAT_BAND_MAX_HZ"
-                    :default-value="factory(sel.k, 'loHz')" label="Low" :color="ACCENT" :format-value="fmtHz"
+                    :default-value="factory(sel.k, 'loHz')" data-help="low" label="Low" :color="ACCENT" :format-value="fmtHz"
                     :disabled="!sbPreview"
                     title="Bottom of the band this layer saturates. Fully down (1 Hz) is open — no high-pass; the next step is a 2 Hz corner, so leaving open is gentle. The value is the real corner. Double-click to reset"
                     @update:model-value="v => syncLayer(sel.k, 'loHz', v)"
@@ -317,13 +317,13 @@ async function applyAndClose() {
                   <ModulaKnob
                     variant="plain" :size="40" show-value editable :quantize="quantizeHz" :taper="HIGH_TAPER"
                     :model-value="sel.layer.hiHz" :min="SAT_BAND_HIGH_MIN_HZ" :max="SAT_BAND_MAX_HZ"
-                    :default-value="factory(sel.k, 'hiHz')" label="High" :color="ACCENT" :format-value="fmtHz"
+                    :default-value="factory(sel.k, 'hiHz')" data-help="high" label="High" :color="ACCENT" :format-value="fmtHz"
                     :disabled="!sbPreview"
                     title="Top of the band this layer saturates. Fully up is open — no low-pass. What the curve adds is band-passed again, so nothing it makes leaves the band. Double-click to reset"
                     @update:model-value="v => syncLayer(sel.k, 'hiHz', v)"
                   />
                 </div>
-                <ModulaReadout class="sb-range" :text="bandCaption(sel.layer)" size="sm" />
+                <ModulaReadout class="sb-range" data-help="band-range" :text="bandCaption(sel.layer)" size="sm" />
               </div>
             </section>
           </div>
@@ -332,19 +332,20 @@ async function applyAndClose() {
             <div class="sb-pre-head">
               <span class="m-caption">Pre-Emphasis</span>
               <ModulaChip
-                class="sb-on" :label="sel.layer.emphOn !== false ? 'ON' : 'OFF'" lamp :color="ACCENT"
+                class="sb-on" data-help="emph-on" :label="sel.layer.emphOn !== false ? 'ON' : 'OFF'" lamp :color="ACCENT"
                 :model-value="sel.layer.emphOn !== false" :disabled="!sbPreview"
                 :aria-label="`Layer ${selNum} pre-emphasis`"
                 title="Bypass the pre-emphasis: off sends the signal into the curve flat and skips the matching de-emphasis, without changing its frequency, Q or gain"
                 @update:model-value="v => syncLayer(sel.k, 'emphOn', v)"
               />
               <ModulaSegmented
+                data-help="emph-shape"
                 :model-value="sel.layer.emphType" :options="EMPH_TYPE_OPTIONS"
                 :aria-label="`Layer ${selNum} emphasis shape`" :disabled="!sbPreview"
                 @update:model-value="v => syncLayer(sel.k, 'emphType', v)"
               />
             </div>
-            <div class="sb-emph">
+            <div class="sb-emph" data-help="emph-plot">
               <SaturationEmphasisPlot
                 :type="sel.layer.emphType" :hz="sel.layer.emphHz" :q="sel.layer.emphQ" :db="sel.layer.emphDb"
                 :on="sel.layer.emphOn !== false" :sample-rate="sampleRate()" :color="ACCENT" :width="300"
@@ -364,14 +365,14 @@ async function applyAndClose() {
         <div class="sb-foot">
           <span class="m-note">LAYERS RUN LEFT TO RIGHT</span>
           <button
-            type="button" class="sb-text-btn m-focusable" :disabled="!sbPreview"
+            type="button" class="sb-text-btn m-focusable" data-help="reset-layers" :disabled="!sbPreview"
             title="Back to the two factory layers: Warmth (Quartic, +20.4 dB shelf, full band) and Exciter (Tanh, −20.4 dB shelf, 3 kHz up)"
             @click="resetLayers"
           >Reset layers</button>
         </div>
       </div>
 
-      <div class="sb-meter">
+      <div class="sb-meter" data-help="output">
         <LevelMeter variant="modula" scale-side="right" :levels="sbOutputLevels" label="OUT" :height="METER_H">
           <template #below>
             <ModulaKnob
