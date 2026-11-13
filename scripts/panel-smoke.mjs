@@ -453,9 +453,9 @@ try {
   }
 
   /**
-   * Fade (a rail view, so no window opens): a fade out and then a crossfade
-   * applied to the whole file, each reporting itself. The crossfade shortens
-   * the timeline, so this runs after every check that needs the full file.
+   * Fade (a rail view, so no window opens): a fade in and a fade out applied
+   * across the whole file, each reporting itself, and the panel offering no
+   * crossfade and no length control (the selection is the fade's length).
    */
   {
     const before = errors.length
@@ -474,19 +474,20 @@ try {
       }
       return seen.join('\n')
     }
-    const outOk = /Fade out applied/.test(await applyFade('Fade Out'))
-    const crossOk = /Crossfade applied/.test(await applyFade('Crossfade'))
-    // The 6 s probe, crossfaded end to end at 1 s, is the 1 s join alone —
-    // Select All reads the timeline (the header's Length is the source file).
-    await page.getByText('Select All', { exact: false }).first().click(); await page.waitForTimeout(300)
-    const shortened = /DURATION\s+1\.00s/.test(await page.evaluate(() => document.body.innerText))
+    const inOk = /Fade in applied \(6\.00 s/.test(await applyFade('Fade In'))
+    const outOk = /Fade out applied \(6\.00 s/.test(await applyFade('Fade Out'))
+    // Scoped to the panel that holds Apply Fade: the transport has a range input of its own.
+    const panel = page.locator('div:has(> * button:text-is("Fade In"))').filter({ has: page.getByRole('button', { name: 'Apply Fade' }) }).last()
+    const noExtras = (await panel.count()) > 0
+      && (await panel.getByRole('button', { name: 'Crossfade', exact: true }).count()) === 0
+      && (await panel.locator('input[type=range]').count()) === 0
     const fresh = errors.slice(before)
-    const ok = outOk && crossOk && shortened && fresh.length === 0
+    const ok = inOk && outOk && noExtras && fresh.length === 0
     if (!ok) failures++
     const why = [
-      outOk ? '' : 'Fade Out did not report an apply; ',
-      crossOk ? '' : 'Crossfade did not report an apply; ',
-      shortened ? '' : 'Crossfade did not shorten the file to its 1 s join; ',
+      inOk ? '' : 'Fade In did not report a 6 s apply; ',
+      outOk ? '' : 'Fade Out did not report a 6 s apply; ',
+      noExtras ? '' : 'the panel still offers a crossfade or a length slider; ',
     ].join('')
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Fade'.padEnd(16)} ${why}${fresh.join(' | ')}`)
     await page.keyboard.press('Escape'); await page.waitForTimeout(300)

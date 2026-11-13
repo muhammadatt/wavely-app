@@ -1,6 +1,6 @@
 import { getSegmentDuration } from './operations.js'
 import { applyGainSegments } from './dsp/autoLevel.js'
-import { applyFade, crossfadeChannels, effectiveFadeSeconds } from './dsp/fade.js'
+import { applyFade } from './dsp/fade.js'
 import { analysisWindow, analysedWholeRegion, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_PREROLL_S } from './la2aProcessor.js'
@@ -354,53 +354,17 @@ export function normalizeRegion(segments, start, end, targetPeakDb, audioContext
 }
 
 /**
- * Render a fade (see dsp/fade.js) for the selection [start, end] and say what
- * it replaces. Only the audio a fade changes is rendered — at most 5 s, so it
- * runs on the main thread with no worker round trip:
- *
- *   in    → replace [start, start + d]   with the faded head
- *   out   → replace [end − d, end]       with the faded tail
- *   cross → replace [start, end]         with a d-long blend of
- *           [start, start + d] (fading out) and [end − d, end] (fading in)
- *
- * `d` is whole samples. Returns { buffer, start, end, duration, seconds }:
- * the region to replace, how long the new buffer plays there (shorter than the
- * region for a crossfade), and the fade length actually used.
+ * Render a fade (see dsp/fade.js) over the whole selection [start, end]: the
+ * selection is the fade's length. A gain ramp needs no worker round trip, so it
+ * runs on the main thread, like the region render it starts from.
  */
-export function renderFadeRegion(segments, start, end, { type, curve, seconds }, audioContext, sampleRate, channels) {
-  const d = effectiveFadeSeconds(type, seconds, end - start)
-  const n = Math.round(d * sampleRate)
+export function renderFadeRegion(segments, start, end, { type, curve }, audioContext, sampleRate, channels) {
+  const data = applyFade(renderRegionToBuffer(segments, start, end, sampleRate, channels), type, curve)
+  const n = data[0]?.length ?? 0
   if (n < 1) throw new Error('The selection is too short to fade')
-  const len = n / sampleRate
-  const take = (a, b) => renderRegionToBuffer(segments, a, b, sampleRate, channels)
-    .map((ch) => (ch.length === n ? ch : fitLength(ch, n)))
-
-  let data, regionStart, regionEnd
-  if (type === 'in') {
-    regionStart = start
-    regionEnd = start + len
-    data = applyFade(take(regionStart, regionEnd), 'in', curve)
-  } else if (type === 'out') {
-    regionStart = end - len
-    regionEnd = end
-    data = applyFade(take(regionStart, regionEnd), 'out', curve)
-  } else if (type === 'cross') {
-    regionStart = start
-    regionEnd = end
-    data = crossfadeChannels(take(start, start + len), take(end - len, end), curve)
-  } else {
-    throw new Error(`Unknown fade type: ${type}`)
-  }
-
   const buffer = audioContext.createBuffer(channels, n, sampleRate)
   for (let ch = 0; ch < channels; ch++) buffer.copyToChannel(data[ch], ch)
-  return { buffer, start: regionStart, end: regionEnd, duration: len, seconds: len }
-}
-
-function fitLength(ch, n) {
-  const out = new Float32Array(n)
-  out.set(ch.subarray(0, Math.min(n, ch.length)))
-  return out
+  return buffer
 }
 
 /**

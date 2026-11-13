@@ -233,12 +233,9 @@ export function insertSegments(segments, position, clipboardSegments) {
 
 /**
  * Replace segments in a region [start, end) with a new segment
- * pointing to a processed buffer. `duration` is how long the new segment plays
- * — the region's own length unless the edit changes the timeline's length
- * (a crossfade replaces the selection with the shorter blended join); every
- * segment after it is moved by the difference.
+ * pointing to a processed buffer.
  */
-export function replaceRegionWithBuffer(segments, start, end, newBuffer, newBufferId, duration = end - start) {
+export function replaceRegionWithBuffer(segments, start, end, newBuffer, newBufferId) {
   if (start >= end) return segments
 
   let result = splitSegmentsAtTime(segments, start)
@@ -258,7 +255,7 @@ export function replaceRegionWithBuffer(segments, start, end, newBuffer, newBuff
           sourceBuffer: newBuffer,
           sourceBufferId: newBufferId,
           sourceStart: 0,
-          sourceEnd: duration,
+          sourceEnd: end - start,
           outputStart: start,
         })
         replaced = true
