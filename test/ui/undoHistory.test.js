@@ -103,3 +103,81 @@ test('history is per document — undo reports the active document’s last edit
   editor.undo()
   assert.equal(lastToast(editor), 'Undid silence')
 })
+
+// ── Selection across undo / redo ─────────────────────────────────────────────
+// Undo used to clear the selection, so "apply, Undo, change a setting, apply
+// again" meant re-selecting by hand. Each entry now carries the selection that
+// belongs to its timeline.
+
+test('undoing an effect puts back the selection it was applied to', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'effect.wav')
+
+  editor.state.selection = { start: 1, end: 2 }
+  editor.replaceRegion(1, 2, fakeBuffer(1), 'LA Vintage 2A compression')
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+
+  // Re-applying to the same span and undoing again lands in the same place.
+  editor.replaceRegion(1, 2, fakeBuffer(1), 'LA Vintage 2A compression')
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+})
+
+test('undoing a cut selects the restored audio; redo leaves none', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'cut.wav')
+
+  editor.state.selection = { start: 1, end: 2 }
+  editor.performCut()
+  assert.equal(editor.state.selection, null)
+
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+
+  editor.redo()
+  assert.equal(editor.state.selection, null)
+})
+
+test('a selection made after an edit is not carried onto the undone timeline', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'shift.wav')
+
+  editor.state.selection = { start: 1, end: 2 }
+  editor.performCut()
+  // Made on the shortened timeline: after undo, 2.5–3 s would be other audio.
+  editor.state.selection = { start: 2.5, end: 3 }
+
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+
+  // Redo returns to the shortened timeline, and with it the selection made there.
+  editor.redo()
+  assert.deepEqual(editor.state.selection, { start: 2.5, end: 3 })
+})
+
+test('undo restores "no selection" when there was none', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'none.wav')
+
+  editor.state.selection = null
+  editor.replaceRegion(0, 4, fakeBuffer(4), 'Peak Normalize')
+  editor.state.selection = { start: 0, end: 1 }
+  editor.undo()
+  assert.equal(editor.state.selection, null)
+})
+
+test('a restored selection is a copy, not shared with the history entry', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'copy.wav')
+
+  editor.state.selection = { start: 1, end: 2 }
+  editor.pushUndo('silence')
+  editor.state.selection.end = 3   // mutate after the snapshot
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+  editor.state.selection.start = 0
+  editor.redo()
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 0, end: 2 })
+})

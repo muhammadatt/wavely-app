@@ -191,6 +191,20 @@ const state = new Proxy({}, {
   },
 })
 
+/**
+ * History entries carry the selection that went with their timeline, and undo /
+ * redo put it back. Undo used to CLEAR the selection, which made the common
+ * loop — apply, Undo, change a setting, apply again to the same span —
+ * impossible without re-selecting by hand (and Noise Reduction's held result,
+ * keyed on the exact span, unreachable). Keeping the CURRENT selection instead
+ * would be wrong: after a cut or paste is undone the timeline shifts, and a
+ * selection made on the edited timeline would cover different audio. A saved
+ * selection always belongs to the segments saved with it.
+ */
+function copySelection(sel) {
+  return sel ? { start: sel.start, end: sel.end } : null
+}
+
 function historyFor(docId) {
   let h = docHistory.get(docId)
   if (!h) {
@@ -261,7 +275,7 @@ export function useEditorState() {
     const doc = activeDocument.value
     if (!doc) return
     const h = historyFor(doc.id)
-    h.undo.push({ segments: cloneSegments(doc.segments), label, revision: doc.revision })
+    h.undo.push({ segments: cloneSegments(doc.segments), selection: copySelection(doc.selection), label, revision: doc.revision })
     if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
     h.redo.length = 0
     doc.revision = ++revisionSeq
@@ -278,10 +292,10 @@ export function useEditorState() {
     // The label travels with the state it belongs to: the entry now going onto
     // the redo stack is the result of that same operation, so redoing it can
     // name it too.
-    h.redo.push({ segments: cloneSegments(doc.segments), label: entry.label, revision: doc.revision })
+    h.redo.push({ segments: cloneSegments(doc.segments), selection: copySelection(doc.selection), label: entry.label, revision: doc.revision })
     doc.segments = entry.segments
     doc.revision = entry.revision
-    doc.selection = null
+    doc.selection = copySelection(entry.selection)
     doc.undoCount = h.undo.length
     doc.redoCount = h.redo.length
     showToast(entry.label ? `Undid ${entry.label}` : 'Undone')
@@ -293,10 +307,10 @@ export function useEditorState() {
     const h = historyFor(doc.id)
     if (h.redo.length === 0) return
     const entry = h.redo.pop()
-    h.undo.push({ segments: cloneSegments(doc.segments), label: entry.label, revision: doc.revision })
+    h.undo.push({ segments: cloneSegments(doc.segments), selection: copySelection(doc.selection), label: entry.label, revision: doc.revision })
     doc.segments = entry.segments
     doc.revision = entry.revision
-    doc.selection = null
+    doc.selection = copySelection(entry.selection)
     doc.undoCount = h.undo.length
     doc.redoCount = h.redo.length
     showToast(entry.label ? `Redid ${entry.label}` : 'Redone')
@@ -635,7 +649,7 @@ export function useEditorState() {
     // Undo must land on the document being modified, which is not necessarily
     // the active one — a preset job can finish after the user switched tabs.
     const h = historyFor(doc.id)
-    h.undo.push({ segments: cloneSegments(doc.segments), label, revision: doc.revision })
+    h.undo.push({ segments: cloneSegments(doc.segments), selection: copySelection(doc.selection), label, revision: doc.revision })
     if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
     h.redo.length = 0
     doc.revision = ++revisionSeq
