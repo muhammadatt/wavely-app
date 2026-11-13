@@ -1,5 +1,6 @@
 import { getSegmentDuration } from './operations.js'
 import { applyGainSegments } from './dsp/autoLevel.js'
+import { playedSampleCount } from './dsp/fade.js'
 import { analysisWindow, analysedWholeRegion, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_PREROLL_S } from './la2aProcessor.js'
@@ -348,6 +349,33 @@ export function normalizeRegion(segments, start, end, targetPeakDb, audioContext
     worker.postMessage(
       { type: 'normalize', channelData, params: { targetPeakDb } },
       channelData.map(c => c.buffer)
+    )
+  })
+}
+
+/**
+ * Render a fade (see dsp/fade.js) over the whole selection [start, end]: the
+ * selection is the fade's length. The per-sample gain runs in the processing
+ * worker, as Volume's does, so an hour-long fade does not freeze the tab and
+ * the processing overlay paints. Resolves the faded AudioBuffer.
+ */
+export function renderFadeRegion(segments, start, end, { type, curve }, audioContext, sampleRate, channels) {
+  return new Promise((resolve, reject) => {
+    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+    const played = playedSampleCount(end - start, sampleRate)
+    const worker = new Worker(new URL('../workers/processWorker.js', import.meta.url), { type: 'module' })
+    worker.onmessage = (e) => {
+      worker.terminate()
+      if (e.data.type !== 'done') { reject(new Error(e.data.message)); return }
+      const out = e.data.channelData
+      const buffer = audioContext.createBuffer(channels, out[0].length, sampleRate)
+      for (let ch = 0; ch < channels; ch++) buffer.copyToChannel(out[ch], ch)
+      resolve(buffer)
+    }
+    worker.onerror = (err) => { worker.terminate(); reject(err) }
+    worker.postMessage(
+      { type: 'fade', channelData, params: { type, curve, played } },
+      channelData.map(c => c.buffer),
     )
   })
 }

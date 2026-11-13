@@ -453,6 +453,47 @@ try {
   }
 
   /**
+   * Fade (a rail view, so no window opens): a fade in and a fade out applied
+   * across the whole file, each reporting itself, and the panel offering no
+   * crossfade and no length control (the selection is the fade's length).
+   */
+  {
+    const before = errors.length
+    const applyFade = async (type) => {
+      await page.getByText('Select All', { exact: false }).first().click(); await page.waitForTimeout(300)
+      await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
+      await page.keyboard.type('Fade'); await page.waitForTimeout(450)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(800)
+      await page.getByRole('button', { name: type, exact: true }).click()
+      await page.getByRole('button', { name: 'Apply Fade' }).click()
+      // The toast is brief, so poll for it rather than sample once.
+      const seen = []
+      for (let i = 0; i < 15; i++) {
+        await page.waitForTimeout(100)
+        seen.push(await page.evaluate(() => document.body.innerText))
+      }
+      return seen.join('\n')
+    }
+    const inOk = /Fade in applied \(6\.00 s/.test(await applyFade('Fade In'))
+    const outOk = /Fade out applied \(6\.00 s/.test(await applyFade('Fade Out'))
+    // Scoped to the panel that holds Apply Fade: the transport has a range input of its own.
+    const panel = page.locator('div:has(> * button:text-is("Fade In"))').filter({ has: page.getByRole('button', { name: 'Apply Fade' }) }).last()
+    const noExtras = (await panel.count()) > 0
+      && (await panel.getByRole('button', { name: 'Crossfade', exact: true }).count()) === 0
+      && (await panel.locator('input[type=range]').count()) === 0
+    const fresh = errors.slice(before)
+    const ok = inOk && outOk && noExtras && fresh.length === 0
+    if (!ok) failures++
+    const why = [
+      inOk ? '' : 'Fade In did not report a 6 s apply; ',
+      outOk ? '' : 'Fade Out did not report a 6 s apply; ',
+      noExtras ? '' : 'the panel still offers a crossfade or a length slider; ',
+    ].join('')
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Fade'.padEnd(16)} ${why}${fresh.join(' | ')}`)
+    await page.keyboard.press('Escape'); await page.waitForTimeout(300)
+  }
+
+  /**
    * A PHONE, held sideways, driven by touch. The desktop pass above never
    * touches the screen, and every touch path in the editor is wiring a unit
    * test cannot see: pointer capture on the waveform, the long-press timer,
