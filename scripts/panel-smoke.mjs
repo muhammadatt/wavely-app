@@ -453,6 +453,46 @@ try {
   }
 
   /**
+   * Fade (a rail view, so no window opens): a fade out and then a crossfade
+   * applied to the whole file, each reporting itself. The crossfade shortens
+   * the timeline, so this runs after every check that needs the full file.
+   */
+  {
+    const before = errors.length
+    const applyFade = async (type) => {
+      await page.getByText('Select All', { exact: false }).first().click(); await page.waitForTimeout(300)
+      await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
+      await page.keyboard.type('Fade'); await page.waitForTimeout(450)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(800)
+      await page.getByRole('button', { name: type, exact: true }).click()
+      await page.getByRole('button', { name: 'Apply Fade' }).click()
+      // The toast is brief, so poll for it rather than sample once.
+      const seen = []
+      for (let i = 0; i < 15; i++) {
+        await page.waitForTimeout(100)
+        seen.push(await page.evaluate(() => document.body.innerText))
+      }
+      return seen.join('\n')
+    }
+    const outOk = /Fade out applied/.test(await applyFade('Fade Out'))
+    const crossOk = /Crossfade applied/.test(await applyFade('Crossfade'))
+    // The 6 s probe, crossfaded end to end at 1 s, is the 1 s join alone —
+    // Select All reads the timeline (the header's Length is the source file).
+    await page.getByText('Select All', { exact: false }).first().click(); await page.waitForTimeout(300)
+    const shortened = /DURATION\s+1\.00s/.test(await page.evaluate(() => document.body.innerText))
+    const fresh = errors.slice(before)
+    const ok = outOk && crossOk && shortened && fresh.length === 0
+    if (!ok) failures++
+    const why = [
+      outOk ? '' : 'Fade Out did not report an apply; ',
+      crossOk ? '' : 'Crossfade did not report an apply; ',
+      shortened ? '' : 'Crossfade did not shorten the file to its 1 s join; ',
+    ].join('')
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Fade'.padEnd(16)} ${why}${fresh.join(' | ')}`)
+    await page.keyboard.press('Escape'); await page.waitForTimeout(300)
+  }
+
+  /**
    * A PHONE, held sideways, driven by touch. The desktop pass above never
    * touches the screen, and every touch path in the editor is wiring a unit
    * test cannot see: pointer capture on the waveform, the long-press timer,

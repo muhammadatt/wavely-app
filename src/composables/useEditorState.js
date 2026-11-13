@@ -628,8 +628,10 @@ export function useEditorState() {
    * Swap a processed buffer into [start, end]. `label` names the effect for the
    * undo toast, in the same reading form pushUndo documents; `docId` defaults to the active document, and is only ever passed
    * explicitly by the preset job, which can land after a tab switch.
+   * `duration` (default: the region's length) is how long the new buffer plays
+   * — shorter for an edit that shortens the timeline, such as a crossfade.
    */
-  function replaceRegion(start, end, newBuffer, label = '', docId = appState.activeDocumentId) {
+  function replaceRegion(start, end, newBuffer, label = '', docId = appState.activeDocumentId, duration = end - start) {
     const doc = getDocument(docId)
     if (!doc) return null
     // Undo must land on the document being modified, which is not necessarily
@@ -644,7 +646,7 @@ export function useEditorState() {
 
     const bufferId = uuidv4()
     addBuffer(bufferId, newBuffer, doc.id)
-    doc.segments = replaceRegionWithBuffer(doc.segments, start, end, newBuffer, bufferId)
+    doc.segments = replaceRegionWithBuffer(doc.segments, start, end, newBuffer, bufferId, duration)
     return bufferId
   }
 
