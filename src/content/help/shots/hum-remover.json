@@ -1,0 +1,49 @@
+{
+  "panel": {
+    "src": "/help/shots/hum-remover/panel.jpg",
+    "w": 700,
+    "h": 582
+  },
+  "controls": {
+    "in-meter": {
+      "src": "/help/shots/hum-remover/in-meter.png",
+      "w": 82,
+      "h": 317
+    },
+    "mains": {
+      "src": "/help/shots/hum-remover/mains.png",
+      "w": 131,
+      "h": 57
+    },
+    "analyse": {
+      "src": "/help/shots/hum-remover/analyse.png",
+      "w": 96,
+      "h": 48
+    },
+    "harmonics": {
+      "src": "/help/shots/hum-remover/harmonics.png",
+      "w": 496,
+      "h": 97
+    },
+    "status": {
+      "src": "/help/shots/hum-remover/status.png",
+      "w": 496,
+      "h": 27
+    },
+    "out-meter": {
+      "src": "/help/shots/hum-remover/out-meter.png",
+      "w": 82,
+      "h": 317
+    },
+    "width": {
+      "src": "/help/shots/hum-remover/width.png",
+      "w": 74,
+      "h": 139
+    },
+    "depth": {
+      "src": "/help/shots/hum-remover/depth.png",
+      "w": 75,
+      "h": 139
+    }
+  }
+}

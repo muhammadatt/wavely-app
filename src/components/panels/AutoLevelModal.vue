@@ -122,7 +122,7 @@ async function applyAndClose() {
     @apply="applyAndClose"
   >
     <!-- Target mode tiles -->
-    <div class="of-tiles" role="radiogroup" aria-label="Level towards">
+    <div class="of-tiles" data-help="target" role="radiogroup" aria-label="Level towards">
       <button
         v-for="(m, i) in MODES" :key="m.value"
         type="button" class="of-tile m-focusable" role="radio"
@@ -145,7 +145,7 @@ async function applyAndClose() {
         </header>
         <div class="of-rule"></div>
         <div class="of-card-body">
-          <div class="of-row" title="How far a phrase may sit from the target before it is touched at all">
+          <div class="of-row" data-help="deadband" title="How far a phrase may sit from the target before it is touched at all">
             <span class="of-setting">DEADBAND</span>
             <ModulaField
               :model-value="params.deadband_db" :min="0" :max="6" :step="0.05"
@@ -154,7 +154,7 @@ async function applyAndClose() {
               @update:model-value="v => syncParam('deadband_db', v)"
             />
           </div>
-          <div class="of-row" title="How gently the correction fades in past the deadband">
+          <div class="of-row" data-help="knee" title="How gently the correction fades in past the deadband">
             <span class="of-setting">KNEE</span>
             <ModulaField
               :model-value="params.knee_db" :min="0.1" :max="6" :step="0.1"
@@ -163,7 +163,7 @@ async function applyAndClose() {
               @update:model-value="v => syncParam('knee_db', v)"
             />
           </div>
-          <div class="of-row" :class="{ 'is-dim': !rolling }" title="How much recent speech the rolling median looks at — Rolling only">
+          <div class="of-row" data-help="window" :class="{ 'is-dim': !rolling }" title="How much recent speech the rolling median looks at — Rolling only">
             <span class="of-setting">WINDOW</span>
             <ModulaField
               :model-value="params.target_window_s" :min="10" :max="120" :step="5"
@@ -181,7 +181,7 @@ async function applyAndClose() {
         </header>
         <div class="of-rule"></div>
         <div class="of-card-body">
-          <div class="of-row" title="The most any phrase is lifted">
+          <div class="of-row" data-help="max-boost" title="The most any phrase is lifted">
             <span class="of-setting">MAX BOOST</span>
             <ModulaField
               :model-value="params.max_up_db" :min="0" :max="18" :step="0.5"
@@ -190,7 +190,7 @@ async function applyAndClose() {
               @update:model-value="v => syncParam('max_up_db', v)"
             />
           </div>
-          <div class="of-row" title="The most any phrase is turned down">
+          <div class="of-row" data-help="max-cut" title="The most any phrase is turned down">
             <span class="of-setting">MAX CUT</span>
             <ModulaField
               :model-value="params.max_down_db" :min="0" :max="18" :step="0.5"
@@ -199,7 +199,7 @@ async function applyAndClose() {
               @update:model-value="v => syncParam('max_down_db', v)"
             />
           </div>
-          <div class="of-row" title="The room-tone level boosts are not allowed to push past">
+          <div class="of-row" data-help="floor" title="The room-tone level boosts are not allowed to push past">
             <span class="of-setting">FLOOR</span>
             <ModulaField
               :model-value="params.noise_floor_target_dbfs" :min="-80" :max="-40" :step="1"
@@ -213,7 +213,7 @@ async function applyAndClose() {
     </div>
 
     <!-- Last run -->
-    <section class="of-card of-wide al-result">
+    <section class="of-card of-wide al-result" data-help="last-run">
       <div class="of-wide-text">
         <span class="of-card-name">Last run</span>
         <span v-if="declined" class="of-about of-warn">{{ declined }}</span>

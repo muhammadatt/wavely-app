@@ -71,7 +71,7 @@ const MODES = [
 const MODE_ABOUT = {
   df3: 'Transparent removal of hiss, fans, air conditioning and more. The right first choice.',
   rnnoise: 'Cleans lip smacks, mic bumps and room noise. Best for audiobooks and narration.',
-  both: `${CLEAN} emoves broadband hiss, then ${DEEP} removes lip smack and room noise.`,
+  both: `${CLEAN} removes broadband hiss, then ${DEEP} removes lip smack and room noise.`,
 }
 
 /** The mastering chain's light / standard / heavy tiers, and uncapped. */
@@ -133,7 +133,7 @@ async function applyAndClose() {
     @apply="applyAndClose"
   >
     <!-- Mode tiles -->
-    <div class="of-tiles" role="radiogroup" aria-label="Noise reduction mode">
+    <div class="of-tiles" data-help="mode" role="radiogroup" aria-label="Noise reduction mode">
       <button
         v-for="(m, i) in MODES" :key="m.value"
         type="button" class="of-tile m-focusable" role="radio"
@@ -158,7 +158,7 @@ async function applyAndClose() {
         </header>
         <div class="of-rule"></div>
         <div class="of-card-body" :class="{ 'is-off': !cleanOn }">
-          <div class="of-row">
+          <div class="of-row" data-help="max-reduction">
             <span class="of-setting">MAX REDUCTION</span>
             <ModulaField
               :model-value="params.df3LimitDb" :min="NR_DF3_LIMIT_MIN_DB" :max="NR_DF3_LIMIT_MAX_DB" :step="1"
@@ -167,7 +167,7 @@ async function applyAndClose() {
               @update:model-value="setDf3Limit"
             />
           </div>
-          <div class="of-tiers" role="radiogroup" aria-label="Max reduction tier">
+          <div class="of-tiers" data-help="tiers" role="radiogroup" aria-label="Max reduction tier">
             <button
               v-for="(t, i) in TIERS" :key="t.label"
               type="button" class="of-tier m-focusable" role="radio"
@@ -188,7 +188,7 @@ async function applyAndClose() {
           <span class="of-card-state" :class="{ 'is-on': deepOn }">{{ deepOn ? 'ACTIVE' : 'OFF' }}</span>
         </header>
         <div class="of-rule"></div>
-        <div class="of-card-body" :class="{ 'is-off': !deepOn }">
+        <div class="of-card-body" data-help="voice-guard" :class="{ 'is-off': !deepOn }">
           <div class="of-row">
             <span class="of-setting">VOICE GUARD</span>
             <span class="of-toggle-wrap">
@@ -208,7 +208,7 @@ async function applyAndClose() {
     </div>
 
     <!-- Mix -->
-    <section class="of-card of-wide" :class="{ 'is-off': !anyOn }">
+    <section class="of-card of-wide" data-help="mix" :class="{ 'is-off': !anyOn }">
       <div class="of-wide-text">
         <span class="of-card-name">MIX</span>
         <span class="of-about">Below 100% blends the original back in to mask potential noise reduction artifacts.</span>

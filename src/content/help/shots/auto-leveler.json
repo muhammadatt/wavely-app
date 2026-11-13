@@ -1,0 +1,49 @@
+{
+  "panel": {
+    "src": "/help/shots/auto-leveler/panel.jpg",
+    "w": 560,
+    "h": 506
+  },
+  "controls": {
+    "target": {
+      "src": "/help/shots/auto-leveler/target.png",
+      "w": 544,
+      "h": 82
+    },
+    "deadband": {
+      "src": "/help/shots/auto-leveler/deadband.png",
+      "w": 245,
+      "h": 43
+    },
+    "knee": {
+      "src": "/help/shots/auto-leveler/knee.png",
+      "w": 245,
+      "h": 43
+    },
+    "window": {
+      "src": "/help/shots/auto-leveler/window.png",
+      "w": 245,
+      "h": 43
+    },
+    "max-boost": {
+      "src": "/help/shots/auto-leveler/max-boost.png",
+      "w": 245,
+      "h": 43
+    },
+    "max-cut": {
+      "src": "/help/shots/auto-leveler/max-cut.png",
+      "w": 245,
+      "h": 43
+    },
+    "floor": {
+      "src": "/help/shots/auto-leveler/floor.png",
+      "w": 245,
+      "h": 43
+    },
+    "last-run": {
+      "src": "/help/shots/auto-leveler/last-run.png",
+      "w": 544,
+      "h": 78
+    }
+  }
+}
