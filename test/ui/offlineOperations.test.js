@@ -1,6 +1,6 @@
 /**
  * Offline processes are marked as such everywhere they appear (registry
- * `offline` → the RENDER tag in lists and the palette, FloatingWindow's
+ * `offline` → the RENDER tag in the palette, FloatingWindow's
  * `offline` mode), and the registry and the plan table agree on which they are.
  */
 import { test } from 'node:test'
@@ -38,10 +38,9 @@ test('the registry and the plan table agree on which operations are offline', ()
   }
 })
 
-test('every operation list shows the offline badge', () => {
-  for (const p of ['src/components/ui/OperationList.vue', 'src/components/CommandPalette.vue']) {
-    assert.match(read(p), /<OfflineBadge :show="!!op\.offline" \/>/, p)
-  }
+test('the command palette shows the offline badge; the rail does not (it took room from the description)', () => {
+  assert.match(read('src/components/CommandPalette.vue'), /<OfflineBadge :show="!!op\.offline" \/>/)
+  assert.doesNotMatch(read('src/components/ui/OperationList.vue'), /OfflineBadge/)
 })
 
 test('offline windows use the offline chrome and no real-time controls', () => {

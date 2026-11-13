@@ -5,7 +5,6 @@ import { useWindows, CHAIN_WINDOW_ID } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Icon from './Icon.vue'
 import PlanBadge from './PlanBadge.vue'
-import OfflineBadge from './OfflineBadge.vue'
 
 /**
  * The searchable, grouped list of operations in a category.
@@ -91,13 +90,9 @@ function select(op) {
         </div>
         <div class="flex-1 min-w-0">
           <div class="text-[13px] font-bold text-text truncate">{{ op.label }}</div>
-          <!-- The RENDER tag leads the description rather than sitting beside
-               the PRO tag: in a 300 px rail, two tags there cut the name to
-               "Noise Re…". -->
-          <div class="flex items-center gap-[6px] mt-[2px] min-w-0">
-            <OfflineBadge :show="!!op.offline" />
-            <div class="text-[11px] font-medium text-text-muted truncate">{{ op.desc }}</div>
-          </div>
+          <!-- No RENDER tag here (owner, November 2026): in a 300 px rail it
+               took the description's room. The window still carries it. -->
+          <div class="text-[11px] font-medium text-text-muted truncate mt-[2px]">{{ op.desc }}</div>
         </div>
         <PlanBadge :feature="op.feature" />
         <!-- A chevron promises "this opens something", so the verbs that just
