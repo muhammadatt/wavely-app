@@ -237,6 +237,7 @@ async function applyAndClose() {
         <div class="hl-left">
           <span class="hl-cap">Threshold</span>
           <ModulaKnob
+            data-help="threshold"
             variant="ticks" :size="104"
             :model-value="hflParams.threshold" :min="THRESHOLD_MIN_DB" :max="THRESHOLD_MAX_DB" :step="0.5"
             :default-value="D.threshold" aria-label="Threshold" :color="ACCENT" :format-value="fmtDb" :disabled="!hflPreview"
@@ -247,7 +248,7 @@ async function applyAndClose() {
             :text="fmtDb(hflParams.threshold)" aria-label="Threshold" :disabled="!hflPreview"
             @commit="typed('threshold', THRESHOLD_MIN_DB, THRESHOLD_MAX_DB, 0.5)($event)"
           />
-          <div class="hl-shape">
+          <div class="hl-shape" data-help="shape">
             <span class="hl-cap">Shape</span>
             <ModulaSegmented
               :model-value="hflParams.shape" :options="SHAPE_OPTIONS"
@@ -261,10 +262,11 @@ async function applyAndClose() {
              deepest cut RANGE allows ghosted behind it and FREQ dashed. -->
         <div class="hl-display">
           <GainReductionBar
+            data-help="meter"
             :reduction-db="-hflReduction" :accent="ACCENT"
             :full-scale-db="RANGE_MAX_DB" ballistics="none" title="HF REDUCTION"
           />
-          <div>
+          <div data-help="curve">
             <div
               class="hl-curve" :class="{ 'is-disabled': !hflPreview }"
               title="Drag: left / right moves Freq, up / down moves Range"
@@ -304,7 +306,7 @@ async function applyAndClose() {
 
         <!-- FREQ and RANGE: the band, in a column beside the curve they change. -->
         <div class="hl-right">
-          <div class="hl-ctl">
+          <div class="hl-ctl" data-help="freq">
             <ModulaKnob
               variant="halo" :size="72"
               :model-value="hflParams.freq" :min="FREQ_MIN_HZ" :max="FREQ_MAX_HZ" :step="10" scale="log"
@@ -318,7 +320,7 @@ async function applyAndClose() {
               @commit="typed('freq', FREQ_MIN_HZ, FREQ_MAX_HZ, 10)($event)"
             />
           </div>
-          <div class="hl-ctl">
+          <div class="hl-ctl" data-help="range">
             <ModulaKnob
               variant="halo" :size="72"
               :model-value="hflParams.range" :min="0" :max="RANGE_MAX_DB" :step="0.5"
@@ -339,7 +341,7 @@ async function applyAndClose() {
 
       <!-- The quieter strip: TRANSIENT, RELEASE, OUTPUT, then IN / OUT. -->
       <div class="hl-bottom">
-        <div class="hl-item">
+        <div class="hl-item" data-help="transient">
           <ModulaKnob
             variant="halo" :size="52"
             :model-value="hflParams.transient" :min="0" :max="TRANSIENT_MAX_DB" :step="0.5"
@@ -363,7 +365,7 @@ async function applyAndClose() {
             />
           </div>
         </div>
-        <div class="hl-item">
+        <div class="hl-item" data-help="release">
           <ModulaKnob
             variant="halo" :size="52"
             :model-value="hflParams.release" :min="RELEASE_MIN_MS" :max="RELEASE_MAX_MS" :step="1" scale="log"
@@ -379,7 +381,7 @@ async function applyAndClose() {
             />
           </div>
         </div>
-        <div class="hl-item">
+        <div class="hl-item" data-help="output">
           <ModulaKnob
             variant="halo" :size="52" bipolar
             :model-value="hflParams.output" :min="HF_LIMITER_OUTPUT_MIN_DB" :max="HF_LIMITER_OUTPUT_MAX_DB" :step="0.1"
@@ -395,7 +397,7 @@ async function applyAndClose() {
             />
           </div>
         </div>
-        <div class="hl-io">
+        <div class="hl-io" data-help="in-out">
           <LevelMeter variant="modula" slim label="IN" label-side="start" orientation="horizontal" :levels="hflInputLevels" :height="IO_METER_LEN" :show-scale="false" />
           <LevelMeter variant="modula" slim label="OUT" label-side="start" orientation="horizontal" :levels="hflOutputLevels" :height="IO_METER_LEN" :show-scale="false" />
         </div>

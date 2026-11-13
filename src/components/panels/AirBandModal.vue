@@ -148,13 +148,13 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="ab-grid">
-      <div class="ab-meter">
+      <div class="ab-meter" data-help="in-meter">
         <LevelMeter variant="modula" scale-side="left" :levels="airBandInputLevels" label="IN" :height="METER_H" />
       </div>
 
       <div class="ab-panel">
         <!-- Response curve, from the same coefficient builders the kernel runs. -->
-        <div>
+        <div data-help="curve">
           <svg
             :viewBox="`0 0 ${CURVE_W} ${CURVE_H}`"
             class="ab-well"
@@ -179,6 +179,7 @@ async function applyAndClose() {
         </div>
 
         <ModulaKnob
+          data-help="air"
           variant="led" :size="146" show-value editable
           :model-value="airBandAir" :min="0" :max="AIR_MAX_DB" :step="0.1"
           :default-value="AIR_BAND_DEFAULTS.air"
@@ -188,10 +189,11 @@ async function applyAndClose() {
         />
       </div>
 
-      <div class="ab-meter">
+      <div class="ab-meter" data-help="out-meter">
         <LevelMeter variant="modula" scale-side="right" :levels="airBandOutputLevels" label="OUT" :height="METER_H">
           <template #below>
             <ModulaKnob
+              data-help="output"
               variant="trim" :model-value="airBandOutput" show-value
               :min="AIR_OUTPUT_MIN_DB" :max="AIR_OUTPUT_MAX_DB" :step="0.1"
               :default-value="AIR_BAND_DEFAULTS.output" :format-value="formatOutput"
