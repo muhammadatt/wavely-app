@@ -52,9 +52,7 @@
  *                       "Quick Start" (Waves' CLA-2A and Parallel Particles
  *                       guides are the model). Name the controls as printed
  *
- *   notes     string[]  Optional. What is easy to get wrong, and anything the
- *                       panel implies but does not say — a latency cost, a
- *                       control that only applies in one mode, a limit
+ *   notes     string[]  Optional. The "Worth knowing" tips (see VOICE below)
  *
  * ── A CONTROL ENTRY ─────────────────────────────────────────────────────────
  *
@@ -75,11 +73,15 @@
  *                       shot as the Interface image
  *
  * ── VOICE ───────────────────────────────────────────────────────────────────
- * The product's rules apply here and are partly enforced by the test: second
- * person, present tense, sentence case, exact numbers with units, and **no
- * terminal punctuation** — every string ends bare, the same as every other
- * string in the app. Write one clause per entry rather than a paragraph; two
- * sentences in one bullet is a sign it should be two bullets. No emoji.
+ * Partly enforced by the test: second person, present tense, sentence case,
+ * exact numbers with units, no emoji. Prose (summary, intro, quick start,
+ * control text and details, notes) ends every sentence with a full stop —
+ * these are pages to read, not UI strings. Labels, groups, ranges and defaults
+ * are names and values copied from the panel and stay bare.
+ *
+ * Notes are TIPS: what to try, what to reach for instead, what order to work
+ * in, what is easy to get wrong. Not how the plugin works inside — no latency
+ * figures, measurement mechanics or history of what moved where.
  */
 
 import airBand from './air-band.js'

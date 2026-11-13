@@ -117,26 +117,27 @@ test('every entry has the required shape', () => {
   }
 })
 
-test('the house voice holds: no terminal punctuation, no emoji', () => {
-  // "No terminal punctuation on UI strings" is a product-wide rule, and help
-  // copy is the place it is easiest to lose — prose invites full stops. The
-  // question mark and the exclamation are caught too; neither belongs here.
+test('the house voice holds: sentences end in a full stop, names do not, no emoji', () => {
+  // Help pages are reading copy, so prose is punctuated like prose (owner,
+  // November 2026). Labels, group names, ranges and defaults are names and
+  // values copied from the panel, which carry no punctuation in the app.
   const EMOJI = /\p{Extended_Pictographic}/u
   for (const [id, entry] of Object.entries(HELP)) {
-    const strings = [
+    const prose = [
       entry.summary,
       ...entry.intro,
       ...entry.quickStart,
       ...(entry.notes ?? []),
-      ...entry.controls.flatMap(c => [c.label, c.text, c.group, c.range, c.default, ...(c.details ?? [])]),
+      ...entry.controls.flatMap(c => [c.text, ...(c.details ?? [])]),
     ]
-    for (const s of strings.filter(x => x !== undefined)) {
-      assert.ok(
-        !/[.!?]$/.test(s.trim()),
-        `${id}: string ends with terminal punctuation — "${s}"`,
-      )
-      assert.ok(!EMOJI.test(s), `${id}: string carries an emoji — "${s}"`)
+    const names = entry.controls.flatMap(c => [c.label, c.group, c.range, c.default]).filter(x => x !== undefined)
+    for (const s of prose) {
+      assert.ok(/[.!?:]$/.test(s.trim()), `${id}: sentence has no terminal punctuation — "${s}"`)
     }
+    for (const s of names) {
+      assert.ok(!/[.!?]$/.test(s.trim()), `${id}: a name or value ends with punctuation — "${s}"`)
+    }
+    for (const s of [...prose, ...names]) assert.ok(!EMOJI.test(s), `${id}: string carries an emoji — "${s}"`)
   }
 })
 
