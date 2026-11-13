@@ -2,7 +2,7 @@
  * Audio Processing Web Worker
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
- * Supports: normalize, loudnessNormalize, adjustVolume, la2aAutoMakeup,
+ * Supports: normalize, loudnessNormalize, adjustVolume, fade, la2aAutoMakeup,
  * fet1176AutoMakeup, softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling,
  * voiceProfile, measureLoudness, deEsserAutoAir, phatassWarmthReadout, phatassTapeMakeup,
  * phatassOutputMakeup, renderChunk
@@ -21,6 +21,7 @@ import { measureWarmthReadout, measureWarmthBandsSampled } from '../audio/phatas
 import { renderChunk } from '../audio/chunkRender.js'
 import { measureTapeMakeup } from '../audio/phatassTapeMakeup.js'
 import { measureOutputMakeup } from '../audio/phatassOutputMakeup.js'
+import { fadeRegionChannels } from '../audio/dsp/fade.js'
 
 /**
  * ⚠ EVERY REPLY MUST CARRY `__id` BACK. The worker is shared and long-lived
@@ -77,6 +78,14 @@ self.onmessage = function (e) {
       break
     case 'adjustVolume':
       adjustVolume(channelData, params)
+      break
+    case 'fade':
+      try {
+        fadeRegionChannels(channelData, params.type, params.curve, params.played)
+        postDoneTransfer({ channelData }, channelData.map(c => c.buffer))
+      } catch (err) {
+        postReply({ type: 'error', message: err.message })
+      }
       break
     case 'la2aAutoMakeup':
       la2aAutoMakeup(channelData, sampleRate, params)

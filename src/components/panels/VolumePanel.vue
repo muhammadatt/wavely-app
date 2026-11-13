@@ -18,7 +18,7 @@ function onGainInput() {
 }
 
 async function applyVolume() {
-  if (!hasSelection.value) return
+  if (!hasSelection.value || state.isProcessing) return
   const { start, end } = state.selection
 
   // Pinned to this document: the render below reads it before its first
@@ -105,7 +105,7 @@ async function applyVolume() {
         :met="hasSelection"
         message="Make a selection to apply"
         label="Apply Volume Change"
-        :disabled="gainDb === 0"
+        :disabled="gainDb === 0 || !!state.isProcessing"
         @apply="applyVolume"
       />
 

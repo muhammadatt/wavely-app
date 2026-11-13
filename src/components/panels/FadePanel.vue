@@ -4,6 +4,7 @@ import { useEditorState, DocumentSwitchedError } from "../../composables/useEdit
 import ApplyAction from '../ui/ApplyAction.vue'
 import { renderFadeRegion, computePeakCache } from '../../audio/processing.js'
 import { fadeCurvePath } from '../../audio/dsp/fade.js'
+import { getTimelineDuration } from '../../audio/operations.js'
 
 const {
   state, hasSelection, getAudioContext, replaceRegion, setPeakCache,
@@ -13,10 +14,11 @@ const {
 const fadeType = ref("in")
 const curveType = ref("linear")
 
-const fadeTypes = [
-  { id: "in", label: "Fade In", path: "M2 22 Q24 22 46 2" },
-  { id: "out", label: "Fade Out", path: "M2 2 Q24 22 46 22" },
-]
+// The type icons draw the selected curve too, so both rows show the real fade.
+const fadeTypes = computed(() => [
+  { id: "in", label: "Fade In" },
+  { id: "out", label: "Fade Out" },
+].map((t) => ({ ...t, path: fadeCurvePath(curveType.value, t.id) })))
 
 // Each curve icon is the real gain curve, drawn in the chosen direction.
 const curveTypes = computed(() => [
@@ -36,10 +38,27 @@ const hint = computed(() => (fadeType.value === "in"
   ? "Fades up from silence across the selection."
   : "Fades down to silence across the selection."))
 
+// A fade in that starts mid-file (or a fade out that ends mid-file) meets audio
+// at full level: the step from full level to silence there is audible.
+const edgeWarning = computed(() => {
+  const sel = state.selection
+  if (!sel) return ""
+  const EPS = 1e-6
+  if (fadeType.value === "in" && sel.start > EPS) {
+    return "The audio before the selection stays at full level, so it will jump to silence where the fade starts."
+  }
+  if (fadeType.value === "out" && sel.end < getTimelineDuration(state.segments) - EPS) {
+    return "The audio after the selection stays at full level, so it will jump back up where the fade ends."
+  }
+  return ""
+})
+
 const LABELS = { in: "fade in", out: "fade out" }
 
 async function apply() {
-  if (!hasSelection.value) return
+  // One fade at a time: a second click while this one renders would render
+  // from the uncommitted timeline and commit a second undo step.
+  if (!hasSelection.value || state.isProcessing) return
   const { start, end } = state.selection
   const type = fadeType.value
   const curve = curveType.value
@@ -47,7 +66,7 @@ async function apply() {
   const pin = pinActiveDocument(`The ${label}`)
   startProcessing(`Applying ${label}...`, pin.docId)
   try {
-    const buffer = renderFadeRegion(
+    const buffer = await renderFadeRegion(
       state.segments, start, end, { type, curve },
       getAudioContext(), state.currentFile.sampleRate, state.currentFile.channels,
     )
@@ -129,12 +148,16 @@ async function apply() {
       </div>
 
       <div class="text-[11px] leading-[1.45] text-[rgba(255,255,255,.45)]">{{ hint }}</div>
+      <div
+        v-if="edgeWarning"
+        class="text-[11px] leading-[1.45] font-semibold text-[#f5c26b]">{{ edgeWarning }}</div>
 
       <ApplyAction
         class="mt-1"
         :met="hasSelection"
         message="Make a selection to apply fade"
         label="Apply Fade"
+        :disabled="!!state.isProcessing"
         @apply="apply"
       />
 

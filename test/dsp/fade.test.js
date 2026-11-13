@@ -5,7 +5,9 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { FADE_CURVES, fadeGain, applyFade, fadeCurvePath } from '../../src/audio/dsp/fade.js'
+import {
+  FADE_CURVES, fadeGain, applyFade, fadeCurvePath, fadeRegionChannels, playedSampleCount,
+} from '../../src/audio/dsp/fade.js'
 
 const ones = (n) => new Float32Array(n).fill(1)
 
@@ -68,5 +70,35 @@ test('the panel icons draw the real curve, mirrored for a fade out', () => {
   // Expo rises late: at the midpoint it is still near silence.
   const mid = pts(fadeCurvePath('expo', 'in'))[16]
   assert.ok(mid[1] > 21, `expo midpoint y ${mid[1]}`)
+})
+
+test('a region fade lands on the samples that play back', () => {
+  // renderRegionToBuffer sizes a region at ceil(s · rate); a timeline render
+  // plays floor(s · rate) of it. 0.01003 s at 44.1 kHz is 442.3 samples.
+  const rate = 44100
+  const seconds = 0.01003
+  const rendered = Math.ceil(seconds * rate)
+  const played = playedSampleCount(seconds, rate)
+  assert.equal(rendered, 443)
+  assert.equal(played, 442)
+  // A whole number of samples is not shaved by float error.
+  assert.equal(playedSampleCount(441 / rate, rate), 441)
+
+  const [down] = fadeRegionChannels([ones(rendered)], 'out', 'linear', played)
+  assert.equal(down[played - 1], 0, 'the last PLAYED sample is silent')
+  assert.equal(down[rendered - 1], 0, 'nothing past it is left at level')
+  assert.ok(down[0] > 0.99)
+
+  const [up] = fadeRegionChannels([ones(rendered)], 'in', 'linear', played)
+  assert.equal(up[0], 0)
+  assert.ok(up[played - 1] > 0.99 && up[played - 1] < 1)
+  assert.equal(up[rendered - 1], 1, 'past the fade in the audio is untouched')
+})
+
+test('a region fade treats every channel alike and refuses an empty region', () => {
+  const [l, r] = fadeRegionChannels([ones(100), ones(100)], 'out', 's-curve', 100)
+  assert.deepEqual(Array.from(l), Array.from(r))
+  assert.throws(() => fadeRegionChannels([ones(0)], 'in', 'linear', 0), /too short/)
+  assert.throws(() => fadeRegionChannels([ones(5)], 'in', 'linear', 0), /too short/)
 })
 
