@@ -1,42 +1,42 @@
 {
   "panel": {
-    "src": "/help/shots/inflator/panel.jpg",
+    "src": "/help/shots/cambridge-inflator/panel.jpg",
     "w": 660,
     "h": 525
   },
   "controls": {
     "in": {
-      "src": "/help/shots/inflator/in.png",
+      "src": "/help/shots/cambridge-inflator/in.png",
       "w": 83,
       "h": 367
     },
     "effect": {
-      "src": "/help/shots/inflator/effect.png",
+      "src": "/help/shots/cambridge-inflator/effect.png",
       "w": 76,
       "h": 310
     },
     "lift": {
-      "src": "/help/shots/inflator/lift.png",
+      "src": "/help/shots/cambridge-inflator/lift.png",
       "w": 58,
       "h": 183
     },
     "band-split": {
-      "src": "/help/shots/inflator/band-split.png",
+      "src": "/help/shots/cambridge-inflator/band-split.png",
       "w": 153,
       "h": 57
     },
     "clip": {
-      "src": "/help/shots/inflator/clip.png",
+      "src": "/help/shots/cambridge-inflator/clip.png",
       "w": 152,
       "h": 57
     },
     "curve": {
-      "src": "/help/shots/inflator/curve.png",
+      "src": "/help/shots/cambridge-inflator/curve.png",
       "w": 76,
       "h": 310
     },
     "out": {
-      "src": "/help/shots/inflator/out.png",
+      "src": "/help/shots/cambridge-inflator/out.png",
       "w": 83,
       "h": 367
     }

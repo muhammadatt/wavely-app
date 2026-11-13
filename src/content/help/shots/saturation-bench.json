@@ -1,82 +1,82 @@
 {
   "panel": {
-    "src": "/help/shots/saturation-bench/panel.jpg",
+    "src": "/help/shots/saturation-workbench/panel.jpg",
     "w": 760,
     "h": 763
   },
   "controls": {
     "input": {
-      "src": "/help/shots/saturation-bench/input.png",
+      "src": "/help/shots/saturation-workbench/input.png",
       "w": 87,
       "h": 629
     },
     "layers": {
-      "src": "/help/shots/saturation-bench/layers.png",
+      "src": "/help/shots/saturation-workbench/layers.png",
       "w": 584,
       "h": 54
     },
     "layer-on": {
-      "src": "/help/shots/saturation-bench/layer-on.png",
+      "src": "/help/shots/saturation-workbench/layer-on.png",
       "w": 53,
       "h": 34
     },
     "solo": {
-      "src": "/help/shots/saturation-bench/solo.png",
+      "src": "/help/shots/saturation-workbench/solo.png",
       "w": 65,
       "h": 34
     },
     "curve": {
-      "src": "/help/shots/saturation-bench/curve.png",
+      "src": "/help/shots/saturation-workbench/curve.png",
       "w": 86,
       "h": 121
     },
     "drive": {
-      "src": "/help/shots/saturation-bench/drive.png",
+      "src": "/help/shots/saturation-workbench/drive.png",
       "w": 124,
       "h": 192
     },
     "amount": {
-      "src": "/help/shots/saturation-bench/amount.png",
+      "src": "/help/shots/saturation-workbench/amount.png",
       "w": 82,
       "h": 131
     },
     "low": {
-      "src": "/help/shots/saturation-bench/low.png",
+      "src": "/help/shots/saturation-workbench/low.png",
       "w": 88,
       "h": 109
     },
     "high": {
-      "src": "/help/shots/saturation-bench/high.png",
+      "src": "/help/shots/saturation-workbench/high.png",
       "w": 88,
       "h": 109
     },
     "band-range": {
-      "src": "/help/shots/saturation-bench/band-range.png",
+      "src": "/help/shots/saturation-workbench/band-range.png",
       "w": 108,
       "h": 31
     },
     "emph-on": {
-      "src": "/help/shots/saturation-bench/emph-on.png",
+      "src": "/help/shots/saturation-workbench/emph-on.png",
       "w": 53,
       "h": 34
     },
     "emph-shape": {
-      "src": "/help/shots/saturation-bench/emph-shape.png",
+      "src": "/help/shots/saturation-workbench/emph-shape.png",
       "w": 135,
       "h": 39
     },
     "emph-plot": {
-      "src": "/help/shots/saturation-bench/emph-plot.png",
+      "src": "/help/shots/saturation-workbench/emph-plot.png",
       "w": 528,
       "h": 163
     },
     "reset-layers": {
-      "src": "/help/shots/saturation-bench/reset-layers.png",
+      "src": "/help/shots/saturation-workbench/reset-layers.png",
       "w": 114,
       "h": 38
     },
     "output": {
-      "src": "/help/shots/saturation-bench/output.png",
+      "src": "/help/shots/saturation-workbench/output.png",
       "w": 87,
       "h": 629
     }

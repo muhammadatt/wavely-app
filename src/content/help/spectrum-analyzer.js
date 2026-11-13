@@ -1,10 +1,9 @@
 export default {
   summary: 'Shows what is in the audio, frequency by frequency, as it plays',
 
-  whenToUse: [
-    'You can hear something wrong and want to find where it sits',
-    'You are looking for a whistle, a ring or a mains hum',
-    'You want to see whether a change did what you expected',
+  intro: [
+    'The Spectrum Analyzer shows what is in the audio, frequency by frequency, as it plays. It reads the output of the effect chain, so it shows the sound you are hearing, processing included',
+    'Use it to find where a problem you can hear actually sits, such as a whistle, a ring or mains hum, or to see whether a change did what you expected',
   ],
 
   quickStart: [

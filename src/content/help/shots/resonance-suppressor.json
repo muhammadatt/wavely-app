@@ -1,52 +1,52 @@
 {
   "panel": {
-    "src": "/help/shots/resonance-suppressor/panel.jpg",
+    "src": "/help/shots/reso-soothe/panel.jpg",
     "w": 800,
     "h": 581
   },
   "controls": {
     "overlays": {
-      "src": "/help/shots/resonance-suppressor/overlays.png",
+      "src": "/help/shots/reso-soothe/overlays.png",
       "w": 384,
       "h": 32
     },
     "display": {
-      "src": "/help/shots/resonance-suppressor/display.png",
+      "src": "/help/shots/reso-soothe/display.png",
       "w": 784,
       "h": 298
     },
     "attack": {
-      "src": "/help/shots/resonance-suppressor/attack.png",
+      "src": "/help/shots/reso-soothe/attack.png",
       "w": 68,
       "h": 131
     },
     "release": {
-      "src": "/help/shots/resonance-suppressor/release.png",
+      "src": "/help/shots/reso-soothe/release.png",
       "w": 71,
       "h": 131
     },
     "threshold": {
-      "src": "/help/shots/resonance-suppressor/threshold.png",
+      "src": "/help/shots/reso-soothe/threshold.png",
       "w": 86,
       "h": 131
     },
     "sharp": {
-      "src": "/help/shots/resonance-suppressor/sharp.png",
+      "src": "/help/shots/reso-soothe/sharp.png",
       "w": 62,
       "h": 131
     },
     "depth": {
-      "src": "/help/shots/resonance-suppressor/depth.png",
+      "src": "/help/shots/reso-soothe/depth.png",
       "w": 74,
       "h": 131
     },
     "mix": {
-      "src": "/help/shots/resonance-suppressor/mix.png",
+      "src": "/help/shots/reso-soothe/mix.png",
       "w": 74,
       "h": 131
     },
     "trim": {
-      "src": "/help/shots/resonance-suppressor/trim.png",
+      "src": "/help/shots/reso-soothe/trim.png",
       "w": 72,
       "h": 131
     }

@@ -1,11 +1,9 @@
 export default {
   summary: 'Adds tape saturation and low-end warmth to the selection, rounding its peaks and top end without raising its peak level',
 
-  whenToUse: [
-    'A voice sounds thin or clinical and you want body without an EQ boost',
-    'You want peaks rounded off the way tape does it, and the level given back as loudness',
-    'You want the gentle, energy-driven top-end sag of tape rather than a fixed high cut',
-    'You want added density that never eats into your headroom',
+  intro: [
+    'PHAT*SS (Psycho Harmonic Analog Tape Saturation Simulator) brings the sound of analog tape to a voice: peaks rounded by the tape itself, the low-end bump of the playback head, the gentle sag of the top end on loud passages, and low-frequency harmonic warmth on top',
+    'Use it when a voice sounds thin or clinical and needs body without an EQ boost, or when you want peaks softened the way tape does it. It is built never to raise the selection\'s peak level, so the density it adds never eats into your headroom',
   ],
 
   quickStart: [

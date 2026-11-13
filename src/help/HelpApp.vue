@@ -16,11 +16,19 @@
  * bookmark or send to someone.
  */
 import { computed, onMounted } from 'vue'
-import { HELP, HELP_META, HELP_CATEGORIES, publishedHelpIds, helpUrl } from '../content/help/index.js'
+import {
+  HELP, HELP_META, HELP_CATEGORIES, publishedHelpIds, listedHelpIds, helpUrl, helpIdForSlug,
+} from '../content/help/index.js'
 import { DEV_TUNING_PANELS } from '../devFlags.js'
-import { helpIdFromPath } from './route.js'
+import { helpSlugFromPath } from './route.js'
 
+/**
+ * Which pages this build serves (dev-only effects only in a dev build, so their
+ * `?` works there) and which the index and sidebar LIST — shipping effects
+ * only, in every build: a help list is not where unreleased work shows up.
+ */
 const published = new Set(publishedHelpIds(DEV_TUNING_PANELS))
+const listed = new Set(listedHelpIds())
 
 /**
  * Screenshots, from `npm run help:shots`: `src/content/help/shots/<id>.json`
@@ -32,10 +40,11 @@ const SHOTS = Object.fromEntries(
     .map(([path, m]) => [path.replace(/^.*\/(.+)\.json$/, '$1'), m]),
 )
 
-const id = helpIdFromPath(window.location.pathname)
+const slug = helpSlugFromPath(window.location.pathname)
+const id = slug ? helpIdForSlug(slug) : null
 const entry = id && published.has(id) ? HELP[id] : null
 const meta = entry ? HELP_META[id] : null
-const notFound = !!id && !entry
+const notFound = !!slug && !entry
 const shots = entry ? SHOTS[id] ?? null : null
 
 /**
@@ -57,12 +66,12 @@ function crop(c) {
   const scale = Math.min(1, 240 / m.w, 200 / m.h)
   return { src: m.src, w: Math.round(m.w * scale), h: Math.round(m.h * scale) }
 }
-/** The sidebar and the index: published pages bucketed by category, in order. */
+/** The sidebar and the index: listed pages bucketed by category, in order. */
 const groups = HELP_CATEGORIES
   .map(c => ({
     ...c,
     pages: Object.keys(HELP_META)
-      .filter(k => published.has(k) && HELP_META[k].category === c.id)
+      .filter(k => listed.has(k) && HELP_META[k].category === c.id)
       .map(k => ({ id: k, title: HELP_META[k].title, summary: HELP[k].summary, href: helpUrl(k) })),
   }))
   .filter(g => g.pages.length)
@@ -72,7 +81,7 @@ const categoryLabel = computed(() =>
 )
 
 /**
- * Order: what it is, when to reach for it, the quick start, the interface and
+ * Order: the intro (what it is and what it is for), the quick start, the interface and
  * each control (the manuals' layout — Waves' CLA-2A guide is the model), then
  * the caveats.
  */
@@ -125,10 +134,8 @@ onMounted(() => {
           <p class="hp-summary">{{ entry.summary }}</p>
 
           <section class="hp-section">
-            <h2 class="hp-heading">When to use it</h2>
-            <ul class="hp-list">
-              <li v-for="(item, i) in entry.whenToUse" :key="i">{{ item }}</li>
-            </ul>
+            <h2 class="hp-heading">Intro</h2>
+            <p v-for="(para, i) in entry.intro" :key="i" class="hp-intro-text">{{ para }}</p>
           </section>
 
           <section class="hp-section">
@@ -199,7 +206,7 @@ onMounted(() => {
         <!-- ── Not found ──────────────────────────────────────────────── -->
         <div v-else-if="notFound" class="hp-article">
           <h1 class="hp-title">No help page here</h1>
-          <p class="hp-summary">There is no effect called “{{ id }}”. Pick one from the list below</p>
+          <p class="hp-summary">There is no effect called “{{ slug }}”. Pick one from the list below</p>
         </div>
 
         <!-- ── The index ──────────────────────────────────────────────── -->
@@ -430,6 +437,16 @@ a:focus-visible {
 .hp-list--ordered {
   list-style: decimal outside;
   font-variant-numeric: tabular-nums;
+}
+
+/* The intro: prose, at full reading colour. */
+.hp-intro-text {
+  margin: 0;
+  color: var(--hp-soft);
+  text-wrap: pretty;
+}
+.hp-intro-text + .hp-intro-text {
+  margin-top: 12px;
 }
 
 /* The interface image: the whole window, at most its own 1x width. */

@@ -1,12 +1,12 @@
 {
   "panel": {
-    "src": "/help/shots/normalize/panel.jpg",
+    "src": "/help/shots/peak-normalize/panel.jpg",
     "w": 380,
     "h": 426
   },
   "controls": {
     "target-peak": {
-      "src": "/help/shots/normalize/target-peak.png",
+      "src": "/help/shots/peak-normalize/target-peak.png",
       "w": 168,
       "h": 236
     }

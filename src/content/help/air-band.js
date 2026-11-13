@@ -1,10 +1,9 @@
 export default {
   summary: 'Lifts the top end with a wide, gentle shelf shaped from five overlapping bells',
 
-  whenToUse: [
-    'A voice sounds dull or closed-in after noise reduction',
-    'You want presence and air without the hardness a narrow high boost gives',
-    'The recording is fine but sits behind the listener rather than in front of them',
+  intro: [
+    'Air Boost lifts the very top of the voice with a wide, gentle shelf built from five overlapping bells, adding openness and presence without the hardness a narrow high boost brings',
+    'It is the fix for a voice that sounds dull or closed-in, especially after noise reduction, or for a recording that sits behind the listener rather than in front of them',
   ],
 
   quickStart: [

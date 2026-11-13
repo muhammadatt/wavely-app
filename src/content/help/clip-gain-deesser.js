@@ -1,10 +1,9 @@
 export default {
   summary: 'Finds each sibilant in the selection and turns it down on its own, the way an editor would with clip gain',
 
-  whenToUse: [
-    'S and F sounds are harsh or spitty in a few places rather than everywhere',
-    'Sibilance got worse after adding air or compression',
-    'You want the harshness gone without changing the tone of the S itself',
+  intro: [
+    'The Sibilance Editor finds each S and F in the selection and turns it down on its own, the way an editor would with clip gain. Because it changes the level of the whole sibilant rather than filtering it, the tone of the S is left exactly as it was',
+    'Use it when sibilance is harsh in a few places rather than everywhere, or when it got worse after adding air or compression',
   ],
 
   quickStart: [

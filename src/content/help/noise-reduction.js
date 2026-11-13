@@ -1,11 +1,9 @@
 export default {
   summary: 'Removes background noise, hiss and room tone in one or two cleaning passes',
 
-  whenToUse: [
-    'A steady hiss, fan or air conditioner runs under the voice',
-    'The room tone between phrases is too loud for ACX',
-    'Lip smacks, mouth noise or mic bumps remain after a first clean',
-    'A passage was recorded somewhere noisier than the rest',
+  intro: [
+    'Noise Reduction removes steady background noise, hiss and room tone from the selection using neural-network noise removal running on our servers. Clean is the transparent first choice for hiss and fans; Deep Clean takes away more, including lip smacks, clicks and bumps, at some cost to the voice',
+    'Use it on a hiss, fan or air conditioner under the voice, room tone too loud for ACX, or mouth noise left after a first pass. It is an offline process: Process cleans the whole selection, and Undo takes it back',
   ],
 
   quickStart: [

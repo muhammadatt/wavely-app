@@ -1,10 +1,9 @@
 export default {
   summary: 'Holds the loudest peaks down to a ceiling measured from your recording, then hands the room it made back as level',
 
-  whenToUse: [
-    'A few isolated peaks are forcing everything else to sit low',
-    'You want more level before compressing, without the compressor chasing single transients',
-    'A plosive or a mouth click is the loudest thing in an otherwise even take',
+  intro: [
+    'Soft Clipper rounds off the very loudest peaks with a smooth curve instead of a hard limit. The ceiling is measured from your own recording, so it only touches the few peaks that stand far above everything else, and the room it frees is handed back as level',
+    'Use it when a single plosive, click or shout is forcing the rest of a take to sit low, or before a compressor so it is not chasing isolated transients. A LIMIT mode adds a lookahead limiter for the cleanest result on hard peaks',
   ],
 
   quickStart: [

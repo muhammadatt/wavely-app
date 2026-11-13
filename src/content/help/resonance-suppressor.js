@@ -1,10 +1,9 @@
 export default {
   summary: 'Finds frequencies that ring louder than the rest of the voice and holds them down only while they occur',
 
-  whenToUse: [
-    'Certain words or notes jump out harshly while the rest of the take is fine',
-    'A room mode or a boxy resonance rings under the voice',
-    'A fixed EQ cut fixes the problem word and dulls everything else',
+  intro: [
+    'Reso Soothe finds frequencies that ring louder than the rest of the voice, harsh notes, nasal peaks, boxy room modes, and turns each down only while it rings. The display shows every cut, frequency by frequency, as it happens',
+    'Use it when particular words or notes jump out harshly while the rest of the take is fine, or when a fixed EQ cut fixes the problem word but dulls everything else',
   ],
 
   quickStart: [

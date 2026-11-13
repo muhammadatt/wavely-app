@@ -1,11 +1,9 @@
 export default {
   summary: 'Holds the top end at a ceiling, so brightness, harshness and sharp edges never get past it',
 
-  whenToUse: [
-    'A voice or a whole file is too bright or harsh in places, not everywhere',
-    'Sibilance, hiss or clicks spike above an otherwise good top end',
-    'Clicks, lip smacks or hard T, K and P bursts stand out',
-    'You want a brightness ceiling rather than a static high cut that dulls everything',
+  intro: [
+    'The Hi-Freq Limiter puts a ceiling on the top end. Brightness, harshness, sibilance and sharp clicks are held down only at the moments they cross the threshold, while everything below it passes untouched. Its WARM shape follows the character of a well-known analog tape-emulation compressor',
+    'Use it when a voice or a whole file is too bright in places rather than everywhere, or when clicks, lip smacks and hard consonants stand out. It is a ceiling, not a static high cut, so the overall tone stays open',
   ],
 
   quickStart: [

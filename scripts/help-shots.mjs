@@ -9,9 +9,12 @@
  * the registry label) on a generated probe file with everything selected, then
  * writes:
  *
- *   public/help/shots/<id>/panel.jpg        the whole window (the "Interface" image)
- *   public/help/shots/<id>/<shot>.png       one crop per control that names a `shot`
+ *   public/help/shots/<slug>/panel.jpg      the whole window (the "Interface" image)
+ *   public/help/shots/<slug>/<shot>.png     one crop per control that names a `shot`
  *   src/content/help/shots/<id>.json        the manifest the help page reads
+ *
+ * `<slug>` is the page's product-name URL segment (`la-vintage-2a`), so image
+ * URLs never show the old window ids; the manifest stays keyed by window id.
  *
  * A control's `shot` is a `data-help` id: the crop is the element carrying
  * `data-help="<shot>"` inside the window, padded a little. Ids live on the
@@ -29,7 +32,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { HELP, HELP_META } from '../src/content/help/index.js'
+import { HELP, HELP_META, helpSlug } from '../src/content/help/index.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PORT = Number(process.env.HELP_SHOTS_PORT ?? 5198)
@@ -124,14 +127,15 @@ try {
     await page.mouse.move(0, 0)
     await page.waitForTimeout(1500)
 
-    const outDir = join(ROOT, 'public/help/shots', id)
+    const slug = helpSlug(id)
+    const outDir = join(ROOT, 'public/help/shots', slug)
     rmSync(outDir, { recursive: true, force: true })
     mkdirSync(outDir, { recursive: true })
     const manifest = { panel: null, controls: {} }
 
     const box = await frame.boundingBox()
     await page.screenshot({ path: join(outDir, 'panel.jpg'), clip: box, type: 'jpeg', quality: 88 })
-    manifest.panel = { src: `/help/shots/${id}/panel.jpg`, w: Math.round(box.width), h: Math.round(box.height) }
+    manifest.panel = { src: `/help/shots/${slug}/panel.jpg`, w: Math.round(box.width), h: Math.round(box.height) }
 
     const missing = []
     for (const c of entry.controls) {
@@ -156,7 +160,7 @@ try {
         width: b.width + 2 * PAD, height: b.height + 2 * PAD,
       }
       await page.screenshot({ path: join(outDir, `${c.shot}.png`), clip })
-      manifest.controls[c.shot] = { src: `/help/shots/${id}/${c.shot}.png`, w: Math.round(clip.width), h: Math.round(clip.height) }
+      manifest.controls[c.shot] = { src: `/help/shots/${slug}/${c.shot}.png`, w: Math.round(clip.width), h: Math.round(clip.height) }
     }
 
     mkdirSync(join(ROOT, 'src/content/help/shots'), { recursive: true })

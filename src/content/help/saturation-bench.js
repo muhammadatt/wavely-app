@@ -1,10 +1,9 @@
 export default {
   summary: 'Adds harmonic warmth, density or brightness with up to four saturation layers in series, each with its own curve, band and drive',
 
-  whenToUse: [
-    'A voice needs density or warmth without sounding processed',
-    'Vowels sound dull after de-essing and you want harmonic brightness rather than EQ',
-    'You want to audition saturation curves against each other at matched strength',
+  intro: [
+    'Saturation Workbench stacks up to four saturation layers, each with its own curve, frequency band, drive and pre-emphasis, so you can build exactly the harmonic colour you want: warmth in the low mids, sheen on the vowels or grit on the top',
+    'Drive is calibrated to your recording, so the same setting means the same amount of distortion on any curve, band or level, which makes it easy to audition curves against each other fairly',
   ],
 
   quickStart: [

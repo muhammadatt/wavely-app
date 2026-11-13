@@ -1,10 +1,9 @@
 export default {
   summary: 'Blends a squashed, EQ-steered copy of the voice under the original for density without a jump in level',
 
-  whenToUse: [
-    'The take is clean but thin, and you want weight without a level change',
-    'You want density that survives quiet playback',
-    'Compression alone made it steadier but not richer',
+  intro: [
+    'Scheps Parallel recreates a well-known mix engineer\'s parallel vocal chain: a Pultec-style EQ pushes the voice into an LA-2A-style compressor, a second EQ shapes the squashed copy, and that copy is blended under the untouched original',
+    'The result is weight and density without a jump in level, a voice that stays rich even at quiet playback. Use it when a take is clean but thin, or when compression alone made it steadier but not fuller',
   ],
 
   quickStart: [

@@ -1,11 +1,9 @@
 export default {
   summary: 'Moves the selection to a delivery loudness target and holds a peak ceiling while doing it',
 
-  whenToUse: [
-    'You are submitting to a platform with a published spec — ACX, a podcast host, a broadcaster, a streaming service',
-    'A file sounds right but you need the number a submission will be checked against',
-    'Two recordings differ in level and you want both sitting on the same target',
-    'You want to know what a region actually measures before deciding anything',
+  intro: [
+    'Loudness Normalize moves the selection to a delivery loudness target, such as ACX for audiobooks or −16 LUFS for podcasts, while holding a peak ceiling. It measures the way the platform does: K-weighted LUFS for streaming and broadcast, and unweighted RMS for ACX',
+    'Use it before submitting to a platform with a published spec, or to put two recordings on the same target. Every number it shows after Apply is measured on the result, so what you read is what the platform will find',
   ],
 
   quickStart: [

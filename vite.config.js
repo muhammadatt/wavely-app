@@ -70,9 +70,9 @@ function helpPages(devPanels) {
       if (devPanels) return
       const { rm } = await import('node:fs/promises')
       const { join, resolve } = await import('node:path')
-      const { HELP_META } = await import('./src/content/help/index.js')
+      const { HELP_META, helpSlug } = await import('./src/content/help/index.js')
       for (const [id, meta] of Object.entries(HELP_META)) {
-        if (meta.release === 'dev') await rm(join(resolve(outDir), 'help/shots', id), { recursive: true, force: true })
+        if (meta.release === 'dev') await rm(join(resolve(outDir), 'help/shots', helpSlug(id)), { recursive: true, force: true })
       }
     },
     configureServer(server) {
@@ -88,13 +88,13 @@ function helpPages(devPanels) {
     generateBundle: { order: 'post', async handler(_options, bundle) {
       const entry = bundle['help/index.html']
       if (!entry) return
-      const { HELP_META, publishedHelpIds } = await import('./src/content/help/index.js')
+      const { HELP_META, publishedHelpIds, helpSlug } = await import('./src/content/help/index.js')
       const html = String(entry.source)
       for (const id of publishedHelpIds(devPanels)) {
         const title = HELP_META[id].title.replace(/&/g, '&amp;').replace(/</g, '&lt;')
         this.emitFile({
           type: 'asset',
-          fileName: `help/${id}/index.html`,
+          fileName: `help/${helpSlug(id)}/index.html`,
           source: html.replace(/<title>[^<]*<\/title>/, `<title>${title} help — crisp.fm</title>`),
         })
       }

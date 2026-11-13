@@ -1,11 +1,9 @@
 export default {
   summary: 'Runs several effects in series, in an order you set, so you hear them together and apply them all as one edit',
 
-  whenToUse: [
-    'You are building a sound from more than one effect and want to hear them together before committing',
-    'The order matters — compressing before or after an EQ, de-essing before or after saturation',
-    'You want the whole chain written to the selection as one edit, with one undo',
-    'You want to save a chain you like and load it on the next file',
+  intro: [
+    'The Effect Chain runs several effects in series, in an order you choose, so you hear them working together before anything is written. When it sounds right, Apply renders the whole chain onto the selection as a single edit with a single undo',
+    'Use it whenever a sound takes more than one effect, when the order matters, compressing before or after an EQ, de-essing before or after saturation, or to save a chain you like and load it on the next file',
   ],
 
   quickStart: [

@@ -5,9 +5,10 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 import {
-  HELP, HELP_META, HELP_CATEGORIES, helpFor, helpUrl, publishedHelpIds,
+  HELP, HELP_META, HELP_CATEGORIES, helpFor, helpUrl, publishedHelpIds, listedHelpIds,
+  helpSlug, helpIdForSlug,
 } from '../../src/content/help/index.js'
-import { helpIdFromPath } from '../../src/help/route.js'
+import { helpSlugFromPath } from '../../src/help/route.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '../..')
@@ -74,9 +75,8 @@ test('every entry has the required shape', () => {
     assert.equal(typeof entry.summary, 'string', `${id}: summary must be a string`)
     assert.ok(entry.summary.length > 0, `${id}: summary is empty`)
 
-    assert.ok(Array.isArray(entry.whenToUse), `${id}: whenToUse must be an array`)
-    assert.ok(entry.whenToUse.length >= 1, `${id}: whenToUse is empty`)
-    assert.ok(entry.whenToUse.length <= 5, `${id}: whenToUse is a list, not a manual`)
+    assert.ok(Array.isArray(entry.intro), `${id}: intro must be an array of paragraphs`)
+    assert.ok(entry.intro.length >= 1 && entry.intro.length <= 3, `${id}: intro wants 1–3 paragraphs`)
 
     assert.ok(Array.isArray(entry.controls), `${id}: controls must be an array`)
     assert.ok(entry.controls.length >= 1, `${id}: no controls documented`)
@@ -111,7 +111,7 @@ test('every entry has the required shape', () => {
     // Nothing outside the documented shape: an unknown key is either a typo for
     // a real one (and silently renders nothing) or a section the page cannot
     // draw. Both are invisible without this.
-    const allowed = new Set(['summary', 'whenToUse', 'controls', 'quickStart', 'notes'])
+    const allowed = new Set(['summary', 'intro', 'controls', 'quickStart', 'notes'])
     const unknown = Object.keys(entry).filter(k => !allowed.has(k))
     assert.deepEqual(unknown, [], `${id}: unknown key(s) ${unknown.join(', ')}`)
   }
@@ -125,7 +125,7 @@ test('the house voice holds: no terminal punctuation, no emoji', () => {
   for (const [id, entry] of Object.entries(HELP)) {
     const strings = [
       entry.summary,
-      ...entry.whenToUse,
+      ...entry.intro,
       ...entry.quickStart,
       ...(entry.notes ?? []),
       ...entry.controls.flatMap(c => [c.label, c.text, c.group, c.range, c.default, ...(c.details ?? [])]),
@@ -198,13 +198,43 @@ test('dev-only help pages are published only in dev builds', () => {
 
 test('a help URL routes back to its own entry', () => {
   for (const id of Object.keys(HELP)) {
-    assert.equal(helpIdFromPath(helpUrl(id)), id)
-    assert.equal(helpIdFromPath(helpUrl(id).replace(/\/$/, '')), id)
+    assert.equal(helpIdForSlug(helpSlugFromPath(helpUrl(id))), id)
+    assert.equal(helpIdForSlug(helpSlugFromPath(helpUrl(id).replace(/\/$/, ''))), id)
   }
-  assert.equal(helpIdFromPath('/help/'), null)
-  assert.equal(helpIdFromPath('/help'), null)
-  assert.equal(helpIdFromPath('/help/index.html'), 'index.html')
-  assert.equal(helpIdFromPath('/'), null)
+  assert.equal(helpSlugFromPath('/help/'), null)
+  assert.equal(helpSlugFromPath('/help'), null)
+  assert.equal(helpSlugFromPath('/'), null)
+  assert.equal(helpIdForSlug('opto-smooth'), null, 'old window ids are not URLs')
+})
+
+test('page URLs are the product names, unique, and never an old window id', () => {
+  const slugs = Object.keys(HELP_META).map(helpSlug)
+  assert.equal(new Set(slugs).size, slugs.length, 'two pages share a URL')
+  for (const slug of slugs) assert.match(slug, /^[a-z0-9]+(-[a-z0-9]+)*$/)
+  assert.equal(helpUrl('opto-smooth'), '/help/la-vintage-2a/')
+  assert.equal(helpUrl('fet-punch'), '/help/la-classic-76/')
+  assert.equal(helpUrl('phatass'), '/help/phatss/')
+})
+
+test('the index and sidebar list shipping effects only, in every build', () => {
+  const listed = new Set(listedHelpIds())
+  for (const [id, meta] of Object.entries(HELP_META)) {
+    assert.equal(listed.has(id), meta.release !== 'dev', `${id}: wrong listing`)
+  }
+})
+
+test('screenshots live under the page slug', () => {
+  const dir = join(HELP_DIR, 'shots')
+  let files = []
+  try { files = readdirSync(dir).filter(f => f.endsWith('.json')) } catch { return }
+  for (const f of files) {
+    const id = f.replace(/\.json$/, '')
+    const m = JSON.parse(readFileSync(join(dir, f), 'utf8'))
+    const prefix = `/help/shots/${helpSlug(id)}/`
+    for (const img of [m.panel, ...Object.values(m.controls ?? {})].filter(Boolean)) {
+      assert.ok(img.src.startsWith(prefix), `shots/${f}: ${img.src} is not under ${prefix}`)
+    }
+  }
 })
 
 /**

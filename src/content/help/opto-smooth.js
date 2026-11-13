@@ -1,10 +1,9 @@
 export default {
   summary: 'Levels a performance the way an opto compressor does — slowly, across phrases rather than syllables',
 
-  whenToUse: [
-    'A narrator drifts closer to and further from the mic across a take',
-    'You want the quiet passages to sit up without the loud ones jumping',
-    'You want compression that is hard to hear working',
+  intro: [
+    'LA Vintage 2A is modelled on the LA-2A, the tube-driven optical leveling amplifier that has been the default first compressor on vocals for decades. Its optical cell reacts slowly and lets go even more slowly, so it rides the level of whole phrases rather than individual syllables, and it is famously hard to hear working',
+    'Use it when a narrator drifts towards and away from the mic, when quiet passages need to sit up without the loud ones jumping, or whenever you want steadier level that still sounds natural. It measures your recording first, so the same Peak Reduction setting does the same job on a quiet file as on a hot one',
   ],
 
   quickStart: [

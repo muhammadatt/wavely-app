@@ -1,10 +1,9 @@
 export default {
   summary: 'Scales the selection so its loudest peak lands where you set it',
 
-  whenToUse: [
-    'A passage is quieter or louder than the rest of the file and you want it to match',
-    'You want a predictable peak level before compressing or clipping',
-    'A recording is generally quiet and you want more level without changing its dynamics',
+  intro: [
+    'Peak Normalize turns the selection up or down so its single loudest sample lands exactly at the level you set. It is one clean gain change, so the dynamics, tone and balance of the recording are untouched',
+    'Use it to bring a quiet passage up to match the rest, to set a predictable peak level before compressing or clipping, or simply to get more level from a quiet recording without processing it',
   ],
 
   quickStart: [

@@ -1,10 +1,9 @@
 export default {
   summary: 'Finds mains hum and its harmonics in the selection and cuts each one with a narrow notch',
 
-  whenToUse: [
-    'A steady low buzz runs under the whole recording',
-    'Noise reduction thinned the voice and the hum is still there',
-    'You can see a hard line at 50 or 60 Hz, or at 100 or 120 Hz, in the analyzer',
+  intro: [
+    'Hum Remover finds mains hum, the steady buzz at 50 or 60 Hz and its harmonics, in the selection and cuts each one with its own narrow notch, leaving the voice around them alone',
+    'Use it when a low buzz runs under the whole recording, or when noise reduction thinned the voice and the hum is still there',
   ],
 
   quickStart: [

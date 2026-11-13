@@ -1,10 +1,9 @@
 export default {
   summary: 'Measures a voice recording and corrects the tonal problems it finds with a few gentle EQ bands',
 
-  whenToUse: [
-    'A recording sounds wrong and you cannot name which frequency is at fault',
-    'You want a starting point before shaping tone by hand',
-    'You are checking a take for problems before mastering it',
+  intro: [
+    'VoiceRx listens to a voice recording, diagnoses its tonal problems the way an engineer would, rumble, mud, boxiness, nasal ring, harshness, dullness, and corrects each with a gentle EQ band. It needs no reference track: everything is measured from the recording itself',
+    'Use it when something sounds wrong and you cannot name the frequency, as a starting point before shaping tone by hand, or to check a take before mastering. Its corrections can be handed to the EQ as ordinary bands to refine further',
   ],
 
   quickStart: [

@@ -1,57 +1,57 @@
 {
   "panel": {
-    "src": "/help/shots/hf-limiter/panel.jpg",
+    "src": "/help/shots/hi-freq-limiter/panel.jpg",
     "w": 760,
     "h": 524
   },
   "controls": {
     "threshold": {
-      "src": "/help/shots/hf-limiter/threshold.png",
+      "src": "/help/shots/hi-freq-limiter/threshold.png",
       "w": 116,
       "h": 128
     },
     "shape": {
-      "src": "/help/shots/hf-limiter/shape.png",
+      "src": "/help/shots/hi-freq-limiter/shape.png",
       "w": 129,
       "h": 57
     },
     "meter": {
-      "src": "/help/shots/hf-limiter/meter.png",
+      "src": "/help/shots/hi-freq-limiter/meter.png",
       "w": 440,
       "h": 73
     },
     "curve": {
-      "src": "/help/shots/hf-limiter/curve.png",
+      "src": "/help/shots/hi-freq-limiter/curve.png",
       "w": 440,
       "h": 226
     },
     "freq": {
-      "src": "/help/shots/hf-limiter/freq.png",
+      "src": "/help/shots/hi-freq-limiter/freq.png",
       "w": 106,
       "h": 135
     },
     "range": {
-      "src": "/help/shots/hf-limiter/range.png",
+      "src": "/help/shots/hi-freq-limiter/range.png",
       "w": 106,
       "h": 135
     },
     "transient": {
-      "src": "/help/shots/hf-limiter/transient.png",
+      "src": "/help/shots/hi-freq-limiter/transient.png",
       "w": 153,
       "h": 83
     },
     "release": {
-      "src": "/help/shots/hf-limiter/release.png",
+      "src": "/help/shots/hi-freq-limiter/release.png",
       "w": 128,
       "h": 83
     },
     "output": {
-      "src": "/help/shots/hf-limiter/output.png",
+      "src": "/help/shots/hi-freq-limiter/output.png",
       "w": 134,
       "h": 83
     },
     "in-out": {
-      "src": "/help/shots/hf-limiter/in-out.png",
+      "src": "/help/shots/hi-freq-limiter/in-out.png",
       "w": 208,
       "h": 57
     }

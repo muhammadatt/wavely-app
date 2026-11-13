@@ -1,32 +1,32 @@
 {
   "panel": {
-    "src": "/help/shots/loudness/panel.jpg",
+    "src": "/help/shots/loudness-normalize/panel.jpg",
     "w": 560,
     "h": 572
   },
   "controls": {
     "measurement": {
-      "src": "/help/shots/loudness/measurement.png",
+      "src": "/help/shots/loudness-normalize/measurement.png",
       "w": 544,
       "h": 88
     },
     "benchmarks": {
-      "src": "/help/shots/loudness/benchmarks.png",
+      "src": "/help/shots/loudness-normalize/benchmarks.png",
       "w": 544,
       "h": 87
     },
     "target": {
-      "src": "/help/shots/loudness/target.png",
+      "src": "/help/shots/loudness-normalize/target.png",
       "w": 160,
       "h": 241
     },
     "ceiling": {
-      "src": "/help/shots/loudness/ceiling.png",
+      "src": "/help/shots/loudness-normalize/ceiling.png",
       "w": 151,
       "h": 234
     },
     "peak": {
-      "src": "/help/shots/loudness/peak.png",
+      "src": "/help/shots/loudness-normalize/peak.png",
       "w": 142,
       "h": 93
     }

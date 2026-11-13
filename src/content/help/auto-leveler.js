@@ -1,11 +1,9 @@
 export default {
   summary: 'Evens out the level between phrases, leaving the dynamics inside each phrase alone',
 
-  whenToUse: [
-    'Some sentences sit noticeably quieter than others in the same take',
-    'You drifted off-mic or changed delivery part-way through a session',
-    'A compressor is working too hard because the level going into it wanders',
-    'Chapters have to match each other and one of them rides low',
+  intro: [
+    'Auto Leveler evens out the level between phrases, the way an editor would by riding clip gain by hand. It finds each spoken phrase, measures its loudness, and moves the ones that sit too far from the rest towards a common target, while leaving the dynamics inside each phrase untouched',
+    'Use it when some sentences sit noticeably quieter than others, when someone drifted off-mic part-way through a session, or before a compressor so the compressor is not working against a wandering level. It is an offline process: one Apply analyses, levels and writes the selection, and Undo takes it back',
   ],
 
   quickStart: [

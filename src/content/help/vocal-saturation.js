@@ -1,11 +1,9 @@
 export default {
   summary: 'Adds tube-style warmth, with the low, mid and high bands each driven by their own amount',
 
-  whenToUse: [
-    'A digital recording sounds correct but sterile',
-    'You want harmonic weight rather than more level',
-    'You want to warm the low end without hardening the consonants',
-    'You want onsets rounded by saturation rather than by a compressor',
+  intro: [
+    'Tube Saturation adds the warmth of a tube stage, with the low, mid and high bands each driven by their own amount. It gives a digital recording harmonic weight rather than more level',
+    'Use it when a voice sounds correct but sterile, to warm the low end without hardening the consonants, or to round onsets with saturation instead of a compressor',
   ],
 
   quickStart: [

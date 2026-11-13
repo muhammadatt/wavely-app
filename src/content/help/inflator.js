@@ -1,10 +1,9 @@
 export default {
   summary: 'Raises quiet detail faster than it raises peaks, for density and apparent loudness without going past full scale',
 
-  whenToUse: [
-    'A recording is technically fine but sounds thin or far away',
-    'You want density without a compressor pumping on the syllables',
-    'You want more apparent level without pushing anything past full scale',
+  intro: [
+    'Cambridge Inflator follows the idea behind the classic Inflator mastering processor: it raises quiet detail faster than it raises peaks, so a recording gains density and apparent loudness without anything going past full scale',
+    'It suits recordings that are technically fine but sound thin or far away, and situations where you want more weight without a compressor pumping on the syllables. A band split lets it treat lows, mids and highs separately',
   ],
 
   quickStart: [

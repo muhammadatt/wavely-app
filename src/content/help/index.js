@@ -35,11 +35,10 @@
  *                       audio. Written like the registry's own `desc` — a verb
  *                       phrase about the user's file, not about the DSP.
  *
- *   whenToUse string[]  Required, 1–5 entries. The situations that should make
- *                       someone reach for this rather than its neighbours. This
- *                       is the section that earns the panel: a control list can
- *                       be inferred from the faceplate, "when is this the right
- *                       tool" cannot.
+ *   intro     string[]  Required, 1–3 paragraphs. The page's Intro: what the
+ *                       plugin is (and what it is modelled on, where it is),
+ *                       what it is for, and when to reach for it rather than
+ *                       its neighbours. Prose, not a list
  *
  *   controls  [control]  Required. One entry per control on the faceplate, in
  *                       the order they appear on it (fields below). `label`
@@ -144,8 +143,13 @@ export const HELP = {
  * learn a name. `test/ui/helpContent.test.js` reads them back out of
  * `src/ui/registry.js`, so the two cannot drift.
  *
- *   release: 'dev'  hidden from production builds exactly as the operation is:
- *                   not on the index, no page emitted, no link from a window
+ *   release: 'dev'  not on the index or in the sidebar in ANY build — they
+ *                   list shipping effects only — and in a production build no
+ *                   page, no screenshots and no link from a window. A dev build
+ *                   still serves the page itself, so its `?` works there
+ *
+ * Every page's URL is its product name (`helpSlug`), never the window id: the
+ * ids keep old names (`opto-smooth` is LA Vintage 2A).
  */
 export const HELP_CATEGORIES = [
   { id: 'level', label: 'Level' },
@@ -182,18 +186,42 @@ export const HELP_META = {
   'plugin-chain': { title: 'Effect Chain', category: null },
 }
 
-/** The ids with a published page in this build (dev-only ones only in dev). */
+/** The ids with a page in this build (dev-only ones only in dev). */
 export function publishedHelpIds(devBuild) {
   return Object.keys(HELP_META).filter(id => devBuild || HELP_META[id].release !== 'dev')
 }
 
+/** The ids the index and sidebar list: shipping effects only, in every build. */
+export function listedHelpIds() {
+  return Object.keys(HELP_META).filter(id => HELP_META[id].release !== 'dev')
+}
+
+/**
+ * A page's URL segment, from its product name: `LA Vintage 2A` →
+ * `la-vintage-2a`, `PHAT*SS` → `phatss`.
+ */
+export function helpSlug(windowId) {
+  return HELP_META[windowId].title
+    .toLowerCase()
+    .replace(/[*']/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+const ID_BY_SLUG = new Map(Object.keys(HELP_META).map(id => [helpSlug(id), id]))
+
+/** The window id a URL segment names, or null. */
+export function helpIdForSlug(slug) {
+  return ID_BY_SLUG.get(slug) ?? null
+}
+
 /**
  * The URL of an effect's help page. Trailing slash: the build emits each page
- * as `help/<id>/index.html`, which every static host serves at this path with
- * no rewrite rule.
+ * as `help/<slug>/index.html`, which every static host serves at this path
+ * with no rewrite rule.
  */
 export function helpUrl(windowId) {
-  return `/help/${encodeURIComponent(windowId)}/`
+  return `/help/${helpSlug(windowId)}/`
 }
 
 /**

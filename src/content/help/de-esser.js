@@ -1,10 +1,9 @@
 export default {
   summary: 'Turns each S, SH and CH down only while it sounds, and puts a little air back on the vowels afterwards',
 
-  whenToUse: [
-    'S, T and CH sounds poke out of an otherwise good recording',
-    'A static high cut would dull the voice along with the harshness',
-    'You want sibilance calmer without the speaker starting to lisp',
+  intro: [
+    'The De-Esser turns down S, SH and CH sounds only while they sound, then puts a little air back on the vowels so the voice does not go dull. A lisp guard stops it from ever pulling an S down far enough to sound like a TH',
+    'Use it when sibilance pokes out of an otherwise good recording and a static high cut would dull everything else. The frequency strip shows exactly which band the detector listens to, and the activity scope shows every place it acted',
   ],
 
   quickStart: [

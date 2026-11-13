@@ -1,62 +1,62 @@
 {
   "panel": {
-    "src": "/help/shots/fet-punch/panel.jpg",
+    "src": "/help/shots/la-classic-76/panel.jpg",
     "w": 868,
     "h": 538
   },
   "controls": {
     "input": {
-      "src": "/help/shots/fet-punch/input.png",
+      "src": "/help/shots/la-classic-76/input.png",
       "w": 188,
       "h": 211
     },
     "ratio": {
-      "src": "/help/shots/fet-punch/ratio.png",
+      "src": "/help/shots/la-classic-76/ratio.png",
       "w": 75,
       "h": 232
     },
     "meter": {
-      "src": "/help/shots/fet-punch/meter.png",
+      "src": "/help/shots/la-classic-76/meter.png",
       "w": 322,
       "h": 232
     },
     "harmonics": {
-      "src": "/help/shots/fet-punch/harmonics.png",
+      "src": "/help/shots/la-classic-76/harmonics.png",
       "w": 145,
       "h": 32
     },
     "output": {
-      "src": "/help/shots/fet-punch/output.png",
+      "src": "/help/shots/la-classic-76/output.png",
       "w": 188,
       "h": 211
     },
     "pre-gain": {
-      "src": "/help/shots/fet-punch/pre-gain.png",
+      "src": "/help/shots/la-classic-76/pre-gain.png",
       "w": 97,
       "h": 52
     },
     "sc-hpf": {
-      "src": "/help/shots/fet-punch/sc-hpf.png",
+      "src": "/help/shots/la-classic-76/sc-hpf.png",
       "w": 88,
       "h": 58
     },
     "attack": {
-      "src": "/help/shots/fet-punch/attack.png",
+      "src": "/help/shots/la-classic-76/attack.png",
       "w": 124,
       "h": 140
     },
     "release": {
-      "src": "/help/shots/fet-punch/release.png",
+      "src": "/help/shots/la-classic-76/release.png",
       "w": 124,
       "h": 140
     },
     "auto-makeup": {
-      "src": "/help/shots/fet-punch/auto-makeup.png",
+      "src": "/help/shots/la-classic-76/auto-makeup.png",
       "w": 82,
       "h": 69
     },
     "mix": {
-      "src": "/help/shots/fet-punch/mix.png",
+      "src": "/help/shots/la-classic-76/mix.png",
       "w": 142,
       "h": 93
     }

@@ -1,10 +1,9 @@
 export default {
   summary: 'Takes the thump out of P and B sounds and the spit out of hard T, K and P releases, only where they happen',
 
-  whenToUse: [
-    'P and B sounds thump or boom because air from the mouth hit the microphone',
-    'T, K and P releases spit or click after the silence before them',
-    'You want plosives fixed without a high-pass filter thinning the whole voice',
+  intro: [
+    'The Plosive Tamer takes the thump out of P and B sounds, where air from the mouth hits the microphone, and the spit out of hard T, K and P releases, acting only at the moments they happen',
+    'Use it when plosives boom or click, and you want them fixed without a high-pass filter thinning the whole voice. Deep voices are spared because it only acts on a sudden jump of low-end energy, not on a voice that is simply low',
   ],
 
   quickStart: [
