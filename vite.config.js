@@ -2,7 +2,6 @@ import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
-import { HELP_META, publishedHelpIds } from './src/content/help/index.js'
 
 /**
  * Developer-only modules, stubbed out of production builds.
@@ -68,9 +67,13 @@ function helpPages(devPanels) {
       server.middlewares.use(rewrite)
     },
     // `post`: Vite's own HTML plugin emits the entry in this same hook.
-    generateBundle: { order: 'post', handler(_options, bundle) {
+    // The help index is imported HERE, at build time, not at the top of this
+    // file: anything the config imports is a config dependency, and Vite
+    // restarts the dev server whenever one changes — every edit to a help page.
+    generateBundle: { order: 'post', async handler(_options, bundle) {
       const entry = bundle['help/index.html']
       if (!entry) return
+      const { HELP_META, publishedHelpIds } = await import('./src/content/help/index.js')
       const html = String(entry.source)
       for (const id of publishedHelpIds(devPanels)) {
         const title = HELP_META[id].title.replace(/&/g, '&amp;').replace(/</g, '&lt;')

@@ -1,0 +1,59 @@
+{
+  "panel": {
+    "src": "/help/shots/soft-clipper/panel.jpg",
+    "w": 900,
+    "h": 731
+  },
+  "controls": {
+    "clip-lamp": {
+      "src": "/help/shots/soft-clipper/clip-lamp.png",
+      "w": 61,
+      "h": 25
+    },
+    "peak-reduction": {
+      "src": "/help/shots/soft-clipper/peak-reduction.png",
+      "w": 102,
+      "h": 24
+    },
+    "engaged": {
+      "src": "/help/shots/soft-clipper/engaged.png",
+      "w": 112,
+      "h": 24
+    },
+    "scope": {
+      "src": "/help/shots/soft-clipper/scope.png",
+      "w": 884,
+      "h": 268
+    },
+    "meters": {
+      "src": "/help/shots/soft-clipper/meters.png",
+      "w": 884,
+      "h": 38
+    },
+    "ceiling": {
+      "src": "/help/shots/soft-clipper/ceiling.png",
+      "w": 139,
+      "h": 206
+    },
+    "set-ceiling": {
+      "src": "/help/shots/soft-clipper/set-ceiling.png",
+      "w": 273,
+      "h": 71
+    },
+    "peak-control": {
+      "src": "/help/shots/soft-clipper/peak-control.png",
+      "w": 116,
+      "h": 76
+    },
+    "output": {
+      "src": "/help/shots/soft-clipper/output.png",
+      "w": 138,
+      "h": 206
+    },
+    "auto": {
+      "src": "/help/shots/soft-clipper/auto.png",
+      "w": 87,
+      "h": 42
+    }
+  }
+}

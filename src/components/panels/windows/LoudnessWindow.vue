@@ -358,7 +358,7 @@ function toastFor(report, appliedUnit) {
            First, and above the controls, because every decision below is made
            against it: a target is meaningless without the number it is being
            moved from. -->
-      <div class="ln-well">
+      <div class="ln-well" data-help="measurement">
         <div class="ln-well-head">
           <span class="m-caption">{{ hasSelection ? 'Selection' : 'Whole file' }}</span>
           <span v-if="measuredLine" class="ln-status">{{ measuredLine }}</span>
@@ -394,7 +394,7 @@ function toastFor(report, appliedUnit) {
            Buttons describe values rather than selecting a mode: land on
            Spotify's numbers by turning the knobs and its lamp lights, which
            is the truth about what the panel is set to. -->
-      <div class="ln-benchmarks">
+      <div class="ln-benchmarks" data-help="benchmarks">
         <div v-for="g in buttons" :key="g.id" class="ln-group">
           <span class="ln-group-label">{{ g.label }}</span>
           <div class="ln-chips">
@@ -419,7 +419,7 @@ function toastFor(report, appliedUnit) {
 
       <!-- ── The three controls ──────────────────────────────────────────── -->
       <div class="ln-panel">
-        <div class="ln-knob">
+        <div class="ln-knob" data-help="target">
           <ModulaKnob
             variant="led" :size="146" show-value editable
             v-model="targetDb" :min="targetRange.min" :max="targetRange.max" :step="0.1"
@@ -430,7 +430,7 @@ function toastFor(report, appliedUnit) {
           <span class="m-note">{{ unit === 'RMS' ? 'dBFS RMS, ungated' : 'LUFS integrated' }}</span>
         </div>
 
-        <div class="ln-knob">
+        <div class="ln-knob" data-help="ceiling">
           <ModulaKnob
             variant="ticks" :size="139" show-value editable
             v-model="ceilingDb" :min="-9" :max="0" :step="0.1"
@@ -441,7 +441,7 @@ function toastFor(report, appliedUnit) {
           <span class="m-note">{{ peakUnit }}</span>
         </div>
 
-        <div class="ln-mode">
+        <div class="ln-mode" data-help="peak">
           <span class="m-caption">Peak</span>
           <ModulaSegmented v-model="peakMode" :options="PEAK_MODE_OPTIONS" aria-label="Peak control" />
           <span class="ln-mode-cap">{{ peakModeCaption }}</span>
