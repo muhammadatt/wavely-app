@@ -1,18 +1,18 @@
 export default {
-  summary: 'Holds the top end at a ceiling, so brightness, harshness and sharp edges never get past it.',
+  summary: 'Holds the top end at a ceiling, providing firm control of brightness, harshness and sharp edges.',
 
   intro: [
-    'The Hi-Freq Limiter puts a ceiling on the top end. Brightness, harshness, sibilance and sharp clicks are held down only at the moments they cross the threshold, while everything below it passes untouched. Its WARM shape follows the character of a well-known analog tape-emulation compressor.',
-    'Use it when a voice or a whole file is too bright in places rather than everywhere, or when clicks, lip smacks and hard consonants stand out. It is a ceiling, not a static high cut, so the overall tone stays open.',
+    'The Hi-Freq Limiter is an adaptive, transparent, high-frequency attenuator that tames harshness while preserving tone. Brightness, harshness, sibilance and sharp clicks are held down only at the loudest moments, while preserving full detail below the threshold. TIGHT mode provides nearly transparent HF reduction, while WARM mode offers a subtle warm, natural curve based a well-known analog compressor emulation.',
+    'Use it to control bright transients or sibilant spikes without causing dullness or drastic changes in overall tone.',
   ],
 
   quickStart: [
     'Select a bright passage and open the window — it opens engaged.',
-    'Play with DELTA lit and lower Threshold until what you hear is the harshness and nothing else.',
-    'Set Range so heavy moments stay natural, and Release so the top end does not pump.',
-    'Raise Transient if clicks, lip smacks or hard consonants still stand out.',
-    'Turn DELTA off, match the level with Output and compare against bypass.',
-    'Apply to selection.',
+    'Active DELTA mode so you can hear the audio being removed.', 
+    'Play the audio and lower the Threshold until you can hear the harshness being removed.',
+    'Use FREQ to adjust the frequency cutoff and RANGE to determine the depth of the attenuation.',
+    'Raise the Transient knob in necessary to provide additional softening on fast attacks or consonant onsets.',
+    'Turn DELTA off, use ON/BYPASS to compare before and after, then Apply to selection.',
   ],
 
   controls: [

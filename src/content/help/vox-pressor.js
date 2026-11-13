@@ -2,7 +2,7 @@ export default {
   summary: 'A vocal dynamics chain in one window: a 1176 trims the loudest peaks, an LA-2A levels the voice, a de-esser cleans up the top and a parallel copy adds density.',
 
   intro: [
-    'VoxPressor is a complete vocal dynamics chain in one window, built on the classic engineer\'s recipe of a 1176 into an LA-2A. A fast FET stage trims the loudest peaks, an opto stage levels the body of the voice, a de-esser cleans up the top and a parallel copy adds density underneath.',
+    'VoxPressor is a complete vocal dynamics chain in one window, built on the classic 1176 into an LA-2A vocal chain. A fast FET stage trims the loudest peaks, an opto stage levels the body of the voice, a de-esser cleans up the top and a parallel copy adds density underneath.',
     'It is for narration and dialogue that jumps between quiet and loud, and for anyone who wants a finished, dense vocal level in one pass before mastering, without staging four plugins by hand. Each stage measures what it did and shows it under the meter, with guide colours on the knobs that warn before you start squashing the voice.',
   ],
 

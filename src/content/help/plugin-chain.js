@@ -2,15 +2,15 @@ export default {
   summary: 'Runs several effects in series, in an order you set, so you hear them together and apply them all as one edit.',
 
   intro: [
-    'The Effect Chain runs several effects in series, in an order you choose, so you hear them working together before anything is written. When it sounds right, Apply renders the whole chain onto the selection as a single edit with a single undo.',
-    'Use it whenever a sound takes more than one effect, when the order matters, compressing before or after an EQ, de-essing before or after saturation, or to save a chain you like and load it on the next file.',
+    'The Effect Chain runs multiple effects in series, in any order you choose. Add, reorder or bypass individual effects and and render the whole chain onto the selection ins a single step.',
+    'Use it build a custom vocal chain or mix effect buss; save your best chains as presets to reuse on future tracks.',
   ],
 
   quickStart: [
-    'Press Add your first effect and pick one — it joins the end of the chain and its window opens so you can tune it.',
-    'Add the next effects the same way; each window can stay open beside the chain.',
-    'Reorder, bypass or remove slots until the chain sounds right while you play.',
-    'Select a region and press Apply — it reads Apply chain to selection, or Apply 3 effects to selection with three live slots.',
+    'Press Add to select your first effect in the chain — it opens its effect window.',
+    'Add additional effects — each one joins the end of the current chain.',
+    'Reorder, edit, bypass or remove effects until you achieve the desired sound.',
+    'Select a region and press Apply to apply the whole chain at once.',
   ],
 
   controls: [
@@ -28,7 +28,7 @@ export default {
       label: 'Slot row',
       text: 'Each row is one effect in the chain, numbered in processing order — the top row runs first.',
       details: [
-        'Drag a row by its grip onto another row to move it there.',
+        'Drag a row by its grip handle onto another row to move it there.',
       ],
     },
     {
@@ -74,7 +74,7 @@ export default {
 
   notes: [
     'Use the ON / BYPASS in the window header to hear the file without the chain. Each slot keeps its own setting.',
-    'After Apply the whole chain is bypassed so the processing is not heard twice. Turn it back on with the header switch.',
+    'After Applying, the whole chain is bypassed so the processing is not heard twice. Turn it back on using the ON/BYPASS switch.',
     'Apply needs a selection and at least one live slot. Effects in the chain have no Apply of their own.',
     'Opening an effect from the toolbar or search opens a separate copy with its own Apply, and bypasses the chain until you turn it back on.',
     'Peak and Loudness Normalize cannot go in the chain. Run them before or after it.',

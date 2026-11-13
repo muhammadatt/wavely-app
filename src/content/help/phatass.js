@@ -2,8 +2,8 @@ export default {
   summary: 'Adds tape saturation and low-end warmth to the selection, rounding its peaks and top end without raising its peak level.',
 
   intro: [
-    'PHAT*SS (Psycho Harmonic Analog Tape Saturation Simulator) brings the sound of analog tape to a voice: peaks rounded by the tape itself, the low-end bump of the playback head, the gentle sag of the top end on loud passages, and low-frequency harmonic warmth on top.',
-    'Use it when a voice sounds thin or clinical and needs body without an EQ boost, or when you want peaks softened the way tape does it. It is built never to raise the selection\'s peak level, so the density it adds never eats into your headroom.',
+    'PHATaSS (Psycho-Harmonic Analog Tape and Saturation Simulator) is designed to add low-frequency harmonic warmth and gentle soft saturation, resulting in a warmer, fuller sound.',
+    'Use it add warmth, body and fullness while gentling attenuating peaks. It is built never to raise the selection\'s peak level, so the density it adds never eats into your headroom.',
   ],
 
   quickStart: [

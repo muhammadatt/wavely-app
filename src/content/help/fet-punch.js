@@ -2,17 +2,17 @@ export default {
   summary: 'Catches peaks fast and lifts everything underneath them, the way a 1176-style FET compressor does.',
 
   intro: [
-    'LA Classic 76 is modelled on the 1176, the FET peak limiter whose lightning-fast attack made it the go-to for vocals that need to cut through. Where an opto compressor rides phrases, the 76 grabs individual words and transients, adds density and pushes the voice forward.',
-    'Reach for it when loud words poke out of an otherwise even performance, when a take is steady but not loud or present enough, or for parallel compression without a second track. Its ratio buttons, attack, release and the colour of its output stage were matched against measured references of the original.',
+    'LA Classic 76 is modelled on the UA 1176, the classic FET peak limiter whose lightning-fast attack made it the go-to for drums, synth or even vocals that need to cut through. The 1176 is ideal for controlling fast peaks, while adding density and "up front" sound.',
+    'Reach for it when loud words poke out of an otherwise even performance, when a take is steady but not loud or present enough, or for parallel compression without a second track.',
   ],
 
   quickStart: [
     'Select the passage and open the window — it opens engaged.',
-    'Leave Ratio on 4 and play, raising Input until the meter swings 3–6 dB on the loudest words.',
+    'Leave Ratio on 4 and play your audio, raising Input until the meter swings 3–6 dB on the loudest words.',
     'Leave Auto Makeup lit so Output restores the level for you.',
     'Set Attack by ear against the consonants, and Release so the level does not pump between words.',
     'Pull Mix down if the result feels squashed but you want the density.',
-    'Compare against bypass, then Apply to selection.',
+    'Use ON/BYPASS to compare before and after, then Apply to selection.',
   ],
 
   controls: [

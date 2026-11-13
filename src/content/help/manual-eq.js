@@ -3,7 +3,7 @@ export default {
 
   intro: [
     'EQ is a parametric equaliser for shaping tone by hand, with up to eight bands drawn over a live analyzer of the audio as it plays. Each band can be a bell, shelf or filter, and you can drag its node on the graph or type exact values.',
-    'Use it when you know which frequency is wrong and want to fix exactly that, or to refine the corrections VoiceRx suggests. Unlike the dynamic plugins, an EQ change applies the same everywhere in the selection.',
+    'Use it make many precise cuts or boosts anywhere across the frequency spectrum.',
   ],
 
   quickStart: [

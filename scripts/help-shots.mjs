@@ -49,6 +49,9 @@ for (const id of ids) if (!HELP[id]) { console.error(`no help entry: ${id}`); pr
  */
 const QUERY = { 'saturation-bench': 'Saturation Workbench', 'plugin-chain': 'Effect Chain' }
 
+/** The rack the Effect Chain's help picture shows: picker queries, in order. */
+const CHAIN_SAMPLE = ['EQ', 'LA Classic 76', 'LA Vintage 2A', 'De-Esser', 'Air Boost']
+
 function writeProbeWav(path) {
   // Speech-like: a pitched, syllabic tone with sibilant bursts and a click per
   // second, so meters and scopes show something rather than sitting flat.
@@ -87,7 +90,9 @@ writeProbeWav(wav)
 let server = null
 if (!(await waitForServer(1000))) {
   if (process.env.HELP_SHOTS_URL) { console.error(`no server at ${URL_}`); process.exit(1) }
-  server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { cwd: ROOT, stdio: 'ignore' })
+  // Node + vite's bin, not `npx`: on Windows npx is npx.cmd and spawn without a shell cannot find it.
+  const viteBin = join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js')
+  server = spawn(process.execPath, [viteBin, '--port', String(PORT), '--strictPort'], { cwd: ROOT, stdio: 'ignore' })
   if (!(await waitForServer(40000))) { console.error('dev server did not start'); process.exit(1) }
 }
 
@@ -107,7 +112,9 @@ await page.addInitScript(() => {
 
 let failures = 0
 try {
-  await page.goto(URL_, { waitUntil: 'networkidle' })
+  // Not 'networkidle': a cold dev server streams modules (and the app may poll) for longer than it allows.
+  await page.goto(URL_, { waitUntil: 'load', timeout: 120000 })
+  await page.getByText('Choose audio files').waitFor({ timeout: 120000 })
   const chooser = page.waitForEvent('filechooser')
   await page.getByText('Choose audio files').click()
   await (await chooser).setFiles(wav)
@@ -120,8 +127,27 @@ try {
     await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
     await page.keyboard.type(QUERY[id] ?? HELP_META[id].title); await page.waitForTimeout(450)
     await page.keyboard.press('Enter'); await page.waitForTimeout(3500)
-    const frame = page.locator('.win-frame').last()
+    let frame = page.locator('.win-frame').last()
     if (!(await frame.count())) { console.log(`FAIL  ${id}: window did not open`); failures++; continue }
+
+    // An empty chain does not show what it is for: fill it with a typical vocal rack first.
+    if (id === 'plugin-chain') {
+      frame = page.locator('.win-frame').filter({ hasText: 'EFFECT CHAIN' }).first()
+      for (const label of CHAIN_SAMPLE) {
+        await frame.getByRole('button', { name: 'Add effect', exact: true }).dispatchEvent('click'); await page.waitForTimeout(300)
+        await page.keyboard.type(label); await page.waitForTimeout(250)
+        await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
+      }
+      // Each added effect opened its window beside the chain; the slots keep running without them.
+      const members = page.locator('.win-frame').filter({ hasNotText: 'EFFECT CHAIN' })
+      for (let i = 0; i < CHAIN_SAMPLE.length + 2 && await members.count(); i++) {
+        await members.last().locator('[aria-label="Close window"]').first().click().catch(() => {})
+        await page.waitForTimeout(300)
+      }
+      const rows = await frame.locator('.pc-name').allInnerTexts()
+      console.log(`      chain rows: ${rows.join(' → ')}`)
+      if (rows.length !== CHAIN_SAMPLE.length) { console.log(`FAIL  ${id}: expected ${CHAIN_SAMPLE.length} slots`); failures++ }
+    }
 
     // Measurements and meters settle; nothing should be mid-animation.
     await page.mouse.move(0, 0)
@@ -171,7 +197,7 @@ try {
     await page.keyboard.press('Escape'); await page.waitForTimeout(500)
     // A window that ignores Escape (focus elsewhere) must not leak into the next shot.
     while (await page.locator('.win-frame').count()) {
-      await page.locator('.win-frame').last().locator('[aria-label="Close"], .win-close').first().click().catch(() => {})
+      await page.locator('.win-frame').last().locator('[aria-label="Close window"]').first().click().catch(() => {})
       await page.waitForTimeout(300)
       if (await page.locator('.win-frame').count()) { await page.keyboard.press('Escape'); await page.waitForTimeout(300) }
       break

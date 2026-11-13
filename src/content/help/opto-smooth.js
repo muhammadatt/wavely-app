@@ -2,8 +2,8 @@ export default {
   summary: 'Levels a performance the way an opto compressor does — slowly, across phrases rather than syllables.',
 
   intro: [
-    'LA Vintage 2A is modelled on the LA-2A, the tube-driven optical leveling amplifier that has been the default first compressor on vocals for decades. Its optical cell reacts slowly and lets go even more slowly, so it rides the level of whole phrases rather than individual syllables, and it is famously hard to hear working.',
-    'Use it when a narrator drifts towards and away from the mic, when quiet passages need to sit up without the loud ones jumping, or whenever you want steadier level that still sounds natural. It measures your recording first, so the same Peak Reduction setting does the same job on a quiet file as on a hot one.',
+    'LA Vintage 2A is modelled on the Teletronix LA-2A, the tube-driven optical leveling amplifier that has been the premier analog vocal compressor for decades. Its optical cell reacts gently and releases slowly, so it rides the level of whole phrases rather than individual syllables, and it is famously transparent.',
+    'Use it add warmth, glue and subtle control to vocal takes, synths, guitar or even full mixes.',
   ],
 
   quickStart: [
@@ -125,7 +125,8 @@ export default {
   ],
 
   notes: [
-    'It levels phrases, not syllables. When you want individual peaks caught fast, reach for LA Classic 76, or VoxPressor for both in one window.',
+    'It gently levels phrases, not fast peaks. To catch fast peaks, reach for the LA Classic 76, or try the VoxPressor (Pro-only) for both in one window.',
+    'It measures your recording first, so the same Peak Reduction setting does the same job on a quiet file as on a hot one.',
     'Presets save Peak Reduction but not Pre-Gain, which is measured for each file.',
   ],
 }
