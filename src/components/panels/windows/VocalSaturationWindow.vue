@@ -100,11 +100,11 @@ async function applyAndClose() {
   >
     <div class="px-[22px] pt-[22px] pb-[24px]">
       <div class="flex items-center gap-[14px]">
-        <LevelMeter :levels="vsInputLevels" label="IN" :height="132" />
+        <LevelMeter data-help="input-meter" :levels="vsInputLevels" label="IN" :height="132" />
 
         <!-- Primary voicing controls in the center strip. -->
         <div class="flex-1 min-w-0 flex items-start justify-center gap-[18px]">
-          <div class="w-[100px]">
+          <div class="w-[100px]" data-help="drive">
             <Knob :model-value="vsDrive" @update:model-value="syncDrive"
                   :min="0" :max="5" :step="0.05"
                   label="Drive" :accent="ACCENT" :format-value="twoDp"
@@ -115,7 +115,7 @@ async function applyAndClose() {
                SIGN is now measured from the material rather than always
                positive. Even-order content is identical either way; what the
                sign buys is up to 7.9 dB LESS of everything else. -->
-          <div class="w-[100px]">
+          <div class="w-[100px]" data-help="asymmetry">
             <Knob :model-value="vsAsymmetry" @update:model-value="syncAsymmetry"
                   :min="0" :max="100" :step="1"
                   label="Asymmetry" :accent="ACCENT" :format-value="v => v.toFixed(0)"
@@ -132,7 +132,7 @@ async function applyAndClose() {
                HARDNESS_MIN. ⚠ Its authority falls away once Drive has squared
                the wave off, and the default patch sits past that point; see
                the tilt table on `shape`. -->
-          <div class="w-[100px]">
+          <div class="w-[100px]" data-help="hardness">
             <Knob :model-value="vsHardness" @update:model-value="syncHardness"
                   :min="HARDNESS_MIN" :max="HARDNESS_MAX" :step="0.1"
                   label="Hardness" :accent="ACCENT" :format-value="oneDp"
@@ -142,7 +142,7 @@ async function applyAndClose() {
                  : vsHardness > 5.5 ? 'spiky' : vsHardness >= 3 ? 'close-in' : 'dense' }}
             </p>
           </div>
-          <div class="w-[72px] pt-[8px]">
+          <div class="w-[72px] pt-[8px]" data-help="wet-dry">
             <Knob :model-value="vsWetDry" @update:model-value="syncWetDry"
                   :min="0" :max="1" :step="0.01"
                   :value-font-px="13"
@@ -156,7 +156,7 @@ async function applyAndClose() {
                out above 4 kHz at the default blend, where a wet-path version
                manages 0.79. A tape machine does not roll off only the part of
                the signal that saturated. -->
-          <div class="w-[72px] pt-[8px]">
+          <div class="w-[72px] pt-[8px]" data-help="hf-loss">
             <Knob :model-value="vsHfLoss" @update:model-value="syncHfLoss"
                   :min="0" :max="100" :step="1"
                   :value-font-px="13"
@@ -168,7 +168,7 @@ async function applyAndClose() {
           </div>
         </div>
 
-        <LevelMeter :levels="vsOutputLevels" label="OUT" :height="132" />
+        <LevelMeter data-help="output-meter" :levels="vsOutputLevels" label="OUT" :height="132" />
       </div>
 
       <!-- Band shaping: wide numeric ranges you read rather than feel, so
@@ -197,7 +197,7 @@ async function applyAndClose() {
                hold ONLY while Drive keeps the signal inside the polynomial's
                domain; past it the clamp is a hard clipper and CUBIC measures
                grittier than SHAPE. See cubicShape. -->
-          <div>
+          <div data-help="curve">
             <DeviceChoiceRocker
               :model-value="vsCurve"
               @update:model-value="syncCurve"
@@ -216,7 +216,7 @@ async function applyAndClose() {
                asymptote, so the bounds stay matched. Measured crest at
                Asymmetry 100: +6.87 dB for offset, -5.06 for split, against
                -5.01 symmetric. See ASYM_MODE_SPLIT. -->
-          <div>
+          <div data-help="asym-mode">
             <DeviceChoiceRocker
               :model-value="vsAsymMode"
               @update:model-value="syncAsymMode"
@@ -227,7 +227,7 @@ async function applyAndClose() {
               :disabled="!vsPreview || vsCurve === 'cubic'"
             />
           </div>
-          <div>
+          <div data-help="topology">
             <DeviceChoiceRocker
               :model-value="vsMode"
               @update:model-value="syncMode"
@@ -249,7 +249,7 @@ async function applyAndClose() {
                measured THD 0.3 / 1.3 / 9.1% across 30 dB of input level at 0,
                and 1.7 / 1.7 / 1.7% at 100. Gated on voice so a pause does not
                drive room tone — see AutoDrive. -->
-          <div class="w-[82px]">
+          <div class="w-[82px]" data-help="auto-drive">
             <Knob :model-value="vsAutoDrive" @update:model-value="syncAutoDrive"
                   :min="0" :max="100" :step="1" :value-font-px="13"
                   label="Auto Drive" :accent="ACCENT" :format-value="v => v.toFixed(0)"
@@ -265,7 +265,7 @@ async function applyAndClose() {
                only a third harmonic. Measured at Drive 2, share of distortion
                above the 5th: 12.7% at 0, 2.2% at 50. Above 50 the amount of
                saturation stops depending on Drive at all. See TAME_LOOKAHEAD_L. -->
-          <div class="w-[82px]">
+          <div class="w-[82px]" data-help="tame">
             <Knob :model-value="vsTame" @update:model-value="syncTame"
                   :min="0" :max="100" :step="1" :value-font-px="13"
                   label="Tame" :accent="ACCENT" :format-value="v => v.toFixed(0)"
@@ -281,7 +281,7 @@ async function applyAndClose() {
                on a control that provably cannot boost — because slew-limiting
                an already-saturated LF-dominated sum makes it triangular, and a
                triangle is harmonics. See SOFTEN_REFERENCE. -->
-          <div class="w-[82px]">
+          <div class="w-[82px]" data-help="soften">
             <Knob :model-value="vsSoften" @update:model-value="syncSoften"
                   :min="0" :max="100" :step="1" :value-font-px="13"
                   label="Soften" :accent="ACCENT" :format-value="v => v.toFixed(0)"
@@ -290,7 +290,7 @@ async function applyAndClose() {
               {{ vsMode !== 'series' ? 'series only' : vsSoften > 0 ? 'limits slew rate' : 'off' }}
             </p>
           </div>
-          <div class="w-[82px]">
+          <div class="w-[82px]" data-help="emphasis">
             <Knob :model-value="vsEmphasis" @update:model-value="syncEmphasis"
                   :min="0" :max="100" :step="1" :value-font-px="13"
                   label="Emphasis" :accent="ACCENT" :format-value="v => v.toFixed(0)"
@@ -302,30 +302,30 @@ async function applyAndClose() {
         </div>
 
         <div class="grid grid-cols-2 gap-x-[30px] gap-y-[15px]">
-          <DeviceSlider :model-value="vsLowCrossover" @update:model-value="syncLowCrossover"
+          <DeviceSlider data-help="low-crossover" :model-value="vsLowCrossover" @update:model-value="syncLowCrossover"
                         :min="100" :max="2000" :step="10"
                         label="Low Crossover" :accent="ACCENT" :format-value="hertz"
                         :disabled="!vsPreview" />
-          <DeviceSlider :model-value="vsMidCrossover" @update:model-value="syncMidCrossover"
+          <DeviceSlider data-help="mid-crossover" :model-value="vsMidCrossover" @update:model-value="syncMidCrossover"
                         :min="1000" :max="8000" :step="50"
                         label="Mid Crossover" :accent="ACCENT" :format-value="hertz"
                         :disabled="!vsPreview" />
         </div>
 
         <div class="mt-[16px] flex items-start justify-center gap-[20px]">
-          <div class="w-[82px]">
+          <div class="w-[82px]" data-help="low-drive">
             <Knob :model-value="vsLowDriveMult" @update:model-value="syncLowDriveMult"
                   :min="0" :max="10" :step="0.05" :value-font-px="13"
                   label="Low Drive" :accent="ACCENT" :format-value="multiplier"
                   :disabled="!vsPreview" />
           </div>
-          <div class="w-[82px]">
+          <div class="w-[82px]" data-help="mid-drive">
             <Knob :model-value="vsMidDriveMult" @update:model-value="syncMidDriveMult"
                   :min="0" :max="10" :step="0.05" :value-font-px="13"
                   label="Mid Drive" :accent="ACCENT" :format-value="multiplier"
                   :disabled="!vsPreview" />
           </div>
-          <div class="w-[82px]">
+          <div class="w-[82px]" data-help="high-drive">
             <Knob :model-value="vsHighDriveMult" @update:model-value="syncHighDriveMult"
                   :min="0" :max="10" :step="0.05" :value-font-px="13"
                   label="High Drive" :accent="ACCENT" :format-value="multiplier"
