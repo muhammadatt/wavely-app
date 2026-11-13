@@ -181,3 +181,83 @@ test('a restored selection is a copy, not shared with the history entry', () => 
   editor.undo()
   assert.deepEqual(editor.state.selection, { start: 0, end: 2 })
 })
+
+test('undo restores the span an apply processed, even if the selection moved while it rendered', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'async.wav')
+
+  // Apply started on 1–2 s; the user reselected while the render ran, and the
+  // commit (replaceRegion) lands afterwards with the original span.
+  editor.state.selection = { start: 1, end: 2 }
+  editor.state.selection = { start: 3, end: 3.5 }
+  editor.replaceRegion(1, 2, fakeBuffer(1), 'De-Esser')
+
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+
+  // Redo returns to the selection that was in place when Undo was pressed.
+  editor.redo()
+  assert.deepEqual(editor.state.selection, { start: 3, end: 3.5 })
+})
+
+test('a whole-file apply with nothing selected undoes to no selection', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'whole.wav')
+
+  // Nothing selected at Apply; a selection made during the render is not it.
+  editor.state.selection = null
+  editor.state.selection = { start: 0.5, end: 1 }
+  editor.replaceRegion(0, 4, fakeBuffer(4), 'Peak Normalize')
+  editor.undo()
+  assert.equal(editor.state.selection, null)
+
+  // Select all, then apply: Undo brings Select all back.
+  editor.selectAll()
+  editor.replaceRegion(0, 4, fakeBuffer(4), 'Peak Normalize')
+  editor.state.selection = null
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 0, end: 4 })
+})
+
+test('undo moves a stopped playhead into the restored selection', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'playhead.wav')
+
+  // Trim to selection puts the playhead at 0, outside 2–3 s once undone.
+  editor.state.selection = { start: 2, end: 3 }
+  editor.performTrimToSelection()
+  assert.equal(editor.state.playhead, 0)
+
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 2, end: 3 })
+  assert.equal(editor.state.playhead, 2)
+})
+
+test('undo leaves a playhead already inside the restored selection where it is', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'inside.wav')
+
+  editor.state.selection = { start: 1, end: 3 }
+  editor.replaceRegion(1, 3, fakeBuffer(2), 'AirBoost')
+  editor.state.playhead = 2.5
+  editor.undo()
+  assert.equal(editor.state.playhead, 2.5)
+})
+
+test('undo clamps the playhead onto a timeline it shortened', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'clamp.wav')
+
+  // Copy 1 s and paste it at the end: 5 s long. Park the playhead at 4.8 s and
+  // undo the paste — the timeline is 4 s again.
+  editor.state.selection = { start: 0, end: 1 }
+  editor.performCopy()
+  editor.state.selection = null
+  editor.performPaste(4)
+  assert.equal(editor.totalDuration.value, 5)
+  editor.state.playhead = 4.8
+
+  editor.undo()
+  assert.equal(editor.totalDuration.value, 4)
+  assert.equal(editor.state.playhead, 4)
+})

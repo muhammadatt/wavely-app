@@ -205,6 +205,46 @@ function copySelection(sel) {
   return sel ? { start: sel.start, end: sel.end } : null
 }
 
+const WHOLE_SPAN_EPS = 1e-9
+
+/** One history entry: the document's timeline and the selection that goes with it. */
+function snapshot(doc, label, selection = doc.selection) {
+  return {
+    segments: cloneSegments(doc.segments),
+    selection: copySelection(selection),
+    label,
+    revision: doc.revision,
+  }
+}
+
+/** Push an undo entry for an edit about to happen to `doc`, and invalidate redo. */
+function recordUndo(doc, label, selection = doc.selection) {
+  const h = historyFor(doc.id)
+  h.undo.push(snapshot(doc, label, selection))
+  if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
+  h.redo.length = 0
+  doc.revision = ++revisionSeq
+  doc.undoCount = h.undo.length
+  doc.redoCount = 0
+}
+
+/**
+ * The selection an apply over [start, end] ran on. replaceRegion is called when
+ * a render COMMITS, which can be seconds after Apply, and the waveform stays
+ * usable meanwhile — so the live selection may no longer be the span that was
+ * processed. A partial span always came from a selection. A span covering the
+ * whole timeline is either Select all or an apply with nothing selected (the
+ * plugins' "whole file" fallback); it counts as a selection only if one equal
+ * to it is still in place.
+ */
+function appliedSelection(doc, start, end) {
+  const dur = getTimelineDuration(doc.segments)
+  const whole = start <= WHOLE_SPAN_EPS && end >= dur - WHOLE_SPAN_EPS
+  if (!whole) return { start, end }
+  const sel = doc.selection
+  return sel && sel.start === start && sel.end === end ? { start, end } : null
+}
+
 function historyFor(docId) {
   let h = docHistory.get(docId)
   if (!h) {
@@ -274,30 +314,45 @@ export function useEditorState() {
   function pushUndo(label = '') {
     const doc = activeDocument.value
     if (!doc) return
+    recordUndo(doc, label)
+  }
+
+  /**
+   * Move one entry from `from` to `to`, saving the current state in its place.
+   * The label travels with the state it belongs to: the entry going onto the
+   * other stack is the result of that same operation, so the reverse step can
+   * name it too.
+   */
+  function stepHistory(from, to) {
+    const doc = activeDocument.value
+    if (!doc || from.length === 0) return null
+    const entry = from.pop()
+    to.push(snapshot(doc, entry.label))
+    doc.segments = entry.segments
+    doc.revision = entry.revision
+    doc.selection = copySelection(entry.selection)
+    // The playhead is not part of history (restoring it would yank it back
+    // after the user has moved on), but it must agree with what came back: on
+    // the timeline, and — when stopped — inside a restored selection, so Play
+    // starts on what was selected. While playing, playback owns it.
+    const dur = getTimelineDuration(doc.segments)
+    if (doc.playhead > dur) doc.playhead = dur
+    const sel = doc.selection
+    if (sel && !doc.isPlaying && (doc.playhead < sel.start || doc.playhead > sel.end)) {
+      doc.playhead = sel.start
+    }
     const h = historyFor(doc.id)
-    h.undo.push({ segments: cloneSegments(doc.segments), selection: copySelection(doc.selection), label, revision: doc.revision })
-    if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
-    h.redo.length = 0
-    doc.revision = ++revisionSeq
     doc.undoCount = h.undo.length
-    doc.redoCount = 0
+    doc.redoCount = h.redo.length
+    return entry
   }
 
   function undo() {
     const doc = activeDocument.value
     if (!doc) return
     const h = historyFor(doc.id)
-    if (h.undo.length === 0) return
-    const entry = h.undo.pop()
-    // The label travels with the state it belongs to: the entry now going onto
-    // the redo stack is the result of that same operation, so redoing it can
-    // name it too.
-    h.redo.push({ segments: cloneSegments(doc.segments), selection: copySelection(doc.selection), label: entry.label, revision: doc.revision })
-    doc.segments = entry.segments
-    doc.revision = entry.revision
-    doc.selection = copySelection(entry.selection)
-    doc.undoCount = h.undo.length
-    doc.redoCount = h.redo.length
+    const entry = stepHistory(h.undo, h.redo)
+    if (!entry) return
     showToast(entry.label ? `Undid ${entry.label}` : 'Undone')
   }
 
@@ -305,14 +360,8 @@ export function useEditorState() {
     const doc = activeDocument.value
     if (!doc) return
     const h = historyFor(doc.id)
-    if (h.redo.length === 0) return
-    const entry = h.redo.pop()
-    h.undo.push({ segments: cloneSegments(doc.segments), selection: copySelection(doc.selection), label: entry.label, revision: doc.revision })
-    doc.segments = entry.segments
-    doc.revision = entry.revision
-    doc.selection = copySelection(entry.selection)
-    doc.undoCount = h.undo.length
-    doc.redoCount = h.redo.length
+    const entry = stepHistory(h.redo, h.undo)
+    if (!entry) return
     showToast(entry.label ? `Redid ${entry.label}` : 'Redone')
   }
 
@@ -648,13 +697,8 @@ export function useEditorState() {
     if (!doc) return null
     // Undo must land on the document being modified, which is not necessarily
     // the active one — a preset job can finish after the user switched tabs.
-    const h = historyFor(doc.id)
-    h.undo.push({ segments: cloneSegments(doc.segments), selection: copySelection(doc.selection), label, revision: doc.revision })
-    if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
-    h.redo.length = 0
-    doc.revision = ++revisionSeq
-    doc.undoCount = h.undo.length
-    doc.redoCount = 0
+    // Undo restores the span that was processed, not whatever is selected now.
+    recordUndo(doc, label, appliedSelection(doc, start, end))
 
     const bufferId = uuidv4()
     addBuffer(bufferId, newBuffer, doc.id)
