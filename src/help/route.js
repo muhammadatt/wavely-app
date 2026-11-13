@@ -9,6 +9,10 @@
 export function helpSlugFromPath(pathname) {
   const m = /^\/help\/?([^/]*)\/?$/.exec(pathname || '')
   if (!m) return null
-  const slug = decodeURIComponent(m[1] || '')
+  // A malformed escape (`/help/%/`) makes decodeURIComponent throw, which
+  // would blank the page during setup. Keep the raw segment instead: it
+  // matches no slug, so the page shows its not-found message.
+  let slug = m[1] || ''
+  try { slug = decodeURIComponent(slug) } catch { /* keep the raw segment */ }
   return slug || null
 }

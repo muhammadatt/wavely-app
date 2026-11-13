@@ -206,6 +206,10 @@ test('a help URL routes back to its own entry', () => {
   assert.equal(helpSlugFromPath('/help'), null)
   assert.equal(helpSlugFromPath('/'), null)
   assert.equal(helpIdForSlug('opto-smooth'), null, 'old window ids are not URLs')
+  // A malformed escape must not throw: it is an unknown page, not a blank tab.
+  assert.equal(helpSlugFromPath('/help/%/'), '%')
+  assert.equal(helpSlugFromPath('/help/%E0%A4/'), '%E0%A4')
+  assert.equal(helpIdForSlug(helpSlugFromPath('/help/%/')), null)
 })
 
 test('page URLs are the product names, unique, and never an old window id', () => {
