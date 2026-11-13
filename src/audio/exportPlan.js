@@ -1,6 +1,6 @@
 import { getTimelineDuration } from './operations.js'
-import { toWavFileName } from './download.js'
 import { ZIP_SIZE_LIMIT } from './zip.js'
+import { defaultSaveSettings, estimateSaveBytes, toSaveFileName, FORMATS } from './saveFormat.js'
 
 /**
  * The rules an export follows before any audio is rendered: what it will be
@@ -20,12 +20,27 @@ import { ZIP_SIZE_LIMIT } from './zip.js'
  */
 export const WAV_SIZE_LIMIT = 0xffffffff
 
-/** 16-bit PCM: bytes = samples × channels × 2, plus a 44-byte header. */
+/**
+ * What a document exports as: the format, depth, rate and (for MP3) bitrate of
+ * the file it was opened from — the same defaults the Save dialog opens on.
+ *
+ * ⚠ EXPORT USED TO WRITE 16-BIT WAV WHATEVER CAME IN, so an MP3 chapter came
+ * back as a WAV five times its size and a 24-bit or FLAC source lost its
+ * format. Nothing about exporting several files at once is a reason to change
+ * their type; a file whose source is unknown (or a container we cannot write,
+ * AIFF, M4A) still falls back to WAV, as Save does.
+ */
+export function exportSettingsFor(doc) {
+  const f = doc.currentFile ?? {}
+  return defaultSaveSettings(f.sourceFormat ?? null, f.sampleRate, f.channels ?? 1)
+}
+
+/** Expected bytes at the document's export settings (FLAC is an estimate). */
 export function estimatedBytes(doc) {
   const dur = getTimelineDuration(doc.segments)
   const f = doc.currentFile
   if (!f || !dur) return 0
-  return Math.round(dur * f.sampleRate) * f.channels * 2 + 44
+  return estimateSaveBytes(dur, f.channels, exportSettingsFor(doc)).bytes
 }
 
 export function totalBytes(docs) {
@@ -84,8 +99,10 @@ export function exportSizeLimit(docs) {
   if (docs.length === 0) return null
 
   if (docs.length === 1) {
-    // The estimate already carries the 44-byte header; the RIFF field counts
-    // 36 + data, so measuring the whole file is 8 bytes conservative.
+    // Only a WAV has the 32-bit size fields; FLAC and MP3 go out as they are.
+    // The estimate already carries the header; the RIFF field counts 36 + data,
+    // so measuring the whole file is 8 bytes conservative.
+    if (exportSettingsFor(docs[0]).format !== 'wav') return null
     const bytes = estimatedBytes(docs[0])
     if (bytes <= WAV_SIZE_LIMIT) return null
     return {
@@ -105,10 +122,11 @@ export function exportSizeLimit(docs) {
 }
 
 /**
- * Disambiguate names that collide once extensions are normalised to .wav.
+ * Each document's export filename — its name with its export format's
+ * extension — disambiguated where two would collide.
  *
  * Two documents can legitimately carry the same name — the same chapter opened
- * from two folders, or "take.wav" and "take.flac" — and inside a zip the second
+ * from two folders, or "take.wav" and "take.m4a" (which has no writer, so exports as WAV) — and inside a zip the second
  * would silently replace the first.
  */
 export function uniqueNames(docs) {
@@ -123,12 +141,15 @@ export function uniqueNames(docs) {
   // it is the third copy of something it may have nothing to do with.
   const taken = new Set()
   return docs.map(doc => {
-    const base = toWavFileName(doc.name)
+    const format = exportSettingsFor(doc).format
+    const base = toSaveFileName(doc.name, format)
+    const ext = base.slice(-FORMATS[format].ext.length)
+    const stem = base.slice(0, -ext.length)
     let candidate = base
     let n = 1
     while (taken.has(candidate)) {
       n += 1
-      candidate = base.replace(/\.wav$/, ` (${n}).wav`)
+      candidate = `${stem} (${n})${ext}`
     }
     taken.add(candidate)
     return candidate

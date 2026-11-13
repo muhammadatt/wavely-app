@@ -18,7 +18,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  estimatedBytes, totalBytes, formatSize, archiveBytes, exportSizeLimit, uniqueNames,
+  estimatedBytes, totalBytes, formatSize, archiveBytes, exportSizeLimit, uniqueNames, exportSettingsFor,
 } from '../../src/audio/exportPlan.js'
 import { ZIP_SIZE_LIMIT } from '../../src/audio/zip.js'
 
@@ -121,4 +121,34 @@ test('sizes read in the unit the number deserves', () => {
   assert.equal(formatSize(12_000), '12 KB')
   // Never "0 KB" for a file that exists — a 44-byte header is still a file.
   assert.equal(formatSize(44), '1 KB')
+})
+
+test('a file exports in its source format, not always WAV', () => {
+  const mp3 = { ...doc('chapter.mp3', 60, { channels: 1 }) }
+  mp3.currentFile.sourceFormat = { container: 'mp3', lossy: true, sampleRate: 44100, bitrate: 192 }
+  const flac = doc('take.flac', 60)
+  flac.currentFile.sourceFormat = { container: 'flac', lossy: false, sampleRate: 48000, bitDepth: 24 }
+  assert.equal(exportSettingsFor(mp3).format, 'mp3')
+  assert.equal(exportSettingsFor(mp3).bitrate, 192)
+  assert.deepEqual(
+    { format: exportSettingsFor(flac).format, bitDepth: exportSettingsFor(flac).bitDepth, sampleRate: exportSettingsFor(flac).sampleRate },
+    { format: 'flac', bitDepth: '24', sampleRate: 48000 },
+  )
+  assert.deepEqual(uniqueNames([mp3, flac]), ['chapter.mp3', 'take.flac'])
+  // CBR: 60 s at 192 kbps.
+  assert.equal(estimatedBytes(mp3), 60 * 192 * 125)
+  // An unknown source still exports as WAV.
+  assert.equal(exportSettingsFor(doc('x.wav')).format, 'wav')
+})
+
+test('collisions keep each file\'s own extension', () => {
+  const a = doc('take.mp3'); a.currentFile.sourceFormat = { container: 'mp3', lossy: true, sampleRate: 44100, bitrate: 128 }
+  const b = doc('take.mp3'); b.currentFile.sourceFormat = { container: 'mp3', lossy: true, sampleRate: 44100, bitrate: 128 }
+  assert.deepEqual(uniqueNames([a, b]), ['take.mp3', 'take (2).mp3'])
+})
+
+test('only a WAV is refused for its own 4 GB size fields', () => {
+  const huge = doc('long.flac', 40000, { channels: 2 })
+  huge.currentFile.sourceFormat = { container: 'flac', lossy: false, sampleRate: 44100, bitDepth: 16 }
+  assert.equal(exportSizeLimit([huge]), null)
 })

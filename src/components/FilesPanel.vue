@@ -7,6 +7,8 @@ import { useExport } from '../composables/useExport.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { formatDuration } from '../utils/format.js'
 import { documentStatus } from '../utils/documentStatus.js'
+import { exportSettingsFor } from '../audio/exportPlan.js'
+import { FORMATS } from '../audio/saveFormat.js'
 import { focusRenameInput } from '../utils/renameInput.js'
 import WaveformThumbnail from './WaveformThumbnail.vue'
 import BaseButton from './ui/BaseButton.vue'
@@ -181,12 +183,20 @@ function commitRename() {
 }
 
 // ── Status ───────────────────────────────────────────────────────────────────
-// Same definition the tab strip renders as a dot, plus the one state it leaves
-// out: a file nobody has mastered. That is worth saying here and nowhere else,
-// because this is where a narrator decides what to export for ACX — the
-// export dialog that used to say it is gone, and this panel is that screen now.
+// Only what bears on exporting the file as it stands: still processing, or
+// edited and unsaved. ⚠ NO MASTERED / NOT MASTERED: it read as if export were
+// a mastering step, and most exports are files that were edited or run through
+// plugins, never mastered (owner, November 2026). An untouched file shows its
+// format instead.
 function statusLabel(doc) {
-  return documentStatus(doc) ?? { label: 'Not mastered', color: 'rgba(255,255,255,.35)' }
+  const s = documentStatus(doc)
+  if (s?.kind === 'processing' || s?.kind === 'edited') return s
+  return null
+}
+
+// What Export writes for this file — its source's own format.
+function formatLabel(doc) {
+  return FORMATS[exportSettingsFor(doc).format].label
 }
 
 // ── Select all ───────────────────────────────────────────────────────────────
@@ -352,7 +362,11 @@ watch(documents, docs => { if (docs.length === 0) close() })
             <div class="flex items-center gap-[6px] mt-[2px]">
               <span class="font-['JetBrains_Mono'] text-[10.5px] font-semibold text-[rgba(255,255,255,.35)]">{{ docDuration(doc) }}</span>
               <span class="text-[rgba(255,255,255,.15)] text-[10px]">·</span>
-              <span class="text-[10.5px] font-bold truncate" :style="{ color: statusLabel(doc).color }">{{ statusLabel(doc).label }}</span>
+              <span class="font-['JetBrains_Mono'] text-[10.5px] font-semibold text-[rgba(255,255,255,.35)]" title="Exports in this format">{{ formatLabel(doc) }}</span>
+              <template v-if="statusLabel(doc)">
+                <span class="text-[rgba(255,255,255,.15)] text-[10px]">·</span>
+                <span class="text-[10.5px] font-bold truncate" :style="{ color: statusLabel(doc).color }">{{ statusLabel(doc).label }}</span>
+              </template>
             </div>
           </div>
 
@@ -457,7 +471,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
             </BaseButton>
           </template>
           <span v-else class="text-[11px] font-semibold text-[rgba(255,255,255,.28)]">
-            Tick files to export as WAV
+            Tick files to export in their own format
           </span>
         </div>
       </div>
