@@ -402,12 +402,12 @@ watch(doc, d => { if (!d) appState.saveDialog = null })
   <div
     ref="root"
     tabindex="-1"
-    class="fixed inset-0 z-[450] flex items-start justify-center pt-[10vh] px-4 dialog-scrim outline-none"
+    class="fixed inset-0 z-[450] flex items-start justify-center pt-[10vh] px-4 palette-scrim outline-none"
     @click.self="close"
     @keydown="onKeydown"
   >
     <div
-      class="w-full max-w-[500px] flex flex-col rounded-[18px] overflow-hidden font-['Inter'] dialog-surface"
+      class="w-full max-w-[500px] flex flex-col rounded-[18px] overflow-hidden font-['Inter'] palette-surface"
       style="animation:bounceIn .28s cubic-bezier(.34,1.4,.64,1) both"
       role="dialog"
       aria-modal="true"

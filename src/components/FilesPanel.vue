@@ -236,12 +236,12 @@ watch(documents, docs => { if (docs.length === 0) close() })
 
 <template>
   <div
-    class="fixed inset-0 z-[400] flex items-start justify-center pt-[12vh] px-4 dialog-scrim"
+    class="fixed inset-0 z-[400] flex items-start justify-center pt-[12vh] px-4 palette-scrim"
     @click.self="close"
     @keydown="onKeydown"
   >
     <div
-      class="w-full max-w-[660px] max-h-[74vh] flex flex-col rounded-[18px] overflow-hidden font-['Inter'] dialog-surface"
+      class="w-full max-w-[660px] max-h-[74vh] flex flex-col rounded-[18px] overflow-hidden font-['Inter'] palette-surface"
       style="animation:bounceIn .28s cubic-bezier(.34,1.4,.64,1) both"
       role="dialog"
       aria-modal="true"
@@ -475,7 +475,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
             </BaseButton>
           </template>
           <span v-else class="text-[11px] font-semibold text-[rgba(255,255,255,.28)]">
-            Tick files to export in their own format
+            Tick files to export
           </span>
         </div>
       </div>
