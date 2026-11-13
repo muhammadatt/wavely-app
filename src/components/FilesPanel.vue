@@ -6,7 +6,7 @@ import { useFileSave } from '../composables/useFileSave.js'
 import { useExport } from '../composables/useExport.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { formatDuration } from '../utils/format.js'
-import { documentStatus } from '../utils/documentStatus.js'
+import { documentStatus, isUnsaved } from '../utils/documentStatus.js'
 import { exportSettingsFor } from '../audio/exportPlan.js'
 import { FORMATS } from '../audio/saveFormat.js'
 import { focusRenameInput } from '../utils/renameInput.js'
@@ -188,9 +188,13 @@ function commitRename() {
 // a mastering step, and most exports are files that were edited or run through
 // plugins, never mastered (owner, November 2026). An untouched file shows its
 // format instead.
+// ⚠ Unsaved is checked ON ITS OWN, not read off `documentStatus`: that reports
+// a mastering result first, so a mastered file with new edits came back as
+// 'mastered' and filtering it out hid the Unsaved label too.
 function statusLabel(doc) {
   const s = documentStatus(doc)
-  if (s?.kind === 'processing' || s?.kind === 'edited') return s
+  if (s?.kind === 'processing') return s
+  if (isUnsaved(doc)) return { kind: 'edited', color: '#e0b84a', label: 'Unsaved' }
   return null
 }
 

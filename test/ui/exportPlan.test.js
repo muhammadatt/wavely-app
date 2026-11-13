@@ -18,7 +18,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  estimatedBytes, totalBytes, formatSize, archiveBytes, exportSizeLimit, uniqueNames, exportSettingsFor,
+  estimatedBytes, totalBytes, formatSize, archiveBytes, exportSizeLimit, uniqueNames, exportSettingsFor, encodedZipLimit,
 } from '../../src/audio/exportPlan.js'
 import { ZIP_SIZE_LIMIT } from '../../src/audio/zip.js'
 
@@ -151,4 +151,17 @@ test('only a WAV is refused for its own 4 GB size fields', () => {
   const huge = doc('long.flac', 40000, { channels: 2 })
   huge.currentFile.sourceFormat = { container: 'flac', lossy: false, sampleRate: 44100, bitDepth: 16 }
   assert.equal(exportSizeLimit([huge]), null)
+})
+
+test('names that differ only in case still collide — they unzip onto one file', () => {
+  assert.deepEqual(uniqueNames([doc('take.WAV'), doc('take.wav')]), ['take.WAV', 'take (2).wav'])
+})
+
+test('the encoded-size check refuses what the estimate let through', () => {
+  // FLAC is estimated at 60 % of PCM; incompressible audio comes in larger.
+  const big = Math.floor(ZIP_SIZE_LIMIT / 2)
+  assert.equal(encodedZipLimit([{ name: 'a.flac', size: 1000 }, { name: 'b.flac', size: 1000 }]), null)
+  const refusal = encodedZipLimit([{ name: 'a.flac', size: big }, { name: 'b.flac', size: big }])
+  assert.ok(refusal)
+  assert.match(refusal.message, /smaller batches/)
 })

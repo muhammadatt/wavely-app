@@ -4,7 +4,7 @@ import { renderTimelineForSave } from '../audio/export.js'
 import { downloadBlob } from '../audio/download.js'
 import { createZip } from '../audio/zip.js'
 import {
-  estimatedBytes, totalBytes, formatSize, exportSizeLimit, uniqueNames, exportSettingsFor,
+  estimatedBytes, totalBytes, formatSize, exportSizeLimit, uniqueNames, exportSettingsFor, encodedZipLimit,
 } from '../audio/exportPlan.js'
 
 /**
@@ -84,6 +84,11 @@ export function useExport() {
         downloadBlob(new Blob([rendered[0].data], { type: rendered[0].mime }), rendered[0].name)
         showToast(`Exported ${rendered[0].name}`)
       } else {
+        const over = encodedZipLimit(rendered.map(f => ({ name: f.name, size: f.data.byteLength })))
+        if (over) {
+          showToast(over.message, 6000)
+          return false
+        }
         const stamp = new Date().toISOString().slice(0, 10)
         downloadBlob(createZip(rendered), `wavely-export-${stamp}.zip`)
         showToast(`Exported ${rendered.length} files as a zip`)

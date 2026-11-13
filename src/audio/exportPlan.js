@@ -64,14 +64,35 @@ const ZIP_END_RECORD = 22
 
 const encoder = new TextEncoder()
 
-/** What the archive will actually weigh, headers and directory included. */
+/** What the archive will weigh, headers and directory included (estimated). */
 export function archiveBytes(docs) {
   const names = uniqueNames(docs)
-  const entries = docs.reduce((sum, doc, i) => (
-    sum + estimatedBytes(doc)
-      + ZIP_LOCAL_HEADER + ZIP_CENTRAL_RECORD + 2 * encoder.encode(names[i]).length
-  ), 0)
-  return entries + ZIP_END_RECORD
+  return zipBytesOf(docs.map((doc, i) => ({ name: names[i], size: estimatedBytes(doc) })))
+}
+
+/** An archive's exact size for entries of known `{ name, size }`. */
+export function zipBytesOf(entries) {
+  return entries.reduce((sum, { name, size }) => (
+    sum + size + ZIP_LOCAL_HEADER + ZIP_CENTRAL_RECORD + 2 * encoder.encode(name).length
+  ), 0) + ZIP_END_RECORD
+}
+
+/**
+ * The refusal for an archive of already-ENCODED entries, or null when it fits.
+ *
+ * ⚠ THE PREFLIGHT IS AN ESTIMATE AND CANNOT BE THE LAST CHECK. FLAC's size is
+ * guessed at 60 % of PCM; incompressible material comes in larger, so a
+ * selection the preflight passed can still cross 4 GB once encoded — and the
+ * zip writer wraps its 32-bit offsets rather than refusing.
+ */
+export function encodedZipLimit(entries) {
+  const bytes = zipBytesOf(entries)
+  if (bytes <= ZIP_SIZE_LIMIT) return null
+  return {
+    bytes,
+    message: `These files encode to ${formatSize(bytes)} — over the 4 GB zip limit. `
+      + 'Export in smaller batches.',
+  }
 }
 
 /**
@@ -139,6 +160,9 @@ export function uniqueNames(docs) {
   // is not renumbered into the generated run. Uglier, but "chapter (2).wav" is
   // the name the user gave that file, and calling it "chapter (3).wav" claims
   // it is the third copy of something it may have nothing to do with.
+  // ⚠ COLLISIONS ARE CASE-INSENSITIVE. Extensions keep their case now
+  // ("take.WAV" stays as typed), and on Windows or macOS "take.WAV" and
+  // "take.wav" unzip onto the same file. The key folds case; the name keeps it.
   const taken = new Set()
   return docs.map(doc => {
     const format = exportSettingsFor(doc).format
@@ -147,11 +171,11 @@ export function uniqueNames(docs) {
     const stem = base.slice(0, -ext.length)
     let candidate = base
     let n = 1
-    while (taken.has(candidate)) {
+    while (taken.has(candidate.toLowerCase())) {
       n += 1
       candidate = `${stem} (${n})${ext}`
     }
-    taken.add(candidate)
+    taken.add(candidate.toLowerCase())
     return candidate
   })
 }
