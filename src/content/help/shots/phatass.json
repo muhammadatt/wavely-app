@@ -1,0 +1,54 @@
+{
+  "panel": {
+    "src": "/help/shots/phatass/panel.jpg",
+    "w": 820,
+    "h": 602
+  },
+  "controls": {
+    "saturation": {
+      "src": "/help/shots/phatass/saturation.png",
+      "w": 640,
+      "h": 107
+    },
+    "drive": {
+      "src": "/help/shots/phatass/drive.png",
+      "w": 170,
+      "h": 202
+    },
+    "tape-type": {
+      "src": "/help/shots/phatass/tape-type.png",
+      "w": 127,
+      "h": 39
+    },
+    "tape-speed": {
+      "src": "/help/shots/phatass/tape-speed.png",
+      "w": 184,
+      "h": 182
+    },
+    "warmth": {
+      "src": "/help/shots/phatass/warmth.png",
+      "w": 168,
+      "h": 202
+    },
+    "character": {
+      "src": "/help/shots/phatass/character.png",
+      "w": 133,
+      "h": 39
+    },
+    "mix": {
+      "src": "/help/shots/phatass/mix.png",
+      "w": 640,
+      "h": 76
+    },
+    "in": {
+      "src": "/help/shots/phatass/in.png",
+      "w": 83,
+      "h": 395
+    },
+    "out": {
+      "src": "/help/shots/phatass/out.png",
+      "w": 83,
+      "h": 395
+    }
+  }
+}

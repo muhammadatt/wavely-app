@@ -186,6 +186,7 @@ const SECOND = 'var(--m-second)'
          This one covers the empty canvas only. The band dots carry their own,
          which the browser prefers over this while the pointer is on one. -->
     <EqPlot
+      data-help="plot"
       design="modula"
       title="Click anywhere on the plot to add a band · click a value under a knob to type an exact one"
       :bands="eq.bands.value"
@@ -230,6 +231,7 @@ const SECOND = 'var(--m-second)'
         <!-- Gain: the one thing here that is HOW MUCH, so it takes the accent.
              A notch or pass filter has no gain term — shown, not dimmed. -->
         <ModulaKnob
+          data-help="band-gain"
           variant="ring" :size="50" bipolar
           :model-value="gainInert(band) ? 0 : band.gainDb"
           :min="PARAM_RANGES.gainDb[0]" :max="PARAM_RANGES.gainDb[1]" :step="0.1"
@@ -239,7 +241,7 @@ const SECOND = 'var(--m-second)'
           @update:model-value="eq.setGain(band.id, $event)"
         />
 
-        <div class="eq-strip-shape">
+        <div class="eq-strip-shape" data-help="band-shape">
           <FilterShapePicker
             design="modula"
             :model-value="band.type"
@@ -250,6 +252,7 @@ const SECOND = 'var(--m-second)'
         </div>
 
         <ModulaKnob
+          data-help="band-freq"
           variant="ring" :size="42" scale="log" editable show-value
           :model-value="band.frequencyHz"
           :min="PARAM_RANGES.frequencyHz[0]" :max="PARAM_RANGES.frequencyHz[1]"
@@ -260,6 +263,7 @@ const SECOND = 'var(--m-second)'
         />
 
         <ModulaKnob
+          data-help="band-width"
           variant="ring" :size="42" scale="log" editable show-value
           :model-value="band.q"
           :min="qRangeForBand(band)[0]" :max="qRangeForBand(band)[1]"
@@ -271,12 +275,14 @@ const SECOND = 'var(--m-second)'
 
         <div class="eq-strip-chips">
           <ModulaChip
+            data-help="band-on"
             variant="flat" :model-value="band.enabled" :label="band.enabled ? 'ON' : 'OFF'" :color="SECOND"
             :title="band.enabled ? 'Turn this band off' : 'Turn this band on'"
             :aria-label="`Band ${i + 1} on`"
             @update:model-value="eq.toggleBand(band.id)"
           />
           <ModulaChip
+            data-help="band-solo"
             variant="flat" :model-value="eq.soloBandId.value === band.id" label="S" color="var(--m-second)"
             :disabled="!band.enabled"
             :title="band.enabled ? 'Hear this band alone' : 'Turn this band on to solo it'"
@@ -284,6 +290,7 @@ const SECOND = 'var(--m-second)'
             @update:model-value="eq.soloBandId.value === band.id ? eq.clearSolo() : eq.setSolo(band.id)"
           />
           <ModulaChip
+            data-help="band-remove"
             variant="flat" label="×" danger title="Remove this band" :aria-label="`Remove band ${i + 1}`"
             @click="eq.removeBand(band.id)"
           />

@@ -114,7 +114,7 @@ async function applyAndClose() {
     <div class="inf-grid">
       <!-- IN, with the Input trim: it drives the curve, which is not level-invariant. -->
       <div class="inf-meter">
-        <LevelMeter variant="modula" scale-side="left" :levels="inInputLevels" label="IN" :height="METER_H">
+        <LevelMeter data-help="in" variant="modula" scale-side="left" :levels="inInputLevels" label="IN" :height="METER_H">
           <template #below>
             <ModulaKnob
               variant="trim" :model-value="inInputDb" show-value
@@ -131,7 +131,7 @@ async function applyAndClose() {
       <div class="inf-panel">
         <div class="inf-captions"><span>EFFECT</span><span>CURVE</span></div>
         <div class="inf-row">
-          <div class="inf-fader" title="Effect: how much of the curve's output is blended with the dry signal. 0 skips the curve outright">
+          <div class="inf-fader" data-help="effect" title="Effect: how much of the curve's output is blended with the dry signal. 0 skips the curve outright">
             <ModulaFader
               :model-value="inEffect" :min="0" :max="1" :step="0.001"
               :default-value="INFLATOR_DEFAULTS.effect" :format-value="percent"
@@ -142,18 +142,19 @@ async function applyAndClose() {
 
           <div class="inf-centre">
             <ModulaMiniLadder
+              data-help="lift"
               :values="liftValues" :rows="14" :color="ACCENT" :reading="liftText" label="LIFT"
               title="LIFT: what the curve is adding right now (the ladder, measured as output against input) and the most it can add — on the quietest material — at these settings (the number)"
             />
             <div class="inf-toggles">
-              <div class="inf-toggle">
+              <div class="inf-toggle" data-help="band-split">
                 <ModulaLedPill
                   :model-value="inBandSplit" label="BAND SPLIT" :color="ACCENT" :disabled="!inPreview"
                   @update:model-value="syncBandSplit"
                 />
                 <span class="inf-cap">{{ inBandSplit ? 'curve runs on 240 Hz / 2.4 kHz bands' : 'curve runs on the whole signal' }}</span>
               </div>
-              <div class="inf-toggle">
+              <div class="inf-toggle" data-help="clip">
                 <ModulaLedPill
                   :model-value="inClip" label="CLIP 0 dB" :color="ACCENT" :disabled="!inPreview"
                   @update:model-value="syncClip"
@@ -166,7 +167,7 @@ async function applyAndClose() {
           <!-- CURVE IS SHAPE, NOT DEPTH — f(1) = 1 at every setting, so this
                cannot move the ceiling. What it moves is the small-signal lift,
                which the LIFT readout beside it prints. -->
-          <div class="inf-fader" title="Curve: the shape of the curve. Positive lifts quiet material more; it never moves the ceiling">
+          <div class="inf-fader" data-help="curve" title="Curve: the shape of the curve. Positive lifts quiet material more; it never moves the ceiling">
             <ModulaFader
               :model-value="inCurve" :min="CURVE_MIN_PCT" :max="CURVE_MAX_PCT" :step="0.1"
               :default-value="INFLATOR_DEFAULTS.curve" :unity="0" :format-value="signed"
@@ -188,7 +189,7 @@ async function applyAndClose() {
 
       <!-- OUT, with the Output trim: cut only. -->
       <div class="inf-meter">
-        <LevelMeter variant="modula" scale-side="right" :levels="inOutputLevels" label="OUT" :height="METER_H">
+        <LevelMeter data-help="out" variant="modula" scale-side="right" :levels="inOutputLevels" label="OUT" :height="METER_H">
           <template #below>
             <ModulaKnob
               variant="trim" :model-value="inOutputDb" show-value
