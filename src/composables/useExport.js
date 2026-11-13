@@ -1,15 +1,16 @@
 import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
-import { renderTimelineToWav } from '../audio/export.js'
+import { renderTimelineForSave } from '../audio/export.js'
 import { downloadBlob } from '../audio/download.js'
 import { createZip } from '../audio/zip.js'
 import {
-  estimatedBytes, totalBytes, formatSize, exportSizeLimit, uniqueNames,
+  estimatedBytes, totalBytes, formatSize, exportSizeLimit, uniqueNames, exportSettingsFor, encodedZipLimit,
 } from '../audio/exportPlan.js'
 
 /**
- * Export: render the chosen documents to WAV and hand them over, one file or a
- * zip of many.
+ * Export: render the chosen documents and hand them over, one file or a zip of
+ * many — each in its source's own format, depth and rate (`exportSettingsFor`,
+ * the Save dialog's defaults), through the same encoder Save uses.
  *
  * The files panel is the only surface that exports (tick files, then Export;
  * Ctrl+E opens it with the active file ticked). A separate export dialog
@@ -57,14 +58,15 @@ export function useExport() {
 
       for (const [i, doc] of docs.entries()) {
         // Yield to the browser between files so the progress readout actually
-        // paints — rendering is synchronous and would otherwise freeze the UI
-        // solid until every file was done.
+        // paints — the timeline render is synchronous and would otherwise
+        // freeze the UI solid until every file was done.
         await new Promise(r => setTimeout(r, 0))
         try {
-          const wav = renderTimelineToWav(
-            doc.segments, doc.currentFile.sampleRate, doc.currentFile.channels
+          const file = await renderTimelineForSave(
+            doc.segments, doc.currentFile.sampleRate, doc.currentFile.channels,
+            exportSettingsFor(doc),
           )
-          if (wav) rendered.push({ name: names[i], data: wav })
+          if (file) rendered.push({ name: names[i], data: file.bytes, mime: file.mime })
           else failed.push(doc.name)
         } catch (err) {
           console.error(`Failed to render ${doc.name}:`, err)
@@ -79,9 +81,14 @@ export function useExport() {
       }
 
       if (rendered.length === 1) {
-        downloadBlob(new Blob([rendered[0].data], { type: 'audio/wav' }), rendered[0].name)
+        downloadBlob(new Blob([rendered[0].data], { type: rendered[0].mime }), rendered[0].name)
         showToast(`Exported ${rendered[0].name}`)
       } else {
+        const over = encodedZipLimit(rendered.map(f => ({ name: f.name, size: f.data.byteLength })))
+        if (over) {
+          showToast(over.message, 6000)
+          return false
+        }
         const stamp = new Date().toISOString().slice(0, 10)
         downloadBlob(createZip(rendered), `wavely-export-${stamp}.zip`)
         showToast(`Exported ${rendered.length} files as a zip`)
@@ -98,6 +105,6 @@ export function useExport() {
 
   return {
     isExporting, exportProgress, exportDocuments,
-    estimatedBytes, totalBytes, formatSize, exportSizeLimit, uniqueNames,
+    estimatedBytes, totalBytes, formatSize, exportSizeLimit, uniqueNames, exportSettingsFor,
   }
 }

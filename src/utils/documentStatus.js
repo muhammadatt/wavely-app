@@ -31,16 +31,23 @@ export function documentStatus(doc) {
     return { kind: 'mastered', color: '#7fe9f6', label: 'Mastered', title: 'Mastered' }
   }
 
-  // Edited-and-unsaved, rather than merely edited: once the timeline has been
-  // written to disk there is nothing here for the user to act on. Falls back to
-  // the old undo-history test for document-shaped objects that predate
-  // revision tracking.
-  const dirty = doc.revision === undefined
-    ? doc.undoCount > 0
-    : doc.revision !== doc.savedRevision
-  if (dirty) {
+  if (isUnsaved(doc)) {
     return { kind: 'edited', color: '#e0b84a', label: 'Unsaved', title: 'Unsaved edits' }
   }
 
   return null
+}
+
+/**
+ * Edited-and-unsaved, rather than merely edited: once the timeline has been
+ * written to disk there is nothing for the user to act on. Falls back to the
+ * old undo-history test for document-shaped objects that predate revision
+ * tracking. Separate from `documentStatus` because that reports a mastering
+ * result ahead of it, and a mastered file can still have unsaved edits.
+ */
+export function isUnsaved(doc) {
+  if (!doc) return false
+  return doc.revision === undefined
+    ? doc.undoCount > 0
+    : doc.revision !== doc.savedRevision
 }

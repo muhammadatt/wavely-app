@@ -13,7 +13,7 @@ import assert from 'node:assert/strict'
 import { useEditorState } from '../../src/composables/useEditorState.js'
 import { saveTargetKind, ensureWritePermission } from '../../src/audio/fileSave.js'
 import { toWavFileName } from '../../src/audio/download.js'
-import { documentStatus } from '../../src/utils/documentStatus.js'
+import { documentStatus, isUnsaved } from '../../src/utils/documentStatus.js'
 
 function fakeBuffer(duration = 4) {
   return { duration, sampleRate: 48000, numberOfChannels: 1 }
@@ -212,4 +212,11 @@ test('a save marks the revision it rendered, so an edit made while it encoded st
   assert.equal(editor.documentHasUnsavedWork(docId), true)
   editor.markDocumentSaved(docId)
   assert.equal(editor.documentHasUnsavedWork(docId), false)
+})
+
+test('isUnsaved holds for a mastered file with new edits', () => {
+  const doc = { revision: 3, savedRevision: 2, processingReport: {} }
+  assert.equal(documentStatus(doc).kind, 'mastered')
+  assert.equal(isUnsaved(doc), true)
+  assert.equal(isUnsaved({ revision: 2, savedRevision: 2 }), false)
 })
