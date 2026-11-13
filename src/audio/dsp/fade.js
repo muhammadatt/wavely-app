@@ -56,3 +56,21 @@ export function applyFade(channels, direction, curve) {
   }
   return channels
 }
+
+/**
+ * An SVG path of the fade's gain curve for the panel's icons, drawn from
+ * fadeGain itself so the picture is the curve the audio gets. The box runs
+ * x0 → x1 left to right and yBottom (silence) → yTop (full level); 'out' is
+ * the 'in' curve mirrored, as applyFade renders it.
+ */
+export function fadeCurvePath(curve, direction, { x0 = 2, x1 = 46, yTop = 2, yBottom = 22, points = 32 } = {}) {
+  const parts = []
+  for (let i = 0; i <= points; i++) {
+    const t = i / points
+    const g = fadeGain(curve, direction === 'out' ? 1 - t : t)
+    const x = x0 + (x1 - x0) * t
+    const y = yBottom - (yBottom - yTop) * g
+    parts.push(`${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`)
+  }
+  return parts.join(' ')
+}

@@ -3,6 +3,7 @@ import { ref, computed } from "vue"
 import { useEditorState, DocumentSwitchedError } from "../../composables/useEditorState.js"
 import ApplyAction from '../ui/ApplyAction.vue'
 import { renderFadeRegion, computePeakCache } from '../../audio/processing.js'
+import { fadeCurvePath } from '../../audio/dsp/fade.js'
 
 const {
   state, hasSelection, getAudioContext, replaceRegion, setPeakCache,
@@ -17,11 +18,12 @@ const fadeTypes = [
   { id: "out", label: "Fade Out", path: "M2 2 Q24 22 46 22" },
 ]
 
-const curveTypes = [
-  { id: "linear", label: "Linear", path: "M2 22 C12 22 36 2 46 2" },
-  { id: "expo", label: "Expo", path: "M2 22 C2 22 10 2 46 2" },
-  { id: "s-curve", label: "S-Curve", path: "M2 22 C16 22 32 2 46 2" },
-]
+// Each curve icon is the real gain curve, drawn in the chosen direction.
+const curveTypes = computed(() => [
+  { id: "linear", label: "Linear" },
+  { id: "expo", label: "Expo" },
+  { id: "s-curve", label: "S-Curve" },
+].map((c) => ({ ...c, path: fadeCurvePath(c.id, fadeType.value) })))
 
 // The selection is the fade: its length is the fade's length.
 const fadeSeconds = computed(() => (state.selection ? state.selection.end - state.selection.start : 0))
@@ -53,7 +55,7 @@ async function apply() {
     pin.check()
     const bufferId = replaceRegion(start, end, buffer, `the ${label}`, pin.docId)
     setPeakCache(bufferId, cache)
-    const curveLabel = curveTypes.find((c) => c.id === curve)?.label ?? curve
+    const curveLabel = curveTypes.value.find((c) => c.id === curve)?.label ?? curve
     showToast(`${label[0].toUpperCase()}${label.slice(1)} applied (${(end - start).toFixed(2)} s, ${curveLabel})`)
   } catch (err) {
     console.error("Fade failed:", err)
@@ -109,7 +111,8 @@ async function apply() {
                 :d="ct.path"
                 stroke="currentColor"
                 stroke-width="2"
-                stroke-linecap="round" />
+                stroke-linecap="round"
+                stroke-linejoin="round" />
             </svg>
             {{ ct.label }}
           </button>

@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { FADE_CURVES, fadeGain, applyFade } from '../../src/audio/dsp/fade.js'
+import { FADE_CURVES, fadeGain, applyFade, fadeCurvePath } from '../../src/audio/dsp/fade.js'
 
 const ones = (n) => new Float32Array(n).fill(1)
 
@@ -53,3 +53,20 @@ test('fades apply the same gain to every channel', () => {
   applyFade([l, r], 'in', 's-curve')
   for (let i = 0; i < 64; i++) assert.ok(Math.abs(l[i] / 0.5 + r[i] / 0.25) < 1e-6 || l[i] === 0)
 })
+
+test('the panel icons draw the real curve, mirrored for a fade out', () => {
+  const pts = (d) => d.split(/[ML]/).filter(Boolean).map((p) => p.trim().split(' ').map(Number))
+  for (const curve of FADE_CURVES) {
+    const up = pts(fadeCurvePath(curve, 'in'))
+    const down = pts(fadeCurvePath(curve, 'out'))
+    // In starts at the bottom (silence, y 22) and ends at the top (y 2); out the reverse.
+    assert.deepEqual(up[0], [2, 22]); assert.deepEqual(up[up.length - 1], [46, 2])
+    assert.deepEqual(down[0], [2, 2]); assert.deepEqual(down[down.length - 1], [46, 22])
+    // Out is in mirrored left to right.
+    for (let i = 0; i < up.length; i++) assert.equal(down[i][1], up[up.length - 1 - i][1])
+  }
+  // Expo rises late: at the midpoint it is still near silence.
+  const mid = pts(fadeCurvePath('expo', 'in'))[16]
+  assert.ok(mid[1] > 21, `expo midpoint y ${mid[1]}`)
+})
+
