@@ -127,13 +127,14 @@ async function applyAndClose() {
   >
     <div class="eq-toolbar">
       <ModulaLedPill
+        data-help="analyzer"
         size="sm" label="ANALYZER" color="var(--m-second)"
         :model-value="eq.showAnalyzer.value"
         title="Draw the live spectrum behind the curve"
         @update:model-value="eq.showAnalyzer.value = $event"
       />
       <span class="eq-count">{{ activeBandCount > 0 ? `${activeBandCount} band${activeBandCount === 1 ? '' : 's'} active` : 'flat' }}</span>
-      <ModulaButton variant="ghost" size="sm" title="Back to the four neutral bands this opened with" @click="eq.resetBands()">Reset</ModulaButton>
+      <ModulaButton data-help="reset" variant="ghost" size="sm" title="Back to the four neutral bands this opened with" @click="eq.resetBands()">Reset</ModulaButton>
     </div>
 
     <GeneralView
@@ -143,7 +144,7 @@ async function applyAndClose() {
       <!-- The meters live on the strip row, pinned to the outside, each with
            its trim under it: Input ahead of the filters, Output after them. -->
       <template #left>
-        <LevelMeter variant="modula" scale-side="left" :levels="eq.inputLevels.value" label="IN" :height="METER_H">
+        <LevelMeter data-help="in" variant="modula" scale-side="left" :levels="eq.inputLevels.value" label="IN" :height="METER_H">
           <template #below>
             <ModulaKnob
               variant="trim" :model-value="eq.inputTrim.value" show-value
@@ -156,7 +157,7 @@ async function applyAndClose() {
         </LevelMeter>
       </template>
       <template #right>
-        <LevelMeter variant="modula" scale-side="right" :levels="eq.outputLevels.value" label="OUT" :height="METER_H">
+        <LevelMeter data-help="out" variant="modula" scale-side="right" :levels="eq.outputLevels.value" label="OUT" :height="METER_H">
           <template #below>
             <ModulaKnob
               variant="trim" :model-value="eq.outputTrim.value" show-value

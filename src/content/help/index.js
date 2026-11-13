@@ -1,5 +1,13 @@
 /**
- * Per-effect help content — the text behind the harness's `?` button.
+ * Per-effect help content — the pages behind the harness's `?` button.
+ *
+ * ── THE PAGES LIVE ON THEIR OWN URL ─────────────────────────────────────────
+ * Each entry is rendered as a standalone page at `/help/<window-id>/` (the
+ * `help/index.html` entry, `src/help/`), which the `?` opens in a new browser
+ * tab. It used to be an overlay inside the plugin window, and the windows are
+ * small and all different sizes, so the same text read differently in every
+ * one. The page imports nothing from the editor — only this directory — so it
+ * loads fast and cannot pull the audio engine into a help tab.
  *
  * ── THE SHAPE IS FIXED SO THE PANEL CANNOT DRIFT ────────────────────────────
  * Each entry is data, not markup. There is no rich text, no markdown and no
@@ -27,32 +35,53 @@
  *                       audio. Written like the registry's own `desc` — a verb
  *                       phrase about the user's file, not about the DSP.
  *
- *   whenToUse string[]  Required, 1–5 entries. The situations that should make
- *                       someone reach for this rather than its neighbours. This
- *                       is the section that earns the panel: a control list can
- *                       be inferred from the faceplate, "when is this the right
- *                       tool" cannot.
+ *   intro     string[]  Required, 1–3 paragraphs. The page's Intro: what the
+ *                       plugin is (and what it is modelled on, where it is),
+ *                       what it is for, and when to reach for it rather than
+ *                       its neighbours. Prose, not a list
  *
- *   controls  [{ label, text }]
- *                       Required. One entry per control on the faceplate, in
- *                       the order they appear on it. `label` must match what is
- *                       printed on the panel exactly — a help entry naming a
- *                       knob that is not there is worse than no entry.
+ *   controls  [control]  Required. One entry per control on the faceplate, in
+ *                       the order they appear on it (fields below). `label`
+ *                       must match what is printed on the panel exactly — a
+ *                       help entry naming a knob that is not there is worse
+ *                       than no entry. Controls that are not on the panel
+ *                       (bench rows, pinned parameters) are not documented.
  *
- *   steps     string[]  Optional. An ordered walkthrough, for effects where the
- *                       order genuinely matters (anything with an ANALYSE pass,
- *                       or a measurement that has to precede a setting).
+ *   quickStart string[]  Required, 2–6 entries. The fastest route from opening
+ *                       the window to a good result, in order — the manuals'
+ *                       "Quick Start" (Waves' CLA-2A and Parallel Particles
+ *                       guides are the model). Name the controls as printed
  *
- *   notes     string[]  Optional. What is easy to get wrong, and anything the
- *                       panel implies but does not say — a latency cost, a
- *                       control that only applies in one mode, a limit.
+ *   notes     string[]  Optional. The "Worth knowing" tips (see VOICE below)
+ *
+ * ── A CONTROL ENTRY ─────────────────────────────────────────────────────────
+ *
+ *   label     string    Required. Exactly as printed on the panel
+ *   text      string    Required. One sentence: what it controls
+ *   group     string    Optional. The panel section it sits in (DE-ESS, AIR…);
+ *                       consecutive controls with the same group share a
+ *                       heading on the page
+ *   details   string[]  Optional. Further paragraphs: how it behaves, what it
+ *                       interacts with, the technical detail behind it
+ *   range     string    Optional. Its travel, with units: `0 to 100`,
+ *                       `−24 to +24 dB in 0.1 dB steps`, `COMP, LIMIT`
+ *   default   string    Optional. What a fresh window opens at
+ *   shot      string    Optional. A `data-help` id carried by the control's
+ *                       element on the panel. `npm run help:shots` crops it
+ *                       into `public/help/shots/<id>/<shot>.png`; the page shows
+ *                       the crop beside the entry. The whole window is always
+ *                       shot as the Interface image
  *
  * ── VOICE ───────────────────────────────────────────────────────────────────
- * The product's rules apply here and are partly enforced by the test: second
- * person, present tense, sentence case, exact numbers with units, and **no
- * terminal punctuation** — every string ends bare, the same as every other
- * string in the app. Write one clause per entry rather than a paragraph; two
- * sentences in one bullet is a sign it should be two bullets. No emoji.
+ * Partly enforced by the test: second person, present tense, sentence case,
+ * exact numbers with units, no emoji. Prose (summary, intro, quick start,
+ * control text and details, notes) ends every sentence with a full stop —
+ * these are pages to read, not UI strings. Labels, groups, ranges and defaults
+ * are names and values copied from the panel and stay bare.
+ *
+ * Notes are TIPS: what to try, what to reach for instead, what order to work
+ * in, what is easy to get wrong. Not how the plugin works inside — no latency
+ * figures, measurement mechanics or history of what moved where.
  */
 
 import airBand from './air-band.js'
@@ -105,6 +134,96 @@ export const HELP = {
   'vocal-saturation': vocalSaturation,
   voicerx,
   'vox-pressor': voxPressor,
+}
+
+/**
+ * What the help pages print around an entry: its title and the toolbar category
+ * it is filed under, in toolbar order — the index page lists them this way.
+ *
+ * ⚠ It repeats the registry's `label`, `category` and `release` on purpose: the
+ * registry imports every faceplate, and a help tab must not load the editor to
+ * learn a name. `test/ui/helpContent.test.js` reads them back out of
+ * `src/ui/registry.js`, so the two cannot drift.
+ *
+ *   release: 'dev'  not on the index or in the sidebar in ANY build — they
+ *                   list shipping effects only — and in a production build no
+ *                   page, no screenshots and no link from a window. A dev build
+ *                   still serves the page itself, so its `?` works there
+ *
+ * Every page's URL is its product name (`helpSlug`), never the window id: the
+ * ids keep old names (`opto-smooth` is LA Vintage 2A).
+ */
+export const HELP_CATEGORIES = [
+  { id: 'level', label: 'Level' },
+  { id: 'dynamics', label: 'Dynamics' },
+  { id: 'tone', label: 'Tone' },
+  { id: 'clean', label: 'Fix' },
+  { id: null, label: 'Workflow' },
+]
+
+export const HELP_META = {
+  normalize: { title: 'Peak Normalize', category: 'level' },
+  loudness: { title: 'Loudness Normalize', category: 'level' },
+  'auto-leveler': { title: 'Auto Leveler', category: 'dynamics' },
+  'soft-clipper': { title: 'Soft Clipper', category: 'dynamics' },
+  'opto-smooth': { title: 'LA Vintage 2A', category: 'dynamics' },
+  'fet-punch': { title: 'LA Classic 76', category: 'dynamics' },
+  'vox-pressor': { title: 'VoxPressor', category: 'dynamics' },
+  'scheps-parallel': { title: 'Scheps Parallel', category: 'dynamics', release: 'dev' },
+  inflator: { title: 'Cambridge Inflator', category: 'dynamics' },
+  'manual-eq': { title: 'EQ', category: 'tone' },
+  voicerx: { title: 'VoiceRx', category: 'tone', release: 'dev' },
+  'air-band': { title: 'Air Boost', category: 'tone' },
+  phatass: { title: 'PHAT*SS', category: 'tone' },
+  'vocal-saturation': { title: 'Tube Saturation', category: 'tone', release: 'dev' },
+  'saturation-bench': { title: 'Saturation Workbench', category: 'tone' },
+  'noise-reduction': { title: 'Noise Reduction', category: 'clean' },
+  'de-esser': { title: 'De-Esser', category: 'clean' },
+  'clip-gain-deesser': { title: 'Sibilance Editor', category: 'clean', release: 'dev' },
+  'hf-limiter': { title: 'Hi-Freq Limiter', category: 'clean' },
+  'resonance-suppressor': { title: 'Reso Soothe', category: 'clean' },
+  plosive: { title: 'Plosive Tamer', category: 'clean', release: 'dev' },
+  'hum-remover': { title: 'Hum Remover', category: 'clean' },
+  'spectrum-analyzer': { title: 'Spectrum Analyzer', category: 'clean' },
+  'plugin-chain': { title: 'Effect Chain', category: null },
+}
+
+/** The ids with a page in this build (dev-only ones only in dev). */
+export function publishedHelpIds(devBuild) {
+  return Object.keys(HELP_META).filter(id => devBuild || HELP_META[id].release !== 'dev')
+}
+
+/** The ids the index and sidebar list: shipping effects only, in every build. */
+export function listedHelpIds() {
+  return Object.keys(HELP_META).filter(id => HELP_META[id].release !== 'dev')
+}
+
+/**
+ * A page's URL segment, from its product name: `LA Vintage 2A` →
+ * `la-vintage-2a`, `PHAT*SS` → `phatss`.
+ */
+export function helpSlug(windowId) {
+  return HELP_META[windowId].title
+    .toLowerCase()
+    .replace(/[*']/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+const ID_BY_SLUG = new Map(Object.keys(HELP_META).map(id => [helpSlug(id), id]))
+
+/** The window id a URL segment names, or null. */
+export function helpIdForSlug(slug) {
+  return ID_BY_SLUG.get(slug) ?? null
+}
+
+/**
+ * The URL of an effect's help page. Trailing slash: the build emits each page
+ * as `help/<slug>/index.html`, which every static host serves at this path
+ * with no rewrite rule.
+ */
+export function helpUrl(windowId) {
+  return `/help/${helpSlug(windowId)}/`
 }
 
 /**

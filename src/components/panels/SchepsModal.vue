@@ -182,17 +182,17 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="sc-grid">
-      <div class="sc-meter">
+      <div class="sc-meter" data-help="input-meter">
         <LevelMeter variant="modula" scale-side="left" :levels="schepsInputLevels" label="IN" :height="METER_H" />
       </div>
 
       <div class="sc-panel">
         <!-- The wet path's gain reduction, not the summed output's: the blend
              only passes a fraction of it on. -->
-        <GainReductionBar :reduction-db="schepsReduction" :accent="ACCENT" />
+        <GainReductionBar data-help="reduction" :reduction-db="schepsReduction" :accent="ACCENT" />
 
         <!-- Response curve: pre, post, and the net of the two -->
-        <div class="sc-curve">
+        <div class="sc-curve" data-help="curve">
           <svg
             :viewBox="`0 0 ${CURVE_W} ${CURVE_H}`"
             class="sc-well"
@@ -239,7 +239,7 @@ async function applyAndClose() {
         </div>
 
         <div class="sc-controls">
-          <div class="sc-col">
+          <div class="sc-col" data-help="character">
             <span class="m-caption">Character</span>
             <ModulaSegmented
               :model-value="schepsCharacter" :options="CHARACTER_OPTIONS"
@@ -251,6 +251,7 @@ async function applyAndClose() {
 
           <ModulaKnob
             variant="ticks" :size="130" show-value editable
+            data-help="squash"
             :model-value="schepsSquash" :min="0" :max="100" :step="1"
             :default-value="SCHEPS_DEFAULTS.squash"
             label="Squash" :color="ACCENT" :format-value="formatSquash" :disabled="!schepsPreview"
@@ -259,6 +260,7 @@ async function applyAndClose() {
           />
           <ModulaKnob
             variant="ticks" :size="130" show-value editable
+            data-help="mix"
             :model-value="schepsMix" :min="0" :max="100" :step="1"
             :default-value="SCHEPS_DEFAULTS.mix"
             label="Mix" :color="ACCENT" :format-value="formatMix" :disabled="!schepsPreview"
@@ -270,7 +272,7 @@ async function applyAndClose() {
                pushing Mix changes character rather than loudness. Switching
                it off drops to a textbook equal-power crossfade with the wet
                path at whatever level the chain leaves it. -->
-          <div class="sc-col">
+          <div class="sc-col" data-help="auto-trim">
             <ModulaLedPill
               label="AUTO TRIM" :color="ACCENT"
               :model-value="schepsAutoTrim" :disabled="!schepsPreview"
@@ -285,9 +287,10 @@ async function applyAndClose() {
       </div>
 
       <div class="sc-meter">
-        <LevelMeter variant="modula" scale-side="right" :levels="schepsOutputLevels" label="OUT" :height="METER_H">
+        <LevelMeter data-help="output-meter" variant="modula" scale-side="right" :levels="schepsOutputLevels" label="OUT" :height="METER_H">
           <template #below>
             <ModulaKnob
+              data-help="output"
               variant="trim" :model-value="schepsOutput" show-value
               :min="SCHEPS_OUTPUT_MIN_DB" :max="SCHEPS_OUTPUT_MAX_DB" :step="0.1"
               :default-value="SCHEPS_DEFAULTS.output" :format-value="formatOutput"

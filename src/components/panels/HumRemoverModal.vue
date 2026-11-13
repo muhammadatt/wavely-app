@@ -171,14 +171,14 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="hr-grid">
-      <div class="hr-meter">
+      <div class="hr-meter" data-help="in-meter">
         <LevelMeter variant="modula" scale-side="left" :levels="humInputLevels" label="IN" :height="METER_H" />
       </div>
 
       <div class="hr-display">
         <!-- Mains frequency + analyse -->
         <div class="hr-top">
-          <div class="hr-mains">
+          <div class="hr-mains" data-help="mains">
             <span class="m-caption">Mains frequency</span>
             <ModulaSegmented
               :model-value="humFundamental" :options="MAINS_OPTIONS"
@@ -187,13 +187,14 @@ async function applyAndClose() {
             />
           </div>
           <ModulaButton
+            data-help="analyse"
             variant="accent" :disabled="humAnalyzing || !hasSelection"
             @click="analyze"
           >{{ humAnalyzing ? 'Analysing…' : 'Analyse' }}</ModulaButton>
         </div>
 
         <!-- Harmonic table -->
-        <div class="hr-table">
+        <div class="hr-table" data-help="harmonics">
           <div class="hr-row hr-head">
             <span></span><span>Freq</span><span>Above floor</span><span class="hr-right">Δ dB</span>
           </div>
@@ -240,10 +241,10 @@ async function applyAndClose() {
           </div>
         </div>
 
-        <p class="hr-status" :class="{ 'is-warn': isStale }">{{ statusLine }}</p>
+        <p class="hr-status" data-help="status" :class="{ 'is-warn': isStale }">{{ statusLine }}</p>
       </div>
 
-      <div class="hr-meter">
+      <div class="hr-meter" data-help="out-meter">
         <LevelMeter variant="modula" scale-side="right" :levels="humOutputLevels" label="OUT" :height="METER_H" />
       </div>
     </div>
@@ -256,6 +257,7 @@ async function applyAndClose() {
       </p>
       <div class="hr-knobs">
         <ModulaKnob
+          data-help="width"
           variant="small" :size="52" show-value editable
           :model-value="humQ" :min="5" :max="60" :step="1"
           :default-value="D.q" label="Width" :color="ACCENT" :format-value="formatQ"
@@ -264,6 +266,7 @@ async function applyAndClose() {
           @update:model-value="syncQ"
         />
         <ModulaKnob
+          data-help="depth"
           variant="small" :size="52" show-value editable :parse-value="t => Math.abs(parseFloat(t))"
           :model-value="humDepth" :min="0" :max="40" :step="1"
           :default-value="D.depth" label="Depth" :color="ACCENT" :format-value="formatDepth"

@@ -66,6 +66,7 @@ const pct = v => `${Math.round(v * 100)}%`
       variant="small" :size="44" show-value editable
       :model-value="g.selectivity" :min="R.selectivity.min" :max="R.selectivity.max" :step="0.5"
       :default-value="DEF?.selectivity ?? null"
+      data-help="threshold"
       label="Threshold" :color="accent" :format-value="plain" :disabled="disabled"
       title="The global detection threshold. Use focus nodes to offset this. Double-click to reset"
       @update:model-value="setGlobal('selectivity', $event)"
@@ -79,6 +80,7 @@ const pct = v => `${Math.round(v * 100)}%`
       variant="small" :size="44" show-value editable :parse-value="t => parseFloat(t) / 100"
       :model-value="g.sharpness" :min="R.sharpness.min" :max="R.sharpness.max" :step="0.01"
       :default-value="DEF?.sharpness ?? null"
+      data-help="sharp"
       label="Sharp" :color="accent" :format-value="pct" :disabled="disabled"
       title="What shape counts as a resonance. Not a node width. Double-click to reset"
       @update:model-value="setGlobal('sharpness', $event)"
@@ -87,6 +89,7 @@ const pct = v => `${Math.round(v * 100)}%`
       variant="small" :size="44" show-value editable :parse-value="t => parseFloat(t) / 100"
       :model-value="g.depth" :min="R.depth.min" :max="R.depth.max" :step="0.01"
       :default-value="DEF?.depth ?? null"
+      data-help="depth"
       label="Depth" :color="accent" :format-value="pct" :disabled="disabled"
       title="How much of what is found gets removed. Double-click to reset"
       @update:model-value="setGlobal('depth', $event)"

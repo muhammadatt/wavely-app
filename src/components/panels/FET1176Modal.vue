@@ -195,7 +195,7 @@ async function applyAndClose() {
 
       <!-- ── Top row: Input · ratio + meter · Output ───────────────────────── -->
       <div class="c76-top">
-        <div class="c76-col">
+        <div class="c76-col" data-help="input">
           <div class="c76-title">Input</div>
           <!-- Input is the only threshold control there is: it drives the
                audio path and the detector together, exactly as the hardware
@@ -214,7 +214,7 @@ async function applyAndClose() {
         </div>
 
         <div class="c76-center">
-          <div class="c76-ratio">
+          <div class="c76-ratio" data-help="ratio">
             <div class="c76-small-title c76-ratio-title">Ratio</div>
             <div class="c76-ratio-stack" role="radiogroup" aria-label="Ratio">
               <div v-for="r in RATIOS" :key="r.value" class="c76-ratio-row">
@@ -234,9 +234,9 @@ async function applyAndClose() {
             </div>
           </div>
           <div class="c76-meter-col">
-            <ClassicVuMeter :reduction-db="fetReduction" :active="fetPreview" :width="272" />
+            <ClassicVuMeter data-help="meter" :reduction-db="fetReduction" :active="fetPreview" :width="272" />
             <div class="c76-nameplate">
-              <div class="c76-nameplate-row">
+              <div class="c76-nameplate-row" data-help="harmonics">
                 <LampButton
                   :on="fetAnalog"
                   :size="20"
@@ -254,7 +254,7 @@ async function applyAndClose() {
           </div>
         </div>
 
-        <div class="c76-col">
+        <div class="c76-col" data-help="output">
           <div class="c76-title">Output</div>
           <!-- Stays draggable while Auto Makeup is lit: touching it takes
                over and drops AUTO, so a gain the user sets actually sticks. -->
@@ -278,6 +278,7 @@ async function applyAndClose() {
           <!-- Pre-Gain (input alignment) is folded to one line by default and
                opens in place. See FoldedLcd. -->
           <FoldedLcd
+            data-help="pre-gain"
             class="c76-ctl"
             name="Pre-Gain"
             :model-value="fetInputAlignDb"
@@ -287,7 +288,7 @@ async function applyAndClose() {
             :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
             :disabled="off"
           />
-          <div class="c76-schpf">
+          <div class="c76-schpf" data-help="sc-hpf">
             <HardwareSlideSwitch
               class="c76-ctl"
               :model-value="fetScHpf"
@@ -301,7 +302,7 @@ async function applyAndClose() {
         </div>
 
         <div class="c76-ballistics">
-          <div class="c76-small-knob">
+          <div class="c76-small-knob" data-help="attack">
             <HardwareKnob
               class="c76-ctl"
               variant="small"
@@ -316,7 +317,7 @@ async function applyAndClose() {
             />
             <div class="c76-small-title">Attack</div>
           </div>
-          <div class="c76-small-knob">
+          <div class="c76-small-knob" data-help="release">
             <HardwareKnob
               class="c76-ctl"
               variant="small"
@@ -334,7 +335,7 @@ async function applyAndClose() {
         </div>
 
         <div class="c76-makeup">
-          <div class="c76-makeup-lamp">
+          <div class="c76-makeup-lamp" data-help="auto-makeup">
             <!-- Auto makeup matters more here than on OptoSmooth: Input feeds
                  the audio path too, so driving the unit harder swings the
                  output level by tens of dB. -->
@@ -351,7 +352,7 @@ async function applyAndClose() {
             />
             <div class="c76-tiny-title c76-makeup-title">Auto Makeup</div>
           </div>
-          <div class="c76-mix">
+          <div class="c76-mix" data-help="mix">
             <!-- Blends the untouched input back in — parallel compression
                  without a second track. -->
             <HardwareFader
@@ -373,7 +374,7 @@ async function applyAndClose() {
     </div>
 
     <!-- Bench only: gated off in production builds. See fet1176Tuning.js. -->
-    <div v-if="showTuningBench" class="px-[26px] pb-[20px]">
+    <div v-if="showTuningBench" class="px-[26px] pb-[20px]" data-bench>
       <FET1176TuningPanel
         :accent="ACCENT"
         :disabled="!fetPreview"

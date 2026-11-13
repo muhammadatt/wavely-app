@@ -1,0 +1,104 @@
+{
+  "panel": {
+    "src": "/help/shots/tube-saturation/panel.jpg",
+    "w": 620,
+    "h": 778
+  },
+  "controls": {
+    "input-meter": {
+      "src": "/help/shots/tube-saturation/input-meter.png",
+      "w": 61,
+      "h": 204
+    },
+    "drive": {
+      "src": "/help/shots/tube-saturation/drive.png",
+      "w": 113,
+      "h": 122
+    },
+    "asymmetry": {
+      "src": "/help/shots/tube-saturation/asymmetry.png",
+      "w": 113,
+      "h": 134
+    },
+    "hardness": {
+      "src": "/help/shots/tube-saturation/hardness.png",
+      "w": 113,
+      "h": 134
+    },
+    "wet-dry": {
+      "src": "/help/shots/tube-saturation/wet-dry.png",
+      "w": 85,
+      "h": 108
+    },
+    "hf-loss": {
+      "src": "/help/shots/tube-saturation/hf-loss.png",
+      "w": 85,
+      "h": 110
+    },
+    "output-meter": {
+      "src": "/help/shots/tube-saturation/output-meter.png",
+      "w": 61,
+      "h": 204
+    },
+    "curve": {
+      "src": "/help/shots/tube-saturation/curve.png",
+      "w": 159,
+      "h": 63
+    },
+    "asym-mode": {
+      "src": "/help/shots/tube-saturation/asym-mode.png",
+      "w": 174,
+      "h": 63
+    },
+    "topology": {
+      "src": "/help/shots/tube-saturation/topology.png",
+      "w": 226,
+      "h": 63
+    },
+    "auto-drive": {
+      "src": "/help/shots/tube-saturation/auto-drive.png",
+      "w": 109,
+      "h": 131
+    },
+    "tame": {
+      "src": "/help/shots/tube-saturation/tame.png",
+      "w": 109,
+      "h": 131
+    },
+    "soften": {
+      "src": "/help/shots/tube-saturation/soften.png",
+      "w": 109,
+      "h": 131
+    },
+    "emphasis": {
+      "src": "/help/shots/tube-saturation/emphasis.png",
+      "w": 109,
+      "h": 131
+    },
+    "low-crossover": {
+      "src": "/help/shots/tube-saturation/low-crossover.png",
+      "w": 285,
+      "h": 57
+    },
+    "mid-crossover": {
+      "src": "/help/shots/tube-saturation/mid-crossover.png",
+      "w": 285,
+      "h": 57
+    },
+    "low-drive": {
+      "src": "/help/shots/tube-saturation/low-drive.png",
+      "w": 109,
+      "h": 119
+    },
+    "mid-drive": {
+      "src": "/help/shots/tube-saturation/mid-drive.png",
+      "w": 109,
+      "h": 119
+    },
+    "high-drive": {
+      "src": "/help/shots/tube-saturation/high-drive.png",
+      "w": 109,
+      "h": 119
+    }
+  }
+}

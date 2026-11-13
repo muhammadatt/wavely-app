@@ -1,0 +1,44 @@
+{
+  "panel": {
+    "src": "/help/shots/spectrum-analyzer/panel.jpg",
+    "w": 700,
+    "h": 495
+  },
+  "controls": {
+    "freeze": {
+      "src": "/help/shots/spectrum-analyzer/freeze.png",
+      "w": 99,
+      "h": 42
+    },
+    "peak-hold": {
+      "src": "/help/shots/spectrum-analyzer/peak-hold.png",
+      "w": 123,
+      "h": 42
+    },
+    "display": {
+      "src": "/help/shots/spectrum-analyzer/display.png",
+      "w": 684,
+      "h": 300
+    },
+    "resolution": {
+      "src": "/help/shots/spectrum-analyzer/resolution.png",
+      "w": 203,
+      "h": 57
+    },
+    "tilt": {
+      "src": "/help/shots/spectrum-analyzer/tilt.png",
+      "w": 158,
+      "h": 58
+    },
+    "averaging": {
+      "src": "/help/shots/spectrum-analyzer/averaging.png",
+      "w": 83,
+      "h": 131
+    },
+    "floor": {
+      "src": "/help/shots/spectrum-analyzer/floor.png",
+      "w": 78,
+      "h": 131
+    }
+  }
+}

@@ -160,6 +160,7 @@ const shade = computed(() => ({
 
       <!-- LOW: where the detector starts listening (its high-pass corner). -->
       <div
+        data-help="detect-low"
         class="sbs-handle sbs-handle--lo"
         :class="{ 'is-dragging': dragging === 'detect', 'is-flip': flip(detect) }"
         :style="{ left: `${pctFor(detect)}%`, '--c': listenColor }"
@@ -180,6 +181,7 @@ const shade = computed(() => ({
 
       <!-- HIGH: where it stops (its low-pass corner); at the top it is out of the circuit. -->
       <div
+        data-help="detect-high"
         class="sbs-handle sbs-handle--hi"
         :class="{ 'is-dragging': dragging === 'detectHigh', 'is-edge': atTop }"
         :style="{ left: `${pctFor(detectHigh)}%`, '--c': listenColor }"
@@ -199,7 +201,7 @@ const shade = computed(() => ({
       </div>
 
       <!-- LIVE / MONITOR: the processed audio, or only what the detector hears. -->
-      <div class="sbs-mode" role="group" aria-label="Output monitor" :style="{ '--c': listenColor }">
+      <div class="sbs-mode" data-help="monitor" role="group" aria-label="Output monitor" :style="{ '--c': listenColor }">
         <button
           type="button" class="sbs-mode-btn" :class="{ 'is-on': !audition }"
           :disabled="disabled" :aria-pressed="!audition"

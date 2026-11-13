@@ -73,6 +73,7 @@ async function applyNormalize(useSelection = true) {
          rather than a lone slider adrift in the panel. -->
     <div class="pn-panel">
       <ModulaKnob
+        data-help="target-peak"
         variant="ticks" :size="156" show-value editable
         v-model="targetPeak" :min="-12" :max="0" :step="0.5" :default-value="TARGET_DEFAULT_DB"
         label="Target Peak" :color="ACCENT" :format-value="formatTarget"

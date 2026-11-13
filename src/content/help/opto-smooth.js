@@ -1,61 +1,132 @@
 export default {
-  summary: 'Levels a performance the way an opto compressor does — slowly, across phrases rather than syllables',
+  summary: 'Levels a performance the way an opto compressor does — slowly, across phrases rather than syllables.',
 
-  whenToUse: [
-    'A narrator drifts closer to and further from the mic across a take',
-    'You want the quiet passages to sit up without the loud ones jumping',
-    'You want compression that is hard to hear working',
+  intro: [
+    'LA Vintage 2A is modelled on the Teletronix LA-2A, the tube-driven optical leveling amplifier that has been the premier analog vocal compressor for decades. Its optical cell reacts gently and releases slowly, so it rides the level of whole phrases rather than individual syllables, and it is famously transparent.',
+    'Use it add warmth, glue and subtle control to vocal takes, synths, guitar or even full mixes.',
+  ],
+
+  quickStart: [
+    'Select the passage and turn the plugin ON — it opens engaged.',
+    'Play, and raise Peak Reduction until the meter swings 3–6 dB on the loud phrases.',
+    'Leave AUTO lit so Gain makes up the level for you.',
+    'Use COMP for levelling and LIMIT only for a harder ceiling.',
+    'Compare against bypass, then Apply to selection.',
   ],
 
   controls: [
     {
       label: 'Peak Reduction',
-      text: 'How hard the cell is driven, which is how much compression you get',
+      shot: 'peak-reduction',
+      text: 'Sets how much compression you get.',
+      details: [
+        'Like the hardware, there is no threshold: the knob is side-chain gain into a fixed internal threshold, so turning it up makes the cell react to quieter material.',
+        'The file is aligned first (see Pre-Gain), so a given setting does the same job on a quiet recording as on a hot one. Most narration sits between 30 and 60.',
+        'Hover, focus or drag the knob to read its value.',
+      ],
+      range: '0 to 100 in steps of 1',
+      default: '50',
     },
     {
-      label: 'Gain',
-      text: 'Makeup level after the compressor, and the tube stage it feeds. Hover or drag either big knob to read its value',
-    },
-    {
-      label: 'Auto Makeup',
-      text: 'Sets Gain to give back what the peaks lost, measured on the selection — turning the knob takes over from it',
-    },
-    {
-      label: 'Comp / Limit',
-      text: 'Comp levels at around 3:1, Limit holds a harder ceiling',
-    },
-    {
-      label: 'HF Emph',
-      text: 'Side-chain emphasis (the hardware\'s R37 trimmer): Flat is factory; turning it up makes the compressor ignore the low end and ride the presence band instead. It changes what the compressor listens to, not the tone',
+      label: 'VU meter',
+      shot: 'meter',
+      text: 'Shows the gain reduction the cell is applying, in dB.',
+      details: [
+        'It reads while audio plays. A needle resting at 0 means nothing is being compressed.',
+      ],
     },
     {
       label: 'Harmonics lamp',
-      text: 'The lamp beside VINTAGE 2A turns the valve and cell colour on or off. Off is clean with exactly the same compression',
+      shot: 'harmonics',
+      text: 'The lamp beside VINTAGE 2A turns the valve and cell colour on or off.',
+      details: [
+        'Off is not a bypass: the detector, timing and gain reduction are identical, only the harmonic colour goes.',
+        'The colour is mostly second harmonic, with a guard that eases it off on loud sibilants so an S does not turn gritty.',
+      ],
+      range: 'On, Off',
+      default: 'On',
     },
     {
-      label: 'Mix',
-      text: 'Blends the untouched signal back in for parallel compression. Auto Makeup accounts for the blend, so Gain stays right at any Mix',
+      label: 'Gain',
+      shot: 'gain',
+      text: 'Makeup level after the compressor, feeding the output valve.',
+      details: [
+        'With AUTO lit the plugin turns this knob for you. Turning it yourself takes over and switches AUTO off.',
+      ],
+      range: '−24 to +24 dB in 0.1 dB steps',
+      default: '0 dB, then set by AUTO',
+    },
+    {
+      label: 'Auto',
+      shot: 'auto-makeup',
+      text: 'Lets the plugin set Gain from a measurement of the selection.',
+      details: [
+        'It restores the level of the body of the voice (the 99.9th percentile of the samples), not of the single loudest peak, so the knob never runs backwards as you compress harder.',
+        'A ceiling at the selection’s own peak guarantees the output is never louder than the source at any setting.',
+        'It follows Mix too, so Gain stays right at any blend.',
+      ],
+      range: 'On, Off',
+      default: 'On',
     },
     {
       label: 'Pre-Gain',
-      text: 'The line in the bottom-left corner: how hard the compressor is driven to suit this file\'s level, so a Peak Reduction setting does the same on a quiet file as on a hot one. Measured automatically; click it to open the control in place and set it by hand (it turns amber and reads MANUAL until you switch AUTO back on)',
+      shot: 'pre-gain',
+      text: 'How hard this file drives the compressor, set so Peak Reduction means the same on any recording level.',
+      details: [
+        'Measured from the whole file’s gated RMS and applied to the side-chain only — it changes what the compressor hears, never the output level.',
+        'Click the line to open it. Stepping it takes over from AUTO and the line reads MANUAL until you switch AUTO back on.',
+        'The manual range reaches further than the automatic one, for very quiet files.',
+      ],
+      range: '−48 to +48 dB in 0.5 dB steps, or AUTO',
+      default: 'AUTO',
     },
     {
       label: 'Lookahead',
-      text: 'Folded under Pre-Gain; click it to open. Off is the hardware. A few ms lets the compressor catch the first syllable after a pause instead of letting it through',
+      shot: 'lookahead',
+      text: 'Delays the audio so the compressor is ready for an onset that comes out of silence.',
+      details: [
+        'Off is the hardware. A few milliseconds stops the first syllable after a pause slipping through before the cell reacts.',
+        'Past about 20 ms the duck would start audibly before the consonant, which is why it stops there.',
+      ],
+      range: 'Off to 20 ms in 1 ms steps',
+      default: 'Off',
+    },
+    {
+      label: 'Comp / Limit',
+      shot: 'mode',
+      text: 'Chooses gentle levelling or a harder ceiling.',
+      details: [
+        'COMP is around 3:1 and is the one to use on voice. LIMIT holds the peaks much more firmly.',
+      ],
+      range: 'COMP, LIMIT',
+      default: 'COMP',
+    },
+    {
+      label: 'HF Emph',
+      shot: 'hf-emph',
+      text: 'Tilts what the compressor listens to toward the upper mids — the hardware’s R37 trimmer.',
+      details: [
+        'FLAT is factory. Turning it up adds a high shelf to the side-chain only, up to +21 dB, so the compressor stops reacting to plosives and low-end bumps and follows the voice instead.',
+        'It changes what the compressor hears, not the tone of the audio.',
+      ],
+      range: 'FLAT to +21 dB',
+      default: 'FLAT',
+    },
+    {
+      label: 'Mix',
+      shot: 'mix',
+      text: 'Blends the untouched signal back in, for parallel compression without a second track.',
+      details: [
+        'The dry path is delay-compensated, so the blend never combs.',
+      ],
+      range: 'DRY (0 %) to WET (100 %)',
+      default: 'WET (100 %)',
     },
   ],
 
-  steps: [
-    'Play the selection and raise Peak Reduction until the gain reduction meter moves on the loud phrases',
-    'Leave AUTO on unless you are matching levels by hand',
-    'Compare against bypass — this effect is doing its job when you notice the level is steadier rather than hearing the compression',
-  ],
-
   notes: [
-    'It levels phrases, not syllables — a 10 ms attack into a release measured in seconds cannot follow a fast envelope, and that is the character rather than a limitation',
-    'Peak-referenced makeup means the output can never come out hotter than the source at any setting',
-    'On fast material this can leave the average quieter while making it steadier — reach for LA Classic 76 when you want it louder',
-    'Turn HF Emph up when plosives are pushing the compressor around, and it will follow the voice instead',
+    'It gently levels phrases, not fast peaks. To catch fast peaks, reach for the LA Classic 76, or try the VoxPressor (Pro-only) for both in one window.',
+    'It measures your recording first, so the same Peak Reduction setting does the same job on a quiet file as on a hot one.',
+    'Presets save Peak Reduction but not Pre-Gain, which is measured for each file.',
   ],
 }

@@ -165,12 +165,12 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="pt-grid">
-      <div class="pt-meter">
+      <div class="pt-meter" data-help="in-meter">
         <LevelMeter variant="modula" scale-side="left" :levels="plInputLevels" label="IN" :height="METER_H" />
       </div>
 
       <div class="pt-display">
-        <div class="pt-bars">
+        <div class="pt-bars" data-help="reduction-bars">
           <GainReductionBar
             :reduction-db="-popShown" :accent="ACCENT"
             :full-scale-db="POP_DEPTH_MAX_DB" ballistics="none" title="POP"
@@ -180,7 +180,7 @@ async function applyAndClose() {
             :full-scale-db="BURST_DEPTH_MAX_DB" ballistics="none" title="BURST"
           />
         </div>
-        <div class="pt-scope">
+        <div class="pt-scope" data-help="scope">
           <DeEsserScope
             :data-fn="getScope"
             :envelope-fn="envelope"
@@ -195,15 +195,16 @@ async function applyAndClose() {
           />
         </div>
         <div class="pt-counts">
-          <span class="pt-count">
+          <span class="pt-count" data-help="pops-count">
             <span class="pt-lamp" :style="lampStyle(popShown, ACCENT)" aria-hidden="true"></span>
             POPS <span class="pt-count-num">{{ plPops }}</span>
           </span>
-          <span class="pt-count">
+          <span class="pt-count" data-help="bursts-count">
             <span class="pt-lamp" :style="lampStyle(burstShown, BURST_COLOR)" aria-hidden="true"></span>
             BURSTS <span class="pt-count-num">{{ plBursts }}</span>
           </span>
           <button
+            data-help="reset"
             type="button" class="pt-reset m-focusable" :disabled="!plPreview"
             title="Zero the counters"
             @click="resetCounts"
@@ -211,10 +212,11 @@ async function applyAndClose() {
         </div>
       </div>
 
-      <div class="pt-meter">
+      <div class="pt-meter" data-help="out-meter">
         <LevelMeter variant="modula" scale-side="right" :levels="plOutputLevels" label="OUT" :height="METER_H">
           <template #below>
             <ModulaKnob
+              data-help="output"
               variant="trim" :model-value="plParams.output" show-value
               :min="OUTPUT_MIN_DB" :max="OUTPUT_MAX_DB" :step="0.1"
               :default-value="D.output" :format-value="fmtDb"
@@ -232,6 +234,7 @@ async function applyAndClose() {
         <span class="m-caption pt-caption" :style="{ color: ACCENT }">Pop · P and B thumps</span>
         <div class="pt-knobs">
           <ModulaKnob
+            data-help="pop-depth"
             variant="small" :size="52" show-value editable :parse-value="parseDepth"
             :model-value="plParams.popDepth" :min="0" :max="POP_DEPTH_MAX_DB" :step="0.5"
             :default-value="D.popDepth" label="Depth" :color="ACCENT" :format-value="fmtDepth" :disabled="!plPreview"
@@ -239,6 +242,7 @@ async function applyAndClose() {
             @update:model-value="v => syncParam('popDepth', v)"
           />
           <ModulaKnob
+            data-help="pop-freq"
             variant="small" :size="52" show-value editable :parse-value="parseHz"
             :model-value="plParams.popFreq" :min="POP_FREQ_MIN_HZ" :max="POP_FREQ_MAX_HZ" :step="1" scale="log"
             :default-value="D.popFreq" label="Freq" :color="ACCENT" :format-value="fmtHz" :disabled="!plPreview"
@@ -246,6 +250,7 @@ async function applyAndClose() {
             @update:model-value="v => syncParam('popFreq', v)"
           />
           <ModulaKnob
+            data-help="pop-sensitivity"
             variant="small" :size="52" show-value editable
             :model-value="plParams.popSensitivity" :min="0" :max="100" :step="1"
             :default-value="D.popSensitivity" label="Sensitivity" :color="ACCENT" :format-value="fmtPct" :disabled="!plPreview"
@@ -253,6 +258,7 @@ async function applyAndClose() {
             @update:model-value="v => syncParam('popSensitivity', v)"
           />
           <ModulaKnob
+            data-help="pop-release"
             variant="small" :size="52" show-value editable
             :model-value="plParams.popRelease" :min="POP_RELEASE_MIN_MS" :max="POP_RELEASE_MAX_MS" :step="1" scale="log"
             :default-value="D.popRelease" label="Release" :color="ACCENT" :format-value="fmtMs" :disabled="!plPreview"
@@ -268,6 +274,7 @@ async function applyAndClose() {
         <span class="m-caption pt-caption" :style="{ color: BURST_COLOR }">Burst · T, K and P releases</span>
         <div class="pt-knobs">
           <ModulaKnob
+            data-help="burst-depth"
             variant="small" :size="52" show-value editable :parse-value="parseDepth"
             :model-value="plParams.burstDepth" :min="0" :max="BURST_DEPTH_MAX_DB" :step="0.5"
             :default-value="D.burstDepth" label="Depth" :color="BURST_COLOR" :format-value="fmtDepth" :disabled="!plPreview"
@@ -275,6 +282,7 @@ async function applyAndClose() {
             @update:model-value="v => syncParam('burstDepth', v)"
           />
           <ModulaKnob
+            data-help="burst-freq"
             variant="small" :size="52" show-value editable :parse-value="parseHz"
             :model-value="plParams.burstFreq" :min="BURST_FREQ_MIN_HZ" :max="BURST_FREQ_MAX_HZ" :step="10" scale="log"
             :default-value="D.burstFreq" label="Freq" :color="BURST_COLOR" :format-value="fmtHz" :disabled="!plPreview"
@@ -282,6 +290,7 @@ async function applyAndClose() {
             @update:model-value="v => syncParam('burstFreq', v)"
           />
           <ModulaKnob
+            data-help="burst-sensitivity"
             variant="small" :size="52" show-value editable
             :model-value="plParams.burstSensitivity" :min="0" :max="100" :step="1"
             :default-value="D.burstSensitivity" label="Sensitivity" :color="BURST_COLOR" :format-value="fmtPct" :disabled="!plPreview"
@@ -289,6 +298,7 @@ async function applyAndClose() {
             @update:model-value="v => syncParam('burstSensitivity', v)"
           />
           <ModulaKnob
+            data-help="burst-length"
             variant="small" :size="52" show-value editable
             :model-value="plParams.burstLength" :min="BURST_LENGTH_MIN_MS" :max="BURST_LENGTH_MAX_MS" :step="1"
             :default-value="D.burstLength" label="Length" :color="BURST_COLOR" :format-value="fmtMs" :disabled="!plPreview"

@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
+import { fileURLToPath } from 'node:url'
 
 /**
  * Developer-only modules, stubbed out of production builds.
@@ -41,6 +42,66 @@ function stripDevOnlyModules(enabled) {
   }
 }
 
+/**
+ * The standalone help pages (`help/index.html`, `src/help/`).
+ *
+ * One HTML entry serves every page; which effect it shows is read from the
+ * path. So that `/help/<id>/` works on any static host with no rewrite rule,
+ * the build writes a copy of the entry at `help/<id>/index.html` for every
+ * published page (the asset URLs in it are absolute, so a copy one level down
+ * loads the same bundle), with the effect's name in its <title>. The dev and
+ * preview servers rewrite the same paths to the entry.
+ */
+function helpPages(devPanels) {
+  let outDir = 'dist'
+  const rewrite = (req, _res, next) => {
+    const path = (req.url || '').split('?')[0]
+    if (/^\/help(\/[^/.]*)?\/?$/.test(path)) req.url = '/help/index.html'
+    next()
+  }
+  return {
+    name: 'wavely:help-pages',
+    configResolved(config) {
+      outDir = config.build.outDir
+    },
+    // `public/` is copied wholesale, so the screenshots of effects a production
+    // build hides would still be fetchable. Remove them, like their pages.
+    async closeBundle() {
+      if (devPanels) return
+      const { rm } = await import('node:fs/promises')
+      const { join, resolve } = await import('node:path')
+      const { HELP_META, helpSlug } = await import('./src/content/help/index.js')
+      for (const [id, meta] of Object.entries(HELP_META)) {
+        if (meta.release === 'dev') await rm(join(resolve(outDir), 'help/shots', helpSlug(id)), { recursive: true, force: true })
+      }
+    },
+    configureServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    // `post`: Vite's own HTML plugin emits the entry in this same hook.
+    // The help index is imported HERE, at build time, not at the top of this
+    // file: anything the config imports is a config dependency, and Vite
+    // restarts the dev server whenever one changes — every edit to a help page.
+    generateBundle: { order: 'post', async handler(_options, bundle) {
+      const entry = bundle['help/index.html']
+      if (!entry) return
+      const { HELP_META, publishedHelpIds, helpSlug } = await import('./src/content/help/index.js')
+      const html = String(entry.source)
+      for (const id of publishedHelpIds(devPanels)) {
+        const title = HELP_META[id].title.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        this.emitFile({
+          type: 'asset',
+          fileName: `help/${helpSlug(id)}/index.html`,
+          source: html.replace(/<title>[^<]*<\/title>/, `<title>${title} help — crisp.fm</title>`),
+        })
+      }
+    } },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // Read the env exactly as Vite will, including .env files. The '' prefix
   // loads every variable, not just VITE_-prefixed ones, so the value is seen
@@ -51,9 +112,18 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       stripDevOnlyModules(devPanels),
+      helpPages(devPanels),
       vue(),
       tailwindcss(),
     ],
+    build: {
+      rollupOptions: {
+        input: {
+          main: fileURLToPath(new URL('./index.html', import.meta.url)),
+          help: fileURLToPath(new URL('./help/index.html', import.meta.url)),
+        },
+      },
+    },
     server: {
       proxy: {
         '/api': {

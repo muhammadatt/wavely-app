@@ -1,0 +1,74 @@
+{
+  "panel": {
+    "src": "/help/shots/sibilance-editor/panel.jpg",
+    "w": 700,
+    "h": 663
+  },
+  "controls": {
+    "in-meter": {
+      "src": "/help/shots/sibilance-editor/in-meter.png",
+      "w": 82,
+      "h": 275
+    },
+    "reduction": {
+      "src": "/help/shots/sibilance-editor/reduction.png",
+      "w": 496,
+      "h": 73
+    },
+    "analyse": {
+      "src": "/help/shots/sibilance-editor/analyse.png",
+      "w": 496,
+      "h": 71
+    },
+    "status": {
+      "src": "/help/shots/sibilance-editor/status.png",
+      "w": 496,
+      "h": 27
+    },
+    "out-meter": {
+      "src": "/help/shots/sibilance-editor/out-meter.png",
+      "w": 82,
+      "h": 275
+    },
+    "s-ceiling": {
+      "src": "/help/shots/sibilance-editor/s-ceiling.png",
+      "w": 84,
+      "h": 139
+    },
+    "f-ceiling": {
+      "src": "/help/shots/sibilance-editor/f-ceiling.png",
+      "w": 83,
+      "h": 139
+    },
+    "amount": {
+      "src": "/help/shots/sibilance-editor/amount.png",
+      "w": 66,
+      "h": 139
+    },
+    "max-cut": {
+      "src": "/help/shots/sibilance-editor/max-cut.png",
+      "w": 86,
+      "h": 139
+    },
+    "fric-in": {
+      "src": "/help/shots/sibilance-editor/fric-in.png",
+      "w": 71,
+      "h": 131
+    },
+    "fric-out": {
+      "src": "/help/shots/sibilance-editor/fric-out.png",
+      "w": 71,
+      "h": 131
+    },
+    "affr-in": {
+      "src": "/help/shots/sibilance-editor/affr-in.png",
+      "w": 72,
+      "h": 131
+    },
+    "affr-out": {
+      "src": "/help/shots/sibilance-editor/affr-out.png",
+      "w": 73,
+      "h": 131
+    }
+  }
+}

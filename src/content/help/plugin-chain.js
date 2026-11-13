@@ -1,36 +1,82 @@
 export default {
-  summary: 'Runs every plugin you have turned on in series, in an order you set, and applies them all in one step',
+  summary: 'Runs several effects in series, in an order you set, so you hear them together and apply them all as one edit.',
 
-  whenToUse: [
-    'You are building a sound from more than one plugin and want to hear them together before committing',
-    'The order matters — compressing before or after an EQ, de-essing before or after saturation',
-    'You want the whole chain written to the selection as one edit, with one undo',
+  intro: [
+    'The Effect Chain runs multiple effects in series, in any order you choose. Add, reorder or bypass individual effects and and render the whole chain onto the selection ins a single step.',
+    'Use it build a custom vocal chain or mix effect buss; save your best chains as presets to reuse on future tracks.',
   ],
 
-  steps: [
-    'Press + Add effect and pick an effect — it joins the end of the chain and opens so you can tune it',
-    'Close its window when you are done tuning it; it keeps playing in the chain',
-    'Reorder, bypass or remove slots here, then select a region and press Apply',
+  quickStart: [
+    'Press Add to select your first effect in the chain — it opens its effect window.',
+    'Add additional effects — each one joins the end of the current chain.',
+    'Reorder, edit, bypass or remove effects until you achieve the desired sound.',
+    'Select a region and press Apply to apply the whole chain at once.',
   ],
 
   controls: [
-    { label: '+ Add effect', text: 'Opens a search of every effect that can run in the chain — type to filter, then press Enter or click. It joins the end, starting from its default settings, and its window opens beside this one. An effect can be added more than once — each slot has its own settings, and the slots are numbered (LA Vintage 2A 1, LA Vintage 2A 2)' },
-    { label: 'ON / BYPASS (header)', text: 'Takes the whole chain out of circuit at once so you can hear the file as it is; each slot keeps its own state' },
-    { label: 'ON / BYPASS (slot)', text: 'The plugin’s own power switch — the same one as in its window. A bypassed slot keeps its place and is skipped by Apply' },
-    { label: 'Arrows and drag', text: 'Move a slot earlier or later. The top slot processes first' },
-    { label: 'Edit', text: 'Opens the plugin’s window to change its settings' },
-    { label: '×', text: 'Takes the plugin out of the chain. Its settings go with it: adding it again starts from its defaults' },
-    { label: 'Clear', text: 'Takes every plugin out of the chain' },
-    { label: 'Apply', text: 'Renders every live slot over the selection in chain order and commits the result as one undo step, then bypasses the whole chain so the processing is not heard twice. Each plugin keeps its own ON / BYPASS, so turning the chain back on is one switch. Apply is off while the chain is bypassed, since it would write processing you cannot hear. It is the only Apply for a plugin in the chain — their own windows say In chain instead' },
+    {
+      label: 'Add effect',
+      shot: 'add-effect',
+      text: 'Opens a list of every effect that can run in the chain and adds the one you pick to the end.',
+      details: [
+        'It reads Add your first effect while the chain is empty. The list is grouped by toolbar category; type to filter, use the arrow keys and press Enter, or click.',
+        'An effect can be added more than once. Each slot is a separate copy with its own settings, numbered when there are several (LA Vintage 2A 1, LA Vintage 2A 2), and a new slot starts from the effect’s defaults.',
+        'Its window opens beside this one so you can tune it, and the slot keeps playing in the chain when you close it.',
+      ],
+    },
+    {
+      label: 'Slot row',
+      text: 'Each row is one effect in the chain, numbered in processing order — the top row runs first.',
+      details: [
+        'Drag a row by its grip handle onto another row to move it there.',
+      ],
+    },
+    {
+      label: 'ON / BYPASS',
+      text: 'The slot’s lamp is the effect’s own power switch, the same one as in its window.',
+      details: [
+        'A bypassed slot keeps its place and settings and is skipped by Apply. Turning a slot on also turns the whole chain back on if it was bypassed.',
+      ],
+      range: 'ON, BYPASS',
+      default: 'ON',
+    },
+    {
+      label: '↑ / ↓',
+      text: 'Move the slot one place earlier or later in the chain.',
+    },
+    {
+      label: 'Edit',
+      text: 'Opens the slot’s window to change its settings.',
+    },
+    {
+      label: '×',
+      text: 'Takes the slot out of the chain.',
+      details: [
+        'Its settings go with it: adding the effect again starts from its defaults.',
+      ],
+    },
+    {
+      label: 'Clear',
+      text: 'Takes every slot out of the chain.',
+    },
+    {
+      label: 'Status line',
+      text: 'Says how many slots are live, or that the chain or every slot is bypassed.',
+    },
+    {
+      label: 'Presets',
+      text: 'The preset browser in the window header saves and loads whole chains — every slot, its ON / BYPASS and its settings.',
+      details: [
+        'Loading a chain replaces the one in the rack. Values an effect measures from the file, such as auto makeup, are never saved; they are measured again on the next file.',
+      ],
+    },
   ],
 
   notes: [
-    'Each plugin renders what the slot before it produced, exactly as if you had applied them one at a time in that order',
-    'Measured values such as auto makeup are re-measured on what actually reaches each plugin, so a plugin late in the chain can land a little differently from the preview, which measures the unprocessed file',
-    'Opening an effect from the toolbar or the search does not add it to the chain: it opens on its own, closing this window and the chain’s effect windows, and the chain is bypassed, even while that effect is bypassed — so it previews, and compares against, exactly what its own Apply writes. The chain stays bypassed after you close the effect, and the toolbar’s Chain button reads BYPASSED, until you turn it back on here',
-    'This window and the effects in the chain can all be open together. The Spectrum Analyzer can stay open beside anything',
-    'Peak and Loudness Normalize measure and set level in one step, so they cannot run in the chain and are not in the list',
-    'An effect in the chain is a separate copy from the same effect opened from the toolbar or the search. Each has its own settings, so you can use an effect on its own — with its own Apply — while it also sits in the chain, and neither changes the other',
-    'An effect opened on its own still has its own Apply, which writes that effect alone',
+    'Use the ON / BYPASS in the window header to hear the file without the chain. Each slot keeps its own setting.',
+    'After Applying, the whole chain is bypassed so the processing is not heard twice. Turn it back on using the ON/BYPASS switch.',
+    'Apply needs a selection and at least one live slot. Effects in the chain have no Apply of their own.',
+    'Opening an effect from the toolbar or search opens a separate copy with its own Apply, and bypasses the chain until you turn it back on.',
+    'Peak and Loudness Normalize cannot go in the chain. Run them before or after it.',
   ],
 }

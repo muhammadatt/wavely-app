@@ -1,40 +1,111 @@
 export default {
-  summary: 'Evens out the level between phrases, leaving the dynamics inside each phrase alone',
+  summary: 'Evens out the level between phrases, leaving the dynamics inside each phrase alone.',
 
-  whenToUse: [
-    'Some sentences sit noticeably quieter than others in the same take',
-    'You drifted off-mic or changed delivery part-way through a session',
-    'A compressor is working too hard because the level going into it wanders',
-    'Chapters have to match each other and one of them rides low',
+  intro: [
+    'Auto Leveler evens out the level between phrases, the way an editor would by riding clip gain by hand. It finds each spoken phrase, measures its loudness, and moves the ones that sit too far from the rest towards a common target, while leaving the dynamics inside each phrase untouched.',
+    'Use it when some sentences sit noticeably quieter than others, when someone drifted off-mic part-way through a session, or before a compressor so the compressor is not working against a wandering level. It is an offline process: one Apply analyses, levels and writes the selection, and Undo takes it back.',
+  ],
+
+  quickStart: [
+    'Select at least 10 seconds holding at least 5 seconds of speech — usually the whole chapter.',
+    'Leave WHOLE SELECTION chosen unless the take changes level on purpose, then pick ROLLING.',
+    'Press Apply to selection. Speech detection, the phrase analysis and the render run in one go and replace the selection in one undoable step.',
+    'Listen in the editor and read LAST RUN when you reopen the window. Undo puts the original back.',
+    'If phrases you can hear as uneven were left alone, undo, lower DEADBAND and apply again.',
   ],
 
   controls: [
-    { label: 'Apply to selection', text: 'Finds the phrases in the selection, evens them out and replaces the selection in one undoable step' },
-    { label: 'Deadband dB', text: 'How far a phrase may sit from the target before anything moves it — inside this band it is left untouched' },
-    { label: 'Knee dB', text: 'How gradually the correction opens up past the deadband, so two similar phrases do not get different treatment' },
-    { label: 'Max Boost dB', text: 'The most any phrase will be lifted' },
-    { label: 'Max Cut dB', text: 'The most any phrase will be turned down' },
-    { label: 'WHOLE SELECTION / ROLLING', text: 'Whether every phrase aims at one level for the whole selection, or at a median that follows the recording' },
-    { label: 'Window s', text: 'How far back the rolling median looks — only used in ROLLING mode' },
-    { label: 'Floor dBFS', text: 'Where room tone is allowed to end up, which caps how far a quiet phrase can be lifted' },
-    { label: 'Settings', text: 'Every value box can be dragged up or down, typed into, or double-clicked to go back to its default' },
-    { label: 'Last run', text: 'What the last Apply did: how many phrases it levelled, how far apart they were before and after, and the largest cut and boost. It says so when the leveler declined or when room tone capped the boost' },
-  ],
-
-  steps: [
-    'Select at least 10 seconds containing at least 5 seconds of speech — usually the whole chapter — and press Apply to selection',
-    'Listen in the editor. Undo puts the original back',
-    'If phrases you can hear as uneven were left alone, undo, lower the deadband and level again',
-    'Use ROLLING if the take deliberately changes level and WHOLE SELECTION should not flatten it',
+    {
+      label: 'WHOLE SELECTION / ROLLING',
+      group: 'TARGET',
+      shot: 'target',
+      text: 'What each phrase is levelled towards: one level held across the whole selection, or a moving median that follows the delivery.',
+      details: [
+        'WHOLE SELECTION takes the median loudness of every phrase in the selection as the one target. Use it to make a passage, or two separately levelled passages, sit at one level.',
+        'ROLLING compares each phrase with the median of the speech around it, over the time set by WINDOW, so a deliberate change in delivery across a chapter survives.',
+        'The line under the tiles describes the chosen target.',
+      ],
+      range: 'WHOLE SELECTION, ROLLING',
+      default: 'WHOLE SELECTION',
+    },
+    {
+      label: 'DEADBAND',
+      group: 'PHRASES',
+      shot: 'deadband',
+      text: 'How far a phrase may sit from the target before it is touched at all.',
+      details: [
+        'Inside the band a phrase keeps its level exactly. Outside it, the phrase is moved back to the edge of the band, not all the way to the target, so natural variation survives.',
+        'If every phrase already sits inside the deadband the leveler declines and changes nothing.',
+        'Drag the readout, click to type, or double-click to reset.',
+      ],
+      range: '0 to 6 dB in 0.05 dB steps',
+      default: '0.75 dB',
+    },
+    {
+      label: 'KNEE',
+      group: 'PHRASES',
+      shot: 'knee',
+      text: 'How gradually the correction fades in past the deadband.',
+      details: [
+        'Across the knee the correction eases in on a smooth curve rather than jumping, so two phrases a fraction of a dB apart do not get very different treatment.',
+      ],
+      range: '0.1 to 6 dB in 0.1 dB steps',
+      default: '1.0 dB',
+    },
+    {
+      label: 'WINDOW',
+      group: 'PHRASES',
+      shot: 'window',
+      text: 'How much surrounding speech the rolling median looks at.',
+      details: [
+        'It only applies with ROLLING chosen, and is dimmed under WHOLE SELECTION. A shorter window follows the delivery more closely and levels less.',
+      ],
+      range: '10 to 120 s in 5 s steps',
+      default: '60 s',
+    },
+    {
+      label: 'MAX BOOST',
+      group: 'LIMITS',
+      shot: 'max-boost',
+      text: 'The most any phrase is lifted.',
+      range: '0 to 18 dB in 0.5 dB steps',
+      default: '10.0 dB',
+    },
+    {
+      label: 'MAX CUT',
+      group: 'LIMITS',
+      shot: 'max-cut',
+      text: 'The most any phrase is turned down.',
+      range: '0 to 18 dB in 0.5 dB steps',
+      default: '10.0 dB',
+    },
+    {
+      label: 'FLOOR',
+      group: 'LIMITS',
+      shot: 'floor',
+      text: 'The room-tone level a boost is not allowed to push past.',
+      details: [
+        'Lifting a quiet phrase lifts the room tone under it too. The selection’s noise floor is measured during speech detection, and boosts are capped so the room tone stays under this level — which can hold the boost below MAX BOOST.',
+        'At the default the room tone stays within the ACX limit of −60 dBFS.',
+      ],
+      range: '−80 to −40 dBFS in 1 dB steps',
+      default: '−60 dBFS',
+    },
+    {
+      label: 'LAST RUN',
+      shot: 'last-run',
+      text: 'What the last Apply did, measured on the levelled audio.',
+      details: [
+        'PHRASES is how many phrases were levelled. SPREAD is how far apart their loudness was before and after, as a standard deviation in dB. GAIN is the largest cut and the largest boost applied.',
+        'When the leveler declines it says why: a selection under 10 seconds, under 5 seconds of speech, only one phrase, or everything already inside the deadband.',
+        'When the floor capped the boost it says by how much.',
+      ],
+    },
   ],
 
   notes: [
-    'Gain is flat within a phrase, so the dynamics you performed inside a sentence survive exactly',
-    'Run this before compression, not after — it hands the compressor a steady input',
-    'Lifting a quiet phrase lifts its room tone with it, so Floor dBFS can cap the boost below Max Boost',
-    'Where two neighbouring phrases would end up more than 6 dB apart, both are left at their average instead — a step that large is usually the analysis being wrong about where a phrase ended',
-    'Under 10 seconds of selection, under 5 seconds of speech, or only one phrase found, and it declines rather than guessing',
-    'Auto Leveler is an offline process, so it has no real-time preview and cannot take a Effect Chain slot',
-    'Auto Leveler is a Pro feature',
+    'Run it before compression, not after. It hands the compressor a steady input.',
+    'There is no preview: listen after Apply, and use Undo if you want to try other settings.',
+    'Auto Leveler is a Pro feature.',
   ],
 }

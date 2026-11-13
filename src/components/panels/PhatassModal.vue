@@ -144,6 +144,7 @@ async function applyAndClose() {
       <div class="ph-main">
         <div
           class="ph-sat"
+          data-help="saturation"
           title="SATURATION: how much TAPE and Warmth are adding, against the clean signal — the energy of everything they add, averaged over the last fraction of a second. 0 is −40 dB (barely there), 100 is as much added as the signal itself; red from about 80. Warmth reads far higher than TAPE: its low layers reshape the whole low band"
         >
           <ModulaBarMeter title="SATURATION" :reading="satReading" :value="phSatNeedle / 100" :active="phPreview" :color="ACCENT" />
@@ -154,7 +155,7 @@ async function applyAndClose() {
             <header class="ph-module-head">Tape</header>
             <div class="ph-module-body ph-tape">
               <div class="ph-col">
-                <div title="DRIVE: takes this many dB off the selection's loudest peak the way tape saturation does, and gives it back as level — the makeup is measured, so the peak lands where it started. Turning it up also drives the top end into the HF sag and brings in the speed's head bump. Double-click for off">
+                <div data-help="drive" title="DRIVE: takes this many dB off the selection's loudest peak the way tape saturation does, and gives it back as level — the makeup is measured, so the peak lands where it started. Turning it up also drives the top end into the HF sag and brings in the speed's head bump. Double-click for off">
                   <ModulaKnob
                     variant="led" :size="156" :model-value="phParams.tape"
                     :min="0" :max="TAPE_MAX_DB" :step="0.1" :default-value="PHATASS_DEFAULTS.tape"
@@ -163,12 +164,13 @@ async function applyAndClose() {
                   />
                 </div>
                 <ModulaSegmented
+                  data-help="tape-type"
                   :model-value="phParams.tapeCurve" :options="TAPE_CURVE_OPTIONS"
                   aria-label="Tape type" :disabled="!phPreview || phParams.tape <= 0"
                   @update:model-value="v => syncParam('tapeCurve', v)"
                 />
               </div>
-              <div class="ph-col ph-reel-col" title="TAPE SPEED: the treble sags on bright, hot passages — slower tape sags sooner, deeper and further down — while attacks stay bright, and Drive makes it sag harder. The speed also sets Drive's head bump, an octave lower at each slower speed">
+              <div class="ph-col ph-reel-col" data-help="tape-speed" title="TAPE SPEED: the treble sags on bright, hot passages — slower tape sags sooner, deeper and further down — while attacks stay bright, and Drive makes it sag harder. The speed also sets Drive's head bump, an octave lower at each slower speed">
                 <ModulaReel :size="100" :spinning="reelSpinning" :period="reelPeriod" />
                 <ModulaDrumCounter
                   :model-value="phParams.hf" :options="speedOptions" label="Tape speed (IPS)" :disabled="!phPreview"
@@ -181,7 +183,7 @@ async function applyAndClose() {
           <section class="ph-module">
             <header class="ph-module-head">Harmonics</header>
             <div class="ph-module-body">
-              <div title="WARMTH: low-end harmonic warmth — an even (quartic) and an odd (cubic) saturator on the low band, voiced for body. It sets how much of what they add is mixed in; the clean signal is never touched. Calibrated on this file, and never raises the selection's peak: a guard turns the added warmth down for a few milliseconds where it would. Double-click for off">
+              <div data-help="warmth" title="WARMTH: low-end harmonic warmth — an even (quartic) and an odd (cubic) saturator on the low band, voiced for body. It sets how much of what they add is mixed in; the clean signal is never touched. Calibrated on this file, and never raises the selection's peak: a guard turns the added warmth down for a few milliseconds where it would. Double-click for off">
                 <ModulaKnob
                   variant="ticks" :size="156" :model-value="phParams.warmth"
                   :min="0" :max="WARMTH_MAX" :step="0.1" :default-value="PHATASS_DEFAULTS.warmth"
@@ -190,6 +192,7 @@ async function applyAndClose() {
                 />
               </div>
               <ModulaSegmented
+                data-help="character"
                 :model-value="characterValue" :options="CHARACTER_OPTIONS"
                 aria-label="Warmth character" :disabled="!phPreview || phParams.warmth <= 0"
                 @update:model-value="v => syncParam('oddEven', v)"
@@ -198,7 +201,7 @@ async function applyAndClose() {
           </section>
         </div>
 
-        <div class="ph-mix" title="MIX: the processed signal against the dry one, held back by the plugin's latency so the blend never combs. Double-click for fully wet">
+        <div class="ph-mix" data-help="mix" title="MIX: the processed signal against the dry one, held back by the plugin's latency so the blend never combs. Double-click for fully wet">
           <span class="m-caption">Mix</span>
           <ModulaFader
             orientation="horizontal" :length="MIX_LEN" :thickness="44" readout="end" :readout-min-width="52"
@@ -212,7 +215,7 @@ async function applyAndClose() {
       <section class="ph-module ph-levels">
         <header class="ph-module-head">Levels</header>
         <div class="ph-levels-body">
-          <LevelMeter variant="modula" scale-side="left" :levels="phInputLevels" label="IN" :height="METER_H">
+          <LevelMeter data-help="in" variant="modula" scale-side="left" :levels="phInputLevels" label="IN" :height="METER_H">
             <template #below>
               <ModulaKnob
                 variant="trim" :model-value="phParams.inputDb" show-value
@@ -223,7 +226,7 @@ async function applyAndClose() {
               />
             </template>
           </LevelMeter>
-          <LevelMeter variant="modula" scale-side="right" :levels="phOutputLevels" label="OUT" :height="METER_H">
+          <LevelMeter data-help="out" variant="modula" scale-side="right" :levels="phOutputLevels" label="OUT" :height="METER_H">
             <template #below>
               <ModulaKnob
                 variant="trim" :model-value="phParams.output" show-value
@@ -241,6 +244,7 @@ async function applyAndClose() {
     <!-- Bench only: gated off in production builds. See phatassBench.js. -->
     <PhatassBenchPanel
       v-if="showBench"
+      data-bench
       :params="phParams" :disabled="!phPreview" :trim-pending="phOutputMakeup.pending"
       @set="(k, v) => syncParam(k, v)"
     />

@@ -62,6 +62,7 @@ function togglePeakHold() {
            settings below: they are what you reach for while looking at the
            plot, usually the instant something interesting goes past. -->
       <ModulaLedPill
+        data-help="freeze"
         size="sm" label="FREEZE" color="var(--m-second)"
         :model-value="frozen"
         title="Hold the display where it is, to read a moment that has gone past"
@@ -70,6 +71,7 @@ function togglePeakHold() {
       />
       <!-- Turning it on starts a fresh hold. -->
       <ModulaLedPill
+        data-help="peak-hold"
         size="sm" label="PEAK HOLD" color="var(--m-second)"
         :model-value="showPeakHold"
         title="Outline showing where the trace has peaked. Turning it on starts a fresh hold."
@@ -79,6 +81,7 @@ function togglePeakHold() {
     </template>
 
     <SpectrumDisplay
+      data-help="display"
       ref="display"
       design="modula"
       :frame-fn="frameFn"
@@ -93,11 +96,11 @@ function togglePeakHold() {
     <!-- The settings, on one panel: the two switches say which spectrum you
          are looking at, the two knobs how it settles and how deep it reads. -->
     <div class="sa-panel">
-      <div class="sa-group">
+      <div class="sa-group" data-help="resolution">
         <span class="m-caption">Resolution</span>
         <ModulaSegmented v-model="fftSize" :options="FFT_OPTIONS" aria-label="FFT size" />
       </div>
-      <div class="sa-group">
+      <div class="sa-group" data-help="tilt">
         <span class="m-caption">Tilt <span class="sa-unit">dB/oct</span></span>
         <ModulaSegmented v-model="slope" :options="SLOPE_OPTIONS" aria-label="Tilt" />
       </div>
@@ -106,6 +109,7 @@ function togglePeakHold() {
 
       <div class="sa-knobs">
       <ModulaKnob
+        data-help="averaging"
         variant="small" :size="44" show-value editable
         v-model="smoothing" :min="0" :max="0.95" :step="0.01" :default-value="SMOOTHING_DEFAULT"
         label="Averaging" :color="ACCENT" :format-value="percent"
@@ -113,6 +117,7 @@ function togglePeakHold() {
         title="How much each frame is averaged with the last: higher is steadier, lower follows faster. Double-click to reset"
       />
       <ModulaKnob
+        data-help="floor"
         variant="small" :size="44" show-value editable
         v-model="floorDb" :min="-140" :max="-40" :step="5" :default-value="FLOOR_DEFAULT_DB"
         label="Floor" :color="ACCENT" :format-value="decibels"

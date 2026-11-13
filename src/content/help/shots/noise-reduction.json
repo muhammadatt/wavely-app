@@ -1,0 +1,34 @@
+{
+  "panel": {
+    "src": "/help/shots/noise-reduction/panel.jpg",
+    "w": 560,
+    "h": 483
+  },
+  "controls": {
+    "mode": {
+      "src": "/help/shots/noise-reduction/mode.png",
+      "w": 544,
+      "h": 82
+    },
+    "max-reduction": {
+      "src": "/help/shots/noise-reduction/max-reduction.png",
+      "w": 245,
+      "h": 43
+    },
+    "tiers": {
+      "src": "/help/shots/noise-reduction/tiers.png",
+      "w": 245,
+      "h": 41
+    },
+    "voice-guard": {
+      "src": "/help/shots/noise-reduction/voice-guard.png",
+      "w": 245,
+      "h": 74
+    },
+    "mix": {
+      "src": "/help/shots/noise-reduction/mix.png",
+      "w": 544,
+      "h": 96
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "panel": {
+    "src": "/help/shots/voicerx/panel.jpg",
+    "w": 820,
+    "h": 440
+  },
+  "controls": {
+    "analyze": {
+      "src": "/help/shots/voicerx/analyze.png",
+      "w": 658,
+      "h": 212
+    },
+    "input-meter": {
+      "src": "/help/shots/voicerx/input-meter.png",
+      "w": 61,
+      "h": 274
+    },
+    "output-meter": {
+      "src": "/help/shots/voicerx/output-meter.png",
+      "w": 61,
+      "h": 274
+    }
+  }
+}

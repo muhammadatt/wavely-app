@@ -255,7 +255,7 @@ async function applyAndClose() {
         :audition="hfAudition"
         @update:detect="syncDetect" @update:detect-high="syncDetectHigh" @update:audition="toggleAudition"
       />
-      <div class="hs-meter">
+      <div class="hs-meter" data-help="out-meter">
         <LevelMeter variant="modula" scale-side="right" :levels="hfOutputLevels" label="OUT" :height="METER_H" />
       </div>
     </div>
@@ -264,14 +264,14 @@ async function applyAndClose() {
     <div class="hs-panel">
       <!-- DE-ESS: one Amount, split between the two cutting stages. -->
       <div class="hs-group">
-        <span class="m-caption hs-caption">
+        <span class="m-caption hs-caption" data-help="deess-lamp">
           De-ess
           <span
             class="hs-lamp" :style="lampStyle(deessLamp, ACCENT)"
             title="Lit while the de-esser is cutting: the wide band Duck or the split band EQ is taking something off"
           ></span>
         </span>
-        <div class="hs-knob">
+        <div class="hs-knob" data-help="amount">
           <ModulaKnob
             variant="arc" :size="100" editable
             :model-value="hfTotal" :min="0" :max="100" :step="1" :default-value="AMOUNT_DEFAULT"
@@ -281,6 +281,7 @@ async function applyAndClose() {
           />
         </div>
         <ModulaFillSlider
+          data-help="split"
           orientation="horizontal" :length="200"
           :model-value="hfSplit" :min="0" :max="100" :step="1" :default-value="SPLIT_DEFAULT"
           label="" :ends="['WIDE BAND', 'SPLIT BAND']" flat :format-value="formatSplit"
@@ -296,7 +297,7 @@ async function applyAndClose() {
       <!-- AIR: what goes back on top after the cut — on the vowels only. -->
       <div class="hs-group">
         <span class="m-caption hs-caption hs-caption-blank" aria-hidden="true">&nbsp;</span>
-        <div class="hs-knob">
+        <div class="hs-knob" data-help="hf-restore">
           <ModulaKnob
             variant="arc" :size="80" show-value editable
             :model-value="hfAir" :min="0" :max="AIR_MAKEUP_MAX_DB" :step="0.1" :default-value="D.air"
@@ -306,6 +307,7 @@ async function applyAndClose() {
           />
         </div>
         <button
+          data-help="air-auto"
           type="button" class="hs-auto" :class="{ 'is-on': hfComp }" :disabled="!hfPreview"
           role="switch" :aria-checked="hfComp" :style="{ '--hs-auto': ACCENT }"
           title="Set HF Restore automatically: half of the top end the cut is measured to take off the selection is put back on the vowels, and it follows the other controls. Turn the knob to take over; AUTO drops and keeps the value"
@@ -318,7 +320,7 @@ async function applyAndClose() {
       <!-- PROTECT: what the cut is not allowed to do. -->
       <div class="hs-group">
         <span class="m-caption hs-caption hs-caption-blank" aria-hidden="true">&nbsp;</span>
-        <div class="hs-knob">
+        <div class="hs-knob" data-help="lisp-guard">
           <ModulaKnob
             variant="arc" :size="80" show-value editable
             :model-value="hfGuard" :min="0" :max="100" :step="1" :default-value="D.guard"
@@ -348,7 +350,7 @@ async function applyAndClose() {
     </div>
 
     <!-- ── What it took, and where ───────────────────────────────────────── -->
-    <div class="hs-readout">
+    <div class="hs-readout" data-help="reduction">
       <span class="hs-total">
         <span class="m-caption">Reduction</span>
         <span class="hs-total-num">{{ fmtCut(shown.total) }}</span>
@@ -359,7 +361,7 @@ async function applyAndClose() {
         <span title="Soften's deepest recent onset cut — a few milliseconds at a time, on top of the reduction. Held for a second so it can be read">SOFT <template v-if="hfSoften > 0">{{ fmtCut(shown.soft) }}</template><span v-else class="hs-off">OFF</span></span>
       </span>
     </div>
-    <div class="hs-scope">
+    <div class="hs-scope" data-help="scope">
       <DeEsserScope
         :data-fn="getScope"
         :envelope-fn="envelope"

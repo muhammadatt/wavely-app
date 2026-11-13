@@ -412,7 +412,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
            reading that separates two settings the other two agree on, which is
            a research question rather than a working one. -->
       <div class="sc-strip">
-        <div class="sc-strip-item">
+        <div class="sc-strip-item" data-help="clip-lamp">
           <span
             class="sc-lamp"
             :style="{
@@ -427,12 +427,12 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
         <span class="sc-strip-rule"></span>
         <!-- ⚠ FIXED WIDTH AND TABULAR FIGURES: these change every tenth of a
              second, and a proportional numeral re-flows the row on every digit. -->
-        <div class="sc-strip-item">
+        <div class="sc-strip-item" data-help="peak-reduction">
           <span class="sc-num" style="font-variant-numeric:tabular-nums;min-width:30px;text-align:right">{{ peakOverText }}</span>
           <span class="m-caption"><span style="text-transform:none">dB</span> peak</span>
         </div>
         <span class="sc-strip-rule"></span>
-        <div class="sc-strip-item">
+        <div class="sc-strip-item" data-help="engaged">
           <span class="sc-num" style="font-variant-numeric:tabular-nums;min-width:34px;text-align:right" :style="{ color: ACCENT }">{{ engagedText }}</span>
           <span class="m-caption">Engaged</span>
         </div>
@@ -442,7 +442,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
            THIS IS THE CONTROL SURFACE, not an illustration of one. The ceiling
            line is the primary control: drag it and the whole picture re-shades
            live. The knob below is the precise way to reach the same number. -->
-      <div class="sc-well">
+      <div class="sc-well" data-help="scope">
         <ClipperScope
           :data-fn="getScope"
           :envelope-fn="envelope"
@@ -462,7 +462,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
       <!-- ── Level ladders ────────────────────────────────────────────────
            HORIZONTAL AND SIDE BY SIDE: IN and OUT are a comparison, and a
            comparison wants the two scales parallel and adjacent. -->
-      <div class="sc-meters">
+      <div class="sc-meters" data-help="meters">
         <LevelMeter
           variant="modula" label="IN" orientation="horizontal"
           :levels="clipperInputLevels" :height="METER_LEN" :show-scale="false"
@@ -479,6 +479,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
            that drags it, so the three controls for one number are adjacent. -->
       <div class="sc-band">
         <ModulaKnob
+          data-help="ceiling"
           variant="ticks" :size="126" show-value editable
           :model-value="fixedThresholdDb" :min="-24" :max="-1" :step="0.5"
           label="Ceiling" :color="ACCENT" :format-value="formatDb"
@@ -494,7 +495,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
                ceiling, so it lights when the ceiling sits on that preset's
                value and goes out by itself the moment the knob or the line
                moves it — nothing remembered, nothing to go stale. -->
-          <div class="sc-group">
+          <div class="sc-group" data-help="set-ceiling">
             <span class="m-caption">Set ceiling</span>
             <div class="sc-setters">
               <ModulaChip
@@ -515,7 +516,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
           </div>
 
           <!-- ── Peak control ───────────────────────────────────────────── -->
-          <div class="sc-group">
+          <div class="sc-group" data-help="peak-control">
             <span class="m-caption">Peak control</span>
             <ModulaSegmented
               :model-value="limiterMode" :options="LIMITER_OPTIONS"
@@ -535,7 +536,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
              never reach. The knob stays draggable while AUTO is lit: touching
              it takes over and drops AUTO. -->
         <div class="sc-output">
-          <div :style="{ opacity: autoMakeup ? 0.78 : 1 }">
+          <div data-help="output" :style="{ opacity: autoMakeup ? 0.78 : 1 }">
             <ModulaKnob
               variant="ticks" :size="126" show-value editable
               :model-value="outputTrimDb"
@@ -547,6 +548,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
             />
           </div>
           <ModulaLedPill
+            data-help="auto"
             size="sm" label="AUTO" :color="ACCENT"
             :model-value="autoMakeup" :disabled="!clipperPreview"
             :title="autoMakeup

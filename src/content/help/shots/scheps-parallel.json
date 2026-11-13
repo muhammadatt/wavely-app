@@ -1,0 +1,54 @@
+{
+  "panel": {
+    "src": "/help/shots/scheps-parallel/panel.jpg",
+    "w": 740,
+    "h": 627
+  },
+  "controls": {
+    "input-meter": {
+      "src": "/help/shots/scheps-parallel/input-meter.png",
+      "w": 82,
+      "h": 317
+    },
+    "reduction": {
+      "src": "/help/shots/scheps-parallel/reduction.png",
+      "w": 536,
+      "h": 73
+    },
+    "curve": {
+      "src": "/help/shots/scheps-parallel/curve.png",
+      "w": 536,
+      "h": 146
+    },
+    "character": {
+      "src": "/help/shots/scheps-parallel/character.png",
+      "w": 152,
+      "h": 74
+    },
+    "squash": {
+      "src": "/help/shots/scheps-parallel/squash.png",
+      "w": 142,
+      "h": 210
+    },
+    "mix": {
+      "src": "/help/shots/scheps-parallel/mix.png",
+      "w": 142,
+      "h": 210
+    },
+    "auto-trim": {
+      "src": "/help/shots/scheps-parallel/auto-trim.png",
+      "w": 129,
+      "h": 57
+    },
+    "output-meter": {
+      "src": "/help/shots/scheps-parallel/output-meter.png",
+      "w": 83,
+      "h": 353
+    },
+    "output": {
+      "src": "/help/shots/scheps-parallel/output.png",
+      "w": 71,
+      "h": 86
+    }
+  }
+}

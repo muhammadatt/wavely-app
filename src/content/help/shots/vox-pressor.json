@@ -1,0 +1,89 @@
+{
+  "panel": {
+    "src": "/help/shots/voxpressor/panel.jpg",
+    "w": 800,
+    "h": 595
+  },
+  "controls": {
+    "surface": {
+      "src": "/help/shots/voxpressor/surface.png",
+      "w": 42,
+      "h": 42
+    },
+    "peak-reduction": {
+      "src": "/help/shots/voxpressor/peak-reduction.png",
+      "w": 196,
+      "h": 259
+    },
+    "attack-release": {
+      "src": "/help/shots/voxpressor/attack-release.png",
+      "w": 196,
+      "h": 52
+    },
+    "knee": {
+      "src": "/help/shots/voxpressor/knee.png",
+      "w": 92,
+      "h": 59
+    },
+    "meter": {
+      "src": "/help/shots/voxpressor/meter.png",
+      "w": 327,
+      "h": 175
+    },
+    "meter-select": {
+      "src": "/help/shots/voxpressor/meter-select.png",
+      "w": 254,
+      "h": 52
+    },
+    "readout": {
+      "src": "/help/shots/voxpressor/readout.png",
+      "w": 212,
+      "h": 38
+    },
+    "body-leveler": {
+      "src": "/help/shots/voxpressor/body-leveler.png",
+      "w": 182,
+      "h": 140
+    },
+    "enhance-detail": {
+      "src": "/help/shots/voxpressor/enhance-detail.png",
+      "w": 182,
+      "h": 134
+    },
+    "de-ess-amount": {
+      "src": "/help/shots/voxpressor/de-ess-amount.png",
+      "w": 102,
+      "h": 112
+    },
+    "de-ess-band": {
+      "src": "/help/shots/voxpressor/de-ess-band.png",
+      "w": 97,
+      "h": 112
+    },
+    "density-drive": {
+      "src": "/help/shots/voxpressor/density-drive.png",
+      "w": 102,
+      "h": 112
+    },
+    "density-mix": {
+      "src": "/help/shots/voxpressor/density-mix.png",
+      "w": 92,
+      "h": 112
+    },
+    "density-comp": {
+      "src": "/help/shots/voxpressor/density-comp.png",
+      "w": 162,
+      "h": 42
+    },
+    "output-level": {
+      "src": "/help/shots/voxpressor/output-level.png",
+      "w": 208,
+      "h": 52
+    },
+    "io-meters": {
+      "src": "/help/shots/voxpressor/io-meters.png",
+      "w": 208,
+      "h": 57
+    }
+  }
+}

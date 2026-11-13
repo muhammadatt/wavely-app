@@ -1,0 +1,89 @@
+{
+  "panel": {
+    "src": "/help/shots/plosive-tamer/panel.jpg",
+    "w": 780,
+    "h": 662
+  },
+  "controls": {
+    "in-meter": {
+      "src": "/help/shots/plosive-tamer/in-meter.png",
+      "w": 82,
+      "h": 317
+    },
+    "reduction-bars": {
+      "src": "/help/shots/plosive-tamer/reduction-bars.png",
+      "w": 576,
+      "h": 140
+    },
+    "scope": {
+      "src": "/help/shots/plosive-tamer/scope.png",
+      "w": 576,
+      "h": 130
+    },
+    "pops-count": {
+      "src": "/help/shots/plosive-tamer/pops-count.png",
+      "w": 87,
+      "h": 22
+    },
+    "bursts-count": {
+      "src": "/help/shots/plosive-tamer/bursts-count.png",
+      "w": 101,
+      "h": 22
+    },
+    "reset": {
+      "src": "/help/shots/plosive-tamer/reset.png",
+      "w": 64,
+      "h": 30
+    },
+    "out-meter": {
+      "src": "/help/shots/plosive-tamer/out-meter.png",
+      "w": 87,
+      "h": 377
+    },
+    "output": {
+      "src": "/help/shots/plosive-tamer/output.png",
+      "w": 71,
+      "h": 86
+    },
+    "pop-depth": {
+      "src": "/help/shots/plosive-tamer/pop-depth.png",
+      "w": 86,
+      "h": 139
+    },
+    "pop-freq": {
+      "src": "/help/shots/plosive-tamer/pop-freq.png",
+      "w": 71,
+      "h": 139
+    },
+    "pop-sensitivity": {
+      "src": "/help/shots/plosive-tamer/pop-sensitivity.png",
+      "w": 90,
+      "h": 139
+    },
+    "pop-release": {
+      "src": "/help/shots/plosive-tamer/pop-release.png",
+      "w": 72,
+      "h": 139
+    },
+    "burst-depth": {
+      "src": "/help/shots/plosive-tamer/burst-depth.png",
+      "w": 86,
+      "h": 139
+    },
+    "burst-freq": {
+      "src": "/help/shots/plosive-tamer/burst-freq.png",
+      "w": 86,
+      "h": 139
+    },
+    "burst-sensitivity": {
+      "src": "/help/shots/plosive-tamer/burst-sensitivity.png",
+      "w": 90,
+      "h": 139
+    },
+    "burst-length": {
+      "src": "/help/shots/plosive-tamer/burst-length.png",
+      "w": 83,
+      "h": 139
+    }
+  }
+}

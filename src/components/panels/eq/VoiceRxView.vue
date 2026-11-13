@@ -489,6 +489,7 @@ function fmtWidth(q) {
     -->
     <div
       v-if="showIntro"
+      data-help="analyze"
       class="rounded-[3px] flex flex-col items-center justify-center gap-[12px] px-[24px] py-[22px]"
       :style="{ minHeight: `${plotHeight}px`, background: 'rgba(0,0,0,.28)' }"
     >
