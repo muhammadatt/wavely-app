@@ -1,0 +1,14 @@
+{
+  "panel": {
+    "src": "/help/shots/plugin-chain/panel.jpg",
+    "w": 560,
+    "h": 330
+  },
+  "controls": {
+    "add-effect": {
+      "src": "/help/shots/plugin-chain/add-effect.png",
+      "w": 516,
+      "h": 58
+    }
+  }
+}

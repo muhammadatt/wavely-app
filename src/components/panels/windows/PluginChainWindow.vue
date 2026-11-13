@@ -185,7 +185,7 @@ function onDragEnd() {
 
       <!-- The next slot: where an added effect lands, so the button sits there. -->
       <button
-        type="button" class="pc-add-slot"
+        type="button" class="pc-add-slot" data-help="add-effect"
         :class="{ 'is-empty': !slots.length }"
         aria-haspopup="dialog"
         aria-label="Add effect"

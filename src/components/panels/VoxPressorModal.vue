@@ -386,7 +386,7 @@ async function applyAndClose() {
   >
     <template #header-center>
       <button
-        type="button" class="vp-surface" :aria-pressed="String(light)"
+        type="button" class="vp-surface" data-help="surface" :aria-pressed="String(light)"
         :title="light ? 'Dark faceplate' : 'Light faceplate'" :aria-label="light ? 'Switch to the dark faceplate' : 'Switch to the light faceplate'"
         @pointerdown.stop @click="toggleSurface"
       >
@@ -402,7 +402,7 @@ async function applyAndClose() {
     <div class="vp" :class="{ 'is-light': light }">
       <!-- ── TOP: Peaks and Body flank the needle meter ─────────────────── -->
       <div class="vp-top">
-        <section class="vp-col" aria-label="Peaks" @pointerdown="meter = 'peaks'" @focusin="meter = 'peaks'">
+        <section class="vp-col" data-help="peak-reduction" aria-label="Peaks" @pointerdown="meter = 'peaks'" @focusin="meter = 'peaks'">
           <div class="vp-title-row">
             <button
               type="button" class="vp-title" :class="{ 'is-lit': meter === 'peaks' }" :aria-pressed="String(meter === 'peaks')"
@@ -419,12 +419,12 @@ async function applyAndClose() {
             @update:model-value="onPeaks"
           />
           <FoldedLcd
-            class="vp-fold vp-ctl-gap" name="Attack / release" label-position="above" stacked cycle
+            class="vp-fold vp-ctl-gap" data-help="attack-release" name="Attack / release" label-position="above" stacked cycle
             :model-value="speedIndex" :min="0" :max="SPEED_OPTIONS.length - 1" :step="1"
             :format="formatSpeed" :disabled="!voxPreview || !speedInUse"
             @update:model-value="onSpeedIndex"
           />
-          <div class="vp-ctl">
+          <div class="vp-ctl" data-help="knee">
             <span class="vp-cap">Knee</span>
             <VoxKneeKeys
               :model-value="voxPeaksMode" :options="PEAKS_MODE_OPTIONS" :color="ACCENT" :surface="surface"
@@ -435,14 +435,14 @@ async function applyAndClose() {
         </section>
 
         <div class="vp-centre">
-          <VoxNeedleMeter :db="meterDb" :label="meterLabel" :scale="0.82" />
-          <div class="vp-ctl">
+          <VoxNeedleMeter data-help="meter" :db="meterDb" :label="meterLabel" :scale="0.82" />
+          <div class="vp-ctl" data-help="meter-select">
             <ModulaDrumCounter v-model="meter" class="vp-drum" :options="METER_OPTIONS" aria-label="What the needle reads" />
           </div>
           <!-- THE SELECTED STAGE'S READOUT, under the drum (owner, November 2026:
                one under each knob crowded them): its measured figures, each
                named, then "measuring…" / "remeasuring…" or its warning. -->
-          <div class="vp-readout" :class="{ 'is-stale': readout.stale }" aria-live="polite">
+          <div class="vp-readout" data-help="readout" :class="{ 'is-stale': readout.stale }" aria-live="polite">
             <span class="vp-status-line">
               <span v-if="Array.isArray(readout.line)" :class="{ 'is-warn': readout.warn, 'is-over': readout.over }"><template v-for="(f, i) in readout.line" :key="f.k"><span v-if="i" class="vp-ro-sep" aria-hidden="true"> · </span><span class="vp-ro-k">{{ f.k }}</span> {{ f.v }}</template></span>
               <span v-else-if="readout.line">{{ readout.line }}</span><template v-else>&nbsp;</template>
@@ -454,7 +454,7 @@ async function applyAndClose() {
         </div>
 
         <div class="vp-body-col">
-        <section class="vp-col" aria-label="Body" @pointerdown="meter = 'body'" @focusin="meter = 'body'">
+        <section class="vp-col" data-help="body-leveler" aria-label="Body" @pointerdown="meter = 'body'" @focusin="meter = 'body'">
           <div class="vp-title-row">
             <button
               type="button" class="vp-title" :class="{ 'is-lit': meter === 'body' }" :aria-pressed="String(meter === 'body')"
@@ -474,7 +474,7 @@ async function applyAndClose() {
           <!-- LO DETAIL in the space under Body (owner, November 2026: reclaims the
                height), kept its OWN section — a rule and its own title, and pushed
                down level with the Knee keys — so it does not read as part of Body. -->
-          <section class="vp-col vp-detail" aria-label="Detail">
+          <section class="vp-col vp-detail" data-help="enhance-detail" aria-label="Detail">
             <hr class="vp-rule" aria-hidden="true">
             <div class="vp-title-row"><span class="vp-title">Enhance Detail</span></div>
             <div class="vp-knob-row">
@@ -500,7 +500,7 @@ async function applyAndClose() {
             <!-- Amount + Band as a pair of knobs (the redesign, November 2026: the band
                  slider became a knob, so De-ess sits on the knob row like Density). -->
             <div class="vp-knob-row">
-              <div class="vp-ctl">
+              <div class="vp-ctl" data-help="de-ess-amount">
                 <ModulaKnob
                   variant="halo" :size="72"
                   :model-value="voxDeEss" :min="0" :max="100" :step="1"
@@ -511,7 +511,7 @@ async function applyAndClose() {
                 />
                 <span class="vp-cap">Amount</span>
               </div>
-              <div class="vp-ctl">
+              <div class="vp-ctl" data-help="de-ess-band">
                 <div class="vp-ends">
                   <ModulaKnob
                     variant="led" :size="72" :segments="11"
@@ -538,7 +538,7 @@ async function applyAndClose() {
             >Density</button>
           </div>
           <div class="vp-knob-row">
-              <div class="vp-ctl">
+              <div class="vp-ctl" data-help="density-drive">
               <ModulaKnob
                 variant="halo" :size="72"
                 :model-value="voxParallelDrive" :min="0" :max="PARALLEL_DRIVE_MAX" :step="0.5"
@@ -550,7 +550,7 @@ async function applyAndClose() {
               <span class="vp-cap">Drive</span>
             </div>
 
-            <div class="vp-ctl">
+            <div class="vp-ctl" data-help="density-mix">
             <div class="vp-ends vp-ends--num">
             <ModulaKnob
               variant="led" :size="72" :segments="11"
@@ -567,7 +567,7 @@ async function applyAndClose() {
             </div>
 
           </div>
-          <div class="vp-ctl">
+          <div class="vp-ctl" data-help="density-comp">
             <VoxSlideSwitch
               :model-value="voxParallelComp" :options="PARALLEL_COMP_OPTIONS" :color="ACCENT" :surface="surface"
               aria-label="Parallel compressor" :disabled="!voxPreview || voxParallel <= 0"
@@ -581,7 +581,7 @@ async function applyAndClose() {
              BOTTOM of the column (owner, November 2026: at the top, with no title
              of their own, they read as detached from the row). -->
         <section class="vp-col vp-out-col" aria-label="Output">
-          <div class="vp-out-title">
+          <div class="vp-out-title" data-help="output-level">
             <FoldedLcd
               class="vp-fold" name="Output level" label-position="above" stacked cycle
               :model-value="ceilingIndex" :min="0" :max="CEILING_OPTIONS.length - 1" :step="1"
@@ -591,7 +591,7 @@ async function applyAndClose() {
           </div>
           <!-- The app's own IN / OUT ladders, horizontal (the Soft Clipper's pair):
                its ballistics, peak hold and clip lamp. -->
-          <div class="vp-io">
+          <div class="vp-io" data-help="io-meters">
             <LevelMeter variant="modula" slim label="IN" label-side="start" orientation="horizontal" :levels="voxInputLevels" :height="IO_METER_LEN" :show-scale="false" />
             <LevelMeter variant="modula" slim label="OUT" label-side="start" orientation="horizontal" :levels="voxOutputLevels" :height="IO_METER_LEN" :show-scale="false" />
           </div>
@@ -599,7 +599,7 @@ async function applyAndClose() {
         </div>
       </div>
 
-        <div v-if="showBench" class="vp-bench-wrap">
+        <div v-if="showBench" class="vp-bench-wrap" data-bench>
           <button
             type="button" class="vp-bench-toggle" :aria-expanded="benchOpen"
             title="Dev-only settings"
