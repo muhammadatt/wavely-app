@@ -3,9 +3,10 @@
  * The effect marketing pages — `/plugins/` (the index) and `/plugins/<slug>/`.
  *
  * A product page per effect, laid out like a commercial plugin's: the hero with
- * the faceplate, "Hear it" (before / after on real material, `ABPlayer`), the
- * interactive screenshot (`PanelTour`), the selling points, the facts and a
- * call to open the editor. It renders `src/content/marketing/<id>.js`, borrows
+ * the faceplate, "Hear it" (before / after on real material, `ABPlayer` —
+ * the audio comes first, owner, November 2026), the Overview (design 3a: a
+ * centred lead over a numbered list of features), the interactive screenshot
+ * (`PanelTour`), the facts and a call to open the editor. It renders `src/content/marketing/<id>.js`, borrows
  * the control descriptions and screenshots from the help pages, and imports
  * nothing from the editor.
  */
@@ -117,6 +118,12 @@ onMounted(() => {
         </div>
       </section>
 
+      <section v-if="samples.length" id="hear" class="mk-section">
+        <h2 class="mk-h2">Hear it</h2>
+        <p class="mk-lede">Real {{ title }} renders — the same processing Apply does in the editor. Switch it on and off while it plays.</p>
+        <ABPlayer :samples="samples" :name="title" :try-href="tryHref" />
+      </section>
+
       <!-- Design 3a (owner, November 2026): a centred lead over a numbered two-column list. -->
       <section v-if="page.overview?.length || page.features?.length" class="mk-section mk-overview">
         <div class="mk-overview-head">
@@ -135,12 +142,6 @@ onMounted(() => {
             </span>
           </li>
         </ol>
-      </section>
-
-      <section v-if="samples.length" id="hear" class="mk-section">
-        <h2 class="mk-h2">Hear it</h2>
-        <p class="mk-lede">Real {{ title }} renders — the same processing Apply does in the editor. Switch it on and off while it plays.</p>
-        <ABPlayer :samples="samples" :name="title" :try-href="tryHref" />
       </section>
 
       <section v-if="spots.length" class="mk-section">
