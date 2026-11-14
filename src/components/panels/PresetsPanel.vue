@@ -146,6 +146,9 @@ async function handleProcess() {
   const docId = appState.activeDocumentId
   const doc = getDocument(docId)
   if (!doc || !doc.currentFile || doc.isProcessing) return
+  // Mastering replaces the whole timeline; Undo puts back what was selected
+  // when it started, not what is selected when the server answers.
+  const selectionAtStart = doc.selection ? { ...doc.selection } : null
 
   // Signed out, the server masters at most the free preview. A whole file
   // can't be narrowed the way a selection can, so ask for a sign-in before
@@ -217,6 +220,7 @@ async function handleProcess() {
     const dur = getTimelineDuration(doc.segments)
     const bufferId = replaceRegion(
       0, dur, audioBuffer, `${PRESETS[preset]?.displayName ?? 'Preset'} mastering`, docId,
+      selectionAtStart,
     )
 
     // Sync file metadata to reflect the processed audio properties.

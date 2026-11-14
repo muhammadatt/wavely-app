@@ -258,6 +258,7 @@ const achieved = computed(() => {
 async function applyNormalize() {
   const { start, end } = region()
   if (start >= end) return
+  const selectionAtStart = state.selection ? { ...state.selection } : null
   // A region with nothing measurable has no target to move to. The Apply button
   // is disabled for it, and this is the second half of that: a keyboard or a
   // race must not reach a no-op that then reports success.
@@ -288,7 +289,7 @@ async function applyNormalize() {
     const { buffer, report } = await loudnessNormalizeRegion(
       state.segments, start, end, applied, mode, ctx, sampleRate, channels,
     )
-    const bufferId = replaceRegion(start, end, buffer, 'loudness normalization', docId)
+    const bufferId = replaceRegion(start, end, buffer, 'loudness normalization', docId, selectionAtStart)
     setPeakCache(bufferId, await computePeakCache(buffer, 256))
 
     lastReport.value = {

@@ -408,7 +408,7 @@ export function usePluginChain() {
         sameDocument()
         segments = replaceRegionWithBuffer(segments, start, end, buffer, `chain-scratch-${i}`)
       }
-      const bufferId = replaceRegion(start, end, buffer, `Chain: ${names}`, docId)
+      const bufferId = replaceRegion(start, end, buffer, `Chain: ${names}`, docId, pin.selection)
       setPeakCache(bufferId, await computePeakCache(buffer, 256))
       chain().setBypassed(true)
       for (const def of defs) def.afterApply?.()

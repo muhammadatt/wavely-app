@@ -103,3 +103,171 @@ test('history is per document — undo reports the active document’s last edit
   editor.undo()
   assert.equal(lastToast(editor), 'Undid silence')
 })
+
+// ── Selection across undo / redo ─────────────────────────────────────────────
+// Undo used to clear the selection, so "apply, Undo, change a setting, apply
+// again" meant re-selecting by hand. Each entry now carries the selection that
+// belongs to its timeline.
+
+test('undoing an effect puts back the selection it was applied to', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'effect.wav')
+
+  editor.state.selection = { start: 1, end: 2 }
+  editor.replaceRegion(1, 2, fakeBuffer(1), 'LA Vintage 2A compression')
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+
+  // Re-applying to the same span and undoing again lands in the same place.
+  editor.replaceRegion(1, 2, fakeBuffer(1), 'LA Vintage 2A compression')
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+})
+
+test('undoing a cut selects the restored audio; redo leaves none', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'cut.wav')
+
+  editor.state.selection = { start: 1, end: 2 }
+  editor.performCut()
+  assert.equal(editor.state.selection, null)
+
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+
+  editor.redo()
+  assert.equal(editor.state.selection, null)
+})
+
+test('a selection made after an edit is not carried onto the undone timeline', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'shift.wav')
+
+  editor.state.selection = { start: 1, end: 2 }
+  editor.performCut()
+  // Made on the shortened timeline: after undo, 2.5–3 s would be other audio.
+  editor.state.selection = { start: 2.5, end: 3 }
+
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+
+  // Redo returns to the shortened timeline, and with it the selection made there.
+  editor.redo()
+  assert.deepEqual(editor.state.selection, { start: 2.5, end: 3 })
+})
+
+test('undo restores "no selection" when there was none', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'none.wav')
+
+  editor.state.selection = null
+  editor.replaceRegion(0, 4, fakeBuffer(4), 'Peak Normalize')
+  editor.state.selection = { start: 0, end: 1 }
+  editor.undo()
+  assert.equal(editor.state.selection, null)
+})
+
+test('a restored selection is a copy, not shared with the history entry', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'copy.wav')
+
+  editor.state.selection = { start: 1, end: 2 }
+  editor.pushUndo('silence')
+  editor.state.selection.end = 3   // mutate after the snapshot
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+  editor.state.selection.start = 0
+  editor.redo()
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 0, end: 2 })
+})
+
+test('undo restores the span an apply processed, even if the selection moved while it rendered', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'async.wav')
+
+  // Apply started on 1–2 s (pinned there); the user reselected while the
+  // render ran, and the commit lands afterwards.
+  editor.state.selection = { start: 1, end: 2 }
+  const pin = editor.pinActiveDocument('De-Esser')
+  editor.state.selection = { start: 3, end: 3.5 }
+  editor.replaceRegion(1, 2, fakeBuffer(1), 'De-Esser', pin.docId, pin.selection)
+
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+
+  // Redo returns to the selection that was in place when Undo was pressed.
+  editor.redo()
+  assert.deepEqual(editor.state.selection, { start: 3, end: 3.5 })
+})
+
+test('a whole-file apply undoes to the selection at its start, whatever it was', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'whole.wav')
+
+  // Nothing selected at Apply; a selection made during the render is not it.
+  editor.state.selection = null
+  let pin = editor.pinActiveDocument('Peak Normalize')
+  editor.state.selection = { start: 0.5, end: 1 }
+  editor.replaceRegion(0, 4, fakeBuffer(4), 'Peak Normalize', pin.docId, pin.selection)
+  editor.undo()
+  assert.equal(editor.state.selection, null)
+
+  // Select all at Apply, cleared mid-render: Undo brings Select all back.
+  editor.selectAll()
+  pin = editor.pinActiveDocument('Peak Normalize')
+  editor.state.selection = null
+  editor.replaceRegion(0, 4, fakeBuffer(4), 'Peak Normalize', pin.docId, pin.selection)
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 0, end: 4 })
+
+  // Mastering replaces the whole timeline from a partial selection: it survives.
+  editor.state.selection = { start: 1, end: 2 }
+  pin = editor.pinActiveDocument('mastering')
+  editor.replaceRegion(0, 4, fakeBuffer(4), 'ACX Audiobook mastering', pin.docId, pin.selection)
+  editor.state.selection = null
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+})
+
+test('the pin keeps its own copy of the selection', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'pincopy.wav')
+  editor.state.selection = { start: 1, end: 2 }
+  const pin = editor.pinActiveDocument('x')
+  editor.state.selection.end = 3
+  assert.deepEqual(pin.selection, { start: 1, end: 2 })
+})
+
+test('undo leaves a valid playhead outside the restored selection where it is', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'playhead.wav')
+
+  // The playhead is the paste point: with 1–2 s selected, paste at 0 and undo,
+  // and a second Paste must still land at 0, not jump to the selection.
+  editor.state.selection = { start: 1, end: 2 }
+  editor.performCopy()
+  editor.state.playhead = 0
+  editor.performPaste(0)
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
+  assert.equal(editor.state.playhead, 0)
+})
+
+test('undo clamps the playhead onto a timeline it shortened', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'clamp.wav')
+
+  // Copy 1 s and paste it at the end: 5 s long. Park the playhead at 4.8 s and
+  // undo the paste — the timeline is 4 s again.
+  editor.state.selection = { start: 0, end: 1 }
+  editor.performCopy()
+  editor.state.selection = null
+  editor.performPaste(4)
+  assert.equal(editor.totalDuration.value, 5)
+  editor.state.playhead = 4.8
+
+  editor.undo()
+  assert.equal(editor.totalDuration.value, 4)
+  assert.equal(editor.state.playhead, 4)
+})

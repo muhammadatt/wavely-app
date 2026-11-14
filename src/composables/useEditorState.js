@@ -191,6 +191,42 @@ const state = new Proxy({}, {
   },
 })
 
+/**
+ * History entries carry the selection that went with their timeline, and undo /
+ * redo put it back. Undo used to CLEAR the selection, which made the common
+ * loop — apply, Undo, change a setting, apply again to the same span —
+ * impossible without re-selecting by hand (and Noise Reduction's held result,
+ * keyed on the exact span, unreachable). Keeping the CURRENT selection instead
+ * would be wrong: after a cut or paste is undone the timeline shifts, and a
+ * selection made on the edited timeline would cover different audio. A saved
+ * selection always belongs to the segments saved with it.
+ */
+function copySelection(sel) {
+  return sel ? { start: sel.start, end: sel.end } : null
+}
+
+/** One history entry: the document's timeline and the selection that goes with it. */
+function snapshot(doc, label, selection = doc.selection) {
+  return {
+    segments: cloneSegments(doc.segments),
+    selection: copySelection(selection),
+    label,
+    revision: doc.revision,
+  }
+}
+
+/** Push an undo entry for an edit about to happen to `doc`, and invalidate redo. */
+function recordUndo(doc, label, selection = doc.selection) {
+  const h = historyFor(doc.id)
+  h.undo.push(snapshot(doc, label, selection))
+  if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
+  h.redo.length = 0
+  doc.revision = ++revisionSeq
+  doc.undoCount = h.undo.length
+  doc.redoCount = 0
+}
+
+
 function historyFor(docId) {
   let h = docHistory.get(docId)
   if (!h) {
@@ -260,30 +296,41 @@ export function useEditorState() {
   function pushUndo(label = '') {
     const doc = activeDocument.value
     if (!doc) return
+    recordUndo(doc, label)
+  }
+
+  /**
+   * Move one entry from `from` to `to`, saving the current state in its place.
+   * The label travels with the state it belongs to: the entry going onto the
+   * other stack is the result of that same operation, so the reverse step can
+   * name it too.
+   */
+  function stepHistory(from, to) {
+    const doc = activeDocument.value
+    if (!doc || from.length === 0) return null
+    const entry = from.pop()
+    to.push(snapshot(doc, entry.label))
+    doc.segments = entry.segments
+    doc.revision = entry.revision
+    doc.selection = copySelection(entry.selection)
+    // The playhead is not part of history (restoring it would yank it back
+    // after the user has moved on) and is left where it is — it is the paste
+    // point, and Play starts at a selection's start regardless — except that it
+    // must stay on a timeline the undo may have shortened.
+    const dur = getTimelineDuration(doc.segments)
+    if (doc.playhead > dur) doc.playhead = dur
     const h = historyFor(doc.id)
-    h.undo.push({ segments: cloneSegments(doc.segments), label, revision: doc.revision })
-    if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
-    h.redo.length = 0
-    doc.revision = ++revisionSeq
     doc.undoCount = h.undo.length
-    doc.redoCount = 0
+    doc.redoCount = h.redo.length
+    return entry
   }
 
   function undo() {
     const doc = activeDocument.value
     if (!doc) return
     const h = historyFor(doc.id)
-    if (h.undo.length === 0) return
-    const entry = h.undo.pop()
-    // The label travels with the state it belongs to: the entry now going onto
-    // the redo stack is the result of that same operation, so redoing it can
-    // name it too.
-    h.redo.push({ segments: cloneSegments(doc.segments), label: entry.label, revision: doc.revision })
-    doc.segments = entry.segments
-    doc.revision = entry.revision
-    doc.selection = null
-    doc.undoCount = h.undo.length
-    doc.redoCount = h.redo.length
+    const entry = stepHistory(h.undo, h.redo)
+    if (!entry) return
     showToast(entry.label ? `Undid ${entry.label}` : 'Undone')
   }
 
@@ -291,14 +338,8 @@ export function useEditorState() {
     const doc = activeDocument.value
     if (!doc) return
     const h = historyFor(doc.id)
-    if (h.redo.length === 0) return
-    const entry = h.redo.pop()
-    h.undo.push({ segments: cloneSegments(doc.segments), label: entry.label, revision: doc.revision })
-    doc.segments = entry.segments
-    doc.revision = entry.revision
-    doc.selection = null
-    doc.undoCount = h.undo.length
-    doc.redoCount = h.redo.length
+    const entry = stepHistory(h.redo, h.undo)
+    if (!entry) return
     showToast(entry.label ? `Redid ${entry.label}` : 'Redone')
   }
 
@@ -627,20 +668,19 @@ export function useEditorState() {
   /**
    * Swap a processed buffer into [start, end]. `label` names the effect for the
    * undo toast, in the same reading form pushUndo documents; `docId` defaults to the active document, and is only ever passed
-   * explicitly by the preset job, which can land after a tab switch.
+   * explicitly by the preset job, which can land after a tab switch. `selection`
+   * is the selection at the START of the apply, which Undo puts back.
    */
-  function replaceRegion(start, end, newBuffer, label = '', docId = appState.activeDocumentId) {
+  function replaceRegion(start, end, newBuffer, label = '', docId = appState.activeDocumentId, selection) {
     const doc = getDocument(docId)
     if (!doc) return null
     // Undo must land on the document being modified, which is not necessarily
     // the active one — a preset job can finish after the user switched tabs.
-    const h = historyFor(doc.id)
-    h.undo.push({ segments: cloneSegments(doc.segments), label, revision: doc.revision })
-    if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
-    h.redo.length = 0
-    doc.revision = ++revisionSeq
-    doc.undoCount = h.undo.length
-    doc.redoCount = 0
+    // `selection` is what was selected when the apply STARTED (pin.selection):
+    // the commit can land seconds later, and the waveform stays usable
+    // meanwhile, so the live selection may be something else by now. Passing
+    // null says "nothing was selected"; omitting it falls back to the live one.
+    recordUndo(doc, label, selection === undefined ? doc.selection : selection)
 
     const bufferId = uuidv4()
     addBuffer(bufferId, newBuffer, doc.id)
@@ -748,6 +788,10 @@ export function useEditorState() {
     const seq = activationSeq
     return {
       docId,
+      // Taken now, before the render: replaceRegion records it so Undo puts
+      // back the selection the apply ran on, not whatever is selected when it
+      // commits.
+      selection: copySelection(activeDocument.value?.selection ?? null),
       check() {
         if (activationSeq !== seq || appState.activeDocumentId !== docId) throw new DocumentSwitchedError(what)
       },

@@ -208,7 +208,7 @@ export function useNoiseReduction() {
         showToast('Audio changed during noise reduction — try again')
         return false
       }
-      const bufferId = replaceRegion(start, end, buffer, 'noise reduction', pin.docId)
+      const bufferId = replaceRegion(start, end, buffer, 'noise reduction', pin.docId, pin.selection)
       setPeakCache(bufferId, cache)
       const mixNote = settings.mix < 1 ? ` at ${Math.round(settings.mix * 100)}% mix` : ''
       showToast(`Noise reduced with ${engineLabel}${mixNote} — undo to compare`)

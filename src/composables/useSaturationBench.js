@@ -248,7 +248,7 @@ const copies = pluginCopies((copy, life) => {
       try {
         const buffer = await renderRegion(state.segments, start, end)
         pin.check()
-        const bufferId = replaceRegion(start, end, buffer, 'Saturation Workbench', pin.docId)
+        const bufferId = replaceRegion(start, end, buffer, 'Saturation Workbench', pin.docId, pin.selection)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Saturation Workbench applied')

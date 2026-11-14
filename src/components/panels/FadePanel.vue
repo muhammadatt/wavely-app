@@ -72,7 +72,7 @@ async function apply() {
     )
     const cache = await computePeakCache(buffer, 256)
     pin.check()
-    const bufferId = replaceRegion(start, end, buffer, `the ${label}`, pin.docId)
+    const bufferId = replaceRegion(start, end, buffer, `the ${label}`, pin.docId, pin.selection)
     setPeakCache(bufferId, cache)
     const curveLabel = curveTypes.value.find((c) => c.id === curve)?.label ?? curve
     showToast(`${label[0].toUpperCase()}${label.slice(1)} applied (${(end - start).toFixed(2)} s, ${curveLabel})`)
