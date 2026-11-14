@@ -83,24 +83,25 @@ function select(op) {
         class="op-row w-full flex items-center gap-[10px] px-[13px] py-3 rounded-[12px] border cursor-pointer text-left select-none"
         :class="isDisabled(op) ? 'op-row--disabled' : ''"
         :disabled="isDisabled(op)"
+        :title="op.desc"
         @click="select(op)"
       >
         <div class="op-icon w-[34px] h-[34px] rounded-[10px] flex items-center justify-center shrink-0">
           <Icon :name="op.icon" :size="16" />
         </div>
+        <!-- The description gets the row's full width (owner, November 2026):
+             no chevron, and the plan badge rides on the NAME line, where the
+             names are short, rather than beside both lines. Descriptions are
+             written to fit ~180 px (test/ui/operationDescriptions.test.js);
+             the tooltip carries the whole text if one is still cut. No RENDER
+             tag here either: the window carries it. -->
         <div class="flex-1 min-w-0">
-          <div class="text-[13px] font-bold text-text truncate">{{ op.label }}</div>
-          <!-- No RENDER tag here (owner, November 2026): in a 300 px rail it
-               took the description's room. The window still carries it. -->
+          <div class="flex items-center gap-[6px] min-w-0">
+            <span class="text-[13px] font-bold text-text truncate">{{ op.label }}</span>
+            <PlanBadge :feature="op.feature" />
+          </div>
           <div class="text-[11px] font-medium text-text-muted truncate mt-[2px]">{{ op.desc }}</div>
         </div>
-        <PlanBadge :feature="op.feature" />
-        <!-- A chevron promises "this opens something", so the verbs that just
-             run don't get one. -->
-        <Icon
-          v-if="op.surface !== 'immediate'"
-          name="chevronRight" :size="16" :stroke-width="2.5" class="text-text-faint"
-        />
       </button>
     </div>
 

@@ -159,7 +159,7 @@ const ALL_OPERATIONS = [
   {
     id: 'cut',
     label: 'Cut',
-    desc: 'Remove the selection and put it on the clipboard',
+    desc: 'Cut the selection to the clipboard',
     category: 'edit',
     group: 'Clipboard',
     icon: 'cut',
@@ -189,7 +189,7 @@ const ALL_OPERATIONS = [
   {
     id: 'paste',
     label: 'Paste',
-    desc: 'Insert the clipboard at the playhead',
+    desc: 'Insert at the playhead',
     category: 'edit',
     group: 'Clipboard',
     icon: 'paste',
@@ -216,7 +216,7 @@ const ALL_OPERATIONS = [
   {
     id: 'trim',
     label: 'Trim',
-    desc: 'Remove audio outside or inside your selection',
+    desc: 'Keep or remove the selection',
     category: 'edit',
     group: 'Arrange',
     icon: 'trim',
@@ -230,7 +230,7 @@ const ALL_OPERATIONS = [
     // others, so it lives in the Edit list now.
     id: 'split',
     label: 'Split',
-    desc: 'Cut the clip in two at the playhead or the selection edges',
+    desc: 'Split the clip at the playhead',
     category: 'edit',
     group: 'Arrange',
     icon: 'split',
@@ -242,7 +242,7 @@ const ALL_OPERATIONS = [
   {
     id: 'silence',
     label: 'Silence',
-    desc: 'Replace the selected region with silence',
+    desc: 'Silence the selection',
     category: 'edit',
     group: 'Arrange',
     icon: 'silence',
@@ -261,7 +261,7 @@ const ALL_OPERATIONS = [
     // which in the label, so the rail never offers a choice between a word and
     // the same word.
     label: 'Peak Normalize',
-    desc: 'Put the loudest peak at a chosen level',
+    desc: 'Set the loudest peak’s level',
     category: 'level',
     icon: 'normalize',
     keywords: ['peak', 'level', 'maximize', 'gain', 'amplify'],
@@ -272,7 +272,7 @@ const ALL_OPERATIONS = [
   {
     id: 'loudness',
     label: 'Loudness Normalize',
-    desc: 'Hit a delivery target like ACX, Spotify or -16 LUFS',
+    desc: 'Hit ACX, Spotify or LUFS targets',
     category: 'level',
     icon: 'loudness',
     keywords: [
@@ -289,7 +289,7 @@ const ALL_OPERATIONS = [
   {
     id: 'fade',
     label: 'Fade',
-    desc: 'Shape the volume curve at the selection edges',
+    desc: 'Fade in or out over the selection',
     category: 'level',
     icon: 'fade',
     keywords: ['fade in', 'fade out', 'ramp', 'curve', 'taper'],
@@ -300,7 +300,7 @@ const ALL_OPERATIONS = [
   {
     id: 'volume',
     label: 'Volume',
-    desc: 'Adjust the volume of the selected region',
+    desc: 'Change the selection’s level',
     category: 'level',
     icon: 'volume',
     keywords: ['gain', 'louder', 'quieter', 'amplify', 'db'],
@@ -336,7 +336,7 @@ const ALL_OPERATIONS = [
     // past a compressor's attack and get amplified by makeup gain.
     id: 'soft-clipper',
     label: 'Soft Clipper',
-    desc: 'Tame transient peaks before compression',
+    desc: 'Round off transient peaks',
     category: 'dynamics',
     icon: 'clipper',
     keywords: ['clip', 'clipper', 'transient', 'plosive', 'peak', 'soft clip', 'saturation'],
@@ -375,7 +375,7 @@ const ALL_OPERATIONS = [
   {
     id: 'vox-pressor',
     label: 'VoxPressor',
-    desc: 'Vocal dynamics: 1176 peaks into LA-2A body',
+    desc: '1176 peaks into LA-2A body',
     category: 'dynamics',
     icon: 'dynamics',
     keywords: [
@@ -396,7 +396,7 @@ const ALL_OPERATIONS = [
     id: 'scheps-parallel',
     release: 'dev',
     label: 'Scheps Parallel',
-    desc: 'Blend in a squashed, EQ-steered copy',
+    desc: 'Blend in a squashed copy',
     category: 'dynamics',
     icon: 'parallel',
     keywords: [
@@ -412,7 +412,7 @@ const ALL_OPERATIONS = [
   {
     id: 'inflator',
     label: 'Cambridge Inflator',
-    desc: 'Raise quiet detail without raising the ceiling',
+    desc: 'Lift detail, not the ceiling',
     category: 'dynamics',
     icon: 'saturation',
     keywords: [
@@ -447,7 +447,7 @@ const ALL_OPERATIONS = [
     id: 'voicerx',
     release: 'dev',
     label: 'VoiceRx',
-    desc: 'Find what’s wrong with a voice recording',
+    desc: 'Diagnose a voice recording',
     category: 'tone',
     icon: 'voicerx',
     keywords: ['voice', 'diagnose', 'analyze', 'analyse', 'muddy', 'boxy', 'harsh', 'nasal', 'eq', 'doctor', 'fix'],
@@ -475,7 +475,7 @@ const ALL_OPERATIONS = [
     // Warmth circuit, moved out, plus its shelf with shape and timing pinned.
     id: 'phatass',
     label: 'PHAT*SS',
-    desc: 'Tape-style warmth and a rounded top end',
+    desc: 'Tape warmth, rounded top end',
     category: 'tone',
     icon: 'tape',
     keywords: ['tape', 'phatass', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'odd', 'even'],
@@ -502,7 +502,7 @@ const ALL_OPERATIONS = [
   {
     id: 'saturation-bench',
     label: 'Saturation Workbench',
-    desc: 'Stack layers of saturation, each on its own band',
+    desc: 'Layered saturation by band',
     category: 'tone',
     icon: 'saturation',
     keywords: [
@@ -523,7 +523,7 @@ const ALL_OPERATIONS = [
     // preview and no chain slot — Process the selection, Undo if it is wrong.
     id: 'noise-reduction',
     label: 'Noise Reduction',
-    desc: 'Remove background noise, hiss and room tone',
+    desc: 'Remove noise, hiss and room tone',
     category: 'clean',
     group: 'Noise',
     icon: 'noise',
@@ -540,7 +540,7 @@ const ALL_OPERATIONS = [
     // selection and rides clip gain on each event.
     id: 'de-esser',
     label: 'De-Esser',
-    desc: 'Soften harsh S sounds, keep the air',
+    desc: 'Soften harsh S sounds',
     category: 'clean',
     group: 'Harshness',
     icon: 'softener',
@@ -555,7 +555,7 @@ const ALL_OPERATIONS = [
     id: 'clip-gain-deesser',
     release: 'dev',
     label: 'Sibilance Editor',
-    desc: 'Find harsh S and F events and turn each down',
+    desc: 'Turn down harsh S and F events',
     category: 'clean',
     group: 'Harshness',
     icon: 'deesser',
@@ -570,7 +570,7 @@ const ALL_OPERATIONS = [
   {
     id: 'hf-limiter',
     label: 'Hi-Freq Limiter',
-    desc: 'Put a ceiling on brightness, harshness and edges',
+    desc: 'Cap brightness and harshness',
     category: 'clean',
     group: 'Harshness',
     icon: 'hflimiter',
@@ -601,7 +601,7 @@ const ALL_OPERATIONS = [
     id: 'plosive',
     release: 'dev',
     label: 'Plosive Tamer',
-    desc: 'Take the thump out of P and B, the spit out of T and K',
+    desc: 'Tame P/B thumps and T/K spit',
     category: 'clean',
     group: 'Pops & Hum',
     icon: 'plosive',
@@ -633,7 +633,7 @@ const ALL_OPERATIONS = [
   {
     id: 'spectrum-analyzer',
     label: 'Spectrum Analyzer',
-    desc: 'See what is in the file, frequency by frequency',
+    desc: 'See the file’s frequency content',
     category: 'clean',
     group: 'Analysis',
     icon: 'spectrum',
@@ -651,7 +651,7 @@ const ALL_OPERATIONS = [
     id: 'modula-kit',
     release: 'dev',
     label: 'Modula Kit',
-    desc: 'Developer gallery of the plugin control-surface kit',
+    desc: 'Plugin control-surface kit',
     category: 'clean',
     group: 'Analysis',
     icon: 'spectrum',
@@ -668,7 +668,7 @@ const ALL_OPERATIONS = [
   {
     id: 'plugin-chain',
     label: 'Effect Chain',
-    desc: 'Order, bypass and apply every active effect at once',
+    desc: 'Run several effects in one pass',
     category: null,
     icon: 'chain',
     keywords: ['effect chain', 'plugin chain', 'chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],
