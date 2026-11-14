@@ -29,16 +29,20 @@ test('every marketing page is an effect with a help entry, at the help page’s 
   }
 })
 
-test('the shape holds: copy, a search description, highlights, specs', () => {
+test('the shape holds: copy, a search description, the overview and its features, specs', () => {
   for (const [id, p] of Object.entries(MARKETING)) {
     for (const k of ['eyebrow', 'headline', 'description']) assert.equal(typeof p[k], 'string', `${id}.${k}`)
     assert.ok(p.description.length <= 160, `${id}: description is ${p.description.length} characters (search results cut at ~160)`)
     assert.ok(Array.isArray(p.pitch) && p.pitch.length >= 1 && p.pitch.length <= 2, `${id}.pitch`)
-    assert.ok(p.highlights.length >= 3 && p.highlights.length <= 6, `${id}.highlights`)
-    for (const h of p.highlights) assert.ok(h.title && h.text, `${id}: highlight needs title and text`)
+    assert.ok(Array.isArray(p.overview) && p.overview.length >= 1 && p.overview.length <= 3, `${id}.overview`)
+    assert.ok(Array.isArray(p.features) && p.features.length >= 6 && p.features.length <= 16, `${id}.features`)
+    assert.equal(new Set(p.features).size, p.features.length, `${id}: a feature is listed twice`)
+    for (const f of p.features) {
+      assert.equal(typeof f, 'string', `${id}: features are one line each`)
+      assert.ok(!f.includes('\n') && !/[.]$/.test(f), `${id}: “${f}” — one line, no full stop (it is a list item)`)
+    }
     for (const s of p.specs) assert.ok(s.label && s.value, `${id}: spec needs label and value`)
     if (p.feature) assert.ok(FEATURES[p.feature], `${id}: unknown plan feature ${p.feature}`)
-    for (const r of p.related ?? []) assert.ok(MARKETING[r] && r !== id, `${id}: related ${r} has no page`)
   }
 })
 
@@ -87,4 +91,32 @@ test('the route reads the slug from the path', () => {
   assert.equal(marketingSlugFromPath('/plugins/voxpressor'), 'voxpressor')
   assert.equal(marketingSlugFromPath('/plugins/%/'), '%')
   assert.equal(marketingSlugFromPath('/help/voxpressor/'), null)
+})
+
+test('every sample’s try-out link opens that sample in the editor, and nothing else does', async () => {
+  const { tryOutUrl, tryOutFromSearch, sampleDryUrl } = await import('../../src/content/marketing/index.js')
+  for (const [id, p] of Object.entries(MARKETING)) {
+    for (const s of p.samples) {
+      const url = tryOutUrl(id, s.id)
+      const got = tryOutFromSearch(url.slice(url.indexOf('?')))
+      assert.equal(got.windowId, id)
+      assert.equal(got.sample.id, s.id)
+      assert.deepEqual(got.sample.settings, s.settings ?? {})
+      assert.equal(got.url, sampleDryUrl(id, s.id))
+      // The dry take is what the editor loads: the render script's `off` file.
+      const audioPath = join(ROOT, 'src/content/marketing/audio', `${id}.json`)
+      if (existsSync(audioPath)) {
+        const rendered = json(`src/content/marketing/audio/${id}.json`).samples[s.id]
+        if (rendered) assert.equal(rendered.off, got.url)
+      }
+    }
+    // No clip named: the page's first sample.
+    assert.equal(tryOutFromSearch(`?try=${marketingSlug(id)}`).sample.id, p.samples[0].id)
+  }
+  assert.equal(tryOutFromSearch(''), null)
+  assert.equal(tryOutFromSearch('?try=no-such-effect'), null)
+  assert.equal(tryOutFromSearch('?try=voxpressor&clip=nope'), null)
+  // A clip is a name in the page's own list, never a path the editor would fetch.
+  assert.equal(tryOutFromSearch('?try=voxpressor&clip=..%2F..%2Fsecret'), null)
+  assert.equal(tryOutFromSearch('?try=opto-smooth'), null, 'the window id is not a slug')
 })

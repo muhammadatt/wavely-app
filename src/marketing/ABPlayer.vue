@@ -31,6 +31,8 @@ const props = defineProps({
   samples: { type: Array, required: true },
   /** The effect's name, for the switch's label. */
   name: { type: String, required: true },
+  /** The editor link that opens a sample there (`tryOutUrl`), or null for none. */
+  tryHref: { type: Function, default: null },
 })
 
 const FADE_S = 0.025
@@ -385,6 +387,11 @@ onBeforeUnmount(() => {
           <span>Match levels</span>
         </label>
         <span class="ab-foot-note">{{ matchLevels ? matchNote : 'Press B to switch, space to play. Headphones recommended.' }}</span>
+        <!-- Into the editor with this clip loaded and the effect open on it. -->
+        <a v-if="tryHref" :href="tryHref(sample)" class="ab-try">
+          Try it on this clip
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </a>
       </div>
     </div>
   </div>
@@ -533,6 +540,22 @@ onBeforeUnmount(() => {
 .ab-match { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--mk-soft); }
 .ab-match input { accent-color: var(--mk-accent); }
 .ab-foot-note { color: var(--mk-muted); }
+.ab-try {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(53, 211, 230, 0.5);
+  color: var(--mk-accent);
+  font-weight: 700;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ab-try:hover { background: rgba(53, 211, 230, 0.1); }
+.ab-try svg { width: 15px; height: 15px; }
 
 @media (max-width: 720px) {
   .ab { grid-template-columns: 1fr; }

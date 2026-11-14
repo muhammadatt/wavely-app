@@ -11,7 +11,7 @@
  */
 import { computed, onMounted } from 'vue'
 import {
-  MARKETING, marketingIdForSlug, marketingPageTitle, marketingTitle, marketingUrl, publishedMarketingIds,
+  MARKETING, marketingIdForSlug, marketingPageTitle, marketingTitle, marketingUrl, publishedMarketingIds, tryOutUrl,
 } from '../content/marketing/index.js'
 import { HELP, helpUrl } from '../content/help/index.js'
 import { requiredPlan } from '../auth/plans.js'
@@ -49,6 +49,15 @@ const samples = (page?.samples ?? [])
   .map(s => ({ ...s, audio: AUDIO[id]?.samples?.[s.id] }))
   .filter(s => s.audio)
 
+/**
+ * The two ways into the editor, kept apart so no two buttons with different
+ * words go to the same place: TRY (the hero, and under the player) opens the
+ * editor with a sample loaded and the effect on it (`tryOutUrl`); OPEN THE
+ * EDITOR (top bar, and the "your own audio" panel) is the plain editor.
+ */
+const tryHref = s => tryOutUrl(id, s.id)
+const heroTry = samples.length ? tryHref(samples[0]) : '/'
+
 /** Hotspots: the help entry's control, placed by the screenshot manifest. */
 const spots = computed(() => {
   if (!page || !shots) return []
@@ -59,10 +68,6 @@ const spots = computed(() => {
     return [{ id: h.shot, label: control.label, text: h.text ?? control.text, at }]
   })
 })
-
-const related = (page?.related ?? [])
-  .filter(r => published.includes(r))
-  .map(r => ({ id: r, title: marketingTitle(r), eyebrow: MARKETING[r].eyebrow, headline: MARKETING[r].headline, href: marketingUrl(r), shot: SHOTS[r]?.panel }))
 
 const index = published.map(r => ({
   id: r, title: marketingTitle(r), eyebrow: MARKETING[r].eyebrow, headline: MARKETING[r].headline,
@@ -99,7 +104,7 @@ onMounted(() => {
           <p class="mk-headline">{{ page.headline }}</p>
           <p v-for="(p, i) in page.pitch" :key="i" class="mk-pitch">{{ p }}</p>
           <div class="mk-actions">
-            <a href="/" class="mk-cta">Try it in your browser</a>
+            <a :href="heroTry" class="mk-cta">Try it in your browser</a>
             <a v-if="samples.length" href="#hear" class="mk-ghost">Hear it</a>
           </div>
           <p class="mk-plan" :class="{ 'mk-plan--pro': plan !== 'free' }">{{ planNote }}</p>
@@ -112,26 +117,28 @@ onMounted(() => {
         </div>
       </section>
 
+      <section v-if="page.overview?.length || page.features?.length" class="mk-section mk-overview">
+        <h2 class="mk-h2">Overview</h2>
+        <div class="mk-overview-body">
+          <div>
+            <p v-for="(p, i) in page.overview" :key="i" class="mk-overview-text">{{ p }}</p>
+          </div>
+          <ul v-if="page.features?.length" class="mk-features">
+            <li v-for="f in page.features" :key="f">{{ f }}</li>
+          </ul>
+        </div>
+      </section>
+
       <section v-if="samples.length" id="hear" class="mk-section">
         <h2 class="mk-h2">Hear it</h2>
         <p class="mk-lede">Real {{ title }} renders — the same processing Apply does in the editor. Switch it on and off while it plays.</p>
-        <ABPlayer :samples="samples" :name="title" />
+        <ABPlayer :samples="samples" :name="title" :try-href="tryHref" />
       </section>
 
       <section v-if="spots.length" class="mk-section">
         <h2 class="mk-h2">Take the tour</h2>
         <p class="mk-lede">Point at any control to see what it does.</p>
         <PanelTour :image="shots.panel" :spots="spots" :alt="`The ${title} faceplate`" />
-      </section>
-
-      <section class="mk-section">
-        <h2 class="mk-h2">Why {{ title }}</h2>
-        <div class="mk-grid">
-          <article v-for="h in page.highlights" :key="h.title" class="mk-card">
-            <h3 class="mk-card-title">{{ h.title }}</h3>
-            <p class="mk-card-text">{{ h.text }}</p>
-          </article>
-        </div>
       </section>
 
       <section class="mk-section mk-split">
@@ -146,25 +153,12 @@ onMounted(() => {
         </div>
         <aside class="mk-band">
           <h2 class="mk-band-title">Use it on your own audio</h2>
-          <p class="mk-band-text">Drop a file into the editor, select a passage and open {{ title }}. Nothing to install.</p>
+          <p class="mk-band-text">Open the editor, drop in your file, select a passage and open {{ title }}. Nothing to install.</p>
           <a href="/" class="mk-cta">Open the editor</a>
           <a :href="helpUrl(id)" class="mk-band-link">Read the {{ title }} manual</a>
         </aside>
       </section>
 
-      <section v-if="related.length" class="mk-section">
-        <h2 class="mk-h2">Works well with</h2>
-        <div class="mk-related">
-          <a v-for="r in related" :key="r.id" :href="r.href" class="mk-tile">
-            <img v-if="r.shot" :src="r.shot.src" alt="" class="mk-tile-img" loading="lazy" />
-            <span class="mk-tile-body">
-              <span class="mk-eyebrow">{{ r.eyebrow }}</span>
-              <span class="mk-tile-title">{{ r.title }}</span>
-              <span class="mk-tile-text">{{ r.headline }}</span>
-            </span>
-          </a>
-        </div>
-      </section>
     </main>
 
     <!-- ── Not found ────────────────────────────────────────────────────── -->
@@ -298,20 +292,42 @@ a { color: inherit; }
 .mk-h2 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.01em; }
 .mk-lede { margin: 8px 0 24px; font-size: 15px; color: var(--mk-soft); }
 
-.mk-grid {
+.mk-overview-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
-  margin-top: 24px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 40px;
+  margin-top: 20px;
+  align-items: start;
 }
-.mk-card {
-  padding: 22px;
+.mk-overview-text { margin: 0 0 16px; font-size: 16px; line-height: 1.7; color: var(--mk-soft); }
+.mk-features {
+  margin: 0;
+  padding: 20px 24px;
+  list-style: none;
   border-radius: 16px;
   background: var(--mk-surface);
   border: 1px solid var(--mk-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.mk-card-title { margin: 0; font-size: 17px; font-weight: 700; }
-.mk-card-text { margin: 8px 0 0; font-size: 14.5px; line-height: 1.6; color: var(--mk-soft); }
+.mk-features li {
+  position: relative;
+  padding-left: 22px;
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.mk-features li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.5em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mk-accent);
+  box-shadow: 0 0 8px rgba(53, 211, 230, 0.6);
+}
 
 .mk-split { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 40px; align-items: start; }
 .mk-specs {
@@ -378,7 +394,7 @@ a { color: inherit; }
 }
 
 @media (max-width: 900px) {
-  .mk-hero, .mk-split { grid-template-columns: 1fr; }
+  .mk-hero, .mk-split, .mk-overview-body { grid-template-columns: 1fr; }
   .mk-hero { padding-top: 40px; gap: 32px; }
   .mk-hero-img { transform: none; }
   .mk-name { font-size: 40px; }

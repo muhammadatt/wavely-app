@@ -3,32 +3,30 @@ export default {
   eyebrow: 'Vocal dynamics chain',
   headline: 'A finished vocal chain in one window.',
   pitch: [
-    'VoxPressor is the classic 1176-into-LA-2A vocal chain, with a de-esser and parallel density built in. The FET stage trims the loudest peaks, the opto stage levels the body of the voice, and every stage measures what it did to your file and shows you.',
-    'It is built for narration, podcasts and dialogue: dial in four knobs, pick your delivery level, and the voice is dense, even and ready for mastering.',
+    'The classic 1176-into-LA-2A vocal chain, with de-essing and parallel density built in — dense, even, ready-to-master vocals from four knobs.',
   ],
   description: 'A 1176-into-LA-2A vocal chain with de-essing and parallel density, in one window in your browser. Measured readouts guide every knob.',
 
-  highlights: [
-    {
-      title: 'Two classic compressors, already staged',
-      text: 'A fast FET stage catches the peaks so the slow opto stage can level the phrases — the order engineers wire by hand. Each stage makes up its own level and holds the source’s peak, so they never fight.',
-    },
-    {
-      title: 'Knobs that tell you when to stop',
-      text: 'The Peak reduction and Body leveler rings are measured on your selection: green while the voice is untouched, amber when a stage starts to lean on it, red when it is squashing. The meter readout shows exactly how many dB each stage took.',
-    },
-    {
-      title: 'De-essing where it belongs',
-      text: 'Compression brings sibilance up, so the de-esser sits after both compressors and listens to what they deliver. Its lisp guard never pushes an S below the voice around it.',
-    },
-    {
-      title: 'Density without the harshness',
-      text: 'A parallel LA-2A or 1176 copy fills in the quiet parts under the voice, with its own de-esser so the blend never brings the sibilance back.',
-    },
-    {
-      title: 'Lands on your delivery spec',
-      text: 'Output level holds the peak at the source’s, at −1 dB for podcasts and streaming, or at −3 dB for ACX.',
-    },
+  overview: [
+    'VoxPressor puts the vocal chain engineers wire by hand into one window. A fast FET stage modelled on the 1176 trims the loudest peaks, an optical stage modelled on the LA-2A levels the body of the voice, a de-esser cleans up the sibilance the compressors bring up, and a parallel copy fills in density underneath.',
+    'It is built for narration, podcasts and dialogue. Every stage measures what it did to your selection and shows it under the meter, and the knobs’ guide colours turn amber before a stage starts to squash the voice — so you get a finished, dense vocal without guessing, ready for mastering or delivery.',
+  ],
+
+  features: [
+    'The classic 1176-into-LA-2A vocal chain, already staged',
+    'FET peak stage with a soft 4:1 or hard 12:1 knee',
+    'Auto release timed from your voice’s own pitch, so low voices don’t ripple',
+    'Opto body leveler with 10 ms of lookahead and a voice-tuned side-chain',
+    'Guide colours on the knobs: green, then amber and red as a stage starts to touch the voice',
+    'Measured readouts per stage: dB off the peaks, cost to the voice, average leveling',
+    'De-esser after the compressors, with a lisp guard and a wide / split-band control',
+    'Parallel density from an LA-2A or 1176 copy, with its own de-esser',
+    'Enhance Detail for presence without raising the peak',
+    'Automatic makeup at every stage; each stage holds the source’s peak',
+    'Output level for delivery: source peak, −1 dB for podcasts and streaming, or −3 dB for ACX',
+    'Input alignment: the same settings work on quiet and hot recordings',
+    'Dark steel and light cream faceplates',
+    'Real-time preview free in your browser; Apply with Pro',
   ],
 
   samples: [
@@ -85,6 +83,4 @@ export default {
     { label: 'Apply', value: 'Pro plan' },
     { label: 'Works with', value: 'WAV, FLAC, MP3, AIFF, M4A — mono or stereo' },
   ],
-
-  related: ['opto-smooth'],
 }

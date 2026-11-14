@@ -2,28 +2,30 @@ export default {
   eyebrow: 'Opto leveling amplifier',
   headline: 'Smooth, phrase-level leveling with real tube warmth.',
   pitch: [
-    'LA Vintage 2A is modelled on the Teletronix LA-2A, the optical leveling amplifier engineers have trusted on vocals for six decades. It rides whole phrases rather than syllables, so a performance comes out even without sounding compressed.',
-    'It runs in your browser, on the file you are editing — no download, no install, no plugin host.',
+    'Transparent leveling for vocals and spoken word, with the valve colour the original is loved for. It runs in your browser — nothing to install.',
   ],
   description: 'An LA-2A style opto compressor that runs in your browser: smooth phrase-level leveling, tube harmonics and auto makeup that never clips. Free to use.',
 
-  highlights: [
-    {
-      title: 'The same knob, any recording level',
-      text: 'The hardware has no threshold, so Peak Reduction 50 does almost nothing to a quietly recorded file. LA Vintage 2A measures your file first and aligns its side-chain, so a setting does the same job on a whisper-quiet take as on a hot one — and a preset travels between files.',
-    },
-    {
-      title: 'Makeup that never runs backwards',
-      text: 'Auto makeup matches the body of the voice, not one stray peak, so turning Peak Reduction up always makes it denser, never quieter. A ceiling at the source’s own peak means the result is never louder than what went in.',
-    },
-    {
-      title: 'Harmonics fitted from measurement',
-      text: 'The valve colour is a second-harmonic-led curve fitted to measured harmonic data, chosen by ear over three alternatives. A sibilance guard eases it off on loud S sounds, so the warmth never turns to grit.',
-    },
-    {
-      title: 'What the original could not do',
-      text: 'Up to 20 ms of lookahead catches the first syllable after a pause. The R37 HF emphasis trim stops plosives driving the cell. And a delay-compensated Mix knob gives you parallel compression without a second track.',
-    },
+  overview: [
+    'LA Vintage 2A is modelled on the Teletronix LA-2A, the electro-optical tube leveling amplifier that has been a studio favourite on vocals, bass and guitar for more than half a century. Its optical cell reacts gently and lets go slowly, so it rides the level of whole phrases rather than individual syllables — a performance comes out even without sounding compressed.',
+    'Behind the famously simple two-knob face, LA Vintage 2A adds what a file-based workflow needs. It measures your recording before it compresses, so a setting does the same job on a quiet take as on a hot one; its makeup gain follows the body of the voice and can never push the result past the source’s own peak; and its valve colour is a second-harmonic-led curve fitted to measured harmonic data, with a guard that keeps loud S sounds clean.',
+  ],
+
+  features: [
+    'Modelled on the classic electro-optical tube leveling amplifier',
+    'Smooth, program-dependent leveling that rides phrases, not syllables',
+    'Natural-sounding, even with heavy gain reduction',
+    'Input alignment: Peak Reduction does the same job at any recording level',
+    'Auto makeup matched to the body of the voice — never louder than the source’s peak',
+    'Valve harmonics for musical warmth, switchable off for a clean compressor',
+    'Sibilance guard keeps loud S sounds free of grit',
+    'Compress and Limit modes',
+    'HF Emph side-chain trim, so plosives and low thumps don’t pump the level',
+    'Up to 20 ms of lookahead to catch the first syllable after a pause',
+    'Mix control for parallel compression, delay-compensated',
+    '4× oversampled gain cell and valve',
+    'Factory presets, plus your own',
+    'Real-time preview while you play — free, in your browser',
   ],
 
   samples: [
@@ -75,6 +77,4 @@ export default {
     { label: 'Presets', value: 'Factory and your own' },
     { label: 'Works with', value: 'WAV, FLAC, MP3, AIFF, M4A — mono or stereo' },
   ],
-
-  related: ['vox-pressor'],
 }

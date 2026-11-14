@@ -1,8 +1,8 @@
 /**
  * Per-effect MARKETING pages — `/plugins/<slug>/`, one product page per effect,
  * written to sell it the way a commercial plugin's page does: a hero with the
- * faceplate, before / after audio on real material, an interactive screenshot,
- * what makes it different, and the facts.
+ * faceplate, an overview with a bulleted list of what it does, before / after
+ * audio on real material, an interactive screenshot, and the facts.
  *
  * ── WHAT THIS SHARES WITH THE HELP PAGES, AND WHY ───────────────────────────
  * Keyed by the same window ids, at the same URL slug (`helpSlug`: the product
@@ -23,15 +23,18 @@
  *                        the plan from there, so pricing copy cannot drift
  *   eyebrow    string    The kind of effect, above the name (`Opto compressor`)
  *   headline   string    The hero line: the one promise, in a few words
- *   pitch      string[]  1–2 short paragraphs under it
+ *   pitch      string[]  1 short paragraph under it (the hero is a glance)
  *   description string   ≤ 160 characters, for <meta name="description"> and
  *                        social cards. Required: it is what a search result shows
- *   highlights [{ title, text }]  3–6 selling points, each one true and specific
+ *   overview   string[]  The OVERVIEW section, 1–3 paragraphs: what it is, what
+ *                        it is modelled on and what it adds (Waves' product
+ *                        pages are the model, owner, November 2026)
+ *   features   string[]  The bulleted capabilities under it, 6–16, each one
+ *                        line, each one true and specific
  *   samples    [sample]  The before / after clips (see below)
  *   hotspots   [{ shot, text? }]  Controls on the screenshot, by help `shot` id;
  *                        `text` overrides the help sentence
  *   specs      [{ label, value }] The facts box
- *   related    string[]  Window ids of other effects with a page
  *
  * ── A SAMPLE ────────────────────────────────────────────────────────────────
  *
@@ -55,7 +58,7 @@
 
 import optoSmooth from './opto-smooth.js'
 import voxPressor from './vox-pressor.js'
-import { HELP_META, helpSlug } from '../help/index.js'
+import { HELP_META, helpSlug } from '../help/meta.js'
 
 export const MARKETING = {
   'opto-smooth': optoSmooth,
@@ -96,4 +99,46 @@ export function marketingPageTitle(windowId) {
  */
 export function publishedMarketingIds(devBuild) {
   return Object.keys(MARKETING).filter(id => devBuild || HELP_META[id]?.release !== 'dev')
+}
+
+// ── The editor's try-out link ───────────────────────────────────────────────
+
+/**
+ * The link that opens the EDITOR with a sample loaded, selected, its effect
+ * open at the sample's settings and playing — "Try it on this clip". The
+ * editor reads it with `tryOutFromSearch`; both live here so the marketing page
+ * and the editor cannot disagree about its shape.
+ */
+export function tryOutUrl(windowId, sampleId) {
+  return `/?try=${encodeURIComponent(marketingSlug(windowId))}&clip=${encodeURIComponent(sampleId)}`
+}
+
+/** Where a sample's DRY take is served (`npm run marketing:render`). */
+export function sampleDryUrl(windowId, sampleId) {
+  return `/plugins/${marketingSlug(windowId)}/audio/${sampleId}-off.mp3`
+}
+
+/**
+ * What a try-out link asks for, or null if it asks for nothing this build
+ * has: `{ windowId, title, sample: { id, title, setting, settings }, url }`.
+ * A clip name is only ever looked up in the page's own sample list, so the
+ * link cannot point the editor at an arbitrary URL.
+ */
+export function tryOutFromSearch(search, devBuild = false) {
+  let params
+  try { params = new URLSearchParams(search || '') } catch { return null }
+  const slug = params.get('try')
+  if (!slug) return null
+  const windowId = marketingIdForSlug(slug)
+  if (!windowId || !publishedMarketingIds(devBuild).includes(windowId)) return null
+  const samples = MARKETING[windowId].samples ?? []
+  const clip = params.get('clip')
+  const sample = (clip ? samples.find(s => s.id === clip) : samples[0]) ?? null
+  if (!sample) return null
+  return {
+    windowId,
+    title: marketingTitle(windowId),
+    sample: { id: sample.id, title: sample.title, setting: sample.setting, settings: { ...(sample.settings ?? {}) } },
+    url: sampleDryUrl(windowId, sample.id),
+  }
 }
