@@ -117,16 +117,24 @@ onMounted(() => {
         </div>
       </section>
 
+      <!-- Design 3a (owner, November 2026): a centred lead over a numbered two-column list. -->
       <section v-if="page.overview?.length || page.features?.length" class="mk-section mk-overview">
-        <h2 class="mk-h2">Overview</h2>
-        <div class="mk-overview-body">
-          <div>
-            <p v-for="(p, i) in page.overview" :key="i" class="mk-overview-text">{{ p }}</p>
-          </div>
-          <ul v-if="page.features?.length" class="mk-features">
-            <li v-for="f in page.features" :key="f">{{ f }}</li>
-          </ul>
+        <div class="mk-overview-head">
+          <h2 class="mk-h2">Overview</h2>
+          <p
+            v-for="(p, i) in page.overview" :key="i"
+            class="mk-overview-text" :class="{ 'mk-overview-text--lead': i === 0 }"
+          >{{ p }}</p>
         </div>
+        <ol v-if="page.features?.length" class="mk-features">
+          <li v-for="(f, i) in page.features" :key="f.title" class="mk-feature">
+            <span class="mk-feature-n" aria-hidden="true">{{ String(i + 1).padStart(2, '0') }}</span>
+            <span class="mk-feature-body">
+              <span class="mk-feature-title">{{ f.title }}</span>
+              <span class="mk-feature-text">{{ f.text }}</span>
+            </span>
+          </li>
+        </ol>
       </section>
 
       <section v-if="samples.length" id="hear" class="mk-section">
@@ -292,42 +300,37 @@ a { color: inherit; }
 .mk-h2 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.01em; }
 .mk-lede { margin: 8px 0 24px; font-size: 15px; color: var(--mk-soft); }
 
-.mk-overview-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 40px;
-  margin-top: 20px;
-  align-items: start;
-}
-.mk-overview-text { margin: 0 0 16px; font-size: 16px; line-height: 1.7; color: var(--mk-soft); }
-.mk-features {
-  margin: 0;
-  padding: 20px 24px;
-  list-style: none;
-  border-radius: 16px;
-  background: var(--mk-surface);
-  border: 1px solid var(--mk-hairline);
+.mk-overview-head {
+  max-width: 720px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
 }
-.mk-features li {
-  position: relative;
-  padding-left: 22px;
-  font-size: 14.5px;
-  line-height: 1.5;
+.mk-overview-text { margin: 0; font-size: 16px; line-height: 1.7; color: var(--mk-soft); text-wrap: pretty; }
+.mk-overview-text--lead { font-size: 18px; line-height: 1.6; color: var(--mk-text); }
+.mk-features {
+  list-style: none;
+  margin: 48px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 48px;
+  border-top: 1px solid var(--mk-hairline);
 }
-.mk-features li::before {
-  content: '';
-  position: absolute;
-  left: 2px;
-  top: 0.5em;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--mk-accent);
-  box-shadow: 0 0 8px rgba(53, 211, 230, 0.6);
+.mk-feature {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--mk-hairline);
 }
+.mk-feature-n { font: 600 13px/21px 'JetBrains Mono', ui-monospace, monospace; color: var(--mk-accent); }
+.mk-feature-body { display: flex; flex-direction: column; gap: 2px; }
+.mk-feature-title { font-size: 15px; font-weight: 600; line-height: 1.4; }
+.mk-feature-text { font-size: 14px; line-height: 1.5; color: var(--mk-soft); text-wrap: pretty; }
 
 .mk-split { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 40px; align-items: start; }
 .mk-specs {
@@ -394,7 +397,7 @@ a { color: inherit; }
 }
 
 @media (max-width: 900px) {
-  .mk-hero, .mk-split, .mk-overview-body { grid-template-columns: 1fr; }
+  .mk-hero, .mk-split { grid-template-columns: 1fr; }
   .mk-hero { padding-top: 40px; gap: 32px; }
   .mk-hero-img { transform: none; }
   .mk-name { font-size: 40px; }
@@ -406,5 +409,7 @@ a { color: inherit; }
   .mk-toplink { display: none; }
   .mk-headline { font-size: 19px; }
   .mk-related { grid-template-columns: 1fr; }
+  .mk-features { grid-template-columns: 1fr; margin-top: 36px; }
+  .mk-overview-text--lead { font-size: 17px; }
 }
 </style>

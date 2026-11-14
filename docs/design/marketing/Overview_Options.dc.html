@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>html,body{margin:0;background:#06080b}a{color:#35d3e6}a:hover{color:#eaf6f8}</style>
+</helmet>
+<section style="padding:48px;display:flex;flex-direction:column;gap:24px;font-family:Inter,system-ui,sans-serif;color:#eaf6f8;border-bottom:1px solid rgba(255,255,255,.08)">
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div style="font:600 12px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#35d3e6">Turn 3 · 2a bullets, single-column prose</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:48px;align-items:flex-start">
+
+    <div id="3a" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:10px;align-items:center"><span style="font:700 13px 'JetBrains Mono',monospace;background:#35d3e6;color:#06181b;padding:4px 9px;border-radius:6px">3a</span><span style="font-size:14px;font-weight:600">Centered block above the list</span></div>
+      <div style="width:1244px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:radial-gradient(1200px 600px at 75% -10%, rgba(53,211,230,.10), transparent 60%), #0b0e12">
+        <div style="max-width:1180px;margin:0 auto;padding:0 32px 64px">
+          <div style="padding:48px 0 8px">
+            <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:20px;text-align:center">
+              <h2 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em">Overview</h2>
+              <p style="margin:0;font-size:18px;line-height:1.6;color:#eaf6f8;text-wrap:pretty">{{ p1 }}</p>
+              <p style="margin:0;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7);text-wrap:pretty">{{ p2 }}</p>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:48px;margin-top:48px;border-top:1px solid rgba(255,255,255,.08)">
+              <sc-for list="{{ features }}" as="f" hint-placeholder-count="14">
+                <div style="display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.08)">
+                  <span style="font:600 13px/21px 'JetBrains Mono',monospace;color:#35d3e6">{{ f.n }}</span>
+                  <div style="display:flex;flex-direction:column;gap:2px">
+                    <span style="font-size:15px;font-weight:600;line-height:1.4;color:#eaf6f8">{{ f.t }}</span>
+                    <span style="font-size:14px;line-height:1.5;color:rgba(234,246,248,.7);text-wrap:pretty">{{ f.d }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="3b" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:10px;align-items:center"><span style="font:700 13px 'JetBrains Mono',monospace;background:#35d3e6;color:#06181b;padding:4px 9px;border-radius:6px">3b</span><span style="font-size:14px;font-weight:600">Left-aligned reading column, list below</span></div>
+      <div style="width:1244px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:radial-gradient(1200px 600px at 75% -10%, rgba(53,211,230,.10), transparent 60%), #0b0e12">
+        <div style="max-width:1180px;margin:0 auto;padding:0 32px 64px">
+          <div style="padding:48px 0 8px">
+            <h2 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em">Overview</h2>
+            <div style="max-width:720px;margin-top:20px;display:flex;flex-direction:column;gap:18px">
+              <p style="margin:0;font-size:18px;line-height:1.6;color:#eaf6f8;text-wrap:pretty">{{ p1 }}</p>
+              <p style="margin:0;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7);text-wrap:pretty">{{ p2 }}</p>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:48px;margin-top:44px;border-top:1px solid rgba(255,255,255,.08)">
+              <sc-for list="{{ features }}" as="f" hint-placeholder-count="14">
+                <div style="display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.08)">
+                  <span style="font:600 13px/21px 'JetBrains Mono',monospace;color:#35d3e6">{{ f.n }}</span>
+                  <div style="display:flex;flex-direction:column;gap:2px">
+                    <span style="font-size:15px;font-weight:600;line-height:1.4;color:#eaf6f8">{{ f.t }}</span>
+                    <span style="font-size:14px;line-height:1.5;color:rgba(234,246,248,.7);text-wrap:pretty">{{ f.d }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="3c" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:10px;align-items:center"><span style="font:700 13px 'JetBrains Mono',monospace;background:#35d3e6;color:#06181b;padding:4px 9px;border-radius:6px">3c</span><span style="font-size:14px;font-weight:600">Heading left, prose right, list full width</span></div>
+      <div style="width:1244px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:radial-gradient(1200px 600px at 75% -10%, rgba(53,211,230,.10), transparent 60%), #0b0e12">
+        <div style="max-width:1180px;margin:0 auto;padding:0 32px 64px">
+          <div style="padding:48px 0 8px">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:48px;align-items:start">
+              <h2 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em">Overview</h2>
+              <div style="display:flex;flex-direction:column;gap:18px;max-width:720px">
+                <p style="margin:0;font-size:18px;line-height:1.6;color:#eaf6f8;text-wrap:pretty">{{ p1 }}</p>
+                <p style="margin:0;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7);text-wrap:pretty">{{ p2 }}</p>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:48px;margin-top:44px;border-top:1px solid rgba(255,255,255,.08)">
+              <sc-for list="{{ features }}" as="f" hint-placeholder-count="14">
+                <div style="display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.08)">
+                  <span style="font:600 13px/21px 'JetBrains Mono',monospace;color:#35d3e6">{{ f.n }}</span>
+                  <div style="display:flex;flex-direction:column;gap:2px">
+                    <span style="font-size:15px;font-weight:600;line-height:1.4;color:#eaf6f8">{{ f.t }}</span>
+                    <span style="font-size:14px;line-height:1.5;color:rgba(234,246,248,.7);text-wrap:pretty">{{ f.d }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+<section style="padding:48px;display:flex;flex-direction:column;gap:24px;font-family:Inter,system-ui,sans-serif;color:#eaf6f8;border-bottom:1px solid rgba(255,255,255,.08)">
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div style="font:600 12px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#35d3e6">Turn 2 · 1c layout, new bullet styles</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:48px;align-items:flex-start">
+
+    <div id="2a" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:10px;align-items:center"><span style="font:700 13px 'JetBrains Mono',monospace;background:#35d3e6;color:#06181b;padding:4px 9px;border-radius:6px">2a</span><span style="font-size:14px;font-weight:600">Mono index numbers</span></div>
+      <div style="width:1244px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:radial-gradient(1200px 600px at 75% -10%, rgba(53,211,230,.10), transparent 60%), #0b0e12">
+        <div style="max-width:1180px;margin:0 auto;padding:0 32px 64px">
+          <div style="padding:48px 0 8px">
+            <h2 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em">Overview</h2>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;margin-top:20px;align-items:start">
+              <p style="margin:0;font-size:18px;line-height:1.6;color:#eaf6f8;text-wrap:pretty">{{ p1 }}</p>
+              <p style="margin:0;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7);text-wrap:pretty">{{ p2 }}</p>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:48px;margin-top:40px;border-top:1px solid rgba(255,255,255,.08)">
+              <sc-for list="{{ features }}" as="f" hint-placeholder-count="14">
+                <div style="display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.08)">
+                  <span style="font:600 13px/21px 'JetBrains Mono',monospace;color:#35d3e6">{{ f.n }}</span>
+                  <div style="display:flex;flex-direction:column;gap:2px">
+                    <span style="font-size:15px;font-weight:600;line-height:1.4;color:#eaf6f8">{{ f.t }}</span>
+                    <span style="font-size:14px;line-height:1.5;color:rgba(234,246,248,.7);text-wrap:pretty">{{ f.d }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="2b" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:10px;align-items:center"><span style="font:700 13px 'JetBrains Mono',monospace;background:#35d3e6;color:#06181b;padding:4px 9px;border-radius:6px">2b</span><span style="font-size:14px;font-weight:600">Square LED, like the faceplate lamps</span></div>
+      <div style="width:1244px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:radial-gradient(1200px 600px at 75% -10%, rgba(53,211,230,.10), transparent 60%), #0b0e12">
+        <div style="max-width:1180px;margin:0 auto;padding:0 32px 64px">
+          <div style="padding:48px 0 8px">
+            <h2 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em">Overview</h2>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;margin-top:20px;align-items:start">
+              <p style="margin:0;font-size:18px;line-height:1.6;color:#eaf6f8;text-wrap:pretty">{{ p1 }}</p>
+              <p style="margin:0;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7);text-wrap:pretty">{{ p2 }}</p>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:48px;margin-top:40px;border-top:1px solid rgba(255,255,255,.08)">
+              <sc-for list="{{ features }}" as="f" hint-placeholder-count="14">
+                <div style="display:grid;grid-template-columns:14px minmax(0,1fr);gap:14px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.08)">
+                  <span style="width:8px;height:8px;border-radius:2px;margin-top:7px;background:#35d3e6;box-shadow:0 0 0 3px rgba(53,211,230,.12),0 0 10px rgba(53,211,230,.55)"></span>
+                  <div style="display:flex;flex-direction:column;gap:2px">
+                    <span style="font-size:15px;font-weight:600;line-height:1.4;color:#eaf6f8">{{ f.t }}</span>
+                    <span style="font-size:14px;line-height:1.5;color:rgba(234,246,248,.7);text-wrap:pretty">{{ f.d }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="2c" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:10px;align-items:center"><span style="font:700 13px 'JetBrains Mono',monospace;background:#35d3e6;color:#06181b;padding:4px 9px;border-radius:6px">2c</span><span style="font-size:14px;font-weight:600">No marker — mono label as the bullet</span></div>
+      <div style="width:1244px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:radial-gradient(1200px 600px at 75% -10%, rgba(53,211,230,.10), transparent 60%), #0b0e12">
+        <div style="max-width:1180px;margin:0 auto;padding:0 32px 64px">
+          <div style="padding:48px 0 8px">
+            <h2 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em">Overview</h2>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;margin-top:20px;align-items:start">
+              <p style="margin:0;font-size:18px;line-height:1.6;color:#eaf6f8;text-wrap:pretty">{{ p1 }}</p>
+              <p style="margin:0;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7);text-wrap:pretty">{{ p2 }}</p>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:48px;margin-top:40px;border-top:1px solid rgba(255,255,255,.08)">
+              <sc-for list="{{ features }}" as="f" hint-placeholder-count="14">
+                <div style="display:flex;flex-direction:column;gap:6px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.08)">
+                  <span style="font:600 12px 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#35d3e6">{{ f.t }}</span>
+                  <span style="font-size:15px;line-height:1.5;color:#eaf6f8;text-wrap:pretty">{{ f.dc }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+<section style="padding:48px;display:flex;flex-direction:column;gap:24px;font-family:Inter,system-ui,sans-serif;color:#eaf6f8">
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div style="font:600 12px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#35d3e6">Turn 1 · Overview restyle</div>
+    <div style="font-size:14px;color:rgba(234,246,248,.7);max-width:900px;text-wrap:pretty">Same list, three treatments. Bullets rewritten as a short title plus one line of detail. Prose kept, first paragraph promoted to a lead. Current version at the bottom for reference.</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:48px;align-items:flex-start">
+
+    <div id="1a" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:10px;align-items:center"><span style="font:700 13px 'JetBrains Mono',monospace;background:#35d3e6;color:#06181b;padding:4px 9px;border-radius:6px">1a</span><span style="font-size:14px;font-weight:600">Spec rows — no card, hairlines like "At a glance"</span></div>
+      <div style="width:1244px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:radial-gradient(1200px 600px at 75% -10%, rgba(53,211,230,.10), transparent 60%), #0b0e12">
+        <header style="display:flex;align-items:center;justify-content:space-between;padding:16px 32px;border-bottom:1px solid rgba(255,255,255,.08)">
+          <div style="display:flex;align-items:center;gap:12px"><img src="public/crisp-fm-logo.png" alt="crisp.fm" style="height:22px"><span style="width:1px;height:18px;background:rgba(255,255,255,.18)"></span><span style="font-weight:600;font-size:14px;color:rgba(234,246,248,.7)">Effects</span></div>
+          <div style="display:flex;align-items:center;gap:18px"><span style="font-size:14px;color:rgba(234,246,248,.7)">Manual</span><span style="padding:8px 14px;font-size:13px;border-radius:10px;background:#35d3e6;color:#06181b;font-weight:700">Open the editor</span></div>
+        </header>
+        <div style="max-width:1180px;margin:0 auto;padding:0 32px 64px">
+          <div style="padding:48px 0 8px">
+            <h2 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em">Overview</h2>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:56px;margin-top:20px;align-items:start">
+              <div>
+                <p style="margin:0 0 18px;font-size:18px;line-height:1.6;color:#eaf6f8;text-wrap:pretty">{{ p1 }}</p>
+                <p style="margin:0;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7);text-wrap:pretty">{{ p2 }}</p>
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;align-items:baseline;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,.08)">
+                  <span style="font:600 12px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#35d3e6">Features</span>
+                  <span style="font:500 12px 'JetBrains Mono',monospace;color:rgba(234,246,248,.45)">14</span>
+                </div>
+                <sc-for list="{{ features }}" as="f" hint-placeholder-count="14">
+                  <div style="display:grid;grid-template-columns:32px minmax(0,1fr);gap:8px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.08)">
+                    <span style="font:500 12px/22px 'JetBrains Mono',monospace;color:rgba(234,246,248,.45)">{{ f.n }}</span>
+                    <div style="font-size:14.5px;line-height:1.5"><span style="font-weight:600;color:#eaf6f8">{{ f.t }}</span><span style="color:rgba(234,246,248,.7)"> — {{ f.d }}</span></div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="1b" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:10px;align-items:center"><span style="font:700 13px 'JetBrains Mono',monospace;background:#35d3e6;color:#06181b;padding:4px 9px;border-radius:6px">1b</span><span style="font-size:14px;font-weight:600">Faceplate card — mono group labels, LED ticks</span></div>
+      <div style="width:1244px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:radial-gradient(1200px 600px at 75% -10%, rgba(53,211,230,.10), transparent 60%), #0b0e12">
+        <header style="display:flex;align-items:center;justify-content:space-between;padding:16px 32px;border-bottom:1px solid rgba(255,255,255,.08)">
+          <div style="display:flex;align-items:center;gap:12px"><img src="public/crisp-fm-logo.png" alt="crisp.fm" style="height:22px"><span style="width:1px;height:18px;background:rgba(255,255,255,.18)"></span><span style="font-weight:600;font-size:14px;color:rgba(234,246,248,.7)">Effects</span></div>
+          <div style="display:flex;align-items:center;gap:18px"><span style="font-size:14px;color:rgba(234,246,248,.7)">Manual</span><span style="padding:8px 14px;font-size:13px;border-radius:10px;background:#35d3e6;color:#06181b;font-weight:700">Open the editor</span></div>
+        </header>
+        <div style="max-width:1180px;margin:0 auto;padding:0 32px 64px">
+          <div style="padding:48px 0 8px">
+            <h2 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em">Overview</h2>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;margin-top:20px;align-items:start">
+              <div>
+                <p style="margin:0 0 18px;font-size:18px;line-height:1.6;color:#eaf6f8;text-wrap:pretty">{{ p1 }}</p>
+                <p style="margin:0;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7);text-wrap:pretty">{{ p2 }}</p>
+              </div>
+              <div style="border-radius:16px;background:#141920;border:1px solid rgba(255,255,255,.08);overflow:hidden">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:rgba(255,255,255,.03);border-bottom:1px solid rgba(255,255,255,.08)">
+                  <span style="font:700 11px 'JetBrains Mono',monospace;letter-spacing:.2em;text-transform:uppercase;color:rgba(234,246,248,.7)">LA Vintage 2A · Features</span>
+                  <span style="display:flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.12);font:600 10px 'JetBrains Mono',monospace;color:rgba(234,246,248,.7)"><span style="width:6px;height:6px;border-radius:50%;background:#35d3e6;box-shadow:0 0 6px rgba(53,211,230,.7)"></span>ON</span>
+                </div>
+                <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+                  <div style="padding:16px 20px 14px;border-bottom:1px solid rgba(255,255,255,.06)">
+                    <div style="font:600 11px 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#35d3e6;margin-bottom:10px">{{ g.label }}</div>
+                    <div style="display:flex;flex-direction:column;gap:9px">
+                      <sc-for list="{{ g.items }}" as="f" hint-placeholder-count="5">
+                        <div style="display:grid;grid-template-columns:14px minmax(0,1fr);gap:10px;align-items:start">
+                          <span style="width:10px;height:3px;border-radius:2px;margin-top:9px;background:#35d3e6;box-shadow:0 0 6px rgba(53,211,230,.6)"></span>
+                          <div style="font-size:14.5px;line-height:1.5"><span style="font-weight:600;color:#eaf6f8">{{ f.t }}</span><span style="color:rgba(234,246,248,.7)"> — {{ f.d }}</span></div>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="1c" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:10px;align-items:center"><span style="font:700 13px 'JetBrains Mono',monospace;background:#35d3e6;color:#06181b;padding:4px 9px;border-radius:6px">1c</span><span style="font-size:14px;font-weight:600">Stacked — lead prose, then a two-column list</span></div>
+      <div style="width:1244px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:radial-gradient(1200px 600px at 75% -10%, rgba(53,211,230,.10), transparent 60%), #0b0e12">
+        <header style="display:flex;align-items:center;justify-content:space-between;padding:16px 32px;border-bottom:1px solid rgba(255,255,255,.08)">
+          <div style="display:flex;align-items:center;gap:12px"><img src="public/crisp-fm-logo.png" alt="crisp.fm" style="height:22px"><span style="width:1px;height:18px;background:rgba(255,255,255,.18)"></span><span style="font-weight:600;font-size:14px;color:rgba(234,246,248,.7)">Effects</span></div>
+          <div style="display:flex;align-items:center;gap:18px"><span style="font-size:14px;color:rgba(234,246,248,.7)">Manual</span><span style="padding:8px 14px;font-size:13px;border-radius:10px;background:#35d3e6;color:#06181b;font-weight:700">Open the editor</span></div>
+        </header>
+        <div style="max-width:1180px;margin:0 auto;padding:0 32px 64px">
+          <div style="padding:48px 0 8px">
+            <h2 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em">Overview</h2>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;margin-top:20px;align-items:start">
+              <p style="margin:0;font-size:18px;line-height:1.6;color:#eaf6f8;text-wrap:pretty">{{ p1 }}</p>
+              <p style="margin:0;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7);text-wrap:pretty">{{ p2 }}</p>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:48px;margin-top:40px;border-top:1px solid rgba(255,255,255,.08)">
+              <sc-for list="{{ features }}" as="f" hint-placeholder-count="14">
+                <div style="display:grid;grid-template-columns:20px minmax(0,1fr);gap:12px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.08)">
+                  <span style="width:18px;height:18px;border-radius:50%;border:1px solid rgba(53,211,230,.45);display:flex;align-items:center;justify-content:center;margin-top:1px"><span style="width:6px;height:6px;border-radius:50%;background:#35d3e6"></span></span>
+                  <div style="display:flex;flex-direction:column;gap:2px">
+                    <span style="font-size:15px;font-weight:600;line-height:1.4;color:#eaf6f8">{{ f.t }}</span>
+                    <span style="font-size:14px;line-height:1.5;color:rgba(234,246,248,.7);text-wrap:pretty">{{ f.d }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="current" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:10px;align-items:center"><span style="font:700 13px 'JetBrains Mono',monospace;background:rgba(255,255,255,.12);color:#eaf6f8;padding:4px 9px;border-radius:6px">Current</span><span style="font-size:14px;font-weight:600;color:rgba(234,246,248,.7)">As shipped on claude/nifty-cray-9ua0nv</span></div>
+      <div style="width:1244px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:radial-gradient(1200px 600px at 75% -10%, rgba(53,211,230,.10), transparent 60%), #0b0e12">
+        <header style="display:flex;align-items:center;justify-content:space-between;padding:16px 32px;border-bottom:1px solid rgba(255,255,255,.08)">
+          <div style="display:flex;align-items:center;gap:12px"><img src="public/crisp-fm-logo.png" alt="crisp.fm" style="height:22px"><span style="width:1px;height:18px;background:rgba(255,255,255,.18)"></span><span style="font-weight:600;font-size:14px;color:rgba(234,246,248,.7)">Effects</span></div>
+          <div style="display:flex;align-items:center;gap:18px"><span style="font-size:14px;color:rgba(234,246,248,.7)">Manual</span><span style="padding:8px 14px;font-size:13px;border-radius:10px;background:#35d3e6;color:#06181b;font-weight:700">Open the editor</span></div>
+        </header>
+        <div style="max-width:1180px;margin:0 auto;padding:0 32px 64px">
+          <div style="padding:48px 0 8px">
+            <h2 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em">Overview</h2>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px;margin-top:20px;align-items:start">
+              <div>
+                <p style="margin:0 0 16px;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7)">{{ o1 }}</p>
+                <p style="margin:0 0 16px;font-size:16px;line-height:1.7;color:rgba(234,246,248,.7)">{{ o2 }}</p>
+              </div>
+              <div style="margin:0;padding:20px 24px;border-radius:16px;background:#141920;border:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;gap:10px">
+                <sc-for list="{{ oldFeatures }}" as="f" hint-placeholder-count="14">
+                  <div style="position:relative;padding-left:22px;font-size:14.5px;line-height:1.5"><span style="position:absolute;left:2px;top:.5em;width:7px;height:7px;border-radius:50%;background:#35d3e6;box-shadow:0 0 8px rgba(53,211,230,.6)"></span>{{ f }}</div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const F = [
+  ['Classic opto character', 'modelled on the electro-optical tube leveling amplifier', 's'],
+  ['Rides phrases, not syllables', 'smooth, program-dependent leveling', 's'],
+  ['Natural under heavy reduction', 'stays transparent even when it’s working hard', 's'],
+  ['Input alignment', 'Peak Reduction does the same job at any recording level', 'c'],
+  ['Auto makeup', 'matched to the body of the voice, never past the source’s peak', 'c'],
+  ['Valve harmonics', 'musical warmth, or switch off for a clean compressor', 's'],
+  ['Sibilance guard', 'loud S sounds stay free of grit', 's'],
+  ['Compress and Limit', 'two modes, about 3:1 or full limiting', 'c'],
+  ['HF Emph', 'side-chain trim so plosives and low thumps don’t pump the level', 'c'],
+  ['Lookahead', 'up to 20 ms to catch the first syllable after a pause', 'c'],
+  ['Mix', 'parallel compression, delay-compensated', 'c'],
+  ['4× oversampling', 'on both the gain cell and the valve', 's'],
+  ['Presets', 'factory presets, plus your own', 'w'],
+  ['Real-time preview', 'free while you play, right in your browser', 'w'],
+].map(([t, d, g], i) => ({ n: String(i + 1).padStart(2, '0'), t, d, g }));
+
+const O1 = 'LA Vintage 2A is modelled on the Teletronix LA-2A, the electro-optical tube leveling amplifier that has been a studio favourite on vocals, bass and guitar for more than half a century. Its optical cell reacts gently and lets go slowly, so it rides the level of whole phrases rather than individual syllables — a performance comes out even without sounding compressed.';
+const O2 = 'Behind the famously simple two-knob face, LA Vintage 2A adds what a file-based workflow needs. It measures your recording before it compresses, so a setting does the same job on a quiet take as on a hot one; its makeup gain follows the body of the voice and can never push the result past the source’s own peak; and its valve colour is a second-harmonic-led curve fitted to measured harmonic data, with a guard that keeps loud S sounds clean.';
+
+class Component extends DCLogic {
+  renderVals() {
+    const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+    return {
+      p1: 'Modelled on the Teletronix LA-2A — a studio favourite on vocals, bass and guitar for over half a century. Its optical cell reacts gently and lets go slowly, so it rides whole phrases rather than syllables: the performance comes out even, not squeezed.',
+      p2: 'Behind the simple two-knob face sits what a file-based workflow needs. It measures your recording first, so a setting behaves the same on a quiet take as a hot one. Makeup gain follows the body of the voice and never passes the source’s peak. The valve colour is fitted to measured harmonic data, with a guard that keeps loud S sounds clean.',
+      features: F.map(f => ({ ...f, dc: cap(f.d) + '.' })),
+      groups: [['Sound', 's'], ['Control', 'c'], ['Workflow', 'w']].map(([label, k]) => ({ label, items: F.filter(f => f.g === k) })),
+      o1: O1, o2: O2,
+      oldFeatures: ['Modelled on the classic electro-optical tube leveling amplifier','Smooth, program-dependent leveling that rides phrases, not syllables','Natural-sounding, even with heavy gain reduction','Input alignment: Peak Reduction does the same job at any recording level','Auto makeup matched to the body of the voice — never louder than the source’s peak','Valve harmonics for musical warmth, switchable off for a clean compressor','Sibilance guard keeps loud S sounds free of grit','Compress and Limit modes','HF Emph side-chain trim, so plosives and low thumps don’t pump the level','Up to 20 ms of lookahead to catch the first syllable after a pause','Mix control for parallel compression, delay-compensated','4× oversampled gain cell and valve','Factory presets, plus your own','Real-time preview while you play — free, in your browser'],
+    };
+  }
+}
+</script>
+</body>
+</html>

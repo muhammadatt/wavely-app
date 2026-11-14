@@ -34,12 +34,15 @@ test('the shape holds: copy, a search description, the overview and its features
     for (const k of ['eyebrow', 'headline', 'description']) assert.equal(typeof p[k], 'string', `${id}.${k}`)
     assert.ok(p.description.length <= 160, `${id}: description is ${p.description.length} characters (search results cut at ~160)`)
     assert.ok(Array.isArray(p.pitch) && p.pitch.length >= 1 && p.pitch.length <= 2, `${id}.pitch`)
-    assert.ok(Array.isArray(p.overview) && p.overview.length >= 1 && p.overview.length <= 3, `${id}.overview`)
+    assert.ok(Array.isArray(p.overview) && p.overview.length === 2, `${id}.overview: design 3a is a lead paragraph and one more`)
     assert.ok(Array.isArray(p.features) && p.features.length >= 6 && p.features.length <= 16, `${id}.features`)
-    assert.equal(new Set(p.features).size, p.features.length, `${id}: a feature is listed twice`)
+    assert.equal(new Set(p.features.map(f => f.title)).size, p.features.length, `${id}: a feature title is listed twice`)
     for (const f of p.features) {
-      assert.equal(typeof f, 'string', `${id}: features are one line each`)
-      assert.ok(!f.includes('\n') && !/[.]$/.test(f), `${id}: “${f}” — one line, no full stop (it is a list item)`)
+      assert.ok(f && typeof f.title === 'string' && typeof f.text === 'string', `${id}: a feature is { title, text }`)
+      assert.ok(f.title.split(/\s+/).length <= 5, `${id}: “${f.title}” — a title is a few words`)
+      // The list's voice: a lower-case clause after the title, no full stop.
+      // (A product or control name may open it: “Peak Reduction does…”.)
+      assert.ok(!/[.]$/.test(f.text) && !f.text.includes('\n'), `${id}: “${f.text}” — one line, no full stop`)
     }
     for (const s of p.specs) assert.ok(s.label && s.value, `${id}: spec needs label and value`)
     if (p.feature) assert.ok(FEATURES[p.feature], `${id}: unknown plan feature ${p.feature}`)

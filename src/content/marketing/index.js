@@ -26,11 +26,15 @@
  *   pitch      string[]  1 short paragraph under it (the hero is a glance)
  *   description string   ≤ 160 characters, for <meta name="description"> and
  *                        social cards. Required: it is what a search result shows
- *   overview   string[]  The OVERVIEW section, 1–3 paragraphs: what it is, what
- *                        it is modelled on and what it adds (Waves' product
- *                        pages are the model, owner, November 2026)
- *   features   string[]  The bulleted capabilities under it, 6–16, each one
- *                        line, each one true and specific
+ *   overview   string[]  The OVERVIEW section, exactly 2 paragraphs, laid out
+ *                        as design 3a (`docs/design/marketing/Overview_Options.dc.html`, owner,
+ *                        November 2026): centred, the
+ *                        first a brighter lead, the second softer. Short:
+ *                        what it is and what it is modelled on, then what it
+ *                        adds
+ *   features   [{ title, text }]  The numbered list under it, two columns,
+ *                        6–16 items: a title of a few words and a one-line
+ *                        description in lower case with no full stop
  *   samples    [sample]  The before / after clips (see below)
  *   hotspots   [{ shot, text? }]  Controls on the screenshot, by help `shot` id;
  *                        `text` overrides the help sentence
