@@ -27,6 +27,7 @@ async function applyNormalize(useSelection = true) {
   const end = useSelection && state.selection ? state.selection.end : totalDuration.value
 
   if (start >= end) return
+  const selectionAtStart = state.selection ? { ...state.selection } : null
 
   // Pinned to this document: the render below reads it before its first
   // await, but tabs stay usable while it runs, and the defaults follow the
@@ -39,7 +40,7 @@ async function applyNormalize(useSelection = true) {
       state.segments, start, end, targetPeak.value,
       ctx, state.currentFile.sampleRate, state.currentFile.channels
     )
-    const bufferId = replaceRegion(start, end, buffer, 'normalization', docId)
+    const bufferId = replaceRegion(start, end, buffer, 'normalization', docId, selectionAtStart)
 
     // Recompute peak cache for new buffer
     const cache = await computePeakCache(buffer, 256)

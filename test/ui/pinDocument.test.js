@@ -98,3 +98,21 @@ test('no apply commits or clears status through the active-document default', ()
   }
   assert.deepEqual(offenders, [])
 })
+
+test('every apply passes the selection it started on, so Undo can put it back', () => {
+  // replaceRegion falls back to the LIVE selection when none is passed, which
+  // by commit time can be whatever the user selected while the render ran.
+  const offenders = []
+  for (const f of sources('src')) {
+    if (f.endsWith('useEditorState.js')) continue
+    const lines = readFileSync(join(ROOT, f), 'utf8').split('\n')
+    lines.forEach((line, i) => {
+      if (!/\breplaceRegion\(/.test(line)) return
+      if (/^\s*(\*|\/\/)/.test(line) || /function replaceRegion\b/.test(line)) return
+      let call = line
+      for (let j = i + 1; j < lines.length && /\($|,$/.test(call.trimEnd()); j++) call += lines[j]
+      if (!/selection/i.test(call)) offenders.push(`${f}:${i + 1}: ${line.trim()}`)
+    })
+  }
+  assert.deepEqual(offenders, [])
+})

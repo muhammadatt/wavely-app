@@ -205,8 +205,6 @@ function copySelection(sel) {
   return sel ? { start: sel.start, end: sel.end } : null
 }
 
-const WHOLE_SPAN_EPS = 1e-9
-
 /** One history entry: the document's timeline and the selection that goes with it. */
 function snapshot(doc, label, selection = doc.selection) {
   return {
@@ -228,22 +226,6 @@ function recordUndo(doc, label, selection = doc.selection) {
   doc.redoCount = 0
 }
 
-/**
- * The selection an apply over [start, end] ran on. replaceRegion is called when
- * a render COMMITS, which can be seconds after Apply, and the waveform stays
- * usable meanwhile — so the live selection may no longer be the span that was
- * processed. A partial span always came from a selection. A span covering the
- * whole timeline is either Select all or an apply with nothing selected (the
- * plugins' "whole file" fallback); it counts as a selection only if one equal
- * to it is still in place.
- */
-function appliedSelection(doc, start, end) {
-  const dur = getTimelineDuration(doc.segments)
-  const whole = start <= WHOLE_SPAN_EPS && end >= dur - WHOLE_SPAN_EPS
-  if (!whole) return { start, end }
-  const sel = doc.selection
-  return sel && sel.start === start && sel.end === end ? { start, end } : null
-}
 
 function historyFor(docId) {
   let h = docHistory.get(docId)
@@ -332,15 +314,11 @@ export function useEditorState() {
     doc.revision = entry.revision
     doc.selection = copySelection(entry.selection)
     // The playhead is not part of history (restoring it would yank it back
-    // after the user has moved on), but it must agree with what came back: on
-    // the timeline, and — when stopped — inside a restored selection, so Play
-    // starts on what was selected. While playing, playback owns it.
+    // after the user has moved on) and is left where it is — it is the paste
+    // point, and Play starts at a selection's start regardless — except that it
+    // must stay on a timeline the undo may have shortened.
     const dur = getTimelineDuration(doc.segments)
     if (doc.playhead > dur) doc.playhead = dur
-    const sel = doc.selection
-    if (sel && !doc.isPlaying && (doc.playhead < sel.start || doc.playhead > sel.end)) {
-      doc.playhead = sel.start
-    }
     const h = historyFor(doc.id)
     doc.undoCount = h.undo.length
     doc.redoCount = h.redo.length
@@ -690,15 +668,19 @@ export function useEditorState() {
   /**
    * Swap a processed buffer into [start, end]. `label` names the effect for the
    * undo toast, in the same reading form pushUndo documents; `docId` defaults to the active document, and is only ever passed
-   * explicitly by the preset job, which can land after a tab switch.
+   * explicitly by the preset job, which can land after a tab switch. `selection`
+   * is the selection at the START of the apply, which Undo puts back.
    */
-  function replaceRegion(start, end, newBuffer, label = '', docId = appState.activeDocumentId) {
+  function replaceRegion(start, end, newBuffer, label = '', docId = appState.activeDocumentId, selection) {
     const doc = getDocument(docId)
     if (!doc) return null
     // Undo must land on the document being modified, which is not necessarily
     // the active one — a preset job can finish after the user switched tabs.
-    // Undo restores the span that was processed, not whatever is selected now.
-    recordUndo(doc, label, appliedSelection(doc, start, end))
+    // `selection` is what was selected when the apply STARTED (pin.selection):
+    // the commit can land seconds later, and the waveform stays usable
+    // meanwhile, so the live selection may be something else by now. Passing
+    // null says "nothing was selected"; omitting it falls back to the live one.
+    recordUndo(doc, label, selection === undefined ? doc.selection : selection)
 
     const bufferId = uuidv4()
     addBuffer(bufferId, newBuffer, doc.id)
@@ -806,6 +788,10 @@ export function useEditorState() {
     const seq = activationSeq
     return {
       docId,
+      // Taken now, before the render: replaceRegion records it so Undo puts
+      // back the selection the apply ran on, not whatever is selected when it
+      // commits.
+      selection: copySelection(activeDocument.value?.selection ?? null),
       check() {
         if (activationSeq !== seq || appState.activeDocumentId !== docId) throw new DocumentSwitchedError(what)
       },

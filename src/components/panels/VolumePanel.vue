@@ -20,6 +20,7 @@ function onGainInput() {
 async function applyVolume() {
   if (!hasSelection.value || state.isProcessing) return
   const { start, end } = state.selection
+  const selectionAtStart = { start, end }
 
   // Pinned to this document: the render below reads it before its first
   // await, but tabs stay usable while it runs, and the defaults follow the
@@ -32,7 +33,7 @@ async function applyVolume() {
       state.segments, start, end, gainDb.value,
       ctx, state.currentFile.sampleRate, state.currentFile.channels
     )
-    const bufferId = replaceRegion(start, end, buffer, 'the volume adjustment', docId)
+    const bufferId = replaceRegion(start, end, buffer, 'the volume adjustment', docId, selectionAtStart)
 
     const cache = await computePeakCache(buffer, 256)
     setPeakCache(bufferId, cache)

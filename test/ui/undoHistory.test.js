@@ -186,11 +186,12 @@ test('undo restores the span an apply processed, even if the selection moved whi
   const editor = useEditorState()
   freshDocument(editor, 'async.wav')
 
-  // Apply started on 1–2 s; the user reselected while the render ran, and the
-  // commit (replaceRegion) lands afterwards with the original span.
+  // Apply started on 1–2 s (pinned there); the user reselected while the
+  // render ran, and the commit lands afterwards.
   editor.state.selection = { start: 1, end: 2 }
+  const pin = editor.pinActiveDocument('De-Esser')
   editor.state.selection = { start: 3, end: 3.5 }
-  editor.replaceRegion(1, 2, fakeBuffer(1), 'De-Esser')
+  editor.replaceRegion(1, 2, fakeBuffer(1), 'De-Esser', pin.docId, pin.selection)
 
   editor.undo()
   assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
@@ -200,48 +201,57 @@ test('undo restores the span an apply processed, even if the selection moved whi
   assert.deepEqual(editor.state.selection, { start: 3, end: 3.5 })
 })
 
-test('a whole-file apply with nothing selected undoes to no selection', () => {
+test('a whole-file apply undoes to the selection at its start, whatever it was', () => {
   const editor = useEditorState()
   freshDocument(editor, 'whole.wav')
 
   // Nothing selected at Apply; a selection made during the render is not it.
   editor.state.selection = null
+  let pin = editor.pinActiveDocument('Peak Normalize')
   editor.state.selection = { start: 0.5, end: 1 }
-  editor.replaceRegion(0, 4, fakeBuffer(4), 'Peak Normalize')
+  editor.replaceRegion(0, 4, fakeBuffer(4), 'Peak Normalize', pin.docId, pin.selection)
   editor.undo()
   assert.equal(editor.state.selection, null)
 
-  // Select all, then apply: Undo brings Select all back.
+  // Select all at Apply, cleared mid-render: Undo brings Select all back.
   editor.selectAll()
-  editor.replaceRegion(0, 4, fakeBuffer(4), 'Peak Normalize')
+  pin = editor.pinActiveDocument('Peak Normalize')
   editor.state.selection = null
+  editor.replaceRegion(0, 4, fakeBuffer(4), 'Peak Normalize', pin.docId, pin.selection)
   editor.undo()
   assert.deepEqual(editor.state.selection, { start: 0, end: 4 })
+
+  // Mastering replaces the whole timeline from a partial selection: it survives.
+  editor.state.selection = { start: 1, end: 2 }
+  pin = editor.pinActiveDocument('mastering')
+  editor.replaceRegion(0, 4, fakeBuffer(4), 'ACX Audiobook mastering', pin.docId, pin.selection)
+  editor.state.selection = null
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
 })
 
-test('undo moves a stopped playhead into the restored selection', () => {
+test('the pin keeps its own copy of the selection', () => {
+  const editor = useEditorState()
+  freshDocument(editor, 'pincopy.wav')
+  editor.state.selection = { start: 1, end: 2 }
+  const pin = editor.pinActiveDocument('x')
+  editor.state.selection.end = 3
+  assert.deepEqual(pin.selection, { start: 1, end: 2 })
+})
+
+test('undo leaves a valid playhead outside the restored selection where it is', () => {
   const editor = useEditorState()
   freshDocument(editor, 'playhead.wav')
 
-  // Trim to selection puts the playhead at 0, outside 2–3 s once undone.
-  editor.state.selection = { start: 2, end: 3 }
-  editor.performTrimToSelection()
+  // The playhead is the paste point: with 1–2 s selected, paste at 0 and undo,
+  // and a second Paste must still land at 0, not jump to the selection.
+  editor.state.selection = { start: 1, end: 2 }
+  editor.performCopy()
+  editor.state.playhead = 0
+  editor.performPaste(0)
+  editor.undo()
+  assert.deepEqual(editor.state.selection, { start: 1, end: 2 })
   assert.equal(editor.state.playhead, 0)
-
-  editor.undo()
-  assert.deepEqual(editor.state.selection, { start: 2, end: 3 })
-  assert.equal(editor.state.playhead, 2)
-})
-
-test('undo leaves a playhead already inside the restored selection where it is', () => {
-  const editor = useEditorState()
-  freshDocument(editor, 'inside.wav')
-
-  editor.state.selection = { start: 1, end: 3 }
-  editor.replaceRegion(1, 3, fakeBuffer(2), 'AirBoost')
-  editor.state.playhead = 2.5
-  editor.undo()
-  assert.equal(editor.state.playhead, 2.5)
 })
 
 test('undo clamps the playhead onto a timeline it shortened', () => {

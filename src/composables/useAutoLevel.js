@@ -130,7 +130,7 @@ export function useAutoLevel() {
         state.segments, start, end, solved.segments, start, sampleRate, channels,
       )
       pin.check()
-      const bufferId = replaceRegion(start, end, buffer, 'auto-levelling', pin.docId)
+      const bufferId = replaceRegion(start, end, buffer, 'auto-levelling', pin.docId, pin.selection)
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
 

@@ -202,6 +202,7 @@ const copies = pluginCopies((copy, life) => {
       // during the render, and `state` follows the active tab. The commit and
       // the processing status go to this document, or nowhere if it closed.
       const docId = appState.activeDocumentId
+      const selectionAtStart = { start, end }
       const segments = state.segments
       const file = state.currentFile
 
@@ -212,7 +213,7 @@ const copies = pluginCopies((copy, life) => {
       startProcessing('Applying Plosive Tamer...', docId)
       try {
         const buffer = await renderRegion(segments, start, end, file)
-        const bufferId = replaceRegion(start, end, buffer, 'Plosive Tamer', docId)
+        const bufferId = replaceRegion(start, end, buffer, 'Plosive Tamer', docId, selectionAtStart)
         if (bufferId == null) return // the document closed while rendering
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)

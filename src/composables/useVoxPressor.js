@@ -607,7 +607,7 @@ const copies = pluginCopies((copy, life) => {
         if (wasPreviewing) togglePreview()
         const buffer = await renderRegion(state.segments, start, end, params)
         pin.check()
-        const bufferId = replaceRegion(start, end, buffer, 'VoxPressor', pin.docId)
+        const bufferId = replaceRegion(start, end, buffer, 'VoxPressor', pin.docId, pin.selection)
         setPeakCache(bufferId, await computePeakCache(buffer, 256))
         showToast('VoxPressor applied')
       } catch (err) {

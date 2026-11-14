@@ -363,7 +363,7 @@ const copies = pluginCopies((copy, life) => {
       try {
         const buffer = renderEnvelope(state.segments, start, end, envelope)
         pin.check()
-        const bufferId = replaceRegion(start, end, buffer, 'de-essing', pin.docId)
+        const bufferId = replaceRegion(start, end, buffer, 'de-essing', pin.docId, pin.selection)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast(`De-essed ${treatedCount.value} event${treatedCount.value === 1 ? '' : 's'}`)
