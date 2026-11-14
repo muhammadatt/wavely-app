@@ -11,7 +11,9 @@
  *
  *   public/help/shots/<slug>/panel.jpg      the whole window (the "Interface" image)
  *   public/help/shots/<slug>/<shot>.png     one crop per control that names a `shot`
- *   src/content/help/shots/<id>.json        the manifest the help page reads
+ *   src/content/help/shots/<id>.json        the manifest the help page reads (and
+ *                                           each control's box on the panel, `at`,
+ *                                           for the marketing page's hotspots)
  *
  * `<slug>` is the page's product-name URL segment (`la-vintage-2a`), so image
  * URLs never show the old window ids; the manifest stays keyed by window id.
@@ -186,7 +188,15 @@ try {
         width: b.width + 2 * PAD, height: b.height + 2 * PAD,
       }
       await page.screenshot({ path: join(outDir, `${c.shot}.png`), clip })
-      manifest.controls[c.shot] = { src: `/help/shots/${slug}/${c.shot}.png`, w: Math.round(clip.width), h: Math.round(clip.height) }
+      manifest.controls[c.shot] = {
+        src: `/help/shots/${slug}/${c.shot}.png`, w: Math.round(clip.width), h: Math.round(clip.height),
+        // Where the control sits on panel.jpg, in its CSS pixels (unpadded):
+        // the marketing page's interactive screenshot places a hotspot here.
+        at: {
+          x: Math.round(b.x - box.x), y: Math.round(b.y - box.y),
+          w: Math.round(b.width), h: Math.round(b.height),
+        },
+      }
     }
 
     mkdirSync(join(ROOT, 'src/content/help/shots'), { recursive: true })

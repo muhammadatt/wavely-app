@@ -8,52 +8,112 @@
     "peak-reduction": {
       "src": "/help/shots/la-vintage-2a/peak-reduction.png",
       "w": 188,
-      "h": 217
+      "h": 217,
+      "at": {
+        "x": 60,
+        "y": 80,
+        "w": 176,
+        "h": 205
+      }
     },
     "meter": {
       "src": "/help/shots/la-vintage-2a/meter.png",
       "w": 361,
-      "h": 235
+      "h": 235,
+      "at": {
+        "x": 260,
+        "y": 54,
+        "w": 349,
+        "h": 223
+      }
     },
     "harmonics": {
       "src": "/help/shots/la-vintage-2a/harmonics.png",
       "w": 166,
-      "h": 34
+      "h": 34,
+      "at": {
+        "x": 338,
+        "y": 266,
+        "w": 154,
+        "h": 22
+      }
     },
     "gain": {
       "src": "/help/shots/la-vintage-2a/gain.png",
       "w": 190,
-      "h": 221
+      "h": 221,
+      "at": {
+        "x": 630,
+        "y": 80,
+        "w": 178,
+        "h": 209
+      }
     },
     "auto-makeup": {
       "src": "/help/shots/la-vintage-2a/auto-makeup.png",
       "w": 65,
-      "h": 34
+      "h": 34,
+      "at": {
+        "x": 630,
+        "y": 267,
+        "w": 53,
+        "h": 22
+      }
     },
     "pre-gain": {
       "src": "/help/shots/la-vintage-2a/pre-gain.png",
       "w": 97,
-      "h": 52
+      "h": 52,
+      "at": {
+        "x": 116,
+        "y": 302,
+        "w": 85,
+        "h": 40
+      }
     },
     "lookahead": {
       "src": "/help/shots/la-vintage-2a/lookahead.png",
       "w": 89,
-      "h": 52
+      "h": 52,
+      "at": {
+        "x": 120,
+        "y": 360,
+        "w": 77,
+        "h": 40
+      }
     },
     "mode": {
       "src": "/help/shots/la-vintage-2a/mode.png",
       "w": 76,
-      "h": 44
+      "h": 44,
+      "at": {
+        "x": 340,
+        "y": 343,
+        "w": 64,
+        "h": 32
+      }
     },
     "hf-emph": {
       "src": "/help/shots/la-vintage-2a/hf-emph.png",
       "w": 92,
-      "h": 105
+      "h": 105,
+      "at": {
+        "x": 448,
+        "y": 307,
+        "w": 80,
+        "h": 93
+      }
     },
     "mix": {
       "src": "/help/shots/la-vintage-2a/mix.png",
       "w": 108,
-      "h": 117
+      "h": 117,
+      "at": {
+        "x": 662,
+        "y": 299,
+        "w": 96,
+        "h": 105
+      }
     }
   }
 }

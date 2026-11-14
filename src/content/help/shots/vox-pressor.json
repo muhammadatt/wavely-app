@@ -8,82 +8,178 @@
     "surface": {
       "src": "/help/shots/voxpressor/surface.png",
       "w": 42,
-      "h": 42
+      "h": 42,
+      "at": {
+        "x": 382,
+        "y": 15,
+        "w": 30,
+        "h": 30
+      }
     },
     "peak-reduction": {
       "src": "/help/shots/voxpressor/peak-reduction.png",
       "w": 196,
-      "h": 259
+      "h": 259,
+      "at": {
+        "x": 23,
+        "y": 82,
+        "w": 184,
+        "h": 247
+      }
     },
     "attack-release": {
       "src": "/help/shots/voxpressor/attack-release.png",
       "w": 196,
-      "h": 52
+      "h": 52,
+      "at": {
+        "x": 23,
+        "y": 230,
+        "w": 184,
+        "h": 40
+      }
     },
     "knee": {
       "src": "/help/shots/voxpressor/knee.png",
       "w": 92,
-      "h": 59
+      "h": 59,
+      "at": {
+        "x": 71,
+        "y": 282,
+        "w": 80,
+        "h": 47
+      }
     },
     "meter": {
       "src": "/help/shots/voxpressor/meter.png",
       "w": 327,
-      "h": 175
+      "h": 175,
+      "at": {
+        "x": 243,
+        "y": 88,
+        "w": 315,
+        "h": 163
+      }
     },
     "meter-select": {
       "src": "/help/shots/voxpressor/meter-select.png",
       "w": 254,
-      "h": 52
+      "h": 52,
+      "at": {
+        "x": 279,
+        "y": 245,
+        "w": 242,
+        "h": 40
+      }
     },
     "readout": {
       "src": "/help/shots/voxpressor/readout.png",
       "w": 212,
-      "h": 38
+      "h": 38,
+      "at": {
+        "x": 300,
+        "y": 297,
+        "w": 200,
+        "h": 26
+      }
     },
     "body-leveler": {
       "src": "/help/shots/voxpressor/body-leveler.png",
       "w": 182,
-      "h": 140
+      "h": 140,
+      "at": {
+        "x": 604,
+        "y": 82,
+        "w": 170,
+        "h": 128
+      }
     },
     "enhance-detail": {
       "src": "/help/shots/voxpressor/enhance-detail.png",
       "w": 182,
-      "h": 134
+      "h": 134,
+      "at": {
+        "x": 604,
+        "y": 244,
+        "w": 170,
+        "h": 122
+      }
     },
     "de-ess-amount": {
       "src": "/help/shots/voxpressor/de-ess-amount.png",
       "w": 102,
-      "h": 112
+      "h": 112,
+      "at": {
+        "x": 21,
+        "y": 367,
+        "w": 90,
+        "h": 100
+      }
     },
     "de-ess-band": {
       "src": "/help/shots/voxpressor/de-ess-band.png",
       "w": 97,
-      "h": 112
+      "h": 112,
+      "at": {
+        "x": 113,
+        "y": 367,
+        "w": 85,
+        "h": 100
+      }
     },
     "density-drive": {
       "src": "/help/shots/voxpressor/density-drive.png",
       "w": 102,
-      "h": 112
+      "h": 112,
+      "at": {
+        "x": 310,
+        "y": 367,
+        "w": 90,
+        "h": 100
+      }
     },
     "density-mix": {
       "src": "/help/shots/voxpressor/density-mix.png",
       "w": 92,
-      "h": 112
+      "h": 112,
+      "at": {
+        "x": 405,
+        "y": 367,
+        "w": 80,
+        "h": 100
+      }
     },
     "density-comp": {
       "src": "/help/shots/voxpressor/density-comp.png",
       "w": 162,
-      "h": 42
+      "h": 42,
+      "at": {
+        "x": 325,
+        "y": 479,
+        "w": 150,
+        "h": 30
+      }
     },
     "output-level": {
       "src": "/help/shots/voxpressor/output-level.png",
       "w": 208,
-      "h": 52
+      "h": 52,
+      "at": {
+        "x": 578,
+        "y": 412,
+        "w": 196,
+        "h": 40
+      }
     },
     "io-meters": {
       "src": "/help/shots/voxpressor/io-meters.png",
       "w": 208,
-      "h": 57
+      "h": 57,
+      "at": {
+        "x": 578,
+        "y": 464,
+        "w": 196,
+        "h": 45
+      }
     }
   }
 }

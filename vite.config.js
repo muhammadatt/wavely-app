@@ -102,6 +102,88 @@ function helpPages(devPanels) {
   }
 }
 
+/**
+ * The effect marketing pages (`plugins/index.html`, `src/marketing/`), at
+ * `/plugins/` and `/plugins/<slug>/` — the help pages' arrangement: one entry,
+ * a copy per published page at `plugins/<slug>/index.html`, and the same
+ * rewrite in dev and preview.
+ *
+ * Unlike the help pages these are for search engines and link previews, so
+ * each copy also gets its own <title>, meta description, Open Graph / Twitter
+ * card and a schema.org SoftwareApplication. With `SITE_URL` set (the public
+ * origin, e.g. https://crisp.fm) the canonical link and the card image are
+ * absolute, as crawlers want them; without it they are left out / relative.
+ */
+function marketingPages(devPanels, siteUrl) {
+  const rewrite = (req, _res, next) => {
+    const path = (req.url || '').split('?')[0]
+    if (/^\/plugins(\/[^/.]*)?\/?$/.test(path)) req.url = '/plugins/index.html'
+    next()
+  }
+  const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
+  return {
+    name: 'wavely:marketing-pages',
+    configureServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    generateBundle: { order: 'post', async handler(_options, bundle) {
+      const entry = bundle['plugins/index.html']
+      if (!entry) return
+      const { readFile } = await import('node:fs/promises')
+      const {
+        MARKETING, publishedMarketingIds, marketingSlug, marketingUrl, marketingTitle, marketingPageTitle,
+      } = await import('./src/content/marketing/index.js')
+      const { requiredPlan } = await import('./src/auth/plans.js')
+      const html = String(entry.source)
+      const origin = siteUrl ? siteUrl.replace(/\/$/, '') : ''
+      for (const id of publishedMarketingIds(devPanels)) {
+        const page = MARKETING[id]
+        const url = marketingUrl(id)
+        let image = null
+        try {
+          const shots = JSON.parse(await readFile(new URL(`./src/content/help/shots/${id}.json`, import.meta.url), 'utf8'))
+          image = shots.panel?.src ?? null
+        } catch { /* no screenshot yet */ }
+        const title = marketingPageTitle(id)
+        const ld = {
+          '@context': 'https://schema.org',
+          '@type': 'SoftwareApplication',
+          name: marketingTitle(id),
+          applicationCategory: 'MultimediaApplication',
+          applicationSubCategory: page.eyebrow,
+          operatingSystem: 'Web browser',
+          description: page.description,
+          ...(origin ? { url: origin + url } : {}),
+          ...(image ? { screenshot: origin + image } : {}),
+          ...(!page.feature || requiredPlan(page.feature) === 'free'
+            ? { offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' } } : {}),
+        }
+        const head = [
+          `<meta property="og:type" content="website" />`,
+          `<meta property="og:site_name" content="crisp.fm" />`,
+          `<meta property="og:title" content="${esc(title)}" />`,
+          `<meta property="og:description" content="${esc(page.description)}" />`,
+          ...(origin ? [`<link rel="canonical" href="${esc(origin + url)}" />`, `<meta property="og:url" content="${esc(origin + url)}" />`] : []),
+          ...(image ? [`<meta property="og:image" content="${esc(origin + image)}" />`] : []),
+          `<meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />`,
+          `<script type="application/ld+json">${JSON.stringify(ld).replace(/</g, '\\u003c')}</script>`,
+        ].join('\n    ')
+        this.emitFile({
+          type: 'asset',
+          fileName: `plugins/${marketingSlug(id)}/index.html`,
+          source: html
+            .replace(/<title>[^<]*<\/title>/, `<title>${esc(title)}</title>`)
+            .replace(/<meta name="description" content="[^"]*" \/>/, `<meta name="description" content="${esc(page.description)}" />`)
+            .replace('<!-- marketing-head -->', head),
+        })
+      }
+    } },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // Read the env exactly as Vite will, including .env files. The '' prefix
   // loads every variable, not just VITE_-prefixed ones, so the value is seen
@@ -113,6 +195,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       stripDevOnlyModules(devPanels),
       helpPages(devPanels),
+      marketingPages(devPanels, env.SITE_URL),
       vue(),
       tailwindcss(),
     ],
@@ -121,6 +204,7 @@ export default defineConfig(({ mode }) => {
         input: {
           main: fileURLToPath(new URL('./index.html', import.meta.url)),
           help: fileURLToPath(new URL('./help/index.html', import.meta.url)),
+          plugins: fileURLToPath(new URL('./plugins/index.html', import.meta.url)),
         },
       },
     },

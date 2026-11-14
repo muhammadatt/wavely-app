@@ -1,0 +1,49 @@
+{
+  "samples": {
+    "narration": {
+      "off": "/plugins/la-vintage-2a/audio/narration-off.mp3",
+      "on": "/plugins/la-vintage-2a/audio/narration-on.mp3",
+      "placeholder": true,
+      "seconds": 25.28,
+      "channels": 1,
+      "levelDb": {
+        "off": -23.43,
+        "on": -23.07
+      },
+      "peakDb": {
+        "off": -2.01,
+        "on": -2.09
+      }
+    },
+    "podcast": {
+      "off": "/plugins/la-vintage-2a/audio/podcast-off.mp3",
+      "on": "/plugins/la-vintage-2a/audio/podcast-on.mp3",
+      "placeholder": true,
+      "seconds": 19.56,
+      "channels": 1,
+      "levelDb": {
+        "off": -18.08,
+        "on": -17.42
+      },
+      "peakDb": {
+        "off": -1,
+        "on": -1.07
+      }
+    },
+    "parallel": {
+      "off": "/plugins/la-vintage-2a/audio/parallel-off.mp3",
+      "on": "/plugins/la-vintage-2a/audio/parallel-on.mp3",
+      "placeholder": true,
+      "seconds": 18.37,
+      "channels": 1,
+      "levelDb": {
+        "off": -22.32,
+        "on": -21.85
+      },
+      "peakDb": {
+        "off": -1.99,
+        "on": -2.14
+      }
+    }
+  }
+}

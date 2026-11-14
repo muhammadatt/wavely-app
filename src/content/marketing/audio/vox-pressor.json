@@ -1,0 +1,49 @@
+{
+  "samples": {
+    "narration": {
+      "off": "/plugins/voxpressor/audio/narration-off.mp3",
+      "on": "/plugins/voxpressor/audio/narration-on.mp3",
+      "placeholder": true,
+      "seconds": 25.28,
+      "channels": 1,
+      "levelDb": {
+        "off": -23.42,
+        "on": -20.06
+      },
+      "peakDb": {
+        "off": -2.01,
+        "on": -2.08
+      }
+    },
+    "podcast": {
+      "off": "/plugins/voxpressor/audio/podcast-off.mp3",
+      "on": "/plugins/voxpressor/audio/podcast-on.mp3",
+      "placeholder": true,
+      "seconds": 19.56,
+      "channels": 1,
+      "levelDb": {
+        "off": -18.08,
+        "on": -15.56
+      },
+      "peakDb": {
+        "off": -0.99,
+        "on": -1
+      }
+    },
+    "audiobook": {
+      "off": "/plugins/voxpressor/audio/audiobook-off.mp3",
+      "on": "/plugins/voxpressor/audio/audiobook-on.mp3",
+      "placeholder": true,
+      "seconds": 20.37,
+      "channels": 1,
+      "levelDb": {
+        "off": -28.42,
+        "on": -21.68
+      },
+      "peakDb": {
+        "off": -6,
+        "on": -3.08
+      }
+    }
+  }
+}
