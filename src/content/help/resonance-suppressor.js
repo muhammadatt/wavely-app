@@ -2,7 +2,7 @@ export default {
   summary: 'Finds frequencies that ring louder than the rest of the voice and holds them down only while they occur.',
 
   intro: [
-    'Reso Soothe finds frequencies that ring louder than the rest of the voice, harsh notes, nasal peaks, boxy room modes, and turns each down only while it rings. The display shows every cut, frequency by frequency, as it happens.',
+    'Reso Tame finds frequencies that ring louder than the rest of the voice, harsh notes, nasal peaks, boxy room modes, and turns each down only while it rings. The display shows every cut, frequency by frequency, as it happens.',
     'Use it when particular words or notes jump out harshly while the rest of the take is fine, or when a fixed EQ cut fixes the problem word but dulls everything else.',
   ],
 

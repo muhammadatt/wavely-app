@@ -1,5 +1,5 @@
 /**
- * PHAT*SS — the claims the design rests on: the Warmth stage and its peak
+ * PHATaSS — the claims the design rests on: the Warmth stage and its peak
  * guard (moved here from the HF Limiter), TAPE, and the constant latency of the
  * whole chain. (The Tame / FATSO limiter shelf and its tests were removed in
  * October 2026 — recoverable at e427de9.)
@@ -22,7 +22,7 @@ import { measureOutputMakeup as measureOutputMakeupShipped, PREVIEW_CAP_S } from
 
 /**
  * ⚠ THIS SUITE PINS TAPE, WARMTH AND THE LIMITER SHELF WITH THE TOP END OFF AND
- * NO HEAD BUMP, as it was written. Since October 2026 PHAT*SS ships a tape
+ * NO HEAD BUMP, as it was written. Since October 2026 PHATaSS ships a tape
  * speed (30 ips: the tape HF shelf, and the A800 bump while TAPE is up), so
  * every call here starts from `ISOLATED` and a test that wants the speed asks
  * for it. The shipping defaults themselves are pinned in phatassHfDetents.test.js.
@@ -356,7 +356,7 @@ test('Warmth takes 1–4 layers with known roles', () => {
   assert.throws(() => checkWarmthLayers([l, l, l, l, l]), /1–4 layers/)
   assert.throws(() => checkWarmthLayers([]), /1–4 layers/)
   assert.throws(() => checkWarmthLayers([{ blend: 'sideways' }]), /unknown blend/)
-  // No VOICED mode in PHAT*SS: refused at load, and every layer is sent FULL.
+  // No VOICED mode in PHATaSS: refused at load, and every layer is sent FULL.
   assert.throws(() => checkWarmthLayers([{ blend: 'fixed', mode: 'voiced' }]), /FULL/)
   assert.doesNotThrow(() => checkWarmthLayers([{ blend: 'fixed', mode: 'full' }]))
   assert.ok(warmthLayers(5, 50).every(l => l.mode === 'full'))

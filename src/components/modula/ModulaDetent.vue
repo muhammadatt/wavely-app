@@ -1,7 +1,7 @@
 <script setup>
 /**
  * MODULA DETENT SELECTOR — a small knob that snaps between named positions
- * engraved around it (PHAT*SS's TAPE SPEED). Options are given left to right;
+ * engraved around it (PHATaSS's TAPE SPEED). Options are given left to right;
  * they spread evenly over ±`spreadDeg`. Drag up turns clockwise, a click on a
  * name goes straight there, the arrow keys step.
  */

@@ -1,5 +1,5 @@
 /**
- * PHAT*SS presets.
+ * PHATaSS presets.
  *
  * The preset params are the panel's controls and nothing else. Everything
  * MEASURED (voice level, Warmth's band references, the guard's ceiling, TAPE's

@@ -154,7 +154,7 @@ self.onmessage = function (e) {
   }
 }
 
-/** PHAT*SS's Warmth readout — see phatassWarmthReadout.js. */
+/** PHATaSS's Warmth readout — see phatassWarmthReadout.js. */
 function phatassWarmthReadout(channelData, sampleRate, params) {
   try {
     const { layers, bands = true, peak = true, guard = null, blocks = null } = params ?? {}

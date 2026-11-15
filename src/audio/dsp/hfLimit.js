@@ -323,8 +323,8 @@ export class ShelfLimiterStage {
       this.tLpB0 = tl.b0
       this.tLpA1 = tl.a1
     }
-    // (A separate DETECTOR band, `detectCornerHz`, served PHAT*SS's DETECT
-    // rocker; it went with PHAT*SS's limiter shelf in October 2026 —
+    // (A separate DETECTOR band, `detectCornerHz`, served PHATaSS's DETECT
+    // rocker; it went with PHATaSS's limiter shelf in October 2026 —
     // recoverable at e427de9.)
     this.cornerHz = cornerHz
     this.thresholdLin = thresholdLin

@@ -1,5 +1,5 @@
 /**
- * PHAT*SS — the Warmth readout: what the Warmth stage does to a region's
+ * PHATaSS — the Warmth readout: what the Warmth stage does to a region's
  * low end, per band, and the peak it leaves. The panel prints these so a
  * setting can be judged by the numbers, not only by ear.
  *

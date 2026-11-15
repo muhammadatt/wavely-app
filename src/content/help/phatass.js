@@ -2,7 +2,7 @@ export default {
   summary: 'Adds tape saturation and low-end warmth to the selection, rounding its peaks and top end without raising its peak level.',
 
   intro: [
-    'PHATaSS (Psycho-Harmonic Analog Tape and Saturation Simulator) is designed to add low-frequency harmonic warmth and gentle soft saturation, resulting in a warmer, fuller sound.',
+    'PHATaSS (Pro-Harmonic Analog Tape and Soft Saturation) is designed to add low-frequency harmonic warmth and gentle soft saturation, resulting in a warmer, fuller sound.',
     'Use it add warmth, body and fullness while gentling attenuating peaks. It is built never to raise the selection\'s peak level, so the density it adds never eats into your headroom.',
   ],
 

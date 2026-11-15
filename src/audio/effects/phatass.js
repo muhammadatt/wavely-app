@@ -1,5 +1,5 @@
 /**
- * PHAT*SS — real-time effect chain wrapper.
+ * PHATaSS — real-time effect chain wrapper.
  *
  * The DSP lives in ../phatassProcessor.js (TAPE → makeup → Warmth → its peak
  * guard → the HF shelves) and runs in an AudioWorklet. The offline apply path renders through
@@ -46,7 +46,7 @@ export function createPhatass(audioContext) {
       worklet.connect(preOutput)
     })
     .catch((err) => {
-      console.error('PHAT*SS worklet failed to load, running bypassed:', err)
+      console.error('PHATaSS worklet failed to load, running bypassed:', err)
     })
 
   const inputMonitor = audioContext.createGain()
@@ -108,7 +108,7 @@ export function createPhatass(audioContext) {
 
 export const phatassEffect = {
   id: 'phatass',
-  name: 'PHAT*SS',
+  name: 'PHATaSS',
   createNodes(audioContext) {
     return createPhatass(audioContext)
   },

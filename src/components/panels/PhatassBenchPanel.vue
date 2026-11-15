@@ -1,6 +1,6 @@
 <script setup>
 /**
- * PHAT*SS bench — TAPE's curve, its loop step, low push and head bump, an
+ * PHATaSS bench — TAPE's curve, its loop step, low push and head bump, an
  * automatic output trim, and the top end OFF. TAPE's place in the
  * chain (first) and the head bump's (after the curve) are pinned.
  *
@@ -8,7 +8,7 @@
  * Punch and OptoSmooth benches: the knobs and rockers in `../knobs/` are the
  * product's visual language, and these are not product controls. CUBIC, no push,
  * no bump and OFF ship; the others are kept to A/B against them, gated off in production
- * (`isPhatassBenchVisible`). They are ordinary PHAT*SS params, so preview and
+ * (`isPhatassBenchVisible`). They are ordinary PHATaSS params, so preview and
  * APPLY both read them — what you hear is what renders.
  */
 import { computed, ref } from 'vue'

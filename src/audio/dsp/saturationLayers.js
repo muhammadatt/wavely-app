@@ -594,7 +594,7 @@ export const SAT_LISTEN_MODES = ['off', 'delta']
 export class SaturationBenchKernel {
   /**
    * `slots` is how many layers run in series; latency is 50 samples per slot,
-   * constant whether a slot is on or not. The bench runs four; PHAT*SS's
+   * constant whether a slot is on or not. The bench runs four; PHATaSS's
    * Warmth runs as many as it has layers.
    *
    * `oversample` (per slot, default all true) is fixed at construction:

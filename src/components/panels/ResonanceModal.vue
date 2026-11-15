@@ -290,7 +290,7 @@ async function applyAndClose() {
     brand-lead="RESO SOOTHE"
     :presets="presets"
     :presets-disabled="!resPreview"
-    presets-disabled-hint="Turn Reso Soothe on to use presets"
+    presets-disabled-hint="Turn Reso Tame on to use presets"
     :engaged="resPreview"
     show-delta
     :delta="resDelta"
@@ -301,7 +301,7 @@ async function applyAndClose() {
     :previewing="state.isPlaying"
     show-apply
     :apply-disabled="!resPreview"
-    apply-disabled-hint="Turn Reso Soothe on to apply it"
+    apply-disabled-hint="Turn Reso Tame on to apply it"
     resizable
     @update:height-delta="heightDelta = $event"
     @toggle-engaged="togglePreview"

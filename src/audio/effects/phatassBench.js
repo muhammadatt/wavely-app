@@ -1,5 +1,5 @@
 /**
- * PHAT*SS bench — whether the TAPE curve / order choices are offered at all.
+ * PHATaSS bench — whether the TAPE curve / order choices are offered at all.
  *
  * ⚠ OFF IN A PRODUCTION BUILD: CUBIC and FIRST ship, and TANH / ALGEBRAIC /
  * LAST are kept only to A/B against them (owner, October 2026). On in dev, and

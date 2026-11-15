@@ -3,14 +3,14 @@
  * MODULA KNOBS — every rotary in the kit, one gesture.
  *
  *   led    LARGE, an LED dot ring outside the cap, an accent pointer bar
- *          (the kit's GAIN, PHAT*SS's DRIVE)
+ *          (the kit's GAIN, PHATaSS's DRIVE)
  *   halo   the led knob with a CONTINUOUS RING in place of the LED dots — the
  *          same cap, pointer bar and footprint, a value arc glowing on a
  *          track. The medium ring knob: sits beside an led knob of the same
  *          size as its pair (VoxPressor's De-ess Amount and Density Drive);
  *          fills BIPOLAR from its zero like the ring
  *   ticks  LARGE in a sunken well, a tick ring with every fifth tick long, an
- *          accent dot on a stepped cap (the kit's DRIVE, PHAT*SS's WARMTH)
+ *          accent dot on a stepped cap (the kit's DRIVE, PHATaSS's WARMTH)
  *   small  62 px, accent pointer bar (ATTACK / RELEASE / TONE / MIX)
  *   arc    MEDIUM, 108 px, an arc and 13 ticks with a dot on the cap; the
  *          only variant that fills BIPOLAR from its zero

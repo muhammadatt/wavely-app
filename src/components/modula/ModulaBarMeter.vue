@@ -1,7 +1,7 @@
 <script setup>
 /**
  * MODULA BAR METER — a horizontal slotted bar with a peak tick and a scale
- * under it: PHAT*SS's SATURATION. The GAIN REDUCTION bar is the same housing
+ * under it: PHATaSS's SATURATION. The GAIN REDUCTION bar is the same housing
  * and stays `meters/GainReductionBar.vue`, which owns the VU ballistics a GR
  * reading needs.
  *
