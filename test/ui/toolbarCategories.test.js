@@ -38,11 +38,10 @@ test('every operation sits in its menu, in order', () => {
     ],
     level: ['normalize', 'loudness', 'fade', 'volume'],
     dynamics: ['auto-leveler', 'soft-clipper', 'opto-smooth', 'fet-punch', 'vox-pressor', 'scheps-parallel', 'inflator'],
-    tone: ['manual-eq', 'voicerx', 'air-band', 'phatass', 'vocal-saturation', 'saturation-bench'],
+    tone: ['manual-eq', 'voicerx', 'air-band', 'resonance-suppressor', 'phatass', 'vocal-saturation', 'saturation-bench'],
     clean: [
       'Noise: noise-reduction',
       'Harshness: de-esser', 'Harshness: clip-gain-deesser', 'Harshness: hf-limiter',
-      'Harshness: resonance-suppressor',
       'Pops & Hum: plosive', 'Pops & Hum: hum-remover',
       'Analysis: spectrum-analyzer', 'Analysis: modula-kit',
     ],

@@ -1,7 +1,7 @@
 /**
  * MODULA — the plugin control-surface kit ("Dark Matter / A2").
  *
- * Reference: docs/design/modula/Plugin_UI_Kit.dc.html, with the PHAT*SS and
+ * Reference: docs/design/modula/Plugin_UI_Kit.dc.html, with the PHATaSS and
  * Inflator faceplates beside it. Every Modula component reads these tokens
  * rather than restating a colour, so a retune lands everywhere at once.
  *

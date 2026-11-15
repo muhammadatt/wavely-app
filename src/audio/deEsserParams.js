@@ -55,7 +55,7 @@ export const DE_ESSER_DEFAULTS = {
   // (and tested) so it can come back; nothing sets it.
   resoAmount: 0,
   // 0–10: SOFTEN, the onset softener at the end of the chain
-  // (deEsserSoftenStage.js — moved here from PHAT*SS). 0 takes it out of the
+  // (deEsserSoftenStage.js — moved here from PHATaSS). 0 takes it out of the
   // chain entirely: no latency, bit-identical to the softener alone.
   soften: 0,
   detect: 4000, // Hz, the detector's high-pass corner, 3000–8000 — see detectCompDb

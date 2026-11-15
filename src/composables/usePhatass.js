@@ -281,7 +281,7 @@ const copies = pluginCopies((copy, life) => {
           rememberExactMakeup(key, makeupDb)
           setTapeMakeup(makeupDb)
         } catch (err) {
-          if (!err?.cancelled) console.error('PHAT*SS exact tape makeup failed:', err)
+          if (!err?.cancelled) console.error('PHATaSS exact tape makeup failed:', err)
         }
       }, EXACT_MAKEUP_IDLE_MS)
     }
@@ -332,7 +332,7 @@ const copies = pluginCopies((copy, life) => {
         return makeupDb
       } catch (err) {
         if (err?.cancelled || seq !== tapeSeq) return null
-        console.error('PHAT*SS tape makeup failed:', err)
+        console.error('PHATaSS tape makeup failed:', err)
         phTapeMakeup.value = { pending: false }
         scheduleOutputMakeup()
         return null
@@ -400,7 +400,7 @@ const copies = pluginCopies((copy, life) => {
         setOutputMakeup(makeupDb)
       } catch (err) {
         if (err?.cancelled || seq !== outputSeq) return
-        console.error('PHAT*SS output trim failed:', err)
+        console.error('PHATaSS output trim failed:', err)
         phOutputMakeup.value = { pending: false }
       }
     }
@@ -476,7 +476,7 @@ const copies = pluginCopies((copy, life) => {
         phWarmthReadout.value = { bandsDb, peakDb, inputPeakDb, bandsPending: false, peakPending: false }
       } catch (err) {
         if (err?.cancelled || seq !== readoutSeq) return
-        console.error('PHAT*SS warmth readout failed:', err)
+        console.error('PHATaSS warmth readout failed:', err)
         phWarmthReadout.value = { ...phWarmthReadout.value, bandsPending: false, peakPending: false }
       }
     }
@@ -563,23 +563,23 @@ const copies = pluginCopies((copy, life) => {
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
-      const pin = pinActiveDocument('PHAT*SS')
+      const pin = pinActiveDocument('PHATaSS')
 
       const wasPreviewing = phPreview.value
       if (wasPreviewing) togglePreview()
 
-      startProcessing('Applying PHAT*SS...', pin.docId)
+      startProcessing('Applying PHATaSS...', pin.docId)
       try {
         await prepareApply(start, end)
         const buffer = await renderRegion(state.segments, start, end)
         pin.check()
-        const bufferId = replaceRegion(start, end, buffer, 'PHAT*SS', pin.docId, pin.selection)
+        const bufferId = replaceRegion(start, end, buffer, 'PHATaSS', pin.docId, pin.selection)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
-        showToast('PHAT*SS applied')
+        showToast('PHATaSS applied')
       } catch (err) {
-        console.error('PHAT*SS failed:', err)
-        showToast(err instanceof DocumentSwitchedError ? err.message : 'PHAT*SS failed')
+        console.error('PHATaSS failed:', err)
+        showToast(err instanceof DocumentSwitchedError ? err.message : 'PHATaSS failed')
       } finally {
         endProcessing(pin.docId)
       }
@@ -614,7 +614,7 @@ const copies = pluginCopies((copy, life) => {
     registerChainPlugin({
       id: phatassEffect.id,
       windowId,
-      label: 'PHAT*SS',
+      label: 'PHATaSS',
       dispose: life.dispose,
       isActive: () => phPreview.value,
       setActive: (on) => { if (phPreview.value !== on) togglePreview() },

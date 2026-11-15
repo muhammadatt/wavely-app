@@ -85,7 +85,7 @@ export const SHAPER_CURVES = [
   },
   {
     // The same loop on the cheaper one-evaluation step (dsp/hysteresis.js,
-    // `fast`). Hidden: PHAT*SS's bench A/Bs it against the exact step; the
+    // `fast`). Hidden: PHATaSS's bench A/Bs it against the exact step; the
     // drive is calibrated on the exact loop (the two agree to ~−50 dB).
     id: 'hysteresis-fast',
     label: 'HYSTERESIS (FAST)',

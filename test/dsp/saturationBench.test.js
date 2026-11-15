@@ -572,7 +572,7 @@ test('a LOW-band layer at the base rate renders what 4x does; a full-band one do
     return 10 * Math.log10(e / s)
   }
   const base = { on: true, mode: 'full', amountDb: 0, refPeakDb: -14 }
-  // PHAT*SS's two low layers, as voiced.
+  // PHATaSS's two low layers, as voiced.
   const lowQ = mismatch({ ...base, curve: 'quartic', driveDb: 50, loHz: 1, hiHz: 250, emphType: 'bell', emphHz: 280, emphQ: 0.5, emphDb: 14 })
   const lowC = mismatch({ ...base, curve: 'cubic', driveDb: 50, loHz: 1, hiHz: 220, emphType: 'bell', emphHz: 240, emphQ: 0.5, emphDb: 10 })
   const full = mismatch({ ...base, curve: 'tanh', driveDb: 24, loHz: 1, hiHz: 20000 })

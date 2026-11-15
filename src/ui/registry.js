@@ -159,7 +159,7 @@ const ALL_OPERATIONS = [
   {
     id: 'cut',
     label: 'Cut',
-    desc: 'Remove the selection and put it on the clipboard',
+    desc: 'Cut to the clipboard',
     category: 'edit',
     group: 'Clipboard',
     icon: 'cut',
@@ -174,7 +174,7 @@ const ALL_OPERATIONS = [
   {
     id: 'copy',
     label: 'Copy',
-    desc: 'Put the selection on the clipboard',
+    desc: 'Copy to the clipboard',
     category: 'edit',
     group: 'Clipboard',
     icon: 'copy',
@@ -189,7 +189,7 @@ const ALL_OPERATIONS = [
   {
     id: 'paste',
     label: 'Paste',
-    desc: 'Insert the clipboard at the playhead',
+    desc: 'Insert at the playhead',
     category: 'edit',
     group: 'Clipboard',
     icon: 'paste',
@@ -216,7 +216,7 @@ const ALL_OPERATIONS = [
   {
     id: 'trim',
     label: 'Trim',
-    desc: 'Remove audio outside or inside your selection',
+    desc: 'Keep or cut the selection',
     category: 'edit',
     group: 'Arrange',
     icon: 'trim',
@@ -230,7 +230,7 @@ const ALL_OPERATIONS = [
     // others, so it lives in the Edit list now.
     id: 'split',
     label: 'Split',
-    desc: 'Cut the clip in two at the playhead or the selection edges',
+    desc: 'Split at playhead or edges',
     category: 'edit',
     group: 'Arrange',
     icon: 'split',
@@ -242,7 +242,7 @@ const ALL_OPERATIONS = [
   {
     id: 'silence',
     label: 'Silence',
-    desc: 'Replace the selected region with silence',
+    desc: 'Silence the selection',
     category: 'edit',
     group: 'Arrange',
     icon: 'silence',
@@ -261,7 +261,7 @@ const ALL_OPERATIONS = [
     // which in the label, so the rail never offers a choice between a word and
     // the same word.
     label: 'Peak Normalize',
-    desc: 'Put the loudest peak at a chosen level',
+    desc: 'Set the loudest peak',
     category: 'level',
     icon: 'normalize',
     keywords: ['peak', 'level', 'maximize', 'gain', 'amplify'],
@@ -272,7 +272,7 @@ const ALL_OPERATIONS = [
   {
     id: 'loudness',
     label: 'Loudness Normalize',
-    desc: 'Hit a delivery target like ACX, Spotify or -16 LUFS',
+    desc: 'Hit ACX, Spotify or LUFS',
     category: 'level',
     icon: 'loudness',
     keywords: [
@@ -289,7 +289,7 @@ const ALL_OPERATIONS = [
   {
     id: 'fade',
     label: 'Fade',
-    desc: 'Shape the volume curve at the selection edges',
+    desc: 'Fade the selection',
     category: 'level',
     icon: 'fade',
     keywords: ['fade in', 'fade out', 'ramp', 'curve', 'taper'],
@@ -300,7 +300,7 @@ const ALL_OPERATIONS = [
   {
     id: 'volume',
     label: 'Volume',
-    desc: 'Adjust the volume of the selected region',
+    desc: 'Set the selection’s level',
     category: 'level',
     icon: 'volume',
     keywords: ['gain', 'louder', 'quieter', 'amplify', 'db'],
@@ -315,7 +315,7 @@ const ALL_OPERATIONS = [
     // would otherwise work harder on the loud ones.
     id: 'auto-leveler',
     label: 'Auto Leveler',
-    desc: 'Even out level between phrases',
+    desc: 'Even out phrase levels',
     category: 'dynamics',
     icon: 'autolevel',
     keywords: [
@@ -336,7 +336,7 @@ const ALL_OPERATIONS = [
     // past a compressor's attack and get amplified by makeup gain.
     id: 'soft-clipper',
     label: 'Soft Clipper',
-    desc: 'Tame transient peaks before compression',
+    desc: 'Round off transient peaks',
     category: 'dynamics',
     icon: 'clipper',
     keywords: ['clip', 'clipper', 'transient', 'plosive', 'peak', 'soft clip', 'saturation'],
@@ -349,7 +349,7 @@ const ALL_OPERATIONS = [
   {
     id: 'opto-smooth',
     label: 'LA Vintage 2A',
-    desc: 'Subtle, transparent compressor',
+    desc: 'Gentle opto compressor',
     category: 'dynamics',
     icon: 'opto',
     keywords: ['la-2a', 'la2a', 'compressor', 'opto', 'opto comp', 'optosmooth', 'tube', 'leveler', 'smooth'],
@@ -375,7 +375,7 @@ const ALL_OPERATIONS = [
   {
     id: 'vox-pressor',
     label: 'VoxPressor',
-    desc: 'Vocal dynamics: 1176 peaks into LA-2A body',
+    desc: 'Classic studio vocal chain',
     category: 'dynamics',
     icon: 'dynamics',
     keywords: [
@@ -396,7 +396,7 @@ const ALL_OPERATIONS = [
     id: 'scheps-parallel',
     release: 'dev',
     label: 'Scheps Parallel',
-    desc: 'Blend in a squashed, EQ-steered copy',
+    desc: 'Blend in a squashed copy',
     category: 'dynamics',
     icon: 'parallel',
     keywords: [
@@ -412,7 +412,7 @@ const ALL_OPERATIONS = [
   {
     id: 'inflator',
     label: 'Cambridge Inflator',
-    desc: 'Raise quiet detail without raising the ceiling',
+    desc: 'Raise apparent loudness',
     category: 'dynamics',
     icon: 'saturation',
     keywords: [
@@ -447,7 +447,7 @@ const ALL_OPERATIONS = [
     id: 'voicerx',
     release: 'dev',
     label: 'VoiceRx',
-    desc: 'Find what’s wrong with a voice recording',
+    desc: 'Diagnose a recording',
     category: 'tone',
     icon: 'voicerx',
     keywords: ['voice', 'diagnose', 'analyze', 'analyse', 'muddy', 'boxy', 'harsh', 'nasal', 'eq', 'doctor', 'fix'],
@@ -471,11 +471,26 @@ const ALL_OPERATIONS = [
     component: AirBandModal,
   },
   {
+    // Moved from Fix (owner, November 2026) and shown as Reso Tame; the id,
+    // files and saved-preset keys keep their old names.
+    id: 'resonance-suppressor',
+    label: 'Reso Tame',
+    desc: 'Tame harsh resonances',
+    category: 'tone',
+    icon: 'resonance',
+    keywords: ['resonance', 'soothe', 'reso soothe', 'reso smooth', 'resotame', 'reso tame', 'harsh', 'ring', 'room mode', 'dynamic eq', 'peak'],
+    requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
+    surface: 'window',
+    component: ResonanceModal,
+  },
+  {
     // Psycho Harmonic Analog Tape * Saturation Simulator: the HF Limiter's
     // Warmth circuit, moved out, plus its shelf with shape and timing pinned.
     id: 'phatass',
-    label: 'PHAT*SS',
-    desc: 'Tape-style warmth and a rounded top end',
+    label: 'PHATaSS',
+    desc: 'Phat analog tape warmth',
     category: 'tone',
     icon: 'tape',
     keywords: ['tape', 'phatass', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'odd', 'even'],
@@ -501,8 +516,9 @@ const ALL_OPERATIONS = [
   },
   {
     id: 'saturation-bench',
+    release: 'dev',
     label: 'Saturation Workbench',
-    desc: 'Stack layers of saturation, each on its own band',
+    desc: 'Custom saturation builder',
     category: 'tone',
     icon: 'saturation',
     keywords: [
@@ -523,7 +539,7 @@ const ALL_OPERATIONS = [
     // preview and no chain slot — Process the selection, Undo if it is wrong.
     id: 'noise-reduction',
     label: 'Noise Reduction',
-    desc: 'Remove background noise, hiss and room tone',
+    desc: 'Remove background noise',
     category: 'clean',
     group: 'Noise',
     icon: 'noise',
@@ -540,7 +556,7 @@ const ALL_OPERATIONS = [
     // selection and rides clip gain on each event.
     id: 'de-esser',
     label: 'De-Esser',
-    desc: 'Soften harsh S sounds, keep the air',
+    desc: 'Soften harsh sibilance',
     category: 'clean',
     group: 'Harshness',
     icon: 'softener',
@@ -555,7 +571,7 @@ const ALL_OPERATIONS = [
     id: 'clip-gain-deesser',
     release: 'dev',
     label: 'Sibilance Editor',
-    desc: 'Find harsh S and F events and turn each down',
+    desc: 'Precise sibilance editor',
     category: 'clean',
     group: 'Harshness',
     icon: 'deesser',
@@ -570,7 +586,7 @@ const ALL_OPERATIONS = [
   {
     id: 'hf-limiter',
     label: 'Hi-Freq Limiter',
-    desc: 'Put a ceiling on brightness, harshness and edges',
+    desc: 'Cap harsh, bright top end',
     category: 'clean',
     group: 'Harshness',
     icon: 'hflimiter',
@@ -582,26 +598,12 @@ const ALL_OPERATIONS = [
     component: HFLimiterModal,
   },
   {
-    id: 'resonance-suppressor',
-    label: 'Reso Soothe',
-    desc: 'Soothe harsh resonances',
-    category: 'clean',
-    group: 'Harshness',
-    icon: 'resonance',
-    keywords: ['resonance', 'soothe', 'reso smooth', 'resotame', 'harsh', 'ring', 'room mode', 'dynamic eq', 'peak'],
-    requires: 'selection',
-    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
-    chain: true,
-    surface: 'window',
-    component: ResonanceModal,
-  },
-  {
     // Real-time plosive repair: the low thump of a P or B, and the top-end
     // burst of a T, K or P release (the latter moved out of the De-Esser).
     id: 'plosive',
     release: 'dev',
     label: 'Plosive Tamer',
-    desc: 'Take the thump out of P and B, the spit out of T and K',
+    desc: 'Fix pops, spit and plosives',
     category: 'clean',
     group: 'Pops & Hum',
     icon: 'plosive',
@@ -633,7 +635,7 @@ const ALL_OPERATIONS = [
   {
     id: 'spectrum-analyzer',
     label: 'Spectrum Analyzer',
-    desc: 'See what is in the file, frequency by frequency',
+    desc: 'See the frequency content',
     category: 'clean',
     group: 'Analysis',
     icon: 'spectrum',
@@ -651,7 +653,7 @@ const ALL_OPERATIONS = [
     id: 'modula-kit',
     release: 'dev',
     label: 'Modula Kit',
-    desc: 'Developer gallery of the plugin control-surface kit',
+    desc: 'Plugin control-surface kit',
     category: 'clean',
     group: 'Analysis',
     icon: 'spectrum',
@@ -668,7 +670,7 @@ const ALL_OPERATIONS = [
   {
     id: 'plugin-chain',
     label: 'Effect Chain',
-    desc: 'Order, bypass and apply every active effect at once',
+    desc: 'Run effects in one pass',
     category: null,
     icon: 'chain',
     keywords: ['effect chain', 'plugin chain', 'chain', 'rack', 'serial', 'order', 'reorder', 'bypass', 'apply all', 'insert', 'plugins'],

@@ -579,7 +579,7 @@ export class VoxPressorKernel {
     this.deEssOn = !!p.deEssOn && !!p.deEss
     if (p.deEss) {
       // The first params are IMMEDIATE: the kernel's own constructor defaults
-      // would otherwise glide into these (PHAT*SS's lesson).
+      // would otherwise glide into these (PHATaSS's lesson).
       this.deEsser.setParams(p.deEss, !this.deEsserPrimed)
       this.deEsserPrimed = true
     }

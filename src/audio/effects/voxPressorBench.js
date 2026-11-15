@@ -5,7 +5,7 @@
  * section under the faceplate, never on it (owner, November 2026).
  *
  * On in dev, and openable on a deployed build with
- * `localStorage['wavely:voxpressor-bench'] = '1'`, the PHAT*SS bench's contract
+ * `localStorage['wavely:voxpressor-bench'] = '1'`, the PHATaSS bench's contract
  * (`phatassBench.js`). The shipping values stay in effect when it is hidden.
  *
  * Guarded: Node has neither `localStorage` nor `import.meta.env`.

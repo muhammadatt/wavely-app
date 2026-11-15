@@ -4,7 +4,7 @@
  * than being caught at a ceiling.
  *
  * It is the other kind of level-dependent shelf from `ShelfLimiterStage`
- * (the HF Limiter's, and PHAT*SS's FATSO), and differs on every axis that
+ * (the HF Limiter's, and PHATaSS's FATSO), and differs on every axis that
  * matters for how it sounds:
  *
  *   detector  ENERGY of a pre-emphasised band (mean square through a one-pole

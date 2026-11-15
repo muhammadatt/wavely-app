@@ -15,7 +15,7 @@ import { SAT_METER_RED_VALUE } from '../../audio/dsp/saturationMeter.js'
  * left stop, as a de-energised movement does.
  *
  * `face: 'saturation'` engraves the same movement as a SATURATION meter
- * (PHAT*SS): a linear 0–100 scale, red from `SAT_METER_RED_VALUE`, and the
+ * (PHATaSS): a linear 0–100 scale, red from `SAT_METER_RED_VALUE`, and the
  * needle set straight from `value` — the caller has already run it through
  * its own spring (`dsp/saturationMeter.js`), so the VU damping stays out of
  * it rather than slowing it twice.

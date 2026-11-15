@@ -38,7 +38,7 @@ export const SR = 44100
 
 /**
  * The floor every plugin's seams must stay under, dBFS. Measured at
- * CHUNK_RUN_IN_S the worst is −144.5 (Reso Soothe and PHAT*SS CLEAN); a 16-bit
+ * CHUNK_RUN_IN_S the worst is −144.5 (Reso Soothe and PHATaSS CLEAN); a 16-bit
  * LSB is −90.3, so a regression past this floor is still far from audible —
  * the floor catches it while it is a number and not yet a sound.
  */
@@ -175,8 +175,8 @@ function phatass(p) {
  * latency, preRollS, grid }].
  */
 export const PLUGINS = [
-  ['PHAT*SS CLEAN, Warmth and TAPE up, 7.5 ips', phatass({ warmth: 8, tape: 8, hf: 'ips7' })],
-  ['PHAT*SS THICK', phatass({ warmth: 5, tape: 8, tapeCurve: 'hysteresis' })],
+  ['PHATaSS CLEAN, Warmth and TAPE up, 7.5 ips', phatass({ warmth: 8, tape: 8, hf: 'ips7' })],
+  ['PHATaSS THICK', phatass({ warmth: 5, tape: 8, tapeCurve: 'hysteresis' })],
   ['Reso Soothe, on its hop grid', () => ({
     stages: [{ renderer: 'resonance', kernelParams: toResonanceKernelParams(RESONANCE_DEFAULTS) }],
     latency: RESONANCE_FRAME_SIZE, preRollS: 0, grid: resonanceHopSamples(RESONANCE_FRAME_SIZE),

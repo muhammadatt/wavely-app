@@ -5,7 +5,7 @@
  * its neighbours show dimmed either side; the arrows step, a click on a
  * neighbour goes to it, the arrow keys step.
  *
- *   horizontal  a pill window with the arrows outside it (PHAT*SS's TAPE
+ *   horizontal  a pill window with the arrows outside it (PHATaSS's TAPE
  *               SPEED under the reel, layout 5a)
  *   vertical    a tall window with the arrows stacked beside it and the
  *               caption between them (layout study 2c)
