@@ -13,8 +13,14 @@ import Icon from './ui/Icon.vue'
  * preconditions, the same dispatch. This is the payoff for having a registry:
  * a whole new surface costs one component and no new knowledge of operations.
  */
-const { state, closeContextMenu } = useEditorState()
-const { dispatch, isDisabled } = useOperationDispatch()
+const editor = useEditorState()
+const { state, closeContextMenu } = editor
+const { dispatch, isDisabled: baseDisabled, isAvailable } = useOperationDispatch()
+
+// An op with a `quick` action runs it here like Cut / Copy, so it is dead
+// without its precondition just as they are.
+const isQuick = op => typeof op.quick === 'function'
+const isDisabled = op => (isQuick(op) ? !isAvailable(op) : baseDisabled(op))
 
 const menuEl = ref(null)
 // Start at the click point; corrected after mount once the size is known.
@@ -74,7 +80,8 @@ function onOutsidePointer(e) {
 function run(op) {
   if (isDisabled(op)) return
   closeContextMenu()
-  dispatch(op)
+  if (isQuick(op)) op.quick(editor)
+  else dispatch(op)
 }
 
 function onKeydown(e) {
@@ -110,7 +117,7 @@ function onKeydown(e) {
         <Icon :name="op.icon" :size="14" class="shrink-0" />
         <span class="text-[12px] font-semibold">{{ op.label }}</span>
         <Icon
-          v-if="op.surface !== 'immediate'"
+          v-if="op.surface !== 'immediate' && !isQuick(op)"
           name="chevronRight" :size="13" :stroke-width="2.5"
           class="ml-auto shrink-0 opacity-45"
         />

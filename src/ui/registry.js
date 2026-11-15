@@ -117,6 +117,9 @@ const ALL_CATEGORIES = [
  *   surface   'rail'      opens as a detail view inside the rail
  *             'window'    opens as a floating window
  *             'immediate' runs on click; no parameters, so nothing opens
+ *   quick     optional `editor => …` the right-click menu runs INSTEAD of opening
+ *             the rail view (Trim = trim to selection, Silence), so those two act
+ *             like Cut / Copy there. The rail and palette still open the panel
  *   feature   optional plan feature (src/auth/plans.js) the operation's Apply
  *             needs. The row stays open to everyone — preview is free — and
  *             shows a PRO tag while the user's plan lacks it
@@ -224,6 +227,10 @@ const ALL_OPERATIONS = [
     requires: 'selection',
     surface: 'rail',
     component: TrimPanel,
+    quick: editor => {
+      editor.performTrimToSelection()
+      editor.showToast('Trimmed to selection')
+    },
   },
   {
     // Was a top-level toolbar category of its own; it is one edit among the
@@ -250,6 +257,10 @@ const ALL_OPERATIONS = [
     requires: 'selection',
     surface: 'rail',
     component: SilencePanel,
+    quick: editor => {
+      editor.performSilence()
+      editor.showToast('Region silenced')
+    },
   },
 
   // ---- Level (windows, plus the Fade and Volume rail views) ----
