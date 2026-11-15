@@ -5,12 +5,12 @@
  * smack, a hard T or K, the snap of an onset — it is turned down for a few
  * milliseconds; steady sound is left alone. A gain on a band, never distortion.
  *
- * ⚠ IT MOVED HERE FROM PHAT*SS (October 2026, owner's call, taking the panel
+ * ⚠ IT MOVED HERE FROM PHATaSS (October 2026, owner's call, taking the panel
  * slot of the Reso knob). The LAW IS UNCHANGED (`softenLaw`, the same numbers,
  * the same 500 Hz corner and the same 32 dB gate under the voice level), so
- * Soften s here renders what PHAT*SS's Soften s did with the rest of PHAT*SS
+ * Soften s here renders what PHATaSS's Soften s did with the rest of PHATaSS
  * out. Its history — the broadband onset softener it replaced, the knobs it
- * lost — is PHAT*SS's, in docs/claude-dev-log.md.
+ * lost — is PHATaSS's, in docs/claude-dev-log.md.
  *
  * IT RUNS ON THE HF LIMITER'S WORKLET, not its own: the detector is the HF
  * Limiter's Transient (`ShelfLimiterStage`: fast and slow followers, rise over

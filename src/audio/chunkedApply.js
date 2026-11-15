@@ -5,14 +5,14 @@
  * WHY. Apply rendered the whole region on one thread. The kernels are the same
  * code in a worker as in the worklet, so a region can be cut into chunks, each
  * rendered from its own run-in of the real audio before it, and the outputs
- * laid end to end. Built for PHAT*SS (~70 s for 10 min of stereo at Warmth 5 /
+ * laid end to end. Built for PHATaSS (~70 s for 10 min of stereo at Warmth 5 /
  * TAPE 6 on one thread), then extended to every plugin whose state a finite
  * run-in settles — see CHUNKED_PLUGINS in chunkRender.js for the list and
  * test/dsp/chunkedApply.test.js for what each one stitches to.
  *
  * ⚠ EVERY CHUNK MUST START ON THE CONTINUOUS RENDER'S GRID. The render runs in
  * 128-sample blocks, and anything resolved per block lands on different samples
- * in a chunk that starts off that grid: PHAT*SS's tape HF shelf recomputes its
+ * in a chunk that starts off that grid: PHATaSS's tape HF shelf recomputes its
  * corner every COEFF_STRIDE samples counted from each block's start, and off
  * the grid it read −28 to −45 dB re the peak at the seams for seconds whatever
  * the run-in. An STFT has a coarser grid of its own, its HOP: ResoTame chunks

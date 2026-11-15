@@ -150,6 +150,6 @@ export default {
   notes: [
     'The window holds eight bands. Remove one to add another.',
     'VoiceRx can move its corrections here as ordinary bands you can edit. They are moved, not copied, so nothing is applied twice.',
-    'A fixed cut suits a constant resonance. When the resonance comes and goes, reach for Reso Soothe instead.',
+    'A fixed cut suits a constant resonance. When the resonance comes and goes, reach for Reso Tame instead.',
   ],
 }

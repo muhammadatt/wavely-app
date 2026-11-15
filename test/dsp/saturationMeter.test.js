@@ -1,6 +1,6 @@
 /**
  * Saturation meter: the scale, the energy followers, the needle spring, and
- * PHAT*SS's kernel sums (what TAPE and Warmth add, against the clean signal).
+ * PHATaSS's kernel sums (what TAPE and Warmth add, against the clean signal).
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -66,14 +66,14 @@ function meterOf(x, p) {
   return k.takeMeter()
 }
 
-test('PHAT*SS meter: nothing added with TAPE and Warmth off; exactly what TAPE adds with it on', () => {
+test('PHATaSS meter: nothing added with TAPE and Warmth off; exactly what TAPE adds with it on', () => {
   const x = sine(110, 0.5)
   const off = meterOf(x, { warmth: 0, tape: 0, warmthCeilingDb: -6 })
   assert.equal(off.added, 0)
   assert.ok(off.clean > 0 && off.count > 0)
   // TAPE 3 with its makeup; with the top end OFF and no head bump everything
   // after TAPE is a pure delay, so the rendered output minus the makeup-scaled
-  // input IS what was added. (PHAT*SS ships 30 ips, which sags the top and
+  // input IS what was added. (PHATaSS ships 30 ips, which sags the top and
   // brings the A800 bump — neither is saturation, and both would show here.)
   const p = { warmth: 0, hf: 'off', tapeHeadBump: 0, tape: 3, tapeMakeupDb: 2.5, warmthCeilingDb: -6 }
   const m = meterOf(x, p)
@@ -89,7 +89,7 @@ test('PHAT*SS meter: nothing added with TAPE and Warmth off; exactly what TAPE a
   assert.ok(Math.abs(metered - rendered) < 0.05, `meter ${metered.toFixed(3)} vs render ${rendered.toFixed(3)} dB`)
 })
 
-test('PHAT*SS meter: Warmth reads, and more Warmth reads more', () => {
+test('PHATaSS meter: Warmth reads, and more Warmth reads more', () => {
   const x = new Float32Array(SR)
   for (let i = 0; i < SR; i++) x[i] = 0.3 * Math.sin((2 * Math.PI * 120 * i) / SR) + 0.1 * Math.sin((2 * Math.PI * 1500 * i) / SR)
   const at = warmth => {

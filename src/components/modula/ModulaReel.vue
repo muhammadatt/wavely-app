@@ -1,11 +1,11 @@
 <script setup>
 /**
  * MODULA TAPE REEL — a spinning tape-reel flange, the 6g finish from the
- * PHAT*SS layout study (`docs/design/modula/PHATaSS_Layouts.dc.html`): satin
+ * PHATaSS layout study (`docs/design/modula/PHATaSS_Layouts.dc.html`): satin
  * steel rim and inner ring, three holes, an amber hub and a white index dot.
  *
  * Decoration only: it shows the selected speed by how fast it turns and has
- * no control of its own. `period` is the seconds per turn (PHAT*SS: 1.6 /
+ * no control of its own. `period` is the seconds per turn (PHATaSS: 1.6 /
  * 3.2 / 6.4 s at 30 / 15 / 7.5 IPS); `spinning` pauses it where it is rather
  * than snapping back to the top, so stopping and starting playback never
  * jumps. Honours `prefers-reduced-motion`.

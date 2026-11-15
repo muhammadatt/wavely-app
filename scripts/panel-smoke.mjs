@@ -38,7 +38,7 @@ const URL_ = `http://localhost:${PORT}/`
 /** Command-palette search terms. These are the REGISTRY labels, not our names. */
 const PANELS = [
   'LA Vintage 2A', 'LA Classic 76', 'Soft Clipper', 'Scheps Parallel',
-  'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'Hi-Freq Limiter', 'PHAT*SS', 'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
+  'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'Hi-Freq Limiter', 'PHATaSS', 'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
   'Loudness Normalize', 'Auto Leveler', 'Plosive Tamer', 'Noise Reduction', 'VoxPressor',
 ]
 
@@ -570,7 +570,7 @@ try {
 
       // A plugin opens as a full-screen sheet with Apply on screen.
       await pp.keyboard.press('Control+k'); await pp.waitForTimeout(250)
-      await pp.keyboard.type('PHAT*SS'); await pp.waitForTimeout(400)
+      await pp.keyboard.type('PHATaSS'); await pp.waitForTimeout(400)
       await pp.keyboard.press('Enter'); await pp.waitForTimeout(900)
       const sheet = await pp.evaluate(() => {
         const f = document.querySelector('.win-frame')

@@ -196,7 +196,7 @@ test('a handler that throws answers with an error, not silence', () => {
   assert.ok(reply.message, 'an error reply must say something')
 })
 
-test('the PHAT*SS Warmth readout answers "done", whole and sampled', async () => {
+test('the PHATaSS Warmth readout answers "done", whole and sampled', async () => {
   const { toKernelParams } = await import('../../src/audio/phatassParams.js')
   const { warmthLayers, warmthGuard } = toKernelParams({ warmth: 5, warmthCeilingDb: -6, warmthRefPeaksDb: [-14, -14, -14, -14] })
   const whole = request('phatassWarmthReadout', { channelData: tone(1), params: { layers: warmthLayers, guard: warmthGuard, bands: true, peak: true } })

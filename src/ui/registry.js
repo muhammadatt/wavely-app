@@ -375,7 +375,7 @@ const ALL_OPERATIONS = [
   {
     id: 'vox-pressor',
     label: 'VoxPressor',
-    desc: '1176 peaks, LA-2A body',
+    desc: 'Classic studio vocal chain',
     category: 'dynamics',
     icon: 'dynamics',
     keywords: [
@@ -412,7 +412,7 @@ const ALL_OPERATIONS = [
   {
     id: 'inflator',
     label: 'Cambridge Inflator',
-    desc: 'Lift detail, not the ceiling',
+    desc: 'Raise apparent loudness',
     category: 'dynamics',
     icon: 'saturation',
     keywords: [
@@ -471,11 +471,26 @@ const ALL_OPERATIONS = [
     component: AirBandModal,
   },
   {
+    // Moved from Fix (owner, November 2026) and shown as Reso Tame; the id,
+    // files and saved-preset keys keep their old names.
+    id: 'resonance-suppressor',
+    label: 'Reso Tame',
+    desc: 'Tame harsh resonances',
+    category: 'tone',
+    icon: 'resonance',
+    keywords: ['resonance', 'soothe', 'reso soothe', 'reso smooth', 'resotame', 'reso tame', 'harsh', 'ring', 'room mode', 'dynamic eq', 'peak'],
+    requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
+    surface: 'window',
+    component: ResonanceModal,
+  },
+  {
     // Psycho Harmonic Analog Tape * Saturation Simulator: the HF Limiter's
     // Warmth circuit, moved out, plus its shelf with shape and timing pinned.
     id: 'phatass',
-    label: 'PHAT*SS',
-    desc: 'Tape warmth, rounded top',
+    label: 'PHATaSS',
+    desc: 'Phat analog tape warmth',
     category: 'tone',
     icon: 'tape',
     keywords: ['tape', 'phatass', 'phat', 'warmth', 'warm', 'fat', 'body', 'analog', 'saturation', 'harmonic', 'odd', 'even'],
@@ -501,8 +516,9 @@ const ALL_OPERATIONS = [
   },
   {
     id: 'saturation-bench',
+    release: 'dev',
     label: 'Saturation Workbench',
-    desc: 'Saturation layers by band',
+    desc: 'Custom saturation designer',
     category: 'tone',
     icon: 'saturation',
     keywords: [
@@ -540,7 +556,7 @@ const ALL_OPERATIONS = [
     // selection and rides clip gain on each event.
     id: 'de-esser',
     label: 'De-Esser',
-    desc: 'Soften harsh S sounds',
+    desc: 'Soften harsh sibilance',
     category: 'clean',
     group: 'Harshness',
     icon: 'softener',
@@ -555,7 +571,7 @@ const ALL_OPERATIONS = [
     id: 'clip-gain-deesser',
     release: 'dev',
     label: 'Sibilance Editor',
-    desc: 'Turn down harsh S and F',
+    desc: 'Precise sibilance editor',
     category: 'clean',
     group: 'Harshness',
     icon: 'deesser',
@@ -582,26 +598,12 @@ const ALL_OPERATIONS = [
     component: HFLimiterModal,
   },
   {
-    id: 'resonance-suppressor',
-    label: 'Reso Soothe',
-    desc: 'Soothe harsh resonances',
-    category: 'clean',
-    group: 'Harshness',
-    icon: 'resonance',
-    keywords: ['resonance', 'soothe', 'reso smooth', 'resotame', 'harsh', 'ring', 'room mode', 'dynamic eq', 'peak'],
-    requires: 'selection',
-    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
-    chain: true,
-    surface: 'window',
-    component: ResonanceModal,
-  },
-  {
     // Real-time plosive repair: the low thump of a P or B, and the top-end
     // burst of a T, K or P release (the latter moved out of the De-Esser).
     id: 'plosive',
     release: 'dev',
     label: 'Plosive Tamer',
-    desc: 'Tame P/B pops, T/K spit',
+    desc: 'Fix pops, spit and plosives',
     category: 'clean',
     group: 'Pops & Hum',
     icon: 'plosive',

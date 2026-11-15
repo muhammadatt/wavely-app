@@ -1,5 +1,5 @@
 /**
- * PHAT*SS — TAPE's automatic makeup: how much TAPE actually took off the
+ * PHATaSS — TAPE's automatic makeup: how much TAPE actually took off the
  * selection's peak, so the kernel can give exactly that back.
  *
  * ⚠ MEASURED, NEVER THE KNOB'S NUMBER. The knob is solved so a peak whose
@@ -173,7 +173,7 @@ function fastPeak(channelData, sampleRate, layer) {
 /**
  * @param {Float32Array[]} channelData the region, as `renderRegionToBuffer` gives it
  * @param {number} sampleRate
- * @param {object} params PHAT*SS UI params (merged over the defaults here)
+ * @param {object} params PHATaSS UI params (merged over the defaults here)
  * @param {{ exact?: boolean }} [options] exact (default) renders the whole
  *   region; `exact: false` is the fast bounded search, for live preview
  * @returns {{ makeupDb: number, peakDb: number, inputPeakDb: number }} the dB

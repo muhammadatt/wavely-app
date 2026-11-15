@@ -1,5 +1,5 @@
 /**
- * PHAT*SS — the Warmth readout (src/audio/phatassWarmthReadout.js).
+ * PHATaSS — the Warmth readout (src/audio/phatassWarmthReadout.js).
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
