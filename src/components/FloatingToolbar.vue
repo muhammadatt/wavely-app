@@ -111,7 +111,7 @@ const tools = CATEGORIES
     >
       <Icon name="chain" :size="15" class="tool-btn__icon" />
       <span class="chain-label">Chain</span>
-      <span v-if="chainLocked" class="chain-pro">PRO</span>
+      <span v-if="chainLocked && !chainBadge" class="chain-pro">PRO</span>
       <span
         v-if="chainBadge"
         class="chain-count"
