@@ -83,7 +83,6 @@ function select(op) {
         class="op-row w-full flex items-center gap-[10px] px-[13px] py-3 rounded-[12px] border cursor-pointer text-left select-none"
         :class="isDisabled(op) ? 'op-row--disabled' : ''"
         :disabled="isDisabled(op)"
-        :title="op.desc"
         @click="select(op)"
       >
         <div class="op-icon w-[34px] h-[34px] rounded-[10px] flex items-center justify-center shrink-0">
@@ -93,9 +92,8 @@ function select(op) {
              so it never takes the description's width (owner, November 2026).
              Descriptions are written to fit the ~142 px left beside the
              chevron and the rail's 8 px scrollbar
-             (test/ui/operationDescriptions.test.js); the tooltip carries the
-             whole text if one is still cut. No RENDER tag here either: the
-             window carries it. -->
+             (test/ui/operationDescriptions.test.js). No RENDER tag here
+             either: the window carries it. -->
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-[6px] min-w-0">
             <span class="text-[13px] font-bold text-text truncate">{{ op.label }}</span>

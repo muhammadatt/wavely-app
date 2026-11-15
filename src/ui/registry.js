@@ -230,7 +230,7 @@ const ALL_OPERATIONS = [
     // others, so it lives in the Edit list now.
     id: 'split',
     label: 'Split',
-    desc: 'Split at the playhead',
+    desc: 'Split at playhead or edges',
     category: 'edit',
     group: 'Arrange',
     icon: 'split',
@@ -289,7 +289,7 @@ const ALL_OPERATIONS = [
   {
     id: 'fade',
     label: 'Fade',
-    desc: 'Fade the start or end',
+    desc: 'Fade the selection',
     category: 'level',
     icon: 'fade',
     keywords: ['fade in', 'fade out', 'ramp', 'curve', 'taper'],
@@ -518,7 +518,7 @@ const ALL_OPERATIONS = [
     id: 'saturation-bench',
     release: 'dev',
     label: 'Saturation Workbench',
-    desc: 'Custom saturation designer',
+    desc: 'Custom saturation builder',
     category: 'tone',
     icon: 'saturation',
     keywords: [

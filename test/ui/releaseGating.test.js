@@ -37,11 +37,30 @@ test('an operation marked release: dev is hidden from production, and nothing el
   }
 })
 
+test('the work-in-progress plugins are hidden from production builds', () => {
+  // Kept as a list on purpose: shipping or hiding a plugin should be a
+  // deliberate edit here as well as in the registry, never a side effect.
+  const hidden = Object.entries(operationReleases(registry))
+    .filter(([, release]) => release === 'dev')
+    .map(([id]) => id)
+    .sort()
+  assert.deepEqual(hidden, [
+    'clip-gain-deesser',
+    'modula-kit',
+    'plosive',
+    'saturation-bench',
+    'scheps-parallel',
+    'vocal-saturation',
+    'voicerx',
+  ])
+})
+
 test('a help page is gated exactly as its operation is', () => {
   // The help entry carries its own copy of `release` (the editor cannot import
   // the registry from there); it has to follow the registry, whatever it says.
   const ops = operationReleases(registry)
   for (const [id, meta] of Object.entries(HELP_META)) {
+    assert.ok(id in ops, `${id}: help page for an operation the registry does not have`)
     assert.equal(meta.release, ops[id], `${id}: help release differs from the registry`)
   }
 })
