@@ -13,31 +13,36 @@ import Icon from './ui/Icon.vue'
  * preconditions, the same dispatch. This is the payoff for having a registry:
  * a whole new surface costs one component and no new knowledge of operations.
  */
-const editor = useEditorState()
-const { state, closeContextMenu } = editor
-const { dispatch, isDisabled: baseDisabled, isAvailable } = useOperationDispatch()
+const { state, closeContextMenu } = useEditorState()
+const { dispatch, isDisabled: baseDisabled } = useOperationDispatch()
 
-// An op with a `quick` action runs it here like Cut / Copy, so it is dead
+// An op with a `quick` action acts instantly here like Cut / Copy, so it is dead
 // without its precondition just as they are.
 const isQuick = op => typeof op.quick === 'function'
-const isDisabled = op => (isQuick(op) ? !isAvailable(op) : baseDisabled(op))
+const isDisabled = op => baseDisabled(op, { quick: true })
 
 const menuEl = ref(null)
 // Start at the click point; corrected after mount once the size is known.
 const pos = ref({ x: state.contextMenu?.x ?? 0, y: state.contextMenu?.y ?? 0 })
 
+// Order: the clipboard verbs and the instant edits (Trim, Silence) in one block
+// above the fold, then whatever still opens a panel (Split) alone below.
 const groups = computed(() => {
   const out = []
   const byName = new Map()
-  for (const op of operationsIn('edit')) {
-    let bucket = byName.get(op.group)
+  const place = (name, op) => {
+    let bucket = byName.get(name)
     if (!bucket) {
-      bucket = { group: op.group, operations: [] }
-      byName.set(op.group, bucket)
+      bucket = { group: name, operations: [] }
+      byName.set(name, bucket)
       out.push(bucket)
     }
     bucket.operations.push(op)
   }
+  const ops = operationsIn('edit')
+  for (const op of ops) if (op.group === 'Clipboard') place('Clipboard', op)
+  for (const op of ops) if (op.group !== 'Clipboard' && isQuick(op)) place('Clipboard', op)
+  for (const op of ops) if (op.group !== 'Clipboard' && !isQuick(op)) place(op.group, op)
   return out
 })
 
@@ -80,8 +85,7 @@ function onOutsidePointer(e) {
 function run(op) {
   if (isDisabled(op)) return
   closeContextMenu()
-  if (isQuick(op)) op.quick(editor)
-  else dispatch(op)
+  dispatch(op, { quick: true })
 }
 
 function onKeydown(e) {

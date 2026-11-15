@@ -1,13 +1,15 @@
 <script setup>
 import { useEditorState } from '../../composables/useEditorState.js'
+import { useOperationDispatch } from '../../composables/useOperationDispatch.js'
+import { getOperation } from '../../ui/registry.js'
 import ApplyAction from '../ui/ApplyAction.vue'
 
-const { hasSelection, performSilence, showToast } = useEditorState()
+const { hasSelection } = useEditorState()
+const { dispatch } = useOperationDispatch()
 
+// The registry's `quick` is the one place that says what Silence does and says.
 function apply() {
-  if (!hasSelection.value) return
-  performSilence()
-  showToast('Region silenced')
+  dispatch(getOperation('silence'), { quick: true })
 }
 </script>
 
