@@ -6,34 +6,12 @@ Audio Editor
 - If selection removed while playing, then play through
 - Audio "Delete" key press does not work while plugin window is open?
 
-Plugin window
-
-- Add ability to save chains with all plugin settings
-- Close/disable effect sidebar upon open or Move into dedicated sidebar
-- Move add button to bottom or Add plugins via dedicated search bar at bottom? 
-- Search list - Organize items into categories and show category headers
-- Active button UI/color
-
 
 AutoLeveler
 
 - Default to "On"
 - Disable knobs when bypassed
 - Default deadband to 1.0 db?
-
-
-Sibilance Editor (dev) -
-
-- analyze (backend) -> apply
-- 30s is ok
-- Listen only preview doesnt really allow you to see how it works
-
-Noise Reduction - 
-
-- process (backend)
-- not realtime stackable
-- 30s is ok
-- Listen only preview doesnt really allow you to see how it works
 
 
 File chooser UI is wonky - double click to rename doesn't actual work -- fights the primary click action. No clear "Save as" action. Modal close button close file. Closing modal is not obvious (click outside, no close X)
@@ -57,11 +35,6 @@ Edit functions:
  - Clip Automation (maybe)
  - Loudness Normalize (LUFS)
  
-New Effects:
-
-- Noise Reduction 1 (Df3) and 2 (RNNoise)
-- VoxChain: Clip -> DeEss (Soften) -> 1176 into LA2A (Punch) -> Scheps (Glue) -> Saturation (Warmth) -> Air
-- VoxPressor
 
 Effect panels:
 
@@ -80,7 +53,6 @@ Clicking a node to open the node focus panel only works if node is not already "
 We should change the node color or provide some other visual indicator when a node is in "delta" mode
 
 	
-
 VoiceRx
 
 - VoiceRx darkens when selection changes
@@ -93,13 +65,6 @@ UI - Limit mode and Clip mode do not result in same final level - they are equal
 
 Consider replacing tanh waveshaper with a tube sat type saturator 
 
-
-
-User Accounts
-Payments/Tokens
-
-Feature gating 
-15 second preview/purchase flow
 
 
 Marker/Regions

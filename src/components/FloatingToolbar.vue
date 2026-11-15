@@ -4,7 +4,14 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { useWindows } from '../composables/useWindows.js'
 import { usePluginChain } from '../composables/usePluginChain.js'
 import { CATEGORIES } from '../ui/registry.js'
+import { useEntitlements } from '../composables/useEntitlements.js'
 import Icon from './ui/Icon.vue'
+
+const entitlements = useEntitlements()
+// The chain's Apply is Pro (plans.js `pluginChainApply`); the rack itself is
+// open to everyone, so the tag says what the button leads to, and goes away
+// for anyone who already has it.
+const chainLocked = computed(() => !entitlements.can('pluginChainApply'))
 
 const { state, setActiveTool, hasFile, openCommandPalette, closeRail } = useEditorState()
 const { openWindow, isOpen } = useWindows()
@@ -104,6 +111,7 @@ const tools = CATEGORIES
     >
       <Icon name="chain" :size="15" class="tool-btn__icon" />
       <span class="chain-label">Chain</span>
+      <span v-if="chainLocked" class="chain-pro">PRO</span>
       <span
         v-if="chainBadge"
         class="chain-count"
@@ -286,6 +294,19 @@ const tools = CATEGORIES
   cursor: default;
 }
 
+/* Dark with teal ink, like the NEW badge it stands in for: the gold PRO tag
+   clashed with the teal fill (owner, November 2026). */
+.chain-pro {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #08161a;
+  color: #86e8ff;
+}
+
 .chain-count {
   font-family: 'JetBrains Mono', monospace;
   font-size: 9.5px;
@@ -358,6 +379,9 @@ const tools = CATEGORIES
     gap: 5px;
   }
   .chain-btn .chain-label {
+    display: none;
+  }
+  .chain-pro {
     display: none;
   }
   .chain-count {
