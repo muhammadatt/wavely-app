@@ -6,8 +6,7 @@ const { hasSelection, performSilence, showToast } = useEditorState()
 
 function apply() {
   if (!hasSelection.value) return
-  performSilence()
-  showToast('Region silenced')
+  if (performSilence()) showToast('Region silenced')
 }
 </script>
 

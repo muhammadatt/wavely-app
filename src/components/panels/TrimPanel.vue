@@ -17,16 +17,13 @@ function apply() {
   if (!hasSelection.value) return
   switch (mode.value) {
     case "to-selection":
-      performTrimToSelection()
-      showToast("Trimmed to selection")
+      if (performTrimToSelection()) showToast("Trimmed to selection")
       break
     case "before":
-      performTrimBefore()
-      showToast("Removed before selection")
+      if (performTrimBefore()) showToast("Removed before selection")
       break
     case "after":
-      performTrimAfter()
-      showToast("Removed after selection")
+      if (performTrimAfter()) showToast("Removed after selection")
       break
   }
 }

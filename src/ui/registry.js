@@ -167,8 +167,7 @@ const ALL_OPERATIONS = [
     requires: 'selection',
     surface: 'immediate',
     action: editor => {
-      editor.performCut()
-      editor.showToast('Cut to clipboard')
+      if (editor.performCut()) editor.showToast('Cut to clipboard')
     },
   },
   {
@@ -197,8 +196,7 @@ const ALL_OPERATIONS = [
     requires: 'clipboard',
     surface: 'immediate',
     action: editor => {
-      editor.performPaste(editor.state.playhead)
-      editor.showToast('Pasted at playhead')
+      if (editor.performPaste(editor.state.playhead)) editor.showToast('Pasted at playhead')
     },
   },
   {

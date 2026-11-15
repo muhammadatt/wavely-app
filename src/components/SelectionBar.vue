@@ -41,28 +41,24 @@ function handleCopy() {
 
 function handleCut() {
   if (!hasSelection.value) return
-  performCut()
-  showToast("Cut to clipboard")
+  if (performCut()) showToast("Cut to clipboard")
 }
 
 function handlePaste() {
   if (!hasClipboard.value) return
-  performPaste(state.playhead)
-  showToast("Pasted at playhead")
+  if (performPaste(state.playhead)) showToast("Pasted at playhead")
 }
 
 function handleSilence() {
   if (!hasSelection.value) return
-  performSilence()
-  showToast("Region silenced")
+  if (performSilence()) showToast("Region silenced")
 }
 
 // Mirrors the Trim panel's "Trim to selection" mode — same wording, same toast,
 // so the shortcut and the panel don't read as two different operations.
 function handleTrim() {
   if (!hasSelection.value) return
-  performTrimToSelection()
-  showToast("Trimmed to selection")
+  if (performTrimToSelection()) showToast("Trimmed to selection")
 }
 </script>
 
