@@ -4,16 +4,18 @@ import { readFileSync } from 'node:fs'
 
 /**
  * Every operation's description must fit its rail row on ONE line. The rail
- * (ContextPanel, 300 px) leaves the description ~195 px — ~180 with a classic
- * scrollbar — at 11 px Inter medium, and the rows are not allowed to grow
- * taller (owner, November 2026). Node cannot measure a font, so the cap is in
- * characters: the shipped set measures 98–180 px at up to 34 characters. A
- * description over the cap needs rewording, not a wider rail.
+ * (ContextPanel, 280 px) leaves the description 150 px beside the icon and the
+ * chevron — 142 once the rail's 8 px scrollbar shows — at 11 px Inter medium,
+ * and the rows are not allowed to grow taller (owner, November 2026). The plan
+ * badge sits on the NAME line, so it takes nothing from the description. Node
+ * cannot measure a font, so the cap is in characters: the shipped set
+ * measures at most 139 px and 28 characters. A description over the cap needs
+ * rewording, not a wider rail.
  *
  * Read from the source rather than imported: the registry imports every
  * panel's .vue file, which node cannot load.
  */
-const MAX_DESC_CHARS = 34
+const MAX_DESC_CHARS = 28
 
 const registry = readFileSync(new URL('../../src/ui/registry.js', import.meta.url), 'utf8')
 const opSrc = registry.slice(registry.indexOf('const ALL_OPERATIONS = ['))
