@@ -53,7 +53,8 @@ function togglePeakHold() {
     :width="700"
     :accent="ACCENT"
     design="modula"
-    brand-lead="SPECTRUM ANALYZER"
+    brand-lead="SPECTRUM"
+    brand-tail="ANALYZER"
     :show-engage="false"
     @close="close"
   >

@@ -382,7 +382,8 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
     :top="72"
     :accent="ACCENT"
     design="modula"
-    brand-lead="SOFT CLIPPER"
+    brand-lead="SOFT"
+    brand-tail="CLIPPER"
     :engaged="clipperPreview"
     show-delta
     :delta="clipperDelta"

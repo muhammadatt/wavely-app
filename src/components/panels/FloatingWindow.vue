@@ -80,6 +80,9 @@ const props = defineProps({
   // second lighter.
   brandLead: { type: String, required: true },
   brandTail: { type: String, default: '' },
+  // Run the tail straight on from the lead (no space): one word in two
+  // weights, e.g. "VOX" + "PRESSOR".
+  brandJoined: { type: Boolean, default: false },
 
   // Override the derived faceplate tint. Only FET Punch does — its steel-blue
   // accent tints too cold through the generic recipe.
@@ -499,7 +502,7 @@ const inChain = computed(() => {
 const frozen = computed(() => chainApplying.value && (windowId === CHAIN_WINDOW_ID || isChainCopyId(windowId)))
 
 // Accessible name, read off the brand mark.
-const label = computed(() => `${props.brandLead} ${props.brandTail}`.trim())
+const label = computed(() => `${props.brandLead}${props.brandJoined ? '' : ' '}${props.brandTail}`.trim())
 
 onMounted(() => {
   // A plugin keeps playing in the chain while its window is closed, with its
@@ -760,9 +763,11 @@ function requestClose() {
       -->
       <div class="flex items-center gap-2.5">
         <!-- Modula: one word mark in the plugin's hue over white, no rule. -->
-        <span v-if="modula" class="win-brand-m">{{ brandLead }}{{ brandTail }}</span>
+        <span v-if="modula" class="win-brand-m">
+          {{ brandLead }}<template v-if="brandTail"><template v-if="!brandJoined">&nbsp;</template><span class="win-brand-m-tail">{{ brandTail }}</span></template>
+        </span>
         <span v-else style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
-          {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.85)">{{ brandTail }}</span></template>
+          {{ brandLead }}<template v-if="brandTail"><template v-if="!brandJoined">&nbsp;</template><span style="font-weight:500;color:rgba(255,255,255,.85)">{{ brandTail }}</span></template>
         </span>
         <span
           v-if="offline"
@@ -1550,9 +1555,10 @@ function requestClose() {
 .win-brand-m {
   white-space: nowrap;
   font: 800 13px/1 var(--m-font-ui);
-  letter-spacing: 0.14em;
-  color: color-mix(in srgb, var(--face, #e8a33d) 20%, #fff);
+  letter-spacing: 0.2em;
+  color: #f6f4f3;
 }
+.win-brand-m-tail { font-weight: 500; color: rgba(255, 255, 255, 0.85); }
 /* RENDER chip and footer note: what kind of plugin this is (an offline
    process), not a control. Filled orange, matching the rail's RENDER tag. */
 .win-offline {
@@ -1699,6 +1705,7 @@ function requestClose() {
 [data-surface='light'] .win-header { border-bottom-color: rgba(60, 50, 40, 0.22); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45); }
 [data-surface='light'] .win-footer { border-top-color: rgba(60, 50, 40, 0.22); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45); }
 [data-surface='light'] .win-brand-m { color: #1d2026; }
+[data-surface='light'] .win-brand-m-tail { color: rgba(29, 32, 38, 0.85); }
 /* The selection readout carries an inline dark-surface colour. */
 [data-surface='light'] .win-sel { color: #555b64 !important; }
 [data-surface='light'] .win-icon-btn { color: #3a3f47; box-shadow: var(--m-shadow-raised); }

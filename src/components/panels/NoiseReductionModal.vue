@@ -121,7 +121,8 @@ async function applyAndClose() {
     :width="560"
     :accent="ACCENT"
     design="modula"
-    brand-lead="NOISE REDUCTION"
+    brand-lead="NOISE"
+    brand-tail="REDUCTION"
     :show-engage="false"
     offline
     show-apply
