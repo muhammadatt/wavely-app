@@ -37,7 +37,7 @@ export default {
       id: 'parallel',
       title: 'Parallel punch',
       text: 'Half the dry signal blended back: natural attacks with an aggressive, dense layer underneath.',
-      settings: {},
+      settings: { ratio: 'all', mix: 0.5 },
       setting: 'All buttons in, Mix 50 %',
       brief: '15–25 s of a dynamic vocal or a drum loop. Untreated.',
     },

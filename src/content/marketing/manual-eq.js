@@ -27,8 +27,15 @@ export default {
       id: 'voice',
       title: 'Muddy voice cleared up',
       text: 'A little cut in the low mids and a lift for presence: the words come forward and the voice sounds clearer.',
-      settings: {},
-      setting: 'Low-mid cut, presence lift',
+      settings: {
+        bands: [
+          { type: 'lowshelf', frequencyHz: 80, gainDb: 0, q: 0.7, enabled: true },
+          { type: 'peaking', frequencyHz: 300, gainDb: -6, q: 1, enabled: true },
+          { type: 'peaking', frequencyHz: 4000, gainDb: 4, q: 1, enabled: true },
+          { type: 'highshelf', frequencyHz: 10000, gainDb: 0, q: 0.7, enabled: true },
+        ],
+      },
+      setting: 'Low-mid cut −6 dB at 300 Hz, presence lift +4 dB at 4 kHz',
       brief: '20–30 s of narration with a slightly muddy, boxy tone. Untreated.',
     },
   ],

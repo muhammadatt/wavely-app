@@ -2,16 +2,16 @@ export default {
   eyebrow: 'Loudness enhancer',
   headline: 'Bigger, fuller, louder — without crossing the line.',
   pitch: [
-    'More loudness, density and excitement with the peaks held exactly where they were. No pumping, no squash — just more.',
+    'More loudness, density and excitement without ever going past full scale. No pumping, no squash — just more.',
   ],
-  description: 'Make a voice or mix sound bigger and louder in your browser: Inflator-style density and detail with the peaks held in place. No pumping. Free.',
+  description: 'Make a voice or mix sound bigger and louder in your browser: Inflator-style density and detail that never goes past full scale. No pumping. Free.',
   overviewTitle: 'The mastering secret, for everything',
   overview: [
-    'The Oxford Inflator became a mastering favourite because it does something a compressor cannot: it makes a recording feel louder, denser and more exciting while the peaks stay put. It raises quiet detail faster than the loud parts, so a voice or a mix fills out and jumps forward with no pumping and no squash.',
+    'The Oxford Inflator became a mastering favourite because it does something a compressor cannot: it makes a recording feel louder, denser and more exciting without the pumping and squash of heavy compression. It raises quiet detail faster than the loud parts, so a voice or a mix fills out and jumps forward with no pumping and no squash.',
     'Cambridge Inflator follows the same idea, in your browser. Effect sets how much, Curve shapes the character from smooth to punchy, and a band split treats lows, mids and highs on their own. It never goes past full scale, so you can push it hard and keep your headroom.',
   ],
   features: [
-    { title: 'Instant loudness', text: 'more apparent volume with the peaks held in place' },
+    { title: 'Instant loudness', text: 'more apparent volume, never past full scale' },
     { title: 'Density and weight', text: 'a fuller, richer sound without compressor artefacts' },
     { title: 'Detail brought forward', text: 'quiet texture rises faster than the loud parts' },
     { title: 'No pumping', text: 'nothing breathes, ducks or squashes' },
@@ -26,7 +26,7 @@ export default {
     {
       id: 'voice',
       title: 'Thin voice, filled out',
-      text: 'The same peak level, but a bigger, denser voice with more detail in every word.',
+      text: 'A bigger, denser voice with more detail in every word, and still clear of full scale.',
       settings: {},
       setting: 'Factory default',
       brief: '20–30 s of narration or podcast speech that sounds a little thin. Untreated.',
@@ -34,8 +34,8 @@ export default {
     {
       id: 'mix',
       title: 'Whole mix, louder',
-      text: 'A finished track gains loudness and excitement with its peaks held in place.',
-      settings: {},
+      text: 'A finished track gains loudness and excitement without going past full scale.',
+      settings: { effect: 0.6 },
       setting: 'Effect 60, Curve 0',
       brief: '20–30 s of a music mix or music bed, mastered or not.',
     },
@@ -52,7 +52,7 @@ export default {
   specs: [
     { label: 'Type', value: 'Loudness and density enhancer' },
     { label: 'Controls', value: 'Input, Effect, Curve, Band split, Clip 0 dB, Output' },
-    { label: 'Peaks', value: 'Held at full scale' },
+    { label: 'Peaks', value: 'Never past full scale' },
     { label: 'Preview', value: 'Real time, while you play' },
     { label: 'Works with', value: 'WAV, FLAC, MP3, AIFF, M4A — mono or stereo' },
   ],
