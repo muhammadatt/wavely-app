@@ -25,7 +25,7 @@ test('every marketing page is an effect with a help entry, at the help page’s 
     assert.ok(HELP[id] && HELP_META[id], `${id}: no help entry`)
     assert.equal(marketingSlug(id), helpSlug(id))
     assert.equal(marketingIdForSlug(marketingSlug(id)), id)
-    assert.equal(marketingUrl(id), `/plugins/${helpSlug(id)}/`)
+    assert.equal(marketingUrl(id), `/effects/${helpSlug(id)}/`)
   }
 })
 
@@ -93,11 +93,11 @@ test('production lists no page for a dev-only effect', () => {
 })
 
 test('the route reads the slug from the path', () => {
-  assert.equal(marketingSlugFromPath('/plugins/'), null)
-  assert.equal(marketingSlugFromPath('/plugins'), null)
-  assert.equal(marketingSlugFromPath('/plugins/voxpressor/'), 'voxpressor')
-  assert.equal(marketingSlugFromPath('/plugins/voxpressor'), 'voxpressor')
-  assert.equal(marketingSlugFromPath('/plugins/%/'), '%')
+  assert.equal(marketingSlugFromPath('/effects/'), null)
+  assert.equal(marketingSlugFromPath('/effects'), null)
+  assert.equal(marketingSlugFromPath('/effects/voxpressor/'), 'voxpressor')
+  assert.equal(marketingSlugFromPath('/effects/voxpressor'), 'voxpressor')
+  assert.equal(marketingSlugFromPath('/effects/%/'), '%')
   assert.equal(marketingSlugFromPath('/help/voxpressor/'), null)
 })
 

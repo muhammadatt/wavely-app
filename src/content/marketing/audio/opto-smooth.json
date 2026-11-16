@@ -1,8 +1,8 @@
 {
   "samples": {
     "narration": {
-      "off": "/plugins/la-vintage-2a/audio/narration-off.mp3",
-      "on": "/plugins/la-vintage-2a/audio/narration-on.mp3",
+      "off": "/effects/la-vintage-2a/audio/narration-off.mp3",
+      "on": "/effects/la-vintage-2a/audio/narration-on.mp3",
       "placeholder": true,
       "seconds": 25.28,
       "channels": 1,
@@ -16,8 +16,8 @@
       }
     },
     "podcast": {
-      "off": "/plugins/la-vintage-2a/audio/podcast-off.mp3",
-      "on": "/plugins/la-vintage-2a/audio/podcast-on.mp3",
+      "off": "/effects/la-vintage-2a/audio/podcast-off.mp3",
+      "on": "/effects/la-vintage-2a/audio/podcast-on.mp3",
       "placeholder": true,
       "seconds": 19.56,
       "channels": 1,
@@ -31,8 +31,8 @@
       }
     },
     "parallel": {
-      "off": "/plugins/la-vintage-2a/audio/parallel-off.mp3",
-      "on": "/plugins/la-vintage-2a/audio/parallel-on.mp3",
+      "off": "/effects/la-vintage-2a/audio/parallel-off.mp3",
+      "on": "/effects/la-vintage-2a/audio/parallel-on.mp3",
       "placeholder": true,
       "seconds": 18.37,
       "channels": 1,

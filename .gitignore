@@ -25,7 +25,7 @@ server/bin/
 *.wav
 *.mp3
 # …except the marketing pages' before / after clips (npm run marketing:render).
-!public/plugins/*/audio/*.mp3
+!public/effects/*/audio/*.mp3
 *.flac
 *.aiff
 *.m4a

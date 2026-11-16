@@ -12,8 +12,8 @@
  *
  * and writes
  *
- *   public/plugins/<slug>/audio/<sample>-off.mp3   the dry clip, as played
- *   public/plugins/<slug>/audio/<sample>-on.mp3    through the effect
+ *   public/effects/<slug>/audio/<sample>-off.mp3   the dry clip, as played
+ *   public/effects/<slug>/audio/<sample>-on.mp3    through the effect
  *   src/content/marketing/audio/<id>.json          what exists, durations, levels
  *
  * A file named PLACEHOLDER in the samples folder marks its clips as stand-ins:
@@ -129,7 +129,7 @@ for (const id of ids) {
   const render = await loadRenderer(id)
   if (!render) { console.log(`skip  ${id}: no renderer in scripts/marketing-renderers/ (the page plays no audio)`); continue }
   const srcDir = join(ROOT, 'marketing/samples', slug)
-  const outDir = join(ROOT, 'public/plugins', slug, 'audio')
+  const outDir = join(ROOT, 'public/effects', slug, 'audio')
   mkdirSync(outDir, { recursive: true })
   // A sample with no dry source keeps whatever was rendered for it before.
   const manifestPath = join(ROOT, 'src/content/marketing/audio', `${id}.json`)
@@ -154,8 +154,8 @@ for (const id of ids) {
       encodeMp3(dry, off)
       encodeMp3(wet.channels, on)
       manifest.samples[sample.id] = {
-        off: `/plugins/${slug}/audio/${sample.id}-off.mp3`,
-        on: `/plugins/${slug}/audio/${sample.id}-on.mp3`,
+        off: `/effects/${slug}/audio/${sample.id}-off.mp3`,
+        on: `/effects/${slug}/audio/${sample.id}-on.mp3`,
         ...(placeholder ? { placeholder: true } : {}),
         seconds: round2(dry[0].length / SR),
         channels: dry.length,

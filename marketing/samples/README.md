@@ -1,7 +1,7 @@
 # Marketing sample sources
 
 The DRY recordings behind the before / after players on the effect marketing
-pages (`/plugins/<slug>/`). One folder per page, named by its URL slug:
+pages (`/effects/<slug>/`). One folder per page, named by its URL slug:
 
     marketing/samples/la-vintage-2a/narration.wav
     marketing/samples/voxpressor/podcast.wav
@@ -17,7 +17,7 @@ Then:
     npm run marketing:render -- opto-smooth  # one page (window id)
 
 which renders each clip through the effect exactly as Apply would and writes
-the pair the page plays (`public/plugins/<slug>/audio/<id>-off.mp3` / `-on.mp3`)
+the pair the page plays (`public/effects/<slug>/audio/<id>-off.mp3` / `-on.mp3`)
 plus `src/content/marketing/audio/<window-id>.json`. Commit those. These source
 files are not committed (the repo ignores audio files): a sample with no source
 keeps its last render.

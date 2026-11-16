@@ -1,8 +1,8 @@
 {
   "samples": {
     "audiobook": {
-      "off": "/plugins/loudness-normalize/audio/audiobook-off.mp3",
-      "on": "/plugins/loudness-normalize/audio/audiobook-on.mp3",
+      "off": "/effects/loudness-normalize/audio/audiobook-off.mp3",
+      "on": "/effects/loudness-normalize/audio/audiobook-on.mp3",
       "placeholder": true,
       "seconds": 25.75,
       "channels": 1,

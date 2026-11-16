@@ -1,6 +1,6 @@
 /**
- * Entry for the effect marketing pages (`plugins/index.html`, served at
- * `/plugins/` and `/plugins/<slug>/`). A separate Vite entry, like the help
+ * Entry for the effect marketing pages (`effects/index.html`, served at
+ * `/effects/` and `/effects/<slug>/`). A separate Vite entry, like the help
  * pages: a product page loads its content and its player, never the editor.
  */
 import { createApp } from 'vue'

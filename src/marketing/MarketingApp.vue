@@ -1,6 +1,6 @@
 <script setup>
 /**
- * The effect marketing pages — `/plugins/` (the index) and `/plugins/<slug>/`.
+ * The effect marketing pages — `/effects/` (the index) and `/effects/<slug>/`.
  *
  * A product page per effect, laid out like a commercial plugin's: the hero with
  * the faceplate, "Hear it" (before / after on real material, `ABPlayer` —
@@ -101,7 +101,7 @@ onMounted(() => {
 <template>
   <div class="mk">
     <header class="mk-top">
-      <a href="/plugins/" class="mk-brand" aria-label="All effects">
+      <a href="/effects/" class="mk-brand" aria-label="All effects">
         <img src="/crisp-fm-logo.png" alt="crisp.fm" class="mk-logo" draggable="false" />
         <span class="mk-rule" aria-hidden="true"></span>
         <span class="mk-brand-word">Effects</span>
@@ -191,7 +191,7 @@ onMounted(() => {
     <!-- ── Not found ────────────────────────────────────────────────────── -->
     <main v-else-if="notFound" class="mk-main mk-empty">
       <h1 class="mk-name">There is no page for that effect.</h1>
-      <p class="mk-pitch"><a href="/plugins/">See every effect</a>.</p>
+      <p class="mk-pitch"><a href="/effects/">See every effect</a>.</p>
     </main>
 
     <!-- ── Index ────────────────────────────────────────────────────────── -->

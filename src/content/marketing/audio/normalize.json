@@ -1,8 +1,8 @@
 {
   "samples": {
     "quiet": {
-      "off": "/plugins/peak-normalize/audio/quiet-off.mp3",
-      "on": "/plugins/peak-normalize/audio/quiet-on.mp3",
+      "off": "/effects/peak-normalize/audio/quiet-off.mp3",
+      "on": "/effects/peak-normalize/audio/quiet-on.mp3",
       "placeholder": true,
       "seconds": 25.78,
       "channels": 1,

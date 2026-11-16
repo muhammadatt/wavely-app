@@ -1,8 +1,8 @@
 {
   "samples": {
     "bright": {
-      "off": "/plugins/hi-freq-limiter/audio/bright-off.mp3",
-      "on": "/plugins/hi-freq-limiter/audio/bright-on.mp3",
+      "off": "/effects/hi-freq-limiter/audio/bright-off.mp3",
+      "on": "/effects/hi-freq-limiter/audio/bright-on.mp3",
       "placeholder": true,
       "seconds": 20.56,
       "channels": 1,

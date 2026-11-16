@@ -1,8 +1,8 @@
 {
   "samples": {
     "voice": {
-      "off": "/plugins/reso-tame/audio/voice-off.mp3",
-      "on": "/plugins/reso-tame/audio/voice-on.mp3",
+      "off": "/effects/reso-tame/audio/voice-off.mp3",
+      "on": "/effects/reso-tame/audio/voice-on.mp3",
       "placeholder": true,
       "seconds": 26.91,
       "channels": 1,

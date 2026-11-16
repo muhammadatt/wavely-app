@@ -1,8 +1,8 @@
 {
   "samples": {
     "vocal": {
-      "off": "/plugins/la-classic-76/audio/vocal-off.mp3",
-      "on": "/plugins/la-classic-76/audio/vocal-on.mp3",
+      "off": "/effects/la-classic-76/audio/vocal-off.mp3",
+      "on": "/effects/la-classic-76/audio/vocal-on.mp3",
       "placeholder": true,
       "seconds": 20.07,
       "channels": 1,
@@ -16,8 +16,8 @@
       }
     },
     "parallel": {
-      "off": "/plugins/la-classic-76/audio/parallel-off.mp3",
-      "on": "/plugins/la-classic-76/audio/parallel-on.mp3",
+      "off": "/effects/la-classic-76/audio/parallel-off.mp3",
+      "on": "/effects/la-classic-76/audio/parallel-on.mp3",
       "placeholder": true,
       "seconds": 25.75,
       "channels": 1,

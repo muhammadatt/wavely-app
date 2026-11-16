@@ -1,5 +1,5 @@
 /**
- * Per-effect MARKETING pages — `/plugins/<slug>/`, one product page per effect,
+ * Per-effect MARKETING pages — `/effects/<slug>/`, one product page per effect,
  * written to sell it the way a commercial plugin's page does: a hero with the
  * faceplate, an overview with a bulleted list of what it does, before / after
  * audio on real material, an interactive screenshot, and the facts.
@@ -46,7 +46,7 @@
  *
  *   id         string    File name: `marketing/samples/<slug>/<id>.wav` is the
  *                        DRY source; `npm run marketing:render` writes the pair
- *                        the page plays (`public/plugins/<slug>/audio/`)
+ *                        the page plays (`public/effects/<slug>/audio/`)
  *   title      string    What the listener is hearing (`Uneven narration`)
  *   text       string    One sentence: what to listen for
  *   settings   object    PANEL params over the effect's defaults, as Apply
@@ -116,9 +116,9 @@ export function marketingSlug(windowId) {
   return helpSlug(windowId)
 }
 
-/** The page's URL. Trailing slash: built as `plugins/<slug>/index.html`. */
+/** The page's URL. Trailing slash: built as `effects/<slug>/index.html`. */
 export function marketingUrl(windowId) {
-  return `/plugins/${marketingSlug(windowId)}/`
+  return `/effects/${marketingSlug(windowId)}/`
 }
 
 const ID_BY_SLUG = new Map(Object.keys(MARKETING).map(id => [marketingSlug(id), id]))
@@ -162,7 +162,7 @@ export function tryOutUrl(windowId, sampleId) {
 
 /** Where a sample's DRY take is served (`npm run marketing:render`). */
 export function sampleDryUrl(windowId, sampleId) {
-  return `/plugins/${marketingSlug(windowId)}/audio/${sampleId}-off.mp3`
+  return `/effects/${marketingSlug(windowId)}/audio/${sampleId}-off.mp3`
 }
 
 /**

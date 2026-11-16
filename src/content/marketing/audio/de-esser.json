@@ -1,8 +1,8 @@
 {
   "samples": {
     "narration": {
-      "off": "/plugins/de-esser/audio/narration-off.mp3",
-      "on": "/plugins/de-esser/audio/narration-on.mp3",
+      "off": "/effects/de-esser/audio/narration-off.mp3",
+      "on": "/effects/de-esser/audio/narration-on.mp3",
       "placeholder": true,
       "seconds": 21.33,
       "channels": 1,

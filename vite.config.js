@@ -106,9 +106,9 @@ function helpPages(devPanels) {
 }
 
 /**
- * The effect marketing pages (`plugins/index.html`, `src/marketing/`), at
- * `/plugins/` and `/plugins/<slug>/` — the help pages' arrangement: one entry,
- * a copy per published page at `plugins/<slug>/index.html`, and the same
+ * The effect marketing pages (`effects/index.html`, `src/marketing/`), at
+ * `/effects/` and `/effects/<slug>/` — the help pages' arrangement: one entry,
+ * a copy per published page at `effects/<slug>/index.html`, and the same
  * rewrite in dev and preview.
  *
  * Unlike the help pages these are for search engines and link previews, so
@@ -120,7 +120,7 @@ function helpPages(devPanels) {
 function marketingPages(devPanels, siteUrl) {
   const rewrite = (req, _res, next) => {
     const path = (req.url || '').split('?')[0]
-    if (/^\/plugins(\/[^/.]*)?\/?$/.test(path)) req.url = '/plugins/index.html'
+    if (/^\/effects(\/[^/.]*)?\/?$/.test(path)) req.url = '/effects/index.html'
     next()
   }
   const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
@@ -133,7 +133,7 @@ function marketingPages(devPanels, siteUrl) {
       server.middlewares.use(rewrite)
     },
     generateBundle: { order: 'post', async handler(_options, bundle) {
-      const entry = bundle['plugins/index.html']
+      const entry = bundle['effects/index.html']
       if (!entry) return
       const { readFile } = await import('node:fs/promises')
       const {
@@ -176,7 +176,7 @@ function marketingPages(devPanels, siteUrl) {
         ].join('\n    ')
         this.emitFile({
           type: 'asset',
-          fileName: `plugins/${marketingSlug(id)}/index.html`,
+          fileName: `effects/${marketingSlug(id)}/index.html`,
           source: html
             .replace(/<title>[^<]*<\/title>/, `<title>${esc(title)}</title>`)
             .replace(/<meta name="description" content="[^"]*" \/>/, `<meta name="description" content="${esc(page.description)}" />`)
@@ -207,7 +207,7 @@ export default defineConfig(({ mode }) => {
         input: {
           main: fileURLToPath(new URL('./index.html', import.meta.url)),
           help: fileURLToPath(new URL('./help/index.html', import.meta.url)),
-          plugins: fileURLToPath(new URL('./plugins/index.html', import.meta.url)),
+          effects: fileURLToPath(new URL('./effects/index.html', import.meta.url)),
         },
       },
     },
