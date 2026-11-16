@@ -1,5 +1,5 @@
 import { reactive, ref, watch } from 'vue'
-import { useEditorState } from './useEditorState.js'
+import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
@@ -42,7 +42,7 @@ const copies = pluginCopies((copy, life) => {
   function usePlosive() {
     const {
       state, appState, getAudioContext, replaceRegion, setPeakCache,
-      startProcessing, endProcessing, showToast, totalDuration,
+      startProcessing, endProcessing, showToast, totalDuration, pinActiveDocument,
     } = useEditorState()
     const { openWindow, closeWindow } = useWindows()
 
@@ -200,9 +200,11 @@ const copies = pluginCopies((copy, life) => {
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: file tabs stay usable
       // during the render, and `state` follows the active tab. The commit and
-      // the processing status go to this document, or nowhere if it closed.
-      const docId = appState.activeDocumentId
-      const selectionAtStart = { start, end }
+      // the processing status go to this document. The measurement below runs
+      // before startProcessing, so an edit can land meanwhile; pin.check()
+      // refuses the commit if one did, or if the user switched files.
+      const pin = pinActiveDocument('Plosive Tamer')
+      const docId = pin.docId
       const segments = state.segments
       const file = state.currentFile
 
@@ -213,14 +215,18 @@ const copies = pluginCopies((copy, life) => {
       startProcessing('Applying Plosive Tamer...', docId)
       try {
         const buffer = await renderRegion(segments, start, end, file)
-        const bufferId = replaceRegion(start, end, buffer, 'Plosive Tamer', docId, selectionAtStart)
+        pin.check()
+        const bufferId = replaceRegion(start, end, buffer, 'Plosive Tamer', docId, pin.selection)
         if (bufferId == null) return // the document closed while rendering
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Plosive Tamer applied')
       } catch (err) {
-        console.error('Plosive Tamer failed:', err)
-        showToast('Plosive Tamer failed')
+        if (err instanceof DocumentSwitchedError) showToast(err.message)
+        else {
+          console.error('Plosive Tamer failed:', err)
+          showToast('Plosive Tamer failed')
+        }
       } finally {
         endProcessing(docId)
       }

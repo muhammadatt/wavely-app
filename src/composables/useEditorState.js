@@ -256,6 +256,21 @@ export class DocumentSwitchedError extends Error {
   }
 }
 
+/**
+ * The file an apply was pinned to was EDITED while it rendered (a Trim, Cut,
+ * Undo…). The apply would splice its render at the times it captured into a
+ * timeline that has since moved, so it is refused the same way a file switch
+ * is. A subclass, so every apply that already shows a DocumentSwitchedError's
+ * message shows this one too.
+ */
+export class DocumentEditedError extends DocumentSwitchedError {
+  constructor(what) {
+    super(what)
+    this.message = `${what} was not applied: the file was edited while it rendered`
+    this.name = 'DocumentEditedError'
+  }
+}
+
 export function useEditorState() {
   // Computed
   const totalDuration = computed(() => getTimelineDuration(state.segments))
@@ -327,20 +342,22 @@ export function useEditorState() {
 
   function undo() {
     const doc = activeDocument.value
-    if (!doc || editBlockedByProcessing()) return
+    if (!doc || editBlockedByProcessing()) return false
     const h = historyFor(doc.id)
     const entry = stepHistory(h.undo, h.redo)
-    if (!entry) return
+    if (!entry) return false
     showToast(entry.label ? `Undid ${entry.label}` : 'Undone')
+    return true
   }
 
   function redo() {
     const doc = activeDocument.value
-    if (!doc || editBlockedByProcessing()) return
+    if (!doc || editBlockedByProcessing()) return false
     const h = historyFor(doc.id)
     const entry = stepHistory(h.redo, h.undo)
-    if (!entry) return
+    if (!entry) return false
     showToast(entry.label ? `Redid ${entry.label}` : 'Redone')
+    return true
   }
 
   // ── Buffer pool ────────────────────────────────────────────────────────────
@@ -807,6 +824,12 @@ export function useEditorState() {
    * pin, so nothing is committed (refused rather than repaired, because the
    * measurements and renders may have read either file).
    *
+   * It also throws a DocumentEditedError if the file's timeline changed since
+   * the pin (its revision moved). Edits are refused while a document is
+   * processing, but several applies measure before they call startProcessing,
+   * and in that window an edit still gets through; this is what catches it.
+   * Call `check()` BEFORE replaceRegion, which bumps the revision itself.
+   *
    * ⚠ ANY SWITCH SINCE THE PIN, NOT "ANOTHER FILE IS ACTIVE NOW". Comparing
    * ids passes an A → B → A round trip, yet a render that started while B was
    * active read B's segments and would commit them into A. The check reads
@@ -815,6 +838,7 @@ export function useEditorState() {
   function pinActiveDocument(what) {
     const docId = appState.activeDocumentId
     const seq = activationSeq
+    const revision = activeDocument.value?.revision
     return {
       docId,
       // Taken now, before the render: replaceRegion records it so Undo puts
@@ -823,6 +847,7 @@ export function useEditorState() {
       selection: copySelection(activeDocument.value?.selection ?? null),
       check() {
         if (activationSeq !== seq || appState.activeDocumentId !== docId) throw new DocumentSwitchedError(what)
+        if (getDocument(docId)?.revision !== revision) throw new DocumentEditedError(what)
       },
     }
   }
@@ -943,6 +968,7 @@ export function useEditorState() {
     getSourceHandle,
 
     // Edit operations
+    editBlockedByProcessing,
     performTrimToSelection,
     performTrimBefore,
     performTrimAfter,

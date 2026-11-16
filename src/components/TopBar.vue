@@ -58,14 +58,14 @@ const fileMeta = computed(() => {
       <div class="tb-history flex items-stretch shrink-0" role="group" aria-label="History">
         <button
           class="tb-hist"
-          :disabled="!canUndo"
+          :disabled="!canUndo || !!state.isProcessing"
           title="Undo (Ctrl+Z)"
           aria-label="Undo"
           @click="undo"
         ><Icon name="undo" :size="15" /><span class="tb-hist-label compact:hidden">Undo</span></button>
         <button
           class="tb-hist"
-          :disabled="!canRedo"
+          :disabled="!canRedo || !!state.isProcessing"
           title="Redo (Ctrl+Shift+Z)"
           aria-label="Redo"
           @click="redo"
