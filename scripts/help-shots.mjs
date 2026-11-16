@@ -78,6 +78,8 @@ const SHOT_SETTINGS = {
   'manual-eq': sampleSettings('manual-eq', 'voice'),
   // A lower threshold, so the Resonance view shows the voice being treated.
   'resonance-suppressor': { focus: { global: { selectivity: 13 } } },
+  // The default (12 kHz, −8 dB) barely touches this vocal's top end.
+  'hf-limiter': { freq: 5000, threshold: -14 },
 }
 
 /** How long audio runs through an open window before it is shot. */
