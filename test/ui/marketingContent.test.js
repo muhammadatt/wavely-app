@@ -139,3 +139,25 @@ test('a control box maps onto the faceplate crop: clamped at the edge, dropped w
   assert.equal(spotOnFace({ x: 382, y: 15, w: 30, h: 30 }, face), null, 'a header control is not on the face')
   assert.equal(spotOnFace({ x: 10, y: 40, w: 20, h: 20 }, face), null, 'mostly off the face')
 })
+
+test('a sample’s settings have a way into its window', () => {
+  // useTryOut writes through the chain settings registry (chainable plugins),
+  // and hands anything else to a window that takes it on mount
+  // (windowHandoff.js). Read as source: the registry imports .vue components.
+  const registry = readFileSync(join(ROOT, 'src/ui/registry.js'), 'utf8')
+  const chainable = new Set()
+  for (const m of registry.matchAll(/\n {4}id: '([^']+)',[\s\S]*?\n {2}\},/g)) {
+    if (/\bchain: true\b/.test(m[0])) chainable.add(m[1])
+  }
+  const HANDOFF = new Set(['loudness'])
+  for (const [id, page] of Object.entries(MARKETING)) {
+    for (const s of page.samples ?? []) {
+      if (!Object.keys(s.settings ?? {}).length) continue
+      assert.ok(chainable.has(id) || HANDOFF.has(id), `${id}/${s.id}: settings would be dropped`)
+      if (HANDOFF.has(id)) {
+        const src = readFileSync(join(ROOT, 'src/components/panels/windows/LoudnessWindow.vue'), 'utf8')
+        assert.match(src, new RegExp(`pendingWindowSettings\\('${id}'\\)`))
+      }
+    }
+  }
+})

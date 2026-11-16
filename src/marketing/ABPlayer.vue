@@ -68,6 +68,10 @@ function load(s) {
     decoded.set(s.id, pair)
     pending.delete(s.id)
     return pair
+  }, (err) => {
+    // Forget the failure so the next play or sample switch fetches again.
+    pending.delete(s.id)
+    throw err
   })
   pending.set(s.id, p)
   return p
@@ -140,10 +144,14 @@ watch([on, matchLevels], applyGains)
 // ── Transport ────────────────────────────────────────────────────────────────
 
 async function play() {
+  // Create and resume the context inside the click, before anything is awaited:
+  // after a first-time fetch the gesture has expired and Safari / iOS keep the
+  // context suspended.
+  if (!ctx) ctx = new AudioContext()
+  const resumed = ctx.state === 'suspended' ? ctx.resume() : null
   const pair = await ensureLoaded()
   if (!pair) return
-  if (!ctx) ctx = new AudioContext()
-  if (ctx.state === 'suspended') await ctx.resume()
+  if (resumed) await resumed
   stopNodes()
   const offset = position.value >= duration.value - 0.05 ? 0 : position.value
   const when = ctx.currentTime + 0.03

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useEditorState } from '../../../composables/useEditorState.js'
+import { pendingWindowSettings, takeWindowSettings } from '../../../composables/windowHandoff.js'
 import {
   loudnessNormalizeRegion, measureRegionLoudness, computePeakCache,
 } from '../../../audio/processing.js'
@@ -182,6 +183,14 @@ function selectTarget(id) {
   unit.value = t.unit
   ceilingDb.value = t.ceilingDb
 }
+
+// Settings handed over by a try-out link (useTryOut.js): `target` is a
+// benchmark id. Taken on mount, or when they arrive while the window is open.
+watch(() => pendingWindowSettings('loudness'), (s) => {
+  if (!s) return
+  takeWindowSettings('loudness')
+  if (typeof s.target === 'string') selectTarget(s.target)
+}, { immediate: true })
 
 /**
  * Knob ranges follow the unit, because the two meters do not share a scale.

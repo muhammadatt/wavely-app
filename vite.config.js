@@ -118,6 +118,7 @@ function helpPages(devPanels) {
  * absolute, as crawlers want them; without it they are left out / relative.
  */
 function marketingPages(devPanels, siteUrl) {
+  let outDir = 'dist'
   const rewrite = (req, _res, next) => {
     const path = (req.url || '').split('?')[0]
     if (/^\/effects(\/[^/.]*)?\/?$/.test(path)) req.url = '/effects/index.html'
@@ -126,6 +127,21 @@ function marketingPages(devPanels, siteUrl) {
   const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
   return {
     name: 'wavely:marketing-pages',
+    configResolved(config) {
+      outDir = config.build.outDir
+    },
+    // `public/` is copied wholesale, so the rendered takes of an effect this
+    // build hides would still be fetchable under /effects/<slug>/. Remove them, like their pages.
+    async closeBundle() {
+      if (devPanels) return
+      const { rm } = await import('node:fs/promises')
+      const { join, resolve } = await import('node:path')
+      const { MARKETING, publishedMarketingIds, marketingSlug } = await import('./src/content/marketing/index.js')
+      const published = new Set(publishedMarketingIds(false))
+      for (const id of Object.keys(MARKETING)) {
+        if (!published.has(id)) await rm(join(resolve(outDir), 'effects', marketingSlug(id)), { recursive: true, force: true })
+      }
+    },
     configureServer(server) {
       server.middlewares.use(rewrite)
     },
@@ -148,7 +164,7 @@ function marketingPages(devPanels, siteUrl) {
         let image = null
         try {
           const shots = JSON.parse(await readFile(new URL(`./src/content/help/shots/${id}.json`, import.meta.url), 'utf8'))
-          image = shots.panel?.src ?? null
+          image = shots.face?.src ?? shots.panel?.src ?? null
         } catch { /* no screenshot yet */ }
         const title = marketingPageTitle(id)
         const ld = {

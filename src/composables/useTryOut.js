@@ -3,6 +3,7 @@ import { useEditorState } from './useEditorState.js'
 import { useFileImport } from './useFileImport.js'
 import { useWindows } from './useWindows.js'
 import { pluginSettingsIO, writePluginSettings } from './pluginSettings.js'
+import { handOffWindowSettings } from './windowHandoff.js'
 import { tryOutFromSearch } from '../content/marketing/index.js'
 import { DEV_TUNING_PANELS } from '../devFlags.js'
 
@@ -50,12 +51,18 @@ function init() {
   }
   if (!offer) return
   state.offer = offer
-  fetched = fetch(offer.url).then((r) => {
+  fetched = fetchClip(offer)
+}
+
+/** Start fetching a sample's dry take. A failure is reported when the user clicks. */
+function fetchClip(offer) {
+  const p = fetch(offer.url).then((r) => {
     if (!r.ok) throw new Error(`${offer.url}: ${r.status}`)
     return r.blob()
   })
-  // Reported when the user clicks, not here; keep an early failure from being "unhandled".
-  fetched.catch(() => {})
+  // Keep an early failure from being "unhandled"; `start` awaits it and reports it.
+  p.catch(() => {})
+  return p
 }
 
 export function useTryOut() {
@@ -70,6 +77,8 @@ export function useTryOut() {
     if (!offer || state.status === 'loading') return
     state.status = 'loading'
     try {
+      // A fetch that failed is retried on the next click rather than awaited again.
+      fetched ??= fetchClip(offer)
       const blob = await fetched
       const file = new File([blob], `${offer.sample.title} (${offer.title} demo).mp3`, { type: 'audio/mpeg' })
       const [docId] = await importFiles([file])
@@ -79,6 +88,10 @@ export function useTryOut() {
       // fresh load), through the same writer a preset or a saved chain uses.
       const io = pluginSettingsIO(offer.windowId, 'solo')
       if (io) writePluginSettings(offer.windowId, 'solo', { ...io.read(), ...offer.sample.settings })
+      // A window with no chain settings (Loudness Normalize) takes them on mount.
+      else if (Object.keys(offer.sample.settings ?? {}).length) {
+        handOffWindowSettings(offer.windowId, offer.sample.settings)
+      }
       openWindow(offer.windowId)
       state.offer = null
       // Let the window mount and engage its preview before the transport starts.
@@ -86,6 +99,7 @@ export function useTryOut() {
       setTimeout(() => window.dispatchEvent(new CustomEvent('wavely:toggle-play')), 350)
     } catch (err) {
       console.error('Try-out clip failed:', err)
+      fetched = null
       state.status = 'failed'
       showToast('The demo clip could not be loaded')
     } finally {
