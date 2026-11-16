@@ -288,7 +288,7 @@ async function applyAndClose() {
     :accent="ACCENT"
     design="modula"
     brand-lead="RESO"
-    brand-tail="SOOTHE"
+    brand-tail="TAME"
     :presets="presets"
     :presets-disabled="!resPreview"
     presets-disabled-hint="Turn Reso Tame on to use presets"

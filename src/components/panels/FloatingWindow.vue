@@ -501,8 +501,12 @@ const inChain = computed(() => {
 // knob turned or a slot removed mid-render would change what is being rendered.
 const frozen = computed(() => chainApplying.value && (windowId === CHAIN_WINDOW_ID || isChainCopyId(windowId)))
 
+// What goes between lead and tail: nothing when the two are one word in two
+// weights, else a space. The visible mark and the accessible name share it.
+const brandSep = computed(() => (props.brandTail && !props.brandJoined ? ' ' : ''))
+
 // Accessible name, read off the brand mark.
-const label = computed(() => `${props.brandLead}${props.brandJoined ? '' : ' '}${props.brandTail}`.trim())
+const label = computed(() => `${props.brandLead}${brandSep.value}${props.brandTail}`.trim())
 
 onMounted(() => {
   // A plugin keeps playing in the chain while its window is closed, with its
@@ -762,12 +766,12 @@ function requestClose() {
         the one button that disposes of the window.
       -->
       <div class="flex items-center gap-2.5">
-        <!-- Modula: one word mark in the plugin's hue over white, no rule. -->
-        <span v-if="modula" class="win-brand-m">
-          {{ brandLead }}<template v-if="brandTail"><template v-if="!brandJoined">&nbsp;</template><span class="win-brand-m-tail">{{ brandTail }}</span></template>
-        </span>
-        <span v-else style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
-          {{ brandLead }}<template v-if="brandTail"><template v-if="!brandJoined">&nbsp;</template><span style="font-weight:500;color:rgba(255,255,255,.85)">{{ brandTail }}</span></template>
+        <!-- One word mark for both designs: the lead bold in off-white, the tail
+             lighter, no rule. Every plugin's mark is the same colour (the
+             per-plugin hue tint was dropped). A non-breaking space keeps a
+             two-word mark on one line. -->
+        <span class="win-brand-m">
+          {{ brandLead }}<template v-if="brandTail">{{ brandSep ? '\u00a0' : '' }}<span class="win-brand-m-tail">{{ brandTail }}</span></template>
         </span>
         <span
           v-if="offline"
