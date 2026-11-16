@@ -139,10 +139,9 @@ onMounted(() => {
         <ABPlayer :samples="samples" :name="title" :try-href="tryHref" />
       </section>
 
-      <!-- Design 3b (owner, November 2026): on the page's left edge like every other
-           section — a reading column as wide as the list's left column, then the
-           numbered list at full width. 3a centred
-           it, the one section off the shared grid. The heading is the page's own line. -->
+      <!-- Owner, November 2026: the heading, both paragraphs and the numbered list
+           share ONE centred 960 px block (3b's left-edge column, as wide as the
+           list's left column, read as too weird). The heading is the page's own line. -->
       <section v-if="page.overview?.length || page.features?.length" class="mk-section mk-overview">
         <h2 class="mk-h2">{{ page.overviewTitle ?? 'Overview' }}</h2>
         <div class="mk-overview-head">
@@ -319,12 +318,9 @@ a { color: inherit; }
 .mk-h2 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.01em; }
 .mk-lede { margin: 8px 0 24px; font-size: 15px; color: var(--mk-soft); }
 
-/* The reading column is exactly the feature list's LEFT column (two equal columns
-   and one gap), so the text ends where that column ends and the section reads as
-   one grid. A fixed 720 px lined up with nothing on the page (owner). */
-.mk-overview { --mk-col-gap: 48px; }
+/* One centred 960 px block: heading, text and list share both edges (owner). */
+.mk-overview { --mk-col-gap: 48px; max-width: 960px; margin-left: auto; margin-right: auto; }
 .mk-overview-head {
-  max-width: calc((100% - var(--mk-col-gap)) / 2);
   margin-top: 20px;
   display: flex;
   flex-direction: column;
@@ -334,7 +330,7 @@ a { color: inherit; }
 .mk-overview-text--lead { font-size: 18px; line-height: 1.6; color: var(--mk-text); }
 .mk-features {
   list-style: none;
-  /* Full content width, so its edges line up with the player above and the tour below. */
+  /* The block's full width, so the list and the text share both edges. */
   margin: 44px 0 0;
   padding: 0;
   display: grid;
@@ -432,7 +428,6 @@ a { color: inherit; }
   .mk-headline { font-size: 19px; }
   .mk-related { grid-template-columns: 1fr; }
   .mk-features { grid-template-columns: 1fr; margin-top: 36px; }
-  .mk-overview-head { max-width: none; }
   .mk-overview-text--lead { font-size: 17px; }
 }
 </style>
