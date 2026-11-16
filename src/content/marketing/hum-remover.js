@@ -28,7 +28,7 @@ export default {
       title: 'Narration with mains hum',
       text: 'The buzz underneath is gone; the voice sounds exactly as it did.',
       settings: {},
-      setting: 'Factory default',
+      setting: 'Factory default (60 Hz mains, detected harmonics)',
       brief: '20–30 s of narration with an audible 50 or 60 Hz hum or buzz under it.',
     },
   ],

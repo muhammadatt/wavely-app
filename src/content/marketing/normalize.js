@@ -28,7 +28,7 @@ export default {
       title: 'Quiet recording',
       text: 'A take recorded with too much headroom comes up to full level: the same voice, just louder and closer.',
       settings: {},
-      setting: 'Factory default',
+      setting: 'Factory default (peak at −1 dB)',
       brief: '20–30 s of narration recorded quietly (peaks around −18 dBFS), otherwise untreated.',
     },
   ],

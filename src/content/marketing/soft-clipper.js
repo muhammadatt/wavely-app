@@ -29,7 +29,7 @@ export default {
       title: 'Narration with stray peaks',
       text: 'A few plosives and a laugh were setting the level; rounded off, the whole read comes up and sits closer.',
       settings: {},
-      setting: 'Factory default',
+      setting: 'Factory default (GENTLE ceiling, LIMIT, AUTO makeup)',
       brief: '20–30 s of narration or podcast speech with a few clear plosives or a laugh that peak well above the rest. Untreated.',
     },
   ],

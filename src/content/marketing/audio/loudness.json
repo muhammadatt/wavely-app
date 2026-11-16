@@ -1,0 +1,19 @@
+{
+  "samples": {
+    "audiobook": {
+      "off": "/plugins/loudness-normalize/audio/audiobook-off.mp3",
+      "on": "/plugins/loudness-normalize/audio/audiobook-on.mp3",
+      "placeholder": true,
+      "seconds": 25.75,
+      "channels": 1,
+      "levelDb": {
+        "off": -34.41,
+        "on": -18.46
+      },
+      "peakDb": {
+        "off": -14,
+        "on": -3
+      }
+    }
+  }
+}
