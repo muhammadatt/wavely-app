@@ -116,6 +116,8 @@ function box(s, i) {
 
 <style scoped>
 .pt {
+  /* Amber, the editor's own accent for a selected thing (#e8a33d). */
+  --pt-accent: #e8a33d;
   display: grid;
   grid-template-columns: 1fr 230px;
   gap: 20px;
@@ -141,11 +143,11 @@ function box(s, i) {
   transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 /* Every hotspot is faintly visible, so the screenshot reads as explorable. */
-.pt-spot:not(.pt-spot--on) { border-color: rgba(53, 211, 230, 0.18); }
+.pt-spot:not(.pt-spot--on) { border-color: rgba(232, 163, 61, 0.18); }
 .pt-spot--on {
-  border-color: var(--mk-accent);
-  background: rgba(53, 211, 230, 0.1);
-  box-shadow: 0 0 0 4px rgba(53, 211, 230, 0.15), 0 0 30px rgba(53, 211, 230, 0.25);
+  border-color: var(--pt-accent);
+  background: rgba(232, 163, 61, 0.1);
+  box-shadow: 0 0 0 4px rgba(232, 163, 61, 0.15), 0 0 30px rgba(232, 163, 61, 0.25);
 }
 .pt-spot:focus-visible { outline: none; }
 /* Placed by `badgePlace`: inside a large box's corner, beside a short one. It
@@ -160,14 +162,14 @@ function box(s, i) {
   padding: 0 4px;
   border-radius: 9px;
   background: rgba(11, 14, 18, 0.9);
-  border: 1px solid rgba(53, 211, 230, 0.5);
-  color: var(--mk-accent);
+  border: 1px solid rgba(232, 163, 61, 0.5);
+  color: var(--pt-accent);
   font: 600 10px/16px 'JetBrains Mono', ui-monospace, monospace;
   text-align: center;
 }
 .pt-badge--side { top: 50%; left: auto; right: calc(100% + 4px); transform: translateY(-50%); }
 .pt-badge--inside { top: 50%; transform: translateY(-50%); }
-.pt-spot--on .pt-badge { background: var(--mk-accent); color: #06181b; border-color: var(--mk-accent); }
+.pt-spot--on .pt-badge { background: var(--pt-accent); color: #06181b; border-color: var(--pt-accent); }
 
 .pt-caption {
   margin-top: 14px;
@@ -187,7 +189,7 @@ function box(s, i) {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--mk-accent);
+  background: var(--pt-accent);
   color: #06181b;
   display: grid;
   place-items: center;
@@ -220,14 +222,14 @@ function box(s, i) {
   cursor: pointer;
 }
 .pt-row:hover { background: rgba(255, 255, 255, 0.04); }
-.pt-row--on { background: rgba(53, 211, 230, 0.1); color: var(--mk-text); }
+.pt-row--on { background: rgba(232, 163, 61, 0.1); color: var(--mk-text); }
 .pt-row-n {
   flex: none;
   width: 20px;
   font: 600 11px 'JetBrains Mono', ui-monospace, monospace;
   color: var(--mk-muted);
 }
-.pt-row--on .pt-row-n { color: var(--mk-accent); }
+.pt-row--on .pt-row-n { color: var(--pt-accent); }
 
 @media (max-width: 900px) {
   .pt { grid-template-columns: 1fr; }
@@ -239,6 +241,6 @@ function box(s, i) {
 @media (max-width: 640px) {
   .pt-spot:not(.pt-spot--on) { border-color: transparent; }
   .pt-spot:not(.pt-spot--on) .pt-badge { display: none; }
-  .pt-spot--on { box-shadow: 0 0 0 3px rgba(53, 211, 230, 0.2); }
+  .pt-spot--on { box-shadow: 0 0 0 3px rgba(232, 163, 61, 0.2); }
 }
 </style>

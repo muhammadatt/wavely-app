@@ -143,8 +143,8 @@ onMounted(() => {
            share ONE centred 960 px block (3b's left-edge column, as wide as the
            list's left column, read as too weird). The heading is the page's own line. -->
       <section v-if="page.overview?.length || page.features?.length" class="mk-section mk-overview">
-        <h2 class="mk-h2">{{ page.overviewTitle ?? 'Overview' }}</h2>
         <div class="mk-overview-head">
+          <h2 class="mk-h2">{{ page.overviewTitle ?? 'Overview' }}</h2>
           <p
             v-for="(p, i) in page.overview" :key="i"
             class="mk-overview-text" :class="{ 'mk-overview-text--lead': i === 0 }"
@@ -325,6 +325,7 @@ a { color: inherit; }
   display: flex;
   flex-direction: column;
   gap: 18px;
+  text-align: center;
 }
 .mk-overview-text { margin: 0; font-size: 16px; line-height: 1.7; color: var(--mk-soft); text-wrap: pretty; }
 .mk-overview-text--lead { font-size: 18px; line-height: 1.6; color: var(--mk-text); }
