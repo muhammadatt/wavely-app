@@ -56,10 +56,20 @@
  *                        demonstrates the thing the caption promises
  *
  * ── VOICE ───────────────────────────────────────────────────────────────────
- * A buyer reads this, not a user, so it may sell — but every claim must be one
- * the DSP keeps (CLAUDE.md is the record). No invented comparisons, no "best",
- * no hardware we did not model. Hardware names identify what was studied and
- * the footer says so.
+ * A buyer reads this, not a user, so it sells. SOUND FIRST (owner, November
+ * 2026): plugin buyers want a result they can hear, so the headline, the lead
+ * paragraph and the top of the feature list are the character and what it does
+ * for a voice. Convenience — input alignment, auto makeup, guards, lookahead —
+ * is the reason it is EASY to get that sound: one sentence in the second
+ * paragraph and the bottom of the list, never the pitch.
+ *
+ * For an EMULATION (LA Vintage 2A, LA Classic 76, Air Boost, Cambridge
+ * Inflator) borrow freely from what is commonly said about the original —
+ * smooth, warm, forward, the sound of countless records — and promise that
+ * kind of outcome, never a replica ("indistinguishable from", "the LA-2A
+ * sound"). Facts about our own DSP must still be ones it keeps (CLAUDE.md is
+ * the record): no invented comparisons, no "best", no hardware we did not
+ * model. Hardware names identify what was studied and the footer says so.
  */
 
 import optoSmooth from './opto-smooth.js'
