@@ -6,6 +6,7 @@ export default {
   ],
   description: 'An LA-2A style opto compressor that runs in your browser: smooth phrase-level leveling, tube harmonics and auto makeup that never clips. Free to use.',
 
+  overviewTitle: 'A modern take on a studio classic',
   overview: [
     'Modelled on the Teletronix LA-2A — a studio favourite on vocals, bass and guitar for over half a century. Its optical cell reacts gently and lets go slowly, so it rides whole phrases rather than syllables: the performance comes out even, not squeezed.',
     'Behind the simple two-knob face sits what a file-based workflow needs. It measures your recording first, so a setting behaves the same on a quiet take as a hot one. Makeup gain follows the body of the voice and never passes the source’s peak. The valve colour is fitted to measured harmonic data, with a guard that keeps loud S sounds clean.',

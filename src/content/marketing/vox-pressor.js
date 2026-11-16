@@ -7,6 +7,7 @@ export default {
   ],
   description: 'A 1176-into-LA-2A vocal chain with de-essing and parallel density, in one window in your browser. Measured readouts guide every knob.',
 
+  overviewTitle: 'A pro vocal chain, already wired',
   overview: [
     'The vocal chain engineers wire by hand, already staged: a fast FET stage modelled on the 1176 trims the loudest peaks, an optical stage modelled on the LA-2A levels the body of the voice, a de-esser cleans up what the compressors bring up, and a parallel copy fills in density underneath.',
     'Built for narration, podcasts and dialogue. Every stage measures what it did to your selection and shows it under the meter, and the knobs’ guide colours turn amber before a stage starts to squash the voice — a finished, dense vocal without guessing, ready for mastering or delivery.',

@@ -34,7 +34,10 @@ test('the shape holds: copy, a search description, the overview and its features
     for (const k of ['eyebrow', 'headline', 'description']) assert.equal(typeof p[k], 'string', `${id}.${k}`)
     assert.ok(p.description.length <= 160, `${id}: description is ${p.description.length} characters (search results cut at ~160)`)
     assert.ok(Array.isArray(p.pitch) && p.pitch.length >= 1 && p.pitch.length <= 2, `${id}.pitch`)
-    assert.ok(Array.isArray(p.overview) && p.overview.length === 2, `${id}.overview: design 3a is a lead paragraph and one more`)
+    assert.equal(typeof p.overviewTitle, 'string', `${id}.overviewTitle`)
+    assert.ok(p.overviewTitle.length <= 48 && !/[.]$/.test(p.overviewTitle) && p.overviewTitle !== 'Overview',
+      `${id}.overviewTitle: a short line of its own, no full stop`)
+    assert.ok(Array.isArray(p.overview) && p.overview.length === 2, `${id}.overview: design 3b is a lead paragraph and one more`)
     assert.ok(Array.isArray(p.features) && p.features.length >= 10 && p.features.length <= 12, `${id}.features: 10–12 items (owner, November 2026)`)
     assert.equal(new Set(p.features.map(f => f.title)).size, p.features.length, `${id}: a feature title is listed twice`)
     for (const f of p.features) {

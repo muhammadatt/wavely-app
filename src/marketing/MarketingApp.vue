@@ -4,8 +4,8 @@
  *
  * A product page per effect, laid out like a commercial plugin's: the hero with
  * the faceplate, "Hear it" (before / after on real material, `ABPlayer` —
- * the audio comes first, owner, November 2026), the Overview (design 3a: a
- * centred lead over a numbered list of features), the interactive screenshot
+ * the audio comes first, owner, November 2026), the Overview (design 3b: a
+ * reading column over a numbered list of features, on the shared left edge), the interactive screenshot
  * (`PanelTour`), the facts and a call to open the editor. It renders `src/content/marketing/<id>.js`, borrows
  * the control descriptions and screenshots from the help pages, and imports
  * nothing from the editor.
@@ -139,10 +139,12 @@ onMounted(() => {
         <ABPlayer :samples="samples" :name="title" :try-href="tryHref" />
       </section>
 
-      <!-- Design 3a (owner, November 2026): a centred lead over a numbered two-column list. -->
+      <!-- Design 3b (owner, November 2026): on the page's left edge like every other
+           section — a reading column, then the numbered list at full width. 3a centred
+           it, the one section off the shared grid. The heading is the page's own line. -->
       <section v-if="page.overview?.length || page.features?.length" class="mk-section mk-overview">
+        <h2 class="mk-h2">{{ page.overviewTitle ?? 'Overview' }}</h2>
         <div class="mk-overview-head">
-          <h2 class="mk-h2">Overview</h2>
           <p
             v-for="(p, i) in page.overview" :key="i"
             class="mk-overview-text" :class="{ 'mk-overview-text--lead': i === 0 }"
@@ -318,21 +320,17 @@ a { color: inherit; }
 
 .mk-overview-head {
   max-width: 720px;
-  margin: 0 auto;
+  margin-top: 20px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  text-align: center;
+  gap: 18px;
 }
 .mk-overview-text { margin: 0; font-size: 16px; line-height: 1.7; color: var(--mk-soft); text-wrap: pretty; }
 .mk-overview-text--lead { font-size: 18px; line-height: 1.6; color: var(--mk-text); }
 .mk-features {
   list-style: none;
-  /* Centred under the lead and no wider than reads as one block with it:
-     full page width left the list's right edge ragged against the centred text. */
-  max-width: 960px;
-  margin: 48px auto 0;
+  /* Full content width, so its edges line up with the player above and the tour below. */
+  margin: 44px 0 0;
   padding: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

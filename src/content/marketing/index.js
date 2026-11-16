@@ -26,12 +26,15 @@
  *   pitch      string[]  1 short paragraph under it (the hero is a glance)
  *   description string   ≤ 160 characters, for <meta name="description"> and
  *                        social cards. Required: it is what a search result shows
- *   overview   string[]  The OVERVIEW section, exactly 2 paragraphs, laid out
- *                        as design 3a (`docs/design/marketing/Overview_Options.dc.html`, owner,
- *                        November 2026): centred, the
- *                        first a brighter lead, the second softer. Short:
- *                        what it is and what it is modelled on, then what it
- *                        adds
+ *   overviewTitle string The OVERVIEW section's heading: a short line of the
+ *                        page's own (`A modern take on a studio classic`), not
+ *                        the word "Overview" (owner, November 2026)
+ *   overview   string[]  Its text, exactly 2 paragraphs, laid out as design 3b
+ *                        (`docs/design/marketing/Overview_Options.dc.html`,
+ *                        owner, November 2026): a 720 px reading column on the
+ *                        page's left edge, the first a brighter lead, the
+ *                        second softer. Short: what it is and what it is
+ *                        modelled on, then what it adds
  *   features   [{ title, text }]  The numbered list under it, two columns,
  *                        10–12 items (owner, November 2026): a title of a few words and a one-line
  *                        description in lower case with no full stop
