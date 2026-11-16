@@ -23,12 +23,10 @@ function apply() {
       dispatch(getOperation('trim'), { quick: true })
       break
     case "before":
-      performTrimBefore()
-      showToast("Removed before selection")
+      if (performTrimBefore()) showToast("Removed before selection")
       break
     case "after":
-      performTrimAfter()
-      showToast("Removed after selection")
+      if (performTrimAfter()) showToast("Removed after selection")
       break
   }
 }

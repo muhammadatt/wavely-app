@@ -6,7 +6,7 @@ import { adjustVolumeRegion, computePeakCache } from '../../audio/processing.js'
 
 const {
   state, appState, hasSelection, getAudioContext, replaceRegion, setPeakCache,
-  startProcessing, endProcessing, showToast,
+  startProcessing, endProcessing, showToast, editBlockedByProcessing,
 } = useEditorState()
 
 const gainDb = ref(0)
@@ -18,7 +18,7 @@ function onGainInput() {
 }
 
 async function applyVolume() {
-  if (!hasSelection.value || state.isProcessing) return
+  if (!hasSelection.value || editBlockedByProcessing()) return
   const { start, end } = state.selection
   const selectionAtStart = { start, end }
 

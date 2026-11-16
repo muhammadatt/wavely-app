@@ -117,6 +117,9 @@ const ALL_CATEGORIES = [
  *   surface   'rail'      opens as a detail view inside the rail
  *             'window'    opens as a floating window
  *             'immediate' runs on click; no parameters, so nothing opens
+ *   edits     true for an instant form that changes the timeline (Cut, Paste,
+ *             Trim, Silence): dead while the file renders an apply, which would
+ *             splice its result into a timeline that moved under it
  *   quick     optional `editor => …` the right-click menu runs INSTEAD of opening
  *             the rail view (Trim = trim to selection, Silence), so those two act
  *             like Cut / Copy there. The rail and palette still open the panel
@@ -167,11 +170,11 @@ const ALL_OPERATIONS = [
     group: 'Clipboard',
     icon: 'cut',
     keywords: ['clipboard', 'remove', 'delete', 'ctrl+x'],
+    edits: true,
     requires: 'selection',
     surface: 'immediate',
     action: editor => {
-      editor.performCut()
-      editor.showToast('Cut to clipboard')
+      if (editor.performCut()) editor.showToast('Cut to clipboard')
     },
   },
   {
@@ -197,11 +200,11 @@ const ALL_OPERATIONS = [
     group: 'Clipboard',
     icon: 'paste',
     keywords: ['clipboard', 'insert', 'ctrl+v'],
+    edits: true,
     requires: 'clipboard',
     surface: 'immediate',
     action: editor => {
-      editor.performPaste(editor.state.playhead)
-      editor.showToast('Pasted at playhead')
+      if (editor.performPaste(editor.state.playhead)) editor.showToast('Pasted at playhead')
     },
   },
   {
@@ -224,12 +227,12 @@ const ALL_OPERATIONS = [
     group: 'Arrange',
     icon: 'trim',
     keywords: ['crop', 'cut', 'keep', 'remove', 'outside', 'inside'],
+    edits: true,
     requires: 'selection',
     surface: 'rail',
     component: TrimPanel,
     quick: editor => {
-      editor.performTrimToSelection()
-      editor.showToast('Trimmed to selection')
+      if (editor.performTrimToSelection()) editor.showToast('Trimmed to selection')
     },
   },
   {
@@ -254,12 +257,12 @@ const ALL_OPERATIONS = [
     group: 'Arrange',
     icon: 'silence',
     keywords: ['mute', 'blank', 'quiet', 'erase'],
+    edits: true,
     requires: 'selection',
     surface: 'rail',
     component: SilencePanel,
     quick: editor => {
-      editor.performSilence()
-      editor.showToast('Region silenced')
+      if (editor.performSilence()) editor.showToast('Region silenced')
     },
   },
 

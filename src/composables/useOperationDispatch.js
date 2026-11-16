@@ -34,8 +34,11 @@ export function useOperationDispatch() {
    * selection, and made "needs a selection" look the same as "can't click this".
    */
   function isDisabled(op, { quick = false } = {}) {
-    if (quick && op?.quick) return !isAvailable(op)
-    return op?.surface === 'immediate' && !isAvailable(op)
+    const instant = (quick && op?.quick) || op?.surface === 'immediate'
+    if (!instant) return false
+    // An edit is dead while the file renders an apply (registry `edits`); the
+    // editor refuses it anyway, so an enabled row would only answer with a toast.
+    return !isAvailable(op) || (!!op.edits && !!editor.state.isProcessing)
   }
 
   /** Why an operation can't run, for the notice shown in its panel. */
@@ -56,6 +59,17 @@ export function useOperationDispatch() {
    * window without a selection is fine and arguably useful, because the panel
    * explains what's missing. Running a verb without one is just a no-op.
    */
+  /**
+   * An edit (registry `edits`) while the file renders an apply: refused here,
+   * so dispatch answers false and a caller such as the command palette stays
+   * open instead of closing as if the edit ran. The editor's own guard does
+   * the refusing, so the "wait" toast still explains it — a panel's Apply
+   * (Trim's default mode) dispatches too and is not greyed out.
+   */
+  function refusedWhileRendering(op) {
+    return !!op.edits && editor.editBlockedByProcessing()
+  }
+
   function dispatch(op, { quick = false } = {}) {
     if (!op) return false
 
@@ -63,13 +77,13 @@ export function useOperationDispatch() {
     // selection bar, a panel's default mode) rather than its panel. Ops without
     // one fall through to their normal surface.
     if (quick && op.quick) {
-      if (!isAvailable(op)) return false
+      if (!isAvailable(op) || refusedWhileRendering(op)) return false
       op.quick(editor)
       return true
     }
 
     if (op.surface === 'immediate') {
-      if (!isAvailable(op)) return false
+      if (!isAvailable(op) || refusedWhileRendering(op)) return false
       op.action?.(editor)
       return true
     }

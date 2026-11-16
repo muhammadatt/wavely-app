@@ -13,12 +13,10 @@ const requirementMet = computed(() => mode.value !== 'selection' || hasSelection
 
 function apply() {
   if (mode.value === 'playhead') {
-    performSplit()
-    showToast('Split at playhead')
+    if (performSplit()) showToast('Split at playhead')
   } else {
     if (!hasSelection.value) return
-    performSplitAtSelectionEdges()
-    showToast('Split at selection edges')
+    if (performSplitAtSelectionEdges()) showToast('Split at selection edges')
   }
 }
 </script>
