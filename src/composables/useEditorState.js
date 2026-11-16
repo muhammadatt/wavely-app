@@ -257,16 +257,18 @@ export class DocumentSwitchedError extends Error {
 }
 
 /**
- * The file an apply was pinned to was EDITED while it rendered (a Trim, Cut,
- * Undo…). The apply would splice its render at the times it captured into a
- * timeline that has since moved, so it is refused the same way a file switch
- * is. A subclass, so every apply that already shows a DocumentSwitchedError's
- * message shows this one too.
+ * The timeline of the file an apply was pinned to CHANGED while it rendered —
+ * an edit (a Trim, Cut, Undo…) or another apply's commit (a second Apply
+ * clicked while the first was still measuring, before startProcessing). The
+ * apply would splice its render at the times it captured into a timeline that
+ * has since moved, so it is refused the same way a file switch is. "Changed",
+ * not "edited": the user may have made no edit at all. A subclass, so every
+ * apply that already shows a DocumentSwitchedError's message shows this one.
  */
 export class DocumentEditedError extends DocumentSwitchedError {
   constructor(what) {
     super(what)
-    this.message = `${what} was not applied: the file was edited while it rendered`
+    this.message = `${what} was not applied: the file changed while it rendered`
     this.name = 'DocumentEditedError'
   }
 }

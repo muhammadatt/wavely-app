@@ -19,6 +19,10 @@ const {
 } = useEditorState()
 
 // The bar is always mounted, so every readout has to survive selection === null.
+// Cut, Paste, Silence and Trim change the timeline, which the editor refuses
+// while this file renders an apply; disabled then, like the header's Undo.
+const busy = computed(() => !!state.isProcessing)
+
 const EMPTY = "—"
 
 function formatTime(seconds) {
@@ -137,7 +141,7 @@ function handleTrim() {
       <BaseButton
         size="xs" color="ghost" :pill="false"
         class="whitespace-nowrap font-semibold"
-        :disabled="!hasClipboard"
+        :disabled="!hasClipboard || busy"
         title="Paste at playhead (Ctrl+V)"
         @click="handlePaste">
         <svg
@@ -152,7 +156,7 @@ function handleTrim() {
       <BaseButton
         size="xs" color="ghost" :pill="false"
         class="whitespace-nowrap font-semibold"
-        :disabled="!hasSelection"
+        :disabled="!hasSelection || busy"
         title="Replace selection with silence"
         @click="handleSilence">
         <svg
@@ -168,7 +172,7 @@ function handleTrim() {
       <BaseButton
         size="xs" color="ghost" :pill="false"
         class="whitespace-nowrap font-semibold"
-        :disabled="!hasSelection"
+        :disabled="!hasSelection || busy"
         title="Cut selection to clipboard (Ctrl+X or Del)"
         @click="handleCut">
         <svg
@@ -186,7 +190,7 @@ function handleTrim() {
       <BaseButton
         size="xs" color="ghost" :pill="false"
         class="whitespace-nowrap font-semibold"
-        :disabled="!hasSelection"
+        :disabled="!hasSelection || busy"
         title="Trim to selection — keep only what's selected"
         @click="handleTrim">
         <svg

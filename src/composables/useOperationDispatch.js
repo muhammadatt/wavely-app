@@ -34,8 +34,11 @@ export function useOperationDispatch() {
    * selection, and made "needs a selection" look the same as "can't click this".
    */
   function isDisabled(op, { quick = false } = {}) {
-    if (quick && op?.quick) return !isAvailable(op)
-    return op?.surface === 'immediate' && !isAvailable(op)
+    const instant = (quick && op?.quick) || op?.surface === 'immediate'
+    if (!instant) return false
+    // An edit is dead while the file renders an apply (registry `edits`); the
+    // editor refuses it anyway, so an enabled row would only answer with a toast.
+    return !isAvailable(op) || (!!op.edits && !!editor.state.isProcessing)
   }
 
   /** Why an operation can't run, for the notice shown in its panel. */
