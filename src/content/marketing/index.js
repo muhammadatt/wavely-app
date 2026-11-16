@@ -31,8 +31,8 @@
  *                        the word "Overview" (owner, November 2026)
  *   overview   string[]  Its text, exactly 2 paragraphs, laid out as design 3b
  *                        (`docs/design/marketing/Overview_Options.dc.html`,
- *                        owner, November 2026): a 720 px reading column on the
- *                        page's left edge, the first a brighter lead, the
+ *                        owner, November 2026): a reading column on the page's
+ *                        left edge, as wide as the list's left column, the first a brighter lead, the
  *                        second softer. Short: what it is and what it is
  *                        modelled on, then what it adds
  *   features   [{ title, text }]  The numbered list under it, two columns,

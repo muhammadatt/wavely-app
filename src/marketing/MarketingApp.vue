@@ -140,7 +140,8 @@ onMounted(() => {
       </section>
 
       <!-- Design 3b (owner, November 2026): on the page's left edge like every other
-           section — a reading column, then the numbered list at full width. 3a centred
+           section — a reading column as wide as the list's left column, then the
+           numbered list at full width. 3a centred
            it, the one section off the shared grid. The heading is the page's own line. -->
       <section v-if="page.overview?.length || page.features?.length" class="mk-section mk-overview">
         <h2 class="mk-h2">{{ page.overviewTitle ?? 'Overview' }}</h2>
@@ -318,8 +319,12 @@ a { color: inherit; }
 .mk-h2 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.01em; }
 .mk-lede { margin: 8px 0 24px; font-size: 15px; color: var(--mk-soft); }
 
+/* The reading column is exactly the feature list's LEFT column (two equal columns
+   and one gap), so the text ends where that column ends and the section reads as
+   one grid. A fixed 720 px lined up with nothing on the page (owner). */
+.mk-overview { --mk-col-gap: 48px; }
 .mk-overview-head {
-  max-width: 720px;
+  max-width: calc((100% - var(--mk-col-gap)) / 2);
   margin-top: 20px;
   display: flex;
   flex-direction: column;
@@ -334,7 +339,7 @@ a { color: inherit; }
   padding: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 48px;
+  column-gap: var(--mk-col-gap);
   border-top: 1px solid var(--mk-hairline);
 }
 .mk-feature {
@@ -427,6 +432,7 @@ a { color: inherit; }
   .mk-headline { font-size: 19px; }
   .mk-related { grid-template-columns: 1fr; }
   .mk-features { grid-template-columns: 1fr; margin-top: 36px; }
+  .mk-overview-head { max-width: none; }
   .mk-overview-text--lead { font-size: 17px; }
 }
 </style>
