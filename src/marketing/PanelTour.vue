@@ -9,6 +9,9 @@
  * the manifest, CSS pixels on panel.jpg), so a re-laid-out panel moves its
  * hotspots with it the next time the shots are taken. Positions are percentages
  * of the image, so the overlay scales with it at any width.
+ *
+ * The tour is AMBER (`--pt-accent`, the editor's selected-thing colour), not the
+ * page's cyan accent (owner, November 2026).
  */
 import { computed, ref } from 'vue'
 

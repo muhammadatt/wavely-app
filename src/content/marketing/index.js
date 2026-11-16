@@ -31,7 +31,8 @@
  *                        the word "Overview" (owner, November 2026)
  *   overview   string[]  Its text, exactly 2 paragraphs, the first a brighter
  *                        lead, the second softer; heading, text and list share
- *                        one centred 960 px block (owner, November 2026). Short:
+ *                        one centred 960 px block, heading and text centred
+ *                        line by line (owner, November 2026). Short:
  *                        what it is and what it is modelled on, then what it adds
  *   features   [{ title, text }]  The numbered list under it, two columns,
  *                        10–12 items (owner, November 2026): a title of a few words and a one-line

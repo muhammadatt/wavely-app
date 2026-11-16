@@ -4,8 +4,8 @@
  *
  * A product page per effect, laid out like a commercial plugin's: the hero with
  * the faceplate, "Hear it" (before / after on real material, `ABPlayer` —
- * the audio comes first, owner, November 2026), the Overview (design 3b: a
- * reading column over a numbered list of features, on the shared left edge), the interactive screenshot
+ * the audio comes first, owner, November 2026), the Overview (a centred
+ * heading and two paragraphs over a numbered list of features, one 960 px block), the interactive screenshot
  * (`PanelTour`), the facts and a call to open the editor. It renders `src/content/marketing/<id>.js`, borrows
  * the control descriptions and screenshots from the help pages, and imports
  * nothing from the editor.
@@ -140,8 +140,8 @@ onMounted(() => {
       </section>
 
       <!-- Owner, November 2026: the heading, both paragraphs and the numbered list
-           share ONE centred 960 px block (3b's left-edge column, as wide as the
-           list's left column, read as too weird). The heading is the page's own line. -->
+           share ONE centred 960 px block, the heading and paragraphs centred line by
+           line (3b's left-edge column read as too weird). The heading is the page's own line. -->
       <section v-if="page.overview?.length || page.features?.length" class="mk-section mk-overview">
         <div class="mk-overview-head">
           <h2 class="mk-h2">{{ page.overviewTitle ?? 'Overview' }}</h2>
@@ -318,7 +318,8 @@ a { color: inherit; }
 .mk-h2 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.01em; }
 .mk-lede { margin: 8px 0 24px; font-size: 15px; color: var(--mk-soft); }
 
-/* One centred 960 px block: heading, text and list share both edges (owner). */
+/* One centred 960 px block: heading, text and list share both edges; the heading
+   and paragraphs are centred line by line (owner). */
 .mk-overview { --mk-col-gap: 48px; max-width: 960px; margin-left: auto; margin-right: auto; }
 .mk-overview-head {
   margin-top: 20px;
