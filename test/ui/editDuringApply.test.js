@@ -202,3 +202,28 @@ test('the right-click menu greys out edits while the file renders, not Copy', ()
   assert.equal(isDisabled(trim), false)
   editor.endProcessing(docId)
 })
+
+// The command palette closes when dispatch reports success; a refused edit
+// must report false so it stays open (Copilot review on #204).
+test('dispatch reports a refused edit as not run, and still explains it', () => {
+  const editor = useEditorState()
+  const { docId } = editor.createDocument('palette.wav', fakeBuffer())
+  editor.state.selection = { start: 1, end: 2 }
+  const { dispatch } = useOperationDispatch()
+  let ran = 0
+  const cut = { surface: 'immediate', requires: 'selection', edits: true, action: () => { ran++ } }
+  const trim = { surface: 'rail', requires: 'selection', edits: true, quick: () => { ran++ } }
+  const copy = { surface: 'immediate', requires: 'selection', action: () => { ran++ } }
+
+  editor.startProcessing('Rendering', docId)
+  assert.equal(dispatch(cut), false)
+  assert.equal(dispatch(trim, { quick: true }), false)
+  assert.equal(ran, 0)
+  assert.equal(lastToast(editor), 'Wait for the current process to finish')
+  assert.equal(dispatch(copy), true, 'Copy only reads')
+  editor.endProcessing(docId)
+
+  assert.equal(dispatch(cut), true)
+  assert.equal(dispatch(trim, { quick: true }), true)
+  assert.equal(ran, 3)
+})
