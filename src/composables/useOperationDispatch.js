@@ -7,6 +7,7 @@ import { useWindows } from './useWindows.js'
  * Every surface that can launch an operation — the rail's list, the command
  * palette, the waveform context menu — goes through here, so "what does
  * clicking this do" has exactly one answer no matter where the click came from.
+ * `{ quick: true }` asks for an op's instant form (registry `quick`).
  */
 export function useOperationDispatch() {
   const editor = useEditorState()
@@ -32,7 +33,8 @@ export function useOperationDispatch() {
    * Dimming those too meant every Effects row looked broken until you'd made a
    * selection, and made "needs a selection" look the same as "can't click this".
    */
-  function isDisabled(op) {
+  function isDisabled(op, { quick = false } = {}) {
+    if (quick && op?.quick) return !isAvailable(op)
     return op?.surface === 'immediate' && !isAvailable(op)
   }
 
@@ -54,8 +56,17 @@ export function useOperationDispatch() {
    * window without a selection is fine and arguably useful, because the panel
    * explains what's missing. Running a verb without one is just a no-op.
    */
-  function dispatch(op) {
+  function dispatch(op, { quick = false } = {}) {
     if (!op) return false
+
+    // `quick`: the caller wants the op's instant form (right-click menu, the
+    // selection bar, a panel's default mode) rather than its panel. Ops without
+    // one fall through to their normal surface.
+    if (quick && op.quick) {
+      if (!isAvailable(op)) return false
+      op.quick(editor)
+      return true
+    }
 
     if (op.surface === 'immediate') {
       if (!isAvailable(op)) return false

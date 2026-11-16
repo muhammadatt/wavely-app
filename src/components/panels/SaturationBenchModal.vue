@@ -189,7 +189,8 @@ async function applyAndClose() {
     :presets="presets"
     :presets-disabled="!sbPreview"
     presets-disabled-hint="Turn Saturation Workbench on to use presets"
-    brand-lead="SATURATION WORKBENCH"
+    brand-lead="SATURATION"
+    brand-tail="WORKBENCH"
     :engaged="sbPreview"
     show-delta
     :delta="sbDelta"

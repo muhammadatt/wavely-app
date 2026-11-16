@@ -14,24 +14,35 @@ import Icon from './ui/Icon.vue'
  * a whole new surface costs one component and no new knowledge of operations.
  */
 const { state, closeContextMenu } = useEditorState()
-const { dispatch, isDisabled } = useOperationDispatch()
+const { dispatch, isDisabled: baseDisabled } = useOperationDispatch()
+
+// An op with a `quick` action acts instantly here like Cut / Copy, so it is dead
+// without its precondition just as they are.
+const isQuick = op => typeof op.quick === 'function'
+const isDisabled = op => baseDisabled(op, { quick: true })
 
 const menuEl = ref(null)
 // Start at the click point; corrected after mount once the size is known.
 const pos = ref({ x: state.contextMenu?.x ?? 0, y: state.contextMenu?.y ?? 0 })
 
+// Order: the clipboard verbs and the instant edits (Trim, Silence) in one block
+// above the fold, then whatever still opens a panel (Split) alone below.
 const groups = computed(() => {
   const out = []
   const byName = new Map()
-  for (const op of operationsIn('edit')) {
-    let bucket = byName.get(op.group)
+  const place = (name, op) => {
+    let bucket = byName.get(name)
     if (!bucket) {
-      bucket = { group: op.group, operations: [] }
-      byName.set(op.group, bucket)
+      bucket = { group: name, operations: [] }
+      byName.set(name, bucket)
       out.push(bucket)
     }
     bucket.operations.push(op)
   }
+  const ops = operationsIn('edit')
+  for (const op of ops) if (op.group === 'Clipboard') place('Clipboard', op)
+  for (const op of ops) if (op.group !== 'Clipboard' && isQuick(op)) place('Clipboard', op)
+  for (const op of ops) if (op.group !== 'Clipboard' && !isQuick(op)) place(op.group, op)
   return out
 })
 
@@ -74,7 +85,7 @@ function onOutsidePointer(e) {
 function run(op) {
   if (isDisabled(op)) return
   closeContextMenu()
-  dispatch(op)
+  dispatch(op, { quick: true })
 }
 
 function onKeydown(e) {
@@ -110,7 +121,7 @@ function onKeydown(e) {
         <Icon :name="op.icon" :size="14" class="shrink-0" />
         <span class="text-[12px] font-semibold">{{ op.label }}</span>
         <Icon
-          v-if="op.surface !== 'immediate'"
+          v-if="op.surface !== 'immediate' && !isQuick(op)"
           name="chevronRight" :size="13" :stroke-width="2.5"
           class="ml-auto shrink-0 opacity-45"
         />

@@ -1,15 +1,17 @@
 <script setup>
 import { ref } from "vue"
 import { useEditorState } from "../../composables/useEditorState.js"
+import { useOperationDispatch } from '../../composables/useOperationDispatch.js'
+import { getOperation } from '../../ui/registry.js'
 import ApplyAction from '../ui/ApplyAction.vue'
 
 const {
   hasSelection,
-  performTrimToSelection,
   performTrimBefore,
   performTrimAfter,
   showToast,
 } = useEditorState()
+const { dispatch } = useOperationDispatch()
 
 const mode = ref("to-selection")
 
@@ -17,7 +19,8 @@ function apply() {
   if (!hasSelection.value) return
   switch (mode.value) {
     case "to-selection":
-      if (performTrimToSelection()) showToast("Trimmed to selection")
+      // The registry's `quick` owns this mode's action and toast.
+      dispatch(getOperation('trim'), { quick: true })
       break
     case "before":
       if (performTrimBefore()) showToast("Removed before selection")

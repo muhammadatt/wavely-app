@@ -63,7 +63,8 @@ async function applyNormalize(useSelection = true) {
     :width="380"
     :accent="ACCENT"
     design="modula"
-    brand-lead="PEAK NORMALIZE"
+    brand-lead="PEAK"
+    brand-tail="NORMALIZE"
     :show-engage="false"
     show-preview
     :previewable="false"

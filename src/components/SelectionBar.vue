@@ -1,14 +1,16 @@
 <script setup>
 import { computed } from "vue"
 import { useEditorState } from "../composables/useEditorState.js"
+import { useOperationDispatch } from "../composables/useOperationDispatch.js"
+import { getOperation } from "../ui/registry.js"
 import BaseButton from "./ui/BaseButton.vue"
+
+const { dispatch } = useOperationDispatch()
 
 const {
   state,
   hasSelection,
   hasClipboard,
-  performSilence,
-  performTrimToSelection,
   performCut,
   performCopy,
   performPaste,
@@ -49,16 +51,14 @@ function handlePaste() {
   if (performPaste(state.playhead)) showToast("Pasted at playhead")
 }
 
+// Silence and Trim to selection run the registry's `quick` action, so the bar,
+// the Trim / Silence panels and the right-click menu share one action and toast.
 function handleSilence() {
-  if (!hasSelection.value) return
-  if (performSilence()) showToast("Region silenced")
+  dispatch(getOperation('silence'), { quick: true })
 }
 
-// Mirrors the Trim panel's "Trim to selection" mode — same wording, same toast,
-// so the shortcut and the panel don't read as two different operations.
 function handleTrim() {
-  if (!hasSelection.value) return
-  if (performTrimToSelection()) showToast("Trimmed to selection")
+  dispatch(getOperation('trim'), { quick: true })
 }
 </script>
 

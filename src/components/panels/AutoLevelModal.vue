@@ -112,7 +112,8 @@ async function applyAndClose() {
     :width="560"
     :accent="ACCENT"
     design="modula"
-    brand-lead="AUTO LEVELER"
+    brand-lead="AUTO"
+    brand-tail="LEVELER"
     :show-engage="false"
     offline
     show-apply

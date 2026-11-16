@@ -155,7 +155,8 @@ async function applyAndClose() {
     :width="700"
     :accent="ACCENT"
     design="modula"
-    brand-lead="HUM REMOVER"
+    brand-lead="HUM"
+    brand-tail="REMOVER"
     :engaged="humPreview"
     show-preview
     previewable
