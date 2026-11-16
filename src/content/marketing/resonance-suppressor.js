@@ -28,8 +28,13 @@ export default {
       id: 'voice',
       title: 'Harsh, ringing voice',
       text: 'The harsh and nasal moments smooth out; the voice keeps its tone everywhere else.',
-      settings: {},
-      setting: 'Factory default',
+      settings: {
+        focus: {
+          global: { depth: 1, sharpness: 0.8, selectivity: 20, maxCut: 36, protect: false, protectCeilHz: 5000 },
+          nodes: [{ id: 'n1', shape: 'bell', hz: 2600, spanOct: 1, biasDb: 6, enabled: true }],
+        },
+      },
+      setting: 'One Focus node: Bell at 2.6 kHz, Amount +6 dB, Width 1 oct; everything else at default',
       brief: '20–30 s of narration with a harsh or nasal ring on some words, or a boxy room. Untreated.',
     },
   ],
