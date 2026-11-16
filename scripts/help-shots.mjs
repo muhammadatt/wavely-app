@@ -10,6 +10,8 @@
  * writes:
  *
  *   public/help/shots/<slug>/panel.jpg      the whole window (the "Interface" image)
+ *   public/help/shots/<slug>/face.jpg       the faceplate alone, no header / footer
+ *                                           (the marketing pages' product shot)
  *   public/help/shots/<slug>/<shot>.png     one crop per control that names a `shot`
  *   src/content/help/shots/<id>.json        the manifest the help page reads (and
  *                                           each control's box on the panel, `at`,
@@ -164,6 +166,21 @@ try {
     const box = await frame.boundingBox()
     await page.screenshot({ path: join(outDir, 'panel.jpg'), clip: box, type: 'jpeg', quality: 88 })
     manifest.panel = { src: `/help/shots/${slug}/panel.jpg`, w: Math.round(box.width), h: Math.round(box.height) }
+
+    // The faceplate alone, without the window's header (name, presets, ON, ✕)
+    // and footer (selection readout, Preview, Apply): the marketing page's
+    // product shot. `x` / `y` are its offset inside panel.jpg, so a control's
+    // `at` box maps onto it by subtraction.
+    const faceEl = frame.locator('.win-face').first()
+    const faceBox = (await faceEl.count()) ? await faceEl.boundingBox() : null
+    if (faceBox) {
+      await page.screenshot({ path: join(outDir, 'face.jpg'), clip: faceBox, type: 'jpeg', quality: 90 })
+      manifest.face = {
+        src: `/help/shots/${slug}/face.jpg`,
+        w: Math.round(faceBox.width), h: Math.round(faceBox.height),
+        x: Math.round(faceBox.x - box.x), y: Math.round(faceBox.y - box.y),
+      }
+    }
 
     const missing = []
     for (const c of entry.controls) {

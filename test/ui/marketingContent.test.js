@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 import {
-  MARKETING, marketingSlug, marketingIdForSlug, marketingUrl, publishedMarketingIds,
+  MARKETING, marketingSlug, marketingIdForSlug, marketingUrl, publishedMarketingIds, spotOnFace,
 } from '../../src/content/marketing/index.js'
 import { HELP, HELP_META, helpSlug } from '../../src/content/help/index.js'
 import { FEATURES } from '../../src/auth/plans.js'
@@ -35,7 +35,7 @@ test('the shape holds: copy, a search description, the overview and its features
     assert.ok(p.description.length <= 160, `${id}: description is ${p.description.length} characters (search results cut at ~160)`)
     assert.ok(Array.isArray(p.pitch) && p.pitch.length >= 1 && p.pitch.length <= 2, `${id}.pitch`)
     assert.ok(Array.isArray(p.overview) && p.overview.length === 2, `${id}.overview: design 3a is a lead paragraph and one more`)
-    assert.ok(Array.isArray(p.features) && p.features.length >= 6 && p.features.length <= 16, `${id}.features`)
+    assert.ok(Array.isArray(p.features) && p.features.length >= 10 && p.features.length <= 12, `${id}.features: 10–12 items (owner, November 2026)`)
     assert.equal(new Set(p.features.map(f => f.title)).size, p.features.length, `${id}: a feature title is listed twice`)
     for (const f of p.features) {
       assert.ok(f && typeof f.title === 'string' && typeof f.text === 'string', `${id}: a feature is { title, text }`)
@@ -53,6 +53,7 @@ test('every hotspot is a documented control with a box on the screenshot', () =>
   for (const [id, p] of Object.entries(MARKETING)) {
     const shots = json(`src/content/help/shots/${id}.json`)
     assert.ok(existsSync(join(ROOT, 'public', shots.panel.src)), `${id}: panel screenshot missing`)
+    assert.ok(shots.face && existsSync(join(ROOT, 'public', shots.face.src)), `${id}: faceplate crop missing — re-run npm run help:shots -- ${id}`)
     const seen = new Set()
     for (const h of p.hotspots) {
       assert.ok(!seen.has(h.shot), `${id}: hotspot ${h.shot} twice`)
@@ -60,8 +61,9 @@ test('every hotspot is a documented control with a box on the screenshot', () =>
       assert.ok(HELP[id].controls.some(c => c.shot === h.shot), `${id}: no help control carries shot ${h.shot}`)
       const at = shots.controls[h.shot]?.at
       assert.ok(at, `${id}: ${h.shot} has no box — re-run npm run help:shots -- ${id}`)
-      assert.ok(at.x >= 0 && at.y >= 0 && at.x + at.w <= shots.panel.w + 1 && at.y + at.h <= shots.panel.h + 1,
-        `${id}: ${h.shot}'s box falls outside the panel`)
+      // The page shows the faceplate alone (face.jpg), so a hotspot must lie on it,
+      // not in the window's header or footer.
+      assert.ok(spotOnFace(at, shots.face ?? { ...shots.panel, x: 0, y: 0 }), `${id}: ${h.shot}'s box falls off the faceplate`)
     }
   }
 })
@@ -122,4 +124,12 @@ test('every sample’s try-out link opens that sample in the editor, and nothing
   // A clip is a name in the page's own list, never a path the editor would fetch.
   assert.equal(tryOutFromSearch('?try=voxpressor&clip=..%2F..%2Fsecret'), null)
   assert.equal(tryOutFromSearch('?try=opto-smooth'), null, 'the window id is not a slug')
+})
+
+test('a control box maps onto the faceplate crop: clamped at the edge, dropped when it is off it', () => {
+  const face = { x: 0, y: 56, w: 868, h: 372 }
+  assert.deepEqual(spotOnFace({ x: 260, y: 54, w: 349, h: 223 }, face), { x: 260, y: 0, w: 349, h: 221 })
+  assert.deepEqual(spotOnFace({ x: 60, y: 136, w: 10, h: 10 }, face), { x: 60, y: 80, w: 10, h: 10 })
+  assert.equal(spotOnFace({ x: 382, y: 15, w: 30, h: 30 }, face), null, 'a header control is not on the face')
+  assert.equal(spotOnFace({ x: 10, y: 40, w: 20, h: 20 }, face), null, 'mostly off the face')
 })

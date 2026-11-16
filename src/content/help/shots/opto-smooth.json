@@ -115,5 +115,12 @@
         "h": 105
       }
     }
+  },
+  "face": {
+    "src": "/help/shots/la-vintage-2a/face.jpg",
+    "w": 868,
+    "h": 372,
+    "x": 0,
+    "y": 56
   }
 }

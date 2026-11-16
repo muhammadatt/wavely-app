@@ -38,6 +38,20 @@ const stack = computed(() => {
   return z
 })
 
+/**
+ * Where a box's number goes. Large controls (knobs, meters) carry it inside
+ * their top-left corner. A short box — a lamp, a switch, a one-line setter —
+ * would be covered by it, so its badge sits just outside its LEFT edge,
+ * vertically centred; or inside on the left, centred, when the box starts at
+ * the image's edge and there is no room outside.
+ */
+const SHORT_BOX_PX = 48
+const SIDE_ROOM_PX = 26
+function badgePlace(s) {
+  if (s.at.h >= SHORT_BOX_PX) return 'corner'
+  return s.at.x >= SIDE_ROOM_PX ? 'side' : 'inside'
+}
+
 function box(s, i) {
   const { w, h } = props.image
   return {
@@ -70,7 +84,7 @@ function box(s, i) {
           @focus="active = i"
           @click="active = i"
         >
-          <span class="pt-badge" aria-hidden="true">{{ i + 1 }}</span>
+          <span class="pt-badge" :class="`pt-badge--${badgePlace(s)}`" aria-hidden="true">{{ i + 1 }}</span>
         </button>
       </div>
       <figcaption v-if="current" class="pt-caption" aria-live="polite">
@@ -134,10 +148,13 @@ function box(s, i) {
   box-shadow: 0 0 0 4px rgba(53, 211, 230, 0.15), 0 0 30px rgba(53, 211, 230, 0.25);
 }
 .pt-spot:focus-visible { outline: none; }
+/* Placed by `badgePlace`: inside a large box's corner, beside a short one. It
+   sat outside every box's corner (−9 px) and on a crowded panel landed on the
+   neighbouring control — LA Vintage 2A's Gain badge read as the meter's. */
 .pt-badge {
   position: absolute;
-  top: -9px;
-  left: -9px;
+  top: 3px;
+  left: 3px;
   min-width: 18px;
   height: 18px;
   padding: 0 4px;
@@ -148,6 +165,8 @@ function box(s, i) {
   font: 600 10px/16px 'JetBrains Mono', ui-monospace, monospace;
   text-align: center;
 }
+.pt-badge--side { top: 50%; left: auto; right: calc(100% + 4px); transform: translateY(-50%); }
+.pt-badge--inside { top: 50%; transform: translateY(-50%); }
 .pt-spot--on .pt-badge { background: var(--mk-accent); color: #06181b; border-color: var(--mk-accent); }
 
 .pt-caption {
@@ -213,5 +232,13 @@ function box(s, i) {
 @media (max-width: 900px) {
   .pt { grid-template-columns: 1fr; }
   .pt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+}
+/* Phones: fifteen numbered boxes on a 360 px image cover the controls they
+   point at, and there is no hover. Only the selected control is outlined
+   (with its number); the list below is how you move between them. */
+@media (max-width: 640px) {
+  .pt-spot:not(.pt-spot--on) { border-color: transparent; }
+  .pt-spot:not(.pt-spot--on) .pt-badge { display: none; }
+  .pt-spot--on { box-shadow: 0 0 0 3px rgba(53, 211, 230, 0.2); }
 }
 </style>

@@ -2,7 +2,7 @@ export default {
   eyebrow: 'Opto leveling amplifier',
   headline: 'Smooth, phrase-level leveling with real tube warmth.',
   pitch: [
-    'Transparent leveling for vocals and spoken word, with the valve colour the original is loved for. It runs in your browser — nothing to install.',
+    'Evens out narration, podcasts and vocals without sounding squeezed — right in your browser, nothing to install.',
   ],
   description: 'An LA-2A style opto compressor that runs in your browser: smooth phrase-level leveling, tube harmonics and auto makeup that never clips. Free to use.',
 
@@ -13,8 +13,6 @@ export default {
 
   features: [
     { title: 'Classic opto character', text: 'modelled on the electro-optical tube leveling amplifier' },
-    { title: 'Rides phrases, not syllables', text: 'smooth, program-dependent leveling' },
-    { title: 'Natural under heavy reduction', text: 'stays transparent even when it’s working hard' },
     { title: 'Input alignment', text: 'Peak Reduction does the same job at any recording level' },
     { title: 'Auto makeup', text: 'matched to the body of the voice, never past the source’s peak' },
     { title: 'Valve harmonics', text: 'musical warmth, or switch off for a clean compressor' },

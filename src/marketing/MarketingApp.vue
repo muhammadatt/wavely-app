@@ -12,7 +12,7 @@
  */
 import { computed, onMounted } from 'vue'
 import {
-  MARKETING, marketingIdForSlug, marketingPageTitle, marketingTitle, marketingUrl, publishedMarketingIds, tryOutUrl,
+  MARKETING, marketingIdForSlug, marketingPageTitle, marketingTitle, marketingUrl, publishedMarketingIds, spotOnFace, tryOutUrl,
 } from '../content/marketing/index.js'
 import { HELP, helpUrl } from '../content/help/index.js'
 import { requiredPlan } from '../auth/plans.js'
@@ -41,8 +41,10 @@ const shots = page ? SHOTS[id] ?? null : null
 
 /** Free, or the plan that unlocks Apply (preview stays free for every real-time effect). */
 const plan = page?.feature ? requiredPlan(page.feature) : 'free'
+// Price only: "runs in your browser" is the pitch's to say, and saying it twice
+// in the hero read as filler.
 const planNote = plan === 'free'
-  ? 'Free — runs in your browser'
+  ? 'Free to use'
   : 'Preview free · Apply with Pro'
 
 /** Samples that have been rendered; a listed sample with no audio yet is left out. */
@@ -60,19 +62,32 @@ const tryHref = s => tryOutUrl(id, s.id)
 const heroTry = samples.length ? tryHref(samples[0]) : '/'
 
 /** Hotspots: the help entry's control, placed by the screenshot manifest. */
+/**
+ * The product shot: the faceplate alone (`face.jpg`, no window header or
+ * footer — the selection readout and Preview / Apply read as a screen grab),
+ * falling back to the whole window for an effect shot before the crop existed.
+ * `x` / `y` are the face's offset inside the window, which the hotspot boxes
+ * (measured on the window) are shifted by.
+ */
+const shot = shots ? (shots.face ?? { ...shots.panel, x: 0, y: 0 }) : null
+
+/** Hotspots: the help entry's control, placed by the screenshot manifest on the face. */
 const spots = computed(() => {
-  if (!page || !shots) return []
+  if (!page || !shot) return []
   return (page.hotspots ?? []).flatMap((h) => {
     const control = help?.controls.find(c => c.shot === h.shot)
-    const at = shots.controls?.[h.shot]?.at
-    if (!control || !at) return []
+    const raw = shots.controls?.[h.shot]?.at
+    if (!control || !raw) return []
+    // A control in the window's header (VoxPressor's faceplate switch) is not on the face.
+    const at = spotOnFace(raw, shot)
+    if (!at) return []
     return [{ id: h.shot, label: control.label, text: h.text ?? control.text, at }]
   })
 })
 
 const index = published.map(r => ({
   id: r, title: marketingTitle(r), eyebrow: MARKETING[r].eyebrow, headline: MARKETING[r].headline,
-  href: marketingUrl(r), shot: SHOTS[r]?.panel,
+  href: marketingUrl(r), shot: SHOTS[r]?.face ?? SHOTS[r]?.panel,
 }))
 
 // The build writes the title into each page's HTML; the dev server serves one entry for all.
@@ -105,14 +120,14 @@ onMounted(() => {
           <p class="mk-headline">{{ page.headline }}</p>
           <p v-for="(p, i) in page.pitch" :key="i" class="mk-pitch">{{ p }}</p>
           <div class="mk-actions">
-            <a :href="heroTry" class="mk-cta">Try it in your browser</a>
+            <a :href="heroTry" class="mk-cta">{{ samples.length ? 'Try it on a sample' : 'Try it in your browser' }}</a>
             <a v-if="samples.length" href="#hear" class="mk-ghost">Hear it</a>
           </div>
           <p class="mk-plan" :class="{ 'mk-plan--pro': plan !== 'free' }">{{ planNote }}</p>
         </div>
-        <div v-if="shots?.panel" class="mk-hero-shot">
+        <div v-if="shot" class="mk-hero-shot">
           <img
-            :src="shots.panel.src" :width="shots.panel.w" :height="shots.panel.h"
+            :src="shot.src" :width="shot.w" :height="shot.h"
             :alt="`The ${title} faceplate`" class="mk-hero-img" draggable="false"
           />
         </div>
@@ -147,7 +162,7 @@ onMounted(() => {
       <section v-if="spots.length" class="mk-section">
         <h2 class="mk-h2">Take the tour</h2>
         <p class="mk-lede">Point at any control to see what it does.</p>
-        <PanelTour :image="shots.panel" :spots="spots" :alt="`The ${title} faceplate`" />
+        <PanelTour :image="shot" :spots="spots" :alt="`The ${title} faceplate`" />
       </section>
 
       <section class="mk-section mk-split">
@@ -314,7 +329,10 @@ a { color: inherit; }
 .mk-overview-text--lead { font-size: 18px; line-height: 1.6; color: var(--mk-text); }
 .mk-features {
   list-style: none;
-  margin: 48px 0 0;
+  /* Centred under the lead and no wider than reads as one block with it:
+     full page width left the list's right edge ragged against the centred text. */
+  max-width: 960px;
+  margin: 48px auto 0;
   padding: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

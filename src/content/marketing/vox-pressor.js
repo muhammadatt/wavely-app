@@ -3,17 +3,16 @@ export default {
   eyebrow: 'Vocal dynamics chain',
   headline: 'A finished vocal chain in one window.',
   pitch: [
-    'The classic 1176-into-LA-2A vocal chain, with de-essing and parallel density built in — dense, even, ready-to-master vocals from four knobs.',
+    'Dense, even, ready-to-master vocals from a handful of knobs, with readouts that tell you when to stop — right in your browser.',
   ],
   description: 'A 1176-into-LA-2A vocal chain with de-essing and parallel density, in one window in your browser. Measured readouts guide every knob.',
 
   overview: [
-    'The vocal chain engineers wire by hand, in one window: a fast FET stage modelled on the 1176 trims the loudest peaks, an optical stage modelled on the LA-2A levels the body of the voice, a de-esser cleans up what the compressors bring up, and a parallel copy fills in density underneath.',
+    'The vocal chain engineers wire by hand, already staged: a fast FET stage modelled on the 1176 trims the loudest peaks, an optical stage modelled on the LA-2A levels the body of the voice, a de-esser cleans up what the compressors bring up, and a parallel copy fills in density underneath.',
     'Built for narration, podcasts and dialogue. Every stage measures what it did to your selection and shows it under the meter, and the knobs’ guide colours turn amber before a stage starts to squash the voice — a finished, dense vocal without guessing, ready for mastering or delivery.',
   ],
 
   features: [
-    { title: 'The classic vocal chain', text: '1176 peaks into LA-2A leveling, already staged' },
     { title: 'Soft or hard knee', text: '4:1 for gentle peak control, 12:1 to hold them firmly' },
     { title: 'Pitch-timed release', text: 'set from your voice’s own pitch, so low voices don’t ripple' },
     { title: 'Opto body leveler', text: '10 ms of lookahead and a voice-tuned side-chain' },
@@ -23,9 +22,8 @@ export default {
     { title: 'Parallel density', text: 'an LA-2A or 1176 copy, with its own de-esser' },
     { title: 'Enhance Detail', text: 'presence without raising the peak' },
     { title: 'Automatic makeup', text: 'at every stage, each one holding the source’s peak' },
-    { title: 'Delivery output level', text: 'source peak, −1 dB for podcasts and streaming, or −3 dB for ACX' },
+    { title: 'Delivery output level', text: 'source peak, −1 dB for streaming or −3 dB for ACX' },
     { title: 'Input alignment', text: 'the same settings work on quiet and hot recordings' },
-    { title: 'Two faceplates', text: 'dark steel or light cream' },
     { title: 'Real-time preview', text: 'free in your browser; Apply with Pro' },
   ],
 
