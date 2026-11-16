@@ -8,97 +8,218 @@
     "input-meter": {
       "src": "/help/shots/tube-saturation/input-meter.png",
       "w": 61,
-      "h": 204
+      "h": 204,
+      "at": {
+        "x": 22,
+        "y": 78,
+        "w": 49,
+        "h": 192
+      }
     },
     "drive": {
       "src": "/help/shots/tube-saturation/drive.png",
       "w": 113,
-      "h": 122
+      "h": 122,
+      "at": {
+        "x": 77,
+        "y": 109,
+        "w": 101,
+        "h": 110
+      }
     },
     "asymmetry": {
       "src": "/help/shots/tube-saturation/asymmetry.png",
       "w": 113,
-      "h": 134
+      "h": 134,
+      "at": {
+        "x": 180,
+        "y": 109,
+        "w": 101,
+        "h": 122
+      }
     },
     "hardness": {
       "src": "/help/shots/tube-saturation/hardness.png",
       "w": 113,
-      "h": 134
+      "h": 134,
+      "at": {
+        "x": 283,
+        "y": 109,
+        "w": 101,
+        "h": 122
+      }
     },
     "wet-dry": {
       "src": "/help/shots/tube-saturation/wet-dry.png",
       "w": 85,
-      "h": 108
+      "h": 108,
+      "at": {
+        "x": 389,
+        "y": 117,
+        "w": 73,
+        "h": 96
+      }
     },
     "hf-loss": {
       "src": "/help/shots/tube-saturation/hf-loss.png",
       "w": 85,
-      "h": 110
+      "h": 110,
+      "at": {
+        "x": 468,
+        "y": 117,
+        "w": 73,
+        "h": 98
+      }
     },
     "output-meter": {
       "src": "/help/shots/tube-saturation/output-meter.png",
-      "w": 61,
-      "h": 204
+      "w": 62,
+      "h": 204,
+      "at": {
+        "x": 548,
+        "y": 78,
+        "w": 50,
+        "h": 192
+      }
     },
     "curve": {
       "src": "/help/shots/tube-saturation/curve.png",
       "w": 159,
-      "h": 63
+      "h": 63,
+      "at": {
+        "x": 22,
+        "y": 332,
+        "w": 147,
+        "h": 51
+      }
     },
     "asym-mode": {
       "src": "/help/shots/tube-saturation/asym-mode.png",
       "w": 174,
-      "h": 63
+      "h": 63,
+      "at": {
+        "x": 195,
+        "y": 332,
+        "w": 162,
+        "h": 51
+      }
     },
     "topology": {
       "src": "/help/shots/tube-saturation/topology.png",
       "w": 226,
-      "h": 63
+      "h": 63,
+      "at": {
+        "x": 384,
+        "y": 332,
+        "w": 214,
+        "h": 51
+      }
     },
     "auto-drive": {
       "src": "/help/shots/tube-saturation/auto-drive.png",
       "w": 109,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 108,
+        "y": 391,
+        "w": 97,
+        "h": 119
+      }
     },
     "tame": {
       "src": "/help/shots/tube-saturation/tame.png",
       "w": 109,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 210,
+        "y": 391,
+        "w": 97,
+        "h": 119
+      }
     },
     "soften": {
       "src": "/help/shots/tube-saturation/soften.png",
       "w": 109,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 312,
+        "y": 391,
+        "w": 97,
+        "h": 119
+      }
     },
     "emphasis": {
       "src": "/help/shots/tube-saturation/emphasis.png",
       "w": 109,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 414,
+        "y": 391,
+        "w": 97,
+        "h": 119
+      }
     },
     "low-crossover": {
       "src": "/help/shots/tube-saturation/low-crossover.png",
       "w": 285,
-      "h": 57
+      "h": 57,
+      "at": {
+        "x": 22,
+        "y": 526,
+        "w": 273,
+        "h": 45
+      }
     },
     "mid-crossover": {
       "src": "/help/shots/tube-saturation/mid-crossover.png",
       "w": 285,
-      "h": 57
+      "h": 57,
+      "at": {
+        "x": 325,
+        "y": 526,
+        "w": 273,
+        "h": 45
+      }
     },
     "low-drive": {
       "src": "/help/shots/tube-saturation/low-drive.png",
       "w": 109,
-      "h": 119
+      "h": 119,
+      "at": {
+        "x": 159,
+        "y": 579,
+        "w": 97,
+        "h": 107
+      }
     },
     "mid-drive": {
       "src": "/help/shots/tube-saturation/mid-drive.png",
       "w": 109,
-      "h": 119
+      "h": 119,
+      "at": {
+        "x": 261,
+        "y": 579,
+        "w": 97,
+        "h": 107
+      }
     },
     "high-drive": {
       "src": "/help/shots/tube-saturation/high-drive.png",
       "w": 109,
-      "h": 119
+      "h": 119,
+      "at": {
+        "x": 363,
+        "y": 579,
+        "w": 97,
+        "h": 107
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/tube-saturation/face.jpg",
+    "w": 620,
+    "h": 654,
+    "x": 0,
+    "y": 56
   }
 }

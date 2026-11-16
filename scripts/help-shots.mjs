@@ -82,6 +82,10 @@ const SHOT_SETTINGS = {
 
 /** How long audio runs through an open window before it is shot. */
 const PLAY_SETTLE_MS = 3000
+/** Windows that measure before they act (VoxPressor's stages wait for their makeups). */
+const SETTLE_MS = { 'vox-pressor': 10000 }
+/** A button pressed before playing, so the panel shows what it found. */
+const PRESS_FIRST = { 'hum-remover': 'Analyse' }
 
 /** The rack the Effect Chain's help picture shows: picker queries, in order. */
 const CHAIN_SAMPLE = ['EQ', 'LA Classic 76', 'LA Vintage 2A', 'De-Esser', 'Air Boost']
@@ -241,9 +245,13 @@ try {
 
     // Play through the open window so meters, scopes and reduction displays are
     // lit; measurements settle while it runs.
+    if (PRESS_FIRST[id]) {
+      await frame.getByRole('button', { name: PRESS_FIRST[id], exact: true }).first().click().catch(() => {})
+      await page.waitForTimeout(4000)
+    }
     await page.mouse.move(0, 0)
     await setPlaying(frame, true)
-    await page.waitForTimeout(PLAY_SETTLE_MS)
+    await page.waitForTimeout(SETTLE_MS[id] ?? PLAY_SETTLE_MS)
 
     const slug = helpSlug(id)
     const outDir = join(ROOT, 'public/help/shots', slug)

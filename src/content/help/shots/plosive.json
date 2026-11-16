@@ -8,82 +8,185 @@
     "in-meter": {
       "src": "/help/shots/plosive-tamer/in-meter.png",
       "w": 82,
-      "h": 317
+      "h": 317,
+      "at": {
+        "x": 14,
+        "y": 72,
+        "w": 70,
+        "h": 305
+      }
     },
     "reduction-bars": {
       "src": "/help/shots/plosive-tamer/reduction-bars.png",
       "w": 576,
-      "h": 140
+      "h": 140,
+      "at": {
+        "x": 108,
+        "y": 86,
+        "w": 564,
+        "h": 128
+      }
     },
     "scope": {
       "src": "/help/shots/plosive-tamer/scope.png",
       "w": 576,
-      "h": 130
+      "h": 130,
+      "at": {
+        "x": 108,
+        "y": 224,
+        "w": 564,
+        "h": 118
+      }
     },
     "pops-count": {
       "src": "/help/shots/plosive-tamer/pops-count.png",
       "w": 87,
-      "h": 22
+      "h": 22,
+      "at": {
+        "x": 108,
+        "y": 356,
+        "w": 75,
+        "h": 10
+      }
     },
     "bursts-count": {
       "src": "/help/shots/plosive-tamer/bursts-count.png",
       "w": 101,
-      "h": 22
+      "h": 22,
+      "at": {
+        "x": 201,
+        "y": 356,
+        "w": 89,
+        "h": 10
+      }
     },
     "reset": {
       "src": "/help/shots/plosive-tamer/reset.png",
       "w": 64,
-      "h": 30
+      "h": 30,
+      "at": {
+        "x": 620,
+        "y": 352,
+        "w": 52,
+        "h": 18
+      }
     },
     "out-meter": {
       "src": "/help/shots/plosive-tamer/out-meter.png",
       "w": 87,
-      "h": 377
+      "h": 377,
+      "at": {
+        "x": 691,
+        "y": 72,
+        "w": 75,
+        "h": 365
+      }
     },
     "output": {
       "src": "/help/shots/plosive-tamer/output.png",
       "w": 71,
-      "h": 86
+      "h": 86,
+      "at": {
+        "x": 691,
+        "y": 351,
+        "w": 59,
+        "h": 74
+      }
     },
     "pop-depth": {
       "src": "/help/shots/plosive-tamer/pop-depth.png",
       "w": 86,
-      "h": 139
+      "h": 139,
+      "at": {
+        "x": 44,
+        "y": 449,
+        "w": 74,
+        "h": 127
+      }
     },
     "pop-freq": {
       "src": "/help/shots/plosive-tamer/pop-freq.png",
       "w": 71,
-      "h": 139
+      "h": 139,
+      "at": {
+        "x": 116,
+        "y": 449,
+        "w": 59,
+        "h": 127
+      }
     },
     "pop-sensitivity": {
       "src": "/help/shots/plosive-tamer/pop-sensitivity.png",
       "w": 90,
-      "h": 139
+      "h": 139,
+      "at": {
+        "x": 183,
+        "y": 449,
+        "w": 78,
+        "h": 127
+      }
     },
     "pop-release": {
       "src": "/help/shots/plosive-tamer/pop-release.png",
       "w": 72,
-      "h": 139
+      "h": 139,
+      "at": {
+        "x": 270,
+        "y": 449,
+        "w": 60,
+        "h": 127
+      }
     },
     "burst-depth": {
       "src": "/help/shots/plosive-tamer/burst-depth.png",
       "w": 86,
-      "h": 139
+      "h": 139,
+      "at": {
+        "x": 444,
+        "y": 449,
+        "w": 74,
+        "h": 127
+      }
     },
     "burst-freq": {
       "src": "/help/shots/plosive-tamer/burst-freq.png",
       "w": 86,
-      "h": 139
+      "h": 139,
+      "at": {
+        "x": 508,
+        "y": 449,
+        "w": 74,
+        "h": 127
+      }
     },
     "burst-sensitivity": {
       "src": "/help/shots/plosive-tamer/burst-sensitivity.png",
       "w": 90,
-      "h": 139
+      "h": 139,
+      "at": {
+        "x": 583,
+        "y": 449,
+        "w": 78,
+        "h": 127
+      }
     },
     "burst-length": {
       "src": "/help/shots/plosive-tamer/burst-length.png",
       "w": 83,
-      "h": 139
+      "h": 139,
+      "at": {
+        "x": 664,
+        "y": 449,
+        "w": 71,
+        "h": 127
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/plosive-tamer/face.jpg",
+    "w": 780,
+    "h": 544,
+    "x": 0,
+    "y": 58
   }
 }

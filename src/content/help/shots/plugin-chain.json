@@ -8,7 +8,20 @@
     "add-effect": {
       "src": "/help/shots/effect-chain/add-effect.png",
       "w": 516,
-      "h": 50
+      "h": 50,
+      "at": {
+        "x": 28,
+        "y": 366,
+        "w": 504,
+        "h": 38
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/effect-chain/face.jpg",
+    "w": 560,
+    "h": 398,
+    "x": 0,
+    "y": 58
   }
 }

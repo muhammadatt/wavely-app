@@ -62,12 +62,12 @@
     },
     "pre-gain": {
       "src": "/help/shots/la-classic-76/pre-gain.png",
-      "w": 97,
+      "w": 98,
       "h": 52,
       "at": {
-        "x": 76,
+        "x": 75,
         "y": 318,
-        "w": 85,
+        "w": 86,
         "h": 40
       }
     },
