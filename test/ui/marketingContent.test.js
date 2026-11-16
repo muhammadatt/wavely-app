@@ -104,9 +104,12 @@ test('the route reads the slug from the path', () => {
 test('every sample’s try-out link opens that sample in the editor, and nothing else does', async () => {
   const { tryOutUrl, tryOutFromSearch, sampleDryUrl } = await import('../../src/content/marketing/index.js')
   for (const [id, p] of Object.entries(MARKETING)) {
+    // A dev-only effect's link works only in a dev build (production has no page for it).
+    const dev = HELP_META[id].release === 'dev'
+    if (dev) assert.equal(tryOutFromSearch(`?try=${marketingSlug(id)}`), null, `${id}: dev-only, no try-out in production`)
     for (const s of p.samples) {
       const url = tryOutUrl(id, s.id)
-      const got = tryOutFromSearch(url.slice(url.indexOf('?')))
+      const got = tryOutFromSearch(url.slice(url.indexOf('?')), dev)
       assert.equal(got.windowId, id)
       assert.equal(got.sample.id, s.id)
       assert.deepEqual(got.sample.settings, s.settings ?? {})
@@ -119,7 +122,7 @@ test('every sample’s try-out link opens that sample in the editor, and nothing
       }
     }
     // No clip named: the page's first sample.
-    assert.equal(tryOutFromSearch(`?try=${marketingSlug(id)}`).sample.id, p.samples[0].id)
+    assert.equal(tryOutFromSearch(`?try=${marketingSlug(id)}`, dev).sample.id, p.samples[0].id)
   }
   assert.equal(tryOutFromSearch(''), null)
   assert.equal(tryOutFromSearch('?try=no-such-effect'), null)

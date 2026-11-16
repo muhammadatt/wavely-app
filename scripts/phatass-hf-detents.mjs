@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PHAT*SS — what each HF detent does on narration.
+ * PHATaSS — what each HF detent does on narration.
  *
  *   node scripts/phatass-hf-detents.mjs <clip.wav> [<clip.wav> ...]
  *

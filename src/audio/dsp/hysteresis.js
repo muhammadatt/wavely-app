@@ -179,7 +179,7 @@ export class JilesAtherton {
    * without oversampling read −10 dB of error), and oversampled audio rarely
    * makes them. A bench A/B. On the loop alone, against a 16×-substepped
    * solution, the unguarded step landed −70 / −59 / −49 dB under the output at
-   * drive 1 / 3 / 10 (RK2: −94 / −87 / −73); through PHAT*SS on drums at
+   * drive 1 / 3 / 10 (RK2: −94 / −87 / −73); through PHATaSS on drums at
    * TAPE 10 the guarded step sits −57 dB from EXACT.
    */
   constructor({ c = shape.c, K = shape.K, A = shape.A, scale = 1, fast = false } = {}) {

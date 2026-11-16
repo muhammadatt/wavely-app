@@ -3,7 +3,7 @@ import { computed } from 'vue'
 /**
  * MODULA SEGMENTED SWITCH — one of N, lit cap on a sunken tray.
  *
- *   inline  the compact tray under a knob (PHAT*SS's CLEAN / PHAT)
+ *   inline  the compact tray under a knob (PHATaSS's CLEAN / PHAT)
  *   tile    the kit's big tiles (GRID / WAVE / SPEC / CLIP)
  *
  * The lit option takes the SECOND hue: a segmented switch states a mode, not

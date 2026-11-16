@@ -1,6 +1,6 @@
 <script setup>
 /**
- * PHAT*SS — Psycho Harmonic Analog Tape * Saturation Simulator, on the Modula
+ * PHATaSS — Psycho Harmonic Analog Tape * Saturation Simulator, on the Modula
  * faceplate: layout 5a, "reel stack + level bay", with the 6g reel
  * (docs/design/modula/PHATaSS_Layouts.dc.html).
  *

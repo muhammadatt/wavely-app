@@ -154,7 +154,7 @@ async function signOut() {
             @click="upgrade"
           >
             <span class="block text-[12px] font-semibold" style="color:#e0b84a">Upgrade to Pro</span>
-            <span class="block text-[11px] text-[rgba(255,255,255,.45)]">Every tool, applied to your whole file</span>
+            <span class="block text-[11px] text-[rgba(255,255,255,.45)]">Unlock Pro tools and effect chain</span>
           </button>
           <button
             class="w-full text-left cursor-pointer px-4 py-[8px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"

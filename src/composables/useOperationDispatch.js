@@ -7,6 +7,7 @@ import { useWindows } from './useWindows.js'
  * Every surface that can launch an operation — the rail's list, the command
  * palette, the waveform context menu — goes through here, so "what does
  * clicking this do" has exactly one answer no matter where the click came from.
+ * `{ quick: true }` asks for an op's instant form (registry `quick`).
  */
 export function useOperationDispatch() {
   const editor = useEditorState()
@@ -32,8 +33,12 @@ export function useOperationDispatch() {
    * Dimming those too meant every Effects row looked broken until you'd made a
    * selection, and made "needs a selection" look the same as "can't click this".
    */
-  function isDisabled(op) {
-    return op?.surface === 'immediate' && !isAvailable(op)
+  function isDisabled(op, { quick = false } = {}) {
+    const instant = (quick && op?.quick) || op?.surface === 'immediate'
+    if (!instant) return false
+    // An edit is dead while the file renders an apply (registry `edits`); the
+    // editor refuses it anyway, so an enabled row would only answer with a toast.
+    return !isAvailable(op) || (!!op.edits && !!editor.state.isProcessing)
   }
 
   /** Why an operation can't run, for the notice shown in its panel. */
@@ -54,11 +59,31 @@ export function useOperationDispatch() {
    * window without a selection is fine and arguably useful, because the panel
    * explains what's missing. Running a verb without one is just a no-op.
    */
-  function dispatch(op) {
+  /**
+   * An edit (registry `edits`) while the file renders an apply: refused here,
+   * so dispatch answers false and a caller such as the command palette stays
+   * open instead of closing as if the edit ran. The editor's own guard does
+   * the refusing, so the "wait" toast still explains it — a panel's Apply
+   * (Trim's default mode) dispatches too and is not greyed out.
+   */
+  function refusedWhileRendering(op) {
+    return !!op.edits && editor.editBlockedByProcessing()
+  }
+
+  function dispatch(op, { quick = false } = {}) {
     if (!op) return false
 
+    // `quick`: the caller wants the op's instant form (right-click menu, the
+    // selection bar, a panel's default mode) rather than its panel. Ops without
+    // one fall through to their normal surface.
+    if (quick && op.quick) {
+      if (!isAvailable(op) || refusedWhileRendering(op)) return false
+      op.quick(editor)
+      return true
+    }
+
     if (op.surface === 'immediate') {
-      if (!isAvailable(op)) return false
+      if (!isAvailable(op) || refusedWhileRendering(op)) return false
       op.action?.(editor)
       return true
     }

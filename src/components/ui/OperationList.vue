@@ -88,13 +88,19 @@ function select(op) {
         <div class="op-icon w-[34px] h-[34px] rounded-[10px] flex items-center justify-center shrink-0">
           <Icon :name="op.icon" :size="16" />
         </div>
+        <!-- The plan badge rides on the NAME line, where the names are short,
+             so it never takes the description's width (owner, November 2026).
+             Descriptions are written to fit the ~142 px left beside the
+             chevron and the rail's 8 px scrollbar
+             (test/ui/operationDescriptions.test.js). No RENDER tag here
+             either: the window carries it. -->
         <div class="flex-1 min-w-0">
-          <div class="text-[13px] font-bold text-text truncate">{{ op.label }}</div>
-          <!-- No RENDER tag here (owner, November 2026): in a 300 px rail it
-               took the description's room. The window still carries it. -->
+          <div class="flex items-center gap-[6px] min-w-0">
+            <span class="text-[13px] font-bold text-text truncate">{{ op.label }}</span>
+            <PlanBadge :feature="op.feature" />
+          </div>
           <div class="text-[11px] font-medium text-text-muted truncate mt-[2px]">{{ op.desc }}</div>
         </div>
-        <PlanBadge :feature="op.feature" />
         <!-- A chevron promises "this opens something", so the verbs that just
              run don't get one. -->
         <Icon

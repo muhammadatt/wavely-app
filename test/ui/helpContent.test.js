@@ -219,7 +219,7 @@ test('page URLs are the product names, unique, and never an old window id', () =
   for (const slug of slugs) assert.match(slug, /^[a-z0-9]+(-[a-z0-9]+)*$/)
   assert.equal(helpUrl('opto-smooth'), '/help/la-vintage-2a/')
   assert.equal(helpUrl('fet-punch'), '/help/la-classic-76/')
-  assert.equal(helpUrl('phatass'), '/help/phatss/')
+  assert.equal(helpUrl('phatass'), '/help/phatass/')
 })
 
 test('the index and sidebar list shipping effects only, in every build', () => {

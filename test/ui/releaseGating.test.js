@@ -1,33 +1,68 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
+import { HELP_META } from '../../src/content/help/index.js'
 
 /**
  * Which operations a production build hides (`release: 'dev'` in the registry).
  *
  * Read from the source rather than imported: the registry imports every panel's
- * .vue file, which node cannot load. Changing what ships should be a deliberate
- * edit to this list as well as to the registry, not a side effect.
+ * .vue file, which node cannot load. The registry is the one place that says
+ * what ships, so nothing here lists the released or the hidden plugins — the
+ * tests follow whatever `release` says.
  */
 const ROOT = new URL('../../', import.meta.url)
-const registry = readFileSync(new URL('src/ui/registry.js', ROOT), 'utf8')
+const registry = readFileSync(new URL('src/ui/registry.js', ROOT), 'utf8').replace(/\r\n/g, '\n')
 
-function devOnlyIds(src) {
-  const ids = []
-  const re = /id: '([^']+)',\s*\n\s*release: 'dev',/g
-  for (let m; (m = re.exec(src));) ids.push(m[1])
-  return ids.sort()
+/** { id: 'dev' | undefined } for every operation, wherever `release` sits in it. */
+function operationReleases(src) {
+  const ops = src.slice(src.indexOf('const ALL_OPERATIONS = ['))
+  const out = {}
+  for (const m of ops.matchAll(/\n  \{\n([\s\S]*?)\n  \},/g)) {
+    const id = /\n?    id: '([^']+)',/.exec(m[1])[1]
+    out[id] = /\n    release: '([^']+)',/.exec(m[1])?.[1]
+  }
+  return out
 }
 
+test('an operation marked release: dev is hidden from production, and nothing else is', () => {
+  const ops = operationReleases(registry)
+  assert.ok(Object.keys(ops).length > 20, 'the registry parse found its operations')
+  // The gate is one rule — the registry's own isReleased — so a hidden id and
+  // a released one differ only by this line.
+  assert.match(registry, /return op\.release !== 'dev' \|\| devBuild/)
+  assert.match(registry, /DEV_ONLY_OPERATION_IDS = ALL_OPERATIONS\s*\n\s*\.filter\(op => op\.release === 'dev'\)/)
+  for (const [id, release] of Object.entries(ops)) {
+    assert.ok(release === undefined || release === 'dev', `${id}: unknown release value ${release}`)
+  }
+})
+
 test('the work-in-progress plugins are hidden from production builds', () => {
-  assert.deepEqual(devOnlyIds(registry), [
+  // Kept as a list on purpose: shipping or hiding a plugin should be a
+  // deliberate edit here as well as in the registry, never a side effect.
+  const hidden = Object.entries(operationReleases(registry))
+    .filter(([, release]) => release === 'dev')
+    .map(([id]) => id)
+    .sort()
+  assert.deepEqual(hidden, [
     'clip-gain-deesser',
     'modula-kit',
     'plosive',
+    'saturation-bench',
     'scheps-parallel',
     'vocal-saturation',
     'voicerx',
   ])
+})
+
+test('a help page is gated exactly as its operation is', () => {
+  // The help entry carries its own copy of `release` (the editor cannot import
+  // the registry from there); it has to follow the registry, whatever it says.
+  const ops = operationReleases(registry)
+  for (const [id, meta] of Object.entries(HELP_META)) {
+    assert.ok(id in ops, `${id}: help page for an operation the registry does not have`)
+    assert.equal(meta.release, ops[id], `${id}: help release differs from the registry`)
+  }
 })
 
 test('every surface reads the gated list, not the full one', () => {

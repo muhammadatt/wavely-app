@@ -53,7 +53,7 @@ const props = defineProps({
    * and changes only what is around it: the readout moves into an inset well
    * ABOVE the ladder, the scale is engraved larger with 0 dB marked, the
    * caption sits under the ladder, and a `below` slot takes an attached
-   * control (the trim knobs under PHAT*SS's and the Inflator's meters).
+   * control (the trim knobs under PHATaSS's and the Inflator's meters).
    * Vertical only.
    */
   variant: { type: String, default: 'classic' },

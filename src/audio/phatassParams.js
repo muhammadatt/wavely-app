@@ -1,5 +1,5 @@
 /**
- * PHAT*SS — Psycho Harmonic Analog Tape * Saturation Simulator. UI params,
+ * PHATaSS — Psycho Harmonic Analog Tape * Saturation Simulator. UI params,
  * their mapping to the kernel, and the latency.
  *
  * Chain: TAPE (CLEAN cubic or THICK hysteresis; its head bump follows the
@@ -162,7 +162,7 @@ export const CHARACTERS = Object.freeze([
  * lands within 0.02 dB of it at Warmth 5. (Named apart from the
  * bench kernel's own `levelOffsetDb`, which is its voicing detector's level.)
  *
- * ⚠ ALWAYS FULL: PHAT*SS has no VOICED mode. `warmthLayers` forces `mode: 'full'`
+ * ⚠ ALWAYS FULL: PHATaSS has no VOICED mode. `warmthLayers` forces `mode: 'full'`
  * (the bench's default is VOICED) and `checkWarmthLayers` rejects a layer that
  * asks for 'voiced', so a layer copied from the bench cannot bring it along.
  *
@@ -207,12 +207,12 @@ export const WARMTH_BASE_RATE_MAX_HZ = 500
 /** Throws unless `layers` is 1–WARMTH_MAX_LAYERS layers with known roles. */
 export function checkWarmthLayers(layers) {
   if (!Array.isArray(layers) || layers.length < 1 || layers.length > WARMTH_MAX_LAYERS) {
-    throw new Error(`PHAT*SS Warmth takes 1–${WARMTH_MAX_LAYERS} layers, got ${layers?.length}`)
+    throw new Error(`PHATaSS Warmth takes 1–${WARMTH_MAX_LAYERS} layers, got ${layers?.length}`)
   }
   layers.forEach((l, k) => {
     const blend = l.blend ?? 'fixed'
     if (!WARMTH_BLENDS.includes(blend)) throw new Error(`Warmth layer ${k}: unknown blend '${l.blend}'`)
-    if (l.mode !== undefined && l.mode !== 'full') throw new Error(`Warmth layer ${k}: PHAT*SS runs every layer FULL, not '${l.mode}'`)
+    if (l.mode !== undefined && l.mode !== 'full') throw new Error(`Warmth layer ${k}: PHATaSS runs every layer FULL, not '${l.mode}'`)
     if (l.oversample === false && !(l.hiHz <= WARMTH_BASE_RATE_MAX_HZ)) {
       throw new Error(`Warmth layer ${k}: oversample: false needs a low band (hiHz ≤ ${WARMTH_BASE_RATE_MAX_HZ}), got ${l.hiHz}`)
     }
@@ -458,7 +458,7 @@ export function keepTrimDb(p) {
  * Warmth — owner's call, so Warmth shapes the rounded signal; it sat after the
  * Warmth guard until October 2026): what a tape machine does to peaks. Measured on a
  * Studer A800 emulation (owner-supplied acoustic guitar, dry vs wet, see
- * docs/claude-dev-log.md "PHAT*SS — TAPE"): the peak reduction is a WAVESHAPER,
+ * docs/claude-dev-log.md "PHATaSS — TAPE"): the peak reduction is a WAVESHAPER,
  * not a compressor — in the loudest 10 ms windows the quiet samples keep their
  * gain and only those near the top bend — nearly symmetric, flat to ~9 dB under
  * the peak, then −1.1 / −2.2 / −5.3 dB at −6 / −3 / 0. The bench's CUBIC

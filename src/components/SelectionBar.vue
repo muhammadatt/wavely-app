@@ -1,14 +1,16 @@
 <script setup>
 import { computed } from "vue"
 import { useEditorState } from "../composables/useEditorState.js"
+import { useOperationDispatch } from "../composables/useOperationDispatch.js"
+import { getOperation } from "../ui/registry.js"
 import BaseButton from "./ui/BaseButton.vue"
+
+const { dispatch } = useOperationDispatch()
 
 const {
   state,
   hasSelection,
   hasClipboard,
-  performSilence,
-  performTrimToSelection,
   performCut,
   performCopy,
   performPaste,
@@ -17,6 +19,10 @@ const {
 } = useEditorState()
 
 // The bar is always mounted, so every readout has to survive selection === null.
+// Cut, Paste, Silence and Trim change the timeline, which the editor refuses
+// while this file renders an apply; disabled then, like the header's Undo.
+const busy = computed(() => !!state.isProcessing)
+
 const EMPTY = "—"
 
 function formatTime(seconds) {
@@ -41,28 +47,22 @@ function handleCopy() {
 
 function handleCut() {
   if (!hasSelection.value) return
-  performCut()
-  showToast("Cut to clipboard")
+  if (performCut()) showToast("Cut to clipboard")
 }
 
 function handlePaste() {
   if (!hasClipboard.value) return
-  performPaste(state.playhead)
-  showToast("Pasted at playhead")
+  if (performPaste(state.playhead)) showToast("Pasted at playhead")
 }
 
+// Silence and Trim to selection run the registry's `quick` action, so the bar,
+// the Trim / Silence panels and the right-click menu share one action and toast.
 function handleSilence() {
-  if (!hasSelection.value) return
-  performSilence()
-  showToast("Region silenced")
+  dispatch(getOperation('silence'), { quick: true })
 }
 
-// Mirrors the Trim panel's "Trim to selection" mode — same wording, same toast,
-// so the shortcut and the panel don't read as two different operations.
 function handleTrim() {
-  if (!hasSelection.value) return
-  performTrimToSelection()
-  showToast("Trimmed to selection")
+  dispatch(getOperation('trim'), { quick: true })
 }
 </script>
 
@@ -141,7 +141,7 @@ function handleTrim() {
       <BaseButton
         size="xs" color="ghost" :pill="false"
         class="whitespace-nowrap font-semibold"
-        :disabled="!hasClipboard"
+        :disabled="!hasClipboard || busy"
         title="Paste at playhead (Ctrl+V)"
         @click="handlePaste">
         <svg
@@ -156,7 +156,7 @@ function handleTrim() {
       <BaseButton
         size="xs" color="ghost" :pill="false"
         class="whitespace-nowrap font-semibold"
-        :disabled="!hasSelection"
+        :disabled="!hasSelection || busy"
         title="Replace selection with silence"
         @click="handleSilence">
         <svg
@@ -172,7 +172,7 @@ function handleTrim() {
       <BaseButton
         size="xs" color="ghost" :pill="false"
         class="whitespace-nowrap font-semibold"
-        :disabled="!hasSelection"
+        :disabled="!hasSelection || busy"
         title="Cut selection to clipboard (Ctrl+X or Del)"
         @click="handleCut">
         <svg
@@ -190,7 +190,7 @@ function handleTrim() {
       <BaseButton
         size="xs" color="ghost" :pill="false"
         class="whitespace-nowrap font-semibold"
-        :disabled="!hasSelection"
+        :disabled="!hasSelection || busy"
         title="Trim to selection — keep only what's selected"
         @click="handleTrim">
         <svg

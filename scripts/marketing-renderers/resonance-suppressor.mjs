@@ -9,7 +9,7 @@ import { DEFAULT_TARGETING } from '../../src/audio/resonanceTargeting.js'
 /**
  * useResonance.renderRegion → applyResonanceRegion (src/audio/processing.js).
  *
- * Reso Soothe's apply measures nothing: its reference envelope is computed by
+ * Reso Tame's apply measures nothing: its reference envelope is computed by
  * the kernel itself, and zone fitting (fitZonesToVoice) is a manual button on
  * the zone model, never part of Apply. So this is the panel's params
  * (useResonance.currentParams under the shipping FOCUS targeting, the shipping

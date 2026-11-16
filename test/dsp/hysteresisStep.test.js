@@ -2,7 +2,7 @@
  * Run with:  npm test
  *
  * The Jiles-Atherton loop's speedups (dsp/hysteresis.js): the Langevin table
- * that ships, and the one-evaluation `fast` step PHAT*SS's bench A/Bs.
+ * that ships, and the one-evaluation `fast` step PHATaSS's bench A/Bs.
  */
 
 import { test } from 'node:test'
@@ -63,7 +63,7 @@ test('the FAST step stays within −45 dB of the exact loop, even through un-ove
   }
 })
 
-test('PHAT*SS: Loop step ships EXACT; FAST picks the hidden fast curve for THICK only', () => {
+test('PHATaSS: Loop step ships EXACT; FAST picks the hidden fast curve for THICK only', () => {
   assert.deepEqual(TAPE_STEPS, ['exact', 'fast'])
   assert.equal(PHATASS_DEFAULTS.tapeStep, 'exact')
   const base = { tape: 6, voiceLevelDb: -20, warmthCeilingDb: -3 }

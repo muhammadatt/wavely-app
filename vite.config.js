@@ -88,15 +88,18 @@ function helpPages(devPanels) {
     generateBundle: { order: 'post', async handler(_options, bundle) {
       const entry = bundle['help/index.html']
       if (!entry) return
-      const { HELP_META, publishedHelpIds, helpSlug } = await import('./src/content/help/index.js')
+      const { HELP_META, publishedHelpIds, helpSlugsFor } = await import('./src/content/help/index.js')
       const html = String(entry.source)
       for (const id of publishedHelpIds(devPanels)) {
         const title = HELP_META[id].title.replace(/&/g, '&amp;').replace(/</g, '&lt;')
-        this.emitFile({
-          type: 'asset',
-          fileName: `help/${helpSlug(id)}/index.html`,
-          source: html.replace(/<title>[^<]*<\/title>/, `<title>${title} help — crisp.fm</title>`),
-        })
+        // A page's old slugs get a copy too, so links from before a rename work.
+        for (const slug of helpSlugsFor(id)) {
+          this.emitFile({
+            type: 'asset',
+            fileName: `help/${slug}/index.html`,
+            source: html.replace(/<title>[^<]*<\/title>/, `<title>${title} help — crisp.fm</title>`),
+          })
+        }
       }
     } },
   }

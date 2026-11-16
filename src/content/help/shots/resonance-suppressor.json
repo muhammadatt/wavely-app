@@ -1,12 +1,12 @@
 {
   "panel": {
-    "src": "/help/shots/reso-soothe/panel.jpg",
+    "src": "/help/shots/reso-tame/panel.jpg",
     "w": 800,
     "h": 581
   },
   "controls": {
     "overlays": {
-      "src": "/help/shots/reso-soothe/overlays.png",
+      "src": "/help/shots/reso-tame/overlays.png",
       "w": 384,
       "h": 32,
       "at": {
@@ -17,7 +17,7 @@
       }
     },
     "display": {
-      "src": "/help/shots/reso-soothe/display.png",
+      "src": "/help/shots/reso-tame/display.png",
       "w": 784,
       "h": 298,
       "at": {
@@ -28,7 +28,7 @@
       }
     },
     "attack": {
-      "src": "/help/shots/reso-soothe/attack.png",
+      "src": "/help/shots/reso-tame/attack.png",
       "w": 68,
       "h": 131,
       "at": {
@@ -39,7 +39,7 @@
       }
     },
     "release": {
-      "src": "/help/shots/reso-soothe/release.png",
+      "src": "/help/shots/reso-tame/release.png",
       "w": 71,
       "h": 131,
       "at": {
@@ -50,7 +50,7 @@
       }
     },
     "threshold": {
-      "src": "/help/shots/reso-soothe/threshold.png",
+      "src": "/help/shots/reso-tame/threshold.png",
       "w": 86,
       "h": 131,
       "at": {
@@ -61,7 +61,7 @@
       }
     },
     "sharp": {
-      "src": "/help/shots/reso-soothe/sharp.png",
+      "src": "/help/shots/reso-tame/sharp.png",
       "w": 62,
       "h": 131,
       "at": {
@@ -72,7 +72,7 @@
       }
     },
     "depth": {
-      "src": "/help/shots/reso-soothe/depth.png",
+      "src": "/help/shots/reso-tame/depth.png",
       "w": 74,
       "h": 131,
       "at": {
@@ -83,7 +83,7 @@
       }
     },
     "mix": {
-      "src": "/help/shots/reso-soothe/mix.png",
+      "src": "/help/shots/reso-tame/mix.png",
       "w": 74,
       "h": 131,
       "at": {
@@ -94,7 +94,7 @@
       }
     },
     "trim": {
-      "src": "/help/shots/reso-soothe/trim.png",
+      "src": "/help/shots/reso-tame/trim.png",
       "w": 72,
       "h": 131,
       "at": {
@@ -106,7 +106,7 @@
     }
   },
   "face": {
-    "src": "/help/shots/reso-soothe/face.jpg",
+    "src": "/help/shots/reso-tame/face.jpg",
     "w": 800,
     "h": 463,
     "x": 0,

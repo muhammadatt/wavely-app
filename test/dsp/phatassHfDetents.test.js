@@ -1,7 +1,7 @@
 /**
  * Run with:  npm test
  *
- * PHAT*SS — the Speed detent (30 / 15 / 7.5 IPS, OFF on the bench) and the tape HF
+ * PHATaSS — the Speed detent (30 / 15 / 7.5 IPS, OFF on the bench) and the tape HF
  * shelf the speeds run (`dsp/tapeHfShelf.js`).
  *
  * ⚠ THE LOAD-BEARING TEST IS ONSET AGAINST BODY. What makes the tape shelf a
@@ -234,7 +234,7 @@ test('tape shelf: it only ever turns down — no component comes out louder, at 
   }
 })
 
-test('through PHAT*SS: a bright take loses sibilance and keeps its vowels; a dull one is left alone at 30 IPS; more TAPE, more sag', () => {
+test('through PHATaSS: a bright take loses sibilance and keeps its vowels; a dull one is left alone at 30 IPS; more TAPE, more sag', () => {
   // Each detent against the SAME chain with HF off, so TAPE's own change drops out.
   const run = (take, hf, tape = 0) => {
     const voice = msDb(take.x)

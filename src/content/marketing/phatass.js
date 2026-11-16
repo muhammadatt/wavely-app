@@ -8,7 +8,7 @@ export default {
   overviewTitle: 'The warmth of tape, without the tape',
   overview: [
     'Engineers printed vocals to tape for decades for one reason: it sounds good. Tape rounds off sharp peaks, fattens the low end and adds a soft glow of harmonics, so a thin or sterile recording comes back warmer, fuller and easier on the ear.',
-    'PHAT*SS puts that on one simple panel: Tape drives a soft saturator through a 30, 15 or 7.5 IPS speed selector, each with its own head bump and top-end character, and Harmonics adds low-frequency warmth with a Round or Tight character. It never raises the selection’s peak, so the warmth never eats into your headroom.',
+    'PHATaSS puts that on one simple panel: Tape drives a soft saturator through a 30, 15 or 7.5 IPS speed selector, each with its own head bump and top-end character, and Harmonics adds low-frequency warmth with a Round or Tight character. It never raises the selection’s peak, so the warmth never eats into your headroom.',
   ],
   features: [
     { title: 'Analog warmth', text: 'a soft glow of low harmonics on any voice' },

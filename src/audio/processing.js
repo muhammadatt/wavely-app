@@ -1097,7 +1097,7 @@ export function measureDeEsserAutoAir(segments, start, end, params, sampleRate, 
 }
 
 /**
- * PHAT*SS's Warmth readout for a region (see phatassWarmthReadout.js).
+ * PHATaSS's Warmth readout for a region (see phatassWarmthReadout.js).
  * Selections up to READOUT_WHOLE_MAX_S are rendered whole, bands and peak.
  * Longer ones render READOUT_BLOCKS sampled blocks for the bands, and the peak
  * is the guard's bound — the selection's own peak, scanned, not rendered —
@@ -1138,7 +1138,7 @@ export function measurePhatassWarmthBands(segments, start, end, params, sampleRa
  * rejects with `err.cancelled = true`.
  *
  * ⚠ PER OWNER, NOT PER PROCESS. The owner is the plugin copy asking (its
- * EffectChain id): with one pass for the whole app, two copies of PHAT*SS — the
+ * EffectChain id): with one pass for the whole app, two copies of PHATaSS — the
  * solo one and one in the chain, or two in the chain — cancelled each other's
  * measurements on every knob turn and neither makeup ever settled.
  */
@@ -1312,7 +1312,7 @@ export function applyPlosiveRegion(segments, start, end, params, sampleRate, cha
 }
 
 /**
- * Apply PHAT*SS to a region. Constant latency per sample rate (every stage is
+ * Apply PHATaSS to a region. Constant latency per sample rate (every stage is
  * a delay of its own length when idle), and a pre-roll so the shelf's release
  * starts where a playing preview's would be.
  */

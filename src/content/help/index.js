@@ -108,7 +108,7 @@ import inflator from './inflator.js'
 import vocalSaturation from './vocal-saturation.js'
 import voicerx from './voicerx.js'
 import voxPressor from './vox-pressor.js'
-import { HELP_META, helpSlug } from './meta.js'
+import { HELP_META, helpSlug, helpSlugsFor } from './meta.js'
 
 export const HELP = {
   'air-band': airBand,
@@ -137,9 +137,9 @@ export const HELP = {
   'vox-pressor': voxPressor,
 }
 
-export { HELP_CATEGORIES, HELP_META, publishedHelpIds, listedHelpIds, helpSlug } from './meta.js'
+export { HELP_CATEGORIES, HELP_META, publishedHelpIds, listedHelpIds, helpSlug, helpSlugsFor } from './meta.js'
 
-const ID_BY_SLUG = new Map(Object.keys(HELP_META).map(id => [helpSlug(id), id]))
+const ID_BY_SLUG = new Map(Object.keys(HELP_META).flatMap(id => helpSlugsFor(id).map(slug => [slug, id])))
 
 /** The window id a URL segment names, or null. */
 export function helpIdForSlug(slug) {

@@ -341,7 +341,8 @@ function toastFor(report, appliedUnit) {
     :width="560"
     :accent="ACCENT"
     design="modula"
-    brand-lead="LOUDNESS NORMALIZE"
+    brand-lead="LOUDNESS"
+    brand-tail="NORMALIZE"
     :show-engage="false"
     show-preview
     :previewable="false"

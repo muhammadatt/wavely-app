@@ -42,14 +42,16 @@ export const HELP_META = {
   'manual-eq': { title: 'EQ', category: 'tone' },
   voicerx: { title: 'VoiceRx', category: 'tone', release: 'dev' },
   'air-band': { title: 'Air Boost', category: 'tone' },
-  phatass: { title: 'PHAT*SS', category: 'tone' },
+  // `oldSlugs`: the URLs a page had under an earlier product name, so old
+  // links keep working (the build writes a copy there too).
+  phatass: { title: 'PHATaSS', category: 'tone', oldSlugs: ['phatss'] },
   'vocal-saturation': { title: 'Tube Saturation', category: 'tone', release: 'dev' },
-  'saturation-bench': { title: 'Saturation Workbench', category: 'tone' },
+  'saturation-bench': { title: 'Saturation Workbench', category: 'tone', release: 'dev' },
   'noise-reduction': { title: 'Noise Reduction', category: 'clean' },
   'de-esser': { title: 'De-Esser', category: 'clean' },
   'clip-gain-deesser': { title: 'Sibilance Editor', category: 'clean', release: 'dev' },
   'hf-limiter': { title: 'Hi-Freq Limiter', category: 'clean' },
-  'resonance-suppressor': { title: 'Reso Soothe', category: 'clean' },
+  'resonance-suppressor': { title: 'Reso Tame', category: 'tone', oldSlugs: ['reso-soothe'] },
   plosive: { title: 'Plosive Tamer', category: 'clean', release: 'dev' },
   'hum-remover': { title: 'Hum Remover', category: 'clean' },
   'spectrum-analyzer': { title: 'Spectrum Analyzer', category: 'clean' },
@@ -68,7 +70,7 @@ export function listedHelpIds() {
 
 /**
  * A page's URL segment, from its product name: `LA Vintage 2A` →
- * `la-vintage-2a`, `PHAT*SS` → `phatss`.
+ * `la-vintage-2a`, `PHATaSS` → `phatass`.
  */
 export function helpSlug(windowId) {
   return HELP_META[windowId].title
@@ -76,4 +78,9 @@ export function helpSlug(windowId) {
     .replace(/[*']/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
+}
+
+/** Every URL segment a page answers to: its slug, then any `oldSlugs`. */
+export function helpSlugsFor(windowId) {
+  return [helpSlug(windowId), ...(HELP_META[windowId].oldSlugs ?? [])]
 }

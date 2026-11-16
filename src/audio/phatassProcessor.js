@@ -1,5 +1,5 @@
 /**
- * PHAT*SS — worklet kernel.
+ * PHATaSS — worklet kernel.
  *
  * Input → TAPE (CLEAN cubic or THICK hysteresis, with the speed's head bump
  * after it) → makeup → Warmth → Guard → tape HF shelf (the Speed dial) → Mix

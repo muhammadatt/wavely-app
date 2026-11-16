@@ -1,12 +1,12 @@
 {
   "panel": {
-    "src": "/help/shots/phatss/panel.jpg",
+    "src": "/help/shots/phatass/panel.jpg",
     "w": 820,
     "h": 602
   },
   "controls": {
     "saturation": {
-      "src": "/help/shots/phatss/saturation.png",
+      "src": "/help/shots/phatass/saturation.png",
       "w": 640,
       "h": 107,
       "at": {
@@ -17,7 +17,7 @@
       }
     },
     "drive": {
-      "src": "/help/shots/phatss/drive.png",
+      "src": "/help/shots/phatass/drive.png",
       "w": 170,
       "h": 202,
       "at": {
@@ -28,7 +28,7 @@
       }
     },
     "tape-type": {
-      "src": "/help/shots/phatss/tape-type.png",
+      "src": "/help/shots/phatass/tape-type.png",
       "w": 127,
       "h": 39,
       "at": {
@@ -39,7 +39,7 @@
       }
     },
     "tape-speed": {
-      "src": "/help/shots/phatss/tape-speed.png",
+      "src": "/help/shots/phatass/tape-speed.png",
       "w": 184,
       "h": 182,
       "at": {
@@ -50,7 +50,7 @@
       }
     },
     "warmth": {
-      "src": "/help/shots/phatss/warmth.png",
+      "src": "/help/shots/phatass/warmth.png",
       "w": 168,
       "h": 202,
       "at": {
@@ -61,7 +61,7 @@
       }
     },
     "character": {
-      "src": "/help/shots/phatss/character.png",
+      "src": "/help/shots/phatass/character.png",
       "w": 133,
       "h": 39,
       "at": {
@@ -72,7 +72,7 @@
       }
     },
     "mix": {
-      "src": "/help/shots/phatss/mix.png",
+      "src": "/help/shots/phatass/mix.png",
       "w": 640,
       "h": 76,
       "at": {
@@ -83,7 +83,7 @@
       }
     },
     "in": {
-      "src": "/help/shots/phatss/in.png",
+      "src": "/help/shots/phatass/in.png",
       "w": 83,
       "h": 395,
       "at": {
@@ -94,7 +94,7 @@
       }
     },
     "out": {
-      "src": "/help/shots/phatss/out.png",
+      "src": "/help/shots/phatass/out.png",
       "w": 83,
       "h": 395,
       "at": {
@@ -106,7 +106,7 @@
     }
   },
   "face": {
-    "src": "/help/shots/phatss/face.jpg",
+    "src": "/help/shots/phatass/face.jpg",
     "w": 820,
     "h": 484,
     "x": 0,

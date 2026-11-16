@@ -8,7 +8,7 @@ import { getTimelineDuration } from '../../audio/operations.js'
 
 const {
   state, hasSelection, getAudioContext, replaceRegion, setPeakCache,
-  startProcessing, endProcessing, showToast, pinActiveDocument,
+  startProcessing, endProcessing, showToast, pinActiveDocument, editBlockedByProcessing,
 } = useEditorState()
 
 const fadeType = ref("in")
@@ -58,7 +58,7 @@ const LABELS = { in: "fade in", out: "fade out" }
 async function apply() {
   // One fade at a time: a second click while this one renders would render
   // from the uncommitted timeline and commit a second undo step.
-  if (!hasSelection.value || state.isProcessing) return
+  if (!hasSelection.value || editBlockedByProcessing()) return
   const { start, end } = state.selection
   const type = fadeType.value
   const curve = curveType.value

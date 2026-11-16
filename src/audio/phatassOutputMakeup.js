@@ -1,5 +1,5 @@
 /**
- * PHAT*SS — the bench's automatic OUTPUT trim (`outputMakeup`): a gain on the
+ * PHATaSS — the bench's automatic OUTPUT trim (`outputMakeup`): a gain on the
  * plugin's output, on top of Output, that puts the whole chain's peak ('peak')
  * or RMS ('rms') back on the selection's. TAPE's own makeup is untouched and
  * stays peak-restoring; this is a separate stage at the end.
@@ -88,7 +88,7 @@ function sourcePeak(channelData, from, to) {
 /**
  * @param {Float32Array[]} channelData the region, as `renderRegionToBuffer` gives it
  * @param {number} sampleRate
- * @param {object} params PHAT*SS UI params, with TAPE's makeup already measured
+ * @param {object} params PHATaSS UI params, with TAPE's makeup already measured
  * @param {{ exact?: boolean }} [options] exact (default) renders the whole
  *   region; `exact: false` is the capped preview measurement
  * @returns {{ makeupDb: number, outPeakDb: number, inputPeakDb: number }} the

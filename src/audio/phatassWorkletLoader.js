@@ -1,5 +1,5 @@
 /**
- * Load the PHAT*SS worklet module into an AudioContext or OfflineAudioContext,
+ * Load the PHATaSS worklet module into an AudioContext or OfflineAudioContext,
  * once per context.
  *
  * `?worker&url` makes Vite bundle phatassProcessor.js together with everything

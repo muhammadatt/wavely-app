@@ -4,7 +4,7 @@
  * The reading is the energy of what the nonlinear stages add (output minus the
  * clean signal, lined up) against the energy of the clean signal, in dB: a
  * running THD+N-style ratio, not a level. The kernel only sums the two
- * energies (PHAT*SS: `PhatassKernel.takeMeter`); everything here is ballistics
+ * energies (PHATaSS: `PhatassKernel.takeMeter`); everything here is ballistics
  * and scale, so it is pure and tests run it under node.
  *
  * ⚠ THE TWO ENERGIES ARE SMOOTHED SEPARATELY AND THEN DIVIDED. A ratio per
@@ -19,7 +19,7 @@
  * Both are reasoned from the VU standard, not auditioned.
  *
  * SCALE: 0–100, linear in dB from `SAT_METER_FLOOR_DB` (0) to
- * `SAT_METER_TOP_DB` (100), red from `SAT_METER_RED_DB`. Chosen on PHAT*SS on two
+ * `SAT_METER_TOP_DB` (100), red from `SAT_METER_RED_DB`. Chosen on PHATaSS on two
  * narration clips (whole-clip ratio, 23 ms posts p50): TAPE 1 / 3 / 6 alone
  * −33 / −25 / −19 dB (posts −42 / −34 / −28), Warmth 2 / 5 / 10 alone −18 to
  * −21 / −10 to −13 / −4 to −8 (posts reach +2 at Warmth 10). ⚠ WARMTH DOMINATES:

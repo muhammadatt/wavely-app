@@ -8,7 +8,7 @@ export default {
   overviewTitle: 'Smooth, balanced, natural',
   overview: [
     'Some voices and rooms have a note that rings: a nasal honk, a boxy tone, a harsh edge that appears on certain words. An EQ cut fixes those words and hollows out the rest. Dynamic resonance suppression finds the ringing frequencies and turns each down only while it rings, so the voice sounds smooth, balanced and natural.',
-    'Reso Soothe does it frequency by frequency in real time and shows every cut as it happens. Threshold and Depth set how much, Sharp sets how narrowly it works, and Mix blends the original back for a subtler touch.',
+    'Reso Tame does it frequency by frequency in real time and shows every cut as it happens. Threshold and Depth set how much, Sharp sets how narrowly it works, and Mix blends the original back for a subtler touch.',
   ],
   features: [
     { title: 'Smooth, balanced voice', text: 'harsh edges gone, character kept' },

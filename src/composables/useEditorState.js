@@ -256,6 +256,23 @@ export class DocumentSwitchedError extends Error {
   }
 }
 
+/**
+ * The timeline of the file an apply was pinned to CHANGED while it rendered —
+ * an edit (a Trim, Cut, Undo…) or another apply's commit (a second Apply
+ * clicked while the first was still measuring, before startProcessing). The
+ * apply would splice its render at the times it captured into a timeline that
+ * has since moved, so it is refused the same way a file switch is. "Changed",
+ * not "edited": the user may have made no edit at all. A subclass, so every
+ * apply that already shows a DocumentSwitchedError's message shows this one.
+ */
+export class DocumentEditedError extends DocumentSwitchedError {
+  constructor(what) {
+    super(what)
+    this.message = `${what} was not applied: the file changed while it rendered`
+    this.name = 'DocumentEditedError'
+  }
+}
+
 export function useEditorState() {
   // Computed
   const totalDuration = computed(() => getTimelineDuration(state.segments))
@@ -327,20 +344,22 @@ export function useEditorState() {
 
   function undo() {
     const doc = activeDocument.value
-    if (!doc) return
+    if (!doc || editBlockedByProcessing()) return false
     const h = historyFor(doc.id)
     const entry = stepHistory(h.undo, h.redo)
-    if (!entry) return
+    if (!entry) return false
     showToast(entry.label ? `Undid ${entry.label}` : 'Undone')
+    return true
   }
 
   function redo() {
     const doc = activeDocument.value
-    if (!doc) return
+    if (!doc || editBlockedByProcessing()) return false
     const h = historyFor(doc.id)
     const entry = stepHistory(h.redo, h.undo)
-    if (!entry) return
+    if (!entry) return false
     showToast(entry.label ? `Redid ${entry.label}` : 'Redone')
+    return true
   }
 
   // ── Buffer pool ────────────────────────────────────────────────────────────
@@ -571,50 +590,77 @@ export function useEditorState() {
   }
 
   // ── Edit operations — all push undo first ──────────────────────────────────
+  /**
+   * True (with a toast) when the active document has an apply in flight.
+   *
+   * An apply captures its region's start and end when it begins and splices
+   * the render back at those times when it commits; `pin.check()` only catches
+   * a switch to another FILE. An edit to the same file meanwhile — a Trim from
+   * the selection bar or the right-click menu, an Undo from the header — moves
+   * the timeline under it, and the render lands in the wrong place. So every
+   * timeline edit refuses while the document is processing, here rather than
+   * per surface: the keyboard handler already did, the buttons and menus did
+   * not. Copy reads only and is not guarded.
+   */
+  function editBlockedByProcessing() {
+    if (!activeDocument.value?.isProcessing) return false
+    showToast('Wait for the current process to finish')
+    return true
+  }
+
+  // Each returns true when it changed the timeline, false when it refused, so
+  // a caller announces only an edit that happened.
   function performTrimToSelection() {
-    if (!state.selection) return
+    if (!state.selection || editBlockedByProcessing()) return false
     pushUndo('trim to selection')
     const { start, end } = state.selection
     state.segments = trimToSelection(state.segments, start, end)
     state.selection = null
     state.playhead = 0
+    return true
   }
 
   function performTrimBefore() {
-    if (!state.selection) return
+    if (!state.selection || editBlockedByProcessing()) return false
     pushUndo('trim before selection')
     state.segments = trimBefore(state.segments, state.selection.start)
     state.selection = null
     state.playhead = 0
+    return true
   }
 
   function performTrimAfter() {
-    if (!state.selection) return
+    if (!state.selection || editBlockedByProcessing()) return false
     pushUndo('trim after selection')
     state.segments = trimAfter(state.segments, state.selection.end)
     const dur = getTimelineDuration(state.segments)
     state.selection = null
     if (state.playhead > dur) state.playhead = dur
+    return true
   }
 
   function performSilence() {
-    if (!state.selection) return
+    if (!state.selection || editBlockedByProcessing()) return false
     pushUndo('silence')
     const { start, end } = state.selection
     state.segments = silenceRegion(state.segments, start, end)
+    return true
   }
 
   function performSplit() {
+    if (editBlockedByProcessing()) return false
     pushUndo('split')
     state.segments = splitAtPlayhead(state.segments, state.playhead)
+    return true
   }
 
   function performSplitAtSelectionEdges() {
-    if (!state.selection) return
+    if (!state.selection || editBlockedByProcessing()) return false
     pushUndo('split at selection edges')
     let segs = splitAtPlayhead(state.segments, state.selection.start)
     segs = splitAtPlayhead(segs, state.selection.end)
     state.segments = segs
+    return true
   }
 
   function segmentsInRange(segments, start, end) {
@@ -627,7 +673,7 @@ export function useEditorState() {
   }
 
   function performCut() {
-    if (!state.selection) return
+    if (!state.selection || editBlockedByProcessing()) return false
     pushUndo('cut')
     const { start, end } = state.selection
     const inner = segmentsInRange(state.segments, start, end)
@@ -638,6 +684,7 @@ export function useEditorState() {
     // timeline — clamp it back onto the timeline.
     const dur = getTimelineDuration(state.segments)
     if (state.playhead > dur) state.playhead = dur
+    return true
   }
 
   function performCopy() {
@@ -649,7 +696,7 @@ export function useEditorState() {
 
   function performPaste(position) {
     const doc = activeDocument.value
-    if (!appState.clipboard || !doc) return
+    if (!appState.clipboard || !doc || editBlockedByProcessing()) return false
     pushUndo('paste')
     // Pasting across documents brings in segments whose buffers belong to the
     // source document. Claim shared ownership so closing that document doesn't
@@ -663,6 +710,7 @@ export function useEditorState() {
       }
     }
     state.segments = insertSegments(state.segments, position, appState.clipboard)
+    return true
   }
 
   /**
@@ -778,6 +826,12 @@ export function useEditorState() {
    * pin, so nothing is committed (refused rather than repaired, because the
    * measurements and renders may have read either file).
    *
+   * It also throws a DocumentEditedError if the file's timeline changed since
+   * the pin (its revision moved). Edits are refused while a document is
+   * processing, but several applies measure before they call startProcessing,
+   * and in that window an edit still gets through; this is what catches it.
+   * Call `check()` BEFORE replaceRegion, which bumps the revision itself.
+   *
    * ⚠ ANY SWITCH SINCE THE PIN, NOT "ANOTHER FILE IS ACTIVE NOW". Comparing
    * ids passes an A → B → A round trip, yet a render that started while B was
    * active read B's segments and would commit them into A. The check reads
@@ -786,6 +840,7 @@ export function useEditorState() {
   function pinActiveDocument(what) {
     const docId = appState.activeDocumentId
     const seq = activationSeq
+    const revision = activeDocument.value?.revision
     return {
       docId,
       // Taken now, before the render: replaceRegion records it so Undo puts
@@ -794,6 +849,7 @@ export function useEditorState() {
       selection: copySelection(activeDocument.value?.selection ?? null),
       check() {
         if (activationSeq !== seq || appState.activeDocumentId !== docId) throw new DocumentSwitchedError(what)
+        if (getDocument(docId)?.revision !== revision) throw new DocumentEditedError(what)
       },
     }
   }
@@ -914,6 +970,7 @@ export function useEditorState() {
     getSourceHandle,
 
     // Edit operations
+    editBlockedByProcessing,
     performTrimToSelection,
     performTrimBefore,
     performTrimAfter,

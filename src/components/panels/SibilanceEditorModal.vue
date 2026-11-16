@@ -146,7 +146,8 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
     :width="TuningPanel && tuningOpen ? 800 : 700"
     :accent="ACCENT"
     design="modula"
-    brand-lead="SIBILANCE EDITOR"
+    brand-lead="SIBILANCE"
+    brand-tail="EDITOR"
     :engaged="preview"
     show-preview
     previewable

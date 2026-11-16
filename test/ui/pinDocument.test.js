@@ -41,7 +41,7 @@ test('a switch away and back refuses even when no check ran in between', () => {
   const editor = useEditorState()
   const { docId: a } = editor.createDocument('round-a.wav', fakeBuffer())
   const { docId: b } = editor.createDocument('round-b.wav', fakeBuffer(), { activate: false })
-  const pin = editor.pinActiveDocument('PHAT*SS')
+  const pin = editor.pinActiveDocument('PHATaSS')
   editor.setActiveDocument(b)
   editor.setActiveDocument(a)
   assert.equal(editor.appState.activeDocumentId, a)

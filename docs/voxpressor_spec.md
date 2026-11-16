@@ -491,7 +491,7 @@ mechanisms, but presets should not max both (§11).
 - The De-Esser's activity scope is *not* included — one scope per window is
   enough, and it is the busiest part of that panel.
 
-### 4.6 Advanced (dev bench, gated like the PHAT*SS bench)
+### 4.6 Advanced (dev bench, gated like the PHATaSS bench)
 
 Peaks patch (ratio, attack, release, Input = knee width), Body ballistics, detector
 corner/shelf depths per tap, Parallel Squash, Inflator Curve and Band Split, the Color switch,

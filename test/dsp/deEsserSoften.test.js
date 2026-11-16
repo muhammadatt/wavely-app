@@ -2,10 +2,10 @@
  * Run with:  npm test
  *
  * De-Esser — the Soften post-stage (deEsserSoftenStage.js): an onset
- * softener on the band above 500 Hz, moved here from PHAT*SS and run on the
+ * softener on the band above 500 Hz, moved here from PHATaSS and run on the
  * HF Limiter's kernel with its shelf out.
  *
- * ⚠ THE MOVE WAS CHECKED BIT FOR BIT, not just re-tested: against PHAT*SS's
+ * ⚠ THE MOVE WAS CHECKED BIT FOR BIT, not just re-tested: against PHATaSS's
  * Soften at 828e9e3 (Tame 0, everything else off) on 10 s of real narration,
  * the HF-Limiter-hosted stage differs by 0 at Soften 3 / 7 / 10, latency
  * aligned (414 samples there, 132 here). The tests below pin the behaviour
@@ -75,7 +75,7 @@ function toneAmp(y, f, from, to) {
 // A −20 dBFS voice: the softener's nominal, level offset 0.
 const run = (x, soften, levelOffsetDb = 0) => processHFLimiterBuffer([x], SR, softenKernelParams(soften, levelOffsetDb))
 
-test('the Soften law (moved unchanged from PHAT*SS): 0–10, 3.6 dB of ceiling a step, slope 0.5 → 1', () => {
+test('the Soften law (moved unchanged from PHATaSS): 0–10, 3.6 dB of ceiling a step, slope 0.5 → 1', () => {
   assert.deepEqual(softenLaw(0), { depthDb: 0, slope: 0.5 })
   assert.ok(Math.abs(softenLaw(5).depthDb - 18) < 1e-9)
   assert.ok(Math.abs(softenLaw(10).depthDb - 36) < 1e-9)
