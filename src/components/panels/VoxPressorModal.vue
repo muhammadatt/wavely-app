@@ -370,7 +370,9 @@ async function applyAndClose() {
     :accent="ACCENT"
     design="modula"
     :surface="surface"
-    brand-lead="VOXPRESSOR"
+    brand-lead="VOX"
+    brand-tail="PRESSOR"
+    brand-joined
     :engaged="voxPreview"
     show-preview
     previewable
