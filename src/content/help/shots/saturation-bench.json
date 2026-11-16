@@ -8,77 +8,174 @@
     "input": {
       "src": "/help/shots/saturation-workbench/input.png",
       "w": 87,
-      "h": 629
+      "h": 629,
+      "at": {
+        "x": 14,
+        "y": 72,
+        "w": 75,
+        "h": 617
+      }
     },
     "layers": {
       "src": "/help/shots/saturation-workbench/layers.png",
       "w": 584,
-      "h": 54
+      "h": 54,
+      "at": {
+        "x": 94,
+        "y": 72,
+        "w": 572,
+        "h": 42
+      }
     },
     "layer-on": {
       "src": "/help/shots/saturation-workbench/layer-on.png",
       "w": 53,
-      "h": 34
+      "h": 34,
+      "at": {
+        "x": 108,
+        "y": 128,
+        "w": 41,
+        "h": 22
+      }
     },
     "solo": {
       "src": "/help/shots/saturation-workbench/solo.png",
       "w": 65,
-      "h": 34
+      "h": 34,
+      "at": {
+        "x": 159,
+        "y": 128,
+        "w": 53,
+        "h": 22
+      }
     },
     "curve": {
       "src": "/help/shots/saturation-workbench/curve.png",
       "w": 86,
-      "h": 121
+      "h": 121,
+      "at": {
+        "x": 126,
+        "y": 226,
+        "w": 74,
+        "h": 109
+      }
     },
     "drive": {
       "src": "/help/shots/saturation-workbench/drive.png",
       "w": 124,
-      "h": 192
+      "h": 192,
+      "at": {
+        "x": 218,
+        "y": 184,
+        "w": 112,
+        "h": 180
+      }
     },
     "amount": {
       "src": "/help/shots/saturation-workbench/amount.png",
       "w": 82,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 341,
+        "y": 208,
+        "w": 70,
+        "h": 119
+      }
     },
     "low": {
       "src": "/help/shots/saturation-workbench/low.png",
       "w": 88,
-      "h": 109
+      "h": 109,
+      "at": {
+        "x": 461,
+        "y": 205,
+        "w": 76,
+        "h": 97
+      }
     },
     "high": {
       "src": "/help/shots/saturation-workbench/high.png",
       "w": 88,
-      "h": 109
+      "h": 109,
+      "at": {
+        "x": 549,
+        "y": 205,
+        "w": 76,
+        "h": 97
+      }
     },
     "band-range": {
       "src": "/help/shots/saturation-workbench/band-range.png",
       "w": 108,
-      "h": 31
+      "h": 31,
+      "at": {
+        "x": 495,
+        "y": 314,
+        "w": 96,
+        "h": 19
+      }
     },
     "emph-on": {
       "src": "/help/shots/saturation-workbench/emph-on.png",
       "w": 53,
-      "h": 34
+      "h": 34,
+      "at": {
+        "x": 463,
+        "y": 402,
+        "w": 41,
+        "h": 22
+      }
     },
     "emph-shape": {
       "src": "/help/shots/saturation-workbench/emph-shape.png",
       "w": 135,
-      "h": 39
+      "h": 39,
+      "at": {
+        "x": 515,
+        "y": 400,
+        "w": 123,
+        "h": 27
+      }
     },
     "emph-plot": {
       "src": "/help/shots/saturation-workbench/emph-plot.png",
       "w": 528,
-      "h": 163
+      "h": 163,
+      "at": {
+        "x": 122,
+        "y": 439,
+        "w": 516,
+        "h": 151
+      }
     },
     "reset-layers": {
       "src": "/help/shots/saturation-workbench/reset-layers.png",
       "w": 114,
-      "h": 38
+      "h": 38,
+      "at": {
+        "x": 560,
+        "y": 626,
+        "w": 102,
+        "h": 26
+      }
     },
     "output": {
       "src": "/help/shots/saturation-workbench/output.png",
       "w": 87,
-      "h": 629
+      "h": 629,
+      "at": {
+        "x": 671,
+        "y": 72,
+        "w": 75,
+        "h": 617
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/saturation-workbench/face.jpg",
+    "w": 760,
+    "h": 645,
+    "x": 0,
+    "y": 58
   }
 }

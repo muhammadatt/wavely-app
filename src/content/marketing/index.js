@@ -74,11 +74,41 @@
 
 import optoSmooth from './opto-smooth.js'
 import voxPressor from './vox-pressor.js'
+import normalize from './normalize.js'
+import loudness from './loudness.js'
+import autoLeveler from './auto-leveler.js'
+import softClipper from './soft-clipper.js'
+import fetPunch from './fet-punch.js'
+import inflator from './inflator.js'
+import manualEq from './manual-eq.js'
+import airBand from './air-band.js'
+import phatass from './phatass.js'
+import saturationBench from './saturation-bench.js'
+import noiseReduction from './noise-reduction.js'
+import deEsser from './de-esser.js'
+import hfLimiter from './hf-limiter.js'
+import resonanceSuppressor from './resonance-suppressor.js'
+import humRemover from './hum-remover.js'
 import { HELP_META, helpSlug } from '../help/meta.js'
 
 export const MARKETING = {
   'opto-smooth': optoSmooth,
   'vox-pressor': voxPressor,
+  'normalize': normalize,
+  'loudness': loudness,
+  'auto-leveler': autoLeveler,
+  'soft-clipper': softClipper,
+  'fet-punch': fetPunch,
+  'inflator': inflator,
+  'manual-eq': manualEq,
+  'air-band': airBand,
+  'phatass': phatass,
+  'saturation-bench': saturationBench,
+  'noise-reduction': noiseReduction,
+  'de-esser': deEsser,
+  'hf-limiter': hfLimiter,
+  'resonance-suppressor': resonanceSuppressor,
+  'hum-remover': humRemover,
 }
 
 /** A page's URL segment: the help page's, the product name. */
@@ -114,7 +144,8 @@ export function marketingPageTitle(windowId) {
  * only in a dev build — the help pages' rule.
  */
 export function publishedMarketingIds(devBuild) {
-  return Object.keys(MARKETING).filter(id => devBuild || HELP_META[id]?.release !== 'dev')
+  // In the help index's order (the toolbar's: Level, Dynamics, Tone, Fix).
+  return Object.keys(HELP_META).filter(id => MARKETING[id] && (devBuild || HELP_META[id].release !== 'dev'))
 }
 
 // ── The editor's try-out link ───────────────────────────────────────────────

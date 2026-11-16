@@ -15,7 +15,7 @@ import {
   MARKETING, marketingIdForSlug, marketingPageTitle, marketingTitle, marketingUrl, publishedMarketingIds, spotOnFace, tryOutUrl,
 } from '../content/marketing/index.js'
 import { HELP, helpUrl } from '../content/help/index.js'
-import { requiredPlan } from '../auth/plans.js'
+import { isOffline, requiredPlan } from '../auth/plans.js'
 import { DEV_TUNING_PANELS } from '../devFlags.js'
 import { marketingSlugFromPath } from './route.js'
 import ABPlayer from './ABPlayer.vue'
@@ -43,9 +43,10 @@ const shots = page ? SHOTS[id] ?? null : null
 const plan = page?.feature ? requiredPlan(page.feature) : 'free'
 // Price only: "runs in your browser" is the pitch's to say, and saying it twice
 // in the hero read as filler.
+// An offline process (Auto Leveler, Noise Reduction) has no free preview.
 const planNote = plan === 'free'
   ? 'Free to use'
-  : 'Preview free · Apply with Pro'
+  : isOffline(page.feature) ? 'Included with Pro' : 'Preview free · Apply with Pro'
 
 /** Samples that have been rendered; a listed sample with no audio yet is left out. */
 const samples = (page?.samples ?? [])

@@ -8,27 +8,64 @@
     "mode": {
       "src": "/help/shots/noise-reduction/mode.png",
       "w": 544,
-      "h": 82
+      "h": 82,
+      "at": {
+        "x": 14,
+        "y": 72,
+        "w": 532,
+        "h": 70
+      }
     },
     "max-reduction": {
       "src": "/help/shots/noise-reduction/max-reduction.png",
       "w": 245,
-      "h": 43
+      "h": 43,
+      "at": {
+        "x": 28,
+        "y": 233,
+        "w": 233,
+        "h": 31
+      }
     },
     "tiers": {
       "src": "/help/shots/noise-reduction/tiers.png",
       "w": 245,
-      "h": 41
+      "h": 41,
+      "at": {
+        "x": 28,
+        "y": 272,
+        "w": 233,
+        "h": 29
+      }
     },
     "voice-guard": {
       "src": "/help/shots/noise-reduction/voice-guard.png",
       "w": 245,
-      "h": 74
+      "h": 74,
+      "at": {
+        "x": 299,
+        "y": 233,
+        "w": 233,
+        "h": 62
+      }
     },
     "mix": {
       "src": "/help/shots/noise-reduction/mix.png",
       "w": 544,
-      "h": 96
+      "h": 96,
+      "at": {
+        "x": 14,
+        "y": 325,
+        "w": 532,
+        "h": 84
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/noise-reduction/face.jpg",
+    "w": 560,
+    "h": 365,
+    "x": 0,
+    "y": 58
   }
 }

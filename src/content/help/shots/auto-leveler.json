@@ -8,42 +8,97 @@
     "target": {
       "src": "/help/shots/auto-leveler/target.png",
       "w": 544,
-      "h": 82
+      "h": 82,
+      "at": {
+        "x": 14,
+        "y": 72,
+        "w": 532,
+        "h": 70
+      }
     },
     "deadband": {
       "src": "/help/shots/auto-leveler/deadband.png",
       "w": 245,
-      "h": 43
+      "h": 43,
+      "at": {
+        "x": 28,
+        "y": 233,
+        "w": 233,
+        "h": 31
+      }
     },
     "knee": {
       "src": "/help/shots/auto-leveler/knee.png",
       "w": 245,
-      "h": 43
+      "h": 43,
+      "at": {
+        "x": 28,
+        "y": 272,
+        "w": 233,
+        "h": 31
+      }
     },
     "window": {
       "src": "/help/shots/auto-leveler/window.png",
       "w": 245,
-      "h": 43
+      "h": 43,
+      "at": {
+        "x": 28,
+        "y": 311,
+        "w": 233,
+        "h": 31
+      }
     },
     "max-boost": {
       "src": "/help/shots/auto-leveler/max-boost.png",
       "w": 245,
-      "h": 43
+      "h": 43,
+      "at": {
+        "x": 299,
+        "y": 233,
+        "w": 233,
+        "h": 31
+      }
     },
     "max-cut": {
       "src": "/help/shots/auto-leveler/max-cut.png",
       "w": 245,
-      "h": 43
+      "h": 43,
+      "at": {
+        "x": 299,
+        "y": 272,
+        "w": 233,
+        "h": 31
+      }
     },
     "floor": {
       "src": "/help/shots/auto-leveler/floor.png",
       "w": 245,
-      "h": 43
+      "h": 43,
+      "at": {
+        "x": 299,
+        "y": 311,
+        "w": 233,
+        "h": 31
+      }
     },
     "last-run": {
       "src": "/help/shots/auto-leveler/last-run.png",
       "w": 544,
-      "h": 78
+      "h": 78,
+      "at": {
+        "x": 14,
+        "y": 366,
+        "w": 532,
+        "h": 66
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/auto-leveler/face.jpg",
+    "w": 560,
+    "h": 388,
+    "x": 0,
+    "y": 58
   }
 }

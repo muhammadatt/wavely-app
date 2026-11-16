@@ -8,62 +8,141 @@
     "detect-low": {
       "src": "/help/shots/de-esser/detect-low.png",
       "w": 102,
-      "h": 209
+      "h": 209,
+      "at": {
+        "x": 408,
+        "y": 72,
+        "w": 90,
+        "h": 197
+      }
     },
     "detect-high": {
       "src": "/help/shots/de-esser/detect-high.png",
       "w": 85,
-      "h": 209
+      "h": 209,
+      "at": {
+        "x": 653,
+        "y": 72,
+        "w": 73,
+        "h": 197
+      }
     },
     "monitor": {
       "src": "/help/shots/de-esser/monitor.png",
       "w": 137,
-      "h": 35
+      "h": 35,
+      "at": {
+        "x": 22,
+        "y": 80,
+        "w": 125,
+        "h": 23
+      }
     },
     "out-meter": {
       "src": "/help/shots/de-esser/out-meter.png",
       "w": 82,
-      "h": 223
+      "h": 223,
+      "at": {
+        "x": 736,
+        "y": 72,
+        "w": 70,
+        "h": 211
+      }
     },
     "deess-lamp": {
       "src": "/help/shots/de-esser/deess-lamp.png",
       "w": 69,
-      "h": 22
+      "h": 22,
+      "at": {
+        "x": 103,
+        "y": 307,
+        "w": 57,
+        "h": 10
+      }
     },
     "amount": {
       "src": "/help/shots/de-esser/amount.png",
       "w": 131,
-      "h": 161
+      "h": 161,
+      "at": {
+        "x": 73,
+        "y": 295,
+        "w": 119,
+        "h": 149
+      }
     },
     "split": {
       "src": "/help/shots/de-esser/split.png",
       "w": 212,
-      "h": 68
+      "h": 68,
+      "at": {
+        "x": 32,
+        "y": 454,
+        "w": 200,
+        "h": 56
+      }
     },
     "hf-restore": {
       "src": "/help/shots/de-esser/hf-restore.png",
       "w": 107,
-      "h": 159
+      "h": 159,
+      "at": {
+        "x": 383,
+        "y": 295,
+        "w": 95,
+        "h": 147
+      }
     },
     "air-auto": {
       "src": "/help/shots/de-esser/air-auto.png",
       "w": 69,
-      "h": 30
+      "h": 30,
+      "at": {
+        "x": 402,
+        "y": 450,
+        "w": 57,
+        "h": 18
+      }
     },
     "lisp-guard": {
       "src": "/help/shots/de-esser/lisp-guard.png",
       "w": 107,
-      "h": 159
+      "h": 159,
+      "at": {
+        "x": 621,
+        "y": 295,
+        "w": 95,
+        "h": 147
+      }
     },
     "reduction": {
       "src": "/help/shots/de-esser/reduction.png",
       "w": 800,
-      "h": 31
+      "h": 31,
+      "at": {
+        "x": 16,
+        "y": 538,
+        "w": 788,
+        "h": 19
+      }
     },
     "scope": {
       "src": "/help/shots/de-esser/scope.png",
       "w": 804,
-      "h": 142
+      "h": 142,
+      "at": {
+        "x": 14,
+        "y": 565,
+        "w": 792,
+        "h": 130
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/de-esser/face.jpg",
+    "w": 820,
+    "h": 651,
+    "x": 0,
+    "y": 58
   }
 }

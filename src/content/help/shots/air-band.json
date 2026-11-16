@@ -8,27 +8,64 @@
     "in-meter": {
       "src": "/help/shots/air-boost/in-meter.png",
       "w": 82,
-      "h": 303
+      "h": 303,
+      "at": {
+        "x": 14,
+        "y": 72,
+        "w": 70,
+        "h": 291
+      }
     },
     "curve": {
       "src": "/help/shots/air-boost/curve.png",
       "w": 476,
-      "h": 138
+      "h": 138,
+      "at": {
+        "x": 108,
+        "y": 86,
+        "w": 464,
+        "h": 126
+      }
     },
     "air": {
       "src": "/help/shots/air-boost/air.png",
       "w": 158,
-      "h": 226
+      "h": 226,
+      "at": {
+        "x": 267,
+        "y": 214,
+        "w": 146,
+        "h": 214
+      }
     },
     "out-meter": {
       "src": "/help/shots/air-boost/out-meter.png",
       "w": 87,
-      "h": 363
+      "h": 363,
+      "at": {
+        "x": 591,
+        "y": 72,
+        "w": 75,
+        "h": 351
+      }
     },
     "output": {
       "src": "/help/shots/air-boost/output.png",
       "w": 71,
-      "h": 86
+      "h": 86,
+      "at": {
+        "x": 591,
+        "y": 337,
+        "w": 59,
+        "h": 74
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/air-boost/face.jpg",
+    "w": 680,
+    "h": 427,
+    "x": 0,
+    "y": 58
   }
 }

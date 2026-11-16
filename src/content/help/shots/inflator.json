@@ -8,37 +8,86 @@
     "in": {
       "src": "/help/shots/cambridge-inflator/in.png",
       "w": 83,
-      "h": 367
+      "h": 367,
+      "at": {
+        "x": 18,
+        "y": 84,
+        "w": 71,
+        "h": 355
+      }
     },
     "effect": {
       "src": "/help/shots/cambridge-inflator/effect.png",
       "w": 76,
-      "h": 310
+      "h": 310,
+      "at": {
+        "x": 104,
+        "y": 104,
+        "w": 64,
+        "h": 298
+      }
     },
     "lift": {
       "src": "/help/shots/cambridge-inflator/lift.png",
       "w": 58,
-      "h": 183
+      "h": 183,
+      "at": {
+        "x": 307,
+        "y": 106,
+        "w": 46,
+        "h": 171
+      }
     },
     "band-split": {
       "src": "/help/shots/cambridge-inflator/band-split.png",
       "w": 153,
-      "h": 57
+      "h": 57,
+      "at": {
+        "x": 260,
+        "y": 293,
+        "w": 141,
+        "h": 45
+      }
     },
     "clip": {
       "src": "/help/shots/cambridge-inflator/clip.png",
       "w": 152,
-      "h": 57
+      "h": 57,
+      "at": {
+        "x": 260,
+        "y": 351,
+        "w": 140,
+        "h": 45
+      }
     },
     "curve": {
       "src": "/help/shots/cambridge-inflator/curve.png",
       "w": 76,
-      "h": 310
+      "h": 310,
+      "at": {
+        "x": 492,
+        "y": 104,
+        "w": 64,
+        "h": 298
+      }
     },
     "out": {
       "src": "/help/shots/cambridge-inflator/out.png",
       "w": 83,
-      "h": 367
+      "h": 367,
+      "at": {
+        "x": 571,
+        "y": 84,
+        "w": 71,
+        "h": 355
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/cambridge-inflator/face.jpg",
+    "w": 660,
+    "h": 407,
+    "x": 0,
+    "y": 58
   }
 }

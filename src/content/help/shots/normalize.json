@@ -8,7 +8,20 @@
     "target-peak": {
       "src": "/help/shots/peak-normalize/target-peak.png",
       "w": 168,
-      "h": 236
+      "h": 236,
+      "at": {
+        "x": 112,
+        "y": 80,
+        "w": 156,
+        "h": 224
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/peak-normalize/face.jpg",
+    "w": 380,
+    "h": 308,
+    "x": 0,
+    "y": 58
   }
 }

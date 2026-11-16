@@ -35,7 +35,8 @@
  * `apply*Region` render, using the same kernel classes the worklets run. If an
  * apply path changes how it measures, change it here too.
  *
- * Only effects listed in RENDERERS can be rendered; add one per page.
+ * Each page's renderer is its own module, scripts/marketing-renderers/<id>.mjs;
+ * a page without one plays no audio (its Hear it section is hidden).
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -43,12 +44,6 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { MARKETING, marketingSlug } from '../src/content/marketing/index.js'
-import { inputAlignDbFor } from '../src/audio/dsp/inputAlign.js'
-import { computeAutoMakeupPlan, processLA2ABuffer } from '../src/audio/la2aProcessor.js'
-import { LA2A_DEFAULTS, toKernelParams as la2aKernelParams } from '../src/audio/effects/la2aParams.js'
-import { processVoxPressorBuffer } from '../src/audio/voxPressorProcessor.js'
-import { measureVoxPressor } from '../src/audio/voxPressorSolve.js'
-import { VOX_DEFAULTS, VOX_MEASURED_KEYS, toKernelParams as voxKernelParams } from '../src/audio/effects/voxPressorParams.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SR = 44100
@@ -62,6 +57,7 @@ for (const id of only) if (!MARKETING[id]) { console.error(`no marketing page: $
 const ids = only.length ? only : Object.keys(MARKETING)
 
 // ── Effects ─────────────────────────────────────────────────────────────────
+// One module per page: scripts/marketing-renderers/<window-id>.mjs.
 
 const peakDb = (channels) => {
   let p = 0
@@ -69,45 +65,9 @@ const peakDb = (channels) => {
   return p > 0 ? 20 * Math.log10(p) : -Infinity
 }
 
-/** Render `channels` through `process`, padded by its latency and trimmed back to the input. */
-function renderAligned(channels, latency, process) {
-  const n = channels[0].length
-  const padded = channels.map((c) => { const q = new Float32Array(n + latency); q.set(c); return q })
-  return process(padded).map(c => c.slice(latency, latency + n))
-}
-
-const RENDERERS = {
-  /** useLA2A.prepareApply (alignment, then the percentile makeup solve) → applyLA2ARegion. */
-  'opto-smooth'(channels, settings) {
-    const panel = { ...LA2A_DEFAULTS, ...settings }
-    const inputAlignDb = inputAlignDbFor(channels, SR)
-    const plan = computeAutoMakeupPlan(channels, SR, {
-      mode: panel.mode, peakReduction: panel.peakReduction, gainDb: 0, r37: panel.r37,
-      lookaheadMs: panel.lookahead, analog: panel.analog !== false, mix: panel.mix, inputAlignDb,
-    }, { reference: 'percentile' })
-    const kp = la2aKernelParams({
-      ...panel,
-      gain: Math.max(-24, Math.min(24, plan.makeupDb)),
-      ceilingDb: peakDb(channels),
-      ceilingKneeDb: plan.ceilingKneeDb,
-      inputAlignDb,
-    })
-    const probe = processLA2ABuffer([new Float32Array(128)], SR, kp)
-    const out = renderAligned(channels, probe.latencySamples, ch => processLA2ABuffer(ch, SR, kp).channelData)
-    return { channels: out, note: `align ${inputAlignDb.toFixed(2)} dB, makeup ${plan.makeupDb.toFixed(2)} dB` }
-  },
-
-  /** useVoxPressor.prepareApply (alignment, measureVoxPressor) → applyVoxPressorRegion. */
-  'vox-pressor'(channels, settings) {
-    const alignDb = inputAlignDbFor(channels, SR)
-    const panel = { ...VOX_DEFAULTS, ...settings, alignDb, listen: 'off' }
-    const measured = measureVoxPressor(channels, SR, voxKernelParams(panel))
-    const solved = { ...panel }
-    for (const k of VOX_MEASURED_KEYS) solved[k] = measured[k] ?? null
-    const kp = voxKernelParams(solved)
-    const out = processVoxPressorBuffer(channels, SR, kp, { compensate: true }).channelData
-    return { channels: out, note: `align ${alignDb.toFixed(2)} dB, peaks ${(measured.peaksDb ?? 0).toFixed(1)} dB, body ${(measured.bodyDb ?? 0).toFixed(1)} dB` }
-  },
+async function loadRenderer(id) {
+  const path = join(ROOT, 'scripts/marketing-renderers', `${id}.mjs`)
+  return existsSync(path) ? (await import(path)).default : null
 }
 
 // ── Audio I/O (FFmpeg) ──────────────────────────────────────────────────────
@@ -166,8 +126,8 @@ let failures = 0
 for (const id of ids) {
   const page = MARKETING[id]
   const slug = marketingSlug(id)
-  const render = RENDERERS[id]
-  if (!render) { console.log(`FAIL  ${id}: no renderer in scripts/marketing-render.mjs`); failures++; continue }
+  const render = await loadRenderer(id)
+  if (!render) { console.log(`skip  ${id}: no renderer in scripts/marketing-renderers/ (the page plays no audio)`); continue }
   const srcDir = join(ROOT, 'marketing/samples', slug)
   const outDir = join(ROOT, 'public/plugins', slug, 'audio')
   mkdirSync(outDir, { recursive: true })
