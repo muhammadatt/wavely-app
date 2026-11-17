@@ -20,10 +20,12 @@
  * selection from those entries (`v-model:active`, `focusSpot`).
  *
  * Usability rules (November 2026 — each fixed a problem found on the first build):
- * - A CLICK, TAP or KEY selects; pointing only PREVIEWS, after a short pause,
- *   and the caption returns to the selection when the pointer leaves the
- *   faceplate. Pointing used to select, and moving down to read the caption (or
- *   click its link) selected whatever lay on the way — VU meter became HF Emph.
+ * - The caption changes ONLY on a click, tap or key (owner, November 2026).
+ *   Pointing just brightens the control's outline. Pointing first selected,
+ *   and moving down to read the caption (or click its link) selected whatever
+ *   lay on the way — VU meter became HF Emph; a hover PREVIEW of the caption
+ *   that reverted on leaving came next, and still changed the text under the
+ *   reader's eyes as the pointer crossed the faceplate.
  * - Every hotspot answers the pointer over at least `MIN_HIT` px, grown into
  *   free space only (`hitBoxes`): lamps were 19 px tall on a desktop and 9 px
  *   on a phone. The outline still draws the control's real box.
@@ -31,9 +33,9 @@
  *   sits in one grid cell, only the shown one visible), so nothing below the
  *   tour jumps as the selection changes.
  * - One Tab stop (roving tabindex); arrows, Home and End move the selection.
- * - Screen readers hear the SELECTION only, through a hidden live region —
- *   the visible caption also follows hover and would read out every sweep
- *   (it is not live; its hidden copies are out of the accessibility tree).
+ * - Screen readers hear the selection through a hidden live region (the
+ *   visible caption is not live; its hidden copies are out of the
+ *   accessibility tree).
  * - Under 640 px only the selected control is outlined (owner: fifteen boxes on
  *   a 360 px image cover the controls), so the numbered list is shown there
  *   even when `list` is off — otherwise nothing says what can be tapped.
@@ -57,31 +59,8 @@ const props = defineProps({
 
 /** The SELECTED spot's index (click, tap, key); a parent may bind it. */
 const active = defineModel('active', { type: Number, default: 0 })
-/** The spot the mouse rests on, or null. Shown, never selected. */
-const preview = ref(null)
-const shown = computed(() => preview.value ?? active.value)
-
-/** How long the mouse must rest on a control before the caption follows it. */
-const PREVIEW_DELAY_MS = 90
-let previewTimer = 0
-function schedulePreview(i) {
-  clearTimeout(previewTimer)
-  previewTimer = setTimeout(() => { preview.value = i }, PREVIEW_DELAY_MS)
-}
-function onEnter(i, e) {
-  // A touch "hover" is the start of a tap; the click selects.
-  if (e.pointerType === 'touch') return
-  schedulePreview(i)
-}
-/** Leaving one control for the next must not flash the selection between. */
-function onLeave() { schedulePreview(null) }
-function endPreview() {
-  clearTimeout(previewTimer)
-  preview.value = null
-}
 
 function select(i) {
-  endPreview()
   active.value = i
 }
 
@@ -109,7 +88,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   ro?.disconnect()
   mq?.removeEventListener?.('change', onMq)
-  clearTimeout(previewTimer)
 })
 
 const boxes = computed(() => props.spots.map(s => s.at))
@@ -161,7 +139,7 @@ defineExpose({ focusSpot })
 <template>
   <div class="pt" :class="{ 'pt--solo': !list }">
     <figure class="pt-figure">
-      <div ref="stage" class="pt-stage" @pointerleave="endPreview">
+      <div ref="stage" class="pt-stage">
         <img
           :src="image.src" :width="image.w" :height="image.h" :alt="alt"
           class="pt-img" draggable="false" loading="lazy"
@@ -172,13 +150,11 @@ defineExpose({ focusSpot })
           :ref="el => { spotEls[i] = el }"
           type="button"
           class="pt-spot"
-          :class="{ 'pt-spot--on': i === active, 'pt-spot--preview': i === preview && i !== active }"
+          :class="{ 'pt-spot--on': i === active }"
           :style="hitStyle(i)"
           :tabindex="i === active ? 0 : -1"
           :aria-label="`${i + 1}. ${s.label}`"
           :aria-pressed="i === active"
-          @pointerenter="onEnter(i, $event)"
-          @pointerleave="onLeave"
           @click="select(i)"
           @keydown="onKey($event, spotEls)"
         >
@@ -195,7 +171,7 @@ defineExpose({ focusSpot })
           v-for="(s, i) in spots"
           :key="s.id"
           class="pt-caption-item"
-          :class="{ 'pt-caption-item--on': i === shown }"
+          :class="{ 'pt-caption-item--on': i === active }"
         >
           <span class="pt-caption-n">{{ i + 1 }}</span>
           <span>
@@ -204,7 +180,7 @@ defineExpose({ focusSpot })
             <a
               v-if="detailHref"
               :href="detailHref(s)"
-              :tabindex="i === shown ? 0 : -1"
+              :tabindex="i === active ? 0 : -1"
               class="pt-caption-more"
             >Full description ↓</a>
           </span>
@@ -220,11 +196,9 @@ defineExpose({ focusSpot })
           :ref="el => { rowEls[i] = el }"
           type="button"
           class="pt-row"
-          :class="{ 'pt-row--on': i === active, 'pt-row--preview': i === preview && i !== active }"
+          :class="{ 'pt-row--on': i === active }"
           :tabindex="i === active ? 0 : -1"
           :aria-pressed="i === active"
-          @pointerenter="onEnter(i, $event)"
-          @pointerleave="endPreview"
           @click="select(i)"
           @keydown="onKey($event, rowEls)"
         >
@@ -275,7 +249,8 @@ defineExpose({ focusSpot })
   transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 /* Every hotspot is faintly visible, so the screenshot reads as explorable. */
-.pt-spot--preview .pt-outline {
+/* Hover only brightens the outline; the caption waits for a click. */
+.pt-spot:hover:not(.pt-spot--on) .pt-outline {
   border-color: rgba(232, 163, 61, 0.6);
   background: rgba(232, 163, 61, 0.05);
 }
@@ -339,8 +314,10 @@ defineExpose({ focusSpot })
 }
 .pt-caption strong { display: block; margin-bottom: 2px; }
 .pt-caption-text { color: var(--tour-soft, rgba(234, 246, 248, 0.7)); }
+/* On a line of its own under the description. */
 .pt-caption-more {
-  display: inline-block;
+  display: block;
+  width: fit-content;
   margin-top: 6px;
   font-size: 13px;
   font-weight: 500;
@@ -384,7 +361,7 @@ defineExpose({ focusSpot })
   text-align: left;
   cursor: pointer;
 }
-.pt-row:hover, .pt-row--preview { background: rgba(255, 255, 255, 0.04); }
+.pt-row:hover { background: rgba(255, 255, 255, 0.04); }
 .pt-row--on { background: rgba(232, 163, 61, 0.1); color: var(--tour-text, #eaf6f8); }
 .pt-row:focus { outline: none; }
 .pt-row:focus-visible { box-shadow: inset 0 0 0 2px var(--pt-accent); }

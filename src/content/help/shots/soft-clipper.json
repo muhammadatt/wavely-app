@@ -51,24 +51,24 @@
     },
     "meters": {
       "src": "/help/shots/soft-clipper/meters.png",
-      "w": 884,
+      "w": 876,
       "h": 38,
       "at": {
-        "x": 14,
+        "x": 18,
         "y": 369,
-        "w": 872,
+        "w": 864,
         "h": 26
       }
     },
     "ceiling": {
       "src": "/help/shots/soft-clipper/ceiling.png",
       "w": 139,
-      "h": 206,
+      "h": 194,
       "at": {
         "x": 34,
-        "y": 430,
+        "y": 442,
         "w": 127,
-        "h": 194
+        "h": 182
       }
     },
     "set-ceiling": {
@@ -96,12 +96,12 @@
     "output": {
       "src": "/help/shots/soft-clipper/output.png",
       "w": 138,
-      "h": 206,
+      "h": 194,
       "at": {
         "x": 740,
-        "y": 411,
+        "y": 423,
         "w": 126,
-        "h": 194
+        "h": 182
       }
     },
     "auto": {

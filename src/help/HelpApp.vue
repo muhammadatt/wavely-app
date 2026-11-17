@@ -95,6 +95,21 @@ function showOnPanel(c) {
   tour.value?.focusSpot(tourIndex.get(c.shot))
   tourEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
+/**
+ * The entry's highlight is a `:target` animation, which plays once per hash:
+ * following the same "Full description" link twice scrolled to the entry
+ * with no highlight the second time. Restart it.
+ */
+function replayTarget(e) {
+  const a = e.target.closest?.('a.pt-caption-more')
+  if (!a || a.getAttribute('href') !== window.location.hash) return
+  const el = document.getElementById(window.location.hash.slice(1))
+  if (!el) return
+  el.style.animation = 'none'
+  void el.offsetWidth
+  el.style.animation = ''
+}
+
 /** A crop for a control, or null; CSS size capped so a wide strip fits. */
 function crop(c) {
   const m = c.shot && shots?.controls?.[c.shot]
@@ -183,7 +198,7 @@ onMounted(() => {
 
           <section class="hp-section">
             <h2 class="hp-heading">Interface and controls</h2>
-            <div v-if="tourSpots.length" ref="tourEl" class="hp-tour">
+            <div v-if="tourSpots.length" ref="tourEl" class="hp-tour" @click="replayTarget">
               <p class="hp-tour-lede">Click a control on the faceplate to see what it does. Its number matches its entry below.</p>
               <PanelTour
                 ref="tour"
@@ -533,14 +548,32 @@ a:focus-visible {
 }
 /* An entry the tour's caption jumped to: clear of the sticky bar, and lit. */
 .hp-control[id] {
-  scroll-margin-top: 72px;
+  scroll-margin-top: 84px;
 }
+/* Held lit for a beat, then faded: an amber block grown 12 px past the entry
+   (box-shadow spread, so the layout does not move) with an amber ring. The
+   first version was a 12 % tint fading over 1.6 s and was easy to miss. */
 .hp-control:target {
-  animation: hp-target 1.6s ease-out;
+  border-radius: 10px;
+  outline: 1.5px solid transparent;
+  outline-offset: 12px;
+  animation: hp-target 3.2s ease-in forwards;
 }
 @keyframes hp-target {
-  from { background: rgba(232, 163, 61, 0.12); }
-  to { background: transparent; }
+  0%,
+  45% {
+    background-color: rgba(232, 163, 61, 0.2);
+    box-shadow: 0 0 0 12px rgba(232, 163, 61, 0.2);
+    outline-color: rgba(232, 163, 61, 0.9);
+  }
+  100% {
+    background-color: rgba(232, 163, 61, 0);
+    box-shadow: 0 0 0 12px rgba(232, 163, 61, 0);
+    outline-color: rgba(232, 163, 61, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hp-control:target { animation: none; outline-color: rgba(232, 163, 61, 0.9); }
 }
 /* The control's tour number, amber like the tour; a button back up to it. */
 .hp-control-n {

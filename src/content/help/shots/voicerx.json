@@ -18,23 +18,23 @@
     },
     "input-meter": {
       "src": "/help/shots/voicerx/input-meter.png",
-      "w": 62,
+      "w": 56,
       "h": 274,
       "at": {
-        "x": 21,
+        "x": 22,
         "y": 74,
-        "w": 50,
+        "w": 44,
         "h": 262
       }
     },
     "output-meter": {
       "src": "/help/shots/voicerx/output-meter.png",
-      "w": 62,
+      "w": 56,
       "h": 274,
       "at": {
-        "x": 748,
+        "x": 749,
         "y": 74,
-        "w": 50,
+        "w": 44,
         "h": 262
       }
     }

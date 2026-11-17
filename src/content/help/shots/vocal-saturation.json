@@ -7,12 +7,12 @@
   "controls": {
     "input-meter": {
       "src": "/help/shots/tube-saturation/input-meter.png",
-      "w": 61,
+      "w": 56,
       "h": 204,
       "at": {
         "x": 22,
         "y": 78,
-        "w": 49,
+        "w": 44,
         "h": 192
       }
     },
@@ -52,33 +52,33 @@
     "wet-dry": {
       "src": "/help/shots/tube-saturation/wet-dry.png",
       "w": 85,
-      "h": 108,
+      "h": 106,
       "at": {
         "x": 389,
-        "y": 117,
+        "y": 119,
         "w": 73,
-        "h": 96
+        "h": 94
       }
     },
     "hf-loss": {
       "src": "/help/shots/tube-saturation/hf-loss.png",
       "w": 85,
-      "h": 110,
+      "h": 108,
       "at": {
         "x": 468,
-        "y": 117,
+        "y": 119,
         "w": 73,
-        "h": 98
+        "h": 96
       }
     },
     "output-meter": {
       "src": "/help/shots/tube-saturation/output-meter.png",
-      "w": 62,
+      "w": 56,
       "h": 204,
       "at": {
-        "x": 548,
+        "x": 549,
         "y": 78,
-        "w": 50,
+        "w": 44,
         "h": 192
       }
     },
@@ -162,23 +162,23 @@
     "low-crossover": {
       "src": "/help/shots/tube-saturation/low-crossover.png",
       "w": 285,
-      "h": 57,
+      "h": 52,
       "at": {
         "x": 22,
         "y": 526,
         "w": 273,
-        "h": 45
+        "h": 40
       }
     },
     "mid-crossover": {
       "src": "/help/shots/tube-saturation/mid-crossover.png",
       "w": 285,
-      "h": 57,
+      "h": 52,
       "at": {
         "x": 325,
         "y": 526,
         "w": 273,
-        "h": 45
+        "h": 40
       }
     },
     "low-drive": {

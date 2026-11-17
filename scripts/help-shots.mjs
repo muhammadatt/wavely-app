@@ -37,15 +37,24 @@
  * `drums.wav` for the ones in DRUM_IDS (gitignored: the owner's clips, for
  * screenshots only, NEVER the marketing pages' Hear it audio) — and the
  * generated probe otherwise.
+ *
+ * ── RE-BOXING ───────────────────────────────────────────────────────────────
+ *   npm run help:shots -- --rebox opto-smooth
+ * Re-measures each control's box and re-cuts its crop from the panel.jpg
+ * already on disk, keeping panel.jpg and face.jpg. For a fix to how boxes are
+ * measured (`lib/controlBox.mjs`) without the owner's clips: a full run without
+ * them would replace the live pictures with probe-lit ones. The panel's layout
+ * must be the one the pictures show — it refuses when the window size differs.
  */
 import { chromium } from 'playwright'
 import { spawn } from 'node:child_process'
-import { writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { HELP, HELP_META, helpSlug } from '../src/content/help/index.js'
+import { measureControlBox } from './lib/controlBox.mjs'
 import { MARKETING } from '../src/content/marketing/index.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -53,7 +62,8 @@ const PORT = Number(process.env.HELP_SHOTS_PORT ?? 5198)
 const URL_ = process.env.HELP_SHOTS_URL ?? `http://localhost:${PORT}/`
 const PAD = 6
 
-const only = process.argv.slice(2)
+const REBOX = process.argv.includes('--rebox')
+const only = process.argv.slice(2).filter(a => !a.startsWith('--'))
 const ids = (only.length ? only : Object.keys(HELP))
 for (const id of ids) if (!HELP[id]) { console.error(`no help entry: ${id}`); process.exit(1) }
 
@@ -180,6 +190,63 @@ async function setPlaying(frame, on) {
   if (await button.count() && await button.isEnabled()) { await button.click(); await page.waitForTimeout(300) }
 }
 
+/**
+ * `--rebox`: measure every control's box on the open window and cut its crop
+ * from the panel.jpg on disk (2x), keeping the live pictures. Returns the
+ * updated manifest, or null when the window no longer matches the picture.
+ */
+async function rebox(id, frame) {
+  const file = join(ROOT, 'src/content/help/shots', `${id}.json`)
+  if (!existsSync(file)) { console.log(`FAIL  ${id}: --rebox needs an existing manifest`); return null }
+  const manifest = JSON.parse(readFileSync(file, 'utf8'))
+  const box = await frame.boundingBox()
+  if (Math.round(box.width) !== manifest.panel.w || Math.round(box.height) !== manifest.panel.h) {
+    console.log(`FAIL  ${id}: the window is ${Math.round(box.width)}×${Math.round(box.height)}, panel.jpg ${manifest.panel.w}×${manifest.panel.h} — re-shoot instead`)
+    return null
+  }
+  const slug = helpSlug(id)
+  const outDir = join(ROOT, 'public/help/shots', slug)
+  // Written only once every control has passed, so a refusal leaves nothing half-done.
+  const writes = []
+  for (const c of HELP[id].controls) {
+    if (!c.shot) continue
+    const el = frame.locator(`[data-help="${c.shot}"]`).first()
+    const b = (await el.count()) ? await el.evaluate(measureControlBox) : null
+    if (!b) { console.log(`FAIL  ${id}: ${c.shot} not found`); return null }
+    const at = { x: Math.round(b.x - box.x), y: Math.round(b.y - box.y), w: Math.round(b.width), h: Math.round(b.height) }
+    const clip = {
+      x: Math.max(0, at.x - PAD), y: Math.max(0, at.y - PAD),
+      w: Math.min(manifest.panel.w, at.x + at.w + PAD) - Math.max(0, at.x - PAD),
+      h: Math.min(manifest.panel.h, at.y + at.h + PAD) - Math.max(0, at.y - PAD),
+    }
+    // Cut from the picture on disk, at its own (2x) resolution, in the page.
+    const png = await page.evaluate(async ([src, c, cssW]) => {
+      const img = new Image(); img.src = src; await img.decode()
+      const k = img.naturalWidth / cssW
+      const cv = document.createElement('canvas')
+      cv.width = Math.round(c.w * k); cv.height = Math.round(c.h * k)
+      cv.getContext('2d').drawImage(img, c.x * k, c.y * k, c.w * k, c.h * k, 0, 0, cv.width, cv.height)
+      return cv.toDataURL('image/png').split(',')[1]
+    }, [`${manifest.panel.src}?rebox=${Date.now()}`, clip, manifest.panel.w])
+    writes.push([join(outDir, `${c.shot}.png`), Buffer.from(png, 'base64')])
+    const old = manifest.controls[c.shot]?.at
+    // Re-measuring only ever trims a box: one that reaches past its old box
+    // means the panel moved since the pictures were taken.
+    const SLACK = 2
+    if (old && (at.x < old.x - SLACK || at.y < old.y - SLACK || at.x + at.w > old.x + old.w + SLACK || at.y + at.h > old.y + old.h + SLACK)) {
+      console.log(`FAIL  ${id}: ${c.shot} moved (${old.w}×${old.h} at ${old.x},${old.y} → ${at.w}×${at.h} at ${at.x},${at.y}) — re-shoot instead`)
+      return null
+    }
+    if (old && (old.w !== at.w || old.h !== at.h || old.x !== at.x || old.y !== at.y)) {
+      console.log(`      ${c.shot}: ${old.w}×${old.h} at ${old.x},${old.y} → ${at.w}×${at.h} at ${at.x},${at.y}`)
+    }
+    manifest.controls[c.shot] = { src: `/help/shots/${slug}/${c.shot}.png`, w: clip.w, h: clip.h, at }
+  }
+  for (const [path, data] of writes) writeFileSync(path, data)
+  console.log(`ok    ${id.padEnd(22)} reboxed`)
+  return manifest
+}
+
 let failures = 0
 const manifests = {}
 try {
@@ -245,6 +312,7 @@ try {
       if (rows.length !== CHAIN_SAMPLE.length) { console.log(`FAIL  ${id}: expected ${CHAIN_SAMPLE.length} slots`); failures++ }
     }
 
+
     // Play through the open window so meters, scopes and reduction displays are
     // lit; measurements settle while it runs.
     if (PRESS_FIRST[id]) {
@@ -252,6 +320,17 @@ try {
       await page.waitForTimeout(4000)
     }
     await page.mouse.move(0, 0)
+    if (REBOX) {
+      const r = await rebox(id, frame)
+      if (r) manifests[id] = r; else failures++
+      await page.keyboard.press('Escape'); await page.waitForTimeout(500)
+      while (await page.locator('.win-frame').count()) {
+        await page.locator('.win-frame').last().locator('[aria-label="Close window"]').first().click().catch(() => {})
+        await page.waitForTimeout(300)
+        break
+      }
+      continue
+    }
     await setPlaying(frame, true)
     await page.waitForTimeout(SETTLE_MS[id] ?? PLAY_SETTLE_MS)
 
@@ -286,17 +365,8 @@ try {
       const el = frame.locator(`[data-help="${c.shot}"]`).first()
       // The union of the element and every visible descendant: a lamp or
       // label positioned outside its wrapper's box still belongs in the crop.
-      const b = (await el.count()) ? await el.evaluate((node) => {
-        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
-        for (const n of [node, ...node.querySelectorAll('*')]) {
-          const r = n.getBoundingClientRect()
-          const cs = getComputedStyle(n)
-          if (r.width < 1 || r.height < 1 || cs.visibility === 'hidden' || cs.display === 'none') continue
-          x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top)
-          x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom)
-        }
-        return x0 === Infinity ? null : { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
-      }) : null
+      // The visible union of the element and its descendants (`lib/controlBox.mjs`).
+      const b = (await el.count()) ? await el.evaluate(measureControlBox) : null
       if (!b || b.width < 2 || b.height < 2) { missing.push(c.shot); continue }
       const clip = {
         x: Math.max(0, b.x - PAD), y: Math.max(0, b.y - PAD),

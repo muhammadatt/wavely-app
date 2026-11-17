@@ -164,7 +164,7 @@ onMounted(() => {
 
       <section v-if="spots.length" class="mk-section">
         <h2 class="mk-h2">Take the tour</h2>
-        <p class="mk-lede">Point at or click any control to see what it does.</p>
+        <p class="mk-lede">Click any control to see what it does.</p>
         <PanelTour :image="shot" :spots="spots" :alt="`The ${title} faceplate`" />
       </section>
 

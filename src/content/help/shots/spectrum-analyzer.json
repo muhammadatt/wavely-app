@@ -63,23 +63,23 @@
     "averaging": {
       "src": "/help/shots/spectrum-analyzer/averaging.png",
       "w": 83,
-      "h": 131,
+      "h": 99,
       "at": {
         "x": 531,
-        "y": 352,
+        "y": 384,
         "w": 71,
-        "h": 119
+        "h": 87
       }
     },
     "floor": {
       "src": "/help/shots/spectrum-analyzer/floor.png",
-      "w": 78,
-      "h": 131,
+      "w": 66,
+      "h": 99,
       "at": {
-        "x": 612,
-        "y": 352,
-        "w": 66,
-        "h": 119
+        "x": 618,
+        "y": 384,
+        "w": 54,
+        "h": 87
       }
     }
   },

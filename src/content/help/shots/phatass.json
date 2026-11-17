@@ -18,13 +18,13 @@
     },
     "drive": {
       "src": "/help/shots/phatass/drive.png",
-      "w": 170,
-      "h": 202,
+      "w": 156,
+      "h": 184,
       "at": {
-        "x": 30,
-        "y": 211,
-        "w": 158,
-        "h": 190
+        "x": 37,
+        "y": 229,
+        "w": 144,
+        "h": 172
       }
     },
     "tape-type": {
@@ -41,23 +41,23 @@
     "tape-speed": {
       "src": "/help/shots/phatass/tape-speed.png",
       "w": 184,
-      "h": 187,
+      "h": 182,
       "at": {
         "x": 206,
-        "y": 242,
+        "y": 246,
         "w": 172,
-        "h": 175
+        "h": 170
       }
     },
     "warmth": {
       "src": "/help/shots/phatass/warmth.png",
       "w": 168,
-      "h": 202,
+      "h": 190,
       "at": {
         "x": 445,
-        "y": 211,
+        "y": 223,
         "w": 156,
-        "h": 190
+        "h": 178
       }
     },
     "character": {
@@ -84,23 +84,23 @@
     },
     "in": {
       "src": "/help/shots/phatass/in.png",
-      "w": 83,
+      "w": 68,
       "h": 395,
       "at": {
-        "x": 664,
+        "x": 670,
         "y": 116,
-        "w": 71,
+        "w": 56,
         "h": 383
       }
     },
     "out": {
       "src": "/help/shots/phatass/out.png",
-      "w": 83,
+      "w": 68,
       "h": 395,
       "at": {
-        "x": 723,
+        "x": 733,
         "y": 116,
-        "w": 71,
+        "w": 56,
         "h": 383
       }
     }
