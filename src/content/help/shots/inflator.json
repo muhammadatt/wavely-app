@@ -82,6 +82,50 @@
         "w": 56,
         "h": 355
       }
+    },
+    "bypass": {
+      "src": "/help/shots/cambridge-inflator/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 526,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/cambridge-inflator/presets.png",
+      "w": 212,
+      "h": 42,
+      "at": {
+        "x": 270,
+        "y": 15,
+        "w": 200,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/cambridge-inflator/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 410,
+        "y": 480,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/cambridge-inflator/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 490,
+        "y": 480,
+        "w": 154,
+        "h": 32
+      }
     }
   },
   "face": {

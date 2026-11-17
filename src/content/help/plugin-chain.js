@@ -64,7 +64,26 @@ export default {
       text: 'Says how many slots are live, or that the chain or every slot is bypassed.',
     },
     {
+      label: 'Chain ON / BYPASS',
+      shot: 'bypass',
+      text: 'The switch in the window header takes the whole chain in and out of what you hear.',
+      details: [
+        'Each slot keeps its own ON / BYPASS. After Apply the chain is bypassed, so the processing is not heard twice; turn it back on here.',
+      ],
+      range: 'ON, BYPASS',
+      default: 'ON',
+    },
+    {
+      label: 'Apply',
+      shot: 'apply',
+      text: 'Renders every live slot over the selection, in the rack’s order, as one undo step.',
+      details: [
+        'It needs a selection and at least one live slot. The effects in the chain have no Apply of their own.',
+      ],
+    },
+    {
       label: 'Presets',
+      shot: 'presets',
       text: 'The preset browser in the window header saves and loads whole chains — every slot, its ON / BYPASS and its settings.',
       details: [
         'Loading a chain replaces the one in the rack. Values an effect measures from the file, such as auto makeup, are never saved; they are measured again on the next file.',

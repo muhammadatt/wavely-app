@@ -137,6 +137,50 @@
         "w": 56,
         "h": 341
       }
+    },
+    "bypass": {
+      "src": "/help/shots/eq/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 530,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/eq/presets.png",
+      "w": 212,
+      "h": 42,
+      "at": {
+        "x": 246,
+        "y": 15,
+        "w": 200,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/eq/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 414,
+        "y": 731,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/eq/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 494,
+        "y": 731,
+        "w": 154,
+        "h": 32
+      }
     }
   },
   "face": {

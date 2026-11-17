@@ -104,6 +104,50 @@
         "w": 56,
         "h": 383
       }
+    },
+    "bypass": {
+      "src": "/help/shots/phatass/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 686,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/phatass/presets.png",
+      "w": 212,
+      "h": 42,
+      "at": {
+        "x": 292,
+        "y": 15,
+        "w": 200,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/phatass/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 570,
+        "y": 556,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/phatass/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 650,
+        "y": 556,
+        "w": 154,
+        "h": 32
+      }
     }
   },
   "face": {

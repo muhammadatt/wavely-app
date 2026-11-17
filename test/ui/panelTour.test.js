@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { contains, placeBadges, hitBoxes, stackOrder, stepIndex } from '../../src/components/tour/tourGeometry.js'
 import { HELP } from '../../src/content/help/index.js'
-import { helpTourSpots, tourImage } from '../../src/content/help/tour.js'
+import { helpTour } from '../../src/content/help/tour.js'
 
 const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 
@@ -46,8 +46,10 @@ test('on every tour page no grown hit area covers another control', () => {
   for (const id of Object.keys(HELP)) {
     let shots
     try { shots = JSON.parse(readFileSync(new URL(`../../src/content/help/shots/${id}.json`, import.meta.url), 'utf8')) } catch { continue }
-    const img = tourImage(shots)
-    const spots = helpTourSpots(HELP[id].controls, shots)
+    const tour = helpTour(HELP[id].controls, shots)
+    if (!tour) continue
+    const img = tour.image
+    const spots = tour.spots
     const boxes = spots.map(s => s.at)
     // 44 px at a phone's ~0.45 scale is ~98 image px: the hardest case.
     for (const min of [32, 98]) {
@@ -109,8 +111,10 @@ test('on every help screenshot no badge covers another control or number', () =>
   for (const id of Object.keys(HELP)) {
     let shots
     try { shots = JSON.parse(readFileSync(new URL(`../../src/content/help/shots/${id}.json`, import.meta.url), 'utf8')) } catch { continue }
-    const img = tourImage(shots)
-    const boxes = helpTourSpots(HELP[id].controls, shots).map(s => s.at)
+    const tour = helpTour(HELP[id].controls, shots)
+    if (!tour) continue
+    const img = tour.image
+    const boxes = tour.spots.map(s => s.at)
     const placed = placeBadges(boxes, img, 18, 3).map(p => ({ ...p, w: 18, h: 18 }))
     placed.forEach((p, i) => {
       const clear = boxes.every((b, j) => i === j || contains(b, boxes[i]) || !overlaps(p, b))

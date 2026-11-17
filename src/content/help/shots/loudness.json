@@ -60,6 +60,28 @@
         "w": 130,
         "h": 81
       }
+    },
+    "preview": {
+      "src": "/help/shots/loudness-normalize/preview.png",
+      "w": 102,
+      "h": 44,
+      "at": {
+        "x": 291,
+        "y": 526,
+        "w": 90,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/loudness-normalize/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 390,
+        "y": 526,
+        "w": 154,
+        "h": 32
+      }
     }
   },
   "face": {

@@ -147,6 +147,7 @@ export default {
     },
     {
       label: 'DELTA',
+      shot: 'delta',
       text: 'Plays only what is being removed, from the button in the title bar.',
       details: [
         'It should sound like sibilance and nothing else. Vowels or breath in it mean AMOUNT is too high or LOW too low.',

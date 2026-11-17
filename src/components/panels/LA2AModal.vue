@@ -188,6 +188,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
   >
     <template #header-center>
       <PresetMenu
+        data-help="presets"
         :presets="presets"
         :accent="ACCENT"
         :disabled="!la2aPreview"

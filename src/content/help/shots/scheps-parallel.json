@@ -104,6 +104,50 @@
         "w": 32,
         "h": 52
       }
+    },
+    "bypass": {
+      "src": "/help/shots/scheps-parallel/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 606,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/scheps-parallel/presets.png",
+      "w": 212,
+      "h": 42,
+      "at": {
+        "x": 293,
+        "y": 15,
+        "w": 200,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/scheps-parallel/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 490,
+        "y": 582,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/scheps-parallel/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 570,
+        "y": 582,
+        "w": 154,
+        "h": 32
+      }
     }
   },
   "face": {

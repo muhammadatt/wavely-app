@@ -181,6 +181,39 @@
         "w": 196,
         "h": 45
       }
+    },
+    "bypass": {
+      "src": "/help/shots/voxpressor/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 666,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/voxpressor/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 550,
+        "y": 550,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/voxpressor/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 630,
+        "y": 550,
+        "w": 154,
+        "h": 32
+      }
     }
   },
   "face": {

@@ -148,6 +148,39 @@
         "w": 61,
         "h": 87
       }
+    },
+    "bypass": {
+      "src": "/help/shots/sibilance-editor/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 566,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/sibilance-editor/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 450,
+        "y": 618,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/sibilance-editor/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 530,
+        "y": 618,
+        "w": 154,
+        "h": 32
+      }
     }
   },
   "face": {

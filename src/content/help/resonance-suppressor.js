@@ -115,6 +115,7 @@ export default {
     },
     {
       label: 'DELTA',
+      shot: 'delta',
       text: 'The header switch plays only what is being removed from the whole effect.',
       details: [
         'It is monitoring only: Apply always renders the processed audio, never the difference. While it is on, the display is marked DELTA.',

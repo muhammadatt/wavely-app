@@ -74,12 +74,12 @@
     },
     "output-meter": {
       "src": "/help/shots/tube-saturation/output-meter.png",
-      "w": 56,
+      "w": 57,
       "h": 204,
       "at": {
-        "x": 549,
+        "x": 548,
         "y": 78,
-        "w": 44,
+        "w": 45,
         "h": 192
       }
     },
@@ -213,6 +213,39 @@
         "y": 579,
         "w": 97,
         "h": 107
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/tube-saturation/bypass.png",
+      "w": 67,
+      "h": 42,
+      "at": {
+        "x": 500,
+        "y": 13,
+        "w": 55,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/tube-saturation/preview.png",
+      "w": 154,
+      "h": 52,
+      "at": {
+        "x": 275,
+        "y": 725,
+        "w": 142,
+        "h": 40
+      }
+    },
+    "apply": {
+      "src": "/help/shots/tube-saturation/apply.png",
+      "w": 193,
+      "h": 52,
+      "at": {
+        "x": 425,
+        "y": 725,
+        "w": 181,
+        "h": 40
       }
     }
   },

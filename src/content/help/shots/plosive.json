@@ -181,6 +181,61 @@
         "w": 52,
         "h": 95
       }
+    },
+    "delta": {
+      "src": "/help/shots/plosive-tamer/delta.png",
+      "w": 91,
+      "h": 42,
+      "at": {
+        "x": 258,
+        "y": 15,
+        "w": 79,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/plosive-tamer/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 646,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/plosive-tamer/presets.png",
+      "w": 212,
+      "h": 42,
+      "at": {
+        "x": 346,
+        "y": 15,
+        "w": 200,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/plosive-tamer/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 530,
+        "y": 617,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/plosive-tamer/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 610,
+        "y": 617,
+        "w": 154,
+        "h": 32
+      }
     }
   },
   "face": {

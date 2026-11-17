@@ -16,6 +16,17 @@
         "w": 156,
         "h": 212
       }
+    },
+    "apply": {
+      "src": "/help/shots/peak-normalize/apply.png",
+      "w": 96,
+      "h": 44,
+      "at": {
+        "x": 280,
+        "y": 380,
+        "w": 84,
+        "h": 32
+      }
     }
   },
   "face": {

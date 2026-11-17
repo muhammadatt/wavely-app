@@ -60,6 +60,17 @@
         "w": 532,
         "h": 84
       }
+    },
+    "apply": {
+      "src": "/help/shots/noise-reduction/apply.png",
+      "w": 165,
+      "h": 44,
+      "at": {
+        "x": 391,
+        "y": 437,
+        "w": 153,
+        "h": 32
+      }
     }
   },
   "face": {

@@ -112,6 +112,7 @@ export default {
     },
     {
       label: 'DELTA',
+      shot: 'delta',
       text: 'The pill in the title bar plays only what is being removed.',
       details: [
         'It should sound like hiss, sibilance and edges, not voice. It is for listening only; Apply always renders the processed audio.',

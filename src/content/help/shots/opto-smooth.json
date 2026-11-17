@@ -115,6 +115,50 @@
         "w": 65,
         "h": 97
       }
+    },
+    "bypass": {
+      "src": "/help/shots/la-vintage-2a/bypass.png",
+      "w": 67,
+      "h": 42,
+      "at": {
+        "x": 748,
+        "y": 13,
+        "w": 55,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/la-vintage-2a/presets.png",
+      "w": 99,
+      "h": 42,
+      "at": {
+        "x": 393,
+        "y": 13,
+        "w": 87,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/la-vintage-2a/preview.png",
+      "w": 154,
+      "h": 52,
+      "at": {
+        "x": 523,
+        "y": 443,
+        "w": 142,
+        "h": 40
+      }
+    },
+    "apply": {
+      "src": "/help/shots/la-vintage-2a/apply.png",
+      "w": 193,
+      "h": 52,
+      "at": {
+        "x": 673,
+        "y": 443,
+        "w": 181,
+        "h": 40
+      }
     }
   },
   "face": {

@@ -1,3 +1,5 @@
+import { withWindowControls } from './window.js'
+
 /**
  * The interactive faceplate ("tour") shared by the help and marketing pages:
  * where each documented control's hotspot sits on the faceplate screenshot.
@@ -30,12 +32,16 @@ export function spotOnFace(at, face) {
 }
 
 /**
- * The tour's image: the faceplate alone (`face`), falling back to the whole
- * window (offset 0) for an effect shot before the face crop existed.
+ * The help tour's image: the WHOLE window (`panel`, offset 0), header and
+ * footer included — ON / BYPASS, DELTA, presets, Preview and Apply are part of
+ * using an effect (owner, November 2026). The marketing pages keep the
+ * faceplate alone (`face`, see MarketingApp), where the focus is the controls
+ * that shape the sound. Falls back to the face when there is no window shot.
  */
 export function tourImage(shots) {
   if (!shots) return null
-  return shots.face ?? (shots.panel ? { ...shots.panel, x: 0, y: 0 } : null)
+  if (shots.panel) return { ...shots.panel, x: 0, y: 0 }
+  return shots.face ?? null
 }
 
 /**
@@ -58,13 +64,13 @@ export function helpTourSpots(controls, shots) {
 }
 
 /**
- * A help page's tour: `{ image, spots }`, or null when the page has no
+ * A help page's tour (its controls with the window's, `withWindowControls`): `{ image, spots }`, or null when the page has no
  * screenshot or too few numbered controls (`MIN_TOUR_SPOTS`) and keeps the
  * window picture instead.
  */
 export function helpTour(controls, shots) {
   const image = tourImage(shots)
   if (!image) return null
-  const spots = helpTourSpots(controls, shots)
+  const spots = helpTourSpots(withWindowControls(controls, shots), shots)
   return spots.length >= MIN_TOUR_SPOTS ? { image, spots } : null
 }

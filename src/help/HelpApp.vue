@@ -20,6 +20,7 @@ import {
   HELP, HELP_META, HELP_CATEGORIES, publishedHelpIds, listedHelpIds, helpUrl, helpIdForSlug,
 } from '../content/help/index.js'
 import { helpTour } from '../content/help/tour.js'
+import { withWindowControls } from '../content/help/window.js'
 // The marketing pages' interactive faceplate. A self-contained component (it
 // imports nothing), so the help bundle still carries none of the editor.
 import PanelTour from '../components/tour/PanelTour.vue'
@@ -57,7 +58,10 @@ const shots = entry ? SHOTS[id] ?? null : null
  * second section on the panel, not the first one continued.
  */
 const controlGroups = []
-for (const c of entry?.controls ?? []) {
+// The page's controls with the window's own around them (header first, footer
+// last; `withWindowControls`), in the order the tour numbers them.
+const pageControls = entry ? withWindowControls(entry.controls, shots) : []
+for (const c of pageControls) {
   const last = controlGroups[controlGroups.length - 1]
   if (last && last.group === (c.group ?? null)) last.controls.push(c)
   else controlGroups.push({ group: c.group ?? null, controls: [c] })
@@ -70,7 +74,7 @@ for (const c of entry?.controls ?? []) {
  * the two link both ways — the caption jumps to the entry, the entry's number
  * lights the control on the faceplate and scrolls back up to it.
  */
-const pageTour = entry ? helpTour(entry.controls, shots) : null
+const pageTour = entry ? helpTour(entry.controls, shots) : null  // merges the window's controls itself
 const tourShot = pageTour?.image ?? null
 const tourSpots = pageTour?.spots ?? []
 const tourIndex = new Map(tourSpots.map((s, i) => [s.id, i]))

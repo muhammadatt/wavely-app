@@ -104,6 +104,61 @@
         "w": 48,
         "h": 87
       }
+    },
+    "delta": {
+      "src": "/help/shots/reso-tame/delta.png",
+      "w": 91,
+      "h": 42,
+      "at": {
+        "x": 249,
+        "y": 15,
+        "w": 79,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/reso-tame/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 666,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/reso-tame/presets.png",
+      "w": 212,
+      "h": 42,
+      "at": {
+        "x": 336,
+        "y": 15,
+        "w": 200,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/reso-tame/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 550,
+        "y": 536,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/reso-tame/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 630,
+        "y": 536,
+        "w": 154,
+        "h": 32
+      }
     }
   },
   "face": {

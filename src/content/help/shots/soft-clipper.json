@@ -115,6 +115,50 @@
         "w": 75,
         "h": 30
       }
+    },
+    "delta": {
+      "src": "/help/shots/soft-clipper/delta.png",
+      "w": 91,
+      "h": 42,
+      "at": {
+        "x": 415,
+        "y": 15,
+        "w": 79,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/soft-clipper/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 766,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/soft-clipper/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 650,
+        "y": 686,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/soft-clipper/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 730,
+        "y": 686,
+        "w": 154,
+        "h": 32
+      }
     }
   },
   "face": {

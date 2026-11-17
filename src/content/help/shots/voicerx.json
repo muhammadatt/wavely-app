@@ -38,6 +38,39 @@
         "w": 44,
         "h": 262
       }
+    },
+    "bypass": {
+      "src": "/help/shots/voicerx/bypass.png",
+      "w": 67,
+      "h": 42,
+      "at": {
+        "x": 700,
+        "y": 13,
+        "w": 55,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/voicerx/preview.png",
+      "w": 154,
+      "h": 52,
+      "at": {
+        "x": 475,
+        "y": 387,
+        "w": 142,
+        "h": 40
+      }
+    },
+    "apply": {
+      "src": "/help/shots/voicerx/apply.png",
+      "w": 193,
+      "h": 52,
+      "at": {
+        "x": 625,
+        "y": 387,
+        "w": 181,
+        "h": 40
+      }
     }
   },
   "face": {

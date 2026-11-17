@@ -55,6 +55,11 @@ import { fileURLToPath } from 'node:url'
 
 import { HELP, HELP_META, helpSlug } from '../src/content/help/index.js'
 import { measureControlBox } from './lib/controlBox.mjs'
+import { WINDOW_HEADER, WINDOW_FOOTER } from '../src/content/help/window.js'
+
+/** The window's own controls (header and footer): shot wherever a window has them. */
+const WINDOW_CONTROLS = [...WINDOW_HEADER, ...WINDOW_FOOTER]
+const WINDOW_SHOTS = new Set(WINDOW_CONTROLS.map(c => c.shot))
 import { MARKETING } from '../src/content/marketing/index.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -218,11 +223,14 @@ async function rebox(id, frame) {
   const outDir = join(ROOT, 'public/help/shots', slug)
   // Written only once every control has passed, so a refusal leaves nothing half-done.
   const writes = []
-  for (const c of HELP[id].controls) {
+  for (const c of [...HELP[id].controls, ...WINDOW_CONTROLS]) {
     if (!c.shot) continue
     const el = frame.locator(`[data-help="${c.shot}"]`).first()
     const b = (await el.count()) ? await el.evaluate(measureControlBox) : null
-    if (!b) { console.log(`FAIL  ${id}: ${c.shot} not found`); return null }
+    if (!b) {
+      if (WINDOW_SHOTS.has(c.shot)) continue // this window has no such control
+      console.log(`FAIL  ${id}: ${c.shot} not found`); return null
+    }
     const at = { x: Math.round(b.x - box.x), y: Math.round(b.y - box.y), w: Math.round(b.width), h: Math.round(b.height) }
     const clip = {
       x: Math.max(0, at.x - PAD), y: Math.max(0, at.y - PAD),
@@ -244,8 +252,13 @@ async function rebox(id, frame) {
     // means the panel moved since the pictures were taken.
     const SLACK = 2
     if (old && (at.x < old.x - SLACK || at.y < old.y - SLACK || at.x + at.w > old.x + old.w + SLACK || at.y + at.h > old.y + old.h + SLACK)) {
-      console.log(`FAIL  ${id}: ${c.shot} moved (${old.w}×${old.h} at ${old.x},${old.y} → ${at.w}×${at.h} at ${at.x},${at.y}) — re-shoot instead`)
-      return null
+      // Keep what the picture shows: the box and crop from the real shot. A
+      // readout whose text differs with the generated probe (VoxPressor's) moves
+      // without the panel having moved, and refusing the whole page for it kept
+      // newly added controls off the page too.
+      console.log(`warn  ${id}: ${c.shot} moved (${old.w}×${old.h} at ${old.x},${old.y} → ${at.w}×${at.h} at ${at.x},${at.y}) — kept the old box; re-shoot to update it`)
+      writes.pop()
+      continue
     }
     if (old && (old.w !== at.w || old.h !== at.h || old.x !== at.x || old.y !== at.y)) {
       console.log(`      ${c.shot}: ${old.w}×${old.h} at ${old.x},${old.y} → ${at.w}×${at.h} at ${at.x},${at.y}`)
@@ -330,8 +343,13 @@ try {
       await page.waitForTimeout(4000)
     }
     await page.mouse.move(0, 0)
+    await setPlaying(frame, true)
+    await page.waitForTimeout(SETTLE_MS[id] ?? PLAY_SETTLE_MS)
     if (REBOX) {
+      // Measured while playing, as the pictures were taken: Preview reads Stop
+      // and the readouts carry live text, so the boxes fit what is shown.
       const r = await rebox(id, frame)
+      await setPlaying(frame, false)
       if (r) manifests[id] = r; else failures++
       await page.keyboard.press('Escape'); await page.waitForTimeout(500)
       while (await page.locator('.win-frame').count()) {
@@ -341,8 +359,6 @@ try {
       }
       continue
     }
-    await setPlaying(frame, true)
-    await page.waitForTimeout(SETTLE_MS[id] ?? PLAY_SETTLE_MS)
 
     const slug = helpSlug(id)
     const outDir = join(ROOT, 'public/help/shots', slug)
@@ -373,9 +389,10 @@ try {
     }
 
     const missing = []
-    for (const c of entry.controls) {
+    for (const c of [...entry.controls, ...WINDOW_CONTROLS]) {
       if (!c.shot || manifest.controls[c.shot]) continue
       const el = frame.locator(`[data-help="${c.shot}"]`).first()
+      if (WINDOW_SHOTS.has(c.shot) && !(await el.count())) continue // this window has no such control
       // The union of the element and every visible descendant: a lamp or
       // label positioned outside its wrapper's box still belongs in the crop.
       // The visible union of the element and its descendants (`lib/controlBox.mjs`).
