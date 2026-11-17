@@ -55,6 +55,8 @@ const props = defineProps({
   list: { type: Boolean, default: true },
   /** Optional spot → href: the caption links to the control's full description. */
   detailHref: { type: Function, default: null },
+  /** Load the picture at once: the help page shows the tour above the fold. */
+  eager: { type: Boolean, default: false },
 })
 
 /** The SELECTED spot's index (click, tap, key); a parent may bind it. */
@@ -142,7 +144,7 @@ defineExpose({ focusSpot })
       <div ref="stage" class="pt-stage">
         <img
           :src="image.src" :width="image.w" :height="image.h" :alt="alt"
-          class="pt-img" draggable="false" loading="lazy"
+          class="pt-img" draggable="false" :loading="eager ? 'eager' : 'lazy'"
         />
         <button
           v-for="(s, i) in spots"

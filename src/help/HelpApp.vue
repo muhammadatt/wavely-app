@@ -195,6 +195,23 @@ onMounted(() => {
           <h1 class="hp-title">{{ meta.title }}</h1>
           <p class="hp-summary">{{ entry.summary }}</p>
 
+          <!-- The tour sits above the fold, before the intro (owner, November
+               2026): the panel is what a reader came to look at. The entries it
+               numbers stay under Interface and controls, linked both ways. -->
+          <div v-if="tourSpots.length" ref="tourEl" class="hp-tour" @click="replayTarget">
+            <p class="hp-tour-lede">Click a control on the faceplate to see what it does. Its number matches its entry under Interface and controls.</p>
+            <PanelTour
+              ref="tour"
+              eager
+              v-model:active="tourActive"
+              :image="tourShot"
+              :spots="tourSpots"
+              :list="false"
+              :detail-href="detailHref"
+              :alt="`The ${meta.title} faceplate`"
+            />
+          </div>
+
           <section class="hp-section">
             <h2 class="hp-heading">Intro</h2>
             <p v-for="(para, i) in entry.intro" :key="i" class="hp-intro-text">{{ para }}</p>
@@ -209,19 +226,7 @@ onMounted(() => {
 
           <section class="hp-section">
             <h2 class="hp-heading">Interface and controls</h2>
-            <div v-if="tourSpots.length" ref="tourEl" class="hp-tour" @click="replayTarget">
-              <p class="hp-tour-lede">Click a control on the faceplate to see what it does. Its number matches its entry below.</p>
-              <PanelTour
-                ref="tour"
-                v-model:active="tourActive"
-                :image="tourShot"
-                :spots="tourSpots"
-                :list="false"
-                :detail-href="detailHref"
-                :alt="`The ${meta.title} faceplate`"
-              />
-            </div>
-            <figure v-else-if="shots?.panel" class="hp-panel">
+            <figure v-if="!tourSpots.length && shots?.panel" class="hp-panel">
               <img
                 :src="shots.panel.src"
                 :width="shots.panel.w"
@@ -550,7 +555,7 @@ a:focus-visible {
 /* The tour: the faceplate, numbered. Its colours come from PanelTour's
    defaults, which are this page's palette. */
 .hp-tour {
-  margin: 0 0 28px;
+  margin: 28px 0 0;
   scroll-margin-top: 76px;
 }
 .hp-tour-lede {
