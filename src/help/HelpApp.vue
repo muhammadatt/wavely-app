@@ -110,6 +110,17 @@ function replayTarget(e) {
   el.style.animation = ''
 }
 
+/**
+ * The window picture's corners, rounded as the window's are (`radius`, recorded
+ * by help:shots). panel.jpg is a rectangle, and its corners hold what sat
+ * behind the window in the editor — at the page's old fixed 14 px a sliver of
+ * the cyan waveform showed in each. In percent, so it scales with the image.
+ */
+function panelRadius(p) {
+  if (!p?.radius) return null
+  return { borderRadius: `${(p.radius / p.w) * 100}% / ${(p.radius / p.h) * 100}%` }
+}
+
 /** A crop for a control, or null; CSS size capped so a wide strip fits. */
 function crop(c) {
   const m = c.shot && shots?.controls?.[c.shot]
@@ -215,6 +226,7 @@ onMounted(() => {
                 :src="shots.panel.src"
                 :width="shots.panel.w"
                 :height="shots.panel.h"
+                :style="panelRadius(shots.panel)"
                 :alt="`The ${meta.title} window`"
                 loading="lazy"
               />

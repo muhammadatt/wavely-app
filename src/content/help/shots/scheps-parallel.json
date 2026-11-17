@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/scheps-parallel/panel.jpg",
     "w": 740,
-    "h": 627
+    "h": 627,
+    "radius": 22
   },
   "controls": {
     "input-meter": {

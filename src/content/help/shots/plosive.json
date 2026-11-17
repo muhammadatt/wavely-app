@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/plosive-tamer/panel.jpg",
     "w": 780,
-    "h": 662
+    "h": 662,
+    "radius": 22
   },
   "controls": {
     "in-meter": {

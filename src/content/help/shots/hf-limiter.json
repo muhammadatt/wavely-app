@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/hi-freq-limiter/panel.jpg",
     "w": 760,
-    "h": 524
+    "h": 524,
+    "radius": 22
   },
   "controls": {
     "threshold": {

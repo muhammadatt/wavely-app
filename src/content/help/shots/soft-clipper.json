@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/soft-clipper/panel.jpg",
     "w": 900,
-    "h": 731
+    "h": 731,
+    "radius": 22
   },
   "controls": {
     "clip-lamp": {

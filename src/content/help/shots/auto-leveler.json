@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/auto-leveler/panel.jpg",
     "w": 560,
-    "h": 506
+    "h": 506,
+    "radius": 22
   },
   "controls": {
     "target": {

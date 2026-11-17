@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/air-boost/panel.jpg",
     "w": 680,
-    "h": 545
+    "h": 545,
+    "radius": 22
   },
   "controls": {
     "in-meter": {

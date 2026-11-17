@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/de-esser/panel.jpg",
     "w": 820,
-    "h": 769
+    "h": 769,
+    "radius": 22
   },
   "controls": {
     "detect-low": {

@@ -191,6 +191,15 @@ async function setPlaying(frame, on) {
 }
 
 /**
+ * The window's corner radius in CSS px (18, or 22 on a Modula panel). panel.jpg
+ * is a rectangle, so its corners hold whatever sat behind the window in the
+ * editor — the help page rounds the picture by this much to hide them.
+ */
+async function windowRadius(frame) {
+  return frame.evaluate(n => parseFloat(getComputedStyle(n).borderTopLeftRadius) || 0)
+}
+
+/**
  * `--rebox`: measure every control's box on the open window and cut its crop
  * from the panel.jpg on disk (2x), keeping the live pictures. Returns the
  * updated manifest, or null when the window no longer matches the picture.
@@ -204,6 +213,7 @@ async function rebox(id, frame) {
     console.log(`FAIL  ${id}: the window is ${Math.round(box.width)}×${Math.round(box.height)}, panel.jpg ${manifest.panel.w}×${manifest.panel.h} — re-shoot instead`)
     return null
   }
+  manifest.panel.radius = await windowRadius(frame)
   const slug = helpSlug(id)
   const outDir = join(ROOT, 'public/help/shots', slug)
   // Written only once every control has passed, so a refusal leaves nothing half-done.
@@ -342,7 +352,10 @@ try {
 
     const box = await frame.boundingBox()
     await page.screenshot({ path: join(outDir, 'panel.jpg'), clip: box, type: 'jpeg', quality: 88 })
-    manifest.panel = { src: `/help/shots/${slug}/panel.jpg`, w: Math.round(box.width), h: Math.round(box.height) }
+    manifest.panel = {
+      src: `/help/shots/${slug}/panel.jpg`, w: Math.round(box.width), h: Math.round(box.height),
+      radius: await windowRadius(frame),
+    }
 
     // The faceplate alone, without the window's header (name, presets, ON, ✕)
     // and footer (selection readout, Preview, Apply): the marketing page's

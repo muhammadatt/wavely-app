@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/la-classic-76/panel.jpg",
     "w": 868,
-    "h": 538
+    "h": 538,
+    "radius": 18
   },
   "controls": {
     "input": {

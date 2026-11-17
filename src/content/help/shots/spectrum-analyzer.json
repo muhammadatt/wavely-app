@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/spectrum-analyzer/panel.jpg",
     "w": 700,
-    "h": 495
+    "h": 495,
+    "radius": 22
   },
   "controls": {
     "freeze": {

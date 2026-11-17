@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/eq/panel.jpg",
     "w": 664,
-    "h": 776
+    "h": 776,
+    "radius": 22
   },
   "controls": {
     "analyzer": {

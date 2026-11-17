@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/tube-saturation/panel.jpg",
     "w": 620,
-    "h": 778
+    "h": 778,
+    "radius": 18
   },
   "controls": {
     "input-meter": {

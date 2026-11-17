@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/reso-tame/panel.jpg",
     "w": 800,
-    "h": 581
+    "h": 581,
+    "radius": 22
   },
   "controls": {
     "overlays": {

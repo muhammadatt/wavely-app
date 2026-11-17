@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/hum-remover/panel.jpg",
     "w": 700,
-    "h": 582
+    "h": 582,
+    "radius": 22
   },
   "controls": {
     "in-meter": {

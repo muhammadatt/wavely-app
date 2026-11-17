@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/loudness-normalize/panel.jpg",
     "w": 560,
-    "h": 572
+    "h": 572,
+    "radius": 22
   },
   "controls": {
     "measurement": {

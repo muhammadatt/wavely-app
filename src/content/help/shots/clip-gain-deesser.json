@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/sibilance-editor/panel.jpg",
     "w": 700,
-    "h": 663
+    "h": 663,
+    "radius": 22
   },
   "controls": {
     "in-meter": {

@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/la-vintage-2a/panel.jpg",
     "w": 868,
-    "h": 496
+    "h": 496,
+    "radius": 18
   },
   "controls": {
     "peak-reduction": {

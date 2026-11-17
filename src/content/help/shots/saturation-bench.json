@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/saturation-workbench/panel.jpg",
     "w": 760,
-    "h": 763
+    "h": 763,
+    "radius": 22
   },
   "controls": {
     "input": {

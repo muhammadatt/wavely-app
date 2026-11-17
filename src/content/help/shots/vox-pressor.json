@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/voxpressor/panel.jpg",
     "w": 800,
-    "h": 595
+    "h": 595,
+    "radius": 22
   },
   "controls": {
     "surface": {

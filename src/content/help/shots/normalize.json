@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/peak-normalize/panel.jpg",
     "w": 380,
-    "h": 426
+    "h": 426,
+    "radius": 22
   },
   "controls": {
     "target-peak": {
