@@ -173,6 +173,8 @@ async function play() {
   nodes = { srcs, gains }
   startedAt = when - offset
   playing.value = true
+  // A seek during playback calls play() again: replace the loop, never stack one.
+  cancelAnimationFrame(raf)
   tick()
 }
 

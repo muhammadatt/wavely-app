@@ -67,7 +67,7 @@ function fetchClip(offer) {
 
 export function useTryOut() {
   init()
-  const { selectAll, showToast } = useEditorState()
+  const { selectAll, showToast, getAudioContext } = useEditorState()
   const { importFiles } = useFileImport()
   const { openWindow } = useWindows()
 
@@ -76,6 +76,10 @@ export function useTryOut() {
     const offer = state.offer
     if (!offer || state.status === 'loading') return
     state.status = 'loading'
+    // Create / resume the editor's AudioContext inside the click, before the
+    // fetch is awaited: once the gesture has expired Safari / iOS keep it
+    // suspended and the timed play below would be silent.
+    getAudioContext()
     try {
       // A fetch that failed is retried on the next click rather than awaited again.
       fetched ??= fetchClip(offer)
@@ -94,6 +98,15 @@ export function useTryOut() {
       }
       openWindow(offer.windowId)
       state.offer = null
+      // Playing now would play the dry take: say what to press instead.
+      if (offer.firstStep === 'apply') {
+        showToast(`Press Apply to process the clip, then play it — Undo brings the original back`)
+        return
+      }
+      if (offer.firstStep === 'analyse') {
+        showToast('Press Analyse to find the hum, then play the clip')
+        return
+      }
       // Let the window mount and engage its preview before the transport starts.
       await nextTick()
       setTimeout(() => window.dispatchEvent(new CustomEvent('wavely:toggle-play')), 350)

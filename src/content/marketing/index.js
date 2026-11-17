@@ -171,6 +171,18 @@ export function sampleDryUrl(windowId, sampleId) {
  * A clip name is only ever looked up in the page's own sample list, so the
  * link cannot point the editor at an arbitrary URL.
  */
+/**
+ * Effects a try-out cannot just play: Peak and Loudness Normalize have no live
+ * preview (the change is heard after Apply), and Hum Remover hears nothing
+ * until Analyse has found the hum. The editor opens these without starting
+ * playback and says which button comes first.
+ */
+export const TRY_OUT_FIRST_STEP = {
+  'normalize': 'apply',
+  'loudness': 'apply',
+  'hum-remover': 'analyse',
+}
+
 export function tryOutFromSearch(search, devBuild = false) {
   let params
   try { params = new URLSearchParams(search || '') } catch { return null }
@@ -187,6 +199,7 @@ export function tryOutFromSearch(search, devBuild = false) {
     title: marketingTitle(windowId),
     sample: { id: sample.id, title: sample.title, setting: sample.setting, settings: { ...(sample.settings ?? {}) } },
     url: sampleDryUrl(windowId, sample.id),
+    firstStep: TRY_OUT_FIRST_STEP[windowId] ?? null,
   }
 }
 

@@ -49,9 +49,11 @@ const { tryOut, start: startTryOut, dismiss: dismissTryOut } = useTryOut()
         <div class="try-setting">{{ tryOut.offer.sample.setting }}</div>
         <BaseButton size="md" class="w-full mt-4" :disabled="tryOut.status === 'loading'" @click="startTryOut()">
           <svg viewBox="0 0 24 24" class="w-[13px] h-[13px]" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor" /></svg>
-          {{ tryOut.status === 'loading' ? 'Loading the clip…' : 'Start — load the clip and play' }}
+          {{ tryOut.status === 'loading' ? 'Loading the clip…' : tryOut.offer.firstStep ? 'Start — load the clip' : 'Start — load the clip and play' }}
         </BaseButton>
-        <p class="try-note">Opens the clip with {{ tryOut.offer.title }} on. Switch it on and off, turn the knobs, then try your own audio.</p>
+        <p v-if="tryOut.offer.firstStep === 'apply'" class="try-note">Opens the clip with {{ tryOut.offer.title }} set up. Press Apply to hear it, Undo to compare, then try your own audio.</p>
+        <p v-else-if="tryOut.offer.firstStep === 'analyse'" class="try-note">Opens the clip with {{ tryOut.offer.title }}. Press Analyse to find the hum, then play to hear it go.</p>
+        <p v-else class="try-note">Opens the clip with {{ tryOut.offer.title }} on. Switch it on and off, turn the knobs, then try your own audio.</p>
         <button type="button" class="try-own" @click="dismissTryOut()">Use my own audio instead</button>
       </div>
 

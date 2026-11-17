@@ -161,3 +161,22 @@ test('a sample’s settings have a way into its window', () => {
     }
   }
 })
+
+test('a try-out never auto-plays the dry take of an effect that cannot be heard yet', async () => {
+  // An effect with no live node (not chainable) has nothing to audition until
+  // Apply, so its try-out must name a first step instead of starting playback.
+  const { TRY_OUT_FIRST_STEP, publishedMarketingIds: ids } = await import('../../src/content/marketing/index.js')
+  const registry = readFileSync(join(ROOT, 'src/ui/registry.js'), 'utf8')
+  const chainable = new Set()
+  for (const m of registry.matchAll(/\n {4}id: '([^']+)',[\s\S]*?\n {2}\},/g)) {
+    if (/\bchain: true\b/.test(m[0])) chainable.add(m[1])
+  }
+  for (const id of Object.keys(TRY_OUT_FIRST_STEP)) assert.ok(MARKETING[id], `${id}: not a marketing page`)
+  for (const id of ids(true)) {
+    // Pages link only to rendered samples (MarketingApp.vue), so only those count.
+    const audioPath = join(ROOT, 'src/content/marketing/audio', `${id}.json`)
+    const rendered = existsSync(audioPath) ? Object.keys(json(`src/content/marketing/audio/${id}.json`).samples ?? {}) : []
+    if (!rendered.length || chainable.has(id)) continue
+    assert.ok(TRY_OUT_FIRST_STEP[id], `${id}: no live preview, so its try-out needs a first step`)
+  }
+})
