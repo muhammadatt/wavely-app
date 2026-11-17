@@ -75,6 +75,7 @@ const tourSpots = tourShot ? helpTourSpots(entry.controls, shots) : []
 const tourIndex = new Map(tourSpots.map((s, i) => [s.id, i]))
 const tourActive = ref(0)
 const tourEl = ref(null)
+const tour = ref(null)
 
 /** The control's number on the tour, or null when it has no hotspot. */
 function tourNumber(c) {
@@ -85,11 +86,15 @@ function tourNumber(c) {
 const controlAnchor = c => (c.shot && tourIndex.has(c.shot) ? `control-${c.shot}` : undefined)
 const detailHref = s => `#control-${s.id}`
 
+/**
+ * An entry's number: select its control, move keyboard focus onto it (a
+ * keyboard user was left down on the entry while the page scrolled away) and
+ * bring the faceplate into view.
+ */
 function showOnPanel(c) {
-  tourActive.value = tourIndex.get(c.shot)
+  tour.value?.focusSpot(tourIndex.get(c.shot))
   tourEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
-
 /** A crop for a control, or null; CSS size capped so a wide strip fits. */
 function crop(c) {
   const m = c.shot && shots?.controls?.[c.shot]
@@ -179,8 +184,9 @@ onMounted(() => {
           <section class="hp-section">
             <h2 class="hp-heading">Interface and controls</h2>
             <div v-if="tourSpots.length" ref="tourEl" class="hp-tour">
-              <p class="hp-tour-lede">Point at a control to see what it does, or pick its number below.</p>
+              <p class="hp-tour-lede">Click a control on the faceplate to see what it does. Its number matches its entry below.</p>
               <PanelTour
+                ref="tour"
                 v-model:active="tourActive"
                 :image="tourShot"
                 :spots="tourSpots"

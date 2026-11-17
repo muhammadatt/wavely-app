@@ -1,26 +1,45 @@
 <script setup>
 /**
  * The interactive screenshot: the faceplate with every documented control
- * outlined and numbered. Pointing at a control (or its row in the list, or
- * tabbing to either) lights both and shows what it does — u-he's product pages
- * are the model.
+ * outlined and numbered. Selecting a control (or its row in the list) lights
+ * both and shows what it does — u-he's product pages are the model.
  *
  * The boxes are the controls' own, recorded by `npm run help:shots` (`at` in
- * the manifest, CSS pixels on panel.jpg), so a re-laid-out panel moves its
+ * the manifest, CSS pixels on the image), so a re-laid-out panel moves its
  * hotspots with it the next time the shots are taken. Positions are percentages
  * of the image, so the overlay scales with it at any width.
  *
  * The tour is AMBER (`--pt-accent`, the editor's selected-thing colour), not the
  * page's cyan accent (owner, November 2026).
  *
- * Shared by the marketing pages and the help pages, so it imports nothing and
- * reads its surface colours from optional `--tour-*` properties on an ancestor
- * (defaults are both pages' shared palette). The help pages turn the side list
- * off (their control entries below ARE the list), link the caption to each
- * control's full entry (`detailHref`) and drive the selection from those
- * entries (`v-model:active`).
+ * Shared by the marketing pages and the help pages, so it imports nothing but
+ * its own geometry and reads its surface colours from optional `--tour-*`
+ * properties on an ancestor (defaults are both pages' shared palette). The help
+ * pages turn the side list off (their control entries below ARE the list),
+ * link the caption to each control's full entry (`detailHref`) and drive the
+ * selection from those entries (`v-model:active`, `focusSpot`).
+ *
+ * Usability rules (November 2026 — each fixed a problem found on the first build):
+ * - A CLICK, TAP or KEY selects; pointing only PREVIEWS, after a short pause,
+ *   and the caption returns to the selection when the pointer leaves the
+ *   faceplate. Pointing used to select, and moving down to read the caption (or
+ *   click its link) selected whatever lay on the way — VU meter became HF Emph.
+ * - Every hotspot answers the pointer over at least `MIN_HIT` px, grown into
+ *   free space only (`hitBoxes`): lamps were 19 px tall on a desktop and 9 px
+ *   on a phone. The outline still draws the control's real box.
+ * - The caption's height is that of the LONGEST description (every caption
+ *   sits in one grid cell, only the shown one visible), so nothing below the
+ *   tour jumps as the selection changes.
+ * - One Tab stop (roving tabindex); arrows, Home and End move the selection.
+ * - Screen readers hear the SELECTION only, through a hidden live region —
+ *   the visible caption also follows hover and would read out every sweep
+ *   (it is not live; its hidden copies are out of the accessibility tree).
+ * - Under 640 px only the selected control is outlined (owner: fifteen boxes on
+ *   a 360 px image cover the controls), so the numbered list is shown there
+ *   even when `list` is off — otherwise nothing says what can be tapped.
  */
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { badgePlace, hitBoxes, stackOrder, stepIndex } from './tourGeometry.js'
 
 const props = defineProps({
   /** { src, w, h } — the panel screenshot and its CSS size. */
@@ -29,60 +48,120 @@ const props = defineProps({
   spots: { type: Array, required: true },
   /** Alt text for the screenshot. */
   alt: { type: String, required: true },
-  /** The numbered list beside the image. Off where the page lists the controls itself. */
+  /** The numbered list beside the image. Off where the page lists the controls
+   *  itself — it still shows on phones, where the outlines are hidden. */
   list: { type: Boolean, default: true },
   /** Optional spot → href: the caption links to the control's full description. */
   detailHref: { type: Function, default: null },
 })
 
-/** The selected spot's index; a parent may bind it (`v-model:active`). */
+/** The SELECTED spot's index (click, tap, key); a parent may bind it. */
 const active = defineModel('active', { type: Number, default: 0 })
-const current = computed(() => props.spots[active.value] ?? null)
+/** The spot the mouse rests on, or null. Shown, never selected. */
+const preview = ref(null)
+const shown = computed(() => preview.value ?? active.value)
 
-/**
- * Smaller boxes stack ABOVE larger ones. Controls nest — Gain's box holds the
- * AUTO lamp, VoxPressor's Peak reduction holds its Knee keys — and whichever
- * box is on top takes the pointer, so a nested control under its parent could
- * never be pointed at. Stacking by area keeps every one reachable; the active
- * box is not raised, for the same reason.
- */
-const stack = computed(() => {
-  const order = props.spots.map((s, i) => [s.at.w * s.at.h, i]).sort((a, b) => b[0] - a[0])
-  const z = new Array(props.spots.length)
-  order.forEach(([, i], rank) => { z[i] = rank + 1 })
-  return z
+/** How long the mouse must rest on a control before the caption follows it. */
+const PREVIEW_DELAY_MS = 90
+let previewTimer = 0
+function schedulePreview(i) {
+  clearTimeout(previewTimer)
+  previewTimer = setTimeout(() => { preview.value = i }, PREVIEW_DELAY_MS)
+}
+function onEnter(i, e) {
+  // A touch "hover" is the start of a tap; the click selects.
+  if (e.pointerType === 'touch') return
+  schedulePreview(i)
+}
+/** Leaving one control for the next must not flash the selection between. */
+function onLeave() { schedulePreview(null) }
+function endPreview() {
+  clearTimeout(previewTimer)
+  preview.value = null
+}
+
+function select(i) {
+  endPreview()
+  active.value = i
+}
+
+// ── Hit areas ────────────────────────────────────────────────────────────────
+/** Minimum hit size in screen px: 32 with a mouse, 44 for a finger. */
+const MIN_HIT = 32
+const MIN_HIT_TOUCH = 44
+const stage = ref(null)
+const stageWidth = ref(0)
+const coarse = ref(false)
+let ro = null
+let mq = null
+const onMq = () => { coarse.value = !!mq?.matches }
+onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined' && stage.value) {
+    ro = new ResizeObserver(([e]) => { stageWidth.value = e.contentRect.width })
+    ro.observe(stage.value)
+  }
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    mq = window.matchMedia('(pointer: coarse), (max-width: 640px)')
+    onMq()
+    mq.addEventListener?.('change', onMq)
+  }
+})
+onBeforeUnmount(() => {
+  ro?.disconnect()
+  mq?.removeEventListener?.('change', onMq)
+  clearTimeout(previewTimer)
 })
 
-/**
- * Where a box's number goes. Large controls (knobs, meters) carry it inside
- * their top-left corner. A short box — a lamp, a switch, a one-line setter —
- * would be covered by it, so its badge sits just outside its LEFT edge,
- * vertically centred; or inside on the left, centred, when the box starts at
- * the image's edge and there is no room outside.
- */
-const SHORT_BOX_PX = 48
-const SIDE_ROOM_PX = 26
-function badgePlace(s) {
-  if (s.at.h >= SHORT_BOX_PX) return 'corner'
-  return s.at.x >= SIDE_ROOM_PX ? 'side' : 'inside'
+const boxes = computed(() => props.spots.map(s => s.at))
+const stack = computed(() => stackOrder(boxes.value))
+const hits = computed(() => {
+  const { w, h } = props.image
+  const scale = stageWidth.value ? stageWidth.value / w : 1
+  const min = (coarse.value ? MIN_HIT_TOUCH : MIN_HIT) / scale
+  return hitBoxes(boxes.value, { w, h }, min)
+})
+
+const pct = (v, of) => `${(v / of) * 100}%`
+function hitStyle(i) {
+  const b = hits.value[i]
+  const { w, h } = props.image
+  return { left: pct(b.x, w), top: pct(b.y, h), width: pct(b.w, w), height: pct(b.h, h), zIndex: stack.value[i] }
+}
+/** The control's real box, inside its (possibly larger) hit area. */
+function outlineStyle(i) {
+  const a = props.spots[i].at
+  const b = hits.value[i]
+  return { left: pct(a.x - b.x, b.w), top: pct(a.y - b.y, b.h), width: pct(a.w, b.w), height: pct(a.h, b.h) }
 }
 
-function box(s, i) {
-  const { w, h } = props.image
-  return {
-    left: `${(s.at.x / w) * 100}%`,
-    top: `${(s.at.y / h) * 100}%`,
-    width: `${(s.at.w / w) * 100}%`,
-    height: `${(s.at.h / h) * 100}%`,
-    zIndex: stack.value[i],
-  }
+// ── Keyboard ─────────────────────────────────────────────────────────────────
+/** Plain arrays, filled by the template's function refs (not reactive state). */
+const spotEls = []
+const rowEls = []
+function onKey(e, els) {
+  const next = stepIndex(e.key, active.value, props.spots.length)
+  if (next === null) return
+  e.preventDefault()
+  select(next)
+  els[next]?.focus()
 }
+
+/**
+ * Select a control and put keyboard focus on it — the help page's entry
+ * numbers call this, so a keyboard user lands on the faceplate with the
+ * control it asked for rather than being left down on the entry.
+ */
+function focusSpot(i) {
+  select(i)
+  spotEls[i]?.focus({ preventScroll: true })
+}
+defineExpose({ focusSpot })
 </script>
 
 <template>
   <div class="pt" :class="{ 'pt--solo': !list }">
     <figure class="pt-figure">
-      <div class="pt-stage">
+      <div ref="stage" class="pt-stage" @pointerleave="endPreview">
         <img
           :src="image.src" :width="image.w" :height="image.h" :alt="alt"
           class="pt-img" draggable="false" loading="lazy"
@@ -90,37 +169,64 @@ function box(s, i) {
         <button
           v-for="(s, i) in spots"
           :key="s.id"
+          :ref="el => { spotEls[i] = el }"
           type="button"
           class="pt-spot"
-          :class="{ 'pt-spot--on': i === active }"
-          :style="box(s, i)"
+          :class="{ 'pt-spot--on': i === active, 'pt-spot--preview': i === preview && i !== active }"
+          :style="hitStyle(i)"
+          :tabindex="i === active ? 0 : -1"
           :aria-label="`${i + 1}. ${s.label}`"
-          @mouseenter="active = i"
-          @focus="active = i"
-          @click="active = i"
+          :aria-pressed="i === active"
+          @pointerenter="onEnter(i, $event)"
+          @pointerleave="onLeave"
+          @click="select(i)"
+          @keydown="onKey($event, spotEls)"
         >
-          <span class="pt-badge" :class="`pt-badge--${badgePlace(s)}`" aria-hidden="true">{{ i + 1 }}</span>
+          <span class="pt-outline" :style="outlineStyle(i)">
+            <span class="pt-badge" :class="`pt-badge--${badgePlace(s.at)}`" aria-hidden="true">{{ i + 1 }}</span>
+          </span>
         </button>
       </div>
-      <figcaption v-if="current" class="pt-caption" aria-live="polite">
-        <span class="pt-caption-n">{{ active + 1 }}</span>
-        <span>
-          <strong>{{ current.label }}</strong>
-          <span class="pt-caption-text">{{ current.text }}</span>
-          <a v-if="detailHref" :href="detailHref(current)" class="pt-caption-more">Full description ↓</a>
-        </span>
+
+      <!-- Every caption in one cell, only the shown one visible: the box is
+           always as tall as the longest, so nothing below it moves. -->
+      <figcaption v-if="spots.length" class="pt-caption">
+        <div
+          v-for="(s, i) in spots"
+          :key="s.id"
+          class="pt-caption-item"
+          :class="{ 'pt-caption-item--on': i === shown }"
+        >
+          <span class="pt-caption-n">{{ i + 1 }}</span>
+          <span>
+            <strong>{{ s.label }}</strong>
+            <span class="pt-caption-text">{{ s.text }}</span>
+            <a
+              v-if="detailHref"
+              :href="detailHref(s)"
+              :tabindex="i === shown ? 0 : -1"
+              class="pt-caption-more"
+            >Full description ↓</a>
+          </span>
+        </div>
       </figcaption>
+      <!-- What a screen reader hears: the selection, never a mouse sweep. -->
+      <p class="pt-sr" aria-live="polite">{{ spots[active] ? `${active + 1}. ${spots[active].label}: ${spots[active].text}` : '' }}</p>
     </figure>
 
-    <ol v-if="list" class="pt-list">
+    <ol class="pt-list" aria-label="Controls">
       <li v-for="(s, i) in spots" :key="s.id">
         <button
+          :ref="el => { rowEls[i] = el }"
           type="button"
           class="pt-row"
-          :class="{ 'pt-row--on': i === active }"
-          @mouseenter="active = i"
-          @focus="active = i"
-          @click="active = i"
+          :class="{ 'pt-row--on': i === active, 'pt-row--preview': i === preview && i !== active }"
+          :tabindex="i === active ? 0 : -1"
+          :aria-pressed="i === active"
+          @pointerenter="onEnter(i, $event)"
+          @pointerleave="endPreview"
+          @click="select(i)"
+          @keydown="onKey($event, rowEls)"
         >
           <span class="pt-row-n">{{ i + 1 }}</span>
           <span class="pt-row-label">{{ s.label }}</span>
@@ -140,6 +246,7 @@ function box(s, i) {
   align-items: start;
 }
 .pt--solo { grid-template-columns: minmax(0, 1fr); }
+.pt--solo .pt-list { display: none; }
 .pt-figure { margin: 0; min-width: 0; }
 .pt-stage {
   position: relative;
@@ -149,24 +256,37 @@ function box(s, i) {
 }
 .pt-img { display: block; width: 100%; height: auto; }
 
+/* The hit area: invisible, at least MIN_HIT px; the outline inside it draws
+   the control's real box. */
 .pt-spot {
   position: absolute;
   padding: 0;
   margin: 0;
-  border: 1.5px solid transparent;
-  border-radius: 10px;
+  border: none;
   background: transparent;
   cursor: pointer;
+}
+.pt-spot:focus { outline: none; }
+.pt-outline {
+  position: absolute;
+  border: 1.5px solid rgba(232, 163, 61, 0.18);
+  border-radius: 10px;
+  pointer-events: none;
   transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 /* Every hotspot is faintly visible, so the screenshot reads as explorable. */
-.pt-spot:not(.pt-spot--on) { border-color: rgba(232, 163, 61, 0.18); }
-.pt-spot--on {
+.pt-spot--preview .pt-outline {
+  border-color: rgba(232, 163, 61, 0.6);
+  background: rgba(232, 163, 61, 0.05);
+}
+.pt-spot--on .pt-outline {
   border-color: var(--pt-accent);
   background: rgba(232, 163, 61, 0.1);
   box-shadow: 0 0 0 4px rgba(232, 163, 61, 0.15), 0 0 30px rgba(232, 163, 61, 0.25);
 }
-.pt-spot:focus-visible { outline: none; }
+.pt-spot:focus-visible .pt-outline {
+  box-shadow: 0 0 0 2px #0b0e12, 0 0 0 4px var(--pt-accent), 0 0 30px rgba(232, 163, 61, 0.25);
+}
 /* Placed by `badgePlace`: inside a large box's corner, beside a short one. It
    sat outside every box's corner (−9 px) and on a crowded panel landed on the
    neighbouring control — LA Vintage 2A's Gain badge read as the meter's. */
@@ -190,10 +310,7 @@ function box(s, i) {
 
 .pt-caption {
   margin-top: 14px;
-  min-height: 64px;
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
+  display: grid;
   padding: 14px 16px;
   border-radius: 12px;
   background: var(--tour-surface, #141920);
@@ -201,6 +318,14 @@ function box(s, i) {
   font-size: 14px;
   line-height: 1.5;
 }
+.pt-caption-item {
+  grid-area: 1 / 1;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  visibility: hidden;
+}
+.pt-caption-item--on { visibility: visible; }
 .pt-caption-n {
   flex: none;
   width: 24px;
@@ -223,6 +348,18 @@ function box(s, i) {
   text-decoration: none;
 }
 .pt-caption-more:hover { text-decoration: underline; }
+
+.pt-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 .pt-list {
   list-style: none;
@@ -247,8 +384,10 @@ function box(s, i) {
   text-align: left;
   cursor: pointer;
 }
-.pt-row:hover { background: rgba(255, 255, 255, 0.04); }
+.pt-row:hover, .pt-row--preview { background: rgba(255, 255, 255, 0.04); }
 .pt-row--on { background: rgba(232, 163, 61, 0.1); color: var(--tour-text, #eaf6f8); }
+.pt-row:focus { outline: none; }
+.pt-row:focus-visible { box-shadow: inset 0 0 0 2px var(--pt-accent); }
 .pt-row-n {
   flex: none;
   width: 20px;
@@ -263,10 +402,17 @@ function box(s, i) {
 }
 /* Phones: fifteen numbered boxes on a 360 px image cover the controls they
    point at, and there is no hover. Only the selected control is outlined
-   (with its number); the list below is how you move between them. */
+   (with its number); the list is how you move between them — so it shows
+   here even on a page that turned it off. */
 @media (max-width: 640px) {
-  .pt-spot:not(.pt-spot--on) { border-color: transparent; }
+  .pt-spot:not(.pt-spot--on) .pt-outline { border-color: transparent; background: transparent; }
   .pt-spot:not(.pt-spot--on) .pt-badge { display: none; }
-  .pt-spot--on { box-shadow: 0 0 0 3px rgba(232, 163, 61, 0.2); }
+  .pt-spot--on .pt-outline { box-shadow: 0 0 0 3px rgba(232, 163, 61, 0.2); }
+  .pt--solo .pt-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    margin-top: 10px;
+  }
+  .pt-row { padding: 10px; min-height: 44px; }
 }
 </style>
