@@ -19,7 +19,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   HELP, HELP_META, HELP_CATEGORIES, publishedHelpIds, listedHelpIds, helpUrl, helpIdForSlug,
 } from '../content/help/index.js'
-import { HELP_TOUR_IDS, helpTourSpots, tourImage } from '../content/help/tour.js'
+import { helpTour } from '../content/help/tour.js'
 // The marketing pages' interactive faceplate. A self-contained component (it
 // imports nothing), so the help bundle still carries none of the editor.
 import PanelTour from '../components/tour/PanelTour.vue'
@@ -64,14 +64,15 @@ for (const c of entry?.controls ?? []) {
 }
 
 /**
- * The tour (trial pages only, `HELP_TOUR_IDS`): the faceplate with every
+ * The tour (every page with enough numbered controls, `helpTour`): the faceplate with every
  * documented control outlined and numbered, in place of the static window
  * picture. Each numbered control's entry below carries the same number, and
  * the two link both ways — the caption jumps to the entry, the entry's number
  * lights the control on the faceplate and scrolls back up to it.
  */
-const tourShot = entry && HELP_TOUR_IDS.has(id) ? tourImage(shots) : null
-const tourSpots = tourShot ? helpTourSpots(entry.controls, shots) : []
+const pageTour = entry ? helpTour(entry.controls, shots) : null
+const tourShot = pageTour?.image ?? null
+const tourSpots = pageTour?.spots ?? []
 const tourIndex = new Map(tourSpots.map((s, i) => [s.id, i]))
 const tourActive = ref(0)
 const tourEl = ref(null)

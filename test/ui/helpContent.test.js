@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -8,7 +8,7 @@ import {
   HELP, HELP_META, HELP_CATEGORIES, helpFor, helpUrl, publishedHelpIds, listedHelpIds,
   helpSlug, helpIdForSlug,
 } from '../../src/content/help/index.js'
-import { HELP_TOUR_IDS, helpTourSpots, tourImage } from '../../src/content/help/tour.js'
+import { MIN_TOUR_SPOTS, helpTour, helpTourSpots, tourImage } from '../../src/content/help/tour.js'
 import { helpSlugFromPath } from '../../src/help/route.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -282,13 +282,28 @@ test('every screenshot manifest belongs to a help entry and names real shots', (
   }
 })
 
+test('every help page with enough numbered controls gets a tour, and only those', () => {
+  const readShots = id => {
+    const f = join(HELP_DIR, 'shots', `${id}.json`)
+    return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null
+  }
+  const without = Object.keys(HELP).filter(id => !helpTour(HELP[id].controls, readShots(id))).sort()
+  // A one-control faceplate keeps the window picture. A page dropping in here
+  // has lost hotspots (a shot renamed, a panel re-laid out): check its boxes.
+  assert.deepEqual(without, ['normalize', 'plugin-chain'])
+  for (const id of without) {
+    const shots = readShots(id)
+    assert.ok(!shots || helpTourSpots(HELP[id].controls, shots).length < MIN_TOUR_SPOTS)
+  }
+})
+
 test('a tour page puts every documented control with a face box on its faceplate', () => {
-  for (const id of HELP_TOUR_IDS) {
-    assert.ok(HELP[id], `${id}: a tour id with no help entry`)
-    const shots = JSON.parse(readFileSync(join(HELP_DIR, 'shots', `${id}.json`), 'utf8'))
-    assert.ok(tourImage(shots), `${id}: a tour page needs a screenshot`)
+  for (const id of Object.keys(HELP)) {
+    const f = join(HELP_DIR, 'shots', `${id}.json`)
+    if (!existsSync(f)) continue
+    const shots = JSON.parse(readFileSync(f, 'utf8'))
+    if (!helpTour(HELP[id].controls, shots)) continue
     const spots = helpTourSpots(HELP[id].controls, shots)
-    assert.ok(spots.length >= 3, `${id}: only ${spots.length} hotspots`)
     // In the entry's (panel) order, each control once, inside the image.
     const order = HELP[id].controls.map(c => c.shot)
     const idx = spots.map(s => order.indexOf(s.id))

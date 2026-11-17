@@ -7,11 +7,13 @@
  */
 
 /**
- * Help pages that show the tour in place of the static window picture. A trial
- * (November 2026): LA Vintage 2A first; add an id here to move another page
- * over, or drop the set once every page has moved.
+ * Fewest numbered controls worth a tour. Every help page shows the tour in place
+ * of the static window picture (November 2026: trialled on LA Vintage 2A, then
+ * rolled out) — except a page whose faceplate carries fewer than this many
+ * documented controls (Peak Normalize and the Effect Chain have one each),
+ * where a single outlined box tells the reader nothing the picture does not.
  */
-export const HELP_TOUR_IDS = new Set(['opto-smooth'])
+export const MIN_TOUR_SPOTS = 3
 
 /**
  * A control's box (`at`, measured on the whole window) on the faceplate crop
@@ -53,4 +55,16 @@ export function helpTourSpots(controls, shots) {
     seen.add(c.shot)
     return [{ id: c.shot, label: c.label, text: c.text, at }]
   })
+}
+
+/**
+ * A help page's tour: `{ image, spots }`, or null when the page has no
+ * screenshot or too few numbered controls (`MIN_TOUR_SPOTS`) and keeps the
+ * window picture instead.
+ */
+export function helpTour(controls, shots) {
+  const image = tourImage(shots)
+  if (!image) return null
+  const spots = helpTourSpots(controls, shots)
+  return spots.length >= MIN_TOUR_SPOTS ? { image, spots } : null
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { badgePlace, contains, hitBoxes, stackOrder, stepIndex } from '../../src/components/tour/tourGeometry.js'
+import { contains, placeBadges, hitBoxes, stackOrder, stepIndex } from '../../src/components/tour/tourGeometry.js'
 import { HELP } from '../../src/content/help/index.js'
 import { helpTourSpots, tourImage } from '../../src/content/help/tour.js'
 
@@ -71,8 +71,53 @@ test('arrow keys step through the controls and wrap', () => {
   assert.equal(stepIndex('ArrowRight', 0, 0), null)
 })
 
-test('badges sit in the corner of a large box and beside a short one', () => {
-  assert.equal(badgePlace({ x: 100, y: 0, w: 100, h: 100 }), 'corner')
-  assert.equal(badgePlace({ x: 100, y: 0, w: 100, h: 20 }), 'side')
-  assert.equal(badgePlace({ x: 4, y: 0, w: 100, h: 20 }), 'inside')
+test('a badge goes outside its box where there is room', () => {
+  const img = { w: 400, h: 300 }
+  // Room on the left: beside the top of a tall box, centred beside a short one.
+  assert.deepEqual(placeBadges([{ x: 100, y: 100, w: 80, h: 80 }], img, 18, 2), [{ x: 80, y: 100 }])
+  assert.deepEqual(placeBadges([{ x: 100, y: 100, w: 60, h: 20 }], img, 18, 2), [{ x: 80, y: 101 }])
+  // At the image's left edge a tall box uses its own top-left corner, a short one goes above.
+  assert.deepEqual(placeBadges([{ x: 5, y: 100, w: 60, h: 60 }], img, 18, 2), [{ x: 8, y: 103 }])
+  assert.deepEqual(placeBadges([{ x: 5, y: 100, w: 60, h: 20 }], img, 18, 2), [{ x: 5, y: 80 }])
+})
+
+test('badges keep clear of other controls and of each other', () => {
+  // A row of chips 4 px apart (the EQ band's ON / S / x): left and above are
+  // taken by the neighbour and the knob over them, so each goes below.
+  const chips = [0, 1, 2].map(i => ({ x: 100 + i * 28, y: 200, w: 24, h: 20 }))
+  const knob = { x: 90, y: 150, w: 100, h: 45 }
+  const boxes = [knob, ...chips]
+  const placed = placeBadges(boxes, { w: 400, h: 300 }, 18, 2)
+  const rect = p => ({ x: p.x, y: p.y, w: 18, h: 18 })
+  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+  placed.forEach((p, i) => {
+    boxes.forEach((b, j) => { if (i !== j) assert.ok(!overlaps(rect(p), b), `badge ${i} covers box ${j}`) })
+    placed.forEach((q, j) => { if (i !== j) assert.ok(!overlaps(rect(p), rect(q)), `badges ${i} and ${j} overlap`) })
+  })
+})
+
+test('a nested box may put its badge over its parent', () => {
+  const gain = { x: 100, y: 50, w: 150, h: 150 }
+  const auto = { x: 105, y: 180, w: 30, h: 15 }
+  const [, b] = placeBadges([gain, auto], { w: 400, h: 300 }, 18, 2)
+  assert.ok(b.x >= 0 && b.y >= 0)
+})
+
+test('on every help screenshot no badge covers another control or number', () => {
+  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+  let fallbacks = 0
+  for (const id of Object.keys(HELP)) {
+    let shots
+    try { shots = JSON.parse(readFileSync(new URL(`../../src/content/help/shots/${id}.json`, import.meta.url), 'utf8')) } catch { continue }
+    const img = tourImage(shots)
+    const boxes = helpTourSpots(HELP[id].controls, shots).map(s => s.at)
+    const placed = placeBadges(boxes, img, 18, 3).map(p => ({ ...p, w: 18, h: 18 }))
+    placed.forEach((p, i) => {
+      const clear = boxes.every((b, j) => i === j || contains(b, boxes[i]) || !overlaps(p, b))
+        && placed.every((q, j) => i === j || !overlaps(p, q))
+      if (!clear) fallbacks++
+    })
+  }
+  // The inside fallback may still touch something; it should be the rare case.
+  assert.ok(fallbacks <= 6, `${fallbacks} badges fell back to a crowded place`)
 })

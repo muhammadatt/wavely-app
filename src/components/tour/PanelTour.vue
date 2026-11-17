@@ -41,7 +41,7 @@
  *   even when `list` is off — otherwise nothing says what can be tapped.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { badgePlace, hitBoxes, stackOrder, stepIndex } from './tourGeometry.js'
+import { hitBoxes, placeBadges, stackOrder, stepIndex } from './tourGeometry.js'
 
 const props = defineProps({
   /** { src, w, h } — the panel screenshot and its CSS size. */
@@ -100,6 +100,27 @@ const hits = computed(() => {
   const min = (coarse.value ? MIN_HIT_TOUCH : MIN_HIT) / scale
   return hitBoxes(boxes.value, { w, h }, min)
 })
+
+/** The picture's scale on screen: CSS px per image px. */
+const scale = computed(() => (stageWidth.value ? stageWidth.value / props.image.w : 1))
+
+/**
+ * The numbers' places (`placeBadges`): outside each box where there is room,
+ * clear of every other control and number. Placed in image pixels for the
+ * badge's CSS size at the picture's current scale, so a narrower page re-plans.
+ */
+const BADGE_PX = 18
+const BADGE_GAP_PX = 3
+const badges = computed(() => placeBadges(
+  boxes.value, props.image, BADGE_PX / scale.value, BADGE_GAP_PX / scale.value,
+))
+/** A badge's offset from its control's outline (whose origin is the box's). */
+function badgeStyle(i) {
+  const b = badges.value[i]
+  const a = props.spots[i].at
+  if (!b) return null
+  return { left: `${(b.x - a.x) * scale.value}px`, top: `${(b.y - a.y) * scale.value}px` }
+}
 
 const pct = (v, of) => `${(v / of) * 100}%`
 function hitStyle(i) {
@@ -161,7 +182,7 @@ defineExpose({ focusSpot })
           @keydown="onKey($event, spotEls)"
         >
           <span class="pt-outline" :style="outlineStyle(i)">
-            <span class="pt-badge" :class="`pt-badge--${badgePlace(s.at)}`" aria-hidden="true">{{ i + 1 }}</span>
+            <span class="pt-badge" :style="badgeStyle(i)" aria-hidden="true">{{ i + 1 }}</span>
           </span>
         </button>
       </div>
@@ -264,9 +285,8 @@ defineExpose({ focusSpot })
 .pt-spot:focus-visible .pt-outline {
   box-shadow: 0 0 0 2px #0b0e12, 0 0 0 4px var(--pt-accent), 0 0 30px rgba(232, 163, 61, 0.25);
 }
-/* Placed by `badgePlace`: inside a large box's corner, beside a short one. It
-   sat outside every box's corner (−9 px) and on a crowded panel landed on the
-   neighbouring control — LA Vintage 2A's Gain badge read as the meter's. */
+/* Placed by `placeBadges` (see tourGeometry.js): outside its control where
+   there is room, clear of every other control and number. */
 .pt-badge {
   position: absolute;
   top: 3px;
@@ -281,8 +301,6 @@ defineExpose({ focusSpot })
   font: 600 10px/16px 'JetBrains Mono', ui-monospace, monospace;
   text-align: center;
 }
-.pt-badge--side { top: 50%; left: auto; right: calc(100% + 4px); transform: translateY(-50%); }
-.pt-badge--inside { top: 50%; transform: translateY(-50%); }
 .pt-spot--on .pt-badge { background: var(--pt-accent); color: #06181b; border-color: var(--pt-accent); }
 
 .pt-caption {

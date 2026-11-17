@@ -23,15 +23,55 @@ export function stackOrder(boxes) {
 }
 
 /**
- * Where a box's number goes: inside a large box's corner, beside a short one
- * (it would cover a lamp or a switch), or inside on the left when the short
- * box starts at the image's edge and there is no room outside.
+ * Where each box's number goes: `[{ x, y }]`, the badge's top-left in image
+ * pixels, for a badge `size` image pixels square with `gap` between it and its
+ * box.
+ *
+ * The first rule — inside a large box's top-left corner, just outside the left
+ * edge of a short one — looked at no neighbours. Rolled out to every help page
+ * (November 2026) it covered what it pointed at: the first letters of
+ * VoxPressor's "PEAK REDUCTION" and "BODY LEVELER" titles, the EQ's meter
+ * readouts, the De-Esser's LIVE switch, and three side badges on the EQ band's
+ * ON / S / × chips piled onto their neighbours. So each badge tries places in
+ * turn — beside its box on the left (by the top of a tall box, centred beside a
+ * short one), on its top-left corner, then (by kind, see below) inside, above,
+ * below or right — and takes the first that stays on the image and clear of
+ * every other control's box and every badge already placed. A box's
+ * own parent (Gain round its AUTO lamp) does not count as in the way.
  */
 export const SHORT_BOX_PX = 48
-export const SIDE_ROOM_PX = 26
-export function badgePlace(box) {
-  if (box.h >= SHORT_BOX_PX) return 'corner'
-  return box.x >= SIDE_ROOM_PX ? 'side' : 'inside'
+export function placeBadges(boxes, image, size, gap = 2) {
+  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+  const placed = []
+  return boxes.map((s, i) => {
+    const short = s.h < SHORT_BOX_PX
+    const midY = s.y + (s.h - size) / 2
+    const besideY = short ? midY : s.y
+    const left = { x: s.x - gap - size, y: besideY }
+    const corner = { x: s.x - size / 2, y: s.y - size / 2 }
+    const inside = { x: s.x + 3, y: short ? midY : s.y + 3 }
+    const above = { x: s.x, y: s.y - gap - size }
+    const below = { x: s.x, y: s.y + s.h + gap }
+    const right = { x: s.x + s.w + gap, y: besideY }
+    // A tall box (a knob in its frame, a meter) has empty space in its top-left
+    // corner, so it uses that before going ABOVE, where panel titles sit
+    // (VoxPressor's DE-ESS over its two knobs). A short box — a chip, a switch,
+    // a one-line setter — is covered by a badge inside it, so it goes above or
+    // below its left edge and only falls back inside.
+    const candidates = short
+      ? [left, corner, above, below, right, inside]
+      : [left, corner, inside, above, right, below]
+    const others = boxes.filter((o, j) => j !== i && !contains(o, s))
+    const pad = gap / 2
+    const free = (c) => {
+      const r = { x: c.x - pad, y: c.y - pad, w: size + 2 * pad, h: size + 2 * pad }
+      if (c.x < 0 || c.y < 0 || c.x + size > image.w || c.y + size > image.h) return false
+      return !others.some(o => overlaps(r, o)) && !placed.some(p => overlaps(r, p))
+    }
+    const c = candidates.find(free) ?? candidates[candidates.length - 1]
+    placed.push({ x: c.x, y: c.y, w: size, h: size })
+    return { x: c.x, y: c.y }
+  })
 }
 
 /**
