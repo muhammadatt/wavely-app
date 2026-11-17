@@ -8,27 +8,64 @@
     "measurement": {
       "src": "/help/shots/loudness-normalize/measurement.png",
       "w": 544,
-      "h": 88
+      "h": 88,
+      "at": {
+        "x": 14,
+        "y": 72,
+        "w": 532,
+        "h": 76
+      }
     },
     "benchmarks": {
       "src": "/help/shots/loudness-normalize/benchmarks.png",
       "w": 544,
-      "h": 87
+      "h": 87,
+      "at": {
+        "x": 14,
+        "y": 162,
+        "w": 532,
+        "h": 75
+      }
     },
     "target": {
       "src": "/help/shots/loudness-normalize/target.png",
       "w": 160,
-      "h": 241
+      "h": 241,
+      "at": {
+        "x": 37,
+        "y": 255,
+        "w": 148,
+        "h": 229
+      }
     },
     "ceiling": {
       "src": "/help/shots/loudness-normalize/ceiling.png",
       "w": 151,
-      "h": 234
+      "h": 234,
+      "at": {
+        "x": 219,
+        "y": 255,
+        "w": 139,
+        "h": 222
+      }
     },
     "peak": {
       "src": "/help/shots/loudness-normalize/peak.png",
       "w": 142,
-      "h": 93
+      "h": 93,
+      "at": {
+        "x": 392,
+        "y": 334,
+        "w": 130,
+        "h": 81
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/loudness-normalize/face.jpg",
+    "w": 560,
+    "h": 454,
+    "x": 0,
+    "y": 58
   }
 }

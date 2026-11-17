@@ -8,52 +8,119 @@
     "clip-lamp": {
       "src": "/help/shots/soft-clipper/clip-lamp.png",
       "w": 61,
-      "h": 25
+      "h": 25,
+      "at": {
+        "x": 569,
+        "y": 72,
+        "w": 49,
+        "h": 13
+      }
     },
     "peak-reduction": {
       "src": "/help/shots/soft-clipper/peak-reduction.png",
       "w": 102,
-      "h": 24
+      "h": 24,
+      "at": {
+        "x": 655,
+        "y": 73,
+        "w": 90,
+        "h": 12
+      }
     },
     "engaged": {
       "src": "/help/shots/soft-clipper/engaged.png",
       "w": 112,
-      "h": 24
+      "h": 24,
+      "at": {
+        "x": 782,
+        "y": 73,
+        "w": 100,
+        "h": 12
+      }
     },
     "scope": {
       "src": "/help/shots/soft-clipper/scope.png",
       "w": 884,
-      "h": 268
+      "h": 268,
+      "at": {
+        "x": 14,
+        "y": 99,
+        "w": 872,
+        "h": 256
+      }
     },
     "meters": {
       "src": "/help/shots/soft-clipper/meters.png",
       "w": 884,
-      "h": 38
+      "h": 38,
+      "at": {
+        "x": 14,
+        "y": 369,
+        "w": 872,
+        "h": 26
+      }
     },
     "ceiling": {
       "src": "/help/shots/soft-clipper/ceiling.png",
       "w": 139,
-      "h": 206
+      "h": 206,
+      "at": {
+        "x": 34,
+        "y": 430,
+        "w": 127,
+        "h": 194
+      }
     },
     "set-ceiling": {
       "src": "/help/shots/soft-clipper/set-ceiling.png",
       "w": 273,
-      "h": 71
+      "h": 71,
+      "at": {
+        "x": 235,
+        "y": 501,
+        "w": 261,
+        "h": 59
+      }
     },
     "peak-control": {
       "src": "/help/shots/soft-clipper/peak-control.png",
       "w": 116,
-      "h": 76
+      "h": 76,
+      "at": {
+        "x": 561,
+        "y": 501,
+        "w": 104,
+        "h": 64
+      }
     },
     "output": {
       "src": "/help/shots/soft-clipper/output.png",
       "w": 138,
-      "h": 206
+      "h": 206,
+      "at": {
+        "x": 740,
+        "y": 411,
+        "w": 126,
+        "h": 194
+      }
     },
     "auto": {
       "src": "/help/shots/soft-clipper/auto.png",
       "w": 87,
-      "h": 42
+      "h": 42,
+      "at": {
+        "x": 765,
+        "y": 613,
+        "w": 75,
+        "h": 30
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/soft-clipper/face.jpg",
+    "w": 900,
+    "h": 613,
+    "x": 0,
+    "y": 58
   }
 }

@@ -1,0 +1,19 @@
+{
+  "samples": {
+    "voice": {
+      "off": "/effects/saturation-workbench/audio/voice-off.mp3",
+      "on": "/effects/saturation-workbench/audio/voice-on.mp3",
+      "placeholder": true,
+      "seconds": 25.75,
+      "channels": 1,
+      "levelDb": {
+        "off": -23.39,
+        "on": -23.37
+      },
+      "peakDb": {
+        "off": -3,
+        "on": -2.23
+      }
+    }
+  }
+}

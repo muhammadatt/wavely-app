@@ -1,0 +1,50 @@
+export default {
+  feature: 'noiseReduction',
+  eyebrow: 'AI noise reduction',
+  headline: 'Clean, quiet recordings, with your voice left natural.',
+  pitch: [
+    'Hiss, fans, air conditioning and room tone taken away by neural-network noise reduction — and your voice still sounds like you.',
+  ],
+  description: 'AI noise reduction in your browser: remove hiss, fans, room tone and mouth clicks from voice recordings and keep the voice natural.',
+  overviewTitle: 'Studio quiet, from any room',
+  overview: [
+    'Hiss, fans, air conditioning and room tone are the first things a listener notices, and the first thing an audiobook reviewer flags. Neural-network noise reduction separates the voice from the noise around it and removes the noise, leaving a clean, quiet recording that still sounds like you.',
+    'Choose Clean for transparent removal of hiss and steady background noise, Deep Clean to take away more — lip smacks, clicks and bumps included — or both for the most stubborn recordings. Mix blends a little of the original back for an even more natural result.',
+  ],
+  features: [
+    { title: 'Studio-quiet backgrounds', text: 'hiss, fans and room noise taken away' },
+    { title: 'Natural voice', text: 'transparent removal that keeps your tone' },
+    { title: 'Clean and Deep Clean', text: 'two neural passes, used alone or together' },
+    { title: 'Mouth noise too', text: 'Deep Clean takes clicks and lip smacks' },
+    { title: 'Max reduction', text: 'choose how far the noise is pulled down' },
+    { title: 'Voice guard', text: 'protects consonants on the deepest pass' },
+    { title: 'Mix', text: 'blend some of the original back' },
+    { title: 'Audiobook friendly', text: 'room tone brought down toward a clean floor' },
+    { title: 'Chapter-length files', text: 'long selections processed on our servers' },
+    { title: 'One click', text: 'process, listen, and undo if you change your mind' },
+  ],
+  samples: [
+    {
+      id: 'room',
+      title: 'Narration in a noisy room',
+      text: 'The fan and hiss are gone; the voice is left clean and natural.',
+      settings: {},
+      setting: 'Clean, factory default',
+      brief: '20–30 s of narration with steady background noise (a fan, air conditioning or hiss) clearly audible between phrases.',
+    },
+  ],
+  hotspots: [
+    { shot: 'mode' },
+    { shot: 'max-reduction' },
+    { shot: 'tiers' },
+    { shot: 'voice-guard' },
+    { shot: 'mix' },
+  ],
+  specs: [
+    { label: 'Engines', value: 'Clean and Deep Clean neural passes' },
+    { label: 'Controls', value: 'Mode, Max reduction, Voice guard, Mix' },
+    { label: 'Process', value: 'Offline, on our servers; one undo step' },
+    { label: 'Plan', value: 'Pro' },
+    { label: 'Works with', value: 'WAV, FLAC, MP3, AIFF, M4A — mono or stereo' },
+  ],
+}

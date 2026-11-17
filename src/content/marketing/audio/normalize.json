@@ -1,0 +1,19 @@
+{
+  "samples": {
+    "quiet": {
+      "off": "/effects/peak-normalize/audio/quiet-off.mp3",
+      "on": "/effects/peak-normalize/audio/quiet-on.mp3",
+      "placeholder": true,
+      "seconds": 25.78,
+      "channels": 1,
+      "levelDb": {
+        "off": -38.32,
+        "on": -21.32
+      },
+      "peakDb": {
+        "off": -18,
+        "on": -1
+      }
+    }
+  }
+}

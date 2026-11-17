@@ -1,0 +1,19 @@
+{
+  "samples": {
+    "voice": {
+      "off": "/effects/reso-tame/audio/voice-off.mp3",
+      "on": "/effects/reso-tame/audio/voice-on.mp3",
+      "placeholder": true,
+      "seconds": 26.91,
+      "channels": 1,
+      "levelDb": {
+        "off": -20.83,
+        "on": -21.46
+      },
+      "peakDb": {
+        "off": -1,
+        "on": -0.96
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "samples": {
+    "narration": {
+      "off": "/effects/soft-clipper/audio/narration-off.mp3",
+      "on": "/effects/soft-clipper/audio/narration-on.mp3",
+      "placeholder": true,
+      "seconds": 20.07,
+      "channels": 1,
+      "levelDb": {
+        "off": -23.74,
+        "on": -17.21
+      },
+      "peakDb": {
+        "off": -1.45,
+        "on": -1.45
+      }
+    }
+  }
+}

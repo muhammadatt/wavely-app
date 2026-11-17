@@ -1,0 +1,52 @@
+export default {
+  eyebrow: 'Hum remover',
+  headline: 'Clear away mains hum and buzz — keep the voice.',
+  pitch: [
+    'Finds the 50 or 60 Hz buzz and every harmonic it rings on, and cuts each one with its own narrow notch, leaving the voice around them alone.',
+  ],
+  description: 'Remove mains hum and electrical buzz in your browser: automatic 50/60 Hz detection and narrow notches that leave the voice untouched. Free.',
+  overviewTitle: 'Buzz gone, voice intact',
+  overview: [
+    'A low electrical buzz under a recording — a ground loop, lighting, a nearby cable — makes an otherwise good take sound amateur, and general noise reduction often thins the voice before it removes it. Hum is a fundamental at 50 or 60 Hz plus its harmonics, so the cleanest fix is a narrow notch on each one.',
+    'Hum Remover analyses the selection, finds the mains frequency and every harmonic that rings, and cuts each with its own narrow notch, leaving the voice around them untouched. Width and Depth let you trade thoroughness for transparency.',
+  ],
+  features: [
+    { title: 'Buzz-free recordings', text: 'mains hum and its harmonics taken away' },
+    { title: 'Voice untouched', text: 'narrow notches leave everything around them alone' },
+    { title: 'Automatic detection', text: 'finds the 50 or 60 Hz fundamental for you' },
+    { title: 'Every harmonic', text: 'each one found and cut on its own' },
+    { title: 'Width and depth', text: 'trade thoroughness for transparency' },
+    { title: 'After noise reduction', text: 'removes the hum other tools leave behind' },
+    { title: 'See what it found', text: 'a table of every harmonic it cuts' },
+    { title: 'Ground loops and lights', text: 'the usual culprits, handled' },
+    { title: 'Real-time preview', text: 'hear the result as it plays' },
+    { title: 'Free in your browser', text: 'no plugin to buy, no DAW, nothing to install' },
+  ],
+  samples: [
+    {
+      id: 'voice',
+      title: 'Narration with mains hum',
+      text: 'The buzz underneath is gone; the voice sounds exactly as it did.',
+      settings: {},
+      setting: 'Factory default (60 Hz mains, detected harmonics)',
+      brief: '20–30 s of narration with an audible 50 or 60 Hz hum or buzz under it.',
+    },
+  ],
+  hotspots: [
+    { shot: 'in-meter' },
+    { shot: 'mains' },
+    { shot: 'analyse' },
+    { shot: 'harmonics' },
+    { shot: 'status' },
+    { shot: 'out-meter' },
+    { shot: 'width' },
+    { shot: 'depth' },
+  ],
+  specs: [
+    { label: 'Detection', value: 'Automatic, 50 or 60 Hz and harmonics' },
+    { label: 'Filters', value: 'One narrow notch per harmonic' },
+    { label: 'Controls', value: 'Mains frequency, Width, Depth' },
+    { label: 'Preview', value: 'Real time, while you play' },
+    { label: 'Works with', value: 'WAV, FLAC, MP3, AIFF, M4A — mono or stereo' },
+  ],
+}

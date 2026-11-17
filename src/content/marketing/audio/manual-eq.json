@@ -1,0 +1,19 @@
+{
+  "samples": {
+    "voice": {
+      "off": "/effects/eq/audio/voice-off.mp3",
+      "on": "/effects/eq/audio/voice-on.mp3",
+      "placeholder": true,
+      "seconds": 25.75,
+      "channels": 1,
+      "levelDb": {
+        "off": -22,
+        "on": -24.87
+      },
+      "peakDb": {
+        "off": -2,
+        "on": -4.48
+      }
+    }
+  }
+}

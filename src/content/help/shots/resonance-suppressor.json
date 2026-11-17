@@ -8,47 +8,108 @@
     "overlays": {
       "src": "/help/shots/reso-tame/overlays.png",
       "w": 384,
-      "h": 32
+      "h": 32,
+      "at": {
+        "x": 414,
+        "y": 72,
+        "w": 372,
+        "h": 20
+      }
     },
     "display": {
       "src": "/help/shots/reso-tame/display.png",
       "w": 784,
-      "h": 298
+      "h": 298,
+      "at": {
+        "x": 14,
+        "y": 100,
+        "w": 772,
+        "h": 286
+      }
     },
     "attack": {
       "src": "/help/shots/reso-tame/attack.png",
       "w": 68,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 26,
+        "y": 378,
+        "w": 56,
+        "h": 119
+      }
     },
     "release": {
       "src": "/help/shots/reso-tame/release.png",
       "w": 71,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 88,
+        "y": 378,
+        "w": 59,
+        "h": 119
+      }
     },
     "threshold": {
       "src": "/help/shots/reso-tame/threshold.png",
       "w": 86,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 304,
+        "y": 378,
+        "w": 74,
+        "h": 119
+      }
     },
     "sharp": {
       "src": "/help/shots/reso-tame/sharp.png",
       "w": 62,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 389,
+        "y": 378,
+        "w": 50,
+        "h": 119
+      }
     },
     "depth": {
       "src": "/help/shots/reso-tame/depth.png",
       "w": 74,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 441,
+        "y": 378,
+        "w": 62,
+        "h": 119
+      }
     },
     "mix": {
       "src": "/help/shots/reso-tame/mix.png",
       "w": 74,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 645,
+        "y": 378,
+        "w": 62,
+        "h": 119
+      }
     },
     "trim": {
       "src": "/help/shots/reso-tame/trim.png",
       "w": 72,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 710,
+        "y": 378,
+        "w": 60,
+        "h": 119
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/reso-tame/face.jpg",
+    "w": 800,
+    "h": 463,
+    "x": 0,
+    "y": 58
   }
 }

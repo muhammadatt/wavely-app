@@ -8,37 +8,86 @@
     "freeze": {
       "src": "/help/shots/spectrum-analyzer/freeze.png",
       "w": 99,
-      "h": 42
+      "h": 42,
+      "at": {
+        "x": 347,
+        "y": 15,
+        "w": 87,
+        "h": 30
+      }
     },
     "peak-hold": {
       "src": "/help/shots/spectrum-analyzer/peak-hold.png",
       "w": 123,
-      "h": 42
+      "h": 42,
+      "at": {
+        "x": 441,
+        "y": 15,
+        "w": 111,
+        "h": 30
+      }
     },
     "display": {
       "src": "/help/shots/spectrum-analyzer/display.png",
       "w": 684,
-      "h": 300
+      "h": 300,
+      "at": {
+        "x": 14,
+        "y": 72,
+        "w": 672,
+        "h": 288
+      }
     },
     "resolution": {
       "src": "/help/shots/spectrum-analyzer/resolution.png",
       "w": 203,
-      "h": 57
+      "h": 57,
+      "at": {
+        "x": 32,
+        "y": 404,
+        "w": 191,
+        "h": 45
+      }
     },
     "tilt": {
       "src": "/help/shots/spectrum-analyzer/tilt.png",
       "w": 158,
-      "h": 58
+      "h": 58,
+      "at": {
+        "x": 277,
+        "y": 403,
+        "w": 146,
+        "h": 46
+      }
     },
     "averaging": {
       "src": "/help/shots/spectrum-analyzer/averaging.png",
       "w": 83,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 531,
+        "y": 352,
+        "w": 71,
+        "h": 119
+      }
     },
     "floor": {
       "src": "/help/shots/spectrum-analyzer/floor.png",
       "w": 78,
-      "h": 131
+      "h": 131,
+      "at": {
+        "x": 612,
+        "y": 352,
+        "w": 66,
+        "h": 119
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/spectrum-analyzer/face.jpg",
+    "w": 700,
+    "h": 437,
+    "x": 0,
+    "y": 58
   }
 }

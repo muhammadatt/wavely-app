@@ -8,17 +8,42 @@
     "analyze": {
       "src": "/help/shots/voicerx/analyze.png",
       "w": 658,
-      "h": 212
+      "h": 212,
+      "at": {
+        "x": 87,
+        "y": 74,
+        "w": 646,
+        "h": 200
+      }
     },
     "input-meter": {
       "src": "/help/shots/voicerx/input-meter.png",
-      "w": 61,
-      "h": 274
+      "w": 62,
+      "h": 274,
+      "at": {
+        "x": 21,
+        "y": 74,
+        "w": 50,
+        "h": 262
+      }
     },
     "output-meter": {
       "src": "/help/shots/voicerx/output-meter.png",
-      "w": 61,
-      "h": 274
+      "w": 62,
+      "h": 274,
+      "at": {
+        "x": 748,
+        "y": 74,
+        "w": 50,
+        "h": 262
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/voicerx/face.jpg",
+    "w": 820,
+    "h": 316,
+    "x": 0,
+    "y": 56
   }
 }

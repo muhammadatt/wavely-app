@@ -1,0 +1,53 @@
+export default {
+  feature: 'autoLevel',
+  eyebrow: 'Phrase leveler',
+  headline: 'Every sentence at the same level — without the squash.',
+  pitch: [
+    'Quiet sentences come up and loud ones come down, the way an editor rides clip gain by hand, while the life inside each phrase is left alone.',
+  ],
+  description: 'Even out the level between spoken phrases in your browser, the way an editor rides clip gain by hand — no compressor pumping, no squashed delivery.',
+  overviewTitle: 'Hand-ridden levels, done for you',
+  overview: [
+    'The most natural-sounding way to even out a voice is the slowest: an editor going through phrase by phrase, nudging the quiet ones up and the loud ones down. Nothing is compressed, so the delivery keeps all its life — the recording just stops wandering between too quiet and too loud.',
+    'Auto Leveler does that for you. It finds every spoken phrase, measures its loudness and moves the ones that stray towards a common target, with smooth transitions at the quietest point between them. One Apply levels the whole selection; Undo takes it back.',
+  ],
+  features: [
+    { title: 'Even phrase to phrase', text: 'quiet sentences come up and loud ones come down' },
+    { title: 'Delivery left intact', text: 'nothing changes inside a phrase, so it stays natural' },
+    { title: 'No compressor sound', text: 'no pumping, no squashed consonants, no lifted breaths' },
+    { title: 'Fixes off-mic drift', text: 'a speaker who turned away comes back to level' },
+    { title: 'Invisible transitions', text: 'gain moves at the quietest point between phrases' },
+    { title: 'Whole or rolling target', text: 'one level for the selection, or one that follows the session' },
+    { title: 'Sets up the compressor', text: 'a steady level so the next stage works evenly' },
+    { title: 'Sensible limits', text: 'caps on boost and cut, and a floor for silences' },
+    { title: 'Last-run report', text: 'phrases found and the spread before and after' },
+    { title: 'One click', text: 'analyse, level and write in one Apply' },
+  ],
+  samples: [
+    {
+      id: 'narration',
+      title: 'Wandering narration',
+      text: 'Quiet sentences come up to meet the rest, with every phrase left exactly as it was spoken.',
+      settings: {},
+      setting: 'Factory default',
+      brief: '30–45 s of narration where some sentences sit clearly quieter than others (turned away, tired, trailing off). Untreated.',
+    },
+  ],
+  hotspots: [
+    { shot: 'target' },
+    { shot: 'deadband' },
+    { shot: 'knee' },
+    { shot: 'window' },
+    { shot: 'max-boost' },
+    { shot: 'max-cut' },
+    { shot: 'floor' },
+    { shot: 'last-run' },
+  ],
+  specs: [
+    { label: 'Type', value: 'Phrase-level gain riding' },
+    { label: 'Detection', value: 'Voice activity, per phrase' },
+    { label: 'Process', value: 'Offline: one Apply, one undo step' },
+    { label: 'Plan', value: 'Pro' },
+    { label: 'Works with', value: 'WAV, FLAC, MP3, AIFF, M4A — mono or stereo' },
+  ],
+}

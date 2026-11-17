@@ -64,7 +64,8 @@ test('the registry key and the filename agree', () => {
   // under another id would serve the wrong instructions with nothing to show
   // for it. Catching that here is cheaper than noticing it in the panel.
   const files = readdirSync(HELP_DIR)
-    .filter(f => f.endsWith('.js') && f !== 'index.js')
+    // index.js and meta.js (titles and slugs) are the directory's own modules, not pages.
+    .filter(f => f.endsWith('.js') && f !== 'index.js' && f !== 'meta.js')
     .map(f => f.replace(/\.js$/, ''))
     .sort()
   assert.deepEqual(files, Object.keys(HELP).sort())

@@ -1,0 +1,63 @@
+export default {
+  eyebrow: 'Parametric EQ',
+  headline: 'Shape your tone precisely, and hear every move.',
+  pitch: [
+    'Warmth, clarity and presence exactly where a voice needs them — with a live analyzer that shows you what you are hearing.',
+  ],
+  description: 'An eight-band parametric EQ in your browser with a live analyzer: add warmth, clear the mud and bring a voice forward, heard as you move. Free.',
+  overviewTitle: 'Clarity starts with EQ',
+  overview: [
+    'Great tone starts with EQ: a little warmth below, clarity where a voice turns muddy, a lift at the top for presence. A parametric EQ lets you find exactly the frequency that needs help and change only that, so a voice comes out richer and clearer instead of just brighter or darker.',
+    'EQ gives you up to eight bands of bells, shelves and filters, drawn over a live analyzer so you can see what you hear. Drag a node or type an exact value, solo a band to hunt down a problem, and hear every change in real time.',
+  ],
+  features: [
+    { title: 'Clearer voices', text: 'cut the mud and boxiness that hide the words' },
+    { title: 'Warmth and presence', text: 'add body below and sparkle above' },
+    { title: 'Surgical precision', text: 'narrow cuts for rings and resonances' },
+    { title: 'Up to eight bands', text: 'bells, shelves and filters' },
+    { title: 'Live analyzer', text: 'see the spectrum as it plays' },
+    { title: 'Drag or type', text: 'move nodes on the graph or enter exact values' },
+    { title: 'Solo a band', text: 'hear only what one band is doing' },
+    { title: 'Real-time preview', text: 'every move heard instantly' },
+    { title: 'Presets', text: 'save your favourite curves' },
+    { title: 'Free in your browser', text: 'no plugin to buy, no DAW, nothing to install' },
+  ],
+  samples: [
+    {
+      id: 'voice',
+      title: 'Muddy voice cleared up',
+      text: 'A little cut in the low mids and a lift for presence: the words come forward and the voice sounds clearer.',
+      settings: {
+        bands: [
+          { type: 'lowshelf', frequencyHz: 80, gainDb: 0, q: 0.7, enabled: true },
+          { type: 'peaking', frequencyHz: 300, gainDb: -6, q: 1, enabled: true },
+          { type: 'peaking', frequencyHz: 4000, gainDb: 4, q: 1, enabled: true },
+          { type: 'highshelf', frequencyHz: 10000, gainDb: 0, q: 0.7, enabled: true },
+        ],
+      },
+      setting: 'Low-mid cut −6 dB at 300 Hz, presence lift +4 dB at 4 kHz',
+      brief: '20–30 s of narration with a slightly muddy, boxy tone. Untreated.',
+    },
+  ],
+  hotspots: [
+    { shot: 'analyzer' },
+    { shot: 'reset' },
+    { shot: 'plot' },
+    { shot: 'in' },
+    { shot: 'band-gain' },
+    { shot: 'band-shape' },
+    { shot: 'band-freq' },
+    { shot: 'band-width' },
+    { shot: 'band-on' },
+    { shot: 'band-solo' },
+    { shot: 'band-remove' },
+    { shot: 'out' },
+  ],
+  specs: [
+    { label: 'Bands', value: 'Up to 8: bell, shelves, high- and low-pass' },
+    { label: 'Display', value: 'Live spectrum analyzer' },
+    { label: 'Preview', value: 'Real time, while you play' },
+    { label: 'Presets', value: 'Factory and your own' },
+    { label: 'Works with', value: 'WAV, FLAC, MP3, AIFF, M4A — mono or stereo' },
+  ],
+}

@@ -1,0 +1,85 @@
+export default {
+  feature: 'voxPressor',
+  eyebrow: 'Vocal dynamics chain',
+  headline: 'Broadcast-ready vocals, no engineer required.',
+  pitch: [
+    'The dense, polished, up-front voice of radio and well-produced podcasts — from a classic FET-into-opto chain that’s already wired and tuned for voice. Right in your browser.',
+  ],
+  description: 'Dense, polished, broadcast-ready vocals in your browser: a classic 1176-into-LA-2A chain with de-essing and parallel density, tuned for voice.',
+
+  overviewTitle: 'The pro vocal sound, already wired',
+  overview: [
+    'The voice on a great podcast or radio show sounds big, close and effortlessly even: every word lands and nothing jumps out. Engineers get there with a chain — a fast 1176 to grab the peaks, an LA-2A to smooth the body, a de-esser, and a parallel copy for density. VoxPressor is that chain, in the order and at the settings a voice needs.',
+    'You get the grip of the FET and the smooth, warm leveling of the opto in one window, with readouts that show what each stage is doing and guide colours that turn amber before you overdo it. The result is the kind of finished, dense vocal you hear on the shows you admire, ready for mastering or delivery.',
+  ],
+
+  features: [
+    { title: 'Broadcast-ready density', text: 'a full, polished voice with every word up front' },
+    { title: 'Rock-steady level', text: 'loud moments come down and quiet ones come up, so listeners never reach for the volume' },
+    { title: '1176 peak control', text: 'the fast FET grab that tames shouts and laughs' },
+    { title: 'Smooth LA-2A body', text: 'opto leveling with tube warmth that evens out whole phrases' },
+    { title: 'Parallel weight', text: 'a compressed copy underneath that thickens the voice without squashing it' },
+    { title: 'Smooth S sounds', text: 'a de-esser after the compressors keeps sibilance in check' },
+    { title: 'Enhance Detail', text: 'extra presence and density without raising the peak' },
+    { title: 'A pro chain, prewired', text: 'four processors in the order a voice needs' },
+    { title: 'Know when to stop', text: 'guide colours turn amber before a stage starts to squash the voice' },
+    { title: 'Tuned to your voice', text: 'release timed from your voice’s own pitch, so low voices stay smooth' },
+    { title: 'Delivery-ready output', text: 'source peak, −1 dB for streaming or −3 dB for ACX' },
+    { title: 'Real-time preview', text: 'free in your browser; Apply with Pro' },
+  ],
+
+  samples: [
+    {
+      id: 'narration',
+      title: 'Raw narration',
+      text: 'Peaks caught, phrases evened out and the S sounds kept smooth — a finished read from the factory settings.',
+      settings: {},
+      setting: 'Factory default',
+      brief: '20–30 s of untreated narration, mono, with some loud syllables and quiet trailing phrases and a few clear S sounds.',
+    },
+    {
+      id: 'podcast',
+      title: 'Podcast, broadcast density',
+      text: 'A bigger, closer, broadcast-style voice: the 1176 parallel copy pulled up for more density.',
+      settings: { parallel: 50, parallelComp: '1176', ceiling: '-1' },
+      setting: 'Density Mix 50 %, 1176, Output −1 dB',
+      brief: '20–30 s of conversational podcast speech, close-miked, untreated, with some energy changes.',
+    },
+    {
+      id: 'audiobook',
+      title: 'Audiobook, ready for ACX',
+      text: 'Gentle, transparent leveling for a natural read, with the peak landing at −3 dB for ACX.',
+      settings: { peaks: 2, body: 4, ceiling: '-3' },
+      setting: 'Peak reduction 20, Body leveler 40, Output −3 dB',
+      brief: '20–30 s of an audiobook read, mono, recorded with ACX-style headroom (peaks around −6 dBFS), untreated.',
+    },
+  ],
+
+  hotspots: [
+    { shot: 'peak-reduction', text: 'How hard the 1176 stage catches the loudest peaks — its ring turns amber before it touches the voice.' },
+    { shot: 'attack-release' },
+    { shot: 'knee' },
+    { shot: 'meter' },
+    { shot: 'meter-select' },
+    { shot: 'readout' },
+    { shot: 'body-leveler', text: 'How hard the LA-2A stage levels the voice, with its own amber and red guide.' },
+    { shot: 'enhance-detail' },
+    { shot: 'de-ess-amount' },
+    { shot: 'de-ess-band' },
+    { shot: 'density-drive' },
+    { shot: 'density-mix' },
+    { shot: 'density-comp' },
+    { shot: 'output-level' },
+    { shot: 'io-meters' },
+  ],
+
+  specs: [
+    { label: 'Stages', value: '1176 peaks → LA-2A body → de-esser → parallel density → enhance' },
+    { label: 'Peaks', value: 'Soft knee 4:1 or hard knee 12:1, release from the voice’s pitch' },
+    { label: 'Output level', value: 'Source peak, −1 dB or −3 dB' },
+    { label: 'Readouts', value: 'Measured dB per stage, on your selection' },
+    { label: 'Preview', value: 'Real time, free for everyone' },
+    { label: 'Apply', value: 'Pro plan' },
+    { label: 'Works with', value: 'WAV, FLAC, MP3, AIFF, M4A — mono or stereo' },
+  ],
+}

@@ -8,52 +8,119 @@
     "threshold": {
       "src": "/help/shots/hi-freq-limiter/threshold.png",
       "w": 116,
-      "h": 128
+      "h": 128,
+      "at": {
+        "x": 46,
+        "y": 141,
+        "w": 104,
+        "h": 116
+      }
     },
     "shape": {
       "src": "/help/shots/hi-freq-limiter/shape.png",
       "w": 129,
-      "h": 57
+      "h": 57,
+      "at": {
+        "x": 39,
+        "y": 306,
+        "w": 117,
+        "h": 45
+      }
     },
     "meter": {
       "src": "/help/shots/hi-freq-limiter/meter.png",
       "w": 440,
-      "h": 73
+      "h": 73,
+      "at": {
+        "x": 200,
+        "y": 78,
+        "w": 428,
+        "h": 61
+      }
     },
     "curve": {
       "src": "/help/shots/hi-freq-limiter/curve.png",
       "w": 440,
-      "h": 226
+      "h": 226,
+      "at": {
+        "x": 200,
+        "y": 151,
+        "w": 428,
+        "h": 214
+      }
     },
     "freq": {
       "src": "/help/shots/hi-freq-limiter/freq.png",
       "w": 106,
-      "h": 135
+      "h": 135,
+      "at": {
+        "x": 649,
+        "y": 99,
+        "w": 94,
+        "h": 123
+      }
     },
     "range": {
       "src": "/help/shots/hi-freq-limiter/range.png",
       "w": 106,
-      "h": 135
+      "h": 135,
+      "at": {
+        "x": 649,
+        "y": 228,
+        "w": 94,
+        "h": 123
+      }
     },
     "transient": {
       "src": "/help/shots/hi-freq-limiter/transient.png",
       "w": 153,
-      "h": 83
+      "h": 83,
+      "at": {
+        "x": 11,
+        "y": 386,
+        "w": 141,
+        "h": 71
+      }
     },
     "release": {
       "src": "/help/shots/hi-freq-limiter/release.png",
       "w": 128,
-      "h": 83
+      "h": 83,
+      "at": {
+        "x": 204,
+        "y": 386,
+        "w": 116,
+        "h": 71
+      }
     },
     "output": {
       "src": "/help/shots/hi-freq-limiter/output.png",
       "w": 134,
-      "h": 83
+      "h": 83,
+      "at": {
+        "x": 366,
+        "y": 386,
+        "w": 122,
+        "h": 71
+      }
     },
     "in-out": {
       "src": "/help/shots/hi-freq-limiter/in-out.png",
       "w": 208,
-      "h": 57
+      "h": 57,
+      "at": {
+        "x": 546,
+        "y": 402,
+        "w": 196,
+        "h": 45
+      }
     }
+  },
+  "face": {
+    "src": "/help/shots/hi-freq-limiter/face.jpg",
+    "w": 760,
+    "h": 406,
+    "x": 0,
+    "y": 58
   }
 }

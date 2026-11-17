@@ -10,8 +10,12 @@
  * writes:
  *
  *   public/help/shots/<slug>/panel.jpg      the whole window (the "Interface" image)
+ *   public/help/shots/<slug>/face.jpg       the faceplate alone, no header / footer
+ *                                           (the marketing pages' product shot)
  *   public/help/shots/<slug>/<shot>.png     one crop per control that names a `shot`
- *   src/content/help/shots/<id>.json        the manifest the help page reads
+ *   src/content/help/shots/<id>.json        the manifest the help page reads (and
+ *                                           each control's box on the panel, `at`,
+ *                                           for the marketing page's hotspots)
  *
  * `<slug>` is the page's product-name URL segment (`la-vintage-2a`), so image
  * URLs never show the old window ids; the manifest stays keyed by window id.
@@ -24,6 +28,15 @@
  * Re-run it after changing a panel's look. It reads the content files, so add
  * the `shot` there first. Images are a picture of the dev build (dev-only
  * effects included) at a 2x device scale.
+ *
+ * ── LIVE SHOTS ──────────────────────────────────────────────────────────────
+ * Every window is shot WHILE AUDIO PLAYS through it (looped, whole file
+ * selected), so meters, scopes and gain-reduction displays are lit (owner,
+ * November 2026: idle panels read as dead). The audio is a real recording when
+ * one is present — `scripts/help-shots-audio/voice.wav` for most effects and
+ * `drums.wav` for the ones in DRUM_IDS (gitignored: the owner's clips, for
+ * screenshots only, NEVER the marketing pages' Hear it audio) — and the
+ * generated probe otherwise.
  */
 import { chromium } from 'playwright'
 import { spawn } from 'node:child_process'
@@ -33,6 +46,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { HELP, HELP_META, helpSlug } from '../src/content/help/index.js'
+import { MARKETING } from '../src/content/marketing/index.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PORT = Number(process.env.HELP_SHOTS_PORT ?? 5198)
@@ -48,6 +62,32 @@ for (const id of ids) if (!HELP[id]) { console.error(`no help entry: ${id}`); pr
  * query is the one that lands on it first (the smoke script's experience).
  */
 const QUERY = { 'saturation-bench': 'Saturation Workbench', 'plugin-chain': 'Effect Chain' }
+
+/** Effects shot on the drum loop rather than the voice (tape and density read best on drums). */
+const DRUM_IDS = new Set(['phatass', 'inflator'])
+
+/**
+ * Settings dialled in before a window opens, for effects whose factory default
+ * does nothing visible on these clips (PHATaSS idles at Drive 0 / Warmth 0, the
+ * EQ is flat). Taken from the marketing page's sample where one fits, through
+ * the same writer a preset or the try-out link uses.
+ */
+const sampleSettings = (id, sample) => MARKETING[id]?.samples.find(s => s.id === sample)?.settings ?? {}
+const SHOT_SETTINGS = {
+  phatass: { ...sampleSettings('phatass', 'drums'), warmth: 5 },
+  'manual-eq': sampleSettings('manual-eq', 'voice'),
+  // A lower threshold, so the Resonance view shows the voice being treated.
+  'resonance-suppressor': { focus: { global: { selectivity: 13 } } },
+  // The default (12 kHz, −8 dB) barely touches this vocal's top end.
+  'hf-limiter': { freq: 5000, threshold: -14 },
+}
+
+/** How long audio runs through an open window before it is shot. */
+const PLAY_SETTLE_MS = 3000
+/** Windows that measure before they act (VoxPressor's stages wait for their makeups). */
+const SETTLE_MS = { 'vox-pressor': 10000 }
+/** A button pressed before playing, so the panel shows what it found. */
+const PRESS_FIRST = { 'hum-remover': 'Analyse' }
 
 /** The rack the Effect Chain's help picture shows: picker queries, in order. */
 const CHAIN_SAMPLE = ['EQ', 'LA Classic 76', 'LA Vintage 2A', 'De-Esser', 'Air Boost']
@@ -87,6 +127,20 @@ async function waitForServer(ms) {
 const wav = join(tmpdir(), 'wavely-help-shots.wav')
 writeProbeWav(wav)
 
+// Real clips when present: the voice drives most windows, the drums the DRUM_IDS.
+const AUDIO_DIR = join(ROOT, 'scripts/help-shots-audio')
+const findClip = name => ['wav', 'flac', 'mp3', 'aif', 'aiff', 'm4a']
+  .map(e => join(AUDIO_DIR, `${name}.${e}`)).find(existsSync) ?? null
+const voiceClip = findClip('voice')
+const drumClip = findClip('drums')
+const clips = voiceClip ? [voiceClip, ...(drumClip ? [drumClip] : [])] : [wav]
+/** The tab (file name without its extension) an effect is shot on. */
+const tabFor = id => {
+  const file = DRUM_IDS.has(id) && drumClip ? drumClip : clips[0]
+  return file.split(/[\\/]/).pop().replace(/\.[^.]+$/, '')
+}
+console.log(`audio: ${clips.map(c => c.split(/[\\/]/).pop()).join(', ')}${voiceClip ? '' : ' (generated probe — add scripts/help-shots-audio/voice.wav for real audio)'}`)
+
 let server = null
 if (!(await waitForServer(1000))) {
   if (process.env.HELP_SHOTS_URL) { console.error(`no server at ${URL_}`); process.exit(1) }
@@ -110,25 +164,67 @@ await page.addInitScript(() => {
   })
 })
 
+/** Bring a file's tab to the front by its name (shown without the extension). */
+async function selectTab(name) {
+  const tab = page.getByRole('tab', { name, exact: false }).first()
+  if (await tab.count()) { await tab.click(); await page.waitForTimeout(800) }
+}
+
+/**
+ * Play through the window the way a user auditions it: its footer's Preview
+ * (which reads Stop while it runs). An offline process has no preview and no
+ * live meters, so it is shot idle.
+ */
+async function setPlaying(frame, on) {
+  const button = frame.getByRole('button', { name: on ? 'Preview' : 'Stop', exact: true }).first()
+  if (await button.count() && await button.isEnabled()) { await button.click(); await page.waitForTimeout(300) }
+}
+
 let failures = 0
+const manifests = {}
 try {
   // Not 'networkidle': a cold dev server streams modules (and the app may poll) for longer than it allows.
   await page.goto(URL_, { waitUntil: 'load', timeout: 120000 })
   await page.getByText('Choose audio files').waitFor({ timeout: 120000 })
   const chooser = page.waitForEvent('filechooser')
   await page.getByText('Choose audio files').click()
-  await (await chooser).setFiles(wav)
-  await page.waitForTimeout(4000)
-  await page.getByText('Select All', { exact: false }).first().click()
-  await page.waitForTimeout(600)
+  await (await chooser).setFiles(clips)
+  await page.waitForTimeout(4000 + 2000 * (clips.length - 1))
+  // Every file: everything selected and Loop on, so playback runs as long as the shots take.
+  for (const clip of clips) {
+    await selectTab(clip.split(/[\\/]/).pop().replace(/\.[^.]+$/, ''))
+    await page.getByText('Select All', { exact: false }).first().click()
+    await page.waitForTimeout(600)
+    const loop = page.getByRole('button', { name: 'Loop playback' })
+    if ((await loop.getAttribute('aria-pressed')) !== 'true') await loop.click()
+    await page.waitForTimeout(200)
+  }
 
   for (const id of ids) {
     const entry = HELP[id]
+    await selectTab(tabFor(id))
+    if (SHOT_SETTINGS[id]) {
+      // The app's own module instance (the dev server serves one URL per module).
+      const ok = await page.evaluate(async ([pluginId, settings]) => {
+        const m = await import('/src/composables/pluginSettings.js')
+        const io = m.pluginSettingsIO(pluginId, 'solo')
+        // Deep, so a nested group (Reso Tame's focus.global) keeps its other keys.
+        const merge = (a, b) => (b && typeof b === 'object' && !Array.isArray(b) && a && typeof a === 'object' && !Array.isArray(a))
+          ? Object.fromEntries([...new Set([...Object.keys(a), ...Object.keys(b)])].map(k => [k, k in b ? merge(a[k], b[k]) : a[k]]))
+          : b
+        return !!io && m.writePluginSettings(pluginId, 'solo', merge(io.read(), settings))
+      }, [id, SHOT_SETTINGS[id]])
+      if (!ok) console.log(`warn  ${id}: shot settings not applied`)
+    }
     await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
     await page.keyboard.type(QUERY[id] ?? HELP_META[id].title); await page.waitForTimeout(450)
     await page.keyboard.press('Enter'); await page.waitForTimeout(3500)
     let frame = page.locator('.win-frame').last()
-    if (!(await frame.count())) { console.log(`FAIL  ${id}: window did not open`); failures++; continue }
+    if (!(await frame.count())) {
+      const snap = join(tmpdir(), `help-shots-fail-${id}.png`)
+      await page.screenshot({ path: snap })
+      console.log(`FAIL  ${id}: window did not open (screen: ${snap})`); failures++; continue
+    }
 
     // An empty chain does not show what it is for: fill it with a typical vocal rack first.
     if (id === 'plugin-chain') {
@@ -149,9 +245,15 @@ try {
       if (rows.length !== CHAIN_SAMPLE.length) { console.log(`FAIL  ${id}: expected ${CHAIN_SAMPLE.length} slots`); failures++ }
     }
 
-    // Measurements and meters settle; nothing should be mid-animation.
+    // Play through the open window so meters, scopes and reduction displays are
+    // lit; measurements settle while it runs.
+    if (PRESS_FIRST[id]) {
+      await frame.getByRole('button', { name: PRESS_FIRST[id], exact: true }).first().click().catch(() => {})
+      await page.waitForTimeout(4000)
+    }
     await page.mouse.move(0, 0)
-    await page.waitForTimeout(1500)
+    await setPlaying(frame, true)
+    await page.waitForTimeout(SETTLE_MS[id] ?? PLAY_SETTLE_MS)
 
     const slug = helpSlug(id)
     const outDir = join(ROOT, 'public/help/shots', slug)
@@ -162,6 +264,21 @@ try {
     const box = await frame.boundingBox()
     await page.screenshot({ path: join(outDir, 'panel.jpg'), clip: box, type: 'jpeg', quality: 88 })
     manifest.panel = { src: `/help/shots/${slug}/panel.jpg`, w: Math.round(box.width), h: Math.round(box.height) }
+
+    // The faceplate alone, without the window's header (name, presets, ON, ✕)
+    // and footer (selection readout, Preview, Apply): the marketing page's
+    // product shot. `x` / `y` are its offset inside panel.jpg, so a control's
+    // `at` box maps onto it by subtraction.
+    const faceEl = frame.locator('.win-face').first()
+    const faceBox = (await faceEl.count()) ? await faceEl.boundingBox() : null
+    if (faceBox) {
+      await page.screenshot({ path: join(outDir, 'face.jpg'), clip: faceBox, type: 'jpeg', quality: 90 })
+      manifest.face = {
+        src: `/help/shots/${slug}/face.jpg`,
+        w: Math.round(faceBox.width), h: Math.round(faceBox.height),
+        x: Math.round(faceBox.x - box.x), y: Math.round(faceBox.y - box.y),
+      }
+    }
 
     const missing = []
     for (const c of entry.controls) {
@@ -186,14 +303,24 @@ try {
         width: b.width + 2 * PAD, height: b.height + 2 * PAD,
       }
       await page.screenshot({ path: join(outDir, `${c.shot}.png`), clip })
-      manifest.controls[c.shot] = { src: `/help/shots/${slug}/${c.shot}.png`, w: Math.round(clip.width), h: Math.round(clip.height) }
+      manifest.controls[c.shot] = {
+        src: `/help/shots/${slug}/${c.shot}.png`, w: Math.round(clip.width), h: Math.round(clip.height),
+        // Where the control sits on panel.jpg, in its CSS pixels (unpadded):
+        // the marketing page's interactive screenshot places a hotspot here.
+        at: {
+          x: Math.round(b.x - box.x), y: Math.round(b.y - box.y),
+          w: Math.round(b.width), h: Math.round(b.height),
+        },
+      }
     }
 
-    mkdirSync(join(ROOT, 'src/content/help/shots'), { recursive: true })
-    writeFileSync(join(ROOT, 'src/content/help/shots', `${id}.json`), JSON.stringify(manifest, null, 2) + '\n')
+    // Written after the browser closes: a file under src/ changing makes the dev
+    // server reload the editor, losing the loaded audio mid-run.
+    manifests[id] = manifest
     if (missing.length) failures++
     console.log(`${missing.length ? 'FAIL' : 'ok  '}  ${id.padEnd(22)} ${Object.keys(manifest.controls).length} crops${missing.length ? `; not found: ${missing.join(', ')}` : ''}`)
 
+    await setPlaying(frame, false)
     await page.keyboard.press('Escape'); await page.waitForTimeout(500)
     // A window that ignores Escape (focus elsewhere) must not leak into the next shot.
     while (await page.locator('.win-frame').count()) {
@@ -206,5 +333,9 @@ try {
 } finally {
   await browser.close()
   if (server) server.kill()
+  mkdirSync(join(ROOT, 'src/content/help/shots'), { recursive: true })
+  for (const [id, manifest] of Object.entries(manifests)) {
+    writeFileSync(join(ROOT, 'src/content/help/shots', `${id}.json`), JSON.stringify(manifest, null, 2) + '\n')
+  }
 }
 process.exit(failures ? 1 : 0)

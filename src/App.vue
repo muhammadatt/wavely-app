@@ -16,6 +16,7 @@ import { useAuth } from './composables/useAuth.js'
 import { useBilling } from './composables/useBilling.js'
 import { useAccountScreen } from './composables/useAccountScreen.js'
 import { checkoutReturnMessage } from './auth/billing.js'
+import { useTryOut } from './composables/useTryOut.js'
 
 // ProcessingOverlay is no longer mounted here — it now renders inside the
 // waveform area so a job on one document doesn't block the whole app.
@@ -23,6 +24,10 @@ import { checkoutReturnMessage } from './auth/billing.js'
 // Floating effect windows are no longer listed here either: WindowLayer renders
 // whatever the window manager has open, so adding one is a registry entry.
 const { appState, showToast } = useEditorState()
+
+// A marketing page's "Try it on this clip" link: read now, so the clip is
+// fetching while the page loads. The empty state shows the offer.
+useTryOut()
 
 // Started here rather than on first use so an auth redirect (email link,
 // password reset) is handled on load even before the top bar renders.
