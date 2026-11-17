@@ -8,6 +8,7 @@ import {
   HELP, HELP_META, HELP_CATEGORIES, helpFor, helpUrl, publishedHelpIds, listedHelpIds,
   helpSlug, helpIdForSlug,
 } from '../../src/content/help/index.js'
+import { HELP_TOUR_IDS, helpTourSpots, tourImage } from '../../src/content/help/tour.js'
 import { helpSlugFromPath } from '../../src/help/route.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -64,8 +65,8 @@ test('the registry key and the filename agree', () => {
   // under another id would serve the wrong instructions with nothing to show
   // for it. Catching that here is cheaper than noticing it in the panel.
   const files = readdirSync(HELP_DIR)
-    // index.js and meta.js (titles and slugs) are the directory's own modules, not pages.
-    .filter(f => f.endsWith('.js') && f !== 'index.js' && f !== 'meta.js')
+    // index.js, meta.js (titles and slugs) and tour.js (hotspots) are the directory's own modules, not pages.
+    .filter(f => f.endsWith('.js') && !['index.js', 'meta.js', 'tour.js'].includes(f))
     .map(f => f.replace(/\.js$/, ''))
     .sort()
   assert.deepEqual(files, Object.keys(HELP).sort())
@@ -279,4 +280,39 @@ test('every screenshot manifest belongs to a help entry and names real shots', (
       assert.ok(shots.has(k), `shots/${f}: crop "${k}" is no longer named by any control — re-run npm run help:shots -- ${id}`)
     }
   }
+})
+
+test('a tour page puts every documented control with a face box on its faceplate', () => {
+  for (const id of HELP_TOUR_IDS) {
+    assert.ok(HELP[id], `${id}: a tour id with no help entry`)
+    const shots = JSON.parse(readFileSync(join(HELP_DIR, 'shots', `${id}.json`), 'utf8'))
+    assert.ok(tourImage(shots), `${id}: a tour page needs a screenshot`)
+    const spots = helpTourSpots(HELP[id].controls, shots)
+    assert.ok(spots.length >= 3, `${id}: only ${spots.length} hotspots`)
+    // In the entry's (panel) order, each control once, inside the image.
+    const order = HELP[id].controls.map(c => c.shot)
+    const idx = spots.map(s => order.indexOf(s.id))
+    assert.deepEqual(idx, [...idx].sort((a, b) => a - b), `${id}: hotspots out of panel order`)
+    assert.equal(new Set(spots.map(s => s.id)).size, spots.length)
+    const img = tourImage(shots)
+    for (const s of spots) {
+      assert.ok(s.at.x >= 0 && s.at.y >= 0 && s.at.x + s.at.w <= img.w && s.at.y + s.at.h <= img.h, `${id}: ${s.id} off the image`)
+    }
+  }
+})
+
+test('the tour skips controls with no shot or off the faceplate', () => {
+  const shots = {
+    face: { src: 'f', w: 400, h: 200, x: 0, y: 50 },
+    controls: { a: { at: { x: 10, y: 60, w: 50, h: 50 } }, head: { at: { x: 10, y: 5, w: 30, h: 30 } } },
+  }
+  const spots = helpTourSpots([
+    { label: 'A', text: 'a', shot: 'a' },
+    { label: 'No shot', text: 'n' },
+    { label: 'Header', text: 'h', shot: 'head' },
+    { label: 'Missing', text: 'm', shot: 'missing' },
+  ], shots)
+  assert.deepEqual(spots, [{ id: 'a', label: 'A', text: 'a', at: { x: 10, y: 10, w: 50, h: 50 } }])
+  assert.deepEqual(tourImage({ panel: { src: 'p', w: 1, h: 2 } }), { src: 'p', w: 1, h: 2, x: 0, y: 0 })
+  assert.equal(tourImage(null), null)
 })

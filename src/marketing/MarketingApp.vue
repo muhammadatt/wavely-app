@@ -19,7 +19,7 @@ import { isOffline, requiredPlan } from '../auth/plans.js'
 import { DEV_TUNING_PANELS } from '../devFlags.js'
 import { marketingSlugFromPath } from './route.js'
 import ABPlayer from './ABPlayer.vue'
-import PanelTour from './PanelTour.vue'
+import PanelTour from '../components/tour/PanelTour.vue'
 
 const SHOTS = Object.fromEntries(
   Object.entries(import.meta.glob('../content/help/shots/*.json', { eager: true, import: 'default' }))

@@ -15,10 +15,14 @@
  * small, and a link is what a user expects to be able to open in another tab,
  * bookmark or send to someone.
  */
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   HELP, HELP_META, HELP_CATEGORIES, publishedHelpIds, listedHelpIds, helpUrl, helpIdForSlug,
 } from '../content/help/index.js'
+import { HELP_TOUR_IDS, helpTourSpots, tourImage } from '../content/help/tour.js'
+// The marketing pages' interactive faceplate. A self-contained component (it
+// imports nothing), so the help bundle still carries none of the editor.
+import PanelTour from '../components/tour/PanelTour.vue'
 import { DEV_TUNING_PANELS } from '../devFlags.js'
 import { helpSlugFromPath } from './route.js'
 
@@ -57,6 +61,33 @@ for (const c of entry?.controls ?? []) {
   const last = controlGroups[controlGroups.length - 1]
   if (last && last.group === (c.group ?? null)) last.controls.push(c)
   else controlGroups.push({ group: c.group ?? null, controls: [c] })
+}
+
+/**
+ * The tour (trial pages only, `HELP_TOUR_IDS`): the faceplate with every
+ * documented control outlined and numbered, in place of the static window
+ * picture. Each numbered control's entry below carries the same number, and
+ * the two link both ways — the caption jumps to the entry, the entry's number
+ * lights the control on the faceplate and scrolls back up to it.
+ */
+const tourShot = entry && HELP_TOUR_IDS.has(id) ? tourImage(shots) : null
+const tourSpots = tourShot ? helpTourSpots(entry.controls, shots) : []
+const tourIndex = new Map(tourSpots.map((s, i) => [s.id, i]))
+const tourActive = ref(0)
+const tourEl = ref(null)
+
+/** The control's number on the tour, or null when it has no hotspot. */
+function tourNumber(c) {
+  const i = c.shot ? tourIndex.get(c.shot) : undefined
+  return i === undefined ? null : i + 1
+}
+/** An entry's anchor: the control's shot id, which the tour links to. */
+const controlAnchor = c => (c.shot && tourIndex.has(c.shot) ? `control-${c.shot}` : undefined)
+const detailHref = s => `#control-${s.id}`
+
+function showOnPanel(c) {
+  tourActive.value = tourIndex.get(c.shot)
+  tourEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 /** A crop for a control, or null; CSS size capped so a wide strip fits. */
@@ -147,7 +178,18 @@ onMounted(() => {
 
           <section class="hp-section">
             <h2 class="hp-heading">Interface and controls</h2>
-            <figure v-if="shots?.panel" class="hp-panel">
+            <div v-if="tourSpots.length" ref="tourEl" class="hp-tour">
+              <p class="hp-tour-lede">Point at a control to see what it does, or pick its number below.</p>
+              <PanelTour
+                v-model:active="tourActive"
+                :image="tourShot"
+                :spots="tourSpots"
+                :list="false"
+                :detail-href="detailHref"
+                :alt="`The ${meta.title} faceplate`"
+              />
+            </div>
+            <figure v-else-if="shots?.panel" class="hp-panel">
               <img
                 :src="shots.panel.src"
                 :width="shots.panel.w"
@@ -162,6 +204,7 @@ onMounted(() => {
               <div class="hp-controls">
                 <div
                   v-for="c in g.controls"
+                  :id="controlAnchor(c)"
                   :key="c.label"
                   class="hp-control"
                   :class="{ 'hp-control--shot': crop(c) }"
@@ -176,7 +219,17 @@ onMounted(() => {
                     />
                   </div>
                   <div class="hp-control-body">
-                    <h4 class="hp-control-label">{{ c.label }}</h4>
+                    <h4 class="hp-control-label">
+                      <button
+                        v-if="tourNumber(c)"
+                        type="button"
+                        class="hp-control-n"
+                        :aria-label="`Show ${c.label} on the panel`"
+                        title="Show on the panel"
+                        @click="showOnPanel(c)"
+                      >{{ tourNumber(c) }}</button>
+                      {{ c.label }}
+                    </h4>
                     <p class="hp-control-text">{{ c.text }}</p>
                     <p v-for="(d, di) in c.details ?? []" :key="di" class="hp-control-detail">{{ d }}</p>
                     <dl v-if="c.range || c.default" class="hp-spec">
@@ -459,6 +512,52 @@ a:focus-visible {
   height: auto;
   border-radius: 14px;
   box-shadow: 0 0 0 1px var(--hp-hairline), 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* The tour: the faceplate, numbered. Its colours come from PanelTour's
+   defaults, which are this page's palette. */
+.hp-tour {
+  margin: 0 0 28px;
+  scroll-margin-top: 76px;
+}
+.hp-tour-lede {
+  margin: 0 0 14px;
+  color: var(--hp-soft);
+  font-size: 14px;
+}
+/* An entry the tour's caption jumped to: clear of the sticky bar, and lit. */
+.hp-control[id] {
+  scroll-margin-top: 72px;
+}
+.hp-control:target {
+  animation: hp-target 1.6s ease-out;
+}
+@keyframes hp-target {
+  from { background: rgba(232, 163, 61, 0.12); }
+  to { background: transparent; }
+}
+/* The control's tour number, amber like the tour; a button back up to it. */
+.hp-control-n {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  margin-right: 8px;
+  padding: 0 5px;
+  vertical-align: 1px;
+  border: 1px solid rgba(232, 163, 61, 0.5);
+  border-radius: 11px;
+  background: rgba(11, 14, 18, 0.9);
+  color: #e8a33d;
+  font: 600 11px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.hp-control-n:hover,
+.hp-control-n:focus-visible {
+  background: #e8a33d;
+  color: #06181b;
+  outline: none;
 }
 
 /* A panel section (DE-ESS, AIR…), as printed. */

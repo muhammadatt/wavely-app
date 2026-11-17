@@ -12,8 +12,15 @@
  *
  * The tour is AMBER (`--pt-accent`, the editor's selected-thing colour), not the
  * page's cyan accent (owner, November 2026).
+ *
+ * Shared by the marketing pages and the help pages, so it imports nothing and
+ * reads its surface colours from optional `--tour-*` properties on an ancestor
+ * (defaults are both pages' shared palette). The help pages turn the side list
+ * off (their control entries below ARE the list), link the caption to each
+ * control's full entry (`detailHref`) and drive the selection from those
+ * entries (`v-model:active`).
  */
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 
 const props = defineProps({
   /** { src, w, h } — the panel screenshot and its CSS size. */
@@ -22,9 +29,14 @@ const props = defineProps({
   spots: { type: Array, required: true },
   /** Alt text for the screenshot. */
   alt: { type: String, required: true },
+  /** The numbered list beside the image. Off where the page lists the controls itself. */
+  list: { type: Boolean, default: true },
+  /** Optional spot → href: the caption links to the control's full description. */
+  detailHref: { type: Function, default: null },
 })
 
-const active = ref(0)
+/** The selected spot's index; a parent may bind it (`v-model:active`). */
+const active = defineModel('active', { type: Number, default: 0 })
 const current = computed(() => props.spots[active.value] ?? null)
 
 /**
@@ -68,7 +80,7 @@ function box(s, i) {
 </script>
 
 <template>
-  <div class="pt">
+  <div class="pt" :class="{ 'pt--solo': !list }">
     <figure class="pt-figure">
       <div class="pt-stage">
         <img
@@ -95,11 +107,12 @@ function box(s, i) {
         <span>
           <strong>{{ current.label }}</strong>
           <span class="pt-caption-text">{{ current.text }}</span>
+          <a v-if="detailHref" :href="detailHref(current)" class="pt-caption-more">Full description ↓</a>
         </span>
       </figcaption>
     </figure>
 
-    <ol class="pt-list">
+    <ol v-if="list" class="pt-list">
       <li v-for="(s, i) in spots" :key="s.id">
         <button
           type="button"
@@ -126,12 +139,13 @@ function box(s, i) {
   gap: 20px;
   align-items: start;
 }
+.pt--solo { grid-template-columns: minmax(0, 1fr); }
 .pt-figure { margin: 0; min-width: 0; }
 .pt-stage {
   position: relative;
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--mk-hairline);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--tour-hairline, rgba(255, 255, 255, 0.08));
 }
 .pt-img { display: block; width: 100%; height: auto; }
 
@@ -182,8 +196,8 @@ function box(s, i) {
   align-items: flex-start;
   padding: 14px 16px;
   border-radius: 12px;
-  background: var(--mk-surface);
-  border: 1px solid var(--mk-hairline);
+  background: var(--tour-surface, #141920);
+  border: 1px solid var(--tour-hairline, rgba(255, 255, 255, 0.08));
   font-size: 14px;
   line-height: 1.5;
 }
@@ -199,7 +213,16 @@ function box(s, i) {
   font: 700 12px 'JetBrains Mono', ui-monospace, monospace;
 }
 .pt-caption strong { display: block; margin-bottom: 2px; }
-.pt-caption-text { color: var(--mk-soft); }
+.pt-caption-text { color: var(--tour-soft, rgba(234, 246, 248, 0.7)); }
+.pt-caption-more {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--pt-accent);
+  text-decoration: none;
+}
+.pt-caption-more:hover { text-decoration: underline; }
 
 .pt-list {
   list-style: none;
@@ -218,19 +241,19 @@ function box(s, i) {
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: var(--mk-soft);
+  color: var(--tour-soft, rgba(234, 246, 248, 0.7));
   font: inherit;
   font-size: 13.5px;
   text-align: left;
   cursor: pointer;
 }
 .pt-row:hover { background: rgba(255, 255, 255, 0.04); }
-.pt-row--on { background: rgba(232, 163, 61, 0.1); color: var(--mk-text); }
+.pt-row--on { background: rgba(232, 163, 61, 0.1); color: var(--tour-text, #eaf6f8); }
 .pt-row-n {
   flex: none;
   width: 20px;
   font: 600 11px 'JetBrains Mono', ui-monospace, monospace;
-  color: var(--mk-muted);
+  color: var(--tour-muted, rgba(234, 246, 248, 0.45));
 }
 .pt-row--on .pt-row-n { color: var(--pt-accent); }
 
