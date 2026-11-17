@@ -199,7 +199,7 @@ onMounted(() => {
                2026): the panel is what a reader came to look at. The entries it
                numbers stay under Interface and controls, linked both ways. -->
           <div v-if="tourSpots.length" ref="tourEl" class="hp-tour" @click="replayTarget">
-            <p class="hp-tour-lede">Click a control on the faceplate to see what it does. Its number matches its entry under Interface and controls.</p>
+            <p class="hp-tour-lede">Hint: Click on any numbered control to see what it does.</p>
             <PanelTour
               ref="tour"
               eager
@@ -561,7 +561,7 @@ a:focus-visible {
 .hp-tour-lede {
   margin: 0 0 14px;
   color: var(--hp-soft);
-  font-size: 14px;
+  font-size: 12px;
 }
 /* An entry the tour's caption jumped to: clear of the sticky bar, and lit. */
 .hp-control[id] {
