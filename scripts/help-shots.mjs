@@ -48,7 +48,7 @@
  */
 import { chromium } from 'playwright'
 import { spawn } from 'node:child_process'
-import { writeFileSync, mkdirSync, existsSync, rmSync, readFileSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, rmSync, readFileSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -190,12 +190,14 @@ async function selectTab(name) {
  * (which reads Stop while it runs). An offline process has no preview and no
  * live meters, so it is shot idle.
  */
-async function setPlaying(frame, on) {
+async function setPlaying(id, frame, on) {
   const button = frame.getByRole('button', { name: on ? 'Preview' : 'Stop', exact: true }).first()
   if (await button.count() && await button.isEnabled()) { await button.click(); await page.waitForTimeout(300); return }
-  // A window with no Preview (the Spectrum Analyzer) listens to the editor's
-  // own transport: Space's event, toggled once to start and once to stop.
-  if (await frame.getByRole('button', { name: 'Preview', exact: true }).count()) return
+  // A window that only listens to the editor's own transport (the Spectrum
+  // Analyzer) is played with Space's event. Only those: the offline windows
+  // (Noise Reduction, Auto Leveler) and Peak Normalize have no Preview either,
+  // and are not meant to be shot with unprocessed audio playing.
+  if (!TRANSPORT_IDS.has(id)) return
   // Its state is read off the time readout (advancing = playing), not assumed:
   // a toggle after another window's Preview / Stop does not always start it.
   for (let tries = 0; tries < 3 && (await transportPlaying()) !== on; tries++) {
@@ -203,6 +205,8 @@ async function setPlaying(frame, on) {
     await page.waitForTimeout(400)
   }
 }
+/** Windows with no Preview of their own that show the editor's playback. */
+const TRANSPORT_IDS = new Set(['spectrum-analyzer'])
 async function transportPlaying() {
   const clock = page.locator('button[aria-label="Loop playback"]')
     .locator('xpath=ancestor::div[contains(@class,"grid-cols")][1]/div[1]')
@@ -231,14 +235,16 @@ const BUSY = {
   },
 }
 const BUSY_TIMEOUT_MS = 20000
+/** Waits for a busy moment; false when none came within the timeout. */
 async function waitBusy(id, frame) {
-  if (!BUSY[id]) return
+  if (!BUSY[id]) return true
   const until = Date.now() + BUSY_TIMEOUT_MS
   while (Date.now() < until) {
-    if (await BUSY[id](frame)) return
+    if (await BUSY[id](frame)) return true
     await page.waitForTimeout(20)
   }
   console.log(`warn  ${id}: never busy within ${BUSY_TIMEOUT_MS / 1000} s`)
+  return false
 }
 /**
  * A screenshot taken at a busy moment, kept only if the window is STILL busy
@@ -248,9 +254,11 @@ async function waitBusy(id, frame) {
  */
 async function busyShot(id, frame, opts) {
   for (let i = 0; i < 10; i++) {
-    await waitBusy(id, frame)
+    // No busy moment in the whole wait (a quiet clip, the generated probe):
+    // take the picture once rather than wait again for every retry.
+    const busy = await waitBusy(id, frame)
     await page.screenshot(opts)
-    if (!BUSY[id] || await BUSY[id](frame)) return
+    if (!busy || !BUSY[id] || await BUSY[id](frame)) return
   }
   console.log(`warn  ${id}: ${opts.path.split(/[\\/]/).pop()} taken after the moment passed`)
 }
@@ -351,6 +359,10 @@ try {
   }
 
   for (const id of ids) {
+    // One page failing (a window that vanished mid-shot) is reported and the
+    // run goes on: an exception used to end the whole run.
+    let stage = null
+    try {
     const entry = HELP[id]
     await selectTab(tabFor(id))
     if (SHOT_SETTINGS[id]) {
@@ -403,13 +415,13 @@ try {
       await page.waitForTimeout(4000)
     }
     await page.mouse.move(0, 0)
-    await setPlaying(frame, true)
+    await setPlaying(id, frame, true)
     await page.waitForTimeout(SETTLE_MS[id] ?? PLAY_SETTLE_MS)
     if (REBOX) {
       // Measured while playing, as the pictures were taken: Preview reads Stop
       // and the readouts carry live text, so the boxes fit what is shown.
       const r = await rebox(id, frame)
-      await setPlaying(frame, false)
+      await setPlaying(id, frame, false)
       if (r) manifests[id] = r; else failures++
       await page.keyboard.press('Escape'); await page.waitForTimeout(500)
       while (await page.locator('.win-frame').count()) {
@@ -421,7 +433,11 @@ try {
     }
 
     const slug = helpSlug(id)
-    const outDir = join(ROOT, 'public/help/shots', slug)
+    const finalDir = join(ROOT, 'public/help/shots', slug)
+    // Shot into a staging folder that replaces the old pictures only once the
+    // page is done, so a failure part-way leaves the committed pictures (which
+    // the committed manifest points at) in place.
+    const outDir = stage = `${finalDir}.new`
     rmSync(outDir, { recursive: true, force: true })
     mkdirSync(outDir, { recursive: true })
     const manifest = { panel: null, controls: {} }
@@ -480,11 +496,14 @@ try {
 
     // Written after the browser closes: a file under src/ changing makes the dev
     // server reload the editor, losing the loaded audio mid-run.
+    rmSync(finalDir, { recursive: true, force: true })
+    renameSync(outDir, finalDir)
+    stage = null
     manifests[id] = manifest
     if (missing.length) failures++
     console.log(`${missing.length ? 'FAIL' : 'ok  '}  ${id.padEnd(22)} ${Object.keys(manifest.controls).length} crops${missing.length ? `; not found: ${missing.join(', ')}` : ''}`)
 
-    await setPlaying(frame, false)
+    await setPlaying(id, frame, false)
     await page.keyboard.press('Escape'); await page.waitForTimeout(500)
     // A window that ignores Escape (focus elsewhere) must not leak into the next shot.
     while (await page.locator('.win-frame').count()) {
@@ -492,6 +511,18 @@ try {
       await page.waitForTimeout(300)
       if (await page.locator('.win-frame').count()) { await page.keyboard.press('Escape'); await page.waitForTimeout(300) }
       break
+    }
+    } catch (e) {
+      failures++
+      console.log(`FAIL  ${id}: ${String(e?.message ?? e).split('\n')[0]} — its pictures were left as they were`)
+      if (stage) rmSync(stage, { recursive: true, force: true })
+      // Clear the way for the next page: stop playback, close whatever is open.
+      if (await transportPlaying().catch(() => false)) {
+        await page.evaluate(() => window.dispatchEvent(new CustomEvent('wavely:toggle-play'))).catch(() => {})
+      }
+      for (let i = 0; i < 3 && await page.locator('.win-frame').count().catch(() => 0); i++) {
+        await page.keyboard.press('Escape').catch(() => {}); await page.waitForTimeout(300)
+      }
     }
   }
 } finally {

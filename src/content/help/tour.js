@@ -64,13 +64,20 @@ export function helpTourSpots(controls, shots) {
 }
 
 /**
- * A help page's tour (its controls with the window's, `withWindowControls`): `{ image, spots }`, or null when the page has no
- * screenshot or too few numbered controls (`MIN_TOUR_SPOTS`) and keeps the
- * window picture instead.
+ * A help page's controls and its tour, from ONE merge of the window's controls
+ * (`withWindowControls`), so the entries listed on the page and the numbers on
+ * the tour come from the same list: `{ controls, tour }`, `tour` being
+ * `{ image, spots }` or null when the page has no screenshot or too few
+ * numbered controls (`MIN_TOUR_SPOTS`) and keeps the window picture instead.
  */
-export function helpTour(controls, shots) {
+export function helpPage(controls, shots) {
+  const merged = withWindowControls(controls, shots)
   const image = tourImage(shots)
-  if (!image) return null
-  const spots = helpTourSpots(withWindowControls(controls, shots), shots)
-  return spots.length >= MIN_TOUR_SPOTS ? { image, spots } : null
+  const spots = image ? helpTourSpots(merged, shots) : []
+  return { controls: merged, tour: spots.length >= MIN_TOUR_SPOTS ? { image, spots } : null }
+}
+
+/** A help page's tour alone (`helpPage`'s `tour`). */
+export function helpTour(controls, shots) {
+  return helpPage(controls, shots).tour
 }

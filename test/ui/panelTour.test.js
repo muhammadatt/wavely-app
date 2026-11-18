@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { contains, placeBadges, hitBoxes, stackOrder, stepIndex } from '../../src/components/tour/tourGeometry.js'
 import { HELP } from '../../src/content/help/index.js'
-import { helpTour } from '../../src/content/help/tour.js'
+import { helpTour, helpPage } from '../../src/content/help/tour.js'
 
 const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 
@@ -124,4 +124,26 @@ test('on every help screenshot no badge covers another control or number', () =>
   }
   // The inside fallback may still touch something; it should be the rare case.
   assert.ok(fallbacks <= 6, `${fallbacks} badges fell back to a crowded place`)
+})
+
+test('with no free place a badge goes inside its own box, never off the picture', () => {
+  // A tall box filling the picture, a smaller control in its top-left corner:
+  // every place beside it is off the picture and its corner is taken, so the
+  // fallback runs — and the last candidate for a tall box (below) is off the
+  // bottom edge.
+  const image = { w: 30, h: 60 }
+  const boxes = [{ x: 0, y: 0, w: 30, h: 60 }, { x: 2, y: 2, w: 20, h: 20 }]
+  const [b] = placeBadges(boxes, image, 18, 2)
+  assert.deepEqual(b, { x: 3, y: 3 })
+})
+
+test('the tour numbers the controls the page lists, in the same order', () => {
+  for (const id of Object.keys(HELP)) {
+    let shots = null
+    try { shots = JSON.parse(readFileSync(new URL(`../../src/content/help/shots/${id}.json`, import.meta.url))) } catch { continue }
+    const { controls, tour } = helpPage(HELP[id].controls, shots)
+    if (!tour) continue
+    const listed = controls.map(c => c.shot).filter(s => tour.spots.some(t => t.id === s))
+    assert.deepEqual(tour.spots.map(s => s.id), listed, id)
+  }
 })

@@ -68,7 +68,9 @@ export function placeBadges(boxes, image, size, gap = 2) {
       if (c.x < 0 || c.y < 0 || c.x + size > image.w || c.y + size > image.h) return false
       return !others.some(o => overlaps(r, o)) && !placed.some(p => overlaps(r, p))
     }
-    const c = candidates.find(free) ?? candidates[candidates.length - 1]
+    // Nothing free: inside the box's own corner, which is always on the image
+    // (the last candidate, `below` for a tall box, can fall off its bottom edge).
+    const c = candidates.find(free) ?? inside
     placed.push({ x: c.x, y: c.y, w: size, h: size })
     return { x: c.x, y: c.y }
   })
