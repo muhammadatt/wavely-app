@@ -121,9 +121,20 @@
       "w": 91,
       "h": 42,
       "at": {
-        "x": 253,
+        "x": 500,
         "y": 15,
         "w": 79,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/hi-freq-limiter/presets.png",
+      "w": 192,
+      "h": 42,
+      "at": {
+        "x": 290,
+        "y": 15,
+        "w": 180,
         "h": 30
       }
     },
@@ -135,17 +146,6 @@
         "x": 626,
         "y": 15,
         "w": 59,
-        "h": 30
-      }
-    },
-    "presets": {
-      "src": "/help/shots/hi-freq-limiter/presets.png",
-      "w": 212,
-      "h": 42,
-      "at": {
-        "x": 341,
-        "y": 15,
-        "w": 200,
         "h": 30
       }
     },

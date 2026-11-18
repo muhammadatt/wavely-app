@@ -94,10 +94,15 @@ export function withWindowControls(controls, shots) {
   const pick = (list, group) => list
     .filter(c => pictured(c.shot) || ownFor(c.shot))
     .map(c => ({ ...(ownFor(c.shot) ?? c), group }))
-  const header = pick(WINDOW_HEADER, WINDOW_HEADER_GROUP)
+  // A page's own control in the header slot (`windowHeader: true`, VoxPressor's
+  // surface toggle) sits after the preset browser and before DELTA, as drawn.
+  const slot = own.filter(c => c.windowHeader).map(c => ({ ...c, group: WINDOW_HEADER_GROUP }))
+  const std = pick(WINDOW_HEADER, WINDOW_HEADER_GROUP)
+  const at = std.findIndex(c => c.shot !== 'presets')
+  const header = at < 0 ? [...std, ...slot] : [...std.slice(0, at), ...slot, ...std.slice(at)]
   let leading = true
   const middle = own
-    .filter(c => !HEADER_SHOTS.has(c.shot) && !FOOTER_SHOTS.has(c.shot))
+    .filter(c => !c.windowHeader && !HEADER_SHOTS.has(c.shot) && !FOOTER_SHOTS.has(c.shot))
     .map((c) => {
       if (c.group) leading = false
       return header.length && leading && !c.group ? { ...c, group: PANEL_GROUP } : c

@@ -83,13 +83,14 @@ test('every entry has the required shape', () => {
 
     assert.ok(Array.isArray(entry.controls), `${id}: controls must be an array`)
     assert.ok(entry.controls.length >= 1, `${id}: no controls documented`)
-    const CONTROL_KEYS = new Set(['label', 'text', 'group', 'details', 'range', 'default', 'shot'])
+    const CONTROL_KEYS = new Set(['label', 'text', 'group', 'details', 'range', 'default', 'shot', 'windowHeader'])
     for (const c of entry.controls) {
       assert.ok(c.label && typeof c.label === 'string', `${id}: a control has no label`)
       assert.ok(c.text && typeof c.text === 'string', `${id}: ${c.label} has no text`)
       for (const k of ['group', 'range', 'default', 'shot']) {
         if (c[k] !== undefined) assert.ok(typeof c[k] === 'string' && c[k], `${id}: ${c.label}.${k} must be a non-empty string`)
       }
+      if (c.windowHeader !== undefined) assert.equal(c.windowHeader, true, `${id}: ${c.label}.windowHeader must be true`)
       if (c.details !== undefined) {
         assert.ok(Array.isArray(c.details) && c.details.length, `${id}: ${c.label}.details must be a non-empty array`)
       }
@@ -351,4 +352,12 @@ test('the window\'s own controls frame each page: header first, page in between,
   assert.equal(out[3].group, WINDOW_FOOTER_GROUP)
   // A window control the screenshot does not show gets no entry.
   assert.ok(!out.some(c => c.shot === 'presets' || c.shot === 'preview'))
+})
+
+test('a page control in the header slot is numbered between the presets and DELTA', () => {
+  const shots = { controls: { presets: {}, delta: {}, bypass: {}, surface: {} } }
+  const own = [{ label: 'Surface', shot: 'surface', windowHeader: true }, { label: 'Amount', shot: 'amount' }]
+  const out = withWindowControls(own, shots)
+  assert.deepEqual(out.map(c => c.shot), ['presets', 'surface', 'delta', 'bypass', 'amount'])
+  assert.equal(out[1].group, WINDOW_HEADER_GROUP)
 })

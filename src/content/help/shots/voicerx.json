@@ -19,23 +19,23 @@
     },
     "input-meter": {
       "src": "/help/shots/voicerx/input-meter.png",
-      "w": 56,
+      "w": 57,
       "h": 274,
       "at": {
-        "x": 22,
+        "x": 21,
         "y": 74,
-        "w": 44,
+        "w": 45,
         "h": 262
       }
     },
     "output-meter": {
       "src": "/help/shots/voicerx/output-meter.png",
-      "w": 56,
+      "w": 57,
       "h": 274,
       "at": {
-        "x": 749,
+        "x": 748,
         "y": 74,
-        "w": 44,
+        "w": 45,
         "h": 262
       }
     },

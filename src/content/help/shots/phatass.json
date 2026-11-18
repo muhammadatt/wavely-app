@@ -42,12 +42,12 @@
     "tape-speed": {
       "src": "/help/shots/phatass/tape-speed.png",
       "w": 184,
-      "h": 182,
+      "h": 191,
       "at": {
         "x": 206,
-        "y": 246,
+        "y": 238,
         "w": 172,
-        "h": 170
+        "h": 179
       }
     },
     "warmth": {
@@ -105,6 +105,17 @@
         "h": 383
       }
     },
+    "presets": {
+      "src": "/help/shots/phatass/presets.png",
+      "w": 192,
+      "h": 42,
+      "at": {
+        "x": 320,
+        "y": 15,
+        "w": 180,
+        "h": 30
+      }
+    },
     "bypass": {
       "src": "/help/shots/phatass/bypass.png",
       "w": 71,
@@ -113,17 +124,6 @@
         "x": 686,
         "y": 15,
         "w": 59,
-        "h": 30
-      }
-    },
-    "presets": {
-      "src": "/help/shots/phatass/presets.png",
-      "w": 212,
-      "h": 42,
-      "at": {
-        "x": 292,
-        "y": 15,
-        "w": 200,
         "h": 30
       }
     },

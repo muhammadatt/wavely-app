@@ -53,22 +53,22 @@
     "output": {
       "src": "/help/shots/la-classic-76/output.png",
       "w": 184,
-      "h": 202,
+      "h": 199,
       "at": {
         "x": 664,
         "y": 80,
         "w": 172,
-        "h": 190
+        "h": 187
       }
     },
     "pre-gain": {
       "src": "/help/shots/la-classic-76/pre-gain.png",
-      "w": 97,
+      "w": 98,
       "h": 27,
       "at": {
-        "x": 76,
+        "x": 75,
         "y": 330,
-        "w": 85,
+        "w": 86,
         "h": 15
       }
     },
@@ -127,17 +127,6 @@
         "h": 56
       }
     },
-    "bypass": {
-      "src": "/help/shots/la-classic-76/bypass.png",
-      "w": 67,
-      "h": 42,
-      "at": {
-        "x": 748,
-        "y": 13,
-        "w": 55,
-        "h": 30
-      }
-    },
     "presets": {
       "src": "/help/shots/la-classic-76/presets.png",
       "w": 99,
@@ -146,6 +135,17 @@
         "x": 393,
         "y": 13,
         "w": 87,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/la-classic-76/bypass.png",
+      "w": 67,
+      "h": 42,
+      "at": {
+        "x": 748,
+        "y": 13,
+        "w": 55,
         "h": 30
       }
     },

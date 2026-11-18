@@ -83,6 +83,17 @@
         "h": 355
       }
     },
+    "presets": {
+      "src": "/help/shots/cambridge-inflator/presets.png",
+      "w": 140,
+      "h": 42,
+      "at": {
+        "x": 266,
+        "y": 15,
+        "w": 128,
+        "h": 30
+      }
+    },
     "bypass": {
       "src": "/help/shots/cambridge-inflator/bypass.png",
       "w": 71,
@@ -91,17 +102,6 @@
         "x": 526,
         "y": 15,
         "w": 59,
-        "h": 30
-      }
-    },
-    "presets": {
-      "src": "/help/shots/cambridge-inflator/presets.png",
-      "w": 212,
-      "h": 42,
-      "at": {
-        "x": 270,
-        "y": 15,
-        "w": 200,
         "h": 30
       }
     },

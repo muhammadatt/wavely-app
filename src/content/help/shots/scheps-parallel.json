@@ -105,6 +105,17 @@
         "h": 52
       }
     },
+    "presets": {
+      "src": "/help/shots/scheps-parallel/presets.png",
+      "w": 192,
+      "h": 42,
+      "at": {
+        "x": 280,
+        "y": 15,
+        "w": 180,
+        "h": 30
+      }
+    },
     "bypass": {
       "src": "/help/shots/scheps-parallel/bypass.png",
       "w": 71,
@@ -113,17 +124,6 @@
         "x": 606,
         "y": 15,
         "w": 59,
-        "h": 30
-      }
-    },
-    "presets": {
-      "src": "/help/shots/scheps-parallel/presets.png",
-      "w": 212,
-      "h": 42,
-      "at": {
-        "x": 293,
-        "y": 15,
-        "w": 200,
         "h": 30
       }
     },

@@ -61,6 +61,17 @@
         "h": 52
       }
     },
+    "presets": {
+      "src": "/help/shots/air-boost/presets.png",
+      "w": 192,
+      "h": 42,
+      "at": {
+        "x": 250,
+        "y": 15,
+        "w": 180,
+        "h": 30
+      }
+    },
     "bypass": {
       "src": "/help/shots/air-boost/bypass.png",
       "w": 71,
@@ -69,17 +80,6 @@
         "x": 546,
         "y": 15,
         "w": 59,
-        "h": 30
-      }
-    },
-    "presets": {
-      "src": "/help/shots/air-boost/presets.png",
-      "w": 212,
-      "h": 42,
-      "at": {
-        "x": 230,
-        "y": 15,
-        "w": 200,
         "h": 30
       }
     },

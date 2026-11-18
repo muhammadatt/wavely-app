@@ -176,9 +176,20 @@
       "w": 91,
       "h": 42,
       "at": {
-        "x": 300,
+        "x": 500,
         "y": 15,
         "w": 79,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/saturation-workbench/presets.png",
+      "w": 172,
+      "h": 42,
+      "at": {
+        "x": 300,
+        "y": 15,
+        "w": 160,
         "h": 30
       }
     },
@@ -190,17 +201,6 @@
         "x": 626,
         "y": 15,
         "w": 59,
-        "h": 30
-      }
-    },
-    "presets": {
-      "src": "/help/shots/saturation-workbench/presets.png",
-      "w": 198,
-      "h": 42,
-      "at": {
-        "x": 387,
-        "y": 15,
-        "w": 186,
         "h": 30
       }
     },

@@ -138,6 +138,17 @@
         "h": 341
       }
     },
+    "presets": {
+      "src": "/help/shots/eq/presets.png",
+      "w": 192,
+      "h": 42,
+      "at": {
+        "x": 242,
+        "y": 15,
+        "w": 180,
+        "h": 30
+      }
+    },
     "bypass": {
       "src": "/help/shots/eq/bypass.png",
       "w": 71,
@@ -146,17 +157,6 @@
         "x": 530,
         "y": 15,
         "w": 59,
-        "h": 30
-      }
-    },
-    "presets": {
-      "src": "/help/shots/eq/presets.png",
-      "w": 212,
-      "h": 42,
-      "at": {
-        "x": 246,
-        "y": 15,
-        "w": 200,
         "h": 30
       }
     },
